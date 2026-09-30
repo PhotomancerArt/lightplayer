@@ -70,7 +70,7 @@ default = []
 # answers every opt-in "json". On by default in all three chip crates (Q4).
 json-pack = ["server"]
 # The USB-Serial-JTAG host link on lp-link (`usb_link`, `log_ring_logger`):
-# the C6 and S3 turn it on; the classic (UART, `M!` lines until M5) does not.
+# the C6 and S3 turn it on. The classic's UART0 link is `uart-link`.
 # The server transport over it (`usb_link::usb_link_transport`) also needs
 # `server`.
 usb-link = ["dep:lp-link", "dep:critical-section"]
@@ -78,6 +78,10 @@ usb-link = ["dep:lp-link", "dep:critical-section"]
 # `ble-on-lp-link`): one `Link` per open connection, Datagram framing. The
 # C6's `ble` feature turns it on; the S3 and the classic have no radio link.
 radio-link = ["server", "dep:lp-link"]
+# The classic's UART0 host link on lp-link (`uart_link`, `log_ring_logger`;
+# plan `classic-uart-on-lp-link`): the classic (v3) turns it on. The server
+# transport over it (`uart_link::uart_link_transport`) also needs `server`.
+uart-link = ["dep:lp-link", "dep:critical-section"]
 server = ["dep:littlefs-rust", "dep:lp-json-pack", "dep:lp-recovery", "dep:lpa-server", "dep:lpc-model", "dep:lpc-wire", "dep:lpfs", "dep:ser-write-json"]
 
 [dev-dependencies]

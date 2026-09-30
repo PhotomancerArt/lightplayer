@@ -19,7 +19,7 @@
 use lp_cli::commands::emu::link_host::{EmuLinkHost, S3Board};
 use lp_emu_esp_figures::Figures;
 use lp_emu_esp32s3::flash::FlashBacking;
-use lp_emu_esp32s3::machine::{AppSource, Esp32S3Builder};
+use lp_emu_esp32s3::machine::{AppSource, Esp32S3Builder, UsbHost};
 use lp_emu_esp32s3::test_support;
 use lpc_wire::{ClientMessage, ClientRequest};
 
@@ -66,7 +66,8 @@ fn the_ledger_triple_is_elicited_by_a_stop_all_over_the_link() {
         .app(AppSource::Path(elf))
         .flash(FlashBacking::Copy(merged))
         .strict(true);
-    let board = S3Board::build(builder).expect("the shipped image direct-loads");
+    let board = S3Board::build(builder, UsbHost::Attached { draining: true })
+        .expect("the shipped image direct-loads");
     let mut host = EmuLinkHost::new(board, 0x5E55_0301, true);
 
     let hello = host.wait_for_line("\"hello\":{", GATE_US).expect("the run");

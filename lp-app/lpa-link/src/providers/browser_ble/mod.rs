@@ -1,6 +1,6 @@
 //! Web Bluetooth: the board's wire over lp-link, on a Nordic UART (NUS)
 //! GATT service (M5 of the BLE remote-control plan; on lp-link since
-//! `WIRE_PROTO_VERSION` 31, plan `lp2025/2026-09-28-1445-ble-on-lp-link`).
+//! `WIRE_PROTO_VERSION` 33, plan `lp2025/2026-09-28-1445-ble-on-lp-link`).
 //!
 //! BLE is *just another transport*. It follows the Web Serial adapter's
 //! shape: the JS module owns the device and its connection, a thin Rust

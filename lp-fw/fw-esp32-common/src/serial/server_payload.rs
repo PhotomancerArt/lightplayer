@@ -66,7 +66,8 @@ pub fn serialize_server_payload(
 
 /// One proto-channel payload from a host → the client message it carries:
 /// always JSON (hosts never pack), first byte `{`. Every lp-link transport on
-/// the board (the USB link, the radio links) decodes through here.
+/// the board (the USB link, the classic's UART link, the radio links) decodes
+/// through here.
 ///
 /// Out of line on purpose: the deserializer's frame stays its own, and never
 /// joins the server loop future's.

@@ -35,8 +35,10 @@ use crate::server::hello_auth::HelloAuth;
 ///
 /// # History
 ///
-/// - 31: BLE (the C6's radio links) moves onto lp-link too (plan
+/// - 33: BLE (the C6's radio links) moves onto lp-link too (plan
 ///   `lp2025/2026-09-28-1445-ble-on-lp-link`; `docs/adr/2026-09-24-ble-transport.md`).
+///   Follows 32 (the classic's UART): the two cut-overs were built side by
+///   side, the classic merged first, and this one takes the next number.
 ///   Every radio link — up to `RADIO_LINK_SLOTS` (2) at once — carries lp-link's
 ///   Datagram framing (one frame per BLE notification or write, no COBS, CRC-32C,
 ///   a nonce handshake) with a 180-byte `max_payload`, instead of `M!{json}\n`
@@ -44,9 +46,22 @@ use crate::server::hello_auth::HelloAuth;
 ///   convention (`{`/`L`), the packed opt-in, and the heartbeat's `link` object
 ///   (`LinkCounters`) are unchanged in spirit — they just ride the radio link the
 ///   same way they already ride USB — so an old peer misreads only the framing,
-///   not a new message shape; the bump marks that framing change. Classic v3's
-///   UART and `fw-emu` keep `M!` lines until their own milestones.
-///   `PACK_FORMAT_VERSION` is unchanged.
+///   not a new message shape; the bump marks that framing change. Only
+///   `fw-emu` keeps `M!` lines now. `PACK_FORMAT_VERSION` is unchanged.
+/// - 32: the classic ESP32's UART0 host link moves onto lp-link (plan
+///   `lp2025/2026-09-28-2015-classic-uart-on-lp-link`, milestone M5 of
+///   `docs/adr/2026-09-27-lp-link-one-comms-layer.md`). On the classic
+///   (DOM-Z-102/dig2go silicon behind a CH340, and `lp-emu-esp32v3`) UART0
+///   carries lp-link frames (`LinkConfig::uart()`: 30's stream framing,
+///   four-frame windows) instead of `M!{json}` lines and `0x00 'L'` COBS
+///   frames, with everything 30 brought to USB: one wire message per
+///   proto-channel message, the hello after every link `Up`, the learned
+///   table and packed opt-in reset with the link, logs on the log channel,
+///   and the heartbeat's `link` object as lp-link's counters. An `M!` host
+///   cannot read a classic running this, nor the reverse. 31 was reserved
+///   for the Bluetooth cut-over (PR #880), which merged after this one and
+///   took 33 instead; no `main` build ever carried 31. BLE and fw-emu keep
+///   `M!` lines here. `PACK_FORMAT_VERSION` is unchanged.
 /// - 30: the USB device link moves onto lp-link (plan
 ///   `lp2025/2026-09-27-0215-lp-link-usb-cutover`;
 ///   `docs/adr/2026-09-27-lp-link-one-comms-layer.md`). On USB-Serial-JTAG
@@ -317,7 +332,7 @@ use crate::server::hello_auth::HelloAuth;
 /// as `None` on new Studio and a new firmware's extra fields are ignored
 /// by old Studio. Bumping for those would mark every board running
 /// current firmware Incompatible in exchange for nothing.
-pub const WIRE_PROTO_VERSION: u32 = 31;
+pub const WIRE_PROTO_VERSION: u32 = 33;
 
 /// Unsolicited/boot-time server identity, version, and capability report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -649,7 +664,7 @@ mod tests {
     #[test]
     fn the_proto_version_is_pinned_to_its_history() {
         assert_eq!(
-            WIRE_PROTO_VERSION, 31,
+            WIRE_PROTO_VERSION, 33,
             "if you meant to bump, add the History entry in this file's \
              doc comment and update this pin"
         );

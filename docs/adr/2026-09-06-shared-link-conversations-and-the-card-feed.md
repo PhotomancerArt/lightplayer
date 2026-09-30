@@ -169,3 +169,9 @@ request id with no pause is the same deferred milestone, **M2b**.
 
 See `docs/adr/2026-09-27-lp-link-one-comms-layer.md` and the cut-over
 plan's notes.md (D2, D9).
+
+**2026-09-29, the classic's UART (PR #884):** the classic ESP32's Web
+Serial port (a CH340 bridge, `LinkConfig::uart()`) is one more
+`LinkPortService`-backed port, so everything above applies to it
+unchanged, on the same terms: read "USB" here as "every `lp-link` port".
+Pause-the-pump stays until M2b for it too.

@@ -1,10 +1,12 @@
 //! Wire-protocol server messages, serialized for an `M!` host link.
 //!
 //! Two shapes share this file's static frame buffer: the lp-link proto
-//! payload (bare JSON or `L`+packed, no line framing) that the C6/S3 USB link
-//! and the C6's radio links send ([`super::server_payload`]), and the `M!`
-//! framing here, which the classic's UART keeps until its own lp-link
-//! milestone (plans `lp-link-usb-cutover`, D3, and `ble-on-lp-link`).
+//! payload (bare JSON or `L`+packed, no line framing) that every board link
+//! sends — the C6/S3 USB link, the classic's UART link and the C6's radio
+//! links ([`super::server_payload`]) — and the `M!` framing here, which no
+//! board link in this crate uses since the classic (wire proto 32) and BLE
+//! (33) moved onto lp-link. (`fw-emu`, the one `M!` board link left, has its
+//! own.)
 //!
 //! This is the chip-agnostic serialization half of every `M!` firmware's
 //! server write path: take a [`lpc_wire::WireServerMessage`] and produce one framed
@@ -402,15 +404,21 @@ pub fn project_read_event_kind(event: &lpc_wire::ProjectReadEvent) -> &'static s
 }
 
 // Only the lp-link transports' tests serialize into the buffer.
-#[cfg(all(test, any(feature = "usb-link", feature = "radio-link")))]
+#[cfg(all(
+    test,
+    any(feature = "usb-link", feature = "uart-link", feature = "radio-link")
+))]
 pub(crate) use frame_buf_test_turn::frame_buf_turn;
 
-#[cfg(all(test, any(feature = "usb-link", feature = "radio-link")))]
+#[cfg(all(
+    test,
+    any(feature = "usb-link", feature = "uart-link", feature = "radio-link")
+))]
 mod frame_buf_test_turn {
     extern crate std;
 
     /// The frame buffer is one static: host tests that serialize into it
-    /// (the radio mux's, the USB link transport's) take turns.
+    /// (the radio mux's, the USB and UART link transports') take turns.
     pub(crate) fn frame_buf_turn() -> std::sync::MutexGuard<'static, ()> {
         static FRAME_BUF_TURN: std::sync::Mutex<()> = std::sync::Mutex::new(());
         FRAME_BUF_TURN.lock().unwrap_or_else(|e| e.into_inner())

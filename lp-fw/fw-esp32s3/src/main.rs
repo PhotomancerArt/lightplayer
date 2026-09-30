@@ -377,12 +377,29 @@ fn heartbeat_memory_stats() -> Option<lpc_wire::server::MemoryStats> {
         free_bytes: free,
         used_bytes: used,
         total_bytes: used.saturating_add(free),
-        largest_free_block: Some(
-            recovery::panic_path::largest_free_block().min(u32::MAX as usize) as u32,
-        ),
+        largest_free_block: read_headroom_probe(),
         oom_retry_saves: None,
     })
 }
+
+/// The largest allocatable block, for the server's read and load gates
+/// (`LpServer::set_read_headroom_probe`) and the heartbeat's
+/// `largest_free_block`.
+#[cfg(not(fw_harness))]
+fn read_headroom_probe() -> Option<u32> {
+    Some(recovery::panic_path::largest_free_block().min(u32::MAX as usize) as u32)
+}
+
+/// This chip's ProjectRead memory gate (`lpa_server::ReadGate`): the C6's
+/// numbers — 40 KiB free in total and a 16 KiB block — until the S3's own
+/// reads are measured (plan `lp2025/2026-09-27-1218-fragmentation-tolerant-reads`,
+/// P7). `fw-esp32c6/src/main.rs`'s `READ_GATE` carries the measurements and
+/// the rule behind them.
+#[cfg(not(fw_harness))]
+const READ_GATE: lpa_server::ReadGate = lpa_server::ReadGate {
+    min_free_bytes: 40 * 1024,
+    min_largest_block_bytes: 16 * 1024,
+};
 
 /// Everything `main` needs to hand to the server loop.
 #[cfg(not(fw_harness))]
@@ -518,6 +535,11 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
         None,
         graphics,
     );
+    // The heap gates, installed on this chip for the first time: until
+    // 2026-09-28 the S3 had no probe, so a read or load it could not afford
+    // aborted and reset the board instead of being refused.
+    server.set_read_headroom_probe(Some(read_headroom_probe));
+    server.set_read_gate(Some(READ_GATE));
     server.set_hello_identity(
         lpc_wire::HelloIdentity::new(
             "fw-esp32s3",

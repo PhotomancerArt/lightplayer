@@ -41,6 +41,7 @@ mod handler;
 pub mod link_host;
 mod run_hosted;
 mod run_s3;
+mod run_v3;
 mod serve;
 
 pub use args::EmuCli;

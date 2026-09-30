@@ -568,8 +568,9 @@ the no-flashing rule all sit above or beside the framing.
   that agree, not two mechanisms in tension: lp-link retransmits what
   trouble-host has not yet drained, and trouble-host's queue absorbs bursts
   lp-link's own window already paces.
-- **`WIRE_PROTO_VERSION` 30 → 31** (`lp-core/lpc-wire/src/server/hello.rs`),
-  in the same change as the framing switch, per the wire-compatibility
+- **`WIRE_PROTO_VERSION` 32 → 33** (`lp-core/lpc-wire/src/server/hello.rs`),
+  in the same change as the framing switch (built as 30 → 31 beside the
+  classic's UART cut-over, PR #884, which merged first and took 32), per the wire-compatibility
   policy (no shims; every producer/consumer moves together). All four
   firmware `manifest-core.expected.json` goldens moved with it.
 - **Packed replies are on by default over BLE now.** The old `M!` radio

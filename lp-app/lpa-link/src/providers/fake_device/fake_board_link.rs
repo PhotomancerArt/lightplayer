@@ -1,5 +1,6 @@
-//! The fake board's end of its USB lp-link, as shipped firmware runs it
-//! (plan `lp2025/2026-09-27-0215-lp-link-usb-cutover`): one board-side
+//! The fake board's end of its lp-link, as shipped firmware runs it (plan
+//! `lp2025/2026-09-27-0215-lp-link-usb-cutover`; USB by default, a classic's
+//! UART link when the script's `link_config` says so): one board-side
 //! [`Link`] per boot, a hello first on every `Up` (D5), replies as proto
 //! messages (JSON, or learned packed payloads once the host opted in, D4),
 //! and per-session state that starts over on every `Up` and `Reset`.
@@ -47,9 +48,11 @@ pub(crate) struct FakeBoardLink {
 }
 
 impl FakeBoardLink {
-    pub(crate) fn new(nonce: u32) -> Self {
+    /// One boot's link on `config` (the script's; USB unless a test asks
+    /// for a classic-shaped UART link).
+    pub(crate) fn new(config: LinkConfig, nonce: u32) -> Self {
         Self {
-            link: Link::new(LinkConfig::usb(), nonce),
+            link: Link::new(config, nonce),
             up: false,
             packed: false,
             table: LearnedTable::boxed(),

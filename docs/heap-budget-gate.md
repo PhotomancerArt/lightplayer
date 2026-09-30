@@ -235,10 +235,15 @@ the two arms need different toolchains and ride different CI jobs (below).
 `esp32_memory_stats` runs on a project load/unload/stop-all or a client
 `runtime_status`, never on the five-second server heartbeat, so a classic boot
 with nobody talking prints no `[MEM]`, no `[JIT]` and no `[stack] heartbeat:`
-line at all. The classic's arm sends one `stopAllProjects` over UART0 —
-`lp-emu/lp-emu-validate/walks/v3-stop-all.script`, the same bytes on the same
-trigger as `lp-emu-esp32v3/tests/boot_idle.rs` and as the desk sitting — and
-takes the first triple. It is the single thing most likely to be got wrong by
+line at all. The classic's arm sends one `stopAllProjects` and takes the
+first triple. Since wire proto 32 (plan `classic-uart-on-lp-link`) UART0 is an
+lp-link and the triple is log records on its log channel, so the arm boots
+through `lp-cli emu run --chip esp32v3 --host-link --json-replies` and asks
+over the link once the hello arrives — the same request
+`lp-cli/tests/emu_v3_link_gates.rs` sends. (Before proto 32 it was
+`lp-emu/lp-emu-validate/walks/v3-stop-all.script`'s raw `M!` bytes, which an
+lp-link image no longer reads; the script stays for the pinned pre-lp-link
+reference images.) It is the single thing most likely to be got wrong by
 copying the C6's arm.
 
 Five recorded figures, each with its own direction, one band, and one

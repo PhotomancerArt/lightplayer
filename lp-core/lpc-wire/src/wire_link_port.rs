@@ -7,8 +7,8 @@
 //! [`WireLinkPort`] is what every host keeps **one of per port**, for the
 //! port's whole life (Studio's Web Serial provider and emulator tab, lp-cli's
 //! serial and emulated-board transports, the fake board's host side) — and,
-//! since `WIRE_PROTO_VERSION` 31, one per Web Bluetooth connection, on
-//! [`LinkConfig::ble`]'s datagrams ([`with_config`](WireLinkPort::with_config),
+//! since `WIRE_PROTO_VERSION` 33, one per Web Bluetooth connection, on
+//! [`LinkConfig::ble`]'s datagrams ([`new`](WireLinkPort::new),
 //! [`on_datagram`](WireLinkPort::on_datagram)). It
 //! replaces the `M!`-era `WireStream` + `PackOptIn` pair for those links:
 //!
@@ -111,12 +111,19 @@ pub struct WireLinkPort {
 }
 
 impl WireLinkPort {
-    /// A port on a USB-Serial-JTAG link ([`LinkConfig::usb`]). `nonce` must
-    /// be random per port open; `want_packed` asks boards to pack their
-    /// replies (Studio's `?wire=json` and `LP_WIRE_ENCODING=json` say no).
-    pub fn new(nonce: u32, want_packed: bool) -> Self {
+    /// A port on a link tuned by `config`, the transport's preset
+    /// ([`LinkConfig::usb`] for a USB-Serial-JTAG board, [`LinkConfig::uart`]
+    /// for a UART behind a USB-serial bridge, [`LinkConfig::ble`] for
+    /// Studio's Web Bluetooth link — datagram framing, one frame per GATT
+    /// write or notification, fed with [`on_datagram`](Self::on_datagram),
+    /// not [`on_bytes`](Self::on_bytes)). Everything above the link — the
+    /// hello, the opt-in, the reads — is the same whatever the transport.
+    /// `nonce` must be random per
+    /// port open; `want_packed` asks boards to pack their replies (Studio's
+    /// `?wire=json` and `LP_WIRE_ENCODING=json` say no).
+    pub fn new(config: LinkConfig, nonce: u32, want_packed: bool) -> Self {
         WireLinkPort {
-            link: Link::new(LinkConfig::usb(), nonce),
+            link: Link::new(config, nonce),
             table: LearnedTable::boxed(),
             want_packed,
             device_log: None,
@@ -137,27 +144,6 @@ impl WireLinkPort {
         self
     }
 
-    /// A port on a link tuned by `config` instead of [`LinkConfig::usb`]:
-    /// Studio's Web Bluetooth link runs [`LinkConfig::ble`] (datagram
-    /// framing, one frame per GATT write or notification — feed it with
-    /// [`on_datagram`](Self::on_datagram), not [`on_bytes`](Self::on_bytes)).
-    /// Everything above the link — the hello, the opt-in, the reads — is the
-    /// same whatever the transport.
-    pub fn with_config(config: LinkConfig, nonce: u32, want_packed: bool) -> Self {
-        WireLinkPort {
-            link: Link::new(config, nonce),
-            table: LearnedTable::boxed(),
-            want_packed,
-            device_log: None,
-            opt_in: OptIn::WaitingForHello,
-            device_log_sent: false,
-            reads: VecDeque::new(),
-            text: TextLines::new(),
-            tally: LinkCounterTally::new(),
-            now: 0,
-        }
-    }
-
     // ---- Transport side --------------------------------------------------
 
     /// Bytes read from the port at `now` (any split).
@@ -170,7 +156,7 @@ impl WireLinkPort {
 
     /// One whole frame from a datagram transport at `now` (a Bluetooth
     /// notification): the port's link must be a datagram one
-    /// ([`with_config`](Self::with_config)).
+    /// ([`new`](Self::new) with [`LinkConfig::ble`]).
     pub fn on_datagram(&mut self, now: Micros, frame: &[u8]) {
         self.now = now;
         self.link.on_datagram(now, frame);
@@ -476,6 +462,34 @@ mod tests {
     }
 
     #[test]
+    fn a_port_on_the_uart_preset_carries_the_hello_and_a_request() {
+        let mut t = Bench::on(LinkConfig::uart(), false);
+        t.run(50);
+        let reads = t.reads();
+        assert!(matches!(reads[0], PortRead::Up { .. }), "{reads:?}");
+        assert!(messages(&reads)[0].json.contains("\"hello\""));
+        t.port
+            .send_client(&ClientMessage {
+                id: 7,
+                msg: ClientRequest::Hello,
+            })
+            .unwrap();
+        t.run(50);
+        assert_eq!(t.board.requests, vec![7]);
+        assert_eq!(messages(&t.reads()).len(), 1);
+    }
+
+    #[test]
+    fn a_port_on_the_uart_preset_queues_an_upload_sized_request() {
+        // The host queues each request with `send()`, bounded by
+        // `send_budget`: an upload's ~5.5 KB chunk must be taken.
+        let mut t = Bench::on(LinkConfig::uart(), false);
+        t.run(50);
+        let chunk = "x".repeat(6 * 1024);
+        assert_eq!(t.port.send_client_json(&chunk), Ok(()));
+    }
+
+    #[test]
     fn a_board_that_offers_another_format_stays_json_and_says_so_once() {
         let mut t = Bench::new(true);
         t.board.pack_format = PACK_FORMAT_VERSION + 1;
@@ -654,7 +668,8 @@ mod tests {
     #[test]
     fn the_dev_log_level_is_asked_once_after_the_hello_and_swallowed() {
         let mut t = Bench::new(false);
-        t.port = WireLinkPort::new(0xAAAA_0001, false).with_device_log_level(Some(LogLevel::Debug));
+        t.port = WireLinkPort::new(LinkConfig::usb(), 0xAAAA_0001, false)
+            .with_device_log_level(Some(LogLevel::Debug));
         t.run(80);
         assert_eq!(t.board.asks, vec![DEVICE_LOG_LEVEL_REQUEST_ID]);
         let reads = t.reads();
@@ -711,9 +726,14 @@ mod tests {
 
     impl Bench {
         fn new(want_packed: bool) -> Self {
+            Self::on(LinkConfig::usb(), want_packed)
+        }
+
+        /// Both ends on `config`.
+        fn on(config: LinkConfig, want_packed: bool) -> Self {
             Bench {
-                port: WireLinkPort::new(0xAAAA_0001, want_packed),
-                board: BoardDouble::new(0xBEEF_0001),
+                port: WireLinkPort::new(config.clone(), 0xAAAA_0001, want_packed),
+                board: BoardDouble::on(config, 0xBEEF_0001),
                 now: 0,
                 reads: Vec::new(),
             }
@@ -762,8 +782,12 @@ mod tests {
 
     impl BoardDouble {
         fn new(nonce: u32) -> Self {
+            Self::on(LinkConfig::usb(), nonce)
+        }
+
+        fn on(config: LinkConfig, nonce: u32) -> Self {
             BoardDouble {
-                link: Link::new(LinkConfig::usb(), nonce),
+                link: Link::new(config, nonce),
                 table: LearnedTable::default(),
                 packed: false,
                 pack_format: PACK_FORMAT_VERSION,

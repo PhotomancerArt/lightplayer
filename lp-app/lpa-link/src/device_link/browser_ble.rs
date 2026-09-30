@@ -28,7 +28,7 @@
 //!
 //! # The wire is lp-link, as over Web Serial
 //!
-//! Since `WIRE_PROTO_VERSION` 31 each connection is an lp-link on
+//! Since `WIRE_PROTO_VERSION` 33 each connection is an lp-link on
 //! `LinkConfig::ble()`'s datagrams, serviced by the provider
 //! (`providers/browser_ble/ble_link_port.rs`, the same `LinkPortService`
 //! Web Serial runs per port). A request is one link message

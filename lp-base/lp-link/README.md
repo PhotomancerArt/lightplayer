@@ -5,18 +5,23 @@ BLE, the classic UART, and later UDP and WebSocket. It sits between a raw pipe
 and the wire messages, on **both** ends: the board, Studio (wasm), `lp-cli`,
 and the emulator tools run the same crate.
 
-> **Status: in the product, on USB and BLE.** USB: C6 and S3 silicon and
-> their emulators, Studio's Web Serial and emulator-tab providers, `lp-cli`'s
-> native serial and `serial:tcp`/`serial:ws`. It was built and measured in
-> the investigation `lp2025/2026-09-26-1720-reliable-device-link`, proven on
-> a C6 in the `test_comms_lab` firmware, and cut over in
-> `lp2025/2026-09-27-0215-lp-link-usb-cutover`. BLE: the C6's radio link
-> (`fw-esp32-common`'s `radio_link/`) and Studio's Web Bluetooth provider,
-> cut over in `lp2025/2026-09-28-1445-ble-on-lp-link` — Datagram framing (one
-> frame per GATT write/notification, `max_payload` capped to the
-> connection's negotiated MTU), with no ATT long-write reassembly path. The
-> classic ESP32's UART and `fw-emu` still speak the old `M!`-line framing
-> until their own milestones bring them onto lp-link too. The decision is
+> **Status: in the product on USB** (C6 and S3 silicon and their
+> emulators, Studio's Web Serial and emulator-tab providers, `lp-cli`'s
+> native serial and `serial:tcp`/`serial:ws`), **on the classic ESP32's
+> UART0** (the DOM-Z-102's CH340 link, its emulator, Studio's Web Serial and
+> `lp-cli`'s native serial behind a USB-UART bridge — wire proto 32) **and on
+> BLE** (the C6's radio links, `fw-esp32-common`'s `radio_link/`, and
+> Studio's Web Bluetooth provider — wire proto 33). It was built and measured
+> in the investigation `lp2025/2026-09-26-1720-reliable-device-link`, proven
+> on a C6 in the `test_comms_lab` firmware, cut over on USB in
+> `lp2025/2026-09-27-0215-lp-link-usb-cutover`, on the classic's UART in
+> `lp2025/2026-09-28-2015-classic-uart-on-lp-link` (emulator-validated; its
+> desk walk is still open), and on BLE in
+> `lp2025/2026-09-28-1445-ble-on-lp-link` — Datagram framing (one frame per
+> GATT write/notification, `max_payload` capped to the connection's
+> negotiated MTU), with no ATT long-write reassembly path. Only `fw-emu`
+> still speaks the old `M!`-line framing, until a future milestone brings it
+> onto lp-link too. The decision is
 > `docs/adr/2026-09-27-lp-link-one-comms-layer.md`; BLE's own is
 > `docs/adr/2026-09-24-ble-transport.md`'s dated Amendment.
 
@@ -40,8 +45,24 @@ wire's messages over channel 1 lives at each edge:
 - **Board, USB:** `lp-fw/fw-esp32-common/src/usb_link/` — one
   `Link<SelectiveRepeat>` per boot, driven by `usb_link_task.rs`'s link task,
   with replies serialized by `usb_link_transport.rs` (`UsbLinkTransport`, a
-  `ServerTransport`). The C6 and S3 enable it behind the `usb-link` feature;
-  the classic (v3) does not.
+  `ServerTransport`). The C6 and S3 enable it behind the `usb-link` feature.
+- **Board, the classic's UART0:** `lp-fw/fw-esp32-common/src/uart_link/`
+  (feature `uart-link`), the same shape: `uart_link_task.rs` owns the `Link`
+  on the **thread** executor, `uart_link_transport.rs` (`UartLinkTransport`)
+  serializes replies, and `uart_link_config.rs`'s `uart_board_link_config()`
+  is the board's cut of the `uart()` preset. The UART itself stays with
+  `fw-esp32v3`'s `serial/io_task.rs` on the swi2 interrupt executor, now only
+  a byte shuttle between UART0's FIFOs and two static pipes
+  (`uart_link_pipes.rs`) — see
+  `docs/adr/2026-08-25-classic-uart-io-task-executor-isolation.md`'s
+  2026-09-29 amendment. A UART has no cable signal, so the board SYNs into
+  the void until a host answers; `syn_backoff` (below) keeps that to one SYN
+  every 1.6 s. The backoff covers the handshake only: a host that brings the
+  link up and then goes quiet (a closed tab) leaves the board Established,
+  sending keepalives and resending what is unacknowledged — ~4–6 frames/s
+  for ~19 s at `lp-emu:esp32v3:t1` — until `max_retries` resets the link;
+  only then does it back off. A plain serial monitor attached in that
+  window sees binary frames, not silence.
 - **Board, BLE (C6 only):** `lp-fw/fw-esp32-common/src/radio_link/` — one
   `Link<SelectiveRepeat>` per open GATT connection (Datagram framing), owned
   by `RadioLinkPort` (heap-leaked, one slot per `RADIO_LINK_SLOTS`) and
@@ -53,24 +74,33 @@ wire's messages over channel 1 lives at each edge:
 - **Native host:** `lpc_wire::WireLinkPort` — the one type every native
   reader drives (a real serial port, `serial:tcp`, `serial:ws`, the fake
   board double). `lpa-client`'s `transport_serial/link_pump.rs` and `lp-cli`'s
-  tools own the port and poll it. No native BLE transport exists (only
-  Studio and `spikes/ble-lab` speak BLE).
+  tools own the port and poll it. The port's preset comes from its USB
+  vendor (`lpa_client::transport_serial::link_config_for_port`): Espressif's
+  own `0x303a` is `usb()`, a USB-UART bridge (the classic's CH340, `0x1a86`)
+  is `uart()`; a socket carries no vendor and stays on `usb()`, which a
+  classic answers just as well because each end sends at most the window the
+  other advertised. `lp-cli emu run --chip esp32v3 --host-link` hosts an
+  emulated classic's UART0 in process, on the board's own `uart()`. No
+  native BLE transport exists (only Studio and `spikes/ble-lab` speak BLE).
 - **Studio (wasm):** `lpa-link`'s `LinkPortService` (`device_link/
   link_port_service.rs`) — one per open port, wrapping the same
   `WireLinkPort`, for the Web Serial provider
   (`providers/browser_serial_esp32/`), the emulator-tab provider
-  (`emulator_tab_link.rs`), and now the Web Bluetooth provider
-  (`providers/browser_ble/`, `BleWire` over a `Link<SelectiveRepeat>` on
-  `LinkConfig::ble()`).
+  (`emulator_tab_link.rs`), and the Web Bluetooth provider
+  (`providers/browser_ble/`, on `LinkConfig::ble()`). The Web Serial
+  provider picks the preset by the same vendor rule as native
+  (`provider/usb_vendors.rs`, `link_config_for_usb_vendor`). Neither
+  `lp-cli emu serve` nor the tab backing holds an emulated classic yet.
 - **Tools:** `lpc_wire::WireLinkSniffer` — a passive decoder with no session
   of its own, for `lp-cli wire unpack`, the emulator's wire tap, and
   `lp-cli record timeline`.
 
-USB and BLE are on lp-link today (D3 of the USB cut-over plan; the BLE
-cut-over is `lp2025/2026-09-28-1445-ble-on-lp-link`). The classic's UART and
-`fw-emu` still run the pre-lp-link `M!`-line framing (`lp-fw/fw-esp32-common`'s
-`server_msg.rs`, `StreamingMessageRouterTransport`) and their own hosts
-(`lpc_wire::WireStream`), unaffected by anything below.
+Only `fw-emu` still runs the pre-lp-link `M!`-line framing (its own, in
+`lp-fw/fw-core`'s `transport/serial.rs`) and its hosts
+(`lpc_wire::WireStream`), unaffected by anything below. The classic's
+`StreamingMessageRouterTransport` — the `M!` transport only it used — is
+gone, and so are `fw-esp32-common`'s `M!` line decoder and loss counters,
+which the BLE links read with until they moved.
 
 ### The proto channel's payload
 
@@ -154,9 +184,19 @@ sequence space is future work if a measurement ever calls for it).
 3. **Both ends reset together.** A reboot, reload, replug or give-up gives one
    `Reset` on each side, and per-link state above (the learned dictionary,
    pending requests) resets in step.
-4. **One design, tuned per transport.** Presets in `link_config.rs`: `usb()`,
+4. **One design, tuned per transport.** Presets in `link_config.rs`: `usb()`, `uart()`,
    `ble()`, `udp()`, `ws()`. WS/TCP use `NoArq` (channels and lifecycle
-   only).
+   only). A preset is what a **host** runs; a board takes its own cut of one
+   (the C6's `UsbLinkShared::config`, the classic's
+   `uart_board_link_config`), smaller buffers and a slower resend floor,
+   because a host queues upload-sized requests through `send()` and a board
+   sends its replies by `send_external`. `uart()` is `usb()` with windows of
+   4 (its doc comment says why the 40 ms `min_rto` is a host's floor and the
+   classic's board takes 200 ms). `syn_backoff` (0 in every preset) doubles
+   the gap between unanswered SYNs up to that many times; the classic's
+   board sets 4 — 100, 200, 400, 800 ms, then one every 1.6 s — because a
+   UART has no cable signal and a board nobody answers would otherwise SYN
+   at 10 Hz forever.
 5. **Logs are traffic.** `LogRing` + `link_log!` + a `log` adapter. The ring
    keeps the newest lines while the link is down and reports what it dropped.
 6. **Stay readable to a plain serial monitor.** Bytes outside frames arrive as

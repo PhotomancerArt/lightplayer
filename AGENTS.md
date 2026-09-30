@@ -175,27 +175,36 @@ The core is IO-free state machines; async belongs to platform edges. See
   nothing done for packing. What both ends must agree on is
   `lp_json_pack::PACK_FORMAT_VERSION` (the tag table, the learning rule and
   the table's capacities): **bump it, and `WIRE_PROTO_VERSION`, when you
-  change any of those**. On the **remaining `M!` transports** (the classic
-  ESP32's UART, `fw-emu`) every host reader keeps **one** `WireStream` per
+  change any of those**. On the **remaining `M!` transport** (`fw-emu`, the
+  only `M!` board link left) every host reader keeps **one** `WireStream` per
   link for the link's whole life, and answers a `WireChunk::Desync` with
   `PackOptIn::desynced` (the board's reset). See
   `docs/adr/2026-09-25-learned-wire-dictionary.md`.
-- **USB and BLE are `lp-link` now, not `M!`.** The C6/S3 silicon and their
-  emulators, Studio's Web Serial, emulator-tab and Web Bluetooth providers,
-  and `lp-cli`'s native serial/`serial:tcp`/`serial:ws` all frame the wire
-  with `lp-link` (`lp-base/lp-link`) instead: a 4-byte header, CRC-32C,
-  selective-repeat ARQ and a session handshake, with the wire's own
-  JSON/packed message as channel 1's payload — one whole message per link
-  message, tagged `{` for JSON or `L` for a learned-dictionary packed frame
-  (never `0x00 'L'` COBS framing; the link already delimits it). USB frames
-  a byte stream (COBS-FF); BLE frames Datagrams — one lp-link frame is one
-  GATT write or one notification, capped to the connection's negotiated size
-  (`min(180, ATT_MTU − 11)`), with no ATT long-write reassembly path at all.
-  Because both ends of a link reset together (on USB, an idle/stall reset;
-  on BLE, a GATT disconnect), the learned table resets **with the link**, not
-  with an epoch: there is no cross-session dictionary, no
-  `Desync`/`PackOptIn::desynced` path and no `R` resync marker on either.
-  That machinery (above) still applies, unchanged, to the classic UART and
+- **USB, the classic's UART and BLE are `lp-link` now, not `M!`.** The C6/S3
+  silicon and their emulators, the classic ESP32's UART0 (DOM-Z-102 and its
+  emulator, since wire proto 32), the C6's Bluetooth links (since wire proto
+  33), Studio's Web Serial, emulator-tab and Web Bluetooth providers, and
+  `lp-cli`'s native serial/`serial:tcp`/`serial:ws` all frame the wire with
+  `lp-link` (`lp-base/lp-link`) instead. The preset follows the transport. On
+  a serial port it follows the port's USB vendor on both hosts — Espressif's
+  native USB (`0x303a`) runs `LinkConfig::usb()`, a USB-UART bridge (the
+  classic's CH340, `0x1a86`) runs `LinkConfig::uart()`
+  (`lpa_client::transport_serial::link_config_for_port`, `lpa-link`'s
+  `usb_vendors::link_config_for_usb_vendor`); a socket has no vendor and stays
+  on `usb()`; a Bluetooth link runs `LinkConfig::ble()`. The link is a 4-byte
+  header, CRC-32C, selective-repeat ARQ and a session handshake, with the
+  wire's own JSON/packed message as channel 1's payload — one whole message
+  per link message, tagged `{` for JSON or `L` for a learned-dictionary packed
+  frame (never `0x00 'L'` COBS framing; the link already delimits it). USB and
+  UART frame a byte stream (COBS-FF); BLE frames Datagrams — one lp-link frame
+  is one GATT write or one notification, capped to the connection's
+  negotiated size (`min(180, ATT_MTU − 11)`), with no ATT long-write
+  reassembly path at all. Because both ends of a link reset together (on a
+  serial link, an idle/stall reset; on BLE, a GATT disconnect), the learned
+  table resets **with the link**, not with an epoch: there is no
+  cross-session dictionary, no `Desync`/`PackOptIn::desynced` path and no `R`
+  resync marker on an lp-link — a payload that fails to decode restarts the
+  link instead. That machinery (above) still applies, unchanged, to
   `fw-emu`. See `lp-base/lp-link/README.md`,
   `docs/adr/2026-09-27-lp-link-one-comms-layer.md` and
   `docs/adr/2026-09-24-ble-transport.md`'s dated Amendment.
@@ -266,14 +275,14 @@ runtime.
 | `lpc-access`     | Access core: secrets, tiers, HMAC login, backoff (sans-IO) | yes |
 | `lp-server`      | Project management, client connections | yes              |
 | `lp-json-pack`   | JSON Pack: a compact binary form of JSON that decodes back to byte-identical JSON text (`lp-base/`, generic; names coded against an injected seed and a per-connection learned table) | yes |
-| `lp-link`        | Sans-IO link layer under the device wire: framing, CRC-32C, channels, selective-repeat ARQ, session handshake (`lp-base/`, generic; one crate on both ends). Runs the product's USB and BLE links (board, host, Studio, tools); the classic UART and fw-emu are still the pre-lp-link `M!` framing | yes |
+| `lp-link`        | Sans-IO link layer under the device wire: framing, CRC-32C, channels, selective-repeat ARQ, session handshake (`lp-base/`, generic; one crate on both ends). Runs the product's USB, classic-UART0 and BLE links (board, host, Studio, tools); only fw-emu is still the pre-lp-link `M!` framing | yes |
 | `lpa-devices`    | Device model: event fold, no IO, no UI | no (host + wasm) |
 | `fw-esp32c6`       | ESP32 firmware                         | yes (bare metal) |
 | `fw-emu`         | RISC-V emulator firmware (CI)          | yes (bare metal) |
 | `lp-riscv-emu`   | RV32 emulator (host) — in `lp-emu/`    | yes (+std feat)  |
 | `lp-xt-emu`      | Xtensa emulator + machine-mode hart (host) — in `lp-emu/` | yes (+std feat)  |
 | `lp-emu-esp32c6` | ESP32-C6 SoC emulator (host) — `lp-emu/esp/` | no        |
-| `lp-emu-esp32v3` | Classic ESP32 (v3, Xtensa LX6) SoC emulator (host) — `lp-emu/esp/`. **Two cores** on a deterministic quantum interleave. Boots the shipped `fw-esp32v3` on **both** paths (direct load, and from the mask ROM's reset vector through the real IDF bootloader), takes a real upload over UART0 with the CH340 cable modelled, and renders a frame that is byte-identical on all three readings. `just test-emu-esp32v3-gate`, `just walk-esp32v3-emu`; the walk record is `docs/reports/2026-09-11-esp32v3-emulator-walk.md`. Speed: `just bench-emu-esp32v3` (an oracle, never a gate) and `scripts/emu/v3-oracle.sh <out-dir> <slug> <window>` — the identity oracle WITHIN one binary, the fast path against `--no-block-cache`, on the three pinned images; `--bin-a`/`--bin-b` runs it ACROSS binaries with the fast path off, which is what proves the interpreter did not move, and `--flags-a`/`--flags-b` (with `--name-a`/`--name-b`) runs any other pair — M7 P04's is `--jit` against `--interpreter`. **`--jit` needs `--features jit`** and today escapes every instruction back to the interpreter, so it is SLOWER than not asking for it; what it proves is identity | no |
+| `lp-emu-esp32v3` | Classic ESP32 (v3, Xtensa LX6) SoC emulator (host) — `lp-emu/esp/`. **Two cores** on a deterministic quantum interleave. Boots the shipped `fw-esp32v3` on **both** paths (direct load, and from the mask ROM's reset vector through the real IDF bootloader), takes a real upload over its UART0 lp-link with the CH340 cable modelled (hosted in process by `lp-cli emu run --chip esp32v3 --host-link`), and renders a frame that is byte-identical on all three readings. `--uart-faults <spec>` damages UART0's byte stream in 64-byte windows, the C6's `--usb-faults` over a UART (a test switch, off by default). `just test-emu-esp32v3-gate`, `just walk-esp32v3-emu`; the gates that need the link live in `lp-cli/tests/emu_v3_link_gates.rs` and `emu_uart_link.rs` (the fault soak), run by `test-emu-esp32v3-boot`; the walk record is `docs/reports/2026-09-11-esp32v3-emulator-walk.md`. Speed: `just bench-emu-esp32v3` (an oracle, never a gate) and `scripts/emu/v3-oracle.sh <out-dir> <slug> <window>` — the identity oracle WITHIN one binary, the fast path against `--no-block-cache`, on the three pinned images; `--bin-a`/`--bin-b` runs it ACROSS binaries with the fast path off, which is what proves the interpreter did not move, and `--flags-a`/`--flags-b` (with `--name-a`/`--name-b`) runs any other pair — M7 P04's is `--jit` against `--interpreter`. **`--jit` needs `--features jit`** and today escapes every instruction back to the interpreter, so it is SLOWER than not asking for it; what it proves is identity | no |
 | `lp-emu-esp32s3` | ESP32-S3 (Xtensa LX7) SoC emulator (host) — `lp-emu/esp/`. **M6 P01: register tables and a vendored ROM only — no map, no hart, no peripheral, no boot yet.** What the shipped image actually does is `docs/reports/2026-09-11-esp32s3-firmware-inventory.md` | no |
 | `lp-emu-validate` | The validation runner (host) — `lp-emu/`. Payloads, configurations, transcripts and their sidecars, replay, and the **trust table** (`validate.toml`) every claim in the two walk records is graded by. Reached through `lp-cli validate list\|record\|run\|replay` | no |
 
@@ -671,11 +680,11 @@ Rust (`browser_serial::take_reads`, before any splitting) into an in-memory
 buffer capped at 16 MiB (one console warning at the cap, then it drops). Run
 `lpWireCapture()` in the page's console to download it as
 `wire-capture-<unix-ms>.bin`; the capture keeps running, and the file is
-exactly what arrived — a board's USB or BLE link is `lp-link` bytes now, and
+exactly what arrived — a board's USB, UART or BLE link is `lp-link` bytes now, and
 `lp-cli wire unpack --sizes < file` decodes them by default (`--lines` reads
-the old `M!`-line framing instead, for a classic-UART/`fw-emu` capture). This
-flag itself only taps Web Serial ports, not a GATT session; there is no BLE
-equivalent of it.
+the old `M!`-line framing instead, for an `fw-emu` capture). This flag itself
+only taps Web Serial ports, not a GATT session; there is no BLE equivalent of
+it.
 `?device-log=<trace|debug|info|warn|error>` asks each board for that log
 level (`SetLogLevel`) once per link, after its hello and the packed-reply
 opt-in; the answer is a `dev: …` `WireNote` line, never a frame. Both cover

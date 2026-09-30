@@ -1,6 +1,6 @@
 //! Each Bluetooth session's lp-link end, and the loop that services it.
 //!
-//! Since `WIRE_PROTO_VERSION` 31 a board's Bluetooth links run lp-link on
+//! Since `WIRE_PROTO_VERSION` 33 a board's Bluetooth links run lp-link on
 //! [`LinkConfig::ble`]'s datagrams (plan
 //! `lp2025/2026-09-28-1445-ble-on-lp-link`, P4). This is Web Serial's
 //! per-port loop (`browser_serial_esp32/browser_serial.rs`), repeated for a
@@ -138,7 +138,7 @@ impl Drop for WakeOnActivity {
 /// A link for a new connection: a fresh nonce, `ble()`'s datagrams, and the
 /// page's wire flags as they are now.
 fn fresh_service() -> LinkPortService {
-    LinkPortService::with_config(
+    LinkPortService::new(
         LinkConfig::ble(),
         random_nonce(),
         packed_replies_wanted(),
