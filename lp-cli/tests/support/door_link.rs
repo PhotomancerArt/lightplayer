@@ -51,7 +51,11 @@ impl DoorLink {
             .expect("a read timeout");
         Self {
             socket,
-            port: WireLinkPort::new(0x0D00_C6A1, want_packed),
+            port: WireLinkPort::new(
+                lpc_wire::lp_link::LinkConfig::usb(),
+                0x0D00_C6A1,
+                want_packed,
+            ),
             start: Instant::now(),
             reads: Vec::new(),
             raw: Vec::new(),

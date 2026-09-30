@@ -1,7 +1,9 @@
 # ADR: lp-link — one reliable comms layer under the wire, on every transport
 
-- **Status:** implemented on USB (PR #854, 2026-09-27); accepted (2026-09-27,
-  by Yona at G1 of `lp2025/2026-09-26-1720-reliable-device-link`)
+- **Status:** implemented on USB (PR #854, 2026-09-27) and on the classic
+  ESP32's UART (PR #884, 2026-09-29 — emulator-validated, desk walk
+  pending; see the amendment at the end); accepted (2026-09-27, by Yona at
+  G1 of `lp2025/2026-09-26-1720-reliable-device-link`)
 - **Deciders:** Yona
 - **Evidence:** planning dir `2026-09-26-1720-reliable-device-link/reports/`
   (`REPORT.md`, `m1-loss.md`, `m2-link-design.md`, `m3-on-target.md`);
@@ -165,3 +167,105 @@ recorded for review in
   (M5) and `fw-emu` (no hello, lossless by construction) keep `M!` until
   their own milestones; `fw-esp32-common` keeps the `M!` serializer for
   them, split into "payload" and "`M!` framing".
+
+## Amendment 2026-09-29: implemented on the classic's UART (M5, PR #884)
+
+Milestone M5 (plan `lp2025/2026-09-28-2015-classic-uart-on-lp-link`) moved
+the classic ESP32's UART0 host link onto `lp-link`: `fw-esp32v3` on the
+DOM-Z-102's CH340 and its emulator, Studio's Web Serial path and `lp-cli`'s
+native serial behind a USB-UART bridge, and `lp-cli emu run --chip esp32v3
+--host-link`. `WIRE_PROTO_VERSION` moved 30 → **32** (31 is held for the
+Bluetooth milestone, PR #880). After it, BLE and `fw-emu` are the only `M!`
+board links. D1 (layering) and D2 (pause-the-pump kept) apply unchanged:
+the classic's Web Serial port is one more `LinkPortService`. The lens and
+card-feed ADRs' 2026-09-27 amendments describe exactly that mechanism but
+name USB, so each gained a two-line 2026-09-29 note extending them to every
+`lp-link` port; nothing in them changed.
+
+**The PR is still a draft.** Every claim below is emulated
+(`lp-emu:esp32v3:t1@cfac9606f`); none is hardware-validated. The desk
+walk's protocol is `hardware-walk-protocol.md` in the plan directory.
+
+What was decided, and what resolved:
+
+- **Where the `Link` lives (ruling DD20).** The classic's io_task keeps its
+  shape from `2026-08-25-classic-uart-io-task-executor-isolation.md` (swi2
+  interrupt executor, 1 ms pacer) but only moves bytes between UART0's
+  FIFOs and two static pipes. The `Link` and the server transport run on
+  the **thread** executor, as on the C6. A `Link` shared across the swi2
+  preemption boundary would have needed a real lock (a `RefCell` there
+  panics), and link work on the interrupt executor would have run on the
+  interrupted task's stack.
+- **`min_rto`: the plan's 40 ms hypothesis (its D4) did not hold, by
+  design rather than by measurement.** D4 assumed the link would inherit
+  the interrupt executor's 1 ms service. It does not (DD20): its timers and
+  ACKs are serviced between engine ticks, 41–114 ms on a dome-scale project,
+  longer than the ~80 ms tick that made the C6 raise its own floor. So the
+  board's cut (`uart_board_link_config`) takes the C6's **200 ms**; the
+  `uart()` preset keeps 40 ms, which is a *host's* floor. No silicon number
+  exists for the classic yet; the C6's two corrections (`frame_abandon`,
+  `min_rto`) came from silicon, and so may the classic's.
+- **Presets are hosts'; boards cut their own.** `uart()` is `usb()` with
+  windows of 4 and `usb()`'s budgets, because hosts queue upload-sized
+  requests through `send()`. The board's RAM cuts (send budget 1,280 B,
+  two log slots, `keep_reassembly` 512 B) live in its own config, as the
+  C6's do. Replies go by `send_external` from the static frame buffer.
+  Measured link RAM at rest 7,995 B (`Link::ram_bytes()`); the shipped
+  image's idle heap `used` rose 16,636 → 23,944 B, and the load gate still
+  reads ~35 KB above its 64 KiB floor with `catalog/projects/zook-dome`.
+- **Preset by vendor id (plan D6).** Both hosts pick the preset from the
+  port's USB vendor: Espressif `0x303a` → `usb()`, any bridge → `uart()`.
+  A socket (`serial:tcp`/`serial:ws`) has no vendor and stays on `usb()`,
+  which a classic answers equally, because each end sends at most the
+  window the other advertised.
+- **A UART has no cable signal (DD27).** A board nobody answers would SYN
+  at 10 Hz forever, into a plain serial monitor. New `LinkConfig::
+  syn_backoff` (a `u8` count of doublings, 0 in every preset, zero bytes of
+  RAM): the classic sets 4, so 100, 200, 400, 800 ms, then one SYN every
+  1.6 s; any byte received snaps it back.
+- **A host that leaves mid-session (DD34, documented, not changed).** The
+  backoff covers the handshake only. After a host that had the link up
+  goes quiet, the board stays Established and sends keepalives and resends
+  ~4–6 frames/s for ~19 s, until `max_retries` resets the link; then it
+  backs off.
+- **The nonce across a software reset (DD28).** The classic has no radio
+  to seed its RNG, so a software reboot may repeat the random word, which
+  would hide `PeerRestarted` from a host that stayed attached. The board's
+  nonce is salted with a boot count kept in RTC fast RAM (survives a
+  software or watchdog reset, not power-on). The emulator gained a real
+  software reset to prove it (its RNG repeats by construction, the worst
+  case).
+- **UART0 has one writer after boot.** io_task's TX pipe takes only whole
+  link frames and whole `[WS281X]` telemetry lines; `[MEM]`/`[JIT]`/`[stack]`
+  became log records; a panic writes `0xFF` first. This closes
+  `docs/defects/2026-08-02-serial-line-interleaving.md`, and lp-link's ARQ
+  closes `2026-08-03-dev-file-sync-drops-on-uart-rx-overflow.md` and
+  `2026-08-26-inbound-frames-longer-than-a-tick-lossy.md` structurally (an
+  overflow is a counted resend; it can still happen).
+- **Found and filed, not fixed:**
+  `docs/defects/2026-09-29-the-classics-log-ring-drops-records-under-a-project-load-burst.md`
+  — the 4 KiB log ring drops (and counts) records during a multi-output
+  project load.
+
+Evidence (all `lp-emu:esp32v3:t1`): `just walk-esp32v3-emu`'s three
+readings of the frame agree over the link with 0 damaged frames and 0 or 1
+resends (0 in P5's run; 1 on 2026-09-29 at `6134f415f`, counted by the host
+with nothing damaged, so a resend timer rather than line damage — most
+likely the host's 40 ms floor running out while a long server pass held the
+board's link task off, the case P2 described; not traced); a `--uart-faults` soak (new: the C6's `--usb-faults` cut into
+64-byte windows over the UART's byte stream) of five project loads at the
+C6's 1 % mix, at ~2.5 %, and with 1 KiB damage runs finishes with **0 app
+errors** each time, both ends counting the damage that reached them and
+resending (`lp-cli/tests/emu_uart_link.rs`).
+
+What the emulator cannot prove, and the desk walk must: real CH340K timing
+and its macOS driver; real desk noise; the swi2 pacer and the thread-side
+link under silicon's own interrupt latency (and so the 200 ms floor);
+silicon's RNG and RTC fast RAM across a real reboot; and byte-level
+interleaving on the real line. Two tooling gaps sit beside those:
+`lp-cli validate record` cannot host a classic lp-link image yet
+(`RunRequest::hosted()` hosts USB-Serial-JTAG only, so the classic's
+validation arms stay pinned to pre-lp-link images), and Studio cannot reach
+an emulated classic (`lp-cli emu serve` and the tab backing hold C6s only),
+so the classic's Studio path is proven by the Web Serial conformance
+suite's board double, not the firmware.

@@ -99,6 +99,10 @@ lp-emu-esp32c6 = { path = "../lp-emu/esp/lp-emu-esp32c6" }
 # the heap ratchet's S3 arm and the S3 host-side tests drive the machine from
 # here. Same direction as the C6 line above.
 lp-emu-esp32s3 = { path = "../lp-emu/esp/lp-emu-esp32s3" }
+# `lp-cli emu run --chip esp32v3 --host-link`: since wire proto 32 the
+# classic's UART0 is an lp-link (plan `classic-uart-on-lp-link`), and only a
+# product crate may host one. Same direction as the two lines above.
+lp-emu-esp32v3 = { path = "../lp-emu/esp/lp-emu-esp32v3" }
 # `lp-cli emu serve --air`: the `LPA1` air wire codec and `ParticipantId`,
 # which `lp-emu-esp32c6` uses but does not re-export. Same direction as the
 # line above — a product crate reaching INTO the fence, which is fine.

@@ -1713,33 +1713,33 @@ mod tests {
     /// firmware, this build's own is not (its hello follows as a frame).
     #[test]
     fn a_boot_marker_older_than_studio_is_older_light_player_firmware() {
-        const MARKER_29: &str = "[INIT] fw-esp32 initialized, starting server loop... \
-                                 proto=29 commit=c5f9736643e1 dirty=false";
         const MARKER_30: &str = "[INIT] fw-esp32 initialized, starting server loop... \
                                  proto=30 commit=4caa5b658157 dirty=false";
+        const MARKER_32: &str = "[INIT] fw-esp32 initialized, starting server loop... \
+                                 proto=32 commit=4caa5b658157 dirty=false";
         let config = studio_config();
 
         let mut older = Evidence::default();
         let mut identity = IdentityChain::default();
         older.fold(Millis(0), &opened(), &mut identity, &config);
-        older.fold(Millis(10), &line(MARKER_29), &mut identity, &config);
+        older.fold(Millis(10), &line(MARKER_30), &mut identity, &config);
         assert_eq!(
             older.classification,
-            Classification::OlderLightPlayer { proto: Some(29) }
+            Classification::OlderLightPlayer { proto: Some(30) }
         );
 
         let mut current = Evidence::default();
         let mut identity = IdentityChain::default();
         current.fold(Millis(0), &opened(), &mut identity, &config);
-        current.fold(Millis(10), &line(MARKER_30), &mut identity, &config);
+        current.fold(Millis(10), &line(MARKER_32), &mut identity, &config);
         assert_eq!(current.classification, Classification::Unknown);
     }
 
-    /// Studio's own roster config: this build's wire proto (30, the lp-link
-    /// cutover), not the model's placeholder default.
+    /// Studio's own roster config: this build's wire proto (32, the classic's
+    /// UART onto lp-link), not the model's placeholder default.
     fn studio_config() -> RosterConfig {
         RosterConfig {
-            expected_proto: 30,
+            expected_proto: 32,
             ..RosterConfig::default()
         }
     }

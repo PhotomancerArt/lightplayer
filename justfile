@@ -3087,6 +3087,24 @@ test-emu-c6-cli:
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test link_capture -- --include-ignored --nocapture
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_frag_reads -- --include-ignored --nocapture
 
+# lp-cli's classic-emulator conversation tests: the shipped `fw-esp32v3` on
+# its UART0 lp-link (plan `classic-uart-on-lp-link`, P3/P5) — hello and an
+# upload, the capture through `wire unpack`, a Reboot's new nonce (DD28), the
+# SYN backoff with no host (DD27), and the fault soak under `--uart-faults`.
+# Builds the image and names the copy it built (`LP_EMU_ESP32V3_ELF`). The
+# shortcut for iterating on them: CI runs the same file inside
+# `test-emu-esp32v3-boot` (DD33), beside the link gates that need the
+# merged and frame-dump images too.
+test-emu-esp32v3-cli:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just build-fw-esp32v3
+    out={{ justfile_directory() }}/target/lp-emu-esp32v3
+    mkdir -p "$out"
+    cp {{ justfile_directory() }}/target/xtensa-esp32-none-elf/release-esp32v3/fw-esp32v3 "$out/fw-esp32v3-cli.elf"
+    LP_EMU_ESP32V3_ELF="$out/fw-esp32v3-cli.elf" \
+        cargo test -p lp-cli --release --test emu_uart_link -- --include-ignored --nocapture
+
 # The classic ESP32 (v3) machine's own suite (plan three, M3).
 #
 # Nothing here builds firmware: a plain `cargo test --workspace` must never
@@ -3220,7 +3238,13 @@ test-emu-esp32v3-boot:
     if [[ -n "${LP_CI_IMAGES:-}" ]]; then
       ci_env="$(scripts/ci/ci-images.py env esp32v3)"
       eval "$ci_env"
-      exec cargo test -p lp-emu-esp32v3 --no-fail-fast -- --include-ignored
+      status=0
+      cargo test -p lp-emu-esp32v3 --no-fail-fast -- --include-ignored || status=$?
+      # The classic's gates that need a link host since wire proto 32
+      # (lp-cli's: a link host is a product crate, which the lp-emu fence
+      # keeps out), and its conversation tests (DD33).
+      cargo test -p lp-cli --release --test emu_v3_link_gates --test emu_uart_link -- --include-ignored --nocapture || status=$?
+      exit "$status"
     fi
     just build-fw-esp32v3
     built={{ justfile_directory() }}/target/xtensa-esp32-none-elf/release-esp32v3/fw-esp32v3
@@ -3294,7 +3318,18 @@ test-emu-esp32v3-boot:
     export -p | grep ' LP_EMU_ESP32V3_' > "$out/images.env"
     # `--no-fail-fast`: every test binary runs, so one red run names every
     # moved figure rather than the first binary's.
-    cargo test -p lp-emu-esp32v3 --no-fail-fast -- --include-ignored
+    status=0
+    cargo test -p lp-emu-esp32v3 --no-fail-fast -- --include-ignored || status=$?
+    # Since wire proto 32 the classic's UART0 is an lp-link, and the gates
+    # that need a request, an upload or a log record on it — G2's idle
+    # heartbeat on both boot paths, R6, the project load, the frame three
+    # ways, the five wires — are lp-cli's (`tests/emu_v3_link_gates.rs`: a
+    # link host is a product crate, which the lp-emu fence keeps out). With
+    # them, the classic's conversation tests and fault soak
+    # (`tests/emu_uart_link.rs`, DD33), so the product's transport on this
+    # chip is covered wherever this recipe runs.
+    cargo test -p lp-cli --release --test emu_v3_link_gates --test emu_uart_link -- --include-ignored --nocapture || status=$?
+    exit "$status"
 
 # Run an image on the classic ESP32 (v3) machine.
 #
@@ -3760,10 +3795,16 @@ walk-esp32s3-emu *args: install-rv32-target build-rv32-builtins
 #              ESP-IDF second-stage bootloader espflash bundles, the real
 #              partition table — instead of a direct load. `LP_WALK_BOOT=direct`
 #              still takes the fast path when something is being bisected.
-#   the cable  the CH340's own verbs over `--control tcp:`: attach, the
-#              classic-reset dance (whose RELEASE is the reboot), open, upload,
-#              then close / detach / `state` — and the final `state` reply is
-#              asserted, so "the port was released" is a gate and not a habit.
+#   the cable  the CH340's own verbs on a scripted schedule
+#              (`--control-script`): attach, the classic-reset dance (whose
+#              RELEASE is the reboot), open, upload, then close / detach — and
+#              the cable's final state is asserted, so "the port was released"
+#              is a gate and not a habit.
+#
+# Since wire proto 32 the classic's UART0 is an lp-link, so the run is `lp-cli
+# emu run --chip esp32v3 --host-link --upload`: one process boots the image,
+# hosts the link in emulated time, uploads over it and keeps hosting, so the
+# `[OUT] dump` (a log record now) reaches the console.
 #
 # It does NOT run the heap gate. That is `just heap-budget-check-chips-v3`,
 # for the reason the C6 keeps its own ratchet out of `walk-esp32c6-emu`: the
@@ -3776,9 +3817,10 @@ walk-esp32s3-emu *args: install-rv32-target build-rv32-builtins
 # `D10` -> `IO18` into a scratch copy, because the DOM-Z-102 has no D10.
 #
 # NOT in any CI job, for the C6 recipe's reason: it builds a firmware image, a
-# merged flash image and a release `lp-cli`, and then runs the machine for tens
-# of emulated seconds. What it proves per-tick lives in `tests/
-# shader_oracle_pin.rs` and `tests/five_wires.rs`, which do run there.
+# merged flash image and a release `lp-cli`, and then runs the machine for
+# seconds of emulated time. What it proves per-tick lives in `lp-cli/tests/
+# emu_v3_link_gates.rs` (moved from `lp-emu-esp32v3`'s `shader_oracle_pin.rs`
+# and `five_wires.rs` when the image went onto lp-link), which does run there.
 walk-esp32v3-emu *args: install-rv32-target build-rv32-builtins
     scripts/emu/m4-walk-esp32v3.sh {{ args }}
 
@@ -3788,9 +3830,10 @@ walk-esp32v3-emu *args: install-rv32-target build-rv32-builtins
 # it asks exactly the same question of the frame: is the first lit frame off
 # IO18 the host oracle's frame, three ways?
 #
-# It reaches all three readings and exits 0: 2,438 frames on IO18, one distinct
-# lit byte string, equal to the guest's own deferred `[OUT] dump` and to
-# `[ORACLE] rgb=` — 384 hex characters, three ways. It reached only two until
+# It reaches all three readings and exits 0: on lp-link (2026-09-29) 1,562
+# frames on IO18 in its 4 s, one distinct lit byte string, equal to the guest's
+# own deferred `[OUT] dump` and to `[ORACLE] rgb=` — 384 hex characters, three
+# ways. It reached only two until
 # M4 P4b (PR #711) fixed the window-spill defect that killed the guest before
 # the deferred dump; `lp-emu/esp/lp-emu-esp32v3/README.md`'s "The window,
 # across a context save" is that trace. The script prints every reading it got

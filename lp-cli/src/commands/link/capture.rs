@@ -29,7 +29,10 @@ use crate::commands::emu::link_host::{console_lines, describe_link_counters, fre
 pub fn capture(args: &CaptureArgs) -> Result<()> {
     let mut requests = CaptureRequests::parse(&args.request)?;
     let mut port = LabPort::open(&args.target, TermiosMode::Raw)?;
-    let mut link = WireLinkPort::new(fresh_nonce(), !args.json_replies);
+    // A CH340-bridged classic takes the UART preset, a C6 or S3 the USB one:
+    // the vendor id the product's own serial host reads (a socket is `usb()`).
+    let config = lpa_client::transport_serial::link_config_for_port(&args.target);
+    let mut link = WireLinkPort::new(config, fresh_nonce(), !args.json_replies);
     let file = std::fs::File::create(&args.console)
         .with_context(|| format!("creating the console {}", args.console.display()))?;
     let mut console = std::io::LineWriter::new(file);

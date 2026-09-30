@@ -92,6 +92,8 @@ pub struct Link<A: Arq> {
     unacked_rx: u8,
     last_adv_win: u8,
     syn_due: Option<Micros>,
+    /// Unanswered SYNs the gap has doubled for so far (`syn_backoff`).
+    syn_doublings: u8,
     syn_owed: bool,
     /// A tail-loss probe may fire for the current flight.
     probe_armed: bool,
@@ -142,6 +144,7 @@ impl<A: Arq> Link<A> {
             unacked_rx: 0,
             last_adv_win: 0,
             syn_due: Some(0),
+            syn_doublings: 0,
             syn_owed: false,
             probe_armed: false,
             last_data_tx: 0,
@@ -287,6 +290,9 @@ impl<A: Arq> Link<A> {
     /// Bytes from a stream transport ([`Framing::Stream`]).
     pub fn on_bytes(&mut self, now: Micros, bytes: &[u8]) {
         self.counters.bytes_rx += bytes.len() as u64;
+        if !bytes.is_empty() {
+            self.heard_while_connecting(now);
+        }
         for &b in bytes {
             match self.deframer.push(now, b) {
                 Deframed::Nothing => {}
@@ -319,6 +325,7 @@ impl<A: Arq> Link<A> {
     /// One whole frame from a datagram transport ([`Framing::Datagram`]).
     pub fn on_datagram(&mut self, now: Micros, frame: &[u8]) {
         self.counters.bytes_rx += frame.len() as u64;
+        self.heard_while_connecting(now);
         self.on_frame(now, frame);
     }
 
@@ -427,6 +434,14 @@ impl<A: Arq> Link<A> {
     /// for what is worth sending.
     pub fn is_stalled(&self, now: Micros) -> bool {
         self.state == LinkState::Established && self.peer_silent_for(now) >= self.cfg.stall_after
+    }
+
+    /// Best-effort messages [`send`](Self::send) would queue right now (free
+    /// datagram slots). A caller that takes each message out of its own
+    /// buffer (a firmware log ring) asks first, so a message the link would
+    /// refuse stays where it was instead of being taken and lost.
+    pub fn datagram_room(&self) -> usize {
+        self.datagrams.free_slots()
     }
 
     /// Nothing queued, nothing unacknowledged.
@@ -693,7 +708,10 @@ impl<A: Arq> Link<A> {
     ) -> bool {
         if self.state == LinkState::Connecting {
             if self.syn_due.is_some_and(|t| t <= now) {
-                self.syn_due = Some(now + self.cfg.syn_interval);
+                self.syn_due = Some(now + (self.cfg.syn_interval << self.syn_doublings));
+                if self.syn_doublings < self.cfg.syn_backoff {
+                    self.syn_doublings += 1;
+                }
                 self.emit_syn();
                 return true;
             }
@@ -954,6 +972,19 @@ impl<A: Arq> Link<A> {
 
     // ---- Lifecycle -------------------------------------------------------
 
+    /// Something arrived while handshaking: somebody may be listening, so a
+    /// backed-off SYN gap (`syn_backoff`) goes back to `syn_interval`.
+    fn heard_while_connecting(&mut self, now: Micros) {
+        if self.state != LinkState::Connecting || self.syn_doublings == 0 {
+            return;
+        }
+        self.syn_doublings = 0;
+        let soon = now + self.cfg.syn_interval;
+        if self.syn_due.is_none_or(|t| t > soon) {
+            self.syn_due = Some(soon);
+        }
+    }
+
     fn establish(&mut self, now: Micros) {
         self.state = LinkState::Established;
         self.tx_payload = self.cfg.max_payload.min(self.peer_max_payload).max(1) as usize;
@@ -990,6 +1021,7 @@ impl<A: Arq> Link<A> {
         self.syn_owed = false;
         self.probe_armed = false;
         self.syn_due = Some(now);
+        self.syn_doublings = 0;
         self.counters.resets += 1;
         self.inbox.push_lifecycle(LinkEvent::Reset {
             reason,

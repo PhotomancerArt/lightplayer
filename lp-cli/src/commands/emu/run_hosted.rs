@@ -41,7 +41,10 @@ async fn run_hosted_async<B: EmuUsbBoard>(
     args: &RunArgs,
     micros: u64,
 ) -> Result<()> {
-    eprintln!("emu: {describe_boot}, usb-serial-jtag hosted in process (lp-link)");
+    eprintln!(
+        "emu: {describe_boot}, {} hosted in process (lp-link)",
+        board.link_name()
+    );
     eprintln!(
         "emu: running for {micros} us of EMULATED time (wall-clock net: {} s)",
         args.wall_timeout_secs

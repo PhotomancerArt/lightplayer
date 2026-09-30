@@ -1,7 +1,8 @@
 //! The product's host end of an emulated board's USB link, in this process.
 //!
 //! Since `WIRE_PROTO_VERSION` 30 the shipped C6 and S3 images speak lp-link
-//! on USB-Serial-JTAG (plan `lp2025/2026-09-27-0215-lp-link-usb-cutover`):
+//! on USB-Serial-JTAG (plan `lp2025/2026-09-27-0215-lp-link-usb-cutover`),
+//! and since 32 the classic does on UART0 (plan `classic-uart-on-lp-link`):
 //! nothing but boot text and panics reaches the port as plain text, the
 //! board's `log` lines ride the link's log channel, and its hello and
 //! heartbeats go out only once a host has brought the link up. So a tool
@@ -26,6 +27,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Result, bail};
 use lp_emu_esp_common::QueueHandle;
+use lpc_wire::lp_link::LinkConfig;
 use lpc_wire::{
     ClientMessage, LinkCounters, PortRead, TransportError, WireLinkPort, WireServerMessage,
 };
@@ -34,8 +36,20 @@ use lpc_wire::{
 /// slices, so this bounds its reaction time (the comms lab's own figure).
 pub const SLICE_US: u64 = 250;
 
-/// One emulated board whose USB-Serial-JTAG port the host holds in process.
+/// One emulated board whose host link the host holds in process: the
+/// USB-Serial-JTAG port on the C6 and S3, UART0 on the classic (the `usb`
+/// in the method names is the first two's; the classic's bytes are its
+/// UART's).
 pub trait EmuUsbBoard {
+    /// The host end's link configuration: the preset for this board's
+    /// transport, as a product host picks it for the port it opened.
+    fn link_config(&self) -> LinkConfig {
+        LinkConfig::usb()
+    }
+    /// What the host link is, for the run's report.
+    fn link_name(&self) -> &'static str {
+        "usb-serial-jtag"
+    }
     /// Run the board `us` more microseconds of emulated time. `Err` is the
     /// machine stopping for any reason other than its deadline.
     fn run_for_us(&mut self, us: u64) -> Result<(), String>;
@@ -197,6 +211,98 @@ impl EmuUsbBoard for S3Board {
     }
 }
 
+/// The emulated classic (v3), with an in-process queue as the host's side of
+/// UART0's cable. Since wire proto 32 its UART0 is an lp-link (plan
+/// `classic-uart-on-lp-link`), so the host end takes [`LinkConfig::uart`].
+/// Built to reboot on reset, so a Reboot request (a software system reset)
+/// boots it again rather than leaving the guest in the ROM's reset path.
+pub struct V3Board {
+    pub machine: lp_emu_esp32v3::machine::Machine,
+    queue: QueueHandle,
+}
+
+impl V3Board {
+    /// Install the host's queue as UART0's RX (its TX kept in memory),
+    /// build, and wrap.
+    pub fn build(builder: lp_emu_esp32v3::machine::Esp32V3Builder) -> Result<Self> {
+        let (source, queue) = lp_emu_esp_common::QueueSource::new();
+        let machine = builder
+            .uart0(lp_emu_esp32v3::machine::Uart0Sink::Memory)
+            .uart0_source(Box::new(source))
+            .reboot_on_reset(true)
+            .build()
+            .map_err(|e| anyhow::anyhow!("building the classic machine: {e}"))?;
+        Ok(Self { machine, queue })
+    }
+}
+
+impl EmuUsbBoard for V3Board {
+    fn link_config(&self) -> LinkConfig {
+        LinkConfig::uart()
+    }
+
+    fn link_name(&self) -> &'static str {
+        "uart0"
+    }
+
+    fn run_for_us(&mut self, us: u64) -> Result<(), String> {
+        use lp_emu_esp32v3::machine::{Outcome, StopCondition};
+        let stop = StopCondition {
+            stop_cycle: Some(self.machine.cycles() + us * lp_emu_esp32v3::memmap::CYCLES_PER_US),
+            ..Default::default()
+        };
+        match self.machine.run_until(&stop) {
+            Outcome::Deadline { .. } => Ok(()),
+            other => Err(format!("{other:?}")),
+        }
+    }
+
+    fn micros(&self) -> u64 {
+        self.machine.micros()
+    }
+
+    fn take_usb_output(&mut self) -> Vec<u8> {
+        let log = self.machine.uart0();
+        let bytes = log.bytes();
+        if !bytes.is_empty() {
+            log.replace(&[]);
+        }
+        bytes
+    }
+
+    fn push_usb_input(&mut self, bytes: &[u8]) {
+        self.queue.push(bytes);
+    }
+
+    fn finish(&mut self) -> Vec<String> {
+        let m = &mut self.machine;
+        m.flush_frames();
+        let flash = m.flush_flash();
+        let mut lines = finish_lines(
+            m.instructions(),
+            (m.bus().unmapped_reads(), m.bus().unmapped_writes()),
+            flash,
+        );
+        if m.reboots() > 0 {
+            lines.push(format!("{} reboot(s)", m.reboots()));
+        }
+        if m.control_lines() > 0 {
+            // The cable's side, in the `state` verb's own words.
+            let state = lp_emu_esp32v3::control::ControlReply::State {
+                cycle: m.cycles(),
+                report: m.cable_report(),
+            };
+            lines.push(format!("cable: {state}"));
+        }
+        if let Some((to_host, to_device)) = m.uart0_fault_counters() {
+            lines.push(format!(
+                "uart-faults: device→host {to_host}; host→device {to_device}"
+            ));
+        }
+        lines
+    }
+}
+
 /// One wire message a hosted link read.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct HostedMessage {
@@ -237,13 +343,15 @@ pub struct EmuLinkHost<B: EmuUsbBoard> {
 }
 
 impl<B: EmuUsbBoard> EmuLinkHost<B> {
-    /// A host with a fresh link port (`want_packed`: ask the board to pack
+    /// A host with a fresh link port on the board's transport's preset
+    /// ([`EmuUsbBoard::link_config`]; `want_packed`: ask the board to pack
     /// its replies, as every product host does).
     pub fn new(board: B, nonce: u32, want_packed: bool) -> Self {
         let start = board.micros();
+        let config = board.link_config();
         Self {
             board,
-            port: WireLinkPort::new(nonce, want_packed),
+            port: WireLinkPort::new(config, nonce, want_packed),
             start,
             pending: VecDeque::new(),
             queue_messages: true,
