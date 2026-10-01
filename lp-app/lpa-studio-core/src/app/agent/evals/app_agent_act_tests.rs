@@ -111,7 +111,11 @@ fn the_agent_presses_save_once_and_a_stale_press_is_refused() {
         })
         .collect();
     assert_eq!(results.len(), 3, "{results:#?}");
-    assert!(results[1].get("done").is_some(), "Save pressed: {:#}", results[1]);
+    assert!(
+        results[1].get("done").is_some(),
+        "Save pressed: {:#}",
+        results[1]
+    );
     assert!(
         results[2]["refused"]["reason"]
             .as_str()
