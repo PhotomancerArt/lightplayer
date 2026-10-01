@@ -27,7 +27,8 @@ pub const DEFAULT_OPENROUTER_MODEL: &str = "anthropic/claude-sonnet-5";
 /// The app chat's model on OpenRouter when no layer overrides it — its own
 /// default, apart from the shader agent's (plan A6): the best open-weights
 /// model that passes the app-agent evals (D13). Chosen by the 2026-10-01
-/// bake-off (`just app-agent-bakeoff`); provisional until Yona's G1 answer.
+/// bake-off (`just app-agent-bakeoff`: 9 of 9 on E1–E3, ~$0.015 a setup)
+/// and confirmed by Yona the same day.
 pub const DEFAULT_APP_AGENT_OPENROUTER_MODEL: &str = "z-ai/glm-5.3";
 
 /// One settings overlay: every field optional, absent fields defer to the
