@@ -267,6 +267,17 @@ impl AgentController {
         self.app.bridge.borrow_mut().readout = readout;
     }
 
+    /// Whether the app chat has a run in flight (the controller refreshes
+    /// the bridge's project summary only then).
+    pub(crate) fn app_running(&self) -> bool {
+        self.app.running
+    }
+
+    /// Replace the app bridge's project summary (read at `revision`).
+    pub(crate) fn refresh_app_project(&mut self, revision: i64, summary: serde_json::Value) {
+        self.app.bridge.borrow_mut().project = Some((revision, summary));
+    }
+
     /// Record one `edit_project` batch's answer for the awaiting run.
     pub(crate) fn record_project_edits_ack(
         &mut self,
@@ -324,11 +335,14 @@ impl AgentController {
             }
             None => AgentSession::with_toolset(
                 provider,
-                AppToolset::new(AppAgentHostBridge::new(
-                    Rc::clone(&app.bridge),
-                    tx.clone(),
-                    self.timer.clone().unwrap_or_else(instant_agent_timer),
-                )),
+                AppToolset::new(
+                    AppAgentHostBridge::new(
+                        Rc::clone(&app.bridge),
+                        tx.clone(),
+                        self.timer.clone().unwrap_or_else(instant_agent_timer),
+                    ),
+                    &crate::app::agent::app_agent_reference::app_agent_reference(),
+                ),
             ),
         };
         app.abort = session.abort_handle();

@@ -15,17 +15,18 @@ use crate::tool::tool_phase::ToolPhase;
 use crate::toolset::{ToolOutcome, Toolset};
 
 /// The app agent's toolset. The system prompt is built once, at
-/// construction, and never changes for the session (PD3).
+/// construction, from the host's generated reference, and never changes
+/// for the session (PD3).
 pub struct AppToolset<H: AppAgentHost> {
     host: H,
     system: String,
 }
 
 impl<H: AppAgentHost> AppToolset<H> {
-    pub fn new(host: H) -> Self {
+    pub fn new(host: H, reference: &str) -> Self {
         Self {
             host,
-            system: build_app_system_prompt(),
+            system: build_app_system_prompt(reference),
         }
     }
 

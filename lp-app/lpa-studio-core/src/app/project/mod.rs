@@ -22,6 +22,7 @@
 //! Studio controller state.
 
 pub(crate) mod agent_project_edits;
+pub(crate) mod agent_project_summary;
 pub(crate) mod agent_slot_json;
 pub(crate) mod agent_support;
 pub mod asset;

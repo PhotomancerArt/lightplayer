@@ -2344,6 +2344,12 @@ impl StudioController {
         // not the change gate emits a snapshot this batch.
         self.refresh_agent_engine_status();
         self.agent.refresh_app_readout(self.app_agent_readout());
+        if self.agent.app_running()
+            && let Some(revision) = self.current_revision()
+        {
+            self.agent
+                .refresh_app_project(revision, self.project.agent_project_summary());
+        }
         let revision = self.current_revision();
         let advanced = revision != self.applied_revision;
         if !self.dirty && !advanced {

@@ -97,8 +97,8 @@ pub struct NodeRef {
 #[serde(deny_unknown_fields)]
 pub struct SlotRef {
     pub node: String,
-    /// Slot path in the node's definition: `render_size.width`,
-    /// `ports[0].endpoint`, `cycle.step_seconds`, `entries[2]`.
+    /// Slot path in the node's definition: `render_size`,
+    /// `ports[0].endpoint`, `cycle`, `bindings[time]`, `entries[2]`.
     pub path: String,
 }
 

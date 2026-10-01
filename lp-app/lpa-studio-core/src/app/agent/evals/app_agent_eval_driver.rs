@@ -41,6 +41,9 @@ use crate::{
 /// a scenario that hits it is reported as stopped.
 const SCENARIO_WALL_LIMIT: Duration = Duration::from_secs(20 * 60);
 
+/// How often a long run prints where it is (live runs take minutes).
+const PROGRESS_EVERY: Duration = Duration::from_secs(30);
+
 /// Where the model comes from.
 pub(crate) enum ModelSource {
     /// A real OpenRouter model. The key is held here only for the provider
@@ -381,6 +384,7 @@ impl AgentEvalStudio {
     fn drive_runs(&mut self, limits: RunLimits) {
         let waker = Waker::from(Arc::new(NoopWake));
         let mut cx = Context::from_waker(&waker);
+        let mut next_progress = Instant::now() + PROGRESS_EVERY;
         loop {
             let Some(mut task) = self.tasks.borrow_mut().pop() else {
                 break;
@@ -398,7 +402,32 @@ impl AgentEvalStudio {
                     self.controller().agent_for_test().request_app_stop();
                 }
                 if !progressed {
+                    // Idle: what the page's refresh timer would do — pull,
+                    // so the engine ticks and statuses advance under a
+                    // waiting agent.
+                    self.tx
+                        .send(crate::app::studio::studio_edit_e2e_tests::project_action(
+                            crate::ProjectOp::RefreshProject,
+                        ));
                     std::thread::sleep(Duration::from_millis(2));
+                }
+                if Instant::now() > next_progress {
+                    next_progress = Instant::now() + PROGRESS_EVERY;
+                    let (turns, usage, status) = (self.turns(), self.usage(), self.status());
+                    let last = self
+                        .controller()
+                        .agent_for_test()
+                        .app_session()
+                        .mirror
+                        .turns
+                        .last()
+                        .map(|turn| format!("{turn:?}").chars().take(160).collect::<String>())
+                        .unwrap_or_default();
+                    eprintln!(
+                        "app-agent-eval: … {turns} turns, {} out tokens, ${:.4}, {status:?}; last: {last}",
+                        usage.output_tokens,
+                        usage.reported_cost_usd().unwrap_or(0.0)
+                    );
                 }
             }
             while self.try_batch() {}

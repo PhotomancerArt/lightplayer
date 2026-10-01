@@ -1073,7 +1073,8 @@ mod tests {
                 turn_done(StopReason::EndTurn, 1, 1),
             ],
         ]);
-        let mut session = AgentSession::with_toolset(&provider, AppToolset::new(CountingHost(0)));
+        let mut session =
+            AgentSession::with_toolset(&provider, AppToolset::new(CountingHost(0), "## Reference"));
         block_on(session.run("set up my leds".into(), |_| {})).expect("run");
 
         let reqs = provider.requests.borrow();

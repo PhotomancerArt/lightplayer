@@ -24,6 +24,15 @@ const EDITS_ACK_BUDGET_MS: u32 = 60_000;
 /// The poll step of the ack wait (the platform timer).
 const EDITS_POLL_STEP_MS: u32 = 50;
 
+/// How long an edit result waits for the engine to report on the edits
+/// (the shader agent's verdict-chase budget, `ENGINE_VERDICT_BUDGET_MS`).
+const SETTLE_BUDGET_MS: u32 = 2_000;
+
+/// Fresh project reads a settled summary needs after the ack: the first
+/// read can carry statuses from before the edits compiled (see the shader
+/// bridge's `VerdictFence`).
+const SETTLE_READS: i64 = 2;
+
 /// The snapshot the app bridge serves.
 #[derive(Clone, Debug, Default)]
 pub struct AppAgentBridgeState {
@@ -34,6 +43,9 @@ pub struct AppAgentBridgeState {
     pub context_notes: Vec<String>,
     /// The last `edit_project` batch's answer, keyed by the bridge's seq.
     pub edits_ack: Option<(u64, Result<ProjectEditsOutcome, String>)>,
+    /// The open project's compact summary and the sync revision it was read
+    /// at, refreshed after every batch while a run is in flight.
+    pub project: Option<(i64, serde_json::Value)>,
 }
 
 /// The host handed to the app agent's `AppToolset`.
@@ -57,6 +69,39 @@ impl AppAgentHostBridge {
             tx,
             timer,
             seq: 0,
+        }
+    }
+}
+
+impl AppAgentHostBridge {
+    /// The project summary once the engine has read the edits back twice,
+    /// or the latest one when the budget runs out (marked unsettled — never
+    /// a blocked run).
+    async fn settled_project(&mut self) -> serde_json::Value {
+        let start = self
+            .state
+            .borrow()
+            .project
+            .as_ref()
+            .map(|(revision, _)| *revision);
+        let mut waited_ms = 0u32;
+        loop {
+            let latest = self.state.borrow().project.clone();
+            if let Some((revision, summary)) = &latest
+                && start.is_none_or(|start| *revision >= start + SETTLE_READS)
+            {
+                return summary.clone();
+            }
+            if waited_ms >= SETTLE_BUDGET_MS {
+                let mut summary = latest
+                    .map(|(_, summary)| summary)
+                    .unwrap_or_else(|| serde_json::json!({}));
+                summary["settled"] =
+                    "unknown — the engine had not reported on these edits yet".into();
+                return summary;
+            }
+            (self.timer.borrow_mut())(Duration::from_millis(u64::from(EDITS_POLL_STEP_MS))).await;
+            waited_ms += EDITS_POLL_STEP_MS;
         }
     }
 }
@@ -89,7 +134,9 @@ impl AppAgentHost for AppAgentHostBridge {
                 if let Some((ack_seq, result)) = ack
                     && ack_seq == seq
                 {
-                    return result.map_err(HostError::new);
+                    let mut outcome = result.map_err(HostError::new)?;
+                    outcome.project = Some(self.settled_project().await);
+                    return Ok(outcome);
                 }
                 if waited_ms >= EDITS_ACK_BUDGET_MS {
                     return Err(HostError::new(

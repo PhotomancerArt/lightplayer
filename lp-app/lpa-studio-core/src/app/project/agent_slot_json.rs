@@ -231,17 +231,21 @@ fn unresolved_path_message(
     format!("`{path}` is not a field of this node")
 }
 
-/// A type the way the model writes it in JSON.
-fn describe_type(ty: &lpc_model::LpType) -> String {
+/// A type the way the model writes it in JSON (shared with the app agent's
+/// reference, so the prompt and the rejections describe types alike).
+pub(crate) fn describe_type(ty: &lpc_model::LpType) -> String {
     use lpc_model::LpType;
     match ty {
+        LpType::Any => "any value".to_string(),
         LpType::String => "a string".to_string(),
         LpType::Bool => "true or false".to_string(),
+        LpType::List(inner) => format!("a list of {}", describe_type(inner)),
+        LpType::Mat3x3 => "a 3×3 matrix [[a, b, c], [d, e, f], [g, h, i]]".to_string(),
         LpType::I32 | LpType::U32 => "a whole number".to_string(),
         LpType::F32 => "a number".to_string(),
-        LpType::Vec2 | LpType::IVec2 => "[x, y]".to_string(),
-        LpType::Vec3 => "[x, y, z]".to_string(),
-        LpType::Vec4 => "[x, y, z, w]".to_string(),
+        LpType::Vec2 | LpType::IVec2 | LpType::UVec2 => "[x, y]".to_string(),
+        LpType::Vec3 | LpType::IVec3 | LpType::UVec3 => "[x, y, z]".to_string(),
+        LpType::Vec4 | LpType::IVec4 | LpType::UVec4 => "[x, y, z, w]".to_string(),
         LpType::Struct { fields, .. } => format!(
             "an object {{{}}}",
             fields
@@ -249,6 +253,30 @@ fn describe_type(ty: &lpc_model::LpType) -> String {
                 .map(|field| format!("{}: {}", field.name, describe_type(&field.ty)))
                 .collect::<Vec<_>>()
                 .join(", ")
+        ),
+        LpType::Enum { variants, .. } => format!(
+            "one of {}",
+            variants
+                .iter()
+                .map(|variant| match &variant.payload {
+                    Some(LpType::Struct { fields, .. }) => format!(
+                        "{{\"kind\": \"{}\", {}}}",
+                        variant.name,
+                        fields
+                            .iter()
+                            .map(|field| format!("{}: {}", field.name, describe_type(&field.ty)))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ),
+                    Some(other) => format!(
+                        "{{\"kind\": \"{}\", …{}}}",
+                        variant.name,
+                        describe_type(other)
+                    ),
+                    None => format!("\"{}\"", variant.name),
+                })
+                .collect::<Vec<_>>()
+                .join(" | ")
         ),
         other => format!("a {other:?}"),
     }

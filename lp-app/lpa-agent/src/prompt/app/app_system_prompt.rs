@@ -5,8 +5,10 @@
 //! after each tool round. Model-neutral (D13): plain prose, no
 //! provider-specific features.
 
-/// Build the app agent's system prompt.
-pub fn build_app_system_prompt() -> String {
+/// Build the app agent's system prompt: the doctrine, then `reference` —
+/// the project-model reference the host generates from the product's own
+/// model (node shapes, boards, the catalog, a worked example).
+pub fn build_app_system_prompt(reference: &str) -> String {
     let mut p = String::new();
     p.push_str(
         "You are the LightPlayer assistant. LightPlayer runs LED light \
@@ -31,9 +33,19 @@ pub fn build_app_system_prompt() -> String {
          - The current state of the app arrives in an <app_state> block with \
          each message and after each of your tool calls. Trust it over your \
          memory of earlier turns.\n\
+         - After edits, read the `project` section of the result: a node in \
+         `error` or `fault`, or a port with a `problem`, means you are not \
+         done.\n\
+         - An Output error names its endpoint. Do not try another pin to \
+         make it go away — ask the user which pin the strip is on.\n\
+         - Prefer one `edit_project` call with many edits over many calls; \
+         a later edit can name what an earlier one created.\n\
+         - Save a project you built or changed for the user (`save: true` \
+         on your last edit) once its `project` section is clean.\n\
          - When you are done, say what you did in one or two plain \
-         sentences.\n",
+         sentences.\n\n",
     );
+    p.push_str(reference);
     p
 }
 
@@ -43,7 +55,12 @@ mod tests {
 
     #[test]
     fn the_prompt_is_static() {
-        assert_eq!(build_app_system_prompt(), build_app_system_prompt());
-        assert!(build_app_system_prompt().contains("Never guess a board"));
+        assert_eq!(
+            build_app_system_prompt("ref"),
+            build_app_system_prompt("ref")
+        );
+        let prompt = build_app_system_prompt("## Reference");
+        assert!(prompt.contains("Never guess a board"));
+        assert!(prompt.ends_with("## Reference"));
     }
 }

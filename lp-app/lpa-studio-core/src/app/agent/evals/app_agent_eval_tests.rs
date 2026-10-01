@@ -7,8 +7,8 @@ use serde_json::Value;
 use lpa_agent::{StopReason, TokenUsage, TurnEvent};
 
 use super::app_agent_checks::{
-    D6_ENDPOINT, XIAO_C6_BOARD_ID, asked_about, minimal_strip_diff, output_on, playlist_cycles,
-    strip_of,
+    D6_ENDPOINT, XIAO_C6_BOARD_ID, all_nodes_ok, asked_about, minimal_strip_diff, output_on,
+    playlist_cycles, strip_of,
 };
 use super::app_agent_eval_driver::{AgentEvalStudio, ModelSource, drive_scenario};
 use super::app_agent_eval_harness::{
@@ -187,6 +187,58 @@ fn the_sean_script_builds_e1_from_blank_through_the_real_tool() {
 }
 
 #[test]
+fn edit_results_carry_the_project_the_engine_reports() {
+    // PD7 + P04: after the edits, the model reads node statuses and where
+    // each port lands. The golden script ends all-ok on /gpio/16; the same
+    // script on D99 shows the Output's error and why the pin is wrong.
+    let scenario = Scenario::load("e1-sean-from-empty").expect("e1");
+    let good = run_scenario(
+        &scenario,
+        &EvalDriver::Scripted(script_turns("sean-250-d6")),
+    );
+    let project = &last_tool_result(&good)["project"];
+    assert_eq!(
+        project["outputs"][0]["ports"][0]["pin"], "/gpio/16",
+        "{project:#}"
+    );
+    assert!(
+        project["nodes"]
+            .as_array()
+            .expect("nodes")
+            .iter()
+            .all(|node| node["status"] == "ok"),
+        "{project:#}"
+    );
+    assert_eq!(project["unsaved"], false, "{project:#}");
+
+    let broken = script_turns_with("sean-250-d6", |script| {
+        script.replace("ws281x:local:D6", "ws281x:local:D99")
+    });
+    let bad = run_scenario(&scenario, &EvalDriver::Scripted(broken));
+    let project = &last_tool_result(&bad)["project"];
+    let output = project["nodes"]
+        .as_array()
+        .expect("nodes")
+        .iter()
+        .find(|node| node["kind"] == "Output")
+        .expect("an Output row");
+    assert_eq!(output["status"], "error", "{project:#}");
+    assert!(
+        output["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("is not an output pin on this board")),
+        "{project:#}"
+    );
+    let problem = project["outputs"][0]["ports"][0]["problem"]
+        .as_str()
+        .expect("a port problem");
+    assert!(
+        problem.contains("D99 is not an LED output on seeed/xiao-esp32-c6"),
+        "{problem}"
+    );
+}
+
+#[test]
 fn the_make_it_300_script_passes_e2_through_the_real_tool() {
     let scenario = Scenario::load("e2-make-it-300").expect("e2");
     let outcome = run_scenario(
@@ -297,6 +349,29 @@ fn an_agent_that_only_talks_fails_every_project_check() {
     assert_eq!(outcome.turns, 1);
 }
 
+#[test]
+fn a_dead_output_endpoint_is_the_output_nodes_status() {
+    // PD7: a pin the board does not have used to leave the Output reading
+    // Running while nothing reached the wire. Now the node says so, and
+    // `all_nodes_ok` fails with the port, the spec and why.
+    // Text, not a JSON round trip: the def reader wants `kind` first.
+    let mut dead = golden_tree("sean-250-d6");
+    let output = dead
+        .text("output.json")
+        .expect("output.json")
+        .replace("ws281x:local:D6", "ws281x:local:D99");
+    dead.files
+        .insert("output.json".to_string(), output.into_bytes());
+    let mut studio = EvalStudio::with_project(&dead);
+    studio.settle(6);
+    let statuses = studio.node_statuses();
+    let reason = all_nodes_ok(&statuses).expect_err("D99 is not a XIAO C6 pin");
+    assert!(
+        reason.contains("port 0: ws281x:local:D99 is not an output pin on this board"),
+        "{reason}"
+    );
+}
+
 /// The live leg (`just app-agent-eval`): every selected scenario, against a
 /// real OpenRouter model, written under `target/app-agent-evals/<run>/`.
 /// A measurement, not a gate: failures are reported, not asserted.
@@ -357,11 +432,21 @@ fn app_agent_eval_live() {
 /// One scenario send whose model calls `edit_project` with the committed
 /// script `scripts/<name>.json`, then says it is done.
 fn script_turns(name: &str) -> Vec<Vec<Vec<TurnEvent>>> {
+    script_turns_with(name, |script| script)
+}
+
+/// [`script_turns`], with the script's text changed first.
+fn script_turns_with(
+    name: &str,
+    change: impl FnOnce(String) -> String,
+) -> Vec<Vec<Vec<TurnEvent>>> {
     let path = super::app_agent_scenario::fixtures_dir()
         .join("scripts")
         .join(format!("{name}.json"));
-    let input = std::fs::read_to_string(&path)
-        .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+    let input = change(
+        std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("{}: {error}", path.display())),
+    );
     vec![vec![
         vec![
             TurnEvent::ToolUseStart {
@@ -379,6 +464,20 @@ fn script_turns(name: &str) -> Vec<Vec<Vec<TurnEvent>>> {
             turn_done(StopReason::EndTurn),
         ],
     ]]
+}
+
+/// The run's last tool result, parsed.
+fn last_tool_result(outcome: &super::app_agent_eval_harness::EvalOutcome) -> serde_json::Value {
+    outcome
+        .transcript
+        .steps
+        .iter()
+        .rev()
+        .find_map(|step| match step {
+            EvalStep::ToolResult { content, .. } => serde_json::from_str(content).ok(),
+            _ => None,
+        })
+        .expect("a tool result")
 }
 
 /// Every tool result the run produced, for failure messages.

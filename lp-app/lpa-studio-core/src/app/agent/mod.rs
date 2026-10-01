@@ -19,6 +19,7 @@ pub mod agent_provider_config;
 pub mod agent_session_key;
 pub mod agent_transcript_mirror;
 pub mod app_agent_host_bridge;
+pub mod app_agent_reference;
 pub mod app_agent_session;
 /// App-agent evals, stage A (test-only).
 #[cfg(test)]
