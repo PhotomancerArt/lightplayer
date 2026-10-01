@@ -65,6 +65,10 @@ pub enum AgentOp {
         seq: u64,
         declaration: lpa_agent::SpaceDeclaration,
     },
+    /// Send one user message to the app-level chat (one per page).
+    AppSend { text: String },
+    /// Flip the app chat's abort flag (its Stop button).
+    AppStop,
 }
 
 impl ControllerOp for AgentOp {
@@ -99,6 +103,16 @@ impl ControllerOp for AgentOp {
                 "Declare space",
                 "Stage the agent's dimensionality declaration as a pending edit.",
                 ActionPriority::Primary,
+            ),
+            Self::AppSend { .. } => ActionMeta::new(
+                "Send",
+                "Send a message to the LightPlayer assistant.",
+                ActionPriority::Primary,
+            ),
+            Self::AppStop => ActionMeta::new(
+                "Stop",
+                "Stop the assistant's running turn.",
+                ActionPriority::Secondary,
             ),
         }
     }

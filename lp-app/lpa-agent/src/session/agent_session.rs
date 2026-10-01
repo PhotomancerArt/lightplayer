@@ -1,8 +1,9 @@
 //! [`AgentSession`]: the agentic loop.
 //!
 //! Drives one user message to completion: model turn → execute tool calls
-//! via the injected [`AgentHost`] → append results → repeat until
-//! `end_turn`, the turn limit, or abort. Runtime-neutral async: no spawning,
+//! via the injected [`Toolset`] → append results → repeat until
+//! `end_turn`, the turn limit, or abort. The shader agent runs on
+//! [`ShaderToolset`] over an [`AgentHost`]; the app agent brings its own. Runtime-neutral async: no spawning,
 //! no sleeps — whoever awaits `run` drives everything (Studio wasm main
 //! thread, `block_on` in tests/evals).
 
@@ -10,23 +11,15 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use futures_util::StreamExt;
-use lps_probe::CompiledShader;
 use serde_json::json;
 
-use crate::prompt::system_prompt::build_system_prompt;
 use crate::provider::model_provider::{
     ContentBlock, ModelProvider, StopReason, TurnEvent, TurnRequest,
 };
 use crate::session::agent_event::AgentEvent;
 use crate::session::agent_transcript::AgentTranscript;
-use crate::tool::declare_space_tool::{
-    DECLARE_SPACE_TOOL_NAME, declare_space_tool_def, run_declare_space,
-};
 use crate::tool::iterate_host::AgentHost;
-use crate::tool::iterate_tool::{ITERATE_TOOL_NAME, IterateOutcome, iterate_tool_def, run_iterate};
-use crate::tool::upsert_param_tool::{
-    UPSERT_PARAM_TOOL_NAME, run_upsert_param, upsert_param_tool_def,
-};
+use crate::toolset::{ShaderToolset, Toolset, wrap_turn_state};
 
 /// Model turns (API calls) allowed per user message.
 pub const MAX_TURNS_PER_RUN: u32 = 16;
@@ -38,28 +31,41 @@ pub enum AgentError {
     Provider { message: String },
 }
 
-/// One agent conversation over one shader.
-pub struct AgentSession<P: ModelProvider, H: AgentHost> {
+/// One agent conversation over one toolset.
+pub struct AgentSession<P: ModelProvider, T: Toolset> {
     provider: P,
-    host: H,
+    toolset: T,
     transcript: AgentTranscript,
     /// Model turns allowed per `run` call.
     pub max_turns: u32,
     abort: Arc<AtomicBool>,
-    /// Last successfully compiled shader (the `iterate` diff cache).
-    prev_compiled: Option<CompiledShader>,
 }
 
-impl<P: ModelProvider, H: AgentHost> AgentSession<P, H> {
+impl<P: ModelProvider, H: AgentHost> AgentSession<P, ShaderToolset<H>> {
+    /// A shader-agent session over `host`.
     pub fn new(provider: P, host: H) -> Self {
+        Self::with_toolset(provider, ShaderToolset::new(host))
+    }
+}
+
+impl<P: ModelProvider, T: Toolset> AgentSession<P, T> {
+    /// A session over any toolset.
+    pub fn with_toolset(provider: P, toolset: T) -> Self {
         Self {
             provider,
-            host,
+            toolset,
             transcript: AgentTranscript::default(),
             max_turns: MAX_TURNS_PER_RUN,
             abort: Arc::new(AtomicBool::new(false)),
-            prev_compiled: None,
         }
+    }
+
+    pub fn toolset(&self) -> &T {
+        &self.toolset
+    }
+
+    pub fn toolset_mut(&mut self) -> &mut T {
+        &mut self.toolset
     }
 
     /// Shared flag the UI's Stop button flips; checked between events and
@@ -85,7 +91,17 @@ impl<P: ModelProvider, H: AgentHost> AgentSession<P, H> {
         mut on_event: impl FnMut(AgentEvent),
     ) -> Result<(), AgentError> {
         self.abort.store(false, Ordering::Relaxed);
-        self.transcript.push_user_text(user_msg);
+        match self.toolset.turn_state() {
+            // The state block rides the user's own message (PD3), so the
+            // transcript records exactly what the model was sent.
+            Some(state) => self.transcript.push_user_blocks(vec![
+                ContentBlock::Text { text: user_msg },
+                ContentBlock::Text {
+                    text: wrap_turn_state(&state),
+                },
+            ]),
+            None => self.transcript.push_user_text(user_msg),
+        }
 
         for _turn in 0..self.max_turns {
             let step = self.run_one_turn(&mut on_event).await?;
@@ -129,17 +145,10 @@ impl<P: ModelProvider, H: AgentHost> AgentSession<P, H> {
         &mut self,
         on_event: &mut impl FnMut(AgentEvent),
     ) -> Result<TurnStep, AgentError> {
-        // Rebuilt every turn: staged edits change the current source.
-        let current_source = self.host.current_source().unwrap_or_default();
-        let system = build_system_prompt(&self.host.shader_context(), &current_source);
         let req = TurnRequest {
-            system,
+            system: self.toolset.system_prompt(),
             messages: self.transcript.messages.clone(),
-            tools: vec![
-                iterate_tool_def(),
-                upsert_param_tool_def(),
-                declare_space_tool_def(),
-            ],
+            tools: self.toolset.tool_defs(),
         };
 
         let mut blocks: Vec<Acc> = Vec::new();
@@ -322,45 +331,16 @@ impl<P: ModelProvider, H: AgentHost> AgentSession<P, H> {
                 id: id.clone(),
                 note: input["note"].as_str().map(str::to_string),
             });
-            let outcome = if name == ITERATE_TOOL_NAME {
-                let progress_id = id.clone();
-                run_iterate(
-                    &input,
-                    &mut self.host,
-                    &mut self.prev_compiled,
-                    &mut |phase| {
-                        on_event(AgentEvent::ToolProgress {
-                            id: progress_id.clone(),
-                            phase,
-                        });
-                    },
-                )
-                .await
-            } else if name == UPSERT_PARAM_TOOL_NAME {
-                let progress_id = id.clone();
-                run_upsert_param(&input, &mut self.host, &mut |phase| {
+            let progress_id = id.clone();
+            let outcome = self
+                .toolset
+                .run_tool(&name, &input, &mut |phase| {
                     on_event(AgentEvent::ToolProgress {
                         id: progress_id.clone(),
                         phase,
                     });
                 })
-                .await
-            } else if name == DECLARE_SPACE_TOOL_NAME {
-                let progress_id = id.clone();
-                run_declare_space(&input, &mut self.host, &mut |phase| {
-                    on_event(AgentEvent::ToolProgress {
-                        id: progress_id.clone(),
-                        phase,
-                    });
-                })
-                .await
-            } else {
-                IterateOutcome {
-                    content: json!({ "error": format!("unknown tool {name:?}") }).to_string(),
-                    is_error: true,
-                    summary: json!({ "error": "unknown tool" }),
-                }
-            };
+                .await;
             on_event(AgentEvent::ToolExecuted {
                 id: id.clone(),
                 name,
@@ -370,6 +350,13 @@ impl<P: ModelProvider, H: AgentHost> AgentSession<P, H> {
                 tool_use_id: id,
                 content: outcome.content,
                 is_error: outcome.is_error.then_some(true),
+            });
+        }
+        // The refreshed state rides after the results (PD3): the model's
+        // next turn sees what its calls changed.
+        if let Some(state) = self.toolset.turn_state() {
+            results.push(ContentBlock::Text {
+                text: wrap_turn_state(&state),
             });
         }
         self.transcript.push_tool_results(results);
@@ -556,7 +543,10 @@ mod tests {
         block_on(session.run("make it green".into(), |e| events.push(e))).expect("run");
 
         // The host saw the staged edit.
-        assert_eq!(session.host.staged.borrow().as_slice(), [GREEN.to_string()]);
+        assert_eq!(
+            session.toolset().host().staged.borrow().as_slice(),
+            [GREEN.to_string()]
+        );
         // The accumulated input surfaced its note (pre-execution), then the
         // live phases, then the executed summary — in that order.
         let ready_at = events
@@ -1056,6 +1046,66 @@ mod tests {
             }
             other => panic!("unexpected: {other:?}"),
         }
+    }
+
+    #[test]
+    fn app_state_rides_the_user_turn_and_each_tool_round_with_a_stable_system_prompt() {
+        use crate::tool::app::{AppAgentHost, AppToolset};
+
+        struct CountingHost(u32);
+        impl AppAgentHost for CountingHost {
+            fn readout(&mut self) -> String {
+                self.0 += 1;
+                format!("readout #{}", self.0)
+            }
+        }
+
+        let provider = FakeProvider::new(vec![
+            vec![
+                TurnEvent::ToolUseStart {
+                    id: "tu_1".into(),
+                    name: "edit_project".into(),
+                },
+                turn_done(StopReason::ToolUse, 1, 1),
+            ],
+            vec![
+                TurnEvent::TextDelta("Done.".into()),
+                turn_done(StopReason::EndTurn, 1, 1),
+            ],
+        ]);
+        let mut session = AgentSession::with_toolset(&provider, AppToolset::new(CountingHost(0)));
+        block_on(session.run("set up my leds".into(), |_| {})).expect("run");
+
+        let reqs = provider.requests.borrow();
+        assert_eq!(reqs.len(), 2);
+        // The system prompt is byte-identical across turns (PD3).
+        assert_eq!(reqs[0].system, reqs[1].system);
+        assert!(!reqs[0].system.contains("readout"));
+        // Turn 1: the user's text, then the fenced state block.
+        assert_eq!(
+            reqs[0].messages[0].content,
+            vec![
+                ContentBlock::Text {
+                    text: "set up my leds".into()
+                },
+                ContentBlock::Text {
+                    text: "<app_state>\nreadout #1\n</app_state>".into()
+                },
+            ]
+        );
+        // After the tool round: the result, then the refreshed state.
+        let round = &reqs[1].messages[2].content;
+        assert!(
+            matches!(&round[0], ContentBlock::ToolResult { tool_use_id, .. } if tool_use_id == "tu_1")
+        );
+        assert_eq!(
+            round[1],
+            ContentBlock::Text {
+                text: "<app_state>\nreadout #2\n</app_state>".into()
+            }
+        );
+        // The recorded transcript is what was sent.
+        assert_eq!(session.transcript().messages[0], reqs[0].messages[0]);
     }
 
     // -- helpers ----------------------------------------------------------

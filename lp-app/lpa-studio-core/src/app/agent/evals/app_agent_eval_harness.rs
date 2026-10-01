@@ -11,7 +11,10 @@
 //! A run is driven by an [`EvalDriver`]:
 //! - [`EvalDriver::Golden`] — the committed project tree, no model (proves
 //!   the checks pass on known-good projects);
-//! - the model drivers arrive with the app session (plan P02).
+//! - [`EvalDriver::Live`] — a real OpenRouter model through the real app
+//!   chat (`just app-agent-eval`; never CI);
+//! - [`EvalDriver::Scripted`] — the real app chat over canned model turns
+//!   (the deterministic leg of the agent path).
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
@@ -25,7 +28,12 @@ use lpc_model::AsLpPath;
 use lpc_shared::output::MemoryOutputProvider;
 use lpfs::LpFsMemory;
 
+use lpa_agent::{TokenUsage, TurnEvent};
+
 use super::app_agent_checks::{CheckInput, CheckResult, NodeStatusRow, run_checks};
+use super::app_agent_eval_driver::{
+    AgentEvalStudio, DrivenRun, ModelSource, drive_scenario, openrouter_key_from_env,
+};
 use super::app_agent_project_tree::ProjectTree;
 use super::app_agent_scenario::{Scenario, ScenarioStart, fixtures_dir};
 use super::app_agent_transcript::EvalTranscript;
@@ -45,12 +53,18 @@ const EVAL_PROJECT_DIR: &str = "/projects/app-agent-eval";
 pub(crate) enum EvalDriver {
     /// A committed project tree (`golden/<name>/`), loaded as-is.
     Golden(String),
+    /// A real OpenRouter model (slug), keyed from the environment.
+    Live { model: String },
+    /// Canned model turns, one script per message the scenario sends.
+    Scripted(Vec<Vec<Vec<TurnEvent>>>),
 }
 
 impl EvalDriver {
     pub(crate) fn label(&self) -> String {
         match self {
             Self::Golden(name) => format!("golden:{name}"),
+            Self::Live { model } => format!("openrouter:{model}"),
+            Self::Scripted(_) => "scripted".to_string(),
         }
     }
 }
@@ -65,6 +79,10 @@ pub(crate) struct EvalOutcome {
     pub(crate) unsaved: bool,
     pub(crate) transcript: EvalTranscript,
     pub(crate) checks: Vec<CheckResult>,
+    /// Model usage across the scenario (zero for a golden).
+    pub(crate) usage: TokenUsage,
+    /// Model turns across the scenario.
+    pub(crate) turns: u32,
 }
 
 impl EvalOutcome {
@@ -87,13 +105,46 @@ impl EvalOutcome {
 /// golden (it had no conversation).
 pub(crate) fn run_scenario(scenario: &Scenario, driver: &EvalDriver) -> EvalOutcome {
     let start = start_tree(&scenario.start);
-    let (project, transcript) = match driver {
-        EvalDriver::Golden(name) => (golden_tree(name), EvalTranscript::default()),
+    let (project, transcript, statuses, unsaved, usage, turns) = match driver {
+        EvalDriver::Golden(name) => {
+            let project = golden_tree(name);
+            let mut studio = EvalStudio::with_project(&project);
+            studio.settle(6);
+            let statuses = studio.node_statuses();
+            let unsaved = studio.unsaved();
+            (
+                project,
+                EvalTranscript::default(),
+                statuses,
+                unsaved,
+                TokenUsage::default(),
+                0,
+            )
+        }
+        EvalDriver::Live { model } => {
+            let api_key = openrouter_key_from_env().expect(
+                "the live leg needs OPENROUTER_API_KEY or ~/.lightplayer/settings.json \
+                 agent.openrouter_api_key",
+            );
+            // reqwest needs a reactor; worker threads drive its IO while
+            // this thread polls the run (tests are edges).
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(2)
+                .enable_all()
+                .build()
+                .expect("a tokio runtime");
+            let _guard = runtime.enter();
+            let mut studio = AgentEvalStudio::new(ModelSource::Live {
+                model: model.clone(),
+                api_key,
+            });
+            driven(drive_scenario(&mut studio, scenario, golden_tree))
+        }
+        EvalDriver::Scripted(scripts) => {
+            let mut studio = AgentEvalStudio::new(ModelSource::Scripted(scripts.clone()));
+            driven(drive_scenario(&mut studio, scenario, golden_tree))
+        }
     };
-    let mut studio = EvalStudio::with_project(&project);
-    studio.settle(6);
-    let statuses = studio.node_statuses();
-    let unsaved = studio.unsaved();
 
     let mut judged = scenario.clone();
     if matches!(driver, EvalDriver::Golden(_)) {
@@ -116,13 +167,39 @@ pub(crate) fn run_scenario(scenario: &Scenario, driver: &EvalDriver) -> EvalOutc
         unsaved,
         transcript,
         checks,
+        usage,
+        turns,
     }
 }
 
-/// Write `outcome` under `run_dir/<scenario>/`: the project tree,
+type DrivenParts = (
+    ProjectTree,
+    EvalTranscript,
+    Vec<NodeStatusRow>,
+    bool,
+    TokenUsage,
+    u32,
+);
+
+fn driven(run: DrivenRun) -> DrivenParts {
+    (
+        run.project,
+        run.transcript,
+        run.statuses,
+        run.unsaved,
+        run.usage,
+        run.turns,
+    )
+}
+
+/// Write `outcome` under `run_dir/<dir_name>/`: the project tree,
 /// `transcript.json` and `report.json`. Never writes provider settings.
-pub(crate) fn write_outcome(run_dir: &Path, outcome: &EvalOutcome) -> std::io::Result<PathBuf> {
-    let dir = run_dir.join(&outcome.scenario.name);
+pub(crate) fn write_outcome(
+    run_dir: &Path,
+    dir_name: &str,
+    outcome: &EvalOutcome,
+) -> std::io::Result<PathBuf> {
+    let dir = run_dir.join(dir_name);
     let project_dir = dir.join("project");
     if project_dir.exists() {
         std::fs::remove_dir_all(&project_dir)?;
@@ -145,6 +222,12 @@ pub(crate) fn write_outcome(run_dir: &Path, outcome: &EvalOutcome) -> std::io::R
         "checks": outcome.checks,
         "statuses": outcome.statuses,
         "unsaved": outcome.unsaved,
+        "turns": outcome.turns,
+        "tokens_in": outcome.usage.input_tokens
+            + outcome.usage.cache_read_tokens
+            + outcome.usage.cache_write_tokens,
+        "tokens_out": outcome.usage.output_tokens,
+        "cost_usd": outcome.usage.reported_cost_usd(),
     });
     std::fs::write(
         dir.join("report.json"),
@@ -174,9 +257,9 @@ fn start_tree(start: &ScenarioStart) -> Option<ProjectTree> {
 }
 
 /// The eval actor's timer: instant (the harness drives batches itself).
-type NoTimer = fn(core::time::Duration) -> core::future::Ready<()>;
+pub(crate) type NoTimer = fn(core::time::Duration) -> core::future::Ready<()>;
 
-fn no_timer(_: core::time::Duration) -> core::future::Ready<()> {
+pub(crate) fn no_timer(_: core::time::Duration) -> core::future::Ready<()> {
     core::future::ready(())
 }
 
@@ -253,7 +336,7 @@ impl EvalStudio {
     }
 }
 
-fn collect_statuses(nodes: &[NodeController], rows: &mut Vec<NodeStatusRow>) {
+pub(crate) fn collect_statuses(nodes: &[NodeController], rows: &mut Vec<NodeStatusRow>) {
     for node in nodes {
         let status = node.status();
         rows.push(NodeStatusRow {

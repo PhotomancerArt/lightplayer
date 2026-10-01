@@ -8,6 +8,7 @@
 //! `tests/fixtures/app_agent/README.md`.
 
 pub(crate) mod app_agent_checks;
+pub(crate) mod app_agent_eval_driver;
 pub(crate) mod app_agent_eval_harness;
 pub(crate) mod app_agent_project_tree;
 pub(crate) mod app_agent_scenario;

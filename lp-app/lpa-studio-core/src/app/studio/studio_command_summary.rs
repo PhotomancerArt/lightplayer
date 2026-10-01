@@ -32,7 +32,9 @@ pub fn summarize_command(command: &StudioCommand) -> Option<(String, String)> {
     let summary = match command {
         StudioCommand::RefreshTick => return None,
         StudioCommand::Device(lpa_devices::Input::Event(_)) => return None,
-        StudioCommand::Agent(AgentFeedback::Event { .. }) => return None,
+        StudioCommand::Agent(AgentFeedback::Event { .. } | AgentFeedback::AppEvent { .. }) => {
+            return None;
+        }
         StudioCommand::Action(action) => (
             format!("Action/{}", action_name(action)),
             bounded_debug(action_op_debug(action)),

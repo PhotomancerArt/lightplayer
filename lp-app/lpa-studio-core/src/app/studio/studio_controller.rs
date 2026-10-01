@@ -2088,7 +2088,8 @@ impl StudioController {
                 .with_access(
                     self.login_prompt_view(),
                     self.access.access_added().cloned(),
-                );
+                )
+                .with_app_agent(self.agent.app_view(&self.agent_view_context()));
         }
         // gallery-always (D24): home covers every no-project state, so the
         // pane layout exists only for an open project
@@ -2145,6 +2146,7 @@ impl StudioController {
             .with_lens_access_line(self.lens_access_line())
             .with_lens_reconnecting(self.lens_reconnecting_view())
             .with_dirty(dirty)
+            .with_app_agent(self.agent.app_view(&self.agent_view_context()))
     }
 
     /// The LENS session's docked card (D43): the device the editor is open
@@ -2341,6 +2343,7 @@ impl StudioController {
         // a shared cell the spawned run polls, so it must happen whether or
         // not the change gate emits a snapshot this batch.
         self.refresh_agent_engine_status();
+        self.agent.refresh_app_readout(self.app_agent_readout());
         let revision = self.current_revision();
         let advanced = revision != self.applied_revision;
         if !self.dirty && !advanced {
@@ -5793,7 +5796,48 @@ impl StudioController {
                 seq,
                 declaration,
             } => self.agent_declare_space(artifact, seq, declaration).await,
+            crate::AgentOp::AppSend { text } => self.app_agent_send(text),
+            crate::AgentOp::AppStop => {
+                self.agent.request_app_stop();
+                Ok(UiNotices::new())
+            }
         }
+    }
+
+    /// Start one app-chat run. Unlike the shader chat it needs no open
+    /// project: the app agent builds one from nothing.
+    fn app_agent_send(&mut self, text: String) -> UiResult {
+        let Some(config) = self.settings.agent_provider_config() else {
+            return Err(UiError::UnsupportedFeature(
+                "the assistant isn't set up yet — configure a provider in Settings (the gear icon)"
+                    .to_string(),
+            ));
+        };
+        let Some(provider) = self.agent.build_provider(&config) else {
+            return Err(UiError::UnsupportedFeature(
+                "the agent provider is not installed in this build".to_string(),
+            ));
+        };
+        // The readout must be current before the first turn reads it.
+        self.agent.refresh_app_readout(self.app_agent_readout());
+        self.agent
+            .start_app_run(text, provider)
+            .map_err(UiError::UnsupportedFeature)?;
+        self.mark_dirty();
+        Ok(UiNotices::new())
+    }
+
+    /// The app agent's view of the app (PD3's per-turn state). A
+    /// placeholder until the focused readout (plan P06): which page is
+    /// up, and the open project's name.
+    fn app_agent_readout(&self) -> String {
+        if self.home_view().is_some() {
+            return "page: home (no project open)".to_string();
+        }
+        format!(
+            "page: project editor\nproject: {}",
+            self.project.agent_project_name()
+        )
     }
 
     /// Execute one history revert: pull the recorded source, restage it
@@ -6640,6 +6684,13 @@ impl StudioController {
             .expect("just-installed session")
             .set_client_for_test(client);
         id
+    }
+
+    /// The agent sub-controller (app-agent evals set context notes and
+    /// read the parked transcript).
+    #[cfg(test)]
+    pub(crate) fn agent_for_test(&mut self) -> &mut crate::AgentController {
+        &mut self.agent
     }
 
     /// The runtime pool, for e2e assertions about session coexistence.
