@@ -11,7 +11,8 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use lpa_agent::{
-    AppAgentHost, EditProjectInput, HostError, HostFuture, ProjectEditsOutcome, ReadInput,
+    ActInput, ActOutcome, AppAgentHost, EditProjectInput, HostError, HostFuture,
+    ProjectEditsOutcome, ReadInput,
 };
 
 use crate::app::agent::agent_controller::{AgentController, AgentTimerFactory};
@@ -51,6 +52,8 @@ pub struct AppAgentBridgeState {
     pub edits_ack: Option<(u64, Result<ProjectEditsOutcome, String>)>,
     /// The last `read`'s answer, keyed by the bridge's seq.
     pub read_ack: Option<(u64, Result<serde_json::Value, String>)>,
+    /// The last `act`'s answer, keyed by the bridge's seq.
+    pub act_ack: Option<(u64, Result<ActOutcome, String>)>,
     /// The open project's compact summary and the sync revision it was read
     /// at, refreshed after every batch while a run is in flight.
     pub project: Option<(i64, serde_json::Value)>,
@@ -186,6 +189,39 @@ impl AppAgentHost for AppAgentHostBridge {
                     return Err(HostError::new(
                         "the project edits were not acknowledged in time",
                     ));
+                }
+                (self.timer.borrow_mut())(Duration::from_millis(u64::from(EDITS_POLL_STEP_MS)))
+                    .await;
+                waited_ms += EDITS_POLL_STEP_MS;
+            }
+        })
+    }
+
+    /// One `act`: an `AgentOp::AppAct` on the command queue — the
+    /// controller resolves the id against the readout the agent was shown,
+    /// presses or carded — answered in the shared cell.
+    fn act<'a>(&'a mut self, input: &'a ActInput) -> HostFuture<'a, Result<ActOutcome, HostError>> {
+        Box::pin(async move {
+            self.seq += 1;
+            let seq = self.seq;
+            self.state.borrow_mut().act_ack = None;
+            self.tx.send(StudioCommand::Action(UiAction::from_op(
+                ControllerId::new(AgentController::NODE_ID),
+                AgentOp::AppAct {
+                    seq,
+                    input: input.clone(),
+                },
+            )));
+            let mut waited_ms = 0u32;
+            loop {
+                let ack = self.state.borrow().act_ack.clone();
+                if let Some((ack_seq, result)) = ack
+                    && ack_seq == seq
+                {
+                    return result.map_err(HostError::new);
+                }
+                if waited_ms >= EDITS_ACK_BUDGET_MS {
+                    return Err(HostError::new("the action was not answered in time"));
                 }
                 (self.timer.borrow_mut())(Duration::from_millis(u64::from(EDITS_POLL_STEP_MS)))
                     .await;

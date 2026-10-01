@@ -3,6 +3,7 @@
 
 use serde_json::{Value, json};
 
+use crate::tool::app::act_tool::{ACT_TOOL_NAME, act_tool_def, run_act};
 use crate::tool::app::edit_project_tool::{
     EDIT_PROJECT_TOOL_NAME, edit_project_tool_def, run_edit_project,
 };
@@ -42,7 +43,7 @@ impl<H: AppAgentHost> AppToolset<H> {
 
 impl<H: AppAgentHost> Toolset for AppToolset<H> {
     fn tool_defs(&self) -> Vec<ToolDef> {
-        vec![edit_project_tool_def(), read_tool_def()]
+        vec![edit_project_tool_def(), read_tool_def(), act_tool_def()]
     }
 
     fn system_prompt(&self) -> String {
@@ -70,6 +71,8 @@ impl<H: AppAgentHost> Toolset for AppToolset<H> {
                 run_edit_project(input, &mut self.host).await
             } else if name == READ_TOOL_NAME {
                 run_read(input, &mut self.host).await
+            } else if name == ACT_TOOL_NAME {
+                run_act(input, &mut self.host).await
             } else {
                 ToolOutcome {
                     content: json!({ "error": format!("unknown tool {name:?}") }).to_string(),

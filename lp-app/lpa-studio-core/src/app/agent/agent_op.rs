@@ -83,6 +83,16 @@ pub enum AgentOp {
         seq: u64,
         input: lpa_agent::ReadInput,
     },
+    /// The app agent's `act` (dispatched by its host bridge): press the
+    /// offered action the id names — or, when only the user may press it,
+    /// put it on a card — and record the outcome under `seq`.
+    AppAct {
+        seq: u64,
+        input: lpa_agent::ActInput,
+    },
+    /// The user's No on an app-agent card: mark it dismissed and let the
+    /// assistant hear it.
+    CardDismissed { card: String },
 }
 
 impl ControllerOp for AgentOp {
@@ -131,6 +141,16 @@ impl ControllerOp for AgentOp {
             Self::AppRead { .. } => ActionMeta::new(
                 "Read",
                 "Answer the assistant's read.",
+                ActionPriority::Secondary,
+            ),
+            Self::AppAct { .. } => ActionMeta::new(
+                "Act",
+                "Press the action the assistant named.",
+                ActionPriority::Secondary,
+            ),
+            Self::CardDismissed { .. } => ActionMeta::new(
+                "Dismiss",
+                "Don't do this; tell the assistant.",
                 ActionPriority::Secondary,
             ),
             Self::AppStop => ActionMeta::new(

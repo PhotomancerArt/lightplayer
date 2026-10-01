@@ -240,6 +240,21 @@ impl AgentEvalStudio {
         self.drive_runs(limits);
     }
 
+    /// The app chat's cards, in transcript order.
+    pub(crate) fn cards(&mut self) -> Vec<crate::UiAgentCard> {
+        self.controller()
+            .agent_for_test()
+            .app_session()
+            .mirror
+            .turns
+            .iter()
+            .filter_map(|turn| match turn {
+                UiAgentTurn::Card(card) => Some(card.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
     /// The app chat's last visible assistant text.
     pub(crate) fn last_assistant_text(&mut self) -> String {
         let turns = self

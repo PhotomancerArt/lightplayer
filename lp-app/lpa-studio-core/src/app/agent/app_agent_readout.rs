@@ -56,8 +56,8 @@ impl AppReadoutSnapshot {
                 if let ActionEnablement::Disabled { reason } = &meta.enablement {
                     let _ = write!(text, " [disabled: {reason}]");
                 }
-                if meta.confirmation.is_some() {
-                    text.push_str(" [asks the user to confirm]");
+                if meta.needs_user() {
+                    text.push_str(" [needs the user's click]");
                 }
                 text.push('\n');
             }

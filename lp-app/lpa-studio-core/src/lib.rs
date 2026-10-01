@@ -27,8 +27,9 @@ pub use app::agent::{
     AgentController, AgentCostRates, AgentEditRecord, AgentFeedback, AgentModelsFetchFuture,
     AgentOp, AgentProviderConfig, AgentRunContext, AgentSessionKey, AgentTaskFuture,
     AgentTimerFactory, AgentTimerFuture, AgentViewContext, MAX_EDIT_RECORDS, UiAgentAvailability,
-    UiAgentDebugDump, UiAgentHistoryEntry, UiAgentModelView, UiAgentStatus, UiAgentToolRow,
-    UiAgentTurn, UiAgentUsage, UiAgentView, UiAppAgentView, instant_agent_timer,
+    UiAgentCard, UiAgentCardState, UiAgentDebugDump, UiAgentHistoryEntry, UiAgentModelView,
+    UiAgentStatus, UiAgentToolRow, UiAgentTurn, UiAgentUsage, UiAgentView, UiAppAgentView,
+    instant_agent_timer,
 };
 pub use app::bus::{
     UiBusChannelPreview, UiBusChannelView, UiBusSiteOrigin, UiBusSiteView, UiBusView,
@@ -185,8 +186,8 @@ pub use core::notice::UiNotices;
 pub use core::view::activity_view::UiActivityStep;
 pub use core::view::activity_view::UiActivityStepState;
 pub use core::{
-    ActionClass, ActionConfirmation, ActionEnablement, ActionMeta, ActionPriority, Controller,
-    ControllerContext, ControllerId, ControllerOp, DEVICE_CARD_FEED_CLASS,
+    ActionClass, ActionConfirmation, ActionEnablement, ActionGesture, ActionMeta, ActionPriority,
+    Controller, ControllerContext, ControllerId, ControllerOp, DEVICE_CARD_FEED_CLASS,
     PASSIVE_REFRESH_DEADLINE, PROJECT_ACTION_DEADLINE, PROJECT_EDITOR_ACTION_DEADLINE,
     PROJECT_LOAD_DEADLINE, UiAction, UiActions, UiActivityView, UiMetric, UiPaneAction, UiPaneView,
     UiProgress, UiStatus, UiStudioView, UiTerminalLine, UiViewContent, UxNodePath,

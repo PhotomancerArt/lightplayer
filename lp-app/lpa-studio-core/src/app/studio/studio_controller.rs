@@ -527,6 +527,9 @@ impl StudioController {
     /// the view dirty (the actor applies these synchronously, in order).
     pub fn apply_agent_feedback(&mut self, feedback: crate::AgentFeedback) {
         self.agent.apply_feedback(feedback);
+        // A card settled while the run was still out: the run after it
+        // hears what the user did.
+        self.resume_app_agent();
         self.mark_dirty();
     }
 
@@ -2610,7 +2613,13 @@ impl StudioController {
         updates: UxUpdateSink,
     ) -> UiResult {
         updates.emit(UxUpdate::View(self.view()));
+        // A press of the action an app-agent card carries IS the card's
+        // press, wherever it came from (the card, or the button it names).
+        let card = self.agent.app_session_mut().pending_card_for(&action);
         let result = self.dispatch_inner(action, updates.clone()).await;
+        if let Some(card) = card {
+            self.app_card_pressed(&card, &result);
+        }
         // Release closed projects' locks and re-hydrate the gallery when
         // the action made either due (open/close/save/home ops).
         self.settle_library().await;
@@ -5821,6 +5830,20 @@ impl StudioController {
                 self.agent.request_app_stop();
                 Ok(UiNotices::new())
             }
+            crate::AgentOp::AppAct { seq, input } => {
+                let outcome = self.app_agent_act(input).await;
+                self.agent.record_act_ack(seq, Ok(outcome));
+                self.mark_dirty();
+                Ok(UiNotices::new())
+            }
+            crate::AgentOp::CardDismissed { card } => {
+                self.agent
+                    .app_session_mut()
+                    .settle_card(&card, crate::UiAgentCardState::Dismissed);
+                self.resume_app_agent();
+                self.mark_dirty();
+                Ok(UiNotices::new())
+            }
         }
     }
 
@@ -6002,6 +6025,111 @@ impl StudioController {
     /// Start one app-chat run. Unlike the shader chat it needs no open
     /// project: the app agent builds one from nothing.
     fn app_agent_send(&mut self, text: String) -> UiResult {
+        self.app_agent_start(text, true)
+    }
+
+    /// One app-agent `act`: resolve the id against the readout the agent
+    /// was shown, check the action is still offered and enabled NOW (the
+    /// same enablement the user sees), then press it through the ordinary
+    /// dispatch — or, when only the user may press it, put it on a card
+    /// (D6, PD6). While a card waits, nothing else is pressed.
+    async fn app_agent_act(&mut self, input: lpa_agent::ActInput) -> lpa_agent::ActOutcome {
+        use lpa_agent::ActOutcome;
+        if let Some(card) = self.agent.app_session_mut().pending_card() {
+            return ActOutcome::Refused {
+                reason: format!(
+                    "card {} (\"{}\") is waiting for the user's click; stop and tell them",
+                    card.id, card.title
+                ),
+                offers: None,
+            };
+        }
+        let fresh = self.app_agent_readout();
+        let offers = || Some(fresh.mint().0);
+        let Some(seen) = self.agent.app_minted_action(&input.action) else {
+            return ActOutcome::Refused {
+                reason: format!("no action {:?} in the readout you were shown", input.action),
+                offers: offers(),
+            };
+        };
+        let Some(action) = fresh
+            .actions
+            .iter()
+            .find(|offered| offered.same_op(&seen))
+            .cloned()
+        else {
+            return ActOutcome::Refused {
+                reason: format!("{:?} is not offered any more", seen.meta().label),
+                offers: offers(),
+            };
+        };
+        if let crate::ActionEnablement::Disabled { reason } = &action.meta().enablement {
+            return ActOutcome::Refused {
+                reason: format!("{:?} is disabled: {reason}", action.meta().label),
+                offers: None,
+            };
+        }
+        if action.meta().needs_user() {
+            let card = self.agent.app_session_mut().add_card(action, &input.why);
+            self.mark_dirty();
+            return ActOutcome::NeedsUser {
+                card: card.id,
+                says: card.title,
+            };
+        }
+        match Box::pin(self.dispatch(action)).await {
+            Ok(notices) => ActOutcome::Done {
+                notices: notices
+                    .notices
+                    .into_iter()
+                    .map(|notice| notice.message)
+                    .collect(),
+            },
+            Err(error) => ActOutcome::Refused {
+                reason: error.to_string(),
+                offers: None,
+            },
+        }
+    }
+
+    /// The user pressed what card `card` carries: settle it with what the
+    /// press came to, and let the assistant hear it.
+    fn app_card_pressed(&mut self, card: &str, result: &UiResult) {
+        let state = match result {
+            Ok(notices) => crate::UiAgentCardState::Done {
+                outcome: notices
+                    .notices
+                    .iter()
+                    .map(|notice| notice.message.as_str())
+                    .collect::<Vec<_>>()
+                    .join("; "),
+            },
+            Err(error) => crate::UiAgentCardState::Failed {
+                error: error.to_string(),
+            },
+        };
+        self.agent.app_session_mut().settle_card(card, state);
+        self.resume_app_agent();
+    }
+
+    /// Start the run a settled card owes the assistant, once no run is out.
+    fn resume_app_agent(&mut self) {
+        if self.agent.app_running() {
+            return;
+        }
+        let resume = std::mem::take(&mut self.agent.app_session_mut().resume);
+        if resume.is_empty() {
+            return;
+        }
+        if let Err(error) = self.app_agent_start(resume.join("\n"), false) {
+            self.agent
+                .app_session_mut()
+                .mirror
+                .push_notice(format!("The assistant could not continue: {error}"));
+        }
+    }
+
+    fn app_agent_start(&mut self, text: String, shown: bool) -> UiResult {
         let Some(config) = self.settings.app_agent_provider_config() else {
             return Err(UiError::UnsupportedFeature(
                 "the assistant isn't set up yet — configure a provider in Settings (the gear icon)"
@@ -6016,7 +6144,7 @@ impl StudioController {
         // The readout must be current before the first turn reads it.
         self.agent.refresh_app_readout(self.app_agent_readout());
         self.agent
-            .start_app_run(text, provider)
+            .start_app_run(text, provider, shown)
             .map_err(UiError::UnsupportedFeature)?;
         self.mark_dirty();
         Ok(UiNotices::new())
@@ -6059,7 +6187,19 @@ impl StudioController {
                 }
             }
         }
-        text.push_str(&device_lines(&self.device_roster_view()));
+        let roster = self.device_roster_view();
+        text.push_str(&device_lines(&roster));
+        // The add-device slot's USB path, named for what it does (the
+        // slot's heading says "Connect a board"; the button alone reads
+        // "via USB"). It needs the user's click (the browser's picker).
+        // Bluetooth stays out: whether this browser has it is asked by the
+        // web layer (`use_ble_reach`), not known here.
+        if roster.usb_available {
+            actions.push(
+                crate::DevicesOp::action_for(lpa_devices::Action::AddFromUsb)
+                    .with_label("Connect a board via USB"),
+            );
+        }
         AppReadoutSnapshot { text, actions }
     }
 
