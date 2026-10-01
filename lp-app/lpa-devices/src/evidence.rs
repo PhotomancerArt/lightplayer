@@ -47,10 +47,23 @@ const LEGACY_FRAME_LINE_PREFIX: &str = "M!{";
 /// The field of the boot marker (`[INIT] fw-esp32 initialized, starting
 /// server loop... proto=29 commit=… dirty=…`) that names its wire proto.
 const BOOT_MARKER_PROTO_FIELD: &str = "proto=";
-const KNOWN_FOREIGN_BOOT_STRINGS: &[(&str, &str)] = &[(
-    "hello from seeed studio xiao esp32-c6",
-    "Seeed XIAO factory firmware",
-)];
+/// Foreign firmware recognized by a substring of a lowercased line.
+const KNOWN_FOREIGN_BOOT_STRINGS: &[(&str, &str)] = &[
+    (
+        "hello from seeed studio xiao esp32-c6",
+        "Seeed XIAO factory firmware",
+    ),
+    // WLED built with `WLED_DEBUG`: `setup()` prints
+    // `---WLED <version> <build> INIT---` (wled00/wled.cpp, WLED 35948831c).
+    ("---wled ", "WLED"),
+];
+/// Foreign firmware recognized by a whole line, exactly (after trimming).
+///
+/// A release WLED build prints nothing of its own at boot except the
+/// Adalight handshake `Ada` (wled00/wled.cpp `setup()`, WLED 35948831c),
+/// once, when the serial pins are free. An Adalight sketch says the same
+/// word, and is just as much LED firmware a flash replaces.
+const KNOWN_FOREIGN_BOOT_LINES: &[(&str, &str)] = &[("Ada", "WLED")];
 const RECENT_LINE_LIMIT: usize = 80;
 
 /// How many lines the card's terminal panel keeps.
@@ -919,6 +932,11 @@ impl Observations {
             self.foreign_label = KNOWN_FOREIGN_BOOT_STRINGS
                 .iter()
                 .find(|(signature, _)| normalized.contains(signature))
+                .or_else(|| {
+                    KNOWN_FOREIGN_BOOT_LINES
+                        .iter()
+                        .find(|(whole_line, _)| line.trim() == *whole_line)
+                })
                 .map(|(_, label)| (*label).to_string());
         }
         if normalized.contains(SERVER_STARTED_SIGNATURE) {
@@ -1733,6 +1751,82 @@ mod tests {
         current.fold(Millis(0), &opened(), &mut identity, &config);
         current.fold(Millis(10), &line(MARKER_32), &mut identity, &config);
         assert_eq!(current.classification, Classification::Unknown);
+    }
+
+    /// A release WLED build on a classic ESP32: the ROM's reset chatter, then
+    /// the one line WLED itself prints, the Adalight handshake `Ada`. The
+    /// card names it, so it can offer to replace WLED.
+    #[test]
+    fn a_release_wled_boot_is_foreign_firmware_labelled_wled() {
+        const WLED_BOOT: &[&str] = &[
+            "ets Jul 29 2019 12:21:46",
+            "",
+            "rst:0x1 (POWERON_RESET),boot:0x13 (SPI_FAST_FLASH_BOOT)",
+            "configsip: 0, SPIWP:0xee",
+            "clk_drv:0x00,q_drv:0x00,d_drv:0x00,cs0_drv:0x00,hd_drv:0x00,wp_drv:0x00",
+            "mode:DIO, clock div:1",
+            "load:0x3fff0030,len:1184",
+            "load:0x40078000,len:13232",
+            "load:0x40080400,len:3028",
+            "entry 0x400805e4",
+            "Ada\r",
+        ];
+        let config = studio_config();
+        let mut evidence = Evidence::default();
+        let mut identity = IdentityChain::default();
+        evidence.fold(Millis(0), &opened(), &mut identity, &config);
+        for (at, text) in WLED_BOOT.iter().enumerate() {
+            evidence.fold(Millis(10 * at as u64), &line(text), &mut identity, &config);
+        }
+
+        let wled = Classification::Foreign {
+            label: Some("WLED".to_string()),
+        };
+        assert_eq!(evidence.classification, wled);
+        assert_eq!(evidence.verdict_if_settled(Millis(5_000)), wled);
+    }
+
+    /// A `WLED_DEBUG` build says its name outright.
+    #[test]
+    fn a_debug_wled_banner_is_foreign_firmware_labelled_wled() {
+        let config = studio_config();
+        let mut evidence = Evidence::default();
+        let mut identity = IdentityChain::default();
+        evidence.fold(Millis(0), &opened(), &mut identity, &config);
+        evidence.fold(
+            Millis(10),
+            &line("---WLED 0.15.0 2412100 INIT---"),
+            &mut identity,
+            &config,
+        );
+
+        assert_eq!(
+            evidence.classification,
+            Classification::Foreign {
+                label: Some("WLED".to_string())
+            }
+        );
+    }
+
+    /// `Ada` names WLED only as the whole line: a line that merely contains
+    /// the word is someone else's firmware, unnamed.
+    #[test]
+    fn ada_inside_a_longer_line_does_not_name_wled() {
+        let config = studio_config();
+        let mut evidence = Evidence::default();
+        let mut identity = IdentityChain::default();
+        evidence.fold(Millis(0), &opened(), &mut identity, &config);
+        evidence.fold(
+            Millis(10),
+            &line("Ada fruit NeoPixel strand test"),
+            &mut identity,
+            &config,
+        );
+
+        assert_eq!(
+            evidence.verdict_if_settled(Millis(5_000)),
+            Classification::Foreign { label: None }
+        );
     }
 
     /// Studio's own roster config: this build's wire proto (32, the classic's
