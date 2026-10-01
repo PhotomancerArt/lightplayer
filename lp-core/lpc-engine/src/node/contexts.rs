@@ -4,7 +4,6 @@
 //! [`QueryKey`] (not the legacy slot resolver cache).
 
 use alloc::rc::Rc;
-use alloc::string::String;
 use alloc::sync::Arc;
 
 use crate::dataflow::resolver::{
@@ -148,7 +147,7 @@ pub struct TickContext<'r> {
     /// Why this output's port did not open at the last flush
     /// (`EngineServices::output_open_failure`), or `None` — for every
     /// output whose wires all open, and every other node.
-    output_open_failure: Option<String>,
+    output_open_failure: Option<Rc<str>>,
 }
 
 impl<'r> TickContext<'r> {
@@ -252,13 +251,13 @@ impl<'r> TickContext<'r> {
 
     /// Attach why this output's port did not open at the last flush. A
     /// builder step for the same reason as [`Self::with_output_smoothing`].
-    pub fn with_output_open_failure(mut self, failure: Option<String>) -> Self {
+    pub fn with_output_open_failure(mut self, failure: Option<Rc<str>>) -> Self {
         self.output_open_failure = failure;
         self
     }
 
     /// Why this output's port did not open at the last flush, if it did not.
-    pub fn take_output_open_failure(&mut self) -> Option<String> {
+    pub fn take_output_open_failure(&mut self) -> Option<Rc<str>> {
         self.output_open_failure.take()
     }
 

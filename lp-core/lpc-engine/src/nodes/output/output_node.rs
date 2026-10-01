@@ -317,7 +317,7 @@ pub struct OutputNode {
     /// Why a port of this output did not open at the last flush (an
     /// endpoint that is not a pin on this board, or one already held) —
     /// re-read every `consume`, so it clears the frame the port opens.
-    open_failure: Option<String>,
+    open_failure: Option<alloc::rc::Rc<str>>,
     /// The runs a scattered render places a patched product through — one
     /// product at a time, reused across products and frames. Resident, sized
     /// by [`ensure_scratch_len`]: the only allocation is the high-water one,
@@ -1661,7 +1661,11 @@ impl NodeRuntime for OutputNode {
             .clone()
             // An Error: the frame renders, but nothing reaches the pin, and
             // "Ok" over a dead wire is the one status that would mislead.
-            .or_else(|| self.open_failure.clone().map(NodeRuntimeStatus::Error))
+            .or_else(|| {
+                self.open_failure
+                    .as_deref()
+                    .map(|why| NodeRuntimeStatus::Error(String::from(why)))
+            })
             // Warn, not Fault: this output is doing its job perfectly — it
             // is SHOWING somebody else's fault, and the badge has to say so
             // or the red on the wire has no explanation in the studio. The

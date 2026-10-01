@@ -42,6 +42,11 @@ struct OutputSinkSet {
     /// [`remainder_offender`]). An empty set is silent from then on — the
     /// refusal is logged once, when the configuration is read.
     wires: Vec<OutputWire>,
+    /// Why this node's output does not reach its pin, while a wire is
+    /// parked: built when a wire parks or the wiring changes, never per
+    /// frame, so a dead endpoint costs its node no allocation per tick.
+    /// Boxed: every output carries the slot, almost none ever fill it.
+    open_failure: Option<Box<OpenFailureNote>>,
 }
 
 /// One authored port of an output node: a slice of the node's control
@@ -251,6 +256,7 @@ impl EngineServices {
             for wire in &mut sink.wires {
                 wire.parked = None;
             }
+            sink.refresh_open_failure();
         }
         self.output_provider = provider;
     }
@@ -306,6 +312,7 @@ impl EngineServices {
             node,
             display_options: display_options_from_output_config(config),
             wires: Vec::new(),
+            open_failure: None,
         };
         self.reconcile_wires(&mut set, config, false);
         self.output_sinks.insert(buffer_id, set);
@@ -389,20 +396,15 @@ impl EngineServices {
     /// (one flush behind, like the smoothing notice), so a dead endpoint is
     /// visible where the node is, not only in the log. `None` once every
     /// wire opens.
-    pub fn output_open_failure(&self, node: NodeId) -> Option<String> {
+    ///
+    /// Shared, not built: the text is made when a wire parks, so asking every
+    /// tick costs a reference count, not an allocation.
+    pub fn output_open_failure(&self, node: NodeId) -> Option<Rc<str>> {
         self.output_sinks
             .values()
             .filter(|sink| sink.node == node)
-            .flat_map(|sink| sink.wires.iter())
-            .find_map(|wire| {
-                let parked = wire.parked?;
-                Some(alloc::format!(
-                    "port {}: {} {}",
-                    wire.port,
-                    wire.endpoint.as_str(),
-                    parked.reason.describe()
-                ))
-            })
+            .find_map(|sink| sink.open_failure.as_ref())
+            .map(|note| Rc::clone(&note.message))
     }
 
     pub fn flush_dirty_output_sinks(
@@ -439,6 +441,7 @@ impl EngineServices {
             for wire in &mut previous {
                 self.close_output_wire(wire);
             }
+            set.open_failure = None;
             return;
         }
 
@@ -503,6 +506,7 @@ impl EngineServices {
             self.close_output_wire(wire);
         }
         set.wires = wires;
+        set.refresh_open_failure();
     }
 
     fn close_output_sinks(&mut self) {
@@ -742,6 +746,7 @@ fn flush_registered_sinks(
                 first_error.get_or_insert(error);
             }
         }
+        sink.refresh_open_failure();
     }
 
     // The frame-wide barrier: a provider whose `write` starts transmissions
@@ -900,6 +905,48 @@ fn wire_slice<'a>(node: NodeId, wire: &mut OutputWire, samples: &'a [u16]) -> Op
 struct Parked {
     generation: u64,
     reason: OpenFailure,
+}
+
+/// The text an output node wears while one of its wires is parked, with the
+/// wire it describes — so the text is rebuilt only when that changes.
+#[derive(Debug)]
+struct OpenFailureNote {
+    port: u32,
+    endpoint: HwEndpointSpec,
+    reason: OpenFailure,
+    message: Rc<str>,
+}
+
+impl OutputSinkSet {
+    /// Bring [`Self::open_failure`] in line with the wires: the first parked
+    /// wire's text, or `None`. Allocates only when the answer changes.
+    fn refresh_open_failure(&mut self) {
+        let Some((wire, parked)) = self
+            .wires
+            .iter()
+            .find_map(|wire| wire.parked.map(|parked| (wire, parked)))
+        else {
+            self.open_failure = None;
+            return;
+        };
+        if self.open_failure.as_ref().is_some_and(|note| {
+            note.port == wire.port && note.reason == parked.reason && note.endpoint == wire.endpoint
+        }) {
+            return;
+        }
+        let message = alloc::format!(
+            "port {}: {} {}",
+            wire.port,
+            wire.endpoint.as_str(),
+            parked.reason.describe()
+        );
+        self.open_failure = Some(Box::new(OpenFailureNote {
+            port: wire.port,
+            endpoint: wire.endpoint.clone(),
+            reason: parked.reason,
+            message: Rc::from(message),
+        }));
+    }
 }
 
 impl OutputWire {
@@ -1372,6 +1419,38 @@ mod tests {
         );
         assert_eq!(services.output_open_failure(node(4)), None, "per node");
 
+        // Asked every tick, the text is the same allocation: a dead pin
+        // costs its node a reference count per frame, not a string.
+        let first = services.output_open_failure(node(3)).expect("parked");
+        buffers
+            .get_mut(buffer_id)
+            .expect("the buffer")
+            .mark_updated(Revision::new(2));
+        services
+            .flush_dirty_output_sinks(Revision::new(2), &buffers)
+            .expect("a parked wire does not fail the frame again");
+        let again = services.output_open_failure(node(3)).expect("still parked");
+        assert!(Rc::ptr_eq(&first, &again), "rebuilt on an unchanged frame");
+
+        // Re-pinned to another pin that is not there: the text follows the
+        // wire, not the cache.
+        services.register_output_sink(
+            buffer_id,
+            node(3),
+            &OutputDef::new(endpoint("ws281x:local:D98")),
+        );
+        buffers
+            .get_mut(buffer_id)
+            .expect("the buffer")
+            .mark_updated(Revision::new(3));
+        services
+            .flush_dirty_output_sinks(Revision::new(3), &buffers)
+            .expect_err("D98 is not a XIAO C6 pin either");
+        assert_eq!(
+            services.output_open_failure(node(3)).as_deref(),
+            Some("port 0: ws281x:local:D98 is not an output pin on this board")
+        );
+
         // Re-authored onto D6 (GPIO16): it opens, and the failure clears.
         services.register_output_sink(
             buffer_id,
@@ -1381,9 +1460,9 @@ mod tests {
         buffers
             .get_mut(buffer_id)
             .expect("the buffer")
-            .mark_updated(Revision::new(2));
+            .mark_updated(Revision::new(4));
         services
-            .flush_dirty_output_sinks(Revision::new(2), &buffers)
+            .flush_dirty_output_sinks(Revision::new(4), &buffers)
             .expect("D6 opens");
         assert_eq!(services.output_open_failure(node(3)), None);
     }
