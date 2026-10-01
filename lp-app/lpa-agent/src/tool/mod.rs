@@ -1,6 +1,7 @@
-//! The `iterate` + `upsert_param` + `declare_space` tools and the host
-//! seam they dispatch through.
+//! The shader tools (`iterate` + `upsert_param` + `declare_space`) and the
+//! host seam they dispatch through, plus the app agent's tools ([`app`]).
 
+pub mod app;
 pub mod declare_space_tool;
 pub mod iterate_host;
 pub mod iterate_tool;

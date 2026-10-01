@@ -13,7 +13,7 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::sync::atomic::Ordering;
 
-use lpa_agent::{AgentError, AgentSession, ModelProvider, ShaderContext};
+use lpa_agent::{AgentError, AgentSession, AppToolset, ModelProvider, ShaderContext};
 use lpc_model::ArtifactLocation;
 use lps_probe::LedPoint;
 
@@ -23,7 +23,10 @@ use crate::app::agent::agent_host_bridge::AgentHostBridge;
 use crate::app::agent::agent_pricing::{AgentCostRates, format_cost_usd};
 use crate::app::agent::agent_provider_config::AgentProviderConfig;
 use crate::app::agent::agent_session_key::AgentSessionKey;
+use crate::app::agent::app_agent_host_bridge::AppAgentHostBridge;
+use crate::app::agent::app_agent_session::AppAgentSession;
 use crate::app::agent::ui_agent_view::{UiAgentAvailability, UiAgentUsage, UiAgentView};
+use crate::app::agent::ui_app_agent_view::UiAppAgentView;
 use crate::app::settings::agent_provider::AgentProviderGuidance;
 use crate::app::studio::studio_view_channel::CommandSender;
 use crate::{
@@ -102,6 +105,8 @@ pub struct AgentController {
     /// The platform timer factory the host bridge's engine-verdict wait
     /// polls on (installed by `StudioActor::new`; `None` ⇒ instant timers).
     timer: Option<AgentTimerFactory>,
+    /// The one app-level chat this page holds (plan A7: in memory).
+    app: AppAgentSession,
 }
 
 impl AgentController {
@@ -251,6 +256,142 @@ impl AgentController {
                     session.run_ended(error);
                 }
             }
+            AgentFeedback::AppEvent { event } => self.app.apply_event(event),
+            AgentFeedback::AppRunEnded { error } => self.app.run_ended(error),
+        }
+    }
+
+    /// Replace the app chat's readout (called after every processed batch,
+    /// so a running app agent reads the state its last edit produced).
+    pub(crate) fn refresh_app_readout(
+        &mut self,
+        readout: crate::app::agent::app_agent_readout::AppReadoutSnapshot,
+    ) {
+        self.app.bridge.borrow_mut().readout = readout;
+    }
+
+    /// Whether the app chat has a run in flight (the controller refreshes
+    /// the bridge's project summary only then).
+    pub(crate) fn app_running(&self) -> bool {
+        self.app.running
+    }
+
+    /// Replace the app bridge's project summary (read at `revision`).
+    pub(crate) fn refresh_app_project(&mut self, revision: i64, summary: serde_json::Value) {
+        self.app.bridge.borrow_mut().project = Some((revision, summary));
+    }
+
+    /// Record one `read`'s answer for the awaiting run.
+    pub(crate) fn record_read_ack(&mut self, seq: u64, result: Result<serde_json::Value, String>) {
+        self.app.bridge.borrow_mut().read_ack = Some((seq, result));
+    }
+
+    /// Record one `edit_project` batch's answer for the awaiting run.
+    pub(crate) fn record_project_edits_ack(
+        &mut self,
+        seq: u64,
+        result: Result<lpa_agent::ProjectEditsOutcome, String>,
+    ) {
+        self.app.bridge.borrow_mut().edits_ack = Some((seq, result));
+    }
+
+    /// Facts the embedder knows that the readout does not show (evals: the
+    /// scenario's board line), appended to every readout.
+    #[cfg(test)]
+    pub(crate) fn set_app_context_notes(&mut self, notes: Vec<String>) {
+        self.app.bridge.borrow_mut().context_notes = notes;
+    }
+
+    /// The app chat's session (tests and evals read its parked transcript).
+    #[cfg(test)]
+    pub(crate) fn app_session(&self) -> &AppAgentSession {
+        &self.app
+    }
+
+    /// Flip the app chat's abort flag (Stop). The run settles
+    /// asynchronously (Aborted → SessionDone → AppRunEnded).
+    pub fn request_app_stop(&mut self) {
+        if self.app.running {
+            self.app.abort.store(true, Ordering::Relaxed);
+        }
+    }
+
+    /// Start one app-chat run: push the user turn and spawn the session
+    /// future. The readout the bridge serves is already current (the
+    /// controller refreshes it after every batch).
+    pub(crate) fn start_app_run(
+        &mut self,
+        text: String,
+        provider: Box<dyn ModelProvider>,
+    ) -> Result<(), String> {
+        let Some(tx) = self.command_tx.clone() else {
+            return Err("agent command channel not installed".to_string());
+        };
+        let Some(spawner) = self.spawner.clone() else {
+            return Err("agent spawner not installed".to_string());
+        };
+        let app = &mut self.app;
+        if app.running {
+            app.mirror
+                .push_notice("A run is already in progress — stop it first.");
+            return Ok(());
+        }
+        let mut session = match app.runtime.borrow_mut().take() {
+            Some(mut session) => {
+                session.set_provider(provider);
+                session
+            }
+            None => AgentSession::with_toolset(
+                provider,
+                AppToolset::new(
+                    AppAgentHostBridge::new(
+                        Rc::clone(&app.bridge),
+                        tx.clone(),
+                        self.timer.clone().unwrap_or_else(instant_agent_timer),
+                    ),
+                    &crate::app::agent::app_agent_reference::app_agent_reference(),
+                ),
+            ),
+        };
+        app.abort = session.abort_handle();
+        app.running = true;
+        app.mirror.status = crate::UiAgentStatus::Streaming;
+        app.mirror
+            .turns
+            .push(crate::UiAgentTurn::User { text: text.clone() });
+
+        let slot = Rc::clone(&app.runtime);
+        let event_tx = tx.clone();
+        let future: AgentTaskFuture = Box::pin(async move {
+            let result = session
+                .run(text, move |event| {
+                    event_tx.send(StudioCommand::Agent(AgentFeedback::AppEvent { event }));
+                })
+                .await;
+            // Park the runtime BEFORE announcing the end (same ordering as
+            // the shader chat).
+            slot.borrow_mut().replace(session);
+            let error = match result {
+                Ok(()) => None,
+                Err(AgentError::Provider { message }) => Some(message),
+            };
+            tx.send(StudioCommand::Agent(AgentFeedback::AppRunEnded { error }));
+        });
+        (spawner)(future);
+        Ok(())
+    }
+
+    /// The app chat's DTO.
+    pub fn app_view(&self, ctx: &AgentViewContext) -> UiAppAgentView {
+        let usage = self.app.mirror.ui_usage();
+        UiAppAgentView {
+            availability: ctx.availability,
+            setup: ctx.setup,
+            status: self.app.mirror.status.clone(),
+            turns: self.app.mirror.turns.clone(),
+            usage,
+            estimated_cost: estimated_cost(usage, ctx.cost_rates),
+            model: ctx.model.clone(),
         }
     }
 
@@ -306,7 +447,7 @@ impl AgentController {
                 artifact.file_path().as_str(),
                 config,
                 agent.transcript(),
-                &session.turn_stats,
+                &session.mirror.turn_stats,
                 &session.edits,
             )
         };
@@ -402,8 +543,9 @@ impl AgentController {
         // came from is about to grow); the web shell only downloads on a
         // fresh `seq`, so dropping it here just trims the DTO.
         entry.debug_dump = None;
-        entry.status = crate::UiAgentStatus::Streaming;
+        entry.mirror.status = crate::UiAgentStatus::Streaming;
         entry
+            .mirror
             .turns
             .push(crate::UiAgentTurn::User { text: text.clone() });
 
@@ -543,8 +685,8 @@ impl AgentController {
         });
         let (status, turns, usage, history, history_dropped, debug) = match session {
             Some(session) => (
-                session.status.clone(),
-                session.turns.clone(),
+                session.mirror.status.clone(),
+                session.mirror.turns.clone(),
                 session.ui_usage(),
                 session
                     .edits
@@ -595,9 +737,13 @@ impl AgentController {
     }
 }
 
-/// Display-ready cost estimate for a session's cumulative usage: `None`
-/// without rates (unknown model, no overrides) or before any usage.
-fn estimated_cost(usage: UiAgentUsage, rates: Option<AgentCostRates>) -> Option<String> {
+/// Display-ready cost for a session's cumulative usage: what the provider
+/// reported charging when it reports (OpenRouter — exact, no `~`), else the
+/// price-table estimate; `None` without either, or before any usage.
+pub(crate) fn estimated_cost(usage: UiAgentUsage, rates: Option<AgentCostRates>) -> Option<String> {
+    if let Some(micro) = usage.cost_micro_usd {
+        return Some(format_cost_usd(micro as f64 / 1_000_000.0));
+    }
     let rates = rates?;
     if usage.is_zero() {
         return None;

@@ -3086,6 +3086,27 @@ test-emu-c6-cli:
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_usb_link_gates -- --include-ignored --nocapture
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test link_capture -- --include-ignored --nocapture
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_frag_reads -- --include-ignored --nocapture
+    cargo test -p lpa-studio-core --lib app_agent_eval_tests::the_
+    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test app_agent_emu_decode -- --include-ignored --nocapture the_
+
+# App-agent evals, live leg (plan lp2025/2026-10-01-0126-app-agent-harness):
+# a model builds the scenario's project in a headless Studio (stage A,
+# project checks), then the tree it wrote runs on an emulated C6 with the
+# frames on D6 decoded (stage B). Costs real money: OPENROUTER_API_KEY or
+# ~/.lightplayer/settings.json `agent.openrouter_api_key`. Never CI.
+#
+#   just app-agent-eval e1 --model <openrouter slug>
+#   just app-agent-eval all --model <slug> --repeat 3
+#
+# The deterministic legs (goldens, negatives) are `cargo test -p
+# lpa-studio-core app_agent` and `test-emu-c6-cli`. See
+# lp-app/lpa-studio-core/tests/fixtures/app_agent/README.md.
+app-agent-eval scenario="all" *args:
+    scripts/app-agent/eval.sh {{ scenario }} {{ args }}
+
+# Every bake-off candidate × E1–E3 × 3 runs, one table (plan P07).
+app-agent-bakeoff *args:
+    scripts/app-agent/bakeoff.sh {{ args }}
 
 # lp-cli's classic-emulator conversation tests: the shipped `fw-esp32v3` on
 # its UART0 lp-link (plan `classic-uart-on-lp-link`, P3/P5) — hello and an

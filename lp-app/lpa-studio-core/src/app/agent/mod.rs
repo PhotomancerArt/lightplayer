@@ -1,5 +1,6 @@
-//! The shader agent surface: per-shader-node chat sessions over
-//! `lpa-agent`, owned by [`AgentController`] inside the studio controller.
+//! The agent surfaces over `lpa-agent`, owned by [`AgentController`] inside
+//! the studio controller: per-shader-node chat sessions, and the one
+//! app-level chat ([`AppAgentSession`]) that builds and edits a project.
 //!
 //! The humble split: transcript, status, and usage live here as controller
 //! state and reach the web layer as [`UiAgentView`] DTOs decorated onto the
@@ -16,7 +17,16 @@ pub mod agent_op;
 pub mod agent_pricing;
 pub mod agent_provider_config;
 pub mod agent_session_key;
+pub mod agent_transcript_mirror;
+pub mod app_agent_host_bridge;
+pub mod app_agent_readout;
+pub mod app_agent_reference;
+pub mod app_agent_session;
+/// App-agent evals, stage A (test-only).
+#[cfg(test)]
+mod evals;
 pub mod ui_agent_view;
+pub mod ui_app_agent_view;
 
 pub use agent_chat_session::{AgentEditRecord, MAX_EDIT_RECORDS};
 pub use agent_controller::{
@@ -29,7 +39,10 @@ pub use agent_op::AgentOp;
 pub use agent_pricing::{AgentCostRates, format_cost_usd};
 pub use agent_provider_config::AgentProviderConfig;
 pub use agent_session_key::AgentSessionKey;
+pub use app_agent_host_bridge::{AppAgentBridgeState, AppAgentHostBridge};
+pub use app_agent_session::AppAgentSession;
 pub use ui_agent_view::{
     UiAgentAvailability, UiAgentDebugDump, UiAgentHistoryEntry, UiAgentModelView, UiAgentStatus,
     UiAgentToolRow, UiAgentTurn, UiAgentUsage, UiAgentView,
 };
+pub use ui_app_agent_view::UiAppAgentView;

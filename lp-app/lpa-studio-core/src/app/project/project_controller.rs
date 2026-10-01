@@ -1191,6 +1191,33 @@ impl ProjectController {
         &self.root_nodes
     }
 
+    /// The patch surface's single selection, when exactly one thing is
+    /// selected.
+    pub(crate) fn patch_selection_single(&self) -> Option<&crate::UiPatchTarget> {
+        self.patch_selection.single()
+    }
+
+    /// The slot shape registry the project's defs are read through (the
+    /// app agent maps its JSON values through it).
+    pub(crate) fn slot_shape_registry(&self) -> &lpc_model::SlotShapeRegistry {
+        &self.slot_shapes
+    }
+
+    /// The def artifact behind `node`, when the inventory knows it.
+    pub(crate) fn def_artifact_for(&self, node: &NodeController) -> Option<ArtifactLocation> {
+        self.def_artifacts.get(&node.target().node_id).cloned()
+    }
+
+    /// The artifact `source` names, resolved against `node`'s def file —
+    /// the same resolution the server applies to a def's asset references.
+    pub(crate) fn node_asset_artifact(
+        &self,
+        node: &NodeController,
+        source: &str,
+    ) -> Option<ArtifactLocation> {
+        self.resolve_node_asset_artifact(node, source)
+    }
+
     /// Project root node controllers into node-pane DTOs in project tree order.
     pub fn ui_nodes(&self) -> Vec<UiNodeView> {
         let always_live = self.always_live_products();
@@ -1639,6 +1666,62 @@ impl ProjectController {
             // The def change reached the engine; chase its recompile
             // verdict with the tightened passive ticks (same liveness as
             // an accepted asset apply).
+            self.verdict_chase_ticks = VERDICT_CHASE_TICKS;
+        }
+        Ok((
+            ProjectEditRun {
+                notices: rejection_notices(&rejections),
+                logs: mutation.logs,
+            },
+            rejection,
+        ))
+    }
+
+    /// Send `edits` on `node`'s def as ONE `MutationCmdBatch` — the app
+    /// agent's `set`, which a JSON value can expand into several leaf edits
+    /// that are only valid together (a binding entry and its endpoint).
+    /// Acks fold exactly like any slot edit's; the result is the joined
+    /// rejection text when any command was refused.
+    pub(crate) async fn apply_def_edit_batch(
+        &mut self,
+        server: &mut StudioServerClient,
+        node: &ProjectNodeAddress,
+        edits: Vec<lpc_model::SlotEdit>,
+    ) -> Result<(ProjectEditRun, Option<String>), UiError> {
+        let handle_id = self.ready_handle_id()?;
+        let def_artifact = {
+            let controller = self.node(node).ok_or_else(|| {
+                UiError::UnsupportedAction(format!("{node} is not in the synced project"))
+            })?;
+            self.def_artifacts
+                .get(&controller.target().node_id)
+                .cloned()
+                .ok_or_else(|| UiError::Project(format!("no def artifact is known for {node}")))?
+        };
+        let batch = MutationCmdBatch::new(
+            edits
+                .into_iter()
+                .map(|edit| MutationCmd {
+                    id: self.allocate_mutation_cmd_id(),
+                    mutation: MutationOp::PutSlotEdit {
+                        artifact: def_artifact.clone(),
+                        edit,
+                    },
+                })
+                .collect(),
+        );
+        let mutation = server
+            .project_overlay_mutate(handle_id, batch.clone())
+            .await?;
+        let rejections = self.apply_mutation_acks(&batch, &mutation, &[]);
+        let rejection = (!rejections.is_empty()).then(|| {
+            rejections
+                .iter()
+                .map(rejection_text)
+                .collect::<Vec<_>>()
+                .join("; ")
+        });
+        if rejection.is_none() {
             self.verdict_chase_ticks = VERDICT_CHASE_TICKS;
         }
         Ok((
@@ -7076,6 +7159,7 @@ impl ProjectController {
         server: &mut StudioServerClient,
         source: &crate::ImportSource,
         export: &str,
+        attach: &UiAttachTarget,
     ) -> Result<ProjectEditRun, UiError> {
         use crate::app::project::node::import_pattern::{
             VendoredExport, collect_export_folder, source_manifest, stamp_module_provenance,
@@ -7126,16 +7210,14 @@ impl ProjectController {
             &self.slot_shapes,
         )?;
 
+        // The folder is always vendored under `modules/<key>/`; `attach`
+        // decides only whose slot refs it — the project root's `nodes`, or
+        // a playlist's next free entry.
         let key = self.unique_node_name_from(&key_stem);
-        let (site, parent, expected_name) =
-            match self.resolve_attach_site(&UiAttachTarget::ProjectRoot, &key)? {
-                Some(resolved) => resolved,
-                None => {
-                    return Ok(ProjectEditRun::notice(attach_unavailable_notice(
-                        &UiAttachTarget::ProjectRoot,
-                    )));
-                }
-            };
+        let (site, parent, expected_name) = match self.resolve_attach_site(attach, &key)? {
+            Some(resolved) => resolved,
+            None => return Ok(ProjectEditRun::notice(attach_unavailable_notice(attach))),
+        };
 
         let request = WireCreateNodeRequest::new(
             lpc_model::LpPathBuf::from(VendoredExport::def_path(&key).as_str()),

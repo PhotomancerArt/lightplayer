@@ -319,6 +319,9 @@ pub struct UiAgentUsage {
     pub output_tokens: u32,
     pub cache_write_tokens: u32,
     pub cache_read_tokens: u32,
+    /// What the provider reported charging, in millionths of a dollar
+    /// (OpenRouter); preferred over the price-table estimate when set.
+    pub cost_micro_usd: Option<u64>,
 }
 
 impl UiAgentUsage {

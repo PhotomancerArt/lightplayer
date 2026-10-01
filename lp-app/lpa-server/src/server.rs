@@ -687,7 +687,9 @@ impl LpServer {
                     delta_ms
                 );
                 // One project's failure never stops the others; clients
-                // see it when they sync or query project state.
+                // see it through the nodes' statuses when they sync — an
+                // output the board refuses wears it on the Output node
+                // (`EngineServices::output_open_failure`).
                 //
                 // A tick error is normally PERSISTENT (it re-fails every
                 // frame until the project or the tier changes), so the

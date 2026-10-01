@@ -65,6 +65,24 @@ pub enum AgentOp {
         seq: u64,
         declaration: lpa_agent::SpaceDeclaration,
     },
+    /// Send one user message to the app-level chat (one per page).
+    AppSend { text: String },
+    /// The app agent's `edit_project` batch (dispatched by its host bridge,
+    /// not the web layer): apply the edits in order through the project's
+    /// own node and slot ops, then record one status per edit into the app
+    /// bridge cell under `seq`.
+    ApplyProjectEdits {
+        seq: u64,
+        input: lpa_agent::EditProjectInput,
+    },
+    /// Flip the app chat's abort flag (its Stop button).
+    AppStop,
+    /// The app agent's `read` (dispatched by its host bridge): answer from
+    /// what the controller holds into the app bridge cell under `seq`.
+    AppRead {
+        seq: u64,
+        input: lpa_agent::ReadInput,
+    },
 }
 
 impl ControllerOp for AgentOp {
@@ -99,6 +117,26 @@ impl ControllerOp for AgentOp {
                 "Declare space",
                 "Stage the agent's dimensionality declaration as a pending edit.",
                 ActionPriority::Primary,
+            ),
+            Self::AppSend { .. } => ActionMeta::new(
+                "Send",
+                "Send a message to the LightPlayer assistant.",
+                ActionPriority::Primary,
+            ),
+            Self::ApplyProjectEdits { .. } => ActionMeta::new(
+                "Apply edits",
+                "Apply the assistant's project edits as ordinary edits.",
+                ActionPriority::Primary,
+            ),
+            Self::AppRead { .. } => ActionMeta::new(
+                "Read",
+                "Answer the assistant's read.",
+                ActionPriority::Secondary,
+            ),
+            Self::AppStop => ActionMeta::new(
+                "Stop",
+                "Stop the assistant's running turn.",
+                ActionPriority::Secondary,
             ),
         }
     }
