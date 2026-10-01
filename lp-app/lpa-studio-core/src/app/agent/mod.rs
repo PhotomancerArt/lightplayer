@@ -16,6 +16,9 @@ pub mod agent_op;
 pub mod agent_pricing;
 pub mod agent_provider_config;
 pub mod agent_session_key;
+/// App-agent evals, stage A (test-only).
+#[cfg(test)]
+mod evals;
 pub mod ui_agent_view;
 
 pub use agent_chat_session::{AgentEditRecord, MAX_EDIT_RECORDS};

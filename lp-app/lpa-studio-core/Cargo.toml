@@ -99,6 +99,10 @@ lpc-shared = { path = "../../lp-core/lpc-shared", features = ["std"] }
 lpc-mapping = { path = "../../lp-core/lpc-mapping" }
 jsonschema = { version = "0.46", default-features = false }
 lpfs = { path = "../../lp-base/lpfs", features = ["std"] }  # std for host tests
+# App-agent evals (`app/agent/evals`): the in-process server wears the
+# XIAO C6's real pin map, and scenarios are TOML fixtures.
+lpc-hardware = { path = "../../lp-core/lpc-hardware" }
+toml = "0.8"
 
 [features]
 default = []
