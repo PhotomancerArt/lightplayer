@@ -78,15 +78,21 @@ pub fn page_line(home: bool) -> String {
 /// The open project, from its compact summary (`agent_project_summary`).
 pub fn project_lines(name: &str, summary: &Value) -> String {
     let mut text = String::new();
+    // Desktop is what a new project is set to before anyone chose: to the
+    // agent it must read as "not chosen", or a board-less chip looks
+    // decided (the bake-off's E3 misses read "Desktop" as an answer).
     let board = summary["board"]
         .as_str()
+        .filter(|board| *board != crate::app::library::DESKTOP_BOARD_ID)
         .map(|board| {
             format!(
                 "{board} ({})",
                 crate::app::roster::board_display_name(board)
             )
         })
-        .unwrap_or_else(|| "none chosen".to_string());
+        .unwrap_or_else(|| {
+            "not chosen yet — which board this is decides what a pin label means".to_string()
+        });
     let unsaved = if summary["unsaved"].as_bool().unwrap_or(false) {
         "yes"
     } else {
