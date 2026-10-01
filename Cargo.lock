@@ -6107,6 +6107,7 @@ dependencies = [
  "lps-builtins",
  "lps-probe",
  "reqwest",
+ "schemars",
  "serde",
  "serde_json",
  "tokio",

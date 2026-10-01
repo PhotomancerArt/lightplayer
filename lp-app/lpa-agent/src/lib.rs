@@ -42,7 +42,10 @@ pub use provider::{
     TurnEvent, TurnRequest, list_anthropic_models, list_openai_compat_models,
 };
 pub use session::{AgentError, AgentEvent, AgentSession, AgentTranscript, MAX_TURNS_PER_RUN};
-pub use tool::app::{AppAgentHost, AppToolset};
+pub use tool::app::{
+    AppAgentHost, AppToolset, EDIT_PROJECT_TOOL_NAME, EditProjectInput, EditStatus, ProjectEdit,
+    ProjectEditsOutcome,
+};
 pub use tool::{
     AgentHost, BindingInfo, DECLARE_SPACE_TOOL_NAME, DeclaredSpace, ENGINE_VERDICT_BUDGET_MS,
     EngineStatusKind, EngineVerdict, FixtureSummary, HostError, HostFuture, ITERATE_TOOL_NAME,

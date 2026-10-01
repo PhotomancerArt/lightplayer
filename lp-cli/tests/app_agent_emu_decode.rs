@@ -43,12 +43,20 @@ const PAD: u8 = 16;
 /// channels on the C6).
 const RMT_SIGNALS: [u16; 2] = [71, 72];
 
-/// Emulated time rendered after the upload. Long enough for the first
-/// pattern's compile and a second of frames; the emulated C6 builds a
-/// graphics stage far slower than silicon (open defect
+/// Emulated time stage B waits for the first lit frame after the upload.
+/// Generous on purpose: the emulated C6 builds a graphics stage far slower
+/// than silicon (open defect
 /// `docs/defects/2026-09-10-the-emulated-c6-builds-a-graphics-stage-40x-slower-than-silicon.md`),
-/// so the window is in emulated time and generous.
-const RENDER_WINDOW_US: u64 = 4_000_000;
+/// so a project that loads in a blink on a board can take seconds here.
+/// A golden lights in about half a second, so the wait costs only the
+/// projects that need it.
+const FIRST_LIT_CAP_US: u64 = 30_000_000;
+
+/// Emulated time rendered after the first lit frame — the frames judged.
+const AFTER_LIT_US: u64 = 2_000_000;
+
+/// The step the wait advances by between looks at the pad.
+const WAIT_STEP_US: u64 = 500_000;
 
 /// Two frames at least this far apart (emulated) must differ: the patterns
 /// animate.
@@ -64,6 +72,22 @@ fn the_sean_250_golden_lights_250_leds_on_d6() {
 #[ignore = "needs a built fw-esp32c6 ELF; `just test-emu-c6-cli` runs it"]
 fn the_sean_300_golden_lights_300_leds_on_d6() {
     decode_and_check(&golden("sean-300-d6"), 300);
+}
+
+/// The project the golden edit script built from Blank, through the real
+/// `edit_project` tool and Studio op (stage A's scripted replay writes it;
+/// `just test-emu-c6-cli` runs that replay first).
+#[test]
+#[ignore = "needs a built fw-esp32c6 ELF; `just test-emu-c6-cli` runs it"]
+fn the_sean_script_replay_lights_250_leds_on_d6() {
+    decode_and_check(&replayed("e1-sean-from-empty"), 250);
+}
+
+/// The 300-LED script, replayed on the 250 golden.
+#[test]
+#[ignore = "needs a built fw-esp32c6 ELF; `just test-emu-c6-cli` runs it"]
+fn the_make_it_300_script_replay_lights_300_leds_on_d6() {
+    decode_and_check(&replayed("e2-make-it-300"), 300);
 }
 
 /// The judge can fail: the 250 golden is not a 300-LED strip.
@@ -93,7 +117,7 @@ fn an_agent_built_project_lights_its_leds_on_d6() {
     decode_and_check(Path::new(&dir), leds);
 }
 
-/// Deploy `dir` to a booted C6, render for [`RENDER_WINDOW_US`], and judge
+/// Deploy `dir` to a booted C6, render until it lights (or the cap), and judge
 /// the frames on pad 16 against `leds`. Prints one summary line.
 fn decode_and_check(dir: &Path, leds: usize) {
     let Some(elf) = image() else {
@@ -113,6 +137,16 @@ fn decode_and_check(dir: &Path, leds: usize) {
 /// Whether the frames on pad 16 are `leds` LEDs long, whole, clean, lit and
 /// changing: `Ok(summary)` or `Err(what is wrong)`.
 fn judge(run: &RenderRun, leds: usize) -> Result<String, String> {
+    if let Some(stopped) = &run.stopped {
+        // Named apart from a project fault: the emulated C6 builds a
+        // graphics stage far slower than silicon, and a heavy enough load
+        // trips the 8 s runtime watchdog here where a board would not
+        // (open defect, see FIRST_LIT_CAP_US).
+        return Err(format!(
+            "emu-watchdog: {stopped} — the emulated C6 reset while the project loaded; \
+             likely the open graphics-stage fidelity defect, not the project"
+        ));
+    }
     if !run.routed.iter().any(|(pad, source)| {
         *pad == PadId(PAD)
             && RMT_SIGNALS
@@ -167,7 +201,7 @@ fn judge(run: &RenderRun, leds: usize) -> Result<String, String> {
         ));
     }
     let first = judged[0];
-    let gap = CHANGE_GAP_US * u64::from(memmap::CYCLES_PER_US);
+    let gap = CHANGE_GAP_US * memmap::CYCLES_PER_US;
     if !judged
         .iter()
         .any(|f| f.start >= first.start + gap && f.wire != first.wire)
@@ -186,13 +220,16 @@ fn judge(run: &RenderRun, leds: usize) -> Result<String, String> {
 }
 
 struct RenderRun {
+    /// Why the board stopped before the window ended (a watchdog reset).
+    stopped: Option<String>,
     console: Vec<String>,
     frames: Vec<Frame>,
     routed: Vec<(PadId, RouteSource)>,
 }
 
 /// Boot, wait for the hello, deploy `dir` over the link as `lp-cli upload`
-/// does, then render on for [`RENDER_WINDOW_US`] of emulated time.
+/// does, then render until the first lit frame (at most
+/// [`FIRST_LIT_CAP_US`]) and [`AFTER_LIT_US`] beyond it, in emulated time.
 fn deploy_and_render(elf: &Path, dir: &Path) -> RenderRun {
     let mut host = hosted(elf);
     let hello = host
@@ -211,11 +248,34 @@ fn deploy_and_render(elf: &Path, dir: &Path) -> RenderRun {
             .unwrap_or_else(|e| panic!("the deploy failed: {e}"));
     }
     host.set_queue_messages(false);
-    let until = host.board.machine.micros() + RENDER_WINDOW_US;
-    host.run_until(until, None).expect("rendering on");
+    let uploaded = host.board.machine.micros();
+    let mut lit_at = None;
+    let mut stopped = None;
+    while lit_at.is_none() && host.board.machine.micros() < uploaded + FIRST_LIT_CAP_US {
+        let until = host.board.machine.micros() + WAIT_STEP_US;
+        if let Err(error) = host.run_until(until, None) {
+            stopped = Some(error.to_string());
+            break;
+        }
+        if host
+            .board
+            .machine
+            .frames(PAD)
+            .iter()
+            .any(|f| f.wire.iter().any(|b| *b != 0))
+        {
+            lit_at = Some(host.board.machine.micros());
+        }
+    }
+    if let Some(lit) = lit_at
+        && let Err(error) = host.run_until(lit + AFTER_LIT_US, None)
+    {
+        stopped = Some(error.to_string());
+    }
     host.board.machine.flush_frames();
     assert_eq!(host.link_errors, 0, "{}", host.console().join("\n"));
     RenderRun {
+        stopped,
         console: host.console().to_vec(),
         frames: host.board.machine.frames(PAD).to_vec(),
         routed: host.board.machine.routed_pads(),
@@ -246,6 +306,25 @@ fn image() -> Option<PathBuf> {
             None
         }
     }
+}
+
+/// A tree stage A's scripted replay wrote. Missing means the replay has not
+/// run in this target dir — said loudly, then the test fails.
+fn replayed(scenario: &str) -> PathBuf {
+    let target = std::env::var_os("CARGO_TARGET_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| repo_root().join("target"));
+    let dir = target
+        .join("app-agent-evals/scripted")
+        .join(scenario)
+        .join("project");
+    assert!(
+        dir.join("project.json").exists(),
+        "{} is missing — run `cargo test -p lpa-studio-core app_agent` first \
+         (`just test-emu-c6-cli` does)",
+        dir.display()
+    );
+    dir
 }
 
 fn golden(name: &str) -> PathBuf {

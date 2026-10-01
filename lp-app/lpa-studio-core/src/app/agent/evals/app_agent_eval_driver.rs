@@ -133,7 +133,14 @@ impl AgentEvalStudio {
             }
         }
 
-        let (actor, handle) = StudioActor::new(controller, no_timer as NoTimer);
+        let (mut actor, handle) = StudioActor::new(controller, no_timer as NoTimer);
+        // The agent's ack waits poll a timer between checks; an instant
+        // timer would spin its whole budget inside one poll of the run.
+        // Yielding once per wait lets the driver run a batch in between.
+        actor
+            .controller_mut_for_test()
+            .agent_for_test()
+            .set_timer(|_| Box::pin(YieldOnce(false)) as crate::AgentTimerFuture);
         Self {
             actor,
             tx: handle.tx,
@@ -160,7 +167,14 @@ impl AgentEvalStudio {
                 },
             )),
             ScenarioStart::Golden(name) => {
-                let files: Vec<(String, Vec<u8>)> = golden(name).files.into_iter().collect();
+                // A board-targeted package opens by waiting for that board,
+                // and the eval has none: the in-process server IS the board
+                // (it wears the XIAO C6's pin map). So the package opens
+                // untargeted on it, and the Hardware row's own op puts the
+                // target back — the same open project the user would have.
+                let mut tree = golden(name);
+                let target = strip_target(&mut tree);
+                let files: Vec<(String, Vec<u8>)> = tree.files.into_iter().collect();
                 let summary = self
                     .store
                     .install_package("Sean's LEDs", &files, PackageProvenance::Created, 2.0)
@@ -172,16 +186,35 @@ impl AgentEvalStudio {
                         prefer: None,
                     },
                 ));
+                if let Some(target) = target {
+                    self.act(UiAction::from_op(
+                        ControllerId::new(HOME_NODE_ID),
+                        HomeOp::SetPackageTarget {
+                            uid: summary.uid.to_string(),
+                            target: Some(target),
+                        },
+                    ));
+                }
             }
         }
         self.settle(4);
-        assert!(
-            self.controller()
-                .project_for_test()
-                .active_library_uid()
-                .is_some(),
-            "the scenario's start project opened"
-        );
+        if self
+            .controller()
+            .project_for_test()
+            .active_library_uid()
+            .is_none()
+        {
+            let view = self.controller().view();
+            panic!(
+                "the scenario's start project did not open; console: {:#?}",
+                view.console
+                    .entries
+                    .iter()
+                    .rev()
+                    .take(12)
+                    .collect::<Vec<_>>()
+            );
+        }
     }
 
     /// Facts the readout cannot show (the scenario's board line).
@@ -191,17 +224,17 @@ impl AgentEvalStudio {
             .set_app_context_notes(vec![format!("context: {context}")]);
     }
 
-    /// Send one message to the app chat and drive the run to its end.
-    /// The session's own per-run turn cap applies; the scenario budget is
-    /// checked between sends.
-    pub(crate) fn send(&mut self, text: &str, deadline: Instant) {
+    /// Send one message to the app chat and drive the run to its end, or
+    /// until a limit is passed (then the run is stopped the way Stop stops
+    /// it, between events).
+    pub(crate) fn send(&mut self, text: &str, limits: RunLimits) {
         self.act(UiAction::from_op(
             ControllerId::new(AgentController::NODE_ID),
             AgentOp::AppSend {
                 text: text.to_string(),
             },
         ));
-        self.drive_runs(deadline);
+        self.drive_runs(limits);
     }
 
     /// The app chat's last visible assistant text.
@@ -345,7 +378,7 @@ impl AgentEvalStudio {
 
     /// Drive every spawned run future to completion, interleaving Studio
     /// batches so the agent's ops and acks flow.
-    fn drive_runs(&mut self, deadline: Instant) {
+    fn drive_runs(&mut self, limits: RunLimits) {
         let waker = Waker::from(Arc::new(NoopWake));
         let mut cx = Context::from_waker(&waker);
         loop {
@@ -357,7 +390,11 @@ impl AgentEvalStudio {
                     break;
                 }
                 let progressed = self.try_batch();
-                if Instant::now() > deadline {
+                let spent = self.usage().reported_cost_usd().unwrap_or(0.0);
+                if Instant::now() > limits.deadline
+                    || spent > limits.usd
+                    || self.turns() > limits.turns
+                {
                     self.controller().agent_for_test().request_app_stop();
                 }
                 if !progressed {
@@ -367,6 +404,16 @@ impl AgentEvalStudio {
             while self.try_batch() {}
         }
     }
+}
+
+/// When a run is stopped mid-flight.
+#[derive(Clone, Copy)]
+pub(crate) struct RunLimits {
+    pub(crate) deadline: Instant,
+    /// Reported cost across the scenario, US dollars.
+    pub(crate) usd: f64,
+    /// Model turns across the scenario.
+    pub(crate) turns: u32,
 }
 
 /// Run one scenario on the real app chat. Scripted replies answer the
@@ -390,7 +437,14 @@ pub(crate) fn drive_scenario(
             break;
         }
         let before = studio.transcript_steps().len();
-        studio.send(&message, deadline);
+        studio.send(
+            &message,
+            RunLimits {
+                deadline,
+                usd: scenario.budget.usd,
+                turns: scenario.budget.turns,
+            },
+        );
         let all = studio.transcript_steps();
         steps.extend(all.into_iter().skip(before));
         if let UiAgentStatus::Error { message, .. } = studio.status() {
@@ -439,6 +493,21 @@ pub(crate) fn drive_scenario(
         turns: studio.turns(),
         statuses: studio.node_statuses(),
     }
+}
+
+/// Remove `target` from the tree's manifest, returning it.
+fn strip_target(tree: &mut ProjectTree) -> Option<String> {
+    let mut manifest = tree.manifest()?;
+    let target = manifest
+        .as_object_mut()?
+        .remove("target")?
+        .as_str()
+        .map(str::to_string);
+    tree.files.insert(
+        "project.json".to_string(),
+        serde_json::to_vec_pretty(&manifest).expect("a manifest serializes"),
+    );
+    target
 }
 
 /// The key for a live run: `OPENROUTER_API_KEY`, else
@@ -516,6 +585,22 @@ fn flatten(messages: &[lpa_agent::ChatMessage]) -> Vec<EvalStep> {
         }
     }
     steps
+}
+
+/// A timer that is pending exactly once, then ready.
+struct YieldOnce(bool);
+
+impl Future for YieldOnce {
+    type Output = ();
+
+    fn poll(mut self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<()> {
+        if self.0 {
+            Poll::Ready(())
+        } else {
+            self.0 = true;
+            Poll::Pending
+        }
+    }
 }
 
 struct NoopWake;

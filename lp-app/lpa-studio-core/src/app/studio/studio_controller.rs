@@ -5797,11 +5797,88 @@ impl StudioController {
                 declaration,
             } => self.agent_declare_space(artifact, seq, declaration).await,
             crate::AgentOp::AppSend { text } => self.app_agent_send(text),
+            crate::AgentOp::ApplyProjectEdits { seq, input } => {
+                self.app_agent_apply_edits(seq, input).await
+            }
             crate::AgentOp::AppStop => {
                 self.agent.request_app_stop();
                 Ok(UiNotices::new())
             }
         }
+    }
+
+    /// Execute one app-agent `edit_project` batch: the edits in order
+    /// through the project's own ops, then the save when asked, then the
+    /// per-edit statuses into the app bridge cell — failures included, so
+    /// the awaiting run reports them instead of timing out.
+    async fn app_agent_apply_edits(
+        &mut self,
+        seq: u64,
+        input: lpa_agent::EditProjectInput,
+    ) -> UiResult {
+        let outcome = self.app_agent_edits_outcome(&input).await;
+        let result = outcome.map(|(outcome, notices)| {
+            self.agent.record_project_edits_ack(seq, Ok(outcome));
+            notices
+        });
+        match result {
+            Ok(notices) => {
+                self.request_library_refresh();
+                self.mark_dirty();
+                Ok(notices)
+            }
+            Err(error) => {
+                self.agent
+                    .record_project_edits_ack(seq, Err(error.to_string()));
+                Err(error)
+            }
+        }
+    }
+
+    async fn app_agent_edits_outcome(
+        &mut self,
+        input: &lpa_agent::EditProjectInput,
+    ) -> Result<(lpa_agent::ProjectEditsOutcome, UiNotices), UiError> {
+        if self.project.active_library_uid().is_none() {
+            return Err(UiError::UnsupportedAction(
+                "no project is open — open or create one first".to_string(),
+            ));
+        }
+        let (results, runs) = {
+            let server = self.pool.lens_session_mut()?.client_mut()?;
+            self.project
+                .apply_agent_project_edits(server, &input.edits)
+                .await
+        };
+        let mut notices = UiNotices::new();
+        for run in runs {
+            notices
+                .notices
+                .extend(self.record_project_edit_run(Ok(run))?.notices);
+        }
+        let saved = if input.save {
+            let run = {
+                let server = self.pool.lens_session_mut()?.client_mut()?;
+                self.project.save_overlay(server).await
+            };
+            Some(match self.record_project_edit_run(run) {
+                Ok(saved) => {
+                    notices.notices.extend(saved.notices);
+                    Ok(())
+                }
+                Err(error) => Err(error.to_string()),
+            })
+        } else {
+            None
+        };
+        Ok((
+            lpa_agent::ProjectEditsOutcome {
+                results,
+                saved,
+                project: None,
+            },
+            notices,
+        ))
     }
 
     /// Start one app-chat run. Unlike the shader chat it needs no open
@@ -6194,7 +6271,7 @@ impl StudioController {
         let run = {
             let server = self.pool.lens_session_mut()?.client_mut()?;
             self.project
-                .import_pattern(server, &op.source, &op.export)
+                .import_pattern(server, &op.source, &op.export, &op.attach)
                 .await
         };
         // The vendored files landed in the library through the create's

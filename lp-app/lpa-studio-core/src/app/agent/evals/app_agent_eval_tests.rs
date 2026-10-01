@@ -166,6 +166,104 @@ fn the_app_chat_runs_a_scenario_end_to_end_on_a_scripted_model() {
 }
 
 #[test]
+fn the_sean_script_builds_e1_from_blank_through_the_real_tool() {
+    // PD9: the committed edit script, replayed by a scripted model through
+    // the real `edit_project` tool and the real Studio op, builds Sean's
+    // project from Blank — the vocabulary is enough before any model runs.
+    let scenario = Scenario::load("e1-sean-from-empty").expect("e1");
+    let outcome = run_scenario(
+        &scenario,
+        &EvalDriver::Scripted(script_turns("sean-250-d6")),
+    );
+    let dir = write_outcome(&eval_run_dir("scripted"), &scenario.name, &outcome)
+        .expect("the outcome is written");
+    assert!(
+        outcome.passed(),
+        "the golden script fails E1 ({}):\n{}\n\ntool results:\n{}",
+        dir.display(),
+        outcome.failures(),
+        tool_results(&outcome)
+    );
+}
+
+#[test]
+fn the_make_it_300_script_passes_e2_through_the_real_tool() {
+    let scenario = Scenario::load("e2-make-it-300").expect("e2");
+    let outcome = run_scenario(
+        &scenario,
+        &EvalDriver::Scripted(script_turns("make-it-300")),
+    );
+    let dir = write_outcome(&eval_run_dir("scripted"), &scenario.name, &outcome)
+        .expect("the outcome is written");
+    assert!(
+        outcome.passed(),
+        "the 300 script fails E2 ({}):\n{}\n\ntool results:\n{}",
+        dir.display(),
+        outcome.failures(),
+        tool_results(&outcome)
+    );
+}
+
+#[test]
+fn a_rejected_edit_comes_back_in_band_and_the_batch_goes_on() {
+    // A bad path, a wrong type and an unknown node each come back with
+    // their index and reason; the edits around them still land, and the
+    // session carries on to its next turn.
+    let scenario = Scenario::load("e2-make-it-300").expect("e2");
+    let input = serde_json::json!({
+        "edits": [
+            { "set": { "node": "fixture", "path": "no_such_field", "value": 1 } },
+            { "set": { "node": "fixture", "path": "render_size", "value": "wide" } },
+            { "set": { "node": "nowhere", "path": "render_size.width", "value": 300 } },
+            { "set": { "node": "fixture", "path": "render_size", "value": { "width": 300, "height": 8 } } }
+        ]
+    })
+    .to_string();
+    let scripts = vec![vec![
+        vec![
+            TurnEvent::ToolUseStart {
+                id: "tu_bad".into(),
+                name: lpa_agent::EDIT_PROJECT_TOOL_NAME.into(),
+            },
+            TurnEvent::ToolInputDelta {
+                id: "tu_bad".into(),
+                json_fragment: input,
+            },
+            turn_done(StopReason::ToolUse),
+        ],
+        vec![
+            TurnEvent::TextDelta("Fixed what I could.".into()),
+            turn_done(StopReason::EndTurn),
+        ],
+    ]];
+    let outcome = run_scenario(&scenario, &EvalDriver::Scripted(scripts));
+    let results = tool_results(&outcome);
+    let value: serde_json::Value = serde_json::from_str(&results).expect("one result");
+    let rows = value["results"].as_array().expect("results");
+    assert_eq!(rows.len(), 4, "{results}");
+    for (index, needle) in [
+        (0, "no_such_field"),
+        (
+            1,
+            "an object {width: a whole number, height: a whole number}",
+        ),
+        (2, "nowhere"),
+    ] {
+        assert_eq!(rows[index]["ok"], false, "{results}");
+        assert_eq!(rows[index]["index"], index, "{results}");
+        let reason = rows[index]["reason"].as_str().expect("a reason");
+        assert!(reason.contains(needle), "edit {index}: {reason}");
+    }
+    assert_eq!(rows[3]["ok"], true, "{results}");
+    assert!(
+        outcome.transcript.steps.iter().any(
+            |step| matches!(step, EvalStep::Assistant { text } if text == "Fixed what I could.")
+        ),
+        "the session continued after the rejections"
+    );
+}
+
+#[test]
 fn an_agent_that_only_talks_fails_every_project_check() {
     // The P02 baseline in miniature: a model with no tools leaves the Blank
     // project blank, and E1 says exactly why.
@@ -255,6 +353,51 @@ fn app_agent_eval_live() {
 }
 
 // --- helpers ---------------------------------------------------------------
+
+/// One scenario send whose model calls `edit_project` with the committed
+/// script `scripts/<name>.json`, then says it is done.
+fn script_turns(name: &str) -> Vec<Vec<Vec<TurnEvent>>> {
+    let path = super::app_agent_scenario::fixtures_dir()
+        .join("scripts")
+        .join(format!("{name}.json"));
+    let input = std::fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+    vec![vec![
+        vec![
+            TurnEvent::ToolUseStart {
+                id: "tu_script".into(),
+                name: lpa_agent::EDIT_PROJECT_TOOL_NAME.into(),
+            },
+            TurnEvent::ToolInputDelta {
+                id: "tu_script".into(),
+                json_fragment: input,
+            },
+            turn_done(StopReason::ToolUse),
+        ],
+        vec![
+            TurnEvent::TextDelta("Done.".into()),
+            turn_done(StopReason::EndTurn),
+        ],
+    ]]
+}
+
+/// Every tool result the run produced, for failure messages.
+fn tool_results(outcome: &super::app_agent_eval_harness::EvalOutcome) -> String {
+    outcome
+        .transcript
+        .steps
+        .iter()
+        .filter_map(|step| match step {
+            EvalStep::ToolResult { content, .. } => {
+                serde_json::from_str::<serde_json::Value>(content)
+                    .map(|value| serde_json::to_string_pretty(&value).unwrap_or_default())
+                    .ok()
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
 
 fn turn_done(stop_reason: StopReason) -> TurnEvent {
     TurnEvent::TurnDone {

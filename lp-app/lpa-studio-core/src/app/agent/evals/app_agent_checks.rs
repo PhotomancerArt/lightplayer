@@ -464,7 +464,9 @@ pub(crate) fn minimal_strip_diff(start: &ProjectTree, end: &ProjectTree) -> Resu
             ));
             continue;
         };
-        let parse = |bytes: &Vec<u8>| serde_json::from_slice::<Value>(bytes).ok();
+        // Node defs compare by meaning: a save rewrites them canonically
+        // (defaults spelled out), which is not the agent's change.
+        let parse = |bytes: &Vec<u8>| canonical_json(bytes);
         let (Some(mut a), Some(mut b)) = (parse(before), parse(after)) else {
             extra.push(format!("{path} changed"));
             continue;
@@ -503,6 +505,22 @@ pub(crate) fn minimal_strip_diff(start: &ProjectTree, end: &ProjectTree) -> Resu
 }
 
 // --- helpers ---------------------------------------------------------------
+
+/// A file's JSON, with a node def rewritten through the model's canonical
+/// writer (so authored and saved forms of the same def compare equal).
+fn canonical_json(bytes: &[u8]) -> Option<Value> {
+    let text = std::str::from_utf8(bytes).ok()?;
+    let value: Value = serde_json::from_str(text).ok()?;
+    if value.get("kind").is_none() {
+        return Some(value);
+    }
+    let registry = lpc_model::SlotShapeRegistry::default();
+    let canonical = lpc_model::NodeDef::read_json(&registry, text)
+        .ok()?
+        .write_json(&registry)
+        .ok()?;
+    serde_json::from_str(&canonical).ok()
+}
 
 fn port_endpoints(output: &Value) -> Vec<String> {
     let ports = &output["ports"];

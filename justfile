@@ -3086,7 +3086,8 @@ test-emu-c6-cli:
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_usb_link_gates -- --include-ignored --nocapture
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test link_capture -- --include-ignored --nocapture
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_frag_reads -- --include-ignored --nocapture
-    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test app_agent_emu_decode -- --include-ignored --nocapture the_sean
+    cargo test -p lpa-studio-core --lib app_agent_eval_tests::the_
+    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test app_agent_emu_decode -- --include-ignored --nocapture the_
 
 # App-agent evals, live leg (plan lp2025/2026-10-01-0126-app-agent-harness):
 # a model builds the scenario's project in a headless Studio (stage A,

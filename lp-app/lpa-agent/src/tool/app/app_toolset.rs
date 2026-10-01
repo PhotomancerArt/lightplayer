@@ -3,6 +3,10 @@
 
 use serde_json::{Value, json};
 
+use crate::tool::app::edit_project_tool::{
+    EDIT_PROJECT_TOOL_NAME, edit_project_tool_def, run_edit_project,
+};
+
 use crate::prompt::app::build_app_system_prompt;
 use crate::provider::model_provider::ToolDef;
 use crate::tool::app::app_agent_host::AppAgentHost;
@@ -36,7 +40,7 @@ impl<H: AppAgentHost> AppToolset<H> {
 
 impl<H: AppAgentHost> Toolset for AppToolset<H> {
     fn tool_defs(&self) -> Vec<ToolDef> {
-        Vec::new()
+        vec![edit_project_tool_def()]
     }
 
     fn system_prompt(&self) -> String {
@@ -50,14 +54,18 @@ impl<H: AppAgentHost> Toolset for AppToolset<H> {
     fn run_tool<'a>(
         &'a mut self,
         name: &'a str,
-        _input: &'a Value,
+        input: &'a Value,
         _progress: &'a mut dyn FnMut(ToolPhase),
     ) -> HostFuture<'a, ToolOutcome> {
         Box::pin(async move {
-            ToolOutcome {
-                content: json!({ "error": format!("unknown tool {name:?}") }).to_string(),
-                is_error: true,
-                summary: json!({ "error": "unknown tool" }),
+            if name == EDIT_PROJECT_TOOL_NAME {
+                run_edit_project(input, &mut self.host).await
+            } else {
+                ToolOutcome {
+                    content: json!({ "error": format!("unknown tool {name:?}") }).to_string(),
+                    is_error: true,
+                    summary: json!({ "error": "unknown tool" }),
+                }
             }
         })
     }

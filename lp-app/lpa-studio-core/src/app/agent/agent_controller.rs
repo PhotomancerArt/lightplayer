@@ -267,6 +267,15 @@ impl AgentController {
         self.app.bridge.borrow_mut().readout = readout;
     }
 
+    /// Record one `edit_project` batch's answer for the awaiting run.
+    pub(crate) fn record_project_edits_ack(
+        &mut self,
+        seq: u64,
+        result: Result<lpa_agent::ProjectEditsOutcome, String>,
+    ) {
+        self.app.bridge.borrow_mut().edits_ack = Some((seq, result));
+    }
+
     /// Facts the embedder knows that the readout does not show (evals: the
     /// scenario's board line), appended to every readout.
     #[cfg(test)]

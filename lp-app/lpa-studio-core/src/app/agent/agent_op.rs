@@ -67,6 +67,14 @@ pub enum AgentOp {
     },
     /// Send one user message to the app-level chat (one per page).
     AppSend { text: String },
+    /// The app agent's `edit_project` batch (dispatched by its host bridge,
+    /// not the web layer): apply the edits in order through the project's
+    /// own node and slot ops, then record one status per edit into the app
+    /// bridge cell under `seq`.
+    ApplyProjectEdits {
+        seq: u64,
+        input: lpa_agent::EditProjectInput,
+    },
     /// Flip the app chat's abort flag (its Stop button).
     AppStop,
 }
@@ -107,6 +115,11 @@ impl ControllerOp for AgentOp {
             Self::AppSend { .. } => ActionMeta::new(
                 "Send",
                 "Send a message to the LightPlayer assistant.",
+                ActionPriority::Primary,
+            ),
+            Self::ApplyProjectEdits { .. } => ActionMeta::new(
+                "Apply edits",
+                "Apply the assistant's project edits as ordinary edits.",
                 ActionPriority::Primary,
             ),
             Self::AppStop => ActionMeta::new(
