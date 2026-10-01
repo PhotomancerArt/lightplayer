@@ -1191,10 +1191,21 @@ impl ProjectController {
         &self.root_nodes
     }
 
+    /// The patch surface's single selection, when exactly one thing is
+    /// selected.
+    pub(crate) fn patch_selection_single(&self) -> Option<&crate::UiPatchTarget> {
+        self.patch_selection.single()
+    }
+
     /// The slot shape registry the project's defs are read through (the
     /// app agent maps its JSON values through it).
     pub(crate) fn slot_shape_registry(&self) -> &lpc_model::SlotShapeRegistry {
         &self.slot_shapes
+    }
+
+    /// The def artifact behind `node`, when the inventory knows it.
+    pub(crate) fn def_artifact_for(&self, node: &NodeController) -> Option<ArtifactLocation> {
+        self.def_artifacts.get(&node.target().node_id).cloned()
     }
 
     /// The artifact `source` names, resolved against `node`'s def file —

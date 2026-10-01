@@ -389,6 +389,24 @@ impl ProjectController {
         }
     }
 
+    /// A node's facts for the `read` tool: name, kind, status, issues, and
+    /// the def artifact its definition is read from.
+    pub(crate) fn agent_node_facts(
+        &self,
+        wanted: &str,
+    ) -> Result<(serde_json::Value, Option<lpc_model::ArtifactLocation>), String> {
+        let node = self.agent_node(wanted)?;
+        let status = node.status();
+        let facts = serde_json::json!({
+            "node": node_display_name(node.address()),
+            "kind": node.kind(),
+            "status": status.label,
+            "message": status.detail,
+            "issues": node.issues(),
+        });
+        Ok((facts, self.def_artifact_for(node)))
+    }
+
     fn agent_node_addresses(&self) -> BTreeSet<ProjectNodeAddress> {
         let mut all = Vec::new();
         collect_nodes(self.root_nodes(), &mut all);

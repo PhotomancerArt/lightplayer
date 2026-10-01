@@ -2343,12 +2343,14 @@ impl StudioController {
         // a shared cell the spawned run polls, so it must happen whether or
         // not the change gate emits a snapshot this batch.
         self.refresh_agent_engine_status();
-        self.agent.refresh_app_readout(self.app_agent_readout());
-        if self.agent.app_running()
-            && let Some(revision) = self.current_revision()
-        {
-            self.agent
-                .refresh_app_project(revision, self.project.agent_project_summary());
+        // Only while the app chat is out with a run: the readout builds a
+        // whole view, which an ordinary batch must not pay for.
+        if self.agent.app_running() {
+            self.agent.refresh_app_readout(self.app_agent_readout());
+            if let Some(revision) = self.current_revision() {
+                self.agent
+                    .refresh_app_project(revision, self.project.agent_project_summary());
+            }
         }
         let revision = self.current_revision();
         let advanced = revision != self.applied_revision;
@@ -5806,6 +5808,11 @@ impl StudioController {
             crate::AgentOp::ApplyProjectEdits { seq, input } => {
                 self.app_agent_apply_edits(seq, input).await
             }
+            crate::AgentOp::AppRead { seq, input } => {
+                let result = self.app_agent_read(&input).await;
+                self.agent.record_read_ack(seq, result);
+                Ok(UiNotices::new())
+            }
             crate::AgentOp::AppStop => {
                 self.agent.request_app_stop();
                 Ok(UiNotices::new())
@@ -5887,6 +5894,107 @@ impl StudioController {
         ))
     }
 
+    /// Answer one app-agent `read` from what the controller holds.
+    async fn app_agent_read(
+        &mut self,
+        input: &lpa_agent::ReadInput,
+    ) -> Result<serde_json::Value, String> {
+        use lpa_agent::ReadWhat;
+        let name = input.name.trim();
+        match input.what {
+            ReadWhat::Node => {
+                let (mut facts, def) = self.project.agent_node_facts(name)?;
+                if let Some(def) = def
+                    && let Ok(Some(text)) = self.agent_asset_text(&def).await
+                {
+                    facts["definition"] =
+                        serde_json::from_str(&text).unwrap_or(serde_json::Value::String(text));
+                }
+                Ok(facts)
+            }
+            ReadWhat::Pattern => {
+                let slug = name.trim_start_matches("catalog/");
+                let example = crate::app::home::embedded_example(&format!("catalog/{slug}"))
+                    .filter(|example| example.bucket == crate::app::home::CatalogBucket::Patterns)
+                    .ok_or_else(|| format!("there is no catalog pattern {slug:?}"))?;
+                let shader: serde_json::Value = example
+                    .file("effect/shader.json")
+                    .and_then(|bytes| serde_json::from_slice(bytes).ok())
+                    .unwrap_or_default();
+                let knobs: Vec<serde_json::Value> = shader["consumed"]
+                    .as_object()
+                    .into_iter()
+                    .flatten()
+                    .filter(|(_, param)| param["label"].is_string())
+                    .map(|(key, param)| {
+                        serde_json::json!({
+                            "knob": key,
+                            "label": param["label"],
+                            "description": param["description"],
+                        })
+                    })
+                    .collect();
+                Ok(serde_json::json!({
+                    "pattern": example.slug,
+                    "name": example.name,
+                    "description": example.description,
+                    "space": shader["space"]["kind"].as_str().unwrap_or("TwoD"),
+                    "knobs": knobs,
+                }))
+            }
+            ReadWhat::Board => {
+                let board = lpa_boards::board_by_id(name).ok_or_else(|| {
+                    format!(
+                        "there is no board {name:?}; boards: {}",
+                        lpa_boards::all_boards()
+                            .iter()
+                            .map(|board| board.board_id.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
+                })?;
+                Ok(serde_json::json!({
+                    "board": board.board_id,
+                    "name": board.display_name,
+                    "chip": board.soc,
+                    "led_pins": board
+                        .output_wires()
+                        .map(|(label, gpio)| serde_json::json!({ "label": label, "gpio": gpio }))
+                        .collect::<Vec<_>>(),
+                    "default_led_pin": board.default_led_wire(),
+                }))
+            }
+            ReadWhat::Device => {
+                let roster = self.device_roster_view();
+                let device = roster
+                    .roster
+                    .devices
+                    .iter()
+                    .find(|device| device.title == name)
+                    .ok_or_else(|| {
+                        format!(
+                            "no device named {name:?}; devices: {}",
+                            roster
+                                .roster
+                                .devices
+                                .iter()
+                                .map(|device| device.title.as_str())
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        )
+                    })?;
+                Ok(serde_json::json!({
+                    "device": device.title,
+                    "state": device.state_label,
+                    "detail": device.detail,
+                    "chip": device.detected_chip,
+                    "board": device.board_id,
+                    "identity": device.identity_label,
+                }))
+            }
+        }
+    }
+
     /// Start one app-chat run. Unlike the shader chat it needs no open
     /// project: the app agent builds one from nothing.
     fn app_agent_send(&mut self, text: String) -> UiResult {
@@ -5910,17 +6018,45 @@ impl StudioController {
         Ok(UiNotices::new())
     }
 
-    /// The app agent's view of the app (PD3's per-turn state). A
-    /// placeholder until the focused readout (plan P06): which page is
-    /// up, and the open project's name.
-    fn app_agent_readout(&self) -> String {
-        if self.home_view().is_some() {
-            return "page: home (no project open)".to_string();
+    /// The readout, for tests that measure it.
+    #[cfg(test)]
+    pub(crate) fn app_agent_readout_for_test(
+        &self,
+    ) -> crate::app::agent::app_agent_readout::AppReadoutSnapshot {
+        self.app_agent_readout()
+    }
+
+    /// The app agent's view of the app (PD3's per-turn state; focus v1 =
+    /// page + open project + selection + devices + offered actions).
+    fn app_agent_readout(&self) -> crate::app::agent::app_agent_readout::AppReadoutSnapshot {
+        use crate::app::agent::app_agent_readout::{
+            AppReadoutSnapshot, device_lines, page_line, project_lines, selection_line,
+        };
+        let home = self.home_view().is_some();
+        let mut text = page_line(home);
+        let mut actions = Vec::new();
+        if !home {
+            text.push_str(&project_lines(
+                &self.project.agent_project_name(),
+                &self.project.agent_project_summary(),
+            ));
+            text.push_str(&selection_line(self.project.agent_selection()));
+            // The view's own offers: the project pane's actions (Save,
+            // Revert, …) and each root card's header actions — the buttons
+            // the user sees, with their enablement. Tree focus actions and
+            // add-node menus stay out (the edit tool covers those).
+            let view = self.view();
+            for pane in &view.panes {
+                actions.extend(pane.actions.iter().cloned());
+                if let crate::UiViewContent::ProjectEditor(editor) = &pane.body {
+                    for node in &editor.nodes {
+                        actions.extend(node.header_actions.iter().map(|a| a.action.clone()));
+                    }
+                }
+            }
         }
-        format!(
-            "page: project editor\nproject: {}",
-            self.project.agent_project_name()
-        )
+        text.push_str(&device_lines(&self.device_roster_view()));
+        AppReadoutSnapshot { text, actions }
     }
 
     /// Execute one history revert: pull the recorded source, restage it

@@ -17,6 +17,12 @@ use super::project_node_tree_view::ProjectNodeStatusTone;
 use crate::ProjectController;
 
 impl ProjectController {
+    /// What the patch surface has selected, for the agent's readout.
+    pub(crate) fn agent_selection(&self) -> Option<String> {
+        self.patch_selection_single()
+            .map(|target| format!("{target:?}").chars().take(120).collect())
+    }
+
     /// The project as the agent's edit results report it.
     pub(crate) fn agent_project_summary(&self) -> Value {
         let board = self

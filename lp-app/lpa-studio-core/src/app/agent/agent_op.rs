@@ -77,6 +77,12 @@ pub enum AgentOp {
     },
     /// Flip the app chat's abort flag (its Stop button).
     AppStop,
+    /// The app agent's `read` (dispatched by its host bridge): answer from
+    /// what the controller holds into the app bridge cell under `seq`.
+    AppRead {
+        seq: u64,
+        input: lpa_agent::ReadInput,
+    },
 }
 
 impl ControllerOp for AgentOp {
@@ -121,6 +127,11 @@ impl ControllerOp for AgentOp {
                 "Apply edits",
                 "Apply the assistant's project edits as ordinary edits.",
                 ActionPriority::Primary,
+            ),
+            Self::AppRead { .. } => ActionMeta::new(
+                "Read",
+                "Answer the assistant's read.",
+                ActionPriority::Secondary,
             ),
             Self::AppStop => ActionMeta::new(
                 "Stop",

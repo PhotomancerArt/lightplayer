@@ -329,6 +329,15 @@ impl EvalStudio {
         rows
     }
 
+    /// The app agent's readout of this studio, ids minted.
+    pub(crate) fn readout(&mut self) -> String {
+        self.actor
+            .controller_mut_for_test()
+            .app_agent_readout_for_test()
+            .mint()
+            .0
+    }
+
     /// Whether unsaved authored edits remain.
     pub(crate) fn unsaved(&mut self) -> bool {
         let project = self.actor.controller_mut_for_test().project_for_test();

@@ -32,7 +32,10 @@ pub fn build_app_system_prompt(reference: &str) -> String {
          can decide sensibly yourself.\n\
          - The current state of the app arrives in an <app_state> block with \
          each message and after each of your tool calls. Trust it over your \
-         memory of earlier turns.\n\
+         memory of earlier turns. Its action ids (a1, a2, …) are good only \
+         until the next <app_state>.\n\
+         - Before you change a field you have not seen, `read` the node: its \
+         definition shows the exact paths and values `set` takes.\n\
          - After edits, read the `project` section of the result: a node in \
          `error` or `fault`, or a port with a `problem`, means you are not \
          done.\n\

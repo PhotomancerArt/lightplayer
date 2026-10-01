@@ -4,6 +4,7 @@
 //! lands where a user's edit lands (D3/D6). Tests and evals use stubs.
 
 use crate::tool::app::edit_project_tool::{EditProjectInput, ProjectEditsOutcome};
+use crate::tool::app::read_tool::ReadInput;
 use crate::tool::iterate_host::{HostError, HostFuture};
 
 /// Injected by the embedding app.
@@ -21,5 +22,15 @@ pub trait AppAgentHost {
     ) -> HostFuture<'a, Result<ProjectEditsOutcome, HostError>> {
         let _ = input;
         Box::pin(async { Err(HostError::new("this host cannot edit projects")) })
+    }
+
+    /// Read one thing in full (the `read` tool). `Err` = not found, with
+    /// what does exist.
+    fn read<'a>(
+        &'a mut self,
+        input: &'a ReadInput,
+    ) -> HostFuture<'a, Result<serde_json::Value, HostError>> {
+        let _ = input;
+        Box::pin(async { Err(HostError::new("this host cannot read")) })
     }
 }

@@ -263,7 +263,10 @@ impl AgentController {
 
     /// Replace the app chat's readout (called after every processed batch,
     /// so a running app agent reads the state its last edit produced).
-    pub(crate) fn refresh_app_readout(&mut self, readout: String) {
+    pub(crate) fn refresh_app_readout(
+        &mut self,
+        readout: crate::app::agent::app_agent_readout::AppReadoutSnapshot,
+    ) {
         self.app.bridge.borrow_mut().readout = readout;
     }
 
@@ -276,6 +279,11 @@ impl AgentController {
     /// Replace the app bridge's project summary (read at `revision`).
     pub(crate) fn refresh_app_project(&mut self, revision: i64, summary: serde_json::Value) {
         self.app.bridge.borrow_mut().project = Some((revision, summary));
+    }
+
+    /// Record one `read`'s answer for the awaiting run.
+    pub(crate) fn record_read_ack(&mut self, seq: u64, result: Result<serde_json::Value, String>) {
+        self.app.bridge.borrow_mut().read_ack = Some((seq, result));
     }
 
     /// Record one `edit_project` batch's answer for the awaiting run.

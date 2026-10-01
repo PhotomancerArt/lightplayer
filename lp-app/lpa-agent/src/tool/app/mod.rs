@@ -6,6 +6,7 @@ pub mod app_agent_host;
 pub mod app_tool_schema;
 pub mod app_toolset;
 pub mod edit_project_tool;
+pub mod read_tool;
 
 pub use app_agent_host::AppAgentHost;
 pub use app_toolset::AppToolset;
@@ -14,3 +15,4 @@ pub use edit_project_tool::{
     NodeRef, ProjectEdit, ProjectEditsOutcome, SetAssetEdit, SetEdit, SetTargetEdit, SlotRef,
     edit_project_tool_def, run_edit_project,
 };
+pub use read_tool::{READ_TOOL_NAME, ReadInput, ReadWhat, read_tool_def, run_read};

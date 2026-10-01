@@ -44,7 +44,7 @@ pub use provider::{
 pub use session::{AgentError, AgentEvent, AgentSession, AgentTranscript, MAX_TURNS_PER_RUN};
 pub use tool::app::{
     AppAgentHost, AppToolset, EDIT_PROJECT_TOOL_NAME, EditProjectInput, EditStatus, ProjectEdit,
-    ProjectEditsOutcome,
+    ProjectEditsOutcome, READ_TOOL_NAME, ReadInput, ReadWhat,
 };
 pub use tool::{
     AgentHost, BindingInfo, DECLARE_SPACE_TOOL_NAME, DeclaredSpace, ENGINE_VERDICT_BUDGET_MS,

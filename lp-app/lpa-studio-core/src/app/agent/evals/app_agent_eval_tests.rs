@@ -372,6 +372,101 @@ fn a_dead_output_endpoint_is_the_output_nodes_status() {
     );
 }
 
+#[test]
+fn the_readout_of_seans_project_is_small_and_says_what_matters() {
+    let mut studio = EvalStudio::with_project(&golden_tree("sean-250-d6"));
+    studio.settle(6);
+    let readout = studio.readout();
+    // Loaded straight onto the server (no library), so no board is chosen
+    // and the readout says so instead of resolving the pin.
+    for needle in [
+        "page: project editor",
+        "- output (Output) ok",
+        "- fixture (Fixture) ok",
+        "port 0 → ws281x:local:D6 — problem: the project has no board",
+        "actions",
+    ] {
+        assert!(readout.contains(needle), "{needle}:\n{readout}");
+    }
+    // ≤1.5k tokens (≈ 4 chars a token) on a 10-node project.
+    eprintln!(
+        "readout: {} chars ≈ {} tokens\n{readout}",
+        readout.len(),
+        readout.len() / 4
+    );
+    assert!(readout.len() / 4 <= 1_500, "{readout}");
+}
+
+#[test]
+fn read_answers_nodes_patterns_boards_and_names_what_exists_on_a_miss() {
+    let scenario = Scenario::load("e2-make-it-300").expect("e2");
+    let call = |id: &str, what: &str, name: &str| {
+        vec![
+            TurnEvent::ToolUseStart {
+                id: id.into(),
+                name: lpa_agent::READ_TOOL_NAME.into(),
+            },
+            TurnEvent::ToolInputDelta {
+                id: id.into(),
+                json_fragment: serde_json::json!({ "what": what, "name": name }).to_string(),
+            },
+        ]
+    };
+    let mut turn = Vec::new();
+    turn.extend(call("r1", "node", "fixture"));
+    turn.extend(call("r2", "pattern", "spiral"));
+    turn.extend(call("r3", "board", "seeed/xiao-esp32-c6"));
+    turn.extend(call("r4", "board", "acme/nope"));
+    turn.push(turn_done(StopReason::ToolUse));
+    let scripts = vec![vec![
+        turn,
+        vec![
+            TurnEvent::TextDelta("Read.".into()),
+            turn_done(StopReason::EndTurn),
+        ],
+    ]];
+    let outcome = run_scenario(&scenario, &EvalDriver::Scripted(scripts));
+    let results: Vec<serde_json::Value> = outcome
+        .transcript
+        .steps
+        .iter()
+        .filter_map(|step| match step {
+            EvalStep::ToolResult { content, .. } => serde_json::from_str(content).ok(),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(results.len(), 4, "{results:#?}");
+    assert_eq!(results[0]["kind"], "Fixture", "{:#}", results[0]);
+    assert_eq!(
+        results[0]["definition"]["render_size"]["width"], 250,
+        "{:#}",
+        results[0]
+    );
+    assert!(
+        results[1]["description"]
+            .as_str()
+            .is_some_and(|text| text.contains("rainbow")),
+        "{:#}",
+        results[1]
+    );
+    assert!(
+        results[2]["led_pins"]
+            .as_array()
+            .expect("pins")
+            .iter()
+            .any(|pin| pin["label"] == "D6" && pin["gpio"] == 16),
+        "{:#}",
+        results[2]
+    );
+    assert!(
+        results[3]["error"]
+            .as_str()
+            .is_some_and(|text| text.contains("seeed/xiao-esp32-c6")),
+        "a miss lists the boards: {:#}",
+        results[3]
+    );
+}
+
 /// The live leg (`just app-agent-eval`): every selected scenario, against a
 /// real OpenRouter model, written under `target/app-agent-evals/<run>/`.
 /// A measurement, not a gate: failures are reported, not asserted.
