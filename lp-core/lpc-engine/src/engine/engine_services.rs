@@ -76,7 +76,10 @@ struct OutputWire {
     /// offer. Parking on the generation means such a wire is asked once per
     /// *hardware change* rather than once per frame, while a pin freed by
     /// another node still lights it on the very next flush.
-    parked_at_generation: Option<u64>,
+    ///
+    /// The record also says WHY, for the output node's status — packed into
+    /// the bytes the generation already took, so a wire costs what it did.
+    parked: Option<Parked>,
     /// Buffer sample count the last buffer-underrun warning was issued for.
     ///
     /// An overflowing slice keeps overflowing every frame, so the warning is
@@ -102,7 +105,7 @@ impl OutputWire {
             len_samples: planned.len_samples,
             port_handle: None,
             last_byte_count: None,
-            parked_at_generation: None,
+            parked: None,
             truncated_at_samples: None,
             capped_at_samples: None,
         }
@@ -246,7 +249,7 @@ impl EngineServices {
         // across the swap.
         for sink in self.output_sinks.values_mut() {
             for wire in &mut sink.wires {
-                wire.parked_at_generation = None;
+                wire.parked = None;
             }
         }
         self.output_provider = provider;
@@ -380,6 +383,28 @@ impl EngineServices {
             })
     }
 
+    /// Why `node`'s output does not reach its pin, while one of its wires
+    /// is parked on a failed open: `port 0: ws281x:local:D99 is not an
+    /// output pin on this board`. The output node wears it as its status
+    /// (one flush behind, like the smoothing notice), so a dead endpoint is
+    /// visible where the node is, not only in the log. `None` once every
+    /// wire opens.
+    pub fn output_open_failure(&self, node: NodeId) -> Option<String> {
+        self.output_sinks
+            .values()
+            .filter(|sink| sink.node == node)
+            .flat_map(|sink| sink.wires.iter())
+            .find_map(|wire| {
+                let parked = wire.parked?;
+                Some(alloc::format!(
+                    "port {}: {} {}",
+                    wire.port,
+                    wire.endpoint.as_str(),
+                    parked.reason.describe()
+                ))
+            })
+    }
+
     pub fn flush_dirty_output_sinks(
         &mut self,
         revision: Revision,
@@ -464,7 +489,7 @@ impl EngineServices {
                         wire.start_samples = planned.start_samples;
                         wire.len_samples = planned.len_samples;
                         wire.last_byte_count = None;
-                        wire.parked_at_generation = None;
+                        wire.parked = None;
                         wire.truncated_at_samples = None;
                         wire.capped_at_samples = None;
                     }
@@ -685,11 +710,7 @@ fn flush_registered_sinks(
 
         // Nothing to drive, or every wire is waiting on a hardware change:
         // skip before paying for the decode.
-        if sink
-            .wires
-            .iter()
-            .all(|wire| wire.parked_at_generation == Some(generation))
-        {
+        if sink.wires.iter().all(|wire| wire.parked_at(generation)) {
             continue;
         }
 
@@ -705,7 +726,7 @@ fn flush_registered_sinks(
         }
 
         for wire in sink.wires.iter_mut() {
-            if wire.parked_at_generation == Some(generation) {
+            if wire.parked_at(generation) {
                 continue;
             }
             if let Err(error) = flush_one_wire(
@@ -873,6 +894,51 @@ fn wire_slice<'a>(node: NodeId, wire: &mut OutputWire, samples: &'a [u16]) -> Op
     Some(&samples[start..start + len as usize])
 }
 
+/// A wire parked on a failed open: the hardware generation it failed at,
+/// and why.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Parked {
+    generation: u64,
+    reason: OpenFailure,
+}
+
+impl OutputWire {
+    /// Parked at exactly `generation` — skipped until the hardware changes.
+    fn parked_at(&self, generation: u64) -> bool {
+        self.parked
+            .is_some_and(|parked| parked.generation == generation)
+    }
+}
+
+/// Why a wire's open failed, kept on the parked wire for its node's status.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum OpenFailure {
+    /// The board has no output resource by that name.
+    NotOnThisBoard,
+    /// The resource exists but something else holds it.
+    InUse,
+    /// Any other refusal.
+    Other,
+}
+
+impl OpenFailure {
+    fn of(error: &OutputError) -> Self {
+        match error {
+            OutputError::InvalidConfig { .. } => Self::NotOnThisBoard,
+            OutputError::PinAlreadyOpen { .. } | OutputError::Hardware { .. } => Self::InUse,
+            _ => Self::Other,
+        }
+    }
+
+    fn describe(self) -> &'static str {
+        match self {
+            Self::Other => "could not be opened (see the log)",
+            Self::NotOnThisBoard => "is not an output pin on this board",
+            Self::InUse => "is already in use (another output, or the board)",
+        }
+    }
+}
+
 /// Open the wire's port if it has none, parking it on failure.
 ///
 /// `generation` is the provider's hardware generation sampled before any open
@@ -897,12 +963,15 @@ fn ensure_port_open(
     ) {
         Ok(handle) => handle,
         Err(error) => {
-            wire.parked_at_generation = Some(generation);
+            wire.parked = Some(Parked {
+                generation,
+                reason: OpenFailure::of(&error),
+            });
             return Err(error);
         }
     };
 
-    if wire.parked_at_generation.take().is_some() {
+    if wire.parked.take().is_some() {
         log::info!(
             "EngineServices: output {} recovered and is writing again",
             wire.endpoint
@@ -1267,6 +1336,67 @@ mod tests {
             );
         }
         assert_eq!(provider.open_port_count(), good.len());
+    }
+
+    /// A dead endpoint is the output node's status, not only a log line
+    /// (PD7): the services name the port, the spec and why — and stop
+    /// naming it once a port that opens replaces it.
+    #[test]
+    fn an_output_that_cannot_open_reports_why_until_it_opens() {
+        let provider = Rc::new(MemoryOutputProvider::with_hardware_manifest(
+            lpc_hardware::default_esp32c6_hardware_manifest(),
+        ));
+        let mut services = EngineServices::new(TreePath::parse("/p.show").expect("tree path"));
+        services.set_output_provider(Some(Box::new(SharedMemoryOutputProvider(Rc::clone(
+            &provider,
+        )))));
+        let mut buffers = RuntimeBufferStore::new();
+        let buffer_id = output_buffer(&mut buffers, Revision::new(1));
+        services.register_output_sink(
+            buffer_id,
+            node(3),
+            &OutputDef::new(endpoint("ws281x:local:D99")),
+        );
+        assert_eq!(
+            services.output_open_failure(node(3)),
+            None,
+            "nothing tried yet"
+        );
+
+        services
+            .flush_dirty_output_sinks(Revision::new(1), &buffers)
+            .expect_err("D99 is not a XIAO C6 pin");
+        assert_eq!(
+            services.output_open_failure(node(3)).as_deref(),
+            Some("port 0: ws281x:local:D99 is not an output pin on this board")
+        );
+        assert_eq!(services.output_open_failure(node(4)), None, "per node");
+
+        // Re-authored onto D6 (GPIO16): it opens, and the failure clears.
+        services.register_output_sink(
+            buffer_id,
+            node(3),
+            &OutputDef::new(endpoint("ws281x:local:D6")),
+        );
+        buffers
+            .get_mut(buffer_id)
+            .expect("the buffer")
+            .mark_updated(Revision::new(2));
+        services
+            .flush_dirty_output_sinks(Revision::new(2), &buffers)
+            .expect("D6 opens");
+        assert_eq!(services.output_open_failure(node(3)), None);
+    }
+
+    /// `size_of::<OutputWire>()` before the parked reason existed (64-bit host).
+    const OUTPUT_WIRE_BYTES: usize = 88;
+
+    /// The parked reason rides the bytes the parked generation already
+    /// took: a wire costs what it did before it learned why it parked.
+    #[test]
+    fn the_parked_reason_does_not_grow_a_wire() {
+        assert_eq!(core::mem::size_of::<super::OpenFailure>(), 1);
+        assert_eq!(core::mem::size_of::<super::OutputWire>(), OUTPUT_WIRE_BYTES);
     }
 
     /// An endpoint the board does not have can never open, so the flush seam
