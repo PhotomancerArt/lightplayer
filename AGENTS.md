@@ -151,6 +151,28 @@ The core is IO-free state machines; async belongs to platform edges. See
 - Tests count as edges: a null-waker `block_on` loop is fine in tests
   driving immediately-ready futures, and nowhere else.
 
+## Agentic control — every user verb is an offer built in core
+
+Studio's view is humble, and the app agent is its second consumer: it sees
+the app through the same view model and presses the same actions. See
+`docs/adr/2026-10-01-agentic-control-offers-in-core.md`.
+
+- **A button the user can press is a `UiAction` built in `lpa-studio-core`**
+  and published on a view model, never constructed in `lpa-studio-web`. An
+  action the web builds is invisible to the agent and untestable from core.
+- **`just lint-web-actions`** (in `check-lint`, so in CI) is a ratchet on the
+  actions the web still builds (`scripts/web-actions-ratchet.txt`). Per
+  file, the count may only go down. Moving a web-built action between files
+  needs `--bless` in the same change. Moving one into core is the point:
+  bless the drop.
+- **An action only the user may press says so in its meta:** a
+  `confirmation`, or `ActionMeta::gesture` (`UserActivation` for a browser
+  picker, `UserDecision` for flashing or replacing what a board runs). The
+  agent turns those into chat cards whose click dispatches the same action.
+- The rework toward one offer tree is a roadmap
+  (`lp2025/2026-10-01-1255-agentic-ui-roadmap`). Don't migrate whole
+  surfaces ad hoc. Don't add new web-built actions either.
+
 ## Wire/protocol compatibility
 
 - **During heavy development, wire/protocol compatibility is NOT maintained.**

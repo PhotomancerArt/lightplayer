@@ -6173,14 +6173,18 @@ impl StudioController {
                 &self.project.agent_project_summary(),
             ));
             text.push_str(&selection_line(self.project.agent_selection()));
-            // The view's own offers: the project pane's actions (Save,
-            // Revert, …) and each root card's header actions — the buttons
-            // the user sees, with their enablement. Tree focus actions and
-            // add-node menus stay out (the edit tool covers those).
+            // The view's own offers: the pane's actions, the project
+            // header's (Save and Revert, while there are edits to save) and
+            // each root card's header actions — the buttons the user sees,
+            // with their enablement. Tree focus actions and add-node menus
+            // stay out (the edit tool covers those). Core keeps these in
+            // several DTO fields rather than one list; the roadmap's
+            // "offers" work gives them one home.
             let view = self.view();
             for pane in &view.panes {
                 actions.extend(pane.actions.iter().cloned());
                 if let crate::UiViewContent::ProjectEditor(editor) = &pane.body {
+                    actions.extend(editor.header_actions.iter().map(|a| a.action.clone()));
                     for node in &editor.nodes {
                         actions.extend(node.header_actions.iter().map(|a| a.action.clone()));
                     }
