@@ -12,7 +12,9 @@ use core::any::Any;
 
 use lpa_devices::Action;
 
-use crate::{ActionClass, ActionConfirmation, ActionMeta, ActionPriority, ControllerOp};
+use crate::{
+    ActionClass, ActionConfirmation, ActionGesture, ActionMeta, ActionPriority, ControllerOp,
+};
 
 /// How the device this gesture targets is reached.
 ///
@@ -142,7 +144,9 @@ impl ControllerOp for DevicesOp {
                 "Pick the USB port your LightPlayer board is plugged into.",
                 ActionPriority::Primary,
             )
-            .with_icon("usb"),
+            .with_icon("usb")
+            // `navigator.serial.requestPort()`: a real click or nothing.
+            .with_gesture(ActionGesture::UserActivation),
             // The sibling path. Its summary says what Bluetooth cannot do
             // up front, because a user who adds a piece over Bluetooth and
             // then looks for "Update firmware" is owed the reason before,
@@ -153,7 +157,9 @@ impl ControllerOp for DevicesOp {
                  Play and edit work over Bluetooth; firmware updates need USB.",
                 ActionPriority::Secondary,
             )
-            .with_icon("bluetooth"),
+            .with_icon("bluetooth")
+            // `navigator.bluetooth.requestDevice()`: a real click or nothing.
+            .with_gesture(ActionGesture::UserActivation),
             Action::AdoptLink { .. } => ActionMeta::new(
                 "Set up this device",
                 "Remember this board so it can be set up.",
@@ -184,7 +190,9 @@ impl ControllerOp for DevicesOp {
                 "Pick this board's port again. Some boards can't be \
                  re-recognized after a replug, so the browser asks once more.",
                 ActionPriority::Primary,
-            ),
+            )
+            // The browser's chooser again: a real click or nothing.
+            .with_gesture(ActionGesture::UserActivation),
             Action::Disconnect { .. } => ActionMeta::new(
                 "Disconnect",
                 "Close the port. The board keeps running; Studio stops watching it.",
@@ -223,7 +231,10 @@ impl ControllerOp for DevicesOp {
                 "Flash firmware",
                 "Write LightPlayer firmware for the picked board onto this chip.",
                 ActionPriority::Primary,
-            ),
+            )
+            // Whatever the chip ran before is gone: the user's call, even
+            // when an assistant proposes it.
+            .with_gesture(ActionGesture::UserDecision),
             // No confirmation: the empty face's picker IS the deliberate
             // gesture, and a board with nothing on it has nothing to lose.
             // (Pushing OVER a project is M4's banking question, not this
@@ -368,6 +379,50 @@ mod tests {
                 "{action:?} renders nothing"
             );
             assert_eq!(op.action_class(), ActionClass::Recovery, "{action:?}");
+        }
+    }
+
+    /// The verbs only the user's own click may press (PD5): the browser's
+    /// pickers need user activation, and a flash is the user's decision.
+    /// Everything else an assistant may press for them — the ones that
+    /// take something away still ask through their confirmation.
+    #[test]
+    fn the_pickers_and_the_flash_need_the_users_own_click() {
+        let device = DeviceId(1);
+        let flash = Action::Flash {
+            device,
+            board_id: "seeed/xiao-esp32-c6".to_string(),
+            build_id: "esp32c6-4mb".to_string(),
+            park_first: false,
+            name: None,
+        };
+        for (action, gesture) in [
+            (Action::AddFromUsb, ActionGesture::UserActivation),
+            (Action::AddFromBle, ActionGesture::UserActivation),
+            (Action::Reconnect { device }, ActionGesture::UserActivation),
+            (flash, ActionGesture::UserDecision),
+            (Action::Connect { device }, ActionGesture::Anyone),
+            (Action::Push { device }, ActionGesture::Anyone),
+            (Action::Disconnect { device }, ActionGesture::Anyone),
+        ] {
+            let meta = DevicesOp::new(action.clone()).default_action_meta();
+            assert_eq!(meta.gesture, gesture, "{action:?}");
+            assert_eq!(
+                meta.needs_user(),
+                gesture != ActionGesture::Anyone,
+                "{action:?}"
+            );
+        }
+        for action in [
+            Action::Forget { device },
+            Action::Erase { device },
+            Action::RemoveProject { device },
+        ] {
+            let meta = DevicesOp::new(action.clone()).default_action_meta();
+            assert!(
+                meta.needs_user(),
+                "{action:?} asks through its confirmation"
+            );
         }
     }
 

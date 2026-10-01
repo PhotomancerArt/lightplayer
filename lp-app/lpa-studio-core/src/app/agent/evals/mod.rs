@@ -15,4 +15,6 @@ pub(crate) mod app_agent_scenario;
 pub(crate) mod app_agent_transcript;
 
 #[cfg(test)]
+mod app_agent_act_tests;
+#[cfg(test)]
 mod app_agent_eval_tests;

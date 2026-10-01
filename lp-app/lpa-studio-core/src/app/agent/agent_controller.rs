@@ -286,6 +286,31 @@ impl AgentController {
         self.app.bridge.borrow_mut().read_ack = Some((seq, result));
     }
 
+    /// Record one `act`'s answer for the awaiting run.
+    pub(crate) fn record_act_ack(
+        &mut self,
+        seq: u64,
+        result: Result<lpa_agent::ActOutcome, String>,
+    ) {
+        self.app.bridge.borrow_mut().act_ack = Some((seq, result));
+    }
+
+    /// The action id `id` named in the readout the agent was last shown.
+    pub(crate) fn app_minted_action(&self, id: &str) -> Option<crate::UiAction> {
+        self.app
+            .bridge
+            .borrow()
+            .minted
+            .iter()
+            .find(|entry| entry.id == id)
+            .map(|entry| entry.action.clone())
+    }
+
+    /// The app chat's session, for the controller's card bookkeeping.
+    pub(crate) fn app_session_mut(&mut self) -> &mut AppAgentSession {
+        &mut self.app
+    }
+
     /// Record one `edit_project` batch's answer for the awaiting run.
     pub(crate) fn record_project_edits_ack(
         &mut self,
@@ -319,10 +344,15 @@ impl AgentController {
     /// Start one app-chat run: push the user turn and spawn the session
     /// future. The readout the bridge serves is already current (the
     /// controller refreshes it after every batch).
+    ///
+    /// `shown` is false for the run a card resumes: the card's own state
+    /// already shows what the user did, so the synthetic message is the
+    /// model's only.
     pub(crate) fn start_app_run(
         &mut self,
         text: String,
         provider: Box<dyn ModelProvider>,
+        shown: bool,
     ) -> Result<(), String> {
         let Some(tx) = self.command_tx.clone() else {
             return Err("agent command channel not installed".to_string());
@@ -356,9 +386,11 @@ impl AgentController {
         app.abort = session.abort_handle();
         app.running = true;
         app.mirror.status = crate::UiAgentStatus::Streaming;
-        app.mirror
-            .turns
-            .push(crate::UiAgentTurn::User { text: text.clone() });
+        if shown {
+            app.mirror
+                .turns
+                .push(crate::UiAgentTurn::User { text: text.clone() });
+        }
 
         let slot = Rc::clone(&app.runtime);
         let event_tx = tx.clone();

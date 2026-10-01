@@ -1,4 +1,4 @@
-use crate::{ActionConfirmation, ActionEnablement, ActionPriority};
+use crate::{ActionConfirmation, ActionEnablement, ActionGesture, ActionPriority};
 
 /// Render metadata for a `UiAction`.
 ///
@@ -26,6 +26,9 @@ pub struct ActionMeta {
     /// (delete, wipe). Renderers wear the error tint for these in every
     /// context; destructive actions usually also carry a confirmation.
     pub destructive: bool,
+    /// Who may press it: anyone driving the view, or only the user's own
+    /// click (see [`ActionGesture`]).
+    pub gesture: ActionGesture,
 }
 
 impl ActionMeta {
@@ -44,6 +47,7 @@ impl ActionMeta {
             enablement: ActionEnablement::Enabled,
             confirmation: None,
             destructive: false,
+            gesture: ActionGesture::Anyone,
         }
     }
 
@@ -83,6 +87,19 @@ impl ActionMeta {
             reason: reason.into(),
         };
         self
+    }
+
+    /// Require the user's own click (see [`ActionGesture`]).
+    pub fn with_gesture(mut self, gesture: ActionGesture) -> Self {
+        self.gesture = gesture;
+        self
+    }
+
+    /// Whether only the user may press this: it asks for a confirmation,
+    /// or needs the user's own click. The app agent offers such an action
+    /// as a card instead of dispatching it.
+    pub fn needs_user(&self) -> bool {
+        self.confirmation.is_some() || self.gesture != ActionGesture::Anyone
     }
 
     /// Attach confirmation copy to require approval before dispatch.

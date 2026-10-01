@@ -212,6 +212,9 @@ pub enum UiAgentTurn {
     /// truncated run). `level` picks the presentation: `Info` renders dim,
     /// `Warning` warning-toned (a run that ended incomplete).
     Notice { text: String, level: UiNoticeLevel },
+    /// An action the app agent proposed that only the user may press
+    /// (the app chat only).
+    Card(crate::app::agent::ui_agent_card::UiAgentCard),
 }
 
 /// Compact projection of one `iterate` call for the tool row. Derived from
