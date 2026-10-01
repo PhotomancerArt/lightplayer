@@ -135,6 +135,7 @@ fn the_app_chat_runs_a_scenario_end_to_end_on_a_scripted_model() {
             EvalStep::ToolResult { .. } => "tool_result",
             EvalStep::ScriptedReply { .. } => "reply",
             EvalStep::Stopped { .. } => "stopped",
+            EvalStep::Notice { .. } => "notice",
         })
         .collect();
     assert_eq!(

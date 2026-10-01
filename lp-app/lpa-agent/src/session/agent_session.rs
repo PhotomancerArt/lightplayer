@@ -270,7 +270,20 @@ impl<P: ModelProvider, T: Toolset> AgentSession<P, T> {
         // deserialization error that names neither the cause nor the fix.
         // Note this reclassifies AFTER `TurnDone`, so the UI's usage row
         // still reflects what the provider actually reported.
-        let stop_reason = if blocks.iter().any(Acc::has_malformed_tool_input) {
+        //
+        // A toolset can ask for the other reading instead: when the server
+        // says the turn ENDED on a tool call, an input that does not parse
+        // is the model writing bad JSON, not a cut — open models do this on
+        // long nested arguments — and the honest answer is an in-band error
+        // it can act on (resend), not "the output limit" and a dead run.
+        let malformed: Vec<(String, String)> = blocks
+            .iter()
+            .filter_map(Acc::malformed_tool_input)
+            .collect();
+        let answer_malformed = !malformed.is_empty()
+            && stop_reason == StopReason::ToolUse
+            && self.toolset.answers_malformed_tool_input();
+        let stop_reason = if !malformed.is_empty() && !answer_malformed {
             StopReason::MaxTokens
         } else {
             stop_reason
@@ -332,15 +345,27 @@ impl<P: ModelProvider, T: Toolset> AgentSession<P, T> {
                 note: input["note"].as_str().map(str::to_string),
             });
             let progress_id = id.clone();
-            let outcome = self
-                .toolset
-                .run_tool(&name, &input, &mut |phase| {
-                    on_event(AgentEvent::ToolProgress {
-                        id: progress_id.clone(),
-                        phase,
-                    });
-                })
-                .await;
+            let outcome = match malformed.iter().find(|(bad, _)| *bad == id) {
+                Some((_, error)) => crate::toolset::ToolOutcome {
+                    content: json!({
+                        "error": format!("the arguments of this `{name}` call are not valid JSON: {error}"),
+                        "hint": "nothing was applied; send the whole call again as one valid JSON object",
+                    })
+                    .to_string(),
+                    is_error: false,
+                    summary: json!({ "input_error": true }),
+                },
+                None => {
+                    self.toolset
+                        .run_tool(&name, &input, &mut |phase| {
+                            on_event(AgentEvent::ToolProgress {
+                                id: progress_id.clone(),
+                                phase,
+                            });
+                        })
+                        .await
+                }
+            };
             on_event(AgentEvent::ToolExecuted {
                 id: id.clone(),
                 name,
@@ -417,13 +442,19 @@ impl Acc {
     /// cause is the per-turn output cap landing mid-JSON; a genuinely
     /// malformed emission is indistinguishable here and is treated the
     /// same way, since neither can be run.
-    fn has_malformed_tool_input(&self) -> bool {
+    /// `(id, parse error)` for a tool call whose input does not parse.
+    fn malformed_tool_input(&self) -> Option<(String, String)> {
         match self {
-            Acc::Tool { input_json, .. } => {
+            Acc::Tool { id, input_json, .. } => {
                 let raw = input_json.trim();
-                !raw.is_empty() && serde_json::from_str::<serde_json::Value>(raw).is_err()
+                if raw.is_empty() {
+                    return None;
+                }
+                serde_json::from_str::<serde_json::Value>(raw)
+                    .err()
+                    .map(|error| (id.clone(), error.to_string()))
             }
-            Acc::Text(_) | Acc::Thinking { .. } | Acc::Redacted { .. } => false,
+            Acc::Text(_) | Acc::Thinking { .. } | Acc::Redacted { .. } => None,
         }
     }
 
@@ -443,14 +474,17 @@ impl Acc {
                 let raw = input_json.trim();
                 // A tool call with no streamed input means `{}`. Input that
                 // does not parse means the call was cut mid-JSON: `run_turn`
-                // detects that via `has_malformed_tool_input` and drops the
+                // detects that via `malformed_tool_input` and drops the
                 // block before execution, so this placeholder is never read.
                 // (It must not be the raw string — handing that to a tool's
                 // deserializer reports a type mismatch instead of the cut.)
                 let input = if raw.is_empty() {
                     json!({})
                 } else {
-                    serde_json::from_str(raw).unwrap_or(serde_json::Value::Null)
+                    // A malformed input is recorded as `{}` so the replayed
+                    // message stays protocol-valid when the toolset answers
+                    // it in-band (otherwise the block is dropped unread).
+                    serde_json::from_str(raw).unwrap_or_else(|_| json!({}))
                 };
                 ContentBlock::ToolUse {
                     id: id.clone(),
@@ -1107,6 +1141,62 @@ mod tests {
         );
         // The recorded transcript is what was sent.
         assert_eq!(session.transcript().messages[0], reqs[0].messages[0]);
+    }
+
+    #[test]
+    fn an_app_toolset_answers_malformed_tool_json_in_band_and_the_run_goes_on() {
+        use crate::tool::app::{AppAgentHost, AppToolset};
+
+        struct QuietHost;
+        impl AppAgentHost for QuietHost {
+            fn readout(&mut self) -> String {
+                "page: home".into()
+            }
+        }
+
+        // The server says the turn ended on the call, and the call's JSON
+        // breaks partway (an open model double-escaping long arguments).
+        let provider = FakeProvider::new(vec![
+            vec![
+                TurnEvent::ToolUseStart {
+                    id: "tu_1".into(),
+                    name: "edit_project".into(),
+                },
+                TurnEvent::ToolInputDelta {
+                    id: "tu_1".into(),
+                    json_fragment: "{\"edits\": [{\\\"set\\\": 1}]".into(),
+                },
+                turn_done(StopReason::ToolUse, 10, 40),
+            ],
+            vec![
+                TurnEvent::TextDelta("Resent.".into()),
+                turn_done(StopReason::EndTurn, 1, 1),
+            ],
+        ]);
+        let mut session =
+            AgentSession::with_toolset(&provider, AppToolset::new(QuietHost, "## Reference"));
+        let mut events = Vec::new();
+        block_on(session.run("go".into(), |e| events.push(e))).expect("run");
+
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::Truncated { .. })),
+            "a malformed call on a tool_calls turn is not an output cut here"
+        );
+        let results = &session.transcript().messages[2].content;
+        match &results[0] {
+            ContentBlock::ToolResult {
+                tool_use_id,
+                content,
+                ..
+            } => {
+                assert_eq!(tool_use_id, "tu_1");
+                assert!(content.contains("not valid JSON"), "{content}");
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+        assert_eq!(provider.requests.borrow().len(), 2, "the run went on");
     }
 
     // -- helpers ----------------------------------------------------------

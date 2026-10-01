@@ -1465,6 +1465,10 @@ impl StudioController {
                 self.settings.set_agent_model(model);
                 self.persist_user_settings();
             }
+            SettingsCommand::SetAppAgentModel(model) => {
+                self.settings.set_app_agent_model(model);
+                self.persist_user_settings();
+            }
             SettingsCommand::SetAgentPriceInputPerMtok(value) => {
                 self.settings.set_agent_price_input_per_mtok(value);
                 self.persist_user_settings();
@@ -5998,7 +6002,7 @@ impl StudioController {
     /// Start one app-chat run. Unlike the shader chat it needs no open
     /// project: the app agent builds one from nothing.
     fn app_agent_send(&mut self, text: String) -> UiResult {
-        let Some(config) = self.settings.agent_provider_config() else {
+        let Some(config) = self.settings.app_agent_provider_config() else {
             return Err(UiError::UnsupportedFeature(
                 "the assistant isn't set up yet — configure a provider in Settings (the gear icon)"
                     .to_string(),

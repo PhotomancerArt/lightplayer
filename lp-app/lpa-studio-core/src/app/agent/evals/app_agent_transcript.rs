@@ -30,4 +30,8 @@ pub(crate) enum EvalStep {
     /// Why the scenario stopped early (budget, an unanswered question, a
     /// provider error).
     Stopped { reason: String },
+    /// A notice the chat showed the user (a truncated turn, a provider
+    /// error, the turn limit) — what the model-facing transcript cannot
+    /// carry, because a torn tool call never reaches it.
+    Notice { text: String },
 }

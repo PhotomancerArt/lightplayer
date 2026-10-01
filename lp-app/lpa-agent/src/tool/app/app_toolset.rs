@@ -49,6 +49,12 @@ impl<H: AppAgentHost> Toolset for AppToolset<H> {
         self.system.clone()
     }
 
+    /// Open models write malformed JSON on long nested `edit_project`
+    /// arguments; answering in-band lets them resend (D13).
+    fn answers_malformed_tool_input(&self) -> bool {
+        true
+    }
+
     fn turn_state(&mut self) -> Option<String> {
         Some(self.host.readout())
     }

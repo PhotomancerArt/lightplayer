@@ -103,7 +103,7 @@ impl AgentEvalStudio {
         for command in [
             SettingsCommand::SetAgentProvider(Some(AgentProvider::OpenRouter)),
             SettingsCommand::SetAgentOpenRouterApiKey(Some(api_key)),
-            SettingsCommand::SetAgentModel(Some(model)),
+            SettingsCommand::SetAppAgentModel(Some(model)),
         ] {
             controller.apply_settings_command(command);
         }
@@ -258,6 +258,21 @@ impl AgentEvalStudio {
                 _ => None,
             })
             .unwrap_or_default()
+    }
+
+    /// Every notice the app chat has shown, in order.
+    pub(crate) fn notices(&mut self) -> Vec<String> {
+        self.controller()
+            .agent_for_test()
+            .app_session()
+            .mirror
+            .turns
+            .iter()
+            .filter_map(|turn| match turn {
+                UiAgentTurn::Notice { text, .. } => Some(text.clone()),
+                _ => None,
+            })
+            .collect()
     }
 
     /// The app chat's status (an error ends a scenario).
@@ -466,6 +481,7 @@ pub(crate) fn drive_scenario(
             break;
         }
         let before = studio.transcript_steps().len();
+        let notices_before = studio.notices().len();
         studio.send(
             &message,
             RunLimits {
@@ -476,6 +492,13 @@ pub(crate) fn drive_scenario(
         );
         let all = studio.transcript_steps();
         steps.extend(all.into_iter().skip(before));
+        steps.extend(
+            studio
+                .notices()
+                .into_iter()
+                .skip(notices_before)
+                .map(|text| EvalStep::Notice { text }),
+        );
         if let UiAgentStatus::Error { message, .. } = studio.status() {
             stop = Some(format!("provider error: {message}"));
             break;

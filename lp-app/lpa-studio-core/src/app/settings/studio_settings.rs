@@ -24,6 +24,12 @@ pub const OPENROUTER_BASE_URL: &str = "https://openrouter.ai/api/v1";
 /// `GET https://openrouter.ai/api/v1/models` on 2026-07-26.
 pub const DEFAULT_OPENROUTER_MODEL: &str = "anthropic/claude-sonnet-5";
 
+/// The app chat's model on OpenRouter when no layer overrides it — its own
+/// default, apart from the shader agent's (plan A6): the best open-weights
+/// model that passes the app-agent evals (D13). Chosen by the 2026-10-01
+/// bake-off (`just app-agent-bakeoff`); provisional until Yona's G1 answer.
+pub const DEFAULT_APP_AGENT_OPENROUTER_MODEL: &str = "z-ai/glm-5.3";
+
 /// One settings overlay: every field optional, absent fields defer to the
 /// layer below.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -62,6 +68,11 @@ pub struct AgentSettings {
     /// Anthropic; REQUIRED (no default) for OpenAI/Custom.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// The app chat's model, when it should differ from the shader
+    /// agent's. Effective default on OpenRouter is
+    /// [`DEFAULT_APP_AGENT_OPENROUTER_MODEL`]; elsewhere it follows `model`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub app_agent_model: Option<String>,
     /// Cost-estimate rate override, $ per million input tokens. Wins over
     /// the built-in pricing table.
     #[serde(skip_serializing_if = "Option::is_none")]

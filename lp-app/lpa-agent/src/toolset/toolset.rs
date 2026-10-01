@@ -37,6 +37,15 @@ pub trait Toolset {
         None
     }
 
+    /// Whether a tool call whose arguments are not valid JSON, on a turn
+    /// the server says ended on that call, is answered in-band (an error
+    /// result the model can act on) instead of being read as an output
+    /// cut. Off by default: the shader agent's servers have labelled real
+    /// cuts `tool_calls`.
+    fn answers_malformed_tool_input(&self) -> bool {
+        false
+    }
+
     /// Run one tool call. An unknown tool or a malformed input is an
     /// in-band `{"error": …}` result, never a panic.
     fn run_tool<'a>(
