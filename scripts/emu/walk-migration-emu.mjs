@@ -15,6 +15,8 @@
 //   W2  a board already on the new layout: Update asks nothing
 //   W3  a board whose files do not fit: refused, nothing written
 //   W4  Cancel at the question: nothing written
+//   W5  cable pulled during the FIRMWARE write: the card leads back to a
+//       completed migration with every file
 //   W9  a board flashed with the new image by a path that skipped the
 //       migration (a bare `esptool write_flash 0x0`): it boots HOLDING its
 //       files, and the card's Finish update moves them
@@ -62,6 +64,7 @@ const SCENARIOS = {
   W2: { fixture: "current", describe: "a board already on the new layout: Update asks nothing" },
   W3: { fixture: "overfull", describe: "a board whose files do not fit: refused, nothing written" },
   W4: { fixture: "legacy", describe: "Cancel at the question: nothing written" },
+  W5: { fixture: "legacy", describe: "cable pulled mid firmware write: the card leads back to a completed migration" },
   W9: { fixture: "bypassed", describe: "a bypassed flash holds the files; Finish update moves them" },
   W7a: { fixture: "legacy", describe: "cable pulled mid filesystem write: formatted, backup in this browser" },
   W7b: { fixture: null, describe: "a new Chrome on the same profile restores the backup" },
@@ -233,6 +236,16 @@ async function pressLasting(driver, text) {
   await driver.clickWhenReady(text, { timeoutMs: STEP_MS });
   await driver.waitFor(`[...document.querySelectorAll('.ux-armed')].length > 0`, { timeoutMs: 10_000, what: `${text} to arm` });
   await driver.click(text);
+}
+
+/// A verb that may or may not arm (the not-LightPlayer face's Flash is a
+/// one-click row action today): click, and click again only if it armed.
+async function pressMaybeArmed(driver, text) {
+  await driver.clickWhenReady(text, { timeoutMs: STEP_MS });
+  const armed = await driver
+    .waitFor(`[...document.querySelectorAll('.ux-armed')].length > 0`, { timeoutMs: 3_000, what: `${text} to arm` })
+    .then(() => true, () => false);
+  if (armed) await driver.click(text);
 }
 
 async function awaitQuestion(driver) {
@@ -447,7 +460,52 @@ async function main() {
           await shot("cancelled");
         } else {
           await pressLasting(driver, "Continue");
-          if (scenario === "W7a") {
+          if (scenario === "W5") {
+            // The firmware's own write: esptool-js writes the merged image
+            // from 0x0 first and the filesystem (0x35…) only after it, so a
+            // reading inside the app's range is the firmware mid-write.
+            const moment = `(() => {
+              const at = [...${MAIN_TEXT}.matchAll(/Writing at 0x([0-9a-f]+)/g)].map((m) => parseInt(m[1], 16));
+              const last = at.length ? at[at.length - 1] : 0;
+              return last >= 0x100000 && last < 0x300000;
+            })()`;
+            const deadline = Date.now() + MIGRATION_MS;
+            while (!(await driver.evaluate(moment))) {
+              if (Date.now() > deadline) throw new Error("the moment to pull the cable never came");
+              await new Promise((r) => setTimeout(r, 250));
+            }
+            await shot("before-pull");
+            const writing = (await driver.evaluate(MAIN_TEXT)).match(/Writing at 0x[0-9a-f]+[^\n]*/g)?.pop() ?? "";
+            step("cable pulled during the firmware write", (await pullCable(driver)) === "pulled", writing);
+            await driver.attach(BOARD);
+            await connect(driver).catch(() => {});
+            // What the board does on its power-on boot (a part-written app),
+            // in its own words, before anything is asked of it again.
+            await new Promise((r) => setTimeout(r, 15_000));
+            const afterPull = await driver.evaluate(MAIN_TEXT);
+            verdict.afterPull = { card: afterPull.slice(0, 1500), board: boardConsole(door).slice(-1500).replace(/[\x00-\x09\x0b-\x1f\x7f-\xff]/g, "") };
+            await shot("after-pull");
+            // A part-written app does not boot ("No bootable app partitions"),
+            // so the card meets a board that is not running LightPlayer: its
+            // way back is the face for that, Flash firmware with the board
+            // picked — the same verb a blank board offers.
+            let verb = ["Finish update", "Restore files", "Update firmware"].find((v) => afterPull.includes(v));
+            if (!verb && afterPull.includes("boards fit") && afterPull.includes("Flash firmware")) {
+              await driver.clickWhenReady("boards fit", { timeoutMs: STEP_MS });
+              await driver.waitFor(`Boolean(document.querySelector('[id^="ux-popover-panel"]'))`, { timeoutMs: STEP_MS, what: "the board-model picker" });
+              await driver.click("XIAO ESP32-C6", { scope: `document.querySelector('[id^="ux-popover-panel"]')` });
+              verb = "Flash firmware";
+            }
+            step("the card offers a way back", Boolean(verb), verb ?? afterPull.slice(0, 300));
+            await pressMaybeArmed(driver, verb);
+            const again = await awaitQuestion(driver);
+            await shot("question-again");
+            step("asked again", again.includes("Move this board's files") || again.includes("Put this board's files back"), "");
+            await pressLasting(driver, "Continue");
+            const text = await awaitInstalled(driver);
+            await shot("installed");
+            step("update installed", text.includes("firmware installed"), text.match(/firmware installed[^\n]*/)?.[0] ?? "");
+          } else if (scenario === "W7a") {
             // The card names the step, not its percentage; the terminal
             // carries esptool-js's own lines: the filesystem body (block 2
             // on, so 0x352000) is being written once esptool-js says so.
@@ -548,6 +606,7 @@ async function main() {
     const legacySuperblock = bytes.subarray(0x310008, 0x310010).toString() === "littlefs";
     switch (scenario) {
       case "W1":
+      case "W5":
       case "W9":
       case "W7b":
         step("files moved, byte for byte", files.same, JSON.stringify(files));
