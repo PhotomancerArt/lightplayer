@@ -227,6 +227,27 @@
     body { padding: 16px 16px 120px; }
     .controls { position: static; gap: 10px; }
   }
+  /* ---- round 2: the converged panel ---- */
+  .concept.wide { width: min(375px, 100%); }
+  .sech { display: flex; align-items: baseline; gap: 8px; font: 800 10px var(--sans); letter-spacing: .08em; text-transform: uppercase;
+    color: var(--dim); border-top: 1px solid var(--border-muted); padding-top: 10px; margin-top: 2px; }
+  .sech .r { margin-left: auto; text-transform: none; letter-spacing: 0; font-weight: 600; font-size: 11px; }
+  .pwrow { display: grid; gap: 6px; padding: 6px 0 8px; border-top: 1px solid var(--border-muted); }
+  .pwrow .top { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .pwrow .inp { margin-left: 40px; }
+  .pwrow.off .inp { opacity: .5; }
+  .pwrow.off .inp:focus-within { opacity: 1; }
+  .pwrow .say { margin-left: 40px; font-size: 11px; color: var(--dim); line-height: 1.4; }
+  .pwrow .say b { color: var(--muted); font-weight: 650; }
+  .pwrow .say.warn { color: var(--warn-text); }
+  .pwrow .say.good { color: var(--good-text); }
+  .savebtn { appearance: none; cursor: pointer; border-radius: 5px; padding: 4px 8px; font: 700 11.5px var(--sans); flex: none;
+    color: var(--strong); border: 1px solid var(--accent-border); background: rgba(123,224,178,.12); }
+  .reject { border: 1px dashed var(--border-strong); border-radius: 8px; padding: 10px 14px; font-size: 12px; color: var(--dim); max-width: 920px; line-height: 1.6; }
+  .reject b { color: var(--muted); }
+  .gate { max-width: 920px; border: 1px solid var(--good-border); background: var(--good-bg); border-radius: 8px; padding: 9px 14px;
+    font-size: 12px; color: var(--good-text); margin: 0 0 12px; line-height: 1.55; }
+  .gate b { color: var(--strong); }
 </style>
 </head>
 <body>
@@ -237,45 +258,48 @@
   ‘allow everyone’ thing not work. Security matters but right now it’s getting in the way. Collapse/group the things that have access, and make it much
   easier to enter a custom password. We can offer a random one, but it should be as easy as just replacing the text to change it.”
 </p>
+<div class="gate"><b>Round 1 gate (Yona, 2026-10-02):</b> list = <b>1B, grouped by name</b>. Passwords: “make it simple — <b>one box for play password, one for
+  edit</b>. Button to regenerate. All the add, and choose and crap is too complex. <b>Two rows, with a checkbox/toggle, default to a random pw, let the user
+  override.</b>”</div>
 <p class="hint">
-  <b>What happened on the choker</b> (<code>lp-cli link capture … --request accessList</code>, XIAO C6 <code>10:bd:a3:b0:8e:30</code>): the board holds
-  <b>16 entries, all “Brave on Mac”</b>, added Sep 26 → Oct 2 (six between 00:35 and 01:42 on Oct 2). Each worktree’s dev server is its own origin, so its own
-  browser key, and every USB plug-in from one adds another copy. <b>16 is the board’s cap</b> (<code>MAX_SECRETS_PER_FILE</code>): the next add is refused —
-  silently today — so a new browser, the account key, or a typed password can’t get on.
+  <b>What happened on the choker</b> (<code>lp-cli link capture … --request accessList</code>, XIAO C6 <code>10:bd:a3:b0:8e:30</code>): <b>16 entries, all
+  “Brave on Mac”</b>, added Sep 26 → Oct 2. Each worktree’s dev server is its own origin, so its own browser key; every USB plug-in from a new one adds a copy.
+  16 is the board’s cap, and the next add is refused silently today.
 </p>
 <p class="hint">
-  <b>Thesis:</b> people think in <i>who</i> (me, my phone, friends, anyone nearby), not in keys. Group by name, show how full the board is, make the
-  “make room” fix one deliberate tap, and make a custom password a single text box that already holds a good one.
+  <b>Round 2 — one panel.</b> Keys fold by name with a count and a “Keep this one”; the header counts toward 16 and a full board says so, with <b>Make room</b>.
+  Below the list, <b>Passwords</b> is three switches and nothing else: <b>Anyone nearby</b>, <b>Play password</b>, <b>Edit password</b>. Each password row holds a
+  random one already; turn it on and that’s the password. Click the box and type to replace it (the whole thing is selected), ↻ for another, and a changed
+  password saves with <b>Save</b> or Enter. No names, no tier picker, no second screen.
 </p>
-<div class="bug"><b>Separate bug, not designed here:</b> “Anyone nearby can play” didn’t work for you, even though the choker’s store reads
-  <code>open: true</code>. That’s filed as its own task (chip) — the concepts below only move where the switch sits.</div>
+<div class="bug"><b>Separate bug, not designed here:</b> “Anyone nearby can play” didn’t work for you, though the choker’s store reads <code>open: true</code>.
+  Filed as its own task (chip).</div>
 
 <div class="controls" id="controls">
-  <span class="group"><b>Board</b>
-    <button class="chip" data-k="data" data-v="choker">your choker (16, full)</button>
-    <button class="chip" data-k="data" data-v="mixed">mixed (10)</button>
-    <button class="chip" data-k="data" data-v="fresh">just set up (1)</button>
-  </span>
   <span class="group"><b>This browser</b>
     <button class="chip" data-k="me" data-v="on">on the list</button>
     <button class="chip" data-k="me" data-v="off">not on it (a new dev origin)</button>
   </span>
-  <span class="group"><b>Anyone nearby</b>
-    <button class="chip" data-k="open" data-v="on">on</button>
-    <button class="chip" data-k="open" data-v="off">off</button>
-  </span>
-  <span class="group"><button class="chip" data-k="reset" data-v="1">↺ reset removals</button></span>
+  <span class="group"><button class="chip" data-k="reset" data-v="1">↺ reset all three</button></span>
 </div>
 
-<h2><span class="n">1</span>Who has access</h2>
-<p class="sub">Each panel is live: expand groups, arm and confirm the trash cans, press the “make room” actions. Removals are per concept so you can compare
-  after. <b>Q:</b> which list shape, and should copies of the same name replace each other on their own (1D) or only when you say so (1B)?</p>
+<h2><span class="n">1</span>The panel, on three boards</h2>
+<p class="sub">Same panel, live: expand the group, arm a trash can, press Make room, flip the switches, type over a password.
+  The password rows count toward the 16 like everything else — on the full choker, turning one on asks you to make room first.</p>
 <div class="row" id="s1"></div>
 
-<h2><span class="n">2</span>Add a password</h2>
-<p class="sub">The fields are real: click the password and type — the generated one is selected on focus, so typing replaces it. ↻ rolls a new one.
-  <b>Q:</b> which form, and does the QR/link stay on the same screen (2B) or move to after the add (2C)?</p>
+<h2><span class="n">2</span>A password row’s states</h2>
+<p class="sub">Frozen states of one row, so they can be judged side by side. The middle one is the case the board forces on us: it stores only a key derived from
+  the password, never the password, so a password set from <b>another browser</b> can’t be shown — only replaced.</p>
 <div class="row" id="s2"></div>
+
+<h2><span class="n">3</span>Set aside in round 1</h2>
+<div class="reject">
+  <b>1A</b> today’s flat list · <b>1C</b> people-first buckets (Anyone nearby as the first choice) · <b>1D</b> self-tidying (a browser’s new copy replacing its old
+  one on plug-in — risky when two Macs share a name) · <b>2A</b> today’s share sheet · <b>2B</b> one prefilled field with name + tier · <b>2C</b> inline add row ·
+  <b>2D</b> two add buttons. All are in commit <code>094662568</code>. Round 1 dropped the QR + share link from the password form; whether it comes back is a gate
+  question below.
+</div>
 
 <script>
 // ---------------------------------------------------------------- icons
@@ -288,14 +312,12 @@ const I = {
   chev: '<svg class="i" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>',
   trash: '<svg class="i" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>',
   dice: '<svg class="i" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.7"/><path d="M20 4v4h-4"/></svg>',
-  copy: '<svg class="i" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/></svg>',
   done: '<svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.6 2.6L16 9.7"/></svg>',
-  broom: '<svg class="i" viewBox="0 0 24 24"><path d="M14 4l6 6M12 6l6 6-5 1-3-3zM10 10l-6 6c-1 1-1 3 0 4s3 1 4 0l6-6"/></svg>',
+  pen: '<svg class="i" viewBox="0 0 24 24"><path d="M4 20l4-1 11-11-3-3L5 16z"/></svg>',
 };
 const CAP = 16;
 
 // ---------------------------------------------------------------- data
-// Dates as [month, day, hour, minute], local. kind: browser | account | password.
 const choker = () => {
   const when = [[9,26,14,10],[9,27,11,2],[9,27,19,40],[9,28,10,5],[9,29,16,22],[9,30,9,48],[9,30,21,3],[10,1,8,30],[10,1,13,12],
     [10,1,22,51],[10,2,0,35],[10,2,0,48],[10,2,1,2],[10,2,1,15],[10,2,1,30],[10,2,1,42]];
@@ -305,16 +327,23 @@ const mixed = () => [
   { id: 'm0', label: "Yona's MacBook", kind: 'browser', tier: 'edit', at: [9,24,20,1], me: true },
   { id: 'm1', label: 'Bluefy on iPhone', kind: 'browser', tier: 'edit', at: [9,25,18,30] },
   { id: 'm2', label: "Yona's account", kind: 'account', tier: 'edit', at: [9,24,20,1], acct: true },
-  { id: 'm3', label: "Yona's play password", kind: 'password', tier: 'play', at: [9,24,20,1], acct: true },
-  { id: 'm4', label: 'friends', kind: 'password', tier: 'play', at: [9,27,17,44] },
-  { id: 'm5', label: 'crew', kind: 'password', tier: 'edit', at: [9,28,12,0] },
   { id: 'm6', label: 'Brave on Mac', kind: 'browser', tier: 'edit', at: [9,30,10,12] },
   { id: 'm7', label: 'Brave on Mac', kind: 'browser', tier: 'edit', at: [10,1,15,40] },
   { id: 'm8', label: 'Brave on Mac', kind: 'browser', tier: 'edit', at: [10,2,0,48] },
-  { id: 'm9', label: 'Brave on Mac', kind: 'browser', tier: 'edit', at: [10,2,1,42] },
+  { id: 'm4', label: 'friends', kind: 'password', tier: 'play', at: [9,27,17,44] },
+  { id: 'pp', label: 'Play password', kind: 'password', tier: 'play', at: [9,29,12,0], slot: 'play' },
+  { id: 'pe', label: 'Edit password', kind: 'password', tier: 'edit', at: [9,28,12,0], slot: 'edit' },
 ];
 const fresh = () => [{ id: 'f0', label: "Yona's MacBook", kind: 'browser', tier: 'edit', at: [10,2,9,0], me: true }];
-const DATA = { choker, mixed, fresh };
+
+const BOARDS = [
+  { id: 'P1', name: 'Your choker', note: 'Today’s real list: 16 × Brave on Mac, full. No passwords.', entries: choker, open: true,
+    pw: { play: null, edit: null } },
+  { id: 'P2', name: 'A board in use', note: 'Older copies, a phone, an account, an old named password (“friends”), and both passwords on — the edit one set from another browser.', entries: mixed, open: false,
+    pw: { play: 'camp-glow-17', edit: undefined } },
+  { id: 'P3', name: 'Just set up', note: 'Only this browser. Everything off; the boxes already hold random passwords.', entries: fresh, open: false,
+    pw: { play: null, edit: null } },
+];
 
 const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const day = (at) => `${MON[at[0]-1]} ${at[1]}`;
@@ -323,419 +352,237 @@ const stamp = (at) => `${day(at)}, ${clock(at)}`;
 const cmp = (a, b) => (a.at[0]-b.at[0]) || (a.at[1]-b.at[1]) || (a.at[2]-b.at[2]) || (a.at[3]-b.at[3]);
 const esc = (s) => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const isPhone = (label) => /iphone|android|phone|bluefy/i.test(label);
+const WORDS = ['amber','anchor','aspen','badger','banjo','beacon','birch','cedar','comet','coral','cricket','ember','falcon','fern','firefly',
+  'garnet','gecko','glacier','harbor','heron','iris','jade','kayak','lantern','lotus','lynx','maple','meadow','moss','nova','orbit','otter',
+  'pebble','plum','prism','quartz','raven','river','robin','sage','sparrow','summit','thistle','tiger','tulip','velvet','willow','zephyr'];
+let seed = 7;
+const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+const roll = () => { const a = WORDS[rnd() * WORDS.length | 0]; let b; do { b = WORDS[rnd() * WORDS.length | 0]; } while (b === a);
+  return `${a}-${b}-${10 + (rnd() * 90 | 0)}`; };
 
 // ---------------------------------------------------------------- state
-const S = { data: 'choker', me: 'on', open: 'on' };
-// ?data=mixed&me=off&open=off — for screenshots of a state.
+const S = { me: 'on' };
 for (const [k, v] of new URLSearchParams(location.search)) if (k in S) S[k] = v;
-const concepts = {}; // per-concept: { entries, open, expanded:Set, armed, flash, toast }
-
-function baseEntries() {
-  const list = DATA[S.data]();
-  if (S.me === 'off') list.forEach(e => e.me = false);
-  return list;
-}
-function resetConcepts() {
-  for (const id of ['1A','1B','1C','1D']) {
-    concepts[id] = { entries: baseEntries(), open: S.open === 'on', expanded: new Set(), armed: null, flash: null, toast: null };
+const P = {};
+// A password slot: on (an entry is on the board), value (the box), saved (what
+// this browser knows is on the board; undefined = set elsewhere, unknown).
+function resetPanels() {
+  seed = 7;
+  for (const b of BOARDS) {
+    const entries = b.entries();
+    if (S.me === 'off') entries.forEach(e => e.me = false);
+    const slot = (k) => {
+      const known = b.pw[k];
+      const on = entries.some(e => e.slot === k);
+      return { on, saved: on ? known : null, value: on && known ? known : (on ? '' : roll()), status: null };
+    };
+    P[b.id] = { entries, open: b.open, expanded: new Set(), armed: null, flash: null, toast: null, pw: { play: slot('play'), edit: slot('edit') } };
   }
 }
 
-// ---------------------------------------------------------------- shared bits
+// ---------------------------------------------------------------- list (1B)
 function icon(e) {
   if (e.kind === 'account') return `<span class="kicon acct">${esc(e.label[0].toUpperCase())}</span>`;
   if (e.kind === 'password') return `<span class="kicon pw">${I.key}</span>`;
   return `<span class="kicon">${isPhone(e.label) ? I.phone : I.laptop}</span>`;
 }
-function trash(cid, id, label, armedLabel = 'Remove') {
-  const armed = concepts[cid].armed === id;
-  return `<button class="trash${armed ? ' armed' : ''}" data-c="${cid}" data-act="trash" data-id="${id}" title="Remove ${esc(label)}">${I.trash}<span class="lbl">${armedLabel}</span></button>`;
+function trash(pid, id, label) {
+  const armed = P[pid].armed === id;
+  return `<button class="trash${armed ? ' armed' : ''}" data-p="${pid}" data-act="trash" data-id="${id}" title="Remove ${esc(label)}">${I.trash}<span class="lbl">Remove</span></button>`;
 }
 function detail(e) {
   let origin;
-  if (e.kind === 'account' && e.acct) origin = 'any browser signed in as you';
-  else if (e.kind === 'password' && e.acct) origin = 'from your account';
+  if (e.kind === 'account') origin = 'any browser signed in as you';
   else if (e.kind === 'password') origin = `password · added ${day(e.at)}`;
   else origin = `added ${day(e.at)}`;
   return e.tier === 'play' ? `can play · ${origin}` : origin;
 }
-function order(entries) {
-  const rank = e => e.me ? 0 : e.kind === 'browser' ? 1 : e.kind === 'account' ? 2 : (e.kind === 'password' && e.acct) ? 3 : 4;
-  return [...entries].sort((a, b) => rank(a) - rank(b));
-}
-// Group by (kind, label). Newest copy first inside; "me" floats to the top.
 function groups(entries) {
+  const rank = e => e.me ? 0 : e.kind === 'browser' ? 1 : e.kind === 'account' ? 2 : 3;
   const map = new Map();
-  for (const e of order(entries)) {
+  for (const e of [...entries].filter(e => !e.slot).sort((a, b) => rank(a) - rank(b))) {
     const k = e.kind + '|' + e.label;
     if (!map.has(k)) map.set(k, []);
     map.get(k).push(e);
   }
   return [...map.values()].map(list => {
     list.sort((a, b) => (b.me - a.me) || cmp(b, a));
-    return { key: list[0].kind + '|' + list[0].label, label: list[0].label, kind: list[0].kind, list,
-      me: list.some(e => e.me), tier: list[0].tier, acct: list[0].acct };
+    return { key: list[0].kind + '|' + list[0].label, label: list[0].label, kind: list[0].kind, list, me: list.some(e => e.me), tier: list[0].tier };
   });
 }
-function openRow(cid, c, opts = {}) {
-  return `<div class="krow">
-    <span class="kicon open">${I.nearby}</span>
-    <span class="kwho"><span class="nm">Anyone nearby</span><span class="sd">${c.open ? 'can play without a password' : 'off — needs a key or password'}</span></span>
-    <button class="switch${c.open ? ' on' : ''}" data-c="${cid}" data-act="open" aria-label="Anyone nearby can play"></button>
-  </div>`;
+function oldCopies(p) {
+  return groups(p.entries).filter(g => g.kind === 'browser' && g.list.length > 1).flatMap(g => g.list.slice(1));
 }
-function countLine(c) {
-  return `${c.entries.length} of ${CAP}`;
-}
-function toastHtml(c) {
-  return c.toast ? `<div class="toast">${I.done}<span>${c.toast}</span><button class="tlink q" data-act="untoast" data-c="${c.cid}">OK</button></div>` : '';
-}
-function meMissingNote(c, cid, fix) {
-  const full = c.entries.length >= CAP;
-  if (c.entries.some(e => e.me)) return '';
-  if (full) return `<div class="note"><span><b>This browser isn’t on it — the list is full.</b> Plugging in by USB couldn’t add it, so Bluetooth from here will ask for a password.</span>${fix || ''}</div>`;
-  return `<div class="note live"><span>This browser is added on its next USB plug-in.</span></div>`;
-}
-
-// ---------------------------------------------------------------- 1A today
-function render1A() {
-  const cid = '1A', c = concepts[cid];
-  const rows = order(c.entries).map(e => `<div class="krow">
-    ${icon(e)}
-    <span class="kwho"><span class="nm">${esc(e.label)}${e.me ? '<span class="me">this browser</span>' : ''}</span><span class="sd">${detail(e)}</span></span>
-    ${e.tier === 'play' ? '<span class="playchip">play</span>' : ''}
-    ${trash(cid, e.id, e.label)}
-  </div>`).join('');
-  return `<div class="pop">
-    <div class="ph">${I.people}<h3>Who has access</h3></div>
-    <div class="scroll"><div class="krows">${rows}${openRow(cid, c)}</div></div>
-    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><button class="tlink">+ Add a password</button><span class="help">USB always gets in.</span></div>
-    ${c.entries.length >= CAP && !c.entries.some(e=>e.me) ? '' : ''}
-  </div>`;
-}
-
-// ---------------------------------------------------------------- 1B grouped
-function makeRoomCandidates(c) {
-  // every copy of a name beyond its newest one (or beyond this browser's own), across names
-  const out = [];
-  for (const g of groups(c.entries)) if (g.kind === 'browser' && g.list.length > 1) out.push(...g.list.slice(1));
-  return out;
-}
-function render1B() {
-  const cid = '1B', c = concepts[cid];
-  const full = c.entries.length >= CAP;
-  const extra = makeRoomCandidates(c);
-  const gs = groups(c.entries);
-  const rows = gs.map(g => {
-    const n = g.list.length;
-    const open = c.expanded.has(g.key);
-    const head = g.list[0];
-    let sd;
-    if (n === 1) sd = detail(head);
-    else {
-      const span = `${day(g.list[g.list.length-1].at)} – ${day(g.list[0].at)}`;
-      sd = g.me ? `<span style="color:var(--accent)">this browser</span> + ${n-1} older · ${span}` : `${n} copies · ${span}`;
-    }
-    const groupAct = n > 1
-      ? `<button class="btn sm${c.armed === 'g:' + g.key ? ' armed' : ''}" data-c="${cid}" data-act="trimgroup" data-g="${esc(g.key)}">${c.armed === 'g:' + g.key ? `Remove ${n-1}` : (g.me ? 'Keep this one' : 'Keep newest')}</button>`
-      : trash(cid, head.id, head.label);
+function listRows(pid) {
+  const p = P[pid];
+  return groups(p.entries).map(g => {
+    const n = g.list.length, head = g.list[0], open = p.expanded.has(g.key);
+    const sd = n === 1 ? detail(head)
+      : g.me ? `<span style="color:var(--accent)">this browser</span> + ${n - 1} older ${n === 2 ? 'copy' : 'copies'}`
+      : `${n} copies · ${day(g.list[n-1].at)} – ${day(g.list[0].at)}`;
+    const act = n > 1
+      ? `<button class="btn sm${p.armed === 'g:' + g.key ? ' armed' : ''}" data-p="${pid}" data-act="trimgroup" data-g="${esc(g.key)}">${p.armed === 'g:' + g.key ? `Remove ${n-1}` : (g.me ? 'Keep this one' : 'Keep newest')}</button>`
+      : trash(pid, head.id, head.label);
     const kids = open && n > 1 ? `<div class="kids">${g.list.map(e => `<div class="krow">
         <span class="kwho"><span class="nm">${e.me ? 'This browser' : 'Added ' + stamp(e.at)}</span>${e.me ? `<span class="sd">added ${stamp(e.at)}</span>` : ''}</span>
-        ${trash(cid, e.id, e.label)}</div>`).join('')}</div>` : '';
-    return `<div class="krow${c.flash === g.key ? ' flash' : ''}">
-      ${n > 1 ? `<button class="chev${open ? ' open' : ''}" data-c="${cid}" data-act="expand" data-g="${esc(g.key)}" aria-label="Show each">${I.chev}</button>` : ''}
-      <span style="position:relative;display:inline-flex">${icon(head)}${n > 1 ? `<span class="kicon-badge"></span>` : ''}</span>
-      <span class="kwho ${n > 1 ? 'clickable' : ''}" ${n > 1 ? `data-c="${cid}" data-act="expand" data-g="${esc(g.key)}"` : ''}>
+        ${trash(pid, e.id, e.label)}</div>`).join('')}</div>` : '';
+    return `<div class="krow${p.flash === g.key ? ' flash' : ''}">
+      ${n > 1 ? `<button class="chev${open ? ' open' : ''}" data-p="${pid}" data-act="expand" data-g="${esc(g.key)}" aria-label="Show each">${I.chev}</button>` : ''}
+      ${icon(head)}
+      <span class="kwho ${n > 1 ? 'clickable' : ''}" ${n > 1 ? `data-p="${pid}" data-act="expand" data-g="${esc(g.key)}"` : ''}>
         <span class="nm">${esc(g.label)}${n > 1 ? `<span class="x">×${n}</span>` : ''}${g.me && n === 1 ? '<span class="me">this browser</span>' : ''}</span>
         <span class="sd">${sd}</span></span>
       ${g.tier === 'play' ? '<span class="playchip">play</span>' : ''}
-      ${groupAct}
+      ${act}
     </div>${kids}`;
   }).join('');
-  const room = extra.length;
-  const fullNote = full ? `<div class="note"><span><b>Full — ${CAP} of ${CAP}.</b> Nothing new can be added${c.entries.some(e=>e.me) ? '' : ', including this browser'}.
-      ${room ? `${room} are older copies of the same browser (a dev server, or cleared storage).` : 'Remove one below to make room.'}</span>
-      ${room ? `<span class="acts"><button class="btn sm warn${c.armed === 'room' ? ' armed' : ''}" data-c="${cid}" data-act="room">${c.armed === 'room' ? `Remove ${room} old copies` : 'Make room'}</button><span class="tip">keeps the newest of each name</span></span>` : ''}</div>`
-    : (room >= 3 ? `<div class="note live"><span>${room} older copies of the same browser. <button class="tlink" data-c="${cid}" data-act="room" style="color:var(--live-text)">${c.armed === 'room' ? `Remove ${room} — sure?` : 'Tidy up'}</button></span></div>` : '');
+}
+
+// ---------------------------------------------------------------- passwords
+const PW = {
+  play: { name: 'Play password', what: 'knobs, brightness, patterns' },
+  edit: { name: 'Edit password', what: 'everything but firmware' },
+};
+function pwRow(pid, k, opts = {}) {
+  const p = P[pid], s = p.pw[k], full = p.entries.length >= CAP;
+  const unknown = s.on && s.saved === undefined;
+  const dirty = s.on && s.value.trim() && s.value !== s.saved;
+  let say;
+  if (s.status === 'saved') say = `<p class="say good">Saved to the device.</p>`;
+  else if (s.status === 'full') say = `<p class="say warn">The device is full (16 of 16) — make room above first.</p>`;
+  else if (k === 'play' && p.open) say = `<p class="say">Anyone nearby can already play; this matters when that’s off.</p>`;
+  else if (unknown && !s.value) say = `<p class="say">Set ${day(p.entries.find(e => e.slot === k).at)} from another browser, so it can’t be shown here. Type a new one to replace it.</p>`;
+  else if (!s.on) say = `<p class="say">Off — turn on to use this one, or type your own first.</p>`;
+  else say = `<p class="say">Can: ${PW[k].what}. Say it, or type it on a phone.</p>`;
+  return `<div class="pwrow${s.on ? '' : ' off'}${p.flash === k ? ' flash' : ''}">
+    <div class="top">
+      <span class="kicon pw">${I.key}</span>
+      <span class="kwho"><span class="nm">${PW[k].name}</span></span>
+      <button class="switch${s.on ? ' on' : ''}" data-p="${pid}" data-act="pwtoggle" data-k="${k}" aria-label="${PW[k].name}"></button>
+    </div>
+    <div class="inp mono"><input data-p="${pid}" data-k="${k}" data-bind="pw" data-selectall="1" value="${esc(s.value)}" spellcheck="false" autocomplete="off"
+        placeholder="${unknown ? 'type a new one' : ''}" aria-label="${PW[k].name}">
+      ${dirty ? `<button class="savebtn" data-p="${pid}" data-act="pwsave" data-k="${k}">Save</button>` : ''}
+      <button class="icobtn" data-p="${pid}" data-act="pwroll" data-k="${k}" title="Another random one">${I.dice}</button></div>
+    ${say}
+  </div>`;
+}
+function panel(pid) {
+  const p = P[pid], full = p.entries.length >= CAP, extra = oldCopies(p);
+  const meOn = p.entries.some(e => e.me);
+  const fullNote = full ? `<div class="note"><span><b>Full — ${CAP} of ${CAP}.</b> Nothing new can be added${meOn ? '' : ', including this browser'}.
+      ${extra.length ? `${extra.length} are older copies of the same browser (a dev server, or cleared storage).` : 'Remove one to make room.'}</span>
+      ${extra.length ? `<span class="acts"><button class="btn sm warn${p.armed === 'room' ? ' armed' : ''}" data-p="${pid}" data-act="room">${p.armed === 'room' ? `Remove ${extra.length} old copies` : 'Make room'}</button><span class="tip">keeps the newest of each name</span></span>` : ''}</div>`
+    : (!meOn ? `<div class="note live"><span>This browser is added on its next USB plug-in.</span></div>` : '');
   return `<div class="pop">
-    <div class="ph">${I.people}<h3>Who has access</h3><span class="cnt${full ? ' full' : ''}">${countLine(c)}</span></div>
+    <div class="ph">${I.people}<h3>Who has access</h3><span class="cnt${full ? ' full' : ''}">${p.entries.length} of ${CAP}</span></div>
     ${fullNote}
-    ${full ? '' : meMissingNote(c, cid)}
-    <div class="scroll"><div class="krows">${rows}${openRow(cid, c)}</div></div>
-    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><button class="tlink" ${full ? 'disabled title="Full — make room first"' : ''}>+ Add a password</button><span class="help">USB always gets in.</span></div>
-    ${toastHtml(c)}
-  </div>`;
-}
-
-// ---------------------------------------------------------------- 1C people first
-function render1C() {
-  const cid = '1C', c = concepts[cid];
-  const full = c.entries.length >= CAP;
-  const gs = groups(c.entries);
-  const mine = gs.filter(g => g.acct || g.me || (g.kind === 'browser' && /^(yona|brave on mac)/i.test(g.label)) || g.kind === 'account');
-  const yoursKeys = new Set(mine.map(g => g.key));
-  const others = gs.filter(g => !yoursKeys.has(g.key) && g.kind === 'browser');
-  const shared = gs.filter(g => !yoursKeys.has(g.key) && g.kind === 'password');
-  const mineCount = mine.reduce((n, g) => n + g.list.length, 0);
-  const extra = makeRoomCandidates(c).filter(e => yoursKeys.has(e.kind + '|' + e.label));
-  const pill = g => `<span class="pill${g.me ? ' me' : ''}">${g.kind === 'account' ? '●' : g.kind === 'password' ? '🔑' : (isPhone(g.label) ? '▯' : '▭')} ${esc(g.label)}${g.list.length > 1 ? ` <span class="c${g.list.length > 3 ? ' warn' : ''}">×${g.list.length}</span>` : ''}</span>`;
-  const openYours = c.expanded.has('yours');
-  const listRows = (gl) => gl.map(g => `<div class="krow">${icon(g.list[0])}<span class="kwho"><span class="nm">${esc(g.label)}${g.list.length > 1 ? `<span class="x">×${g.list.length}</span>` : ''}${g.me ? '<span class="me">this browser</span>' : ''}</span><span class="sd">${g.list.length > 1 ? `newest ${day(g.list[0].at)}` : detail(g.list[0])}</span></span>${g.tier === 'play' ? '<span class="playchip">play</span>' : ''}${trash(cid, g.list[0].id, g.label)}</div>`).join('');
-  return `<div class="pop">
-    <div class="ph">${I.people}<h3>Who has access</h3><span class="cnt${full ? ' full' : ''}">${countLine(c)}${full ? ' · full' : ''}</span></div>
-    <div class="seg big" role="group" aria-label="Who can play">
-      <button class="${c.open ? 'on' : ''}" data-c="${cid}" data-act="setopen" data-v="1">Anyone nearby<small>can play, no password</small></button>
-      <button class="${c.open ? '' : 'on'}" data-c="${cid}" data-act="setopen" data-v="0">Only the list<small>everyone else asks</small></button>
+    <div class="krows">${listRows(pid)}</div>
+    <div class="sech">Passwords</div>
+    <div class="krow first">
+      <span class="kicon open">${I.nearby}</span>
+      <span class="kwho"><span class="nm">Anyone nearby</span><span class="sd">${p.open ? 'can play — no password' : 'off'}</span></span>
+      <button class="switch${p.open ? ' on' : ''}" data-p="${pid}" data-act="open" aria-label="Anyone nearby can play"></button>
     </div>
-    <div class="bucket">
-      <div class="bh">You<span class="r">${mineCount} ${mineCount === 1 ? 'key' : 'keys'}</span></div>
-      <div class="pills">${mine.map(pill).join('')}</div>
-      ${extra.length ? `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:2px">
-        <button class="btn sm${full ? ' warn' : ''}${c.armed === 'room' ? ' armed' : ''}" data-c="${cid}" data-act="room">${I.broom} ${c.armed === 'room' ? `Remove ${extra.length} — sure?` : `Tidy up ${extra.length} old copies`}</button>
-        <span class="tip">${full ? 'the board is full' : 'one per browser is enough'}</span></div>` : ''}
-      <button class="tlink q" style="justify-self:start" data-c="${cid}" data-act="expand" data-g="yours">${openYours ? 'Hide each' : 'Show each'}</button>
-      ${openYours ? `<div class="krows">${listRows(mine)}</div>` : ''}
-    </div>
-    ${others.length ? `<div class="bucket"><div class="bh">Other browsers<span class="r">${others.length}</span></div><div class="krows">${listRows(others)}</div></div>` : ''}
-    <div class="bucket"><div class="bh">Shared passwords<span class="r">${shared.length || 'none'}</span></div>
-      ${shared.length ? `<div class="krows">${listRows(shared)}</div>` : ''}
-      <button class="tlink" style="justify-self:start" ${full ? 'disabled' : ''}>+ Add a password</button></div>
-    ${!full ? '' : (c.entries.some(e=>e.me) ? '' : '<p class="help" style="color:var(--warn-text)">This browser isn’t on it — tidy up to make room; your next USB plug-in adds it.</p>')}
-    ${toastHtml(c)}
+    ${pwRow(pid, 'play')}
+    ${pwRow(pid, 'edit')}
+    <p class="help">USB always gets in.</p>
+    ${p.toast ? `<div class="toast">${I.done}<span>${p.toast}</span><button class="tlink q" data-p="${pid}" data-act="untoast">OK</button></div>` : ''}
   </div>`;
 }
 
-// ---------------------------------------------------------------- 1D self-tidying
-function render1D() {
-  const cid = '1D', c = concepts[cid];
-  const full = c.entries.length >= CAP;
-  const gs = groups(c.entries);
-  const extra = makeRoomCandidates(c);
-  const slotCls = e => e.me ? 'me' : e.kind === 'account' ? 'a' : e.kind === 'password' ? 'p' : 'b';
-  const hot = c.expanded.has('hot') ? [...c.expanded].find(k => k.startsWith('hot:'))?.slice(4) : null;
-  const flat = gs.flatMap(g => g.list.map(e => ({ e, g: g.key })));
-  const slots = Array.from({ length: CAP }, (_, i) => flat[i]
-    ? `<span class="slot ${slotCls(flat[i].e)}${hot === flat[i].g ? ' hot' : ''}" title="${esc(flat[i].e.label)}"></span>` : '<span class="slot"></span>').join('');
-  const rows = gs.map(g => {
-    const n = g.list.length;
-    return `<div class="krow${c.flash === g.key ? ' flash' : ''}" data-c="${cid}" data-act="hot" data-g="${esc(g.key)}">
-      ${icon(g.list[0])}
-      <span class="kwho"><span class="nm">${esc(g.label)}${n > 1 ? `<span class="x">×${n}</span>` : ''}${g.me ? '<span class="me">this browser</span>' : ''}</span>
-      <span class="sd">${n > 1 ? `${n - 1} older ${n-1 === 1 ? 'copy' : 'copies'} — replaced on the next plug-in` : detail(g.list[0])}</span></span>
-      ${g.tier === 'play' ? '<span class="playchip">play</span>' : ''}
-      ${trash(cid, g.list[0].id, g.label, n > 1 ? `Remove all ${n}` : 'Remove')}
-    </div>`;
-  }).join('');
-  return `<div class="pop">
-    <div class="ph">${I.people}<h3>Who has access</h3></div>
-    <div><div class="slots">${slots}</div>
-      <div class="slotcap"><span>${c.entries.length} of ${CAP} slots</span>${full ? '<span class="full">full</span>' : `<span>${CAP - c.entries.length} free</span>`}</div></div>
-    ${extra.length ? `<div class="note${full ? '' : ' live'}"><span>${full ? `<b>Full.</b> ` : ''}${extra.length} ${extra.length === 1 ? 'is an older copy' : 'are older copies'} of a browser that’s already here. From now on a browser’s new copy replaces its old one when you plug in.</span>
-      <span class="acts"><button class="btn sm${full ? ' warn' : ''}${c.armed === 'room' ? ' armed' : ''}" data-c="${cid}" data-act="room">${c.armed === 'room' ? `Remove ${extra.length} — sure?` : 'Clear them now'}</button></span></div>` : ''}
-    ${c.entries.some(e => e.me) ? '' : `<div class="note live"><span>This browser isn’t on it yet. Plug in by USB again: it takes an older Brave on Mac’s place.</span></div>`}
-    <div class="scroll"><div class="krows">${rows}${openRow(cid, c)}</div></div>
-    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><button class="tlink" ${full ? 'disabled' : ''}>+ Add a password</button><span class="help">USB always gets in.</span></div>
-    ${toastHtml(c)}
-    <p class="help" style="border-top:1px dashed var(--border-strong);padding-top:7px"><b>What the toast says after a plug-in from a new dev server:</b></p>
-    <div class="toast" style="box-shadow:none">${I.done}<span><b>Brave on Mac</b> can now unlock PLAYFUL choker over Bluetooth. It replaced the older Brave on Mac.</span><button class="tlink q">Undo</button></div>
-  </div>`;
-}
-
-// ---------------------------------------------------------------- §2 add a password
-const WORDS = ['amber','anchor','aspen','badger','banjo','beacon','birch','cedar','comet','coral','cricket','ember','falcon','fern','firefly',
-  'garnet','gecko','glacier','harbor','heron','iris','jade','kayak','lantern','lotus','lynx','maple','meadow','moss','nova','orbit','otter',
-  'pebble','plum','prism','quartz','raven','river','robin','sage','sparrow','summit','thistle','tiger','tulip','velvet','willow','zephyr'];
-const roll = () => { const a = WORDS[Math.random() * WORDS.length | 0]; let b; do { b = WORDS[Math.random() * WORDS.length | 0]; } while (b === a);
-  return `${a}-${b}-${10 + (Math.random() * 90 | 0)}`; };
-const F = {};
-function resetForms() {
-  F['2A'] = { pw: 'maple-otter-42', typed: '', typing: false, name: 'friends', tier: 'play' };
-  F['2B'] = { pw: 'maple-otter-42', name: 'friends', tier: 'play', fresh: true };
-  F['2C'] = { pw: 'maple-otter-42', name: 'friends', tier: 'play', open: true, added: null };
-  F['2D'] = { pw: 'maple-otter-42', name: '', added: null };
-}
-const linkFor = (pw) => `https://lightplayer.app/unlock#d=PLAYFUL%20choker&p=${encodeURIComponent(pw)}`;
-function qr(id, text) { return `<canvas class="qr" data-qr="${esc(text)}" id="${id}" width="25" height="25"></canvas>`; }
-function drawQrs() {
-  document.querySelectorAll('canvas[data-qr]').forEach(cv => {
-    const ctx = cv.getContext('2d'); const t = cv.dataset.qr; let h = 2166136261;
-    for (const ch of t) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); }
-    const rnd = () => { h ^= h << 13; h ^= h >>> 17; h ^= h << 5; return (h >>> 0) / 4294967296; };
-    ctx.fillStyle = '#fffaf0'; ctx.fillRect(0, 0, 25, 25); ctx.fillStyle = '#0c1114';
-    for (let y = 1; y < 24; y++) for (let x = 1; x < 24; x++) if (rnd() < .48) ctx.fillRect(x, y, 1, 1);
-    for (const [ox, oy] of [[1,1],[17,1],[1,17]]) { ctx.fillStyle = '#0c1114'; ctx.fillRect(ox, oy, 7, 7); ctx.fillStyle = '#fffaf0'; ctx.fillRect(ox+1, oy+1, 5, 5); ctx.fillStyle = '#0c1114'; ctx.fillRect(ox+2, oy+2, 3, 3); }
-  });
-}
-const tierSeg = (fid, tier) => `<div class="seg" role="group"><button class="${tier === 'play' ? 'on' : ''}" data-f="${fid}" data-act="tier" data-v="play">Play</button><button class="${tier === 'edit' ? 'on' : ''}" data-f="${fid}" data-act="tier" data-v="edit">Edit</button></div>`;
-
-function render2A() {
-  const f = F['2A']; const pw = f.typing ? f.typed : f.pw;
-  return `<div class="pop">
-    <div class="ph"><h3>Share PLAYFUL choker</h3><button class="tlink" style="margin-left:auto">Back</button></div>
-    ${f.typing
-      ? `<div class="inp"><input type="text" data-f="2A" data-bind="typed" placeholder="Device password" value="${esc(f.typed)}"><button class="tlink q" style="padding:0 6px">Hide</button></div>
-         ${pw ? `<div class="qrbox">${qr('q2a', linkFor(pw))}<p class="help">Scan with a phone camera — it opens LightPlayer and saves the password.</p></div>` : ''}`
-      : `<div class="qrbox">${qr('q2a', linkFor(pw))}<div style="display:grid;gap:5px;min-width:0"><p class="help">Scan with a phone camera — it opens LightPlayer and saves the password. Or say it:</p><span class="pwbig">${esc(pw)}</span></div></div>`}
-    ${pw ? `<code class="link">${esc(linkFor(pw))}</code>` : ''}
-    <div style="display:flex;gap:8px"><button class="btn" style="flex:1">Copy link</button>${f.typing ? '' : `<button class="btn" style="flex:1" data-f="2A" data-act="reroll">New words</button>`}</div>
-    <div style="display:flex;gap:8px;align-items:center"><div class="inp" style="flex:1"><input data-f="2A" data-bind="name" value="${esc(f.name)}" aria-label="Name (friends, crew…)"></div>${tierSeg('2A', f.tier)}</div>
-    <p class="help"><b>Play</b>: knobs, brightness, patterns. <b>Edit</b>: change the show.</p>
-    <button class="btn primary wide" ${pw ? '' : 'disabled'}>Add to the device</button>
-    <button class="tlink" style="justify-self:center" data-f="2A" data-act="typing">${f.typing ? 'Use words instead' : 'Type my own instead'}</button>
-  </div>`;
-}
-
-function render2B() {
-  const f = F['2B'];
-  return `<div class="pop">
-    <div class="ph"><h3>Add a password</h3><button class="tlink q" style="margin-left:auto">Back</button></div>
-    <label class="field"><span>PASSWORD — type to replace it</span>
-      <div class="inp huge"><input data-f="2B" data-bind="pw" data-selectall="1" value="${esc(f.pw)}" spellcheck="false" autocomplete="off" aria-label="Password">
-      <button class="icobtn" data-f="2B" data-act="reroll" title="Another one">${I.dice}</button></div></label>
-    <div style="display:flex;gap:8px;align-items:flex-end">
-      <label class="field" style="flex:1"><span>FOR</span><div class="inp"><input data-f="2B" data-bind="name" value="${esc(f.name)}" placeholder="friends, crew…"></div></label>
-      ${tierSeg('2B', f.tier)}</div>
-    <button class="btn primary wide" style="padding:11px" ${f.pw.trim() ? '' : 'disabled'}>Add “${esc(f.pw.trim() || '…')}” for ${f.tier}</button>
-    <div class="qrbox" style="border-top:1px solid var(--border-muted);padding-top:9px">${qr('q2b', linkFor(f.pw))}
-      <div style="display:grid;gap:5px;min-width:0"><p class="help">Then share it: scan, or <button class="tlink q">copy link</button>. The QR follows what you type.</p></div></div>
-  </div>`;
-}
-
-function render2C() {
-  const f = F['2C'];
-  const added = f.added ? `<div class="krow flash">${'<span class="kicon pw">' + I.key + '</span>'}<span class="kwho"><span class="nm">${esc(f.added.name)}</span><span class="sd">${f.added.tier === 'play' ? 'can play · ' : ''}added just now</span></span>
-      <button class="btn sm" data-f="2C" data-act="share">Share</button></div>
-      ${f.sharing ? `<div class="qrbox" style="padding:4px 0 6px 40px">${qr('q2c', linkFor(f.added.pw))}<div style="display:grid;gap:4px;min-width:0"><span class="pwbig" style="font-size:15px">${esc(f.added.pw)}</span><button class="tlink q" style="justify-self:start">Copy link</button></div></div>` : ''}` : '';
-  return `<div class="pop">
-    <div class="ph">${I.people}<h3>Who has access</h3><span class="cnt">9 of 16</span></div>
-    <div class="krows">
-      <div class="krow"><span class="kicon">${I.laptop}</span><span class="kwho"><span class="nm">Yona's MacBook<span class="me">this browser</span></span><span class="sd">added Sep 24</span></span></div>
-      <div class="krow"><span class="kicon acct">Y</span><span class="kwho"><span class="nm">Yona's account</span><span class="sd">any browser signed in as you</span></span></div>
-      <div class="krow"><span class="kicon pw">${I.key}</span><span class="kwho"><span class="nm">crew</span><span class="sd">password · added Sep 28</span></span></div>
-      ${added}
-    </div>
-    ${f.open ? `<div class="inline-add">
-      <div class="inp mono"><input data-f="2C" data-bind="pw" data-selectall="1" value="${esc(f.pw)}" spellcheck="false" aria-label="Password"><button class="icobtn" data-f="2C" data-act="reroll" title="Another one">${I.dice}</button></div>
-      <div style="display:flex;gap:6px;align-items:center"><div class="inp" style="flex:1"><input data-f="2C" data-bind="name" value="${esc(f.name)}" placeholder="for (friends, crew…)"></div>${tierSeg('2C', f.tier)}</div>
-      <div style="display:flex;gap:8px;align-items:center"><button class="btn primary sm" data-f="2C" data-act="add" ${f.pw.trim() ? '' : 'disabled'}>Add</button><button class="tlink q" data-f="2C" data-act="cancel">Cancel</button>
-        <span class="tip" style="margin-left:auto"><kbd>⏎</kbd> adds</span></div>
-    </div>` : `<button class="tlink" style="justify-self:start" data-f="2C" data-act="openadd">+ Add a password</button>`}
-  </div>`;
-}
-
-function render2D() {
-  const f = F['2D'];
-  return `<div class="pop">
-    <div class="ph"><h3>Add a password</h3><button class="tlink q" style="margin-left:auto">Back</button></div>
-    <div class="inp huge" style="margin-top:4px"><input data-f="2D" data-bind="pw" data-selectall="1" value="${esc(f.pw)}" spellcheck="false" aria-label="Password"><button class="icobtn" data-f="2D" data-act="reroll" title="Another one">${I.dice}</button></div>
-    <p class="tip" style="text-align:center;margin:-2px 0 2px">Ours, or type your own over it.</p>
-    <div class="twoadd">
-      <button class="btn primary" data-f="2D" data-act="add2" data-v="play">Add for play<small>knobs, brightness, patterns</small></button>
-      <button class="btn" data-f="2D" data-act="add2" data-v="edit">Add for edit<small>change the show</small></button>
-    </div>
-    <div class="inp"><input data-f="2D" data-bind="name" value="${esc(f.name)}" placeholder="Name it (optional — “friends”)"></div>
-    ${f.added ? `<div class="toast" style="box-shadow:none">${I.done}<span><b>${esc(f.added.pw)}</b> now unlocks PLAYFUL choker for ${f.added.tier}${f.added.name ? ` (“${esc(f.added.name)}”)` : ''}.</span></div>
-      <div class="qrbox">${qr('q2d', linkFor(f.added.pw))}<div style="display:grid;gap:4px;min-width:0"><p class="help">Share it: scan, or</p><button class="tlink q" style="justify-self:start">Copy link</button></div></div>` : ''}
-  </div>`;
+// ---------------------------------------------------------------- §2 frozen states
+const STATES = [
+  ['off', 'Off', 'A fresh random password waits in the box.', s => ({ on: false, saved: null, value: 'otter-lantern-58' })],
+  ['own', 'Typing your own', 'Clicked once (all selected), typed over it. On, so Save appears.', s => ({ on: true, saved: 'otter-lantern-58', value: 'camp glow' })],
+  ['elsewhere', 'Set from another browser', 'On, but this browser never knew it: the box is empty, the sentence says why.', s => ({ on: true, saved: undefined, value: '' })],
+  ['full', 'On a full board', 'Turning it on was refused; the row says what to do.', s => ({ on: false, saved: null, value: 'otter-lantern-58', status: 'full' })],
+];
+function stateCard([id, name, note, make]) {
+  const pid = 'S_' + id;
+  P[pid] = P[pid] || { entries: [{ id: 'x', slot: 'play', at: [9,28,12,0] }], open: false, expanded: new Set(), pw: { play: make(), edit: null } };
+  if (id === 'full') P[pid].entries = Array.from({ length: CAP }, (_, i) => ({ id: 'x' + i, at: [9,28,12,0] }));
+  return `<div class="concept"><div class="cap"><span class="cid">2·${id}</span><span class="cname">${name}</span></div><p class="cnote" style="min-height:0">${note}</p>
+    <div class="pop">${pwRow(pid, 'play')}</div></div>`;
 }
 
 // ---------------------------------------------------------------- mount
-const S1 = [
-  ['1A', 'Today', 'today', 'One row per key. On your choker: <b>16 identical “Brave on Mac” rows</b>, no count, no sign it’s full, and “+ Add a password” fails when pressed.', render1A],
-  ['1B', 'Grouped by name', 'lean', 'Copies of the same name fold into <b>one row ×N</b> (chevron shows each, by date). The header counts <b>16 of 16</b>; full gets a banner with <b>Make room</b>. A group’s action is <b>Keep this one</b> (two-tap).', render1B],
-  ['1C', 'People first', '', '“Who can play” is the <b>first choice</b>, not a switch at the bottom. Then <b>You</b> (your browsers + account, as pills) with one <b>Tidy up</b>, then other browsers, then shared passwords.', render1C],
-  ['1D', 'Self-tidying', '', 'A browser’s new copy <b>replaces its older one on plug-in</b> (same name, same kind) — the list stops growing on its own. A 16-slot meter shows fullness; existing copies get a one-time <b>Clear them now</b>.', render1D],
-];
-const S2 = [
-  ['2A', 'Today', 'today', 'Generated words + QR; “Type my own instead” swaps to <b>a second, empty field</b>. Name + Play/Edit + Add below.', render2A],
-  ['2B', 'One prefilled field', 'lean', 'The password <b>is</b> the field, prefilled and <b>selected on focus</b> — type and it’s yours; ↻ rolls another. The button says exactly what will happen. QR follows below.', render2B],
-  ['2C', 'Inline in the list', '', 'No second screen: “+ Add a password” opens a row <b>where the new entry will appear</b>. Share (QR) is on the row after it’s added.', render2C],
-  ['2D', 'Two add buttons', '', 'One big prefilled field; <b>the button is the tier</b> (“Add for play” / “Add for edit”), name is optional. Share appears after adding.', render2D],
-];
-function mountRow(el, defs) {
-  el.innerHTML = defs.map(([id, name, tag, note]) => `<div class="concept ${tag}"><div class="cap"><span class="cid">${id}</span><span class="cname">${name}</span></div><p class="cnote">${note}</p><div data-mount="${id}"></div></div>`).join('');
-}
 function renderAll() {
-  for (const [id,,,, fn] of [...S1, ...S2]) {
-    const slot = document.querySelector(`[data-mount="${id}"]`);
-    const focus = document.activeElement && slot.contains(document.activeElement) ? document.activeElement.dataset.bind : null;
-    const caret = focus ? [document.activeElement.selectionStart, document.activeElement.selectionEnd] : null;
-    if (concepts[id]) concepts[id].cid = id;
-    slot.innerHTML = fn();
-    if (focus) { const inp = slot.querySelector(`[data-bind="${focus}"]`); if (inp) { restoring = true; inp.focus(); inp.setSelectionRange(...caret); restoring = false; } }
+  const focused = document.activeElement?.dataset?.bind ? [document.activeElement.dataset.p, document.activeElement.dataset.k,
+    document.activeElement.selectionStart, document.activeElement.selectionEnd] : null;
+  document.getElementById('s1').innerHTML = BOARDS.map(b => `<div class="concept wide"><div class="cap"><span class="cid">${b.id}</span><span class="cname">${b.name}</span></div>
+    <p class="cnote" style="min-height:34px">${b.note}</p>${panel(b.id)}</div>`).join('');
+  document.getElementById('s2').innerHTML = STATES.map(stateCard).join('');
+  if (focused) {
+    const inp = document.querySelector(`input[data-p="${focused[0]}"][data-k="${focused[1]}"]`);
+    if (inp) { restoring = true; inp.focus(); inp.setSelectionRange(focused[2], focused[3]); restoring = false; }
   }
-  drawQrs();
   document.querySelectorAll('#controls .chip').forEach(b => b.setAttribute('aria-pressed', String(S[b.dataset.k] === b.dataset.v)));
 }
 
 // ---------------------------------------------------------------- events
-let armTimer;
-function arm(c, key) { c.armed = key; clearTimeout(armTimer); armTimer = setTimeout(() => { c.armed = null; renderAll(); }, 4000); }
-function removeIds(c, ids) { c.entries = c.entries.filter(e => !ids.includes(e.id)); }
+let armTimer, flashTimer;
+function arm(p, key) { p.armed = key; clearTimeout(armTimer); armTimer = setTimeout(() => { p.armed = null; renderAll(); }, 4000); }
+function flash(p, key) { p.flash = key; clearTimeout(flashTimer); flashTimer = setTimeout(() => { p.flash = null; }, 1300); }
+function savedSoon(p, k) { const s = p.pw[k]; s.status = 'saved'; setTimeout(() => { if (s.status === 'saved') { s.status = null; renderAll(); } }, 2200); }
+function savePw(p, k) {
+  const s = p.pw[k]; if (!s.value.trim()) return;
+  // Replace = remove the old entry, add one with a fresh salt (the board can't change a password in place).
+  const old = p.entries.find(e => e.slot === k);
+  if (old) old.at = [10,2,12,0]; else p.entries.push({ id: 'pw' + k, label: PW[k].name, kind: 'password', tier: k, at: [10,2,12,0], slot: k });
+  s.on = true; s.saved = s.value; flash(p, k); savedSoon(p, k);
+}
 
 document.addEventListener('click', ev => {
   const t = ev.target.closest('[data-act], #controls .chip'); if (!t) return;
-  if (t.matches('#controls .chip')) {
-    if (t.dataset.k !== 'reset') S[t.dataset.k] = t.dataset.v;
-    resetConcepts(); resetForms(); renderAll(); return;
+  if (t.matches('#controls .chip')) { if (t.dataset.k !== 'reset') S[t.dataset.k] = t.dataset.v; resetPanels(); renderAll(); return; }
+  const p = P[t.dataset.p]; if (!p) return;
+  const act = t.dataset.act, k = t.dataset.k;
+  if (act === 'expand') { const g = t.dataset.g; p.expanded.has(g) ? p.expanded.delete(g) : p.expanded.add(g); }
+  else if (act === 'open') p.open = !p.open;
+  else if (act === 'untoast') p.toast = null;
+  else if (act === 'trash') {
+    if (p.armed === t.dataset.id) { p.entries = p.entries.filter(e => e.id !== t.dataset.id); p.armed = null; }
+    else arm(p, t.dataset.id);
   }
-  const act = t.dataset.act;
-  if (t.dataset.c) {
-    const c = concepts[t.dataset.c];
-    if (act === 'expand') { const g = t.dataset.g; c.expanded.has(g) ? c.expanded.delete(g) : c.expanded.add(g); }
-    else if (act === 'open') c.open = !c.open;
-    else if (act === 'setopen') c.open = t.dataset.v === '1';
-    else if (act === 'untoast') c.toast = null;
-    else if (act === 'hot') { [...c.expanded].filter(k => k.startsWith('hot:')).forEach(k => c.expanded.delete(k)); c.expanded.add('hot'); c.expanded.add('hot:' + t.dataset.g); }
-    else if (act === 'trash') {
-      ev.stopPropagation();
-      if (c.armed === t.dataset.id) {
-        const e = c.entries.find(x => x.id === t.dataset.id);
-        // 1D's group trash removes every copy of the name
-        const ids = t.dataset.c === '1D' ? c.entries.filter(x => x.kind === e.kind && x.label === e.label).map(x => x.id) : [e.id];
-        removeIds(c, ids); c.armed = null;
-      } else arm(c, t.dataset.id);
-    }
-    else if (act === 'trimgroup') {
-      const key = 'g:' + t.dataset.g;
-      if (c.armed === key) {
-        const g = groups(c.entries).find(g => g.key === t.dataset.g);
-        removeIds(c, g.list.slice(1).map(e => e.id)); c.armed = null; c.flash = g.key;
-        c.toast = `Removed ${g.list.length - 1} older ${esc(g.label)}. ${countLine(c)} now.`;
-      } else arm(c, key);
-    }
-    else if (act === 'room') {
-      if (c.armed === 'room') {
-        const extra = makeRoomCandidates(c); removeIds(c, extra.map(e => e.id)); c.armed = null;
-        c.toast = `Removed ${extra.length} old copies. ${countLine(c)} now${c.entries.some(e=>e.me) ? '' : ' — plug in by USB again to add this browser'}.`;
-      } else arm(c, 'room');
-    }
-    renderAll(); return;
+  else if (act === 'trimgroup') {
+    const key = 'g:' + t.dataset.g;
+    if (p.armed === key) {
+      const g = groups(p.entries).find(g => g.key === t.dataset.g); const drop = g.list.slice(1).map(e => e.id);
+      p.entries = p.entries.filter(e => !drop.includes(e.id)); p.armed = null; flash(p, g.key);
+      p.toast = `Removed ${drop.length} older ${esc(g.label)}. ${p.entries.length} of ${CAP} now.`;
+    } else arm(p, key);
   }
-  if (t.dataset.f) {
-    const f = F[t.dataset.f];
-    if (act === 'tier') f.tier = t.dataset.v;
-    else if (act === 'reroll') { f.pw = roll(); }
-    else if (act === 'typing') f.typing = !f.typing;
-    else if (act === 'openadd') { f.open = true; f.pw = roll(); }
-    else if (act === 'cancel') f.open = false;
-    else if (act === 'add') { f.added = { name: f.name.trim() || 'password', pw: f.pw.trim(), tier: f.tier }; f.open = false; f.sharing = false; }
-    else if (act === 'share') f.sharing = !f.sharing;
-    else if (act === 'add2') { f.added = { pw: f.pw.trim(), tier: t.dataset.v, name: f.name.trim() }; }
-    renderAll();
+  else if (act === 'room') {
+    if (p.armed === 'room') {
+      const drop = oldCopies(p).map(e => e.id); p.entries = p.entries.filter(e => !drop.includes(e.id)); p.armed = null;
+      p.toast = `Removed ${drop.length} old copies. ${p.entries.length} of ${CAP} now${p.entries.some(e => e.me) ? '' : ' — plug in by USB again to add this browser'}.`;
+    } else arm(p, 'room');
   }
+  else if (act === 'pwtoggle') {
+    const s = p.pw[k];
+    if (s.on) { p.entries = p.entries.filter(e => e.slot !== k); s.on = false; s.status = null;
+      if (!s.value) s.value = roll();
+      p.toast = `${PW[k].name} off — it no longer unlocks this device.`; }
+    else if (p.entries.length >= CAP) s.status = 'full';
+    else { if (!s.value.trim()) s.value = roll(); savePw(p, k); }
+  }
+  else if (act === 'pwroll') { p.pw[k].value = roll(); p.pw[k].status = null; }
+  else if (act === 'pwsave') savePw(p, k);
+  renderAll();
 });
 document.addEventListener('input', ev => {
-  const t = ev.target; if (!t.dataset.f) return;
-  F[t.dataset.f][t.dataset.bind] = t.value; renderAll();
+  const t = ev.target; if (t.dataset.bind !== 'pw') return;
+  const s = P[t.dataset.p].pw[t.dataset.k]; s.value = t.value; s.status = null; renderAll();
 });
 document.addEventListener('keydown', ev => {
-  const t = ev.target; if (ev.key !== 'Enter' || !t.dataset.f) return;
-  if (t.dataset.f === '2C') document.querySelector('[data-f="2C"][data-act="add"]')?.click();
+  const t = ev.target; if (ev.key !== 'Enter' || t.dataset.bind !== 'pw') return;
+  const p = P[t.dataset.p], s = p.pw[t.dataset.k];
+  if (s.on) { savePw(p, t.dataset.k); renderAll(); }
 });
-// "type to replace it": the whole prefilled password is selected on focus
-// (not when a re-render puts focus back mid-typing). The mouseup after a
-// focusing click would collapse the selection to a caret: swallow that one.
+// Type to replace it: the whole password is selected on focus (not when a
+// re-render puts focus back mid-typing). Swallow the focusing click's mouseup,
+// which would collapse the selection to a caret.
 let restoring = false, selectOnUp = null;
 document.addEventListener('focusin', ev => {
   const t = ev.target; if (!t.dataset.selectall || restoring) return;
@@ -743,9 +590,7 @@ document.addEventListener('focusin', ev => {
 });
 document.addEventListener('mouseup', ev => { if (ev.target === selectOnUp) { ev.preventDefault(); selectOnUp.select(); } selectOnUp = null; });
 
-mountRow(document.getElementById('s1'), S1);
-mountRow(document.getElementById('s2'), S2);
-resetConcepts(); resetForms(); renderAll();
+resetPanels(); renderAll();
 </script>
 </body>
 </html>
