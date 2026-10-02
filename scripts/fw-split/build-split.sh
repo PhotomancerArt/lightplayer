@@ -46,6 +46,13 @@ SECTIONS {
 INSERT BEFORE .rodata;
 EOF
 
+# The two passes must link the same program: build.rs bakes the commit and
+# the dirty flag into the image, so a commit (or an edit) between them makes
+# pass 2 a different program and the placement wrong. The verifier catches
+# that as "core nodes in the engine region"; this says why.
+tree_state() { git -C "$repo" rev-parse HEAD; git -C "$repo" status --porcelain | shasum; }
+before="$(tree_state)"
+
 t0=$(date +%s)
 echo "==> pass 1 ($features${LP_BUILD_TAG:+, tag $LP_BUILD_TAG})"
 link p1 "$out/engine-pass1.x"
@@ -55,6 +62,10 @@ python3 "$repo/scripts/fw-split/split_reach.py" "$out/p1.elf" "$out/p1.map" --to
 echo "==> pass 2"
 link p2 "$out/engine.x"
 t2=$(date +%s)
+if [[ "$(tree_state)" != "$before" ]]; then
+    echo "FAIL: the tree changed between pass 1 and pass 2 (a commit or an edit) — rerun" >&2
+    exit 1
+fi
 python3 "$repo/scripts/fw-split/split_reach.py" "$out/p2.elf" "$out/p2.map" --top 0 \
     --verify-engine-base 0x42400000 | tee "$out/p2-verify.txt" | grep "== verify"
 grep -q "core nodes in engine region: 0;" "$out/p2-verify.txt" || {
