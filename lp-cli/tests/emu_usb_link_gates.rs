@@ -65,11 +65,14 @@ const CONSOLE_IN_ORDER: &[(&str, Option<&str>)] = &[
     ),
     ("\"boardId\":\"seeed/xiao-esp32-c6\"", None),
     ("\"baseMac\":\"a0:f2:62:87:b4:8c\"", None),
+    // The radios come up in the core's boot; the LED driver in the
+    // engine's, after it (the split-link boot: `core_boot` then
+    // `lp_engine_entry`).
+    ("ESP-NOW radio ready", None),
     (
         "Esp32C6RmtWs281xDriver: 2 WS281x channels for 2 declared",
         None,
     ),
-    ("ESP-NOW radio ready", None),
     ("[RECOVERY] boot complete", None),
     ("M!{\"id\":0,\"msg\":{\"heartbeat\":{", None),
     ("\"totalBytes\":", Some("heartbeat.total_bytes")),
