@@ -406,14 +406,32 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
     // or from the host over esptool. Read (and consumed) before the
     // filesystem mounts, because it must survive the power cycle that wipes
     // the RTC recovery region — see docs/adr/2026-07-30-boot-control-sector.md.
+    #[cfg(lp_split)]
+    let ota_state;
     #[cfg(not(feature = "memory_fs"))]
     let (boot_control, flash) = {
         let mut flash_storage = esp_storage::FlashStorage::new(flash);
+        // Split builds: read the boot records — and a trial core marks itself
+        // attempted — right here, before any radio or driver comes up (a new
+        // core that dies in that bring-up must still read as a failed trial,
+        // or the loader would keep retrying it). NOT before this line: the
+        // OTA path reads flash through the ROM, and any ROM flash access
+        // before `FlashStorage::new` leaves esp-storage's SPI1 RDID size
+        // probe returning garbage on silicon — every lpfs read then fails
+        // (two XIAO C6s, 2026-10-02).
+        #[cfg(lp_split)]
+        {
+            ota_state = ota::begin();
+        }
         let outcome = crate::bootctl::read_and_consume(&mut flash_storage);
         (outcome, flash_storage)
     };
     #[cfg(feature = "memory_fs")]
     let boot_control = lp_bootctl::DecodeOutcome::Blank;
+    #[cfg(all(lp_split, feature = "memory_fs"))]
+    {
+        ota_state = ota::begin();
+    }
 
     // Create filesystem before hardware providers so /hardware.json can override board policy.
     let base_fs: Box<dyn lpfs::LpFs> = {
@@ -565,6 +583,8 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
         watchdog,
         boot_guard,
         boot_assessment,
+        #[cfg(lp_split)]
+        ota_state,
     }
 }
 
@@ -591,6 +611,8 @@ struct CoreBoot {
     watchdog: recovery::watchdog::WatchdogFeeder,
     boot_guard: Option<lp_recovery::FrameGuard>,
     boot_assessment: lp_recovery::BootAssessment,
+    #[cfg(lp_split)]
+    ota_state: ota::BootState,
 }
 
 /// The engine's header, the first bytes of the engine region (split builds).
@@ -696,6 +718,7 @@ fn lp_engine_entry(core: CoreBoot) {
         watchdog,
         boot_guard,
         boot_assessment,
+        ..
     } = core;
     let transport = fw_esp32_common::usb_link::UsbLinkTransport::new(usb_link);
     // The RMT peripheral becomes the WS281x driver's, clock and all. 80 MHz
@@ -1093,17 +1116,11 @@ async fn main(spawner: embassy_executor::Spawner) {
 
     #[cfg(not(fw_harness))]
     {
-        // Split builds read the boot records — and a trial core marks itself
-        // attempted — before ANYTHING else runs: a new core that dies in its
-        // own radio bring-up must still read as a failed trial on the next
-        // boot, or the loader would keep retrying it.
-        #[cfg(lp_split)]
-        let state = ota::begin();
         let core = core_boot(spawner);
         #[cfg(not(lp_split))]
         lp_engine_entry(core);
         #[cfg(lp_split)]
-        split_boot(core, state).await;
+        split_boot(core).await;
         // The server loop runs in its own task now; main has nothing left to
         // do. A future that never completes arms no timer (a long sleep here
         // would arm an alarm the boot gates rightly refuse).
@@ -1114,7 +1131,8 @@ async fn main(spawner: embassy_executor::Spawner) {
 /// A split build after `core_boot`: enter the engine the boot records and
 /// the header agree on, or stay core-only and take an update.
 #[cfg(all(lp_split, not(fw_harness)))]
-async fn split_boot(core: CoreBoot, state: ota::BootState) {
+async fn split_boot(mut core: CoreBoot) {
+    let state = core::mem::replace(&mut core.ota_state, ota::BootState::placeholder());
     let id = build_id();
     let id_len = id.iter().position(|b| *b == 0).unwrap_or(id.len());
     ota::say!(

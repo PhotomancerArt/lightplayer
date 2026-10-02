@@ -27,6 +27,20 @@ pub struct BootState {
 }
 
 impl BootState {
+    /// A state that trusts nothing (what is left behind once the real one
+    /// has been taken out of `CoreBoot`).
+    pub fn placeholder() -> Self {
+        Self {
+            layout: SplitLayout::c6_4mb(page_size()),
+            choice: None,
+            core_off: 0,
+            core_len: 0,
+            failed_build: None,
+            healthy: false,
+            max_seq: 0,
+        }
+    }
+
     pub fn read(flash: &mut SplitFlash) -> Self {
         let layout = SplitLayout::c6_4mb(page_size());
         let mut sectors = [None; 2];
