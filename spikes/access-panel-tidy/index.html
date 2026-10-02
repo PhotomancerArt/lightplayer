@@ -279,7 +279,8 @@
   .rung.on .dot { border: 4px solid var(--accent); }
   .rung .t { font-size: 12.5px; font-weight: 700; color: var(--strong); }
   .rung .d { font-size: 11px; color: var(--dim); }
-  .keysline { display: flex; align-items: center; gap: 9px; padding: 6px 0 2px; border-top: 1px solid var(--border-muted); cursor: pointer; }
+  .keysline { display: flex; align-items: center; gap: 9px; padding: 8px 0 0; margin-top: 4px; border-top: 1px solid var(--border-muted); cursor: pointer; }
+  .who { font-size: 12px; color: var(--dim); margin: 2px 0 -2px; }
   .keysline .t { font-size: 12.5px; font-weight: 700; color: var(--muted); }
   .keysline .d { font-size: 11px; color: var(--dim); }
   .boardchange { max-width: 920px; border: 1px solid var(--bound-border); background: var(--bound-bg); border-radius: 8px; padding: 9px 14px;
@@ -296,10 +297,10 @@
   The shared keys bypass it.</b> … and that should be on the top of the box.” Earlier, still standing: call edit <b>Author</b>; a password is prefilled with a
   random one you type over; saves when you click away; old browser keys make room automatically; “this isn’t enterprise banking software.”</div>
 <p class="hint">
-  <b>The model:</b> two switches. <b>Play password</b> off → anyone nearby can play. <b>Author password</b> off → anyone nearby can author (change the
-  show). On → it takes the password. Your browsers and your account always get in — those keys are added when you plug in by USB and sit in one quiet
-  line below. <b>One rule falls out:</b> anyone who can author can play, so while Author is open a play password means nothing — the Play switch rests off
-  and says why, and turning Author off turns Play off with it.
+  <b>The model:</b> two choices. <b>Play:</b> Anyone → anyone nearby can play; Password → it takes the password. <b>Author</b> the same, for changing
+  the show. Your browsers and your account always get in — those keys are added when you plug in by USB and sit in one quiet
+  line below. <b>One rule falls out:</b> anyone who can author can play, so while Author is Anyone a play password means nothing — Play rests on Anyone
+  (“follows Author”), and setting Author to Anyone sets Play with it.
 </p>
 <div class="boardchange"><b>Needs a board change:</b> today the store’s <code>open</code> is a yes/no that grants <b>play</b> only
   (<code>lpc-access/src/device_access_file.rs</code>, store <code>version: 2</code>). “Author password off” means anyone nearby can author, so
@@ -308,30 +309,22 @@
 <div class="bug"><b>Separate bug, still filed on its own:</b> “Anyone nearby can play” didn’t work on the choker.</div>
 
 <div class="controls" id="controls">
-  <span class="group"><b>Start from</b>
-    <button class="chip" data-k="start" data-v="fresh">just set up</button>
-    <button class="chip" data-k="start" data-v="view">play open, author locked</button>
-    <button class="chip" data-k="start" data-v="both">both locked</button>
-    <button class="chip" data-k="start" data-v="open">wide open</button>
-  </span>
-  <span class="group"><b>Passwords were set</b>
-    <button class="chip" data-k="where" data-v="here">here</button>
-    <button class="chip" data-k="where" data-v="elsewhere">from another browser</button>
-  </span>
+  <span class="group"><button class="chip" data-k="reset" data-v="1">↺ reset</button></span>
 </div>
 
-<h2><span class="n">1</span>The box, three ways</h2>
-<p class="sub">Same state in each, live — flip, type over a password (it’s selected when you click), click away to save. The panels are the whole access
-  panel: the box on top, your keys as one line under it (click it to see them).
-  <b>Q:</b> which box?</p>
+<div class="gate"><b>Round 4 gate:</b> “<b>4B is close</b> to what I wanted. But let’s not do box-in-box — the separator is plenty. ‘USB always gets in’ is
+  weird to say.”</div>
+
+<h2><span class="n">1</span>The panel, in its four states</h2>
+<p class="sub">4B, live in each — press Anyone / Password, type over a password (it’s selected when you click), click away to save, open your keys.</p>
 <div class="row" id="s1"></div>
 
-<h2><span class="n">2</span>The four states, in the lean</h2>
-<p class="sub">Frozen, side by side, so each reads on its own.</p>
+<h2><span class="n">2</span>Round 4’s other two ways</h2>
+<p class="sub">Kept for contrast: 4A two switches (with a sentence on top), 4C three levels.</p>
 <div class="row" id="s2"></div>
 
 <h2><span class="n">3</span>Set aside</h2>
-<div class="reject">Rounds 1–3 (commits <code>094662568</code> → <code>0144fb89f</code>): the “Who has access” list as the panel’s main subject, with an
+<div class="reject">Round 4: <b>4A</b> two switches and <b>4C</b> three levels (section 2 above). Rounds 1–3 (commits <code>094662568</code> → <code>0144fb89f</code>): the “Who has access” list as the panel’s main subject, with an
   Anyone-nearby switch and the two passwords under it. Round 4 turns that around: the passwords are the panel; the keys are a footnote.</div>
 
 <script>
@@ -425,7 +418,7 @@ function keysLine(pid) {
   return `<div class="keysline" data-p="${pid}" data-act="keys">
       <span class="kicon">${I.laptop}</span>
       <span class="kwho"><span class="t">Your browsers &amp; account</span>
-      <span class="d">always get in · added by USB · ${total} of 16, oldest drops when full</span></span>
+      <span class="d">always get in · ${total} of 16 · added by USB</span></span>
       <button class="chev${p.keysOpen ? ' open' : ''}" aria-label="Show them">${I.chev}</button></div>
     ${p.keysOpen ? `<div class="kids" style="margin-left:36px">${KEYS.map(k => `<div class="krow">
       <span class="kwho"><span class="nm">${esc(k.label)}${k.n > 1 ? `<span class="x">×${k.n}</span>` : ''}${k.me ? '<span class="me">this browser</span>' : ''}</span>
@@ -438,7 +431,6 @@ function frame(pid, inner) {
     <div class="ph">${I.lock}<h3>Access</h3><span class="cnt">PLAYFUL choker</span></div>
     ${inner}
     ${keysLine(pid)}
-    <p class="help">USB always gets in.</p>
     ${p.toast ? `<div class="toast">${I.done}<span>${p.toast}</span><button class="tlink q" data-p="${pid}" data-act="untoast">OK</button></div>` : ''}
   </div>`;
 }
@@ -470,9 +462,8 @@ function lineB(pid, k) {
       ${s.on ? '' : `<span class="free${locked ? ' dim' : ''}">${locked ? 'follows Author' : 'no password'}</span>`}
     </div>${s.on ? `<div class="gline" style="min-height:0;margin:-2px 0 4px 63px">${box(pid, k)}</div>` : ''}${note(pid, k)}`;
 }
-function renderB() {
-  const pid = 'B';
-  return frame(pid, `<div class="gbox"><div class="say">Who nearby can…</div>${lineB(pid, 'play')}${lineB(pid, 'edit')}</div>`);
+function renderB(pid = 'B') {
+  return frame(pid, `<div class="who">Who nearby can…</div>${lineB(pid, 'play')}${lineB(pid, 'edit')}`);
 }
 // C: the three combinations that make sense, as one choice; the boxes follow it.
 function renderC() {
@@ -490,24 +481,23 @@ function renderC() {
 }
 
 // ---------------------------------------------------------------- mount
-const S1 = [
-  ['A', 'Two switches', 'lean', 'Exactly the ask: Play and Author, each a switch. Off says who can; on shows the password. One sentence on top says what they add up to.', () => renderA('A')],
-  ['B', 'Anyone · Password', '', 'Google Docs’ “Anyone / Restricted”, once per thing. Same model as A with words instead of switches.', renderB],
+const S2_WAYS = [
+  ['A', 'Two switches', '', 'Exactly the ask: Play and Author, each a switch. Off says who can; on shows the password. One sentence on top says what they add up to.', () => renderA('A')],
   ['C', 'Three levels', '', 'The three combinations that make sense, as one choice — so the impossible one (play locked, author open) can’t be picked at all.', renderC],
 ];
-const S2 = [
-  ['S_open', 'Wide open', 'Both off.'],
-  ['S_view', 'Play open, author locked', 'The case you asked for: watching is free, changing the show isn’t.'],
+const STATES = [
+  ['S_view', 'Play open, author locked', 'A new board, and the case you asked for: watching is free, changing the show isn’t.'],
+  ['S_open', 'Wide open', 'Anyone nearby can do both. Author is open, so Play follows it.'],
   ['S_both', 'Both locked', 'Two passwords.'],
   ['S_else', 'Set from another browser', 'Author was set elsewhere: it can’t be shown, only replaced.'],
 ];
 function renderAll() {
   const a = document.activeElement;
   const focused = a?.dataset?.bind ? [a.dataset.p, a.dataset.k, a.selectionStart, a.selectionEnd] : null;
-  document.getElementById('s1').innerHTML = S1.map(([id, name, tag, note_, fn]) => `<div class="concept wide ${tag}"><div class="cap"><span class="cid">4${id}</span>
+  document.getElementById('s1').innerHTML = STATES.map(([id, name, note_]) => `<div class="concept wide"><div class="cap"><span class="cname">${name}</span></div>
+    <p class="cnote" style="min-height:34px">${note_}</p>${renderB(id)}</div>`).join('');
+  document.getElementById('s2').innerHTML = S2_WAYS.map(([id, name, tag, note_, fn]) => `<div class="concept wide"><div class="cap"><span class="cid">4${id}</span>
     <span class="cname">${name}</span></div><p class="cnote">${note_}</p>${fn()}</div>`).join('');
-  document.getElementById('s2').innerHTML = S2.map(([id, name, note_]) => `<div class="concept"><div class="cap"><span class="cname">${name}</span></div>
-    <p class="cnote" style="min-height:0">${note_}</p><div class="pop tight"><div class="gbox"><div class="say">${sentence(P[id])}</div>${lineA(id, 'play')}${lineA(id, 'edit')}</div></div></div>`).join('');
   if (focused) {
     const inp = document.querySelector(`input[data-p="${focused[0]}"][data-k="${focused[1]}"]`);
     if (inp) { restoring = true; inp.focus(); inp.setSelectionRange(focused[2], focused[3]); restoring = false; }
@@ -518,7 +508,7 @@ function renderAll() {
 // ---------------------------------------------------------------- events
 document.addEventListener('click', ev => {
   const t = ev.target.closest('[data-act], #controls .chip'); if (!t) return;
-  if (t.matches('#controls .chip')) { S[t.dataset.k] = t.dataset.v; resetPanels(); renderAll(); return; }
+  if (t.matches('#controls .chip')) { resetPanels(); renderAll(); return; }
   const p = P[t.dataset.p]; if (!p) return;
   const act = t.dataset.act, k = t.dataset.k;
   if (act === 'toggle') setOn(p, k, !p[k].on);
