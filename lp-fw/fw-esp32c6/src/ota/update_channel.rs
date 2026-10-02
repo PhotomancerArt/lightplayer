@@ -75,10 +75,15 @@ pub fn on_update_while_running(data: &[u8]) {
     {
         let mut flash = SplitFlash::take();
         let state = BootState::read(&mut flash);
-        flash.erase(state.engine_extent().start);
-        esp_println::println!(
-            "[OTA] offer of a different build — engine erased, resetting into core-only"
-        );
+        if !state.healthy {
+            return; // logged by `read`; never act on a state we cannot trust
+        }
+        flash.protect(state.core_extent());
+        if !flash.erase(state.engine_extent().start) {
+            return;
+        }
+        log::info!("[OTA] offer of a different build — engine erased, resetting into core-only");
+        super::say!("[OTA] offer of a different build — engine erased, resetting into core-only");
         system_reset();
     }
 }
@@ -93,6 +98,9 @@ pub async fn core_only(
     engine_crashing: bool,
 ) -> ! {
     let mut flash = SplitFlash::take();
+    if state.healthy {
+        flash.protect(state.core_extent());
+    }
     let mut buf = Box::new(SectorBuf([0xff; SECTOR as usize]));
     let mut plan = Plan::Idle;
     let mut queried = false;
@@ -102,7 +110,7 @@ pub async fn core_only(
     if !engine_crashing {
         lp_recovery::mark_boot_complete();
     }
-    esp_println::println!(
+    super::say!(
         "[OTA] core-only: core @{:#x} ({} B), engine room {} B",
         state.core_off,
         state.core_len,
@@ -140,12 +148,12 @@ fn step(
     usb_link: &'static UsbLinkShared,
 ) -> Plan {
     if let Some(offer) = Offer::parse(msg) {
-        if plan != Plan::Idle || state.on_trial() {
-            return plan; // mid-transfer (a link re-up), or not confirmed yet
+        if plan != Plan::Idle || state.on_trial() || !state.healthy {
+            return plan; // mid-transfer, not confirmed yet, or a state we cannot trust
         }
         let build = lp_bootctl::build_hash(&offer.build_id);
         if state.failed_build == Some(build) {
-            esp_println::println!("[OTA] that build failed its trial on this board — refused");
+            super::say!("[OTA] that build failed its trial on this board — refused");
             let mut m = Vec::with_capacity(5);
             m.push(b'F');
             m.extend_from_slice(&build.to_le_bytes());
@@ -158,7 +166,7 @@ fn step(
                     .layout
                     .next_core_offset(state.core_off, state.core_len, offer.core_len)
             else {
-                esp_println::println!(
+                super::say!(
                     "[OTA] new core ({} B) does not fit beside this one ({} B) — refused",
                     offer.core_len,
                     state.core_len
@@ -167,8 +175,10 @@ fn step(
             };
             // The engine dies first, so no cut from here on leaves this core
             // starting an engine whose region is half overwritten.
-            flash.erase(state.engine_extent().start);
-            esp_println::println!(
+            if !flash.erase(state.engine_extent().start) {
+                return plan;
+            }
+            super::say!(
                 "[OTA] new build: core {} B → {dest:#x}, engine erased",
                 offer.core_len
             );
@@ -183,15 +193,17 @@ fn step(
         // Same build, and core-only: no valid engine here. Fetch it.
         let room = state.engine_extent();
         if offer.engine_len > room.len() {
-            esp_println::println!(
+            super::say!(
                 "[OTA] engine ({} B) does not fit ({} B) — refused",
                 offer.engine_len,
                 room.len()
             );
             return plan;
         }
-        flash.erase(room.start);
-        esp_println::println!(
+        if !flash.erase(room.start) {
+            return plan;
+        }
+        super::say!(
             "[OTA] same build, no engine: fetching {} B → {:#x}",
             offer.engine_len,
             room.start
@@ -217,7 +229,10 @@ fn step(
             next,
             build,
         } if kind == b'C' && off == next => {
-            flash.write_sector(buf, dest + off, data);
+            if !flash.write_sector(buf, dest + off, data) {
+                super::say!("[OTA] write at {:#x} failed — update abandoned", dest + off);
+                return Plan::Idle;
+            }
             let next = off + data.len() as u32;
             if next < len {
                 request(usb_link, b'C', next, len);
@@ -229,17 +244,18 @@ fn step(
                 };
             }
             state.write_trial_record(flash, buf, dest, len, build);
-            esp_println::println!(
-                "[OTA] core written ({len} B) and named on trial — resetting into it"
-            );
+            super::say!("[OTA] core written ({len} B) and named on trial — resetting into it");
             system_reset();
         }
         Plan::Engine { dest, len, next } if kind == b'E' && off == next => {
-            flash.write_sector(buf, dest + off, data);
+            if !flash.write_sector(buf, dest + off, data) {
+                super::say!("[OTA] write at {:#x} failed — update abandoned", dest + off);
+                return Plan::Idle;
+            }
             if off == 0 {
                 // A new engine deserves a fair start: clear the crash count.
                 lp_recovery::mark_boot_complete();
-                esp_println::println!("[OTA] engine written ({len} B), header last — resetting");
+                super::say!("[OTA] engine written ({len} B), header last — resetting");
                 system_reset();
             }
             let after = off + data.len() as u32;

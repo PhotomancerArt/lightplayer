@@ -6,10 +6,10 @@
 
 use lp_bootctl::{
     ATTEMPTED_MARK_OFFSET, BOOT_RECORD_READ_LEN, BOOT_RECORD_SECTORS, BootChoice, BootRecord,
-    BootSlot, CONFIRMED_MARK_OFFSET, Extent, REGION_START, SplitLayout,
+    BootSlot, CONFIRMED_MARK_OFFSET, Extent, SplitLayout,
 };
 
-use super::engine_window::page_size;
+use super::engine_window::{page_size, running_core_offset};
 use super::split_flash::{SectorBuf, SplitFlash};
 
 pub struct BootState {
@@ -19,6 +19,10 @@ pub struct BootState {
     pub core_len: u32,
     /// The build that failed its trial here, when the loader rolled back.
     pub failed_build: Option<u32>,
+    /// Every read succeeded, the extent fits the layout, and the records
+    /// agree with the MMU about where this core runs. Nothing is written —
+    /// no mark, no update — unless this holds.
+    pub healthy: bool,
     max_seq: u32,
 }
 
@@ -27,10 +31,13 @@ impl BootState {
         let layout = SplitLayout::c6_4mb(page_size());
         let mut sectors = [None; 2];
         let mut max_seq = 0;
+        let mut reads_ok = true;
         for (slot, at) in sectors.iter_mut().zip(BOOT_RECORD_SECTORS) {
             let mut buf = [0u8; BOOT_RECORD_READ_LEN];
             if flash.read(at, &mut buf) {
                 *slot = BootSlot::decode(&buf);
+            } else {
+                reads_ok = false;
             }
             if let Some(s) = slot {
                 max_seq = max_seq.max(s.record.seq);
@@ -41,18 +48,29 @@ impl BootState {
             .filter(|c| c.rolled_back)
             .and_then(|c| sectors[1 - c.sector])
             .map(|s| s.record.build);
+        let running = running_core_offset();
         let (core_off, core_len) = match choice {
             Some(c) => (c.slot.record.core_off, c.slot.record.core_len),
-            // No record (a board flashed without one): the loader booted the
-            // low end; its length is the image's own.
-            None => (REGION_START, image_len(flash, REGION_START).unwrap_or(0)),
+            // No record (a board flashed without one): the core is where the
+            // MMU says it is; its length is the image's own.
+            None => (running, image_len(flash, running).unwrap_or(0)),
         };
+        let healthy =
+            reads_ok && core_len > 0 && core_off == running && layout.fits(core_off, core_len);
+        if !healthy {
+            log::error!(
+                "[OTA] boot state not trusted (reads {}, record core @{core_off:#x} +{core_len}, \
+                 MMU says @{running:#x}) — updates refused this boot",
+                if reads_ok { "ok" } else { "FAILED" }
+            );
+        }
         Self {
             layout,
             choice,
             core_off,
             core_len,
             failed_build,
+            healthy,
             max_seq,
         }
     }
@@ -66,6 +84,14 @@ impl BootState {
     /// The loader skipped a newer core that never confirmed.
     pub fn rolled_back(&self) -> bool {
         self.choice.is_some_and(|c| c.rolled_back)
+    }
+
+    /// The running core's own bytes: never written while it runs.
+    pub fn core_extent(&self) -> Extent {
+        Extent {
+            start: self.core_off,
+            end: self.core_off + self.core_len,
+        }
     }
 
     pub fn engine_extent(&self) -> Extent {
@@ -91,7 +117,7 @@ impl BootState {
         if let Some(c) = self.choice.as_mut() {
             flash.program_word(BOOT_RECORD_SECTORS[c.sector] + CONFIRMED_MARK_OFFSET, 0);
             c.slot.marks.confirmed = true;
-            esp_println::println!("[OTA] core confirmed");
+            super::say!("[OTA] core confirmed");
         }
     }
 

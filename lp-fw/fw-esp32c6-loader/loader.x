@@ -18,7 +18,6 @@ MEMORY {
 ENTRY(_start)
 
 PROVIDE(ets_printf = 0x40000028);
-PROVIDE(esp_rom_spiflash_read = 0x40000150);
 PROVIDE(Cache_Invalidate_ICache_All = 0x4000064c);
 
 SECTIONS {

@@ -26,6 +26,17 @@
 //! 4. Core-only, the new core fetches its engine into the space the old core
 //!    left, header last, and resets into it.
 
+/// Say it twice: raw on the console (what a monitor sees during boot) and
+/// through the log ring, which keeps it until a host attaches — boot text
+/// alone is gone by the time a reconnecting host opens the port.
+macro_rules! say {
+    ($($t:tt)*) => {{
+        esp_println::println!($($t)*);
+        log::info!($($t)*);
+    }};
+}
+pub(crate) use say;
+
 mod boot_state;
 mod engine_window;
 mod split_flash;
@@ -47,6 +58,9 @@ pub const INCOMPLETE_BOOTS_TO_CORE_ONLY: u32 = 4;
 pub fn begin() -> BootState {
     let mut flash = split_flash::SplitFlash::take();
     let state = BootState::read(&mut flash);
-    state.mark_attempted(&mut flash);
+    if state.healthy {
+        flash.protect(state.core_extent());
+        state.mark_attempted(&mut flash);
+    }
     state
 }

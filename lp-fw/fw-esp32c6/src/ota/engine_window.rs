@@ -37,3 +37,16 @@ pub fn map_engine(extent: Extent) {
         }
     }
 }
+
+/// Where the running core really is: the flash page behind `0x4200_0000`
+/// (MMU entry 0), which the loader mapped to the core's first page. The boot
+/// records are only trusted when they agree with this.
+pub fn running_core_offset() -> u32 {
+    let shift = page_size().trailing_zeros();
+    // SAFETY: selects and reads MMU entry 0.
+    let entry = unsafe {
+        core::ptr::write_volatile(MMU_ITEM_INDEX as *mut u32, 0);
+        core::ptr::read_volatile(MMU_ITEM_CONTENT as *const u32)
+    };
+    (entry & (MMU_VALID - 1)) << shift
+}

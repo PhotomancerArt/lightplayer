@@ -8,8 +8,9 @@
 //!    newest valid record, or the one before it when the newest is a trial
 //!    that ran and never confirmed);
 //! 2. walks that core's ESP image: flash segments are **mapped** at their
-//!    link addresses through the MMU, RAM segments are **read** straight from
-//!    flash into place by the ROM's SPI routine;
+//!    link addresses through the MMU, RAM segments are **copied** into place
+//!    through a scratch mapping (never the ROM's SPI1 routines — see
+//!    `flash_window`);
 //! 3. invalidates the flash cache;
 //! 4. jumps to the core's entry point.
 //!
@@ -21,10 +22,14 @@
 #![no_main]
 
 mod esp_image;
+mod flash_window;
 mod mmu;
 mod rom;
 
-use lp_bootctl::{BOOT_RECORD_READ_LEN, BOOT_RECORD_SECTORS, BootSlot, REGION_START, choose};
+use flash_window::FlashWindow;
+use lp_bootctl::{
+    BOOT_RECORD_READ_LEN, BOOT_RECORD_SECTORS, BootSlot, REGION_END_C6_4MB, REGION_START, choose,
+};
 
 core::arch::global_asm!(
     ".section .text.entry, \"ax\"",
@@ -44,10 +49,13 @@ extern "C" fn loader_main() -> ! {
     let page_shift = mmu::page_shift();
 
     let mut sectors = [None; 2];
-    for (slot, at) in sectors.iter_mut().zip(BOOT_RECORD_SECTORS) {
-        let mut buf = [0u32; BOOT_RECORD_READ_LEN / 4];
-        if rom::flash_read(at, &mut buf) {
-            *slot = BootSlot::decode(words_as_bytes(&buf));
+    if let Some(records) = FlashWindow::map(BOOT_RECORD_SECTORS[0], 0x2000, page_shift) {
+        for (slot, at) in sectors.iter_mut().zip(BOOT_RECORD_SECTORS) {
+            let mut buf = [0u8; BOOT_RECORD_READ_LEN];
+            // SAFETY: a local buffer.
+            if unsafe { records.copy(at, buf.as_mut_ptr(), buf.len() as u32) } {
+                *slot = BootSlot::decode(&buf);
+            }
         }
     }
     let (core_off, note) = match choose(sectors) {
@@ -62,7 +70,13 @@ extern "C" fn loader_main() -> ! {
     };
     rom::print_core(core_off, note);
 
-    match esp_image::load(core_off, page_shift, &LOADER_RAM) {
+    let image = FlashWindow::map(core_off, REGION_END_C6_4MB - core_off, page_shift)
+        .or_else(|| FlashWindow::map(core_off, 0x20_0000, page_shift));
+    let loaded = match image {
+        Some(w) => esp_image::load(&w, core_off, page_shift, &LOADER_RAM),
+        None => Err(c"core does not fit the scratch window"),
+    };
+    match loaded {
         Ok(entry) => {
             rom::invalidate_cache();
             // SAFETY: `entry` is the core image's own entry point, and every
@@ -77,11 +91,6 @@ extern "C" fn loader_main() -> ! {
             }
         }
     }
-}
-
-fn words_as_bytes(words: &[u32]) -> &[u8] {
-    // SAFETY: a `u32` slice is a valid byte slice four times as long.
-    unsafe { core::slice::from_raw_parts(words.as_ptr().cast(), words.len() * 4) }
 }
 
 #[panic_handler]

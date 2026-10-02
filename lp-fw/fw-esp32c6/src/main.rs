@@ -658,11 +658,11 @@ fn engine_entry() -> Option<fn(CoreBoot)> {
         )
     };
     if magic != ENGINE_MAGIC {
-        esp_println::println!("[CORE] no engine at {ENGINE_VADDR:#x} — core-only mode");
+        ota::say!("[CORE] no engine at {ENGINE_VADDR:#x} — core-only mode");
         return None;
     }
     if id != build_id() {
-        esp_println::println!("[CORE] engine build id mismatch — core-only mode");
+        ota::say!("[CORE] engine build id mismatch — core-only mode");
         return None;
     }
     // SAFETY: magic and build id match, so this header came from this link.
@@ -1112,19 +1112,19 @@ async fn split_boot(core: CoreBoot) {
     let id = build_id();
     let id_len = id.iter().position(|b| *b == 0).unwrap_or(id.len());
     let state = ota::begin();
-    esp_println::println!(
+    ota::say!(
         "[CORE] build {} @{:#x}{}",
         core::str::from_utf8(&id[..id_len]).unwrap_or("?"),
         state.core_off,
         if state.on_trial() { " (trial)" } else { "" }
     );
     if state.rolled_back() {
-        esp_println::println!("[OTA] rolled back: the newer core never confirmed");
+        ota::say!("[OTA] rolled back: the newer core never confirmed");
     }
     // Test builds only: a core that dies on its trial boot, before it could
     // confirm — what the loader's rollback exists for.
     if option_env!("LP_OTA_TEST_DIE_ON_TRIAL").is_some() && state.on_trial() {
-        esp_println::println!("[TEST] dying on trial");
+        ota::say!("[TEST] dying on trial");
         ota::system_reset();
     }
     ota::map_engine(state.engine_extent());
@@ -1140,9 +1140,7 @@ async fn split_boot(core: CoreBoot) {
         }
         _ => {
             if engine_crashing && entry.is_some() {
-                esp_println::println!(
-                    "[OTA] {incomplete} incomplete boots — not starting the engine"
-                );
+                ota::say!("[OTA] {incomplete} incomplete boots — not starting the engine");
             }
             let CoreBoot {
                 usb_link, watchdog, ..

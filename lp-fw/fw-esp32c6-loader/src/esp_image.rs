@@ -8,7 +8,8 @@
 
 use core::ffi::CStr;
 
-use crate::{mmu, rom};
+use crate::flash_window::FlashWindow;
+use crate::mmu;
 
 const MAGIC: u8 = 0xE9;
 const HEADER_LEN: u32 = 24;
@@ -16,29 +17,26 @@ const MAX_SEGMENTS: u8 = 16;
 
 /// Map and load the image at flash `at`; its entry point.
 pub fn load(
+    flash: &FlashWindow,
     at: u32,
     page_shift: u32,
     loader_ram: &core::ops::Range<u32>,
 ) -> Result<u32, &'static CStr> {
-    let mut header = [0u32; (HEADER_LEN / 4) as usize];
-    if !rom::flash_read(at, &mut header) {
+    let (Some(first), Some(entry)) = (flash.word(at), flash.word(at + 4)) else {
         return Err(c"flash read failed");
-    }
-    let bytes = header[0].to_le_bytes();
+    };
+    let bytes = first.to_le_bytes();
     let segments = bytes[1];
     if bytes[0] != MAGIC || segments == 0 || segments > MAX_SEGMENTS {
         return Err(c"no image there");
     }
-    let entry = header[1];
     let page = 1u32 << page_shift;
 
     let mut off = at + HEADER_LEN;
     for _ in 0..segments {
-        let mut seg = [0u32; 2];
-        if !rom::flash_read(off, &mut seg) {
+        let (Some(addr), Some(len)) = (flash.word(off), flash.word(off + 4)) else {
             return Err(c"flash read failed");
-        }
-        let [addr, len] = seg;
+        };
         let data = off + 8;
         if mmu::WINDOW.contains(&addr) {
             // A flash segment: map every page it touches. The image was laid
@@ -55,11 +53,13 @@ pub fn load(
                 p += page;
             }
         } else {
-            // A RAM segment: straight from flash into place.
+            // A RAM segment: copied into place through the window.
             if addr < loader_ram.end && addr + len > loader_ram.start {
                 return Err(c"segment overlaps the loader");
             }
-            if !rom::flash_read_raw(data, addr as *mut u32, len) {
+            // SAFETY: checked against the loader's own RAM above; the core's
+            // RAM is otherwise free until it starts.
+            if !unsafe { flash.copy(data, addr as *mut u8, len) } {
                 return Err(c"flash read failed");
             }
         }
