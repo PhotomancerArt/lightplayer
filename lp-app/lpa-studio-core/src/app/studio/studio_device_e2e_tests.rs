@@ -1495,6 +1495,57 @@ fn a_link_attach_queued_behind_another_input_still_identifies() {
     });
 }
 
+/// A second connect edge while the first sweep's arrival is still pending
+/// (landed, its `LinkAttached` queued, nothing folded yet) must not mint a
+/// second link for the same port: that arrival has not joined the routing
+/// map, so a sweep that only skips routed links would attach it again.
+#[test]
+fn a_second_sweep_before_a_pending_arrival_folds_mints_no_second_link() {
+    let device = empty_light_player("dev000000daqf6dvvra");
+    let (mut bench, tasks) = DeviceBench::granted(&device, "usb-sweep-10");
+    let attaches = |bench: &DeviceBench| {
+        bench
+            .inbox
+            .borrow()
+            .iter()
+            .filter(|input| {
+                matches!(
+                    input,
+                    DeviceInput::Event(lpa_devices::event::Event::LinkAttached { .. })
+                )
+            })
+            .count()
+    };
+    let connect = |bench: &mut DeviceBench| {
+        bench
+            .controller
+            .note_device_hotplug(crate::app::studio::studio_command::DeviceHotplug::Connected);
+    };
+    // The first sweep lands its arrival; nothing folds.
+    connect(&mut bench);
+    for _ in 0..100 {
+        if attaches(&bench) > 0 {
+            break;
+        }
+        pump(&tasks);
+    }
+    assert_eq!(attaches(&bench), 1, "the first sweep attached the port");
+    // A second connect edge in that window sweeps again.
+    connect(&mut bench);
+    for _ in 0..100 {
+        pump(&tasks);
+    }
+    assert_eq!(attaches(&bench), 1, "one port, one link");
+    bench.run_until(&tasks, "the board to identify", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.state_label == "Ready")
+    });
+    assert_eq!(bench.view().devices.len(), 1, "one board, one card");
+}
+
 /// One wire, one owner: a card verb that needs the board's wire while the
 /// editor is a lens on it closes the editor first, then RUNS — the card's
 /// verbs always work; the editor is what yields.
@@ -6578,6 +6629,90 @@ fn a_refused_push_leaves_the_board_running_its_previous_project() {
         .value;
     let listed: Vec<String> = listed.iter().map(|p| p.to_string()).collect();
     assert_eq!(listed, vec!["/projects/studio-b"]);
+}
+
+/// The P6 pull loop's apply step (`ProjectOp::ReloadActiveProject`,
+/// dispatched by `visitor_session.rs` on a fast-forward): a collaborator's
+/// update that damages a node file passes the fast-forward's own checks,
+/// the sim refuses the re-push, and the editor was left reading Ready over
+/// a runtime holding nothing. The fix fails the project the way a refused
+/// open does (D24 sends the page back to the gallery), and raises the
+/// same failure notice a refused open raises — the only route the reason
+/// reaches the user, since the visitor loop enqueues the reload and never
+/// sees the error the dispatch returns.
+#[test]
+fn a_refused_reload_fails_the_editor_instead_of_reading_ready() {
+    let (mut bench, tasks, device, good) = sim_open_bench();
+    open_package(&mut bench, &tasks, &good);
+    assert_eq!(sim_loaded(&device).len(), 1);
+    let name = bench
+        .controller
+        .project_for_test()
+        .active_library_display_name()
+        .expect("the opened project names itself");
+
+    // What a fast-forward does: new content lands in the library copy.
+    let mut copy = bench.store.open(good.parse().expect("uid")).expect("open");
+    copy.apply_update("/module.json".as_path(), Some(b"{ this is not json"))
+        .expect("write");
+    copy.record_save(2.0).expect("save");
+
+    let result = drive_real(bench.controller.dispatch(UiAction::from_op(
+        crate::ControllerId::new(ProjectController::NODE_ID),
+        ProjectOp::ReloadActiveProject,
+    )));
+    assert!(result.is_err(), "the reload is refused: {result:?}");
+    assert_eq!(sim_loaded(&device), Vec::<String>::new(), "the sim is dark");
+
+    // Without the fix the project pane still read "Ready". A failed
+    // project is not loaded, so the page falls back to the gallery (D24).
+    let view = bench.controller.view();
+    let status: Vec<String> = view.panes.iter().map(|p| p.status.label.clone()).collect();
+    assert!(view.panes.is_empty(), "not Ready over nothing: {status:?}");
+    assert!(view.home.is_some(), "the gallery stands instead");
+
+    // The console line alone is not a surface a user reads; the same
+    // failure notice a refused OPEN raises is — Retry re-opens this same
+    // package, and the message names it and says the editor closed.
+    let crate::app::open_progress::OpenStage::Failed(failure) =
+        crate::app::open_progress::open_stage()
+    else {
+        panic!(
+            "the reload left no verdict for the user: {:?}",
+            crate::app::open_progress::open_stage()
+        );
+    };
+    assert!(
+        failure.message.contains(&name),
+        "the notice names the project: {:?}",
+        failure.message
+    );
+    assert!(
+        failure.message.contains("The editor closed"),
+        "the notice says what happened: {:?}",
+        failure.message
+    );
+    assert_eq!(
+        failure.retry,
+        UiAction::from_op(
+            crate::ControllerId::new(crate::HOME_NODE_ID),
+            crate::HomeOp::OpenPackage {
+                key: good,
+                prefer: None,
+            },
+        ),
+        "Retry reopens the same package"
+    );
+}
+
+/// What the sim's runtime has loaded, asked over its own wire rather than
+/// the lens: a refused open or reload drops the lens.
+fn sim_loaded(device: &FakeEsp32Device) -> Vec<String> {
+    let mut client = lpa_client::LpClient::new(FakeDeviceIo::new(device)).on_borrowed_wire();
+    let loaded = drive_real(client.project_list_loaded())
+        .expect("list")
+        .value;
+    loaded.iter().map(|p| p.path.to_string()).collect()
 }
 
 /// A board that boots dark — its saved startup project (`/lightplayer.json`

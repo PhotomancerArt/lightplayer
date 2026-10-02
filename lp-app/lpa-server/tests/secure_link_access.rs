@@ -19,7 +19,7 @@ use alloc::rc::Rc;
 use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
-use core::cell::RefCell;
+use core::cell::{Cell, RefCell};
 use core::future::Future;
 use core::pin::Pin;
 use core::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
@@ -258,6 +258,7 @@ struct World {
 
 impl World {
     fn new(open: bool, (key_id, psk): (KeyId, Psk)) -> Self {
+        rewind_entropy();
         let store = DeviceAccessFile {
             version: DeviceAccessFile::VERSION,
             secrets: vec![entry_for(PLAY_SALT), entry_for(EDIT_SALT)],
@@ -481,12 +482,47 @@ impl ServerTransport for OtherLinks {
     }
 }
 
-/// Test entropy: a different fill every call, never a real RNG.
+/// Test entropy: a different fill every call, never a real RNG, and the
+/// same bytes on every run: a counter per test thread through splitmix64,
+/// rewound by `World::new`.
+///
+/// Not one counter shared by the whole binary. It was a single `AtomicU8`
+/// stepping 41 a byte, so a 32-byte ephemeral moved it 32 × 41 ≡ 32 (mod
+/// 256) and every eighth draw repeated a key, and with the tests in parallel
+/// the number of draws between two of one test's was the scheduler's. When a
+/// retry's fresh ephemeral repeated the refused attempt's, lp-link's
+/// responder read it as that msg1 resent (same nonce, same ephemeral) and
+/// replayed the cached refusal: the stale `Backoff` that flaked
+/// `a_wrong_key_is_refused_wrong_and_charged_to_the_backoff`.
 fn counting_entropy(buf: &mut [u8]) {
-    static NEXT: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(1);
-    for b in buf {
-        *b = NEXT.fetch_add(41, core::sync::atomic::Ordering::Relaxed);
-    }
+    ENTROPY.with(|counter| {
+        for chunk in buf.chunks_mut(8) {
+            let n = counter.get().wrapping_add(1);
+            counter.set(n);
+            let bytes = splitmix64(n).to_le_bytes();
+            chunk.copy_from_slice(&bytes[..chunk.len()]);
+        }
+    });
+}
+
+std::thread_local! {
+    /// `counting_entropy`'s counter: this test thread's draws so far.
+    static ENTROPY: Cell<u64> = const { Cell::new(0) };
+}
+
+/// Start this thread's test entropy over: each `World` draws the same bytes
+/// whatever ran before it on the thread or beside it on another.
+fn rewind_entropy() {
+    ENTROPY.with(|counter| counter.set(0));
+}
+
+/// splitmix64's output step: distinct inputs give distinct outputs, so no
+/// two draws of one stream begin with the same eight bytes.
+fn splitmix64(n: u64) -> u64 {
+    let mut z = n.wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^ (z >> 31)
 }
 
 fn block_on<F: Future>(future: F) -> F::Output {
