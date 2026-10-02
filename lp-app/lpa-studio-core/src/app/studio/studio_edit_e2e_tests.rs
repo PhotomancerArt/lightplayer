@@ -2070,7 +2070,7 @@ fn shader_asset_editor_fetch_apply_save_and_revert_end_to_end() {
 /// The header's dirty state and the shader editor's own "Unsaved" word read
 /// the SAME published snapshot — the editor's persistence word comes from
 /// `UiAssetContent::dirty` and the header control's pencil/count/Save come
-/// from `ProjectEditorView::dirty` + `header_actions`, both built in one
+/// from `ProjectEditorView::dirty` + the `project/*` offers, both built in one
 /// `view()` pass. This locks the pair together across the window where they
 /// could plausibly drift: the verdict-chase refresh ticks an accepted apply
 /// arms, each of which re-reads the project (and, when the revision moved,
@@ -2109,11 +2109,21 @@ fn an_applied_shader_body_keeps_the_header_dirty_across_the_refresh_ticks() {
     let mut snapshot = view.try_recv().expect("apply emits a snapshot");
     assert_eq!(editor_dirty(&snapshot), (1, 0), "right after the apply");
     // What the header dispatches is the project-level save, not a second
-    // asset-only verb: the control renders `header_actions` as-is.
-    let editor = project_editor(&snapshot);
-    assert_eq!(editor.header_actions.len(), 2);
+    // asset-only verb: the control renders the `project/*` offers as-is.
     assert_eq!(
-        editor.header_actions[0].action.op_as::<ProjectOp>(),
+        snapshot
+            .offers
+            .verbs_of(&crate::OfferPath::project())
+            .count(),
+        2
+    );
+    assert_eq!(
+        snapshot
+            .offers
+            .get(&crate::OfferPath::project().child("save"))
+            .expect("project/save")
+            .action
+            .op_as::<ProjectOp>(),
         Some(&ProjectOp::SaveOverlay)
     );
 
@@ -2131,7 +2141,10 @@ fn an_applied_shader_body_keeps_the_header_dirty_across_the_refresh_ticks() {
             "the applied body still counts after refresh tick {tick}"
         );
         assert_eq!(
-            project_editor(&snapshot).header_actions.len(),
+            snapshot
+                .offers
+                .verbs_of(&crate::OfferPath::project())
+                .count(),
             2,
             "the header keeps Save/Revert across refresh tick {tick}"
         );

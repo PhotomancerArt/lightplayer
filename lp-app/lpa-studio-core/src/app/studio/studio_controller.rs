@@ -1330,6 +1330,15 @@ impl StudioController {
         crate::DeviceMillis(((self.now_secs)() * 1_000.0).max(0.0) as u64)
     }
 
+    /// Whether this page can reach a board over USB. Web Serial (or the
+    /// `?emu=` shim that polyfills it) is what built a serial transport;
+    /// without one the add slot keeps its USB verb out of the primary
+    /// position (iPhone, Bluefy, Firefox, Safari), and the offer tree has
+    /// no `devices/connect-usb`.
+    fn usb_available(&self) -> bool {
+        self.serial_transport.is_some()
+    }
+
     /// The devices surface's projection.
     pub fn device_roster_view(&self) -> crate::DeviceRosterView {
         let mut view = self.devices.view(self.device_now());
@@ -1341,10 +1350,7 @@ impl StudioController {
             (self.now_secs)(),
         );
         view.runtime_bands = self.runtime_bands(&view);
-        // Web Serial (or the `?emu=` shim that polyfills it) is what built
-        // a serial transport; without one the add slot keeps its USB verb
-        // out of the primary position (iPhone, Bluefy, Firefox, Safari).
-        view.usb_available = self.serial_transport.is_some();
+        view.usb_available = self.usb_available();
         view.access = self
             .devices
             .roster()
@@ -2092,7 +2098,9 @@ impl StudioController {
     }
 
     pub fn view(&self) -> UiStudioView {
+        let mut offers = crate::UiOfferTree::new();
         if let Some(home) = self.home_view() {
+            self.publish_device_offers(&mut offers);
             return UiStudioView::new(Vec::new(), self.console_view())
                 .with_home(Some(home))
                 .with_lens(self.lens_runtime())
@@ -2103,11 +2111,13 @@ impl StudioController {
                     self.login_prompt_view(),
                     self.access.access_added().cloned(),
                 )
-                .with_app_agent(self.agent.app_view(&self.agent_view_context()));
+                .with_app_agent(self.agent.app_view(&self.agent_view_context()))
+                .with_offers(offers);
         }
         // gallery-always (D24): home covers every no-project state, so the
         // pane layout exists only for an open project
-        let mut project_pane = self.project.view(self.has_lightplayer_state());
+        let mut project_pane = self.project.view(self.has_lightplayer_state(), &mut offers);
+        self.publish_device_offers(&mut offers);
         // Decorate every GLSL inline editor with its agent chat DTO (the
         // project walk stays agent-free; chat state lives on this
         // controller's agent sub-state).
@@ -2161,6 +2171,27 @@ impl StudioController {
             .with_lens_reconnecting(self.lens_reconnecting_view())
             .with_dirty(dirty)
             .with_app_agent(self.agent.app_view(&self.agent_view_context()))
+            .with_offers(offers)
+    }
+
+    /// Publish the device verbs that live in the offer tree.
+    ///
+    /// `devices/connect-usb`: the add-device slot's USB path, named for what
+    /// it does (the slot's heading says "Connect a board"; the button alone
+    /// reads "via USB"), while this browser has Web Serial. It needs the
+    /// user's click (the browser's picker). Bluetooth stays out: whether
+    /// this browser has it is asked by the web layer (`use_ble_reach`), not
+    /// known here. Nothing on the web renders it from the tree yet; the app
+    /// agent reads it.
+    fn publish_device_offers(&self, offers: &mut crate::UiOfferTree) {
+        if self.usb_available() {
+            offers.publish(crate::UiOffer::new(
+                crate::OfferPath::devices().child("connect-usb"),
+                "usb",
+                crate::DevicesOp::action_for(lpa_devices::Action::AddFromUsb)
+                    .with_label("Connect a board via USB"),
+            ));
+        }
     }
 
     /// The LENS session's docked card (D43): the device the editor is open
@@ -6047,11 +6078,10 @@ impl StudioController {
         self.app_agent_start(text, true)
     }
 
-    /// One app-agent `act`: resolve the id against the readout the agent
-    /// was shown, check the action is still offered and enabled NOW (the
-    /// same enablement the user sees), then press it through the ordinary
-    /// dispatch — or, when only the user may press it, put it on a card
-    /// (D6, PD6). While a card waits, nothing else is pressed.
+    /// One app-agent `act`: look the offer path up in the offer tree as it
+    /// is NOW (the same enablement the user sees), then press it through
+    /// the ordinary dispatch — or, when only the user may press it, put it
+    /// on a card (D6, PD6). While a card waits, nothing else is pressed.
     async fn app_agent_act(&mut self, input: lpa_agent::ActInput) -> lpa_agent::ActOutcome {
         use lpa_agent::ActOutcome;
         if let Some(card) = self.agent.app_session_mut().pending_card() {
@@ -6064,22 +6094,26 @@ impl StudioController {
             };
         }
         let fresh = self.app_agent_readout();
-        let offers = || Some(fresh.mint().0);
-        let Some(seen) = self.agent.app_minted_action(&input.action) else {
-            return ActOutcome::Refused {
-                reason: format!("no action {:?} in the readout you were shown", input.action),
-                offers: offers(),
-            };
-        };
-        let Some(action) = fresh
-            .actions
-            .iter()
-            .find(|offered| offered.same_op(&seen))
-            .cloned()
+        let path = crate::OfferPath::parse(input.action.trim()).ok();
+        let Some(action) = path
+            .as_ref()
+            .and_then(|path| fresh.offer(path))
+            .map(|offer| offer.action.clone())
         else {
+            let reason = if path
+                .as_ref()
+                .is_some_and(|path| self.agent.app_offer_was_shown(path))
+            {
+                format!("{:?} is not offered any more", input.action)
+            } else {
+                format!(
+                    "no action at {:?}; name one by its path exactly as the readout lists it",
+                    input.action
+                )
+            };
             return ActOutcome::Refused {
-                reason: format!("{:?} is not offered any more", seen.meta().label),
-                offers: offers(),
+                reason,
+                offers: Some(fresh.render()),
             };
         };
         if let crate::ActionEnablement::Disabled { reason } = &action.meta().enablement {
@@ -6185,45 +6219,24 @@ impl StudioController {
         };
         let home = self.home_view().is_some();
         let mut text = page_line(home);
-        let mut actions = Vec::new();
         if !home {
             text.push_str(&project_lines(
                 &self.project.agent_project_name(),
                 &self.project.agent_project_summary(),
             ));
             text.push_str(&selection_line(self.project.agent_selection()));
-            // The view's own offers: the pane's actions, the project
-            // header's (Save and Revert, while there are edits to save) and
-            // each root card's header actions — the buttons the user sees,
-            // with their enablement. Tree focus actions and add-node menus
-            // stay out (the edit tool covers those). Core keeps these in
-            // several DTO fields rather than one list; the roadmap's
-            // "offers" work gives them one home.
-            let view = self.view();
-            for pane in &view.panes {
-                actions.extend(pane.actions.iter().cloned());
-                if let crate::UiViewContent::ProjectEditor(editor) = &pane.body {
-                    actions.extend(editor.header_actions.iter().map(|a| a.action.clone()));
-                    for node in &editor.nodes {
-                        actions.extend(node.header_actions.iter().map(|a| a.action.clone()));
-                    }
-                }
-            }
         }
         let roster = self.device_roster_view();
         text.push_str(&device_lines(&roster));
-        // The add-device slot's USB path, named for what it does (the
-        // slot's heading says "Connect a board"; the button alone reads
-        // "via USB"). It needs the user's click (the browser's picker).
-        // Bluetooth stays out: whether this browser has it is asked by the
-        // web layer (`use_ble_reach`), not known here.
-        if roster.usb_available {
-            actions.push(
-                crate::DevicesOp::action_for(lpa_devices::Action::AddFromUsb)
-                    .with_label("Connect a board via USB"),
-            );
-        }
-        AppReadoutSnapshot { text, actions }
+        // Every offer in the view's tree, in publish order: the project
+        // header's Save and Revert while there are edits to save, every
+        // node card's verbs (nested nodes included), and the device verbs —
+        // the buttons the user sees, with their enablement. The pane's own
+        // actions stay out: a project pane offers none once the project is
+        // ready, and every other state shows home. Tree focus actions and
+        // add-node menus stay out too (the edit tool covers those).
+        let offers = self.view().offers.iter().cloned().collect();
+        AppReadoutSnapshot { text, offers }
     }
 
     /// Execute one history revert: pull the recorded source, restage it

@@ -155,7 +155,8 @@ The core is IO-free state machines; async belongs to platform edges. See
 
 Studio's view is humble, and the app agent is its second consumer: it sees
 the app through the same view model and presses the same actions. See
-`docs/adr/2026-10-01-agentic-control-offers-in-core.md`.
+`docs/adr/2026-10-01-agentic-control-offers-in-core.md`, refined by
+`docs/adr/2026-10-01-offer-tree-and-consequence-levels.md`.
 
 - **A button the user can press is a `UiAction` built in `lpa-studio-core`**
   and published on a view model, never constructed in `lpa-studio-web`. An
@@ -165,11 +166,24 @@ the app through the same view model and presses the same actions. See
   file, the count may only go down. Moving a web-built action between files
   needs `--bless` in the same change. Moving one into core is the point:
   bless the drop.
-- **An action only the user may press says so in its meta:** a
-  `confirmation`, or `ActionMeta::gesture` (`UserActivation` for a browser
-  picker, `UserDecision` for flashing or replacing what a board runs). The
-  agent turns those into chat cards whose click dispatches the same action.
-- The rework toward one offer tree is a roadmap
+- **What pressing an action costs the user is one `ActionConsequence`:**
+  `Routine` (plain; the agent presses it), `Undoable` (error tint, one
+  click; the agent presses it and says what it did), or `Lasting` (error
+  tint, two-click arm, carries the copy saying what is lost; the agent
+  never presses it — it becomes the user's own button in chat).
+  `ActionMeta::needs_user_activation` is the separate browser fact that a
+  picker needs a real click (`navigator.serial.requestPort`,
+  `navigator.bluetooth.requestDevice`): plain look, but the agent still
+  hands it to the user. No browser `confirm()` dialog backs any action.
+- **One offer tree, `UiStudioView.offers`, holds every offer by a stable
+  path** (`project/save`, `project/demo.module/orbit.shader/remove` — a
+  node segment always has a dot, a verb never does). A surface renders its
+  own buttons with `verbs_of(its_path)`; the agent reads and presses the
+  same tree by path (`act { action: "project/save" }`). A migrated surface
+  loses its old DTO action field — there is nowhere else left to look.
+  **`just lint-core-action-fields`** (in `check-lint`) is a second ratchet:
+  action-carrying fields on core view types may only go down.
+- The rework toward migrating every surface onto the tree is a roadmap
   (`lp2025/2026-10-01-1255-agentic-ui-roadmap`). Don't migrate whole
   surfaces ad hoc. Don't add new web-built actions either.
 
@@ -223,6 +237,12 @@ the app through the same view model and presses the same actions. See
   to BLE and `fw-emu`, the only `M!` board links left (BLE until its own
   milestone, M3, lands). See `lp-base/lp-link/README.md` and
   `docs/adr/2026-09-27-lp-link-one-comms-layer.md`.
+- **lp-link's `secure` feature is off on every product link.** Turning it on
+  for one (M6's LAN WebSocket is the first) is a wire change: bump
+  `WIRE_PROTO_VERSION` in the same change. A plain link's bytes are pinned by
+  `lp-base/lp-link/tests/plain_bytes_golden.rs`; a mismatch there is a wire
+  change too, never a golden to re-capture. See
+  `docs/adr/2026-10-01-network-link-security.md`.
 
 ## Persisted-format compatibility (the wire rule does NOT apply here)
 
@@ -290,7 +310,7 @@ runtime.
 | `lpc-access`     | Access core: secrets, tiers, HMAC login, backoff (sans-IO) | yes |
 | `lp-server`      | Project management, client connections | yes              |
 | `lp-json-pack`   | JSON Pack: a compact binary form of JSON that decodes back to byte-identical JSON text (`lp-base/`, generic; names coded against an injected seed and a per-connection learned table) | yes |
-| `lp-link`        | Sans-IO link layer under the device wire: framing, CRC-32C, channels, selective-repeat ARQ, session handshake (`lp-base/`, generic; one crate on both ends). Runs the product's USB link and the classic's UART0 link (board, host, Studio, tools); BLE/fw-emu are still the pre-lp-link `M!` framing | yes |
+| `lp-link`        | Sans-IO link layer under the device wire: framing, CRC-32C, channels, selective-repeat ARQ, session handshake (`lp-base/`, generic; one crate on both ends). Runs the product's USB link and the classic's UART0 link (board, host, Studio, tools); BLE/fw-emu are still the pre-lp-link `M!` framing. Optional `secure` feature: Noise NNpsk0 inside the SYN + sealed frames, the key match as the login (`LinkTrust::Keyed`), off on every product link until the Wi-Fi milestones | yes |
 | `lpa-devices`    | Device model: event fold, no IO, no UI | no (host + wasm) |
 | `fw-esp32c6`       | ESP32 firmware                         | yes (bare metal) |
 | `fw-emu`         | RISC-V emulator firmware (CI)          | yes (bare metal) |

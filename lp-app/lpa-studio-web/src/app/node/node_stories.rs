@@ -6,11 +6,13 @@ use crate::app::module::module_fixtures::{
     fire_export, inline_module_export, module_card_with_export,
 };
 use crate::app::node::node_story_fixtures::{
-    debug_rows_node_view, error_node_view, failed_dirty_node_view, fault_node_view,
-    nested_dirty_node_view, node_delete_pane_action, output_node_view, playlist_node_view,
-    playlist_pending_edits, unsaved_dirty_node_view, unsupported_node_view,
+    debug_rows_node_view, dirty_playlist_offers, error_node_view, failed_dirty_node_view,
+    fault_node_view, nested_dirty_node_view, nested_dirty_offers, node_delete_offer,
+    output_node_view, playlist_node_view, playlist_pending_edits, story_offers,
+    unsaved_dirty_node_view, unsupported_node_view,
 };
 use crate::app::node::{NodeDetailPopover, NodeDirtyTint, NodePane};
+use crate::core::OffersProvider;
 
 /// Story stand-in for the controller-built focus action so panes render the
 /// header select control.
@@ -71,10 +73,11 @@ pub(crate) fn error_node() -> Element {
 pub(crate) fn header_delete_action() -> Element {
     let mut view = playlist_node_view();
     view.action = Some(story_focus_action());
-    view.header_actions = vec![node_delete_pane_action()];
 
     rsx! {
-        NodePane { view, on_action: move |_| {} }
+        OffersProvider { offers: story_offers([node_delete_offer()]),
+            NodePane { view, on_action: move |_| {} }
+        }
     }
 }
 
@@ -86,10 +89,12 @@ pub(crate) fn dirty_unsaved_header_tint() -> Element {
     view.action = Some(story_focus_action());
 
     rsx! {
-        NodePane {
-            view,
-            on_action: move |_| {},
-            dirty_tint: NodeDirtyTint::HeaderOnly,
+        OffersProvider { offers: dirty_playlist_offers(),
+            NodePane {
+                view,
+                on_action: move |_| {},
+                dirty_tint: NodeDirtyTint::HeaderOnly,
+            }
         }
     }
 }
@@ -102,10 +107,12 @@ pub(crate) fn dirty_unsaved_surface_tint() -> Element {
     view.action = Some(story_focus_action());
 
     rsx! {
-        NodePane {
-            view,
-            on_action: move |_| {},
-            dirty_tint: NodeDirtyTint::FullSurface,
+        OffersProvider { offers: dirty_playlist_offers(),
+            NodePane {
+                view,
+                on_action: move |_| {},
+                dirty_tint: NodeDirtyTint::FullSurface,
+            }
         }
     }
 }
@@ -118,10 +125,12 @@ pub(crate) fn dirty_failed_header_tint() -> Element {
     view.action = Some(story_focus_action());
 
     rsx! {
-        NodePane {
-            view,
-            on_action: move |_| {},
-            dirty_tint: NodeDirtyTint::HeaderOnly,
+        OffersProvider { offers: dirty_playlist_offers(),
+            NodePane {
+                view,
+                on_action: move |_| {},
+                dirty_tint: NodeDirtyTint::HeaderOnly,
+            }
         }
     }
 }
@@ -134,10 +143,12 @@ pub(crate) fn dirty_failed_surface_tint() -> Element {
     view.action = Some(story_focus_action());
 
     rsx! {
-        NodePane {
-            view,
-            on_action: move |_| {},
-            dirty_tint: NodeDirtyTint::FullSurface,
+        OffersProvider { offers: dirty_playlist_offers(),
+            NodePane {
+                view,
+                on_action: move |_| {},
+                dirty_tint: NodeDirtyTint::FullSurface,
+            }
         }
     }
 }
@@ -150,7 +161,9 @@ pub(crate) fn nested_dirty_children() -> Element {
     view.action = Some(story_focus_action());
 
     rsx! {
-        NodePane { view, on_action: move |_| {} }
+        OffersProvider { offers: nested_dirty_offers(),
+            NodePane { view, on_action: move |_| {} }
+        }
     }
 }
 
@@ -202,7 +215,9 @@ pub(crate) fn debug_section_vs_unsaved() -> Element {
             NodePane { view: debug_rows_node_view(0, false), on_action: move |_| {} }
             NodePane { view: debug_rows_node_view(2, false), on_action: move |_| {} }
             NodePane { view: debug_rows_node_view(2, true), on_action: move |_| {} }
-            NodePane { view: unsaved, on_action: move |_| {} }
+            OffersProvider { offers: dirty_playlist_offers(),
+                NodePane { view: unsaved, on_action: move |_| {} }
+            }
         }
     }
 }
