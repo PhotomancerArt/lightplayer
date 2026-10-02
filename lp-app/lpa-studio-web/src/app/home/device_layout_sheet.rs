@@ -2,7 +2,7 @@
 //! layout (the C6 repartition), and the refusal when they do not fit.
 //!
 //! Core decides every word and every verb ([`UiLayoutPanel`] for the words,
-//! the view's offers under `devices/<id>` for the verbs, which the card
+//! the view's offers under `devices/<board>` for the verbs, which the card
 //! resolves into [`LayoutSheetVerbs`]); this sheet only lays them out —
 //! Download backup always, Continue and Cancel while the question is open. Page-level like the Unlock sheet, so it rises over
 //! whatever the user is looking at and never changes the card's height.

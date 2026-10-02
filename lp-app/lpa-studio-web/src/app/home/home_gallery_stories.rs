@@ -831,7 +831,10 @@ fn devices_card_layout_change() -> Element {
         // The verbs are offers; the shell would provide the view's tree, so
         // the story provides the one core published for this card.
         let mut offers = lpa_studio_core::UiOfferTree::new();
-        let layout = device_layout_view(&card, fs, true, staged, None, &mut offers);
+        // The story board's MAC names the card's offer paths
+        // (`devices/<mac>/…`), as a real board's does.
+        let mac = lpa_studio_core::MacAddress("60:55:f9:0a:0b:0c".to_string());
+        let layout = device_layout_view(&card, Some(&mac), fs, true, staged, None, &mut offers);
         rsx! {
             div { class: "tw:grid tw:content-start tw:gap-2",
                 crate::core::OffersProvider { offers,

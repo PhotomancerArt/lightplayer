@@ -309,9 +309,10 @@ pub(crate) fn DeviceRosterCard(
         .and_then(|layout| layout.panel.clone())
         .filter(|panel| closed_sheet.read().as_ref() != Some(panel));
     // The layout facts name their verbs by path; the verbs themselves are
-    // the view's offers under `devices/<id>` (core publishes them, the
-    // app agent presses the same ones).
-    let device_verbs = crate::core::use_verbs_of(Some(lpa_studio_core::device_offer_path(card.id)));
+    // the view's offers under `devices/<board>` (core publishes them, the
+    // app agent presses the same ones), and the facts say where.
+    let device_verbs =
+        crate::core::use_verbs_of(layout.as_ref().map(|layout| layout.offers_at.clone()));
     let offered = move |path: Option<&lpa_studio_core::OfferPath>| -> Option<UiAction> {
         let path = path?;
         device_verbs

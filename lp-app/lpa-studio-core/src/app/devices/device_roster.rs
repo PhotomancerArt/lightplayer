@@ -379,7 +379,7 @@ impl DeviceRoster {
         }
     }
 
-    /// Publish every device card's layout verbs (`devices/<id>/…`: the
+    /// Publish every device card's layout verbs (`devices/<board>/…`: the
     /// question's Continue and Cancel, Download backup, Restore files,
     /// Finish update) into the view's offer tree — the same verbs, from the
     /// same decision, that [`Self::view`]'s layout facts name by path.
@@ -412,6 +412,7 @@ impl DeviceRoster {
                     .and_then(|mac| layout.pending_for(&mac.0));
                 super::device_layout_view::device_layout_view(
                     &view,
+                    device.identity.mac.as_ref(),
                     fs,
                     has_uid,
                     staged.as_ref(),

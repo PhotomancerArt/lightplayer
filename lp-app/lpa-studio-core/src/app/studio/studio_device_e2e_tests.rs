@@ -6873,11 +6873,17 @@ fn updating_a_legacy_board_backs_up_asks_and_keeps_every_file() {
         "nothing written while the question is open"
     );
 
-    // The card's verbs are the view's offers, at the device's path.
+    // The card's verbs are the view's offers, at the BOARD's path: its MAC,
+    // which survives a Forget and a reload where the DeviceId does not.
+    let board = crate::MacAddress("60:55:f9:0a:0b:0c".to_string());
     let continue_path = panel.continue_action.expect("a migration can continue");
     assert_eq!(
+        continue_path.to_string(),
+        "devices/6055f90a0b0c/continue-update"
+    );
+    assert_eq!(
         continue_path,
-        crate::device_offer_path(target).child("continue-update")
+        crate::device_offer_path(target, Some(&board)).child("continue-update")
     );
     let continue_action = offer(&bench, &continue_path);
     assert!(
@@ -6910,7 +6916,7 @@ fn updating_a_legacy_board_backs_up_asks_and_keeps_every_file() {
             .controller
             .view()
             .offers
-            .verbs_of(&crate::device_offer_path(target))
+            .verbs_of(&crate::device_offer_path(target, Some(&board)))
             .count(),
         0,
         "and nothing left offered"

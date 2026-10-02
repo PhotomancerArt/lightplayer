@@ -2198,7 +2198,7 @@ impl StudioController {
     /// known here. Nothing on the web renders it from the tree yet; the app
     /// agent reads it.
     ///
-    /// `devices/<id>/…`: each card's layout verbs across the C6
+    /// `devices/<board>/…`: each card's layout verbs across the C6
     /// repartition (the question, Download backup, Restore files, Finish
     /// update); the card draws these from the tree by path.
     fn publish_device_offers(&self, offers: &mut crate::UiOfferTree) {
