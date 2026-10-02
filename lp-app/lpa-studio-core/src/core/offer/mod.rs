@@ -5,12 +5,24 @@
 //! from the tree, and the app agent reads and presses the same tree, so the
 //! two consumers can never disagree about what is offered. See
 //! `docs/adr/2026-10-01-agentic-control-offers-in-core.md`.
+//!
+//! A verb that needs values first (flash *which board*) declares
+//! [`OfferParam`]s; a press carries [`OfferArgs`], and the offer's
+//! [`OfferBinder`] turns them into the action ([`UiOffer::press`]).
 
+pub mod offer_arg_error;
+pub mod offer_args;
+pub mod offer_binder;
+pub mod offer_param;
 pub mod offer_path;
 pub mod offer_search;
 pub mod ui_offer;
 pub mod ui_offer_tree;
 
+pub use offer_arg_error::OfferArgError;
+pub use offer_args::OfferArgs;
+pub use offer_binder::OfferBinder;
+pub use offer_param::{OfferChoice, OfferParam, OfferParamKind};
 pub use offer_path::{OfferPath, OfferPathError};
 pub use ui_offer::UiOffer;
 pub use ui_offer_tree::UiOfferTree;

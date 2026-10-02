@@ -19,7 +19,7 @@ use dioxus::prelude::*;
 use lpa_studio_core::{AccessCommand, DeviceAction, DevicesOp, UiAction};
 
 use super::access_fields::HELP_CLASS;
-use super::ble_reach::{BleReach, use_ble_reach};
+use super::ble_reach::{BluetoothReach, ble_reach_note, use_ble_reach};
 use super::devices_page::TransportOffer;
 use super::reach_note::this_page_url;
 use super::unlock_link::{UNLOCK_PATH, UnlockLink};
@@ -76,7 +76,7 @@ pub(crate) fn UnlockPage(
     link: Option<UnlockLink>,
     /// Stories: pin what the Bluetooth half says.
     #[props(default)]
-    ble_reach: Option<BleReach>,
+    ble_reach: Option<BluetoothReach>,
     /// Stories: the address the copy lines show.
     #[props(default)]
     page_url: Option<String>,
@@ -96,7 +96,7 @@ pub(crate) fn UnlockPage(
     let connect = if reach.offers_verb() {
         connect
     } else {
-        connect.disabled(reach.note().map_or("", |note| note.reason))
+        connect.disabled(ble_reach_note(reach).map_or("", |note| note.reason))
     };
     let Some(link) = link else {
         return rsx! {
@@ -131,7 +131,7 @@ pub(crate) fn UnlockPage(
             div { class: "tw:grid tw:max-w-64 tw:gap-3 tw:text-center",
                 TransportOffer {
                     action: connect,
-                    note: reach.note(),
+                    note: ble_reach_note(reach),
                     page_url,
                     on_action: move |action| {
                         on_action.call(action);

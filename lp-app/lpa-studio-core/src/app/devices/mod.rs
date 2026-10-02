@@ -39,6 +39,7 @@
 /// The Bluetooth transport (M5): a control-only link, host-tested through
 /// its source seam.
 pub mod ble_transport;
+pub mod bluetooth_reach;
 /// Bluetooth devices backed by the page's Web Bluetooth. wasm-only, and only
 /// when the studio is built with the provider that owns them.
 #[cfg(all(feature = "browser-ble", target_arch = "wasm32"))]
@@ -63,6 +64,7 @@ pub mod device_effects;
 pub mod device_feed_op;
 pub mod device_firmware_face;
 pub mod device_flash;
+pub mod device_flash_offer;
 pub mod device_frame_feed;
 pub mod device_frame_snapshot;
 pub mod device_identity;
@@ -84,6 +86,7 @@ pub mod target_offer;
 pub mod wire_conversation;
 
 pub use ble_transport::{BleDeviceTransport, BleLinkSource};
+pub use bluetooth_reach::BluetoothReach;
 #[cfg(all(feature = "browser-ble", target_arch = "wasm32"))]
 pub use browser_ble_source::BrowserBleSource;
 #[cfg(all(feature = "emulator-tab", target_arch = "wasm32"))]
@@ -112,6 +115,9 @@ pub use device_flash::{
     FirmwareVerb, FlashBoardChoice, FlashOffer, RESET_NEEDS_USB, blocked_erase_action,
     derive_flash_name, firmware_verb, flash_offer, flash_offer_for, reflash_choice,
     taken_device_titles,
+};
+pub use device_flash_offer::{
+    FLASH_BOARD_PARAM, FLASH_NAME_PARAM, flash_consequence, flash_device_offer,
 };
 pub use device_frame_feed::{DEVICE_FEED_PARK_AFTER_FAILURES, DeviceFrameFeed, DeviceFrameFeeds};
 pub use device_frame_snapshot::DEVICE_FRAME_SNAPSHOT_INTERVAL_SECS;

@@ -36,7 +36,7 @@ use lpa_studio_core::{
     device_escape_action_for, split_roster,
 };
 
-use crate::app::home::ble_reach::{BleReach, use_ble_reach};
+use crate::app::home::ble_reach::{BluetoothReach, ble_reach_note, use_ble_reach};
 use crate::app::home::device_roster_card::{DeviceRosterCard, PendingLinkCard};
 use crate::app::home::play_feed_text::frame_age_label;
 use crate::app::home::reach_note::{ReachCopy, ReachNote, USB_UNAVAILABLE, this_page_url};
@@ -210,7 +210,7 @@ pub(crate) fn AddDeviceCard(
     /// Stories only: pin what the Bluetooth half says. Real surfaces ask the
     /// browser (`use_ble_reach`).
     #[props(default = None)]
-    ble_reach: Option<BleReach>,
+    ble_reach: Option<BluetoothReach>,
     /// Whether this browser can reach a USB port (Web Serial, or the
     /// `?emu=` shim that polyfills it). Where it cannot — iPhone, Bluefy,
     /// Firefox, Safari — the USB button is drawn disabled with its reason.
@@ -334,8 +334,8 @@ pub(crate) struct TransportVerb {
     pub note: Option<ReachNote>,
 }
 
-pub(crate) fn add_slot_verbs(usb_available: bool, ble: BleReach) -> AddSlotVerbs {
-    let ble_note = ble.note();
+pub(crate) fn add_slot_verbs(usb_available: bool, ble: BluetoothReach) -> AddSlotVerbs {
+    let ble_note = ble_reach_note(ble);
     let mut usb_note = (!usb_available).then_some(USB_UNAVAILABLE);
     // Firefox, desktop Safari: BOTH paths send you to Chrome or Edge, with
     // the same "open this page there" — say the address once, under the
@@ -695,7 +695,7 @@ mod tests {
     #[test]
     fn a_transport_this_browser_cannot_drive_is_disabled_with_a_way_forward() {
         // Chrome/Edge on a computer: both live, nothing to explain.
-        let chrome = add_slot_verbs(true, BleReach::Ready);
+        let chrome = add_slot_verbs(true, BluetoothReach::Ready);
         assert_eq!(
             chrome,
             AddSlotVerbs {
@@ -712,7 +712,7 @@ mod tests {
 
         // Bluefy: no Web Serial. USB disabled, says where it works and
         // gives this page's address to open there; Bluetooth live.
-        let bluefy = add_slot_verbs(false, BleReach::Ready);
+        let bluefy = add_slot_verbs(false, BluetoothReach::Ready);
         assert!(!bluefy.usb.enabled);
         assert_eq!(bluefy.usb.note, Some(USB_UNAVAILABLE));
         assert_eq!(
@@ -725,7 +725,7 @@ mod tests {
 
         // iPhone Safari / Chrome on iOS: both disabled; Bluetooth points to
         // Bluefy on the App Store and then this page, USB keeps its own.
-        let ios = add_slot_verbs(false, BleReach::Ios);
+        let ios = add_slot_verbs(false, BluetoothReach::Ios);
         assert!(!ios.usb.enabled && !ios.ble.enabled);
         let ble_note = ios.ble.note.expect("the Bluefy path");
         assert_eq!(
@@ -735,7 +735,7 @@ mod tests {
         assert_eq!(ios.usb.note, Some(USB_UNAVAILABLE));
 
         // Brave on a computer: USB live, Bluetooth disabled with the flag.
-        let brave = add_slot_verbs(true, BleReach::Brave);
+        let brave = add_slot_verbs(true, BluetoothReach::Brave);
         assert!(brave.usb.enabled && !brave.ble.enabled);
         assert_eq!(
             brave.ble.note.and_then(|note| note.copy),
@@ -746,7 +746,7 @@ mod tests {
 
         // Firefox / desktop Safari: both go to Chrome or Edge — the page's
         // address is said ONCE (under Bluetooth), not twice in a row.
-        let firefox = add_slot_verbs(false, BleReach::Firefox);
+        let firefox = add_slot_verbs(false, BluetoothReach::Firefox);
         let usb_note = firefox.usb.note.expect("USB still says why");
         assert_eq!(usb_note.reason, USB_UNAVAILABLE.reason);
         assert_eq!(usb_note.copy, None, "the address is not repeated");
@@ -756,7 +756,7 @@ mod tests {
         );
 
         // The answer still on its way: disabled, nothing said yet.
-        let checking = add_slot_verbs(true, BleReach::Checking);
+        let checking = add_slot_verbs(true, BluetoothReach::Checking);
         assert_eq!(
             checking.ble,
             TransportVerb {

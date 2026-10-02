@@ -43,28 +43,28 @@ pub use app::devices::BrowserSerialTransport;
 #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
 pub use app::devices::BrowserSimLinkSource;
 pub use app::devices::{
-    BLE_ENDPOINT_PREFIX, Backing, BleDeviceTransport, BleLinkSource, CompletedPush,
+    BLE_ENDPOINT_PREFIX, Backing, BleDeviceTransport, BleLinkSource, BluetoothReach, CompletedPush,
     CompositeDeviceTransport, DEVICE_FEED_PARK_AFTER_FAILURES, DEVICE_FRAME_SNAPSHOT_INTERVAL_SECS,
     DeviceCardFeedView, DeviceEffectCall, DeviceEffectFacts, DeviceEffectProgress, DeviceEffects,
     DeviceFace, DeviceFeedOp, DeviceFrameFeed, DeviceFrameFeeds, DeviceIdentityFirmware,
     DeviceIdentityLine, DevicePushOp, DeviceRoster, DeviceRosterView, DeviceTaskFuture,
     DeviceTimerFuture, DeviceTransport, DeviceTransportFuture, DevicesOp, EMU_TRANSPORT,
-    EmuBacking, EmuDeviceTransport, EmuLinkSource, EmuRuntimeControl, EmuSession, FeedLiveness,
-    FirmwareVerb, FlashBoardChoice, FlashOffer, GrantedLink, JournalLine, LensLineTap,
-    LensTapEvent, NewSimRecord, PushOffer, PushPayload, PushSource, PushSourceChoice,
-    PushSourceGroup, RESET_NEEDS_USB, RememberedView, RosterSplit, RuntimeKind, SIM_TRANSPORT,
-    SimBacking, SimCreateOp, SimDeviceTransport, SimLinkSource, SimRecord, SimRuntimeControl,
-    SimSession, SimTier, StagedPush, TargetChoice, TargetGroup, TargetOffer, TargetScope,
-    UiRuntimeBand, backing_for, ble_endpoint, ble_link_info, blocked_erase_action,
-    delete_sim_record, device_card_feed_view, device_card_feed_views, device_chip,
-    device_escape_action, device_escape_action_for, device_firmware_line,
+    EmuBacking, EmuDeviceTransport, EmuLinkSource, EmuRuntimeControl, EmuSession,
+    FLASH_BOARD_PARAM, FLASH_NAME_PARAM, FeedLiveness, FirmwareVerb, FlashBoardChoice, FlashOffer,
+    GrantedLink, JournalLine, LensLineTap, LensTapEvent, NewSimRecord, PushOffer, PushPayload,
+    PushSource, PushSourceChoice, PushSourceGroup, RESET_NEEDS_USB, RememberedView, RosterSplit,
+    RuntimeKind, SIM_TRANSPORT, SimBacking, SimCreateOp, SimDeviceTransport, SimLinkSource,
+    SimRecord, SimRuntimeControl, SimSession, SimTier, StagedPush, TargetChoice, TargetGroup,
+    TargetOffer, TargetScope, UiRuntimeBand, backing_for, ble_endpoint, ble_link_info,
+    blocked_erase_action, delete_sim_record, device_card_feed_view, device_card_feed_views,
+    device_chip, device_escape_action, device_escape_action_for, device_firmware_line,
     device_id_from_ble_endpoint, device_identity_line, device_status_kind, emu_endpoint,
     emu_link_info, emu_offered_for, feed_liveness, firmware_face_preview_sentence, firmware_verb,
-    first_bundled_example_id, flash_offer, flash_offer_for, mint_sim_identity, new_sim_record,
-    pending_escape_action, pending_firmware_line, pending_identity_rows, push_offer,
-    read_sim_record, reflash_choice, sim_device_name, sim_endpoint, sim_link_info, split_roster,
-    target_offer, transport_label_for_endpoint, uid_from_emu_endpoint, uid_from_sim_endpoint,
-    write_sim_record,
+    first_bundled_example_id, flash_consequence, flash_device_offer, flash_offer, flash_offer_for,
+    mint_sim_identity, new_sim_record, pending_escape_action, pending_firmware_line,
+    pending_identity_rows, push_offer, read_sim_record, reflash_choice, sim_device_name,
+    sim_endpoint, sim_link_info, split_roster, target_offer, transport_label_for_endpoint,
+    uid_from_emu_endpoint, uid_from_sim_endpoint, write_sim_record,
 };
 pub use app::devices::{LINK_COUNTERS_CAPTION, LinkTrouble, UiLinkCounterRow, link_counter_rows};
 pub use app::docs_host::DocsSimHost;
@@ -183,7 +183,10 @@ pub use app::studio::{
 };
 pub use core::log::{DeviceEventKind, DeviceEventRecorder};
 pub use core::notice::UiNotices;
-pub use core::offer::{OfferPath, OfferPathError, UiOffer, UiOfferTree};
+pub use core::offer::{
+    OfferArgError, OfferArgs, OfferBinder, OfferChoice, OfferParam, OfferParamKind, OfferPath,
+    OfferPathError, UiOffer, UiOfferTree,
+};
 pub use core::view::activity_view::UiActivityStep;
 pub use core::view::activity_view::UiActivityStepState;
 pub use core::{

@@ -139,6 +139,9 @@ pub struct StudioController {
     /// The transport that reaches BLUETOOTH devices (M5), when this build
     /// has one. `dyn`-free for symmetry with the other two halves.
     ble_transport: Option<Rc<crate::BleDeviceTransport>>,
+    /// What the browser answered about Bluetooth, reported by the web layer
+    /// (`StudioCommand::BluetoothReach`); `Checking` until it does.
+    bluetooth_reach: crate::BluetoothReach,
     /// How many Play surfaces are mounted on the lens right now (the
     /// `PlayViewOp` lease). Play is the one mode with an idle read budget
     /// over Bluetooth; everything else is authoring.
@@ -407,6 +410,7 @@ impl StudioController {
             sim_transport: None,
             emu_transport: None,
             ble_transport: None,
+            bluetooth_reach: crate::BluetoothReach::Checking,
             play_views: 0,
             device_sims: std::collections::BTreeMap::new(),
             pool: RuntimePool::new(),
@@ -581,6 +585,17 @@ impl StudioController {
     pub fn set_ble_transport(&mut self, transport: Rc<crate::BleDeviceTransport>) {
         self.ble_transport = Some(transport);
         self.install_device_transport();
+    }
+
+    /// What the browser answered about Bluetooth. A platform fact the web
+    /// layer reports (it alone can ask `navigator.bluetooth`), as installing
+    /// a serial transport reports Web Serial: it decides whether
+    /// `devices/connect-ble` can be pressed.
+    pub fn set_bluetooth_reach(&mut self, reach: crate::BluetoothReach) {
+        if self.bluetooth_reach != reach {
+            self.bluetooth_reach = reach;
+            self.mark_dirty();
+        }
     }
 
     /// (Re)install whichever transport this build's halves add up to, and
@@ -2176,13 +2191,21 @@ impl StudioController {
 
     /// Publish the device verbs that live in the offer tree.
     ///
-    /// `devices/connect-usb`: the add-device slot's USB path, named for what
-    /// it does (the slot's heading says "Connect a board"; the button alone
-    /// reads "via USB"), while this browser has Web Serial. It needs the
-    /// user's click (the browser's picker). Bluetooth stays out: whether
-    /// this browser has it is asked by the web layer (`use_ble_reach`), not
-    /// known here. Nothing on the web renders it from the tree yet; the app
-    /// agent reads it.
+    /// - `devices/connect-usb`: the add-device slot's USB path, named for
+    ///   what it does (the slot's heading says "Connect a board"; the button
+    ///   alone reads "via USB"), while this browser has Web Serial. It needs
+    ///   the user's click (the browser's picker).
+    /// - `devices/connect-ble`: the Bluetooth path, always published and
+    ///   disabled with the browser's reason when Bluetooth cannot work here
+    ///   ([`crate::BluetoothReach`], which the web reports). It needs the
+    ///   user's click too.
+    /// - `devices/<board>/flash` for every card whose firmware verb is Flash
+    ///   (the needs-firmware faces), taking its board as a parameter
+    ///   ([`crate::flash_device_offer`]). `<board>` is the card's MAC, or
+    ///   `new-<n>` while it has none.
+    ///
+    /// Nothing on the web renders these from the tree yet; the app agent
+    /// reads them.
     fn publish_device_offers(&self, offers: &mut crate::UiOfferTree) {
         if self.usb_available() {
             offers.publish(crate::UiOffer::new(
@@ -2192,6 +2215,29 @@ impl StudioController {
                     .with_label("Connect a board via USB"),
             ));
         }
+        let ble = crate::DevicesOp::action_for(lpa_devices::Action::AddFromBle)
+            .with_label("Connect a board via Bluetooth");
+        offers.publish(crate::UiOffer::new(
+            crate::OfferPath::devices().child("connect-ble"),
+            "bluetooth",
+            match self.bluetooth_reach.disabled_reason() {
+                Some(reason) => ble.disabled(reason),
+                None => ble,
+            },
+        ));
+        for view in self.device_roster_view().roster.devices {
+            let prefix = self.device_offer_prefix(view.id);
+            if let Some(flash) = crate::flash_device_offer(&view, prefix) {
+                offers.publish(flash);
+            }
+        }
+    }
+
+    /// The offer-path prefix a device's verbs live under:
+    /// `devices/<12 hex MAC>` once the roster knows its MAC, else the
+    /// provisional `devices/new-<n>` by its roster handle.
+    fn device_offer_prefix(&self, device: crate::DeviceId) -> crate::OfferPath {
+        crate::OfferPath::board(self.devices.roster().board_key(device).as_ref(), device)
     }
 
     /// The LENS session's docked card (D43): the device the editor is open

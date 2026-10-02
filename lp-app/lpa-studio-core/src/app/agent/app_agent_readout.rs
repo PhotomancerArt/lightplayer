@@ -13,7 +13,10 @@ use std::fmt::Write as _;
 
 use serde_json::Value;
 
-use crate::{ActionConsequence, ActionEnablement, DeviceRosterView, OfferPath, UiOffer};
+use crate::{
+    ActionConsequence, ActionEnablement, DeviceRosterView, OfferParam, OfferParamKind, OfferPath,
+    UiOffer,
+};
 
 /// The readout as the controller builds it after a batch: the text, and the
 /// offer tree's offers in publish order.
@@ -47,6 +50,10 @@ impl AppReadoutSnapshot {
                 text.push_str(" [undoable]");
             }
             text.push('\n');
+            if !offer.params().is_empty() {
+                let params: Vec<String> = offer.params().iter().map(param_text).collect();
+                let _ = writeln!(text, "  takes {}", params.join("; "));
+            }
         }
         text
     }
@@ -54,6 +61,44 @@ impl AppReadoutSnapshot {
     /// The offer at `path`, if this readout lists one.
     pub fn offer(&self, path: &OfferPath) -> Option<&UiOffer> {
         self.offers.iter().find(|offer| &offer.path == path)
+    }
+}
+
+/// One parameter as the readout lists it: `board: one of xiao (XIAO
+/// ESP32-C6), … [default xiao]`, `name: optional text`, `enabled: true or
+/// false [now true]`.
+fn param_text(param: &OfferParam) -> String {
+    match &param.kind {
+        OfferParamKind::Choice { options, preselect } => {
+            let options: Vec<String> = options
+                .iter()
+                .map(|option| match &option.disabled {
+                    Some(reason) => {
+                        format!("{} ({}; not now: {reason})", option.value, option.label)
+                    }
+                    None => format!("{} ({})", option.value, option.label),
+                })
+                .collect();
+            let mut text = format!("{}: one of {}", param.name, options.join(", "));
+            if let Some(preselect) = preselect {
+                let _ = write!(text, " [default {preselect}]");
+            }
+            text
+        }
+        OfferParamKind::Text {
+            max_len, optional, ..
+        } => {
+            let mut text = format!(
+                "{}: {}",
+                param.name,
+                if *optional { "optional text" } else { "text" }
+            );
+            if let Some(limit) = max_len {
+                let _ = write!(text, ", at most {limit} characters");
+            }
+            text
+        }
+        OfferParamKind::Toggle { value } => format!("{}: true or false [now {value}]", param.name),
     }
 }
 
@@ -223,6 +268,46 @@ mod tests {
             "{text}"
         );
         assert_eq!(text, snapshot().render(), "the same view reads the same");
+    }
+
+    #[test]
+    fn an_offers_parameters_are_listed_under_it() {
+        use crate::{OfferArgs, OfferBinder, OfferChoice, OfferParam};
+        let save = UiAction::from_op(ControllerId::new("studio|project"), ProjectOp::SaveOverlay);
+        let bound = save.clone();
+        let offer = UiOffer::with_params(
+            OfferPath::parse("devices/a0f26287b48c/flash").unwrap(),
+            "flash",
+            vec![
+                OfferParam::choice(
+                    "board",
+                    "board",
+                    vec![
+                        OfferChoice::new("xiao", "XIAO ESP32-C6"),
+                        OfferChoice::new("devkit", "ESP32-C6 DevKit").disabled("no build"),
+                    ],
+                    Some("xiao".to_string()),
+                ),
+                OfferParam::text("name", "name", "blank").optional(),
+                OfferParam::text("note", "note", "").max_len(8),
+                OfferParam::toggle("loud", "loud", false),
+            ],
+            OfferBinder::new(move |_: &OfferArgs| Ok(bound.clone())),
+            save,
+        );
+        let text = AppReadoutSnapshot {
+            text: String::new(),
+            offers: vec![offer],
+        }
+        .render();
+        assert!(
+            text.contains(
+                "  takes board: one of xiao (XIAO ESP32-C6), devkit (ESP32-C6 DevKit; not now: \
+                 no build) [default xiao]; name: optional text; note: text, at most 8 \
+                 characters; loud: true or false [now false]\n"
+            ),
+            "{text}"
+        );
     }
 
     #[test]

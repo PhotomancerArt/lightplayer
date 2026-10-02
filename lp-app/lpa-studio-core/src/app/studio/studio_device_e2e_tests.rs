@@ -4754,6 +4754,85 @@ fn factory_reset_wipes_the_board_and_the_card_comes_back_blank() {
     );
 }
 
+/// A wiped board's Flash is an offer at its MAC's path, taking its board:
+/// the options are the core pick for its chip, nothing on the chip is lost
+/// so it is Routine (Q3), and a press through the offer runs the same flash
+/// the picker's button does — named after the board, back to Ready.
+#[test]
+fn a_blank_boards_flash_offer_lists_its_boards_and_flashes_through_a_press() {
+    let device = light_player("dev_wipeme");
+    let (mut bench, tasks) = DeviceBench::granted(&device, "usb-offer-flash");
+    bench.run_until(&tasks, "the hello to settle the link", |bench| {
+        !bench.view().devices.is_empty()
+    });
+    let wiped = bench.view().devices[0].id;
+    let flash = crate::OfferPath::parse("devices/6055f90a0b0c/flash").unwrap();
+    assert!(
+        bench.controller.view().offers.get(&flash).is_none(),
+        "a running LightPlayer updates; it has no Flash"
+    );
+
+    bench.gesture(DeviceAction::Erase { device: wiped });
+    bench.run_until(&tasks, "the erase to settle as a blank verdict", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.needs_firmware() && card.activity.is_none())
+    });
+
+    let view = bench.controller.view();
+    let offer = view
+        .offers
+        .get(&flash)
+        .expect("the blank card's Flash, at its MAC");
+    assert!(
+        offer.consequence().is_routine(),
+        "a blank chip loses nothing"
+    );
+    let choice = c6_board_choice();
+    let crate::OfferParamKind::Choice { options, .. } = &offer.params()[0].kind else {
+        panic!("board is a choice: {:?}", offer.params());
+    };
+    assert!(
+        options.iter().any(|option| option.value == choice.board_id),
+        "{options:?}"
+    );
+    let readout = bench.controller.app_agent_readout_for_test().render();
+    assert!(
+        readout.contains("- devices/6055f90a0b0c/flash: Flash firmware"),
+        "{readout}"
+    );
+    assert!(readout.contains("  takes board: one of "), "{readout}");
+    assert!(readout.contains("; name: optional text\n"), "{readout}");
+
+    assert!(
+        offer
+            .press(&crate::OfferArgs::new().with("board", "no-such-board"))
+            .is_err(),
+        "an unknown board is refused before anything is dispatched"
+    );
+    let action = offer
+        .press(&crate::OfferArgs::new().with("board", &choice.board_id))
+        .expect("a candidate binds");
+    drive(bench.controller.dispatch(action)).expect("the bound flash dispatches");
+    bench.run_until(&tasks, "the flashed board to land Ready", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.state_label == "Ready" && card.activity.is_none())
+    });
+    assert!(
+        bench.view().devices[0]
+            .last_outcome
+            .as_ref()
+            .is_some_and(|outcome| outcome.ok && outcome.summary.contains("firmware installed")),
+        "{:?}",
+        bench.view().devices[0]
+    );
+}
+
 /// The bench's dead end and its way out (G1, 2026-08-31): a board arrives
 /// running a project from a previous life and the running face has no verbs
 /// on it — "how do I push?" with no answer short of throwing the firmware
@@ -6368,6 +6447,53 @@ fn a_build_without_web_serial_says_usb_is_unavailable() {
         .expect("devices/connect-usb is offered while USB is available");
     assert_eq!(offer.icon, "usb");
     assert_eq!(offer.label(), "Connect a board via USB");
+}
+
+/// `devices/connect-ble` is always offered, and whether it can be pressed
+/// is the browser's answer the web reports: disabled while Studio is still
+/// asking, disabled with the family's sentence when Bluetooth cannot work
+/// here, and pressable (by the user's own click) when it can.
+#[test]
+fn connect_ble_follows_the_reach_the_web_reports() {
+    let mut controller = StudioController::new(|| 0.0);
+    let connect_ble = crate::OfferPath::devices().child("connect-ble");
+    let reason = |controller: &StudioController| {
+        let view = controller.view();
+        let offer = view
+            .offers
+            .get(&connect_ble)
+            .expect("devices/connect-ble is always offered")
+            .clone();
+        assert_eq!(offer.icon, "bluetooth");
+        assert_eq!(offer.label(), "Connect a board via Bluetooth");
+        assert!(
+            offer.action.meta().needs_user_activation,
+            "the browser's chooser"
+        );
+        match &offer.action.meta().enablement {
+            crate::ActionEnablement::Enabled => None,
+            crate::ActionEnablement::Disabled { reason } => Some(reason.clone()),
+        }
+    };
+
+    assert_eq!(
+        reason(&controller).as_deref(),
+        crate::BluetoothReach::Checking.disabled_reason()
+    );
+    controller.set_bluetooth_reach(crate::BluetoothReach::Brave);
+    assert_eq!(
+        reason(&controller).as_deref(),
+        Some("Brave keeps Bluetooth behind a flag.")
+    );
+    controller.set_bluetooth_reach(crate::BluetoothReach::Ready);
+    assert_eq!(reason(&controller), None);
+    let readout = controller.app_agent_readout_for_test().render();
+    assert!(
+        readout.contains(
+            "- devices/connect-ble: Connect a board via Bluetooth [needs the user's click]\n"
+        ),
+        "{readout}"
+    );
 }
 
 /// One Bluetooth board, always present: a fake-device link at a `ble:`

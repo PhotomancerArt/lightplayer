@@ -1008,6 +1008,18 @@ pub fn App() -> Element {
         );
     });
 
+    // Bluetooth reach is a platform fact core needs (`devices/connect-ble`
+    // is disabled with the browser's reason when it cannot work), and only
+    // the page can ask the browser: ask once and report the answer, the way
+    // installing a serial transport reports Web Serial.
+    let reach_tx = bridge.tx.clone();
+    use_hook(move || {
+        spawn(async move {
+            let reach = crate::app::home::ble_reach::ask_browser().await;
+            reach_tx.send(StudioCommand::BluetoothReach(reach));
+        });
+    });
+
     // The local project library: probed in the startup hook below (which
     // also attaches the library host and only then fires the connect
     // action).
