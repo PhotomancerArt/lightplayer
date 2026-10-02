@@ -19,7 +19,7 @@ use super::device_backup_store::BackupEntry;
 use super::device_flash::{FirmwareVerb, firmware_verb};
 use super::device_layout_step::LayoutStaging;
 use super::devices_op::DevicesOp;
-use crate::{OfferPath, UiAction, UiOffer, UiOfferTree};
+use crate::{ActionConfirmation, ActionConsequence, OfferPath, UiAction, UiOffer, UiOfferTree};
 
 /// `devices/<id>`: the prefix every verb of one device card lives under.
 pub fn device_offer_path(device: DeviceId) -> OfferPath {
@@ -169,7 +169,16 @@ pub fn device_layout_view(
                 .with_label("Finish update")
                 .with_summary(
                     "Write the firmware again and move this board's waiting files onto it.",
-                ),
+                )
+                // Lasting, as every Flash is (D7) — with words that say what
+                // this one changes for good: the old layout is retired.
+                .with_consequence(ActionConsequence::Lasting(ActionConfirmation::new(
+                    "Finish moving this board's files?",
+                    "The board gets the new firmware again, its waiting files move to the new \
+                     layout, and the old layout is retired. Studio asks once more, with a \
+                     backup, before the files move.",
+                    "finish",
+                ))),
             ));
         }
         return Some(layout);
@@ -206,7 +215,17 @@ pub fn device_layout_view(
                     "Write the firmware and put the files backed up on {} back on this board. \
                      It replaces what is on the board now.",
                     date(entry.captured_at_epoch_seconds)
-                )),
+                ))
+                // Lasting (D7): it writes over the board's filesystem.
+                .with_consequence(ActionConsequence::Lasting(ActionConfirmation::new(
+                    "Replace this board's files with the backup?",
+                    format!(
+                        "Whatever is on the board now is replaced by the files backed up on {}. \
+                         The backup stays in this browser.",
+                        date(entry.captured_at_epoch_seconds)
+                    ),
+                    "restore",
+                ))),
             ));
         }
         layout.download = Some(publish(
@@ -400,6 +419,110 @@ mod tests {
             .is_none(),
             "no backup, nothing to offer"
         );
+    }
+
+    /// The five layout offers' levels (docs/adr/2026-10-01-offer-tree-and-
+    /// consequence-levels.md): every verb that changes the board's data for
+    /// good is `Lasting` with its own words, so the card arms it and the app
+    /// agent hands it to the user; the download needs a real click; Cancel
+    /// writes nothing and is routine.
+    #[test]
+    fn the_layout_offers_carry_their_consequence_levels() {
+        use lpa_devices::view::ActivityView;
+        use lpa_devices::{ActivityKind, FlashLayoutView};
+
+        let at = |verb: &str| device_offer_path(DeviceId(7)).child(verb);
+        let lasting = |offers: &UiOfferTree, verb: &str| {
+            let offer = offers
+                .get(&at(verb))
+                .unwrap_or_else(|| panic!("{verb} offered"));
+            let copy = offer
+                .consequence()
+                .copy()
+                .unwrap_or_else(|| panic!("{verb} is Lasting: {:?}", offer.consequence()));
+            assert!(!copy.message.is_empty(), "{verb} says what is lost");
+            assert!(offer.action.meta().needs_user(), "{verb} is the user's");
+            copy.title.clone()
+        };
+
+        // The question: Continue is Lasting, Cancel routine, the download a
+        // real click that loses nothing.
+        let mut asking = running_c6();
+        asking.activity = Some(ActivityView {
+            kind: ActivityKind::Flash,
+            label: "Flashing firmware".to_string(),
+            percent: None,
+            cancellable: true,
+            cancel_requested: false,
+            layout: Some(FlashLayoutView {
+                verdict: LayoutVerdict::Migrate {
+                    files: 3,
+                    bytes: 9_000,
+                    free_blocks: 150,
+                    tight: false,
+                    backup_stored: true,
+                    device_uid: None,
+                },
+                awaiting_consent: true,
+            }),
+        });
+        let mut offers = UiOfferTree::new();
+        device_layout_view(&asking, BoardFs::Mounted, true, None, None, &mut offers)
+            .expect("the question");
+        assert_eq!(lasting(&offers, CONTINUE_UPDATE), "Rewrite this board now?");
+        let cancel = offers.get(&at(CANCEL_UPDATE)).expect("cancel offered");
+        assert!(cancel.consequence().is_routine());
+        assert!(!cancel.action.meta().needs_user(), "the agent may cancel");
+        let download = offers.get(&at(DOWNLOAD_BACKUP)).expect("download offered");
+        assert!(
+            download.consequence().is_routine(),
+            "a download loses nothing"
+        );
+        assert!(download.action.meta().needs_user_activation);
+
+        // A held board: Finish update retires the old layout.
+        let mut offers = UiOfferTree::new();
+        device_layout_view(
+            &running_c6(),
+            BoardFs::LegacyHeld,
+            true,
+            None,
+            None,
+            &mut offers,
+        )
+        .expect("the held line");
+        assert_eq!(
+            lasting(&offers, FINISH_UPDATE),
+            "Finish moving this board's files?"
+        );
+
+        // A board back without its files: Restore writes over them.
+        let entry = super::super::device_backup_store::BackupEntry {
+            base_mac: "60:55:f9:0a:0b:0c".to_string(),
+            archive: "a.zip".to_string(),
+            captured_at_epoch_seconds: 1_800_000_000.0,
+            purpose: "layout-migration".to_string(),
+            status: super::super::device_backup_store::BackupStatus::Pending,
+            file_count: 3,
+            total_bytes: 100,
+        };
+        let mut offers = UiOfferTree::new();
+        device_layout_view(
+            &running_c6(),
+            BoardFs::Formatted,
+            false,
+            None,
+            Some(&entry),
+            &mut offers,
+        )
+        .expect("the restore line");
+        assert_eq!(
+            lasting(&offers, RESTORE_FILES),
+            "Replace this board's files with the backup?"
+        );
+        let download = offers.get(&at(DOWNLOAD_BACKUP)).expect("download offered");
+        assert!(download.consequence().is_routine());
+        assert!(download.action.meta().needs_user_activation);
     }
 
     /// A running C6 on a resolved board (the Update verb resolves).
