@@ -11,7 +11,7 @@ use core::any::Any;
 
 use lpa_devices::DeviceId;
 
-use crate::{ActionClass, ActionGesture, ActionMeta, ActionPriority, ControllerOp};
+use crate::{ActionClass, ActionMeta, ActionPriority, ControllerOp};
 
 /// Download a board's backup.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -38,7 +38,7 @@ impl ControllerOp for DeviceBackupOp {
         )
         .with_icon("download")
         // A browser download wants a real click.
-        .with_gesture(ActionGesture::UserActivation)
+        .needs_user_activation()
     }
 
     /// Reading a backup changes nothing: it must never cancel a pull.

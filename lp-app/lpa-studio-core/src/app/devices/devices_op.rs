@@ -206,14 +206,20 @@ impl ControllerOp for DevicesOp {
                 ActionPriority::Secondary,
             ),
             // The layout question's yes (the C6 repartition): the backup is
-            // already stored, and the board's files move now. The user's
-            // decision, never an assistant's.
+            // already stored, and the board is rewritten now. The user's
+            // decision, never an assistant's (D7: Lasting, so the agent
+            // hands it over).
             Action::ConfirmFlashLayout { .. } => ActionMeta::new(
                 "Continue",
                 "Write the new firmware and move this board's files to it.",
                 ActionPriority::Primary,
             )
-            .with_gesture(ActionGesture::UserDecision),
+            .lasting(ActionConfirmation::new(
+                "Rewrite this board now?",
+                "The board gets the new firmware and its files move to the new layout. \
+                 The backup stays in this browser.",
+                "continue",
+            )),
             Action::Identify { .. } => ActionMeta::new(
                 "Identify again",
                 "Ask the board what it is, right now.",
