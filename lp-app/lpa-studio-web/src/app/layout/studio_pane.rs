@@ -272,8 +272,9 @@ fn PaneCollapseButton(collapse: PaneCollapse) -> Element {
 /// on the first click and acts on the second, through the same
 /// [`use_armed_confirm`] machine. An icon has no label to swap, so arming
 /// changes its dress (`.ux-armed-chip` / `.ux-armed`: the error fill, the
-/// knock, the drain), never its width; while armed, its `title` and
-/// accessible name are the copy's message.
+/// knock, the drain) and lays the copy's verb beside it as a question pill
+/// that overlays the header ("Revert?"), never its width; while armed, its
+/// `title` and accessible name are the copy's message.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn PaneActionButton(
@@ -300,6 +301,13 @@ fn PaneActionButton(
         Some(copy) if armed => (copy.message.clone(), copy.message.clone()),
         _ => (title, label),
     };
+    // The armed icon asks in words: the copy's verb as a short question,
+    // in a pill that overlays leftward from the icon (G2). It is absolute,
+    // so the button keeps its width and no neighbour moves.
+    let ask = consequence
+        .copy()
+        .filter(|_| armed)
+        .map(|copy| armed_question(&copy.confirm_label));
     let dispatch = offer.action.clone();
 
     rsx! {
@@ -326,8 +334,32 @@ fn PaneActionButton(
                 name: icon,
                 size: 15,
             }
+            // Part of the button: pressing the question answers it. Hidden
+            // from AT — the armed accessible name is the copy's message.
+            if let Some(ask) = ask {
+                span { class: ARMED_ASK_CLASS, aria_hidden: "true", "{ask}" }
+            }
         }
     }
+}
+
+/// The armed header icon's question pill: the error chip's dress, anchored
+/// to the button's left edge and laid over the header to its left (above
+/// the title band and any neighbour icon), so arming never reflows the
+/// header. `ux-armed-ask` (style.css) fades it in, unless reduced motion.
+const ARMED_ASK_CLASS: &str = "ux-armed-ask tw:pointer-events-auto tw:absolute tw:right-full tw:top-1/2 tw:z-10 tw:mr-1.5 tw:-translate-y-1/2 tw:whitespace-nowrap tw:rounded-pill tw:border tw:border-status-error-border tw:bg-status-error-bg tw:px-2 tw:py-1 tw:text-xs tw:font-bold tw:leading-none tw:text-status-error-foreground tw:shadow-[0_0_0_3px_var(--studio-color-surface-subtle)]";
+
+/// An armed icon's question from its copy's confirm verb: "revert" reads
+/// "Revert?". Kept as a plain function so it is testable without mounting.
+fn armed_question(confirm_label: &str) -> String {
+    let verb = confirm_label.trim().trim_end_matches('?');
+    let mut chars = verb.chars();
+    let mut question: String = match chars.next() {
+        Some(first) => first.to_uppercase().chain(chars).collect(),
+        None => String::new(),
+    };
+    question.push('?');
+    question
 }
 
 /// A header icon's classes with its arming dress: an arming button always
@@ -444,9 +476,11 @@ fn pane_action_button_class(primary: bool, enabled: bool, tinted: bool) -> &'sta
             "tw:inline-flex tw:h-full tw:min-h-[46px] tw:w-[34px] tw:items-center tw:justify-center tw:border-0 tw:border-l tw:border-border-muted tw:bg-transparent tw:p-0 tw:text-dim-foreground tw:opacity-50 tw:cursor-not-allowed"
         }
         // The consequence's error tint (Undoable, Lasting), whatever the
-        // priority: the icon in the error tone, the error wash on hover.
+        // priority: the icon in the error tone ON the error wash, at rest —
+        // the icon colour alone read as a plain one beside its neighbours
+        // (gate G1). Hover fills the wash to full strength.
         (_, true) if tinted => {
-            "tw:inline-flex tw:h-full tw:min-h-[46px] tw:w-[34px] tw:items-center tw:justify-center tw:border-0 tw:border-l tw:border-border-muted tw:bg-transparent tw:p-0 tw:text-status-error-foreground tw:hover:bg-status-error-bg"
+            "tw:inline-flex tw:h-full tw:min-h-[46px] tw:w-[34px] tw:items-center tw:justify-center tw:border-0 tw:border-l tw:border-border-muted tw:bg-status-error-bg/60 tw:p-0 tw:text-status-error-foreground tw:hover:bg-status-error-bg"
         }
         (true, true) => {
             "tw:inline-flex tw:h-full tw:min-h-[46px] tw:w-[34px] tw:items-center tw:justify-center tw:border-0 tw:border-l tw:border-border-muted tw:bg-transparent tw:p-0 tw:text-strong-foreground tw:hover:bg-card-subtle/60"
@@ -486,5 +520,23 @@ mod tests {
         for class in [&rest, &armed] {
             assert!(class.contains("tw:w-[34px]"), "{class}");
         }
+    }
+
+    #[test]
+    fn a_tinted_header_icon_wears_the_error_wash_at_rest() {
+        let tinted = pane_action_button_class(false, true, true);
+        assert!(tinted.contains("tw:bg-status-error-bg/60"), "{tinted}");
+        let plain = pane_action_button_class(false, true, false);
+        assert!(plain.contains("tw:bg-transparent"), "{plain}");
+    }
+
+    #[test]
+    fn an_armed_header_icon_asks_its_verb_as_a_question() {
+        assert_eq!(armed_question("revert"), "Revert?");
+        assert_eq!(armed_question("Delete"), "Delete?");
+        assert_eq!(armed_question(" forget? "), "Forget?");
+        // The pill overlays; it never takes layout room in the header.
+        assert!(ARMED_ASK_CLASS.contains("tw:absolute"));
+        assert!(ARMED_ASK_CLASS.contains("tw:right-full"));
     }
 }

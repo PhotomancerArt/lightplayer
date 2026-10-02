@@ -29,7 +29,7 @@ pub struct NodeRemoveOp {
 impl ControllerOp for NodeRemoveOp {
     fn default_action_meta(&self) -> ActionMeta {
         ActionMeta::new(
-            "Delete node",
+            "Remove node",
             "Remove this node from the project; its files are deleted on save.",
             ActionPriority::Tertiary,
         )
@@ -78,7 +78,7 @@ mod tests {
             }
         );
         let meta = op.default_action_meta();
-        assert_eq!(meta.label, "Delete node");
+        assert_eq!(meta.label, "Remove node");
         assert_eq!(meta.icon.as_deref(), Some("remove"));
         assert_eq!(meta.consequence, crate::ActionConsequence::Undoable);
     }

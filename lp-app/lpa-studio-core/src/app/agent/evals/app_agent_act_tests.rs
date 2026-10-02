@@ -151,7 +151,7 @@ fn the_agent_sees_a_nested_nodes_remove_and_presses_it() {
         })
         .expect("the readout the model saw");
     assert!(
-        state.contains(&format!("- {remove}: Delete node [undoable]\n")),
+        state.contains(&format!("- {remove}: Remove node [undoable]\n")),
         "{state}"
     );
     let result = tool_results(&steps).remove(0);
