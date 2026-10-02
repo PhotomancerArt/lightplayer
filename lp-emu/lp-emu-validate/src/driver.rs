@@ -2368,8 +2368,10 @@ mod tests {
         assert!(rendered.contains("Studio"), "{rendered}");
     }
 
-    /// G1b-2: flash / wait / open, three steps after the build, no `--monitor`
-    /// anywhere, and the open step is the non-resetting reader.
+    /// G1b-2: flash / wait / open after the build, no `--monitor` anywhere,
+    /// and the open step is the non-resetting reader. Since the 2026-10 C6
+    /// repartition a layout preflight runs before the flash (the board's
+    /// table read and compared; nothing written).
     #[test]
     fn the_negative_control_flashes_waits_then_opens_without_resetting() {
         let req = request(
@@ -2378,7 +2380,11 @@ mod tests {
             Some("/dev/cu.usbmodem1433201"),
         );
         let plan = SiliconDriver.plan(&req).unwrap();
-        assert_eq!(plan.steps.len(), 4, "build, flash, wait, open");
+        assert_eq!(
+            plan.steps.len(),
+            5,
+            "build, layout preflight, flash, wait, open"
+        );
         let rendered = plan.render();
 
         // The commands, not the prose that explains them — one of the notes
@@ -2406,10 +2412,14 @@ mod tests {
         assert!(rendered.contains("--seconds 120"), "{rendered}");
 
         // In order, and the wait really is between the two.
+        let preflight = rendered.find("hardware lpfs preflight").unwrap();
         let flash = rendered.find(DESK_FLASH_NO_MONITOR_SCRIPT).unwrap();
         let wait = rendered.find("sleep 8").unwrap();
         let open = rendered.find(TTY_CAPTURE_SCRIPT).unwrap();
-        assert!(flash < wait && wait < open, "{rendered}");
+        assert!(
+            preflight < flash && flash < wait && wait < open,
+            "{rendered}"
+        );
 
         // The shipped image, not the memfs variant.
         assert_eq!(req.features().unwrap(), vec!["esp32c6", "server", "radio"]);
