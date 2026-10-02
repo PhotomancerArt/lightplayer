@@ -1,0 +1,26 @@
+{
+  "format": 1,
+  "sample_diameter": 1.0,
+  "canvas": [
+    0.0,
+    0.0,
+    300.0,
+    8.0
+  ],
+  "objects": [
+    {
+      "name": "strip",
+      "shape": {
+        "grid": {
+          "origin": [
+            0.5,
+            4.0
+          ],
+          "cols": 300,
+          "rows": 1,
+          "pitch": 1.0
+        }
+      }
+    }
+  ]
+}

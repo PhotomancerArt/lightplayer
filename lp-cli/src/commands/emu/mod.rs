@@ -36,11 +36,12 @@
 //! front door is not a replacement for the workshop behind it, and the gates
 //! call the binary directly.
 
-mod args;
+pub mod args;
 mod handler;
 pub mod link_host;
 mod run_hosted;
 mod run_s3;
+mod run_v3;
 mod serve;
 
 pub use args::EmuCli;

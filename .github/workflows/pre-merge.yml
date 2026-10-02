@@ -368,6 +368,12 @@ jobs:
               # `lp-core/**` (director ruling DD77): that closure is wider
               # than what the two chips' `fw-esp32-common` actually shares.
               - 'lp-fw/fw-esp32-common/**'
+              # The vendored forks (esp-hal, esp-radio, esp-alloc, naga, …)
+              # are in the C6 image's link closure, so a change there moves
+              # the bytes every gate below boots. Missing until 2026-09-27:
+              # esp-hal's USB-Serial-JTAG ISR back-port (#855) would have run
+              # no emulator gate had it not also touched fw-esp32-common.
+              - 'third_party/**'
               # The tab host's WASI shim, which `scripts/emu/tab-smoke.mjs`
               # IMPORTS rather than copies (C6-in-tab P2): a change to it
               # changes what this job runs, so it must trigger this job. Since
@@ -407,6 +413,15 @@ jobs:
               # (`emu run --host-link`, `tests/emu_usb_link_gates.rs`).
               - 'lp-cli/src/commands/emu/**'
               - 'lp-cli/tests/emu_*.rs'
+              # The validation runner's link host (`lp-cli validate`'s
+              # `--link-host`, plan lp2025/2026-09-27-validate-driver-link-host):
+              # its board half is `link capture`, tested against an emulated
+              # board in `tests/link_capture.rs`, and its contract with
+              # lp-emu-validate in `tests/validate_link_host_parity.rs`.
+              - 'lp-cli/src/commands/link/**'
+              - 'lp-cli/src/commands/validate/**'
+              - 'lp-cli/tests/link_capture.rs'
+              - 'lp-cli/tests/validate_*.rs'
               - 'justfile'
               - '.github/workflows/pre-merge.yml'
             # emu_esp32v3 is the same shape for the CLASSIC ESP32's machine
@@ -466,6 +481,14 @@ jobs:
               - 'scripts/heap-budget-check.sh'
               - 'scripts/heap-budget-stack-layout.py'
               - 'scripts/heap-budget-record/chips/esp32v3.json'
+              # Since wire proto 32 the classic's UART0 is an lp-link: its heap
+              # ratchet and walk boot through `lp-cli emu run --chip esp32v3
+              # --host-link`, and its link-side gates and conversation tests
+              # (`tests/emu_v3_link_gates.rs`, `tests/emu_uart_link.rs`) are
+              # lp-cli's.
+              - 'lp-cli/src/commands/emu/**'
+              - 'lp-cli/tests/emu_v3_*.rs'
+              - 'lp-cli/tests/emu_uart_*.rs'
               - 'justfile'
               - '.github/workflows/pre-merge.yml'
               - '.github/actions/**'
@@ -1833,13 +1856,13 @@ jobs:
       # ratchet's rebuild is incremental (44 s on the runner, run
       # 35969291379); in the other job it would be a cold ~3-minute build.
       #
-      # Cost, measured on an M2 Max with a warm cargo cache: 24 s all in — a
-      # 22 s `fw-esp32v3` rebuild (the recipe touches `src/main.rs`, because
-      # this crate's cfg-dependent codegen does not always retrigger on a
-      # feature flip) plus a 0.2 s boot that ends on its own `[JIT] used=`
-      # line at 119 ms of emulated time. The release `lp-emu-esp32v3`
-      # binary the ratchet runs is the one expense this job does not already
-      # pay; it is a much smaller dependency tree than `lp-cli`'s.
+      # Cost, measured on an M2 Max with a warm cargo cache before wire
+      # proto 32: 24 s all in — a 22 s `fw-esp32v3` rebuild (the recipe
+      # touches `src/main.rs`, because this crate's cfg-dependent codegen
+      # does not always retrigger on a feature flip) plus a sub-second boot.
+      # Since proto 32 the ratchet boots through a release `lp-cli emu run
+      # --chip esp32v3 --host-link` (the classic's UART0 is an lp-link), which
+      # the boot step's own lp-cli link gates have already built.
       #
       # It runs even when the boot suite failed (and only then besides
       # success): a statics change moves both, and one red run should name —
@@ -1870,6 +1893,11 @@ jobs:
             scripts/ci/figures-patch.py bless --name "Emulator ESP32v3 boot suite" \
               --log "$RUNNER_TEMP/figures-tests.log" \
               --cargo-test "set -a; . target/lp-emu-esp32v3/images.env; set +a; cargo test -p lp-emu-esp32v3"
+            # The classic's link-side gates (G2's `main_stack_bytes` and
+            # `boot_idle.path_high_water_gap`) are lp-cli's since wire proto 32.
+            scripts/ci/figures-patch.py bless --name "Classic link gates (lp-cli)" \
+              --log "$RUNNER_TEMP/figures-tests.log" \
+              --cargo-test "set -a; . target/lp-emu-esp32v3/images.env; set +a; cargo test -p lp-cli --release --test emu_v3_link_gates"
           fi
           if [ "$HEAP" = failure ]; then
             scripts/ci/figures-patch.py bless --name "Heap budget ratchet (esp32v3)" \

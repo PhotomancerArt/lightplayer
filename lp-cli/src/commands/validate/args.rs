@@ -71,6 +71,15 @@ pub struct RunArgs {
     /// Refused on any configuration that is not `lp-emu:*`.
     #[arg(long, value_parser = ["real", "spike"])]
     pub link: Option<String>,
+    /// Who reads the shipped image's USB link: `lp-link` (default) hosts the
+    /// product's link — the image speaks lp-link since wire proto 30, and
+    /// its hello, heartbeats and log lines leave the board only once a host
+    /// brings the link up — and captures the host's decoded console. `raw`
+    /// reads the port's bytes, which is how every committed transcript was
+    /// captured: use it to re-run a pinned pre-lp-link image (`--image`).
+    /// Harness payloads and spike-link payloads are read raw either way.
+    #[arg(long = "link-host", value_parser = ["lp-link", "raw"], default_value = "lp-link")]
+    pub link_host: String,
     /// Seconds to wait for the payload's sentinel. EMULATED seconds on an
     /// emulated configuration.
     #[arg(long, default_value_t = 120)]
@@ -122,6 +131,15 @@ pub struct RecordArgs {
     /// filed exactly where it always was.
     #[arg(long)]
     pub machine: Option<String>,
+    /// Who reads the shipped image's USB link: `lp-link` (default) hosts the
+    /// product's link — the image speaks lp-link since wire proto 30, and
+    /// its hello, heartbeats and log lines leave the board only once a host
+    /// brings the link up — and captures the host's decoded console. `raw`
+    /// reads the port's bytes, which is how every committed transcript was
+    /// captured: use it to re-run a pinned pre-lp-link image (`--image`).
+    /// Harness payloads and spike-link payloads are read raw either way.
+    #[arg(long = "link-host", value_parser = ["lp-link", "raw"], default_value = "lp-link")]
+    pub link_host: String,
     #[arg(long, default_value_t = 120)]
     pub timeout_secs: u64,
     /// Print the exact commands and the destination paths, and stop.

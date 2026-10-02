@@ -386,6 +386,14 @@ impl RuntimeSession {
         self.consecutive_refresh_failures = self.consecutive_refresh_failures.saturating_add(1);
     }
 
+    /// A pull that failed on an ANSWER (the board refused the read, or its
+    /// reply arrived malformed): back off as for any failure, but the board
+    /// is plainly on the wire, so the no-answer streak starts over.
+    pub(crate) fn record_refresh_answered_failure(&mut self) {
+        self.backoff.record_failure();
+        self.consecutive_refresh_failures = 0;
+    }
+
     /// Passive pulls that failed back to back, for the device lens's
     /// dead-wire backstop.
     pub fn consecutive_refresh_failures(&self) -> u32 {

@@ -33,6 +33,63 @@ pub enum LinkSubcommand {
     ///       --faults in-drop=1%,in-tail=1%,in-run=0.1%,out-drop=1%,seed=7
     #[command(verbatim_doc_comment)]
     Lab(LabArgs),
+    /// Open a board's port as the host of its link and write what the board
+    /// says as a console — raw text, log records, each wire message as its
+    /// `M!{json}` line, `[link] …` notes — until a line contains `--exit-on`
+    /// or `--seconds` pass.
+    ///
+    /// The port is opened the way lp-cli's own transports open it: no reset
+    /// dance, so a board that is already running keeps running. This is the
+    /// silicon half of `lp-cli validate`'s link host; the emulated half is
+    /// `lp-cli emu run --host-link`, and both write the same lines.
+    ///
+    /// Targets: a serial device, or `tcp://host:port` (an emulated board's
+    /// link, `lp-cli emu run --link`).
+    ///
+    /// `--request` sends a client request once the board has said hello:
+    /// the desk's way to ask a board something with nothing else on its
+    /// port. Each waits for the one before to be done — answered, or for a
+    /// `reboot`, the board restarted (a `[link] reset (PeerRestarted)` and a
+    /// new session) — and goes after its session's hello, so a reboot
+    /// followed by a hello asks the rebooted board:
+    ///
+    ///   lp-cli link capture /dev/cu.usbmodem1101 --console boot.txt \
+    ///       --request reboot --request hello --seconds 20
+    #[command(verbatim_doc_comment)]
+    Capture(CaptureArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct CaptureArgs {
+    /// A serial device, or `tcp://host:port`.
+    pub target: String,
+
+    /// Write the console here, a line at a time.
+    #[arg(long)]
+    pub console: PathBuf,
+
+    /// Stop at the end of the first console line containing this text; a run
+    /// that ends without one fails.
+    #[arg(long = "exit-on")]
+    pub exit_on: Option<String>,
+
+    /// Wall-clock seconds to host the link for.
+    #[arg(long, default_value_t = 120)]
+    pub seconds: u64,
+
+    /// Do not ask the board to pack its replies (JSON Pack).
+    #[arg(long = "json-replies")]
+    pub json_replies: bool,
+
+    /// Send this client request once the board's hello arrives — the JSON
+    /// of a `ClientRequest` (`'"reboot"'`, `'{"setLogLevel":{…}}'`), or a
+    /// unit request's bare name (`reboot`). Repeatable; sent in order, each
+    /// once the one before is done: answered, or — for a `reboot` — the
+    /// board restarted and said hello again. A request whose session resets
+    /// under it is done unanswered. The run fails if one is never sent,
+    /// never answered, or a `reboot` never restarts the board.
+    #[arg(long)]
+    pub request: Vec<String>,
 }
 
 #[derive(Debug, Args)]

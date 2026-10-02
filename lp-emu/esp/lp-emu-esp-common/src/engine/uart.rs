@@ -29,6 +29,7 @@ use alloc::vec::Vec;
 use lp_emu_core::sched::{Cycles, EventId};
 
 use crate::host::StreamId;
+use crate::link_faults::{LinkFaults, StreamFaults};
 use crate::periph::BusCx;
 
 /// What the view must tell the engine before it acts, all derived from the
@@ -161,6 +162,13 @@ pub struct UartEngine {
     rx_popped: u32,
     /// Bytes the guest wrote into a full TX FIFO, dropped.
     tx_dropped: u64,
+    /// The host link's fault injector — **a test switch, `None` by default**
+    /// ([`crate::link_faults`]). It stands between the wire and the host
+    /// stream, never inside the block: every byte the shifter sent still
+    /// left it, and the injector decides what the host then got (and the
+    /// same for the host's bytes on their way in). Not in the save-state
+    /// blob, so a restore keeps whatever the run was configured with.
+    faults: Option<StreamFaults>,
 }
 
 impl UartEngine {
@@ -179,7 +187,21 @@ impl UartEngine {
             rx_pushed: 0,
             rx_popped: 0,
             tx_dropped: 0,
+            faults: None,
         }
+    }
+
+    /// Damage what crosses between the wire and the host — **a test switch,
+    /// off by default** ([`crate::link_faults`], a window of
+    /// [`crate::link_faults::STREAM_PACKET_BYTES`] at a time). `None`, or a
+    /// spec with every rate 0, turns it off.
+    pub fn set_faults(&mut self, faults: Option<LinkFaults>) {
+        self.faults = faults.filter(|f| !f.is_off()).map(StreamFaults::new);
+    }
+
+    /// The injector and its counters, when one is set.
+    pub fn faults(&self) -> Option<&LinkFaults> {
+        self.faults.as_ref().map(StreamFaults::faults)
     }
 
     // ---- the transmit side ----------------------------------------------
@@ -258,7 +280,11 @@ impl UartEngine {
         let Some(byte) = self.shifter.take() else {
             return;
         };
-        if let Some(id) = stream {
+        let delivered = match self.faults.as_mut() {
+            Some(faults) => faults.on_device_to_host(byte),
+            None => Some(byte),
+        };
+        if let (Some(id), Some(byte)) = (stream, delivered) {
             cx.host.stream(id).write_byte(byte);
         }
         if self.tx.is_empty() {
@@ -350,13 +376,20 @@ impl UartEngine {
         };
         match byte {
             Some(b) => {
-                let outcome = self.deliver_rx(b, at, cfg, ids, cx);
+                // The injector, when one is set, decides what the host's byte
+                // became on the wire: itself, a bit flipped, or nothing at
+                // all — which still took its symbol time to not arrive.
+                let arrived = match self.faults.as_mut() {
+                    Some(faults) => faults.on_host_to_device(b),
+                    None => Some(b),
+                };
+                let outcome = arrived.map(|b| self.deliver_rx(b, at, cfg, ids, cx));
                 // The wire delivers at baud: the next byte, if there is one,
                 // is one symbol behind this one.
                 let gap = cfg.symbol_cycles.unwrap_or(live_poll_cycles);
                 self.rx_due = at.saturating_add(gap);
                 cx.sched.schedule_at(self.rx_due, ids.rx_poll);
-                Some((b, outcome))
+                Some((arrived?, outcome?))
             }
             None => {
                 match next_ready {

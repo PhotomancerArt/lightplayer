@@ -21,9 +21,13 @@
 //! 3fcdb700 A _stack_start      ← top, == ORIGIN(dram2_seg)
 //! ```
 //!
-//! — a 37,280 B main stack, and every byte of it that goes unused is a byte
-//! `HEAP_SIZE` could have had. Nothing has ever measured how much of it a
-//! workload actually touches; that is what this is for.
+//! — however large `dram_seg` leaves `.stack` once `HEAP_SIZE` and every
+//! other static are carved out (today's exact number is `stack_total_bytes`
+//! in `lp-emu/esp/figures/esp32s3.json`, re-measured by `just bless-chips
+//! esp32s3`; it moves with firmware changes, so it is not repeated here) —
+//! and every byte of it that goes unused is a byte `HEAP_SIZE` could have
+//! had. Nothing has ever measured how much of it a workload actually
+//! touches; that is what this is for.
 //!
 //! This paints the unused stack once at boot and later scans for the lowest
 //! painted word still intact — the classic watermark — so a `[stack]` line can

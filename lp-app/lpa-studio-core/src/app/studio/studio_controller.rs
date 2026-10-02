@@ -527,6 +527,9 @@ impl StudioController {
     /// the view dirty (the actor applies these synchronously, in order).
     pub fn apply_agent_feedback(&mut self, feedback: crate::AgentFeedback) {
         self.agent.apply_feedback(feedback);
+        // A card settled while the run was still out: the run after it
+        // hears what the user did.
+        self.resume_app_agent();
         self.mark_dirty();
     }
 
@@ -1243,6 +1246,13 @@ impl StudioController {
             );
             return;
         };
+        if row.uid.starts_with("mac:") {
+            log::debug!(
+                "push not banked: {:?} is still keyed on its MAC, which record_push refuses",
+                row.uid
+            );
+            return;
+        }
         let version: lpc_history::ContentHash = match push.version.parse() {
             Ok(version) => version,
             Err(error) => {
@@ -1320,6 +1330,15 @@ impl StudioController {
         crate::DeviceMillis(((self.now_secs)() * 1_000.0).max(0.0) as u64)
     }
 
+    /// Whether this page can reach a board over USB. Web Serial (or the
+    /// `?emu=` shim that polyfills it) is what built a serial transport;
+    /// without one the add slot keeps its USB verb out of the primary
+    /// position (iPhone, Bluefy, Firefox, Safari), and the offer tree has
+    /// no `devices/connect-usb`.
+    fn usb_available(&self) -> bool {
+        self.serial_transport.is_some()
+    }
+
     /// The devices surface's projection.
     pub fn device_roster_view(&self) -> crate::DeviceRosterView {
         let mut view = self.devices.view(self.device_now());
@@ -1331,10 +1350,7 @@ impl StudioController {
             (self.now_secs)(),
         );
         view.runtime_bands = self.runtime_bands(&view);
-        // Web Serial (or the `?emu=` shim that polyfills it) is what built
-        // a serial transport; without one the add slot keeps its USB verb
-        // out of the primary position (iPhone, Bluefy, Firefox, Safari).
-        view.usb_available = self.serial_transport.is_some();
+        view.usb_available = self.usb_available();
         view.access = self
             .devices
             .roster()
@@ -1463,6 +1479,10 @@ impl StudioController {
             }
             SettingsCommand::SetAgentModel(model) => {
                 self.settings.set_agent_model(model);
+                self.persist_user_settings();
+            }
+            SettingsCommand::SetAppAgentModel(model) => {
+                self.settings.set_app_agent_model(model);
                 self.persist_user_settings();
             }
             SettingsCommand::SetAgentPriceInputPerMtok(value) => {
@@ -1751,6 +1771,15 @@ impl StudioController {
     pub fn record_passive_refresh_success(&mut self) {
         if let Ok(session) = self.pool.lens_session_mut() {
             session.record_refresh_success();
+        }
+    }
+
+    /// A passive pull the board ANSWERED with a failure (a refused read, a
+    /// torn reply): backoff applies, but it is proof the wire is alive, so
+    /// it never counts toward — and restarts — the dead-wire streak below.
+    pub fn record_passive_refresh_answered_failure(&mut self) {
+        if let Ok(session) = self.pool.lens_session_mut() {
+            session.record_refresh_answered_failure();
         }
     }
 
@@ -2069,7 +2098,9 @@ impl StudioController {
     }
 
     pub fn view(&self) -> UiStudioView {
+        let mut offers = crate::UiOfferTree::new();
         if let Some(home) = self.home_view() {
+            self.publish_device_offers(&mut offers);
             return UiStudioView::new(Vec::new(), self.console_view())
                 .with_home(Some(home))
                 .with_lens(self.lens_runtime())
@@ -2079,11 +2110,14 @@ impl StudioController {
                 .with_access(
                     self.login_prompt_view(),
                     self.access.access_added().cloned(),
-                );
+                )
+                .with_app_agent(self.agent.app_view(&self.agent_view_context()))
+                .with_offers(offers);
         }
         // gallery-always (D24): home covers every no-project state, so the
         // pane layout exists only for an open project
-        let mut project_pane = self.project.view(self.has_lightplayer_state());
+        let mut project_pane = self.project.view(self.has_lightplayer_state(), &mut offers);
+        self.publish_device_offers(&mut offers);
         // Decorate every GLSL inline editor with its agent chat DTO (the
         // project walk stays agent-free; chat state lives on this
         // controller's agent sub-state).
@@ -2136,6 +2170,28 @@ impl StudioController {
             .with_lens_access_line(self.lens_access_line())
             .with_lens_reconnecting(self.lens_reconnecting_view())
             .with_dirty(dirty)
+            .with_app_agent(self.agent.app_view(&self.agent_view_context()))
+            .with_offers(offers)
+    }
+
+    /// Publish the device verbs that live in the offer tree.
+    ///
+    /// `devices/connect-usb`: the add-device slot's USB path, named for what
+    /// it does (the slot's heading says "Connect a board"; the button alone
+    /// reads "via USB"), while this browser has Web Serial. It needs the
+    /// user's click (the browser's picker). Bluetooth stays out: whether
+    /// this browser has it is asked by the web layer (`use_ble_reach`), not
+    /// known here. Nothing on the web renders it from the tree yet; the app
+    /// agent reads it.
+    fn publish_device_offers(&self, offers: &mut crate::UiOfferTree) {
+        if self.usb_available() {
+            offers.publish(crate::UiOffer::new(
+                crate::OfferPath::devices().child("connect-usb"),
+                "usb",
+                crate::DevicesOp::action_for(lpa_devices::Action::AddFromUsb)
+                    .with_label("Connect a board via USB"),
+            ));
+        }
     }
 
     /// The LENS session's docked card (D43): the device the editor is open
@@ -2332,6 +2388,15 @@ impl StudioController {
         // a shared cell the spawned run polls, so it must happen whether or
         // not the change gate emits a snapshot this batch.
         self.refresh_agent_engine_status();
+        // Only while the app chat is out with a run: the readout builds a
+        // whole view, which an ordinary batch must not pay for.
+        if self.agent.app_running() {
+            self.agent.refresh_app_readout(self.app_agent_readout());
+            if let Some(revision) = self.current_revision() {
+                self.agent
+                    .refresh_app_project(revision, self.project.agent_project_summary());
+            }
+        }
         let revision = self.current_revision();
         let advanced = revision != self.applied_revision;
         if !self.dirty && !advanced {
@@ -2586,7 +2651,13 @@ impl StudioController {
         updates: UxUpdateSink,
     ) -> UiResult {
         updates.emit(UxUpdate::View(self.view()));
+        // A press of the action an app-agent card carries IS the card's
+        // press, wherever it came from (the card, or the button it names).
+        let card = self.agent.app_session_mut().pending_card_for(&action);
         let result = self.dispatch_inner(action, updates.clone()).await;
+        if let Some(card) = card {
+            self.app_card_pressed(&card, &result);
+        }
         // Release closed projects' locks and re-hydrate the gallery when
         // the action made either due (open/close/save/home ops).
         self.settle_library().await;
@@ -4046,6 +4117,13 @@ impl StudioController {
             log::debug!("adoption not banked: the lens device has no persisted record");
             return;
         };
+        if row.uid.starts_with("mac:") {
+            log::debug!(
+                "adoption not banked: {:?} is still keyed on its MAC, which record_push refuses",
+                row.uid
+            );
+            return;
+        }
         if let Err(error) = self
             .run_catalog_op(CatalogOp::RecordPush {
                 project_uid: project_uid.to_string(),
@@ -4600,10 +4678,22 @@ impl StudioController {
     /// for it (direct-control doctrine — the card's verbs always work; the
     /// editor is the thing that yields). Gestures that never touch the wire
     /// (a rename, the autoconnect toggle) leave the lens alone.
+    ///
+    /// Reset is exempted too (DD1, plan D13's follow-up): a hardware reset
+    /// is "a direct gesture, not an activity" (the fold's own words — one
+    /// command, then identify reads whatever boots), and the link already
+    /// rides out the reboot on its own — the SAME wire note and
+    /// `LinkTrouble` that cover a board resetting itself. Closing the
+    /// editor here used to run ahead of that: the lens was gone before the
+    /// reset command even reached the link, so the reconnecting strip never
+    /// got a chance to show. Studio's own Reset now reads exactly like an
+    /// outside one — the strip appears, the grace applies, the editor stays.
     fn yield_lens_wire_for(&mut self, action: &crate::DeviceAction) {
         let touches_wire = !matches!(
             action,
-            crate::DeviceAction::SetName { .. } | crate::DeviceAction::SetAutoconnect { .. }
+            crate::DeviceAction::SetName { .. }
+                | crate::DeviceAction::SetAutoconnect { .. }
+                | crate::DeviceAction::ResetBoard { .. }
         );
         let Some(target) = action.device() else {
             return;
@@ -4740,6 +4830,18 @@ impl StudioController {
                 .unwrap_or_else(|| uid.to_string());
             return Ok((files, hash, label));
         }
+        // A board never migrates (ADR 2026-07-05) and refuses old bytes at
+        // load, AFTER the push has already stopped and cleared it — so an
+        // "upgrades on open" package is migrated here first, through the
+        // same catalog op (and the same saved, undoable history event) the
+        // editor's open uses. Current packages are left alone; a package no
+        // step can migrate refuses the push with the classifier's sentence
+        // before the board is touched.
+        self.run_catalog_op(CatalogOp::UpgradePackageFormat {
+            project_uid: uid.to_string(),
+        })
+        .await
+        .map_err(|error| error.to_string())?;
         let host = self.library_host().map_err(|error| error.to_string())?;
         let opened = host
             .open_project(uid)
@@ -5765,7 +5867,376 @@ impl StudioController {
                 seq,
                 declaration,
             } => self.agent_declare_space(artifact, seq, declaration).await,
+            crate::AgentOp::AppSend { text } => self.app_agent_send(text),
+            crate::AgentOp::ApplyProjectEdits { seq, input } => {
+                self.app_agent_apply_edits(seq, input).await
+            }
+            crate::AgentOp::AppRead { seq, input } => {
+                let result = self.app_agent_read(&input).await;
+                self.agent.record_read_ack(seq, result);
+                Ok(UiNotices::new())
+            }
+            crate::AgentOp::AppStop => {
+                self.agent.request_app_stop();
+                Ok(UiNotices::new())
+            }
+            crate::AgentOp::AppAct { seq, input } => {
+                let outcome = self.app_agent_act(input).await;
+                self.agent.record_act_ack(seq, Ok(outcome));
+                self.mark_dirty();
+                Ok(UiNotices::new())
+            }
+            crate::AgentOp::CardDismissed { card } => {
+                self.agent
+                    .app_session_mut()
+                    .settle_card(&card, crate::UiAgentCardState::Dismissed);
+                self.resume_app_agent();
+                self.mark_dirty();
+                Ok(UiNotices::new())
+            }
         }
+    }
+
+    /// Execute one app-agent `edit_project` batch: the edits in order
+    /// through the project's own ops, then the save when asked, then the
+    /// per-edit statuses into the app bridge cell — failures included, so
+    /// the awaiting run reports them instead of timing out.
+    async fn app_agent_apply_edits(
+        &mut self,
+        seq: u64,
+        input: lpa_agent::EditProjectInput,
+    ) -> UiResult {
+        let outcome = self.app_agent_edits_outcome(&input).await;
+        let result = outcome.map(|(outcome, notices)| {
+            self.agent.record_project_edits_ack(seq, Ok(outcome));
+            notices
+        });
+        match result {
+            Ok(notices) => {
+                self.request_library_refresh();
+                self.mark_dirty();
+                Ok(notices)
+            }
+            Err(error) => {
+                self.agent
+                    .record_project_edits_ack(seq, Err(error.to_string()));
+                Err(error)
+            }
+        }
+    }
+
+    async fn app_agent_edits_outcome(
+        &mut self,
+        input: &lpa_agent::EditProjectInput,
+    ) -> Result<(lpa_agent::ProjectEditsOutcome, UiNotices), UiError> {
+        if self.project.active_library_uid().is_none() {
+            return Err(UiError::UnsupportedAction(
+                "no project is open — open or create one first".to_string(),
+            ));
+        }
+        let (results, runs) = {
+            let server = self.pool.lens_session_mut()?.client_mut()?;
+            self.project
+                .apply_agent_project_edits(server, &input.edits)
+                .await
+        };
+        let mut notices = UiNotices::new();
+        for run in runs {
+            notices
+                .notices
+                .extend(self.record_project_edit_run(Ok(run))?.notices);
+        }
+        let saved = if input.save {
+            let run = {
+                let server = self.pool.lens_session_mut()?.client_mut()?;
+                self.project.save_overlay(server).await
+            };
+            Some(match self.record_project_edit_run(run) {
+                Ok(saved) => {
+                    notices.notices.extend(saved.notices);
+                    Ok(())
+                }
+                Err(error) => Err(error.to_string()),
+            })
+        } else {
+            None
+        };
+        Ok((
+            lpa_agent::ProjectEditsOutcome {
+                results,
+                saved,
+                project: None,
+            },
+            notices,
+        ))
+    }
+
+    /// Answer one app-agent `read` from what the controller holds.
+    async fn app_agent_read(
+        &mut self,
+        input: &lpa_agent::ReadInput,
+    ) -> Result<serde_json::Value, String> {
+        use lpa_agent::ReadWhat;
+        let name = input.name.trim();
+        match input.what {
+            ReadWhat::Node => {
+                let (mut facts, def) = self.project.agent_node_facts(name)?;
+                if let Some(def) = def
+                    && let Ok(Some(text)) = self.agent_asset_text(&def).await
+                {
+                    facts["definition"] =
+                        serde_json::from_str(&text).unwrap_or(serde_json::Value::String(text));
+                }
+                Ok(facts)
+            }
+            ReadWhat::Pattern => {
+                let slug = name.trim_start_matches("catalog/");
+                let example = crate::app::home::embedded_example(&format!("catalog/{slug}"))
+                    .filter(|example| example.bucket == crate::app::home::CatalogBucket::Patterns)
+                    .ok_or_else(|| format!("there is no catalog pattern {slug:?}"))?;
+                let shader: serde_json::Value = example
+                    .file("effect/shader.json")
+                    .and_then(|bytes| serde_json::from_slice(bytes).ok())
+                    .unwrap_or_default();
+                let knobs: Vec<serde_json::Value> = shader["consumed"]
+                    .as_object()
+                    .into_iter()
+                    .flatten()
+                    .filter(|(_, param)| param["label"].is_string())
+                    .map(|(key, param)| {
+                        serde_json::json!({
+                            "knob": key,
+                            "label": param["label"],
+                            "description": param["description"],
+                        })
+                    })
+                    .collect();
+                Ok(serde_json::json!({
+                    "pattern": example.slug,
+                    "name": example.name,
+                    "description": example.description,
+                    "space": shader["space"]["kind"].as_str().unwrap_or("TwoD"),
+                    "knobs": knobs,
+                }))
+            }
+            ReadWhat::Board => {
+                let board = lpa_boards::board_by_id(name).ok_or_else(|| {
+                    format!(
+                        "there is no board {name:?}; boards: {}",
+                        lpa_boards::all_boards()
+                            .iter()
+                            .map(|board| board.board_id.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
+                })?;
+                Ok(serde_json::json!({
+                    "board": board.board_id,
+                    "name": board.display_name,
+                    "chip": board.soc,
+                    "led_pins": board
+                        .output_wires()
+                        .map(|(label, gpio)| serde_json::json!({ "label": label, "gpio": gpio }))
+                        .collect::<Vec<_>>(),
+                    "default_led_pin": board.default_led_wire(),
+                }))
+            }
+            ReadWhat::Device => {
+                let roster = self.device_roster_view();
+                let device = roster
+                    .roster
+                    .devices
+                    .iter()
+                    .find(|device| device.title == name)
+                    .ok_or_else(|| {
+                        format!(
+                            "no device named {name:?}; devices: {}",
+                            roster
+                                .roster
+                                .devices
+                                .iter()
+                                .map(|device| device.title.as_str())
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        )
+                    })?;
+                Ok(serde_json::json!({
+                    "device": device.title,
+                    "state": device.state_label,
+                    "detail": device.detail,
+                    "chip": device.detected_chip,
+                    "board": device.board_id,
+                    "identity": device.identity_label,
+                }))
+            }
+        }
+    }
+
+    /// Start one app-chat run. Unlike the shader chat it needs no open
+    /// project: the app agent builds one from nothing.
+    fn app_agent_send(&mut self, text: String) -> UiResult {
+        self.app_agent_start(text, true)
+    }
+
+    /// One app-agent `act`: look the offer path up in the offer tree as it
+    /// is NOW (the same enablement the user sees), then press it through
+    /// the ordinary dispatch — or, when only the user may press it, put it
+    /// on a card (D6, PD6). While a card waits, nothing else is pressed.
+    async fn app_agent_act(&mut self, input: lpa_agent::ActInput) -> lpa_agent::ActOutcome {
+        use lpa_agent::ActOutcome;
+        if let Some(card) = self.agent.app_session_mut().pending_card() {
+            return ActOutcome::Refused {
+                reason: format!(
+                    "card {} (\"{}\") is waiting for the user's click; stop and tell them",
+                    card.id, card.title
+                ),
+                offers: None,
+            };
+        }
+        let fresh = self.app_agent_readout();
+        let path = crate::OfferPath::parse(input.action.trim()).ok();
+        let Some(action) = path
+            .as_ref()
+            .and_then(|path| fresh.offer(path))
+            .map(|offer| offer.action.clone())
+        else {
+            let reason = if path
+                .as_ref()
+                .is_some_and(|path| self.agent.app_offer_was_shown(path))
+            {
+                format!("{:?} is not offered any more", input.action)
+            } else {
+                format!(
+                    "no action at {:?}; name one by its path exactly as the readout lists it",
+                    input.action
+                )
+            };
+            return ActOutcome::Refused {
+                reason,
+                offers: Some(fresh.render()),
+            };
+        };
+        if let crate::ActionEnablement::Disabled { reason } = &action.meta().enablement {
+            return ActOutcome::Refused {
+                reason: format!("{:?} is disabled: {reason}", action.meta().label),
+                offers: None,
+            };
+        }
+        if action.meta().needs_user() {
+            let card = self.agent.app_session_mut().add_card(action, &input.why);
+            self.mark_dirty();
+            return ActOutcome::NeedsUser {
+                card: card.id,
+                says: card.title,
+            };
+        }
+        match Box::pin(self.dispatch(action)).await {
+            Ok(notices) => ActOutcome::Done {
+                notices: notices
+                    .notices
+                    .into_iter()
+                    .map(|notice| notice.message)
+                    .collect(),
+            },
+            Err(error) => ActOutcome::Refused {
+                reason: error.to_string(),
+                offers: None,
+            },
+        }
+    }
+
+    /// The user pressed what card `card` carries: settle it with what the
+    /// press came to, and let the assistant hear it.
+    fn app_card_pressed(&mut self, card: &str, result: &UiResult) {
+        let state = match result {
+            Ok(notices) => crate::UiAgentCardState::Done {
+                outcome: notices
+                    .notices
+                    .iter()
+                    .map(|notice| notice.message.as_str())
+                    .collect::<Vec<_>>()
+                    .join("; "),
+            },
+            Err(error) => crate::UiAgentCardState::Failed {
+                error: error.to_string(),
+            },
+        };
+        self.agent.app_session_mut().settle_card(card, state);
+        self.resume_app_agent();
+    }
+
+    /// Start the run a settled card owes the assistant, once no run is out.
+    fn resume_app_agent(&mut self) {
+        if self.agent.app_running() {
+            return;
+        }
+        let resume = std::mem::take(&mut self.agent.app_session_mut().resume);
+        if resume.is_empty() {
+            return;
+        }
+        if let Err(error) = self.app_agent_start(resume.join("\n"), false) {
+            self.agent
+                .app_session_mut()
+                .mirror
+                .push_notice(format!("The assistant could not continue: {error}"));
+        }
+    }
+
+    fn app_agent_start(&mut self, text: String, shown: bool) -> UiResult {
+        let Some(config) = self.settings.app_agent_provider_config() else {
+            return Err(UiError::UnsupportedFeature(
+                "the assistant isn't set up yet — configure a provider in Settings (the gear icon)"
+                    .to_string(),
+            ));
+        };
+        let Some(provider) = self.agent.build_provider(&config) else {
+            return Err(UiError::UnsupportedFeature(
+                "the agent provider is not installed in this build".to_string(),
+            ));
+        };
+        // The readout must be current before the first turn reads it.
+        self.agent.refresh_app_readout(self.app_agent_readout());
+        self.agent
+            .start_app_run(text, provider, shown)
+            .map_err(UiError::UnsupportedFeature)?;
+        self.mark_dirty();
+        Ok(UiNotices::new())
+    }
+
+    /// The readout, for tests that measure it.
+    #[cfg(test)]
+    pub(crate) fn app_agent_readout_for_test(
+        &self,
+    ) -> crate::app::agent::app_agent_readout::AppReadoutSnapshot {
+        self.app_agent_readout()
+    }
+
+    /// The app agent's view of the app (PD3's per-turn state; focus v1 =
+    /// page + open project + selection + devices + offered actions).
+    fn app_agent_readout(&self) -> crate::app::agent::app_agent_readout::AppReadoutSnapshot {
+        use crate::app::agent::app_agent_readout::{
+            AppReadoutSnapshot, device_lines, page_line, project_lines, selection_line,
+        };
+        let home = self.home_view().is_some();
+        let mut text = page_line(home);
+        if !home {
+            text.push_str(&project_lines(
+                &self.project.agent_project_name(),
+                &self.project.agent_project_summary(),
+            ));
+            text.push_str(&selection_line(self.project.agent_selection()));
+        }
+        let roster = self.device_roster_view();
+        text.push_str(&device_lines(&roster));
+        // Every offer in the view's tree, in publish order: the project
+        // header's Save and Revert while there are edits to save, every
+        // node card's verbs (nested nodes included), and the device verbs —
+        // the buttons the user sees, with their enablement. The pane's own
+        // actions stay out: a project pane offers none once the project is
+        // ready, and every other state shows home. Tree focus actions and
+        // add-node menus stay out too (the edit tool covers those).
+        let offers = self.view().offers.iter().cloned().collect();
+        AppReadoutSnapshot { text, offers }
     }
 
     /// Execute one history revert: pull the recorded source, restage it
@@ -6122,7 +6593,7 @@ impl StudioController {
         let run = {
             let server = self.pool.lens_session_mut()?.client_mut()?;
             self.project
-                .import_pattern(server, &op.source, &op.export)
+                .import_pattern(server, &op.source, &op.export, &op.attach)
                 .await
         };
         // The vendored files landed in the library through the create's
@@ -6522,6 +6993,39 @@ impl StudioController {
                     UiLogOrigin::Studio,
                     format!("project reload failed: {error}"),
                 ));
+                // What Retry needs to reopen the SAME package, read before
+                // `fail` drops the library binding that names it.
+                let retry = self.project.active_library_uid().map(|key| {
+                    UiAction::from_op(
+                        crate::ControllerId::new(HOME_NODE_ID),
+                        HomeOp::OpenPackage { key, prefer: None },
+                    )
+                });
+                let name = self
+                    .project
+                    .active_library_display_name()
+                    .unwrap_or_else(|| "project".to_string());
+                // The push already stopped the runtime before the refusal:
+                // the editor must not keep reading Ready over nothing, so
+                // fail it the way a refused open does — which is what
+                // sends the page back to the gallery (D24).
+                self.project.fail(error.to_string());
+                // A failed reload lands on that gallery with nothing more
+                // than the console line above unless it reaches the same
+                // failure notice a refused OPEN does: the route stays on
+                // the project's address (`web_app.rs`'s open-ended check
+                // reads this same stage), whose opening frame renders the
+                // notice with Retry.
+                if let Some(retry) = retry {
+                    crate::app::open_progress::note_open_failed(
+                        format!(
+                            "Couldn't load the latest version of \"{name}\": {}. \
+                             The editor closed; open it again from the gallery.",
+                            error.message()
+                        ),
+                        retry,
+                    );
+                }
                 Err(error)
             }
         }
@@ -6612,6 +7116,13 @@ impl StudioController {
             .expect("just-installed session")
             .set_client_for_test(client);
         id
+    }
+
+    /// The agent sub-controller (app-agent evals set context notes and
+    /// read the parked transcript).
+    #[cfg(test)]
+    pub(crate) fn agent_for_test(&mut self) -> &mut crate::AgentController {
+        &mut self.agent
     }
 
     /// The runtime pool, for e2e assertions about session coexistence.

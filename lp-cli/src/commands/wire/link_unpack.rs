@@ -62,6 +62,9 @@ pub fn rendered(item: &SniffedWire) -> String {
         SniffedWire::Unreadable { len, reason, .. } => {
             format!("<unreadable message: {len} bytes, {reason}>\n")
         }
+        SniffedWire::Sealed { chan, len, .. } => {
+            format!("<sealed frame: {len} bytes on channel {chan}, a secure link>\n")
+        }
         SniffedWire::Session { .. } | SniffedWire::Damaged { .. } | SniffedWire::Gap { .. } => {
             String::new()
         }
@@ -106,6 +109,72 @@ mod tests {
         assert!(lines.contains(&format!("M!{reply}").as_str()), "{text}");
         let log = String::from_utf8(log).unwrap();
         assert!(log.contains("total messages 3 packed 0"), "{log}");
+    }
+
+    /// A classic's capture (plan `classic-uart-on-lp-link`, P3): its UART0
+    /// link is `LinkConfig::uart()` on the host and the board's cut of it
+    /// (four-frame windows, a 200 ms resend floor, SYN backoff), framed as
+    /// USB is, so the one sniffer reads it with nothing chip-specific: the
+    /// ROM's boot text, packed replies, and the panic path's `0xFF` text mark
+    /// after the link's last frame.
+    #[test]
+    fn a_classic_uart_capture_reads_like_a_usb_one() {
+        use lpc_wire::lp_link::LinkConfig;
+
+        use crate::commands::wire::test_capture::capture_over;
+
+        let board = LinkConfig {
+            min_rto: 200_000,
+            syn_backoff: 4,
+            ..LinkConfig::uart()
+        };
+        let replies: Vec<_> = (30..40).map(log_reply).collect();
+        let session = capture_over(
+            LinkConfig::uart(),
+            board,
+            "ets Jun  8 2016 00:22:57\r\n\r\nrst:0x1 (POWERON_RESET),boot:0x13 \
+             (SPI_FAST_FLASH_BOOT)\r\n[INIT] fw-esp32v3 boot\r\n",
+            &replies,
+            true,
+        );
+        let mut bytes = session.to_host();
+        bytes.extend_from_slice(b"\xFF\r\n[PANIC] after the link's last frame\r\n");
+
+        let mut out = Vec::new();
+        let mut log = Vec::new();
+        let mut report = UnpackReport::new(true);
+        unpack_link_stream(
+            bytes.as_slice(),
+            Direction::BoardToHost,
+            &mut out,
+            &mut report,
+            &mut log,
+        )
+        .unwrap();
+        report.finish(&mut log).unwrap();
+
+        let text = String::from_utf8(out).unwrap();
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(lines[0], "ets Jun  8 2016 00:22:57", "{text}");
+        assert!(lines.contains(&"rst:0x1 (POWERON_RESET),boot:0x13 (SPI_FAST_FLASH_BOOT)"));
+        assert!(lines.contains(&"[INIT] fw-esp32v3 boot"), "{text}");
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.starts_with("M!{") && l.contains("\"hello\"")),
+            "{text}"
+        );
+        for reply in &replies {
+            let json = lpc_wire::json::to_string(reply).unwrap();
+            assert!(text.contains(&format!("M!{json}\n")), "{text}");
+        }
+        assert!(
+            lines.contains(&"[PANIC] after the link's last frame"),
+            "{text}"
+        );
+        let log = String::from_utf8(log).unwrap();
+        assert!(!log.contains("packed 0 "), "the replies went packed: {log}");
+        assert!(log.contains("unreadable 0 damaged 0 gaps 0"), "{log}");
     }
 
     /// Packed replies read back as the JSON they stand for, from the

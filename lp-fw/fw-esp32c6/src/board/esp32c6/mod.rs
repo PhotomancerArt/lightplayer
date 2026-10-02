@@ -14,6 +14,7 @@ pub mod constants;
     feature = "test_jit_math_perf",
     feature = "test_shader_compile_incremental",
     feature = "bench_render_loop",
+    feature = "diag_secure_link",
 ))]
 pub mod cycle_counter;
 pub mod init;

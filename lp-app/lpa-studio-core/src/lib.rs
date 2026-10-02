@@ -27,8 +27,9 @@ pub use app::agent::{
     AgentController, AgentCostRates, AgentEditRecord, AgentFeedback, AgentModelsFetchFuture,
     AgentOp, AgentProviderConfig, AgentRunContext, AgentSessionKey, AgentTaskFuture,
     AgentTimerFactory, AgentTimerFuture, AgentViewContext, MAX_EDIT_RECORDS, UiAgentAvailability,
-    UiAgentDebugDump, UiAgentHistoryEntry, UiAgentModelView, UiAgentStatus, UiAgentToolRow,
-    UiAgentTurn, UiAgentUsage, UiAgentView, instant_agent_timer,
+    UiAgentCard, UiAgentCardState, UiAgentDebugDump, UiAgentHistoryEntry, UiAgentModelView,
+    UiAgentStatus, UiAgentToolRow, UiAgentTurn, UiAgentUsage, UiAgentView, UiAppAgentView,
+    instant_agent_timer,
 };
 pub use app::bus::{
     UiBusChannelPreview, UiBusChannelView, UiBusSiteOrigin, UiBusSiteView, UiBusView,
@@ -182,14 +183,16 @@ pub use app::studio::{
 };
 pub use core::log::{DeviceEventKind, DeviceEventRecorder};
 pub use core::notice::UiNotices;
+pub use core::offer::{OfferPath, OfferPathError, UiOffer, UiOfferTree};
 pub use core::view::activity_view::UiActivityStep;
 pub use core::view::activity_view::UiActivityStepState;
 pub use core::{
-    ActionClass, ActionConfirmation, ActionEnablement, ActionMeta, ActionPriority, Controller,
-    ControllerContext, ControllerId, ControllerOp, DEVICE_CARD_FEED_CLASS,
-    PASSIVE_REFRESH_DEADLINE, PROJECT_ACTION_DEADLINE, PROJECT_EDITOR_ACTION_DEADLINE,
-    PROJECT_LOAD_DEADLINE, UiAction, UiActions, UiActivityView, UiMetric, UiPaneAction, UiPaneView,
-    UiProgress, UiStatus, UiStudioView, UiTerminalLine, UiViewContent, UxNodePath,
+    ActionClass, ActionConfirmation, ActionConsequence, ActionEnablement, ActionMeta,
+    ActionPriority, Controller, ControllerContext, ControllerId, ControllerOp,
+    DEVICE_CARD_FEED_CLASS, PASSIVE_REFRESH_DEADLINE, PROJECT_ACTION_DEADLINE,
+    PROJECT_EDITOR_ACTION_DEADLINE, PROJECT_LOAD_DEADLINE, UiAction, UiActions, UiActivityView,
+    UiMetric, UiPaneView, UiProgress, UiStatus, UiStudioView, UiTerminalLine, UiViewContent,
+    UxNodePath,
 };
 /// The device model's own vocabulary, re-exported so the web crate renders
 /// and dispatches it without a second dependency edge. The model is the ONE

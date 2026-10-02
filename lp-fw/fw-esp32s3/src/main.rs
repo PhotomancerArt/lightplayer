@@ -150,10 +150,14 @@ esp_bootloader_esp_idf::esp_app_desc!();
 /// location counter backwards") rather than silently, which is the one mercy
 /// here: 300 KB — the C6's figure — does not link on this chip.
 ///
-/// This split leaves 52,896 B of stack against fw-esp32c6's proven 35,784 B
-/// (both read off the linked ELFs), which is the margin the Xtensa windowed
-/// ABI's larger frames deserve. The heartbeat's free-heap figure is the number
-/// to watch if a future node kind pushes it.
+/// This split leaves whatever `dram_seg` has left over for `.stack` once
+/// `HEAP_SIZE` and every other `.bss`/`.data` static are carved out — today's
+/// exact number is `stack_total_bytes` in `lp-emu/esp/figures/esp32s3.json`
+/// (re-measured by `just bless-chips esp32s3`; it moves with firmware
+/// changes, so it is not repeated here), against fw-esp32c6's own measured
+/// split (both read off the linked ELFs), which is the margin the Xtensa
+/// windowed ABI's larger frames deserve. The heartbeat's free-heap figure is
+/// the number to watch if a future node kind pushes it.
 ///
 /// The next lever, if one is needed, is `dram2_seg`
 /// (`0x3FCDB700..0x3FCED710`, ~72 KB) as a second `esp_alloc` region — not
@@ -377,12 +381,29 @@ fn heartbeat_memory_stats() -> Option<lpc_wire::server::MemoryStats> {
         free_bytes: free,
         used_bytes: used,
         total_bytes: used.saturating_add(free),
-        largest_free_block: Some(
-            recovery::panic_path::largest_free_block().min(u32::MAX as usize) as u32,
-        ),
+        largest_free_block: read_headroom_probe(),
         oom_retry_saves: None,
     })
 }
+
+/// The largest allocatable block, for the server's read and load gates
+/// (`LpServer::set_read_headroom_probe`) and the heartbeat's
+/// `largest_free_block`.
+#[cfg(not(fw_harness))]
+fn read_headroom_probe() -> Option<u32> {
+    Some(recovery::panic_path::largest_free_block().min(u32::MAX as usize) as u32)
+}
+
+/// This chip's ProjectRead memory gate (`lpa_server::ReadGate`): the C6's
+/// numbers — 40 KiB free in total and a 16 KiB block — until the S3's own
+/// reads are measured (plan `lp2025/2026-09-27-1218-fragmentation-tolerant-reads`,
+/// P7). `fw-esp32c6/src/main.rs`'s `READ_GATE` carries the measurements and
+/// the rule behind them.
+#[cfg(not(fw_harness))]
+const READ_GATE: lpa_server::ReadGate = lpa_server::ReadGate {
+    min_free_bytes: 40 * 1024,
+    min_largest_block_bytes: 16 * 1024,
+};
 
 /// Everything `main` needs to hand to the server loop.
 #[cfg(not(fw_harness))]
@@ -518,6 +539,11 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
         None,
         graphics,
     );
+    // The heap gates, installed on this chip for the first time: until
+    // 2026-09-28 the S3 had no probe, so a read or load it could not afford
+    // aborted and reset the board instead of being refused.
+    server.set_read_headroom_probe(Some(read_headroom_probe));
+    server.set_read_gate(Some(READ_GATE));
     server.set_hello_identity(
         lpc_wire::HelloIdentity::new(
             "fw-esp32s3",
@@ -624,14 +650,38 @@ async fn main(spawner: embassy_executor::Spawner) {
     );
 
     let mut watchdog = app.watchdog;
-    run_server_loop(
+    OutlinedPoll(run_server_loop(
         app.server,
         app.transport,
         app.time_provider,
         heartbeat_memory_stats,
         move |now_ms| watchdog.feed(now_ms),
-    )
+    ))
     .await;
+}
+
+/// Keeps `run_server_loop`'s future out of `main`'s own generator frame.
+///
+/// Since the lp-link USB cut-over (#854) `run_server_loop`'s poll was inlined
+/// into `main`'s async-fn state machine, so its multi-KB frame stayed live
+/// under `boot_firmware` on the stack-high-water scan even though the two
+/// never run concurrently (ticket `2026-09-27-s3-stack-headroom`).
+/// `#[inline(never)]` on `poll` is what keeps the frame out-of-line; the
+/// wrapper itself adds nothing at runtime.
+#[cfg(not(fw_harness))]
+struct OutlinedPoll<F>(F);
+
+#[cfg(not(fw_harness))]
+impl<F: core::future::Future> core::future::Future for OutlinedPoll<F> {
+    type Output = F::Output;
+    #[inline(never)]
+    fn poll(
+        self: core::pin::Pin<&mut Self>,
+        cx: &mut core::task::Context<'_>,
+    ) -> core::task::Poll<F::Output> {
+        // SAFETY: structural pin projection; the field is never moved.
+        unsafe { self.map_unchecked_mut(|s| &mut s.0) }.poll(cx)
+    }
 }
 
 // Same gate as its only caller, `boot_firmware`: the hardware harnesses

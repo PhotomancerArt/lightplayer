@@ -11,6 +11,10 @@
 //!   only the HMAC. The password never crosses a link and is never stored.
 //! - **One login at a time, with backoff** ([`LoginState`],
 //!   [`RateLimit`]), both per device.
+//! - **Secure links log in by handshake.** On a link built with lp-link's
+//!   `secure` feature the client names an entry by its salt and proves it
+//!   holds `link_psk(K)` ([`link_psk`]) in the Noise handshake; the device
+//!   answers the lookup with [`key_candidates`], and the match is the login.
 //! - **Two persisted files**, both `version: 2` (v1 still reads): the project sidecar
 //!   ([`ProjectAccessFile`], `<project>/.lp/access.json`) and the device
 //!   store ([`DeviceAccessFile`], root `/.lp/access.json`). Neither is ever
@@ -37,6 +41,8 @@ pub mod base64_bytes;
 pub mod constant_time_eq;
 pub mod device_access_file;
 pub mod hmac_sha256;
+pub mod key_lookup;
+pub mod link_psk;
 pub mod login_state;
 pub mod pbkdf2_sha256;
 pub mod project_access_file;
@@ -50,6 +56,8 @@ pub use access_file_path::{is_access_file_path, is_within_dir};
 pub use constant_time_eq::constant_time_eq;
 pub use device_access_file::DeviceAccessFile;
 pub use hmac_sha256::{HMAC_SHA256_BYTES, HmacSha256, hmac_sha256};
+pub use key_lookup::{KeyCandidate, key_candidates};
+pub use link_psk::{LINK_PSK_LABEL, link_psk};
 pub use login_state::{
     BeginOutcome, CHALLENGE_TTL_MS, Challenge, LoginMac, LoginOffer, LoginOutcome, LoginState,
     NONCE_BYTES,

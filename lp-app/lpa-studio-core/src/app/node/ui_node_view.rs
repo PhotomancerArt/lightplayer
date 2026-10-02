@@ -2,7 +2,7 @@
 
 use crate::{
     NodeCardUiState, UiAction, UiAddNodeMenu, UiNodeChild, UiNodeFace, UiNodeHeader, UiNodeTab,
-    UiNodeTabBody, UiPaneAction,
+    UiNodeTabBody,
 };
 
 /// The full data model for a Studio node pane.
@@ -12,10 +12,6 @@ pub struct UiNodeView {
     pub node_id: String,
     /// Header identity and status metadata.
     pub header: UiNodeHeader,
-    /// Contextual header actions (the pane grammar's actions slot):
-    /// controller-produced, currently the node-subtree batch revert while
-    /// the header's dirty summary announces pending edits.
-    pub header_actions: Vec<UiPaneAction>,
     /// Kind-specific permanent face for this node's card. `None` (any kind
     /// without a hand-built face) renders the generic tab/section fallback.
     pub face: Option<UiNodeFace>,
@@ -64,7 +60,6 @@ impl UiNodeView {
         Self {
             node_id,
             header,
-            header_actions: Vec::new(),
             face: None,
             card_ui: NodeCardUiState::default(),
             tabs,
@@ -83,12 +78,6 @@ impl UiNodeView {
     /// Override the stable id.
     pub fn with_node_id(mut self, node_id: impl Into<String>) -> Self {
         self.node_id = node_id.into();
-        self
-    }
-
-    /// Set the contextual header actions.
-    pub fn with_header_actions(mut self, actions: Vec<UiPaneAction>) -> Self {
-        self.header_actions = actions;
         self
     }
 
