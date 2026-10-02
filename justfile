@@ -2925,7 +2925,7 @@ test-glsl-filetests:
 # Warm ~1s, cold ~47s locally; it runs beside clippy, the Lint job's long
 # pole. See docs/debt/wasm-cloud-check-not-in-just-check.md.
 [parallel]
-check-lint: fmt-check clippy check-wasm-cloud check-lp-link-targets check-lpc-engine-gates check-studio-core-minimal lint-serde-content lint-browser-test-harness lint-classic-capture lint-pcb-export lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-nested-patches lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities lint-red-main-needs lint-tag-next-version lint-web-actions
+check-lint: fmt-check clippy check-wasm-cloud check-lp-link-targets check-lpc-engine-gates check-studio-core-minimal lint-serde-content lint-browser-test-harness lint-classic-capture lint-pcb-export lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-nested-patches lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities lint-red-main-needs lint-tag-next-version lint-web-actions lint-core-action-fields
 
 [parallel]
 check: check-lint schema-check fw-manifest-check-emu
@@ -2993,6 +2993,12 @@ lint-tw-utilities:
 # locks a drop in. docs/adr/2026-10-01-agentic-control-offers-in-core.md.
 lint-web-actions *args:
     python3 scripts/check-web-actions.py {{ args }}
+
+# The core action-fields ratchet: action-carrying pub fields on Studio core
+# view types may only go down — a verb belongs in the offer tree, at a path
+# (docs/adr/2026-10-01-agentic-control-offers-in-core.md). `--bless` records a drop.
+lint-core-action-fields *args:
+    python3 scripts/check-core-action-fields.py {{ args }}
 
 # Guard against schemars reaching the RV32 firmware graphs (schema generation is host-only; see script).
 lint-schemars-fw:

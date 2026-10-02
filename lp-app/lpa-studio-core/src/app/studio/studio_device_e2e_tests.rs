@@ -6302,6 +6302,11 @@ fn a_build_without_web_serial_says_usb_is_unavailable() {
         !controller.device_roster_view().usb_available,
         "sims and Bluetooth, but no port to reach"
     );
+    let connect_usb = crate::OfferPath::devices().child("connect-usb");
+    assert!(
+        controller.view().offers.get(&connect_usb).is_none(),
+        "no USB offer without a port to reach"
+    );
 
     let usb_side = board();
     let (bench, _tasks) = DeviceBench::granted(&usb_side, "usb-1");
@@ -6309,6 +6314,13 @@ fn a_build_without_web_serial_says_usb_is_unavailable() {
         bench.controller.device_roster_view().usb_available,
         "a serial transport is installed"
     );
+    let view = bench.controller.view();
+    let offer = view
+        .offers
+        .get(&connect_usb)
+        .expect("devices/connect-usb is offered while USB is available");
+    assert_eq!(offer.icon, "usb");
+    assert_eq!(offer.label(), "Connect a board via USB");
 }
 
 /// One Bluetooth board, always present: a fake-device link at a `ble:`

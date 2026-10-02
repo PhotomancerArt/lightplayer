@@ -287,10 +287,14 @@ stateless views that dispatch ops and render DTOs. The model (recorded in
   feeds `DirtySummary { persisted, failed }` (`project/dirty_summary.rs`),
   aggregated slot → node → project during the DTO build: node headers,
   child entries, sidebar tree items, and `ProjectEditorView.dirty` all carry
-  it, and the project header's contextual Save/Revert actions surface as
-  controller-produced `UiPaneAction`s on `ProjectEditorView.header_actions`;
-  dirty node headers likewise carry the subtree batch revert
-  (`NodeRevertOp`) on `UiNodeView.header_actions` / `UiNodeChild.header_actions`.
+  it, and the project header's contextual Save/Revert actions, and every
+  dirty node header's subtree batch revert (`NodeRevertOp`) and Remove,
+  publish as `UiOffer`s into `UiStudioView.offers` (the offer tree,
+  `core/offer/`), addressed by stable path (`project/save`,
+  `project/demo.module/orbit.shader/revert`) — see
+  `docs/adr/2026-10-01-offer-tree-and-consequence-levels.md`. A card asks
+  the tree for its own node's verbs with `verbs_of(its_path)`; there is no
+  longer a `header_actions` DTO field to read instead.
   Each hierarchy DTO also projects status + dirty into its one chrome
   `UiAffordance` (`project/ui_affordance.rs`, priority merge
   Error > Unsaved > Debug > Busy > Info) — the glyph/tone every detail

@@ -125,7 +125,12 @@ mod tests {
             RuntimeOp::CloseDeviceLens.action_class(),
             ActionClass::Recovery
         );
-        assert!(!RuntimeOp::CloseDeviceLens.default_action_meta().destructive);
+        assert!(
+            RuntimeOp::CloseDeviceLens
+                .default_action_meta()
+                .consequence
+                .is_routine()
+        );
     }
 
     #[test]

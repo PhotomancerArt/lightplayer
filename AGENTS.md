@@ -155,7 +155,8 @@ The core is IO-free state machines; async belongs to platform edges. See
 
 Studio's view is humble, and the app agent is its second consumer: it sees
 the app through the same view model and presses the same actions. See
-`docs/adr/2026-10-01-agentic-control-offers-in-core.md`.
+`docs/adr/2026-10-01-agentic-control-offers-in-core.md`, refined by
+`docs/adr/2026-10-01-offer-tree-and-consequence-levels.md`.
 
 - **A button the user can press is a `UiAction` built in `lpa-studio-core`**
   and published on a view model, never constructed in `lpa-studio-web`. An
@@ -165,11 +166,24 @@ the app through the same view model and presses the same actions. See
   file, the count may only go down. Moving a web-built action between files
   needs `--bless` in the same change. Moving one into core is the point:
   bless the drop.
-- **An action only the user may press says so in its meta:** a
-  `confirmation`, or `ActionMeta::gesture` (`UserActivation` for a browser
-  picker, `UserDecision` for flashing or replacing what a board runs). The
-  agent turns those into chat cards whose click dispatches the same action.
-- The rework toward one offer tree is a roadmap
+- **What pressing an action costs the user is one `ActionConsequence`:**
+  `Routine` (plain; the agent presses it), `Undoable` (error tint, one
+  click; the agent presses it and says what it did), or `Lasting` (error
+  tint, two-click arm, carries the copy saying what is lost; the agent
+  never presses it — it becomes the user's own button in chat).
+  `ActionMeta::needs_user_activation` is the separate browser fact that a
+  picker needs a real click (`navigator.serial.requestPort`,
+  `navigator.bluetooth.requestDevice`): plain look, but the agent still
+  hands it to the user. No browser `confirm()` dialog backs any action.
+- **One offer tree, `UiStudioView.offers`, holds every offer by a stable
+  path** (`project/save`, `project/demo.module/orbit.shader/remove` — a
+  node segment always has a dot, a verb never does). A surface renders its
+  own buttons with `verbs_of(its_path)`; the agent reads and presses the
+  same tree by path (`act { action: "project/save" }`). A migrated surface
+  loses its old DTO action field — there is nowhere else left to look.
+  **`just lint-core-action-fields`** (in `check-lint`) is a second ratchet:
+  action-carrying fields on core view types may only go down.
+- The rework toward migrating every surface onto the tree is a roadmap
   (`lp2025/2026-10-01-1255-agentic-ui-roadmap`). Don't migrate whole
   surfaces ad hoc. Don't add new web-built actions either.
 

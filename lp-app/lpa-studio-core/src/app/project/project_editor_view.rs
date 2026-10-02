@@ -1,6 +1,6 @@
 use crate::{
     DirtySummary, ProjectNodeTreeView, ProjectSyncSummary, UiAddNodeMenu, UiAffordance,
-    UiConfigSlot, UiMetric, UiNodeView, UiPaneAction, UiPendingEdit, UiStatusKind,
+    UiConfigSlot, UiMetric, UiNodeView, UiPendingEdit, UiStatusKind,
 };
 
 /// The open project's container-manifest identity (`project.json`), shown
@@ -76,10 +76,6 @@ pub struct ProjectEditorView {
     /// Stable order: by node address, then slot path (stale artifact-labeled
     /// entries appended last).
     pub pending_edits: Vec<UiPendingEdit>,
-    /// Contextual project-header actions produced controller-side: the
-    /// always-present add-node action, plus Save / Revert to saved while
-    /// persisted edits are pending.
-    pub header_actions: Vec<UiPaneAction>,
     /// The add-node picker for the project pane (attach = project root):
     /// every instantiable kind in stable order, `None` until the controller
     /// attaches it. Playlist cards carry their own copy on
@@ -133,7 +129,6 @@ impl ProjectEditorView {
             dirty: DirtySummary::clean(),
             debug_overrides: 0,
             pending_edits: Vec::new(),
-            header_actions: Vec::new(),
             add_node_menu: None,
             edits_in_flight: 0,
             patch_surface: None,
@@ -189,12 +184,6 @@ impl ProjectEditorView {
     /// Attach the save panel's labeled change list.
     pub fn with_pending_edits(mut self, pending_edits: Vec<UiPendingEdit>) -> Self {
         self.pending_edits = pending_edits;
-        self
-    }
-
-    /// Attach the contextual project-header actions.
-    pub fn with_header_actions(mut self, header_actions: Vec<UiPaneAction>) -> Self {
-        self.header_actions = header_actions;
         self
     }
 
