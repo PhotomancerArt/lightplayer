@@ -1,6 +1,6 @@
 # esp-hal — LP fork
 
-Vendored from crates.io **esp-hal 1.1.1**, verbatim except for the two diffs below.
+Vendored from crates.io **esp-hal 1.1.1**, verbatim except for the three diffs below.
 Patched in through the root `Cargo.toml`'s `[patch.crates-io]`, the same way
 `third_party/esp-alloc` and `third_party/esp-storage` are. The version stays
 `1.1.1` on purpose: `esp-rtos`, `esp-radio`, `esp-storage` and the three
@@ -64,6 +64,32 @@ metadata line have to be re-applied to whatever replaces it — or
 with this file's name in the message rather than linking the stock layout, so
 the mistake cannot be silent, but it will stop the build.
 
+## The third diff: upstream's USB-Serial-JTAG async fixes, back-ported
+
+`src/usb_serial_jtag.rs` carries three upstream esp-hal PRs, all merged in
+August 2026 and **released in esp-hal 1.2.0**. They are upstream's own
+commits (MIT/Apache-2.0), applied verbatim to the 1.1.1 file:
+
+| upstream PR | merge commit | what it changes |
+|---|---|---|
+| [#6089](https://github.com/esp-rs/esp-hal/pull/6089) | `5c2672becc9f6161da65c329ef3593ed770af629` | `async_interrupt_handler` writes `int_clr` with only the bits it handled, not both |
+| [#6097](https://github.com/esp-rs/esp-hal/pull/6097) | `f05b3976f8f5c3aa31ede23ca09bdb9d8f2f925b` | `flush_tx_async` sets `wr_done` (a prerequisite of #6104's flush hunk) |
+| [#6104](https://github.com/esp-rs/esp-hal/pull/6104) | `ab45d33cf69f941e5bd8b939b9a4ad0e68bd6b7d` | an `esp_sync::RawMutex` around every async-path `int_ena` read-modify-write; `wait_tx_ready` (a new `serial_in_empty` event, then `serial_in_ep_data_free`) after every `wr_done` |
+
+Why: the handler cleared a TX edge it had not handled. A drain that raised
+`serial_in_empty` between the handler's `int_st` read (for an RX interrupt)
+and its `int_clr` write was lost, and the write future slept until the
+caller's 250 ms timeout with the send buffer already empty. See
+`docs/defects/2026-09-26-esp-hals-usb-isr-clears-a-tx-edge-it-did-not-handle.md`.
+
+Left out of 1.2.0's copy of the file on purpose: the `WakeLock` fields
+(1.2.0's light-sleep lock, which needs `rtc_cntl` changes this fork does not
+have), the module's move to `usb::usb_serial_jtag`, and doc-comment
+rewording. After this diff the file differs from 1.2.0's only in those.
+
+**Drop on upgrade to esp-hal ≥ 1.2.0**: all three are in it. Nothing of ours
+is mixed in.
+
 ## Nothing else
 
 No other linker-script edits, no feature changes.
@@ -80,7 +106,9 @@ somewhere else to live, since upstream does not provide it and
 
 Copy the new version out of the cargo registry, delete `.cargo-ok`,
 `.cargo_vcs_info.json`, `Cargo.lock` and `Cargo.toml.orig` (mirroring
-`third_party/esp-storage`), then re-apply **both** diffs:
+`third_party/esp-storage`), then re-apply the first two diffs (the third is
+upstream's, so a ≥ 1.2.0 copy already has it; on a 1.1.x copy, re-apply it
+too — `grep -n INT_ENA_LOCK src/usb_serial_jtag.rs` finds it here):
 
 * the three `#[crate::ram]` attributes — `grep -n 'crate::ram'
   src/interrupt/mod.rs` finds them in this copy;

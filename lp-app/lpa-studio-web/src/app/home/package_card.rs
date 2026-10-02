@@ -244,7 +244,7 @@ pub(crate) fn PackageCardMenu(
     let delete = home_action(HomeOp::DeletePackage {
         uid: card.uid.clone(),
     })
-    .with_confirmation(ActionConfirmation::new(
+    .lasting(ActionConfirmation::new(
         "Delete project",
         format!(
             "Delete \"{}\" and its history from your library?",

@@ -314,6 +314,10 @@ pub struct OutputNode {
     /// moment a port closes elsewhere and the feature comes back, the
     /// badge stops explaining a roughness that is no longer there.
     smoothing: Option<OutputPortSmoothing>,
+    /// Why a port of this output did not open at the last flush (an
+    /// endpoint that is not a pin on this board, or one already held) —
+    /// re-read every `consume`, so it clears the frame the port opens.
+    open_failure: Option<alloc::rc::Rc<str>>,
     /// The runs a scattered render places a patched product through — one
     /// product at a time, reused across products and frames. Resident, sized
     /// by [`ensure_scratch_len`]: the only allocation is the high-water one,
@@ -337,6 +341,7 @@ impl OutputNode {
             sample_layout_revision: Revision::default(),
             fault_pattern_nodes: None,
             smoothing: None,
+            open_failure: None,
             scatter_runs: Vec::new(),
         }
     }
@@ -1595,6 +1600,7 @@ impl NodeRuntime for OutputNode {
 
     fn consume(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
         self.smoothing = ctx.output_smoothing();
+        self.open_failure = ctx.take_output_open_failure();
         // Identity first, resolve second: the fixtures this resolve ticks
         // read the registered-name set for their dangling-entry checks, so
         // this output's name must be on the books before they run.
@@ -1653,6 +1659,13 @@ impl NodeRuntime for OutputNode {
     fn runtime_status(&self) -> Option<NodeRuntimeStatus> {
         self.identity_status
             .clone()
+            // An Error: the frame renders, but nothing reaches the pin, and
+            // "Ok" over a dead wire is the one status that would mislead.
+            .or_else(|| {
+                self.open_failure
+                    .as_deref()
+                    .map(|why| NodeRuntimeStatus::Error(String::from(why)))
+            })
             // Warn, not Fault: this output is doing its job perfectly — it
             // is SHOWING somebody else's fault, and the badge has to say so
             // or the red on the wire has no explanation in the studio. The

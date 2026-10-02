@@ -172,6 +172,9 @@ pub fn AgentChatPane(
                         UiAgentTurn::Notice { text, level } => rsx! {
                             p { key: "{index}", class: notice_class(*level), "{text}" }
                         },
+                        // Cards belong to the app chat; the shader agent
+                        // has no `act` and never makes one.
+                        UiAgentTurn::Card(_) => rsx! {},
                     }
                 }
                 if thinking_row {

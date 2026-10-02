@@ -1,0 +1,32 @@
+# Web-built UiActions per file — a ratchet: counts may only go down.
+# Written by `scripts/check-web-actions.py --bless`; see that script and
+# docs/adr/2026-10-01-agentic-control-offers-in-core.md.
+1 lp-app/lpa-studio-web/src/app/docs/embeds/open_in_studio.rs
+1 lp-app/lpa-studio-web/src/app/docs/embeds/panel_embed.rs
+3 lp-app/lpa-studio-web/src/app/editor_shell/arrange.rs
+1 lp-app/lpa-studio-web/src/app/editor_shell/mapping_session.rs
+6 lp-app/lpa-studio-web/src/app/editor_shell/mod.rs
+2 lp-app/lpa-studio-web/src/app/editor_shell/patching.rs
+1 lp-app/lpa-studio-web/src/app/editor_shell/selection.rs
+1 lp-app/lpa-studio-web/src/app/home/device_pick_popover.rs
+13 lp-app/lpa-studio-web/src/app/home/device_roster_card.rs
+2 lp-app/lpa-studio-web/src/app/home/devices_page.rs
+2 lp-app/lpa-studio-web/src/app/home/gallery_paste.rs
+1 lp-app/lpa-studio-web/src/app/home/package_card.rs
+6 lp-app/lpa-studio-web/src/app/home/project_opening_frame.rs
+1 lp-app/lpa-studio-web/src/app/home/target_pick_popover.rs
+1 lp-app/lpa-studio-web/src/app/home/unlock_page.rs
+2 lp-app/lpa-studio-web/src/app/module/play_mode.rs
+1 lp-app/lpa-studio-web/src/app/node/add_node_picker.rs
+1 lp-app/lpa-studio-web/src/app/node/asset_editor.rs
+1 lp-app/lpa-studio-web/src/app/node/face/mod.rs
+2 lp-app/lpa-studio-web/src/app/node/node_detail_popover.rs
+11 lp-app/lpa-studio-web/src/app/node/slot_edit_actions.rs
+1 lp-app/lpa-studio-web/src/app/patch/patch_panel.rs
+2 lp-app/lpa-studio-web/src/app/patch/verb_ui.rs
+1 lp-app/lpa-studio-web/src/app/project/mismatch_page.rs
+1 lp-app/lpa-studio-web/src/app/project/project_pane.rs
+1 lp-app/lpa-studio-web/src/app/share/relationship.rs
+4 lp-app/lpa-studio-web/src/app/share/visitor_session.rs
+4 lp-app/lpa-studio-web/src/app/workbench/panels.rs
+9 lp-app/lpa-studio-web/src/web_app.rs

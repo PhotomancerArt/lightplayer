@@ -1,9 +1,9 @@
 //! ESP32 logging module: `log` records as raw `[LEVEL] module: message`
 //! lines through an injected write function.
 //!
-//! The classic ESP32 (`fw-esp32v3`, UART, `M!` lines) and the hardware
-//! harnesses use this. The C6 and S3 product images, whose host link runs
-//! lp-link, log into [`crate::log_ring_logger`] instead.
+//! The hardware harnesses use this. The product images — the C6 and S3 on
+//! USB, and the classic (`fw-esp32v3`) on its UART0 since wire proto 32 —
+//! run lp-link and log into [`crate::log_ring_logger`] instead.
 
 use alloc::format;
 use core::sync::atomic::{AtomicPtr, Ordering};

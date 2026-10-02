@@ -6,7 +6,7 @@
 //! transcript and a replay are.
 
 mod args;
-mod handler;
+pub mod handler;
 
 pub use args::ValidateCli;
 pub use handler::handle_validate;

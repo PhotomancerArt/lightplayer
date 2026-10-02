@@ -25,7 +25,7 @@ mod studio_device_e2e_tests;
 #[cfg(test)]
 mod studio_docs_e2e_tests;
 #[cfg(test)]
-mod studio_edit_e2e_tests;
+pub(crate) mod studio_edit_e2e_tests;
 /// End-to-end export designation tests (module authoring unit, P3): the
 /// folder-sub-module fixture, the popup row, the root rail, and the
 /// library/runtime manifest mirror.

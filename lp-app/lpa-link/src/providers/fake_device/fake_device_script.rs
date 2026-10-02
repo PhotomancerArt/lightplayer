@@ -121,6 +121,11 @@ pub struct FakeLightPlayerState {
     /// port reopens or the device resets. On by default, as it is on every
     /// ESP firmware; `false` is a board that cannot pack (hello `0`).
     pub packs: bool,
+    /// The board end's link configuration. `LinkConfig::usb()` by default: the
+    /// C6 and S3 on USB-Serial-JTAG. A classic-shaped double (its UART0 link,
+    /// plan `classic-uart-on-lp-link`) takes `LinkConfig::uart()` or a cut of it
+    /// ([`with_link_config`](Self::with_link_config)).
+    pub link_config: lpc_wire::lp_link::LinkConfig,
 }
 
 impl FakeLightPlayerState {
@@ -138,7 +143,17 @@ impl FakeLightPlayerState {
             load_project_at_boot: false,
             project_dir: FAKE_DEVICE_PROJECT_DIR.to_string(),
             packs: true,
+            link_config: lpc_wire::lp_link::LinkConfig::usb(),
         }
+    }
+
+    /// The board end of the link on `config` rather than the USB preset: a
+    /// classic-shaped double is `LinkConfig::uart()`, or the classic board's
+    /// own timings on top of it (`min_rto` 200 ms, `syn_backoff` 4;
+    /// `fw_esp32_common::uart_link::uart_board_link_config`).
+    pub fn with_link_config(mut self, config: lpc_wire::lp_link::LinkConfig) -> Self {
+        self.link_config = config;
+        self
     }
 
     pub fn with_boot_delay(mut self, boot_delay: Duration) -> Self {

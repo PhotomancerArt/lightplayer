@@ -155,7 +155,11 @@ fn annotate(out: &mut impl Write, unix_us: u128, item: &SniffedWire) -> std::io:
             unix_us,
             &format!("gap: {skipped} frame(s) {dir:?} never seen"),
         ),
-        SniffedWire::Console { .. } | SniffedWire::Session { .. } => Ok(()),
+        // Sealed frames carry nothing a tap can decode; their bytes are in
+        // the chunk records as they went.
+        SniffedWire::Console { .. } | SniffedWire::Session { .. } | SniffedWire::Sealed { .. } => {
+            Ok(())
+        }
     }
 }
 

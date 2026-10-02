@@ -10,30 +10,24 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
-use lpa_agent::{
-    AgentEvent, AgentSession, EngineStatusKind, ModelProvider, StopReason, TokenUsage,
-};
+use lpa_agent::{AgentEvent, AgentSession, EngineStatusKind, ModelProvider};
 use lpc_model::{ArtifactLocation, Revision};
 
+use crate::UiProductPreview;
 use crate::app::agent::agent_host_bridge::{AgentBridgeState, AgentHostBridge};
 use crate::app::agent::agent_session_key::AgentSessionKey;
-use crate::app::agent::ui_agent_view::{
-    UiAgentDebugDump, UiAgentStatus, UiAgentToolRow, UiAgentTurn, UiAgentUsage,
-};
-use crate::{UiNoticeLevel, UiProductPreview};
+use crate::app::agent::agent_transcript_mirror::AgentTranscriptMirror;
+pub use crate::app::agent::agent_transcript_mirror::{AgentTurnStat, MAX_THINKING_BYTES};
+use crate::app::agent::ui_agent_view::{UiAgentDebugDump, UiAgentUsage};
 
 /// The concrete `lpa-agent` session type Studio drives: a runtime-chosen
 /// provider behind a box, over the command-queue host bridge.
-pub type AgentSessionRuntime = AgentSession<Box<dyn ModelProvider>, AgentHostBridge>;
+pub type AgentSessionRuntime =
+    AgentSession<Box<dyn ModelProvider>, lpa_agent::ShaderToolset<AgentHostBridge>>;
 
 /// Retention cap for [`AgentChatSession::edits`]: past it the oldest record
 /// is dropped (and counted, so the UI can say so).
 pub const MAX_EDIT_RECORDS: usize = 50;
-
-/// Per-turn cap on retained thinking text (bytes). Thinking can run long;
-/// the mirror keeps the NEWEST text (the part the user is watching) and
-/// trims the front. Session-scoped only — thinking is never persisted.
-pub const MAX_THINKING_BYTES: usize = 20_000;
 
 /// One staged edit of this session, recorded when its `iterate` call
 /// executed (the source is mirrored core-side at `ToolExecuted` — the
@@ -60,23 +54,14 @@ pub struct AgentEditRecord {
     pub at: Revision,
 }
 
-/// One model turn's outcome, mirrored for the debug export: how the turn
-/// stopped and what it cost. The model-facing transcript records neither,
-/// so the mirror keeps them (session-scoped, like the rest of the mirror).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct AgentTurnStat {
-    pub stop_reason: StopReason,
-    pub usage: TokenUsage,
-}
-
 /// One shader node's conversation: view mirror + parked session runtime.
 pub struct AgentChatSession {
     pub key: AgentSessionKey,
     /// The shader source artifact the session operates on (the decoration
     /// lookup identity).
     pub artifact: ArtifactLocation,
-    /// The transcript mirror the DTO clones from.
-    pub turns: Vec<UiAgentTurn>,
+    /// The transcript the DTO renders (turns, status, usage, turn stats).
+    pub mirror: AgentTranscriptMirror,
     /// Session edit history (oldest first, capped at
     /// [`MAX_EDIT_RECORDS`]) — the revert store and the filmstrip source.
     pub edits: Vec<AgentEditRecord>,
@@ -84,12 +69,6 @@ pub struct AgentChatSession {
     pub dropped_edits: u32,
     /// The next edit record's ordinal (1-based, never reused).
     next_edit_turn: u32,
-    /// Live status projected into the DTO.
-    pub status: UiAgentStatus,
-    /// Cumulative usage (authoritatively reset by `SessionDone` totals).
-    pub usage: TokenUsage,
-    /// Per-turn stop reason + usage, in turn order (debug-export data).
-    pub turn_stats: Vec<AgentTurnStat>,
     /// The latest requested debug dump, embedded in the DTO until the next
     /// run starts (the web shell downloads it when `seq` advances).
     pub debug_dump: Option<UiAgentDebugDump>,
@@ -111,13 +90,10 @@ impl AgentChatSession {
         Self {
             key,
             artifact,
-            turns: Vec::new(),
+            mirror: AgentTranscriptMirror::default(),
             edits: Vec::new(),
             dropped_edits: 0,
             next_edit_turn: 1,
-            status: UiAgentStatus::Idle,
-            usage: TokenUsage::default(),
-            turn_stats: Vec::new(),
             debug_dump: None,
             next_debug_seq: 1,
             running: false,
@@ -127,127 +103,23 @@ impl AgentChatSession {
         }
     }
 
-    /// Fold one streamed event into the mirror.
+    /// Fold one streamed event into the mirror; an executed `iterate` that
+    /// staged source becomes an edit record.
     pub fn apply_event(&mut self, event: AgentEvent) {
-        match event {
-            AgentEvent::TextDelta(text) => {
-                self.status = UiAgentStatus::Streaming;
-                match self.turns.last_mut() {
-                    Some(UiAgentTurn::Assistant { text: existing }) => existing.push_str(&text),
-                    _ => self.turns.push(UiAgentTurn::Assistant { text }),
-                }
-            }
-            AgentEvent::ThinkingDelta(text) => {
-                self.status = UiAgentStatus::Streaming;
-                match self.turns.last_mut() {
-                    Some(UiAgentTurn::Thinking {
-                        text: existing,
-                        done: false,
-                    }) => {
-                        existing.push_str(&text);
-                        cap_thinking_text(existing);
-                    }
-                    _ => self.turns.push(UiAgentTurn::Thinking { text, done: false }),
-                }
-            }
-            AgentEvent::ThinkingDone => {
-                if let Some(UiAgentTurn::Thinking { done, .. }) = self.turns.last_mut() {
-                    *done = true;
-                }
-            }
-            AgentEvent::ToolUseStart { id, .. } => {
-                self.status = UiAgentStatus::RunningTool;
-                self.turns
-                    .push(UiAgentTurn::Tool(UiAgentToolRow::started(id)));
-            }
-            // The raw input JSON stays in core/debug; the row renders the
-            // executed summary instead.
-            AgentEvent::ToolInputDelta { .. } => {}
-            // The accumulated input's note lands pre-execution so the
-            // running row reads "{note} — running" while the tool works.
-            AgentEvent::ToolInputReady { id, note } => {
-                if let Some(row) = self.tool_row_mut(&id) {
-                    row.note = note;
-                }
-            }
-            // Live phase for the running row ("compiling", "probe 2/5", …).
-            AgentEvent::ToolProgress { id, phase } => {
-                if let Some(row) = self.tool_row_mut(&id) {
-                    row.phase = Some(phase.to_string());
-                }
-            }
-            AgentEvent::ToolExecuted {
-                id,
-                name,
-                summary_json,
-            } => {
-                self.status = UiAgentStatus::Streaming;
-                let row = self.turns.iter_mut().rev().find_map(|turn| match turn {
-                    UiAgentTurn::Tool(row) if row.id == id => Some(row),
-                    _ => None,
-                });
-                if let Some(row) = row {
-                    row.done = true;
-                    row.phase = None;
-                    row.note = summary_json["note"].as_str().map(str::to_string);
-                    row.staged = summary_json["staged"].as_bool().unwrap_or(false);
-                    row.shader_ok = summary_json["shader_ok"].as_bool();
-                    row.probes = summary_json["probes"].as_u64().unwrap_or(0) as u32;
-                    row.warnings = summary_json["warnings"].as_u64().unwrap_or(0) as u32;
-                    row.error = summary_json["error"]
-                        .as_str()
-                        .map(str::to_string)
-                        .or_else(|| {
-                            summary_json["input_error"]
-                                .as_bool()
-                                .unwrap_or(false)
-                                .then(|| "invalid tool input".to_string())
-                        });
-                    row.detail = serde_json::to_string_pretty(&summary_json)
-                        .unwrap_or_else(|_| summary_json.to_string());
-                }
-                // Source-staging calls become edit records. `iterate` is
-                // the ONLY source-staging tool (`upsert_param` also reports
-                // `staged: true`, but for a def edit) — the name gate keeps
-                // the bridge's staged-source queue correlated per call. The
-                // record's ordinal stamps the tool row, so the transcript
-                // can carry the edit's snapshot inline.
-                if name == "iterate" && summary_json["staged"].as_bool().unwrap_or(false) {
-                    let turn = self.push_edit_record(&summary_json);
-                    if let Some(row) = self.tool_row_mut(&id) {
-                        row.edit_turn = Some(turn);
-                    }
-                }
-            }
-            AgentEvent::TurnDone { stop_reason, usage } => {
-                self.usage.add(usage);
-                self.turn_stats.push(AgentTurnStat { stop_reason, usage });
-            }
-            AgentEvent::MaxTurnsReached { turns } => {
-                self.push_notice(format!(
-                    "Turn limit reached ({turns} model turns) — the agent stopped to wait for you."
-                ));
-            }
-            AgentEvent::Truncated {
-                stop_reason,
-                dropped_tool_call,
-            } => {
-                // The cut usually lands mid-tool-call: that row will never
-                // execute, so it must not keep pulsing "running".
-                self.resolve_unfinished_tool_rows("cut off by the output-token limit");
-                self.push_warning_notice(truncation_notice(&stop_reason, dropped_tool_call));
-            }
-            AgentEvent::Aborted => {
-                self.push_notice("Stopped.");
-            }
-            AgentEvent::ProviderError { message, retryable } => {
-                self.push_notice(format!("Provider error: {message}"));
-                self.status = UiAgentStatus::Error { message, retryable };
-            }
-            AgentEvent::SessionDone { usage_total } => {
-                // The session's own total is authoritative (it survives
-                // event loss and covers every turn of this session).
-                self.usage = usage_total;
+        let Some(executed) = self.mirror.apply_event(event) else {
+            return;
+        };
+        // Source-staging calls become edit records. `iterate` is the ONLY
+        // source-staging tool (`upsert_param` also reports `staged: true`,
+        // but for a def edit) — the name gate keeps the bridge's
+        // staged-source queue correlated per call. The record's ordinal
+        // stamps the tool row, so the transcript can carry the edit's
+        // snapshot inline.
+        if executed.name == "iterate" && executed.summary_json["staged"].as_bool().unwrap_or(false)
+        {
+            let turn = self.push_edit_record(&executed.summary_json);
+            if let Some(row) = self.mirror.tool_row_mut(&executed.id) {
+                row.edit_turn = Some(turn);
             }
         }
     }
@@ -255,57 +127,17 @@ impl AgentChatSession {
     /// The run future finished; settle the terminal status.
     pub fn run_ended(&mut self, error: Option<String>) {
         self.running = false;
-        // A run that ends mid-thought (abort, provider failure) never sent
-        // the boundary event — collapse the trailing thinking strip anyway.
-        if let Some(UiAgentTurn::Thinking { done, .. }) = self.turns.last_mut() {
-            *done = true;
-        }
-        // General invariant: however the run ended (abort, provider error,
-        // truncation), no tool row may stay pulsing "running" forever.
-        self.resolve_unfinished_tool_rows("interrupted — the run ended before this call finished");
-        match error {
-            // `ProviderError` events usually set the error status already;
-            // this covers failure paths that end the run without one.
-            Some(message) => {
-                if !matches!(self.status, UiAgentStatus::Error { .. }) {
-                    self.status = UiAgentStatus::Error {
-                        message,
-                        retryable: true,
-                    };
-                }
-            }
-            None => self.status = UiAgentStatus::Idle,
-        }
+        self.mirror.run_ended(error);
     }
 
     /// Append a session-level notice to the transcript.
     pub fn push_notice(&mut self, text: impl Into<String>) {
-        self.turns.push(UiAgentTurn::Notice {
-            text: text.into(),
-            level: UiNoticeLevel::Info,
-        });
+        self.mirror.push_notice(text);
     }
 
-    /// Append a warning-toned notice (the run ended incomplete).
-    pub fn push_warning_notice(&mut self, text: impl Into<String>) {
-        self.turns.push(UiAgentTurn::Notice {
-            text: text.into(),
-            level: UiNoticeLevel::Warning,
-        });
-    }
-
-    /// Settle every not-yet-done tool row as failed with `reason`, so a
-    /// run that ends for any reason leaves no dangling "running" row.
-    fn resolve_unfinished_tool_rows(&mut self, reason: &str) {
-        for turn in &mut self.turns {
-            if let UiAgentTurn::Tool(row) = turn
-                && !row.done
-            {
-                row.done = true;
-                row.phase = None;
-                row.error = Some(reason.to_string());
-            }
-        }
+    /// Snapshot the mirror's usage as the DTO's.
+    pub fn ui_usage(&self) -> UiAgentUsage {
+        self.mirror.ui_usage()
     }
 
     /// Record a freshly built debug dump; the DTO's `seq` advance is what
@@ -398,64 +230,13 @@ impl AgentChatSession {
     pub fn edit_record(&self, turn: u32) -> Option<&AgentEditRecord> {
         self.edits.iter().find(|record| record.turn == turn)
     }
-
-    /// The most recent tool row with `id` (updates target the newest call).
-    fn tool_row_mut(&mut self, id: &str) -> Option<&mut UiAgentToolRow> {
-        self.turns.iter_mut().rev().find_map(|turn| match turn {
-            UiAgentTurn::Tool(row) if row.id == id => Some(row),
-            _ => None,
-        })
-    }
-
-    /// Snapshot the mirror as DTO fields (turns + usage).
-    pub fn ui_usage(&self) -> UiAgentUsage {
-        UiAgentUsage {
-            input_tokens: self.usage.input_tokens,
-            output_tokens: self.usage.output_tokens,
-            cache_write_tokens: self.usage.cache_write_tokens,
-            cache_read_tokens: self.usage.cache_read_tokens,
-        }
-    }
-}
-
-/// The user-facing copy for a truncated run. `MaxTokens` gets the
-/// actionable phrasing (retry, or ask for something smaller); an unknown
-/// `Other` stop reason is surfaced verbatim.
-fn truncation_notice(stop_reason: &StopReason, dropped_tool_call: bool) -> String {
-    match (stop_reason, dropped_tool_call) {
-        (StopReason::MaxTokens, true) => "Run stopped: the response hit the output-token limit \
-             while writing the edit — try again or ask for something smaller."
-            .to_string(),
-        (StopReason::MaxTokens, false) => "Run stopped: the response hit the output-token limit \
-             — try again or ask for something smaller."
-            .to_string(),
-        (StopReason::Other(reason), true) => format!(
-            "Run stopped early (provider reported {reason:?}) — the unfinished edit was discarded."
-        ),
-        (StopReason::Other(reason), false) => {
-            format!("Run stopped early (provider reported {reason:?}).")
-        }
-        // Unreachable today (the session only emits Truncated for the two
-        // arms above); a safe fallback beats a panic.
-        _ => "Run stopped early.".to_string(),
-    }
-}
-
-/// Trim one thinking turn's text to [`MAX_THINKING_BYTES`], dropping the
-/// OLDEST text on a char boundary and marking the cut with an ellipsis.
-fn cap_thinking_text(text: &mut String) {
-    if text.len() <= MAX_THINKING_BYTES {
-        return;
-    }
-    let cut = text.len() - MAX_THINKING_BYTES;
-    let boundary = (cut..text.len())
-        .find(|&index| text.is_char_boundary(index))
-        .unwrap_or(text.len());
-    text.replace_range(..boundary, "…");
 }
 
 #[cfg(test)]
 mod tests {
+    use lpa_agent::TokenUsage;
+
+    use crate::app::agent::ui_agent_view::{UiAgentStatus, UiAgentTurn};
     use serde_json::json;
 
     use super::*;
@@ -474,12 +255,12 @@ mod tests {
         session.apply_event(AgentEvent::TextDelta("lo.".into()));
 
         assert_eq!(
-            session.turns,
+            session.mirror.turns,
             vec![UiAgentTurn::Assistant {
                 text: "Hello.".into()
             }]
         );
-        assert_eq!(session.status, UiAgentStatus::Streaming);
+        assert_eq!(session.mirror.status, UiAgentStatus::Streaming);
     }
 
     #[test]
@@ -488,13 +269,13 @@ mod tests {
         session.apply_event(AgentEvent::ThinkingDelta("Weighing ".into()));
         session.apply_event(AgentEvent::ThinkingDelta("palettes.".into()));
         assert_eq!(
-            session.turns,
+            session.mirror.turns,
             vec![UiAgentTurn::Thinking {
                 text: "Weighing palettes.".into(),
                 done: false,
             }]
         );
-        assert_eq!(session.status, UiAgentStatus::Streaming);
+        assert_eq!(session.mirror.status, UiAgentStatus::Streaming);
 
         // The boundary collapses the strip; following text starts its own
         // assistant turn, and a LATER thinking segment is a new turn.
@@ -502,7 +283,7 @@ mod tests {
         session.apply_event(AgentEvent::TextDelta("Warmer.".into()));
         session.apply_event(AgentEvent::ThinkingDelta("Next step…".into()));
         assert_eq!(
-            session.turns,
+            session.mirror.turns,
             vec![
                 UiAgentTurn::Thinking {
                     text: "Weighing palettes.".into(),
@@ -526,7 +307,7 @@ mod tests {
         session.apply_event(AgentEvent::ThinkingDelta("half a thought".into()));
         session.run_ended(None);
         assert_eq!(
-            session.turns,
+            session.mirror.turns,
             vec![UiAgentTurn::Thinking {
                 text: "half a thought".into(),
                 done: true,
@@ -542,7 +323,7 @@ mod tests {
         for _ in 0..30 {
             session.apply_event(AgentEvent::ThinkingDelta("é".repeat(500)));
         }
-        let Some(UiAgentTurn::Thinking { text, .. }) = session.turns.last() else {
+        let Some(UiAgentTurn::Thinking { text, .. }) = session.mirror.turns.last() else {
             panic!("expected thinking turn");
         };
         assert!(text.len() <= MAX_THINKING_BYTES + '…'.len_utf8());
@@ -558,7 +339,7 @@ mod tests {
             id: "tu_1".into(),
             name: "iterate".into(),
         });
-        assert_eq!(session.status, UiAgentStatus::RunningTool);
+        assert_eq!(session.mirror.status, UiAgentStatus::RunningTool);
 
         session.apply_event(AgentEvent::ToolExecuted {
             id: "tu_1".into(),
@@ -568,7 +349,7 @@ mod tests {
                 "probes": 2, "warnings": 1,
             }),
         });
-        let UiAgentTurn::Tool(row) = &session.turns[0] else {
+        let UiAgentTurn::Tool(row) = &session.mirror.turns[0] else {
             panic!("expected tool row");
         };
         assert!(row.done);
@@ -577,7 +358,7 @@ mod tests {
         assert_eq!(row.shader_ok, Some(true));
         assert_eq!((row.probes, row.warnings), (2, 1));
         assert!(row.detail.contains("go green"));
-        assert_eq!(session.status, UiAgentStatus::Streaming);
+        assert_eq!(session.mirror.status, UiAgentStatus::Streaming);
     }
 
     #[test]
@@ -595,7 +376,7 @@ mod tests {
             id: "tu_1".into(),
             phase: lpa_agent::ToolPhase::Probing { i: 2, of: 5 },
         });
-        let UiAgentTurn::Tool(row) = &session.turns[0] else {
+        let UiAgentTurn::Tool(row) = &session.mirror.turns[0] else {
             panic!("expected tool row");
         };
         assert!(!row.done);
@@ -607,7 +388,7 @@ mod tests {
             name: "iterate".into(),
             summary_json: json!({ "note": "go green", "staged": true, "shader_ok": true }),
         });
-        let UiAgentTurn::Tool(row) = &session.turns[0] else {
+        let UiAgentTurn::Tool(row) = &session.mirror.turns[0] else {
             panic!("expected tool row");
         };
         assert!(row.done);
@@ -625,15 +406,17 @@ mod tests {
                 output_tokens: 5,
                 cache_write_tokens: 100,
                 cache_read_tokens: 0,
+                cost_micro_usd: None,
             },
         });
-        assert_eq!(session.usage.input_tokens, 10);
+        assert_eq!(session.mirror.usage.input_tokens, 10);
         session.apply_event(AgentEvent::SessionDone {
             usage_total: TokenUsage {
                 input_tokens: 60,
                 output_tokens: 40,
                 cache_write_tokens: 120,
                 cache_read_tokens: 90,
+                cost_micro_usd: None,
             },
         });
         assert_eq!(
@@ -643,6 +426,7 @@ mod tests {
                 output_tokens: 40,
                 cache_write_tokens: 120,
                 cache_read_tokens: 90,
+                cost_micro_usd: None,
             }
         );
     }
@@ -749,6 +533,7 @@ mod tests {
         });
 
         let stamps: Vec<Option<u32>> = session
+            .mirror
             .turns
             .iter()
             .filter_map(|turn| match turn {
@@ -860,14 +645,14 @@ mod tests {
         session.run_ended(Some("401 unauthorized".into()));
         assert!(!session.running);
         assert_eq!(
-            session.status,
+            session.mirror.status,
             UiAgentStatus::Error {
                 message: "401 unauthorized".into(),
                 retryable: false,
             }
         );
         assert!(matches!(
-            session.turns.last(),
+            session.mirror.turns.last(),
             Some(UiAgentTurn::Notice { text, .. }) if text.contains("401")
         ));
     }
@@ -878,6 +663,6 @@ mod tests {
         session.running = true;
         session.apply_event(AgentEvent::TextDelta("done".into()));
         session.run_ended(None);
-        assert_eq!(session.status, UiAgentStatus::Idle);
+        assert_eq!(session.mirror.status, UiAgentStatus::Idle);
     }
 }

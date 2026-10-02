@@ -55,6 +55,7 @@ fn the_link_loses_nothing_the_app_can_see_under_injected_faults() {
         let o = run(&elf, faults, 0);
         eprintln!("\n=== {name} ===\n{}", summary(&o));
         assert!(o.report.problems().is_empty(), "{name}: {}", o.report);
+        assert_no_lost_wakes(name, &o);
         if let Some((to_host, _)) = o.faults {
             let damaged = to_host.packets_dropped
                 + to_host.tails_cut
@@ -86,6 +87,7 @@ fn a_long_board_stall_is_ridden_out() {
     let o = run(&elf, faults, 3_000);
     eprintln!("\n=== 3 s board stall, 0.5% drops ===\n{}", summary(&o));
     assert!(o.report.problems().is_empty(), "{}", o.report);
+    assert_no_lost_wakes("3 s board stall", &o);
     assert_eq!(o.report.stall_asked_ms, 3_000);
 }
 
@@ -111,6 +113,22 @@ fn run(elf: &std::path::Path, faults: LinkFaults, stall_ms: u32) -> LabOutcome {
         LinkConfig::usb(),
     )
     .expect("the emulated lab runs")
+}
+
+/// No USB write waited out its timeout with a host draining and the send
+/// buffer already free: the esp-hal interrupt handler's lost TX wake
+/// (docs/defects/2026-09-26-esp-hals-usb-isr-clears-a-tx-edge-it-did-not-handle.md),
+/// fixed by the upstream back-port in `third_party/esp-hal`. Stock esp-hal
+/// 1.1.1 lost about five a minute here.
+fn assert_no_lost_wakes(name: &str, o: &LabOutcome) {
+    let lost = o
+        .report
+        .board
+        .iter()
+        .find(|(k, _)| k == "edge.lost_wakes")
+        .map(|(_, v)| *v)
+        .unwrap_or_else(|| panic!("{name}: the board reported no edge.lost_wakes"));
+    assert_eq!(lost, 0, "{name}: {lost} USB write(s) lost their wake-up");
 }
 
 fn summary(o: &LabOutcome) -> String {

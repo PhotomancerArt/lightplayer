@@ -1045,6 +1045,8 @@ pub struct Esp32V3Builder {
     uart0_source: Option<Box<dyn ByteSource>>,
     uart0_script: Option<lp_emu_esp_common::ScriptedSource>,
     uart0_baud: Option<u64>,
+    /// UART0's host-link fault injector (`--uart-faults`), off by default.
+    uart0_faults: Option<lp_emu_esp_common::link_faults::LinkFaults>,
     control: Option<String>,
     control_script: Vec<(Cycles, ControlCommand)>,
     reboot_on_reset: bool,
@@ -1101,6 +1103,7 @@ impl Default for Esp32V3Builder {
             uart0_source: None,
             uart0_script: None,
             uart0_baud: None,
+            uart0_faults: None,
             control: None,
             control_script: Vec::new(),
             reboot_on_reset: false,
@@ -1209,6 +1212,7 @@ impl fmt::Debug for Esp32V3Builder {
             .field("uart0_source", &self.uart0_source.is_some())
             .field("uart0_script", &self.uart0_script.is_some())
             .field("uart0_baud", &self.uart0_baud)
+            .field("uart0_faults", &self.uart0_faults)
             .field("control", &self.control)
             .field("control_script", &self.control_script.len())
             .field("reboot_on_reset", &self.reboot_on_reset)
@@ -1501,6 +1505,15 @@ impl Esp32V3Builder {
         self
     }
 
+    /// Damage UART0's host link (`--uart-faults <spec>`) — a test switch,
+    /// off by default: the C6's `usb_faults`, over a byte stream. See
+    /// `lp_emu_esp_common::link_faults` (the spec, and `StreamFaults` for
+    /// what a "packet" is on a UART).
+    pub fn uart0_faults(mut self, faults: lp_emu_esp_common::link_faults::LinkFaults) -> Self {
+        self.uart0_faults = Some(faults);
+        self
+    }
+
     /// Listen for a control-channel client on this address (`--control`).
     pub fn control(mut self, addr: impl Into<String>) -> Self {
         self.control = Some(addr.into());
@@ -1786,6 +1799,8 @@ impl Esp32V3Builder {
             control_lines: 0,
             pending_reset: None,
             gpio_index: None,
+            rtc_cntl_index: None,
+            software_reset: None,
             rmt_index: None,
             pins: PinObserver {
                 strip: self.strip,
@@ -1801,6 +1816,14 @@ impl Esp32V3Builder {
 
         machine.gpio_index = machine.bus.peripheral_index("GPIO");
         machine.rmt_index = machine.bus.peripheral_index("RMT");
+        machine.rtc_cntl_index = machine.bus.peripheral_index("RTC_CNTL");
+        if let Some(i) = machine.rtc_cntl_index {
+            machine.software_reset = machine
+                .bus
+                .with_peripheral::<crate::periph::rtc_cntl::RtcCntl, _>(i, |r, _| {
+                    r.software_reset()
+                });
+        }
         if self.rmt_logs {
             match machine.rmt_index {
                 Some(i) => {
@@ -1879,6 +1902,17 @@ impl Esp32V3Builder {
             machine
                 .bus
                 .with_peripheral::<crate::periph::uart::Uart, _>(i, |u, _| u.set_host_baud(baud));
+        }
+        // Not in the save-state blob (the host's side of the cable, like the
+        // baud above), so a reboot keeps it.
+        if let Some(faults) = self.uart0_faults.filter(|f| !f.is_off())
+            && let Some(i) = machine.bus.peripheral_index("UART0")
+        {
+            machine
+                .bus
+                .with_peripheral::<crate::periph::uart::Uart, _>(i, |u, _| {
+                    u.set_faults(Some(faults))
+                });
         }
 
         // Guest time is zero and everything is placed: the one moment a
@@ -2097,6 +2131,13 @@ pub struct Machine {
     /// Set when the auto-reset circuit released EN; drained at the next
     /// slice boundary by [`Machine::run_until`].
     pending_reset: Option<Strap>,
+    /// `RTC_CNTL`'s peripheral index, for [`Machine::software_reboot`]'s
+    /// `reset_state`. `None` on a machine built with
+    /// [`Esp32V3Builder::bare`].
+    rtc_cntl_index: Option<usize>,
+    /// `options0.sw_sys_rst`, raised by the guest and taken between slices
+    /// (see [`crate::periph::rtc_cntl`]'s module docs).
+    software_reset: Option<crate::periph::rtc_cntl::SoftwareReset>,
     /// `GPIO`'s peripheral index: the block the drained edges are handed to
     /// so its `status` latch sees what was on the wire. `None` on a machine
     /// built with [`Esp32V3Builder::bare`].
@@ -3113,6 +3154,35 @@ impl Machine {
         &self.uart0_log
     }
 
+    /// Set (or, with `None`, clear) UART0's host-link fault injector
+    /// mid-run; `false` when the machine has no UART0.
+    pub fn set_uart0_faults(
+        &mut self,
+        faults: Option<lp_emu_esp_common::link_faults::LinkFaults>,
+    ) -> bool {
+        let Some(index) = self.bus.peripheral_index("UART0") else {
+            return false;
+        };
+        self.bus
+            .with_peripheral::<crate::periph::uart::Uart, _>(index, |u, _| u.set_faults(faults))
+            .is_some()
+    }
+
+    /// What UART0's fault injector did: (device → host, host → device).
+    pub fn uart0_fault_counters(
+        &mut self,
+    ) -> Option<(
+        lp_emu_esp_common::link_faults::FaultCounters,
+        lp_emu_esp_common::link_faults::FaultCounters,
+    )> {
+        let index = self.bus.peripheral_index("UART0")?;
+        self.bus
+            .with_peripheral::<crate::periph::uart::Uart, _>(index, |u, _| {
+                u.faults().map(|f| (f.in_counters, f.out_counters))
+            })
+            .flatten()
+    }
+
     /// The UART0 TCP listener, when `Uart0Sink::Tcp` was chosen.
     pub fn uart0_tcp(&self) -> Option<&lp_emu_esp_common::TcpHost> {
         self.uart0_tcp.as_ref()
@@ -3456,6 +3526,16 @@ impl Machine {
                     continue;
                 }
                 return Outcome::Reset { cycle: now, strap };
+            }
+            // The guest wrote `options0.sw_sys_rst`: a run that reboots
+            // performs it; any other run lets the guest carry on, as before.
+            if self.reboot_on_reset
+                && self.software_reset.as_ref().is_some_and(|line| line.take())
+                && self.software_reboot()
+            {
+                log::info!("machine: software system reset at cycle {now} — rebooting");
+                matched = 0;
+                continue;
             }
 
             let mut deadline = stop_cycle.min(now.saturating_add(MAX_SLICE_CYCLES));
@@ -4472,6 +4552,59 @@ impl Machine {
                  strap is recorded, not acted on."
             );
         }
+        true
+    }
+
+    /// A **software system reset** (`options0.sw_sys_rst`, the firmware's
+    /// `esp_hal::system::software_reset`): [`reboot`](Self::reboot)'s return
+    /// to the power-on snapshot, with the two things that reset does not
+    /// clear on silicon put back.
+    ///
+    /// - **RTC fast memory** keeps its bytes: the classic's TRM puts it in
+    ///   the RTC domain, which a digital-core reset leaves powered, and the
+    ///   firmware's recovery ledger and link boot count live there on that
+    ///   promise (`fw-esp32v3`'s `esp32v3_recovery_backend` and
+    ///   `serial::link_boot_count`).
+    /// - **`reset_state`** reads `SW_RESET` (3) in both halves, not the
+    ///   power-on code the snapshot holds.
+    ///
+    /// Everything else goes back to power-on, **including the RNG's state**:
+    /// the model has no entropy, so the random word a boot reads after this
+    /// reset is the one it read after power-on. That is the worst case the
+    /// link nonce's boot-count salt exists for (ruling DD28 of the
+    /// classic-UART plan), which makes this the check for it. Other
+    /// RTC-domain state (RTC slow memory, the RTC timer, RTC_CNTL's other
+    /// registers) is restored to power-on too — a simplification nothing
+    /// reads across a reset today.
+    ///
+    /// `false` when the run was not built to reboot (no power-on snapshot).
+    pub fn software_reboot(&mut self) -> bool {
+        let Some(power_on) = self.power_on.clone() else {
+            return false;
+        };
+        let base = (memmap::RTC_FAST_DBUS - self.bus.guest_arena_base()) as usize;
+        let span = base..base + memmap::RTC_FAST_LEN as usize;
+        let rtc_fast = self.bus.guest_arena()[span.clone()].to_vec();
+        let uart0 = self.uart0_log.bytes();
+        self.restore(&power_on);
+        self.uart0_log.replace(&uart0);
+        self.bus.guest_arena_mut()[span].copy_from_slice(&rtc_fast);
+        if let Some(i) = self.rtc_cntl_index {
+            self.bus
+                .with_peripheral::<crate::periph::rtc_cntl::RtcCntl, _>(i, |r, _| {
+                    r.set_reset_cause_code(crate::periph::rtc_cntl::SW_RESET_CODE)
+                });
+        }
+        self.reboots += 1;
+        // As in `reboot`: the host-poll deadline is an absolute guest cycle
+        // outside the snapshot, and the clock just went back to zero.
+        self.next_host_poll = 0;
+        log::info!(
+            "machine: software reboot {} — back to cycle {}, pc {:#010x}, RTC fast memory kept",
+            self.reboots,
+            self.cycles(),
+            self.harts[0].pc()
+        );
         true
     }
 

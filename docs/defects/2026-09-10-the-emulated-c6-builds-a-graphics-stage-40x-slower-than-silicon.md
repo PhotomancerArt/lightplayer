@@ -125,3 +125,18 @@ property of the machine, not of what is hosting it. Not this plan's to fix
 (vision.md Q4): the card's existing push face is judged sufficient for the
 wait, and the tab-hosted walk uses `peach-1d`, like the native walk, for
 exactly the reason above.
+
+**2026-10-01 — a 250-lamp strip with the Fixture default sampling trips it.**
+The app-agent evals' stage B (`lp-cli/tests/app_agent_emu_decode.rs`, plan
+`lp2025/2026-10-01-0126-app-agent-harness`) deploys a one-row map2d strip of
+250 lamps, render 250×8, to the shipped image direct-loaded. With
+`"sampling": "texture_area"` — the Fixture node's default, which a project
+built through Studio's "+ Fixture" gets — the board logs `project new start`
+and the LP_WDT resets it before `project new` finishes (no frame on gpio16 in
+30 s emulated). The same project with `"sampling": "direct"` (what
+`generate_board_project` writes) lights on the first frame at ~0.4 s
+emulated. `lp-emu:esp32c6:t1`, lp-emu `28d010762`, CI images of run
+36690150578. No board was attached; whether silicon is fine is unproven but
+the fyeah-sign fixture above makes it likely. Stage B now reports this case
+as `emu-watchdog:` so an eval does not score it as the project's fault, and
+the golden edit script sets `direct` sampling like the board project does.

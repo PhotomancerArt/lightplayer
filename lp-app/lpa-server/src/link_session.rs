@@ -31,11 +31,13 @@ impl LinkSession {
     /// - Trusted → edit, always (physical possession is the recovery path).
     /// - Untrusted → what its login granted; failing that, play when the
     ///   device is explicitly `open`; failing that, nothing.
+    /// - Keyed → the same, where the grant is the tier of the key its
+    ///   secure handshake matched (the anonymous key grants nothing).
     #[must_use]
     pub fn effective_tier(&self, device_open: bool) -> Option<Tier> {
         match self.trust {
             LinkTrust::Trusted => Some(Tier::Edit),
-            LinkTrust::Untrusted => {
+            LinkTrust::Untrusted | LinkTrust::Keyed => {
                 self.granted
                     .or(if device_open { Some(Tier::Play) } else { None })
             }
@@ -53,6 +55,15 @@ mod tests {
         assert_eq!(session.effective_tier(false), Some(Tier::Edit));
         session.granted = Some(Tier::Play);
         assert_eq!(session.effective_tier(true), Some(Tier::Edit));
+    }
+
+    #[test]
+    fn keyed_links_hold_their_handshake_grant_then_open_then_nothing() {
+        let mut session = LinkSession::new(LinkTrust::Keyed);
+        assert_eq!(session.effective_tier(false), None);
+        assert_eq!(session.effective_tier(true), Some(Tier::Play));
+        session.granted = Some(Tier::Play);
+        assert_eq!(session.effective_tier(false), Some(Tier::Play));
     }
 
     #[test]

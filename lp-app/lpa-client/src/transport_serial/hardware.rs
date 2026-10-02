@@ -12,6 +12,7 @@
 //! the module docs of [`crate::transport_serial`], and `LP_WIRE_ENCODING`).
 
 use log;
+use lpc_wire::lp_link::LinkConfig;
 use lpc_wire::{TransportError, WireEncoding};
 use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
@@ -39,22 +40,44 @@ pub struct HardwareSerialOptions {
     /// The encoding to ask the board for. `None` reads `LP_WIRE_ENCODING`
     /// ([`crate::wire_encoding_env`]): packed unless it says `json`.
     pub wire_encoding: Option<WireEncoding>,
+    /// The host end's link configuration. `None` picks it from the port
+    /// ([`link_config_for_port`]): the UART preset behind a USB-UART bridge
+    /// (the classic ESP32's CH340), the USB preset otherwise — including
+    /// every stream that is not a native port (an emulated board's socket, a
+    /// fake), where the board's advertised window governs either way.
+    pub link_config: Option<LinkConfig>,
+}
+
+/// The link configuration a host takes for the native port `port_name`:
+/// [`LinkConfig::uart`] when it is an external USB-UART bridge (the classic
+/// ESP32's UART0 behind a CH340, on lp-link since `WIRE_PROTO_VERSION` 32),
+/// [`LinkConfig::usb`] for Espressif's native USB-Serial-JTAG (C6, S3) and
+/// for anything that is not a native port. The same vendor-id test the reset
+/// dance uses ([`SerialResetStyle`]): one port, one answer to "what is on the
+/// other end".
+pub fn link_config_for_port(port_name: &str) -> LinkConfig {
+    detect_reset_style(port_name).link_config()
 }
 
 /// The I/O thread: the reset dance (when asked), then the link until
 /// shutdown or until the stream fails.
 fn serial_thread_loop(mut pump: LinkPump) {
     let stream_label = pump.stream_label.clone();
+    let style = detect_reset_style(&stream_label);
     if pump.options.reset_after_open {
-        let style = detect_reset_style(&stream_label);
         log::debug!("Serial thread: resetting {stream_label} via {style:?}");
         if let Err(e) = reset_after_open(pump.stream.as_mut(), style) {
             log::error!("Serial thread: Failed to reset device after opening {stream_label}: {e}");
             return;
         }
     }
+    let config = pump
+        .options
+        .link_config
+        .clone()
+        .unwrap_or_else(|| style.link_config());
 
-    let stream = pump.run();
+    let stream = pump.run(config);
 
     // Explicit, and load-bearing: this thread is the ONLY owner of the byte
     // stream, so the OS serial port is released here and nowhere else.
@@ -78,6 +101,17 @@ enum SerialResetStyle {
     /// auto-reset circuit, so the run-mode reset is a plain EN pulse with
     /// IO0 left high.
     UartBridge,
+}
+
+impl SerialResetStyle {
+    /// The link preset for what is on the other end: a UART behind a bridge
+    /// is `uart()`, the rest `usb()` (see [`link_config_for_port`]).
+    fn link_config(self) -> LinkConfig {
+        match self {
+            SerialResetStyle::UsbSerialJtag => LinkConfig::usb(),
+            SerialResetStyle::UartBridge => LinkConfig::uart(),
+        }
+    }
 }
 
 /// Pick the reset dance from the port's USB vendor id. Espressif's native
@@ -118,11 +152,14 @@ fn detect_reset_style(port_name: &str) -> SerialResetStyle {
 /// on the DOM-Z-102, classic bring-up M3).
 ///
 /// In both arms, pending input is discarded before the edge that reboots the
-/// chip: a previously RUNNING device flushes its buffered TX — heartbeat
-/// `M!` frames included — into the freshly opened port, and delivering those
-/// to the readiness gate misclassifies the boot (found on hardware, M5
-/// smoke). Bytes that arrive before the reset takes effect are not boot
-/// output; everything after the edge is.
+/// chip: a previously RUNNING device flushes its buffered TX into the freshly
+/// opened port, and delivering that to the readiness gate misclassified the
+/// boot when it was `M!` frames (found on hardware, M5 smoke). On lp-link a
+/// stale frame is keyed to a session this host never had and is dropped by
+/// the link anyway, so the discard is no longer load-bearing for frames; it
+/// still keeps the previous boot's console text out of this one's. Bytes that
+/// arrive before the reset takes effect are not boot output; everything
+/// after the edge is.
 fn reset_after_open(
     stream: &mut dyn DeviceByteStream,
     style: SerialResetStyle,
