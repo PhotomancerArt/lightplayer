@@ -49,7 +49,7 @@ import path from "node:path";
 import process from "node:process";
 
 import { StudioDriver } from "./studio-driver.mjs";
-import { startDoor, stopDoor, studioUrlFor } from "./emulated-lane.mjs";
+import { serveStudioBundle, startDoor, stopDoor, studioUrlFor, walkPort } from "./emulated-lane.mjs";
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
 const PUBLIC = path.join(ROOT, "target/dx/lpa-studio-web/release/web/public");
@@ -179,26 +179,19 @@ function report(chip) {
 
 // --- the bundle, served by this script ----------------------------------
 
-const TYPES = { ".html": "text/html", ".js": "text/javascript", ".mjs": "text/javascript", ".wasm": "application/wasm", ".css": "text/css", ".json": "application/json", ".svg": "image/svg+xml", ".bin": "application/octet-stream", ".woff2": "font/woff2", ".png": "image/png" };
-
-/// The bundle's port: this worktree's stable slot for the walk
-/// (`scripts/dev-port.sh`), NOT an ephemeral one — a browser's OPFS (where
-/// Studio keeps a board's backup) belongs to the ORIGIN, and W7b comes
-/// back in a new Chrome on the same profile expecting the same origin.
-function bundlePort() {
-  return Number(spawnSync("bash", ["scripts/dev-port.sh", "walk-migration-emu"], { cwd: ROOT, encoding: "utf8" }).stdout.trim());
-}
-
-/// `walk` carries the two routes the tab lane (W12) needs, because its chip
-/// lives in the page: `GET /__walk/fixture.bin` seeds it, and
-/// `POST /__walk/chip?name=<file>` brings it back out to `walk.out`.
+/// The walk's own endpoints beside the release bundle (`serveStudioBundle`),
+/// on this worktree's stable slot for the walk — a browser's OPFS (where
+/// Studio keeps a board's backup) belongs to the ORIGIN, and W7b comes back
+/// in a new Chrome on the same profile expecting the same origin. The two
+/// routes are the tab lane's (W12), whose chip lives in the page:
+/// `GET /__walk/fixture.bin` seeds it, and `POST /__walk/chip?name=<file>`
+/// brings it back out to `walk.out`.
 function serveBundle(walk) {
-  const server = createServer((request, response) => {
-    const url = new URL(request.url, "http://x");
+  const route = (request, response, url) => {
     if (url.pathname === "/__walk/fixture.bin") {
       response.writeHead(200, { "content-type": "application/octet-stream" });
       createReadStream(walk.fixtureChip).pipe(response);
-      return;
+      return true;
     }
     if (url.pathname === "/__walk/chip" && request.method === "POST") {
       // A name under `out`, never outside it.
@@ -210,26 +203,11 @@ function serveBundle(walk) {
         response.writeHead(204);
         response.end();
       });
-      return;
+      return true;
     }
-    let file = null;
-    const firmware = url.pathname.match(/^\/firmware\/([^/]+)\/([^/]+)$/);
-    if (firmware) file = path.join(FIRMWARE, firmware[1], firmware[2]);
-    else {
-      const candidate = path.join(PUBLIC, decodeURIComponent(url.pathname));
-      file = candidate.startsWith(PUBLIC) && existsSync(candidate) && statSync(candidate).isFile()
-        ? candidate
-        : path.join(PUBLIC, "index.html"); // the SPA's routes
-    }
-    if (!existsSync(file)) {
-      response.writeHead(404);
-      response.end();
-      return;
-    }
-    response.writeHead(200, { "content-type": TYPES[path.extname(file)] ?? "application/octet-stream" });
-    createReadStream(file).pipe(response);
-  });
-  return new Promise((resolve) => server.listen(bundlePort(), "127.0.0.1", () => resolve(server)));
+    return false;
+  };
+  return serveStudioBundle({ root: ROOT, port: walkPort(ROOT, "walk-migration-emu"), route });
 }
 
 function startSink() {

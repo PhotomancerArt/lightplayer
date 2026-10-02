@@ -13,7 +13,10 @@
 //
 // It is NOT a CI job and must not become one (PD9, pre-ruled E-cost): it
 // wants Chrome, a dev server, a packaged firmware and an emulator. It is a
-// recipe an agent runs.
+// recipe an agent runs. `--serve-release` takes the dev server out: the walk
+// serves the release bundle (`just studio-web-story-build`) and the packaged
+// firmware itself, so a session that cannot keep a server running in the
+// background can still run it as one foreground command.
 //
 // TWO BACKINGS, ONE WALK. By default the board is held by a native `lp-cli
 // emu serve` on a socket. With `--tab` (or `WALK_BACKING=tab`) it is held by
@@ -44,7 +47,7 @@ import process from "node:process";
 import { execSync } from "node:child_process";
 
 import { StudioDriver } from "./studio-driver.mjs";
-import { liveRegistry, startDoor, stopDoor, studioUrlFor } from "./emulated-lane.mjs";
+import { liveRegistry, serveStudioBundle, startDoor, stopDoor, studioUrlFor, walkPort } from "./emulated-lane.mjs";
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
 
@@ -85,6 +88,7 @@ function args() {
     shots: null,
     out: null,
     keepOpen: false,
+    serveRelease: false,
     board: tabByDefault ? "tab-c6" : "c6-a",
     tab: tabByDefault,
   };
@@ -94,13 +98,14 @@ function args() {
     if (argv[i] === "--shots") out.shots = argv[++i];
     else if (argv[i] === "--out") out.out = argv[++i];
     else if (argv[i] === "--keep-open") out.keepOpen = true;
+    else if (argv[i] === "--serve-release") out.serveRelease = true;
     else if (argv[i] === "--tab") out.tab = true;
     else if (argv[i] === "--board") {
       out.board = argv[++i];
       boardNamed = true;
     } else {
       console.error(
-        `usage: node scripts/emu/walk-no-board.mjs [--tab] [--shots <dir>] [--out <dir>] [--keep-open]`,
+        `usage: node scripts/emu/walk-no-board.mjs [--tab] [--serve-release] [--shots <dir>] [--out <dir>] [--keep-open]`,
       );
       process.exit(2);
     }
@@ -201,8 +206,15 @@ async function main() {
   mkdirSync(options.shots, { recursive: true });
   mkdirSync(options.out, { recursive: true });
 
-  const port = studioPort();
-  if (!(await studioUp(port))) {
+  // `--serve-release`: no dev server — this walk serves the release bundle
+  // (`just studio-web-story-build`) and the packaged firmware itself, on its
+  // own stable slot, so it runs as one foreground command. It never looks
+  // at, or adopts, any other listener.
+  const bundle = options.serveRelease
+    ? await serveStudioBundle({ root: ROOT, port: walkPort(ROOT, "walk-no-board") })
+    : null;
+  const port = bundle ? bundle.address().port : studioPort();
+  if (!bundle && !(await studioUp(port))) {
     console.error(
       `No Studio on this worktree's canonical port ${port}.\n` +
         `Start one first — \`just studio-dev\` or \`just studio-dev-emu\` — and re-run.\n` +
@@ -529,6 +541,7 @@ async function main() {
     await driver.close();
     if (door) await stopDoor(door);
     sink.server.close();
+    bundle?.close();
   } else if (door) {
     console.log(`\n  --keep-open: the door (pid ${door.pid}) is still up; the browser is still attached.`);
   } else {
