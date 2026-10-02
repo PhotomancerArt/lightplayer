@@ -3,7 +3,7 @@
 
 use crate::{
     ActionConsequence, ActionEnablement, ActionPriority, OfferArgError, OfferArgs, OfferBinder,
-    OfferParam, OfferParamKind, OfferPath, UiAction,
+    OfferParam, OfferParamKind, OfferPath, OfferPress, UiAction,
 };
 
 /// One verb the user can press, addressed by a stable [`OfferPath`].
@@ -116,10 +116,16 @@ impl UiOffer {
     ///   then binds.
     /// - Either way, an action that comes out disabled is refused as
     ///   [`OfferArgError::Unavailable`] with its reason.
+    ///
+    /// The action carries where it was pressed from — this offer's path and
+    /// `args` as handed over ([`UiAction::offer_press`]).
     pub fn press(&self, args: &OfferArgs) -> Result<UiAction, OfferArgError> {
         let action = self.press_unchecked(args)?;
         match &action.meta().enablement {
-            ActionEnablement::Enabled => Ok(action),
+            ActionEnablement::Enabled => Ok(action.pressed_from(OfferPress {
+                path: self.path.clone(),
+                args: args.clone(),
+            })),
             ActionEnablement::Disabled { reason } => Err(OfferArgError::Unavailable {
                 reason: reason.clone(),
             }),
@@ -384,6 +390,25 @@ mod tests {
             )
             .expect("the toggle widens the choice");
         assert_eq!(widened.meta().label, "Save as s3");
+    }
+
+    #[test]
+    fn a_press_says_which_offer_it_came_from_and_with_what() {
+        let offer = labelled_offer(Some("xiao"));
+        let args = OfferArgs::new().with("board", "devkit");
+        let pressed = offer.press(&args).unwrap();
+        let press = pressed.offer_press().expect("a press is stamped");
+        assert_eq!(press.path, offer.path);
+        assert_eq!(press.args, args, "the values as handed over");
+        assert!(
+            offer.action.offer_press().is_none(),
+            "the published verb is not a press"
+        );
+        assert_eq!(
+            offer.press(&OfferArgs::new()).unwrap(),
+            offer.action,
+            "provenance is not identity"
+        );
     }
 
     #[test]

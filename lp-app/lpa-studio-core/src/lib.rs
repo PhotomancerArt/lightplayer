@@ -190,7 +190,7 @@ pub use core::log::{DeviceEventKind, DeviceEventRecorder};
 pub use core::notice::UiNotices;
 pub use core::offer::{
     OfferArgError, OfferArgs, OfferBinder, OfferChoice, OfferParam, OfferParamKind, OfferPath,
-    OfferPathError, UiOffer, UiOfferTree,
+    OfferPathError, OfferPress, UiOffer, UiOfferTree,
 };
 pub use core::view::activity_view::UiActivityStep;
 pub use core::view::activity_view::UiActivityStepState;

@@ -27,7 +27,7 @@ pub use crate::controller::{
 pub use metric::UiMetric;
 pub use offer::{
     OfferArgError, OfferArgs, OfferBinder, OfferChoice, OfferParam, OfferParamKind, OfferPath,
-    OfferPathError, UiOffer, UiOfferTree,
+    OfferPathError, OfferPress, UiOffer, UiOfferTree,
 };
 pub use progress::UiProgress;
 pub use status::UiStatus;

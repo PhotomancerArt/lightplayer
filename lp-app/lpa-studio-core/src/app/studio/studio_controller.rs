@@ -2768,11 +2768,14 @@ impl StudioController {
     ) -> UiResult {
         updates.emit(UxUpdate::View(self.view()));
         // A press of the action an app-agent card carries IS the card's
-        // press, wherever it came from (the card, or the button it names).
+        // press, wherever it came from (the card, or the button it names) —
+        // and so is any press of the offer a card hands over, with whatever
+        // values the user settled on.
         let card = self.agent.app_session_mut().pending_card_for(&action);
+        let press = action.offer_press().cloned();
         let result = self.dispatch_inner(action, updates.clone()).await;
         if let Some(card) = card {
-            self.app_card_pressed(&card, &result);
+            self.app_card_pressed(&card, &result, press);
         }
         // Release closed projects' locks and re-hydrate the gallery when
         // the action made either due (open/close/save/home ops).
@@ -6003,9 +6006,11 @@ impl StudioController {
                 Ok(UiNotices::new())
             }
             crate::AgentOp::CardDismissed { card } => {
-                self.agent
-                    .app_session_mut()
-                    .settle_card(&card, crate::UiAgentCardState::Dismissed);
+                self.agent.app_session_mut().settle_card(
+                    &card,
+                    crate::UiAgentCardState::Dismissed,
+                    None,
+                );
                 self.resume_app_agent();
                 self.mark_dirty();
                 Ok(UiNotices::new())
@@ -6195,9 +6200,14 @@ impl StudioController {
     }
 
     /// One app-agent `act`: look the offer path up in the offer tree as it
-    /// is NOW (the same enablement the user sees), then press it through
-    /// the ordinary dispatch — or, when only the user may press it, put it
-    /// on a card (D6, PD6). While a card waits, nothing else is pressed.
+    /// is NOW (the same enablement the user sees), press it with the
+    /// agent's values the way the user's own picker does
+    /// ([`crate::UiOffer::press`]: unknown names, values that are not
+    /// allowed and missing required ones are refused in plain words, with
+    /// the choices), then dispatch it through the ordinary dispatch — or,
+    /// when only the user may press it, put it on a card that hands the
+    /// user the offer pre-filled with those values (D6, PD6). While a card
+    /// waits, nothing else is pressed.
     async fn app_agent_act(&mut self, input: lpa_agent::ActInput) -> lpa_agent::ActOutcome {
         use lpa_agent::ActOutcome;
         if let Some(card) = self.agent.app_session_mut().pending_card() {
@@ -6211,11 +6221,7 @@ impl StudioController {
         }
         let fresh = self.app_agent_readout();
         let path = crate::OfferPath::parse(input.action.trim()).ok();
-        let Some(action) = path
-            .as_ref()
-            .and_then(|path| fresh.offer(path))
-            .map(|offer| offer.action.clone())
-        else {
+        let Some(offer) = path.as_ref().and_then(|path| fresh.offer(path)).cloned() else {
             let reason = if path
                 .as_ref()
                 .is_some_and(|path| self.agent.app_offer_was_shown(path))
@@ -6232,14 +6238,24 @@ impl StudioController {
                 offers: Some(fresh.render()),
             };
         };
-        if let crate::ActionEnablement::Disabled { reason } = &action.meta().enablement {
-            return ActOutcome::Refused {
-                reason: format!("{:?} is disabled: {reason}", action.meta().label),
-                offers: None,
-            };
+        let mut args = crate::OfferArgs::new();
+        for (name, value) in &input.args {
+            args.insert(name.clone(), value.as_text());
         }
+        let action = match offer.press(&args) {
+            Ok(action) => action,
+            Err(error) => {
+                return ActOutcome::Refused {
+                    reason: crate::app::agent::app_agent_readout::press_refusal(&offer, &error),
+                    offers: None,
+                };
+            }
+        };
         if action.meta().needs_user() {
-            let card = self.agent.app_session_mut().add_card(action, &input.why);
+            let card =
+                self.agent
+                    .app_session_mut()
+                    .add_card(action, &input.why, offer.path.clone(), args);
             self.mark_dirty();
             return ActOutcome::NeedsUser {
                 card: card.id,
@@ -6261,9 +6277,24 @@ impl StudioController {
         }
     }
 
+    /// Run one `act` without the run around it (the device tests press
+    /// offers the way the agent does).
+    #[cfg(test)]
+    pub(crate) async fn app_agent_act_for_test(
+        &mut self,
+        input: lpa_agent::ActInput,
+    ) -> lpa_agent::ActOutcome {
+        self.app_agent_act(input).await
+    }
+
     /// The user pressed what card `card` carries: settle it with what the
     /// press came to, and let the assistant hear it.
-    fn app_card_pressed(&mut self, card: &str, result: &UiResult) {
+    fn app_card_pressed(
+        &mut self,
+        card: &str,
+        result: &UiResult,
+        press: Option<crate::OfferPress>,
+    ) {
         let state = match result {
             Ok(notices) => crate::UiAgentCardState::Done {
                 outcome: notices
@@ -6277,7 +6308,7 @@ impl StudioController {
                 error: error.to_string(),
             },
         };
-        self.agent.app_session_mut().settle_card(card, state);
+        self.agent.app_session_mut().settle_card(card, state, press);
         self.resume_app_agent();
     }
 

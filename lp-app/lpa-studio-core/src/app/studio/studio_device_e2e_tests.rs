@@ -5161,6 +5161,209 @@ fn a_pending_blank_chip_publishes_its_flash_at_new_n() {
     );
 }
 
+/// The app agent flashes a board that runs somebody else's firmware: a
+/// guessed board is refused with every board the chip takes, a press with
+/// none is refused naming the choices, and a press with a board — Lasting,
+/// the firmware on it is lost — becomes a card that hands the user the
+/// Flash offer pre-filled with the agent's board. Nothing is flashed until
+/// the user presses; they pick ANOTHER board on the card, that board is the
+/// one flashed, the card settles, and the agent hears what they changed.
+#[test]
+fn the_agents_flash_over_firmware_is_a_card_the_user_may_re_pick() {
+    let device = FakeEsp32Device::new(FakeDeviceScript::new(FakeBootState::ForeignFirmware));
+    let (mut bench, tasks) = DeviceBench::granted(&device, "usb-agent-flash");
+    bench.run_until(&tasks, "the foreign verdict to settle", |bench| {
+        bench
+            .view()
+            .pending
+            .first()
+            .is_some_and(|pending| pending.needs_firmware())
+    });
+    let provisional = bench.view().pending[0].device;
+    let flash = format!("devices/new-{}/flash", provisional.0);
+    let path = crate::OfferPath::parse(&flash).unwrap();
+    let offer = bench
+        .controller
+        .view()
+        .offers
+        .get(&path)
+        .cloned()
+        .expect("the foreign board's Flash");
+    assert!(
+        offer.consequence().arms(),
+        "flashing over firmware loses it: Lasting"
+    );
+    let fits = crate::flash_offer(Some("esp32c6")).candidates;
+    let [agents, users, ..] = fits.as_slice() else {
+        panic!("two C6 boards fit, so the pick is the user's: {fits:?}");
+    };
+    let readout = bench.controller.app_agent_readout_for_test().render();
+    assert!(
+        readout.contains(&format!(
+            "- {flash}: Flash firmware [choose a board in args] [needs the user's click]\n"
+        )),
+        "{readout}"
+    );
+    assert!(
+        readout.contains(&format!("  takes board: one of {} (", agents.board_id)),
+        "{readout}"
+    );
+
+    // A guess is refused with every board the chip takes.
+    let refused = act(&mut bench, &flash, &[("board", "esp8266-board")]);
+    let lpa_agent::ActOutcome::Refused { reason, .. } = &refused else {
+        panic!("a board that is not an option is refused: {refused:?}");
+    };
+    assert!(
+        reason.contains("`board` must be one of ") && reason.contains("It takes board: one of "),
+        "{reason}"
+    );
+    for fit in &fits {
+        assert!(reason.contains(&fit.board_id), "{reason}");
+    }
+    // No board: two fit, so nothing is preselected and the board is the
+    // user's to name.
+    let refused = act(&mut bench, &flash, &[]);
+    let lpa_agent::ActOutcome::Refused { reason, .. } = &refused else {
+        panic!("a missing board is refused: {refused:?}");
+    };
+    assert!(
+        reason.contains("`board` is required: choose a board. It takes board: one of "),
+        "{reason}"
+    );
+
+    // The agent's board: a card, pre-filled, and nothing flashed.
+    let outcome = act(&mut bench, &flash, &[("board", &agents.board_id)]);
+    assert!(
+        matches!(&outcome, lpa_agent::ActOutcome::NeedsUser { card, .. } if card == "c1"),
+        "{outcome:?}"
+    );
+    let card = app_cards(&mut bench).remove(0);
+    assert!(card.is_pending());
+    assert_eq!(card.offer.as_ref(), Some(&path), "the card names the offer");
+    assert_eq!(
+        card.args,
+        crate::OfferArgs::new().with("board", &agents.board_id),
+        "the agent's board is the pre-selection"
+    );
+    assert!(card.destructive, "the firmware on it is lost for good");
+    for _ in 0..20 {
+        bench.step(&tasks);
+    }
+    assert!(
+        bench.view().devices.is_empty() && bench.view().pending[0].needs_firmware(),
+        "nothing runs before the user's click: {:?}",
+        bench.view()
+    );
+
+    // The user picks another board on the card's own picker and presses.
+    let user_args = card.args.clone().with("board", &users.board_id);
+    let action = bench
+        .controller
+        .view()
+        .offers
+        .get(&path)
+        .expect("still offered")
+        .press(&user_args)
+        .expect("the user's board binds");
+    assert!(
+        !card.press.same_op(&action),
+        "another board is another op; the card answers to its offer"
+    );
+    drive(bench.controller.dispatch(action)).expect("the user's flash dispatches");
+    bench.run_until(&tasks, "the flashed board to land Ready", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.state_label == "Ready" && card.activity.is_none())
+    });
+    assert_eq!(
+        bench.manifest_writes.borrow().as_slice(),
+        [lpa_boards::runtime_manifest_json(&users.board_id).expect("a served board")],
+        "the user's board was flashed, not the agent's"
+    );
+    assert_eq!(
+        bench.view().devices[0].title,
+        format!("{} · Jan 1", users.title),
+        "named after the user's board"
+    );
+    let card = app_cards(&mut bench).remove(0);
+    assert!(
+        matches!(card.state, crate::UiAgentCardState::Done { .. }),
+        "{card:?}"
+    );
+    assert_eq!(card.user_args.as_ref(), Some(&user_args));
+    assert!(
+        card.resume_text().contains(&format!(
+            " with board = {} (you chose {})",
+            users.board_id, agents.board_id
+        )),
+        "the agent hears what the user changed: {}",
+        card.resume_text()
+    );
+}
+
+/// A Routine verb with a value is pressed outright: the agent renames a
+/// board through `devices/<mac>/rename`, and the card wears the name. A
+/// name the offer does not take is refused, naming what it does take.
+#[test]
+fn the_agent_renames_a_board_through_its_offer() {
+    let device = light_player("dev_agent_rename");
+    let (mut bench, tasks) = identified(&device, "usb-agent-rename");
+    let rename = "devices/mac-6055f90a0b0c/rename";
+
+    let refused = act(&mut bench, rename, &[("title", "Kitchen")]);
+    assert!(
+        matches!(&refused, lpa_agent::ActOutcome::Refused { reason, .. }
+            if reason.contains("no parameter `title`; it takes name")),
+        "{refused:?}"
+    );
+    let outcome = act(&mut bench, rename, &[("name", "Kitchen")]);
+    assert!(
+        matches!(outcome, lpa_agent::ActOutcome::Done { .. }),
+        "{outcome:?}"
+    );
+    assert!(app_cards(&mut bench).is_empty(), "a rename needs no card");
+    bench.run_until(&tasks, "the card to wear its new name", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.title == "Kitchen")
+    });
+}
+
+/// One `act` the way the app agent's tool calls it.
+fn act(bench: &mut DeviceBench, action: &str, args: &[(&str, &str)]) -> lpa_agent::ActOutcome {
+    let input: lpa_agent::ActInput = serde_json::from_value(serde_json::json!({
+        "action": action,
+        "args": args
+            .iter()
+            .map(|(name, value)| (name.to_string(), serde_json::json!(value)))
+            .collect::<serde_json::Map<_, _>>(),
+        "why": "the test asked",
+    }))
+    .expect("an act input");
+    drive(bench.controller.app_agent_act_for_test(input))
+}
+
+/// The app chat's cards, in transcript order.
+fn app_cards(bench: &mut DeviceBench) -> Vec<crate::UiAgentCard> {
+    bench
+        .controller
+        .agent_for_test()
+        .app_session()
+        .mirror
+        .turns
+        .iter()
+        .filter_map(|turn| match turn {
+            crate::UiAgentTurn::Card(card) => Some(card.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
 /// The verbs published directly under `prefix`, in publish order, each with
 /// whether it is Lasting.
 fn board_verbs(view: &crate::UiStudioView, prefix: &str) -> Vec<(String, bool)> {
