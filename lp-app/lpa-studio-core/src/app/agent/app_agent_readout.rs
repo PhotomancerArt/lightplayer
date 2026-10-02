@@ -4,65 +4,56 @@
 //! A dedicated projection of the core view model, never the DOM: the page,
 //! the open project (its board, whether it is saved, each node's status and
 //! where each output port lands), what is selected, the devices on the
-//! roster, and the actions the view offers. Actions get short ids (`a1`,
-//! `a2`, …) minted when the agent reads the readout (PD4): `UiAction` has no
-//! stable id, so an id means "the action that was at this place in the
-//! readout you were shown", and the host checks it against the latest
-//! offers before dispatching (plan P08).
+//! roster, and every offer in the view's offer tree, listed by its path
+//! (`project/save`, `project/demo.module/orbit.shader/remove`). A path is
+//! the offer's stable id, so `act` names it directly and the host looks it
+//! up in the tree as it is at the press.
 
 use std::fmt::Write as _;
 
 use serde_json::Value;
 
-use crate::{ActionEnablement, DeviceRosterView, UiAction};
+use crate::{ActionConsequence, ActionEnablement, DeviceRosterView, OfferPath, UiOffer};
 
 /// The readout as the controller builds it after a batch: the text, and the
-/// offered actions in display order (ids are minted on read).
+/// offer tree's offers in publish order.
 #[derive(Clone, Debug, Default)]
 pub struct AppReadoutSnapshot {
     pub text: String,
-    pub actions: Vec<UiAction>,
-}
-
-/// One minted id and the action it names.
-#[derive(Clone, Debug)]
-pub struct MintedAction {
-    pub id: String,
-    pub action: UiAction,
+    pub offers: Vec<UiOffer>,
 }
 
 impl AppReadoutSnapshot {
-    /// The readout text with its actions listed under freshly minted ids,
-    /// and the id table. The same snapshot always mints the same ids in the
-    /// same order.
-    pub fn mint(&self) -> (String, Vec<MintedAction>) {
+    /// The readout text with its offers listed by path, each with its
+    /// label, `[disabled: …]` when it cannot be pressed, and what pressing
+    /// it does: `[needs the user's click]` (a card the user presses) or
+    /// `[undoable]` (it takes something away that Revert brings back).
+    pub fn render(&self) -> String {
         let mut text = self.text.clone();
-        let minted: Vec<MintedAction> = self
-            .actions
-            .iter()
-            .enumerate()
-            .map(|(index, action)| MintedAction {
-                id: format!("a{}", index + 1),
-                action: action.clone(),
-            })
-            .collect();
-        if minted.is_empty() {
+        if self.offers.is_empty() {
             text.push_str("actions: none offered\n");
-        } else {
-            text.push_str("actions (ids are valid until the next readout):\n");
-            for entry in &minted {
-                let meta = entry.action.meta();
-                let _ = write!(text, "- {}: {}", entry.id, meta.label);
-                if let ActionEnablement::Disabled { reason } = &meta.enablement {
-                    let _ = write!(text, " [disabled: {reason}]");
-                }
-                if meta.needs_user() {
-                    text.push_str(" [needs the user's click]");
-                }
-                text.push('\n');
-            }
+            return text;
         }
-        (text, minted)
+        text.push_str("actions (press one with `act` by its path):\n");
+        for offer in &self.offers {
+            let meta = offer.action.meta();
+            let _ = write!(text, "- {}: {}", offer.path, meta.label);
+            if let ActionEnablement::Disabled { reason } = &meta.enablement {
+                let _ = write!(text, " [disabled: {reason}]");
+            }
+            if meta.needs_user() {
+                text.push_str(" [needs the user's click]");
+            } else if meta.consequence == ActionConsequence::Undoable {
+                text.push_str(" [undoable]");
+            }
+            text.push('\n');
+        }
+        text
+    }
+
+    /// The offer at `path`, if this readout lists one.
+    pub fn offer(&self, path: &OfferPath) -> Option<&UiOffer> {
+        self.offers.iter().find(|offer| &offer.path == path)
     }
 }
 
@@ -178,52 +169,76 @@ pub fn device_lines(roster: &DeviceRosterView) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ControllerId, ProjectOp};
+    use crate::{ActionConfirmation, ControllerId, ProjectNodeAddress, ProjectOp, UiAction};
 
     fn snapshot() -> AppReadoutSnapshot {
+        let project = ControllerId::new("studio|project");
+        let node = OfferPath::project_node(
+            &ProjectNodeAddress::parse("/demo.module/orbit.shader").unwrap(),
+        );
         AppReadoutSnapshot {
             text: "page: project editor\n".to_string(),
-            actions: vec![
-                UiAction::from_op(ControllerId::new("studio|project"), ProjectOp::SaveOverlay),
-                UiAction::from_op(
-                    ControllerId::new("studio|project"),
-                    ProjectOp::RevertAllEdits,
-                )
-                .disabled("nothing to revert"),
+            offers: vec![
+                UiOffer::new(
+                    OfferPath::project().child("save"),
+                    "save",
+                    UiAction::from_op(project.clone(), ProjectOp::SaveOverlay),
+                ),
+                UiOffer::new(
+                    OfferPath::project().child("revert"),
+                    "revert",
+                    UiAction::from_op(project.clone(), ProjectOp::RevertAllEdits)
+                        .with_label("Revert to saved")
+                        .with_consequence(ActionConsequence::Lasting(ActionConfirmation::new(
+                            "Revert to saved?",
+                            "Every unsaved edit is lost.",
+                            "Revert",
+                        ))),
+                ),
+                UiOffer::new(
+                    node.child("remove"),
+                    "remove",
+                    UiAction::from_op(project, ProjectOp::RevertAllEdits)
+                        .with_label("Remove")
+                        .with_consequence(ActionConsequence::Undoable)
+                        .disabled("the root cannot go"),
+                ),
             ],
         }
     }
 
     #[test]
-    fn the_same_view_mints_the_same_ids_in_the_same_order() {
-        let (text_a, minted_a) = snapshot().mint();
-        let (text_b, minted_b) = snapshot().mint();
-        assert_eq!(text_a, text_b);
-        let ids: Vec<&str> = minted_a.iter().map(|entry| entry.id.as_str()).collect();
-        assert_eq!(ids, ["a1", "a2"]);
+    fn offers_are_listed_by_path_with_what_pressing_does() {
+        let text = snapshot().render();
+        assert!(text.contains("- project/save: Save\n"), "{text}");
         assert!(
-            minted_a
-                .iter()
-                .zip(&minted_b)
-                .all(|(a, b)| a.id == b.id && a.action == b.action)
+            text.contains("- project/revert: Revert to saved [needs the user's click]\n"),
+            "{text}"
         );
-        assert!(text_a.contains("- a2: "), "{text_a}");
-        assert!(text_a.contains("[disabled: nothing to revert]"), "{text_a}");
+        assert!(
+            text.contains(
+                "- project/demo.module/orbit.shader/remove: Remove \
+                 [disabled: the root cannot go] [undoable]\n"
+            ),
+            "{text}"
+        );
+        assert_eq!(text, snapshot().render(), "the same view reads the same");
     }
 
     #[test]
-    fn a_stale_id_is_detectable() {
-        // The table the agent saw names an action the next view no longer
-        // offers: comparing actions, not ids, catches it.
-        let (_, seen) = snapshot().mint();
-        let mut next = snapshot();
-        next.actions.remove(0);
-        let (_, fresh) = next.mint();
-        let saved = &seen[0].action;
-        assert!(!fresh.iter().any(|entry| &entry.action == saved));
-        assert_eq!(
-            fresh[0].id, "a1",
-            "ids are positional: a1 now names another action"
+    fn an_offer_is_found_by_its_path() {
+        let readout = snapshot();
+        let save = OfferPath::parse("project/save").unwrap();
+        assert_eq!(readout.offer(&save).map(UiOffer::label), Some("Save"));
+        assert!(
+            readout
+                .offer(&OfferPath::parse("project/nope").unwrap())
+                .is_none()
+        );
+        assert!(
+            AppReadoutSnapshot::default()
+                .render()
+                .contains("actions: none offered")
         );
     }
 }

@@ -6059,11 +6059,10 @@ impl StudioController {
         self.app_agent_start(text, true)
     }
 
-    /// One app-agent `act`: resolve the id against the readout the agent
-    /// was shown, check the action is still offered and enabled NOW (the
-    /// same enablement the user sees), then press it through the ordinary
-    /// dispatch — or, when only the user may press it, put it on a card
-    /// (D6, PD6). While a card waits, nothing else is pressed.
+    /// One app-agent `act`: look the offer path up in the offer tree as it
+    /// is NOW (the same enablement the user sees), then press it through
+    /// the ordinary dispatch — or, when only the user may press it, put it
+    /// on a card (D6, PD6). While a card waits, nothing else is pressed.
     async fn app_agent_act(&mut self, input: lpa_agent::ActInput) -> lpa_agent::ActOutcome {
         use lpa_agent::ActOutcome;
         if let Some(card) = self.agent.app_session_mut().pending_card() {
@@ -6076,22 +6075,26 @@ impl StudioController {
             };
         }
         let fresh = self.app_agent_readout();
-        let offers = || Some(fresh.mint().0);
-        let Some(seen) = self.agent.app_minted_action(&input.action) else {
-            return ActOutcome::Refused {
-                reason: format!("no action {:?} in the readout you were shown", input.action),
-                offers: offers(),
-            };
-        };
-        let Some(action) = fresh
-            .actions
-            .iter()
-            .find(|offered| offered.same_op(&seen))
-            .cloned()
+        let path = crate::OfferPath::parse(input.action.trim()).ok();
+        let Some(action) = path
+            .as_ref()
+            .and_then(|path| fresh.offer(path))
+            .map(|offer| offer.action.clone())
         else {
+            let reason = if path
+                .as_ref()
+                .is_some_and(|path| self.agent.app_offer_was_shown(path))
+            {
+                format!("{:?} is not offered any more", input.action)
+            } else {
+                format!(
+                    "no action at {:?}; name one by its path exactly as the readout lists it",
+                    input.action
+                )
+            };
             return ActOutcome::Refused {
-                reason: format!("{:?} is not offered any more", seen.meta().label),
-                offers: offers(),
+                reason,
+                offers: Some(fresh.render()),
             };
         };
         if let crate::ActionEnablement::Disabled { reason } = &action.meta().enablement {
@@ -6197,7 +6200,6 @@ impl StudioController {
         };
         let home = self.home_view().is_some();
         let mut text = page_line(home);
-        let mut actions = Vec::new();
         if !home {
             text.push_str(&project_lines(
                 &self.project.agent_project_name(),
@@ -6207,19 +6209,15 @@ impl StudioController {
         }
         let roster = self.device_roster_view();
         text.push_str(&device_lines(&roster));
-        // The view's own offers: the pane's actions, then the offer tree
-        // (the project header's Save and Revert while there are edits to
-        // save, every node card's verbs, and the device verbs) — the
-        // buttons the user sees, with their enablement. Tree focus actions
-        // and add-node menus stay out (the edit tool covers those).
-        let view = self.view();
-        if !home {
-            for pane in &view.panes {
-                actions.extend(pane.actions.iter().cloned());
-            }
-        }
-        actions.extend(view.offers.iter().map(|offer| offer.action.clone()));
-        AppReadoutSnapshot { text, actions }
+        // Every offer in the view's tree, in publish order: the project
+        // header's Save and Revert while there are edits to save, every
+        // node card's verbs (nested nodes included), and the device verbs —
+        // the buttons the user sees, with their enablement. The pane's own
+        // actions stay out: a project pane offers none once the project is
+        // ready, and every other state shows home. Tree focus actions and
+        // add-node menus stay out too (the edit tool covers those).
+        let offers = self.view().offers.iter().cloned().collect();
+        AppReadoutSnapshot { text, offers }
     }
 
     /// Execute one history revert: pull the recorded source, restage it

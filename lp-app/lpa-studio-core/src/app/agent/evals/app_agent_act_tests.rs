@@ -1,8 +1,7 @@
-//! The app agent's `act` against the real controller (plan P08): what can
-//! be pressed is whatever the readout offers, checked again at the press.
-//! The card legs need an offer only the user may press on a host build (the
-//! USB add slot needs a serial transport); they arrive with the roadmap's
-//! offers work.
+//! The app agent's `act` against the real controller (plan P08, M1 P3):
+//! the agent names an offer by its path, and the host looks it up in the
+//! offer tree as it is at the press — pressing it, refusing it, or putting
+//! it on a card when only the user may press it.
 
 use lpa_agent::{StopReason, TokenUsage, TurnEvent};
 
@@ -12,7 +11,7 @@ use super::app_agent_scenario::Scenario;
 use super::app_agent_transcript::EvalStep;
 
 #[test]
-fn an_id_the_readout_never_offered_is_refused_with_the_current_offers() {
+fn a_path_the_readout_never_offered_is_refused_with_the_current_offers() {
     let scenario = Scenario::load("e2-make-it-300").expect("e2");
     let scripts = vec![vec![
         vec![
@@ -22,7 +21,8 @@ fn an_id_the_readout_never_offered_is_refused_with_the_current_offers() {
             },
             TurnEvent::ToolInputDelta {
                 id: "act1".into(),
-                json_fragment: serde_json::json!({ "action": "a9", "why": "testing" }).to_string(),
+                json_fragment: serde_json::json!({ "action": "project/nope", "why": "testing" })
+                    .to_string(),
             },
             turn_done(StopReason::ToolUse),
         ],
@@ -49,13 +49,13 @@ fn an_id_the_readout_never_offered_is_refused_with_the_current_offers() {
     assert!(
         refused["reason"]
             .as_str()
-            .is_some_and(|reason| reason.contains("\"a9\"")),
+            .is_some_and(|reason| reason.contains("\"project/nope\"")),
         "{result:#}"
     );
     assert!(
         refused["offers"]
             .as_str()
-            .is_some_and(|offers| offers.contains("actions")),
+            .is_some_and(|offers| offers.contains("- project/")),
         "a refusal carries what IS offered: {result:#}"
     );
     assert!(studio.cards().is_empty());
@@ -71,22 +71,10 @@ fn the_agent_presses_save_once_and_a_stale_press_is_refused() {
     let mut script: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&path).expect("script")).expect("json");
     script["save"] = serde_json::Value::Bool(false);
-    let call = |id: &str, name: &str, input: serde_json::Value| {
-        vec![
-            TurnEvent::ToolUseStart {
-                id: id.into(),
-                name: name.into(),
-            },
-            TurnEvent::ToolInputDelta {
-                id: id.into(),
-                json_fragment: input.to_string(),
-            },
-        ]
-    };
     let mut edit = call("e1", lpa_agent::EDIT_PROJECT_TOOL_NAME, script);
     edit.push(turn_done(StopReason::ToolUse));
-    // After the edit's tool round the readout lists Save first (a1).
-    let save = serde_json::json!({ "action": "a1", "why": "keep the 300" });
+    // After the edit's tool round the readout lists Save.
+    let save = serde_json::json!({ "action": "project/save", "why": "keep the 300" });
     let mut press = call("p1", lpa_agent::ACT_TOOL_NAME, save.clone());
     press.extend(call("p2", lpa_agent::ACT_TOOL_NAME, save));
     press.push(turn_done(StopReason::ToolUse));
@@ -124,6 +112,150 @@ fn the_agent_presses_save_once_and_a_stale_press_is_refused() {
         results[2]
     );
     assert!(!studio.unsaved(), "the press saved the project");
+}
+
+/// Q6: the readout lists a nested node's verbs, not only the root card's,
+/// and the agent presses Remove by its path. Remove is undoable (Revert
+/// brings the node back until a save), so it is pressed, not carded.
+#[test]
+fn the_agent_sees_a_nested_nodes_remove_and_presses_it() {
+    let scenario = Scenario::load("e2-make-it-300").expect("e2");
+    let remove = format!("project/{ROOT}/clock.clock/remove");
+    let mut press = call(
+        "r1",
+        lpa_agent::ACT_TOOL_NAME,
+        serde_json::json!({ "action": remove, "why": "you asked to drop the clock" }),
+    );
+    press.push(turn_done(StopReason::ToolUse));
+    let scripts = vec![vec![
+        press,
+        vec![
+            TurnEvent::TextDelta("I removed the clock.".into()),
+            turn_done(StopReason::EndTurn),
+        ],
+    ]];
+    let mut studio = AgentEvalStudio::new(ModelSource::Scripted(scripts));
+    studio.start(&scenario.start, golden_tree);
+    assert!(
+        has_kind(&mut studio, "Clock"),
+        "the golden has a clock to remove"
+    );
+    studio.send("remove the clock", limits());
+
+    let steps = studio.transcript_steps();
+    let state = steps
+        .iter()
+        .find_map(|step| match step {
+            EvalStep::State { text } => Some(text.clone()),
+            _ => None,
+        })
+        .expect("the readout the model saw");
+    assert!(
+        state.contains(&format!("- {remove}: Delete node [undoable]\n")),
+        "{state}"
+    );
+    let result = tool_results(&steps).remove(0);
+    assert!(result.get("done").is_some(), "{result:#}");
+    assert!(studio.cards().is_empty(), "an undoable press is no card");
+    assert!(!has_kind(&mut studio, "Clock"), "the clock is gone");
+    assert!(
+        studio.unsaved(),
+        "the removal waits to be saved or reverted"
+    );
+}
+
+/// D7: Revert to saved loses every unsaved edit for good, so the agent's
+/// press becomes a card, and the user's press of the card's button reverts.
+#[test]
+fn revert_to_saved_becomes_a_card() {
+    let scenario = Scenario::load("e2-make-it-300").expect("e2");
+    let path = super::app_agent_scenario::fixtures_dir().join("scripts/make-it-300.json");
+    let mut script: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).expect("script")).expect("json");
+    script["save"] = serde_json::Value::Bool(false);
+    let mut edit = call("e1", lpa_agent::EDIT_PROJECT_TOOL_NAME, script);
+    edit.push(turn_done(StopReason::ToolUse));
+    let mut revert = call(
+        "v1",
+        lpa_agent::ACT_TOOL_NAME,
+        serde_json::json!({ "action": "project/revert", "why": "you asked to undo it all" }),
+    );
+    revert.push(turn_done(StopReason::ToolUse));
+    let scripts = vec![
+        vec![
+            edit,
+            revert,
+            vec![
+                TurnEvent::TextDelta("Click Revert on the card.".into()),
+                turn_done(StopReason::EndTurn),
+            ],
+        ],
+        // The run the card's press resumes.
+        vec![vec![
+            TurnEvent::TextDelta("Reverted.".into()),
+            turn_done(StopReason::EndTurn),
+        ]],
+    ];
+    let mut studio = AgentEvalStudio::new(ModelSource::Scripted(scripts));
+    studio.start(&scenario.start, golden_tree);
+    studio.send("make it 300, then undo all of it", limits());
+
+    let results = tool_results(&studio.transcript_steps());
+    assert_eq!(results.len(), 2, "{results:#?}");
+    let needs = &results[1]["needs_user"];
+    assert_eq!(needs["card"], "c1", "{:#}", results[1]);
+    assert!(
+        studio.unsaved(),
+        "nothing is reverted before the user's click"
+    );
+    let cards = studio.cards();
+    assert_eq!(cards.len(), 1, "{cards:#?}");
+    let card = &cards[0];
+    assert!(card.is_pending());
+    assert_eq!(needs["says"], card.title.as_str());
+    assert!(card.destructive, "a lasting card wears the error tint");
+
+    studio.press(card.press.clone(), limits());
+
+    assert!(!studio.unsaved(), "the card's press reverted the edits");
+    assert!(
+        matches!(
+            studio.cards()[0].state,
+            crate::UiAgentCardState::Done { .. }
+        ),
+        "{:#?}",
+        studio.cards()
+    );
+}
+
+/// The golden's tree root, as its node segment in an offer path.
+const ROOT: &str = "studio.show";
+
+fn has_kind(studio: &mut AgentEvalStudio, kind: &str) -> bool {
+    studio.node_statuses().iter().any(|row| row.kind == kind)
+}
+
+fn tool_results(steps: &[EvalStep]) -> Vec<serde_json::Value> {
+    steps
+        .iter()
+        .filter_map(|step| match step {
+            EvalStep::ToolResult { content, .. } => serde_json::from_str(content).ok(),
+            _ => None,
+        })
+        .collect()
+}
+
+fn call(id: &str, name: &str, input: serde_json::Value) -> Vec<TurnEvent> {
+    vec![
+        TurnEvent::ToolUseStart {
+            id: id.into(),
+            name: name.into(),
+        },
+        TurnEvent::ToolInputDelta {
+            id: id.into(),
+            json_fragment: input.to_string(),
+        },
+    ]
 }
 
 fn limits() -> RunLimits {

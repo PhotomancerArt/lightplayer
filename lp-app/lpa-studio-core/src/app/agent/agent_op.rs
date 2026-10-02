@@ -84,7 +84,7 @@ pub enum AgentOp {
         input: lpa_agent::ReadInput,
     },
     /// The app agent's `act` (dispatched by its host bridge): press the
-    /// offered action the id names — or, when only the user may press it,
+    /// offer its path names — or, when only the user may press it,
     /// put it on a card — and record the outcome under `seq`.
     AppAct {
         seq: u64,

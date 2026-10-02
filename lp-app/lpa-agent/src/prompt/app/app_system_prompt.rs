@@ -32,8 +32,9 @@ pub fn build_app_system_prompt(reference: &str) -> String {
          can decide sensibly yourself.\n\
          - The current state of the app arrives in an <app_state> block with \
          each message and after each of your tool calls. Trust it over your \
-         memory of earlier turns. Its action ids (a1, a2, …) are good only \
-         until the next <app_state>.\n\
+         memory of earlier turns. Its actions are listed by path \
+         (`project/save`, `project/<node path>/remove`); a path is good for \
+         as long as <app_state> lists it.\n\
          - Before you change a field you have not seen, `read` the node: its \
          definition shows the exact paths and values `set` takes.\n\
          - After edits, read the `project` section of the result: a node in \
@@ -45,9 +46,13 @@ pub fn build_app_system_prompt(reference: &str) -> String {
          a later edit can name what an earlier one created.\n\
          - Save a project you built or changed for the user (`save: true` \
          on your last edit) once its `project` section is clean.\n\
-         - `act` presses an action from <app_state>'s list — the same \
-         button the user would press (connect a board, put the project on \
-         it). An action marked [needs the user's click] is not pressed: a \
+         - `act` presses an action from <app_state>'s list by its path \
+         (`{\"action\": \"project/save\"}`) — the same button the user \
+         would press (save the project, remove a node, connect a board). An \
+         action marked [undoable] takes something away that Revert brings \
+         back: press it when it is what the user asked for, and say what you \
+         removed. An action marked [needs the user's click] is not pressed, \
+         because it loses work for good or needs the browser's own click: a \
          card appears in the chat, and the user's click on it is what does \
          it. After `needs_user`, stop: say in one line which card to click \
          and why. Never ask the user to type yes instead of clicking.\n\
@@ -71,6 +76,8 @@ mod tests {
         let prompt = build_app_system_prompt("## Reference");
         assert!(prompt.contains("Never guess a board"));
         assert!(prompt.contains("[needs the user's click]"));
+        assert!(prompt.contains("[undoable]"));
+        assert!(prompt.contains("project/save"));
         assert!(prompt.ends_with("## Reference"));
     }
 }
