@@ -1093,11 +1093,17 @@ async fn main(spawner: embassy_executor::Spawner) {
 
     #[cfg(not(fw_harness))]
     {
+        // Split builds read the boot records — and a trial core marks itself
+        // attempted — before ANYTHING else runs: a new core that dies in its
+        // own radio bring-up must still read as a failed trial on the next
+        // boot, or the loader would keep retrying it.
+        #[cfg(lp_split)]
+        let state = ota::begin();
         let core = core_boot(spawner);
         #[cfg(not(lp_split))]
         lp_engine_entry(core);
         #[cfg(lp_split)]
-        split_boot(core).await;
+        split_boot(core, state).await;
         // The server loop runs in its own task now; main has nothing left to
         // do. A future that never completes arms no timer (a long sleep here
         // would arm an alarm the boot gates rightly refuse).
@@ -1108,10 +1114,9 @@ async fn main(spawner: embassy_executor::Spawner) {
 /// A split build after `core_boot`: enter the engine the boot records and
 /// the header agree on, or stay core-only and take an update.
 #[cfg(all(lp_split, not(fw_harness)))]
-async fn split_boot(core: CoreBoot) {
+async fn split_boot(core: CoreBoot, state: ota::BootState) {
     let id = build_id();
     let id_len = id.iter().position(|b| *b == 0).unwrap_or(id.len());
-    let state = ota::begin();
     ota::say!(
         "[CORE] build {} @{:#x}{}",
         core::str::from_utf8(&id[..id_len]).unwrap_or("?"),
