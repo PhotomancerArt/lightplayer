@@ -36,7 +36,7 @@ pub use emulator::{BacktraceInfo, create_emulator_serial_transport_pair};
 #[cfg(feature = "serial")]
 pub use hardware::{
     HardwareSerialOptions, SerialLineObserver, create_hardware_serial_transport_pair,
-    create_hardware_serial_transport_pair_with_options,
+    create_hardware_serial_transport_pair_with_options, link_config_for_port,
 };
 #[cfg(feature = "serial")]
 pub use link_nonce::fresh_link_nonce;

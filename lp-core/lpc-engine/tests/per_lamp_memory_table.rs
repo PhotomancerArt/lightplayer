@@ -33,9 +33,9 @@
 //! set, tick 2 is the compile, ticks 3–6 are steady state.
 
 use std::alloc::{GlobalAlloc, Layout, System};
+use std::cell::Cell;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 use lpc_engine::{EngineServices, ProjectLoader};
 use lpc_model::TreePath;
@@ -44,21 +44,39 @@ use lpfs::LpFsStd;
 
 struct TrackingAlloc;
 
-static LIVE: AtomicUsize = AtomicUsize::new(0);
-static PEAK: AtomicUsize = AtomicUsize::new(0);
+thread_local! {
+    /// Net bytes this thread allocated minus the bytes it freed. Signed: a
+    /// thread may free what another allocated. `const`-initialised with no
+    /// destructor, so reaching it from inside the allocator never allocates.
+    static LIVE: Cell<isize> = const { Cell::new(0) };
+    /// The highest `LIVE` this thread has reached since the last reset.
+    static PEAK: Cell<isize> = const { Cell::new(0) };
+}
+
+fn add_live(delta: isize) {
+    // `try_with`: a thread tearing down may still allocate or free.
+    let _ = LIVE.try_with(|live| {
+        let level = live.get() + delta;
+        live.set(level);
+        let _ = PEAK.try_with(|peak| {
+            if level > peak.get() {
+                peak.set(level);
+            }
+        });
+    });
+}
 
 unsafe impl GlobalAlloc for TrackingAlloc {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         let ptr = unsafe { System.alloc(layout) };
         if !ptr.is_null() {
-            let live = LIVE.fetch_add(layout.size(), Ordering::Relaxed) + layout.size();
-            PEAK.fetch_max(live, Ordering::Relaxed);
+            add_live(layout.size() as isize);
         }
         ptr
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        LIVE.fetch_sub(layout.size(), Ordering::Relaxed);
+        add_live(-(layout.size() as isize));
         unsafe { System.dealloc(ptr, layout) }
     }
 }
@@ -66,16 +84,25 @@ unsafe impl GlobalAlloc for TrackingAlloc {
 #[global_allocator]
 static ALLOC: TrackingAlloc = TrackingAlloc;
 
-fn live() -> usize {
-    LIVE.load(Ordering::Relaxed)
+/// This thread's live heap. Signed (see [`LIVE`]): a phase boundary's
+/// absolute value can be negative if this thread has, net, freed more than
+/// it allocated (typically memory another thread allocated). Only the
+/// *difference* between two readings — what every caller below takes — is
+/// meaningful; do not clamp this to zero, or two negative readings collapse
+/// to an identical zero and hide a real delta between them.
+fn live() -> i64 {
+    LIVE.try_with(Cell::get).unwrap_or(0) as i64
 }
 
 fn reset_peak() {
-    PEAK.store(live(), Ordering::Relaxed);
+    let level = LIVE.try_with(Cell::get).unwrap_or(0);
+    let _ = PEAK.try_with(|peak| peak.set(level));
 }
 
-fn peak() -> usize {
-    PEAK.load(Ordering::Relaxed)
+/// This thread's peak live heap since the last [`reset_peak`]. Signed, same
+/// as [`live`].
+fn peak() -> i64 {
+    PEAK.try_with(Cell::get).unwrap_or(0) as i64
 }
 
 fn workspace_dir() -> PathBuf {
@@ -225,17 +252,21 @@ fn fixtures() -> Vec<Fixture> {
 #[derive(Clone, Copy)]
 struct Phase {
     label: &'static str,
-    live_before: usize,
-    step_peak: usize,
-    live_after: usize,
+    live_before: i64,
+    step_peak: i64,
+    live_after: i64,
 }
 
 impl Phase {
     fn resident(&self) -> i64 {
-        self.live_after as i64 - self.live_before as i64
+        self.live_after - self.live_before
     }
-    fn transient(&self) -> usize {
-        self.step_peak.saturating_sub(self.live_before)
+    /// By construction `step_peak >= live_before` (the peak is reset to
+    /// `live_before` right before the phase runs, then only rises); `max(0)`
+    /// is a safety net, not a clamp on a value that can legitimately go
+    /// negative the way [`live`]'s absolute reading can.
+    fn transient(&self) -> i64 {
+        (self.step_peak - self.live_before).max(0)
     }
 }
 
@@ -341,10 +372,7 @@ fn print_slopes(label: &str, a: (&Fixture, &[Phase]), b: (&Fixture, &[Phase])) {
             "{:<34} {:>16.2} {:>16.2}",
             pa.label,
             slope((a.0.lamps, pa.resident()), (b.0.lamps, pb.resident())),
-            slope(
-                (a.0.lamps, pa.transient() as i64),
-                (b.0.lamps, pb.transient() as i64)
-            ),
+            slope((a.0.lamps, pa.transient()), (b.0.lamps, pb.transient())),
         );
     }
 }
@@ -397,10 +425,7 @@ fn per_lamp_memory_table() {
         let (pa, pb) = (find(a.1), find(b.1));
         (
             slope((a.0.lamps, pa.resident()), (b.0.lamps, pb.resident())),
-            slope(
-                (a.0.lamps, pa.transient() as i64),
-                (b.0.lamps, pb.transient() as i64),
-            ),
+            slope((a.0.lamps, pa.transient()), (b.0.lamps, pb.transient())),
         )
     };
     for pair in [("zook", "zook-2x"), ("dome-scale", "dome-scale-2x")] {
@@ -429,7 +454,7 @@ fn per_lamp_memory_table() {
     // second says a patch costs O(runs) bookkeeping, not O(lamps) — 513 B
     // measured for five runs, pinned with ~4× headroom and well under the
     // 3 B/lamp a half-rate buffer would cost.
-    let steady_transient = |label: &str| -> usize {
+    let steady_transient = |label: &str| -> i64 {
         by_label(label)
             .1
             .iter()
@@ -469,7 +494,7 @@ fn per_lamp_memory_table() {
             fixture.label
         );
         let after_drop = phases.last().expect("phases").live_after;
-        let above_floor = after_drop as i64 - floor as i64;
+        let above_floor = after_drop - floor;
         assert!(
             above_floor <= 16 * 1024,
             "{}: {above_floor} B above the process floor after dropping the engine",

@@ -43,6 +43,13 @@ impl UiAction {
         &self.node_id
     }
 
+    /// Whether `other` does the same thing — same controller, same
+    /// operation — whatever its label or enablement says. How a press of
+    /// an action is recognized as the press of a card that carries it.
+    pub fn same_op(&self, other: &Self) -> bool {
+        self.node_id == other.node_id && self.op.eq_op(other.op.as_ref())
+    }
+
     /// Return the render metadata for this action.
     pub fn meta(&self) -> &ActionMeta {
         &self.meta

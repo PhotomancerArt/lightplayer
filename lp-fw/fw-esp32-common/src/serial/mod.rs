@@ -5,14 +5,14 @@ pub mod chunked_write;
 // injected); the C6 and S3 USB link tasks wrap their TX half in it, the
 // classic v3 (UART, no USB-Serial-JTAG) never names it.
 pub mod in_endpoint;
-// The `M!` transports' loss counters (BLE, the classic's UART). Ungated:
+// The `M!` transports' loss counters (BLE). Ungated:
 // `current()` — the only part that needs `lpc-wire` — is behind `server`.
 pub mod link_counters;
 pub mod shared_serial;
 pub mod usb_connection;
 
-/// Wire-protocol serialization for an `M!` host link (BLE, the classic's
-/// UART) and the static frame buffer every server write path shares.
+/// Wire-protocol serialization for an `M!` host link (BLE) and the static
+/// frame buffer every server write path shares.
 #[cfg(feature = "server")]
 pub mod server_msg;
 

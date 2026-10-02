@@ -16,6 +16,15 @@ impl AgentTranscript {
         self.messages.push(ChatMessage::user_text(text));
     }
 
+    /// Append a user message of several blocks (the user's text plus a
+    /// toolset's state block).
+    pub fn push_user_blocks(&mut self, content: Vec<ContentBlock>) {
+        self.messages.push(ChatMessage {
+            role: ChatRole::User,
+            content,
+        });
+    }
+
     /// Append an assistant message (skipped when `content` is empty).
     pub fn push_assistant(&mut self, content: Vec<ContentBlock>) {
         if !content.is_empty() {

@@ -94,18 +94,21 @@
 //! stores that matter (`store1`, `store4`) are written by the firmware with
 //! values this phase's TIMG calibration now makes correct.
 //!
-//! # `options0.sw_sys_rst` is reported, not performed
+//! # `options0.sw_sys_rst` is performed only by a run that reboots
 //!
 //! `0x8000_0000` into `options0` is the ROM's own software reset
 //! (`_rtc_trigger_sw_system_reset` at `0x4000_FDC7`, which the eFuse
-//! anti-glitch check jumps to when its comparison fails). This machine has
-//! no boot chain to restart in M3, so the write leaves a trace note and a
-//! warning and the run carries on into the `ill.n` the ROM puts after it —
-//! which is a *fault*, i.e. loud. Performing the reset is M7's (the boot
-//! chain) and the C6's `MachineRequest::Reset` is the shape it would take.
+//! anti-glitch check jumps to when its comparison fails, and which
+//! `esp_hal::system::software_reset` reaches through the ROM's
+//! `software_reset`: the firmware's Reboot request). The write always leaves
+//! a trace note and raises [`SoftwareReset`], the line the machine reads
+//! between slices. A run built with `reboot_on_reset` performs it
+//! (`Machine::software_reboot`: back to power-on with RTC fast memory kept
+//! and `reset_state` reading `SW_RESET`); any other run carries on into
+//! whatever the ROM puts after the write, as it did before the line existed.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use lp_emu_esp_common::engine::timg::{WdtWrite, wdt_write};
 use lp_emu_esp_common::regfile::{lane_of, merge_lane};
@@ -191,11 +194,35 @@ impl StallKey {
     }
 }
 
+/// `options0.sw_sys_rst`, as the machine sees it: raised by the guest's
+/// write, taken by the run loop between slices (see the module docs). An
+/// atomic for the same reason [`StallKey`] is one: the question is asked
+/// between slices and answered by whatever the guest last wrote.
+#[derive(Clone, Debug, Default)]
+pub struct SoftwareReset(Arc<AtomicBool>);
+
+impl SoftwareReset {
+    /// Was a software system reset written since the last call? Clears it.
+    pub fn take(&self) -> bool {
+        self.0.swap(false, Ordering::Relaxed)
+    }
+
+    fn raise(&self) {
+        self.0.store(true, Ordering::Relaxed);
+    }
+}
+
+/// `reset_state`'s cause code for a software system reset: the ROM's
+/// `SW_RESET`, esp-hal's `SocResetReason::CoreSw`
+/// (`third_party/esp-hal/src/rtc_cntl/rtc/esp32.rs`).
+pub const SW_RESET_CODE: u32 = 0x03;
+
 /// The classic's RTC controller.
 #[derive(Debug)]
 pub struct RtcCntl {
     regs: RegFile,
     stall: StallKey,
+    sw_reset: SoftwareReset,
     warned_sys_rst: bool,
 }
 
@@ -214,6 +241,7 @@ impl RtcCntl {
         let out = Self {
             regs,
             stall,
+            sw_reset: SoftwareReset::default(),
             warned_sys_rst: false,
         };
         out.publish_stall();
@@ -223,6 +251,19 @@ impl RtcCntl {
     /// The handle the machine holds.
     pub fn stall_key(&self) -> StallKey {
         self.stall.clone()
+    }
+
+    /// The software-reset line the machine holds.
+    pub fn software_reset(&self) -> SoftwareReset {
+        self.sw_reset.clone()
+    }
+
+    /// `reset_state` reads `code` in both halves (PRO bits 5:0, APP bits
+    /// 11:6), as a reset of that kind leaves it.
+    pub fn set_reset_cause_code(&mut self, code: u32) {
+        let word = self.regs.stored(RESET_STATE) & !0xfff;
+        self.regs
+            .poke(RESET_STATE, word | (code & 0x3f) | ((code & 0x3f) << 6));
     }
 
     /// Recompute both cores' keys from the two registers and publish them.
@@ -254,18 +295,25 @@ impl RtcCntl {
     fn write_word(&mut self, off: u32, value: u32, cx: &mut BusCx<'_>) {
         match off {
             OPTIONS0 => {
+                if value & SW_SYS_RST != 0 {
+                    // The machine performs it between slices when the run
+                    // reboots on reset, and ignores the line otherwise. The
+                    // slice ends after this store: the ROM puts an `ill.n`
+                    // right after it, which silicon never reaches.
+                    self.sw_reset.raise();
+                    cx.yield_to_machine();
+                }
                 if value & SW_SYS_RST != 0 && !self.warned_sys_rst {
                     self.warned_sys_rst = true;
                     let line = format!(
                         "cyc={} pc=0x{:08x} RTC_CNTL options0.sw_sys_rst written (a software \
-                         system reset; this machine has no boot chain to restart in M3, so the \
-                         run carries on)",
+                         system reset; performed only by a run that reboots on reset)",
                         cx.now, cx.pc
                     );
                     cx.trace.note(&line);
                     log::warn!(
-                        "RTC_CNTL: sw_sys_rst written at pc={:#010x}; the reset is reported, \
-                         not performed",
+                        "RTC_CNTL: sw_sys_rst written at pc={:#010x}; a run that reboots on \
+                         reset performs it",
                         cx.pc
                     );
                 }
@@ -312,6 +360,12 @@ impl RtcCntl {
 impl Peripheral for RtcCntl {
     fn name(&self) -> &'static str {
         "RTC_CNTL"
+    }
+
+    /// For `Machine::software_reboot`, which sets `reset_state` after the
+    /// restore, and for the build, which takes the [`SoftwareReset`] line.
+    fn as_any_mut(&mut self) -> Option<&mut dyn core::any::Any> {
+        Some(self)
     }
 
     fn read(&mut self, off: u32, width: Width, _cx: &mut BusCx<'_>) -> u32 {
@@ -466,11 +520,13 @@ mod tests {
     }
 
     #[test]
-    fn the_software_system_reset_is_reported_not_performed() {
+    fn the_software_system_reset_is_noted_and_raised_for_the_machine() {
         let buf = lp_emu_esp_common::trace::SharedBuffer::new();
         let mut sb = Sandbox::new();
         sb.trace = lp_emu_esp_common::Trace::to_sink(Box::new(buf.clone()));
         let mut r = block();
+        let line = r.software_reset();
+        assert!(!line.take(), "nothing raised before the write");
         // What `_rtc_trigger_sw_system_reset` (0x4000FDC7) stores.
         sb.write(&mut r, OPTIONS0, 0x8000_0000);
         assert_eq!(buf.lines().len(), 1);
@@ -480,6 +536,20 @@ mod tests {
             0,
             "a write-only pulse, not remembered"
         );
+        assert!(sb.yield_now, "the slice ends at the store");
+        assert!(line.take(), "the machine's line is raised");
+        assert!(!line.take(), "and taken once");
+    }
+
+    #[test]
+    fn a_software_reset_leaves_reset_state_reading_sw_reset_in_both_halves() {
+        let mut sb = Sandbox::new();
+        let mut r = block();
+        r.set_reset_cause_code(SW_RESET_CODE);
+        let word = sb.read(&mut r, RESET_STATE);
+        assert_eq!(word & 0x3f, SW_RESET_CODE, "PRO");
+        assert_eq!((word >> 6) & 0x3f, SW_RESET_CODE, "APP");
+        assert_eq!(word & !0xfff, 0x0000_3000, "the rest as the PAC resets it");
     }
 
     #[test]

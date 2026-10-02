@@ -1,12 +1,39 @@
 # lpa-agent
 
-Model-facing shader agent core: the `ModelProvider` abstraction with two
+Model-facing agent core: the `ModelProvider` abstraction with two
 streaming implementations (Anthropic and OpenAI-compatible, over shared
-wasm/host transports), the agentic loop, the `iterate` + `upsert_param`
-tools bound to `lps-probe` through an injected host trait, model-list
-discovery, and the system-prompt builder. No Studio/UI/settings code —
-Studio implements `AgentHost` and maps its persisted settings into
-`AnthropicConfig` / `OpenAiCompatConfig`.
+wasm/host transports), one agentic loop over a **toolset seam**, the two
+toolsets that run on it — the shader agent's (`iterate` + `upsert_param` +
+`declare_space`, bound to `lps-probe`) and the app agent's (builds and
+edits a whole project) — model-list discovery, and the system-prompt
+builders. No Studio/UI/settings code — Studio implements `AgentHost` and
+`AppAgentHost` and maps its persisted settings into `AnthropicConfig` /
+`OpenAiCompatConfig`.
+
+## Toolsets
+
+`AgentSession<P, T: Toolset>` is the one loop. A `Toolset` supplies the
+tool definitions, the system prompt, an optional per-turn **state block**
+and the dispatch:
+
+- **`ShaderToolset<H: AgentHost>`** — the shader agent exactly as it was
+  before the seam: three tools, a system prompt rebuilt every turn from
+  the host (it embeds the current source), no state block. Its prompt
+  snapshot (`src/prompt/system_prompt_snapshot.md`) is the regression
+  guard. `AgentSession::new(provider, host)` builds one.
+- **`AppToolset<H: AppAgentHost>`** (`src/tool/app/`) — the app agent. Its
+  system prompt (`src/prompt/app/`) is built once and is **byte-stable for
+  the session**; everything that changes (page, project, devices, offered
+  actions) rides an `<app_state>…</app_state>` block appended to each user
+  message and after each tool round, so a provider cache can hold the
+  prefix and the model always reads current state. It relies on no
+  provider-specific feature (no thinking shapes, no `cache_control`): the
+  default is chosen among open-weights models by the evals.
+
+Evals for the app agent live in `lpa-studio-core` (stage A, headless
+Studio) and `lp-cli` (stage B, emulated C6) — see
+`lp-app/lpa-studio-core/tests/fixtures/app_agent/README.md`; run one live
+with `just app-agent-eval <scenario> --model <openrouter slug>`.
 
 ## Why `ModelProvider` exists
 
@@ -35,8 +62,11 @@ src/provider/openai_compat/
   openai_compat_provider.rs             turn state machine, retry policy
   openai_compat_wire.rs                 request/chunk serde types + transcript mapping
 src/session/                            AgentSession loop, transcript, AgentEvents
-src/tool/                               iterate + upsert_param tools, AgentHost seam, ToolPhase
-src/prompt/                             system prompt + builtin reference
+src/toolset/                            Toolset trait, ToolOutcome, ShaderToolset
+src/tool/                               shader tools, AgentHost seam, ToolPhase
+src/tool/app/                           AppToolset, AppAgentHost seam (app tools)
+src/prompt/                             shader system prompt + builtin reference
+src/prompt/app/                         the app agent's static system prompt
 ```
 
 ## The OpenAI-compatible provider
@@ -59,7 +89,10 @@ results become `role: "tool"` messages, tool calls become
 `[DONE]` after a `finish_reason` still completes the turn.
 `reasoning_content` / `reasoning` deltas are passed through as thinking
 events where servers emit them; nothing reasoning-related is ever sent on
-the request (unsafe on arbitrary compat servers).
+the request (unsafe on arbitrary compat servers). OpenRouter's final
+usage carries `cost` (credits = US dollars); it lands on
+`TokenUsage::cost_micro_usd`, and Studio shows it in place of a
+price-table estimate whenever it is present.
 
 ## Prompt caching and usage buckets
 

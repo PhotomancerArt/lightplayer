@@ -294,12 +294,28 @@ pub fn free_list_shape() -> FreeListShape {
     }
 }
 
+/// lp-link's text mark, before any raw text on a dying board: `0xFF` never
+/// occurs inside a COBS-FF frame, so it abandons whatever frame the panic
+/// interrupted on the host's side (io_task may have been mid-way through
+/// one), and the report that follows — and the ROM banner after the reset —
+/// arrives as text. The C6's and S3's panic paths write the same three bytes
+/// (`fw-esp32c6/src/main.rs`'s `write_link_text_mark`); a plain serial
+/// monitor or a capture tool can always find where a panic starts by it.
+///
+/// Written once the interrupts are masked, so io_task (swi2) cannot put a
+/// frame's bytes between the mark and the text.
+#[inline(always)]
+fn write_link_text_mark() {
+    esp_println::Printer::write_bytes(&[0xFF, b'\r', b'\n']);
+}
+
 /// Stage a breadcrumb into the RTC ledger, commit it, report on serial, reset.
 /// Never returns, and never hangs.
 pub fn stage_and_reset(info: &core::panic::PanicInfo) -> ! {
     if PANICKING.swap(true, Ordering::AcqRel) {
         // Re-entered while handling a panic. Do the absolute minimum — no
         // formatting of caller-controlled values, no ledger write — and go.
+        write_link_text_mark();
         esp_println::println!("\n[PANIC] recursive panic in the panic path; resetting now");
         esp_hal::system::software_reset()
     }
@@ -333,6 +349,7 @@ pub fn stage_and_reset(info: &core::panic::PanicInfo) -> ! {
 
     // ── From here on we are spending time we may not have. Nothing after this
     // point is load-bearing for the next boot's report.
+    write_link_text_mark();
     esp_println::println!("\n\n====================== PANIC ======================");
     esp_println::println!("{info}");
     print_frames(&frames[..count]);
@@ -370,6 +387,7 @@ pub fn stage_oom_and_reset(layout: core::alloc::Layout) -> ! {
         // Recursive OOM — the allocator failed again while we were reporting
         // the first failure. Nothing here allocates, so this should be
         // unreachable; say so rather than looping.
+        write_link_text_mark();
         esp_println::println!("\n[OOM] recursive allocation failure while reporting; resetting");
         esp_hal::system::software_reset()
     }
@@ -446,6 +464,7 @@ pub fn stage_oom_and_reset(layout: core::alloc::Layout) -> ! {
         lp_recovery::commit_staged_crash();
     }
 
+    write_link_text_mark();
     esp_println::println!("\n\n====================== OOM ======================");
     esp_println::println!(
         "allocation failed: requested={} align={} free={} used={} largest_free={} retry_ok={} context={}",

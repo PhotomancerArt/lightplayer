@@ -1422,6 +1422,11 @@ fn preview_slot_sentence(card: &DeviceView, feed: Option<&DeviceCardFeedView>) -
         ),
         None => Some(match feed.liveness {
             FeedLiveness::Waiting => "Waiting for the first frame…".to_string(),
+            // The editor lens holds this board's wire, so the feed does not
+            // pull (ADR 2026-09-06, "never pull under a borrow") — there is
+            // no last frame yet to dim, but "the live feed is coming" would
+            // still be a promise the editor is actively blocking.
+            FeedLiveness::Lens => "Picture paused while the editor is open.".to_string(),
             _ => preview_sentence(card),
         }),
     }
@@ -1935,6 +1940,19 @@ mod tests {
         assert_eq!(
             preview_slot_sentence(&card, Some(&feed_fixture(FeedLiveness::Waiting, true))),
             Some("Waiting for the first frame…".to_string())
+        );
+        // Editor lens, no frame pulled yet (the feed never pulls under the
+        // borrow — ADR 2026-09-06): says why there is no picture rather
+        // than the never-fed card's "the live feed is coming".
+        let lens_no_frame = DeviceCardFeedView {
+            frame: None,
+            liveness: FeedLiveness::Lens,
+            frame_age_secs: None,
+            engine_fps: None,
+        };
+        assert_eq!(
+            preview_slot_sentence(&card, Some(&lens_no_frame)),
+            Some("Picture paused while the editor is open.".to_string())
         );
         assert_eq!(
             preview_slot_sentence(&card, None),
