@@ -24,15 +24,17 @@ use crate::{ActionConfirmation, ActionConsequence, OfferPath, UiAction, UiOffer,
 
 /// `devices/<board>`: the prefix every verb of one device card lives under.
 ///
-/// A board is named by its MAC, as 12 lowercase hex digits with no
-/// separators (`devices/a0f2b1c3d4e5/finish-update`): the one board id that
-/// survives a Forget and a reload, where a [`DeviceId`] is reused. A link
-/// whose board has not said who it is yet has no MAC to name it by, and is
-/// `devices/new-<n>` (`n` its `DeviceId`) until it does. Never invented: a
-/// MAC that does not normalize is treated as absent.
+/// A board is named by its MAC, as `mac-` plus 12 lowercase hex digits with
+/// no separators (`devices/mac-a0f2b1c3d4e5/finish-update`): the one board id
+/// that survives a Forget and a reload, where a [`DeviceId`] is reused. The
+/// `mac-` prefix tells a real board's path apart from `devices/new-<n>` at a
+/// glance. A link whose board has not said who it is yet has no MAC to name
+/// it by, and is `devices/new-<n>` (`n` its `DeviceId`) until it does. Never
+/// invented: a MAC that does not normalize is treated as absent.
 pub fn device_offer_path(device: DeviceId, mac: Option<&MacAddress>) -> OfferPath {
     let segment = mac
         .and_then(|mac| mac_segment(&mac.0))
+        .map(|digits| format!("mac-{digits}"))
         .unwrap_or_else(|| format!("new-{}", device.0));
     OfferPath::devices().child(segment)
 }
@@ -465,7 +467,7 @@ mod tests {
 
         let at = |verb: &str| {
             let path = device_offer_path(DeviceId(7), Some(&mac())).child(verb);
-            assert_eq!(path.to_string(), format!("devices/6055f90a0b0c/{verb}"));
+            assert_eq!(path.to_string(), format!("devices/mac-6055f90a0b0c/{verb}"));
             path
         };
         let lasting = |offers: &UiOfferTree, verb: &str| {
@@ -579,11 +581,11 @@ mod tests {
         let id = DeviceId(7);
         assert_eq!(
             device_offer_path(id, Some(&mac())).to_string(),
-            "devices/6055f90a0b0c"
+            "devices/mac-6055f90a0b0c"
         );
         assert_eq!(
             device_offer_path(id, Some(&MacAddress("A0-F2-B1-C3-D4-E5".to_string()))).to_string(),
-            "devices/a0f2b1c3d4e5"
+            "devices/mac-a0f2b1c3d4e5"
         );
         assert_eq!(device_offer_path(id, None).to_string(), "devices/new-7");
         assert_eq!(
@@ -601,10 +603,10 @@ mod tests {
             &mut UiOfferTree::new(),
         )
         .expect("the held line");
-        assert_eq!(layout.offers_at.to_string(), "devices/6055f90a0b0c");
+        assert_eq!(layout.offers_at.to_string(), "devices/mac-6055f90a0b0c");
         assert_eq!(
             layout.finish_update.map(|path| path.to_string()),
-            Some("devices/6055f90a0b0c/finish-update".to_string())
+            Some("devices/mac-6055f90a0b0c/finish-update".to_string())
         );
     }
 

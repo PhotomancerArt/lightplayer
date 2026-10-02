@@ -7124,7 +7124,7 @@ fn updating_a_legacy_board_backs_up_asks_and_keeps_every_file() {
     let continue_path = panel.continue_action.expect("a migration can continue");
     assert_eq!(
         continue_path.to_string(),
-        "devices/6055f90a0b0c/continue-update"
+        "devices/mac-6055f90a0b0c/continue-update"
     );
     assert_eq!(
         continue_path,
