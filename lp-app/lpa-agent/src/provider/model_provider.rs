@@ -103,15 +103,31 @@ pub struct TokenUsage {
     /// Prompt tokens read from the provider cache (billed at a discount).
     #[serde(default)]
     pub cache_read_tokens: u32,
+    /// What the provider says it charged, in millionths of a US dollar,
+    /// when it says (OpenRouter's `usage.cost`). Preferred over any
+    /// price-table estimate wherever a cost is shown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost_micro_usd: Option<u64>,
 }
 
 impl TokenUsage {
-    /// Accumulate another turn's usage into this total.
+    /// Accumulate another turn's usage into this total. A reported cost
+    /// sums with the others that were reported; one turn without a report
+    /// leaves the total as the known part.
     pub fn add(&mut self, other: TokenUsage) {
         self.input_tokens += other.input_tokens;
         self.output_tokens += other.output_tokens;
         self.cache_write_tokens += other.cache_write_tokens;
         self.cache_read_tokens += other.cache_read_tokens;
+        self.cost_micro_usd = match (self.cost_micro_usd, other.cost_micro_usd) {
+            (None, None) => None,
+            (a, b) => Some(a.unwrap_or(0) + b.unwrap_or(0)),
+        };
+    }
+
+    /// The provider-reported cost in US dollars, when reported.
+    pub fn reported_cost_usd(&self) -> Option<f64> {
+        self.cost_micro_usd.map(|micro| micro as f64 / 1_000_000.0)
     }
 }
 
@@ -249,12 +265,14 @@ mod tests {
             output_tokens: 5,
             cache_write_tokens: 100,
             cache_read_tokens: 0,
+            cost_micro_usd: None,
         });
         total.add(TokenUsage {
             input_tokens: 3,
             output_tokens: 7,
             cache_write_tokens: 20,
             cache_read_tokens: 90,
+            cost_micro_usd: None,
         });
         assert_eq!(
             total,
@@ -263,6 +281,7 @@ mod tests {
                 output_tokens: 12,
                 cache_write_tokens: 120,
                 cache_read_tokens: 90,
+                cost_micro_usd: None,
             }
         );
     }

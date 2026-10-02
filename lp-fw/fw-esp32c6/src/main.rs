@@ -113,6 +113,8 @@ pub use fw_esp32_common::logger;
 ))]
 mod output;
 mod recovery;
+#[cfg(all(feature = "diag_secure_link", not(fw_harness)))]
+mod secure_link_probe;
 mod serial;
 #[cfg(not(fw_harness))]
 mod stack_probe;
@@ -237,6 +239,34 @@ fn heartbeat_memory_stats() -> Option<lpc_wire::server::MemoryStats> {
         oom_retry_saves: None,
     })
 }
+
+/// This chip's ProjectRead memory gate (`lpa_server::ReadGate`): refuse a
+/// read when under 40 KiB is free in total or no 16 KiB block is left.
+///
+/// Measured on the emulated C6 with Bluetooth on (`lp-emu:esp32c6:t1@4caa5b658`,
+/// plan `lp2025/2026-09-27-1218-fragmentation-tolerant-reads`, REPORT.md):
+///
+/// - a read's working set is 8.3–25.1 KB (the first sync's skeleton read is
+///   the worst; the editor's repeating reads are 12–15.6 KB), and it keeps
+///   0–176 B; 40 KiB is that plus room for the link and radio tasks;
+/// - the largest single ask any read makes is 8 KB (a mapping file's slot
+///   JSON, once `lpc-wire` sizes it exactly), 2.5 KB for the editor's reads;
+///   16 KiB is twice it.
+///
+/// The old single floor (a 32 KiB block) refused 52 of 96 editor reads after
+/// ten shader edits, because Bluetooth holds this chip's second heap region
+/// to a ~19.5 KB block once the main region fragments; this gate refused
+/// none, with no resets (`lp-cli/tests/emu_frag_reads.rs` holds that in CI).
+///
+/// ⚠️ Until reads cap their own allocations (the plan's PR B), a board whose
+/// largest block is 16–32 KiB can reset, instead of refusing, on a read
+/// with a single ask above ~15 KB: a slot value over ~15 KB of JSON, a
+/// display layout over ~800 lamps, a render probe over ~2,048 px.
+#[cfg(not(fw_harness))]
+const READ_GATE: lpa_server::ReadGate = lpa_server::ReadGate {
+    min_free_bytes: 40 * 1024,
+    min_largest_block_bytes: 16 * 1024,
+};
 
 #[cfg(not(fw_harness))]
 fn read_headroom_probe() -> Option<u32> {
@@ -577,6 +607,7 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
         graphics,
     );
     server.set_read_headroom_probe(Some(read_headroom_probe));
+    server.set_read_gate(Some(READ_GATE));
     // Wire hello identity: compile-time provenance from build.rs, injected
     // into the server (sans-IO: the server never reads env/git itself),
     // plus the boot-time read of the root-stamped device identity. The
@@ -819,6 +850,8 @@ async fn main(spawner: embassy_executor::Spawner) {
     #[cfg(not(fw_harness))]
     {
         let app = boot_firmware(spawner);
+        #[cfg(feature = "diag_secure_link")]
+        secure_link_probe::run();
         board::esp32c6::status_led::show(lpc_hardware::StatusLedState::Running);
         // Keep the marker substring "fw-esp32c6 initialized, starting server
         // loop" intact: two readiness classifiers grep for it

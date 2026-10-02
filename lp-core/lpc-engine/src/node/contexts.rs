@@ -144,6 +144,10 @@ pub struct TickContext<'r> {
     /// every node that is not a reduced output. Read by outputs for their
     /// status; one flush behind, like the fault verdict.
     output_smoothing: Option<OutputPortSmoothing>,
+    /// Why this output's port did not open at the last flush
+    /// (`EngineServices::output_open_failure`), or `None` — for every
+    /// output whose wires all open, and every other node.
+    output_open_failure: Option<Rc<str>>,
 }
 
 impl<'r> TickContext<'r> {
@@ -206,6 +210,7 @@ impl<'r> TickContext<'r> {
             project_fault_node_count: 0,
             fault_presentation: FaultPresentation::default(),
             output_smoothing: None,
+            output_open_failure: None,
         }
     }
 
@@ -242,6 +247,18 @@ impl<'r> TickContext<'r> {
     pub fn with_output_smoothing(mut self, smoothing: Option<OutputPortSmoothing>) -> Self {
         self.output_smoothing = smoothing;
         self
+    }
+
+    /// Attach why this output's port did not open at the last flush. A
+    /// builder step for the same reason as [`Self::with_output_smoothing`].
+    pub fn with_output_open_failure(mut self, failure: Option<Rc<str>>) -> Self {
+        self.output_open_failure = failure;
+        self
+    }
+
+    /// Why this output's port did not open at the last flush, if it did not.
+    pub fn take_output_open_failure(&mut self) -> Option<Rc<str>> {
+        self.output_open_failure.take()
     }
 
     pub fn node_id(&self) -> NodeId {

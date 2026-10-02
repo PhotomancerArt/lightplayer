@@ -22,4 +22,8 @@ pub enum AgentFeedback {
         key: AgentSessionKey,
         error: Option<String>,
     },
+    /// A streamed event from the app chat's run.
+    AppEvent { event: AgentEvent },
+    /// The app chat's run finished; its runtime is back in its slot.
+    AppRunEnded { error: Option<String> },
 }

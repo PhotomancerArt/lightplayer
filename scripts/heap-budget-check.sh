@@ -116,6 +116,11 @@ MAX_CYCLES=400000000
 # record zeros.
 STEADY_WINDOWS='["frame"]'
 DEFAULT_PROJECTS=(projects/test/basic catalog/patterns/meteor)
+# Absolute allowance, per figure, for catalog project records only (`check`'s
+# per-project loop, engine records under scripts/heap-budget-record/engine/
+# catalog/…) — on top of the percentage margin, in both directions the check
+# tests. A renamed JSON key costs a few bytes; a real regression is hundreds.
+CATALOG_ABS_MARGIN_B=64
 
 command -v jq >/dev/null 2>&1 || {
     echo "jq not found. Install it (brew install jq / apt-get install jq) to run the heap-budget gate."
@@ -242,9 +247,10 @@ chip_facts() {
         CHIP_ELF_ENV="LP_EMU_V3_ELF_ESP32_SERVER_FLOAT_F32"
         # ⚠️ NOT a 5 s window, and the difference is the whole classic arm:
         # this chip's heartbeat triple is ELICITED, not idle-emitted, so the
-        # run is bounded by the request instead of by a tick. The triple lands
-        # 119,041 us into the boot (measured, this host) and `--exit-on` ends
-        # the run there; 1 s is that with eight times the margin, and a run
+        # run is bounded by the request instead of by a tick. Since wire
+        # proto 32 the request goes over the hosted link once the board's
+        # hello has arrived; the triple lands ~0.13 s into the boot and
+        # `--exit-on` ends the run there. 1 s is that with room, and a run
         # that misses it says so by name rather than by silence.
         CHIP_TIMEOUT="1s"
         CHIP_CONFIG="lp-emu:esp32v3:t1"
@@ -345,11 +351,12 @@ cross-target firmware build." >&2
     esac
 }
 
-# The committed stimulus for the classic's elicited heartbeat. It is the walk
-# registry's file rather than a heredoc so that the gate, the boot-idle test
-# and the desk sitting are the SAME stimulus as well as the same bytes; a unit
-# test in `lp-emu-validate` holds it byte-for-byte against `boot_idle.rs`'s
-# own constants.
+# The committed stimulus for the classic's elicited heartbeat on the
+# pre-lp-link images: the walk registry's file, which the validation payload
+# and the desk sitting still use for the committed transcripts' pinned
+# images. Since wire proto 32 the gate below asks with the same request over
+# the hosted link instead (`--request`), because the lp-link image no longer
+# reads `M!` bytes; the S3's arm made the same move at proto 30.
 V3_STOP_ALL_SCRIPT="lp-emu/lp-emu-validate/walks/v3-stop-all.script"
 # The S3's, and the same stimulus on the same trigger line — a unit test in
 # `lp-emu-validate` holds the two files' payloads against each other, which is
@@ -369,8 +376,8 @@ S3_IDLE_JIT_LINE="[JIT] used=0 peak=0 cap=0 spans=0 peak_spans=0 allocs=0 frees=
 # classic boot with nobody talking prints no `[MEM]`, no `[JIT]` and no
 # `[stack] heartbeat:` line at all, and a gate that copied the C6's arm would
 # report "no first heartbeat" for ever. So the classic arm sends
-# `stopAllProjects` over UART0 and takes the FIRST triple, exactly as
-# `lp-emu-esp32v3/tests/boot_idle.rs` does.
+# `stopAllProjects` over its hosted link and takes the FIRST triple, exactly
+# as `lp-cli/tests/emu_v3_link_gates.rs` does.
 chip_measure() {
     chip_facts "$1" || return 1
     local elf="$2" dir
@@ -381,11 +388,12 @@ chip_measure() {
     # wait for is a gate nobody runs.
     #
     # No link socket on any arm: a gate that binds a port collides with
-    # whatever is already using one. The classic is driven by a deterministic
-    # script on UART0.
+    # whatever is already using one.
     #
-    # ⚠️ The C6 and the S3 need a HOST, in process (`--host-link`), since the
-    # wire went onto lp-link at proto 30 (plan lp-link-usb-cutover): their
+    # ⚠️ All three need a HOST, in process (`--host-link`): the C6 and the
+    # S3 since the wire went onto lp-link at proto 30 (plan
+    # lp-link-usb-cutover), the classic since proto 32 (plan
+    # classic-uart-on-lp-link). Their
     # log lines ride the link's log channel and their hello and heartbeats go
     # out only once a host has brought the link up, so a console read straight
     # off the port holds boot text and nothing this gate greps for. The host
@@ -404,16 +412,24 @@ chip_measure() {
             >"$dir/emu.out" 2>"$dir/emu.err" && ok=1
         ;;
     esp32v3)
-        # The machine binary, not `lp-cli emu run`: `emu run --chip` knows one
-        # chip today and teaching it the classic is M8's, not this gate's.
+        # `lp-cli emu run --chip esp32v3`, the hosted run: since wire proto 32
+        # the classic's UART0 is an lp-link, which only a product crate may
+        # host (the lp-emu fence), and its `[stack]` / `[MEM]` / `[JIT]`
+        # triple rides the link's log channel. The asking is the S3's: one
+        # `stopAllProjects` over the link once the board's hello arrives,
+        # rather than the `M!` bytes of `$V3_STOP_ALL_SCRIPT` on
+        # `[INIT] I/O task spawned` +1 ms, which the lp-link image no longer
+        # reads — the same request, a little later in the boot. The machine's
+        # default core quantum is 256, which is what this arm passed before.
         # `--strict-bus` is free here and is a second assertion for nothing:
-        # this boot's run report says `unmapped=0`, and a run that started
-        # reaching addresses nothing claims would stop and say where.
-        cargo run -q --release -p lp-emu-esp32v3 -- --elf "$elf" \
-            --uart0 "file:$dir/console.txt" \
-            --uart0-script "$V3_STOP_ALL_SCRIPT" \
+        # a run that started reaching addresses nothing claims would stop and
+        # say where.
+        cargo run -q --release -p lp-cli -- emu run --chip esp32v3 --elf "$elf" \
+            --host-link --json-replies \
+            --request '"stopAllProjects"' \
+            --console "$dir/console.txt" \
             --exit-on '[JIT] used=' \
-            --strict-bus --core-quantum 256 --time-grade t1 \
+            --strict-bus \
             --timeout "$CHIP_TIMEOUT" --wall-timeout 600 \
             >"$dir/emu.out" 2>"$dir/emu.err" && ok=1
         ;;
@@ -828,6 +844,12 @@ check)
     fail=0
     for project in $projects; do
         rec_file="$(engine_record "$project")"
+        # Catalog project records only — test records (engine/projects/test/…)
+        # stay at the bare percentage margin.
+        abs_margin_b=0
+        case "$project" in
+        catalog/*) abs_margin_b="$CATALOG_ABS_MARGIN_B" ;;
+        esac
         for pmode in $(jq -r '.modes | keys[]' "$rec_file"); do
             echo "heap-budget: profiling ${project} (${pmode})..."
             budget="$(budget_for "$project" "$pmode")"
@@ -862,7 +884,7 @@ check)
                     # Inverted direction: a bigger largest-free-block is the
                     # improvement here, so the ratchet fails on SHRINKING
                     # below the record, not on growth.
-                    allowed=$(awk -v r="$rec" -v m="$margin" 'BEGIN { printf "%d", r * (1 - m / 100) }')
+                    allowed=$(awk -v r="$rec" -v m="$margin" -v a="$abs_margin_b" 'BEGIN { printf "%d", r * (1 - m / 100) - a }')
                     if [ "$meas" -lt "$allowed" ]; then
                         echo "::error::heap-budget: ${project} (${pmode}) ${w}.${f} shrank: ${meas} < recorded ${rec} (margin ${margin}%). Intentional? Re-baseline with 'just heap-budget-baseline ${project}' in this PR."
                         fail=1
@@ -873,7 +895,7 @@ check)
                     fi
                     continue
                 fi
-                allowed=$(awk -v r="$rec" -v m="$margin" 'BEGIN { printf "%d", r * (1 + m / 100) }')
+                allowed=$(awk -v r="$rec" -v m="$margin" -v a="$abs_margin_b" 'BEGIN { printf "%d", r * (1 + m / 100) + a }')
                 if [ "$meas" -gt "$allowed" ]; then
                     echo "::error::heap-budget: ${project} (${pmode}) ${w}.${f} grew: ${meas} > recorded ${rec} (margin ${margin}%). Intentional? Re-baseline with 'just heap-budget-baseline ${project}' in this PR."
                     fail=1

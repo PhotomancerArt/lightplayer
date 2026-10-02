@@ -17,6 +17,18 @@
 //! timer to a second or worse, but not a stream read, so the board's frames
 //! are still acknowledged promptly and it does not give up on the session.
 //!
+//! # Which preset a port's link runs
+//!
+//! A port's link is tuned for what is on the other end of the cable, and the
+//! only thing the page knows about that before a hello is the USB vendor id
+//! the port enumerated with — the same id the chooser filter and the
+//! granted-ports sweep already read. [`port_handle`] records it for every
+//! port it hands out, and a new link takes
+//! [`link_config_for_usb_vendor`]'s answer: `uart()` behind a bridge (the
+//! classic ESP32's CH340), `usb()` on Espressif's native USB (plan
+//! `lp2025/2026-09-28-2015-classic-uart-on-lp-link`, P4 — the native host
+//! makes the same call from the same id).
+//!
 //! Above the link nothing changed shape (D1): [`take_reads`] hands out the
 //! same [`WireRead`]s the `M!` reader did, to whichever drainer holds the
 //! port (the model's pump, or a borrowed conversation — D2), and a request
@@ -30,7 +42,7 @@ use std::rc::Rc;
 
 use js_sys::{Array, Promise, Reflect, Uint8Array};
 use lpa_devices::link::ResetKind;
-use lpc_wire::lp_link::Micros;
+use lpc_wire::lp_link::{LinkConfig, Micros};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::{JsFuture, spawn_local};
 
@@ -42,6 +54,7 @@ use crate::device_link::link_port_service::LinkPortService;
 use crate::device_link::wire_capture::capture_wire_bytes;
 use crate::device_link::wire_reader::{WireRead, device_log_level, packed_replies_wanted};
 use crate::device_link::wire_tap::{WireTapDir, tap_wire};
+use crate::provider::usb_vendors::link_config_for_usb_vendor;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BrowserSerialPortHandle {
@@ -167,13 +180,18 @@ pub async fn request_port() -> Result<BrowserSerialPortHandle, LinkError> {
     port_handle(&value)
 }
 
+/// A port descriptor from the JS layer, as a handle — and the port's vendor
+/// id remembered for the link it will open (see the module docs). Every port
+/// id Rust ever holds came through here.
 fn port_handle(value: &JsValue) -> Result<BrowserSerialPortHandle, LinkError> {
-    Ok(BrowserSerialPortHandle {
+    let handle = BrowserSerialPortHandle {
         id: reflect_u32(value, "id")?,
         label: reflect_string(value, "label")?,
         usb_vendor_id: reflect_optional_u32(value, "usbVendorId")?.map(|id| id as u16),
         usb_product_id: reflect_optional_u32(value, "usbProductId")?.map(|id| id as u16),
-    })
+    };
+    PORT_USB_VENDORS.with(|vendors| vendors.borrow_mut().insert(handle.id, handle.usb_vendor_id));
+    Ok(handle)
 }
 
 /// The JS `runReset` sequence each model reset kind selects.
@@ -265,6 +283,12 @@ thread_local! {
     /// model's link pump and, while it holds the wire, a conversation (the
     /// editor lens, a push). See the module docs.
     static PORTS: RefCell<HashMap<u32, ServedPort>> = RefCell::new(HashMap::new());
+
+    /// The USB vendor id each port handed out enumerated with (`None`: the
+    /// browser exposed none), kept from [`port_handle`] so a port's link can
+    /// be tuned for the board behind it. Outlives a close: the port, and so
+    /// its vendor, is the same the next time it opens.
+    static PORT_USB_VENDORS: RefCell<HashMap<u32, Option<u16>>> = RefCell::new(HashMap::new());
 }
 
 /// A port's link, the controller buffer generation it is for, and whether
@@ -296,10 +320,34 @@ impl Drop for WakeOnBytes {
     }
 }
 
-/// A link for a newly opened port: a fresh nonce, and the page's wire flags
-/// as they are now.
-fn fresh_service() -> LinkPortService {
-    LinkPortService::new(random_nonce(), packed_replies_wanted(), device_log_level())
+/// A link for a newly opened port: the preset for the board behind it, a
+/// fresh nonce, and the page's wire flags as they are now.
+fn fresh_service(id: u32) -> LinkPortService {
+    LinkPortService::new(
+        port_link_config(id),
+        random_nonce(),
+        packed_replies_wanted(),
+        device_log_level(),
+    )
+}
+
+/// The preset a new link on port `id` runs, from the vendor id the port
+/// enumerated with (see the module docs). A port this module never described
+/// has no vendor on record and takes `usb()`, as every port did before.
+fn port_link_config(id: u32) -> LinkConfig {
+    let vendor = PORT_USB_VENDORS.with(|vendors| vendors.borrow().get(&id).copied().flatten());
+    link_config_for_usb_vendor(vendor)
+}
+
+/// The preset port `id`'s current link runs; `None` while the port has no
+/// link (never serviced, or released).
+pub fn link_config(id: u32) -> Option<LinkConfig> {
+    PORTS.with(|ports| {
+        ports
+            .borrow()
+            .get(&id)
+            .map(|port| port.service.config().clone())
+    })
 }
 
 /// What one service pass found.
@@ -347,7 +395,7 @@ fn service(id: u32) -> Serviced {
         let mut ports = ports.borrow_mut();
         let port = ports.entry(id).or_insert_with(|| ServedPort {
             generation,
-            service: fresh_service(),
+            service: fresh_service(id),
             running: Rc::default(),
             wake: None,
         });
@@ -356,7 +404,7 @@ fn service(id: u32) -> Serviced {
             // what was half read and what the board had agreed belong to the
             // previous port generation.
             port.generation = generation;
-            port.service = fresh_service();
+            port.service = fresh_service(id);
         }
         port.service.on_bytes(now, &bytes);
         let mut frames = Vec::new();
@@ -507,6 +555,7 @@ pub async fn reset_and_read(
 /// no `forget()` — callers decide whether that deserves a warning.
 pub async fn forget(id: u32) -> Result<bool, LinkError> {
     PORTS.with(|ports| ports.borrow_mut().remove(&id));
+    PORT_USB_VENDORS.with(|vendors| vendors.borrow_mut().remove(&id));
     let value = JsFuture::from(js_forget_port(id)).await.map_err(js_error)?;
     Ok(value.as_bool().unwrap_or(false))
 }

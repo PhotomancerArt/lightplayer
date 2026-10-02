@@ -1,0 +1,16 @@
+# Action-carrying pub fields on core view types, per file — a ratchet:
+# counts may only go down. Written by `scripts/check-core-action-fields.py
+# --bless`; see that script and docs/adr/2026-10-01-agentic-control-offers-in-core.md.
+1 lp-app/lpa-studio-core/src/app/agent/ui_agent_card.rs
+2 lp-app/lpa-studio-core/src/app/bus/ui_bus_view.rs
+7 lp-app/lpa-studio-core/src/app/node/face/ui_pattern_picker.rs
+1 lp-app/lpa-studio-core/src/app/node/face/ui_playlist_entry.rs
+1 lp-app/lpa-studio-core/src/app/node/ui_node_child.rs
+1 lp-app/lpa-studio-core/src/app/node/ui_node_view.rs
+1 lp-app/lpa-studio-core/src/app/node/ui_produced_product.rs
+1 lp-app/lpa-studio-core/src/app/node/ui_slot_aspect.rs
+1 lp-app/lpa-studio-core/src/app/open_progress.rs
+1 lp-app/lpa-studio-core/src/app/project/node/ui_add_node_menu.rs
+1 lp-app/lpa-studio-core/src/app/project/project_node_tree_view.rs
+1 lp-app/lpa-studio-core/src/app/project/ui_pending_edit.rs
+1 lp-app/lpa-studio-core/src/core/view/pane_view.rs

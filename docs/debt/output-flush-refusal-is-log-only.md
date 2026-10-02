@@ -1,5 +1,5 @@
 ---
-status: carried
+status: retired
 since: 2026-09-02
 logged: 2026-09-07
 area: lpc-engine output flush + lpa-server tick + lpc-wire project read
@@ -82,6 +82,17 @@ until the hardware generation changes (`ensure_port_open`,
 
 **Incident log**
 
+- 2026-10-01 — **Retired** (plan `lp2025/2026-10-01-0126-app-agent-harness`,
+  P04, PR #888). The exit criterion's first branch, by its named precedent:
+  a parked wire keeps why it parked (`Option<Parked { generation, reason }>`,
+  no larger than the old `parked_at_generation`), `EngineServices::
+  output_open_failure` names the port, endpoint and reason, `TickContext`
+  carries it like the smoothing notice, and `OutputNode::runtime_status`
+  wears it as `Error("port 0: ws281x:local:D9 is not an output pin on this
+  board")`, cleared the frame the port opens. The fw-browser pin broke on CI
+  exactly as this entry said it would and now asserts the named refusal; the
+  app agent's eval reads the same status through Studio. The heartbeat and
+  `ProjectRuntimeStatus` were not touched (the status is the seam).
 - 2026-09-07 — PR #579 (plan "Always a device", P1). CI job *Validate
   Browser (x64)* red on
   `board_manifest_boot_refuses_an_endpoint_the_board_lacks`: the console

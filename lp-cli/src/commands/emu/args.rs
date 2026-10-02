@@ -26,11 +26,17 @@ pub enum EmuChip {
     #[value(name = "esp32c6")]
     Esp32C6,
     /// The S3, for `run --host-link` only (`--elf` or `--merged`, `--console`,
-    /// `--request`, `--exit-on`, `--dump-frames`, `--strict-bus`): the rest of
-    /// this door's flags are the C6's, and the S3's own binary is the
-    /// workshop for everything else.
+    /// `--request`, `--exit-on`, `--dump-frames`, `--strict-bus`,
+    /// `--usb-host`, `--usb-script`): the rest of this door's flags are the
+    /// C6's, and the S3's own binary is the workshop for everything else.
     #[value(name = "esp32s3")]
     Esp32S3,
+    /// The classic ESP32 (v3), for `run --host-link` only, with the S3's
+    /// subset of flags: its UART0 host link is an lp-link since wire proto
+    /// 32. The classic's own binary (`lp-emu-esp32v3`) is the workshop for
+    /// everything else.
+    #[value(name = "esp32v3")]
+    Esp32V3,
 }
 
 /// Which link the socket is.
@@ -144,10 +150,42 @@ pub struct RunArgs {
     /// is the DECODED console instead — raw text and log records as the
     /// board used to print them, every wire message as its `M!{json}` line,
     /// and `[link] …` notes — and `--exit-on` matches those lines. The USB
-    /// host is attached and draining from power-on; no `--link` socket can
-    /// be the USB port.
-    #[arg(long = "host-link", conflicts_with_all = ["monitor", "usb_host"])]
+    /// host is attached and draining from power-on unless `--usb-host` says
+    /// otherwise; no `--link` socket can be the USB port.
+    #[arg(long = "host-link", conflicts_with = "monitor")]
     pub host_link: bool,
+
+    /// With `--host-link`: the link nonce the host opens with, in hex. A
+    /// product host draws a fresh one per open, and so does this door by
+    /// default; a recording states one so that two runs of one image are the
+    /// same run (`lp-cli validate`'s link host).
+    #[arg(long = "link-nonce", value_name = "HEX", value_parser = parse_hex_u32, requires = "host_link")]
+    pub link_nonce: Option<u32>,
+
+    /// With `--host-link`: the cable's schedule, in `lp-emu-esp32c6
+    /// --usb-script`'s grammar — control words only (`<ms> detach`,
+    /// `attach`, `open`, `close`, `wait`). The host IS the link, so a line of
+    /// bytes is refused rather than injected under it.
+    #[arg(long = "usb-script", requires = "host_link")]
+    pub usb_script: Option<PathBuf>,
+
+    /// With `--host-link --chip esp32v3`: the CH340 cable's schedule, in
+    /// `lp-emu-esp32v3 --control-script`'s grammar — `<ms> attach`,
+    /// `reset`, `open`, `close`, `detach`, `signals …`, `wait`. The
+    /// classic's reset circuit is on the carrier board, so `reset`'s release
+    /// reboots the machine (the hosted board is built to reboot on reset)
+    /// and the host sees a new session. The run's report ends with the
+    /// cable's state, as the `state` verb reports it.
+    #[arg(long = "control-script", requires = "host_link")]
+    pub control_script: Option<PathBuf>,
+
+    /// With `--host-link --chip esp32v3`: a TEST switch, off by default —
+    /// damage UART0's host link, in `lp-emu-esp32v3 --uart-faults`'s spec
+    /// (`in-drop=1%,in-tail=0.5%,in-corrupt=0.5%,in-run=0.1%,out-drop=1%,
+    /// seed=7`; each 64-byte window of the wire is one packet). The link
+    /// resends what it loses; the run's report counts both sides.
+    #[arg(long = "uart-faults", requires = "host_link")]
+    pub uart_faults: Option<String>,
 
     /// With `--host-link`: upload this project directory over the link once
     /// the board's hello arrives, exactly as `lp-cli upload` deploys it, and
@@ -226,6 +264,16 @@ pub struct RunArgs {
     #[arg(long)]
     pub flash: Option<PathBuf>,
 
+    /// Reboot the chip when something asks it to reset — a `reboot`
+    /// request's software reset, a watchdog, a host's DTR/RTS dance — and
+    /// carry on, the way a board does, instead of ending the run there. The
+    /// flash part keeps what the guest wrote, so a project uploaded before
+    /// the reboot is loaded again after it. Off by default: a run that ends
+    /// on the reset, with the reset as its outcome, is what the scenarios
+    /// that read the exit code were captured against.
+    #[arg(long = "reboot-on-reset")]
+    pub reboot_on_reset: bool,
+
     /// Refuse any access to an address no peripheral claims, instead of
     /// reading zero and carrying on.
     #[arg(long = "strict-bus")]
@@ -235,6 +283,21 @@ pub struct RunArgs {
     /// board's, which is what every transcript was captured against.
     #[arg(long = "efuse-mac")]
     pub efuse_mac: Option<String>,
+
+    /// The chip's wafer revision, `<major>.<minor>`. Defaults to the desk
+    /// board's `0.2`.
+    #[arg(long = "efuse-rev")]
+    pub efuse_rev: Option<String>,
+
+    /// What `LP_CLKRST.reset_cause` says at power-on, and so what a ROM-up
+    /// boot's banner prints: `poweron` (default), `usb-uart` or `tg0-wdt`.
+    #[arg(long = "reset-cause")]
+    pub reset_cause: Option<String>,
+
+    /// Where the strapping pins were at reset: `app` (default) or
+    /// `download`.
+    #[arg(long, value_parser = ["app", "download"])]
+    pub strap: Option<String>,
 
     /// The rate a host on UART0 sends at, default 115200. UART0 carries no
     /// clock, so the pulse-width counters the mask ROM's baud auto-detection

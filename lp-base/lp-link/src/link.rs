@@ -37,6 +37,13 @@ use crate::send_queue::SendQueue;
 use crate::seq_num::seq_dist;
 use crate::tx_queue::TxQueue;
 
+#[cfg(feature = "secure")]
+mod sealed_frames;
+#[cfg(feature = "secure")]
+mod secure_handshake;
+#[cfg(feature = "secure")]
+mod secure_state;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LinkState {
     /// Handshaking: sending SYNs, no data moves.
@@ -92,6 +99,8 @@ pub struct Link<A: Arq> {
     unacked_rx: u8,
     last_adv_win: u8,
     syn_due: Option<Micros>,
+    /// Unanswered SYNs the gap has doubled for so far (`syn_backoff`).
+    syn_doublings: u8,
     syn_owed: bool,
     /// A tail-loss probe may fire for the current flight.
     probe_armed: bool,
@@ -101,6 +110,11 @@ pub struct Link<A: Arq> {
     counters: LinkCounters,
     /// RAM allocated in `new` and never resized (see [`Link::ram_bound`]).
     fixed_ram: usize,
+    /// A secure link's handshake, keys and counters (`Link::new_secure`);
+    /// `None` on a plain link, which then behaves exactly as without the
+    /// feature.
+    #[cfg(feature = "secure")]
+    secure: Option<alloc::boxed::Box<secure_state::SecureState>>,
 }
 
 impl<A: Arq> Link<A> {
@@ -142,6 +156,7 @@ impl<A: Arq> Link<A> {
             unacked_rx: 0,
             last_adv_win: 0,
             syn_due: Some(0),
+            syn_doublings: 0,
             syn_owed: false,
             probe_armed: false,
             last_data_tx: 0,
@@ -149,6 +164,8 @@ impl<A: Arq> Link<A> {
             last_rx: 0,
             counters: LinkCounters::default(),
             fixed_ram: shape.fixed_ram,
+            #[cfg(feature = "secure")]
+            secure: None,
             cfg,
         }
     }
@@ -287,6 +304,9 @@ impl<A: Arq> Link<A> {
     /// Bytes from a stream transport ([`Framing::Stream`]).
     pub fn on_bytes(&mut self, now: Micros, bytes: &[u8]) {
         self.counters.bytes_rx += bytes.len() as u64;
+        if !bytes.is_empty() {
+            self.heard_while_connecting(now);
+        }
         for &b in bytes {
             match self.deframer.push(now, b) {
                 Deframed::Nothing => {}
@@ -319,6 +339,7 @@ impl<A: Arq> Link<A> {
     /// One whole frame from a datagram transport ([`Framing::Datagram`]).
     pub fn on_datagram(&mut self, now: Micros, frame: &[u8]) {
         self.counters.bytes_rx += frame.len() as u64;
+        self.heard_while_connecting(now);
         self.on_frame(now, frame);
     }
 
@@ -387,6 +408,8 @@ impl<A: Arq> Link<A> {
                 min(Some(self.last_tx + self.cfg.keepalive));
             }
         }
+        #[cfg(feature = "secure")]
+        min(self.secure_deadline());
         t
     }
 
@@ -399,6 +422,14 @@ impl<A: Arq> Link<A> {
     /// Session number: bumped on every reset.
     pub fn generation(&self) -> u32 {
         self.generation
+    }
+
+    /// The nonce the peer opened its session with, once a SYN has been heard
+    /// (a peer that restarts draws a new one, which is what
+    /// [`ResetReason::PeerRestarted`] means). For diagnostics: a desk tool
+    /// prints it so two boots of one board can be told apart.
+    pub fn peer_nonce(&self) -> Option<u32> {
+        self.peer_nonce
     }
 
     pub fn counters(&self) -> &LinkCounters {
@@ -419,6 +450,14 @@ impl<A: Arq> Link<A> {
     /// for what is worth sending.
     pub fn is_stalled(&self, now: Micros) -> bool {
         self.state == LinkState::Established && self.peer_silent_for(now) >= self.cfg.stall_after
+    }
+
+    /// Best-effort messages [`send`](Self::send) would queue right now (free
+    /// datagram slots). A caller that takes each message out of its own
+    /// buffer (a firmware log ring) asks first, so a message the link would
+    /// refuse stays where it was instead of being taken and lost.
+    pub fn datagram_room(&self) -> usize {
+        self.datagrams.free_slots()
     }
 
     /// Nothing queued, nothing unacknowledged.
@@ -465,6 +504,10 @@ impl<A: Arq> Link<A> {
             return false;
         };
         if hdr.kind == FrameKind::Syn {
+            #[cfg(feature = "secure")]
+            if let Some(verified) = self.on_secure_aware_syn(now, raw) {
+                return verified;
+            }
             let Some(syn) = frame::verify(crc, 0, raw).and_then(SynBody::parse) else {
                 self.counters.bad_frames += 1;
                 return false;
@@ -478,7 +521,11 @@ impl<A: Arq> Link<A> {
             self.counters.dropped_unsynced += 1;
             return false;
         };
-        if raw.len() > HEADER_LEN + self.cfg.max_payload as usize + crc.len() {
+        #[cfg(feature = "secure")]
+        let max_body = self.cfg.max_payload as usize + self.seal_overhead();
+        #[cfg(not(feature = "secure"))]
+        let max_body = self.cfg.max_payload as usize;
+        if raw.len() > HEADER_LEN + max_body + crc.len() {
             // Longer than any frame we agreed to take (a datagram transport
             // hands frames over whole, unchecked).
             self.counters.oversize_frames += 1;
@@ -495,6 +542,16 @@ impl<A: Arq> Link<A> {
             self.counters.bad_frames += 1;
             return false;
         };
+        #[cfg(feature = "secure")]
+        if self.secure.is_some() {
+            return self.on_sealed_frame(now, &hdr, raw, body);
+        }
+        self.on_verified(now, &hdr, body)
+    }
+
+    /// A frame that verified under the session key (and, on a secure link,
+    /// opened): its plaintext body.
+    fn on_verified(&mut self, now: Micros, hdr: &Header, body: &[u8]) -> bool {
         self.counters.frames_rx += 1;
         self.last_rx = now;
         if self.state == LinkState::Connecting {
@@ -503,12 +560,12 @@ impl<A: Arq> Link<A> {
         }
         match hdr.kind {
             FrameKind::Data => {
-                if self.on_ack_fields(now, &hdr, 0, None) {
-                    self.on_data(now, &hdr, body);
+                if self.on_ack_fields(now, hdr, 0, None) {
+                    self.on_data(now, hdr, body);
                 }
             }
             FrameKind::Datagram => {
-                if !self.on_ack_fields(now, &hdr, 0, None) {
+                if !self.on_ack_fields(now, hdr, 0, None) {
                     return true;
                 }
                 // Best effort, but never silent: datagrams carry their own
@@ -534,7 +591,7 @@ impl<A: Arq> Link<A> {
                     SACK_LEN => u32::from_le_bytes([body[0], body[1], body[2], body[3]]),
                     _ => 0,
                 };
-                self.on_ack_fields(now, &hdr, sack, hdr.fin.then_some(hdr.seq));
+                self.on_ack_fields(now, hdr, sack, hdr.fin.then_some(hdr.seq));
             }
             FrameKind::Syn => {}
         }
@@ -665,6 +722,8 @@ impl<A: Arq> Link<A> {
     // ---- Transmit path ---------------------------------------------------
 
     fn service_timers(&mut self, now: Micros) {
+        #[cfg(feature = "secure")]
+        self.secure_timers(now);
         if self
             .deframer
             .idle_deadline(self.cfg.idle_flush, self.cfg.frame_abandon)
@@ -700,7 +759,10 @@ impl<A: Arq> Link<A> {
     ) -> bool {
         if self.state == LinkState::Connecting {
             if self.syn_due.is_some_and(|t| t <= now) {
-                self.syn_due = Some(now + self.cfg.syn_interval);
+                self.syn_due = Some(now + (self.cfg.syn_interval << self.syn_doublings));
+                if self.syn_doublings < self.cfg.syn_backoff {
+                    self.syn_doublings += 1;
+                }
                 self.emit_syn();
                 return true;
             }
@@ -824,6 +886,8 @@ impl<A: Arq> Link<A> {
                 return false;
             };
             frame::encode_raw(self.cfg.crc, key, &hdr, data, &mut self.raw);
+            #[cfg(feature = "secure")]
+            self.seal_raw();
             finish(
                 self.cfg.framing,
                 self.cfg.escape_ff,
@@ -860,6 +924,8 @@ impl<A: Arq> Link<A> {
         hdr.fin = e.fin;
         hdr.seq = seq;
         frame::encode_raw(self.cfg.crc, key, &hdr, payload, &mut self.raw);
+        #[cfg(feature = "secure")]
+        self.seal_raw();
         finish(
             self.cfg.framing,
             self.cfg.escape_ff,
@@ -884,6 +950,11 @@ impl<A: Arq> Link<A> {
     }
 
     fn emit_syn(&mut self) {
+        #[cfg(feature = "secure")]
+        if self.secure.is_some() {
+            self.emit_secure_syn();
+            return;
+        }
         let body = SynBody {
             nonce: self.nonce,
             your: self.peer_nonce.unwrap_or(0),
@@ -932,6 +1003,8 @@ impl<A: Arq> Link<A> {
     fn encode(&mut self, hdr: &Header, body: &[u8]) {
         let key = self.key();
         frame::encode_raw(self.cfg.crc, key, hdr, body, &mut self.raw);
+        #[cfg(feature = "secure")]
+        self.seal_raw();
         finish(
             self.cfg.framing,
             self.cfg.escape_ff,
@@ -960,6 +1033,19 @@ impl<A: Arq> Link<A> {
     }
 
     // ---- Lifecycle -------------------------------------------------------
+
+    /// Something arrived while handshaking: somebody may be listening, so a
+    /// backed-off SYN gap (`syn_backoff`) goes back to `syn_interval`.
+    fn heard_while_connecting(&mut self, now: Micros) {
+        if self.state != LinkState::Connecting || self.syn_doublings == 0 {
+            return;
+        }
+        self.syn_doublings = 0;
+        let soon = now + self.cfg.syn_interval;
+        if self.syn_due.is_none_or(|t| t > soon) {
+            self.syn_due = Some(soon);
+        }
+    }
 
     fn establish(&mut self, now: Micros) {
         self.state = LinkState::Established;
@@ -997,11 +1083,14 @@ impl<A: Arq> Link<A> {
         self.syn_owed = false;
         self.probe_armed = false;
         self.syn_due = Some(now);
+        self.syn_doublings = 0;
         self.counters.resets += 1;
         self.inbox.push_lifecycle(LinkEvent::Reset {
             reason,
             generation: self.generation,
         });
+        #[cfg(feature = "secure")]
+        self.secure_reset();
     }
 
     fn protocol_error(&mut self) {
