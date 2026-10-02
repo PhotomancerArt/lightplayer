@@ -248,6 +248,19 @@ impl Roster {
         &self.pending
     }
 
+    /// The identity chain of a device or a pending link, or `None` for an
+    /// id the roster does not hold.
+    pub fn identity(&self, id: DeviceId) -> Option<&IdentityChain> {
+        match self.device(id) {
+            Some(device) => Some(&device.identity),
+            None => self
+                .pending
+                .iter()
+                .find(|pending| pending.device_id() == id)
+                .map(PendingLink::identity),
+        }
+    }
+
     /// The board id of a device or a pending link: its MAC, once something
     /// has read one (a hello, or the flash preflight's efuse read). `None`
     /// for an id the roster does not hold, and for one that has not said
@@ -255,15 +268,7 @@ impl Roster {
     /// the preflight — which is the provisional case an offer path names
     /// `devices/new-<n>`.
     pub fn board_key(&self, id: DeviceId) -> Option<BoardKey> {
-        let identity = match self.device(id) {
-            Some(device) => &device.identity,
-            None => self
-                .pending
-                .iter()
-                .find(|pending| pending.device_id() == id)?
-                .identity(),
-        };
-        identity.mac.as_ref().and_then(BoardKey::from_mac)
+        self.identity(id)?.mac.as_ref().and_then(BoardKey::from_mac)
     }
 
     /// What the effects layer told us about a link that is still attached.

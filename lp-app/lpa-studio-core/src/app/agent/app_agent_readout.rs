@@ -276,7 +276,7 @@ mod tests {
         let save = UiAction::from_op(ControllerId::new("studio|project"), ProjectOp::SaveOverlay);
         let bound = save.clone();
         let offer = UiOffer::with_params(
-            OfferPath::parse("devices/a0f26287b48c/flash").unwrap(),
+            OfferPath::parse("devices/mac-a0f26287b48c/flash").unwrap(),
             "flash",
             vec![
                 OfferParam::choice(

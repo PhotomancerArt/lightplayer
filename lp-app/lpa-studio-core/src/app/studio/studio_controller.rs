@@ -2201,7 +2201,8 @@ impl StudioController {
     ///   user's click too.
     /// - `devices/<board>/flash` for every card whose firmware verb is Flash
     ///   (the needs-firmware faces), taking its board as a parameter
-    ///   ([`crate::flash_device_offer`]). `<board>` is the card's MAC, or
+    ///   ([`crate::flash_device_offer`]). `<board>` is the card's
+    ///   [`crate::BoardRef`]: `mac-`, `sim-` or `emu-` and its MAC, or
     ///   `new-<n>` while it has none.
     ///
     /// Nothing on the web renders these from the tree yet; the app agent
@@ -2233,11 +2234,17 @@ impl StudioController {
         }
     }
 
-    /// The offer-path prefix a device's verbs live under:
-    /// `devices/<12 hex MAC>` once the roster knows its MAC, else the
-    /// provisional `devices/new-<n>` by its roster handle.
+    /// The offer-path prefix a device's verbs live under: once the roster
+    /// knows its MAC, `devices/mac-<12 hex>` — or `sim-`/`emu-` when its
+    /// endpoint says it is a sim or an in-tab emulated board
+    /// ([`crate::BoardRef`]) — else the provisional `devices/new-<n>` by its
+    /// roster handle.
     fn device_offer_prefix(&self, device: crate::DeviceId) -> crate::OfferPath {
-        crate::OfferPath::board(self.devices.roster().board_key(device).as_ref(), device)
+        let board = match self.devices.roster().identity(device) {
+            Some(identity) => crate::BoardRef::for_identity(identity, device),
+            None => crate::BoardRef::New(device),
+        };
+        crate::OfferPath::board(&board)
     }
 
     /// The LENS session's docked card (D43): the device the editor is open

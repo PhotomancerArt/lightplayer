@@ -143,7 +143,7 @@ mod tests {
         let offer = flash_device_offer(&view, prefix()).expect("a blank board flashes");
         let candidates = flash_offer(Some("esp32c6"));
 
-        assert_eq!(offer.path.to_string(), "devices/a0f26287b48c/flash");
+        assert_eq!(offer.path.to_string(), "devices/mac-a0f26287b48c/flash");
         assert!(offer.consequence().is_routine(), "nothing on it to lose");
         let [board, name] = offer.params() else {
             panic!("board + name: {:?}", offer.params());
@@ -309,7 +309,9 @@ mod tests {
     }
 
     fn prefix() -> OfferPath {
-        OfferPath::device(&lpa_devices::BoardKey::parse("a0:f2:62:87:b4:8c").unwrap())
+        OfferPath::board(&crate::BoardRef::Mac(
+            lpa_devices::BoardKey::parse("a0:f2:62:87:b4:8c").unwrap(),
+        ))
     }
 
     /// A linked card on a needs-firmware face (or any face, for the

@@ -4766,7 +4766,7 @@ fn a_blank_boards_flash_offer_lists_its_boards_and_flashes_through_a_press() {
         !bench.view().devices.is_empty()
     });
     let wiped = bench.view().devices[0].id;
-    let flash = crate::OfferPath::parse("devices/6055f90a0b0c/flash").unwrap();
+    let flash = crate::OfferPath::parse("devices/mac-6055f90a0b0c/flash").unwrap();
     assert!(
         bench.controller.view().offers.get(&flash).is_none(),
         "a running LightPlayer updates; it has no Flash"
@@ -4800,7 +4800,7 @@ fn a_blank_boards_flash_offer_lists_its_boards_and_flashes_through_a_press() {
     );
     let readout = bench.controller.app_agent_readout_for_test().render();
     assert!(
-        readout.contains("- devices/6055f90a0b0c/flash: Flash firmware"),
+        readout.contains("- devices/mac-6055f90a0b0c/flash: Flash firmware"),
         "{readout}"
     );
     assert!(readout.contains("  takes board: one of "), "{readout}");

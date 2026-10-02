@@ -40,6 +40,7 @@
 /// its source seam.
 pub mod ble_transport;
 pub mod bluetooth_reach;
+pub mod board_ref;
 /// Bluetooth devices backed by the page's Web Bluetooth. wasm-only, and only
 /// when the studio is built with the provider that owns them.
 #[cfg(all(feature = "browser-ble", target_arch = "wasm32"))]
@@ -87,6 +88,7 @@ pub mod wire_conversation;
 
 pub use ble_transport::{BleDeviceTransport, BleLinkSource};
 pub use bluetooth_reach::BluetoothReach;
+pub use board_ref::{BoardRef, BoardRefError};
 #[cfg(all(feature = "browser-ble", target_arch = "wasm32"))]
 pub use browser_ble_source::BrowserBleSource;
 #[cfg(all(feature = "emulator-tab", target_arch = "wasm32"))]

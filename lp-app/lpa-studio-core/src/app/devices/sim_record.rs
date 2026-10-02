@@ -241,7 +241,8 @@ pub struct SimRecord {
     pub target: String,
     /// The minted, locally administered base MAC this runtime reports.
     /// `aa:bb:cc:dd:ee:ff`, lowercase — the hello's own form. It is also
-    /// the runtime's board id ([`BoardKey`], `devices/<12 hex>/…`): every
+    /// the runtime's board id ([`BoardKey`]; its offers live at
+    /// `devices/sim-<12 hex>/…` or `devices/emu-<12 hex>/…`): every
     /// sidecar since v1 carries it, so no record is ever without one.
     pub base_mac: String,
     /// Epoch seconds (the studio clock) when the runtime was created.

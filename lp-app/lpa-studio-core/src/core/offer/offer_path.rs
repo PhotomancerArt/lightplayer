@@ -4,9 +4,7 @@
 use core::fmt;
 use core::str::FromStr;
 
-use lpa_devices::{BoardKey, DeviceId};
-
-use crate::ProjectNodeAddress;
+use crate::{BoardRef, ProjectNodeAddress};
 
 /// The stable id of one offer: a sequence of segments, written `a/b/c`.
 ///
@@ -21,12 +19,15 @@ use crate::ProjectNodeAddress;
 /// So `project/demo.module/orbit.shader/remove` reads as: the project
 /// namespace, the node `/demo.module/orbit.shader`, the verb `remove`.
 ///
-/// A **board** segment under `devices` is the board's id: its MAC as 12
-/// lowercase hex ([`BoardKey`], `devices/a0f26287b48c/flash`), or, for a
-/// link that has not said who it is yet, a provisional `new-<n>`
-/// (`devices/new-3/flash`) that changes once it does. Neither has a dot,
-/// and the depth tells a board's verb from a namespace verb:
-/// `devices/<board>/<verb>` has three segments, `devices/connect-usb` two.
+/// A **board** segment under `devices` is the board's id ([`BoardRef`]),
+/// naming what kind of id it is: `mac-<12 hex>` for a board known by its
+/// silicon MAC (`devices/mac-a0f26287b48c/flash`), `sim-<12 hex>` for an
+/// in-browser sim and `emu-<12 hex>` for an in-tab emulated board, each by
+/// its minted MAC, or, for a link that has not said who it is yet, a
+/// provisional `new-<n>` (`devices/new-3/flash`) that changes once it does.
+/// None has a dot, and the depth tells a board's verb from a namespace
+/// verb: `devices/<board>/<verb>` has three segments, `devices/connect-usb`
+/// two.
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct OfferPath {
     segments: Vec<String>,
@@ -57,26 +58,11 @@ impl OfferPath {
         Self::root(Self::DEVICES)
     }
 
-    /// `devices/<board>`: the prefix a board's verbs live under, keyed by
-    /// its MAC as 12 lowercase hex (`devices/a0f26287b48c`).
-    pub fn device(key: &BoardKey) -> Self {
-        Self::devices().child(key.to_string())
-    }
-
-    /// `devices/new-<n>`: the provisional prefix of a link or device that
-    /// has no MAC yet, by its roster handle. It changes to
-    /// [`Self::device`]'s once the board says who it is.
-    pub fn new_link(provisional: DeviceId) -> Self {
-        Self::devices().child(format!("new-{}", provisional.0))
-    }
-
-    /// The prefix a device's verbs live under: [`Self::device`] when its
-    /// board id is known, else [`Self::new_link`].
-    pub fn board(key: Option<&BoardKey>, provisional: DeviceId) -> Self {
-        match key {
-            Some(key) => Self::device(key),
-            None => Self::new_link(provisional),
-        }
+    /// `devices/<board>`: the prefix a board's verbs live under
+    /// (`devices/mac-a0f26287b48c`, `devices/sim-122233445566`,
+    /// `devices/new-3`).
+    pub fn board(board: &BoardRef) -> Self {
+        Self::devices().child(board.to_string())
     }
 
     /// `project/<node tree path>`: the prefix a node card asks
@@ -242,28 +228,27 @@ mod tests {
     }
 
     #[test]
-    fn a_board_is_addressed_by_its_mac_or_provisionally() {
+    fn a_board_is_addressed_by_its_kind_and_id() {
+        use lpa_devices::{BoardKey, DeviceId};
+
         let desk = BoardKey::parse("a0:f2:62:87:b4:8c").unwrap();
-        let flash = OfferPath::device(&desk).child("flash");
-        assert_eq!(flash.to_string(), "devices/a0f26287b48c/flash");
-        assert_eq!(
-            OfferPath::parse("devices/a0f26287b48c/flash").unwrap(),
-            flash
-        );
-        assert!(flash.starts_with(&OfferPath::devices()));
-
-        let fresh = OfferPath::new_link(DeviceId(3)).child("flash");
-        assert_eq!(fresh.to_string(), "devices/new-3/flash");
-
-        assert_eq!(
-            OfferPath::board(Some(&desk), DeviceId(3)),
-            OfferPath::device(&desk),
-            "a known MAC wins over the provisional handle"
-        );
-        assert_eq!(
-            OfferPath::board(None, DeviceId(3)),
-            OfferPath::new_link(DeviceId(3))
-        );
+        let made = BoardKey::parse("12:22:33:44:55:66").unwrap();
+        for (board, text) in [
+            (BoardRef::Mac(desk), "devices/mac-a0f26287b48c/flash"),
+            (BoardRef::Sim(made), "devices/sim-122233445566/flash"),
+            (BoardRef::Emu(made), "devices/emu-122233445566/flash"),
+            (BoardRef::New(DeviceId(3)), "devices/new-3/flash"),
+        ] {
+            let flash = OfferPath::board(&board).child("flash");
+            assert_eq!(flash.to_string(), text);
+            assert_eq!(OfferPath::parse(text).unwrap(), flash);
+            assert!(flash.starts_with(&OfferPath::devices()));
+            assert_eq!(
+                BoardRef::parse(&flash.segments()[1]),
+                Ok(board),
+                "the segment reads back as the board"
+            );
+        }
     }
 
     #[test]
