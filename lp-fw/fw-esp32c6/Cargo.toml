@@ -8,7 +8,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [features]
-default = ["esp32c6", "server", "radio", "ble", "json-pack"]
+default = ["esp32c6", "server", "radio", "ble", "json-pack", "io-thread"]
 esp32c6 = [
     "esp-backtrace/esp32c6",
     "esp-bootloader-esp-idf/esp32c6",
@@ -54,6 +54,18 @@ ble = [
     "dep:embedded-io-07",
 ]
 naga = ["lpa-server/naga"]
+# The USB link task on a preemptive esp-rtos thread of its own (priority 1,
+# 3 KB stack, its own embassy executor), and the server answering a tick's
+# requests before it renders (`LpServer::set_messages_first`). On by default;
+# without it the link task shares the main executor and the server renders
+# first, as before. See `src/io_thread.rs`. Thread creation is esp-rtos's
+# radio-facing `esp_radio_rtos_driver::task_create`, which exists only with
+# `esp-rtos/esp-radio`, so this needs `radio`.
+io-thread = ["radio", "dep:esp-radio-rtos-driver"]
+# The link thread's stack high-water, painted at thread start and logged as
+# `[iostack]` at the heartbeat — OFF by default, never shipped: it finds the
+# stack by scanning esp-rtos's private task record (`src/io_thread_stack_diag.rs`).
+io_thread_stack_diag = ["io-thread"]
 # NOTE: the former `ws281x_2blocks` feature is gone: the RMT block plan is now
 # computed at driver init from the board manifest's declared WS281x channel
 # count (1 declared channel = the whole 192-word RMT RAM, 2 = one 48-word
@@ -327,6 +339,9 @@ esp-backtrace = { version = "0.19.0", features = ["println"] }
 esp-bootloader-esp-idf = { version = "0.5.0" }
 esp-hal = { version = "1.1.0", features = ["log-04", "unstable"] }
 esp-rtos = { version = "0.3.0", features = ["embassy", "log-04"] }
+# `io-thread` only: esp-rtos's own thread creation is crate-private; this is
+# the public face esp-radio itself creates its threads through.
+esp-radio-rtos-driver = { version = "0.3.0", optional = true }
 esp-radio = { version = "0.18.0", optional = true, features = ["esp-now", "log-04", "unstable", "wifi"] }
 esp-println = { version = "0.17.0", default-features = false, features = ["esp32c6", "jtag-serial", "log-04"] }
 # `compat` (esp-alloc's C `malloc` family) is OFF: `src/c_heap.rs` provides
