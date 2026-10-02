@@ -3,8 +3,9 @@
 //!
 //! Header: the project *name* as the title (never the literal word
 //! "project" — that is the kind label), a dirty/status tone wash, contextual
-//! Save / Revert-to-saved icon actions supplied by the controller
-//! (`ProjectEditorView.header_actions`), the always-present "+" whose press
+//! Save / Revert-to-saved icon actions the controller publishes into the
+//! view's offer tree (`project/save`, `project/revert`), the always-present
+//! "+" whose press
 //! opens the add-node kind picker (`ProjectEditorView.add_node_menu`, P5 —
 //! intercepting the P4 add action's default create), and a `DetailPopover`
 //! at the right edge whose trigger renders the pane's one core-computed
@@ -37,8 +38,9 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    ControllerId, DirtySummary, ProjectController, ProjectEditorView, ProjectOp, ProjectSyncPhase,
-    UiAction, UiAffordance, UiConfigSlot, UiMetric, UiPaneAction, UiPendingEdit, UiStatus,
+    ControllerId, DirtySummary, OfferPath, ProjectController, ProjectEditorView, ProjectOp,
+    ProjectSyncPhase, UiAction, UiAffordance, UiConfigSlot, UiMetric, UiOffer, UiPendingEdit,
+    UiStatus,
 };
 
 use crate::app::affordance::{affordance_pane_tone, affordance_trigger_style};
@@ -46,6 +48,7 @@ use crate::app::layout::{PaneChrome, StudioPane};
 use crate::app::node::node_status_label_class;
 use crate::app::project::{ProjectNodeTree, ProjectSettingsSection};
 use crate::base::{DetailPopover, DetailSection, PopoverPlacement};
+use crate::core::use_verbs_of;
 
 /// Everything the project's detail popup shows, gathered from the editor view
 /// plus the pane-level status — one value so the SAME sections can render in
@@ -70,12 +73,13 @@ pub struct ProjectDetailContent {
     /// this value for the same reason everything else here does: one
     /// gather, so no two homes can disagree about a project.
     history: lpa_studio_core::UiProjectHistory,
-    /// The controller's contextual Save / Revert-to-saved pair (present
-    /// only while persisted edits are pending). The SECTIONS do not render
-    /// them — the pane header and the header session·project control do —
-    /// but they ride this value so every home dispatches the controller's
-    /// own actions instead of minting a second save verb.
-    header_actions: Vec<UiPaneAction>,
+    /// The project's own verbs from the view's offer tree, the
+    /// `project/save` / `project/revert` pair (published only while
+    /// persisted edits are pending). The SECTIONS do not render them — the
+    /// pane header and the header session·project control do — but they
+    /// ride this value so every home dispatches the controller's own
+    /// actions instead of minting a second save verb.
+    header_offers: Vec<UiOffer>,
 }
 
 /// The pending-work facts and lists the header control's **changes**
@@ -86,7 +90,7 @@ pub struct ProjectChanges {
     /// The merged affordance — the popup's "State" row wording.
     pub affordance: UiAffordance,
     /// Unsaved / failed counts: the changes segment's face reads them, and
-    /// `persisted > 0` is the same dirty test `header_actions` encodes.
+    /// `persisted > 0` is the same dirty test the `project/*` offers encode.
     pub dirty: DirtySummary,
     /// The overlay's revision number — the pending fact that used to sit in
     /// the detail sections' "Pending edits" block.
@@ -96,9 +100,9 @@ pub struct ProjectChanges {
     /// Every pending edit, in the DTO's stable order (bucketed for display
     /// by `pending_edit_section::entries_in`).
     pub pending_edits: Vec<UiPendingEdit>,
-    /// The controller's own Save / Revert-to-saved pair — the popup
+    /// The controller's own Save / Revert-to-saved offers — the popup
     /// dispatches THESE, never a second save verb minted locally.
-    pub header_actions: Vec<UiPaneAction>,
+    pub header_offers: Vec<UiOffer>,
     /// The document's banked history, newest first and capped. It rides the
     /// changes value because changes and history are ONE temporal axis
     /// (relationship-control D14): the receipt "Save banks v13" and the
@@ -143,11 +147,11 @@ impl ProjectDetailContent {
         self.manifest.as_ref()?.created.as_deref()
     }
 
-    /// The controller's contextual header actions (Save / Revert-to-saved),
-    /// empty while the project is clean — the header session·project
-    /// control's trailing segments read them.
-    pub fn header_actions(&self) -> &[UiPaneAction] {
-        &self.header_actions
+    /// The project's own verbs (`project/save`, `project/revert`), empty
+    /// while the project is clean — the header session·project control's
+    /// trailing segments read them.
+    pub fn header_offers(&self) -> &[UiOffer] {
+        &self.header_offers
     }
 
     /// The **changes** half of this content: everything the header
@@ -166,14 +170,16 @@ impl ProjectDetailContent {
             overlay_revision: self.overlay_revision,
             edits_in_flight: self.edits_in_flight,
             pending_edits: self.pending_edits.clone(),
-            header_actions: self.header_actions.clone(),
+            header_offers: self.header_offers.clone(),
             history: self.history.clone(),
         }
     }
 
     /// Gather the popup's content from the editor view and the pane status
-    /// (the same merge the pane header's affordance uses).
-    pub fn new(view: &ProjectEditorView, status: UiStatus) -> Self {
+    /// (the same merge the pane header's affordance uses), plus the
+    /// project's own verbs from the offer tree
+    /// (`offers.verbs_of(&OfferPath::project())`).
+    pub fn new(view: &ProjectEditorView, status: UiStatus, header_offers: Vec<UiOffer>) -> Self {
         Self {
             affordance: view.affordance(status.kind),
             project_name: view.project_name.clone(),
@@ -187,7 +193,7 @@ impl ProjectDetailContent {
             manifest: view.manifest.clone(),
             library_identity: view.library_identity.clone(),
             history: view.history.clone(),
-            header_actions: view.header_actions.clone(),
+            header_offers,
         }
     }
 }
@@ -214,7 +220,10 @@ pub fn ProjectPane(
     #[props(default = false)]
     add_picker_initially_open: bool,
 ) -> Element {
-    let detail_content = ProjectDetailContent::new(&view, status.clone());
+    // The header's verbs are the project's offers (`project/save`,
+    // `project/revert`), read from the view's offer tree.
+    let header_offers = use_verbs_of(Some(OfferPath::project()))();
+    let detail_content = ProjectDetailContent::new(&view, status.clone(), header_offers.clone());
     let affordance = detail_content.affordance;
     let chrome = PaneChrome {
         tone: affordance_pane_tone(affordance, status.kind),
@@ -227,8 +236,8 @@ pub fn ProjectPane(
     let tree_add_menu = view.add_node_menu.clone();
     // Adding does not ride the header: the tree's "Add node…" row (below)
     // and the workspace button carry the picker. Header actions are the
-    // contextual Save / Revert pair on the generic `PaneActionButton` path.
-    let header_actions = view.header_actions.clone();
+    // contextual Save / Revert pair (`header_offers`) on the generic
+    // `PaneActionButton` path.
     // D8 tier (a): the project-wide debug channel, deliberately outside the
     // dirty rollup that drives `chrome`/`affordance` (D7).
     let debug_overrides = view.debug_overrides;
@@ -265,7 +274,7 @@ pub fn ProjectPane(
             title: view.project_name.clone(),
             kind: "Project".to_string(),
             chrome,
-            actions: header_actions,
+            actions: header_offers,
             on_action,
             trailing: rsx! {
                 DebugActiveChip { count: debug_overrides, on_action }
@@ -417,7 +426,7 @@ pub fn ProjectDetailSections(
         overlay_revision: _,
         edits_in_flight: _,
         pending_edits: _,
-        header_actions: _,
+        header_offers: _,
         // Likewise the history half: the changes popup's banked timeline
         // renders it (D14), and these sections are its neighbours, not its
         // home.

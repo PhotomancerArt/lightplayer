@@ -97,6 +97,9 @@ struct ScriptedTransport {
     push_plan: Rc<Cell<PushPlan>>,
     /// What a remove effect does. `Real` runs the real conversation too.
     remove_plan: Rc<Cell<RemovePlan>>,
+    /// Every file set a push effect was handed — the bytes Studio sent
+    /// down the wire, captured before the conversation runs.
+    pushed: Rc<RefCell<Vec<Vec<(String, Vec<u8>)>>>>,
 }
 
 /// The scripted outcomes a remove effect can play out. Same three shapes the
@@ -302,6 +305,7 @@ impl DeviceTransport for ScriptedTransport {
                 expected_hash,
                 fallback_storage_id,
             } => {
+                self.pushed.borrow_mut().push(files.clone());
                 let plan = self.push_plan.get();
                 let device = self.device.clone();
                 Box::pin(async move {
@@ -648,6 +652,7 @@ struct DeviceBench {
     manifest_writes: Rc<RefCell<Vec<String>>>,
     push_plan: Rc<Cell<PushPlan>>,
     remove_plan: Rc<Cell<RemovePlan>>,
+    pushed: Rc<RefCell<Vec<Vec<(String, Vec<u8>)>>>>,
     /// The sim half of the transport, when this bench has one. Held so a
     /// row can assert what is RUNNING as opposed to what is remembered.
     sims: Option<Rc<SimDeviceTransport>>,
@@ -843,6 +848,7 @@ impl DeviceBench {
         let manifest_writes: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
         let push_plan: Rc<Cell<PushPlan>> = Rc::new(Cell::new(PushPlan::default()));
         let remove_plan: Rc<Cell<RemovePlan>> = Rc::new(Cell::new(RemovePlan::default()));
+        let pushed: Rc<RefCell<Vec<Vec<(String, Vec<u8>)>>>> = Rc::new(RefCell::new(Vec::new()));
         controller.set_device_transport(Rc::new(ScriptedTransport {
             device: device.clone(),
             endpoint: endpoint.to_string(),
@@ -853,6 +859,7 @@ impl DeviceBench {
             manifest_writes: Rc::clone(&manifest_writes),
             push_plan: Rc::clone(&push_plan),
             remove_plan: Rc::clone(&remove_plan),
+            pushed: Rc::clone(&pushed),
         }));
 
         let bench = Self {
@@ -867,6 +874,7 @@ impl DeviceBench {
             manifest_writes,
             push_plan,
             remove_plan,
+            pushed,
             sims: None,
             sim_restarts: Rc::new(Cell::new(0)),
             started: std::time::Instant::now(),
@@ -1438,6 +1446,104 @@ fn a_replug_under_the_lens_comes_back_ready_and_opens_again() {
         .open_lens(&uid)
         .expect("the replugged board opens again");
     assert_eq!(bench.lens_device_uid().as_deref(), Some(uid.as_str()));
+}
+
+/// The replug-under-the-lens flake, made deterministic: a link whose
+/// arrival has landed but whose own `LinkAttached` is still queued behind
+/// another input (here a stale timer fire) must survive that input's fold.
+/// It used to be adopted by the earlier fold and evicted by its
+/// `retain_links` before the model had routed it, so the model's `Open`
+/// found no link and the board sat at Identifying… forever.
+#[test]
+fn a_link_attach_queued_behind_another_input_still_identifies() {
+    let device = empty_light_player("dev000000daqf6dvvr9");
+    let (mut bench, tasks) = DeviceBench::granted(&device, "usb-race-9");
+    let attach_queued = |bench: &DeviceBench| {
+        bench.inbox.borrow().iter().any(|input| {
+            matches!(
+                input,
+                DeviceInput::Event(lpa_devices::event::Event::LinkAttached { .. })
+            )
+        })
+    };
+    // The connect edge sweeps the grant; its arrival lands and its
+    // `LinkAttached` queues — and nothing has folded yet.
+    bench
+        .controller
+        .note_device_hotplug(crate::app::studio::studio_command::DeviceHotplug::Connected);
+    for _ in 0..100 {
+        if attach_queued(&bench) {
+            break;
+        }
+        pump(&tasks);
+    }
+    assert!(attach_queued(&bench), "the sweep queued the link's attach");
+    bench.inbox.borrow_mut().push_front(DeviceInput::Event(
+        lpa_devices::event::Event::TimerFired {
+            timer: lpa_devices::time::TimerId {
+                scope: lpa_devices::journal::Scope::Roster,
+                seq: u64::MAX,
+            },
+        },
+    ));
+    bench.run_until(&tasks, "the board to identify", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.state_label == "Ready")
+    });
+}
+
+/// A second connect edge while the first sweep's arrival is still pending
+/// (landed, its `LinkAttached` queued, nothing folded yet) must not mint a
+/// second link for the same port: that arrival has not joined the routing
+/// map, so a sweep that only skips routed links would attach it again.
+#[test]
+fn a_second_sweep_before_a_pending_arrival_folds_mints_no_second_link() {
+    let device = empty_light_player("dev000000daqf6dvvra");
+    let (mut bench, tasks) = DeviceBench::granted(&device, "usb-sweep-10");
+    let attaches = |bench: &DeviceBench| {
+        bench
+            .inbox
+            .borrow()
+            .iter()
+            .filter(|input| {
+                matches!(
+                    input,
+                    DeviceInput::Event(lpa_devices::event::Event::LinkAttached { .. })
+                )
+            })
+            .count()
+    };
+    let connect = |bench: &mut DeviceBench| {
+        bench
+            .controller
+            .note_device_hotplug(crate::app::studio::studio_command::DeviceHotplug::Connected);
+    };
+    // The first sweep lands its arrival; nothing folds.
+    connect(&mut bench);
+    for _ in 0..100 {
+        if attaches(&bench) > 0 {
+            break;
+        }
+        pump(&tasks);
+    }
+    assert_eq!(attaches(&bench), 1, "the first sweep attached the port");
+    // A second connect edge in that window sweeps again.
+    connect(&mut bench);
+    for _ in 0..100 {
+        pump(&tasks);
+    }
+    assert_eq!(attaches(&bench), 1, "one port, one link");
+    bench.run_until(&tasks, "the board to identify", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.state_label == "Ready")
+    });
+    assert_eq!(bench.view().devices.len(), 1, "one board, one card");
 }
 
 /// One wire, one owner: a card verb that needs the board's wire while the
@@ -3241,6 +3347,120 @@ fn the_empty_face_pushes_an_example_and_the_card_ends_up_running() {
         "the banked version is the verified content hash"
     );
 }
+
+/// A LightPlayer board with nothing loaded and no stamped identity — the
+/// heartbeat still runs so the fold learns the empty/running fact, exactly
+/// like [`empty_light_player`], but the registry key falls back to the
+/// board's MAC, same as [`light_player_running_unstamped`].
+fn empty_light_player_unstamped() -> FakeEsp32Device {
+    FakeEsp32Device::new(FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new()
+            .with_base_mac(BENCH_BOARD_MAC)
+            .with_heartbeat_interval(Duration::from_millis(20)),
+    )))
+}
+
+/// An ordinary push to an unstamped board (registry key `mac:…`) still
+/// installs the project and the board still ends up running it — but
+/// `RecordPush` is never attempted, for the reason
+/// `opening_an_unstamped_board_adopts_without_attempting_record_push`
+/// documents for adoption: `library_host::record_push` refuses a device uid
+/// it cannot parse as a `dev…`/`prj…` `PrefixedUid`. Before the fix,
+/// `bank_completed_push` attempted it anyway and logged the refusal at warn
+/// on every ordinary push to every unstamped board.
+#[test]
+fn pushing_to_an_unstamped_board_banks_nothing_without_attempting_record_push() {
+    let device = empty_light_player_unstamped();
+    let (mut bench, tasks) = identified(&device, "usb-push-unstamped");
+    bench.run_until(&tasks, "the board to report nothing loaded", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.loaded_project == lpa_devices::view::LoadedProject::Empty)
+    });
+    let card = bench.view().devices[0].clone();
+    assert_eq!(bench.record_push_attempts(), 0);
+
+    bench.push_gesture(card.id, bundled_example());
+    bench.run_until(&tasks, "the push to finish", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.last_outcome.is_some())
+    });
+
+    let card = &bench.view().devices[0];
+    let outcome = card.last_outcome.as_ref().expect("an outcome");
+    assert!(outcome.ok, "{outcome:?}");
+    assert!(
+        matches!(
+            &card.loaded_project,
+            lpa_devices::view::LoadedProject::Running { label } if !label.is_empty()
+        ),
+        "the running face reads the board's report even though nothing was banked: {card:?}"
+    );
+
+    let rows = bench.registry();
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert!(
+        rows[0].uid.starts_with("mac:"),
+        "an unstamped board's registry key falls back to its MAC: {}",
+        rows[0].uid
+    );
+    assert!(
+        rows[0].association.is_none(),
+        "record_push refuses a mac:-keyed device uid, so nothing bankable \
+         was ever written: {:?}",
+        rows[0].association
+    );
+    assert_eq!(
+        bench.record_push_attempts(),
+        0,
+        "the honest skip means RecordPush is never attempted for a mac:-keyed board"
+    );
+}
+
+/// The sibling case: an ordinary push to a STAMPED board DOES attempt (and
+/// bank) `RecordPush` — the skip is specific to a `mac:`-keyed device uid,
+/// not a blanket "never try" the fix could have overshot into.
+#[test]
+fn pushing_to_a_stamped_board_banks_and_attempts_record_push() {
+    let device = empty_light_player("dev000000daqf6dvvqz");
+    let (mut bench, tasks) = identified(&device, "usb-push-stamped");
+    bench.run_until(&tasks, "the board to report nothing loaded", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.loaded_project == lpa_devices::view::LoadedProject::Empty)
+    });
+    let card = bench.view().devices[0].clone();
+    assert_eq!(bench.record_push_attempts(), 0);
+
+    bench.push_gesture(card.id, bundled_example());
+    bench.run_until(&tasks, "the push to finish", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.last_outcome.is_some())
+    });
+
+    assert_eq!(
+        bench.record_push_attempts(),
+        1,
+        "an ordinary push to a stamped board still attempts RecordPush"
+    );
+    let rows = bench.registry();
+    assert!(
+        rows[0].association.is_some(),
+        "a verified push to a stamped board is banked: {:?}",
+        rows[0].association
+    );
+}
+
 // ---------------------------------------------------------------------
 // P4: `?on=mac:` and the mismatch page (D50)
 // ---------------------------------------------------------------------
@@ -3533,6 +3753,200 @@ fn an_unknown_mac_raises_no_page() {
 
 /// The base MAC [`empty_light_player`] reports.
 const BENCH_BOARD_MAC: &str = "60:55:f9:0a:0b:0c";
+
+// ---------------------------------------------------------------------
+// A saved board comes back to its own record (2026-10-02 hardware gate)
+// ---------------------------------------------------------------------
+
+/// Yona's desk C6 as his registry remembered it: keyed on its MAC (no
+/// provisioned uid), its board known, no name of its own.
+const DESK_C6_MAC: &str = "10:bd:a3:b0:8e:30";
+
+/// The registry's second row: another board, named by the user, whose row
+/// wears the SAME model handle as the C6's. Ids are minted per page from 1,
+/// so a second tab — or a row that loaded after a link had already minted
+/// its number — can leave two rows on disk with one `device_id`.
+const NEIGHBOUR_MAC: &str = "02:00:00:00:00:01";
+
+/// Yona's 2026-10-02 session, whole: a browser that already remembers the
+/// C6, a granted port, a hello naming the remembered MAC. The card must come
+/// back to the saved record and reach Ready, the board's later frames must
+/// land on it (on main they landed on the neighbour as `IdentityConflict`s,
+/// and the card never reached Ready), and the auto-name must be written ONCE
+/// — on main it ping-ponged "… · Oct 2" / "… · Oct 2 2" every settle for as
+/// long as the page was open, because each `SetName` aimed at the C6's id
+/// renamed the neighbour instead.
+#[test]
+fn a_remembered_board_comes_back_to_its_record_and_is_named_once() {
+    let device = mac_only_light_player(DESK_C6_MAC);
+    let (mut bench, tasks) = bench_remembering(
+        &device,
+        "browser-serial-esp32-port-2",
+        vec![
+            remembered_row(NEIGHBOUR_MAC, 1, "Porch sign"),
+            remembered_row(DESK_C6_MAC, 1, ""),
+        ],
+    );
+    assert_eq!(
+        bench.view().devices.len(),
+        2,
+        "both remembered boards are cards before any port opens"
+    );
+
+    bench.run_until(&tasks, "the remembered board to come back Ready", |bench| {
+        card_for_mac(bench, DESK_C6_MAC)
+            .is_some_and(|card| card.activity.is_none() && card.state_label == "Ready")
+    });
+    // Keep going: the board heartbeats every 20 ms, and every step settles
+    // the records — the loop on main needed nothing more than this.
+    for _ in 0..200 {
+        bench.step(&tasks);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+
+    let journal = journal_lines(&bench);
+    let conflicts: Vec<&String> = journal
+        .iter()
+        .filter(|line| line.contains("IdentityConflict"))
+        .collect();
+    assert!(
+        conflicts.is_empty(),
+        "the board's frames are its own: {conflicts:#?}"
+    );
+    let renames = journal
+        .iter()
+        .filter(|line| line.contains("SetName"))
+        .count();
+    assert_eq!(renames, 1, "the auto-name is a fixed point: {journal:#?}");
+
+    let view = bench.view();
+    assert!(view.pending.is_empty(), "{view:?}");
+    assert_eq!(view.devices.len(), 2, "one card per board: {view:?}");
+    let mut ids: Vec<crate::DeviceId> = view.devices.iter().map(|card| card.id).collect();
+    ids.dedup();
+    assert_eq!(ids.len(), 2, "one id per card: {view:?}");
+    let desk = card_for_mac(&bench, DESK_C6_MAC).expect("the desk board's card");
+    assert_eq!(desk.state_label, "Ready", "{desk:?}");
+    assert!(
+        desk.title.ends_with(&month_day_of(&bench)),
+        "named once, without a collision suffix: {:?}",
+        desk.title
+    );
+    let porch = card_for_mac(&bench, NEIGHBOUR_MAC).expect("the neighbour's card");
+    assert_eq!(porch.title, "Porch sign", "the neighbour keeps its name");
+    assert_eq!(porch.state_label, "Offline", "{porch:?}");
+}
+
+/// The precondition the fresh-profile walks never had: with ONE remembered
+/// row the same session was always fine. Pinned beside the failing shape so
+/// the difference between them stays legible.
+#[test]
+fn a_single_remembered_board_comes_back_to_its_record() {
+    let device = mac_only_light_player(DESK_C6_MAC);
+    let (mut bench, tasks) = bench_remembering(
+        &device,
+        "browser-serial-esp32-port-2",
+        vec![remembered_row(DESK_C6_MAC, 1, "")],
+    );
+    bench.run_until(&tasks, "the remembered board to come back Ready", |bench| {
+        card_for_mac(bench, DESK_C6_MAC)
+            .is_some_and(|card| card.activity.is_none() && card.state_label == "Ready")
+    });
+    for _ in 0..50 {
+        bench.step(&tasks);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    let journal = journal_lines(&bench);
+    assert!(!journal.iter().any(|line| line.contains("IdentityConflict")));
+    assert_eq!(
+        journal
+            .iter()
+            .filter(|line| line.contains("SetName"))
+            .count(),
+        1
+    );
+    assert_eq!(bench.view().devices.len(), 1);
+}
+
+/// A LightPlayer with a base MAC and no provisioned uid — the shape of every
+/// board flashed by Studio today.
+fn mac_only_light_player(mac: &str) -> FakeEsp32Device {
+    FakeEsp32Device::new(FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new()
+            .with_base_mac(mac)
+            .with_heartbeat_interval(Duration::from_millis(20)),
+    )))
+}
+
+/// One registry row as Studio writes it for a MAC-keyed board.
+fn remembered_row(mac: &str, device_id: u64, name: &str) -> crate::app::places::RegisteredDevice {
+    crate::app::places::RegisteredDevice {
+        uid: format!("mac:{mac}"),
+        name: name.to_string(),
+        transport: "USB".to_string(),
+        hardware_id: Some(format!("efuse:{mac}")),
+        device_id: Some(device_id),
+        board_id: Some("seeed/xiao-esp32-c6".to_string()),
+        chip: Some("esp32c6".to_string()),
+        ..Default::default()
+    }
+}
+
+/// A page load over a library that already holds `rows`, with the board's
+/// port granted: the library hydrates first (the remembered boards are
+/// cards before any port opens), then the sweep finds the port.
+fn bench_remembering(
+    device: &FakeEsp32Device,
+    endpoint: &str,
+    rows: Vec<crate::app::places::RegisteredDevice>,
+) -> (DeviceBench, TaskPool) {
+    let clock = Rc::new(Cell::new(1_000.0));
+    let store = memory_store(Rc::clone(&clock));
+    let registry = DeviceRegistry::new(store.fs_handle());
+    for row in rows {
+        registry.upsert(row).expect("the row writes");
+    }
+    let (mut bench, tasks) = DeviceBench::build_on(device, endpoint, true, true, clock, store);
+    bench.settle_library();
+    (bench, tasks)
+}
+
+/// The card of the roster device whose chain holds `mac`.
+fn card_for_mac(bench: &DeviceBench, mac: &str) -> Option<lpa_devices::view::DeviceView> {
+    let id = bench
+        .controller
+        .devices_for_test()
+        .roster()
+        .devices()
+        .iter()
+        .find(|device| {
+            device
+                .identity
+                .mac
+                .as_ref()
+                .is_some_and(|known| known.0 == mac)
+        })?
+        .id;
+    bench.view().devices.into_iter().find(|card| card.id == id)
+}
+
+/// Every journal entry, rendered.
+fn journal_lines(bench: &DeviceBench) -> Vec<String> {
+    bench
+        .controller
+        .devices_for_test()
+        .roster()
+        .journal()
+        .entries()
+        .map(|entry| format!("{entry:?}"))
+        .collect()
+}
+
+/// The "<Mon D>" the auto-name ends with on the bench's clock.
+fn month_day_of(bench: &DeviceBench) -> String {
+    let derived = crate::app::devices::derive_flash_name("x", bench.clock.get(), &[]);
+    derived.trim_start_matches("x · ").to_string()
+}
 
 // ---------------------------------------------------------------------
 // P1: opening a board binds the library package it is running (D1, D6)
@@ -5774,6 +6188,68 @@ fn a_held_lens_on_a_sim_that_is_off_powers_it_on_and_lands() {
     );
 }
 
+/// A failed open must name what it was actually trying to open. Lands a
+/// lens on a sim the ordinary way, detaches it (the wire goes back to the
+/// pump, the record stays Ready — the fold's own hello already landed),
+/// then kills the wire for any FURTHER bytes without touching what has
+/// already been served (the replug test's own trick:
+/// `with_disconnect_after_bytes(device.served_bytes())`), so the model's
+/// cached "this board's port is open" fact is untouched and the reopen's
+/// own hello is the first thing to hit the dead wire — exactly the "the
+/// board answered the fold's hello but not the lens's conversation" race
+/// `open_device_lens`'s failure branch names. Before the fix this logged
+/// "could not open the board in the editor" for a runtime with no board.
+#[test]
+fn a_failed_open_on_a_sim_names_the_sim_not_the_board() {
+    let device = sim_light_player();
+    let (mut bench, tasks, uid) = DeviceBench::with_sim(&device, SIM_TARGET);
+
+    drive(bench.controller.dispatch(UiAction::from_op(
+        crate::RuntimeOp::NODE_ID,
+        crate::RuntimeOp::OpenDeviceLens { uid: uid.clone() },
+    )))
+    .expect("the address is an intent to hold, never a refusal");
+    let deadline = std::time::Instant::now() + REAL_TIME_LIMIT;
+    while bench
+        .controller
+        .runtime_pool_for_test()
+        .lens_session()
+        .is_none()
+    {
+        bench.step(&tasks);
+        drive(bench.controller.try_pending_device_lens());
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the held lens never woke its sim; roster now: {:?}",
+            bench.view()
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert_eq!(bench.lens_device_uid().as_deref(), Some(uid.as_str()));
+
+    bench.detach_lens();
+    device.set_failure_plan(
+        lpa_link::providers::fake_device::FakeFailurePlan::none()
+            .with_disconnect_after_bytes(device.served_bytes()),
+    );
+
+    let error = bench
+        .open_lens(&uid)
+        .expect_err("the lens's own hello dies on the cut wire");
+    let logged = bench
+        .controller
+        .logs()
+        .iter()
+        .rev()
+        .find(|entry| entry.message.starts_with("could not open"))
+        .map(|entry| entry.message.clone());
+    assert_eq!(
+        logged,
+        Some(format!("could not open the sim in the editor: {error}")),
+        "the console line must name the SIM, never a board — there is none here"
+    );
+}
+
 /// A sim whose runtime dies before it ever says hello — the browser worker
 /// that could not fetch its engine (G1, 2026-09-07) — must not hold the
 /// open forever. The fold hears Error + Closed, spends its identify
@@ -6180,6 +6656,11 @@ fn a_build_without_web_serial_says_usb_is_unavailable() {
         !controller.device_roster_view().usb_available,
         "sims and Bluetooth, but no port to reach"
     );
+    let connect_usb = crate::OfferPath::devices().child("connect-usb");
+    assert!(
+        controller.view().offers.get(&connect_usb).is_none(),
+        "no USB offer without a port to reach"
+    );
 
     let usb_side = board();
     let (bench, _tasks) = DeviceBench::granted(&usb_side, "usb-1");
@@ -6187,6 +6668,13 @@ fn a_build_without_web_serial_says_usb_is_unavailable() {
         bench.controller.device_roster_view().usb_available,
         "a serial transport is installed"
     );
+    let view = bench.controller.view();
+    let offer = view
+        .offers
+        .get(&connect_usb)
+        .expect("devices/connect-usb is offered while USB is available");
+    assert_eq!(offer.icon, "usb");
+    assert_eq!(offer.label(), "Connect a board via USB");
 }
 
 /// One Bluetooth board, always present: a fake-device link at a `ble:`
@@ -6226,4 +6714,443 @@ impl crate::BleLinkSource for OneBleBoard {
             None => io,
         }))
     }
+}
+
+/// A library project one `PROJECT_FORMAT_VERSION` behind ("upgrades on
+/// open") pushed through the REAL path — `DevicePushOp` → `prepare_push` →
+/// `read_push_payload` → `DeviceEffectCall::PushProject` → the real
+/// `lpa-client` conversation against the fake's `LpServer`. Pins what the
+/// board is handed: the CURRENT format, never the library's old bytes (a
+/// board never migrates, ADR 2026-07-05, and refuses old bytes at boot).
+#[test]
+fn pushing_an_old_format_library_project_sends_the_current_format() {
+    use lpc_model::PROJECT_FORMAT_VERSION;
+
+    let device = empty_light_player("dev000000daqf6dvvr1");
+    let (mut bench, tasks) = identified(&device, "usb-old-format-1");
+    bench.run_until(&tasks, "the board to report nothing loaded", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.loaded_project == lpa_devices::view::LoadedProject::Empty)
+    });
+
+    // A real v10 fixture from the upgrader's corpus, installed as-is.
+    let old = PROJECT_FORMAT_VERSION - 1;
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join(format!("../lpa-upgrade/tests/corpus/v{old}/button-sign"));
+    let mut files = Vec::new();
+    for entry in std::fs::read_dir(&dir).expect("the corpus fixture exists") {
+        let entry = entry.unwrap();
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name == "README.md" {
+            continue;
+        }
+        files.push((name, std::fs::read(entry.path()).unwrap()));
+    }
+    let uid = bench
+        .store
+        .install_package(
+            "Old sign",
+            &files,
+            crate::app::library::PackageProvenance::Created,
+            1.0,
+        )
+        .expect("the old package installs")
+        .uid;
+    let before = bench.library_head(uid);
+    bench.settle_library();
+
+    let card = bench.view().devices[0].clone();
+    bench.push_gesture(
+        card.id,
+        crate::PushSource::Library {
+            project_uid: uid.to_string(),
+        },
+    );
+    bench.run_until(&tasks, "the push to finish", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.last_outcome.is_some())
+    });
+
+    let pushed = bench.pushed.borrow().clone();
+    let outcome = bench.view().devices[0].last_outcome.clone();
+    let manifest = pushed.first().and_then(|files| {
+        files
+            .iter()
+            .find(|(path, _)| path.trim_start_matches('/') == "project.json")
+            .map(|(_, bytes)| String::from_utf8_lossy(bytes).to_string())
+    });
+    let manifest = manifest.expect("the push handed the board a project.json");
+    let format = serde_json::from_str::<serde_json::Value>(&manifest).unwrap()["format"].clone();
+    assert_eq!(
+        format,
+        serde_json::json!(PROJECT_FORMAT_VERSION),
+        "the board was handed format {format}, not the current {PROJECT_FORMAT_VERSION}"
+    );
+    assert!(outcome.is_some_and(|o| o.ok), "the push landed");
+    // The migration is SAVED to the library copy (a new head, the old one
+    // kept in history as the undo), so the board's hash check compares
+    // against bytes the library actually has.
+    assert_ne!(
+        bench.library_head(uid),
+        before,
+        "the library copy was upgraded"
+    );
+}
+
+/// Like [`drive`], but sleeps between polls for the fake device's thread.
+fn drive_real<F: Future>(future: F) -> F::Output {
+    let waker = noop_waker();
+    let mut cx = Context::from_waker(&waker);
+    let mut future = core::pin::pin!(future);
+    let deadline = std::time::Instant::now() + REAL_TIME_LIMIT;
+    loop {
+        if let Poll::Ready(output) = future.as_mut().poll(&mut cx) {
+            return output;
+        }
+        assert!(std::time::Instant::now() < deadline, "timed out");
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+fn v10_corpus_files() -> Vec<(String, Vec<u8>)> {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../lpa-upgrade/tests/corpus/v10/button-sign");
+    let mut files: Vec<(String, Vec<u8>)> = std::fs::read_dir(&root)
+        .expect("corpus dir")
+        .map(|entry| {
+            let entry = entry.expect("entry");
+            (
+                entry.file_name().to_string_lossy().into_owned(),
+                std::fs::read(entry.path()).expect("corpus file"),
+            )
+        })
+        .collect();
+    files.sort();
+    files
+}
+/// A refused push leaves the board on its previous project; a good push
+/// then lands in the OTHER slot with the refused dir gone.
+#[test]
+fn a_refused_push_leaves_the_board_running_its_previous_project() {
+    let (_uid, good_files) = a_project_from_another_library(0x6b);
+    let device = light_player_running("dev000000daqf6dvvr9", good_files.clone());
+    let (_bench, _tasks, _device_uid) = running_board(&device, "usb-push-dark");
+    let mut client = lpa_client::LpClient::new(FakeDeviceIo::new(&device)).on_borrowed_wire();
+    let mut quiet = |_: String, _: Option<u8>| {};
+    let before = drive_real(client.project_list_loaded())
+        .expect("list")
+        .value;
+    let dir = before[0].path.to_string();
+    let result = drive_real(lpa_client::push_project(
+        &mut client,
+        &v10_corpus_files(),
+        "unused-hash",
+        "fallback",
+        &mut quiet,
+    ));
+    assert!(result.is_err(), "v10 push must be refused: {result:?}");
+
+    let after = drive_real(client.project_list_loaded())
+        .expect("list")
+        .value;
+    let after_paths: Vec<String> = after.iter().map(|p| p.path.to_string()).collect();
+    assert_eq!(after_paths, vec![dir.clone()], "not dark: {after_paths:?}");
+    let manifest = drive_real(client.fs_read(format!("{dir}/project.json").as_path()))
+        .map(|outcome| String::from_utf8_lossy(&outcome.value).into_owned());
+    let whole = manifest
+        .as_deref()
+        .is_ok_and(|t| !t.contains("\"format\": 10"));
+    assert!(whole, "previous project must be whole: {manifest:?}");
+
+    // A good push lands in the OTHER slot; the old one is cleaned up.
+    let good_hash = drive_real(client.hash_package("studio"))
+        .expect("hash")
+        .value;
+    let report = drive_real(lpa_client::push_project(
+        &mut client,
+        &good_files,
+        &good_hash,
+        "fallback",
+        &mut quiet,
+    ))
+    .expect("a good push lands");
+    assert_eq!(report.storage_id, "studio-b");
+    let listed = drive_real(client.fs_list_dir("/projects".as_path(), false))
+        .expect("ls")
+        .value;
+    let listed: Vec<String> = listed.iter().map(|p| p.to_string()).collect();
+    assert_eq!(listed, vec!["/projects/studio-b"]);
+}
+
+/// The P6 pull loop's apply step (`ProjectOp::ReloadActiveProject`,
+/// dispatched by `visitor_session.rs` on a fast-forward): a collaborator's
+/// update that damages a node file passes the fast-forward's own checks,
+/// the sim refuses the re-push, and the editor was left reading Ready over
+/// a runtime holding nothing. The fix fails the project the way a refused
+/// open does (D24 sends the page back to the gallery), and raises the
+/// same failure notice a refused open raises — the only route the reason
+/// reaches the user, since the visitor loop enqueues the reload and never
+/// sees the error the dispatch returns.
+#[test]
+fn a_refused_reload_fails_the_editor_instead_of_reading_ready() {
+    let (mut bench, tasks, device, good) = sim_open_bench();
+    open_package(&mut bench, &tasks, &good);
+    assert_eq!(sim_loaded(&device).len(), 1);
+    let name = bench
+        .controller
+        .project_for_test()
+        .active_library_display_name()
+        .expect("the opened project names itself");
+
+    // What a fast-forward does: new content lands in the library copy.
+    let mut copy = bench.store.open(good.parse().expect("uid")).expect("open");
+    copy.apply_update("/module.json".as_path(), Some(b"{ this is not json"))
+        .expect("write");
+    copy.record_save(2.0).expect("save");
+
+    let result = drive_real(bench.controller.dispatch(UiAction::from_op(
+        crate::ControllerId::new(ProjectController::NODE_ID),
+        ProjectOp::ReloadActiveProject,
+    )));
+    assert!(result.is_err(), "the reload is refused: {result:?}");
+    assert_eq!(sim_loaded(&device), Vec::<String>::new(), "the sim is dark");
+
+    // Without the fix the project pane still read "Ready". A failed
+    // project is not loaded, so the page falls back to the gallery (D24).
+    let view = bench.controller.view();
+    let status: Vec<String> = view.panes.iter().map(|p| p.status.label.clone()).collect();
+    assert!(view.panes.is_empty(), "not Ready over nothing: {status:?}");
+    assert!(view.home.is_some(), "the gallery stands instead");
+
+    // The console line alone is not a surface a user reads; the same
+    // failure notice a refused OPEN raises is — Retry re-opens this same
+    // package, and the message names it and says the editor closed.
+    let crate::app::open_progress::OpenStage::Failed(failure) =
+        crate::app::open_progress::open_stage()
+    else {
+        panic!(
+            "the reload left no verdict for the user: {:?}",
+            crate::app::open_progress::open_stage()
+        );
+    };
+    assert!(
+        failure.message.contains(&name),
+        "the notice names the project: {:?}",
+        failure.message
+    );
+    assert!(
+        failure.message.contains("The editor closed"),
+        "the notice says what happened: {:?}",
+        failure.message
+    );
+    assert_eq!(
+        failure.retry,
+        UiAction::from_op(
+            crate::ControllerId::new(crate::HOME_NODE_ID),
+            crate::HomeOp::OpenPackage {
+                key: good,
+                prefer: None,
+            },
+        ),
+        "Retry reopens the same package"
+    );
+}
+
+/// What the sim's runtime has loaded, asked over its own wire rather than
+/// the lens: a refused open or reload drops the lens.
+fn sim_loaded(device: &FakeEsp32Device) -> Vec<String> {
+    let mut client = lpa_client::LpClient::new(FakeDeviceIo::new(device)).on_borrowed_wire();
+    let loaded = drive_real(client.project_list_loaded())
+        .expect("list")
+        .value;
+    loaded.iter().map(|p| p.path.to_string()).collect()
+}
+
+/// A board that boots dark — its saved startup project (`/lightplayer.json`
+/// names `porch`) is one it refuses — reports nothing loaded. A push to it
+/// replaces that saved project: it lands in the saved folder's OTHER slot,
+/// the refused folder is gone once the new one runs, and the next boot
+/// resumes the pushed project. The demo folder is not involved.
+#[test]
+fn a_push_to_a_dark_board_replaces_its_saved_startup_project() {
+    let (_uid, good_files) = a_project_from_another_library(0x6c);
+    let device = dark_board_saved_at("dev000000daqf6dvvra", "porch");
+    let (_bench, _tasks, _device_uid) = running_board(&device, "usb-push-dark-saved");
+    let mut client = lpa_client::LpClient::new(FakeDeviceIo::new(&device)).on_borrowed_wire();
+    save_startup_project(&mut client, "porch");
+    let mut quiet = |_: String, _: Option<u8>| {};
+    let loaded = drive_real(client.project_list_loaded())
+        .expect("list")
+        .value;
+    assert!(loaded.is_empty(), "the board boots dark: {loaded:?}");
+
+    let report = drive_real(lpa_client::push_project(
+        &mut client,
+        &good_files,
+        &hash_of(&good_files),
+        "studio",
+        &mut quiet,
+    ))
+    .expect("a good push lands");
+
+    assert_eq!(report.storage_id, "porch-b");
+    assert_eq!(project_dirs(&mut client), vec!["/projects/porch-b"]);
+    assert_eq!(
+        saved_startup_project(&mut client).as_deref(),
+        Some("porch-b")
+    );
+    let loaded: Vec<String> = drive_real(client.project_list_loaded())
+        .expect("list")
+        .value
+        .iter()
+        .map(|p| p.path.to_string())
+        .collect();
+    assert_eq!(loaded, vec!["/projects/porch-b"]);
+}
+
+/// The same dark board, with a push it refuses too: nothing it held is
+/// touched — the saved folder is still whole, `/lightplayer.json` still names
+/// it, and the refused slot is cleaned up.
+#[test]
+fn a_refused_push_to_a_dark_board_leaves_its_saved_startup_project() {
+    let device = dark_board_saved_at("dev000000daqf6dvvrb", "porch");
+    let (_bench, _tasks, _device_uid) = running_board(&device, "usb-push-dark-refused");
+    let mut client = lpa_client::LpClient::new(FakeDeviceIo::new(&device)).on_borrowed_wire();
+    save_startup_project(&mut client, "porch");
+    let saved_manifest = drive_real(client.fs_read("/projects/porch/project.json".as_path()))
+        .expect("the saved project is on the board")
+        .value;
+    let mut quiet = |_: String, _: Option<u8>| {};
+
+    let result = drive_real(lpa_client::push_project(
+        &mut client,
+        &v10_corpus_files(),
+        "unused-hash",
+        "studio",
+        &mut quiet,
+    ));
+    let error = result.expect_err("a v10 push is refused").to_string();
+    assert!(
+        error.contains("porch"),
+        "the error names what the board kept: {error}"
+    );
+    assert_eq!(project_dirs(&mut client), vec!["/projects/porch"]);
+    assert_eq!(saved_startup_project(&mut client).as_deref(), Some("porch"));
+    let after = drive_real(client.fs_read("/projects/porch/project.json".as_path()))
+        .expect("the saved project is still on the board")
+        .value;
+    assert_eq!(after, saved_manifest, "the saved project is whole");
+}
+
+/// A board that boots dark (its saved startup project, `porch`, is one it
+/// refuses) reports nothing loaded. Removing "the project" from it must
+/// target that SAVED folder — the same lookup the push conversation uses —
+/// never the fallback slot, which would leave `porch` (and the board's
+/// retry-at-boot loop) completely untouched while creating nothing where
+/// the fallback names.
+///
+/// `startup_project` is left naming `porch` afterwards: a removal, like a
+/// push, only ever writes it through a later successful load, never through
+/// a delete — the same thing happens when the removed project IS the one
+/// the board runs (`remove_project` never touches `/lightplayer.json`
+/// either way).
+#[test]
+fn a_removal_on_a_dark_board_deletes_its_saved_startup_project() {
+    let device = dark_board_saved_at("dev000000daqf6dvvrd", "porch");
+    let (_bench, _tasks, _device_uid) = running_board(&device, "usb-remove-dark");
+    let mut client = lpa_client::LpClient::new(FakeDeviceIo::new(&device)).on_borrowed_wire();
+    save_startup_project(&mut client, "porch");
+    let mut quiet = |_: String, _: Option<u8>| {};
+    let loaded = drive_real(client.project_list_loaded())
+        .expect("list")
+        .value;
+    assert!(loaded.is_empty(), "the board boots dark: {loaded:?}");
+
+    let report = drive_real(lpa_client::remove_project(
+        &mut client,
+        "studio",
+        &mut quiet,
+    ))
+    .expect("removed");
+
+    assert_eq!(
+        report.storage_id, "porch",
+        "the saved folder is removed, not the fallback slot"
+    );
+    assert!(
+        !report.was_loaded,
+        "the board was not running it — it was dark"
+    );
+    assert_eq!(
+        project_dirs(&mut client),
+        Vec::<String>::new(),
+        "the saved project is gone and the fallback folder was never created"
+    );
+    assert_eq!(
+        saved_startup_project(&mut client).as_deref(),
+        Some("porch"),
+        "a removal only ever writes startup_project through a later load, \
+         never through a delete — it is left naming the now-gone folder"
+    );
+}
+
+/// A board seeded with a project it refuses at boot (a format-behind
+/// package) in `/projects/<dir>`: it boots dark.
+fn dark_board_saved_at(uid: &str, dir: &str) -> FakeEsp32Device {
+    FakeEsp32Device::new(FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new()
+            .with_identity(FakeDeviceIdentity::new(uid, "Bench board"))
+            .with_base_mac(BENCH_BOARD_MAC)
+            .with_heartbeat_interval(Duration::from_millis(20))
+            .with_project_files(v10_corpus_files())
+            .with_project_dir(dir)
+            .with_loaded_project(),
+    )))
+}
+
+/// What a board that once loaded `dir` over the wire holds in
+/// `/lightplayer.json` (the server's `persist_startup_project`). The fake's
+/// boot loads straight from its seed dir and never writes it, so the test
+/// writes it the way an earlier session's load would have.
+fn save_startup_project(client: &mut lpa_client::LpClient<FakeDeviceIo>, dir: &str) {
+    let json = format!(r#"{{"startup_project":"{dir}"}}"#);
+    drive_real(client.fs_write("/lightplayer.json".as_path(), json.into_bytes()))
+        .expect("the board config writes");
+}
+
+/// The folder `/lightplayer.json` says the board boots.
+fn saved_startup_project(client: &mut lpa_client::LpClient<FakeDeviceIo>) -> Option<String> {
+    let bytes = drive_real(client.fs_read("/lightplayer.json".as_path()))
+        .ok()?
+        .value;
+    serde_json::from_slice::<serde_json::Value>(&bytes).ok()?["startup_project"]
+        .as_str()
+        .map(str::to_string)
+}
+
+/// Every project folder on the board.
+fn project_dirs(client: &mut lpa_client::LpClient<FakeDeviceIo>) -> Vec<String> {
+    let mut dirs: Vec<String> = drive_real(client.fs_list_dir("/projects".as_path(), false))
+        .expect("ls")
+        .value
+        .iter()
+        .map(|p| p.to_string())
+        .collect();
+    dirs.sort();
+    dirs
+}
+
+/// The canonical package hash the board computes over `files`.
+fn hash_of(files: &[(String, Vec<u8>)]) -> String {
+    let fs = lpfs::LpFsMemory::new();
+    for (relative, bytes) in files {
+        lpfs::LpFs::write_file(&fs, format!("/{relative}").as_str().as_path(), bytes)
+            .expect("seed");
+    }
+    lpc_history::hash_package(&fs).expect("hash").0.to_string()
 }

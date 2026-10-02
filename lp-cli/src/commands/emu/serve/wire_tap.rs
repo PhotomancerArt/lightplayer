@@ -155,11 +155,20 @@ fn annotate(out: &mut impl Write, unix_us: u128, item: &SniffedWire) -> std::io:
             unix_us,
             &format!("gap: {skipped} frame(s) {dir:?} never seen"),
         ),
-        SniffedWire::Console { .. } | SniffedWire::Session { .. } => Ok(()),
+        // Sealed frames carry nothing a tap can decode; their bytes are in
+        // the chunk records as they went.
+        SniffedWire::Console { .. } | SniffedWire::Session { .. } | SniffedWire::Sealed { .. } => {
+            Ok(())
+        }
     }
 }
 
 /// A `P` or `Q` record: one message's `M!{json}` line and its payload size.
+///
+/// Built whole, then handed to `out` as a single `write_all`: a kill lands
+/// either before or after the record, never mid-record (`Serve::shutdown`
+/// SIGKILLs the child; three separate writes each left a window for a
+/// truncated trailing record).
 fn write_message(
     out: &mut impl Write,
     unix_us: u128,
@@ -168,28 +177,33 @@ fn write_message(
     payload_len: usize,
 ) -> std::io::Result<()> {
     let line = format!("M!{json}\n");
-    writeln!(out, "{unix_us} {kind} {} {payload_len}", line.len())?;
-    out.write_all(line.as_bytes())?;
-    out.write_all(b"\n")
+    let mut record = format!("{unix_us} {kind} {} {payload_len}\n", line.len()).into_bytes();
+    record.extend_from_slice(line.as_bytes());
+    record.push(b'\n');
+    out.write_all(&record)
 }
 
 /// An `E` record: something on the link that could not be read, and why.
+/// One `write_all`, for the same reason as [`write_message`].
 fn write_error(out: &mut impl Write, unix_us: u128, error: &str) -> std::io::Result<()> {
-    writeln!(out, "{unix_us} E {}", error.len())?;
-    out.write_all(error.as_bytes())?;
-    out.write_all(b"\n")
+    let mut record = format!("{unix_us} E {}\n", error.len()).into_bytes();
+    record.extend_from_slice(error.as_bytes());
+    record.push(b'\n');
+    out.write_all(&record)
 }
 
-/// One record, in the tap's format.
+/// One record, in the tap's format. One `write_all`, for the same reason as
+/// [`write_message`].
 fn write_record(
     out: &mut impl Write,
     unix_us: u128,
     direction: TapDirection,
     bytes: &[u8],
 ) -> std::io::Result<()> {
-    writeln!(out, "{unix_us} {} {}", direction.marker(), bytes.len())?;
-    out.write_all(bytes)?;
-    out.write_all(b"\n")
+    let mut record = format!("{unix_us} {} {}\n", direction.marker(), bytes.len()).into_bytes();
+    record.extend_from_slice(bytes);
+    record.push(b'\n');
+    out.write_all(&record)
 }
 
 #[cfg(test)]

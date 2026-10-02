@@ -935,6 +935,16 @@ pub enum Outcome {
     /// A `--break-at` symbol was reached; the guest is stopped at its first
     /// instruction with every register as the caller left it.
     Breakpoint { cycle: Cycles, pc: u32 },
+    /// The guest wrote `PMU.slp_wakeup_cntl0.sleep_req = 1` with
+    /// `LP_AON.store9` bit 0 (the deep-sleep flag) set — esp-hal's
+    /// `RtcSleepConfig::start_sleep` deep-sleep path
+    /// (`third_party/esp-hal/src/rtc_cntl/sleep/esp32c6.rs`), which then
+    /// spins on `PMU.int_raw` waiting for a wake this emulator does not
+    /// model. Reported rather than modelled (out of scope: the wake
+    /// itself): `wake` is the armed wake sources decoded from
+    /// `LP_AON.ext_wakeup_cntl` and `PMU.slp_wakeup_cntl2`
+    /// (`periph::accept::decode_deep_sleep_wake`).
+    DeepSleep { cycle: Cycles, wake: String },
 }
 
 impl Outcome {
@@ -942,7 +952,7 @@ impl Outcome {
     pub const fn exit_code(&self) -> i32 {
         match self {
             Outcome::ExitMatched { .. } | Outcome::Deadline { .. } => 0,
-            Outcome::Fault { .. } | Outcome::Reset { .. } => 2,
+            Outcome::Fault { .. } | Outcome::Reset { .. } | Outcome::DeepSleep { .. } => 2,
             Outcome::StrictBus { .. } => 3,
             Outcome::WallTimeout { .. } => 4,
             Outcome::Breakpoint { .. } => 5,
@@ -5119,6 +5129,59 @@ impl Esp32C6Machine {
                     pc,
                 };
             }
+            // `PMU.slp_wakeup_cntl0.sleep_req` is bit 31 (esp32c6 PAC:
+            // write-only, `SLEEP_REQ_W::new(self, 31)`); accept.rs's PMU
+            // block only remembers what was written, so a peek is the only
+            // way to see it. Gated on that one cheap word first: the second
+            // peek (and the decode) only run once a guest has actually
+            // asked to sleep.
+            //
+            // The peeks go through `peek_word`, which reads through the same
+            // traced, graded MMIO path a guest access does — and both the
+            // trace's spin detector and `--strict-grade` cannot tell a host
+            // peek from a guest read:
+            //
+            // - Run every slice, a `(pc=0, PMU/LP_AON offset)` read falls
+            //   between every consecutive pair of the guest's own identical
+            //   reads (e.g. esp-println's `USB_DEVICE.ep1_conf` wait) and
+            //   resets the run length the spin detector is counting, so the
+            //   `SPIN` line this emulator exists to print never fires
+            //   (`boot_idle.rs`/`boot_no_radio.rs`'s "no radio SPIN left"
+            //   assertions, red on this check before the trace was borrowed
+            //   out).
+            // - `check_grade` runs unconditionally (not gated on the trace)
+            //   and records the *first* access below the run's
+            //   `--strict-grade` level; PMU/LP_AON are graded `Modeled`, so
+            //   a `--strict-grade documented` run (`usb_attached.rs`'s
+            //   survey test) saw this peek's `(pc=0, cycle=8192)` as that
+            //   first violation instead of the boot's own first one, before
+            //   strict-grade was suspended around it too.
+            //
+            // Both are borrowed out and restored around the four peeks, so
+            // they are as invisible to the trace and the grade as they are
+            // to the guest.
+            let saved_trace = std::mem::take(&mut self.bus.trace);
+            let saved_grade = self.bus.strict_grade();
+            self.bus.set_strict_grade(None);
+            let sleep_req = self
+                .peek_word(memmap::periph::PMU + 0x120)
+                .is_some_and(|v| v & (1 << 31) != 0);
+            let deep_sleep_flag = self
+                .peek_word(memmap::periph::LP_AON + 0x024)
+                .is_some_and(|v| v & 1 != 0);
+            let wake = (sleep_req && deep_sleep_flag).then(|| {
+                let wakeup_ena = self.peek_word(memmap::periph::PMU + 0x128).unwrap_or(0);
+                let ext_wakeup_cntl = self.peek_word(memmap::periph::LP_AON + 0x040).unwrap_or(0);
+                periph::accept::decode_deep_sleep_wake(wakeup_ena, ext_wakeup_cntl)
+            });
+            self.bus.set_strict_grade(saved_grade);
+            self.bus.trace = saved_trace;
+            if let Some(wake) = wake {
+                return Outcome::DeepSleep {
+                    cycle: self.cycles(),
+                    wake,
+                };
+            }
             if let Some(lp_emu_esp_common::MachineRequest::Reset {
                 source,
                 at,
@@ -6105,6 +6168,53 @@ mod tests {
             ),
             "{out:?}"
         );
+    }
+
+    /// The trigger the `emu-c6-deep-sleep-spins` ticket names: a write
+    /// of `PMU.slp_wakeup_cntl0.sleep_req = 1` (bit 31) with
+    /// `LP_AON.store9` bit 0 set stops the machine instead of spinning
+    /// silently to the wall net. Register writes straight from the host
+    /// side, the same way `a_reset_request_from_a_peripheral_ends_the_run_
+    /// with_exit_code_two` arms the RWDT — this machine never runs the
+    /// esp-hal sequence itself, only the two registers it ends with
+    /// (`third_party/esp-hal/src/rtc_cntl/sleep/esp32c6.rs::start_sleep`).
+    ///
+    /// Before this change nothing reads `slp_wakeup_cntl0` back, so the run
+    /// reaches its deadline instead of stopping — this test fails on that
+    /// code with `Outcome::Deadline`, not `Outcome::DeepSleep`.
+    #[test]
+    fn a_deep_sleep_request_stops_the_machine_with_a_decoded_wake_reason() {
+        let mut m = Esp32C6Builder::new().build().unwrap();
+        // A guest that does nothing further: the stop has to come from the
+        // register peek, not from the guest reading its own request back.
+        m.bus
+            .load_image(memmap::HP_SRAM_BASE, &0x0000_006fu32.to_le_bytes())
+            .unwrap();
+        m.harts[0].set_pc(memmap::HP_SRAM_BASE);
+
+        // `Ext1WakeupSource::apply`: GPIO0 armed, wake level high.
+        let lp_aon = memmap::periph::LP_AON;
+        m.bus
+            .write_word(lp_aon + 0x040, (1 << 15) | (1 << 23))
+            .unwrap();
+        // `lp_aon_hal_inform_wakeup_type`: store9 bit 0 set for deep sleep.
+        m.bus.write_word(lp_aon + 0x024, 1).unwrap();
+        // `pmu_ll_hp_set_wakeup_enable`: EXT1 alone.
+        let pmu = memmap::periph::PMU;
+        m.bus.write_word(pmu + 0x128, 1 << 1).unwrap();
+        // `pmu_ll_hp_set_sleep_enable`: the write that starts the spin on
+        // real esp-hal.
+        m.bus.write_word(pmu + 0x120, 1 << 31).unwrap();
+
+        let out = m.run_until(&StopCondition::after_micros(10_000));
+        assert!(
+            matches!(
+                out,
+                Outcome::DeepSleep { ref wake, .. } if wake == "ext1 wake: gpio0 high"
+            ),
+            "{out:?}"
+        );
+        assert_eq!(out.exit_code(), 2);
     }
 
     /// A reboot moves the clock's origin, and `run_until`'s stop is an

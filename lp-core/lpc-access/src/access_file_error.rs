@@ -18,6 +18,9 @@ pub enum AccessFileError {
     ZeroIterations { label: String },
     /// More secrets than [`crate::MAX_SECRETS_PER_FILE`].
     TooManySecrets(usize),
+    /// A secret whose salt is all zero: the salt is a secure link's key id,
+    /// and all zero is the anonymous key's, which no entry may claim.
+    ZeroSalt { label: String },
 }
 
 impl fmt::Display for AccessFileError {
@@ -34,6 +37,10 @@ impl fmt::Display for AccessFileError {
                 f,
                 "{count} secrets in one access file (at most {})",
                 crate::MAX_SECRETS_PER_FILE
+            ),
+            Self::ZeroSalt { label } => write!(
+                f,
+                "secret {label:?} has an all-zero salt (the anonymous key's id)"
             ),
         }
     }

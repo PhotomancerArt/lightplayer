@@ -2456,6 +2456,11 @@ fmt-check:
 # compile it for its real target.
 clippy-host:
     cargo clippy --workspace --exclude lps-builtins-emu-app --exclude fw-esp32c6 --exclude fw-esp32s3 --exclude fw-esp32v3 --exclude fw-emu --exclude lp-riscv-emu-guest-test-app --exclude lp-riscv-emu-guest --exclude lp-xt-fp-harness --exclude lp-gfx-wgpu --exclude fw-browser --exclude naga-wasm-poc -- --no-deps -D warnings
+    # fw-esp32-common's usb_link/uart_link modules are behind non-default
+    # features (`clippy-host`'s `--workspace` only lints its defaults), the
+    # same gap `test-rust-core` closes above for the tests.
+    cargo clippy -p fw-esp32-common --features usb-link,server --all-targets -- --no-deps -D warnings
+    cargo clippy -p fw-esp32-common --features uart-link,server --all-targets -- --no-deps -D warnings
 
 # `lp-emu-esp32c6` with the `jit` feature on — the native translated build.
 #
@@ -2683,18 +2688,32 @@ test-rust-core:
     # lp-link's simulator and delivery property need its `sim` feature; the
     # comms lab's halves over the simulator need `lab` too.
     cargo test -p lp-link --features sim,lab
+    # ...and again with the secure channel: the snow oracle, the RFC vectors,
+    # and the simulator, fuzzer and allocation tests' secure cases.
+    cargo test -p lp-link --features sim,lab,secure
+    # lpc-wire's secure-initiator port (feature `secure-link`).
+    cargo test -p lpc-wire --features secure-link,ser-write-json
+    # fw-esp32-common's usb_link module (the C6/S3 host link) sits behind the
+    # non-default `usb-link` feature, and needs `server` for the transport's
+    # `lpc_wire` dependency. Plain `cargo test` above never turns it on, so
+    # these tests (and the classic's uart_link pair below) never ran in CI
+    # until this line (docs: lp2025/_auto/2026-10-01-fw-common-link-tests-never-run).
+    cargo test -p fw-esp32-common --features usb-link,server
+    # ...and the classic's UART0 host link (feature `uart-link`), same reason.
+    cargo test -p fw-esp32-common --features uart-link,server
 
 # lp-link (the link-layer prototype, plan lp2025/2026-09-26-1720-reliable-device-link):
 # the delivery property at soak depth, 5,000 fault schedules per ARQ variant
 # (release, ~3 min). CI runs 500 per variant inside `test-rust-core`.
 link-soak cases="5000":
-    PROPTEST_CASES={{cases}} cargo test -p lp-link --features sim --release --test delivery_properties
+    PROPTEST_CASES={{cases}} cargo test -p lp-link --features sim,secure --release --test delivery_properties
 
 # lp-link's decoder fuzzing at depth: arbitrary bytes, datagrams and crafted
-# frames against a live link, `cases` per framing (release, ~12 s at 20,000).
+# frames against a live link, `cases` per framing (release, ~12 s at 20,000),
+# plain and secure (the secure cases add replays, forged SYNs and msg1 floods).
 # CI runs 256 per framing inside `test-rust-core`.
 link-fuzz cases="20000":
-    PROPTEST_CASES={{cases}} cargo test -p lp-link --release --test decoder_fuzz
+    PROPTEST_CASES={{cases}} cargo test -p lp-link --features sim,secure --release --test decoder_fuzz
 
 # lp-link's tables: compare | sweep | crc | codec | logs | ram | all. The link
 # rows are simulated; `codec` (and the top of `crc`) is host CPU throughput.
@@ -2709,11 +2728,22 @@ link-size:
 # lp-link builds for the board (riscv32, no_std) and the page (wasm32) with
 # the features those builds turn on, and lints clean with every feature on
 # (`clippy-host` sees only its default features, so the simulator, the lab and
-# the tests behind them were unlinted). Part of `check-lint`.
+# the tests behind them were unlinted). Part of `check-lint`. The `secure`
+# lines prove the secure channel builds no_std for both, and the last line
+# that no RNG crate (`getrandom`) reaches either graph: entropy is injected.
 check-lp-link-targets: install-rv32-target install-wasm32-target
     cargo check -p lp-link --target {{ rv32_target }} --features log,lab
     cargo check -p lp-link --target {{ wasm32_target }} --features log,lab
+    cargo check -p lp-link --target {{ rv32_target }} --features log,lab,secure
+    cargo check -p lp-link --target {{ wasm32_target }} --features log,lab,secure
+    cargo check -p lpc-wire --target {{ wasm32_target }} --features secure-link
     cargo clippy -p lp-link --features sim,lab,log --all-targets -- --no-deps -D warnings
+    cargo clippy -p lp-link --features sim,lab,log,secure --all-targets -- --no-deps -D warnings
+    for t in {{ rv32_target }} {{ wasm32_target }}; do \
+        if cargo tree -p lp-link --features log,lab,secure -e normal,features --target $t | grep -E 'getrandom|precomputed-tables'; then \
+            echo "lp-link/secure pulls an RNG or curve25519's precomputed tables on $t" >&2; exit 1; \
+        fi; \
+    done
 
 # The comms lab on the emulated C6 (plan reliable-device-link, M3): lp-link in
 # the `test_comms_lab` image against `lp-cli link lab`'s host half, with the
@@ -2908,7 +2938,7 @@ test-glsl-filetests:
 # Warm ~1s, cold ~47s locally; it runs beside clippy, the Lint job's long
 # pole. See docs/debt/wasm-cloud-check-not-in-just-check.md.
 [parallel]
-check-lint: fmt-check clippy check-wasm-cloud check-lp-link-targets check-lpc-engine-gates check-studio-core-minimal lint-serde-content lint-browser-test-harness lint-classic-capture lint-pcb-export lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-nested-patches lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities lint-red-main-needs lint-tag-next-version lint-web-actions
+check-lint: fmt-check clippy check-wasm-cloud check-lp-link-targets check-lpc-engine-gates check-studio-core-minimal lint-serde-content lint-browser-test-harness lint-classic-capture lint-pcb-export lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-nested-patches lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities lint-red-main-needs lint-tag-next-version lint-web-actions lint-core-action-fields
 
 [parallel]
 check: check-lint schema-check fw-manifest-check-emu
@@ -2976,6 +3006,12 @@ lint-tw-utilities:
 # locks a drop in. docs/adr/2026-10-01-agentic-control-offers-in-core.md.
 lint-web-actions *args:
     python3 scripts/check-web-actions.py {{ args }}
+
+# The core action-fields ratchet: action-carrying pub fields on Studio core
+# view types may only go down — a verb belongs in the offer tree, at a path
+# (docs/adr/2026-10-01-agentic-control-offers-in-core.md). `--bless` records a drop.
+lint-core-action-fields *args:
+    python3 scripts/check-core-action-fields.py {{ args }}
 
 # Guard against schemars reaching the RV32 firmware graphs (schema generation is host-only; see script).
 lint-schemars-fw:

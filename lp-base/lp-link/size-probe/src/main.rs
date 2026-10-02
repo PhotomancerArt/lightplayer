@@ -46,7 +46,124 @@ pub extern "C" fn _start() -> ! {
     exercise::<lp_link::GoBackN<127>>();
     #[cfg(feature = "sr")]
     exercise::<lp_link::SelectiveRepeat>();
+    #[cfg(feature = "crypto")]
+    exercise_crypto();
+    #[cfg(feature = "sr-secure")]
+    exercise_secure_link();
     loop {}
+}
+
+/// A selective-repeat link built secure, every entry point driven, the
+/// edge's secure calls included (the role is an input, so both are linked).
+#[cfg(feature = "sr-secure")]
+fn exercise_secure_link() {
+    use lp_link::secure_channel::{KeyId, Psk, RefusalReason, SecureEvent, SecureRole};
+    use lp_link::{CH_LOG, LinkConfig, LinkEvent, SelectiveRepeat};
+    fn entropy(buf: &mut [u8]) {
+        for (i, b) in buf.iter_mut().enumerate() {
+            *b = input(200 + i % 64);
+        }
+    }
+    let mut cfg = LinkConfig::usb();
+    cfg.max_payload = u16::from_le_bytes([input(1), input(2)]);
+    let role = if input(3) != 0 {
+        SecureRole::Responder
+    } else {
+        SecureRole::Initiator {
+            key_id: KeyId(core::array::from_fn(|i| input(100 + i))),
+            psk: Psk::new(core::array::from_fn(|i| input(120 + i))),
+        }
+    };
+    let mut link = lp_link::Link::<SelectiveRepeat>::new_secure(
+        cfg,
+        u32::from_le_bytes([input(6), input(7), input(8), input(9)]),
+        role,
+        entropy,
+    );
+    // SAFETY: single-threaded bare-metal probe; nothing else touches it.
+    let ring = unsafe { &mut *addr_of_mut!(LOG_RING_SECURE) };
+    let mut now = 0u64;
+    loop {
+        now += input(10) as u64;
+        let n = input(11) as usize;
+        // SAFETY: as above.
+        let bytes = unsafe { &(&*addr_of!(INPUT))[..n] };
+        match input(12) {
+            0 => link.on_bytes(now, bytes),
+            1 => link.on_datagram(now, bytes),
+            2 => {
+                let _ = link.send(input(13), bytes);
+            }
+            4 => link.restart(now),
+            5 => link.retry_with(KeyId([input(14); 16]), Psk::new([input(15); 32])),
+            _ => {}
+        }
+        while let Some(ev) = link.poll_secure_event() {
+            match ev {
+                SecureEvent::KeyLookup { key_id } if input(16) != 0 => {
+                    link.provide_keys(key_id, &[Psk::new([input(17); 32])])
+                }
+                SecureEvent::KeyLookup { key_id } => {
+                    link.refuse(key_id, RefusalReason::Backoff, input(18) as u32)
+                }
+                _ => sink(&[1]),
+            }
+        }
+        link.pump_log(now, ring, CH_LOG);
+        while let Some(f) = link.poll_transmit(now) {
+            sink(f);
+        }
+        while let Some(ev) = link.recv() {
+            if let LinkEvent::Message { data, .. } | LinkEvent::Text(data) = ev {
+                sink(&data);
+            }
+        }
+        sink(&[
+            link.counters().seal_failures as u8,
+            link.session_auth().map_or(0, |a| a.candidate),
+            link.poll_timeout().unwrap_or(0) as u8,
+        ]);
+    }
+}
+
+#[cfg(feature = "sr-secure")]
+static mut LOG_RING_SECURE: lp_link::LogRing<1024> = lp_link::LogRing::new();
+
+/// `size_of` a secure-capable link on this target.
+#[cfg(feature = "sr-secure")]
+#[used]
+#[unsafe(no_mangle)]
+static LINK_STRUCT_SIZE_SR_SECURE: [u8; core::mem::size_of::<
+    lp_link::Link<lp_link::SelectiveRepeat>,
+>()] = [0; core::mem::size_of::<lp_link::Link<lp_link::SelectiveRepeat>>()];
+
+/// Both NNpsk0 roles and one seal/open, on inputs the optimizer cannot see.
+#[cfg(feature = "crypto")]
+fn exercise_crypto() {
+    use lp_link::secure_channel::{
+        Initiator, KeyId, MSG2_LEN, Psk, Responder, cipher_state::CipherKey, prologue,
+    };
+    let bytes = |at: usize| -> [u8; 32] { core::array::from_fn(|i| input(at + i)) };
+    let key_id = KeyId(core::array::from_fn(|i| input(100 + i)));
+    let p = prologue(&key_id, u32::from_le_bytes([input(0), input(1), input(2), input(3)]));
+    let psk = Psk::new(bytes(150));
+    let init = Initiator::new(&p, &psk, bytes(200));
+    sink(init.msg1());
+    if let Ok(ready) = Responder::new(&p).read_msg1(init.msg1(), &psk) {
+        let mut msg2 = [0u8; MSG2_LEN];
+        if let Ok(keys) = ready.write_msg2(bytes(250), &[input(4); 4], &mut msg2) {
+            sink(&keys.send);
+        }
+        let mut payload = [0u8; 4];
+        if let Ok(keys) = init.read_msg2(&msg2, &mut payload) {
+            let key = CipherKey::new(keys.send);
+            // SAFETY: single-threaded bare-metal probe.
+            let buf = unsafe { &mut (&mut *addr_of_mut!(INPUT))[300..300 + input(5) as usize % 200] };
+            let tag = key.seal(input(6) as u64, &[input(7); 4], buf);
+            sink(&tag);
+            sink(&[key.open(input(8) as u64, &[input(9); 4], buf, &tag).is_ok() as u8]);
+        }
+    }
 }
 
 /// The two checksums as standalone symbols, for reading their inner loops
@@ -87,10 +204,10 @@ static LINK_STRUCT_SIZE_SR: [u8; core::mem::size_of::<lp_link::Link<lp_link::Sel
 static LINK_STRUCT_SIZE_GBN: [u8; core::mem::size_of::<lp_link::Link<lp_link::GoBackN<127>>>()] =
     [0; core::mem::size_of::<lp_link::Link<lp_link::GoBackN<127>>>()];
 
-#[cfg(not(feature = "base"))]
+#[cfg(any(feature = "noarq", feature = "sw", feature = "gbn", feature = "sr"))]
 static mut LOG_RING: lp_link::LogRing<1024> = lp_link::LogRing::new();
 
-#[cfg(not(feature = "base"))]
+#[cfg(any(feature = "noarq", feature = "sw", feature = "gbn", feature = "sr"))]
 fn exercise<A: lp_link::Arq>() {
     use lp_link::{CH_LOG, CrcKind, Framing, LinkConfig, LinkEvent};
     let mut cfg = LinkConfig::usb();
