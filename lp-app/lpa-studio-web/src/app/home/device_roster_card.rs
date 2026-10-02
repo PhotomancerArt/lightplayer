@@ -186,6 +186,15 @@ pub(crate) fn DeviceRosterCard(
     /// Stories only: mount "Who has access" open.
     #[props(default)]
     access_panel_open: bool,
+    /// What the card says and offers about the board's files across a
+    /// layout change (the C6 repartition): the question or the refusal
+    /// (a sheet), a board holding its files, a backup waiting to go back.
+    /// Joined at the app view; `None` when there is nothing to say.
+    #[props(default)]
+    layout: Option<lpa_studio_core::UiDeviceLayout>,
+    /// Stories: pin the layout sheet in the card's box, not the viewport.
+    #[props(default)]
+    layout_sheet_inline: bool,
     /// Open the header's ⋯ menu immediately (stories only).
     #[props(default = false)]
     menu_initially_open: bool,
@@ -282,7 +291,28 @@ pub(crate) fn DeviceRosterCard(
     } else {
         project_line_text(&card, busy_zone)
     };
-    let firmware_line = firmware_line_text(&card, identity_line.board.as_deref(), busy_zone);
+    // A board whose files are waiting (held, or in a backup) says so in
+    // the firmware line rather than in a new row: the card's height holds.
+    let layout_line = layout
+        .as_ref()
+        .and_then(|layout| layout.line.clone())
+        .filter(|_| busy_zone.is_none());
+    let firmware_line = match layout_line {
+        Some(line) => line,
+        None => firmware_line_text(&card, identity_line.board.as_deref(), busy_zone),
+    };
+    // The refusal sheet closes in the page (it has no Cancel: nothing is
+    // running). Remembered by value, so a NEW refusal rises again.
+    let mut closed_sheet = use_signal(|| None::<lpa_studio_core::UiLayoutPanel>);
+    let layout_sheet = layout
+        .as_ref()
+        .and_then(|layout| layout.panel.clone())
+        .filter(|panel| closed_sheet.read().as_ref() != Some(panel));
+    let finish_update = layout
+        .as_ref()
+        .and_then(|layout| layout.finish_update.clone());
+    let restore_files = layout.as_ref().and_then(|layout| layout.restore.clone());
+    let backup_download = layout.as_ref().and_then(|layout| layout.download.clone());
     let device_line = match access.as_ref().and_then(|access| access.line.as_deref()) {
         // Over Bluetooth the login leads: it is what decides what the
         // card can do, and at 375 px the freshness is what truncates.
@@ -474,6 +504,35 @@ pub(crate) fn DeviceRosterCard(
                                 on_action,
                             }
                         }
+                    } else if let Some(action) = finish_update {
+                        // A board holding its files for a layout change:
+                        // the Update verb, relabelled by core, finishes it.
+                        ActionButton {
+                            key: "{\"finish-update\"}",
+                            action,
+                            running: false,
+                            variant: ActionButtonVariant::Quiet,
+                            on_action,
+                        }
+                    } else if let Some(action) = restore_files {
+                        // A board that came back without its files while
+                        // a backup of them waits in this browser.
+                        ActionButton {
+                            key: "{\"restore-files\"}",
+                            action,
+                            running: false,
+                            variant: ActionButtonVariant::Quiet,
+                            on_action,
+                        }
+                        if let Some(action) = backup_download {
+                            ActionButton {
+                                key: "{\"download-backup\"}",
+                                action,
+                                running: false,
+                                variant: ActionButtonVariant::Quiet,
+                                on_action,
+                            }
+                        }
                     } else {
                         match verb {
                             // The blank board's face: the chip-filtered
@@ -653,6 +712,20 @@ pub(crate) fn DeviceRosterCard(
                             on_action,
                         }
                     }
+                }
+            }
+            // The layout question (or refusal): a sheet over the page, so
+            // asking never changes the card's height.
+            if let Some(panel) = layout_sheet {
+                super::device_layout_sheet::DeviceLayoutSheet {
+                    on_close: panel.cancel.is_none().then(|| {
+                        let refusal = panel.clone();
+                        EventHandler::new(move |_| closed_sheet.set(Some(refusal.clone())))
+                    }),
+                    panel,
+                    device_name: card.title.clone(),
+                    inline: layout_sheet_inline,
+                    on_action,
                 }
             }
         }
@@ -1656,6 +1729,7 @@ mod tests {
             percent: Some(42),
             cancellable: true,
             cancel_requested: false,
+            layout: None,
         };
         assert_eq!(activity_line_text(&activity), "Flashing firmware · 42%");
 
@@ -1743,6 +1817,7 @@ mod tests {
             percent: Some(40),
             cancellable: true,
             cancel_requested: false,
+            layout: None,
         });
         assert_eq!(
             project_line_text(&card, Some(ZoneKind::Project)),
@@ -1806,6 +1881,7 @@ mod tests {
             percent: Some(62),
             cancellable: true,
             cancel_requested: false,
+            layout: None,
         });
         assert_eq!(
             firmware_line_text(&card, None, Some(ZoneKind::Firmware)),
@@ -1838,6 +1914,7 @@ mod tests {
             percent: Some(40),
             cancellable: true,
             cancel_requested: false,
+            layout: None,
         });
         assert_eq!(
             device_line_text(&card, Some(ZoneKind::Device)),
@@ -1915,6 +1992,7 @@ mod tests {
             percent: None,
             cancellable: true,
             cancel_requested: false,
+            layout: None,
         });
         assert_eq!(
             feed_pill(&busy, Some(&feed_fixture(FeedLiveness::Live, true))),
@@ -1966,6 +2044,7 @@ mod tests {
             percent: None,
             cancellable: true,
             cancel_requested: false,
+            layout: None,
         });
         assert_eq!(
             preview_slot_sentence(&busy, Some(&feed_fixture(FeedLiveness::Live, true))),
@@ -2028,6 +2107,7 @@ mod tests {
             percent: None,
             cancellable: true,
             cancel_requested: false,
+            layout: None,
         });
         assert_eq!(
             preview_sentence(&card),

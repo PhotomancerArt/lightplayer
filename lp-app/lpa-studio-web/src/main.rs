@@ -4,6 +4,8 @@ mod clipboard;
 pub mod cloud;
 pub mod core;
 mod dev_url_flags;
+#[cfg(target_arch = "wasm32")]
+mod device_backup_store_opfs;
 mod device_events_io;
 mod device_hint;
 pub mod exploration;

@@ -113,11 +113,8 @@ pub fn device_layout_view(
     }
     // A board holding its files for a migration: the Update verb finishes it.
     if fs == BoardFs::LegacyHeld {
-        layout.line = Some(
-            "This board's files are waiting from an earlier update. Finish the update to \
-             move them."
-                .to_string(),
-        );
+        layout.line =
+            Some("This board's files are waiting — Finish update moves them.".to_string());
         if let Some(FirmwareVerb::Update(choice)) = firmware_verb(view) {
             layout.finish_update = Some(
                 DevicesOp::action_for(Action::Flash {

@@ -381,6 +381,12 @@ pub fn App() -> Element {
         #[cfg(target_arch = "wasm32")]
         {
             controller.set_device_spawner(wasm_bindgen_futures::spawn_local);
+            // Where a board's backup goes before an update moves its files
+            // to a new layout (the C6 repartition): OPFS, read back before
+            // the board is written.
+            controller.set_device_backup_store(Rc::new(
+                crate::device_backup_store_opfs::OpfsDeviceBackupStore,
+            ));
             let provider = Rc::new(lpa_studio_core::BrowserSerialEsp32Provider::with_options(
                 Default::default(),
             ));

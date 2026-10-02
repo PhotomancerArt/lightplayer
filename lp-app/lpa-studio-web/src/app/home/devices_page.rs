@@ -82,6 +82,10 @@ pub fn DevicesPage(
 
     rsx! {
         div { class: "tw:grid tw:content-start tw:gap-7",
+            // A board's backup, handed over as a file when core prepares one.
+            super::device_layout_sheet::BackupDownloadWatcher {
+                download: devices.backup_download.clone(),
+            }
             if let Some(issue) = home.issue.clone() {
                 div { class: "tw:flex tw:items-center tw:gap-3 tw:rounded-md tw:border tw:border-status-error-border tw:bg-status-error-bg tw:px-4 tw:py-2.5 tw:text-sm tw:text-status-error-foreground",
                     span { "{issue.message}" }
@@ -123,6 +127,10 @@ pub fn DevicesPage(
                                 runtime: devices.runtime_bands.get(&card.id).cloned(),
                                 // Its login line and access panel (BLE M6).
                                 access: devices.access.get(&card.id).cloned(),
+                                // Its files across a layout change (the
+                                // C6 repartition): question, refusal, a
+                                // held board, a backup to put back.
+                                layout: devices.layout.get(&card.id).cloned(),
                                 card,
                                 // The empty face's picker reads the SAME two
                                 // lists the gallery does — there is no
@@ -667,6 +675,8 @@ mod tests {
             open_addresses: Default::default(),
             feeds: Default::default(),
             runtime_bands: Default::default(),
+            layout: Default::default(),
+            backup_download: None,
         }
     }
 
