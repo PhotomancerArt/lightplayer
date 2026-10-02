@@ -151,6 +151,8 @@ fn link_counter_facts(link: &lpc_wire::server::LinkCounters) -> lpa_devices::Lin
         stalls: link.stalls,
         bytes_sent: link.bytes_tx,
         bytes_received: link.bytes_rx,
+        frames_sent: link.frames_tx,
+        frames_received: link.frames_rx,
     }
 }
 
@@ -513,6 +515,8 @@ mod tests {
                 stalls: 2,
                 bytes_tx: 40_000,
                 bytes_rx: 9_000,
+                frames_tx: 400,
+                frames_rx: 90,
                 resets: lpc_wire::server::LinkResets {
                     total: 4,
                     ..Default::default()
@@ -534,6 +538,8 @@ mod tests {
                 stalls: 2,
                 bytes_sent: 40_000,
                 bytes_received: 9_000,
+                frames_sent: 400,
+                frames_received: 90,
             })
         );
         let silent = server_frame(&WireServerMessage::new(0, heartbeat_body(None)));

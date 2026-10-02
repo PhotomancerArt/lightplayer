@@ -29,9 +29,8 @@ pub enum WireSubcommand {
     /// and cannot read the packed ones before the next session: each is
     /// written as `<unreadable message: …>` and counted, never guessed at.
     ///
-    /// `--lines` reads an `M!`-line link instead (BLE, the classic ESP32's
-    /// UART, fw-emu): packed frames rewritten, every other byte passed
-    /// through.
+    /// `--lines` reads an `M!`-line link instead (BLE, fw-emu): packed
+    /// frames rewritten, every other byte passed through.
     Unpack(UnpackArgs),
 }
 
@@ -67,8 +66,8 @@ pub struct UnpackArgs {
     #[arg(long, conflicts_with_all = ["tap", "lines"])]
     pub from_host: bool,
 
-    /// The capture is of an `M!`-line link (BLE, the classic ESP32's UART,
-    /// fw-emu), not a USB lp-link.
+    /// The capture is of an `M!`-line link (BLE, fw-emu), not an lp-link
+    /// (USB, or the classic's UART).
     #[arg(long)]
     pub lines: bool,
 }

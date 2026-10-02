@@ -3319,6 +3319,7 @@ fn consume_tree_node(
     let slot_shapes = host.slot_shapes;
     let fault = host.fault;
     let smoothing = host.services.output_smoothing_notice(node_id);
+    let open_failure = host.services.output_open_failure(node_id);
     let recovery_name = recovery_frame_name(&host.tree, node_id);
     let consume_result = {
         let mut bridge = SessionHostResolver {
@@ -3339,6 +3340,7 @@ fn consume_tree_node(
         )
         .with_project_fault(fault.since_seconds, fault.node_count, fault.presentation)
         .with_output_smoothing(smoothing)
+        .with_output_open_failure(open_failure)
         .with_power_service(power_service);
         catch_node_panic_framed(lp_recovery::FrameKind::NodeRender, &recovery_name, || {
             node_runtime.consume(&mut tick_ctx)

@@ -359,6 +359,45 @@ pub struct RunRequest {
     /// `lp-emu:<chip>:<grade>` and do **not** for `esp-emu:<version>`, whose
     /// detail is a version. One field, one source, no special case.
     pub chip: String,
+    /// The host for the product's own wire, when the caller supplied one.
+    /// See [`LinkHost`] and [`RunRequest::hosted`]. `None` is the raw port,
+    /// which is what every committed transcript was captured through.
+    pub link_host: Option<LinkHost>,
+}
+
+/// A host for the shipped image's link, supplied by the CALLER.
+///
+/// Since wire proto 30 the shipped image speaks lp-link on its USB link: the
+/// port carries boot text and link frames, and the hello, the heartbeats and
+/// every log record leave the board only once a host has brought the link up.
+/// A capture read straight off the port therefore never reaches a shipped
+/// payload's sentinel. The host that brings the link up is a product crate
+/// (lp-link, lpc-wire), and this crate is inside the `lp-emu/` MIT fence, so
+/// it cannot be here: `lp-cli validate` supplies it as two command prefixes
+/// and this crate only appends flags to them. The printed plan stays the
+/// whole protocol — the sidecar's `source` names the host command — and no
+/// product type crosses the fence.
+///
+/// **The contract is the flag vocabulary.** [`emulated`](Self::emulated)
+/// takes the machine's own flags (`--elf`, `--merged`, `--time-grade`,
+/// `--timeout`, `--wall-timeout`, `--strict-bus`, `--exit-on`, `--efuse-mac`,
+/// `--efuse-rev`, `--reset-cause`, `--strap`, `--usb-host`, `--usb-script`,
+/// `--wire`, `--pin-script`) with two spellings of its own: the capture is
+/// `--console <path>` and the pin capture `--dump-frames <path>`, both bare
+/// paths. [`port`](Self::port) takes a positional port and `--console`,
+/// `--seconds`, `--exit-on`. lp-cli's parity test parses what this crate
+/// prints with lp-cli's own argument definitions, so the two cannot drift.
+///
+/// What either writes is the host's DECODED console: raw text as it arrived,
+/// log records as `[LEVEL] target: text`, each wire message as its
+/// `M!{json}` line and `[link] …` notes — the form the pre-lp-link captures
+/// had, which is why the series parsers read it unchanged.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LinkHost {
+    /// Runs an emulated machine with the link hosted in process.
+    pub emulated: Vec<String>,
+    /// Opens a board's port without resetting it and hosts the link on it.
+    pub port: Vec<String>,
 }
 
 /// The eFuse identity an emulated configuration is given.
@@ -398,6 +437,52 @@ impl RunRequest {
     /// is what a reader tells them apart *by*, after the fact).
     pub fn effective_link(&self) -> Result<Link> {
         Ok(self.link_override.unwrap_or(self.arm()?.link))
+    }
+
+    /// The link host this run is captured through, or `None` for the raw port.
+    ///
+    /// A host applies when the caller supplied one AND the payload is the
+    /// shipped image (no `fw-checks` module — a harness still logs raw) AND it
+    /// runs over the USB link AND a host is attached at all: an absent host
+    /// captures nothing, and there is no link for anyone to bring up.
+    pub fn hosted(&self) -> Result<Option<&LinkHost>> {
+        let Some(host) = &self.link_host else {
+            return Ok(None);
+        };
+        if self.payload.fw_checks_feature.is_some()
+            || self.effective_link()? != Link::UsbSerialJtag
+            || self
+                .effective_host_plan()?
+                .is_some_and(|plan| plan.host == "absent")
+        {
+            return Ok(None);
+        }
+        Ok(Some(host))
+    }
+
+    /// Refuse a hosted run this plan cannot express, naming why. Each of these
+    /// is a payload whose meaning a link host would change, and changing it
+    /// is a ruling, not a runner's call.
+    fn check_hostable(&self) -> Result<()> {
+        let arm = self.arm()?;
+        if let Some(script) = arm.host_script {
+            bail!(
+                "payload `{}` on `{}` carries a raw `M!` conversation (`{script}`), and the \
+                 image under a link host speaks lp-link: those bytes would never reach the \
+                 server. Re-running it on a pre-lp-link image is `--link-host raw`; running it on \
+                 a current one needs its host half re-expressed (the plan's ruling R2/R3).",
+                self.payload.name,
+                self.chip,
+            );
+        }
+        if !self.payload.probes.is_empty() {
+            bail!(
+                "payload `{}` reads guest memory with `--probe`, which a hosted run has no flag \
+                 for",
+                self.payload.name
+            );
+        }
+        Ok(())
     }
 
     /// The chip this run is of.
@@ -876,7 +961,65 @@ impl ConfigurationDriver for SiliconDriver {
             ]
         };
 
+        // The link host on the port, when this image needs one: it opens the
+        // port without the reset dance (as lp-cli's own transports do), brings
+        // the link up, and writes the decoded console until the sentinel.
+        let hosted = req.hosted()?.cloned();
+        if hosted.is_some() {
+            req.check_hostable()?;
+            notes.push(
+                "captured through a LINK HOST: this image speaks lp-link on its USB link, so the \
+                 capture is the host's decoded console (raw text as it arrived, log records as \
+                 `[LEVEL] target: text`, each wire message as its `M!{json}` line, `[link] …` \
+                 notes), not the port's bytes, and the host does not ask the board to pack its \
+                 replies (`--json-replies`, the same as the emulated twin). espflash resets the \
+                 board and exits before the host opens the port, so raw boot text printed before \
+                 that open is NOT in this capture; log records are held in the board's log ring \
+                 until the link is up, so the payload's own lines are."
+                    .to_string(),
+            );
+        }
+        let link_capture = |host: &LinkHost| -> PlanStep {
+            let mut open = host.port.clone();
+            open.extend([
+                port.to_string(),
+                "--console".into(),
+                capture.display().to_string(),
+                "--seconds".into(),
+                req.timeout_secs.to_string(),
+            ]);
+            if let Some(marker) = req.sentinel().exit_on() {
+                open.push("--exit-on".into());
+                open.push(marker.into());
+            }
+            PlanStep::new(
+                "open the port as the link's host, stop at the sentinel",
+                open,
+            )
+            .with_note(
+                "no reset dance: opening the port is the only line-state change, the same one \
+                     Studio and lp-cli make. The host brings lp-link up and writes what the board \
+                     says as it arrives. It has not been run against silicon before this sitting",
+            )
+        };
+
         match req.payload.capture {
+            Capture::Monitor if hosted.is_some() => {
+                let host = hosted.as_ref().expect("checked");
+                let mut command: Vec<String> =
+                    vec![DESK_FLASH_NO_MONITOR_SCRIPT.into(), "--".into()];
+                command.extend(flash_args(elf));
+                steps.push(
+                    PlanStep::new("flash in the foreground and RELEASE the port", command)
+                        .with_env("PORT_DEV", port)
+                        .with_note(
+                            "no --monitor: espflash's monitor reads raw bytes and cannot host \
+                             the link. It hard-resets the board after the write and exits, and \
+                             the port goes back to closed for the host below",
+                        ),
+                );
+                steps.push(link_capture(host));
+            }
             Capture::Monitor => {
                 let mut command = vec![
                     DESK_STEP_SCRIPT.into(),
@@ -948,28 +1091,10 @@ impl ConfigurationDriver for SiliconDriver {
                          is the pair of timestamps in the next heartbeat.",
                     ),
                 );
-                let mut open: Vec<String> = vec![
-                    TTY_CAPTURE_SCRIPT.into(),
-                    "--dev".into(),
-                    port.into(),
-                    "--out".into(),
-                    capture.display().to_string(),
-                    "--seconds".into(),
-                    req.timeout_secs.to_string(),
-                ];
-                if let Some(marker) = req.sentinel().exit_on() {
-                    open.push("--until".into());
-                    open.push(marker.into());
+                match &hosted {
+                    Some(host) => steps.push(link_capture(host)),
+                    None => steps.push(tty_capture(req, port, &capture)),
                 }
-                steps.push(
-                    PlanStep::new("open a non-resetting reader", open).with_note(
-                        "os.open + raw termios with HUPCL cleared and DTR/RTS untouched: opening \
-                     the port is the only line-state change, which is the same one Studio and \
-                     lp-cli make. espflash --monitor would assert the reset dance instead and \
-                     the board would boot again with a reader already attached — the very \
-                     thing this payload must not do.",
-                    ),
-                );
             }
         }
 
@@ -989,7 +1114,22 @@ impl ConfigurationDriver for SiliconDriver {
                     .into(),
             ],
             notes,
-            tools: BTreeMap::new(),
+            // A hosted capture's reader is the caller's command, from this
+            // checkout; a raw one's is espflash or tty-capture.py, named in
+            // `source`.
+            tools: hosted
+                .iter()
+                .map(|host| {
+                    (
+                        "link-host".to_string(),
+                        format!(
+                            "{} ({})",
+                            host.port.join(" "),
+                            git_description(&req.repo_root)
+                        ),
+                    )
+                })
+                .collect(),
             image: Some(image),
         })
     }
@@ -999,6 +1139,31 @@ impl ConfigurationDriver for SiliconDriver {
         run_steps(plan)?;
         Ok(plan.capture.clone())
     }
+}
+
+/// The non-resetting raw reader for a `FlashThenOpenAfter` payload on the raw
+/// port: `tty-capture.py`, stopping at the sentinel's line.
+fn tty_capture(req: &RunRequest, port: &str, capture: &Path) -> PlanStep {
+    let mut open: Vec<String> = vec![
+        TTY_CAPTURE_SCRIPT.into(),
+        "--dev".into(),
+        port.into(),
+        "--out".into(),
+        capture.display().to_string(),
+        "--seconds".into(),
+        req.timeout_secs.to_string(),
+    ];
+    if let Some(marker) = req.sentinel().exit_on() {
+        open.push("--until".into());
+        open.push(marker.into());
+    }
+    PlanStep::new("open a non-resetting reader", open).with_note(
+        "os.open + raw termios with HUPCL cleared and DTR/RTS untouched: opening \
+         the port is the only line-state change, which is the same one Studio and \
+         lp-cli make. espflash --monitor would assert the reset dance instead and \
+         the board would boot again with a reader already attached — the very \
+         thing this payload must not do.",
+    )
 }
 
 /// Espressif's binary emulator, the C6's second oracle.
@@ -1204,6 +1369,30 @@ impl ConfigurationDriver for LpEmuDriver {
         let mut notes = Vec::new();
 
         let usb = req.effective_link()? == Link::UsbSerialJtag;
+        let hosted = req.hosted()?.cloned();
+        if hosted.is_some() {
+            req.check_hostable()?;
+            if spec.chip != ESP32C6.chip || arm.second_boot {
+                bail!(
+                    "a hosted run of payload `{}` on `{}` is not built yet: the link host drives \
+                     the C6's machine, from one boot. The S3's hosted run takes no writable flash \
+                     part for a second boot (the plan's ruling R3); `--link-host raw` runs it \
+                     over the raw port, as before.",
+                    req.payload.name,
+                    spec.chip,
+                );
+            }
+            notes.push(
+                "captured through a LINK HOST: this image speaks lp-link on its USB link, so the \
+                 capture is the host's decoded console (raw text as it arrived, log records as \
+                 `[LEVEL] target: text`, each wire message as its `M!{json}` line, `[link] …` \
+                 notes) rather than the port's bytes. The host uses a fixed link nonce, so two \
+                 runs are the same run, and does NOT ask the board to pack its replies \
+                 (`--json-replies`, the heap ratchet's state), so no memory figure here depends \
+                 on a host's opt-in. A product host does ask."
+                    .to_string(),
+            );
+        }
         if let Some(overridden) = req.link_override
             && overridden != arm.link
         {
@@ -1315,15 +1504,18 @@ impl ConfigurationDriver for LpEmuDriver {
         // so its transcript is the machine's own `--probe` report on stdout.
         let state_payload = matches!(req.sentinel(), Sentinel::State(_));
         let secs = req.run_secs();
-        let mut emu: Vec<String> = vec![
-            "cargo".into(),
-            "run".into(),
-            "-q".into(),
-            "-p".into(),
-            spec.emu_package.into(),
-            "--release".into(),
-            "--".into(),
-        ];
+        let mut emu: Vec<String> = match &hosted {
+            Some(host) => host.emulated.clone(),
+            None => vec![
+                "cargo".into(),
+                "run".into(),
+                "-q".into(),
+                "-p".into(),
+                spec.emu_package.into(),
+                "--release".into(),
+                "--".into(),
+            ],
+        };
         // How the image is reached. `Direct` hands the machine the ELF;
         // `RomUp` hands it a whole merged flash part and lets the mask ROM
         // and the ESP-IDF bootloader do the loading, which needs a step
@@ -1427,7 +1619,13 @@ impl ConfigurationDriver for LpEmuDriver {
         }
         emu.push("--time-grade".into());
         emu.push(grade.into());
-        if usb {
+        if hosted.is_some() {
+            // The host's decoded console IS the capture; there is no
+            // "tried" stream, because the host drains everything it is
+            // attached for.
+            emu.push("--console".into());
+            emu.push(capture.display().to_string());
+        } else if usb {
             // The capture is the USB byte stream: the same bytes a reader on
             // the silicon port sees, and nothing else. What the guest handed
             // over that no host took is an observation and goes beside it.
@@ -1456,7 +1654,11 @@ impl ConfigurationDriver for LpEmuDriver {
             // a transcript is the bytes a reader on the port saw, and a
             // decoded frame is not one of those.
             emu.push("--dump-frames".into());
-            emu.push(format!("file:{}", req.pin_capture_path().display()));
+            emu.push(match hosted {
+                // The host's flag takes a bare path (see `LinkHost`).
+                Some(_) => req.pin_capture_path().display().to_string(),
+                None => format!("file:{}", req.pin_capture_path().display()),
+            });
         }
         for (symbol, ms) in req.payload.probes {
             emu.push("--probe".into());
@@ -1595,6 +1797,9 @@ impl ConfigurationDriver for LpEmuDriver {
         }
         let mut run = PlanStep::new(
             match (usb, state_payload, arm.second_boot) {
+                _ if hosted.is_some() => {
+                    "run the machine with the link hosted, the decoded console to the capture"
+                }
                 (_, true, _) => "run the machine, its own report to the capture",
                 (true, false, _) => "run the machine, the USB link to the capture",
                 (false, false, false) => "run the machine, UART0 to the capture",
@@ -1631,7 +1836,22 @@ impl ConfigurationDriver for LpEmuDriver {
             cwd: req.repo_root.clone(),
             warnings: Vec::new(),
             notes,
-            tools: emulator_tools(spec, &req.repo_root),
+            tools: {
+                let mut tools = emulator_tools(spec, &req.repo_root);
+                // The host ran the machine, so it is a tool of this capture
+                // too: the caller's command, from this same checkout.
+                if let Some(host) = &hosted {
+                    tools.insert(
+                        "link-host".to_string(),
+                        format!(
+                            "{} ({})",
+                            host.emulated.join(" "),
+                            git_description(&req.repo_root)
+                        ),
+                    );
+                }
+                tools
+            },
             image: Some(image),
         })
     }
@@ -2071,6 +2291,7 @@ mod tests {
                 .configuration(config)
                 .map(|e| e.chip.clone())
                 .unwrap_or_else(|_| Configuration::parse(config).unwrap().detail),
+            link_host: None,
         }
     }
 
@@ -2610,6 +2831,176 @@ mod tests {
         ] {
             let c = Configuration::parse(name).unwrap();
             assert_eq!(driver_for(&c).kind(), kind);
+        }
+    }
+
+    /// The shipped image over its USB link, with a host supplied: the machine
+    /// is run by the HOST's command and the capture is its decoded console.
+    #[test]
+    fn a_hosted_shipped_image_runs_under_the_callers_host() {
+        let mut req = request("lp-emu:esp32c6:t1", "boot-idle-flash", None);
+        req.identity = desk_identity();
+        req.link_host = Some(test_host());
+        req.timeout_secs = 16;
+        let plan = LpEmuDriver.plan(&req).unwrap();
+        let run = &plan.steps.last().unwrap().command;
+        assert_eq!(
+            &run[..test_host().emulated.len()],
+            &test_host().emulated[..],
+            "the run step starts with the host's own prefix"
+        );
+        let rendered = plan.render();
+        for want in [
+            "--console target/validate/boot-idle-flash.cap",
+            "--usb-host attached",
+            "--time-grade t1",
+            "--strict-bus",
+            "--exit-on '[stack] heartbeat: high-water'",
+            "--efuse-mac a0:f2:62:87:b4:8c",
+            "--efuse-rev 0.2",
+        ] {
+            assert!(rendered.contains(want), "missing `{want}`:\n{rendered}");
+        }
+        for never in ["--usb-sj ", "--usb-sj-tried", "lp-emu-esp32c6 --release"] {
+            assert!(!rendered.contains(never), "`{never}` in:\n{rendered}");
+        }
+        assert!(
+            plan.notes.iter().any(|n| n.contains("LINK HOST")),
+            "the sidecar's note says how it was captured"
+        );
+        assert!(
+            plan.tools
+                .get("link-host")
+                .is_some_and(|t| t.starts_with("host-under-test emulated")),
+            "the sidecar's tools name the host: {:?}",
+            plan.tools
+        );
+    }
+
+    /// The ROM-up boot keeps its reset cause and strap under a host.
+    #[test]
+    fn a_hosted_rom_up_boot_passes_the_merged_chip_and_its_reset() {
+        let mut req = request("lp-emu:esp32c6:t1", "rom-up-boot", None);
+        req.link_host = Some(test_host());
+        let rendered = LpEmuDriver.plan(&req).unwrap().render();
+        for want in [
+            "--merged target/riscv32imac-unknown-none-elf/release-esp32/merged.bin",
+            "--reset-cause poweron",
+            "--strap app",
+        ] {
+            assert!(rendered.contains(want), "missing `{want}`:\n{rendered}");
+        }
+    }
+
+    /// A cable schedule rides along: the host takes `--usb-host` and the
+    /// control-word script the plan writes.
+    #[test]
+    fn a_hosted_scenario_keeps_its_cable_schedule() {
+        let mut req = request("lp-emu:esp32c6:t1", "usb-detach-reattach", None);
+        req.link_host = Some(test_host());
+        let rendered = LpEmuDriver.plan(&req).unwrap().render();
+        assert!(rendered.contains("--usb-host attached"), "{rendered}");
+        assert!(
+            rendered.contains("--usb-script target/validate/usb-detach-reattach.usbscript"),
+            "{rendered}"
+        );
+    }
+
+    /// What a host does NOT touch: a harness (it logs raw), a spike-link
+    /// payload, and an absent host (nobody to bring a link up).
+    #[test]
+    fn a_host_leaves_harnesses_spike_links_and_absent_hosts_alone() {
+        for payload in ["rmt-chase", "upload-walk", "usb-host-absent"] {
+            let mut req = request("lp-emu:esp32c6:t1", payload, None);
+            req.link_host = Some(test_host());
+            assert!(req.hosted().unwrap().is_none(), "{payload} was hosted");
+            let rendered = LpEmuDriver.plan(&req).unwrap().render();
+            assert!(
+                !rendered.contains("host-under-test"),
+                "{payload}:\n{rendered}"
+            );
+        }
+    }
+
+    /// A raw-`M!` conversation cannot ride lp-link, and a runner that sent it
+    /// anyway would record a walk that never happened.
+    #[test]
+    fn a_hosted_walk_with_a_raw_script_is_refused_with_the_ruling() {
+        let mut req = request("lp-emu:esp32c6:t1", "upload-walk-usb", None);
+        req.link_host = Some(test_host());
+        let err = format!("{:#}", LpEmuDriver.plan(&req).unwrap_err());
+        assert!(err.contains("--link-host raw"), "{err}");
+        assert!(err.contains("examples-basic.script"), "{err}");
+    }
+
+    /// No host supplied is the plan it always was.
+    #[test]
+    fn no_host_is_the_raw_port_as_before() {
+        let req = request("lp-emu:esp32c6:t1", "boot-idle-flash", None);
+        let rendered = LpEmuDriver.plan(&req).unwrap().render();
+        assert!(
+            rendered.contains("cargo run -q -p lp-emu-esp32c6 --release --"),
+            "{rendered}"
+        );
+        assert!(rendered.contains("--usb-sj file:"), "{rendered}");
+    }
+
+    /// On a board: flash and release, then the host opens the port.
+    #[test]
+    fn a_hosted_silicon_capture_flashes_then_opens_as_the_host() {
+        let mut req = request("silicon:esp32c6", "boot-idle", Some("/dev/cu.usbmodem9"));
+        req.link_host = Some(test_host());
+        req.timeout_secs = 30;
+        let plan = SiliconDriver.plan(&req).unwrap();
+        let rendered = plan.render();
+        assert!(
+            rendered.contains(DESK_FLASH_NO_MONITOR_SCRIPT),
+            "{rendered}"
+        );
+        assert!(
+            plan.steps
+                .iter()
+                .all(|st| !st.command.iter().any(|a| a == "--monitor")),
+            "espflash's monitor cannot host the link:\n{rendered}"
+        );
+        assert!(!rendered.contains(DESK_STEP_SCRIPT), "{rendered}");
+        let open = &plan.steps.last().unwrap().command;
+        let n = test_host().port.len();
+        assert_eq!(&open[..n], &test_host().port[..]);
+        assert_eq!(
+            &open[n..],
+            [
+                "/dev/cu.usbmodem9",
+                "--console",
+                "target/validate/boot-idle.cap",
+                "--seconds",
+                "30",
+                "--exit-on",
+                "[stack] heartbeat: high-water",
+            ]
+        );
+    }
+
+    /// The negative control keeps its wait; the host replaces the raw reader.
+    #[test]
+    fn a_hosted_negative_control_waits_then_opens_as_the_host() {
+        let mut req = request(
+            "silicon:esp32c6",
+            "usb-negative-control",
+            Some("/dev/cu.usbmodem9"),
+        );
+        req.link_host = Some(test_host());
+        let plan = SiliconDriver.plan(&req).unwrap();
+        let rendered = plan.render();
+        assert!(rendered.contains("$ sleep 8"), "{rendered}");
+        assert!(!rendered.contains(TTY_CAPTURE_SCRIPT), "{rendered}");
+        assert!(rendered.contains("host-under-test port"), "{rendered}");
+    }
+
+    fn test_host() -> LinkHost {
+        LinkHost {
+            emulated: vec!["host-under-test".into(), "emulated".into()],
+            port: vec!["host-under-test".into(), "port".into()],
         }
     }
 }

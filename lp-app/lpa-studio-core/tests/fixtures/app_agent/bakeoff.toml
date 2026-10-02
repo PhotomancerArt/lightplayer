@@ -1,0 +1,36 @@
+# App-agent bake-off candidates (plan lp2025/2026-10-01-0126-app-agent-harness, P07).
+#
+# Chosen 2026-10-01 from OpenRouter's live /models: open-weights models
+# (a Hugging Face id is listed) with tool calling and ≥128k context, the
+# strongest of each family by recent agentic/tool-use standing, plus one
+# cheap small model as a floor. `reference = true` rows are measured for
+# comparison only and are never eligible as the default (D13).
+#
+# Edit freely; `just app-agent-bakeoff` reads this file.
+
+chosen = "2026-10-01"
+runs = 3
+# Stop and report before a bake-off would exceed this (US dollars).
+cost_ceiling_usd = 25.0
+
+[[candidate]]
+model = "z-ai/glm-5.3"
+
+[[candidate]]
+model = "moonshotai/kimi-k3"
+
+[[candidate]]
+model = "deepseek/deepseek-v4-pro"
+
+[[candidate]]
+model = "qwen/qwen3.8-2.4t-a95b"
+
+[[candidate]]
+model = "minimax/minimax-m3"
+
+[[candidate]]
+model = "openai/gpt-oss-120b"
+
+[[candidate]]
+model = "anthropic/claude-sonnet-5"
+reference = true
