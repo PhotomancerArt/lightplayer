@@ -137,6 +137,7 @@ fn main() {
     println!("cargo::rustc-check-cfg=cfg(lp_split)");
     println!("cargo:rerun-if-env-changed=LP_SPLIT_LINK");
     println!("cargo:rerun-if-env-changed=LP_BUILD_TAG");
+    println!("cargo:rerun-if-env-changed=LP_OTA_TEST_DIE_ON_TRIAL");
     if std::env::var_os("LP_SPLIT_LINK").is_some() {
         println!("cargo::rustc-cfg=lp_split");
     }

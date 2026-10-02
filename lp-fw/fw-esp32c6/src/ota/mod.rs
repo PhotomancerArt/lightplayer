@@ -34,6 +34,7 @@ mod update_channel;
 
 pub use boot_state::BootState;
 pub use engine_window::{ENGINE_VADDR, map_engine};
+pub use system_reset::system_reset;
 pub use update_channel::{core_only, on_update_while_running};
 
 /// Incomplete boots after which the core stops starting the engine: the

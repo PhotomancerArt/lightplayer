@@ -1024,6 +1024,12 @@ async fn split_boot(core: CoreBoot) {
     if state.rolled_back() {
         esp_println::println!("[OTA] rolled back: the newer core never confirmed");
     }
+    // Test builds only: a core that dies on its trial boot, before it could
+    // confirm — what the loader's rollback exists for.
+    if option_env!("LP_OTA_TEST_DIE_ON_TRIAL").is_some() && state.on_trial() {
+        esp_println::println!("[TEST] dying on trial");
+        ota::system_reset();
+    }
     ota::map_engine(state.engine_extent());
     let incomplete = lp_recovery::snapshot()
         .map(|s| s.consecutive_incomplete_boots)
