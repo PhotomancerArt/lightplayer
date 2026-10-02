@@ -81,10 +81,21 @@ use lp_emu_esp32c6::memmap;
 use lp_emu_esp32c6::test_support::{FwImage, fw_esp32c6_image};
 use lpc_wire::{ClientMessage, ClientRequest, LinkCounters};
 
-/// The conversation, by emulated millisecond: the free lag set (which also
-/// restarts the block's wake measurements, so boot is not in them), then a
-/// Hello every [`EVERY_MS`]. A packed Hello is several packets, so every
-/// reply gives esp-hal's loop wakes to write straight into.
+/// The conversation, by emulated millisecond: one warm-up Hello, the free lag
+/// set (which also restarts the block's wake measurements, so boot and the
+/// warm-up are not in them), then a Hello every [`EVERY_MS`]. A packed Hello
+/// is several packets, so every reply gives esp-hal's loop wakes to write
+/// straight into.
+///
+/// The warm-up keeps the link's first, table-teaching reply (the largest
+/// frame of the run) out of the measurements the lag is picked from. That
+/// reply alone carries an endpoint touch a few us sooner than any other, and
+/// whether it shows up depends on incidental image bytes — CI's db2eec7fa
+/// image had it on the gated side, its neighbours did not, from the same
+/// sources. A lag picked from it fell short of every ordinary wake, and the
+/// test measured one outlier instead of the lag it was built to set.
+const WARM_AT_MS: u64 = 1_700;
+const WARM_ID: u64 = 1;
 const LAG_AT_MS: u64 = 1_900;
 const FIRST_AT_MS: u64 = 2_000;
 const EVERY_MS: u64 = 20;
@@ -259,6 +270,12 @@ fn converse(elf: &std::path::Path, lag_ns: u64) -> Run {
         .build()
         .expect("the image builds a machine");
     let mut host = EmuLinkHost::new(C6Board::new(machine).unwrap(), 0x0F4E_E1A6, true);
+    host.run_until(WARM_AT_MS * 1_000, None).expect("the run");
+    host.send(&ClientMessage {
+        id: WARM_ID,
+        msg: ClientRequest::Hello,
+    })
+    .expect("the link takes a request");
     for n in 0..REQUESTS {
         host.run_until((FIRST_AT_MS + n * EVERY_MS) * 1_000, None)
             .expect("the run");
@@ -270,6 +287,12 @@ fn converse(elf: &std::path::Path, lag_ns: u64) -> Run {
     }
     host.run_until((FIRST_AT_MS + REQUESTS * EVERY_MS + 1_500) * 1_000, None)
         .expect("the run");
+    assert!(
+        host.messages
+            .iter()
+            .any(|m| m.id == WARM_ID && m.at_us < LAG_AT_MS * 1_000),
+        "the warm-up Hello was not answered before the wake measurements began"
+    );
 
     let ids: std::collections::BTreeSet<u64> = host
         .messages
