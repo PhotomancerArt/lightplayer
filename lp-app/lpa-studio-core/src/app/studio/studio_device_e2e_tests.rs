@@ -1495,6 +1495,57 @@ fn a_link_attach_queued_behind_another_input_still_identifies() {
     });
 }
 
+/// A second connect edge while the first sweep's arrival is still pending
+/// (landed, its `LinkAttached` queued, nothing folded yet) must not mint a
+/// second link for the same port: that arrival has not joined the routing
+/// map, so a sweep that only skips routed links would attach it again.
+#[test]
+fn a_second_sweep_before_a_pending_arrival_folds_mints_no_second_link() {
+    let device = empty_light_player("dev000000daqf6dvvra");
+    let (mut bench, tasks) = DeviceBench::granted(&device, "usb-sweep-10");
+    let attaches = |bench: &DeviceBench| {
+        bench
+            .inbox
+            .borrow()
+            .iter()
+            .filter(|input| {
+                matches!(
+                    input,
+                    DeviceInput::Event(lpa_devices::event::Event::LinkAttached { .. })
+                )
+            })
+            .count()
+    };
+    let connect = |bench: &mut DeviceBench| {
+        bench
+            .controller
+            .note_device_hotplug(crate::app::studio::studio_command::DeviceHotplug::Connected);
+    };
+    // The first sweep lands its arrival; nothing folds.
+    connect(&mut bench);
+    for _ in 0..100 {
+        if attaches(&bench) > 0 {
+            break;
+        }
+        pump(&tasks);
+    }
+    assert_eq!(attaches(&bench), 1, "the first sweep attached the port");
+    // A second connect edge in that window sweeps again.
+    connect(&mut bench);
+    for _ in 0..100 {
+        pump(&tasks);
+    }
+    assert_eq!(attaches(&bench), 1, "one port, one link");
+    bench.run_until(&tasks, "the board to identify", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.state_label == "Ready")
+    });
+    assert_eq!(bench.view().devices.len(), 1, "one board, one card");
+}
+
 /// One wire, one owner: a card verb that needs the board's wire while the
 /// editor is a lens on it closes the editor first, then RUNS — the card's
 /// verbs always work; the editor is what yields.
