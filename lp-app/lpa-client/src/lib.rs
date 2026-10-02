@@ -50,7 +50,7 @@ pub use client_observer::{
 };
 pub use device_push::{PushReport, push_project};
 pub use device_remove::{READY_ATTEMPTS, RemoveReport, remove_project, wait_until_ready};
-pub use device_stamp::{MANIFEST_CHUNK_BYTES, write_file_in_chunks};
+pub use device_stamp::{MANIFEST_CHUNK_BYTES, stamp_board_manifest, write_file_in_chunks};
 pub use link_reset::{LINK_RESET_PREFIX, is_link_reset, link_reset_error, reset_reason_words};
 #[cfg(feature = "host")]
 pub use local::{

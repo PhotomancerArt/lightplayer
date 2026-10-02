@@ -2731,6 +2731,10 @@ test-rust-core:
     cargo test -p lp-link --features sim,lab,secure
     # lpc-wire's secure-initiator port (feature `secure-link`).
     cargo test -p lpc-wire --features secure-link,ser-write-json
+    # fw-esp32-common's server half (`lp_fs`'s legacy guard, the boot
+    # loader's interrupted-stamp test): only the chip crates turn `server`
+    # on, and none of them is a default member, so the plain run skips it.
+    cargo test -p fw-esp32-common --features server --lib
 
 # lp-link (the link-layer prototype, plan lp2025/2026-09-26-1720-reliable-device-link):
 # the delivery property at soak depth, 5,000 fault schedules per ARQ variant

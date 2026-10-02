@@ -23,10 +23,6 @@ use super::device_transport::{
     DeviceTransportFuture, GrantedLink, LensLineTap, LensTapEvent,
 };
 
-/// Where the board runtime manifest lives on a device (read by the
-/// firmware's loader at boot — effective next restart, board-selection D4).
-const DEVICE_HARDWARE_MANIFEST_PATH: &str = "/hardware.json";
-
 /// The browser Web Serial transport.
 pub struct BrowserSerialTransport {
     provider: Rc<BrowserSerialEsp32Provider>,
@@ -203,12 +199,7 @@ impl DeviceTransport for BrowserSerialTransport {
                 }
                 DeviceEffectCall::WriteHardwareManifest { manifest_json } => {
                     provider
-                        .write_device_file(
-                            &endpoint,
-                            DEVICE_HARDWARE_MANIFEST_PATH,
-                            manifest_json.as_bytes(),
-                            events,
-                        )
+                        .stamp_board_manifest(&endpoint, manifest_json.as_bytes(), events)
                         .await
                         .map_err(|error| error.to_string())?;
                     Ok(DeviceEffectFacts {

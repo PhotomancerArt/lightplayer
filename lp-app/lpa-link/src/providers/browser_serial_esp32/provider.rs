@@ -596,29 +596,29 @@ impl BrowserSerialEsp32Provider {
             .map(|state| state.endpoint.id.clone())
     }
 
-    /// Write `bytes` to `path` on the device over the app protocol, on the
-    /// port's link (round 2's coarse-effect seam; first consumer is
-    /// the flash activity's `/hardware.json` stamp, D4).
+    /// Stamp `manifest` onto the device as its `/hardware.json` over the
+    /// app protocol, on the port's link (round 2's coarse-effect seam; the
+    /// flash activity's board-manifest stamp, D4). Journaled — see
+    /// [`lpa_client::stamp_board_manifest`].
     ///
     /// ⚠️ The caller owns the exclusive-borrow discipline: the model's link
     /// pump for this endpoint must be paused while this runs, or the two
     /// drainers split the frames between them.
-    pub async fn write_device_file(
+    pub async fn stamp_board_manifest(
         &self,
         endpoint_id: &LinkEndpointId,
-        path: &str,
-        bytes: &[u8],
+        manifest: &[u8],
         events: LinkManagementEventSink,
     ) -> Result<(), LinkError> {
         let port_id = self.endpoint_port_id(endpoint_id)?;
-        super::port_client_io::write_device_file(port_id, path, bytes, events).await
+        super::port_client_io::stamp_board_manifest(port_id, manifest, events).await
     }
 
     /// Push a project onto the device over the app protocol (round 2's
     /// second coarse effect): find the storage dir the board runs from,
     /// replace it, load it, and verify the package hash.
     ///
-    /// ⚠️ Same exclusive-borrow rule as [`Self::write_device_file`]: the
+    /// ⚠️ Same exclusive-borrow rule as [`Self::stamp_board_manifest`]: the
     /// model's link pump for this endpoint must be paused while this runs.
     pub async fn push_device_project(
         &self,
@@ -642,7 +642,7 @@ impl BrowserSerialEsp32Provider {
     /// A long-lived `lpa-client` io over an endpoint's open port for the
     /// editor lens (round-2 M5), with every drained line teed to `tap`.
     ///
-    /// ⚠️ Same exclusive-borrow rule as [`Self::write_device_file`], held
+    /// ⚠️ Same exclusive-borrow rule as [`Self::stamp_board_manifest`], held
     /// for the lens's lifetime: the model's link pump for this endpoint must
     /// stay paused until the lens gives the wire back.
     pub fn lens_client_io(
@@ -660,7 +660,7 @@ impl BrowserSerialEsp32Provider {
     /// dir. The firmware is untouched, so the board comes back on the empty
     /// face rather than needing a re-flash.
     ///
-    /// ⚠️ Same exclusive-borrow rule as [`Self::write_device_file`]: the
+    /// ⚠️ Same exclusive-borrow rule as [`Self::stamp_board_manifest`]: the
     /// model's link pump for this endpoint must be paused while this runs.
     pub async fn remove_device_project(
         &self,

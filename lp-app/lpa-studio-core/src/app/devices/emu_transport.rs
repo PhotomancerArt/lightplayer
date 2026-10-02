@@ -530,9 +530,11 @@ mod tests {
             asked.borrow().as_slice(),
             [
                 "listLoadedProjects".to_string(),
-                "write /hardware.json {\"id\":\"x\"}".to_string()
+                "write /hardware.json.next {\"id\":\"x\"}".to_string(),
+                "write /hardware.json {\"id\":\"x\"}".to_string(),
+                "delete /hardware.json.next".to_string()
             ],
-            "ready first, then the write — the serial arm's order"
+            "ready first, then the journaled stamp — the serial arm's order"
         );
         assert_eq!(
             resets.get(),
@@ -656,6 +658,10 @@ mod tests {
                 ClientRequest::Filesystem(FsRequest::Write { path, data }) => (
                     format!("write {} {}", path.as_str(), String::from_utf8_lossy(&data)),
                     ServerMsgBody::Filesystem(FsResponse::Write { path, error: None }),
+                ),
+                ClientRequest::Filesystem(FsRequest::DeleteFile { path }) => (
+                    format!("delete {}", path.as_str()),
+                    ServerMsgBody::Filesystem(FsResponse::DeleteFile { path, error: None }),
                 ),
                 // Anything else is a conversation this double was not
                 // written for: recorded by name, and answered with a reply
