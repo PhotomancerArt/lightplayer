@@ -162,6 +162,79 @@ proptest! {
     }
 }
 
+/// Pinned from CI (PR #866, run 36505858435; the fuzz keeps no failure file).
+/// A checksum-valid data frame at exactly the sequence number the peer sends
+/// next, landing while the link still waits for earlier frames: once the real
+/// ones fill the gap the link acknowledges one past anything the peer sent,
+/// and the peer used to ignore every ACK after that and resend its flight
+/// until the retry limit (about 56 s on `ble()`, 18 s on `usb()`). The window
+/// of 0 in the shrunk input plays no part. It must come back at once.
+#[test]
+fn a_frame_at_the_senders_next_seq_does_not_stall_the_link() {
+    for (cfg, seq) in [(LinkConfig::ble(), 27), (LinkConfig::usb(), 24)] {
+        let ops = [
+            Op::Send { chan: 0, len: 6137 },
+            Op::Exchange { n: 10 },
+            Op::Exchange { n: 10 },
+            Op::Crafted {
+                b0: 56,
+                seq,
+                ack: 0,
+                win: 0,
+                body: vec![],
+                syn_key: false,
+                flip: None,
+            },
+        ];
+        // One second of settling, not the fuzz's twenty.
+        fuzz_settling::<SelectiveRepeat>(cfg, &ops, Mode::Plain, 200).unwrap();
+    }
+}
+
+/// Regression for 2026-09-28-link-fuzz-rekey-coverage: `Op::Crafted` used to
+/// key every non-SYN frame with the FIRST session's nonces
+/// (`NONCE_PEER ^ NONCE_LINK`). Once a reset repicked either side's nonce,
+/// every later crafted frame failed [`frame::verify`] under that stale key,
+/// so from there on the fuzz exercised only the checksum-reject path. One
+/// `restart` here forces exactly that; the crafted frame right after must
+/// still reach the receive path under the link's new session key.
+#[test]
+fn a_crafted_frame_after_a_reset_still_reaches_the_receive_path() {
+    let mut w = World::<SelectiveRepeat>::new(LinkConfig::usb(), Mode::Plain);
+    w.exchange(64);
+    assert_eq!(w.link.state(), LinkState::Established);
+
+    w.link.restart(w.now);
+    assert_eq!(
+        w.link.generation(),
+        1,
+        "the restart must have bumped the session"
+    );
+    w.exchange(20);
+    assert_eq!(
+        w.link.state(),
+        LinkState::Established,
+        "the real pair must come back up before the crafted frame"
+    );
+
+    let before = w.link.counters().frames_rx;
+    w.apply(&Op::Crafted {
+        b0: 2, // FrameKind::Ack
+        seq: 0,
+        ack: 1,
+        win: 4,
+        body: vec![],
+        syn_key: false,
+        flip: None,
+    });
+    let after = w.link.counters().frames_rx;
+    assert!(
+        after > before,
+        "a crafted frame keyed with the CURRENT session must reach the receive \
+         path after a reset (frames_rx {before} -> {after})"
+    );
+}
+
 #[cfg(all(feature = "secure", feature = "sim"))]
 proptest! {
     #![proptest_config(config())]
@@ -199,6 +272,18 @@ enum Mode {
 }
 
 fn fuzz<A: Arq>(cfg: LinkConfig, ops: &[Op], mode: Mode) -> Result<(), TestCaseError> {
+    fuzz_settling::<A>(cfg, ops, mode, 4_000)
+}
+
+/// [`fuzz`], allowing `rounds` × 5 ms for the pair to settle rather than the
+/// full 20 s — so a pinned regression case fails fast instead of risking a
+/// pass by simply outlasting a retry-limit reset it should never need.
+fn fuzz_settling<A: Arq>(
+    cfg: LinkConfig,
+    ops: &[Op],
+    mode: Mode,
+    rounds: usize,
+) -> Result<(), TestCaseError> {
     let mut w = World::<A>::new(cfg, mode);
     let bound = w.bound;
     w.exchange(64);
@@ -223,7 +308,7 @@ fn fuzz<A: Arq>(cfg: LinkConfig, ops: &[Op], mode: Mode) -> Result<(), TestCaseE
     }
 
     // The input stops: the real pair must come back and finish its work.
-    for _ in 0..4_000 {
+    for _ in 0..rounds {
         w.now += 5_000;
         w.exchange(64);
         w.recv();
@@ -330,7 +415,7 @@ impl<A: Arq> World<A> {
                 syn_key,
                 flip,
             } => {
-                let key = if *syn_key { 0 } else { NONCE_PEER ^ NONCE_LINK };
+                let key = if *syn_key { 0 } else { self.session_key() };
                 let mut raw = vec![*b0, *seq, *ack, *win];
                 raw.extend_from_slice(body);
                 self.feed_crafted(raw, key, *flip);
@@ -391,6 +476,19 @@ impl<A: Arq> World<A> {
             let f = f.to_vec();
             self.feed_peer(&f);
         }
+    }
+
+    /// The key [`Link::on_frame`] verifies a non-SYN frame under right now.
+    /// `Link` has no public accessor for its own nonce, but the key is both
+    /// nonces XORed, and each half is observable from the real traffic this
+    /// harness already relays: `peer.peer_nonce()` is the link-under-test's
+    /// own nonce, as heard by the peer in a real SYN; `link.peer_nonce()` is
+    /// the peer's nonce, as heard by the link. Using the FIRST session's
+    /// nonces here (a fixed constant) is exactly the bug this guards
+    /// against: every later crafted frame goes stale forever after any
+    /// reset repicks either side's nonce (2026-09-28-link-fuzz-rekey-coverage).
+    fn session_key(&self) -> u32 {
+        self.peer.peer_nonce().unwrap_or(NONCE_LINK) ^ self.link.peer_nonce().unwrap_or(NONCE_PEER)
     }
 
     /// `raw` (header and body), checksummed under `key`, framed, maybe with

@@ -625,8 +625,94 @@ if [[ "$device_hex" == "$pad_hex" && "$device_hex" == "$oracle_hex" ]]; then
     fi
 fi
 
+echo
+echo "===== FRAME RATE (t1 vs t3) ====="
+# REPORT ONLY. t1/t2 install no memory-cost model (`TimeGrade::memory_cost`
+# is `None` for both) — a cold flash fetch costs what a warm one does, so a
+# preempting thread's frame-rate cost is invisible at t1, the grade the walk
+# pins above and everywhere else. t3 (`cache.rs`'s `CacheCost`, a 338-cycle
+# line fill measured on silicon 2026-09-08) is the grade that charges it, and
+# the io-thread spike found it reproduces about half of silicon's frame-rate
+# cost on a project with a preempting link thread — see
+# docs/defects/2026-10-01-the-emulated-c6-charges-a-cold-code-path-10x-less-than-silicon.md.
+# `shader-oracle` (this walk's project) has no such thread, so there is no
+# reason to expect its t1/t3 gap to echo that number — this prints whatever
+# this run measures, never a threshold (AGENTS.md: "never gate on emulated
+# microseconds"). It can only fail the walk if the t3 run itself errors or
+# renders nothing — never on the fps figures themselves.
+if [[ "$CHIP" != "esp32c6" ]]; then
+    echo "skipping: the t3 frame-rate leg is C6-only for now; esp32s3 has none here."
+else
+    # The cadence of complete pad frames, dropping the first (it follows the
+    # upload's own latency, not the render loop's) so the window is the
+    # steady render, not the boot.
+    fps_of() {
+        jq -r --argjson pad "$PAD" -s '
+            ([ .[] | select(.kind == "ws281x-frame" and .pad == $pad and .complete)
+                   | .start_us ]) as $all
+            | ($all[1:]) as $t
+            | if ($t | length) < 2 then
+                "0 \($t | length) 0"
+              else
+                (($t | length - 1) / (($t[-1] - $t[0]) / 1000000)) as $fps
+                | "1 \($t | length) \($fps)"
+              end
+        ' "$1"
+    }
+
+    # Modest on purpose (director: "the t3 grade ran ~1.3x real time on a desk
+    # in the spike") — this is a second `emu run` on top of the walk's own,
+    # not a soak; LP_WALK_T3_TIMEOUT overrides.
+    T3_TIMEOUT="${LP_WALK_T3_TIMEOUT:-6s}"
+    t3_console="$OUT/walk.t3.console.txt"
+    t3_frames="$OUT/walk.t3.frames.jsonl"
+    rm -f "$t3_console" "$t3_frames"
+
+    echo "==> lp-cli emu run (--time-grade t3, ${T3_TIMEOUT} emulated), same image and project"
+    t3_wall_start=$(date +%s)
+    set +e
+    "$cli" emu run \
+        "${boot_args[@]}" \
+        --host-link \
+        --upload "$PROJECT" \
+        --time-grade t3 \
+        --timeout "$T3_TIMEOUT" \
+        --wall-timeout "$WALL" \
+        --console "$t3_console" \
+        --dump-frames "$t3_frames" \
+        >"$OUT/emu.t3.stdout" 2>"$OUT/emu.t3.stderr"
+    t3_emu_status=$?
+    set -e
+    t3_wall_secs=$(( $(date +%s) - t3_wall_start ))
+
+    if [[ $t3_emu_status -ne 0 ]] || ! grep -qa "uploaded and running" "$OUT/emu.t3.stderr"; then
+        echo "FAIL: the t3 leg's own run did not complete (exit $t3_emu_status)." >&2
+        tail -20 "$OUT/emu.t3.stderr" >&2
+        exit 1
+    fi
+
+    read -r t1_ok t1_n t1_fps <<<"$(fps_of "$frames")"
+    read -r t3_ok t3_n t3_fps <<<"$(fps_of "$t3_frames")"
+
+    if [[ "$t1_ok" != "1" || "$t3_ok" != "1" ]]; then
+        echo "FAIL: too few decoded pad $PAD frames to compute a frame rate (t1 n=$t1_n, t3 n=$t3_n)." >&2
+        exit 1
+    fi
+
+    lp_emu_sha="$(git -C "$REPO" rev-parse --short=9 HEAD)"
+    printf "frame rate: t1 %.1f fps (n=%s) · t3 %.1f fps (n=%s) (configuration=lp-emu:esp32c6:t{1,3}, lp-emu %s)\n" \
+        "$t1_fps" "$t1_n" "$t3_fps" "$t3_n" "$lp_emu_sha"
+    echo "  t3 charges the flash-cache line fill (cache.rs CacheCost, 338 cycles/fill) that t1"
+    echo "  does not; this project has no preempting thread, so no preemption cost is expected"
+    echo "  here — unlike the reference below, where one is the whole point."
+    echo "  reference only, a different project: a XIAO C6 lost 9.9% idle frame rate to a"
+    echo "  preempting io thread where lp-emu:esp32c6:t3 showed 4.8% and t1/t2 near 0% (2026-10-01"
+    echo "  io-thread spike; docs/defects/2026-10-01-the-emulated-c6-charges-a-cold-code-path-10x-less-than-silicon.md)."
+    echo "  added host time for this leg: ${t3_wall_secs}s"
+fi
+
 echo "artefacts: $OUT"
 if [[ $keep -eq 0 && $fail -eq 0 ]]; then
-    rm -f "$OUT/emu.stdout" "$OUT/cli.stdout" "$OUT/cli.stderr"
+    rm -f "$OUT/emu.stdout" "$OUT/cli.stdout" "$OUT/cli.stderr" "$OUT/emu.t3.stdout"
 fi
 exit "$fail"
