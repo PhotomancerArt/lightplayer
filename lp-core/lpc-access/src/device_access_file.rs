@@ -115,10 +115,16 @@ impl DeviceAccessFile {
     /// Add `entry`, or replace the entry with the same salt (a holder uses
     /// one salt everywhere, so the same salt is the same holder — this is
     /// how a rename re-labels). A new entry past
-    /// [`crate::MAX_SECRETS_PER_FILE`] is refused and nothing changes.
+    /// [`crate::MAX_SECRETS_PER_FILE`] is refused and nothing changes, and
+    /// so is an all-zero salt: the salt is a secure link's key id, and all
+    /// zero is the anonymous key's ([`crate::key_lookup`]). Only adding is
+    /// refused; a stored file is read as it is.
     pub fn upsert_secret(&mut self, entry: SecretEntry) -> Result<(), AccessFileError> {
         if entry.iterations == 0 {
             return Err(AccessFileError::ZeroIterations { label: entry.label });
+        }
+        if entry.salt == [0; SALT_BYTES] {
+            return Err(AccessFileError::ZeroSalt { label: entry.label });
         }
         if let Some(existing) = self.secrets.iter_mut().find(|s| s.salt == entry.salt) {
             *existing = entry;
@@ -255,6 +261,19 @@ mod tests {
             DeviceAccessFile::from_json(b"{\"version\":3,\"secrets\":[],\"new\":1}"),
             Err(AccessFileError::UnsupportedVersion(3))
         );
+    }
+
+    #[test]
+    fn an_all_zero_salt_is_refused_on_add() {
+        let mut file = DeviceAccessFile::fresh();
+        let entry = SecretEntry::from_password("anon", Tier::Play, b"k", [0; 16], 1);
+        assert_eq!(
+            file.upsert_secret(entry),
+            Err(AccessFileError::ZeroSalt {
+                label: "anon".into()
+            })
+        );
+        assert!(file.secrets.is_empty());
     }
 
     #[test]

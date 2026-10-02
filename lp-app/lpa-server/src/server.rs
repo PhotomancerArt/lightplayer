@@ -18,7 +18,8 @@ use lpc_model::{LpPath, LpPathBuf};
 use lpc_shared::output::OutputProvider;
 use lpc_shared::time::TimeProvider;
 use lpc_shared::transport::{
-    Incoming, Link, LinkId, ProjectReadStreamSink, ServerTransport, transport_error_is_signalable,
+    Incoming, Link, LinkId, ProjectReadStreamSink, SecureLinkEvent, ServerTransport,
+    transport_error_is_signalable,
 };
 use lpc_wire::{ClientRequest, WireServerMessage};
 
@@ -809,6 +810,9 @@ impl LpServer {
         for closed in transport.take_closed_links() {
             self.access.close_link(closed);
         }
+        // Then secure links' handshakes: a link that came up this tick
+        // holds its key's tier before its first request is gated.
+        self.handle_secure_link_events(transport);
 
         let mut response_count = 0usize;
         for message in incoming {
@@ -1099,6 +1103,36 @@ impl LpServer {
     }
 
     /// Get a reference to the base filesystem
+    /// Answer secure links' handshake events (see
+    /// [`ServerTransport::take_secure_events`]). A transport with no secure
+    /// links reports none.
+    #[inline(never)]
+    fn handle_secure_link_events<T: ServerTransport>(&mut self, transport: &mut T) {
+        for (link, event) in transport.take_secure_events() {
+            match event {
+                SecureLinkEvent::KeyLookup { salt } => {
+                    let loaded: Vec<_> = self
+                        .project_manager
+                        .list_loaded_projects()
+                        .into_iter()
+                        .map(|loaded| loaded.path)
+                        .collect();
+                    let answer = self.access.key_lookup(
+                        link,
+                        &salt,
+                        &*self.base_fs,
+                        loaded.iter().map(|path| path.as_str()),
+                    );
+                    transport.answer_key_lookup(link, answer);
+                }
+                SecureLinkEvent::WrongKey { .. } => self.access.key_wrong(link),
+                SecureLinkEvent::Authenticated { candidate, .. } => {
+                    self.access.key_authenticated(link, candidate);
+                }
+            }
+        }
+    }
+
     pub fn base_fs(&self) -> &dyn LpFs {
         &*self.base_fs
     }

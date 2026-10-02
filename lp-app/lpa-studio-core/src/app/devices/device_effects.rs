@@ -176,6 +176,11 @@ struct LinkSlot {
     inbox: ConversationInbox,
     /// The link's session resets, for those conversations (D9).
     resets: LinkResets,
+    /// Adopted by [`DeviceEffects::settle`] before its own `LinkAttached`
+    /// folded. The model cannot route a link it has not heard of yet, so
+    /// until that fold [`DeviceEffects::retain_links`] must not read its
+    /// absence from the roster as a release.
+    awaiting_attach: bool,
 }
 
 /// A link that arrived from a spawned future, waiting to join the routing map.
@@ -465,8 +470,17 @@ impl DeviceEffects {
                     borrowed: arrival.borrowed,
                     inbox: arrival.inbox,
                     resets: arrival.resets,
+                    awaiting_attach: true,
                 },
             );
+        }
+    }
+
+    /// The model has folded `link`'s own `LinkAttached`: from here on its
+    /// roster is the authority on whether the link stays routed.
+    pub(crate) fn attach_folded(&mut self, link: LinkId) {
+        if let Some(slot) = self.links.get_mut(&link) {
+            slot.awaiting_attach = false;
         }
     }
 
@@ -770,10 +784,18 @@ impl DeviceEffects {
         ) else {
             return;
         };
+        // An arrival that has not settled yet holds its port too: a second
+        // connect edge before the next fold would otherwise attach it again.
         let held: Vec<EndpointKey> = self
             .links
             .values()
             .map(|slot| slot.info.endpoint.clone())
+            .chain(
+                self.arrivals
+                    .borrow()
+                    .iter()
+                    .map(|arrival| arrival.info.endpoint.clone()),
+            )
             .collect();
         let register = self.registrar();
         let ids: Vec<LinkId> = (0..MAX_SWEEP_LINKS).map(|_| self.mint_link_id()).collect();
@@ -870,8 +892,16 @@ impl DeviceEffects {
     /// Run after every fold against the roster's own link map: the model is
     /// the authority on what is routed, so a link it has let go stops being
     /// pumped rather than lingering as a second opinion.
+    ///
+    /// A link whose `LinkAttached` has not folded yet is not the model's to
+    /// let go: [`Self::settle`] adopts every arrival before whatever input
+    /// happens to fold next, and that input may be queued AHEAD of the
+    /// link's own attach (a stale timer fire). Evicting it then dropped the
+    /// model's `Open` a fold later and left a replugged board identifying
+    /// forever.
     pub fn retain_links(&mut self, keep: impl Fn(LinkId) -> bool) {
-        self.links.retain(|link, _| keep(*link));
+        self.links
+            .retain(|link, slot| slot.awaiting_attach || keep(*link));
     }
 
     fn drop_endpoint(&mut self, endpoint: &EndpointKey) {
@@ -1338,6 +1368,7 @@ mod tests {
                 borrowed: Rc::new(Cell::new(None)),
                 inbox: Rc::new(RefCell::new(VecDeque::new())),
                 resets: Rc::new(Cell::new(0)),
+                awaiting_attach: false,
             },
         );
         (effects, inputs, taps)

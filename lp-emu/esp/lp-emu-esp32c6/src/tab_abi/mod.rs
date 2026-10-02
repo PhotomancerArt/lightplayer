@@ -121,6 +121,9 @@ pub mod outcome_code {
     /// and here so the mapping is total rather than a `_ =>` that would
     /// quietly rename a new outcome.
     pub const WALL_TIMEOUT: i32 = 6;
+    /// The guest wrote itself to sleep (`Outcome::DeepSleep`); the wake
+    /// itself is not modelled.
+    pub const DEEP_SLEEP: i32 = 7;
 }
 
 pub fn code_for(outcome: &Outcome) -> i32 {
@@ -132,6 +135,7 @@ pub fn code_for(outcome: &Outcome) -> i32 {
         Outcome::Reset { .. } => outcome_code::RESET,
         Outcome::Breakpoint { .. } => outcome_code::BREAKPOINT,
         Outcome::WallTimeout { .. } => outcome_code::WALL_TIMEOUT,
+        Outcome::DeepSleep { .. } => outcome_code::DEEP_SLEEP,
     }
 }
 

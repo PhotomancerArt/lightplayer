@@ -10,9 +10,9 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    ControllerId, DirtySummary, ProjectController, ProjectNodeAddress, ProjectOp,
+    ControllerId, DirtySummary, OfferPath, ProjectController, ProjectNodeAddress, ProjectOp,
     ProjectSlotAddress, ProjectSlotRoot, ProjectSyncPhase, SlotEditOp, SlotPath, UiAction,
-    UiChromeSessionControl, UiChromeSessionStatus, UiHistoryKind, UiPaneAction, UiPendingEdit,
+    UiChromeSessionControl, UiChromeSessionStatus, UiHistoryKind, UiOffer, UiPendingEdit,
     UiPendingEditKind, UiPendingEditPhase, UiProjectHistory, UiProjectHistoryEntry, UiStatus,
 };
 use lpa_studio_web_story_macros::story;
@@ -521,16 +521,15 @@ fn hardware_empty_control() -> UiChromeSessionControl {
 }
 
 /// The control stories' project content: the shared editor fixture with the
-/// dirty counts and the matching header actions stamped — the SAME gate the
-/// controller's `project_header_actions` applies (persisted > 0, never
+/// dirty counts and the matching `project/*` offers — the SAME gate the
+/// controller's `publish_project_offers` applies (persisted > 0, never
 /// failed alone), so a failed-only row here renders exactly the header's
 /// real blind spot
 /// (`docs/debt/failed-only-asset-edit-header-blindness.md`).
 fn control_content(persisted: usize, failed: usize, status: UiStatus) -> ProjectDetailContent {
     let mut editor = project_editor_fixture(ProjectSyncPhase::Ready);
     editor.dirty = DirtySummary { persisted, failed };
-    editor.header_actions = save_revert_actions(persisted);
-    ProjectDetailContent::new(&editor, status)
+    ProjectDetailContent::new(&editor, status, save_revert_offers(persisted))
 }
 
 /// The dirty-list-open story's content: two persisted edits, both listed
@@ -543,12 +542,11 @@ fn dirty_content() -> ProjectDetailContent {
         persisted: 2,
         failed: 0,
     };
-    editor.header_actions = save_revert_actions(2);
     editor.pending_edits = vec![
         pending_edit("Orbit shader", "brightness", "0.82"),
         pending_edit("Sunrise palette", "entries[dusk]", "#ff7a3d"),
     ];
-    ProjectDetailContent::new(&editor, UiStatus::good("Ready"))
+    ProjectDetailContent::new(&editor, UiStatus::good("Ready"), save_revert_offers(2))
 }
 
 /// A fixed clock for the history rows, so relative times never drift
@@ -563,13 +561,12 @@ fn dirty_content_with_history() -> ProjectDetailContent {
         persisted: 2,
         failed: 0,
     };
-    editor.header_actions = save_revert_actions(2);
     editor.pending_edits = vec![
         pending_edit("Orbit shader", "brightness", "0.82"),
         pending_edit("Sunrise palette", "entries[dusk]", "#ff7a3d"),
     ];
     editor.history = history();
-    ProjectDetailContent::new(&editor, UiStatus::good("Ready"))
+    ProjectDetailContent::new(&editor, UiStatus::good("Ready"), save_revert_offers(2))
 }
 
 /// A representative log: a fork origin, saves, a push, and a join —
@@ -624,16 +621,22 @@ fn changes_panel_frame(children: Element) -> Element {
     }
 }
 
-/// Save / Revert-to-saved, exactly as the controller's `project_header_actions`
-/// mints them — present only while persisted edits are pending, never for a
-/// failed-only project (the header blindness this control inherited).
-fn save_revert_actions(persisted: usize) -> Vec<UiPaneAction> {
+/// Save / Revert-to-saved, exactly as the controller's
+/// `publish_project_offers` publishes them — present only while persisted
+/// edits are pending, never for a failed-only project (the header blindness
+/// this control inherited).
+fn save_revert_offers(persisted: usize) -> Vec<UiOffer> {
     if persisted == 0 {
         return Vec::new();
     }
     vec![
-        UiPaneAction::new("save", project_action(ProjectOp::SaveOverlay)),
-        UiPaneAction::new(
+        UiOffer::new(
+            OfferPath::project().child("save"),
+            "save",
+            project_action(ProjectOp::SaveOverlay),
+        ),
+        UiOffer::new(
+            OfferPath::project().child("revert"),
             "revert",
             project_action(ProjectOp::RevertAllEdits).with_label("Revert to saved"),
         ),
@@ -666,7 +669,7 @@ fn pending_edit(node_label: &str, path: &str, value_display: &str) -> UiPendingE
 }
 
 /// An action dispatched to the project controller itself — the same helper
-/// `ProjectController::project_header_actions` uses internally.
+/// `ProjectController`'s `publish_project_offers` uses internally.
 fn project_action(op: ProjectOp) -> UiAction {
     UiAction::from_op(ControllerId::new(ProjectController::NODE_ID), op)
 }

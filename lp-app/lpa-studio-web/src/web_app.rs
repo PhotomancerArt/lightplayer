@@ -23,6 +23,7 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use crate::app::StudioShell;
+use crate::app::command_palette::{CommandPalette, CommandPaletteHint};
 use crate::app::home::package_card::home_action;
 use crate::app::layout::LocalStoreBanner;
 use crate::app::layout::session_control::ProjectPopoverInputs;
@@ -1177,6 +1178,9 @@ pub fn App() -> Element {
     // link to a project this library does NOT have never gets here: the
     // route resolution above lands it on Home with a pending intent.
     let current_view = view.read().clone();
+    // The ⌘K command palette's open state: web chrome, like a popover's,
+    // held here so the chrome's hint and the palette share it.
+    let mut palette_open = use_signal(|| false);
     // Bluetooth access: the Unlock sheet, the card's Connections group and
     // "Who has access", and the Devices page's access settings all sit
     // under the shell; their callback and the view slice they read ride
@@ -1336,7 +1340,19 @@ pub fn App() -> Element {
             );
             ChromeSessionControl {
                 session,
-                project: editor.map(|(editor, status)| ProjectDetailContent::new(editor, status)),
+                // The project's own verbs come from the view's offer tree
+                // (`project/save`, `project/revert`), like the pane header's.
+                project: editor.map(|(editor, status)| {
+                    ProjectDetailContent::new(
+                        editor,
+                        status,
+                        current_view
+                            .offers
+                            .verbs_of(&lpa_studio_core::OfferPath::project())
+                            .cloned()
+                            .collect(),
+                    )
+                }),
                 relationship,
                 project_popover: project_popover_inputs(
                     relationship,
@@ -1381,6 +1397,9 @@ pub fn App() -> Element {
         _ => SiteSection::Session,
     };
     let settings = current_view.settings.clone();
+    // The palette lists the view's whole offer tree. It mounts here, not in
+    // the shell, because the shell's offers context is not on every page.
+    let palette_offers = current_view.offers.clone();
 
     // The workbench keeps a modest desktop inset (the workbench frame draws
     // no box of its own now — see `app::workbench`), and below the fold
@@ -1413,6 +1432,12 @@ pub fn App() -> Element {
                 // its visitor variant both retired at relationship-control
                 // P5, and the bar's PROJECT segment is the one door for
                 // every standing.
+                // The palette's "⌘K" hint, which also opens it on a click.
+                // It folds with the build chip: a phone has no ⌘K.
+                span {
+                    class: if session_control_present { "tw:hidden tw:@min-[900px]:flex" } else { "tw:hidden tw:@min-[560px]:flex" },
+                    CommandPaletteHint { on_open: move |_| palette_open.set(true) }
+                }
                 // The build chip is an inspector, not a control: it is the
                 // first utility to fold — with the crowded bar's <900 rung
                 // on lens routes, with the phone rung elsewhere.
@@ -1505,6 +1530,9 @@ pub fn App() -> Element {
                     }
                 },
             }
+            // ⌘K from anywhere: every offer the view publishes, pressed
+            // through this same dispatch.
+            CommandPalette { offers: palette_offers, open: palette_open, on_action }
             // Last, and outside every section: one line at the page's
             // bottom for acts with no other visible consequence (a link on
             // the clipboard, an access level flipped, a project archived).

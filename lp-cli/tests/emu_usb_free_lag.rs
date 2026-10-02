@@ -65,7 +65,19 @@
 //!
 //! The lag is chosen from step 1's measurements (just past the later of the
 //! two), not written down, so a firmware change that moves either path moves
-//! the lag with it.
+//! the lag with it. What it is chosen from is each image's **typical** wake,
+//! not its soonest: the median, over the 40 requests, of each request's
+//! soonest `ep1` write and `ep1_conf` read after a drain. The soonest over
+//! the whole run is the wrong statistic. Almost every drain finds the CPU
+//! idle and takes the same path (1,503 cycles to the ungated image's check),
+//! but now and then a drain lands while the CPU is already running, and that
+//! one wake is shorter (769–1,317 cycles, measured on PR #894's images).
+//! Whether any drain lands like that is a matter of phase between the guest's
+//! other work and the host's drain cadence, so it moves with any change to
+//! the image, and differs between a desk build and CI's of one commit.
+//! On #894 the run's soonest became one of those and put the lag below the
+//! wake nearly every drain takes, so the test no longer covered the path it
+//! is about.
 //!
 //! **Boot has two writers** since the C6's link task got a thread of its own
 //! (`io-thread`, plan `lp2025/2026-10-01-1756-c6-link-io-thread`): the link
@@ -85,9 +97,9 @@
 //! `fw-esp32c6` ELFs (`LP_EMU_BUILD_FW=1`).
 
 use lp_cli::commands::emu::link_host::{C6Board, EmuLinkHost};
-use lp_emu_esp32c6::control::ControlCommand;
+use lp_emu_esp32c6::control::{ControlCommand, ControlReply};
 use lp_emu_esp32c6::flash::FlashBacking;
-use lp_emu_esp32c6::machine::{AppSource, Esp32C6Builder, TimeGrade, UsbHost};
+use lp_emu_esp32c6::machine::{AppSource, Esp32C6Builder, Esp32C6Machine, TimeGrade, UsbHost};
 use lp_emu_esp32c6::memmap;
 use lp_emu_esp32c6::test_support::{FwImage, fw_esp32c6_image};
 use lpc_wire::{ClientMessage, ClientRequest, LinkCounters};
@@ -153,6 +165,17 @@ fn a_free_lag_tears_neither_image_once_esp_hal_checks_the_free_bit() {
     eprintln!(
         "esp-hal writes {write} ns after a drain at the soonest; the gate checks at {check} ns"
     );
+    // The typical wake, which the lag is chosen from (module docs).
+    let typical_write = before
+        .typical_write_ns
+        .expect("the ungated image wrote after a drain");
+    let typical_check = after
+        .typical_check_ns
+        .expect("the gated image checked the buffer after a drain");
+    eprintln!(
+        "typically, esp-hal writes {typical_write} ns after a drain; the gate checks at \
+         {typical_check} ns"
+    );
 
     // 3. A lag past the ungated write. Before the esp-hal back-port the
     //    ungated image wrote each packet straight out of its wake, lost a few
@@ -164,7 +187,7 @@ fn a_free_lag_tears_neither_image_once_esp_hal_checks_the_free_bit() {
     //    the gate's: docs/defects/2026-09-27-the-in-endpoint-gate-loses-the-
     //    drains-wake-inside-a-free-lag.md (open, and conditional on the lag
     //    hypothesis).
-    let lag = write.max(check) + 1_000;
+    let lag = typical_write.max(typical_check) + 1_000;
     let (before, after) = both(&ungated, &gated, lag);
     for (name, run) in [("ungated", &before), ("gated", &after)] {
         eprintln!("free lag {lag} ns, {name}: {}", run.summary());
@@ -241,6 +264,11 @@ struct Run {
     write_ns: Option<u64>,
     /// The soonest `ep1_conf` read after a drain, in ns.
     check_ns: Option<u64>,
+    /// The median over the requests of each one's soonest `ep1` write after
+    /// a drain, in ns: the typical wake (module docs).
+    typical_write_ns: Option<u64>,
+    /// The same for `ep1_conf` reads.
+    typical_check_ns: Option<u64>,
     /// The board's own count of frame writes it gave up on.
     board_write_timeouts: u32,
 }
@@ -251,7 +279,8 @@ impl Run {
             "lp-emu:esp32c6:t1 — {} of {REQUESTS} Hellos answered, {} B refused ({} B in boot); \
              host link {} damaged, {} stale partials, {} resent, {} resets, {} payload errors; board {} write \
              timeouts; \
-             next write {:?} ns / next free check {:?} ns after a drain",
+             next write {:?} ns / next free check {:?} ns after a drain at the soonest, \
+             {:?} ns / {:?} ns typically",
             self.replies,
             self.tried,
             self.tried_in_boot,
@@ -263,6 +292,8 @@ impl Run {
             self.board_write_timeouts,
             self.write_ns,
             self.check_ns,
+            self.typical_write_ns,
+            self.typical_check_ns,
         )
     }
 }
@@ -283,12 +314,18 @@ fn converse(elf: &std::path::Path, lag_ns: u64) -> Run {
         .expect("the image builds a machine");
     let mut host = EmuLinkHost::new(C6Board::new(machine).unwrap(), 0x0F4E_E1A6, true);
     let mut tried_in_boot = 0;
+    // One window of wake stats per request, so one odd drain moves one
+    // window's soonest, not the run's (module docs).
+    let mut windows = Vec::new();
     for n in 0..REQUESTS {
         host.run_until((FIRST_AT_MS + n * EVERY_MS) * 1_000, None)
             .expect("the run");
         if n == 0 {
             tried_in_boot = host.board.machine.usb_sj_tried().len();
+        } else {
+            windows.push(soonest_wake(&mut host.board.machine));
         }
+        restart_wake_stats(&mut host.board.machine, lag_ns);
         host.send(&ClientMessage {
             id: FIRST_ID + n,
             msg: ClientRequest::Hello,
@@ -305,10 +342,19 @@ fn converse(elf: &std::path::Path, lag_ns: u64) -> Run {
         .filter(|id| (FIRST_ID..FIRST_ID + REQUESTS).contains(id))
         .collect();
     let m = &mut host.board.machine;
-    let stats = m.usb_in_wake_stats().expect("the USB block");
-    let ns = |cycles: u64| cycles * 1_000 / stats.cycles_per_us;
-    let write_ns = (stats.write.count > 0).then(|| ns(stats.write.min));
-    let check_ns = (stats.free_read.count > 0).then(|| ns(stats.free_read.min));
+    windows.push(soonest_wake(m));
+    let soonest = |pick: fn(&(Option<u64>, Option<u64>)) -> Option<u64>| {
+        windows.iter().filter_map(pick).min()
+    };
+    let typical = |pick: fn(&(Option<u64>, Option<u64>)) -> Option<u64>| {
+        let mut v: Vec<u64> = windows.iter().filter_map(pick).collect();
+        v.sort_unstable();
+        v.get(v.len() / 2).copied()
+    };
+    let write_ns = soonest(|w| w.0);
+    let check_ns = soonest(|w| w.1);
+    let typical_write_ns = typical(|w| w.0);
+    let typical_check_ns = typical(|w| w.1);
     let tried = m.usb_sj_tried().len() - tried_in_boot;
     let board_write_timeouts = m
         .peek_symbol("fw_esp32_common::usb_link::usb_link_counters::WRITE_TIMEOUTS")
@@ -322,6 +368,29 @@ fn converse(elf: &std::path::Path, lag_ns: u64) -> Run {
         tried_in_boot,
         write_ns,
         check_ns,
+        typical_write_ns,
+        typical_check_ns,
         board_write_timeouts,
     }
+}
+
+/// The soonest `ep1` write and `ep1_conf` read after a drain since the
+/// stats last restarted, in ns.
+fn soonest_wake(m: &mut Esp32C6Machine) -> (Option<u64>, Option<u64>) {
+    let stats = m.usb_in_wake_stats().expect("the USB block");
+    let ns = |cycles: u64| cycles * 1_000 / stats.cycles_per_us;
+    (
+        (stats.write.count > 0).then(|| ns(stats.write.min)),
+        (stats.free_read.count > 0).then(|| ns(stats.free_read.min)),
+    )
+}
+
+/// Restart the wake stats. Setting the lag is what restarts them, and
+/// setting the lag already in force changes nothing else the guest sees.
+fn restart_wake_stats(m: &mut Esp32C6Machine, lag_ns: u64) {
+    let reply = m.control_line(&format!("free-lag {lag_ns}"));
+    assert!(
+        matches!(reply, ControlReply::Ok { .. }),
+        "free-lag {lag_ns}: {reply:?}"
+    );
 }
