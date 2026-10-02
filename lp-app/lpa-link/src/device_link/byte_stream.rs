@@ -245,6 +245,7 @@ impl<S: DeviceByteStream> LinkCore<S> {
                 // A fresh port is a fresh link session (a new nonce), so the
                 // board starts its per-link state over too.
                 self.service = Some(LinkPortService::new(
+                    lpc_wire::lp_link::LinkConfig::usb(),
                     fresh_link_nonce(),
                     self.want_packed,
                     None,

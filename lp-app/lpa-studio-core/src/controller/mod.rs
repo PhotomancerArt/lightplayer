@@ -10,6 +10,7 @@ pub use crate::core::action::action_class::{
 };
 pub use crate::core::action::action_confirmation::ActionConfirmation;
 pub use crate::core::action::action_enablement::ActionEnablement;
+pub use crate::core::action::action_gesture::ActionGesture;
 pub use crate::core::action::action_meta::ActionMeta;
 pub use crate::core::action::action_priority::ActionPriority;
 pub use crate::core::action::actions::UiActions;

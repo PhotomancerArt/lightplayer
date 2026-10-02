@@ -87,6 +87,21 @@ description = "M7's boot chain as a RECORDED claim rather than an integration te
 payloads = ["rom-up-boot"]
 
 [[set]]
+name = "lp-link-emu"
+description = "The shipped-image payloads a link host records on our own machine since the image went onto lp-link (wire proto 30, #854): the idle boot from memory and from flash, the same boot from the reset vector, and the cable out mid-session and back in. `lp-cli validate`'s default `--link-host lp-link` runs each under `lp-cli emu run --host-link` and the capture is that host's decoded console (plan lp2025/2026-09-27-validate-driver-link-host). Not here, each for a reason the plan names: `usb-negative-control` and `usb-host-absent`, whose subject — the connection monitor's stamps — left the firmware with the cut-over, and the walks, whose host half is a raw `M!` script."
+payloads = [
+    "boot-idle",
+    "boot-idle-flash",
+    "rom-up-boot",
+    "usb-detach-reattach",
+]
+
+[[set]]
+name = "lp-link-desk"
+description = "The desk's half of `lp-link-emu`: the two idle boots, on a board, through `lp-cli link capture` (flash with no monitor, then open the port as the link's host). The first silicon captures of an lp-link image; see `desk-recapture.md` in plan lp2025/2026-09-27-validate-driver-link-host for the protocol."
+payloads = ["boot-idle", "boot-idle-flash"]
+
+[[set]]
 name = "jit-math-perf"
 description = "The Q32 math kernel cycle-cost payload (Q12 ledger, cheapest test_* migration): mul/div/sin kernels and LUT access cost against the PMU cycle counter. Timing only — never a gate under esp-emu, which has no cycle model."
 payloads = ["jit-math-perf"]

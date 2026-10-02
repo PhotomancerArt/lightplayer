@@ -235,10 +235,15 @@ the two arms need different toolchains and ride different CI jobs (below).
 `esp32_memory_stats` runs on a project load/unload/stop-all or a client
 `runtime_status`, never on the five-second server heartbeat, so a classic boot
 with nobody talking prints no `[MEM]`, no `[JIT]` and no `[stack] heartbeat:`
-line at all. The classic's arm sends one `stopAllProjects` over UART0 —
-`lp-emu/lp-emu-validate/walks/v3-stop-all.script`, the same bytes on the same
-trigger as `lp-emu-esp32v3/tests/boot_idle.rs` and as the desk sitting — and
-takes the first triple. It is the single thing most likely to be got wrong by
+line at all. The classic's arm sends one `stopAllProjects` and takes the
+first triple. Since wire proto 32 (plan `classic-uart-on-lp-link`) UART0 is an
+lp-link and the triple is log records on its log channel, so the arm boots
+through `lp-cli emu run --chip esp32v3 --host-link --json-replies` and asks
+over the link once the hello arrives — the same request
+`lp-cli/tests/emu_v3_link_gates.rs` sends. (Before proto 32 it was
+`lp-emu/lp-emu-validate/walks/v3-stop-all.script`'s raw `M!` bytes, which an
+lp-link image no longer reads; the script stays for the pinned pre-lp-link
+reference images.) It is the single thing most likely to be got wrong by
 copying the C6's arm.
 
 Five recorded figures, each with its own direction, one band, and one
@@ -359,6 +364,18 @@ The margin defaults to **0%** — the emulator is deterministic (simulated
 time, no host randomness), so identical trees produce identical figures. If
 noise ever appears, that is itself a finding, not something to widen the
 margin over. **Never widen the margin to make the gate pass.**
+
+**Catalog project records get a 64 B absolute allowance per figure, on top of
+the percentage margin.** `CATALOG_ABS_MARGIN_B` in `heap-budget-check.sh`
+applies only to records under `scripts/heap-budget-record/engine/catalog/…`,
+in both directions the per-project check tests (growth, and the inverted
+`largest_free_at_close` shrink). Test records
+(`scripts/heap-budget-record/engine/projects/test/…`) stay at the bare
+percentage margin. It exists because a catalog project's JSON content moves
+its own footprint by a few bytes on a routine edit — #827 failed CI at
+`project-load.retained grew: 51468 > recorded 51463 (margin 0%)`, 5 B, from
+renaming a JSON key — while a real regression is hundreds of bytes; 64 B
+covers the first and still catches the second.
 
 ## Why deltas, not absolutes
 

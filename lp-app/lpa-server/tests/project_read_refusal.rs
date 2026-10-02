@@ -8,6 +8,7 @@ extern crate alloc;
 
 use alloc::boxed::Box;
 use alloc::rc::Rc;
+use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
@@ -18,65 +19,118 @@ use core::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 use lpc_shared::transport::{Incoming, Link, LinkId};
 
 use lp_gfx_lpvm::TargetLpvmGraphics;
-use lpa_server::{LpGraphics, LpServer, PROJECT_READ_MIN_HEADROOM_BYTES};
+use lpa_server::{LpGraphics, LpServer, MemoryStatsFn, ReadGate};
 use lpc_model::{AsLpPath, LpPathBuf};
 use lpc_shared::output::MemoryOutputProvider;
 use lpc_wire::{
     ClientMessage, ClientRequest, NodeReadQuery, ProjectReadEvent, ProjectReadQuery,
-    ProjectReadRequest, TransportError, WireServerMessage, WireServerMsgBody,
+    ProjectReadRequest, TransportError, WireProjectHandle, WireServerMessage, WireServerMsgBody,
 };
 use lpfs::LpFsMemory;
 
 #[test]
-fn starved_heap_refuses_the_read_and_stays_alive() {
-    let (mut server, project_path) = server_with_clock_project("read-refusal");
+fn a_small_largest_block_refuses_the_read_and_stays_alive() {
+    let (mut server, project_path) = server_with_clock_project("read-refusal", Some(plenty_free));
     let handle = server.load_project(project_path.as_path()).expect("load");
+    server.set_read_gate(Some(GATE));
 
-    // A probe reporting headroom below the gate: every read is refused.
-    server.set_read_headroom_probe(Some(|| Some(PROJECT_READ_MIN_HEADROOM_BYTES - 1)));
-
-    let mut transport = VecTransport::default();
-    let read = Incoming::primary(ClientMessage {
-        id: 41,
-        msg: ClientRequest::ProjectRead {
-            handle,
-            request: ProjectReadRequest {
-                since: None,
-                queries: vec![ProjectReadQuery::Nodes(NodeReadQuery::detail_all())],
-                probes: Vec::new(),
-            },
-        },
-    });
-    block_on(server.tick_and_send(16, vec![read], &mut transport)).expect("tick");
+    // Plenty free in total, but no block big enough: refused.
+    server.set_read_headroom_probe(Some(|| Some(GATE.min_largest_block_bytes - 1)));
+    let sent = read(&mut server, handle, 41);
 
     // Exactly one terminal frame for the request id, carrying a
-    // ProjectReadEvent::Error whose message names the remedy.
-    assert_eq!(
-        transport.sent.len(),
-        1,
-        "one terminal frame: {:?}",
-        transport.sent
-    );
-    let frame = &transport.sent[0];
+    // ProjectReadEvent::Error that says the board is busy and to retry.
+    assert_eq!(sent.len(), 1, "one terminal frame: {sent:?}");
+    let frame = &sent[0];
     assert_eq!(frame.id, 41);
     assert!(frame.fin, "refusal frame is final");
-    let WireServerMsgBody::ProjectRead { events } = &frame.msg else {
-        panic!("expected a ProjectRead body, got {:?}", frame.msg);
-    };
-    let [ProjectReadEvent::Error { message }] = events.as_slice() else {
-        panic!("expected a single terminal Error event, got {events:?}");
-    };
+    let message = refusal_message(&sent).expect("a refusal");
     assert!(
-        message.contains("read refused") && !message.contains("narrow the query"),
-        "refusal message drops the unpassable remedy: {message}"
+        message.starts_with("read refused: board memory busy")
+            && message.contains("retry shortly")
+            && !message.contains("narrow the query"),
+        "refusal message says busy and transient: {message}"
     );
 
     // The connection survives: with the probe healthy again, the same server
     // answers the same read normally.
     server.set_read_headroom_probe(Some(|| Some(u32::MAX)));
+    let sent = read(&mut server, handle, 42);
+    assert_served(&sent);
+}
+
+#[test]
+fn low_total_free_refuses_even_with_a_big_block() {
+    let (mut server, project_path) = server_with_clock_project("read-low-free", Some(short_free));
+    let handle = server.load_project(project_path.as_path()).expect("load");
+    server.set_read_gate(Some(GATE));
+    server.set_read_headroom_probe(Some(|| Some(u32::MAX)));
+
+    let sent = read(&mut server, handle, 43);
+    let message = refusal_message(&sent).expect("a refusal");
+    assert!(
+        message.contains(&format!("free {} B", GATE.min_free_bytes - 1)),
+        "refusal names the total free: {message}"
+    );
+}
+
+/// The prod choker's refusals (2026-09-26/27): ~90 KB free, a 19,480 B
+/// largest block. The old single floor (a 32 KiB block) refused it; the
+/// two-number gate serves it.
+#[test]
+fn a_fragmented_heap_with_room_in_total_is_served() {
+    let (mut server, project_path) =
+        server_with_clock_project("read-fragmented", Some(plenty_free));
+    let handle = server.load_project(project_path.as_path()).expect("load");
+    server.set_read_gate(Some(GATE));
+    server.set_read_headroom_probe(Some(|| Some(19_480)));
+
+    let sent = read(&mut server, handle, 44);
+    assert_served(&sent);
+}
+
+#[test]
+fn a_probe_without_a_gate_never_refuses() {
+    let (mut server, project_path) = server_with_clock_project("read-no-gate", Some(short_free));
+    let handle = server.load_project(project_path.as_path()).expect("load");
+    // The probe alone feeds the load gate and the heartbeat, not reads.
+    server.set_read_headroom_probe(Some(|| Some(1)));
+
+    let sent = read(&mut server, handle, 45);
+    assert_served(&sent);
+}
+
+#[test]
+fn unset_probe_never_refuses() {
+    let (mut server, project_path) = server_with_clock_project("read-no-probe", None);
+    let handle = server.load_project(project_path.as_path()).expect("load");
+
+    let sent = read(&mut server, handle, 7);
+    assert!(
+        refusal_message(&sent).is_none(),
+        "host embedders (no probe) are never refused"
+    );
+}
+
+/// The C6's numbers (`fw-esp32c6/src/main.rs` `READ_GATE`).
+const GATE: ReadGate = ReadGate {
+    min_free_bytes: 40 * 1024,
+    min_largest_block_bytes: 16 * 1024,
+};
+
+fn plenty_free() -> Option<(u32, u32)> {
+    Some((90_000, 200_000))
+}
+
+fn short_free() -> Option<(u32, u32)> {
+    Some((GATE.min_free_bytes - 1, 250_000))
+}
+
+/// Sends one full node read and returns every frame the server sent for it.
+fn read(server: &mut LpServer, handle: WireProjectHandle, id: u64) -> Vec<WireServerMessage> {
     let mut transport = VecTransport::default();
     let read = Incoming::primary(ClientMessage {
-        id: 42,
+        id,
         msg: ClientRequest::ProjectRead {
             handle,
             request: ProjectReadRequest {
@@ -87,55 +141,41 @@ fn starved_heap_refuses_the_read_and_stays_alive() {
         },
     });
     block_on(server.tick_and_send(16, vec![read], &mut transport)).expect("tick");
-    let served: Vec<&ProjectReadEvent> = transport
-        .sent
-        .iter()
+    transport.sent
+}
+
+fn project_read_events(sent: &[WireServerMessage]) -> Vec<&ProjectReadEvent> {
+    sent.iter()
         .filter_map(|frame| match &frame.msg {
             WireServerMsgBody::ProjectRead { events } => Some(events.iter()),
             _ => None,
         })
         .flatten()
-        .collect();
+        .collect()
+}
+
+/// The refusal's text, when the read was refused (a lone terminal `Error`).
+fn refusal_message(sent: &[WireServerMessage]) -> Option<String> {
+    match project_read_events(sent).as_slice() {
+        [ProjectReadEvent::Error { message }] => Some(message.clone()),
+        _ => None,
+    }
+}
+
+fn assert_served(sent: &[WireServerMessage]) {
+    let served = project_read_events(sent);
     assert!(
         served
             .iter()
             .any(|event| matches!(event, ProjectReadEvent::Begin { .. })),
-        "healthy probe serves the read normally: {served:?}"
+        "the read is served: {served:?}"
     );
     assert!(
         !served
             .iter()
             .any(|event| matches!(event, ProjectReadEvent::Error { .. })),
-        "no refusal once headroom is healthy"
+        "no refusal: {served:?}"
     );
-}
-
-#[test]
-fn unset_probe_never_refuses() {
-    let (mut server, project_path) = server_with_clock_project("read-no-probe");
-    let handle = server.load_project(project_path.as_path()).expect("load");
-
-    let mut transport = VecTransport::default();
-    let read = Incoming::primary(ClientMessage {
-        id: 7,
-        msg: ClientRequest::ProjectRead {
-            handle,
-            request: ProjectReadRequest {
-                since: None,
-                queries: vec![ProjectReadQuery::Nodes(NodeReadQuery::detail_all())],
-                probes: Vec::new(),
-            },
-        },
-    });
-    block_on(server.tick_and_send(16, vec![read], &mut transport)).expect("tick");
-    let has_error = transport.sent.iter().any(|frame| {
-        matches!(
-            &frame.msg,
-            WireServerMsgBody::ProjectRead { events }
-                if events.iter().any(|e| matches!(e, ProjectReadEvent::Error { .. }))
-        )
-    });
-    assert!(!has_error, "host embedders (no probe) are never refused");
 }
 
 /// In-memory transport that records every sent server message.
@@ -167,7 +207,10 @@ impl lpc_shared::transport::ServerTransport for VecTransport {
     }
 }
 
-fn server_with_clock_project(name: &str) -> (LpServer, LpPathBuf) {
+fn server_with_clock_project(
+    name: &str,
+    memory_stats: Option<MemoryStatsFn>,
+) -> (LpServer, LpPathBuf) {
     let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
     let graphics: Arc<dyn LpGraphics> =
         Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND));
@@ -175,7 +218,7 @@ fn server_with_clock_project(name: &str) -> (LpServer, LpPathBuf) {
         output_provider,
         Box::new(LpFsMemory::new()),
         "projects".as_path(),
-        None,
+        memory_stats,
         None,
         graphics,
     );

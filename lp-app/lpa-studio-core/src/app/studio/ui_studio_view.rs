@@ -173,6 +173,9 @@ pub struct UiStudioView {
     /// for the toast with Undo (`AccessCommand::UndoAutoAdd`). A new
     /// `generation` is a new toast.
     pub access_added: Option<crate::app::access::AccessAdded>,
+    /// The app-level chat (one per page): the assistant that builds and
+    /// edits a project.
+    pub app_agent: crate::UiAppAgentView,
 }
 
 impl UiStudioView {
@@ -196,6 +199,7 @@ impl UiStudioView {
             lens_access_line: None,
             lens_reconnecting: None,
             access_added: None,
+            app_agent: crate::UiAppAgentView::default(),
         }
     }
 
@@ -281,6 +285,11 @@ impl UiStudioView {
 
     pub fn with_dirty(mut self, dirty: crate::DirtySummary) -> Self {
         self.dirty = dirty;
+        self
+    }
+
+    pub fn with_app_agent(mut self, app_agent: crate::UiAppAgentView) -> Self {
+        self.app_agent = app_agent;
         self
     }
 

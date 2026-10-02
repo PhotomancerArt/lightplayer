@@ -77,6 +77,25 @@ exit criteria: inbound frames longer than one engine tick of line time
 (P6's RX ring is the known design answer; no current client sends that
 shape).
 
+2026-09-29: the classic's UART0 moved onto `lp-link` (wire proto 32, plan
+`classic-uart-on-lp-link`, PR #884). The "no ack/retry on either direction"
+half of this entry's shape is gone: every frame carries a CRC-32C and is
+resent until acknowledged, so a FIFO overflow in either direction becomes a
+counted resend (`resends`/`damaged` on the heartbeat's `link` object), not a
+lost message; a long inbound frame is cut into 256-byte link frames, so the
+2026-08-26 "longer than a tick" loss is covered by the same resend. The
+"unowned" half is gone too: after boot, io_task is UART0's only writer (a panic
+aside, which writes a raw `0xFF` mark first), and its TX pipe only ever
+takes whole units — link frames from the link task, whole `[WS281X]`
+telemetry lines between them.
+io_task keeps its #448 shape (swi2, 1 ms pacer) as a byte shuttle; the
+`Link` runs on the thread executor beside the server (ruling DD20), which is
+why the board's resend floor is 200 ms. Emulator-proven only
+(`lp-emu:esp32v3:t1`, a `--uart-faults` soak at up to ~2.5 % damaged windows
+with 0 app errors); the desk walk on the DOM-Z-102 is still open. Once it
+passes, this entry can retire: the `stopAllProjects` workaround applies only
+to pre-proto-32 firmware.
+
 **Exit criteria** — inbound: an interrupt-serviced RX ring (or io_task
 priority/executor isolation) sized so a full-load engine tick cannot
 overflow it, proven by a test that pushes a ≥4 KB frame while a

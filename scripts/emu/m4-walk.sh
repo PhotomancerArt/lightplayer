@@ -40,16 +40,16 @@
 #
 # ## Why one run where the hardware walk needs two flashes
 #
-# The hardware walk flashes twice because espflash's `--monitor` HOLDS the
-# port, so `lp-cli` cannot open it at the same time; round 1 pushes the
-# project, round 2 reflashes to watch it render. On the C6 the emulator's
-# runner is also the host on the board's link (`lp-cli emu run --host-link
-# --upload`, since the image went onto lp-link at wire proto 30): one process
+# The hardware walk flashes twice and hosts the board's link in two separate
+# processes, one at a time: round 1 flashes and `lp-cli upload`s the project,
+# round 2 reflashes so the board boots into it while `lp-cli link capture`
+# hosts the link and reads the dump. This walk needs one run on
+# either chip: `lp-cli emu run --host-link --upload` (since the image went
+# onto lp-link at wire proto 30, and M8 taught the same door the S3) makes
+# this process the host on the board's own link, in process — one run
 # uploads over the link and keeps hosting it, so the board's log lines — the
 # `[OUT] dump` among them — keep leaving the board after the upload is done.
-# On the S3 the link is a socket the machine serves. Either way one run
-# uploads AND watches. The
-# project surviving a reboot — the thing the second flash also happens to
+# The project surviving a reboot — the thing the second flash also happens to
 # prove — is `lp-emu/esp/lp-emu-esp32c6/tests/flash_persistence.rs`'s gate,
 # not this walk's.
 #
@@ -112,8 +112,6 @@ done
 #                   script will look for the rewrite here and there is none.
 #   MERGED_CHIP     what `build-merged-image.sh --chip` is told (it owns the
 #                   partition table and the flash size).
-#   LINK / CTRL     the byte socket and, on the S3, the cable's own channel.
-#                   Different defaults per chip so two walks can run at once.
 #   RV32_IS_THE_GUESTS_CODEGEN
 #                   whether `[ORACLE-RV32]` is the guest's OWN code generator.
 #                   On the C6 it is — same ISA, same backend — so a guest that
@@ -124,15 +122,12 @@ case "$CHIP" in
 esp32c6)
     PAD="${LP_WALK_PAD:-18}"
     MERGED_CHIP="esp32c6"
-    LINK="${LP_WALK_LINK:-127.0.0.1:5597}"
     OUT_DEFAULT="$REPO/target/lp-emu-c6-walk"
     RV32_IS_THE_GUESTS_CODEGEN=1
     ;;
 esp32s3)
     PAD="${LP_WALK_PAD:-9}"
     MERGED_CHIP="esp32s3"
-    LINK="${LP_WALK_LINK:-127.0.0.1:5598}"
-    CTRL="${LP_WALK_CTRL:-127.0.0.1:5618}"
     OUT_DEFAULT="$REPO/target/lp-emu-esp32s3-walk"
     RV32_IS_THE_GUESTS_CODEGEN=0
     ;;
@@ -175,12 +170,7 @@ command -v jq >/dev/null 2>&1 || {
 mkdir -p "$OUT"
 console="$OUT/walk.console.txt"
 frames="$OUT/walk.frames.jsonl"
-# The OBSERVATION stream: bytes the guest handed the link that no host took.
-# On the S3 it is not empty and the reason is a known open defect — see THE
-# RUN below. It is never a gate; it is the difference between "the firmware
-# said nothing" and "the firmware said it and the link ate it".
-tried="$OUT/walk.tried.txt"
-rm -f "$console" "$frames" "$tried"
+rm -f "$console" "$frames"
 
 # ------------------------------------------------- the image, and its bytes
 #
@@ -235,14 +225,11 @@ case "$BOOT" in
     rom-up)
         echo "==> building the merged image for $MERGED_CHIP (the bytes a flasher writes)"
         scripts/emu/build-merged-image.sh --chip "$MERGED_CHIP" "$elf" "$OUT/merged.bin"
-        # `lp-cli emu run` (the C6) infers rom-up from `--merged`; the S3
-        # machine binary asks for the boot mode by name, and says so if the
-        # two disagree.
-        if [[ "$CHIP" == "esp32s3" ]]; then
-            boot_args=(--boot-mode rom-up --merged "$OUT/merged.bin")
-        else
-            boot_args=(--merged "$OUT/merged.bin")
-        fi
+        # `lp-cli emu run --chip esp32s3` infers rom-up from `--merged` the
+        # same way the C6 does (`run_s3.rs`'s own boot-mode match) — no
+        # `--boot-mode` flag here; that belonged to the standalone
+        # `lp-emu-esp32s3` binary this walk no longer runs.
+        boot_args=(--merged "$OUT/merged.bin")
         ;;
     direct)
         # No flash chip, and no bootloader: the fast path, for bisecting. On
@@ -250,16 +237,6 @@ case "$BOOT" in
         # `no lpfs partition in the flashed table … using memory FS` and runs
         # on the memory FS — a different allocator load from the ROM-up boot's
         # and a thing to remember before comparing figures across the two.
-        #
-        # ⚠️ **On the S3 this path cannot complete an upload today**, and the
-        # reason is the open link defect rather than this script: the deploy's
-        # `stopAllProjects` reply lands on the TRIED stream (printed under THE
-        # RUN below) and `lp-cli` waits ten seconds for a reply the host never
-        # got. ROM-up is unaffected — the same run loses only the hello's
-        # feature-list packet, which `lp-cli` survives. Giving this path a
-        # flash chip (`--flash-copy`) removes the `lpfs` error line and does
-        # NOT bring the reply back, so the log line is not the trigger. The
-        # walk still runs, prints everything it reached and exits non-zero.
         boot_args=(--elf "$elf")
         ;;
     *)
@@ -271,20 +248,13 @@ esac
 # Release, and it is the expensive step of the walk on a cold cache — minutes,
 # not seconds. It has to be: the emulator's interpreter loop IS this binary,
 # and a debug build of it runs the emulated seconds below at a speed nobody
-# will wait for. On the C6 one binary serves the link and drives the upload;
-# on the S3 the machine is its own binary, because `lp-cli emu run` knows one
-# chip and teaching it a second is M8's — so that arm builds both.
-case "$CHIP" in
-esp32c6)
-    echo "==> building lp-cli (release — the emulator's own interpreter loop)"
-    cargo build --quiet --release -p lp-cli
-    ;;
-esp32s3)
-    echo "==> building lp-cli and lp-emu-esp32s3 (release)"
-    cargo build --quiet --release -p lp-cli -p lp-emu-esp32s3
-    emu="$REPO/target/release/lp-emu-esp32s3"
-    ;;
-esac
+# will wait for. One binary on both chips now: `lp-cli emu run --host-link`
+# hosts the link and drives the upload in process, on the C6 and the S3
+# alike (M8 taught `emu run` the second chip; the standalone
+# `lp-emu-esp32s3` binary stays the workshop for everything this door
+# doesn't cover, but this walk isn't one of those things any more).
+echo "==> building lp-cli (release — the emulator's own interpreter loop)"
+cargo build --quiet --release -p lp-cli
 cli="$REPO/target/release/lp-cli"
 
 # ---------------------------------------------------- the machine, listening
@@ -292,6 +262,34 @@ cleanup() {
     [[ -n "${emu_pid:-}" ]] && kill "$emu_pid" 2>/dev/null || true
 }
 trap cleanup EXIT
+
+# The simulated cable-out/cable-in a hardware walk's fingers do, and nobody
+# writes down — the S3's substitute for the old `--control` TCP dance (D2,
+# lp2025/2026-09-28-s3-walk-host-link): a scripted `--usb-script` (the same
+# control-word grammar `--usb-script` always had, `<ms> <verb>`), because the
+# hosted-run door has no live control channel to query mid-run the way the
+# now-retired standalone binary did. Detach well past the deferred lit dump
+# (30 frames after the first lit one — see the TIMEOUT comment above for the
+# render's own timing budget), replug, and reopen, all comfortably inside
+# TIMEOUT; what proves the replug worked is read back from the console and
+# the frame dump afterward (the COMPARISON section below), not a live query.
+cable_script=""
+if [[ "$CHIP" == "esp32s3" ]]; then
+    # Timed to leave the product's one 5 s-interval heartbeat (measured: link
+    # up at ~0.25 s, one heartbeat at 5.00 s uptime, none before or after in
+    # an 8 s run) on the FAR side of the replug — the cleanest evidence this
+    # walk can read back with no live query: a mid-run unplug, then the
+    # regularly-scheduled heartbeat still arriving once the cable is back.
+    UNPLUG_MS="${LP_WALK_UNPLUG_MS:-1500}"
+    REPLUG_MS="${LP_WALK_REPLUG_MS:-4000}"
+    OPEN_MS=$((REPLUG_MS + 300))
+    cable_script="$OUT/cable.usb-script"
+    cat >"$cable_script" <<EOF
+${UNPLUG_MS} detach
+${REPLUG_MS} attach
+${OPEN_MS} open
+EOF
+fi
 
 case "$CHIP" in
 esp32c6)
@@ -317,324 +315,64 @@ esp32c6)
     emu_pid=$!
     ;;
 esp32s3)
-    # `--usb-host attached`, and it is not a convenience: this chip's console
-    # IS the link, and with no host at power-on the first packet commits,
-    # `free` never comes back, esp-println latches TIMED_OUT and the console
-    # falls silent for the rest of the run. A XIAO S3 is powered THROUGH the
-    # cable, so "a board running with no host attached" is not a state the
-    # hardware walk can be in either.
+    # `--host-link --chip esp32s3`: the C6 arm's shape, one chip over — since
+    # M8 taught `emu run` this chip, this process is the host on the S3's
+    # USB-Serial-JTAG link too, and it needs no `--usb-host` override: a
+    # hosted run's own default (`run_s3.rs`) is attached and draining from
+    # power-on, which is the only state a XIAO S3 walk can start in anyway —
+    # this board is powered THROUGH the cable, so there is no "nothing
+    # plugged in yet" moment to model.
     #
-    # `--usb-sj-drain manual` decouples the port from the byte socket, which
-    # is what `--monitor` buys on the C6 arm and for exactly the same reason:
-    # `lp-cli upload` disconnects when it is done, the deferred lit dump comes
-    # THIRTY frames later, and a port that closed with the client would hold
-    # it. Here the control channel owns `open`/`close`, the walk opens the
-    # port itself, and the coupling is asserted below rather than relied on.
+    # `--strict-bus`: a guest that reached an address nothing claims stops
+    # and says where, instead of rendering something plausible.
     #
-    # `--strict-bus` is a second gate for nothing: this run's report says
-    # `unmapped=0`, and a guest that started reaching addresses nothing claims
-    # would stop and say where instead of rendering something plausible.
-    #
-    # `--core-quantum 256` is the machine's own default, named here because
-    # DD110 is about it: frame-START cycles on this chip move with the quantum
-    # (the guest's ISR observes the RMT threshold at slice boundaries) while
-    # frame BYTES do not. This walk compares bytes and nothing else (PD9).
-    echo "==> lp-emu-esp32s3 ($BOOT boot, ${TIMEOUT} emulated) on $LINK, cable on $CTRL"
-    "$emu" \
+    # `--core-quantum` is left at the machine's own default (256, DD110);
+    # `emu run` does not expose it and this walk has never asked for another.
+    echo "==> lp-cli emu run --chip esp32s3 ($BOOT boot, ${TIMEOUT} emulated), hosting the link and uploading $PROJECT"
+    "$cli" emu run \
+        --chip esp32s3 \
         "${boot_args[@]}" \
-        --usb-sj "tcp:$LINK" \
-        --usb-sj-tried "file:$tried" \
-        --usb-sj-drain manual \
-        --usb-host attached \
-        --control "tcp:$CTRL" \
-        --console "$console" \
-        --dump-frames "file:$frames" \
-        --strict-bus \
-        --core-quantum 256 \
+        --host-link \
+        --upload "$PROJECT" \
+        --usb-script "$cable_script" \
         --time-grade t1 \
         --timeout "$TIMEOUT" \
         --wall-timeout "$WALL" \
+        --console "$console" \
+        --dump-frames "$frames" \
+        --strict-bus \
         >"$OUT/emu.stdout" 2>"$OUT/emu.stderr" &
     emu_pid=$!
     ;;
 esac
 
-# The machine listens as soon as it is built, before the ROM has run a single
-# instruction; wait for the port rather than for a log line, so this works the
-# same on both boot paths. (The S3 only: the C6's runner hosts its own link.)
-# bash's own /dev/tcp rather than `nc`, whose flags differ between the BSD one
-# macOS ships and the GNU one a CI runner has.
-[[ "$CHIP" == "esp32s3" ]] && for _ in $(seq 1 300); do
-    (exec 3<>"/dev/tcp/${LINK%%:*}/${LINK##*:}") 2>/dev/null && break
-    kill -0 "$emu_pid" 2>/dev/null || break
-    sleep 0.1
-done
-if ! kill -0 "$emu_pid" 2>/dev/null; then
-    echo "FAIL: the emulator exited before it served the link." >&2
-    tail -20 "$OUT/emu.stderr" >&2
-    exit 1
-fi
-
-# ----------------------------------------------------------------- the cable
-#
-# Only the S3 has one here: `lp-cli emu run --monitor` owns the C6's port from
-# the inside. ONE client for the whole run, on fd 4, because the machine
-# listens for one control client at a time and a verb-per-connection would
-# make the walk's own reconnects part of what it is testing. Every verb is
-# answered with exactly one line, so `read` once per verb is the protocol and
-# not a guess.
-cable_replies="$OUT/walk.cable.txt"
-cable_failed=0
-cable() {
-    local verb="$*" reply=""
-    # A machine that has reached its own deadline has closed this socket, and
-    # a `printf` into it would take the script out with SIGPIPE — at a
-    # progress print, on a run whose evidence is already collected. Say so
-    # instead.
-    if ! kill -0 "$emu_pid" 2>/dev/null; then
-        printf '%-16s (the machine had already ended; no verb sent)\n' "$verb"
-        CABLE_REPLY=""
-        return 0
-    fi
-    printf '%s\n' "$verb" >&4 2>/dev/null || {
-        printf '%-16s (the control socket is gone)\n' "$verb"
-        CABLE_REPLY=""
-        return 0
-    }
-    # `|| true`: a read that times out returns non-zero and would take the
-    # script with it under `set -e` — at the point where the reply we are
-    # about to complain about would have been printed.
-    IFS= read -r -t 30 reply <&4 || true
-    printf '%-16s %s\n' "$verb" "$reply" | tee -a "$cable_replies"
-    CABLE_REPLY="$reply"
-}
-cable_want() {
-    local what="$1"
-    shift
-    # No reply at all means the machine had already ended (above), which some
-    # other check has already failed the run for. Asserting on a reply nobody
-    # sent would bury that reason under this one.
-    if [[ -z "$CABLE_REPLY" ]]; then
-        echo "  (not asserted: $what — there was no reply to read)"
-        return 0
-    fi
-    for want in "$@"; do
-        if [[ "$CABLE_REPLY" != *"$want"* ]]; then
-            echo "FAIL: $what has no '$want':"
-            echo "  $CABLE_REPLY"
-            cable_failed=1
-        fi
-    done
-}
-
-if [[ "$CHIP" == "esp32s3" ]]; then
-    : >"$cable_replies"
-    echo
-    echo "===== CABLE ====="
-    # The probe is a SUBSHELL, and then the real connection is opened in this
-    # one: a failing `exec` redirection kills a non-interactive shell outright,
-    # so the reachability question is asked where the answer is cheap.
-    cable_open=0
-    for _ in $(seq 1 300); do
-        (exec 4<>"/dev/tcp/${CTRL%%:*}/${CTRL##*:}") 2>/dev/null && { cable_open=1; break; }
-        kill -0 "$emu_pid" 2>/dev/null || break
-        sleep 0.1
-    done
-    if [[ $cable_open -eq 0 ]]; then
-        echo "FAIL: the machine never served the control socket on $CTRL." >&2
-        tail -20 "$OUT/emu.stderr" >&2
-        exit 1
-    fi
-    exec 4<>"/dev/tcp/${CTRL%%:*}/${CTRL##*:}"
-    # ⚠️ This is NOT the classic's `attach; reset; open` dance, and the
-    # difference is the chip, not a simplification. There is no CH340 and no
-    # auto-reset truth table here — this link IS the chip — and the board is
-    # powered THROUGH the cable, so a host attached from power-on is the only
-    # state a XIAO S3 walk can start in. `--usb-host attached` says that on the
-    # command line; this asks the machine to confirm it, which is the one thing
-    # a run cannot get wrong silently: with the host absent the console would
-    # simply be empty and every failure below would blame the render.
-    cable state
-    cable_want "the host's state at power-on" "host=attached" "draining=true" "sof=on"
-
-    # ⚠️ **Do not make the walk wait for the guest to boot before uploading.**
-    # It is the obvious next idea, it was tried three ways, and every one of
-    # them makes this walk WORSE. The upload rides two races that pull
-    # opposite ways:
-    #
-    #   * `lp-cli` allows five WALL seconds from link-open to the device's
-    #     hello (lpa-link's `DEFAULT_READY_DEADLINE`). This chip's ROM-up boot
-    #     — the real mask ROM, the real IDF bootloader, 1.9 MB of app hashed
-    #     and mapped — is seconds of interpreting, and on a LOADED desk it is
-    #     more than five: the run then reports "timed out waiting for the
-    #     device hello" and the load average is the whole story. Measured:
-    #     `--exit-on "[RECOVERY] boot complete"` puts the server loop at
-    #     83,572,924 cycles = **348 ms of guest time**, and this desk at load
-    #     average 7–33 does not reach it inside the budget.
-    #   * The open link defect (DD103) eats the io_task's framed write when it
-    #     follows an esp-println packet inside the 100 us IN drain latency,
-    #     which is exactly the shape of the deploy's `stopAllProjects` reply —
-    #     written straight after the ledger triple the handler prints
-    #     (`tests/boot_idle.rs` pins it). A client that arrives after the
-    #     machine has started booting loses this race, reports "device did not
-    #     respond within 10.0s", and the reply is on the tried stream THE RUN
-    #     prints.
-    #
-    # Waiting loses the second race at **every** barrier tried — 500 ms (past
-    # the loop), 300 ms (a poll overshot to 353 ms), and 200 ms (short of the
-    # loop, and it lost anyway, which is what refutes "get the request queued
-    # before the loop's first read" as the explanation). Only a client that
-    # connects at POWER-ON has ever completed the deploy, so that is what this
-    # does — the C6 arm's shape, unchanged.
-    #
-    # Which means: on a quiet desk this walk passes, and on a busy one it
-    # loses the readiness race. **The fix is the defect closing**, not another
-    # barrier; the five-second budget is `lp-app/lpa-link`'s and this script
-    # has no business tuning it.
-fi
-
 # ---------------------------------------------------------------- the upload
 #
-# ⚠️ **`--no-wait` on the S3, and it is the open link defect rather than a
-# shortcut.** `lp-cli upload`'s post-deploy wait polls `projectRead`, whose
-# reply is a multi-frame stream of the whole shape registry — tens of
-# kilobytes. On this chip the link model drops one 64-byte packet whenever a
-# framed write follows an `esp-println` packet inside the IN drain latency
-# (docs/defects/2026-09-13-the-s3-link-drops-the-io-tasks-next-chunk-on-a-
-# stale-serial-in-empty.md, DD103, still open — which side is wrong is
-# P09's measurement), so that stream arrives with a frame missing and
-# `lp-cli` reports `expected project read frame seq 0, got 1`. The DEPLOY
-# itself is unaffected and the console proves it: `Project loaded`,
-# `compilation succeeded`, `[OUT] open`.
-#
-# So this arm asks for the deploy ack and takes its "is it running?" evidence
-# from somewhere better than a reply the link is known to mangle: LIT FRAMES
-# ON THE PAD, counted below. That is the thing the walk is about, and a run
-# where the project did not start has none of them and says so by name.
-#
-# ⚠️ Do NOT copy this onto the C6 arm, and re-point this at the plain wait the
-# day the defect closes. P07's `walks/shader-oracle.script` carries the same
-# workaround one layer down (it waits on `Stopped all projects` rather than on
-# the reply's bytes) and the same instruction.
-upload_args=(--wait-timeout "${LP_WALK_CLI_TIMEOUT:-600}")
-[[ "$CHIP" == "esp32s3" ]] && upload_args=(--no-wait)
-
+# One shape on both chips now: the runner hosts its own link, in process, and
+# `--upload` (above) waits for the deploy to be acked and the project to
+# render before the runner moves on to the rest of its emulated deadline —
+# `run_hosted.rs`'s `wait_for_project_running`, 600 s of WALL budget, polling
+# every 250 ms. (DD103, the S3 link defect this used to work around with
+# `--no-wait` and a tried-byte stream, was fixed in firmware 2026-09-24 —
+# docs/defects/2026-09-13-the-s3-link-drops-the-io-tasks-next-chunk-on-a-
+# stale-serial-in-empty.md — five days before this walk's own ticket was
+# filed citing it as still open. This run is that fix's confirmation.)
 echo
 echo "===== UPLOAD ====="
-if [[ "$CHIP" == "esp32c6" ]]; then
-    # In process (`--upload`, above): wait for the runner and read its verdict.
-    echo "==> the runner uploads over its own link; letting it run to its emulated deadline"
-    wait "$emu_pid" && emu_status=0 || emu_status=$?
-    emu_pid=
-    grep -a -m 1 "uploaded and running" "$OUT/emu.stderr" >"$OUT/cli.stdout" || true
-    cp "$OUT/emu.stderr" "$OUT/cli.stderr"
-    if grep -qa "uploaded and running" "$OUT/emu.stderr"; then
-        cli_status=0
-    else
-        cli_status=1
-    fi
-else
-    set +e
-    "$cli" upload "$PROJECT" "serial:tcp://$LINK" "${upload_args[@]}" \
-        >"$OUT/cli.stdout" 2>"$OUT/cli.stderr"
-    cli_status=$?
-    set -e
-fi
+echo "==> the runner uploads over its own link; letting it run to its emulated deadline"
+wait "$emu_pid" && emu_status=0 || emu_status=$?
+emu_pid=
+grep -a -m 1 "uploaded and running" "$OUT/emu.stderr" >"$OUT/cli.stdout" || true
+cp "$OUT/emu.stderr" "$OUT/cli.stderr"
 tail -5 "$OUT/cli.stdout" || true
 upload_failed=0
-if [[ $cli_status -ne 0 ]]; then
-    echo "upload: FAILED (exit $cli_status)" >&2
+if ! grep -qa "uploaded and running" "$OUT/emu.stderr"; then
+    echo "upload: FAILED" >&2
     tail -30 "$OUT/cli.stderr" >&2
-    # The C6 stops here. The S3 carries on, which is the classic walk's rule
-    # (`m4-walk-esp32v3.sh`) and its reason: a guest that lost the client
-    # mid-upload has usually already loaded the project, opened its output and
-    # rendered, and a walk that exits here throws away the only evidence it
-    # went to all this trouble to collect — the console, the pad and the run
-    # report, none of which exist until the machine reaches its deadline. The
-    # exit code still says FAILED.
-    if [[ "$CHIP" != "esp32s3" ]]; then
-        exit 1
-    fi
-    # The two known failures, named, because both look like "the emulator is
-    # broken" and neither is. See the CABLE section above for the full
-    # argument and the measurements.
-    if grep -qa "timed out waiting for the device hello" "$OUT/cli.stderr"; then
-        echo "       TRIAGE: the readiness race, and it is about how busy this host is." >&2
-        echo "       lp-cli allows five WALL seconds from link-open to the hello" >&2
-        echo "       (lpa-link DEFAULT_READY_DEADLINE). This chip's server loop is up at" >&2
-        echo "       348 ms of GUEST time, which is a few wall seconds of interpreting —" >&2
-        echo "       under a loaded desk it is more than five. Check the load average and" >&2
-        echo "       run it again on a quiet machine. Nothing about the image changed." >&2
-    elif grep -qa "device did not respond within" "$OUT/cli.stderr"; then
-        echo "       TRIAGE: a reply the LINK ate — the open defect DD103. THE RUN section" >&2
-        echo "       below prints the tried stream; if it holds the deploy's" >&2
-        echo "       'stopAllProjects' reply, that is this failure and the guest served the" >&2
-        echo "       request perfectly (the DEVICE section shows it)." >&2
-    fi
-    echo "       continuing: the frames the pad already carried are printed below" >&2
-    upload_failed=1
-else
-    echo "upload: OK"
+    exit 1
 fi
+echo "upload: OK"
 
-# ------------------------------------------------- the cable, released again
-#
-# The upload's client is gone. On the C6 that changes nothing, because
-# `--monitor` holds the port open from inside the runner; on the S3 the same
-# job is `--usb-sj-drain manual`, and the reply below is the evidence that it
-# did it — a port that had closed with the client would HOLD the deferred lit
-# dump (thirty frames after the first lit one) and this walk would report a
-# render that never printed.
-#
-# Then the cable really does come out, which is the half of a hardware walk a
-# human's fingers do and nobody writes down. It is done HERE, once the pad has
-# carried well past the deferred dump, rather than at the end: the machine
-# ends at its own emulated deadline and there is nobody left to ask. What it
-# proves is that the guest renders on with no host at all — which is what an
-# installed light does for the rest of its life.
-if [[ "$CHIP" == "esp32s3" ]]; then
-    echo
-    echo "===== CABLE (released) ====="
-    cable state
-    cable_want "the port after the upload client left" "host=attached" "draining=true"
-
-    # Wait for the pad to carry past the deferred dump before unplugging. The
-    # frames file is written as the run goes (a BufWriter, so it arrives in
-    # batches); the CONSOLE is not — it is written when the run ends — so this
-    # is the only live view of progress the walk has. Bounded, and a run that
-    # never lights up falls through to the checks below, which say so by name.
-    lit_target="${LP_WALK_LIT_BEFORE_UNPLUG:-70}"
-    lit_now=0
-    for _ in $(seq 1 600); do
-        lit_now="$(jq -r --argjson pad "$PAD" -s '
-            [ .[] | select(.kind == "ws281x-frame" and .pad == $pad and .complete
-                           and (.rgb | test("[1-9a-f]"))) ] | length' "$frames" 2>/dev/null || echo 0)"
-        [[ "$lit_now" -ge "$lit_target" ]] && break
-        kill -0 "$emu_pid" 2>/dev/null || break
-        sleep 0.5
-    done
-    echo "  $lit_now lit frame(s) on pad $PAD before the cable comes out (wanted $lit_target)"
-
-    cable close
-    cable detach
-    cable state
-    released="$CABLE_REPLY"
-    cable_want "the released cable" "host=absent" "draining=false"
-    exec 4<&- || true
-    if [[ $cable_failed -eq 0 && -n "$released" ]]; then
-        echo "PASS: the port stayed open after the client left, and the cable is out."
-    fi
-fi
-
-# Let the guest render on past the upload to its deferred lit dump, then let
-# the machine reach its own emulated deadline rather than killing it — a
-# killed run has no report and no flushed frames.
-echo
-if [[ -n "${emu_pid:-}" ]]; then
-    echo "==> letting the machine run on to its emulated deadline"
-    wait "$emu_pid" && emu_status=0 || emu_status=$?
-    emu_pid=
-fi
 if [[ $emu_status -ne 0 ]]; then
     echo "FAIL: the machine did not end cleanly (exit $emu_status)." >&2
     tail -20 "$OUT/emu.stderr" >&2
@@ -646,44 +384,67 @@ echo
 # frame comparison that is what the walk is for. Here rather than at the end
 # because the checks below exit on the first missing reading, and a run that
 # rendered nothing is exactly the run whose report is worth having.
-fail=$(( cable_failed + upload_failed ))
+fail=$upload_failed
 echo "===== THE RUN ====="
-case "$CHIP" in
-esp32c6)
-    grep -m 8 -a "^emu: " "$OUT/emu.stderr" || true
-    ;;
-esp32s3)
-    # This machine prints its report on STDOUT, not stderr, and the `run:`
-    # line is the one a gate reads.
-    grep -m 8 -aE "^(usb-sj|control|flash|uart0|run):" "$OUT/emu.stdout" || true
-    # `unmapped=0` is the walk's third gate, beside the bytes: a run that
-    # reached an address nothing claims rendered its frame past a hole in the
-    # map, and the frame being right anyway is luck rather than evidence.
-    # Under `--strict-bus` the machine would have stopped first — this is what
-    # says so in the transcript the PR body carries.
-    # What the link ate, said out loud. Reported, NEVER gated: the open defect
-    # docs/defects/2026-09-13-the-s3-link-drops-the-io-tasks-next-chunk-on-a-
-    # stale-serial-in-empty.md drops one 64-byte packet whenever a framed
-    # write follows an esp-println packet inside the IN drain latency, and
-    # which side is wrong — this model or esp-hal's future — is not known
-    # until P09 reads silicon. Printing the bytes is what keeps a future run's
-    # "the firmware said nothing" from being confused with "the firmware said
-    # it and the link ate it".
-    if [[ -s "$tried" ]]; then
-        echo "tried: $(wc -c <"$tried" | tr -d ' ') byte(s) the guest handed over that no host took"
-        echo "  the open link defect (DD103), reported and not gated. The first 120 bytes:"
-        head -c 120 "$tried" | tr -d '\000' | sed 's/^/    /'
-        echo
-    fi
-    if grep -qa 'unmapped=0 ' "$OUT/emu.stdout"; then
-        echo "PASS: unmapped=0 — every access the guest made landed on a block that claims it."
+grep -m 8 -a "^emu: " "$OUT/emu.stderr" || true
+
+if [[ "$CHIP" == "esp32s3" ]]; then
+    echo
+    echo "===== CABLE (scripted) ====="
+    # What proves the ${UNPLUG_MS}/${REPLUG_MS} ms detach/attach (above) both
+    # happened and recovered. NOT a second hello: the wire session lives in
+    # `WireLinkPort`, which this process keeps for the whole run, and a cable
+    # event at the USB peripheral does not by itself reset it (measured: this
+    # image sends exactly one hello and one heartbeat in an 8 s run, cable or
+    # no cable — a session reset needs the ARQ layer to say so, e.g. G3-1's
+    # C6 case, `lp-cli/tests/emu_usb_link_gates.rs`, where the standalone
+    # `--control` dance forced a longer unplug). What this walk CAN read back
+    # with no live query: the product's regularly-scheduled heartbeat (every
+    # 5 s of guest uptime) still reaching the host once the cable is back —
+    # the schedule above is timed so that heartbeat falls on the far side of
+    # the replug — and lit frames on the pad on both sides of the unplug
+    # window, proving the guest kept rendering with no host attached at all,
+    # which is what an installed light does for the rest of its life.
+    heartbeat_line="$(grep -m 1 -a '"msg":{"heartbeat":{' "$console" || true)"
+    uptime_ms="$(echo "$heartbeat_line" | grep -oE '"uptime_ms":[0-9]+' | cut -d: -f2 || true)"
+    if [[ -z "$heartbeat_line" ]]; then
+        echo "FAIL: no heartbeat reached the host in this run." >&2
+        fail=1
+    elif [[ -z "$uptime_ms" ]]; then
+        echo "FAIL: a heartbeat reached the host but its uptime_ms did not parse:" >&2
+        echo "  $heartbeat_line" >&2
+        fail=1
+    elif [[ "$uptime_ms" -gt "$REPLUG_MS" ]]; then
+        echo "PASS: a heartbeat (uptime_ms=$uptime_ms) reached the host after the scripted" \
+             "replug at ${REPLUG_MS} ms."
     else
-        echo "FAIL: the run summary does not say unmapped=0."
-        grep -m 1 -a '^run: ' "$OUT/emu.stdout" || true
+        echo "FAIL: the heartbeat's uptime_ms=$uptime_ms is not after the scripted replug" >&2
+        echo "      at ${REPLUG_MS} ms — it may have been generated before the unplug" >&2
+        echo "      rather than surviving it." >&2
         fail=1
     fi
-    ;;
-esac
+    lit_before="$(jq -r --argjson pad "$PAD" --argjson us "$((UNPLUG_MS * 1000))" -s '
+        [ .[] | select(.kind == "ws281x-frame" and .pad == $pad and .complete
+                       and (.rgb | test("[1-9a-f]")) and .start_us < $us) ] | length' \
+        "$frames" 2>/dev/null || echo 0)"
+    lit_after="$(jq -r --argjson pad "$PAD" --argjson us "$((REPLUG_MS * 1000))" -s '
+        [ .[] | select(.kind == "ws281x-frame" and .pad == $pad and .complete
+                       and (.rgb | test("[1-9a-f]")) and .start_us > $us) ] | length' \
+        "$frames" 2>/dev/null || echo 0)"
+    echo "  pad $PAD: $lit_before lit frame(s) before the unplug, $lit_after after the replug"
+    if [[ "$lit_before" -lt 1 || "$lit_after" -lt 1 ]]; then
+        echo "FAIL: no lit frame on one side of the unplug window — the render did not" >&2
+        echo "      carry on with the host detached, or never resumed after the replug." >&2
+        fail=1
+    fi
+    link_report="$(grep -a -m 1 "^emu: host link" "$OUT/emu.stderr" || true)"
+    echo "  $link_report"
+    if [[ "$link_report" != *" 0 link error(s)"* ]]; then
+        echo "FAIL: the host link reported errors across the unplug — see the line above." >&2
+        fail=1
+    fi
+fi
+
 echo
 echo "===== DEVICE ====="
 # `does not produce` is in the filter on purpose, exactly as in the hardware
@@ -708,7 +469,7 @@ echo "===== ORACLE ====="
 # with wasmtime has an engine finding, not a machine finding. On the S3 the
 # guest JITs **Xtensa**, so rv32-emu shares neither the ISA nor the backend
 # with it and agreement is worth no more than wasmtime's.
-# `scripts/m4-hardware-walk.sh:377-390` says the same thing to a human holding
+# `scripts/m4-hardware-walk.sh`'s TRIAGE lines say the same thing to a human holding
 # the board.
 #
 # `set +e` around it deliberately: a failing `cargo test` inside a command

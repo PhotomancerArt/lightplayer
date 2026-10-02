@@ -87,6 +87,7 @@ mod tests {
             output_tokens: output,
             cache_write_tokens: cache_write,
             cache_read_tokens: cache_read,
+            cost_micro_usd: None,
         }
     }
 

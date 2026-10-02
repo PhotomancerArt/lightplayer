@@ -339,26 +339,35 @@ fn collect_diff_shape(
     }
 }
 
+/// A slot value as its sync JSON, in one allocation of exactly its length.
+///
+/// The value is written twice: once to count its bytes, once into a buffer
+/// of that size. Written once into a growing `Vec`, a 7.4 KB mapping file
+/// cost an 8 KiB doubling buffer and then a 7.8 KB shrink-copy into the
+/// `RawValue`, both alive at once — the largest single allocation any
+/// project read made, and on a fragmented heap the one that decides whether
+/// a read fits (plan `lp2025/2026-09-27-1218-fragmentation-tolerant-reads`).
+/// Counting costs a second walk of the value, and no memory.
 pub fn wire_slot_data_from_slot_access(
     registry: &SlotShapeRegistry,
     shape_id: SlotShapeId,
     data: SlotDataAccess<'_>,
 ) -> WireSlotData {
-    let mut writer = SlotWriter::new(Vec::new());
-    write_slot_snapshot_value(registry, shape_id, data, writer.value())
-        .expect("slot sync snapshot writes to vec");
-    raw_wire_slot_data(writer.into_inner())
+    exact_slot_json(|sink| {
+        write_slot_snapshot_value(registry, shape_id, data, SlotWriter::new(sink).value())
+    })
 }
 
+/// [`wire_slot_data_from_slot_access`] for a value whose shape is at hand
+/// rather than registered.
 fn wire_slot_data_from_slot_shape(
     registry: &SlotShapeRegistry,
     shape: &SlotShape,
     data: SlotDataAccess<'_>,
 ) -> WireSlotData {
-    let mut writer = SlotWriter::new(Vec::new());
-    write_slot_snapshot_shape_value(registry, shape, data, writer.value())
-        .expect("slot sync snapshot writes to vec");
-    raw_wire_slot_data(writer.into_inner())
+    exact_slot_json(|sink| {
+        write_slot_snapshot_shape_value(registry, shape, data, SlotWriter::new(sink).value())
+    })
 }
 
 fn wire_slot_data_from_slot_shape_view(
@@ -375,7 +384,51 @@ fn wire_slot_data_from_slot_shape_view(
     }
 }
 
+/// Runs `write` twice — counting, then into a buffer of exactly the counted
+/// length — and wraps the result. `serde_json`'s `RawValue::from_string`
+/// keeps a `String` whose capacity equals its length (and that has no
+/// surrounding whitespace, which the codec never writes) without copying it,
+/// so the value ends as that one allocation.
+///
+/// Both passes write through the one sink type, so the slot codec is
+/// instantiated once for this path, not once per pass.
+fn exact_slot_json<E: core::fmt::Debug>(
+    mut write: impl FnMut(&mut SlotJsonSink) -> Result<(), E>,
+) -> WireSlotData {
+    let mut counter = SlotJsonSink::Count(0);
+    write(&mut counter).expect("slot sync snapshot counts");
+    let SlotJsonSink::Count(len) = counter else {
+        unreachable!("the counting pass keeps its sink")
+    };
+    let mut sink = SlotJsonSink::Write(Vec::with_capacity(len));
+    write(&mut sink).expect("slot sync snapshot writes to vec");
+    let SlotJsonSink::Write(bytes) = sink else {
+        unreachable!("the writing pass keeps its sink")
+    };
+    debug_assert_eq!(bytes.len(), len, "both passes write the same JSON");
+    raw_wire_slot_data(bytes)
+}
+
 fn raw_wire_slot_data(bytes: Vec<u8>) -> WireSlotData {
     WireSlotData::from_json_string(String::from_utf8(bytes).expect("slot sync JSON is UTF-8"))
         .expect("slot sync codec writes valid JSON")
+}
+
+/// The slot codec's output for [`exact_slot_json`]: a byte count, or the
+/// bytes.
+enum SlotJsonSink {
+    Count(usize),
+    Write(Vec<u8>),
+}
+
+impl lpc_model::slot_codec::SlotWrite for SlotJsonSink {
+    type Error = core::convert::Infallible;
+
+    fn write_all(&mut self, bytes: &[u8]) -> Result<(), Self::Error> {
+        match self {
+            Self::Count(len) => *len += bytes.len(),
+            Self::Write(buffer) => buffer.extend_from_slice(bytes),
+        }
+        Ok(())
+    }
 }

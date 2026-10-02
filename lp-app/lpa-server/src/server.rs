@@ -8,6 +8,7 @@ use crate::handlers;
 use crate::power_off::{PowerOffQueue, PowerPlatform};
 use crate::project_manager::ProjectManager;
 use crate::project_read_source::ServerProjectReadSource;
+use crate::read_gate::ReadGate;
 use alloc::{boxed::Box, format, rc::Rc, string::ToString, sync::Arc, vec::Vec};
 use core::cell::RefCell;
 use hashbrown::HashMap;
@@ -55,7 +56,13 @@ pub type ReadHeadroomProbe = fn() -> Option<u32>;
 /// record the request.
 pub type RebootHook = Rc<dyn Fn()>;
 
-/// Minimum largest-free-block headroom to *begin* serving a ProjectRead.
+/// The classic's ProjectRead floor: the largest free block a read needs to
+/// *begin*, installed there as [`ReadGate::largest_block_only`]. The C6 and
+/// S3 install two-number [`ReadGate`]s instead (see [`crate::read_gate`] for
+/// why one number was the wrong question on a fragmented heap); the classic
+/// keeps this until its reads' working set comes down, because its heap
+/// (≈34 KB free, 25.5 KB largest block with a project loaded) has no room for
+/// anything looser.
 ///
 /// Below this, assembly of even a well-behaved streamed read (one slot root or
 /// shape entry + one ~16 KiB frame batch + serde transients) risks the
@@ -78,7 +85,7 @@ pub const PROJECT_READ_MIN_HEADROOM_BYTES: u32 = 32 * 1024;
 
 /// Minimum heap headroom (largest free block) to attempt a `LoadProject`.
 ///
-/// Same refusal-not-reset posture as [`PROJECT_READ_MIN_HEADROOM_BYTES`]
+/// Same refusal-not-reset posture as the read gate ([`ReadGate`])
 /// (ADR `2026-08-28-project-reads-bounded-streamed-refusable`, D7): loading
 /// materializes the whole engine — mapping lamp lists, node graph, shader
 /// JIT — through infallible allocs, so an unaffordable load abort-resets the
@@ -151,6 +158,9 @@ pub struct LpServer {
     /// LoadProject headroom refusal gates. Unset (hosts/browser) = requests
     /// are never refused.
     read_headroom_probe: Option<ReadHeadroomProbe>,
+    /// The ProjectRead memory gate's floors, per chip (see [`ReadGate`]).
+    /// Unset (hosts/browser) = reads are never refused.
+    read_gate: Option<ReadGate>,
     /// Optional embedder reset action backing `ClientRequest::Reboot`.
     /// Unset (hosts/browser) = the request is refused, not acked.
     reboot_hook: Option<RebootHook>,
@@ -335,6 +345,7 @@ impl LpServer {
             project_read_frame_budget: Some(lpc_wire::PROJECT_READ_FRAME_MAX_BYTES),
             memory_stats,
             read_headroom_probe: None,
+            read_gate: None,
             reboot_hook: None,
             #[cfg(feature = "node-power-button")]
             power: None,
@@ -676,7 +687,9 @@ impl LpServer {
                     delta_ms
                 );
                 // One project's failure never stops the others; clients
-                // see it when they sync or query project state.
+                // see it through the nodes' statuses when they sync — an
+                // output the board refuses wears it on the Output node
+                // (`EngineServices::output_open_failure`).
                 //
                 // A tick error is normally PERSISTENT (it re-fails every
                 // frame until the project or the tier changes), so the
@@ -890,25 +903,33 @@ impl LpServer {
                 }
                 ClientRequest::ProjectRead { handle, request } => {
                     let sink_frame_budget = self.sink_frame_budget();
+                    // One read of the heap's figures serves both the gate
+                    // and the reply's runtime status: the S3's and the
+                    // classic's stats function prints the memory ledger
+                    // when it is called, so it is called once per read.
+                    let mut server_status = self.runtime_status();
                     // Refusal-not-reset: if the heap cannot afford
                     // even a well-behaved streamed read, fail the
                     // request with a structured terminal error instead
                     // of letting infallible alloc abort-reset the
                     // board mid-assembly.
-                    if let Some(headroom) = self.read_headroom_probe.and_then(|probe| probe())
-                        && headroom < PROJECT_READ_MIN_HEADROOM_BYTES
-                    {
+                    if let Some(refusal) = self.read_gate.and_then(|gate| {
+                        let memory = server_status.memory.as_ref();
+                        gate.check(
+                            memory.map(|memory| memory.free_bytes),
+                            memory
+                                .and_then(|memory| memory.largest_free_block)
+                                .or_else(|| self.read_headroom_probe.and_then(|probe| probe())),
+                        )
+                        .err()
+                    }) {
                         let mut sink = ProjectReadStreamSink::with_max_bytes(
                             transport,
                             link.id,
                             msg_id,
                             sink_frame_budget,
                         );
-                        let message = format!(
-                            "read refused: heap headroom too low (largest free block \
-                             {headroom} B < {PROJECT_READ_MIN_HEADROOM_BYTES} B); retry \
-                             once the board has freed memory",
-                        );
+                        let message = refusal.message();
                         log::warn!("tick_and_send: {message}");
                         if let Err(send_error) = sink.send_terminal_error(message).await {
                             log::warn!(
@@ -919,7 +940,6 @@ impl LpServer {
                         response_count += 1;
                         continue;
                     }
-                    let mut server_status = self.runtime_status();
                     let Some(project) = self.project_manager.get_project_mut(handle) else {
                         transport
                             .send(
@@ -1091,11 +1111,20 @@ impl LpServer {
     }
 
     /// Get the memory stats callback
-    /// Install the largest-free-block probe the ProjectRead and LoadProject
-    /// headroom gates consult (see [`PROJECT_READ_MIN_HEADROOM_BYTES`] and
-    /// [`PROJECT_LOAD_MIN_HEADROOM_BYTES`]). Unset = never refuse.
+    /// Install the largest-free-block probe the ProjectRead gate
+    /// ([`Self::set_read_gate`]) and the LoadProject headroom gate
+    /// ([`PROJECT_LOAD_MIN_HEADROOM_BYTES`]) consult. Unset = neither checks
+    /// a largest block.
     pub fn set_read_headroom_probe(&mut self, probe: Option<ReadHeadroomProbe>) {
         self.read_headroom_probe = probe;
+    }
+
+    /// Install this chip's ProjectRead memory gate (see [`ReadGate`]): a read
+    /// is refused when the largest block (from the headroom probe) or the
+    /// total free heap (from the memory-stats function) is under its floor.
+    /// Unset = reads are never refused.
+    pub fn set_read_gate(&mut self, gate: Option<ReadGate>) {
+        self.read_gate = gate;
     }
 
     /// Install the embedder's power-off capability (see [`PowerPlatform`]).

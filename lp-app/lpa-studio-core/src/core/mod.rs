@@ -18,8 +18,8 @@ pub mod view;
 
 pub use crate::app::studio::ui_studio_view::UiStudioView;
 pub use crate::controller::{
-    ActionClass, ActionConfirmation, ActionEnablement, ActionMeta, ActionPriority, Controller,
-    ControllerContext, ControllerId, ControllerOp, DEVICE_CARD_FEED_CLASS,
+    ActionClass, ActionConfirmation, ActionEnablement, ActionGesture, ActionMeta, ActionPriority,
+    Controller, ControllerContext, ControllerId, ControllerOp, DEVICE_CARD_FEED_CLASS,
     PASSIVE_REFRESH_DEADLINE, PROJECT_ACTION_DEADLINE, PROJECT_EDITOR_ACTION_DEADLINE,
     PROJECT_LOAD_DEADLINE, UiAction, UiActions, UiPaneAction, UxNodePath,
 };

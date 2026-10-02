@@ -24,7 +24,23 @@
 //!
 //! ⚠️ Not in a machine's save-state blob: a snapshot restores the link with
 //! no faults. The injector is how a run was configured, like a script.
+//!
+//! # A byte stream has no packets: [`StreamFaults`]
+//!
+//! A USB link moves packets, so "per packet" is the model's own unit. A UART
+//! moves bytes, one symbol at a time, and has no packet to damage. Rather
+//! than a second set of rates with a second meaning, [`StreamFaults`] cuts
+//! the byte stream into fixed windows of [`STREAM_PACKET_BYTES`] — the size
+//! of a full-speed USB packet — and hands each window to this same injector
+//! as if it were a packet. So `in-drop=1%` is the same fraction of the same
+//! amount of traffic on the C6's USB link and on the classic's UART, and a
+//! soak on one is comparable with a soak on the other. The shapes carry over
+//! as a UART shows them: a `drop` is 64 bytes the line lost, a `tail` the
+//! last bytes of a window, a `corrupt` one bit of line noise, and a `run` a
+//! loss that starts inside a window and swallows `run-packets` whole windows
+//! after it (a host tty overflowing).
 
+use alloc::collections::VecDeque;
 use core::fmt;
 
 /// Rates for one direction, parts per million per packet.
@@ -199,6 +215,95 @@ impl LinkFaults {
     }
 }
 
+/// The window a byte stream is cut into for [`LinkFaults`] (module docs): a
+/// full-speed USB packet, so one spec means the same thing on both links.
+pub const STREAM_PACKET_BYTES: usize = 64;
+
+/// What becomes of one byte of a window.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Fate {
+    Keep,
+    Drop,
+    Flip(u8),
+}
+
+/// [`LinkFaults`] over a byte stream, a window at a time (module docs).
+///
+/// Each window's fate is decided when its first byte crosses — the injector
+/// damages a stand-in window of the right length, and the difference between
+/// the stand-in and what came back says, byte by byte, which were lost and
+/// which bits flipped — and then applied to the real bytes as they cross,
+/// one at a time. So nothing is held back: a byte reaches the other side at
+/// the cycle it would have without the injector, or never. The counters are
+/// the injector's own, a window at a time.
+#[derive(Clone, Debug)]
+pub struct StreamFaults {
+    faults: LinkFaults,
+    to_host: VecDeque<Fate>,
+    to_device: VecDeque<Fate>,
+}
+
+impl StreamFaults {
+    pub fn new(faults: LinkFaults) -> Self {
+        Self {
+            faults,
+            to_host: VecDeque::new(),
+            to_device: VecDeque::new(),
+        }
+    }
+
+    /// The injector, its rates and its counters.
+    pub fn faults(&self) -> &LinkFaults {
+        &self.faults
+    }
+
+    /// One byte from the device to the host: what the host gets, if anything.
+    pub fn on_device_to_host(&mut self, byte: u8) -> Option<u8> {
+        if self.to_host.is_empty() {
+            let mut window = stand_in();
+            self.faults.on_device_to_host(&mut window);
+            self.to_host = fates(&window);
+        }
+        apply(self.to_host.pop_front(), byte)
+    }
+
+    /// One byte from the host to the device: what the device gets, if
+    /// anything.
+    pub fn on_host_to_device(&mut self, byte: u8) -> Option<u8> {
+        if self.to_device.is_empty() {
+            let mut window = stand_in();
+            self.faults.on_host_to_device(&mut window);
+            self.to_device = fates(&window);
+        }
+        apply(self.to_device.pop_front(), byte)
+    }
+}
+
+/// A window whose every byte is its own index, so the damaged copy names
+/// what happened to each position: a truncation keeps a prefix, and a byte
+/// that no longer equals its index had the difference flipped.
+fn stand_in() -> Vec<u8> {
+    (0..STREAM_PACKET_BYTES as u8).collect()
+}
+
+fn fates(damaged: &[u8]) -> VecDeque<Fate> {
+    (0..STREAM_PACKET_BYTES)
+        .map(|i| match damaged.get(i) {
+            None => Fate::Drop,
+            Some(&b) if b == i as u8 => Fate::Keep,
+            Some(&b) => Fate::Flip(b ^ i as u8),
+        })
+        .collect()
+}
+
+fn apply(fate: Option<Fate>, byte: u8) -> Option<u8> {
+    match fate.unwrap_or(Fate::Keep) {
+        Fate::Keep => Some(byte),
+        Fate::Drop => None,
+        Fate::Flip(mask) => Some(byte ^ mask),
+    }
+}
+
 fn ppm(key: &str, value: &str) -> Result<u32, String> {
     if let Some(pct) = value.strip_suffix('%') {
         let p: f64 = pct
@@ -265,6 +370,63 @@ mod tests {
             assert!(q.is_empty());
         }
         assert_eq!(f.in_counters.runs_started, 1);
+    }
+
+    #[test]
+    fn a_stream_is_damaged_a_window_at_a_time_at_the_packet_rates() {
+        let mut s = StreamFaults::new(
+            LinkFaults::parse("in-drop=2%,in-tail=1%,in-corrupt=1%,out-drop=1%,seed=5").unwrap(),
+        );
+        let (mut kept, mut flipped) = (0u64, 0u64);
+        for i in 0..(10_000 * STREAM_PACKET_BYTES) {
+            let byte = (i % 251) as u8;
+            match s.on_device_to_host(byte) {
+                Some(b) if b == byte => kept += 1,
+                Some(b) => {
+                    assert_eq!((b ^ byte).count_ones(), 1, "one bit of line noise");
+                    flipped += 1;
+                }
+                None => {}
+            }
+        }
+        let c = s.faults().in_counters;
+        assert_eq!(c.packets_seen, 10_000, "one window per 64 bytes");
+        assert!((150..250).contains(&c.packets_dropped), "{c}");
+        assert!((60..140).contains(&c.tails_cut), "{c}");
+        assert_eq!(
+            flipped, c.bits_flipped,
+            "every flip counted, and no other damage"
+        );
+        let total = 10_000 * STREAM_PACKET_BYTES as u64;
+        assert_eq!(
+            kept + flipped + c.bytes_dropped,
+            total,
+            "every byte accounted for"
+        );
+        for _ in 0..(1_000 * STREAM_PACKET_BYTES) {
+            s.on_host_to_device(0xA5);
+        }
+        assert_eq!(s.faults().out_counters.packets_seen, 1_000);
+    }
+
+    #[test]
+    fn a_stream_run_swallows_whole_windows_after_the_one_it_starts_in() {
+        let mut s =
+            StreamFaults::new(LinkFaults::parse("in-run=100%,run-packets=2,seed=1").unwrap());
+        let first: Vec<_> = (0..STREAM_PACKET_BYTES)
+            .map(|_| s.on_device_to_host(1))
+            .collect();
+        let cut = first
+            .iter()
+            .position(Option::is_none)
+            .expect("the run starts inside");
+        assert!(
+            first[cut..].iter().all(Option::is_none),
+            "and runs to the window's end"
+        );
+        for _ in 0..(2 * STREAM_PACKET_BYTES) {
+            assert_eq!(s.on_device_to_host(1), None, "the next two windows vanish");
+        }
     }
 
     #[test]
