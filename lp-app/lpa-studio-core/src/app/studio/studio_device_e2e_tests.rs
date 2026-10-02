@@ -6656,6 +6656,58 @@ fn a_refused_push_to_a_dark_board_leaves_its_saved_startup_project() {
     assert_eq!(after, saved_manifest, "the saved project is whole");
 }
 
+/// A board that boots dark (its saved startup project, `porch`, is one it
+/// refuses) reports nothing loaded. Removing "the project" from it must
+/// target that SAVED folder — the same lookup the push conversation uses —
+/// never the fallback slot, which would leave `porch` (and the board's
+/// retry-at-boot loop) completely untouched while creating nothing where
+/// the fallback names.
+///
+/// `startup_project` is left naming `porch` afterwards: a removal, like a
+/// push, only ever writes it through a later successful load, never through
+/// a delete — the same thing happens when the removed project IS the one
+/// the board runs (`remove_project` never touches `/lightplayer.json`
+/// either way).
+#[test]
+fn a_removal_on_a_dark_board_deletes_its_saved_startup_project() {
+    let device = dark_board_saved_at("dev000000daqf6dvvrd", "porch");
+    let (_bench, _tasks, _device_uid) = running_board(&device, "usb-remove-dark");
+    let mut client = lpa_client::LpClient::new(FakeDeviceIo::new(&device)).on_borrowed_wire();
+    save_startup_project(&mut client, "porch");
+    let mut quiet = |_: String, _: Option<u8>| {};
+    let loaded = drive_real(client.project_list_loaded())
+        .expect("list")
+        .value;
+    assert!(loaded.is_empty(), "the board boots dark: {loaded:?}");
+
+    let report = drive_real(lpa_client::remove_project(
+        &mut client,
+        "studio",
+        &mut quiet,
+    ))
+    .expect("removed");
+
+    assert_eq!(
+        report.storage_id, "porch",
+        "the saved folder is removed, not the fallback slot"
+    );
+    assert!(
+        !report.was_loaded,
+        "the board was not running it — it was dark"
+    );
+    assert_eq!(
+        project_dirs(&mut client),
+        Vec::<String>::new(),
+        "the saved project is gone and the fallback folder was never created"
+    );
+    assert_eq!(
+        saved_startup_project(&mut client).as_deref(),
+        Some("porch"),
+        "a removal only ever writes startup_project through a later load, \
+         never through a delete — it is left naming the now-gone folder"
+    );
+}
+
 /// A board seeded with a project it refuses at boot (a format-behind
 /// package) in `/projects/<dir>`: it boots dark.
 fn dark_board_saved_at(uid: &str, dir: &str) -> FakeEsp32Device {
