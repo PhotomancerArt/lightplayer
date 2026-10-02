@@ -58,7 +58,7 @@ extern "C" fn loader_main() -> ! {
             }
         }
     }
-    let (core_off, note) = match choose(sectors) {
+    let (core_off, note) = match choose(sectors, rom::cold_boot()) {
         Some(c) if c.rolled_back => (c.slot.record.core_off, c"rolled back"),
         Some(c) if c.slot.record.trial && !c.slot.marks.confirmed => {
             (c.slot.record.core_off, c"trial")

@@ -4,6 +4,14 @@
 unsafe extern "C" {
     fn ets_printf(fmt: *const core::ffi::c_char, ...) -> i32;
     fn Cache_Invalidate_ICache_All();
+    fn rtc_get_reset_reason(cpu: u32) -> u32;
+}
+
+/// This boot follows a power-on or a brownout (`0x01`, `0x0F`), not a reset
+/// the chip did to itself — see `lp_bootctl::choose`.
+pub fn cold_boot() -> bool {
+    // SAFETY: a ROM routine reading a status register.
+    matches!(unsafe { rtc_get_reset_reason(0) }, 0x01 | 0x0F)
 }
 
 /// The flash cache holds lines the bootloader read through the old mapping.

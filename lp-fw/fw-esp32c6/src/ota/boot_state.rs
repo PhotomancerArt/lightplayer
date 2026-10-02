@@ -57,7 +57,7 @@ impl BootState {
                 max_seq = max_seq.max(s.record.seq);
             }
         }
-        let choice = lp_bootctl::choose(sectors);
+        let choice = lp_bootctl::choose(sectors, cold_boot());
         let failed_build = choice
             .filter(|c| c.rolled_back)
             .and_then(|c| sectors[1 - c.sector])
@@ -159,6 +159,16 @@ impl BootState {
         };
         flash.write_sector(buf, BOOT_RECORD_SECTORS[sector], &record.encode());
     }
+}
+
+/// This boot follows a power-on or a brownout — the loader asks the same ROM
+/// routine, so the two make the same choice (see `lp_bootctl::choose`).
+fn cold_boot() -> bool {
+    unsafe extern "C" {
+        fn rtc_get_reset_reason(cpu: u32) -> u32;
+    }
+    // SAFETY: a ROM routine reading a status register.
+    matches!(unsafe { rtc_get_reset_reason(0) }, 0x01 | 0x0F)
 }
 
 /// Length of the ESP image at `at`: header, then each segment's header and

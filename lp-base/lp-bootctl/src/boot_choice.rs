@@ -16,7 +16,16 @@ pub struct BootChoice {
 /// way to the other record when that one is proven. A failed trial with
 /// nothing to fall back to is booted anyway: a board that might work beats
 /// one that certainly does not.
-pub fn choose(sectors: [Option<BootSlot>; 2]) -> Option<BootChoice> {
+///
+/// `cold_boot` — this boot follows a power-on or brownout, not a reset the
+/// chip did to itself. Then an unconfirmed trial did not *fail*: the power
+/// went away under it (found on silicon: a cut in the second between a new
+/// core marking itself attempted and confirming rolled a good build back,
+/// and the old core then refused it for good). So a cold boot gives the trial
+/// another go; only a warm one — a panic, a watchdog, a software reset —
+/// counts against it. A core that only dies when cold-booted cannot loop:
+/// its own death makes the next boot warm.
+pub fn choose(sectors: [Option<BootSlot>; 2], cold_boot: bool) -> Option<BootChoice> {
     let pick = |sector: usize, rolled_back| {
         sectors[sector].map(|slot| BootChoice {
             sector,
@@ -32,7 +41,7 @@ pub fn choose(sectors: [Option<BootSlot>; 2]) -> Option<BootChoice> {
     };
     let other = 1 - newest;
     let newest_slot = sectors[newest]?;
-    if newest_slot.failed() && sectors[other].is_some_and(|s| s.proven()) {
+    if newest_slot.failed() && !cold_boot && sectors[other].is_some_and(|s| s.proven()) {
         return pick(other, true);
     }
     pick(newest, false)
@@ -61,48 +70,80 @@ mod tests {
 
     #[test]
     fn nothing_valid_is_no_choice() {
-        assert_eq!(choose([None, None]), None);
+        assert_eq!(choose([None, None], false), None);
     }
 
     #[test]
     fn the_newest_wins_in_either_sector() {
         assert_eq!(
-            choose([slot(1, false, false, false), slot(2, false, false, false)])
-                .unwrap()
-                .sector,
+            choose(
+                [slot(1, false, false, false), slot(2, false, false, false)],
+                false
+            )
+            .unwrap()
+            .sector,
             1
         );
         assert_eq!(
-            choose([slot(3, false, false, false), slot(2, false, false, false)])
-                .unwrap()
-                .sector,
+            choose(
+                [slot(3, false, false, false), slot(2, false, false, false)],
+                false
+            )
+            .unwrap()
+            .sector,
             0
         );
     }
 
     #[test]
     fn a_fresh_trial_is_booted() {
-        let c = choose([slot(1, false, false, false), slot(2, true, false, false)]).unwrap();
+        let c = choose(
+            [slot(1, false, false, false), slot(2, true, false, false)],
+            false,
+        )
+        .unwrap();
         assert_eq!((c.sector, c.rolled_back), (1, false));
     }
 
     #[test]
     fn a_failed_trial_rolls_back_to_the_proven_one() {
-        let c = choose([slot(1, false, false, false), slot(2, true, true, false)]).unwrap();
+        let c = choose(
+            [slot(1, false, false, false), slot(2, true, true, false)],
+            false,
+        )
+        .unwrap();
         assert_eq!((c.sector, c.rolled_back), (0, true));
     }
 
     #[test]
     fn a_confirmed_trial_stays() {
-        let c = choose([slot(1, false, false, false), slot(2, true, true, true)]).unwrap();
+        let c = choose(
+            [slot(1, false, false, false), slot(2, true, true, true)],
+            false,
+        )
+        .unwrap();
+        assert_eq!((c.sector, c.rolled_back), (1, false));
+    }
+
+    #[test]
+    fn after_a_power_cut_an_unconfirmed_trial_gets_another_go() {
+        let c = choose(
+            [slot(1, false, false, false), slot(2, true, true, false)],
+            true,
+        )
+        .unwrap();
         assert_eq!((c.sector, c.rolled_back), (1, false));
     }
 
     #[test]
     fn a_failed_trial_with_nothing_proven_behind_it_is_booted_anyway() {
-        let c = choose([None, slot(2, true, true, false)]).unwrap();
+        let c = choose([None, slot(2, true, true, false)], false).unwrap();
         assert_eq!((c.sector, c.rolled_back), (1, false));
-        let c = choose([slot(1, true, true, false), slot(2, true, true, false)]).unwrap();
+        let c = choose(
+            [slot(1, true, true, false), slot(2, true, true, false)],
+            false,
+        )
+        .unwrap();
         assert_eq!((c.sector, c.rolled_back), (1, false));
     }
 }

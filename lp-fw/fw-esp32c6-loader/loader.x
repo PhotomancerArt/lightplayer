@@ -18,6 +18,7 @@ MEMORY {
 ENTRY(_start)
 
 PROVIDE(ets_printf = 0x40000028);
+PROVIDE(rtc_get_reset_reason = 0x40000018);
 PROVIDE(Cache_Invalidate_ICache_All = 0x4000064c);
 
 SECTIONS {
