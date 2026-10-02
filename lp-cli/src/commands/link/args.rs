@@ -90,6 +90,13 @@ pub struct CaptureArgs {
     /// never answered, or a `reboot` never restarts the board.
     #[arg(long)]
     pub request: Vec<String>,
+
+    /// OTA split-link spike: offer the build in this directory (`core.bin`,
+    /// `engine.bin`) on the update channel and serve the board's requests.
+    /// The port is reopened when it drops, since a board's USB goes away on
+    /// every reset the update performs.
+    #[arg(long = "ota-offer")]
+    pub ota_offer: Option<PathBuf>,
 }
 
 #[derive(Debug, Args)]

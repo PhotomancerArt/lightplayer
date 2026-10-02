@@ -372,7 +372,7 @@ impl OtaServe {
         Ok(Self { core, engine, build_id, offers: 0, requests: 0, served_bytes: 0 })
     }
 
-    fn offer(&mut self) -> Vec<u8> {
+    pub fn offer(&mut self) -> Vec<u8> {
         self.offers += 1;
         let mut out = vec![b'O'];
         out.extend_from_slice(&(self.core.len() as u32).to_le_bytes());
@@ -381,7 +381,7 @@ impl OtaServe {
         out
     }
 
-    fn answer(&mut self, msg: &[u8]) -> Option<Vec<u8>> {
+    pub fn answer(&mut self, msg: &[u8]) -> Option<Vec<u8>> {
         match msg.first()? {
             b'Q' => Some(self.offer()),
             b'R' if msg.len() == 10 => {
