@@ -101,6 +101,9 @@ pub struct WireLinkPort {
     opt_in: OptIn,
     device_log_sent: bool,
     reads: VecDeque<PortRead>,
+    /// Update-channel messages (OTA split-link spike), apart from `reads` so
+    /// no consumer of [`PortRead`] has to know about them.
+    updates: VecDeque<alloc::vec::Vec<u8>>,
     /// Raw text since the last newline.
     text: TextLines,
     tally: LinkCounterTally,
@@ -122,6 +125,7 @@ impl WireLinkPort {
             opt_in: OptIn::WaitingForHello,
             device_log_sent: false,
             reads: VecDeque::new(),
+            updates: VecDeque::new(),
             text: TextLines::new(),
             tally: LinkCounterTally::new(),
             now: 0,
@@ -171,6 +175,17 @@ impl WireLinkPort {
     /// for conversation layers that carry requests as text.
     pub fn send_client_json(&mut self, json: &str) -> Result<(), SendError> {
         self.link.send(CH_PROTO, json.as_bytes())
+    }
+
+    /// The next update-channel message (OTA split-link spike).
+    pub fn poll_update(&mut self) -> Option<alloc::vec::Vec<u8>> {
+        self.pump_events();
+        self.updates.pop_front()
+    }
+
+    /// Send raw bytes on the update channel (OTA split-link spike).
+    pub fn send_update(&mut self, data: &[u8]) -> Result<(), SendError> {
+        self.link.send(lp_link::CH_UPDATE, data)
     }
 
     /// The next thing the board said, in order.
@@ -240,6 +255,7 @@ impl WireLinkPort {
                 LinkEvent::Message { channel, data } => match channel {
                     CH_PROTO => self.on_proto(&data),
                     CH_LOG => self.on_log(&data),
+                    lp_link::CH_UPDATE => self.updates.push_back(data.to_vec()),
                     // Channel 0 and the rest are unused on a device link.
                     _ => {}
                 },

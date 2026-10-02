@@ -82,6 +82,13 @@ pub struct RunArgs {
     #[arg(long, group = "image")]
     pub merged: Option<PathBuf>,
 
+    /// OTA split-link spike: boot from the reset vector out of THIS flash
+    /// file (a merged image to start with), writing the guest's flash writes
+    /// back to it — so a run cut short at `--timeout` is a power cut, and the
+    /// next run boots what the flash held at that moment.
+    #[arg(long = "rom-up-flash", group = "image")]
+    pub rom_up_flash: Option<PathBuf>,
+
     /// Address to serve the link on, for example `127.0.0.1:5591`. `lp-cli
     /// upload <project> serial:tcp://<addr>` connects to exactly this.
     ///
@@ -192,6 +199,12 @@ pub struct RunArgs {
     /// keep hosting the link (and writing the console) to the deadline.
     #[arg(long, requires = "host_link")]
     pub upload: Option<PathBuf>,
+
+    /// OTA split-link spike: offer the build in this directory (`core.bin`,
+    /// `engine.bin` from `scripts/ota-spike/build-split.sh`) on the link's
+    /// update channel, and serve the board's chunk requests.
+    #[arg(long = "ota-offer", requires = "host_link")]
+    pub ota_offer: Option<PathBuf>,
 
     /// With `--host-link`: do not ask the board to pack its replies (JSON
     /// Pack), so the run measures a board that has no learned table — the

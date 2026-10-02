@@ -121,6 +121,9 @@ impl UsbLinkTransport {
                         self.inbox.push_back(msg);
                     }
                 }
+                LinkEvent::Message { channel, data } if channel == lp_link::CH_UPDATE => {
+                    crate::usb_link::on_update_message(&data);
+                }
                 LinkEvent::Message { channel, data } => {
                     log::debug!("[usb_link] {} B on channel {channel} ignored", data.len());
                 }

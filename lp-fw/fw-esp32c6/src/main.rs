@@ -112,6 +112,8 @@ pub use fw_esp32_common::logger;
     feature = "test_fluid_demo",
 ))]
 mod output;
+#[cfg(not(fw_harness))]
+mod ota_spike;
 mod recovery;
 mod serial;
 #[cfg(not(fw_harness))]
@@ -586,27 +588,27 @@ struct EngineHeader {
 
 #[cfg(not(fw_harness))]
 const ENGINE_MAGIC: [u8; 8] = *b"LPENGIN1";
-/// Where the engine is linked (`scripts/ota-spike/split_reach.py --engine-base`).
 #[cfg(not(fw_harness))]
-const ENGINE_VADDR: usize = 0x4240_0000;
-/// Where its bytes sit in flash. S2: a fixed offset inside `factory`, after
-/// the core image. S3 makes this the inactive slot plus the tail.
-#[cfg(not(fw_harness))]
-const ENGINE_FLASH_OFFSET: u32 = 0x14_0000;
-/// The most engine the window may hold (S2: everything after the core in `factory`).
-#[cfg(not(fw_harness))]
-const ENGINE_MAX_BYTES: u32 = 0x31_0000 - ENGINE_FLASH_OFFSET;
+use ota_spike::ENGINE_VADDR;
 
 /// Lockstep: core and engine carry the same id because they come from the
 /// same link. (Spike: commit + dirty flag; a product build stamps a digest.)
 #[cfg(not(fw_harness))]
 const fn build_id() -> [u8; 48] {
-    let src = concat!(env!("LP_BUILD_COMMIT"), "-", env!("LP_BUILD_DIRTY")).as_bytes();
+    const fn append(out: &mut [u8; 48], at: usize, src: &[u8]) -> usize {
+        let mut i = 0;
+        while i < src.len() && at + i < 48 {
+            out[at + i] = src[i];
+            i += 1;
+        }
+        at + i
+    }
     let mut out = [0u8; 48];
-    let mut i = 0;
-    while i < src.len() && i < 48 {
-        out[i] = src[i];
-        i += 1;
+    let at = append(&mut out, 0, concat!(env!("LP_BUILD_COMMIT"), "-", env!("LP_BUILD_DIRTY")).as_bytes());
+    // Spike: two builds of one commit told apart (`LP_SPIKE_BUILD_TAG=x`).
+    if let Some(tag) = option_env!("LP_SPIKE_BUILD_TAG") {
+        let at = append(&mut out, at, b"+");
+        append(&mut out, at, tag.as_bytes());
     }
     out
 }
@@ -619,34 +621,6 @@ static ENGINE_HEADER: EngineHeader = EngineHeader {
     build_id: build_id(),
     entry: lp_engine_entry,
 };
-
-/// Map the engine's flash pages behind `ENGINE_VADDR`: one MMU entry per
-/// page, the way the bootloader maps the app. The page size is whatever the
-/// bootloader chose (`mmu_power_ctrl[4:3]`: 64 KiB >> mode — the IDF
-/// bootloader picks 32 KiB on this 4 MB part), never assumed. Unwritten pages
-/// read as erased flash, which the magic check below rejects.
-#[cfg(not(fw_harness))]
-fn map_engine() {
-    const SPI0: usize = 0x6000_2000;
-    const MMU_ITEM_CONTENT: usize = SPI0 + 0x37c;
-    const MMU_ITEM_INDEX: usize = SPI0 + 0x380;
-    const MMU_POWER_CTRL: usize = SPI0 + 0x384;
-    const MMU_VALID: u32 = 1 << 9;
-    // SAFETY: a read of an SPI0 register.
-    let mode = (unsafe { core::ptr::read_volatile(MMU_POWER_CTRL as *const u32) } >> 3) & 3;
-    let shift = 16 - mode;
-    let first_entry = ((ENGINE_VADDR - 0x4200_0000) >> shift) as u32;
-    let first_page = ENGINE_FLASH_OFFSET >> shift;
-    let pages = ENGINE_MAX_BYTES >> shift;
-    for k in 0..pages {
-        // SAFETY: these entries cover only the engine window, which nothing
-        // has touched yet; the code doing it runs from the core's pages.
-        unsafe {
-            core::ptr::write_volatile(MMU_ITEM_INDEX as *mut u32, first_entry + k);
-            core::ptr::write_volatile(MMU_ITEM_CONTENT as *mut u32, (first_page + k) | MMU_VALID);
-        }
-    }
-}
 
 /// The engine's entry, if a matching engine is mapped.
 #[cfg(not(fw_harness))]
@@ -1023,10 +997,22 @@ async fn main(spawner: embassy_executor::Spawner) {
     #[cfg(not(fw_harness))]
     {
         let core = core_boot(spawner);
-        map_engine();
+        let id = build_id();
+        let id_len = id.iter().position(|b| *b == 0).unwrap_or(id.len());
+        esp_println::println!(
+            "[CORE] build {}",
+            core::str::from_utf8(&id[..id_len]).unwrap_or("?")
+        );
+        ota_spike::map_engine();
         match engine_entry() {
-            Some(entry) => entry(core),
-            None => drop(core),
+            Some(entry) => {
+                fw_esp32_common::usb_link::set_update_hook(ota_spike::on_update_while_running);
+                entry(core);
+            }
+            None => {
+                let CoreBoot { usb_link, watchdog, .. } = core;
+                ota_spike::core_only(usb_link, watchdog).await;
+            }
         }
         loop {
             embassy_time::Timer::after(embassy_time::Duration::from_secs(3600)).await;

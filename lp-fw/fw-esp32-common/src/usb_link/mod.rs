@@ -28,3 +28,21 @@ pub use usb_link_shared::UsbLinkShared;
 pub use usb_link_task::{UsbLinkChip, run_usb_link, when_drained};
 #[cfg(feature = "server")]
 pub use usb_link_transport::UsbLinkTransport;
+
+/// OTA split-link spike: where an update-channel message goes while the
+/// engine's transport owns the link (the core installs it before entering
+/// the engine). A plain fn pointer in an atomic: set once, read per message.
+static UPDATE_HOOK: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
+
+pub fn set_update_hook(hook: fn(&[u8])) {
+    UPDATE_HOOK.store(hook as usize, core::sync::atomic::Ordering::Release);
+}
+
+pub(crate) fn on_update_message(data: &[u8]) {
+    let raw = UPDATE_HOOK.load(core::sync::atomic::Ordering::Acquire);
+    if raw != 0 {
+        // SAFETY: only `set_update_hook` stores here, and it stores a `fn(&[u8])`.
+        let hook: fn(&[u8]) = unsafe { core::mem::transmute(raw) };
+        hook(data);
+    }
+}

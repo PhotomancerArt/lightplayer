@@ -53,6 +53,9 @@ async fn run_hosted_async<B: EmuUsbBoard>(
     let mut host = EmuLinkHost::new(board, nonce, !args.json_replies)
         .queue_messages(false)
         .wall_timeout(Duration::from_secs(args.wall_timeout_secs));
+    if let Some(dir) = &args.ota_offer {
+        host.ota = Some(super::link_host::OtaServe::from_dir(dir)?);
+    }
     if let Some(path) = &args.console {
         let file = std::fs::File::create(path)
             .with_context(|| format!("creating the console transcript {}", path.display()))?;
@@ -100,6 +103,12 @@ async fn run_hosted_async<B: EmuUsbBoard>(
     );
     for line in report {
         eprintln!("emu: {line}");
+    }
+    if let Some(ota) = &host.ota {
+        eprintln!(
+            "emu: ota — {} offer(s), {} request(s), {} B served",
+            ota.offers, ota.requests, ota.served_bytes
+        );
     }
     eprintln!(
         "emu: host link — {}; {} link error(s)",

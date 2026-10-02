@@ -340,6 +340,67 @@ pub struct EmuLinkHost<B: EmuUsbBoard> {
     /// How long a `receive` waits for an answer, in emulated seconds.
     pub answer_budget_s: f64,
     wall_deadline: Option<Instant>,
+    /// OTA split-link spike: firmware this host offers on the update channel.
+    pub ota: Option<OtaServe>,
+}
+
+/// OTA split-link spike: a build this host offers, and serves chunk by chunk.
+///
+/// The update channel's messages, all little-endian:
+/// - host → board `O` core_len:u32 engine_len:u32 build_id:[u8;48] — the offer
+/// - board → host `Q` — "what do you have?" (answered with the offer)
+/// - board → host `R` kind:u8 offset:u32 len:u32 — a request (`kind` `C`/`E`)
+/// - host → board `D` kind:u8 offset:u32 bytes… — the answer
+pub struct OtaServe {
+    pub core: Vec<u8>,
+    pub engine: Vec<u8>,
+    pub build_id: [u8; 48],
+    pub offers: u32,
+    pub requests: u32,
+    pub served_bytes: u64,
+}
+
+impl OtaServe {
+    /// `core.bin` and `engine.bin` from `scripts/ota-spike/build-split.sh`;
+    /// the build id is the engine header's own.
+    pub fn from_dir(dir: &std::path::Path) -> Result<Self> {
+        let core = std::fs::read(dir.join("core.bin"))?;
+        let engine = std::fs::read(dir.join("engine.bin"))?;
+        anyhow::ensure!(engine.len() > 56 && &engine[..8] == b"LPENGIN1", "engine.bin has no header");
+        let mut build_id = [0u8; 48];
+        build_id.copy_from_slice(&engine[8..56]);
+        Ok(Self { core, engine, build_id, offers: 0, requests: 0, served_bytes: 0 })
+    }
+
+    fn offer(&mut self) -> Vec<u8> {
+        self.offers += 1;
+        let mut out = vec![b'O'];
+        out.extend_from_slice(&(self.core.len() as u32).to_le_bytes());
+        out.extend_from_slice(&(self.engine.len() as u32).to_le_bytes());
+        out.extend_from_slice(&self.build_id);
+        out
+    }
+
+    fn answer(&mut self, msg: &[u8]) -> Option<Vec<u8>> {
+        match msg.first()? {
+            b'Q' => Some(self.offer()),
+            b'R' if msg.len() == 10 => {
+                let kind = msg[1];
+                let off = u32::from_le_bytes(msg[2..6].try_into().ok()?) as usize;
+                let len = u32::from_le_bytes(msg[6..10].try_into().ok()?) as usize;
+                let src = if kind == b'C' { &self.core } else { &self.engine };
+                let end = (off + len).min(src.len());
+                let bytes = src.get(off..end)?;
+                self.requests += 1;
+                self.served_bytes += bytes.len() as u64;
+                let mut out = vec![b'D', kind];
+                out.extend_from_slice(&(off as u32).to_le_bytes());
+                out.extend_from_slice(bytes);
+                Some(out)
+            }
+            _ => None,
+        }
+    }
 }
 
 impl<B: EmuUsbBoard> EmuLinkHost<B> {
@@ -363,6 +424,7 @@ impl<B: EmuUsbBoard> EmuLinkHost<B> {
             notes: Vec::new(),
             answer_budget_s: 60.0,
             wall_deadline: None,
+            ota: None,
         }
     }
 
@@ -461,9 +523,23 @@ impl<B: EmuUsbBoard> EmuLinkHost<B> {
                     }
                     Err(_) => self.link_errors += 1,
                 },
-                PortRead::Log(_) | PortRead::Up { .. } => {}
+                PortRead::Up { .. } => {
+                    if let Some(ota) = self.ota.as_mut() {
+                        let offer = ota.offer();
+                        let _ = self.port.send_update(&offer);
+                    }
+                }
+                PortRead::Log(_) => {}
                 PortRead::Reset { .. } => self.link_errors += 1,
                 PortRead::Note(note) => self.notes.push(note),
+            }
+        }
+        while let Some(msg) = self.port.poll_update() {
+            let Some(ota) = self.ota.as_mut() else { continue };
+            if let Some(answer) = ota.answer(&msg) {
+                if self.port.send_update(&answer).is_err() {
+                    self.link_errors += 1;
+                }
             }
         }
         Ok(())
