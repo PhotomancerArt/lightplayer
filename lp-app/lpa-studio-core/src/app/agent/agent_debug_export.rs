@@ -91,6 +91,7 @@ mod tests {
             output_tokens: 20,
             cache_write_tokens: 30,
             cache_read_tokens: 40,
+            cost_micro_usd: None,
         };
         transcript
     }

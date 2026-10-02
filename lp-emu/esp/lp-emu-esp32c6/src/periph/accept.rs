@@ -397,6 +397,96 @@ pub fn io_mux() -> RegFile {
 // (`super::spi0`, `super::spi1`): a flash access used to spin on `SPI1.cmd`,
 // which is what every flash-backed image stopped on at 11 ms.
 
+// ---- Deep sleep: PMU + LP_AON only remember what is written to them
+// (`pmu()`, `lp_aon()` above), so `Esp32C6Machine::run_until` (`src/
+// machine.rs`) peeks the two blocks itself for the trigger and calls this
+// to decode the wake setup into `Outcome::DeepSleep`'s reason.
+
+/// Decode the wake sources a deep-sleep request armed, from `PMU.
+/// slp_wakeup_cntl2` (`wakeup_ena`: esp-hal writes the raw mask verbatim,
+/// `pmu().slp_wakeup_cntl2().write(|w| w.bits(wakeup_mask))` —
+/// `third_party/esp-hal/src/rtc_cntl/sleep/esp32c6.rs::start_sleep`) and
+/// `LP_AON.ext_wakeup_cntl` (`ext_wakeup_sel` bits 15:22, `ext_wakeup_lv`
+/// bits 23:30 — esp32c6 PAC `lp_aon::ext_wakeup_cntl::{EXT_WAKEUP_SEL_R,
+/// EXT_WAKEUP_LV_R}`, one bit per LP GPIO 0..7).
+///
+/// The wake-enable bit positions are `start_sleep`'s own local consts
+/// (`PMU_EXT0_WAKEUP_EN` = bit 0 … `PMU_USB_WAKEUP_EN` = bit 14); nothing
+/// in the PAC names them. Unknown bits decode honestly — `wake mask 0x…`
+/// — rather than a guess.
+pub(crate) fn decode_deep_sleep_wake(wakeup_ena: u32, ext_wakeup_cntl: u32) -> String {
+    const EXT0: u32 = 1 << 0;
+    const EXT1: u32 = 1 << 1;
+    const GPIO: u32 = 1 << 2;
+    const LP_TIMER: u32 = 1 << 4;
+    const WIFI_SOC: u32 = 1 << 5;
+    const UART0: u32 = 1 << 6;
+    const UART1: u32 = 1 << 7;
+    const SDIO: u32 = 1 << 8;
+    const BLE_SOC: u32 = 1 << 10;
+    const LP_CORE: u32 = 1 << 11;
+    const USB: u32 = 1 << 14;
+    const KNOWN: u32 =
+        EXT0 | EXT1 | GPIO | LP_TIMER | WIFI_SOC | UART0 | UART1 | SDIO | BLE_SOC | LP_CORE | USB;
+
+    let mut parts = Vec::new();
+    if wakeup_ena & EXT0 != 0 {
+        parts.push("ext0 wake".to_string());
+    }
+    if wakeup_ena & EXT1 != 0 {
+        let sel = (ext_wakeup_cntl >> 15) & 0xff;
+        let lv = (ext_wakeup_cntl >> 23) & 0xff;
+        let pins: Vec<String> = (0..8u32)
+            .filter(|pin| sel & (1 << pin) != 0)
+            .map(|pin| {
+                let level = if lv & (1 << pin) != 0 { "high" } else { "low" };
+                format!("gpio{pin} {level}")
+            })
+            .collect();
+        parts.push(if pins.is_empty() {
+            "ext1 wake: no pin selected".to_string()
+        } else {
+            format!("ext1 wake: {}", pins.join(", "))
+        });
+    }
+    if wakeup_ena & GPIO != 0 {
+        parts.push("gpio wake".to_string());
+    }
+    if wakeup_ena & LP_TIMER != 0 {
+        parts.push("timer wake".to_string());
+    }
+    if wakeup_ena & WIFI_SOC != 0 {
+        parts.push("wifi wake".to_string());
+    }
+    if wakeup_ena & UART0 != 0 {
+        parts.push("uart0 wake".to_string());
+    }
+    if wakeup_ena & UART1 != 0 {
+        parts.push("uart1 wake".to_string());
+    }
+    if wakeup_ena & SDIO != 0 {
+        parts.push("sdio wake".to_string());
+    }
+    if wakeup_ena & BLE_SOC != 0 {
+        parts.push("ble wake".to_string());
+    }
+    if wakeup_ena & LP_CORE != 0 {
+        parts.push("lp-core wake".to_string());
+    }
+    if wakeup_ena & USB != 0 {
+        parts.push("usb wake".to_string());
+    }
+    let unknown = wakeup_ena & !KNOWN;
+    if unknown != 0 {
+        parts.push(format!("wake mask {unknown:#010x}"));
+    }
+    if parts.is_empty() {
+        format!("wake mask {wakeup_ena:#010x}")
+    } else {
+        parts.join(", ")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

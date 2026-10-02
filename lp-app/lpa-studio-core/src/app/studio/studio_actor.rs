@@ -533,6 +533,10 @@ where
             Ok(Some(ProjectRefreshOutcome::Synced(sync))) => {
                 if sync.synced {
                     self.controller.record_passive_refresh_success();
+                } else if sync.board_answered {
+                    // The board answered (a refusal, a torn reply): back
+                    // off, but it is no dead wire — don't close the editor.
+                    self.controller.record_passive_refresh_answered_failure();
                 } else {
                     // A recorded sync failure applies backoff, just like the
                     // retired web `delay_next_project_refresh` did.
@@ -895,4 +899,151 @@ pub(crate) fn poll_now<F: Future>(future: F) -> Option<F::Output> {
 mod tests {
     use super::*;
     include!("studio_actor_tests.rs");
+
+    /// How a scripted board answers one project read.
+    #[derive(Clone, Copy)]
+    enum Reply {
+        /// A clean `Begin`/`End` read.
+        Good,
+        /// The board's heap-headroom refusal: a terminal `Error` frame.
+        Refused,
+        /// Frame 0 was torn on the wire, so frame 1 arrives first.
+        TornFirstFrame,
+        /// Nobody answered: the transport reports the wire gone.
+        Lost,
+    }
+
+    /// A `ClientIo` that answers each project read with the next scripted
+    /// [`Reply`] (a clean read once the script runs out).
+    struct ReplyScriptIo {
+        script: Rc<RefCell<std::collections::VecDeque<Reply>>>,
+        pending: Option<(u64, Reply)>,
+    }
+
+    impl ClientIo for ReplyScriptIo {
+        fn send<'life0, 'async_trait>(
+            &'life0 mut self,
+            msg: ClientMessage,
+        ) -> Pin<Box<dyn Future<Output = Result<(), TransportError>> + 'async_trait>>
+        where
+            'life0: 'async_trait,
+            Self: 'async_trait,
+        {
+            let reply = self.script.borrow_mut().pop_front().unwrap_or(Reply::Good);
+            self.pending = Some((msg.id, reply));
+            Box::pin(async { Ok(()) })
+        }
+
+        fn receive<'life0, 'async_trait>(
+            &'life0 mut self,
+        ) -> Pin<Box<dyn Future<Output = Result<WireServerMessage, TransportError>> + 'async_trait>>
+        where
+            'life0: 'async_trait,
+            Self: 'async_trait,
+        {
+            let (id, reply) = self.pending.take().unwrap_or((1, Reply::Good));
+            let revision = Revision::new(11);
+            let read = |events| WireServerMsgBody::ProjectRead { events };
+            let message = match reply {
+                Reply::Good => WireServerMessage::new(
+                    id,
+                    read(vec![
+                        ProjectReadEvent::Begin { revision },
+                        ProjectReadEvent::End { revision },
+                    ]),
+                ),
+                Reply::Refused => WireServerMessage::stream_frame(
+                    id,
+                    0,
+                    true,
+                    read(vec![ProjectReadEvent::Error {
+                        message: "read refused: heap headroom too low".to_string(),
+                    }]),
+                ),
+                Reply::TornFirstFrame => {
+                    WireServerMessage::stream_frame(id, 1, false, read(Vec::new()))
+                }
+                Reply::Lost => return Box::pin(async { Err(TransportError::ConnectionLost) }),
+            };
+            Box::pin(async move { Ok(message) })
+        }
+
+        fn close<'life0, 'async_trait>(
+            &'life0 mut self,
+        ) -> Pin<Box<dyn Future<Output = Result<(), TransportError>> + 'async_trait>>
+        where
+            'life0: 'async_trait,
+            Self: 'async_trait,
+        {
+            Box::pin(async { Ok(()) })
+        }
+    }
+
+    /// PLAYFUL choker prod recording, 2026-09-26 (+168 s to +178 s): two
+    /// pulls the board refused (low heap), then one whose first frame tore
+    /// on the wire. Each was the board ANSWERING, yet together they made
+    /// the three-in-a-row that closed the editor as a "dead wire". Answers
+    /// back off; they never close the lens. Silence still does.
+    #[test]
+    fn a_board_that_answers_badly_is_no_dead_wire() {
+        let script = Rc::new(RefCell::new(std::collections::VecDeque::from([
+            // #849 makes a refused refresh fail (and back off) without a
+            // heavier since=0 resync: one read per refused tick.
+            Reply::Refused,
+            Reply::Refused,
+            Reply::TornFirstFrame,
+        ])));
+        let io = ReplyScriptIo {
+            script: Rc::clone(&script),
+            pending: None,
+        };
+        let client = StudioServerClient::from_io_for_test("fake-protocol", Box::new(io));
+        let mut controller = StudioController::connected_with_client_for_test(client);
+        controller.apply_project_view_for_test(&single_product_project_view(3));
+        let (mut actor, studio_handle) = StudioActor::new(controller, never_timer());
+        let StudioHandle {
+            tx, view: _view, ..
+        } = studio_handle;
+        let tick = |actor: &mut StudioActor<_>| {
+            actor.controller.advance_clock_for_test(60.0);
+            tx.send(StudioCommand::RefreshTick);
+            drive(actor.run_one_batch_for_test());
+        };
+        let closed_log = |actor: &StudioActor<_>| {
+            actor
+                .controller
+                .logs()
+                .iter()
+                .any(|entry| entry.message.contains("stopped answering the editor"))
+        };
+
+        for _ in 0..3 {
+            tick(&mut actor);
+        }
+        assert!(script.borrow().is_empty(), "every scripted reply was read");
+        assert!(
+            actor.controller.runtime_pool_for_test().lens().is_some(),
+            "answers are no dead wire: the editor stays open"
+        );
+        assert!(!closed_log(&actor), "no close is logged");
+        assert!(
+            actor.refresh_backoff_delay() > Duration::ZERO,
+            "a failed answer still backs off"
+        );
+
+        // The next read works, and nothing was lost.
+        tick(&mut actor);
+        assert_eq!(actor.refresh_backoff_delay(), Duration::ZERO);
+        assert!(actor.controller.runtime_pool_for_test().lens().is_some());
+
+        // Silence is still a dead wire: three unanswered pulls close it.
+        script
+            .borrow_mut()
+            .extend([Reply::Lost, Reply::Lost, Reply::Lost]);
+        for _ in 0..3 {
+            tick(&mut actor);
+        }
+        assert!(actor.controller.runtime_pool_for_test().lens().is_none());
+        assert!(closed_log(&actor));
+    }
 }

@@ -253,9 +253,21 @@ pub struct WireUsage {
     /// OpenAI's cached-prompt breakdown (absent on most local servers).
     #[serde(default)]
     pub prompt_tokens_details: Option<PromptTokensDetails>,
+    /// What the request was charged, in credits (= US dollars). OpenRouter
+    /// always sends it on the final chunk; OpenAI and local servers never
+    /// do.
+    #[serde(default)]
+    pub cost: Option<f64>,
 }
 
 impl WireUsage {
+    /// The reported cost in millionths of a dollar (rounded), when sent.
+    pub fn cost_micro_usd(&self) -> Option<u64> {
+        self.cost
+            .filter(|cost| cost.is_finite() && *cost >= 0.0)
+            .map(|cost| (cost * 1_000_000.0).round() as u64)
+    }
+
     /// Cached prompt tokens, when the server reports them.
     pub fn cached_tokens(&self) -> u32 {
         self.prompt_tokens_details
@@ -492,6 +504,14 @@ mod tests {
         )
         .expect("parse");
         assert_eq!(chunk.usage.expect("usage").cached_tokens(), 768);
+
+        // OpenRouter's usage carries what it charged, in credits (= USD).
+        let chunk: StreamChunk = serde_json::from_str(
+            r#"{"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":1,"cost":0.001234,
+                "cost_details":{"upstream_inference_cost":0.001}}}"#,
+        )
+        .expect("openrouter usage chunk");
+        assert_eq!(chunk.usage.expect("usage").cost_micro_usd(), Some(1_234));
 
         // An empty details object defaults its fields.
         let chunk: StreamChunk = serde_json::from_str(

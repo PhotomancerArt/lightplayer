@@ -164,3 +164,9 @@ USB for good. Until M2b, read every "borrows the wire" in this ADR as
 
 See `lp-base/lp-link/README.md` and
 `docs/adr/2026-09-27-lp-link-one-comms-layer.md`.
+
+**2026-09-29, the classic's UART (PR #884):** the classic ESP32's Web
+Serial port (a CH340 bridge, `LinkConfig::uart()`) is one more
+`LinkPortService`-backed port, so everything above applies to it
+unchanged, on the same terms: read "USB" here as "every `lp-link` port".
+Pause-the-pump stays until M2b for it too.

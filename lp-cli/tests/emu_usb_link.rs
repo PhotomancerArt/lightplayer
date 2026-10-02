@@ -282,7 +282,7 @@ impl LinkIo {
             machine,
             queue,
             start,
-            port: WireLinkPort::new(0x4057_C601, true),
+            port: WireLinkPort::new(lpc_wire::lp_link::LinkConfig::usb(), 0x4057_C601, true),
             pending: VecDeque::new(),
             link_errors: 0,
             notes: Vec::new(),

@@ -44,6 +44,21 @@ the gate. On the lp-link image the link task reaches the gate SOONER (gate
 check 8,606 ns after a drain, esp-hal's write 9,306 ns), so any lag long
 enough to hurt the ungated image puts the gate's check inside it.
 
+**Since the esp-hal back-port (PR #855), esp-hal's own wait has the same
+shape.** Upstream #6104 makes `write_async` wait, after every `wr_done`, for
+a new `serial_in_empty` and then loop until `serial_in_ep_data_free` is set,
+waiting on the edge again while it is not. Inside a free lag that second
+wait never ends either. So the ungated image (`fixture-no-in-endpoint-gate`)
+no longer writes into the lag — 0 B refused — and stalls exactly like the
+gated one: with the back-port merged onto the lp-link image, at a 10,712 ns
+lag, **both** images answer 0 of 40 Hellos, 0 B refused, 9 damaged frames
+and 9 board write timeouts (`lp-emu:esp32c6:t1`). A fix in the gate alone
+would therefore not end the stall: esp-hal's per-packet wait would still sit
+out the bound. Upstream's design (like ESP-IDF's ISR) assumes a second
+`serial_in_empty` edge follows once the buffer really is free; the
+emulator's lag model gives none, which is a question about the model as
+much as about the drivers.
+
 **Fix (not applied).** When the recheck still reads not-free, poll
 `serial_in_ep_data_free` on a short timer instead of waiting on the edge
 (or wait on the edge with a short timeout and re-check), so a lagging free
@@ -52,8 +67,8 @@ S3 USB byte passes through, so it wants a desk check against the gate's
 silicon record (0 of 1,327 packed frames lost, 2026-09-25) before it lands.
 
 **Regression coverage.** `emu_usb_free_lag.rs` pins today's behaviour under
-the lag: the gated image writes nothing into the lag, and its writes time
-out. A write that times out after its first packet leaves half a frame on
+the lag: neither image writes into the lag (since PR #855, the ungated one
+too), and both images' writes time out. A write that times out after its first packet leaves half a frame on
 the host; since the host waits `frame_abandon` (3 s, e726f7083) for the rest
 instead of the 50 ms text idle, that half frame is closed by the next frame
 and counted `damaged` (9 of 9 timeouts at `lp-emu:esp32c6:t1`) where it used
@@ -65,3 +80,24 @@ write timeout" — the test says so where it asserts.
 check lands relative to the drain, and that ordering was the whole reason the
 gate was safe under the hypothesis. A gate that clears an edge it then waits
 on is only race-free if the condition it re-checks moves with the edge.
+
+**2026-10-01 — the regression test's lag stopped covering the wake (still
+open).** On PR #894 (the secure link) `emu_usb_free_lag.rs` reported this
+defect "looks fixed": the ungated image answered 40 of 40 under the lag, with
+2 write timeouts that the link's resends recovered. It was not fixed. The test
+chose the lag from the run's *soonest* drain-to-`ep1_conf`/`ep1` span, and
+that statistic belongs to whichever single drain happened to land while the
+CPU was already running: per-drain traces (`lp-emu:esp32c6:t1`, images built
+on a desk from 3ecb85468 and from #894's head) show the idle wake unchanged —
+the ungated image's check 1,503 cycles (9,393 ns) after a drain, the gated
+one's 1,528 (9,550 ns), on ~97 of 98 drains in both trees — while #894's
+images add one or two drains that find the CPU awake and wake in 769–1,317
+cycles. The run's soonest became one of those (6,418 ns on CI, 4,806 ns on the
+desk, for one commit), the lag landed at ~8 µs, below the wake almost every
+drain takes, and so almost every wake escaped the lag. The test now chooses the
+lag from the median, over the 40 requests, of each request's soonest wake; on
+both trees, and on CI's own shipped image for #894, that is 9,718 / 9,550 ns,
+the lag is 10,718 ns, and both images show this defect's full signature again:
+0 of 40 answered, 9 write timeouts, 9 damaged, 26 resent. The firmware change
+did not move the USB path; it moved the phase of the guest's other work against
+the host's drain cadence, which any change to the image can.

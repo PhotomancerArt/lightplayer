@@ -540,6 +540,22 @@ export async function livePortFor(boardId) {
   return bus().livePortFor(boardId);
 }
 
+/// Make a board's port enumerate as a classic ESP32's USB-UART bridge (the
+/// desk classic's CH340K is `1a86:7522`) instead of the polyfill's native-USB
+/// `303a:1001` — for the classic link tests (plan
+/// `lp2025/2026-09-28-2015-classic-uart-on-lp-link`, P4).
+///
+/// TEST-ONLY, and on this one port OBJECT, never the polyfill: the shim models
+/// native USB on purpose (its header), and no backing holds a classic board.
+/// What it changes is the one thing the page learns about a port before a
+/// hello, the ids `getInfo()` answers, which is what picks the port's link
+/// preset. Call it before the port is described (`getGrantedPorts`).
+export async function presentBehindBridge(boardId, usbVendorId, usbProductId) {
+  const { bus } = await polyfill();
+  const port = bus().livePortFor(boardId);
+  port.getInfo = () => ({ usbVendorId, usbProductId });
+}
+
 export async function portIsDead(port) {
   return Boolean(port?.dead);
 }

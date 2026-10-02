@@ -21,8 +21,9 @@ Chip facts arrive by injection instead:
 
 - `server_loop::run_server_loop` takes a `memory_stats` fn (heap free/used) and
   a `feed_watchdog` closure.
-- `transport::StreamingMessageRouterTransport::new` takes the chip io-task's
-  three embassy channels.
+- `uart_link` (the classic's UART on lp-link) takes its bytes from the chip
+  crate's I/O task through two static pipes (`uart_link::uart_link_pipes`);
+  `usb_link` (the C6/S3) takes the chip's USB halves and register facts.
 - `hardware::manifest_loader::load_hardware_manifest` takes the compiled-in
   fallback manifest fn.
 - `lp_fs::LpFsFlash` is generic over `littlefs_rust::Storage`; the flash

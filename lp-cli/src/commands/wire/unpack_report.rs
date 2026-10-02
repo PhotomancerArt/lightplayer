@@ -24,6 +24,8 @@ pub struct UnpackReport {
     gaps: usize,
     unverified: usize,
     sessions: usize,
+    /// Frames of a secure link (sealed; no key to read them).
+    sealed: usize,
     /// Whether this report is of an lp-link capture (decides the total's
     /// words).
     link: bool,
@@ -43,6 +45,7 @@ impl UnpackReport {
             gaps: 0,
             unverified: 0,
             sessions: 0,
+            sealed: 0,
             link: false,
         }
     }
@@ -144,6 +147,19 @@ impl UnpackReport {
                     "wire unpack: {skipped} frame(s) {} missing from the capture",
                     dir_word(*dir)
                 );
+            }
+            SniffedWire::Sealed { dir, chan, len } => {
+                self.sealed += 1;
+                if self.sealed == 1 {
+                    let _ = writeln!(
+                        log,
+                        "wire unpack: this capture is of a secure link; its frames are sealed \
+                         and are written as `<sealed frame …>` lines"
+                    );
+                }
+                if self.sizes {
+                    let _ = writeln!(log, "sealed {} channel {chan} {len}", dir_word(*dir));
+                }
             }
             SniffedWire::Console { .. } => {}
         }
