@@ -43,6 +43,11 @@ impl DatagramQueue {
         self.count >= self.slots
     }
 
+    /// Slots free: datagrams a `push_with` would take right now.
+    pub fn free_slots(&self) -> usize {
+        self.slots.saturating_sub(self.count)
+    }
+
     /// Payload bytes queued.
     pub fn bytes(&self) -> usize {
         self.bytes

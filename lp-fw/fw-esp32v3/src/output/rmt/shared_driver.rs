@@ -265,7 +265,8 @@ pub use telemetry::report_telemetry_if_due;
 ///
 /// * one `[WS281X]` line per configured channel, at most every
 ///   [`PERIOD`] — a period long enough that the print cost cannot itself
-///   perturb the thing being measured;
+///   perturb the thing being measured — written whole between the host
+///   link's frames (`emit_line`), never raw;
 /// * integer formatting only (mean lag is reported in tenths of a word), so
 ///   no float-formatting machinery is linked;
 /// * emitted from the *frame-write* path, never from the ISR;
@@ -333,7 +334,7 @@ pub mod telemetry {
             if stats.posted == 0 {
                 continue;
             }
-            esp_println::println!(
+            emit_line(format_args!(
                 "[WS281X-WIRE] t_ms={} wire={} posted={} sent={} torn={} waved={} mux={} \
                  aborted={} cancelled={} failed={} queue_wait_max_us={}",
                 now_ms,
@@ -347,7 +348,7 @@ pub mod telemetry {
                 stats.cancelled,
                 stats.start_failed,
                 stats.queue_wait_max_us,
-            );
+            ));
         }
 
         for ch in 0..TX_CHANNELS as u8 {
@@ -372,7 +373,7 @@ pub mod telemetry {
             // before and after this change stay comparable. Entry delay vs
             // refill lag split one deadline into "getting in" vs "getting
             // out" — see lp-ws281x's driver docs.
-            esp_println::println!(
+            emit_line(format_args!(
                 "[WS281X] t_ms={} ch={} half={} frames={} complete={} trips={} skips={} \
                  errors={} refills={} wanted={} lag_avg={}.{} lag_max={} over_half={} \
                  hist={} entry_max={} entry_hist={}",
@@ -393,8 +394,24 @@ pub mod telemetry {
                 HistFmt(stats.lag_hist),
                 stats.entry_delay_max,
                 HistFmt(stats.entry_delay_hist),
-            );
+            ));
         }
+    }
+
+    /// One report line, whole, to the host link as console text between its
+    /// frames (`uart_link_pipes::put_text_line`).
+    ///
+    /// Not `esp_println`: since wire proto 32 UART0 carries lp-link frames,
+    /// and a raw line written from the render path while io_task writes a
+    /// frame lands inside it — the concurrent-writer defect itself
+    /// (`docs/defects/2026-08-02-serial-line-interleaving.md`). Not `log`
+    /// either: a log record is cut at 200 bytes, a `[WS281X]` line runs to
+    /// ~300, and the capacity-matrix scripts read its fields by position. A
+    /// line the TX pipe has no room for this period is dropped; the next one
+    /// carries cumulative counters.
+    fn emit_line(args: core::fmt::Arguments<'_>) {
+        let line = alloc::format!("{args}\r\n");
+        let _ = fw_esp32_common::uart_link::uart_link_pipes::put_text_line(line.as_bytes());
     }
 
     /// Mean refill lag as `(whole_words, tenths)` — integer arithmetic so no

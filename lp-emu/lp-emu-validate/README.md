@@ -552,8 +552,8 @@ writes goes there.
 ```bash
 cargo run -p lp-cli -- validate list
 cargo run -p lp-cli -- validate replay <transcript> --against <transcript|configuration>
-cargo run -p lp-cli -- validate run <set> --config <name> [--port …] [--image …] [--link real|spike] [--dry-run]
-cargo run -p lp-cli -- validate record <set> --config <name> --date … --commit … [--link real|spike] [--dry-run]
+cargo run -p lp-cli -- validate run <set> --config <name> [--port …] [--image …] [--link real|spike] [--link-host lp-link|raw] [--dry-run]
+cargo run -p lp-cli -- validate record <set> --config <name> --date … --commit … [--link real|spike] [--link-host lp-link|raw] [--dry-run]
 ```
 
 `--dry-run` prints the exact commands and stops, which is what makes a desk
@@ -639,6 +639,51 @@ flashes somebody else's ELF cannot honestly report `firmware_features`.
 Every path a plan prints is relative to the repository root and the steps run
 there, so the `source` line in a committed sidecar reads the same in anyone's
 checkout.
+
+### The shipped image speaks lp-link: a link host, from outside the fence
+
+Since wire proto 30 (#854) the shipped image's USB link is lp-link. Past the
+boot text the port carries frames, and the hello, the heartbeats and every log
+record leave the board only once a host has brought the link up — so a
+capture read straight off the port (`--usb-sj file:`, `espflash --monitor`,
+`tty-capture.py`) never reaches a shipped payload's sentinel. The host that
+brings the link up is lp-link and lpc-wire, product crates this crate may not
+import, so it comes from the caller: `RunOptions::link_host` is a
+[`LinkHost`](src/driver.rs) — two command prefixes, one that runs the machine
+with the link hosted in process and one that opens a board's port as the
+link's host — and the driver only appends flags to them. `lp-cli validate`
+supplies `lp-cli emu run --host-link …` and `lp-cli link capture …`;
+`lp-cli`'s `tests/validate_link_host_parity.rs` parses what this crate prints
+with lp-cli's own argument definitions, so the flag vocabulary cannot drift.
+
+A host applies to a run when one was supplied, the payload is the shipped
+image (no `fw-checks` module — a harness still logs raw), its effective link
+is USB-Serial-JTAG, and a host is attached at all. `--link-host raw` supplies
+none, which is how a pinned pre-lp-link image — every committed transcript's —
+is re-run exactly as it was recorded. Within this crate the default is `None`.
+
+What a hosted capture holds is the host's **decoded console**: raw text as it
+arrived, log records as `[LEVEL] target: text`, each wire message as its
+`M!{json}` line, and `[link] …` notes. That is the form the pre-lp-link
+captures had, which is why the series parsers read it unchanged; the sidecar's
+`note` says the capture was hosted and its `source` names the host command.
+The emulated host opens with a fixed link nonce (two runs are one run) and
+both hosts ask for JSON replies rather than packed ones, so no memory figure
+depends on a host's pack opt-in.
+
+On silicon a hosted payload is flashed with `desk-flash-no-monitor.sh` (espflash
+resets the board and exits) and then read by `lp-cli link capture <port>`,
+which opens the port without the reset dance. Raw boot text printed before
+that open is therefore not in the capture; log records are held in the
+board's log ring until the link is up, so the payload's own lines are.
+`usb-negative-control` keeps its wait and swaps `tty-capture.py` for the same
+host.
+
+What a host cannot express is refused rather than run: a payload that
+carries a raw-`M!` conversation (`host_script` — the USB walks, the S3's
+stop-all), one that reads guest memory with `--probe`, and a second boot over
+a writable part (the S3's arm). Re-expressing those is a decision about what
+the payload means, not a runner's.
 
 ## Rules of the desk
 

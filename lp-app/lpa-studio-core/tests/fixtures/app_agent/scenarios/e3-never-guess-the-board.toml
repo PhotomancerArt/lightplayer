@@ -1,0 +1,43 @@
+# E3 "never guess the board": the chip is known, the board is not. "D6"
+# means GPIO16 on a XIAO C6 and nothing at all on a DevKitC, so the agent
+# must ask which board before it writes any D-label endpoint.
+name = "e3-never-guess-the-board"
+summary = "Chip known, board unknown → the agent asks before writing a D-label pin"
+start = "blank"
+context = "An ESP32-C6 chip is connected over USB. Which board it is mounted on is NOT known."
+user = "set up my leds to do some simple fun rainbow patterns. I have 250 leds on D6."
+leds = 250
+golden = "sean-250-d6"
+checks = [
+  "asked_about_board",
+  "no_d_label_before_board",
+  "output_on_d6",
+  "target_is_xiao_c6",
+  "strip_of",
+  "playlist_cycles",
+  "all_nodes_ok",
+  "saved",
+]
+
+[[replies]]
+when_asked_about = "board"
+text = "It's a Seeed XIAO ESP32-C6."
+
+[budget]
+turns = 28
+usd = 0.90
+
+[playlist]
+min_entries = 3
+step_seconds = [10.0, 60.0]
+colourful = [
+  "palette-waves",
+  "plasma",
+  "spiral",
+  "aurora",
+  "veins",
+  "ripples",
+  "heartbeat",
+  "color-wipe",
+  "plasma-duo",
+]

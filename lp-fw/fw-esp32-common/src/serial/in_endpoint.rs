@@ -60,8 +60,9 @@ pub trait InEndpointRegs {
 /// A TX half behind the free-then-clear gate (module docs).
 ///
 /// `W::flush` must wait for the send buffer to drain (esp-hal's
-/// `UsbSerialJtagTx<Async>` does: it arms `serial_in_empty` while
-/// `serial_in_ep_data_free` is clear).
+/// `UsbSerialJtagTx<Async>` does: it arms `serial_in_empty`, waits for it,
+/// and loops until `serial_in_ep_data_free` is set — upstream #6104,
+/// back-ported in `third_party/esp-hal`).
 pub struct InEndpoint<W, R> {
     tx: W,
     regs: PhantomData<R>,
@@ -80,8 +81,7 @@ impl<W: Write, R: InEndpointRegs> InEndpoint<W, R> {
     /// The clear-then-recheck order is what makes the wait race-free: if the
     /// buffer drains after the first check, either the recheck sees it free,
     /// or the drain raises the bit *after* the clear and the inner `flush`
-    /// (which arms the interrupt only while the buffer is still not free)
-    /// wakes on it.
+    /// (which arms the interrupt and waits for it) wakes on it.
     async fn ready(&mut self) -> Result<(), W::Error> {
         if !R::in_ep_free() {
             R::clear_serial_in_empty();

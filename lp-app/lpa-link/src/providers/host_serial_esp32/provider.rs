@@ -394,6 +394,9 @@ impl LinkProvider for HostSerialEsp32Provider {
             })),
             // `LP_WIRE_ENCODING`, or packed.
             wire_encoding: None,
+            // From the port: `uart()` behind a USB-UART bridge (a classic's
+            // CH340), `usb()` for a C6/S3 and for a socket.
+            link_config: None,
         };
         // Port opening happens here (the provider owns the endpoint→port
         // mapping); the transport machinery below the byte-stream seam is

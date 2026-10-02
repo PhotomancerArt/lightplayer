@@ -70,7 +70,10 @@ impl Default for WireLinkSniffer {
 }
 
 impl WireLinkSniffer {
-    /// A sniffer for a USB-Serial-JTAG link ([`lp_link::LinkConfig::usb`]).
+    /// A sniffer for a stream link: USB-Serial-JTAG
+    /// ([`lp_link::LinkConfig::usb`]) or a UART ([`lp_link::LinkConfig::uart`]),
+    /// which frame alike. It reads framing and checksums only, never the
+    /// windows or budgets, so it takes no `LinkConfig`.
     pub fn new() -> Self {
         WireLinkSniffer {
             link: LinkSniffer::usb(),

@@ -56,7 +56,8 @@ pub fn serve(args: ServeArgs) -> Result<()> {
     wire_tear::WireTear::from_env()?;
     if args.chip != EmuChip::Esp32C6 {
         anyhow::bail!(
-            "`emu serve` holds C6 boards only; the S3 is `emu run --chip esp32s3 --host-link`"
+            "`emu serve` holds C6 boards only; the S3 and the classic are `emu run --chip \
+             esp32s3|esp32v3 --host-link`"
         );
     }
 

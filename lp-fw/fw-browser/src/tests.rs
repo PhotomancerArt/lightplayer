@@ -723,26 +723,12 @@ fn load_project_tolerates_library_artifacts() {
 /// under test is the fw-browser boot wiring, not which board it happens to
 /// be.
 ///
-/// ⚠️ WHAT THIS TEST CANNOT ASSERT, AND WHY. The refusal is real and it does
-/// name the endpoint — `EngineServices::flush_dirty_output_sinks` builds
-/// `OutputFlushError::Provider` ("output node 3 port 0 ws281x:local:D9:
-/// Invalid config: unknown Ws281x hardware endpoint")
-/// (`lp-core/lpc-engine/src/engine/engine_services.rs:711`) and
-/// `Engine::tick` returns it as `EngineError::OutputFlush`
-/// (`lp-core/lpc-engine/src/engine/engine.rs:666`). But
-/// `LpServer::advance_frame` (`lp-app/lpa-server/src/server.rs:577`) drops
-/// that error into a `log::warn!` and a failure COUNT, and no wire message
-/// carries either. The output node's `NodeRuntimeStatus` cannot carry it
-/// either: node statuses are written only from the node walk
-/// (`engine.rs:1568`, `:2285`), and the flush runs outside it. So through
-/// the wire a refused wire and an opened one are INDISTINGUISHABLE — that is
-/// a product gap, filed as `docs/debt/output-flush-refusal-is-log-only.md`,
-/// not a property. The `Ok` asserted below is pinned deliberately: when the
-/// gap closes, this test must fail so it can be upgraded to assert the named
-/// refusal. Until then the strictness itself is proven where it IS
-/// observable — `a_failing_output_sink_does_not_suppress_the_others`
-/// (`engine_services.rs:1219`) asserts the flush error names the endpoint it
-/// refused.
+/// The refusal reaches the wire as the Output node's status: the engine
+/// keeps why a parked wire did not open and the output wears it as an
+/// `Error` naming the endpoint (`EngineServices::output_open_failure` →
+/// `TickContext` → `OutputNode::runtime_status`, one flush behind). Until
+/// 2026-10-01 that status read `Ok` here, pinned against
+/// `docs/debt/output-flush-refusal-is-log-only.md` (now retired).
 #[wasm_bindgen_test]
 fn board_manifest_boot_wears_the_board_and_survives_a_wire_it_lacks() {
     fw_browser_init_exports(wasm_bindgen::exports());
@@ -818,17 +804,15 @@ fn board_manifest_boot_wears_the_board_and_survives_a_wire_it_lacks() {
          {absent_frame} -> {absent_frame_later}"
     );
 
-    // Pinned, not endorsed: see this test's doc comment. The refusal reaches
-    // no wire query today, so the output node reports exactly what an opened
-    // wire reports. Closing
-    // `docs/debt/output-flush-refusal-is-log-only.md` must break this line.
-    assert_eq!(
-        output_node_status(runtime_id, absent_handle, &mut next_id),
-        NodeRuntimeStatus::Ok,
-        "GAP PINNED: no wire query carries an output-flush refusal, so a \
-         refused wire still reads Ok. Closing the debt entry should turn \
-         this into an assertion that the status NAMES ws281x:local:D9."
-    );
+    // The refusal is a status a wire client can read: the Output node is in
+    // Error and names the endpoint the board lacks.
+    match output_node_status(runtime_id, absent_handle, &mut next_id) {
+        NodeRuntimeStatus::Error(message) => assert!(
+            message.contains("ws281x:local:D9") && message.contains("not an output pin"),
+            "the refused wire's status must name it: {message}"
+        ),
+        other => panic!("a refused wire must read Error naming ws281x:local:D9, got {other:?}"),
+    }
 }
 
 /// A project authored for `B13` — a dome wire label no silicon profile in

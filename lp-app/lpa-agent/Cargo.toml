@@ -13,6 +13,9 @@ futures-util = "0.3"
 lp-collection = { workspace = true, features = ["serde"] }
 lps-builtins = { path = "../../lp-shader/lps-builtins" }
 lps-probe = { path = "../../lp-shader/lps-probe" }
+# Strict input schemas for the app agent's tools, generated from the types
+# the tools deserialize (the shader tools keep their hand-written schemas).
+schemars = { workspace = true, features = ["std"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 # Host SSE transport for evals/tests (feature `host-transport`; never on wasm).

@@ -25,6 +25,24 @@
 //! `[INIT] main stack 45280 B` where L0's capture says 45,488: the desk board
 //! runs a different, dirty commit (`2e21b6226bcd-dirty`, ruling R7). P3
 //! recorded the same difference against the same image.
+//!
+//! # ⚠️ Since wire proto 32 the idle heartbeat is lp-cli's to gate
+//!
+//! The shipped image's UART0 is an lp-link now (plan
+//! `classic-uart-on-lp-link`): past `[INIT] fw-esp32 initialized, starting
+//! server loop…` the wire is link frames, the `[stack]`/`[MEM]`/`[JIT]`
+//! triple and every other log line ride the link's log channel, and the
+//! hello and the replies leave the board only once a host has brought the
+//! link up. Nothing under `lp-emu/` may host a link (the MIT fence), so G2
+//! (a) — both boot paths to the elicited triple, with the hello and the
+//! reply — and G2's two-path memory comparison moved, unchanged in what they
+//! prove, to `lp-cli/tests/emu_v3_link_gates.rs`, which asks with the same
+//! `stopAllProjects` over the product's own link host. What stays here is
+//! what the raw wire still carries: the boot chain, both boot paths to the
+//! server loop with nothing unmapped and core 1 running
+//! ([`both_boot_paths_reach_the_server_loop_with_nothing_unmapped`]), and
+//! G2 (e) against the desk board, which reads the PINNED pre-lp-link
+//! reference image and so still speaks `M!`.
 
 use std::path::PathBuf;
 
@@ -184,10 +202,6 @@ fn exit_on_stops_at_a_complete_line() {
     );
 }
 
-/// The three lines G2 calls the **idle heartbeat**, in the order the board
-/// prints them.
-const HEARTBEAT: &[&str] = &["[stack] heartbeat: ", "[MEM] free=", "[JIT] used="];
-
 /// The line silicon prints, and — **since M4 P1** — the line this machine
 /// prints: core 1 is released by DPORT, boots through the mask ROM's own
 /// reset path and binds the RMT ISR in its own matrix
@@ -225,16 +239,17 @@ const SINGLE_CORE_LINE: &str = "[INIT] APP core unavailable; RMT ISR on PRO core
 /// whether or not any project is loaded. That is a client doing what a client
 /// does, on a machine with no client attached — which is also G2's "hello
 /// over the socket", one request earlier.
-const STOP_ALL: &str = "M!{\"id\":1,\"msg\":\"stopAllProjects\"}\n";
-
-/// The device's answer to it, and the gate runs' exit line.
 ///
-/// ⚠️ It is the **last** of the things the gate asserts to reach the wire,
-/// not the first. The heartbeat triple is `esp_println` straight into the
-/// FIFO; the reply travels through the io_task's queue. A run that stopped
-/// on the triple would not have seen the reply yet — two console paths with
-/// different latencies, a fact about this firmware rather than this machine.
-const REPLY_LINE: &str = "\"id\":1,\"msg\":\"stopAllProjects\"";
+/// ⚠️ **As `M!` bytes this is the PRE-lp-link stimulus.** It is what the
+/// pinned reference image (`75486b114`, [`the_heartbeats_memory_figures_are_the_desk_boards`])
+/// and the desk sitting's committed transcripts were captured with, and
+/// `lp-emu-validate`'s `walks/v3-stop-all.script` is held to it byte for
+/// byte. The shipped image on this tree reads lp-link frames on UART0 and
+/// not `M!` lines, so the same request reaches it over a link host instead
+/// (`lp-cli/tests/emu_v3_link_gates.rs`) — and
+/// [`both_boot_paths_reach_the_server_loop_with_nothing_unmapped`] shows
+/// these bytes are not a conversation to it.
+const STOP_ALL: &str = "M!{\"id\":1,\"msg\":\"stopAllProjects\"}\n";
 
 /// The script both gate runs use: wait for the io_task to say it is up, then
 /// send one request a millisecond later.
@@ -249,232 +264,95 @@ fn stop_all_script() -> lp_emu_esp_common::ScriptedSource {
     )
 }
 
-/// What both halves of G2 (a) assert about a run that reached the heartbeat.
-fn assert_reached_the_heartbeat(machine: &Machine, outcome: &Outcome, path: &str) {
-    let text = machine.uart0().text();
-    assert!(
-        matches!(outcome, Outcome::ExitMatched { .. }),
-        "{path}: the run stops because the heartbeat appeared: {outcome:?}\n{text}"
-    );
-    assert!(
-        machine.first_strict_violation().is_none(),
-        "{path}: no strict refusal anywhere in the boot"
-    );
-    assert_eq!(
-        machine.bus().unmapped_reads() + machine.bus().unmapped_writes(),
-        0,
-        "{path}: G2's first binary condition — zero unmapped accesses"
-    );
-    for line in HEARTBEAT {
-        assert!(text.contains(line), "{path}: no `{line}` in:\n{text}");
+/// The last line of the boot that is still raw text on this image: after it,
+/// UART0 carries link frames.
+const SERVER_LOOP_LINE: &str = "[INIT] fw-esp32 initialized, starting server loop";
+
+/// **G2 (a)'s raw-wire half, both boot paths.** The shipped image on the
+/// merged chip under `--strict-bus`, direct-loaded and ROM-up, reaches the
+/// server loop and runs half a second past it with zero unmapped accesses,
+/// no strict refusal, and core 1 running (silicon's `[INIT] RMT ISR on APP
+/// core`, not the Q5 fallback) — with the pre-lp-link stop-all bytes
+/// ([`STOP_ALL`]) arriving on UART0 1 ms after `[INIT] I/O task spawned`,
+/// and **not** answered: on this image those bytes are line noise to the
+/// link, and nothing on UART0 is a `M!` reply to them.
+///
+/// ⚠️ **Weaker than the pre-lp-link G2 (a), and on purpose.** Those two
+/// tests ran to the elicited heartbeat triple and the stop-all's reply, and
+/// on this image both are link traffic. They moved, with every assertion,
+/// to `lp-cli/tests/emu_v3_link_gates.rs`'s
+/// `g2_both_boot_paths_reach_the_idle_heartbeat_over_the_link`, as did G2's
+/// two-path memory comparison (`the_two_paths_report_the_same_memory_figures`,
+/// and with it the positional `boot_idle.path_high_water_gap` figure). What
+/// this one keeps is what the machine alone can still see: both boots, the
+/// bus clean, the second core bound.
+#[test]
+#[ignore = "needs the shipped image and espflash; run through `just test-emu-esp32v3-boot`"]
+fn both_boot_paths_reach_the_server_loop_with_nothing_unmapped() {
+    let test = "both_boot_paths_reach_the_server_loop_with_nothing_unmapped";
+    let Some(elf) = image() else { return };
+    let merged = match lp_emu_esp32v3::test_support::merged_chip_image() {
+        Ok(p) => p,
+        Err(reason) => return skip_notice(test, &reason),
+    };
+    let len = std::fs::metadata(&merged).expect("the merged image").len() as u32;
+    for (path, mode) in [("direct", BootMode::Direct), ("rom-up", BootMode::RomUp)] {
+        let mut builder = Esp32V3Builder::new()
+            .boot_mode(mode)
+            .flash(lp_emu_esp32v3::flash::FlashBacking::Copy(merged.clone()))
+            .flash_len(len)
+            .strict(true)
+            .uart0_script(stop_all_script());
+        if mode == BootMode::Direct {
+            builder = builder.app(AppSource::Path(elf.clone()));
+        }
+        let mut machine = builder.build().expect("builds");
+        let outcome = machine.run_until(&StopCondition {
+            exit_on: Some(SERVER_LOOP_LINE.to_string()),
+            ..StopCondition::after_micros(3_000_000)
+        });
+        let text = machine.uart0().text();
+        assert!(
+            matches!(outcome, Outcome::ExitMatched { .. }),
+            "{path}: the boot reaches the server loop: {outcome:?}\n{text}"
+        );
+        let settle = machine.cycles() + 500_000 * lp_emu_esp32v3::memmap::CYCLES_PER_US;
+        let outcome = machine.run_until(&StopCondition {
+            stop_cycle: Some(settle),
+            ..Default::default()
+        });
+        assert!(
+            matches!(outcome, Outcome::Deadline { .. }),
+            "{path}: half a second past the server loop's line: {outcome:?}"
+        );
+        assert!(
+            machine.first_strict_violation().is_none(),
+            "{path}: no strict refusal anywhere in the boot: {:?}",
+            machine.first_strict_violation()
+        );
+        assert_eq!(
+            machine.bus().unmapped_reads() + machine.bus().unmapped_writes(),
+            0,
+            "{path}: G2's first binary condition — zero unmapped accesses"
+        );
+        let text = machine.uart0().text();
+        assert!(
+            text.contains(DUAL_CORE_LINE) && !text.contains(SINGLE_CORE_LINE),
+            "{path}: core 1 runs (M4 P1), so the firmware prints silicon's `{DUAL_CORE_LINE}` \
+             and not the Q5 fallback:\n{text}"
+        );
+        assert!(
+            !text.contains("\"id\":1,\"msg\":\"stopAllProjects\""),
+            "{path}: the lp-link image answered a raw `M!` line:\n{text}"
+        );
+        if mode == BootMode::RomUp {
+            assert!(text.contains("ets Jul 29 2019 12:21:46"), "the ROM banner");
+            assert!(
+                text.contains("Image contains multiple DROM segments"),
+                "the DROM-segments line the desk board prints on every boot"
+            );
+        }
     }
-    assert!(
-        text.contains(DUAL_CORE_LINE) && !text.contains(SINGLE_CORE_LINE),
-        "{path}: core 1 runs (M4 P1), so the firmware prints silicon's `{DUAL_CORE_LINE}` and \
-         not the Q5 fallback:\n{text}"
-    );
-    // ⚠️ **Not** `[RECOVERY] boot complete (first frame served)`, which the
-    // server loop prints on its first successful tick. That line is a
-    // `log::info!` and travels through the io_task's queue; the heartbeat
-    // triple is `esp_println`, straight into the FIFO. So the triple reaches
-    // the wire *first* and a run that stops on it has not seen the log line
-    // yet — two console paths with different latencies, which is a fact
-    // about this firmware and not about this machine. The frame really was
-    // served: `stopAllProjects` is answered below, and that answer comes out
-    // of `tick_and_send`.
-    // The hello the server sends unprompted, and the reply to the request
-    // the script made — G2 (d), over the wire rather than over a register.
-    assert!(
-        text.contains("\"id\":0,\"msg\":{\"hello\""),
-        "{path}: the unsolicited wire hello:\n{text}"
-    );
-    assert!(
-        text.contains("\"id\":1,\"msg\":\"stopAllProjects\""),
-        "{path}: the scripted request is answered:\n{text}"
-    );
-}
-
-/// **G2 (a), the direct half.** The shipped image, direct-loaded onto the
-/// merged chip, under `--strict-bus`, reaches the idle heartbeat with zero
-/// unmapped accesses.
-#[test]
-#[ignore = "needs the shipped image and espflash; run through `just test-emu-esp32v3-boot`"]
-fn the_direct_load_reaches_the_idle_heartbeat() {
-    let Some(elf) = image() else { return };
-    let merged = match lp_emu_esp32v3::test_support::merged_chip_image() {
-        Ok(p) => p,
-        Err(reason) => {
-            skip_notice("the_direct_load_reaches_the_idle_heartbeat", &reason);
-            return;
-        }
-    };
-    let len = std::fs::metadata(&merged).expect("the merged image").len() as u32;
-    let mut machine = Esp32V3Builder::new()
-        .boot_mode(BootMode::Direct)
-        .app(AppSource::Path(elf))
-        .flash(lp_emu_esp32v3::flash::FlashBacking::Copy(merged))
-        .flash_len(len)
-        .strict(true)
-        .uart0_script(stop_all_script())
-        .build()
-        .expect("builds");
-    let outcome = machine.run_until(&StopCondition {
-        exit_on: Some(REPLY_LINE.to_string()),
-        ..StopCondition::after_micros(2_000_000)
-    });
-    assert_reached_the_heartbeat(&machine, &outcome, "direct");
-}
-
-/// **G2 (a), the ROM-up half.** The same image, the same chip, started at the
-/// mask ROM's reset vector — through the real ROM and the real ESP-IDF
-/// second-stage bootloader — and the same heartbeat comes out.
-#[test]
-#[ignore = "needs the shipped image and espflash; run through `just test-emu-esp32v3-boot`"]
-fn the_rom_up_boot_reaches_the_idle_heartbeat() {
-    let merged = match lp_emu_esp32v3::test_support::merged_chip_image() {
-        Ok(p) => p,
-        Err(reason) => {
-            skip_notice("the_rom_up_boot_reaches_the_idle_heartbeat", &reason);
-            return;
-        }
-    };
-    let len = std::fs::metadata(&merged).expect("the merged image").len() as u32;
-    let mut machine = Esp32V3Builder::new()
-        .boot_mode(BootMode::RomUp)
-        .flash(lp_emu_esp32v3::flash::FlashBacking::Copy(merged))
-        .flash_len(len)
-        .strict(true)
-        .uart0_script(stop_all_script())
-        .build()
-        .expect("builds");
-    let outcome = machine.run_until(&StopCondition {
-        exit_on: Some(REPLY_LINE.to_string()),
-        ..StopCondition::after_micros(3_000_000)
-    });
-    assert_reached_the_heartbeat(&machine, &outcome, "rom-up");
-    // And the bootloader's own log is in front of it, including the `E` that
-    // is correct (`tests/rom_up_boot.rs` compares it line for line).
-    let text = machine.uart0().text();
-    assert!(text.contains("ets Jul 29 2019 12:21:46"), "the ROM banner");
-    assert!(
-        text.contains("Image contains multiple DROM segments"),
-        "the DROM-segments line the desk board prints on every boot"
-    );
-}
-
-/// **G2's memory figures, side by side with L0's.**
-///
-/// The two runs are of **different image bytes** — the desk board is on
-/// `2e21b6226bcd`-dirty (ruling R7) and this tree is not — so nothing here is
-/// asserted equal. What is asserted is that the triple parses, that both boot
-/// paths produce the **same** figures as each other, and that the numbers are
-/// printed where the gate packet can quote them. The equality against silicon
-/// is L1's, and it is held until L1 captures from a clean pinned commit.
-///
-/// ⚠️ With core 1 running, "the same figures" excludes the main stack's
-/// high-water — see [`PATH_HIGH_WATER_GAP_KEY`] and the comment at the assertion.
-#[test]
-#[ignore = "needs the shipped image and espflash; run through `just test-emu-esp32v3-boot`"]
-fn the_two_paths_report_the_same_memory_figures() {
-    let Some(elf) = image() else { return };
-    let merged = match lp_emu_esp32v3::test_support::merged_chip_image() {
-        Ok(p) => p,
-        Err(reason) => {
-            skip_notice("the_two_paths_report_the_same_memory_figures", &reason);
-            return;
-        }
-    };
-    let len = std::fs::metadata(&merged).expect("the merged image").len() as u32;
-
-    let triple = |text: &str| -> Vec<String> {
-        text.lines()
-            .filter(|l| HEARTBEAT.iter().any(|h| l.contains(h)))
-            .map(|l| {
-                let at = HEARTBEAT
-                    .iter()
-                    .find_map(|h| l.find(h))
-                    .expect("a heartbeat line");
-                l[at..].to_string()
-            })
-            .take(3)
-            .collect()
-    };
-
-    let mut direct = Esp32V3Builder::new()
-        .boot_mode(BootMode::Direct)
-        .app(AppSource::Path(elf))
-        .flash(lp_emu_esp32v3::flash::FlashBacking::Copy(merged.clone()))
-        .flash_len(len)
-        .strict(true)
-        .uart0_script(stop_all_script())
-        .build()
-        .expect("builds");
-    direct.run_until(&StopCondition {
-        exit_on: Some("[JIT] used=".to_string()),
-        ..StopCondition::after_micros(2_000_000)
-    });
-
-    let mut rom_up = Esp32V3Builder::new()
-        .boot_mode(BootMode::RomUp)
-        .flash(lp_emu_esp32v3::flash::FlashBacking::Copy(merged))
-        .flash_len(len)
-        .strict(true)
-        .uart0_script(stop_all_script())
-        .build()
-        .expect("builds");
-    rom_up.run_until(&StopCondition {
-        exit_on: Some("[JIT] used=".to_string()),
-        ..StopCondition::after_micros(3_000_000)
-    });
-
-    let a = triple(&direct.uart0().text());
-    let b = triple(&rom_up.uart0().text());
-    assert_eq!(a.len(), 3, "the direct run printed the triple: {a:?}");
-    assert_eq!(b.len(), 3, "the rom-up run printed the triple: {b:?}");
-    println!("direct:\n  {}", a.join("\n  "));
-    println!("rom-up:\n  {}", b.join("\n  "));
-    // ⚠️ **The `[stack]` line is compared apart from the other two, and M4 P1
-    // split it.** With one core the two paths agreed on all three lines. With
-    // core 1 running they still agree **exactly** on every memory-transfer
-    // field — `[MEM]`'s `free`/`used`/`largest_free`/`retry_saves` and the
-    // whole `[JIT]` census — and differ on the main stack's high-water by
-    // [`PATH_HIGH_WATER_GAP_KEY`], which is not a memory-transfer field: it is
-    // how deep an interrupt happened to land, and the two paths reach the
-    // heartbeat at different points in the pacer's phase.
-    assert_eq!(
-        a[1..],
-        b[1..],
-        "the two boot paths report the same memory figures"
-    );
-    let (hw_direct, hw_rom_up) = (number(&a[0], "high-water "), number(&b[0], "high-water "));
-    let mut figures = Figures::new(
-        "esp32v3",
-        "boot_idle::the_two_paths_report_the_same_memory_figures",
-    );
-    // The measured cross-path gap — positional, so the record holds CI's
-    // value; see PATH_HIGH_WATER_GAP_KEY.
-    figures.positional_int(PATH_HIGH_WATER_GAP_KEY, hw_rom_up as i64 - hw_direct as i64);
-    assert_eq!(
-        a[0].split("high-water").next(),
-        b[0].split("high-water").next(),
-        "and it is the same stack, reported the same way"
-    );
-    assert_eq!(
-        number(&a[0], " B of "),
-        number(&b[0], " B of "),
-        "the stack's size is the same on both paths: {a:?} vs {b:?}"
-    );
-    figures.int(MAIN_STACK_KEY, number(&a[0], " B of "));
-    figures.verify();
-    // The one figure the boot banner carries too, so the triple can be read
-    // against `[INIT] chip=esp32 … heap=…`.
-    assert!(
-        direct
-            .uart0()
-            .text()
-            .contains("heap=15072+112640+98304+15536=241552"),
-        "the heap arithmetic is the desk board's, in both arms of Q5"
-    );
 }
 
 // ---------------------------------------------------------------------------
@@ -633,60 +511,64 @@ const HEAP_USED_GAP: u64 = 84;
 /// that touches no allocation. The remaining 640 B is still unexplained.
 const STACK_HIGH_WATER_GAP: u64 = 640;
 
-/// **The two boot paths' own high-water gap: the ROM-up boot goes 160 B
-/// deeper than the direct load.**
-///
-/// New with M4 P1, and it is a *cross-path* number rather than a
-/// silicon-vs-emulator one — both sides of it are this machine. Measured on
-/// 2026-09-11 with core 1 running: `direct 16124`, `rom-up 16284`.
-///
-/// The rest of the triple is identical between the paths to the byte
-/// (`free=223096 used=18456 largest_free=106494 retry_saves=0` on both), so
-/// this is not a memory-transfer difference: it is how deep an interrupt
-/// happened to land. The two paths reach the heartbeat at different points
-/// in the pacer's phase — the ROM-up boot spends several hundred thousand
-/// extra cycles in the mask ROM and the second-stage bootloader before the
-/// application starts, and the heartbeat's sample lands at a different
-/// place in the cycle. High-water is a maximum over time, so a path that
-/// takes one more interrupt inside a deeper call reports a larger one.
-///
-/// Pinned rather than tolerated, like its two neighbours. Unlike them it is
-/// read off **this tree's** image, not the pinned reference, so it is a
-/// figure — recorded as `boot_idle.path_high_water_gap` in
-/// `lp-emu/esp/figures/esp32v3.json` and moved by the image's layout (BLE M3
-/// moved it with nothing but `.bss`). Exactly as strict: any move fails and
-/// names old → new. With an unchanged image a move is the machine's, and a
-/// finding.
-///
-/// ⚠️ **And it is positional, so the record holds CI's value.** A high-water
-/// is where an interrupt happened to land, and the tree's image is not the
-/// same bytes on two hosts (host paths, the host rustc's own build; see
-/// `docs/debt/reference-images-are-not-reproducible-across-hosts.md`). At
-/// `5e864de73` CI's runner reads −96 and a desk worktree reads −64 off the
-/// same commit — a desk failure of this test predates the record. So it is
-/// observed with `positional_int`: checked exactly, but a desk bless does not
-/// rewrite it (CI's failure message carries the new value).
-///
-/// ⚠️ **Re-measured on 2026-09-11 after M4 P3b: 160 → −64, and the sign
-/// flipped.** `direct 16460`, `rom-up 16396`: the direct load now goes
-/// deeper, not the ROM-up boot. Same cause as [`STACK_HIGH_WATER_GAP`]'s
-/// move — interrupts are taken at the instruction after the MMIO store that
-/// raised them rather than at the next slice boundary, so where in the
-/// pacer's phase each path's heartbeat lands has changed. Signed from here
-/// on, because a pin that could only express one sign was hiding the
-/// direction. The rest of the triple is still identical between the paths
-/// to the byte (`free=223096 used=18456 largest_free=106494 retry_saves=0`).
-///
-/// ⚠️ **Re-measured by the BLE plan's M3 (access core): −64 → −96**
-/// (`direct 13132`, `rom-up 13036`, of a 45,360 B stack). The image's layout
-/// moved — the server loop's future shrank 80 B and the main stack grew by
-/// as much — and with it where each path's heartbeat lands in the pacer's
-/// phase. The cause was not isolated further than that; the memory-transfer
-/// fields still agree between the paths to the byte. (Both absolute figures
-/// fell by 3,328 B — `direct` 16460 → 13132 — and that part IS named: the
-/// embassy main task's `poll` frame shrank from `entry a1, 4304` to `976`;
-/// see `determinism.rs`'s `PREFIX_CYCLES`. The 32 B move of the gap is not.)
-const PATH_HIGH_WATER_GAP_KEY: &str = "boot_idle.path_high_water_gap";
+// ⚠️ `boot_idle.path_high_water_gap` — the two boot paths' own high-water
+// gap — moved with G2's two-path comparison to
+// `lp-cli/tests/emu_v3_link_gates.rs` (wire proto 32: the triple it is read
+// off is link traffic). Its history until then, kept where it was written:
+//
+// **The two boot paths' own high-water gap: the ROM-up boot goes 160 B
+// deeper than the direct load.**
+//
+// New with M4 P1, and it is a *cross-path* number rather than a
+// silicon-vs-emulator one — both sides of it are this machine. Measured on
+// 2026-09-11 with core 1 running: `direct 16124`, `rom-up 16284`.
+//
+// The rest of the triple is identical between the paths to the byte
+// (`free=223096 used=18456 largest_free=106494 retry_saves=0` on both), so
+// this is not a memory-transfer difference: it is how deep an interrupt
+// happened to land. The two paths reach the heartbeat at different points
+// in the pacer's phase — the ROM-up boot spends several hundred thousand
+// extra cycles in the mask ROM and the second-stage bootloader before the
+// application starts, and the heartbeat's sample lands at a different
+// place in the cycle. High-water is a maximum over time, so a path that
+// takes one more interrupt inside a deeper call reports a larger one.
+//
+// Pinned rather than tolerated, like its two neighbours. Unlike them it is
+// read off **this tree's** image, not the pinned reference, so it is a
+// figure — recorded as `boot_idle.path_high_water_gap` in
+// `lp-emu/esp/figures/esp32v3.json` and moved by the image's layout (BLE M3
+// moved it with nothing but `.bss`). Exactly as strict: any move fails and
+// names old → new. With an unchanged image a move is the machine's, and a
+// finding.
+//
+// ⚠️ **And it is positional, so the record holds CI's value.** A high-water
+// is where an interrupt happened to land, and the tree's image is not the
+// same bytes on two hosts (host paths, the host rustc's own build; see
+// `docs/debt/reference-images-are-not-reproducible-across-hosts.md`). At
+// `5e864de73` CI's runner reads −96 and a desk worktree reads −64 off the
+// same commit — a desk failure of this test predates the record. So it is
+// observed with `positional_int`: checked exactly, but a desk bless does not
+// rewrite it (CI's failure message carries the new value).
+//
+// ⚠️ **Re-measured on 2026-09-11 after M4 P3b: 160 → −64, and the sign
+// flipped.** `direct 16460`, `rom-up 16396`: the direct load now goes
+// deeper, not the ROM-up boot. Same cause as [`STACK_HIGH_WATER_GAP`]'s
+// move — interrupts are taken at the instruction after the MMIO store that
+// raised them rather than at the next slice boundary, so where in the
+// pacer's phase each path's heartbeat lands has changed. Signed from here
+// on, because a pin that could only express one sign was hiding the
+// direction. The rest of the triple is still identical between the paths
+// to the byte (`free=223096 used=18456 largest_free=106494 retry_saves=0`).
+//
+// ⚠️ **Re-measured by the BLE plan's M3 (access core): −64 → −96**
+// (`direct 13132`, `rom-up 13036`, of a 45,360 B stack). The image's layout
+// moved — the server loop's future shrank 80 B and the main stack grew by
+// as much — and with it where each path's heartbeat lands in the pacer's
+// phase. The cause was not isolated further than that; the memory-transfer
+// fields still agree between the paths to the byte. (Both absolute figures
+// fell by 3,328 B — `direct` 16460 → 13132 — and that part IS named: the
+// embassy main task's `poll` frame shrank from `entry a1, 4304` to `976`;
+// see `determinism.rs`'s `PREFIX_CYCLES`. The 32 B move of the gap is not.)
 
 /// **G2 (e).** Every memory-class field of the idle heartbeat, this machine
 /// against the desk board, on the same image and the same request.

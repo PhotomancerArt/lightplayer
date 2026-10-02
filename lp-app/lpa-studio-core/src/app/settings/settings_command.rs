@@ -38,6 +38,8 @@ pub enum SettingsCommand {
     SetAgentOpenRouterApiKey(Option<String>),
     /// Set or clear the user's model override.
     SetAgentModel(Option<String>),
+    /// Set or clear the app chat's own model override.
+    SetAppAgentModel(Option<String>),
     /// Set or clear the $/MTok input-rate override from its text-field
     /// value (parsed in the store; junk clears).
     SetAgentPriceInputPerMtok(Option<String>),
