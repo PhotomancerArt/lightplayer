@@ -315,6 +315,11 @@
 <div class="gate"><b>Round 4 gate:</b> “<b>4B is close</b> to what I wanted. But let’s not do box-in-box — the separator is plenty. ‘USB always gets in’ is
   weird to say.”</div>
 
+<div class="gate"><b>Round 5 — converged (Yona, 2026-10-02):</b> 4B as drawn. “<b>We ship open, by default. For now.</b> With such a tiny group of people
+  using it, that’s a better default.” Author set to Anyone really means anyone nearby can author: “for now, yes. I share your concern, but we have to remember
+  that no one knows this exists. <b>We call that out in the device pane.</b> It’s not hard to change the default later, but for development and alpha testing,
+  I want public access — like WLED <i>still</i> does after … 15 years?”</div>
+
 <h2><span class="n">1</span>The panel, in its four states</h2>
 <p class="sub">4B, live in each — press Anyone / Password, type over a password (it’s selected when you click), click away to save, open your keys.</p>
 <div class="row" id="s1"></div>
@@ -486,8 +491,8 @@ const S2_WAYS = [
   ['C', 'Three levels', '', 'The three combinations that make sense, as one choice — so the impossible one (play locked, author open) can’t be picked at all.', renderC],
 ];
 const STATES = [
-  ['S_view', 'Play open, author locked', 'A new board, and the case you asked for: watching is free, changing the show isn’t.'],
-  ['S_open', 'Wide open', 'Anyone nearby can do both. Author is open, so Play follows it.'],
+  ['S_open', 'Wide open — a new board', 'The default, for now: anyone nearby can play and author. Author is Anyone, so Play follows it.'],
+  ['S_view', 'Play open, author locked', 'Watching is free, changing the show isn’t.'],
   ['S_both', 'Both locked', 'Two passwords.'],
   ['S_else', 'Set from another browser', 'Author was set elsewhere: it can’t be shown, only replaced.'],
 ];
