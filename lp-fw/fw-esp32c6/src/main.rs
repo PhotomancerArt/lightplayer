@@ -92,6 +92,7 @@ use fw_esp32_common::boot;
     feature = "test_espnow",
     feature = "test_espnow_broadcast",
     feature = "test_gpio_input",
+    feature = "test_ble_coex",
 ))]
 mod hardware;
 #[cfg(all(feature = "heap_map_diag", not(fw_harness)))]

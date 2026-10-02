@@ -39,14 +39,16 @@ const ESP_NOW_PAYLOAD: usize = 250;
 
 /// Bring the radio up and spawn the configured load task(s).
 ///
-/// Mirrors `Esp32EspNowRadioDriver::new`'s bring-up: `wifi::new` applies the
-/// default station config and starts it, so the station is running when this
-/// returns. The controller must stay alive for the whole run — dropping it
+/// Mirrors `Esp32EspNowRadioDriver::new`'s bring-up, driver config included:
+/// `wifi::new` applies the default station config and starts it, so the
+/// station is running when this returns. The controller must stay alive for the whole run — dropping it
 /// deinitializes WiFi — so it is either moved into the scan task or leaked.
 pub fn start(spawner: Spawner, wifi: WIFI<'static>) {
-    let (controller, interfaces) =
-        esp_radio::wifi::new(wifi, esp_radio::wifi::ControllerConfig::default())
-            .expect("stress: Wi-Fi init failed");
+    let (controller, interfaces) = esp_radio::wifi::new(
+        wifi,
+        crate::hardware::espnow_controller_config::espnow_controller_config(),
+    )
+    .expect("stress: Wi-Fi init failed");
 
     #[cfg(feature = "stress_s2")]
     spawner.spawn(wifi_scan_task(controller).expect("stress: spawn wifi_scan_task"));

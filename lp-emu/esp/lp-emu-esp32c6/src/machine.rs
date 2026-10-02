@@ -864,7 +864,7 @@ pub enum AirDelivery {
     NoRing,
     /// **Every descriptor in the chain is the guest's**, or none that is
     /// still the hardware's has a big enough buffer. The ring ends rather
-    /// than wrapping, so this is what "the eleventh frame" looks like. The
+    /// than wrapping, so this is what the frame past the ring looks like. The
     /// frame is dropped, counted, and the first one is logged.
     RingFull,
     /// The walk hit [`RX_RING_WALK_CAP`] without finding an end — a chain
