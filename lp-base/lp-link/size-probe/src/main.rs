@@ -48,8 +48,94 @@ pub extern "C" fn _start() -> ! {
     exercise::<lp_link::SelectiveRepeat>();
     #[cfg(feature = "crypto")]
     exercise_crypto();
+    #[cfg(feature = "sr-secure")]
+    exercise_secure_link();
     loop {}
 }
+
+/// A selective-repeat link built secure, every entry point driven, the
+/// edge's secure calls included (the role is an input, so both are linked).
+#[cfg(feature = "sr-secure")]
+fn exercise_secure_link() {
+    use lp_link::secure_channel::{KeyId, Psk, RefusalReason, SecureEvent, SecureRole};
+    use lp_link::{CH_LOG, LinkConfig, LinkEvent, SelectiveRepeat};
+    fn entropy(buf: &mut [u8]) {
+        for (i, b) in buf.iter_mut().enumerate() {
+            *b = input(200 + i % 64);
+        }
+    }
+    let mut cfg = LinkConfig::usb();
+    cfg.max_payload = u16::from_le_bytes([input(1), input(2)]);
+    let role = if input(3) != 0 {
+        SecureRole::Responder
+    } else {
+        SecureRole::Initiator {
+            key_id: KeyId(core::array::from_fn(|i| input(100 + i))),
+            psk: Psk::new(core::array::from_fn(|i| input(120 + i))),
+        }
+    };
+    let mut link = lp_link::Link::<SelectiveRepeat>::new_secure(
+        cfg,
+        u32::from_le_bytes([input(6), input(7), input(8), input(9)]),
+        role,
+        entropy,
+    );
+    // SAFETY: single-threaded bare-metal probe; nothing else touches it.
+    let ring = unsafe { &mut *addr_of_mut!(LOG_RING_SECURE) };
+    let mut now = 0u64;
+    loop {
+        now += input(10) as u64;
+        let n = input(11) as usize;
+        // SAFETY: as above.
+        let bytes = unsafe { &(&*addr_of!(INPUT))[..n] };
+        match input(12) {
+            0 => link.on_bytes(now, bytes),
+            1 => link.on_datagram(now, bytes),
+            2 => {
+                let _ = link.send(input(13), bytes);
+            }
+            4 => link.restart(now),
+            5 => link.retry_with(KeyId([input(14); 16]), Psk::new([input(15); 32])),
+            _ => {}
+        }
+        while let Some(ev) = link.poll_secure_event() {
+            match ev {
+                SecureEvent::KeyLookup { key_id } if input(16) != 0 => {
+                    link.provide_keys(key_id, &[Psk::new([input(17); 32])])
+                }
+                SecureEvent::KeyLookup { key_id } => {
+                    link.refuse(key_id, RefusalReason::Backoff, input(18) as u32)
+                }
+                _ => sink(&[1]),
+            }
+        }
+        link.pump_log(now, ring, CH_LOG);
+        while let Some(f) = link.poll_transmit(now) {
+            sink(f);
+        }
+        while let Some(ev) = link.recv() {
+            if let LinkEvent::Message { data, .. } | LinkEvent::Text(data) = ev {
+                sink(&data);
+            }
+        }
+        sink(&[
+            link.counters().seal_failures as u8,
+            link.session_auth().map_or(0, |a| a.candidate),
+            link.poll_timeout().unwrap_or(0) as u8,
+        ]);
+    }
+}
+
+#[cfg(feature = "sr-secure")]
+static mut LOG_RING_SECURE: lp_link::LogRing<1024> = lp_link::LogRing::new();
+
+/// `size_of` a secure-capable link on this target.
+#[cfg(feature = "sr-secure")]
+#[used]
+#[unsafe(no_mangle)]
+static LINK_STRUCT_SIZE_SR_SECURE: [u8; core::mem::size_of::<
+    lp_link::Link<lp_link::SelectiveRepeat>,
+>()] = [0; core::mem::size_of::<lp_link::Link<lp_link::SelectiveRepeat>>()];
 
 /// Both NNpsk0 roles and one seal/open, on inputs the optimizer cannot see.
 #[cfg(feature = "crypto")]

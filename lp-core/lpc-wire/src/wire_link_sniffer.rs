@@ -13,11 +13,16 @@
 //! mid-session reads frames **unverified** (the checksum key is not known yet)
 //! and cannot read packed replies until the next session: each is reported
 //! [`SniffedWire::Unreadable`], never guessed.
+//!
+//! A secure link's frames are sealed and a capture holds no key: each data
+//! or log frame is reported [`SniffedWire::Sealed`] (its channel and length),
+//! never decoded. Sealed ACKs carry nothing to report and are skipped.
 
 use alloc::boxed::Box;
 use alloc::string::{String, ToString};
 
 use lp_json_pack::{LearnStore, LearnedTable};
+use lp_link::frame::FrameKind;
 use lp_link::sniffer::{Direction, LinkSniffer, SniffEvent};
 use lp_link::{CH_LOG, CH_PROTO, Micros};
 
@@ -53,6 +58,13 @@ pub enum SniffedWire {
     /// Frames the capture never saw, even resent (a gap in the capture, not
     /// in the link).
     Gap { dir: Direction, skipped: u8 },
+    /// A data or log frame of a secure link: sealed, so only its channel and
+    /// length are known (`len`: the sealed body, counter and tag included).
+    Sealed {
+        dir: Direction,
+        chan: u8,
+        len: usize,
+    },
 }
 
 /// A captured device link, read as wire traffic. See the module docs.
@@ -132,6 +144,13 @@ fn read_event(
         }
         SniffEvent::Damaged { dir } => on(SniffedWire::Damaged { dir }),
         SniffEvent::Gap { dir, skipped } => on(SniffedWire::Gap { dir, skipped }),
+        SniffEvent::Sealed {
+            dir,
+            kind: FrameKind::Data | FrameKind::Datagram,
+            chan,
+            len,
+        } => on(SniffedWire::Sealed { dir, chan, len }),
+        SniffEvent::Sealed { .. } => {}
         SniffEvent::Message {
             dir,
             channel: CH_LOG,

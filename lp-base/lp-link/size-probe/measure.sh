@@ -12,7 +12,7 @@ sizes() {
     rust-size -A "$1" | awk '$1==".text"{t=$2} $1==".rodata"{r=$2} END{print t+0, r+0}'
 }
 
-variants=(base noarq sw gbn sr sr,crc16 crypto)
+variants=(base noarq sw gbn sr sr,crc16 crypto sr-secure)
 for v in "${variants[@]}"; do
     cargo build -q --release --target "$target" --features "$v" --target-dir "$out"
     cp "$out/$target/release/lp-link-size-probe" "$out/probe-$v"
@@ -29,6 +29,7 @@ echo
 echo "size_of::<Link<_>>() on $target (bytes):"
 rust-nm -S -t d "$out/probe-sr" | awk '/LINK_STRUCT_SIZE/ {printf "  %s %d\n", $4, $2}'
 rust-nm -S -t d "$out/probe-gbn" | awk '/LINK_STRUCT_SIZE/ {printf "  %s %d\n", $4, $2}'
+rust-nm -S -t d "$out/probe-sr-secure" | awk '/LINK_STRUCT_SIZE/ {printf "  %s %d\n", $4, $2}'
 
 echo
 echo "largest symbols in the selective-repeat probe:"

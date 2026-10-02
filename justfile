@@ -2691,13 +2691,14 @@ test-rust-core:
 # the delivery property at soak depth, 5,000 fault schedules per ARQ variant
 # (release, ~3 min). CI runs 500 per variant inside `test-rust-core`.
 link-soak cases="5000":
-    PROPTEST_CASES={{cases}} cargo test -p lp-link --features sim --release --test delivery_properties
+    PROPTEST_CASES={{cases}} cargo test -p lp-link --features sim,secure --release --test delivery_properties
 
 # lp-link's decoder fuzzing at depth: arbitrary bytes, datagrams and crafted
-# frames against a live link, `cases` per framing (release, ~12 s at 20,000).
+# frames against a live link, `cases` per framing (release, ~12 s at 20,000),
+# plain and secure (the secure cases add replays, forged SYNs and msg1 floods).
 # CI runs 256 per framing inside `test-rust-core`.
 link-fuzz cases="20000":
-    PROPTEST_CASES={{cases}} cargo test -p lp-link --release --test decoder_fuzz
+    PROPTEST_CASES={{cases}} cargo test -p lp-link --features sim,secure --release --test decoder_fuzz
 
 # lp-link's tables: compare | sweep | crc | codec | logs | ram | all. The link
 # rows are simulated; `codec` (and the top of `crc`) is host CPU throughput.

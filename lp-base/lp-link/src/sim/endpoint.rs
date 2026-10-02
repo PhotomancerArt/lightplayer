@@ -37,6 +37,9 @@ pub struct Endpoint<A: Arq> {
     /// Counters of earlier incarnations.
     pub past_counters: Vec<LinkCounters>,
     pub log_ring: LogRing<2048>,
+    /// A secure link's edge (`Endpoint::new_secure`).
+    #[cfg(feature = "secure")]
+    pub secure: Option<crate::sim::secure_sim::SecureEdge>,
 }
 
 impl<A: Arq> Endpoint<A> {
@@ -60,13 +63,47 @@ impl<A: Arq> Endpoint<A> {
             text_bytes: 0,
             past_counters: Vec::new(),
             log_ring: LogRing::new(),
+            #[cfg(feature = "secure")]
+            secure: None,
         }
+    }
+
+    /// An endpoint whose link is secure, in `edge`'s role.
+    #[cfg(feature = "secure")]
+    pub fn new_secure(
+        cfg: LinkConfig,
+        nonce: u32,
+        edge: crate::sim::secure_sim::SecureEdge,
+    ) -> Self {
+        let mut e = Self::new(cfg.clone(), nonce);
+        e.link = Link::new_secure(cfg, nonce, edge.role(), crate::sim::sim_entropy::fill);
+        e.secure = Some(edge);
+        e
+    }
+
+    /// The RAM bound this endpoint's link must stay under.
+    pub fn ram_bound(&self) -> usize {
+        #[cfg(feature = "secure")]
+        if self.secure.is_some() {
+            return Link::<A>::ram_bound_secure(&self.cfg);
+        }
+        Link::<A>::ram_bound(&self.cfg)
     }
 
     /// Power-cycle: a fresh link with a fresh nonce; nothing survives.
     pub fn reboot(&mut self, nonce: u32) {
         self.past_counters.push(self.link.counters().clone());
         self.link = Link::new(self.cfg.clone(), nonce);
+        #[cfg(feature = "secure")]
+        if let Some(edge) = self.secure.as_mut() {
+            edge.reboot();
+            self.link = Link::new_secure(
+                self.cfg.clone(),
+                nonce,
+                edge.role(),
+                crate::sim::sim_entropy::fill,
+            );
+        }
         self.inc += 1;
         self.rx_gen = 0;
         self.logs_lost_in_ring += self.log_ring.len() as u64;
@@ -110,6 +147,10 @@ impl<A: Arq> Endpoint<A> {
 
     /// Write frames while the pipe takes them.
     pub fn service(&mut self, now: Micros, pipe: &mut Pipe) {
+        #[cfg(feature = "secure")]
+        if let Some(edge) = self.secure.as_mut() {
+            edge.service(&mut self.link);
+        }
         self.link.pump_log(now, &mut self.log_ring, CH_LOG);
         self.blocked = false;
         loop {
