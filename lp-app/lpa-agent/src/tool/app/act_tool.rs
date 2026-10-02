@@ -1,10 +1,12 @@
 //! The `act` tool: press one action the readout offers (plan P08, D6).
 //!
-//! The agent names an action from the readout's `actions:` list; the host
-//! checks it is still offered and enabled, then either presses it — the
-//! same dispatch the user's own button makes — or, for an action only the
-//! user may press (a confirmation, a browser picker, a flash), puts a card
-//! in the chat whose click presses it. The model can never press a card.
+//! The agent names an action from the readout's `actions:` list by its
+//! offer path (`project/save`); the host looks the path up in the offer
+//! tree as it is at the press, checks it is enabled, then either presses it
+//! — the same dispatch the user's own button makes — or, for an action only
+//! the user may press (it loses something for good, or the browser needs a
+//! real click), puts a card in the chat whose click presses it. The model
+//! can never press a card.
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -21,7 +23,8 @@ pub const ACT_TOOL_NAME: &str = "act";
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ActInput {
-    /// The action's id exactly as the readout lists it.
+    /// The action's path exactly as the readout lists it, e.g.
+    /// `project/save` or `project/demo.module/orbit.shader/remove`.
     pub action: String,
     /// One short line for the user: why this, now. Shown on the card when
     /// the user has to click it.
@@ -37,8 +40,9 @@ pub enum ActOutcome {
     /// Only the user may press it: a card is in the chat. Stop, and tell
     /// the user which card to click.
     NeedsUser { card: String, says: String },
-    /// Not pressed: no longer offered, disabled, or a card is still
-    /// waiting. `offers` is the current action list when it helps.
+    /// Not pressed: no action at that path (or no longer), disabled, or a
+    /// card is still waiting. `offers` is the current action list when it
+    /// helps.
     Refused {
         reason: String,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -55,11 +59,14 @@ pub fn act_tool_def() -> ToolDef {
 }
 
 const DESCRIPTION: &str = "\
-Press one action from the readout's `actions:` list, by its id — the same \
-button the user would press. An action marked [needs the user's click] is \
-not pressed: a card appears in the chat and the user's click on it does it; \
-when the result says `needs_user`, stop and tell the user which card to \
-click. Content edits go through `edit_project`, not here.";
+Press one action from the readout's `actions:` list, by its path exactly as \
+listed (`project/save`) — the same button the user would press. An action \
+marked [undoable] takes something away that Revert brings back: press it \
+only when it is what the user asked for, and say what it removed. An action \
+marked [needs the user's click] is not pressed: a card appears in the chat \
+and the user's click on it does it; when the result says `needs_user`, stop \
+and tell the user which card to click. Content edits go through \
+`edit_project`, not here.";
 
 /// Run one `act` call against `host`.
 pub async fn run_act(input_json: &Value, host: &mut dyn AppAgentHost) -> ToolOutcome {
@@ -69,7 +76,7 @@ pub async fn run_act(input_json: &Value, host: &mut dyn AppAgentHost) -> ToolOut
             return ToolOutcome {
                 content: json!({
                     "error": format!("invalid act input: {error}"),
-                    "hint": "pass {\"action\": \"<id from the readout>\", \"why\": \"…\"}",
+                    "hint": "pass {\"action\": \"<path from the readout, e.g. project/save>\", \"why\": \"…\"}",
                 })
                 .to_string(),
                 is_error: false,
@@ -107,14 +114,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_schema_asks_for_an_id_and_a_reason_and_nothing_else() {
+    fn the_schema_asks_for_a_path_and_a_reason_and_nothing_else() {
         let schema = act_tool_def().input_schema;
         let required = schema["required"].as_array().expect("required");
         assert!(required.contains(&json!("action")));
         assert!(required.contains(&json!("why")));
         assert!(
             serde_json::from_value::<ActInput>(
-                json!({ "action": "a1", "why": "x", "force": true })
+                json!({ "action": "project/save", "why": "x", "force": true })
             )
             .is_err()
         );

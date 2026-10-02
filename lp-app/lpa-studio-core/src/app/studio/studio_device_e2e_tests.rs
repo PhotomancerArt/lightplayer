@@ -1448,6 +1448,53 @@ fn a_replug_under_the_lens_comes_back_ready_and_opens_again() {
     assert_eq!(bench.lens_device_uid().as_deref(), Some(uid.as_str()));
 }
 
+/// The replug-under-the-lens flake, made deterministic: a link whose
+/// arrival has landed but whose own `LinkAttached` is still queued behind
+/// another input (here a stale timer fire) must survive that input's fold.
+/// It used to be adopted by the earlier fold and evicted by its
+/// `retain_links` before the model had routed it, so the model's `Open`
+/// found no link and the board sat at Identifying… forever.
+#[test]
+fn a_link_attach_queued_behind_another_input_still_identifies() {
+    let device = empty_light_player("dev000000daqf6dvvr9");
+    let (mut bench, tasks) = DeviceBench::granted(&device, "usb-race-9");
+    let attach_queued = |bench: &DeviceBench| {
+        bench.inbox.borrow().iter().any(|input| {
+            matches!(
+                input,
+                DeviceInput::Event(lpa_devices::event::Event::LinkAttached { .. })
+            )
+        })
+    };
+    // The connect edge sweeps the grant; its arrival lands and its
+    // `LinkAttached` queues — and nothing has folded yet.
+    bench
+        .controller
+        .note_device_hotplug(crate::app::studio::studio_command::DeviceHotplug::Connected);
+    for _ in 0..100 {
+        if attach_queued(&bench) {
+            break;
+        }
+        pump(&tasks);
+    }
+    assert!(attach_queued(&bench), "the sweep queued the link's attach");
+    bench.inbox.borrow_mut().push_front(DeviceInput::Event(
+        lpa_devices::event::Event::TimerFired {
+            timer: lpa_devices::time::TimerId {
+                scope: lpa_devices::journal::Scope::Roster,
+                seq: u64::MAX,
+            },
+        },
+    ));
+    bench.run_until(&tasks, "the board to identify", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.state_label == "Ready")
+    });
+}
+
 /// One wire, one owner: a card verb that needs the board's wire while the
 /// editor is a lens on it closes the editor first, then RUNS — the card's
 /// verbs always work; the editor is what yields.
@@ -3249,6 +3296,120 @@ fn the_empty_face_pushes_an_example_and_the_card_ends_up_running() {
         "the banked version is the verified content hash"
     );
 }
+
+/// A LightPlayer board with nothing loaded and no stamped identity — the
+/// heartbeat still runs so the fold learns the empty/running fact, exactly
+/// like [`empty_light_player`], but the registry key falls back to the
+/// board's MAC, same as [`light_player_running_unstamped`].
+fn empty_light_player_unstamped() -> FakeEsp32Device {
+    FakeEsp32Device::new(FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new()
+            .with_base_mac(BENCH_BOARD_MAC)
+            .with_heartbeat_interval(Duration::from_millis(20)),
+    )))
+}
+
+/// An ordinary push to an unstamped board (registry key `mac:…`) still
+/// installs the project and the board still ends up running it — but
+/// `RecordPush` is never attempted, for the reason
+/// `opening_an_unstamped_board_adopts_without_attempting_record_push`
+/// documents for adoption: `library_host::record_push` refuses a device uid
+/// it cannot parse as a `dev…`/`prj…` `PrefixedUid`. Before the fix,
+/// `bank_completed_push` attempted it anyway and logged the refusal at warn
+/// on every ordinary push to every unstamped board.
+#[test]
+fn pushing_to_an_unstamped_board_banks_nothing_without_attempting_record_push() {
+    let device = empty_light_player_unstamped();
+    let (mut bench, tasks) = identified(&device, "usb-push-unstamped");
+    bench.run_until(&tasks, "the board to report nothing loaded", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.loaded_project == lpa_devices::view::LoadedProject::Empty)
+    });
+    let card = bench.view().devices[0].clone();
+    assert_eq!(bench.record_push_attempts(), 0);
+
+    bench.push_gesture(card.id, bundled_example());
+    bench.run_until(&tasks, "the push to finish", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.last_outcome.is_some())
+    });
+
+    let card = &bench.view().devices[0];
+    let outcome = card.last_outcome.as_ref().expect("an outcome");
+    assert!(outcome.ok, "{outcome:?}");
+    assert!(
+        matches!(
+            &card.loaded_project,
+            lpa_devices::view::LoadedProject::Running { label } if !label.is_empty()
+        ),
+        "the running face reads the board's report even though nothing was banked: {card:?}"
+    );
+
+    let rows = bench.registry();
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert!(
+        rows[0].uid.starts_with("mac:"),
+        "an unstamped board's registry key falls back to its MAC: {}",
+        rows[0].uid
+    );
+    assert!(
+        rows[0].association.is_none(),
+        "record_push refuses a mac:-keyed device uid, so nothing bankable \
+         was ever written: {:?}",
+        rows[0].association
+    );
+    assert_eq!(
+        bench.record_push_attempts(),
+        0,
+        "the honest skip means RecordPush is never attempted for a mac:-keyed board"
+    );
+}
+
+/// The sibling case: an ordinary push to a STAMPED board DOES attempt (and
+/// bank) `RecordPush` — the skip is specific to a `mac:`-keyed device uid,
+/// not a blanket "never try" the fix could have overshot into.
+#[test]
+fn pushing_to_a_stamped_board_banks_and_attempts_record_push() {
+    let device = empty_light_player("dev000000daqf6dvvqz");
+    let (mut bench, tasks) = identified(&device, "usb-push-stamped");
+    bench.run_until(&tasks, "the board to report nothing loaded", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.loaded_project == lpa_devices::view::LoadedProject::Empty)
+    });
+    let card = bench.view().devices[0].clone();
+    assert_eq!(bench.record_push_attempts(), 0);
+
+    bench.push_gesture(card.id, bundled_example());
+    bench.run_until(&tasks, "the push to finish", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.last_outcome.is_some())
+    });
+
+    assert_eq!(
+        bench.record_push_attempts(),
+        1,
+        "an ordinary push to a stamped board still attempts RecordPush"
+    );
+    let rows = bench.registry();
+    assert!(
+        rows[0].association.is_some(),
+        "a verified push to a stamped board is banked: {:?}",
+        rows[0].association
+    );
+}
+
 // ---------------------------------------------------------------------
 // P4: `?on=mac:` and the mismatch page (D50)
 // ---------------------------------------------------------------------
@@ -6188,6 +6349,11 @@ fn a_build_without_web_serial_says_usb_is_unavailable() {
         !controller.device_roster_view().usb_available,
         "sims and Bluetooth, but no port to reach"
     );
+    let connect_usb = crate::OfferPath::devices().child("connect-usb");
+    assert!(
+        controller.view().offers.get(&connect_usb).is_none(),
+        "no USB offer without a port to reach"
+    );
 
     let usb_side = board();
     let (bench, _tasks) = DeviceBench::granted(&usb_side, "usb-1");
@@ -6195,6 +6361,13 @@ fn a_build_without_web_serial_says_usb_is_unavailable() {
         bench.controller.device_roster_view().usb_available,
         "a serial transport is installed"
     );
+    let view = bench.controller.view();
+    let offer = view
+        .offers
+        .get(&connect_usb)
+        .expect("devices/connect-usb is offered while USB is available");
+    assert_eq!(offer.icon, "usb");
+    assert_eq!(offer.label(), "Connect a board via USB");
 }
 
 /// One Bluetooth board, always present: a fake-device link at a `ble:`
@@ -6405,4 +6578,136 @@ fn a_refused_push_leaves_the_board_running_its_previous_project() {
         .value;
     let listed: Vec<String> = listed.iter().map(|p| p.to_string()).collect();
     assert_eq!(listed, vec!["/projects/studio-b"]);
+}
+
+/// A board that boots dark — its saved startup project (`/lightplayer.json`
+/// names `porch`) is one it refuses — reports nothing loaded. A push to it
+/// replaces that saved project: it lands in the saved folder's OTHER slot,
+/// the refused folder is gone once the new one runs, and the next boot
+/// resumes the pushed project. The demo folder is not involved.
+#[test]
+fn a_push_to_a_dark_board_replaces_its_saved_startup_project() {
+    let (_uid, good_files) = a_project_from_another_library(0x6c);
+    let device = dark_board_saved_at("dev000000daqf6dvvra", "porch");
+    let (_bench, _tasks, _device_uid) = running_board(&device, "usb-push-dark-saved");
+    let mut client = lpa_client::LpClient::new(FakeDeviceIo::new(&device)).on_borrowed_wire();
+    save_startup_project(&mut client, "porch");
+    let mut quiet = |_: String, _: Option<u8>| {};
+    let loaded = drive_real(client.project_list_loaded())
+        .expect("list")
+        .value;
+    assert!(loaded.is_empty(), "the board boots dark: {loaded:?}");
+
+    let report = drive_real(lpa_client::push_project(
+        &mut client,
+        &good_files,
+        &hash_of(&good_files),
+        "studio",
+        &mut quiet,
+    ))
+    .expect("a good push lands");
+
+    assert_eq!(report.storage_id, "porch-b");
+    assert_eq!(project_dirs(&mut client), vec!["/projects/porch-b"]);
+    assert_eq!(
+        saved_startup_project(&mut client).as_deref(),
+        Some("porch-b")
+    );
+    let loaded: Vec<String> = drive_real(client.project_list_loaded())
+        .expect("list")
+        .value
+        .iter()
+        .map(|p| p.path.to_string())
+        .collect();
+    assert_eq!(loaded, vec!["/projects/porch-b"]);
+}
+
+/// The same dark board, with a push it refuses too: nothing it held is
+/// touched — the saved folder is still whole, `/lightplayer.json` still names
+/// it, and the refused slot is cleaned up.
+#[test]
+fn a_refused_push_to_a_dark_board_leaves_its_saved_startup_project() {
+    let device = dark_board_saved_at("dev000000daqf6dvvrb", "porch");
+    let (_bench, _tasks, _device_uid) = running_board(&device, "usb-push-dark-refused");
+    let mut client = lpa_client::LpClient::new(FakeDeviceIo::new(&device)).on_borrowed_wire();
+    save_startup_project(&mut client, "porch");
+    let saved_manifest = drive_real(client.fs_read("/projects/porch/project.json".as_path()))
+        .expect("the saved project is on the board")
+        .value;
+    let mut quiet = |_: String, _: Option<u8>| {};
+
+    let result = drive_real(lpa_client::push_project(
+        &mut client,
+        &v10_corpus_files(),
+        "unused-hash",
+        "studio",
+        &mut quiet,
+    ));
+    let error = result.expect_err("a v10 push is refused").to_string();
+    assert!(
+        error.contains("porch"),
+        "the error names what the board kept: {error}"
+    );
+    assert_eq!(project_dirs(&mut client), vec!["/projects/porch"]);
+    assert_eq!(saved_startup_project(&mut client).as_deref(), Some("porch"));
+    let after = drive_real(client.fs_read("/projects/porch/project.json".as_path()))
+        .expect("the saved project is still on the board")
+        .value;
+    assert_eq!(after, saved_manifest, "the saved project is whole");
+}
+
+/// A board seeded with a project it refuses at boot (a format-behind
+/// package) in `/projects/<dir>`: it boots dark.
+fn dark_board_saved_at(uid: &str, dir: &str) -> FakeEsp32Device {
+    FakeEsp32Device::new(FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new()
+            .with_identity(FakeDeviceIdentity::new(uid, "Bench board"))
+            .with_base_mac(BENCH_BOARD_MAC)
+            .with_heartbeat_interval(Duration::from_millis(20))
+            .with_project_files(v10_corpus_files())
+            .with_project_dir(dir)
+            .with_loaded_project(),
+    )))
+}
+
+/// What a board that once loaded `dir` over the wire holds in
+/// `/lightplayer.json` (the server's `persist_startup_project`). The fake's
+/// boot loads straight from its seed dir and never writes it, so the test
+/// writes it the way an earlier session's load would have.
+fn save_startup_project(client: &mut lpa_client::LpClient<FakeDeviceIo>, dir: &str) {
+    let json = format!(r#"{{"startup_project":"{dir}"}}"#);
+    drive_real(client.fs_write("/lightplayer.json".as_path(), json.into_bytes()))
+        .expect("the board config writes");
+}
+
+/// The folder `/lightplayer.json` says the board boots.
+fn saved_startup_project(client: &mut lpa_client::LpClient<FakeDeviceIo>) -> Option<String> {
+    let bytes = drive_real(client.fs_read("/lightplayer.json".as_path()))
+        .ok()?
+        .value;
+    serde_json::from_slice::<serde_json::Value>(&bytes).ok()?["startup_project"]
+        .as_str()
+        .map(str::to_string)
+}
+
+/// Every project folder on the board.
+fn project_dirs(client: &mut lpa_client::LpClient<FakeDeviceIo>) -> Vec<String> {
+    let mut dirs: Vec<String> = drive_real(client.fs_list_dir("/projects".as_path(), false))
+        .expect("ls")
+        .value
+        .iter()
+        .map(|p| p.to_string())
+        .collect();
+    dirs.sort();
+    dirs
+}
+
+/// The canonical package hash the board computes over `files`.
+fn hash_of(files: &[(String, Vec<u8>)]) -> String {
+    let fs = lpfs::LpFsMemory::new();
+    for (relative, bytes) in files {
+        lpfs::LpFs::write_file(&fs, format!("/{relative}").as_str().as_path(), bytes)
+            .expect("seed");
+    }
+    lpc_history::hash_package(&fs).expect("hash").0.to_string()
 }

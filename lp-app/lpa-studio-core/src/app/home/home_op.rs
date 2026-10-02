@@ -3,8 +3,8 @@
 use core::any::Any;
 
 use crate::{
-    ActionClass, ActionMeta, ActionPriority, ControllerOp, PROJECT_ACTION_DEADLINE,
-    PROJECT_LOAD_DEADLINE,
+    ActionClass, ActionConfirmation, ActionMeta, ActionPriority, ControllerOp,
+    PROJECT_ACTION_DEADLINE, PROJECT_LOAD_DEADLINE,
 };
 
 /// The node id home-gallery actions target. The gallery has no controller
@@ -322,7 +322,13 @@ impl ControllerOp for HomeOp {
                 ActionPriority::Tertiary,
             )
             .with_icon("remove")
-            .destructive(),
+            // The card names the project in its own copy; this is the
+            // copy any other surface (and the app agent's card) reads.
+            .lasting(ActionConfirmation::new(
+                "Delete project",
+                "Delete this project and its history from your library?",
+                "Delete",
+            )),
             Self::ImportZip { .. } => ActionMeta::new(
                 "Import zip",
                 "Install a project from a zip archive.",

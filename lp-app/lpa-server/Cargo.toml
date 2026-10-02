@@ -149,6 +149,10 @@ lpc-registry = { path = "../../lp-core/lpc-registry", default-features = false, 
 lpc-view = { path = "../../lp-core/lpc-view", default-features = false, features = ["std"] }
 lpc-shared = { path = "../../lp-core/lpc-shared", default-features = false, features = ["std"] }
 lpfs = { path = "../../lp-base/lpfs", default-features = false, features = ["std"] }
+# `tests/secure_link_access.rs`: a secure lp-link initiator (lpc-wire's
+# `WireLinkPort::new_secure`) against the server behind a secure responder.
+# Tests only: no lpa-server build for a device turns the secure link on.
+lpc-wire = { path = "../../lp-core/lpc-wire", default-features = false, features = ["std", "secure-link"] }
 
 [lints]
 workspace = true

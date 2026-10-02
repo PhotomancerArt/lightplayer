@@ -101,7 +101,13 @@ pub fn StudioShell(
         access_added: _,
         // the app chat surface arrives with plan P10
         app_agent: _,
+        // every migrated surface below reads its verbs from here
+        offers,
     } = view;
+    // The offer tree reaches the surfaces through context, not props: a
+    // node card nested any depth down asks for its own verbs
+    // (`use_verbs_of`), so nothing between here and there carries them.
+    crate::core::use_provide_offers(&offers);
 
     // The mismatch page outranks the opening frame: the open it was
     // narrating has STOPPED, and a skeleton over a settled question is the
