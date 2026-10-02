@@ -1,7 +1,7 @@
 ---
 status: fixed
 found: 2026-10-02      # hardware-walk: Yona's M1 feel gate, recorded with ?record=
-fixed: this change
+fixed: efc9281d3
 area: lpa-devices roster (load_records) + lpa-studio-core device_roster (load_records, is_already_known) + studio_controller auto-name
 class: assumed-context
 related:
@@ -53,14 +53,19 @@ every input addressed to `DeviceId(1)` went to whichever entry came first:
   base name again. The `taken` list also counted the card being named, so
   even a correctly routed rename was not guaranteed to be a fixed point.
 
-Why the duplicate id existed: a row's `device_id` is minted per page from 1,
-and `DeviceRoster::is_already_known` treated "some device wears this row's id"
-as "this row is loaded", without comparing identities. So if a link mints
-number N before the library hydrate lands, the saved row with `device_id: N`
-is skipped. A different board promoted under N is then persisted with N too,
-and from then on the registry holds two rows with one id. Two tabs minting
-independently gets you to the same place. The model assumed persisted ids
-were unique and never checked.
+Why the duplicate id existed: a row's `device_id` is minted per page, upward
+from the highest id that page loaded. The recording cannot tell us which path
+wrote Yona's two rows, and two paths are possible:
+
+1. Two tabs open over the same library each mint the same next number for
+   different boards.
+2. A link mints number N before the library hydrate lands.
+   `DeviceRoster::is_already_known` treated "some device wears this row's id"
+   as "this row is loaded" without comparing identities, so the saved row
+   with `device_id: N` is skipped, and a different board promoted under N is
+   persisted with N too.
+
+The model assumed persisted ids were unique and never checked.
 
 The identity rules themselves are correct and unchanged: a pending MAC that
 matches a saved record merges, and here it did. The conflict was a misroute,
