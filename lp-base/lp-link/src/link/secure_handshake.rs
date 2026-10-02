@@ -31,6 +31,7 @@
 //!   session is a fresh handshake with fresh ephemerals on both ends.
 
 use alloc::boxed::Box;
+use alloc::vec::Vec;
 
 use zeroize::Zeroize;
 
@@ -40,10 +41,12 @@ use super::secure_state::{
 use super::{Link, LinkState, Shape, finish};
 use crate::Micros;
 use crate::arq::Arq;
+use crate::cobs;
+use crate::deframer::Deframer;
 use crate::frame::secure_syn::{SECURE_SYN_MAX_LEN, SecureSyn, SynExt};
-use crate::frame::{self, FrameKind, Header, SynBody};
+use crate::frame::{self, FrameKind, HEADER_LEN, Header, SynBody};
 use crate::inbox::Inbox;
-use crate::link_config::{LinkConfig, SEAL_OVERHEAD};
+use crate::link_config::{Framing, LinkConfig, SEAL_OVERHEAD};
 use crate::link_event::ResetReason;
 use crate::secure_channel::cipher_state::CipherKey;
 use crate::secure_channel::{
@@ -61,8 +64,17 @@ impl<A: Arq> Link<A> {
         role: SecureRole,
         entropy: fn(&mut [u8]),
     ) -> Self {
-        let shape = Shape::secure::<A>(&cfg);
-        let mut link = Self::with_shape(cfg, nonce, shape);
+        let mut link = Self::new(cfg, nonce);
+        // A plain link's buffers, re-cut once for sealed frames and the
+        // 76-byte msg1 SYN (so `Link::new` itself is untouched).
+        let shape = Shape::secure::<A>(&link.cfg);
+        let stream = link.cfg.framing == Framing::Stream;
+        link.deframer =
+            Deframer::new(shape.max_cobs, stream).with_text_mark(link.cfg.escape_ff && stream);
+        link.rx_raw = Vec::with_capacity(shape.max_rx_raw);
+        link.raw = Vec::with_capacity(shape.max_wire);
+        link.out = Vec::with_capacity(shape.max_wire);
+        link.fixed_ram = shape.fixed_ram;
         link.secure = Some(Box::new(SecureState::new(role, entropy)));
         link.secure_reset();
         link
@@ -423,10 +435,15 @@ impl<A: Arq> Link<A> {
                         // the one sealed inside: dropped, the handshake kept.
                         _ => self.counters.seal_failures += 1,
                     }
-                } else if self.state == LinkState::Established {
+                } else if self.state == LinkState::Established && base.your == self.nonce {
                     // The responder is still half-open: our confirmation was
                     // lost. Another sealed frame is the answer (never a SYN).
                     self.ack_due = Some(now);
+                } else if self.state == LinkState::Established {
+                    // The responder is half-open for another initiator
+                    // session (a replayed msg1 took its slot): ours is gone
+                    // on its side. Start over; our new msg1 replaces it.
+                    self.reset(now, ResetReason::PeerRestarted);
                 } else {
                     self.counters.stale_syns += 1;
                 }
@@ -552,12 +569,27 @@ impl<A: Arq> Link<A> {
 }
 
 impl Shape {
-    /// A secure link's shape: sealed frames are `SEAL_OVERHEAD` longer and a
-    /// SYN body reaches 76 bytes; the secure state is allocated once.
+    /// A secure link's shape: `Shape::of`'s, with frames `SEAL_OVERHEAD`
+    /// longer, SYN bodies up to 76 bytes, and the secure state (allocated
+    /// once) in the fixed RAM.
     pub(super) fn secure<A: Arq>(cfg: &LinkConfig) -> Self {
-        let mut shape = Self::framed::<A>(cfg, SEAL_OVERHEAD, SECURE_SYN_MAX_LEN);
-        shape.fixed_ram += size_of::<SecureState>() + SecureState::heap_bytes();
-        shape
+        let plain = Self::of::<A>(cfg);
+        let max_raw = HEADER_LEN
+            + (cfg.max_payload as usize + SEAL_OVERHEAD).max(SECURE_SYN_MAX_LEN)
+            + cfg.crc.len();
+        let max_cobs = cobs::max_encoded_no_ff_len(max_raw);
+        let (max_wire, max_rx_raw, deframer) = match cfg.framing {
+            Framing::Stream => (max_cobs + 2, max_cobs, Deframer::ram_bound(max_cobs)),
+            Framing::Datagram => (max_raw, 0, 0),
+        };
+        Shape {
+            tx_window: plain.tx_window,
+            max_rx_raw,
+            max_cobs,
+            max_wire,
+            scratch: max_rx_raw + 2 * max_wire + deframer,
+            fixed_ram: plain.fixed_ram + size_of::<SecureState>() + SecureState::heap_bytes(),
+        }
     }
 }
 

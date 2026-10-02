@@ -327,6 +327,35 @@ fn a_replayed_old_msg1_verifies_and_resets_but_goes_nowhere() {
     p.run_until_up();
 }
 
+/// Found by the decoder fuzzer: an old msg1 replayed while the board is
+/// half-open (the host already up, its confirmation still in flight) takes
+/// the board's half-open slot, and the host's frames then fail the board's
+/// CRC for ever. The host must notice the board answering someone else's
+/// msg1 and start over.
+#[test]
+fn a_msg1_replayed_into_a_half_open_board_does_not_wedge_the_session() {
+    let mut p = Pair::<NoArq>::ws(1);
+    let old_msg1 = p.host.poll_transmit(0).unwrap().to_vec();
+    p.feed_board(&old_msg1);
+    p.run_until_up();
+    p.host.restart(p.now);
+    // The new handshake, up to the host's confirmation, which is held back.
+    let msg1 = p.host.poll_transmit(p.now).unwrap().to_vec();
+    p.feed_board(&msg1);
+    p.answer_lookups();
+    let msg2 = p.board.poll_transmit(p.now).unwrap().to_vec();
+    p.feed_host(&msg2);
+    assert_eq!(p.host.state(), LinkState::Established);
+    let _held = p.host.poll_transmit(p.now).unwrap().to_vec();
+    // The replay lands; the board is half-open for the dead session now.
+    p.feed_board(&old_msg1);
+    p.answer_lookups();
+    p.drain();
+    assert!(p.board.is_half_open_for_test());
+    p.run_until_up();
+    p.both_ways_carry_messages();
+}
+
 #[test]
 fn a_new_host_session_resets_the_board_only_after_its_msg1_verifies() {
     let mut p = Pair::<SelectiveRepeat>::usb(1);

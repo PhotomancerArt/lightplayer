@@ -122,10 +122,6 @@ impl<A: Arq> Link<A> {
     /// tells the peer we restarted).
     pub fn new(cfg: LinkConfig, nonce: u32) -> Self {
         let shape = Shape::of::<A>(&cfg);
-        Self::with_shape(cfg, nonce, shape)
-    }
-
-    fn with_shape(cfg: LinkConfig, nonce: u32, shape: Shape) -> Self {
         let rx_window = cfg.rx_window.min(A::MAX_WINDOW);
         let max_payload = cfg.max_payload as usize;
         Link {
@@ -1120,16 +1116,10 @@ struct Shape {
 
 impl Shape {
     fn of<A: Arq>(cfg: &LinkConfig) -> Self {
-        Self::framed::<A>(cfg, 0, SYN_LEN)
-    }
-
-    /// `of`, for frames `seal` bytes longer than their payload and SYN
-    /// bodies up to `syn` bytes (a secure link's).
-    fn framed<A: Arq>(cfg: &LinkConfig, seal: usize, syn: usize) -> Self {
         let max_payload = cfg.max_payload as usize;
         let tx_window = cfg.tx_window.min(A::MAX_WINDOW).max(1) as usize;
         // Largest decoded frame: header, body, checksum.
-        let max_raw = HEADER_LEN + (max_payload + seal).max(syn) + cfg.crc.len();
+        let max_raw = HEADER_LEN + max_payload.max(SYN_LEN) + cfg.crc.len();
         let max_cobs = cobs::max_encoded_no_ff_len(max_raw);
         let (max_wire, max_rx_raw, deframer) = match cfg.framing {
             Framing::Stream => (max_cobs + 2, max_cobs, Deframer::ram_bound(max_cobs)),
