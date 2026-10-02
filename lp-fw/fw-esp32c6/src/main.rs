@@ -1098,9 +1098,10 @@ async fn main(spawner: embassy_executor::Spawner) {
         lp_engine_entry(core);
         #[cfg(lp_split)]
         split_boot(core).await;
-        loop {
-            embassy_time::Timer::after(embassy_time::Duration::from_secs(3600)).await;
-        }
+        // The server loop runs in its own task now; main has nothing left to
+        // do. A future that never completes arms no timer (a long sleep here
+        // would arm an alarm the boot gates rightly refuse).
+        core::future::pending::<()>().await;
     }
 }
 
