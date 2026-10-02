@@ -240,6 +240,14 @@ impl AgentEvalStudio {
         self.drive_runs(limits);
     }
 
+    /// Press `action` the way the user's click does (a card's button, or
+    /// the button it names), and drive any run the press resumes to its
+    /// end.
+    pub(crate) fn press(&mut self, action: UiAction, limits: RunLimits) {
+        self.act(action);
+        self.drive_runs(limits);
+    }
+
     /// The app chat's cards, in transcript order.
     pub(crate) fn cards(&mut self) -> Vec<crate::UiAgentCard> {
         self.controller()

@@ -19,6 +19,12 @@ and the emulator tools run the same crate.
 > framing until their own milestones (M3, and a future one) bring them onto
 > lp-link too. The decision is
 > `docs/adr/2026-09-27-lp-link-one-comms-layer.md`.
+>
+> **The `secure` feature** (Noise NNpsk0 inside the SYN, then every frame
+> sealed; [Secure links](#secure-links)) is built and proven against `snow`,
+> the simulator, the fuzzer and a host end-to-end login test, and **off on
+> every product link** until the Wi-Fi milestones (M6's LAN WebSocket is the
+> first). Its decision is `docs/adr/2026-10-01-network-link-security.md`.
 
 ## Why it exists
 
@@ -139,7 +145,8 @@ wire messages (JSON / learned-dictionary packed, request/response by id)
   frame:     4-byte header (kind/channel/fragment · seq · cumulative ack · window) + payload + CRC-32C
   framing:   stream   → 0x00 · COBS-FF(frame) · 0x00   (no 0x00 or 0xFF on the wire)
              datagram → one frame per BLE notification / UDP packet / WS message
-pipe:        USB-Serial-JTAG | BLE NUS | UART | UDP | WebSocket
+  secure:    (feature `secure`) Noise NNpsk0 in the SYN; header ‖ ctr ‖ sealed body ‖ tag ‖ CRC
+pipe:        USB-Serial-JTAG | BLE NUS | UART | UDP | WebSocket   (a TLS socket, where one is used, is under all of it)
 ```
 
 **Scheduling between channels.** The sender keeps one queue per reliable
@@ -228,7 +235,69 @@ pin `max_message` bytes on a board for the link's life (the presets keep
 | `send_queue.rs`, `tx_queue.rs`, `datagram_queue.rs`, `inbox.rs` | the fixed buffers: messages waiting to be cut into frames, the transmit window, log datagrams waiting to go, and reassembly plus the application's event queue |
 | `log_ring.rs` | the board-side log ring and `link_log!` |
 | `lab/` | the comms-lab soak protocol (`LabBoard`/`LabHost`) |
-| `sim/` (feature `sim`) | the deterministic fault-injecting simulator: USB/BLE/UDP/WS pipe models; drop, corrupt, duplicate, reorder, truncate, stall, reboot |
+| `sim/` (feature `sim`) | the deterministic fault-injecting simulator: USB/BLE/UDP/WS pipe models; drop, corrupt, duplicate, reorder, truncate, stall, reboot; `secure_sim.rs`, `sim_entropy.rs`: secure endpoints with a scripted key table |
+| `secure_channel/` (feature `secure`) | the crypto core: HMAC-SHA256 and Noise's HKDF (ours, from the specs), CipherState over ChaCha20-Poly1305, the NNpsk0 initiator and responder, the replay window, `KeyId`/`Psk`/`SecureRole`/`SecureEvent` |
+| `link/secure_handshake.rs`, `link/sealed_frames.rs`, `link/secure_state.rs`, `frame/secure_syn.rs` (feature `secure`) | the handshake inside the SYN, the sealed frame, a secure link's state, the SYN extension codec |
+
+## Secure links
+
+The `secure` feature (`docs/adr/2026-10-01-network-link-security.md`) runs
+**`Noise_NNpsk0_25519_ChaChaPoly_SHA256`** merged into the session handshake,
+then seals every frame. It is for untrusted network links (the LAN
+WebSocket, the relay); USB and UART never use it (the cable is the trust).
+
+**The SYN.** Its 12 bytes do not change; flags bit 1 is `SECURE` and bits 2–3
+name what follows (`frame/secure_syn.rs`):
+
+| content | sent by | after the 12 bytes | body |
+|---|---|---|---|
+| presence | responder, nobody heard | — | 12 B |
+| msg1 (`psk, e`) | initiator, every SYN while connecting | `key_id[16] ‖ e_i[32] ‖ tag[16]` | 76 B |
+| msg2 (`e, ee`) | responder | `e_r[32] ‖ enc(responder nonce)[4] ‖ tag[16]` | 64 B |
+| refusal | responder | `reason[1] ‖ retry_after_ms[4]` | 17 B |
+
+**The sealed frame.** `header[4] ‖ ctr[4] ‖ ciphertext ‖ tag[16] ‖ crc`
+(`SEAL_OVERHEAD` = 20): ChaCha20-Poly1305 with the header as associated data,
+one counter per direction, every transmission re-sealed (resends included).
+`max_payload` stays plaintext; `LinkConfig::secured()` takes the overhead off
+for a transport with a hard frame size (`ble().secured()`).
+
+**The lifecycle, in five lines.**
+1. The initiator (`SecureRole::Initiator { key_id, psk }`) sends msg1 on every
+   SYN; one ephemeral per session, so a resend is the same bytes.
+2. The responder raises `SecureEvent::KeyLookup`; the edge answers
+   `provide_keys(key_id, candidates)` or `refuse(...)` (2 s, then `Busy`).
+3. The first candidate whose PSK verifies msg1 gets msg2; the responder is
+   half-open (keys split, still connecting).
+4. The initiator is up on a msg2 that answers its nonce and sends a sealed
+   ACK at once; the responder is up on the first frame that opens
+   (`session_auth()` names the key and the candidate).
+5. Every reset wipes the keys; the next session is a fresh handshake. An
+   established responder resets only for a msg1 that verifies.
+
+**The API** (feature `secure`): `Link::new_secure(cfg, nonce, role, entropy)`,
+`poll_secure_event`, `provide_keys`, `refuse`, `retry_with`, `session_auth`,
+`is_secure`, `ram_bound_secure`. `LinkEvent` is unchanged. Entropy is a
+`fn(&mut [u8])` the edge supplies (32 bytes per handshake per end).
+
+**Replay and failure.** ARQ links keep a 64-frame window: a replay or a bad
+tag is dropped and counted (`replays`, `seal_failures`) and ARQ resends. A
+no-ARQ link (WebSocket, relay) takes only the next counter: a gap
+(`counter_gaps`) or a bad tag resets the session. A CRC failure is still
+`bad_frames` (line damage); a tag failure past the CRC is a forgery or a bug.
+A plain link hearing a secure peer counts `secure_required` (with the feature
+on); a secure link hearing a plain peer raises `PeerNotSecure`. The sniffer
+holds no keys and reports a secure capture's frames as `SniffEvent::Sealed`.
+
+**Running its tests:**
+
+```bash
+cargo test -p lp-link --features sim,lab,secure   # snow oracle, RFC vectors, handshake legs, sim, fuzz, alloc
+cargo test -p lp-link --features sim,lab          # plain: the golden bytes are unchanged
+just link-fuzz 20000 && just link-soak 5000       # both include the secure cases
+just check-lp-link-targets                        # rv32 + wasm32 with `secure`, no getrandom, no precomputed tables
+just link-size                                    # `crypto` and `sr-secure` beside the plain variants
+```
 
 ## Message budget
 
@@ -358,10 +427,28 @@ After the hardening (plan `lp2025/2026-09-27-0155-lp-link-hardening`):
   now held for the link's life instead of allocated per message; the
   allocator no longer sees link traffic at all.
 
+Secure links (feature `secure`, plan `lp2025/2026-10-01-1843-secure-link`):
+
+- Flash, `just link-size` (riscv32imac, over the probe's baseline): the
+  crypto alone 25,274 B (sha2 included); a selective-repeat link built secure
+  54,076 B against the plain link's 21,866 B. The plain variants are
+  byte-for-byte what they were.
+- On the C6 (`lp-fw/fw-esp32c6` feature `diag_secure_link`, the product image
+  with a secure pair run at boot; `lp-emu:esp32c6:t1@f06c77c6d`, where a PMU
+  cycle is an instruction — **never time**): ~25 KB of flash for the feature
+  (curve25519 9.5 KB, ChaCha20-Poly1305 3.7 KB, `secure_channel` 5–5.8 KB,
+  the link's secure paths 5.7 KB, sha2 0.9 KB); +752 B of RAM per link over
+  a plain one (`ws()` with the board's cut); 12.07 M instructions per
+  handshake (both ends); 34,361 instructions per 64 B message sealed and
+  opened, 531,329 per 2 KB; **3,860 B of stack** for a handshake through the
+  links (3,204 B for the Noise core alone). Silicon timing: owed (M6's desk
+  walk).
+
 ## Running it
 
 ```bash
 cargo test -p lp-link --features sim,lab   # unit tests, scenarios, proptests (CI runs this)
+cargo test -p lp-link --features sim,lab,secure   # ...and the secure channel's (CI runs this too)
 just link-soak 5000                        # the delivery property at depth
 just link-fuzz 20000                       # the decoder fuzzer at depth
 just link-bench                            # the tables; `codec` is CPU throughput

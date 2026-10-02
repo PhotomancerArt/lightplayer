@@ -6197,8 +6197,30 @@ select:focus-visible {
     filter: saturate(0.3);
 }
 
+/* An armed header ICON has no label to swap, so it asks in a pill laid
+   over the header to its left (studio_pane.rs, `ARMED_ASK_CLASS`). The pill
+   is absolute — the icon keeps its width — and only exists while armed;
+   it fades in with the arming ramp. */
+@keyframes ux-armed-ask-in {
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
+}
+
+.ux-armed-ask {
+    animation: ux-armed-ask-in 0.16s ease-in;
+}
+
 @media (prefers-reduced-motion: reduce) {
     .ux-armed {
+        animation: none;
+    }
+
+    .ux-armed-ask {
         animation: none;
     }
 

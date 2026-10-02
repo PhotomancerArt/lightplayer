@@ -161,6 +161,9 @@ fn link_item(item: SniffedWire) -> Option<WireItem> {
         SniffedWire::Gap { skipped, .. } => {
             WireItem::Link(format!("{skipped} frame(s) missing from the recording"))
         }
+        SniffedWire::Sealed { chan, len, .. } => WireItem::Link(format!(
+            "sealed frame: {len} B on channel {chan} (a secure link; no key to read it)"
+        )),
     })
 }
 
@@ -172,7 +175,8 @@ fn item_direction(item: &SniffedWire) -> Direction {
         | SniffedWire::Unreadable { dir, .. }
         | SniffedWire::Session { dir, .. }
         | SniffedWire::Damaged { dir }
-        | SniffedWire::Gap { dir, .. } => *dir,
+        | SniffedWire::Gap { dir, .. }
+        | SniffedWire::Sealed { dir, .. } => *dir,
     }
 }
 

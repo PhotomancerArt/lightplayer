@@ -62,6 +62,9 @@ pub fn rendered(item: &SniffedWire) -> String {
         SniffedWire::Unreadable { len, reason, .. } => {
             format!("<unreadable message: {len} bytes, {reason}>\n")
         }
+        SniffedWire::Sealed { chan, len, .. } => {
+            format!("<sealed frame: {len} bytes on channel {chan}, a secure link>\n")
+        }
         SniffedWire::Session { .. } | SniffedWire::Damaged { .. } | SniffedWire::Gap { .. } => {
             String::new()
         }

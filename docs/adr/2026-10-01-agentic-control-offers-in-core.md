@@ -5,6 +5,8 @@
   ratchet land now. The design of "offers" is the work of the roadmap
   `lp2025/2026-10-01-1255-agentic-ui-roadmap` and will amend this ADR.
 - **Deciders:** Yona
+- **Refined by:** `docs/adr/2026-10-01-offer-tree-and-consequence-levels.md`
+  (the consequence level, path ids, and the offer tree itself)
 - **Evidence:** planning dir `2026-10-01-0126-app-agent-harness/`
   (`design-offers-as-a-core-concept.md`, `p08` Implementation Result);
   PR #888 (the app agent) and #889 (`act`, cards, this ratchet).

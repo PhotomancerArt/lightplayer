@@ -23,11 +23,12 @@ pub(crate) fn disabled_action() -> UiAction {
     story_action(StoryOp::Secondary).disabled("Connect a device before running this action.")
 }
 
-pub(crate) fn confirmation_action() -> UiAction {
+/// A Lasting action: error tint, and the first click arms.
+pub(crate) fn lasting_action() -> UiAction {
     story_action(StoryOp::Primary)
         .with_label("Erase device")
         .with_summary("Erase the connected device flash.")
-        .with_confirmation(ActionConfirmation::new(
+        .lasting(ActionConfirmation::new(
             "Erase device?",
             "This removes the current firmware and project data from the connected device.",
             "Erase",
@@ -116,7 +117,7 @@ pub(crate) fn story_activity() -> UiActivityView {
         .with_terminal(story_terminal_lines())
 }
 
-/// The generic pane fixture: a bus-shaped body with a confirmation
+/// The generic pane fixture: a bus-shaped body with a Lasting
 /// action, standing in for "a pane with a busy status". Was a Device
 /// step-stack until that pane retired.
 pub(crate) fn story_pane() -> UiPaneView {
@@ -125,7 +126,7 @@ pub(crate) fn story_pane() -> UiPaneView {
         "Project",
         UiStatus::working("Syncing"),
         UiViewContent::Metrics(story_metrics()),
-        vec![confirmation_action()],
+        vec![lasting_action()],
     )
 }
 
