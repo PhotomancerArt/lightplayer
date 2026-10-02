@@ -551,6 +551,14 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
         boot_control,
         base_fs,
         hardware_registry,
+        #[cfg(all(
+            feature = "radio",
+            not(any(
+                feature = "stress_s2",
+                feature = "stress_s3",
+                feature = "desk_espnow_meter"
+            ))
+        ))]
         radio_driver,
         #[cfg(feature = "ble")]
         ble_started,
@@ -569,6 +577,14 @@ struct CoreBoot {
     boot_control: lp_bootctl::DecodeOutcome,
     base_fs: Box<dyn lpfs::LpFs>,
     hardware_registry: Rc<HwRegistry>,
+    #[cfg(all(
+        feature = "radio",
+        not(any(
+            feature = "stress_s2",
+            feature = "stress_s3",
+            feature = "desk_espnow_meter"
+        ))
+    ))]
     radio_driver: Esp32EspNowRadioDriver,
     #[cfg(feature = "ble")]
     ble_started: bool,
@@ -666,6 +682,14 @@ fn lp_engine_entry(core: CoreBoot) {
         boot_control,
         base_fs,
         hardware_registry,
+        #[cfg(all(
+            feature = "radio",
+            not(any(
+                feature = "stress_s2",
+                feature = "stress_s3",
+                feature = "desk_espnow_meter"
+            ))
+        ))]
         radio_driver,
         #[cfg(feature = "ble")]
         ble_started,
@@ -697,6 +721,14 @@ fn lp_engine_entry(core: CoreBoot) {
     hardware_system.add_button_driver(Box::new(Esp32GpioButtonDriver::new(Rc::clone(
         &hardware_registry,
     ))));
+    #[cfg(all(
+        feature = "radio",
+        not(any(
+            feature = "stress_s2",
+            feature = "stress_s3",
+            feature = "desk_espnow_meter"
+        ))
+    ))]
     hardware_system.add_radio_driver(Box::new(radio_driver));
     let hardware_system = Rc::new(hardware_system);
 
@@ -852,6 +884,8 @@ fn lp_engine_entry(core: CoreBoot) {
         transport,
         time_provider,
         watchdog,
+        #[cfg(feature = "bench_render_loop")]
+        load_cycles,
     };
     #[cfg(feature = "diag_secure_link")]
     secure_link_probe::run();
@@ -867,18 +901,72 @@ fn lp_engine_entry(core: CoreBoot) {
     spawner.spawn(engine_task(app).unwrap());
 }
 
+/// The server loop, as its own task (spawned by the engine door).
 #[cfg(not(fw_harness))]
 #[embassy_executor::task]
 async fn engine_task(app: FirmwareApp) {
-    let mut watchdog = app.watchdog;
-    run_server_loop(
-        app.server,
-        app.transport,
-        app.time_provider,
-        heartbeat_memory_stats,
-        move |now_ms| watchdog.feed(now_ms),
-    )
-    .await;
+    // Run server loop (never returns)
+    #[cfg(not(feature = "bench_render_loop"))]
+    {
+        let mut watchdog = app.watchdog;
+        run_server_loop(
+            app.server,
+            app.transport,
+            app.time_provider,
+            heartbeat_memory_stats,
+            move |now_ms| watchdog.feed(now_ms),
+        )
+        .await;
+    }
+
+    // The render-loop benchmark's whole firmware difference, part two:
+    // the same loop, with an end. `run_server_loop` is a wrapper around
+    // this call with `FrameBudget::UNBOUNDED` — the frames below are the
+    // product's frames, not a re-implementation of them.
+    #[cfg(feature = "bench_render_loop")]
+    {
+        use fw_checks::checks::render_loop::{FrameStats, cycles_to_us};
+
+        let heap_after_load = esp32_memory_stats().unwrap_or((0, 0));
+        let load_us = cycles_to_us(app.load_cycles as u64, board::esp32c6::constants::CPU_HZ);
+        let mut stats = FrameStats::new();
+        // The guest's own clock, bracketing the loop: `Esp32TimeProvider`
+        // measures from its own construction and is about to be moved
+        // into the loop, so the bracket is taken on `Instant` directly.
+        let started = embassy_time::Instant::now();
+
+        // The same watchdog the product arms and the same feed policy:
+        // the bounded loop yields once a frame like the unbounded one, so
+        // the I/O task stays provably alive and the RWDT never bites. An
+        // image that disarmed it would differ from the product in a third
+        // way, for no measurement.
+        let mut watchdog = app.watchdog;
+        let server = server_loop::run_server_loop_bounded(
+            app.server,
+            app.transport,
+            app.time_provider,
+            heartbeat_memory_stats,
+            move |now_ms| watchdog.feed(now_ms),
+            bench::render_loop::budget(),
+            |cycles| stats.record(cycles),
+        )
+        .await;
+
+        let uptime_us = started.elapsed().as_micros();
+        // Report BEFORE the server is dropped: the summary's heap figures
+        // are meant to describe a machine with the project loaded, and
+        // dropping it first would report one that had just unloaded.
+        bench::render_loop::report(&stats, load_us, uptime_us, heap_after_load);
+        drop(server);
+
+        // Idle, yielding, so the I/O task drains the records and the
+        // marker to the host link. `--exit-on` fires on those bytes; a
+        // loop that stopped yielding here would print the sentinel into a
+        // queue nobody pumps.
+        loop {
+            embassy_time::Timer::after(embassy_time::Duration::from_millis(100)).await;
+        }
+    }
 }
 
 #[esp_rtos::main]
