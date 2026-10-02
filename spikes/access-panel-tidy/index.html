@@ -276,6 +276,9 @@
   that was added longest ago makes room</b>. Never this browser, never the account, never a password. The header says it when full, and the toast says what
   made room. Copies of one name still fold into one row (that’s just how the list reads). Passwords are one line each: switch, name, the password, ↻.
 </p>
+<div class="gate"><b>Round 3 (converged):</b> a friend’s browser being the one dropped — “I know and I just don’t care.” Turning a password off
+  with no confirm — fine. A typed password <b>saves when you click away</b> (Save and Enter still work). No share QR. “I just really want this to be
+  simple … this isn’t enterprise banking software.”</div>
 <p class="hint">
   <b>Why the choker filled:</b> 16 × “Brave on Mac” (XIAO C6 <code>10:bd:a3:b0:8e:30</code>, Sep 26 → Oct 2): each worktree’s dev server is its own origin,
   so its own browser key, and 16 is the board’s cap. Under this rule the next plug-in just replaces the Sep 26 copy.
@@ -496,7 +499,7 @@ function panel(pid) {
 // ---------------------------------------------------------------- §2 frozen states
 const STATES = [
   ['off', 'Off', 'A random password waits in the box; turning it on uses it.', () => ({ on: false, saved: null, value: 'otter-lantern-58' })],
-  ['own', 'Typing your own', 'One click selected it all; typing replaced it. Save (or Enter).', () => ({ on: true, saved: 'otter-lantern-58', value: 'camp glow' })],
+  ['own', 'Typing your own', 'One click selected it all; typing replaced it. Clicking away saves (so do Save and Enter).', () => ({ on: true, saved: 'otter-lantern-58', value: 'camp glow' })],
   ['saved', 'Saved', 'The line says so for a moment, then goes quiet.', () => ({ on: true, saved: 'camp glow', value: 'camp glow', status: 'saved' })],
   ['elsewhere', 'Set from another browser', 'On, but this browser never knew it.', () => ({ on: true, saved: undefined, value: '' })],
 ];
@@ -586,6 +589,13 @@ document.addEventListener('click', ev => {
 document.addEventListener('input', ev => {
   const t = ev.target; if (t.dataset.bind !== 'pw') return;
   const s = P[t.dataset.p].pw[t.dataset.k]; s.value = t.value; s.status = null; renderAll();
+});
+// Clicking away saves too (Yona, round 3): Save and Enter are only the
+// visible ways to do what leaving the box already does.
+document.addEventListener('focusout', ev => {
+  const t = ev.target; if (t.dataset.bind !== 'pw' || restoring) return;
+  const p = P[t.dataset.p], s = p && p.pw[t.dataset.k];
+  if (s && s.on && s.value.trim() && s.value !== s.saved) setTimeout(() => { savePw(p, t.dataset.k); renderAll(); });
 });
 document.addEventListener('keydown', ev => {
   const t = ev.target; if (ev.key !== 'Enter' || t.dataset.bind !== 'pw') return;
