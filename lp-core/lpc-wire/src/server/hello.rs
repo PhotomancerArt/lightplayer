@@ -35,6 +35,20 @@ use crate::server::hello_auth::HelloAuth;
 ///
 /// # History
 ///
+/// - 32: the classic ESP32's UART0 host link moves onto lp-link (plan
+///   `lp2025/2026-09-28-2015-classic-uart-on-lp-link`, milestone M5 of
+///   `docs/adr/2026-09-27-lp-link-one-comms-layer.md`). On the classic
+///   (DOM-Z-102/dig2go silicon behind a CH340, and `lp-emu-esp32v3`) UART0
+///   carries lp-link frames (`LinkConfig::uart()`: 30's stream framing,
+///   four-frame windows) instead of `M!{json}` lines and `0x00 'L'` COBS
+///   frames, with everything 30 brought to USB: one wire message per
+///   proto-channel message, the hello after every link `Up`, the learned
+///   table and packed opt-in reset with the link, logs on the log channel,
+///   and the heartbeat's `link` object as lp-link's counters. An `M!` host
+///   cannot read a classic running this, nor the reverse. 31 is the
+///   Bluetooth cut-over's (`claude/ble-on-lp-link`, PR #880), sequenced
+///   before this one by the director; BLE and fw-emu keep `M!` lines here.
+///   `PACK_FORMAT_VERSION` is unchanged.
 /// - 30: the USB device link moves onto lp-link (plan
 ///   `lp2025/2026-09-27-0215-lp-link-usb-cutover`;
 ///   `docs/adr/2026-09-27-lp-link-one-comms-layer.md`). On USB-Serial-JTAG
@@ -305,7 +319,7 @@ use crate::server::hello_auth::HelloAuth;
 /// as `None` on new Studio and a new firmware's extra fields are ignored
 /// by old Studio. Bumping for those would mark every board running
 /// current firmware Incompatible in exchange for nothing.
-pub const WIRE_PROTO_VERSION: u32 = 30;
+pub const WIRE_PROTO_VERSION: u32 = 32;
 
 /// Unsolicited/boot-time server identity, version, and capability report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -637,7 +651,7 @@ mod tests {
     #[test]
     fn the_proto_version_is_pinned_to_its_history() {
         assert_eq!(
-            WIRE_PROTO_VERSION, 30,
+            WIRE_PROTO_VERSION, 32,
             "if you meant to bump, add the History entry in this file's \
              doc comment and update this pin"
         );

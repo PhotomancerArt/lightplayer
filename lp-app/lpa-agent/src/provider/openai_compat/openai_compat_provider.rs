@@ -276,6 +276,7 @@ impl<'a, T: HttpSseTransport> TurnDriver<'a, T> {
                 output_tokens: usage.completion_tokens,
                 cache_write_tokens: 0,
                 cache_read_tokens: cached,
+                cost_micro_usd: usage.cost_micro_usd(),
             };
         }
         let Some(choice) = chunk.choices.into_iter().next() else {
@@ -533,6 +534,7 @@ mod tests {
                     output_tokens: 12,
                     cache_write_tokens: 0,
                     cache_read_tokens: 768,
+                    cost_micro_usd: None,
                 }
             })
         );

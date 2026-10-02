@@ -12,7 +12,7 @@ use anyhow::{Context, Result, bail};
 
 use crate::config::ValidateConfig;
 use crate::configuration::{Availability, Configuration, ConfigurationKind};
-use crate::driver::{RunRequest, default_out_dir, driver_for};
+use crate::driver::{LinkHost, RunRequest, default_out_dir, driver_for};
 use crate::grade::FieldClass;
 use crate::header::{InbandHeader, TranscriptHeader};
 use crate::payload::{ALL_PAYLOADS, Link, Sentinel, find_payload};
@@ -210,6 +210,11 @@ pub struct RunOptions<'a> {
     /// override is `RunRequest::effective_link`'s seam, and only the
     /// `lp-emu:*` driver reads it.
     pub link_override: Option<Link>,
+    /// The host for the shipped image's lp-link wire, when the caller has one
+    /// to give (`lp-cli validate` does, unless `--link-host raw`). `None` is
+    /// the raw port, which is what every committed transcript was captured
+    /// through. See [`crate::driver::LinkHost`].
+    pub link_host: Option<&'a LinkHost>,
 }
 
 /// No `--image` at all: build what the plan says to build.
@@ -226,6 +231,7 @@ impl Default for RunOptions<'_> {
             // same run an operator would get.
             timeout_secs: 120,
             link_override: None,
+            link_host: None,
         }
     }
 }
@@ -700,6 +706,7 @@ fn request(
         // they agree for `silicon:<chip>` and `lp-emu:<chip>:<grade>` and do
         // not for `esp-emu:<version>`, whose detail is a version.
         chip: entry.chip.clone(),
+        link_host: opts.link_host.cloned(),
     }
 }
 

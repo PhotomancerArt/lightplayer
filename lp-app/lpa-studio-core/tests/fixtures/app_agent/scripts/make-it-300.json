@@ -1,0 +1,23 @@
+{
+  "note": "300 LEDs: a longer strip map and a wider render",
+  "edits": [
+    {
+      "set": {
+        "node": "fixture",
+        "path": "render_size",
+        "value": {
+          "width": 300,
+          "height": 8
+        }
+      }
+    },
+    {
+      "set_asset": {
+        "node": "fixture",
+        "file": "fixture.map2d.json",
+        "text": "{\n  \"format\": 1,\n  \"sample_diameter\": 1.0,\n  \"canvas\": [\n    0.0,\n    0.0,\n    300.0,\n    8.0\n  ],\n  \"objects\": [\n    {\n      \"name\": \"strip\",\n      \"shape\": {\n        \"grid\": {\n          \"origin\": [\n            0.5,\n            4.0\n          ],\n          \"cols\": 300,\n          \"rows\": 1,\n          \"pitch\": 1.0\n        }\n      }\n    }\n  ]\n}\n"
+      }
+    }
+  ],
+  "save": true
+}

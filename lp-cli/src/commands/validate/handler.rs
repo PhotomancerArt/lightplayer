@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use lp_emu_validate::ValidateConfig;
+use lp_emu_validate::driver::LinkHost;
 use lp_emu_validate::payload::Link;
 use lp_emu_validate::replay::ReplayOptions;
 use lp_emu_validate::run::{self, ImageOverrides, RecordProvenance, RunOptions};
@@ -19,6 +20,45 @@ fn link_override(link: Option<&str>) -> Option<Link> {
     }
 }
 
+/// The link nonce an EMULATED recording's host uses: fixed, so that a
+/// recording is a function of its inputs and two recordings of one image are
+/// the same run (plan D4). A product host draws a fresh one per open.
+pub const RECORDING_LINK_NONCE: &str = "4c500001";
+
+/// The host for the shipped image's lp-link wire (`--link-host lp-link`), as
+/// the two command prefixes `lp-emu-validate` appends its flags to. It is
+/// supplied from here because the host is lp-link and lpc-wire, and the
+/// runner is inside the `lp-emu/` MIT fence (`LinkHost`'s doc).
+///
+/// Both ask for JSON replies: the heap ratchet's state, so a memory figure in
+/// a transcript does not depend on a host's pack opt-in — and the same on a
+/// board as on the machine, so the pair compares.
+pub fn link_host(choice: &str) -> Option<LinkHost> {
+    let lp_cli = ["cargo", "run", "-q", "-p", "lp-cli", "--release", "--"];
+    let argv = |tail: &[&str]| -> Vec<String> {
+        lp_cli
+            .iter()
+            .chain(tail)
+            .map(|s| (*s).to_string())
+            .collect()
+    };
+    match choice {
+        "raw" => None,
+        "lp-link" => Some(LinkHost {
+            emulated: argv(&[
+                "emu",
+                "run",
+                "--host-link",
+                "--json-replies",
+                "--link-nonce",
+                RECORDING_LINK_NONCE,
+            ]),
+            port: argv(&["link", "capture", "--json-replies"]),
+        }),
+        other => unreachable!("clap's value_parser refuses `{other}`"),
+    }
+}
+
 pub fn handle_validate(cli: ValidateCli) -> Result<()> {
     let repo_root = resolve_repo_root(cli.repo_root.as_deref())?;
     let config = ValidateConfig::embedded();
@@ -31,6 +71,7 @@ pub fn handle_validate(cli: ValidateCli) -> Result<()> {
         ValidateCommand::Replay(args) => replay(args, &repo_root),
         ValidateCommand::Run(args) => {
             let images = ImageOverrides::parse(&args.image)?;
+            let host = link_host(&args.link_host);
             print!(
                 "{}",
                 run::run_set(
@@ -42,6 +83,7 @@ pub fn handle_validate(cli: ValidateCli) -> Result<()> {
                         images: &images,
                         timeout_secs: args.timeout_secs,
                         link_override: link_override(args.link.as_deref()),
+                        link_host: host.as_ref(),
                     },
                     &repo_root,
                     args.dry_run,
@@ -81,6 +123,7 @@ fn record(args: RecordArgs, config: &ValidateConfig, repo_root: &Path) -> Result
         None => chrono::Local::now().format("%Y-%m-%d").to_string(),
     };
     let images = ImageOverrides::parse(&args.image)?;
+    let host = link_host(&args.link_host);
     print!(
         "{}",
         run::record_set(
@@ -92,6 +135,7 @@ fn record(args: RecordArgs, config: &ValidateConfig, repo_root: &Path) -> Result
                 images: &images,
                 timeout_secs: args.timeout_secs,
                 link_override: link_override(args.link.as_deref()),
+                link_host: host.as_ref(),
             },
             repo_root,
             &RecordProvenance {

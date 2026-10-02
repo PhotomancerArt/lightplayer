@@ -236,10 +236,25 @@ impl<'a, W: Write, F: FnMut(), D: DelayNs> ChunkedWriter<'a, W, F, D> {
         timeout: Duration,
     ) -> Result<(), WriteFailure> {
         if RESYNC_OWED.load(Relaxed) {
+            // Still owed if this fails: it is cleared only below.
             self.write_chunks(&RESYNC_SEQUENCE, timeout).await?;
             RESYNC_OWED.store(false, Relaxed);
         }
-        self.write_chunks(data, timeout).await
+        self.write_chunks(data, timeout)
+            .await
+            // Some of these bytes may be on the wire: a reader may now be
+            // inside a frame that will never close.
+            .inspect_err(|_| RESYNC_OWED.store(true, Relaxed))
+    }
+
+    /// [`try_write_all`](Self::try_write_all) for a link that frames and
+    /// recovers its own bytes (lp-link, the classic's UART): the same chunks,
+    /// timeout and per-chunk hook, but no [`RESYNC_SEQUENCE`] before it and
+    /// none owed after a failure. On such a link a cut-short write is a
+    /// damaged frame the link resends, and the marker's bytes would only be
+    /// one more thing for the host's deframer to discard.
+    pub async fn try_write_link_bytes(&mut self, data: &[u8]) -> Result<(), WriteFailure> {
+        self.write_chunks(data, self.policy.timeout).await
     }
 
     async fn write_chunks(&mut self, data: &[u8], timeout: Duration) -> Result<(), WriteFailure> {
@@ -263,9 +278,6 @@ impl<'a, W: Write, F: FnMut(), D: DelayNs> ChunkedWriter<'a, W, F, D> {
                         continue;
                     }
                 };
-            // Some of these bytes may be on the wire: a reader may now be
-            // inside a frame that will never close.
-            RESYNC_OWED.store(true, Relaxed);
             return Err(WriteFailure {
                 chunk_index,
                 chunks_total,

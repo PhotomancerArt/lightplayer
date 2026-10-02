@@ -16,8 +16,7 @@ use lpc_wire::{ClientMessage, ClientRequest};
 use lpfs::LpFsStd;
 
 use super::args::RunArgs;
-use super::handler::describe_link_counters;
-use super::link_host::{EmuLinkHost, EmuUsbBoard, fresh_nonce};
+use super::link_host::{EmuLinkHost, EmuUsbBoard, describe_link_counters, fresh_nonce};
 use crate::commands::dev::{collect_project_deploy_files, validation};
 use crate::commands::upload::wait::wait_for_project_running;
 
@@ -42,12 +41,16 @@ async fn run_hosted_async<B: EmuUsbBoard>(
     args: &RunArgs,
     micros: u64,
 ) -> Result<()> {
-    eprintln!("emu: {describe_boot}, usb-serial-jtag hosted in process (lp-link)");
+    eprintln!(
+        "emu: {describe_boot}, {} hosted in process (lp-link)",
+        board.link_name()
+    );
     eprintln!(
         "emu: running for {micros} us of EMULATED time (wall-clock net: {} s)",
         args.wall_timeout_secs
     );
-    let mut host = EmuLinkHost::new(board, fresh_nonce(), !args.json_replies)
+    let nonce = args.link_nonce.unwrap_or_else(fresh_nonce);
+    let mut host = EmuLinkHost::new(board, nonce, !args.json_replies)
         .queue_messages(false)
         .wall_timeout(Duration::from_secs(args.wall_timeout_secs));
     if let Some(path) = &args.console {

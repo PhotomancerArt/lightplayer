@@ -1,8 +1,10 @@
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
+use lp_emu_esp_common::Strap;
+use lp_emu_esp32c6::control::parse_usb_script;
 use lp_emu_esp32c6::flash::FlashBacking;
-use lp_emu_esp32c6::loader::EfuseIdentity;
+use lp_emu_esp32c6::loader::{EfuseIdentity, ResetCause};
 use lp_emu_esp32c6::machine::{
     AppSource, BootMode, Esp32C6Builder, Esp32C6Machine, FrameSink, Outcome, PinLogSink,
     StopCondition, TimeGrade, TxLogSink, Uart0Sink, UsbHost, UsbSjDrain, UsbSjSink,
@@ -114,8 +116,20 @@ pub(super) fn apply_image(
 }
 
 fn run(args: RunArgs) -> Result<()> {
+    if args.chip != EmuChip::Esp32V3 {
+        let classic_only = [
+            (args.control_script.is_some(), "--control-script"),
+            (args.uart_faults.is_some(), "--uart-faults"),
+        ];
+        if let Some((_, flag)) = classic_only.iter().find(|(set, _)| *set) {
+            bail!("{flag} is the classic's (--chip esp32v3): its host link is UART0");
+        }
+    }
     if args.chip == EmuChip::Esp32S3 {
         return super::run_s3::run_s3(&args, parse_duration_us(&args.timeout)?);
+    }
+    if args.chip == EmuChip::Esp32V3 {
+        return super::run_v3::run_v3(&args, parse_duration_us(&args.timeout)?);
     }
 
     let micros = parse_duration_us(&args.timeout)?;
@@ -124,6 +138,7 @@ fn run(args: RunArgs) -> Result<()> {
     let mut builder = Esp32C6Builder::new()
         .time_grade(grade)
         .strict(args.strict_bus)
+        .reboot_on_reset(args.reboot_on_reset)
         .usb_host(usb_host_at_power_on(&args))
         // `--monitor` takes the socket out of the port's open/close story:
         // the host is declared attached and draining from power-on and stays
@@ -150,13 +165,47 @@ fn run(args: RunArgs) -> Result<()> {
     // board's MAC — is the right one; `serve` gives every board its own,
     // because a registry of N boards that all answer with one MAC is one
     // board N times.
-    if let Some(text) = &args.efuse_mac {
-        let mac = EfuseIdentity::parse_mac(text)
-            .map_err(|e| anyhow::anyhow!("--efuse-mac `{text}`: {e}"))?;
-        builder = builder.efuse(EfuseIdentity {
-            mac,
-            ..EfuseIdentity::default()
+    if args.efuse_mac.is_some() || args.efuse_rev.is_some() {
+        let mut efuse = EfuseIdentity::default();
+        if let Some(text) = &args.efuse_mac {
+            efuse.mac = EfuseIdentity::parse_mac(text)
+                .map_err(|e| anyhow::anyhow!("--efuse-mac `{text}`: {e}"))?;
+        }
+        if let Some(text) = &args.efuse_rev {
+            (efuse.wafer_major, efuse.wafer_minor) = EfuseIdentity::parse_rev(text)
+                .map_err(|e| anyhow::anyhow!("--efuse-rev `{text}`: {e}"))?;
+        }
+        builder = builder.efuse(efuse);
+    }
+    // The reset the chip is starting from, which a ROM-up boot's banner prints
+    // verbatim (`rst:` / `boot:`), so a recording states them.
+    if let Some(text) = &args.reset_cause {
+        builder = builder.reset_cause(ResetCause::parse(text).with_context(|| {
+            format!("--reset-cause `{text}`: expected poweron, usb-uart or tg0-wdt")
+        })?);
+    }
+    if let Some(text) = &args.strap {
+        builder = builder.strap(match text.as_str() {
+            "download" => Strap::Download,
+            _ => Strap::App,
         });
+    }
+    // The cable's schedule beside a hosted link: control words only, because
+    // the host is the link and a scripted byte would be injected under it.
+    if let Some(path) = &args.usb_script {
+        let text = std::fs::read_to_string(path)
+            .with_context(|| format!("reading --usb-script {}", path.display()))?;
+        let script =
+            parse_usb_script(&text).map_err(|e| anyhow::anyhow!("{}: {e}", path.display()))?;
+        if script.bytes.steps_left() > 0 {
+            bail!(
+                "--usb-script {} sends bytes, and with --host-link this process IS the host on \
+                 that link: only the cable's control words (detach, attach, open, close, wait) \
+                 may ride beside it",
+                path.display()
+            );
+        }
+        builder = builder.usb_script(script.commands);
     }
 
     // The link. Both kinds listen; the difference is which of the chip's two
@@ -376,23 +425,6 @@ pub(super) fn describe(outcome: &Outcome) -> String {
         }
         Outcome::Breakpoint { pc, .. } => format!("stopped at a breakpoint, pc {pc:#010x}"),
     }
-}
-
-/// One line for a host link's counters: what it sent and read, and what it
-/// had to recover from.
-pub(super) fn describe_link_counters(c: &lpc_wire::LinkCounters) -> String {
-    format!(
-        "{} frames out / {} in, {} resent, {} damaged, {} stale partials, {} duplicates, \
-         {} resets, {} payload errors",
-        c.frames_tx,
-        c.frames_rx,
-        c.resends,
-        c.damaged,
-        c.stale_partials,
-        c.duplicates,
-        c.resets.total,
-        c.payload_errors
-    )
 }
 
 pub(super) fn check_file(path: &Path, flag: &str) -> Result<()> {

@@ -13,6 +13,14 @@ related:
 ---
 # The read gate refuses on a largest-block proxy while the read needs volume — and names a remedy the client already applied
 
+> **Recurred on the C6, 2026-09-27** — the same proxy refused every read on
+> the Bluetooth-on PLAYFUL choker with ~90 KB free:
+> [2026-09-27-fragmented-heap-refuses-every-read](2026-09-27-fragmented-heap-refuses-every-read.md).
+> The C6 and S3 now gate on total free plus a 16 KiB block
+> (`lpa_server::ReadGate`); the classic keeps the 32 KiB block, so this entry
+> stays open for it until plan `lp2025/2026-09-27-1218-fragmentation-tolerant-reads`
+> PR B lands the fallible, write-don't-build read path.
+
 **Shape** — opening a project in Studio against the desk classic fails,
 terminally:
 

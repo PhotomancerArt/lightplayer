@@ -2140,6 +2140,14 @@ door; the recipe exists from P1 so the door has one name for its whole life.
 --uart0-baud <n>        the rate the host at the other end of the cable sends
                         at [115200] — what the auto-baud counters measure,
                         and nothing else
+--uart-faults <spec>    a TEST switch, off by default: damage UART0's byte
+                        stream between the wire and the host, the C6's
+                        `--usb-faults` over a UART. The stream is cut into
+                        64-byte windows and each is handed to the shared
+                        `lp_emu_esp_common::link_faults::LinkFaults` as a
+                        packet (`StreamFaults`), so one spec means the same
+                        fraction of the same traffic on both chips. The run
+                        report's `uart-faults:` line counts what it did
 --control <tcp:addr>    LISTEN for a control-channel client: the cable's own
                         socket (see "The CH340 cable")
 --control-script <path> the same verbs at declared EMULATED times
@@ -2298,8 +2306,22 @@ it fixed for P4–P8, is
 | `src/periph/gpio.rs`, `src/periph/io_mux.rs` (unit) | A plain `Output` pin drive reaching a pad and `enable` taking it back off the wire; `256` being the GPIO selector and `128` an ordinary signal; bank 1 carrying pads 32..39; the input matrix routing `U0RXD_IN` and refusing the two constants by name; `in_` served only through `fun_ie`; the PRO core's enable at `pin[n]` bit 15 and the APP core's at 13; **no peripheral signal reaching a pad**; the IO_MUX pad map walked against the generated table's own names, and asserted *not* to be in pad order |
 | `tests/uart_socket.rs` | The view **through the bus**, at the addresses a guest uses: scripted bytes arriving at the cycles the file names and reading back in order; an `int_clr` unable to clear `rxfifo_full` while it holds; the receive timeout refusing to clear until the FIFO is empty (the classic's third category). And the **cable** at machine level: the reboot on the *release* of EN and not on the assert, `reset` and `download-mode` one reboot each with the right strap, a release without `--reboot-on-reset` ending the run and naming the strap, and `attach`/`open` moving no chip state. With the image: a cable reset of the running app, one reboot, and **both boots in one console log** — 1,086 bytes, two identical halves |
 
+**Since wire proto 32 the shipped image's UART0 is an lp-link** (plan
+`classic-uart-on-lp-link`), and a link host is a product crate this fence
+keeps out. So every gate that talks to the shipped image over its link lives
+in `lp-cli` instead — `lp-cli/tests/emu_v3_link_gates.rs` (G2's both-paths
+idle heartbeat and memory comparison, the three requests, project load,
+the frame three ways, five wires) and `lp-cli/tests/emu_uart_link.rs`
+(upload, tools, the reboot nonce, the SYN backoff, and the `--uart-faults`
+soak) — hosted by `lp-cli emu run --chip esp32v3 --host-link`. The rows
+above that still name a `walks/*.script` or a raw `M!` stimulus keep only
+what needs no link (the boot chain, the machine's own claims, the script's
+shape); `walks/*.script` stay committed as the pre-lp-link record, and the
+pinned reference images still speak `M!`.
+
 Run them with `just test-emu-esp32v3`, and the image-backed ones with
-`just test-emu-esp32v3-boot`. **`just test-emu-esp32v3-gate` is the whole of
+`just test-emu-esp32v3-boot` (which runs the two `lp-cli` suites after this
+crate's). **`just test-emu-esp32v3-gate` is the whole of
 M3's gate** — that suite, both lints, and the reference image built twice for
 `--verify` — and it is what CI's path-gated, non-required
 `Emulator ESP32v3 (x64)` job runs.

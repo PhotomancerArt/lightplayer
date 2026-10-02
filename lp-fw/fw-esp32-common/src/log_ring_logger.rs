@@ -57,17 +57,34 @@ pub fn init() {
 /// One record per critical section, not `Link::pump_log` under one: that
 /// holds the ring's lock for the whole batch (up to the link's 32-record
 /// datagram queue, each popped byte by byte and copied onto the heap), and
-/// with interrupts masked that long the RMT refill misses its deadline. A
-/// record the link refuses (its datagram queue full) is lost and counted by
-/// the link (`datagrams_dropped`); `max` keeps that rare.
+/// with interrupts masked that long the RMT refill misses its deadline.
+///
+/// A record leaves the ring only when the link has a datagram slot for it
+/// ([`lp_link::Link::datagram_room`]). While the line is slower than the log
+/// (a burst on the classic's 921,600-baud UART: the queued datagrams wait for
+/// room in the TX pipe) the records wait in the ring, which keeps the newest
+/// and says in-band how many it dropped. Taking a record the link then
+/// refused lost it with no notice a host could see — only the board's
+/// `datagramsDropped` counted it — and that is how a `[OUT] dump` lost its
+/// parts under a project load
+/// (`docs/defects/2026-09-29-the-classics-log-ring-drops-records-under-a-project-load-burst.md`).
 pub fn pump<A: lp_link::Arq>(link: &mut lp_link::Link<A>, now: lp_link::Micros, max: usize) {
+    pump_ring(&LOG_RING, link, now, max);
+}
+
+/// [`pump`], from any ring (the tests' own).
+fn pump_ring<A: lp_link::Arq, const N: usize>(
+    ring: &Mutex<RefCell<LogRing<N>>>,
+    link: &mut lp_link::Link<A>,
+    now: lp_link::Micros,
+    max: usize,
+) {
     if link.state() != lp_link::LinkState::Established || link.is_stalled(now) {
         return;
     }
     let mut record = [0u8; 1 + lp_link::log_ring::MAX_RECORD_TEXT];
-    for _ in 0..max {
-        let Some(n) =
-            critical_section::with(|cs| LOG_RING.borrow_ref_mut(cs).pop_into(&mut record))
+    for _ in 0..max.min(link.datagram_room()) {
+        let Some(n) = critical_section::with(|cs| ring.borrow_ref_mut(cs).pop_into(&mut record))
         else {
             return;
         };
@@ -144,7 +161,11 @@ impl core::fmt::Write for RecordText {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::format;
+    use alloc::string::String;
+    use alloc::vec::Vec;
     use log::Log;
+    use lp_link::{Link, LinkConfig, LinkEvent, LinkState, SelectiveRepeat};
 
     /// A record is `level ‖ "module: message"`, cut at the ring's limit, and
     /// esp-rtos's chatter never reaches the ring. (The one test that touches
@@ -176,5 +197,81 @@ mod tests {
         assert_eq!(n, 1 + lp_link::log_ring::MAX_RECORD_TEXT, "cut");
         assert!(out[1..n].starts_with(b"m: xxx"));
         assert!(pop(&mut out).is_none(), "esp_rtos was dropped");
+    }
+
+    /// A record leaves the ring only when the link has a slot for it: with
+    /// the link's datagram queue full (the line behind the log), a pass takes
+    /// nothing, the link refuses nothing, and every record arrives, in order,
+    /// once the frames go out. Before this, each full pass took a record and
+    /// lost it, counted only in the board's `datagramsDropped` — how the
+    /// classic's `[OUT] dump` lost parts under a load.
+    #[test]
+    fn a_record_waits_in_the_ring_while_the_link_has_no_slot_for_it() {
+        static RING: Mutex<RefCell<LogRing<4096>>> = Mutex::new(RefCell::new(LogRing::new()));
+        let cfg = LinkConfig {
+            datagram_queue: 2,
+            ..LinkConfig::uart()
+        };
+        let mut board = Link::<SelectiveRepeat>::new(cfg.clone(), 1);
+        let mut host = Link::<SelectiveRepeat>::new(cfg, 2);
+        let mut now = 0;
+        for _ in 0..10 {
+            shuttle(&mut board, &mut host, now);
+            now += 200_000;
+        }
+        assert_eq!(board.state(), LinkState::Established);
+        assert_eq!(host.state(), LinkState::Established);
+        while host.recv().is_some() {}
+
+        for part in 1..=6 {
+            critical_section::with(|cs| {
+                RING.borrow_ref_mut(cs).push(
+                    lp_link::log_ring::LEVEL_INFO,
+                    format!("part={part}/6").as_bytes(),
+                )
+            });
+        }
+        // Three passes with the line blocked: the first fills the queue, the
+        // next two find no slot.
+        for _ in 0..3 {
+            pump_ring(&RING, &mut board, now, 2);
+        }
+        assert_eq!(board.counters().datagrams_dropped, 0, "nothing refused");
+        assert_eq!(critical_section::with(|cs| RING.borrow_ref(cs).len()), 4);
+
+        let mut got = Vec::new();
+        for _ in 0..10 {
+            pump_ring(&RING, &mut board, now, 2);
+            shuttle(&mut board, &mut host, now);
+            while let Some(event) = host.recv() {
+                if let LinkEvent::Message { channel, data } = event
+                    && channel == lp_link::CH_LOG
+                {
+                    got.push(String::from_utf8(data[1..].to_vec()).unwrap());
+                }
+            }
+            now += 1_000;
+        }
+        let want: Vec<String> = (1..=6).map(|p| format!("part={p}/6")).collect();
+        assert_eq!(got, want);
+        assert_eq!(board.counters().datagrams_dropped, 0);
+    }
+
+    /// Move every frame each way, instantly and losslessly.
+    fn shuttle(a: &mut Link<SelectiveRepeat>, b: &mut Link<SelectiveRepeat>, now: u64) {
+        for _ in 0..64 {
+            let mut moved = false;
+            while let Some(f) = a.poll_transmit(now).map(<[u8]>::to_vec) {
+                b.on_bytes(now, &f);
+                moved = true;
+            }
+            while let Some(f) = b.poll_transmit(now).map(<[u8]>::to_vec) {
+                a.on_bytes(now, &f);
+                moved = true;
+            }
+            if !moved {
+                break;
+            }
+        }
     }
 }

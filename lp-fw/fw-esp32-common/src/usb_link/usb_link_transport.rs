@@ -426,6 +426,7 @@ mod tests {
     use alloc::string::ToString;
     use alloc::vec;
     use lp_link::{LinkConfig, Micros, SelectiveRepeat};
+    #[cfg(feature = "json-pack")]
     use lpc_wire::WireEncoding;
 
     use crate::serial::server_msg::frame_buf_turn;
@@ -486,6 +487,10 @@ mod tests {
         assert!(host.next_proto().is_some(), "the heartbeat");
     }
 
+    /// Packed replies exist only with `json-pack` (without it the board
+    /// answers every opt-in "json"), so the claim is made where the
+    /// behaviour is built.
+    #[cfg(feature = "json-pack")]
     #[test]
     fn a_packed_session_codes_against_a_table_and_a_new_session_is_json_again() {
         let _turn = frame_buf_turn();
@@ -745,6 +750,7 @@ mod tests {
         )
     }
 
+    #[cfg(feature = "json-pack")]
     fn log_reply(n: u64) -> WireServerMessage {
         WireServerMessage::new(
             n,
@@ -755,6 +761,7 @@ mod tests {
         )
     }
 
+    #[cfg(feature = "json-pack")]
     fn set_encoding(encoding: WireEncoding) -> WireServerMessage {
         WireServerMessage::new(
             lpc_wire::PACK_OPT_IN_REQUEST_ID,
