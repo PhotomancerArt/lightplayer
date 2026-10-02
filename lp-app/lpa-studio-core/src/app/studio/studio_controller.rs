@@ -4901,14 +4901,17 @@ impl StudioController {
             return Vec::new();
         }
         let now = (self.now_secs)();
-        let mut taken =
-            crate::app::devices::taken_device_titles(&self.device_roster_view().roster.devices);
+        let cards = self.device_roster_view().roster.devices;
+        // Names minted earlier in THIS pass, which no card wears yet.
+        let mut minted: Vec<String> = Vec::new();
         let mut actions = Vec::new();
         for record in unnamed {
+            let mut taken = crate::app::devices::taken_device_titles(&cards, record.device);
+            taken.extend(minted.iter().cloned());
             let Some(name) = crate::app::devices::auto_record_name(&record, now, &taken) else {
                 continue;
             };
-            taken.push(name.clone());
+            minted.push(name.clone());
             actions.push(crate::DeviceAction::SetName {
                 device: record.device,
                 name,
@@ -4959,8 +4962,10 @@ impl StudioController {
         let board_display = lpa_boards::board_by_id(board_id)
             .map(|board| board.display_name.clone())
             .unwrap_or_else(|| board_id.clone());
-        let taken =
-            crate::app::devices::taken_device_titles(&self.device_roster_view().roster.devices);
+        let taken = crate::app::devices::taken_device_titles(
+            &self.device_roster_view().roster.devices,
+            *device,
+        );
         Some(crate::DeviceAction::SetName {
             device: *device,
             name: crate::app::devices::derive_flash_name(&board_display, (self.now_secs)(), &taken),
@@ -5063,6 +5068,15 @@ impl StudioController {
             // The same `M!` line framing, over a NUS GATT service.
             crate::LinkTransport::Ble => "ble-nus",
         };
+        // What to call this in a failure line, in the product's own words
+        // for each kind (the card's runtime band's "Sim"/"Emu", the
+        // emulator picker's "an emulated board") — never "the board" for a
+        // sim or an emulated board, which have none.
+        let open_noun = match attachment.transport {
+            crate::LinkTransport::Sim => "sim",
+            crate::LinkTransport::Emu => "emulated board",
+            crate::LinkTransport::Serial | crate::LinkTransport::Ble => "board",
+        };
         let client = crate::StudioServerClient::from_lens_io(io, deadline, protocol);
         let id = self.pool.install(crate::RuntimePayload::Device(attachment));
         self.record_device_event(
@@ -5098,7 +5112,7 @@ impl StudioController {
                     self.push_log(UiLogDraft::new(
                         UiLogLevel::Warn,
                         UiLogOrigin::Studio,
-                        format!("could not open the board in the editor: {error}"),
+                        format!("could not open the {open_noun} in the editor: {error}"),
                     ));
                 }
                 self.close_device_lens();
@@ -6993,6 +7007,39 @@ impl StudioController {
                     UiLogOrigin::Studio,
                     format!("project reload failed: {error}"),
                 ));
+                // What Retry needs to reopen the SAME package, read before
+                // `fail` drops the library binding that names it.
+                let retry = self.project.active_library_uid().map(|key| {
+                    UiAction::from_op(
+                        crate::ControllerId::new(HOME_NODE_ID),
+                        HomeOp::OpenPackage { key, prefer: None },
+                    )
+                });
+                let name = self
+                    .project
+                    .active_library_display_name()
+                    .unwrap_or_else(|| "project".to_string());
+                // The push already stopped the runtime before the refusal:
+                // the editor must not keep reading Ready over nothing, so
+                // fail it the way a refused open does — which is what
+                // sends the page back to the gallery (D24).
+                self.project.fail(error.to_string());
+                // A failed reload lands on that gallery with nothing more
+                // than the console line above unless it reaches the same
+                // failure notice a refused OPEN does: the route stays on
+                // the project's address (`web_app.rs`'s open-ended check
+                // reads this same stage), whose opening frame renders the
+                // notice with Retry.
+                if let Some(retry) = retry {
+                    crate::app::open_progress::note_open_failed(
+                        format!(
+                            "Couldn't load the latest version of \"{name}\": {}. \
+                             The editor closed; open it again from the gallery.",
+                            error.message()
+                        ),
+                        retry,
+                    );
+                }
                 Err(error)
             }
         }

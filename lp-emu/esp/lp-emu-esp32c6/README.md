@@ -1339,10 +1339,12 @@ latency constant was chosen from. `sig_len` and `is_group` *are* derived from
 the frame. Four zero bytes stand where the FCS would be; the air carries no
 FCS and none is computed.
 
-**The ring ends; it does not wrap.** The blob posts ten descriptors and the
-tenth's `next` is NULL. A guest that has stopped draining fills all ten, and
-this guest does **not** re-post them — after ten deliveries every descriptor
-is still the guest's. So the eleventh frame and every one after it is
+**The ring ends; it does not wrap.** The blob posts one descriptor per
+static RX buffer the firmware asked for — esp-radio's default is ten, and the
+product image has asked for four since 2026-10-01 — and the last one's `next`
+is NULL. A guest that has stopped draining fills them all, and this guest
+does **not** re-post them — after a ring's worth of deliveries every
+descriptor is still the guest's. So the next frame and every one after it is
 **dropped, counted and logged once**: `air_frames_delivered` and
 `air_frames_undelivered` on the machine say how many of each, and the first
 drop writes one line.
