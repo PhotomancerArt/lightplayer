@@ -21,7 +21,9 @@
 //!
 //! The whole example corpus, both ISAs, is the `lpc-engine` probe's job; this
 //! one stays the single-shader Xtensa sentinel that runs in the `lpvm-native`
-//! test build. ONE `#[test]`: the allocator counters are process-wide.
+//! test build. ONE `#[test]` per binary, by convention with the other two
+//! probes; the allocator counters are per-thread (`support/peak_alloc.rs`),
+//! not process-wide.
 
 #[path = "support/peak_alloc.rs"]
 mod peak_alloc;

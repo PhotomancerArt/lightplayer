@@ -18,6 +18,7 @@ use lpa_studio_core::{
     UiRuntimeBand, UiSlotAsset, UiSlotSourceState, UiSlotValue, UiStatus, UiStudioView,
     UiViewContent,
 };
+use lpa_studio_core::{OfferPath, ProjectOp, UiOffer, UiOfferTree};
 
 /// Timestamp shared by every story log fixture, so stories stay
 /// deterministic. P2 renders the timestamp column; until then it is unused by
@@ -600,7 +601,27 @@ pub(crate) fn project_view(state: ProjectState, server_connected: bool) -> UiPan
     if no_running_project {
         project.mark_no_running_project();
     }
-    project.view(server_connected)
+    // A story controller never syncs, so it publishes no offers.
+    project.view(server_connected, &mut UiOfferTree::new())
+}
+
+/// The project header's Save / Revert-to-saved offers, exactly as the
+/// project controller publishes them while persisted edits are pending.
+pub(crate) fn project_save_revert_offers() -> UiOfferTree {
+    let project_action =
+        |op: ProjectOp| UiAction::from_op(ControllerId::new(ProjectController::NODE_ID), op);
+    let mut offers = UiOfferTree::new();
+    offers.publish(UiOffer::new(
+        OfferPath::project().child("save"),
+        "save",
+        project_action(ProjectOp::SaveOverlay),
+    ));
+    offers.publish(UiOffer::new(
+        OfferPath::project().child("revert"),
+        "revert",
+        project_action(ProjectOp::RevertAllEdits).with_label("Revert to saved"),
+    ));
+    offers
 }
 
 pub(crate) fn project_ready_state() -> ProjectState {

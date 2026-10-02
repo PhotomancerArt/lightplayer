@@ -1,5 +1,5 @@
 ---
-status: paying-down
+status: retired
 since: 2026-08-28
 logged: 2026-09-25
 area: host heap-measurement tests (lpc-engine/tests, lpvm-native/tests)
@@ -66,8 +66,47 @@ process-wide counter.
   kept its `MEASURE_LOCK` mutex (no longer needed for correctness once the
   counters are per-thread, but harmless, and removing it was out of this
   ticket's scope). See the PR for per-test pass evidence.
+- 2026-09-28 — auto-queue ticket `2026-09-26-heap-counters-lpvm-native-peak-alloc`:
+  converted `lp-shader/lpvm-native/tests/support/peak_alloc.rs` (shared by
+  `#[path]` with `lpc-engine`'s `example_shader_compile_peak_memory` and
+  `lps-filetests`' `compile_peak_memory_corpus`) to `thread_local!`
+  `Cell<isize>` counters, never clamped. Confirmed the same class of
+  cross-thread event bites here even though the traced compile spawns no
+  threads: every fresh test thread frees a `Box<ThreadInit>` the parent
+  allocated to start it before any test code runs, underflowing a naive
+  per-thread `usize` counter (reproduced: "attempt to subtract with
+  overflow" on the first tracked `dealloc`). `live()`/`peak()` read
+  relative to a per-thread epoch latched on first read, so that one-time
+  noise never reaches a caller and the two other probe binaries' `usize`
+  `StepRecord`/`Summary` types stayed untouched. Assertion and ceiling
+  (37 KiB) unchanged; 26,971 B measured, matching the 2026-09-02 figure the
+  ceiling comment already recorded. Evidence: 20 sequential release runs
+  plus a 32-run parallel batch (4×8 concurrent processes), no failures.
+  **Incomplete**: CI on the PR's own diff (run 36490651838) failed
+  `lpc-engine --test example_shader_compile_peak_memory` with the same
+  underflow, one call later — the one-time latch only accounted for the
+  spawned-thread bootstrap free, not this probe's own warm-up-pass-then-drop
+  shape (see the next entry).
+- 2026-09-28 — same ticket, reworked: `lpc-engine`'s
+  `example_shader_compile_peaks` runs a warm-up compile pass and drops it
+  *before* its first reading of the measured pass; dropping the warm-up
+  frees memory allocated before that reading, on the same thread, so the
+  very next reading legitimately sits below it — a second, distinct source
+  of the same underflow shape, not a bug. A one-time latch (the previous
+  entry) cannot absorb a dip that happens *after* the latch. Replaced the
+  one-time epoch with a `FLOOR` that ratchets down (never up, never clamped
+  to zero) the moment a reading would otherwise go negative, in one helper
+  both `live()` and `peak()` route through — so the subtraction is always
+  well-defined and no longer needs a fallible conversion or a panic.
+  Assertions, ceilings and the two other probe binaries unchanged.
+  Reproduced the failure locally (`cargo test -p lpc-engine --test
+  example_shader_compile_peak_memory --features node-shader`, panicked in
+  0.04 s at the post-warm-up reading) and confirmed it green after the fix,
+  peak figures unchanged from the recorded ones in all three consumers;
+  each run 20 sequential plus a parallel batch, no failures. See the PR for
+  per-test pass evidence.
 
 **Exit criteria** — no host heap test counts through a process-wide
-counter. Still process-wide on 2026-09-26:
-`lp-shader/lpvm-native/tests/support/peak_alloc.rs`. Retire when that is
-converted, or shown to measure only across threads it owns.
+counter. Met 2026-09-28: all six probes (four `lpc-engine/tests`, plus
+`lpvm-native`'s and, via the shared `peak_alloc.rs`, the other two probe
+binaries' counters) are per-thread.

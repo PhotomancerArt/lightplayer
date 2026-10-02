@@ -115,6 +115,8 @@ mod ota;
 ))]
 mod output;
 mod recovery;
+#[cfg(all(feature = "diag_secure_link", not(fw_harness)))]
+mod secure_link_probe;
 mod serial;
 #[cfg(not(fw_harness))]
 mod stack_probe;
@@ -851,6 +853,8 @@ fn lp_engine_entry(core: CoreBoot) {
         time_provider,
         watchdog,
     };
+    #[cfg(feature = "diag_secure_link")]
+    secure_link_probe::run();
     board::esp32c6::status_led::show(lpc_hardware::StatusLedState::Running);
     // Keep the marker substring "fw-esp32c6 initialized, starting server
     // loop" intact: two readiness classifiers grep for it.
