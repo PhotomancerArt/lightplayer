@@ -392,11 +392,16 @@ fn playlist_face_derives_and_keeps_one_live_surface() {
     );
     assert_eq!(face.entries.len(), 2);
     let idle = &face.entries[0];
-    assert_eq!((idle.key, idle.name.as_str()), (1, "idle"));
+    assert_eq!(
+        (idle.key, idle.name.as_str()),
+        (1, "Idle"),
+        "the strip humanises the authored entry name like the Pattern picker \
+         does (`idle` -> `Idle`)"
+    );
     assert_eq!(idle.duration_ms, None);
     assert!(!idle.cue);
     let cued = &face.entries[1];
-    assert_eq!((cued.key, cued.name.as_str()), (2, "active"));
+    assert_eq!((cued.key, cued.name.as_str()), (2, "Active"));
     assert_eq!(cued.duration_ms, Some(4000), "authored 4 s → 4000 ms chip");
     assert!(cued.cue, "trigger_ids entry reads as a cue entry");
 
