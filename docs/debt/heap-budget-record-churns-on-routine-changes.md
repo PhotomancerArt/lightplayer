@@ -165,6 +165,17 @@ long-lived branch conflict on this file whenever main re-baselined too.
   `main`'s own C6 change moved the C6 figures again. Workaround: merge
   `origin/main` BEFORE blessing.
 
+- 2026-09-28 — **a static moved to the heap is a re-baseline** (BLE on
+  lp-link, P3, PR #880). The radio link port left `.bss` (432 B) for the heap
+  (its slots hold `RefCell`s), so the idle C6's `usedBytes` rose 196 B and
+  `largestFreeBlock` fell 240 B: a net RAM saving the ratchet reads as growth,
+  at margin 0. A first cut that held each slot's `Link` inline also pushed the
+  stack high-water out of its band (14,308 B); boxing the slot and keeping the
+  mux's pump `#[inline(never)]` brought it back to 12,868 B, and the heap
+  record was re-baselined (the three `bless-chips esp32c6` steps run one at a
+  time; ≈10 min). The same bless caught `hello.proto` 30 → 31, which the
+  proto bump earlier on the branch had moved without re-recording.
+
 **Exit criteria** — a PR whose only memory effect is a few bytes of statics
 passes the gate without touching the record, and two PRs that each
 legitimately re-baseline different chips/projects do not conflict. Likely

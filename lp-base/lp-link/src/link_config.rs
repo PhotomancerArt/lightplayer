@@ -184,12 +184,63 @@ impl LinkConfig {
     /// frame per notification (4 header + 236 payload + 4 CRC). A secure
     /// BLE link uses `ble().secured()`, which keeps a sealed frame inside one
     /// notification.
+    /// BLE NUS: a 15–30 ms connection interval, one frame per notification or
+    /// write.
+    ///
+    /// This preset is shared by every consumer of `ble()` — the C6 board,
+    /// but also this crate's own generic reliability-property fuzzer
+    /// (`delivery_properties.rs`, `link_scenarios.rs`'s `random()`), the
+    /// comms-lab soak (`lab_over_sim.rs`'s BLE case), and the no-steady-
+    /// state-allocation guarantee (`no_steady_state_alloc.rs`'s BLE case),
+    /// which run every `Transport` variant through the plain `Link::send()`
+    /// path with messages up to 16 KiB (well past what a board sends
+    /// through it — real replies go via `send_external`) and, for the
+    /// alloc test, repeatedly at steady state. That is why `send_budget`,
+    /// `max_message` and `keep_reassembly` stay at `usb()`'s values here
+    /// (`..Self::usb()`): a `keep_reassembly` below `max_message` reallocates
+    /// the reassembly buffer on every large message past warm-up instead of
+    /// keeping it — exactly what `no_steady_state_alloc` forbids — and a
+    /// `send_budget` below ~16 KiB makes the comms-lab's default soak size
+    /// `TooBig`. Both were verified by running them, not guessed. USB's own
+    /// preset has the identical shape: `usb()` stays generous, and the
+    /// board-specific narrowing (`send_budget` 2,560 B, `keep_reassembly`
+    /// 1 KiB, replies via `send_external`) lives in firmware only
+    /// (`UsbLinkShared::config()`,
+    /// `lp-fw/fw-esp32-common/src/usb_link/usb_link_shared.rs`). A BLE
+    /// firmware config doing the same is P3's job, not this preset's — see
+    /// this phase's Implementation Result for the two-radio-slot RAM figure
+    /// measured against that board-shaped config, and for the contradiction
+    /// this raised against the phase brief's original plan to narrow
+    /// `send_budget`/`keep_reassembly` directly here.
     pub fn ble() -> Self {
         LinkConfig {
             framing: Framing::Datagram,
-            max_payload: 236,
+            // 180 B, not the ATT MTU-derived 236: `browser_ble.js`'s write
+            // chunker has used 180 B since M2 (safely under every measured
+            // usable MTU — iOS 185→182, macOS/board 247→244) and at 180 B
+            // every lp-link frame (4 header + payload + 4 CRC = 188 B raw)
+            // fits inside one ATT write or notification, always. No frame is
+            // ever split across an ATT long write (Prepare…Execute), which
+            // retires `prepared_write.rs` entirely (D3/D7,
+            // `lp2025/2026-09-28-1445-ble-on-lp-link`). Director ruling R4
+            // (2026-09-28): keep 180 B.
+            max_payload: 180,
             tx_window: 8,
             rx_window: 8,
+            // `rx_budget` is NOT a preallocated buffer (see the field doc):
+            // it only bounds the inbox's worst case and `validate()`
+            // (`max_message + EVENT_COST <= rx_budget`). Shrunk from
+            // `usb()`'s 24 KiB to the tightest value that still holds one
+            // largest message plus its queueing charge — unlike
+            // `send_budget`/`keep_reassembly` above, nothing in this crate's
+            // own tests sends enough concurrent unread traffic to notice.
+            rx_budget: MAX_MESSAGE + crate::inbox::EVENT_COST,
+            // BLE log traffic is lower-priority and lower-volume than USB's
+            // (32 slots): eight `max_payload`-sized slots (one per tx-window
+            // frame) is enough buffering for the board's structured logs
+            // without holding a whole extra `max_payload × 32` allocation
+            // per radio link.
+            datagram_queue: 8,
             ack_delay: 15_000,
             ack_every: 4,
             initial_rto: 500_000,

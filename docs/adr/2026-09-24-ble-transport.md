@@ -510,3 +510,113 @@ console saw no error and no drop. Three mechanisms, all fixed in #834
 - **Not fixed here:** the board still drops an unparseable request without
   replying, which is how a proto-26 image left Studio waiting on
   `accessList` (plan DD35, deferred to the wire version-skew work).
+
+## Amendment 2026-09-29 (D8): BLE moves onto lp-link
+
+`lp2025/2026-09-28-1445-ble-on-lp-link` (director plan M3 of the lp-link
+comms-layer effort) replaces the `M!{json}\n`-line radio transport this ADR
+originally specified with lp-link's Datagram framing — the same crate USB
+cut over to in `lp2025/2026-09-27-0215-lp-link-usb-cutover`
+(`docs/adr/2026-09-27-lp-link-one-comms-layer.md`). This amends decisions 1,
+3 and 7 above; decisions 2, 4, 5, 6, 6a, 8, 9 and 10 are unaffected — trust,
+enable-at-boot, subscribe-to-open, connection parameters, the slot count and
+the no-flashing rule all sit above or beside the framing.
+
+- **Decision 1 (framing) replaced.** NUS still carries the wire (same
+  service and characteristic UUIDs, same RX-write/TX-notify shape), but the
+  bytes are no longer `M!{json}\n` lines. Each GATT write and each
+  notification is exactly one lp-link Datagram frame — a 4-byte header, the
+  proto-channel payload (`{`-JSON or an `L` learned-dictionary packed
+  message, unchanged from what channel 1 already carried) and a 4-byte
+  CRC-32C — capped to `min(180, negotiated_ATT_MTU − 11)` B of payload. GATT
+  already delimits one write/notification from the next, so there is no
+  byte-stream framing (no COBS, no newline) the way USB's Stream mode needs
+  one. `LineJoiner`, `LineChunker` and the ATT long-write (Prepare…Execute)
+  reassembly path (`prepared_write.rs`, added by the 2026-09-25 Amendment
+  above) are deleted outright — with every frame fixed at or under one ATT
+  value, no write can ever need a long write, and the board now actively
+  refuses a Prepare Write on RX with `REQUEST_NOT_SUPPORTED`. This closes
+  the whole bug class the "editing from the phone" defect above described;
+  see the defect's own closure note.
+  - **Correction to the 2026-09-25 Amendment's "180 B fits iOS's 185 B
+    MTU."** That measured a *write chunk size against a raw ATT value*; a
+    180 B lp-link *payload* is a 188 B *frame* (180 + 8 for the header and
+    CRC), which does not fit inside iOS/Bluefy's 182-byte usable ATT value
+    (185 MTU − 3). The per-connection formula above is what actually makes
+    a frame fit any given MTU: 180 B at the board's own ceiling (MTU 247),
+    174 B at iOS's common 185, down to 12 B at the Bluetooth minimum of 23
+    (below which the link is refused — even a 20-byte SYN would not fit one
+    ATT value). Studio no longer needs to guess the MTU at all: lp-link's
+    SYN carries the board's `max_payload`, and the host's frames shrink to
+    match automatically.
+- **Decision 3 (one frame buffer, one in flight) implemented differently,
+  ruling still holds.** The ADR's rejection of a second 16 KiB frame buffer
+  per link stands. What generalizes is *how* a reply reaches `FRAME_BUF`:
+  the mux's existing lease/deadline scheme (`release_frame_buf`,
+  `RADIO_WRITE_DEADLINE_MS`) is now reached through lp-link's own
+  `send_external` mechanism — a reply serializes once into the buffer the
+  firmware already owns, rather than being copied into the link's own send
+  ring, mirroring the USB cut-over's own heap follow-up (`lp-link`
+  README's "Sending without a copy"). Replies of 1 KiB or less still go
+  through the ordinary send ring and hold no buffer at all. A radio link
+  that does not release the buffer within its deadline is closed with a
+  logged reason, same as before.
+- **Decision 7 (queueing backpressures, not drops) unchanged in effect, now
+  through lp-link.** trouble-host's own notify-queue backpressure (up to
+  the mux's deadline) still composes with lp-link's own send budget and
+  selective-repeat window the same way USB's does — these are two layers
+  that agree, not two mechanisms in tension: lp-link retransmits what
+  trouble-host has not yet drained, and trouble-host's queue absorbs bursts
+  lp-link's own window already paces.
+- **`WIRE_PROTO_VERSION` 32 → 33** (`lp-core/lpc-wire/src/server/hello.rs`),
+  in the same change as the framing switch (built as 30 → 31 beside the
+  classic's UART cut-over, PR #884, which merged first and took 32), per the wire-compatibility
+  policy (no shims; every producer/consumer moves together). All four
+  firmware `manifest-core.expected.json` goldens moved with it.
+- **Packed replies are on by default over BLE now.** The old `M!` radio
+  link never asked a board to pack its replies; the new lp-link-based port
+  opts in the same way Web Serial's does (`SetEncoding`), unless `?wire=json`.
+  This is a behavior change on the air, not just under the hood — the board
+  answers it, so no defect follows, but it means Studio's own preference
+  now applies to BLE where it previously never did.
+- **`?ble=emu` (S5) keeps its original boundary (D9 of the plan), described
+  more precisely.** The polyfill still proxies the emulated board's real
+  *USB* lp-link **Stream** session — it does not open a genuine BLE
+  Datagram session, and building that is explicitly out of scope (see the
+  plan's "Out of scope"). What changed is that the polyfill now translates
+  the framing instead of piping raw bytes: a page write becomes one
+  COBS-FF-wrapped stream chunk into the emulated board's USB byte channel,
+  and the board's stream is cut back into one frame per notification on the
+  way out (verified byte-identical to `lp_link::frame::wrap_stream` on 200
+  vectors). The trust caveat is unchanged: the emulated board sees its
+  trusted USB link, so every request is answered at the edit tier, and
+  access enforcement still rests on `lpa-server/tests/access_gate.rs` and
+  the desk check. One artifact this walk surfaced and did not resolve: the
+  emulated board's USB link (`stall_after` 1 s) and Studio's BLE keepalive
+  (also 1 s) are two independent timers tuned for two different transports
+  now standing in for each other on this one path; an idle hermetic run saw
+  a handful of stall edges out of hundreds of polls. This is read as an
+  artifact of the emu path's borrowed USB timing, not a BLE framing defect —
+  a real board runs BLE's own `ble()` timers (`min_rto` 250 ms, keepalive
+  1 s, `stall_after` 3.5 s) on both ends.
+- **RAM, measured (host test, not yet silicon).** Per open GATT connection
+  at the real firmware config: 7,672 B at rest for one link, 15,344 B for
+  two (against the region-1 floor of ~19,500 B this plan's own `notes.md`
+  named as already the tightest block in the system, that leaves about
+  4.2 KB headroom for two links at rest — worse under a simultaneous large
+  upload on each, which peaks at 27,760 B). Full figures and the flash
+  delta (image landed 96 B smaller) are in `lp-base/lp-link/README.md`'s
+  "Measured" section. These are 64-bit host-test figures; a silicon
+  measurement is the soak this plan's own P5 phase still owes (see that
+  phase file's "Silicon soak (pending the board)").
+- **`RADIO_LINK_SLOTS` stays 2**, per the plan's own R1 ruling: the measured
+  two-link-at-rest margin (~4.2 KB) is judged comfortable enough not to
+  drop to 1, an improvement over the plan's own pre-firmware preview
+  (~1.4 KB) because the single-datagram-slot-per-link design saves about
+  1.26 KB per link over the generic `ble()` preset's per-connection cost.
+- **The defect this ADR's 2026-09-25 Amendment describes**
+  (`docs/defects/2026-09-25-a-long-bluetooth-write-is-acknowledged-and-lost.md`)
+  is closed as moot by this change — see the defect file's own closure
+  note.
+- Plan directory: `lp2025/2026-09-28-1445-ble-on-lp-link` (`plan.md`,
+  `notes.md`, phase files `p1`–`p5`).

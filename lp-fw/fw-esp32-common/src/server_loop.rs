@@ -308,8 +308,9 @@ fn heartbeat_status(
 }
 
 /// The host link's counters for the heartbeat: the lp-link link's own — the
-/// USB link's on the C6 and S3, the UART link's on the classic — or the `M!`
-/// loss counters on an image with neither.
+/// USB link's on the C6 and S3, the UART link's on the classic — or `None`
+/// on an image with neither (a host test build: every shipped image has one,
+/// and no board link in this crate speaks `M!` any more).
 #[inline(always)]
 fn heartbeat_link_counters() -> Option<lpc_wire::server::LinkCounters> {
     #[cfg(feature = "usb-link")]
@@ -317,7 +318,7 @@ fn heartbeat_link_counters() -> Option<lpc_wire::server::LinkCounters> {
     #[cfg(all(feature = "uart-link", not(feature = "usb-link")))]
     return crate::uart_link::uart_link_counters::heartbeat();
     #[cfg(not(any(feature = "usb-link", feature = "uart-link")))]
-    return crate::serial::link_counters::current();
+    return None;
 }
 
 /// How many frames the loop runs for, and on whose clock.
