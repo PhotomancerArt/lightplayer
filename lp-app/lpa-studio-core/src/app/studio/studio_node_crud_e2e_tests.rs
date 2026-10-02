@@ -425,7 +425,7 @@ fn remove_stages_rows_revert_restores_and_save_deletes_on_disk() {
         .find(|path| path.ends_with("/clock.clock"))
         .expect("clock card");
 
-    // The clock card offers the ungated delete action with confirmation.
+    // The clock card offers the ungated, undoable delete action.
     let delete = card_at(&snapshot, &clock_id)
         .header_actions
         .iter()
@@ -433,7 +433,10 @@ fn remove_stages_rows_revert_restores_and_save_deletes_on_disk() {
         .expect("delete header action")
         .action
         .clone();
-    assert!(delete.meta().confirmation.is_some());
+    assert_eq!(
+        delete.meta().consequence,
+        crate::ActionConsequence::Undoable
+    );
     assert!(delete.op_as::<NodeRemoveOp>().is_some());
 
     // Remove: the node leaves the tree, the save panel lists the NodeRemoved

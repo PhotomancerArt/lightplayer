@@ -186,11 +186,12 @@ pub use core::notice::UiNotices;
 pub use core::view::activity_view::UiActivityStep;
 pub use core::view::activity_view::UiActivityStepState;
 pub use core::{
-    ActionClass, ActionConfirmation, ActionEnablement, ActionGesture, ActionMeta, ActionPriority,
-    Controller, ControllerContext, ControllerId, ControllerOp, DEVICE_CARD_FEED_CLASS,
-    PASSIVE_REFRESH_DEADLINE, PROJECT_ACTION_DEADLINE, PROJECT_EDITOR_ACTION_DEADLINE,
-    PROJECT_LOAD_DEADLINE, UiAction, UiActions, UiActivityView, UiMetric, UiPaneAction, UiPaneView,
-    UiProgress, UiStatus, UiStudioView, UiTerminalLine, UiViewContent, UxNodePath,
+    ActionClass, ActionConfirmation, ActionConsequence, ActionEnablement, ActionMeta,
+    ActionPriority, Controller, ControllerContext, ControllerId, ControllerOp,
+    DEVICE_CARD_FEED_CLASS, PASSIVE_REFRESH_DEADLINE, PROJECT_ACTION_DEADLINE,
+    PROJECT_EDITOR_ACTION_DEADLINE, PROJECT_LOAD_DEADLINE, UiAction, UiActions, UiActivityView,
+    UiMetric, UiPaneAction, UiPaneView, UiProgress, UiStatus, UiStudioView, UiTerminalLine,
+    UiViewContent, UxNodePath,
 };
 /// The device model's own vocabulary, re-exported so the web crate renders
 /// and dispatches it without a second dependency edge. The model is the ONE

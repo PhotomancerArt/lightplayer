@@ -80,9 +80,10 @@ use crate::app::share::{
     relationship_face,
 };
 use crate::base::{
-    DetailPopover, DetailSection, DetailSectionTint, IconMenuTone, InlineButton, InlineButtonTone,
-    PopoverPlacement, StudioIcon, StudioIconName,
+    DetailPopover, DetailSection, DetailSectionTint, IconMenuTone, PopoverPlacement, StudioIcon,
+    StudioIconName,
 };
+use crate::core::{ActionButton, ActionButtonVariant};
 
 static NEXT_SESSION_CONTROL_ID: AtomicUsize = AtomicUsize::new(1);
 
@@ -695,15 +696,17 @@ pub fn SessionChangesPanel(changes: ProjectChanges, on_action: EventHandler<UiAc
                             }
                         }
                     }
+                    // Revert to saved is Lasting (D7): it draws through
+                    // `ActionButton`, so it wears the error tint and arms on
+                    // its first click exactly as every other Lasting verb.
                     if let Some(revert) = revert.clone() {
-                        InlineButton {
-                            label: "Revert all".to_string(),
-                            title: revert.meta().summary.clone(),
-                            text: "Revert all".to_string(),
-                            icon: StudioIconName::Revert,
-                            tone: InlineButtonTone::Warning,
-                            class: "tw:ml-auto".to_string(),
-                            on_press: move |_| on_action.call(revert.clone()),
+                        div { class: "tw:ml-auto",
+                            ActionButton {
+                                action: revert,
+                                running: false,
+                                variant: ActionButtonVariant::Quiet,
+                                on_action,
+                            }
                         }
                     }
                 }

@@ -17,18 +17,19 @@ use crate::{ControllerId, UiAction};
 pub struct UiAgentCard {
     /// Session-scoped id (`c1`, `c2`, …), what the agent was told.
     pub id: String,
-    /// What the button does, in the app's own words (the action's
-    /// confirmation title, or its label).
+    /// What the button does, in the app's own words (a lasting action's
+    /// copy title, or its label).
     pub title: String,
-    /// What happens and what is at stake (the confirmation message, or the
-    /// action's summary).
+    /// What happens and what is at stake (a lasting action's copy message,
+    /// or the action's summary).
     pub message: String,
     /// The assistant's one line on why now. Model text: render as plain
     /// text.
     pub why: String,
     /// The button's label.
     pub confirm_label: String,
-    /// The action takes something away (the error tint).
+    /// The action takes something away (the error tint; see
+    /// [`crate::ActionConsequence::wears_error_tint`]).
     pub destructive: bool,
     pub state: UiAgentCardState,
     /// The card's button: the original action, verbatim.
@@ -52,7 +53,7 @@ impl UiAgentCard {
     /// A pending card for `action`, in the action's own words.
     pub fn new(id: impl Into<String>, action: UiAction, why: impl Into<String>) -> Self {
         let meta = action.meta();
-        let (title, message, confirm_label) = match &meta.confirmation {
+        let (title, message, confirm_label) = match meta.consequence.copy() {
             Some(confirmation) => (
                 confirmation.title.clone(),
                 confirmation.message.clone(),
@@ -66,7 +67,7 @@ impl UiAgentCard {
             message,
             why: why.into(),
             confirm_label,
-            destructive: meta.destructive,
+            destructive: meta.consequence.wears_error_tint(),
             state: UiAgentCardState::Pending,
             press: action,
         }
@@ -137,9 +138,10 @@ mod tests {
         } = card
             .press
             .meta()
-            .confirmation
-            .clone()
-            .expect("Forget confirms");
+            .consequence
+            .copy()
+            .cloned()
+            .expect("Forget is lasting");
         assert_eq!(card.title, title);
         assert_eq!(card.confirm_label, confirm_label);
         assert!(card.destructive);

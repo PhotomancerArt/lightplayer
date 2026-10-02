@@ -155,10 +155,11 @@ pub(crate) fn node_revert_pane_action() -> UiPaneAction {
 }
 
 /// The always-available delete-node pane action (authoring P4/P5): the
-/// `NodeRemoveOp` wearing the confirmation the controller composes from the
-/// removal pre-flight (dependents, swept pending edits, staged file
-/// deletions). Renders as the Trash2 icon through the generic pane-action
-/// path; the press runs the composed warning before dispatch.
+/// `NodeRemoveOp`, Undoable, whose summary is what the controller composes
+/// from the removal pre-flight (dependents, swept pending edits, staged file
+/// deletions). Renders as the Trash2 icon in the error tint through the
+/// generic pane-action path; one click removes, and the save panel's revert
+/// brings it back.
 pub(crate) fn node_delete_pane_action() -> UiPaneAction {
     let preflight = UiNodeRemovePreflight {
         node_label: "Playlist".to_string(),
@@ -175,7 +176,7 @@ pub(crate) fn node_delete_pane_action() -> UiPaneAction {
                     .expect("valid story node address"),
             },
         )
-        .with_confirmation(preflight.confirmation()),
+        .with_summary(preflight.summary()),
     )
 }
 

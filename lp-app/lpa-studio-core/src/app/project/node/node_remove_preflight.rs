@@ -1,7 +1,5 @@
 //! Pre-flight summary for a node removal, computed client-side from the
-//! synced inventory (no wire round-trip) for the delete confirmation.
-
-use crate::ActionConfirmation;
+//! synced inventory (no wire round-trip) for the remove action's summary.
 
 /// What removing one node would do, as far as the client can tell from its
 /// mirror: dependents that reference the node, pending edits the removal
@@ -9,8 +7,11 @@ use crate::ActionConfirmation;
 ///
 /// Best-effort by design — the server's `RemoveNode` validation is the
 /// authority (shared assets are never deleted there; unknown sites reject).
-/// The web layer composes the confirmation dialog from this; the node
-/// header's delete action carries [`Self::confirmation`] pre-composed.
+/// The node header's remove action carries [`Self::summary`] pre-composed as
+/// its summary (its tooltip), and [`Self::consequence`] as its level: a
+/// removal is Undoable (Revert brings the node back until save) unless it
+/// sweeps pending edits, which no revert restores — then it is Lasting and
+/// arms.
 #[derive(Clone, Debug, PartialEq)]
 pub struct UiNodeRemovePreflight {
     /// Display label of the node being removed.
@@ -28,10 +29,9 @@ pub struct UiNodeRemovePreflight {
 }
 
 impl UiNodeRemovePreflight {
-    /// Compose the delete confirmation for this removal (same
-    /// `ActionConfirmation` pattern as `HomeOp::DeletePackage`).
-    pub fn confirmation(&self) -> ActionConfirmation {
-        let mut message = format!("Remove {} from the project?", self.node_label);
+    /// Compose what this removal does, as the remove action's summary.
+    pub fn summary(&self) -> String {
+        let mut message = format!("Remove {} from the project.", self.node_label);
         if !self.staged_files.is_empty() {
             message.push_str(&format!(
                 " {} file(s) will be deleted on save: {}.",
@@ -52,7 +52,24 @@ impl UiNodeRemovePreflight {
             ));
         }
         message.push_str(" You can revert from the save panel until you save.");
-        ActionConfirmation::new("Delete node", message, "Delete")
+        message
+    }
+
+    /// How serious the removal is (D7). Undoable while reverting the
+    /// removal gives everything back; Lasting when it also discards pending
+    /// edits on the subtree, because those are gone for good.
+    pub fn consequence(&self) -> crate::ActionConsequence {
+        if self.pending_edit_count == 0 {
+            return crate::ActionConsequence::Undoable;
+        }
+        crate::ActionConsequence::Lasting(crate::ActionConfirmation::new(
+            format!("Remove {}?", self.node_label),
+            format!(
+                "Its {} unsaved edit(s) are discarded, and reverting the removal does not bring them back.",
+                self.pending_edit_count
+            ),
+            "remove",
+        ))
     }
 }
 
@@ -61,7 +78,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn confirmation_composes_files_edits_and_dependents() {
+    fn summary_composes_files_edits_and_dependents() {
         let preflight = UiNodeRemovePreflight {
             node_label: "Orbit shader".to_string(),
             dependent_count: 2,
@@ -69,21 +86,15 @@ mod tests {
             staged_files: vec!["/orbit.json".to_string(), "/orbit.glsl".to_string()],
         };
 
-        let confirmation = preflight.confirmation();
-        assert_eq!(confirmation.title, "Delete node");
-        assert_eq!(confirmation.confirm_label, "Delete");
-        assert!(confirmation.message.contains("Remove Orbit shader"));
-        assert!(
-            confirmation
-                .message
-                .contains("2 file(s) will be deleted on save: /orbit.json, /orbit.glsl")
-        );
-        assert!(confirmation.message.contains("1 pending edit(s)"));
-        assert!(confirmation.message.contains("2 other node(s)"));
+        let summary = preflight.summary();
+        assert!(summary.contains("Remove Orbit shader"));
+        assert!(summary.contains("2 file(s) will be deleted on save: /orbit.json, /orbit.glsl"));
+        assert!(summary.contains("1 pending edit(s)"));
+        assert!(summary.contains("2 other node(s)"));
     }
 
     #[test]
-    fn clean_leaf_confirmation_stays_minimal() {
+    fn clean_leaf_summary_stays_minimal() {
         let preflight = UiNodeRemovePreflight {
             node_label: "Clock".to_string(),
             dependent_count: 0,
@@ -91,10 +102,25 @@ mod tests {
             staged_files: Vec::new(),
         };
 
-        let message = preflight.confirmation().message;
+        let message = preflight.summary();
         assert!(message.contains("Remove Clock"));
         assert!(!message.contains("pending edit"));
         assert!(!message.contains("reference"));
         assert!(message.contains("revert from the save panel"));
+        assert_eq!(preflight.consequence(), crate::ActionConsequence::Undoable);
+    }
+
+    #[test]
+    fn a_removal_that_sweeps_unsaved_edits_is_lasting() {
+        let preflight = UiNodeRemovePreflight {
+            node_label: "Orbit shader".to_string(),
+            dependent_count: 0,
+            pending_edit_count: 2,
+            staged_files: Vec::new(),
+        };
+
+        assert!(preflight.consequence().arms());
+        let copy = preflight.consequence();
+        assert!(copy.copy().unwrap().message.contains("2 unsaved edit(s)"));
     }
 }

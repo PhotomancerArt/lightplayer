@@ -1,8 +1,8 @@
 use core::any::Any;
 
 use crate::{
-    ActionClass, ActionMeta, ActionPriority, ControllerOp, PROJECT_ACTION_DEADLINE,
-    PROJECT_EDITOR_ACTION_DEADLINE, PROJECT_LOAD_DEADLINE,
+    ActionClass, ActionConfirmation, ActionMeta, ActionPriority, ControllerOp,
+    PROJECT_ACTION_DEADLINE, PROJECT_EDITOR_ACTION_DEADLINE, PROJECT_LOAD_DEADLINE,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -108,11 +108,17 @@ impl ControllerOp for ProjectOp {
                 "Write pending persisted edits back to the project files.",
                 ActionPriority::Primary,
             ),
+            // Every unsaved edit goes, and nothing brings them back (D7).
             Self::RevertAllEdits => ActionMeta::new(
                 "Revert all",
                 "Discard every pending edit on this project.",
                 ActionPriority::Secondary,
-            ),
+            )
+            .lasting(ActionConfirmation::new(
+                "Revert to saved?",
+                "Every unsaved edit in this project is discarded.",
+                "revert",
+            )),
             Self::ClearDebugEdits => ActionMeta::new(
                 "Clear all",
                 "Clear every debug override in this project.",

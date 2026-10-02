@@ -16,9 +16,10 @@ use crate::{
 /// the playlist's `entries[k].node` slot for playlist entries), sends one
 /// `RemoveNode`, and on ack converges the overlay mirror and refreshes so
 /// the node disappears immediately. The staged removal stays revertible from
-/// the save panel until save; the header action carrying this op wears an
-/// [`crate::ActionConfirmation`] composed from the pre-flight summary
-/// ([`crate::UiNodeRemovePreflight`]).
+/// the save panel until save, so it is
+/// [`crate::ActionConsequence::Undoable`]: one click, no question. The header
+/// action carrying this op says what the removal does in its summary,
+/// composed from the pre-flight ([`crate::UiNodeRemovePreflight`]).
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NodeRemoveOp {
     /// Stable address of the node to remove.
@@ -33,7 +34,7 @@ impl ControllerOp for NodeRemoveOp {
             ActionPriority::Tertiary,
         )
         .with_icon("remove")
-        .destructive()
+        .undoable()
     }
 
     fn action_class(&self) -> ActionClass {
@@ -65,7 +66,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn node_remove_is_editor_foreground_class_with_destructive_meta() {
+    fn node_remove_is_editor_foreground_class_and_undoable() {
         let op = NodeRemoveOp {
             node: ProjectNodeAddress::parse("/demo.module/orbit.shader").unwrap(),
         };
@@ -79,6 +80,6 @@ mod tests {
         let meta = op.default_action_meta();
         assert_eq!(meta.label, "Delete node");
         assert_eq!(meta.icon.as_deref(), Some("remove"));
-        assert!(meta.destructive);
+        assert_eq!(meta.consequence, crate::ActionConsequence::Undoable);
     }
 }

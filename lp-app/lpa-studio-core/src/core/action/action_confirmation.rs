@@ -1,25 +1,21 @@
-/// Confirmation copy for an action that needs explicit user approval.
+/// The copy of a [`crate::ActionConsequence::Lasting`] action: the words that
+/// say what is lost.
 ///
-/// Use this for destructive, expensive, or surprising actions. The web renderer
-/// decides how to present the confirmation.
+/// Every renderer reads it the same way: the armed button's `title` is the
+/// `message`, and its armed label is "Confirm ⟨`confirm_label`⟩". The app
+/// agent's card for the action speaks in the same words.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ActionConfirmation {
-    /// Confirmation dialog title.
+    /// What is being asked, as a question ("Forget this device?").
     pub title: String,
-    /// Confirmation body copy.
+    /// What is lost, in plain words.
     pub message: String,
-    /// Label for the confirmation button.
+    /// The verb the armed button confirms ("forget", "Delete").
     pub confirm_label: String,
-    /// Present the confirmation as a two-click ARMED button (first click
-    /// arms — the button itself asks; second click within the window
-    /// dispatches) instead of the native dialog. For destructive-but-light
-    /// verbs where a modal reads heavier than the act (G1 feedback,
-    /// 2026-08-31: Forget device).
-    pub inline: bool,
 }
 
 impl ActionConfirmation {
-    /// Create confirmation copy for an action.
+    /// Create the copy for a lasting action.
     pub fn new(
         title: impl Into<String>,
         message: impl Into<String>,
@@ -29,13 +25,6 @@ impl ActionConfirmation {
             title: title.into(),
             message: message.into(),
             confirm_label: confirm_label.into(),
-            inline: false,
         }
-    }
-
-    /// Two-click armed-button presentation (see [`Self::inline`]).
-    pub fn inline(mut self) -> Self {
-        self.inline = true;
-        self
     }
 }

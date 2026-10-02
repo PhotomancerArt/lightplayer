@@ -9,8 +9,8 @@ pub use crate::core::action::action_class::{
     PROJECT_EDITOR_ACTION_DEADLINE, PROJECT_LOAD_DEADLINE,
 };
 pub use crate::core::action::action_confirmation::ActionConfirmation;
+pub use crate::core::action::action_consequence::ActionConsequence;
 pub use crate::core::action::action_enablement::ActionEnablement;
-pub use crate::core::action::action_gesture::ActionGesture;
 pub use crate::core::action::action_meta::ActionMeta;
 pub use crate::core::action::action_priority::ActionPriority;
 pub use crate::core::action::actions::UiActions;

@@ -7681,9 +7681,9 @@ impl ProjectController {
     }
 
     /// The delete-node header action for `address`: the
-    /// [`crate::NodeRemoveOp`] wearing an [`crate::ActionConfirmation`]
-    /// composed from the removal pre-flight (`HomeOp::DeletePackage`
-    /// pattern). `None` when the node's attachment site cannot be resolved
+    /// [`crate::NodeRemoveOp`] (Undoable: one click, no question) whose
+    /// summary says what the removal does, composed from the removal
+    /// pre-flight. `None` when the node's attachment site cannot be resolved
     /// (no delete affordance is offered).
     pub fn node_remove_action(&self, address: &ProjectNodeAddress) -> Option<UiAction> {
         // The ROOT is never deletable. Since the flat-root reversal it
@@ -7704,7 +7704,8 @@ impl ProjectController {
                     node: address.clone(),
                 },
             )
-            .with_confirmation(preflight.confirmation()),
+            .with_summary(preflight.summary())
+            .with_consequence(preflight.consequence()),
         )
     }
 
@@ -16237,7 +16238,8 @@ mod tests {
             "every instantiable kind, Module included"
         );
 
-        // Root children carry the ungated delete action with confirmation.
+        // Root children carry the ungated, undoable delete action, its
+        // summary composed from the pre-flight.
         let clock = root_children(&view)
             .iter()
             .find(|child| child.detail == "/demo.module/clock.clock")
@@ -16247,9 +16249,18 @@ mod tests {
             .iter()
             .find(|action| action.icon == "remove")
             .expect("delete action present on a clean node");
+        assert_eq!(
+            delete.action.meta().consequence,
+            crate::ActionConsequence::Undoable,
+            "delete is undoable: one click, no question"
+        );
         assert!(
-            delete.action.meta().confirmation.is_some(),
-            "delete carries composed confirmation copy"
+            delete
+                .action
+                .meta()
+                .summary
+                .contains("revert from the save panel"),
+            "delete carries the composed pre-flight as its summary"
         );
         assert!(
             delete.action.op_as::<crate::NodeRemoveOp>().is_some(),
