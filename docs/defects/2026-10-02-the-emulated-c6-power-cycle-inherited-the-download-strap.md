@@ -1,7 +1,7 @@
 ---
 status: fixed
 found: 2026-10-02      # how: e2e — the C6 repartition's migration walk (W7, a cable pull)
-fixed: 7f5e82a40
+fixed: e9f26ea96
 area: lp-emu/esp/lp-emu-esp32c6 machine.rs (ControlCommand::PowerCycle)
 class: fidelity
 related:

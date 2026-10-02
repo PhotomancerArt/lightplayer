@@ -3,7 +3,8 @@
 Plan `lp2025/2026-10-01-1843-c6-repartition`, phase P08. Everything here ran
 on **`lp-emu:esp32c6:t1`** (non-strict: espflash's and esptool-js's stub reads
 one block the C6 boot set does not map, `flash_over_socket.rs`) at
-**`lp-emu` commit `6a417cdff`** (this branch). Nothing here is
+**`lp-emu` commit `6a417cdff`** (this branch before its rebase onto main
+`1645a7f4d`; the same change is `d3b73107b` after it). Nothing here is
 hardware-validated; durations are emulated seconds, never host time.
 
 ## The fielded board

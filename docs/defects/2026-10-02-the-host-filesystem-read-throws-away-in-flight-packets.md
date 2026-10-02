@@ -1,7 +1,7 @@
 ---
 status: fixed
 found: 2026-10-02      # how: e2e — the C6 repartition's emulator walk (P08 step 0)
-fixed: 87d77b8d8
+fixed: 244d3d59c
 area: lp-app/lpa-link providers/host_serial_esp32 (read_flash_region)
 class: assumed-context
 related:
