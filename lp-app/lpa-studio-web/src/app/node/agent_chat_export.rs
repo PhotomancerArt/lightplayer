@@ -70,6 +70,12 @@ pub(crate) fn chat_markdown(view: &UiAgentView) -> String {
                 };
                 out.push_str(&format!("*{tag}{text}*\n\n"));
             }
+            UiAgentTurn::Card(card) => {
+                out.push_str(&format!(
+                    "> **{}** ({}) — {:?}\n\n",
+                    card.title, card.id, card.state
+                ));
+            }
         }
     }
     if !view.usage.is_zero() {

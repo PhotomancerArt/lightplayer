@@ -99,6 +99,8 @@ pub fn StudioShell(
         lens_reconnecting,
         // the web app raises the "can now unlock" toast
         access_added: _,
+        // the app chat surface arrives with plan P10
+        app_agent: _,
     } = view;
 
     // The mismatch page outranks the opening frame: the open it was

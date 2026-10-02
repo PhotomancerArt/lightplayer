@@ -39,16 +39,9 @@ pub const ENGINE_VERDICT_BUDGET_MS: u32 = 1500;
 /// lpa-studio-core; the values must stay in sync).
 pub const MAX_SOURCE_BYTES: usize = 10 * 1024;
 
-/// Result of one `iterate` call, ready for the transcript and the UI.
-#[derive(Clone, Debug)]
-pub struct IterateOutcome {
-    /// JSON text for the `tool_result` content.
-    pub content: String,
-    /// True only for host/internal failures (never for compile errors).
-    pub is_error: bool,
-    /// Compact JSON for the UI's tool row.
-    pub summary: Value,
-}
+/// Result of one `iterate` call — the shader tools' name for the
+/// session-wide [`ToolOutcome`].
+pub type IterateOutcome = crate::toolset::ToolOutcome;
 
 /// Parsed `iterate` input. Unknown fields are rejected so the model gets an
 /// actionable error instead of a silently ignored argument.

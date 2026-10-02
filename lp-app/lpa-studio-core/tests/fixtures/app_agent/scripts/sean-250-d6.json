@@ -1,0 +1,131 @@
+{
+  "note": "Sean's strip: 250 LEDs on D6, three colourful patterns on a 30 s cycle",
+  "edits": [
+    {
+      "set_target": {
+        "board": "seeed/xiao-esp32-c6"
+      }
+    },
+    {
+      "create_node": {
+        "kind": "Clock"
+      }
+    },
+    {
+      "create_node": {
+        "kind": "Playlist"
+      }
+    },
+    {
+      "import_pattern": {
+        "pattern": "palette-waves",
+        "in_playlist": "playlist"
+      }
+    },
+    {
+      "import_pattern": {
+        "pattern": "color-wipe",
+        "in_playlist": "playlist"
+      }
+    },
+    {
+      "import_pattern": {
+        "pattern": "spiral",
+        "in_playlist": "playlist"
+      }
+    },
+    {
+      "set": {
+        "node": "playlist",
+        "path": "bindings",
+        "value": {
+          "time": {
+            "source": "bus:time"
+          }
+        }
+      }
+    },
+    {
+      "set": {
+        "node": "playlist",
+        "path": "cycle",
+        "value": {
+          "kind": "cycle",
+          "step_seconds": 30.0,
+          "fade_seconds": 1.5
+        }
+      }
+    },
+    {
+      "create_node": {
+        "kind": "Fixture"
+      }
+    },
+    {
+      "set": {
+        "node": "fixture",
+        "path": "render_size",
+        "value": {
+          "width": 250,
+          "height": 8
+        }
+      }
+    },
+    {
+      "set": {
+        "node": "fixture",
+        "path": "sampling",
+        "value": "direct"
+      }
+    },
+    {
+      "set_asset": {
+        "node": "fixture",
+        "file": "fixture.map2d.json",
+        "text": "{\n  \"format\": 1,\n  \"sample_diameter\": 1.0,\n  \"canvas\": [\n    0.0,\n    0.0,\n    250.0,\n    8.0\n  ],\n  \"objects\": [\n    {\n      \"name\": \"strip\",\n      \"shape\": {\n        \"grid\": {\n          \"origin\": [\n            0.5,\n            4.0\n          ],\n          \"cols\": 250,\n          \"rows\": 1,\n          \"pitch\": 1.0\n        }\n      }\n    }\n  ]\n}\n"
+      }
+    },
+    {
+      "set": {
+        "node": "fixture",
+        "path": "bindings",
+        "value": {
+          "input": {
+            "source": "bus:visual.out"
+          },
+          "output": {
+            "target": "bus:control.out"
+          }
+        }
+      }
+    },
+    {
+      "create_node": {
+        "kind": "Output"
+      }
+    },
+    {
+      "set": {
+        "node": "output",
+        "path": "ports",
+        "value": {
+          "0": {
+            "endpoint": "ws281x:local:D6"
+          }
+        }
+      }
+    },
+    {
+      "set": {
+        "node": "output",
+        "path": "bindings",
+        "value": {
+          "input": {
+            "source": "bus:control.out"
+          }
+        }
+      }
+    }
+  ],
+  "save": true
+}
