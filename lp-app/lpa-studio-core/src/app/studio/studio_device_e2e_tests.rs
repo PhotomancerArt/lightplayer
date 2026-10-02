@@ -6323,8 +6323,7 @@ fn pushing_an_old_format_library_project_sends_the_current_format() {
     );
 }
 
-/// Like [`drive`], but sleeps between polls for the fake device's own
-/// server thread (not always-ready futures).
+/// Like [`drive`], but sleeps between polls for the fake device's thread.
 fn drive_real<F: Future>(future: F) -> F::Output {
     let waker = noop_waker();
     let mut cx = Context::from_waker(&waker);
@@ -6338,7 +6337,6 @@ fn drive_real<F: Future>(future: F) -> F::Output {
         std::thread::sleep(Duration::from_millis(1));
     }
 }
-
 fn v10_corpus_files() -> Vec<(String, Vec<u8>)> {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../lpa-upgrade/tests/corpus/v10/button-sign");
@@ -6355,9 +6353,8 @@ fn v10_corpus_files() -> Vec<(String, Vec<u8>)> {
     files.sort();
     files
 }
-
-/// A refused push leaves the board running its previous project, whole —
-/// and a later good push lands in the OTHER slot with the refused dir gone.
+/// A refused push leaves the board on its previous project; a good push
+/// then lands in the OTHER slot with the refused dir gone.
 #[test]
 fn a_refused_push_leaves_the_board_running_its_previous_project() {
     let (_uid, good_files) = a_project_from_another_library(0x6b);
@@ -6365,9 +6362,10 @@ fn a_refused_push_leaves_the_board_running_its_previous_project() {
     let (_bench, _tasks, _device_uid) = running_board(&device, "usb-push-dark");
     let mut client = lpa_client::LpClient::new(FakeDeviceIo::new(&device)).on_borrowed_wire();
     let mut quiet = |_: String, _: Option<u8>| {};
-
-    let before = drive_real(client.project_list_loaded()).expect("list").value;
-    let dir = before[0].path.as_str().to_string();
+    let before = drive_real(client.project_list_loaded())
+        .expect("list")
+        .value;
+    let dir = before[0].path.to_string();
     let result = drive_real(lpa_client::push_project(
         &mut client,
         &v10_corpus_files(),
@@ -6375,23 +6373,24 @@ fn a_refused_push_leaves_the_board_running_its_previous_project() {
         "fallback",
         &mut quiet,
     ));
-    assert!(result.is_err(), "the server refuses a v10 project: {result:?}");
+    assert!(result.is_err(), "v10 push must be refused: {result:?}");
 
-    let after = drive_real(client.project_list_loaded()).expect("list").value;
-    assert_eq!(
-        after.iter().map(|p| p.path.as_str().to_string()).collect::<Vec<_>>(),
-        vec![dir.clone()],
-        "the board runs its previous project again, not dark"
-    );
+    let after = drive_real(client.project_list_loaded())
+        .expect("list")
+        .value;
+    let after_paths: Vec<String> = after.iter().map(|p| p.path.to_string()).collect();
+    assert_eq!(after_paths, vec![dir.clone()], "not dark: {after_paths:?}");
     let manifest = drive_real(client.fs_read(format!("{dir}/project.json").as_path()))
         .map(|outcome| String::from_utf8_lossy(&outcome.value).into_owned());
-    assert!(
-        manifest.as_deref().is_ok_and(|text| !text.contains("\"format\": 10")),
-        "the previous project's folder is whole: {manifest:?}"
-    );
+    let whole = manifest
+        .as_deref()
+        .is_ok_and(|t| !t.contains("\"format\": 10"));
+    assert!(whole, "previous project must be whole: {manifest:?}");
 
     // A good push lands in the OTHER slot; the old one is cleaned up.
-    let good_hash = drive_real(client.hash_package("studio")).expect("hash").value;
+    let good_hash = drive_real(client.hash_package("studio"))
+        .expect("hash")
+        .value;
     let report = drive_real(lpa_client::push_project(
         &mut client,
         &good_files,
@@ -6404,8 +6403,6 @@ fn a_refused_push_leaves_the_board_running_its_previous_project() {
     let listed = drive_real(client.fs_list_dir("/projects".as_path(), false))
         .expect("ls")
         .value;
-    assert_eq!(
-        listed.iter().map(|p| p.as_str().to_string()).collect::<Vec<_>>(),
-        vec!["/projects/studio-b"]
-    );
+    let listed: Vec<String> = listed.iter().map(|p| p.to_string()).collect();
+    assert_eq!(listed, vec!["/projects/studio-b"]);
 }
