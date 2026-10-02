@@ -1082,7 +1082,11 @@ mod tests {
             else {
                 panic!("{checked:?}")
             };
-            assert_eq!((required, granted), (true, None), "a new link holds nothing");
+            assert_eq!(
+                (required, granted),
+                (true, None),
+                "a new link holds nothing"
+            );
             session.checked(window(link), required, granted, true);
             let step = session
                 .next_step(Millis(6), &held, &[])
