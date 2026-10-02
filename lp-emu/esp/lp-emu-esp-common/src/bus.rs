@@ -423,6 +423,13 @@ pub struct SocBus {
     alias_sites: BTreeSet<(u32, u8)>,
 
     strict: bool,
+    /// Whether this chip's contract for publishing code is a guest barrier
+    /// (`fence.i`), so `--strict-bus` should also run the missing-fence
+    /// checker. See [`SocBus::set_fence_contract`].
+    fence_contract: bool,
+    /// `strict && fence_contract`, hoisted into one `bool` so the store and
+    /// fetch paths test exactly what they tested before the contract existed.
+    strict_fences: bool,
     /// `Some(level)`: an access to a register graded below `level` is
     /// refused like an unmapped one. See [`SocBus::set_strict_grade`].
     strict_grade: Option<RegGrade>,
@@ -663,6 +670,8 @@ impl SocBus {
             has_ram_alias: false,
             alias_sites: BTreeSet::new(),
             strict: false,
+            fence_contract: true,
+            strict_fences: false,
             strict_grade: None,
             strict_grade_blocks: None,
             sideband: false,
@@ -1160,6 +1169,30 @@ impl SocBus {
     /// a silent zero. The vision's honest-peripheral policy.
     pub fn set_strict(&mut self, strict: bool) {
         self.strict = strict;
+        self.strict_fences = self.strict && self.fence_contract;
+    }
+
+    /// Whether code is published by a guest barrier on this chip — and so
+    /// whether `--strict-bus` also runs the missing-fence checker
+    /// ([`SocBus::missing_fence_reports`]). **On by default**: RV32's contract
+    /// is the guest's `fence.i`.
+    ///
+    /// A chip whose contract is the **store address** turns it off. On the
+    /// classic ESP32 internal SRAM is fetched with no cache between, silicon
+    /// ran freshly written SRAM0 code with no barrier at all (`test_sram0_exec`,
+    /// 2026-09-05, `docs/adr/2026-09-05-classic-jit-code-lives-in-sram0.md`),
+    /// and the emulator's own invalidation keys off the store (M7 XD3). There
+    /// a store into executable memory *is* the publish, and a checker waiting
+    /// for a `fence.i` would call every one of them — the second-stage
+    /// bootloader placing the app's IRAM, the firmware's own JIT — a firmware
+    /// bug.
+    pub fn set_fence_contract(&mut self, on: bool) {
+        self.fence_contract = on;
+        self.strict_fences = self.strict && self.fence_contract;
+        if !self.strict_fences {
+            self.code_pages.clear();
+            self.unpublished_code_words.clear();
+        }
     }
 
     pub fn strict(&self) -> bool {
@@ -1867,6 +1900,9 @@ impl SocBus {
     /// the mask ROM and the ESP-IDF second-stage bootloader copy code into
     /// RAM and jump into it and we own neither (M5 MD13). That is what makes
     /// this a working checker rather than an untested one.
+    ///
+    /// Always zero on a chip that publishes by store rather than by barrier
+    /// ([`SocBus::set_fence_contract`]): the checker is not armed there.
     #[inline]
     pub fn missing_fence_reports(&self) -> u64 {
         self.missing_fence_reports
@@ -2622,7 +2658,7 @@ impl SocBus {
                 return Err(fault);
             }
             let off = (address - self.arena_base) as usize;
-            if self.strict {
+            if self.strict_fences {
                 self.note_guest_code_write(off, address, len, value);
             }
             // **One** test against a `bool` the branch predictor owns — not
@@ -2915,7 +2951,7 @@ impl Bus for SocBus {
             return Err(fault());
         }
         self.last_fetch_region = i;
-        if self.strict {
+        if self.strict_fences {
             self.check_code_word(address, true);
         }
         if let Some(cost) = self.memory_cost.as_mut() {
@@ -2995,7 +3031,7 @@ impl Bus for SocBus {
             return Err(fault());
         }
         self.last_fetch_region = i;
-        if self.strict {
+        if self.strict_fences {
             self.check_code_word(pc, true);
         }
         if let Some(cost) = self.memory_cost.as_mut() {
@@ -3174,7 +3210,7 @@ impl Bus for SocBus {
     /// path, and a cached block has no fetch path — this is where it is told
     /// instead. Off by default and inlined away.
     fn note_cached_execute(&mut self, pc: u32, bytes: u32) {
-        if !self.strict {
+        if !self.strict_fences {
             return;
         }
         if self.unpublished_code_words.is_empty() {

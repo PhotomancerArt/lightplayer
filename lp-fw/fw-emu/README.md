@@ -30,7 +30,7 @@ cargo check -p fw-emu --target riscv32imac-unknown-none-elf --profile release-em
 Run firmware emulator tests that exercise real shader compilation and execution:
 
 ```bash
-cargo test -p fw-tests --test scene_render_emu --test profile_alloc_emu
+cargo test -p fw-tests --test scene_render_emu
 ```
 
 Do not use host workspace-wide cargo commands for this target. Use the targeted

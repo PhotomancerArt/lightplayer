@@ -56,6 +56,7 @@ use lpc_model::{
 };
 
 use crate::app::project::format_lp_value;
+use crate::app::project::node::human_node_label;
 use crate::app::project::node::node_space_section;
 use crate::{
     ControllerId, PlaylistActivateOp, ProjectController, ProjectNodeAddress, ProjectSlotAddress,
@@ -1169,7 +1170,13 @@ fn playlist_entry(
         .iter()
         .position(|child| child_tree_name(child) == Some(child_name.as_str()));
 
+    // Displayed the way the Pattern picker's derivation labels the same
+    // entry (`pattern_picker_derivation.rs`), so the two can't drift: the
+    // authored name is a node name (`noise_soft`) and reads humanised
+    // (`Noise soft`). The raw name stays the identifier used above for
+    // `child_name`/`playlist_entry_expected_child_name`.
     let name = authored_name
+        .map(|raw| human_node_label(&raw))
         .or_else(|| child.map(|index| children[index].label.clone()))
         .unwrap_or_else(|| format!("Entry {key}"));
     let activate_label = format!("Activate {name}");
@@ -1910,11 +1917,16 @@ mod tests {
         assert_eq!(face.active, Some(1), "ACTIVE follows the produced status");
         assert_eq!(face.entries.len(), 2);
         let idle = &face.entries[0];
-        assert_eq!((idle.key, idle.name.as_str()), (1, "idle"));
+        assert_eq!(
+            (idle.key, idle.name.as_str()),
+            (1, "Idle"),
+            "the strip labels an authored entry name humanised, like the \
+             Pattern picker does (`idle` → `Idle`)"
+        );
         assert_eq!(idle.duration_ms, None);
         assert!(!idle.cue);
         let cued = &face.entries[1];
-        assert_eq!((cued.key, cued.name.as_str()), (2, "active"));
+        assert_eq!((cued.key, cued.name.as_str()), (2, "Active"));
         assert_eq!(cued.duration_ms, Some(4000), "authored seconds → ms");
         assert!(cued.cue, "non-empty trigger_ids reads as a cue entry");
         assert!(
@@ -2024,6 +2036,44 @@ mod tests {
         let entry = face.entries.iter().find(|entry| entry.key == 3).unwrap();
         assert_eq!(entry.name, "Entry 3", "falls back to the child's label");
         assert!(entry.action.is_some(), "matched via the entry_<key> rule");
+    }
+
+    #[test]
+    fn playlist_entry_label_matches_the_pattern_picker_humanisation() {
+        // P7 defect: the strip used to show the raw node name
+        // (`noise_soft`) while the Play-mode Pattern picker showed the
+        // same entry through `human_label` (`Noise soft`). The strip must
+        // read the same string the picker derives (`human_node_label`,
+        // shared with `pattern_picker_derivation.rs`'s `PatternPickerEntryFacts`).
+        let mut sections = playlist_sections(Some(1));
+        if let UiNodeSection::ConfigSlots(rows) = &mut sections[2]
+            && let UiConfigSlotBody::Record(entries) = &mut rows[0].body
+        {
+            entries.fields[0] = UiConfigSlot::record(
+                "entries[1]",
+                "1",
+                vec![UiConfigSlot::value(
+                    "entries[1].name",
+                    "Name",
+                    UiSlotValue::string("noise_soft"),
+                )],
+            );
+        }
+        let mut children = playlist_children();
+        // Entry 1's authored name changed above; the mounted child tree
+        // name (matched by the loader's naming rule) must follow it.
+        children[0] = child("noise_soft", "Idle");
+
+        let Some(UiNodeFace::Playlist(face)) =
+            kind_face("playlist", &test_address(), &sections, &mut children)
+        else {
+            panic!("expected a playlist face");
+        };
+        let entry = face.entries.iter().find(|entry| entry.key == 1).unwrap();
+        assert_eq!(
+            entry.name, "Noise soft",
+            "the strip humanises the raw node name exactly like the picker"
+        );
     }
 
     #[test]
