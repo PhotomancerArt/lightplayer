@@ -3,10 +3,10 @@
 //! Deliberately small (GLSL editor UX plan, D4/QD-B): a [`Shortcut`] is the
 //! platform's primary modifier (⌘ on Mac, Ctrl elsewhere) plus a key, and
 //! [`Shortcut::display`] renders it in that platform's convention (`⌘↵` vs
-//! `Ctrl+Enter`). There is no global command registry or palette, and no
-//! event matching here — capture happens inside the CodeMirror keymap
-//! (`Mod-` bindings in `vendor-src/codemirror/entry.mjs`), so this module
-//! only needs platform detection and display.
+//! `Ctrl+Enter`). There is no global command registry: the editor's own
+//! shortcuts are captured inside the CodeMirror keymap (`Mod-` bindings in
+//! `vendor-src/codemirror/entry.mjs`). The one window-wide shortcut is the
+//! command palette's ([`PALETTE`]), matched by [`Shortcut::matches`].
 
 use std::sync::OnceLock;
 
@@ -22,6 +22,13 @@ pub const SAVE: Shortcut = Shortcut {
     alt: false,
     shift: false,
     key: Key::Char('s'),
+};
+
+/// Open the command palette (`Mod-k`), from anywhere in Studio.
+pub const PALETTE: Shortcut = Shortcut {
+    alt: false,
+    shift: false,
+    key: Key::Char('k'),
 };
 
 /// Platform family, as far as shortcut display cares: Mac renders modifier
@@ -71,9 +78,10 @@ pub enum Key {
     Char(char),
 }
 
-/// One editor shortcut: the platform's primary modifier (⌘ on Mac, Ctrl
-/// elsewhere) plus optional Alt/Shift and a key. Display-only today; the
-/// actual key capture lives in the CodeMirror keymap.
+/// One shortcut: the platform's primary modifier (⌘ on Mac, Ctrl
+/// elsewhere) plus optional Alt/Shift and a key. The editor's are
+/// display-only (their capture lives in the CodeMirror keymap); the
+/// palette's is matched against window keydowns with [`Shortcut::matches`].
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Shortcut {
     pub alt: bool,
@@ -118,6 +126,36 @@ impl Shortcut {
             Key::Char(ch) => out.extend(ch.to_uppercase()),
         }
         out
+    }
+
+    /// Whether a keydown (its `key` string and modifier flags) is this
+    /// shortcut on `platform`: the primary modifier held and the other one
+    /// not (Ctrl+K on a Mac is the text fields' kill-line), Alt and Shift
+    /// exactly as declared (CodeMirror's `Shift-Mod-k` deletes a line).
+    pub fn matches(
+        &self,
+        platform: Platform,
+        key: &str,
+        meta: bool,
+        ctrl: bool,
+        alt: bool,
+        shift: bool,
+    ) -> bool {
+        let (primary, other) = match platform {
+            Platform::Mac => (meta, ctrl),
+            Platform::Other => (ctrl, meta),
+        };
+        let key_matches = match self.key {
+            Key::Enter => key == "Enter",
+            Key::Char(ch) => {
+                let mut chars = key.chars();
+                chars
+                    .next()
+                    .is_some_and(|first| first.eq_ignore_ascii_case(&ch))
+                    && chars.next().is_none()
+            }
+        };
+        primary && !other && alt == self.alt && shift == self.shift && key_matches
     }
 }
 
@@ -174,6 +212,28 @@ mod tests {
         assert_eq!(combo.display(Platform::Mac), "⌥⇧⌘K");
         // Elsewhere: Ctrl leads.
         assert_eq!(combo.display(Platform::Other), "Ctrl+Alt+Shift+K");
+    }
+
+    #[test]
+    fn the_palette_shortcut_is_the_primary_modifier_and_k() {
+        assert_eq!(PALETTE.display(Platform::Mac), "⌘K");
+        assert_eq!(PALETTE.display(Platform::Other), "Ctrl+K");
+
+        // ⌘K on a Mac, Ctrl+K elsewhere; either letter case.
+        assert!(PALETTE.matches(Platform::Mac, "k", true, false, false, false));
+        assert!(PALETTE.matches(Platform::Mac, "K", true, false, false, false));
+        assert!(PALETTE.matches(Platform::Other, "k", false, true, false, false));
+
+        // The other platform's modifier is not it: Ctrl+K on a Mac kills to
+        // the end of the line in a text field.
+        assert!(!PALETTE.matches(Platform::Mac, "k", false, true, false, false));
+        assert!(!PALETTE.matches(Platform::Other, "k", true, false, false, false));
+        assert!(!PALETTE.matches(Platform::Mac, "k", true, true, false, false));
+
+        // Shift-Mod-k is CodeMirror's delete-line; a bare k is typing.
+        assert!(!PALETTE.matches(Platform::Mac, "K", true, false, false, true));
+        assert!(!PALETTE.matches(Platform::Mac, "k", false, false, false, false));
+        assert!(!PALETTE.matches(Platform::Mac, "Enter", true, false, false, false));
     }
 
     #[test]
