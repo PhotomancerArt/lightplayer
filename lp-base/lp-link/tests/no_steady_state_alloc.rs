@@ -5,6 +5,11 @@
 //! exactly one per message. Everything else the link needs it allocated in
 //! `Link::new` (or, for the reassembly buffers and the event queue, during
 //! warm-up, and keeps).
+//!
+//! With features `secure` and `sim`, the same holds for secure links: every
+//! frame sealed and opened in place, on `usb()` with selective repeat (with
+//! the same losses) and on `ws()` with no ARQ (lossless: a loss there resets
+//! the session).
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
@@ -44,6 +49,18 @@ fn external_messages_over_a_small_send_ring_allocate_only_delivered_messages() {
     );
 }
 
+#[cfg(all(feature = "secure", feature = "sim"))]
+#[test]
+fn a_secure_selective_repeat_link_over_usb_allocates_only_delivered_messages() {
+    run_exchange::<SelectiveRepeat>(LinkConfig::usb(), false, true, true);
+}
+
+#[cfg(all(feature = "secure", feature = "sim"))]
+#[test]
+fn a_secure_no_arq_link_over_ws_allocates_only_delivered_messages() {
+    run_exchange::<lp_link::NoArq>(LinkConfig::ws(), false, true, false);
+}
+
 /// Largest message the exchange sends.
 const BIG: usize = 12 * 1024;
 
@@ -52,8 +69,15 @@ fn exchange<A: Arq>(cfg: LinkConfig) {
 }
 
 fn exchange_with<A: Arq>(cfg: LinkConfig, external: bool) {
+    run_exchange::<A>(cfg, external, false, true);
+}
+
+/// The exchange: `secure` builds both links secure (`a` the responder, `b`
+/// the initiator); `lossy` loses and damages frames on the way.
+fn run_exchange<A: Arq>(cfg: LinkConfig, external: bool, secure: bool, lossy: bool) {
     let payload: Vec<u8> = (0..BIG).map(|i| (i * 7 + 3) as u8).collect();
-    let mut w = World::<A>::new(cfg, &payload);
+    let mut w = World::<A>::new(cfg, &payload, secure);
+    w.lossy = lossy;
     if external {
         // Only `a` (the board) has the small ring; its peer is a host.
         w.external = true;
@@ -92,14 +116,33 @@ fn exchange_with<A: Arq>(cfg: LinkConfig, external: bool) {
         w.a.config().framing
     );
     for (peak, link) in [(w.peak_ram_a, &w.a), (w.peak_ram_b, &w.b)] {
-        let bound = Link::<A>::ram_bound(link.config());
+        let bound = ram_bound(link);
         assert!(peak <= bound, "{peak} > {bound}");
     }
     assert_eq!(w.a.counters().resets + w.b.counters().resets, 0);
     if external {
         assert!(w.external_sent > 50, "external: {}", w.external_sent);
     }
-    assert!(w.dropped > 0 && w.a.counters().retransmits + w.b.counters().retransmits > 0);
+    if lossy {
+        assert!(w.dropped > 0 && w.a.counters().retransmits + w.b.counters().retransmits > 0);
+    }
+    #[cfg(all(feature = "secure", feature = "sim"))]
+    if secure {
+        assert!(w.a.is_secure() && w.b.is_secure());
+        assert_eq!(w.a.counters().handshakes, 1);
+        assert_eq!(
+            w.a.counters().seal_failures + w.b.counters().seal_failures,
+            0
+        );
+    }
+}
+
+fn ram_bound<A: Arq>(link: &Link<A>) -> usize {
+    #[cfg(all(feature = "secure", feature = "sim"))]
+    if link.is_secure() {
+        return Link::<A>::ram_bound_secure(link.config());
+    }
+    Link::<A>::ram_bound(link.config())
 }
 
 struct World<'p, A: Arq> {
@@ -121,13 +164,23 @@ struct World<'p, A: Arq> {
     external: bool,
     /// External messages `a` queued during the run.
     external_sent: u64,
+    /// Frames are lost and damaged on the way.
+    lossy: bool,
 }
 
 impl<'p, A: Arq> World<'p, A> {
-    fn new(cfg: LinkConfig, payload: &'p [u8]) -> Self {
+    fn new(cfg: LinkConfig, payload: &'p [u8], secure: bool) -> Self {
+        let (a, b) = if secure {
+            secure_pair(&cfg)
+        } else {
+            (
+                Link::new(cfg.clone(), 0x1234_5678),
+                Link::new(cfg, 0x9ABC_DEF0),
+            )
+        };
         World {
-            a: Link::new(cfg.clone(), 0x1234_5678),
-            b: Link::new(cfg, 0x9ABC_DEF0),
+            a,
+            b,
             ring_a: LogRing::new(),
             ring_b: LogRing::new(),
             payload,
@@ -142,6 +195,7 @@ impl<'p, A: Arq> World<'p, A> {
             buf: [0; 4096],
             external: false,
             external_sent: 0,
+            lossy: true,
         }
     }
 
@@ -248,7 +302,7 @@ impl<'p, A: Arq> World<'p, A> {
                     self.rng ^= self.rng << 13;
                     self.rng ^= self.rng >> 17;
                     self.rng ^= self.rng << 5;
-                    let r = self.rng % 100;
+                    let r = if self.lossy { self.rng % 100 } else { 99 };
                     if r < 2 {
                         self.dropped += 1;
                         continue;
@@ -262,6 +316,7 @@ impl<'p, A: Arq> World<'p, A> {
                         Framing::Stream => to.on_bytes(self.now, &self.buf[..n]),
                         Framing::Datagram => to.on_datagram(self.now, &self.buf[..n]),
                     }
+                    answer_lookups(to);
                 }
             }
             if !moved {
@@ -292,6 +347,50 @@ impl<'p, A: Arq> World<'p, A> {
         self.rng ^= self.rng << 5;
         self.rng
     }
+}
+
+/// A secure pair: `a` the responder (the board), `b` the initiator.
+#[cfg(all(feature = "secure", feature = "sim"))]
+fn secure_pair<A: Arq>(cfg: &LinkConfig) -> (Link<A>, Link<A>) {
+    use lp_link::secure_channel::SecureRole;
+    let (key_id, psk) = secure_key();
+    (
+        Link::new_secure(
+            cfg.clone(),
+            0x1234_5678,
+            SecureRole::Responder,
+            lp_link::sim::sim_entropy::fill,
+        ),
+        Link::new_secure(
+            cfg.clone(),
+            0x9ABC_DEF0,
+            SecureRole::Initiator { key_id, psk },
+            lp_link::sim::sim_entropy::fill,
+        ),
+    )
+}
+
+#[cfg(not(all(feature = "secure", feature = "sim")))]
+fn secure_pair<A: Arq>(_cfg: &LinkConfig) -> (Link<A>, Link<A>) {
+    unreachable!("secure links need features secure and sim")
+}
+
+#[cfg(all(feature = "secure", feature = "sim"))]
+fn secure_key() -> (lp_link::secure_channel::KeyId, lp_link::secure_channel::Psk) {
+    use lp_link::secure_channel::{KeyId, Psk};
+    (KeyId([5; 16]), Psk::new([6; 32]))
+}
+
+/// The board's edge: answer its key lookup (a plain link has none).
+fn answer_lookups<A: Arq>(link: &mut Link<A>) {
+    #[cfg(all(feature = "secure", feature = "sim"))]
+    while let Some(ev) = link.poll_secure_event() {
+        if let lp_link::secure_channel::SecureEvent::KeyLookup { key_id } = ev {
+            link.provide_keys(key_id, &[secure_key().1]);
+        }
+    }
+    #[cfg(not(all(feature = "secure", feature = "sim")))]
+    let _ = link;
 }
 
 /// Run `f` counting this thread's allocations (and reallocations).

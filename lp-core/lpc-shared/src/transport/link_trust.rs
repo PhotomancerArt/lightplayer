@@ -7,10 +7,17 @@
 ///   the browser worker, the emulator's own console. A trusted link holds
 ///   the edit tier without logging in, because the cable is the recovery
 ///   path for a board whose passwords are lost.
-/// - **Untrusted** — a radio link (BLE, later WiFi). It holds nothing until
-///   it logs in, except play when the device is explicitly `open`.
+/// - **Untrusted** — a radio link (BLE). It holds nothing until it logs in,
+///   except play when the device is explicitly `open`.
+/// - **Keyed** — an untrusted network link secured by lp-link's secure
+///   channel (a LAN WebSocket, the relay). Its tier is the tier of the
+///   access entry its handshake matched (none for the anonymous key), else
+///   play when the device is `open`. It logs in by handshake only: the HMAC
+///   `LoginAnswer` is refused on it, so a relay can never pass a login
+///   through a session it could sit in the middle of.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LinkTrust {
     Trusted,
     Untrusted,
+    Keyed,
 }

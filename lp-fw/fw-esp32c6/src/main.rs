@@ -113,6 +113,8 @@ pub use fw_esp32_common::logger;
 ))]
 mod output;
 mod recovery;
+#[cfg(all(feature = "diag_secure_link", not(fw_harness)))]
+mod secure_link_probe;
 mod serial;
 #[cfg(not(fw_harness))]
 mod stack_probe;
@@ -848,6 +850,8 @@ async fn main(spawner: embassy_executor::Spawner) {
     #[cfg(not(fw_harness))]
     {
         let app = boot_firmware(spawner);
+        #[cfg(feature = "diag_secure_link")]
+        secure_link_probe::run();
         board::esp32c6::status_led::show(lpc_hardware::StatusLedState::Running);
         // Keep the marker substring "fw-esp32c6 initialized, starting server
         // loop" intact: two readiness classifiers grep for it

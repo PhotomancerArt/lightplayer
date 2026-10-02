@@ -9,9 +9,34 @@
 //! (`lp-shader/lpvm-native/tests/support/peak_alloc.rs`).
 //!
 //! Each binary still declares its own `#[global_allocator] static ALLOC:
-//! TrackingAlloc`, and each binary holds exactly ONE `#[test]`: the counters
-//! are process-wide, so two tests in one binary would run on parallel threads
-//! and read each other's allocations as their own peak.
+//! TrackingAlloc`, and each binary holds exactly ONE `#[test]`.
+//!
+//! `LIVE`/`PEAK` are `thread_local!`, counting only the bytes this thread
+//! allocates and frees (`docs/debt/process-wide-heap-counters-in-tests.md`):
+//! a process-wide counter also sees the libtest harness's own main thread —
+//! its `running_tests`/`timeout_queue` bookkeeping lands inside the
+//! measurement window on a loaded runner and inflates the figure with
+//! nothing the compile under test did. `LIVE`/`PEAK` are signed (`isize`)
+//! internally: a thread may free what another thread allocated, or free,
+//! later in its own life, memory it allocated before this module ever took
+//! a reading — both are legitimate net-negative excursions, not bugs.
+//! Confirmed on this suite: every spawned thread frees a `Box<ThreadInit>`
+//! the parent thread allocated to start it
+//! (`std::thread::lifecycle::ThreadInit::init`) before any test code runs;
+//! separately, `lpc-engine`'s probe runs a warm-up compile pass and drops
+//! it *before* taking its first reading of the measured pass — dropping the
+//! warm-up frees memory allocated before that reading, so the very next
+//! reading legitimately sits below it. `live()`/`peak()` read relative to
+//! [`FLOOR`], the lowest raw value this thread has ever been asked to
+//! report, ratcheted down (never up, never clamped to zero) the moment a
+//! reading would otherwise go negative — see [`relative`]. That keeps every
+//! one-off dip, whichever of the two shapes above caused it, from ever
+//! reaching a caller as a negative number, without hiding the *difference*
+//! between two readings the way pinning a negative reading to zero would.
+//! The public API stays `usize` (`StepRecord`/`Summary`, shared with the two
+//! other probe binaries, keep their existing types); a probe whose *traced*
+//! work spawned threads would need to name and join them inside the window
+//! instead.
 //!
 //! Host caveat: pointers here are 8 bytes and the device's are 4, so host
 //! figures overstate device DRAM roughly 1.5–2× for pointer-heavy structures.
@@ -24,6 +49,7 @@
 )]
 
 use std::alloc::{GlobalAlloc, Layout, System};
+use std::cell::Cell;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use lpir::FloatMode;
@@ -34,15 +60,59 @@ use lpvm_native::native_options::NativeCompileOptions;
 
 pub struct TrackingAlloc;
 
-static LIVE: AtomicUsize = AtomicUsize::new(0);
-static PEAK: AtomicUsize = AtomicUsize::new(0);
+thread_local! {
+    /// This thread's live heap bytes since thread start: bytes allocated
+    /// minus bytes freed, on this thread only. Signed — see the module
+    /// docs. `const`-initialised with no destructor, so reaching it from
+    /// inside the allocator never allocates.
+    static LIVE: Cell<isize> = const { Cell::new(0) };
+    /// The highest `LIVE` this thread has reached since the last
+    /// [`reset_peak`]. Same signedness as `LIVE`, same reason.
+    static PEAK: Cell<isize> = const { Cell::new(0) };
+    /// The lowest raw value (`LIVE` or `PEAK`) this thread has ever been
+    /// asked to report, ratcheted down lazily by [`relative`]. Not a
+    /// one-time latch: see the module docs for why a single bootstrap
+    /// reading is not enough.
+    static FLOOR: Cell<Option<isize>> = const { Cell::new(None) };
+}
+
+/// `raw` relative to this thread's [`FLOOR`], ratcheting the floor down to
+/// `raw` first if `raw` is a new low. Every caller (`live()`, `peak()`)
+/// routes through here, so by construction the floor never sits above
+/// whatever it is about to be subtracted from — the result is never
+/// negative and never needs a fallible conversion. A caller that never sees
+/// a reading below the current floor never moves it, so genuine growth
+/// between two readings still shows up as a genuine, uncollapsed
+/// difference; only a new low point ever adjusts the reference frame, and
+/// only downward.
+fn relative(raw: isize) -> usize {
+    let floor = FLOOR
+        .try_with(|cell| {
+            let floor = cell.get().map_or(raw, |f| f.min(raw));
+            cell.set(Some(floor));
+            floor
+        })
+        .unwrap_or(0);
+    // `floor <= raw` by construction above; `max(0)` only guards the
+    // `try_with` failure fallback (thread teardown), where `floor` may have
+    // defaulted to 0 without having been ratcheted to `raw`.
+    (raw - floor).max(0) as usize
+}
 
 unsafe impl GlobalAlloc for TrackingAlloc {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         let ptr = unsafe { System.alloc(layout) };
         if !ptr.is_null() {
-            let live = LIVE.fetch_add(layout.size(), Ordering::Relaxed) + layout.size();
-            PEAK.fetch_max(live, Ordering::Relaxed);
+            // `try_with`: a thread tearing down may still allocate or free.
+            let _ = LIVE.try_with(|live| {
+                let level = live.get() + layout.size() as isize;
+                live.set(level);
+                let _ = PEAK.try_with(|peak| {
+                    if level > peak.get() {
+                        peak.set(level);
+                    }
+                });
+            });
             if CENSUS.load(Ordering::Relaxed) {
                 census_count(layout.size());
             }
@@ -51,13 +121,14 @@ unsafe impl GlobalAlloc for TrackingAlloc {
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        LIVE.fetch_sub(layout.size(), Ordering::Relaxed);
+        let _ = LIVE.try_with(|live| live.set(live.get() - layout.size() as isize));
         unsafe { System.dealloc(ptr, layout) }
     }
 }
 
+/// This thread's live heap relative to its [`FLOOR`] — see [`relative`].
 pub fn live() -> usize {
-    LIVE.load(Ordering::Relaxed)
+    relative(LIVE.try_with(Cell::get).unwrap_or(0))
 }
 
 // --- Census mode --------------------------------------------------------
@@ -220,11 +291,14 @@ pub fn print_census(title: &str, census: &CensusRecord, watch_labels: &[(&str, u
 
 /// Reset the peak to the current live level.
 pub fn reset_peak() {
-    PEAK.store(live(), Ordering::Relaxed);
+    let level = LIVE.try_with(Cell::get).unwrap_or(0);
+    let _ = PEAK.try_with(|peak| peak.set(level));
 }
 
+/// This thread's peak live heap since [`reset_peak`], relative to its
+/// [`FLOOR`] like [`live`] — see [`relative`].
 pub fn peak() -> usize {
-    PEAK.load(Ordering::Relaxed)
+    relative(PEAK.try_with(Cell::get).unwrap_or(0))
 }
 
 /// One pipeline step's memory trace. `Copy` on purpose: records are written

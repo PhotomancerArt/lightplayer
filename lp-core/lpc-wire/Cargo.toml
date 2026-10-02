@@ -13,6 +13,10 @@ schema-gen = ["std", "dep:schemars", "lpc-model/schema-gen"]
 # ser-write-json for streaming serialization (ESP32), and the packed sink
 # (`PackSink`, `ser_wire_to`) that rides the same serializer.
 ser-write-json = ["dep:ser-write-json", "dep:ryu-js", "lp-json-pack/lex"]
+# A `WireLinkPort` that is a secure lp-link initiator (Noise NNpsk0 with a
+# key, sealed frames): lp-cli and Studio's future network links. Nothing
+# turns it on in M4; it must build for wasm32 (`check-lp-link-targets`).
+secure-link = ["lp-link/secure"]
 
 [dependencies]
 lp-collection = { workspace = true, features = ["serde"] }

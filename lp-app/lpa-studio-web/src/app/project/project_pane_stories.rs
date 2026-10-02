@@ -7,9 +7,9 @@ use lpa_studio_core::app::project::format_lp_value;
 use lpa_studio_core::app::project::node::{add_node_menu, gate_add_node_menu, set_import_source};
 use lpa_studio_core::{
     ControllerId, DirtySummary, LpFeature, ProjectController, ProjectNodeAddress,
-    ProjectNodeStatusTone, ProjectNodeStatusView, ProjectOp, ProjectSlotAddress, ProjectSlotRoot,
+    ProjectNodeStatusTone, ProjectNodeStatusView, ProjectSlotAddress, ProjectSlotRoot,
     ProjectSyncPhase, SlotEditOp, SlotPath, UiAction, UiAttachTarget, UiImportablePattern,
-    UiPaneAction, UiPendingEdit, UiPendingEditKind, UiPendingEditPhase, UiStatus,
+    UiOfferTree, UiPendingEdit, UiPendingEditKind, UiPendingEditPhase, UiStatus,
 };
 use lpa_studio_web_story_macros::story;
 use lpc_model::{GradientConfig, ToLpValue};
@@ -17,7 +17,8 @@ use lpc_model::{GradientConfig, ToLpValue};
 use crate::app::home::target_pick_popover::HardwarePickPopover;
 use crate::app::node::node_story_fixtures::{palette_cycle, sunset_gradient};
 use crate::app::project::{ProjectPane, ProjectSettingsSection};
-use crate::app::story_fixtures::project_editor_fixture;
+use crate::app::story_fixtures::{project_editor_fixture, project_save_revert_offers};
+use crate::core::OffersProvider;
 
 #[story(
     description = "Clean project: the project name as title, 'Project' kind label, no chips, no header actions (adding lives in the node list's dashed 'Add node…' row), quiet 'i' detail trigger (the status word lives in the popup); the node tree is the whole pane body — no 'Node tree' heading and no Refresh/Disconnect strip (P6 sidebar tidy)."
@@ -450,7 +451,6 @@ pub(crate) fn empty_project() -> Element {
     let mut view = project_editor_fixture(ProjectSyncPhase::Ready);
     view.tree.roots = Vec::new();
     view.nodes = Vec::new();
-    view.header_actions = Vec::new();
     view.add_node_menu = Some(add_node_menu(&UiAttachTarget::ProjectRoot));
 
     rsx! {
@@ -510,10 +510,12 @@ fn StoryPane(
     view.debug_overrides = debug_overrides;
     view.edits_in_flight = edits_in_flight;
     view.pending_edits = pending_edits;
-    view.header_actions = if actions {
-        header_actions()
+    // The header's Save / Revert are the view's `project/*` offers, which
+    // the shell would provide; the story provides them itself.
+    let offers = if actions {
+        project_save_revert_offers()
     } else {
-        Vec::new()
+        UiOfferTree::new()
     };
     // Mirror the controller (review round): no header add action — the
     // picker data rides the view and renders as the tree's add row.
@@ -521,31 +523,17 @@ fn StoryPane(
 
     rsx! {
         div { class: "tw:max-w-[320px]",
-            ProjectPane {
-                view,
-                status: UiStatus::good("Ready"),
-                on_action: move |_| {},
-                initially_open,
-                add_picker_initially_open: add_picker_open,
+            OffersProvider { offers,
+                ProjectPane {
+                    view,
+                    status: UiStatus::good("Ready"),
+                    on_action: move |_| {},
+                    initially_open,
+                    add_picker_initially_open: add_picker_open,
+                }
             }
         }
     }
-}
-
-/// The same Save / Revert-to-saved pair the project controller produces while
-/// persisted edits are pending.
-fn header_actions() -> Vec<UiPaneAction> {
-    vec![
-        UiPaneAction::new("save", project_action(ProjectOp::SaveOverlay)),
-        UiPaneAction::new(
-            "revert",
-            project_action(ProjectOp::RevertAllEdits).with_label("Revert to saved"),
-        ),
-    ]
-}
-
-fn project_action(op: ProjectOp) -> UiAction {
-    UiAction::from_op(ControllerId::new(ProjectController::NODE_ID), op)
 }
 
 /// One change-list entry with the same per-entry revert action the project

@@ -329,13 +329,12 @@ impl EvalStudio {
         rows
     }
 
-    /// The app agent's readout of this studio, ids minted.
+    /// The app agent's readout of this studio, offers listed by path.
     pub(crate) fn readout(&mut self) -> String {
         self.actor
             .controller_mut_for_test()
             .app_agent_readout_for_test()
-            .mint()
-            .0
+            .render()
     }
 
     /// Whether unsaved authored edits remain.

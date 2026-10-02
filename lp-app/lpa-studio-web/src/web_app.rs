@@ -1336,7 +1336,19 @@ pub fn App() -> Element {
             );
             ChromeSessionControl {
                 session,
-                project: editor.map(|(editor, status)| ProjectDetailContent::new(editor, status)),
+                // The project's own verbs come from the view's offer tree
+                // (`project/save`, `project/revert`), like the pane header's.
+                project: editor.map(|(editor, status)| {
+                    ProjectDetailContent::new(
+                        editor,
+                        status,
+                        current_view
+                            .offers
+                            .verbs_of(&lpa_studio_core::OfferPath::project())
+                            .cloned()
+                            .collect(),
+                    )
+                }),
                 relationship,
                 project_popover: project_popover_inputs(
                     relationship,

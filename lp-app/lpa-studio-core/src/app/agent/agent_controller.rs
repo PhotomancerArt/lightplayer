@@ -295,15 +295,9 @@ impl AgentController {
         self.app.bridge.borrow_mut().act_ack = Some((seq, result));
     }
 
-    /// The action id `id` named in the readout the agent was last shown.
-    pub(crate) fn app_minted_action(&self, id: &str) -> Option<crate::UiAction> {
-        self.app
-            .bridge
-            .borrow()
-            .minted
-            .iter()
-            .find(|entry| entry.id == id)
-            .map(|entry| entry.action.clone())
+    /// Whether a readout the agent was shown this session listed `path`.
+    pub(crate) fn app_offer_was_shown(&self, path: &crate::OfferPath) -> bool {
+        self.app.bridge.borrow().shown.contains(path)
     }
 
     /// The app chat's session, for the controller's card bookkeeping.
