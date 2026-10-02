@@ -1,0 +1,1104 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>spike: canvas design language — objects as THINGS</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #101317;            --bg-wash: rgba(255,255,255,.04);
+    --surface: #171b20;       --surface-subtle: #14181d;
+    --surface-muted: #11161b; --raised: #20272e;   --raised-strong: #26313a;
+    --terminal: #0c1114;      --track: #10151a;
+
+    --border: #2a3138;        --border-muted: #252d34;
+    --border-subtle: #293039; --border-strong: #3e4852;
+
+    --text: #f2f0e8;   --strong: #fffaf0;  --muted: #c7cbd0;
+    --subtle: #99a2ad; --dim: #9ba4ad;
+    --heading: #94b8aa; --accent: #7be0b2; --accent-border: #65bd96;
+
+    --sel: #4c9ffe;    --sel-bg: rgba(76,159,254,.12);
+    --good: #3fd68e;   --dirty: #e4c065;
+    --err-bg: #301b1d; --err-border: #874b4b; --err-text: #ffc7c7;
+    --warn-text: #f0dc7a;
+
+    --obj-0: #5aa9e6; --obj-1: #3fd68e; --obj-2: #e4c065;
+    --obj-3: #c792ea; --obj-4: #f0913b; --obj-5: #64d8cb;
+    --gap: #3a4149;
+
+    --sans: Inter, -apple-system, "Segoe UI", ui-sans-serif, sans-serif;
+    --mono: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, monospace;
+    --r-xs: 5px; --r-sm: 6px; --r-md: 8px;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body {
+    margin: 0; padding: 26px 30px 140px;
+    background: linear-gradient(180deg, var(--bg-wash), transparent 240px), var(--bg);
+    color: var(--text);
+    font: 13.5px/1.45 var(--sans);
+  }
+  h1 { font-size: 13px; letter-spacing: .12em; color: var(--heading);
+       text-transform: uppercase; margin: 0 0 6px; }
+  p.hint { color: var(--dim); font-size: 12px; margin: 0 0 20px; max-width: 980px; }
+  p.hint b { color: var(--muted); }
+  h2 { font-size: 12px; letter-spacing: .1em; color: var(--heading);
+       text-transform: uppercase; margin: 38px 0 4px; }
+  h2 .num { color: var(--dim); margin-right: 6px; }
+  p.sub { color: var(--subtle); font-size: 12px; margin: 0 0 12px; max-width: 980px; }
+  p.sub b { color: var(--muted); }
+  p.sub code, .cap code { font: 11px var(--mono); color: var(--muted); }
+
+  .xstrip {
+    display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center;
+    border: 1px dashed var(--border-strong); border-radius: var(--r-md);
+    padding: 10px 12px; margin: 0 0 8px; background: var(--surface-subtle);
+    position: sticky; top: 8px; z-index: 40;
+  }
+  .xstrip.local { position: static; margin-bottom: 10px; }
+  .xstrip .lbl { font: 10px var(--mono); letter-spacing: .1em; color: var(--dim);
+                 text-transform: uppercase; margin-right: -6px; }
+  button, select {
+    font: 11px var(--mono); color: var(--muted);
+    background: var(--raised); border: 1px solid var(--border-strong);
+    border-radius: var(--r-xs); padding: 3px 9px; cursor: pointer;
+  }
+  button:hover { color: var(--strong); border-color: #4a555f; }
+  button.on { color: var(--sel); border-color: var(--sel); background: var(--sel-bg); }
+  input[type=range] { accent-color: var(--sel); vertical-align: middle; }
+  .val { font: 11px var(--mono); color: var(--accent); min-width: 3ch; display: inline-block; }
+
+  /* ---- comparison grids ---- */
+  .cmp { display: flex; gap: 14px; flex-wrap: wrap; align-items: flex-start; margin: 0 0 6px; }
+  .cell {
+    background: radial-gradient(ellipse 90% 70% at 50% 28%, #131920, var(--terminal));
+    border: 1px solid var(--border-muted); border-radius: var(--r-md);
+    padding: 8px 8px 4px; position: relative;
+  }
+  .cell h3 { margin: 0 0 2px; font: 10px var(--mono); letter-spacing: .1em;
+             text-transform: uppercase; color: var(--subtle); }
+  .cell h3 b { color: var(--muted); }
+  .cell .tag { position: absolute; top: 8px; right: 10px; font: 9px var(--mono);
+               color: var(--dim); letter-spacing: .08em; text-transform: uppercase; }
+  .cell svg { display: block; }
+  .cap { color: var(--dim); font-size: 11.5px; margin: 2px 0 14px; max-width: 980px; }
+  .cap b { color: var(--muted); }
+
+  /* ---- object body states (mirrors .lpme-obj-hull in the app) ---- */
+  .hull { fill: rgba(255,255,255,.025); stroke: rgba(154,151,143,.35);
+          transition: fill 80ms ease, stroke 80ms ease; }
+  .hull.hov { fill: rgba(90,169,230,.08); stroke: rgba(90,169,230,.6); }
+  .hull.sel { fill: rgba(76,159,254,.1); stroke: #4c9ffe; }
+
+  /* section 3 interactive */
+  .wrap3 { position: relative; display: inline-block; }
+  .wrap3 svg { cursor: crosshair; }
+  .dmenu {
+    position: absolute; z-index: 30; min-width: 240px; white-space: nowrap;
+    background: var(--raised); border: 1px solid var(--border-strong);
+    border-radius: var(--r-sm); box-shadow: 0 10px 28px rgba(0,0,0,.55);
+    padding: 4px; font: 11px var(--mono);
+  }
+  .dmenu .mh { padding: 3px 8px 5px; color: var(--dim); font-size: 9.5px;
+               letter-spacing: .1em; text-transform: uppercase; }
+  .dmenu .mi { display: flex; align-items: center; gap: 8px; width: 100%;
+               padding: 5px 8px; border: 0; background: none; border-radius: 4px;
+               color: var(--muted); text-align: left; }
+  .dmenu .mi:hover { background: var(--sel-bg); color: var(--strong); }
+  .dmenu .mi i { width: 9px; height: 9px; border-radius: 2px; flex: none; }
+  .dmenu .mi small { margin-left: auto; color: var(--dim); }
+  #log3 { font: 11px var(--mono); color: var(--subtle); background: var(--surface-muted);
+          border: 1px solid var(--border-muted); border-radius: var(--r-sm);
+          padding: 8px 10px; margin-top: 10px; max-width: 720px; min-height: 74px; }
+  #log3 div { padding: 1px 0; }
+  #log3 b { color: var(--accent); font-weight: 600; }
+  #log3 .amb { color: var(--warn-text); }
+
+  table.dm { border-collapse: collapse; font-size: 12px; margin: 8px 0 4px; }
+  table.dm th, table.dm td { border: 1px solid var(--border-muted); padding: 5px 10px;
+                             text-align: left; vertical-align: top; }
+  table.dm th { font: 10px var(--mono); letter-spacing: .08em; text-transform: uppercase;
+                color: var(--subtle); background: var(--surface-subtle); }
+  table.dm td { color: var(--muted); }
+  table.dm td:first-child { font-family: var(--mono); font-size: 11px; color: var(--text); white-space: nowrap; }
+
+  footer { margin-top: 44px; border-top: 1px solid var(--border-muted); padding-top: 12px; }
+  footer h2 { margin-top: 0; }
+  footer code { font: 11px var(--mono); color: var(--accent); }
+  footer td code { color: var(--muted); }
+
+  body[data-solo] section { display: none; }
+  body[data-solo="1"] section[data-sec="1"],
+  body[data-solo="2"] section[data-sec="2"],
+  body[data-solo="3"] section[data-sec="3"],
+  body[data-solo="4"] section[data-sec="4"] { display: block; }
+  body[data-solo] footer { display: none; }
+</style>
+
+<h1>Canvas design language — objects as THINGS</h1>
+<p class="hint">
+  Pass-2 gate seed: objects on the mapping canvas <b>"should feel like individual THINGS,
+  not collections of hard-to-target tiny things."</b> Pass 2 shipped padded <b>convex</b> hulls
+  with whole-hull hit targets; this spike explores the next step on three axes:
+  <b>(1)</b> the outline itself — convex hull vs a morphological <b>offset-and-union</b>
+  (buffer every lamp by r, union the discs) that respects concavity;
+  <b>(2)</b> the lamps — round 3: <b>stroke + voronoi</b>, the solid cell ribbon placed on /
+  inside / outside the stroke to capture direction (an object provides an outline stroke and
+  its lamp polygons);
+  <b>(3)</b> overlapping-object <b>selection</b> — shipped v1 vs KiCad-style menu vs
+  click-to-cycle vs prefer-same-fixture. Section 4 composes the pieces into three
+  complete design languages on the mini-dome. Geometry is real-ish: the mini-dome's
+  5 sectors + 3 doors, a C-arc, the peach.
+</p>
+
+<div class="xstrip" id="gstrip">
+  <span class="lbl">outline r</span>
+  <input type="range" id="padr" min="5" max="16" step="1" value="9">
+  <span class="val" id="padr-v">9</span>
+  <span class="lbl">buffer</span>
+  <button id="b-line" title="offset from the polyline through lamp centres (smooth) — long jumps stay point-buffered">line</button>
+  <button id="b-disc" title="round 1: offset from per-lamp discs (scalloped)">discs</button>
+  <span class="lbl">holes</span>
+  <button id="b-holes" title="offset-union of a hollow shape has interior holes; fill = keep only outer loops">fill holes</button>
+  <span class="lbl">smoothing</span>
+  <button id="b-smooth" title="2 rounds of Chaikin corner-cutting on the marching-squares contour">smooth</button>
+  <span class="lbl" style="margin-left:12px">capture</span>
+  <button data-solo="">all</button>
+  <button data-solo="1">§1</button>
+  <button data-solo="2">§2</button>
+  <button data-solo="3">§3</button>
+  <button data-solo="4">§4</button>
+</div>
+
+<!-- ============================ 1 ─ OUTLINES ============================ -->
+<section data-sec="1">
+<h2><span class="num">1</span>Object outlines — convex hull vs offset-and-union</h2>
+<p class="sub">
+  Same lamps, three treatments per row: the shipped <b>padded convex hull</b>, the
+  <b>offset-union</b> (distance field, iso-contour at r, marching squares + Chaikin), and both
+  <b>overlaid</b> — the hatched wedge is the area the convex hull claims but the object doesn't
+  occupy: dead click-target, and visually a lie about the shape. <b>Round 2 (gate ruling):</b>
+  union wins; the buffer now offsets from the <b>polyline through lamp centres</b> instead of
+  per-lamp discs, which kills the scalloped edge (flip <b>buffer: discs</b> above to see round
+  1's bumps; jumps longer than ~2.6× the local spacing stay point-buffered so gaps never
+  bridge). Drag <b>outline r</b> above;
+  note the dome sectors are hollow strands, so the union honestly grows a hole
+  (toggle <b>fill holes</b> to decide whether solidity should win). The thin spike at the dome apex is
+  real shipped behaviour: the convex pad's miter clamp (4×r) flings needle-sharp corners — the union
+  has no corner cases to clamp.
+</p>
+<div class="cmp" id="s1-dome"></div>
+<p class="cap" id="cap-dome"><b>Mini-dome, 5 sectors + 3 doors.</b> Sectors are near-convex, so the
+  two agree on silhouette — but the union hugs the strand and (holes unfilled) shows the hollow
+  center honestly. Doors sit over sector bases: bodies overlap, which is section 3's problem.</p>
+<div class="cmp" id="s1-shapes"></div>
+<p class="cap"><b>C-arc and peach — the concave cases.</b> The convex hull bridges the C's mouth
+  and the peach's cleft: clicking in the mouth of the C selects the arc even though there is
+  nothing there. The offset-union outline is the shape a person would draw.</p>
+</section>
+
+<!-- ============================ 2 ─ LAMPS ============================ -->
+<section data-sec="2">
+<h2><span class="num">2</span>Lamps — stroke + voronoi, direction by alignment</h2>
+<p class="sub">
+  <b>Round 3 (gate rulings):</b> the <b>voronoi look</b> is the one — beams rejected ("they
+  aren't solid") — but stroke <b>direction must be captured, Illustrator-style</b>: the solid
+  voronoi cell ribbon is <b>aligned</b> to the path like a stroke — <b>on path</b> (faces the
+  viewer), <b>inside</b> (a strip wrapping a form), <b>outside</b> (edge-lit). Cells are the
+  round-1 derivation (Voronoi ∩ disc); each lamp shifts by its own cell radius so the band's
+  edge kisses the path, exactly like an aligned stroke; the pale core marks the true emitter.
+  <b>Round 4: the OUTLINE follows the alignment too</b> — for inside/outside the body is a
+  one-sided buffer whose edge <i>is</i> the lamp path, hanging off the aligned side. The
+  <b>letter P</b> specimen is the case that demands it: LEDs lining the inside (or outside)
+  of a channel letter's wall — the body must be the letter's face, not a capsule around the
+  strip.
+  <b>Scope ruled IN:</b> an object formally provides <b>(1) an outline stroke</b> and
+  <b>(2) a series of lamp polygons</b> (as lp2014 did) — derived today, customizable someday;
+  this section is the look-spike for that model.
+</p>
+<div class="cmp" id="s2-grid"></div>
+<div class="cmp" id="s2-zoom"></div>
+<p class="cap"><b>Reading it:</b> all three alignments keep the solid tiled body that made round
+  1 work; inside/outside add the physical fact — the C-arc aligned <b>inside</b> reads as a
+  strip wrapped around a column, <b>outside</b> as an edge-lit rim, and the alignment is
+  exactly the per-object authored bit ("wraps a form" / "edge-lit" / "faces viewer"). At 45%
+  the ribbon stays a solid body where circles dissolve. Beam wedges kept only as the rejected
+  strip.</p>
+</section>
+
+<!-- ============================ 3 ─ SELECTION ============================ -->
+<section data-sec="3">
+<h2><span class="num">3</span>Overlapping objects — who gets the click?</h2>
+<p class="sub">
+  Interleaved combs (one fixture, two objects — convex hulls would coincide almost entirely)
+  and a door lying over a sector's base (two fixtures). Bodies are offset-union.
+  <b>Click the canvas</b> — or use the sim buttons (headless capture uses them too). Shipped v1:
+  whole hull is the target, a hull that also owns the nearest lamp wins, else last-painted.
+  <b>Round 2 (gate note: cycle is intuitive):</b> the new <b>cycle + hold/rclick menu</b> policy
+  keeps plain clicks on the cycle fast path and summons the candidate menu on press-and-hold
+  (~420ms) or right-click. <b>Round 3: ambiguity is generous</b> — anything within ~10px of a
+  body counts as a candidate (marked <code>~</code> in the log), so clicking near-but-not-on
+  the overlap still cycles instead of feeling broken.
+</p>
+<div class="xstrip local" id="s3-modes">
+  <span class="lbl">policy</span>
+  <button data-mode="v1" class="on">v1 · nearest-lamp</button>
+  <button data-mode="cycle">click-again-to-cycle</button>
+  <button data-mode="menu">menu on ambiguity</button>
+  <button data-mode="fixture">prefer same fixture</button>
+  <button data-mode="combo">cycle + hold/rclick menu</button>
+  <span class="lbl" style="margin-left:10px">sim</span>
+  <button id="sim-a">✕ A between comb teeth</button>
+  <button id="sim-b">✕ B door-over-sector</button>
+  <button id="sim-hold">⊙ hold at A</button>
+  <button id="s3-clear">clear selection</button>
+</div>
+<div class="wrap3" id="wrap3">
+  <svg id="svg3" width="560" height="330" viewBox="0 0 560 330"></svg>
+</div>
+<div id="log3"></div>
+<table class="dm">
+  <tr><th>policy</th><th>ambiguous click behaves</th><th>trade</th></tr>
+  <tr><td>v1 · nearest-lamp</td><td>silently picks the hull owning the nearest lamp, else the top one</td>
+      <td>zero friction, but "weird effects": the winner is invisible until it happens, and a buried object can be unreachable</td></tr>
+  <tr><td>click-again-to-cycle</td><td>first click = v1 winner; clicking the same spot again cycles the stack</td>
+      <td>everything reachable, no UI — but undiscoverable, and a double-click habit re-selects the wrong thing</td></tr>
+  <tr><td>menu on ambiguity</td><td>≥2 bodies → small KiCad-style menu names the candidates; 1 body → direct select</td>
+      <td>always explicit, teaches the stack — but a menu interrupts flow in dense scenes (dome base = every click)</td></tr>
+  <tr><td>prefer same fixture</td><td>candidates from the currently-selected object's fixture win first, then v1 rules</td>
+      <td>makes sector→sector walks frictionless — but it's a modifier on v1, not an answer to cold ambiguity</td></tr>
+  <tr><td>cycle + hold/rclick menu</td><td><b>round 2 (gate note):</b> plain click = v1-then-cycle; press-and-hold ~420ms or right-click = the candidate menu at that point</td>
+      <td>fast path stays zero-friction and reachable, the menu becomes an opt-in inspection tool instead of an interruption — cost is one more hidden gesture to learn</td></tr>
+</table>
+</section>
+
+<!-- ============================ 4 ─ LANGUAGE ============================ -->
+<section data-sec="4">
+<h2><span class="num">4</span>Three complete languages — the mini-dome, hovered + selected</h2>
+<p class="sub">
+  Everything composed: same scene, <b>sector 1 hovered</b>, <b>sector 3 selected</b>, door 1
+  overlapping sector 3's base. <b>A</b> is a faithful reproduction of what shipped in pass 2.
+  <b>B</b> renders objects as tinted entities: smooth line-buffer body, per-object hue at rest,
+  <b>round 3:</b> fill = the voronoi ribbon offset inward (§2's ruled look), name chip on the
+  body; the fixture frame demotes to a corner tag. <b>C</b> pushes "solid" to the limit: opaque bodies with a drop
+  shadow, lamps as lit cores. <b>Gate ruling: B reads cleanest</b> — C kept only for contrast.
+</p>
+<div class="cmp" id="s4-grid"></div>
+<p class="cap"><b>What to judge (round 3):</b> B with the inside-aligned ribbon — do the cells
+  still read once live lamp colors paint them (each cell would carry its lamp's live color,
+  the pale core stays the emitter truth)? How much per-object hue survives into production —
+  full hue at rest, or neutral at rest with hue only on hover/selection? And do the on-body
+  name chips scale to ~150 dome objects, or do they need a zoom threshold?</p>
+</section>
+
+<footer>
+<h2>Capture states (headless)</h2>
+<p class="sub">State lives in the URL hash; the exploration strip writes it. For per-section
+  PNGs use <code>solo</code>; sims run on load.</p>
+<table class="dm">
+  <tr><th>state</th><th>hash</th></tr>
+  <tr><td>§1 outlines, line buffer (round 2)</td><td><code>#solo=1</code></td></tr>
+  <tr><td>§1 round-1 disc buffer (scalloped)</td><td><code>#solo=1&amp;buf=disc</code></td></tr>
+  <tr><td>§1 honest holes, r=7</td><td><code>#solo=1&amp;pad=7&amp;holes=0</code></td></tr>
+  <tr><td>§2 fill/stroke beam model</td><td><code>#solo=2</code></td></tr>
+  <tr><td>§3 menu open at door/sector</td><td><code>#solo=3&amp;mode=menu&amp;sim=b</code></td></tr>
+  <tr><td>§3 cycle, second click</td><td><code>#solo=3&amp;mode=cycle&amp;sim=a2</code></td></tr>
+  <tr><td>§3 combo: hold summons menu</td><td><code>#solo=3&amp;mode=combo&amp;sim=hold</code></td></tr>
+  <tr><td>§4 three languages</td><td><code>#solo=4</code></td></tr>
+</table>
+</footer>
+
+<script>
+/* =============================== state =============================== */
+const S = { pad: 9, holes: true, smooth: true, buffer: 'line', mode: 'v1', solo: '' };
+
+/* =============================== geometry ============================ */
+/* mini-dome sector strands (prior spike's flattened dome), scaled */
+const RAW_SECTORS = [
+  [[139,16],[80,72],[42,138],[95,180],[139,140]],
+  [[139,16],[198,72],[236,138],[183,180],[139,140]],
+  [[42,138],[70,214],[139,238],[139,140],[95,180]],
+  [[236,138],[208,214],[139,238],[139,140],[183,180]],
+  [[80,72],[139,110],[198,72],[139,16],[80,72]],
+];
+const RAW_DOORS = [
+  [[86,218],[112,229],[135,235]],
+  [[143,235],[168,229],[196,217]],
+  [[50,152],[58,180],[68,206]],
+];
+const TX = ([x,y]) => [x*1.55+18, y*1.55+12];
+
+function sampleAlong(pts, n) {
+  const segs = []; let total = 0;
+  for (let i = 0; i < pts.length-1; i++) {
+    const L = Math.hypot(pts[i+1][0]-pts[i][0], pts[i+1][1]-pts[i][1]) || .001;
+    segs.push(L); total += L;
+  }
+  const out = [];
+  for (let k = 0; k < n; k++) {
+    let d = k/(n-1)*total, i = 0;
+    while (i < segs.length-1 && d > segs[i]) { d -= segs[i]; i++; }
+    const f = segs[i] ? d/segs[i] : 0;
+    out.push([pts[i][0]+(pts[i+1][0]-pts[i][0])*f, pts[i][1]+(pts[i+1][1]-pts[i][1])*f]);
+  }
+  return out;
+}
+const angDiff = (a,b) => { let d=a-b; while(d>Math.PI)d-=2*Math.PI; while(d<-Math.PI)d+=2*Math.PI; return d; };
+
+function cArcPts() {
+  const cx=112, cy=120, R=74, out=[];
+  for (let k=0; k<34; k++) {
+    const th = (48 + k/33*264) * Math.PI/180;
+    out.push([cx+R*Math.cos(th), cy+R*Math.sin(th)]);
+  }
+  return out;
+}
+function peachPts() {
+  const cx=122, cy=128, R=82, out=[];
+  const rim = th => {
+    const d = Math.exp(-Math.pow(angDiff(th,-Math.PI/2)/0.42, 2));
+    return R*(1+0.05*Math.sin(2*th))*(1-0.4*d);
+  };
+  for (let k=0; k<46; k++) { const th=k/46*2*Math.PI, r=rim(th);
+    out.push([cx+r*Math.cos(th), cy+r*Math.sin(th)]); }
+  for (let k=0; k<26; k++) { const th=k/26*2*Math.PI, r=rim(th)*0.58;
+    out.push([cx+r*Math.cos(th), cy+r*Math.sin(th)]); }
+  for (let k=0; k<8; k++) { const th=k/8*2*Math.PI;
+    out.push([cx+15*Math.cos(th), cy+9+15*Math.sin(th)]); }
+  return out;
+}
+/* a channel-letter P: the letter case for aligned outlines — LEDs wrap the
+   inside (or outside) of the letter's wall, and the body must hang off the
+   aligned side of the path to read as the letter's face */
+function letterPts() {
+  const path=[[78,486],[78,358],[120,358],[133,371],[133,398],[120,411],[78,411]];
+  return sampleAlong(path, 34);
+}
+function combPts(x0, y0, dir, teethX, len) {
+  /* spine along y0, teeth strands of `len` in direction dir */
+  const out = [];
+  const xEnd = teethX[teethX.length-1];
+  for (let x = teethX[0]; x <= xEnd+0.1; x += 7.5) out.push([x0+x, y0]);
+  for (const tx of teethX)
+    for (let d = 7.5; d <= len; d += 7.5) out.push([x0+tx, y0+dir*d]);
+  return out;
+}
+
+/* =============================== hull math =========================== */
+/* ports of lp-app/lpa-mapping-editor/src/view/canvas/layers/hull.rs */
+function convexHull(points) {
+  const s = points.map(p=>[p[0],p[1]]).sort((a,b)=>a[0]-b[0] || a[1]-b[1]);
+  const uniq = s.filter((p,i)=> !i || Math.abs(p[0]-s[i-1][0])>1e-9 || Math.abs(p[1]-s[i-1][1])>1e-9);
+  if (uniq.length < 3) return uniq;
+  const cross = (o,a,b)=>(a[0]-o[0])*(b[1]-o[1])-(a[1]-o[1])*(b[0]-o[0]);
+  const chain = [];
+  for (const p of uniq) {
+    while (chain.length>=2 && cross(chain[chain.length-2],chain[chain.length-1],p)<=0) chain.pop();
+    chain.push(p);
+  }
+  const lower = chain.length+1;
+  for (let i=uniq.length-1; i>=0; i--) {
+    const p = uniq[i];
+    while (chain.length>=lower && cross(chain[chain.length-2],chain[chain.length-1],p)<=0) chain.pop();
+    chain.push(p);
+  }
+  chain.pop();
+  return chain;
+}
+function padHull(hull, pad) {
+  const n = hull.length;
+  if (!n) return [];
+  if (n === 1) { const [x,y]=hull[0];
+    return [[x-pad,y-pad],[x+pad,y-pad],[x+pad,y+pad],[x-pad,y+pad]]; }
+  if (n === 2) {
+    const [[ax,ay],[bx,by]] = hull, dx=bx-ax, dy=by-ay, L=Math.hypot(dx,dy)||1e-6;
+    const ux=dx/L*pad, uy=dy/L*pad, nx=-uy, ny=ux;
+    return [[ax-ux+nx,ay-uy+ny],[bx+ux+nx,by+uy+ny],[bx+ux-nx,by+uy-ny],[ax-ux-nx,ay-uy-ny]];
+  }
+  const norm = (f,t)=>{ const dx=t[0]-f[0], dy=t[1]-f[1], L=Math.hypot(dx,dy);
+    return L<1e-6 ? [0,0] : [dy/L,-dx/L]; };
+  const out = [];
+  for (let i=0; i<n; i++) {
+    const prev=hull[(i+n-1)%n], here=hull[i], next=hull[(i+1)%n];
+    const a=norm(prev,here), b=norm(here,next);
+    const sx=a[0]+b[0], sy=a[1]+b[1], L=Math.hypot(sx,sy);
+    let ox, oy;
+    if (L<1e-6) { ox=b[0]*pad; oy=b[1]*pad; }
+    else { const m=Math.min(pad*2/L, pad*4); ox=sx/L*m; oy=sy/L*m; }
+    out.push([here[0]+ox, here[1]+oy]);
+  }
+  return out;
+}
+function pointInPoly(poly, x, y) {
+  if (poly.length < 3) return false;
+  let inside = false;
+  for (let i=0, j=poly.length-1; i<poly.length; j=i++) {
+    const [xi,yi]=poly[i], [xj,yj]=poly[j];
+    if ((yi>y)!==(yj>y) && x < (xj-xi)*(y-yi)/(yj-yi)+xi) inside=!inside;
+  }
+  return inside;
+}
+
+/* ------- offset-and-union: distance field → marching squares -------- */
+function unionLoops(pts, r, opts={}) {
+  const m = r+6, cell = Math.max(1.6, r/4);
+  let x0=1/0, y0=1/0, x1=-1/0, y1=-1/0;
+  for (const p of pts) { x0=Math.min(x0,p[0]); x1=Math.max(x1,p[0]);
+                         y0=Math.min(y0,p[1]); y1=Math.max(y1,p[1]); }
+  x0-=m; y0-=m; x1+=m; y1+=m;
+  /* line-buffer mode (Yona §1 gate note): offset from the POLYLINE through
+     lamp centres, not from per-lamp discs — kills the scalloped "string of
+     pearls" edge. Segments much longer than the local spacing are jumps
+     (comb spine→tooth), not strand runs: those stay point-buffered so the
+     buffer never bridges a gap the wire doesn't. */
+  const segsL = [];
+  if ((opts.buffer ?? S.buffer) === 'line' && pts.length > 1) {
+    const lens = [];
+    for (let i=0; i<pts.length-1; i++)
+      lens.push(Math.hypot(pts[i+1][0]-pts[i][0], pts[i+1][1]-pts[i][1]));
+    const med = [...lens].sort((a,b)=>a-b)[Math.floor(lens.length/2)] || 0;
+    for (let i=0; i<pts.length-1; i++)
+      if (lens[i] <= Math.max(med*2.6, 1)) segsL.push([pts[i], pts[i+1]]);
+  }
+  const nx=Math.ceil((x1-x0)/cell)+1, ny=Math.ceil((y1-y0)/cell)+1;
+  const F = new Float32Array(nx*ny);
+  for (let j=0; j<ny; j++) for (let i=0; i<nx; i++) {
+    const x=x0+i*cell, y=y0+j*cell; let d=1/0;
+    for (const p of pts) { const dx=x-p[0], dy=y-p[1], dd=dx*dx+dy*dy; if (dd<d) d=dd; }
+    for (const [a,b] of segsL) {
+      const vx=b[0]-a[0], vy=b[1]-a[1], L2=vx*vx+vy*vy || 1e-9;
+      let t=((x-a[0])*vx+(y-a[1])*vy)/L2; t = t<0?0 : t>1?1 : t;
+      const dx=x-(a[0]+vx*t), dy=y-(a[1]+vy*t), dd=dx*dx+dy*dy;
+      if (dd<d) d=dd;
+    }
+    F[j*nx+i] = Math.sqrt(d)-r;
+  }
+  /* marching squares → segment soup */
+  const segs = [];
+  const P = (xa,ya,va, xb,yb,vb) => { const t=va/(va-vb);
+    return [xa+(xb-xa)*t, ya+(yb-ya)*t]; };
+  for (let j=0; j<ny-1; j++) for (let i=0; i<nx-1; i++) {
+    const xa=x0+i*cell, ya=y0+j*cell, xb=xa+cell, yb=ya+cell;
+    const fa=F[j*nx+i], fb=F[j*nx+i+1], fc=F[(j+1)*nx+i+1], fd=F[(j+1)*nx+i];
+    const idx=(fa<0?8:0)|(fb<0?4:0)|(fc<0?2:0)|(fd<0?1:0);
+    if (!idx || idx===15) continue;
+    const T=()=>P(xa,ya,fa, xb,ya,fb), R_=()=>P(xb,ya,fb, xb,yb,fc);
+    const B=()=>P(xa,yb,fd, xb,yb,fc), L=()=>P(xa,ya,fa, xa,yb,fd);
+    const add=(p,q)=>segs.push([p,q]);
+    switch (idx) {
+      case 1: add(L(),B()); break;        case 2: add(B(),R_()); break;
+      case 3: add(L(),R_()); break;       case 4: add(T(),R_()); break;
+      case 5: add(T(),L()); add(B(),R_()); break;
+      case 6: add(T(),B()); break;        case 7: add(T(),L()); break;
+      case 8: add(T(),L()); break;        case 9: add(T(),B()); break;
+      case 10: add(T(),R_()); add(B(),L()); break;
+      case 11: add(T(),R_()); break;      case 12: add(L(),R_()); break;
+      case 13: add(B(),R_()); break;      case 14: add(L(),B()); break;
+    }
+  }
+  /* chain segments into closed loops by endpoint identity */
+  const key = p => p[0].toFixed(2)+','+p[1].toFixed(2);
+  const map = new Map();
+  segs.forEach((s,i)=>{ for (const e of [key(s[0]),key(s[1])]) {
+    if (!map.has(e)) map.set(e,[]); map.get(e).push(i); } });
+  const used = new Uint8Array(segs.length), loops=[];
+  for (let i=0; i<segs.length; i++) {
+    if (used[i]) continue;
+    used[i]=1;
+    const loop=[segs[i][0], segs[i][1]];
+    for (;;) {
+      const k=key(loop[loop.length-1]);
+      const cand=(map.get(k)||[]).find(x=>!used[x]);
+      if (cand===undefined) break;
+      used[cand]=1;
+      const s=segs[cand];
+      loop.push(key(s[0])===k ? s[1] : s[0]);
+      if (key(loop[loop.length-1])===key(loop[0])) { loop.pop(); break; }
+    }
+    if (loop.length>=3) loops.push(loop);
+  }
+  /* smoothing: decimate then Chaikin */
+  let out = loops.map(lp=>{
+    const dec=[]; for (const p of lp) {
+      const q=dec[dec.length-1];
+      if (!q || Math.hypot(p[0]-q[0],p[1]-q[1])>1.4) dec.push(p);
+    }
+    return dec.length>=3?dec:lp;
+  });
+  if (opts.smooth !== false && S.smooth) out = out.map(lp=>chaikin(lp,2));
+  if (opts.holes !== false && S.holes) {
+    out = out.filter(lp => !out.some(other =>
+      other!==lp && pointInPoly(other, lp[0][0], lp[0][1])));
+  }
+  return out;
+}
+function chaikin(loop, rounds) {
+  for (; rounds>0; rounds--) {
+    const out=[];
+    for (let i=0; i<loop.length; i++) {
+      const p=loop[i], q=loop[(i+1)%loop.length];
+      out.push([p[0]*.75+q[0]*.25, p[1]*.75+q[1]*.25],
+               [p[0]*.25+q[0]*.75, p[1]*.25+q[1]*.75]);
+    }
+    loop=out;
+  }
+  return loop;
+}
+const loopD  = lp => 'M'+lp.map(p=>p[0].toFixed(1)+','+p[1].toFixed(1)).join('L')+'Z';
+const loopsD = ls => ls.map(loopD).join(' ');
+const inLoops = (ls,x,y) => { let n=0; for (const lp of ls) if (pointInPoly(lp,x,y)) n++;
+  return n%2===1; };
+
+/* ------- lamp polygons: Voronoi cell ∩ disc ------- */
+function ngon(c, r, n, phase=0) {
+  const out=[]; for (let k=0;k<n;k++) { const th=phase+k/n*2*Math.PI;
+    out.push([c[0]+r*Math.cos(th), c[1]+r*Math.sin(th)]); }
+  return out;
+}
+function clipHalf(poly, M, N) { /* keep dot(p-M,N) >= 0 */
+  const out=[];
+  for (let i=0; i<poly.length; i++) {
+    const a=poly[i], b=poly[(i+1)%poly.length];
+    const da=(a[0]-M[0])*N[0]+(a[1]-M[1])*N[1];
+    const db=(b[0]-M[0])*N[0]+(b[1]-M[1])*N[1];
+    if (da>=0) out.push(a);
+    if ((da>=0)!==(db>=0)) {
+      const t=da/(da-db);
+      out.push([a[0]+(b[0]-a[0])*t, a[1]+(b[1]-a[1])*t]);
+    }
+  }
+  return out;
+}
+function lampCells(pts, opts={}) {
+  const Rmax = opts.rmax ?? 13, gap = opts.gap ?? 0.9;
+  return pts.map((p,i)=>{
+    let nn=1/0;
+    for (let k=0;k<pts.length;k++) { if (k===i) continue;
+      const dd=(p[0]-pts[k][0])**2+(p[1]-pts[k][1])**2; if (dd<nn) nn=dd; }
+    nn = Math.sqrt(nn);
+    const R = Math.min(Rmax, Math.max(3.2, nn*0.92));
+    let poly = ngon(p, R, 12, i*0.5);
+    for (let k=0;k<pts.length && poly.length>2;k++) {
+      if (k===i) continue;
+      const q=pts[k];
+      const dd=(p[0]-q[0])**2+(p[1]-q[1])**2;
+      if (dd > (2*R)*(2*R)) continue;
+      const M=[(p[0]+q[0])/2,(p[1]+q[1])/2];
+      const L=Math.sqrt(dd)||1e-6, N=[(p[0]-q[0])/L,(p[1]-q[1])/L];
+      poly=clipHalf(poly, M, N);
+    }
+    /* inset toward the lamp for a visible seam */
+    return poly.map(v=>{
+      const dx=v[0]-p[0], dy=v[1]-p[1], d=Math.hypot(dx,dy)||1e-6;
+      const s=Math.max(0,(d-gap))/d;
+      return [p[0]+dx*s, p[1]+dy*s];
+    });
+  });
+}
+/* ------- beam model: per-lamp direction from strand tangent ------- */
+function beamDirs(pts) {
+  const n=pts.length; let cx=0, cy=0;
+  for (const p of pts) { cx+=p[0]; cy+=p[1]; }
+  cx/=n; cy/=n;
+  return pts.map((p,i)=>{
+    const a=pts[Math.max(0,i-1)], b=pts[Math.min(n-1,i+1)];
+    let tx=b[0]-a[0], ty=b[1]-a[1];
+    const L=Math.hypot(tx,ty)||1e-6; tx/=L; ty/=L;
+    let nx=-ty, ny=tx;
+    /* flip the normal toward the object's centroid = "wraps a form" */
+    if ((cx-p[0])*nx+(cy-p[1])*ny < 0) { nx=-nx; ny=-ny; }
+    return [nx,ny,tx,ty];
+  });
+}
+/* lp2014-style LED triangles: apex at the emitter, base at the beam's far
+   end (a beam spreads), plus a small emitter core dot. side=1 inward
+   (wrapped), side=-1 outward. */
+function lampWedges(o, side=1, len=9, half=4.4) {
+  const ds=beamDirs(o.pts);
+  return o.pts.map((p,i)=>{
+    const [nx,ny,tx,ty]=ds[i];
+    const bx=nx*side, by=ny*side;
+    const fx=p[0]+bx*len, fy=p[1]+by*len;
+    return `<polygon points="${p[0].toFixed(1)},${p[1].toFixed(1)} `+
+      `${(fx+tx*half).toFixed(1)},${(fy+ty*half).toFixed(1)} `+
+      `${(fx-tx*half).toFixed(1)},${(fy-ty*half).toFixed(1)}" `+
+      `fill="${o.color}" fill-opacity=".5"/>`+
+      `<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="1.8" fill="${o.color}"/>`;
+  }).join('');
+}
+/* stroke + voronoi (round 3): Illustrator-style stroke ALIGNMENT — the
+   solid cell ribbon sits on / inside / outside the path. side 0 = centered
+   on the path, +1 = inside (wrapped), -1 = outside (edge-lit). Each lamp
+   shifts by its OWN cell radius so the band's edge kisses the path, exactly
+   like an inside-aligned stroke; a pale core marks the true emitter. */
+function voronoiRibbon(o, side, dFixed) {
+  const ds=beamDirs(o.pts);
+  const radiusAt = i => {
+    if (dFixed) return dFixed;
+    let nn=1/0;
+    for (let k=0;k<o.pts.length;k++) { if (k===i) continue;
+      const dd=(o.pts[i][0]-o.pts[k][0])**2+(o.pts[i][1]-o.pts[k][1])**2;
+      if (dd<nn) nn=dd; }
+    return Math.min(13, Math.max(3.2, Math.sqrt(nn)*0.92));
+  };
+  const off = side===0 ? o.pts
+    : o.pts.map((p,i)=>{ const d=radiusAt(i);
+        return [p[0]+ds[i][0]*side*d, p[1]+ds[i][1]*side*d]; });
+  const cells=lampCells(off);
+  let h=cells.map(c=>c.length>2
+    ? `<path d="${loopD(c)}" fill="${o.color}" fill-opacity=".8" stroke="${o.color}" stroke-opacity=".5" stroke-width=".6"/>`
+    : '').join('');
+  for (const p of o.pts)
+    h+=`<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="1.3" fill="#fffaf0" fill-opacity=".45"/>`;
+  return h;
+}
+/* round 4: the OUTLINE follows the alignment too. For inside/outside, the
+   body is a ONE-SIDED buffer — the lamp path is its edge and the body hangs
+   off the aligned side (a channel letter: LEDs line the inside wall, the
+   letter's face is the body). side 0 keeps the symmetric union. */
+function alignedBody(o, side, r) {
+  r = r ?? S.pad;
+  if (!side) return unionLoops(o.pts, r);
+  const ds=beamDirs(o.pts);
+  const shifted=o.pts.map((p,i)=>[p[0]+ds[i][0]*side*r, p[1]+ds[i][1]*side*r]);
+  return unionLoops(shifted, r);
+}
+function sizedR(pts, i, lo=2, hi=7) {
+  let nn=1/0;
+  for (let k=0;k<pts.length;k++) { if (k===i) continue;
+    const dd=(pts[i][0]-pts[k][0])**2+(pts[i][1]-pts[k][1])**2; if (dd<nn) nn=dd; }
+  return Math.max(lo, Math.min(hi, Math.sqrt(nn)*0.46));
+}
+
+/* =============================== scenes ============================== */
+const CSS = getComputedStyle(document.documentElement);
+const C = n => CSS.getPropertyValue(n).trim();
+const SECTOR_COLOR = C('--obj-0'), DOOR_COLOR = C('--obj-2');
+const mix = (hex,a) => { const n=parseInt(hex.slice(1),16);
+  return `rgba(${n>>16&255},${n>>8&255},${n&255},${a})`; };
+
+function domeObjects() {
+  const objs = [];
+  RAW_SECTORS.forEach((raw,k)=>objs.push({
+    fx:'mini_dome', name:'sector '+k, color:SECTOR_COLOR,
+    pts: sampleAlong(raw.map(TX), 40),
+  }));
+  RAW_DOORS.forEach((raw,k)=>objs.push({
+    fx:'doors', name:'door '+k, color:DOOR_COLOR,
+    pts: sampleAlong(raw.map(TX), 9),
+  }));
+  return objs;
+}
+const SCATTER = [[38,30],[92,22],[150,38],[52,74],[118,68],[170,84],
+                 [30,118],[84,110],[140,128],[62,152],[112,158],[168,150]];
+
+/* =============================== render helpers ====================== */
+function lampMarkup(o, mode, opts={}) {
+  const col = o.color, pts=o.pts;
+  let h='';
+  if (mode==='dots') {
+    for (const p of pts)
+      h+=`<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="${opts.r??2.2}" fill="${col}" fill-opacity=".9"/>`;
+  } else if (mode==='sized') {
+    pts.forEach((p,i)=>{
+      h+=`<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="${sizedR(pts,i).toFixed(1)}" fill="${col}" fill-opacity=".85"/>`;
+    });
+  } else if (mode==='poly' || mode==='hybrid') {
+    const cells=lampCells(pts, opts);
+    cells.forEach((cell,i)=>{
+      if (cell.length<3) return;
+      h+=`<path d="${loopD(cell)}" fill="${col}" fill-opacity="${mode==='poly'?.78:.34}" stroke="${col}" stroke-opacity=".5" stroke-width=".6"/>`;
+    });
+    if (mode==='hybrid')
+      for (const p of pts)
+        h+=`<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="2" fill="${col}"/>`;
+  }
+  return h;
+}
+function bodyMarkup(o, kind, cls) {
+  if (kind==='convex')
+    return `<path class="${cls}" d="${loopD(padHull(convexHull(o.pts), S.pad))}"/>`;
+  return `<path class="${cls}" fill-rule="evenodd" d="${loopsD(o.body)}"/>`;
+}
+function withBodies(objs) {
+  for (const o of objs) o.body = unionLoops(o.pts, S.pad);
+  return objs;
+}
+
+/* =============================== §1 outlines ========================= */
+function renderS1() {
+  const dome = withBodies(domeObjects());
+  const mk = (title, tag, inner, w, h) =>
+    `<div class="cell"><h3>${title}</h3><span class="tag">${tag}</span>
+     <svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${inner}</svg></div>`;
+  const lamps = objs => objs.map(o=>lampMarkup(o,'dots')).join('');
+  const convex = objs => objs.map(o=>bodyMarkup(o,'convex','hull')).join('');
+  const union  = objs => objs.map(o=>bodyMarkup(o,'union','hull')).join('');
+  const ghost  = objs => objs.map(o=>
+    `<path d="${loopD(padHull(convexHull(o.pts), S.pad))}" fill="rgba(228,192,101,.04)"
+       stroke="rgba(228,192,101,.5)" stroke-width="1" stroke-dasharray="4 3"/>`).join('');
+
+  const W=460, H=420;
+  document.getElementById('s1-dome').innerHTML =
+    mk('convex hull <b>(shipped)</b>','5 sectors + 3 doors', convex(dome)+lamps(dome), W, H) +
+    mk('offset-and-union','buffer r + union', union(dome)+lamps(dome), W, H) +
+    mk('overlaid','dashed = convex claim', union(dome)+ghost(dome)+lamps(dome), W, H);
+
+  const carc = withBodies([{fx:'arc', name:'C-arc', color:C('--obj-5'), pts:cArcPts()}]);
+  const peach = withBodies([{fx:'peach', name:'peach', color:C('--obj-3'), pts:peachPts()}]);
+  const cell2 = (title,objs,w,h) => [
+    mk(title+' — convex','', convex(objs)+lamps(objs), w, h),
+    mk(title+' — offset-union','', union(objs)+lamps(objs), w, h),
+    mk(title+' — overlaid','', union(objs)+ghost(objs)+lamps(objs), w, h),
+  ].join('');
+  document.getElementById('s1-shapes').innerHTML =
+    cell2('C-arc', carc, 236, 244) + cell2('peach', peach, 236, 250);
+}
+
+/* =============================== §2 lamps ============================ */
+function renderS2() {
+  const sector = { fx:'mini_dome', name:'sector 2', color:SECTOR_COLOR,
+    pts: sampleAlong(RAW_SECTORS[2].map(TX), 40).map(p=>[p[0]-70, p[1]-215]) };
+  const door = { fx:'doors', name:'door 0', color:DOOR_COLOR,
+    pts: sampleAlong(RAW_DOORS[0].map(TX), 9).map(p=>[p[0]-115, p[1]-190]) };
+  const carc = { fx:'arc', name:'C-arc', color:C('--obj-5'),
+    pts: cArcPts().map(p=>[p[0]*.72+30, p[1]*.72+195]) };
+  const letter = { fx:'sign', name:'letter P', color:C('--obj-4'),
+    pts: letterPts() };
+  const objs = [sector, door, carc, letter];
+  const W=210, H=510;
+  const inner = mode => objs.map(o=>{
+    if (mode==='in')  return lampWedges(o, 1);
+    if (mode==='out') return lampWedges(o, -1);
+    return lampMarkup(o, mode);
+  }).join('');
+  const stroke = side => objs.map(o=>
+    `<path d="${loopsD(alignedBody(o, side))}" fill-rule="evenodd"
+       fill="${mix(o.color,.05)}" stroke="${mix(o.color,.45)}" stroke-width="1.2"/>`).join('');
+  const cell = (t, body) =>
+    `<div class="cell"><h3>${t}</h3>
+     <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${body}</svg></div>`;
+  const mini = (t, body) =>
+    `<div class="cell"><h3>${t}</h3>
+     <svg width="${(W*.45+8).toFixed(0)}" height="${(H*.45+8).toFixed(0)}"
+       viewBox="0 0 ${(W*.45+8).toFixed(0)} ${(H*.45+8).toFixed(0)}">
+       <g transform="translate(4,4) scale(.45)">${body}</g></svg></div>`;
+  const variants = [['align: on path · faces viewer',0],['align: inside · wrapped',1],
+                    ['align: outside · edge-lit',-1]];
+  const ribbon = side => objs.map(o=>voronoiRibbon(o, side)).join('');
+  document.getElementById('s2-grid').innerHTML =
+    variants.map(([t,s])=>cell('stroke + voronoi · '+t, stroke(s)+ribbon(s))).join('') +
+    cell('omni dots · shipped ref', inner('dots'));
+  document.getElementById('s2-zoom').innerHTML =
+    variants.map(([t,s])=>mini('45% · '+t.split(' ·')[0], stroke(s)+ribbon(s))).join('') +
+    mini('45% · shipped dots', inner('dots')) +
+    mini('rejected · beams (not solid)', stroke(0)+inner('in'));
+}
+
+/* =============================== §3 selection ======================== */
+const S3 = { sel:null, lastClick:null, menu:null };
+let SCENE3 = [];
+function buildScene3() {
+  const teethA=[0,30,60,90], teethB=[15,45,75,105];
+  SCENE3 = withBodies([
+    { fx:'panel', name:'comb A', color:C('--obj-3'),
+      pts: combPts(64, 78, 1, teethA, 112) },
+    { fx:'panel', name:'comb B', color:C('--obj-5'),
+      pts: combPts(64, 78+112+24, -1, teethB, 112) },
+    { fx:'mini_dome', name:'sector 2', color:SECTOR_COLOR,
+      pts: sampleAlong(RAW_SECTORS[2].map(TX), 40).map(p=>[p[0]+210, p[1]-100]) },
+    { fx:'doors', name:'door 0', color:DOOR_COLOR,
+      pts: sampleAlong(RAW_DOORS[0].map(TX), 9).map(p=>[p[0]+210, p[1]-104]) },
+  ]);
+}
+const SIM_A = [101, 145], SIM_B = [402, 264];
+/* round 3 (gate note): ambiguity is GENEROUS — a click near-but-not-on a
+   body still counts it as a candidate, so cycling works beside the overlap
+   instead of feeling broken. Near-misses are marked ~ in the log. */
+const SLOP = 10;
+function distToLoops(loops, x, y) {
+  let best=1/0;
+  for (const lp of loops) for (let i=0; i<lp.length; i++) {
+    const a=lp[i], b=lp[(i+1)%lp.length];
+    const vx=b[0]-a[0], vy=b[1]-a[1], L2=vx*vx+vy*vy||1e-9;
+    let t=((x-a[0])*vx+(y-a[1])*vy)/L2; t=t<0?0:t>1?1:t;
+    const dx=x-(a[0]+vx*t), dy=y-(a[1]+vy*t), dd=dx*dx+dy*dy;
+    if (dd<best) best=dd;
+  }
+  return Math.sqrt(best);
+}
+function candidatesAt(x,y) {
+  return SCENE3.map((o,i)=>({o,i, near: !inLoops(o.body,x,y)}))
+    .filter(c=>!c.near || distToLoops(c.o.body,x,y)<=SLOP);
+}
+function nearestLampOwner(x,y) {
+  let best=1/0, who=-1;
+  SCENE3.forEach((o,i)=>{ for (const p of o.pts) {
+    const dd=(p[0]-x)**2+(p[1]-y)**2; if (dd<best) { best=dd; who=i; } } });
+  return who;
+}
+function v1pick(cands, x, y) {
+  const nl = nearestLampOwner(x,y);
+  const own = cands.find(c=>c.i===nl);
+  return own ? own : cands[cands.length-1];
+}
+function log3(html) {
+  const el=document.getElementById('log3');
+  el.insertAdjacentHTML('afterbegin', `<div>${html}</div>`);
+  while (el.children.length>5) el.lastChild.remove();
+}
+function closeMenu() { S3.menu=null; const m=document.querySelector('.dmenu'); if (m) m.remove(); }
+function click3(x, y, viaSim) {
+  closeMenu();
+  const cands = candidatesAt(x,y);
+  const names = cands.map(c=>(c.near?'~':'')+SCENE3[c.i].name).join(', ');
+  if (!cands.length) { S3.sel=null; S3.lastClick=null;
+    log3(`(${x|0},${y|0}) → background → <b>deselect</b>`); renderS3(); return; }
+  const mode=S.mode;
+  if (mode==='menu' && cands.length>1) {
+    S3.menu={x,y,cands};
+    log3(`(${x|0},${y|0}) → <span class="amb">${cands.length} bodies</span> [${names}] → menu`);
+    renderS3(); return;
+  }
+  let pick;
+  if ((mode==='cycle' || mode==='combo') && S3.lastClick
+      && Math.hypot(S3.lastClick.x-x, S3.lastClick.y-y)<9) {
+    const order=cands.map(c=>c.i);
+    const at=order.indexOf(S3.sel);
+    pick={i: order[(at+1) % order.length]};
+    log3(`(${x|0},${y|0}) again → <span class="amb">cycle</span> ${((at+1)%order.length)+1}/${order.length} → <b>${SCENE3[pick.i].name}</b>`);
+  } else if (mode==='fixture' && S3.sel!=null && cands.length>1) {
+    const fx=SCENE3[S3.sel].fx;
+    const same=cands.filter(c=>SCENE3[c.i].fx===fx);
+    pick = same.length ? v1pick(same,x,y) : v1pick(cands,x,y);
+    log3(`(${x|0},${y|0}) → <span class="amb">${cands.length} bodies</span> [${names}] → prefer fx <b>${fx}</b> → <b>${SCENE3[pick.i].name}</b>`);
+  } else {
+    pick=v1pick(cands,x,y);
+    const why = pick.i===nearestLampOwner(x,y) ? 'owns nearest lamp' : 'top of paint order';
+    log3(`(${x|0},${y|0}) → ${cands.length>1?`<span class="amb">${cands.length} bodies</span> [${names}]`:names} → <b>${SCENE3[pick.i].name}</b> <small>(${why})</small>`);
+  }
+  S3.sel=pick.i; S3.lastClick={x,y};
+  renderS3();
+}
+function renderS3() {
+  const svg=document.getElementById('svg3');
+  let h='';
+  SCENE3.forEach((o,i)=>{
+    const cls='hull'+(S3.sel===i?' sel':'');
+    h+=`<path class="${cls}" fill-rule="evenodd" d="${loopsD(o.body)}" stroke-width="${S3.sel===i?1.5:1}"/>`;
+  });
+  SCENE3.forEach(o=>{ h+=lampMarkup(o,'dots'); });
+  /* labels + sim markers */
+  const lab=(x,y,t)=>`<text x="${x}" y="${y}" font-size="10" font-family="JetBrains Mono,monospace"
+     fill="rgba(199,203,208,.55)">${t}</text>`;
+  h+=lab(62,58,'panel · comb A + comb B')+lab(310,108,'mini_dome · sector 2  /  doors · door 0');
+  for (const [pt,name] of [[SIM_A,'A'],[SIM_B,'B']])
+    h+=`<g font-family="JetBrains Mono,monospace">
+      <text x="${pt[0]-4}" y="${pt[1]+4}" font-size="11" fill="var(--warn-text)">✕</text>
+      <text x="${pt[0]+7}" y="${pt[1]+4}" font-size="9" fill="rgba(240,220,122,.6)">${name}</text></g>`;
+  svg.innerHTML=h;
+  /* menu popover */
+  closeMenuDom();
+  if (S3.menu) {
+    const {x,y,cands}=S3.menu;
+    const wrap=document.getElementById('wrap3');
+    const div=document.createElement('div');
+    div.className='dmenu';
+    div.style.left=(x+10)+'px'; div.style.top=(y+6)+'px';
+    div.innerHTML=`<div class="mh">${cands.length} objects here</div>`+
+      cands.map(c=>{ const o=SCENE3[c.i];
+        return `<button class="mi" data-i="${c.i}"><i style="background:${o.color}"></i>
+          ${o.fx} / <b>${o.name}</b><small>${o.pts.length} lamps</small></button>`; }).join('');
+    div.addEventListener('click',e=>{
+      const b=e.target.closest('.mi'); if (!b) return;
+      S3.sel=+b.dataset.i; log3(`menu → <b>${SCENE3[S3.sel].name}</b>`);
+      closeMenu(); renderS3();
+    });
+    wrap.appendChild(div);
+  }
+}
+function closeMenuDom(){ const m=document.querySelector('.dmenu'); if (m && !S3.menu) m.remove(); }
+/* combo mode: hold (or right-click) summons the menu instead of interrupting
+   the plain-click fast path */
+function openMenuAt(x, y, via) {
+  closeMenu();
+  const cands=candidatesAt(x,y);
+  if (!cands.length) { log3(`${via} (${x|0},${y|0}) → background — no menu`); renderS3(); return; }
+  if (cands.length===1) {
+    S3.sel=cands[0].i; S3.lastClick={x,y};
+    log3(`${via} (${x|0},${y|0}) → one body → <b>${SCENE3[cands[0].i].name}</b>`);
+    renderS3(); return;
+  }
+  S3.menu={x,y,cands};
+  log3(`${via} (${x|0},${y|0}) → <span class="amb">${cands.length} bodies</span> → menu`);
+  renderS3();
+}
+
+/* =============================== §4 languages ======================== */
+function renderS4() {
+  const objs = withBodies(domeObjects());
+  const HOV=1, SEL=3; /* sector 1 hovered, sector 3 selected */
+  const W=470, H=428;
+  const frameOf = objs => { /* fixture frame of all dome lamps (language A) */
+    let x0=1/0,y0=1/0,x1=-1/0,y1=-1/0;
+    for (const o of objs) if (o.fx==='mini_dome')
+      for (const p of o.pts){x0=Math.min(x0,p[0]);x1=Math.max(x1,p[0]);
+                             y0=Math.min(y0,p[1]);y1=Math.max(y1,p[1]);}
+    return [x0-10,y0-10,x1-x0+20,y1-y0+20];
+  };
+  const [fx,fy,fw,fh]=frameOf(objs);
+  const chip=(o,cls,tint)=>{ /* name chip at the object's centroid: on the body */
+    let cx=0, cy=0;
+    for (const p of o.pts) { cx+=p[0]; cy+=p[1]; }
+    cx/=o.pts.length; cy/=o.pts.length;
+    const wpx=o.name.length*5.6+12;
+    const x=Math.min(Math.max(cx-wpx/2, 2), W-wpx-2), y=Math.min(Math.max(cy-6.5, 2), H-18);
+    return `<g><rect x="${x}" y="${y}" width="${wpx}" height="13" rx="4"
+        fill="rgba(23,27,32,.85)" stroke="${mix(tint||o.color,.5)}" stroke-width=".7"/>
+      <text x="${x+wpx/2}" y="${y+9.5}" text-anchor="middle" font-size="8.5"
+        font-family="JetBrains Mono,monospace" fill="${cls==='sel'?'#4c9ffe':'#c7cbd0'}">${o.name}</text></g>`;
+  };
+  const st = i => i===SEL?'sel':(i===HOV?'hov':'');
+  /* B tints: entities get their OWN hue — sectors stop being five copies of
+     the fixture colour (the question §4's caption asks) */
+  const TINTS=[C('--obj-0'),C('--obj-1'),C('--obj-5'),C('--obj-3'),C('--obj-4'),
+               C('--obj-2'),C('--dirty'),'#e08a5a'];
+  const tintOf = i => TINTS[i%TINTS.length];
+
+  /* A — current (pass-2 shipped look) */
+  let A=`<rect x="${fx}" y="${fy}" width="${fw}" height="${fh}" rx="4" fill="none"
+      stroke="var(--border-strong)" stroke-width="1"/>
+    <text x="${fx+2}" y="${fy-4}" font-size="11" font-family="Inter,sans-serif" font-weight="600"
+      fill="#99a2ad">mini_dome</text>`;
+  objs.forEach((o,i)=>{ A+=`<path class="hull ${st(i)}"
+      d="${loopD(padHull(convexHull(o.pts), S.pad))}" stroke-width="${i===SEL?1.5:1}"/>`; });
+  objs.forEach(o=>{ A+=lampMarkup(o,'dots'); });
+
+  /* B — tinted entities */
+  let B=`<text x="${fx+2}" y="${fy-4}" font-size="9" font-family="JetBrains Mono,monospace"
+      letter-spacing=".08em" fill="rgba(153,162,173,.6)">MINI_DOME · DOORS</text>`;
+  objs.forEach((o,i)=>{
+    const s=st(i), tint=tintOf(i);
+    const body=alignedBody(o, 1);
+    const fill = s==='sel'?'rgba(76,159,254,.13)': s==='hov'?mix(tint,.18):mix(tint,.07);
+    const strk = s==='sel'?'#4c9ffe': s==='hov'?mix(tint,.85):mix(tint,.42);
+    if (s==='sel') B+=`<path d="${loopsD(body)}" fill="none"
+        stroke="rgba(76,159,254,.28)" stroke-width="5.5" fill-rule="evenodd"/>`;
+    B+=`<path d="${loopsD(body)}" fill-rule="evenodd" fill="${fill}"
+        stroke="${strk}" stroke-width="${s==='sel'?1.7:1.1}"/>`;
+  });
+  objs.forEach((o,i)=>{ B+=voronoiRibbon({...o, color:tintOf(i)}, 1); });
+  objs.forEach((o,i)=>{ B+=chip(o, st(i), tintOf(i)); });
+
+  /* C — solid tiles */
+  let Cm=`<defs><filter id="soft" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="1.5" stdDeviation="2.4" flood-color="#000" flood-opacity=".55"/>
+    </filter></defs>`;
+  objs.forEach((o,i)=>{
+    const s=st(i);
+    const fill = s==='sel'?'#1f3049': s==='hov'?'#26313a':'#20272e';
+    const strk = s==='sel'?'#4c9ffe': s==='hov'?'#4a555f':'#3e4852';
+    Cm+=`<path d="${loopsD(o.body)}" fill-rule="evenodd" fill="${fill}"
+        stroke="${strk}" stroke-width="${s==='sel'?1.6:1}" filter="url(#soft)"/>`;
+  });
+  objs.forEach(o=>{
+    for (const p of o.pts)
+      Cm+=`<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="4.6" fill="${o.color}" fill-opacity=".14"/>`+
+          `<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="2.1" fill="${o.color}"/>`;
+  });
+  objs.forEach((o,i)=>{ if (st(i)) Cm+=chip(o, st(i)); });
+
+  const cell=(t,tag,inner)=>`<div class="cell"><h3>${t}</h3><span class="tag">${tag}</span>
+    <svg width="${W}" height="${H}" viewBox="0 -6 ${W} ${H}">${inner}</svg></div>`;
+  document.getElementById('s4-grid').innerHTML =
+    cell('A — current (shipped pass 2)','convex + neutral', A) +
+    cell('B — tinted entities','body + offset+ voronoi + chips', B) +
+    cell('C — solid tiles','opaque + lit cores', Cm);
+}
+
+/* =============================== wiring ============================== */
+function renderAll() {
+  document.getElementById('padr').value=S.pad;
+  document.getElementById('padr-v').textContent=S.pad;
+  document.getElementById('b-line').classList.toggle('on', S.buffer==='line');
+  document.getElementById('b-disc').classList.toggle('on', S.buffer==='disc');
+  document.getElementById('b-holes').classList.toggle('on', S.holes);
+  document.getElementById('b-smooth').classList.toggle('on', S.smooth);
+  document.querySelectorAll('#s3-modes [data-mode]').forEach(b=>
+    b.classList.toggle('on', b.dataset.mode===S.mode));
+  if (S.solo) document.body.dataset.solo=S.solo;
+  else delete document.body.dataset.solo;
+  renderS1(); renderS2(); buildScene3(); renderS3(); renderS4();
+}
+function writeHash() {
+  const p=new URLSearchParams();
+  if (S.solo) p.set('solo',S.solo);
+  if (S.pad!==9) p.set('pad',S.pad);
+  if (S.buffer!=='line') p.set('buf',S.buffer);
+  if (!S.holes) p.set('holes','0');
+  if (!S.smooth) p.set('smooth','0');
+  if (S.mode!=='v1') p.set('mode',S.mode);
+  history.replaceState(null,'', p.toString()?('#'+p.toString()):location.pathname);
+}
+function readHash() {
+  const p=new URLSearchParams(location.hash.slice(1));
+  S.solo=p.get('solo')||'';
+  S.pad=+(p.get('pad')||9);
+  S.buffer=p.get('buf')==='disc'?'disc':'line';
+  S.holes=p.get('holes')!=='0';
+  S.smooth=p.get('smooth')!=='0';
+  S.mode=p.get('mode')||'v1';
+  return p.get('sim')||'';
+}
+
+document.getElementById('padr').addEventListener('input', e=>{
+  S.pad=+e.target.value; writeHash(); renderAll(); });
+document.getElementById('b-line').addEventListener('click', ()=>{
+  S.buffer='line'; writeHash(); renderAll(); });
+document.getElementById('b-disc').addEventListener('click', ()=>{
+  S.buffer='disc'; writeHash(); renderAll(); });
+document.getElementById('b-holes').addEventListener('click', ()=>{
+  S.holes=!S.holes; writeHash(); renderAll(); });
+document.getElementById('b-smooth').addEventListener('click', ()=>{
+  S.smooth=!S.smooth; writeHash(); renderAll(); });
+document.querySelectorAll('#gstrip [data-solo]').forEach(b=>
+  b.addEventListener('click', ()=>{ S.solo=b.dataset.solo; writeHash(); renderAll(); }));
+document.querySelectorAll('#s3-modes [data-mode]').forEach(b=>
+  b.addEventListener('click', ()=>{ S.mode=b.dataset.mode; S3.sel=null; S3.lastClick=null;
+    closeMenu(); writeHash(); renderAll(); }));
+document.getElementById('sim-a').addEventListener('click', ()=>click3(...SIM_A, true));
+document.getElementById('sim-b').addEventListener('click', ()=>click3(...SIM_B, true));
+document.getElementById('sim-hold').addEventListener('click', ()=>{
+  if (S.mode!=='combo') { S.mode='combo'; writeHash(); renderAll(); }
+  openMenuAt(...SIM_A, 'hold');
+});
+document.getElementById('s3-clear').addEventListener('click', ()=>{
+  S3.sel=null; S3.lastClick=null; closeMenu(); log3('cleared'); renderS3(); });
+let holdTimer=null, holdFired=false;
+document.getElementById('svg3').addEventListener('pointerdown', e=>{
+  if (S.mode!=='combo' || e.button!==0) return;
+  const r=e.currentTarget.getBoundingClientRect();
+  const x=e.clientX-r.left, y=e.clientY-r.top;
+  holdFired=false;
+  holdTimer=setTimeout(()=>{ holdFired=true; openMenuAt(x, y, 'hold'); }, 420);
+});
+document.getElementById('svg3').addEventListener('pointerup', ()=>clearTimeout(holdTimer));
+document.getElementById('svg3').addEventListener('pointerleave', ()=>clearTimeout(holdTimer));
+document.getElementById('svg3').addEventListener('contextmenu', e=>{
+  if (S.mode!=='combo') return;
+  e.preventDefault();
+  const r=e.currentTarget.getBoundingClientRect();
+  openMenuAt(e.clientX-r.left, e.clientY-r.top, 'rclick');
+});
+document.getElementById('svg3').addEventListener('click', e=>{
+  if (holdFired) { holdFired=false; return; }
+  const r=e.currentTarget.getBoundingClientRect();
+  click3(e.clientX-r.left, e.clientY-r.top, false);
+});
+
+const sim = readHash();
+renderAll();
+if (sim==='a') click3(...SIM_A, true);
+if (sim==='a2') { click3(...SIM_A, true); click3(...SIM_A, true); }
+if (sim==='b') click3(...SIM_B, true);
+if (sim==='hold') openMenuAt(...SIM_A, 'hold');
+</script>
