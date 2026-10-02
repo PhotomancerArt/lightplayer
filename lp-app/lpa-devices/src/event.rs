@@ -132,7 +132,7 @@ pub enum Action {
         /// adopts it).
         #[serde(default)]
         name: Option<String>,
-        /// The card's "Restore files from backup": put the stored backup
+        /// The card's "Restore files": put the stored backup
         /// still pending for this board back on it, even though the board
         /// mounts a (freshly formatted) filesystem of its own — the C6
         /// repartition's resume rule. `false` is an ordinary update.

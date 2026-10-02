@@ -24,7 +24,7 @@ pub struct UiDeviceLayout {
     pub panel: Option<UiLayoutPanel>,
     /// One line in the firmware zone (a board whose files are waiting).
     pub line: Option<String>,
-    /// "Restore files from backup (<date>)" — the resume rule's verb.
+    /// "Restore files" — the resume rule's verb (the line names the date).
     pub restore: Option<UiAction>,
     /// The Update verb relabelled "Finish update" on a board holding its
     /// files for a migration.
@@ -152,14 +152,14 @@ pub fn device_layout_view(
                     name: None,
                     restore_backup: true,
                 })
-                .with_label(format!(
-                    "Restore files from backup ({})",
-                    date(entry.captured_at_epoch_seconds)
-                ))
-                .with_summary(
-                    "Write the firmware and put the backed-up files back on this board. \
+                // Short: the line above it already names the backup's date,
+                // and the row also holds Download backup.
+                .with_label("Restore files")
+                .with_summary(format!(
+                    "Write the firmware and put the files backed up on {} back on this board. \
                      It replaces what is on the board now.",
-                ),
+                    date(entry.captured_at_epoch_seconds)
+                )),
             );
         }
         layout.download = Some(DeviceBackupOp::action_for(device));

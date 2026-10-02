@@ -14,7 +14,7 @@
 //! migration that took it finished (`pending` / `completed`). It is a
 //! cache-like sidecar: **unreadable or a foreign version reads as empty**,
 //! and an archive is never deleted because the index could not be read. A
-//! `pending` entry is what makes Studio offer "Restore files from backup".
+//! `pending` entry is what makes Studio offer "Restore files".
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;

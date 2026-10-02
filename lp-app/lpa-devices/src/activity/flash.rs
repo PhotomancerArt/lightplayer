@@ -134,7 +134,7 @@ fn kib(bytes: u64) -> String {
 /// its files mounted, or as somebody else.
 const LAYOUT_NOT_CONFIRMED: &str = "the new firmware is running, but the board's files were not \
      confirmed on it. They are in the backup Studio saved in this browser — use Restore files \
-     from backup on this card.";
+     on the card.";
 
 /// Where the flash currently is.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -220,7 +220,7 @@ pub struct FlashActivity {
     /// Cancel wind-down in progress: the port was asked to close.
     winding_down: bool,
     next_request_id: u32,
-    /// The card's "Restore files from backup" (the resume rule): the
+    /// The card's "Restore files" (the resume rule): the
     /// inspection puts a pending stored backup back even onto a board that
     /// mounts files of its own.
     #[serde(default)]
@@ -255,7 +255,7 @@ impl FlashActivity {
     }
 
     /// Ask the inspection to restore the pending stored backup (the card's
-    /// "Restore files from backup").
+    /// "Restore files").
     pub fn with_restore_backup(mut self, restore: bool) -> Self {
         self.restore_backup = restore;
         self
@@ -1411,7 +1411,7 @@ mod tests {
                         ..
                     },
                 ) => {
-                    assert!(message.contains("Restore files from backup"), "{message}")
+                    assert!(message.contains("Restore files on the card"), "{message}")
                 }
                 (verified, step) => panic!("{fs:?} {uid:?}: verified={verified}, got {step:?}"),
             }

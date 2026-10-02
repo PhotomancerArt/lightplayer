@@ -43,6 +43,18 @@ pub struct LpfsReport {
     /// Per top-level directory (`/projects/<dir>` each).
     pub groups: Vec<LpfsGroup>,
     pub trial: RepackTrial,
+    /// Every file with its SHA-256 — what a before/after comparison of a
+    /// migration (or of a backup against its board) checks, byte for byte.
+    pub files: Vec<LpfsFileDigest>,
+}
+
+/// One file and its digest.
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LpfsFileDigest {
+    pub path: String,
+    pub bytes: u64,
+    pub sha256: String,
 }
 
 /// One top-level directory's share.
@@ -177,7 +189,23 @@ pub fn measure(
         total_bytes: tree.total_bytes(),
         groups,
         trial,
+        files: tree
+            .files()
+            .map(|(path, bytes)| LpfsFileDigest {
+                path: path.to_string(),
+                bytes: bytes.len() as u64,
+                sha256: sha256_hex(bytes),
+            })
+            .collect(),
     }
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::Digest;
+    sha2::Sha256::digest(bytes)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
 }
 
 /// `/projects/<dir>` for a project file, else the top-level entry.

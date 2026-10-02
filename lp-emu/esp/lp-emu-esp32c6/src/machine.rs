@@ -2255,6 +2255,7 @@ impl Esp32C6Builder {
             efuse,
             reset_cause,
             strap,
+            pin_strap: strap,
             reboot_on_reset,
             translate,
             jit_report,
@@ -2551,6 +2552,13 @@ pub struct Esp32C6Machine {
     efuse: EfuseIdentity,
     reset_cause: ResetCause,
     strap: Strap,
+    /// What the strapping pins say at power-on: the board's configuration
+    /// ([`Esp32C6Builder::strap`]), which a power cycle samples. NOT
+    /// [`Self::strap`], which is the strap of the LAST reset — a USB
+    /// download request's reset is in the download strap, and a power cycle
+    /// after it must not inherit that: the supply going away clears the
+    /// request, and GPIO9 is a pin, not a latch.
+    pin_strap: Strap,
     reboot_on_reset: bool,
     /// May a translated core be installed on this machine's hart
     /// ([`Esp32C6Builder::translate`])? `false` is `--interpreter`.
@@ -5603,7 +5611,7 @@ impl Esp32C6Machine {
                     .request_from_host(lp_emu_esp_common::MachineRequest::Reset {
                         source: "host power-cycle (control channel)",
                         at: now,
-                        strap: self.strap,
+                        strap: self.pin_strap,
                         cause: lp_emu_esp_common::ResetSource::PowerOn,
                     });
                 self.control_lines += 1;
@@ -6441,6 +6449,48 @@ mod tests {
             Some(0x5555_5555),
             "a chip_rst leaves the LP island alone"
         );
+    }
+
+    /// **A power cycle samples the strapping pins, not the last reset.**
+    ///
+    /// The host's download dance resets the chip in the download strap; a
+    /// power cycle after it (the cable pulled from a USB-powered board, in
+    /// the C6 repartition's migration walk) must boot from flash, as GPIO9's
+    /// pull-up says on silicon. It used to inherit the dance's strap and come
+    /// back `boot:0x16 (DOWNLOAD…)`, which reads as a board that lost its
+    /// firmware.
+    #[test]
+    fn a_power_cycle_after_a_download_dance_boots_from_the_pins() {
+        let mut m = Esp32C6Builder::new()
+            .reset_cause(ResetCause::UsbUartHpSys)
+            .reboot_on_reset(true)
+            .build()
+            .unwrap();
+        m.bus
+            .load_image(memmap::HP_SRAM_BASE, &0x0000_006fu32.to_le_bytes())
+            .unwrap();
+        m.harts[0].set_pc(memmap::HP_SRAM_BASE);
+        assert_eq!(m.strap(), Strap::App, "the board's pins say app");
+
+        m.apply_control(&ControlCommand::Attach, m.cycles());
+        assert!(
+            m.control_line("download-mode")
+                .to_string()
+                .starts_with("ok download-mode ")
+        );
+        let out = m.run_until(&StopCondition::after_micros(1_000));
+        assert!(matches!(out, Outcome::Deadline { .. }), "{out:?}");
+        assert_eq!(m.strap(), Strap::Download, "the dance's reset");
+
+        assert!(
+            m.control_line("power-cycle")
+                .to_string()
+                .starts_with("ok power-cycle ")
+        );
+        let out = m.run_until(&StopCondition::after_micros(2_000));
+        assert!(matches!(out, Outcome::Deadline { .. }), "{out:?}");
+        assert_eq!(m.reset_cause(), ResetCause::PowerOn);
+        assert_eq!(m.strap(), Strap::App, "the supply came back to the pins");
     }
 
     #[test]
