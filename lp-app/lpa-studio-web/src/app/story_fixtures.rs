@@ -96,8 +96,7 @@ pub(crate) fn shell_story(
     // needs its verbs folded in here — the same tree core would build —
     // or it draws with none (devices-as-offers).
     if let Some(card) = &view.lens_card {
-        view.offers =
-            crate::app::home::device_offer_story_fixtures::lens_card_offer_tree(card);
+        view.offers = crate::app::home::device_offer_story_fixtures::lens_card_offer_tree(card);
     }
     rsx! {
         // Body only: the site chrome above it is `web_app`'s, and has its
