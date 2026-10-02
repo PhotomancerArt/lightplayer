@@ -341,8 +341,12 @@ impl DeviceTransport for EmuDeviceTransport {
                 // The tab's board is written by the emulator's own package
                 // loader, not by esptool, so there is no bootloader read to
                 // inspect a layout with: an emulated tab board updates as a
-                // plain flash (its filesystem stays where it is; firmware on
-                // a pre-repartition chip holds it — the legacy guard).
+                // plain flash. ⚠️ That flash is `putFlash`, which ERASES THE
+                // WHOLE CHIP before writing the image at 0 — the board's
+                // files go with it, on main as here (open:
+                // docs/defects/2026-10-02-updating-a-tab-hosted-board-erases-its-files.md).
+                // The `?emu=tab` polyfill lane (esptool-js over the ROM) is
+                // not this path: it migrates like a board (walk W12).
                 DeviceEffectCall::InspectLayout { .. } => Ok(DeviceEffectFacts {
                     summary: "an emulated tab board has no layout to read".to_string(),
                     ..Default::default()

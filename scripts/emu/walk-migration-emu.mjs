@@ -24,6 +24,10 @@
 //       formatted with its backup in this browser
 //   W7b  …then Restore files puts them back (W8: the tab was
 //       closed in between — a new Chrome on the same profile)
+//   W12 W1 with the board a Worker in the page (`?emu=tab`, no door): the
+//       fixture chip is put into it through the page, and its chip and
+//       console are read back out of the page (`/__walk/*` on this
+//       script's own server)
 //
 // Every claim keys off the BOARD's words or the CHIP's bytes, never a Studio
 // string another component could satisfy (walk-no-board's binding rule):
@@ -51,7 +55,8 @@ const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../.
 const PUBLIC = path.join(ROOT, "target/dx/lpa-studio-web/release/web/public");
 const FIRMWARE = path.join(ROOT, "target/studio-web-assets/firmware");
 const LP_CLI = path.join(ROOT, "target/debug/lp-cli");
-const BOARD = "c6-a";
+/// The door's board id; the tab lane (W12) sets it to the tab's own board.
+let BOARD = "c6-a";
 const MAC = "60:55:f9:0a:0b:0c";
 const UID = "dev0000000000000011";
 const STUDIO_LOAD_MS = 420_000;
@@ -68,6 +73,7 @@ const SCENARIOS = {
   W9: { fixture: "bypassed", describe: "a bypassed flash holds the files; Finish update moves them" },
   W7a: { fixture: "legacy", describe: "cable pulled mid filesystem write: formatted, backup in this browser" },
   W7b: { fixture: null, describe: "a new Chrome on the same profile restores the backup" },
+  W12: { fixture: "legacy", tab: true, describe: "W1 with the board a Worker in the page (?emu=tab, no door)" },
 };
 
 function args() {
@@ -183,9 +189,29 @@ function bundlePort() {
   return Number(spawnSync("bash", ["scripts/dev-port.sh", "walk-migration-emu"], { cwd: ROOT, encoding: "utf8" }).stdout.trim());
 }
 
-function serveBundle() {
+/// `walk` carries the two routes the tab lane (W12) needs, because its chip
+/// lives in the page: `GET /__walk/fixture.bin` seeds it, and
+/// `POST /__walk/chip?name=<file>` brings it back out to `walk.out`.
+function serveBundle(walk) {
   const server = createServer((request, response) => {
     const url = new URL(request.url, "http://x");
+    if (url.pathname === "/__walk/fixture.bin") {
+      response.writeHead(200, { "content-type": "application/octet-stream" });
+      createReadStream(walk.fixtureChip).pipe(response);
+      return;
+    }
+    if (url.pathname === "/__walk/chip" && request.method === "POST") {
+      // A name under `out`, never outside it.
+      const name = path.normalize(url.searchParams.get("name") ?? "chip.bin").replace(/^(\.\.[/\\])+/, "");
+      const chunks = [];
+      request.on("data", (chunk) => chunks.push(chunk));
+      request.on("end", () => {
+        writeFileSync(path.join(walk.out, name), Buffer.concat(chunks));
+        response.writeHead(204);
+        response.end();
+      });
+      return;
+    }
     let file = null;
     const firmware = url.pathname.match(/^\/firmware\/([^/]+)\/([^/]+)$/);
     if (firmware) file = path.join(FIRMWARE, firmware[1], firmware[2]);
@@ -293,6 +319,43 @@ async function pullCable(driver) {
   );
 }
 
+// --- the tab lane (W12): the board is a Worker in the page ------------------
+
+/// Put the fixture chip into the tab board and power it on from it, and start
+/// keeping what the board says (its USB bytes and its UART0 text, in arrival
+/// order — the door's console file holds the same two). Its chip and console
+/// live in the page, so the walk reads both back out of it.
+async function seedTabBoard(driver) {
+  return driver.evaluate(
+    `(async () => {
+       const emu = window.__lpEmuSerial.bus.requireLivePort(${JSON.stringify(BOARD)}).emulator;
+       window.__walkEmu = emu;
+       const latin1 = new TextDecoder("latin1");
+       window.__walkConsole = "";
+       emu._hub.onBytes((bytes) => { window.__walkConsole += latin1.decode(bytes); });
+       emu._hub.onConsole((text) => { window.__walkConsole += text; });
+       const bytes = new Uint8Array(await (await fetch("/__walk/fixture.bin", { cache: "no-store" })).arrayBuffer());
+       await emu.putFlash(bytes);
+       await emu.command("power-cycle");
+       return bytes.length;
+     })()`,
+    { awaitPromise: true, timeoutMs: 120_000 },
+  );
+}
+
+/// The tab board's whole chip, written to `<out>/<name>` by the bundle server.
+async function saveTabChip(driver, name) {
+  return driver.evaluate(
+    `(async () => {
+       const bytes = await window.__walkEmu.getFlash();
+       const answer = await fetch("/__walk/chip?name=" + encodeURIComponent(${JSON.stringify(name)}), { method: "POST", body: bytes });
+       if (!answer.ok) throw new Error("the walk server answered " + answer.status);
+       return bytes.length;
+     })()`,
+    { awaitPromise: true, timeoutMs: 120_000 },
+  );
+}
+
 // --- the verdicts ------------------------------------------------------------
 
 function boardConsole(door) {
@@ -358,7 +421,8 @@ async function main() {
   const fixtureReport = report(spec.fixture === "bypassed" ? beforeBypass : fixtureChip);
   console.log(`  fixture: ${fixtureReport.layout} — ${fixtureReport.fileCount} files, ${fixtureReport.totalBytes} B`);
 
-  const door = await startDoor({
+  if (spec.tab) BOARD = "tab-c6";
+  const door = spec.tab ? null : await startDoor({
     root: ROOT,
     id: "migration",
     boards: [`${BOARD}=${fixtureChip},kind=rom-up,mac=${MAC}`],
@@ -367,14 +431,14 @@ async function main() {
     logFile: path.join(out, `serve-${scenario}.log`),
     fresh: !continuing,
   });
-  const bundle = await serveBundle();
+  const bundle = await serveBundle({ fixtureChip, out });
   const sink = await startSink();
   const url = studioUrlFor({
     studioPort: bundle.address().port,
-    doorAddr: door.addr,
+    doorAddr: door?.addr ?? null,
     sinkUrl: `http://127.0.0.1:${sink.address().port}/ingest`,
   });
-  console.log(`  door ${door.addr} · studio ${url}`);
+  console.log(`  ${door ? `door ${door.addr}` : "no door: the board is a Worker in the page"} · studio ${url}`);
 
   const verdict = { scenario, describe: spec.describe, steps: [], ok: false };
   const step = (name, ok, detail) => {
@@ -392,10 +456,25 @@ async function main() {
   // What the board held when the update began (see the question step);
   // the fixture until then.
   let baseline = fixtureReport;
+  // What the board has said: the door's console file, or (tab) the page's.
+  const consoleText = async () => (door ? boardConsole(door) : await driver.evaluate(`window.__walkConsole ?? ""`));
   try {
     await driver.navigate(url);
     await driver.awaitShim();
     await driver.waitFor(`${MAIN_TEXT}.length > 0`, { timeoutMs: STUDIO_LOAD_MS, what: "Studio to load" });
+    if (spec.tab) {
+      const seeded = await seedTabBoard(driver);
+      step("the tab board holds the fixture chip", seeded === readFileSync(fixtureChip).length, `${seeded} B`);
+      // Its own power-on boot, to the server loop, before Studio is asked
+      // to find it.
+      // Polled from here: the page's own waits re-check on DOM mutations,
+      // and the board's words are not in the DOM.
+      const bootBy = Date.now() + STEP_MS;
+      while (!(await consoleText()).includes("starting server loop")) {
+        if (Date.now() > bootBy) throw new Error("the seeded board never reached its server loop");
+        await new Promise((r) => setTimeout(r, 1_000));
+      }
+    }
     await connect(driver);
     await shot("connected");
     step("connected", true, "the card settled");
@@ -403,9 +482,9 @@ async function main() {
     // The door writes the console back every 2 s: let what the board has
     // said so far land before marking where the update's words begin.
     await new Promise((r) => setTimeout(r, 5_000));
-    const before = boardConsole(door);
+    const before = await consoleText();
     if (scenario === "W9") {
-      const said = boardConsole(door);
+      const said = await consoleText();
       step(
         "the board held its files",
         said.includes("holding: not formatting") || said.includes("legacy-layout filesystem found"),
@@ -439,7 +518,8 @@ async function main() {
       // after a few cadences means nothing was ever written — the chip is
       // still the fixture it was seeded from.
       await new Promise((r) => setTimeout(r, 5_000));
-      cpSync(existsSync(live) ? live : fixtureChip, asFound);
+      if (door) cpSync(existsSync(live) ? live : fixtureChip, asFound);
+      else await saveTabChip(driver, path.basename(asFound));
       try {
         baseline = report(asFound);
         verdict.connectChanged = compareFiles(fixtureReport, baseline);
@@ -483,7 +563,7 @@ async function main() {
             // in its own words, before anything is asked of it again.
             await new Promise((r) => setTimeout(r, 15_000));
             const afterPull = await driver.evaluate(MAIN_TEXT);
-            verdict.afterPull = { card: afterPull.slice(0, 1500), board: boardConsole(door).slice(-1500).replace(/[\x00-\x09\x0b-\x1f\x7f-\xff]/g, "") };
+            verdict.afterPull = { card: afterPull.slice(0, 1500), board: (await consoleText()).slice(-1500).replace(/[\x00-\x09\x0b-\x1f\x7f-\xff]/g, "") };
             await shot("after-pull");
             // A part-written app does not boot ("No bootable app partitions"),
             // so the card meets a board that is not running LightPlayer: its
@@ -536,7 +616,7 @@ async function main() {
               // Its power-on banner went out with nobody listening (the
               // cable was out); what came after the bootloader session is
               // the firmware's own start.
-              const text = boardConsole(door);
+              const text = await consoleText();
               if (text.lastIndexOf("starting server loop") > text.lastIndexOf("waiting for download")) break;
               if (Date.now() > bootBy) throw new Error("the board never finished its power-on boot after the pull");
               await new Promise((r) => setTimeout(r, 1_000));
@@ -557,7 +637,7 @@ async function main() {
     // its filesystem did.
     const settleBy = Date.now() + STEP_MS;
     for (;;) {
-      const text = boardConsole(door);
+      const text = await consoleText();
       const last = text.lastIndexOf("ESP-ROM:");
       const tail = last >= 0 ? text.slice(last) : "";
       if (tail.includes("starting server loop") || tail.includes("waiting for download")) break;
@@ -567,11 +647,20 @@ async function main() {
       }
       await new Promise((r) => setTimeout(r, 1_000));
     }
+    // The tab's chip and console are the page's: read both before it goes.
+    let tabConsole = "";
+    if (!door) {
+      tabConsole = await consoleText();
+      mkdirSync(stateDir, { recursive: true });
+      await saveTabChip(driver, path.join("state", `${BOARD}.flash.bin`));
+    }
     await driver.close();
     // The door writes the chip and the console back on shutdown (and every
     // 2 s before it): read both after it has stopped.
-    await stopDoor(door);
-    await new Promise((r) => setTimeout(r, 3_000));
+    if (door) {
+      await stopDoor(door);
+      await new Promise((r) => setTimeout(r, 3_000));
+    }
     // The board's own words since the update began. The link's framing
     // interleaves binary headers with the JSON; drop control bytes and read
     // the hello's own fields.
@@ -579,7 +668,7 @@ async function main() {
     // before it are counted by their ROM banners (the door rewrites the
     // transcript whole, so neither a length nor a text tail is a safe
     // anchor — a heartbeat repeats).
-    const whole = boardConsole(door);
+    const whole = door ? boardConsole(door) : tabConsole;
     const bootsBefore = before.split("ESP-ROM:").length - 1;
     let from = -1;
     for (let i = 0; i <= bootsBefore; i += 1) {
@@ -607,6 +696,7 @@ async function main() {
     switch (scenario) {
       case "W1":
       case "W5":
+      case "W12":
       case "W9":
       case "W7b":
         step("files moved, byte for byte", files.same, JSON.stringify(files));
@@ -667,8 +757,15 @@ async function main() {
     fatal = error;
     await shot("failure");
     console.error(`\n✗ ${error.message}`);
+    // The tab's console dies with the page: keep it beside the verdict, the
+    // way the door keeps its console file.
+    if (!door) {
+      try {
+        writeFileSync(path.join(out, `${BOARD}.console.log`), await consoleText(), "latin1");
+      } catch { /* the page may be gone */ }
+    }
     try { await driver.close(); } catch { /* gone */ }
-    await stopDoor(door);
+    if (door) await stopDoor(door);
   } finally {
     bundle.close();
     sink.close();
