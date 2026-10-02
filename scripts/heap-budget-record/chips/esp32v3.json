@@ -4,15 +4,15 @@
     "usedBytes": 23944,
     "totalBytes": 241552,
     "largestFreeBlock": 102387,
-    "stackHighWater": 12632,
+    "stackHighWater": 12664,
     "stackTop": 1073610752,
     "stackHighWaterBand": [
       12100,
       13200
     ]
   },
-  "recorded": "2026-09-30",
-  "commit": "622ef3146",
+  "recorded": "2026-10-02",
+  "commit": "06e76b810",
   "comment": "What the classic's FIRMWARE costs: the shipped image (esp32,server,float-f32 \u2014 lp-fw/fw-esp32v3's own default feature set, the bytes the DOM-Z-102 is flashed with) direct-loaded on lp-emu:esp32v3:t1 and read from its FIRST heartbeat triple. \u26a0\ufe0f That triple is ELICITED, not idle-emitted: `esp32_memory_stats` runs on a project load/unload/stop-all or a client `runtime_status`, never on the five-second server heartbeat, so a classic boot with nobody talking prints no `[MEM]` line at all. Since wire proto 32 (plan classic-uart-on-lp-link) the classic's UART0 is an lp-link and the triple is log records on its log channel, so the gate boots through `lp-cli emu run --chip esp32v3 --host-link --json-replies`, asks with one `stopAllProjects` over the link once the hello arrives (the same request lp-cli/tests/emu_v3_link_gates.rs sends; before proto 32 it was lp-emu/lp-emu-validate/walks/v3-stop-all.script's `M!` bytes on `[INIT] I/O task spawned` +1 ms), and stops on the first `[JIT] used=` line. `--json-replies`: no learned table, so the figure is the link's cost alone. `measured` is this tree, and is the ratchet. Regenerate with `just heap-budget-baseline-chips-v3`; see docs/heap-budget-gate.md, \"The second source\".",
   "image": "esp32,server,float-f32",
   "configuration": "lp-emu:esp32v3:t1",
