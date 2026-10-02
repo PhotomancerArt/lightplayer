@@ -45,6 +45,12 @@ pub fn handle_fixture(args: LpfsFixtureArgs) -> Result<()> {
 /// The chip bytes (pure).
 pub fn build_chip(merged: &[u8], table: &PartitionTable, tree: &LpfsTree) -> Result<Vec<u8>> {
     let geometry = LpfsGeometry::from_table(table).context("the table has no lpfs row")?;
+    // `espflash save-image --merge` pads to the whole chip with erased
+    // (0xFF) bytes; what must stay below the filesystem is the written part.
+    let merged = &merged[..merged
+        .iter()
+        .rposition(|b| *b != 0xFF)
+        .map_or(0, |at| at + 1)];
     if merged.len() > geometry.offset as usize {
         bail!(
             "the merged image ({} bytes) reaches the filesystem at {:#x}",
@@ -78,5 +84,15 @@ mod tests {
         target[4].size = 0xB_0000;
         let inspection = inspect_flash(&chip, PartitionTable::new(target), true);
         assert_eq!(inspection.state, LayoutState::Legacy);
+    }
+
+    #[test]
+    fn a_whole_chip_merged_image_is_trimmed_to_what_it_wrote() {
+        let tree = LpfsTree::from_files([("/hardware.json".to_string(), b"{}".to_vec())]);
+        let mut merged = vec![0xFFu8; CHIP_LEN];
+        merged[..0x2000].fill(0x5A);
+        let chip = build_chip(&merged, &legacy_c6_v1_table(), &tree).unwrap();
+        assert_eq!(&chip[..0x2000], &merged[..0x2000]);
+        assert_eq!(chip.len(), CHIP_LEN);
     }
 }
