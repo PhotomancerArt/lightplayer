@@ -88,12 +88,14 @@ use lpc_wire::{ClientMessage, ClientRequest, LinkCounters};
 /// straight into.
 ///
 /// The warm-up keeps the link's first, table-teaching reply (the largest
-/// frame of the run) out of the measurements the lag is picked from. That
-/// reply alone carries an endpoint touch a few us sooner than any other, and
-/// whether it shows up depends on incidental image bytes — CI's db2eec7fa
-/// image had it on the gated side, its neighbours did not, from the same
-/// sources. A lag picked from it fell short of every ordinary wake, and the
-/// test measured one outlier instead of the lag it was built to set.
+/// frame of the run) out of the measurements the lag is picked from. In the
+/// images measured, that reply carried an endpoint touch a few us sooner than
+/// the ordinary ones, and whether it shows up depends on incidental image
+/// bytes — CI's db2eec7fa image had it on the gated side, its neighbours did
+/// not, from the same sources. A lag picked from it fell short of every
+/// ordinary wake, and the test measured one outlier instead of the lag it was
+/// built to set. The lag is still a minimum, so an outlier elsewhere in the
+/// run would still move it.
 const WARM_AT_MS: u64 = 1_700;
 const WARM_ID: u64 = 1;
 const LAG_AT_MS: u64 = 1_900;
