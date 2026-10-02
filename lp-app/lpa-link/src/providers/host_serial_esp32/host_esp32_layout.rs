@@ -307,10 +307,7 @@ fn execute_in_session(
 
 fn reset(flasher: &mut Flasher, recorder: &mut EventRecorder) -> Result<(), LinkError> {
     recorder.log("Resetting device");
-    flasher
-        .connection()
-        .reset()
-        .map_err(|error| LinkError::other(format!("reset failed: {error}")))
+    super::host_esp32_flash::reset_chip(flasher, recorder, "reset")
 }
 
 /// [`FlashStepTarget`] over an open espflash session.

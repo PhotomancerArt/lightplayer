@@ -57,11 +57,22 @@ pub(super) fn manifest_chip(target_chip: &str) -> Option<Chip> {
 /// matches the browser provider; espflash negotiates faster stub baud itself.
 const CONNECT_BAUD: u32 = 115_200;
 
-/// `ESP_READ_FLASH` packet size and in-flight window. Both are the values the
-/// M1 spike measured on hardware; the stub is already running by the time we
-/// read (`Flasher::connect` uploads it), so this is the fast path.
+/// `ESP_READ_FLASH` packet size and in-flight window. The stub is already
+/// running by the time we read (`Flasher::connect` uploads it).
+///
+/// ONE packet in flight, not the M1 spike's 1024: espflash 3.3's
+/// `Connection::write_raw` — the per-packet ack — clears the port's INPUT
+/// buffer before it writes, so any part of the next packet that has already
+/// arrived is thrown away and the read fails "truncated". With 1024 in
+/// flight the stub streams ahead of the acks, and whether bytes are waiting
+/// at the clear is a race the host's own speed decides: the emulated C6
+/// lost 7–45 bytes per run in the second packet (C6 repartition P08), and a
+/// busy laptop can lose them against silicon too. One in flight means the
+/// stub sends nothing until it has the ack, so the clear finds nothing to
+/// lose — at the cost of one round trip per 4 KB block (~240 for a C6
+/// filesystem).
 const READ_BLOCK_SIZE: u32 = 4096;
-const READ_MAX_IN_FLIGHT: u32 = 1024;
+const READ_MAX_IN_FLIGHT: u32 = 1;
 
 /// Flash firmware from the merged-image manifest at `manifest_path` over the
 /// serial port `port_name`. Emits live progress into `events` and returns the
@@ -131,10 +142,7 @@ pub(super) fn flash_firmware(
     recorder.log("Flash complete");
     restore_lp_analog_i2c_clock(&mut flasher, &mut recorder);
     recorder.log("Resetting flashed device");
-    flasher
-        .connection()
-        .reset()
-        .map_err(|error| LinkError::other(format!("post-flash reset failed: {error}")))?;
+    reset_chip(&mut flasher, &mut recorder, "post-flash reset")?;
 
     Ok(LinkFirmwareFlashResult {
         manifest,
@@ -467,7 +475,8 @@ pub(super) fn connect(
 ) -> Result<Flasher, LinkError> {
     recorder.log(format!("Connecting to {port_name}"));
     prepare_lp_domain(port_name, recorder);
-    let serial = open_port(port_name)?;
+    let mut serial = open_port(port_name)?;
+    let before = reset_before(&mut serial, recorder);
     Flasher::connect(
         serial,
         port_info_for(port_name),
@@ -477,9 +486,54 @@ pub(super) fn connect(
         /* skip      */ false,
         expect_chip,
         after,
-        ResetBeforeOperation::DefaultReset,
+        before,
     )
     .map_err(|error| LinkError::other(format!("espflash connect failed: {error}")))
+}
+
+/// How to reach the bootloader on this port: the DTR/RTS dance, unless the
+/// port has no modem lines at all — a pseudo-terminal (the emulated board's
+/// pty bridge), where every line ioctl fails ENOTTY and the board is put in
+/// its download console by whoever holds the other end. Probed with a
+/// read-only line query, so a real port is never touched by the probe.
+fn reset_before(
+    serial: &mut serialport::TTYPort,
+    recorder: &mut EventRecorder,
+) -> ResetBeforeOperation {
+    use serialport::SerialPort;
+    match serial.read_clear_to_send() {
+        Err(error) if is_enotty(&error) => {
+            recorder.log(
+                "no modem lines on this port (a pseudo-terminal): connecting without the reset \
+                 dance",
+            );
+            recorder.no_modem_lines = true;
+            ResetBeforeOperation::NoReset
+        }
+        _ => ResetBeforeOperation::DefaultReset,
+    }
+}
+
+/// Reset the chip out of its bootloader into its firmware. On a port with
+/// no modem lines (a pseudo-terminal) there is nothing to toggle: the reset
+/// is the harness's (the emulator's control channel), so it is logged, not
+/// fatal.
+pub(super) fn reset_chip(
+    flasher: &mut Flasher,
+    recorder: &mut EventRecorder,
+    what: &str,
+) -> Result<(), LinkError> {
+    if recorder.no_modem_lines {
+        recorder.log(format!(
+            "{what}: no reset lines on this port (a pseudo-terminal) — reset the board from \
+                 the other end"
+        ));
+        return Ok(());
+    }
+    flasher
+        .connection()
+        .reset()
+        .map_err(|error| LinkError::other(format!("{what} failed: {error}")))
 }
 
 /// Open the port, tolerating the brief window after a link release where the
@@ -493,6 +547,16 @@ pub(super) fn connect(
 /// stub connect). A bounded retry turns that transient into a non-event;
 /// anything else (a real second holder, a vanished port) surfaces after the
 /// budget, unchanged.
+/// "Inappropriate ioctl for device": the port is not a real serial device.
+fn is_enotty(error: &serialport::Error) -> bool {
+    // serialport folds the errno into a description; nix renders ENOTTY as
+    // its libc text, which differs by platform.
+    let text = error.to_string();
+    text.contains("ENOTTY")
+        || text.contains("Not a typewriter")
+        || text.contains("Inappropriate ioctl")
+}
+
 fn open_port(port_name: &str) -> Result<serialport::TTYPort, LinkError> {
     const OPEN_ATTEMPTS: u32 = 20;
     const OPEN_RETRY: Duration = Duration::from_millis(100);
@@ -503,6 +567,18 @@ fn open_port(port_name: &str) -> Result<serialport::TTYPort, LinkError> {
             .open_native()
         {
             Ok(port) => return Ok(port),
+            // A pseudo-terminal (the emulated board's bridge, a pty test
+            // harness): macOS has no baud ioctl for one (`IOSSIOSPEED` fails
+            // with ENOTTY) and a baud means nothing there, so open it without
+            // one. A real USB serial port never answers ENOTTY.
+            Err(error) if is_enotty(&error) => {
+                return serialport::new(port_name, 0)
+                    .flow_control(serialport::FlowControl::None)
+                    .open_native()
+                    .map_err(|error| {
+                        LinkError::other(format!("failed to open {port_name}: {error}"))
+                    });
+            }
             Err(error)
                 if error.kind() == serialport::ErrorKind::Io(std::io::ErrorKind::ResourceBusy) =>
             {
@@ -592,6 +668,12 @@ pub(super) fn assert_chip_matches_manifest(
 /// same). Best-effort: a reset failure is logged but not fatal —
 /// `DeviceSession` re-runs readiness on rebuild regardless.
 pub(super) fn reset_into_app(flasher: &mut Flasher, recorder: &mut EventRecorder) {
+    if recorder.no_modem_lines {
+        recorder.log(
+            "no reset lines on this port (a pseudo-terminal) — reset the board from the other end",
+        );
+        return;
+    }
     // `is_stub = true` matches the `use_stub = true` passed to `connect`.
     if let Err(error) = flasher.connection().reset_after(true) {
         recorder.log(format!("warning: post-operation reset failed: {error}"));
@@ -694,6 +776,9 @@ pub(super) struct EventRecorder<'a> {
     sink: &'a LinkManagementEventSink,
     pub(super) logs: Vec<String>,
     pub(super) progress: Vec<LinkManagementProgress>,
+    /// The port has no modem lines (a pseudo-terminal), as `connect`
+    /// found: nothing can reset the chip from this end.
+    pub(super) no_modem_lines: bool,
 }
 
 impl<'a> EventRecorder<'a> {
@@ -702,6 +787,7 @@ impl<'a> EventRecorder<'a> {
             sink,
             logs: Vec::new(),
             progress: Vec::new(),
+            no_modem_lines: false,
         }
     }
 

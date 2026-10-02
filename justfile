@@ -3147,6 +3147,16 @@ test-emu-c6-boot:
     cargo test -p lp-emu-validate --test band_contract
     just test-emu-serve
 
+# The C6 repartition's host path on the emulated C6 (plan
+# lp2025/2026-10-01-1843-c6-repartition, P08): `lp-cli hardware lpfs` reading,
+# migrating, refusing and preflighting a "fielded board" built from this
+# tree's image on the pre-2026-10 table, through espflash's stub over a pty.
+# ~16 minutes of wall clock (a migration is ~180 s emulated), so it is NOT in
+# `test-emu-c6-cli` and no CI job runs it yet — run it when the layout
+# migration or the host flasher changes.
+test-emu-layout-migration:
+    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_layout_migration -- --include-ignored --nocapture --test-threads=1
+
 # lp-cli's emulator-backed tests. Both resolve the ELF through
 # `lp_emu_esp32c6::test_support` under `LP_EMU_BUILD_FW=1` — a plain
 # `cargo build`, not a reference image, so no espflash and no git history.
