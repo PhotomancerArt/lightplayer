@@ -3409,15 +3409,20 @@ impl ProjectController {
     /// checked-out files are already there — and replaces the runtime's
     /// loaded project with that content.
     ///
-    /// No lock is taken (the open already holds it), and no format
-    /// migration runs: a tracking copy must not be diverged from its own
-    /// history by a local rewrite, so content this build cannot load
-    /// surfaces as the open error it is.
+    /// No lock is taken (the open already holds it). The same open
+    /// pre-flight runs here too (`migrate_package_on_open`): a head that
+    /// moved past this build's format must be refused with the classified
+    /// "newer LightPlayer" reason rather than handed to the runtime as a
+    /// parser failure, and a head still behind the current format is
+    /// migrated and saved in place exactly as an open would — a tracking
+    /// copy only diverges from its own history when a LOCAL rewrite does
+    /// that, and the migrator's write is recorded as its own history event
+    /// (the undo path), not a silent local edit.
     pub(crate) async fn reload_active_from_library(
         &mut self,
         server: &mut StudioServerClient,
     ) -> Result<Vec<UiLogDraft>, UiError> {
-        let (uid, slug, package_fs, history_fs, transient) = {
+        let (uid, slug, package_fs, history_fs, transient, now) = {
             let context = self.library.as_ref().ok_or_else(no_library_error)?;
             let active = context.active.as_ref().ok_or_else(|| {
                 UiError::MissingSession("no active library project to reload".to_string())
@@ -3428,11 +3433,17 @@ impl ProjectController {
                 std::rc::Rc::clone(&active.handle.package_fs),
                 std::rc::Rc::clone(&active.handle.history_fs),
                 active.transient.clone(),
+                (context.now_secs)(),
             )
         };
-        let handle = crate::app::library::PackageHandle::load(uid, slug, package_fs, history_fs)
-            .map_err(library_ui_error)?;
+        let mut handle =
+            crate::app::library::PackageHandle::load(uid, slug, package_fs, history_fs)
+                .map_err(library_ui_error)?;
         let title = handle.slug.clone();
+        // Pre-flight (same as `open_opened_package`'s, P3): BEFORE anything
+        // reads the package for the push, so a refused or upgraded head
+        // never reaches `open_library_project`'s hash check.
+        self.migrate_package_on_open(&mut handle, now)?;
         let files = handle.read_all_files().map_err(library_ui_error)?;
         let expected_hash = handle.content_hash().map_err(library_ui_error)?.to_string();
         let loaded = server
