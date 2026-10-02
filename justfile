@@ -4379,13 +4379,17 @@ device-scenario *args:
 #
 # Diff a produced trace against the silicon fixture for the same scenario with
 #   node scripts/emu/trace-diff.mjs <silicon>.jsonl <emulated>.emu.jsonl
+#
+# `--serve-release` runs it with no dev server: the walk serves the release
+# bundle (`just studio-web-story-build`) and the packaged firmware itself.
 walk-no-board *args:
     node scripts/emu/walk-no-board.mjs {{ args }}
 
 # The C6 repartition's migration walk (P08): real Studio, headless, updating
 # an emulated C6 that is a fielded board (current firmware, pre-2026-10
-# table, files at 0x310000). One scenario per run — W1 W2 W3 W4 W9 W7a
-# W7b, see the script header. Serves the RELEASE bundle itself (no dev
+# table, files at 0x310000). One scenario per run — W1 W2 W3 W4 W5 W9 W7a
+# W7b W12 (W12: the board a Worker in the page, `?emu=tab`), see the script
+# header. Serves the RELEASE bundle itself (no dev
 # server); needs `just studio-web-story-build`,
 # `just studio-firmware-package-served` and `cargo build -p lp-cli`. Not CI.
 walk-migration-emu *args:
