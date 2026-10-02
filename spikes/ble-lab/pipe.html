@@ -82,10 +82,22 @@ async function connect() {
   if (ws && ws.readyState === 1) ws.send("up");
 }
 
+// Chrome's `gatt.connect()` on macOS can hang forever (seen 2026-10-02: no
+// resolve, no reject, after the board dropped an idle link), so every attempt
+// is raced against a deadline and abandoned with an explicit disconnect.
 async function reconnect() {
   for (;;) {
-    try { await connect(); return; }
-    catch (e) { log(`connect failed: ${e.message}`); await new Promise((r) => setTimeout(r, 700)); }
+    try {
+      await Promise.race([
+        connect(),
+        new Promise((_, no) => setTimeout(() => no(new Error("connect timed out")), 12000)),
+      ]);
+      return;
+    } catch (e) {
+      log(`connect failed: ${e.message}`);
+      try { device.gatt.disconnect(); } catch {}
+      await new Promise((r) => setTimeout(r, 700));
+    }
   }
 }
 
