@@ -39,7 +39,9 @@ pub use link_mux_transport::{
     LOGIN_DEADLINE_MS, LinkMuxTransport, RADIO_WRITE_DEADLINE_MS, now_us,
 };
 #[cfg(feature = "radio-link")]
-pub use radio_link_config::{MtuTooSmall, radio_link_config, radio_max_payload};
+pub use radio_link_config::{
+    MtuTooSmall, UPDATE_RX_WINDOW, radio_link_config, radio_max_payload, set_update_mode,
+};
 #[cfg(feature = "radio-link")]
 pub use radio_link_port::{
     CloseReason, RADIO_LINK_SLOTS, RadioLinkEvent, RadioLinkPort, RadioLinkSlot,

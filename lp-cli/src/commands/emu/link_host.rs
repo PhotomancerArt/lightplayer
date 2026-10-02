@@ -342,6 +342,8 @@ pub struct EmuLinkHost<B: EmuUsbBoard> {
     wall_deadline: Option<Instant>,
     /// OTA split-link spike: firmware this host offers on the update channel.
     pub ota: Option<OtaServe>,
+    /// Update-channel messages waiting for room in the link's send ring.
+    ota_out: VecDeque<Vec<u8>>,
 }
 
 /// OTA split-link spike: a build this host offers, and serves chunk by chunk.
@@ -368,6 +370,14 @@ pub struct OtaServe {
     pub ticket: Option<[u8; 16]>,
     /// Offers refused for want of a login or a ticket (`A`).
     pub auth_refusals: u32,
+    /// Sectors kept in flight ahead of the board's request (1: answer only
+    /// what was asked). Over BLE the link is round-trip bound, and sending
+    /// ahead is what keeps the radio busy while the board writes flash.
+    pub ahead: u32,
+    /// The chunk stream being sent ahead: (kind, next offset to send).
+    stream: Option<(u8, usize)>,
+    /// When each kind's first and latest chunk went out (for its rate).
+    pub sent_at: [(Option<std::time::Instant>, Option<std::time::Instant>, u64); 2],
 }
 
 impl OtaServe {
@@ -393,6 +403,9 @@ impl OtaServe {
             cut_after: None,
             ticket: None,
             auth_refusals: 0,
+            ahead: 1,
+            stream: None,
+            sent_at: [(None, None, 0); 2],
         })
     }
 
@@ -408,37 +421,97 @@ impl OtaServe {
         out
     }
 
+    /// The answer to one board message, if any: see [`Self::answer_all`].
     pub fn answer(&mut self, msg: &[u8]) -> Option<Vec<u8>> {
-        match msg.first()? {
-            b'Q' => Some(self.offer()),
+        self.answer_all(msg).into_iter().next()
+    }
+
+    /// Every message to send for one board message: an offer for `Q`; for a
+    /// request `R`, the chunk asked for and, with `ahead > 1`, the chunks
+    /// after it, so `ahead` stay in flight. A request behind what was sent
+    /// (the board lost chunks with a link reset) restarts the stream there;
+    /// the engine's header sector (offset 0, asked for last) goes alone.
+    pub fn answer_all(&mut self, msg: &[u8]) -> Vec<Vec<u8>> {
+        const SECTOR: usize = 4096;
+        let Some(&first) = msg.first() else {
+            return Vec::new();
+        };
+        match first {
+            b'Q' => vec![self.offer()],
             b'F' => {
                 self.refusals += 1;
-                None
+                Vec::new()
             }
             b'A' => {
                 self.auth_refusals += 1;
-                None
+                Vec::new()
             }
             b'R' if msg.len() == 10 => {
                 let kind = msg[1];
-                let off = u32::from_le_bytes(msg[2..6].try_into().ok()?) as usize;
-                let len = u32::from_le_bytes(msg[6..10].try_into().ok()?) as usize;
-                let src = if kind == b'C' {
-                    &self.core
+                let off = u32::from_le_bytes(msg[2..6].try_into().unwrap()) as usize;
+                let total = if kind == b'C' {
+                    self.core.len()
                 } else {
-                    &self.engine
+                    self.engine.len()
                 };
-                let end = (off + len).min(src.len());
-                let bytes = src.get(off..end)?;
+                if off >= total {
+                    return Vec::new();
+                }
                 self.requests += 1;
-                self.served_bytes += bytes.len() as u64;
-                let mut out = vec![b'D', kind];
-                out.extend_from_slice(&(off as u32).to_le_bytes());
-                out.extend_from_slice(bytes);
-                Some(out)
+                let ahead = self.ahead.max(1) as usize;
+                let header_last = kind == b'E' && off == 0;
+                let restart = match self.stream {
+                    Some((k, next)) => {
+                        k != kind || header_last || off > next || off + (ahead - 1) * SECTOR < next
+                    }
+                    None => true,
+                };
+                if restart {
+                    self.stream = Some((kind, off));
+                }
+                let next = self.stream.map_or(off, |(_, n)| n).max(off);
+                let to = if header_last {
+                    SECTOR.min(total)
+                } else {
+                    (off + ahead * SECTOR).min(total)
+                };
+                let mut out = Vec::new();
+                let mut at = next;
+                while at < to {
+                    let end = (at + SECTOR).min(total);
+                    let src = if kind == b'C' { &self.core } else { &self.engine };
+                    let mut m = vec![b'D', kind];
+                    m.extend_from_slice(&(at as u32).to_le_bytes());
+                    m.extend_from_slice(&src[at..end]);
+                    self.served_bytes += (end - at) as u64;
+                    let slot = &mut self.sent_at[usize::from(kind != b'C')];
+                    let now = std::time::Instant::now();
+                    slot.0.get_or_insert(now);
+                    slot.1 = Some(now);
+                    slot.2 += (end - at) as u64;
+                    out.push(m);
+                    at = end;
+                }
+                self.stream = Some((kind, if header_last { 0 } else { at.max(next) }));
+                out
             }
-            _ => None,
+            _ => Vec::new(),
         }
+    }
+
+    /// One line on what was served, per kind, and its rate.
+    pub fn describe_rates(&self) -> String {
+        let mut parts = Vec::new();
+        for (name, (a, b, bytes)) in ["core", "engine"].iter().zip(self.sent_at.iter()) {
+            if let (Some(a), Some(b)) = (a, b) {
+                let secs = b.duration_since(*a).as_secs_f64().max(1e-3);
+                parts.push(format!(
+                    "{name} {bytes} B in {secs:.1} s ({:.1} KB/s)",
+                    *bytes as f64 / 1024.0 / secs
+                ));
+            }
+        }
+        parts.join(", ")
     }
 }
 
@@ -464,6 +537,7 @@ impl<B: EmuUsbBoard> EmuLinkHost<B> {
             answer_budget_s: 60.0,
             wall_deadline: None,
             ota: None,
+            ota_out: VecDeque::new(),
         }
     }
 
@@ -577,14 +651,17 @@ impl<B: EmuUsbBoard> EmuLinkHost<B> {
             let Some(ota) = self.ota.as_mut() else {
                 continue;
             };
-            if let Some(answer) = ota.answer(&msg) {
-                if self.port.send_update(&answer).is_err() {
-                    self.link_errors += 1;
-                }
-            }
+            self.ota_out.extend(ota.answer_all(&msg));
             if ota.cut_after.is_some_and(|n| ota.requests >= n) {
                 bail!("ota: power cut after {} request(s)", ota.requests);
             }
+        }
+        // The send ring drains as frames go out; what does not fit waits.
+        while let Some(next) = self.ota_out.front() {
+            if self.port.send_update(next).is_err() {
+                break;
+            }
+            self.ota_out.pop_front();
         }
         Ok(())
     }
@@ -720,4 +797,99 @@ pub fn describe_link_counters(c: &LinkCounters) -> String {
 /// A random link nonce, as every product host draws one per port open.
 pub fn fresh_nonce() -> u32 {
     lpa_client::transport_serial::fresh_link_nonce()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const S: usize = 4096;
+
+    #[test]
+    fn one_ahead_answers_exactly_what_was_asked() {
+        let mut ota = serve(10 * S, 5 * S + 100);
+        assert_eq!(offsets(&ota.answer_all(&req(b'C', 0))), [0]);
+        assert_eq!(offsets(&ota.answer_all(&req(b'C', S))), [S]);
+        assert_eq!(offsets(&ota.answer_all(&req(b'C', 2 * S))), [2 * S]);
+    }
+
+    #[test]
+    fn ahead_keeps_that_many_chunks_in_flight() {
+        let mut ota = serve(10 * S, 0);
+        ota.ahead = 4;
+        assert_eq!(offsets(&ota.answer_all(&req(b'C', 0))), [0, S, 2 * S, 3 * S]);
+        // Each request after the first adds one chunk at the far end.
+        assert_eq!(offsets(&ota.answer_all(&req(b'C', S))), [4 * S]);
+        assert_eq!(offsets(&ota.answer_all(&req(b'C', 2 * S))), [5 * S]);
+        // Near the end nothing is sent past the image.
+        for k in 3..=6 {
+            ota.answer_all(&req(b'C', k * S));
+        }
+        assert!(ota.answer_all(&req(b'C', 8 * S)).is_empty());
+        assert_eq!(ota.served_bytes, 10 * S as u64);
+    }
+
+    #[test]
+    fn a_request_behind_the_stream_restarts_it_there() {
+        let mut ota = serve(10 * S, 0);
+        ota.ahead = 4;
+        ota.answer_all(&req(b'C', 0));
+        ota.answer_all(&req(b'C', S));
+        // A link reset lost chunks 2..5: the board asks for 2 again.
+        assert_eq!(
+            offsets(&ota.answer_all(&req(b'C', 2 * S))),
+            [5 * S],
+            "in step: 2 + 3 ahead = 5 is the next new chunk"
+        );
+        assert_eq!(
+            offsets(&ota.answer_all(&req(b'C', 2 * S))),
+            [2 * S, 3 * S, 4 * S, 5 * S],
+            "behind: resend from where the board is"
+        );
+    }
+
+    #[test]
+    fn the_engine_header_goes_alone_and_last() {
+        let mut ota = serve(S, 3 * S + 10);
+        ota.ahead = 4;
+        assert_eq!(offsets(&ota.answer_all(&req(b'E', S))), [S, 2 * S, 3 * S]);
+        assert!(ota.answer_all(&req(b'E', 2 * S)).is_empty());
+        assert!(ota.answer_all(&req(b'E', 3 * S)).is_empty());
+        let header = ota.answer_all(&req(b'E', 0));
+        assert_eq!(offsets(&header), [0]);
+        assert_eq!(header[0].len(), 6 + S);
+    }
+
+    fn serve(core: usize, engine: usize) -> OtaServe {
+        let mut engine_bytes = vec![0u8; engine.max(64)];
+        engine_bytes[..8].copy_from_slice(b"LPENGIN1");
+        OtaServe {
+            core: vec![1; core],
+            engine: engine_bytes,
+            build_id: [0; 48],
+            offers: 0,
+            requests: 0,
+            served_bytes: 0,
+            refusals: 0,
+            cut_after: None,
+            ticket: None,
+            auth_refusals: 0,
+            ahead: 1,
+            stream: None,
+            sent_at: [(None, None, 0); 2],
+        }
+    }
+
+    fn req(kind: u8, off: usize) -> Vec<u8> {
+        let mut m = vec![b'R', kind];
+        m.extend_from_slice(&(off as u32).to_le_bytes());
+        m.extend_from_slice(&(S as u32).to_le_bytes());
+        m
+    }
+
+    fn offsets(msgs: &[Vec<u8>]) -> Vec<usize> {
+        msgs.iter()
+            .map(|m| u32::from_le_bytes(m[2..6].try_into().unwrap()) as usize)
+            .collect()
+    }
 }

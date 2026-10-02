@@ -56,6 +56,7 @@ async fn run_hosted_async<B: EmuUsbBoard>(
     if let Some(dir) = &args.ota_offer {
         let mut ota = super::link_host::OtaServe::from_dir(dir)?;
         ota.cut_after = args.ota_cut_after;
+        ota.ahead = args.ota_ahead;
         host.ota = Some(ota);
     }
     if let Some(path) = &args.console {

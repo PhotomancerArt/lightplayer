@@ -211,6 +211,11 @@ pub struct RunArgs {
     #[arg(long = "ota-cut-after", requires = "ota_offer")]
     pub ota_cut_after: Option<u32>,
 
+    /// OTA split-link spike: chunks to keep in flight ahead of the board's
+    /// request (1: answer only what was asked).
+    #[arg(long = "ota-ahead", requires = "ota_offer", default_value_t = 1)]
+    pub ota_ahead: u32,
+
     /// With `--host-link`: do not ask the board to pack its replies (JSON
     /// Pack), so the run measures a board that has no learned table — the
     /// heap ratchet's state, and what a host with `LP_WIRE_ENCODING=json`

@@ -33,7 +33,11 @@ pub fn capture(args: &CaptureArgs) -> Result<()> {
     let mut requests = CaptureRequests::parse(&args.request)?;
     let mut port = Some(LabPort::open(&args.target, TermiosMode::Raw)?);
     let mut ota = match &args.ota_offer {
-        Some(dir) => Some(crate::commands::emu::link_host::OtaServe::from_dir(dir)?),
+        Some(dir) => {
+            let mut serve = crate::commands::emu::link_host::OtaServe::from_dir(dir)?;
+            serve.ahead = args.ota_ahead.unwrap_or(1);
+            Some(serve)
+        }
         None => None,
     };
     let mut ota_out: std::collections::VecDeque<Vec<u8>> = std::collections::VecDeque::new();
@@ -136,9 +140,7 @@ pub fn capture(args: &CaptureArgs) -> Result<()> {
         }
         if let Some(ota) = ota.as_mut() {
             while let Some(msg) = link.poll_update() {
-                if let Some(answer) = ota.answer(&msg) {
-                    ota_out.push_back(answer);
-                }
+                ota_out.extend(ota.answer_all(&msg));
             }
             while let Some(next) = ota_out.front() {
                 match link.send_update(next) {
@@ -182,6 +184,7 @@ pub fn capture(args: &CaptureArgs) -> Result<()> {
             "link capture: ota — {} offer(s), {} request(s), {} B served, {} refusal(s)",
             ota.offers, ota.requests, ota.served_bytes, ota.refusals
         );
+        eprintln!("link capture: ota rates — {}", ota.describe_rates());
     }
     if let Some(summary) = requests.describe() {
         eprintln!("link capture: {summary}");

@@ -83,6 +83,22 @@ pub fn radio_max_payload(att_mtu: u16) -> Result<u16, MtuTooSmall> {
 /// side is lazy (grows with traffic, capped at one largest request, and gives
 /// a large reassembly buffer back once its request is delivered); and there
 /// is one datagram slot, since no log records travel on a radio link.
+/// OTA spike: a board with no engine (core-only, taking an update) opens
+/// radio links with the widest receive window lp-link allows. The link is
+/// window-bound over BLE (a window of frames per round trip, and the host's
+/// round trip runs through a browser), and core-only has the RAM: no engine,
+/// no project. The window is advertised in the SYN, so the host's own
+/// `tx_window` decides how much of it is used.
+static UPDATE_MODE: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+/// The receive window of a radio link opened in update mode.
+pub const UPDATE_RX_WINDOW: u8 = 32;
+
+/// Open every later radio link in update mode (see [`UPDATE_MODE`]).
+pub fn set_update_mode(on: bool) {
+    UPDATE_MODE.store(on, core::sync::atomic::Ordering::Relaxed);
+}
+
 pub fn radio_link_config(att_mtu: u16) -> Result<LinkConfig, MtuTooSmall> {
     let max_payload = radio_max_payload(att_mtu)?;
     let mut cfg = LinkConfig::ble();
@@ -94,6 +110,9 @@ pub fn radio_link_config(att_mtu: u16) -> Result<LinkConfig, MtuTooSmall> {
     cfg.send_queue = SEND_QUEUE;
     cfg.keep_reassembly = KEEP_REASSEMBLY;
     cfg.datagram_queue = DATAGRAM_QUEUE;
+    if UPDATE_MODE.load(core::sync::atomic::Ordering::Relaxed) {
+        cfg.rx_window = UPDATE_RX_WINDOW;
+    }
     Ok(cfg)
 }
 

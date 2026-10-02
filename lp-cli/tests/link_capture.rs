@@ -57,6 +57,8 @@ fn a_capture_over_the_boards_socket_reaches_the_boot_idle_sentinel() {
         request: Vec::new(),
         ota_offer: None,
         password: None,
+        ota_ahead: None,
+        ble_window: 32,
     })
     .expect("the capture reached the sentinel");
 
@@ -119,6 +121,8 @@ fn a_reboot_request_restarts_the_board_and_the_next_request_goes_to_the_new_sess
         request: vec!["reboot".into(), "hello".into()],
         ota_offer: None,
         password: None,
+        ota_ahead: None,
+        ble_window: 32,
     })
     .expect("the capture sent both requests and the rebooted board answered the second");
 

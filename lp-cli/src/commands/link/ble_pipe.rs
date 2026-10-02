@@ -27,7 +27,7 @@ use lpc_wire::{ClientMessage, ClientRequest, PortRead, WireLinkPort, WireServerM
 use tungstenite::Message;
 
 use super::args::CaptureArgs;
-use crate::commands::emu::link_host::{OtaServe, console_lines, fresh_nonce};
+use crate::commands::emu::link_host::{OtaServe, console_lines, describe_link_counters, fresh_nonce};
 
 const LOGIN_ID_BASE: u64 = 2_000_000;
 
@@ -42,6 +42,7 @@ pub fn capture(args: &CaptureArgs, port: &str) -> Result<()> {
                 chunk.copy_from_slice(&fresh_nonce().to_le_bytes());
             }
             serve.ticket = Some(ticket);
+            serve.ahead = args.ota_ahead.unwrap_or(4);
             Some(serve)
         }
         None => None,
@@ -90,12 +91,18 @@ pub fn capture(args: &CaptureArgs, port: &str) -> Result<()> {
                         "link capture: BLE connection {connections} up at {:.3} s",
                         stamp(&clock)
                     );
-                    link = Some(WireLinkPort::new(LinkConfig::ble(), fresh_nonce(), false));
+                    let mut cfg = LinkConfig::ble();
+                    cfg.tx_window = args.ble_window;
+                    link = Some(WireLinkPort::new(cfg, fresh_nonce(), false));
                     logged_in = false;
                     out.clear();
                 }
                 Ok(Message::Text(text)) if text.as_str() == "down" => {
-                    eprintln!("link capture: BLE connection down at {:.3} s", stamp(&clock));
+                    eprintln!(
+                        "link capture: BLE connection down at {:.3} s; host link — {}",
+                        stamp(&clock),
+                        link.as_ref().map_or_else(String::new, |l| describe_link_counters(&l.counters()))
+                    );
                     link = None;
                 }
                 Ok(Message::Text(text)) => {
@@ -205,9 +212,7 @@ pub fn capture(args: &CaptureArgs, port: &str) -> Result<()> {
                             stamp(&clock)
                         );
                     }
-                    if let Some(answer) = ota.answer(&msg) {
-                        out.push_back(answer);
-                    }
+                    out.extend(ota.answer_all(&msg));
                 }
                 while let Some(next) = out.front() {
                     match l.send_update(next) {
@@ -238,6 +243,7 @@ pub fn capture(args: &CaptureArgs, port: &str) -> Result<()> {
             "link capture: ota — {} offer(s), {} request(s), {} B served, {} refusal(s), {} auth refusal(s)",
             ota.offers, ota.requests, ota.served_bytes, ota.refusals, ota.auth_refusals
         );
+        eprintln!("link capture: ota rates — {}", ota.describe_rates());
     }
     if let Some(needle) = &args.exit_on
         && !matched

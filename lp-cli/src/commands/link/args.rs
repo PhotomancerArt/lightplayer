@@ -102,6 +102,16 @@ pub struct CaptureArgs {
     /// board says hello (an untrusted link needs the edit tier to offer).
     #[arg(long)]
     pub password: Option<String>,
+
+    /// OTA spike: chunks to keep in flight ahead of the board's request
+    /// (default 4 on `blepipe:`, 1 elsewhere).
+    #[arg(long = "ota-ahead")]
+    pub ota_ahead: Option<u32>,
+
+    /// OTA spike, `blepipe:` targets: the host link's send window, in frames
+    /// (the board's advertised receive window still caps it).
+    #[arg(long = "ble-window", default_value_t = 32)]
+    pub ble_window: u8,
 }
 
 #[derive(Debug, Args)]

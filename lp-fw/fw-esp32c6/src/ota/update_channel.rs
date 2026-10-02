@@ -11,7 +11,11 @@
 //! - board → host `A` — refused: an untrusted link must log in (engine
 //!   running) or bring this board's ticket (core-only)
 //!
-//! One request is in flight at a time; every chunk is one flash sector. The
+//! The board asks for one chunk at a time, and every chunk is one flash
+//! sector. A host may send chunks AHEAD of the request: the board takes a `D`
+//! only for the sector it is waiting for (anything else is ignored), and
+//! lp-link's flow control bounds what waits in its inbox. Over BLE that is
+//! what keeps the radio busy while the board erases and programs. The
 //! transfer belongs to the link that asked for it; an offer of the same
 //! build from another link (a reconnect after a drop) takes it over where it
 //! stopped.
@@ -188,6 +192,9 @@ pub async fn core_only(
     let mut queried = false;
     #[cfg(feature = "ble")]
     let mut radios: Vec<(LinkId, usize)> = Vec::new();
+    // Every radio link from here on takes the wide update window.
+    #[cfg(feature = "ble")]
+    fw_esp32_common::radio_link::set_update_mode(true);
     // Core-only is a complete boot for the recovery ledger — unless the core
     // is here because the engine keeps crashing, in which case the count
     // must stay up so the next boot stays here too.
