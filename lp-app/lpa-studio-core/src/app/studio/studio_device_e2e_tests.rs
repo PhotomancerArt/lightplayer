@@ -6663,3 +6663,135 @@ fn sim_loaded(device: &FakeEsp32Device) -> Vec<String> {
         .value;
     loaded.iter().map(|p| p.path.to_string()).collect()
 }
+
+/// A board that boots dark — its saved startup project (`/lightplayer.json`
+/// names `porch`) is one it refuses — reports nothing loaded. A push to it
+/// replaces that saved project: it lands in the saved folder's OTHER slot,
+/// the refused folder is gone once the new one runs, and the next boot
+/// resumes the pushed project. The demo folder is not involved.
+#[test]
+fn a_push_to_a_dark_board_replaces_its_saved_startup_project() {
+    let (_uid, good_files) = a_project_from_another_library(0x6c);
+    let device = dark_board_saved_at("dev000000daqf6dvvra", "porch");
+    let (_bench, _tasks, _device_uid) = running_board(&device, "usb-push-dark-saved");
+    let mut client = lpa_client::LpClient::new(FakeDeviceIo::new(&device)).on_borrowed_wire();
+    save_startup_project(&mut client, "porch");
+    let mut quiet = |_: String, _: Option<u8>| {};
+    let loaded = drive_real(client.project_list_loaded())
+        .expect("list")
+        .value;
+    assert!(loaded.is_empty(), "the board boots dark: {loaded:?}");
+
+    let report = drive_real(lpa_client::push_project(
+        &mut client,
+        &good_files,
+        &hash_of(&good_files),
+        "studio",
+        &mut quiet,
+    ))
+    .expect("a good push lands");
+
+    assert_eq!(report.storage_id, "porch-b");
+    assert_eq!(project_dirs(&mut client), vec!["/projects/porch-b"]);
+    assert_eq!(
+        saved_startup_project(&mut client).as_deref(),
+        Some("porch-b")
+    );
+    let loaded: Vec<String> = drive_real(client.project_list_loaded())
+        .expect("list")
+        .value
+        .iter()
+        .map(|p| p.path.to_string())
+        .collect();
+    assert_eq!(loaded, vec!["/projects/porch-b"]);
+}
+
+/// The same dark board, with a push it refuses too: nothing it held is
+/// touched — the saved folder is still whole, `/lightplayer.json` still names
+/// it, and the refused slot is cleaned up.
+#[test]
+fn a_refused_push_to_a_dark_board_leaves_its_saved_startup_project() {
+    let device = dark_board_saved_at("dev000000daqf6dvvrb", "porch");
+    let (_bench, _tasks, _device_uid) = running_board(&device, "usb-push-dark-refused");
+    let mut client = lpa_client::LpClient::new(FakeDeviceIo::new(&device)).on_borrowed_wire();
+    save_startup_project(&mut client, "porch");
+    let saved_manifest = drive_real(client.fs_read("/projects/porch/project.json".as_path()))
+        .expect("the saved project is on the board")
+        .value;
+    let mut quiet = |_: String, _: Option<u8>| {};
+
+    let result = drive_real(lpa_client::push_project(
+        &mut client,
+        &v10_corpus_files(),
+        "unused-hash",
+        "studio",
+        &mut quiet,
+    ));
+    let error = result.expect_err("a v10 push is refused").to_string();
+    assert!(
+        error.contains("porch"),
+        "the error names what the board kept: {error}"
+    );
+    assert_eq!(project_dirs(&mut client), vec!["/projects/porch"]);
+    assert_eq!(saved_startup_project(&mut client).as_deref(), Some("porch"));
+    let after = drive_real(client.fs_read("/projects/porch/project.json".as_path()))
+        .expect("the saved project is still on the board")
+        .value;
+    assert_eq!(after, saved_manifest, "the saved project is whole");
+}
+
+/// A board seeded with a project it refuses at boot (a format-behind
+/// package) in `/projects/<dir>`: it boots dark.
+fn dark_board_saved_at(uid: &str, dir: &str) -> FakeEsp32Device {
+    FakeEsp32Device::new(FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new()
+            .with_identity(FakeDeviceIdentity::new(uid, "Bench board"))
+            .with_base_mac(BENCH_BOARD_MAC)
+            .with_heartbeat_interval(Duration::from_millis(20))
+            .with_project_files(v10_corpus_files())
+            .with_project_dir(dir)
+            .with_loaded_project(),
+    )))
+}
+
+/// What a board that once loaded `dir` over the wire holds in
+/// `/lightplayer.json` (the server's `persist_startup_project`). The fake's
+/// boot loads straight from its seed dir and never writes it, so the test
+/// writes it the way an earlier session's load would have.
+fn save_startup_project(client: &mut lpa_client::LpClient<FakeDeviceIo>, dir: &str) {
+    let json = format!(r#"{{"startup_project":"{dir}"}}"#);
+    drive_real(client.fs_write("/lightplayer.json".as_path(), json.into_bytes()))
+        .expect("the board config writes");
+}
+
+/// The folder `/lightplayer.json` says the board boots.
+fn saved_startup_project(client: &mut lpa_client::LpClient<FakeDeviceIo>) -> Option<String> {
+    let bytes = drive_real(client.fs_read("/lightplayer.json".as_path()))
+        .ok()?
+        .value;
+    serde_json::from_slice::<serde_json::Value>(&bytes).ok()?["startup_project"]
+        .as_str()
+        .map(str::to_string)
+}
+
+/// Every project folder on the board.
+fn project_dirs(client: &mut lpa_client::LpClient<FakeDeviceIo>) -> Vec<String> {
+    let mut dirs: Vec<String> = drive_real(client.fs_list_dir("/projects".as_path(), false))
+        .expect("ls")
+        .value
+        .iter()
+        .map(|p| p.to_string())
+        .collect();
+    dirs.sort();
+    dirs
+}
+
+/// The canonical package hash the board computes over `files`.
+fn hash_of(files: &[(String, Vec<u8>)]) -> String {
+    let fs = lpfs::LpFsMemory::new();
+    for (relative, bytes) in files {
+        lpfs::LpFs::write_file(&fs, format!("/{relative}").as_str().as_path(), bytes)
+            .expect("seed");
+    }
+    lpc_history::hash_package(&fs).expect("hash").0.to_string()
+}
