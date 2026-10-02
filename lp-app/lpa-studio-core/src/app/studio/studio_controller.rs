@@ -5063,6 +5063,15 @@ impl StudioController {
             // The same `M!` line framing, over a NUS GATT service.
             crate::LinkTransport::Ble => "ble-nus",
         };
+        // What to call this in a failure line, in the product's own words
+        // for each kind (the card's runtime band's "Sim"/"Emu", the
+        // emulator picker's "an emulated board") — never "the board" for a
+        // sim or an emulated board, which have none.
+        let open_noun = match attachment.transport {
+            crate::LinkTransport::Sim => "sim",
+            crate::LinkTransport::Emu => "emulated board",
+            crate::LinkTransport::Serial | crate::LinkTransport::Ble => "board",
+        };
         let client = crate::StudioServerClient::from_lens_io(io, deadline, protocol);
         let id = self.pool.install(crate::RuntimePayload::Device(attachment));
         self.record_device_event(
@@ -5098,7 +5107,7 @@ impl StudioController {
                     self.push_log(UiLogDraft::new(
                         UiLogLevel::Warn,
                         UiLogOrigin::Studio,
-                        format!("could not open the board in the editor: {error}"),
+                        format!("could not open the {open_noun} in the editor: {error}"),
                     ));
                 }
                 self.close_device_lens();

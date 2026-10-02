@@ -5943,6 +5943,68 @@ fn a_held_lens_on_a_sim_that_is_off_powers_it_on_and_lands() {
     );
 }
 
+/// A failed open must name what it was actually trying to open. Lands a
+/// lens on a sim the ordinary way, detaches it (the wire goes back to the
+/// pump, the record stays Ready — the fold's own hello already landed),
+/// then kills the wire for any FURTHER bytes without touching what has
+/// already been served (the replug test's own trick:
+/// `with_disconnect_after_bytes(device.served_bytes())`), so the model's
+/// cached "this board's port is open" fact is untouched and the reopen's
+/// own hello is the first thing to hit the dead wire — exactly the "the
+/// board answered the fold's hello but not the lens's conversation" race
+/// `open_device_lens`'s failure branch names. Before the fix this logged
+/// "could not open the board in the editor" for a runtime with no board.
+#[test]
+fn a_failed_open_on_a_sim_names_the_sim_not_the_board() {
+    let device = sim_light_player();
+    let (mut bench, tasks, uid) = DeviceBench::with_sim(&device, SIM_TARGET);
+
+    drive(bench.controller.dispatch(UiAction::from_op(
+        crate::RuntimeOp::NODE_ID,
+        crate::RuntimeOp::OpenDeviceLens { uid: uid.clone() },
+    )))
+    .expect("the address is an intent to hold, never a refusal");
+    let deadline = std::time::Instant::now() + REAL_TIME_LIMIT;
+    while bench
+        .controller
+        .runtime_pool_for_test()
+        .lens_session()
+        .is_none()
+    {
+        bench.step(&tasks);
+        drive(bench.controller.try_pending_device_lens());
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the held lens never woke its sim; roster now: {:?}",
+            bench.view()
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert_eq!(bench.lens_device_uid().as_deref(), Some(uid.as_str()));
+
+    bench.detach_lens();
+    device.set_failure_plan(
+        lpa_link::providers::fake_device::FakeFailurePlan::none()
+            .with_disconnect_after_bytes(device.served_bytes()),
+    );
+
+    let error = bench
+        .open_lens(&uid)
+        .expect_err("the lens's own hello dies on the cut wire");
+    let logged = bench
+        .controller
+        .logs()
+        .iter()
+        .rev()
+        .find(|entry| entry.message.starts_with("could not open"))
+        .map(|entry| entry.message.clone());
+    assert_eq!(
+        logged,
+        Some(format!("could not open the sim in the editor: {error}")),
+        "the console line must name the SIM, never a board — there is none here"
+    );
+}
+
 /// A sim whose runtime dies before it ever says hello — the browser worker
 /// that could not fetch its engine (G1, 2026-09-07) — must not hold the
 /// open forever. The fold hears Error + Closed, spends its identify
