@@ -220,6 +220,14 @@ pub(crate) fn DeviceRosterCard(
     // with the reason under them ("Firmware updates need USB") — never
     // hidden, so the question is answered where it is asked (M5 S6).
     let firmware_blocked = card.firmware_blocked.is_some();
+    // Update draws as one chip when it is one click, or when it is refused
+    // for the link (Bluetooth: drawn disabled, reason under it). With
+    // nothing to pick and nothing to press — this Studio serves no build
+    // for the chip — it goes to the pick, whose row is core's reason.
+    let update_one_click = update.as_ref().is_some_and(|update| {
+        update.params().is_empty()
+            && (firmware_blocked || update.action.meta().enablement.is_enabled())
+    });
     // A Bluetooth link nothing has unlocked yet: the board answers only its
     // hello and the unlock, so what it runs is unknown to the card (its
     // "nothing loaded" is a refused read, not the board's word), and the
@@ -522,9 +530,12 @@ pub(crate) fn DeviceRosterCard(
                         // Its board unresolved: the quiet chip is the board
                         // popover's trigger, and picking flashes. The panel
                         // floats in the top layer, so opening it cannot
-                        // change the card's height.
+                        // change the card's height. Nothing to pick at all
+                        // (no build served for the chip): the pick's own
+                        // row says why on one truncated line — a dead chip
+                        // with its reason under it overflows a narrow dock.
                         if let Some(update) = update.clone() {
-                            if update.params().is_empty() {
+                            if update_one_click {
                                 ActionButton {
                                     key: "{\"update-firmware\"}",
                                     action: update.action,
