@@ -466,8 +466,7 @@ fn manage_fake_device(
     use crate::providers::fake_device::{FAKE_IMAGE_IDENTITY, FAKE_PROBED_MAC};
     use crate::{
         LinkBootControlResult, LinkEraseDeviceResult, LinkFirmwareFlashResult,
-        LinkFirmwareManifest, LinkFlashRegion, LinkManagementProgress, LinkManagementRequest,
-        LinkManagementResult, LinkRawFilesystemReadResult,
+        LinkFirmwareManifest, LinkManagementProgress, LinkManagementRequest, LinkManagementResult,
     };
 
     match request {
@@ -475,8 +474,16 @@ fn manage_fake_device(
             device.reset_runtime();
             Ok(LinkManagementResult::ResetRuntime)
         }
-        LinkManagementRequest::FlashFirmware { build_id } => {
-            device.fake_flash(FAKE_IMAGE_IDENTITY);
+        LinkManagementRequest::InspectLayout { .. } => Ok(LinkManagementResult::InspectLayout(
+            device.fake_inspect_layout(),
+        )),
+        LinkManagementRequest::FlashFirmware { build_id, plan } => {
+            match &plan {
+                // A plan runs against the board's flash image
+                // (`fake_flash_layout`), and the board boots what it left.
+                Some(plan) => device.fake_execute_plan(plan)?,
+                None => device.fake_flash(FAKE_IMAGE_IDENTITY),
+            }
             Ok(LinkManagementResult::FlashFirmware(
                 LinkFirmwareFlashResult {
                     manifest: LinkFirmwareManifest {
@@ -533,62 +540,13 @@ fn manage_fake_device(
                 },
             ))
         }
-        LinkManagementRequest::ReadRawFilesystem => {
-            let files = fake_device_files(device);
-            let region = LinkFlashRegion::lpfs_for_chip(FAKE_CHIP_NAME)
-                .expect("the fake device presents as a C6");
-            let image =
-                crate::providers::fake_device::fake_filesystem_image::build_image(region, &files);
-            Ok(LinkManagementResult::ReadRawFilesystem(
-                LinkRawFilesystemReadResult {
-                    logs: vec![format!(
-                        "fake filesystem read: {} bytes at {:#x}",
-                        image.len(),
-                        region.offset
-                    )],
-                    progress: vec![
-                        LinkManagementProgress::new("Reading filesystem")
-                            .with_steps(region.length, region.length)
-                            .with_percent(100),
-                    ],
-                    image,
-                    region,
-                    chip_name: Some(FAKE_CHIP_NAME.to_string()),
-                },
-            ))
-        }
+        LinkManagementRequest::ReadRawFilesystem => Ok(LinkManagementResult::ReadRawFilesystem(
+            device.fake_read_raw_filesystem()?,
+        )),
         LinkManagementRequest::EraseRawFilesystem => {
             Err(LinkError::unsupported(format!("{:?}", request.operation())))
         }
     }
-}
-
-/// What the scripted device answers to a chip probe. Kept as one constant so
-/// the fake's flash-region lookup and its result payloads cannot disagree.
-#[cfg(feature = "fake-device")]
-const FAKE_CHIP_NAME: &str = "ESP32-C6 (fake)";
-
-/// The device's storage as absolute paths: its project files under the
-/// scripted project dir, plus the root-level identity stamp — the same two
-/// things `finish_light_player_boot` seeds into the fake server's memory fs.
-#[cfg(feature = "fake-device")]
-fn fake_device_files(
-    device: &crate::providers::fake_device::FakeEsp32Device,
-) -> Vec<(String, Vec<u8>)> {
-    let Some(state) = device.light_player_state() else {
-        return Vec::new();
-    };
-    let mut files: Vec<(String, Vec<u8>)> = state
-        .project_files
-        .iter()
-        .map(|(relative, bytes)| (format!("{}/{relative}", state.project_dir), bytes.clone()))
-        .collect();
-    if let Some(identity) = &state.identity
-        && let Ok(json) = lpc_wire::json::to_string(identity)
-    {
-        files.push((fw_host::DEVICE_IDENTITY_PATH.to_string(), json.into_bytes()));
-    }
-    files
 }
 
 /// Resources built when a device-backed endpoint connects.

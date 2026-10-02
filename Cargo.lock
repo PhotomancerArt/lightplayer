@@ -6338,6 +6338,7 @@ dependencies = [
  "wasm-bindgen-futures",
  "wasm-bindgen-test",
  "web-sys",
+ "zip",
 ]
 
 [[package]]
@@ -6398,7 +6399,6 @@ dependencies = [
  "futures-util",
  "js-sys",
  "jsonschema",
- "littlefs-rust",
  "log",
  "lp-gfx-lpvm",
  "lpa-agent",

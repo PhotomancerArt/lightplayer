@@ -77,6 +77,7 @@ impl FakeEsp32Device {
                 premature_input_bytes: 0,
                 premature_input: Vec::new(),
                 failure: FakeFailurePlan::none(),
+                plan_interrupt: None,
                 dtr_high_seen: false,
                 last_rts: None,
                 reboot_requests: Arc::new(AtomicUsize::new(0)),
@@ -232,15 +233,35 @@ impl FakeEsp32Device {
         }
     }
 
-    /// The scripted LightPlayer state, when the device is in that boot
-    /// state. Backs the fake raw-filesystem read: the image it returns holds
-    /// the same files the fake server serves, so a backup taken through the
-    /// fake contains what the device actually "has".
-    pub(crate) fn light_player_state(&self) -> Option<FakeLightPlayerState> {
-        match &self.lock().script.boot {
-            FakeBootState::LightPlayer(state) => Some(state.clone()),
-            _ => None,
-        }
+    /// Replace the boot state (a flash the fake executed changed what the
+    /// board boots) and reboot into it.
+    pub(crate) fn replace_boot(&self, boot: FakeBootState) {
+        let mut core = self.lock();
+        core.script.boot = boot;
+        core.reset_current();
+    }
+
+    /// The board's efuse MAC and link configuration — what survives any
+    /// flash.
+    pub(crate) fn board_constants(&self) -> (Option<String>, lpc_wire::lp_link::LinkConfig) {
+        let core = self.lock();
+        (core.efuse_mac.clone(), core.board_link.clone())
+    }
+
+    /// The current boot state.
+    pub(crate) fn boot_state(&self) -> FakeBootState {
+        self.lock().script.boot.clone()
+    }
+
+    /// Make the NEXT plan this board executes stop after `steps` steps, as a
+    /// pulled cable would (consumed once). The board then boots whatever
+    /// that partial write left on its flash.
+    pub fn interrupt_next_plan_after(&self, steps: usize) {
+        self.lock().plan_interrupt = Some(steps);
+    }
+
+    pub(crate) fn take_plan_interrupt(&self) -> Option<usize> {
+        self.lock().plan_interrupt.take()
     }
 
     /// Consume the scripted one-shot manage failure, if any.
@@ -319,6 +340,9 @@ pub(crate) struct FakeDeviceCore {
     /// [`FakeEsp32Device::premature_input`]. Fresh every boot.
     premature_sniffer: LinkSniffer,
     failure: FakeFailurePlan,
+    /// [`FakeEsp32Device::interrupt_next_plan_after`]: steps the next plan
+    /// gets through before the "cable" is pulled.
+    plan_interrupt: Option<usize>,
     dtr_high_seen: bool,
     last_rts: Option<bool>,
     /// Reboots the server's reset hook has asked for, cumulative. Shared
@@ -473,21 +497,35 @@ impl FakeDeviceCore {
         ));
 
         let files = lp.project_files.clone();
+        let root_files = lp.root_files.clone();
+        let fs_boot_state = lp.fs_boot_state;
         let load_at_boot = lp.load_project_at_boot;
         let project_dir = lp.project_dir.clone();
         let identity = lp.identity.clone();
         let base_mac = lp.base_mac.clone();
         let packs = lp.packs;
         let reboot_requests = Arc::clone(&self.reboot_requests);
+        // The stamped uid the hello names: the scripted identity, or — for a
+        // board rebuilt from a flash image — the one its own
+        // `/.lp/device.json` holds, as firmware reads it at boot.
+        let device_uid = identity
+            .as_ref()
+            .map(|identity| identity.uid.clone())
+            .or_else(|| uid_in_root_files(&root_files));
         let hello_identity = lp
             .provenance
             .clone()
             .with_proto(lp.proto_override.unwrap_or(lpc_wire::WIRE_PROTO_VERSION))
-            .with_device_uid(identity.as_ref().map(|identity| identity.uid.clone()));
+            .with_device_uid(device_uid);
         let start = HostRuntime::start_with_server(move || {
             let fs = LpFsMemory::new();
             for (relative, bytes) in &files {
                 let path = format!("{project_dir}/{relative}");
+                if let Err(error) = fs.write_file(path.as_path(), bytes) {
+                    eprintln!("[fake-device] failed to seed {path}: {error}");
+                }
+            }
+            for (path, bytes) in &root_files {
                 if let Err(error) = fs.write_file(path.as_path(), bytes) {
                     eprintln!("[fake-device] failed to seed {path}: {error}");
                 }
@@ -504,6 +542,7 @@ impl FakeDeviceCore {
                 }
             }
             let mut server = create_memory_server_with(fs, hello_identity);
+            server.set_fs_boot_state(fs_boot_state);
             // What the ESP firmwares do: the hello names this build's
             // dictionary and an opt-in naming it is answered `packed`.
             server.set_packed_encoding_supported(packs);
@@ -1033,6 +1072,16 @@ fn boot_nonce(boot: u32) -> u32 {
     static DEVICES: AtomicUsize = AtomicUsize::new(0);
     let device = DEVICES.fetch_add(1, Ordering::Relaxed) as u32;
     boot.wrapping_mul(0x9E37_79B1) ^ device.wrapping_mul(0x85EB_CA77) ^ 0x5EED_0001
+}
+
+/// The `uid` of a `/.lp/device.json` among `files`, read the way firmware
+/// reads its stamp at boot.
+fn uid_in_root_files(files: &[(String, Vec<u8>)]) -> Option<String> {
+    let (_, bytes) = files
+        .iter()
+        .find(|(path, _)| path == fw_host::DEVICE_IDENTITY_PATH)?;
+    let value: serde_json::Value = serde_json::from_slice(bytes).ok()?;
+    value.get("uid")?.as_str().map(str::to_string)
 }
 
 fn is_hello(frame: &lpc_wire::WireServerMessage) -> bool {

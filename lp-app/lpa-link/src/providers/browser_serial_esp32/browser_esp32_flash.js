@@ -329,11 +329,11 @@ export async function writeBootControl(portId, esptoolModulePath, address, recor
 /**
  * Read the device's filesystem partition back to the host, verbatim.
  *
- * The partition is per board, and which board this is only becomes known
- * when `loader.main()` completes its SYNC handshake — a device that cannot
- * boot cannot be asked. So the region is resolved MID-FLOW, by calling back
- * into `resolveRegion(chipName)` on the Rust side; the per-board table stays
- * in one place instead of being mirrored here.
+ * The partition is per board — a device that cannot boot cannot be asked
+ * where its files are, but its partition table can. So the table at 0x8000
+ * is read first, in this session, and handed to `resolveRegion(tableBytes)`
+ * on the Rust side, which parses it and answers the `lpfs` row (or null for
+ * a table that has none). No layout lives in this file.
  *
  * **Default baud, deliberately.** These parts speak USB-Serial-JTAG, where
  * the baud parameter is meaningless and negotiating a higher one is measurably
@@ -368,10 +368,15 @@ export async function readRawFilesystem(portId, esptoolModulePath, resolveRegion
         totalSteps: 1,
         percent: 0,
       });
-      const region = resolveRegion(chipName ? String(chipName) : "");
+      // The region is the device's OWN table's `lpfs` row (Rust parses it):
+      // a C6 flashed before the 2026-10 repartition and one flashed after
+      // keep their files in different places.
+      const partitionTable = await loader.readFlash(PARTITION_TABLE_OFFSET, PARTITION_TABLE_LEN);
+      const region = resolveRegion(new Uint8Array(partitionTable));
       if (!region) {
         throw new Error(
-          `No filesystem partition layout for chip ${chipName ?? "(unidentified)"}.`,
+          `The ${chipName ?? "device"} holds no LightPlayer filesystem partition ` +
+            "(its partition table has no lpfs row).",
         );
       }
       const image = await loader.readFlash(
@@ -405,6 +410,7 @@ export async function readRawFilesystem(portId, esptoolModulePath, resolveRegion
         offset: region.offset,
         length: region.length,
         image,
+        partitionTable,
         logs,
         progress: compactProgress(progress),
       };
@@ -417,6 +423,234 @@ export async function readRawFilesystem(portId, esptoolModulePath, resolveRegion
     }
   } catch (error) {
     reportFailure("esp32-fsread", error, onEvent);
+    throw error;
+  }
+}
+
+// Where every ESP32 flasher writes the partition table, and its length.
+const PARTITION_TABLE_OFFSET = 0x8000;
+const PARTITION_TABLE_LEN = 0xc00;
+
+/**
+ * Read what the board holds relative to the package at `manifestPath`
+ * (plan lp2025/2026-10-01-1843-c6-repartition, the layout migration).
+ *
+ * A dumb executor (`docs/debt/web-serial-js-untestable.md`): WHAT to read
+ * is decided in Rust. `nextRead(chipName, targetTable, lastReadBytes)` is
+ * called first with `lastReadBytes = null`, then once after every read with
+ * that read's bytes, and answers `{offset, length}` or null when it has seen
+ * enough. Rust keeps the bytes; this returns only what it alone knows.
+ *
+ * Ends WITHOUT a reset: the chip stays in ROM download, so the board does
+ * not boot its old firmware (which writes to its filesystem) between this
+ * read and the write that follows it. A caller that ends up not writing
+ * resets the board itself.
+ */
+export async function inspectLayout(
+  portId,
+  manifestPath,
+  esptoolModulePath,
+  knownChipIds,
+  nextRead,
+  onEvent,
+) {
+  if (!isSupported()) {
+    throw new Error("Web Serial firmware updates are not supported in this browser.");
+  }
+  const logs = [];
+  const progress = [];
+  const terminal = terminalFor(logs, "esp32-inspect", onEvent);
+  try {
+    const manifest = await loadFullManifest(manifestPath);
+    const imageFiles = await loadImageFiles(manifest, manifestPath);
+    const merged = imageFiles.find((image) => image.address === 0);
+    if (!merged || merged.data.length < PARTITION_TABLE_OFFSET + PARTITION_TABLE_LEN) {
+      throw new Error("The firmware package has no merged image at 0x0.");
+    }
+    // Copies, never views (the Safari OPFS lesson applies to every async
+    // sink): these bytes cross into Rust and into esptool-js.
+    const targetTable = merged.data.slice(
+      PARTITION_TABLE_OFFSET,
+      PARTITION_TABLE_OFFSET + PARTITION_TABLE_LEN,
+    );
+    const targetImageLen = Math.max(
+      ...imageFiles.map((image) => image.address + image.data.length),
+    );
+    const { ESPLoader, Transport } = await loadEsptoolModule(esptoolModulePath);
+    const port = await getPort(portId);
+    await releasePort(portId);
+    const transport = new Transport(port, ESPTOOL_TRANSPORT_TRACING);
+    const loader = new ESPLoader({ transport, baudrate: 115200, terminal, debugLogging: false });
+    try {
+      const chipName = await loader.main();
+      assertChipMatchesManifest(chipName, manifest, manifestPath, knownChipIds);
+      const baseMac = await readBaseMac(loader);
+      let read = nextRead(chipName ? String(chipName) : "", new Uint8Array(targetTable), null);
+      while (read) {
+        const label = read.length > 0x10000 ? "Reading the board's files" : "Reading the board's layout";
+        const bytes = await loader.readFlash(read.offset, read.length, (_p, done, total) => {
+          pushProgress(progress, onEvent, {
+            label,
+            completedSteps: done,
+            totalSteps: total,
+            percent: total > 0 ? Math.round((done / total) * 100) : 0,
+          });
+        });
+        if (!bytes || bytes.length !== read.length) {
+          throw new Error(
+            `Flash read at 0x${read.offset.toString(16)} returned ${bytes ? bytes.length : 0} ` +
+              `bytes, expected ${read.length}.`,
+          );
+        }
+        read = nextRead(chipName ? String(chipName) : "", new Uint8Array(targetTable), new Uint8Array(bytes));
+      }
+      return {
+        chipName: chipName ? String(chipName) : null,
+        baseMac,
+        targetImageLen,
+        logs,
+        progress: compactProgress(progress),
+      };
+    } finally {
+      try {
+        await transport.disconnect();
+      } catch (error) {
+        console.warn("[esp32-inspect] transport disconnect failed", error);
+      }
+    }
+  } catch (error) {
+    reportFailure("esp32-inspect", error, onEvent);
+    throw error;
+  }
+}
+
+/**
+ * Execute a flash plan decided in Rust, in one bootloader session.
+ *
+ * `steps` is data: `{kind: "firmware"}` (the package's images),
+ * `{kind: "erase", offset, length}`, `{kind: "write", offset, data}`,
+ * `{kind: "verify", offset, length}`. Before anything is written,
+ * `approveBoard(chipName, baseMac)` (Rust) answers null to proceed or a
+ * refusal message — a different board plugged in since the inspection must
+ * not receive this one's files. A verify step reads the region back and asks
+ * `afterVerify(index, bytes)` (Rust, which compares) for the index to run
+ * next: the following step, the start of the filesystem steps (the one
+ * retry), or -1 to fail. An erase is written as 0xff sectors: a flash write
+ * erases the sectors it touches first, so the result is an erased region by
+ * the same path every write already takes.
+ */
+export async function executePlan(
+  portId,
+  manifestPath,
+  esptoolModulePath,
+  knownChipIds,
+  steps,
+  approveBoard,
+  afterVerify,
+  onEvent,
+) {
+  if (!isSupported()) {
+    throw new Error("Web Serial firmware updates are not supported in this browser.");
+  }
+  const logs = [];
+  const progress = [];
+  const terminal = terminalFor(logs, "esp32-plan", onEvent);
+  try {
+    const manifest = await loadFullManifest(manifestPath);
+    const imageFiles = await loadImageFiles(manifest, manifestPath);
+    const { ESPLoader, Transport } = await loadEsptoolModule(esptoolModulePath);
+    const port = await getPort(portId);
+    await releasePort(portId);
+    const transport = new Transport(port, ESPTOOL_TRANSPORT_TRACING);
+    const loader = new ESPLoader({
+      transport,
+      baudrate: manifest.flash?.baudRate ?? 115200,
+      terminal,
+      debugLogging: false,
+    });
+    try {
+      const chipName = await loader.main();
+      assertChipMatchesManifest(chipName, manifest, manifestPath, knownChipIds);
+      const baseMac = await readBaseMac(loader);
+      const refusal = approveBoard(chipName ? String(chipName) : "", baseMac);
+      if (refusal) {
+        throw new Error(String(refusal));
+      }
+      const write = async (fileArray, label) => {
+        await loader.writeFlash({
+          fileArray,
+          flashSize: "keep",
+          flashMode: "keep",
+          flashFreq: "keep",
+          eraseAll: false,
+          // esptool-js 0.6.0 implements only deflate writes.
+          compress: true,
+          reportProgress: (_index, written, total) => {
+            pushProgress(progress, onEvent, {
+              label,
+              completedSteps: written,
+              totalSteps: total,
+              percent: total > 0 ? Math.round((written / total) * 100) : 0,
+            });
+          },
+        });
+      };
+      let index = 0;
+      while (index < steps.length) {
+        const step = steps[index];
+        if (step.kind === "firmware") {
+          await write(
+            imageFiles.map((image) => ({ data: image.data, address: image.address })),
+            "Writing firmware",
+          );
+        } else if (step.kind === "erase") {
+          await write(
+            [{ data: new Uint8Array(step.length).fill(0xff), address: step.offset }],
+            "Moving files",
+          );
+        } else if (step.kind === "write") {
+          await write([{ data: new Uint8Array(step.data), address: step.offset }], "Moving files");
+        } else if (step.kind === "verify") {
+          const bytes = await loader.readFlash(step.offset, step.length, (_p, done, total) => {
+            pushProgress(progress, onEvent, {
+              label: "Verifying files",
+              completedSteps: done,
+              totalSteps: total,
+              percent: total > 0 ? Math.round((done / total) * 100) : 0,
+            });
+          });
+          const next = afterVerify(index, new Uint8Array(bytes ?? []));
+          if (next < 0) {
+            throw new Error(
+              `The files written at 0x${step.offset.toString(16)} did not read back the same, twice.`,
+            );
+          }
+          index = next;
+          continue;
+        } else {
+          throw new Error(`Unknown flash step kind ${step.kind}.`);
+        }
+        index += 1;
+      }
+      pushProgress(progress, onEvent, { label: "Resetting the board", percent: 100 });
+      await restoreLpAnalogI2cClock(loader, chipName, knownChipIds, terminal);
+      await loader.after("hard_reset");
+      return {
+        manifest: summarizeManifest(manifest, manifestPath),
+        chipName: chipName ? String(chipName) : null,
+        baseMac,
+        logs,
+        progress: compactProgress(progress),
+      };
+    } finally {
+      try {
+        await transport.disconnect();
+      } catch (error) {
+        console.warn("[esp32-plan] transport disconnect failed", error);
+      }
+    }
+  } catch (error) {
+    reportFailure("esp32-plan", error, onEvent);
     throw error;
   }
 }

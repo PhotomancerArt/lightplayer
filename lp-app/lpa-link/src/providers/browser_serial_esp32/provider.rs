@@ -306,6 +306,46 @@ impl BrowserSerialEsp32Provider {
         .await
     }
 
+    /// Read the board's layout against the package `build_id` would write
+    /// (the layout migration's first step). Leaves the chip in ROM download.
+    pub async fn inspect_layout_with_events(
+        &self,
+        endpoint_id: &LinkEndpointId,
+        build_id: Option<&str>,
+        events: LinkManagementEventSink,
+    ) -> Result<crate::LinkLayoutInspection, LinkError> {
+        let build_id = require_build_id(build_id)?;
+        let port_id = self.endpoint_port_id(endpoint_id)?;
+        browser_esp32_flash::inspect_layout_with_events(
+            port_id,
+            &self.options.firmware_manifest_path(build_id),
+            self.options.esptool_module_path(),
+            events,
+        )
+        .await
+    }
+
+    /// Execute a flash plan (a layout migration or a restore), the
+    /// `WriteFirmware` step writing the package `build_id`.
+    pub async fn execute_plan_with_events(
+        &self,
+        endpoint_id: &LinkEndpointId,
+        build_id: Option<&str>,
+        plan: &crate::FlashPlan,
+        events: LinkManagementEventSink,
+    ) -> Result<BrowserEsp32FlashResult, LinkError> {
+        let build_id = require_build_id(build_id)?;
+        let port_id = self.endpoint_port_id(endpoint_id)?;
+        browser_esp32_flash::execute_plan_with_events(
+            port_id,
+            &self.options.firmware_manifest_path(build_id),
+            self.options.esptool_module_path(),
+            plan,
+            events,
+        )
+        .await
+    }
+
     pub async fn erase_device_flash(
         &self,
         endpoint_id: &LinkEndpointId,
@@ -338,10 +378,35 @@ impl BrowserSerialEsp32Provider {
         let (endpoint_id, port_id) = self.session_endpoint_and_port(session_id)?;
         self.release_protocol_if_open(session_id).await?;
         match request {
-            LinkManagementRequest::FlashFirmware { ref build_id } => {
+            LinkManagementRequest::InspectLayout { ref build_id } => {
                 let result = self
-                    .flash_firmware_with_events(&endpoint_id, build_id.as_deref(), events.clone())
+                    .inspect_layout_with_events(&endpoint_id, build_id.as_deref(), events.clone())
                     .await?;
+                Ok(LinkManagementResult::InspectLayout(result))
+            }
+            LinkManagementRequest::FlashFirmware {
+                ref build_id,
+                ref plan,
+            } => {
+                let result = match plan {
+                    None => {
+                        self.flash_firmware_with_events(
+                            &endpoint_id,
+                            build_id.as_deref(),
+                            events.clone(),
+                        )
+                        .await?
+                    }
+                    Some(plan) => {
+                        self.execute_plan_with_events(
+                            &endpoint_id,
+                            build_id.as_deref(),
+                            plan,
+                            events.clone(),
+                        )
+                        .await?
+                    }
+                };
                 let logs = result
                     .logs
                     .iter()
@@ -465,6 +530,7 @@ impl BrowserSerialEsp32Provider {
                     LinkRawFilesystemReadResult {
                         image: result.image,
                         region: result.region,
+                        partition_table: result.partition_table,
                         chip_name: result.chip_name,
                         logs: result.logs,
                         progress: map_progress(result.progress),

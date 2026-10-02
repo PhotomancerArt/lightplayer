@@ -44,7 +44,7 @@ use crate::{
 /// This used to be `const TARGET_CHIP: Chip = Chip::Esp32c6`, which was true
 /// only while exactly one image existed; the day a second one shipped it
 /// would have declared "C6" while writing an S3 image.
-fn manifest_chip(target_chip: &str) -> Option<Chip> {
+pub(super) fn manifest_chip(target_chip: &str) -> Option<Chip> {
     match crate::chip_id_from_reported(target_chip)? {
         "esp32c6" => Some(Chip::Esp32c6),
         "esp32s3" => Some(Chip::Esp32s3),
@@ -233,9 +233,11 @@ pub(super) fn write_boot_control(
 
 /// Read the device's `lpfs` partition back to the host, verbatim.
 ///
-/// The region is resolved from the chip the SYNC handshake names, never
-/// hardcoded: the C6 and S3 put `lpfs` in different places, and a backup of
-/// the wrong 960 KB looks exactly like a backup of the right one.
+/// The region is read from the device's own partition table at `0x8000`, in
+/// the same session, never hardcoded: boards put `lpfs` in different places
+/// (and a C6 moved it in 2026-10), and a backup of the wrong 960 KB looks
+/// exactly like a backup of the right one. A table with no `lpfs` row is
+/// refused.
 ///
 /// **Default baud, deliberately.** These parts speak USB-Serial-JTAG, where
 /// the baud parameter is meaningless and negotiating a higher one costs real
@@ -244,7 +246,7 @@ pub(super) fn write_boot_control(
 ///
 /// The read is acked per packet, so progress is genuinely per-block rather
 /// than a spinner: 240 packets for a C6's partition.
-pub(super) fn read_raw_filesystem(
+pub fn read_raw_filesystem(
     port_name: &str,
     events: &LinkManagementEventSink,
 ) -> Result<LinkRawFilesystemReadResult, LinkError> {
@@ -256,13 +258,24 @@ pub(super) fn read_raw_filesystem(
         &mut recorder,
     )?;
     let chip_name = chip_name(&mut flasher);
-    let region = chip_name
-        .as_deref()
-        .and_then(LinkFlashRegion::lpfs_for_chip)
+    let partition_table = read_flash_region(
+        &mut flasher,
+        LinkFlashRegion {
+            offset: crate::PARTITION_TABLE_OFFSET,
+            length: crate::PARTITION_TABLE_LEN as u32,
+        },
+        "Reading partition table",
+        &mut recorder,
+    )?;
+    let region = crate::PartitionTable::parse(&partition_table)
+        .ok()
+        .as_ref()
+        .and_then(LinkFlashRegion::lpfs_in)
         .ok_or_else(|| {
             LinkError::other(format!(
-                "no lpfs partition layout for chip {}",
-                chip_name.as_deref().unwrap_or("(unidentified)")
+                "the {} holds no LightPlayer filesystem partition (its partition table has \
+                 no `lpfs` row)",
+                chip_name.as_deref().unwrap_or("device")
             ))
         })?;
     recorder.log(format!(
@@ -270,13 +283,14 @@ pub(super) fn read_raw_filesystem(
         region.length, region.offset
     ));
 
-    let image = read_flash_region(&mut flasher, region, &mut recorder)?;
+    let image = read_flash_region(&mut flasher, region, "Reading filesystem", &mut recorder)?;
     reset_into_app(&mut flasher, &mut recorder);
     recorder.log("Filesystem read complete");
 
     Ok(LinkRawFilesystemReadResult {
         image,
         region,
+        partition_table,
         chip_name,
         logs: recorder.logs.clone(),
         progress: recorder.progress.clone(),
@@ -289,12 +303,12 @@ pub(super) fn read_raw_filesystem(
 /// espflash's own `Flasher::read_flash` writes straight to a file and reports
 /// nothing, neither of which suits a browser-shaped operation whose whole UX
 /// problem is looking hung; this keeps the bytes in memory and narrates.
-fn read_flash_region(
+pub(super) fn read_flash_region(
     flasher: &mut Flasher,
     region: LinkFlashRegion,
+    label: &str,
     recorder: &mut EventRecorder,
 ) -> Result<Vec<u8>, LinkError> {
-    let label = "Reading filesystem";
     recorder.progress(
         LinkManagementProgress::new(label)
             .with_steps(0, region.length)
@@ -445,7 +459,7 @@ pub(super) fn reset_runtime(
 /// chip-agnostic by design — the raw read in particular exists for a board
 /// nobody can identify any other way, so declaring a chip would refuse the
 /// one case it is for.
-fn connect(
+pub(super) fn connect(
     port_name: &str,
     expect_chip: Option<Chip>,
     after: ResetAfterOperation,
@@ -556,7 +570,7 @@ fn prepare_lp_domain(port_name: &str, recorder: &mut EventRecorder) {
 /// mismatch, but it does so as espflash's `ChipMismatch`, which names neither
 /// the image nor what the user should do about it. This runs before the first
 /// `write_bin_to_flash` and says both.
-fn assert_chip_matches_manifest(
+pub(super) fn assert_chip_matches_manifest(
     detected: Chip,
     manifest: &LinkFirmwareManifest,
 ) -> Result<(), LinkError> {
@@ -577,7 +591,7 @@ fn assert_chip_matches_manifest(
 /// applies the after-operation (the espflash CLI's erase commands do the
 /// same). Best-effort: a reset failure is logged but not fatal —
 /// `DeviceSession` re-runs readiness on rebuild regardless.
-fn reset_into_app(flasher: &mut Flasher, recorder: &mut EventRecorder) {
+pub(super) fn reset_into_app(flasher: &mut Flasher, recorder: &mut EventRecorder) {
     // `is_stub = true` matches the `use_stub = true` passed to `connect`.
     if let Err(error) = flasher.connection().reset_after(true) {
         recorder.log(format!("warning: post-operation reset failed: {error}"));
@@ -592,7 +606,7 @@ fn reset_into_app(flasher: &mut Flasher, recorder: &mut EventRecorder) {
 /// Best-effort on purpose: a register read that fails is logged, and the
 /// flash still ends in a reset — the board may then need a replug, which is
 /// exactly where it stood before this existed.
-fn restore_lp_analog_i2c_clock(flasher: &mut Flasher, recorder: &mut EventRecorder) {
+pub(super) fn restore_lp_analog_i2c_clock(flasher: &mut Flasher, recorder: &mut EventRecorder) {
     if flasher.chip() != Chip::Esp32c6 {
         return;
     }
@@ -632,7 +646,7 @@ fn restore_lp_analog_i2c_clock(flasher: &mut Flasher, recorder: &mut EventRecord
     }
 }
 
-fn chip_name(flasher: &mut Flasher) -> Option<String> {
+pub(super) fn chip_name(flasher: &mut Flasher) -> Option<String> {
     // Chip identity was already detected during `Flasher::connect`; no extra
     // ROM round-trip needed.
     Some(flasher.chip().to_string())
@@ -676,14 +690,14 @@ fn hard_reset_pulse(port: &mut dyn SerialPort) -> serialport::Result<()> {
 
 /// Records management events into `logs`/`progress` for the returned result
 /// while forwarding each one live to the sink.
-struct EventRecorder<'a> {
+pub(super) struct EventRecorder<'a> {
     sink: &'a LinkManagementEventSink,
-    logs: Vec<String>,
-    progress: Vec<LinkManagementProgress>,
+    pub(super) logs: Vec<String>,
+    pub(super) progress: Vec<LinkManagementProgress>,
 }
 
 impl<'a> EventRecorder<'a> {
-    fn new(sink: &'a LinkManagementEventSink) -> Self {
+    pub(super) fn new(sink: &'a LinkManagementEventSink) -> Self {
         Self {
             sink,
             logs: Vec::new(),
@@ -691,13 +705,13 @@ impl<'a> EventRecorder<'a> {
         }
     }
 
-    fn log(&mut self, message: impl Into<String>) {
+    pub(super) fn log(&mut self, message: impl Into<String>) {
         let message = message.into();
         self.sink.emit(LinkManagementEvent::log(message.clone()));
         self.logs.push(message);
     }
 
-    fn progress(&mut self, progress: LinkManagementProgress) {
+    pub(super) fn progress(&mut self, progress: LinkManagementProgress) {
         self.sink
             .emit(LinkManagementEvent::progress(progress.clone()));
         self.progress.push(progress);
@@ -706,14 +720,14 @@ impl<'a> EventRecorder<'a> {
 
 /// Bridges espflash's byte-count [`ProgressCallbacks`] onto our step/percent
 /// [`LinkManagementProgress`] events. One bridge per flashed image.
-struct ProgressBridge<'a, 'b> {
+pub(super) struct ProgressBridge<'a, 'b> {
     recorder: &'a mut EventRecorder<'b>,
     label: String,
     total: u32,
 }
 
 impl<'a, 'b> ProgressBridge<'a, 'b> {
-    fn new(recorder: &'a mut EventRecorder<'b>, label: String) -> Self {
+    pub(super) fn new(recorder: &'a mut EventRecorder<'b>, label: String) -> Self {
         Self {
             recorder,
             label,
@@ -760,14 +774,14 @@ const FIRMWARE_MANIFEST_SCHEMA_VERSION: u32 = 2;
 
 /// A firmware image resolved against the manifest directory.
 #[derive(Debug)]
-struct ResolvedImage {
-    absolute_path: PathBuf,
-    address: u32,
+pub(super) struct ResolvedImage {
+    pub(super) absolute_path: PathBuf,
+    pub(super) address: u32,
 }
 
 /// Load and validate the firmware manifest, returning a provider-neutral
 /// [`LinkFirmwareManifest`] plus the images resolved to absolute paths.
-fn load_manifest(
+pub(super) fn load_manifest(
     manifest_path: &str,
 ) -> Result<(LinkFirmwareManifest, Vec<ResolvedImage>), LinkError> {
     let manifest_path = Path::new(manifest_path);

@@ -104,7 +104,10 @@ async fn run(port: String, manifest: String) {
     println!("\n== manage: FlashFirmware (expect Ready after rebuild) ==");
     let outcome = session
         .manage(
-            LinkManagementRequest::FlashFirmware { build_id: None },
+            LinkManagementRequest::FlashFirmware {
+                build_id: None,
+                plan: None,
+            },
             event_printer(),
         )
         .await

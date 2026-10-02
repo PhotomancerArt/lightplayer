@@ -4,6 +4,8 @@
 pub mod device_link;
 #[cfg(feature = "device-session")]
 pub mod device_session;
+#[cfg(feature = "layout-migration")]
+pub mod layout_migration;
 pub mod provider;
 pub mod providers;
 pub mod registry;
@@ -34,6 +36,7 @@ pub use provider::endpoint::LinkEndpoint;
 pub use provider::endpoint::LinkEndpointId;
 pub use provider::endpoint::LinkEndpointStatus;
 pub use provider::error::LinkError;
+pub use provider::flash_plan::{FlashPlan, FlashStep, FlashStepTarget, PlanError, run_plan};
 pub use provider::flash_region::LinkFlashRegion;
 pub use provider::log::{LinkLogEntry, LinkLogLevel};
 pub use provider::management_event::{
@@ -43,9 +46,14 @@ pub use provider::management_progress::LinkManagementProgress;
 pub use provider::management_request::LinkManagementRequest;
 pub use provider::management_result::{
     LinkBootControlResult, LinkEraseDeviceResult, LinkFirmwareFlashResult, LinkFirmwareManifest,
-    LinkManagementResult, LinkRawFilesystemEraseResult, LinkRawFilesystemReadResult,
+    LinkLayoutInspection, LinkManagementResult, LinkRawFilesystemEraseResult,
+    LinkRawFilesystemReadResult,
 };
 pub use provider::operation::{LinkCapabilities, LinkOperation};
+pub use provider::partition_table::{
+    PARTITION_TABLE_LEN, PARTITION_TABLE_OFFSET, PartitionEntry, PartitionTable,
+    PartitionTableError,
+};
 pub use provider::provider::LinkProvider;
 pub use provider::session::LinkSession;
 pub use provider::session::LinkSessionId;
