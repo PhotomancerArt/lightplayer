@@ -130,6 +130,46 @@ is left to Rust. With BLE up on silicon, 44,584 B of `dram2_seg` holds radio
 allocations. Allocations that a project outlives no longer keep memory they
 grew during the project.
 
+## Amendment (2026-10-01): ESP-NOW asks for lean Wi-Fi driver buffers
+
+The radio's C heap fills `dram2_seg` first (Placement, above). The largest
+tenant there is the Wi-Fi driver. The product brings that driver up only for
+ESP-NOW and never joins a network, but it used esp-radio's
+`ControllerConfig::default()`. That default is sized for a station moving
+bulk traffic: 10 static RX buffers, 32 dynamic RX, 32 dynamic TX and a
+block-ack window of 6.
+
+**Decision:** every ESP-NOW bring-up uses
+`espnow_controller_config()`, with 4 static RX, 8 dynamic RX, 8 dynamic TX
+and a window of 3 (`lp-fw/fw-esp32c6/src/hardware/espnow_controller_config.rs`).
+The stress builds, the desk meter and the BLE coexistence harness all mirror
+the product's bring-up, so they call the same function.
+
+| | default | lean |
+|---|---|---|
+| radio `dram2_seg` use at `wifi::new`, silicon (XIAO C6, PLAYFUL Choker, 2026-10-01 bench) | 30,404 B | 20,084 B |
+| heap used at first heartbeat, `lp-emu:esp32c6:t1`, shipped image | 96,628 B | 86,308 B |
+| image size | 2,960,400 B | 2,960,400 B |
+
+The two −10,320 B figures agree to the byte. On silicon, a joined station
+showed no change in throughput or round-trip time; the render loop bounds
+both. The bench report is in the planning workspace at
+`lp2025/2026-10-01-0300-wifi-control-experiments`.
+
+**What it gives up:** the RX DMA ring is 4 descriptors instead of 10. If
+more than four frames arrive before the Wi-Fi task drains the ring, the rest
+are lost. On the emulator, the two-board `espnow_broadcast_pair` runs
+identically on both configs. The `air_delivery` ring test now pins 4
+delivered and 8 dropped out of 12 undrained frames. ESP-NOW *traffic* has not
+been run on silicon with the lean config; the desk meter
+(`desk_espnow_meter`, PR #890's comment) is the check if a loss question
+comes up.
+
+**Revisit when Wi-Fi joins a network for real** (LAN or relay control, the
+flash budget ADR's radio day). A station carrying a WebSocket might want
+deeper RX buffers than ESP-NOW does. The bench measured no loss of
+throughput at these counts, but that was with frame-bound traffic.
+
 ## Alternatives Considered
 
 - **Grow the stack by shrinking the heap alone (no dram2).** Loses
