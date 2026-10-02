@@ -7,6 +7,7 @@
 //! `docs/adr/2026-10-01-agentic-control-offers-in-core.md`.
 
 pub mod offer_path;
+pub mod offer_search;
 pub mod ui_offer;
 pub mod ui_offer_tree;
 
