@@ -91,6 +91,14 @@ pub(crate) fn shell_story(
     // the global console UI retired (M7′ P2); the entries still ride the
     // view so fixtures stay honest about what the controller carries
     view.console.entries.extend(story_logs);
+    // `StudioShell` always re-publishes the offer context from
+    // `view.offers` (never an ancestor's), so a lens card's Device panel
+    // needs its verbs folded in here — the same tree core would build —
+    // or it draws with none (devices-as-offers).
+    if let Some(card) = &view.lens_card {
+        view.offers =
+            crate::app::home::device_offer_story_fixtures::lens_card_offer_tree(card);
+    }
     rsx! {
         // Body only: the site chrome above it is `web_app`'s, and has its
         // own stories (`site_chrome_stories`).

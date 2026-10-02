@@ -14,8 +14,8 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{
     BluetoothReach, BoardRef, DeviceFace, DeviceOfferFacts, DeviceRosterView, DeviceView,
-    OfferPath, PendingLinkView, UiExampleCard, UiOfferTree, UiPackageCard, UiUnlockOffer,
-    add_device_offers, device_offers, new_sim_offer, pending_link_offers,
+    OfferPath, PendingLinkView, UiExampleCard, UiLensCard, UiOfferTree, UiPackageCard,
+    UiUnlockOffer, add_device_offers, device_offers, new_sim_offer, pending_link_offers,
 };
 
 use crate::app::home::DevicesPage;
@@ -237,6 +237,27 @@ pub(crate) fn StoryDevicesPage(
             DevicesPage { home, remembered_open, target_pick_open, on_action }
         }
     }
+}
+
+/// The tree core would publish for a docked lens card (D43): the gallery's
+/// own `card_tree`, read off the `UiLensCard` the view already carries, so
+/// a `StudioShell`/`WorkbenchFrame` story needs only `simulator_lens_card()`
+/// (or whatever lens it docks) to build both the card and its offers.
+///
+/// `StudioShell` always re-publishes the offer context from `view.offers`
+/// (never an ancestor's — see its `use_provide_offers` call), so a story
+/// that docks a lens card must fold this into `UiStudioView::offers`
+/// itself; wrapping the shell in [`OffersProvider`] from outside has no
+/// effect on anything under it. A bare `WorkbenchFrame` story (no
+/// `StudioShell`) has no such shadowing and may use this with
+/// [`OffersProvider`] directly.
+pub(crate) fn lens_card_offer_tree(card: &UiLensCard) -> UiOfferTree {
+    let UiLensCard::Device { card, runtime } = card;
+    let face = match runtime.is_some() {
+        true => DeviceFace::Sim,
+        false => DeviceFace::Wire,
+    };
+    card_tree(card, face, false, &[], &[])
 }
 
 /// The tree a session's device lens is offered under: the device's own
