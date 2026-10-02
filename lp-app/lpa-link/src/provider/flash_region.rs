@@ -55,6 +55,12 @@ mod tests {
                 384,
             ),
             (
+                include_str!("../../../../lp-fw/fw-esp32c6/partitions.csv"),
+                0x0035_0000,
+                0x000B_0000,
+                176,
+            ),
+            (
                 include_str!("../../testdata/partitions-esp32c6-legacy-v1.csv"),
                 0x0031_0000,
                 0x000F_0000,

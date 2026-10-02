@@ -52,13 +52,13 @@ pub const PHY_INIT_LEN: u32 = 0x0000_1000;
 /// The `factory` partition (`partitions.csv`), where a flashed app image
 /// starts, and how long it may be.
 pub const FACTORY_OFFSET: u32 = 0x0001_0000;
-pub const FACTORY_LEN: u32 = 0x0030_0000;
+pub const FACTORY_LEN: u32 = 0x0034_0000;
 
 /// The `lpfs` partition (`partitions.csv`). The firmware reads it from the
 /// flashed table at boot (`fw-esp32c6/src/flash_storage.rs`), so a direct
 /// load stages [`c6_partition_table_bytes`] for it to find.
-pub const LPFS_OFFSET: u32 = 0x0031_0000;
-pub const LPFS_LEN: u32 = 0x000F_0000;
+pub const LPFS_OFFSET: u32 = 0x0035_0000;
+pub const LPFS_LEN: u32 = 0x000B_0000;
 
 /// The length of a compiled partition table: rows, the MD5 row, then `0xff`
 /// to here (ESP-IDF's `PARTITION_TABLE_MAX_LEN`, and what espflash writes).

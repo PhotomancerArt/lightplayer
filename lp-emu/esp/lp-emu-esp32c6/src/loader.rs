@@ -497,7 +497,7 @@ pub struct FlashStaging {
 /// the RAM region behind the window and left the MMU empty
 /// (`the module docs, item 2`). That works right up until something asks the
 /// flash *chip* a question, and this milestone's firmware does: littlefs
-/// mounts `lpfs` at `0x0031_0000` through the mask ROM's
+/// mounts `lpfs` at `0x0035_0000` through the mask ROM's
 /// `esp_rom_spiflash_read`, which reads the same part the app's `.text`
 /// lives in. So the chip has to hold the app too, or the two halves of the
 /// address space would be describing different boards.
@@ -611,7 +611,7 @@ pub fn stage_image_in_flash(
 /// bltu  a5, a4, +0xae      ; → return 1
 /// ```
 ///
-/// and `lpfs` starts at `0x0031_0000`, which is past 2 MiB. On silicon the
+/// and `lpfs` starts at `0x0035_0000`, which is past 2 MiB. On silicon the
 /// bootloader calls `esp_rom_spiflash_config_param` with the size from the
 /// image header's flash-size field; here the loader writes the same word,
 /// derived from the image the machine was actually given. Without it every

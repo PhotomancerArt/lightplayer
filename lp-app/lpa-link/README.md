@@ -84,15 +84,23 @@ The current implemented management operations are:
 - `ReadRawFilesystem`: read the device's `lpfs` partition back to the host,
   verbatim, as littlefs image bytes.
 
-`ReadRawFilesystem` takes no region. The partition is per board (the C6's
-`lpfs` is at `0x310000`, the S3's at `0x610000`), and which board this is only
-becomes knowable when the esptool SYNC handshake answers — a device that will
-not boot cannot be asked what it is, and that is precisely the case this
-operation exists for. Providers therefore resolve the region from the chip
-they detect, through `LinkFlashRegion::lpfs_for_chip`, and report both the
-region and the chip on the result so a backup's manifest can record them.
-An unrecognized chip is refused rather than guessed at: a wrong region
-produces a plausible-looking archive of the wrong bytes.
+`ReadRawFilesystem` takes no region. The partition is per board and per
+layout (a C6 on today's table has `lpfs` at `0x350000`; one still on the
+pre-2026-10 table at `0x310000`; the S3's at `0x610000`), and a device that
+will not boot cannot be asked which. Providers therefore read the device's
+OWN partition table at `0x8000` over the esptool link and take its `lpfs`
+row (`LinkFlashRegion::lpfs_in`), returning the table's bytes, the region
+and the chip on the result so a backup's manifest can record them. A board
+with no readable table, or no `lpfs` row, is refused rather than guessed at:
+a wrong region produces a plausible-looking archive of the wrong bytes.
+
+The C6 repartition's migration lives in `layout_migration` (feature
+`layout-migration`): a sans-IO probe that classifies a board's layout from a
+handful of reads, a planner that turns the classification into an ordered
+`FlashPlan` (old filesystem retired, new one written, superblocks last,
+verified), and the device backup archive (format 2). The host and browser
+providers execute the plan (`InspectLayout`, `FlashFirmware { plan }`); see
+`docs/adr/2026-10-01-c6-repartition-and-layout-migration.md`.
 
 `lpa-link` does not parse the image. Turning littlefs bytes into files is the
 concern of the layer that builds the archive (`lpa-studio-core`'s

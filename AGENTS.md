@@ -68,12 +68,14 @@ and the correct solution was always to fix the dependency.
 
 ## How to Handle Binary Size Issues
 
-The ESP32-C6 app image must fit a 3 MB partition, and the budget is tight —
+The ESP32-C6 app image must fit a 3.25 MB partition, and the budget is tight —
 read `docs/adr/2026-07-28-esp32c6-flash-budget.md` before doing size work. It
 records what has already been spent (a ~200 KB diagnostics-for-flash flag
-stack, the deliberately-kept 500 KB WiFi blob), what is reserved (the lpfs
-partition, held for the future radio/WiFi decision), and what has been measured
-and *rejected* so you don't re-run dead ends.
+stack, the deliberately-kept 500 KB WiFi blob), what was reserved and is now
+spent (256 KB of the lpfs partition, given to the app for Wi-Fi by the 2026-10
+repartition — `docs/adr/2026-10-01-c6-repartition-and-layout-migration.md`;
+moving `lpfs` again needs a migration, never just a new table), and what has
+been measured and *rejected* so you don't re-run dead ends.
 
 Check where you stand at any time:
 

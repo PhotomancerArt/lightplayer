@@ -41,7 +41,9 @@ rather than the *pre-existing* safe-mode upload gap it actually is.
 
 **Workarounds** — From the one bench occurrence of the (unrelated) upload
 side of this hang (`zook-dome-silicon-verdict` memory, 2026-08-04): erase
-`lpfs` (`0x310000 0xF0000`) and `espflash reset` to force the board back
+`lpfs` (`0x310000 0xF0000` on the pre-2026-10 C6 layout; `0x350000 0xB0000`
+since the C6 repartition — check the board's own table, or use
+`lp-cli hardware lpfs report`, before erasing) and `espflash reset` to force the board back
 to an idle (non-safe-mode) boot, then upload normally. That workaround is
 **destructive to the board's stored project** — it is a firmware-recovery
 move, not a project-preserving one, so it does not actually solve the

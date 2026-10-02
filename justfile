@@ -46,7 +46,7 @@ fw_esp32v3_elf := "target/" + xt_v3_target + "/release-esp32v3/fw-esp32v3"
 v3_flash_size := "4mb"
 
 # The C6's 4 MB flash, matching lp-fw/fw-esp32c6/partitions.csv
-# (0x310000 + 0xF0000 = 0x400000) and the runner in
+# (0x350000 + 0xB0000 = 0x400000) and the runner in
 # lp-fw/fw-esp32c6/.cargo/config.toml, which cannot read this var — same
 # reasoning as s3_flash_size above. CANONICAL SOURCE:
 # lp-fw/builds/esp32c6-4mb.json (`flashSizeMb`).
@@ -2036,10 +2036,10 @@ fw-esp32c6-size-check margin="65536": install-rv32-target
     #!/usr/bin/env bash
     set -euo pipefail
     (cd lp-fw/fw-esp32c6 && cargo build --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} --features esp32c6,server)
-    # Keep `partition` in sync with the `factory` app partition in
-    # lp-fw/fw-esp32c6/partitions.csv.
-    just _fw-size-check esp32c6 esp32c6 {{ c6_flash_size }} {{ fw_esp32c6_elf }} 3145728 {{ margin }} \
-        "See docs/adr/2026-07-28-esp32c6-flash-budget.md."
+    # The partition is read from the `factory` row of the table the chip is
+    # flashed with, so the budget cannot drift from the layout again.
+    just _fw-size-check esp32c6 esp32c6 {{ c6_flash_size }} {{ fw_esp32c6_elf }} lp-fw/fw-esp32c6/partitions.csv {{ margin }} \
+        "See docs/adr/2026-07-28-esp32c6-flash-budget.md and docs/adr/2026-10-01-c6-repartition-and-layout-migration.md."
     just fw-esp32c6-rodata-layout-check
 
 # The image just linked must carry `build.rs`'s MERGED rodata layout, not
@@ -2124,9 +2124,9 @@ fw-manifest-check-emu: build-fw-emu
 fw-esp32s3-size-check margin="65536": build-fw-esp32s3
     #!/usr/bin/env bash
     set -euo pipefail
-    # Keep `partition` in sync with the `factory` app partition in
-    # lp-fw/fw-esp32s3/partitions.csv (0x600000).
-    just _fw-size-check esp32s3 esp32s3 {{ s3_flash_size }} {{ fw_esp32s3_elf }} 6291456 {{ margin }} \
+    # The partition is read from the `factory` row of
+    # lp-fw/fw-esp32s3/partitions.csv.
+    just _fw-size-check esp32s3 esp32s3 {{ s3_flash_size }} {{ fw_esp32s3_elf }} lp-fw/fw-esp32s3/partitions.csv {{ margin }} \
         "See lp-fw/fw-esp32s3/README.md 'Partitions'."
 
 # Fail when the esp32v3 (classic ESP32) app image gets too close to its 3 MB
@@ -2140,9 +2140,9 @@ fw-esp32s3-size-check margin="65536": build-fw-esp32s3
 fw-esp32v3-size-check margin="65536": build-fw-esp32v3
     #!/usr/bin/env bash
     set -euo pipefail
-    # Keep `partition` in sync with the `factory` app partition in
-    # lp-fw/fw-esp32v3/partitions.csv (0x300000).
-    just _fw-size-check esp32v3 esp32 {{ v3_flash_size }} {{ fw_esp32v3_elf }} 3145728 {{ margin }} \
+    # The partition is read from the `factory` row of
+    # lp-fw/fw-esp32v3/partitions.csv.
+    just _fw-size-check esp32v3 esp32 {{ v3_flash_size }} {{ fw_esp32v3_elf }} lp-fw/fw-esp32v3/partitions.csv {{ margin }} \
         "See lp-fw/fw-esp32v3/README.md 'Partitions'."
 
 # Shared tail of the per-chip size checks: measure the flashable image and
@@ -2152,13 +2152,21 @@ fw-esp32v3-size-check margin="65536": build-fw-esp32v3
 #
 # Callers build the ELF first; the build differs per chip (target, profile,
 # features, toolchain) but the measurement does not.
-_fw-size-check name chip flash_size elf partition margin doc:
+_fw-size-check name chip flash_size elf csv margin doc:
     #!/usr/bin/env bash
     set -euo pipefail
     if ! command -v espflash >/dev/null 2>&1; then
         echo "espflash not found. Install it before running the firmware size check."
         exit 1
     fi
+    # The app partition: the `factory` row of the table this chip is flashed
+    # with (a literal here drifted from the CSV once already).
+    factory="$(awk -F, '$1=="factory"{gsub(/[ \t]/,"",$5); print $5}' {{ csv }})"
+    if [ -z "${factory}" ]; then
+        echo "::error::no factory row in {{ csv }}"
+        exit 1
+    fi
+    partition=$(( factory ))
     # No --partition-table here on purpose: espflash errors out when the image
     # overruns the real table, and we want to report *how far* over it is.
     #
@@ -2175,10 +2183,22 @@ _fw-size-check name chip flash_size elf partition margin doc:
     trap 'rm -f "${img}"' EXIT
     espflash save-image --chip {{ chip }} --flash-size {{ flash_size }} {{ elf }} "${img}" >/dev/null
     size="$(wc -c < "${img}" | tr -d ' ')"
-    headroom=$(( {{ partition }} - size ))
-    echo "fw-{{ name }} image ${size} B / {{ partition }} B — headroom ${headroom} B (margin {{ margin }} B)"
+    headroom=$(( partition - size ))
+    echo "fw-{{ name }} image ${size} B / ${partition} B — headroom ${headroom} B (margin {{ margin }} B)"
     if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
-        echo "{{ name }} image \`${size}\` B of \`{{ partition }}\` B — headroom \`${headroom}\` B" >> "$GITHUB_STEP_SUMMARY"
+        echo "{{ name }} image \`${size}\` B of \`${partition}\` B — headroom \`${headroom}\` B" >> "$GITHUB_STEP_SUMMARY"
+    fi
+    # The C6's pre-repartition lpfs began at 0x310000 (frozen at
+    # lp-app/lpa-link/testdata/partitions-esp32c6-legacy-v1.csv). Once the app
+    # image crosses it, a migration must retire the old filesystem BEFORE the
+    # firmware is written (plan MQ6/MQ9) — informational, never a failure.
+    if [ "{{ name }}" = "esp32c6" ]; then
+        overlap=$(( 0x300000 - size ))
+        if [ "${overlap}" -ge 0 ]; then
+            echo "legacy overlap: ${overlap} B before the image reaches the old lpfs at 0x310000"
+        else
+            echo "legacy overlap: crossed — the image runs $(( -overlap )) B into the old lpfs at 0x310000"
+        fi
     fi
     if [ "${headroom}" -lt "{{ margin }}" ]; then
         echo "::error::{{ name }} image headroom ${headroom} B is under the {{ margin }} B margin. {{ doc }}"

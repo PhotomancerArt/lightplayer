@@ -230,7 +230,7 @@ board:
   `rom_spiflash_legacy_data->chip_size`, in place of the bootloader's
   `esp_rom_spiflash_config_param`. The ROM's own default chip is **2 MiB**
   (`rom_default_spiflash_legacy_data` at `0x4087_fa08`), `SPI_read_data`
-  refuses any read past `chip_size`, and `lpfs` starts at `0x0031_0000` —
+  refuses any read past `chip_size`, and `lpfs` starts at `0x0035_0000` —
   so without this every filesystem read returns error 1 for a reason that has
   nothing to do with the filesystem.
 
