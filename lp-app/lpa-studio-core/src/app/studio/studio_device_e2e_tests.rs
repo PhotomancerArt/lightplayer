@@ -3249,6 +3249,120 @@ fn the_empty_face_pushes_an_example_and_the_card_ends_up_running() {
         "the banked version is the verified content hash"
     );
 }
+
+/// A LightPlayer board with nothing loaded and no stamped identity — the
+/// heartbeat still runs so the fold learns the empty/running fact, exactly
+/// like [`empty_light_player`], but the registry key falls back to the
+/// board's MAC, same as [`light_player_running_unstamped`].
+fn empty_light_player_unstamped() -> FakeEsp32Device {
+    FakeEsp32Device::new(FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new()
+            .with_base_mac(BENCH_BOARD_MAC)
+            .with_heartbeat_interval(Duration::from_millis(20)),
+    )))
+}
+
+/// An ordinary push to an unstamped board (registry key `mac:…`) still
+/// installs the project and the board still ends up running it — but
+/// `RecordPush` is never attempted, for the reason
+/// `opening_an_unstamped_board_adopts_without_attempting_record_push`
+/// documents for adoption: `library_host::record_push` refuses a device uid
+/// it cannot parse as a `dev…`/`prj…` `PrefixedUid`. Before the fix,
+/// `bank_completed_push` attempted it anyway and logged the refusal at warn
+/// on every ordinary push to every unstamped board.
+#[test]
+fn pushing_to_an_unstamped_board_banks_nothing_without_attempting_record_push() {
+    let device = empty_light_player_unstamped();
+    let (mut bench, tasks) = identified(&device, "usb-push-unstamped");
+    bench.run_until(&tasks, "the board to report nothing loaded", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.loaded_project == lpa_devices::view::LoadedProject::Empty)
+    });
+    let card = bench.view().devices[0].clone();
+    assert_eq!(bench.record_push_attempts(), 0);
+
+    bench.push_gesture(card.id, bundled_example());
+    bench.run_until(&tasks, "the push to finish", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.last_outcome.is_some())
+    });
+
+    let card = &bench.view().devices[0];
+    let outcome = card.last_outcome.as_ref().expect("an outcome");
+    assert!(outcome.ok, "{outcome:?}");
+    assert!(
+        matches!(
+            &card.loaded_project,
+            lpa_devices::view::LoadedProject::Running { label } if !label.is_empty()
+        ),
+        "the running face reads the board's report even though nothing was banked: {card:?}"
+    );
+
+    let rows = bench.registry();
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert!(
+        rows[0].uid.starts_with("mac:"),
+        "an unstamped board's registry key falls back to its MAC: {}",
+        rows[0].uid
+    );
+    assert!(
+        rows[0].association.is_none(),
+        "record_push refuses a mac:-keyed device uid, so nothing bankable \
+         was ever written: {:?}",
+        rows[0].association
+    );
+    assert_eq!(
+        bench.record_push_attempts(),
+        0,
+        "the honest skip means RecordPush is never attempted for a mac:-keyed board"
+    );
+}
+
+/// The sibling case: an ordinary push to a STAMPED board DOES attempt (and
+/// bank) `RecordPush` — the skip is specific to a `mac:`-keyed device uid,
+/// not a blanket "never try" the fix could have overshot into.
+#[test]
+fn pushing_to_a_stamped_board_banks_and_attempts_record_push() {
+    let device = empty_light_player("dev000000daqf6dvvqz");
+    let (mut bench, tasks) = identified(&device, "usb-push-stamped");
+    bench.run_until(&tasks, "the board to report nothing loaded", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.loaded_project == lpa_devices::view::LoadedProject::Empty)
+    });
+    let card = bench.view().devices[0].clone();
+    assert_eq!(bench.record_push_attempts(), 0);
+
+    bench.push_gesture(card.id, bundled_example());
+    bench.run_until(&tasks, "the push to finish", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.last_outcome.is_some())
+    });
+
+    assert_eq!(
+        bench.record_push_attempts(),
+        1,
+        "an ordinary push to a stamped board still attempts RecordPush"
+    );
+    let rows = bench.registry();
+    assert!(
+        rows[0].association.is_some(),
+        "a verified push to a stamped board is banked: {:?}",
+        rows[0].association
+    );
+}
+
 // ---------------------------------------------------------------------
 // P4: `?on=mac:` and the mismatch page (D50)
 // ---------------------------------------------------------------------
