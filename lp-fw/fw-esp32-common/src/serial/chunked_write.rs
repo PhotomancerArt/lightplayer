@@ -416,8 +416,15 @@ mod tests {
     #[test]
     fn production_code_has_no_heap_allocation_on_the_error_path() {
         let source = include_str!("chunked_write.rs");
-        let production = source.split_once("#[cfg(test)]").map_or(source, |(before, _)| before);
-        for needle in ["format!(", "alloc::string::String", "String::", "Option<String>"] {
+        let production = source
+            .split_once("#[cfg(test)]")
+            .map_or(source, |(before, _)| before);
+        for needle in [
+            "format!(",
+            "alloc::string::String",
+            "String::",
+            "Option<String>",
+        ] {
             assert!(
                 !production.contains(needle),
                 "chunked_write.rs's production code must not contain {needle:?} — \
