@@ -861,10 +861,18 @@ impl DeviceEffects {
         ) else {
             return;
         };
+        // An arrival that has not settled yet holds its port too: a second
+        // connect edge before the next fold would otherwise attach it again.
         let held: Vec<EndpointKey> = self
             .links
             .values()
             .map(|slot| slot.info.endpoint.clone())
+            .chain(
+                self.arrivals
+                    .borrow()
+                    .iter()
+                    .map(|arrival| arrival.info.endpoint.clone()),
+            )
             .collect();
         let register = self.registrar();
         let ids: Vec<LinkId> = (0..MAX_SWEEP_LINKS).map(|_| self.mint_link_id()).collect();

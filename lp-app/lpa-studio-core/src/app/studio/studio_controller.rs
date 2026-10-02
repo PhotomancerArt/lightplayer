@@ -4931,14 +4931,17 @@ impl StudioController {
             return Vec::new();
         }
         let now = (self.now_secs)();
-        let mut taken =
-            crate::app::devices::taken_device_titles(&self.device_roster_view().roster.devices);
+        let cards = self.device_roster_view().roster.devices;
+        // Names minted earlier in THIS pass, which no card wears yet.
+        let mut minted: Vec<String> = Vec::new();
         let mut actions = Vec::new();
         for record in unnamed {
+            let mut taken = crate::app::devices::taken_device_titles(&cards, record.device);
+            taken.extend(minted.iter().cloned());
             let Some(name) = crate::app::devices::auto_record_name(&record, now, &taken) else {
                 continue;
             };
-            taken.push(name.clone());
+            minted.push(name.clone());
             actions.push(crate::DeviceAction::SetName {
                 device: record.device,
                 name,
@@ -4989,8 +4992,10 @@ impl StudioController {
         let board_display = lpa_boards::board_by_id(board_id)
             .map(|board| board.display_name.clone())
             .unwrap_or_else(|| board_id.clone());
-        let taken =
-            crate::app::devices::taken_device_titles(&self.device_roster_view().roster.devices);
+        let taken = crate::app::devices::taken_device_titles(
+            &self.device_roster_view().roster.devices,
+            *device,
+        );
         Some(crate::DeviceAction::SetName {
             device: *device,
             name: crate::app::devices::derive_flash_name(&board_display, (self.now_secs)(), &taken),

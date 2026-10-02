@@ -47,8 +47,8 @@
 //! # How the window is served
 //!
 //! [`translate`](CacheMmu::translate) is the whole of the address path, and
-//! it is one function on purpose (director note 6): a later `t2` rung hangs
-//! its cache-miss wait states off exactly this lookup.
+//! it is one function on purpose (director note 6): the `t3` rung's
+//! [`CacheCost`] hangs its cache-miss wait states off exactly this lookup.
 //!
 //! The window itself is a **cache fill**, not a per-access translation:
 //! [`fill`] copies each valid page's flash bytes into the RAM region behind
