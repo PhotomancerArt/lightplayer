@@ -560,11 +560,14 @@ impl<A: Arq> Link<A> {
         }
         match hdr.kind {
             FrameKind::Data => {
-                self.on_ack_fields(now, hdr, 0, None);
-                self.on_data(now, hdr, body);
+                if self.on_ack_fields(now, hdr, 0, None) {
+                    self.on_data(now, hdr, body);
+                }
             }
             FrameKind::Datagram => {
-                self.on_ack_fields(now, hdr, 0, None);
+                if !self.on_ack_fields(now, hdr, 0, None) {
+                    return true;
+                }
                 // Best effort, but never silent: datagrams carry their own
                 // 8-bit sequence, so a gap is counted and a duplicate dropped.
                 let next = self.dgram_rx_next.unwrap_or(hdr.seq);
@@ -669,12 +672,23 @@ impl<A: Arq> Link<A> {
         }
     }
 
-    fn on_ack_fields(&mut self, now: Micros, hdr: &Header, sack: u32, trigger: Option<u8>) {
+    /// Apply a frame's ACK and window; `false` if it ended the session.
+    fn on_ack_fields(&mut self, now: Micros, hdr: &Header, sack: u32, trigger: Option<u8>) -> bool {
         if !A::RELIABLE {
-            return;
+            return true;
         }
         let Some(acked) = self.tx.ack_to(hdr.ack, now) else {
-            return;
+            // Past the last frame we sent: the peer took a frame we never sent
+            // (one that passed the checksum without being ours) and now waits
+            // beyond it, so every later ACK would be ignored here and the
+            // flight resent until the retry limit. The session is already
+            // wrong; end it now. Further off (a stale ACK from behind `base`,
+            // or more than any receive window ahead) is ignored, as before.
+            if (1..=A::MAX_WINDOW).contains(&seq_dist(self.tx.next_seq(), hdr.ack)) {
+                self.protocol_error();
+                return false;
+            }
+            return true;
         };
         if acked.frames > 0 {
             self.backoff = 0;
@@ -692,6 +706,7 @@ impl<A: Arq> Link<A> {
             reorder_threshold: self.cfg.reorder_threshold,
         };
         self.counters.fast_retransmits += A::on_feedback(&mut self.tx, fb) as u32;
+        true
     }
 
     fn flush_text(&mut self) {

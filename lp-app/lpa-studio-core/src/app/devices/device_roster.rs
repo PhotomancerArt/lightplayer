@@ -16,7 +16,7 @@
 //! it hands back are the one asynchronous step, and they are performed by the
 //! controller AFTER the fold — never inside it (invariant I7).
 
-use lpa_devices::event::{Command, Input};
+use lpa_devices::event::{Command, Event, Input};
 use lpa_devices::identity::DeviceId;
 use lpa_devices::journal::Scope;
 use lpa_devices::link::LinkId;
@@ -313,9 +313,18 @@ impl DeviceRoster {
         // Links that arrived from a spawned grant/sweep join the routing map
         // first, so the `LinkAttached` queued behind them is routable.
         self.effects.settle();
+        let attached = match &input {
+            Input::Event(Event::LinkAttached { link, .. }) => Some(*link),
+            _ => None,
+        };
         let commands = self.roster.handle(now, input);
         self.note_dropped_links(&commands);
         self.effects.apply(commands);
+        // Only once a link's own attach has folded may the roster's silence
+        // about it mean "let go" (see `DeviceEffects::retain_links`).
+        if let Some(link) = attached {
+            self.effects.attach_folded(link);
+        }
         // The model is the authority on what is routed; anything it let go
         // stops being pumped.
         let roster = &self.roster;
