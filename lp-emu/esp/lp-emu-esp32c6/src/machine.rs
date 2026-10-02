@@ -5135,18 +5135,51 @@ impl Esp32C6Machine {
             // way to see it. Gated on that one cheap word first: the second
             // peek (and the decode) only run once a guest has actually
             // asked to sleep.
-            if self
+            //
+            // The peeks go through `peek_word`, which reads through the same
+            // traced, graded MMIO path a guest access does — and both the
+            // trace's spin detector and `--strict-grade` cannot tell a host
+            // peek from a guest read:
+            //
+            // - Run every slice, a `(pc=0, PMU/LP_AON offset)` read falls
+            //   between every consecutive pair of the guest's own identical
+            //   reads (e.g. esp-println's `USB_DEVICE.ep1_conf` wait) and
+            //   resets the run length the spin detector is counting, so the
+            //   `SPIN` line this emulator exists to print never fires
+            //   (`boot_idle.rs`/`boot_no_radio.rs`'s "no radio SPIN left"
+            //   assertions, red on this check before the trace was borrowed
+            //   out).
+            // - `check_grade` runs unconditionally (not gated on the trace)
+            //   and records the *first* access below the run's
+            //   `--strict-grade` level; PMU/LP_AON are graded `Modeled`, so
+            //   a `--strict-grade documented` run (`usb_attached.rs`'s
+            //   survey test) saw this peek's `(pc=0, cycle=8192)` as that
+            //   first violation instead of the boot's own first one, before
+            //   strict-grade was suspended around it too.
+            //
+            // Both are borrowed out and restored around the four peeks, so
+            // they are as invisible to the trace and the grade as they are
+            // to the guest.
+            let saved_trace = std::mem::take(&mut self.bus.trace);
+            let saved_grade = self.bus.strict_grade();
+            self.bus.set_strict_grade(None);
+            let sleep_req = self
                 .peek_word(memmap::periph::PMU + 0x120)
-                .is_some_and(|v| v & (1 << 31) != 0)
-                && self
-                    .peek_word(memmap::periph::LP_AON + 0x024)
-                    .is_some_and(|v| v & 1 != 0)
-            {
+                .is_some_and(|v| v & (1 << 31) != 0);
+            let deep_sleep_flag = self
+                .peek_word(memmap::periph::LP_AON + 0x024)
+                .is_some_and(|v| v & 1 != 0);
+            let wake = (sleep_req && deep_sleep_flag).then(|| {
                 let wakeup_ena = self.peek_word(memmap::periph::PMU + 0x128).unwrap_or(0);
                 let ext_wakeup_cntl = self.peek_word(memmap::periph::LP_AON + 0x040).unwrap_or(0);
+                periph::accept::decode_deep_sleep_wake(wakeup_ena, ext_wakeup_cntl)
+            });
+            self.bus.set_strict_grade(saved_grade);
+            self.bus.trace = saved_trace;
+            if let Some(wake) = wake {
                 return Outcome::DeepSleep {
                     cycle: self.cycles(),
-                    wake: periph::accept::decode_deep_sleep_wake(wakeup_ena, ext_wakeup_cntl),
+                    wake,
                 };
             }
             if let Some(lp_emu_esp_common::MachineRequest::Reset {
