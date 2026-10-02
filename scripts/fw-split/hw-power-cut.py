@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Real power cuts during a real X -> Y update, on a C6 behind a switchable hub.
 
-    hw-power-cut.py --mac 10:BD:A3:B0:BD:A8 --hub 1-1.3 --hub-port 2 \\
+    hw-power-cut.py --mac 10:BD:A3:B0:BD:A8 --hub 1-1.3,1-2.3 --hub-port 2 \\
         --x <split-build-x> --y <split-build-y> --lp-cli <lp-cli> --out <dir> \\
         --cuts 0.5,3,7,11,...
 
@@ -43,8 +43,11 @@ def port_of(mac, wait=15.0):
     return None
 
 
-def power(hub, port, on):
-    sh(["uhubctl", "-l", hub, "-p", str(port), "-a", "on" if on else "off", "-e"])
+def power(hubs, port, on):
+    # A VIA-style hub is a USB 2 and a USB 3 hub on one chip; VBUS only drops
+    # when BOTH twins' ports are off (checked: uptime restarts only then).
+    for hub in hubs.split(","):
+        sh(["uhubctl", "-l", hub, "-p", str(port), "-a", "on" if on else "off", "-e"])
 
 
 def capture(lp_cli, port, console, seconds, offer=None, exit_on=None):
@@ -83,7 +86,7 @@ def story(text):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--mac", required=True)
-    ap.add_argument("--hub", required=True)
+    ap.add_argument("--hub", required=True, help="comma list: the hub and its USB 3 twin, e.g. 1-1.3,1-2.3")
     ap.add_argument("--hub-port", type=int, required=True)
     ap.add_argument("--x", required=True)
     ap.add_argument("--y", required=True)
