@@ -162,6 +162,35 @@ proptest! {
     }
 }
 
+/// Pinned from CI (PR #866, run 36505858435; the fuzz keeps no failure file).
+/// A checksum-valid data frame at exactly the sequence number the peer sends
+/// next, landing while the link still waits for earlier frames: once the real
+/// ones fill the gap the link acknowledges one past anything the peer sent,
+/// and the peer used to ignore every ACK after that and resend its flight
+/// until the retry limit (about 56 s on `ble()`, 18 s on `usb()`). The window
+/// of 0 in the shrunk input plays no part. It must come back at once.
+#[test]
+fn a_frame_at_the_senders_next_seq_does_not_stall_the_link() {
+    for (cfg, seq) in [(LinkConfig::ble(), 27), (LinkConfig::usb(), 24)] {
+        let ops = [
+            Op::Send { chan: 0, len: 6137 },
+            Op::Exchange { n: 10 },
+            Op::Exchange { n: 10 },
+            Op::Crafted {
+                b0: 56,
+                seq,
+                ack: 0,
+                win: 0,
+                body: vec![],
+                syn_key: false,
+                flip: None,
+            },
+        ];
+        // One second of settling, not the fuzz's twenty.
+        fuzz_settling::<SelectiveRepeat>(cfg, &ops, Mode::Plain, 200).unwrap();
+    }
+}
+
 #[cfg(all(feature = "secure", feature = "sim"))]
 proptest! {
     #![proptest_config(config())]
@@ -199,6 +228,18 @@ enum Mode {
 }
 
 fn fuzz<A: Arq>(cfg: LinkConfig, ops: &[Op], mode: Mode) -> Result<(), TestCaseError> {
+    fuzz_settling::<A>(cfg, ops, mode, 4_000)
+}
+
+/// [`fuzz`], allowing `rounds` × 5 ms for the pair to settle rather than the
+/// full 20 s — so a pinned regression case fails fast instead of risking a
+/// pass by simply outlasting a retry-limit reset it should never need.
+fn fuzz_settling<A: Arq>(
+    cfg: LinkConfig,
+    ops: &[Op],
+    mode: Mode,
+    rounds: usize,
+) -> Result<(), TestCaseError> {
     let mut w = World::<A>::new(cfg, mode);
     let bound = w.bound;
     w.exchange(64);
@@ -223,7 +264,7 @@ fn fuzz<A: Arq>(cfg: LinkConfig, ops: &[Op], mode: Mode) -> Result<(), TestCaseE
     }
 
     // The input stops: the real pair must come back and finish its work.
-    for _ in 0..4_000 {
+    for _ in 0..rounds {
         w.now += 5_000;
         w.exchange(64);
         w.recv();
