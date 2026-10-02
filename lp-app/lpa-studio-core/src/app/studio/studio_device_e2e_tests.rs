@@ -3755,6 +3755,200 @@ fn an_unknown_mac_raises_no_page() {
 const BENCH_BOARD_MAC: &str = "60:55:f9:0a:0b:0c";
 
 // ---------------------------------------------------------------------
+// A saved board comes back to its own record (2026-10-02 hardware gate)
+// ---------------------------------------------------------------------
+
+/// Yona's desk C6 as his registry remembered it: keyed on its MAC (no
+/// provisioned uid), its board known, no name of its own.
+const DESK_C6_MAC: &str = "10:bd:a3:b0:8e:30";
+
+/// The registry's second row: another board, named by the user, whose row
+/// wears the SAME model handle as the C6's. Ids are minted per page from 1,
+/// so a second tab — or a row that loaded after a link had already minted
+/// its number — can leave two rows on disk with one `device_id`.
+const NEIGHBOUR_MAC: &str = "02:00:00:00:00:01";
+
+/// Yona's 2026-10-02 session, whole: a browser that already remembers the
+/// C6, a granted port, a hello naming the remembered MAC. The card must come
+/// back to the saved record and reach Ready, the board's later frames must
+/// land on it (on main they landed on the neighbour as `IdentityConflict`s,
+/// and the card never reached Ready), and the auto-name must be written ONCE
+/// — on main it ping-ponged "… · Oct 2" / "… · Oct 2 2" every settle for as
+/// long as the page was open, because each `SetName` aimed at the C6's id
+/// renamed the neighbour instead.
+#[test]
+fn a_remembered_board_comes_back_to_its_record_and_is_named_once() {
+    let device = mac_only_light_player(DESK_C6_MAC);
+    let (mut bench, tasks) = bench_remembering(
+        &device,
+        "browser-serial-esp32-port-2",
+        vec![
+            remembered_row(NEIGHBOUR_MAC, 1, "Porch sign"),
+            remembered_row(DESK_C6_MAC, 1, ""),
+        ],
+    );
+    assert_eq!(
+        bench.view().devices.len(),
+        2,
+        "both remembered boards are cards before any port opens"
+    );
+
+    bench.run_until(&tasks, "the remembered board to come back Ready", |bench| {
+        card_for_mac(bench, DESK_C6_MAC)
+            .is_some_and(|card| card.activity.is_none() && card.state_label == "Ready")
+    });
+    // Keep going: the board heartbeats every 20 ms, and every step settles
+    // the records — the loop on main needed nothing more than this.
+    for _ in 0..200 {
+        bench.step(&tasks);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+
+    let journal = journal_lines(&bench);
+    let conflicts: Vec<&String> = journal
+        .iter()
+        .filter(|line| line.contains("IdentityConflict"))
+        .collect();
+    assert!(
+        conflicts.is_empty(),
+        "the board's frames are its own: {conflicts:#?}"
+    );
+    let renames = journal
+        .iter()
+        .filter(|line| line.contains("SetName"))
+        .count();
+    assert_eq!(renames, 1, "the auto-name is a fixed point: {journal:#?}");
+
+    let view = bench.view();
+    assert!(view.pending.is_empty(), "{view:?}");
+    assert_eq!(view.devices.len(), 2, "one card per board: {view:?}");
+    let mut ids: Vec<crate::DeviceId> = view.devices.iter().map(|card| card.id).collect();
+    ids.dedup();
+    assert_eq!(ids.len(), 2, "one id per card: {view:?}");
+    let desk = card_for_mac(&bench, DESK_C6_MAC).expect("the desk board's card");
+    assert_eq!(desk.state_label, "Ready", "{desk:?}");
+    assert!(
+        desk.title.ends_with(&month_day_of(&bench)),
+        "named once, without a collision suffix: {:?}",
+        desk.title
+    );
+    let porch = card_for_mac(&bench, NEIGHBOUR_MAC).expect("the neighbour's card");
+    assert_eq!(porch.title, "Porch sign", "the neighbour keeps its name");
+    assert_eq!(porch.state_label, "Offline", "{porch:?}");
+}
+
+/// The precondition the fresh-profile walks never had: with ONE remembered
+/// row the same session was always fine. Pinned beside the failing shape so
+/// the difference between them stays legible.
+#[test]
+fn a_single_remembered_board_comes_back_to_its_record() {
+    let device = mac_only_light_player(DESK_C6_MAC);
+    let (mut bench, tasks) = bench_remembering(
+        &device,
+        "browser-serial-esp32-port-2",
+        vec![remembered_row(DESK_C6_MAC, 1, "")],
+    );
+    bench.run_until(&tasks, "the remembered board to come back Ready", |bench| {
+        card_for_mac(bench, DESK_C6_MAC)
+            .is_some_and(|card| card.activity.is_none() && card.state_label == "Ready")
+    });
+    for _ in 0..50 {
+        bench.step(&tasks);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    let journal = journal_lines(&bench);
+    assert!(!journal.iter().any(|line| line.contains("IdentityConflict")));
+    assert_eq!(
+        journal
+            .iter()
+            .filter(|line| line.contains("SetName"))
+            .count(),
+        1
+    );
+    assert_eq!(bench.view().devices.len(), 1);
+}
+
+/// A LightPlayer with a base MAC and no provisioned uid — the shape of every
+/// board flashed by Studio today.
+fn mac_only_light_player(mac: &str) -> FakeEsp32Device {
+    FakeEsp32Device::new(FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new()
+            .with_base_mac(mac)
+            .with_heartbeat_interval(Duration::from_millis(20)),
+    )))
+}
+
+/// One registry row as Studio writes it for a MAC-keyed board.
+fn remembered_row(mac: &str, device_id: u64, name: &str) -> crate::app::places::RegisteredDevice {
+    crate::app::places::RegisteredDevice {
+        uid: format!("mac:{mac}"),
+        name: name.to_string(),
+        transport: "USB".to_string(),
+        hardware_id: Some(format!("efuse:{mac}")),
+        device_id: Some(device_id),
+        board_id: Some("seeed/xiao-esp32-c6".to_string()),
+        chip: Some("esp32c6".to_string()),
+        ..Default::default()
+    }
+}
+
+/// A page load over a library that already holds `rows`, with the board's
+/// port granted: the library hydrates first (the remembered boards are
+/// cards before any port opens), then the sweep finds the port.
+fn bench_remembering(
+    device: &FakeEsp32Device,
+    endpoint: &str,
+    rows: Vec<crate::app::places::RegisteredDevice>,
+) -> (DeviceBench, TaskPool) {
+    let clock = Rc::new(Cell::new(1_000.0));
+    let store = memory_store(Rc::clone(&clock));
+    let registry = DeviceRegistry::new(store.fs_handle());
+    for row in rows {
+        registry.upsert(row).expect("the row writes");
+    }
+    let (mut bench, tasks) = DeviceBench::build_on(device, endpoint, true, true, clock, store);
+    bench.settle_library();
+    (bench, tasks)
+}
+
+/// The card of the roster device whose chain holds `mac`.
+fn card_for_mac(bench: &DeviceBench, mac: &str) -> Option<lpa_devices::view::DeviceView> {
+    let id = bench
+        .controller
+        .devices_for_test()
+        .roster()
+        .devices()
+        .iter()
+        .find(|device| {
+            device
+                .identity
+                .mac
+                .as_ref()
+                .is_some_and(|known| known.0 == mac)
+        })?
+        .id;
+    bench.view().devices.into_iter().find(|card| card.id == id)
+}
+
+/// Every journal entry, rendered.
+fn journal_lines(bench: &DeviceBench) -> Vec<String> {
+    bench
+        .controller
+        .devices_for_test()
+        .roster()
+        .journal()
+        .entries()
+        .map(|entry| format!("{entry:?}"))
+        .collect()
+}
+
+/// The "<Mon D>" the auto-name ends with on the bench's clock.
+fn month_day_of(bench: &DeviceBench) -> String {
+    let derived = crate::app::devices::derive_flash_name("x", bench.clock.get(), &[]);
+    derived.trim_start_matches("x · ").to_string()
+}
+
+// ---------------------------------------------------------------------
 // P1: opening a board binds the library package it is running (D1, D6)
 // ---------------------------------------------------------------------
 
