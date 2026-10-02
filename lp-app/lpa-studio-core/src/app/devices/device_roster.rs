@@ -390,12 +390,9 @@ impl DeviceRoster {
             .iter()
             .filter_map(|device| {
                 let view = lpa_devices::view::device_view(device, now);
-                let fs = device
-                    .evidence
-                    .classification
-                    .hello()
-                    .map(|hello| hello.fs)
-                    .unwrap_or_default();
+                let hello = device.evidence.classification.hello();
+                let fs = hello.map(|hello| hello.fs).unwrap_or_default();
+                let has_uid = hello.is_some_and(|hello| hello.identity.uid.is_some());
                 let staged = layout.staged(device.id);
                 let pending = device
                     .identity
@@ -405,6 +402,7 @@ impl DeviceRoster {
                 super::device_layout_view::device_layout_view(
                     &view,
                     fs,
+                    has_uid,
                     staged.as_ref(),
                     pending.as_ref(),
                 )

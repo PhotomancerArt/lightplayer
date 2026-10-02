@@ -15,8 +15,9 @@
 //   W2  a board already on the new layout: Update asks nothing
 //   W3  a board whose files do not fit: refused, nothing written
 //   W4  Cancel at the question: nothing written
-//   W6a cable pulled as the firmware write ends: the board HOLDS its files
-//   W6b  …then Finish update moves them (same board, same browser profile)
+//   W9  a board flashed with the new image by a path that skipped the
+//       migration (a bare `esptool write_flash 0x0`): it boots HOLDING its
+//       files, and the card's Finish update moves them
 //   W7a cable pulled during the filesystem write: the board comes back
 //       formatted with its backup in this browser
 //   W7b  …then Restore files puts them back (W8: the tab was
@@ -61,8 +62,7 @@ const SCENARIOS = {
   W2: { fixture: "current", describe: "a board already on the new layout: Update asks nothing" },
   W3: { fixture: "overfull", describe: "a board whose files do not fit: refused, nothing written" },
   W4: { fixture: "legacy", describe: "Cancel at the question: nothing written" },
-  W6a: { fixture: "legacy", describe: "cable pulled as the firmware write ends: the board holds its files" },
-  W6b: { fixture: null, describe: "the held board's Finish update moves its files" },
+  W9: { fixture: "bypassed", describe: "a bypassed flash holds the files; Finish update moves them" },
   W7a: { fixture: "legacy", describe: "cable pulled mid filesystem write: formatted, backup in this browser" },
   W7b: { fixture: null, describe: "a new Chrome on the same profile restores the backup" },
 };
@@ -149,6 +149,17 @@ function buildFixture(kind, out) {
   const cliArgs = ["hardware", "lpfs", "fixture", "--merged", merged, "--tree", tree, "--out", chip];
   if (kind === "current") cliArgs.push("--table", path.join(ROOT, "lp-fw/fw-esp32c6/partitions.csv"));
   console.log("  " + run(LP_CLI, cliArgs).trim());
+  if (kind === "bypassed") {
+    // `esptool write_flash 0x0 <merged.bin>` onto the fielded board: the new
+    // image (and its new table at 0x8000) over the old, nothing else — the
+    // old filesystem stays at 0x310000, and nothing is at the new lpfs.
+    const bytes = readFileSync(chip);
+    // What the board held, for the report: its table still says where.
+    writeFileSync(path.join(out, "fixture-before-bypass.bin"), bytes);
+    readFileSync(merged).copy(bytes, 0);
+    writeFileSync(chip, bytes);
+    console.log("  …then the new image written over 0x0 with no migration (a bypassed flash)");
+  }
   return chip;
 }
 
@@ -160,6 +171,14 @@ function report(chip) {
 // --- the bundle, served by this script ----------------------------------
 
 const TYPES = { ".html": "text/html", ".js": "text/javascript", ".mjs": "text/javascript", ".wasm": "application/wasm", ".css": "text/css", ".json": "application/json", ".svg": "image/svg+xml", ".bin": "application/octet-stream", ".woff2": "font/woff2", ".png": "image/png" };
+
+/// The bundle's port: this worktree's stable slot for the walk
+/// (`scripts/dev-port.sh`), NOT an ephemeral one — a browser's OPFS (where
+/// Studio keeps a board's backup) belongs to the ORIGIN, and W7b comes
+/// back in a new Chrome on the same profile expecting the same origin.
+function bundlePort() {
+  return Number(spawnSync("bash", ["scripts/dev-port.sh", "walk-migration-emu"], { cwd: ROOT, encoding: "utf8" }).stdout.trim());
+}
 
 function serveBundle() {
   const server = createServer((request, response) => {
@@ -181,7 +200,7 @@ function serveBundle() {
     response.writeHead(200, { "content-type": TYPES[path.extname(file)] ?? "application/octet-stream" });
     createReadStream(file).pipe(response);
   });
-  return new Promise((resolve) => server.listen(0, "127.0.0.1", () => resolve(server)));
+  return new Promise((resolve) => server.listen(bundlePort(), "127.0.0.1", () => resolve(server)));
 }
 
 function startSink() {
@@ -233,6 +252,11 @@ async function awaitInstalled(driver) {
     timeoutMs: MIGRATION_MS,
     what: "the update to end",
   });
+  // The activity's OUTCOME line is the last thing it writes (after the
+  // board-manifest stamp); give it its moment before anything is closed.
+  await driver
+    .waitFor(`${MAIN_TEXT}.includes('firmware installed')`, { timeoutMs: 60_000, what: "the outcome line" })
+    .catch(() => {});
   return driver.evaluate(MAIN_TEXT);
 }
 
@@ -293,7 +317,8 @@ async function main() {
   console.log(`\nTHE MIGRATION WALK — ${scenario}: ${spec.describe}`);
   let fixtureChip = path.join(out, "fixture.bin");
   if (!continuing) fixtureChip = buildFixture(spec.fixture, out);
-  const fixtureReport = report(fixtureChip);
+  const beforeBypass = path.join(out, "fixture-before-bypass.bin");
+  const fixtureReport = report(spec.fixture === "bypassed" ? beforeBypass : fixtureChip);
   console.log(`  fixture: ${fixtureReport.layout} — ${fixtureReport.fileCount} files, ${fixtureReport.totalBytes} B`);
 
   const door = await startDoor({
@@ -338,9 +363,18 @@ async function main() {
     await shot("connected");
     step("connected", true, "the card settled");
 
+    // The door writes the console back every 2 s: let what the board has
+    // said so far land before marking where the update's words begin.
+    await new Promise((r) => setTimeout(r, 5_000));
     const before = boardConsole(door);
-    if (scenario === "W6b") {
-      step("held board offers Finish update", (await driver.evaluate(MAIN_TEXT)).includes("Finish update"), "");
+    if (scenario === "W9") {
+      const said = boardConsole(door);
+      step(
+        "the board held its files",
+        said.includes("holding: not formatting") || said.includes("legacy-layout filesystem found"),
+        (said.match(/\[FS\][^\n]*/) ?? [""])[0].slice(0, 120),
+      );
+      step("the card offers Finish update", (await driver.evaluate(MAIN_TEXT)).includes("Finish update"), "");
       await pressLasting(driver, "Finish update");
     } else if (scenario === "W7b") {
       step("formatted board offers its backup", (await driver.evaluate(MAIN_TEXT)).includes("Restore files"), "");
@@ -369,8 +403,15 @@ async function main() {
       // still the fixture it was seeded from.
       await new Promise((r) => setTimeout(r, 5_000));
       cpSync(existsSync(live) ? live : fixtureChip, asFound);
-      baseline = report(asFound);
-      verdict.connectChanged = compareFiles(fixtureReport, baseline);
+      try {
+        baseline = report(asFound);
+        verdict.connectChanged = compareFiles(fixtureReport, baseline);
+      } catch {
+        // A held board's table names a filesystem that is not there yet
+        // (its files are at the old offset, untouched, and the board ran on
+        // a memory filesystem): what it holds is still the fixture's.
+        verdict.connectChanged = "the chip's own table names no mountable filesystem (held)";
+      }
       if (scenario === "W3") {
         step("refused", page.includes("don't fit the new firmware"), "");
       } else {
@@ -382,14 +423,11 @@ async function main() {
           await shot("cancelled");
         } else {
           await pressLasting(driver, "Continue");
-          if (scenario === "W6a" || scenario === "W7a") {
+          if (scenario === "W7a") {
             // The card names the step, not its percentage; the terminal
-            // carries esptool-js's own lines. The firmware write has ended at
-            // the first "Moving files"; the filesystem body (block 2 on, so
-            // 0x352000) is being written once esptool-js says so.
-            const when = scenario === "W6a"
-              ? `${MAIN_TEXT}.includes('Moving files')`
-              : `${MAIN_TEXT}.includes('Writing at 0x352000')`;
+            // carries esptool-js's own lines: the filesystem body (block 2
+            // on, so 0x352000) is being written once esptool-js says so.
+            const when = `${MAIN_TEXT}.includes('Writing at 0x352000')`;
             // Poll the card (and say what it says) rather than one long
             // wait: the moment is a progress reading, and a run that misses
             // it should show which readings it saw.
@@ -419,6 +457,21 @@ async function main() {
       }
     }
 
+    // Wait for the board's own last boot to finish (its words, not
+    // Studio's): the card can come back before the firmware has said what
+    // its filesystem did.
+    const settleBy = Date.now() + STEP_MS;
+    for (;;) {
+      const text = boardConsole(door);
+      const last = text.lastIndexOf("ESP-ROM:");
+      const tail = last >= 0 ? text.slice(last) : "";
+      if (tail.includes("starting server loop") || tail.includes("waiting for download")) break;
+      if (Date.now() > settleBy) {
+        verdict.note = "the board's last boot had not finished when the walk stopped";
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 1_000));
+    }
     await driver.close();
     // The door writes the chip and the console back on shutdown (and every
     // 2 s before it): read both after it has stopped.
@@ -427,7 +480,18 @@ async function main() {
     // The board's own words since the update began. The link's framing
     // interleaves binary headers with the JSON; drop control bytes and read
     // the hello's own fields.
-    const said = boardConsole(door).slice(before.length).replace(/[\x00-\x09\x0b-\x1f\x7f-\xff]/g, "");
+    // Everything from the first boot AFTER the update began: the boots
+    // before it are counted by their ROM banners (the door rewrites the
+    // transcript whole, so neither a length nor a text tail is a safe
+    // anchor — a heartbeat repeats).
+    const whole = boardConsole(door);
+    const bootsBefore = before.split("ESP-ROM:").length - 1;
+    let from = -1;
+    for (let i = 0; i <= bootsBefore; i += 1) {
+      from = whole.indexOf("ESP-ROM:", from + 1);
+      if (from < 0) break;
+    }
+    const said = (from >= 0 ? whole.slice(from) : "").replace(/[\x00-\x09\x0b-\x1f\x7f-\xff]/g, "");
     verdict.console = {
       fs: [...new Set([...said.matchAll(/"fs":"([a-z_]+)"/g)].map((m) => m[1]))],
       deviceUid: [...new Set([...said.matchAll(/"deviceUid":"([^"]+)"/g)].map((m) => m[1]))],
@@ -438,20 +502,23 @@ async function main() {
     const chip = existsSync(written) ? written : fixtureChip;
     const after = report(chip);
     verdict.after = { layout: after.layout, files: after.fileCount, bytes: after.totalBytes };
+    // A b half carries the files its a half's update found on the board —
+    // they went into the backup (W7) in between.
+    if (continuing) baseline = report(path.join(out, `as-found-${family}a.bin`));
     const files = compareFiles(baseline, after);
     verdict.files = files;
     const bytes = readFileSync(chip);
     const legacySuperblock = bytes.subarray(0x310008, 0x310010).toString() === "littlefs";
     switch (scenario) {
       case "W1":
-      case "W6b":
+      case "W9":
       case "W7b":
         step("files moved, byte for byte", files.same, JSON.stringify(files));
         step("the chip is on the new layout", /0x350000/.test(after.layout) || !/pre-2026-10/.test(after.layout), after.layout);
         step("old superblock retired", !legacySuperblock, "");
         step(
           "the board mounted them, as itself",
-          said.includes("Flash filesystem mounted") && !said.includes("legacy-layout filesystem found")
+          said.includes("Flash filesystem mounted") && !said.includes("holding: not formatting")
             && verdict.console.fs.at(-1) === "mounted" && verdict.console.deviceUid.includes(UID),
           JSON.stringify(verdict.console),
         );
@@ -488,10 +555,6 @@ async function main() {
         );
         break;
       }
-      case "W6a":
-        step("the board held its files", said.includes("legacy-layout filesystem found") || verdict.console.fs.includes("legacy_held"), JSON.stringify(verdict.console));
-        step("held means untouched", legacySuperblock, "the old superblock is still there");
-        break;
       case "W7a":
         verdict.note = "the outcome depends on where in the filesystem write the cable came out";
         step(

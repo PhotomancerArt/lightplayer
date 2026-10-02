@@ -51,12 +51,14 @@ pub struct UiLayoutPanel {
 
 /// The card's layout facts, or `None` when there is nothing to say.
 ///
-/// `fs` is the board's last hello's filesystem state; `pending` the stored
-/// backup still marked pending for its base MAC; `staged` what its last
-/// inspection staged.
+/// `fs` is the board's last hello's filesystem state and `has_uid` whether
+/// that hello named a stamped identity; `pending` the stored backup still
+/// marked pending for its base MAC; `staged` what its last inspection
+/// staged.
 pub fn device_layout_view(
     view: &DeviceView,
     fs: BoardFs,
+    has_uid: bool,
     staged: Option<&LayoutStaging>,
     pending: Option<&BackupEntry>,
 ) -> Option<UiDeviceLayout> {
@@ -134,9 +136,13 @@ pub fn device_layout_view(
         return Some(layout);
     }
     // A board that came back without its files while a backup of them is
-    // still pending (an interrupted update): offer them back.
+    // still pending (an interrupted update): offer them back. "Without its
+    // files" is the boot that formatted — or ANY later boot of that empty
+    // filesystem, which mounts fine but names no identity (the walk's W7b:
+    // a reboot between the interruption and the user's return must not
+    // hide the way back).
     if let Some(entry) = pending
-        && fs == BoardFs::Formatted
+        && (fs == BoardFs::Formatted || (fs == BoardFs::Mounted && !has_uid))
     {
         layout.line = Some(format!(
             "This board's files from {} are in a backup in this browser.",
@@ -290,5 +296,72 @@ mod tests {
         assert_eq!(date(1_800_000_000.0), "Jan 15");
         assert_eq!(size(1536), "1.5 KB");
         assert_eq!(size(720_896), "704 KB");
+    }
+
+    /// The backup is offered on the boot that formatted AND on any later
+    /// boot of that empty filesystem (mounted, but naming no identity) —
+    /// never on a board that has its own files and identity back.
+    #[test]
+    fn a_pending_backup_is_offered_until_the_board_has_its_identity_back() {
+        let entry = super::super::device_backup_store::BackupEntry {
+            base_mac: "60:55:f9:0a:0b:0c".to_string(),
+            archive: "a.zip".to_string(),
+            captured_at_epoch_seconds: 1_800_000_000.0,
+            purpose: "layout-migration".to_string(),
+            status: super::super::device_backup_store::BackupStatus::Pending,
+            file_count: 3,
+            total_bytes: 100,
+        };
+        let view = running_c6();
+        let offered = |fs, has_uid| {
+            device_layout_view(&view, fs, has_uid, None, Some(&entry))
+                .is_some_and(|layout| layout.restore.is_some())
+        };
+        assert!(
+            offered(BoardFs::Formatted, false),
+            "the boot that formatted"
+        );
+        assert!(
+            offered(BoardFs::Mounted, false),
+            "a later boot of the empty fs"
+        );
+        assert!(!offered(BoardFs::Mounted, true), "its own files are back");
+        assert!(
+            device_layout_view(&view, BoardFs::Mounted, false, None, None).is_none(),
+            "no backup, nothing to offer"
+        );
+    }
+
+    /// A running C6 on a resolved board (the Update verb resolves).
+    fn running_c6() -> DeviceView {
+        use lpa_devices::view::{Escape, FirmwareFace, LoadedProject};
+        DeviceView {
+            id: DeviceId(7),
+            title: "Porch".to_string(),
+            status: lpa_devices::DeviceStatus::Ready,
+            state_label: "Ready".to_string(),
+            detail: None,
+            freshness_label: None,
+            identity_label: None,
+            detected_chip: Some("esp32c6".to_string()),
+            board_id: Some("seeed/xiao-esp32-c6".to_string()),
+            firmware_face: FirmwareFace::LightPlayer {
+                firmware: Some("fw-esp32c6 abc1234".to_string()),
+                wire: lpa_devices::WireVersion::Match,
+            },
+            remembered_firmware: None,
+            degraded: None,
+            engine_fps: None,
+            link_counters: None,
+            loaded_project: LoadedProject::Empty,
+            can_receive_project: true,
+            can_remove_project: false,
+            activity: None,
+            last_outcome: None,
+            terminal: Vec::new(),
+            terminal_dropped: 0,
+            firmware_blocked: None,
+            escapes: vec![Escape::Disconnect, Escape::Forget],
+        }
     }
 }

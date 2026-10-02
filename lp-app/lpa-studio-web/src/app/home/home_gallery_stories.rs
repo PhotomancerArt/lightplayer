@@ -828,7 +828,7 @@ fn devices_card_layout_change() -> Element {
         ..base.clone()
     };
     let cell = |card: DeviceView, fs: DeviceBoardFs, staged: Option<&LayoutStaging>| {
-        let layout = device_layout_view(&card, fs, staged, None);
+        let layout = device_layout_view(&card, fs, true, staged, None);
         rsx! {
             div { class: "tw:grid tw:content-start tw:gap-2",
                 DeviceRosterCard {
