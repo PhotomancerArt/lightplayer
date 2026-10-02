@@ -17,7 +17,10 @@ stripped:
   with arguments the view chose, i.e. the view deciding what is offered;
 - `<Something>Op { … }.into_action()` (a struct literal, over any number
   of lines) and `<op variable>.into_action()` — the same op built field by
-  field in the view.
+  field in the view;
+- core's device-action helpers (`pending_escape_action(`,
+  `blocked_erase_action(`, `device_escape_action(`, `.blocked_action(`,
+  `.update_action(`), which build a verb's action for the caller.
 
 Not counted: the PLUMBING ops below. They are dispatched like actions but
 are not verbs anyone presses — a card's mount lease for its live picture is
@@ -39,6 +42,11 @@ RECORD = os.path.join(ROOT, "scripts", "web-actions-ratchet.txt")
 
 PATTERN = re.compile(
     r"UiAction::from_op\(|\b(?P<op>\w+Op)::action_for\(|\b\w+_action_for\(|\bDevicesOp::(?:new|on_sim)\("
+    # Core's device-action helpers, which hand back an action for a verb
+    # the caller names: called from the web, they are the view deciding
+    # what is offered (M3 moved every one of them into the offer tree).
+    r"|\b(?:pending_escape_action|blocked_erase_action|device_escape_action)\("
+    r"|\.(?:blocked_action|update_action)\("
 )
 
 # `.into_action()`, whatever its receiver; the receiver is read backwards.

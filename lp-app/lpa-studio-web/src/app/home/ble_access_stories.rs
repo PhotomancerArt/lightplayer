@@ -21,13 +21,16 @@ use crate::app::home::access_settings_section::AccessSettingsSection;
 use crate::app::home::ble_reach::BluetoothReach;
 use crate::app::home::browser_identity::BrowserPlatform;
 use crate::app::home::device_access_panel::DeviceAccessPanel;
-use crate::app::home::device_roster_card::{DeviceRosterCard, PendingLinkCard};
+use crate::app::home::device_offer_story_fixtures::{
+    StoryDeviceCard, StoryPendingCard, add_slot_tree,
+};
 use crate::app::home::devices_page::AddDeviceCard;
 use crate::app::home::share_access_sheet::ShareAccessSheet;
 use crate::app::home::unlock_link::UnlockLink;
 use crate::app::home::unlock_page::UnlockPage;
 use crate::app::home::unlock_sheet::UnlockSheet;
 use crate::cloud::account_access::AccountAccessState;
+use crate::core::OffersProvider;
 
 // --- 1 · Connections ------------------------------------------------------
 
@@ -37,7 +40,7 @@ use crate::cloud::account_access::AccountAccessState;
 fn ble_connections_usb_on() -> Element {
     rsx! {
         div { class: CARD_FRAME,
-            DeviceRosterCard {
+            StoryDeviceCard {
                 card: usb_card(),
                 projects: Vec::new(),
                 examples: Vec::new(),
@@ -55,7 +58,7 @@ fn ble_connections_usb_on() -> Element {
 fn ble_connections_usb_off_and_restarting() -> Element {
     rsx! {
         div { class: "tw:grid tw:gap-3 tw:p-3 tw:sm:grid-cols-2",
-            DeviceRosterCard {
+            StoryDeviceCard {
                 card: usb_card(),
                 projects: Vec::new(),
                 examples: Vec::new(),
@@ -63,7 +66,7 @@ fn ble_connections_usb_off_and_restarting() -> Element {
                 access: Some(usb_access(Some(false), false, typical())),
                 on_action: |_| {},
             }
-            DeviceRosterCard {
+            StoryDeviceCard {
                 card: usb_card(),
                 projects: Vec::new(),
                 examples: Vec::new(),
@@ -90,7 +93,7 @@ fn ble_connections_over_bluetooth() -> Element {
     };
     rsx! {
         div { class: CARD_FRAME,
-            DeviceRosterCard {
+            StoryDeviceCard {
                 card: ble_card(),
                 projects: Vec::new(),
                 examples: Vec::new(),
@@ -211,7 +214,7 @@ fn ble_play_only_prompt() -> Element {
     };
     rsx! {
         div { class: CARD_FRAME,
-            DeviceRosterCard {
+            StoryDeviceCard {
                 card: ble_card(),
                 projects: Vec::new(),
                 examples: Vec::new(),
@@ -235,7 +238,7 @@ fn ble_card_locked() -> Element {
     };
     rsx! {
         div { class: CARD_FRAME,
-            DeviceRosterCard {
+            StoryDeviceCard {
                 card: DeviceView {
                     loaded_project: DeviceLoadedProject::Empty,
                     can_remove_project: false,
@@ -333,21 +336,25 @@ fn ble_friend_page() -> Element {
     };
     rsx! {
         div { class: "tw:grid tw:gap-3 tw:p-3 tw:sm:grid-cols-2",
-            UnlockPage {
-                this_word: "phone".to_string(),
-                on_access: |_| {},
-                on_action: |_| {},
-                link: Some(link.clone()),
-                ble_reach: Some(BluetoothReach::Ready),
-                page_url: Some("https://lightplayer.app/unlock".to_string()),
+            OffersProvider { offers: add_slot_tree(true, BluetoothReach::Ready),
+                UnlockPage {
+                    this_word: "phone".to_string(),
+                    on_access: |_| {},
+                    on_action: |_| {},
+                    link: Some(link.clone()),
+                    ble_reach: Some(BluetoothReach::Ready),
+                    page_url: Some("https://lightplayer.app/unlock".to_string()),
+                }
             }
-            UnlockPage {
-                this_word: "phone".to_string(),
-                on_access: |_| {},
-                on_action: |_| {},
-                link: Some(link),
-                ble_reach: Some(BluetoothReach::Ios),
-                page_url: Some("https://lightplayer.app/unlock".to_string()),
+            OffersProvider { offers: add_slot_tree(false, BluetoothReach::Ios),
+                UnlockPage {
+                    this_word: "phone".to_string(),
+                    on_access: |_| {},
+                    on_action: |_| {},
+                    link: Some(link),
+                    ble_reach: Some(BluetoothReach::Ios),
+                    page_url: Some("https://lightplayer.app/unlock".to_string()),
+                }
             }
         }
     }
@@ -488,9 +495,9 @@ fn ble_pending_card_over_bluetooth() -> Element {
     };
     rsx! {
         div { class: "tw:grid tw:gap-3 tw:p-3 tw:sm:grid-cols-2",
-            PendingLinkCard { pending: ble, on_action: |_| {} }
-            PendingLinkCard { pending: usb, on_action: |_| {} }
-            PendingLinkCard { pending: ble_needs_firmware, on_action: |_| {} }
+            StoryPendingCard { pending: ble, on_action: |_| {} }
+            StoryPendingCard { pending: usb, on_action: |_| {} }
+            StoryPendingCard { pending: ble_needs_firmware, on_action: |_| {} }
         }
     }
 }
@@ -515,11 +522,13 @@ const ADD_SLOT_BROWSERS: [(&str, BluetoothReach, bool); 7] = [
 fn AddSlotAs(reach: BluetoothReach, usb: bool) -> Element {
     rsx! {
         div { class: "tw:p-3",
-            AddDeviceCard {
-                ble_reach: Some(reach),
-                usb_available: usb,
-                page_url: Some("https://lightplayer.app/devices".to_string()),
-                on_action: |_| {},
+            OffersProvider { offers: add_slot_tree(usb, reach),
+                AddDeviceCard {
+                    ble_reach: Some(reach),
+                    usb_available: usb,
+                    page_url: Some("https://lightplayer.app/devices".to_string()),
+                    on_action: |_| {},
+                }
             }
         }
     }

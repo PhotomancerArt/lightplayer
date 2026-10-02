@@ -19,7 +19,7 @@
 //! | `erase` | linked, idle, and not a needs-firmware face (erasing a blank flash does nothing) |
 //! | `identify` | linked and idle, where Retry (the same `Identify`) is not already offered |
 //! | `connect` | the port is there but closed |
-//! | `reset-board` | linked and idle; disabled over Bluetooth, which has no reset lines |
+//! | `reset-board` | linked; disabled over Bluetooth (no reset lines) and while an activity runs (the model refuses a reset under one; Cancel is the escape) |
 //! | `rename` | always: one Text param, `name` |
 //! | `autoconnect` | a board at the end of a wire: one Toggle param, `enabled` |
 //!
@@ -33,6 +33,11 @@ use lpa_devices::view::{DeviceView, Escape};
 
 use super::device_affordance::device_escape_action_for;
 use super::device_flash::{FirmwareVerb, RESET_NEEDS_USB, firmware_verb};
+
+/// Why Reset is disabled while an activity runs: the device model refuses a
+/// reset under one, and Cancel is the way out.
+pub const RESET_WAITS_FOR_ACTIVITY: &str =
+    "Reset waits until Studio finishes what it is doing; cancel it first";
 use super::device_flash_offer::{flash_device_offer, update_firmware_offer};
 use super::device_push_offer::push_device_offer;
 use super::devices_op::{DeviceFace, DevicesOp};
@@ -150,14 +155,24 @@ pub fn device_offers(view: &DeviceView, facts: &DeviceOfferFacts<'_>) -> Vec<UiO
             face_action(facts.face, Action::Connect { device }),
         ));
     }
-    if idle && linked {
+    // Reset is offered on any linked board, busy or not, so the way out of
+    // a stuck board is always visible. But the device model refuses a reset
+    // while an activity runs (`lpa-devices` device.rs: a reset under a
+    // flash would wreck it), so while busy it is published DISABLED with
+    // that reason: an offer the user or the agent can press must do
+    // something (director, M3 P3). The escape from a busy board is Cancel,
+    // which leads the list; Reset enables once the activity ends.
+    if linked {
         let reset = DevicesOp::action_for(Action::ResetBoard { device });
         offers.push(UiOffer::new(
             at("reset-board"),
             "reset",
-            match view.is_over_bluetooth() {
-                true => reset.disabled(RESET_NEEDS_USB),
-                false => reset,
+            if view.is_over_bluetooth() {
+                reset.disabled(RESET_NEEDS_USB)
+            } else if view.activity.is_some() {
+                reset.disabled(RESET_WAITS_FOR_ACTIVITY)
+            } else {
+                reset
             },
         ));
     }
@@ -317,7 +332,23 @@ mod tests {
         busy.escapes = vec![Escape::Cancel, Escape::Disconnect, Escape::Forget];
         assert_eq!(
             paths(&device_offers(&busy, &facts(DeviceFace::Wire))),
-            ["cancel", "disconnect", "rename", "autoconnect", "forget"]
+            [
+                "cancel",
+                "reset-board",
+                "disconnect",
+                "rename",
+                "autoconnect",
+                "forget"
+            ],
+            "Reset stays visible on a busy board"
+        );
+        let offers = device_offers(&busy, &facts(DeviceFace::Wire));
+        assert_eq!(
+            find(&offers, "reset-board").action.meta().enablement,
+            crate::ActionEnablement::Disabled {
+                reason: RESET_WAITS_FOR_ACTIVITY.to_string()
+            },
+            "but disabled until the activity ends: the model refuses a reset under one"
         );
 
         // Silent on an open link: Retry stands where Identify would.

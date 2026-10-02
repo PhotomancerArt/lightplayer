@@ -6744,8 +6744,8 @@ fn a_board_seen_over_usb_and_over_bluetooth_is_one_registry_row() {
 /// iPhone/Bluefy's shape: a sim half and a Bluetooth half, and NO serial
 /// transport, because the browser has no Web Serial. The roster is still
 /// reachable, but the view says USB is not — which is what keeps the add
-/// slot's USB verb away. Installing a serial transport (Web Serial, or the
-/// `?emu=` shim) is exactly what turns it back on.
+/// slot's USB verb disabled with its reason. Installing a serial transport
+/// (Web Serial, or the `?emu=` shim) is exactly what turns it back on.
 #[test]
 fn a_build_without_web_serial_says_usb_is_unavailable() {
     let board = || {
@@ -6772,9 +6772,17 @@ fn a_build_without_web_serial_says_usb_is_unavailable() {
         "sims and Bluetooth, but no port to reach"
     );
     let connect_usb = crate::OfferPath::devices().child("connect-usb");
-    assert!(
-        controller.view().offers.get(&connect_usb).is_none(),
-        "no USB offer without a port to reach"
+    let view = controller.view();
+    let offer = view
+        .offers
+        .get(&connect_usb)
+        .expect("devices/connect-usb is always offered");
+    assert_eq!(
+        offer.action.meta().enablement,
+        crate::ActionEnablement::Disabled {
+            reason: crate::USB_NEEDS_WEB_SERIAL.to_string()
+        },
+        "disabled, with the reason, without a port to reach"
     );
 
     let usb_side = board();
@@ -6788,6 +6796,7 @@ fn a_build_without_web_serial_says_usb_is_unavailable() {
         .offers
         .get(&connect_usb)
         .expect("devices/connect-usb is offered while USB is available");
+    assert!(offer.is_enabled());
     assert_eq!(offer.icon, "usb");
     assert_eq!(offer.label(), "Connect a board via USB");
 }

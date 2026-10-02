@@ -1348,8 +1348,8 @@ impl StudioController {
     /// Whether this page can reach a board over USB. Web Serial (or the
     /// `?emu=` shim that polyfills it) is what built a serial transport;
     /// without one the add slot keeps its USB verb out of the primary
-    /// position (iPhone, Bluefy, Firefox, Safari), and the offer tree has
-    /// no `devices/connect-usb`.
+    /// position (iPhone, Bluefy, Firefox, Safari), and the offer tree's
+    /// `devices/connect-usb` is disabled with the reason.
     fn usb_available(&self) -> bool {
         self.serial_transport.is_some()
     }
@@ -2191,14 +2191,10 @@ impl StudioController {
 
     /// Publish every device verb into the offer tree.
     ///
-    /// - `devices/connect-usb`: the add-device slot's USB path, named for
-    ///   what it does (the slot's heading says "Connect a board"; the button
-    ///   alone reads "via USB"), while this browser has Web Serial. It needs
-    ///   the user's click (the browser's picker).
-    /// - `devices/connect-ble`: the Bluetooth path, always published and
-    ///   disabled with the browser's reason when Bluetooth cannot work here
-    ///   ([`crate::BluetoothReach`], which the web reports). It needs the
-    ///   user's click too.
+    /// - `devices/connect-usb` and `devices/connect-ble`: the add-device
+    ///   slot's two paths ([`crate::add_device_offers`]), always published,
+    ///   each disabled with its reason where this browser cannot drive it
+    ///   (no Web Serial; the [`crate::BluetoothReach`] the web reports).
     /// - `devices/new-sim`: the slot's "start a board here", taking the
     ///   board and the runtime ([`crate::new_sim_offer`]), wherever the slot
     ///   is drawn.
@@ -2213,24 +2209,9 @@ impl StudioController {
     /// `connect`, Reset its `reset-board`, and the no-device USB path
     /// `devices/connect-usb`.
     fn publish_device_offers(&self, offers: &mut crate::UiOfferTree) {
-        if self.usb_available() {
-            offers.publish(crate::UiOffer::new(
-                crate::OfferPath::devices().child("connect-usb"),
-                "usb",
-                crate::DevicesOp::action_for(lpa_devices::Action::AddFromUsb)
-                    .with_label("Connect a board via USB"),
-            ));
+        for offer in crate::add_device_offers(self.usb_available(), self.bluetooth_reach) {
+            offers.publish(offer);
         }
-        let ble = crate::DevicesOp::action_for(lpa_devices::Action::AddFromBle)
-            .with_label("Connect a board via Bluetooth");
-        offers.publish(crate::UiOffer::new(
-            crate::OfferPath::devices().child("connect-ble"),
-            "bluetooth",
-            match self.bluetooth_reach.disabled_reason() {
-                Some(reason) => ble.disabled(reason),
-                None => ble,
-            },
-        ));
         let roster = self.device_roster_view();
         if roster.transport_available {
             offers.publish(crate::new_sim_offer());
@@ -2244,6 +2225,7 @@ impl StudioController {
             for offer in crate::pending_link_offers(pending, &prefix) {
                 offers.publish(offer);
             }
+            offers.place_device(pending.device, prefix);
         }
         for view in &roster.roster.devices {
             let device = self.devices.roster().device(view.id);
@@ -2267,6 +2249,7 @@ impl StudioController {
             for offer in crate::device_offers(view, &facts) {
                 offers.publish(offer);
             }
+            offers.place_device(view.id, facts.prefix);
         }
     }
 

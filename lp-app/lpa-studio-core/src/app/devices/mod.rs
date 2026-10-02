@@ -38,6 +38,7 @@
 
 /// The Bluetooth transport (M5): a control-only link, host-tested through
 /// its source seam.
+pub mod add_device_offers;
 pub mod ble_transport;
 pub mod bluetooth_reach;
 pub mod board_ref;
@@ -90,6 +91,7 @@ pub mod sim_transport;
 pub mod target_offer;
 pub mod wire_conversation;
 
+pub use add_device_offers::{USB_NEEDS_WEB_SERIAL, add_device_offers};
 pub use ble_transport::{BleDeviceTransport, BleLinkSource};
 pub use bluetooth_reach::BluetoothReach;
 pub use board_ref::{BoardRef, BoardRefError};
@@ -140,7 +142,9 @@ pub use device_push::{
     DevicePushOp, PushOffer, PushSource, PushSourceChoice, PushSourceGroup,
     first_bundled_example_id, push_offer,
 };
-pub use device_push_offer::{PUSH_NAME_PARAM, PUSH_SOURCE_PARAM, PushOver, push_device_offer};
+pub use device_push_offer::{
+    PUSH_NAME_BOARD_PARAM, PUSH_NAME_PARAM, PUSH_SOURCE_PARAM, PushOver, push_device_offer,
+};
 pub use device_records::{
     EMU_TRANSPORT, SIM_TRANSPORT, auto_record_name, record_from_registry_row,
     registry_row_from_record, transport_label_for_endpoint,

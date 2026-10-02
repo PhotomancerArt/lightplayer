@@ -16,7 +16,7 @@
 use std::cell::RefCell;
 
 use dioxus::prelude::*;
-use lpa_studio_core::{AccessCommand, DeviceAction, DevicesOp, UiAction};
+use lpa_studio_core::{AccessCommand, OfferPath, UiAction};
 
 use super::access_fields::HELP_CLASS;
 use super::ble_reach::{BluetoothReach, ble_reach_note, use_ble_reach};
@@ -24,6 +24,7 @@ use super::devices_page::TransportOffer;
 use super::reach_note::this_page_url;
 use super::unlock_link::{UNLOCK_PATH, UnlockLink};
 use crate::base::{StudioIcon, StudioIconName};
+use crate::core::use_offer_at;
 
 thread_local! {
     /// The link read at boot, until the page takes it.
@@ -92,12 +93,9 @@ pub(crate) fn UnlockPage(
     let asked = use_ble_reach();
     let reach = ble_reach.unwrap_or_else(|| asked());
     let page_url = page_url.unwrap_or_else(this_page_url);
-    let connect = DevicesOp::action_for(DeviceAction::AddFromBle);
-    let connect = if reach.offers_verb() {
-        connect
-    } else {
-        connect.disabled(ble_reach_note(reach).map_or("", |note| note.reason))
-    };
+    // `devices/connect-ble`: core's verb, disabled with core's reason where
+    // Bluetooth cannot work here; the way forward under it is this page's.
+    let connect = use_offer_at(OfferPath::devices().child("connect-ble"))();
     let Some(link) = link else {
         return rsx! {
             section { class: PAGE_CLASS,
@@ -129,15 +127,18 @@ pub(crate) fn UnlockPage(
                 "Be near it, then connect over Bluetooth. From then on this {this_word} unlocks it whenever you're close."
             }
             div { class: "tw:grid tw:max-w-64 tw:gap-3 tw:text-center",
-                TransportOffer {
-                    action: connect,
-                    note: ble_reach_note(reach),
-                    page_url,
-                    on_action: move |action| {
-                        on_action.call(action);
-                        crate::route_recording::note_route_reason("unlock-connect");
-                        crate::router::navigate_push(&crate::router::StudioRoute::Devices);
-                    },
+                if let Some(connect) = connect {
+                    TransportOffer {
+                        offer: connect,
+                        path_word: "via Bluetooth",
+                        note: ble_reach_note(reach),
+                        page_url,
+                        on_action: move |action| {
+                            on_action.call(action);
+                            crate::route_recording::note_route_reason("unlock-connect");
+                            crate::router::navigate_push(&crate::router::StudioRoute::Devices);
+                        },
+                    }
                 }
             }
         }

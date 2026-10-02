@@ -1,0 +1,288 @@
+//! Story fixtures for the device surfaces' offer trees (M3).
+//!
+//! The device card, the pending card, the add slot and the stalled-open
+//! exits draw their verbs from the view's offer tree, which the shell
+//! provides. A story mounts a surface on its own, so it builds the tree the
+//! same way core publishes it — [`device_offers`], [`pending_link_offers`],
+//! [`add_device_offers`], [`new_sim_offer`] over the story's own fixtures —
+//! and hands it down with [`OffersProvider`]. Nothing here invents a verb:
+//! a story whose card shows a button shows it because core offered it.
+//!
+//! Boards are addressed `devices/new-<handle>` here; the board ref is not
+//! drawn anywhere, so a story has no reason to mint MACs for it.
+
+use dioxus::prelude::*;
+use lpa_studio_core::{
+    BluetoothReach, BoardRef, DeviceFace, DeviceOfferFacts, DeviceRosterView, DeviceView,
+    OfferPath, PendingLinkView, UiExampleCard, UiOfferTree, UiPackageCard, UiUnlockOffer,
+    add_device_offers, device_offers, new_sim_offer, pending_link_offers,
+};
+
+use crate::app::home::DevicesPage;
+use crate::app::home::ble_reach::use_ble_reach;
+use crate::app::home::device_roster_card::{DeviceRosterCard, PendingLinkCard};
+use crate::core::OffersProvider;
+
+/// The tree core would publish for `devices`: the add slot's transports at
+/// `bluetooth`, `devices/new-sim` where a runtime can start, and every
+/// pending link's and device's verbs — each device placed by its handle.
+pub(crate) fn roster_tree(
+    devices: &DeviceRosterView,
+    projects: &[UiPackageCard],
+    examples: &[UiExampleCard],
+    bluetooth: BluetoothReach,
+) -> UiOfferTree {
+    let mut tree = UiOfferTree::new();
+    for offer in add_device_offers(devices.usb_available, bluetooth) {
+        tree.publish(offer);
+    }
+    if devices.transport_available {
+        tree.publish(new_sim_offer());
+    }
+    tree.append(pending_tree(&devices.roster.pending));
+    for card in &devices.roster.devices {
+        let locked = devices
+            .access
+            .get(&card.id)
+            .is_some_and(|access| access.unlock == Some(UiUnlockOffer::Locked));
+        let face = match devices.runtime_bands.contains_key(&card.id) {
+            true => DeviceFace::Sim,
+            false => DeviceFace::Wire,
+        };
+        tree.append(card_tree(card, face, locked, projects, examples));
+    }
+    tree
+}
+
+/// One device card's verbs, as core publishes them for it.
+pub(crate) fn card_tree(
+    card: &DeviceView,
+    face: DeviceFace,
+    locked: bool,
+    projects: &[UiPackageCard],
+    examples: &[UiExampleCard],
+) -> UiOfferTree {
+    let prefix = OfferPath::board(&BoardRef::New(card.id));
+    let facts = DeviceOfferFacts {
+        prefix: prefix.clone(),
+        face,
+        autoconnect: false,
+        locked,
+        banked: false,
+        projects,
+        examples,
+    };
+    let mut tree = UiOfferTree::new();
+    for offer in device_offers(card, &facts) {
+        tree.publish(offer);
+    }
+    tree.place_device(card.id, prefix);
+    tree
+}
+
+/// Every pending link's verbs, as core publishes them.
+pub(crate) fn pending_tree(pending: &[PendingLinkView]) -> UiOfferTree {
+    let mut tree = UiOfferTree::new();
+    for link in pending {
+        let prefix = OfferPath::board(&BoardRef::New(link.device));
+        for offer in pending_link_offers(link, &prefix) {
+            tree.publish(offer);
+        }
+        tree.place_device(link.device, prefix);
+    }
+    tree
+}
+
+/// `children` under the tree core would publish for one device card: a sim
+/// when `sim` (the power verbs' words), locked when `locked` (no push).
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+pub(crate) fn CardOffers(
+    card: DeviceView,
+    #[props(default)] sim: bool,
+    #[props(default)] locked: bool,
+    #[props(default)] projects: Vec<UiPackageCard>,
+    #[props(default)] examples: Vec<UiExampleCard>,
+    children: Element,
+) -> Element {
+    let face = match sim {
+        true => DeviceFace::Sim,
+        false => DeviceFace::Wire,
+    };
+    let offers = card_tree(&card, face, locked, &projects, &examples);
+    rsx! {
+        OffersProvider { offers, {children} }
+    }
+}
+
+/// `children` under the tree core would publish for these pending links.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+pub(crate) fn PendingOffers(pending: Vec<PendingLinkView>, children: Element) -> Element {
+    let offers = pending_tree(&pending);
+    rsx! {
+        OffersProvider { offers, {children} }
+    }
+}
+
+/// `children` under the tree core would publish for a whole roster. The
+/// Bluetooth half is `ble_reach` when a story pins it, else what this
+/// browser answers — the same answer the add slot's notes read, so the
+/// button and the way forward under it never disagree.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+pub(crate) fn RosterOffers(
+    devices: DeviceRosterView,
+    #[props(default)] projects: Vec<UiPackageCard>,
+    #[props(default)] examples: Vec<UiExampleCard>,
+    #[props(default)] ble_reach: Option<BluetoothReach>,
+    children: Element,
+) -> Element {
+    let asked = use_ble_reach();
+    let reach = ble_reach.unwrap_or_else(|| asked());
+    let offers = roster_tree(&devices, &projects, &examples, reach);
+    rsx! {
+        OffersProvider { offers, {children} }
+    }
+}
+
+/// [`DeviceRosterCard`] under the tree core would publish for its card —
+/// the card's own props, passed straight through. A runtime band makes it
+/// a sim (the power verbs' words); a Locked access makes it locked (no
+/// push), exactly as core reads the roster.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+pub(crate) fn StoryDeviceCard(
+    card: DeviceView,
+    projects: Vec<UiPackageCard>,
+    examples: Vec<UiExampleCard>,
+    #[props(default)] armed_preview: bool,
+    #[props(default)] armed_remove_preview: bool,
+    #[props(default)] open_uid: Option<String>,
+    #[props(default)] feed: Option<lpa_studio_core::DeviceCardFeedView>,
+    #[props(default)] runtime: Option<lpa_studio_core::UiRuntimeBand>,
+    #[props(default)] access: Option<lpa_studio_core::UiDeviceAccess>,
+    #[props(default)] access_panel_open: bool,
+    #[props(default)] menu_initially_open: bool,
+    on_action: EventHandler<lpa_studio_core::UiAction>,
+) -> Element {
+    let locked = access
+        .as_ref()
+        .is_some_and(|access| access.unlock == Some(UiUnlockOffer::Locked));
+    rsx! {
+        CardOffers {
+            card: card.clone(),
+            sim: runtime.is_some(),
+            locked,
+            projects: projects.clone(),
+            examples: examples.clone(),
+            DeviceRosterCard {
+                card,
+                projects,
+                examples,
+                armed_preview,
+                armed_remove_preview,
+                open_uid,
+                feed,
+                runtime,
+                access,
+                access_panel_open,
+                menu_initially_open,
+                on_action,
+            }
+        }
+    }
+}
+
+/// [`PendingLinkCard`] under the tree core would publish for its link.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+pub(crate) fn StoryPendingCard(
+    pending: PendingLinkView,
+    on_action: EventHandler<lpa_studio_core::UiAction>,
+) -> Element {
+    rsx! {
+        PendingOffers { pending: vec![pending.clone()],
+            PendingLinkCard { pending, on_action }
+        }
+    }
+}
+
+/// The add slot's offers alone — `devices/connect-usb`, `connect-ble` and
+/// `devices/new-sim` — for a story that mounts the slot (or a page that
+/// draws one of its verbs) on its own.
+pub(crate) fn add_slot_tree(usb_available: bool, bluetooth: BluetoothReach) -> UiOfferTree {
+    let mut tree = UiOfferTree::new();
+    for offer in add_device_offers(usb_available, bluetooth) {
+        tree.publish(offer);
+    }
+    tree.publish(new_sim_offer());
+    tree
+}
+
+/// [`DevicesPage`] under the tree core would publish for its roster.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+pub(crate) fn StoryDevicesPage(
+    home: lpa_studio_core::UiHomeView,
+    #[props(default)] remembered_open: bool,
+    #[props(default)] target_pick_open: bool,
+    on_action: EventHandler<lpa_studio_core::UiAction>,
+) -> Element {
+    rsx! {
+        RosterOffers {
+            devices: home.devices.clone(),
+            projects: home.projects.clone(),
+            examples: home.examples.clone(),
+            DevicesPage { home, remembered_open, target_pick_open, on_action }
+        }
+    }
+}
+
+/// The tree a session's device lens is offered under: the device's own
+/// verbs (Rename among them), for a story of the header session panel.
+pub(crate) fn session_device_tree(
+    device: Option<lpa_studio_core::DeviceId>,
+    title: &str,
+) -> UiOfferTree {
+    let Some(device) = device else {
+        return UiOfferTree::new();
+    };
+    card_tree(
+        &ready_device(device, title),
+        DeviceFace::Wire,
+        false,
+        &[],
+        &[],
+    )
+}
+
+/// A connected, idle LightPlayer with nothing reported loaded.
+fn ready_device(id: lpa_studio_core::DeviceId, title: &str) -> DeviceView {
+    use lpa_studio_core::{DeviceEscape, DeviceFirmwareFace, DeviceLoadedProject, DeviceStatus};
+    DeviceView {
+        id,
+        title: title.to_string(),
+        status: DeviceStatus::Ready,
+        state_label: "Ready".to_string(),
+        detail: None,
+        freshness_label: None,
+        identity_label: None,
+        detected_chip: None,
+        board_id: None,
+        firmware_face: DeviceFirmwareFace::Unknown,
+        remembered_firmware: None,
+        degraded: None,
+        loaded_project: DeviceLoadedProject::Unknown,
+        engine_fps: None,
+        link_counters: None,
+        can_receive_project: false,
+        can_remove_project: false,
+        activity: None,
+        last_outcome: None,
+        terminal: Vec::new(),
+        terminal_dropped: 0,
+        firmware_blocked: None,
+        escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
+    }
+}

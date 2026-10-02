@@ -32,8 +32,8 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    DeviceAction, DeviceEscape, DeviceRosterView, DevicesOp, RememberedView, UiAction, UiHomeView,
-    device_escape_action_for, split_roster,
+    DeviceEscape, DeviceRosterView, OfferPath, RememberedView, UiAction, UiHomeView, UiOffer,
+    escape_verb, split_roster,
 };
 
 use crate::app::home::ble_reach::{BluetoothReach, ble_reach_note, use_ble_reach};
@@ -43,7 +43,7 @@ use crate::app::home::reach_note::{ReachCopy, ReachNote, USB_UNAVAILABLE, this_p
 use crate::app::home::target_pick_popover::TargetPickPopover;
 use crate::app::home::{device_grid_class, section_title_class};
 use crate::app::node::lamp_view::LampView;
-use crate::core::{ActionButton, ActionButtonVariant};
+use crate::core::{ActionButton, ActionButtonVariant, use_device_verbs, use_offer_at, verb_named};
 
 /// The runtime roster page (roadmap M4's gallery top, re-homed).
 #[component]
@@ -186,7 +186,8 @@ pub fn DevicesPage(
 }
 
 /// The roster's add slot: a card in the grid where the next device's card
-/// will appear. It doubles as the empty state — same slot, same copy, same
+/// will appear. Its three verbs are offers (M3): `devices/connect-usb`,
+/// `devices/connect-ble` and `devices/new-sim`. It doubles as the empty state — same slot, same copy, same
 /// layout whether it is the first board or the fifth (clear minimalism,
 /// G1 ruling) — so there is no separate empty-state block to jump around.
 ///
@@ -195,7 +196,7 @@ pub fn DevicesPage(
 /// The heading says the goal; the two buttons say only the path —
 /// **via USB** (the spectrum Primary: a board on the desk is the common
 /// case) and **via Bluetooth**. Both are ALWAYS drawn (G3, 2026-09-24): a
-/// transport this browser cannot drive is DISABLED with its reason under
+/// transport this browser cannot drive is DISABLED with core's reason under
 /// it and a way to continue — the Bluefy link, the Brave flag, this page's
 /// address to open where it works — rather than hidden, so a phone visitor
 /// learns USB exists and where it works. Below them, **start a board here
@@ -225,10 +226,10 @@ pub(crate) fn AddDeviceCard(
 ) -> Element {
     let asked = use_ble_reach();
     let ble = ble_reach.unwrap_or_else(|| asked());
-    let verbs = add_slot_verbs(usb_available, ble);
+    let notes = add_slot_notes(usb_available, ble);
     let page_url = page_url.unwrap_or_else(this_page_url);
-    let usb_action = transport_action(DeviceAction::AddFromUsb, verbs.usb.enabled, verbs.usb.note);
-    let ble_action = transport_action(DeviceAction::AddFromBle, verbs.ble.enabled, verbs.ble.note);
+    let usb = use_offer_at(OfferPath::devices().child("connect-usb"))();
+    let ble_offer = use_offer_at(OfferPath::devices().child("connect-ble"))();
     rsx! {
         div { class: "tw:flex tw:min-h-40 tw:flex-col tw:items-center tw:justify-center tw:gap-3 tw:rounded-md tw:border tw:border-dashed tw:border-border-strong tw:bg-transparent tw:px-5 tw:py-6",
             // The invitation is transport-OPEN: connecting is the goal, and
@@ -240,17 +241,23 @@ pub(crate) fn AddDeviceCard(
             // paths read as a pair whatever each says under it. USB wears
             // the Primary spectrum ring, Bluetooth the Secondary tier.
             div { class: "tw:grid tw:w-full tw:max-w-64 tw:gap-3 tw:text-center",
-                TransportOffer {
-                    action: usb_action,
-                    note: verbs.usb.note,
-                    page_url: page_url.clone(),
-                    on_action,
+                if let Some(usb) = usb {
+                    TransportOffer {
+                        offer: usb,
+                        path_word: "via USB",
+                        note: notes.usb,
+                        page_url: page_url.clone(),
+                        on_action,
+                    }
                 }
-                TransportOffer {
-                    action: ble_action,
-                    note: verbs.ble.note,
-                    page_url,
-                    on_action,
+                if let Some(ble) = ble_offer {
+                    TransportOffer {
+                        offer: ble,
+                        path_word: "via Bluetooth",
+                        note: notes.ble,
+                        page_url,
+                        on_action,
+                    }
                 }
             }
             span { class: add_slot_or_class(), "or" }
@@ -259,13 +266,18 @@ pub(crate) fn AddDeviceCard(
     }
 }
 
-/// One transport's button and, when it is disabled, the way forward under
-/// it: the reason (the button's own disabled reason), an optional link
-/// out, and the text to select and copy — shown in full, never folded.
+/// One transport's offer as its button and, when it is disabled, the way
+/// forward under it: the reason (the offer's own, core's sentence), an
+/// optional link out, and the text to select and copy — shown in full,
+/// never folded. The way forward is the web's: it is about this browser.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub(crate) fn TransportOffer(
-    action: UiAction,
+    offer: UiOffer,
+    /// What the button reads in the slot: only the path ("via USB"),
+    /// because the slot's heading already says the goal. The offer's own
+    /// label says both, for a reader with no heading (the app agent, ⌘K).
+    path_word: &'static str,
     note: Option<ReachNote>,
     page_url: String,
     on_action: EventHandler<UiAction>,
@@ -274,6 +286,9 @@ pub(crate) fn TransportOffer(
         ReachCopy::Text(text) => text.to_string(),
         ReachCopy::ThisPage => page_url.clone(),
     });
+    // The way forward belongs under a button that cannot be pressed.
+    let note = note.filter(|_| !offer.is_enabled());
+    let action = offer.action.with_label(path_word);
     rsx! {
         div { class: "tw:grid tw:w-full tw:gap-1",
             ActionButton { action, running: false, on_action }
@@ -302,39 +317,19 @@ pub(crate) fn TransportOffer(
     }
 }
 
-/// The add-slot button for one transport: the op's own label and icon,
-/// disabled with the note's reason where this browser cannot drive it.
-/// Disabled with no note is the Bluetooth answer still on its way — a
-/// button that could only fail must not be live for that moment either.
-fn transport_action(action: DeviceAction, enabled: bool, note: Option<ReachNote>) -> UiAction {
-    let action = DevicesOp::action_for(action);
-    if enabled {
-        action
-    } else {
-        action.disabled(note.map_or("", |note| note.reason))
-    }
-}
-
-/// What the add slot offers, decided apart from the component so it is
-/// testable: both buttons, each enabled only where this browser can drive
-/// it, each with its note where it cannot.
+/// What the add slot says under each transport where this browser cannot
+/// drive it: the way forward (a link out, an address to copy), beside the
+/// reason core gives the disabled offer. Decided apart from the component
+/// so it is testable.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct AddSlotVerbs {
-    /// "via USB".
-    pub usb: TransportVerb,
-    /// "via Bluetooth".
-    pub ble: TransportVerb,
+pub(crate) struct AddSlotNotes {
+    /// Under "via USB".
+    pub usb: Option<ReachNote>,
+    /// Under "via Bluetooth".
+    pub ble: Option<ReachNote>,
 }
 
-/// One transport's button state.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct TransportVerb {
-    pub enabled: bool,
-    /// Said under the disabled button: why, and how to go on.
-    pub note: Option<ReachNote>,
-}
-
-pub(crate) fn add_slot_verbs(usb_available: bool, ble: BluetoothReach) -> AddSlotVerbs {
+pub(crate) fn add_slot_notes(usb_available: bool, ble: BluetoothReach) -> AddSlotNotes {
     let ble_note = ble_reach_note(ble);
     let mut usb_note = (!usb_available).then_some(USB_UNAVAILABLE);
     // Firefox, desktop Safari: BOTH paths send you to Chrome or Edge, with
@@ -347,15 +342,9 @@ pub(crate) fn add_slot_verbs(usb_available: bool, ble: BluetoothReach) -> AddSlo
         usb.copy_lead = None;
         usb.copy = None;
     }
-    AddSlotVerbs {
-        usb: TransportVerb {
-            enabled: usb_available,
-            note: usb_note,
-        },
-        ble: TransportVerb {
-            enabled: ble.offers_verb(),
-            note: ble_note,
-        },
+    AddSlotNotes {
+        usb: usb_note,
+        ble: ble_note,
     }
 }
 
@@ -454,7 +443,13 @@ fn RememberedLine(
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn RememberedTile(entry: RememberedView, on_action: EventHandler<UiAction>) -> Element {
-    let device = entry.id;
+    // Its escapes are the device's offers (M3), at the escape's path verb.
+    let verbs = use_device_verbs(Some(entry.id))();
+    let escapes: Vec<(DeviceEscape, UiOffer)> = entry
+        .escapes
+        .iter()
+        .filter_map(|escape| verb_named(&verbs, escape_verb(*escape)).map(|offer| (*escape, offer)))
+        .collect();
     let meta = remembered_meta_text(&entry);
     let slot = remembered_slot(&entry);
 
@@ -495,10 +490,10 @@ fn RememberedTile(entry: RememberedView, on_action: EventHandler<UiAction>) -> E
             // tile's one call to action (a grant can die on a replug), so
             // it wears the Outline voice; Forget keeps its inline confirm.
             div { class: "tw:mt-auto tw:flex tw:flex-wrap tw:items-center tw:gap-2 tw:whitespace-nowrap",
-                for escape in entry.escapes.iter().copied() {
+                for (escape , offer) in escapes {
                     ActionButton {
                         key: "{escape:?}",
-                        action: device_escape_action_for(escape, device, entry.face),
+                        action: offer.action,
                         running: false,
                         variant: remembered_escape_variant(escape),
                         on_action,
@@ -671,18 +666,18 @@ mod tests {
     }
 
     /// D44 + G3: the slot offers BOTH ways a card can appear, and each
-    /// verb's words come from the place that owns them — core's action
-    /// vocabulary for the two transports under "Connect a board", the target
-    /// menu for the board Studio is about to start.
+    /// verb's words come from the place that owns them — core's offers for
+    /// the two transports under "Connect a board" (the button reads only
+    /// the path), the target menu for the board Studio is about to start.
     #[test]
     fn the_add_slot_offers_both_ways_a_card_can_appear() {
-        let usb = DevicesOp::action_for(DeviceAction::AddFromUsb);
-        let ble = DevicesOp::action_for(DeviceAction::AddFromBle);
-
-        assert_eq!(usb.meta().label, "via USB");
-        assert_eq!(usb.meta().icon.as_deref(), Some("usb"));
-        assert_eq!(ble.meta().label, "via Bluetooth");
-        assert_eq!(ble.meta().icon.as_deref(), Some("bluetooth"));
+        let [usb, ble] = lpa_studio_core::add_device_offers(true, BluetoothReach::Ready)
+            .try_into()
+            .expect("two transports");
+        assert_eq!(usb.path.to_string(), "devices/connect-usb");
+        assert_eq!(usb.action.meta().icon.as_deref(), Some("usb"));
+        assert_eq!(ble.path.to_string(), "devices/connect-ble");
+        assert_eq!(ble.action.meta().icon.as_deref(), Some("bluetooth"));
         assert_eq!(
             crate::app::home::target_pick_popover::SLOT_VERB_LABEL,
             "start a board here"
@@ -690,55 +685,70 @@ mod tests {
     }
 
     /// G3: both buttons are ALWAYS drawn. Where this browser cannot drive a
-    /// transport its button is disabled with the reason, plus a way to go
-    /// on — never hidden, never a verb that can only fail.
+    /// transport, core disables its offer with the reason, and the slot
+    /// adds a way to go on under it — never hidden, never a verb that can
+    /// only fail.
     #[test]
     fn a_transport_this_browser_cannot_drive_is_disabled_with_a_way_forward() {
+        let reasons = |usb: bool, reach: BluetoothReach| {
+            lpa_studio_core::add_device_offers(usb, reach)
+                .into_iter()
+                .map(|offer| match &offer.action.meta().enablement {
+                    lpa_studio_core::ActionEnablement::Enabled => None,
+                    lpa_studio_core::ActionEnablement::Disabled { reason } => Some(reason.clone()),
+                })
+                .collect::<Vec<_>>()
+        };
+
         // Chrome/Edge on a computer: both live, nothing to explain.
-        let chrome = add_slot_verbs(true, BluetoothReach::Ready);
+        assert_eq!(reasons(true, BluetoothReach::Ready), [None, None]);
         assert_eq!(
-            chrome,
-            AddSlotVerbs {
-                usb: TransportVerb {
-                    enabled: true,
-                    note: None
-                },
-                ble: TransportVerb {
-                    enabled: true,
-                    note: None
-                },
+            add_slot_notes(true, BluetoothReach::Ready),
+            AddSlotNotes {
+                usb: None,
+                ble: None
             }
         );
 
-        // Bluefy: no Web Serial. USB disabled, says where it works and
-        // gives this page's address to open there; Bluetooth live.
-        let bluefy = add_slot_verbs(false, BluetoothReach::Ready);
-        assert!(!bluefy.usb.enabled);
-        assert_eq!(bluefy.usb.note, Some(USB_UNAVAILABLE));
+        // Bluefy: no Web Serial. USB disabled with core's reason, and the
+        // slot gives this page's address to open where it works; Bluetooth
+        // live.
+        assert_eq!(
+            reasons(false, BluetoothReach::Ready),
+            [
+                Some(lpa_studio_core::USB_NEEDS_WEB_SERIAL.to_string()),
+                None
+            ]
+        );
+        let bluefy = add_slot_notes(false, BluetoothReach::Ready);
+        assert_eq!(bluefy.usb, Some(USB_UNAVAILABLE));
         assert_eq!(
             USB_UNAVAILABLE.reason,
-            "USB needs Chrome or Edge on a computer."
+            lpa_studio_core::USB_NEEDS_WEB_SERIAL
         );
         assert_eq!(USB_UNAVAILABLE.copy, Some(ReachCopy::ThisPage));
-        assert!(bluefy.ble.enabled);
-        assert_eq!(bluefy.ble.note, None);
+        assert_eq!(bluefy.ble, None);
 
         // iPhone Safari / Chrome on iOS: both disabled; Bluetooth points to
         // Bluefy on the App Store and then this page, USB keeps its own.
-        let ios = add_slot_verbs(false, BluetoothReach::Ios);
-        assert!(!ios.usb.enabled && !ios.ble.enabled);
-        let ble_note = ios.ble.note.expect("the Bluefy path");
+        assert!(
+            reasons(false, BluetoothReach::Ios)
+                .iter()
+                .all(Option::is_some)
+        );
+        let ios = add_slot_notes(false, BluetoothReach::Ios);
+        let ble_note = ios.ble.expect("the Bluefy path");
         assert_eq!(
             ble_note.link.map(|link| link.href),
             Some(crate::app::home::reach_note::BLUEFY_APP_STORE_URL)
         );
-        assert_eq!(ios.usb.note, Some(USB_UNAVAILABLE));
+        assert_eq!(ios.usb, Some(USB_UNAVAILABLE));
 
         // Brave on a computer: USB live, Bluetooth disabled with the flag.
-        let brave = add_slot_verbs(true, BluetoothReach::Brave);
-        assert!(brave.usb.enabled && !brave.ble.enabled);
+        let brave = add_slot_notes(true, BluetoothReach::Brave);
+        assert_eq!(brave.usb, None);
         assert_eq!(
-            brave.ble.note.and_then(|note| note.copy),
+            brave.ble.and_then(|note| note.copy),
             Some(ReachCopy::Text(
                 crate::app::home::ble_reach::BRAVE_BLUETOOTH_FLAG
             ))
@@ -746,43 +756,17 @@ mod tests {
 
         // Firefox / desktop Safari: both go to Chrome or Edge — the page's
         // address is said ONCE (under Bluetooth), not twice in a row.
-        let firefox = add_slot_verbs(false, BluetoothReach::Firefox);
-        let usb_note = firefox.usb.note.expect("USB still says why");
-        assert_eq!(usb_note.reason, USB_UNAVAILABLE.reason);
+        let firefox = add_slot_notes(false, BluetoothReach::Firefox);
+        let usb_note = firefox.usb.expect("USB still says why");
         assert_eq!(usb_note.copy, None, "the address is not repeated");
         assert_eq!(
-            firefox.ble.note.and_then(|note| note.copy),
+            firefox.ble.and_then(|note| note.copy),
             Some(ReachCopy::ThisPage)
         );
 
-        // The answer still on its way: disabled, nothing said yet.
-        let checking = add_slot_verbs(true, BluetoothReach::Checking);
-        assert_eq!(
-            checking.ble,
-            TransportVerb {
-                enabled: false,
-                note: None
-            }
-        );
-    }
-
-    /// The disabled button carries the note's reason as its own disabled
-    /// reason, so it is said directly under the button.
-    #[test]
-    fn a_disabled_transport_button_carries_its_reason() {
-        let action = transport_action(DeviceAction::AddFromUsb, false, Some(USB_UNAVAILABLE));
-        assert_eq!(
-            action.meta().enablement,
-            lpa_studio_core::ActionEnablement::Disabled {
-                reason: USB_UNAVAILABLE.reason.to_string()
-            }
-        );
-        assert!(
-            transport_action(DeviceAction::AddFromBle, true, None)
-                .meta()
-                .enablement
-                .is_enabled()
-        );
+        // The answer still on its way: disabled, nothing to add under it.
+        assert!(reasons(true, BluetoothReach::Checking)[1].is_some());
+        assert_eq!(add_slot_notes(true, BluetoothReach::Checking).ble, None);
     }
 
     /// A host build (or a Firefox) has no transport, and the page says that

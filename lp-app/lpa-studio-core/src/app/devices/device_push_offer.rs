@@ -9,9 +9,9 @@
 //!
 //! The optional `name` belongs to the starter alone: it names the new
 //! project and, when it differs from the board's own name, renames the
-//! board to match — the picker's "name the board to match" offer, ticked
-//! as it is by default. A press that names an example or a library project
-//! is refused, because neither is renamed by a push.
+//! board to match — unless `name_board` (the picker's "Name the board the
+//! same" tick, on by default) is turned off. A press that names an example
+//! or a library project is refused, because neither is renamed by a push.
 //!
 //! **The level depends on what the push lands on (Q4).** Onto an empty
 //! board nothing is lost, and over a project the library holds the library
@@ -35,6 +35,9 @@ use crate::{
 pub const PUSH_SOURCE_PARAM: &str = "source";
 /// The Push offer's optional name parameter (a new project only).
 pub const PUSH_NAME_PARAM: &str = "name";
+/// The Push offer's toggle: whether a new project's name renames the board
+/// to match (on by default; it has an effect only when the two differ).
+pub const PUSH_NAME_BOARD_PARAM: &str = "name_board";
 
 /// What an empty name field means.
 const NAME_PLACEHOLDER: &str = "A new project only. Leave blank to name it after the board";
@@ -128,6 +131,11 @@ pub fn push_device_offer(
     )];
     if offer.new_project_unavailable.is_none() {
         params.push(OfferParam::text(PUSH_NAME_PARAM, "name", NAME_PLACEHOLDER).optional());
+        params.push(OfferParam::toggle(
+            PUSH_NAME_BOARD_PARAM,
+            "name the board the same",
+            true,
+        ));
     }
     let choices = Rc::new(offer.choices);
     let board_title = view.title.trim().to_string();
@@ -145,7 +153,8 @@ pub fn push_device_offer(
         let (source, device_name) = match &choice.source {
             PushSource::NewForBoard { board_id, .. } => {
                 let name = typed.unwrap_or(board_title.as_str()).to_string();
-                let rename = (name != board_title).then(|| name.clone());
+                let name_board = args.toggle(PUSH_NAME_BOARD_PARAM).unwrap_or(true);
+                let rename = (name_board && name != board_title).then(|| name.clone());
                 (
                     PushSource::NewForBoard {
                         board_id: board_id.clone(),
@@ -292,7 +301,7 @@ mod tests {
                 .iter()
                 .map(|param| param.name.as_str())
                 .collect::<Vec<_>>(),
-            ["source", "name"]
+            ["source", "name", "name_board"]
         );
         let new_key = format!("new:{}", starter.board_id);
 
@@ -314,6 +323,19 @@ mod tests {
                 device_name: Some("Porch".to_string()),
             }),
             "the board is named to match, as the picker's ticked offer does"
+        );
+        let kept = offer
+            .press(
+                &OfferArgs::new()
+                    .with("source", &new_key)
+                    .with("name", "Porch")
+                    .with("name_board", "false"),
+            )
+            .unwrap();
+        assert_eq!(
+            kept.op_as::<DevicePushOp>().unwrap().device_name,
+            None,
+            "the tick off: the project is named, the board keeps its name"
         );
         let unnamed = offer
             .press(&OfferArgs::new().with("source", &new_key))

@@ -61,7 +61,7 @@
 //!
 //! | zone | info line | verbs |
 //! |---|---|---|
-//! | Project | the project name, "Nothing loaded", the push's label + %; a degraded board's fault text replaces it | Open · Clear faults … [pick] Put it on the board … Remove |
+//! | Project | the project name, "Nothing loaded", the push's label + %; a degraded board's fault text replaces it; on a running board, "Replace…" at the line's end (the gallery) | Open · Clear faults … [pick] Put it on the board … Remove |
 //! | Firmware | "<firmware> · <board>" (with "— older than Studio" when it is), the flash face's own verdict line ("Blank flash — needs firmware", …), the flash's label + % (the terminal is this zone's second half) | [board pick] Flash firmware (a needs-firmware face) · Update firmware (a running LightPlayer; opens the pick once when its board is unknown) … Factory reset |
 //! | Device | freshness ("last heard 3 s ago" / "quiet — …"), "Identifying…" | Reset · Retry · Disconnect … Forget |
 //!
@@ -126,16 +126,15 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    DeviceAction, DeviceActivityView, DeviceCardFeedView, DeviceEscape, DeviceFeedOp, DeviceId,
-    DeviceLoadedProject, DeviceStatus, DeviceView, DevicesOp, FeedLiveness, FirmwareVerb,
-    PendingLinkView, RESET_NEEDS_USB, UiAction, UiExampleCard, UiPackageCard, UiRuntimeBand,
-    UiStatus, UiUnlockOffer, blocked_erase_action, device_escape_action_for, device_firmware_line,
-    device_identity_line, device_status_kind, firmware_face_preview_sentence, firmware_verb,
-    pending_escape_action, pending_firmware_line, pending_identity_rows,
+    DeviceActivityView, DeviceCardFeedView, DeviceEscape, DeviceFeedOp, DeviceLoadedProject,
+    DeviceStatus, DeviceView, FeedLiveness, OfferArgs, PendingLinkView, RENAME_NAME_PARAM,
+    UiAction, UiExampleCard, UiOffer, UiPackageCard, UiRuntimeBand, UiStatus, UiUnlockOffer,
+    device_firmware_line, device_identity_line, device_status_kind, escape_verb,
+    firmware_face_preview_sentence, pending_firmware_line, pending_identity_rows,
 };
 
 use super::device_pick_popover::{
-    BoardPickMode, BoardPickPopover, ChipSource, ProjectPickPopover, joined_chip,
+    BoardPickMode, BoardPickPopover, ChipSource, ProjectPickMode, ProjectPickPopover, joined_chip,
 };
 use super::device_terminal::DeviceTerminal;
 use super::play_feed_text::frame_age_label;
@@ -143,7 +142,9 @@ use crate::app::node::lamp_view::LampView;
 use crate::base::{
     DetailPopover, DetailSection, PopoverCloseHandle, PopoverPlacement, StudioIcon, StudioIconName,
 };
-use crate::core::{ActionButton, ActionButtonVariant, StatusChip, quiet_action_class};
+use crate::core::{
+    ActionButton, ActionButtonVariant, StatusChip, quiet_action_class, use_device_verbs, verb_named,
+};
 
 /// One device card.
 #[component]
@@ -192,37 +193,33 @@ pub(crate) fn DeviceRosterCard(
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let device = card.id;
-    // The two verbs whose WORDS depend on what the device is (PD8/Q15): a
-    // sim is powered on and off, a board is connected and disconnected.
-    // The band is the fact — a device with one is not silicon.
-    let face = match runtime.is_some() {
-        true => lpa_studio_core::DeviceFace::Sim,
-        false => lpa_studio_core::DeviceFace::Wire,
-    };
+    // Every verb this card draws is one of the device's offers (M3):
+    // `devices/<board ref>/<verb>`, published by core in the order the
+    // card reads. Which zone a verb sits in, and whether a zone is
+    // withdrawn while an activity runs (D9), is this card's layout.
+    let verbs = use_device_verbs(Some(device))();
+    let verb = |name: &str| verb_named(&verbs, name);
     // The mount lease: a card on screen wants its board's picture; a card
     // leaving the page stops the pull (frames nobody sees are serial time
     // the board would rather spend elsewhere). The feed keeps the last
-    // frame across the unmount.
+    // frame across the unmount. Plumbing, not a verb: it is no offer.
     use_effect(move || on_action.call(DeviceFeedOp::action_for(device, true)));
     use_drop(move || on_action.call(DeviceFeedOp::action_for(device, false)));
     let status = UiStatus {
         label: card.state_label.clone(),
         kind: device_status_kind(card.status),
     };
-    // The FIRMWARE zone's verb, decided in core (ruled 2026-09-04): Flash,
-    // with the pick, on a needs-firmware face; Update on a running
-    // LightPlayer — one click when its board resolved, the pick once when
-    // it did not. `None` while an activity runs (the row is withdrawn).
-    let verb = firmware_verb(&card);
+    // The FIRMWARE zone's verbs, decided in core (ruled 2026-09-04):
+    // `flash`, with the board pick, on a needs-firmware face;
+    // `update-firmware` on a running LightPlayer — one click when its board
+    // resolved, the pick once when it did not. Neither while an activity
+    // runs (the row is withdrawn).
+    let flash = verb("flash");
+    let update = verb("update-firmware");
     // A board reached over Bluetooth: the firmware verbs are DRAWN, disabled,
     // with the reason under them ("Firmware updates need USB") — never
     // hidden, so the question is answered where it is asked (M5 S6).
-    let firmware_blocked = card.firmware_blocked.clone();
-    let offer_flash = matches!(verb, Some(FirmwareVerb::Flash));
-    let update_action = verb.as_ref().and_then(|verb| verb.update_action(device));
-    // The empty face: a LightPlayer that has REPORTED nothing loaded. A
-    // board that simply has not said yet gets neither face — see
-    // `DeviceLoadedProject::Unknown`.
+    let firmware_blocked = card.firmware_blocked.is_some();
     // A Bluetooth link nothing has unlocked yet: the board answers only its
     // hello and the unlock, so what it runs is unknown to the card (its
     // "nothing loaded" is a refused read, not the board's word), and the
@@ -230,25 +227,29 @@ pub(crate) fn DeviceRosterCard(
     let locked = access
         .as_ref()
         .is_some_and(|access| access.unlock == Some(UiUnlockOffer::Locked));
-    let offer_push =
-        card.can_receive_project && card.loaded_project == DeviceLoadedProject::Empty && !locked;
+    // The PROJECT zone's verb: `push`, offered once the board has said
+    // what it runs. On the empty face it is the row (the pick and its
+    // Primary); on the running face a quiet "Replace…" beside Open (Q4: it
+    // arms over a project the library has no copy of).
+    let push = verb("push");
     let running = match &card.loaded_project {
         DeviceLoadedProject::Running { label } => Some(label.clone()),
         DeviceLoadedProject::Empty | DeviceLoadedProject::Unknown => None,
     };
+
     // "Linked" in projection terms: Disconnect is offered exactly when the
     // model has a link for this device. It gates the terminal zone (an
     // offline card has no wire to show) and the always-actions that need a
     // port, which is the same condition the model's own spawns check.
     let linked = card.escapes.contains(&DeviceEscape::Disconnect);
     let idle = card.activity.is_none();
-    // The one condition Clear faults turns on. The status is the derived
-    // headline — a board is Degraded exactly when it reported a faulted node
-    // or a non-green recovery state — so the verb appears with the attention
-    // chip and the fault line, and leaves with them.
-    let degraded = card.status == DeviceStatus::Degraded;
-    // The chip the board popovers filter by, and the source that answered
-    // it (the panel says which). Core's verb already joined the same chip.
+    // The running face's push ("Replace…"), withdrawn while work runs (D9).
+    let replace_push = push
+        .clone()
+        .filter(|push| running.is_some() && idle && !push.params().is_empty());
+    // The chip the board popover's filter line names, and the source that
+    // answered it (the panel says which). Core's offer narrowed by the
+    // same chip.
     let chip = joined_chip(&card);
     // The running face's ONE Primary: Open — the editor as a lens on this
     // board. Opening is NAVIGATION, so it is a real `<a>` to the device
@@ -297,11 +298,16 @@ pub(crate) fn DeviceRosterCard(
     let project_line_is_fault = busy_zone != Some(ZoneKind::Project) && card.degraded.is_some();
     // Cancel is the escape of whatever is RUNNING, so it renders in that
     // activity's own zone rather than in a fixed corner of the card.
-    let cancel = card
+    let cancel = verb("cancel");
+    // The escapes that act on the wire, in the order the model projects
+    // them: Retry, Reconnect, Disconnect. Cancel rides its activity's
+    // zone; Forget is held back for the right-hand end.
+    let wire_escapes: Vec<UiOffer> = card
         .escapes
         .iter()
-        .copied()
-        .find(|escape| *escape == DeviceEscape::Cancel);
+        .filter(|escape| !matches!(escape, DeviceEscape::Cancel | DeviceEscape::Forget))
+        .filter_map(|escape| verb(escape_verb(*escape)))
+        .collect();
 
     rsx! {
         article { class: card_class(),
@@ -317,7 +323,7 @@ pub(crate) fn DeviceRosterCard(
                         div { class: "tw:flex tw:flex-none tw:items-center tw:gap-1.5",
                             StatusChip { status }
                             DeviceCardMenu {
-                                device,
+                                rename: verb("rename"),
                                 title: card.title.clone(),
                                 link_counters: card.link_counters,
                                 initially_open: menu_initially_open,
@@ -354,23 +360,49 @@ pub(crate) fn DeviceRosterCard(
 
             // ── zone 2: PROJECT — what is on the board ──────────────────
             section { class: zone_class(false),
-                div { class: "ux-armed-dim tw:grid tw:min-w-0 tw:gap-2",
+                div { class: "tw:grid tw:min-w-0 tw:gap-2",
                     // preview slot (120px, AC10): the board's own published
                     // frames when the feed has them, the honest sentence
                     // otherwise — never a fake picture. The liveness pill
                     // sits top-right INSIDE the frame, so the picture
                     // arriving moves nothing: the frame's height is fixed.
-                    {preview_slot(&card, feed.as_ref(), locked)}
+                    div { class: "ux-armed-dim tw:grid tw:min-w-0",
+                        {preview_slot(&card, feed.as_ref(), locked)}
+                    }
                     div { class: line_and_bar_class(),
-                        // info line (17px, one line, full text on hover)
-                        p {
-                            class: if project_line_is_fault { fault_line_class() } else { info_line_class() },
-                            title: "{project_line}",
-                            "{project_line}"
+                        div { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-2",
+                            // info line (17px, one line, full text on hover)
+                            div { class: "ux-armed-dim tw:grid tw:min-w-0 tw:flex-1",
+                                p {
+                                    class: if project_line_is_fault { fault_line_class() } else { info_line_class() },
+                                    title: "{project_line}",
+                                    "{project_line}"
+                                }
+                            }
+                            // Something else onto a running board: the same
+                            // gallery, opened from "Replace…" at the end of the
+                            // line that names what runs — the way "Unlock" rides
+                            // the device line — because the verb row already
+                            // holds Open, Clear faults and Remove. Outside the
+                            // dim: arming dims what the card says, never what
+                            // it offers. With nothing to choose from it would
+                            // open an empty gallery, so it is not drawn.
+                            if let Some(push) = replace_push.clone() {
+                                ProjectPickPopover {
+                                    offer: push,
+                                    card: card.clone(),
+                                    projects: projects.clone(),
+                                    examples: examples.clone(),
+                                    mode: ProjectPickMode::Verb,
+                                    on_action,
+                                }
+                            }
                         }
                         // bar slot (4px, flush under the line) — lit only
                         // for PROJECT work.
-                        ZoneBar { activity: card.activity.clone(), lit: busy_zone == Some(ZoneKind::Project) }
+                        div { class: "ux-armed-dim tw:grid tw:min-w-0",
+                            ZoneBar { activity: card.activity.clone(), lit: busy_zone == Some(ZoneKind::Project) }
+                        }
                     }
                 }
                 // verb row (30px) — outside `ux-armed-dim`: arming dims what
@@ -378,10 +410,10 @@ pub(crate) fn DeviceRosterCard(
                 div { class: verb_row_class(),
                     if busy_zone == Some(ZoneKind::Project) {
                         // The push's own way out, on the push's own zone.
-                        if let Some(escape) = cancel {
+                        if let Some(cancel) = cancel.clone() {
                             ActionButton {
                                 key: "{\"cancel-project\"}",
-                                action: device_escape_action_for(escape, device, face),
+                                action: cancel.action,
                                 running: false,
                                 variant: ActionButtonVariant::Quiet,
                                 on_action,
@@ -389,8 +421,14 @@ pub(crate) fn DeviceRosterCard(
                         }
                     } else if card.activity.is_some() {
                         // D9: withdrawn at its height while other work runs.
-                    } else if offer_push {
-                        ProjectPickPopover { card: card.clone(), projects, examples, on_action }
+                    } else if let Some(push) = push.clone().filter(|_| card.loaded_project == DeviceLoadedProject::Empty) {
+                        ProjectPickPopover {
+                            offer: push,
+                            card: card.clone(),
+                            projects: projects.clone(),
+                            examples: examples.clone(),
+                            on_action,
+                        }
                     } else {
                         if let Some(href) = open_href.clone() {
                             a {
@@ -400,27 +438,28 @@ pub(crate) fn DeviceRosterCard(
                                 "Open in editor"
                             }
                         }
-                        // Only on a board that has SAID it is degraded: a
-                        // verb to forget faults offered over a healthy card
-                        // would invite a gesture with nothing to do.
-                        if degraded && linked {
+                        // Offered only on a board that has SAID it is
+                        // degraded: a verb to forget faults offered over a
+                        // healthy card would invite a gesture with nothing
+                        // to do.
+                        if let Some(clear) = verb("clear-faults") {
                             ActionButton {
                                 key: "{\"clear-faults\"}",
-                                action: DevicesOp::action_for(DeviceAction::ClearFaults { device }),
+                                action: clear.action,
                                 running: false,
                                 variant: ActionButtonVariant::Quiet,
                                 on_action,
                             }
                         }
                         span { class: "tw:min-w-0 tw:flex-1" }
-                        // Only when the board has SAID it is running
-                        // something: a delete offered over a board that
-                        // never reported one would be a verb aimed at a
-                        // guess.
-                        if card.can_remove_project {
+                        // Offered only when the board has SAID it is
+                        // running something: a delete offered over a board
+                        // that never reported one would be a verb aimed at
+                        // a guess.
+                        if let Some(remove) = verb("remove-project") {
                             ActionButton {
                                 key: "{\"remove-project\"}",
-                                action: DevicesOp::action_for(DeviceAction::RemoveProject { device }),
+                                action: remove.action,
                                 running: false,
                                 variant: ActionButtonVariant::Quiet,
                                 armed_preview: armed_remove_preview,
@@ -442,10 +481,10 @@ pub(crate) fn DeviceRosterCard(
                 }
                 div { class: verb_row_class(),
                     if busy_zone == Some(ZoneKind::Firmware) {
-                        if let Some(escape) = cancel {
+                        if let Some(cancel) = cancel.clone() {
                             ActionButton {
                                 key: "{\"cancel-firmware\"}",
-                                action: device_escape_action_for(escape, device, face),
+                                action: cancel.action,
                                 running: false,
                                 variant: ActionButtonVariant::Quiet,
                                 on_action,
@@ -453,84 +492,68 @@ pub(crate) fn DeviceRosterCard(
                         }
                     } else if card.activity.is_some() {
                         // Withdrawn at its height while other work runs.
-                    } else if let Some(reason) = firmware_blocked.as_deref() {
-                        if let Some(verb) = verb.as_ref() {
-                            ActionButton {
-                                key: "{\"firmware-blocked\"}",
-                                action: verb.blocked_action(device, reason),
-                                running: false,
-                                variant: ActionButtonVariant::Quiet,
-                                on_action,
-                            }
-                        }
-                        span { class: "tw:min-w-0 tw:flex-1" }
-                        if idle && linked && !offer_flash {
-                            // Its reason is the verb's, said once beside it.
-                            ActionButton {
-                                key: "{\"factory-reset-blocked\"}",
-                                action: blocked_erase_action(device, ""),
-                                running: false,
-                                variant: ActionButtonVariant::Quiet,
-                                on_action,
-                            }
-                        }
                     } else {
-                        match verb {
-                            // The blank board's face: the chip-filtered
-                            // board pick plus its Flash CTA, on one row.
-                            Some(FirmwareVerb::Flash) => rsx! {
-                                BoardPickPopover { device, chip: chip.clone(), on_action }
-                            },
-                            // Update (#500) on a board that is already
-                            // running (G1 2026-09-02: the only road to
-                            // newer firmware was Factory reset, which
-                            // "causes issues sometimes"), its board
-                            // resolved: one click, wearing core's label.
-                            // Safe on a live board: the Flash activity
-                            // parks a native-USB chip in its ROM
-                            // downloader first, and the merged image ends
-                            // before the lpfs partition, so the project
-                            // and the efuse identity survive.
-                            Some(FirmwareVerb::Update(_)) => rsx! {
-                                if let Some(action) = update_action.clone() {
-                                    ActionButton {
-                                        key: "{\"update-firmware\"}",
-                                        action,
-                                        running: false,
-                                        variant: ActionButtonVariant::Quiet,
-                                        on_action,
-                                    }
+                        // The blank board's face: the chip-filtered board
+                        // pick plus its Flash CTA, on one row — or, over a
+                        // link that cannot carry firmware, Flash drawn
+                        // disabled with the reason.
+                        if let Some(flash) = flash.clone() {
+                            if firmware_blocked {
+                                ActionButton {
+                                    key: "{\"firmware-blocked\"}",
+                                    action: flash.action,
+                                    running: false,
+                                    variant: ActionButtonVariant::Quiet,
+                                    on_action,
                                 }
-                            },
-                            // The same verb with the board unresolved:
-                            // the quiet chip is the board popover's
-                            // trigger, and picking flashes. The panel
-                            // floats in the top layer, so opening it
-                            // cannot change the card's height — which is
-                            // why the verb could come up out of the footer
-                            // at all.
-                            Some(FirmwareVerb::UpdatePick) => rsx! {
+                            } else {
+                                BoardPickPopover { offer: flash, chip: chip.clone(), on_action }
+                            }
+                        }
+                        // Update (#500) on a board that is already running
+                        // (G1 2026-09-02: the only road to newer firmware
+                        // was Factory reset, which "causes issues
+                        // sometimes"). Its board resolved, or its link
+                        // cannot carry firmware: one chip, core's words.
+                        // Safe on a live board: the Flash activity parks a
+                        // native-USB chip in its ROM downloader first, and
+                        // the merged image ends before the lpfs partition,
+                        // so the project and the efuse identity survive.
+                        // Its board unresolved: the quiet chip is the board
+                        // popover's trigger, and picking flashes. The panel
+                        // floats in the top layer, so opening it cannot
+                        // change the card's height.
+                        if let Some(update) = update.clone() {
+                            if update.params().is_empty() {
+                                ActionButton {
+                                    key: "{\"update-firmware\"}",
+                                    action: update.action,
+                                    running: false,
+                                    variant: ActionButtonVariant::Quiet,
+                                    on_action,
+                                }
+                            } else {
                                 BoardPickPopover {
-                                    device,
+                                    offer: update,
                                     chip: chip.clone(),
                                     mode: BoardPickMode::Verb,
                                     on_action,
                                 }
-                            },
-                            None => rsx! {},
+                            }
                         }
                         span { class: "tw:min-w-0 tw:flex-1" }
                         // The other firmware verb: wipe the flash back to a
                         // blank chip. It asks nothing, so it needs no picker.
-                        // Not on a board that already IS blank (G2 prep: the
-                        // pick trigger needs that row's width, and erasing a
-                        // blank flash does nothing).
-                        if idle && linked && !offer_flash {
+                        // Not offered on a board that already IS blank
+                        // (erasing a blank flash does nothing). Blocked, its
+                        // reason is the firmware verb's, said once beside it.
+                        if let Some(erase) = verb("erase") {
                             ActionButton {
                                 key: "{\"factory-reset\"}",
-                                action: DevicesOp::action_for(DeviceAction::Erase { device }),
+                                action: erase.action,
                                 running: false,
                                 variant: ActionButtonVariant::Quiet,
+                                reason_said_elsewhere: firmware_blocked,
                                 on_action,
                             }
                         }
@@ -603,10 +626,10 @@ pub(crate) fn DeviceRosterCard(
                 }
                 div { class: verb_row_class(),
                     if busy_zone == Some(ZoneKind::Device) {
-                        if let Some(escape) = cancel {
+                        if let Some(cancel) = cancel.clone() {
                             ActionButton {
                                 key: "{\"cancel-device\"}",
-                                action: device_escape_action_for(escape, device, face),
+                                action: cancel.action,
                                 running: false,
                                 variant: ActionButtonVariant::Quiet,
                                 on_action,
@@ -616,37 +639,34 @@ pub(crate) fn DeviceRosterCard(
                     // The one device verb that never asks a question. It
                     // pulses the chip's reset lines, which a Bluetooth link
                     // does not have — so over one it is drawn disabled.
-                    if idle && linked {
+                    // Core offers it busy or not (the escape from a stuck
+                    // open); the card withdraws it while an activity runs
+                    // (D9), as it does every verb that is not an escape.
+                    if let Some(reset) = verb("reset-board").filter(|_| idle) {
                         ActionButton {
                             key: "{\"reset-board\"}",
-                            action: reset_action(device, firmware_blocked.is_some()),
+                            action: reset.action,
                             running: false,
                             variant: ActionButtonVariant::Quiet,
                             on_action,
                         }
                     }
                     // Retry, Disconnect, Reconnect — the escapes that act on
-                    // the wire. Cancel rode its activity's zone; Forget is
-                    // held back for the right-hand end.
-                    for escape in card
-                        .escapes
-                        .iter()
-                        .copied()
-                        .filter(|escape| !matches!(escape, DeviceEscape::Cancel | DeviceEscape::Forget))
-                    {
+                    // the wire.
+                    for escape in wire_escapes {
                         ActionButton {
-                            key: "{escape:?}",
-                            action: device_escape_action_for(escape, device, face),
+                            key: "{escape.path}",
+                            action: escape.action,
                             running: false,
                             variant: ActionButtonVariant::Quiet,
                             on_action,
                         }
                     }
                     span { class: "tw:min-w-0 tw:flex-1" }
-                    if card.escapes.contains(&DeviceEscape::Forget) {
+                    if let Some(forget) = verb("forget") {
                         ActionButton {
                             key: "{\"forget\"}",
-                            action: device_escape_action_for(DeviceEscape::Forget, device, face),
+                            action: forget.action,
                             running: false,
                             variant: ActionButtonVariant::Quiet,
                             armed_preview,
@@ -676,7 +696,9 @@ pub(crate) fn DeviceRosterCard(
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn DeviceCardMenu(
-    device: DeviceId,
+    /// `devices/<board>/rename`, when the tree offers it.
+    #[props(default)]
+    rename: Option<UiOffer>,
     title: String,
     #[props(default)] link_counters: Option<lpa_studio_core::DeviceLinkCounters>,
     #[props(default = false)] initially_open: bool,
@@ -700,7 +722,9 @@ fn DeviceCardMenu(
             trigger_open_class: format!(
                 "{HEADER_MENU_TRIGGER_CLASS} tw:bg-white/10 tw:text-strong-foreground"
             ),
-            DeviceRenameSection { device, title, on_action }
+            if let Some(rename) = rename {
+                DeviceRenameSection { offer: rename, title, on_action }
+            }
             if let Some(counters) = link_counters {
                 DeviceLinkSection { counters }
             }
@@ -742,11 +766,12 @@ const LINK_VALUE_CLASS: &str = "tw:m-0 tw:font-mono tw:tabular-nums tw:text-stro
 const LINK_VALUE_NOTABLE_CLASS: &str =
     "tw:m-0 tw:font-mono tw:tabular-nums tw:text-status-warning-foreground";
 
-/// The "Rename" section: one form, on the project card's Rename precedent
-/// (a form in the menu, never a dialog). Prefilled with what the card says
-/// now, so a board wearing the derived "<board> · <Mon D>" is a few
-/// keystrokes from a name of its own. Submitting dispatches `SetName` — the
-/// user-stream write the model persists to the registry (the name is
+/// The "Rename" section: the device's `rename` offer, its one Text param
+/// drawn as one form, on the project card's Rename precedent (a form in the
+/// menu, never a dialog). Prefilled with what the card says now, so a board
+/// wearing the derived "<board> · <Mon D>" is a few keystrokes from a name
+/// of its own. Submitting presses the offer with the typed name — the
+/// user-stream `SetName` the model persists to the registry (the name is
 /// Studio's, never written to the board) — and closes the menu: a rename is
 /// a completed gesture.
 ///
@@ -755,7 +780,8 @@ const LINK_VALUE_NOTABLE_CLASS: &str =
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub(crate) fn DeviceRenameSection(
-    device: DeviceId,
+    /// `devices/<board>/rename`.
+    offer: UiOffer,
     /// What the device is called right now — the field's starting value.
     title: String,
     on_action: EventHandler<UiAction>,
@@ -769,11 +795,12 @@ pub(crate) fn DeviceRenameSection(
                 class: "tw:flex tw:gap-2",
                 onsubmit: move |event| {
                     event.prevent_default();
-                    let name = value.read().trim().to_string();
-                    if name.is_empty() {
+                    let args = OfferArgs::new().with(RENAME_NAME_PARAM, value.read().clone());
+                    // A blank name binds nothing: the field stays put.
+                    let Ok(action) = offer.press(&args) else {
                         return;
-                    }
-                    on_action.call(DevicesOp::action_for(DeviceAction::SetName { device, name }));
+                    };
+                    on_action.call(action);
                     if let Some(mut close) = close {
                         close.close();
                     }
@@ -797,7 +824,7 @@ pub(crate) fn DeviceRenameSection(
 /// A verb that rides the Device zone's 17px info line ("Unlock", when a
 /// device needs a password): text with a dotted underline, no chrome, so it fits
 /// the line's height and reads as something to press.
-const LINE_VERB_CLASS: &str = "tw:flex-none tw:cursor-pointer tw:appearance-none tw:border-0 tw:bg-transparent tw:p-0 tw:text-xs tw:font-semibold tw:leading-[17px] tw:text-strong-foreground tw:underline tw:decoration-dotted tw:underline-offset-2 tw:hover:decoration-solid ux-focus-ring";
+pub(super) const LINE_VERB_CLASS: &str = "tw:flex-none tw:cursor-pointer tw:appearance-none tw:border-0 tw:bg-transparent tw:p-0 tw:text-xs tw:font-semibold tw:leading-[17px] tw:text-strong-foreground tw:underline tw:decoration-dotted tw:underline-offset-2 tw:hover:decoration-solid ux-focus-ring";
 
 const HEADER_MENU_TRIGGER_CLASS: &str = "tw:grid tw:h-5 tw:w-5 tw:flex-none tw:cursor-pointer tw:appearance-none tw:place-items-center tw:rounded tw:border-0 tw:bg-transparent tw:p-0 tw:text-muted-foreground tw:transition-colors tw:hover:bg-white/10 tw:hover:text-strong-foreground";
 
@@ -841,7 +868,10 @@ pub(crate) fn PendingLinkCard(
     pending: PendingLinkView,
     on_action: EventHandler<UiAction>,
 ) -> Element {
-    let link = pending.link;
+    // The link's verbs (M3), under its board ref — usually
+    // `devices/new-<n>` until it says who it is.
+    let verbs = use_device_verbs(Some(pending.device))();
+    let verb = |name: &str| verb_named(&verbs, name);
     let status = UiStatus {
         label: "Identifying".to_string(),
         kind: lpa_studio_core::UiStatusKind::Working,
@@ -895,29 +925,32 @@ pub(crate) fn PendingLinkCard(
                         div { class: progress_slot_class(false) }
                     }
                     div { class: verb_row_class(),
-                        if let Some(reason) = pending.firmware_blocked.as_deref().filter(|_| pending.needs_firmware()) {
-                            // A Bluetooth link that settles on "needs
-                            // firmware" cannot carry it: Flash is DRAWN,
-                            // disabled, with the reason — as on the settled
-                            // card — never the live board pick.
-                            ActionButton {
-                                key: "{\"firmware-blocked\"}",
-                                action: FirmwareVerb::Flash.blocked_action(pending.device, reason),
-                                running: false,
-                                variant: ActionButtonVariant::Quiet,
-                                on_action,
-                            }
-                        } else if pending.needs_firmware() {
-                            // The same popover the device card's firmware
-                            // zone wears: a blank chip's only chip fact is
-                            // its ROM boot banner.
-                            BoardPickPopover {
-                                device: pending.device,
-                                chip: pending
-                                    .detected_chip
-                                    .clone()
-                                    .map(|chip| (chip, ChipSource::BootBanner)),
-                                on_action,
+                        // Offered once the link settled on a needs-firmware
+                        // verdict. Over a Bluetooth link it cannot carry
+                        // firmware: Flash is DRAWN, disabled, with the
+                        // reason — as on the settled card — never the live
+                        // board pick.
+                        if let Some(flash) = verb("flash") {
+                            if pending.firmware_blocked.is_some() {
+                                ActionButton {
+                                    key: "{\"firmware-blocked\"}",
+                                    action: flash.action,
+                                    running: false,
+                                    variant: ActionButtonVariant::Quiet,
+                                    on_action,
+                                }
+                            } else {
+                                // The same popover the device card's firmware
+                                // zone wears: a blank chip's only chip fact
+                                // is its ROM boot banner.
+                                BoardPickPopover {
+                                    offer: flash,
+                                    chip: pending
+                                        .detected_chip
+                                        .clone()
+                                        .map(|chip| (chip, ChipSource::BootBanner)),
+                                    on_action,
+                                }
                             }
                         }
                     }
@@ -937,30 +970,33 @@ pub(crate) fn PendingLinkCard(
                     // output (G1 2026-08-31, the erased C6). A Bluetooth
                     // link has no reset lines, so there it is drawn
                     // disabled with the reason, as on the settled card.
-                    ActionButton {
-                        key: "{\"reset-board\"}",
-                        action: pending_reset_action(&pending),
-                        running: false,
-                        variant: ActionButtonVariant::Quiet,
-                        on_action,
-                    }
-                    if pending.can_adopt && !pending.needs_firmware() {
-                        // A blank chip may never identify itself, so a user
-                        // gesture must be able to keep it. On a
-                        // needs-firmware verdict the Flash verb IS that
-                        // gesture; here the plain adopt is live.
+                    if let Some(reset) = verb("reset-board") {
                         ActionButton {
-                            action: DevicesOp::action_for(DeviceAction::AdoptLink { link }),
+                            key: "{\"reset-board\"}",
+                            action: reset.action,
+                            running: false,
+                            variant: ActionButtonVariant::Quiet,
+                            on_action,
+                        }
+                    }
+                    // A blank chip may never identify itself, so a user
+                    // gesture must be able to keep it. On a needs-firmware
+                    // verdict the Flash verb IS that gesture, and core
+                    // offers no separate adopt.
+                    if let Some(adopt) = verb("adopt") {
+                        ActionButton {
+                            key: "{\"adopt\"}",
+                            action: adopt.action,
                             running: false,
                             variant: ActionButtonVariant::Quiet,
                             on_action,
                         }
                     }
                     span { class: "tw:min-w-0 tw:flex-1" }
-                    for escape in pending.escapes.iter().copied() {
+                    if let Some(dismiss) = verb("dismiss") {
                         ActionButton {
-                            key: "{escape:?}",
-                            action: pending_escape_action(escape, link),
+                            key: "{\"dismiss\"}",
+                            action: dismiss.action,
                             running: false,
                             variant: ActionButtonVariant::Quiet,
                             on_action,
@@ -979,6 +1015,14 @@ pub(crate) fn PendingLinkCard(
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub(super) fn RowCta(action: UiAction, on_action: EventHandler<UiAction>) -> Element {
+    // A Lasting verb (a flash over firmware, a push over a project the
+    // library has no copy of) wears its level's look and arms on its own
+    // button, as every Lasting verb does (D7): the quiet tinted chip.
+    if action.meta().consequence.arms() {
+        return rsx! {
+            ActionButton { action, running: false, variant: ActionButtonVariant::Quiet, on_action }
+        };
+    }
     let meta = action.meta().clone();
     let dispatch = action.clone();
 
@@ -1017,24 +1061,6 @@ enum ZoneKind {
     Project,
     Firmware,
     Device,
-}
-
-/// Reset, as both cards draw it: the one device verb that never asks a
-/// question, drawn DISABLED with [`RESET_NEEDS_USB`] when the link cannot
-/// carry it — a Bluetooth link has no reset lines, whether it is still
-/// identifying or long settled.
-fn reset_action(device: DeviceId, over_bluetooth: bool) -> UiAction {
-    let action = DevicesOp::action_for(DeviceAction::ResetBoard { device });
-    if over_bluetooth {
-        action.disabled(RESET_NEEDS_USB)
-    } else {
-        action
-    }
-}
-
-/// The pending card's Reset (see [`reset_action`]).
-fn pending_reset_action(pending: &PendingLinkView) -> UiAction {
-    reset_action(pending.device, pending.is_over_bluetooth())
 }
 
 /// Which zone an activity narrates in — the rule that decides which bar
@@ -1505,6 +1531,9 @@ fn runtime_band_class() -> &'static str {
 mod tests {
     use super::*;
     use lpa_studio_core::{DeviceId, UiStatusKind};
+    // Reset over Bluetooth is drawn disabled in every card state: core's
+    // `device_offers` and `pending_link_offers` tests own that now (the card
+    // draws the offer it is given).
 
     /// The fault line must wear the tone its own status chip wears, and it
     /// must be a SANCTIONED tone: the accent reckoning removed hue accents,
@@ -1525,53 +1554,6 @@ mod tests {
         // line is for a failed OUTCOME, and this board is running.
         assert_ne!(fault_line_class(), info_line_class());
         assert!(!fault_line_class().contains("status-error"));
-    }
-
-    /// A Bluetooth link has no reset lines in ANY card state: the pending
-    /// card (still identifying) and the settled card both draw Reset
-    /// disabled with the same reason, while a USB link keeps it live.
-    #[test]
-    fn reset_is_disabled_over_bluetooth_in_every_card_state() {
-        let usb_pending = PendingLinkView {
-            link: lpa_studio_core::DeviceLinkId(7),
-            device: DeviceId(107),
-            title: "New device".to_string(),
-            state_label: "New device found — identifying…".to_string(),
-            detail: None,
-            can_adopt: true,
-            firmware_face: lpa_studio_core::DeviceFirmwareFace::Unknown,
-            detected_chip: None,
-            mac: None,
-            firmware_blocked: None,
-            escapes: vec![DeviceEscape::Forget],
-        };
-        let ble_pending = PendingLinkView {
-            firmware_blocked: Some(lpa_studio_core::FIRMWARE_NEEDS_USB.to_string()),
-            ..usb_pending.clone()
-        };
-        for action in [
-            pending_reset_action(&ble_pending),
-            reset_action(DeviceId(1), true),
-        ] {
-            assert_eq!(
-                action.meta().enablement,
-                lpa_studio_core::ActionEnablement::Disabled {
-                    reason: RESET_NEEDS_USB.to_string()
-                }
-            );
-        }
-        assert!(
-            pending_reset_action(&usb_pending)
-                .meta()
-                .enablement
-                .is_enabled()
-        );
-        assert!(
-            reset_action(DeviceId(1), false)
-                .meta()
-                .enablement
-                .is_enabled()
-        );
     }
 
     /// Both readings of the project line occupy the SAME fixed row: a board

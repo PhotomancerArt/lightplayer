@@ -1190,6 +1190,10 @@ pub fn App() -> Element {
     // link to a project this library does NOT have never gets here: the
     // route resolution above lands it on Home with a pending intent.
     let current_view = view.read().clone();
+    // The offer tree, for every surface the app draws — the chrome (the
+    // session panel's Rename), the Unlock page's Connect, and everything
+    // under the shell, which provides the same tree again for its stories.
+    crate::core::use_provide_offers(&current_view.offers);
     // The ⌘K command palette's open state: web chrome, like a popover's,
     // held here so the chrome's hint and the palette share it.
     let mut palette_open = use_signal(|| false);
