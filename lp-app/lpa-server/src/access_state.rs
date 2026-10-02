@@ -52,8 +52,11 @@ pub struct AccessState {
     entropy: Option<EntropySource>,
     /// Secure links: the tier each candidate of a link's last key lookup
     /// grants (`None` for the anonymous key), until its handshake says which
-    /// one matched.
-    key_lookups: HashMap<LinkId, Vec<Option<Tier>>>,
+    /// one matched. A short list, not a map: handshakes in flight at once
+    /// are few, and a second hash map's code would sit in every device image
+    /// (its remove is inlined into `close_link`) whether or not it runs a
+    /// secure link.
+    key_lookups: Vec<(LinkId, Vec<Option<Tier>>)>,
 }
 
 impl AccessState {
@@ -66,7 +69,7 @@ impl AccessState {
             clock_ms: 0,
             device_open: Cell::new(None),
             entropy: None,
-            key_lookups: HashMap::new(),
+            key_lookups: Vec::new(),
         }
     }
 
@@ -95,7 +98,7 @@ impl AccessState {
     /// it held the device's one login. The backoff stays.
     pub fn close_link(&mut self, link: LinkId) {
         self.sessions.remove(&link);
-        self.key_lookups.remove(&link);
+        self.key_lookups.retain(|(id, _)| *id != link);
         if self.login_owner == Some(link) {
             self.login.cancel();
             self.login_owner = None;
@@ -144,7 +147,8 @@ impl AccessState {
     }
 
     /// `LoginBegin` on `link`: a challenge over every installed secret, or
-    /// the reason there is none.
+    /// the reason there is none. On a keyed link, the offers only
+    /// (`offers_for_keyed_link`).
     ///
     /// Never inlined, like the other login paths: they are rare, and their
     /// temporaries (the installed secrets, the challenge) must not deepen
@@ -157,6 +161,9 @@ impl AccessState {
         fs: &dyn LpFs,
         loaded_project_paths: impl IntoIterator<Item = &'a str>,
     ) -> ServerMsgBody {
+        if self.is_keyed(link) {
+            return self.offers_for_keyed_link(fs, loaded_project_paths);
+        }
         let Some(entropy) = self.entropy else {
             return ServerMsgBody::Error {
                 error: String::from("login is unavailable: this server has no entropy source"),
@@ -183,9 +190,13 @@ impl AccessState {
     /// `LoginAnswer` on `link`: the verdict, and on success the grant.
     ///
     /// Only the link that began the login may answer it; an answer from any
-    /// other link is refused and leaves the challenge standing.
+    /// other link is refused and leaves the challenge standing. A keyed link
+    /// never may (`refuse_keyed_login_answer`).
     #[inline(never)]
     pub fn answer_login(&mut self, link: LinkId, macs: &[LoginMac]) -> ServerMsgBody {
+        if self.is_keyed(link) {
+            return Self::refuse_keyed_login_answer();
+        }
         if self.login_owner != Some(link) {
             return ServerMsgBody::LoginResult(LoginOutcome::Refused {
                 retry_after_ms: self.login.rate_limit().retry_after_ms(self.clock_ms),
@@ -206,8 +217,7 @@ impl AccessState {
     /// then handshakes with), and a fresh nonce no one can answer: nothing
     /// registers the device's one login and no slot is taken. A secure link
     /// logs in by handshake only.
-    #[inline(never)]
-    pub fn offers_for_keyed_link<'a>(
+    fn offers_for_keyed_link<'a>(
         &self,
         fs: &dyn LpFs,
         loaded_project_paths: impl IntoIterator<Item = &'a str>,
@@ -236,8 +246,7 @@ impl AccessState {
     /// refused, no wait), which on a keyed link is always the case:
     /// `LoginBegin` there registers none. No new wire shape, and the
     /// `NotPermitted` reply keeps meaning "your tier does not cover this".
-    #[must_use]
-    pub fn refuse_keyed_login_answer() -> ServerMsgBody {
+    fn refuse_keyed_login_answer() -> ServerMsgBody {
         ServerMsgBody::LoginResult(LoginOutcome::Refused { retry_after_ms: 0 })
     }
 
@@ -263,25 +272,25 @@ impl AccessState {
                 retry_after_ms: u32::try_from(backoff).unwrap_or(u32::MAX),
             };
         }
+        self.take_key_lookup(link);
         if *salt == [0; SALT_BYTES] {
-            self.key_lookups.insert(link, alloc::vec![None]);
+            self.key_lookups.push((link, alloc::vec![None]));
             return KeyAnswer::Keys(alloc::vec![[0; 32]]);
         }
         let installed = access_store::installed_secrets(fs, loaded_project_paths);
         let candidates = key_candidates(&installed, salt);
         if candidates.is_empty() {
-            self.key_lookups.remove(&link);
             return KeyAnswer::Unknown;
         }
         self.key_lookups
-            .insert(link, candidates.iter().map(|c| Some(c.tier)).collect());
+            .push((link, candidates.iter().map(|c| Some(c.tier)).collect()));
         KeyAnswer::Keys(candidates.iter().map(|c| c.psk).collect())
     }
 
     /// A secure link's handshake matched no candidate of a known salt: a
     /// failed guess, charged to the device's backoff like a wrong login.
     pub fn key_wrong(&mut self, link: LinkId) {
-        self.key_lookups.remove(&link);
+        self.take_key_lookup(link);
         let now = self.clock_ms;
         self.login.rate_limit_mut().record_failure(now);
     }
@@ -291,8 +300,7 @@ impl AccessState {
     /// does; the anonymous key grants nothing and clears nothing.
     pub fn key_authenticated(&mut self, link: LinkId, candidate: u8) {
         let tier = self
-            .key_lookups
-            .remove(&link)
+            .take_key_lookup(link)
             .and_then(|tiers| tiers.get(usize::from(candidate)).copied().flatten());
         let session = self
             .sessions
@@ -308,6 +316,21 @@ impl AccessState {
     #[must_use]
     pub fn now_ms(&self) -> u64 {
         self.clock_ms
+    }
+
+    /// Whether `link` is a keyed (secure network) link, as its session was
+    /// seen (`see`, or its handshake's grant): read from the session, so the
+    /// request loop passes the login paths a link id as it always has.
+    fn is_keyed(&self, link: LinkId) -> bool {
+        self.sessions
+            .get(&link)
+            .is_some_and(|session| session.trust == LinkTrust::Keyed)
+    }
+
+    /// The candidate tiers of `link`'s pending key lookup, removed.
+    fn take_key_lookup(&mut self, link: LinkId) -> Option<Vec<Option<Tier>>> {
+        let at = self.key_lookups.iter().position(|(id, _)| *id == link)?;
+        Some(self.key_lookups.swap_remove(at).1)
     }
 
     fn device_open(&self, fs: &dyn LpFs) -> bool {

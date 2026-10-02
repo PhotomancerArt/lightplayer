@@ -18,7 +18,7 @@ use lpc_model::{LpPath, LpPathBuf};
 use lpc_shared::output::OutputProvider;
 use lpc_shared::time::TimeProvider;
 use lpc_shared::transport::{
-    Incoming, Link, LinkId, LinkTrust, ProjectReadStreamSink, SecureLinkEvent, ServerTransport,
+    Incoming, Link, LinkId, ProjectReadStreamSink, SecureLinkEvent, ServerTransport,
     transport_error_is_signalable,
 };
 use lpc_wire::{ClientRequest, WireServerMessage};
@@ -859,15 +859,11 @@ impl LpServer {
                         .into_iter()
                         .map(|loaded| loaded.path)
                         .collect();
-                    let loaded = loaded.iter().map(|path| path.as_str());
-                    let body = match link.trust {
-                        LinkTrust::Keyed => {
-                            self.access.offers_for_keyed_link(&*self.base_fs, loaded)
-                        }
-                        LinkTrust::Trusted | LinkTrust::Untrusted => {
-                            self.access.begin_login(link.id, &*self.base_fs, loaded)
-                        }
-                    };
+                    let body = self.access.begin_login(
+                        link.id,
+                        &*self.base_fs,
+                        loaded.iter().map(|path| path.as_str()),
+                    );
                     transport
                         .send(link.id, WireServerMessage::new(msg_id, body))
                         .await
@@ -875,12 +871,7 @@ impl LpServer {
                     response_count += 1;
                 }
                 ClientRequest::LoginAnswer { macs } => {
-                    let body = match link.trust {
-                        LinkTrust::Keyed => AccessState::refuse_keyed_login_answer(),
-                        LinkTrust::Trusted | LinkTrust::Untrusted => {
-                            self.access.answer_login(link.id, &macs)
-                        }
-                    };
+                    let body = self.access.answer_login(link.id, &macs);
                     transport
                         .send(link.id, WireServerMessage::new(msg_id, body))
                         .await
