@@ -51,6 +51,8 @@ mod link_counters;
 mod link_event;
 pub mod log_ring;
 mod rtt_estimator;
+#[cfg(feature = "secure")]
+pub mod secure_channel;
 mod send_queue;
 mod seq_num;
 pub mod sniffer;

@@ -12,7 +12,7 @@ sizes() {
     rust-size -A "$1" | awk '$1==".text"{t=$2} $1==".rodata"{r=$2} END{print t+0, r+0}'
 }
 
-variants=(base noarq sw gbn sr sr,crc16)
+variants=(base noarq sw gbn sr sr,crc16 crypto)
 for v in "${variants[@]}"; do
     cargo build -q --release --target "$target" --features "$v" --target-dir "$out"
     cp "$out/$target/release/lp-link-size-probe" "$out/probe-$v"

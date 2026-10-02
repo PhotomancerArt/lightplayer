@@ -22,12 +22,38 @@ sim = ["std"]
 # (`lab::LabBoard` in the firmware, `lab::LabHost` in lp-cli, the emulator
 # test and the browser pages). no_std + alloc.
 lab = []
+# The secure channel (`secure_channel`): Noise_NNpsk0_25519_ChaChaPoly_SHA256
+# merged into the SYN handshake, then every frame sealed. no_std, no RNG (the
+# edge injects entropy). Off on every product link until the Wi-Fi milestones.
+secure = [
+    "dep:x25519-dalek",
+    "dep:curve25519-dalek",
+    "dep:chacha20poly1305",
+    "dep:sha2",
+    "dep:zeroize",
+]
 
 [dependencies]
 log = { workspace = true, optional = true }
+# Curve and AEAD arithmetic come from RustCrypto (constant-time field math is
+# where "tiny custom" stops); HMAC, HKDF and the Noise state machine are ours.
+x25519-dalek = { version = "2", default-features = false, features = ["zeroize"], optional = true }
+# Named only to keep `precomputed-tables` OFF (it would cost ~30 KB of rv32
+# flash): x25519-dalek's own default turns it on.
+curve25519-dalek = { version = "4", default-features = false, features = ["zeroize"], optional = true }
+chacha20poly1305 = { version = "0.10", default-features = false, optional = true }
+sha2 = { workspace = true, optional = true }
+zeroize = { version = "1", default-features = false, optional = true }
 
+# `snow`, `hmac` and `hkdf` are ORACLES, never dependencies: the Noise
+# handshake, HMAC and HKDF are written from the Noise spec (rev 34) and RFC
+# 2104 / RFC 5869, and these check them in tests. snow is read as behaviour,
+# never copied.
 [dev-dependencies]
 proptest = { version = "1.11", default-features = false, features = ["std"] }
+snow = { version = "0.10", default-features = false, features = ["default-resolver", "use-chacha20poly1305", "use-sha2", "use-curve25519", "use-getrandom", "risky-raw-split"] }
+hmac = "0.12"
+hkdf = "0.12"
 
 [[bin]]
 name = "link-bench"
@@ -45,3 +71,7 @@ required-features = ["sim"]
 [[test]]
 name = "lab_over_sim"
 required-features = ["sim", "lab"]
+
+[[test]]
+name = "secure_oracle_snow"
+required-features = ["secure"]

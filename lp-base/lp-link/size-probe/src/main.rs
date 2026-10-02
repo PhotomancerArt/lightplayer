@@ -46,7 +46,38 @@ pub extern "C" fn _start() -> ! {
     exercise::<lp_link::GoBackN<127>>();
     #[cfg(feature = "sr")]
     exercise::<lp_link::SelectiveRepeat>();
+    #[cfg(feature = "crypto")]
+    exercise_crypto();
     loop {}
+}
+
+/// Both NNpsk0 roles and one seal/open, on inputs the optimizer cannot see.
+#[cfg(feature = "crypto")]
+fn exercise_crypto() {
+    use lp_link::secure_channel::{
+        Initiator, KeyId, MSG2_LEN, Psk, Responder, cipher_state::CipherKey, prologue,
+    };
+    let bytes = |at: usize| -> [u8; 32] { core::array::from_fn(|i| input(at + i)) };
+    let key_id = KeyId(core::array::from_fn(|i| input(100 + i)));
+    let p = prologue(&key_id, u32::from_le_bytes([input(0), input(1), input(2), input(3)]));
+    let psk = Psk::new(bytes(150));
+    let init = Initiator::new(&p, &psk, bytes(200));
+    sink(init.msg1());
+    if let Ok(ready) = Responder::new(&p).read_msg1(init.msg1(), &psk) {
+        let mut msg2 = [0u8; MSG2_LEN];
+        if let Ok(keys) = ready.write_msg2(bytes(250), &[input(4); 4], &mut msg2) {
+            sink(&keys.send);
+        }
+        let mut payload = [0u8; 4];
+        if let Ok(keys) = init.read_msg2(&msg2, &mut payload) {
+            let key = CipherKey::new(keys.send);
+            // SAFETY: single-threaded bare-metal probe.
+            let buf = unsafe { &mut (&mut *addr_of_mut!(INPUT))[300..300 + input(5) as usize % 200] };
+            let tag = key.seal(input(6) as u64, &[input(7); 4], buf);
+            sink(&tag);
+            sink(&[key.open(input(8) as u64, &[input(9); 4], buf, &tag).is_ok() as u8]);
+        }
+    }
 }
 
 /// The two checksums as standalone symbols, for reading their inner loops
@@ -87,10 +118,10 @@ static LINK_STRUCT_SIZE_SR: [u8; core::mem::size_of::<lp_link::Link<lp_link::Sel
 static LINK_STRUCT_SIZE_GBN: [u8; core::mem::size_of::<lp_link::Link<lp_link::GoBackN<127>>>()] =
     [0; core::mem::size_of::<lp_link::Link<lp_link::GoBackN<127>>>()];
 
-#[cfg(not(feature = "base"))]
+#[cfg(any(feature = "noarq", feature = "sw", feature = "gbn", feature = "sr"))]
 static mut LOG_RING: lp_link::LogRing<1024> = lp_link::LogRing::new();
 
-#[cfg(not(feature = "base"))]
+#[cfg(any(feature = "noarq", feature = "sw", feature = "gbn", feature = "sr"))]
 fn exercise<A: lp_link::Arq>() {
     use lp_link::{CH_LOG, CrcKind, Framing, LinkConfig, LinkEvent};
     let mut cfg = LinkConfig::usb();

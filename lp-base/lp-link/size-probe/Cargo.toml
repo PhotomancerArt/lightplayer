@@ -23,6 +23,9 @@ sr = []
 crc16 = []
 # Export the checksum functions as symbols, for reading their inner loops.
 crcfns = ["base"]
+# The secure channel's crypto alone (both handshake roles, one seal and one
+# open), over the baseline: what `secure_channel` costs before the link.
+crypto = ["lp-link/secure"]
 
 [dependencies]
 lp-link = { path = ".." }

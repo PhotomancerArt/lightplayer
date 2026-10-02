@@ -2683,6 +2683,9 @@ test-rust-core:
     # lp-link's simulator and delivery property need its `sim` feature; the
     # comms lab's halves over the simulator need `lab` too.
     cargo test -p lp-link --features sim,lab
+    # ...and again with the secure channel: the snow oracle, the RFC vectors,
+    # and the simulator, fuzzer and allocation tests' secure cases.
+    cargo test -p lp-link --features sim,lab,secure
 
 # lp-link (the link-layer prototype, plan lp2025/2026-09-26-1720-reliable-device-link):
 # the delivery property at soak depth, 5,000 fault schedules per ARQ variant
@@ -2709,11 +2712,21 @@ link-size:
 # lp-link builds for the board (riscv32, no_std) and the page (wasm32) with
 # the features those builds turn on, and lints clean with every feature on
 # (`clippy-host` sees only its default features, so the simulator, the lab and
-# the tests behind them were unlinted). Part of `check-lint`.
+# the tests behind them were unlinted). Part of `check-lint`. The `secure`
+# lines prove the secure channel builds no_std for both, and the last line
+# that no RNG crate (`getrandom`) reaches either graph: entropy is injected.
 check-lp-link-targets: install-rv32-target install-wasm32-target
     cargo check -p lp-link --target {{ rv32_target }} --features log,lab
     cargo check -p lp-link --target {{ wasm32_target }} --features log,lab
+    cargo check -p lp-link --target {{ rv32_target }} --features log,lab,secure
+    cargo check -p lp-link --target {{ wasm32_target }} --features log,lab,secure
     cargo clippy -p lp-link --features sim,lab,log --all-targets -- --no-deps -D warnings
+    cargo clippy -p lp-link --features sim,lab,log,secure --all-targets -- --no-deps -D warnings
+    for t in {{ rv32_target }} {{ wasm32_target }}; do \
+        if cargo tree -p lp-link --features log,lab,secure -e normal,features --target $t | grep -E 'getrandom|precomputed-tables'; then \
+            echo "lp-link/secure pulls an RNG or curve25519's precomputed tables on $t" >&2; exit 1; \
+        fi; \
+    done
 
 # The comms lab on the emulated C6 (plan reliable-device-link, M3): lp-link in
 # the `test_comms_lab` image against `lp-cli link lab`'s host half, with the
