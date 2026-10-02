@@ -5,8 +5,6 @@
 //! chunks. Only that last part is a chip fact, so it arrives as a hook rather
 //! than a dependency — see [`ChunkedWriter::new`].
 
-use alloc::format;
-use alloc::string::String;
 use core::sync::atomic::{AtomicBool, Ordering::Relaxed};
 use embassy_time::{Duration, Instant};
 use embedded_hal_async::delay::DelayNs;
@@ -98,6 +96,72 @@ impl WritePolicy {
     };
 }
 
+/// Capacity for [`IoErrorText`]: generous for a transport error's one-line
+/// `Debug` (`Overrun`, `FramingError`, …), small enough to sit on the stack
+/// through an interrupt-context write.
+const IO_ERROR_TEXT_CAPACITY: usize = 48;
+
+/// A write error's `Debug` text, captured on the stack rather than the heap.
+///
+/// [`ChunkedWriter::write_chunks`] runs on an interrupt executor on some
+/// chips (the classic's swi2 io task), where a heap allocation is forbidden —
+/// this used to be built with `alloc::format!` on every write error, which
+/// allocated on exactly that executor. See the module docs on
+/// [`ChunkedWriter::new`]'s `delay` seam and
+/// `docs/adr/2026-08-25-classic-uart-io-task-executor-isolation.md`. This
+/// type holds the same one-line detail in a `Copy` fixed-capacity buffer
+/// instead; a `Debug` longer than [`IO_ERROR_TEXT_CAPACITY`] is truncated,
+/// never allocated or panicked on.
+#[derive(Debug, Clone, Copy)]
+pub struct IoErrorText {
+    bytes: [u8; IO_ERROR_TEXT_CAPACITY],
+    len: usize,
+}
+
+impl IoErrorText {
+    /// Render `error`'s `Debug` form into a fixed buffer. `core::fmt`'s
+    /// machinery writes straight into [`IoErrorText`]'s own
+    /// [`core::fmt::Write`] impl below, so nothing is heap-allocated along
+    /// the way.
+    fn from_debug(error: &dyn core::fmt::Debug) -> Self {
+        let mut this = Self {
+            bytes: [0; IO_ERROR_TEXT_CAPACITY],
+            len: 0,
+        };
+        let _ = core::fmt::Write::write_fmt(&mut this, format_args!("{error:?}"));
+        this
+    }
+
+    /// The captured text. `core::fmt` only ever writes valid UTF-8, except
+    /// when this buffer's capacity cuts a write off mid-codepoint; backing
+    /// off to the nearest earlier boundary handles that without panicking.
+    pub fn as_str(&self) -> &str {
+        let mut end = self.len;
+        while end > 0 && core::str::from_utf8(&self.bytes[..end]).is_err() {
+            end -= 1;
+        }
+        // SAFETY: `end` was walked back to the nearest valid UTF-8 boundary
+        // not past `self.len`, which the loop above checks directly.
+        unsafe { core::str::from_utf8_unchecked(&self.bytes[..end]) }
+    }
+}
+
+impl core::fmt::Write for IoErrorText {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        let remaining = IO_ERROR_TEXT_CAPACITY - self.len;
+        let take = remaining.min(s.len());
+        self.bytes[self.len..self.len + take].copy_from_slice(&s.as_bytes()[..take]);
+        self.len += take;
+        Ok(())
+    }
+}
+
+impl core::fmt::Display for IoErrorText {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// Where and why a chunked write stopped, for callers that want more than
 /// [`ChunkedWriter::write_all`]'s bare bool.
 ///
@@ -118,7 +182,7 @@ pub struct WriteFailure {
     /// Time since the write began.
     pub elapsed: Duration,
     /// Debug form of the transport error, or `None` for a timeout.
-    pub io_error: Option<String>,
+    pub io_error: Option<IoErrorText>,
 }
 
 impl core::fmt::Display for WriteFailure {
@@ -271,7 +335,7 @@ impl<'a, W: Write, F: FnMut(), D: DelayNs> ChunkedWriter<'a, W, F, D> {
             let io_error =
                 match select(self.delay.delay_ms(timeout_ms), self.tx.write_all(chunk)).await {
                     Either::First(_) => None,
-                    Either::Second(Err(error)) => Some(format!("{error:?}")),
+                    Either::Second(Err(error)) => Some(IoErrorText::from_debug(&error)),
                     Either::Second(Ok(())) => {
                         offset = chunk_end;
                         chunk_index += 1;
@@ -291,11 +355,79 @@ impl<'a, W: Write, F: FnMut(), D: DelayNs> ChunkedWriter<'a, W, F, D> {
     }
 }
 
-#[cfg(all(test, feature = "server"))]
+#[cfg(test)]
 mod tests {
     use super::*;
 
+    /// A `Write` that fails every call, so the error path below runs with no
+    /// real link. `embedded_io_async::ErrorKind` already implements the
+    /// `embedded_io` `Error` trait, so no bespoke error type is needed.
+    struct FailingWrite;
+
+    impl embedded_io_async::ErrorType for FailingWrite {
+        type Error = embedded_io_async::ErrorKind;
+    }
+
+    impl embedded_io_async::Write for FailingWrite {
+        async fn write(&mut self, _buf: &[u8]) -> Result<usize, Self::Error> {
+            Err(embedded_io_async::ErrorKind::Other)
+        }
+    }
+
+    /// A delay that never completes. [`FailingWrite::write`] above always
+    /// resolves on its first poll, so `select` in `write_chunks` never needs
+    /// this side to finish — it exists only to satisfy `DelayNs`.
+    struct NeverDelay;
+
+    impl embedded_hal_async::delay::DelayNs for NeverDelay {
+        async fn delay_ns(&mut self, _ns: u32) {
+            core::future::pending::<()>().await
+        }
+    }
+
+    /// Ticket `2026-09-29-swi2-chunked-writer-allocates-on-error`: a write
+    /// error's detail still reaches [`WriteFailure`] once [`format!`] is
+    /// gone from the path — this is the behavior the removed `alloc::format!`
+    /// call used to provide.
+    #[test]
+    fn write_error_detail_is_captured_without_format() {
+        let mut tx = FailingWrite;
+        let mut writer = ChunkedWriter::new(&mut tx, WritePolicy::UART_921600, || {}, NeverDelay);
+        let failure = embassy_futures::block_on(writer.try_write_link_bytes(b"hello"))
+            .expect_err("FailingWrite always errors");
+        let io_error = failure.io_error.expect("io error path");
+        let text = io_error.as_str();
+        assert!(
+            text.contains("Other"),
+            "expected the error kind's Debug text, got {text:?}"
+        );
+    }
+
+    /// Ticket `2026-09-29-swi2-chunked-writer-allocates-on-error`'s "done
+    /// when": the error path builds a [`WriteFailure`] with no allocation.
+    /// `write_chunks` runs on the classic's swi2 interrupt executor via
+    /// [`ChunkedWriter::try_write_link_bytes`]
+    /// (`docs/adr/2026-08-25-classic-uart-io-task-executor-isolation.md`),
+    /// where a heap allocation is forbidden — so this file's *production*
+    /// code (everything before this test module) must never call the
+    /// allocating `format!`/`String` machinery. Sliced at the `#[cfg(test)]`
+    /// marker so this check of the code above it doesn't trip on its own
+    /// source below the marker.
+    #[test]
+    fn production_code_has_no_heap_allocation_on_the_error_path() {
+        let source = include_str!("chunked_write.rs");
+        let production = source.split_once("#[cfg(test)]").map_or(source, |(before, _)| before);
+        for needle in ["format!(", "alloc::string::String", "String::", "Option<String>"] {
+            assert!(
+                !production.contains(needle),
+                "chunked_write.rs's production code must not contain {needle:?} — \
+                 it runs on an interrupt executor with no heap (see this test's docs)"
+            );
+        }
+    }
+
     /// The board's copy of the marker is the one the host side proves.
+    #[cfg(feature = "server")]
     #[test]
     fn the_resync_marker_is_the_wires() {
         assert_eq!(RESYNC_SEQUENCE, lpc_wire::RESYNC_SEQUENCE);
