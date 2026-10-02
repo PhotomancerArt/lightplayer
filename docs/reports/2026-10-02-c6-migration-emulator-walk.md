@@ -69,6 +69,23 @@ scenario under `target/walk-migration-emu/<scenario>/`.
 | W11 | preflight for an old-table image onto a migrated chip | **pass** | `emu_layout_migration.rs`: exit 3, chip unchanged |
 | W12 | `--tab` (`?emu=tab`) | **NEVER RUN** | not attempted: the tab backing's chip lives in the page, and seeding a fixture chip into it was not built |
 
+**Re-walked after main's merge** (`6ee94d107`) and the move of the card's
+layout verbs into the offer tree (`devices/<id>/continue-update`,
+`cancel-update`, `download-backup`, `restore-files`, `finish-update`, as
+main's core action-fields ratchet requires): W1, W3, W7a, W7b and W9
+**pass** again on that head's release bundle and freshly packaged firmware
+(3,031,696 B). The first W1 of that run failed one check, the hello's `fs`,
+with every file moved: the walk scraped the hello from the console's RAW
+lp-link bytes, and a frame boundary inside the value
+(`"fs":"\x0cmounted<crc>j(…`) left printable header bytes glued to it. The
+walk now reads a framed value as letters that must contain the state in
+order. A harness bug, not the board's; the earlier passes were frame
+boundaries that happened to fall elsewhere.
+
+What the card says while it writes: its progress label reads "Flashing
+firmware…" for the whole write, the filesystem included; "Moving files"
+and `Writing at 0x35…` appear only in its terminal lines.
+
 `walk-no-board` (and its `--tab`) on the new layout: **NEVER RUN** — it needs
 a dev server on the worktree port, and this session could not run one
 (no background processes); `walk-esp32c6-emu` (the render walk) **passed** on

@@ -290,6 +290,30 @@ function boardConsole(door) {
   }
 }
 
+/// Every `"<key>":"<value>"` the board said, value as written on the
+/// console. The console holds the link's raw frames, so a frame boundary
+/// can fall INSIDE a value: its CRC and the next header ride between the
+/// letters (`"fs":"\x0cmounted<crc>j(…"`), and some of those bytes are
+/// printable. So a value is everything up to the next quote, read by the
+/// callers below as letters that must CONTAIN what they look for, in order.
+function framedValues(said, key) {
+  return [...said.matchAll(new RegExp(`"${key}":"([^"]{0,64})"`, "g"))].map((m) => m[1]);
+}
+
+/// The hello's filesystem state in a framed value: the one known state
+/// whose letters it holds in order (the longest, should two fit).
+function fsState(value) {
+  const letters = value.replace(/[^a-z_]/g, "");
+  return ["legacy_held", "formatted", "mounted", "memory"].find((state) => subsequence(state, letters));
+}
+
+/// Whether `needle`'s characters appear in `hay` in order.
+function subsequence(needle, hay) {
+  let at = 0;
+  for (const char of hay) if (char === needle[at]) at += 1;
+  return at === needle.length;
+}
+
 /// The fixture's files against the chip's, by SHA-256.
 function compareFiles(expected, actual) {
   const want = new Map(expected.files.map((f) => [f.path, f.sha256]));
@@ -506,8 +530,8 @@ async function main() {
     }
     const said = (from >= 0 ? whole.slice(from) : "").replace(/[\x00-\x09\x0b-\x1f\x7f-\xff]/g, "");
     verdict.console = {
-      fs: [...new Set([...said.matchAll(/"fs":"([a-z_]+)"/g)].map((m) => m[1]))],
-      deviceUid: [...new Set([...said.matchAll(/"deviceUid":"([^"]+)"/g)].map((m) => m[1]))],
+      fs: [...new Set(framedValues(said, "fs").map(fsState).filter(Boolean))],
+      deviceUid: [...new Set(framedValues(said, "deviceUid").filter((v) => subsequence(UID, v)).map(() => UID))],
       lines: said.split("\n").filter((l) => /\[FS\]|\[INIT\] Flash filesystem|legacy-layout|found \d+ entries in \/projects/.test(l)).map((l) => l.trim().slice(-120)),
     };
     const written = path.join(stateDir, `${BOARD}.flash.bin`);
