@@ -37,6 +37,13 @@ use crate::send_queue::SendQueue;
 use crate::seq_num::seq_dist;
 use crate::tx_queue::TxQueue;
 
+#[cfg(feature = "secure")]
+mod sealed_frames;
+#[cfg(feature = "secure")]
+mod secure_handshake;
+#[cfg(feature = "secure")]
+mod secure_state;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LinkState {
     /// Handshaking: sending SYNs, no data moves.
@@ -103,6 +110,11 @@ pub struct Link<A: Arq> {
     counters: LinkCounters,
     /// RAM allocated in `new` and never resized (see [`Link::ram_bound`]).
     fixed_ram: usize,
+    /// A secure link's handshake, keys and counters (`Link::new_secure`);
+    /// `None` on a plain link, which then behaves exactly as without the
+    /// feature.
+    #[cfg(feature = "secure")]
+    secure: Option<alloc::boxed::Box<secure_state::SecureState>>,
 }
 
 impl<A: Arq> Link<A> {
@@ -110,6 +122,10 @@ impl<A: Arq> Link<A> {
     /// tells the peer we restarted).
     pub fn new(cfg: LinkConfig, nonce: u32) -> Self {
         let shape = Shape::of::<A>(&cfg);
+        Self::with_shape(cfg, nonce, shape)
+    }
+
+    fn with_shape(cfg: LinkConfig, nonce: u32, shape: Shape) -> Self {
         let rx_window = cfg.rx_window.min(A::MAX_WINDOW);
         let max_payload = cfg.max_payload as usize;
         Link {
@@ -152,6 +168,8 @@ impl<A: Arq> Link<A> {
             last_rx: 0,
             counters: LinkCounters::default(),
             fixed_ram: shape.fixed_ram,
+            #[cfg(feature = "secure")]
+            secure: None,
             cfg,
         }
     }
@@ -394,6 +412,8 @@ impl<A: Arq> Link<A> {
                 min(Some(self.last_tx + self.cfg.keepalive));
             }
         }
+        #[cfg(feature = "secure")]
+        min(self.secure_deadline());
         t
     }
 
@@ -488,6 +508,10 @@ impl<A: Arq> Link<A> {
             return false;
         };
         if hdr.kind == FrameKind::Syn {
+            #[cfg(feature = "secure")]
+            if let Some(verified) = self.on_secure_aware_syn(now, raw) {
+                return verified;
+            }
             let Some(syn) = frame::verify(crc, 0, raw).and_then(SynBody::parse) else {
                 self.counters.bad_frames += 1;
                 return false;
@@ -501,7 +525,11 @@ impl<A: Arq> Link<A> {
             self.counters.dropped_unsynced += 1;
             return false;
         };
-        if raw.len() > HEADER_LEN + self.cfg.max_payload as usize + crc.len() {
+        #[cfg(feature = "secure")]
+        let max_body = self.cfg.max_payload as usize + self.seal_overhead();
+        #[cfg(not(feature = "secure"))]
+        let max_body = self.cfg.max_payload as usize;
+        if raw.len() > HEADER_LEN + max_body + crc.len() {
             // Longer than any frame we agreed to take (a datagram transport
             // hands frames over whole, unchecked).
             self.counters.oversize_frames += 1;
@@ -518,6 +546,16 @@ impl<A: Arq> Link<A> {
             self.counters.bad_frames += 1;
             return false;
         };
+        #[cfg(feature = "secure")]
+        if self.secure.is_some() {
+            return self.on_sealed_frame(now, &hdr, raw, body);
+        }
+        self.on_verified(now, &hdr, body)
+    }
+
+    /// A frame that verified under the session key (and, on a secure link,
+    /// opened): its plaintext body.
+    fn on_verified(&mut self, now: Micros, hdr: &Header, body: &[u8]) -> bool {
         self.counters.frames_rx += 1;
         self.last_rx = now;
         if self.state == LinkState::Connecting {
@@ -526,11 +564,11 @@ impl<A: Arq> Link<A> {
         }
         match hdr.kind {
             FrameKind::Data => {
-                self.on_ack_fields(now, &hdr, 0, None);
-                self.on_data(now, &hdr, body);
+                self.on_ack_fields(now, hdr, 0, None);
+                self.on_data(now, hdr, body);
             }
             FrameKind::Datagram => {
-                self.on_ack_fields(now, &hdr, 0, None);
+                self.on_ack_fields(now, hdr, 0, None);
                 // Best effort, but never silent: datagrams carry their own
                 // 8-bit sequence, so a gap is counted and a duplicate dropped.
                 let next = self.dgram_rx_next.unwrap_or(hdr.seq);
@@ -554,7 +592,7 @@ impl<A: Arq> Link<A> {
                     SACK_LEN => u32::from_le_bytes([body[0], body[1], body[2], body[3]]),
                     _ => 0,
                 };
-                self.on_ack_fields(now, &hdr, sack, hdr.fin.then_some(hdr.seq));
+                self.on_ack_fields(now, hdr, sack, hdr.fin.then_some(hdr.seq));
             }
             FrameKind::Syn => {}
         }
@@ -673,6 +711,8 @@ impl<A: Arq> Link<A> {
     // ---- Transmit path ---------------------------------------------------
 
     fn service_timers(&mut self, now: Micros) {
+        #[cfg(feature = "secure")]
+        self.secure_timers(now);
         if self
             .deframer
             .idle_deadline(self.cfg.idle_flush, self.cfg.frame_abandon)
@@ -835,6 +875,8 @@ impl<A: Arq> Link<A> {
                 return false;
             };
             frame::encode_raw(self.cfg.crc, key, &hdr, data, &mut self.raw);
+            #[cfg(feature = "secure")]
+            self.seal_raw();
             finish(
                 self.cfg.framing,
                 self.cfg.escape_ff,
@@ -871,6 +913,8 @@ impl<A: Arq> Link<A> {
         hdr.fin = e.fin;
         hdr.seq = seq;
         frame::encode_raw(self.cfg.crc, key, &hdr, payload, &mut self.raw);
+        #[cfg(feature = "secure")]
+        self.seal_raw();
         finish(
             self.cfg.framing,
             self.cfg.escape_ff,
@@ -895,6 +939,11 @@ impl<A: Arq> Link<A> {
     }
 
     fn emit_syn(&mut self) {
+        #[cfg(feature = "secure")]
+        if self.secure.is_some() {
+            self.emit_secure_syn();
+            return;
+        }
         let body = SynBody {
             nonce: self.nonce,
             your: self.peer_nonce.unwrap_or(0),
@@ -943,6 +992,8 @@ impl<A: Arq> Link<A> {
     fn encode(&mut self, hdr: &Header, body: &[u8]) {
         let key = self.key();
         frame::encode_raw(self.cfg.crc, key, hdr, body, &mut self.raw);
+        #[cfg(feature = "secure")]
+        self.seal_raw();
         finish(
             self.cfg.framing,
             self.cfg.escape_ff,
@@ -1027,6 +1078,8 @@ impl<A: Arq> Link<A> {
             reason,
             generation: self.generation,
         });
+        #[cfg(feature = "secure")]
+        self.secure_reset();
     }
 
     fn protocol_error(&mut self) {
@@ -1067,10 +1120,16 @@ struct Shape {
 
 impl Shape {
     fn of<A: Arq>(cfg: &LinkConfig) -> Self {
+        Self::framed::<A>(cfg, 0, SYN_LEN)
+    }
+
+    /// `of`, for frames `seal` bytes longer than their payload and SYN
+    /// bodies up to `syn` bytes (a secure link's).
+    fn framed<A: Arq>(cfg: &LinkConfig, seal: usize, syn: usize) -> Self {
         let max_payload = cfg.max_payload as usize;
         let tx_window = cfg.tx_window.min(A::MAX_WINDOW).max(1) as usize;
         // Largest decoded frame: header, body, checksum.
-        let max_raw = HEADER_LEN + max_payload.max(SYN_LEN) + cfg.crc.len();
+        let max_raw = HEADER_LEN + (max_payload + seal).max(syn) + cfg.crc.len();
         let max_cobs = cobs::max_encoded_no_ff_len(max_raw);
         let (max_wire, max_rx_raw, deframer) = match cfg.framing {
             Framing::Stream => (max_cobs + 2, max_cobs, Deframer::ram_bound(max_cobs)),

@@ -75,3 +75,7 @@ required-features = ["sim", "lab"]
 [[test]]
 name = "secure_oracle_snow"
 required-features = ["secure"]
+
+[[test]]
+name = "secure_handshake"
+required-features = ["secure", "sim"]

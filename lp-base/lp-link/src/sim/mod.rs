@@ -8,6 +8,8 @@ pub mod endpoint;
 pub mod pipe;
 pub mod probe_message;
 pub mod scenario;
+#[cfg(feature = "secure")]
+pub mod sim_entropy;
 pub mod sim_rng;
 pub mod transport;
 pub mod workload;

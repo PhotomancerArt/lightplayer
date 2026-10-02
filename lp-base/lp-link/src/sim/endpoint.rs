@@ -167,37 +167,8 @@ impl<A: Arq> Endpoint<A> {
     pub fn total_counters(&self) -> LinkCounters {
         let mut t = self.link.counters().clone();
         for c in &self.past_counters {
-            add_counters(&mut t, c);
+            t = t.plus(c);
         }
         t
     }
-}
-
-fn add_counters(t: &mut LinkCounters, c: &LinkCounters) {
-    t.frames_tx += c.frames_tx;
-    t.frames_rx += c.frames_rx;
-    t.bytes_tx += c.bytes_tx;
-    t.bytes_rx += c.bytes_rx;
-    t.data_frames_tx += c.data_frames_tx;
-    t.retransmits += c.retransmits;
-    t.timeouts += c.timeouts;
-    t.fast_retransmits += c.fast_retransmits;
-    t.probes += c.probes;
-    t.bad_frames += c.bad_frames;
-    t.stale_frames += c.stale_frames;
-    t.oversize_frames += c.oversize_frames;
-    t.oversize_messages += c.oversize_messages;
-    t.dropped_unsynced += c.dropped_unsynced;
-    t.duplicates += c.duplicates;
-    t.out_of_order += c.out_of_order;
-    t.rx_no_room += c.rx_no_room;
-    t.datagrams_dropped += c.datagrams_dropped;
-    t.datagrams_lost += c.datagrams_lost;
-    t.stale_partials += c.stale_partials;
-    t.text_bytes += c.text_bytes;
-    t.text_dropped += c.text_dropped;
-    t.ups += c.ups;
-    t.resets += c.resets;
-    t.stale_syns += c.stale_syns;
-    t.protocol_errors += c.protocol_errors;
 }

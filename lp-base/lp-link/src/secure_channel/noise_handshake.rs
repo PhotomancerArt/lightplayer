@@ -123,14 +123,15 @@ impl Initiator {
     }
 
     /// Read msg2 (`e, ee`, its payload decrypted into `payload`) and split.
-    /// On an error the handshake is spent (a forged msg2 cannot be retried
-    /// against the same state).
+    /// The initiator is left as it was, so a forged or damaged msg2 is
+    /// dropped and the genuine one can still be read.
     pub fn read_msg2(
-        self,
+        &self,
         msg: &[u8],
         payload: &mut [u8],
     ) -> Result<TransportKeys, HandshakeError> {
-        let Initiator { mut ss, e, .. } = self;
+        let mut ss = self.ss.clone();
+        let e = &self.e;
         if msg.len() != DH_LEN + payload.len() + TAG_LEN {
             return Err(HandshakeError::Length);
         }
