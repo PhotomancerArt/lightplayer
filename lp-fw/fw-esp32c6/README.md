@@ -114,7 +114,7 @@ the 704 KB after it, at `0x350000`). The 2026-10 repartition spent the
 reservation the budget ADR held for Wi-Fi: a board still on the old layout
 (`factory` 3 MB, `lpfs` 960 KB at `0x310000`) keeps its files through Studio's
 Update firmware or `lp-cli hardware lpfs migrate`, which move them; see
-`docs/adr/2026-10-01-c6-repartition-and-layout-migration.md`. The firmware
+`docs/adr/2026-10-02-c6-repartition-and-layout-migration.md`. The firmware
 reads its `lpfs` partition from the flashed table at boot, and never formats
 over an old-layout filesystem it finds instead (it boots on a memory
 filesystem and says `fs: legacy_held` in its hello).
@@ -148,7 +148,22 @@ just fw-esp32c6-size-check
 Background and the decisions behind the budget (including why the ~500 KB WiFi
 blob is kept) are in `docs/adr/2026-07-28-esp32c6-flash-budget.md`; the
 repartition that spent its lpfs reservation is
-`docs/adr/2026-10-01-c6-repartition-and-layout-migration.md`.
+`docs/adr/2026-10-02-c6-repartition-and-layout-migration.md`.
+
+## Moving a Board's Files (the 2026-10 repartition)
+
+Studio's Update firmware migrates an old-layout board itself. From a
+terminal, with the board in its bootloader on `<port>`:
+
+```bash
+cargo run -q -p lp-cli -- hardware lpfs report --port <port>    # how full, does it fit 704 KB
+cargo run -q -p lp-cli -- hardware lpfs save --port <port> --out ~/lp-backups/
+cargo run -q -p lp-cli -- hardware lpfs migrate --port <port> --merged <merged.bin>
+just flash-fw-esp32c6 migrate=1                                  # the flash recipe, migrating
+```
+
+`just flash-fw-esp32c6` refuses to write a table that does not match the
+board's (exit 3) unless told `migrate=1` or `discard=1`.
 
 ## Feature Notes
 

@@ -33,7 +33,7 @@ const COMMON_LOW_REGION: &[(&str, u32)] =
 /// The C6's moved ONCE, deliberately (2026-10, `0x310000` → `0x350000`), and
 /// only because Studio's Update firmware and `lp-cli hardware lpfs migrate`
 /// carry every fielded board's files across
-/// (`docs/adr/2026-10-01-c6-repartition-and-layout-migration.md`). Changing a
+/// (`docs/adr/2026-10-02-c6-repartition-and-layout-migration.md`). Changing a
 /// row here again needs a migration of its own, not just a new number.
 const LPFS_OFFSETS: &[(&str, u32, u32)] = &[
     ("esp32c6", 0x350000, 0x40_0000),

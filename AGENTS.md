@@ -73,7 +73,7 @@ read `docs/adr/2026-07-28-esp32c6-flash-budget.md` before doing size work. It
 records what has already been spent (a ~200 KB diagnostics-for-flash flag
 stack, the deliberately-kept 500 KB WiFi blob), what was reserved and is now
 spent (256 KB of the lpfs partition, given to the app for Wi-Fi by the 2026-10
-repartition — `docs/adr/2026-10-01-c6-repartition-and-layout-migration.md`;
+repartition — `docs/adr/2026-10-02-c6-repartition-and-layout-migration.md`;
 moving `lpfs` again needs a migration, never just a new table), and what has
 been measured and *rejected* so you don't re-run dead ends.
 
@@ -998,6 +998,7 @@ lp-cli emu run --merged <chip.bin> --link 127.0.0.1:5591 --monitor   # a C6 you 
 lp-cli upload projects/test/basic serial:tcp://127.0.0.1:5591        # …in another terminal
 
 just walk-esp32c6-emu                           # THE WALK (see below) — minutes, not seconds
+just walk-migration-emu W1                       # the C6 repartition's migration, real Studio on an emulated fielded board (W1–W4, W7a/b, W9)
 just test-emu-c6                                # its gates (builds firmware)
 just heap-budget-check-chips                    # the firmware's own heap ledger, ratcheted
 just bless-chips [esp32c6|esp32v3|esp32s3|engine]   # a firmware change moved a pinned figure: re-record them all (docs/chip-figures.md)

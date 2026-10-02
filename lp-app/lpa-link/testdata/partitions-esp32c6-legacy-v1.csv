@@ -3,7 +3,7 @@
 # origin/main 0380c63f8). Never edit: a fielded board's flash is the fact,
 # and the migration recognizes it by these exact rows
 # (`lpa_link::layout_migration::legacy_layout`, which a test holds equal to
-# this file). See docs/adr/2026-10-01-c6-repartition-and-layout-migration.md.
+# this file). See docs/adr/2026-10-02-c6-repartition-and-layout-migration.md.
 #
 # Name,   Type,  SubType, Offset,   Size,     Flags
 nvs,      data,  nvs,     0x9000,   0x5000,

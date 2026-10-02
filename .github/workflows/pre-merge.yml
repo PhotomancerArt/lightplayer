@@ -1154,7 +1154,7 @@ jobs:
         run: cd lp2025 && scripts/filetests.sh -t xtlpn.q32 --summary
 
   # The esp32c6 app image must fit its 3.25 MB partition (3 MB until the
-  # 2026-10 repartition, docs/adr/2026-10-01-c6-repartition-and-layout-migration.md;
+  # 2026-10 repartition, docs/adr/2026-10-02-c6-repartition-and-layout-migration.md;
   # the recipe reads it from partitions.csv). It has overrun twice, and
   # both times the signal was a red `Build and deploy Studio` run *after* the merge,
   # because no pre-merge job built the device firmware. This job builds it and

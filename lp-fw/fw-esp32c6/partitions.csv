@@ -8,7 +8,7 @@
 # The 2026-10 repartition (D1) moved the app/lpfs line once, deliberately:
 # factory grew 0x300000 -> 0x340000 (the reservation the flash-budget ADR held
 # for Wi-Fi, now spent) and lpfs shrank 0xF0000 -> 0xB0000 at 0x350000. See
-# docs/adr/2026-10-01-c6-repartition-and-layout-migration.md. The pre-D1 table
+# docs/adr/2026-10-02-c6-repartition-and-layout-migration.md. The pre-D1 table
 # is frozen at lp-app/lpa-link/testdata/partitions-esp32c6-legacy-v1.csv; a
 # board still carrying it keeps its files through Studio's Update firmware or
 # `lp-cli hardware lpfs migrate`, never a plain flash. Do not move lpfs again

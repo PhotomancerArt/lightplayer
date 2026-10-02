@@ -100,7 +100,7 @@ handful of reads, a planner that turns the classification into an ordered
 `FlashPlan` (old filesystem retired, new one written, superblocks last,
 verified), and the device backup archive (format 2). The host and browser
 providers execute the plan (`InspectLayout`, `FlashFirmware { plan }`); see
-`docs/adr/2026-10-01-c6-repartition-and-layout-migration.md`.
+`docs/adr/2026-10-02-c6-repartition-and-layout-migration.md`.
 
 `lpa-link` does not parse the image. Turning littlefs bytes into files is the
 concern of the layer that builds the archive (`lpa-studio-core`'s

@@ -51,7 +51,10 @@ unambiguous either way.
 
 ## Decision
 
-**The classic ESP32 keeps the 4 MB table unchanged.**
+**The classic ESP32 keeps the 4 MB table unchanged.** *(Still true after 2026-10: the C6 diverged —
+3.25 MB app, `lpfs` at `0x350000`,
+`2026-10-02-c6-repartition-and-layout-migration.md` — and the classic kept
+this table.)*
 
 ```
 nvs,      data,  nvs,     0x9000,   0x6000,

@@ -1481,7 +1481,7 @@ flash-fw-esp32c6 port="" features="" monitor="monitor" migrate="" discard="": (b
       no-monitor) ;;
       *) echo "monitor must be 'monitor' or 'no-monitor', not '{{ monitor }}'" >&2; exit 2 ;;
     esac
-    # The layout preflight (C6 repartition, docs/adr/2026-10-01-c6-repartition-and-layout-migration.md):
+    # The layout preflight (C6 repartition, docs/adr/2026-10-02-c6-repartition-and-layout-migration.md):
     # a board whose partition table differs from this image's — either way;
     # a downgrade formats over a migrated board's files — is refused unless
     # migrate=1 (move the files, writing this image) or discard=1 (erase them,
@@ -2039,7 +2039,7 @@ fw-esp32c6-size-check margin="65536": install-rv32-target
     # The partition is read from the `factory` row of the table the chip is
     # flashed with, so the budget cannot drift from the layout again.
     just _fw-size-check esp32c6 esp32c6 {{ c6_flash_size }} {{ fw_esp32c6_elf }} lp-fw/fw-esp32c6/partitions.csv {{ margin }} \
-        "See docs/adr/2026-07-28-esp32c6-flash-budget.md and docs/adr/2026-10-01-c6-repartition-and-layout-migration.md."
+        "See docs/adr/2026-07-28-esp32c6-flash-budget.md and docs/adr/2026-10-02-c6-repartition-and-layout-migration.md."
     just fw-esp32c6-rodata-layout-check
 
 # The image just linked must carry `build.rs`'s MERGED rodata layout, not

@@ -544,6 +544,21 @@ behaviour. Filed at
 `docs/defects/2026-09-09-the-esptool-stub-reads-i2c0-a-block-the-c6-boot-set-does-not-map.md`.
 `--no-stub` is the path that works, and is what the recipe and the gate use.
 
+### Reading it back, and the C6 repartition's migration
+
+The download console is READ as well as written now (2026-10, the C6
+repartition): `lp-cli/tests/emu_layout_migration.rs` drives the real
+`lp-cli hardware lpfs save|migrate|preflight` through espflash's stub over a
+pty and checks the chip file byte for byte (`just test-emu-layout-migration`),
+and `just walk-migration-emu <scenario>` drives real Studio's Update firmware
+— esptool-js reads the board's layout, the migration writes it — against an
+`emu serve` board seeded from a "fielded" chip (this tree's firmware on the
+pre-2026-10 table). Both run non-strict: the stub reads one unmapped block.
+A `power-cycle` on the control channel samples the board's strapping pins,
+not the last reset's strap, so a cable pulled after a download dance comes
+back booting from flash. The record is
+`docs/reports/2026-10-02-c6-migration-emulator-walk.md`.
+
 ## Flash, and the cache window
 
 The chip is a `flash::FlashImage`: read, program (an `&=`, because a NOR cell

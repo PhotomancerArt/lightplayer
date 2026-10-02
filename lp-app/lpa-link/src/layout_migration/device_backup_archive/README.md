@@ -6,7 +6,7 @@ and directory in its `lpfs`, read raw over the bootloader and mounted in Rust
 the firmware uses. It works on a board that **cannot boot**.
 
 Format 2 exists for the 2026-10 C6 repartition
-(`docs/adr/2026-10-01-c6-repartition-and-layout-migration.md`): every layout
+(`docs/adr/2026-10-02-c6-repartition-and-layout-migration.md`): every layout
 migration stores one of these in the browser — and offers it as a download —
 **before** it writes anything to the board, because for a few seconds of the
 write it is the only copy of the board's files. `lp-cli hardware lpfs save`
