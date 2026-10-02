@@ -6322,3 +6322,87 @@ fn pushing_an_old_format_library_project_sends_the_current_format() {
         "the library copy was upgraded"
     );
 }
+
+/// Like [`drive`], but sleeps between polls for the fake device's thread.
+fn drive_real<F: Future>(future: F) -> F::Output {
+    let waker = noop_waker();
+    let mut cx = Context::from_waker(&waker);
+    let mut future = core::pin::pin!(future);
+    let deadline = std::time::Instant::now() + REAL_TIME_LIMIT;
+    loop {
+        if let Poll::Ready(output) = future.as_mut().poll(&mut cx) {
+            return output;
+        }
+        assert!(std::time::Instant::now() < deadline, "timed out");
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+fn v10_corpus_files() -> Vec<(String, Vec<u8>)> {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../lpa-upgrade/tests/corpus/v10/button-sign");
+    let mut files: Vec<(String, Vec<u8>)> = std::fs::read_dir(&root)
+        .expect("corpus dir")
+        .map(|entry| {
+            let entry = entry.expect("entry");
+            (
+                entry.file_name().to_string_lossy().into_owned(),
+                std::fs::read(entry.path()).expect("corpus file"),
+            )
+        })
+        .collect();
+    files.sort();
+    files
+}
+/// A refused push leaves the board on its previous project; a good push
+/// then lands in the OTHER slot with the refused dir gone.
+#[test]
+fn a_refused_push_leaves_the_board_running_its_previous_project() {
+    let (_uid, good_files) = a_project_from_another_library(0x6b);
+    let device = light_player_running("dev000000daqf6dvvr9", good_files.clone());
+    let (_bench, _tasks, _device_uid) = running_board(&device, "usb-push-dark");
+    let mut client = lpa_client::LpClient::new(FakeDeviceIo::new(&device)).on_borrowed_wire();
+    let mut quiet = |_: String, _: Option<u8>| {};
+    let before = drive_real(client.project_list_loaded())
+        .expect("list")
+        .value;
+    let dir = before[0].path.to_string();
+    let result = drive_real(lpa_client::push_project(
+        &mut client,
+        &v10_corpus_files(),
+        "unused-hash",
+        "fallback",
+        &mut quiet,
+    ));
+    assert!(result.is_err(), "v10 push must be refused: {result:?}");
+
+    let after = drive_real(client.project_list_loaded())
+        .expect("list")
+        .value;
+    let after_paths: Vec<String> = after.iter().map(|p| p.path.to_string()).collect();
+    assert_eq!(after_paths, vec![dir.clone()], "not dark: {after_paths:?}");
+    let manifest = drive_real(client.fs_read(format!("{dir}/project.json").as_path()))
+        .map(|outcome| String::from_utf8_lossy(&outcome.value).into_owned());
+    let whole = manifest
+        .as_deref()
+        .is_ok_and(|t| !t.contains("\"format\": 10"));
+    assert!(whole, "previous project must be whole: {manifest:?}");
+
+    // A good push lands in the OTHER slot; the old one is cleaned up.
+    let good_hash = drive_real(client.hash_package("studio"))
+        .expect("hash")
+        .value;
+    let report = drive_real(lpa_client::push_project(
+        &mut client,
+        &good_files,
+        &good_hash,
+        "fallback",
+        &mut quiet,
+    ))
+    .expect("a good push lands");
+    assert_eq!(report.storage_id, "studio-b");
+    let listed = drive_real(client.fs_list_dir("/projects".as_path(), false))
+        .expect("ls")
+        .value;
+    let listed: Vec<String> = listed.iter().map(|p| p.to_string()).collect();
+    assert_eq!(listed, vec!["/projects/studio-b"]);
+}
