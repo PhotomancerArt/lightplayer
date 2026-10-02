@@ -69,7 +69,7 @@ mod split_layout;
 pub use boot_choice::{BootChoice, choose};
 pub use boot_record::{
     ATTEMPTED_MARK_OFFSET, BOOT_RECORD_LEN, BOOT_RECORD_READ_LEN, BOOT_RECORD_VERSION, BootMarks,
-    BootRecord, BootSlot, CONFIRMED_MARK_OFFSET, RECORD_MAGIC,
+    BootRecord, BootSlot, CONFIRMED_MARK_OFFSET, RECORD_MAGIC, build_hash,
 };
 pub use split_layout::{
     BOOT_RECORD_SECTORS, Extent, LOADER_MAX_LEN, LOADER_OFFSET, REGION_END_C6_4MB, REGION_START,

@@ -24,9 +24,16 @@ MAGIC = int.from_bytes(b"LPBR", "little")
 VERSION = 1
 
 
-def record(seq, core_off, core_len, trial=False):
-    body = struct.pack("<IHHIII", MAGIC, VERSION, 1 if trial else 0, seq, core_off, core_len)
+def record(seq, core_off, core_len, build, trial=False):
+    body = struct.pack("<IHHIIII", MAGIC, VERSION, 1 if trial else 0, seq, core_off, core_len, build)
     return body + struct.pack("<I", zlib.crc32(body) & 0xFFFF_FFFF)
+
+
+def build_hash(engine):
+    """lp_bootctl::build_hash of the build id in the engine's header."""
+    if engine[:8] != b"LPENGIN1":
+        sys.exit("engine.bin has no LPENGIN1 header")
+    return zlib.crc32(engine[8:56]) & 0xFFFF_FFFF
 
 
 def main():
@@ -50,7 +57,7 @@ def main():
     def put(at, data):
         img[at - LOADER_OFFSET:at - LOADER_OFFSET + len(data)] = data
     put(LOADER_OFFSET, loader)
-    put(BOOT_RECORD_SECTORS[0], record(1, REGION_START, len(core)))
+    put(BOOT_RECORD_SECTORS[0], record(1, REGION_START, len(core), build_hash(engine)))
     put(REGION_START, core)
     put(engine_at, engine)
     open(a.out, "wb").write(img)

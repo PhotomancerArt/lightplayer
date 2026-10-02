@@ -17,6 +17,8 @@ pub struct BootState {
     pub choice: Option<BootChoice>,
     pub core_off: u32,
     pub core_len: u32,
+    /// The build that failed its trial here, when the loader rolled back.
+    pub failed_build: Option<u32>,
     max_seq: u32,
 }
 
@@ -35,6 +37,10 @@ impl BootState {
             }
         }
         let choice = lp_bootctl::choose(sectors);
+        let failed_build = choice
+            .filter(|c| c.rolled_back)
+            .and_then(|c| sectors[1 - c.sector])
+            .map(|s| s.record.build);
         let (core_off, core_len) = match choice {
             Some(c) => (c.slot.record.core_off, c.slot.record.core_len),
             // No record (a board flashed without one): the loader booted the
@@ -46,6 +52,7 @@ impl BootState {
             choice,
             core_off,
             core_len,
+            failed_build,
             max_seq,
         }
     }
@@ -97,6 +104,7 @@ impl BootState {
         buf: &mut SectorBuf,
         core_off: u32,
         core_len: u32,
+        build: u32,
     ) {
         let sector = match self.choice {
             Some(c) => 1 - c.sector,
@@ -106,6 +114,7 @@ impl BootState {
             seq: self.max_seq + 1,
             core_off,
             core_len,
+            build,
             trial: true,
         };
         flash.write_sector(buf, BOOT_RECORD_SECTORS[sector], &record.encode());

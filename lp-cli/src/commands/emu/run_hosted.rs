@@ -108,8 +108,8 @@ async fn run_hosted_async<B: EmuUsbBoard>(
     }
     if let Some(ota) = &host.ota {
         eprintln!(
-            "emu: ota — {} offer(s), {} request(s), {} B served",
-            ota.offers, ota.requests, ota.served_bytes
+            "emu: ota — {} offer(s), {} request(s), {} B served, {} refusal(s)",
+            ota.offers, ota.requests, ota.served_bytes, ota.refusals
         );
     }
     eprintln!(

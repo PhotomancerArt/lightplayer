@@ -5,6 +5,7 @@
 //! - board → host `Q` — "what do you have?" (answered with an offer)
 //! - board → host `R` kind:u8 offset:u32 len:u32 — a request (`C`ore/`E`ngine)
 //! - host → board `D` kind:u8 offset:u32 bytes… — the answer
+//! - board → host `F` build:u32 — refused: that build failed its trial here
 //!
 //! One request is in flight at a time; every chunk is one flash sector.
 //!
@@ -50,6 +51,8 @@ enum Plan {
         dest: u32,
         len: u32,
         next: u32,
+        /// `lp_bootctl::build_hash` of the offered build, for its record.
+        build: u32,
     },
     /// Writing this build's engine at `dest`: sector 1 onward, then sector 0
     /// (its header) LAST, so a cut never leaves a valid header over a
@@ -140,6 +143,15 @@ fn step(
         if plan != Plan::Idle || state.on_trial() {
             return plan; // mid-transfer (a link re-up), or not confirmed yet
         }
+        let build = lp_bootctl::build_hash(&offer.build_id);
+        if state.failed_build == Some(build) {
+            esp_println::println!("[OTA] that build failed its trial on this board — refused");
+            let mut m = Vec::with_capacity(5);
+            m.push(b'F');
+            m.extend_from_slice(&build.to_le_bytes());
+            send(usb_link, &m);
+            return plan;
+        }
         if offer.build_id != crate::build_id() {
             let Some(dest) =
                 state
@@ -165,6 +177,7 @@ fn step(
                 dest,
                 len: offer.core_len,
                 next: 0,
+                build,
             };
         }
         // Same build, and core-only: no valid engine here. Fetch it.
@@ -198,14 +211,24 @@ fn step(
     let off = u32::from_le_bytes(msg[2..6].try_into().unwrap_or_default());
     let data = &msg[6..];
     match plan {
-        Plan::Core { dest, len, next } if kind == b'C' && off == next => {
+        Plan::Core {
+            dest,
+            len,
+            next,
+            build,
+        } if kind == b'C' && off == next => {
             flash.write_sector(buf, dest + off, data);
             let next = off + data.len() as u32;
             if next < len {
                 request(usb_link, b'C', next, len);
-                return Plan::Core { dest, len, next };
+                return Plan::Core {
+                    dest,
+                    len,
+                    next,
+                    build,
+                };
             }
-            state.write_trial_record(flash, buf, dest, len);
+            state.write_trial_record(flash, buf, dest, len, build);
             esp_println::println!(
                 "[OTA] core written ({len} B) and named on trial — resetting into it"
             );

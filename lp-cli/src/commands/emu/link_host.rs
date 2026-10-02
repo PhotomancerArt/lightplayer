@@ -358,6 +358,9 @@ pub struct OtaServe {
     pub offers: u32,
     pub requests: u32,
     pub served_bytes: u64,
+    /// Offers the board refused because that build already failed its trial
+    /// on it (`F`).
+    pub refusals: u32,
     /// Spike: end the run (a power cut) once this many requests are served.
     pub cut_after: Option<u32>,
 }
@@ -381,6 +384,7 @@ impl OtaServe {
             offers: 0,
             requests: 0,
             served_bytes: 0,
+            refusals: 0,
             cut_after: None,
         })
     }
@@ -397,6 +401,10 @@ impl OtaServe {
     pub fn answer(&mut self, msg: &[u8]) -> Option<Vec<u8>> {
         match msg.first()? {
             b'Q' => Some(self.offer()),
+            b'F' => {
+                self.refusals += 1;
+                None
+            }
             b'R' if msg.len() == 10 => {
                 let kind = msg[1];
                 let off = u32::from_le_bytes(msg[2..6].try_into().ok()?) as usize;

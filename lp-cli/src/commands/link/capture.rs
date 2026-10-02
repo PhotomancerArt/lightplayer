@@ -176,8 +176,8 @@ pub fn capture(args: &CaptureArgs) -> Result<()> {
     );
     if let Some(ota) = &ota {
         eprintln!(
-            "link capture: ota — {} offer(s), {} request(s), {} B served",
-            ota.offers, ota.requests, ota.served_bytes
+            "link capture: ota — {} offer(s), {} request(s), {} B served, {} refusal(s)",
+            ota.offers, ota.requests, ota.served_bytes, ota.refusals
         );
     }
     if let Some(summary) = requests.describe() {

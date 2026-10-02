@@ -49,6 +49,7 @@ mod tests {
                 seq,
                 core_off: seq * 0x10000,
                 core_len: 1,
+                build: seq,
                 trial,
             },
             marks: BootMarks {
