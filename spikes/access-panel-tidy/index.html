@@ -1,0 +1,751 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Access panel, tidied</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  /* ---- studio palette (lp-app/lpa-studio-web/src/style.css, via spikes/ble-easy-access) ---- */
+  :root {
+    --bg: #101317;
+    --bg-wash: rgba(255,255,255,.04);
+    --surface: #171b20;
+    --surface-subtle: #14181d;
+    --surface-muted: #11161b;
+    --surface-raised: #20272e;
+    --terminal: #0c1114;
+    --border: #2a3138;
+    --border-muted: #252d34;
+    --border-subtle: #293039;
+    --border-strong: #3e4852;
+    --text: #f2f0e8;
+    --strong: #fffaf0;
+    --muted: #c7cbd0;
+    --subtle: #99a2ad;
+    --dim: #9ba4ad;
+    --heading: #94b8aa;
+    --accent: #7be0b2;
+    --accent-border: #65bd96;
+    --neutral-bg: #12171c;
+    --neutral-border: #3a444c;
+    --neutral-text: #d9e2df;
+    --good-bg: #13241d;   --good-border: #365545;  --good-text: #7be0b2;
+    --warn-bg: #292614;   --warn-border: #796c33;  --warn-text: #f0dc7a;
+    --live-bg: #142330;   --live-border: #3c5c78;  --live-text: #9cc8ee;
+    --bound-bg: #241a33;  --bound-border: #5f4a85; --bound-text: #c9b1f5;
+    --err-text: #ef7a76;  --err-border: #79403e;   --err-bg: #2b1817;
+    --sans: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, monospace;
+  }
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body {
+    margin: 0; padding: 28px 32px 160px;
+    background: linear-gradient(180deg, var(--bg-wash), transparent 240px), var(--bg);
+    color: var(--text);
+    font: 14px/1.45 var(--sans);
+  }
+  h1 { font-size: 13px; letter-spacing: .12em; color: var(--muted); text-transform: uppercase; margin: 0 0 6px; }
+  p.hint { color: var(--dim); font-size: 12px; margin: 0 0 10px; max-width: 920px; line-height: 1.55; }
+  p.hint b { color: var(--muted); }
+  h2 { font-size: 12px; letter-spacing: .1em; color: var(--muted); text-transform: uppercase; margin: 46px 0 4px; }
+  h2 .n { color: var(--dim); margin-right: 6px; }
+  p.sub { color: var(--dim); font-size: 12px; margin: 0 0 14px; max-width: 920px; line-height: 1.55; }
+  p.sub b { color: var(--muted); font-weight: 600; }
+  button, input { font-family: var(--sans); }
+  .bug { max-width: 920px; border: 1px solid var(--err-border); background: var(--err-bg); border-radius: 8px; padding: 9px 14px;
+    font-size: 12px; color: var(--muted); margin: 0 0 12px; line-height: 1.55; }
+  .bug b { color: var(--err-text); }
+
+  /* ---- exploration controls ---- */
+  .controls { position: sticky; top: 10px; z-index: 40; display: flex; gap: 18px; flex-wrap: wrap; align-items: center;
+    padding: 10px 14px; border: 1px dashed var(--border-strong); border-radius: 8px; color: var(--muted); font-size: 12px; margin: 14px 0 10px;
+    background: color-mix(in srgb, var(--surface-subtle) 92%, transparent); backdrop-filter: blur(6px); }
+  .controls .group { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .controls .group > b { color: var(--text); font-weight: 600; margin-right: 2px; }
+  .chip { appearance: none; border: 1px solid var(--border-strong); background: transparent; color: var(--subtle); font-size: 11.5px;
+    font-weight: 600; border-radius: 999px; padding: 3px 10px; cursor: pointer; }
+  .chip:hover { color: var(--text); }
+  .chip[aria-pressed=true] { color: var(--accent); border-color: var(--accent-border); background: rgba(123,224,178,.08); }
+
+  /* ---- concepts row ---- */
+  .row { display: flex; gap: 22px; flex-wrap: wrap; align-items: flex-start; }
+  .concept { width: min(360px, 100%); flex: none; }
+  .concept .cap { display: flex; align-items: baseline; gap: 8px; margin: 0 0 6px; }
+  .concept .cap .cid { font: 700 11px var(--mono); color: var(--dim); }
+  .concept .cap .cname { font-size: 12.5px; font-weight: 700; color: var(--strong); }
+  .concept .cnote { font-size: 11.5px; color: var(--dim); margin: 0 0 8px; line-height: 1.45; min-height: 50px; }
+  .concept .cnote b { color: var(--muted); }
+  .concept.today .cap .cname::after { content: "today"; margin-left: 8px; font: 600 10px var(--mono);
+    color: var(--warn-text); border: 1px solid var(--warn-border); border-radius: 999px; padding: 1px 7px; }
+  .concept.lean .cap .cname::after { content: "lean"; margin-left: 8px; font: 700 10px var(--mono);
+    color: var(--accent); border: 1px solid var(--accent-border); border-radius: 999px; padding: 1px 7px; }
+
+  /* the panel frame: the popover the card's "Who has access · N ›" opens */
+  .pop { border: 1px solid var(--border-strong); border-radius: 10px; background: var(--surface); padding: 10px 13px 12px;
+    box-shadow: 0 14px 40px rgba(0,0,0,.45); display: grid; gap: 8px; position: relative; overflow: hidden; }
+  .pop .ph { display: flex; align-items: center; gap: 8px; color: var(--neutral-text); }
+  .pop .ph h3 { margin: 0; font-size: 14px; font-weight: 700; color: var(--strong); }
+  .pop .ph .cnt { margin-left: auto; font: 600 11px var(--mono); color: var(--subtle); }
+  .pop .ph .cnt.full { color: var(--warn-text); }
+  .scroll { max-height: 470px; overflow-y: auto; margin: 0 -4px; padding: 0 4px; }
+
+  .help { font-size: 11.5px; color: var(--dim); line-height: 1.45; margin: 0; }
+  .help b { color: var(--muted); font-weight: 650; }
+  .tlink { appearance: none; border: 0; background: transparent; padding: 0; cursor: pointer; font: 700 12px var(--sans);
+    color: var(--strong); text-decoration: underline dotted; text-underline-offset: 3px; white-space: nowrap; }
+  .tlink.q { color: var(--subtle); font-weight: 600; }
+  .tlink[disabled] { opacity: .45; cursor: default; }
+  .btn { appearance: none; cursor: pointer; border-radius: 6px; padding: 8px 12px; font: 700 12.5px/1 var(--sans);
+    color: var(--neutral-text); background: var(--neutral-bg); border: 1px solid var(--neutral-border); white-space: nowrap; }
+  .btn:hover { color: var(--strong); border-color: var(--border-strong); }
+  .btn.primary { color: var(--strong); border-color: var(--accent-border); background: rgba(123,224,178,.10); }
+  .btn.warn { color: var(--warn-text); border-color: var(--warn-border); background: transparent; }
+  .btn.sm { padding: 6px 9px; font-size: 11.5px; }
+  .btn.wide { width: 100%; justify-content: center; }
+  .btn[disabled] { opacity: .45; cursor: default; }
+  .btn.armed { color: var(--err-text); background: var(--err-bg); border-color: var(--err-border); }
+
+  .note { border-radius: 7px; border: 1px solid var(--warn-border); background: var(--warn-bg); color: var(--warn-text);
+    font-size: 12px; padding: 8px 10px; line-height: 1.45; display: grid; gap: 7px; }
+  .note b { color: var(--strong); }
+  .note .acts { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .note.good { border-color: var(--good-border); background: var(--good-bg); color: var(--good-text); }
+  .note.live { border-color: var(--live-border); background: var(--live-bg); color: var(--live-text); }
+
+  /* rows */
+  .krow { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-top: 1px solid var(--border-muted); min-width: 0; }
+  .krow.first, .krows > .krow:first-child { border-top: 0; }
+  .kicon { width: 30px; height: 30px; border-radius: 8px; flex: none; display: inline-flex; align-items: center; justify-content: center;
+    border: 1px solid var(--neutral-border); background: var(--neutral-bg); color: var(--neutral-text); position: relative; }
+  .kicon.acct { border-radius: 50%; border-color: var(--good-border); background: var(--good-bg); color: var(--good-text); font: 800 12px var(--sans); }
+  .kicon.pw { color: var(--warn-text); border-color: var(--warn-border); background: var(--warn-bg); }
+  .kicon.open { color: var(--live-text); border-color: var(--live-border); background: var(--live-bg); }
+  .kicon .stack { position: absolute; right: -7px; top: -7px; min-width: 18px; height: 16px; padding: 0 4px; border-radius: 999px;
+    font: 800 9.5px/16px var(--mono); text-align: center; background: var(--surface-raised); border: 1px solid var(--border-strong); color: var(--strong); }
+  .kicon .stack.warn { color: var(--warn-text); border-color: var(--warn-border); background: var(--warn-bg); }
+  .kwho { min-width: 0; flex: 1; display: grid; gap: 1px; }
+  .kwho .nm { font-size: 13px; font-weight: 700; color: var(--strong); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .kwho .nm .me { font: 700 9.5px var(--mono); color: var(--accent); margin-left: 6px; letter-spacing: .04em; text-transform: uppercase; }
+  .kwho .nm .x { font: 700 11px var(--mono); color: var(--subtle); margin-left: 5px; }
+  .kwho .sd { font-size: 11px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .playchip { font: 700 9.5px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; border-radius: 4px; padding: 3px 5px;
+    border: 1px solid var(--live-border); color: var(--live-text); flex: none; }
+  .chev { appearance: none; border: 0; background: transparent; color: var(--subtle); cursor: pointer; padding: 4px; display: inline-flex; flex: none; }
+  .chev svg { transition: transform .15s; }
+  .chev.open svg { transform: rotate(90deg); }
+  .kids { margin: 0 0 4px 40px; border-left: 1px solid var(--border-muted); padding-left: 10px; }
+  .kids .krow { padding: 4px 0; }
+  .kids .kwho .nm { font-size: 12px; font-weight: 600; color: var(--muted); }
+  .clickable { cursor: pointer; }
+  .clickable:hover .nm { text-decoration: underline dotted; text-underline-offset: 3px; }
+
+  /* the armed trash (studio: ux-armed-chip, action_button.rs; 4 s window) */
+  .trash { --win: 4000ms; position: relative; flex: none; appearance: none; cursor: pointer; border-radius: 6px; height: 28px; min-width: 28px;
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 6px;
+    border: 1px solid transparent; background: transparent; color: var(--subtle); font: 700 12px var(--sans); }
+  .trash:hover { color: var(--err-text); border-color: var(--err-border); }
+  .trash .lbl { display: none; white-space: nowrap; }
+  .trash.armed { color: var(--err-text); background: var(--err-bg); border-color: var(--err-border); animation: knock .22s ease-out; }
+  .trash.armed .lbl { display: inline; }
+  .trash::after { content: ""; position: absolute; left: 4px; right: 4px; bottom: 1px; height: 1.5px; border-radius: 2px;
+    background: var(--err-border); transform-origin: left; transform: scaleX(0); opacity: 0; }
+  .trash.armed::after { opacity: .55; animation: drain var(--win) linear forwards; }
+  @keyframes knock { 35% { transform: scale(1.07); } }
+  @keyframes drain { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+  .krow:has(> .trash.armed) .kicon, .krow:has(> .trash.armed) .kwho { opacity: .4; filter: saturate(.3); }
+
+  /* switch + segmented */
+  .switch { width: 36px; height: 21px; border-radius: 999px; border: 1px solid var(--border-strong); background: var(--neutral-bg);
+    position: relative; flex: none; cursor: pointer; appearance: none; padding: 0; }
+  .switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 15px; height: 15px; border-radius: 50%; background: var(--subtle); transition: .2s; }
+  .switch.on { background: rgba(123,224,178,.25); border-color: var(--accent-border); }
+  .switch.on::after { left: 17px; background: var(--accent); }
+  .seg { display: inline-flex; border: 1px solid var(--border-strong); border-radius: 6px; overflow: hidden; flex: none; }
+  .seg button { appearance: none; border: 0; background: transparent; padding: 6px 10px; font: 700 12px var(--sans); color: var(--subtle); cursor: pointer; }
+  .seg button.on { background: var(--surface-raised); color: var(--strong); }
+  .seg.big { display: flex; }
+  .seg.big button { flex: 1; padding: 8px 6px; display: grid; gap: 1px; text-align: left; }
+  .seg.big button small { font-weight: 500; font-size: 10.5px; color: var(--dim); }
+
+  /* slot meter */
+  .slots { display: grid; grid-template-columns: repeat(16, 1fr); gap: 3px; }
+  .slot { height: 10px; border-radius: 2px; background: var(--neutral-bg); border: 1px solid var(--border-muted); transition: outline .1s; }
+  .slot.b { background: #39434c; border-color: #4a5560; }
+  .slot.me { background: var(--accent); border-color: var(--accent-border); }
+  .slot.a { background: var(--good-border); border-color: var(--good-border); }
+  .slot.p { background: var(--warn-border); border-color: var(--warn-border); }
+  .slot.hot { outline: 1.5px solid var(--strong); outline-offset: 1px; }
+  .slotcap { display: flex; justify-content: space-between; font: 600 10.5px var(--mono); color: var(--dim); margin-top: 4px; }
+  .slotcap .full { color: var(--warn-text); }
+
+  /* buckets (1C) */
+  .bucket { border: 1px solid var(--border); border-radius: 9px; background: var(--surface-subtle); padding: 8px 10px; display: grid; gap: 4px; }
+  .bucket .bh { display: flex; align-items: center; gap: 8px; font: 800 10px var(--sans); letter-spacing: .08em; text-transform: uppercase; color: var(--dim); }
+  .bucket .bh .r { margin-left: auto; text-transform: none; letter-spacing: 0; font-weight: 600; }
+  .pills { display: flex; flex-wrap: wrap; gap: 5px; }
+  .pill { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--neutral-border); background: var(--neutral-bg); color: var(--neutral-text);
+    border-radius: 999px; padding: 3px 9px; font: 650 11.5px var(--sans); white-space: nowrap; max-width: 100%; }
+  .pill.me { border-color: var(--accent-border); color: var(--strong); }
+  .pill .c { font: 800 10px var(--mono); color: var(--subtle); }
+  .pill .c.warn { color: var(--warn-text); }
+
+  /* forms (§2) */
+  .field { display: grid; gap: 4px; min-width: 0; }
+  .field > span { font: 700 10.5px var(--sans); color: var(--dim); letter-spacing: .02em; }
+  .inp { display: flex; align-items: center; gap: 4px; border: 1px solid var(--border-strong); background: var(--terminal); border-radius: 6px; padding: 0 4px 0 0; min-width: 0; }
+  .inp:focus-within { border-color: var(--accent-border); box-shadow: 0 0 0 2px rgba(123,224,178,.15); }
+  .inp input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--strong); padding: 8px 10px; font: 13px var(--sans); }
+  .inp.mono input { font: 600 14px var(--mono); letter-spacing: .02em; }
+  .inp.huge input { font: 700 19px var(--mono); padding: 11px 12px; text-align: center; }
+  .icobtn { appearance: none; border: 0; background: transparent; color: var(--subtle); cursor: pointer; padding: 5px; border-radius: 5px; display: inline-flex; flex: none; }
+  .icobtn:hover { color: var(--strong); background: var(--surface-raised); }
+  .pwbig { font: 700 18px var(--mono); color: var(--strong); letter-spacing: .03em; user-select: all; overflow-wrap: anywhere; }
+  .qrbox { display: flex; gap: 11px; align-items: center; min-width: 0; }
+  canvas.qr { width: 96px; height: 96px; border-radius: 6px; flex: none; background: #fffaf0; image-rendering: pixelated; }
+  code.link { display: block; user-select: all; overflow-wrap: anywhere; border-radius: 4px; background: var(--surface-muted); padding: 4px 6px;
+    font: 10.5px/1.4 var(--mono); color: var(--subtle); }
+  .inline-add { border: 1px dashed var(--accent-border); border-radius: 8px; padding: 8px; display: grid; gap: 7px; background: rgba(123,224,178,.04); }
+  .twoadd { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .twoadd .btn { display: grid; gap: 3px; padding: 10px; text-align: left; line-height: 1.2; }
+  .twoadd .btn small { font-weight: 500; font-size: 10.5px; color: var(--dim); }
+  .tip { font-size: 10.5px; color: var(--dim); }
+  .tip kbd { font: 600 10px var(--mono); border: 1px solid var(--border-strong); border-bottom-width: 2px; border-radius: 3px; padding: 0 4px; color: var(--muted); }
+
+  .toast { border: 1px solid var(--good-border); background: #15201b; border-radius: 9px; padding: 9px 11px; font-size: 12px; color: var(--text);
+    display: flex; gap: 9px; align-items: flex-start; box-shadow: 0 10px 30px rgba(0,0,0,.5); }
+  .toast svg { color: var(--accent); flex: none; margin-top: 1px; }
+  .toast b { color: var(--strong); }
+  .toast .tlink { margin-left: auto; }
+
+  .flash { animation: flash 1.2s ease; }
+  @keyframes flash { 0% { background: rgba(123,224,178,.2); } 100% { background: transparent; } }
+
+  svg.i { width: 15px; height: 15px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  @media (max-width: 700px) {
+    body { padding: 16px 16px 120px; }
+    .controls { position: static; gap: 10px; }
+  }
+</style>
+</head>
+<body>
+
+<h1>Access panel, tidied</h1>
+<p class="hint" style="font-size:13px;color:var(--muted)">
+  <b>Yona, 2026-10-02:</b> “Per-origin makes sense … it’s the UX that sucks. The list gets super long, custom passwords are hard to enter, and I had the
+  ‘allow everyone’ thing not work. Security matters but right now it’s getting in the way. Collapse/group the things that have access, and make it much
+  easier to enter a custom password. We can offer a random one, but it should be as easy as just replacing the text to change it.”
+</p>
+<p class="hint">
+  <b>What happened on the choker</b> (<code>lp-cli link capture … --request accessList</code>, XIAO C6 <code>10:bd:a3:b0:8e:30</code>): the board holds
+  <b>16 entries, all “Brave on Mac”</b>, added Sep 26 → Oct 2 (six between 00:35 and 01:42 on Oct 2). Each worktree’s dev server is its own origin, so its own
+  browser key, and every USB plug-in from one adds another copy. <b>16 is the board’s cap</b> (<code>MAX_SECRETS_PER_FILE</code>): the next add is refused —
+  silently today — so a new browser, the account key, or a typed password can’t get on.
+</p>
+<p class="hint">
+  <b>Thesis:</b> people think in <i>who</i> (me, my phone, friends, anyone nearby), not in keys. Group by name, show how full the board is, make the
+  “make room” fix one deliberate tap, and make a custom password a single text box that already holds a good one.
+</p>
+<div class="bug"><b>Separate bug, not designed here:</b> “Anyone nearby can play” didn’t work for you, even though the choker’s store reads
+  <code>open: true</code>. That’s filed as its own task (chip) — the concepts below only move where the switch sits.</div>
+
+<div class="controls" id="controls">
+  <span class="group"><b>Board</b>
+    <button class="chip" data-k="data" data-v="choker">your choker (16, full)</button>
+    <button class="chip" data-k="data" data-v="mixed">mixed (10)</button>
+    <button class="chip" data-k="data" data-v="fresh">just set up (1)</button>
+  </span>
+  <span class="group"><b>This browser</b>
+    <button class="chip" data-k="me" data-v="on">on the list</button>
+    <button class="chip" data-k="me" data-v="off">not on it (a new dev origin)</button>
+  </span>
+  <span class="group"><b>Anyone nearby</b>
+    <button class="chip" data-k="open" data-v="on">on</button>
+    <button class="chip" data-k="open" data-v="off">off</button>
+  </span>
+  <span class="group"><button class="chip" data-k="reset" data-v="1">↺ reset removals</button></span>
+</div>
+
+<h2><span class="n">1</span>Who has access</h2>
+<p class="sub">Each panel is live: expand groups, arm and confirm the trash cans, press the “make room” actions. Removals are per concept so you can compare
+  after. <b>Q:</b> which list shape, and should copies of the same name replace each other on their own (1D) or only when you say so (1B)?</p>
+<div class="row" id="s1"></div>
+
+<h2><span class="n">2</span>Add a password</h2>
+<p class="sub">The fields are real: click the password and type — the generated one is selected on focus, so typing replaces it. ↻ rolls a new one.
+  <b>Q:</b> which form, and does the QR/link stay on the same screen (2B) or move to after the add (2C)?</p>
+<div class="row" id="s2"></div>
+
+<script>
+// ---------------------------------------------------------------- icons
+const I = {
+  laptop: '<svg class="i" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="11" rx="1.5"/><path d="M2 19h20"/></svg>',
+  phone: '<svg class="i" viewBox="0 0 24 24"><rect x="7" y="2.5" width="10" height="19" rx="2"/><path d="M11 18.5h2"/></svg>',
+  key: '<svg class="i" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M17 6l3 3M15 8l2 2"/></svg>',
+  people: '<svg class="i" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3 20c.6-3.6 3-5.5 6-5.5s5.4 1.9 6 5.5"/><circle cx="17" cy="9" r="2.4"/><path d="M16 14.5c2.6.2 4.4 2 5 5"/></svg>',
+  nearby: '<svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="1.6"/><path d="M8.5 8.5a5 5 0 0 0 0 7M15.5 8.5a5 5 0 0 1 0 7M5.5 5.5a9.2 9.2 0 0 0 0 13M18.5 5.5a9.2 9.2 0 0 1 0 13"/></svg>',
+  chev: '<svg class="i" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>',
+  trash: '<svg class="i" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>',
+  dice: '<svg class="i" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.7"/><path d="M20 4v4h-4"/></svg>',
+  copy: '<svg class="i" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/></svg>',
+  done: '<svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.6 2.6L16 9.7"/></svg>',
+  broom: '<svg class="i" viewBox="0 0 24 24"><path d="M14 4l6 6M12 6l6 6-5 1-3-3zM10 10l-6 6c-1 1-1 3 0 4s3 1 4 0l6-6"/></svg>',
+};
+const CAP = 16;
+
+// ---------------------------------------------------------------- data
+// Dates as [month, day, hour, minute], local. kind: browser | account | password.
+const choker = () => {
+  const when = [[9,26,14,10],[9,27,11,2],[9,27,19,40],[9,28,10,5],[9,29,16,22],[9,30,9,48],[9,30,21,3],[10,1,8,30],[10,1,13,12],
+    [10,1,22,51],[10,2,0,35],[10,2,0,48],[10,2,1,2],[10,2,1,15],[10,2,1,30],[10,2,1,42]];
+  return when.map((d, i) => ({ id: 'c' + i, label: 'Brave on Mac', kind: 'browser', tier: 'edit', at: d, me: i === 0 }));
+};
+const mixed = () => [
+  { id: 'm0', label: "Yona's MacBook", kind: 'browser', tier: 'edit', at: [9,24,20,1], me: true },
+  { id: 'm1', label: 'Bluefy on iPhone', kind: 'browser', tier: 'edit', at: [9,25,18,30] },
+  { id: 'm2', label: "Yona's account", kind: 'account', tier: 'edit', at: [9,24,20,1], acct: true },
+  { id: 'm3', label: "Yona's play password", kind: 'password', tier: 'play', at: [9,24,20,1], acct: true },
+  { id: 'm4', label: 'friends', kind: 'password', tier: 'play', at: [9,27,17,44] },
+  { id: 'm5', label: 'crew', kind: 'password', tier: 'edit', at: [9,28,12,0] },
+  { id: 'm6', label: 'Brave on Mac', kind: 'browser', tier: 'edit', at: [9,30,10,12] },
+  { id: 'm7', label: 'Brave on Mac', kind: 'browser', tier: 'edit', at: [10,1,15,40] },
+  { id: 'm8', label: 'Brave on Mac', kind: 'browser', tier: 'edit', at: [10,2,0,48] },
+  { id: 'm9', label: 'Brave on Mac', kind: 'browser', tier: 'edit', at: [10,2,1,42] },
+];
+const fresh = () => [{ id: 'f0', label: "Yona's MacBook", kind: 'browser', tier: 'edit', at: [10,2,9,0], me: true }];
+const DATA = { choker, mixed, fresh };
+
+const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const day = (at) => `${MON[at[0]-1]} ${at[1]}`;
+const clock = (at) => { const h = at[2] % 12 || 12; return `${h}:${String(at[3]).padStart(2,'0')} ${at[2] < 12 ? 'am' : 'pm'}`; };
+const stamp = (at) => `${day(at)}, ${clock(at)}`;
+const cmp = (a, b) => (a.at[0]-b.at[0]) || (a.at[1]-b.at[1]) || (a.at[2]-b.at[2]) || (a.at[3]-b.at[3]);
+const esc = (s) => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const isPhone = (label) => /iphone|android|phone|bluefy/i.test(label);
+
+// ---------------------------------------------------------------- state
+const S = { data: 'choker', me: 'on', open: 'on' };
+// ?data=mixed&me=off&open=off — for screenshots of a state.
+for (const [k, v] of new URLSearchParams(location.search)) if (k in S) S[k] = v;
+const concepts = {}; // per-concept: { entries, open, expanded:Set, armed, flash, toast }
+
+function baseEntries() {
+  const list = DATA[S.data]();
+  if (S.me === 'off') list.forEach(e => e.me = false);
+  return list;
+}
+function resetConcepts() {
+  for (const id of ['1A','1B','1C','1D']) {
+    concepts[id] = { entries: baseEntries(), open: S.open === 'on', expanded: new Set(), armed: null, flash: null, toast: null };
+  }
+}
+
+// ---------------------------------------------------------------- shared bits
+function icon(e) {
+  if (e.kind === 'account') return `<span class="kicon acct">${esc(e.label[0].toUpperCase())}</span>`;
+  if (e.kind === 'password') return `<span class="kicon pw">${I.key}</span>`;
+  return `<span class="kicon">${isPhone(e.label) ? I.phone : I.laptop}</span>`;
+}
+function trash(cid, id, label, armedLabel = 'Remove') {
+  const armed = concepts[cid].armed === id;
+  return `<button class="trash${armed ? ' armed' : ''}" data-c="${cid}" data-act="trash" data-id="${id}" title="Remove ${esc(label)}">${I.trash}<span class="lbl">${armedLabel}</span></button>`;
+}
+function detail(e) {
+  let origin;
+  if (e.kind === 'account' && e.acct) origin = 'any browser signed in as you';
+  else if (e.kind === 'password' && e.acct) origin = 'from your account';
+  else if (e.kind === 'password') origin = `password · added ${day(e.at)}`;
+  else origin = `added ${day(e.at)}`;
+  return e.tier === 'play' ? `can play · ${origin}` : origin;
+}
+function order(entries) {
+  const rank = e => e.me ? 0 : e.kind === 'browser' ? 1 : e.kind === 'account' ? 2 : (e.kind === 'password' && e.acct) ? 3 : 4;
+  return [...entries].sort((a, b) => rank(a) - rank(b));
+}
+// Group by (kind, label). Newest copy first inside; "me" floats to the top.
+function groups(entries) {
+  const map = new Map();
+  for (const e of order(entries)) {
+    const k = e.kind + '|' + e.label;
+    if (!map.has(k)) map.set(k, []);
+    map.get(k).push(e);
+  }
+  return [...map.values()].map(list => {
+    list.sort((a, b) => (b.me - a.me) || cmp(b, a));
+    return { key: list[0].kind + '|' + list[0].label, label: list[0].label, kind: list[0].kind, list,
+      me: list.some(e => e.me), tier: list[0].tier, acct: list[0].acct };
+  });
+}
+function openRow(cid, c, opts = {}) {
+  return `<div class="krow">
+    <span class="kicon open">${I.nearby}</span>
+    <span class="kwho"><span class="nm">Anyone nearby</span><span class="sd">${c.open ? 'can play without a password' : 'off — needs a key or password'}</span></span>
+    <button class="switch${c.open ? ' on' : ''}" data-c="${cid}" data-act="open" aria-label="Anyone nearby can play"></button>
+  </div>`;
+}
+function countLine(c) {
+  return `${c.entries.length} of ${CAP}`;
+}
+function toastHtml(c) {
+  return c.toast ? `<div class="toast">${I.done}<span>${c.toast}</span><button class="tlink q" data-act="untoast" data-c="${c.cid}">OK</button></div>` : '';
+}
+function meMissingNote(c, cid, fix) {
+  const full = c.entries.length >= CAP;
+  if (c.entries.some(e => e.me)) return '';
+  if (full) return `<div class="note"><span><b>This browser isn’t on it — the list is full.</b> Plugging in by USB couldn’t add it, so Bluetooth from here will ask for a password.</span>${fix || ''}</div>`;
+  return `<div class="note live"><span>This browser is added on its next USB plug-in.</span></div>`;
+}
+
+// ---------------------------------------------------------------- 1A today
+function render1A() {
+  const cid = '1A', c = concepts[cid];
+  const rows = order(c.entries).map(e => `<div class="krow">
+    ${icon(e)}
+    <span class="kwho"><span class="nm">${esc(e.label)}${e.me ? '<span class="me">this browser</span>' : ''}</span><span class="sd">${detail(e)}</span></span>
+    ${e.tier === 'play' ? '<span class="playchip">play</span>' : ''}
+    ${trash(cid, e.id, e.label)}
+  </div>`).join('');
+  return `<div class="pop">
+    <div class="ph">${I.people}<h3>Who has access</h3></div>
+    <div class="scroll"><div class="krows">${rows}${openRow(cid, c)}</div></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><button class="tlink">+ Add a password</button><span class="help">USB always gets in.</span></div>
+    ${c.entries.length >= CAP && !c.entries.some(e=>e.me) ? '' : ''}
+  </div>`;
+}
+
+// ---------------------------------------------------------------- 1B grouped
+function makeRoomCandidates(c) {
+  // every copy of a name beyond its newest one (or beyond this browser's own), across names
+  const out = [];
+  for (const g of groups(c.entries)) if (g.kind === 'browser' && g.list.length > 1) out.push(...g.list.slice(1));
+  return out;
+}
+function render1B() {
+  const cid = '1B', c = concepts[cid];
+  const full = c.entries.length >= CAP;
+  const extra = makeRoomCandidates(c);
+  const gs = groups(c.entries);
+  const rows = gs.map(g => {
+    const n = g.list.length;
+    const open = c.expanded.has(g.key);
+    const head = g.list[0];
+    let sd;
+    if (n === 1) sd = detail(head);
+    else {
+      const span = `${day(g.list[g.list.length-1].at)} – ${day(g.list[0].at)}`;
+      sd = g.me ? `<span style="color:var(--accent)">this browser</span> + ${n-1} older · ${span}` : `${n} copies · ${span}`;
+    }
+    const groupAct = n > 1
+      ? `<button class="btn sm${c.armed === 'g:' + g.key ? ' armed' : ''}" data-c="${cid}" data-act="trimgroup" data-g="${esc(g.key)}">${c.armed === 'g:' + g.key ? `Remove ${n-1}` : (g.me ? 'Keep this one' : 'Keep newest')}</button>`
+      : trash(cid, head.id, head.label);
+    const kids = open && n > 1 ? `<div class="kids">${g.list.map(e => `<div class="krow">
+        <span class="kwho"><span class="nm">${e.me ? 'This browser' : 'Added ' + stamp(e.at)}</span>${e.me ? `<span class="sd">added ${stamp(e.at)}</span>` : ''}</span>
+        ${trash(cid, e.id, e.label)}</div>`).join('')}</div>` : '';
+    return `<div class="krow${c.flash === g.key ? ' flash' : ''}">
+      ${n > 1 ? `<button class="chev${open ? ' open' : ''}" data-c="${cid}" data-act="expand" data-g="${esc(g.key)}" aria-label="Show each">${I.chev}</button>` : ''}
+      <span style="position:relative;display:inline-flex">${icon(head)}${n > 1 ? `<span class="kicon-badge"></span>` : ''}</span>
+      <span class="kwho ${n > 1 ? 'clickable' : ''}" ${n > 1 ? `data-c="${cid}" data-act="expand" data-g="${esc(g.key)}"` : ''}>
+        <span class="nm">${esc(g.label)}${n > 1 ? `<span class="x">×${n}</span>` : ''}${g.me && n === 1 ? '<span class="me">this browser</span>' : ''}</span>
+        <span class="sd">${sd}</span></span>
+      ${g.tier === 'play' ? '<span class="playchip">play</span>' : ''}
+      ${groupAct}
+    </div>${kids}`;
+  }).join('');
+  const room = extra.length;
+  const fullNote = full ? `<div class="note"><span><b>Full — ${CAP} of ${CAP}.</b> Nothing new can be added${c.entries.some(e=>e.me) ? '' : ', including this browser'}.
+      ${room ? `${room} are older copies of the same browser (a dev server, or cleared storage).` : 'Remove one below to make room.'}</span>
+      ${room ? `<span class="acts"><button class="btn sm warn${c.armed === 'room' ? ' armed' : ''}" data-c="${cid}" data-act="room">${c.armed === 'room' ? `Remove ${room} old copies` : 'Make room'}</button><span class="tip">keeps the newest of each name</span></span>` : ''}</div>`
+    : (room >= 3 ? `<div class="note live"><span>${room} older copies of the same browser. <button class="tlink" data-c="${cid}" data-act="room" style="color:var(--live-text)">${c.armed === 'room' ? `Remove ${room} — sure?` : 'Tidy up'}</button></span></div>` : '');
+  return `<div class="pop">
+    <div class="ph">${I.people}<h3>Who has access</h3><span class="cnt${full ? ' full' : ''}">${countLine(c)}</span></div>
+    ${fullNote}
+    ${full ? '' : meMissingNote(c, cid)}
+    <div class="scroll"><div class="krows">${rows}${openRow(cid, c)}</div></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><button class="tlink" ${full ? 'disabled title="Full — make room first"' : ''}>+ Add a password</button><span class="help">USB always gets in.</span></div>
+    ${toastHtml(c)}
+  </div>`;
+}
+
+// ---------------------------------------------------------------- 1C people first
+function render1C() {
+  const cid = '1C', c = concepts[cid];
+  const full = c.entries.length >= CAP;
+  const gs = groups(c.entries);
+  const mine = gs.filter(g => g.acct || g.me || (g.kind === 'browser' && /^(yona|brave on mac)/i.test(g.label)) || g.kind === 'account');
+  const yoursKeys = new Set(mine.map(g => g.key));
+  const others = gs.filter(g => !yoursKeys.has(g.key) && g.kind === 'browser');
+  const shared = gs.filter(g => !yoursKeys.has(g.key) && g.kind === 'password');
+  const mineCount = mine.reduce((n, g) => n + g.list.length, 0);
+  const extra = makeRoomCandidates(c).filter(e => yoursKeys.has(e.kind + '|' + e.label));
+  const pill = g => `<span class="pill${g.me ? ' me' : ''}">${g.kind === 'account' ? '●' : g.kind === 'password' ? '🔑' : (isPhone(g.label) ? '▯' : '▭')} ${esc(g.label)}${g.list.length > 1 ? ` <span class="c${g.list.length > 3 ? ' warn' : ''}">×${g.list.length}</span>` : ''}</span>`;
+  const openYours = c.expanded.has('yours');
+  const listRows = (gl) => gl.map(g => `<div class="krow">${icon(g.list[0])}<span class="kwho"><span class="nm">${esc(g.label)}${g.list.length > 1 ? `<span class="x">×${g.list.length}</span>` : ''}${g.me ? '<span class="me">this browser</span>' : ''}</span><span class="sd">${g.list.length > 1 ? `newest ${day(g.list[0].at)}` : detail(g.list[0])}</span></span>${g.tier === 'play' ? '<span class="playchip">play</span>' : ''}${trash(cid, g.list[0].id, g.label)}</div>`).join('');
+  return `<div class="pop">
+    <div class="ph">${I.people}<h3>Who has access</h3><span class="cnt${full ? ' full' : ''}">${countLine(c)}${full ? ' · full' : ''}</span></div>
+    <div class="seg big" role="group" aria-label="Who can play">
+      <button class="${c.open ? 'on' : ''}" data-c="${cid}" data-act="setopen" data-v="1">Anyone nearby<small>can play, no password</small></button>
+      <button class="${c.open ? '' : 'on'}" data-c="${cid}" data-act="setopen" data-v="0">Only the list<small>everyone else asks</small></button>
+    </div>
+    <div class="bucket">
+      <div class="bh">You<span class="r">${mineCount} ${mineCount === 1 ? 'key' : 'keys'}</span></div>
+      <div class="pills">${mine.map(pill).join('')}</div>
+      ${extra.length ? `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:2px">
+        <button class="btn sm${full ? ' warn' : ''}${c.armed === 'room' ? ' armed' : ''}" data-c="${cid}" data-act="room">${I.broom} ${c.armed === 'room' ? `Remove ${extra.length} — sure?` : `Tidy up ${extra.length} old copies`}</button>
+        <span class="tip">${full ? 'the board is full' : 'one per browser is enough'}</span></div>` : ''}
+      <button class="tlink q" style="justify-self:start" data-c="${cid}" data-act="expand" data-g="yours">${openYours ? 'Hide each' : 'Show each'}</button>
+      ${openYours ? `<div class="krows">${listRows(mine)}</div>` : ''}
+    </div>
+    ${others.length ? `<div class="bucket"><div class="bh">Other browsers<span class="r">${others.length}</span></div><div class="krows">${listRows(others)}</div></div>` : ''}
+    <div class="bucket"><div class="bh">Shared passwords<span class="r">${shared.length || 'none'}</span></div>
+      ${shared.length ? `<div class="krows">${listRows(shared)}</div>` : ''}
+      <button class="tlink" style="justify-self:start" ${full ? 'disabled' : ''}>+ Add a password</button></div>
+    ${!full ? '' : (c.entries.some(e=>e.me) ? '' : '<p class="help" style="color:var(--warn-text)">This browser isn’t on it — tidy up to make room; your next USB plug-in adds it.</p>')}
+    ${toastHtml(c)}
+  </div>`;
+}
+
+// ---------------------------------------------------------------- 1D self-tidying
+function render1D() {
+  const cid = '1D', c = concepts[cid];
+  const full = c.entries.length >= CAP;
+  const gs = groups(c.entries);
+  const extra = makeRoomCandidates(c);
+  const slotCls = e => e.me ? 'me' : e.kind === 'account' ? 'a' : e.kind === 'password' ? 'p' : 'b';
+  const hot = c.expanded.has('hot') ? [...c.expanded].find(k => k.startsWith('hot:'))?.slice(4) : null;
+  const flat = gs.flatMap(g => g.list.map(e => ({ e, g: g.key })));
+  const slots = Array.from({ length: CAP }, (_, i) => flat[i]
+    ? `<span class="slot ${slotCls(flat[i].e)}${hot === flat[i].g ? ' hot' : ''}" title="${esc(flat[i].e.label)}"></span>` : '<span class="slot"></span>').join('');
+  const rows = gs.map(g => {
+    const n = g.list.length;
+    return `<div class="krow${c.flash === g.key ? ' flash' : ''}" data-c="${cid}" data-act="hot" data-g="${esc(g.key)}">
+      ${icon(g.list[0])}
+      <span class="kwho"><span class="nm">${esc(g.label)}${n > 1 ? `<span class="x">×${n}</span>` : ''}${g.me ? '<span class="me">this browser</span>' : ''}</span>
+      <span class="sd">${n > 1 ? `${n - 1} older ${n-1 === 1 ? 'copy' : 'copies'} — replaced on the next plug-in` : detail(g.list[0])}</span></span>
+      ${g.tier === 'play' ? '<span class="playchip">play</span>' : ''}
+      ${trash(cid, g.list[0].id, g.label, n > 1 ? `Remove all ${n}` : 'Remove')}
+    </div>`;
+  }).join('');
+  return `<div class="pop">
+    <div class="ph">${I.people}<h3>Who has access</h3></div>
+    <div><div class="slots">${slots}</div>
+      <div class="slotcap"><span>${c.entries.length} of ${CAP} slots</span>${full ? '<span class="full">full</span>' : `<span>${CAP - c.entries.length} free</span>`}</div></div>
+    ${extra.length ? `<div class="note${full ? '' : ' live'}"><span>${full ? `<b>Full.</b> ` : ''}${extra.length} ${extra.length === 1 ? 'is an older copy' : 'are older copies'} of a browser that’s already here. From now on a browser’s new copy replaces its old one when you plug in.</span>
+      <span class="acts"><button class="btn sm${full ? ' warn' : ''}${c.armed === 'room' ? ' armed' : ''}" data-c="${cid}" data-act="room">${c.armed === 'room' ? `Remove ${extra.length} — sure?` : 'Clear them now'}</button></span></div>` : ''}
+    ${c.entries.some(e => e.me) ? '' : `<div class="note live"><span>This browser isn’t on it yet. Plug in by USB again: it takes an older Brave on Mac’s place.</span></div>`}
+    <div class="scroll"><div class="krows">${rows}${openRow(cid, c)}</div></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><button class="tlink" ${full ? 'disabled' : ''}>+ Add a password</button><span class="help">USB always gets in.</span></div>
+    ${toastHtml(c)}
+    <p class="help" style="border-top:1px dashed var(--border-strong);padding-top:7px"><b>What the toast says after a plug-in from a new dev server:</b></p>
+    <div class="toast" style="box-shadow:none">${I.done}<span><b>Brave on Mac</b> can now unlock PLAYFUL choker over Bluetooth. It replaced the older Brave on Mac.</span><button class="tlink q">Undo</button></div>
+  </div>`;
+}
+
+// ---------------------------------------------------------------- §2 add a password
+const WORDS = ['amber','anchor','aspen','badger','banjo','beacon','birch','cedar','comet','coral','cricket','ember','falcon','fern','firefly',
+  'garnet','gecko','glacier','harbor','heron','iris','jade','kayak','lantern','lotus','lynx','maple','meadow','moss','nova','orbit','otter',
+  'pebble','plum','prism','quartz','raven','river','robin','sage','sparrow','summit','thistle','tiger','tulip','velvet','willow','zephyr'];
+const roll = () => { const a = WORDS[Math.random() * WORDS.length | 0]; let b; do { b = WORDS[Math.random() * WORDS.length | 0]; } while (b === a);
+  return `${a}-${b}-${10 + (Math.random() * 90 | 0)}`; };
+const F = {};
+function resetForms() {
+  F['2A'] = { pw: 'maple-otter-42', typed: '', typing: false, name: 'friends', tier: 'play' };
+  F['2B'] = { pw: 'maple-otter-42', name: 'friends', tier: 'play', fresh: true };
+  F['2C'] = { pw: 'maple-otter-42', name: 'friends', tier: 'play', open: true, added: null };
+  F['2D'] = { pw: 'maple-otter-42', name: '', added: null };
+}
+const linkFor = (pw) => `https://lightplayer.app/unlock#d=PLAYFUL%20choker&p=${encodeURIComponent(pw)}`;
+function qr(id, text) { return `<canvas class="qr" data-qr="${esc(text)}" id="${id}" width="25" height="25"></canvas>`; }
+function drawQrs() {
+  document.querySelectorAll('canvas[data-qr]').forEach(cv => {
+    const ctx = cv.getContext('2d'); const t = cv.dataset.qr; let h = 2166136261;
+    for (const ch of t) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); }
+    const rnd = () => { h ^= h << 13; h ^= h >>> 17; h ^= h << 5; return (h >>> 0) / 4294967296; };
+    ctx.fillStyle = '#fffaf0'; ctx.fillRect(0, 0, 25, 25); ctx.fillStyle = '#0c1114';
+    for (let y = 1; y < 24; y++) for (let x = 1; x < 24; x++) if (rnd() < .48) ctx.fillRect(x, y, 1, 1);
+    for (const [ox, oy] of [[1,1],[17,1],[1,17]]) { ctx.fillStyle = '#0c1114'; ctx.fillRect(ox, oy, 7, 7); ctx.fillStyle = '#fffaf0'; ctx.fillRect(ox+1, oy+1, 5, 5); ctx.fillStyle = '#0c1114'; ctx.fillRect(ox+2, oy+2, 3, 3); }
+  });
+}
+const tierSeg = (fid, tier) => `<div class="seg" role="group"><button class="${tier === 'play' ? 'on' : ''}" data-f="${fid}" data-act="tier" data-v="play">Play</button><button class="${tier === 'edit' ? 'on' : ''}" data-f="${fid}" data-act="tier" data-v="edit">Edit</button></div>`;
+
+function render2A() {
+  const f = F['2A']; const pw = f.typing ? f.typed : f.pw;
+  return `<div class="pop">
+    <div class="ph"><h3>Share PLAYFUL choker</h3><button class="tlink" style="margin-left:auto">Back</button></div>
+    ${f.typing
+      ? `<div class="inp"><input type="text" data-f="2A" data-bind="typed" placeholder="Device password" value="${esc(f.typed)}"><button class="tlink q" style="padding:0 6px">Hide</button></div>
+         ${pw ? `<div class="qrbox">${qr('q2a', linkFor(pw))}<p class="help">Scan with a phone camera — it opens LightPlayer and saves the password.</p></div>` : ''}`
+      : `<div class="qrbox">${qr('q2a', linkFor(pw))}<div style="display:grid;gap:5px;min-width:0"><p class="help">Scan with a phone camera — it opens LightPlayer and saves the password. Or say it:</p><span class="pwbig">${esc(pw)}</span></div></div>`}
+    ${pw ? `<code class="link">${esc(linkFor(pw))}</code>` : ''}
+    <div style="display:flex;gap:8px"><button class="btn" style="flex:1">Copy link</button>${f.typing ? '' : `<button class="btn" style="flex:1" data-f="2A" data-act="reroll">New words</button>`}</div>
+    <div style="display:flex;gap:8px;align-items:center"><div class="inp" style="flex:1"><input data-f="2A" data-bind="name" value="${esc(f.name)}" aria-label="Name (friends, crew…)"></div>${tierSeg('2A', f.tier)}</div>
+    <p class="help"><b>Play</b>: knobs, brightness, patterns. <b>Edit</b>: change the show.</p>
+    <button class="btn primary wide" ${pw ? '' : 'disabled'}>Add to the device</button>
+    <button class="tlink" style="justify-self:center" data-f="2A" data-act="typing">${f.typing ? 'Use words instead' : 'Type my own instead'}</button>
+  </div>`;
+}
+
+function render2B() {
+  const f = F['2B'];
+  return `<div class="pop">
+    <div class="ph"><h3>Add a password</h3><button class="tlink q" style="margin-left:auto">Back</button></div>
+    <label class="field"><span>PASSWORD — type to replace it</span>
+      <div class="inp huge"><input data-f="2B" data-bind="pw" data-selectall="1" value="${esc(f.pw)}" spellcheck="false" autocomplete="off" aria-label="Password">
+      <button class="icobtn" data-f="2B" data-act="reroll" title="Another one">${I.dice}</button></div></label>
+    <div style="display:flex;gap:8px;align-items:flex-end">
+      <label class="field" style="flex:1"><span>FOR</span><div class="inp"><input data-f="2B" data-bind="name" value="${esc(f.name)}" placeholder="friends, crew…"></div></label>
+      ${tierSeg('2B', f.tier)}</div>
+    <button class="btn primary wide" style="padding:11px" ${f.pw.trim() ? '' : 'disabled'}>Add “${esc(f.pw.trim() || '…')}” for ${f.tier}</button>
+    <div class="qrbox" style="border-top:1px solid var(--border-muted);padding-top:9px">${qr('q2b', linkFor(f.pw))}
+      <div style="display:grid;gap:5px;min-width:0"><p class="help">Then share it: scan, or <button class="tlink q">copy link</button>. The QR follows what you type.</p></div></div>
+  </div>`;
+}
+
+function render2C() {
+  const f = F['2C'];
+  const added = f.added ? `<div class="krow flash">${'<span class="kicon pw">' + I.key + '</span>'}<span class="kwho"><span class="nm">${esc(f.added.name)}</span><span class="sd">${f.added.tier === 'play' ? 'can play · ' : ''}added just now</span></span>
+      <button class="btn sm" data-f="2C" data-act="share">Share</button></div>
+      ${f.sharing ? `<div class="qrbox" style="padding:4px 0 6px 40px">${qr('q2c', linkFor(f.added.pw))}<div style="display:grid;gap:4px;min-width:0"><span class="pwbig" style="font-size:15px">${esc(f.added.pw)}</span><button class="tlink q" style="justify-self:start">Copy link</button></div></div>` : ''}` : '';
+  return `<div class="pop">
+    <div class="ph">${I.people}<h3>Who has access</h3><span class="cnt">9 of 16</span></div>
+    <div class="krows">
+      <div class="krow"><span class="kicon">${I.laptop}</span><span class="kwho"><span class="nm">Yona's MacBook<span class="me">this browser</span></span><span class="sd">added Sep 24</span></span></div>
+      <div class="krow"><span class="kicon acct">Y</span><span class="kwho"><span class="nm">Yona's account</span><span class="sd">any browser signed in as you</span></span></div>
+      <div class="krow"><span class="kicon pw">${I.key}</span><span class="kwho"><span class="nm">crew</span><span class="sd">password · added Sep 28</span></span></div>
+      ${added}
+    </div>
+    ${f.open ? `<div class="inline-add">
+      <div class="inp mono"><input data-f="2C" data-bind="pw" data-selectall="1" value="${esc(f.pw)}" spellcheck="false" aria-label="Password"><button class="icobtn" data-f="2C" data-act="reroll" title="Another one">${I.dice}</button></div>
+      <div style="display:flex;gap:6px;align-items:center"><div class="inp" style="flex:1"><input data-f="2C" data-bind="name" value="${esc(f.name)}" placeholder="for (friends, crew…)"></div>${tierSeg('2C', f.tier)}</div>
+      <div style="display:flex;gap:8px;align-items:center"><button class="btn primary sm" data-f="2C" data-act="add" ${f.pw.trim() ? '' : 'disabled'}>Add</button><button class="tlink q" data-f="2C" data-act="cancel">Cancel</button>
+        <span class="tip" style="margin-left:auto"><kbd>⏎</kbd> adds</span></div>
+    </div>` : `<button class="tlink" style="justify-self:start" data-f="2C" data-act="openadd">+ Add a password</button>`}
+  </div>`;
+}
+
+function render2D() {
+  const f = F['2D'];
+  return `<div class="pop">
+    <div class="ph"><h3>Add a password</h3><button class="tlink q" style="margin-left:auto">Back</button></div>
+    <div class="inp huge" style="margin-top:4px"><input data-f="2D" data-bind="pw" data-selectall="1" value="${esc(f.pw)}" spellcheck="false" aria-label="Password"><button class="icobtn" data-f="2D" data-act="reroll" title="Another one">${I.dice}</button></div>
+    <p class="tip" style="text-align:center;margin:-2px 0 2px">Ours, or type your own over it.</p>
+    <div class="twoadd">
+      <button class="btn primary" data-f="2D" data-act="add2" data-v="play">Add for play<small>knobs, brightness, patterns</small></button>
+      <button class="btn" data-f="2D" data-act="add2" data-v="edit">Add for edit<small>change the show</small></button>
+    </div>
+    <div class="inp"><input data-f="2D" data-bind="name" value="${esc(f.name)}" placeholder="Name it (optional — “friends”)"></div>
+    ${f.added ? `<div class="toast" style="box-shadow:none">${I.done}<span><b>${esc(f.added.pw)}</b> now unlocks PLAYFUL choker for ${f.added.tier}${f.added.name ? ` (“${esc(f.added.name)}”)` : ''}.</span></div>
+      <div class="qrbox">${qr('q2d', linkFor(f.added.pw))}<div style="display:grid;gap:4px;min-width:0"><p class="help">Share it: scan, or</p><button class="tlink q" style="justify-self:start">Copy link</button></div></div>` : ''}
+  </div>`;
+}
+
+// ---------------------------------------------------------------- mount
+const S1 = [
+  ['1A', 'Today', 'today', 'One row per key. On your choker: <b>16 identical “Brave on Mac” rows</b>, no count, no sign it’s full, and “+ Add a password” fails when pressed.', render1A],
+  ['1B', 'Grouped by name', 'lean', 'Copies of the same name fold into <b>one row ×N</b> (chevron shows each, by date). The header counts <b>16 of 16</b>; full gets a banner with <b>Make room</b>. A group’s action is <b>Keep this one</b> (two-tap).', render1B],
+  ['1C', 'People first', '', '“Who can play” is the <b>first choice</b>, not a switch at the bottom. Then <b>You</b> (your browsers + account, as pills) with one <b>Tidy up</b>, then other browsers, then shared passwords.', render1C],
+  ['1D', 'Self-tidying', '', 'A browser’s new copy <b>replaces its older one on plug-in</b> (same name, same kind) — the list stops growing on its own. A 16-slot meter shows fullness; existing copies get a one-time <b>Clear them now</b>.', render1D],
+];
+const S2 = [
+  ['2A', 'Today', 'today', 'Generated words + QR; “Type my own instead” swaps to <b>a second, empty field</b>. Name + Play/Edit + Add below.', render2A],
+  ['2B', 'One prefilled field', 'lean', 'The password <b>is</b> the field, prefilled and <b>selected on focus</b> — type and it’s yours; ↻ rolls another. The button says exactly what will happen. QR follows below.', render2B],
+  ['2C', 'Inline in the list', '', 'No second screen: “+ Add a password” opens a row <b>where the new entry will appear</b>. Share (QR) is on the row after it’s added.', render2C],
+  ['2D', 'Two add buttons', '', 'One big prefilled field; <b>the button is the tier</b> (“Add for play” / “Add for edit”), name is optional. Share appears after adding.', render2D],
+];
+function mountRow(el, defs) {
+  el.innerHTML = defs.map(([id, name, tag, note]) => `<div class="concept ${tag}"><div class="cap"><span class="cid">${id}</span><span class="cname">${name}</span></div><p class="cnote">${note}</p><div data-mount="${id}"></div></div>`).join('');
+}
+function renderAll() {
+  for (const [id,,,, fn] of [...S1, ...S2]) {
+    const slot = document.querySelector(`[data-mount="${id}"]`);
+    const focus = document.activeElement && slot.contains(document.activeElement) ? document.activeElement.dataset.bind : null;
+    const caret = focus ? [document.activeElement.selectionStart, document.activeElement.selectionEnd] : null;
+    if (concepts[id]) concepts[id].cid = id;
+    slot.innerHTML = fn();
+    if (focus) { const inp = slot.querySelector(`[data-bind="${focus}"]`); if (inp) { restoring = true; inp.focus(); inp.setSelectionRange(...caret); restoring = false; } }
+  }
+  drawQrs();
+  document.querySelectorAll('#controls .chip').forEach(b => b.setAttribute('aria-pressed', String(S[b.dataset.k] === b.dataset.v)));
+}
+
+// ---------------------------------------------------------------- events
+let armTimer;
+function arm(c, key) { c.armed = key; clearTimeout(armTimer); armTimer = setTimeout(() => { c.armed = null; renderAll(); }, 4000); }
+function removeIds(c, ids) { c.entries = c.entries.filter(e => !ids.includes(e.id)); }
+
+document.addEventListener('click', ev => {
+  const t = ev.target.closest('[data-act], #controls .chip'); if (!t) return;
+  if (t.matches('#controls .chip')) {
+    if (t.dataset.k !== 'reset') S[t.dataset.k] = t.dataset.v;
+    resetConcepts(); resetForms(); renderAll(); return;
+  }
+  const act = t.dataset.act;
+  if (t.dataset.c) {
+    const c = concepts[t.dataset.c];
+    if (act === 'expand') { const g = t.dataset.g; c.expanded.has(g) ? c.expanded.delete(g) : c.expanded.add(g); }
+    else if (act === 'open') c.open = !c.open;
+    else if (act === 'setopen') c.open = t.dataset.v === '1';
+    else if (act === 'untoast') c.toast = null;
+    else if (act === 'hot') { [...c.expanded].filter(k => k.startsWith('hot:')).forEach(k => c.expanded.delete(k)); c.expanded.add('hot'); c.expanded.add('hot:' + t.dataset.g); }
+    else if (act === 'trash') {
+      ev.stopPropagation();
+      if (c.armed === t.dataset.id) {
+        const e = c.entries.find(x => x.id === t.dataset.id);
+        // 1D's group trash removes every copy of the name
+        const ids = t.dataset.c === '1D' ? c.entries.filter(x => x.kind === e.kind && x.label === e.label).map(x => x.id) : [e.id];
+        removeIds(c, ids); c.armed = null;
+      } else arm(c, t.dataset.id);
+    }
+    else if (act === 'trimgroup') {
+      const key = 'g:' + t.dataset.g;
+      if (c.armed === key) {
+        const g = groups(c.entries).find(g => g.key === t.dataset.g);
+        removeIds(c, g.list.slice(1).map(e => e.id)); c.armed = null; c.flash = g.key;
+        c.toast = `Removed ${g.list.length - 1} older ${esc(g.label)}. ${countLine(c)} now.`;
+      } else arm(c, key);
+    }
+    else if (act === 'room') {
+      if (c.armed === 'room') {
+        const extra = makeRoomCandidates(c); removeIds(c, extra.map(e => e.id)); c.armed = null;
+        c.toast = `Removed ${extra.length} old copies. ${countLine(c)} now${c.entries.some(e=>e.me) ? '' : ' — plug in by USB again to add this browser'}.`;
+      } else arm(c, 'room');
+    }
+    renderAll(); return;
+  }
+  if (t.dataset.f) {
+    const f = F[t.dataset.f];
+    if (act === 'tier') f.tier = t.dataset.v;
+    else if (act === 'reroll') { f.pw = roll(); }
+    else if (act === 'typing') f.typing = !f.typing;
+    else if (act === 'openadd') { f.open = true; f.pw = roll(); }
+    else if (act === 'cancel') f.open = false;
+    else if (act === 'add') { f.added = { name: f.name.trim() || 'password', pw: f.pw.trim(), tier: f.tier }; f.open = false; f.sharing = false; }
+    else if (act === 'share') f.sharing = !f.sharing;
+    else if (act === 'add2') { f.added = { pw: f.pw.trim(), tier: t.dataset.v, name: f.name.trim() }; }
+    renderAll();
+  }
+});
+document.addEventListener('input', ev => {
+  const t = ev.target; if (!t.dataset.f) return;
+  F[t.dataset.f][t.dataset.bind] = t.value; renderAll();
+});
+document.addEventListener('keydown', ev => {
+  const t = ev.target; if (ev.key !== 'Enter' || !t.dataset.f) return;
+  if (t.dataset.f === '2C') document.querySelector('[data-f="2C"][data-act="add"]')?.click();
+});
+// "type to replace it": the whole prefilled password is selected on focus
+// (not when a re-render puts focus back mid-typing). The mouseup after a
+// focusing click would collapse the selection to a caret: swallow that one.
+let restoring = false, selectOnUp = null;
+document.addEventListener('focusin', ev => {
+  const t = ev.target; if (!t.dataset.selectall || restoring) return;
+  t.select(); selectOnUp = t;
+});
+document.addEventListener('mouseup', ev => { if (ev.target === selectOnUp) { ev.preventDefault(); selectOnUp.select(); } selectOnUp = null; });
+
+mountRow(document.getElementById('s1'), S1);
+mountRow(document.getElementById('s2'), S2);
+resetConcepts(); resetForms(); renderAll();
+</script>
+</body>
+</html>
