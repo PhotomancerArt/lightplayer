@@ -2686,6 +2686,8 @@ test-rust-core:
     # ...and again with the secure channel: the snow oracle, the RFC vectors,
     # and the simulator, fuzzer and allocation tests' secure cases.
     cargo test -p lp-link --features sim,lab,secure
+    # lpc-wire's secure-initiator port (feature `secure-link`).
+    cargo test -p lpc-wire --features secure-link,ser-write-json
 
 # lp-link (the link-layer prototype, plan lp2025/2026-09-26-1720-reliable-device-link):
 # the delivery property at soak depth, 5,000 fault schedules per ARQ variant
@@ -2721,6 +2723,7 @@ check-lp-link-targets: install-rv32-target install-wasm32-target
     cargo check -p lp-link --target {{ wasm32_target }} --features log,lab
     cargo check -p lp-link --target {{ rv32_target }} --features log,lab,secure
     cargo check -p lp-link --target {{ wasm32_target }} --features log,lab,secure
+    cargo check -p lpc-wire --target {{ wasm32_target }} --features secure-link
     cargo clippy -p lp-link --features sim,lab,log --all-targets -- --no-deps -D warnings
     cargo clippy -p lp-link --features sim,lab,log,secure --all-targets -- --no-deps -D warnings
     for t in {{ rv32_target }} {{ wasm32_target }}; do \

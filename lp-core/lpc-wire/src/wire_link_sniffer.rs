@@ -342,3 +342,41 @@ mod tests {
         }
     }
 }
+
+/// Sealed frames pass through as opaque lines, ACKs not at all.
+#[cfg(test)]
+mod sealed_tests {
+    use super::*;
+    use alloc::vec::Vec;
+    use lp_link::frame::FrameKind;
+
+    #[test]
+    fn sealed_data_and_log_frames_pass_through_and_acks_do_not() {
+        let mut table = LearnedTable::boxed();
+        let mut text = [TextLines::new(), TextLines::new()];
+        let mut out = Vec::new();
+        for (kind, chan) in [
+            (FrameKind::Data, CH_PROTO),
+            (FrameKind::Datagram, CH_LOG),
+            (FrameKind::Ack, 0),
+        ] {
+            let event = SniffEvent::Sealed {
+                dir: Direction::BoardToHost,
+                kind,
+                chan,
+                len: 40,
+            };
+            read_event(&mut table, &mut text, event, &mut |w| out.push(w));
+        }
+        assert_eq!(out.len(), 2);
+        assert!(matches!(
+            out[0],
+            SniffedWire::Sealed {
+                dir: Direction::BoardToHost,
+                chan: CH_PROTO,
+                len: 40
+            }
+        ));
+        assert!(matches!(out[1], SniffedWire::Sealed { chan: CH_LOG, .. }));
+    }
+}

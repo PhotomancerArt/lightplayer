@@ -11,10 +11,14 @@
 extern crate alloc;
 
 use alloc::string::String;
+use alloc::vec::Vec;
 use core::cell::Cell;
 use hashbrown::HashMap;
-use lpc_access::{BeginOutcome, LoginMac, LoginOutcome, LoginState, NONCE_BYTES, Tier};
-use lpc_shared::transport::{Link, LinkId, LinkTrust};
+use lpc_access::{
+    BeginOutcome, LoginMac, LoginOffer, LoginOutcome, LoginState, NONCE_BYTES, SALT_BYTES, Tier,
+    key_candidates,
+};
+use lpc_shared::transport::{KeyAnswer, Link, LinkId, LinkTrust};
 use lpc_wire::HelloAuth;
 use lpc_wire::server::ServerMsgBody;
 use lpfs::LpFs;
@@ -46,6 +50,10 @@ pub struct AccessState {
     /// server handles (`invalidate_device_store`).
     device_open: Cell<Option<bool>>,
     entropy: Option<EntropySource>,
+    /// Secure links: the tier each candidate of a link's last key lookup
+    /// grants (`None` for the anonymous key), until its handshake says which
+    /// one matched.
+    key_lookups: HashMap<LinkId, Vec<Option<Tier>>>,
 }
 
 impl AccessState {
@@ -58,6 +66,7 @@ impl AccessState {
             clock_ms: 0,
             device_open: Cell::new(None),
             entropy: None,
+            key_lookups: HashMap::new(),
         }
     }
 
@@ -86,6 +95,7 @@ impl AccessState {
     /// it held the device's one login. The backoff stays.
     pub fn close_link(&mut self, link: LinkId) {
         self.sessions.remove(&link);
+        self.key_lookups.remove(&link);
         if self.login_owner == Some(link) {
             self.login.cancel();
             self.login_owner = None;
@@ -112,7 +122,7 @@ impl AccessState {
             .unwrap_or_else(|| LinkSession::new(link.trust));
         match session.trust {
             LinkTrust::Trusted => session.effective_tier(false),
-            LinkTrust::Untrusted => match session.granted {
+            LinkTrust::Untrusted | LinkTrust::Keyed => match session.granted {
                 Some(granted) => Some(granted),
                 None => session.effective_tier(self.device_open(fs)),
             },
@@ -123,7 +133,7 @@ impl AccessState {
     #[inline(never)]
     pub fn hello_auth(&self, link: Link, fs: &dyn LpFs) -> HelloAuth {
         HelloAuth {
-            required: link.trust == LinkTrust::Untrusted,
+            required: link.trust != LinkTrust::Trusted,
             granted: self.tier(link, fs),
         }
     }
@@ -189,6 +199,109 @@ impl AccessState {
             session.granted = Some(*tier);
         }
         ServerMsgBody::LoginResult(outcome)
+    }
+
+    /// `LoginBegin` on a keyed (secure network) link: the offers, so a
+    /// typed-password client can derive its key and its salt (the key id it
+    /// then handshakes with), and a fresh nonce no one can answer: nothing
+    /// registers the device's one login and no slot is taken. A secure link
+    /// logs in by handshake only.
+    #[inline(never)]
+    pub fn offers_for_keyed_link<'a>(
+        &self,
+        fs: &dyn LpFs,
+        loaded_project_paths: impl IntoIterator<Item = &'a str>,
+    ) -> ServerMsgBody {
+        let Some(entropy) = self.entropy else {
+            return ServerMsgBody::Error {
+                error: String::from("login is unavailable: this server has no entropy source"),
+            };
+        };
+        let mut nonce = [0u8; NONCE_BYTES];
+        entropy(&mut nonce);
+        let offers = access_store::installed_secrets(fs, loaded_project_paths)
+            .iter()
+            .map(|secret| LoginOffer {
+                salt: secret.salt,
+                iterations: secret.iterations,
+            })
+            .collect();
+        ServerMsgBody::LoginChallenge { nonce, offers }
+    }
+
+    /// `LoginAnswer` on a keyed link: refused, always. Its handshake is its
+    /// only login, so an HMAC answer can never be relayed through a session
+    /// a relay could sit in the middle of. The refusal is the one any
+    /// `LoginAnswer` with no challenge outstanding gets (`LoginResult`
+    /// refused, no wait), which on a keyed link is always the case:
+    /// `LoginBegin` there registers none. No new wire shape, and the
+    /// `NotPermitted` reply keeps meaning "your tier does not cover this".
+    #[must_use]
+    pub fn refuse_keyed_login_answer() -> ServerMsgBody {
+        ServerMsgBody::LoginResult(LoginOutcome::Refused { retry_after_ms: 0 })
+    }
+
+    /// A secure link's handshake named the entry with `salt`: its candidate
+    /// PSKs, best tier first, or why there are none. In backoff the lookup
+    /// is refused without reading anything; an unknown salt tested no
+    /// secret and is not charged; the anonymous key (zero salt) is answered
+    /// with the zero PSK and grants nothing (the device's `open` decides).
+    ///
+    /// Never inlined: rare, and its temporaries (the installed secrets) must
+    /// not deepen `tick_and_send`'s frame (the C6 main-stack ratchet).
+    #[inline(never)]
+    pub fn key_lookup<'a>(
+        &mut self,
+        link: LinkId,
+        salt: &[u8; SALT_BYTES],
+        fs: &dyn LpFs,
+        loaded_project_paths: impl IntoIterator<Item = &'a str>,
+    ) -> KeyAnswer {
+        let backoff = self.login.rate_limit().retry_after_ms(self.clock_ms);
+        if backoff > 0 {
+            return KeyAnswer::Backoff {
+                retry_after_ms: u32::try_from(backoff).unwrap_or(u32::MAX),
+            };
+        }
+        if *salt == [0; SALT_BYTES] {
+            self.key_lookups.insert(link, alloc::vec![None]);
+            return KeyAnswer::Keys(alloc::vec![[0; 32]]);
+        }
+        let installed = access_store::installed_secrets(fs, loaded_project_paths);
+        let candidates = key_candidates(&installed, salt);
+        if candidates.is_empty() {
+            self.key_lookups.remove(&link);
+            return KeyAnswer::Unknown;
+        }
+        self.key_lookups
+            .insert(link, candidates.iter().map(|c| Some(c.tier)).collect());
+        KeyAnswer::Keys(candidates.iter().map(|c| c.psk).collect())
+    }
+
+    /// A secure link's handshake matched no candidate of a known salt: a
+    /// failed guess, charged to the device's backoff like a wrong login.
+    pub fn key_wrong(&mut self, link: LinkId) {
+        self.key_lookups.remove(&link);
+        let now = self.clock_ms;
+        self.login.rate_limit_mut().record_failure(now);
+    }
+
+    /// A secure link came up on `candidate` of its lookup: the link's grant
+    /// is that candidate's tier. A real key clears the backoff, as a login
+    /// does; the anonymous key grants nothing and clears nothing.
+    pub fn key_authenticated(&mut self, link: LinkId, candidate: u8) {
+        let tier = self
+            .key_lookups
+            .remove(&link)
+            .and_then(|tiers| tiers.get(usize::from(candidate)).copied().flatten());
+        let session = self
+            .sessions
+            .entry(link)
+            .or_insert_with(|| LinkSession::new(LinkTrust::Keyed));
+        session.granted = tier;
+        if tier.is_some() {
+            self.login.rate_limit_mut().record_success();
+        }
     }
 
     /// The access clock, for tests and logs.
