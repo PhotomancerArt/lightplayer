@@ -2499,6 +2499,11 @@ fmt-check:
 # compile it for its real target.
 clippy-host:
     cargo clippy --workspace --exclude lps-builtins-emu-app --exclude fw-esp32c6 --exclude fw-esp32s3 --exclude fw-esp32v3 --exclude fw-emu --exclude lp-riscv-emu-guest-test-app --exclude lp-riscv-emu-guest --exclude lp-xt-fp-harness --exclude lp-gfx-wgpu --exclude fw-browser --exclude naga-wasm-poc -- --no-deps -D warnings
+    # fw-esp32-common's usb_link/uart_link modules are behind non-default
+    # features (`clippy-host`'s `--workspace` only lints its defaults), the
+    # same gap `test-rust-core` closes above for the tests.
+    cargo clippy -p fw-esp32-common --features usb-link,server --all-targets -- --no-deps -D warnings
+    cargo clippy -p fw-esp32-common --features uart-link,server --all-targets -- --no-deps -D warnings
 
 # `lp-emu-esp32c6` with the `jit` feature on — the native translated build.
 #
@@ -2731,10 +2736,17 @@ test-rust-core:
     cargo test -p lp-link --features sim,lab,secure
     # lpc-wire's secure-initiator port (feature `secure-link`).
     cargo test -p lpc-wire --features secure-link,ser-write-json
-    # fw-esp32-common's server half (`lp_fs`'s legacy guard, the boot
-    # loader's interrupted-stamp test): only the chip crates turn `server`
-    # on, and none of them is a default member, so the plain run skips it.
-    cargo test -p fw-esp32-common --features server --lib
+    # fw-esp32-common's usb_link module (the C6/S3 host link) sits behind the
+    # non-default `usb-link` feature, and needs `server` for the transport's
+    # `lpc_wire` dependency. Plain `cargo test` above never turns it on, so
+    # these tests (and the classic's uart_link pair below) never ran in CI
+    # until this line (docs: lp2025/_auto/2026-10-01-fw-common-link-tests-never-run).
+    # Both runs turn on `server`, so they also run that crate's `lp_fs`
+    # legacy guard and the boot loader's interrupted-stamp test
+    # (`hardware::manifest_loader`).
+    cargo test -p fw-esp32-common --features usb-link,server
+    # ...and the classic's UART0 host link (feature `uart-link`), same reason.
+    cargo test -p fw-esp32-common --features uart-link,server
 
 # lp-link (the link-layer prototype, plan lp2025/2026-09-26-1720-reliable-device-link):
 # the delivery property at soak depth, 5,000 fault schedules per ARQ variant

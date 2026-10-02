@@ -94,8 +94,9 @@ nothing or as the whole manifest) and `boot_settles_a_staged_copy_once`;
 and in `lpa-client` `device_stamp::tests`, the request order and the two
 interrupted-stamp messages. These run under `--features server`, which no
 CI recipe used to turn on for `fw-esp32-common` (its `lp_fs` legacy-guard
-tests were unrun in CI too); `test-rust-core` now runs that crate's
-`--features server` tests.
+tests were unrun in CI too); `test-rust-core` now runs that crate with
+`usb-link,server` and `uart-link,server` (main's #905, which closed the same
+gap for the link modules while this was in flight), and both include them.
 
 **Lesson** — "the activity ended" and "the last write landed" are different
 moments; a walk that keys off the first will eventually cut the second. And
