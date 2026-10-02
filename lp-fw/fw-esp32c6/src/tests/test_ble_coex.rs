@@ -3,7 +3,7 @@
 //!
 //! Plan `ble-remote-control`, M2 (desk sitting 1, Run G and Run H). The radio
 //! is brought up exactly as the product's `Esp32EspNowRadioDriver` does it —
-//! `esp_radio::wifi::new(WIFI, ControllerConfig::default())`, then the ESP-NOW
+//! `esp_radio::wifi::new(WIFI, espnow_controller_config())`, then the ESP-NOW
 //! interface on the product's default channel, broadcast — and then this
 //! module broadcasts a sequence-numbered frame at a fixed rate and counts what
 //! it receives from any other board running the same image.
@@ -36,7 +36,9 @@ use embassy_futures::select::{Either, select};
 use embassy_time::{Duration, Instant, Ticker};
 use esp_println::println;
 use esp_radio::esp_now::{BROADCAST_ADDRESS, EspNow};
-use esp_radio::wifi::{ControllerConfig, WifiController};
+use esp_radio::wifi::WifiController;
+
+use crate::hardware::espnow_controller_config::espnow_controller_config;
 
 /// The product's default ESP-NOW channel (`DEFAULT_ESPNOW_CHANNEL`).
 const ESPNOW_CHANNEL: u8 = 11;
@@ -59,7 +61,7 @@ const HZ: u64 = parse_u64_or(option_env!("LP_COEX_HZ"), 50);
 pub fn bring_up(
     wifi: esp_hal::peripherals::WIFI<'static>,
 ) -> (WifiController<'static>, EspNow<'static>) {
-    let (controller, interfaces) = match esp_radio::wifi::new(wifi, ControllerConfig::default()) {
+    let (controller, interfaces) = match esp_radio::wifi::new(wifi, espnow_controller_config()) {
         Ok(pair) => pair,
         Err(e) => {
             // `{:?}` prints nothing in this build profile; the line still
