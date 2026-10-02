@@ -446,6 +446,19 @@ async function main() {
             step("cable pulled", (await pullCable(driver)) === "pulled", (await driver.evaluate(MAIN_TEXT)).match(/(Writing firmware|Moving files)[^\n]*/)?.[0] ?? "");
             await driver.attach(BOARD);
             await connect(driver).catch(() => {});
+            // The board's own power-on boot, to its end (a port must be
+            // open for the boot's words to flow): the card can settle on an
+            // early reading of the link.
+            const bootBy = Date.now() + STEP_MS;
+            for (;;) {
+              // Its power-on banner went out with nobody listening (the
+              // cable was out); what came after the bootloader session is
+              // the firmware's own start.
+              const text = boardConsole(door);
+              if (text.lastIndexOf("starting server loop") > text.lastIndexOf("waiting for download")) break;
+              if (Date.now() > bootBy) throw new Error("the board never finished its power-on boot after the pull");
+              await new Promise((r) => setTimeout(r, 1_000));
+            }
             await driver.waitFor(`${MAIN_TEXT}.includes('Finish update') || ${MAIN_TEXT}.includes('Restore files') || ${MAIN_TEXT}.includes('Update firmware')`, { timeoutMs: STEP_MS, what: "the board back after the pull" });
             await shot("after-pull");
           } else {
