@@ -495,6 +495,7 @@ mod tests {
                     output_tokens: 9,
                     cache_write_tokens: 2100,
                     cache_read_tokens: 18000,
+                    cost_micro_usd: None,
                 }
             }]
         );
@@ -522,6 +523,7 @@ mod tests {
                     output_tokens: 9,
                     cache_write_tokens: 2100,
                     cache_read_tokens: 18000,
+                    cost_micro_usd: None,
                 }
             }]
         );

@@ -2,7 +2,7 @@
 
 use crate::{
     DirtySummary, NodeCardUiState, UiAction, UiAddNodeMenu, UiAffordance, UiNodeFace, UiNodeHeader,
-    UiNodeSection, UiNodeTab, UiNodeView, UiPaneAction, UiStatus,
+    UiNodeSection, UiNodeTab, UiNodeView, UiStatus,
 };
 
 /// A child node rendered outside its parent node pane.
@@ -48,10 +48,6 @@ pub struct UiNodeChild {
     /// Active Debug overrides in this child's subtree — the nested card's
     /// marking (D8 tier b), separate from [`Self::dirty`] (D7).
     pub debug_overrides: usize,
-    /// Contextual header actions for the nested pane this child becomes:
-    /// controller-produced, currently the node-subtree batch revert while
-    /// [`Self::dirty`] announces pending edits.
-    pub header_actions: Vec<UiPaneAction>,
     /// The add-node picker for container children (the symmetric seed of
     /// [`crate::UiNodeView::add_node_menu`]). Since the flat-root reversal
     /// a playlist is a NESTED card, so its "+ entry" chip has to ride the
@@ -83,7 +79,6 @@ impl UiNodeChild {
             children: Vec::new(),
             dirty: DirtySummary::clean(),
             debug_overrides: 0,
-            header_actions: Vec::new(),
             add_node_menu: None,
         }
     }
@@ -143,7 +138,6 @@ impl UiNodeChild {
         };
         let mut view = UiNodeView::new(header, vec![UiNodeTab::main(self.sections)])
             .with_node_id(format!("child:{}", self.label))
-            .with_header_actions(self.header_actions)
             .with_children(self.children);
         view.face = self.face;
         view.card_ui = self.card_ui;

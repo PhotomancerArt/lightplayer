@@ -678,22 +678,31 @@ fn outcome_code(o: &Outcome) -> i32 {
 // The shipped image
 // ---------------------------------------------------------------------------
 
-/// The P8 gate script: one `stopAllProjects` a millisecond after the io_task
-/// is up (`tests/boot_idle.rs` says why that request).
-fn stop_all_script() -> lp_emu_esp_common::ScriptedSource {
-    lp_emu_esp_common::ScriptedSource::new().after(
-        "[INIT] I/O task spawned",
-        memmap::CYCLES_PER_US * 1_000,
-        b"M!{\"id\":1,\"msg\":\"stopAllProjects\"}\n",
-    )
-}
+/// The last line of the boot that is still raw text on UART0: since wire
+/// proto 32 what follows it is lp-link frames, which this crate cannot host
+/// (the MIT fence).
+const SERVER_LOOP_LINE: &str = "[INIT] fw-esp32 initialized, starting server loop";
 
-const REPLY_LINE: &str = "\"id\":1,\"msg\":\"stopAllProjects\"";
+/// How far past [`SERVER_LOOP_LINE`] the shipped-image runs go: long enough
+/// for the server loop's first ticks and the boot to settle with core 1
+/// parked, a stand-in for the old run's end at the stop-all's reply
+/// (~120 ms into a direct boot).
+const SETTLE_US: u64 = 200_000;
 const DUAL_CORE_LINE: &str = "[INIT] RMT ISR on APP core";
 const FALLBACK_LINE: &str = "[INIT] APP core unavailable; RMT ISR on PRO core";
 
-/// The shipped image on the merged chip, under `--strict-bus`, to the
-/// heartbeat reply — with core 1 running. `None` when there is no image.
+/// The shipped image on the merged chip, under `--strict-bus`, to the server
+/// loop and [`SETTLE_US`] past it — with core 1 running. `None` when there is
+/// no image.
+///
+/// ⚠️ **Until wire proto 32 this ran to the reply to a scripted
+/// `stopAllProjects` `M!` line** (the P8 gate script, `tests/boot_idle.rs`).
+/// The shipped image reads lp-link frames on UART0 now and a request needs a
+/// link host, which is lp-cli's (`lp-cli/tests/emu_v3_link_gates.rs` runs the
+/// stop-all, and asserts the dual-core line there too). The claims these
+/// tests make are the machine's — the line, the binds, the park — so they
+/// stop at the raw wire's last line plus a settle instead; a request served
+/// with core 1 running is the lp-cli twin's claim.
 fn dual_core_run(test: &str, mode: BootMode, micros: u64) -> Option<Machine> {
     let elf = match fw_esp32v3_image() {
         Ok(p) => p,
@@ -716,17 +725,27 @@ fn dual_core_run(test: &str, mode: BootMode, micros: u64) -> Option<Machine> {
         .flash(FlashBacking::Copy(merged))
         .flash_len(len)
         .strict(true)
-        .uart0_script(stop_all_script())
         .build()
         .expect("builds");
-    let outcome = m.run_until(&StopCondition {
-        exit_on: Some(REPLY_LINE.to_string()),
+    let mut outcome = m.run_until(&StopCondition {
+        exit_on: Some(SERVER_LOOP_LINE.to_string()),
         ..StopCondition::after_micros(micros)
     });
+    if matches!(outcome, Outcome::ExitMatched { .. }) {
+        let settled = m.cycles() + SETTLE_US * memmap::CYCLES_PER_US;
+        outcome = match m.run_until(&StopCondition {
+            stop_cycle: Some(settled),
+            ..Default::default()
+        }) {
+            Outcome::Deadline { .. } => outcome,
+            other => other,
+        };
+    }
     let text = m.uart0().text();
     assert!(
         matches!(outcome, Outcome::ExitMatched { .. }),
-        "{mode:?}: the boot did not reach the heartbeat reply with core 1 running: {outcome:?}\n\
+        "{mode:?}: the boot did not reach the server loop and settle with core 1 running: \
+         {outcome:?}\n\
          {:#?}\n\
          If this is a strict-bus read at 0x00000008 from `LpFs::read_file` ~30k cycles after\n\
          `core 1: released by DPORT`, the APP core is running the mask ROM's reset path over\n\
@@ -965,8 +984,9 @@ fn core_one_binds_in_its_own_matrix() {
 }
 
 /// **Gate 3: the pusher parks in `waiti` on core one.** At least one window
-/// ended in `Wfi` on hart 1, and at the reply the pc at the park symbolizes
-/// inside `wire_pusher::idle_once`.
+/// ended in `Wfi` on hart 1, and once the boot has settled (the reply, until
+/// wire proto 32) the pc at the park symbolizes inside
+/// `wire_pusher::idle_once`.
 #[test]
 #[ignore = "needs the shipped image and espflash; `just test-emu-esp32v3-boot`"]
 fn the_pusher_parks_in_waiti_on_core_one() {

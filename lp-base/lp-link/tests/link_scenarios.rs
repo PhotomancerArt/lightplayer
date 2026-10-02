@@ -78,12 +78,136 @@ fn torn_tails_are_detected_and_resent() {
 }
 
 #[test]
+fn the_uart_preset_recovers_loss_with_its_narrower_windows() {
+    // A stream pipe (the USB model: the framing is the same) with uart()'s
+    // four-frame windows on both ends: loss is found and resent, nothing is
+    // delivered twice, out of order or damaged.
+    let mut sc = Scenario::new(Transport::Usb, 0.02, random(), 3_000_000, 17);
+    sc.host_cfg = LinkConfig::uart();
+    sc.board_cfg = LinkConfig::uart();
+    let r = run::<SelectiveRepeat>(&sc);
+    assert_clean(&r, Transport::Usb);
+    assert!(
+        r.host.retransmits + r.board.retransmits > 0,
+        "loss was resent"
+    );
+    assert!(r.down.delivered > 0 && r.up.delivered > 0);
+}
+
+#[test]
 fn a_board_reboot_resets_both_sides_and_the_new_session_works() {
     let mut sc = Scenario::new(Transport::Usb, 0.0, random(), 3_000_000, 5);
     sc.board_reboots = vec![1_000_000, 2_000_000];
     let r = run::<SelectiveRepeat>(&sc);
     assert_clean(&r, Transport::Usb);
     assert_eq!(r.host_resets, 2, "the host sees each reboot as a reset");
+}
+
+/// `syn_backoff` (ruling DD27 of the classic-UART plan): a board nobody
+/// answers doubles its SYN gap up to its ceiling instead of writing a SYN
+/// every `syn_interval` forever. Ten seconds with nobody there, four
+/// doublings: 100, 200, 400, 800 ms, then one every 1.6 s.
+#[test]
+fn an_unanswered_link_backs_off_its_syns_to_the_ceiling() {
+    let backed_off = LinkConfig {
+        syn_backoff: 4,
+        ..LinkConfig::uart()
+    };
+    let at = syn_times(&mut Link::<SelectiveRepeat>::new(backed_off, 7), 10_000_000);
+    let gaps: Vec<u64> = at.windows(2).map(|w| (w[1] - w[0]) / 1_000).collect();
+    assert_eq!(&gaps[..5], &[100, 200, 400, 800, 1_600], "{gaps:?}");
+    assert!(gaps[4..].iter().all(|&g| g == 1_600), "{gaps:?}");
+    assert_eq!(at.len(), 10, "SYNs in ten seconds: {at:?}");
+}
+
+/// The knob defaults to off: every preset keeps today's fixed interval.
+#[test]
+fn without_the_knob_syns_stay_one_interval_apart() {
+    for (name, cfg) in [
+        ("usb", LinkConfig::usb()),
+        ("uart", LinkConfig::uart()),
+        ("ble", LinkConfig::ble()),
+    ] {
+        assert_eq!(cfg.syn_backoff, 0, "{name}");
+        let interval = cfg.syn_interval;
+        let at = syn_times(&mut Link::<SelectiveRepeat>::new(cfg, 7), 2_000_000);
+        assert!(
+            at.windows(2).all(|w| w[1] - w[0] == interval),
+            "{name}: {at:?}"
+        );
+    }
+}
+
+/// Any byte heard while handshaking (a host opening the port and writing
+/// anything at all) brings the gap back to `syn_interval` at once.
+#[test]
+fn any_byte_heard_snaps_the_syn_gap_back() {
+    let cfg = LinkConfig {
+        syn_backoff: 4,
+        ..LinkConfig::uart()
+    };
+    let mut board = Link::<SelectiveRepeat>::new(cfg, 7);
+    let backed_off = syn_times(&mut board, 5_000_000);
+    let last = *backed_off.last().unwrap();
+    // Well inside a 1.6 s gap: a stray byte of text.
+    let heard = last + 50_000;
+    board.on_bytes(heard, b"x");
+    let mut after = Vec::new();
+    let mut now = heard;
+    while now < heard + 1_000_000 {
+        now += 1_000;
+        while board.poll_transmit(now).is_some() {
+            after.push(now);
+        }
+    }
+    assert_eq!(
+        after.first().copied(),
+        Some(heard + 100_000),
+        "the next SYN goes one syn_interval after the byte: {after:?}"
+    );
+    let gaps: Vec<u64> = after.windows(2).map(|w| (w[1] - w[0]) / 1_000).collect();
+    assert_eq!(gaps, vec![100, 200, 400], "and backs off again from there");
+}
+
+/// The backoff never delays a host: a host that turns up after the board
+/// has backed off to its ceiling is answered at once, and both ends are up
+/// within one exchange.
+#[test]
+fn a_backed_off_board_answers_a_late_host_at_once() {
+    let cfg = LinkConfig {
+        syn_backoff: 4,
+        ..LinkConfig::uart()
+    };
+    let mut board = Link::<SelectiveRepeat>::new(cfg, 0x3333_4444);
+    let at = syn_times(&mut board, 7_300_000);
+    let now = *at.last().unwrap() + 300_000; // mid-gap
+    let mut host = Link::<SelectiveRepeat>::new(LinkConfig::uart(), 0x1111_2222);
+    shuttle(&mut host, &mut board, now);
+    assert_eq!(host.state(), LinkState::Established);
+    assert_eq!(board.state(), LinkState::Established);
+}
+
+/// Sim: a backed-off board across two reboots and an outage long enough to
+/// reset the link is still clean: nothing lost, doubled or reordered, and
+/// every reboot is seen.
+#[test]
+fn a_backed_off_board_stays_clean_across_reboots_and_an_outage() {
+    let mut sc = Scenario::new(Transport::Usb, 0.02, random(), 6_000_000, 23);
+    sc.host_cfg = LinkConfig::uart();
+    sc.board_cfg = LinkConfig {
+        syn_backoff: 4,
+        ..LinkConfig::uart()
+    };
+    sc.board_reboots = vec![1_500_000, 4_000_000];
+    sc.outage = Some((2_000_000, 3_500_000));
+    let r = run::<SelectiveRepeat>(&sc);
+    assert_clean(&r, Transport::Usb);
+    assert!(
+        r.host_resets >= 2,
+        "each reboot is a reset: {}",
+        r.host_resets
+    );
+    assert!(r.down.delivered > 0 && r.up.delivered > 0);
 }
 
 #[test]
@@ -145,6 +269,42 @@ fn text_outside_frames_passes_through() {
     assert_eq!(
         texts.concat(),
         "ESP-ROM:esp32c6-20220919\r\nboot: chip revision v0.1\r\npanicked at src/main.rs:10\n"
+    );
+}
+
+/// main's (proto-29) firmware sends a short marker containing `0x00` when
+/// the port opens. Taken as a frame start, followed by an old board's
+/// continuous plain-text console (no quiet gap for `frame_abandon` to fire
+/// on), that must not hold the console text for 3 s: once the misread
+/// partial reaches `max_frame` it flushes as text at once.
+#[test]
+fn text_after_a_stray_leading_zero_is_not_held_for_frame_abandon() {
+    let (_a, mut b) = pair::<SelectiveRepeat>(LinkConfig::usb());
+    let now = 0;
+    // The stray 0x00, then an M!-line stream well past max_frame (531 B for
+    // the usb preset) with no gap, so frame_abandon never gets a chance.
+    let mut stream = vec![0u8];
+    for i in 0..100u32 {
+        stream.extend_from_slice(format!("M!{i:05}\n").as_bytes());
+    }
+    b.on_bytes(now, &stream);
+    let texts: Vec<String> = drain(&mut b)
+        .into_iter()
+        .filter_map(|e| match e {
+            LinkEvent::Text(t) => Some(String::from_utf8(t).unwrap()),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        !texts.is_empty(),
+        "an M!-line stream after a stray 0x00 must arrive as text without \
+         waiting on frame_abandon, at time `now` with no idle at all"
+    );
+    assert!(texts.concat().starts_with("M!00000\n"), "{texts:?}");
+    assert_eq!(
+        b.counters().stale_partials,
+        0,
+        "flushed before it went stale"
     );
 }
 
@@ -416,6 +576,31 @@ fn logs_keep_flowing_beside_a_busy_proto_stream() {
     );
 }
 
+/// `datagram_room` is what `send` would take: a caller that pops each log
+/// record out of its own ring asks it first, so a record the link would
+/// refuse is never taken (the classic's `[OUT] dump` lost parts that way —
+/// docs/defects/2026-09-29-the-classics-log-ring-drops-records-under-a-project-load-burst.md).
+#[test]
+fn datagram_room_counts_the_slots_send_would_fill() {
+    let cfg = LinkConfig {
+        datagram_queue: 2,
+        ..LinkConfig::uart()
+    };
+    let (mut a, mut b) = pair::<SelectiveRepeat>(cfg);
+    let mut now = 0;
+    handshake(&mut a, &mut b, &mut now);
+    assert_eq!(a.datagram_room(), 2);
+    a.send(CH_LOG, b"one").unwrap();
+    assert_eq!(a.datagram_room(), 1);
+    a.send(CH_LOG, b"two").unwrap();
+    assert_eq!(a.datagram_room(), 0);
+    assert_eq!(a.send(CH_LOG, b"three"), Err(SendError::Full));
+    assert_eq!(a.counters().datagrams_dropped, 1, "a refusal is counted");
+    let f = a.poll_transmit(now).expect("the oldest datagram").to_vec();
+    b.on_bytes(now, &f);
+    assert_eq!(a.datagram_room(), 1, "sending one frees its slot");
+}
+
 /// The message budget: the wire's 16 KiB frame budget plus slack. Longer is
 /// refused at `send`.
 #[test]
@@ -614,6 +799,175 @@ fn a_small_send_budget_refuses_big_ring_messages_but_not_external_ones() {
     assert!(a.external_in_flight());
 }
 
+/// The same behaviours with both links secure (feature `secure`): the host
+/// the initiator, the board the responder with a scripted key table.
+#[cfg(feature = "secure")]
+mod secure {
+    use super::{assert_clean, interactive, random};
+    use lp_link::secure_channel::Psk;
+    use lp_link::sim::pipe::Faults;
+    use lp_link::sim::secure_sim::{LookupDelay, SecureSim};
+    use lp_link::sim::{Report, Scenario, Transport, Workload, run};
+    use lp_link::{Arq, LinkConfig, NoArq, SelectiveRepeat};
+
+    fn secure(t: Transport, p: f64, workload: Workload, seed: u64) -> Scenario {
+        let mut sc = Scenario::new(t, p, workload, 2_000_000, seed);
+        if t == Transport::Ble {
+            // One sealed frame per notification.
+            sc = sc.with_configs(LinkConfig::ble().secured());
+        }
+        sc.secure = Some(SecureSim::matched());
+        sc
+    }
+
+    fn handshook(r: &Report) {
+        assert!(r.host.handshakes >= 1 && r.board.handshakes >= 1, "{r:?}");
+        assert_eq!(r.host.seal_failures + r.board.seal_failures, 0);
+    }
+
+    #[test]
+    fn every_preset_is_clean_on_a_perfect_pipe() {
+        for t in [
+            Transport::Usb,
+            Transport::BleStream,
+            Transport::Ble,
+            Transport::Udp,
+        ] {
+            let r = run::<SelectiveRepeat>(&secure(t, 0.0, interactive(), 1));
+            assert_clean(&r, t);
+            handshook(&r);
+            assert!(r.down.delivered > 0 && r.up.delivered > 0);
+        }
+        let r = run::<NoArq>(&secure(Transport::Ws, 0.0, random(), 7));
+        assert_clean(&r, Transport::Ws);
+        handshook(&r);
+        assert_eq!(r.up.delivered, r.up.sent);
+        assert_eq!(r.down.delivered, r.down.sent);
+        assert_eq!(r.host.resets + r.board.resets, 0);
+    }
+
+    #[test]
+    fn faults_across_the_handshake_and_after_it_are_healed() {
+        for (t, seed) in [
+            (Transport::Usb, 3),
+            (Transport::BleStream, 4),
+            (Transport::Ble, 5),
+            (Transport::Udp, 6),
+        ] {
+            let r = run::<SelectiveRepeat>(&secure(t, 0.05, random(), seed));
+            assert_clean(&r, t);
+            handshook(&r);
+            assert!(r.down.delivered > 0 && r.up.delivered > 0, "{}", t.name());
+        }
+    }
+
+    #[test]
+    fn udp_duplicates_are_refused_as_replays_and_cost_nothing() {
+        let mut sc = secure(Transport::Udp, 0.0, random(), 9);
+        let dup = Faults {
+            duplicate: 0.2,
+            ..Faults::none()
+        };
+        sc.faults_up = dup.clone();
+        sc.faults_down = dup;
+        let r = run::<SelectiveRepeat>(&sc);
+        assert_clean(&r, Transport::Udp);
+        assert!(r.host.replays + r.board.replays > 0);
+        assert_eq!(r.host.resets + r.board.resets, 0);
+    }
+
+    #[test]
+    fn a_board_reboot_brings_a_fresh_handshake_and_the_new_session_works() {
+        let mut sc = secure(Transport::Usb, 0.0, interactive(), 12);
+        sc.board_reboots = vec![700_000];
+        let r = run::<SelectiveRepeat>(&sc);
+        assert_clean(&r, Transport::Usb);
+        assert!(r.host.handshakes >= 2, "{:?}", r.host);
+        assert!(r.host_resets >= 1);
+    }
+
+    /// No ARQ under loss: every gap resets the session (the reset reports
+    /// it), so the delivery property holds where a plain no-ARQ link loses
+    /// messages silently.
+    #[test]
+    fn no_arq_resets_on_loss_rather_than_deliver_around_it() {
+        let mut sc = secure(Transport::Ws, 0.0, random(), 21);
+        let lossy = Faults {
+            drop_packet: 0.01,
+            corrupt: 0.005,
+            ..Faults::none()
+        };
+        sc.faults_up = lossy.clone();
+        sc.faults_down = lossy;
+        let r = run::<NoArq>(&sc);
+        assert_clean(&r, Transport::Ws);
+        assert!(
+            r.host.counter_gaps + r.board.counter_gaps > 0,
+            "loss was seen"
+        );
+        assert!(r.host_resets + r.board_resets > 0);
+        assert!(r.down.delivered > 0 && r.up.delivered > 0);
+    }
+
+    #[test]
+    fn a_lookup_answered_a_few_steps_late_comes_up() {
+        let mut sc = secure(Transport::Usb, 0.0, interactive(), 13);
+        if let Some(s) = sc.secure.as_mut() {
+            s.lookup_delay = LookupDelay::Steps(5);
+        }
+        let r = run::<SelectiveRepeat>(&sc);
+        assert_clean(&r, Transport::Usb);
+        handshook(&r);
+    }
+
+    #[test]
+    fn a_lookup_never_answered_never_comes_up() {
+        let mut sc = secure(Transport::Usb, 0.0, interactive(), 14);
+        if let Some(s) = sc.secure.as_mut() {
+            s.lookup_delay = LookupDelay::Never;
+        }
+        let r = run::<SelectiveRepeat>(&sc);
+        assert!(r.violations.iter().any(|v| v.contains("not up")));
+        assert_eq!(r.up.delivered + r.down.delivered, 0);
+        assert!(r.board.handshake_refusals >= 1);
+    }
+
+    #[test]
+    fn a_wrong_key_never_comes_up_and_moves_no_data() {
+        for (name, report) in [
+            ("sr/usb", wrong_key::<SelectiveRepeat>(Transport::Usb)),
+            ("no-arq/ws", wrong_key::<NoArq>(Transport::Ws)),
+        ] {
+            assert!(
+                report.violations.iter().any(|v| v.contains("not up")),
+                "{name}"
+            );
+            assert_eq!(report.up.delivered + report.down.delivered, 0, "{name}");
+            assert_eq!(report.host.handshake_refusals, 1, "{name}: refused once");
+        }
+    }
+
+    fn wrong_key<A: Arq>(t: Transport) -> Report {
+        let mut sc = secure(t, 0.0, interactive(), 15);
+        if let Some(s) = sc.secure.as_mut() {
+            s.board_table[0].1 = vec![Psk::new([0xEE; 32])];
+        }
+        run::<A>(&sc)
+    }
+
+    #[test]
+    fn an_unknown_key_is_refused_once_and_the_host_stops() {
+        let mut sc = secure(Transport::Usb, 0.0, interactive(), 16);
+        if let Some(s) = sc.secure.as_mut() {
+            s.board_table.clear();
+        }
+        let r = run::<SelectiveRepeat>(&sc);
+        assert_eq!(r.host.handshake_refusals, 1);
+        assert_eq!(r.board.handshake_refusals, 1);
+        assert_eq!(r.up.delivered + r.down.delivered, 0);
+    }
+}
+
 /// A lossy, damaging wire for the external-message scenario: drop 3%, flip a
 /// byte in 2%.
 fn mangle(rng: &mut u64, mut f: Vec<u8>) -> Option<Vec<u8>> {
@@ -694,6 +1048,30 @@ fn handshake<A: Arq>(a: &mut Link<A>, b: &mut Link<A>, now: &mut u64) {
         *now += 200_000;
     }
     panic!("no handshake");
+}
+
+/// Step a link nobody answers in 1 ms ticks up to `until`, and return the
+/// time of every frame it wrote (all SYNs: it never connects).
+fn syn_times<A: Arq>(link: &mut Link<A>, until: u64) -> Vec<u64> {
+    let mut at = Vec::new();
+    let mut raw = Vec::new();
+    let mut now = 0;
+    while now <= until {
+        while let Some(f) = link.poll_transmit(now) {
+            let body = if f[0] == 0 {
+                // Stream framing: undo the COBS.
+                raw.clear();
+                frame::unwrap_stream(&f[1..f.len() - 1], &mut raw).unwrap();
+                &raw[..]
+            } else {
+                f
+            };
+            assert_eq!(Header::parse(body).unwrap().kind, FrameKind::Syn);
+            at.push(now);
+        }
+        now += 1_000;
+    }
+    at
 }
 
 fn drain<A: Arq>(l: &mut Link<A>) -> Vec<LinkEvent> {

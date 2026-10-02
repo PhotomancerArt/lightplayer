@@ -1362,16 +1362,26 @@ _s3-payload-sentinel payload:
 # `flash --monitor`, as this recipe does, or hold the fd open by hand
 # (`exec 3<> $port; stty -f $port 921600 raw -echo clocal; cat <&3`).
 #
+# The third argument, `no-monitor`, flashes and lets go of the port: what the
+# hardware walk does since the classic's UART went onto lp-link (proto 32),
+# because a board on lp-link says its log lines only to a link host
+# (`lp-cli link capture`), never to espflash's monitor.
+#
 # The optional second argument is passed straight to `build-fw-esp32v3`. The one
 # that matters is `frame-dump`, which makes the board print every transmitted
 # frame — `scripts/m4-hardware-walk.sh --chip esp32` flashes with it because an
 # LED cannot be diffed against a host render:
 #
 #   just flash-fw-esp32v3 /dev/cu.wchusbserial1140 frame-dump
-flash-fw-esp32v3 port="" features="": (build-fw-esp32v3 features)
+flash-fw-esp32v3 port="" features="" monitor="monitor": (build-fw-esp32v3 features)
     #!/usr/bin/env bash
     set -euo pipefail
-    args=(--chip esp32 --partition-table {{ fw_esp32v3_dir }}/partitions.csv --flash-size {{ v3_flash_size }} --monitor --monitor-baud 921600 --after hard-reset)
+    args=(--chip esp32 --partition-table {{ fw_esp32v3_dir }}/partitions.csv --flash-size {{ v3_flash_size }} --after hard-reset)
+    case "{{ monitor }}" in
+      monitor) args+=(--monitor --monitor-baud 921600) ;;
+      no-monitor) ;;
+      *) echo "monitor must be 'monitor' or 'no-monitor', not '{{ monitor }}'" >&2; exit 2 ;;
+    esac
     if [[ -n "{{ port }}" ]]; then
       args+=(--port "{{ port }}")
     fi
@@ -1418,16 +1428,25 @@ _xt-gcc-dir bin="xtensa-esp32s3-elf-gcc":
 
 # Flash fw-esp32s3 to a connected ESP32-S3 and open the serial monitor.
 #
+# The third argument, `no-monitor`, flashes and lets go of the port: since
+# wire proto 30 the board's log lines leave it only over lp-link, to a link
+# host (`lp-cli link capture`), and the hardware walk reads them that way.
+#
 # The optional second argument is passed straight to `build-fw-esp32s3`. The
 # one that matters is `frame-dump`, which makes the board print every
 # transmitted frame — `scripts/m4-hardware-walk.sh` flashes with it because an
 # LED cannot be diffed against a host render:
 #
 #   just flash-fw-esp32s3 /dev/cu.usbmodemXXXX frame-dump
-flash-fw-esp32s3 port="" features="": (build-fw-esp32s3 features)
+flash-fw-esp32s3 port="" features="" monitor="monitor": (build-fw-esp32s3 features)
     #!/usr/bin/env bash
     set -euo pipefail
-    args=(--chip esp32s3 --partition-table lp-fw/fw-esp32s3/partitions.csv --flash-size {{ s3_flash_size }} --monitor --after hard-reset)
+    args=(--chip esp32s3 --partition-table lp-fw/fw-esp32s3/partitions.csv --flash-size {{ s3_flash_size }} --after hard-reset)
+    case "{{ monitor }}" in
+      monitor) args+=(--monitor) ;;
+      no-monitor) ;;
+      *) echo "monitor must be 'monitor' or 'no-monitor', not '{{ monitor }}'" >&2; exit 2 ;;
+    esac
     if [[ -n "{{ port }}" ]]; then
       args+=(--port "{{ port }}")
     fi
@@ -1436,9 +1455,13 @@ flash-fw-esp32s3 port="" features="": (build-fw-esp32s3 features)
 # Flash fw-esp32c6 to a connected ESP32-C6 and open the serial monitor.
 #
 # The S3 recipe above, one chip over, and it exists for the same caller:
-# `scripts/m4-hardware-walk.sh --chip esp32c6` needs one command that builds,
-# flashes and monitors, and owns the partition table and flash size so the
-# walk script duplicates neither. The optional second argument is passed to
+# `scripts/m4-hardware-walk.sh --chip esp32c6` needs one command that builds
+# and flashes, and owns the partition table and flash size so the walk script
+# duplicates neither. The walk passes the third argument, `no-monitor`: since
+# wire proto 30 the board's log lines leave it only over lp-link, to a link
+# host (`lp-cli link capture`), not to espflash's monitor. With the default
+# `monitor` you see the boot text and then link frames, nothing readable.
+# The optional second argument is passed to
 # `build-fw-esp32c6`; the one that matters is `frame-dump`, which makes the
 # board print every transmitted frame, because an LED cannot be diffed against
 # a host render:
@@ -1449,10 +1472,15 @@ flash-fw-esp32s3 port="" features="": (build-fw-esp32s3 features)
 # `303a:1001` and both come up as `/dev/cu.usbmodem14332xx`. Resolve by MAC
 # first (`scripts/emu/board-port.py A0:F2:62:87:B4:8C`) and pass the port
 # explicitly rather than letting espflash pick.
-flash-fw-esp32c6 port="" features="": (build-fw-esp32c6 features)
+flash-fw-esp32c6 port="" features="" monitor="monitor": (build-fw-esp32c6 features)
     #!/usr/bin/env bash
     set -euo pipefail
-    args=(--chip esp32c6 --partition-table lp-fw/fw-esp32c6/partitions.csv --flash-size {{ c6_flash_size }} --monitor --after hard-reset)
+    args=(--chip esp32c6 --partition-table lp-fw/fw-esp32c6/partitions.csv --flash-size {{ c6_flash_size }} --after hard-reset)
+    case "{{ monitor }}" in
+      monitor) args+=(--monitor) ;;
+      no-monitor) ;;
+      *) echo "monitor must be 'monitor' or 'no-monitor', not '{{ monitor }}'" >&2; exit 2 ;;
+    esac
     if [[ -n "{{ port }}" ]]; then
       args+=(--port "{{ port }}")
     fi
@@ -2428,6 +2456,11 @@ fmt-check:
 # compile it for its real target.
 clippy-host:
     cargo clippy --workspace --exclude lps-builtins-emu-app --exclude fw-esp32c6 --exclude fw-esp32s3 --exclude fw-esp32v3 --exclude fw-emu --exclude lp-riscv-emu-guest-test-app --exclude lp-riscv-emu-guest --exclude lp-xt-fp-harness --exclude lp-gfx-wgpu --exclude fw-browser --exclude naga-wasm-poc -- --no-deps -D warnings
+    # fw-esp32-common's usb_link/uart_link modules are behind non-default
+    # features (`clippy-host`'s `--workspace` only lints its defaults), the
+    # same gap `test-rust-core` closes above for the tests.
+    cargo clippy -p fw-esp32-common --features usb-link,server --all-targets -- --no-deps -D warnings
+    cargo clippy -p fw-esp32-common --features uart-link,server --all-targets -- --no-deps -D warnings
 
 # `lp-emu-esp32c6` with the `jit` feature on — the native translated build.
 #
@@ -2655,18 +2688,32 @@ test-rust-core:
     # lp-link's simulator and delivery property need its `sim` feature; the
     # comms lab's halves over the simulator need `lab` too.
     cargo test -p lp-link --features sim,lab
+    # ...and again with the secure channel: the snow oracle, the RFC vectors,
+    # and the simulator, fuzzer and allocation tests' secure cases.
+    cargo test -p lp-link --features sim,lab,secure
+    # lpc-wire's secure-initiator port (feature `secure-link`).
+    cargo test -p lpc-wire --features secure-link,ser-write-json
+    # fw-esp32-common's usb_link module (the C6/S3 host link) sits behind the
+    # non-default `usb-link` feature, and needs `server` for the transport's
+    # `lpc_wire` dependency. Plain `cargo test` above never turns it on, so
+    # these tests (and the classic's uart_link pair below) never ran in CI
+    # until this line (docs: lp2025/_auto/2026-10-01-fw-common-link-tests-never-run).
+    cargo test -p fw-esp32-common --features usb-link,server
+    # ...and the classic's UART0 host link (feature `uart-link`), same reason.
+    cargo test -p fw-esp32-common --features uart-link,server
 
 # lp-link (the link-layer prototype, plan lp2025/2026-09-26-1720-reliable-device-link):
 # the delivery property at soak depth, 5,000 fault schedules per ARQ variant
 # (release, ~3 min). CI runs 500 per variant inside `test-rust-core`.
 link-soak cases="5000":
-    PROPTEST_CASES={{cases}} cargo test -p lp-link --features sim --release --test delivery_properties
+    PROPTEST_CASES={{cases}} cargo test -p lp-link --features sim,secure --release --test delivery_properties
 
 # lp-link's decoder fuzzing at depth: arbitrary bytes, datagrams and crafted
-# frames against a live link, `cases` per framing (release, ~12 s at 20,000).
+# frames against a live link, `cases` per framing (release, ~12 s at 20,000),
+# plain and secure (the secure cases add replays, forged SYNs and msg1 floods).
 # CI runs 256 per framing inside `test-rust-core`.
 link-fuzz cases="20000":
-    PROPTEST_CASES={{cases}} cargo test -p lp-link --release --test decoder_fuzz
+    PROPTEST_CASES={{cases}} cargo test -p lp-link --features sim,secure --release --test decoder_fuzz
 
 # lp-link's tables: compare | sweep | crc | codec | logs | ram | all. The link
 # rows are simulated; `codec` (and the top of `crc`) is host CPU throughput.
@@ -2681,11 +2728,22 @@ link-size:
 # lp-link builds for the board (riscv32, no_std) and the page (wasm32) with
 # the features those builds turn on, and lints clean with every feature on
 # (`clippy-host` sees only its default features, so the simulator, the lab and
-# the tests behind them were unlinted). Part of `check-lint`.
+# the tests behind them were unlinted). Part of `check-lint`. The `secure`
+# lines prove the secure channel builds no_std for both, and the last line
+# that no RNG crate (`getrandom`) reaches either graph: entropy is injected.
 check-lp-link-targets: install-rv32-target install-wasm32-target
     cargo check -p lp-link --target {{ rv32_target }} --features log,lab
     cargo check -p lp-link --target {{ wasm32_target }} --features log,lab
+    cargo check -p lp-link --target {{ rv32_target }} --features log,lab,secure
+    cargo check -p lp-link --target {{ wasm32_target }} --features log,lab,secure
+    cargo check -p lpc-wire --target {{ wasm32_target }} --features secure-link
     cargo clippy -p lp-link --features sim,lab,log --all-targets -- --no-deps -D warnings
+    cargo clippy -p lp-link --features sim,lab,log,secure --all-targets -- --no-deps -D warnings
+    for t in {{ rv32_target }} {{ wasm32_target }}; do \
+        if cargo tree -p lp-link --features log,lab,secure -e normal,features --target $t | grep -E 'getrandom|precomputed-tables'; then \
+            echo "lp-link/secure pulls an RNG or curve25519's precomputed tables on $t" >&2; exit 1; \
+        fi; \
+    done
 
 # The comms lab on the emulated C6 (plan reliable-device-link, M3): lp-link in
 # the `test_comms_lab` image against `lp-cli link lab`'s host half, with the
@@ -2880,7 +2938,7 @@ test-glsl-filetests:
 # Warm ~1s, cold ~47s locally; it runs beside clippy, the Lint job's long
 # pole. See docs/debt/wasm-cloud-check-not-in-just-check.md.
 [parallel]
-check-lint: fmt-check clippy check-wasm-cloud check-lp-link-targets check-lpc-engine-gates check-studio-core-minimal lint-serde-content lint-browser-test-harness lint-classic-capture lint-pcb-export lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-nested-patches lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities lint-red-main-needs lint-tag-next-version
+check-lint: fmt-check clippy check-wasm-cloud check-lp-link-targets check-lpc-engine-gates check-studio-core-minimal lint-serde-content lint-browser-test-harness lint-classic-capture lint-pcb-export lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-nested-patches lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities lint-red-main-needs lint-tag-next-version lint-web-actions lint-core-action-fields
 
 [parallel]
 check: check-lint schema-check fw-manifest-check-emu
@@ -2941,6 +2999,19 @@ lint-vec-corpus:
 # Every `tw:` utility in the Studio markup must generate a CSS rule.
 lint-tw-utilities:
     python3 scripts/check-tw-utilities.py
+
+# The web-built actions ratchet: every verb the user can press is meant to be
+# built in core and published on the view (the app agent must see it). The
+# web layer may only build FEWER actions than recorded per file; `--bless`
+# locks a drop in. docs/adr/2026-10-01-agentic-control-offers-in-core.md.
+lint-web-actions *args:
+    python3 scripts/check-web-actions.py {{ args }}
+
+# The core action-fields ratchet: action-carrying pub fields on Studio core
+# view types may only go down — a verb belongs in the offer tree, at a path
+# (docs/adr/2026-10-01-agentic-control-offers-in-core.md). `--bless` records a drop.
+lint-core-action-fields *args:
+    python3 scripts/check-core-action-fields.py {{ args }}
 
 # Guard against schemars reaching the RV32 firmware graphs (schema generation is host-only; see script).
 lint-schemars-fw:
@@ -3051,11 +3122,52 @@ test-emu-c6-boot:
 # `cargo build`, not a reference image, so no espflash and no git history.
 # CI's `Heap budget (esp32c6 chip)` job runs this half.
 test-emu-c6-cli:
-    cargo test -p lp-cli --test validate_registry_parity
+    cargo test -p lp-cli --test validate_registry_parity --test validate_link_host_parity
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_usb_link_pack -- --include-ignored --nocapture
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_usb_free_lag -- --include-ignored --nocapture
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_usb_link -- --include-ignored --nocapture
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_usb_link_gates -- --include-ignored --nocapture
+    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test link_capture -- --include-ignored --nocapture
+    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_frag_reads -- --include-ignored --nocapture
+    cargo test -p lpa-studio-core --lib app_agent_eval_tests::the_
+    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test app_agent_emu_decode -- --include-ignored --nocapture the_
+
+# App-agent evals, live leg (plan lp2025/2026-10-01-0126-app-agent-harness):
+# a model builds the scenario's project in a headless Studio (stage A,
+# project checks), then the tree it wrote runs on an emulated C6 with the
+# frames on D6 decoded (stage B). Costs real money: OPENROUTER_API_KEY or
+# ~/.lightplayer/settings.json `agent.openrouter_api_key`. Never CI.
+#
+#   just app-agent-eval e1 --model <openrouter slug>
+#   just app-agent-eval all --model <slug> --repeat 3
+#
+# The deterministic legs (goldens, negatives) are `cargo test -p
+# lpa-studio-core app_agent` and `test-emu-c6-cli`. See
+# lp-app/lpa-studio-core/tests/fixtures/app_agent/README.md.
+app-agent-eval scenario="all" *args:
+    scripts/app-agent/eval.sh {{ scenario }} {{ args }}
+
+# Every bake-off candidate × E1–E3 × 3 runs, one table (plan P07).
+app-agent-bakeoff *args:
+    scripts/app-agent/bakeoff.sh {{ args }}
+
+# lp-cli's classic-emulator conversation tests: the shipped `fw-esp32v3` on
+# its UART0 lp-link (plan `classic-uart-on-lp-link`, P3/P5) — hello and an
+# upload, the capture through `wire unpack`, a Reboot's new nonce (DD28), the
+# SYN backoff with no host (DD27), and the fault soak under `--uart-faults`.
+# Builds the image and names the copy it built (`LP_EMU_ESP32V3_ELF`). The
+# shortcut for iterating on them: CI runs the same file inside
+# `test-emu-esp32v3-boot` (DD33), beside the link gates that need the
+# merged and frame-dump images too.
+test-emu-esp32v3-cli:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just build-fw-esp32v3
+    out={{ justfile_directory() }}/target/lp-emu-esp32v3
+    mkdir -p "$out"
+    cp {{ justfile_directory() }}/target/xtensa-esp32-none-elf/release-esp32v3/fw-esp32v3 "$out/fw-esp32v3-cli.elf"
+    LP_EMU_ESP32V3_ELF="$out/fw-esp32v3-cli.elf" \
+        cargo test -p lp-cli --release --test emu_uart_link -- --include-ignored --nocapture
 
 # The classic ESP32 (v3) machine's own suite (plan three, M3).
 #
@@ -3136,7 +3248,7 @@ test-emu-esp32v3-reference:
     just lint-emu-fence
     just lint-emu-regnames
     cargo test -p lp-emu-validate
-    cargo test -p lp-cli --test validate_registry_parity
+    cargo test -p lp-cli --test validate_registry_parity --test validate_link_host_parity
     commit="$(git rev-parse --short HEAD)"
     if [[ -n "${LP_CI_IMAGES:-}" ]]; then
         # The reference image IS this half's firmware build, and its claim
@@ -3190,7 +3302,13 @@ test-emu-esp32v3-boot:
     if [[ -n "${LP_CI_IMAGES:-}" ]]; then
       ci_env="$(scripts/ci/ci-images.py env esp32v3)"
       eval "$ci_env"
-      exec cargo test -p lp-emu-esp32v3 --no-fail-fast -- --include-ignored
+      status=0
+      cargo test -p lp-emu-esp32v3 --no-fail-fast -- --include-ignored || status=$?
+      # The classic's gates that need a link host since wire proto 32
+      # (lp-cli's: a link host is a product crate, which the lp-emu fence
+      # keeps out), and its conversation tests (DD33).
+      cargo test -p lp-cli --release --test emu_v3_link_gates --test emu_uart_link -- --include-ignored --nocapture || status=$?
+      exit "$status"
     fi
     just build-fw-esp32v3
     built={{ justfile_directory() }}/target/xtensa-esp32-none-elf/release-esp32v3/fw-esp32v3
@@ -3264,7 +3382,18 @@ test-emu-esp32v3-boot:
     export -p | grep ' LP_EMU_ESP32V3_' > "$out/images.env"
     # `--no-fail-fast`: every test binary runs, so one red run names every
     # moved figure rather than the first binary's.
-    cargo test -p lp-emu-esp32v3 --no-fail-fast -- --include-ignored
+    status=0
+    cargo test -p lp-emu-esp32v3 --no-fail-fast -- --include-ignored || status=$?
+    # Since wire proto 32 the classic's UART0 is an lp-link, and the gates
+    # that need a request, an upload or a log record on it — G2's idle
+    # heartbeat on both boot paths, R6, the project load, the frame three
+    # ways, the five wires — are lp-cli's (`tests/emu_v3_link_gates.rs`: a
+    # link host is a product crate, which the lp-emu fence keeps out). With
+    # them, the classic's conversation tests and fault soak
+    # (`tests/emu_uart_link.rs`, DD33), so the product's transport on this
+    # chip is covered wherever this recipe runs.
+    cargo test -p lp-cli --release --test emu_v3_link_gates --test emu_uart_link -- --include-ignored --nocapture || status=$?
+    exit "$status"
 
 # Run an image on the classic ESP32 (v3) machine.
 #
@@ -3382,7 +3511,7 @@ test-emu-esp32s3-gate: test-emu-esp32s3-boot
     just lint-emu-fence
     just lint-emu-regnames
     cargo test -p lp-emu-validate
-    cargo test -p lp-cli --test validate_registry_parity
+    cargo test -p lp-cli --test validate_registry_parity --test validate_link_host_parity
 
 # Run an image on the ESP32-S3 machine.
 emu-esp32s3 elf *args:
@@ -3689,17 +3818,18 @@ walk-esp32c6-emu *args: install-rv32-target build-rv32-builtins
 # The classic's UART0 link and CH340 cable verbs are what made a separate
 # script the honest shape there (DD69).
 #
-# Three differences from the C6 recipe, all in the script's header:
+# Two differences from the C6 recipe, both in the script's header — a third
+# used to be here (the runner) until `lp-cli emu run --host-link --chip
+# esp32s3` (M8) took over from the standalone `lp-emu-esp32s3` binary
+# (lp2025/2026-09-28-s3-walk-host-link):
 #
-#   the runner  the `lp-emu-esp32s3` binary, not `lp-cli emu run` — `emu run`
-#               knows one chip and teaching it a second is M8's.
 #   the image   8 MiB, not 4: this chip's partition table does not fit a 4 MB
 #               part (docs/adr/2026-07-30-esp32s3-partition-floor.md).
-#   the port    `--usb-sj-drain manual` + the control channel do what
-#               `--monitor` does on the C6: hold the port open after `lp-cli
-#               upload` disconnects, so the deferred lit dump thirty frames
-#               later still reaches a host. The walk then really does unplug
-#               the cable and asserts the state.
+#   the cable   a scripted `--usb-script` detach/attach/open, since the
+#               hosted-run door has no live control channel to unplug the
+#               cable and query its state the way the retired binary did —
+#               the walk's COMPARISON section reads the replug back from the
+#               console and the frame dump instead.
 #
 # ⚠️ **This walk is M6's only end-to-end exercise of D2's alias.** The oracle
 # project compiles a shader ON THE DEVICE; on the S3 that shader is written
@@ -3729,10 +3859,16 @@ walk-esp32s3-emu *args: install-rv32-target build-rv32-builtins
 #              ESP-IDF second-stage bootloader espflash bundles, the real
 #              partition table — instead of a direct load. `LP_WALK_BOOT=direct`
 #              still takes the fast path when something is being bisected.
-#   the cable  the CH340's own verbs over `--control tcp:`: attach, the
-#              classic-reset dance (whose RELEASE is the reboot), open, upload,
-#              then close / detach / `state` — and the final `state` reply is
-#              asserted, so "the port was released" is a gate and not a habit.
+#   the cable  the CH340's own verbs on a scripted schedule
+#              (`--control-script`): attach, the classic-reset dance (whose
+#              RELEASE is the reboot), open, upload, then close / detach — and
+#              the cable's final state is asserted, so "the port was released"
+#              is a gate and not a habit.
+#
+# Since wire proto 32 the classic's UART0 is an lp-link, so the run is `lp-cli
+# emu run --chip esp32v3 --host-link --upload`: one process boots the image,
+# hosts the link in emulated time, uploads over it and keeps hosting, so the
+# `[OUT] dump` (a log record now) reaches the console.
 #
 # It does NOT run the heap gate. That is `just heap-budget-check-chips-v3`,
 # for the reason the C6 keeps its own ratchet out of `walk-esp32c6-emu`: the
@@ -3745,9 +3881,10 @@ walk-esp32s3-emu *args: install-rv32-target build-rv32-builtins
 # `D10` -> `IO18` into a scratch copy, because the DOM-Z-102 has no D10.
 #
 # NOT in any CI job, for the C6 recipe's reason: it builds a firmware image, a
-# merged flash image and a release `lp-cli`, and then runs the machine for tens
-# of emulated seconds. What it proves per-tick lives in `tests/
-# shader_oracle_pin.rs` and `tests/five_wires.rs`, which do run there.
+# merged flash image and a release `lp-cli`, and then runs the machine for
+# seconds of emulated time. What it proves per-tick lives in `lp-cli/tests/
+# emu_v3_link_gates.rs` (moved from `lp-emu-esp32v3`'s `shader_oracle_pin.rs`
+# and `five_wires.rs` when the image went onto lp-link), which does run there.
 walk-esp32v3-emu *args: install-rv32-target build-rv32-builtins
     scripts/emu/m4-walk-esp32v3.sh {{ args }}
 
@@ -3757,9 +3894,10 @@ walk-esp32v3-emu *args: install-rv32-target build-rv32-builtins
 # it asks exactly the same question of the frame: is the first lit frame off
 # IO18 the host oracle's frame, three ways?
 #
-# It reaches all three readings and exits 0: 2,438 frames on IO18, one distinct
-# lit byte string, equal to the guest's own deferred `[OUT] dump` and to
-# `[ORACLE] rgb=` — 384 hex characters, three ways. It reached only two until
+# It reaches all three readings and exits 0: on lp-link (2026-09-29) 1,562
+# frames on IO18 in its 4 s, one distinct lit byte string, equal to the guest's
+# own deferred `[OUT] dump` and to `[ORACLE] rgb=` — 384 hex characters, three
+# ways. It reached only two until
 # M4 P4b (PR #711) fixed the window-spill defect that killed the guest before
 # the deferred dump; `lp-emu/esp/lp-emu-esp32v3/README.md`'s "The window,
 # across a context save" is that trace. The script prints every reading it got

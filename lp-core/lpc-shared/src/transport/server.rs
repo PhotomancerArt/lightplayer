@@ -18,6 +18,7 @@ use lpc_wire::{PROJECT_READ_FRAME_MAX_BYTES, ProjectReadEvent, TransportError, W
 use super::incoming::Incoming;
 use super::link::Link;
 use super::link_id::LinkId;
+use super::secure_link_event::{KeyAnswer, SecureLinkEvent};
 
 /// Sink for semantic project-read events.
 ///
@@ -126,6 +127,18 @@ pub trait ServerTransport {
     fn take_closed_links(&mut self) -> Vec<LinkId> {
         Vec::new()
     }
+
+    /// Secure links' handshake events since the last call (key lookups,
+    /// wrong keys, authenticated sessions), drained by the server before
+    /// it answers any message that tick. A transport with no secure links
+    /// has none.
+    fn take_secure_events(&mut self) -> Vec<(LinkId, SecureLinkEvent)> {
+        Vec::new()
+    }
+
+    /// The server's answer to a `KeyLookup` on `link`; the transport hands
+    /// it to that link's handshake.
+    fn answer_key_lookup(&mut self, _link: LinkId, _answer: KeyAnswer) {}
 
     /// Close the transport connection
     async fn close(&mut self) -> Result<(), TransportError>;

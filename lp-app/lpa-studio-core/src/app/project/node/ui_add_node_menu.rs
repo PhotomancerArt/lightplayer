@@ -104,20 +104,15 @@ pub const IMPORT_BUILTIN_SECTION: &str = "Built-in";
 /// catalog pattern export (self-exclusion is a library matter; a catalog
 /// entry is never the open project).
 ///
-/// Only the project-root site gets the source this round; a playlist's
-/// picker keeps the two it had, with no empty-state row to explain a
-/// section it never offered.
+/// Both sites get the source: an import at the project root mounts the
+/// vendored module in the root's `nodes`, one in a playlist becomes its
+/// next entry (the app agent builds playlists of catalog patterns through
+/// this same op, so the person can too).
 pub fn set_import_source(
     menu: &mut UiAddNodeMenu,
     patterns: &[UiImportablePattern],
     exclude_uid: Option<&str>,
 ) {
-    if !matches!(menu.attach, UiAttachTarget::ProjectRoot) {
-        menu.imports = Vec::new();
-        menu.imports_builtin = Vec::new();
-        menu.imports_empty = None;
-        return;
-    }
     let excluded = |pattern: &&UiImportablePattern| match &pattern.source {
         ImportSource::Library { package_uid } => exclude_uid == Some(package_uid.as_str()),
         ImportSource::BuiltIn { .. } => false,
@@ -472,20 +467,27 @@ mod tests {
         assert_eq!(op.export, "effect");
     }
 
-    /// This round vendors into the project `nodes` map only, so a
-    /// playlist's picker gets no import section at all — not an empty one.
+    /// A playlist's picker imports too, and each import row attaches to
+    /// THIS playlist — the vendored module becomes its next entry (the app
+    /// agent builds playlists of catalog patterns through the same op).
     #[test]
-    fn a_playlist_menu_offers_no_import_section() {
+    fn a_playlist_menu_imports_into_the_playlist() {
+        let playlist = crate::ProjectNodeAddress::parse("/demo.module/loop.playlist").unwrap();
         let mut menu = add_node_menu(&UiAttachTarget::Playlist {
-            node: crate::ProjectNodeAddress::parse("/demo.module/loop.playlist").unwrap(),
+            node: playlist.clone(),
         });
         set_import_source(
             &mut menu,
             &[pattern("prj_a", "aurora", "effect", false)],
             None,
         );
-        assert!(menu.imports.is_empty());
-        assert_eq!(menu.imports_empty, None);
+        assert_eq!(menu.imports.len(), 1);
+        let op = menu.imports[0]
+            .action
+            .op_as::<NodeImportOp>()
+            .expect("import op");
+        assert_eq!(op.attach, UiAttachTarget::Playlist { node: playlist });
+        assert!(!menu.imports_builtin.is_empty(), "catalog rows too");
     }
 
     /// No device has reported: nothing is gated. A sim lens must never be

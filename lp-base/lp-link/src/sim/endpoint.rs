@@ -37,6 +37,9 @@ pub struct Endpoint<A: Arq> {
     /// Counters of earlier incarnations.
     pub past_counters: Vec<LinkCounters>,
     pub log_ring: LogRing<2048>,
+    /// A secure link's edge (`Endpoint::new_secure`).
+    #[cfg(feature = "secure")]
+    pub secure: Option<crate::sim::secure_sim::SecureEdge>,
 }
 
 impl<A: Arq> Endpoint<A> {
@@ -60,13 +63,47 @@ impl<A: Arq> Endpoint<A> {
             text_bytes: 0,
             past_counters: Vec::new(),
             log_ring: LogRing::new(),
+            #[cfg(feature = "secure")]
+            secure: None,
         }
+    }
+
+    /// An endpoint whose link is secure, in `edge`'s role.
+    #[cfg(feature = "secure")]
+    pub fn new_secure(
+        cfg: LinkConfig,
+        nonce: u32,
+        edge: crate::sim::secure_sim::SecureEdge,
+    ) -> Self {
+        let mut e = Self::new(cfg.clone(), nonce);
+        e.link = Link::new_secure(cfg, nonce, edge.role(), crate::sim::sim_entropy::fill);
+        e.secure = Some(edge);
+        e
+    }
+
+    /// The RAM bound this endpoint's link must stay under.
+    pub fn ram_bound(&self) -> usize {
+        #[cfg(feature = "secure")]
+        if self.secure.is_some() {
+            return Link::<A>::ram_bound_secure(&self.cfg);
+        }
+        Link::<A>::ram_bound(&self.cfg)
     }
 
     /// Power-cycle: a fresh link with a fresh nonce; nothing survives.
     pub fn reboot(&mut self, nonce: u32) {
         self.past_counters.push(self.link.counters().clone());
         self.link = Link::new(self.cfg.clone(), nonce);
+        #[cfg(feature = "secure")]
+        if let Some(edge) = self.secure.as_mut() {
+            edge.reboot();
+            self.link = Link::new_secure(
+                self.cfg.clone(),
+                nonce,
+                edge.role(),
+                crate::sim::sim_entropy::fill,
+            );
+        }
         self.inc += 1;
         self.rx_gen = 0;
         self.logs_lost_in_ring += self.log_ring.len() as u64;
@@ -110,6 +147,10 @@ impl<A: Arq> Endpoint<A> {
 
     /// Write frames while the pipe takes them.
     pub fn service(&mut self, now: Micros, pipe: &mut Pipe) {
+        #[cfg(feature = "secure")]
+        if let Some(edge) = self.secure.as_mut() {
+            edge.service(&mut self.link);
+        }
         self.link.pump_log(now, &mut self.log_ring, CH_LOG);
         self.blocked = false;
         loop {
@@ -167,37 +208,8 @@ impl<A: Arq> Endpoint<A> {
     pub fn total_counters(&self) -> LinkCounters {
         let mut t = self.link.counters().clone();
         for c in &self.past_counters {
-            add_counters(&mut t, c);
+            t = t.plus(c);
         }
         t
     }
-}
-
-fn add_counters(t: &mut LinkCounters, c: &LinkCounters) {
-    t.frames_tx += c.frames_tx;
-    t.frames_rx += c.frames_rx;
-    t.bytes_tx += c.bytes_tx;
-    t.bytes_rx += c.bytes_rx;
-    t.data_frames_tx += c.data_frames_tx;
-    t.retransmits += c.retransmits;
-    t.timeouts += c.timeouts;
-    t.fast_retransmits += c.fast_retransmits;
-    t.probes += c.probes;
-    t.bad_frames += c.bad_frames;
-    t.stale_frames += c.stale_frames;
-    t.oversize_frames += c.oversize_frames;
-    t.oversize_messages += c.oversize_messages;
-    t.dropped_unsynced += c.dropped_unsynced;
-    t.duplicates += c.duplicates;
-    t.out_of_order += c.out_of_order;
-    t.rx_no_room += c.rx_no_room;
-    t.datagrams_dropped += c.datagrams_dropped;
-    t.datagrams_lost += c.datagrams_lost;
-    t.stale_partials += c.stale_partials;
-    t.text_bytes += c.text_bytes;
-    t.text_dropped += c.text_dropped;
-    t.ups += c.ups;
-    t.resets += c.resets;
-    t.stale_syns += c.stale_syns;
-    t.protocol_errors += c.protocol_errors;
 }

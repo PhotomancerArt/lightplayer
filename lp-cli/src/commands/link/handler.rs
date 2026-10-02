@@ -8,5 +8,6 @@ use super::args::{LinkCli, LinkSubcommand};
 pub fn handle_link(cli: LinkCli) -> Result<()> {
     match cli.subcommand {
         LinkSubcommand::Lab(args) => super::lab_cmd::lab(&args),
+        LinkSubcommand::Capture(args) => super::capture::capture(&args),
     }
 }

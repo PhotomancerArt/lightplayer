@@ -1,7 +1,7 @@
 {
   "format": 11,
   "name": "Colour Wipe",
-  "description": "Each palette colour in turn wipes across the piece behind a bright leading edge.",
+  "description": "Rainbow colours in turn (red, yellow, green, blue, violet), each wiping across the piece behind a bright leading edge.",
   "kind": "pattern",
   "exports": [
     "effect"

@@ -151,6 +151,42 @@ The core is IO-free state machines; async belongs to platform edges. See
 - Tests count as edges: a null-waker `block_on` loop is fine in tests
   driving immediately-ready futures, and nowhere else.
 
+## Agentic control — every user verb is an offer built in core
+
+Studio's view is humble, and the app agent is its second consumer: it sees
+the app through the same view model and presses the same actions. See
+`docs/adr/2026-10-01-agentic-control-offers-in-core.md`, refined by
+`docs/adr/2026-10-01-offer-tree-and-consequence-levels.md`.
+
+- **A button the user can press is a `UiAction` built in `lpa-studio-core`**
+  and published on a view model, never constructed in `lpa-studio-web`. An
+  action the web builds is invisible to the agent and untestable from core.
+- **`just lint-web-actions`** (in `check-lint`, so in CI) is a ratchet on the
+  actions the web still builds (`scripts/web-actions-ratchet.txt`). Per
+  file, the count may only go down. Moving a web-built action between files
+  needs `--bless` in the same change. Moving one into core is the point:
+  bless the drop.
+- **What pressing an action costs the user is one `ActionConsequence`:**
+  `Routine` (plain; the agent presses it), `Undoable` (error tint, one
+  click; the agent presses it and says what it did), or `Lasting` (error
+  tint, two-click arm, carries the copy saying what is lost; the agent
+  never presses it — it becomes the user's own button in chat).
+  `ActionMeta::needs_user_activation` is the separate browser fact that a
+  picker needs a real click (`navigator.serial.requestPort`,
+  `navigator.bluetooth.requestDevice`): plain look, but the agent still
+  hands it to the user. No browser `confirm()` dialog backs any action.
+- **One offer tree, `UiStudioView.offers`, holds every offer by a stable
+  path** (`project/save`, `project/demo.module/orbit.shader/remove` — a
+  node segment always has a dot, a verb never does). A surface renders its
+  own buttons with `verbs_of(its_path)`; the agent reads and presses the
+  same tree by path (`act { action: "project/save" }`). A migrated surface
+  loses its old DTO action field — there is nowhere else left to look.
+  **`just lint-core-action-fields`** (in `check-lint`) is a second ratchet:
+  action-carrying fields on core view types may only go down.
+- The rework toward migrating every surface onto the tree is a roadmap
+  (`lp2025/2026-10-01-1255-agentic-ui-roadmap`). Don't migrate whole
+  surfaces ad hoc. Don't add new web-built actions either.
+
 ## Wire/protocol compatibility
 
 - **During heavy development, wire/protocol compatibility is NOT maintained.**
@@ -175,25 +211,38 @@ The core is IO-free state machines; async belongs to platform edges. See
   nothing done for packing. What both ends must agree on is
   `lp_json_pack::PACK_FORMAT_VERSION` (the tag table, the learning rule and
   the table's capacities): **bump it, and `WIRE_PROTO_VERSION`, when you
-  change any of those**. On the **remaining `M!` transports** (BLE, the
-  classic ESP32's UART, `fw-emu`) every host reader keeps **one**
+  change any of those**. On the **remaining `M!` transports** (BLE and
+  `fw-emu`) every host reader keeps **one**
   `WireStream` per link for the link's whole life, and answers a
   `WireChunk::Desync` with `PackOptIn::desynced` (the board's reset). See
   `docs/adr/2026-09-25-learned-wire-dictionary.md`.
-- **USB is `lp-link` now, not `M!`.** The C6/S3 silicon and their emulators,
-  Studio's Web Serial and emulator-tab providers, and `lp-cli`'s native
-  serial/`serial:tcp`/`serial:ws` all frame the wire with `lp-link`
-  (`lp-base/lp-link`) instead: a 4-byte header, CRC-32C, selective-repeat
+- **USB and the classic's UART are `lp-link` now, not `M!`.** The C6/S3
+  silicon and their emulators, the classic ESP32's UART0 (DOM-Z-102 and its
+  emulator, since wire proto 32), Studio's Web Serial and emulator-tab
+  providers, and `lp-cli`'s native serial/`serial:tcp`/`serial:ws` all frame
+  the wire with `lp-link` (`lp-base/lp-link`) instead. The preset follows
+  the port's USB vendor on both hosts — Espressif's native USB (`0x303a`)
+  runs `LinkConfig::usb()`, a USB-UART bridge (the classic's CH340,
+  `0x1a86`) runs `LinkConfig::uart()` (`lpa_client::transport_serial::
+  link_config_for_port`, `lpa-link`'s `usb_vendors::link_config_for_usb_vendor`);
+  a socket has no vendor and stays on `usb()`. The link is a 4-byte header, CRC-32C, selective-repeat
   ARQ and a session handshake, with the wire's own JSON/packed message as
   channel 1's payload — one whole message per link message, tagged `{` for
   JSON or `L` for a learned-dictionary packed frame (never `0x00 'L'` COBS
   framing; the link already delimits it). Because both ends of a link reset
   together, the learned table resets **with the link**, not with an epoch:
   there is no cross-session dictionary, no `Desync`/`PackOptIn::desynced`
-  path and no `R` resync marker on USB — a payload that fails to decode
+  path and no `R` resync marker on an lp-link — a payload that fails to decode
   restarts the link instead. That machinery (above) still applies, unchanged,
-  to BLE, the classic UART and `fw-emu`. See `lp-base/lp-link/README.md` and
+  to BLE and `fw-emu`, the only `M!` board links left (BLE until its own
+  milestone, M3, lands). See `lp-base/lp-link/README.md` and
   `docs/adr/2026-09-27-lp-link-one-comms-layer.md`.
+- **lp-link's `secure` feature is off on every product link.** Turning it on
+  for one (M6's LAN WebSocket is the first) is a wire change: bump
+  `WIRE_PROTO_VERSION` in the same change. A plain link's bytes are pinned by
+  `lp-base/lp-link/tests/plain_bytes_golden.rs`; a mismatch there is a wire
+  change too, never a golden to re-capture. See
+  `docs/adr/2026-10-01-network-link-security.md`.
 
 ## Persisted-format compatibility (the wire rule does NOT apply here)
 
@@ -261,14 +310,14 @@ runtime.
 | `lpc-access`     | Access core: secrets, tiers, HMAC login, backoff (sans-IO) | yes |
 | `lp-server`      | Project management, client connections | yes              |
 | `lp-json-pack`   | JSON Pack: a compact binary form of JSON that decodes back to byte-identical JSON text (`lp-base/`, generic; names coded against an injected seed and a per-connection learned table) | yes |
-| `lp-link`        | Sans-IO link layer under the device wire: framing, CRC-32C, channels, selective-repeat ARQ, session handshake (`lp-base/`, generic; one crate on both ends). Runs the product's USB link (board, host, Studio, tools); BLE/classic-UART/fw-emu are still the pre-lp-link `M!` framing | yes |
+| `lp-link`        | Sans-IO link layer under the device wire: framing, CRC-32C, channels, selective-repeat ARQ, session handshake (`lp-base/`, generic; one crate on both ends). Runs the product's USB link and the classic's UART0 link (board, host, Studio, tools); BLE/fw-emu are still the pre-lp-link `M!` framing. Optional `secure` feature: Noise NNpsk0 inside the SYN + sealed frames, the key match as the login (`LinkTrust::Keyed`), off on every product link until the Wi-Fi milestones | yes |
 | `lpa-devices`    | Device model: event fold, no IO, no UI | no (host + wasm) |
 | `fw-esp32c6`       | ESP32 firmware                         | yes (bare metal) |
 | `fw-emu`         | RISC-V emulator firmware (CI)          | yes (bare metal) |
 | `lp-riscv-emu`   | RV32 emulator (host) — in `lp-emu/`    | yes (+std feat)  |
 | `lp-xt-emu`      | Xtensa emulator + machine-mode hart (host) — in `lp-emu/` | yes (+std feat)  |
 | `lp-emu-esp32c6` | ESP32-C6 SoC emulator (host) — `lp-emu/esp/` | no        |
-| `lp-emu-esp32v3` | Classic ESP32 (v3, Xtensa LX6) SoC emulator (host) — `lp-emu/esp/`. **Two cores** on a deterministic quantum interleave. Boots the shipped `fw-esp32v3` on **both** paths (direct load, and from the mask ROM's reset vector through the real IDF bootloader), takes a real upload over UART0 with the CH340 cable modelled, and renders a frame that is byte-identical on all three readings. `just test-emu-esp32v3-gate`, `just walk-esp32v3-emu`; the walk record is `docs/reports/2026-09-11-esp32v3-emulator-walk.md`. Speed: `just bench-emu-esp32v3` (an oracle, never a gate) and `scripts/emu/v3-oracle.sh <out-dir> <slug> <window>` — the identity oracle WITHIN one binary, the fast path against `--no-block-cache`, on the three pinned images; `--bin-a`/`--bin-b` runs it ACROSS binaries with the fast path off, which is what proves the interpreter did not move, and `--flags-a`/`--flags-b` (with `--name-a`/`--name-b`) runs any other pair — M7 P04's is `--jit` against `--interpreter`. **`--jit` needs `--features jit`** and today escapes every instruction back to the interpreter, so it is SLOWER than not asking for it; what it proves is identity | no |
+| `lp-emu-esp32v3` | Classic ESP32 (v3, Xtensa LX6) SoC emulator (host) — `lp-emu/esp/`. **Two cores** on a deterministic quantum interleave. Boots the shipped `fw-esp32v3` on **both** paths (direct load, and from the mask ROM's reset vector through the real IDF bootloader), takes a real upload over its UART0 lp-link with the CH340 cable modelled (hosted in process by `lp-cli emu run --chip esp32v3 --host-link`), and renders a frame that is byte-identical on all three readings. `--uart-faults <spec>` damages UART0's byte stream in 64-byte windows, the C6's `--usb-faults` over a UART (a test switch, off by default). `just test-emu-esp32v3-gate`, `just walk-esp32v3-emu`; the gates that need the link live in `lp-cli/tests/emu_v3_link_gates.rs` and `emu_uart_link.rs` (the fault soak), run by `test-emu-esp32v3-boot`; the walk record is `docs/reports/2026-09-11-esp32v3-emulator-walk.md`. Speed: `just bench-emu-esp32v3` (an oracle, never a gate) and `scripts/emu/v3-oracle.sh <out-dir> <slug> <window>` — the identity oracle WITHIN one binary, the fast path against `--no-block-cache`, on the three pinned images; `--bin-a`/`--bin-b` runs it ACROSS binaries with the fast path off, which is what proves the interpreter did not move, and `--flags-a`/`--flags-b` (with `--name-a`/`--name-b`) runs any other pair — M7 P04's is `--jit` against `--interpreter`. **`--jit` needs `--features jit`** and today escapes every instruction back to the interpreter, so it is SLOWER than not asking for it; what it proves is identity | no |
 | `lp-emu-esp32s3` | ESP32-S3 (Xtensa LX7) SoC emulator (host) — `lp-emu/esp/`. **M6 P01: register tables and a vendored ROM only — no map, no hart, no peripheral, no boot yet.** What the shipped image actually does is `docs/reports/2026-09-11-esp32s3-firmware-inventory.md` | no |
 | `lp-emu-validate` | The validation runner (host) — `lp-emu/`. Payloads, configurations, transcripts and their sidecars, replay, and the **trust table** (`validate.toml`) every claim in the two walk records is graded by. Reached through `lp-cli validate list\|record\|run\|replay` | no |
 
@@ -655,7 +704,7 @@ buffer capped at 16 MiB (one console warning at the cap, then it drops). Run
 `wire-capture-<unix-ms>.bin`; the capture keeps running, and the file is
 exactly what arrived — a board's USB link is `lp-link` bytes now, and
 `lp-cli wire unpack --sizes < file` decodes them by default (`--lines` reads
-the old `M!`-line framing instead, for a BLE/classic-UART/`fw-emu` capture).
+the old `M!`-line framing instead, for a BLE or `fw-emu` capture).
 `?device-log=<trace|debug|info|warn|error>` asks each board for that log
 level (`SetLogLevel`) once per link, after its hello and the packed-reply
 opt-in; the answer is a `dev: …` `WireNote` line, never a frame. Both cover
@@ -1114,7 +1163,7 @@ These commands must pass for any change touching the shader pipeline:
 
 ```bash
 # Firmware emulator tests (real shader compilation + execution)
-cargo test -p fw-tests --test scene_render_emu --test profile_alloc_emu
+cargo test -p fw-tests --test scene_render_emu
 
 # ESP32 builds with compiler included
 cargo check -p fw-esp32c6 --target riscv32imac-unknown-none-elf --profile release-esp32 --features esp32c6,server

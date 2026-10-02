@@ -14,9 +14,9 @@
 //! `VisitorSession` (routed to a `/p/<uid>` share link), while an embedded
 //! example's transient session has no such route to key off. Q9 rules
 //! that this dispatches `ProjectOp::SaveOverlay` directly rather than
-//! picking a `UiPaneAction` out of `header_actions` — `header_actions` is
-//! populated only while persisted edits are pending (presence-is-dirty
-//! contract), so it is EMPTY exactly when a pristine session needs this
+//! picking `project/save` out of the view's offer tree — that offer is
+//! published only while persisted edits are pending (presence-is-dirty
+//! contract), so it is ABSENT exactly when a pristine session needs this
 //! button to still work.
 
 use lpa_studio_core::app::studio::studio_view_channel::CommandSender;

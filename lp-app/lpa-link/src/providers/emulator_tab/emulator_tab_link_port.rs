@@ -15,7 +15,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use lpc_wire::lp_link::Micros;
+use lpc_wire::lp_link::{LinkConfig, Micros};
 
 use super::emulator_tab_bridge::EmulatorTabPort;
 use crate::device_link::link_port_edge::{
@@ -102,8 +102,18 @@ pub fn take_notes(port: EmulatorTabPort) -> Vec<String> {
     })
 }
 
+/// A link for a newly opened board. `usb()`, because the tab holds C6 boards
+/// only (`emu_esp32c6_wasm`, a board record's `link: "usb-serial-jtag"`): the
+/// preset is the board's, as Web Serial picks it from the port's vendor id
+/// (`usb_vendors::link_config_for_usb_vendor`). A classic in the tab would
+/// run `uart()` here.
 fn fresh_service() -> LinkPortService {
-    LinkPortService::new(random_nonce(), packed_replies_wanted(), device_log_level())
+    LinkPortService::new(
+        LinkConfig::usb(),
+        random_nonce(),
+        packed_replies_wanted(),
+        device_log_level(),
+    )
 }
 
 /// One pass: pull what the board said, feed the link, write its frames.

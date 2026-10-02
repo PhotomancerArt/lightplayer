@@ -54,6 +54,8 @@ esp32 = ["esp-backtrace/esp32", "esp-rtos?/esp32"]
 # load-bearing.
 server = [
     "fw-esp32-common/server",
+    # The host link: lp-link over UART0 (plan `classic-uart-on-lp-link`).
+    "fw-esp32-common/uart-link",
     "dep:embassy-executor",
     "dep:embassy-futures",
     "dep:embassy-sync",
@@ -412,7 +414,9 @@ lp-recovery = { path = "../../lp-base/lp-recovery", default-features = false, op
 # crate must stay free of chip code (ADR 2026-07-29-per-chip-fw-toolchains).
 fw-esp32-common = { path = "../fw-esp32-common", default-features = false }
 
-# MessageRouter + the SerialIo trait, for `serial::io_task`.
+# Named for its `fixture-no-hello` feature (below), which must reach the
+# `fw-core` that `fw-esp32-common` links; this crate no longer names it in code
+# (the `M!` io_task's `MessageRouter` went with the lp-link cut-over).
 fw-core = { path = "../fw-core", default-features = false, optional = true }
 
 # The portable WS281x transmitter: pulse encoding, the ping-pong refill state

@@ -4,7 +4,7 @@ use dioxus::prelude::*;
 use lpa_studio_web_story_macros::story;
 
 use crate::core::ActionStrip;
-use crate::core::story_fixtures::{confirmation_action, disabled_action, story_actions};
+use crate::core::story_fixtures::{disabled_action, lasting_action, story_actions};
 
 #[story]
 pub(crate) fn priorities() -> Element {
@@ -39,11 +39,13 @@ pub(crate) fn running_state() -> Element {
     }
 }
 
-#[story]
+#[story(
+    description = "A Lasting action (D7) in the strip: the error tint at rest, and the chip already as wide as its armed \"Confirm Erase\" reading — the first click arms, the second acts. There is no dialog."
+)]
 pub(crate) fn confirmation() -> Element {
     rsx! {
         ActionStrip {
-            actions: vec![confirmation_action()],
+            actions: vec![lasting_action()],
             running: false,
             on_action: move |_| {},
         }

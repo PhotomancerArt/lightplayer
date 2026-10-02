@@ -11,7 +11,8 @@ use crate::app::settings::agent_models::{
 use crate::app::settings::agent_provider::{AgentProvider, provider_guidance};
 use crate::app::settings::settings_layer::SettingsLayer;
 use crate::app::settings::studio_settings::{
-    DEFAULT_AGENT_MODEL, DEFAULT_OPENROUTER_MODEL, OPENROUTER_BASE_URL, StudioSettings,
+    DEFAULT_AGENT_MODEL, DEFAULT_APP_AGENT_OPENROUTER_MODEL, DEFAULT_OPENROUTER_MODEL,
+    OPENROUTER_BASE_URL, StudioSettings,
 };
 use crate::app::settings::ui_settings_view::{
     UiAgentSettingsView, UiSettingsView, masked_key_preview,
@@ -85,6 +86,10 @@ impl SettingsStore {
     }
 
     /// Set or clear the user's model override (trimmed; empty ⇒ clear).
+    pub fn set_app_agent_model(&mut self, model: Option<String>) {
+        self.user.agent.app_agent_model = normalized(model);
+    }
+
     pub fn set_agent_model(&mut self, model: Option<String>) {
         self.user.agent.model = normalized(model);
         self.adopt_discovered_rates();
@@ -207,6 +212,28 @@ impl SettingsStore {
             ),
             AgentProvider::OpenAi | AgentProvider::Custom => self.agent_model_override(),
         }
+    }
+
+    /// The app chat's model: its own override, else on OpenRouter its own
+    /// default (the bake-off's choice), else the shader agent's model.
+    pub fn app_agent_model(&self) -> Option<&str> {
+        let override_model = self.user.agent.app_agent_model.as_deref().or(self
+            .host
+            .agent
+            .app_agent_model
+            .as_deref());
+        match (override_model, self.agent_provider()) {
+            (Some(model), _) => Some(model),
+            (None, AgentProvider::OpenRouter) => Some(DEFAULT_APP_AGENT_OPENROUTER_MODEL),
+            (None, _) => self.agent_model(),
+        }
+    }
+
+    /// The app chat's connection settings: the selected provider and key,
+    /// with [`Self::app_agent_model`].
+    pub fn app_agent_provider_config(&self) -> Option<AgentProviderConfig> {
+        let model = self.app_agent_model()?.to_string();
+        self.provider_config_with_model(model)
     }
 
     /// The readiness rule: the agent is available exactly when the selected
@@ -541,6 +568,41 @@ mod tests {
         assert_eq!(view.provider, AgentProvider::Anthropic);
         assert_eq!(view.api_key_layer, SettingsLayer::Default);
         assert_eq!(view.model_placeholder, DEFAULT_AGENT_MODEL);
+    }
+
+    #[test]
+    fn the_app_chat_has_its_own_model_default_on_openrouter() {
+        let mut store = SettingsStore::default();
+        store.set_host_layer(layer(|agent| {
+            agent.provider = Some(AgentProvider::OpenRouter);
+            agent.openrouter_api_key = Some("sk-or-host".into());
+        }));
+        // The shader agent keeps its default; the app chat takes the
+        // bake-off's open-weights pick (A6).
+        assert_eq!(store.agent_model(), Some(DEFAULT_OPENROUTER_MODEL));
+        assert_eq!(
+            store.app_agent_model(),
+            Some(DEFAULT_APP_AGENT_OPENROUTER_MODEL)
+        );
+        let Some(AgentProviderConfig::OpenAiCompat(config)) = store.app_agent_provider_config()
+        else {
+            panic!("OpenRouter resolves to the compat provider");
+        };
+        assert_eq!(config.model, DEFAULT_APP_AGENT_OPENROUTER_MODEL);
+        // Its own override wins; the shader agent's override does not leak in.
+        store.set_agent_model(Some("shader-model".to_string()));
+        assert_eq!(
+            store.app_agent_model(),
+            Some(DEFAULT_APP_AGENT_OPENROUTER_MODEL)
+        );
+        store.set_app_agent_model(Some("app-model".to_string()));
+        assert_eq!(store.app_agent_model(), Some("app-model"));
+        // Off OpenRouter, with no override of its own, it follows the agent.
+        store.set_app_agent_model(None);
+        store.set_host_layer(layer(|agent| {
+            agent.anthropic_api_key = Some("sk-ant".into());
+        }));
+        assert_eq!(store.app_agent_model(), store.agent_model());
     }
 
     #[test]

@@ -198,7 +198,14 @@ fn a_client_through_the_door_gets_packed_replies_and_unpack_restores_json() {
                 .any(|r| matches!(r, DoorRead::Message { message, .. } if message.id == *id))
         })
     });
-    let raw = std::mem::take(&mut link.raw);
+    let mut raw = std::mem::take(&mut link.raw);
+    // The client stopped reading at a WebSocket message boundary, not a
+    // frame boundary: the read that completed reply 4 can also carry the
+    // start of the board's next frame (usually a log datagram). `wire
+    // unpack` rightly counts a frame the capture ends inside as damaged, so
+    // end the capture at its last `0x00` — every message read is before it.
+    let end = raw.iter().rposition(|&b| b == 0).map_or(0, |i| i + 1);
+    raw.truncate(end);
     let received: Vec<(String, bool)> = link
         .reads
         .iter()

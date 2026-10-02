@@ -103,7 +103,14 @@ pub fn log_if_grown(label: &str) {
     if used > last {
         HIGH_WATER_REPORTED.store(used, Ordering::Relaxed);
         let total = total_bytes();
-        esp_println::println!(
+        // Through `log`, not `esp_println`: since wire proto 32 UART0 is an
+        // lp-link, and raw text written while io_task is writing a frame
+        // lands inside it — the frame is resent, the text is lost with it,
+        // and a raw diagnostic line concurrent with the host link is the
+        // interleaving defect itself
+        // (`docs/defects/2026-08-02-serial-line-interleaving.md`). The S3's
+        // probe made the same move at its own cut-over.
+        log::info!(
             "[stack] {label}: high-water {used} B of {total} B ({} B headroom)",
             total.saturating_sub(used)
         );

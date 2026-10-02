@@ -156,6 +156,12 @@ OPTIONS:
                             sends at [115200]. It changes what the auto-baud
                             counters report and NOTHING else; it never
                             overrides what the guest writes to clkdiv
+    --uart-faults <spec>    a TEST switch, off by default: damage UART0's
+                            host link, e.g.
+                            in-drop=0.5%,in-tail=0.5%,in-run=0.1%,out-drop=0.5%,seed=7
+                            — the C6's --usb-faults over a byte stream: each
+                            64-byte window of the wire is one packet
+                            (lp_emu_esp_common::link_faults) [none]
     --control <tcp:addr>    LISTEN for a control-channel client: the CH340
                             cable's own socket (attach/detach/open/close/
                             dtr/rts/signals/reset/download-mode/state). One
@@ -279,6 +285,7 @@ struct Args {
     console: Option<PathBuf>,
     uart0_script: Option<PathBuf>,
     uart0_baud: Option<u64>,
+    uart_faults: Option<lp_emu_esp_common::link_faults::LinkFaults>,
     control: Option<String>,
     control_script: Option<PathBuf>,
     reboot_on_reset: bool,
@@ -358,6 +365,9 @@ fn run() -> Result<ExitCode, String> {
         .reboot_on_reset(args.reboot_on_reset);
     if let Some(baud) = args.uart0_baud {
         builder = builder.uart0_baud(baud);
+    }
+    if let Some(faults) = args.uart_faults.clone() {
+        builder = builder.uart0_faults(faults);
     }
     if let Some(path) = &args.uart0_script {
         let text = std::fs::read_to_string(path)
@@ -440,6 +450,9 @@ fn run() -> Result<ExitCode, String> {
     machine.bus_mut().host.flush_all();
     print_outcome(&mut machine, &outcome);
     print_run_summary(&machine);
+    if let Some((to_host, to_device)) = machine.uart0_fault_counters() {
+        eprintln!("uart-faults: device→host {to_host}; host→device {to_device}");
+    }
     print_block_report(&machine);
     if args.jit_report {
         print_jit_report(&machine);
@@ -1104,6 +1117,13 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
                 args.uart0_baud = Some(
                     v.parse()
                         .map_err(|_| format!("--uart0-baud {v}: not a number"))?,
+                );
+            }
+            "--uart-faults" => {
+                let text = value()?;
+                args.uart_faults = Some(
+                    lp_emu_esp_common::link_faults::LinkFaults::parse(&text)
+                        .map_err(|e| format!("--uart-faults: {e}"))?,
                 );
             }
             "--control" => {

@@ -5,6 +5,8 @@
 //! section says (D13). Like every other mirrored fact it is the BOARD's
 //! view: `resends` are frames the board sent again, `damaged` are frames
 //! from this side that reached it broken, `bytes_sent` left the board.
+//! `frames_sent`/`frames_received` ride along only as the denominators the
+//! link section's amber rule (DD2) needs — they carry no row of their own.
 
 use serde::{Deserialize, Serialize};
 
@@ -23,4 +25,10 @@ pub struct LinkCounterFacts {
     pub bytes_sent: u64,
     /// Bytes the board read off the wire.
     pub bytes_received: u64,
+    /// Frames the board wrote (every kind, not resends alone) — the
+    /// denominator [`resends`](Self::resends) is a share of.
+    pub frames_sent: u32,
+    /// Frames the board read and verified — the denominator
+    /// [`damaged`](Self::damaged) is a share of.
+    pub frames_received: u32,
 }

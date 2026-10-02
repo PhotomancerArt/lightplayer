@@ -366,13 +366,18 @@ impl Serve {
             text = std::fs::read(&path)
                 .map(|b| String::from_utf8_lossy(&b).into_owned())
                 .unwrap_or_default();
-            if text.contains(needle) {
+            // The whole line, not just the needle: the console is written
+            // as it arrives, and a caller asserting on the rest of the line
+            // read a half-written one ("…final_inst_count=2048, fi").
+            if let Some(at) = text.find(needle)
+                && text[at..].contains('\n')
+            {
                 return text;
             }
             std::thread::sleep(POLL);
         }
         panic!(
-            "`{needle}` never appeared in {}; it held {} bytes:\n{}",
+            "`{needle}` never appeared (as a whole line) in {}; it held {} bytes:\n{}",
             path.display(),
             text.len(),
             tail(&text)

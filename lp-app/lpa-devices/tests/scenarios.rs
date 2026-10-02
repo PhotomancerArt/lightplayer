@@ -326,6 +326,54 @@ fn a_silent_link_is_identified_by_its_silence() {
     assert!(view.pending[0].can_adopt, "a blank chip is still adoptable");
 }
 
+/// `Device::spawn_identify` is called directly from the roster's routing
+/// paths (a hotplug connect, a fresh grant) — never through `Device::handle`
+/// — so its caller never reaches `handle`'s own `rearm`. A freshly spawned
+/// identify whose `Open` is lost must still arm its own deadline, or nothing
+/// is left to wake it: the card would be stranded on "Identifying…" forever
+/// (2026-09-28, split from
+/// `a_replug_under_the_lens_comes_back_ready_and_opens_again`).
+///
+/// This attaches a brand-new endpoint — the "nobody claims it" branch of
+/// `Roster::attach_link`, which spawns the provisional device's identify
+/// directly, bypassing `handle` entirely — and never answers the identify's
+/// `Open` (no `Step::opened`). Without the deadline armed, `advance_to` has
+/// no timer to fire and the identify never settles; with it armed, the
+/// identify's own deadline still fires on schedule and settles the link as
+/// a bounded, honest failure instead of hanging.
+#[test]
+fn an_identify_spawned_from_roster_routing_arms_its_own_deadline() {
+    let config = RosterConfig::default();
+    let mut replay = Replay::new(config);
+    replay.step(Millis(0), Step::attach(1, "usb-1"));
+
+    // No `Step::opened(1)`: the identify's `Open` command is issued (by
+    // `spawn_identify`, straight from `attach_link`) but never answered —
+    // the same as if it were lost to the link-registration race this ticket
+    // was split from.
+    let pending = &replay.roster().pending()[0];
+    assert!(
+        pending.is_identifying(),
+        "the identify started: {:?}",
+        pending.verdict()
+    );
+
+    replay.advance_to(Millis(config.identify_deadline_ms + 200));
+
+    let pending = &replay.roster().pending()[0];
+    assert!(
+        !pending.is_identifying(),
+        "a lost Open must not hang the identify forever — deadline armed \
+         at spawn, not left for a `handle` that this routing path never \
+         reaches"
+    );
+    assert!(
+        pending.verdict().is_some(),
+        "the deadline must settle a verdict, not just stop the activity: {:?}",
+        pending.verdict()
+    );
+}
+
 #[test]
 fn unplugging_mid_activity_evicts_and_refolds() {
     let mut replay = ready_device();
