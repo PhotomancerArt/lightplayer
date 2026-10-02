@@ -372,7 +372,12 @@ impl AccessSession {
     ) {
         use super::login_attempt::LoginAttemptOutcome as Outcome;
         self.busy = false;
-        if !was_typed {
+        // Only an automatic try that did not unlock is spent. One that did
+        // is what unlocks every later window too: a silent reconnect is a
+        // new link holding nothing, and the board drops it at its unlock
+        // deadline unless it is unlocked again — which Web Bluetooth answers
+        // with another reconnect, forever.
+        if !was_typed && !matches!(outcome, Outcome::Granted { .. }) {
             self.auto_spent = true;
         }
         let same_window = self.window == Some(window);
@@ -550,6 +555,51 @@ mod tests {
         );
         assert_eq!(session.prompt, None);
         assert_eq!(session.next_step(Millis(40), &held, &[]), None);
+    }
+
+    /// Bluefy, 2026-10-02: a silent reconnect after a held key had unlocked
+    /// the board came up locked and stayed locked, so the board dropped it
+    /// at its unlock deadline, Web Bluetooth reconnected, and the loop never
+    /// ended — one native "disconnected" alert per lap. A key that unlocked
+    /// the board is not a spent guess: every new window is unlocked with it
+    /// again, silently.
+    #[test]
+    fn a_reconnect_after_an_automatic_unlock_is_unlocked_again() {
+        let mut session = AccessSession::default();
+        let held = [held_key()];
+        let first = window(1, 10);
+        session.observe(Some(first));
+        session.started(&AccessStep::Check(first));
+        session.checked(first, true, None, true);
+        let step = session.next_step(Millis(11), &held, &[]).unwrap();
+        session.started(&step);
+        session.logged_in(first, &granted_edit(), false, Millis(20));
+
+        for (link, at) in [(2, 5_000), (3, 9_000)] {
+            session.observe(None);
+            let next = window(link, at);
+            session.observe(Some(next));
+            let step = session.next_step(Millis(at), &held, &[]).unwrap();
+            assert_eq!(step, AccessStep::Check(next));
+            session.started(&step);
+            session.checked(next, true, None, true);
+            assert_eq!(session.prompt, None, "no sheet on a silent reconnect");
+            let step = session.next_step(Millis(at + 1), &held, &[]).unwrap();
+            assert_eq!(
+                step,
+                AccessStep::Login {
+                    window: next,
+                    held: held.to_vec(),
+                    passwords: Vec::new(),
+                    typed: None,
+                    challenge: None,
+                },
+                "window {link} is unlocked with the key that unlocked the last"
+            );
+            session.started(&step);
+            session.logged_in(next, &granted_edit(), false, Millis(at + 20));
+            assert!(matches!(session.phase, AccessPhase::Granted { .. }));
+        }
     }
 
     #[test]
@@ -829,6 +879,14 @@ mod tests {
         LoginWindow {
             link: LinkId(link),
             hello_at: Millis(at),
+        }
+    }
+
+    fn granted_edit() -> LoginAttemptOutcome {
+        LoginAttemptOutcome::Granted {
+            tier: Tier::Edit,
+            label: "Yona's MacBook".to_string(),
+            password_index: None,
         }
     }
 
