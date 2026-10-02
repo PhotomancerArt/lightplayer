@@ -231,11 +231,9 @@ esp_bootloader_esp_idf::esp_app_desc!();
 /// stays absent).
 #[cfg(not(fw_harness))]
 fn heartbeat_memory_stats() -> Option<lpc_wire::server::MemoryStats> {
-    // Piggybacks on the heartbeat cadence: one scan of the main stack per
-    // second, a log line only when the mark grows.
-    stack_probe::log_if_grown("heartbeat");
-    #[cfg(feature = "io_thread_stack_diag")]
-    io_thread_stack_diag::log_if_grown();
+    // The heartbeat's stack lines are due; [`log_heartbeat_stack_lines`]
+    // writes them once the heartbeat itself has gone out.
+    HEARTBEAT_STACK_LINES_DUE.store(true, core::sync::atomic::Ordering::Relaxed);
     esp32_memory_stats().map(|(free_bytes, used_bytes)| lpc_wire::server::MemoryStats {
         free_bytes,
         used_bytes,
@@ -243,6 +241,32 @@ fn heartbeat_memory_stats() -> Option<lpc_wire::server::MemoryStats> {
         largest_free_block: read_headroom_probe(),
         oom_retry_saves: None,
     })
+}
+
+/// Set when a heartbeat's figures are taken; cleared once its stack lines are
+/// logged.
+#[cfg(not(fw_harness))]
+static HEARTBEAT_STACK_LINES_DUE: core::sync::atomic::AtomicBool =
+    core::sync::atomic::AtomicBool::new(false);
+
+/// The heartbeat's stack lines, logged AFTER the heartbeat went out: one scan
+/// of the main stack per heartbeat, a line only when the mark grows (and the
+/// link thread's, under `io_thread_stack_diag`). Run from the server loop's
+/// per-iteration upkeep, which follows the heartbeat in the same iteration.
+///
+/// They used to be logged while the heartbeat was built, which put them on
+/// the wire after it only because the link task ran later. With the link on
+/// its own thread (`io_thread`) a record goes out the moment it is written,
+/// so a line logged before the send overtook the heartbeat, and a capture
+/// stopping on `[stack] heartbeat: high-water` (`boot-idle`'s sentinel)
+/// would stop short of it.
+#[cfg(not(fw_harness))]
+fn log_heartbeat_stack_lines() {
+    if HEARTBEAT_STACK_LINES_DUE.swap(false, core::sync::atomic::Ordering::Relaxed) {
+        stack_probe::log_if_grown("heartbeat");
+        #[cfg(feature = "io_thread_stack_diag")]
+        io_thread_stack_diag::log_if_grown();
+    }
 }
 
 /// This chip's ProjectRead memory gate (`lpa_server::ReadGate`): refuse a
@@ -894,7 +918,10 @@ async fn main(spawner: embassy_executor::Spawner) {
                 app.transport,
                 app.time_provider,
                 heartbeat_memory_stats,
-                move |now_ms| watchdog.feed(now_ms),
+                move |now_ms| {
+                    watchdog.feed(now_ms);
+                    log_heartbeat_stack_lines();
+                },
             )
             .await;
         }
@@ -926,7 +953,10 @@ async fn main(spawner: embassy_executor::Spawner) {
                 app.transport,
                 app.time_provider,
                 heartbeat_memory_stats,
-                move |now_ms| watchdog.feed(now_ms),
+                move |now_ms| {
+                    watchdog.feed(now_ms);
+                    log_heartbeat_stack_lines();
+                },
                 bench::render_loop::budget(),
                 |cycles| stats.record(cycles),
             )
