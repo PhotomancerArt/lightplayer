@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# OTA split-link spike, S3: cut the power at emulated time T during an
+# OTA split-link spike, S3: cut the power at emulated time T (or, with
+# CUT_BY_REQUESTS=1, right after the Nth update request is served) during an
 # X → Y update, then boot what the flash holds and offer Y again. Pass = the
 # board ends up running Y's engine; and right after the cut it is reachable
 # (engine running, or core-only).
@@ -20,8 +21,10 @@ mkdir -p "$out"
 one() {
     local t="$1" c="$out/cut-$1"
     cp "$dir/x/merged.bin" "$c.flash"
+    local cut_args=(--timeout "${t}ms")
+    [[ -n "${CUT_BY_REQUESTS:-}" ]] && cut_args=(--ota-cut-after "$t" --timeout 120s)
     "$cli" emu run --rom-up-flash "$c.flash" --host-link --ota-offer "$dir/y" \
-        --reboot-on-reset --timeout "${t}ms" --wall-timeout 900 \
+        --reboot-on-reset "${cut_args[@]}" --wall-timeout 900 \
         --console "$c.cut.txt" >/dev/null 2>"$c.cut.err"
     "$cli" emu run --rom-up-flash "$c.flash" --host-link --ota-offer "$dir/y" \
         --reboot-on-reset --timeout 70s --wall-timeout 1200 \
@@ -42,6 +45,6 @@ one() {
         "$verdict" "$t" "$boots" "${served:-0}" "$last" "$first" "$final"
 }
 export -f one
-export dir out cli
+export dir out cli CUT_BY_REQUESTS
 printf '%s\n' "$@" | xargs -P "${JOBS:-6}" -I{} bash -c 'one {}' | sort -t= -k2 -n | tee "$out/summary.tsv"
 echo "pass: $(grep -c ^PASS "$out/summary.tsv") / $(wc -l < "$out/summary.tsv")"

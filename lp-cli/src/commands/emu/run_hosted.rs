@@ -54,7 +54,9 @@ async fn run_hosted_async<B: EmuUsbBoard>(
         .queue_messages(false)
         .wall_timeout(Duration::from_secs(args.wall_timeout_secs));
     if let Some(dir) = &args.ota_offer {
-        host.ota = Some(super::link_host::OtaServe::from_dir(dir)?);
+        let mut ota = super::link_host::OtaServe::from_dir(dir)?;
+        ota.cut_after = args.ota_cut_after;
+        host.ota = Some(ota);
     }
     if let Some(path) = &args.console {
         let file = std::fs::File::create(path)

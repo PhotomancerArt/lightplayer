@@ -206,6 +206,11 @@ pub struct RunArgs {
     #[arg(long = "ota-offer", requires = "host_link")]
     pub ota_offer: Option<PathBuf>,
 
+    /// OTA split-link spike: cut the power (end the run, flash written back)
+    /// right after the Nth update request is served.
+    #[arg(long = "ota-cut-after", requires = "ota_offer")]
+    pub ota_cut_after: Option<u32>,
+
     /// With `--host-link`: do not ask the board to pack its replies (JSON
     /// Pack), so the run measures a board that has no learned table — the
     /// heap ratchet's state, and what a host with `LP_WIRE_ENCODING=json`

@@ -358,6 +358,8 @@ pub struct OtaServe {
     pub offers: u32,
     pub requests: u32,
     pub served_bytes: u64,
+    /// Spike: end the run (a power cut) once this many requests are served.
+    pub cut_after: Option<u32>,
 }
 
 impl OtaServe {
@@ -369,7 +371,7 @@ impl OtaServe {
         anyhow::ensure!(engine.len() > 56 && &engine[..8] == b"LPENGIN1", "engine.bin has no header");
         let mut build_id = [0u8; 48];
         build_id.copy_from_slice(&engine[8..56]);
-        Ok(Self { core, engine, build_id, offers: 0, requests: 0, served_bytes: 0 })
+        Ok(Self { core, engine, build_id, offers: 0, requests: 0, served_bytes: 0, cut_after: None })
     }
 
     pub fn offer(&mut self) -> Vec<u8> {
@@ -540,6 +542,9 @@ impl<B: EmuUsbBoard> EmuLinkHost<B> {
                 if self.port.send_update(&answer).is_err() {
                     self.link_errors += 1;
                 }
+            }
+            if ota.cut_after.is_some_and(|n| ota.requests >= n) {
+                bail!("ota: power cut after {} request(s)", ota.requests);
             }
         }
         Ok(())
