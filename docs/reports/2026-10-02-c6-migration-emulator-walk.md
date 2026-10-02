@@ -60,17 +60,18 @@ scenario under `target/walk-migration-emu/<scenario>/`.
 | W2 | Update on a board already on the new layout | **pass** | no question; installed; no file lost/moved/added; only `/.lp/access.json` changed (Studio's own key write on a USB connect — documented behaviour, not the migration) |
 | W3 | over-full board (+720 KB of noise: fits 240 blocks, not 176 with the 16-block floor) | **pass** | refusal "This board's files don't fit the new firmware"; **chip byte-identical** to as found; board back on its firmware, files mounted |
 | W4 | Cancel at the question | **pass** | chip byte-identical; board back on its firmware, `fs: mounted`, its uid |
-| W5 | cable pull during "Writing firmware" | **NEVER RUN** | not attempted (time). By the write order nothing of the old filesystem is touched before the firmware write ends, so the board boots its old firmware on its old files or the new one HOLDING them (W9's state) |
+| W5 | cable pull during the firmware write (`Writing at 0x10ab7e... (33%)`) | **pass** | the part-written app does not boot (`No bootable app partitions in the partition table`); the card reads "Unrecognized firmware" and offers **Flash firmware** with the board picked; that flash reads the layout again and asks "Move this board's files to the new layout" (23 files, read again from `0x310000`); Continue → **all 23 files byte-identical** at `0x350000`, old superblock erased, `fs: mounted`, same uid |
 | W6 | cable pull between the firmware write and the filesystem | **not reachable** | the moment (after the firmware write, before the old filesystem's retirement) is one esptool-js step boundary; pulls keyed off the card's progress landed later every time. The held state is proven by W9 instead, and by the fake e2e (`interrupt_next_plan_after(1)`) |
 | W7a | cable pull mid filesystem write (`Writing at 0x352000`) | **pass** | power-on boot: `[FS] Formatted and mounted fresh filesystem`; the card offers **Restore files** with the backup's date and Download backup |
 | W7b / W8 | a NEW Chrome on the same profile (the tab was closed), same board | **pass** | the backup came back out of OPFS; Restore → "Put this board's files back" → installed; **all 23 files byte-identical** to what W7a's update found; `fs: mounted`, uid back |
 | W9 | a bypassed flash (the new image written over `0x0`, no migration) | **pass** | boot: `[FS] legacy-layout filesystem found at 0x310000 — not formatting; files are held for migration; using memory FS`; the card offers **Finish update**; it moves **all 23 files byte-identical**; uid back |
 | W10 | `lp-cli hardware lpfs migrate` (host path) | **pass** | `emu_layout_migration.rs`: every file byte for byte at `0x350000`, new table, old superblocks erased, the board mounts them on boot (179.28 s emulated) |
 | W11 | preflight for an old-table image onto a migrated chip | **pass** | `emu_layout_migration.rs`: exit 3, chip unchanged |
-| W12 | `--tab` (`?emu=tab`) | **NEVER RUN** | not attempted: the tab backing's chip lives in the page, and seeding a fixture chip into it was not built |
+| W12 | W1 on a tab-hosted board (`?emu=tab`, no door) | **pass** | the fixture chip is put into the page's board (`putFlash`, power-cycle) and read back out through the walk's own server; Studio's update asks, moves **all 23 files byte-identical** to `0x350000`, retires the old superblock; the board mounts them as itself |
 
 **Re-walked after main's merge** (`6ee94d107`) and the move of the card's
-layout verbs into the offer tree (`devices/<id>/continue-update`,
+layout verbs into the offer tree (then `devices/<id>/continue-update`,
+now keyed by the board's MAC,
 `cancel-update`, `download-backup`, `restore-files`, `finish-update`, as
 main's core action-fields ratchet requires): W1, W3, W7a, W7b and W9
 **pass** again on that head's release bundle and freshly packaged firmware
@@ -86,10 +87,24 @@ What the card says while it writes: its progress label reads "Flashing
 firmware…" for the whole write, the filesystem included; "Moving files"
 and `Writing at 0x35…` appear only in its terminal lines.
 
-`walk-no-board` (and its `--tab`) on the new layout: **NEVER RUN** — it needs
-a dev server on the worktree port, and this session could not run one
-(no background processes); `walk-esp32c6-emu` (the render walk) **passed** on
-the new layout, byte-identical frames on all three readings.
+`walk-no-board` (and its `--tab`) on the new layout: **pass**, all six steps
+each (flash → connect → identify → upload → detach → re-attach), run with the
+new `--serve-release` (the walk serves the release bundle itself, no dev
+server); `walk-esp32c6-emu` (the render walk) **passed** on the new layout,
+byte-identical frames on all three readings (not re-run after the pre-G1
+pass).
+
+**Pre-G1 pass** (`d757d91d1`; firmware `fw-esp32c6 5f410f63c5d0`, whose
+sources are unchanged since; release bundle rebuilt at that head): W1, W3,
+W5, W7a, W7b, W9 and W12 **pass**; `walk-no-board` and `--tab` **pass**;
+`test-emu-layout-migration` **pass** in three pieces (step 0 99.29 s
+emulated, W10 179.17 s, W3-host 99.30 s + W11 0.41 s). W2 and W4 were not
+re-run after their earlier passes. Two harness fixes came first: the walks
+stopped the door with a SIGTERM, which skips its flash write-back, so the
+chip they reported on was the last two-second snapshot (W7b read a stamp
+half done that way); `stopDoor` now interrupts and waits. And the card's
+layout verbs are offered at the board's MAC now,
+`devices/<12 hex>/<verb>` (a link not yet identified is `devices/new-<n>`).
 
 ## Found and fixed during the walk
 
@@ -101,9 +116,14 @@ the new layout, byte-identical frames on all three readings.
   identity again (W7b found it; never shipped).
 - **Studio** — the card's "Restore files from backup (Oct 2)" overflowed its
   row beside Download backup; it reads "Restore files".
-- **Open** — a tab closed while Studio stamps `/hardware.json` after an
-  update left it truncated (6,144 of 6,802 B):
+- **Fixed** — a stamp of `/hardware.json` cut between chunks left it
+  truncated, on main too (every update stamps): the stamp is journaled
+  through `/hardware.json.next` and the boot loader settles it —
   `docs/defects/2026-10-02-a-closed-tab-mid-stamp-leaves-hardware-json-truncated.md`.
+  The emulated 6,144-byte sighting may have been the SIGTERM snapshot above.
+- **Open** (found reading the tab path for W12, not walked) — a user's
+  tab-hosted board updates by erasing the whole chip, files included, on
+  main too: `docs/defects/2026-10-02-updating-a-tab-hosted-board-erases-its-files.md`.
 
 ## What this does not cover
 
