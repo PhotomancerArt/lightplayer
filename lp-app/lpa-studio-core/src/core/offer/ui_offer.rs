@@ -3,7 +3,7 @@
 
 use crate::{
     ActionConsequence, ActionEnablement, ActionPriority, OfferArgError, OfferArgs, OfferBinder,
-    OfferParam, OfferPath, UiAction,
+    OfferParam, OfferParamKind, OfferPath, UiAction,
 };
 
 /// One verb the user can press, addressed by a stable [`OfferPath`].
@@ -160,7 +160,37 @@ impl UiOffer {
                 },
             }
         }
+        self.check_widened_choices(&resolved)?;
         binder.bind(&resolved)
+    }
+
+    /// Refuse a choice option that is offered only with a toggle on
+    /// ([`crate::OfferChoice::only_with`]) when the resolved press leaves
+    /// that toggle off.
+    fn check_widened_choices(&self, resolved: &OfferArgs) -> Result<(), OfferArgError> {
+        for param in &self.params {
+            let OfferParamKind::Choice { options, .. } = &param.kind else {
+                continue;
+            };
+            let Some(value) = resolved.choice(&param.name) else {
+                continue;
+            };
+            let Some(toggle) = options
+                .iter()
+                .find(|option| option.value == value)
+                .and_then(|option| option.only_with.as_deref())
+            else {
+                continue;
+            };
+            if resolved.toggle(toggle) != Some(true) {
+                return Err(OfferArgError::OptionDisabled {
+                    name: param.name.clone(),
+                    value: value.to_string(),
+                    reason: format!("it is offered only with `{toggle}` on"),
+                });
+            }
+        }
+        Ok(())
     }
 
     /// Visible label (tooltip and accessible name).
@@ -307,6 +337,53 @@ mod tests {
             })
         );
         assert!(offer.press(&OfferArgs::new().with("board", "xiao")).is_ok());
+    }
+
+    #[test]
+    fn an_option_widened_by_a_toggle_needs_the_toggle_on() {
+        let params = vec![
+            OfferParam::choice(
+                "board",
+                "board",
+                vec![
+                    OfferChoice::new("xiao", "XIAO"),
+                    OfferChoice::new("s3", "S3 DevKit").only_with("all_boards"),
+                ],
+                Some("xiao".to_string()),
+            ),
+            OfferParam::toggle("all_boards", "every served board", false),
+        ];
+        let binder = OfferBinder::new(|args: &OfferArgs| {
+            Ok(save_offer()
+                .action
+                .with_label(format!("Save as {}", args.choice("board").unwrap_or("?"))))
+        });
+        let offer = UiOffer::with_params(
+            OfferPath::project().child("save-as"),
+            "save",
+            params,
+            binder,
+            save_offer().action,
+        );
+
+        assert!(offer.is_enabled(), "the narrowed preselect binds");
+        assert_eq!(
+            offer
+                .press(&OfferArgs::new().with("board", "s3"))
+                .map_err(|error| error.to_string()),
+            Err(
+                "`board` cannot be `s3` right now: it is offered only with `all_boards` on"
+                    .to_string()
+            )
+        );
+        let widened = offer
+            .press(
+                &OfferArgs::new()
+                    .with("board", "s3")
+                    .with("all_boards", "true"),
+            )
+            .expect("the toggle widens the choice");
+        assert_eq!(widened.meta().label, "Save as s3");
     }
 
     #[test]

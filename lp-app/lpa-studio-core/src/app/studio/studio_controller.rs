@@ -2189,7 +2189,7 @@ impl StudioController {
             .with_offers(offers)
     }
 
-    /// Publish the device verbs that live in the offer tree.
+    /// Publish every device verb into the offer tree.
     ///
     /// - `devices/connect-usb`: the add-device slot's USB path, named for
     ///   what it does (the slot's heading says "Connect a board"; the button
@@ -2199,14 +2199,19 @@ impl StudioController {
     ///   disabled with the browser's reason when Bluetooth cannot work here
     ///   ([`crate::BluetoothReach`], which the web reports). It needs the
     ///   user's click too.
-    /// - `devices/<board>/flash` for every card whose firmware verb is Flash
-    ///   (the needs-firmware faces), taking its board as a parameter
-    ///   ([`crate::flash_device_offer`]). `<board>` is the card's
+    /// - `devices/new-sim`: the slot's "start a board here", taking the
+    ///   board and the runtime ([`crate::new_sim_offer`]), wherever the slot
+    ///   is drawn.
+    /// - `devices/<board>/<verb>` for every pending link
+    ///   ([`crate::pending_link_offers`]) and every device on the roster
+    ///   ([`crate::device_offers`]). `<board>` is the card's
     ///   [`crate::BoardRef`]: `mac-`, `sim-` or `emu-` and its MAC, or
     ///   `new-<n>` while it has none.
     ///
-    /// Nothing on the web renders these from the tree yet; the app agent
-    /// reads them.
+    /// The stalled-open exits ask for the same verbs: Reconnect is the
+    /// offline board's `reconnect`, the closed port's Connect its
+    /// `connect`, Reset its `reset-board`, and the no-device USB path
+    /// `devices/connect-usb`.
     fn publish_device_offers(&self, offers: &mut crate::UiOfferTree) {
         if self.usb_available() {
             offers.publish(crate::UiOffer::new(
@@ -2226,24 +2231,99 @@ impl StudioController {
                 None => ble,
             },
         ));
-        for view in self.device_roster_view().roster.devices {
-            let prefix = self.device_offer_prefix(view.id);
-            if let Some(flash) = crate::flash_device_offer(&view, prefix) {
-                offers.publish(flash);
+        let roster = self.device_roster_view();
+        if roster.transport_available {
+            offers.publish(crate::new_sim_offer());
+        }
+        // The push's two lists are the gallery's, read the way the home
+        // view reads them — there is no separate device-side source.
+        let sources = home_view_builder::build_home_view(self.home_inputs.as_ref(), None, None);
+        let mut taken = std::collections::BTreeSet::new();
+        for pending in &roster.roster.pending {
+            let prefix = self.device_offer_prefix(pending.device, &mut taken);
+            for offer in crate::pending_link_offers(pending, &prefix) {
+                offers.publish(offer);
+            }
+        }
+        for view in &roster.roster.devices {
+            let device = self.devices.roster().device(view.id);
+            let facts = crate::DeviceOfferFacts {
+                prefix: self.device_offer_prefix(view.id, &mut taken),
+                // A runtime wears a band; silicon wears none (the card's
+                // own reading of which words the power verbs take).
+                face: match roster.runtime_bands.contains_key(&view.id) {
+                    true => crate::DeviceFace::Sim,
+                    false => crate::DeviceFace::Wire,
+                },
+                autoconnect: device.is_some_and(|device| device.intent.autoconnect),
+                locked: roster
+                    .access
+                    .get(&view.id)
+                    .is_some_and(|access| access.unlock == Some(crate::UiUnlockOffer::Locked)),
+                banked: self.runs_a_banked_project(view.id, &sources.projects),
+                projects: &sources.projects,
+                examples: &sources.examples,
+            };
+            for offer in crate::device_offers(view, &facts) {
+                offers.publish(offer);
             }
         }
     }
 
-    /// The offer-path prefix a device's verbs live under: once the roster
-    /// knows its MAC, `devices/mac-<12 hex>` — or `sim-`/`emu-` when its
-    /// endpoint says it is a sim or an in-tab emulated board
-    /// ([`crate::BoardRef`]) — else the provisional `devices/new-<n>` by its
-    /// roster handle.
-    fn device_offer_prefix(&self, device: crate::DeviceId) -> crate::OfferPath {
-        let board = match self.devices.roster().identity(device) {
+    /// Whether what `device` runs is a project this library holds (Q4): its
+    /// registry row's association — written when a push verified — names a
+    /// project in `projects`.
+    ///
+    /// The association can be stale (another browser pushed since), and the
+    /// wire names only a storage dir, so this is the best Studio can say;
+    /// it errs toward Lasting, because a board with no association, or one
+    /// naming a project this library lacks, reads as un-banked.
+    fn runs_a_banked_project(
+        &self,
+        device: crate::DeviceId,
+        projects: &[crate::UiPackageCard],
+    ) -> bool {
+        let Some(inputs) = self.home_inputs.as_ref() else {
+            return false;
+        };
+        let Some(key) =
+            self.devices.roster().device(device).and_then(|device| {
+                crate::app::devices::device_records::registry_key(&device.identity)
+            })
+        else {
+            return false;
+        };
+        crate::app::devices::device_by_base_mac::last_given_project(&inputs.registered, &key)
+            .is_some_and(|uid| projects.iter().any(|project| project.uid == uid))
+    }
+
+    /// The offer-path prefix a device's or pending link's verbs live under:
+    /// once the roster knows its MAC, `devices/mac-<12 hex>` — or
+    /// `sim-`/`emu-` when its endpoint says it is a sim or an in-tab
+    /// emulated board ([`crate::BoardRef`]) — else the provisional
+    /// `devices/new-<n>` by its roster handle.
+    ///
+    /// `taken` holds the refs already handed out in this build: should two
+    /// entries answer to one MAC (a pending link whose preflight read the
+    /// MAC of a board the roster already remembers), the second is offered
+    /// by its handle instead, so no path is published twice.
+    fn device_offer_prefix(
+        &self,
+        device: crate::DeviceId,
+        taken: &mut std::collections::BTreeSet<crate::BoardRef>,
+    ) -> crate::OfferPath {
+        let mut board = match self.devices.roster().identity(device) {
             Some(identity) => crate::BoardRef::for_identity(identity, device),
             None => crate::BoardRef::New(device),
         };
+        if !taken.insert(board) {
+            log::warn!(
+                "two roster entries answer to {board}; {device:?} is offered as new-{}",
+                device.0
+            );
+            board = crate::BoardRef::New(device);
+            taken.insert(board);
+        }
         crate::OfferPath::board(&board)
     }
 

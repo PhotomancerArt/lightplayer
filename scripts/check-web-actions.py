@@ -14,7 +14,15 @@ stripped:
 - `UiAction::from_op(` — a controller op made into an action in the view;
 - `<Something>Op::action_for(`, `<something>_action_for(`,
   `DevicesOp::new(` / `DevicesOp::on_sim(` — core constructors called
-  with arguments the view chose, i.e. the view deciding what is offered.
+  with arguments the view chose, i.e. the view deciding what is offered;
+- `<Something>Op { … }.into_action()` (a struct literal, over any number
+  of lines) and `<op variable>.into_action()` — the same op built field by
+  field in the view.
+
+Not counted: the PLUMBING ops below. They are dispatched like actions but
+are not verbs anyone presses — a card's mount lease for its live picture is
+the web reporting what is on screen — so they are not offers and never go
+in the offer tree.
 
     scripts/check-web-actions.py            # check against the record
     scripts/check-web-actions.py --bless    # rewrite the record
@@ -30,8 +38,24 @@ WEB_SRC = os.path.join(ROOT, "lp-app", "lpa-studio-web", "src")
 RECORD = os.path.join(ROOT, "scripts", "web-actions-ratchet.txt")
 
 PATTERN = re.compile(
-    r"UiAction::from_op\(|\b\w+Op::action_for\(|\b\w+_action_for\(|\bDevicesOp::(?:new|on_sim)\("
+    r"UiAction::from_op\(|\b(?P<op>\w+Op)::action_for\(|\b\w+_action_for\(|\bDevicesOp::(?:new|on_sim)\("
 )
+
+# `.into_action()`, whatever its receiver; the receiver is read backwards.
+INTO_ACTION = re.compile(r"\.\s*into_action\s*\(\s*\)")
+
+# A receiver that names an op: `SomeOp` (a struct literal's type, possibly
+# path-qualified) or a variable called `op` / `…_op`.
+OP_TYPE = re.compile(r"(?:\w+::)*(?P<op>\w+Op)$")
+OP_VARIABLE = re.compile(r"(?:^|_)op$")
+
+# Ops the web dispatches that are plumbing, not verbs: never offers, so
+# never counted (Q5, M3). Add one only with the reason beside it.
+PLUMBING = {
+    # The device card's mount/unmount lease on its board's live picture
+    # (`ActionClass::Passive`): the web saying what is on screen.
+    "DeviceFeedOp",
+}
 
 
 def skipped(name):
@@ -56,10 +80,46 @@ def count():
             if cut >= 0:
                 source = source[:cut]
             source = "\n".join(line.split("//")[0] for line in source.splitlines())
-            hits = len(PATTERN.findall(source))
+            hits = sum(
+                1 for match in PATTERN.finditer(source) if match.group("op") not in PLUMBING
+            )
+            hits += sum(
+                1 for match in INTO_ACTION.finditer(source) if op_receiver(source, match.start())
+            )
             if hits:
                 counts[os.path.relpath(path, ROOT)] = hits
     return counts
+
+
+def op_receiver(source, dot):
+    """Whether the receiver of the `.into_action()` at `dot` is an op that
+    counts: a `SomeOp { … }` literal (its braces matched backwards, across
+    lines) or a variable named like an op, and not a PLUMBING op."""
+    at = dot
+    while at > 0 and source[at - 1].isspace():
+        at -= 1
+    if at > 0 and source[at - 1] == "}":
+        depth = 0
+        at -= 1
+        while at >= 0:
+            if source[at] == "}":
+                depth += 1
+            elif source[at] == "{":
+                depth -= 1
+                if depth == 0:
+                    break
+            at -= 1
+        while at > 0 and source[at - 1].isspace():
+            at -= 1
+        end = at
+        while at > 0 and (source[at - 1].isalnum() or source[at - 1] in "_:"):
+            at -= 1
+        named = OP_TYPE.search(source[at:end])
+        return bool(named) and named.group("op") not in PLUMBING
+    end = at
+    while at > 0 and (source[at - 1].isalnum() or source[at - 1] == "_"):
+        at -= 1
+    return bool(OP_VARIABLE.search(source[at:end]))
 
 
 def read_record():

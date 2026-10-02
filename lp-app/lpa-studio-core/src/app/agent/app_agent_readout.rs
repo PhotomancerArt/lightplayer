@@ -72,11 +72,14 @@ fn param_text(param: &OfferParam) -> String {
         OfferParamKind::Choice { options, preselect } => {
             let options: Vec<String> = options
                 .iter()
-                .map(|option| match &option.disabled {
-                    Some(reason) => {
+                .map(|option| match (&option.disabled, &option.only_with) {
+                    (Some(reason), _) => {
                         format!("{} ({}; not now: {reason})", option.value, option.label)
                     }
-                    None => format!("{} ({})", option.value, option.label),
+                    (None, Some(toggle)) => {
+                        format!("{} ({}; only with {toggle})", option.value, option.label)
+                    }
+                    (None, None) => format!("{} ({})", option.value, option.label),
                 })
                 .collect();
             let mut text = format!("{}: one of {}", param.name, options.join(", "));

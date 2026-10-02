@@ -62,6 +62,12 @@ pub struct OfferChoice {
     /// Why it cannot be picked right now, when it cannot. Drawn disabled
     /// with this reason, never hidden.
     pub disabled: Option<String>,
+    /// The toggle parameter that widens the choice to this option, when it
+    /// is one the list is narrowed away from by default: a board outside
+    /// the detected chip is offered only with `all_boards` on. A renderer
+    /// draws it only while that toggle is on, and a press that picks it
+    /// with the toggle off is refused ([`crate::UiOffer::press`]).
+    pub only_with: Option<String>,
 }
 
 impl OfferParam {
@@ -201,6 +207,7 @@ impl OfferChoice {
             label: label.into(),
             detail: None,
             disabled: None,
+            only_with: None,
         }
     }
 
@@ -213,6 +220,12 @@ impl OfferChoice {
     /// Drawn but not pickable, for `reason`.
     pub fn disabled(mut self, reason: impl Into<String>) -> Self {
         self.disabled = Some(reason.into());
+        self
+    }
+
+    /// Offered only while the toggle parameter `toggle` is on.
+    pub fn only_with(mut self, toggle: impl Into<String>) -> Self {
+        self.only_with = Some(toggle.into());
         self
     }
 }

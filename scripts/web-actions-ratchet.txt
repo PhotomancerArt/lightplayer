@@ -8,8 +8,8 @@
 6 lp-app/lpa-studio-web/src/app/editor_shell/mod.rs
 2 lp-app/lpa-studio-web/src/app/editor_shell/patching.rs
 1 lp-app/lpa-studio-web/src/app/editor_shell/selection.rs
-1 lp-app/lpa-studio-web/src/app/home/device_pick_popover.rs
-13 lp-app/lpa-studio-web/src/app/home/device_roster_card.rs
+2 lp-app/lpa-studio-web/src/app/home/device_pick_popover.rs
+11 lp-app/lpa-studio-web/src/app/home/device_roster_card.rs
 2 lp-app/lpa-studio-web/src/app/home/devices_page.rs
 2 lp-app/lpa-studio-web/src/app/home/gallery_paste.rs
 1 lp-app/lpa-studio-web/src/app/home/package_card.rs

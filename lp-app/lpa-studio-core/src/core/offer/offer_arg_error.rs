@@ -33,6 +33,10 @@ pub enum OfferArgError {
     TooLong { name: String, max_len: usize },
     /// A toggle's value is not `true` or `false`.
     NotAToggle { name: String, value: String },
+    /// A value was given for a parameter that does not apply to what the
+    /// rest of the press picked (a push's `name` names a new project, never
+    /// an example).
+    Inapplicable { name: String, reason: String },
     /// The offer cannot be pressed right now at all, whatever it is given.
     Unavailable { reason: String },
 }
@@ -70,6 +74,9 @@ impl fmt::Display for OfferArgError {
             }
             Self::NotAToggle { name, value } => {
                 write!(f, "`{name}` takes true or false, not `{value}`")
+            }
+            Self::Inapplicable { name, reason } => {
+                write!(f, "`{name}` does not apply here: {reason}")
             }
             Self::Unavailable { reason } => write!(f, "this cannot be done right now: {reason}"),
         }
@@ -135,6 +142,13 @@ mod tests {
                     value: "yes".to_string(),
                 },
                 "`enabled` takes true or false, not `yes`",
+            ),
+            (
+                OfferArgError::Inapplicable {
+                    name: "name".to_string(),
+                    reason: "it names a new project".to_string(),
+                },
+                "`name` does not apply here: it names a new project",
             ),
             (
                 OfferArgError::Unavailable {
