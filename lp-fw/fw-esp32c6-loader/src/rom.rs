@@ -26,11 +26,22 @@ pub fn invalidate_cache() {
 
 pub fn print_core(core_off: u32, note: &core::ffi::CStr) {
     // SAFETY: a C format string with matching arguments.
-    unsafe { ets_printf(c"[LOADER] core @0x%x (%s)\n".as_ptr(), core_off, note.as_ptr()) };
+    unsafe {
+        ets_printf(
+            c"[LOADER] core @0x%x (%s)\n".as_ptr(),
+            core_off,
+            note.as_ptr(),
+        )
+    };
 }
 
 pub fn print_failure(core_off: u32, why: &core::ffi::CStr) {
     // SAFETY: as above.
-    unsafe { ets_printf(c"[LOADER] core @0x%x NOT loaded: %s\n".as_ptr(), core_off, why.as_ptr()) };
+    unsafe {
+        ets_printf(
+            c"[LOADER] core @0x%x NOT loaded: %s\n".as_ptr(),
+            core_off,
+            why.as_ptr(),
+        )
+    };
 }
-

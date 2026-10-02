@@ -151,7 +151,12 @@ mod tests {
 
     #[test]
     fn a_record_round_trips() {
-        let r = BootRecord { seq: 7, core_off: 0x18000, core_len: 1_150_816, trial: true };
+        let r = BootRecord {
+            seq: 7,
+            core_off: 0x18000,
+            core_len: 1_150_816,
+            trial: true,
+        };
         assert_eq!(BootRecord::decode(&r.encode()), Some(r));
     }
 
@@ -163,7 +168,13 @@ mod tests {
 
     #[test]
     fn any_torn_record_write_is_no_record() {
-        let full = BootRecord { seq: 3, core_off: 0x2c0000, core_len: 1_000_000, trial: true }.encode();
+        let full = BootRecord {
+            seq: 3,
+            core_off: 0x2c0000,
+            core_len: 1_000_000,
+            trial: true,
+        }
+        .encode();
         // A program that stopped after `n` bytes leaves the rest erased.
         for n in 0..BOOT_RECORD_LEN {
             let mut torn = [0xffu8; 32];
@@ -174,7 +185,13 @@ mod tests {
 
     #[test]
     fn a_future_version_is_no_record() {
-        let mut b = BootRecord { seq: 1, core_off: 0x18000, core_len: 1, trial: false }.encode();
+        let mut b = BootRecord {
+            seq: 1,
+            core_off: 0x18000,
+            core_len: 1,
+            trial: false,
+        }
+        .encode();
         b[4] = 2;
         let crc = crc32(&b[0..20]);
         b[20..24].copy_from_slice(&crc.to_le_bytes());
@@ -184,7 +201,15 @@ mod tests {
     #[test]
     fn marks_read_as_set_once_any_bit_is_programmed() {
         let mut b = [0xffu8; 32];
-        b[..24].copy_from_slice(&BootRecord { seq: 1, core_off: 0, core_len: 1, trial: true }.encode());
+        b[..24].copy_from_slice(
+            &BootRecord {
+                seq: 1,
+                core_off: 0,
+                core_len: 1,
+                trial: true,
+            }
+            .encode(),
+        );
         assert_eq!(BootMarks::decode(&b), BootMarks::default());
         b[25] = 0x7f; // a torn program of the attempted mark
         assert!(BootMarks::decode(&b).attempted);
@@ -193,8 +218,19 @@ mod tests {
 
     #[test]
     fn a_trial_fails_only_when_attempted_and_unconfirmed() {
-        let record = BootRecord { seq: 2, core_off: 0, core_len: 1, trial: true };
-        let slot = |attempted, confirmed| BootSlot { record, marks: BootMarks { attempted, confirmed } };
+        let record = BootRecord {
+            seq: 2,
+            core_off: 0,
+            core_len: 1,
+            trial: true,
+        };
+        let slot = |attempted, confirmed| BootSlot {
+            record,
+            marks: BootMarks {
+                attempted,
+                confirmed,
+            },
+        };
         assert!(!slot(false, false).failed());
         assert!(slot(true, false).failed());
         assert!(!slot(true, true).failed());

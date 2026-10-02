@@ -41,7 +41,13 @@ impl BootState {
             // low end; its length is the image's own.
             None => (REGION_START, image_len(flash, REGION_START).unwrap_or(0)),
         };
-        Self { layout, choice, core_off, core_len, max_seq }
+        Self {
+            layout,
+            choice,
+            core_off,
+            core_len,
+            max_seq,
+        }
     }
 
     /// This core is on trial and has not confirmed yet.
@@ -85,12 +91,23 @@ impl BootState {
     /// Name a new core in the record sector this boot did NOT come from, on
     /// trial, with the next sequence number. Erase, then one write: a cut
     /// leaves either the old contents or a record that fails its CRC.
-    pub fn write_trial_record(&self, flash: &mut SplitFlash, buf: &mut SectorBuf, core_off: u32, core_len: u32) {
+    pub fn write_trial_record(
+        &self,
+        flash: &mut SplitFlash,
+        buf: &mut SectorBuf,
+        core_off: u32,
+        core_len: u32,
+    ) {
         let sector = match self.choice {
             Some(c) => 1 - c.sector,
             None => 1,
         };
-        let record = BootRecord { seq: self.max_seq + 1, core_off, core_len, trial: true };
+        let record = BootRecord {
+            seq: self.max_seq + 1,
+            core_off,
+            core_len,
+            trial: true,
+        };
         flash.write_sector(buf, BOOT_RECORD_SECTORS[sector], &record.encode());
     }
 }

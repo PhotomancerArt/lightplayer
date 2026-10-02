@@ -18,7 +18,11 @@ pub struct BootChoice {
 /// one that certainly does not.
 pub fn choose(sectors: [Option<BootSlot>; 2]) -> Option<BootChoice> {
     let pick = |sector: usize, rolled_back| {
-        sectors[sector].map(|slot| BootChoice { sector, slot, rolled_back })
+        sectors[sector].map(|slot| BootChoice {
+            sector,
+            slot,
+            rolled_back,
+        })
     };
     let newest = match sectors {
         [Some(a), Some(b)] => usize::from(b.record.seq > a.record.seq),
@@ -41,8 +45,16 @@ mod tests {
 
     fn slot(seq: u32, trial: bool, attempted: bool, confirmed: bool) -> Option<BootSlot> {
         Some(BootSlot {
-            record: BootRecord { seq, core_off: seq * 0x10000, core_len: 1, trial },
-            marks: BootMarks { attempted, confirmed },
+            record: BootRecord {
+                seq,
+                core_off: seq * 0x10000,
+                core_len: 1,
+                trial,
+            },
+            marks: BootMarks {
+                attempted,
+                confirmed,
+            },
         })
     }
 
@@ -53,8 +65,18 @@ mod tests {
 
     #[test]
     fn the_newest_wins_in_either_sector() {
-        assert_eq!(choose([slot(1, false, false, false), slot(2, false, false, false)]).unwrap().sector, 1);
-        assert_eq!(choose([slot(3, false, false, false), slot(2, false, false, false)]).unwrap().sector, 0);
+        assert_eq!(
+            choose([slot(1, false, false, false), slot(2, false, false, false)])
+                .unwrap()
+                .sector,
+            1
+        );
+        assert_eq!(
+            choose([slot(3, false, false, false), slot(2, false, false, false)])
+                .unwrap()
+                .sector,
+            0
+        );
     }
 
     #[test]

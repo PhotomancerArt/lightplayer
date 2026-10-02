@@ -23,6 +23,9 @@ pub fn map(vaddr: u32, paddr: u32, page_shift: u32) {
     // SAFETY: SPI0's MMU registers; nothing runs from the window.
     unsafe {
         core::ptr::write_volatile(MMU_ITEM_INDEX as *mut u32, entry);
-        core::ptr::write_volatile(MMU_ITEM_CONTENT as *mut u32, (paddr >> page_shift) | MMU_VALID);
+        core::ptr::write_volatile(
+            MMU_ITEM_CONTENT as *mut u32,
+            (paddr >> page_shift) | MMU_VALID,
+        );
     }
 }

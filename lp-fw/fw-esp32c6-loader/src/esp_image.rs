@@ -15,7 +15,11 @@ const HEADER_LEN: u32 = 24;
 const MAX_SEGMENTS: u8 = 16;
 
 /// Map and load the image at flash `at`; its entry point.
-pub fn load(at: u32, page_shift: u32, loader_ram: &core::ops::Range<u32>) -> Result<u32, &'static CStr> {
+pub fn load(
+    at: u32,
+    page_shift: u32,
+    loader_ram: &core::ops::Range<u32>,
+) -> Result<u32, &'static CStr> {
     let mut header = [0u32; (HEADER_LEN / 4) as usize];
     if !rom::flash_read(at, &mut header) {
         return Err(c"flash read failed");

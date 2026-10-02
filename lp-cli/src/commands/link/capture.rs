@@ -60,7 +60,10 @@ pub fn capture(args: &CaptureArgs) -> Result<()> {
         let Some(p) = port.as_mut() else {
             std::thread::sleep(Duration::from_millis(100));
             if let Ok(p) = LabPort::open(&args.target, TermiosMode::Raw) {
-                eprintln!("link capture: port back at {:.3} s", clock.elapsed().as_secs_f64());
+                eprintln!(
+                    "link capture: port back at {:.3} s",
+                    clock.elapsed().as_secs_f64()
+                );
                 port = Some(p);
             }
             continue;
@@ -68,7 +71,10 @@ pub fn capture(args: &CaptureArgs) -> Result<()> {
         let n = match p.read(&mut buf) {
             Ok(n) => n,
             Err(error) if ota.is_some() => {
-                eprintln!("link capture: port lost ({error}) at {:.3} s", clock.elapsed().as_secs_f64());
+                eprintln!(
+                    "link capture: port lost ({error}) at {:.3} s",
+                    clock.elapsed().as_secs_f64()
+                );
                 port = None;
                 continue;
             }

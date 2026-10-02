@@ -52,7 +52,9 @@ extern "C" fn loader_main() -> ! {
     }
     let (core_off, note) = match choose(sectors) {
         Some(c) if c.rolled_back => (c.slot.record.core_off, c"rolled back"),
-        Some(c) if c.slot.record.trial && !c.slot.marks.confirmed => (c.slot.record.core_off, c"trial"),
+        Some(c) if c.slot.record.trial && !c.slot.marks.confirmed => {
+            (c.slot.record.core_off, c"trial")
+        }
         Some(c) => (c.slot.record.core_off, c"proven"),
         // A board flashed before it ever had a record: the core is where the
         // first flash puts it.

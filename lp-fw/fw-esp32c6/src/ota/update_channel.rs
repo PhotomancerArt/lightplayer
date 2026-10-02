@@ -46,11 +46,19 @@ impl Offer {
 enum Plan {
     Idle,
     /// Writing the new core at `dest`, front to back.
-    Core { dest: u32, len: u32, next: u32 },
+    Core {
+        dest: u32,
+        len: u32,
+        next: u32,
+    },
     /// Writing this build's engine at `dest`: sector 1 onward, then sector 0
     /// (its header) LAST, so a cut never leaves a valid header over a
     /// partial engine.
-    Engine { dest: u32, len: u32, next: u32 },
+    Engine {
+        dest: u32,
+        len: u32,
+        next: u32,
+    },
 }
 
 /// Installed into the engine's link transport while the engine runs: an
@@ -65,7 +73,9 @@ pub fn on_update_while_running(data: &[u8]) {
         let mut flash = SplitFlash::take();
         let state = BootState::read(&mut flash);
         flash.erase(state.engine_extent().start);
-        esp_println::println!("[OTA] offer of a different build — engine erased, resetting into core-only");
+        esp_println::println!(
+            "[OTA] offer of a different build — engine erased, resetting into core-only"
+        );
         system_reset();
     }
 }
@@ -131,9 +141,10 @@ fn step(
             return plan; // mid-transfer (a link re-up), or not confirmed yet
         }
         if offer.build_id != crate::build_id() {
-            let Some(dest) = state
-                .layout
-                .next_core_offset(state.core_off, state.core_len, offer.core_len)
+            let Some(dest) =
+                state
+                    .layout
+                    .next_core_offset(state.core_off, state.core_len, offer.core_len)
             else {
                 esp_println::println!(
                     "[OTA] new core ({} B) does not fit beside this one ({} B) — refused",
@@ -145,21 +156,40 @@ fn step(
             // The engine dies first, so no cut from here on leaves this core
             // starting an engine whose region is half overwritten.
             flash.erase(state.engine_extent().start);
-            esp_println::println!("[OTA] new build: core {} B → {dest:#x}, engine erased", offer.core_len);
+            esp_println::println!(
+                "[OTA] new build: core {} B → {dest:#x}, engine erased",
+                offer.core_len
+            );
             request(usb_link, b'C', 0, offer.core_len);
-            return Plan::Core { dest, len: offer.core_len, next: 0 };
+            return Plan::Core {
+                dest,
+                len: offer.core_len,
+                next: 0,
+            };
         }
         // Same build, and core-only: no valid engine here. Fetch it.
         let room = state.engine_extent();
         if offer.engine_len > room.len() {
-            esp_println::println!("[OTA] engine ({} B) does not fit ({} B) — refused", offer.engine_len, room.len());
+            esp_println::println!(
+                "[OTA] engine ({} B) does not fit ({} B) — refused",
+                offer.engine_len,
+                room.len()
+            );
             return plan;
         }
         flash.erase(room.start);
-        esp_println::println!("[OTA] same build, no engine: fetching {} B → {:#x}", offer.engine_len, room.start);
+        esp_println::println!(
+            "[OTA] same build, no engine: fetching {} B → {:#x}",
+            offer.engine_len,
+            room.start
+        );
         let first = if offer.engine_len > SECTOR { SECTOR } else { 0 };
         request(usb_link, b'E', first, offer.engine_len);
-        return Plan::Engine { dest: room.start, len: offer.engine_len, next: first };
+        return Plan::Engine {
+            dest: room.start,
+            len: offer.engine_len,
+            next: first,
+        };
     }
     if msg.len() < 6 || msg[0] != b'D' {
         return plan;
@@ -176,7 +206,9 @@ fn step(
                 return Plan::Core { dest, len, next };
             }
             state.write_trial_record(flash, buf, dest, len);
-            esp_println::println!("[OTA] core written ({len} B) and named on trial — resetting into it");
+            esp_println::println!(
+                "[OTA] core written ({len} B) and named on trial — resetting into it"
+            );
             system_reset();
         }
         Plan::Engine { dest, len, next } if kind == b'E' && off == next => {

@@ -368,10 +368,21 @@ impl OtaServe {
     pub fn from_dir(dir: &std::path::Path) -> Result<Self> {
         let core = std::fs::read(dir.join("core.bin"))?;
         let engine = std::fs::read(dir.join("engine.bin"))?;
-        anyhow::ensure!(engine.len() > 56 && &engine[..8] == b"LPENGIN1", "engine.bin has no header");
+        anyhow::ensure!(
+            engine.len() > 56 && &engine[..8] == b"LPENGIN1",
+            "engine.bin has no header"
+        );
         let mut build_id = [0u8; 48];
         build_id.copy_from_slice(&engine[8..56]);
-        Ok(Self { core, engine, build_id, offers: 0, requests: 0, served_bytes: 0, cut_after: None })
+        Ok(Self {
+            core,
+            engine,
+            build_id,
+            offers: 0,
+            requests: 0,
+            served_bytes: 0,
+            cut_after: None,
+        })
     }
 
     pub fn offer(&mut self) -> Vec<u8> {
@@ -390,7 +401,11 @@ impl OtaServe {
                 let kind = msg[1];
                 let off = u32::from_le_bytes(msg[2..6].try_into().ok()?) as usize;
                 let len = u32::from_le_bytes(msg[6..10].try_into().ok()?) as usize;
-                let src = if kind == b'C' { &self.core } else { &self.engine };
+                let src = if kind == b'C' {
+                    &self.core
+                } else {
+                    &self.engine
+                };
                 let end = (off + len).min(src.len());
                 let bytes = src.get(off..end)?;
                 self.requests += 1;
@@ -537,7 +552,9 @@ impl<B: EmuUsbBoard> EmuLinkHost<B> {
             }
         }
         while let Some(msg) = self.port.poll_update() {
-            let Some(ota) = self.ota.as_mut() else { continue };
+            let Some(ota) = self.ota.as_mut() else {
+                continue;
+            };
             if let Some(answer) = ota.answer(&msg) {
                 if self.port.send_update(&answer).is_err() {
                     self.link_errors += 1;

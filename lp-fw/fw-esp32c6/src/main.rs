@@ -102,6 +102,8 @@ pub use fw_esp32_common::logger;
 // The app, plus the five harnesses that light a strip. `test_gpio` used to be
 // in this list and drives pins directly, so it only pulled in an output tree
 // nothing in that build touches.
+#[cfg(all(lp_split, not(fw_harness)))]
+mod ota;
 #[cfg(any(
     not(fw_harness),
     feature = "test_rmt",
@@ -112,8 +114,6 @@ pub use fw_esp32_common::logger;
     feature = "test_fluid_demo",
 ))]
 mod output;
-#[cfg(all(lp_split, not(fw_harness)))]
-mod ota;
 mod recovery;
 mod serial;
 #[cfg(not(fw_harness))]
@@ -606,7 +606,11 @@ const fn build_id() -> [u8; 48] {
         at + i
     }
     let mut out = [0u8; 48];
-    let at = append(&mut out, 0, concat!(env!("LP_BUILD_COMMIT"), "-", env!("LP_BUILD_DIRTY")).as_bytes());
+    let at = append(
+        &mut out,
+        0,
+        concat!(env!("LP_BUILD_COMMIT"), "-", env!("LP_BUILD_DIRTY")).as_bytes(),
+    );
     if let Some(tag) = option_env!("LP_BUILD_TAG") {
         let at = append(&mut out, at, b"+");
         append(&mut out, at, tag.as_bytes());
@@ -1047,7 +1051,9 @@ async fn split_boot(core: CoreBoot) {
                     "[OTA] {incomplete} incomplete boots — not starting the engine"
                 );
             }
-            let CoreBoot { usb_link, watchdog, .. } = core;
+            let CoreBoot {
+                usb_link, watchdog, ..
+            } = core;
             ota::core_only(usb_link, watchdog, state, engine_crashing).await;
         }
     }

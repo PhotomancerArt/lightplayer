@@ -60,7 +60,10 @@ impl Extent {
 
 impl SplitLayout {
     pub const fn c6_4mb(page: u32) -> Self {
-        Self { region_end: REGION_END_C6_4MB, page }
+        Self {
+            region_end: REGION_END_C6_4MB,
+            page,
+        }
     }
 
     fn up(&self, x: u32) -> u32 {
@@ -80,9 +83,15 @@ impl SplitLayout {
     /// before a high one.
     pub fn engine_extent(&self, core_off: u32, core_len: u32) -> Extent {
         if self.core_is_low(core_off) {
-            Extent { start: self.up(core_off + core_len), end: self.region_end }
+            Extent {
+                start: self.up(core_off + core_len),
+                end: self.region_end,
+            }
         } else {
-            Extent { start: REGION_START, end: core_off }
+            Extent {
+                start: REGION_START,
+                end: core_off,
+            }
         }
     }
 
@@ -127,25 +136,46 @@ mod tests {
 
     #[test]
     fn a_high_core_has_the_engine_before_it() {
-        let at = L.next_core_offset(REGION_START, 1_150_816, 1_160_000).unwrap();
+        let at = L
+            .next_core_offset(REGION_START, 1_150_816, 1_160_000)
+            .unwrap();
         assert_eq!(at % PAGE, 0);
         assert!(at + 1_160_000 <= REGION_END_C6_4MB);
         let e = L.engine_extent(at, 1_160_000);
-        assert_eq!(e, Extent { start: REGION_START, end: at });
+        assert_eq!(
+            e,
+            Extent {
+                start: REGION_START,
+                end: at
+            }
+        );
     }
 
     #[test]
     fn the_core_alternates_ends() {
-        let high = L.next_core_offset(REGION_START, 1_150_816, 1_150_816).unwrap();
+        let high = L
+            .next_core_offset(REGION_START, 1_150_816, 1_150_816)
+            .unwrap();
         assert!(!L.core_is_low(high));
-        assert_eq!(L.next_core_offset(high, 1_150_816, 1_200_000), Some(REGION_START));
+        assert_eq!(
+            L.next_core_offset(high, 1_150_816, 1_200_000),
+            Some(REGION_START)
+        );
     }
 
     #[test]
     fn two_cores_that_do_not_fit_together_are_refused() {
         let region = REGION_END_C6_4MB - REGION_START;
-        assert_eq!(L.next_core_offset(REGION_START, region / 2 + PAGE, region / 2), None);
-        let high = L.next_core_offset(REGION_START, 1_000_000, 1_000_000).unwrap();
-        assert_eq!(L.next_core_offset(high, 1_000_000, high - REGION_START + 1), None);
+        assert_eq!(
+            L.next_core_offset(REGION_START, region / 2 + PAGE, region / 2),
+            None
+        );
+        let high = L
+            .next_core_offset(REGION_START, 1_000_000, 1_000_000)
+            .unwrap();
+        assert_eq!(
+            L.next_core_offset(high, 1_000_000, high - REGION_START + 1),
+            None
+        );
     }
 }
