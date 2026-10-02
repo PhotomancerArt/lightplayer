@@ -4792,6 +4792,18 @@ impl StudioController {
                 .unwrap_or_else(|| uid.to_string());
             return Ok((files, hash, label));
         }
+        // A board never migrates (ADR 2026-07-05) and refuses old bytes at
+        // load, AFTER the push has already stopped and cleared it — so an
+        // "upgrades on open" package is migrated here first, through the
+        // same catalog op (and the same saved, undoable history event) the
+        // editor's open uses. Current packages are left alone; a package no
+        // step can migrate refuses the push with the classifier's sentence
+        // before the board is touched.
+        self.run_catalog_op(CatalogOp::UpgradePackageFormat {
+            project_uid: uid.to_string(),
+        })
+        .await
+        .map_err(|error| error.to_string())?;
         let host = self.library_host().map_err(|error| error.to_string())?;
         let opened = host
             .open_project(uid)
