@@ -6789,7 +6789,13 @@ fn updating_a_legacy_board_backs_up_asks_and_keeps_every_file() {
         "nothing written while the question is open"
     );
 
-    let continue_action = panel.continue_action.expect("a migration can continue");
+    // The card's verbs are the view's offers, at the device's path.
+    let continue_path = panel.continue_action.expect("a migration can continue");
+    assert_eq!(
+        continue_path,
+        crate::device_offer_path(target).child("continue-update")
+    );
+    let continue_action = offer(&bench, &continue_path);
     assert!(
         continue_action.meta().enablement.is_enabled(),
         "the backup is stored: {continue_action:?}"
@@ -6814,6 +6820,16 @@ fn updating_a_legacy_board_backs_up_asks_and_keeps_every_file() {
             .get(&target)
             .is_none(),
         "nothing left to say on the card"
+    );
+    assert_eq!(
+        bench
+            .controller
+            .view()
+            .offers
+            .verbs_of(&crate::device_offer_path(target))
+            .count(),
+        0,
+        "and nothing left offered"
     );
 }
 
@@ -6849,7 +6865,10 @@ fn a_board_whose_files_do_not_fit_is_refused_untouched() {
     assert_eq!(panel.title, "This board's files don't fit the new firmware");
     assert!(panel.continue_action.is_none());
     assert!(
-        panel.download.meta().enablement.is_enabled(),
+        offer(&bench, &panel.download)
+            .meta()
+            .enablement
+            .is_enabled(),
         "the files can still be saved"
     );
     assert_eq!(device.fake_board_files().0, before, "nothing was written");
@@ -6871,7 +6890,8 @@ fn cancelling_at_the_question_leaves_the_board_untouched() {
 
     update(&mut bench, target);
     let panel = layout_panel(&mut bench, &tasks, target);
-    drive(bench.controller.dispatch(panel.cancel.expect("a way out"))).expect("Cancel dispatches");
+    let cancel = offer(&bench, &panel.cancel.expect("a way out"));
+    drive(bench.controller.dispatch(cancel)).expect("Cancel dispatches");
     settle(&mut bench, &tasks);
 
     assert_eq!(device.fake_board_files().0, before, "nothing was written");
@@ -6903,7 +6923,7 @@ fn a_pull_after_the_firmware_write_holds_the_files_and_finish_update_moves_them(
     update(&mut bench, target);
     let panel = layout_panel(&mut bench, &tasks, target);
     device.interrupt_next_plan_after(1);
-    drive(bench.controller.dispatch(panel.continue_action.unwrap())).unwrap();
+    press(&mut bench, &panel.continue_action.unwrap());
     settle(&mut bench, &tasks);
     assert!(
         !bench.view().devices[0].last_outcome.clone().unwrap().ok,
@@ -6924,9 +6944,9 @@ fn a_pull_after_the_firmware_write_holds_the_files_and_finish_update_moves_them(
     });
     let layout = bench.controller.device_roster_view().layout[&target].clone();
     assert!(layout.line.unwrap().contains("waiting"));
-    drive(bench.controller.dispatch(layout.finish_update.unwrap())).unwrap();
+    press(&mut bench, &layout.finish_update.unwrap());
     let panel = layout_panel(&mut bench, &tasks, target);
-    drive(bench.controller.dispatch(panel.continue_action.unwrap())).unwrap();
+    press(&mut bench, &panel.continue_action.unwrap());
     settle(&mut bench, &tasks);
 
     assert!(bench.view().devices[0].last_outcome.clone().unwrap().ok);
@@ -6947,7 +6967,7 @@ fn a_pull_mid_filesystem_write_offers_the_backup_and_restore_puts_it_back() {
     update(&mut bench, target);
     let panel = layout_panel(&mut bench, &tasks, target);
     device.interrupt_next_plan_after(4);
-    drive(bench.controller.dispatch(panel.continue_action.unwrap())).unwrap();
+    press(&mut bench, &panel.continue_action.unwrap());
     settle(&mut bench, &tasks);
     assert_eq!(
         device.fake_board_files().1,
@@ -6967,10 +6987,10 @@ fn a_pull_mid_filesystem_write_offers_the_backup_and_restore_puts_it_back() {
         layout.download.is_some(),
         "the backup can be downloaded too"
     );
-    drive(bench.controller.dispatch(layout.restore.unwrap())).unwrap();
+    press(&mut bench, &layout.restore.unwrap());
     let panel = layout_panel(&mut bench, &tasks, target);
     assert_eq!(panel.title, "Put this board's files back");
-    drive(bench.controller.dispatch(panel.continue_action.unwrap())).unwrap();
+    press(&mut bench, &panel.continue_action.unwrap());
     settle(&mut bench, &tasks);
 
     assert!(bench.view().devices[0].last_outcome.clone().unwrap().ok);
@@ -7043,6 +7063,24 @@ fn layout_panel(
         .panel
         .clone()
         .unwrap()
+}
+
+/// The action the view offers at `path` (the card draws the same one).
+fn offer(bench: &DeviceBench, path: &crate::OfferPath) -> crate::UiAction {
+    bench
+        .controller
+        .view()
+        .offers
+        .get(path)
+        .unwrap_or_else(|| panic!("nothing offered at `{path}`"))
+        .action
+        .clone()
+}
+
+/// Press the offer at `path`.
+fn press(bench: &mut DeviceBench, path: &crate::OfferPath) {
+    let action = offer(bench, path);
+    drive(bench.controller.dispatch(action)).unwrap_or_else(|e| panic!("`{path}`: {e:?}"));
 }
 
 /// Run until the card's activity has ended with an outcome.

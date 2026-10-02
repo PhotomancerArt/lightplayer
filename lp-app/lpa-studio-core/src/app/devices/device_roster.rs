@@ -372,17 +372,28 @@ impl DeviceRoster {
             feeds: std::collections::BTreeMap::new(),
             runtime_bands: std::collections::BTreeMap::new(),
             access: std::collections::BTreeMap::new(),
-            layout: self.layout_views(now),
+            // The verbs land in a scratch tree here; the studio view
+            // publishes them for real (`publish_layout_offers`).
+            layout: self.layout_views(now, &mut crate::UiOfferTree::new()),
             backup_download: self.effects.layout().download(),
         }
     }
 
+    /// Publish every device card's layout verbs (`devices/<id>/…`: the
+    /// question's Continue and Cancel, Download backup, Restore files,
+    /// Finish update) into the view's offer tree — the same verbs, from the
+    /// same decision, that [`Self::view`]'s layout facts name by path.
+    pub fn publish_layout_offers(&self, now: Millis, offers: &mut crate::UiOfferTree) {
+        self.layout_views(now, offers);
+    }
+
     /// The card's layout facts (C6 repartition) for every device with
     /// something to say: the question, the refusal, a board holding its
-    /// files, a backup waiting to go back.
+    /// files, a backup waiting to go back. Their verbs go into `offers`.
     fn layout_views(
         &self,
         now: Millis,
+        offers: &mut crate::UiOfferTree,
     ) -> std::collections::BTreeMap<lpa_devices::DeviceId, super::UiDeviceLayout> {
         let layout = self.effects.layout();
         self.roster
@@ -405,6 +416,7 @@ impl DeviceRoster {
                     has_uid,
                     staged.as_ref(),
                     pending.as_ref(),
+                    offers,
                 )
                 .map(|ui| (device.id, ui))
             })

@@ -130,7 +130,9 @@ pub use device_identity::{
     device_identity_line, pending_identity_rows,
 };
 pub use device_layout_effect::BackupDownload;
-pub use device_layout_view::{UiDeviceLayout, UiLayoutPanel, device_layout_view};
+pub use device_layout_view::{
+    UiDeviceLayout, UiLayoutPanel, device_layout_view, device_offer_path,
+};
 pub use device_link_counter_rows::{LINK_COUNTERS_CAPTION, UiLinkCounterRow, link_counter_rows};
 pub use device_push::{
     DevicePushOp, PushOffer, PushSource, PushSourceChoice, PushSourceGroup,

@@ -69,7 +69,7 @@ pub use app::devices::{
 pub use app::devices::{
     BackupDownload, BackupEntry, BackupIndex, BackupStatus, BackupStoreError, DeviceBackupOp,
     DeviceBackupStore, MemoryBackupStore, UiDeviceLayout, UiLayoutPanel, check_store_contract,
-    device_layout_view,
+    device_layout_view, device_offer_path,
 };
 pub use app::devices::{LINK_COUNTERS_CAPTION, LinkTrouble, UiLinkCounterRow, link_counter_rows};
 pub use app::docs_host::DocsSimHost;

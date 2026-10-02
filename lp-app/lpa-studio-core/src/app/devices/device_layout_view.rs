@@ -3,6 +3,11 @@
 //! they do not fit, the line on a board whose files are waiting, and the
 //! verbs that resolve each. Core decides; the card only lays these out.
 //!
+//! The verbs are offers (docs/adr/2026-10-01-agentic-control-offers-in-core.md):
+//! published into the view's offer tree under `devices/<id>/…`, so the app
+//! agent reads and presses the same ones the card draws. The view types
+//! below carry only words and the offers' paths.
+//!
 //! Plain language on purpose (Yona gets lost in plan-speak): "files",
 //! "board", "backup" — never `lpfs`, "superblock" or a phase name.
 
@@ -14,7 +19,23 @@ use super::device_backup_store::BackupEntry;
 use super::device_flash::{FirmwareVerb, firmware_verb};
 use super::device_layout_step::LayoutStaging;
 use super::devices_op::DevicesOp;
-use crate::UiAction;
+use crate::{OfferPath, UiAction, UiOffer, UiOfferTree};
+
+/// `devices/<id>`: the prefix every verb of one device card lives under.
+pub fn device_offer_path(device: DeviceId) -> OfferPath {
+    OfferPath::devices().child(device.0.to_string())
+}
+
+/// `devices/<id>/continue-update`: the question's Continue.
+pub const CONTINUE_UPDATE: &str = "continue-update";
+/// `devices/<id>/cancel-update`: the question's Cancel.
+pub const CANCEL_UPDATE: &str = "cancel-update";
+/// `devices/<id>/download-backup`: the backup, as a file.
+pub const DOWNLOAD_BACKUP: &str = "download-backup";
+/// `devices/<id>/restore-files`: put a pending backup back.
+pub const RESTORE_FILES: &str = "restore-files";
+/// `devices/<id>/finish-update`: move a held board's waiting files.
+pub const FINISH_UPDATE: &str = "finish-update";
 
 /// The card's layout facts for one device.
 #[derive(Clone, Debug, PartialEq)]
@@ -25,13 +46,13 @@ pub struct UiDeviceLayout {
     /// One line in the firmware zone (a board whose files are waiting).
     pub line: Option<String>,
     /// "Restore files" — the resume rule's verb (the line names the date).
-    pub restore: Option<UiAction>,
+    pub restore: Option<OfferPath>,
     /// The Update verb relabelled "Finish update" on a board holding its
     /// files for a migration.
-    pub finish_update: Option<UiAction>,
+    pub finish_update: Option<OfferPath>,
     /// Download the backup this card is about (always offered beside a
     /// restore).
-    pub download: Option<UiAction>,
+    pub download: Option<OfferPath>,
 }
 
 /// The question (or the refusal), as the card draws it.
@@ -41,15 +62,16 @@ pub struct UiLayoutPanel {
     pub body: String,
     /// Fewer than a quarter free, or the backup could not be stored here.
     pub warning: Option<String>,
-    pub download: UiAction,
-    /// `None` on a refusal. Disabled until the backup is safe (stored, or
-    /// downloaded).
-    pub continue_action: Option<UiAction>,
+    pub download: OfferPath,
+    /// `None` on a refusal. Its offer is disabled until the backup is safe
+    /// (stored, or downloaded).
+    pub continue_action: Option<OfferPath>,
     /// `None` on a refusal (the activity has already ended).
-    pub cancel: Option<UiAction>,
+    pub cancel: Option<OfferPath>,
 }
 
-/// The card's layout facts, or `None` when there is nothing to say.
+/// The card's layout facts, or `None` when there is nothing to say; every
+/// verb they name is published into `offers`.
 ///
 /// `fs` is the board's last hello's filesystem state and `has_uid` whether
 /// that hello named a stamped identity; `pending` the stored backup still
@@ -61,8 +83,14 @@ pub fn device_layout_view(
     has_uid: bool,
     staged: Option<&LayoutStaging>,
     pending: Option<&BackupEntry>,
+    offers: &mut UiOfferTree,
 ) -> Option<UiDeviceLayout> {
     let device = view.id;
+    let mut publish = |verb: &str, icon: &str, action: UiAction| {
+        let path = device_offer_path(device).child(verb);
+        offers.publish(UiOffer::new(path.clone(), icon, action));
+        path
+    };
     let mut layout = UiDeviceLayout {
         panel: None,
         line: None,
@@ -78,7 +106,12 @@ pub fn device_layout_view(
         .and_then(|activity| activity.layout.as_ref())
         .filter(|layout| layout.awaiting_consent)
     {
-        layout.panel = Some(question_panel(device, &flash_layout.verdict, staged));
+        layout.panel = Some(question_panel(
+            device,
+            &flash_layout.verdict,
+            staged,
+            &mut publish,
+        ));
         return Some(layout);
     }
 
@@ -103,7 +136,11 @@ pub fn device_layout_view(
                 size(*room_bytes)
             ),
             warning: None,
-            download: DeviceBackupOp::action_for(device),
+            download: publish(
+                DOWNLOAD_BACKUP,
+                "download",
+                DeviceBackupOp::action_for(device),
+            ),
             continue_action: None,
             cancel: None,
         });
@@ -118,7 +155,9 @@ pub fn device_layout_view(
         layout.line =
             Some("This board's files are waiting — Finish update moves them.".to_string());
         if let Some(FirmwareVerb::Update(choice)) = firmware_verb(view) {
-            layout.finish_update = Some(
+            layout.finish_update = Some(publish(
+                FINISH_UPDATE,
+                "upload",
                 DevicesOp::action_for(Action::Flash {
                     device,
                     board_id: choice.board_id.clone(),
@@ -131,7 +170,7 @@ pub fn device_layout_view(
                 .with_summary(
                     "Write the firmware again and move this board's waiting files onto it.",
                 ),
-            );
+            ));
         }
         return Some(layout);
     }
@@ -149,7 +188,9 @@ pub fn device_layout_view(
             date(entry.captured_at_epoch_seconds)
         ));
         if let Some(FirmwareVerb::Update(choice)) = firmware_verb(view) {
-            layout.restore = Some(
+            layout.restore = Some(publish(
+                RESTORE_FILES,
+                "upload",
                 DevicesOp::action_for(Action::Flash {
                     device,
                     board_id: choice.board_id.clone(),
@@ -166,9 +207,13 @@ pub fn device_layout_view(
                      It replaces what is on the board now.",
                     date(entry.captured_at_epoch_seconds)
                 )),
-            );
+            ));
         }
-        layout.download = Some(DeviceBackupOp::action_for(device));
+        layout.download = Some(publish(
+            DOWNLOAD_BACKUP,
+            "download",
+            DeviceBackupOp::action_for(device),
+        ));
         return Some(layout);
     }
     None
@@ -178,8 +223,18 @@ fn question_panel(
     device: DeviceId,
     verdict: &LayoutVerdict,
     staged: Option<&LayoutStaging>,
+    publish: &mut impl FnMut(&str, &str, UiAction) -> OfferPath,
 ) -> UiLayoutPanel {
-    let cancel = Some(DevicesOp::action_for(Action::CancelActivity { device }));
+    let download = publish(
+        DOWNLOAD_BACKUP,
+        "download",
+        DeviceBackupOp::action_for(device),
+    );
+    let cancel = Some(publish(
+        CANCEL_UPDATE,
+        "revert",
+        DevicesOp::action_for(Action::CancelActivity { device }),
+    ));
     let confirm = DevicesOp::action_for(Action::ConfirmFlashLayout { device });
     match verdict {
         LayoutVerdict::Migrate {
@@ -226,8 +281,8 @@ fn question_panel(
                 title: "Move this board's files to the new layout".to_string(),
                 body,
                 warning,
-                download: DeviceBackupOp::action_for(device),
-                continue_action: Some(continue_action),
+                download,
+                continue_action: Some(publish(CONTINUE_UPDATE, "apply", continue_action)),
                 cancel,
             }
         }
@@ -245,8 +300,8 @@ fn question_panel(
                 date(*captured_at as f64)
             ),
             warning: None,
-            download: DeviceBackupOp::action_for(device),
-            continue_action: Some(confirm),
+            download,
+            continue_action: Some(publish(CONTINUE_UPDATE, "apply", confirm)),
             cancel,
         },
         // A question is only asked for the two verdicts above; the others
@@ -255,7 +310,7 @@ fn question_panel(
             title: String::new(),
             body: String::new(),
             warning: None,
-            download: DeviceBackupOp::action_for(device),
+            download,
             continue_action: None,
             cancel,
         },
@@ -314,8 +369,15 @@ mod tests {
         };
         let view = running_c6();
         let offered = |fs, has_uid| {
-            device_layout_view(&view, fs, has_uid, None, Some(&entry))
-                .is_some_and(|layout| layout.restore.is_some())
+            device_layout_view(
+                &view,
+                fs,
+                has_uid,
+                None,
+                Some(&entry),
+                &mut UiOfferTree::new(),
+            )
+            .is_some_and(|layout| layout.restore.is_some())
         };
         assert!(
             offered(BoardFs::Formatted, false),
@@ -327,7 +389,15 @@ mod tests {
         );
         assert!(!offered(BoardFs::Mounted, true), "its own files are back");
         assert!(
-            device_layout_view(&view, BoardFs::Mounted, false, None, None).is_none(),
+            device_layout_view(
+                &view,
+                BoardFs::Mounted,
+                false,
+                None,
+                None,
+                &mut UiOfferTree::new()
+            )
+            .is_none(),
             "no backup, nothing to offer"
         );
     }

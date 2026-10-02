@@ -1,9 +1,10 @@
 //! The question an update asks before it moves a board's files to the new
 //! layout (the C6 repartition), and the refusal when they do not fit.
 //!
-//! Core decides every word and every verb ([`UiLayoutPanel`]); this sheet
-//! only lays them out — Download backup always, Continue and Cancel while
-//! the question is open. Page-level like the Unlock sheet, so it rises over
+//! Core decides every word and every verb ([`UiLayoutPanel`] for the words,
+//! the view's offers under `devices/<id>` for the verbs, which the card
+//! resolves into [`LayoutSheetVerbs`]); this sheet only lays them out —
+//! Download backup always, Continue and Cancel while the question is open. Page-level like the Unlock sheet, so it rises over
 //! whatever the user is looking at and never changes the card's height.
 
 use dioxus::prelude::*;
@@ -11,10 +12,20 @@ use lpa_studio_core::{UiAction, UiLayoutPanel};
 
 use crate::core::{ActionButton, ActionButtonVariant, quiet_action_class};
 
+/// The sheet's verbs, as the view offers them at the panel's paths. One
+/// the tree does not hold is simply not drawn.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct LayoutSheetVerbs {
+    pub download: Option<UiAction>,
+    pub cancel: Option<UiAction>,
+    pub continue_action: Option<UiAction>,
+}
+
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub(crate) fn DeviceLayoutSheet(
     panel: UiLayoutPanel,
+    verbs: LayoutSheetVerbs,
     /// The card's title, so the sheet says which board.
     device_name: String,
     on_action: EventHandler<UiAction>,
@@ -48,12 +59,14 @@ pub(crate) fn DeviceLayoutSheet(
                     }
                 }
                 div { class: "tw:flex tw:flex-wrap tw:items-center tw:gap-2 tw:pt-1",
-                    ActionButton {
-                        key: "{\"layout-download\"}",
-                        action: panel.download.clone(),
-                        running: false,
-                        variant: ActionButtonVariant::Quiet,
-                        on_action,
+                    if let Some(download) = verbs.download.clone() {
+                        ActionButton {
+                            key: "{\"layout-download\"}",
+                            action: download,
+                            running: false,
+                            variant: ActionButtonVariant::Quiet,
+                            on_action,
+                        }
                     }
                     span { class: "tw:min-w-0 tw:flex-1" }
                     if let Some(close) = on_close {
@@ -64,7 +77,7 @@ pub(crate) fn DeviceLayoutSheet(
                             "Close"
                         }
                     }
-                    if let Some(cancel) = panel.cancel.clone() {
+                    if let Some(cancel) = verbs.cancel.clone() {
                         ActionButton {
                             key: "{\"layout-cancel\"}",
                             action: cancel,
@@ -73,7 +86,7 @@ pub(crate) fn DeviceLayoutSheet(
                             on_action,
                         }
                     }
-                    if let Some(next) = panel.continue_action.clone() {
+                    if let Some(next) = verbs.continue_action.clone() {
                         ActionButton {
                             key: "{\"layout-continue\"}",
                             action: next,

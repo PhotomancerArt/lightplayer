@@ -308,11 +308,33 @@ pub(crate) fn DeviceRosterCard(
         .as_ref()
         .and_then(|layout| layout.panel.clone())
         .filter(|panel| closed_sheet.read().as_ref() != Some(panel));
-    let finish_update = layout
-        .as_ref()
-        .and_then(|layout| layout.finish_update.clone());
-    let restore_files = layout.as_ref().and_then(|layout| layout.restore.clone());
-    let backup_download = layout.as_ref().and_then(|layout| layout.download.clone());
+    // The layout facts name their verbs by path; the verbs themselves are
+    // the view's offers under `devices/<id>` (core publishes them, the
+    // app agent presses the same ones).
+    let device_verbs = crate::core::use_verbs_of(Some(lpa_studio_core::device_offer_path(card.id)));
+    let offered = move |path: Option<&lpa_studio_core::OfferPath>| -> Option<UiAction> {
+        let path = path?;
+        device_verbs
+            .read()
+            .iter()
+            .find(|offer| &offer.path == path)
+            .map(|offer| offer.action.clone())
+    };
+    let finish_update = offered(
+        layout
+            .as_ref()
+            .and_then(|layout| layout.finish_update.as_ref()),
+    );
+    let restore_files = offered(layout.as_ref().and_then(|layout| layout.restore.as_ref()));
+    let backup_download = offered(layout.as_ref().and_then(|layout| layout.download.as_ref()));
+    let sheet_verbs =
+        layout_sheet
+            .as_ref()
+            .map(|panel| super::device_layout_sheet::LayoutSheetVerbs {
+                download: offered(Some(&panel.download)),
+                cancel: offered(panel.cancel.as_ref()),
+                continue_action: offered(panel.continue_action.as_ref()),
+            });
     let device_line = match access.as_ref().and_then(|access| access.line.as_deref()) {
         // Over Bluetooth the login leads: it is what decides what the
         // card can do, and at 375 px the freshness is what truncates.
@@ -716,13 +738,14 @@ pub(crate) fn DeviceRosterCard(
             }
             // The layout question (or refusal): a sheet over the page, so
             // asking never changes the card's height.
-            if let Some(panel) = layout_sheet {
+            if let (Some(panel), Some(verbs)) = (layout_sheet, sheet_verbs) {
                 super::device_layout_sheet::DeviceLayoutSheet {
                     on_close: panel.cancel.is_none().then(|| {
                         let refusal = panel.clone();
                         EventHandler::new(move |_| closed_sheet.set(Some(refusal.clone())))
                     }),
                     panel,
+                    verbs,
                     device_name: card.title.clone(),
                     inline: layout_sheet_inline,
                     on_action,

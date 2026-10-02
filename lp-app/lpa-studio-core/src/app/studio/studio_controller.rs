@@ -2197,6 +2197,10 @@ impl StudioController {
     /// this browser has it is asked by the web layer (`use_ble_reach`), not
     /// known here. Nothing on the web renders it from the tree yet; the app
     /// agent reads it.
+    ///
+    /// `devices/<id>/…`: each card's layout verbs across the C6
+    /// repartition (the question, Download backup, Restore files, Finish
+    /// update); the card draws these from the tree by path.
     fn publish_device_offers(&self, offers: &mut crate::UiOfferTree) {
         if self.usb_available() {
             offers.publish(crate::UiOffer::new(
@@ -2206,6 +2210,8 @@ impl StudioController {
                     .with_label("Connect a board via USB"),
             ));
         }
+        self.devices
+            .publish_layout_offers(self.device_now(), offers);
     }
 
     /// The LENS session's docked card (D43): the device the editor is open

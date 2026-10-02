@@ -828,16 +828,21 @@ fn devices_card_layout_change() -> Element {
         ..base.clone()
     };
     let cell = |card: DeviceView, fs: DeviceBoardFs, staged: Option<&LayoutStaging>| {
-        let layout = device_layout_view(&card, fs, true, staged, None);
+        // The verbs are offers; the shell would provide the view's tree, so
+        // the story provides the one core published for this card.
+        let mut offers = lpa_studio_core::UiOfferTree::new();
+        let layout = device_layout_view(&card, fs, true, staged, None, &mut offers);
         rsx! {
             div { class: "tw:grid tw:content-start tw:gap-2",
-                DeviceRosterCard {
-                    card,
-                    projects: vec![],
-                    examples: vec![],
-                    layout,
-                    layout_sheet_inline: true,
-                    on_action: |_| {},
+                crate::core::OffersProvider { offers,
+                    DeviceRosterCard {
+                        card,
+                        projects: vec![],
+                        examples: vec![],
+                        layout,
+                        layout_sheet_inline: true,
+                        on_action: |_| {},
+                    }
                 }
             }
         }
