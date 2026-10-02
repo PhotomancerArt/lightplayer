@@ -427,19 +427,34 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     let base_fs: Box<dyn lpfs::LpFs> = {
         #[cfg(not(feature = "memory_fs"))]
         {
-            let flash_storage = flash;
-            match lp_fs::LpFsFlash::init(
-                crate::flash_storage::LpFlashStorage::new(flash_storage),
-                crate::flash_storage::lpfs_config,
-            ) {
-                Ok(fs) => {
-                    esp_println::println!("[INIT] Flash filesystem mounted");
-                    Box::new(fs)
-                }
-                Err(e) => {
-                    esp_println::println!("[WARN] Flash FS failed: {e}, falling back to memory");
+            let mut flash_storage = flash;
+            match crate::flash_storage::LpfsPartition::locate(&mut flash_storage) {
+                // Not a runtime condition: the image was flashed without
+                // `--partition-table lp-fw/fw-esp32c6/partitions.csv` and
+                // espflash substituted its default. Say so rather than guess
+                // an offset and mount across whatever is there.
+                None => {
+                    esp_println::println!(
+                        "[ERROR] no `lpfs` partition in the flashed table — reflash with \
+                         --partition-table lp-fw/fw-esp32c6/partitions.csv; using memory FS"
+                    );
                     Box::new(LpFsMemory::new())
                 }
+                Some(partition) => match lp_fs::LpFsFlash::init(
+                    crate::flash_storage::LpFlashStorage::new(flash_storage, partition),
+                    crate::flash_storage::lpfs_config,
+                ) {
+                    Ok(fs) => {
+                        esp_println::println!("[INIT] Flash filesystem mounted");
+                        Box::new(fs)
+                    }
+                    Err(e) => {
+                        esp_println::println!(
+                            "[WARN] Flash FS failed: {e}, falling back to memory"
+                        );
+                        Box::new(LpFsMemory::new())
+                    }
+                },
             }
         }
         #[cfg(feature = "memory_fs")]

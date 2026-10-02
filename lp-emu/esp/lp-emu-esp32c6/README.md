@@ -218,7 +218,14 @@ board:
   and programs the page table for them. It is **not** an `esptool` image
   layout; a ROM-up boot reads a real merged image through the real bootloader
   and gets the real offsets, and `tests/rom_up_boot.rs` checks that the two
-  agree.
+  agree. It also writes the C6's **partition table** at `0x8000`
+  (`flash::c6_partition_table_bytes`, MD5 row and all) when the chip holds
+  none, because the firmware reads `lpfs`'s offset and length from that table
+  at boot; a chip that already holds one keeps it. The table is staged, not
+  validated against the app. `lp-cli/tests/c6_partition_table_parity.rs`
+  compiles `lp-fw/fw-esp32c6/partitions.csv` with espflash's encoder and
+  asserts the two are byte-equal (the fence keeps this crate from reading
+  the product's file).
 - **`seed_rom_flash_chip`** writes the chip size into
   `rom_spiflash_legacy_data->chip_size`, in place of the bootloader's
   `esp_rom_spiflash_config_param`. The ROM's own default chip is **2 MiB**
