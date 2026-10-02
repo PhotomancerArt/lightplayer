@@ -1495,6 +1495,57 @@ fn a_link_attach_queued_behind_another_input_still_identifies() {
     });
 }
 
+/// A second connect edge while the first sweep's arrival is still pending
+/// (landed, its `LinkAttached` queued, nothing folded yet) must not mint a
+/// second link for the same port: that arrival has not joined the routing
+/// map, so a sweep that only skips routed links would attach it again.
+#[test]
+fn a_second_sweep_before_a_pending_arrival_folds_mints_no_second_link() {
+    let device = empty_light_player("dev000000daqf6dvvra");
+    let (mut bench, tasks) = DeviceBench::granted(&device, "usb-sweep-10");
+    let attaches = |bench: &DeviceBench| {
+        bench
+            .inbox
+            .borrow()
+            .iter()
+            .filter(|input| {
+                matches!(
+                    input,
+                    DeviceInput::Event(lpa_devices::event::Event::LinkAttached { .. })
+                )
+            })
+            .count()
+    };
+    let connect = |bench: &mut DeviceBench| {
+        bench
+            .controller
+            .note_device_hotplug(crate::app::studio::studio_command::DeviceHotplug::Connected);
+    };
+    // The first sweep lands its arrival; nothing folds.
+    connect(&mut bench);
+    for _ in 0..100 {
+        if attaches(&bench) > 0 {
+            break;
+        }
+        pump(&tasks);
+    }
+    assert_eq!(attaches(&bench), 1, "the first sweep attached the port");
+    // A second connect edge in that window sweeps again.
+    connect(&mut bench);
+    for _ in 0..100 {
+        pump(&tasks);
+    }
+    assert_eq!(attaches(&bench), 1, "one port, one link");
+    bench.run_until(&tasks, "the board to identify", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.state_label == "Ready")
+    });
+    assert_eq!(bench.view().devices.len(), 1, "one board, one card");
+}
+
 /// One wire, one owner: a card verb that needs the board's wire while the
 /// editor is a lens on it closes the editor first, then RUNS — the card's
 /// verbs always work; the editor is what yields.
@@ -3702,6 +3753,200 @@ fn an_unknown_mac_raises_no_page() {
 
 /// The base MAC [`empty_light_player`] reports.
 const BENCH_BOARD_MAC: &str = "60:55:f9:0a:0b:0c";
+
+// ---------------------------------------------------------------------
+// A saved board comes back to its own record (2026-10-02 hardware gate)
+// ---------------------------------------------------------------------
+
+/// Yona's desk C6 as his registry remembered it: keyed on its MAC (no
+/// provisioned uid), its board known, no name of its own.
+const DESK_C6_MAC: &str = "10:bd:a3:b0:8e:30";
+
+/// The registry's second row: another board, named by the user, whose row
+/// wears the SAME model handle as the C6's. Ids are minted per page from 1,
+/// so a second tab — or a row that loaded after a link had already minted
+/// its number — can leave two rows on disk with one `device_id`.
+const NEIGHBOUR_MAC: &str = "02:00:00:00:00:01";
+
+/// Yona's 2026-10-02 session, whole: a browser that already remembers the
+/// C6, a granted port, a hello naming the remembered MAC. The card must come
+/// back to the saved record and reach Ready, the board's later frames must
+/// land on it (on main they landed on the neighbour as `IdentityConflict`s,
+/// and the card never reached Ready), and the auto-name must be written ONCE
+/// — on main it ping-ponged "… · Oct 2" / "… · Oct 2 2" every settle for as
+/// long as the page was open, because each `SetName` aimed at the C6's id
+/// renamed the neighbour instead.
+#[test]
+fn a_remembered_board_comes_back_to_its_record_and_is_named_once() {
+    let device = mac_only_light_player(DESK_C6_MAC);
+    let (mut bench, tasks) = bench_remembering(
+        &device,
+        "browser-serial-esp32-port-2",
+        vec![
+            remembered_row(NEIGHBOUR_MAC, 1, "Porch sign"),
+            remembered_row(DESK_C6_MAC, 1, ""),
+        ],
+    );
+    assert_eq!(
+        bench.view().devices.len(),
+        2,
+        "both remembered boards are cards before any port opens"
+    );
+
+    bench.run_until(&tasks, "the remembered board to come back Ready", |bench| {
+        card_for_mac(bench, DESK_C6_MAC)
+            .is_some_and(|card| card.activity.is_none() && card.state_label == "Ready")
+    });
+    // Keep going: the board heartbeats every 20 ms, and every step settles
+    // the records — the loop on main needed nothing more than this.
+    for _ in 0..200 {
+        bench.step(&tasks);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+
+    let journal = journal_lines(&bench);
+    let conflicts: Vec<&String> = journal
+        .iter()
+        .filter(|line| line.contains("IdentityConflict"))
+        .collect();
+    assert!(
+        conflicts.is_empty(),
+        "the board's frames are its own: {conflicts:#?}"
+    );
+    let renames = journal
+        .iter()
+        .filter(|line| line.contains("SetName"))
+        .count();
+    assert_eq!(renames, 1, "the auto-name is a fixed point: {journal:#?}");
+
+    let view = bench.view();
+    assert!(view.pending.is_empty(), "{view:?}");
+    assert_eq!(view.devices.len(), 2, "one card per board: {view:?}");
+    let mut ids: Vec<crate::DeviceId> = view.devices.iter().map(|card| card.id).collect();
+    ids.dedup();
+    assert_eq!(ids.len(), 2, "one id per card: {view:?}");
+    let desk = card_for_mac(&bench, DESK_C6_MAC).expect("the desk board's card");
+    assert_eq!(desk.state_label, "Ready", "{desk:?}");
+    assert!(
+        desk.title.ends_with(&month_day_of(&bench)),
+        "named once, without a collision suffix: {:?}",
+        desk.title
+    );
+    let porch = card_for_mac(&bench, NEIGHBOUR_MAC).expect("the neighbour's card");
+    assert_eq!(porch.title, "Porch sign", "the neighbour keeps its name");
+    assert_eq!(porch.state_label, "Offline", "{porch:?}");
+}
+
+/// The precondition the fresh-profile walks never had: with ONE remembered
+/// row the same session was always fine. Pinned beside the failing shape so
+/// the difference between them stays legible.
+#[test]
+fn a_single_remembered_board_comes_back_to_its_record() {
+    let device = mac_only_light_player(DESK_C6_MAC);
+    let (mut bench, tasks) = bench_remembering(
+        &device,
+        "browser-serial-esp32-port-2",
+        vec![remembered_row(DESK_C6_MAC, 1, "")],
+    );
+    bench.run_until(&tasks, "the remembered board to come back Ready", |bench| {
+        card_for_mac(bench, DESK_C6_MAC)
+            .is_some_and(|card| card.activity.is_none() && card.state_label == "Ready")
+    });
+    for _ in 0..50 {
+        bench.step(&tasks);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    let journal = journal_lines(&bench);
+    assert!(!journal.iter().any(|line| line.contains("IdentityConflict")));
+    assert_eq!(
+        journal
+            .iter()
+            .filter(|line| line.contains("SetName"))
+            .count(),
+        1
+    );
+    assert_eq!(bench.view().devices.len(), 1);
+}
+
+/// A LightPlayer with a base MAC and no provisioned uid — the shape of every
+/// board flashed by Studio today.
+fn mac_only_light_player(mac: &str) -> FakeEsp32Device {
+    FakeEsp32Device::new(FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new()
+            .with_base_mac(mac)
+            .with_heartbeat_interval(Duration::from_millis(20)),
+    )))
+}
+
+/// One registry row as Studio writes it for a MAC-keyed board.
+fn remembered_row(mac: &str, device_id: u64, name: &str) -> crate::app::places::RegisteredDevice {
+    crate::app::places::RegisteredDevice {
+        uid: format!("mac:{mac}"),
+        name: name.to_string(),
+        transport: "USB".to_string(),
+        hardware_id: Some(format!("efuse:{mac}")),
+        device_id: Some(device_id),
+        board_id: Some("seeed/xiao-esp32-c6".to_string()),
+        chip: Some("esp32c6".to_string()),
+        ..Default::default()
+    }
+}
+
+/// A page load over a library that already holds `rows`, with the board's
+/// port granted: the library hydrates first (the remembered boards are
+/// cards before any port opens), then the sweep finds the port.
+fn bench_remembering(
+    device: &FakeEsp32Device,
+    endpoint: &str,
+    rows: Vec<crate::app::places::RegisteredDevice>,
+) -> (DeviceBench, TaskPool) {
+    let clock = Rc::new(Cell::new(1_000.0));
+    let store = memory_store(Rc::clone(&clock));
+    let registry = DeviceRegistry::new(store.fs_handle());
+    for row in rows {
+        registry.upsert(row).expect("the row writes");
+    }
+    let (mut bench, tasks) = DeviceBench::build_on(device, endpoint, true, true, clock, store);
+    bench.settle_library();
+    (bench, tasks)
+}
+
+/// The card of the roster device whose chain holds `mac`.
+fn card_for_mac(bench: &DeviceBench, mac: &str) -> Option<lpa_devices::view::DeviceView> {
+    let id = bench
+        .controller
+        .devices_for_test()
+        .roster()
+        .devices()
+        .iter()
+        .find(|device| {
+            device
+                .identity
+                .mac
+                .as_ref()
+                .is_some_and(|known| known.0 == mac)
+        })?
+        .id;
+    bench.view().devices.into_iter().find(|card| card.id == id)
+}
+
+/// Every journal entry, rendered.
+fn journal_lines(bench: &DeviceBench) -> Vec<String> {
+    bench
+        .controller
+        .devices_for_test()
+        .roster()
+        .journal()
+        .entries()
+        .map(|entry| format!("{entry:?}"))
+        .collect()
+}
+
+/// The "<Mon D>" the auto-name ends with on the bench's clock.
+fn month_day_of(bench: &DeviceBench) -> String {
+    let derived = crate::app::devices::derive_flash_name("x", bench.clock.get(), &[]);
+    derived.trim_start_matches("x · ").to_string()
+}
 
 // ---------------------------------------------------------------------
 // P1: opening a board binds the library package it is running (D1, D6)
@@ -6642,6 +6887,90 @@ fn a_refused_push_leaves_the_board_running_its_previous_project() {
     assert_eq!(listed, vec!["/projects/studio-b"]);
 }
 
+/// The P6 pull loop's apply step (`ProjectOp::ReloadActiveProject`,
+/// dispatched by `visitor_session.rs` on a fast-forward): a collaborator's
+/// update that damages a node file passes the fast-forward's own checks,
+/// the sim refuses the re-push, and the editor was left reading Ready over
+/// a runtime holding nothing. The fix fails the project the way a refused
+/// open does (D24 sends the page back to the gallery), and raises the
+/// same failure notice a refused open raises — the only route the reason
+/// reaches the user, since the visitor loop enqueues the reload and never
+/// sees the error the dispatch returns.
+#[test]
+fn a_refused_reload_fails_the_editor_instead_of_reading_ready() {
+    let (mut bench, tasks, device, good) = sim_open_bench();
+    open_package(&mut bench, &tasks, &good);
+    assert_eq!(sim_loaded(&device).len(), 1);
+    let name = bench
+        .controller
+        .project_for_test()
+        .active_library_display_name()
+        .expect("the opened project names itself");
+
+    // What a fast-forward does: new content lands in the library copy.
+    let mut copy = bench.store.open(good.parse().expect("uid")).expect("open");
+    copy.apply_update("/module.json".as_path(), Some(b"{ this is not json"))
+        .expect("write");
+    copy.record_save(2.0).expect("save");
+
+    let result = drive_real(bench.controller.dispatch(UiAction::from_op(
+        crate::ControllerId::new(ProjectController::NODE_ID),
+        ProjectOp::ReloadActiveProject,
+    )));
+    assert!(result.is_err(), "the reload is refused: {result:?}");
+    assert_eq!(sim_loaded(&device), Vec::<String>::new(), "the sim is dark");
+
+    // Without the fix the project pane still read "Ready". A failed
+    // project is not loaded, so the page falls back to the gallery (D24).
+    let view = bench.controller.view();
+    let status: Vec<String> = view.panes.iter().map(|p| p.status.label.clone()).collect();
+    assert!(view.panes.is_empty(), "not Ready over nothing: {status:?}");
+    assert!(view.home.is_some(), "the gallery stands instead");
+
+    // The console line alone is not a surface a user reads; the same
+    // failure notice a refused OPEN raises is — Retry re-opens this same
+    // package, and the message names it and says the editor closed.
+    let crate::app::open_progress::OpenStage::Failed(failure) =
+        crate::app::open_progress::open_stage()
+    else {
+        panic!(
+            "the reload left no verdict for the user: {:?}",
+            crate::app::open_progress::open_stage()
+        );
+    };
+    assert!(
+        failure.message.contains(&name),
+        "the notice names the project: {:?}",
+        failure.message
+    );
+    assert!(
+        failure.message.contains("The editor closed"),
+        "the notice says what happened: {:?}",
+        failure.message
+    );
+    assert_eq!(
+        failure.retry,
+        UiAction::from_op(
+            crate::ControllerId::new(crate::HOME_NODE_ID),
+            crate::HomeOp::OpenPackage {
+                key: good,
+                prefer: None,
+            },
+        ),
+        "Retry reopens the same package"
+    );
+}
+
+/// What the sim's runtime has loaded, asked over its own wire rather than
+/// the lens: a refused open or reload drops the lens.
+fn sim_loaded(device: &FakeEsp32Device) -> Vec<String> {
+    let mut client = lpa_client::LpClient::new(FakeDeviceIo::new(device)).on_borrowed_wire();
+    let loaded = drive_real(client.project_list_loaded())
+        .expect("list")
+        .value;
+    loaded.iter().map(|p| p.path.to_string()).collect()
+}
+
 /// A board that boots dark — its saved startup project (`/lightplayer.json`
 /// names `porch`) is one it refuses — reports nothing loaded. A push to it
 /// replaces that saved project: it lands in the saved folder's OTHER slot,
@@ -6716,6 +7045,58 @@ fn a_refused_push_to_a_dark_board_leaves_its_saved_startup_project() {
         .expect("the saved project is still on the board")
         .value;
     assert_eq!(after, saved_manifest, "the saved project is whole");
+}
+
+/// A board that boots dark (its saved startup project, `porch`, is one it
+/// refuses) reports nothing loaded. Removing "the project" from it must
+/// target that SAVED folder — the same lookup the push conversation uses —
+/// never the fallback slot, which would leave `porch` (and the board's
+/// retry-at-boot loop) completely untouched while creating nothing where
+/// the fallback names.
+///
+/// `startup_project` is left naming `porch` afterwards: a removal, like a
+/// push, only ever writes it through a later successful load, never through
+/// a delete — the same thing happens when the removed project IS the one
+/// the board runs (`remove_project` never touches `/lightplayer.json`
+/// either way).
+#[test]
+fn a_removal_on_a_dark_board_deletes_its_saved_startup_project() {
+    let device = dark_board_saved_at("dev000000daqf6dvvrd", "porch");
+    let (_bench, _tasks, _device_uid) = running_board(&device, "usb-remove-dark");
+    let mut client = lpa_client::LpClient::new(FakeDeviceIo::new(&device)).on_borrowed_wire();
+    save_startup_project(&mut client, "porch");
+    let mut quiet = |_: String, _: Option<u8>| {};
+    let loaded = drive_real(client.project_list_loaded())
+        .expect("list")
+        .value;
+    assert!(loaded.is_empty(), "the board boots dark: {loaded:?}");
+
+    let report = drive_real(lpa_client::remove_project(
+        &mut client,
+        "studio",
+        &mut quiet,
+    ))
+    .expect("removed");
+
+    assert_eq!(
+        report.storage_id, "porch",
+        "the saved folder is removed, not the fallback slot"
+    );
+    assert!(
+        !report.was_loaded,
+        "the board was not running it — it was dark"
+    );
+    assert_eq!(
+        project_dirs(&mut client),
+        Vec::<String>::new(),
+        "the saved project is gone and the fallback folder was never created"
+    );
+    assert_eq!(
+        saved_startup_project(&mut client).as_deref(),
+        Some("porch"),
+        "a removal only ever writes startup_project through a later load, \
+         never through a delete — it is left naming the now-gone folder"
+    );
 }
 
 /// A board seeded with a project it refuses at boot (a format-behind
