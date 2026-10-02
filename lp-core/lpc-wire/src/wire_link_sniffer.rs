@@ -13,11 +13,16 @@
 //! mid-session reads frames **unverified** (the checksum key is not known yet)
 //! and cannot read packed replies until the next session: each is reported
 //! [`SniffedWire::Unreadable`], never guessed.
+//!
+//! A secure link's frames are sealed and a capture holds no key: each data
+//! or log frame is reported [`SniffedWire::Sealed`] (its channel and length),
+//! never decoded. Sealed ACKs carry nothing to report and are skipped.
 
 use alloc::boxed::Box;
 use alloc::string::{String, ToString};
 
 use lp_json_pack::{LearnStore, LearnedTable};
+use lp_link::frame::FrameKind;
 use lp_link::sniffer::{Direction, LinkSniffer, SniffEvent};
 use lp_link::{CH_LOG, CH_PROTO, Micros};
 
@@ -53,6 +58,13 @@ pub enum SniffedWire {
     /// Frames the capture never saw, even resent (a gap in the capture, not
     /// in the link).
     Gap { dir: Direction, skipped: u8 },
+    /// A data or log frame of a secure link: sealed, so only its channel and
+    /// length are known (`len`: the sealed body, counter and tag included).
+    Sealed {
+        dir: Direction,
+        chan: u8,
+        len: usize,
+    },
 }
 
 /// A captured device link, read as wire traffic. See the module docs.
@@ -132,6 +144,13 @@ fn read_event(
         }
         SniffEvent::Damaged { dir } => on(SniffedWire::Damaged { dir }),
         SniffEvent::Gap { dir, skipped } => on(SniffedWire::Gap { dir, skipped }),
+        SniffEvent::Sealed {
+            dir,
+            kind: FrameKind::Data | FrameKind::Datagram,
+            chan,
+            len,
+        } => on(SniffedWire::Sealed { dir, chan, len }),
+        SniffEvent::Sealed { .. } => {}
         SniffEvent::Message {
             dir,
             channel: CH_LOG,
@@ -321,5 +340,43 @@ mod tests {
             sniffer.flush(|r| reads.push(r));
             reads
         }
+    }
+}
+
+/// Sealed frames pass through as opaque lines, ACKs not at all.
+#[cfg(test)]
+mod sealed_tests {
+    use super::*;
+    use alloc::vec::Vec;
+    use lp_link::frame::FrameKind;
+
+    #[test]
+    fn sealed_data_and_log_frames_pass_through_and_acks_do_not() {
+        let mut table = LearnedTable::boxed();
+        let mut text = [TextLines::new(), TextLines::new()];
+        let mut out = Vec::new();
+        for (kind, chan) in [
+            (FrameKind::Data, CH_PROTO),
+            (FrameKind::Datagram, CH_LOG),
+            (FrameKind::Ack, 0),
+        ] {
+            let event = SniffEvent::Sealed {
+                dir: Direction::BoardToHost,
+                kind,
+                chan,
+                len: 40,
+            };
+            read_event(&mut table, &mut text, event, &mut |w| out.push(w));
+        }
+        assert_eq!(out.len(), 2);
+        assert!(matches!(
+            out[0],
+            SniffedWire::Sealed {
+                dir: Direction::BoardToHost,
+                chan: CH_PROTO,
+                len: 40
+            }
+        ));
+        assert!(matches!(out[1], SniffedWire::Sealed { chan: CH_LOG, .. }));
     }
 }

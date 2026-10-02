@@ -14,6 +14,11 @@ pub const CH_LOG: u8 = 2;
 /// The presets' `max_message`: the wire's 16 KiB frame budget plus 1 KiB.
 pub const MAX_MESSAGE: usize = 17 * 1024;
 
+/// Bytes a secure link's sealing adds to every frame after the handshake:
+/// a 4-byte counter and a 16-byte Poly1305 tag (`header ‖ ctr ‖ ciphertext ‖
+/// tag ‖ crc`). See [`LinkConfig::secured`].
+pub const SEAL_OVERHEAD: usize = 4 + 16;
+
 /// How frames meet the transport.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Framing {
@@ -174,7 +179,9 @@ impl LinkConfig {
     }
 
     /// BLE NUS: a 15–30 ms connection interval, 244-byte notifications, one
-    /// frame per notification (4 header + 236 payload + 4 CRC).
+    /// frame per notification (4 header + 236 payload + 4 CRC). A secure
+    /// BLE link uses `ble().secured()`, which keeps a sealed frame inside one
+    /// notification.
     pub fn ble() -> Self {
         LinkConfig {
             framing: Framing::Datagram,
@@ -270,6 +277,19 @@ impl LinkConfig {
         }
     }
 
+    /// The same config for a secure link on a transport with a hard frame
+    /// size (a BLE notification): `max_payload` keeps meaning *plaintext*,
+    /// and a sealed frame is [`SEAL_OVERHEAD`] bytes longer, so this takes
+    /// the overhead off the payload to keep each frame inside one
+    /// transport packet. A secure BLE link uses `LinkConfig::ble().secured()`.
+    /// Stream and WebSocket links need not: their frames have no hard ceiling.
+    pub fn secured(self) -> Self {
+        LinkConfig {
+            max_payload: self.max_payload.saturating_sub(SEAL_OVERHEAD as u16).max(1),
+            ..self
+        }
+    }
+
     pub fn is_reliable(&self, channel: u8) -> bool {
         channel < 8 && self.reliable_channels & (1 << channel) != 0
     }
@@ -310,6 +330,20 @@ mod tests {
             assert_eq!(cfg.validate(), Ok(()), "{name}");
             assert_eq!(cfg.max_message, MAX_MESSAGE, "{name}");
         }
+    }
+
+    /// A secured BLE frame (header, counter, payload, tag, CRC) is exactly
+    /// one 244-byte notification, as a plain one is.
+    #[test]
+    fn a_secured_ble_frame_still_fits_one_notification() {
+        let plain = LinkConfig::ble();
+        let secure = LinkConfig::ble().secured();
+        let wire = |cfg: &LinkConfig, overhead: usize| {
+            4 + cfg.max_payload as usize + overhead + cfg.crc.len()
+        };
+        assert_eq!(wire(&plain, 0), 244);
+        assert_eq!(wire(&secure, SEAL_OVERHEAD), 244);
+        assert_eq!(secure.validate(), Ok(()));
     }
 
     /// Tools read a UART link with the USB sniffer (`LinkSniffer::usb`), so
