@@ -123,7 +123,7 @@ members = [
 # workspace; lp-xt-emu-guest lives under lp-emu/ with the rest of the
 # emulation family but is a member of THAT workspace, not this one
 # (see lp-emu/README.md).
-exclude = ["lp-xt/fixtures", "lp-emu/lp-xt-emu-guest"]
+exclude = ["lp-xt/fixtures", "lp-emu/lp-xt-emu-guest", "lp-fw/fw-esp32c6-loader"]
 resolver = "2"
 
 # Exclude lps-builtins-emu-app, lps-builtins-wasm, and fw-esp32c6 from default workspace builds (cross-target only)

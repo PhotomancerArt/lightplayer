@@ -112,8 +112,8 @@ pub use fw_esp32_common::logger;
     feature = "test_fluid_demo",
 ))]
 mod output;
-#[cfg(not(fw_harness))]
-mod ota_spike;
+#[cfg(all(lp_split, not(fw_harness)))]
+mod ota;
 mod recovery;
 mod serial;
 #[cfg(not(fw_harness))]
@@ -575,10 +575,11 @@ struct CoreBoot {
     boot_assessment: lp_recovery::BootAssessment,
 }
 
-/// OTA split-link spike: the engine's header, the first bytes of the engine
-/// region. The core never names it — it reads it through a plain address —
-/// so no relocation in core points into the engine.
-#[cfg(not(fw_harness))]
+/// The engine's header, the first bytes of the engine region (split builds).
+/// The core never names it — it reads it through a plain address — so no
+/// relocation in the core points into the engine, and the split tool's
+/// reachability walk from the core's roots never crosses into it.
+#[cfg(all(lp_split, not(fw_harness)))]
 #[repr(C)]
 struct EngineHeader {
     magic: [u8; 8],
@@ -586,14 +587,15 @@ struct EngineHeader {
     entry: fn(CoreBoot),
 }
 
-#[cfg(not(fw_harness))]
+#[cfg(all(lp_split, not(fw_harness)))]
 const ENGINE_MAGIC: [u8; 8] = *b"LPENGIN1";
-#[cfg(not(fw_harness))]
-use ota_spike::ENGINE_VADDR;
+#[cfg(all(lp_split, not(fw_harness)))]
+use ota::ENGINE_VADDR;
 
 /// Lockstep: core and engine carry the same id because they come from the
-/// same link. (Spike: commit + dirty flag; a product build stamps a digest.)
-#[cfg(not(fw_harness))]
+/// same link: commit + dirty flag, plus `LP_BUILD_TAG` when set (two builds
+/// of one commit told apart — the OTA tests' X and Y).
+#[cfg(all(lp_split, not(fw_harness)))]
 const fn build_id() -> [u8; 48] {
     const fn append(out: &mut [u8; 48], at: usize, src: &[u8]) -> usize {
         let mut i = 0;
@@ -605,15 +607,14 @@ const fn build_id() -> [u8; 48] {
     }
     let mut out = [0u8; 48];
     let at = append(&mut out, 0, concat!(env!("LP_BUILD_COMMIT"), "-", env!("LP_BUILD_DIRTY")).as_bytes());
-    // Spike: two builds of one commit told apart (`LP_SPIKE_BUILD_TAG=x`).
-    if let Some(tag) = option_env!("LP_SPIKE_BUILD_TAG") {
+    if let Some(tag) = option_env!("LP_BUILD_TAG") {
         let at = append(&mut out, at, b"+");
         append(&mut out, at, tag.as_bytes());
     }
     out
 }
 
-#[cfg(not(fw_harness))]
+#[cfg(all(lp_split, not(fw_harness)))]
 #[unsafe(link_section = ".engine_header")]
 #[used]
 static ENGINE_HEADER: EngineHeader = EngineHeader {
@@ -623,7 +624,7 @@ static ENGINE_HEADER: EngineHeader = EngineHeader {
 };
 
 /// The engine's entry, if a matching engine is mapped.
-#[cfg(not(fw_harness))]
+#[cfg(all(lp_split, not(fw_harness)))]
 fn engine_entry() -> Option<fn(CoreBoot)> {
     let header = ENGINE_VADDR as *const EngineHeader;
     // SAFETY: the window is mapped (erased flash reads as 0xff); volatile so
@@ -646,9 +647,9 @@ fn engine_entry() -> Option<fn(CoreBoot)> {
     Some(unsafe { core::ptr::read_volatile(core::ptr::addr_of!((*header).entry)) })
 }
 
-/// OTA split-link spike: the engine door. Reached only through
-/// `ENGINE_HEADER`; everything reachable from here and not from the core
-/// roots is engine.
+/// The engine door. Split builds reach it only through `ENGINE_HEADER`, so
+/// everything reachable from here and not from the core's roots is engine;
+/// monolithic builds call it directly.
 #[cfg(not(fw_harness))]
 #[inline(never)]
 fn lp_engine_entry(core: CoreBoot) {
@@ -997,25 +998,51 @@ async fn main(spawner: embassy_executor::Spawner) {
     #[cfg(not(fw_harness))]
     {
         let core = core_boot(spawner);
-        let id = build_id();
-        let id_len = id.iter().position(|b| *b == 0).unwrap_or(id.len());
-        esp_println::println!(
-            "[CORE] build {}",
-            core::str::from_utf8(&id[..id_len]).unwrap_or("?")
-        );
-        ota_spike::map_engine();
-        match engine_entry() {
-            Some(entry) => {
-                fw_esp32_common::usb_link::set_update_hook(ota_spike::on_update_while_running);
-                entry(core);
-            }
-            None => {
-                let CoreBoot { usb_link, watchdog, .. } = core;
-                ota_spike::core_only(usb_link, watchdog).await;
-            }
-        }
+        #[cfg(not(lp_split))]
+        lp_engine_entry(core);
+        #[cfg(lp_split)]
+        split_boot(core).await;
         loop {
             embassy_time::Timer::after(embassy_time::Duration::from_secs(3600)).await;
+        }
+    }
+}
+
+/// A split build after `core_boot`: enter the engine the boot records and
+/// the header agree on, or stay core-only and take an update.
+#[cfg(all(lp_split, not(fw_harness)))]
+async fn split_boot(core: CoreBoot) {
+    let id = build_id();
+    let id_len = id.iter().position(|b| *b == 0).unwrap_or(id.len());
+    let state = ota::begin();
+    esp_println::println!(
+        "[CORE] build {} @{:#x}{}",
+        core::str::from_utf8(&id[..id_len]).unwrap_or("?"),
+        state.core_off,
+        if state.on_trial() { " (trial)" } else { "" }
+    );
+    if state.rolled_back() {
+        esp_println::println!("[OTA] rolled back: the newer core never confirmed");
+    }
+    ota::map_engine(state.engine_extent());
+    let incomplete = lp_recovery::snapshot()
+        .map(|s| s.consecutive_incomplete_boots)
+        .unwrap_or(0);
+    let engine_crashing = incomplete >= ota::INCOMPLETE_BOOTS_TO_CORE_ONLY;
+    let entry = engine_entry();
+    match entry {
+        Some(entry) if !engine_crashing && !state.on_trial() => {
+            fw_esp32_common::usb_link::set_update_hook(ota::on_update_while_running);
+            entry(core);
+        }
+        _ => {
+            if engine_crashing && entry.is_some() {
+                esp_println::println!(
+                    "[OTA] {incomplete} incomplete boots — not starting the engine"
+                );
+            }
+            let CoreBoot { usb_link, watchdog, .. } = core;
+            ota::core_only(usb_link, watchdog, state, engine_crashing).await;
         }
     }
 }

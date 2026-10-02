@@ -5,7 +5,7 @@
 # board ends up running Y's engine; and right after the cut it is reachable
 # (engine running, or core-only).
 #
-#   scripts/ota-spike/power-cut.sh <s3-dir> <cut-ms>...
+#   scripts/fw-split/power-cut.sh <s3-dir> <cut-ms>...
 #   (<s3-dir> holds x/ and y/ from build-split.sh; results in <s3-dir>/cuts/)
 #
 # Spike tooling — not product code.
