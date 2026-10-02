@@ -1,18 +1,15 @@
 //! Stories for loaded-project workspace states.
 
 use dioxus::prelude::*;
-use lpa_studio_core::{
-    ControllerId, DirtySummary, ProjectController, ProjectOp, ProjectSyncPhase, UiAction,
-    UiLogLevel, UiPaneAction, UiStatus,
-};
+use lpa_studio_core::{DirtySummary, ProjectSyncPhase, UiLogLevel, UiStatus};
 use lpa_studio_web_story_macros::story;
 
 use crate::app::project::ProjectPane;
 use crate::app::story_fixtures::{
-    project_editor_fixture, project_ready_state, project_ready_view, project_sync_failed_view,
-    project_syncing_view, project_view, shell_story, studio_log,
+    project_editor_fixture, project_ready_state, project_ready_view, project_save_revert_offers,
+    project_sync_failed_view, project_syncing_view, project_view, shell_story, studio_log,
 };
-use crate::core::PaneView;
+use crate::core::{OffersProvider, PaneView};
 
 #[story]
 pub(crate) fn project_pane() -> Element {
@@ -47,31 +44,16 @@ pub(crate) fn sidebar_dirty_tree() -> Element {
     }
     view.dirty = unsaved.merge(failed);
     view.edits_in_flight = 0;
-    view.header_actions = vec![
-        UiPaneAction::new(
-            "save",
-            UiAction::from_op(
-                ControllerId::new(ProjectController::NODE_ID),
-                ProjectOp::SaveOverlay,
-            ),
-        ),
-        UiPaneAction::new(
-            "revert",
-            UiAction::from_op(
-                ControllerId::new(ProjectController::NODE_ID),
-                ProjectOp::RevertAllEdits,
-            )
-            .with_label("Revert to saved"),
-        ),
-    ];
 
     rsx! {
         div { class: "tw:max-w-[320px]",
-            ProjectPane {
-                view,
-                status: UiStatus::good("Ready"),
-                running: false,
-                on_action: move |_| {},
+            OffersProvider { offers: project_save_revert_offers(),
+                ProjectPane {
+                    view,
+                    status: UiStatus::good("Ready"),
+                    running: false,
+                    on_action: move |_| {},
+                }
             }
         }
     }

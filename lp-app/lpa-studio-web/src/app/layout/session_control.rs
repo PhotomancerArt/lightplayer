@@ -62,8 +62,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    DirtySummary, UiAction, UiAffordance, UiChromeSessionControl, UiChromeSessionStatus,
-    UiPaneAction,
+    DirtySummary, OfferPath, UiAction, UiAffordance, UiChromeSessionControl, UiChromeSessionStatus,
+    UiOffer,
 };
 use lpc_cloud_api::Access;
 
@@ -200,13 +200,14 @@ pub fn SessionProjectControl(control: ChromeSessionControl) -> Element {
 
     let affordance = project.as_ref().map(ProjectDetailContent::affordance);
     let style = affordance.map(affordance_trigger_style);
-    // The save moment: the controller publishes Save/Revert on the editor's
-    // `header_actions` exactly while persisted edits are pending, so their
-    // presence IS the dirty test — the control never recomputes dirtiness.
+    // The save moment: the controller publishes `project/save` and
+    // `project/revert` into the offer tree exactly while persisted edits are
+    // pending, so their presence IS the dirty test — the control never
+    // recomputes dirtiness.
     // Only Save rides the bar; revert-all retired into the changes popup.
     let save = project
         .as_ref()
-        .map(|project| save_and_revert(project.header_actions()).0)
+        .map(|project| save_and_revert(project.header_offers()).0)
         .unwrap_or_default();
     let changes = project.as_ref().map(ProjectDetailContent::changes);
     let dirty = changes.as_ref().map(|changes| changes.dirty);
@@ -633,12 +634,12 @@ pub fn SessionChangesPanel(changes: ProjectChanges, on_action: EventHandler<UiAc
         overlay_revision,
         edits_in_flight,
         pending_edits,
-        header_actions,
+        header_offers,
         history,
     } = changes;
     let unsaved_entries = entries_in(&pending_edits, PendingEditBucket::Persisted);
     let failed_entries = entries_in(&pending_edits, PendingEditBucket::Failed);
-    let (save, revert) = save_and_revert(&header_actions);
+    let (save, revert) = save_and_revert(&header_offers);
     let receipt = save_receipt_line(history.next_version);
     let anything_pending = dirty.persisted > 0
         || dirty.failed > 0
@@ -860,15 +861,17 @@ fn board_suffix(session: &UiChromeSessionControl) -> Option<String> {
         .filter(|board| !board.is_empty() && !session.name.contains(board.as_str()))
 }
 
-/// Save and Revert, picked out of the editor's `header_actions` by their
-/// icon tokens. Every home dispatches the SAME actions the pane header and
-/// the Tree row dispatch — one save verb in the app.
-fn save_and_revert(actions: &[UiPaneAction]) -> (Option<UiAction>, Option<UiAction>) {
-    let pick = |icon: &str| {
-        actions
+/// Save and Revert, picked out of the project's offers by their paths
+/// (`project/save`, `project/revert`). Every home dispatches the SAME
+/// actions the pane header and the Tree row dispatch — one save verb in the
+/// app.
+fn save_and_revert(offers: &[UiOffer]) -> (Option<UiAction>, Option<UiAction>) {
+    let pick = |verb: &str| {
+        let path = OfferPath::project().child(verb);
+        offers
             .iter()
-            .find(|action| action.icon == icon)
-            .map(|action| action.action.clone())
+            .find(|offer| offer.path == path)
+            .map(|offer| offer.action.clone())
     };
     (pick("save"), pick("revert"))
 }
@@ -1055,9 +1058,10 @@ mod tests {
         }
     }
 
-    fn pane_action(icon: &str, op: ProjectOp) -> UiPaneAction {
-        UiPaneAction::new(
-            icon,
+    fn project_offer(verb: &str, op: ProjectOp) -> UiOffer {
+        UiOffer::new(
+            OfferPath::project().child(verb),
+            verb,
             UiAction::from_op(ControllerId::new(ProjectController::NODE_ID), op),
         )
     }
@@ -1067,13 +1071,13 @@ mod tests {
     }
 
     /// Save (bar) and Revert-all (changes popup) are the controller's own
-    /// header actions — not a second pair minted here — so the bar, the
+    /// `project/*` offers — not a second pair minted here — so the bar, the
     /// popup, and the pane header can never save different things.
     #[test]
-    fn save_and_revert_come_from_the_editors_header_actions() {
+    fn save_and_revert_come_from_the_project_offers() {
         let actions = vec![
-            pane_action("save", ProjectOp::SaveOverlay),
-            pane_action("revert", ProjectOp::RevertAllEdits),
+            project_offer("save", ProjectOp::SaveOverlay),
+            project_offer("revert", ProjectOp::RevertAllEdits),
         ];
 
         let (save, revert) = save_and_revert(&actions);
@@ -1082,8 +1086,8 @@ mod tests {
         assert_eq!(revert, Some(actions[1].action.clone()));
     }
 
-    /// A clean project publishes no header actions, which is exactly the
-    /// dirty test: no actions, no Save sibling and no popup verbs.
+    /// A clean project publishes no `project/*` offers, which is exactly
+    /// the dirty test: no offers, no Save sibling and no popup verbs.
     #[test]
     fn a_clean_project_offers_no_save_verbs() {
         assert_eq!(save_and_revert(&[]), (None, None));

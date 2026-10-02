@@ -6,11 +6,11 @@ use lpc_wire::{NodeRuntimeStatus, WireEntryState};
 
 use crate::app::project::slot::SlotEditJoin;
 use crate::{
-    ControllerId, DirtySummary, NodeRevertOp, ProjectController, ProjectEditorOp,
+    ControllerId, DirtySummary, NodeRevertOp, OfferPath, ProjectController, ProjectEditorOp,
     ProjectEditorTarget, ProjectNodeAddress, ProjectNodeStatusTone, ProjectNodeStatusView,
     ProjectNodeTarget, ProjectSlotAddress, ProjectSlotRoot, SlotController, UiAction,
     UiAssetEditor, UiConfigSlot, UiConfigSlotBody, UiNodeChild, UiNodeFace, UiNodeHeader,
-    UiNodeSection, UiNodeTab, UiNodeView, UiPaneAction, UiProductPreview, UiProductRef,
+    UiNodeSection, UiNodeTab, UiNodeView, UiOffer, UiOfferTree, UiProductPreview, UiProductRef,
     UiProductTrackingState, UiSlotAsset, UiStatus,
 };
 
@@ -170,6 +170,8 @@ impl NodeController {
             &[],
             // No project context: focus is the whole Default-intent policy.
             &|node| node.state().focused,
+            // No project context, no offers to read: the tree is dropped.
+            &mut UiOfferTree::new(),
         )
     }
 
@@ -189,7 +191,12 @@ impl NodeController {
     /// `remove_action` resolves a node address into its delete-node header
     /// action (confirmation pre-composed from the removal pre-flight); it
     /// closes over project state exactly like `asset_editor`, and `None`
-    /// keeps the header without a delete affordance (unresolvable site).
+    /// keeps the card without a delete affordance (unresolvable site).
+    ///
+    /// The card's verbs are not on the DTO: this node's and every
+    /// descendant's are published into `offers` at
+    /// `project/<node tree path>/<verb>`, in tree pre-order (a node's own
+    /// verbs before its children's), and the card asks the tree for them.
     pub(in crate::app::project) fn ui_node_with_product_previews(
         &self,
         product_preview: &impl Fn(&UiProductRef) -> Option<UiProductPreview>,
@@ -199,7 +206,11 @@ impl NodeController {
         remove_action: &impl Fn(&ProjectNodeAddress) -> Option<UiAction>,
         always_live: &[UiProductRef],
         subscribes: &impl Fn(&NodeController) -> bool,
+        offers: &mut UiOfferTree,
     ) -> UiNodeView {
+        // The children's verbs are collected on the side and published
+        // after this node's own, which need the subtree's dirty summary.
+        let mut child_offers = UiOfferTree::new();
         let mut children = self.ui_children_with_product_previews(
             product_preview,
             edits,
@@ -208,6 +219,7 @@ impl NodeController {
             remove_action,
             always_live,
             subscribes,
+            &mut child_offers,
         );
         // Dirty aggregates over the FULL child list, before any face-driven
         // suppression: a playlist face hides non-active child cards, but
@@ -260,13 +272,10 @@ impl NodeController {
         // whose face failed to derive keeps its rows reachable. Ordering
         // is the whole trick: filtering earlier would starve the lift.
         retire_face_claimed_debug_rows(&mut sections, face.as_ref());
+        publish_node_offers(offers, &self.address, &dirty, remove_action(&self.address));
+        offers.append(child_offers);
         let mut view = UiNodeView::new(header, vec![UiNodeTab::main(sections)])
             .with_node_id(self.address.to_string())
-            .with_header_actions(node_header_actions(
-                &self.address,
-                &dirty,
-                remove_action(&self.address),
-            ))
             .with_children(children);
         view.focused = self.state.focused;
         view.action = Some(node_focus_action(self));
@@ -657,6 +666,7 @@ impl NodeController {
         remove_action: &impl Fn(&ProjectNodeAddress) -> Option<UiAction>,
         always_live: &[UiProductRef],
         subscribes: &impl Fn(&NodeController) -> bool,
+        offers: &mut UiOfferTree,
     ) -> Vec<UiNodeChild> {
         self.children
             .iter()
@@ -678,6 +688,7 @@ impl NodeController {
                     subscribes,
                 );
                 child.embed_asset_editors(&mut view.sections, asset_editor);
+                let mut nested_offers = UiOfferTree::new();
                 view.children = child.ui_children_with_product_previews(
                     product_preview,
                     edits,
@@ -686,6 +697,7 @@ impl NodeController {
                     remove_action,
                     always_live,
                     subscribes,
+                    &mut nested_offers,
                 );
                 // Dirty rolls up the FULL nested-child list before the face
                 // derivation may suppress non-active playlist children —
@@ -708,8 +720,13 @@ impl NodeController {
                 // Same retirement as the top-level build path: the face
                 // claims its Debug rows only after it has read them.
                 retire_face_claimed_debug_rows(&mut view.sections, view.face.as_ref());
-                view.header_actions =
-                    node_header_actions(&child.address, &view.dirty, remove_action(&child.address));
+                publish_node_offers(
+                    offers,
+                    &child.address,
+                    &view.dirty,
+                    remove_action(&child.address),
+                );
+                offers.append(nested_offers);
                 // A container child keeps its picker: since the flat-root
                 // reversal a playlist card is always nested, so its "+
                 // entry" chip only exists if it rides the child DTO.
@@ -887,21 +904,24 @@ fn retire_face_claimed_debug_rows(
     });
 }
 
-/// Contextual node-header actions (pane grammar actions slot, M3 UX gate
-/// feedback): the subtree batch revert ([`NodeRevertOp`]) with the same
-/// "revert" icon token as the project header's Revert-to-saved, present only
-/// while the header's subtree [`DirtySummary`] announces pending edits, plus
-/// the UNGATED delete-node action when the caller resolved one (its
-/// confirmation copy rides the action's `ActionMeta`, like
-/// `HomeOp::DeletePackage`).
-fn node_header_actions(
+/// Publish one node card's verbs (the pane grammar's actions slot, M3 UX
+/// gate feedback) at `project/<node tree path>/<verb>`:
+///
+/// - `revert`: the subtree batch revert ([`NodeRevertOp`]), with the same
+///   "revert" icon token as the project header's Revert to saved, only
+///   while the subtree [`DirtySummary`] announces pending edits;
+/// - `remove`: the UNGATED delete-node action, when the caller resolved
+///   one (its consequence and summary ride its `ActionMeta`).
+fn publish_node_offers(
+    offers: &mut UiOfferTree,
     node: &ProjectNodeAddress,
     dirty: &DirtySummary,
     remove: Option<UiAction>,
-) -> Vec<UiPaneAction> {
-    let mut actions = Vec::new();
+) {
+    let at = OfferPath::project_node(node);
     if !dirty.is_clean() {
-        actions.push(UiPaneAction::new(
+        offers.publish(UiOffer::new(
+            at.clone().child("revert"),
             "revert",
             UiAction::from_op(
                 ControllerId::new(ProjectController::NODE_ID),
@@ -910,9 +930,8 @@ fn node_header_actions(
         ));
     }
     if let Some(remove) = remove {
-        actions.push(UiPaneAction::new("remove", remove));
+        offers.publish(UiOffer::new(at.child("remove"), "remove", remove));
     }
-    actions
 }
 
 fn node_focus_action(node: &NodeController) -> UiAction {

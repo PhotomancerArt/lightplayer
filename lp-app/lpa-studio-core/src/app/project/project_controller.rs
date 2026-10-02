@@ -20,15 +20,15 @@ use crate::app::studio::refresh_cadence::{VERDICT_CHASE_INTERVAL, VERDICT_CHASE_
 use crate::core::notice::UiNotices;
 use crate::{
     AssetEditOp, Controller, ControllerId, DirtySummary, LoadedProjectChoice, MAX_ASSET_BODY_BYTES,
-    NodeCardUiState, NodeUiOp, PanelAutoSaveOp, PanelClearOp, PanelWriteOp, PendingAssetEdit,
-    PendingEdit, PendingEditOp, PendingEditPhase, PlaylistActivateOp, ProgressState,
-    ProjectConnectResult, ProjectEditorOp, ProjectEditorTarget, ProjectEditorView,
+    NodeCardUiState, NodeUiOp, OfferPath, PanelAutoSaveOp, PanelClearOp, PanelWriteOp,
+    PendingAssetEdit, PendingEdit, PendingEditOp, PendingEditPhase, PlaylistActivateOp,
+    ProgressState, ProjectConnectResult, ProjectEditorOp, ProjectEditorTarget, ProjectEditorView,
     ProjectInventorySummary, ProjectNodeAddress, ProjectNodeStatusTone, ProjectNodeTreeItem,
     ProjectNodeTreeView, ProjectOp, ProjectSlotAddress, ProjectSlotRoot, ProjectSnapshot,
     ProjectState, ProjectSync, ProjectSyncPhase, ProjectSyncRun, ProjectSyncSummary, SlotEditOp,
     StudioOverlayMutation, StudioProjectRead, StudioProjectReadOutcome, StudioServerClient,
     UiAction, UiAssetContent, UiAssetContentBody, UiAssetEditor, UiError, UiIssue, UiLogDraft,
-    UiLogLevel, UiLogOrigin, UiMetric, UiNodeTabBody, UiNodeView, UiNotice, UiPaneAction,
+    UiLogLevel, UiLogOrigin, UiMetric, UiNodeTabBody, UiNodeView, UiNotice, UiOffer, UiOfferTree,
     UiPaneView, UiPendingEdit, UiPendingEditKind, UiPendingEditPhase, UiProductRef, UiResult,
     UiShaderError, UiShaderUniform, UiSlotAsset, UiStatus, UiViewContent, UxUpdateSink,
 };
@@ -1219,7 +1219,11 @@ impl ProjectController {
     }
 
     /// Project root node controllers into node-pane DTOs in project tree order.
+    ///
+    /// The cards' verbs are published into a tree this entry point drops;
+    /// [`Self::editor_view`] is the build that keeps them.
     pub fn ui_nodes(&self) -> Vec<UiNodeView> {
+        let mut offers = UiOfferTree::new();
         let always_live = self.always_live_products();
         let product_preview =
             |product: &UiProductRef| self.sync.as_ref()?.product_preview(product).cloned();
@@ -1240,6 +1244,7 @@ impl ProjectController {
                     &remove_action,
                     &always_live,
                     &subscribes,
+                    &mut offers,
                 )
             })
             .collect()
@@ -2426,12 +2431,16 @@ impl ProjectController {
         }
     }
 
-    pub fn view(&self, server_connected: bool) -> UiPaneView {
+    /// The project pane. Its verbs that live in the offer tree (the
+    /// project header's and every node card's) are published into `offers`
+    /// while the editor view builds; a project that is not open publishes
+    /// none.
+    pub fn view(&self, server_connected: bool, offers: &mut UiOfferTree) -> UiPaneView {
         UiPaneView::new(
             Self::NODE_ID,
             "Project",
             project_status(&self.state, self.sync.as_ref()),
-            self.body(),
+            self.body(offers),
             self.actions(server_connected),
         )
     }
@@ -2451,11 +2460,16 @@ impl ProjectController {
     /// keeps walking the controllers (root included) rather than summing
     /// the card headers, so root-slot edits (a project rename) still count
     /// exactly once.
+    ///
+    /// The project header's verbs (`project/save`, `project/revert`) and
+    /// every node card's (`project/<node tree path>/<verb>`) are published
+    /// into `offers`, in that order, rather than carried on the DTO.
     pub fn editor_view(
         &self,
         project_id: &str,
         handle_id: u32,
         inventory: &ProjectInventorySummary,
+        offers: &mut UiOfferTree,
     ) -> ProjectEditorView {
         let summary = self.sync_summary().unwrap_or_default();
         let always_live = self.always_live_products();
@@ -2467,6 +2481,18 @@ impl ProjectController {
         let edits = self.slot_edit_join();
         let extra_config = |node: NodeId| self.binding_derived_config_slots(node);
         let subscribes = |node: &NodeController| self.node_subscribes_products(node);
+        // Node dirty covers slot + node-mapped asset edits across the subtree;
+        // asset edits whose artifact maps to no node (a shader's `.glsl`) are
+        // added on top so they still count toward Save (see `dirty_summary`).
+        // Computed before the cards so the project header's verbs publish
+        // ahead of theirs.
+        let dirty = self
+            .root_nodes
+            .iter()
+            .map(|node| node.dirty_summary(&edits))
+            .sum::<DirtySummary>()
+            + edits.unmapped_asset_dirty_summary();
+        publish_project_offers(offers, &dirty);
         let mut nodes = self
             .root_nodes
             .iter()
@@ -2479,6 +2505,7 @@ impl ProjectController {
                     &remove_action,
                     &always_live,
                     &subscribes,
+                    offers,
                 )
             })
             .collect::<Vec<_>>();
@@ -2540,15 +2567,6 @@ impl ProjectController {
             &mut root_add_node_menu,
             self.lens_device_features.as_deref(),
         );
-        // Node dirty covers slot + node-mapped asset edits across the subtree;
-        // asset edits whose artifact maps to no node (a shader's `.glsl`) are
-        // added on top so they still count toward Save (see `dirty_summary`).
-        let dirty = self
-            .root_nodes
-            .iter()
-            .map(|node| node.dirty_summary(&edits))
-            .sum::<DirtySummary>()
-            + edits.unmapped_asset_dirty_summary();
         let root_slots = self
             .root_nodes
             .first()
@@ -2570,7 +2588,6 @@ impl ProjectController {
         .with_dirty(dirty)
         .with_debug_overrides(edits.debug_override_count())
         .with_pending_edits(self.pending_edits())
-        .with_header_actions(project_header_actions(&dirty))
         .with_add_node_menu(root_add_node_menu)
         .with_edits_in_flight(self.edits_in_flight())
         .with_patch_surface(surface, self.patch_selection.clone())
@@ -5612,7 +5629,7 @@ impl ProjectController {
         }
     }
 
-    fn body(&self) -> UiViewContent {
+    fn body(&self, offers: &mut UiOfferTree) -> UiViewContent {
         match &self.state {
             ProjectState::NotLoaded
                 if self.running_project_status == RunningProjectStatus::NoneKnown =>
@@ -5639,7 +5656,7 @@ impl ProjectController {
             } => {
                 if self.sync.is_some() {
                     UiViewContent::ProjectEditor(Box::new(
-                        self.editor_view(project_id, *handle_id, inventory),
+                        self.editor_view(project_id, *handle_id, inventory, offers),
                     ))
                 } else {
                     ready_project_metrics(project_id, *handle_id, inventory)
@@ -9829,25 +9846,25 @@ fn slot_path_display(address: &ProjectSlotAddress) -> String {
     }
 }
 
-/// Contextual project-header actions (D4/D5): Save and Revert-to-saved as
-/// controller-produced [`UiPaneAction`] data while persisted edits are
-/// pending. Adding nodes does NOT ride the header: the add affordance is the
-/// node tree's "Add node…" row and the workspace's add button, both fed by
+/// Publish the project header's verbs (D4/D5), `project/save` and
+/// `project/revert` ("Revert to saved"), while persisted edits are pending.
+/// Adding nodes does NOT ride the header: the add affordance is the node
+/// tree's "Add node…" row and the workspace's add button, both fed by
 /// [`ProjectEditorView::add_node_menu`] (review round, 2026-07-27 — put
 /// buttons where people look for them; the title-bar "+" was dropped).
-fn project_header_actions(dirty: &DirtySummary) -> Vec<UiPaneAction> {
-    let mut actions = Vec::new();
+fn publish_project_offers(offers: &mut UiOfferTree, dirty: &DirtySummary) {
     if dirty.persisted > 0 {
-        actions.push(UiPaneAction::new(
+        offers.publish(UiOffer::new(
+            OfferPath::project().child("save"),
             "save",
             project_action(ProjectOp::SaveOverlay),
         ));
-        actions.push(UiPaneAction::new(
+        offers.publish(UiOffer::new(
+            OfferPath::project().child("revert"),
             "revert",
             project_action(ProjectOp::RevertAllEdits).with_label("Revert to saved"),
         ));
     }
-    actions
 }
 
 /// An action dispatched to the project controller itself.
@@ -11492,7 +11509,7 @@ mod tests {
         project.mark_ready("studio-demo", 7, inventory.clone());
         project.apply_project_view(&tree_view()).unwrap();
 
-        let view = project.editor_view("studio-demo", 7, &inventory);
+        let view = project.editor_view("studio-demo", 7, &inventory, &mut UiOfferTree::new());
 
         assert_eq!(view.project_id, "studio-demo");
         // The pane title carries the project name (the root node's label),
@@ -11530,7 +11547,7 @@ mod tests {
         let inventory = ProjectInventorySummary::default();
         project.mark_ready("studio-demo", 7, inventory.clone());
 
-        let view = project.editor_view("studio-demo", 7, &inventory);
+        let view = project.editor_view("studio-demo", 7, &inventory, &mut UiOfferTree::new());
 
         assert_eq!(view.project_name, "studio-demo");
     }
@@ -11578,7 +11595,7 @@ mod tests {
             },
         );
 
-        let view = project.editor_view("studio-demo", 7, &inventory);
+        let view = project.editor_view("studio-demo", 7, &inventory, &mut UiOfferTree::new());
         let cards = root_children(&view);
         assert_eq!(
             cards[1].card_ui,
@@ -11622,7 +11639,7 @@ mod tests {
                 collapsed: true,
             },
         );
-        let collapsed = project.editor_view("studio-demo", 7, &inventory);
+        let collapsed = project.editor_view("studio-demo", 7, &inventory, &mut UiOfferTree::new());
         assert!(root_children(&collapsed)[1].card_ui.agent_collapsed);
         assert_eq!(
             root_children(&collapsed)[1].card_ui.composer_draft,
@@ -11636,7 +11653,7 @@ mod tests {
                 collapsed: false,
             },
         );
-        let expanded = project.editor_view("studio-demo", 7, &inventory);
+        let expanded = project.editor_view("studio-demo", 7, &inventory, &mut UiOfferTree::new());
         assert!(!root_children(&expanded)[1].card_ui.agent_collapsed);
         assert_eq!(
             root_children(&expanded)[1].card_ui.composer_draft,
@@ -11663,7 +11680,7 @@ mod tests {
         project.mark_ready("studio-demo", 8, inventory.clone());
         project.apply_project_view(&tree_view()).unwrap();
 
-        let view = project.editor_view("studio-demo", 8, &inventory);
+        let view = project.editor_view("studio-demo", 8, &inventory, &mut UiOfferTree::new());
         assert_eq!(
             root_children(&view)[1].card_ui,
             NodeCardUiState::default(),
@@ -12869,7 +12886,12 @@ mod tests {
             .unwrap()
             .set_binding_graph_for_test(control_out_graph(scope, None));
 
-        let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+        let editor = project.editor_view(
+            "loaded-project",
+            7,
+            &ProjectInventorySummary::default(),
+            &mut UiOfferTree::new(),
+        );
         let Some(crate::UiNodeFace::Module(face)) = editor.nodes[0].face.clone() else {
             panic!("the root module card wears a module face");
         };
@@ -12908,7 +12930,12 @@ mod tests {
             .unwrap()
             .set_binding_graph_for_test(control_out_graph(scope, Some(visual)));
 
-        let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+        let editor = project.editor_view(
+            "loaded-project",
+            7,
+            &ProjectInventorySummary::default(),
+            &mut UiOfferTree::new(),
+        );
         let Some(crate::UiNodeFace::Module(face)) = editor.nodes[0].face.clone() else {
             panic!("the root module card wears a module face");
         };
@@ -12956,7 +12983,12 @@ mod tests {
             .unwrap()
             .set_binding_graph_for_test((graph, values));
 
-        let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+        let editor = project.editor_view(
+            "loaded-project",
+            7,
+            &ProjectInventorySummary::default(),
+            &mut UiOfferTree::new(),
+        );
         let Some(crate::UiNodeFace::Module(face)) = editor.nodes[0].face.clone() else {
             panic!("the root module card wears a module face");
         };
@@ -13060,8 +13092,12 @@ mod tests {
             .unwrap();
 
         let child_hero = |project: &ProjectController| {
-            let editor =
-                project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+            let editor = project.editor_view(
+                "loaded-project",
+                7,
+                &ProjectInventorySummary::default(),
+                &mut UiOfferTree::new(),
+            );
             let child = editor.nodes[0].children[0].clone();
             let Some(crate::UiNodeFace::Module(face)) = child.face else {
                 panic!("the inner module card wears a module face");
@@ -14575,8 +14611,12 @@ mod tests {
         clear_node_focus(&mut project.root_nodes);
 
         let visual = |project: &ProjectController| {
-            let editor =
-                project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+            let editor = project.editor_view(
+                "loaded-project",
+                7,
+                &ProjectInventorySummary::default(),
+                &mut UiOfferTree::new(),
+            );
             let card = editor.nodes[0].clone();
             let product = section_products(node_sections(&card))
                 .iter()
@@ -14602,7 +14642,12 @@ mod tests {
         assert_eq!(product.tracking, UiProductTrackingState::Tracking);
         assert_eq!(product.show_live, None, "already live: nothing to offer");
 
-        let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+        let editor = project.editor_view(
+            "loaded-project",
+            7,
+            &ProjectInventorySummary::default(),
+            &mut UiOfferTree::new(),
+        );
         assert!(
             editor.tree.roots[0].streaming_live,
             "the sidebar row agrees with the card"
@@ -14612,7 +14657,12 @@ mod tests {
         let (card, _) = visual(&project);
         assert!(!card.selection_streams);
         assert!(!card.streaming_live, "sim streams everything; no Live chip");
-        let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+        let editor = project.editor_view(
+            "loaded-project",
+            7,
+            &ProjectInventorySummary::default(),
+            &mut UiOfferTree::new(),
+        );
         assert!(!editor.tree.roots[0].streaming_live);
     }
 
@@ -16221,13 +16271,14 @@ mod tests {
     }
 
     #[test]
-    fn header_actions_offer_add_always_and_delete_on_removable_nodes() {
+    fn header_offers_add_always_and_delete_on_removable_nodes() {
         let (project, _client, _sent) = authoring_project_with_scripted_client(Vec::new());
 
-        let view = project.editor_view("demo", 7, &ProjectInventorySummary::default());
-        // Clean project: no header actions — adding rides the tree row and
-        // the workspace button, both fed by the picker data on the view.
-        assert!(view.header_actions.is_empty());
+        let mut offers = UiOfferTree::new();
+        let view = project.editor_view("demo", 7, &ProjectInventorySummary::default(), &mut offers);
+        // Clean project: no project-header verbs — adding rides the tree row
+        // and the workspace button, both fed by the picker data on the view.
+        assert_eq!(offers.verbs_of(&OfferPath::project()).count(), 0);
         let menu = view
             .add_node_menu
             .as_ref()
@@ -16240,15 +16291,16 @@ mod tests {
 
         // Root children carry the ungated, undoable delete action, its
         // summary composed from the pre-flight.
-        let clock = root_children(&view)
-            .iter()
-            .find(|child| child.detail == "/demo.module/clock.clock")
-            .expect("clock card");
-        let delete = clock
-            .header_actions
-            .iter()
-            .find(|action| action.icon == "remove")
-            .expect("delete action present on a clean node");
+        assert!(
+            root_children(&view)
+                .iter()
+                .any(|child| child.detail == "/demo.module/clock.clock"),
+            "clock card"
+        );
+        let delete = offers
+            .get(&offer_path("project/demo.module/clock.clock/remove"))
+            .expect("delete offer present on a clean node");
+        assert_eq!(delete.icon, "remove");
         assert_eq!(
             delete.action.meta().consequence,
             crate::ActionConsequence::Undoable,
@@ -16271,12 +16323,70 @@ mod tests {
         // card is not an affordance, and the root has no attachment site to
         // be removed from.
         assert!(
-            !view.nodes[0]
-                .header_actions
-                .iter()
-                .any(|action| action.icon == "remove"),
+            offers
+                .get(&offer_path("project/demo.module/remove"))
+                .is_none(),
             "the restored root card offers no Delete"
         );
+    }
+
+    #[test]
+    fn every_node_at_any_depth_publishes_its_verbs_by_tree_path() {
+        let (mut project, _client, _sent) = authoring_project_with_scripted_client(Vec::new());
+        let paths = |project: &ProjectController| {
+            let mut offers = UiOfferTree::new();
+            project.editor_view("demo", 7, &ProjectInventorySummary::default(), &mut offers);
+            offers
+                .iter()
+                .map(|offer| offer.path.to_string())
+                .collect::<Vec<_>>()
+        };
+
+        // Clean: no revert anywhere, and Remove on every removable card
+        // below the root (the playlist's entry has no resolvable site in
+        // this fixture, so it offers none).
+        assert_eq!(
+            paths(&project),
+            [
+                "project/demo.module/group.playlist/remove",
+                "project/demo.module/clock.clock/remove",
+            ]
+        );
+
+        // A pending edit on the nested clock and one on the playlist's
+        // entry, two levels down: each dirty subtree offers its revert, the
+        // project header offers Save and Revert first, and the order is the
+        // tree's (a node's own verbs before its children's).
+        for node in [
+            "/demo.module/clock.clock",
+            "/demo.module/group.playlist/leaf.shader",
+        ] {
+            project.insert_pending_edit_for_test(
+                crate::ProjectSlotAddress::new(
+                    node_address(node),
+                    ProjectSlotRoot::def(),
+                    SlotPath::parse("rate").unwrap(),
+                ),
+                PendingEdit::pending(LpValue::F32(2.0)),
+            );
+        }
+        assert_eq!(
+            paths(&project),
+            [
+                "project/save",
+                "project/revert",
+                "project/demo.module/revert",
+                "project/demo.module/group.playlist/revert",
+                "project/demo.module/group.playlist/remove",
+                "project/demo.module/group.playlist/leaf.shader/revert",
+                "project/demo.module/clock.clock/revert",
+                "project/demo.module/clock.clock/remove",
+            ]
+        );
+    }
+
+    fn offer_path(text: &str) -> OfferPath {
+        OfferPath::parse(text).expect("offer path")
     }
 
     fn config_slot<'a>(nodes: &'a [crate::UiNodeView], label: &str) -> &'a crate::UiConfigSlot {
@@ -17006,11 +17116,23 @@ mod tests {
     }
 
     #[test]
-    fn dirty_node_header_offers_the_batch_revert_pane_action() {
+    fn dirty_node_header_offers_the_batch_revert() {
         let (mut project, _client, _sent) = structural_project_with_scripted_client(Vec::new());
-        assert!(
-            project.ui_nodes()[0].header_actions.is_empty(),
-            "a clean node header offers no actions"
+        let node = OfferPath::project_node(&node_address("/demo.module/orbit.shader"));
+        let offers = |project: &ProjectController| {
+            let mut offers = UiOfferTree::new();
+            project.editor_view(
+                "loaded-project",
+                7,
+                &ProjectInventorySummary::default(),
+                &mut offers,
+            );
+            offers
+        };
+        assert_eq!(
+            offers(&project).verbs_of(&node).count(),
+            0,
+            "a clean node header offers no verbs"
         );
 
         project.sync_mut().unwrap().apply_acked_edits(
@@ -17027,9 +17149,13 @@ mod tests {
             Revision::new(3),
         );
 
-        let nodes = project.ui_nodes();
-        let actions = &nodes[0].header_actions;
+        let offers = offers(&project);
+        let actions = offers.verbs_of(&node).collect::<Vec<_>>();
         assert_eq!(actions.len(), 1);
+        assert_eq!(
+            actions[0].path.to_string(),
+            "project/demo.module/orbit.shader/revert"
+        );
         assert_eq!(
             actions[0].icon, "revert",
             "same icon token as the project header"
@@ -17492,7 +17618,12 @@ mod tests {
             expected,
             "the rowless removal counts exactly once"
         );
-        let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+        let editor = project.editor_view(
+            "loaded-project",
+            7,
+            &ProjectInventorySummary::default(),
+            &mut UiOfferTree::new(),
+        );
         assert_eq!(
             editor.dirty, expected,
             "root-own edits count without a child card"
@@ -17712,7 +17843,12 @@ mod tests {
             },
         );
 
-        let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+        let editor = project.editor_view(
+            "loaded-project",
+            7,
+            &ProjectInventorySummary::default(),
+            &mut UiOfferTree::new(),
+        );
 
         assert_eq!(
             editor.dirty,
@@ -17808,7 +17944,12 @@ mod tests {
             Revision::new(3),
         );
 
-        let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+        let editor = project.editor_view(
+            "loaded-project",
+            7,
+            &ProjectInventorySummary::default(),
+            &mut UiOfferTree::new(),
+        );
 
         assert_eq!(
             editor.dirty,
@@ -17861,7 +18002,12 @@ mod tests {
             Revision::new(3),
         );
 
-        let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+        let editor = project.editor_view(
+            "loaded-project",
+            7,
+            &ProjectInventorySummary::default(),
+            &mut UiOfferTree::new(),
+        );
 
         assert!(
             editor.dirty.is_clean(),
@@ -17929,7 +18075,12 @@ mod tests {
         install_mixed_policy_slots(&mut unmounted, 1, Revision::new(2));
         project.apply_project_view(&unmounted).unwrap();
 
-        let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+        let editor = project.editor_view(
+            "loaded-project",
+            7,
+            &ProjectInventorySummary::default(),
+            &mut UiOfferTree::new(),
+        );
         let listed: Vec<&str> = editor
             .pending_edits
             .iter()
@@ -17973,7 +18124,12 @@ mod tests {
             Revision::new(3),
         );
 
-        let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+        let editor = project.editor_view(
+            "loaded-project",
+            7,
+            &ProjectInventorySummary::default(),
+            &mut UiOfferTree::new(),
+        );
         assert_eq!(editor.pending_edits.len(), 1);
         assert_eq!(
             editor.pending_edits[0].phase,
@@ -18227,10 +18383,16 @@ mod tests {
             failed: 0,
         };
         assert_eq!(project.dirty_summary(), expected);
-        let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+        let mut offers = UiOfferTree::new();
+        let editor = project.editor_view(
+            "loaded-project",
+            7,
+            &ProjectInventorySummary::default(),
+            &mut offers,
+        );
         assert_eq!(editor.dirty, expected);
         assert_eq!(
-            editor.header_actions.len(),
+            offers.verbs_of(&OfferPath::project()).count(),
             2,
             "a pending asset body enables Save/Revert"
         );
@@ -18249,7 +18411,12 @@ mod tests {
             failed: 0,
         };
         assert_eq!(project.dirty_summary(), expected);
-        let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+        let editor = project.editor_view(
+            "loaded-project",
+            7,
+            &ProjectInventorySummary::default(),
+            &mut UiOfferTree::new(),
+        );
         // The fixture's single node is the project root (flat-root hoists it
         // out of `nodes`/`tree` into `root_slots`), so its dirty surfaces
         // through the project total and the pending-edit row rather than a
@@ -18395,7 +18562,12 @@ mod tests {
         let (mut project, _client, _sent) = editable_project_with_scripted_client(Vec::new());
         seed_acked_asset_body(&mut project, glsl_artifact(), &vec![b'x'; 3277]);
 
-        let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+        let editor = project.editor_view(
+            "loaded-project",
+            7,
+            &ProjectInventorySummary::default(),
+            &mut UiOfferTree::new(),
+        );
 
         assert_eq!(editor.pending_edits.len(), 1);
         let row = &editor.pending_edits[0];
@@ -18748,7 +18920,12 @@ mod tests {
             "sibling branch stays clean"
         );
 
-        let editor = project.editor_view("demo", 1, &ProjectInventorySummary::default());
+        let editor = project.editor_view(
+            "demo",
+            1,
+            &ProjectInventorySummary::default(),
+            &mut UiOfferTree::new(),
+        );
         // The root is the tree's one top row again, so the bubbling chain
         // is one level longer: root → group → leaf.
         let root = &editor.tree.roots[0];
@@ -18790,7 +18967,13 @@ mod tests {
         };
         assert_eq!(project.dirty_summary(), expected);
 
-        let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+        let mut offers = UiOfferTree::new();
+        let editor = project.editor_view(
+            "loaded-project",
+            7,
+            &ProjectInventorySummary::default(),
+            &mut offers,
+        );
         assert_eq!(editor.dirty, expected);
         assert!(!editor.dirty.is_clean(), "failed edits need attention");
         // The childless root is the one workspace card; its failed row
@@ -18807,10 +18990,9 @@ mod tests {
         assert_eq!(editor.tree.roots.len(), 1);
         assert_eq!(editor.tree.roots[0].dirty, expected);
         assert_eq!(
-            editor
-                .header_actions
-                .iter()
-                .map(|action| action.icon.as_str())
+            offers
+                .verbs_of(&OfferPath::project())
+                .map(|offer| offer.icon.as_str())
                 .collect::<Vec<_>>(),
             Vec::<&str>::new(),
             "failed edits alone do not surface Save/Revert"
@@ -18818,11 +19000,17 @@ mod tests {
     }
 
     #[test]
-    fn clean_tree_yields_clean_summaries_and_no_header_actions() {
+    fn clean_tree_yields_clean_summaries_and_no_header_offers() {
         let (project, _client, _sent) = editable_project_with_scripted_client(Vec::new());
 
         assert!(project.dirty_summary().is_clean());
-        let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+        let mut offers = UiOfferTree::new();
+        let editor = project.editor_view(
+            "loaded-project",
+            7,
+            &ProjectInventorySummary::default(),
+            &mut offers,
+        );
         assert!(editor.dirty.is_clean());
         // The childless root is the one workspace card; its rows ride
         // `root_slots` (clean here).
@@ -18838,22 +19026,31 @@ mod tests {
         // A childless root is still exactly one tree row.
         assert_eq!(editor.tree.roots.len(), 1);
         assert!(editor.tree.roots[0].children.is_empty());
-        // No header actions on a clean project (adding rides the node list).
-        assert!(editor.header_actions.is_empty());
+        // No project-header verbs on a clean project (adding rides the node
+        // list).
+        assert_eq!(offers.verbs_of(&OfferPath::project()).count(), 0);
     }
 
     #[test]
-    fn header_actions_present_iff_persisted_dirty() {
+    fn header_offers_present_iff_persisted_dirty() {
         let (mut project, _client, _sent) = editable_project_with_scripted_client(Vec::new());
         project.insert_pending_edit_for_test(
             brightness_address(),
             PendingEdit::pending(LpValue::F32(0.9)),
         );
 
-        let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+        let mut offers = UiOfferTree::new();
+        project.editor_view(
+            "loaded-project",
+            7,
+            &ProjectInventorySummary::default(),
+            &mut offers,
+        );
 
-        assert_eq!(editor.header_actions.len(), 2, "save + revert");
-        let save = &editor.header_actions[0];
+        let header = offers.verbs_of(&OfferPath::project()).collect::<Vec<_>>();
+        assert_eq!(header.len(), 2, "save + revert");
+        let save = header[0];
+        assert_eq!(save.path.to_string(), "project/save");
         assert_eq!(save.icon, "save");
         assert_eq!(save.label(), "Save");
         assert!(save.is_primary());
@@ -18863,7 +19060,8 @@ mod tests {
             Some(&ProjectOp::SaveOverlay)
         );
         assert!(save.action.is_for_node(ProjectController::NODE_ID));
-        let revert = &editor.header_actions[1];
+        let revert = header[1];
+        assert_eq!(revert.path.to_string(), "project/revert");
         assert_eq!(revert.icon, "revert");
         assert_eq!(revert.label(), "Revert to saved");
         assert!(!revert.is_primary());
@@ -18872,15 +19070,19 @@ mod tests {
             Some(&ProjectOp::RevertAllEdits)
         );
         assert!(revert.action.is_for_node(ProjectController::NODE_ID));
+        assert!(
+            revert.consequence().arms(),
+            "Revert to saved is Lasting: it arms before it acts"
+        );
         assert_eq!(
-            editor.header_actions.len(),
+            header.len(),
             2,
             "no standing add action rides the header (adding lives in the tree/workspace)"
         );
     }
 
     #[test]
-    fn debug_only_dirty_is_clean_and_shows_no_header_actions() {
+    fn debug_only_dirty_is_clean_and_shows_no_header_offers() {
         let (mut project, _client, _sent) = editable_project_with_scripted_client(Vec::new());
         // An ACKED debug override (nothing in flight, so the only thing that
         // could announce is the dirty projection).
@@ -18901,7 +19103,13 @@ mod tests {
             Revision::new(3),
         );
 
-        let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+        let mut offers = UiOfferTree::new();
+        let editor = project.editor_view(
+            "loaded-project",
+            7,
+            &ProjectInventorySummary::default(),
+            &mut offers,
+        );
 
         // D7: the summary never learns about the debug override, so the
         // project header stays untinted and offers no Save/Revert.
@@ -18913,10 +19121,9 @@ mod tests {
             "a debug-only project does not tint its header"
         );
         assert_eq!(
-            editor
-                .header_actions
-                .iter()
-                .map(|action| action.icon.as_str())
+            offers
+                .verbs_of(&OfferPath::project())
+                .map(|offer| offer.icon.as_str())
                 .collect::<Vec<_>>(),
             Vec::<&str>::new(),
             "debug overrides do not surface Save/Revert"
@@ -18938,7 +19145,12 @@ mod tests {
         project
             .insert_pending_edit_for_test(rate_address(), PendingEdit::pending(LpValue::F32(2.0)));
 
-        let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+        let editor = project.editor_view(
+            "loaded-project",
+            7,
+            &ProjectInventorySummary::default(),
+            &mut UiOfferTree::new(),
+        );
 
         // Only the persisted brightness edit counts; the debug rate override
         // is absent from every aggregation (D7).

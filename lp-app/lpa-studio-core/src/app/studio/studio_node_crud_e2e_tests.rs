@@ -344,13 +344,8 @@ fn create_into_playlist_adds_entry_and_child() {
         .into_iter()
         .find(|card| card.header.path.contains("entry_1"))
         .expect("entry child card present");
-    let delete = entry_child
-        .header_actions
-        .iter()
-        .find(|action| action.icon == "remove")
-        .expect("entry child offers the delete action")
-        .action
-        .clone();
+    let delete = node_verb(&snapshot, &entry_child.header.path, "remove")
+        .expect("entry child offers the delete action");
     handle.tx.send(StudioCommand::Action(delete));
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("entry remove emits a snapshot");
@@ -426,13 +421,8 @@ fn remove_stages_rows_revert_restores_and_save_deletes_on_disk() {
         .expect("clock card");
 
     // The clock card offers the ungated, undoable delete action.
-    let delete = card_at(&snapshot, &clock_id)
-        .header_actions
-        .iter()
-        .find(|action| action.icon == "remove")
-        .expect("delete header action")
-        .action
-        .clone();
+    assert_eq!(card_at(&snapshot, &clock_id).header.path, clock_id);
+    let delete = node_verb(&snapshot, &clock_id, "remove").expect("delete header offer");
     assert_eq!(
         delete.meta().consequence,
         crate::ActionConsequence::Undoable
@@ -965,6 +955,15 @@ fn card_at(view: &UiStudioView, path: &str) -> crate::UiNodeView {
         .into_iter()
         .find(|card| card.header.path == path)
         .unwrap_or_else(|| panic!("workspace carries a card at {path}"))
+}
+
+/// The verb a node card at tree path `node` offers, read from the view's
+/// offer tree (`project/<node>/<verb>`), the way the card renders it.
+fn node_verb(view: &UiStudioView, node: &str, verb: &str) -> Option<UiAction> {
+    let address = ProjectNodeAddress::parse(node).expect("card path is a node address");
+    view.offers
+        .get(&crate::OfferPath::project_node(&address).child(verb))
+        .map(|offer| offer.action.clone())
 }
 
 fn project_editor(view: &UiStudioView) -> &crate::ProjectEditorView {

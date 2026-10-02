@@ -1,7 +1,8 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    DirtySummary, ExportSeverity, NodeCardDrawer, NodeUiOp, UiAction, UiConfigSlot,
-    UiNodeDirtyState, UiNodeSection, UiNodeTabBody, UiNodeView, UiPendingEdit, UiSlotRecord,
+    DirtySummary, ExportSeverity, NodeCardDrawer, NodeUiOp, OfferPath, ProjectNodeAddress,
+    UiAction, UiConfigSlot, UiNodeDirtyState, UiNodeSection, UiNodeTabBody, UiNodeView,
+    UiPendingEdit, UiSlotRecord,
 };
 
 use crate::app::affordance::affordance_pane_tone;
@@ -15,6 +16,7 @@ use crate::app::node::{
 use crate::base::{
     HelpLink, Platform, StudioIcon, StudioIconName, node_kind_icon, use_reveal_on_focus,
 };
+use crate::core::use_verbs_of;
 
 /// Which surface treatment a dirty node pane wears — the D7 tint experiment,
 /// story-selectable pending the user's P5 pick.
@@ -53,6 +55,15 @@ pub fn NodePane(
 ) -> Element {
     let mut active_tab = use_signal(|| 0_usize);
     let mut collapsed = use_signal(|| view.collapsed);
+    // The card's header verbs (subtree Revert, Remove) are the view's
+    // offers at `project/<node tree path>`, read from the offer tree, not
+    // off the DTO. The header path is the node's address on root and
+    // nested cards alike.
+    let verbs = use_verbs_of(
+        ProjectNodeAddress::parse(&view.header.path)
+            .ok()
+            .map(|address| OfferPath::project_node(&address)),
+    );
     let active_index = active_tab().min(view.tabs.len().saturating_sub(1));
     let active_body = view.tabs.get(active_index).map(|tab| tab.body.clone());
     let dirty = view.header.dirty;
@@ -89,7 +100,7 @@ pub fn NodePane(
     let kind_label = view.header.kind.clone();
     let focus_action = view.action.clone();
     let issues = view.issues.clone();
-    let header_actions = view.header_actions.clone();
+    let header_actions = verbs();
     // Face + drawers replace the generic tab/section body when the
     // controller supplies a kind-specific face (shader/fixture/playlist
     // today); every other kind keeps the classic sections fallback.

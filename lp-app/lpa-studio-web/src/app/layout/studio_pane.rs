@@ -16,8 +16,9 @@
 //!   tone, selection outline, and state chips. Consumers map their domain state
 //!   (`UiStatusKind`, `DirtySummary`, …) onto it; the pane imports no node,
 //!   project, or device types.
-//! - `actions` — contextual [`UiPaneAction`]s rendered as icon buttons that
-//!   dispatch the wrapped action through the usual `on_action` conduit. Each
+//! - `actions` — contextual [`UiOffer`]s (a surface's verbs, read from the
+//!   view's offer tree) rendered as icon buttons that dispatch the wrapped
+//!   action through the usual `on_action` conduit. Each
 //!   wears its consequence exactly as `ActionButton` does: Undoable and
 //!   Lasting take the error tint, and Lasting arms on the first click.
 //! - `trailing` — free-form header extras between the actions and the detail
@@ -31,7 +32,7 @@
 //! domain knowledge stays with the consumers.
 
 use dioxus::prelude::*;
-use lpa_studio_core::{UiAction, UiPaneAction};
+use lpa_studio_core::{UiAction, UiOffer};
 
 use crate::base::{StudioIcon, StudioIconName, action_icon_name};
 use crate::core::action::armed_confirm_button::use_armed_confirm;
@@ -59,9 +60,9 @@ pub fn StudioPane(
     /// Neutral chrome: header tone, selection outline, state chips.
     #[props(default)]
     chrome: PaneChrome,
-    /// Contextual header actions rendered as icon buttons.
+    /// Contextual header verbs rendered as icon buttons.
     #[props(default)]
-    actions: Vec<UiPaneAction>,
+    actions: Vec<UiOffer>,
     /// Story-only: mount every arming (Lasting) header action already
     /// ARMED, so captures can show the armed dress. Real surfaces never set
     /// this.
@@ -145,8 +146,13 @@ pub fn StudioPane(
                     }
                 }
                 div { class: "tw:flex tw:h-full tw:items-stretch",
-                    for action in actions {
-                        PaneActionButton { action, on_action, armed_preview }
+                    for offer in actions {
+                        PaneActionButton {
+                            key: "{offer.path}",
+                            offer,
+                            on_action,
+                            armed_preview,
+                        }
                     }
                     if let Some(trailing) = trailing {
                         {trailing}
@@ -271,22 +277,22 @@ fn PaneCollapseButton(collapse: PaneCollapse) -> Element {
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn PaneActionButton(
-    action: UiPaneAction,
+    offer: UiOffer,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
     #[props(default)] armed_preview: bool,
 ) -> Element {
-    let enabled = action.is_enabled();
-    let icon = action_icon_name(Some(action.icon.as_str())).unwrap_or(StudioIconName::Info);
-    let label = action.label().to_string();
-    let title = if action.summary().is_empty() {
+    let enabled = offer.is_enabled();
+    let icon = action_icon_name(Some(offer.icon.as_str())).unwrap_or(StudioIconName::Info);
+    let label = offer.label().to_string();
+    let title = if offer.summary().is_empty() {
         label.clone()
     } else {
-        action.summary().to_string()
+        offer.summary().to_string()
     };
-    let consequence = action.action.meta().consequence.clone();
+    let consequence = offer.consequence().clone();
     let arms = consequence.arms();
     let base =
-        pane_action_button_class(action.is_primary(), enabled, consequence.wears_error_tint());
+        pane_action_button_class(offer.is_primary(), enabled, consequence.wears_error_tint());
     let mut confirm = use_armed_confirm(armed_preview && arms);
     let armed = arms && confirm.is_armed();
     let class = pane_action_armed_class(base, arms, armed);
@@ -294,7 +300,7 @@ fn PaneActionButton(
         Some(copy) if armed => (copy.message.clone(), copy.message.clone()),
         _ => (title, label),
     };
-    let dispatch = action.action.clone();
+    let dispatch = offer.action.clone();
 
     rsx! {
         button {

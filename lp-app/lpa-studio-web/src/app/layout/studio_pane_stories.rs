@@ -3,7 +3,7 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    ControllerId, NodeRemoveOp, ProjectNodeAddress, ProjectOp, UiAction, UiPaneAction,
+    ControllerId, NodeRemoveOp, OfferPath, ProjectNodeAddress, ProjectOp, UiAction, UiOffer,
 };
 use lpa_studio_web_story_macros::story;
 
@@ -168,13 +168,15 @@ fn story_detail() -> Element {
     }
 }
 
-fn story_actions() -> Vec<UiPaneAction> {
+fn story_actions() -> Vec<UiOffer> {
     vec![
-        UiPaneAction::new(
+        UiOffer::new(
+            OfferPath::root("story").child("play"),
             "play",
             UiAction::from_op(ControllerId::new("story.pane"), ProjectOp::SaveOverlay),
         ),
-        UiPaneAction::new(
+        UiOffer::new(
+            OfferPath::root("story").child("test"),
             "test-tube",
             UiAction::from_op(ControllerId::new("story.pane"), ProjectOp::RevertAllEdits)
                 .with_label("Revert to saved")
@@ -196,26 +198,30 @@ fn story_dirty_chrome() -> PaneChrome {
 }
 
 /// One header action per consequence level: Routine, Undoable, Lasting.
-fn story_level_actions() -> Vec<UiPaneAction> {
+fn story_level_actions() -> Vec<UiOffer> {
+    let playlist = ProjectNodeAddress::parse("/fyeah_sign.show/playlist.playlist")
+        .expect("valid story node address");
     vec![
-        UiPaneAction::new(
+        UiOffer::new(
+            OfferPath::project().child("save"),
             "save",
             UiAction::from_op(ControllerId::new("story.pane"), ProjectOp::SaveOverlay),
         ),
-        UiPaneAction::new(
+        UiOffer::new(
+            OfferPath::project_node(&playlist).child("remove"),
             "remove",
             UiAction::from_op(
                 ControllerId::new("story.pane"),
                 NodeRemoveOp {
-                    node: ProjectNodeAddress::parse("/fyeah_sign.show/playlist.playlist")
-                        .expect("valid story node address"),
+                    node: playlist.clone(),
                 },
             )
             .with_summary(
                 "Remove Playlist from the project. You can revert from the save panel until you save.",
             ),
         ),
-        UiPaneAction::new(
+        UiOffer::new(
+            OfferPath::project().child("revert"),
             "revert",
             UiAction::from_op(ControllerId::new("story.pane"), ProjectOp::RevertAllEdits)
                 .with_label("Revert to saved"),
