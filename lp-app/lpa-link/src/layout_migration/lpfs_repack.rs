@@ -75,6 +75,31 @@ pub fn repack(tree: &LpfsTree, geometry: LpfsGeometry) -> Result<RepackedImage, 
     })
 }
 
+/// How many blocks `tree` occupies when packed alone into a fresh
+/// filesystem of `geometry` — `None` when it does not fit at all. The
+/// measurement behind `lp-cli hardware lpfs report`'s per-directory
+/// breakdown; no floor applies.
+pub fn blocks_needed(tree: &LpfsTree, geometry: LpfsGeometry) -> Option<u32> {
+    let image = write_tree_image(tree, geometry).ok()?;
+    LpfsTree::from_image(&image, geometry)
+        .ok()
+        .map(|(_, used)| used)
+}
+
+/// Build a fresh filesystem image of `geometry` holding `tree` (fixtures:
+/// `lp-cli hardware lpfs fixture`, the emulator walks). Refuses a tree that
+/// does not fit.
+pub fn build_image(tree: &LpfsTree, geometry: LpfsGeometry) -> Result<Vec<u8>, Refusal> {
+    write_tree_image(tree, geometry).map_err(|error| match error {
+        WriteError::NoSpace => Refusal::DoesNotFit {
+            files: tree.file_count(),
+            bytes: tree.total_bytes(),
+            blocks_available: geometry.block_count,
+        },
+        WriteError::Other(error) => Refusal::RepackFailed(error),
+    })
+}
+
 /// Why writing a tree into an image failed.
 #[derive(Debug)]
 pub(crate) enum WriteError {

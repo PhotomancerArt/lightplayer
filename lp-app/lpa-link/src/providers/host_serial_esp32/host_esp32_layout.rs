@@ -109,12 +109,71 @@ pub fn layout_session(
         &mut recorder,
     )?;
     let inspection = inspect_in_session(&mut flasher, &package, &mut recorder)?;
-    let Some(plan) = decide(&inspection)? else {
-        reset(&mut flasher, &mut recorder)?;
-        return Ok(LayoutSessionOutcome::NotWritten(inspection));
+    // A refusal (or a decision not to write) still leaves the board running
+    // its firmware, untouched.
+    let plan = match decide(&inspection) {
+        Ok(Some(plan)) => plan,
+        Ok(None) => {
+            reset(&mut flasher, &mut recorder)?;
+            return Ok(LayoutSessionOutcome::NotWritten(inspection));
+        }
+        Err(error) => {
+            let _ = reset(&mut flasher, &mut recorder);
+            return Err(error);
+        }
     };
     let flash = execute_in_session(&mut flasher, &package, &plan, &mut recorder)?;
     Ok(LayoutSessionOutcome::Written { inspection, flash })
+}
+
+/// Read the board's partition table (3 KB at `0x8000`) and reset it back
+/// into its firmware — the layout preflight's whole read (`lp-cli hardware
+/// lpfs preflight`).
+pub fn read_partition_table(
+    port_name: &str,
+    events: &LinkManagementEventSink,
+) -> Result<(Option<String>, Vec<u8>), LinkError> {
+    let mut recorder = EventRecorder::new(events);
+    let mut flasher = connect(
+        port_name,
+        None,
+        ResetAfterOperation::NoResetNoStub,
+        &mut recorder,
+    )?;
+    let chip = chip_name(&mut flasher);
+    let table = read_flash_region(
+        &mut flasher,
+        LinkFlashRegion {
+            offset: PARTITION_TABLE_OFFSET,
+            length: PARTITION_TABLE_LEN as u32,
+        },
+        "Reading partition table",
+        &mut recorder,
+    )?;
+    reset(&mut flasher, &mut recorder)?;
+    Ok((chip, table))
+}
+
+/// Erase `length` bytes at `offset` and reset the board — the preflight's
+/// `--discard-lpfs` for a test board whose files are not wanted.
+pub fn erase_region(
+    port_name: &str,
+    offset: u32,
+    length: u32,
+    events: &LinkManagementEventSink,
+) -> Result<(), LinkError> {
+    let mut recorder = EventRecorder::new(events);
+    let mut flasher = connect(
+        port_name,
+        None,
+        ResetAfterOperation::NoResetNoStub,
+        &mut recorder,
+    )?;
+    recorder.log(format!("Erasing {length:#x} bytes at {offset:#x}"));
+    flasher
+        .erase_region(offset, length)
+        .map_err(|error| LinkError::other(format!("erase failed: {error}")))?;
+    reset(&mut flasher, &mut recorder)
 }
 
 /// The package being written: its manifest, images, chip, and the target

@@ -1003,6 +1003,40 @@ impl ConfigurationDriver for SiliconDriver {
             )
         };
 
+        // The C6's partition table moved in 2026-10 (the repartition). A
+        // plain flash whose table differs from the board's — either way:
+        // a pinned pre-2026-10 reference image onto a migrated board is
+        // the downgrade that formats over its files — is refused before
+        // anything is written. A run that erases the chip first has
+        // nothing to lose and skips it.
+        if spec.espflash_chip == "esp32c6" && !req.payload.fresh_chip {
+            steps.push(
+                PlanStep::new(
+                    "refuse a partition-layout change (lp-cli hardware lpfs preflight)",
+                    vec![
+                        "cargo".into(),
+                        "run".into(),
+                        "-q".into(),
+                        "-p".into(),
+                        "lp-cli".into(),
+                        "--".into(),
+                        "hardware".into(),
+                        "lpfs".into(),
+                        "preflight".into(),
+                        "--port".into(),
+                        port.into(),
+                        "--table".into(),
+                        spec.partitions.into(),
+                    ],
+                )
+                .with_note(
+                    "reads the board's table (resetting it back into its firmware) and exits 3 \
+                     when this image's table differs: move the board's files with `lp-cli \
+                     hardware lpfs migrate`, or erase them on a test board with `--discard-lpfs`",
+                ),
+            );
+        }
+
         match req.payload.capture {
             Capture::Monitor if hosted.is_some() => {
                 let host = hosted.as_ref().expect("checked");

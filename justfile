@@ -1472,7 +1472,7 @@ flash-fw-esp32s3 port="" features="" monitor="monitor": (build-fw-esp32s3 featur
 # `303a:1001` and both come up as `/dev/cu.usbmodem14332xx`. Resolve by MAC
 # first (`scripts/emu/board-port.py A0:F2:62:87:B4:8C`) and pass the port
 # explicitly rather than letting espflash pick.
-flash-fw-esp32c6 port="" features="" monitor="monitor": (build-fw-esp32c6 features)
+flash-fw-esp32c6 port="" features="" monitor="monitor" migrate="" discard="": (build-fw-esp32c6 features)
     #!/usr/bin/env bash
     set -euo pipefail
     args=(--chip esp32c6 --partition-table lp-fw/fw-esp32c6/partitions.csv --flash-size {{ c6_flash_size }} --after hard-reset)
@@ -1481,8 +1481,31 @@ flash-fw-esp32c6 port="" features="" monitor="monitor": (build-fw-esp32c6 featur
       no-monitor) ;;
       *) echo "monitor must be 'monitor' or 'no-monitor', not '{{ monitor }}'" >&2; exit 2 ;;
     esac
-    if [[ -n "{{ port }}" ]]; then
-      args+=(--port "{{ port }}")
+    # The layout preflight (C6 repartition, docs/adr/2026-10-01-c6-repartition-and-layout-migration.md):
+    # a board whose partition table differs from this image's — either way;
+    # a downgrade formats over a migrated board's files — is refused unless
+    # migrate=1 (move the files, writing this image) or discard=1 (erase them,
+    # test boards). It needs the port, so resolve it the way every recipe does.
+    port="{{ port }}"
+    if [[ -z "$port" ]]; then
+      port="$(cargo run -q -p lp-cli -- fwcheck port --chip esp32c6)"
+    fi
+    args+=(--port "$port")
+    preflight=(--port "$port" --table lp-fw/fw-esp32c6/partitions.csv)
+    [[ -n "{{ discard }}" ]] && preflight+=(--discard-lpfs)
+    [[ -n "{{ migrate }}" ]] && preflight+=(--migrate)
+    set +e
+    cargo run -q -p lp-cli -- hardware lpfs preflight "${preflight[@]}"
+    verdict=$?
+    set -e
+    if [[ $verdict -eq 4 ]]; then
+      merged="target/riscv32imac-unknown-none-elf/{{ fw_esp32c6_profile }}/fw-esp32c6-merged-for-migrate.bin"
+      espflash save-image --chip esp32c6 --merge --partition-table lp-fw/fw-esp32c6/partitions.csv \
+        --flash-size {{ c6_flash_size }} {{ fw_esp32c6_elf }} "$merged"
+      cargo run -q -p lp-cli -- hardware lpfs migrate --port "$port" --merged "$merged" --yes
+      exit 0
+    elif [[ $verdict -ne 0 ]]; then
+      exit $verdict
     fi
     espflash flash "${args[@]}" {{ fw_esp32c6_elf }}
 

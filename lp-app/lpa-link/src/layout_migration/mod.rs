@@ -26,6 +26,7 @@
 
 pub mod device_backup_archive;
 pub mod flash_map;
+pub mod layout_preflight;
 pub mod layout_state;
 pub mod legacy_layout;
 pub mod lpfs_geometry;
@@ -34,10 +35,11 @@ pub mod lpfs_tree;
 pub mod migration_plan;
 
 pub use flash_map::apply_steps;
+pub use layout_preflight::{LayoutPreflight, describe_layout, preflight};
 pub use layout_state::{LayoutInspection, LayoutProbe, LayoutState, inspect_flash};
 pub use legacy_layout::{LEGACY_C6_V1_LPFS, is_legacy_c6_v1, legacy_c6_v1_table};
 pub use lpfs_geometry::LpfsGeometry;
-pub use lpfs_repack::{RepackedImage, repack};
+pub use lpfs_repack::{FREE_BLOCK_FLOOR, RepackedImage, blocks_needed, build_image, repack};
 pub use lpfs_tree::{LpfsNode, LpfsTree, LpfsTreeError};
 pub use migration_plan::{
     FlashPlan, FlashStep, LayoutDecision, MigrationSummary, Refusal, decide, plan_lpfs_restore,

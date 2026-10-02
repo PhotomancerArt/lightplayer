@@ -19,6 +19,186 @@ pub enum HardwareSubcommand {
     /// Write a board manifest to a device's /hardware.json (as Studio's
     /// flash does). Takes effect on the next boot.
     Stamp(StampArgs),
+    /// A board's filesystem (`lpfs`) across partition layouts: measure it,
+    /// back it up, move it to the new layout, put a backup back.
+    Lpfs(LpfsArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct LpfsArgs {
+    #[command(subcommand)]
+    pub command: LpfsCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum LpfsCommand {
+    /// How full a board's filesystem is, and whether its files fit the
+    /// current C6 layout. Reads only (a port is reset back into its
+    /// firmware afterwards).
+    Report(LpfsReportArgs),
+    /// Save a board's filesystem: the raw region, the partition table, and
+    /// a backup ZIP. Reads only.
+    Save(LpfsSaveArgs),
+    /// Move a board's files to the layout of a firmware package, writing
+    /// the firmware too. Stores a backup first. WRITES THE BOARD.
+    Migrate(LpfsMigrateArgs),
+    /// Put a backup ZIP's files back onto a board already on the package's
+    /// layout (the last-resort path). WRITES THE BOARD'S FILESYSTEM.
+    Restore(LpfsRestoreArgs),
+    /// Refuse (exit 3) when flashing an image's partition table would move
+    /// a board's files — either direction. What `just flash-fw-esp32c6`
+    /// runs before espflash.
+    Preflight(LpfsPreflightArgs),
+    /// Build a 4 MiB emulator chip image: a merged firmware image, a
+    /// partition table, and a filesystem holding a directory's files
+    /// (emulator walks and tests).
+    #[command(hide = true)]
+    Fixture(LpfsFixtureArgs),
+}
+
+/// Where the image whose layout a board is measured against comes from.
+#[derive(Debug, Args, Clone)]
+pub struct LpfsTargetArgs {
+    /// The target partition table as CSV. Defaults to
+    /// lp-fw/fw-esp32c6/partitions.csv under the repo.
+    #[arg(long)]
+    pub table: Option<PathBuf>,
+    /// Measure against this many 4 KB blocks instead of a table's lpfs row.
+    #[arg(long)]
+    pub target_blocks: Option<u32>,
+}
+
+#[derive(Debug, Args)]
+pub struct LpfsReportArgs {
+    /// A board's serial port (reads its table and filesystem over the
+    /// bootloader).
+    #[arg(long, conflicts_with_all = ["image", "dir"])]
+    pub port: Option<String>,
+    /// A raw image: either a whole 4 MiB chip, or one filesystem region
+    /// (assumed the pre-2026-10 C6 layout unless --offset/--blocks say
+    /// otherwise).
+    #[arg(long, conflicts_with = "dir")]
+    pub image: Option<PathBuf>,
+    /// With --image of a region: where the region was on the chip.
+    #[arg(long, value_parser = parse_hex_or_dec)]
+    pub offset: Option<u32>,
+    /// A project directory, measured as if it were the board's only project
+    /// (plus a stamped board manifest and identity).
+    #[arg(long)]
+    pub dir: Option<PathBuf>,
+    #[command(flatten)]
+    pub target: LpfsTargetArgs,
+    /// Machine-readable output.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct LpfsSaveArgs {
+    /// The board's serial port.
+    #[arg(long)]
+    pub port: String,
+    /// Directory to write the raw region, the table and the backup ZIP into.
+    #[arg(long)]
+    pub out: PathBuf,
+}
+
+#[derive(Debug, Args)]
+pub struct LpfsFirmwareArgs {
+    /// A packaged firmware build's manifest.json
+    /// (`lp-cli firmware package <id>`).
+    #[arg(long, conflicts_with = "merged")]
+    pub manifest: Option<PathBuf>,
+    /// Or a merged image (bootloader + table + app at 0x0, as
+    /// `espflash save-image --merge` writes).
+    #[arg(long)]
+    pub merged: Option<PathBuf>,
+    /// The chip a --merged image is for.
+    #[arg(long, default_value = "esp32c6")]
+    pub chip: String,
+}
+
+#[derive(Debug, Args)]
+pub struct LpfsMigrateArgs {
+    /// The board's serial port.
+    #[arg(long)]
+    pub port: String,
+    #[command(flatten)]
+    pub firmware: LpfsFirmwareArgs,
+    /// Where the mandatory backup is stored (default
+    /// ~/.lightplayer/backups/<mac>/).
+    #[arg(long)]
+    pub backup_dir: Option<PathBuf>,
+    /// Do not ask before writing.
+    #[arg(long)]
+    pub yes: bool,
+    /// Do not wait for the board's hello afterwards.
+    #[arg(long)]
+    pub no_verify: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct LpfsRestoreArgs {
+    /// The board's serial port.
+    #[arg(long)]
+    pub port: String,
+    /// The backup ZIP (format 2) to put back.
+    #[arg(long)]
+    pub archive: PathBuf,
+    #[command(flatten)]
+    pub firmware: LpfsFirmwareArgs,
+    /// Restore even though the archive's board address is not this board's.
+    #[arg(long)]
+    pub other_board: bool,
+    /// Do not ask before writing.
+    #[arg(long)]
+    pub yes: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct LpfsPreflightArgs {
+    /// The board's serial port.
+    #[arg(long)]
+    pub port: String,
+    /// The partition table (CSV) of the image about to be flashed.
+    #[arg(long)]
+    pub table: PathBuf,
+    /// Erase the board's filesystem instead of refusing (a test board whose
+    /// files are not wanted).
+    #[arg(long, conflicts_with = "migrate")]
+    pub discard_lpfs: bool,
+    /// Exit 4 instead of 3 on a mismatch, telling the caller to run
+    /// `lp-cli hardware lpfs migrate` (just flash-fw-esp32c6 migrate=1).
+    #[arg(long)]
+    pub migrate: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct LpfsFixtureArgs {
+    /// The merged firmware image to place at 0x0.
+    #[arg(long)]
+    pub merged: PathBuf,
+    /// The partition table (CSV) to write at 0x8000 — and whose lpfs row
+    /// the filesystem is built at. Defaults to the frozen pre-2026-10 table.
+    #[arg(long)]
+    pub table: Option<PathBuf>,
+    /// The directory whose tree becomes the board's filesystem root.
+    #[arg(long)]
+    pub tree: PathBuf,
+    /// Where to write the 4 MiB chip image.
+    #[arg(long)]
+    pub out: PathBuf,
+}
+
+fn parse_hex_or_dec(text: &str) -> Result<u32, String> {
+    let digits = text.trim();
+    match digits
+        .strip_prefix("0x")
+        .or_else(|| digits.strip_prefix("0X"))
+    {
+        Some(hex) => u32::from_str_radix(hex, 16).map_err(|e| e.to_string()),
+        None => digits.parse::<u32>().map_err(|e| e.to_string()),
+    }
 }
 
 #[derive(Debug, Args)]
