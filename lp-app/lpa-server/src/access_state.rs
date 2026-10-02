@@ -161,9 +161,6 @@ impl AccessState {
         fs: &dyn LpFs,
         loaded_project_paths: impl IntoIterator<Item = &'a str>,
     ) -> ServerMsgBody {
-        if self.is_keyed(link) {
-            return self.offers_for_keyed_link(fs, loaded_project_paths);
-        }
         let Some(entropy) = self.entropy else {
             return ServerMsgBody::Error {
                 error: String::from("login is unavailable: this server has no entropy source"),
@@ -172,6 +169,9 @@ impl AccessState {
         let mut nonce = [0u8; NONCE_BYTES];
         entropy(&mut nonce);
         let secrets = access_store::installed_secrets(fs, loaded_project_paths);
+        if self.is_keyed(link) {
+            return offers_for_keyed_link(nonce, &secrets);
+        }
 
         match self.login.begin(self.clock_ms, nonce, secrets) {
             BeginOutcome::Challenge(challenge) => {
@@ -210,33 +210,6 @@ impl AccessState {
             session.granted = Some(*tier);
         }
         ServerMsgBody::LoginResult(outcome)
-    }
-
-    /// `LoginBegin` on a keyed (secure network) link: the offers, so a
-    /// typed-password client can derive its key and its salt (the key id it
-    /// then handshakes with), and a fresh nonce no one can answer: nothing
-    /// registers the device's one login and no slot is taken. A secure link
-    /// logs in by handshake only.
-    fn offers_for_keyed_link<'a>(
-        &self,
-        fs: &dyn LpFs,
-        loaded_project_paths: impl IntoIterator<Item = &'a str>,
-    ) -> ServerMsgBody {
-        let Some(entropy) = self.entropy else {
-            return ServerMsgBody::Error {
-                error: String::from("login is unavailable: this server has no entropy source"),
-            };
-        };
-        let mut nonce = [0u8; NONCE_BYTES];
-        entropy(&mut nonce);
-        let offers = access_store::installed_secrets(fs, loaded_project_paths)
-            .iter()
-            .map(|secret| LoginOffer {
-                salt: secret.salt,
-                iterations: secret.iterations,
-            })
-            .collect();
-        ServerMsgBody::LoginChallenge { nonce, offers }
     }
 
     /// `LoginAnswer` on a keyed link: refused, always. Its handshake is its
@@ -347,4 +320,23 @@ impl Default for AccessState {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// `LoginBegin` on a keyed (secure network) link: the offers, so a
+/// typed-password client can derive its key and its salt (the key id it then
+/// handshakes with), and a fresh nonce no one can answer: nothing registers
+/// the device's one login and no slot is taken. A secure link logs in by
+/// handshake only.
+fn offers_for_keyed_link(
+    nonce: [u8; NONCE_BYTES],
+    secrets: &[lpc_access::SecretEntry],
+) -> ServerMsgBody {
+    let offers = secrets
+        .iter()
+        .map(|secret| LoginOffer {
+            salt: secret.salt,
+            iterations: secret.iterations,
+        })
+        .collect();
+    ServerMsgBody::LoginChallenge { nonce, offers }
 }
