@@ -131,6 +131,46 @@ impl LpFlashStorage {
     fn block_offset(&self, block: u32, offset: u32) -> u32 {
         self.partition.offset + block * BLOCK_SIZE + offset
     }
+
+    /// Is a pre-repartition LightPlayer filesystem still at the legacy
+    /// offset? Probed read-only (`fw_esp32_common::lp_fs::lpfs_mounts_read_only`
+    /// refuses every write). Asked only after the located `lpfs` failed to
+    /// mount, and never when the located partition IS the legacy one — then
+    /// the failed mount was already the answer.
+    pub fn legacy_lpfs_present(&mut self) -> bool {
+        use crate::legacy_layout::{LEGACY_LPFS_V1_BLOCKS, LEGACY_LPFS_V1_OFFSET};
+        if self.partition.offset == LEGACY_LPFS_V1_OFFSET {
+            return false;
+        }
+        let region = RegionReader {
+            flash: &mut self.flash,
+            offset: LEGACY_LPFS_V1_OFFSET,
+        };
+        fw_esp32_common::lp_fs::lpfs_mounts_read_only(region, config_for(LEGACY_LPFS_V1_BLOCKS))
+    }
+}
+
+/// A read-only littlefs view of a flash region at `offset` (the legacy
+/// probe). Writes and erases are refused here as well as by the common
+/// crate's wrapper.
+struct RegionReader<'a> {
+    flash: &'a mut esp_storage::FlashStorage<'static>,
+    offset: u32,
+}
+
+impl Storage for RegionReader<'_> {
+    fn read(&mut self, block: u32, offset: u32, buf: &mut [u8]) -> Result<(), LfsError> {
+        let addr = self.offset + block * BLOCK_SIZE + offset;
+        self.flash.read(addr, buf).map_err(|_| LfsError::Io)
+    }
+
+    fn write(&mut self, _block: u32, _offset: u32, _data: &[u8]) -> Result<(), LfsError> {
+        Err(LfsError::Io)
+    }
+
+    fn erase(&mut self, _block: u32) -> Result<(), LfsError> {
+        Err(LfsError::Io)
+    }
 }
 
 impl Storage for LpFlashStorage {
@@ -169,7 +209,12 @@ static LPFS_BLOCK_COUNT: AtomicU32 = AtomicU32::new(0);
 /// rejects it rather than mounting a zero-length filesystem, so the failure is
 /// loud.
 pub fn lpfs_config() -> Config {
-    let mut config = Config::new(BLOCK_SIZE, LPFS_BLOCK_COUNT.load(Ordering::Relaxed));
+    config_for(LPFS_BLOCK_COUNT.load(Ordering::Relaxed))
+}
+
+/// The firmware's littlefs geometry for a region of `block_count` blocks.
+fn config_for(block_count: u32) -> Config {
+    let mut config = Config::new(BLOCK_SIZE, block_count);
     config.cache_size = CACHE_SIZE;
     config.lookahead_size = LOOKAHEAD_SIZE;
     config

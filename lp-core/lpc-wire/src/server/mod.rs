@@ -3,6 +3,7 @@ pub mod api;
 pub mod config;
 pub mod file_chunk;
 pub mod fs_api;
+pub mod fs_boot_state;
 pub mod hello;
 pub mod hello_auth;
 pub mod link_counters;
@@ -17,6 +18,7 @@ pub use api::{
 pub use config::ServerConfig;
 pub use file_chunk::{FileChangeKind, FileChunk, FileCursor};
 pub use fs_api::{FsRequest, FsResponse};
+pub use fs_boot_state::FsBootState;
 pub use hello::{
     BuildFacts, HardwareFacts, HardwareIdentity, HelloIdentity, ServerHello, WIRE_PROTO_VERSION,
 };
