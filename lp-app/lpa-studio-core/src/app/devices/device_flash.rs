@@ -330,10 +330,21 @@ pub fn derive_flash_name(board_display: &str, epoch_secs: f64, taken: &[String])
     }
 }
 
-/// The names a new derived name must not collide with: every title the
-/// roster currently shows.
-pub fn taken_device_titles(devices: &[DeviceView]) -> Vec<String> {
-    devices.iter().map(|device| device.title.clone()).collect()
+/// The names a new derived name for `naming` must not collide with: every
+/// title the roster currently shows on ANOTHER card.
+///
+/// The card being named is left out so that naming is a fixed point: a board
+/// whose title already IS the derived name must derive that same name again,
+/// never "… 2" because it collided with itself. Counting it is what let one
+/// misrouted rename flip a title between "… · Oct 2" and "… · Oct 2 2" on
+/// every settle (docs/defects/
+/// 2026-10-02-saved-records-sharing-a-device-id-misroute-the-board.md).
+pub fn taken_device_titles(devices: &[DeviceView], naming: DeviceId) -> Vec<String> {
+    devices
+        .iter()
+        .filter(|device| device.id != naming)
+        .map(|device| device.title.clone())
+        .collect()
 }
 
 /// "Aug 30" from epoch seconds (UTC). A tiny civil-date conversion beats a
@@ -452,6 +463,34 @@ mod tests {
         assert_eq!(
             derive_flash_name("Seeed XIAO ESP32-C6", at, &taken),
             "Seeed XIAO ESP32-C6 · Aug 30 3"
+        );
+    }
+
+    /// Deriving a name for a card that already wears it gives the same name
+    /// back: the card's own title is not a collision.
+    #[test]
+    fn naming_a_card_again_is_a_fixed_point() {
+        let at = 1_788_091_200.0;
+        let base = "Seeed XIAO ESP32-C6 · Aug 30".to_string();
+        let mut named = running_view(None, None, FirmwareFace::Unknown);
+        named.title = base.clone();
+        let mut neighbour = running_view(None, None, FirmwareFace::Unknown);
+        neighbour.id = DeviceId(8);
+        neighbour.title = "Porch sign".to_string();
+        let cards = [named.clone(), neighbour];
+
+        let taken = taken_device_titles(&cards, named.id);
+        assert_eq!(taken, vec!["Porch sign".to_string()]);
+        let again = derive_flash_name("Seeed XIAO ESP32-C6", at, &taken);
+        assert_eq!(again, base, "a card never collides with itself");
+        assert_eq!(
+            derive_flash_name(
+                "Seeed XIAO ESP32-C6",
+                at,
+                &taken_device_titles(&cards, DeviceId(9))
+            ),
+            "Seeed XIAO ESP32-C6 · Aug 30 2",
+            "another card still dodges it"
         );
     }
 
