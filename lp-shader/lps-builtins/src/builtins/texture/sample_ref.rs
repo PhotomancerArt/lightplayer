@@ -69,6 +69,35 @@ pub fn nearest_index_height_one_q32(u: i32, v: i32, width: u32, wrap_x: TextureW
     nearest_index_q32(u, width, wrap_x)
 }
 
+#[inline]
+fn mirror_repeat_index(i: i32, extent: u32) -> u32 {
+    if extent <= 1 {
+        return 0;
+    }
+    let n = extent as i32;
+    let period = 2 * (n - 1);
+    let x = i.rem_euclid(period);
+    let x = if x >= n { 2 * (n - 1) - x } else { x };
+    x as u32
+}
+
+#[inline]
+fn round_coord_to_nearest_i32(coord_raw: i32) -> i32 {
+    crate::builtins::glsl::round_q32::__lps_round_q32(coord_raw) >> 16
+}
+
+#[inline]
+fn sat_i64_to_q32_raw(wide: i64) -> i32 {
+    const Q32_MAX_RAW: i64 = 0x7FFF_FFFF;
+    if wide > Q32_MAX_RAW {
+        Q32_MAX_RAW as i32
+    } else if wide < i32::MIN as i64 {
+        i32::MIN
+    } else {
+        wide as i32
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #[cfg(test)]
@@ -157,34 +186,5 @@ mod tests {
         assert_eq!(ax.i0, 3);
         assert_eq!(ax.i1, 0);
         assert_eq!(ax.frac, 0);
-    }
-}
-
-#[inline]
-fn mirror_repeat_index(i: i32, extent: u32) -> u32 {
-    if extent <= 1 {
-        return 0;
-    }
-    let n = extent as i32;
-    let period = 2 * (n - 1);
-    let x = i.rem_euclid(period);
-    let x = if x >= n { 2 * (n - 1) - x } else { x };
-    x as u32
-}
-
-#[inline]
-fn round_coord_to_nearest_i32(coord_raw: i32) -> i32 {
-    crate::builtins::glsl::round_q32::__lps_round_q32(coord_raw) >> 16
-}
-
-#[inline]
-fn sat_i64_to_q32_raw(wide: i64) -> i32 {
-    const Q32_MAX_RAW: i64 = 0x7FFF_FFFF;
-    if wide > Q32_MAX_RAW {
-        Q32_MAX_RAW as i32
-    } else if wide < i32::MIN as i64 {
-        i32::MIN
-    } else {
-        wide as i32
     }
 }
