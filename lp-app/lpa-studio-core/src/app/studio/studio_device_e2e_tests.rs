@@ -6406,3 +6406,121 @@ fn a_refused_push_leaves_the_board_running_its_previous_project() {
     let listed: Vec<String> = listed.iter().map(|p| p.to_string()).collect();
     assert_eq!(listed, vec!["/projects/studio-b"]);
 }
+
+/// A refused open from the gallery: a current-format package whose node
+/// file is damaged passes the open's pre-flight (which reads only
+/// `project.json`), the sim refuses the load and is left with nothing
+/// running, over a dir holding the refused bytes. The editor holds no
+/// project, and the next open lands.
+#[test]
+fn a_refused_lens_open_leaves_the_sim_dark_and_the_next_open_recovers() {
+    let (mut bench, tasks, device, good) = sim_open_bench();
+    open_package(&mut bench, &tasks, &good);
+    let before = sim_loaded(&device);
+    assert_eq!(before.len(), 1, "the good open runs: {before:?}");
+
+    let bad = library_package_with(&bench, "Damaged", |path| {
+        (path == "module.json").then(|| b"{ this is not json".to_vec())
+    });
+    bench.controller.request_library_refresh();
+    drive(bench.controller.settle_library());
+    open_and_settle(&mut bench, &tasks, &bad);
+
+    let project = bench.controller.project_for_test();
+    assert_eq!(
+        project.active_library_uid(),
+        None,
+        "no project after refusal"
+    );
+    assert_eq!(sim_loaded(&device), Vec::<String>::new(), "the sim is dark");
+    let mut client = lpa_client::LpClient::new(FakeDeviceIo::new(&device)).on_borrowed_wire();
+    let held = drive_real(client.fs_read(format!("{}/module.json", before[0]).as_path()))
+        .map(|outcome| outcome.value);
+    assert_eq!(held.ok().as_deref(), Some(&b"{ this is not json"[..]));
+
+    open_and_settle(&mut bench, &tasks, &good);
+    let project = bench.controller.project_for_test();
+    assert_eq!(
+        project.active_library_uid(),
+        Some(good),
+        "back on a project"
+    );
+    assert_eq!(sim_loaded(&device), before, "the sim runs again");
+}
+
+/// The other caller of `open_library_project`, the P6 reload: a visitor's
+/// fast-forward re-pushes the ACTIVE project. The editor stays on it, so a
+/// refused reload must say so rather than keep reading Ready over a dark
+/// runtime.
+#[test]
+fn a_refused_reload_fails_the_editor_instead_of_reading_ready() {
+    let (mut bench, tasks, device, good) = sim_open_bench();
+    open_package(&mut bench, &tasks, &good);
+    assert_eq!(sim_loaded(&device).len(), 1);
+
+    // What a fast-forward does: new content lands in the library copy.
+    let mut copy = bench.store.open(good.parse().expect("uid")).expect("open");
+    copy.apply_update("/module.json".as_path(), Some(b"{ this is not json"))
+        .expect("write");
+    copy.record_save(2.0).expect("save");
+
+    let result = drive_real(bench.controller.dispatch(UiAction::from_op(
+        ProjectController::NODE_ID,
+        crate::app::project::project_op::ProjectOp::ReloadActiveProject,
+    )));
+    assert!(result.is_err(), "the reload is refused: {result:?}");
+    assert_eq!(sim_loaded(&device), Vec::<String>::new(), "the sim is dark");
+    // Without the fix the project pane still read "Ready". A failed project
+    // is not loaded, so the page falls back to the gallery (D24).
+    let view = bench.controller.view();
+    let status: Vec<String> = view.panes.iter().map(|p| p.status.label.clone()).collect();
+    assert!(view.panes.is_empty(), "not Ready over nothing: {status:?}");
+    assert!(view.home.is_some(), "the gallery stands instead");
+}
+
+/// What the sim's runtime has loaded, asked over its own wire rather than
+/// the lens: a refused open drops the lens.
+fn sim_loaded(device: &FakeEsp32Device) -> Vec<String> {
+    let mut client = lpa_client::LpClient::new(FakeDeviceIo::new(device)).on_borrowed_wire();
+    let loaded = drive_real(client.project_list_loaded())
+        .expect("list")
+        .value;
+    loaded.iter().map(|p| p.path.to_string()).collect()
+}
+
+/// [`library_package`] of [`SIM_TARGET`], with `replace` given each path.
+fn library_package_with(
+    bench: &DeviceBench,
+    name: &str,
+    replace: impl Fn(&str) -> Option<Vec<u8>>,
+) -> String {
+    let uid = library_package(bench, name, SIM_TARGET);
+    let mut copy = bench.store.open(uid.parse().expect("uid")).expect("open");
+    for (path, _) in copy.read_all_files().expect("read") {
+        if let Some(bytes) = replace(&path) {
+            let path = format!("/{path}");
+            copy.apply_update(path.as_path(), Some(&bytes))
+                .expect("write");
+        }
+    }
+    copy.record_save(1.5).expect("save");
+    uid
+}
+
+/// Dispatch the gallery's open and run the tick until no lens is held.
+fn open_and_settle(bench: &mut DeviceBench, tasks: &TaskPool, key: &str) {
+    let _ = drive_real(bench.controller.dispatch(UiAction::from_op(
+        crate::ControllerId::new(crate::HOME_NODE_ID),
+        crate::HomeOp::OpenPackage {
+            key: key.to_string(),
+            prefer: None,
+        },
+    )));
+    let deadline = std::time::Instant::now() + REAL_TIME_LIMIT;
+    while bench.controller.pending_device_lens_for_test().is_some() {
+        bench.step(tasks);
+        drive_real(bench.controller.try_pending_device_lens());
+        assert!(std::time::Instant::now() < deadline, "never settled");
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}

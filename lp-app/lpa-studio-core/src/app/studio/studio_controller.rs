@@ -6973,6 +6973,9 @@ impl StudioController {
                     UiLogOrigin::Studio,
                     format!("project reload failed: {error}"),
                 ));
+                // The reload stopped the runtime before it was refused: the
+                // editor must not keep reading Ready over nothing.
+                self.project.fail(error.to_string());
                 Err(error)
             }
         }
