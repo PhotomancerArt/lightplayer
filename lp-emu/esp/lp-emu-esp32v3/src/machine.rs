@@ -1545,6 +1545,12 @@ impl Esp32V3Builder {
 
         let mut bus = crate::bus_setup::build();
         bus.set_strict(self.strict);
+        // This chip publishes code by **store**, not by barrier (M7 XD3): the
+        // firmware's JIT writes SRAM0 with no `isync`, silicon runs it
+        // (2026-09-05), and the ESP-IDF bootloader places the app's IRAM over
+        // the pages it ran from the same way. `--strict-bus`'s RV32
+        // missing-fence checker would call each of those a firmware bug.
+        bus.set_fence_contract(false);
         // Remembered because the sink itself is moved into the bus here and
         // the boot event, further down, has to know whether this run is traced
         // — see the `--trace` refusal there.
