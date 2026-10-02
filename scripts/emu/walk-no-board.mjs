@@ -527,7 +527,7 @@ async function main() {
 
   if (!options.keepOpen) {
     await driver.close();
-    if (door) stopDoor(door);
+    if (door) await stopDoor(door);
     sink.server.close();
   } else if (door) {
     console.log(`\n  --keep-open: the door (pid ${door.pid}) is still up; the browser is still attached.`);

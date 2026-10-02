@@ -112,12 +112,40 @@ function readListenAddress(logFile, child, id) {
   });
 }
 
-export function stopDoor(door) {
+export async function stopDoor(door, { timeoutMs = 30_000 } = {}) {
   // By pid, only what this lane started. Never `pkill -f`.
+  //
+  // SIGINT, and wait for the exit: the door writes every board's flash and
+  // console back on Ctrl-C (the shutdown path of `emu serve`) and NOT on
+  // SIGTERM, which kills it where it stands. A caller that reads the chip
+  // file after a SIGTERM reads the last two-second write-back instead — a
+  // snapshot that can sit in the middle of a write the board finished (the
+  // migration walk's W7b read a board-manifest stamp half done that way).
+  const alive = () => {
+    try {
+      process.kill(door.pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
   try {
-    process.kill(door.pid, "SIGTERM");
+    process.kill(door.pid, "SIGINT");
   } catch {
-    // already gone
+    return; // already gone
+  }
+  const deadline = Date.now() + timeoutMs;
+  while (alive()) {
+    if (Date.now() > deadline) {
+      console.error(`stopDoor: emu serve (pid ${door.pid}) did not exit on SIGINT; killing it`);
+      try {
+        process.kill(door.pid, "SIGTERM");
+      } catch {
+        // gone in between
+      }
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
   }
 }
 

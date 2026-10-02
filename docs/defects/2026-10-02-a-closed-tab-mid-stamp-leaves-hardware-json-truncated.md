@@ -1,7 +1,7 @@
 ---
 status: fixed
 found: 2026-10-02      # how: e2e — the C6 repartition's migration walk (W1, an early close)
-fixed: this change
+fixed: 0db3e4798
 area: lpa-client device_stamp (the board-manifest stamp) / fw-esp32-common hardware::manifest_loader
 class: write-ordering
 related:
@@ -34,6 +34,20 @@ the board kept booting, but its stamped manifest was gone until the next
 stamp. Reproduced without the emulator: the regression test below, run
 against the old unjournaled stamp, fails with `cut after 1 of 7 requests:
 the board lost its stamped manifest`.
+
+**The emulated sighting itself is not proof of the cause.** Re-walking
+after the fix found that the walk read the chip from a stale snapshot:
+`stopDoor` sent `emu serve` a SIGTERM, which kills it without the
+write-back it does on Ctrl-C, so the chip file the walk reported on was
+the door's last two-second write-back, which can land mid-stamp. W7b failed
+that way on the journaled stamp (`/hardware.json` 1,024 B, the staged copy
+whole) while the card said "board manifest written" and the board had
+answered every chunk; with the door interrupted and waited for, W7b passes.
+So the 6,144-byte reading may have been the harness and not the board — it
+cannot be told apart now. The mechanism above stands on its own: the host
+test reproduces it against the old stamp with no emulator involved. The
+harness is fixed too (`scripts/emu/emulated-lane.mjs` `stopDoor`: SIGINT,
+then wait for the exit).
 
 **main is affected, not only the migration.** The stamp is not part of the
 repartition: it runs after **every** firmware update (the flash activity's
@@ -87,4 +101,5 @@ tests were unrun in CI too); `test-rust-core` now runs that crate's
 moments; a walk that keys off the first will eventually cut the second. And
 a file written in more than one request is torn at every request boundary:
 if a reader must never see it torn, the writer needs a journal (or an
-atomic rename), not a faster write.
+atomic rename), not a faster write. And a walk that reads a chip out of an
+emulator it killed is reading a snapshot, not the chip.

@@ -512,7 +512,7 @@ async function main() {
     await driver.close();
     // The door writes the chip and the console back on shutdown (and every
     // 2 s before it): read both after it has stopped.
-    stopDoor(door);
+    await stopDoor(door);
     await new Promise((r) => setTimeout(r, 3_000));
     // The board's own words since the update began. The link's framing
     // interleaves binary headers with the JSON; drop control bytes and read
@@ -609,7 +609,7 @@ async function main() {
     await shot("failure");
     console.error(`\n✗ ${error.message}`);
     try { await driver.close(); } catch { /* gone */ }
-    stopDoor(door);
+    await stopDoor(door);
   } finally {
     bundle.close();
     sink.close();
