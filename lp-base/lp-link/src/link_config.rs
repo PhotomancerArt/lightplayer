@@ -10,6 +10,8 @@ pub const CH_CONTROL: u8 = 0;
 pub const CH_PROTO: u8 = 1;
 /// Channel 2: structured log lines. Best effort: dropped, not retried.
 pub const CH_LOG: u8 = 2;
+/// Channel 3: firmware update chunks (OTA split-link spike). Reliable.
+pub const CH_UPDATE: u8 = 3;
 
 /// The presets' `max_message`: the wire's 16 KiB frame budget plus 1 KiB.
 pub const MAX_MESSAGE: usize = 17 * 1024;
@@ -154,7 +156,7 @@ impl LinkConfig {
             keep_reassembly: MAX_MESSAGE,
             datagram_queue: 32,
             datagram_every: 4,
-            reliable_channels: (1 << CH_CONTROL) | (1 << CH_PROTO),
+            reliable_channels: (1 << CH_CONTROL) | (1 << CH_PROTO) | (1 << CH_UPDATE),
             ack_delay: 1_000,
             ack_every: 2,
             reorder_threshold: 1,

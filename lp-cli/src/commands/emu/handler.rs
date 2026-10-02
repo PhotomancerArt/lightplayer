@@ -150,16 +150,20 @@ fn run(args: RunArgs) -> Result<()> {
             UsbSjDrain::Auto
         });
 
-    let image = match (args.elf.as_deref(), args.merged.as_deref()) {
-        (Some(elf), None) => Image::Elf(elf),
-        (None, Some(merged)) => Image::Merged(merged),
-        (Some(_), Some(_)) => unreachable!("clap's `image` group allows only one"),
-        (None, None) => bail!(
-            "nothing to run: pass --elf <fw-esp32c6> for a direct load, or --merged \
-             <chip.bin> to boot from the reset vector through the real ROM"
-        ),
-    };
-    builder = apply_image(builder, image, args.flash.as_deref())?;
+    if let Some(flash) = args.rom_up_flash.as_deref() {
+        builder = apply_image(builder, Image::RomUp, Some(flash))?;
+    } else {
+        let image = match (args.elf.as_deref(), args.merged.as_deref()) {
+            (Some(elf), None) => Image::Elf(elf),
+            (None, Some(merged)) => Image::Merged(merged),
+            (Some(_), Some(_)) => unreachable!("clap's `image` group allows only one"),
+            (None, None) => bail!(
+                "nothing to run: pass --elf <fw-esp32c6> for a direct load, or --merged \
+                 <chip.bin> to boot from the reset vector through the real ROM"
+            ),
+        };
+        builder = apply_image(builder, image, args.flash.as_deref())?;
+    }
 
     // The eFuse identity. `run` serves one board, so the default — the desk
     // board's MAC — is the right one; `serve` gives every board its own,

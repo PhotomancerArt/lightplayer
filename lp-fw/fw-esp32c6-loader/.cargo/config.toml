@@ -1,0 +1,13 @@
+[build]
+target = "riscv32imac-unknown-none-elf"
+
+[target.riscv32imac-unknown-none-elf]
+rustflags = [
+  "-C", "link-arg=-Tloader.x",
+  "-C", "panic=abort",
+  "-C", "link-arg=--gc-sections",
+]
+
+[unstable]
+build-std = ["core"]
+build-std-features = ["compiler-builtins-mem", "optimize_for_size"]

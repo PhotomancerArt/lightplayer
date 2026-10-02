@@ -102,6 +102,8 @@ pub use fw_esp32_common::logger;
 // The app, plus the five harnesses that light a strip. `test_gpio` used to be
 // in this list and drives pins directly, so it only pulled in an output tree
 // nothing in that build touches.
+#[cfg(all(lp_split, not(fw_harness)))]
+mod ota;
 #[cfg(any(
     not(fw_harness),
     feature = "test_rmt",
@@ -341,7 +343,7 @@ struct FirmwareApp {
 
 #[cfg(not(fw_harness))]
 #[inline(never)]
-fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
+fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
     // TODO: esp_println writes directly to USB-Serial-JTAG hardware, outside
     // the link task. May block if no USB host is connected during boot.
     // Hasn't been observed yet but worth investigating if boot hangs occur.
@@ -399,29 +401,37 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
 
     // The server's side of the host link: whole wire messages on the link's
     // proto channel.
-    let transport = fw_esp32_common::usb_link::UsbLinkTransport::new(usb_link);
-
-    // The RMT peripheral becomes the WS281x driver's, clock and all. 80 MHz
-    // with the per-channel divider of 1 gives the 12.5 ns tick
-    // `lp_ws281x::PulseCodes` assumes — the same pair the legacy C6 driver's
-    // `config.rs` encoded and drove strips with since the project started.
-    esp_println::println!("[INIT] Initializing RMT peripheral at 80MHz...");
-    let rmt = esp_hal::rmt::Rmt::new(rmt_peripheral, output::rmt::shared_driver::RMT_CLOCK)
-        .expect("Failed to initialize RMT");
-    esp_println::println!("[INIT] RMT peripheral initialized");
 
     // Boot-control sector: a flash-persisted instruction from a previous run
     // or from the host over esptool. Read (and consumed) before the
     // filesystem mounts, because it must survive the power cycle that wipes
     // the RTC recovery region — see docs/adr/2026-07-30-boot-control-sector.md.
+    #[cfg(lp_split)]
+    let ota_state;
     #[cfg(not(feature = "memory_fs"))]
     let (boot_control, flash) = {
         let mut flash_storage = esp_storage::FlashStorage::new(flash);
+        // Split builds: read the boot records — and a trial core marks itself
+        // attempted — right here, before any radio or driver comes up (a new
+        // core that dies in that bring-up must still read as a failed trial,
+        // or the loader would keep retrying it). NOT before this line: the
+        // OTA path reads flash through the ROM, and any ROM flash access
+        // before `FlashStorage::new` leaves esp-storage's SPI1 RDID size
+        // probe returning garbage on silicon — every lpfs read then fails
+        // (two XIAO C6s, 2026-10-02).
+        #[cfg(lp_split)]
+        {
+            ota_state = ota::begin();
+        }
         let outcome = crate::bootctl::read_and_consume(&mut flash_storage);
         (outcome, flash_storage)
     };
     #[cfg(feature = "memory_fs")]
     let boot_control = lp_bootctl::DecodeOutcome::Blank;
+    #[cfg(all(lp_split, feature = "memory_fs"))]
+    {
+        ota_state = ota::begin();
+    }
 
     // Create filesystem before hardware providers so /hardware.json can override board policy.
     let base_fs: Box<dyn lpfs::LpFs> = {
@@ -476,21 +486,6 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     // starts. A board with no status LED gets nothing.
     board::esp32c6::status_led::start(spawner, hardware_manifest.board_id());
     let hardware_registry = Rc::new(HwRegistry::new(hardware_manifest));
-    let mut hardware_system = HardwareSystem::new(Rc::clone(&hardware_registry));
-    // How many outputs appear is decided in one place: the board manifest's
-    // `/rmt/ws281xK` resources (two on the XIAO C6). The RMT block plan
-    // follows from that count at driver init — two declared channels get one
-    // 48-word block each; a single declared channel absorbs the whole
-    // 192-word RMT RAM (RX blocks included) for legacy-class refill margin.
-    // See `output::rmt::c6_rmt::plan_for_declared`; absorbed slots are never
-    // configured.
-    hardware_system.add_ws281x_driver(Box::new(Esp32C6RmtWs281xDriver::new(
-        Rc::clone(&hardware_registry),
-        rmt,
-    )));
-    hardware_system.add_button_driver(Box::new(Esp32GpioButtonDriver::new(Rc::clone(
-        &hardware_registry,
-    ))));
     #[cfg(all(
         feature = "radio",
         not(any(
@@ -499,7 +494,7 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
             feature = "desk_espnow_meter"
         ))
     ))]
-    {
+    let radio_driver = {
         let radio_driver = Esp32EspNowRadioDriver::new(Rc::clone(&hardware_registry), wifi)
             .expect("Failed to initialize ESP-NOW radio");
         log::info!(
@@ -507,8 +502,8 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
             radio_driver.device_id(),
             radio_driver.default_channel()
         );
-        hardware_system.add_radio_driver(Box::new(radio_driver));
-    }
+        radio_driver
+    };
     // P4 stress builds: the radio stack becomes a load generator instead of a
     // driver — `esp_radio::wifi::new` can only run once, and the stress tasks
     // own its controller/interface. See `stress.rs`.
@@ -528,7 +523,6 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
         ))
     ))]
     let _ = wifi;
-    let hardware_system = Rc::new(hardware_system);
 
     // BLE: on unless the device store turns it off, read once here (a
     // missing store is `fresh()`: Bluetooth on, locked, no keys; a damaged
@@ -567,6 +561,199 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     heap_map::log("after-ble");
     #[cfg(not(feature = "ble"))]
     let _ = quirks_applied;
+
+    CoreBoot {
+        spawner,
+        usb_link,
+        rmt_peripheral,
+        boot_control,
+        base_fs,
+        hardware_registry,
+        #[cfg(all(
+            feature = "radio",
+            not(any(
+                feature = "stress_s2",
+                feature = "stress_s3",
+                feature = "desk_espnow_meter"
+            ))
+        ))]
+        radio_driver,
+        #[cfg(feature = "ble")]
+        ble_started,
+        watchdog,
+        boot_guard,
+        boot_assessment,
+        #[cfg(lp_split)]
+        ota_state,
+    }
+}
+
+/// OTA split-link spike: everything the core hands the engine.
+#[cfg(not(fw_harness))]
+struct CoreBoot {
+    spawner: embassy_executor::Spawner,
+    usb_link: &'static fw_esp32_common::usb_link::UsbLinkShared,
+    rmt_peripheral: esp_hal::peripherals::RMT<'static>,
+    boot_control: lp_bootctl::DecodeOutcome,
+    base_fs: Box<dyn lpfs::LpFs>,
+    hardware_registry: Rc<HwRegistry>,
+    #[cfg(all(
+        feature = "radio",
+        not(any(
+            feature = "stress_s2",
+            feature = "stress_s3",
+            feature = "desk_espnow_meter"
+        ))
+    ))]
+    radio_driver: Esp32EspNowRadioDriver,
+    #[cfg(feature = "ble")]
+    ble_started: bool,
+    watchdog: recovery::watchdog::WatchdogFeeder,
+    boot_guard: Option<lp_recovery::FrameGuard>,
+    boot_assessment: lp_recovery::BootAssessment,
+    #[cfg(lp_split)]
+    ota_state: ota::BootState,
+}
+
+/// The engine's header, the first bytes of the engine region (split builds).
+/// The core never names it — it reads it through a plain address — so no
+/// relocation in the core points into the engine, and the split tool's
+/// reachability walk from the core's roots never crosses into it.
+#[cfg(all(lp_split, not(fw_harness)))]
+#[repr(C)]
+struct EngineHeader {
+    magic: [u8; 8],
+    build_id: [u8; 48],
+    entry: fn(CoreBoot),
+}
+
+#[cfg(all(lp_split, not(fw_harness)))]
+const ENGINE_MAGIC: [u8; 8] = *b"LPENGIN1";
+#[cfg(all(lp_split, not(fw_harness)))]
+use ota::ENGINE_VADDR;
+
+/// Lockstep: core and engine carry the same id because they come from the
+/// same link: commit + dirty flag, plus `LP_BUILD_TAG` when set (two builds
+/// of one commit told apart — the OTA tests' X and Y).
+#[cfg(all(lp_split, not(fw_harness)))]
+const fn build_id() -> [u8; 48] {
+    const fn append(out: &mut [u8; 48], at: usize, src: &[u8]) -> usize {
+        let mut i = 0;
+        while i < src.len() && at + i < 48 {
+            out[at + i] = src[i];
+            i += 1;
+        }
+        at + i
+    }
+    let mut out = [0u8; 48];
+    let at = append(
+        &mut out,
+        0,
+        concat!(env!("LP_BUILD_COMMIT"), "-", env!("LP_BUILD_DIRTY")).as_bytes(),
+    );
+    if let Some(tag) = option_env!("LP_BUILD_TAG") {
+        let at = append(&mut out, at, b"+");
+        append(&mut out, at, tag.as_bytes());
+    }
+    out
+}
+
+#[cfg(all(lp_split, not(fw_harness)))]
+#[unsafe(link_section = ".engine_header")]
+#[used]
+static ENGINE_HEADER: EngineHeader = EngineHeader {
+    magic: ENGINE_MAGIC,
+    build_id: build_id(),
+    entry: lp_engine_entry,
+};
+
+/// The engine's entry, if a matching engine is mapped.
+#[cfg(all(lp_split, not(fw_harness)))]
+fn engine_entry() -> Option<fn(CoreBoot)> {
+    let header = ENGINE_VADDR as *const EngineHeader;
+    // SAFETY: the window is mapped (erased flash reads as 0xff); volatile so
+    // the compiler cannot assume anything about bytes it did not write.
+    let (magic, id) = unsafe {
+        (
+            core::ptr::read_volatile(core::ptr::addr_of!((*header).magic)),
+            core::ptr::read_volatile(core::ptr::addr_of!((*header).build_id)),
+        )
+    };
+    if magic != ENGINE_MAGIC {
+        ota::say!("[CORE] no engine at {ENGINE_VADDR:#x} — core-only mode");
+        return None;
+    }
+    if id != build_id() {
+        ota::say!("[CORE] engine build id mismatch — core-only mode");
+        return None;
+    }
+    // SAFETY: magic and build id match, so this header came from this link.
+    Some(unsafe { core::ptr::read_volatile(core::ptr::addr_of!((*header).entry)) })
+}
+
+/// The engine door. Split builds reach it only through `ENGINE_HEADER`, so
+/// everything reachable from here and not from the core's roots is engine;
+/// monolithic builds call it directly.
+#[cfg(not(fw_harness))]
+#[inline(never)]
+fn lp_engine_entry(core: CoreBoot) {
+    let CoreBoot {
+        spawner,
+        usb_link,
+        rmt_peripheral,
+        boot_control,
+        base_fs,
+        hardware_registry,
+        #[cfg(all(
+            feature = "radio",
+            not(any(
+                feature = "stress_s2",
+                feature = "stress_s3",
+                feature = "desk_espnow_meter"
+            ))
+        ))]
+        radio_driver,
+        #[cfg(feature = "ble")]
+        ble_started,
+        watchdog,
+        boot_guard,
+        boot_assessment,
+        ..
+    } = core;
+    let transport = fw_esp32_common::usb_link::UsbLinkTransport::new(usb_link);
+    // The RMT peripheral becomes the WS281x driver's, clock and all. 80 MHz
+    // with the per-channel divider of 1 gives the 12.5 ns tick
+    // `lp_ws281x::PulseCodes` assumes — the same pair the legacy C6 driver's
+    // `config.rs` encoded and drove strips with since the project started.
+    esp_println::println!("[INIT] Initializing RMT peripheral at 80MHz...");
+    let rmt = esp_hal::rmt::Rmt::new(rmt_peripheral, output::rmt::shared_driver::RMT_CLOCK)
+        .expect("Failed to initialize RMT");
+    esp_println::println!("[INIT] RMT peripheral initialized");
+    let mut hardware_system = HardwareSystem::new(Rc::clone(&hardware_registry));
+    // How many outputs appear is decided in one place: the board manifest's
+    // `/rmt/ws281xK` resources (two on the XIAO C6). The RMT block plan
+    // follows from that count at driver init — two declared channels get one
+    // 48-word block each; a single declared channel absorbs the whole
+    // 192-word RMT RAM (RX blocks included) for legacy-class refill margin.
+    // See `output::rmt::c6_rmt::plan_for_declared`; absorbed slots are never
+    // configured.
+    hardware_system.add_ws281x_driver(Box::new(Esp32C6RmtWs281xDriver::new(
+        Rc::clone(&hardware_registry),
+        rmt,
+    )));
+    hardware_system.add_button_driver(Box::new(Esp32GpioButtonDriver::new(Rc::clone(
+        &hardware_registry,
+    ))));
+    #[cfg(all(
+        feature = "radio",
+        not(any(
+            feature = "stress_s2",
+            feature = "stress_s3",
+            feature = "desk_espnow_meter"
+        ))
+    ))]
+    hardware_system.add_radio_driver(Box::new(radio_driver));
+    let hardware_system = Rc::new(hardware_system);
 
     // Initialize output provider
     esp_println::println!("[INIT] Creating output provider...");
@@ -715,13 +902,93 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
         }
     };
 
-    FirmwareApp {
+    let app = FirmwareApp {
         server,
         transport,
         time_provider,
         watchdog,
         #[cfg(feature = "bench_render_loop")]
         load_cycles,
+    };
+    #[cfg(feature = "diag_secure_link")]
+    secure_link_probe::run();
+    board::esp32c6::status_led::show(lpc_hardware::StatusLedState::Running);
+    // Keep the marker substring "fw-esp32c6 initialized, starting server
+    // loop" intact: two readiness classifiers grep for it.
+    esp_println::println!(
+        "[INIT] fw-esp32 initialized, starting server loop... proto={} commit={} dirty={}",
+        lpc_wire::WIRE_PROTO_VERSION,
+        env!("LP_BUILD_COMMIT"),
+        env!("LP_BUILD_DIRTY"),
+    );
+    spawner.spawn(engine_task(app).unwrap());
+}
+
+/// The server loop, as its own task (spawned by the engine door).
+#[cfg(not(fw_harness))]
+#[embassy_executor::task]
+async fn engine_task(app: FirmwareApp) {
+    // Run server loop (never returns)
+    #[cfg(not(feature = "bench_render_loop"))]
+    {
+        let mut watchdog = app.watchdog;
+        run_server_loop(
+            app.server,
+            app.transport,
+            app.time_provider,
+            heartbeat_memory_stats,
+            move |now_ms| watchdog.feed(now_ms),
+        )
+        .await;
+    }
+
+    // The render-loop benchmark's whole firmware difference, part two:
+    // the same loop, with an end. `run_server_loop` is a wrapper around
+    // this call with `FrameBudget::UNBOUNDED` — the frames below are the
+    // product's frames, not a re-implementation of them.
+    #[cfg(feature = "bench_render_loop")]
+    {
+        use fw_checks::checks::render_loop::{FrameStats, cycles_to_us};
+
+        let heap_after_load = esp32_memory_stats().unwrap_or((0, 0));
+        let load_us = cycles_to_us(app.load_cycles as u64, board::esp32c6::constants::CPU_HZ);
+        let mut stats = FrameStats::new();
+        // The guest's own clock, bracketing the loop: `Esp32TimeProvider`
+        // measures from its own construction and is about to be moved
+        // into the loop, so the bracket is taken on `Instant` directly.
+        let started = embassy_time::Instant::now();
+
+        // The same watchdog the product arms and the same feed policy:
+        // the bounded loop yields once a frame like the unbounded one, so
+        // the I/O task stays provably alive and the RWDT never bites. An
+        // image that disarmed it would differ from the product in a third
+        // way, for no measurement.
+        let mut watchdog = app.watchdog;
+        let server = server_loop::run_server_loop_bounded(
+            app.server,
+            app.transport,
+            app.time_provider,
+            heartbeat_memory_stats,
+            move |now_ms| watchdog.feed(now_ms),
+            bench::render_loop::budget(),
+            |cycles| stats.record(cycles),
+        )
+        .await;
+
+        let uptime_us = started.elapsed().as_micros();
+        // Report BEFORE the server is dropped: the summary's heap figures
+        // are meant to describe a machine with the project loaded, and
+        // dropping it first would report one that had just unloaded.
+        bench::render_loop::report(&stats, load_us, uptime_us, heap_after_load);
+        drop(server);
+
+        // Idle, yielding, so the I/O task drains the records and the
+        // marker to the host link. `--exit-on` fires on those bytes; a
+        // loop that stopped yielding here would print the sentinel into a
+        // queue nobody pumps.
+        loop {
+            embassy_time::Timer::after(embassy_time::Duration::from_millis(100)).await;
+        }
     }
 }
 
@@ -849,82 +1116,59 @@ async fn main(spawner: embassy_executor::Spawner) {
 
     #[cfg(not(fw_harness))]
     {
-        let app = boot_firmware(spawner);
-        #[cfg(feature = "diag_secure_link")]
-        secure_link_probe::run();
-        board::esp32c6::status_led::show(lpc_hardware::StatusLedState::Running);
-        // Keep the marker substring "fw-esp32c6 initialized, starting server
-        // loop" intact: two readiness classifiers grep for it
-        // (lpa-studio-core browser_serial_readiness, lp-cli fwcheck). The
-        // version suffix is additive only.
-        esp_println::println!(
-            "[INIT] fw-esp32 initialized, starting server loop... proto={} commit={} dirty={}",
-            lpc_wire::WIRE_PROTO_VERSION,
-            env!("LP_BUILD_COMMIT"),
-            env!("LP_BUILD_DIRTY"),
-        );
+        let core = core_boot(spawner);
+        #[cfg(not(lp_split))]
+        lp_engine_entry(core);
+        #[cfg(lp_split)]
+        split_boot(core).await;
+        // The server loop runs in its own task now; main has nothing left to
+        // do. A future that never completes arms no timer (a long sleep here
+        // would arm an alarm the boot gates rightly refuse).
+        core::future::pending::<()>().await;
+    }
+}
 
-        // Run server loop (never returns)
-        #[cfg(not(feature = "bench_render_loop"))]
-        {
-            let mut watchdog = app.watchdog;
-            run_server_loop(
-                app.server,
-                app.transport,
-                app.time_provider,
-                heartbeat_memory_stats,
-                move |now_ms| watchdog.feed(now_ms),
-            )
-            .await;
+/// A split build after `core_boot`: enter the engine the boot records and
+/// the header agree on, or stay core-only and take an update.
+#[cfg(all(lp_split, not(fw_harness)))]
+async fn split_boot(mut core: CoreBoot) {
+    let state = core::mem::replace(&mut core.ota_state, ota::BootState::placeholder());
+    let id = build_id();
+    let id_len = id.iter().position(|b| *b == 0).unwrap_or(id.len());
+    ota::say!(
+        "[CORE] build {} @{:#x}{}",
+        core::str::from_utf8(&id[..id_len]).unwrap_or("?"),
+        state.core_off,
+        if state.on_trial() { " (trial)" } else { "" }
+    );
+    if state.rolled_back() {
+        ota::say!("[OTA] rolled back: the newer core never confirmed");
+    }
+    // Test builds only: a core that dies on its trial boot, before it could
+    // confirm — what the loader's rollback exists for.
+    if option_env!("LP_OTA_TEST_DIE_ON_TRIAL").is_some() && state.on_trial() {
+        ota::say!("[TEST] dying on trial");
+        ota::system_reset();
+    }
+    ota::map_engine(state.engine_extent());
+    let incomplete = lp_recovery::snapshot()
+        .map(|s| s.consecutive_incomplete_boots)
+        .unwrap_or(0);
+    let engine_crashing = incomplete >= ota::INCOMPLETE_BOOTS_TO_CORE_ONLY;
+    let entry = engine_entry();
+    match entry {
+        Some(entry) if !engine_crashing && !state.on_trial() => {
+            fw_esp32_common::usb_link::set_update_hook(ota::on_update_while_running);
+            entry(core);
         }
-
-        // The render-loop benchmark's whole firmware difference, part two:
-        // the same loop, with an end. `run_server_loop` is a wrapper around
-        // this call with `FrameBudget::UNBOUNDED` — the frames below are the
-        // product's frames, not a re-implementation of them.
-        #[cfg(feature = "bench_render_loop")]
-        {
-            use fw_checks::checks::render_loop::{FrameStats, cycles_to_us};
-
-            let heap_after_load = esp32_memory_stats().unwrap_or((0, 0));
-            let load_us = cycles_to_us(app.load_cycles as u64, board::esp32c6::constants::CPU_HZ);
-            let mut stats = FrameStats::new();
-            // The guest's own clock, bracketing the loop: `Esp32TimeProvider`
-            // measures from its own construction and is about to be moved
-            // into the loop, so the bracket is taken on `Instant` directly.
-            let started = embassy_time::Instant::now();
-
-            // The same watchdog the product arms and the same feed policy:
-            // the bounded loop yields once a frame like the unbounded one, so
-            // the I/O task stays provably alive and the RWDT never bites. An
-            // image that disarmed it would differ from the product in a third
-            // way, for no measurement.
-            let mut watchdog = app.watchdog;
-            let server = server_loop::run_server_loop_bounded(
-                app.server,
-                app.transport,
-                app.time_provider,
-                heartbeat_memory_stats,
-                move |now_ms| watchdog.feed(now_ms),
-                bench::render_loop::budget(),
-                |cycles| stats.record(cycles),
-            )
-            .await;
-
-            let uptime_us = started.elapsed().as_micros();
-            // Report BEFORE the server is dropped: the summary's heap figures
-            // are meant to describe a machine with the project loaded, and
-            // dropping it first would report one that had just unloaded.
-            bench::render_loop::report(&stats, load_us, uptime_us, heap_after_load);
-            drop(server);
-
-            // Idle, yielding, so the I/O task drains the records and the
-            // marker to the host link. `--exit-on` fires on those bytes; a
-            // loop that stopped yielding here would print the sentinel into a
-            // queue nobody pumps.
-            loop {
-                embassy_time::Timer::after(embassy_time::Duration::from_millis(100)).await;
+        _ => {
+            if engine_crashing && entry.is_some() {
+                ota::say!("[OTA] {incomplete} incomplete boots — not starting the engine");
             }
+            let CoreBoot {
+                usb_link, watchdog, ..
+            } = core;
+            ota::core_only(usb_link, watchdog, state, engine_crashing).await;
         }
     }
 }
