@@ -177,6 +177,7 @@ mod tests {
         for call in [
             DeviceEffectCall::FlashFirmware {
                 build_id: "esp32c6-xiao".to_string(),
+                plan: None,
             },
             DeviceEffectCall::EraseFlash,
         ] {

@@ -307,7 +307,7 @@ impl DeviceTransport for EmuDeviceTransport {
             false => None,
         };
         let manifest_url = match &call {
-            DeviceEffectCall::FlashFirmware { build_id } => {
+            DeviceEffectCall::FlashFirmware { build_id, .. } => {
                 Some(self.firmware.firmware_manifest_path(build_id))
             }
             _ => None,
@@ -338,6 +338,15 @@ impl DeviceTransport for EmuDeviceTransport {
                         ..Default::default()
                     })
                 }
+                // The tab's board is written by the emulator's own package
+                // loader, not by esptool, so there is no bootloader read to
+                // inspect a layout with: an emulated tab board updates as a
+                // plain flash (its filesystem stays where it is; firmware on
+                // a pre-repartition chip holds it — the legacy guard).
+                DeviceEffectCall::InspectLayout { .. } => Ok(DeviceEffectFacts {
+                    summary: "an emulated tab board has no layout to read".to_string(),
+                    ..Default::default()
+                }),
                 // Manifest, push and removal are the REAL conversations, on
                 // the board's own wire — the same body a Bluetooth link runs
                 // (`wire_conversation.rs`), so a green push here means what
@@ -451,6 +460,7 @@ mod tests {
             emu_link_info("dev1", "XIAO ESP32-C6"),
             DeviceEffectCall::FlashFirmware {
                 build_id: "esp32c6-4mb".to_string(),
+                plan: None,
             },
             Rc::new(|_, _| {}),
         ))

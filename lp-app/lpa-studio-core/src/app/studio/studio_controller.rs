@@ -399,7 +399,14 @@ impl StudioController {
         let now_secs_for_stamp = Rc::clone(&now_secs);
         let device_events = Rc::new(std::cell::RefCell::new(DeviceEventLog::new()));
         Self {
-            devices: crate::DeviceRoster::new(device_roster_config()),
+            devices: {
+                let mut devices = crate::DeviceRoster::new(device_roster_config());
+                // Backup archives (the C6 repartition's layout step) are
+                // stamped with the app's own clock; core reads none.
+                let clock = Rc::clone(&now_secs);
+                devices.effects_mut().set_clock(Rc::new(move || clock()));
+                devices
+            },
             device_feeds: crate::DeviceFrameFeeds::new(),
             pending_device_lens: None,
             device_sweep_pending: false,
@@ -1062,6 +1069,13 @@ impl StudioController {
                 .map(lpa_devices::Device::title)
                 .unwrap_or_else(|| "This device".to_string())
         })
+    }
+
+    /// Install the store a board's backup goes into before a layout
+    /// migration writes it (OPFS in the browser; the C6 repartition).
+    /// Without one, every migration asks for a download first.
+    pub fn set_device_backup_store(&mut self, store: Rc<dyn crate::DeviceBackupStore>) {
+        self.devices.effects_mut().set_backup_store(store);
     }
 
     /// Install the platform timer factory device waits run on (called by
@@ -2748,6 +2762,16 @@ impl StudioController {
                 true => self.play_views.saturating_add(1),
                 false => self.play_views.saturating_sub(1),
             };
+            return Ok(UiNotices::new());
+        }
+        if node_id.as_str() == crate::DeviceBackupOp::NODE_ID {
+            let op = action.into_op::<crate::DeviceBackupOp>()?;
+            let device = self.devices.roster().device(op.device);
+            let base_mac = device.and_then(|d| d.identity.mac.as_ref().map(|mac| mac.0.clone()));
+            let label = device.map(lpa_devices::Device::title);
+            self.devices
+                .effects_mut()
+                .request_backup_download(op.device, base_mac, label);
             return Ok(UiNotices::new());
         }
         if node_id.as_str() == crate::DeviceFeedOp::NODE_ID {

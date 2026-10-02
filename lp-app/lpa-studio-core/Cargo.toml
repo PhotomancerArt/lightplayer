@@ -27,7 +27,9 @@ lpa-devices = { path = "../lpa-devices" }
 # both already in this crate's graph. The host transport WIRE still arrives
 # via unification when a host provider feature is enabled (tests: fake-device
 # below; wasm: the browser features).
-lpa-link = { path = "../lpa-link", features = ["device-session", "device-link"] }
+# `layout-migration`: the C6 repartition's layout step (classify, plan,
+# back up — `app/devices/device_layout_step.rs`), pure and wasm-safe.
+lpa-link = { path = "../lpa-link", features = ["device-session", "device-link", "layout-migration"] }
 # Format classification + offline migration for authored projects. Studio is
 # the only crate that gets this dep: the library classifies every package it
 # lists, and opening an older-but-supported one migrates it in place.

@@ -79,6 +79,13 @@ pub struct DeviceRosterView {
     /// and the device access panel where this link may write the store.
     pub access:
         std::collections::BTreeMap<lpa_devices::DeviceId, crate::app::access::UiDeviceAccess>,
+    /// Each device's layout facts (the C6 repartition): the question before
+    /// its files move, the refusal, a board holding its files, a backup to
+    /// put back. Absent = nothing to say.
+    pub layout: std::collections::BTreeMap<lpa_devices::DeviceId, super::UiDeviceLayout>,
+    /// The latest backup the user asked to download; the shell downloads
+    /// when its `seq` advances.
+    pub backup_download: Option<super::device_layout_effect::BackupDownload>,
 }
 
 impl Default for DeviceRosterView {
@@ -94,6 +101,8 @@ impl Default for DeviceRosterView {
             feeds: std::collections::BTreeMap::new(),
             runtime_bands: std::collections::BTreeMap::new(),
             access: std::collections::BTreeMap::new(),
+            layout: std::collections::BTreeMap::new(),
+            backup_download: None,
         }
     }
 }
@@ -363,7 +372,45 @@ impl DeviceRoster {
             feeds: std::collections::BTreeMap::new(),
             runtime_bands: std::collections::BTreeMap::new(),
             access: std::collections::BTreeMap::new(),
+            layout: self.layout_views(now),
+            backup_download: self.effects.layout().download(),
         }
+    }
+
+    /// The card's layout facts (C6 repartition) for every device with
+    /// something to say: the question, the refusal, a board holding its
+    /// files, a backup waiting to go back.
+    fn layout_views(
+        &self,
+        now: Millis,
+    ) -> std::collections::BTreeMap<lpa_devices::DeviceId, super::UiDeviceLayout> {
+        let layout = self.effects.layout();
+        self.roster
+            .devices()
+            .iter()
+            .filter_map(|device| {
+                let view = lpa_devices::view::device_view(device, now);
+                let fs = device
+                    .evidence
+                    .classification
+                    .hello()
+                    .map(|hello| hello.fs)
+                    .unwrap_or_default();
+                let staged = layout.staged(device.id);
+                let pending = device
+                    .identity
+                    .mac
+                    .as_ref()
+                    .and_then(|mac| layout.pending_for(&mac.0));
+                super::device_layout_view::device_layout_view(
+                    &view,
+                    fs,
+                    staged.as_ref(),
+                    pending.as_ref(),
+                )
+                .map(|ui| (device.id, ui))
+            })
+            .collect()
     }
 
     /// A `Close` for a link the model is releasing is the last thing that link
@@ -623,6 +670,8 @@ mod tests {
                 },
             )]),
             runtime_bands: std::collections::BTreeMap::new(),
+            layout: std::collections::BTreeMap::new(),
+            backup_download: None,
         };
 
         let split = split_roster(&view);
@@ -666,6 +715,8 @@ mod tests {
             open_addresses: Default::default(),
             feeds: std::collections::BTreeMap::new(),
             runtime_bands: std::collections::BTreeMap::new(),
+            layout: std::collections::BTreeMap::new(),
+            backup_download: None,
         };
 
         let split = split_roster(&view);

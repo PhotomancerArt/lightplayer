@@ -531,6 +531,8 @@ fn powered_off_sim_fixture() -> DeviceRosterView {
         access: Default::default(),
         transport_available: true,
         usb_available: true,
+        layout: Default::default(),
+        backup_download: None,
         feeds: Default::default(),
         runtime_bands: [(id, UiRuntimeBand::sim("seeed/xiao-esp32-c6", Some("cpu")))]
             .into_iter()
@@ -828,6 +830,8 @@ fn roster_fixture() -> DeviceRosterView {
         access: Default::default(),
         transport_available: true,
         usb_available: true,
+        layout: Default::default(),
+        backup_download: None,
         feeds: Default::default(),
         runtime_bands: Default::default(),
         // The running card has earned a registry row, so it has an editor
@@ -959,6 +963,7 @@ fn roster_fixture() -> DeviceRosterView {
                         percent: Some(40),
                         cancellable: true,
                         cancel_requested: false,
+                        layout: None,
                     }),
                     last_outcome: None,
                     // Mid-activity: the bar is in the state zone above and
@@ -1160,6 +1165,8 @@ fn roster_page_fixture() -> DeviceRosterView {
         access: Default::default(),
         transport_available: true,
         usb_available: true,
+        layout: Default::default(),
+        backup_download: None,
         feeds: Default::default(),
         runtime_bands: Default::default(),
         open_addresses: full.open_addresses,
@@ -1652,6 +1659,7 @@ fn card_state_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
             percent: Some(62),
             cancellable: true,
             cancel_requested: false,
+            layout: None,
         }),
         can_remove_project: false,
         escapes: vec![
@@ -1672,6 +1680,7 @@ fn card_state_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
             percent: None,
             cancellable: true,
             cancel_requested: false,
+            layout: None,
         }),
         can_remove_project: false,
         escapes: vec![

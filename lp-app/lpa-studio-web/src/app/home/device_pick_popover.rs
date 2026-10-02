@@ -599,6 +599,7 @@ pub(crate) fn BoardPickPopover(
             build_id: choice.build_id.clone(),
             park_first: choice.park_first,
             name: (!name.is_empty()).then_some(name),
+            restore_backup: false,
         })
     };
     // What the board will be called if the field stays blank: the derived

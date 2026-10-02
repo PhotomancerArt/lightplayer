@@ -232,6 +232,7 @@ impl FirmwareVerb {
             build_id: String::new(),
             park_first: false,
             name: None,
+            restore_backup: false,
         })
         .with_label(self.label())
         .with_summary(self.summary())
@@ -253,6 +254,7 @@ impl FirmwareVerb {
                 park_first: choice.park_first,
                 // An update never renames: the board already has a name.
                 name: None,
+                restore_backup: false,
             })
             .with_label(self.label())
             .with_summary(self.summary()),
@@ -711,6 +713,7 @@ mod tests {
                 percent: Some(40),
                 cancellable: true,
                 cancel_requested: false,
+                layout: None,
             }),
             ..base.clone()
         };

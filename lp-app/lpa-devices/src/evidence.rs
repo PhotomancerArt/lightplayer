@@ -536,6 +536,26 @@ impl Evidence {
                 self.push_output(TerminalKind::Studio, label);
                 Vec::new()
             }
+            // The layout inspection's answer is narration too: the card's
+            // terminal says what was found before anything is written.
+            ActivityMarker::LayoutVerdict { verdict } => {
+                let line = match verdict {
+                    crate::activity::LayoutVerdict::Plain => {
+                        "layout: the board's files stay where they are".to_string()
+                    }
+                    crate::activity::LayoutVerdict::Migrate { files, .. } => {
+                        format!("layout: {files} files to move to the new layout")
+                    }
+                    crate::activity::LayoutVerdict::Restore { files, .. } => {
+                        format!("layout: {files} files to restore from the stored backup")
+                    }
+                    crate::activity::LayoutVerdict::Refused { files, .. } => {
+                        format!("layout: {files} files do not fit the new layout")
+                    }
+                };
+                self.push_output(TerminalKind::Studio, &line);
+                Vec::new()
+            }
             ActivityMarker::Ended { outcome, .. } => {
                 let kind = if outcome.is_success() {
                     TerminalKind::Outcome

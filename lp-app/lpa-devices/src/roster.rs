@@ -36,6 +36,12 @@ use crate::link::{LinkCommand, LinkId, LinkInfo};
 use crate::record::DeviceRecord;
 use crate::time::{Millis, TimerAllocator, TimerId};
 
+/// Ten minutes: [`RosterConfig::flash_consent_ms`]'s default (and a journal
+/// recorded before the knob existed decodes with it).
+fn default_flash_consent_ms() -> u64 {
+    600_000
+}
+
 /// Every knob the model needs, supplied by the app. Deliberately no
 /// constants baked into the fold: the wire proto comes from `lpc-wire`, and
 /// the budgets are product decisions the app owns.
@@ -70,6 +76,13 @@ pub struct RosterConfig {
     /// How long each rung of the post-flash reconnect ladder waits for the
     /// boot hello before escalating (reopen → Normal → BothThenDrop → fail).
     pub flash_rung_ms: u64,
+    /// How long the Flash activity waits for the user's yes to move (or
+    /// restore) a board's files (the C6 repartition's consent dialog).
+    /// Generous: it covers reading the dialog and downloading the backup.
+    /// The board sits parked and untouched meanwhile; supervision is held
+    /// off for exactly this long.
+    #[serde(default = "default_flash_consent_ms")]
+    pub flash_consent_ms: u64,
     /// The retry/ask cadence inside a rung: reopen a closed port (session
     /// adoption absorbs a re-enumerated one) or re-ask a quiet open one.
     pub flash_reopen_retry_ms: u64,
@@ -126,6 +139,7 @@ impl Default for RosterConfig {
             flash_deadline_ms: 240_000,
             flash_cancel_grace_ms: 180_000,
             flash_rung_ms: 8_000,
+            flash_consent_ms: default_flash_consent_ms(),
             flash_reopen_retry_ms: 1_000,
             stamp_deadline_ms: 45_000,
             push_deadline_ms: 180_000,

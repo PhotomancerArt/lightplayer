@@ -362,6 +362,7 @@ impl Device {
         board_id: &str,
         build_id: &str,
         park_first: bool,
+        restore_backup: bool,
         ctx: &mut ModelCtx<'_>,
     ) -> Vec<Command> {
         if self.activity.is_some() || self.link().is_none() {
@@ -373,7 +374,8 @@ impl Device {
             board_id.to_string(),
             build_id.to_string(),
             park_first,
-        );
+        )
+        .with_restore_backup(restore_backup);
         let commands = {
             let activity_ctx = ActivityCtx {
                 link: self.evidence.link(),
@@ -545,11 +547,26 @@ impl Device {
                 self.identify_retries = 0;
                 self.spawn_identify(now, ctx)
             }
+            Action::ConfirmFlashLayout { .. } => {
+                // The user said yes to moving the board's files: the write
+                // starts now, so its supervision budget starts now too —
+                // the consent wait must not have eaten it.
+                if let Some(cell) = &mut self.activity
+                    && cell.kind == ActivityKind::Flash
+                {
+                    cell.deadline = now.plus_ms(ctx.config.flash_deadline_ms);
+                }
+                match self.forward(now, &Input::Action(action.clone()), ctx) {
+                    Some(step) => self.apply_step(now, step, ctx),
+                    None => Vec::new(),
+                }
+            }
             Action::Flash {
                 board_id,
                 build_id,
                 park_first,
                 name,
+                restore_backup,
                 ..
             } => {
                 // Flashing implies wanting the board connected afterwards.
@@ -560,7 +577,7 @@ impl Device {
                 if let Some(name) = name {
                     self.intent.name = Some(name.clone());
                 }
-                self.spawn_flash(now, board_id, build_id, *park_first, ctx)
+                self.spawn_flash(now, board_id, build_id, *park_first, *restore_backup, ctx)
             }
             Action::Push { .. } => {
                 // Sending a project implies wanting the board connected.
@@ -784,6 +801,14 @@ impl Device {
         let step = cell.handle(now, input, &mut activity_ctx);
         if starts_effect(step_commands(&step), effect_id) {
             cell.current_effect = Some(effect_id);
+        }
+        // A reducer waiting on the user (the Flash's layout consent) is
+        // bounded by its own deadline; supervision must not evict it first.
+        if let Some(floor) = cell.supervision_floor() {
+            let held = floor.plus_ms(ctx.config.supervision_slack_ms);
+            if held > cell.deadline {
+                cell.deadline = held;
+            }
         }
         Some(step)
     }

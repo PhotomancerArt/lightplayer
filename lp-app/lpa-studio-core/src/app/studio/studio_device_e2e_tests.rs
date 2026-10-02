@@ -206,7 +206,39 @@ impl DeviceTransport for ScriptedTransport {
         progress: DeviceEffectProgress,
     ) -> DeviceTransportFuture<Result<DeviceEffectFacts, String>> {
         match call {
-            DeviceEffectCall::FlashFirmware { build_id } => {
+            // The layout read (C6 repartition), against the scripted board's
+            // own flash image: a blank chip or a board already on the fake
+            // package's layout comes back plain, a legacy board migrates.
+            DeviceEffectCall::InspectLayout { .. } => {
+                let inspection = self.device.fake_inspect_layout();
+                Box::pin(core::future::ready(Ok(DeviceEffectFacts {
+                    summary: "read the board's layout".to_string(),
+                    probed_mac: inspection.probed_mac.clone(),
+                    chip_name: inspection.chip_name.clone(),
+                    inspection: Some(inspection),
+                })))
+            }
+            // A staged plan runs against the board's flash image, which then
+            // boots whatever it holds — mounted files, a held legacy
+            // filesystem, or a fresh format.
+            DeviceEffectCall::FlashFirmware {
+                build_id,
+                plan: Some(plan),
+            } => {
+                let device = self.device.clone();
+                Box::pin(async move {
+                    progress("Writing firmware".to_string(), Some(50));
+                    device
+                        .fake_execute_plan(&plan)
+                        .map_err(|error| error.to_string())?;
+                    progress("Verifying files".to_string(), Some(100));
+                    Ok(DeviceEffectFacts {
+                        summary: format!("wrote {build_id} and moved the files"),
+                        ..Default::default()
+                    })
+                })
+            }
+            DeviceEffectCall::FlashFirmware { build_id, .. } => {
                 let plan = self.flash_plan.get();
                 let device = self.device.clone();
                 Box::pin(async move {
@@ -220,6 +252,7 @@ impl DeviceTransport for ScriptedTransport {
                                 summary: format!("wrote {build_id}"),
                                 probed_mac: Some(SCRIPTED_PREFLIGHT_MAC.to_string()),
                                 chip_name: Some("ESP32-C6 (fake)".to_string()),
+                                inspection: None,
                             })
                         }
                         FlashPlan::FailMidWrite => {
@@ -229,6 +262,7 @@ impl DeviceTransport for ScriptedTransport {
                             summary: format!("wrote {build_id}"),
                             probed_mac: Some(SCRIPTED_PREFLIGHT_MAC.to_string()),
                             chip_name: Some("ESP32-C6 (fake)".to_string()),
+                            inspection: None,
                         }),
                         FlashPlan::Hang => {
                             core::future::pending::<()>().await;
@@ -648,6 +682,8 @@ struct DeviceBench {
     revoked: Rc<RefCell<Vec<String>>>,
     granted: Rc<Cell<bool>>,
     chooser_grants: Rc<Cell<bool>>,
+    /// The layout migration's backup store (C6 repartition).
+    backups: crate::MemoryBackupStore,
     flash_plan: Rc<Cell<FlashPlan>>,
     manifest_writes: Rc<RefCell<Vec<String>>>,
     push_plan: Rc<Cell<PushPlan>>,
@@ -862,6 +898,10 @@ impl DeviceBench {
             pushed: Rc::clone(&pushed),
         }));
 
+        // Where a layout migration's backup goes before anything is written
+        // (the browser's is OPFS).
+        let backups = crate::MemoryBackupStore::new();
+        controller.set_device_backup_store(Rc::new(backups.clone()));
         let bench = Self {
             controller,
             clock,
@@ -870,6 +910,7 @@ impl DeviceBench {
             revoked,
             granted,
             chooser_grants,
+            backups,
             flash_plan,
             manifest_writes,
             push_plan,
@@ -2912,6 +2953,7 @@ fn a_flash_from_the_blank_pending_card_runs_to_ready_named_and_registered() {
         build_id: choice.build_id.clone(),
         park_first: false,
         name: None,
+        restore_backup: false,
     });
 
     // The gesture adopts: the pending card becomes a device card, busy
@@ -2994,6 +3036,7 @@ fn a_flash_with_a_typed_name_wears_it_instead_of_the_derived_one() {
         build_id: choice.build_id.clone(),
         park_first: false,
         name: Some("Porch lantern".to_string()),
+        restore_backup: false,
     });
     bench.run_until(&tasks, "the flashed board to land Ready", |bench| {
         bench
@@ -3037,6 +3080,7 @@ fn a_mid_write_failure_lands_on_an_honest_face_with_retry_in_place() {
         build_id: choice.build_id,
         park_first: false,
         name: None,
+        restore_backup: false,
     });
     bench.run_until(&tasks, "the failure to settle", |bench| {
         bench
@@ -3088,6 +3132,7 @@ fn post_flash_silence_climbs_the_ladder_then_fails_with_honest_guidance() {
         build_id: choice.build_id,
         park_first: true,
         name: None,
+        restore_backup: false,
     });
     bench.run_until(&tasks, "the ladder to exhaust", |bench| {
         bench
@@ -3141,6 +3186,7 @@ fn forgetting_mid_flash_evicts_the_hung_effect_and_cleans_up() {
         build_id: choice.build_id,
         park_first: false,
         name: None,
+        restore_backup: false,
     });
     bench.run_until(&tasks, "the flash to be visibly running", |bench| {
         bench
@@ -5494,6 +5540,7 @@ fn flashing_a_sim_ends_with_the_scripted_summary_and_no_fake_facts() {
         build_id: choice.build_id.clone(),
         park_first: false,
         name: None,
+        restore_backup: false,
     });
     bench.run_until(&tasks, "the sim flash to end", |bench| {
         bench
@@ -6710,4 +6757,306 @@ fn hash_of(files: &[(String, Vec<u8>)]) -> String {
             .expect("seed");
     }
     lpc_history::hash_package(&fs).expect("hash").0.to_string()
+}
+
+// ---------------------------------------------------------------------
+// The C6 repartition: a fielded board's files move with the update
+// ---------------------------------------------------------------------
+
+/// The everyday migration, whole: Update on a board still on the old
+/// layout reads its layout, stores a backup BEFORE anything is written,
+/// asks, and only on Continue rewrites the board — which comes back with
+/// every file mounted and its own identity, and the backup is marked done.
+#[test]
+fn updating_a_legacy_board_backs_up_asks_and_keeps_every_file() {
+    let device = legacy_light_player(Vec::new());
+    let before = device.fake_board_files().0;
+    let (mut bench, tasks) = identified(&device, "usb-layout-1");
+    let target = bench.view().devices[0].id;
+
+    update(&mut bench, target);
+    let panel = layout_panel(&mut bench, &tasks, target);
+    assert_eq!(panel.title, "Move this board's files to the new layout");
+    assert!(panel.body.contains("saved a backup"), "{panel:?}");
+    // The backup is stored (pending) before a single byte was written.
+    let index = drive(crate::DeviceBackupStore::index(&bench.backups));
+    assert_eq!(index.entries.len(), 1, "{index:?}");
+    assert_eq!(index.entries[0].status, crate::BackupStatus::Pending);
+    assert_eq!(index.entries[0].base_mac, "60:55:f9:0a:0b:0c");
+    assert_eq!(
+        device.fake_board_files().0,
+        before,
+        "nothing written while the question is open"
+    );
+
+    let continue_action = panel.continue_action.expect("a migration can continue");
+    assert!(
+        continue_action.meta().enablement.is_enabled(),
+        "the backup is stored: {continue_action:?}"
+    );
+    drive(bench.controller.dispatch(continue_action)).expect("Continue dispatches");
+    settle(&mut bench, &tasks);
+
+    let card = &bench.view().devices[0];
+    let outcome = card.last_outcome.clone().expect("an outcome");
+    assert!(outcome.ok, "{outcome:?}");
+    assert_eq!(card.state_label, "Ready");
+    let (after, fs) = device.fake_board_files();
+    assert_eq!(fs, Some(lpc_wire::FsBootState::Mounted));
+    assert_eq!(sorted(after), sorted(before), "every file, byte for byte");
+    let index = drive(crate::DeviceBackupStore::index(&bench.backups));
+    assert_eq!(index.entries[0].status, crate::BackupStatus::Completed);
+    assert!(
+        bench
+            .controller
+            .device_roster_view()
+            .layout
+            .get(&target)
+            .is_none(),
+        "nothing left to say on the card"
+    );
+}
+
+/// Files that do not fit the new layout: the update is refused before
+/// anything is written, and the card says why, with a download.
+#[test]
+fn a_board_whose_files_do_not_fit_is_refused_untouched() {
+    // ~720 KB that does not compress: more than the new layout holds.
+    let mut seed = 0x1234_5678u32;
+    let big: Vec<u8> = (0..720 * 1024)
+        .map(|_| {
+            seed ^= seed << 13;
+            seed ^= seed >> 17;
+            seed ^= seed << 5;
+            seed as u8
+        })
+        .collect();
+    let device = legacy_light_player(vec![("/big.bin".to_string(), big)]);
+    let before = device.fake_board_files().0;
+    let (mut bench, tasks) = identified(&device, "usb-layout-2");
+    let target = bench.view().devices[0].id;
+
+    update(&mut bench, target);
+    settle(&mut bench, &tasks);
+
+    let outcome = bench.view().devices[0]
+        .last_outcome
+        .clone()
+        .expect("an outcome");
+    assert!(!outcome.ok, "{outcome:?}");
+    let layout = bench.controller.device_roster_view().layout[&target].clone();
+    let panel = layout.panel.expect("the refusal panel");
+    assert_eq!(panel.title, "This board's files don't fit the new firmware");
+    assert!(panel.continue_action.is_none());
+    assert!(
+        panel.download.meta().enablement.is_enabled(),
+        "the files can still be saved"
+    );
+    assert_eq!(device.fake_board_files().0, before, "nothing was written");
+    assert!(
+        drive(crate::DeviceBackupStore::index(&bench.backups))
+            .entries
+            .is_empty(),
+        "no backup taken"
+    );
+}
+
+/// Cancel at the question: nothing is written and the board keeps its files.
+#[test]
+fn cancelling_at_the_question_leaves_the_board_untouched() {
+    let device = legacy_light_player(Vec::new());
+    let before = device.fake_board_files().0;
+    let (mut bench, tasks) = identified(&device, "usb-layout-3");
+    let target = bench.view().devices[0].id;
+
+    update(&mut bench, target);
+    let panel = layout_panel(&mut bench, &tasks, target);
+    drive(bench.controller.dispatch(panel.cancel.expect("a way out"))).expect("Cancel dispatches");
+    settle(&mut bench, &tasks);
+
+    assert_eq!(device.fake_board_files().0, before, "nothing was written");
+    assert_eq!(
+        device.fake_board_files().1,
+        Some(lpc_wire::FsBootState::Mounted)
+    );
+    assert!(
+        bench
+            .controller
+            .device_roster_view()
+            .layout
+            .get(&target)
+            .is_none(),
+        "no question left on the card"
+    );
+}
+
+/// The cable is pulled right after the firmware write: the new firmware
+/// HOLDS the old files (writes nothing to them), the card says they are
+/// waiting, and "Finish update" moves them.
+#[test]
+fn a_pull_after_the_firmware_write_holds_the_files_and_finish_update_moves_them() {
+    let device = legacy_light_player(Vec::new());
+    let before = device.fake_board_files().0;
+    let (mut bench, tasks) = identified(&device, "usb-layout-4");
+    let target = bench.view().devices[0].id;
+
+    update(&mut bench, target);
+    let panel = layout_panel(&mut bench, &tasks, target);
+    device.interrupt_next_plan_after(1);
+    drive(bench.controller.dispatch(panel.continue_action.unwrap())).unwrap();
+    settle(&mut bench, &tasks);
+    assert!(
+        !bench.view().devices[0].last_outcome.clone().unwrap().ok,
+        "the interrupted update failed honestly"
+    );
+    assert_eq!(
+        device.fake_board_files().1,
+        Some(lpc_wire::FsBootState::LegacyHeld)
+    );
+
+    bench.run_until(&tasks, "the held board to say so", |bench| {
+        bench
+            .controller
+            .device_roster_view()
+            .layout
+            .get(&target)
+            .is_some_and(|layout| layout.finish_update.is_some())
+    });
+    let layout = bench.controller.device_roster_view().layout[&target].clone();
+    assert!(layout.line.unwrap().contains("waiting"));
+    drive(bench.controller.dispatch(layout.finish_update.unwrap())).unwrap();
+    let panel = layout_panel(&mut bench, &tasks, target);
+    drive(bench.controller.dispatch(panel.continue_action.unwrap())).unwrap();
+    settle(&mut bench, &tasks);
+
+    assert!(bench.view().devices[0].last_outcome.clone().unwrap().ok);
+    let (after, fs) = device.fake_board_files();
+    assert_eq!(fs, Some(lpc_wire::FsBootState::Mounted));
+    assert_eq!(sorted(after), sorted(before), "every file, byte for byte");
+}
+
+/// The cable is pulled mid filesystem write: the board boots formatted, the
+/// card offers the stored backup back, and Restore puts every file back.
+#[test]
+fn a_pull_mid_filesystem_write_offers_the_backup_and_restore_puts_it_back() {
+    let device = legacy_light_player(Vec::new());
+    let before = device.fake_board_files().0;
+    let (mut bench, tasks) = identified(&device, "usb-layout-5");
+    let target = bench.view().devices[0].id;
+
+    update(&mut bench, target);
+    let panel = layout_panel(&mut bench, &tasks, target);
+    device.interrupt_next_plan_after(4);
+    drive(bench.controller.dispatch(panel.continue_action.unwrap())).unwrap();
+    settle(&mut bench, &tasks);
+    assert_eq!(
+        device.fake_board_files().1,
+        Some(lpc_wire::FsBootState::Formatted)
+    );
+
+    bench.run_until(&tasks, "the card to offer the backup", |bench| {
+        bench
+            .controller
+            .device_roster_view()
+            .layout
+            .get(&target)
+            .is_some_and(|layout| layout.restore.is_some())
+    });
+    let layout = bench.controller.device_roster_view().layout[&target].clone();
+    assert!(
+        layout.download.is_some(),
+        "the backup can be downloaded too"
+    );
+    drive(bench.controller.dispatch(layout.restore.unwrap())).unwrap();
+    let panel = layout_panel(&mut bench, &tasks, target);
+    assert_eq!(panel.title, "Put this board's files back");
+    drive(bench.controller.dispatch(panel.continue_action.unwrap())).unwrap();
+    settle(&mut bench, &tasks);
+
+    assert!(bench.view().devices[0].last_outcome.clone().unwrap().ok);
+    let (after, fs) = device.fake_board_files();
+    assert_eq!(fs, Some(lpc_wire::FsBootState::Mounted));
+    assert_eq!(sorted(after), sorted(before), "every file, byte for byte");
+    let index = drive(crate::DeviceBackupStore::index(&bench.backups));
+    assert!(
+        index
+            .entries
+            .iter()
+            .all(|entry| entry.status == crate::BackupStatus::Completed),
+        "{index:?}"
+    );
+}
+
+/// A LightPlayer board still on the pre-repartition layout, holding a
+/// project, the board manifest Studio stamped when it first flashed it (so
+/// its hello names its board, and the record learns it), an access file and
+/// its identity (plus `extra` root files).
+fn legacy_light_player(extra: Vec<(String, Vec<u8>)>) -> FakeEsp32Device {
+    let manifest = lpa_boards::runtime_manifest_json(&c6_board_choice().board_id)
+        .expect("a served board has a manifest");
+    let mut root_files = vec![
+        ("/hardware.json".to_string(), manifest.as_bytes().to_vec()),
+        ("/.lp/access.json".to_string(), b"{\"version\":1}".to_vec()),
+    ];
+    root_files.extend(extra);
+    FakeEsp32Device::new(FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new()
+            .with_identity(FakeDeviceIdentity::new("dev0000000000000011", "Porch"))
+            .with_base_mac("60:55:f9:0a:0b:0c")
+            .with_project_files(vec![(
+                "project.json".to_string(),
+                b"{\"name\":\"kept\"}".to_vec(),
+            )])
+            .with_root_files(root_files)
+            .with_legacy_layout(),
+    )))
+}
+
+/// The card's Update, through the ordinary action path.
+fn update(bench: &mut DeviceBench, device: crate::DeviceId) {
+    let choice = c6_board_choice();
+    bench.gesture(DeviceAction::Flash {
+        device,
+        board_id: choice.board_id,
+        build_id: choice.build_id,
+        park_first: true,
+        name: None,
+        restore_backup: false,
+    });
+}
+
+/// Wait for the layout question (or refusal) on `device`'s card.
+fn layout_panel(
+    bench: &mut DeviceBench,
+    tasks: &TaskPool,
+    device: crate::DeviceId,
+) -> crate::UiLayoutPanel {
+    bench.run_until(tasks, "the layout question", |bench| {
+        bench
+            .controller
+            .device_roster_view()
+            .layout
+            .get(&device)
+            .is_some_and(|layout| layout.panel.is_some())
+    });
+    bench.controller.device_roster_view().layout[&device]
+        .panel
+        .clone()
+        .unwrap()
+}
+
+/// Run until the card's activity has ended with an outcome.
+fn settle(bench: &mut DeviceBench, tasks: &TaskPool) {
+    bench.run_until(tasks, "the activity to end", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.last_outcome.is_some())
+    });
+}
+
+fn sorted(mut files: Vec<(String, Vec<u8>)>) -> Vec<(String, Vec<u8>)> {
+    files.sort();
+    files
 }

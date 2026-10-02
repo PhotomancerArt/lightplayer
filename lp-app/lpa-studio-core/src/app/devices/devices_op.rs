@@ -205,6 +205,15 @@ impl ControllerOp for DevicesOp {
                 "Stop what Studio is doing to this device.",
                 ActionPriority::Secondary,
             ),
+            // The layout question's yes (the C6 repartition): the backup is
+            // already stored, and the board's files move now. The user's
+            // decision, never an assistant's.
+            Action::ConfirmFlashLayout { .. } => ActionMeta::new(
+                "Continue",
+                "Write the new firmware and move this board's files to it.",
+                ActionPriority::Primary,
+            )
+            .with_gesture(ActionGesture::UserDecision),
             Action::Identify { .. } => ActionMeta::new(
                 "Identify again",
                 "Ask the board what it is, right now.",
@@ -342,6 +351,7 @@ mod tests {
                 build_id: "esp32c6-4mb".to_string(),
                 park_first: false,
                 name: None,
+                restore_backup: false,
             },
             Action::SetName {
                 device,
@@ -376,6 +386,7 @@ mod tests {
             build_id: "esp32c6-4mb".to_string(),
             park_first: false,
             name: None,
+            restore_backup: false,
         };
         // (action, needs a real click, lasting)
         for (action, activation, lasting) in [

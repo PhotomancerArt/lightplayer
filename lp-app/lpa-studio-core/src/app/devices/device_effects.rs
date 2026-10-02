@@ -215,6 +215,10 @@ pub struct DeviceEffects {
     /// [`Self::arrivals`] exists.
     completed_pushes: Rc<RefCell<Vec<CompletedPush>>>,
     next_link: u64,
+    /// The C6 repartition's layout step: the backup store, what each
+    /// device's inspection staged, the store's index as last read, and
+    /// the wall clock archives are stamped with.
+    layout: super::device_layout_effect::LayoutEffects,
 }
 
 impl Default for DeviceEffects {
@@ -236,7 +240,48 @@ impl DeviceEffects {
             staged_pushes: BTreeMap::new(),
             completed_pushes: Rc::new(RefCell::new(Vec::new())),
             next_link: 0,
+            layout: super::device_layout_effect::LayoutEffects::default(),
         }
+    }
+
+    /// The layout step's state (the C6 repartition): backup store, staged
+    /// plans, the cached backup index.
+    pub fn layout(&self) -> &super::device_layout_effect::LayoutEffects {
+        &self.layout
+    }
+
+    /// Install the backup store a layout migration writes to before it
+    /// writes the board (OPFS in the browser). Without one, every migration
+    /// asks the user to download the backup first.
+    pub fn set_backup_store(
+        &mut self,
+        store: Rc<dyn super::device_backup_store::DeviceBackupStore>,
+    ) {
+        self.layout.set_store(store);
+        if let Some(spawn) = self.spawn.clone() {
+            spawn(self.layout.refresh_index_task());
+        }
+    }
+
+    /// Hand the user `device`'s backup as a file (the card's "Download
+    /// backup"): fetched off the fold path, then carried out on the view.
+    pub fn request_backup_download(
+        &mut self,
+        device: DeviceId,
+        base_mac: Option<String>,
+        label: Option<String>,
+    ) {
+        let Some(spawn) = self.spawn.clone() else {
+            log::warn!("a backup download was asked for before the spawner was installed");
+            return;
+        };
+        spawn(self.layout.download_task(device, base_mac, label));
+    }
+
+    /// Install the wall clock (epoch seconds) backup archives are stamped
+    /// with. Core reads no clocks; the controller's own is injected.
+    pub fn set_clock(&mut self, clock: Rc<dyn Fn() -> f64>) {
+        self.layout.set_clock(clock);
     }
 
     /// Stage what a [`Action::Push`](lpa_devices::Action::Push) gesture will
@@ -610,7 +655,23 @@ impl DeviceEffects {
                     payload.content_hash.clone(),
                 )
             });
-        let call = match resolve_effect_call(effect, payload) {
+        // The layout step's two hooks (C6 repartition): an inspection's
+        // verdict is staged and reported before its end marker; a stamp
+        // after a VERIFIED carried write completes the backup that covered
+        // it.
+        let inspect_restore = match &effect {
+            EffectRequest::InspectLayout { restore_backup, .. } => Some(*restore_backup),
+            _ => None,
+        };
+        let layout_verified = matches!(
+            &effect,
+            EffectRequest::WriteBoardManifest {
+                layout_verified: true,
+                ..
+            }
+        );
+        let layout = self.layout.clone();
+        let call = match resolve_effect_call(effect, payload, || layout.plan_for_flash(device)) {
             Ok(call) => call,
             Err(message) => {
                 sink(effect_ended(
@@ -639,7 +700,23 @@ impl DeviceEffects {
         sink(Input::Event(Event::LinkBorrow { link, held: true }));
         let writes = Rc::clone(&self.completed_pushes);
         spawn(Box::pin(async move {
-            let result = transport.run_effect(info, call, progress).await;
+            let mut result = transport.run_effect(info, call, progress).await;
+            if let (Some(restore), Ok(facts)) = (inspect_restore, &result) {
+                match layout
+                    .after_inspection(device, facts.inspection.clone(), restore)
+                    .await
+                {
+                    Ok(verdict) => sink(Input::Event(Event::ActivityMarker {
+                        device,
+                        effect: Some(effect_id),
+                        marker: ActivityMarker::LayoutVerdict { verdict },
+                    })),
+                    Err(message) => result = Err(message),
+                }
+            }
+            if layout_verified {
+                layout.complete_task(device).await;
+            }
             // Give the wire back BEFORE the end marker folds: the reducer's
             // very next command may be the ladder's reopen, and a pump still
             // paused would eat the boot hello. Guarded, because this effect
@@ -1081,9 +1158,9 @@ fn effect_ended(
 /// Which activity a coarse effect belongs to.
 fn effect_kind(effect: &EffectRequest) -> ActivityKind {
     match effect {
-        EffectRequest::Flash { .. } | EffectRequest::WriteBoardManifest { .. } => {
-            ActivityKind::Flash
-        }
+        EffectRequest::Flash { .. }
+        | EffectRequest::WriteBoardManifest { .. }
+        | EffectRequest::InspectLayout { .. } => ActivityKind::Flash,
         EffectRequest::Push => ActivityKind::Push,
         EffectRequest::Erase => ActivityKind::Erase,
         EffectRequest::RemoveProject => ActivityKind::RemoveProject,
@@ -1098,10 +1175,24 @@ fn effect_kind(effect: &EffectRequest) -> ActivityKind {
 fn resolve_effect_call(
     effect: EffectRequest,
     payload: Option<StagedPush>,
+    staged_plan: impl FnOnce() -> Result<lpa_link::FlashPlan, String>,
 ) -> Result<DeviceEffectCall, String> {
     match effect {
-        EffectRequest::Flash { build_id, .. } => Ok(DeviceEffectCall::FlashFirmware { build_id }),
-        EffectRequest::WriteBoardManifest { board_id } => {
+        // A carried flash runs the plan its inspection staged, confirmed —
+        // or nothing at all.
+        EffectRequest::Flash {
+            build_id, carry, ..
+        } => Ok(DeviceEffectCall::FlashFirmware {
+            build_id,
+            plan: match carry {
+                true => Some(staged_plan()?),
+                false => None,
+            },
+        }),
+        EffectRequest::InspectLayout { build_id, .. } => {
+            Ok(DeviceEffectCall::InspectLayout { build_id })
+        }
+        EffectRequest::WriteBoardManifest { board_id, .. } => {
             let manifest_json = lpa_boards::runtime_manifest_json(&board_id)
                 .ok_or_else(|| format!("board {board_id} has no checked-in runtime manifest"))?;
             Ok(DeviceEffectCall::WriteHardwareManifest {
@@ -1190,7 +1281,8 @@ mod tests {
             fallback_storage_id: "studio".to_string(),
         });
 
-        let call = resolve_effect_call(EffectRequest::Push, Some(staged)).expect("resolved");
+        let call =
+            resolve_effect_call(EffectRequest::Push, Some(staged), no_plan).expect("resolved");
 
         assert_eq!(
             call,
@@ -1208,7 +1300,8 @@ mod tests {
     fn a_preparation_failure_becomes_the_effects_own_message() {
         let staged = Err("this board has no catalog entry".to_string());
 
-        let error = resolve_effect_call(EffectRequest::Push, Some(staged)).expect_err("refused");
+        let error =
+            resolve_effect_call(EffectRequest::Push, Some(staged), no_plan).expect_err("refused");
 
         assert_eq!(error, "this board has no catalog entry");
     }
@@ -1217,7 +1310,7 @@ mod tests {
     /// honest rather than silent if it ever is not.
     #[test]
     fn a_push_with_nothing_staged_refuses_out_loud() {
-        let error = resolve_effect_call(EffectRequest::Push, None).expect_err("refused");
+        let error = resolve_effect_call(EffectRequest::Push, None, no_plan).expect_err("refused");
 
         assert!(error.contains("nothing was prepared"), "{error}");
     }
@@ -1225,17 +1318,74 @@ mod tests {
     /// Each effect belongs to the activity that asked for it — the kind the
     /// end marker wears, and the one the fold brackets against.
     #[test]
+    fn a_carried_flash_runs_only_a_confirmed_staged_plan() {
+        let call = resolve_effect_call(
+            EffectRequest::Flash {
+                build_id: "esp32c6-4mb".to_string(),
+                board_id: "seeed-xiao-esp32c6".to_string(),
+                carry: true,
+            },
+            None,
+            || {
+                Ok(lpa_link::FlashPlan {
+                    backup_confirmed: true,
+                    ..Default::default()
+                })
+            },
+        )
+        .expect("resolved");
+        assert!(matches!(
+            call,
+            DeviceEffectCall::FlashFirmware { plan: Some(ref plan), .. } if plan.backup_confirmed
+        ));
+        let refused = resolve_effect_call(
+            EffectRequest::Flash {
+                build_id: "esp32c6-4mb".to_string(),
+                board_id: "seeed-xiao-esp32c6".to_string(),
+                carry: true,
+            },
+            None,
+            no_plan,
+        );
+        assert!(refused.is_err(), "no confirmed plan, nothing written");
+        assert!(matches!(
+            resolve_effect_call(
+                EffectRequest::InspectLayout {
+                    build_id: "esp32c6-4mb".to_string(),
+                    restore_backup: false,
+                },
+                None,
+                no_plan,
+            ),
+            Ok(DeviceEffectCall::InspectLayout { .. })
+        ));
+        assert_eq!(
+            effect_kind(&EffectRequest::InspectLayout {
+                build_id: "esp32c6-4mb".to_string(),
+                restore_backup: false,
+            }),
+            ActivityKind::Flash
+        );
+    }
+
+    fn no_plan() -> Result<lpa_link::FlashPlan, String> {
+        Err("nothing staged".to_string())
+    }
+
+    #[test]
     fn effects_name_the_activity_they_belong_to() {
         assert_eq!(
             effect_kind(&EffectRequest::Flash {
                 build_id: "esp32c6-4mb".to_string(),
                 board_id: "seeed-xiao-esp32c6".to_string(),
+                carry: false,
             }),
             ActivityKind::Flash
         );
         assert_eq!(
             effect_kind(&EffectRequest::WriteBoardManifest {
                 board_id: "seeed-xiao-esp32c6".to_string(),
+                layout_verified: false,
             }),
             ActivityKind::Flash,
             "the manifest stamp is the flash's second half, not its own flow"
@@ -1495,6 +1645,7 @@ mod tests {
             EffectRequest::Flash {
                 build_id: "esp32c6-4mb".to_string(),
                 board_id: "seeed-xiao-esp32c6".to_string(),
+                carry: false,
             },
         );
 

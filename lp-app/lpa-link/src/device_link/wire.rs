@@ -34,8 +34,8 @@ use lpa_devices::identity::{DeviceUid, EndpointKey, MacAddress, PeerIdentity};
 use lpa_devices::link::{LinkInfo, UsbIds};
 use lpa_devices::roster::RosterConfig;
 use lpa_devices::wire::{
-    ClientFrame, ClientFrameBody, HelloFacts, LoadedProjectFacts, ProjectFaultFacts, RecoveryFacts,
-    RecoveryLevelFacts, RecoveryPathFacts, ServerFrame,
+    BoardFs, ClientFrame, ClientFrameBody, HelloFacts, LoadedProjectFacts, ProjectFaultFacts,
+    RecoveryFacts, RecoveryLevelFacts, RecoveryPathFacts, ServerFrame,
 };
 use lpc_wire::{
     ClientMessage, ClientRequest, ServerHello, ServerMsgBody, WIRE_PROTO_VERSION, WireServerMessage,
@@ -231,6 +231,12 @@ pub fn hello_facts(hello: &ServerHello) -> HelloFacts {
         },
         firmware: Some(firmware_label(hello)),
         board_id: hello.hardware.board_id.clone(),
+        fs: match hello.hardware.fs {
+            lpc_wire::FsBootState::Mounted => BoardFs::Mounted,
+            lpc_wire::FsBootState::Formatted => BoardFs::Formatted,
+            lpc_wire::FsBootState::Memory => BoardFs::Memory,
+            lpc_wire::FsBootState::LegacyHeld => BoardFs::LegacyHeld,
+        },
     }
 }
 

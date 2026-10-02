@@ -346,6 +346,30 @@ pub struct HelloFacts {
     pub firmware: Option<String>,
     /// Board identifier the firmware was built for, when it knows.
     pub board_id: Option<String>,
+    /// How the board's filesystem came up at boot (the hello's `fs`, wire
+    /// 33). What a layout migration's verification reads, and what the card
+    /// reads to say a board's files are waiting.
+    #[serde(default)]
+    pub fs: BoardFs,
+}
+
+/// How a board's filesystem came up at boot — the model's copy of the
+/// hello's `fs` (`lpc_wire::FsBootState`), plus `Unknown` for a hello this
+/// model built without one (tests, replays of older journals).
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub enum BoardFs {
+    #[default]
+    Unknown,
+    /// Its files mounted.
+    Mounted,
+    /// Nothing mounted; formatted fresh — whatever it held is gone from the
+    /// board (a migration's stored backup may still hold it).
+    Formatted,
+    /// Running on a RAM filesystem.
+    Memory,
+    /// A pre-repartition filesystem is waiting for a migration: the
+    /// firmware refused to format over it.
+    LegacyHeld,
 }
 
 impl HelloFacts {

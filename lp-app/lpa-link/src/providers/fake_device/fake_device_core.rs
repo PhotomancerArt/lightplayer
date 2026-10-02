@@ -78,6 +78,7 @@ impl FakeEsp32Device {
                 premature_input: Vec::new(),
                 failure: FakeFailurePlan::none(),
                 plan_interrupt: None,
+                parked_from: None,
                 dtr_high_seen: false,
                 last_rts: None,
                 reboot_requests: Arc::new(AtomicUsize::new(0)),
@@ -190,6 +191,7 @@ impl FakeEsp32Device {
             link_config,
             ..FakeLightPlayerState::new()
         });
+        core.parked_from = None;
         core.reset_current();
     }
 
@@ -198,6 +200,7 @@ impl FakeEsp32Device {
     pub fn fake_erase(&self) {
         let mut core = self.lock();
         core.script.boot = FakeBootState::BlankFlash;
+        core.parked_from = None;
         core.reset_current();
     }
 
@@ -238,6 +241,7 @@ impl FakeEsp32Device {
     pub(crate) fn replace_boot(&self, boot: FakeBootState) {
         let mut core = self.lock();
         core.script.boot = boot;
+        core.parked_from = None;
         core.reset_current();
     }
 
@@ -248,9 +252,14 @@ impl FakeEsp32Device {
         (core.efuse_mac.clone(), core.board_link.clone())
     }
 
-    /// The current boot state.
-    pub(crate) fn boot_state(&self) -> FakeBootState {
-        self.lock().script.boot.clone()
+    /// What the board's flash holds: the current boot state — or, while the
+    /// ROM downloader runs (a parked board), the state it was parked from.
+    /// Entering download mode does not erase flash.
+    pub(crate) fn flash_state(&self) -> FakeBootState {
+        let core = self.lock();
+        core.parked_from
+            .clone()
+            .unwrap_or_else(|| core.script.boot.clone())
     }
 
     /// Make the NEXT plan this board executes stop after `steps` steps, as a
@@ -343,6 +352,9 @@ pub(crate) struct FakeDeviceCore {
     /// [`FakeEsp32Device::interrupt_next_plan_after`]: steps the next plan
     /// gets through before the "cable" is pulled.
     plan_interrupt: Option<usize>,
+    /// The boot state a download-mode dance parked: what the flash still
+    /// holds while the ROM downloader runs (layout operations read it).
+    parked_from: Option<FakeBootState>,
     dtr_high_seen: bool,
     last_rts: Option<bool>,
     /// Reboots the server's reset hook has asked for, cumulative. Shared
@@ -512,6 +524,10 @@ impl FakeDeviceCore {
             .as_ref()
             .map(|identity| identity.uid.clone())
             .or_else(|| uid_in_root_files(&root_files));
+        // The board the hello names, from a stamped `/hardware.json`, as
+        // firmware loads its manifest (the firmware's built-in default
+        // board is not modelled: no stamped manifest, no board id).
+        let board_id = board_in_root_files(&root_files);
         let hello_identity = lp
             .provenance
             .clone()
@@ -543,6 +559,9 @@ impl FakeDeviceCore {
             }
             let mut server = create_memory_server_with(fs, hello_identity);
             server.set_fs_boot_state(fs_boot_state);
+            if board_id.is_some() {
+                server.set_board_id(board_id);
+            }
             // What the ESP firmwares do: the hello names this build's
             // dictionary and an opt-in naming it is answered `packed`.
             server.set_packed_encoding_supported(packs);
@@ -1034,9 +1053,18 @@ impl FakeDeviceCore {
             if falling {
                 if self.dtr_high_seen {
                     self.dtr_high_seen = false;
-                    self.script.boot = FakeBootState::RomDownloadMode;
+                    let was =
+                        core::mem::replace(&mut self.script.boot, FakeBootState::RomDownloadMode);
+                    if !matches!(was, FakeBootState::RomDownloadMode) {
+                        self.parked_from = Some(was);
+                    }
                     self.reset_current();
                 } else {
+                    // A hard reset leaves the ROM downloader and boots what
+                    // the flash holds.
+                    if let Some(was) = self.parked_from.take() {
+                        self.script.boot = was;
+                    }
                     self.reset_current();
                 }
             }
@@ -1082,6 +1110,13 @@ fn uid_in_root_files(files: &[(String, Vec<u8>)]) -> Option<String> {
         .find(|(path, _)| path == fw_host::DEVICE_IDENTITY_PATH)?;
     let value: serde_json::Value = serde_json::from_slice(bytes).ok()?;
     value.get("uid")?.as_str().map(str::to_string)
+}
+
+/// The board id a stamped `/hardware.json` names (its `id`).
+fn board_in_root_files(files: &[(String, Vec<u8>)]) -> Option<String> {
+    let (_, bytes) = files.iter().find(|(path, _)| path == "/hardware.json")?;
+    let value: serde_json::Value = serde_json::from_slice(bytes).ok()?;
+    value.get("id")?.as_str().map(str::to_string)
 }
 
 fn is_hello(frame: &lpc_wire::WireServerMessage) -> bool {

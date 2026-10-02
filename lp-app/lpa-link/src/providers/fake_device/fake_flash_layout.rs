@@ -62,8 +62,8 @@ pub fn fake_firmware_image() -> Vec<u8> {
 
 impl FakeEsp32Device {
     /// `InspectLayout` on the scripted board.
-    pub(crate) fn fake_inspect_layout(&self) -> LinkLayoutInspection {
-        let flash = flash_image_of(&self.boot_state());
+    pub fn fake_inspect_layout(&self) -> LinkLayoutInspection {
+        let flash = flash_image_of(&self.flash_state());
         let mut probe = LayoutProbe::new(fake_target_table(), true);
         let mut reads = Vec::new();
         while let Some(read) = probe.next_read() {
@@ -90,7 +90,7 @@ impl FakeEsp32Device {
     /// to its flash image (stopping early when
     /// [`FakeEsp32Device::interrupt_next_plan_after`] says so), then a boot of
     /// whatever the image holds.
-    pub(crate) fn fake_execute_plan(&self, plan: &FlashPlan) -> Result<(), LinkError> {
+    pub fn fake_execute_plan(&self, plan: &FlashPlan) -> Result<(), LinkError> {
         if !plan.may_execute() {
             return Err(LinkError::other(
                 crate::PlanError::BackupNotConfirmed.to_string(),
@@ -100,7 +100,7 @@ impl FakeEsp32Device {
         if let Some(refusal) = plan.refuse_board(efuse_mac.as_deref()) {
             return Err(LinkError::other(refusal));
         }
-        let mut flash = flash_image_of(&self.boot_state());
+        let mut flash = flash_image_of(&self.flash_state());
         let firmware = fake_firmware_image();
         let limit = self.take_plan_interrupt();
         let steps = &plan.steps[..limit.unwrap_or(plan.steps.len()).min(plan.steps.len())];
@@ -126,12 +126,28 @@ impl FakeEsp32Device {
         result.map_err(|error| LinkError::other(error.to_string()))
     }
 
+    /// Every file the scripted board holds right now (absolute paths), and
+    /// the filesystem state its next hello reports — what a test asserts
+    /// after a plan ran.
+    pub fn fake_board_files(&self) -> (Vec<(String, Vec<u8>)>, Option<lpc_wire::FsBootState>) {
+        match self.flash_state() {
+            FakeBootState::LightPlayer(lp) => (
+                tree_of(&lp)
+                    .files()
+                    .map(|(path, bytes)| (path.to_string(), bytes.to_vec()))
+                    .collect(),
+                Some(lp.fs_boot_state),
+            ),
+            _ => (Vec::new(), None),
+        }
+    }
+
     /// `ReadRawFilesystem` on the scripted board: its table, then its
     /// `lpfs` row's region.
     pub(crate) fn fake_read_raw_filesystem(
         &self,
     ) -> Result<LinkRawFilesystemReadResult, LinkError> {
-        let flash = flash_image_of(&self.boot_state());
+        let flash = flash_image_of(&self.flash_state());
         let at = PARTITION_TABLE_OFFSET as usize;
         let partition_table = flash[at..at + PARTITION_TABLE_LEN].to_vec();
         let region = PartitionTable::parse(&partition_table)
@@ -295,7 +311,7 @@ mod tests {
         let device = legacy_board();
         let plan = plan_for(&device);
         device.fake_execute_plan(&plan).unwrap();
-        let FakeBootState::LightPlayer(lp) = device.boot_state() else {
+        let FakeBootState::LightPlayer(lp) = device.flash_state() else {
             panic!("a LightPlayer board");
         };
         assert_eq!(lp.fs_boot_state, lpc_wire::FsBootState::Mounted);
@@ -320,7 +336,7 @@ mod tests {
         let plan = plan_for(&device);
         device.interrupt_next_plan_after(1);
         assert!(device.fake_execute_plan(&plan).is_err());
-        let FakeBootState::LightPlayer(lp) = device.boot_state() else {
+        let FakeBootState::LightPlayer(lp) = device.flash_state() else {
             panic!("a LightPlayer board");
         };
         assert_eq!(lp.fs_boot_state, lpc_wire::FsBootState::LegacyHeld);
@@ -339,7 +355,7 @@ mod tests {
         let plan = plan_for(&device);
         device.interrupt_next_plan_after(4);
         assert!(device.fake_execute_plan(&plan).is_err());
-        let FakeBootState::LightPlayer(lp) = device.boot_state() else {
+        let FakeBootState::LightPlayer(lp) = device.flash_state() else {
             panic!("a LightPlayer board");
         };
         assert_eq!(lp.fs_boot_state, lpc_wire::FsBootState::Formatted);
@@ -351,7 +367,7 @@ mod tests {
         let mut plan = plan_for(&device);
         plan.base_mac = Some("aa:bb:cc:dd:ee:ff".to_string());
         assert!(device.fake_execute_plan(&plan).is_err());
-        let FakeBootState::LightPlayer(lp) = device.boot_state() else {
+        let FakeBootState::LightPlayer(lp) = device.flash_state() else {
             panic!("a LightPlayer board");
         };
         assert_eq!(lp.layout, FakeFlashLayout::Legacy, "nothing was written");
