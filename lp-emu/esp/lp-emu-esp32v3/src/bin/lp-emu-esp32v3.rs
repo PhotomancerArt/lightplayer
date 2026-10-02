@@ -511,11 +511,13 @@ fn run() -> Result<ExitCode, String> {
 /// that reaches its idle loop has many; one that is spinning has none, and
 /// the two look identical in a cycle count alone.
 ///
-/// `fence` is [`lp_emu_esp_common::SocBus::missing_fence_reports`]: guest
-/// code executed from bytes the guest itself wrote without publishing them.
-/// A ROM-up boot has thousands by construction — the second-stage bootloader
-/// places the application's IRAM segment and jumps into it — so the number is
-/// reported rather than gated on.
+/// `fence` is [`lp_emu_esp_common::SocBus::missing_fence_reports`], and on
+/// this chip it is **always zero**: the classic publishes code by store, not
+/// by `fence.i` (M7 XD3), so the machine never arms that RV32 checker
+/// (`SocBus::set_fence_contract`). Before it did not, a ROM-up `--strict-bus`
+/// boot reported hundreds — the second-stage bootloader placing the app's
+/// IRAM over the pages it ran from — each named a firmware bug. The column
+/// stays so the `run:` line keeps one shape across the three chips.
 ///
 /// `instructions` is the sum over both cores (ruling R10) and the per-core
 /// counts follow it in brackets; `quantum` is the run parameter D3 names,
