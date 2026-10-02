@@ -398,7 +398,6 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
     // The server's side of the host link: whole wire messages on the link's
     // proto channel.
 
-
     // Boot-control sector: a flash-persisted instruction from a previous run
     // or from the host over esptool. Read (and consumed) before the
     // filesystem mounts, because it must survive the power cycle that wipes
@@ -574,11 +573,109 @@ struct CoreBoot {
     boot_assessment: lp_recovery::BootAssessment,
 }
 
-/// OTA split-link spike: the engine door. The only edge from core into the
-/// engine region; everything reachable from here and not from the core roots
-/// is engine.
+/// OTA split-link spike: the engine's header, the first bytes of the engine
+/// region. The core never names it — it reads it through a plain address —
+/// so no relocation in core points into the engine.
 #[cfg(not(fw_harness))]
-#[unsafe(no_mangle)]
+#[repr(C)]
+struct EngineHeader {
+    magic: [u8; 8],
+    build_id: [u8; 48],
+    entry: fn(CoreBoot),
+}
+
+#[cfg(not(fw_harness))]
+const ENGINE_MAGIC: [u8; 8] = *b"LPENGIN1";
+/// Where the engine is linked (`scripts/ota-spike/split_reach.py --engine-base`).
+#[cfg(not(fw_harness))]
+const ENGINE_VADDR: usize = 0x4240_0000;
+/// Where its bytes sit in flash. S2: a fixed offset inside `factory`, after
+/// the core image. S3 makes this the inactive slot plus the tail.
+#[cfg(not(fw_harness))]
+const ENGINE_FLASH_OFFSET: u32 = 0x14_0000;
+/// The most engine the window may hold (S2: everything after the core in `factory`).
+#[cfg(not(fw_harness))]
+const ENGINE_MAX_BYTES: u32 = 0x31_0000 - ENGINE_FLASH_OFFSET;
+
+/// Lockstep: core and engine carry the same id because they come from the
+/// same link. (Spike: commit + dirty flag; a product build stamps a digest.)
+#[cfg(not(fw_harness))]
+const fn build_id() -> [u8; 48] {
+    let src = concat!(env!("LP_BUILD_COMMIT"), "-", env!("LP_BUILD_DIRTY")).as_bytes();
+    let mut out = [0u8; 48];
+    let mut i = 0;
+    while i < src.len() && i < 48 {
+        out[i] = src[i];
+        i += 1;
+    }
+    out
+}
+
+#[cfg(not(fw_harness))]
+#[unsafe(link_section = ".engine_header")]
+#[used]
+static ENGINE_HEADER: EngineHeader = EngineHeader {
+    magic: ENGINE_MAGIC,
+    build_id: build_id(),
+    entry: lp_engine_entry,
+};
+
+/// Map the engine's flash pages behind `ENGINE_VADDR`: one MMU entry per
+/// page, the way the bootloader maps the app. The page size is whatever the
+/// bootloader chose (`mmu_power_ctrl[4:3]`: 64 KiB >> mode — the IDF
+/// bootloader picks 32 KiB on this 4 MB part), never assumed. Unwritten pages
+/// read as erased flash, which the magic check below rejects.
+#[cfg(not(fw_harness))]
+fn map_engine() {
+    const SPI0: usize = 0x6000_2000;
+    const MMU_ITEM_CONTENT: usize = SPI0 + 0x37c;
+    const MMU_ITEM_INDEX: usize = SPI0 + 0x380;
+    const MMU_POWER_CTRL: usize = SPI0 + 0x384;
+    const MMU_VALID: u32 = 1 << 9;
+    // SAFETY: a read of an SPI0 register.
+    let mode = (unsafe { core::ptr::read_volatile(MMU_POWER_CTRL as *const u32) } >> 3) & 3;
+    let shift = 16 - mode;
+    let first_entry = ((ENGINE_VADDR - 0x4200_0000) >> shift) as u32;
+    let first_page = ENGINE_FLASH_OFFSET >> shift;
+    let pages = ENGINE_MAX_BYTES >> shift;
+    for k in 0..pages {
+        // SAFETY: these entries cover only the engine window, which nothing
+        // has touched yet; the code doing it runs from the core's pages.
+        unsafe {
+            core::ptr::write_volatile(MMU_ITEM_INDEX as *mut u32, first_entry + k);
+            core::ptr::write_volatile(MMU_ITEM_CONTENT as *mut u32, (first_page + k) | MMU_VALID);
+        }
+    }
+}
+
+/// The engine's entry, if a matching engine is mapped.
+#[cfg(not(fw_harness))]
+fn engine_entry() -> Option<fn(CoreBoot)> {
+    let header = ENGINE_VADDR as *const EngineHeader;
+    // SAFETY: the window is mapped (erased flash reads as 0xff); volatile so
+    // the compiler cannot assume anything about bytes it did not write.
+    let (magic, id) = unsafe {
+        (
+            core::ptr::read_volatile(core::ptr::addr_of!((*header).magic)),
+            core::ptr::read_volatile(core::ptr::addr_of!((*header).build_id)),
+        )
+    };
+    if magic != ENGINE_MAGIC {
+        esp_println::println!("[CORE] no engine at {ENGINE_VADDR:#x} — core-only mode");
+        return None;
+    }
+    if id != build_id() {
+        esp_println::println!("[CORE] engine build id mismatch — core-only mode");
+        return None;
+    }
+    // SAFETY: magic and build id match, so this header came from this link.
+    Some(unsafe { core::ptr::read_volatile(core::ptr::addr_of!((*header).entry)) })
+}
+
+/// OTA split-link spike: the engine door. Reached only through
+/// `ENGINE_HEADER`; everything reachable from here and not from the core
+/// roots is engine.
+#[cfg(not(fw_harness))]
 #[inline(never)]
 fn lp_engine_entry(core: CoreBoot) {
     let CoreBoot {
@@ -926,7 +1023,11 @@ async fn main(spawner: embassy_executor::Spawner) {
     #[cfg(not(fw_harness))]
     {
         let core = core_boot(spawner);
-        lp_engine_entry(core);
+        map_engine();
+        match engine_entry() {
+            Some(entry) => entry(core),
+            None => drop(core),
+        }
         loop {
             embassy_time::Timer::after(embassy_time::Duration::from_secs(3600)).await;
         }

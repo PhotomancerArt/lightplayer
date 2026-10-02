@@ -309,6 +309,8 @@ def emit_ld(args, nodes, engine, flash):
         if not is_rust_object(obj):
             continue
         sec = sec[:-1] if sec.endswith(")") else sec
+        if sec == ".engine_header":
+            continue
         # Section names are not unique across objects: compiler_builtins (never
         # LTO'd) carries its own OUTLINED_FUNCTION_N, so match the object too.
         # The object's hash changes with the link args, so glob it; archive
@@ -324,7 +326,7 @@ def emit_ld(args, nodes, engine, flash):
         f.write("/* Engine region: mapped by the core at runtime, never by the bootloader. */\n")
         f.write(f"MEMORY {{\n  ENGINE : ORIGIN = {args.engine_base}, LENGTH = 0x400000\n}}\n")
         f.write("SECTIONS {\n")
-        f.write("  .engine_rodata : ALIGN(4) {\n")
+        f.write("  .engine_rodata : ALIGN(4) {\n    KEEP(*(.engine_header))\n")
         for sct in ro:
             f.write(f"    {sct}\n")
         f.write("  } > ENGINE\n  .engine_text : ALIGN(4) {\n")

@@ -178,6 +178,7 @@ rm -f "$console" "$frames"
 # hardware walk flashes the current tree plus the same feature. Built from the
 # crate directory because its own `.cargo/config.toml` carries the linker
 # script.
+if [[ -n "${LP_WALK_MERGED:-}" ]]; then elf="${LP_WALK_ELF:?LP_WALK_ELF names the ELF the merged image came from}"; else  # OTA spike
 case "$CHIP" in
 esp32c6)
     echo "==> building fw-esp32c6 (esp32c6,server,radio + frame-dump)"
@@ -207,6 +208,7 @@ esac
 # readout in it at all.
 elf="$OUT/$(basename "$built")"
 cp "$built" "$elf"
+fi
 
 # The readout has to be IN the image. Without this check a default build would
 # render perfectly, print nothing, and the walk would report "nothing
@@ -220,6 +222,7 @@ if ! strings "$elf" | grep -a '\[OUT\] dump frame=' >/dev/null; then
     exit 1
 fi
 
+if [[ -n "${LP_WALK_MERGED:-}" ]]; then boot_args=(--merged "$LP_WALK_MERGED"); else  # OTA spike: a prebuilt split image
 boot_args=()
 case "$BOOT" in
     rom-up)
@@ -244,6 +247,7 @@ case "$BOOT" in
         exit 2
         ;;
 esac
+fi
 
 # Release, and it is the expensive step of the walk on a cold cache — minutes,
 # not seconds. It has to be: the emulator's interpreter loop IS this binary,
