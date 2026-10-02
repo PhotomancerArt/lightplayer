@@ -7,6 +7,7 @@
 //! as ordinary ops, so they land where a user's edit lands.
 
 use std::cell::RefCell;
+use std::collections::BTreeSet;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -18,7 +19,7 @@ use lpa_agent::{
 use crate::app::agent::agent_controller::{AgentController, AgentTimerFactory};
 use crate::app::agent::agent_op::AgentOp;
 use crate::app::studio::studio_view_channel::CommandSender;
-use crate::{ControllerId, StudioCommand, UiAction};
+use crate::{ControllerId, OfferPath, StudioCommand, UiAction};
 
 /// How long an `edit_project` batch may take to come back (node creates
 /// and a save round-trip the runtime; a long batch on a device is slow).
@@ -39,12 +40,12 @@ const SETTLE_READS: i64 = 2;
 /// The snapshot the app bridge serves.
 #[derive(Clone, Debug, Default)]
 pub struct AppAgentBridgeState {
-    /// The focused readout of the app, refreshed after every batch; ids
-    /// are minted from it when the agent reads it.
+    /// The focused readout of the app, refreshed after every batch.
     pub readout: crate::app::agent::app_agent_readout::AppReadoutSnapshot,
-    /// The id table of the readout the agent was last shown (PD4): what an
-    /// `act` id resolves against.
-    pub minted: Vec<crate::app::agent::app_agent_readout::MintedAction>,
+    /// Every offer path a readout the agent was shown has listed this
+    /// session: an `act` on one of these that the tree no longer offers is
+    /// "not offered any more", rather than unknown.
+    pub shown: BTreeSet<OfferPath>,
     /// Facts the embedder knows that the view model does not show (yet):
     /// appended to every readout. Evals put the scenario's board line here.
     pub context_notes: Vec<String>,
@@ -198,8 +199,8 @@ impl AppAgentHost for AppAgentHostBridge {
     }
 
     /// One `act`: an `AgentOp::AppAct` on the command queue — the
-    /// controller resolves the id against the readout the agent was shown,
-    /// presses or carded — answered in the shared cell.
+    /// controller looks the offer path up in the current offer tree and
+    /// presses it or puts it on a card — answered in the shared cell.
     fn act<'a>(&'a mut self, input: &'a ActInput) -> HostFuture<'a, Result<ActOutcome, HostError>> {
         Box::pin(async move {
             self.seq += 1;
@@ -231,9 +232,12 @@ impl AppAgentHost for AppAgentHostBridge {
     }
 
     fn readout(&mut self) -> String {
-        let mut state = self.state.borrow_mut();
-        let (mut out, minted) = state.readout.mint();
-        state.minted = minted;
+        let mut guard = self.state.borrow_mut();
+        let state = &mut *guard;
+        let mut out = state.readout.render();
+        state
+            .shown
+            .extend(state.readout.offers.iter().map(|offer| offer.path.clone()));
         for note in &state.context_notes {
             out.push_str(note);
             out.push('\n');

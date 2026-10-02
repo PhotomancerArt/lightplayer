@@ -26,7 +26,9 @@ use lpc_access::{
 };
 use lpc_model::{AsLpPath, AsLpPathBuf, LpValue, NodeAttachSite, NodeId};
 use lpc_shared::output::MemoryOutputProvider;
-use lpc_shared::transport::{Incoming, Link, LinkId, LinkTrust, ServerTransport};
+use lpc_shared::transport::{
+    Incoming, KeyAnswer, Link, LinkId, LinkTrust, SecureLinkEvent, ServerTransport,
+};
 use lpc_wire::server::{FsRequest, FsResponse, SampleStats};
 use lpc_wire::{
     ClientMessage, ClientRequest, HelloAuth, ProjectReadRequest, TransportError,
@@ -48,6 +50,12 @@ const BLE_A: Link = Link {
 const BLE_B: Link = Link {
     id: LinkId::new(8),
     trust: LinkTrust::Untrusted,
+};
+/// A secure network link (lp-link's `secure` feature): its tier is its
+/// handshake key's. The rig plays its transport's handshake events.
+const KEYED: Link = Link {
+    id: LinkId::new(9),
+    trust: LinkTrust::Keyed,
 };
 
 /// THE TABLE. Every `ClientRequest` variant — `Filesystem` expanded to every
@@ -735,30 +743,58 @@ enum LinkState {
     UntrustedOpen,
     UntrustedPlay,
     UntrustedEdit,
+    /// A keyed link up on the anonymous key, the device locked.
+    KeyedAnonymousLocked,
+    /// A keyed link up on the anonymous key, the device `open`.
+    KeyedAnonymousOpen,
+    /// A keyed link up on the play secret's key.
+    KeyedPlay,
+    /// A keyed link up on the edit secret's key.
+    KeyedEdit,
 }
 
 impl LinkState {
-    const ALL: [LinkState; 5] = [
+    const ALL: [LinkState; 9] = [
         LinkState::Trusted,
         LinkState::UntrustedNone,
         LinkState::UntrustedOpen,
         LinkState::UntrustedPlay,
         LinkState::UntrustedEdit,
+        LinkState::KeyedAnonymousLocked,
+        LinkState::KeyedAnonymousOpen,
+        LinkState::KeyedPlay,
+        LinkState::KeyedEdit,
     ];
 
     fn link(self) -> Link {
         match self {
             LinkState::Trusted => USB,
+            LinkState::KeyedAnonymousLocked
+            | LinkState::KeyedAnonymousOpen
+            | LinkState::KeyedPlay
+            | LinkState::KeyedEdit => KEYED,
             _ => BLE_A,
         }
     }
 
     fn tier(self) -> Option<Tier> {
         match self {
-            LinkState::Trusted | LinkState::UntrustedEdit => Some(Tier::Edit),
-            LinkState::UntrustedOpen | LinkState::UntrustedPlay => Some(Tier::Play),
-            LinkState::UntrustedNone => None,
+            LinkState::Trusted | LinkState::UntrustedEdit | LinkState::KeyedEdit => {
+                Some(Tier::Edit)
+            }
+            LinkState::UntrustedOpen
+            | LinkState::UntrustedPlay
+            | LinkState::KeyedAnonymousOpen
+            | LinkState::KeyedPlay => Some(Tier::Play),
+            LinkState::UntrustedNone | LinkState::KeyedAnonymousLocked => None,
         }
+    }
+
+    fn device_open(self) -> bool {
+        matches!(
+            self,
+            LinkState::UntrustedOpen | LinkState::KeyedAnonymousOpen
+        )
     }
 }
 
@@ -780,7 +816,7 @@ impl Rig {
                 secret("mine", Tier::Edit, EDIT_PASSWORD, 2),
             ],
             ble_enabled: true,
-            open: state == LinkState::UntrustedOpen,
+            open: state.device_open(),
         };
         let fs = LpFsMemory::new();
         fs.write_file(
@@ -821,9 +857,32 @@ impl Rig {
                     LoginOutcome::Granted { .. }
                 ));
             }
+            LinkState::KeyedAnonymousLocked | LinkState::KeyedAnonymousOpen => {
+                rig.keyed_handshake(KEYED, [0; 16]);
+            }
+            LinkState::KeyedPlay => rig.keyed_handshake(KEYED, [1; 16]),
+            LinkState::KeyedEdit => rig.keyed_handshake(KEYED, [2; 16]),
             _ => {}
         }
         rig
+    }
+
+    /// What a secure link's transport reports for a handshake on `link`
+    /// with the key `salt`: the lookup (answered with candidates), then the
+    /// session up on the first one.
+    fn keyed_handshake(&mut self, link: Link, salt: [u8; 16]) {
+        self.transport
+            .secure_events
+            .push((link.id, SecureLinkEvent::KeyLookup { salt }));
+        self.idle(16);
+        let (answered, answer) = self.transport.answers.pop().expect("a lookup answer");
+        assert_eq!(answered, link.id);
+        assert!(matches!(answer, KeyAnswer::Keys(_)), "{answer:?}");
+        self.transport.secure_events.push((
+            link.id,
+            SecureLinkEvent::Authenticated { salt, candidate: 0 },
+        ));
+        self.idle(16);
     }
 
     /// Send one request on `link` and return the one reply it got.
@@ -913,6 +972,10 @@ impl Rig {
 struct LinkTransport {
     sent: Vec<(LinkId, WireServerMessage)>,
     closed: Vec<LinkId>,
+    /// Handshake events the next tick drains.
+    secure_events: Vec<(LinkId, SecureLinkEvent)>,
+    /// The server's answers to key lookups.
+    answers: Vec<(LinkId, KeyAnswer)>,
 }
 
 impl ServerTransport for LinkTransport {
@@ -935,6 +998,14 @@ impl ServerTransport for LinkTransport {
 
     fn take_closed_links(&mut self) -> Vec<LinkId> {
         core::mem::take(&mut self.closed)
+    }
+
+    fn take_secure_events(&mut self) -> Vec<(LinkId, SecureLinkEvent)> {
+        core::mem::take(&mut self.secure_events)
+    }
+
+    fn answer_key_lookup(&mut self, link: LinkId, answer: KeyAnswer) {
+        self.answers.push((link, answer));
     }
 
     async fn close(&mut self) -> Result<(), TransportError> {

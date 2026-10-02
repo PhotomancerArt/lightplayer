@@ -130,7 +130,25 @@ impl SynBody {
             rx_window: body[11],
         })
     }
+
+    /// The 12-byte head of any SYN, plain or secure (a secure SYN may carry
+    /// an extension after it, see `frame::secure_syn`), and its flags byte. For
+    /// readers that only need to tell the two apart (the sniffer).
+    pub fn parse_prefix(body: &[u8]) -> Option<(SynBody, u8)> {
+        let head = body.get(..SYN_LEN)?;
+        Some((SynBody::parse(head)?, head[8]))
+    }
 }
+
+/// SYN flags (byte 8 of the body), bit 0: the sender considers the link up.
+pub const SYN_ESTABLISHED: u8 = 0x01;
+/// SYN flags, bit 1: the sender runs a secure link (feature `secure`). Bits
+/// 2–3 then name the Noise content after the 12 bytes; a plain link sends
+/// this bit, and those, as zero.
+pub const SYN_SECURE: u8 = 0x02;
+
+#[cfg(feature = "secure")]
+pub mod secure_syn;
 
 /// Build `header ‖ body ‖ crc` into `raw`: the whole frame on a datagram
 /// transport. `key` keys the checksum (0 for SYN).

@@ -269,3 +269,13 @@ validation arms stay pinned to pre-lp-link images), and Studio cannot reach
 an emulated classic (`lp-cli emu serve` and the tab backing hold C6s only),
 so the classic's Studio path is proven by the Web Serial conformance
 suite's board double, not the firmware.
+
+## Amendment 2026-10-01: security is a link feature
+
+lp-link gained an optional **`secure`** feature (plan
+`lp2025/2026-10-01-1843-secure-link`, M4 of the Wi-Fi control roadmap):
+Noise NNpsk0 merged into this ADR's SYN handshake, then every frame sealed
+with the header as associated data. A plain link (every link that ships
+today: USB, the classic's UART, BLE's `M!` path) is byte-identical and, built
+without the feature, compiles to the same code. Decision, wire layout, costs
+and limits: `docs/adr/2026-10-01-network-link-security.md`.

@@ -139,3 +139,85 @@ proptest! {
         check::<StopAndWait>(&c)?;
     }
 }
+
+/// The same promise with both links secure (feature `secure`): selective
+/// repeat on every ARQ transport (`ble()` secured, so a sealed frame fits a
+/// notification), and no ARQ on a WebSocket pipe that now loses, damages
+/// and duplicates. A no-ARQ secure link keeps the promise by resetting on
+/// every counter gap (the reset reports what was lost), where a plain one
+/// would deliver around the hole.
+#[cfg(feature = "secure")]
+mod secure {
+    use super::*;
+    use lp_link::sim::secure_sim::SecureSim;
+    use lp_link::{LinkConfig, NoArq};
+
+    fn check_secure<A: Arq>(c: &Case) -> Result<(), TestCaseError> {
+        let workload = Workload::Random {
+            mean_gap: 8_000,
+            max_size: 3_000,
+        };
+        let mut sc = Scenario::new(c.transport, 0.0, workload, DURATION, c.seed);
+        if c.transport == Transport::Ble {
+            sc = sc.with_configs(LinkConfig::ble().secured());
+        }
+        sc.faults_up = c.up.clone();
+        sc.faults_down = c.down.clone();
+        sc.board_reboots = c.reboots.clone();
+        sc.secure = Some(SecureSim::matched());
+        let r = run::<A>(&sc);
+        prop_assert!(
+            r.violations.is_empty(),
+            "secure {} on {}: {:#?}",
+            A::NAME,
+            c.transport.name(),
+            r.violations
+        );
+        prop_assert!(r.up.sent > 0 && r.down.sent > 0, "the workload ran");
+        prop_assert!(r.host.handshakes > 0 && r.board.handshakes > 0);
+        Ok(())
+    }
+
+    /// A WebSocket pipe's faults, without delay spikes. A spike on an
+    /// ordered pipe holds everything behind it and then releases it at once,
+    /// and a no-ARQ receiver drops what overflows its receive budget
+    /// (`rx_no_room`) with no reset: the sender has no window to respect and
+    /// nothing resends. That is no-ARQ's own behaviour, plain or secure (a
+    /// spike case fails the same way on a plain link), not the secure
+    /// channel's, so it is left out here and named for the first product
+    /// no-ARQ link to settle.
+    fn ws_faults() -> impl Strategy<Value = Faults> {
+        faults().prop_map(|f| Faults {
+            spike: 0.0,
+            spike_len: 0,
+            ..f
+        })
+    }
+
+    fn ws_case() -> impl Strategy<Value = Case> {
+        let reboots = prop::collection::vec(0..DURATION, 0..=3);
+        (ws_faults(), ws_faults(), reboots, any::<u64>()).prop_map(|(up, down, reboots, seed)| {
+            Case {
+                transport: Transport::Ws,
+                up,
+                down,
+                reboots,
+                seed,
+            }
+        })
+    }
+
+    proptest! {
+        #![proptest_config(config())]
+
+        #[test]
+        fn secure_selective_repeat_keeps_the_promise(c in case()) {
+            check_secure::<SelectiveRepeat>(&c)?;
+        }
+
+        #[test]
+        fn secure_no_arq_on_a_websocket_keeps_the_promise_by_resetting(c in ws_case()) {
+            check_secure::<NoArq>(&c)?;
+        }
+    }
+}

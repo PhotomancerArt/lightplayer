@@ -18,6 +18,11 @@
 //! Guard: events targeting editable controls (`input`, `textarea`,
 //! `select`, `contenteditable`) never reach the handler — typing in a
 //! field is not a verb.
+//!
+//! The one exception is [`use_window_shortcut`], for a chord that must work
+//! from inside a field too (the command palette's ⌘K): no editable guard,
+//! and it listens in the capture phase so a field that stops the event's
+//! propagation (CodeMirror) cannot swallow it first.
 
 use dioxus::prelude::*;
 
@@ -40,36 +45,70 @@ pub(crate) fn editor_key_input(
 /// component. `handler` is re-captured every render (see module doc);
 /// editable-target events are filtered before it runs.
 pub(crate) fn use_window_keydown(handler: impl FnMut(web_sys::KeyboardEvent) + 'static) {
+    use_window_keydown_with(handler, KeydownScope::OutsideFields);
+}
+
+/// Install a window keydown listener for a chord that works EVERYWHERE,
+/// editable fields included (see module doc). The handler sees every
+/// keydown, so it must match its chord narrowly and leave the rest alone.
+pub(crate) fn use_window_shortcut(handler: impl FnMut(web_sys::KeyboardEvent) + 'static) {
+    use_window_keydown_with(handler, KeydownScope::Everywhere);
+}
+
+/// Which keydowns a window listener sees.
+#[derive(Clone, Copy)]
+enum KeydownScope {
+    /// Not those aimed at an editable control; bubble phase.
+    OutsideFields,
+    /// All of them; capture phase.
+    Everywhere,
+}
+
+fn use_window_keydown_with(
+    handler: impl FnMut(web_sys::KeyboardEvent) + 'static,
+    scope: KeydownScope,
+) {
     let callback = use_callback(handler);
     #[cfg(target_arch = "wasm32")]
-    use_hook(move || std::rc::Rc::new(WindowKeydown::install(callback)));
+    use_hook(move || std::rc::Rc::new(WindowKeydown::install(callback, scope)));
     #[cfg(not(target_arch = "wasm32"))]
-    let _ = callback;
+    let _ = (callback, scope);
 }
 
 #[cfg(target_arch = "wasm32")]
 struct WindowKeydown {
     window: web_sys::Window,
     callback: wasm_bindgen::closure::Closure<dyn FnMut(web_sys::KeyboardEvent)>,
+    capture: bool,
 }
 
 #[cfg(target_arch = "wasm32")]
 impl WindowKeydown {
-    fn install(handler: Callback<web_sys::KeyboardEvent>) -> Option<Self> {
+    fn install(handler: Callback<web_sys::KeyboardEvent>, scope: KeydownScope) -> Option<Self> {
         use wasm_bindgen::JsCast as _;
 
         let window = web_sys::window()?;
+        let filter_fields = matches!(scope, KeydownScope::OutsideFields);
+        let capture = matches!(scope, KeydownScope::Everywhere);
         let callback =
             wasm_bindgen::closure::Closure::wrap(Box::new(move |event: web_sys::KeyboardEvent| {
-                if lpa_mapping_editor::event_targets_editable(&event) {
+                if filter_fields && lpa_mapping_editor::event_targets_editable(&event) {
                     return;
                 }
                 handler.call(event);
             }) as Box<dyn FnMut(_)>);
         window
-            .add_event_listener_with_callback("keydown", callback.as_ref().unchecked_ref())
+            .add_event_listener_with_callback_and_bool(
+                "keydown",
+                callback.as_ref().unchecked_ref(),
+                capture,
+            )
             .ok()?;
-        Some(Self { window, callback })
+        Some(Self {
+            window,
+            callback,
+            capture,
+        })
     }
 }
 
@@ -77,8 +116,10 @@ impl WindowKeydown {
 impl Drop for WindowKeydown {
     fn drop(&mut self) {
         use wasm_bindgen::JsCast as _;
-        let _ = self
-            .window
-            .remove_event_listener_with_callback("keydown", self.callback.as_ref().unchecked_ref());
+        let _ = self.window.remove_event_listener_with_callback_and_bool(
+            "keydown",
+            self.callback.as_ref().unchecked_ref(),
+            self.capture,
+        );
     }
 }

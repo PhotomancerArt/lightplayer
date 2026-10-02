@@ -282,6 +282,15 @@ test_comms_lab_wifi = ["test_comms_lab", "radio", "dep:embassy-net", "dep:static
 # macOS Web Serial path does to a link that does not escape 0xFF.
 test_comms_lab_plain_cobs = ["test_comms_lab"]
 
+# What lp-link's `secure` feature costs on this chip (plan
+# `lp2025/2026-10-01-1843-secure-link`, P5): the PRODUCT image with a secure
+# link pair run once at boot, after the server is up, logging `[SECURE]`
+# lines (RAM, handshake and sealing cycles, the handshake's stack). Not a
+# `test_*` feature on purpose: those replace the product with a harness, and
+# the number wanted is the product image's delta. See
+# `src/secure_link_probe.rs`. Never shipped.
+diag_secure_link = ["server", "dep:lp-link", "lp-link/secure"]
+
 # FIXTURE builds — test scaffolding, never shipped. Make this CURRENT
 # build misreport its hello so a current Studio classifies it Incompatible,
 # reproducing the s4 device scenario from source instead of from an

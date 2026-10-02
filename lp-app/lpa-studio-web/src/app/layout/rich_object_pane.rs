@@ -21,7 +21,7 @@
 //! device rich object through this same header.
 
 use dioxus::prelude::*;
-use lpa_studio_core::{UiAction, UiPaneAction};
+use lpa_studio_core::{UiAction, UiOffer};
 
 use crate::app::layout::{PaneChrome, PaneCollapse, PaneTone, StudioPane};
 
@@ -50,9 +50,10 @@ pub fn RichObjectPane(
     /// Draw the pane outline in the neutral selection color (focus).
     #[props(default = false)]
     selected: bool,
-    /// Contextual header actions rendered as icon buttons.
+    /// Contextual header verbs (from the view's offer tree) rendered as
+    /// icon buttons.
     #[props(default)]
-    actions: Vec<UiPaneAction>,
+    actions: Vec<UiOffer>,
     /// Action dispatch conduit for the actions slot.
     #[props(default)]
     on_action: Option<EventHandler<UiAction>>,
