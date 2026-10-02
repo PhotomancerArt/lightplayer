@@ -42,6 +42,7 @@ mod engine_window;
 mod split_flash;
 mod system_reset;
 mod update_channel;
+mod update_ticket;
 
 pub use boot_state::BootState;
 pub use engine_window::{ENGINE_VADDR, map_engine};

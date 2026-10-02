@@ -97,6 +97,11 @@ pub struct CaptureArgs {
     /// every reset the update performs.
     #[arg(long = "ota-offer")]
     pub ota_offer: Option<PathBuf>,
+
+    /// OTA spike, `blepipe:` targets: log in with this password once the
+    /// board says hello (an untrusted link needs the edit tier to offer).
+    #[arg(long)]
+    pub password: Option<String>,
 }
 
 #[derive(Debug, Args)]

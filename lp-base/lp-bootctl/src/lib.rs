@@ -73,6 +73,7 @@ pub use boot_record::{
 };
 pub use split_layout::{
     BOOT_RECORD_SECTORS, Extent, LOADER_MAX_LEN, LOADER_OFFSET, REGION_END_C6_4MB, REGION_START,
+    UPDATE_TICKET_SECTOR,
     SplitLayout,
 };
 

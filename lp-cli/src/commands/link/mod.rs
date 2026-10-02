@@ -1,6 +1,7 @@
 //! `lp-cli link`: measure a board's host link.
 
 pub mod args;
+pub mod ble_pipe;
 pub mod capture;
 pub mod capture_requests;
 pub mod handler;

@@ -38,7 +38,7 @@ pub fn set_update_hook(hook: fn(&[u8])) {
     UPDATE_HOOK.store(hook as usize, core::sync::atomic::Ordering::Release);
 }
 
-pub(crate) fn on_update_message(data: &[u8]) {
+pub fn on_update_message(data: &[u8]) {
     let raw = UPDATE_HOOK.load(core::sync::atomic::Ordering::Acquire);
     if raw != 0 {
         // SAFETY: only `set_update_hook` stores here, and it stores a `fn(&[u8])`.

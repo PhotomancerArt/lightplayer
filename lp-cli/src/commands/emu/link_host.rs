@@ -363,6 +363,11 @@ pub struct OtaServe {
     pub refusals: u32,
     /// Spike: end the run (a power cut) once this many requests are served.
     pub cut_after: Option<u32>,
+    /// Spike: the ticket every offer carries (an untrusted link's
+    /// authorization, see `fw-esp32c6`'s `ota/update_ticket.rs`).
+    pub ticket: Option<[u8; 16]>,
+    /// Offers refused for want of a login or a ticket (`A`).
+    pub auth_refusals: u32,
 }
 
 impl OtaServe {
@@ -386,6 +391,8 @@ impl OtaServe {
             served_bytes: 0,
             refusals: 0,
             cut_after: None,
+            ticket: None,
+            auth_refusals: 0,
         })
     }
 
@@ -395,6 +402,9 @@ impl OtaServe {
         out.extend_from_slice(&(self.core.len() as u32).to_le_bytes());
         out.extend_from_slice(&(self.engine.len() as u32).to_le_bytes());
         out.extend_from_slice(&self.build_id);
+        if let Some(ticket) = &self.ticket {
+            out.extend_from_slice(ticket);
+        }
         out
     }
 
@@ -403,6 +413,10 @@ impl OtaServe {
             b'Q' => Some(self.offer()),
             b'F' => {
                 self.refusals += 1;
+                None
+            }
+            b'A' => {
+                self.auth_refusals += 1;
                 None
             }
             b'R' if msg.len() == 10 => {

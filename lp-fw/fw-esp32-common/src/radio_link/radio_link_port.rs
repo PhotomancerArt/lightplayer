@@ -201,7 +201,7 @@ impl RadioLinkSlot {
     /// Run `f` on `id`'s link; `None` when the slot holds no link or another
     /// connection's. Never call it from inside another, and never hold what
     /// `f` returns across an `.await` (see the module docs).
-    pub(crate) fn with_link<R>(
+    pub fn with_link<R>(
         &self,
         id: LinkId,
         f: impl FnOnce(&mut LpLink<SelectiveRepeat>) -> R,
@@ -234,7 +234,7 @@ impl RadioLinkSlot {
     }
 
     /// Wake the radio side to transmit what was just queued.
-    pub(crate) fn ring(&self) {
+    pub fn ring(&self) {
         self.doorbell.signal(());
     }
 
@@ -314,7 +314,7 @@ impl RadioLinkPort {
         self.events.send(event).await;
     }
 
-    pub(crate) fn try_event(&self) -> Option<RadioLinkEvent> {
+    pub fn try_event(&self) -> Option<RadioLinkEvent> {
         self.events.try_receive().ok()
     }
 }

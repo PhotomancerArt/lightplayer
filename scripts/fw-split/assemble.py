@@ -16,7 +16,7 @@ import sys
 import zlib
 
 LOADER_OFFSET = 0x1_0000
-LOADER_MAX_LEN = 0x6000
+LOADER_MAX_LEN = 0x5000  # the update ticket's sector follows (0x15000)
 BOOT_RECORD_SECTORS = (0x1_6000, 0x1_7000)
 REGION_START = 0x1_8000
 REGION_END = 0x31_0000
@@ -47,7 +47,7 @@ def main():
     loader, core, engine = (open(p, "rb").read() for p in (a.loader, a.core, a.engine))
 
     if len(loader) > LOADER_MAX_LEN:
-        sys.exit(f"loader is {len(loader)} B; the boot records start {LOADER_MAX_LEN} B in")
+        sys.exit(f"loader is {len(loader)} B; the update ticket starts {LOADER_MAX_LEN} B in")
     engine_at = -(-(REGION_START + len(core)) // a.page) * a.page
     if engine_at + len(engine) > REGION_END:
         sys.exit(f"core {len(core)} B + engine {len(engine)} B do not fit the region "

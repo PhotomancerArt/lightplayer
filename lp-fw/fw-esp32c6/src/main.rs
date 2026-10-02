@@ -1177,9 +1177,23 @@ async fn split_boot(mut core: CoreBoot) {
                 ota::say!("[OTA] {incomplete} incomplete boots — not starting the engine");
             }
             let CoreBoot {
-                usb_link, watchdog, ..
+                usb_link,
+                watchdog,
+                #[cfg(feature = "ble")]
+                radio_port,
+                #[cfg(feature = "ble")]
+                ble_started,
+                ..
             } = core;
-            ota::core_only(usb_link, watchdog, state, engine_crashing).await;
+            ota::core_only(
+                usb_link,
+                #[cfg(feature = "ble")]
+                ble_started.then_some(radio_port),
+                watchdog,
+                state,
+                engine_crashing,
+            )
+            .await;
         }
     }
 }

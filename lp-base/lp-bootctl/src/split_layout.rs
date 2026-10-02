@@ -25,8 +25,15 @@
 
 /// Where the IDF bootloader finds the loader: the app partition's start.
 pub const LOADER_OFFSET: u32 = 0x1_0000;
-/// The loader image may not reach the boot records.
-pub const LOADER_MAX_LEN: u32 = 0x6000;
+/// The loader image may not reach the update ticket (the sector before the
+/// boot records).
+pub const LOADER_MAX_LEN: u32 = 0x5000;
+/// OTA spike: the update ticket's sector. An update offered over an untrusted
+/// link (radio) is authorized by a logged-in engine, which stores the
+/// offer's ticket here before it resets; the core alone has no login and
+/// accepts an untrusted link's offer only with this ticket. Erased when an
+/// update completes, and by flashing `app.bin` (its bytes here are `0xff`).
+pub const UPDATE_TICKET_SECTOR: u32 = 0x1_5000;
 /// The two boot-record sectors.
 pub const BOOT_RECORD_SECTORS: [u32; 2] = [0x1_6000, 0x1_7000];
 /// The first byte of the region, and the low end's core offset.

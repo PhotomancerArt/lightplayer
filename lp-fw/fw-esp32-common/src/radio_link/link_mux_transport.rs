@@ -132,6 +132,10 @@ pub struct LinkMuxTransport<U, D> {
     /// Closed links the server has not been told about yet.
     closed: Vec<LinkId>,
     upkeep_hook: Option<fn(&LpServer, u64)>,
+    /// OTA spike: update-channel messages taken off radio links, waiting for
+    /// the upkeep to check the link's tier (the server knows it; the pump
+    /// does not).
+    updates: Vec<(LinkId, alloc::vec::Vec<u8>)>,
 }
 
 impl<U: ServerTransport + FrameBufHolder, D: DelayNs> LinkMuxTransport<U, D> {
@@ -147,6 +151,7 @@ impl<U: ServerTransport + FrameBufHolder, D: DelayNs> LinkMuxTransport<U, D> {
             inbox: VecDeque::new(),
             closed: Vec::new(),
             upkeep_hook: None,
+            updates: Vec::new(),
         }
     }
 
@@ -157,6 +162,16 @@ impl<U: ServerTransport + FrameBufHolder, D: DelayNs> LinkMuxTransport<U, D> {
     pub fn with_upkeep_hook(mut self, hook: fn(&LpServer, u64)) -> Self {
         self.upkeep_hook = Some(hook);
         self
+    }
+
+    /// OTA spike: tell a radio link's host its update was refused (`A`: log
+    /// in first, or bring a ticket).
+    fn send_update_refusal(&self, id: LinkId, code: u8) {
+        if let Some(radio) = self.radio.iter().find(|r| r.id == id) {
+            let slot = self.port.slot(radio.slot);
+            let _ = slot.with_link(id, |link| link.send(lp_link::CH_UPDATE, &[code]));
+            slot.ring();
+        }
     }
 
     /// Close every radio link that has been open for [`LOGIN_DEADLINE_MS`]
@@ -279,6 +294,9 @@ impl<U: ServerTransport + FrameBufHolder, D: DelayNs> LinkMuxTransport<U, D> {
                                 );
                             }
                         }
+                    }
+                    LinkEvent::Message { channel, data } if channel == lp_link::CH_UPDATE => {
+                        self.updates.push((radio.id, data));
                     }
                     LinkEvent::Message { channel, data } => {
                         log::debug!(
@@ -577,6 +595,22 @@ impl<U: ServerTransport + FrameBufHolder + LinkUpkeep, D: DelayNs> LinkUpkeep
         );
         if let Some(hook) = self.upkeep_hook {
             hook(server, now_ms);
+        }
+        // OTA spike: an update offered over a radio link goes to the core's
+        // hook only from a link logged in at the edit tier, and only with a
+        // ticket (an offer of 73 B): after the reset the core has no login,
+        // and the ticket is what it will accept over radio instead.
+        for (id, data) in core::mem::take(&mut self.updates) {
+            let tier = server.link_tier(RadioLinkPort::link(id));
+            if !tier.is_some_and(|t| t.satisfies(lpc_access::Tier::Edit)) {
+                log::warn!("[OTA] radio link {id}: update refused — not logged in at the edit tier");
+                self.send_update_refusal(id, b'A');
+            } else if data.first() == Some(&b'O') && data.len() != 73 {
+                log::warn!("[OTA] radio link {id}: update refused — an offer over radio needs a ticket");
+                self.send_update_refusal(id, b'A');
+            } else {
+                crate::usb_link::on_update_message(&data);
+            }
         }
     }
 }

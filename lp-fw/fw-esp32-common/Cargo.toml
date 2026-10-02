@@ -51,6 +51,7 @@ lp-recovery = { path = "../../lp-base/lp-recovery", default-features = false, op
 # tier-specific belongs on a chip crate's own `lpa-server` line;
 # `fw-esp32c6` already does, so its resolved feature set is unchanged.
 lpa-server = { path = "../../lp-app/lpa-server", default-features = false, optional = true }
+lpc-access = { path = "../../lp-core/lpc-access", default-features = false, optional = true }
 lpc-model = { path = "../../lp-core/lpc-model", default-features = false, optional = true }
 lpc-wire = { path = "../../lp-core/lpc-wire", default-features = false, optional = true, features = ["ser-write-json"] }
 # The learned table a packed link keeps (`serial::packed_link`); `alloc` for
@@ -82,7 +83,7 @@ radio-link = ["server", "dep:lp-link"]
 # plan `classic-uart-on-lp-link`): the classic (v3) turns it on. The server
 # transport over it (`uart_link::uart_link_transport`) also needs `server`.
 uart-link = ["dep:lp-link", "dep:critical-section"]
-server = ["dep:littlefs-rust", "dep:lp-json-pack", "dep:lp-recovery", "dep:lpa-server", "dep:lpc-model", "dep:lpc-wire", "dep:lpfs", "dep:ser-write-json"]
+server = ["dep:littlefs-rust", "dep:lp-json-pack", "dep:lp-recovery", "dep:lpa-server", "dep:lpc-access", "dep:lpc-model", "dep:lpc-wire", "dep:lpfs", "dep:ser-write-json"]
 
 [dev-dependencies]
 # Host tests of the link mux run embassy-sync channels, whose

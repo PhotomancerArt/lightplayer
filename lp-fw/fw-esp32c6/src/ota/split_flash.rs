@@ -17,7 +17,7 @@
 //!
 //! [`protect`]: SplitFlash::protect
 
-use lp_bootctl::{BOOT_RECORD_SECTORS, Extent, REGION_END_C6_4MB, REGION_START};
+use lp_bootctl::{BOOT_RECORD_SECTORS, Extent, REGION_END_C6_4MB, REGION_START, UPDATE_TICKET_SECTOR};
 
 pub const SECTOR: u32 = 4096;
 
@@ -78,6 +78,7 @@ impl SplitFlash {
         };
         if BOOT_RECORD_SECTORS
             .iter()
+            .chain(core::iter::once(&UPDATE_TICKET_SECTOR))
             .any(|s| at >= *s && at + len <= s + SECTOR)
         {
             return true;

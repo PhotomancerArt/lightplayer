@@ -27,6 +27,9 @@ use crate::commands::emu::link_host::{console_lines, describe_link_counters, fre
 /// Host the link on `args.target` and write the console until the marker or
 /// the deadline.
 pub fn capture(args: &CaptureArgs) -> Result<()> {
+    if let Some(port) = args.target.strip_prefix("blepipe:") {
+        return super::ble_pipe::capture(args, port);
+    }
     let mut requests = CaptureRequests::parse(&args.request)?;
     let mut port = Some(LabPort::open(&args.target, TermiosMode::Raw)?);
     let mut ota = match &args.ota_offer {
