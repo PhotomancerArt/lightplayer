@@ -1543,6 +1543,11 @@ fn report(machine: &mut Esp32C6Machine, outcome: &Outcome) {
         Outcome::WallTimeout { .. } => {
             eprintln!("WALL TIMEOUT — the host-clock safety net, not a guest event")
         }
+        Outcome::DeepSleep { cycle, wake } => eprintln!(
+            "DEEP SLEEP at cycle {cycle} ({} us) — guest entered deep sleep ({wake}); the wake \
+             itself is not modelled",
+            cycle / memmap::CYCLES_PER_US
+        ),
         Outcome::Breakpoint { pc, .. } => {
             let regs = machine.registers();
             eprintln!(
