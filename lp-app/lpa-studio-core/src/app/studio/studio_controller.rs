@@ -6532,12 +6532,24 @@ impl StudioController {
     /// are listed in full.
     fn app_agent_readout(&self) -> crate::app::agent::app_agent_readout::AppReadoutSnapshot {
         use crate::app::agent::app_agent_readout::{
-            AppReadoutSnapshot, device_lines, looking_at_lines, page_line, project_lines,
+            AppReadoutSnapshot, device_lines, looking_at_lines, opening_line, page_line,
+            project_lines,
         };
-        let home = self.home_view().is_some();
+        let home_view = self.home_view();
+        let home = home_view.is_some();
         let page = self.place.as_ref().map(|place| &place.page);
         let editor_view = self.editor_view_in_place(home);
         let mut lead = page_line(home, page);
+        if let Some(home_view) = &home_view
+            && let Some(key) = &home_view.opening
+        {
+            let title = home_view
+                .projects
+                .iter()
+                .find(|card| card.uid == *key)
+                .map(|card| card.slug.as_str());
+            lead.push_str(&opening_line(key, title));
+        }
         lead.push_str(&looking_at_lines(
             editor_view.is_some(),
             editor_view

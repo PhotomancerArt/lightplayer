@@ -323,6 +323,23 @@ pub fn page_line(home: bool, page: Option<&UiPage>) -> String {
     }
 }
 
+/// The line under the page line while an open from Home is in flight: the
+/// project is starting the device it runs on (a sim, in this tab) and lands
+/// in the editor by itself. Without it, the agent read Home after
+/// `project/new` answered "Waiting for the device", decided the open had
+/// failed, and pressed open again and again (activity corpus S4, S18 and
+/// S19, 2026-10-03).
+pub fn opening_line(key: &str, title: Option<&str>) -> String {
+    let name = match title {
+        Some(title) => format!("{title:?} ({key})"),
+        None => key.to_string(),
+    };
+    format!(
+        "opening: {name} — its device is starting; the editor opens by itself when it is \
+         up, so do not press open again\n"
+    )
+}
+
 /// What the user is looking at: the node in focus (or that none is), what
 /// the patch surface has selected, and what is open over the page. Empty
 /// off the editor with nothing open: the page line says it all.

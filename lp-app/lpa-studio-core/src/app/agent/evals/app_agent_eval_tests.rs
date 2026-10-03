@@ -70,6 +70,10 @@ fn a_playlist_that_does_not_cycle_fails_playlist_cycles() {
     let reason =
         playlist_cycles(&no_cycle, 3, Some([10.0, 60.0]), &colourful).expect_err("no cycle");
     assert!(reason.contains("does not cycle"), "{reason}");
+    assert!(
+        reason.contains("it holds 3 entries"),
+        "a playlist that does not cycle says what it holds: {reason}"
+    );
 
     let too_fast = edit_json(&golden, "playlist.json", |playlist| {
         playlist["cycle"]["step_seconds"] = 2.0.into();

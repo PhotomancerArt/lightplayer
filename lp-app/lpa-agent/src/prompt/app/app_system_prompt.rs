@@ -62,7 +62,9 @@ pub fn build_app_system_prompt(reference: &str) -> String {
          because it loses work for good or needs the browser's own click: a \
          card appears in the chat, showing the same control the user would \
          use, set to your values, and the user's click on it is what does \
-         it (they may change a value first). After `needs_user`, stop: say in one line which card to click \
+         it (they may change a value first). [needs the user's click] does \
+         not mean leave it alone or tell them where the button is: `act` it, \
+         and the card is their button. After `needs_user`, stop: say in one line which card to click \
          and why. Never ask the user to type yes instead of clicking.\n\
          - Never tell the user that a card or a button is waiting for them \
          unless `act` returned `needs_user` with that card in this turn. To \
@@ -73,7 +75,9 @@ pub fn build_app_system_prompt(reference: &str) -> String {
          the editor (`name` is optional; leave `template` out for an empty \
          one), and `project/open` opens one from the user's library \
          (`project`: one of those it lists). `edit_project` works only once \
-         a project is open.\n\
+         a project is open. An open starts the device the project runs on \
+         first; while <app_state> has an `opening:` line the open is under \
+         way and the editor comes up by itself — do not press open again.\n\
          - A flash or a firmware update leaves the board running nothing. \
          When one finishes, look at that board's line under devices. If it \
          runs nothing, or not the user's project, put the project on it \
@@ -86,7 +90,11 @@ pub fn build_app_system_prompt(reference: &str) -> String {
          is on (see Playlist cycle below). Whenever the user wants several \
          patterns to take turns (\"cycle a few patterns\", \"rotate\", \"a \
          show\"), set `cycle` in the same `edit_project` that fills the \
-         playlist.\n\
+         playlist. When you build a project for a look the user describes \
+         (\"make it pretty\", \"breathe slowly in greens and purples\") \
+         rather than one pattern they name, that is several patterns too: \
+         two to four catalog patterns that fit the look, cycling, as the \
+         worked example does.\n\
          - <app_state> also lists the Add node picker's actions: \
          `project/add-node` (`kind`), `project/import-pattern` (`pattern`) \
          and `project/paste-node`, plus the same under each playlist. They \
@@ -160,6 +168,18 @@ mod tests {
         assert!(
             prompt.contains("only while its `cycle`"),
             "a playlist cycles only with cycle on"
+        );
+        assert!(
+            prompt.contains("two to four catalog patterns that fit the look"),
+            "a described look is a few patterns, cycling"
+        );
+        assert!(
+            prompt.contains("do not press open again"),
+            "an open in flight is waited for"
+        );
+        assert!(
+            prompt.contains("the card is their button"),
+            "a click is handed by acting it"
         );
         assert!(prompt.ends_with("## Reference"));
     }

@@ -12,12 +12,14 @@
 //! [`DeviceScenarioSeat`] wraps it as a corpus [`ScenarioSeat`]: it builds
 //! the board a scenario starts with (blank, somebody else's firmware, or
 //! LightPlayer running the start project, which the library holds and the
-//! editor has open), and reads back what the board ended up running.
+//! editor has open), and reads back what the board ended up running. Like
+//! the shipped build, it also holds the tab's own runtimes ([`SeatSims`]):
+//! a project opened from Home runs on a sim, as it does in a browser.
 //!
 //! The bench lives in this test module and is private to it, which is why
 //! the seat lives beside it rather than beside the eval driver.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 
 use lpa_agent::provider::ReqwestTransport;
 use lpa_agent::{ChatRole, ContentBlock, OpenAiCompatProvider, TurnEvent, TurnRequest};
@@ -196,7 +198,7 @@ impl AgentSeat {
         self.apply(bench);
         // A press that opened a chooser settles its card on the chooser's
         // answer, which a step folds; the run it resumes starts there.
-        bench.step(tasks);
+        actor_step(bench, tasks);
         self.apply(bench);
         if quiet_first {
             wait_quiet(bench, tasks);
@@ -211,7 +213,7 @@ impl AgentSeat {
             };
             while run.as_mut().poll(&mut cx).is_pending() {
                 self.apply(bench);
-                bench.step(tasks);
+                actor_step(bench, tasks);
                 if let Some(limits) = limits {
                     let session = bench.controller.agent_for_test().app_session();
                     let (usage, turns) = (session.mirror.usage, session.mirror.turn_stats.len());
@@ -360,16 +362,32 @@ impl AgentSeat {
 fn wait_quiet(bench: &mut DeviceBench, tasks: &TaskPool) {
     let deadline = std::time::Instant::now() + REAL_TIME_LIMIT;
     while std::time::Instant::now() < deadline {
-        bench.step(tasks);
+        actor_step(bench, tasks);
         let view = bench.view();
+        // An Offline card (a sim the last open powered off) will never say
+        // what it runs; waiting on it would spend the whole ceiling.
         let quiet = view.devices.iter().all(|card| {
-            card.activity.is_none()
-                && card.loaded_project != lpa_devices::view::LoadedProject::Unknown
-        }) && view.pending.iter().all(|pending| pending.needs_firmware());
+            card.status == lpa_devices::DeviceStatus::Offline
+                || (card.activity.is_none()
+                    && card.loaded_project != lpa_devices::view::LoadedProject::Unknown)
+        }) && view.pending.iter().all(|pending| pending.needs_firmware())
+            // An open waiting for its device (a sim starting) lands first.
+            && bench.controller.pending_device_lens_for_test().is_none();
         if quiet {
             return;
         }
         std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
+/// One bench step, plus what the actor's tick does besides folding: an
+/// open that was waiting for its device (a sim that has just said hello)
+/// attaches its lens — `try_pending_device_lens`, which the actor runs on
+/// every passive refresh. Without it an open from Home never finished.
+fn actor_step(bench: &mut DeviceBench, tasks: &TaskPool) {
+    bench.step(tasks);
+    if bench.controller.pending_device_lens_for_test().is_some() {
+        drive(bench.controller.try_pending_device_lens());
     }
 }
 
@@ -381,6 +399,59 @@ fn send_action(text: &str) -> UiAction {
             text: text.to_string(),
         },
     )
+}
+
+// ---------------------------------------------------------------------
+// The tab's runtimes
+// ---------------------------------------------------------------------
+
+/// The sims a seat's tab powers on: each one a LightPlayer fake wearing the
+/// identity Studio minted for it and its target's pin map, as `fw-browser`
+/// boots in a worker.
+///
+/// Without it the seat had no runtime at all, and every open from Home —
+/// `project/new`, `project/open`, which resolve to a Desktop sim — waited
+/// forever for a device that could never start: the activity corpus's
+/// S4, S18 and S19 all stalled there, the record minted for it sitting
+/// Offline beside the board (2026-10-03).
+#[derive(Default)]
+struct SeatSims {
+    /// One fake per minted sim, by uid: a power cycle reaches the same one.
+    devices: RefCell<BTreeMap<String, FakeEsp32Device>>,
+}
+
+impl SimLinkSource for SeatSims {
+    fn open(&self, session: &SimSession) -> Result<SimBacking, String> {
+        let device = self
+            .devices
+            .borrow_mut()
+            .entry(session.uid.clone())
+            .or_insert_with(|| {
+                let mut script = FakeDeviceScript::new(FakeBootState::LightPlayer(
+                    FakeLightPlayerState::new()
+                        .with_identity(FakeDeviceIdentity::new(&session.uid, &session.display_name))
+                        .with_base_mac(&session.base_mac)
+                        .with_heartbeat_interval(Duration::from_millis(20)),
+                ));
+                if let Some(manifest) = lpa_boards::runtime_manifest_json(&session.target) {
+                    script = script.with_board_manifest(manifest);
+                }
+                FakeEsp32Device::new(script)
+            })
+            .clone();
+        let info = crate::sim_link_info(&session.uid, &session.display_name);
+        Ok(SimBacking {
+            link: GrantedLink {
+                link: Box::new(fake_device_link(info.clone(), &device)),
+                info,
+            },
+            control: Rc::new(ScriptedSimControl {
+                device,
+                restarts: Rc::new(Cell::new(0)),
+                manifests: Rc::new(RefCell::new(Vec::new())),
+            }),
+        })
+    }
 }
 
 // ---------------------------------------------------------------------
@@ -445,6 +516,9 @@ impl DeviceScenarioSeat {
             true => DeviceBench::granted(&device, "usb-corpus"),
             false => DeviceBench::ungranted(&device, "usb-corpus"),
         };
+        let sims = Rc::new(SimDeviceTransport::new(Rc::new(SeatSims::default())));
+        bench.sims = Some(Rc::clone(&sims));
+        bench.controller.set_device_sim_transport(sims);
         let seat = AgentSeat::with_source(&mut bench, source);
         Self {
             bench,
@@ -574,7 +648,7 @@ impl ScenarioSeat for DeviceScenarioSeat {
     fn settle(&mut self) {
         wait_quiet(&mut self.bench, &self.tasks);
         for _ in 0..100 {
-            self.bench.step(&self.tasks);
+            actor_step(&mut self.bench, &self.tasks);
         }
     }
 
@@ -608,8 +682,22 @@ impl ScenarioSeat for DeviceScenarioSeat {
         studio.node_statuses()
     }
 
+    /// The board the scenario is about: the tab's own runtimes (a sim an
+    /// open from Home started) are not boards, and a running sim must never
+    /// pass for the board running the project.
     fn device_summary(&mut self) -> Option<DeviceSummary> {
-        let view = self.bench.view();
+        let runtimes: Vec<String> = self
+            .bench
+            .registry()
+            .into_iter()
+            .filter(|row| {
+                row.transport == crate::SIM_TRANSPORT || row.transport == crate::EMU_TRANSPORT
+            })
+            .map(|row| row.name)
+            .collect();
+        let mut view = self.bench.view();
+        view.devices
+            .retain(|card| !runtimes.iter().any(|name| *name == card.title));
         let flashed = self
             .bench
             .manifest_writes

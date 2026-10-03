@@ -188,6 +188,126 @@ fn the_device_seat_connects_flashes_and_pushes_on_a_scripted_model() {
     );
 }
 
+/// S4 on the device seat, the way the live model went at it: a project
+/// first, from Home, then the board. `project/new` opens the editor on a
+/// sim, as it does in a browser (the seat used to have no runtime, and the
+/// open waited forever); the flashed board names the board it was flashed
+/// for (the fake used to say "board unknown", and the model re-flashed it
+/// twice); and the sim is not one of the scenario's boards.
+#[test]
+fn the_device_seat_opens_a_new_project_on_a_sim_and_names_the_flashed_board() {
+    let mut scenario = Scenario::load("s04-sean-new-c6-d5").expect("S4");
+    scenario.user.then = vec!["looks good, put something on it".into()];
+    scenario.checks = vec![
+        CheckSpec::CardHanded {
+            offer: "devices/connect-*".into(),
+        },
+        CheckSpec::BoardFirmware {
+            is: super::app_agent_check_spec::FirmwareIs::Flashed,
+        },
+        CheckSpec::BoardRunsProject,
+    ];
+    let example = format!(
+        "example:{}",
+        crate::first_bundled_example_id().expect("this build bundles examples")
+    );
+    let scripts = vec![
+        vec![
+            act_turn("n1", "project/new", &[("name", "XIAO D5 strip")]),
+            act_turn("a1", "devices/connect-usb", &[]),
+            say("Click the card to pick your board's USB port."),
+        ],
+        vec![
+            // The sim took the first provisional id; the board has the
+            // second.
+            act_turn(
+                "f1",
+                "devices/new-9223372036854775809/flash",
+                &[("board", "seeed/xiao-esp32-c6")],
+            ),
+            say("Flashing LightPlayer onto it."),
+        ],
+        vec![
+            call_turn(
+                "r1",
+                lpa_agent::READ_TOOL_NAME,
+                json!({ "name": "XIAO ESP32-C6 \u{b7} Jan 1", "what": "device" }),
+            ),
+            act_turn(
+                "p1",
+                "devices/mac-6055f90a0b0c/push",
+                &[("source", &example)],
+            ),
+            say("Sent."),
+        ],
+    ];
+    let outcome = run_scenario(&scenario, &EvalDriver::Scripted(scripts));
+    let steps = &outcome.transcript.steps;
+    assert!(
+        outcome.passed(),
+        "{}\n{:#?}\n{steps:#?}",
+        outcome.failures(),
+        outcome.device
+    );
+    // Right after `project/new` the sim is still starting: Home says the
+    // open is in flight, not that nothing is open. Then the editor opens.
+    let after_new = steps
+        .iter()
+        .skip_while(|step| !matches!(step, EvalStep::ToolResult { .. }))
+        .find_map(|step| match step {
+            EvalStep::State { text } => Some(text.clone()),
+            _ => None,
+        })
+        .expect("a state after the first act");
+    assert!(
+        after_new.contains("opening: \"") && after_new.contains("do not press open again"),
+        "the open is in flight: {after_new}"
+    );
+    assert!(
+        steps.iter().any(|step| matches!(
+            step,
+            EvalStep::State { text } if text.contains("page: project editor")
+                && text.contains("project: \"XIAO D5 strip\"")
+        )),
+        "project/new opened the editor: {steps:#?}"
+    );
+    // Once flashed, the board says which board it is.
+    assert!(
+        steps.iter().any(|step| matches!(
+            step,
+            EvalStep::State { text } if text.contains("board seeed/xiao-esp32-c6; LightPlayer")
+        )),
+        "the flashed board names its board: {steps:#?}"
+    );
+    // The board's push names the library's project among the options a
+    // read lists, not in the "and N more" it counts.
+    let read = steps
+        .iter()
+        .find_map(|step| match step {
+            EvalStep::ToolResult { name, content } if name == lpa_agent::READ_TOOL_NAME => {
+                Some(content.clone())
+            }
+            _ => None,
+        })
+        .expect("the board was read");
+    let push_sources = read
+        .split("/push: ")
+        .nth(1)
+        .and_then(|rest| rest.split(" more").next())
+        .expect("the flashed board offers a push");
+    assert!(
+        push_sources.contains("library:prj"),
+        "the library's project is a listed source: {push_sources}"
+    );
+    let device = outcome.device.as_ref().expect("a board");
+    assert_eq!(
+        device.boards.len(),
+        1,
+        "the sim is not a board: {device:#?}"
+    );
+    assert_eq!(device.flashed, ["seeed/xiao-esp32-c6"]);
+}
+
 /// S19's board stands up: a classic ESP32 running WLED, its flash a card
 /// pre-filled with the agent's pick, and the person's click on it with the
 /// Dig2Go chosen flashes the Dig2Go's pin map.
