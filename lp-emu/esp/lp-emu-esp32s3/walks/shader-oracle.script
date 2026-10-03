@@ -10,6 +10,17 @@
 # files' payloads against each other rather than trusting the eye — one
 # stimulus over two chips is what makes one comparison mean one question.
 #
+# ⚠️ Since wire proto 30 (plan `lp2025/2026-09-27-0215-lp-link-usb-cutover`)
+# the shipped image speaks lp-link on USB and no longer reads `M!` lines, and
+# nothing under `lp-emu/` may host a link (the MIT fence). This file is the
+# pre-cutover `M!` record of the walk, and today's image would ignore these
+# bytes outright. `just walk-esp32s3-emu` instead uploads
+# `projects/test/shader-oracle` over the product's own hosted link
+# (`lp-cli emu run --host-link --upload`, `scripts/emu/m4-walk.sh`). What
+# stays here is the script's own shape, because the script is still
+# committed and `tests/pin_frames.rs::the_walk_is_the_c6s_captured_bytes`
+# checks its payload against the C6's copy as text — the only reader left.
+#
 # ⚠️ **No project retarget.** The project names `ws281x:local:D10`, and D10 is
 # this board's own pad: the checked-in `seeed/xiao-esp32-s3-plus` profile maps
 # it to `/gpio/9`. The classic needed a scratch copy (`D10 -> IO18`); the S3
@@ -19,14 +30,13 @@
 # ⚠️ **One trigger line differs from the C6's, and this is the whole diff.**
 # Request 2 waits on `Stopped all projects` where the C6 waits on the
 # `stopAllProjects` reply's `"id":1,`. That reply does go out — but on this
-# chip the link drops one 64 B packet of it, which is the open defect
+# chip the link dropped one 64 B packet of it, which was the defect
 # `docs/defects/2026-09-13-the-s3-link-drops-the-io-tasks-next-chunk-on-a-stale-serial-in-empty.md`
-# (P09 measures the silicon side, DD103). A walk that waited on the reply's
-# bytes would stall for ever at request 2 — it does, and that is how this was
-# found. The handler's own log line is the same event, one record earlier, and
-# waiting on it hides nothing: the request was served either way. **Do not
-# widen this to hide the drop anywhere else**, and re-point it at `"id":1,`
-# the day the defect closes.
+# (now fixed; P09 measured the silicon side, DD103). A walk that waited on
+# the reply's bytes would have stalled for ever at request 2 — it did, and
+# that is how this was found. The handler's own log line is the same event,
+# one record earlier, and waiting on it hides nothing: the request was
+# served either way. **Do not widen this to hide the drop anywhere else.**
 #
 # Firmware: fw-esp32s3 (defaults, and `frame-dump` for the readout build),
 # ROM-up off the merged 8 MiB chip

@@ -20,13 +20,13 @@
 //!
 //! # Why the host is the one driving
 //!
-//! The guest *does* drive this chip's RMT — the walk in `walks/` loads a
-//! project and the strip lights up, and the PR body carries that frame three
-//! ways. But a walk needs a firmware image, and its timing rides the link;
-//! this file needs neither, so a plain `cargo test --workspace` runs it. The
-//! register sequence is esp-hal's own `configure_tx`, the same one
-//! `src/periph/rmt.rs`'s unit tests use, written through the same bus decode
-//! the guest writes through.
+//! The guest *does* drive this chip's RMT — `just walk-esp32s3-emu` loads a
+//! project over the product's own hosted link and the strip lights up, and
+//! the PR body carries that frame three ways. But a walk needs a firmware
+//! image, and its timing rides the link; this file needs neither, so a
+//! plain `cargo test --workspace` runs it. The register sequence is
+//! esp-hal's own `configure_tx`, the same one `src/periph/rmt.rs`'s unit
+//! tests use, written through the same bus decode the guest writes through.
 
 use lp_emu_esp_common::ip::rmt::{
     CONF_APB_MEM_RST, CONF_CONF_UPDATE, CONF_DIV_CNT_SHIFT, CONF_MEM_RD_RST, CONF_MEM_TX_WRAP_EN,
@@ -535,10 +535,15 @@ fn the_decoders_ride_the_snapshot() {
     );
 }
 
-/// **The walk is the C6's captured bytes.** One stimulus over two chips is
-/// what makes one comparison mean one question, so the S3's walk script is
-/// the C6's payload byte for byte — the only difference is a trigger line,
-/// and this test names it rather than tolerating any difference at all.
+/// **The walk script is the C6's captured bytes.** One stimulus over two
+/// chips is what makes one comparison mean one question, so the S3's walk
+/// script is the C6's payload byte for byte — the only difference is a
+/// trigger line, and this test names it rather than tolerating any
+/// difference at all. ⚠️ Since wire proto 30 the shipped image speaks
+/// lp-link on USB and no longer reads these `M!` lines — the script is a
+/// pre-cutover record that nothing replays, and `just walk-esp32s3-emu`
+/// uploads over the hosted link instead. This test is the only reader left:
+/// it checks the committed script's payload against the C6's copy as text.
 #[test]
 fn the_walk_is_the_c6s_captured_bytes() {
     let s3 = include_str!("../walks/shader-oracle.script");
@@ -560,14 +565,14 @@ fn the_walk_is_the_c6s_captured_bytes() {
     );
     let i = differing[0];
     // ⚠️ The one difference, and the reason it exists. The C6 waits on the
-    // `stopAllProjects` reply's own bytes; on this chip the link drops one
+    // `stopAllProjects` reply's own bytes; on this chip the link dropped one
     // 64 B packet of that reply
-    // (`docs/defects/2026-09-13-the-s3-link-drops-the-io-tasks-next-chunk-on-a-stale-serial-in-empty.md`),
-    // so a walk that waited on them would stall for ever at request 2 — it
-    // does, and that is how this was found. The handler's own log line is the
-    // same event, one record earlier, and waiting on it hides nothing: the
-    // request was served either way. **Do not widen this to hide the drop
-    // anywhere else**, and re-point it at the reply the day the defect closes.
+    // (`docs/defects/2026-09-13-the-s3-link-drops-the-io-tasks-next-chunk-on-a-stale-serial-in-empty.md`,
+    // now fixed), so a walk that waited on them would have stalled for ever
+    // at request 2 — it did, and that is how this was found. The handler's
+    // own log line is the same event, one record earlier, and waiting on it
+    // hides nothing: the request was served either way. **Do not widen this
+    // to hide the drop anywhere else.**
     assert!(
         b[i].contains(r#"\"id\":1,"#),
         "the C6 waits on the reply: {}",
