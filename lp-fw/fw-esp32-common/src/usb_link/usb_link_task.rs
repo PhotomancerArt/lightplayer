@@ -62,9 +62,13 @@ const LOG_RECORDS_PER_PASS: usize = 4;
 /// Shortest spacing of two SOF samples (see
 /// [`crate::serial::usb_connection::DISCONNECT_THRESHOLD`]).
 const SOF_SAMPLE_US: Micros = 2_000;
-/// The largest frame the link writes: a 256-byte payload with its header and
-/// CRC, COBS-FF-encoded and delimited, fits with room to spare.
-const FRAME_BYTES: usize = 512;
+/// The largest frame the link writes, delimiters included: a 256-byte
+/// payload (`LinkConfig::usb()`'s `max_payload`), its header and CRC-32C,
+/// COBS-FF-encoded with every byte escaped (533 B; a typical frame is much
+/// smaller). Mirrors the classic's `uart_link_pipes::MAX_FRAME_BYTES`: a
+/// hard-coded 512 here used to sit below this worst case, so a frame that
+/// long would have been discarded and resent forever instead of written.
+const FRAME_BYTES: usize = lp_link::frame::max_encoded_len(256, lp_link::CrcKind::Crc32c);
 
 /// The chip facts the loop needs, supplied by the chip crate (no esp-hal in
 /// this crate — ADR 2026-07-29-per-chip-fw-toolchains).
@@ -271,6 +275,71 @@ fn note_write_timeout<C: UsbLinkChip>(shared: &UsbLinkShared, chip: &C) {
              in_ep_free={in_ep_free}",
             usb_link_counters::edge().write_timeouts_live,
             Instant::now().as_millis(),
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::vec::Vec;
+
+    use lp_link::frame::{self, FrameKind, Header};
+    use lp_link::{CH_PROTO, CrcKind, LinkConfig};
+
+    use super::FRAME_BYTES;
+
+    /// `FRAME_BYTES`'s assumptions about the USB preset still hold — the
+    /// same check the classic's `uart_link_pipes` makes of its own constant.
+    #[test]
+    fn frame_bytes_assumes_the_usb_preset() {
+        let cfg = LinkConfig::usb();
+        assert_eq!(cfg.max_payload, 256, "FRAME_BYTES assumes it");
+        assert_eq!(cfg.crc, CrcKind::Crc32c, "FRAME_BYTES assumes it");
+        assert_eq!(
+            FRAME_BYTES, 533,
+            "the worst-case encoded frame at this config"
+        );
+    }
+
+    /// A worst-case frame — the largest payload, every byte needing a COBS-FF
+    /// escape — still fits the stack buffer the link task writes into. Before
+    /// `FRAME_BYTES` was derived from [`frame::max_encoded_len`], the
+    /// hard-coded `512` was 21 bytes short of this (533 B), so a frame this
+    /// long would have been silently discarded every pass.
+    #[test]
+    fn a_worst_case_frame_fits_frame_bytes() {
+        let header = Header {
+            kind: FrameKind::Data,
+            fin: true,
+            first: true,
+            chan: CH_PROTO,
+            seq: 0xFF,
+            ack: 0xFF,
+            win: 0xFF,
+        };
+        // Every payload byte is 0xFF: COBS-FF must escape all of them, the
+        // worst case the encoding bound accounts for.
+        let body = alloc::vec![0xFFu8; LinkConfig::usb().max_payload as usize];
+        let mut raw = Vec::new();
+        let mut out = Vec::new();
+        frame::encode(
+            CrcKind::Crc32c,
+            0xFFFF_FFFF,
+            &header,
+            &body,
+            &mut raw,
+            &mut out,
+        );
+        assert!(
+            out.len() <= FRAME_BYTES,
+            "worst-case frame encoded to {} B, FRAME_BYTES is {FRAME_BYTES}",
+            out.len()
+        );
+        // The hard-coded 512 this replaced was below even this all-0xFF
+        // encoding, so it would have discarded a frame this long forever.
+        assert!(
+            out.len() > 512,
+            "sanity: this encoding should exceed the old hard-coded bound"
         );
     }
 }

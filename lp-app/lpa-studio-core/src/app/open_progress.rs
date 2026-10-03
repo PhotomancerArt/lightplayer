@@ -192,6 +192,9 @@ thread_local! {
     /// The session recorder's stage feed ([`record_open_stages`]), and the
     /// label it last recorded (so a repeated stage records once).
     static STAGE_RECORDER: RefCell<Option<StageRecorder>> = const { RefCell::new(None) };
+    /// `(generation, outcome)` for the most recently requested
+    /// `ProjectOp::ReloadActiveProject` — see [`note_reload_dispatched`].
+    static RELOAD: Cell<(u64, Option<bool>)> = const { Cell::new((0, None)) };
 }
 
 struct StageRecorder {
@@ -287,6 +290,42 @@ pub fn refused_open_device() -> Option<DeviceId> {
         }) => device.id,
         _ => None,
     }
+}
+
+/// Allocate a generation for a `ProjectOp::ReloadActiveProject` about to be
+/// enqueued, clearing any previous verdict. The P6 visitor pull loop
+/// (`visitor_session.rs`) dispatches that reload through the plain command
+/// queue — fire-and-forget, no reply channel — so this is the same
+/// "producer and consumer never meet" seam the module docs describe for the
+/// open flow, reused for the one other action that needed it. Call this
+/// immediately before sending the action, then poll [`reload_outcome`] with
+/// the returned generation.
+pub fn note_reload_dispatched() -> u64 {
+    RELOAD.with(|cell| {
+        let next = cell.get().0.saturating_add(1);
+        cell.set((next, None));
+        next
+    })
+}
+
+/// Record the just-processed reload's outcome, for whichever generation is
+/// current. Called from [`crate::StudioController`]'s reload handler, the
+/// moment it has a verdict — success or [`note_open_failed`]'s refusal.
+pub(crate) fn note_reload_settled(ok: bool) {
+    RELOAD.with(|cell| {
+        let generation = cell.get().0;
+        cell.set((generation, Some(ok)));
+    });
+}
+
+/// The outcome of the reload requested as `generation`, once the actor has
+/// processed it. `None` while still in flight, or if a newer reload
+/// superseded it before settling — a poller must treat both the same way.
+pub fn reload_outcome(generation: u64) -> Option<bool> {
+    RELOAD.with(|cell| {
+        let (current, outcome) = cell.get();
+        if current == generation { outcome } else { None }
+    })
 }
 
 fn fail(message: String, retry: UiAction, needs_unlock: bool) {
@@ -472,6 +511,7 @@ pub(crate) fn reset_for_test() {
     REQUESTED.with(|generation| generation.set(0));
     RUNNING.with(|running| running.set(0));
     STAGE_RECORDER.with(|slot| *slot.borrow_mut() = None);
+    RELOAD.with(|cell| cell.set((0, None)));
 }
 
 #[cfg(test)]
@@ -691,6 +731,35 @@ mod tests {
                 },
             ]
         );
+        reset_for_test();
+    }
+
+    /// A settled outcome reads back against the generation it settled for,
+    /// and a reload nobody has settled yet reads as still in flight.
+    #[test]
+    fn a_reload_outcome_reads_back_by_generation() {
+        reset_for_test();
+        let generation = note_reload_dispatched();
+        assert_eq!(reload_outcome(generation), None, "nothing settled yet");
+        note_reload_settled(true);
+        assert_eq!(reload_outcome(generation), Some(true));
+        reset_for_test();
+    }
+
+    /// A newer reload's generation invalidates an older poller's read —
+    /// the stale caller must not be handed someone else's verdict.
+    #[test]
+    fn a_newer_reload_request_invalidates_an_older_pollers_read() {
+        reset_for_test();
+        let stale = note_reload_dispatched();
+        let fresh = note_reload_dispatched();
+        note_reload_settled(false);
+        assert_eq!(
+            reload_outcome(stale),
+            None,
+            "superseded, not someone else's verdict"
+        );
+        assert_eq!(reload_outcome(fresh), Some(false));
         reset_for_test();
     }
 

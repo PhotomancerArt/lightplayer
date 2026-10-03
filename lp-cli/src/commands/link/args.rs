@@ -2,6 +2,8 @@ use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand};
 
+use crate::commands::emu::args::EmuChip;
+
 #[derive(Debug, Parser)]
 #[command(
     name = "link",
@@ -68,11 +70,16 @@ pub enum LinkSubcommand {
     /// stderr; `--json` holds every sample.
     ///
     /// Targets: a serial device (wall-clock time; the board renders whatever
-    /// project it loads at boot), or `emu:<fw-esp32c6 ELF>` (the C6 in this
-    /// process, EMULATED time, with `--project` — the PLAYFUL choker by
-    /// default — deployed first; the report adds the WS281x frames decoded
-    /// off the pads). Compare emulated runs in frames, never against
-    /// silicon in ms.
+    /// project it loads at boot), or `emu:<ELF>` (one chip's machine in this
+    /// process, EMULATED time, with `--project` deployed first; the report
+    /// adds the WS281x frames decoded off the pads). `--chip` picks the
+    /// machine (`esp32c6`, the default; `esp32s3`; `esp32v3`, the classic) —
+    /// a serial target ignores it and is refused if it is given. Each
+    /// chip's `--project` default differs (the PLAYFUL choker on the C6,
+    /// `shader-oracle` on the S3, `five-wire` on the classic), and so does
+    /// `--grade`'s default: `t2` on the C6, `t1` — the only grade either
+    /// has — on the S3 and classic. Compare emulated runs in frames, never
+    /// against silicon in ms.
     ///
     /// Examples:
     ///
@@ -80,14 +87,24 @@ pub enum LinkSubcommand {
     ///
     ///   lp-cli link rtt emu:target/riscv32imac-unknown-none-elf/release-esp32/fw-esp32c6 \
     ///       --requests-at-s 40 --json emu.json --console emu.console.txt
+    ///
+    ///   lp-cli link rtt emu:target/xtensa-esp32s3-none-elf/release-esp32s3/fw-esp32s3 \
+    ///       --chip esp32s3 --json s3.json
+    ///
+    ///   lp-cli link rtt emu:target/xtensa-esp32-none-elf/release-esp32v3/fw-esp32v3 \
+    ///       --chip esp32v3 --json v3.json
     #[command(verbatim_doc_comment)]
     Rtt(RttArgs),
 }
 
 #[derive(Debug, Args)]
 pub struct RttArgs {
-    /// A serial device, or `emu:<fw-esp32c6 ELF>`.
+    /// A serial device, or `emu:<ELF>`.
     pub target: String,
+    /// `emu:` only: which chip's machine to host. A serial target is real
+    /// hardware and refuses this.
+    #[arg(long, value_enum)]
+    pub chip: Option<EmuChip>,
     /// Write the full report (every sample) here, as JSON.
     #[arg(long)]
     pub json: Option<PathBuf>,
@@ -134,10 +151,13 @@ pub struct RttArgs {
     /// Seconds after the requests (≥ 10 for two more heartbeats).
     #[arg(long, default_value_t = 11.0)]
     pub tail_s: f64,
-    /// `emu:` only: the time grade, t1 or t2.
-    #[arg(long, default_value = "t2")]
-    pub grade: String,
-    /// `emu:` only: the project to deploy (default: the PLAYFUL choker).
+    /// `emu:` only: the time grade. Default: `t2` on the C6, `t1` — the only
+    /// grade either machine has — on the S3 and classic; anything else
+    /// there is refused.
+    #[arg(long)]
+    pub grade: Option<String>,
+    /// `emu:` only: the project to deploy. Default: the PLAYFUL choker on
+    /// the C6, `shader-oracle` on the S3, `five-wire` on the classic.
     #[arg(long)]
     pub project: Option<PathBuf>,
     /// A label carried into the JSON report.

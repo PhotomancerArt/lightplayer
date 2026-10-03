@@ -51,6 +51,12 @@ pub enum SharedOpenState {
     /// The project was fetched, but its format is one this build cannot
     /// open (too old to upgrade, or unreadable). Nothing was installed.
     UnsupportedFormat,
+    /// The project was fetched, and its format is fine, but the library
+    /// refused its own contents — a manifest key this build doesn't know,
+    /// most commonly one a newer Studio added within the SAME format
+    /// version, so the pre-install format check passes and this is what
+    /// catches it. Nothing was installed.
+    ContentRefused,
 }
 
 impl SharedOpenState {
@@ -71,6 +77,9 @@ impl SharedOpenState {
             SharedOpenState::UnsupportedFormat => {
                 Some("This project's format can't be opened by this version of LightPlayer.")
             }
+            SharedOpenState::ContentRefused => Some(
+                "This project uses something this LightPlayer doesn't know — update LightPlayer to open it.",
+            ),
         }
     }
 
@@ -82,6 +91,7 @@ impl SharedOpenState {
                 | SharedOpenState::Unreachable
                 | SharedOpenState::NewerFormat
                 | SharedOpenState::UnsupportedFormat
+                | SharedOpenState::ContentRefused
         )
     }
 }
@@ -139,6 +149,31 @@ pub(crate) fn format_refusal(package: &dyn LpFs) -> Option<SharedOpenState> {
     } else {
         SharedOpenState::UnsupportedFormat
     })
+}
+
+/// Turn an `install_synced` catalog failure into the state Home shows.
+/// `LibraryHostError::Refused` is the library declining the package's own
+/// contents (most often a manifest key this build doesn't know, added
+/// within the SAME format a newer Studio wrote — [`format_refusal`]'s
+/// pre-check only catches a format MISMATCH, not this) and gets its own
+/// honest line. Everything else (a lock, a storage/transport problem)
+/// keeps saying `Unreachable`, as this flow always has.
+#[cfg_attr(
+    not(target_arch = "wasm32"),
+    allow(
+        dead_code,
+        reason = "the flow that reads it is browser-only; tests cover it on host"
+    )
+)]
+pub(crate) fn install_refusal_to_state(
+    error: lpa_studio_core::app::library::LibraryHostError,
+) -> SharedOpenState {
+    use lpa_studio_core::app::library::LibraryHostError;
+
+    match error {
+        LibraryHostError::Refused(_) => SharedOpenState::ContentRefused,
+        _ => SharedOpenState::Unreachable,
+    }
 }
 
 /// What consuming a `/p/` link produced (examples vision P5): the mode
@@ -235,7 +270,7 @@ pub async fn open_shared_link(uid: PrefixedUid) -> Result<SharedOpenOutcome, Sha
         .await
         .map_err(|error| {
             log::warn!("shared open of {uid}: install refused: {error}");
-            SharedOpenState::Unreachable
+            install_refusal_to_state(error)
         })?;
     outcome
         .summary
@@ -308,5 +343,36 @@ mod tests {
         let files = all_files(&fs).unwrap();
         let names: Vec<&str> = files.iter().map(|(path, _)| path.as_str()).collect();
         assert_eq!(names, vec!["blobs/aa/bb", "project.json"]);
+    }
+
+    /// An install refused for the package's own contents (a manifest key
+    /// this Studio doesn't know, slipping past `format_refusal`'s
+    /// pre-check) gets its own honest line, not the "couldn't reach the
+    /// service" lie this bug used to tell; a real host/lock failure still
+    /// reads as `Unreachable`, unchanged.
+    #[test]
+    fn a_content_refusal_gets_its_own_line_a_real_failure_stays_unreachable() {
+        use lpa_studio_core::app::library::LibraryHostError;
+
+        let state = install_refusal_to_state(LibraryHostError::Refused(
+            "parse project.json: unknown field `sparkle`".to_string(),
+        ));
+        assert_eq!(state, SharedOpenState::ContentRefused);
+        let line = state.line().unwrap();
+        assert!(line.contains("doesn't know") && line.contains("update LightPlayer"));
+        assert!(state.is_refusal());
+        assert_ne!(line, SharedOpenState::Unreachable.line().unwrap());
+
+        for error in [
+            LibraryHostError::Host("fs: disk full".to_string()),
+            LibraryHostError::Busy("retry exhausted".to_string()),
+            LibraryHostError::NotFound("prjabc".to_string()),
+        ] {
+            assert_eq!(
+                install_refusal_to_state(error.clone()),
+                SharedOpenState::Unreachable,
+                "{error:?} must still read as Unreachable"
+            );
+        }
     }
 }

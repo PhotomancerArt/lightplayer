@@ -8037,11 +8037,10 @@ fn a_refused_push_to_a_dark_board_leaves_its_saved_startup_project() {
 /// retry-at-boot loop) completely untouched while creating nothing where
 /// the fallback names.
 ///
-/// `startup_project` is left naming `porch` afterwards: a removal, like a
-/// push, only ever writes it through a later successful load, never through
-/// a delete — the same thing happens when the removed project IS the one
-/// the board runs (`remove_project` never touches `/lightplayer.json`
-/// either way).
+/// `startup_project` stops naming `porch` once `porch` is gone. That does
+/// not change the next boot — firmware falls back to the lexical-first
+/// folder under `/projects/` for a missing `startup_project` and for none
+/// alike — it only stops the board naming a folder it does not hold.
 #[test]
 fn a_removal_on_a_dark_board_deletes_its_saved_startup_project() {
     let device = dark_board_saved_at("dev000000daqf6dvvrd", "porch");
@@ -8075,11 +8074,48 @@ fn a_removal_on_a_dark_board_deletes_its_saved_startup_project() {
         "the saved project is gone and the fallback folder was never created"
     );
     assert_eq!(
-        saved_startup_project(&mut client).as_deref(),
-        Some("porch"),
-        "a removal only ever writes startup_project through a later load, \
-         never through a delete — it is left naming the now-gone folder"
+        saved_startup_project(&mut client),
+        None,
+        "the boot pointer no longer names the removed folder"
     );
+}
+
+/// The loaded case of the same: a project loaded over the wire is the one
+/// `/lightplayer.json` names (the server's `persist_startup_project`), and
+/// removing it clears that name with the folder.
+#[test]
+fn a_removal_of_the_running_project_clears_its_boot_pointer() {
+    let (_uid, good_files) = a_project_from_another_library(0x6d);
+    let device = dark_board_saved_at("dev000000daqf6dvvre", "porch");
+    let (_bench, _tasks, _device_uid) = running_board(&device, "usb-remove-loaded");
+    let mut client = lpa_client::LpClient::new(FakeDeviceIo::new(&device)).on_borrowed_wire();
+    save_startup_project(&mut client, "porch");
+    let mut quiet = |_: String, _: Option<u8>| {};
+    drive_real(lpa_client::push_project(
+        &mut client,
+        &good_files,
+        &hash_of(&good_files),
+        "studio",
+        &mut quiet,
+    ))
+    .expect("a good push lands");
+    assert_eq!(
+        saved_startup_project(&mut client).as_deref(),
+        Some("porch-b"),
+        "the load named it"
+    );
+
+    let report = drive_real(lpa_client::remove_project(
+        &mut client,
+        "studio",
+        &mut quiet,
+    ))
+    .expect("removed");
+
+    assert_eq!(report.storage_id, "porch-b");
+    assert!(report.was_loaded);
+    assert_eq!(project_dirs(&mut client), Vec::<String>::new());
+    assert_eq!(saved_startup_project(&mut client), None);
 }
 
 /// A board seeded with a project it refuses at boot (a format-behind
