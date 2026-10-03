@@ -786,10 +786,7 @@ mod tests {
         let PathSpec::PointList {
             first_channel,
             points,
-        } = paths.entries.get(&0).expect("path").value()
-        else {
-            panic!("expected PointList");
-        };
+        } = paths.entries.get(&0).expect("path").value();
         assert_eq!(*first_channel.value(), 3);
         assert_eq!(
             points.entries.get(&0).expect("point").value().0,
