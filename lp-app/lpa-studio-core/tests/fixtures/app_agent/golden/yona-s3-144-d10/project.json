@@ -1,0 +1,5 @@
+{
+  "format": 11,
+  "name": "Ring board",
+  "target": "seeed/xiao-esp32-s3-plus"
+}
