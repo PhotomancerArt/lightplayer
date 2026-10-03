@@ -18,6 +18,7 @@ pub mod offer_path;
 pub mod offer_press;
 pub mod offer_search;
 pub mod ui_offer;
+pub mod ui_offer_focus;
 pub mod ui_offer_tree;
 
 pub use offer_arg_error::OfferArgError;
@@ -27,4 +28,5 @@ pub use offer_param::{OfferChoice, OfferParam, OfferParamKind};
 pub use offer_path::{OfferPath, OfferPathError};
 pub use offer_press::OfferPress;
 pub use ui_offer::UiOffer;
+pub use ui_offer_focus::{OfferNearness, UiOfferFocus};
 pub use ui_offer_tree::UiOfferTree;

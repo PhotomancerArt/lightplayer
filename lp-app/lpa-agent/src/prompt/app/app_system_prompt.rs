@@ -32,9 +32,12 @@ pub fn build_app_system_prompt(reference: &str) -> String {
          can decide sensibly yourself.\n\
          - The current state of the app arrives in an <app_state> block with \
          each message and after each of your tool calls. Trust it over your \
-         memory of earlier turns. Its actions are listed by path \
-         (`project/save`, `project/<node path>/remove`); a path is good for \
-         as long as <app_state> lists it.\n\
+         memory of earlier turns. It starts with where the user is: the \
+         page, the node they are looking at, and the actions there, listed \
+         by path (`project/save`, `project/<node path>/remove`). Other \
+         nodes' and devices' actions are only counted; `read` a node or a \
+         device to list its actions in full. A path is good for as long as \
+         <app_state> lists or counts it.\n\
          - Before you change a field you have not seen, `read` the node: its \
          definition shows the exact paths and values `set` takes.\n\
          - After edits, read the `project` section of the result: a node in \
@@ -104,6 +107,10 @@ mod tests {
         assert!(
             prompt.contains("`project/add-node`") && prompt.contains("still use `edit_project`"),
             "the picker's offers, and edit_project for content"
+        );
+        assert!(
+            prompt.contains("only counted"),
+            "how to expand a counted node"
         );
         assert!(prompt.ends_with("## Reference"));
     }

@@ -136,6 +136,22 @@ impl OfferPath {
     pub fn starts_with(&self, prefix: &OfferPath) -> bool {
         self.segments.starts_with(&prefix.segments)
     }
+
+    /// The path one segment up — an offer's **owner**, the prefix its card
+    /// asks [`crate::UiOfferTree::verbs_of`] for (`project/save` →
+    /// `project`). `None` for a one-segment path.
+    pub fn owner(&self) -> Option<OfferPath> {
+        let (_, owner) = self.segments.split_last()?;
+        (!owner.is_empty()).then(|| Self {
+            segments: owner.to_vec(),
+        })
+    }
+
+    /// Whether the last segment names a node (it holds a `.`): true for
+    /// `project/demo.module`, the owner of that node's verbs.
+    pub fn names_node(&self) -> bool {
+        self.last().is_some_and(|segment| segment.contains('.'))
+    }
 }
 
 impl fmt::Display for OfferPath {
@@ -209,6 +225,25 @@ mod tests {
                 "{text}"
             );
         }
+    }
+
+    #[test]
+    fn an_offers_owner_is_one_segment_up_and_says_whether_it_is_a_node() {
+        let address = ProjectNodeAddress::parse("/demo.module/orbit.shader").unwrap();
+        let remove = OfferPath::project_node(&address).child("remove");
+        let owner = remove.owner().expect("a verb has an owner");
+
+        assert_eq!(owner, OfferPath::project_node(&address));
+        assert!(owner.names_node());
+        let save_owner = OfferPath::project().child("save").owner().unwrap();
+        assert_eq!(save_owner, OfferPath::project());
+        assert!(!save_owner.names_node(), "the project header is not a node");
+        assert!(
+            !OfferPath::parse("devices/mac-a0f26287b48c")
+                .unwrap()
+                .names_node()
+        );
+        assert_eq!(OfferPath::project().owner(), None);
     }
 
     #[test]

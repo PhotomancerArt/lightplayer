@@ -142,6 +142,11 @@ pub struct StudioController {
     /// What the browser answered about Bluetooth, reported by the web layer
     /// (`StudioCommand::BluetoothReach`); `Checking` until it does.
     bluetooth_reach: crate::BluetoothReach,
+    /// Where the user is, as the web last reported it
+    /// (`StudioCommand::Place`); `None` until it does (and in the headless
+    /// tests and evals, which have no page). Read-only: core never
+    /// navigates because of it.
+    place: Option<crate::UiPlace>,
     /// How many Play surfaces are mounted on the lens right now (the
     /// `PlayViewOp` lease). Play is the one mode with an idle read budget
     /// over Bluetooth; everything else is authoring.
@@ -411,6 +416,7 @@ impl StudioController {
             emu_transport: None,
             ble_transport: None,
             bluetooth_reach: crate::BluetoothReach::Checking,
+            place: None,
             play_views: 0,
             device_sims: std::collections::BTreeMap::new(),
             pool: RuntimePool::new(),
@@ -596,6 +602,55 @@ impl StudioController {
             self.bluetooth_reach = reach;
             self.mark_dirty();
         }
+    }
+
+    /// Where the user is, as the web reports it: the page and the panels
+    /// open over it. Read by the agent's readout and the ⌘K ranking; core
+    /// never navigates because of it.
+    pub fn set_place(&mut self, place: crate::UiPlace) {
+        if self.place.as_ref() != Some(&place) {
+            self.place = Some(place);
+            self.mark_dirty();
+        }
+    }
+
+    /// The place the web last reported, if it has.
+    pub fn place(&self) -> Option<&crate::UiPlace> {
+        self.place.as_ref()
+    }
+
+    /// The project editor view the user is looking at: the reported page's
+    /// view, `Nodes` while nothing is reported (the headless tests and
+    /// evals), and `None` when the page is not the editor or `home` shows.
+    fn editor_view_in_place(&self, home: bool) -> Option<crate::UiProjectView> {
+        if home {
+            return None;
+        }
+        match self.place.as_ref().map(|place| &place.page) {
+            None => Some(crate::UiProjectView::Nodes),
+            Some(
+                crate::UiPage::Project { view, .. }
+                | crate::UiPage::Example { view, .. }
+                | crate::UiPage::Device { view, .. },
+            ) => Some(*view),
+            Some(_) => None,
+        }
+    }
+
+    /// Where the user is, as offer prefixes: the node they are looking at
+    /// and the page's area. Without a reported place, the area follows
+    /// what core shows — devices on home, the project in the editor.
+    fn offer_focus(&self, home: bool) -> crate::UiOfferFocus {
+        let area = match self.place.as_ref() {
+            Some(place) => place.page.offer_area(),
+            None if home => Some(crate::OfferPath::devices()),
+            None => Some(crate::OfferPath::project()),
+        };
+        let node = self
+            .editor_view_in_place(home)
+            .and_then(|view| self.project.looked_at_node(view))
+            .map(|node| crate::OfferPath::project_node(node.address()));
+        crate::UiOfferFocus { node, area }
     }
 
     /// (Re)install whichever transport this build's halves add up to, and
@@ -2129,6 +2184,7 @@ impl StudioController {
         let mut offers = crate::UiOfferTree::new();
         if let Some(home) = self.home_view() {
             self.publish_device_offers(&mut offers);
+            offers.set_focus(self.offer_focus(true));
             return UiStudioView::new(Vec::new(), self.console_view())
                 .with_home(Some(home))
                 .with_lens(self.lens_runtime())
@@ -2146,6 +2202,7 @@ impl StudioController {
         // pane layout exists only for an open project
         let mut project_pane = self.project.view(self.has_lightplayer_state(), &mut offers);
         self.publish_device_offers(&mut offers);
+        offers.set_focus(self.offer_focus(false));
         // Decorate every GLSL inline editor with its agent chat DTO (the
         // project walk stays agent-free; chat state lives on this
         // controller's agent sub-state).
@@ -6189,6 +6246,10 @@ impl StudioController {
         match input.what {
             ReadWhat::Node => {
                 let (mut facts, def) = self.project.agent_node_facts(name)?;
+                // The node's own actions in full, as the readout lists the
+                // focused node's: how the agent expands a counted node.
+                let prefix = self.project.agent_node_prefix(name)?;
+                facts["actions"] = agent_actions_under(&self.view().offers, &prefix);
                 if let Some(def) = def
                     && let Ok(Some(text)) = self.agent_asset_text(&def).await
                 {
@@ -6268,6 +6329,11 @@ impl StudioController {
                                 .join(", ")
                         )
                     })?;
+                let offers = self.view().offers;
+                let actions = offers
+                    .device_prefix(device.id)
+                    .map(|prefix| agent_actions_under(&offers, prefix))
+                    .unwrap_or_default();
                 Ok(serde_json::json!({
                     "device": device.title,
                     "state": device.state_label,
@@ -6275,6 +6341,7 @@ impl StudioController {
                     "chip": device.detected_chip,
                     "board": device.board_id,
                     "identity": device.identity_label,
+                    "actions": actions,
                 }))
             }
         }
@@ -6445,20 +6512,33 @@ impl StudioController {
         self.app_agent_readout()
     }
 
-    /// The app agent's view of the app (PD3's per-turn state; focus v1 =
-    /// page + open project + selection + devices + offered actions).
+    /// The app agent's view of the app (PD3's per-turn state; M7 leads it
+    /// with place): where the user is — the page, the node in focus, the
+    /// selection, the panels open — then the open project and the devices,
+    /// and every offer in the view's tree with the focus that decides which
+    /// are listed in full.
     fn app_agent_readout(&self) -> crate::app::agent::app_agent_readout::AppReadoutSnapshot {
         use crate::app::agent::app_agent_readout::{
-            AppReadoutSnapshot, device_lines, page_line, project_lines, selection_line,
+            AppReadoutSnapshot, device_lines, looking_at_lines, page_line, project_lines,
         };
         let home = self.home_view().is_some();
-        let mut text = page_line(home);
+        let page = self.place.as_ref().map(|place| &place.page);
+        let editor_view = self.editor_view_in_place(home);
+        let mut lead = page_line(home, page);
+        lead.push_str(&looking_at_lines(
+            editor_view.is_some(),
+            editor_view
+                .and_then(|view| self.project.agent_node_focus(view))
+                .as_ref(),
+            editor_view.and_then(|_| self.project.agent_selection()),
+            self.place.as_ref(),
+        ));
+        let mut text = String::new();
         if !home {
             text.push_str(&project_lines(
                 &self.project.agent_project_name(),
                 &self.project.agent_project_summary(),
             ));
-            text.push_str(&selection_line(self.project.agent_selection()));
         }
         let roster = self.device_roster_view();
         text.push_str(&device_lines(&roster));
@@ -6468,12 +6548,19 @@ impl StudioController {
         // add-node / import-pattern / paste-node), every node card's verbs
         // (nested nodes included, Copy among them), each playlist picker's,
         // and the device verbs — the buttons the user sees, with their
-        // enablement. A long choice (the kinds, the patterns) is named in
-        // part and counted (`CHOICES_LISTED`). The pane's own actions stay
-        // out: a project pane offers none once the project is ready, and
-        // every other state shows home. Tree focus actions stay out too.
-        let offers = self.view().offers.iter().cloned().collect();
-        AppReadoutSnapshot { text, offers }
+        // enablement. The render lists the ones near the user in full and
+        // counts the rest; `act` finds any of them. A long choice (the
+        // kinds, the patterns) is named in part and counted
+        // (`CHOICES_LISTED`). The pane's own actions stay out: a project
+        // pane offers none once the project is ready, and every other state
+        // shows home. Tree focus actions stay out too.
+        let view = self.view();
+        AppReadoutSnapshot {
+            lead,
+            text,
+            offers: view.offers.iter().cloned().collect(),
+            focus: view.offers.focus().clone(),
+        }
     }
 
     /// Execute one history revert: pull the recorded source, restage it
@@ -7702,6 +7789,24 @@ enum SimWake {
     /// A sim that cannot be started at all, with the reason. The hold has
     /// to END — nothing is coming.
     Refused(String),
+}
+
+/// The verbs directly under `prefix`, each as the readout lists an action
+/// in full (`- <path>: <label> [state]`, then what it takes): what the app
+/// agent's `read` answers for a node or a device.
+fn agent_actions_under(
+    offers: &crate::UiOfferTree,
+    prefix: &crate::OfferPath,
+) -> serde_json::Value {
+    let lines: Vec<String> = offers
+        .verbs_of(prefix)
+        .map(|offer| {
+            crate::app::agent::app_agent_readout::offer_lines(offer)
+                .trim_end()
+                .to_string()
+        })
+        .collect();
+    serde_json::Value::from(lines)
 }
 
 #[cfg(test)]

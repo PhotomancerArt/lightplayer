@@ -1,75 +1,175 @@
 //! The app agent's readout: what the user sees right now, compact, sent with
 //! every user turn and after every tool round (PD3, D9; focus v1 = A8).
 //!
-//! A dedicated projection of the core view model, never the DOM: the page,
-//! the open project (its board, whether it is saved, each node's status and
-//! where each output port lands), what is selected, the devices on the
-//! roster, and every offer in the view's offer tree, listed by its path
-//! (`project/save`, `project/demo.module/orbit.shader/remove`). A path is
-//! the offer's stable id, so `act` names it directly and the host looks it
-//! up in the tree as it is at the press.
+//! A dedicated projection of the core view model, never the DOM. It leads
+//! with **where the user is** (M7, D3): the page, the node they are looking
+//! at, what is selected and what is open over the page — and the actions
+//! there, in full. Then the open project (its board, whether it is saved,
+//! each node's status and where each output port lands) and the devices on
+//! the roster. Every other action is **counted**, per area: the other
+//! nodes' verbs as one line of verb counts, each device-side owner as one
+//! line of verb names. `read` on a node or a device lists its actions in
+//! full. That keeps the readout bounded however many verbs each node card
+//! grows, while every offer in the view's tree stays pressable by its path
+//! (`project/save`, `project/demo.module/orbit.shader/remove`): `act` looks
+//! a path up in the whole tree, never just in what was listed.
 
 use std::fmt::Write as _;
 
 use serde_json::Value;
 
+use crate::app::project::agent_focus::AgentNodeFocus;
 use crate::{
-    ActionConsequence, ActionEnablement, DeviceRosterView, OfferArgError, OfferChoice, OfferParam,
-    OfferParamKind, OfferPath, UiOffer,
+    ActionConsequence, ActionEnablement, DeviceRosterView, OfferArgError, OfferChoice,
+    OfferNearness, OfferParam, OfferParamKind, OfferPath, UiOffer, UiOfferFocus, UiPage, UiPlace,
 };
 
-/// The readout as the controller builds it after a batch: the text, and the
-/// offer tree's offers in publish order.
+/// The readout as the controller builds it after a batch: where the user
+/// is, the rest of the text, and the offer tree's offers in publish order
+/// with the focus they are ranked by.
 #[derive(Clone, Debug, Default)]
 pub struct AppReadoutSnapshot {
+    /// The "where the user is" lines: page, focus, selection, panels.
+    pub lead: String,
+    /// The project and devices lines.
     pub text: String,
+    /// Every offer in the tree, in publish order.
     pub offers: Vec<UiOffer>,
+    /// Where the user is, as offer prefixes: which offers are listed in
+    /// full and which are counted.
+    pub focus: UiOfferFocus,
 }
 
 impl AppReadoutSnapshot {
-    /// The readout text with its offers listed by path, each with its
-    /// label, `[disabled: …]` when it cannot be pressed (`[choose a board
-    /// in args]` when all it waits for is a value), and what pressing
-    /// it does: `[needs the user's click]` (a card the user presses) or
-    /// `[undoable]` (it takes something away that Revert brings back).
+    /// The readout text: the lead, the actions there in full (each with its
+    /// label, `[disabled: …]` when it cannot be pressed — `[choose a board
+    /// in args]` when all it waits for is a value — and what pressing it
+    /// does: `[needs the user's click]`, a card the user presses, or
+    /// `[undoable]`, it takes something away that Revert brings back), the
+    /// project and devices, then every other action counted per area.
     pub fn render(&self) -> String {
-        let mut text = self.text.clone();
+        let mut text = self.lead.clone();
         if self.offers.is_empty() {
+            text.push_str(&self.text);
             text.push_str("actions: none offered\n");
             return text;
         }
-        text.push_str("actions (press one with `act` by its path):\n");
-        for offer in &self.offers {
-            let meta = offer.action.meta();
-            let _ = write!(text, "- {}: {}", offer.path, meta.label);
-            match (&meta.enablement, unbound_label(offer)) {
-                // Waiting only for a value the agent can pass: not disabled.
-                (ActionEnablement::Disabled { .. }, Some(label)) => {
-                    let _ = write!(text, " [choose a {label} in args]");
-                }
-                (ActionEnablement::Disabled { reason }, None) => {
-                    let _ = write!(text, " [disabled: {reason}]");
-                }
-                (ActionEnablement::Enabled, _) => {}
-            }
-            if meta.needs_user() {
-                text.push_str(" [needs the user's click]");
-            } else if meta.consequence == ActionConsequence::Undoable {
-                text.push_str(" [undoable]");
-            }
-            text.push('\n');
-            if !offer.params().is_empty() {
-                let params: Vec<String> = offer.params().iter().map(param_text).collect();
-                let _ = writeln!(text, "  takes {}", params.join("; "));
+        let (listed, counted): (Vec<&UiOffer>, Vec<&UiOffer>) = self
+            .offers
+            .iter()
+            .partition(|offer| self.lists_in_full(offer));
+        if listed.is_empty() {
+            text.push_str("actions here: none\n");
+        } else {
+            text.push_str("actions here (press one with `act` by its path):\n");
+            for offer in listed {
+                text.push_str(&offer_lines(offer));
             }
         }
+        text.push_str(&self.text);
+        text.push_str(&counted_lines(&counted));
         text
     }
 
-    /// The offer at `path`, if this readout lists one.
+    /// The offer at `path`, if the tree holds one (listed or counted).
     pub fn offer(&self, path: &OfferPath) -> Option<&UiOffer> {
         self.offers.iter().find(|offer| &offer.path == path)
     }
+
+    /// Whether `offer` is listed in full: a verb of the node in focus, or
+    /// a verb on the page's own area that is not some other node's.
+    fn lists_in_full(&self, offer: &UiOffer) -> bool {
+        match self.focus.nearness(&offer.path) {
+            OfferNearness::Own => true,
+            OfferNearness::Under | OfferNearness::Elsewhere => false,
+            OfferNearness::Area => !owned_by_a_node(offer),
+        }
+    }
+}
+
+/// One offer as the readout (and `read`) lists it: `- <path>: <label>`
+/// with its state, and what it takes on the next line when it takes
+/// anything.
+pub fn offer_lines(offer: &UiOffer) -> String {
+    let mut text = String::new();
+    let meta = offer.action.meta();
+    let _ = write!(text, "- {}: {}", offer.path, meta.label);
+    match (&meta.enablement, unbound_label(offer)) {
+        // Waiting only for a value the agent can pass: not disabled.
+        (ActionEnablement::Disabled { .. }, Some(label)) => {
+            let _ = write!(text, " [choose a {label} in args]");
+        }
+        (ActionEnablement::Disabled { reason }, None) => {
+            let _ = write!(text, " [disabled: {reason}]");
+        }
+        (ActionEnablement::Enabled, _) => {}
+    }
+    if meta.needs_user() {
+        text.push_str(" [needs the user's click]");
+    } else if meta.consequence == ActionConsequence::Undoable {
+        text.push_str(" [undoable]");
+    }
+    text.push('\n');
+    if !offer.params().is_empty() {
+        let params: Vec<String> = offer.params().iter().map(param_text).collect();
+        let _ = writeln!(text, "  takes {}", params.join("; "));
+    }
+    text
+}
+
+/// Whether `offer` is a node's verb (its owner's last segment is a node).
+fn owned_by_a_node(offer: &UiOffer) -> bool {
+    offer.path.owner().is_some_and(|owner| owner.names_node())
+}
+
+/// The actions not listed in full, counted: every node verb on one line,
+/// as verb counts (bounded by how many kinds of verb there are, not by how
+/// many nodes), then one line per other owner, naming its verbs.
+fn counted_lines(counted: &[&UiOffer]) -> String {
+    if counted.is_empty() {
+        return String::new();
+    }
+    let mut nodes: Vec<OfferPath> = Vec::new();
+    let mut node_verbs: Vec<(&str, usize)> = Vec::new();
+    let mut owners: Vec<(OfferPath, Vec<&str>)> = Vec::new();
+    for offer in counted {
+        let owner = offer.path.owner().unwrap_or_else(|| offer.path.clone());
+        let verb = offer.path.last().unwrap_or("?");
+        if owner.names_node() {
+            if !nodes.contains(&owner) {
+                nodes.push(owner);
+            }
+            match node_verbs.iter_mut().find(|(name, _)| *name == verb) {
+                Some((_, count)) => *count += 1,
+                None => node_verbs.push((verb, 1)),
+            }
+        } else {
+            match owners.iter_mut().find(|(path, _)| *path == owner) {
+                Some((_, verbs)) => verbs.push(verb),
+                None => owners.push((owner, vec![verb])),
+            }
+        }
+    }
+    let mut text = "more actions, counted (`read` a node or a device to list its own; \
+                    `act` takes any path):\n"
+        .to_string();
+    if !nodes.is_empty() {
+        let verbs: Vec<String> = node_verbs
+            .iter()
+            .map(|(verb, count)| format!("{verb} ×{count}"))
+            .collect();
+        let _ = writeln!(
+            text,
+            "- on {} other node{}: {}",
+            nodes.len(),
+            if nodes.len() == 1 { "" } else { "s" },
+            verbs.join(", ")
+        );
+    }
+    for (owner, verbs) in owners {
+        let _ = writeln!(text, "- {owner}: {}", verbs.join(", "));
+    }
+    text
 }
 
 /// The label of the required parameter a press with no values misses,
@@ -207,13 +307,55 @@ pub fn press_refusal(offer: &UiOffer, error: &OfferArgError) -> String {
     text
 }
 
-/// The page line.
-pub fn page_line(home: bool) -> String {
-    if home {
-        "page: home (no project open)\n".to_string()
-    } else {
-        "page: project editor\n".to_string()
+/// The page line: the page the web reports, or — before it has (and in the
+/// headless tests and evals) — what core shows.
+pub fn page_line(home: bool, page: Option<&UiPage>) -> String {
+    match page {
+        Some(page) if home && page.is_editor() => {
+            format!("page: {} (no project open yet)\n", page.describe())
+        }
+        Some(page) => format!("page: {}\n", page.describe()),
+        None if home => "page: home (no project open)\n".to_string(),
+        None => "page: project editor\n".to_string(),
     }
+}
+
+/// What the user is looking at: the node in focus (or that none is), what
+/// the patch surface has selected, and what is open over the page. Empty
+/// off the editor with nothing open: the page line says it all.
+pub(crate) fn looking_at_lines(
+    editor: bool,
+    node: Option<&AgentNodeFocus>,
+    selection: Option<String>,
+    place: Option<&UiPlace>,
+) -> String {
+    let mut text = String::new();
+    if editor {
+        match node {
+            Some(node) => {
+                let _ = write!(
+                    text,
+                    "you are looking at: node {} ({}), {}",
+                    node.name, node.kind, node.status
+                );
+                if !node.open.is_empty() {
+                    let _ = write!(text, "; its card has {} open", node.open.join(", "));
+                }
+                let _ = writeln!(text, "; its actions are at {}/…", node.prefix);
+            }
+            None => text.push_str("you are looking at: no node in particular\n"),
+        }
+        if let Some(selection) = selection {
+            let _ = writeln!(text, "selected: {selection}");
+        }
+    }
+    if let Some(place) = place
+        && !place.panels.is_empty()
+    {
+        let panels: Vec<&str> = place.panels.iter().map(|panel| panel.describe()).collect();
+        let _ = writeln!(text, "open over the page: {}", panels.join(", "));
+    }
+    text
 }
 
 /// The open project, from its compact summary (`agent_project_summary`).
@@ -283,14 +425,6 @@ pub fn project_lines(name: &str, summary: &Value) -> String {
     text
 }
 
-/// The selection line, when something is selected.
-pub fn selection_line(selection: Option<String>) -> String {
-    match selection {
-        Some(selection) => format!("selected: {selection}\n"),
-        None => String::new(),
-    }
-}
-
 /// The device roster, one row per device: its name, chip, board, firmware,
 /// state, and what it runs once it has said.
 pub fn device_lines(roster: &DeviceRosterView) -> String {
@@ -335,7 +469,11 @@ mod tests {
             &ProjectNodeAddress::parse("/demo.module/orbit.shader").unwrap(),
         );
         AppReadoutSnapshot {
-            text: "page: project editor\n".to_string(),
+            lead: "page: project editor\n".to_string(),
+            focus: UiOfferFocus {
+                node: Some(node.clone()),
+                area: Some(OfferPath::project()),
+            },
             offers: vec![
                 UiOffer::new(
                     OfferPath::project().child("save"),
@@ -362,6 +500,7 @@ mod tests {
                         .disabled("the root cannot go"),
                 ),
             ],
+            ..AppReadoutSnapshot::default()
         }
     }
 
@@ -381,6 +520,77 @@ mod tests {
             "{text}"
         );
         assert_eq!(text, snapshot().render(), "the same view reads the same");
+    }
+
+    #[test]
+    fn the_focused_nodes_verbs_are_listed_and_the_rest_counted_per_area() {
+        let mut readout = snapshot();
+        let other = |path: &str| {
+            let address = ProjectNodeAddress::parse(path).unwrap();
+            OfferPath::project_node(&address)
+        };
+        for node in ["/demo.module/clock.clock", "/demo.module/fixture.fixture"] {
+            readout.offers.push(UiOffer::new(
+                other(node).child("remove"),
+                "remove",
+                save_action().with_label("Remove node"),
+            ));
+        }
+        readout.offers.push(UiOffer::new(
+            other("/demo.module/fixture.fixture").child("revert"),
+            "revert",
+            save_action().with_label("Revert"),
+        ));
+        for verb in ["connect-usb", "connect-ble"] {
+            readout.offers.push(UiOffer::new(
+                OfferPath::devices().child(verb),
+                "usb",
+                save_action().with_label(verb),
+            ));
+        }
+        readout.text = "project: \"Demo\"\n".to_string();
+
+        let text = readout.render();
+        assert!(
+            text.starts_with(
+                "page: project editor\n\
+                 actions here (press one with `act` by its path):\n\
+                 - project/save: Save\n"
+            ),
+            "the lead, then the actions near the user: {text}"
+        );
+        assert!(text.contains("- project/demo.module/orbit.shader/remove: Remove"));
+        assert!(
+            !text.contains("clock.clock/remove: Remove node"),
+            "an unfocused node's verb is counted, not listed: {text}"
+        );
+        assert!(
+            text.ends_with(
+                "project: \"Demo\"\n\
+                 more actions, counted (`read` a node or a device to list its own; \
+                 `act` takes any path):\n\
+                 - on 2 other nodes: remove ×2, revert ×1\n\
+                 - devices: connect-usb, connect-ble\n"
+            ),
+            "{text}"
+        );
+        let clock = other("/demo.module/clock.clock").child("remove");
+        assert!(
+            readout.offer(&clock).is_some(),
+            "a counted verb is still pressable"
+        );
+    }
+
+    #[test]
+    fn a_page_with_no_area_lists_nothing_in_full() {
+        let mut readout = snapshot();
+        readout.focus = UiOfferFocus::none();
+        let text = readout.render();
+        assert!(text.contains("actions here: none\n"), "{text}");
+        assert!(
+            text.contains("- on 1 other node: remove ×1\n- project: save, revert\n"),
+            "{text}"
+        );
     }
 
     #[test]
@@ -409,8 +619,9 @@ mod tests {
             save,
         );
         let text = AppReadoutSnapshot {
-            text: String::new(),
             offers: vec![offer],
+            focus: devices_page(),
+            ..AppReadoutSnapshot::default()
         }
         .render();
         assert!(
@@ -444,8 +655,9 @@ mod tests {
             save_action(),
         );
         let text = AppReadoutSnapshot {
-            text: String::new(),
             offers: vec![offer.clone()],
+            focus: devices_page(),
+            ..AppReadoutSnapshot::default()
         }
         .render();
         assert!(
@@ -499,6 +711,13 @@ mod tests {
             press_refusal(&disabled, &disabled.press(&OfferArgs::new()).unwrap_err()),
             "\"Save\" is disabled: nothing to save"
         );
+    }
+
+    fn devices_page() -> UiOfferFocus {
+        UiOfferFocus {
+            node: None,
+            area: Some(OfferPath::devices()),
+        }
     }
 
     fn save_action() -> UiAction {
