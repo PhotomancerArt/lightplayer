@@ -81,11 +81,20 @@ Unchanged:
 - `a_port_that_dies_under_the_lens_holds_the_editor_through_the_tap`: the
   departure arrives through the lens io's tap only, with no hotplug edge.
 
-`lens_hold.rs` unit tests cover the awake-time grace. `just walk-ble-emu`
-gained two steps under Play, `drop` (the radio drops) and `phantom` (Bluefy's
-phantom drop, found when the page is shown again). Each must keep the
-`/play` route, show the strip, clear it, and take a knob turn on the resumed
-session.
+The same tap test also asserts the held project shows no sync issue (the
+pull that met the dead wire is withdrawn as the link's failure, not the
+project's). `lens_hold.rs` unit tests cover the awake-time grace.
+
+`just walk-drop-emu` (new) proves it in real Studio over the emulated USB
+cable: connect, push, open, cable out and back in under the editor, Play,
+cable out and back in under Play, then a knob turn on the resumed session.
+Each pull must keep the route, show the strip and clear it.
+
+`just walk-ble-emu` gained the Bluetooth twin under Play: `drop` (the radio
+drops) and `phantom` (Bluefy's phantom drop, found when the page is shown
+again). Those steps cannot run yet, because `?ble=emu` stopped identifying
+boards at the lp-link USB cut-over
+(`2026-10-02-the-ble-emu-polyfill-relays-lp-link-bytes-as-m-lines.md`).
 
 **Lesson** — on a wireless or hot-pluggable transport, "the link went away"
 is routine. It is not the end of what the user was doing. Keep the session

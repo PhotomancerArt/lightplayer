@@ -1377,8 +1377,14 @@ fn unplugging_mid_lens_holds_the_editor_until_the_grace_runs_out() {
     });
     let view = bench.controller.view();
     assert!(view.home.is_none(), "the project page stays");
-    let strip = view.lens_reconnecting.expect("the page says it is reconnecting");
-    assert!(strip.headline.starts_with("Reconnecting to "), "{}", strip.headline);
+    let strip = view
+        .lens_reconnecting
+        .expect("the page says it is reconnecting");
+    assert!(
+        strip.headline.starts_with("Reconnecting to "),
+        "{}",
+        strip.headline
+    );
     assert!(strip.detail.contains("dropped"), "{}", strip.detail);
     assert_eq!(bench.lens_session_id(), session, "the same session, held");
     assert!(bench.tick().is_none(), "a held lens pulls nothing");
@@ -1394,9 +1400,15 @@ fn unplugging_mid_lens_holds_the_editor_until_the_grace_runs_out() {
             break;
         }
     }
-    assert!(bench.lens_device_uid().is_none(), "past the grace the editor closes");
+    assert!(
+        bench.lens_device_uid().is_none(),
+        "past the grace the editor closes"
+    );
     assert!(bench.controller.runtime_pool_for_test().lens().is_none());
-    assert!(bench.controller.view().home.is_some(), "the gallery takes over");
+    assert!(
+        bench.controller.view().home.is_some(),
+        "the gallery takes over"
+    );
     assert!(bench.controller.view().lens_reconnecting.is_none());
     bench.step(&tasks);
     let card = &bench.view().devices[0];
@@ -1447,23 +1459,30 @@ fn a_replug_under_the_lens_resumes_the_same_editor_session() {
     bench
         .controller
         .note_device_hotplug(crate::app::studio::studio_command::DeviceHotplug::Connected);
-    bench.run_until(&tasks, "the held editor to resume on the replugged board", |bench| {
-        assert!(
-            bench.controller.view().home.is_none(),
-            "a replug must never route the editor to Devices"
-        );
-        bench
-            .view()
-            .devices
-            .first()
-            .is_some_and(|card| card.activity.is_none() && card.state_label == "Ready")
-    });
+    bench.run_until(
+        &tasks,
+        "the held editor to resume on the replugged board",
+        |bench| {
+            assert!(
+                bench.controller.view().home.is_none(),
+                "a replug must never route the editor to Devices"
+            );
+            bench
+                .view()
+                .devices
+                .first()
+                .is_some_and(|card| card.activity.is_none() && card.state_label == "Ready")
+        },
+    );
     // The tick is what notices the board is back.
     let deadline = std::time::Instant::now() + REAL_TIME_LIMIT;
     while bench.controller.lens_is_held() {
         let _ = bench.tick();
         bench.step(&tasks);
-        assert!(std::time::Instant::now() < deadline, "the held lens never resumed");
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the held lens never resumed"
+        );
     }
     assert_eq!(bench.view().devices.len(), 1, "one board, one card");
     assert_eq!(bench.lens_session_id(), session, "the same session resumed");
@@ -1733,6 +1752,18 @@ fn a_port_that_dies_under_the_lens_holds_the_editor_through_the_tap() {
     }
     assert_eq!(bench.lens_session_id(), session, "held, not closed");
     assert!(bench.controller.view().home.is_none());
+    // The pull that met the dead wire is the link's failure, not the
+    // project's: the strip says what happened, the project shows no issue.
+    let issue = bench
+        .controller
+        .snapshot()
+        .project
+        .sync
+        .and_then(|sync| sync.issue);
+    assert!(
+        issue.is_none(),
+        "a held editor shows no sync issue: {issue:?}"
+    );
     // A dead port is a departure: the board reads Offline, never
     // "attached but closed" with no way back.
     bench.run_until(&tasks, "the departure to reach the card", |bench| {

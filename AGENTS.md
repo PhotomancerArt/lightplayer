@@ -670,7 +670,9 @@ second lens on the same session.
 `navigator.bluetooth` with `public/lpa-link/virtual_bluetooth.js`, the NUS
 GATT subset over the same emulated boards, so Studio's `ble:` link, the
 device card and Play run unchanged; `just walk-ble-emu` is its walk. It
-models the firmware's link rules as far as the page can see them: the link
+models the firmware's link rules as far as the page can see them (⚠️ but
+it does not identify a board since the lp-link USB cut-over:
+`docs/defects/2026-10-02-the-ble-emu-polyfill-relays-lp-link-bytes-as-m-lines.md`): the link
 opens when the central subscribes, each link gets its own hello, an
 unauthenticated link is dropped after 10 s, and Bluefy's phantom
 drop, where the page hears a disconnect while the radio link stays

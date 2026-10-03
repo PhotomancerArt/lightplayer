@@ -282,11 +282,7 @@ impl RuntimeSession {
 
     /// Put a held session back on the wire: the board is back, on `link`
     /// (a reconnect is a new link), with a fresh client over it.
-    pub fn rebind_device(
-        &mut self,
-        attachment: DeviceLensAttachment,
-        client: StudioServerClient,
-    ) {
+    pub fn rebind_device(&mut self, attachment: DeviceLensAttachment, client: StudioServerClient) {
         let RuntimePayload::Device(device) = &mut self.payload;
         let features = device.features.take();
         *device = DeviceLensAttachment {

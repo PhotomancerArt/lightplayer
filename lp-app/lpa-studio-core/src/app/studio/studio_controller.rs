@@ -2734,6 +2734,11 @@ impl StudioController {
     }
 
     pub fn mark_passive_project_refresh_failed(&mut self, message: impl Into<String>) {
+        // A pull that failed because the link went away is not the
+        // project's failure: the strip says what happened.
+        if self.lens_hold.is_some() {
+            return;
+        }
         self.project.mark_project_sync_failed(message);
         // A sync failure changes the project pane's status even if the revision
         // did not move, so the next change gate must emit it.
@@ -5466,8 +5471,13 @@ impl StudioController {
         let pending = session.take_pending_logs();
         drop(session.drop_client());
         self.record_session_logs(id, pending);
-        self.devices.effects_mut().release_lens_wire(attachment.link);
+        self.devices
+            .effects_mut()
+            .release_lens_wire(attachment.link);
         self.lens_reconnect = None;
+        // The pull that met the dead wire marked the project failed before
+        // the departure folded; it was the link, and the strip says so.
+        self.project.withdraw_project_sync_failure();
         self.lens_hold = Some(LensHold::new(
             attachment.uid.clone(),
             attachment.name.clone(),
