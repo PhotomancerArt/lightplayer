@@ -42,9 +42,11 @@ const HZ: u64 = parse_u64_or(option_env!("LP_COEX_HZ"), 50);
 
 /// Bring Wi-Fi/ESP-NOW up the product's way and spawn the meter.
 pub fn start(spawner: Spawner, wifi: WIFI<'static>) {
-    let (controller, interfaces) =
-        esp_radio::wifi::new(wifi, esp_radio::wifi::ControllerConfig::default())
-            .expect("espnow meter: Wi-Fi init failed");
+    let (controller, interfaces) = esp_radio::wifi::new(
+        wifi,
+        crate::hardware::espnow_controller_config::espnow_controller_config(),
+    )
+    .expect("espnow meter: Wi-Fi init failed");
     // The controller must outlive the interface; dropping it deinitializes
     // Wi-Fi.
     core::mem::forget(controller);

@@ -162,6 +162,9 @@ pub struct LpServer {
     /// The ProjectRead memory gate's floors, per chip (see [`ReadGate`]).
     /// Unset (hosts/browser) = reads are never refused.
     read_gate: Option<ReadGate>,
+    /// Answer a tick's requests before rendering its frame (see
+    /// [`Self::set_messages_first`]). Off = render first, then answer.
+    messages_first: bool,
     /// Optional embedder reset action backing `ClientRequest::Reboot`.
     /// Unset (hosts/browser) = the request is refused, not acked.
     reboot_hook: Option<RebootHook>,
@@ -352,6 +355,7 @@ impl LpServer {
             memory_stats,
             read_headroom_probe: None,
             read_gate: None,
+            messages_first: false,
             reboot_hook: None,
             #[cfg(feature = "node-power-button")]
             power: None,
@@ -808,7 +812,10 @@ impl LpServer {
         incoming: Vec<Incoming>,
         transport: &mut T,
     ) -> Result<usize, ServerError> {
-        self.advance_frame(delta_ms)?;
+        let messages_first = self.messages_first;
+        if !messages_first {
+            self.advance_frame(delta_ms)?;
+        }
         // The access clock is the frames' own: the embedder's uptime,
         // supplied at the edge one delta at a time. No clock is read here.
         self.access.advance_clock(delta_ms);
@@ -1098,6 +1105,15 @@ impl LpServer {
             }
         }
 
+        if messages_first {
+            // The replies are queued; let a link task sharing this executor
+            // put them on the wire before the frame holds the thread.
+            if response_count > 0 {
+                YieldOnce::default().await;
+            }
+            self.advance_frame(delta_ms)?;
+        }
+
         Ok(response_count)
     }
 
@@ -1174,6 +1190,26 @@ impl LpServer {
     /// Unset = reads are never refused.
     pub fn set_read_gate(&mut self, gate: Option<ReadGate>) {
         self.read_gate = gate;
+    }
+
+    /// Choose the order [`Self::tick_and_send`] works in. Default off.
+    ///
+    /// Off (the default): the tick renders its frame first, then answers the
+    /// requests that arrived with it. A request's effect first shows in the
+    /// **next** tick's frame, and its reply waits behind the render.
+    ///
+    /// On: the tick answers its requests first, yields once (a
+    /// runtime-neutral yield, and only when a reply was sent) so a link task
+    /// can put the replies on the wire, then renders. A request's effect is
+    /// visible in the **same** tick's frame (write, then render), and replies
+    /// are queued before the render starts instead of after it. The access
+    /// clock advances before the requests in both orders.
+    ///
+    /// An embedder turns this on when its link IO runs where the render
+    /// cannot hold it up (the ESP32-C6's link thread); with link IO on the
+    /// same thread as the render, answering first moves no reply sooner.
+    pub fn set_messages_first(&mut self, on: bool) {
+        self.messages_first = on;
     }
 
     /// Install the embedder's power-off capability (see [`PowerPlatform`]).
@@ -1486,6 +1522,29 @@ fn graphics_feature(backend_name: &str) -> Option<lpc_model::LpFeature> {
     LpFeature::ALL.iter().copied().find(|feature| {
         label_prefix(*feature).is_some_and(|prefix| backend_name.starts_with(prefix))
     })
+}
+
+/// Pending once (waking itself), then ready: a yield any executor can drive.
+#[derive(Default)]
+struct YieldOnce {
+    yielded: bool,
+}
+
+impl core::future::Future for YieldOnce {
+    type Output = ();
+
+    fn poll(
+        mut self: core::pin::Pin<&mut Self>,
+        cx: &mut core::task::Context<'_>,
+    ) -> core::task::Poll<()> {
+        if self.yielded {
+            core::task::Poll::Ready(())
+        } else {
+            self.yielded = true;
+            cx.waker().wake_by_ref();
+            core::task::Poll::Pending
+        }
+    }
 }
 
 #[cfg(test)]

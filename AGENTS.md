@@ -239,6 +239,12 @@ the app through the same view model and presses the same actions. See
   to BLE and `fw-emu`, the only `M!` board links left (BLE until its own
   milestone, M3, lands). See `lp-base/lp-link/README.md` and
   `docs/adr/2026-09-27-lp-link-one-comms-layer.md`.
+- **On the C6 the USB link task has its own thread** (`io-thread`, priority
+  1, 3 KB stack) and the server answers a tick's requests before it renders.
+  Every `UsbLinkShared::with_link` closure there masks priority-1 interrupts
+  (the scheduler's and esp-radio's, not the RMT refill's), so **keep those
+  closures short** — no large copy under one. See
+  `docs/adr/2026-10-02-c6-link-io-thread.md`.
 - **lp-link's `secure` feature is off on every product link.** Turning it on
   for one (M6's LAN WebSocket is the first) is a wire change: bump
   `WIRE_PROTO_VERSION` in the same change. A plain link's bytes are pinned by

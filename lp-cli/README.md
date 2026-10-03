@@ -52,3 +52,27 @@ establishes the session instead. See
 (`lp-app/lpa-link/src/providers/host_serial_esp32/provider.rs`) for the
 implementation, and
 `docs/reports/2026-09-07-esp-emu-c6-spike.md` for where this came from.
+
+## Measuring a board's link: `lp-cli link rtt`
+
+How promptly a rendering board answers: request round trips, the link's own
+round trips (send → ACK, from lp-link's estimator), transfer rates both ways
+and the idle frame rate, through warm-up → idle → transfers → requests →
+tail. It runs on a serial device in wall-clock time, or on the emulated C6 in
+this process in emulated time (`emu:<fw-esp32c6 ELF>`, which deploys a
+project first — the PLAYFUL choker by default — and adds the WS281x frames
+decoded off the pads to the report).
+
+```sh
+lp-cli link rtt /dev/cu.usbmodem2101 --transfers-at-s 40 --requests-at-s 63 --json si.json
+lp-cli link rtt emu:target/riscv32imac-unknown-none-elf/release-esp32/fw-esp32c6 \
+    --requests-at-s 40 --json emu.json --console emu.console.txt
+```
+
+A project's frame cost varies with its pattern time and every transfer and
+request waits on the frame in flight, so two builds are only comparable when
+their phases start at the same **board time** (`--transfers-at-s`,
+`--requests-at-s`): emulated time since power-on on `emu:`, the board's own
+uptime from its heartbeats on a serial device. Compare emulated runs in
+frames, never against silicon in milliseconds. `lp-cli link rtt --help` has
+every knob; `lp-cli/src/commands/link/rtt.rs` the phases.

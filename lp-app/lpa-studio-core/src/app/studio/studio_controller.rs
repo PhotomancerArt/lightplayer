@@ -4767,7 +4767,7 @@ impl StudioController {
                 name,
             }));
         }
-        let staged = self.prepare_push(&op.source).await;
+        let (staged, migration_notice) = self.prepare_push(&op.source).await;
         if let Err(reason) = &staged {
             log::warn!("nothing to push to {:?}: {reason}", op.device);
         }
@@ -4776,7 +4776,11 @@ impl StudioController {
             device: op.device,
         }));
         self.settle_device_records().await;
-        Ok(UiNotices::new())
+        let mut notices = UiNotices::new();
+        if let Some(notice) = migration_notice {
+            notices = notices.with_notice(notice);
+        }
+        Ok(notices)
     }
 
     /// Resolve a picked source into the bytes that will go on the board.
@@ -4788,7 +4792,25 @@ impl StudioController {
     /// example is INSTALLED first (fresh uid minted at install, the incoming
     /// manifest untouched — the examples vision's rule) and a starter is
     /// GENERATED into the library first.
-    async fn prepare_push(&mut self, source: &crate::PushSource) -> crate::StagedPush {
+    ///
+    /// Alongside the staged payload, the second slot carries the notice a
+    /// library-format migration produced — see [`Self::read_push_payload`].
+    async fn prepare_push(
+        &mut self,
+        source: &crate::PushSource,
+    ) -> (crate::StagedPush, Option<UiNotice>) {
+        match self.prepare_push_inner(source).await {
+            Ok((payload, notice)) => (Ok(payload), notice),
+            Err(error) => (Err(error), None),
+        }
+    }
+
+    /// [`Self::prepare_push`]'s body, kept `Result`-shaped so the three
+    /// sources can still converge through `?`.
+    async fn prepare_push_inner(
+        &mut self,
+        source: &crate::PushSource,
+    ) -> Result<(crate::PushPayload, Option<UiNotice>), String> {
         let uid = match source {
             crate::PushSource::Library { project_uid } => project_uid.clone(),
             crate::PushSource::Example { example_id } => {
@@ -4813,15 +4835,18 @@ impl StudioController {
                 .await?
             }
         };
-        let (files, content_hash, label) = self.read_push_payload(&uid).await?;
-        Ok(crate::PushPayload {
-            project_uid: uid,
-            label,
-            files,
-            content_hash,
-            fallback_storage_id: crate::app::project::demo_project::DEMO_PROJECT_STORAGE_ID
-                .to_string(),
-        })
+        let (files, content_hash, label, notice) = self.read_push_payload(&uid).await?;
+        Ok((
+            crate::PushPayload {
+                project_uid: uid,
+                label,
+                files,
+                content_hash,
+                fallback_storage_id: crate::app::project::demo_project::DEMO_PROJECT_STORAGE_ID
+                    .to_string(),
+            },
+            notice,
+        ))
     }
 
     /// Run a creation-shaped catalog op and return the uid it installed.
@@ -4843,10 +4868,18 @@ impl StudioController {
     /// lock), otherwise through a read-only open whose receipt is abandoned
     /// the moment the bytes are in hand, so a push never leaves a lock
     /// behind.
+    ///
+    /// The fourth slot is the migration notice, present only on the
+    /// read-only path below and only when the catalog op actually migrated
+    /// something — the live handle is always current (the editor's own open
+    /// already migrated it). Same wording and surface as the editor open's
+    /// notice (`ProjectController::migrate_package_on_open`); it omits that
+    /// notice's per-step notes/warnings because [`crate::app::library::CatalogOutcome`]
+    /// does not carry them past the catalog op, only the migrated-from format.
     async fn read_push_payload(
         &mut self,
         uid: &str,
-    ) -> Result<(Vec<(String, Vec<u8>)>, String, String), String> {
+    ) -> Result<(Vec<(String, Vec<u8>)>, String, String, Option<UiNotice>), String> {
         if let Some(read) = self.project.read_open_package(uid) {
             let (files, hash) = read.map_err(|error| error.to_string())?;
             // The open handle has no slug to hand back through this seam, so
@@ -4858,7 +4891,7 @@ impl StudioController {
                 .and_then(|inputs| inputs.projects.iter().find(|card| card.uid == uid))
                 .map(|card| card.slug.clone())
                 .unwrap_or_else(|| uid.to_string());
-            return Ok((files, hash, label));
+            return Ok((files, hash, label, None));
         }
         // A board never migrates (ADR 2026-07-05) and refuses old bytes at
         // load, AFTER the push has already stopped and cleared it — so an
@@ -4867,16 +4900,18 @@ impl StudioController {
         // editor's open uses. Current packages are left alone; a package no
         // step can migrate refuses the push with the classifier's sentence
         // before the board is touched.
-        self.run_catalog_op(CatalogOp::UpgradePackageFormat {
-            project_uid: uid.to_string(),
-        })
-        .await
-        .map_err(|error| error.to_string())?;
+        let outcome = self
+            .run_catalog_op(CatalogOp::UpgradePackageFormat {
+                project_uid: uid.to_string(),
+            })
+            .await
+            .map_err(|error| error.to_string())?;
         let host = self.library_host().map_err(|error| error.to_string())?;
         let opened = host
             .open_project(uid)
             .await
             .map_err(|error| self.library_error_with_name(error).to_string())?;
+        let slug = opened.slug.clone();
         let handle = crate::app::library::PackageHandle::load(
             opened.uid,
             opened.slug.clone(),
@@ -4894,7 +4929,13 @@ impl StudioController {
         // `close_project` on top would be closing something nothing holds.
         opened.receipt.abandon();
         let (files, hash) = payload?;
-        Ok((files, hash, opened.slug))
+        let notice = outcome.upgraded_from.map(|from| {
+            UiNotice::info(format!(
+                "Upgraded \"{slug}\" from format {from} to {}",
+                lpc_model::PROJECT_FORMAT_VERSION
+            ))
+        });
+        Ok((files, hash, slug, notice))
     }
 
     /// The auto-names due right now: one `SetName` per registered board that
@@ -5098,6 +5139,15 @@ impl StudioController {
             // The same `M!` line framing, over a NUS GATT service.
             crate::LinkTransport::Ble => "ble-nus",
         };
+        // What to call this in a failure line, in the product's own words
+        // for each kind (the card's runtime band's "Sim"/"Emu", the
+        // emulator picker's "an emulated board") — never "the board" for a
+        // sim or an emulated board, which have none.
+        let open_noun = match attachment.transport {
+            crate::LinkTransport::Sim => "sim",
+            crate::LinkTransport::Emu => "emulated board",
+            crate::LinkTransport::Serial | crate::LinkTransport::Ble => "board",
+        };
         let client = crate::StudioServerClient::from_lens_io(io, deadline, protocol);
         let id = self.pool.install(crate::RuntimePayload::Device(attachment));
         self.record_device_event(
@@ -5133,7 +5183,7 @@ impl StudioController {
                     self.push_log(UiLogDraft::new(
                         UiLogLevel::Warn,
                         UiLogOrigin::Studio,
-                        format!("could not open the board in the editor: {error}"),
+                        format!("could not open the {open_noun} in the editor: {error}"),
                     ));
                 }
                 self.close_device_lens();

@@ -7,6 +7,7 @@ without building firmware. See docs/ci-images.md.
   scripts/ci/ci-images.py env   <chip>                    # `export` lines, for `eval`
   scripts/ci/ci-images.py with  <chip|all|""> -- <cmd...> # exec cmd with the env
   scripts/ci/ci-images.py status [chip...]                # what LP_CI_IMAGES holds
+  scripts/ci/ci-images.py --self-test                     # offline checks, no `gh`/network
 
 Chips: esp32c6, esp32v3, esp32s3.
 
@@ -412,6 +413,19 @@ def artifacts(run_id: int) -> dict[str, dict]:
     return {a["name"]: a for a in data.get("artifacts", []) if not a.get("expired")}
 
 
+def green_push_runs(candidates: list[dict]) -> list[dict]:
+    """`completed`+`success` runs, filtered client-side, in the order given.
+
+    Not `runs("...&status=success")`: that server-side filter goes through a
+    search index that was observed stale on 2026-10-02 — a query for main's
+    newest green run returned a page of runs three weeks old, even though
+    fresh green runs existed (and the identical query without `status=`
+    returned the fresh page every time). Fetching the plain push/event page
+    and filtering here avoids that index.
+    """
+    return [r for r in candidates if r.get("status") == "completed" and r.get("conclusion") == "success"]
+
+
 def pick_run(target: str, chips: list[str]) -> tuple[int, dict[str, dict]]:
     wanted = {f"ci-images-{c}" for c in chips}
 
@@ -430,7 +444,7 @@ def pick_run(target: str, chips: list[str]) -> tuple[int, dict[str, dict]]:
             "jobs are path-gated, and artifacts expire after 7 days)")
 
     if target in ("", "main"):
-        return first_with_artifacts(runs("branch=main&event=push&status=success"), "main (green)")
+        return first_with_artifacts(green_push_runs(runs("branch=main&event=push")), "main (green)")
     if re.fullmatch(r"\d{1,6}", target):
         pr = gh_json("pr", "view", target, "--json", "headRefOid,headRefName")
         cands = runs(f"head_sha={pr['headRefOid']}")
@@ -512,10 +526,43 @@ def cmd_fetch(args: list[str]) -> None:
     )
 
 
+def self_test() -> int:
+    """Offline checks for the parts that don't call `gh` or touch the network."""
+    checks = 0
+
+    def check(cond: bool, msg: str) -> None:
+        nonlocal checks
+        if not cond:
+            die(f"self-test failed: {msg}")
+        checks += 1
+
+    check(chip_name("c6") == "esp32c6", "chip_name resolves the 'c6' alias")
+    check(chip_name("nope") is None, "chip_name rejects an unknown chip")
+    check(expand_chips("") == list(CHIPS), "expand_chips('') is every chip")
+    check(expand_chips("esp32s3,c6") == ["esp32s3", "esp32c6"], "expand_chips keeps the given order")
+
+    # green_push_runs must do the completed+success filtering itself rather
+    # than trusting the server-side `status=success` query filter — see its
+    # docstring for the 2026-10-02 staleness this guards against.
+    mixed = [
+        {"id": 1, "status": "in_progress", "conclusion": None},
+        {"id": 2, "status": "completed", "conclusion": "failure"},
+        {"id": 3, "status": "completed", "conclusion": "success"},
+        {"id": 4, "status": "completed", "conclusion": "success"},
+    ]
+    check([r["id"] for r in green_push_runs(mixed)] == [3, 4], "green_push_runs keeps only completed+success, in order")
+    check(green_push_runs([]) == [], "green_push_runs([]) is []")
+
+    print(f"ci-images self-test: {checks} checks passed")
+    return 0
+
+
 def main() -> None:
     if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help"):
         print(__doc__)
         return
+    if sys.argv[1] == "--self-test":
+        sys.exit(self_test())
     cmd, args = sys.argv[1], sys.argv[2:]
     if cmd == "pack":
         if len(args) != 2 or not chip_name(args[0]):

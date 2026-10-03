@@ -436,6 +436,19 @@ impl<A: Arq> Link<A> {
         &self.counters
     }
 
+    /// The most recent round trip this end measured for a data frame (sent
+    /// to acknowledged), with the running sample count — a host polls it to
+    /// read the link-level RTT distribution (`lp-cli link rtt`).
+    pub fn rtt_last_sample(&self) -> (Micros, u32) {
+        self.rtt.last_sample()
+    }
+
+    /// The smoothed round-trip time this end's resend timer works from (the
+    /// initial timeout until the first sample).
+    pub fn srtt(&self) -> Micros {
+        self.rtt.srtt()
+    }
+
     pub fn config(&self) -> &LinkConfig {
         &self.cfg
     }
