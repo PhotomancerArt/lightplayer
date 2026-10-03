@@ -234,7 +234,7 @@ sha256s exactly (543 B `05b27095…`, 804 B `92c857b2…`, 703 B `c0951fb6…`).
 | v3 `boot_idle.rs` `the_heartbeats_memory_figures_are_the_desk_boards` | `HEAP_USED_GAP` 84, `STACK_HIGH_WATER_GAP` 640, every line against the silicon transcript | silicon vs emulator on the **pinned `75486b114` reference image**: only an emulator change moves them |
 | v3 `boot_idle.rs`, `boot.rs` | `heap=15072+112640+98304+15536=241552` | byte-identical to silicon's boot banner; heap configuration |
 | v3 `rom_up_boot.rs` | the bootloader log, partition rows, `SILICON_SEGMENTS` | the committed silicon capture; `partitions.csv` |
-| v3 `boot.rs` | app entry `0x4008_0844`, 6 segments / 1 relocated, first strict stop at cycle 29, ROM symbol addresses | layout identity; move only with a linker-script change, which is a finding |
+| v3 `boot.rs` | app entry `0x4008_084C`, 6 segments / 1 relocated, first strict stop at cycle 29, ROM symbol addresses | layout identity; move only with a linker-script change, which is a finding. One exception found (2026-10-03, the classic's link thread): `.rwtext`'s literal pool sits ahead of `Reset`, so IRAM code that compiles differently can move the entry with no linker-script change — 0x4008_0844 → 0x4008_084C when esp-rtos gained `esp-radio` + `alloc` |
 | s3 `boot_idle.rs` | `HELLO` (253 B, `da070ac0…`) | a golden with no figure in it: heap size and RWDT config, changed only on purpose |
 | s3 `boot_idle.rs` | the all-zero `[JIT]` line, `retry_saves=0` | structural constants |
 | c6 `boot_idle.rs`, `upload_walk*.rs`, `rom_up_boot.rs`, `harness_parity.rs` | heartbeat memory, stack totals, load/compile lines, flash census | pinned reference images (`d6cfaa205`, `735af98ae`) and silicon transcripts |

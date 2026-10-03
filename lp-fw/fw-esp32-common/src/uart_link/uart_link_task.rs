@@ -1,5 +1,7 @@
-//! The UART link task's loop: the one owner of the classic's [`Link`], on the
-//! thread executor.
+//! The UART link task's loop: the one owner of the classic's [`Link`]'s
+//! timers and frames — on a priority-1 esp-rtos thread of its own
+//! (`fw-esp32v3`'s `io_thread`, the default), or on the main thread executor
+//! beside the engine (without `io-thread`).
 //!
 //! It never touches UART0. The classic's I/O task does, from its interrupt
 //! executor every 1 ms (`fw-esp32v3`'s `serial::io_task`), and hands bytes
@@ -27,21 +29,26 @@
 //!    link's own timers (SYN every 100 ms without a host, keepalive every
 //!    250 ms with one) or [`IDLE_BACKSTOP_US`].
 //!
-//! Because this task shares the thread executor with the engine, it runs
-//! only between engine ticks (41–114 ms on a dome-scale project), and the
-//! board's resend floor is sized for that, not for the I/O task's 1 ms
+//! **Where it runs decides how promptly it runs.** On its own thread
+//! (`io-thread`, pinned to core 0 at priority 1, above the main task's 0) a
+//! wake — bytes from the I/O task, room in the TX pipe, the doorbell, a timer
+//! — preempts the render at once, so ACKs, resends, transfers and the log
+//! pump keep the I/O task's ~1 ms cadence while a frame renders; the link is
+//! then shared across two threads, under the lock the chip injects
+//! ([`UartLinkShared::leak_locked`], and its short-closure rule). Without the
+//! thread this task shares the main executor with the engine and runs only
+//! between engine ticks (41–114 ms on a dome-scale project). The board's
+//! resend floor is sized for the second case, not for the I/O task's 1 ms
 //! cadence (`uart_link_config`'s `MIN_RTO_US`). Liveness is the link's own
 //! (`Up`/`Reset`/`is_stalled`): a UART has no cable signal, and there is no
 //! connection monitor to replace.
 //!
-//! Waking on events and not on a 10 ms cadence matters once this task has a
-//! thread of its own (P4's `io-thread`): every pass then preempts the
-//! render, and a pass that finds nothing to do still costs something. The
-//! C6's USB loop made the same change in M1
-//! (`lp2025/2026-10-01-1200-io-thread-spike`); this ports it to the
-//! classic's UART loop ahead of its own thread (P2 of
-//! `lp2025/2026-10-02-1918-io-thread-other-boards`), so idle passes land in
-//! the render's gaps today and do not cost extra once the loop preempts it.
+//! Waking on events and not on a 10 ms cadence matters because this task
+//! has a thread of its own (`io-thread`): every pass preempts the render,
+//! and a pass that finds nothing to do still costs something. The C6's USB
+//! loop made the same change in M1 (`lp2025/2026-10-01-1200-io-thread-spike`);
+//! P2 of `lp2025/2026-10-02-1918-io-thread-other-boards` ported it here
+//! ahead of the thread, which P4 of that plan added.
 
 use core::cell::Cell;
 
@@ -90,7 +97,8 @@ pub fn when_drained(action: fn() -> !) {
     critical_section::with(|cs| WHEN_DRAINED.borrow(cs).set(Some(action)));
 }
 
-/// Run the host link for ever. Spawn it on the thread executor.
+/// Run the host link for ever. Spawn it on a thread executor — the link
+/// thread's, or the main one — never on the I/O task's interrupt executor.
 pub async fn run_uart_link(shared: &'static UartLinkShared) -> ! {
     let mut buf = [0u8; RX_CHUNK];
     let mut frame = [0u8; MAX_FRAME_BYTES];
