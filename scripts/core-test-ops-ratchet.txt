@@ -1,0 +1,26 @@
+# Core test sites that build a user-verb action directly, per file — a ratchet:
+# counts may only go down. Written by `scripts/check-core-test-ops.py --bless`;
+# see that script and docs/adr/2026-10-01-agentic-control-offers-in-core.md.
+5 lp-app/lpa-studio-core/src/app/agent/app_agent_readout.rs
+6 lp-app/lpa-studio-core/src/app/agent/evals/app_agent_eval_driver.rs
+2 lp-app/lpa-studio-core/src/app/agent/evals/app_agent_eval_harness.rs
+7 lp-app/lpa-studio-core/src/app/agent/ui_agent_card.rs
+1 lp-app/lpa-studio-core/src/app/bus/ui_bus_view.rs
+1 lp-app/lpa-studio-core/src/app/open_progress.rs
+1 lp-app/lpa-studio-core/src/app/project/node/node_face_builder.rs
+1 lp-app/lpa-studio-core/src/app/project/project_controller.rs
+12 lp-app/lpa-studio-core/src/app/studio/studio_actor_tests.rs
+9 lp-app/lpa-studio-core/src/app/studio/studio_agent_e2e_tests.rs
+1 lp-app/lpa-studio-core/src/app/studio/studio_command_summary.rs
+13 lp-app/lpa-studio-core/src/app/studio/studio_controller.rs
+25 lp-app/lpa-studio-core/src/app/studio/studio_device_e2e_tests.rs
+1 lp-app/lpa-studio-core/src/app/studio/studio_device_e2e_tests/agent_device_journey_tests.rs
+1 lp-app/lpa-studio-core/src/app/studio/studio_docs_e2e_tests.rs
+56 lp-app/lpa-studio-core/src/app/studio/studio_edit_e2e_tests.rs
+2 lp-app/lpa-studio-core/src/app/studio/studio_export_e2e_tests.rs
+111 lp-app/lpa-studio-core/src/app/studio/studio_face_e2e_tests.rs
+4 lp-app/lpa-studio-core/src/app/studio/studio_import_e2e_tests.rs
+17 lp-app/lpa-studio-core/src/app/studio/studio_node_crud_e2e_tests.rs
+1 lp-app/lpa-studio-core/src/app/studio/studio_open_supersede_e2e_tests.rs
+2 lp-app/lpa-studio-core/src/app/studio/studio_pattern_picker_e2e_tests.rs
+5 lp-app/lpa-studio-core/src/app/studio/studio_transient_open_e2e_tests.rs
