@@ -208,7 +208,20 @@ impl AgentSeat {
         let mut cx = Context::from_waker(&waker);
         let mut next_progress = std::time::Instant::now() + PROGRESS_EVERY;
         loop {
-            let Some(mut run) = self.runs.borrow_mut().pop() else {
+            let next = self.runs.borrow_mut().pop();
+            let Some(mut run) = next else {
+                // An open the agent started that is still landing resumes
+                // it when it does: the actor keeps ticking after a run
+                // ends, and so does the seat, until the open has ended.
+                if waiting_on_an_open(bench) {
+                    if std::time::Instant::now() > give_up {
+                        return false;
+                    }
+                    actor_step(bench, tasks);
+                    self.apply(bench);
+                    std::thread::sleep(Duration::from_millis(1));
+                    continue;
+                }
                 return true;
             };
             while run.as_mut().poll(&mut cx).is_pending() {
@@ -378,6 +391,17 @@ fn wait_quiet(bench: &mut DeviceBench, tasks: &TaskPool) {
         }
         std::thread::sleep(Duration::from_millis(1));
     }
+}
+
+/// Whether the agent pressed an open that has not ended yet (its sim is
+/// still starting).
+fn waiting_on_an_open(bench: &mut DeviceBench) -> bool {
+    bench
+        .controller
+        .agent_for_test()
+        .app_session()
+        .open_wait
+        .is_some()
 }
 
 /// One bench step, plus what the actor's tick does besides folding: an
@@ -737,5 +761,234 @@ impl ScenarioSeat for DeviceScenarioSeat {
             flashed,
             pushes: self.bench.pushed.borrow().len(),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use lpa_agent::{StopReason, TokenUsage};
+
+    use super::*;
+
+    /// The corpus's S4/S18/S19 stall: from Home the agent presses
+    /// `project/new`, the open waits for its sim, and the agent ends its
+    /// turn. When the editor comes up the agent is resumed with a note —
+    /// no user message in between — and the edit it makes then applies to
+    /// the new project.
+    #[test]
+    fn an_open_the_agent_started_resumes_it_when_the_editor_is_up() {
+        let scenario = Scenario::load("s04-sean-new-c6-d5").expect("S4");
+        let scripts = vec![
+            vec![
+                act_turn("n1", "project/new", &[("name", "Porch")]),
+                say("Starting a project; once it's up I'll add a clock."),
+            ],
+            vec![
+                call_turn(
+                    "e1",
+                    lpa_agent::EDIT_PROJECT_TOOL_NAME,
+                    serde_json::json!({
+                        "edits": [{ "create_node": { "kind": "Clock" } }],
+                        "save": false,
+                    }),
+                ),
+                say("Added a clock."),
+            ],
+        ];
+        let mut seat = DeviceScenarioSeat::new(ModelSource::Scripted(scripts), &scenario);
+        seat.start(&scenario);
+        seat.send("make me a project with a clock", limits());
+
+        let requests = seat.seat.requests();
+        assert_eq!(requests, 4, "two turns in each of two runs");
+        // The first run ended on Home with the open still under way.
+        assert!(
+            seat.seat.readout_of_request(1).contains("opening: \""),
+            "{}",
+            seat.seat.readout_of_request(1)
+        );
+        // The second run opens with the note, not a user message.
+        assert_eq!(
+            seat.seat.last_user_text(2),
+            "[the project \"Porch\" you opened is now open in the editor]"
+        );
+        assert!(
+            seat.seat
+                .readout_of_request(2)
+                .contains("page: project editor"),
+            "{}",
+            seat.seat.readout_of_request(2)
+        );
+        let session = seat.bench.controller.agent_for_test().app_session();
+        let users: Vec<_> = session
+            .mirror
+            .turns
+            .iter()
+            .filter(|turn| matches!(turn, crate::UiAgentTurn::User { .. }))
+            .collect();
+        assert_eq!(users.len(), 1, "the user spoke once: {users:#?}");
+        assert!(session.open_wait.is_none() && session.open_settled.is_none());
+        let results = seat.seat.tool_results(&mut seat.bench);
+        let edit = results.last().expect("the edit's result");
+        assert_eq!(edit["results"][0]["ok"], true, "{edit:#}");
+        assert!(
+            seat.bench
+                .controller
+                .project_for_test()
+                .agent_project_name()
+                .contains("Porch")
+        );
+        assert_eq!(
+            seat.seat
+                .assistant_texts(&mut seat.bench)
+                .last()
+                .map(String::as_str),
+            Some("Added a clock.")
+        );
+    }
+
+    /// An open whose sim cannot start resumes the agent with the failure,
+    /// once, instead of leaving it waiting on a page that never comes.
+    #[test]
+    fn an_open_the_agent_started_that_fails_resumes_it_with_the_reason() {
+        let scenario = Scenario::load("s04-sean-new-c6-d5").expect("S4");
+        let scripts = vec![
+            vec![
+                act_turn("n1", "project/new", &[("name", "Porch")]),
+                say("Starting a project."),
+            ],
+            vec![say("The project's simulator would not start.")],
+        ];
+        let mut seat = DeviceScenarioSeat::new(ModelSource::Scripted(scripts), &scenario);
+        let sims = Rc::new(SimDeviceTransport::new(Rc::new(RefusingSims)));
+        seat.bench.sims = Some(Rc::clone(&sims));
+        seat.bench.controller.set_device_sim_transport(sims);
+        seat.start(&scenario);
+        seat.send("make me a project", limits());
+
+        assert_eq!(seat.seat.requests(), 3, "two turns, then the resumed one");
+        let note = seat.seat.last_user_text(2);
+        assert!(
+            note.starts_with("[opening \"") && note.contains("failed: ") && note.ends_with(']'),
+            "{note}"
+        );
+        assert!(
+            note.contains("porch\" failed: ") && note.contains("did not start"),
+            "{note}"
+        );
+        let session = seat.bench.controller.agent_for_test().app_session();
+        assert!(session.open_wait.is_none() && session.open_settled.is_none());
+    }
+
+    /// The user spoke while the open was under way: the open owes the
+    /// agent nothing — the run the user started reads the page itself.
+    #[test]
+    fn an_open_the_user_spoke_over_does_not_resume_the_agent() {
+        let scenario = Scenario::load("s04-sean-new-c6-d5").expect("S4");
+        let scripts = vec![
+            vec![
+                act_turn("n1", "project/new", &[("name", "Porch")]),
+                say("Starting a project."),
+            ],
+            vec![say("Sure.")],
+        ];
+        let mut seat = DeviceScenarioSeat::new(ModelSource::Scripted(scripts), &scenario);
+        seat.start(&scenario);
+        // Drive only the first run: the open is still under way after it.
+        let (bench, tasks) = (&mut seat.bench, &seat.tasks);
+        drive(bench.controller.dispatch(send_action("make me a project"))).expect("sent");
+        let waker = noop_waker();
+        let mut cx = Context::from_waker(&waker);
+        let mut run = seat.seat.runs.borrow_mut().pop().expect("a run");
+        while run.as_mut().poll(&mut cx).is_pending() {
+            seat.seat.apply(bench);
+        }
+        seat.seat.apply(bench);
+        assert!(
+            bench
+                .controller
+                .agent_for_test()
+                .app_session()
+                .open_wait
+                .is_some(),
+            "the open is still under way"
+        );
+        // The user's message, then the open lands: only the user's run.
+        seat.seat.send(bench, tasks, "also make it blue");
+        wait_quiet(bench, tasks);
+        for _ in 0..20 {
+            actor_step(bench, tasks);
+            seat.seat.apply(bench);
+        }
+        assert!(bench.ready_handle().is_some(), "the editor is up");
+        assert!(seat.seat.runs.borrow().is_empty(), "no resumed run");
+        assert_eq!(seat.seat.requests(), 3);
+        let session = bench.controller.agent_for_test().app_session();
+        assert!(session.open_wait.is_none() && session.open_settled.is_none());
+    }
+
+    /// A tab whose runtimes never start.
+    struct RefusingSims;
+
+    impl SimLinkSource for RefusingSims {
+        fn open(&self, _: &SimSession) -> Result<SimBacking, String> {
+            Err("no engine in this test".to_string())
+        }
+    }
+
+    fn limits() -> RunLimits {
+        RunLimits {
+            deadline: std::time::Instant::now() + Duration::from_secs(60),
+            usd: 1.0,
+            turns: 8,
+            tokens: None,
+        }
+    }
+
+    fn call_turn(id: &str, tool: &str, input: serde_json::Value) -> Vec<TurnEvent> {
+        vec![
+            TurnEvent::ToolUseStart {
+                id: id.into(),
+                name: tool.into(),
+            },
+            TurnEvent::ToolInputDelta {
+                id: id.into(),
+                json_fragment: input.to_string(),
+            },
+            turn_done(StopReason::ToolUse),
+        ]
+    }
+
+    fn act_turn(id: &str, action: &str, args: &[(&str, &str)]) -> Vec<TurnEvent> {
+        call_turn(
+            id,
+            lpa_agent::ACT_TOOL_NAME,
+            serde_json::json!({
+                "action": action,
+                "args": args
+                    .iter()
+                    .map(|(name, value)| (name.to_string(), serde_json::json!(value)))
+                    .collect::<serde_json::Map<_, _>>(),
+                "why": "the user asked",
+            }),
+        )
+    }
+
+    fn say(text: &str) -> Vec<TurnEvent> {
+        vec![
+            TurnEvent::TextDelta(text.into()),
+            turn_done(StopReason::EndTurn),
+        ]
+    }
+
+    fn turn_done(stop_reason: StopReason) -> TurnEvent {
+        TurnEvent::TurnDone {
+            stop_reason,
+            usage: TokenUsage {
+                input_tokens: 10,
+                output_tokens: 5,
+                ..TokenUsage::default()
+            },
+        }
     }
 }

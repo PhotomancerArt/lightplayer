@@ -2882,6 +2882,9 @@ impl StudioController {
         // Release closed projects' locks and re-hydrate the gallery when
         // the action made either due (open/close/save/home ops).
         self.settle_library().await;
+        // An open the agent started may have ended here (a Cancel, the
+        // user's own open replacing it).
+        self.observe_agent_open();
         // A dispatched action changes local state (project state, focus,
         // logs, or an error to surface), so the actor's next gate must emit.
         self.mark_dirty();
@@ -4413,6 +4416,13 @@ impl StudioController {
         }))
     }
 
+    /// What the open in flight is pending under (any kind of open).
+    fn pending_open_card_key(&self) -> Option<String> {
+        self.pending_open
+            .as_ref()
+            .map(|pending| pending.card_key().to_string())
+    }
+
     /// The pending open's library key, when it has one.
     fn pending_open_key(&self) -> Option<String> {
         match &self.pending_open {
@@ -5670,6 +5680,12 @@ impl StudioController {
     /// from the refresh tick (the one recurring async seam); a board that
     /// is still not ready keeps the intent, one that vanished drops it.
     pub(crate) async fn try_pending_device_lens(&mut self) {
+        self.try_pending_device_lens_inner().await;
+        // A held open the agent started lands (or fails) here.
+        self.observe_agent_open();
+    }
+
+    async fn try_pending_device_lens_inner(&mut self) {
         let Some(uid) = self.pending_device_lens.clone() else {
             return;
         };
@@ -6153,6 +6169,9 @@ impl StudioController {
                 Ok(UiNotices::new())
             }
             crate::AgentOp::AppStop => {
+                // Stopped means stopped: an open still landing does not
+                // wake the agent back up.
+                self.agent.app_session_mut().forget_agent_open();
                 self.agent.request_app_stop();
                 Ok(UiNotices::new())
             }
@@ -6363,6 +6382,9 @@ impl StudioController {
     /// Start one app-chat run. Unlike the shader chat it needs no open
     /// project: the app agent builds one from nothing.
     fn app_agent_send(&mut self, text: String) -> UiResult {
+        // The user spoke: an open the agent is waiting on owes it nothing
+        // now — this run reads the page as it is.
+        self.agent.app_session_mut().forget_agent_open();
         self.app_agent_start(text, true)
     }
 
@@ -6429,7 +6451,18 @@ impl StudioController {
                 says: card.title,
             };
         }
-        match Box::pin(self.dispatch(action)).await {
+        let opening_before = self.pending_open_card_key();
+        let dispatched = Box::pin(self.dispatch(action)).await;
+        // An open from Home that is still under way when the press returns
+        // (its device is starting) lands after this run has ended: the
+        // agent is resumed then ([`Self::observe_agent_open`]).
+        if dispatched.is_ok()
+            && let Some(key) = self.pending_open_card_key()
+            && opening_before.as_deref() != Some(key.as_str())
+        {
+            self.agent.app_session_mut().agent_open_started(key);
+        }
+        match dispatched {
             Ok(notices) => ActOutcome::Done {
                 notices: notices
                     .notices
@@ -6479,12 +6512,65 @@ impl StudioController {
         self.resume_app_agent();
     }
 
+    /// Resume the agent once an open it started has ended — the editor is
+    /// up on the project, or the open failed — so a turn that ended at
+    /// "waiting for the device" carries on without the user saying
+    /// anything (activity corpus S4/S18/S19, 2026-10-03). Called wherever
+    /// an open can end: the tick that lands a held lens, and the end of
+    /// every dispatch (Cancel, an open the user started instead).
+    fn observe_agent_open(&mut self) {
+        let Some(wait) = self.agent.app_session_mut().open_wait.clone() else {
+            return;
+        };
+        match self.pending_open_card_key() {
+            // Still under way.
+            Some(key) if key == wait.key => return,
+            // The user started another open over it: nothing is owed.
+            Some(_) => {
+                self.agent.app_session_mut().forget_agent_open();
+                return;
+            }
+            None => {}
+        }
+        let note = match crate::app::open_progress::open_stage() {
+            crate::app::open_progress::OpenStage::Failed(failure) => format!(
+                "[opening {:?} failed: {}]",
+                self.agent_open_label(&wait.key),
+                failure.message
+            ),
+            _ if self.project_is_loaded() => format!(
+                "[the project {:?} you opened is now open in the editor]",
+                self.project.agent_project_name()
+            ),
+            _ => format!(
+                "[opening {:?} ended without opening the editor]",
+                self.agent_open_label(&wait.key)
+            ),
+        };
+        if self.agent.app_session_mut().agent_open_settled(note) {
+            self.resume_app_agent();
+            self.mark_dirty();
+        }
+    }
+
+    /// The name Home's gallery gives the project under `key`, else the key.
+    fn agent_open_label(&self, key: &str) -> String {
+        self.home_view()
+            .and_then(|home| {
+                home.projects
+                    .into_iter()
+                    .find(|card| card.uid == key)
+                    .map(|card| card.slug)
+            })
+            .unwrap_or_else(|| key.to_string())
+    }
+
     /// Start the run a settled card owes the assistant, once no run is out.
     fn resume_app_agent(&mut self) {
         if self.agent.app_running() {
             return;
         }
-        let resume = std::mem::take(&mut self.agent.app_session_mut().resume);
+        let resume = self.agent.app_session_mut().take_resume();
         if resume.is_empty() {
             return;
         }
