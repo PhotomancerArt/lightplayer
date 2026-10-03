@@ -40,7 +40,11 @@ impl ChipReport for C6Board {
             if frames.is_empty() {
                 continue;
             }
-            pads.push(pad_entry(pad.0, frames, lp_emu_esp32c6::memmap::CYCLES_PER_US));
+            pads.push(pad_entry(
+                pad.0,
+                frames,
+                lp_emu_esp32c6::memmap::CYCLES_PER_US,
+            ));
         }
         let mut refills = Vec::new();
         for ch in 0..C6_TX_CHANNELS {
@@ -73,7 +77,11 @@ impl ChipReport for S3Board {
             if frames.is_empty() {
                 continue;
             }
-            pads.push(pad_entry(pad.0, frames, lp_emu_esp32s3::memmap::CYCLES_PER_US));
+            pads.push(pad_entry(
+                pad.0,
+                frames,
+                lp_emu_esp32s3::memmap::CYCLES_PER_US,
+            ));
         }
         let mut refills = Vec::new();
         for ch in 0..S3_TX_CHANNELS {
@@ -106,7 +114,11 @@ impl ChipReport for V3Board {
             if frames.is_empty() {
                 continue;
             }
-            pads.push(pad_entry(pad.0, frames, lp_emu_esp32v3::memmap::CYCLES_PER_US));
+            pads.push(pad_entry(
+                pad.0,
+                frames,
+                lp_emu_esp32v3::memmap::CYCLES_PER_US,
+            ));
         }
         let mut refills = Vec::new();
         for ch in 0..V3_TX_CHANNELS {

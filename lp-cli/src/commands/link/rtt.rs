@@ -705,8 +705,8 @@ fn open_emu_v3(args: &RttArgs, elf: &Path) -> Result<Session> {
         .strict(false)
         .boot_mode(BootMode::Direct)
         .app(AppSource::Path(elf.to_path_buf()));
-    let board = V3Board::build(builder)
-        .map_err(|e| anyhow::anyhow!("the image builds no machine: {e}"))?;
+    let board =
+        V3Board::build(builder).map_err(|e| anyhow::anyhow!("the image builds no machine: {e}"))?;
     let host = EmuLinkHost::new(board, fresh_nonce(), true);
     finish_open(args, host, project_dir(args, EmuChip::Esp32V3))
 }
@@ -872,7 +872,9 @@ mod tests {
 
     #[test]
     fn chip_is_refused_on_a_serial_target_but_fine_on_emu() {
-        assert!(check_chip_on_target("/dev/cu.usbmodem1101", false, Some(EmuChip::Esp32S3)).is_err());
+        assert!(
+            check_chip_on_target("/dev/cu.usbmodem1101", false, Some(EmuChip::Esp32S3)).is_err()
+        );
         assert!(check_chip_on_target("/dev/cu.usbmodem1101", false, None).is_ok());
         assert!(check_chip_on_target("emu:fw-esp32c6", true, Some(EmuChip::Esp32S3)).is_ok());
         assert!(check_chip_on_target("emu:fw-esp32c6", true, None).is_ok());
