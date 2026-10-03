@@ -5,9 +5,9 @@
 
 use lpa_agent::{StopReason, TokenUsage, TurnEvent};
 
-use super::app_agent_eval_driver::{AgentEvalStudio, ModelSource, RunLimits};
-use super::app_agent_eval_harness::golden_tree;
+use super::app_agent_eval_driver::{AgentEvalStudio, ModelSource};
 use super::app_agent_scenario::Scenario;
+use super::app_agent_scenario_seat::{RunLimits, ScenarioSeat};
 use super::app_agent_transcript::EvalStep;
 use crate::app::studio::offer_press_test_api::OfferPressTestApi;
 
@@ -33,7 +33,7 @@ fn a_path_the_readout_never_offered_is_refused_with_the_current_offers() {
         ],
     ]];
     let mut studio = AgentEvalStudio::new(ModelSource::Scripted(scripts));
-    studio.start(&scenario.start, golden_tree);
+    studio.start(&scenario);
     studio.send("press it", limits());
 
     let result = studio
@@ -88,7 +88,7 @@ fn the_agent_presses_save_once_and_a_stale_press_is_refused() {
         ],
     ]];
     let mut studio = AgentEvalStudio::new(ModelSource::Scripted(scripts));
-    studio.start(&scenario.start, golden_tree);
+    studio.start(&scenario);
     studio.send("make it 300 and save", limits());
 
     let results: Vec<serde_json::Value> = studio
@@ -145,7 +145,7 @@ fn the_agent_reads_a_nested_nodes_remove_and_presses_it() {
         ],
     ]];
     let mut studio = AgentEvalStudio::new(ModelSource::Scripted(scripts));
-    studio.start(&scenario.start, golden_tree);
+    studio.start(&scenario);
     assert!(
         has_kind(&mut studio, "Clock"),
         "the golden has a clock to remove"
@@ -220,7 +220,7 @@ fn revert_to_saved_becomes_a_card() {
         ]],
     ];
     let mut studio = AgentEvalStudio::new(ModelSource::Scripted(scripts));
-    studio.start(&scenario.start, golden_tree);
+    studio.start(&scenario);
     studio.send("make it 300, then undo all of it", limits());
 
     let results = tool_results(&studio.transcript_steps());
@@ -287,7 +287,7 @@ fn a_lasting_removal_by_edit_project_is_refused_and_points_at_the_card() {
         ],
     ]];
     let mut studio = AgentEvalStudio::new(ModelSource::Scripted(scripts));
-    studio.start(&scenario.start, golden_tree);
+    studio.start(&scenario);
     studio.send("make it 300, then drop the fixture", limits());
 
     let results = tool_results(&studio.transcript_steps());
@@ -334,7 +334,7 @@ fn an_undoable_removal_by_edit_project_still_removes() {
         ],
     ]];
     let mut studio = AgentEvalStudio::new(ModelSource::Scripted(scripts));
-    studio.start(&scenario.start, golden_tree);
+    studio.start(&scenario);
     assert!(has_kind(&mut studio, "Clock"));
     studio.send("remove the clock", limits());
 
@@ -372,7 +372,7 @@ fn the_agent_reads_and_presses_the_add_node_offer() {
         ],
     ]];
     let mut studio = AgentEvalStudio::new(ModelSource::Scripted(scripts));
-    studio.start(&scenario.start, golden_tree);
+    studio.start(&scenario);
     let clocks = |studio: &mut AgentEvalStudio| {
         studio
             .node_statuses()
@@ -453,6 +453,7 @@ fn limits() -> RunLimits {
         deadline: std::time::Instant::now() + std::time::Duration::from_secs(60),
         usd: 1.0,
         turns: 8,
+        tokens: None,
     }
 }
 

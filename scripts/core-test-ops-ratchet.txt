@@ -14,7 +14,7 @@
 1 lp-app/lpa-studio-core/src/app/studio/studio_command_summary.rs
 13 lp-app/lpa-studio-core/src/app/studio/studio_controller.rs
 25 lp-app/lpa-studio-core/src/app/studio/studio_device_e2e_tests.rs
-1 lp-app/lpa-studio-core/src/app/studio/studio_device_e2e_tests/agent_device_journey_tests.rs
+1 lp-app/lpa-studio-core/src/app/studio/studio_device_e2e_tests/agent_device_seat.rs
 1 lp-app/lpa-studio-core/src/app/studio/studio_docs_e2e_tests.rs
 56 lp-app/lpa-studio-core/src/app/studio/studio_edit_e2e_tests.rs
 2 lp-app/lpa-studio-core/src/app/studio/studio_export_e2e_tests.rs

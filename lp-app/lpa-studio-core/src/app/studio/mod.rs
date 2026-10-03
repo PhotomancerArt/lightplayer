@@ -24,7 +24,7 @@ pub mod studio_controller;
 /// tests). See the module doc for why nothing here fakes at the model's own
 /// vocabulary.
 #[cfg(test)]
-mod studio_device_e2e_tests;
+pub(crate) mod studio_device_e2e_tests;
 /// End-to-end edit-flow tests against an in-process `lpa-server` (host-only
 /// dev-dependency; never part of the wasm lib build).
 #[cfg(test)]

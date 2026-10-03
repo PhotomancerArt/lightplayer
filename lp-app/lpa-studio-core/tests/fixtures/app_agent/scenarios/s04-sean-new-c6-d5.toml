@@ -1,0 +1,62 @@
+# S4 "An ESP32-C6 (new board), LEDs on D5" — Yona's first seed case. A
+# new C6 board is plugged in over USB but not connected, blank out of the
+# bag. The agent offers the connect card (Sean clicks it), asks which board
+# it is (D5 means different pins on different boards), flashes it (a blank
+# board loses nothing: the agent may press it), builds a project and
+# pushes it.
+id = "S4"
+name = "s04-sean-new-c6-d5"
+summary = "New blank C6 over USB, LEDs on D5 → connected, asked the board, flashed, running on D5"
+persona = "sean"
+tags = ["device-connect", "flash", "push", "pin", "ask-dont-guess"]
+golden = "sean-new-c6-d5"
+note = "D5 is GPIO23 on the XIAO C6 since PR #955 (the board file had D4/D5 unmapped). The count is the agent's to ask or pick, so there is no strip check and no stage B."
+
+[start]
+project = "none"
+board = { state = "blank", actual = "seeed/xiao-esp32-c6" }
+
+[user]
+say = "I have an esp32c6 board I want to use on lightplayer, with leds on pin D5"
+otherwise = "you decide."
+
+[[user.reply]]
+topic = "board"
+when = ["board", "which xiao", "what kind", "model"]
+text = "It's a XIAO ESP32-C6, the little Seeed one."
+
+[[user.reply]]
+topic = "pin"
+when = ["pin", "gpio"]
+text = "D5."
+
+[[user.card]]
+offer = "devices/connect-usb"
+do = "click"
+
+[budget]
+turns = 30
+usd = 0.40
+tokens = 400_000
+
+[[check]]
+kind = "card_handed"
+offer = "devices/connect-*"
+[[check]]
+kind = "asked_before"
+topic = "board"
+before = "pin"
+[[check]]
+kind = "board_firmware"
+is = "flashed"
+[[check]]
+kind = "board_runs_project"
+# Never quietly swap D5 for another pin.
+[[check]]
+kind = "output_on"
+pin = "D5"
+[[check]]
+kind = "target_is"
+board = "seeed/xiao-esp32-c6"
+[[check]]
+kind = "all_nodes_ok"

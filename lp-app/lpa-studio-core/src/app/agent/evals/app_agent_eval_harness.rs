@@ -1,12 +1,14 @@
-//! Stage A of the app-agent evals: run one scenario through a headless
-//! Studio over an in-process server, judge the resulting project, and
-//! write what happened to `target/app-agent-evals/<run>/<scenario>/`.
+//! Stage A of the app-agent evals: run one scenario in its seat (a
+//! headless Studio over an in-process server, or the device bench), judge
+//! what it left, and write what happened to
+//! `target/app-agent-evals/<run>/<scenario>/`.
 //!
-//! The server wears the **XIAO ESP32-C6's real pin map**
-//! (`lpc_hardware::default_esp32c6_hardware_manifest`), so `ws281x:local:D6`
-//! opens here the way it opens on a board and a wrong label fails here the
-//! way it fails there. Stage B (`lp-cli/tests/app_agent_emu_decode.rs`)
-//! then deploys the written tree to an emulated C6.
+//! The server wears **the scenario's board's real pin map** (its
+//! checked-in `boards/<vendor>/<product>.json`, the XIAO ESP32-C6's for
+//! Sean), so `ws281x:local:D6` opens here the way it opens on a board and a
+//! wrong label fails here the way it fails there. Stage B
+//! (`lp-cli/tests/app_agent_emu_decode.rs`) then deploys the written tree
+//! to an emulated C6 and decodes the scenario's pad.
 //!
 //! A run is driven by an [`EvalDriver`]:
 //! - [`EvalDriver::Golden`] — the committed project tree, no model (proves
@@ -30,15 +32,19 @@ use lpfs::LpFsMemory;
 
 use lpa_agent::{TokenUsage, TurnEvent};
 
+use super::app_agent_check_spec::XIAO_C6_BOARD_ID;
 use super::app_agent_checks::{CheckInput, CheckResult, NodeStatusRow, run_checks};
+use super::app_agent_conversation_checks::unscripted_questions;
 use super::app_agent_eval_driver::{
     AgentEvalStudio, DrivenRun, ModelSource, drive_scenario, openrouter_key_from_env,
 };
 use super::app_agent_project_tree::ProjectTree;
-use super::app_agent_scenario::{Scenario, ScenarioStart, fixtures_dir};
-use super::app_agent_transcript::EvalTranscript;
+use super::app_agent_scenario::{Scenario, SeatKind, fixtures_dir};
+use super::app_agent_scenario_seat::DeviceSummary;
+use super::app_agent_transcript::{EvalStep, EvalTranscript};
 use crate::app::project::node::NodeController;
 use crate::app::project::project_node_tree_view::ProjectNodeStatusTone;
+use crate::app::studio::studio_device_e2e_tests::agent_device_seat::DeviceScenarioSeat;
 use crate::app::studio::studio_edit_e2e_tests::{InProcessServerIo, drive, project_action};
 use crate::app::studio::studio_view_channel::{CommandSender, StudioViewReceiver};
 use crate::{
@@ -73,7 +79,6 @@ impl EvalDriver {
 pub(crate) struct EvalOutcome {
     pub(crate) scenario: Scenario,
     pub(crate) driver: String,
-    pub(crate) start: Option<ProjectTree>,
     pub(crate) project: ProjectTree,
     pub(crate) statuses: Vec<NodeStatusRow>,
     pub(crate) unsaved: bool,
@@ -83,6 +88,8 @@ pub(crate) struct EvalOutcome {
     pub(crate) usage: TokenUsage,
     /// Model turns across the scenario.
     pub(crate) turns: u32,
+    /// The board's end state (device seat).
+    pub(crate) device: Option<DeviceSummary>,
 }
 
 impl EvalOutcome {
@@ -99,27 +106,35 @@ impl EvalOutcome {
             .collect::<Vec<_>>()
             .join("\n")
     }
+
+    /// Why the conversation stopped early, if it did.
+    pub(crate) fn stopped(&self) -> Option<&str> {
+        self.transcript.steps.iter().find_map(|step| match step {
+            EvalStep::Stopped { reason } => Some(reason.as_str()),
+            _ => None,
+        })
+    }
 }
 
-/// Run `scenario` with `driver`. Transcript checks are skipped for a
-/// golden (it had no conversation).
+/// Run `scenario` with `driver`. A golden has no conversation and no
+/// board, so the checks that judge those are skipped for it.
 pub(crate) fn run_scenario(scenario: &Scenario, driver: &EvalDriver) -> EvalOutcome {
-    let start = start_tree(&scenario.start);
-    let (project, transcript, statuses, unsaved, usage, turns) = match driver {
+    let start = scenario.start_golden().map(golden_tree);
+    let board = scenario.board_id().unwrap_or(XIAO_C6_BOARD_ID).to_string();
+    let run = match driver {
         EvalDriver::Golden(name) => {
             let project = golden_tree(name);
-            let mut studio = EvalStudio::with_project(&project);
+            let mut studio = EvalStudio::on_board(&project, &board);
             studio.settle(6);
-            let statuses = studio.node_statuses();
-            let unsaved = studio.unsaved();
-            (
+            DrivenRun {
+                statuses: studio.node_statuses(),
+                unsaved: studio.unsaved(),
                 project,
-                EvalTranscript::default(),
-                statuses,
-                unsaved,
-                TokenUsage::default(),
-                0,
-            )
+                transcript: EvalTranscript::default(),
+                usage: TokenUsage::default(),
+                turns: 0,
+                device: None,
+            }
         }
         EvalDriver::Live { model } => {
             let api_key = openrouter_key_from_env().expect(
@@ -134,62 +149,63 @@ pub(crate) fn run_scenario(scenario: &Scenario, driver: &EvalDriver) -> EvalOutc
                 .build()
                 .expect("a tokio runtime");
             let _guard = runtime.enter();
-            let mut studio = AgentEvalStudio::new(ModelSource::Live {
-                model: model.clone(),
-                api_key,
-            });
-            driven(drive_scenario(&mut studio, scenario, golden_tree))
+            drive_in_seat(
+                scenario,
+                ModelSource::Live {
+                    model: model.clone(),
+                    api_key,
+                },
+                &board,
+            )
         }
         EvalDriver::Scripted(scripts) => {
-            let mut studio = AgentEvalStudio::new(ModelSource::Scripted(scripts.clone()));
-            driven(drive_scenario(&mut studio, scenario, golden_tree))
+            drive_in_seat(scenario, ModelSource::Scripted(scripts.clone()), &board)
         }
     };
 
-    let mut judged = scenario.clone();
-    if matches!(driver, EvalDriver::Golden(_)) {
-        judged.checks.retain(|check| !check.needs_transcript());
-    }
-    let checks = run_checks(&CheckInput {
-        scenario: &judged,
+    let golden = matches!(driver, EvalDriver::Golden(_));
+    let checks: Vec<_> = scenario
+        .checks
+        .iter()
+        .filter(|check| !golden || (!check.needs_transcript() && !check.needs_device()))
+        .cloned()
+        .collect();
+    let results = run_checks(&CheckInput {
+        checks: &checks,
         start: start.as_ref(),
-        project: &project,
-        statuses: Some(&statuses),
-        unsaved: Some(unsaved),
-        transcript: &transcript,
+        project: &run.project,
+        statuses: Some(&run.statuses),
+        unsaved: Some(run.unsaved),
+        transcript: &run.transcript,
+        turns: run.turns,
+        device: run.device.as_ref(),
     });
     EvalOutcome {
         scenario: scenario.clone(),
         driver: driver.label(),
-        start,
-        project,
-        statuses,
-        unsaved,
-        transcript,
-        checks,
-        usage,
-        turns,
+        project: run.project,
+        statuses: run.statuses,
+        unsaved: run.unsaved,
+        transcript: run.transcript,
+        checks: results,
+        usage: run.usage,
+        turns: run.turns,
+        device: run.device,
     }
 }
 
-type DrivenParts = (
-    ProjectTree,
-    EvalTranscript,
-    Vec<NodeStatusRow>,
-    bool,
-    TokenUsage,
-    u32,
-);
-
-fn driven(run: DrivenRun) -> DrivenParts {
-    (
-        run.project,
-        run.transcript,
-        run.statuses,
-        run.unsaved,
-        run.usage,
-        run.turns,
-    )
+/// Drive `scenario` in the seat it names, on `source`.
+fn drive_in_seat(scenario: &Scenario, source: ModelSource, board: &str) -> DrivenRun {
+    match scenario.seat() {
+        SeatKind::Project => {
+            let mut studio = AgentEvalStudio::on_board(source, board);
+            drive_scenario(&mut studio, scenario)
+        }
+        SeatKind::Device => {
+            let mut seat = DeviceScenarioSeat::new(source, scenario);
+            drive_scenario(&mut seat, scenario)
+        }
+    }
 }
 
 /// Write `outcome` under `run_dir/<dir_name>/`: the project tree,
@@ -204,36 +220,74 @@ pub(crate) fn write_outcome(
     if project_dir.exists() {
         std::fs::remove_dir_all(&project_dir)?;
     }
+    std::fs::create_dir_all(&dir)?;
     outcome.project.write_to_dir(&project_dir)?;
     std::fs::write(
         dir.join("transcript.json"),
         serde_json::to_vec_pretty(&outcome.transcript).expect("transcript serializes"),
     )?;
-    let report = serde_json::json!({
-        "scenario": outcome.scenario.name,
-        "summary": outcome.scenario.summary,
-        "driver": outcome.driver,
-        "leds": outcome.scenario.leds,
-        "started_from": match &outcome.start {
-            Some(_) => format!("{:?}", outcome.scenario.start),
-            None => "blank".to_string(),
+    std::fs::write(
+        dir.join("report.json"),
+        serde_json::to_vec_pretty(&report_json(outcome)).expect("report serializes"),
+    )?;
+    Ok(dir)
+}
+
+/// `report.json`: what the corpus report (`scripts/app-agent/corpus_report.py`)
+/// and the bake-off table read.
+pub(crate) fn report_json(outcome: &EvalOutcome) -> serde_json::Value {
+    let scenario = &outcome.scenario;
+    let steps = &outcome.transcript.steps;
+    let count = |pick: fn(&EvalStep) -> bool| steps.iter().filter(|step| pick(step)).count();
+    let stage_b = match (scenario.stage_b(), outcome.project.files.is_empty()) {
+        (Some(stage_b), false) => serde_json::json!({ "pad": stage_b.pad, "leds": stage_b.leds }),
+        _ => serde_json::Value::String("n/a".to_string()),
+    };
+    let first_failure = outcome
+        .checks
+        .iter()
+        .find(|check| !check.passed)
+        .map(|check| format!("{}: {}", check.name, check.reason));
+    serde_json::json!({
+        "scenario": scenario.name,
+        "id": scenario.id,
+        "summary": scenario.summary,
+        "persona": scenario.persona.name(),
+        "tags": scenario.tags,
+        "status": match scenario.status {
+            super::app_agent_scenario::ScenarioStatus::Active => "active",
+            super::app_agent_scenario::ScenarioStatus::Pending => "pending",
         },
+        "waits_for": scenario.waits_for,
+        "note": scenario.note,
+        "seat": scenario.seat(),
+        "driver": outcome.driver,
+        "leds": scenario.stage_b().map(|stage_b| stage_b.leds),
+        "stage_b_plan": stage_b,
+        "started_from": format!("{:?}", scenario.start.project),
         "passed": outcome.passed(),
+        "first_failure": first_failure,
+        "stopped": outcome.stopped(),
         "checks": outcome.checks,
         "statuses": outcome.statuses,
         "unsaved": outcome.unsaved,
+        "device": outcome.device,
         "turns": outcome.turns,
+        "budget": {
+            "turns": scenario.budget.turns,
+            "usd": scenario.budget.usd,
+            "tokens": scenario.budget.tokens,
+        },
+        "questions": count(|step| matches!(step, EvalStep::Question { .. })),
+        "unscripted_questions": unscripted_questions(&outcome.transcript),
+        "cards_handed": count(|step| matches!(step, EvalStep::CardHanded { .. })),
+        "cards_clicked": count(|step| matches!(step, EvalStep::CardClicked { .. })),
         "tokens_in": outcome.usage.input_tokens
             + outcome.usage.cache_read_tokens
             + outcome.usage.cache_write_tokens,
         "tokens_out": outcome.usage.output_tokens,
         "cost_usd": outcome.usage.reported_cost_usd(),
-    });
-    std::fs::write(
-        dir.join("report.json"),
-        serde_json::to_vec_pretty(&report).expect("report serializes"),
-    )?;
-    Ok(dir)
+    })
 }
 
 /// `target/app-agent-evals/<run>` at the workspace root.
@@ -247,13 +301,6 @@ pub(crate) fn eval_run_dir(run: &str) -> PathBuf {
 pub(crate) fn golden_tree(name: &str) -> ProjectTree {
     let dir = fixtures_dir().join("golden").join(name);
     ProjectTree::from_dir(&dir).unwrap_or_else(|error| panic!("{}: {error}", dir.display()))
-}
-
-fn start_tree(start: &ScenarioStart) -> Option<ProjectTree> {
-    match start {
-        ScenarioStart::Blank => None,
-        ScenarioStart::Golden(name) => Some(golden_tree(name)),
-    }
 }
 
 /// The eval actor's timer: instant (the harness drives batches itself).
@@ -273,9 +320,16 @@ pub(crate) struct EvalStudio {
 }
 
 impl EvalStudio {
-    /// Load `tree` on a fresh server and connect Studio to it.
+    /// Load `tree` on a fresh server wearing the XIAO C6's pin map and
+    /// connect Studio to it.
     pub(crate) fn with_project(tree: &ProjectTree) -> Self {
-        let mut server = xiao_c6_server();
+        Self::on_board(tree, XIAO_C6_BOARD_ID)
+    }
+
+    /// Load `tree` on a fresh server wearing `board`'s pin map and connect
+    /// Studio to it.
+    pub(crate) fn on_board(tree: &ProjectTree, board: &str) -> Self {
+        let mut server = board_server(board);
         for (path, bytes) in &tree.files {
             server
                 .base_fs_mut()
@@ -368,11 +422,21 @@ pub(crate) fn collect_statuses(nodes: &[NodeController], rows: &mut Vec<NodeStat
     }
 }
 
-/// A server with nothing loaded whose outputs open against the XIAO
-/// ESP32-C6's manifest (D6 = GPIO16, D10 = GPIO18, two RMT channels).
-pub(crate) fn xiao_c6_server() -> LpServer {
+/// A server with nothing loaded whose outputs open against `board`'s
+/// checked-in runtime manifest (the XIAO ESP32-C6: D6 = GPIO16, D10 =
+/// GPIO18, two RMT channels).
+///
+/// # Panics
+///
+/// When `board` has no runtime pin map (scenarios are validated for it).
+pub(crate) fn board_server(board: &str) -> LpServer {
+    let json = lpa_boards::runtime_manifest_json(board)
+        .unwrap_or_else(|| panic!("{board} has no runtime pin map"));
+    let manifest = lpc_hardware::HardwareManifestFile::read_json(json)
+        .and_then(|file| file.to_manifest())
+        .unwrap_or_else(|error| panic!("{board}'s pin map: {error:?}"));
     let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::with_hardware_manifest(
-        lpc_hardware::default_esp32c6_hardware_manifest(),
+        manifest,
     )));
     let graphics: Arc<dyn LpGraphics> =
         Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND));
