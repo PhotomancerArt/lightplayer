@@ -35,6 +35,11 @@ use crate::server::hello_auth::HelloAuth;
 ///
 /// # History
 ///
+/// - 33: the device store's `open` is who nearby gets in with no password,
+///   `"nobody" | "play" | "edit"` (`lpc_access::OpenTo`), in `AccessList`
+///   and `AccessSetSwitches` — it was a bool that granted play only. A board
+///   with no store is open at edit, for now
+///   (`docs/adr/2026-10-02-two-passwords-open-by-default.md`).
 /// - 32: the classic ESP32's UART0 host link moves onto lp-link (plan
 ///   `lp2025/2026-09-28-2015-classic-uart-on-lp-link`, milestone M5 of
 ///   `docs/adr/2026-09-27-lp-link-one-comms-layer.md`). On the classic
@@ -319,7 +324,7 @@ use crate::server::hello_auth::HelloAuth;
 /// as `None` on new Studio and a new firmware's extra fields are ignored
 /// by old Studio. Bumping for those would mark every board running
 /// current firmware Incompatible in exchange for nothing.
-pub const WIRE_PROTO_VERSION: u32 = 32;
+pub const WIRE_PROTO_VERSION: u32 = 33;
 
 /// Unsolicited/boot-time server identity, version, and capability report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
