@@ -656,7 +656,7 @@ mod tests {
     #[test]
     fn the_proto_version_is_pinned_to_its_history() {
         assert_eq!(
-            WIRE_PROTO_VERSION, 32,
+            WIRE_PROTO_VERSION, 33,
             "if you meant to bump, add the History entry in this file's \
              doc comment and update this pin"
         );

@@ -103,7 +103,7 @@ pub(crate) fn DeviceAccessPanel(
                     }
                 }
                 if keys_open() {
-                    ul { class: "tw:m-0 tw:ml-[40px] tw:grid tw:list-none tw:p-0",
+                    ul { class: "tw:m-0 tw:grid tw:list-none tw:p-0 tw:sm:ml-[40px]",
                         for group in panel.keys.clone() {
                             AccessKeyGroupRow {
                                 key: "{group.salts[0]:?}",
@@ -183,7 +183,7 @@ fn PasswordRow(
     };
     rsx! {
         div { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-2.5",
-            span { class: "tw:w-[52px] tw:flex-none tw:text-[13px] tw:font-bold tw:text-strong-foreground", "{name}" }
+            span { class: "tw:w-[46px] tw:flex-none tw:text-[13px] tw:font-bold tw:text-strong-foreground", "{name}" }
             div { class: if locked { "{SEGMENTS_CLASS} tw:opacity-50" } else { "{SEGMENTS_CLASS}" },
                 role: "group",
                 aria_label: "Who nearby can {name.to_lowercase()}",
@@ -214,13 +214,13 @@ fn PasswordRow(
                 }
             }
             if anyone {
-                span { class: "tw:min-w-0 tw:truncate tw:text-xs tw:text-dim-foreground",
+                span { class: "tw:min-w-0 tw:text-xs tw:leading-tight tw:text-dim-foreground",
                     if line == UiPasswordLine::FollowsAuthor { "follows Author" } else { "no password" }
                 }
             }
         }
         if !anyone {
-            div { class: "tw:ml-[62px] tw:flex tw:min-w-0 tw:items-center tw:gap-1",
+            div { class: "tw:ml-[56px] tw:flex tw:min-w-0 tw:items-center tw:gap-1",
                 input {
                     class: "tw:min-w-0 tw:flex-1 tw:rounded tw:border tw:border-border-strong tw:bg-terminal tw:px-2 tw:py-1.5 tw:font-mono tw:text-[13px] tw:text-strong-foreground",
                     r#type: "text",
@@ -271,7 +271,7 @@ fn PasswordRow(
                 }
             }
             if let Some(note) = note {
-                p { class: "tw:m-0 tw:ml-[62px] tw:text-[11.5px] tw:leading-snug tw:text-subtle-foreground", "{note}" }
+                p { class: "tw:m-0 tw:ml-[56px] tw:text-[11.5px] tw:leading-snug tw:text-subtle-foreground", "{note}" }
             }
         }
     }
@@ -301,9 +301,9 @@ const SEGMENTS_CLASS: &str =
 
 fn segment_class(pressed: bool) -> &'static str {
     if pressed {
-        "tw:cursor-pointer tw:appearance-none tw:border-0 tw:bg-white/10 tw:px-2.5 tw:py-1 tw:text-xs tw:font-bold tw:text-strong-foreground tw:disabled:cursor-not-allowed ux-focus-ring"
+        "tw:cursor-pointer tw:appearance-none tw:border-0 tw:bg-white/10 tw:px-2 tw:py-1 tw:text-xs tw:font-bold tw:text-strong-foreground tw:disabled:cursor-not-allowed ux-focus-ring"
     } else {
-        "tw:cursor-pointer tw:appearance-none tw:border-0 tw:bg-transparent tw:px-2.5 tw:py-1 tw:text-xs tw:font-semibold tw:text-muted-foreground tw:hover:text-strong-foreground tw:disabled:cursor-not-allowed ux-focus-ring"
+        "tw:cursor-pointer tw:appearance-none tw:border-0 tw:bg-transparent tw:px-2 tw:py-1 tw:text-xs tw:font-semibold tw:text-muted-foreground tw:hover:text-strong-foreground tw:disabled:cursor-not-allowed ux-focus-ring"
     }
 }
 

@@ -27,6 +27,11 @@ all read this one file.
   90 s / **Open in editor** 150 s / Fixture 90 s flow as the proto-28 one).
   `?wire=json` keeps the host from opting into packed, so every board→host
   message is JSON.
+- **Edited since, by hand (proto 33):** the three `accessList` replies'
+  `"open":false` became `"open":"nobody"` — the device store's `open` became
+  a word (`lpc_access::OpenTo`), and `nobody` is exactly what that board's
+  `false` reads as. Nothing else in the recording changed; the byte counts
+  above are the original cut's.
 - **Wire shapes:** proto 30. Every line re-parses into the wire types and
   re-serializes byte for byte (`lpc-wire`'s
   `recorded_traffic_reserializes_byte_for_byte`).
