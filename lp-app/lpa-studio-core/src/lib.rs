@@ -27,9 +27,9 @@ pub use app::agent::{
     AgentController, AgentCostRates, AgentEditRecord, AgentFeedback, AgentModelsFetchFuture,
     AgentOp, AgentProviderConfig, AgentRunContext, AgentSessionKey, AgentTaskFuture,
     AgentTimerFactory, AgentTimerFuture, AgentViewContext, MAX_EDIT_RECORDS, UiAgentAvailability,
-    UiAgentCard, UiAgentCardState, UiAgentDebugDump, UiAgentHistoryEntry, UiAgentModelView,
-    UiAgentStatus, UiAgentToolRow, UiAgentTurn, UiAgentUsage, UiAgentView, UiAppAgentView,
-    instant_agent_timer,
+    UiAgentCard, UiAgentCardState, UiAgentDebugDump, UiAgentEditBatch, UiAgentEditLine,
+    UiAgentEditOutcome, UiAgentHistoryEntry, UiAgentModelView, UiAgentStatus, UiAgentToolRow,
+    UiAgentTurn, UiAgentUsage, UiAgentView, UiAppAgentView, instant_agent_timer,
 };
 pub use app::bus::{
     UiBusChannelPreview, UiBusChannelView, UiBusSiteOrigin, UiBusSiteView, UiBusView,
@@ -125,13 +125,13 @@ pub use app::preview_host::{
     PreviewSource, PreviewTier, is_teardown_abort_reason,
 };
 pub use app::project::{
-    AgentEngineStatus, AssetContentFetchOp, AssetEditOp, DirtySummary, EDIT_JOURNAL_CAP,
-    EDITOR_META_PATH, EditorMetaFetchOp, EditorMetaFixture, EditorMetaOp, EditorMetaSet,
-    EditorMetaVerb, FROZEN_PREVIEW_PHASE, HISTORY_ROW_CAP, IMPORT_BUILTIN_SECTION,
-    IMPORT_LIBRARY_SECTION, ImportSource, LoadedProjectChoice, MAX_ASSET_BODY_BYTES,
-    ModuleExportOp, ModuleHeroProduct, NodeCardDrawer, NodeCardUiState, NodeClearDebugOp,
-    NodeController, NodeControllerState, NodeCopyOp, NodeCreateOp, NodeImportOp, NodePasteOp,
-    NodeRemoveOp, NodeRevertOp, NodeUiOp, PanelAutoSaveOp, PanelClearOp, PanelWriteOp,
+    ASK_AGENT_REQUEST_PARAM, ASK_AGENT_VERB, AgentEngineStatus, AssetContentFetchOp, AssetEditOp,
+    DirtySummary, EDIT_JOURNAL_CAP, EDITOR_META_PATH, EditorMetaFetchOp, EditorMetaFixture,
+    EditorMetaOp, EditorMetaSet, EditorMetaVerb, FROZEN_PREVIEW_PHASE, HISTORY_ROW_CAP,
+    IMPORT_BUILTIN_SECTION, IMPORT_LIBRARY_SECTION, ImportSource, LoadedProjectChoice,
+    MAX_ASSET_BODY_BYTES, ModuleExportOp, ModuleHeroProduct, NodeCardDrawer, NodeCardUiState,
+    NodeClearDebugOp, NodeController, NodeControllerState, NodeCopyOp, NodeCreateOp, NodeImportOp,
+    NodePasteOp, NodeRemoveOp, NodeRevertOp, NodeUiOp, PanelAutoSaveOp, PanelClearOp, PanelWriteOp,
     PatchPulseLamps, PatchPulseLanguage, PatchPulseOp, PatchPulseSpace, PatchPulseSubject,
     PatchVerbFixture, PatchVerbKind, PatchVerbOp, PatchVerbSubject, PatchVerbWindow,
     PendingAssetEdit, PendingEdit, PendingEditOp, PendingEditPhase, PlaylistActivateOp,

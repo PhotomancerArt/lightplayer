@@ -72,6 +72,7 @@ pub fn NodeFaceBody(
                         node: node.clone(),
                         agent_collapsed: card_ui.agent_collapsed,
                         composer_draft: card_ui.composer_draft.clone(),
+                        draft_seed: card_ui.draft_seed,
                         detail_open_control,
                         on_action,
                     }

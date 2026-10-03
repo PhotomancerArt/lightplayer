@@ -272,7 +272,13 @@ impl NodeController {
         // whose face failed to derive keeps its rows reachable. Ordering
         // is the whole trick: filtering earlier would starve the lift.
         retire_face_claimed_debug_rows(&mut sections, face.as_ref());
-        publish_node_offers(offers, &self.address, &dirty, remove_action(&self.address));
+        publish_node_offers(
+            offers,
+            &self.address,
+            &dirty,
+            remove_action(&self.address),
+            ask_agent_offer(self, face.as_ref()),
+        );
         offers.append(child_offers);
         let mut view = UiNodeView::new(header, vec![UiNodeTab::main(sections)])
             .with_node_id(self.address.to_string())
@@ -725,6 +731,7 @@ impl NodeController {
                     &child.address,
                     &view.dirty,
                     remove_action(&child.address),
+                    ask_agent_offer(child, view.face.as_ref()),
                 );
                 offers.append(nested_offers);
                 // A container child keeps its picker: since the flat-root
@@ -911,12 +918,15 @@ fn retire_face_claimed_debug_rows(
 ///   "revert" icon token as the project header's Revert to saved, only
 ///   while the subtree [`DirtySummary`] announces pending edits;
 /// - `remove`: the UNGATED delete-node action, when the caller resolved
-///   one (its consequence and summary ride its `ActionMeta`).
+///   one (its consequence and summary ride its `ActionMeta`);
+/// - `ask-agent`: the hand-off to a GLSL shader's own agent
+///   ([`ask_agent_offer`]), on shader cards only.
 fn publish_node_offers(
     offers: &mut UiOfferTree,
     node: &ProjectNodeAddress,
     dirty: &DirtySummary,
     remove: Option<UiAction>,
+    ask_agent: Option<UiOffer>,
 ) {
     let at = OfferPath::project_node(node);
     if !dirty.is_clean() {
@@ -932,6 +942,71 @@ fn publish_node_offers(
     if let Some(remove) = remove {
         offers.publish(UiOffer::new(at.child("remove"), "remove", remove));
     }
+    if let Some(ask_agent) = ask_agent {
+        offers.publish(ask_agent);
+    }
+}
+
+/// The verb segment of the hand-off to a shader's own agent.
+pub const ASK_AGENT_VERB: &str = "ask-agent";
+
+/// The `request` parameter of [`ASK_AGENT_VERB`]: the draft put in the
+/// shader agent's composer.
+pub const ASK_AGENT_REQUEST_PARAM: &str = "request";
+
+/// `project/<node>/ask-agent`: the hand-off from the app chat (or anyone)
+/// to one shader's own agent. Pressing it focuses the card, opens its agent
+/// section and puts `request` in the composer — it never sends, so the
+/// user reads the request and presses Send. Routine: nothing is lost, so
+/// the app agent presses it freely when asked to change shader code.
+///
+/// Only a shader card whose code is GLSL has an agent; every other node
+/// has no such verb.
+fn ask_agent_offer(node: &NodeController, face: Option<&UiNodeFace>) -> Option<UiOffer> {
+    let Some(UiNodeFace::Shader(shader)) = face else {
+        return None;
+    };
+    if shader.code_drawer.as_ref()?.kind != crate::UiAssetEditorKind::Glsl {
+        return None;
+    }
+    let target = ProjectEditorTarget::addressed_node(node.target().clone()).node_id();
+    let address = node.address().to_string();
+    let label = node.label().to_string();
+    let action = move |draft: Option<String>| {
+        UiAction::from_op(
+            target.clone(),
+            ProjectEditorOp::AskAgent {
+                node: address.clone(),
+                draft,
+            },
+        )
+        .with_label(format!("Ask {label}'s shader agent"))
+        .with_summary(format!(
+            "Open {label}'s shader agent with the request typed in; you press Send."
+        ))
+    };
+    let unbound = action(None);
+    let params = vec![
+        crate::OfferParam::text(
+            ASK_AGENT_REQUEST_PARAM,
+            "request",
+            "what to change in this shader, in the user's words",
+        )
+        .optional(),
+    ];
+    Some(UiOffer::with_params(
+        OfferPath::project_node(node.address()).child(ASK_AGENT_VERB),
+        "agent",
+        params,
+        crate::OfferBinder::new(move |args| {
+            Ok(action(
+                args.text(ASK_AGENT_REQUEST_PARAM)
+                    .filter(|text| !text.is_empty())
+                    .map(str::to_string),
+            ))
+        }),
+        unbound,
+    ))
 }
 
 fn node_focus_action(node: &NodeController) -> UiAction {

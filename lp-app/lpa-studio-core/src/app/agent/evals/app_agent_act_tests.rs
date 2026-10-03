@@ -228,6 +228,13 @@ fn revert_to_saved_becomes_a_card() {
         "{:#?}",
         studio.cards()
     );
+    // The run the press resumed is its own assistant turn, not glued onto
+    // the one that asked for the click.
+    assert_eq!(studio.last_assistant_text(), "Reverted.");
+    assert_eq!(
+        studio.assistant_texts(),
+        ["Click Revert on the card.", "Reverted."]
+    );
 }
 
 /// The golden's tree root, as its node segment in an offer path.

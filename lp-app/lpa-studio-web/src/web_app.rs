@@ -1197,6 +1197,11 @@ pub fn App() -> Element {
     // The ⌘K command palette's open state: web chrome, like a popover's,
     // held here so the chrome's hint and the palette share it.
     let mut palette_open = use_signal(|| false);
+    // The app chat's drawer and draft: web chrome too (plan A2), held here
+    // so the header button, the home page's front door and the drawer —
+    // mounted below every route's body, so it stays open across
+    // navigation — share them.
+    let app_chat = crate::app::agent::use_provide_app_chat_chrome();
     // Bluetooth access: the Unlock sheet, the card's Connections group and
     // "Who has access", and the Devices page's access settings all sit
     // under the shell; their callback and the view slice they read ride
@@ -1416,6 +1421,8 @@ pub fn App() -> Element {
     // The palette lists the view's whole offer tree. It mounts here, not in
     // the shell, because the shell's offers context is not on every page.
     let palette_offers = current_view.offers.clone();
+    // The app chat's slice, for the drawer mounted after every route body.
+    let app_agent_view = current_view.app_agent.clone();
 
     // The workbench keeps a modest desktop inset (the workbench frame draws
     // no box of its own now — see `app::workbench`), and below the fold
@@ -1461,6 +1468,12 @@ pub fn App() -> Element {
                     class: if session_control_present { "tw:hidden tw:@min-[900px]:flex" } else { "tw:hidden tw:@min-[560px]:flex" },
                     VersionBadge {}
                 }
+                // The app chat's door, beside the AI settings it runs on.
+                crate::app::agent::AppChatButton {
+                    open: app_chat.open,
+                    pending_card: current_view.app_agent.has_pending_card(),
+                    busy: current_view.app_agent.busy(),
+                }
                 StudioSettingsPopover { settings, on_settings }
                 // Last of the chrome's children, so the account slot sits
                 // exactly where the spike puts it: after the settings
@@ -1482,6 +1495,7 @@ pub fn App() -> Element {
                     crate::app::HomePage {
                         on_action,
                         home: current_view.home.clone().map(|home| *home),
+                        app_agent: Some(current_view.app_agent.clone()),
                     }
                 },
                 StudioRoute::Account => rsx! {
@@ -1549,6 +1563,19 @@ pub fn App() -> Element {
             // ⌘K from anywhere: every offer the view publishes, pressed
             // through this same dispatch.
             CommandPalette { offers: palette_offers, open: palette_open, on_action }
+            // The app chat, over the right edge of every route (A2). Its
+            // cards look their offers up in the tree this component
+            // provides above, and press through this same dispatch — a
+            // card's click is the user's own click, so a browser picker
+            // behind it (connect a board) sees the gesture.
+            crate::app::agent::AppChatDrawer {
+                view: app_agent_view,
+                open: app_chat.open,
+                draft: app_chat.draft,
+                on_action,
+                on_connect: move |_| crate::openrouter_oauth::begin_connect(Some(openrouter_error)),
+                connect_error: openrouter_error(),
+            }
             // Last, and outside every section: one line at the page's
             // bottom for acts with no other visible consequence (a link on
             // the clipboard, an access level flipped, a project archived).

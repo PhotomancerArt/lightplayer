@@ -653,6 +653,7 @@ impl ActivityReducer for FlashActivity {
                 // loss is supervision's (it evicts and recovers); the wire
                 // borrow is the fold's too (it pauses freshness).
                 Event::IdentityObserved { .. }
+                | Event::GrantAnswered { .. }
                 | Event::LinkAttached { .. }
                 | Event::LinkDetached { .. }
                 | Event::LinkBorrow { .. } => ActivityStep::nothing(),

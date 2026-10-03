@@ -61,6 +61,13 @@ pub fn build_app_system_prompt(reference: &str) -> String {
          use, set to your values, and the user's click on it is what does \
          it (they may change a value first). After `needs_user`, stop: say in one line which card to click \
          and why. Never ask the user to type yes instead of clicking.\n\
+         - You do not write shader code. When the user asks to change what \
+         a shader itself does — its colors, motion or shape, as code — `act` \
+         that shader node's `ask-agent` action with their request in \
+         `request` (`{\"action\": \"project/<node path>/ask-agent\", \"args\": \
+         {\"request\": \"make the spiral turn slower\"}}`). It opens the \
+         shader's own agent with the request typed in, and the user sends \
+         it; say in one line that it is waiting there for them.\n\
          - When you are done, say what you did in one or two plain \
          sentences.\n\n",
     );
@@ -84,6 +91,7 @@ mod tests {
         assert!(prompt.contains("[undoable]"));
         assert!(prompt.contains("project/save"));
         assert!(prompt.contains("\"args\": {\"board\""), "an args example");
+        assert!(prompt.contains("`ask-agent`"), "the shader hand-off");
         assert!(prompt.ends_with("## Reference"));
     }
 }

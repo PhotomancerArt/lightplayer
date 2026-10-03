@@ -491,6 +491,7 @@ pub(crate) fn shader_agent_view(status: UiAgentStatus) -> UiAgentView {
             },
             UiAgentTurn::Tool(UiAgentToolRow {
                 id: "tu_1".to_string(),
+                tool: "iterate".to_string(),
                 note: Some("ease drift toward the rim".to_string()),
                 phase: None,
                 done: true,
@@ -501,6 +502,8 @@ pub(crate) fn shader_agent_view(status: UiAgentStatus) -> UiAgentView {
                 warnings: 0,
                 error: None,
                 detail: "{\n  \"probes\": 2,\n  \"shader_ok\": true\n}".to_string(),
+                edits: None,
+                headline: None,
             }),
             UiAgentTurn::Assistant {
                 text: "Done — falloff now eases the drift toward the rim. \
