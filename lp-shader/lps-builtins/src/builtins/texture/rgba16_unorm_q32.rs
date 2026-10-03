@@ -220,9 +220,7 @@ mod tests {
 
     fn ref_vec4_nearest_2d(
         buf: &[u8],
-        width: u32,
-        height: u32,
-        row_stride: u32,
+        (width, height, row_stride): (u32, u32, u32),
         u: i32,
         v: i32,
         wx: TextureWrap,
@@ -236,9 +234,7 @@ mod tests {
 
     fn ref_vec4_linear_2d(
         buf: &[u8],
-        width: u32,
-        height: u32,
-        row_stride: u32,
+        (width, height, row_stride): (u32, u32, u32),
         u: i32,
         v: i32,
         wx: TextureWrap,
@@ -308,9 +304,7 @@ mod tests {
         };
         let exp = ref_vec4_nearest_2d(
             &buf,
-            w,
-            h,
-            rs,
+            (w, h, rs),
             u,
             v,
             TextureWrap::ClampToEdge,
@@ -351,9 +345,7 @@ mod tests {
         };
         let exp = ref_vec4_linear_2d(
             &buf,
-            w,
-            h,
-            rs,
+            (w, h, rs),
             u,
             v,
             TextureWrap::Repeat,

@@ -7183,6 +7183,11 @@ impl StudioController {
             let server = self.pool.lens_session_mut()?.client_mut()?;
             self.project.reload_active_from_library(server).await
         };
+        // The only caller of this op (the P6 visitor pull loop's
+        // post-fast-forward reload, `visitor_session.rs`) dispatches it
+        // fire-and-forget with no reply channel; it polls this instead of
+        // announcing success before this verdict exists.
+        crate::app::open_progress::note_reload_settled(result.is_ok());
         match result {
             Ok(logs) => {
                 self.record_logs(logs);
