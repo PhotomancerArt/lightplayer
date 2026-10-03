@@ -1,5 +1,5 @@
-//! The board-manifest stamp's write, in chunks a board can decode beside a
-//! running project.
+//! The board-manifest stamp: a journaled write, in chunks a board can decode
+//! beside a running project.
 //!
 //! ⚠️ The stamp runs at the board's tightest moment by construction: the
 //! flash ladder starts it after the post-flash hello, and the hello comes
@@ -22,15 +22,22 @@
 //! activity has already settled; minifying the manifest takes a third off
 //! a payload whose decode SHAPE is the problem.
 //!
-//! A chunked write has one failure mode a single write does not: a torn
-//! file. Chunk 0 truncates, so a failure after it leaves a prefix on the
-//! board. The conversation removes the prefix, best effort, and its error
-//! says which of the two states the board is in — a torn manifest is
-//! refused by the loader at boot (compiled default, with a warning), so
-//! both states are the compiled-in default; the words differ in what
-//! Studio actually did.
+//! ⚠️ A chunked write is a prefix at every chunk boundary (chunk 0
+//! truncates), and a stamp that stops between chunks — a tab closed, a
+//! cable pulled, a board reset — used to leave `/hardware.json` torn, so
+//! the board lost its stamped manifest and booted on the compiled-in one
+//! (`docs/defects/2026-10-02-a-closed-tab-mid-stamp-leaves-hardware-json-truncated.md`).
+//! [`stamp_board_manifest`] is therefore journaled, with no new wire
+//! request: the whole manifest is written to
+//! [`lpc_hardware::HARDWARE_MANIFEST_NEXT_PATH`] first, then to
+//! [`lpc_hardware::HARDWARE_MANIFEST_PATH`], then the staged copy is
+//! deleted. The firmware's loader finishes or drops a staged copy at boot
+//! (`fw-esp32-common`'s `manifest_loader`), which is exactly when a manifest
+//! takes effect — so wherever the stamp stops, the board boots on a whole
+//! manifest: the previous one, or the new one.
 
-use lpc_model::LpPath;
+use lpc_hardware::{HARDWARE_MANIFEST_NEXT_PATH, HARDWARE_MANIFEST_PATH};
+use lpc_model::{AsLpPath, LpPath};
 
 use crate::client::{ClientOutcome, LpClient};
 use crate::client_error::{ClientError, ClientResult};
@@ -48,8 +55,71 @@ use crate::device_push::PushProgress;
 /// asked for the same 8–10 KB scratch that failed.
 pub const MANIFEST_CHUNK_BYTES: usize = 1024;
 
+/// Stamp `manifest` onto the board as its `/hardware.json`, journaled.
+///
+/// Three steps, each an ordinary file request: the whole manifest to the
+/// staged path, the whole manifest to the live path, then the staged copy
+/// deleted. Where an interruption lands decides what the board boots on,
+/// and every case is a whole manifest:
+///
+/// | stopped during | live file | staged copy | the board boots on |
+/// |---|---|---|---|
+/// | staging | the previous stamp, untouched | a prefix | the previous stamp (the loader drops the prefix) |
+/// | the live write | a prefix | whole | the new manifest (the loader finishes the stamp) |
+/// | the delete | whole | whole | the new manifest |
+///
+/// The error says which of the first two the board is in, because they
+/// differ in what the board will run.
+pub async fn stamp_board_manifest<Io: ClientIo>(
+    client: &mut LpClient<Io>,
+    manifest: &[u8],
+    chunk_bytes: usize,
+    progress: PushProgress<'_>,
+) -> ClientResult<ClientOutcome<()>> {
+    let live = HARDWARE_MANIFEST_PATH.as_path();
+    let staged = HARDWARE_MANIFEST_NEXT_PATH.as_path();
+    let mut events = Vec::new();
+
+    match write_file_in_chunks(client, staged, manifest, chunk_bytes, progress).await {
+        Ok(outcome) => events.extend(outcome.events),
+        Err(error) => {
+            return Err(ClientError::Server(format!(
+                "{error} — {HARDWARE_MANIFEST_PATH} was not touched, so the board keeps the \
+                 manifest it had"
+            )));
+        }
+    }
+    match write_file_in_chunks(client, live, manifest, chunk_bytes, progress).await {
+        Ok(outcome) => events.extend(outcome.events),
+        Err(error) => {
+            return Err(ClientError::Server(format!(
+                "{error} — the whole manifest is staged at {HARDWARE_MANIFEST_NEXT_PATH}, and \
+                 the board finishes the stamp when it next boots"
+            )));
+        }
+    }
+    match client.fs_delete_file(staged).await {
+        Ok(outcome) => events.extend(outcome.events),
+        // The manifest is written; a staged copy left behind is the same
+        // bytes, and the board clears it at boot. Not a failed stamp — but
+        // said, not swallowed.
+        Err(error) => progress(
+            format!(
+                "Left {HARDWARE_MANIFEST_NEXT_PATH} for the board to clear at its next boot \
+                 ({error})"
+            ),
+            None,
+        ),
+    }
+    Ok(ClientOutcome::new((), events))
+}
+
 /// Write `bytes` to `path`, as one `Write` when it fits a chunk and as a
 /// run of offset `WriteChunk`s otherwise.
+///
+/// Not atomic: a run of chunks that stops part-way leaves a prefix, which
+/// this removes (best effort) and reports. A file a reader must never see
+/// torn needs a journal around it — see [`stamp_board_manifest`].
 ///
 /// Progress is label-only on purpose (`Writing /hardware.json (3/6)`): the
 /// stamp's earlier steps carry no percent, and a bar that restarts at 0
@@ -86,10 +156,8 @@ pub async fn write_file_in_chunks<Io: ClientIo>(
 }
 
 /// A chunk failed: take the prefix off the board (best effort) and say
-/// which state the board is in. Either way it boots on its compiled-in
-/// default — the loader refuses a torn manifest — but "removed" and
-/// "could not remove" are different facts, and the card should carry the
-/// true one.
+/// which state the board is in — "removed" and "could not remove" are
+/// different facts, and the card should carry the true one.
 async fn abandon_partial_file<Io: ClientIo>(
     client: &mut LpClient<Io>,
     path: &LpPath,
@@ -100,14 +168,9 @@ async fn abandon_partial_file<Io: ClientIo>(
     let display = path.as_str();
     let what = format!("chunk {number}/{total} of {display} failed: {error}");
     match client.fs_delete_file(path).await {
-        Ok(_) => ClientError::Server(format!(
-            "{what}; the partial file was removed, so the board boots on its \
-             compiled-in default pin map"
-        )),
+        Ok(_) => ClientError::Server(format!("{what}; the partial file was removed")),
         Err(delete_error) => ClientError::Server(format!(
-            "{what}; the partial file could not be removed ({delete_error}) — the \
-             board refuses a torn manifest at boot and falls back to its \
-             compiled-in default pin map"
+            "{what}; the partial file could not be removed ({delete_error})"
         )),
     }
 }
@@ -301,8 +364,7 @@ mod tests {
 
     /// The bench's own shape: the board stops answering mid-write (an OOM
     /// reset, say) and the clean-up cannot be confirmed either. The error
-    /// says the prefix could not be removed — and what the loader does with
-    /// a torn manifest, so the card's claim about the pin map stays true.
+    /// says the prefix could not be removed.
     #[tokio::test]
     async fn a_board_that_stops_answering_mid_way_is_reported_with_the_partial_file_state() {
         let bytes = manifest(2_500);
@@ -323,6 +385,109 @@ mod tests {
         let message = error.to_string();
         assert!(message.contains("chunk 2/3"), "{message}");
         assert!(message.contains("could not be removed"), "{message}");
-        assert!(message.contains("compiled-in default pin map"), "{message}");
+    }
+
+    /// The stamp's order is the whole fix: every byte of the manifest
+    /// reaches the staged path before the first request names the live
+    /// one, and the staged copy is deleted last.
+    #[tokio::test]
+    async fn a_stamp_stages_the_whole_manifest_before_it_touches_hardware_json() {
+        let bytes = manifest(2_500);
+        let io = ScriptedIo::new([
+            chunk_response(1, 0, None),
+            chunk_response(2, 1_024, None),
+            chunk_response(3, 2_048, None),
+            chunk_response(4, 0, None),
+            chunk_response(5, 1_024, None),
+            chunk_response(6, 2_048, None),
+            delete_response(7, None),
+        ]);
+        let mut client = LpClient::new(io);
+        let mut labels: Vec<String> = Vec::new();
+        let mut progress = |label: String, _percent: Option<u8>| labels.push(label);
+
+        stamp_board_manifest(&mut client, &bytes, 1_024, &mut progress)
+            .await
+            .expect("stamped");
+
+        let sent = client.into_io().sent;
+        let steps: Vec<(String, &str)> = sent
+            .iter()
+            .map(|message| match &message.msg {
+                ClientRequest::Filesystem(FsRequest::WriteChunk { path, .. }) => {
+                    (path.as_str().to_string(), "chunk")
+                }
+                ClientRequest::Filesystem(FsRequest::DeleteFile { path }) => {
+                    (path.as_str().to_string(), "delete")
+                }
+                other => panic!("a stamp sends chunks and one delete: {other:?}"),
+            })
+            .collect();
+        let next = HARDWARE_MANIFEST_NEXT_PATH.to_string();
+        let live = HARDWARE_MANIFEST_PATH.to_string();
+        assert_eq!(
+            steps,
+            vec![
+                (next.clone(), "chunk"),
+                (next.clone(), "chunk"),
+                (next.clone(), "chunk"),
+                (live.clone(), "chunk"),
+                (live.clone(), "chunk"),
+                (live, "chunk"),
+                (next, "delete"),
+            ]
+        );
+        assert_eq!(labels.len(), 6, "{labels:?}");
+    }
+
+    /// Cut while staging: the live manifest was never named, and the error
+    /// says the board keeps the one it had — the claim the card carries.
+    #[tokio::test]
+    async fn a_stamp_cut_while_staging_never_names_hardware_json_and_says_the_board_keeps_its_manifest()
+     {
+        let bytes = manifest(2_500);
+        let io = ScriptedIo::new([chunk_response(1, 0, None)]);
+        let mut client = LpClient::new(io);
+        let mut progress = |_label: String, _percent: Option<u8>| {};
+
+        let error = stamp_board_manifest(&mut client, &bytes, 1_024, &mut progress)
+            .await
+            .expect_err("the board went away");
+
+        let message = error.to_string();
+        assert!(message.contains("keeps the manifest it had"), "{message}");
+        let sent = client.into_io().sent;
+        for message in &sent {
+            let path = match &message.msg {
+                ClientRequest::Filesystem(FsRequest::WriteChunk { path, .. })
+                | ClientRequest::Filesystem(FsRequest::Write { path, .. })
+                | ClientRequest::Filesystem(FsRequest::DeleteFile { path }) => path.as_str(),
+                other => panic!("{other:?}"),
+            };
+            assert_eq!(path, HARDWARE_MANIFEST_NEXT_PATH, "{sent:?}");
+        }
+    }
+
+    /// Cut during the live write: the staged copy is whole, and the error
+    /// says the board finishes the stamp at its next boot.
+    #[tokio::test]
+    async fn a_stamp_cut_during_the_live_write_says_the_board_finishes_it_at_boot() {
+        let bytes = manifest(2_500);
+        let io = ScriptedIo::new([
+            chunk_response(1, 0, None),
+            chunk_response(2, 1_024, None),
+            chunk_response(3, 2_048, None),
+            chunk_response(4, 0, None),
+        ]);
+        let mut client = LpClient::new(io);
+        let mut progress = |_label: String, _percent: Option<u8>| {};
+
+        let error = stamp_board_manifest(&mut client, &bytes, 1_024, &mut progress)
+            .await
+            .expect_err("the board went away");
+
+        let message = error.to_string();
+        assert!(message.contains("finishes the stamp"), "{message}");
+        assert!(message.contains(HARDWARE_MANIFEST_NEXT_PATH), "{message}");
     }
 }

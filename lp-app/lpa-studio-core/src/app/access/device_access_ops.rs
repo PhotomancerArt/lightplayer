@@ -74,8 +74,13 @@ pub struct AddedKey {
 /// How a sync ended.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AccessSynced {
+    /// The list as the board last answered it — after every change that
+    /// went through, and still the board's own when a change was refused.
     pub listing: AccessListing,
     pub added: Vec<AddedKey>,
+    /// Why a change the sync wanted did not happen (a full device, a
+    /// refusal), in words for the panel. The list above is still good.
+    pub refused: Option<String>,
 }
 
 /// Compare a device's list with the keys this browser holds.
@@ -106,7 +111,17 @@ pub fn plan_sync(
 }
 
 /// List, then install what is missing. `added_at` is the caller's clock,
-/// epoch seconds. Stops at the first refusal (a full device, a lost tier).
+/// epoch seconds.
+///
+/// Only the list itself can fail the sync (an older firmware, a lost
+/// link). Past it, a change the board refuses ends the sync with the list
+/// as it then stood and the refusal beside it. A new key that cannot fit
+/// (the store is at [`lpc_access::MAX_SECRETS_PER_FILE`]) is not sent at
+/// all; the re-labels and removals still run.
+///
+/// The list must survive a refusal: the G1 walk's spare C6 had a full store,
+/// and a sync that threw away the list it had read left the panel with
+/// nothing — "Who has access 0" and a Bluetooth switch locked for good.
 pub async fn sync_access<Io: ClientIo>(
     client: &mut LpClient<Io>,
     held: &[HeldKey],
@@ -116,8 +131,34 @@ pub async fn sync_access<Io: ClientIo>(
     let mut listing = send(client, ClientRequest::AccessList).await?;
     let plan = plan_sync(&listing, held, stale);
     let mut added = Vec::new();
+    let refused = match apply_sync_plan(client, &plan, added_at, &mut listing, &mut added).await {
+        Ok(skipped) => skipped,
+        Err(error) => Some(error),
+    };
+    Ok(AccessSynced {
+        listing,
+        added,
+        refused,
+    })
+}
+
+/// The changes of a sync, in order, keeping `listing` at the board's last
+/// answer. A refusal ends it (`Err`); a key skipped because the list is
+/// full does not, and is answered as `Ok(Some(why))`.
+async fn apply_sync_plan<Io: ClientIo>(
+    client: &mut LpClient<Io>,
+    plan: &SyncPlan,
+    added_at: u64,
+    listing: &mut AccessListing,
+    added: &mut Vec<AddedKey>,
+) -> Result<Option<String>, String> {
+    let mut skipped = None;
     for key in &plan.add {
-        listing = send(
+        if listing.entries.len() >= lpc_access::MAX_SECRETS_PER_FILE {
+            skipped.get_or_insert_with(|| full_sentence(&key.label));
+            continue;
+        }
+        *listing = send(
             client,
             ClientRequest::AccessAdd {
                 entry: key.entry(added_at),
@@ -130,7 +171,7 @@ pub async fn sync_access<Io: ClientIo>(
         });
     }
     for key in &plan.relabel {
-        listing = send(
+        *listing = send(
             client,
             ClientRequest::AccessAdd {
                 entry: key.entry(added_at),
@@ -138,10 +179,19 @@ pub async fn sync_access<Io: ClientIo>(
         )
         .await?;
     }
-    for salt in plan.remove {
-        listing = send(client, ClientRequest::AccessRemove { salt }).await?;
+    for salt in &plan.remove {
+        *listing = send(client, ClientRequest::AccessRemove { salt: *salt }).await?;
     }
-    Ok(AccessSynced { listing, added })
+    Ok(skipped)
+}
+
+/// Why `label` is not on a device whose list is full.
+fn full_sentence(label: &str) -> String {
+    format!(
+        "This device's list is full ({} entries), so \u{201c}{label}\u{201d} could not be added. \
+         Remove one to make room.",
+        lpc_access::MAX_SECRETS_PER_FILE
+    )
 }
 
 /// Apply `ops` in order and answer the list as it then stands.
@@ -204,7 +254,7 @@ mod tests {
     use super::*;
     use crate::app::access::key_holder::KeyHolder;
     use crate::app::access::test_board::{FakeBoard, block_on};
-    use lpc_access::{SecretKind, Tier};
+    use lpc_access::{SecretEntry, SecretKind, Tier};
 
     fn held(label: &str, salt: u8) -> HeldKey {
         HeldKey {
@@ -252,6 +302,31 @@ mod tests {
         let again = block_on(sync_access(&mut usb, &[held("Mine", 1)], &[], 8)).unwrap();
         assert!(again.added.is_empty());
         assert_eq!(again.listing.entries.len(), 1);
+    }
+
+    /// The G1 walk's spare C6: a full store answers its list, and a sync
+    /// whose add cannot fit keeps that list and says why — it does not fail.
+    #[test]
+    fn a_full_store_is_listed_and_the_add_that_cannot_fit_is_named() {
+        let full: Vec<SecretEntry> = (0..lpc_access::MAX_SECRETS_PER_FILE as u8)
+            .map(|n| held(&format!("guest {n}"), n + 100).key.entry(1))
+            .collect();
+        let board = FakeBoard::with_entries(full);
+        let mut usb = board.usb();
+        let synced =
+            block_on(sync_access(&mut usb, &[held("Mine", 1)], &[], 7)).expect("the list was read");
+        assert_eq!(
+            synced.listing.entries.len(),
+            lpc_access::MAX_SECRETS_PER_FILE
+        );
+        assert!(synced.added.is_empty());
+        let why = synced.refused.expect("why Mine is not listed");
+        assert!(why.contains("full") && why.contains("Mine"), "{why}");
+        assert_eq!(
+            board.store().secrets.len(),
+            lpc_access::MAX_SECRETS_PER_FILE,
+            "nothing written"
+        );
     }
 
     #[test]

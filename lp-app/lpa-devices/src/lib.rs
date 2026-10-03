@@ -58,7 +58,10 @@ pub mod time;
 pub mod view;
 pub mod wire;
 
-pub use activity::{ActivityCell, ActivityKind, ActivityOutcome, CancelPhase, PushActivity};
+pub use activity::{
+    ActivityCell, ActivityKind, ActivityOutcome, CancelPhase, FlashLayoutView, LayoutVerdict,
+    PushActivity,
+};
 pub use board_key::{BoardKey, BoardKeyError};
 pub use device::{Device, DeviceStatus};
 pub use event::{Action, ActivityMarker, Command, EffectId, EffectRequest, Event, Input};

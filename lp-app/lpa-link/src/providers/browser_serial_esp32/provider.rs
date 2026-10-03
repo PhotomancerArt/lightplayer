@@ -306,6 +306,46 @@ impl BrowserSerialEsp32Provider {
         .await
     }
 
+    /// Read the board's layout against the package `build_id` would write
+    /// (the layout migration's first step). Leaves the chip in ROM download.
+    pub async fn inspect_layout_with_events(
+        &self,
+        endpoint_id: &LinkEndpointId,
+        build_id: Option<&str>,
+        events: LinkManagementEventSink,
+    ) -> Result<crate::LinkLayoutInspection, LinkError> {
+        let build_id = require_build_id(build_id)?;
+        let port_id = self.endpoint_port_id(endpoint_id)?;
+        browser_esp32_flash::inspect_layout_with_events(
+            port_id,
+            &self.options.firmware_manifest_path(build_id),
+            self.options.esptool_module_path(),
+            events,
+        )
+        .await
+    }
+
+    /// Execute a flash plan (a layout migration or a restore), the
+    /// `WriteFirmware` step writing the package `build_id`.
+    pub async fn execute_plan_with_events(
+        &self,
+        endpoint_id: &LinkEndpointId,
+        build_id: Option<&str>,
+        plan: &crate::FlashPlan,
+        events: LinkManagementEventSink,
+    ) -> Result<BrowserEsp32FlashResult, LinkError> {
+        let build_id = require_build_id(build_id)?;
+        let port_id = self.endpoint_port_id(endpoint_id)?;
+        browser_esp32_flash::execute_plan_with_events(
+            port_id,
+            &self.options.firmware_manifest_path(build_id),
+            self.options.esptool_module_path(),
+            plan,
+            events,
+        )
+        .await
+    }
+
     pub async fn erase_device_flash(
         &self,
         endpoint_id: &LinkEndpointId,
@@ -338,10 +378,35 @@ impl BrowserSerialEsp32Provider {
         let (endpoint_id, port_id) = self.session_endpoint_and_port(session_id)?;
         self.release_protocol_if_open(session_id).await?;
         match request {
-            LinkManagementRequest::FlashFirmware { ref build_id } => {
+            LinkManagementRequest::InspectLayout { ref build_id } => {
                 let result = self
-                    .flash_firmware_with_events(&endpoint_id, build_id.as_deref(), events.clone())
+                    .inspect_layout_with_events(&endpoint_id, build_id.as_deref(), events.clone())
                     .await?;
+                Ok(LinkManagementResult::InspectLayout(result))
+            }
+            LinkManagementRequest::FlashFirmware {
+                ref build_id,
+                ref plan,
+            } => {
+                let result = match plan {
+                    None => {
+                        self.flash_firmware_with_events(
+                            &endpoint_id,
+                            build_id.as_deref(),
+                            events.clone(),
+                        )
+                        .await?
+                    }
+                    Some(plan) => {
+                        self.execute_plan_with_events(
+                            &endpoint_id,
+                            build_id.as_deref(),
+                            plan,
+                            events.clone(),
+                        )
+                        .await?
+                    }
+                };
                 let logs = result
                     .logs
                     .iter()
@@ -465,6 +530,7 @@ impl BrowserSerialEsp32Provider {
                     LinkRawFilesystemReadResult {
                         image: result.image,
                         region: result.region,
+                        partition_table: result.partition_table,
                         chip_name: result.chip_name,
                         logs: result.logs,
                         progress: map_progress(result.progress),
@@ -530,29 +596,29 @@ impl BrowserSerialEsp32Provider {
             .map(|state| state.endpoint.id.clone())
     }
 
-    /// Write `bytes` to `path` on the device over the app protocol, on the
-    /// port's link (round 2's coarse-effect seam; first consumer is
-    /// the flash activity's `/hardware.json` stamp, D4).
+    /// Stamp `manifest` onto the device as its `/hardware.json` over the
+    /// app protocol, on the port's link (round 2's coarse-effect seam; the
+    /// flash activity's board-manifest stamp, D4). Journaled — see
+    /// [`lpa_client::stamp_board_manifest`].
     ///
     /// ⚠️ The caller owns the exclusive-borrow discipline: the model's link
     /// pump for this endpoint must be paused while this runs, or the two
     /// drainers split the frames between them.
-    pub async fn write_device_file(
+    pub async fn stamp_board_manifest(
         &self,
         endpoint_id: &LinkEndpointId,
-        path: &str,
-        bytes: &[u8],
+        manifest: &[u8],
         events: LinkManagementEventSink,
     ) -> Result<(), LinkError> {
         let port_id = self.endpoint_port_id(endpoint_id)?;
-        super::port_client_io::write_device_file(port_id, path, bytes, events).await
+        super::port_client_io::stamp_board_manifest(port_id, manifest, events).await
     }
 
     /// Push a project onto the device over the app protocol (round 2's
     /// second coarse effect): find the storage dir the board runs from,
     /// replace it, load it, and verify the package hash.
     ///
-    /// ⚠️ Same exclusive-borrow rule as [`Self::write_device_file`]: the
+    /// ⚠️ Same exclusive-borrow rule as [`Self::stamp_board_manifest`]: the
     /// model's link pump for this endpoint must be paused while this runs.
     pub async fn push_device_project(
         &self,
@@ -576,7 +642,7 @@ impl BrowserSerialEsp32Provider {
     /// A long-lived `lpa-client` io over an endpoint's open port for the
     /// editor lens (round-2 M5), with every drained line teed to `tap`.
     ///
-    /// ⚠️ Same exclusive-borrow rule as [`Self::write_device_file`], held
+    /// ⚠️ Same exclusive-borrow rule as [`Self::stamp_board_manifest`], held
     /// for the lens's lifetime: the model's link pump for this endpoint must
     /// stay paused until the lens gives the wire back.
     pub fn lens_client_io(
@@ -594,7 +660,7 @@ impl BrowserSerialEsp32Provider {
     /// dir. The firmware is untouched, so the board comes back on the empty
     /// face rather than needing a re-flash.
     ///
-    /// ⚠️ Same exclusive-borrow rule as [`Self::write_device_file`]: the
+    /// ⚠️ Same exclusive-borrow rule as [`Self::stamp_board_manifest`]: the
     /// model's link pump for this endpoint must be paused while this runs.
     pub async fn remove_device_project(
         &self,

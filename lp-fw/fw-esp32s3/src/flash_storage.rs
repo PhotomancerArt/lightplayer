@@ -3,14 +3,14 @@
 //! Implements `littlefs_rust::Storage` over `esp_storage::FlashStorage`,
 //! translating block/offset addressing to the `lpfs` partition.
 //!
-//! ## Divergence from the C6 (deliberate)
+//! ## Why no offset constant
 //!
-//! `fw-esp32c6/src/flash_storage.rs` hardcodes `LPFS_PARTITION_OFFSET =
-//! 0x310000` and `BLOCK_COUNT = 240`, transcribed by hand from that chip's
-//! `partitions.csv`. Copying those constants here would be actively dangerous:
-//! the S3's 8 MB table (M3 P1) puts `lpfs` at `0x610000`, so the C6 values
-//! point into the middle of this chip's **factory** partition — a filesystem
-//! mount would silently erase running code, with no diagnostic.
+//! A transcribed `lpfs` offset would be actively dangerous: the S3's 8 MB
+//! table (M3 P1) puts `lpfs` at `0x610000`, so a constant copied from another
+//! chip's table points into the middle of this chip's **factory** partition —
+//! a filesystem mount would silently erase running code, with no diagnostic.
+//! (The C6 transcribed its offset until 2026-10; all three chips now read
+//! their table — `docs/debt/firmware-partition-constants-transcribed.md`.)
 //!
 //! So the offset and length are read from the partition table at runtime,
 //! matched by the `lpfs` label. `esp-bootloader-esp-idf` is already a

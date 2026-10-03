@@ -60,6 +60,8 @@ pub mod browser_sim_source;
 pub mod browser_transport;
 pub mod composite_transport;
 pub mod device_affordance;
+pub mod device_backup_op;
+pub mod device_backup_store;
 pub mod device_by_base_mac;
 pub mod device_card_feed_view;
 pub mod device_effects;
@@ -70,6 +72,9 @@ pub mod device_flash_offer;
 pub mod device_frame_feed;
 pub mod device_frame_snapshot;
 pub mod device_identity;
+pub mod device_layout_effect;
+pub mod device_layout_step;
+pub mod device_layout_view;
 pub mod device_link_counter_rows;
 pub mod device_offers;
 pub mod device_push;
@@ -107,6 +112,11 @@ pub use composite_transport::CompositeDeviceTransport;
 pub use device_affordance::{
     device_escape_action, device_escape_action_for, device_status_kind, pending_escape_action,
 };
+pub use device_backup_op::DeviceBackupOp;
+pub use device_backup_store::{
+    BackupEntry, BackupIndex, BackupStatus, BackupStoreError, DeviceBackupStore, MemoryBackupStore,
+    check_store_contract,
+};
 pub use device_by_base_mac::{DeviceByBaseMac, device_by_base_mac};
 pub use device_card_feed_view::{
     DeviceCardFeedView, FeedLiveness, device_card_feed_view, device_card_feed_views, feed_liveness,
@@ -134,6 +144,8 @@ pub use device_identity::{
     DeviceIdentityLine, IdentityFirmware as DeviceIdentityFirmware, IdentityRows, device_chip,
     device_identity_line, pending_identity_rows,
 };
+pub use device_layout_effect::BackupDownload;
+pub use device_layout_view::{UiDeviceLayout, UiLayoutPanel, device_layout_view};
 pub use device_link_counter_rows::{LINK_COUNTERS_CAPTION, UiLinkCounterRow, link_counter_rows};
 pub use device_offers::{
     AUTOCONNECT_ENABLED_PARAM, DeviceOfferFacts, RENAME_NAME_PARAM, device_offers, escape_verb,

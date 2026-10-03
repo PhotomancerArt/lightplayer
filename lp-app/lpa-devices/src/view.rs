@@ -145,6 +145,10 @@ pub struct ActivityView {
     pub cancellable: bool,
     /// A cancel has been asked for and the activity is winding down.
     pub cancel_requested: bool,
+    /// A Flash's layout step (the C6 repartition): what the inspection found
+    /// and whether the card must ask before the board's files move.
+    #[serde(default)]
+    pub layout: Option<crate::activity::FlashLayoutView>,
 }
 
 /// What a board is running, as the card is allowed to state it.
@@ -253,6 +257,7 @@ pub fn device_view(device: &Device, now: Millis) -> DeviceView {
         percent: cell.progress.as_ref().and_then(|progress| progress.percent),
         cancellable: !cell.is_cancel_requested(),
         cancel_requested: matches!(cell.cancel, CancelPhase::CancelRequested { .. }),
+        layout: cell.flash_layout(),
     });
 
     let mut escapes = Vec::new();

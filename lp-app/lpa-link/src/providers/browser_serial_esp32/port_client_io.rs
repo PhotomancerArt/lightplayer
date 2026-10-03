@@ -54,11 +54,9 @@ const RECEIVE_POLL_MS: u32 = 20;
 /// bound — so this is a plain per-request ceiling.
 const RESPONSE_BUDGET_MS: u32 = 5_000;
 
-/// Write `bytes` to `path` on the device over the app protocol.
-///
-/// Round 2's first consumer is the flash activity's board-manifest stamp
-/// (`/hardware.json`, board-selection D4). M3's push conversation reuses
-/// this seam's shape.
+/// Stamp the board manifest (`/hardware.json`, board-selection D4) on the
+/// device over the app protocol — the flash activity's last step. M3's push
+/// conversation reuses this seam's shape.
 ///
 /// ⚠️ The write **waits for the board to answer something cheap first**. A
 /// just-flashed device formats its littlefs on the first boot and simply
@@ -72,13 +70,15 @@ const RESPONSE_BUDGET_MS: u32 = 5_000;
 /// the request decode while its auto-loaded project was resident (bench,
 /// 2026-09-04) — see [`lpa_client::write_file_in_chunks`] for the shape and
 /// [`lpa_client::MANIFEST_CHUNK_BYTES`] for the size.
-pub async fn write_device_file(
+///
+/// ⚠️ The write **is journaled** (a staged copy first, then the live file),
+/// so a stamp cut between chunks never leaves the board a torn manifest —
+/// see [`lpa_client::stamp_board_manifest`].
+pub async fn stamp_board_manifest(
     port_id: u32,
-    path: &str,
-    bytes: &[u8],
+    manifest: &[u8],
     events: LinkManagementEventSink,
 ) -> Result<(), LinkError> {
-    use lpc_model::AsLpPath;
     let io = PortLineIo {
         port_id,
         pending: VecDeque::new(),
@@ -93,10 +93,9 @@ pub async fn write_device_file(
             LinkError::other(format!("the board never became ready to write to: {error}"))
         })?;
 
-    let outcome = lpa_client::write_file_in_chunks(
+    let outcome = lpa_client::stamp_board_manifest(
         &mut client,
-        path.as_path(),
-        bytes,
+        manifest,
         lpa_client::MANIFEST_CHUNK_BYTES,
         &mut progress,
     )

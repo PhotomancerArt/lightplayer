@@ -538,6 +538,8 @@ fn powered_off_sim_fixture() -> DeviceRosterView {
         access: Default::default(),
         transport_available: true,
         usb_available: true,
+        layout: Default::default(),
+        backup_download: None,
         feeds: Default::default(),
         runtime_bands: [(id, UiRuntimeBand::sim("seeed/xiao-esp32-c6", Some("cpu")))]
             .into_iter()
@@ -751,6 +753,131 @@ fn devices_card_not_responding() -> Element {
 }
 
 #[story(
+    description = "An update that moves a board's files to the new layout (the C6 repartition), in its four faces, all drawn from core's own copy (`device_layout_view`). Top left: the question while the update waits — Studio has already stored a backup in this browser, so Continue is live; Download backup is always there, Cancel leaves the board untouched. Top right: the same question when this browser could NOT keep the backup and the board will be nearly full afterwards — Continue stays disabled until the backup is downloaded. Bottom left: the refusal when the files do not fit; nothing was changed, and the files can still be downloaded. Bottom right: a board that came back holding its files after an interrupted update — the firmware line says they are waiting and the Update verb reads Finish update. The sheets are pinned in their boxes for capture; on the page they rise over it, so asking never changes the card's height."
+)]
+fn devices_card_layout_change() -> Element {
+    use lpa_studio_core::app::devices::device_layout_step::LayoutStaging;
+    use lpa_studio_core::{
+        DeviceBoardFs, DeviceFirmwareFace, DeviceFlashLayoutView, DeviceLayoutVerdict,
+        DeviceWireVersion, device_layout_view,
+    };
+
+    let base = DeviceView {
+        title: "Porch C6".to_string(),
+        detected_chip: Some("esp32c6".to_string()),
+        board_id: Some("seeed/xiao-esp32-c6".to_string()),
+        firmware_face: DeviceFirmwareFace::LightPlayer {
+            firmware: Some("fw-esp32c6 abc1234".to_string()),
+            wire: DeviceWireVersion::Match,
+        },
+        ..roster_fixture().roster.devices.remove(0)
+    };
+    let asking = |verdict: DeviceLayoutVerdict| DeviceView {
+        status: DeviceStatus::Busy,
+        state_label: "Flashing firmware".to_string(),
+        activity: Some(DeviceActivityView {
+            kind: DeviceActivityKind::Flash,
+            label: "Waiting for your answer".to_string(),
+            percent: None,
+            cancellable: true,
+            cancel_requested: false,
+            layout: Some(DeviceFlashLayoutView {
+                verdict,
+                awaiting_consent: true,
+            }),
+        }),
+        escapes: vec![
+            DeviceEscape::Cancel,
+            DeviceEscape::Disconnect,
+            DeviceEscape::Forget,
+        ],
+        ..base.clone()
+    };
+    let stored = asking(DeviceLayoutVerdict::Migrate {
+        files: 9,
+        bytes: 48_128,
+        free_blocks: 150,
+        tight: false,
+        backup_stored: true,
+        device_uid: Some("dev000000daqf6dvvqz".to_string()),
+    });
+    let unstored = asking(DeviceLayoutVerdict::Migrate {
+        files: 31,
+        bytes: 551_936,
+        free_blocks: 24,
+        tight: true,
+        backup_stored: false,
+        device_uid: Some("dev000000daqf6dvvqz".to_string()),
+    });
+    let refused_verdict = DeviceLayoutVerdict::Refused {
+        files: 40,
+        bytes: 802_816,
+        room_bytes: 655_360,
+    };
+    let refused = DeviceView {
+        last_outcome: Some(OutcomeView {
+            summary: "the board's files don't fit the new firmware — nothing was changed"
+                .to_string(),
+            ok: false,
+        }),
+        ..base.clone()
+    };
+    let refused_staging = LayoutStaging {
+        verdict: refused_verdict,
+        plan: None,
+        archive: None,
+        restoring: None,
+        downloaded: false,
+    };
+    let held = DeviceView {
+        loaded_project: DeviceLoadedProject::Empty,
+        can_remove_project: false,
+        ..base.clone()
+    };
+    let cell = |card: DeviceView, fs: DeviceBoardFs, staged: Option<&LayoutStaging>| {
+        // The verbs are offers; the shell would provide the view's tree, so
+        // the story provides the one core publishes for this card — its
+        // device verbs, and the layout verbs under the same prefix.
+        let mut offers = crate::app::home::device_offer_story_fixtures::card_tree(
+            &card,
+            lpa_studio_core::DeviceFace::Wire,
+            false,
+            &[],
+            &[],
+        );
+        let prefix = offers
+            .device_prefix(card.id)
+            .cloned()
+            .expect("the card's verbs are placed");
+        let layout = device_layout_view(&card, prefix, fs, true, staged, None, &mut offers);
+        rsx! {
+            div { class: "tw:grid tw:content-start tw:gap-2",
+                crate::core::OffersProvider { offers,
+                    crate::app::home::device_roster_card::DeviceRosterCard {
+                        card,
+                        projects: vec![],
+                        examples: vec![],
+                        layout,
+                        layout_sheet_inline: true,
+                        on_action: |_| {},
+                    }
+                }
+            }
+        }
+    };
+    rsx! {
+        section { class: "tw:p-4",
+            div { class: "tw:grid tw:grid-cols-[repeat(auto-fill,minmax(300px,400px))] tw:items-start tw:gap-4",
+                {cell(stored, DeviceBoardFs::Mounted, None)}
+                {cell(unstored, DeviceBoardFs::Mounted, None)}
+                {cell(refused, DeviceBoardFs::Mounted, Some(&refused_staging))}
+                {cell(held, DeviceBoardFs::LegacyHeld, None)}
+            }
+        }
+    }
+}
+
+#[story(
     description = "The armed destructive chips, idle beside both armed states (2K+, devices-treatments spike gate 2026-08-31; RESERVE width from the device-card-v2 spike §2, 2026-09-02). The chip renders both 'Forget' and 'Confirm Forget' in one grid cell, so it is already as wide as its armed reading and the first click changes text and tone WITHOUT moving the chip or its neighbours — compare the footers, the chips sit at the same width and the card's height is unchanged. Middle: Forget armed in the DEVICE zone. Right: Remove armed in the PROJECT zone's verb row — D8, the OTHER destructive chip, which marks the whole card exactly as Forget does, and the two now sit in different zones, which is why a capture that proves the marking needs both. Arming dims what the card SAYS (the header and every zone's info line, the preview and the terminal) and never what it OFFERS: every verb row keeps full contrast, so the chip that is asking stays legible. Blur or the 4s window stands down. Captured with the story-only armed_preview hooks; the knock and the quiet drain track are motion and do not capture."
 )]
 fn devices_card_armed() -> Element {
@@ -835,6 +962,8 @@ fn roster_fixture() -> DeviceRosterView {
         access: Default::default(),
         transport_available: true,
         usb_available: true,
+        layout: Default::default(),
+        backup_download: None,
         feeds: Default::default(),
         runtime_bands: Default::default(),
         // The running card has earned a registry row, so it has an editor
@@ -966,6 +1095,7 @@ fn roster_fixture() -> DeviceRosterView {
                         percent: Some(40),
                         cancellable: true,
                         cancel_requested: false,
+                        layout: None,
                     }),
                     last_outcome: None,
                     // Mid-activity: the bar is in the state zone above and
@@ -1167,6 +1297,8 @@ fn roster_page_fixture() -> DeviceRosterView {
         access: Default::default(),
         transport_available: true,
         usb_available: true,
+        layout: Default::default(),
+        backup_download: None,
         feeds: Default::default(),
         runtime_bands: Default::default(),
         open_addresses: full.open_addresses,
@@ -1659,6 +1791,7 @@ fn card_state_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
             percent: Some(62),
             cancellable: true,
             cancel_requested: false,
+            layout: None,
         }),
         can_remove_project: false,
         escapes: vec![
@@ -1679,6 +1812,7 @@ fn card_state_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
             percent: None,
             cancellable: true,
             cancel_requested: false,
+            layout: None,
         }),
         can_remove_project: false,
         escapes: vec![

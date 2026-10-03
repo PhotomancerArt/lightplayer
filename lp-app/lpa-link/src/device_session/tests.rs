@@ -398,7 +398,10 @@ async fn flash_rebuilds_the_link_and_readiness_lands_ready_with_new_provenance()
 
     let outcome = session
         .manage(
-            LinkManagementRequest::FlashFirmware { build_id: None },
+            LinkManagementRequest::FlashFirmware {
+                build_id: None,
+                plan: None,
+            },
             sink,
         )
         .await
@@ -518,7 +521,10 @@ async fn scripted_manage_failure_sets_error_status_and_reconnect_recovers() {
 
     let error = session
         .manage(
-            LinkManagementRequest::FlashFirmware { build_id: None },
+            LinkManagementRequest::FlashFirmware {
+                build_id: None,
+                plan: None,
+            },
             DeviceEventSink::noop(),
         )
         .await
@@ -700,7 +706,10 @@ async fn stale_blank_flash_lines_do_not_misclassify_the_post_flash_rebuild() {
 
     let outcome = session
         .manage(
-            LinkManagementRequest::FlashFirmware { build_id: None },
+            LinkManagementRequest::FlashFirmware {
+                build_id: None,
+                plan: None,
+            },
             DeviceEventSink::noop(),
         )
         .await
@@ -871,7 +880,10 @@ async fn the_flash_preflight_records_a_normalized_probed_mac() {
 
     let outcome = session
         .manage(
-            LinkManagementRequest::FlashFirmware { build_id: None },
+            LinkManagementRequest::FlashFirmware {
+                build_id: None,
+                plan: None,
+            },
             DeviceEventSink::noop(),
         )
         .await
@@ -913,7 +925,10 @@ async fn probed_mac_evidence_outlives_the_link_generation_that_read_it() {
     assert!(session.wait_ready().await.is_ready());
     session
         .manage(
-            LinkManagementRequest::FlashFirmware { build_id: None },
+            LinkManagementRequest::FlashFirmware {
+                build_id: None,
+                plan: None,
+            },
             DeviceEventSink::noop(),
         )
         .await

@@ -528,6 +528,19 @@ impl AccessController {
                         self.records.record(&key, synced.listing, now_secs);
                         self.persist_devices();
                     }
+                    // A refused add (a full device) is said in the panel,
+                    // under the list the board did answer; a sync that
+                    // went through clears what an earlier one said.
+                    if !matches!(self.writes.get(&device), Some(WriteStatus::Writing)) {
+                        match synced.refused {
+                            Some(why) => {
+                                self.writes.insert(device, WriteStatus::Failed(why));
+                            }
+                            None => {
+                                self.writes.remove(&device);
+                            }
+                        }
+                    }
                     if !synced.added.is_empty() {
                         self.undo
                             .insert(device, synced.added.iter().map(|a| a.salt).collect());
@@ -540,9 +553,11 @@ impl AccessController {
                     }
                 }
                 Err(error) => {
-                    // Silent by design (an older firmware, a full device):
-                    // the panel still shows what it last knew.
-                    log::warn!("access: reading or adding to {device:?}'s list failed: {error}");
+                    // The list itself was not read (an older firmware, a
+                    // lost link). Silent by design: the panel still shows
+                    // what it last knew. (A full device is not this: its
+                    // list arrives with the refusal, above.)
+                    log::warn!("access: reading {device:?}'s list failed: {error}");
                 }
             },
             AccessCommand::Changed {

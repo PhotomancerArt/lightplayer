@@ -20,6 +20,7 @@ use alloc::vec::Vec;
 use lpc_model::LpFeature;
 use serde::{Deserialize, Serialize};
 
+use crate::server::fs_boot_state::FsBootState;
 use crate::server::hello_auth::HelloAuth;
 
 /// Wire protocol version spoken by this build of the workspace.
@@ -35,6 +36,15 @@ use crate::server::hello_auth::HelloAuth;
 ///
 /// # History
 ///
+/// - 33: the hello's hardware facts gain a required `fs` field
+///   ([`FsBootState`]: `mounted` / `formatted` / `memory` / `legacy_held`),
+///   how the filesystem came up at boot (plan
+///   `lp2025/2026-10-01-1843-c6-repartition`, MQ3). A C6 that finds its
+///   `lpfs` unmountable but a pre-repartition filesystem at the old offset
+///   refuses to format and says `legacy_held`; Studio reads `mounted` after
+///   a layout migration as the proof the files arrived. An old peer cannot
+///   decode a hello missing the field, nor the reverse.
+///   `PACK_FORMAT_VERSION` is unchanged.
 /// - 32: the classic ESP32's UART0 host link moves onto lp-link (plan
 ///   `lp2025/2026-09-28-2015-classic-uart-on-lp-link`, milestone M5 of
 ///   `docs/adr/2026-09-27-lp-link-one-comms-layer.md`). On the classic
@@ -319,7 +329,7 @@ use crate::server::hello_auth::HelloAuth;
 /// as `None` on new Studio and a new firmware's extra fields are ignored
 /// by old Studio. Bumping for those would mark every board running
 /// current firmware Incompatible in exchange for nothing.
-pub const WIRE_PROTO_VERSION: u32 = 32;
+pub const WIRE_PROTO_VERSION: u32 = 33;
 
 /// Unsolicited/boot-time server identity, version, and capability report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -447,6 +457,12 @@ pub struct HardwareFacts {
     /// folded into [`Self::base_mac`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub eui64: Option<String>,
+    /// How the filesystem the server serves came up at boot — mounted,
+    /// formatted fresh, RAM-only, or a pre-repartition filesystem held for
+    /// migration (see [`FsBootState`]). Required on the wire (no default):
+    /// wire 33 added it. The embedder sets it (`LpServer::set_fs_boot_state`);
+    /// a server that never does reports [`FsBootState::Memory`].
+    pub fs: FsBootState,
 }
 
 /// Chip-level identity the server CANNOT derive: it lives in efuse (or, on
@@ -651,7 +667,7 @@ mod tests {
     #[test]
     fn the_proto_version_is_pinned_to_its_history() {
         assert_eq!(
-            WIRE_PROTO_VERSION, 32,
+            WIRE_PROTO_VERSION, 33,
             "if you meant to bump, add the History entry in this file's \
              doc comment and update this pin"
         );

@@ -224,6 +224,7 @@ mod tests {
             build_id: "b".to_string(),
             park_first: false,
             name: None,
+            restore_backup: false,
         });
         let card = UiAgentCard::new("c1", flash.clone(), "x")
             .for_offer(path.clone(), OfferArgs::new().with("board", "xiao"));
@@ -235,6 +236,7 @@ mod tests {
             build_id: "b".to_string(),
             park_first: false,
             name: None,
+            restore_backup: false,
         });
         assert!(
             !card.answered_by(&other_board),

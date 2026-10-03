@@ -4118,6 +4118,7 @@ dependencies = [
 name = "fw-esp32-common"
 version = "40.0.0"
 dependencies = [
+ "async-trait",
  "critical-section",
  "embassy-futures",
  "embassy-sync 0.8.0",
@@ -4132,6 +4133,7 @@ dependencies = [
  "lp-json-pack",
  "lp-link",
  "lp-recovery",
+ "lpa-client",
  "lpa-server",
  "lpc-hardware",
  "lpc-model",
@@ -5717,6 +5719,7 @@ dependencies = [
  "eframe",
  "egui",
  "env_logger 0.11.9",
+ "esp-idf-part",
  "espflash",
  "futures-util",
  "fw-checks",
@@ -5906,6 +5909,7 @@ dependencies = [
  "lp-emu-validate",
  "lp-riscv-emu",
  "lp-ws281x",
+ "md-5",
  "rustc-demangle",
  "serialport",
  "sha2",
@@ -6261,6 +6265,7 @@ dependencies = [
  "lp-riscv-emu",
  "lp-riscv-inst",
  "lpc-access",
+ "lpc-hardware",
  "lpc-model",
  "lpc-shared",
  "lpc-view",
@@ -6337,6 +6342,7 @@ dependencies = [
  "wasm-bindgen-futures",
  "wasm-bindgen-test",
  "web-sys",
+ "zip",
 ]
 
 [[package]]
@@ -6397,7 +6403,6 @@ dependencies = [
  "futures-util",
  "js-sys",
  "jsonschema",
- "littlefs-rust",
  "log",
  "lp-gfx-lpvm",
  "lpa-agent",

@@ -21,7 +21,7 @@
     "svc.radio-espnow"
   ],
   "limits": {
-    "flashAppBytes": 3145728
+    "flashAppBytes": 3407872
   },
-  "wireProto": 32
+  "wireProto": 33
 }

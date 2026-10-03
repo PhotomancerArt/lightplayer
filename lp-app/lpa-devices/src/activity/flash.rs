@@ -90,6 +90,8 @@ use crate::wire::ClientFrame;
 use super::activity_cell::{
     ActivityCtx, ActivityKind, ActivityOutcome, ActivityReducer, ActivityStep,
 };
+use super::layout_verdict::{FlashLayoutView, LayoutVerdict};
+use crate::wire::BoardFs;
 
 /// How long a parked port gets to re-enumerate before esptool takes it.
 const PARK_SETTLE_MS: u64 = 2_500;
@@ -119,6 +121,21 @@ fn hung_bootloader_message(pc: u32) -> String {
     )
 }
 
+/// `1.5 KB`, `704 KB` — sizes as a user reads them.
+fn kib(bytes: u64) -> String {
+    if bytes < 10 * 1024 {
+        format!("{:.1} KB", bytes as f64 / 1024.0)
+    } else {
+        format!("{} KB", bytes / 1024)
+    }
+}
+
+/// The honest failure copy when a carried write's board came back without
+/// its files mounted, or as somebody else.
+const LAYOUT_NOT_CONFIRMED: &str = "the new firmware is running, but the board's files were not \
+     confirmed on it. They are in the backup Studio saved in this browser — use Restore files \
+     on the card.";
+
 /// Where the flash currently is.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 enum FlashPhase {
@@ -139,6 +156,15 @@ enum FlashPhase {
         /// The effect starts when this settle instant passes.
         settle_at: Option<Millis>,
     },
+    /// The layout inspection (C6 repartition) owns the wire: it reads the
+    /// board's partition table — and, when its files must move, its
+    /// filesystem — in the bootloader, and stages a plan with the effects
+    /// layer. Ends with a [`LayoutVerdict`] and leaves the chip parked.
+    Inspecting,
+    /// The inspection found files to move (or a backup to restore); the
+    /// card asks first. Continue starts the write; Cancel or the deadline
+    /// resets the board back into its old firmware, untouched.
+    AwaitingConsent { deadline: Millis },
     /// The coarse effect owns the wire; we absorb markers.
     Writing,
     /// The effect succeeded; the ladder is bringing the board back.
@@ -194,6 +220,20 @@ pub struct FlashActivity {
     /// Cancel wind-down in progress: the port was asked to close.
     winding_down: bool,
     next_request_id: u32,
+    /// The card's "Restore files" (the resume rule): the
+    /// inspection puts a pending stored backup back even onto a board that
+    /// mounts files of its own.
+    #[serde(default)]
+    restore_backup: bool,
+    /// The inspection's verdict, once heard. `Some` with a carried verdict
+    /// means the write moves the board's files and the post-flash hello must
+    /// prove they mounted.
+    #[serde(default)]
+    layout: Option<LayoutVerdict>,
+    /// The inspect effect ended without a verdict marker: an effects layer
+    /// (or transport) that inspects nothing — a plain flash.
+    #[serde(default)]
+    inspected: bool,
 }
 
 impl FlashActivity {
@@ -208,6 +248,35 @@ impl FlashActivity {
             cancel_after_effect: false,
             winding_down: false,
             next_request_id: 1,
+            restore_backup: false,
+            layout: None,
+            inspected: false,
+        }
+    }
+
+    /// Ask the inspection to restore the pending stored backup (the card's
+    /// "Restore files").
+    pub fn with_restore_backup(mut self, restore: bool) -> Self {
+        self.restore_backup = restore;
+        self
+    }
+
+    /// The layout step, as the card shows it: the verdict, and whether the
+    /// activity is waiting for Continue.
+    pub fn layout_view(&self) -> Option<FlashLayoutView> {
+        let verdict = self.layout.clone()?;
+        Some(FlashLayoutView {
+            verdict,
+            awaiting_consent: matches!(self.phase, FlashPhase::AwaitingConsent { .. }),
+        })
+    }
+
+    /// While the card waits for the user's yes, supervision must not evict
+    /// the activity first: the consent deadline is the bound.
+    pub(crate) fn supervision_floor(&self) -> Option<Millis> {
+        match self.phase {
+            FlashPhase::AwaitingConsent { deadline } => Some(deadline),
+            _ => None,
         }
     }
 
@@ -227,11 +296,39 @@ impl FlashActivity {
                 command: LinkCommand::RunReset(ResetKind::UsbJtagDownload),
             }];
         }
-        self.start_effect(ctx)
+        self.start_next(ctx)
     }
 
-    /// The command that hands the wire to the flasher. From spawn directly
-    /// (UART bridges), or once parking resolves (native USB).
+    /// Hand the wire to the next effect: the layout inspection first, the
+    /// write once its verdict is known (or once it reported none).
+    fn start_next(&mut self, ctx: &ActivityCtx<'_>) -> Vec<Command> {
+        if self.layout.is_none() && !self.inspected {
+            self.start_inspect(ctx)
+        } else {
+            self.start_effect(ctx)
+        }
+    }
+
+    /// The layout inspection: read the board's table (and files) in the
+    /// bootloader and stage a plan with the effects layer.
+    fn start_inspect(&mut self, ctx: &ActivityCtx<'_>) -> Vec<Command> {
+        let Some(link) = ctx.link else {
+            return Vec::new();
+        };
+        self.phase = FlashPhase::Inspecting;
+        vec![Command::RunEffect {
+            device: self.device,
+            link,
+            effect_id: ctx.effect_id,
+            effect: EffectRequest::InspectLayout {
+                build_id: self.build_id.clone(),
+                restore_backup: self.restore_backup,
+            },
+        }]
+    }
+
+    /// The command that hands the wire to the flasher: after the layout
+    /// inspection (and the user's yes, when files move).
     fn start_effect(&mut self, ctx: &ActivityCtx<'_>) -> Vec<Command> {
         let Some(link) = ctx.link else {
             return Vec::new();
@@ -244,8 +341,58 @@ impl FlashActivity {
             effect: EffectRequest::Flash {
                 build_id: self.build_id.clone(),
                 board_id: self.board_id.clone(),
+                carry: self.carries_files(),
             },
         }]
+    }
+
+    fn carries_files(&self) -> bool {
+        self.layout
+            .as_ref()
+            .is_some_and(LayoutVerdict::carries_files)
+    }
+
+    /// Give the parked board back to its own firmware — nothing was
+    /// written — and end with `outcome`.
+    fn release_untouched(&self, outcome: ActivityOutcome, ctx: &ActivityCtx<'_>) -> ActivityStep {
+        let commands = match ctx.link {
+            Some(link) => vec![Command::Link {
+                link,
+                command: LinkCommand::RunReset(ResetKind::Normal),
+            }],
+            None => Vec::new(),
+        };
+        ActivityStep::Done { outcome, commands }
+    }
+
+    /// The inspection's verdict arrived (its `Ended` follows).
+    fn on_inspected(&mut self, now: Millis, ctx: &ActivityCtx<'_>) -> ActivityStep {
+        self.inspected = true;
+        match self.layout.clone() {
+            None | Some(LayoutVerdict::Plain) => ActivityStep::Continue(self.start_effect(ctx)),
+            Some(LayoutVerdict::Migrate { .. } | LayoutVerdict::Restore { .. }) => {
+                self.phase = FlashPhase::AwaitingConsent {
+                    deadline: now.plus_ms(ctx.config.flash_consent_ms),
+                };
+                ActivityStep::nothing()
+            }
+            Some(LayoutVerdict::Refused {
+                files,
+                bytes,
+                room_bytes,
+            }) => self.release_untouched(
+                ActivityOutcome::Failed {
+                    message: format!(
+                        "not updated: this board holds {files} files ({}); after the update \
+                         it has room for {}. Nothing was changed — remove a project from the \
+                         board, then update again.",
+                        kib(bytes),
+                        kib(room_bytes)
+                    ),
+                },
+                ctx,
+            ),
+        }
     }
 
     fn ask_hello(&mut self, ctx: &ActivityCtx<'_>) -> Vec<Command> {
@@ -291,6 +438,29 @@ impl FlashActivity {
     /// journaled the version and put the notice in the terminal; failing
     /// here would tell the user the flash broke when it did not.
     fn on_hello(&mut self, now: Millis, ctx: &ActivityCtx<'_>) -> ActivityStep {
+        // A write that carried the board's files is proven by the board, not
+        // by the readback alone: its hello must say the files MOUNTED, and
+        // it must come back as itself. Anything else leaves the stored
+        // backup pending, which is what offers Restore on the card.
+        let layout_verified = match &self.layout {
+            Some(verdict) if verdict.carries_files() => {
+                let hello = ctx.evidence.classification.hello();
+                let mounted = hello.is_some_and(|hello| hello.fs == BoardFs::Mounted);
+                let same_board = match verdict.expected_uid() {
+                    Some(expected) => hello
+                        .and_then(|hello| hello.identity.uid.as_ref())
+                        .is_some_and(|uid| uid.0 == expected),
+                    None => true,
+                };
+                if !(mounted && same_board) {
+                    return ActivityStep::done(ActivityOutcome::Failed {
+                        message: LAYOUT_NOT_CONFIRMED.to_string(),
+                    });
+                }
+                true
+            }
+            _ => false,
+        };
         let Some(link) = ctx.link else {
             // The hello proves the board is alive, but the link vanished
             // under us in the same instant; the stamp cannot run.
@@ -313,6 +483,7 @@ impl FlashActivity {
             effect_id: ctx.effect_id,
             effect: EffectRequest::WriteBoardManifest {
                 board_id: self.board_id.clone(),
+                layout_verified,
             },
         }])
     }
@@ -355,13 +526,55 @@ impl FlashActivity {
         marker: &ActivityMarker,
         ctx: &mut ActivityCtx<'_>,
     ) -> ActivityStep {
+        if let ActivityMarker::LayoutVerdict { verdict } = marker {
+            if matches!(self.phase, FlashPhase::Inspecting) {
+                self.layout = Some(verdict.clone());
+            }
+            return ActivityStep::nothing();
+        }
         let ActivityMarker::Ended { outcome, .. } = marker else {
             // Progress lands on the cell (the device fold displays it);
             // Started brackets are the device's own.
             return ActivityStep::nothing();
         };
         match &self.phase {
-            FlashPhase::Parking { .. } => ActivityStep::nothing(),
+            FlashPhase::Parking { .. } | FlashPhase::AwaitingConsent { .. } => {
+                ActivityStep::nothing()
+            }
+            FlashPhase::Inspecting => {
+                if self.cancel_after_effect {
+                    // Cancelled while the layout was being read: nothing was
+                    // written; give the parked board back.
+                    return self.release_untouched(ActivityOutcome::Cancelled, ctx);
+                }
+                match outcome {
+                    ActivityOutcome::Succeeded { .. } => self.on_inspected(now, ctx),
+                    ActivityOutcome::Failed { message }
+                        if self.open_retries_left > 0
+                            && (message.contains("Failed to open serial port")
+                                || message.contains("port is closed")) =>
+                    {
+                        // The same dead-port signature as the write's: the
+                        // parked port re-enumerated under us. Re-settle.
+                        self.open_retries_left -= 1;
+                        self.phase = FlashPhase::Parking {
+                            deadline: now.plus_ms(ctx.config.flash_rung_ms),
+                            settle_at: Some(now.plus_ms(PARK_SETTLE_MS)),
+                        };
+                        ActivityStep::nothing()
+                    }
+                    other => self.release_untouched(
+                        ActivityOutcome::Failed {
+                            message: format!(
+                                "not updated: reading the board's layout failed ({}). Nothing \
+                                 was written.",
+                                other.summary()
+                            ),
+                        },
+                        ctx,
+                    ),
+                }
+            }
             FlashPhase::Writing => {
                 if self.cancel_after_effect {
                     // The write window is over; honour the held cancel now,
@@ -430,17 +643,32 @@ impl FlashActivity {
                     if now >= settle_at {
                         // Parked AND enumerated: esptool gets a still,
                         // live port.
-                        return ActivityStep::Continue(self.start_effect(ctx));
+                        return ActivityStep::Continue(self.start_next(ctx));
                     }
                 } else if now >= deadline {
                     // Parking is an odds-improver, never a gate: if the
                     // downloader dance went quiet, hand esptool the wire
                     // and let it fight its own fight.
-                    return ActivityStep::Continue(self.start_effect(ctx));
+                    return ActivityStep::Continue(self.start_next(ctx));
                 }
                 ActivityStep::nothing()
             }
-            FlashPhase::Writing => ActivityStep::nothing(),
+            FlashPhase::Inspecting | FlashPhase::Writing => ActivityStep::nothing(),
+            FlashPhase::AwaitingConsent { deadline } => {
+                if now >= deadline {
+                    // Nobody answered: nothing was written; the board goes
+                    // back to its old firmware with every file.
+                    return self.release_untouched(
+                        ActivityOutcome::Failed {
+                            message: "not updated: the question about moving the board's \
+                                      files went unanswered. Nothing was written."
+                                .to_string(),
+                        },
+                        ctx,
+                    );
+                }
+                ActivityStep::nothing()
+            }
             FlashPhase::Reconnecting {
                 rung,
                 rung_deadline,
@@ -629,6 +857,19 @@ impl ActivityReducer for FlashActivity {
                 match self.phase {
                     // Nothing owns the wire during parking; stop politely.
                     FlashPhase::Parking { .. } => self.wind_down(ctx),
+                    // The layout read cannot be interrupted mid-session;
+                    // hold the cancel like the write's, and release the
+                    // parked board when the read ends.
+                    FlashPhase::Inspecting => {
+                        self.cancel_after_effect = true;
+                        ActivityStep::nothing()
+                    }
+                    // Waiting on the user: nothing was written, the board is
+                    // parked in its bootloader — reset it back into its old
+                    // firmware with every file.
+                    FlashPhase::AwaitingConsent { .. } => {
+                        self.release_untouched(ActivityOutcome::Cancelled, ctx)
+                    }
                     // esptool-js cannot abort a write cleanly: hold the
                     // cancel through the write window (the card says
                     // "cancelling") and wind down when the effect ends.
@@ -642,6 +883,13 @@ impl ActivityReducer for FlashActivity {
                     FlashPhase::Reconnecting { .. } | FlashPhase::Stamping { .. } => {
                         self.wind_down(ctx)
                     }
+                }
+            }
+            Input::Action(Action::ConfirmFlashLayout { .. }) => {
+                if matches!(self.phase, FlashPhase::AwaitingConsent { .. }) && !self.winding_down {
+                    ActivityStep::Continue(self.start_effect(ctx))
+                } else {
+                    ActivityStep::nothing()
                 }
             }
             Input::Action(_) => ActivityStep::nothing(),
@@ -670,7 +918,8 @@ impl ActivityReducer for FlashActivity {
                 settle_at,
             } => Some(settle_at.map_or(*deadline, |settle| settle.min(*deadline))),
             // The effect drives; the supervision backstop bounds it (I1).
-            FlashPhase::Writing => None,
+            FlashPhase::Inspecting | FlashPhase::Writing => None,
+            FlashPhase::AwaitingConsent { deadline } => Some(*deadline),
             FlashPhase::Reconnecting {
                 rung_deadline,
                 next_poke_at,
@@ -867,12 +1116,31 @@ mod tests {
         let commands = with_ctx(&evidence, &config, |ctx| {
             activity.spawn_commands(Millis(0), ctx)
         });
+        // The layout inspection comes first (the C6 repartition)…
         assert!(matches!(
             commands.as_slice(),
             [Command::RunEffect {
-                effect: EffectRequest::Flash { .. },
+                effect: EffectRequest::InspectLayout { .. },
                 ..
             }]
+        ));
+        // …and an inspection that reports no verdict is a plain flash.
+        let step = with_ctx(&evidence, &config, |ctx| {
+            activity.handle(
+                Millis(5_000),
+                &ended(ActivityOutcome::Succeeded {
+                    summary: "inspected".to_string(),
+                }),
+                ctx,
+            )
+        });
+        assert!(matches!(
+            step,
+            ActivityStep::Continue(ref commands)
+                if matches!(commands.as_slice(), [Command::RunEffect {
+                    effect: EffectRequest::Flash { carry: false, .. },
+                    ..
+                }])
         ));
         assert_eq!(activity.next_deadline(), None, "the effect drives");
 
@@ -892,6 +1160,262 @@ mod tests {
                 if matches!(commands.as_slice(), [Command::Link { command: LinkCommand::Open { .. }, .. }])
         ));
         assert!(activity.next_deadline().is_some(), "the ladder is timed");
+    }
+
+    fn layout(verdict: LayoutVerdict) -> Input {
+        Input::Event(Event::ActivityMarker {
+            device: DeviceId(1),
+            effect: Some(crate::event::EffectId(1)),
+            marker: ActivityMarker::LayoutVerdict { verdict },
+        })
+    }
+
+    fn migrate() -> LayoutVerdict {
+        LayoutVerdict::Migrate {
+            files: 12,
+            bytes: 40_000,
+            free_blocks: 150,
+            tight: false,
+            backup_stored: true,
+            device_uid: Some("dev0000000000000042".to_string()),
+        }
+    }
+
+    /// Spawn, then answer the inspection with `verdict`.
+    fn inspected(
+        activity: &mut FlashActivity,
+        evidence: &Evidence,
+        config: &RosterConfig,
+        verdict: LayoutVerdict,
+    ) -> ActivityStep {
+        with_ctx(evidence, config, |ctx| {
+            activity.spawn_commands(Millis(0), ctx)
+        });
+        with_ctx(evidence, config, |ctx| {
+            activity.handle(Millis(4_000), &layout(verdict), ctx)
+        });
+        with_ctx(evidence, config, |ctx| {
+            activity.handle(
+                Millis(5_000),
+                &ended(ActivityOutcome::Succeeded {
+                    summary: "inspected".to_string(),
+                }),
+                ctx,
+            )
+        })
+    }
+
+    fn hello_with(
+        evidence: &mut Evidence,
+        now: Millis,
+        config: &RosterConfig,
+        fs: BoardFs,
+        uid: Option<&str>,
+    ) {
+        fold(
+            evidence,
+            now,
+            Event::Link {
+                link: LinkId(1),
+                event: LinkEvent::Frame(ServerFrame::hello(
+                    1,
+                    HelloFacts {
+                        proto: config.expected_proto,
+                        board_id: Some("seeed-xiao-esp32c6".to_string()),
+                        identity: crate::identity::PeerIdentity {
+                            uid: uid.map(|uid| crate::identity::DeviceUid(uid.to_string())),
+                            ..Default::default()
+                        },
+                        fs,
+                        ..Default::default()
+                    },
+                )),
+            },
+            config,
+        );
+    }
+
+    #[test]
+    fn files_to_move_wait_for_a_yes_and_then_write_carrying_them() {
+        let config = RosterConfig::default();
+        let mut evidence = Evidence::default();
+        opened(&mut evidence, Millis(0), &config);
+        let mut activity = flash();
+        let step = inspected(&mut activity, &evidence, &config, migrate());
+        assert!(
+            matches!(step, ActivityStep::Continue(ref commands) if commands.is_empty()),
+            "nothing is written before the yes: {step:?}"
+        );
+        let view = activity.layout_view().expect("the card sees the verdict");
+        assert!(view.awaiting_consent);
+        assert_eq!(
+            activity.next_deadline(),
+            Some(Millis(5_000).plus_ms(config.flash_consent_ms))
+        );
+
+        let step = with_ctx(&evidence, &config, |ctx| {
+            activity.handle(
+                Millis(9_000),
+                &Input::Action(Action::ConfirmFlashLayout {
+                    device: DeviceId(1),
+                }),
+                ctx,
+            )
+        });
+        assert!(matches!(
+            step,
+            ActivityStep::Continue(ref commands)
+                if matches!(commands.as_slice(), [Command::RunEffect {
+                    effect: EffectRequest::Flash { carry: true, .. },
+                    ..
+                }])
+        ));
+    }
+
+    #[test]
+    fn a_refusal_writes_nothing_and_gives_the_board_back() {
+        let config = RosterConfig::default();
+        let mut evidence = Evidence::default();
+        opened(&mut evidence, Millis(0), &config);
+        let mut activity = flash();
+        let step = inspected(
+            &mut activity,
+            &evidence,
+            &config,
+            LayoutVerdict::Refused {
+                files: 200,
+                bytes: 800_000,
+                room_bytes: 720_896,
+            },
+        );
+        let ActivityStep::Done { outcome, commands } = step else {
+            panic!("a refusal ends the activity");
+        };
+        assert!(
+            matches!(outcome, ActivityOutcome::Failed { ref message } if message.contains("Nothing was changed"))
+        );
+        assert!(matches!(
+            commands.as_slice(),
+            [Command::Link {
+                command: LinkCommand::RunReset(ResetKind::Normal),
+                ..
+            }]
+        ));
+    }
+
+    #[test]
+    fn cancel_at_the_question_resets_the_board_untouched() {
+        let config = RosterConfig::default();
+        let mut evidence = Evidence::default();
+        opened(&mut evidence, Millis(0), &config);
+        let mut activity = flash();
+        inspected(&mut activity, &evidence, &config, migrate());
+        let step = with_ctx(&evidence, &config, |ctx| {
+            activity.handle(
+                Millis(9_000),
+                &Input::Action(Action::CancelActivity {
+                    device: DeviceId(1),
+                }),
+                ctx,
+            )
+        });
+        assert!(matches!(
+            step,
+            ActivityStep::Done {
+                outcome: ActivityOutcome::Cancelled,
+                ref commands,
+            } if matches!(commands.as_slice(), [Command::Link {
+                command: LinkCommand::RunReset(ResetKind::Normal),
+                ..
+            }])
+        ));
+    }
+
+    #[test]
+    fn an_unanswered_question_expires_without_writing() {
+        let config = RosterConfig::default();
+        let mut evidence = Evidence::default();
+        opened(&mut evidence, Millis(0), &config);
+        let mut activity = flash();
+        inspected(&mut activity, &evidence, &config, migrate());
+        let step = with_ctx(&evidence, &config, |ctx| {
+            activity.handle(
+                Millis(5_000).plus_ms(config.flash_consent_ms),
+                &timer(),
+                ctx,
+            )
+        });
+        assert!(matches!(
+            step,
+            ActivityStep::Done {
+                outcome: ActivityOutcome::Failed { .. },
+                ..
+            }
+        ));
+    }
+
+    /// The board must prove the files arrived: mounted, and itself.
+    #[test]
+    fn a_carried_write_is_verified_by_the_boards_own_hello() {
+        for (fs, uid, verified) in [
+            (BoardFs::Mounted, Some("dev0000000000000042"), true),
+            (BoardFs::Formatted, Some("dev0000000000000042"), false),
+            (BoardFs::LegacyHeld, None, false),
+            (BoardFs::Mounted, Some("dev9999999999999999"), false),
+        ] {
+            let config = RosterConfig::default();
+            let mut evidence = Evidence::default();
+            opened(&mut evidence, Millis(0), &config);
+            let mut activity = flash();
+            inspected(&mut activity, &evidence, &config, migrate());
+            with_ctx(&evidence, &config, |ctx| {
+                activity.handle(
+                    Millis(9_000),
+                    &Input::Action(Action::ConfirmFlashLayout {
+                        device: DeviceId(1),
+                    }),
+                    ctx,
+                )
+            });
+            with_ctx(&evidence, &config, |ctx| {
+                activity.handle(
+                    Millis(60_000),
+                    &ended(ActivityOutcome::Succeeded {
+                        summary: "written".to_string(),
+                    }),
+                    ctx,
+                )
+            });
+            hello_with(&mut evidence, Millis(62_000), &config, fs, uid);
+            let step = with_ctx(&evidence, &config, |ctx| {
+                activity.handle(Millis(62_500), &timer(), ctx)
+            });
+            match (verified, step) {
+                (true, ActivityStep::Continue(commands)) => assert!(
+                    matches!(
+                        commands.as_slice(),
+                        [Command::RunEffect {
+                            effect: EffectRequest::WriteBoardManifest {
+                                layout_verified: true,
+                                ..
+                            },
+                            ..
+                        }]
+                    ),
+                    "{commands:?}"
+                ),
+                (
+                    false,
+                    ActivityStep::Done {
+                        outcome: ActivityOutcome::Failed { message },
+                        ..
+                    },
+                ) => {
+                    assert!(message.contains("Restore files on the card"), "{message}")
+                }
+                (verified, step) => panic!("{fs:?} {uid:?}: verified={verified}, got {step:?}"),
+            }
+        }
     }
 
     #[test]

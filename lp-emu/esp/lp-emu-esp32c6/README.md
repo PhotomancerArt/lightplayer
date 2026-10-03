@@ -218,12 +218,19 @@ board:
   and programs the page table for them. It is **not** an `esptool` image
   layout; a ROM-up boot reads a real merged image through the real bootloader
   and gets the real offsets, and `tests/rom_up_boot.rs` checks that the two
-  agree.
+  agree. It also writes the C6's **partition table** at `0x8000`
+  (`flash::c6_partition_table_bytes`, MD5 row and all) when the chip holds
+  none, because the firmware reads `lpfs`'s offset and length from that table
+  at boot; a chip that already holds one keeps it. The table is staged, not
+  validated against the app. `lp-cli/tests/c6_partition_table_parity.rs`
+  compiles `lp-fw/fw-esp32c6/partitions.csv` with espflash's encoder and
+  asserts the two are byte-equal (the fence keeps this crate from reading
+  the product's file).
 - **`seed_rom_flash_chip`** writes the chip size into
   `rom_spiflash_legacy_data->chip_size`, in place of the bootloader's
   `esp_rom_spiflash_config_param`. The ROM's own default chip is **2 MiB**
   (`rom_default_spiflash_legacy_data` at `0x4087_fa08`), `SPI_read_data`
-  refuses any read past `chip_size`, and `lpfs` starts at `0x0031_0000` —
+  refuses any read past `chip_size`, and `lpfs` starts at `0x0035_0000` —
   so without this every filesystem read returns error 1 for a reason that has
   nothing to do with the filesystem.
 
@@ -536,6 +543,21 @@ part and mapping it would be the machine asserting the PAC's reset value as
 behaviour. Filed at
 `docs/defects/2026-09-09-the-esptool-stub-reads-i2c0-a-block-the-c6-boot-set-does-not-map.md`.
 `--no-stub` is the path that works, and is what the recipe and the gate use.
+
+### Reading it back, and the C6 repartition's migration
+
+The download console is READ as well as written now (2026-10, the C6
+repartition): `lp-cli/tests/emu_layout_migration.rs` drives the real
+`lp-cli hardware lpfs save|migrate|preflight` through espflash's stub over a
+pty and checks the chip file byte for byte (`just test-emu-layout-migration`),
+and `just walk-migration-emu <scenario>` drives real Studio's Update firmware
+— esptool-js reads the board's layout, the migration writes it — against an
+`emu serve` board seeded from a "fielded" chip (this tree's firmware on the
+pre-2026-10 table). Both run non-strict: the stub reads one unmapped block.
+A `power-cycle` on the control channel samples the board's strapping pins,
+not the last reset's strap, so a cable pulled after a download dance comes
+back booting from flash. The record is
+`docs/reports/2026-10-02-c6-migration-emulator-walk.md`.
 
 ## Flash, and the cache window
 

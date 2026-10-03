@@ -2,10 +2,19 @@
 # bootctl carries a flash-persisted instruction to the next boot (lp-bootctl).
 # Its 4 KB came out of nvs, which nothing reads: no LightPlayer code touches
 # NVS, and esp-radio's "NVS" is a RAM array, not this partition. Taking it
-# from nvs keeps every other offset fixed, so existing lpfs images stay valid.
-# See docs/adr/2026-07-30-boot-control-sector.md.
+# from nvs keeps every other offset fixed. See
+# docs/adr/2026-07-30-boot-control-sector.md.
+#
+# The 2026-10 repartition (D1) moved the app/lpfs line once, deliberately:
+# factory grew 0x300000 -> 0x340000 (the reservation the flash-budget ADR held
+# for Wi-Fi, now spent) and lpfs shrank 0xF0000 -> 0xB0000 at 0x350000. See
+# docs/adr/2026-10-02-c6-repartition-and-layout-migration.md. The pre-D1 table
+# is frozen at lp-app/lpa-link/testdata/partitions-esp32c6-legacy-v1.csv; a
+# board still carrying it keeps its files through Studio's Update firmware or
+# `lp-cli hardware lpfs migrate`, never a plain flash. Do not move lpfs again
+# without a migration.
 nvs,      data,  nvs,     0x9000,   0x5000,
 bootctl,  data,  undefined, 0xe000, 0x1000,
 phy_init, data,  phy,     0xf000,   0x1000,
-factory,  app,   factory, 0x10000,  0x300000,
-lpfs,     data,  spiffs,  0x310000, 0xF0000,
+factory,  app,   factory, 0x10000,  0x340000,
+lpfs,     data,  spiffs,  0x350000, 0xB0000,

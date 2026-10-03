@@ -1,9 +1,14 @@
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use js_sys::{Array, Function, Promise, Reflect};
 use wasm_bindgen::{JsCast, closure::Closure, prelude::*};
 use wasm_bindgen_futures::JsFuture;
 
+use crate::layout_migration::LayoutProbe;
+use crate::provider::flash_plan::{ExecutorStep as JsStep, FlashPlan};
 use crate::{
-    LinkError, LinkFlashRegion, LinkManagementEvent, LinkManagementEventSink,
+    LinkError, LinkFlashRegion, LinkLayoutInspection, LinkManagementEvent, LinkManagementEventSink,
     LinkManagementProgress,
 };
 
@@ -51,6 +56,7 @@ pub struct BrowserEsp32FlashProgress {
 pub struct BrowserEsp32FilesystemReadResult {
     pub image: Vec<u8>,
     pub region: LinkFlashRegion,
+    pub partition_table: Vec<u8>,
     pub chip_name: Option<String>,
     pub logs: Vec<String>,
     pub progress: Vec<BrowserEsp32FlashProgress>,
@@ -94,6 +100,28 @@ extern "C" {
         port_id: u32,
         esptool_module_path: &str,
         resolve_region: &Function,
+        on_event: &Function,
+    ) -> Promise;
+
+    #[wasm_bindgen(js_name = inspectLayout)]
+    fn js_inspect_layout(
+        port_id: u32,
+        manifest_path: &str,
+        esptool_module_path: &str,
+        known_chip_ids: &Array,
+        next_read: &Function,
+        on_event: &Function,
+    ) -> Promise;
+
+    #[wasm_bindgen(js_name = executePlan)]
+    fn js_execute_plan(
+        port_id: u32,
+        manifest_path: &str,
+        esptool_module_path: &str,
+        known_chip_ids: &Array,
+        steps: &Array,
+        approve_board: &Function,
+        after_verify: &Function,
         on_event: &Function,
     ) -> Promise;
 
@@ -202,37 +230,26 @@ pub async fn write_boot_control_with_events(
 
 /// Read the device's `lpfs` partition back into wasm memory.
 ///
-/// The per-board region table stays HERE: the JS side asks for it by chip
-/// name once its SYNC handshake has one (see the `resolveRegion` callback in
-/// `browser_esp32_flash.js`). Mirroring the offsets into JS would put the
-/// same two numbers in two languages, and the wrong one produces a
-/// plausible-looking archive of the wrong partition.
+/// The JS reads the device's partition table first and hands it to the
+/// `resolveRegion` callback here, which parses it and answers its `lpfs` row
+/// — no layout lives in JS, and the region is the board's own, not a guess
+/// by chip.
 pub async fn read_raw_filesystem_with_events(
     port_id: u32,
     esptool_module_path: &str,
     events: LinkManagementEventSink,
 ) -> Result<BrowserEsp32FilesystemReadResult, LinkError> {
     let on_event = management_event_callback(events);
-    let resolve_region = Closure::wrap(Box::new(|chip: JsValue| -> JsValue {
-        let Some(region) = chip
-            .as_string()
-            .as_deref()
-            .and_then(LinkFlashRegion::lpfs_for_chip)
-        else {
-            return JsValue::NULL;
-        };
-        let out = js_sys::Object::new();
-        let _ = Reflect::set(
-            &out,
-            &"offset".into(),
-            &JsValue::from_f64(region.offset.into()),
-        );
-        let _ = Reflect::set(
-            &out,
-            &"length".into(),
-            &JsValue::from_f64(region.length.into()),
-        );
-        out.into()
+    let resolve_region = Closure::wrap(Box::new(|table: JsValue| -> JsValue {
+        let bytes = js_sys::Uint8Array::new(&table).to_vec();
+        match crate::PartitionTable::parse(&bytes)
+            .ok()
+            .as_ref()
+            .and_then(LinkFlashRegion::lpfs_in)
+        {
+            Some(region) => region_to_js(region),
+            None => JsValue::NULL,
+        }
     }) as Box<dyn FnMut(JsValue) -> JsValue>);
 
     let value = JsFuture::from(js_read_raw_filesystem(
@@ -249,10 +266,227 @@ pub async fn read_raw_filesystem_with_events(
             offset: reflect_u32(&value, "offset")?,
             length: reflect_u32(&value, "length")?,
         },
+        partition_table: js_sys::Uint8Array::new(&reflect_value(&value, "partitionTable")?)
+            .to_vec(),
         chip_name: reflect_optional_string(&value, "chipName")?,
         logs: reflect_string_array(&value, "logs")?,
         progress: reflect_progress_array(&value, "progress")?,
     })
+}
+
+/// Read what the board holds relative to the package at `manifest_path`
+/// (`LinkManagementRequest::InspectLayout`). The reads are DECIDED here, by
+/// a [`LayoutProbe`] the JS calls back into after each one; the bytes stay
+/// on this side. Leaves the chip in ROM download.
+pub async fn inspect_layout_with_events(
+    port_id: u32,
+    manifest_path: &str,
+    esptool_module_path: &str,
+    events: LinkManagementEventSink,
+) -> Result<LinkLayoutInspection, LinkError> {
+    struct ProbeState {
+        probe: Option<LayoutProbe>,
+        asked: Option<LinkFlashRegion>,
+        target_table: Vec<u8>,
+        reads: Vec<(LinkFlashRegion, Vec<u8>)>,
+        error: Option<String>,
+    }
+    let state = Rc::new(RefCell::new(ProbeState {
+        probe: None,
+        asked: None,
+        target_table: Vec::new(),
+        reads: Vec::new(),
+        error: None,
+    }));
+    let on_event = management_event_callback(events);
+    let next_read = {
+        let state = Rc::clone(&state);
+        Closure::wrap(Box::new(
+            move |chip: JsValue, target: JsValue, last: JsValue| -> JsValue {
+                let mut state = state.borrow_mut();
+                if state.probe.is_none() {
+                    let table = js_sys::Uint8Array::new(&target).to_vec();
+                    match crate::PartitionTable::parse(&table) {
+                        Ok(parsed) => {
+                            let chip_is_c6 = chip
+                                .as_string()
+                                .as_deref()
+                                .and_then(crate::chip_id_from_reported)
+                                == Some("esp32c6");
+                            state.probe = Some(LayoutProbe::new(parsed, chip_is_c6));
+                            state.target_table = table;
+                        }
+                        Err(error) => {
+                            state.error = Some(format!("the firmware package's table: {error}"));
+                            return JsValue::NULL;
+                        }
+                    }
+                }
+                if !last.is_null() && !last.is_undefined() {
+                    let bytes = js_sys::Uint8Array::new(&last).to_vec();
+                    if let Some(read) = state.asked.take() {
+                        state.reads.push((read, bytes.clone()));
+                        if let Some(probe) = state.probe.as_mut() {
+                            probe.record(read, bytes);
+                        }
+                    }
+                }
+                let next = state.probe.as_ref().and_then(LayoutProbe::next_read);
+                state.asked = next;
+                next.map(region_to_js).unwrap_or(JsValue::NULL)
+            },
+        )
+            as Box<dyn FnMut(JsValue, JsValue, JsValue) -> JsValue>)
+    };
+    let value = JsFuture::from(js_inspect_layout(
+        port_id,
+        manifest_path,
+        esptool_module_path,
+        &known_chip_ids(),
+        next_read.as_ref().unchecked_ref(),
+        on_event.as_ref().unchecked_ref(),
+    ))
+    .await
+    .map_err(js_error)?;
+    let mut state = state.borrow_mut();
+    if let Some(error) = state.error.take() {
+        return Err(LinkError::other(error));
+    }
+    Ok(LinkLayoutInspection {
+        chip_name: reflect_optional_string(&value, "chipName")?,
+        probed_mac: reflect_optional_string(&value, "baseMac")?,
+        target_table: std::mem::take(&mut state.target_table),
+        target_image_len: reflect_u32(&value, "targetImageLen")?,
+        reads: std::mem::take(&mut state.reads),
+        logs: reflect_string_array(&value, "logs")?,
+        progress: reflect_progress_array(&value, "progress")?
+            .into_iter()
+            .map(|p| LinkManagementProgress {
+                label: p.label,
+                completed_steps: p.completed_steps,
+                total_steps: p.total_steps,
+                percent: p.percent,
+            })
+            .collect(),
+    })
+}
+
+/// Execute `plan` in one bootloader session
+/// (`LinkManagementRequest::FlashFirmware` with a plan). The JS writes;
+/// everything that decides — whether this board may take the plan, whether
+/// a readback matched, where the one retry restarts — is answered here
+/// ([`FlashPlan::refuse_board`], [`FlashPlan::after_verify`]).
+pub async fn execute_plan_with_events(
+    port_id: u32,
+    manifest_path: &str,
+    esptool_module_path: &str,
+    plan: &FlashPlan,
+    events: LinkManagementEventSink,
+) -> Result<BrowserEsp32FlashResult, LinkError> {
+    if !plan.may_execute() {
+        return Err(LinkError::other(
+            crate::PlanError::BackupNotConfirmed.to_string(),
+        ));
+    }
+    let on_event = management_event_callback(events);
+    let steps: Array = plan.executor_steps().iter().map(step_to_js).collect();
+    let approve_board = {
+        let plan = plan.clone();
+        Closure::wrap(Box::new(move |_chip: JsValue, mac: JsValue| -> JsValue {
+            match plan.refuse_board(mac.as_string().as_deref()) {
+                Some(refusal) => JsValue::from_str(&refusal),
+                None => JsValue::NULL,
+            }
+        }) as Box<dyn FnMut(JsValue, JsValue) -> JsValue>)
+    };
+    let after_verify = {
+        let plan = plan.clone();
+        let mut retried = false;
+        Closure::wrap(Box::new(move |index: JsValue, bytes: JsValue| -> JsValue {
+            let index = index.as_f64().unwrap_or(-1.0);
+            if index < 0.0 {
+                return JsValue::from_f64(-1.0);
+            }
+            let back = js_sys::Uint8Array::new(&bytes).to_vec();
+            match plan.after_verify(index as usize, &back, &mut retried) {
+                Some(next) => JsValue::from_f64(next as f64),
+                None => JsValue::from_f64(-1.0),
+            }
+        }) as Box<dyn FnMut(JsValue, JsValue) -> JsValue>)
+    };
+    let value = JsFuture::from(js_execute_plan(
+        port_id,
+        manifest_path,
+        esptool_module_path,
+        &known_chip_ids(),
+        &steps,
+        approve_board.as_ref().unchecked_ref(),
+        after_verify.as_ref().unchecked_ref(),
+        on_event.as_ref().unchecked_ref(),
+    ))
+    .await
+    .map_err(js_error)?;
+    let manifest_value = reflect_value(&value, "manifest")?;
+    Ok(BrowserEsp32FlashResult {
+        manifest: parse_manifest(&manifest_value)?,
+        chip_name: reflect_optional_string(&value, "chipName")?,
+        base_mac: reflect_optional_string(&value, "baseMac")?,
+        logs: reflect_string_array(&value, "logs")?,
+        progress: reflect_progress_array(&value, "progress")?,
+    })
+}
+
+fn known_chip_ids() -> Array {
+    crate::KNOWN_CHIP_IDS
+        .iter()
+        .map(|id| JsValue::from_str(id))
+        .collect()
+}
+
+fn region_to_js(region: LinkFlashRegion) -> JsValue {
+    let out = js_sys::Object::new();
+    let _ = Reflect::set(
+        &out,
+        &"offset".into(),
+        &JsValue::from_f64(region.offset.into()),
+    );
+    let _ = Reflect::set(
+        &out,
+        &"length".into(),
+        &JsValue::from_f64(region.length.into()),
+    );
+    out.into()
+}
+
+/// One plan step as the data `executePlan` iterates.
+fn step_to_js(step: &JsStep<'_>) -> JsValue {
+    {
+        let out = js_sys::Object::new();
+        let set = |key: &str, value: JsValue| {
+            let _ = Reflect::set(&out, &key.into(), &value);
+        };
+        match step {
+            JsStep::Firmware => set("kind", "firmware".into()),
+            JsStep::Erase { offset, length } => {
+                set("kind", "erase".into());
+                set("offset", JsValue::from_f64((*offset).into()));
+                set("length", JsValue::from_f64((*length).into()));
+            }
+            JsStep::Write { offset, bytes } => {
+                set("kind", "write".into());
+                set("offset", JsValue::from_f64((*offset).into()));
+                // A copy, never a view into wasm memory: esptool-js holds it
+                // across awaits while wasm memory may grow.
+                set("data", js_sys::Uint8Array::from(*bytes).into());
+            }
+            JsStep::Verify { offset, length } => {
+                set("kind", "verify".into());
+                set("offset", JsValue::from_f64((*offset).into()));
+                set("length", JsValue::from_f64((*length).into()));
+            }
+        }
+        out.into()
+    }
 }
 
 pub async fn probe_target(

@@ -358,7 +358,7 @@ async function main() {
   console.log(`\n  report → ${path.join(out, "walk-ble-emu.json")}`);
 
   await driver.close();
-  stopDoor(door);
+  await stopDoor(door);
 
   if (fatal) {
     console.error(`\nThe Bluetooth walk did not finish: ${fatal.message}`);

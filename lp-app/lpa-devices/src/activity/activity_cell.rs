@@ -219,6 +219,23 @@ impl ActivityCell {
         }
     }
 
+    /// A Flash activity's layout step (C6 repartition), for the card.
+    pub fn flash_layout(&self) -> Option<super::FlashLayoutView> {
+        match &self.reducer {
+            Reducer::Flash(flash) => flash.layout_view(),
+            _ => None,
+        }
+    }
+
+    /// The instant a reducer waiting on the user is bounded by — what
+    /// supervision is held off until (see `Device::forward`).
+    pub(crate) fn supervision_floor(&self) -> Option<Millis> {
+        match &self.reducer {
+            Reducer::Flash(flash) => flash.supervision_floor(),
+            _ => None,
+        }
+    }
+
     pub fn is_cancel_requested(&self) -> bool {
         matches!(self.cancel, CancelPhase::CancelRequested { .. })
     }

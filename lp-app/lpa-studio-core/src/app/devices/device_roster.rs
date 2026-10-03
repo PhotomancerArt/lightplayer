@@ -79,6 +79,13 @@ pub struct DeviceRosterView {
     /// and the device access panel where this link may write the store.
     pub access:
         std::collections::BTreeMap<lpa_devices::DeviceId, crate::app::access::UiDeviceAccess>,
+    /// Each device's layout facts (the C6 repartition): the question before
+    /// its files move, the refusal, a board holding its files, a backup to
+    /// put back. Absent = nothing to say.
+    pub layout: std::collections::BTreeMap<lpa_devices::DeviceId, super::UiDeviceLayout>,
+    /// The latest backup the user asked to download; the shell downloads
+    /// when its `seq` advances.
+    pub backup_download: Option<super::device_layout_effect::BackupDownload>,
 }
 
 impl Default for DeviceRosterView {
@@ -94,6 +101,8 @@ impl Default for DeviceRosterView {
             feeds: std::collections::BTreeMap::new(),
             runtime_bands: std::collections::BTreeMap::new(),
             access: std::collections::BTreeMap::new(),
+            layout: std::collections::BTreeMap::new(),
+            backup_download: None,
         }
     }
 }
@@ -387,7 +396,75 @@ impl DeviceRoster {
             feeds: std::collections::BTreeMap::new(),
             runtime_bands: std::collections::BTreeMap::new(),
             access: std::collections::BTreeMap::new(),
+            // The verbs land in a scratch tree here; the studio view
+            // publishes them for real (`publish_layout_offers`).
+            layout: self.layout_views(now, &mut crate::UiOfferTree::new(), None),
+            backup_download: self.effects.layout().download(),
         }
+    }
+
+    /// Publish every device card's layout verbs (`devices/<board>/…`: the
+    /// question's Continue and Cancel, Download backup, Restore files,
+    /// Finish update) into the view's offer tree — the same verbs, from the
+    /// same decision, that [`Self::view`]'s layout facts name by path.
+    /// `prefixes` is where the controller placed each device's verbs
+    /// (`devices/<board>`), so these land beside the rest of its card's.
+    pub fn publish_layout_offers(
+        &self,
+        now: Millis,
+        offers: &mut crate::UiOfferTree,
+        prefixes: &std::collections::BTreeMap<lpa_devices::DeviceId, crate::OfferPath>,
+    ) {
+        self.layout_views(now, offers, Some(prefixes));
+    }
+
+    /// The card's layout facts (C6 repartition) for every device with
+    /// something to say: the question, the refusal, a board holding its
+    /// files, a backup waiting to go back. Their verbs go into `offers`,
+    /// under the device's prefix from `prefixes` when the controller placed
+    /// one, else under its own [`crate::BoardRef`].
+    fn layout_views(
+        &self,
+        now: Millis,
+        offers: &mut crate::UiOfferTree,
+        prefixes: Option<&std::collections::BTreeMap<lpa_devices::DeviceId, crate::OfferPath>>,
+    ) -> std::collections::BTreeMap<lpa_devices::DeviceId, super::UiDeviceLayout> {
+        let layout = self.effects.layout();
+        self.roster
+            .devices()
+            .iter()
+            .filter_map(|device| {
+                let view = lpa_devices::view::device_view(device, now);
+                let hello = device.evidence.classification.hello();
+                let fs = hello.map(|hello| hello.fs).unwrap_or_default();
+                let has_uid = hello.is_some_and(|hello| hello.identity.uid.is_some());
+                let staged = layout.staged(device.id);
+                let pending = device
+                    .identity
+                    .mac
+                    .as_ref()
+                    .and_then(|mac| layout.pending_for(&mac.0));
+                let offers_at = prefixes
+                    .and_then(|prefixes| prefixes.get(&device.id))
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        crate::OfferPath::board(&crate::BoardRef::for_identity(
+                            &device.identity,
+                            device.id,
+                        ))
+                    });
+                super::device_layout_view::device_layout_view(
+                    &view,
+                    offers_at,
+                    fs,
+                    has_uid,
+                    staged.as_ref(),
+                    pending.as_ref(),
+                    offers,
+                )
+                .map(|ui| (device.id, ui))
+            })
+            .collect()
     }
 
     /// A `Close` for a link the model is releasing is the last thing that link
@@ -684,6 +761,8 @@ mod tests {
                 },
             )]),
             runtime_bands: std::collections::BTreeMap::new(),
+            layout: std::collections::BTreeMap::new(),
+            backup_download: None,
         };
 
         let split = split_roster(&view);
@@ -727,6 +806,8 @@ mod tests {
             open_addresses: Default::default(),
             feeds: std::collections::BTreeMap::new(),
             runtime_bands: std::collections::BTreeMap::new(),
+            layout: std::collections::BTreeMap::new(),
+            backup_download: None,
         };
 
         let split = split_roster(&view);

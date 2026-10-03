@@ -67,6 +67,7 @@ pub use endpoint::hw_endpoint_status::HwEndpointStatus;
 pub use hw_error::HwError;
 pub use hw_system::HardwareSystem;
 pub use lpc_model::HwEndpointSpec;
+pub use manifest::board_manifest_paths::{HARDWARE_MANIFEST_NEXT_PATH, HARDWARE_MANIFEST_PATH};
 pub use manifest::board_quirk::{BoardQuirk, GpioHold, XIAO_ESP32_C6_BOARD_ID, board_quirks_for};
 pub use manifest::default_manifests::{
     DESKTOP_BOARD_MANIFEST_JSON, default_desktop_hardware_manifest,

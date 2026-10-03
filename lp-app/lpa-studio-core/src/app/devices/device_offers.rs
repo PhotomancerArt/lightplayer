@@ -327,6 +327,7 @@ mod tests {
             percent: None,
             cancellable: true,
             cancel_requested: false,
+            layout: None,
         });
         busy.can_receive_project = false;
         busy.escapes = vec![Escape::Cancel, Escape::Disconnect, Escape::Forget];

@@ -9,14 +9,7 @@
 //! it means over a cable. (The serial provider runs the same `lpa-client`
 //! functions below its own seam.)
 
-use lpc_model::AsLpPath;
-
 use super::device_transport::{DeviceEffectCall, DeviceEffectFacts, DeviceEffectProgress};
-
-/// Where the board runtime manifest lives on a device — the path the
-/// firmware's loader reads at boot (board-selection D4; effective next
-/// restart).
-const DEVICE_HARDWARE_MANIFEST_PATH: &str = "/hardware.json";
 
 /// Whether `call` is one of the conversations [`run_wire_conversation`]
 /// runs. A transport builds its io only for these.
@@ -49,9 +42,10 @@ pub async fn run_wire_conversation(
             lpa_client::wait_until_ready(&mut client, lpa_client::READY_ATTEMPTS, &mut report)
                 .await
                 .map_err(|error| format!("the board never became ready to write to: {error}"))?;
-            lpa_client::write_file_in_chunks(
+            // Journaled (staged copy, then the live file): a stamp cut
+            // part-way can never leave the board a torn manifest.
+            lpa_client::stamp_board_manifest(
                 &mut client,
-                DEVICE_HARDWARE_MANIFEST_PATH.as_path(),
                 manifest_json.as_bytes(),
                 lpa_client::MANIFEST_CHUNK_BYTES,
                 &mut report,

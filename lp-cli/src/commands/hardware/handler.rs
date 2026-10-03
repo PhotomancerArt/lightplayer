@@ -12,6 +12,7 @@ pub fn handle_hardware(cli: HardwareCli) -> Result<()> {
         Some(HardwareSubcommand::Manifest(args)) => manifest::handle_manifest(args),
         Some(HardwareSubcommand::Calibrate(args)) => calibrate::handle_calibrate(args),
         Some(HardwareSubcommand::Stamp(args)) => stamp::handle_stamp(args),
+        Some(HardwareSubcommand::Lpfs(args)) => super::lpfs::handle_lpfs(args),
         None => manifest::handle_manifest(ManifestArgs {
             repo: None,
             boards_dir: None,
