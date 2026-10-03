@@ -53,8 +53,8 @@
 //! Both resolve on this board because both address `D10`. That is not a
 //! coincidence to rely on: the emulated C6 loads the real
 //! `seeed/xiao-esp32-c6` manifest, whose endpoint table is built from
-//! `display_label` alone, so only `D0`–`D3` and `D6`–`D10` resolve and the
-//! `IO*` spellings the classic-board projects use do not resolve at all.
+//! `display_label` alone, so only `D0`–`D10` resolve and the `IO*` spellings
+//! the classic-board projects use do not resolve at all.
 
 use alloc::format;
 use fw_checks::checks::render_loop;

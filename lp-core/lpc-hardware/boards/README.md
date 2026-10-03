@@ -109,13 +109,21 @@ Board-visible labels are optional mapping notes for humans and calibration:
 ```json
 "board_label": [
   { "label": "D10", "gpio": "/gpio/18", "status": "assigned" },
-  { "label": "D4", "status": "not-found" }
+  { "label": "A6", "status": "not-found" }
 ]
 ```
 
 Use `"status": "not-found"` for a silkscreen label the variant does not
 actually expose, rather than omitting the entry — the absence is itself a fact
 worth recording.
+
+**`not-found` from the calibrator proves less than it says.** The calibrator
+only pulses GPIOs the manifest's `gpio` list already declares, so a label
+whose pin was never listed comes back `not-found` however real it is. Before
+calibrating, list every GPIO the chip numbers (minus in-package flash), and
+check any `not-found` against the vendor pin list before trusting it. The
+XIAO C6's D4/D5 (GPIO22/23) sat at `not-found` for four months for exactly
+this reason (`docs/defects/2026-10-03-xiao-c6-d4-d5-unmapped.md`).
 
 GPIO resources are claimable hardware resources:
 

@@ -28,11 +28,15 @@
     },
     {
       "label": "D4",
-      "status": "not-found"
+      "gpio": "/gpio/22",
+      "status": "assigned",
+      "note": "default I2C SDA"
     },
     {
       "label": "D5",
-      "status": "not-found"
+      "gpio": "/gpio/23",
+      "status": "assigned",
+      "note": "default I2C SCL"
     },
     {
       "label": "D6",
@@ -324,6 +328,30 @@
       "aliases": [
         "IO21",
         "GPIO21"
+      ]
+    },
+    {
+      "address": "/gpio/22",
+      "display_label": "D4",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ],
+      "aliases": [
+        "IO22",
+        "GPIO22"
+      ]
+    },
+    {
+      "address": "/gpio/23",
+      "display_label": "D5",
+      "capabilities": [
+        "gpio-output",
+        "gpio-input"
+      ],
+      "aliases": [
+        "IO23",
+        "GPIO23"
       ]
     }
   ],
