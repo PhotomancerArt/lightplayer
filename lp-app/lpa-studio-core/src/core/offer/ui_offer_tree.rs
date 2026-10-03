@@ -106,6 +106,18 @@ impl UiOfferTree {
         })
     }
 
+    /// A node's own verbs: [`Self::verbs_of`] plus the verbs it groups
+    /// under a namespace of its own (`project/<fixture>/patch/assign`),
+    /// never a child node's. What the agent's `read` lists for a node; a
+    /// card's header still asks [`Self::verbs_of`], because a group's verbs
+    /// have controls of their own.
+    pub fn own_verbs_of(&self, prefix: &OfferPath) -> impl Iterator<Item = &UiOffer> + '_ {
+        let prefix = prefix.clone();
+        self.offers
+            .iter()
+            .filter(move |offer| offer.path.is_own_verb_of(&prefix))
+    }
+
     /// How many offers are published.
     pub fn len(&self) -> usize {
         self.offers.len()
@@ -164,6 +176,35 @@ mod tests {
             "get finds by path"
         );
         assert!(tree.get(&OfferPath::project().child("nope")).is_none());
+    }
+
+    #[test]
+    fn own_verbs_of_adds_the_nodes_grouped_verbs_but_never_a_childs() {
+        let node = OfferPath::project_node(&ProjectNodeAddress::parse("/demo.module").unwrap());
+        let child = OfferPath::project_node(
+            &ProjectNodeAddress::parse("/demo.module/dome.fixture").unwrap(),
+        );
+        let mut tree = UiOfferTree::new();
+        tree.publish(offer(node.clone().child("revert")));
+        tree.publish(offer(child.clone().child("remove")));
+        tree.publish(offer(child.clone().child("patch").child("reverse")));
+
+        assert_eq!(
+            paths(tree.own_verbs_of(&node)),
+            ["project/demo.module/revert"]
+        );
+        assert_eq!(
+            paths(tree.own_verbs_of(&child)),
+            [
+                "project/demo.module/dome.fixture/remove",
+                "project/demo.module/dome.fixture/patch/reverse"
+            ]
+        );
+        assert_eq!(
+            paths(tree.verbs_of(&child)),
+            ["project/demo.module/dome.fixture/remove"],
+            "a header's verbs stay one segment down"
+        );
     }
 
     #[test]

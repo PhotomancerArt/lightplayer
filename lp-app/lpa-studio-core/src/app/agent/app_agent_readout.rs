@@ -117,9 +117,10 @@ pub fn offer_lines(offer: &UiOffer) -> String {
     text
 }
 
-/// Whether `offer` is a node's verb (its owner's last segment is a node).
+/// Whether `offer` is a node's verb, directly (`…/orbit.shader/remove`) or
+/// in a group of the node's (`…/dome.fixture/patch/assign`).
 fn owned_by_a_node(offer: &UiOffer) -> bool {
-    offer.path.owner().is_some_and(|owner| owner.names_node())
+    offer.path.node_and_verb().is_some()
 }
 
 /// The actions not listed in full, counted: every node verb on one line,
@@ -130,20 +131,22 @@ fn counted_lines(counted: &[&UiOffer]) -> String {
         return String::new();
     }
     let mut nodes: Vec<OfferPath> = Vec::new();
-    let mut node_verbs: Vec<(&str, usize)> = Vec::new();
+    let mut node_verbs: Vec<(String, usize)> = Vec::new();
     let mut owners: Vec<(OfferPath, Vec<&str>)> = Vec::new();
     for offer in counted {
-        let owner = offer.path.owner().unwrap_or_else(|| offer.path.clone());
-        let verb = offer.path.last().unwrap_or("?");
-        if owner.names_node() {
-            if !nodes.contains(&owner) {
-                nodes.push(owner);
+        // A node's verb counts under its node, a grouped one by its group
+        // (`patch/assign ×2`).
+        if let Some((node, verb)) = offer.path.node_and_verb() {
+            if !nodes.contains(&node) {
+                nodes.push(node);
             }
             match node_verbs.iter_mut().find(|(name, _)| *name == verb) {
                 Some((_, count)) => *count += 1,
                 None => node_verbs.push((verb, 1)),
             }
         } else {
+            let owner = offer.path.owner().unwrap_or_else(|| offer.path.clone());
+            let verb = offer.path.last().unwrap_or("?");
             match owners.iter_mut().find(|(path, _)| *path == owner) {
                 Some((_, verbs)) => verbs.push(verb),
                 None => owners.push((owner, vec![verb])),

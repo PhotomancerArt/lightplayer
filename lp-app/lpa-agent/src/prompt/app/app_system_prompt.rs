@@ -73,6 +73,16 @@ pub fn build_app_system_prompt(reference: &str) -> String {
          `edit_project` `remove_node` that would throw away unsaved edits \
          is refused with the node's `remove` path; `act` that path, which \
          hands the user the button as a card.\n\
+         - Patching (which object of a fixture goes on which output, at \
+         which lamp) is actions too: a fixture's are at \
+         `project/<node path>/patch/…` (`assign`, `re-anchor`, `reverse`, \
+         `rotate`, `clear`, `set-flow`, `unmap-all`), an output's are \
+         `swap-ports` and `shift-port`, and `project/patch/undo` and \
+         `project/patch/redo` walk the patch edits back and forth. The \
+         selected fixture's are listed in full; `read` a fixture or an \
+         output for its own. A `subject` defaults to what the user has \
+         selected; `lamp`, `steps`, `start`, `lamps` and `delta` are whole \
+         numbers.\n\
          - You do not write shader code. When the user asks to change what \
          a shader itself does — its colors, motion or shape, as code — `act` \
          that shader node's `ask-agent` action with their request in \
