@@ -116,6 +116,24 @@ pub fn push_offer(
         }),
         Err(reason) => new_project_unavailable = Some(reason),
     }
+    // The library's own projects before the catalog. The picker shows each
+    // group on its own tab, so the order is the list's alone — and a list
+    // that is read top down and cut short (the app agent's readout names
+    // the first few options and counts the rest) must not bury the
+    // person's own project, the one they mean to put on the board, under
+    // thirty examples (activity corpus S4, 2026-10-03).
+    for project in projects {
+        choices.push(PushSourceChoice {
+            key: format!("library:{}", project.uid),
+            title: project.slug.clone(),
+            blurb: project.project_kind.clone(),
+            section: None,
+            group: PushSourceGroup::Library,
+            source: PushSource::Library {
+                project_uid: project.uid.clone(),
+            },
+        });
+    }
     // The catalog in its kind sections, real pieces first: a walk wants a
     // real piece (or pulse) on the board, so those come before the
     // patterns (catalog content tree D17). The blurb is the kind word,
@@ -134,18 +152,6 @@ pub fn push_offer(
                 },
             });
         }
-    }
-    for project in projects {
-        choices.push(PushSourceChoice {
-            key: format!("library:{}", project.uid),
-            title: project.slug.clone(),
-            blurb: project.project_kind.clone(),
-            section: None,
-            group: PushSourceGroup::Library,
-            source: PushSource::Library {
-                project_uid: project.uid.clone(),
-            },
-        });
     }
     let preselect = match choices.as_slice() {
         [only] => Some(only.key.clone()),

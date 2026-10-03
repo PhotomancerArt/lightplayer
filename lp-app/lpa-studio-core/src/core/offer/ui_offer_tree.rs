@@ -221,7 +221,7 @@ mod tests {
     #[test]
     fn a_device_is_found_by_its_handle() {
         let mut tree = UiOfferTree::new();
-        let prefix = OfferPath::board(&crate::BoardRef::New(DeviceId(4)));
+        let prefix = OfferPath::board(&crate::BoardRef::New(4));
         tree.publish(offer(prefix.clone().child("forget")));
         tree.place_device(DeviceId(4), prefix.clone());
 

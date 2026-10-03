@@ -12,12 +12,14 @@
 //! [`DeviceScenarioSeat`] wraps it as a corpus [`ScenarioSeat`]: it builds
 //! the board a scenario starts with (blank, somebody else's firmware, or
 //! LightPlayer running the start project, which the library holds and the
-//! editor has open), and reads back what the board ended up running.
+//! editor has open), and reads back what the board ended up running. Like
+//! the shipped build, it also holds the tab's own runtimes ([`SeatSims`]):
+//! a project opened from Home runs on a sim, as it does in a browser.
 //!
 //! The bench lives in this test module and is private to it, which is why
 //! the seat lives beside it rather than beside the eval driver.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 
 use lpa_agent::provider::ReqwestTransport;
 use lpa_agent::{ChatRole, ContentBlock, OpenAiCompatProvider, TurnEvent, TurnRequest};
@@ -196,7 +198,7 @@ impl AgentSeat {
         self.apply(bench);
         // A press that opened a chooser settles its card on the chooser's
         // answer, which a step folds; the run it resumes starts there.
-        bench.step(tasks);
+        actor_step(bench, tasks);
         self.apply(bench);
         if quiet_first {
             wait_quiet(bench, tasks);
@@ -206,12 +208,26 @@ impl AgentSeat {
         let mut cx = Context::from_waker(&waker);
         let mut next_progress = std::time::Instant::now() + PROGRESS_EVERY;
         loop {
-            let Some(mut run) = self.runs.borrow_mut().pop() else {
+            let next = self.runs.borrow_mut().pop();
+            let Some(mut run) = next else {
+                // What the agent started that is still under way (an open,
+                // a flash, a push) resumes it when it ends: the actor keeps
+                // ticking after a run ends, and so does the seat, until it
+                // has.
+                if agent_waiting(bench) {
+                    if std::time::Instant::now() > give_up {
+                        return false;
+                    }
+                    actor_step(bench, tasks);
+                    self.apply(bench);
+                    std::thread::sleep(Duration::from_millis(1));
+                    continue;
+                }
                 return true;
             };
             while run.as_mut().poll(&mut cx).is_pending() {
                 self.apply(bench);
-                bench.step(tasks);
+                actor_step(bench, tasks);
                 if let Some(limits) = limits {
                     let session = bench.controller.agent_for_test().app_session();
                     let (usage, turns) = (session.mirror.usage, session.mirror.turn_stats.len());
@@ -267,6 +283,11 @@ impl AgentSeat {
             }
         }
         let _ = bench.controller.view_if_changed();
+    }
+
+    /// The readout the agent would read now (before any request).
+    pub(super) fn readout_of_request_now(&self, bench: &mut DeviceBench) -> String {
+        bench.controller.app_agent_readout_for_test().render()
     }
 
     pub(super) fn requests(&self) -> usize {
@@ -360,16 +381,43 @@ impl AgentSeat {
 fn wait_quiet(bench: &mut DeviceBench, tasks: &TaskPool) {
     let deadline = std::time::Instant::now() + REAL_TIME_LIMIT;
     while std::time::Instant::now() < deadline {
-        bench.step(tasks);
+        actor_step(bench, tasks);
         let view = bench.view();
+        // An Offline card (a sim the last open powered off) will never say
+        // what it runs; waiting on it would spend the whole ceiling.
         let quiet = view.devices.iter().all(|card| {
-            card.activity.is_none()
-                && card.loaded_project != lpa_devices::view::LoadedProject::Unknown
-        }) && view.pending.iter().all(|pending| pending.needs_firmware());
+            card.status == lpa_devices::DeviceStatus::Offline
+                || (card.activity.is_none()
+                    && card.loaded_project != lpa_devices::view::LoadedProject::Unknown)
+        }) && view.pending.iter().all(|pending| pending.needs_firmware())
+            // An open waiting for its device (a sim starting) lands first.
+            && bench.controller.pending_device_lens_for_test().is_none();
         if quiet {
             return;
         }
         std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
+/// Whether the agent started something that has not ended yet (an open
+/// whose sim is still starting, a flash or a push still running).
+fn agent_waiting(bench: &mut DeviceBench) -> bool {
+    bench
+        .controller
+        .agent_for_test()
+        .app_session()
+        .wait
+        .is_some()
+}
+
+/// One bench step, plus what the actor's tick does besides folding: an
+/// open that was waiting for its device (a sim that has just said hello)
+/// attaches its lens — `try_pending_device_lens`, which the actor runs on
+/// every passive refresh. Without it an open from Home never finished.
+fn actor_step(bench: &mut DeviceBench, tasks: &TaskPool) {
+    bench.step(tasks);
+    if bench.controller.pending_device_lens_for_test().is_some() {
+        drive(bench.controller.try_pending_device_lens());
     }
 }
 
@@ -381,6 +429,59 @@ fn send_action(text: &str) -> UiAction {
             text: text.to_string(),
         },
     )
+}
+
+// ---------------------------------------------------------------------
+// The tab's runtimes
+// ---------------------------------------------------------------------
+
+/// The sims a seat's tab powers on: each one a LightPlayer fake wearing the
+/// identity Studio minted for it and its target's pin map, as `fw-browser`
+/// boots in a worker.
+///
+/// Without it the seat had no runtime at all, and every open from Home —
+/// `project/new`, `project/open`, which resolve to a Desktop sim — waited
+/// forever for a device that could never start: the activity corpus's
+/// S4, S18 and S19 all stalled there, the record minted for it sitting
+/// Offline beside the board (2026-10-03).
+#[derive(Default)]
+struct SeatSims {
+    /// One fake per minted sim, by uid: a power cycle reaches the same one.
+    devices: RefCell<BTreeMap<String, FakeEsp32Device>>,
+}
+
+impl SimLinkSource for SeatSims {
+    fn open(&self, session: &SimSession) -> Result<SimBacking, String> {
+        let device = self
+            .devices
+            .borrow_mut()
+            .entry(session.uid.clone())
+            .or_insert_with(|| {
+                let mut script = FakeDeviceScript::new(FakeBootState::LightPlayer(
+                    FakeLightPlayerState::new()
+                        .with_identity(FakeDeviceIdentity::new(&session.uid, &session.display_name))
+                        .with_base_mac(&session.base_mac)
+                        .with_heartbeat_interval(Duration::from_millis(20)),
+                ));
+                if let Some(manifest) = lpa_boards::runtime_manifest_json(&session.target) {
+                    script = script.with_board_manifest(manifest);
+                }
+                FakeEsp32Device::new(script)
+            })
+            .clone();
+        let info = crate::sim_link_info(&session.uid, &session.display_name);
+        Ok(SimBacking {
+            link: GrantedLink {
+                link: Box::new(fake_device_link(info.clone(), &device)),
+                info,
+            },
+            control: Rc::new(ScriptedSimControl {
+                device,
+                restarts: Rc::new(Cell::new(0)),
+                manifests: Rc::new(RefCell::new(Vec::new())),
+            }),
+        })
+    }
 }
 
 // ---------------------------------------------------------------------
@@ -445,6 +546,9 @@ impl DeviceScenarioSeat {
             true => DeviceBench::granted(&device, "usb-corpus"),
             false => DeviceBench::ungranted(&device, "usb-corpus"),
         };
+        let sims = Rc::new(SimDeviceTransport::new(Rc::new(SeatSims::default())));
+        bench.sims = Some(Rc::clone(&sims));
+        bench.controller.set_device_sim_transport(sims);
         let seat = AgentSeat::with_source(&mut bench, source);
         Self {
             bench,
@@ -574,7 +678,7 @@ impl ScenarioSeat for DeviceScenarioSeat {
     fn settle(&mut self) {
         wait_quiet(&mut self.bench, &self.tasks);
         for _ in 0..100 {
-            self.bench.step(&self.tasks);
+            actor_step(&mut self.bench, &self.tasks);
         }
     }
 
@@ -608,8 +712,22 @@ impl ScenarioSeat for DeviceScenarioSeat {
         studio.node_statuses()
     }
 
+    /// The board the scenario is about: the tab's own runtimes (a sim an
+    /// open from Home started) are not boards, and a running sim must never
+    /// pass for the board running the project.
     fn device_summary(&mut self) -> Option<DeviceSummary> {
-        let view = self.bench.view();
+        let runtimes: Vec<String> = self
+            .bench
+            .registry()
+            .into_iter()
+            .filter(|row| {
+                row.transport == crate::SIM_TRANSPORT || row.transport == crate::EMU_TRANSPORT
+            })
+            .map(|row| row.name)
+            .collect();
+        let mut view = self.bench.view();
+        view.devices
+            .retain(|card| !runtimes.iter().any(|name| *name == card.title));
         let flashed = self
             .bench
             .manifest_writes
@@ -649,5 +767,387 @@ impl ScenarioSeat for DeviceScenarioSeat {
             flashed,
             pushes: self.bench.pushed.borrow().len(),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use lpa_agent::{StopReason, TokenUsage};
+
+    use super::*;
+
+    /// The corpus's S4/S18/S19 stall: from Home the agent presses
+    /// `project/new`, the open waits for its sim, and the agent ends its
+    /// turn. When the editor comes up the agent is resumed with a note —
+    /// no user message in between — and the edit it makes then applies to
+    /// the new project.
+    #[test]
+    fn an_open_the_agent_started_resumes_it_when_the_editor_is_up() {
+        let scenario = Scenario::load("s04-sean-new-c6-d5").expect("S4");
+        let scripts = vec![
+            vec![
+                act_turn("n1", "project/new", &[("name", "Porch")]),
+                say("Starting a project; once it's up I'll add a clock."),
+            ],
+            vec![
+                call_turn(
+                    "e1",
+                    lpa_agent::EDIT_PROJECT_TOOL_NAME,
+                    serde_json::json!({
+                        "edits": [{ "create_node": { "kind": "Clock" } }],
+                        "save": false,
+                    }),
+                ),
+                say("Added a clock."),
+            ],
+        ];
+        let mut seat = DeviceScenarioSeat::new(ModelSource::Scripted(scripts), &scenario);
+        seat.start(&scenario);
+        seat.send("make me a project with a clock", limits());
+
+        let requests = seat.seat.requests();
+        assert_eq!(requests, 4, "two turns in each of two runs");
+        // The first run ended on Home with the open still under way.
+        assert!(
+            seat.seat.readout_of_request(1).contains("opening: \""),
+            "{}",
+            seat.seat.readout_of_request(1)
+        );
+        // The second run opens with the note, not a user message.
+        assert_eq!(
+            seat.seat.last_user_text(2),
+            "[the project \"Porch\" you opened is now open in the editor]"
+        );
+        assert!(
+            seat.seat
+                .readout_of_request(2)
+                .contains("page: project editor"),
+            "{}",
+            seat.seat.readout_of_request(2)
+        );
+        let session = seat.bench.controller.agent_for_test().app_session();
+        let users: Vec<_> = session
+            .mirror
+            .turns
+            .iter()
+            .filter(|turn| matches!(turn, crate::UiAgentTurn::User { .. }))
+            .collect();
+        assert_eq!(users.len(), 1, "the user spoke once: {users:#?}");
+        assert!(session.wait.is_none() && session.wait_settled.is_none());
+        let results = seat.seat.tool_results(&mut seat.bench);
+        let edit = results.last().expect("the edit's result");
+        assert_eq!(edit["results"][0]["ok"], true, "{edit:#}");
+        assert!(
+            seat.bench
+                .controller
+                .project_for_test()
+                .agent_project_name()
+                .contains("Porch")
+        );
+        assert_eq!(
+            seat.seat
+                .assistant_texts(&mut seat.bench)
+                .last()
+                .map(String::as_str),
+            Some("Added a clock.")
+        );
+    }
+
+    /// An open whose sim cannot start resumes the agent with the failure,
+    /// once, instead of leaving it waiting on a page that never comes.
+    #[test]
+    fn an_open_the_agent_started_that_fails_resumes_it_with_the_reason() {
+        let scenario = Scenario::load("s04-sean-new-c6-d5").expect("S4");
+        let scripts = vec![
+            vec![
+                act_turn("n1", "project/new", &[("name", "Porch")]),
+                say("Starting a project."),
+            ],
+            vec![say("The project's simulator would not start.")],
+        ];
+        let mut seat = DeviceScenarioSeat::new(ModelSource::Scripted(scripts), &scenario);
+        let sims = Rc::new(SimDeviceTransport::new(Rc::new(RefusingSims)));
+        seat.bench.sims = Some(Rc::clone(&sims));
+        seat.bench.controller.set_device_sim_transport(sims);
+        seat.start(&scenario);
+        seat.send("make me a project", limits());
+
+        assert_eq!(seat.seat.requests(), 3, "two turns, then the resumed one");
+        let note = seat.seat.last_user_text(2);
+        assert!(
+            note.starts_with("[opening \"") && note.contains("failed: ") && note.ends_with(']'),
+            "{note}"
+        );
+        assert!(
+            note.contains("porch\" failed: ") && note.contains("did not start"),
+            "{note}"
+        );
+        let session = seat.bench.controller.agent_for_test().app_session();
+        assert!(session.wait.is_none() && session.wait_settled.is_none());
+    }
+
+    /// The user spoke while the open was under way: the open owes the
+    /// agent nothing — the run the user started reads the page itself.
+    #[test]
+    fn an_open_the_user_spoke_over_does_not_resume_the_agent() {
+        let scenario = Scenario::load("s04-sean-new-c6-d5").expect("S4");
+        let scripts = vec![
+            vec![
+                act_turn("n1", "project/new", &[("name", "Porch")]),
+                say("Starting a project."),
+            ],
+            vec![say("Sure.")],
+        ];
+        let mut seat = DeviceScenarioSeat::new(ModelSource::Scripted(scripts), &scenario);
+        seat.start(&scenario);
+        // Drive only the first run: the open is still under way after it.
+        let (bench, tasks) = (&mut seat.bench, &seat.tasks);
+        drive(bench.controller.dispatch(send_action("make me a project"))).expect("sent");
+        let waker = noop_waker();
+        let mut cx = Context::from_waker(&waker);
+        let mut run = seat.seat.runs.borrow_mut().pop().expect("a run");
+        while run.as_mut().poll(&mut cx).is_pending() {
+            seat.seat.apply(bench);
+        }
+        seat.seat.apply(bench);
+        assert!(
+            bench
+                .controller
+                .agent_for_test()
+                .app_session()
+                .wait
+                .is_some(),
+            "the open is still under way"
+        );
+        // The user's message, then the open lands: only the user's run.
+        seat.seat.send(bench, tasks, "also make it blue");
+        wait_quiet(bench, tasks);
+        for _ in 0..20 {
+            actor_step(bench, tasks);
+            seat.seat.apply(bench);
+        }
+        assert!(bench.ready_handle().is_some(), "the editor is up");
+        assert!(seat.seat.runs.borrow().is_empty(), "no resumed run");
+        assert_eq!(seat.seat.requests(), 3);
+        let session = bench.controller.agent_for_test().app_session();
+        assert!(session.wait.is_none() && session.wait_settled.is_none());
+    }
+
+    /// The corpus's S18 stall: the agent flashes the blank board it was
+    /// handed (Routine, no card), says it will push once that is done, and
+    /// ends its turn. When the flash finishes the agent is resumed with a
+    /// note that says what the board runs now — no user message in between
+    /// — and the push it presses then lands, and resumes it once more when
+    /// the board runs the project.
+    #[test]
+    fn a_flash_the_agent_started_resumes_it_and_its_push_lands() {
+        let mut scenario = Scenario::load("s18-yona-festival-2am").expect("S18");
+        scenario.start.board.connected = true;
+        let example = format!(
+            "example:{}",
+            crate::first_bundled_example_id().expect("this build bundles examples")
+        );
+        let scripts = vec![
+            vec![
+                act_turn(
+                    "f1",
+                    "devices/new-1/flash",
+                    &[("board", "seeed/xiao-esp32-c6")],
+                ),
+                say("Flashing LightPlayer; I'll push the project once it's done."),
+            ],
+            vec![
+                act_turn(
+                    "p1",
+                    "devices/mac-6055f90a0b0c/push",
+                    &[("source", &example)],
+                ),
+                say("Sending it."),
+            ],
+            vec![say("It's running.")],
+        ];
+        let mut seat = DeviceScenarioSeat::new(ModelSource::Scripted(scripts), &scenario);
+        seat.start(&scenario);
+        // The blank board is the only unidentified one: `new-1`, not its
+        // roster handle.
+        assert!(
+            seat.seat
+                .readout_of_request_now(&mut seat.bench)
+                .contains("devices/new-1/flash"),
+            "{}",
+            seat.seat.readout_of_request_now(&mut seat.bench)
+        );
+        seat.send("put something pretty on it", limits());
+
+        assert_eq!(seat.seat.requests(), 5, "two turns, two turns, one turn");
+        let flashed = seat.seat.last_user_text(2);
+        assert!(
+            flashed.starts_with("[flashing \"XIAO ESP32-C6")
+                && flashed.ends_with("\" finished: it runs LightPlayer and no project yet]"),
+            "{flashed}"
+        );
+        let pushed = seat.seat.last_user_text(4);
+        assert!(
+            pushed.starts_with("[pushing \"catalog/")
+                && pushed.ends_with("\" finished: it runs it now]"),
+            "{pushed}"
+        );
+        let session = seat.bench.controller.agent_for_test().app_session();
+        let users = session
+            .mirror
+            .turns
+            .iter()
+            .filter(|turn| matches!(turn, crate::UiAgentTurn::User { .. }))
+            .count();
+        assert_eq!(users, 1, "the user spoke once");
+        assert!(session.wait.is_none() && session.wait_settled.is_none());
+        let device = seat.device_summary().expect("a board");
+        assert_eq!(device.flashed, ["seeed/xiao-esp32-c6"]);
+        assert_eq!(device.pushes, 1);
+        assert!(
+            device.boards.iter().any(|board| board.running),
+            "{device:#?}"
+        );
+    }
+
+    /// A flash that fails resumes the agent with the reason, once, instead
+    /// of leaving it waiting on a board that never comes up.
+    #[test]
+    fn a_flash_the_agent_started_that_fails_resumes_it_with_the_reason() {
+        let mut scenario = Scenario::load("s18-yona-festival-2am").expect("S18");
+        scenario.start.board.connected = true;
+        let scripts = vec![
+            vec![
+                act_turn(
+                    "f1",
+                    "devices/new-1/flash",
+                    &[("board", "seeed/xiao-esp32-c6")],
+                ),
+                say("Flashing LightPlayer."),
+            ],
+            vec![say("The flash failed.")],
+        ];
+        let mut seat = DeviceScenarioSeat::new(ModelSource::Scripted(scripts), &scenario);
+        seat.bench.flash_plan.set(FlashPlan::FailMidWrite);
+        seat.start(&scenario);
+        seat.send("flash it", limits());
+
+        assert_eq!(seat.seat.requests(), 3, "two turns, then the resumed one");
+        let note = seat.seat.last_user_text(2);
+        assert!(
+            note.starts_with("[flashing \"") && note.contains("\" failed: ") && note.ends_with(']'),
+            "{note}"
+        );
+        assert!(note.contains("write failed at 0x2000"), "{note}");
+        assert!(!note.contains("flash failed: "), "said once: {note}");
+        let session = seat.bench.controller.agent_for_test().app_session();
+        assert!(session.wait.is_none() && session.wait_settled.is_none());
+    }
+
+    /// The user cancels the flash the agent started: the board is theirs
+    /// now, and its end owes the agent nothing.
+    #[test]
+    fn a_flash_the_user_takes_over_does_not_resume_the_agent() {
+        let mut scenario = Scenario::load("s18-yona-festival-2am").expect("S18");
+        scenario.start.board.connected = true;
+        let scripts = vec![vec![
+            act_turn(
+                "f1",
+                "devices/new-1/flash",
+                &[("board", "seeed/xiao-esp32-c6")],
+            ),
+            say("Flashing LightPlayer."),
+        ]];
+        let mut seat = DeviceScenarioSeat::new(ModelSource::Scripted(scripts), &scenario);
+        seat.start(&scenario);
+        let (bench, tasks) = (&mut seat.bench, &seat.tasks);
+        drive(bench.controller.dispatch(send_action("flash it"))).expect("sent");
+        let waker = noop_waker();
+        let mut cx = Context::from_waker(&waker);
+        let mut run = seat.seat.runs.borrow_mut().pop().expect("a run");
+        while run.as_mut().poll(&mut cx).is_pending() {
+            seat.seat.apply(bench);
+        }
+        seat.seat.apply(bench);
+        let device = match &bench.controller.agent_for_test().app_session().wait {
+            Some(crate::app::agent::app_agent_session::AgentWait::Activity(wait)) => wait.device,
+            other => panic!("the flash is under way: {other:?}"),
+        };
+        // The user's own Cancel on the card.
+        bench.press_device(device, "cancel", OfferArgs::new());
+        wait_quiet(bench, tasks);
+        for _ in 0..20 {
+            actor_step(bench, tasks);
+            seat.seat.apply(bench);
+        }
+        assert!(seat.seat.runs.borrow().is_empty(), "no resumed run");
+        assert_eq!(seat.seat.requests(), 2);
+        let session = bench.controller.agent_for_test().app_session();
+        assert!(session.wait.is_none() && session.wait_settled.is_none());
+    }
+
+    /// A tab whose runtimes never start.
+    struct RefusingSims;
+
+    impl SimLinkSource for RefusingSims {
+        fn open(&self, _: &SimSession) -> Result<SimBacking, String> {
+            Err("no engine in this test".to_string())
+        }
+    }
+
+    fn limits() -> RunLimits {
+        RunLimits {
+            deadline: std::time::Instant::now() + Duration::from_secs(60),
+            usd: 1.0,
+            turns: 8,
+            tokens: None,
+        }
+    }
+
+    fn call_turn(id: &str, tool: &str, input: serde_json::Value) -> Vec<TurnEvent> {
+        vec![
+            TurnEvent::ToolUseStart {
+                id: id.into(),
+                name: tool.into(),
+            },
+            TurnEvent::ToolInputDelta {
+                id: id.into(),
+                json_fragment: input.to_string(),
+            },
+            turn_done(StopReason::ToolUse),
+        ]
+    }
+
+    fn act_turn(id: &str, action: &str, args: &[(&str, &str)]) -> Vec<TurnEvent> {
+        call_turn(
+            id,
+            lpa_agent::ACT_TOOL_NAME,
+            serde_json::json!({
+                "action": action,
+                "args": args
+                    .iter()
+                    .map(|(name, value)| (name.to_string(), serde_json::json!(value)))
+                    .collect::<serde_json::Map<_, _>>(),
+                "why": "the user asked",
+            }),
+        )
+    }
+
+    fn say(text: &str) -> Vec<TurnEvent> {
+        vec![
+            TurnEvent::TextDelta(text.into()),
+            turn_done(StopReason::EndTurn),
+        ]
+    }
+
+    fn turn_done(stop_reason: StopReason) -> TurnEvent {
+        TurnEvent::TurnDone {
+            stop_reason,
+            usage: TokenUsage {
+                input_tokens: 10,
+                output_tokens: 5,
+                ..TokenUsage::default()
+            },
+        }
     }
 }

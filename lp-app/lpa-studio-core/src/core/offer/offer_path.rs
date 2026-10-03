@@ -327,7 +327,7 @@ mod tests {
 
     #[test]
     fn a_board_is_addressed_by_its_kind_and_id() {
-        use lpa_devices::{BoardKey, DeviceId};
+        use lpa_devices::BoardKey;
 
         let desk = BoardKey::parse("a0:f2:62:87:b4:8c").unwrap();
         let made = BoardKey::parse("12:22:33:44:55:66").unwrap();
@@ -335,7 +335,7 @@ mod tests {
             (BoardRef::Mac(desk), "devices/mac-a0f26287b48c/flash"),
             (BoardRef::Sim(made), "devices/sim-122233445566/flash"),
             (BoardRef::Emu(made), "devices/emu-122233445566/flash"),
-            (BoardRef::New(DeviceId(3)), "devices/new-3/flash"),
+            (BoardRef::New(3), "devices/new-3/flash"),
         ] {
             let flash = OfferPath::board(&board).child("flash");
             assert_eq!(flash.to_string(), text);

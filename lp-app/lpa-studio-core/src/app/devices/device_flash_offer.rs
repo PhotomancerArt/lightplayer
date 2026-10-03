@@ -537,7 +537,7 @@ mod tests {
             firmware_blocked: None,
             escapes: vec![Escape::Forget],
         };
-        let prefix = OfferPath::board(&crate::BoardRef::New(DeviceId(3)));
+        let prefix = OfferPath::board(&crate::BoardRef::New(3));
         let offer = flash_pending_offer(&pending, prefix.clone()).expect("a blank chip flashes");
         assert_eq!(offer.path.to_string(), "devices/new-3/flash");
         assert!(

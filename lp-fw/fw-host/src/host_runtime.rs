@@ -193,19 +193,22 @@ pub fn create_memory_server_on_board(
     identity: lpc_wire::HelloIdentity,
     board_manifest: Option<&str>,
 ) -> LpServer {
-    let (output_provider, registry) = match board_manifest {
+    let (output_provider, registry, board_id) = match board_manifest {
         Some(json) => {
             let manifest = lpc_hardware::HardwareManifestFile::read_json(json)
                 .and_then(|file| file.to_manifest())
                 .expect("a fake board's manifest is a checked-in board file");
+            let board_id = manifest.board_id().to_string();
             (
                 MemoryOutputProvider::with_hardware_manifest(manifest.clone()),
                 manifest,
+                Some(board_id),
             )
         }
         None => (
             MemoryOutputProvider::new_permissive(),
             default_esp32c6_hardware_manifest(),
+            None,
         ),
     };
     let output_provider = Rc::new(RefCell::new(output_provider));
@@ -229,6 +232,12 @@ pub fn create_memory_server_on_board(
         graphics,
     );
     server.set_hello_identity(identity);
+    // What every ESP firmware does with the manifest it wears: name the
+    // board in the hello (`set_board_id`). A fake standing for a board that
+    // said "board unknown" sent the app agent re-flashing a XIAO it had just
+    // flashed, twice (activity corpus S4, 2026-10-03). The permissive sink
+    // wears no board, and says none.
+    server.set_board_id(board_id);
     server
 }
 
@@ -278,6 +287,26 @@ mod tests {
         assert!(projects.is_empty());
 
         runtime.close().await.unwrap();
+    }
+
+    /// A server on a board names it in its hello, as the firmware does; the
+    /// permissive one wears none and names none.
+    #[test]
+    fn a_server_on_a_board_names_the_board_in_its_hello() {
+        let identity = lpc_wire::HelloIdentity::new("fw-esp32c6", "test", false, "test");
+        let on_board = create_memory_server_on_board(
+            LpFsMemory::new(),
+            identity.clone(),
+            Some(include_str!(
+                "../../../lp-core/lpc-hardware/boards/seeed/xiao-esp32-c6.json"
+            )),
+        );
+        assert_eq!(
+            on_board.hello().hardware.board_id.as_deref(),
+            Some("seeed/xiao-esp32-c6")
+        );
+        let permissive = create_memory_server_with(LpFsMemory::new(), identity);
+        assert_eq!(permissive.hello().hardware.board_id, None);
     }
 
     #[tokio::test]
