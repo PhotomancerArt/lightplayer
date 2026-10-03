@@ -66,4 +66,11 @@ impl UartLinkShared {
     pub(crate) async fn doorbell(&self) {
         self.doorbell.wait().await;
     }
+
+    /// The doorbell itself, for the log ring to ring when a record lands
+    /// ([`crate::log_ring_logger::ring_on_record`]), mirroring the C6/S3's
+    /// `UsbLinkShared::doorbell_signal`.
+    pub(crate) fn doorbell_signal(&'static self) -> &'static Signal<CriticalSectionRawMutex, ()> {
+        &self.doorbell
+    }
 }

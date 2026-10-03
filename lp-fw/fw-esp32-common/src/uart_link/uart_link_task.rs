@@ -19,7 +19,13 @@
 //!    one, **feeding the link RX between frames** — a frame is only overdue
 //!    if its ACK has not *arrived*, not if it waits unread in a pipe;
 //! 4. sleep until the link's next timer, the I/O task's news (bytes arrived,
-//!    or room for a frame), or the transport's doorbell.
+//!    or room for a frame), the transport's doorbell, or a log record
+//!    landing ([`crate::log_ring_logger::ring_on_record`]) — rung the same
+//!    way the C6/S3's USB loop does it
+//!    (`crate::usb_link::usb_link_task::run_usb_link`). Nothing wakes the
+//!    task on a cadence of its own: with nothing to do it sleeps until the
+//!    link's own timers (SYN every 100 ms without a host, keepalive every
+//!    250 ms with one) or [`IDLE_BACKSTOP_US`].
 //!
 //! Because this task shares the thread executor with the engine, it runs
 //! only between engine ticks (41–114 ms on a dome-scale project), and the
@@ -27,6 +33,15 @@
 //! cadence (`uart_link_config`'s `MIN_RTO_US`). Liveness is the link's own
 //! (`Up`/`Reset`/`is_stalled`): a UART has no cable signal, and there is no
 //! connection monitor to replace.
+//!
+//! Waking on events and not on a 10 ms cadence matters once this task has a
+//! thread of its own (P4's `io-thread`): every pass then preempts the
+//! render, and a pass that finds nothing to do still costs something. The
+//! C6's USB loop made the same change in M1
+//! (`lp2025/2026-10-01-1200-io-thread-spike`); this ports it to the
+//! classic's UART loop ahead of its own thread (P2 of
+//! `lp2025/2026-10-02-1918-io-thread-other-boards`), so idle passes land in
+//! the render's gaps today and do not cost extra once the loop preempts it.
 
 use core::cell::Cell;
 
@@ -39,8 +54,14 @@ use super::uart_link_counters::{self, EdgeCounters};
 use super::uart_link_pipes::{self, MAX_FRAME_BYTES};
 use super::uart_link_shared::UartLinkShared;
 
-/// The longest the task sleeps with nothing to do (the log ring's cadence).
-pub const IDLE_CAP_US: Micros = 10_000;
+/// The longest the task sleeps with nothing to do. A backstop only: log
+/// records, queued replies and the I/O task's news (bytes arrived, room for
+/// a frame) all ring or wake sooner, and the link's own timers come sooner
+/// whenever a host is there or being looked for. Was `IDLE_CAP_US = 10_000`
+/// (a true 10 ms poll); event-driven since P2 of
+/// `lp2025/2026-10-02-1918-io-thread-other-boards`, mirroring the C6/S3 USB
+/// loop's `IDLE_BACKSTOP_US`.
+pub const IDLE_BACKSTOP_US: Micros = 250_000;
 /// Log records moved onto the log channel per pass: the board's datagram
 /// queue (`uart_link_config`'s two slots). Each is popped under its own
 /// short critical section (see [`crate::log_ring_logger::pump`]).
@@ -76,14 +97,16 @@ pub async fn run_uart_link(shared: &'static UartLinkShared) -> ! {
     let mut drain_asked_at: Option<Micros> = None;
     let mut io_live_said = false;
     let mut edge_seen = EdgeCounters::default();
+    crate::log_ring_logger::ring_on_record(shared.doorbell_signal());
 
     loop {
         feed_rx(shared, &mut buf);
 
         let now = now_us();
-        shared.with_link(|link| {
-            crate::log_ring_logger::pump(link, now, LOG_RECORDS_PER_PASS);
+        let logs_moved = shared.with_link(|link| {
+            let moved = crate::log_ring_logger::pump(link, now, LOG_RECORDS_PER_PASS);
             uart_link_counters::note_stalled(link.is_stalled(now));
+            moved
         });
 
         // Whole frames, while the TX pipe has room for a largest one. When it
@@ -119,7 +142,17 @@ pub async fn run_uart_link(shared: &'static UartLinkShared) -> ! {
             }
         }
 
-        let wake = wake_at(shared, IDLE_CAP_US);
+        // A burst longer than one pass's records: go round again while the
+        // link keeps taking them (the datagram queue's own room gates it).
+        // A pass that moved none waits for the event that makes room (an ACK
+        // arriving, a timer) or a new record — the C6/S3 USB loop's
+        // `log_backlog` rule.
+        let log_backlog = logs_moved > 0 && crate::log_ring_logger::has_records();
+        let wake = if log_backlog {
+            now_us()
+        } else {
+            wake_at(shared, IDLE_BACKSTOP_US)
+        };
         select3(
             uart_link_pipes::wake(),
             Timer::at(Instant::from_micros(wake)),
