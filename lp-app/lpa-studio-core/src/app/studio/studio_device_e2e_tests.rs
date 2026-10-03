@@ -6961,6 +6961,152 @@ fn a_refused_reload_fails_the_editor_instead_of_reading_ready() {
     );
 }
 
+/// Companion to the test above: a fast-forward (or Discard) that lands a
+/// head THIS BUILD CANNOT RUN must be refused by the same open pre-flight
+/// the open path runs, not handed to the runtime as a parser complaint —
+/// `migrate_package_on_open` now runs inside `reload_active_from_library`
+/// (2026-10-01-fast-forward-skips-format-check). The runtime must never see
+/// the newer-format bytes at all: unlike the test above (refused by the
+/// RUNTIME, which drops the lens), this is refused before the push, so the
+/// sim's loaded project is untouched.
+#[test]
+fn a_reload_to_a_newer_format_is_refused_before_it_reaches_the_runtime() {
+    let (mut bench, tasks, device, good) = sim_open_bench();
+    open_package(&mut bench, &tasks, &good);
+    let name = bench
+        .controller
+        .project_for_test()
+        .active_library_display_name()
+        .expect("the opened project names itself");
+    let before = sim_loaded(&device);
+    assert_eq!(before.len(), 1);
+
+    // What a fast-forward (or Discard) does: a head from a newer LightPlayer
+    // lands in the library copy. Bump `format` ALONE, in place — the rest of
+    // the manifest (including `name`, which the failure notice below must
+    // still read correctly) stays exactly as the open left it.
+    let mut copy = bench.store.open(good.parse().expect("uid")).expect("open");
+    let manifest = copy
+        .read_all_files()
+        .expect("read")
+        .into_iter()
+        .find(|(path, _)| path == "project.json")
+        .map(|(_, bytes)| bytes)
+        .expect("project.json");
+    let mut manifest: serde_json::Value = serde_json::from_slice(&manifest).expect("parses");
+    manifest["format"] = serde_json::json!(lpc_model::PROJECT_FORMAT_VERSION + 1);
+    copy.apply_update(
+        "/project.json".as_path(),
+        Some(&serde_json::to_vec(&manifest).expect("re-encode")),
+    )
+    .expect("write");
+    copy.record_save(2.0).expect("save");
+
+    let result = drive_real(bench.controller.dispatch(UiAction::from_op(
+        crate::ControllerId::new(ProjectController::NODE_ID),
+        ProjectOp::ReloadActiveProject,
+    )));
+    let error = result.expect_err("a newer-format head is refused");
+    assert!(
+        error.to_string().contains("made by a newer LightPlayer"),
+        "the classified reason reaches the caller: {error}"
+    );
+
+    // Refused BEFORE the push: the runtime still holds exactly what it did.
+    assert_eq!(
+        sim_loaded(&device),
+        before,
+        "the runtime is never handed the newer-format bytes"
+    );
+
+    let crate::app::open_progress::OpenStage::Failed(failure) =
+        crate::app::open_progress::open_stage()
+    else {
+        panic!(
+            "the reload left no verdict for the user: {:?}",
+            crate::app::open_progress::open_stage()
+        );
+    };
+    assert!(
+        failure.message.contains(&name),
+        "the notice names the project: {:?}",
+        failure.message
+    );
+    assert!(
+        failure.message.contains("made by a newer LightPlayer"),
+        "the notice carries the classified reason: {:?}",
+        failure.message
+    );
+}
+
+/// The other half: a head still behind the current format (reachable via
+/// Discard, or a collaborator's fast-forward to an older save) must migrate
+/// in place and load — not be refused the way the open path never refuses an
+/// upgradable package. A real v10 fixture from the upgrader's own corpus
+/// replaces the active package's files wholesale, standing in for whatever
+/// landed the old head.
+#[test]
+fn a_reload_to_an_older_format_migrates_in_place_and_loads() {
+    let (mut bench, tasks, device, good) = sim_open_bench();
+    open_package(&mut bench, &tasks, &good);
+    assert_eq!(sim_loaded(&device).len(), 1);
+    let uid: lpc_history::PrefixedUid = good.parse().expect("uid");
+
+    // Replace the active package's whole file set with the real v10
+    // fixture — the fast-forward/Discard landed an older-but-supported head.
+    // The fixture's own `project.json` states no `uid` (the lenient reader
+    // falls back to one derived from the slug, same as the catalog example
+    // it is a fixture OF), so it is stamped with THIS package's own uid —
+    // exactly what `install_package`'s `ensure_uid` already did for the
+    // active head — or a later-by-uid lookup would call this package gone.
+    let mut copy = bench.store.open(uid).expect("open");
+    for (path, _) in copy.read_all_files().expect("read the old file set") {
+        copy.apply_update(format!("/{path}").as_path(), None)
+            .expect("clear the old file");
+    }
+    for (path, bytes) in v10_corpus_files() {
+        let bytes = if path == "project.json" {
+            let mut manifest: serde_json::Value = serde_json::from_slice(&bytes).expect("parses");
+            manifest["uid"] = serde_json::Value::String(uid.to_string());
+            serde_json::to_vec(&manifest).expect("re-encode")
+        } else {
+            bytes
+        };
+        copy.apply_update(format!("/{path}").as_path(), Some(&bytes))
+            .expect("write the v10 fixture");
+    }
+    copy.record_save(2.0).expect("save");
+
+    let result = drive_real(bench.controller.dispatch(UiAction::from_op(
+        crate::ControllerId::new(ProjectController::NODE_ID),
+        ProjectOp::ReloadActiveProject,
+    )));
+    result.expect("an older-but-supported head migrates and loads");
+    assert_eq!(
+        sim_loaded(&device).len(),
+        1,
+        "the migrated project is loaded"
+    );
+
+    // The library copy itself is upgraded, not left at v10 for next time.
+    let manifest = bench
+        .store
+        .open(uid)
+        .expect("open")
+        .read_all_files()
+        .expect("read")
+        .into_iter()
+        .find(|(path, _)| path == "project.json")
+        .map(|(_, bytes)| bytes)
+        .expect("project.json is in the migrated package");
+    let format = serde_json::from_slice::<serde_json::Value>(&manifest).unwrap()["format"].clone();
+    assert_eq!(
+        format,
+        serde_json::json!(lpc_model::PROJECT_FORMAT_VERSION),
+        "the library head is at the current format: {format}"
+    );
+}
+
 /// What the sim's runtime has loaded, asked over its own wire rather than
 /// the lens: a refused open or reload drops the lens.
 fn sim_loaded(device: &FakeEsp32Device) -> Vec<String> {
