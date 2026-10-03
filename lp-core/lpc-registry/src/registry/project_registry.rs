@@ -3473,10 +3473,7 @@ mod tests {
         let lpc_model::PathSpec::PointList {
             first_channel,
             points,
-        } = paths.entries.get(&1).expect("path 1").value()
-        else {
-            panic!("expected the moved PointList at path 1");
-        };
+        } = paths.entries.get(&1).expect("path 1").value();
         assert_eq!(*first_channel.value(), 5);
         assert_eq!(
             points.entries.get(&0).map(|xy| xy.value().0),

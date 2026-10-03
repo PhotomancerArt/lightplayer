@@ -375,6 +375,10 @@ pub fn emit_rx_record(record: &RxRecord) {
 mod tests {
     use super::*;
 
+    #[allow(
+        unused_extern_crates,
+        reason = "this crate is #![no_std] by default; tests need std back"
+    )]
     extern crate std;
     use std::string::String;
 

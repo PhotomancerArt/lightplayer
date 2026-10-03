@@ -134,6 +134,10 @@ pub fn pump<const N: usize>(queue: &mut ByteRing<N>, incoming: &[u8], out: &mut 
 
 #[cfg(test)]
 mod tests {
+    #[allow(
+        unused_extern_crates,
+        reason = "this crate is #![no_std] by default; tests need std back"
+    )]
     extern crate std;
 
     use std::{format, vec::Vec};

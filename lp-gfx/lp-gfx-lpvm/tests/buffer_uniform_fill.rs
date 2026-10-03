@@ -8,7 +8,7 @@
 //! so a wrong stride or a dropped word is a wrong pixel, not a compile
 //! error.
 
-use lp_gfx::{LpGraphics, ShaderCompileOptions, ShaderSemantics};
+use lp_gfx::{LpGraphics, ShaderCompileOptions};
 use lp_gfx_lpvm::TargetLpvmGraphics;
 use lp_shader::ShaderFrontend;
 use lps_shared::{LpsBuffer, LpsBufferElem, LpsValueF32};
