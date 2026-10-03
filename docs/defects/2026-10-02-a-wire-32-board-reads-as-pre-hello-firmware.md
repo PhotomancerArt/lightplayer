@@ -1,7 +1,7 @@
 ---
 status: fixed
 found: 2026-10-02      # how: hardware-walk (G1 of the C6 repartition, the spare XIAO C6)
-fixed: this change
+fixed: 1afe61e7b
 area: lpa-link device_link/demux × lpc-wire hello (wire 33) × lpa-devices evidence
 class: partial-knowledge-loss
 related:
@@ -51,6 +51,14 @@ to Flash's pick when nothing names the board.
 `evidence::tests::a_hello_from_another_wire_is_a_light_player_on_that_wire`;
 and end to end from the bytes to the card,
 `lpa-studio-core` `device_flash::tests::a_wire_32_board_is_older_light_player_firmware_that_updates`.
+On silicon (2026-10-02, the spare on #891's wire-32 firmware, this branch's
+Studio in headless Brave over real Web Serial): the card read "Older
+LightPlayer firmware — flash to update; the project stays" with its project
+named. In that fresh browser profile nothing named the board model (no
+record, and the hello's `boardId` is deliberately not read), so the verb was
+Flash firmware with the pick ("2 boards fit" once the chip was seen); a
+browser that has flashed the board before has its record, and gets Update
+firmware.
 
 **Lesson** — the version field is the one part of the hello that must be
 readable by every other version, and a typed decode of the whole message

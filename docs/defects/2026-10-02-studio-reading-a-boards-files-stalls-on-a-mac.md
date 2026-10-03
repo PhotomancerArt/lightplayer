@@ -1,7 +1,7 @@
 ---
 status: fixed
 found: 2026-10-02      # how: hardware-walk (G1 of the C6 repartition, Yona's Chrome, the spare XIAO C6)
-fixed: this change
+fixed: 650299682
 area: lpa-link providers/browser_serial_esp32 (browser_esp32_flash.js — every flash read)
 class: assumed-context
 related:
@@ -67,9 +67,16 @@ erased flash through `MacTtyModel`; esptool-js's read parameters lose
 bytes, `readFlashSafely` reads it byte for byte with one packet in flight,
 and a short packet or a wrong digest fails. The emulator walk now models
 the loss on a Mac (`docs/defects/2026-10-02-the-emulated-serial-path-never-drops-a-byte.md`).
-Silicon, once (2026-10-02, headless Brave, macOS, the spare C6): before,
-stalled at 310,706 of 983,040 bytes; after, 983,040 bytes MD5-checked in
-14.2 s.
+Silicon (2026-10-02, headless Brave over real Web Serial, macOS, the spare
+C6; Studio shown only that board's port): the executor alone, before —
+stalled at 310,706 of 983,040 bytes — and after — 983,040 bytes MD5-checked
+in 14.2 s; real Studio, before — "Flashing firmware…" for 100 s, then
+`Serial data stream stopped` and no question — and after — the layout
+question 14 s after Update with the right count ("27 files (107 KB)"), then,
+continued, the whole migration: the board came back on the new layout
+(47 of 176 blocks) with all 27 files byte-identical, its project rendering.
+The board was then restored to its old layout and firmware from a full
+4 MiB image.
 
 **Lesson** — routing one protocol around a host bug does not retire the
 bug: every other byte stream on the same path still meets it. The 09-26

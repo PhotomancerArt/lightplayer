@@ -62,7 +62,9 @@ const UID = "dev0000000000000011";
 const STUDIO_LOAD_MS = 420_000;
 const STEP_MS = 180_000;
 /// A wedged-run guard for a whole migration, never a measurement.
-const MIGRATION_MS = 900_000;
+/// `WALK_MIGRATION_MS` shortens it for a run that is EXPECTED to wedge (a
+/// reproduction), so it fails inside one foreground command.
+const MIGRATION_MS = Number(process.env.WALK_MIGRATION_MS ?? 900_000);
 
 const SCENARIOS = {
   W1: { fixture: "legacy", describe: "Update → the question → Continue → files moved" },
@@ -632,6 +634,10 @@ async function main() {
       mkdirSync(stateDir, { recursive: true });
       await saveTabChip(driver, path.join("state", `${BOARD}.flash.bin`));
     }
+    writeFileSync(path.join(out, "page-console.log"), driver.consoleLines().join("\n"));
+    // What the Mac serial model (on for a page on a Mac) dropped: on a run
+    // that passed, the update's reads must have lost nothing.
+    verdict.macTtyDrops = driver.consoleLines("Mac serial model dropped").length;
     await driver.close();
     // The door writes the chip and the console back on shutdown (and every
     // 2 s before it): read both after it has stopped.
@@ -735,6 +741,11 @@ async function main() {
     fatal = error;
     await shot("failure");
     console.error(`\n✗ ${error.message}`);
+    // Studio's own console, for the why (esptool-js's errors, the Mac
+    // serial model's drops) — it dies with the page.
+    try {
+      writeFileSync(path.join(out, "page-console.log"), driver.consoleLines().join("\n"));
+    } catch { /* the page may be gone */ }
     // The tab's console dies with the page: keep it beside the verdict, the
     // way the door keeps its console file.
     if (!door) {

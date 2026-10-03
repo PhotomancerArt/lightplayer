@@ -684,6 +684,16 @@ write acknowledged and dropped) were invisible to it. Access enforcement is
 proven by `lpa-server/tests/access_gate.rs` and the desk check
 (`spikes/ble-lab`). See `docs/adr/2026-09-24-ble-transport.md`, S5.
 
+**On a Mac, `?emu=` pages model the Mac's serial path** (`?emu-tty=mac|none`
+overrides): `public/lpa-link/mac_tty_model.js` drops `0xFF`-heavy bytes a
+late page has not read, as Chromium's Web Serial on macOS does, and the page
+reads at most every 16 ms. Without it a flash read that stalled on every Mac
+passed the migration walk (G1-F2,
+`docs/defects/2026-10-02-the-emulated-serial-path-never-drops-a-byte.md`).
+Each drop is a `[emu] … the Mac serial model dropped N B` console warning;
+`walk-migration-emu` writes the page console and the count (`macTtyDrops`)
+beside its verdict.
+
 Two more dev-only flags tune the device wire for a measurement (read once at
 page load by `lpa-studio-web/src/dev_url_flags.rs`; no UI, no persistence):
 `?lens-pause-ms=N` sets the editor lens's pause between device reads

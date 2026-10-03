@@ -69,6 +69,10 @@
 import { nativeBacking } from "./emulator_port.js";
 import { MacTtyModel } from "./mac_tty_model.js";
 
+/// How often, at most, a page behind the Mac serial model reads (see
+/// `_attachMacStreams`): a page busy for a frame now and then.
+const MAC_PAGE_READ_EVERY_MS = 16;
+
 const VENDOR_ID = 0x303a;
 const PRODUCT_ID = 0x1001;
 
@@ -656,11 +660,28 @@ class VirtualSerialPort {
     const port = this;
     const tty = new MacTtyModel();
     this.tty = tty;
+    const readEveryMs = MAC_PAGE_READ_EVERY_MS;
     let waiting = null;
+    let lastRead = -Infinity;
+    let timer = null;
+    // A page that reads late: at most one read per `readEveryMs`. An
+    // emulated board delivers slower than silicon, so a page that read
+    // the instant bytes landed would never fall behind the way a busy page
+    // on a Mac does — and never see what a Mac drops.
     const deliver = () => {
       if (!waiting) return;
+      const now = globalThis.performance?.now?.() ?? Date.now();
+      const early = lastRead + readEveryMs - now;
+      if (early > 0) {
+        timer ??= setTimeout(() => {
+          timer = null;
+          deliver();
+        }, early);
+        return;
+      }
       const bytes = tty.read();
       if (bytes.length === 0) return;
+      lastRead = now;
       const resolve = waiting;
       waiting = null;
       resolve(bytes);
