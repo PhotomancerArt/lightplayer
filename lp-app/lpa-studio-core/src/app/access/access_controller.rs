@@ -25,7 +25,7 @@
 //!   [`AccessAdded`] for the toast when anything was added (plan D6). A
 //!   Bluetooth link unlocked at edit only reads the list. A sync that fails
 //!   says why in the panel.
-//! - **Changes** from the access panel ("Who nearby can…" Play and Author,
+//! - **Changes** from the access panel (Play and Author,
 //!   a key group's trash can, Bluetooth), and Undo.
 
 use core::time::Duration;
@@ -843,7 +843,7 @@ impl AccessController {
                 if matches!(phase, AccessPhase::Granted { label: None, .. })
                     && open == Some(lpc_access::OpenTo::Edit)
                 {
-                    return Some("Open to anyone nearby".to_string());
+                    return Some("Open — no password".to_string());
                 }
                 access_line(&phase)
             });

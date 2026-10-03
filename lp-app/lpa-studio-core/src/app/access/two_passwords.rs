@@ -1,4 +1,4 @@
-//! "Who nearby can… Play / Author": the device's two passwords and its
+//! The access panel's Play and Author lines: the device's two passwords and its
 //! `open` setting, read off a listing and changed together.
 //!
 //! The panel offers two lines, each Anyone or Password. Anyone is the

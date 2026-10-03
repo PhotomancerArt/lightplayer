@@ -36,7 +36,9 @@ The design is the converged spike `spikes/access-panel-tidy/index.html`
 
 ### Two lines: Play and Author, each Anyone or Password
 
-The access panel starts "Who nearby can…" with two lines. **Play** (the
+The access panel is a detail card. Its first section, "Access", says in
+one sentence what it is for ("Control who can play and author over
+Bluetooth and Wi‑Fi.") and then has two lines. **Play** (the
 panel, brightness, patterns) and **Author** (everything but firmware — the
 edit tier; "Edit sounds like you're editing the password") are each
 **Anyone** or **Password**. Anyone who can author can play, so while Author
@@ -64,8 +66,8 @@ the board is open to. **A board with no store is open at edit**
 (`DeviceAccessFile::FRESH_OPEN`, one constant). Yona: "for development and
 alpha testing, I want public access — like WLED still does … It's not hard
 to change the default later." The device card says it where it is seen:
-its access row reads "open to anyone nearby", warning-tinted, and a
-Bluetooth link that got in that way reads "Open to anyone nearby".
+its access row reads "open", warning-tinted, and a Bluetooth link that
+got in that way reads "Open — no password".
 
 **An existing board keeps exactly what it had.** The store goes to
 version 3 with v2 and v1 readers: v2's `open: true` (which only ever
@@ -77,8 +79,8 @@ Wire: `AccessList.open` and `AccessSetSwitches.open` carry the word;
 
 ### Keys are a footnote, folded, and make their own room
 
-Under a separator, one line — "Your browsers & account · always get in ·
-N of 16 · added by USB" — opens the keys, folded by kind and name ("Brave
+The card's second section is one line — "Your browsers & account · always
+get in · N of 16 · added by USB" — which opens the keys, folded by kind and name ("Brave
 on Mac ×11", with its date span; one two-tap trash can removes the group).
 When a board is full and something new needs a slot, Studio drops the
 browser key added longest ago — never one this browser holds, never an

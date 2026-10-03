@@ -1,17 +1,19 @@
 //! The device's access panel (spike `access-panel-tidy`, concept 4B).
 //!
-//! It opens from the card's Connections group ("Access · open to anyone
-//! nearby ›") into a panel in the top layer, so the card keeps its height.
+//! It opens from the card's Connections group ("Access · open ›") into a
+//! detail card in the top layer, so the card keeps its height. Two
+//! sections, as every detail card has: the access itself, then the keys.
 //! Only a link that holds author sees it: USB (the trusted link) or a
 //! Bluetooth link at author — the board answers the list at that tier only.
 //!
-//! Top: "Who nearby can…" Play and Author, each Anyone or Password.
+//! Top: "Access", one sentence saying what it is, then Play and Author,
+//! each Anyone or Password.
 //! Password shows a box with a random password already in it, selected
 //! when you click in, so typing replaces it; ↻ rolls another; it saves when
 //! you click away (or press Enter). Anyone saves at once, no confirm. While
 //! Author is Anyone, Play follows it.
 //!
-//! Under a separator, one line: "Your browsers & account · always get in ·
+//! The second section is one line: "Your browsers & account · always get in ·
 //! N of 16 · added by USB", which opens the keys, grouped
 //! ([`super::access_key_group_row`]). "This isn't enterprise banking
 //! software" (Yona): nothing else.
@@ -24,7 +26,7 @@ use lpa_studio_core::{
 use super::access_fields::HELP_CLASS;
 use super::access_key_group_row::{AccessKeyGroupRow, ICON_TILE_CLASS};
 use super::share_words::fresh_share_words;
-use crate::base::{StudioIcon, StudioIconName};
+use crate::base::{DetailSection, StudioIcon, StudioIconName};
 
 /// The panel body (the popover's content, and the stories' subject).
 #[component]
@@ -48,71 +50,75 @@ pub(crate) fn DeviceAccessPanel(
     let mut keys_open = use_signal(|| keys_open_preview);
     let author_anyone = panel.author.is_anyone();
     rsx! {
-        div { class: "tw:grid tw:min-w-0 tw:gap-1.5 tw:py-1",
-            p { class: "tw:m-0 tw:text-xs tw:font-semibold tw:text-muted-foreground", "Who nearby can…" }
-            PasswordRow {
-                key: "play-{line_key(&panel.play)}",
-                device,
-                tier: AccessTier::Play,
-                line: panel.play.clone(),
-                locked: busy || author_anyone,
-                words: words_preview.clone(),
-                on_access,
+        DetailSection { title: "Access".to_string(),
+            div { class: "tw:grid tw:min-w-0 tw:gap-1.5 tw:pb-1",
+                p { class: "tw:m-0 tw:mb-0.5 tw:text-xs tw:leading-snug tw:text-muted-foreground",
+                    "Control who can play and author over Bluetooth and Wi‑Fi."
+                }
+                PasswordRow {
+                    key: "play-{line_key(&panel.play)}",
+                    device,
+                    tier: AccessTier::Play,
+                    line: panel.play.clone(),
+                    locked: busy || author_anyone,
+                    words: words_preview.clone(),
+                    on_access,
+                }
+                PasswordRow {
+                    key: "author-{line_key(&panel.author)}",
+                    device,
+                    tier: AccessTier::Edit,
+                    line: panel.author.clone(),
+                    locked: busy,
+                    words: words_preview.clone(),
+                    on_access,
+                }
+                if let Some(notice) = panel.notice.clone() {
+                    p { class: "tw:m-0 tw:text-xs tw:leading-snug tw:text-status-good-foreground", "{notice}" }
+                }
+                if panel.ble_enabled.is_none() {
+                    p { class: HELP_CLASS, "Reading the device's list…" }
+                }
+                if panel.writing {
+                    p { class: HELP_CLASS, "Writing to the device…" }
+                }
+                if let Some(error) = panel.error.clone() {
+                    p { class: "tw:m-0 tw:text-xs tw:leading-relaxed tw:text-status-error-foreground", "{error}" }
+                }
             }
-            PasswordRow {
-                key: "author-{line_key(&panel.author)}",
-                device,
-                tier: AccessTier::Edit,
-                line: panel.author.clone(),
-                locked: busy,
-                words: words_preview.clone(),
-                on_access,
-            }
-            if let Some(notice) = panel.notice.clone() {
-                p { class: "tw:m-0 tw:text-xs tw:leading-snug tw:text-status-good-foreground", "{notice}" }
-            }
-            if panel.ble_enabled.is_none() {
-                p { class: HELP_CLASS, "Reading the device's list…" }
-            }
-            if panel.writing {
-                p { class: HELP_CLASS, "Writing to the device…" }
-            }
-            if let Some(error) = panel.error.clone() {
-                p { class: "tw:m-0 tw:text-xs tw:leading-relaxed tw:text-status-error-foreground", "{error}" }
-            }
-            div { class: "tw:mt-1 tw:border-t tw:border-border-muted tw:pt-1.5",
-                button {
-                    class: "tw:flex tw:w-full tw:min-w-0 tw:cursor-pointer tw:appearance-none tw:items-center tw:gap-2.5 tw:border-0 tw:bg-transparent tw:p-0 tw:py-1 tw:text-left ux-focus-ring",
-                    r#type: "button",
-                    aria_expanded: "{keys_open()}",
-                    onclick: move |_| {
-                        let was = keys_open();
-                        keys_open.set(!was);
-                    },
-                    span { class: "{ICON_TILE_CLASS} tw:border-status-neutral-border tw:bg-status-neutral-bg tw:text-status-neutral-foreground",
-                        StudioIcon { name: StudioIconName::AccessLaptop, size: 15 }
-                    }
-                    span { class: "tw:grid tw:min-w-0 tw:flex-1 tw:gap-px",
-                        span { class: "tw:text-[13px] tw:font-bold tw:text-strong-foreground", "Your browsers & account" }
-                        span { class: "tw:truncate tw:text-[11px] tw:text-dim-foreground",
-                            "always get in · {panel.used} of {panel.capacity} · added by USB"
-                        }
-                    }
-                    span { class: if keys_open() { "tw:inline-flex tw:rotate-90 tw:text-dim-foreground" } else { "tw:inline-flex tw:text-dim-foreground" },
-                        StudioIcon { name: StudioIconName::Collapsed, size: 14 }
+        }
+        DetailSection {
+            button {
+                class: "tw:flex tw:w-full tw:min-w-0 tw:cursor-pointer tw:appearance-none tw:items-center tw:gap-2.5 tw:border-0 tw:bg-transparent tw:p-0 tw:py-1 tw:text-left ux-focus-ring",
+                r#type: "button",
+                aria_expanded: "{keys_open()}",
+                onclick: move |_| {
+                    let was = keys_open();
+                    keys_open.set(!was);
+                },
+                span { class: "{ICON_TILE_CLASS} tw:border-status-neutral-border tw:bg-status-neutral-bg tw:text-status-neutral-foreground",
+                    StudioIcon { name: StudioIconName::AccessLaptop, size: 15 }
+                }
+                span { class: "tw:grid tw:min-w-0 tw:flex-1 tw:gap-px",
+                    span { class: "tw:text-[13px] tw:font-bold tw:text-strong-foreground", "Your browsers & account" }
+                    span { class: "tw:truncate tw:text-[11px] tw:text-dim-foreground",
+                        "always get in · {panel.used} of {panel.capacity} · added by USB"
                     }
                 }
-                if keys_open() {
-                    ul { class: "tw:m-0 tw:grid tw:list-none tw:p-0 tw:sm:ml-[40px]",
-                        for group in panel.keys.clone() {
-                            AccessKeyGroupRow {
-                                key: "{group.salts[0]:?}",
-                                armed_preview: armed_preview == group.salts.first().copied(),
-                                group,
-                                device,
-                                busy: panel.writing,
-                                on_access,
-                            }
+                span { class: if keys_open() { "tw:inline-flex tw:rotate-90 tw:text-dim-foreground" } else { "tw:inline-flex tw:text-dim-foreground" },
+                    StudioIcon { name: StudioIconName::Collapsed, size: 14 }
+                }
+            }
+            if keys_open() {
+                ul { class: "tw:m-0 tw:grid tw:list-none tw:p-0 tw:sm:ml-[40px]",
+                    for group in panel.keys.clone() {
+                        AccessKeyGroupRow {
+                            key: "{group.salts[0]:?}",
+                            armed_preview: armed_preview == group.salts.first().copied(),
+                            group,
+                            device,
+                            busy: panel.writing,
+                            on_access,
                         }
                     }
                 }
@@ -121,7 +127,7 @@ pub(crate) fn DeviceAccessPanel(
     }
 }
 
-/// One "Who nearby can…" line: its name, Anyone | Password, and the box.
+/// One line, Play or Author: its name, Anyone | Password, and the box.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn PasswordRow(

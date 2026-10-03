@@ -31,7 +31,7 @@ pub enum UiUnlockOffer {
     PlayOnly,
 }
 
-/// The device access panel, read from the board: "Who nearby can…" Play
+/// The device access panel, read from the board: Play
 /// and Author, then the keys that always get in, folded into one line.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct UiAccessPanel {
@@ -89,7 +89,7 @@ impl UiAccessPanel {
     }
 }
 
-/// One "Who nearby can…" line.
+/// One line of the panel, Play or Author.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum UiPasswordLine {
     /// Anyone nearby, no password.
@@ -149,11 +149,11 @@ pub fn dropped_sentence(dropped: &[super::DroppedKey]) -> Option<String> {
     }
 }
 
-/// What the card's access row says, decided once ("open to anyone
-/// nearby" is the callout a new board needs).
+/// What the card's access row says, decided once. "open" (warning-tinted
+/// on the card) is the callout a new board needs.
 pub fn open_summary(open: OpenTo) -> &'static str {
     match open {
-        OpenTo::Edit => "open to anyone nearby",
+        OpenTo::Edit => "open",
         OpenTo::Play => "anyone can play",
         OpenTo::Nobody => "password",
     }

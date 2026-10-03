@@ -5,7 +5,7 @@
 //! |---|---|
 //! | USB | "connected" / "not connected" |
 //! | Bluetooth | the icon, "Bluetooth", a switch — nothing else |
-//! | Access · open to anyone nearby › | opens the access panel (author links only) |
+//! | Access · open › | opens the access panel (author links only) |
 //!
 //! Bluetooth is on by default, so most people never touch the switch. The
 //! board reads it once, at boot: flipped over USB, Studio restarts the
@@ -21,7 +21,7 @@ use lpa_studio_core::{
 
 use super::access_fields::Switch;
 use super::device_access_panel::DeviceAccessPanel;
-use crate::base::{DetailPopover, DetailSection, PopoverPlacement, StudioIcon, StudioIconName};
+use crate::base::{DetailPopover, PopoverPlacement, StudioIcon, StudioIconName};
 
 /// See the module doc.
 #[component]
@@ -98,9 +98,7 @@ pub(crate) fn ConnectionsGroup(
                             StudioIcon { name: StudioIconName::Collapsed, size: 14 }
                         }
                     },
-                    DetailSection {
-                        DeviceAccessPanel { panel, on_access }
-                    }
+                    DeviceAccessPanel { panel, on_access }
                 }
                 }
             }

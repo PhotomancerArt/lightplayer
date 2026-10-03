@@ -87,7 +87,7 @@ pub enum DeviceAccessChange {
     /// restarts the device; over Bluetooth, turning it off is refused
     /// (it would cut the link it came over — "turn off by USB").
     SetBluetooth(bool),
-    /// A "Who nearby can…" line: `tier` (Play, or Author = edit) takes this
+    /// A Play or Author line: `tier` (Play, or Author = edit) takes this
     /// password, or with `None` anyone nearby can do it
     /// ([`super::two_passwords::plan_password`]).
     SetPassword {

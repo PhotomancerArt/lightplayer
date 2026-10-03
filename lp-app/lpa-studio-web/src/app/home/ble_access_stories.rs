@@ -33,7 +33,7 @@ use crate::cloud::account_access::AccountAccessState;
 // --- 1 · Connections ------------------------------------------------------
 
 #[story(
-    description = "The device card's Connections group over USB, Bluetooth ON (the default): a USB row (\"connected\"), a Bluetooth row that is only the icon, the word and a switch, and \"Access · open to anyone nearby ›\" under them (warning-tinted: a new board is open to anyone nearby, for now), which opens the access panel. The old \"Bluetooth\" and \"Unlock for edit\" verbs are gone from the Device zone."
+    description = "The device card's Connections group over USB, Bluetooth ON (the default): a USB row (\"connected\"), a Bluetooth row that is only the icon, the word and a switch, and \"Access · open ›\" under them (warning-tinted: a new board is open to anyone nearby, for now), which opens the access panel. The old \"Bluetooth\" and \"Unlock for edit\" verbs are gone from the Device zone."
 )]
 fn ble_connections_usb_on() -> Element {
     rsx! {
@@ -111,7 +111,7 @@ fn ble_connections_over_bluetooth() -> Element {
 // --- 2 · Access ------------------------------------------------------------
 
 #[story(
-    description = "Access on a NEW board (the default, for now): \"Who nearby can…\" Author is Anyone, so Play is greyed and reads \"follows Author\". Under the separator, one line: \"Your browsers & account · always get in · 14 of 16 · added by USB\" (closed)."
+    description = "Access on a NEW board (the default, for now), as a detail card: the ACCESS section says what it is in one sentence, then Author is Anyone, so Play is greyed and reads \"follows Author\". The second section is one line: \"Your browsers & account · always get in · 14 of 16 · added by USB\" (closed)."
 )]
 fn ble_access_wide_open() -> Element {
     rsx! {
@@ -615,7 +615,7 @@ fn SettingsAs(
 }
 
 /// A 320px panel, as the popover draws it.
-const PANEL_FRAME: &str = "tw:m-3 tw:w-[320px] tw:max-w-[calc(100vw-24px)] tw:rounded-md tw:border tw:border-border-strong tw:bg-card-raised tw:px-3";
+const PANEL_FRAME: &str = "tw:m-3 tw:grid tw:w-[min(320px,calc(100vw-24px))] tw:gap-0 tw:overflow-hidden tw:rounded-md tw:text-sm tw:text-muted-foreground ux-glass-panel";
 
 /// One card, at most the roster column's width.
 const CARD_FRAME: &str = "tw:grid tw:max-w-[420px] tw:p-3";
