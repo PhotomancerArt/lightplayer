@@ -60,7 +60,7 @@ impl ReachNote {
 /// iPad, Bluefy, Firefox, Safari): the reason, and this page's address to
 /// open in a browser that has it.
 pub const USB_UNAVAILABLE: ReachNote = ReachNote {
-    reason: "USB needs Chrome or Edge on a computer.",
+    reason: lpa_studio_core::USB_NEEDS_WEB_SERIAL,
     link: None,
     copy_lead: Some("Open this page there:"),
     copy: Some(ReachCopy::ThisPage),

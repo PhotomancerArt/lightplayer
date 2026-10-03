@@ -150,6 +150,7 @@ programmatic sweep. Both go through the same runner.
 | `intent.rs` | The prescriptive half |
 | `activity/` | Supervision machinery + the `Identify` reducer |
 | `identity.rs` | The bindings chain: endpoint → MAC → uid → name |
+| `board_key.rs` | `BoardKey`: a board's id, its MAC as 12 lowercase hex |
 | `journal.rs` | Flight recorder: both streams, derived notes, ring pruning |
 | `view.rs` | The projection and the escape invariant |
 | `link.rs` | The transport contract `lpa-link` implements |
@@ -242,6 +243,30 @@ window reset drops it, honestly, since firmware is a live report rather
 than a durable identity fact. The app-layer identity line (P2,
 `lpa-studio-core::device_identity_line`) reads it to render "fw …" or "no
 firmware".
+
+## Board key: one id, read off the MAC
+
+`BoardKey` (`board_key.rs`) is the id Studio names a board by everywhere,
+offer paths included: its six MAC octets, written as 12 lowercase hex
+digits (`6055f90a0b0c`). `Roster::board_key(id)` reads it off a device's or
+pending link's identity once something has read a MAC (a hello, or the
+flash preflight's efuse read). Before that it is `None`, and Studio names
+the board `new-<n>`. Parsing accepts colons, dashes and upper case. It
+refuses all-zero and all-ones, which are what a failed efuse read looks
+like.
+
+A key is never stored in this form. Records keep the MAC text the hello
+reports, and the key is derived from it, so no persisted byte changed shape.
+Made boards (sims, emulated boards) get one from
+`BoardKey::locally_administered(random)`, from caller-supplied random
+bytes. That sets the IEEE locally administered bit, which vendor hardware
+never ships with, so a made board can never take a real board's id.
+
+`DeviceId` stays the roster's handle, and it is not a board's id. It is
+minted per browser profile and can be reused after a forget and a reload.
+The kind prefix in a path (`mac-`/`sim-`/`emu-`) is studio-core's, read
+off the endpoint scheme this crate never interprets. See
+`docs/adr/2026-10-02-board-ids-and-typed-offer-parameters.md`.
 
 ## Validation
 

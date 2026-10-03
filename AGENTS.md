@@ -156,7 +156,8 @@ The core is IO-free state machines; async belongs to platform edges. See
 Studio's view is humble, and the app agent is its second consumer: it sees
 the app through the same view model and presses the same actions. See
 `docs/adr/2026-10-01-agentic-control-offers-in-core.md`, refined by
-`docs/adr/2026-10-01-offer-tree-and-consequence-levels.md`.
+`docs/adr/2026-10-01-offer-tree-and-consequence-levels.md` and
+`docs/adr/2026-10-02-board-ids-and-typed-offer-parameters.md`.
 
 - **A button the user can press is a `UiAction` built in `lpa-studio-core`**
   and published on a view model, never constructed in `lpa-studio-web`. An
@@ -183,6 +184,15 @@ the app through the same view model and presses the same actions. See
   loses its old DTO action field — there is nowhere else left to look.
   **`just lint-core-action-fields`** (in `check-lint`) is a second ratchet:
   action-carrying fields on core view types may only go down.
+- **Device offers live at `devices/<board ref>/<verb>`**, where the ref
+  names its kind: `mac-<12 hex>` (silicon, or an `emu serve` board),
+  `sim-…`, `emu-…` (generated, locally administered MACs), or `new-<n>`
+  until the board says who it is. Never a `DeviceId`: it is per-browser
+  and can be reused.
+- **A verb that takes a value declares typed `params`** (`Choice`, `Text`,
+  `Toggle`) and a binder in core, and `UiOffer::press(args)` validates and
+  binds. The web draws them with `OfferParamsForm` (or a picker that
+  renders the same params) and never builds the op itself.
 - The rework toward migrating every surface onto the tree is a roadmap
   (`lp2025/2026-10-01-1255-agentic-ui-roadmap`). Don't migrate whole
   surfaces ad hoc. Don't add new web-built actions either.

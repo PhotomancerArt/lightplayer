@@ -178,15 +178,18 @@ impl FakeEsp32Device {
     /// The base MAC is NOT fresh: it is burned into efuse, so it survives
     /// every flash and erase this fake can script. The new firmware
     /// reports the same one the board always had, and speaks the board's
-    /// own link (its `link_config`).
+    /// own link (its `link_config`). It heartbeats at the script's
+    /// `flashed_heartbeat_interval`, if one is set.
     pub fn fake_flash(&self, image_identity: &str) {
         let mut core = self.lock();
         let base_mac = core.efuse_mac.clone();
         let link_config = core.board_link.clone();
+        let heartbeat_interval = core.script.flashed_heartbeat_interval;
         core.script.boot = FakeBootState::LightPlayer(FakeLightPlayerState {
             provenance: fake_provenance(image_identity),
             base_mac,
             link_config,
+            heartbeat_interval,
             ..FakeLightPlayerState::new()
         });
         core.reset_current();
