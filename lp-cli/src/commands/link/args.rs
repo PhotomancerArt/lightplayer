@@ -112,6 +112,11 @@ pub struct CaptureArgs {
     /// (the board's advertised receive window still caps it).
     #[arg(long = "ble-window", default_value_t = 32)]
     pub ble_window: u8,
+
+    /// OTA spike, `blepipe:` targets: keep the update ticket in this file, so
+    /// a later run can finish an update an earlier one authorized.
+    #[arg(long = "ota-ticket-file")]
+    pub ota_ticket_file: Option<PathBuf>,
 }
 
 #[derive(Debug, Args)]

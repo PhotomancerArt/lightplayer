@@ -31,17 +31,45 @@ use crate::commands::emu::link_host::{OtaServe, console_lines, describe_link_cou
 
 const LOGIN_ID_BASE: u64 = 2_000_000;
 
+/// The update's ticket: read from `file` when it holds one (so a later run
+/// can finish an update an earlier one authorized), else fresh, and saved
+/// there.
+fn ticket_for(file: Option<&std::path::Path>) -> Result<[u8; 16]> {
+    if let Some(f) = file
+        && let Ok(text) = std::fs::read_to_string(f)
+        && let Some(t) = parse_hex16(text.trim())
+    {
+        return Ok(t);
+    }
+    let mut ticket = [0u8; 16];
+    for chunk in ticket.chunks_mut(4) {
+        chunk.copy_from_slice(&fresh_nonce().to_le_bytes());
+    }
+    if let Some(f) = file {
+        let hex: String = ticket.iter().map(|b| format!("{b:02x}")).collect();
+        std::fs::write(f, hex).with_context(|| format!("saving the ticket to {}", f.display()))?;
+    }
+    Ok(ticket)
+}
+
+fn parse_hex16(s: &str) -> Option<[u8; 16]> {
+    if s.len() != 32 {
+        return None;
+    }
+    let mut t = [0u8; 16];
+    for (i, b) in t.iter_mut().enumerate() {
+        *b = u8::from_str_radix(s.get(2 * i..2 * i + 2)?, 16).ok()?;
+    }
+    Some(t)
+}
+
 pub fn capture(args: &CaptureArgs, port: &str) -> Result<()> {
     let addr = format!("127.0.0.1:{port}");
     let listener = TcpListener::bind(&addr).with_context(|| format!("listening on {addr}"))?;
     let mut ota = match &args.ota_offer {
         Some(dir) => {
             let mut serve = OtaServe::from_dir(dir)?;
-            let mut ticket = [0u8; 16];
-            for chunk in ticket.chunks_mut(4) {
-                chunk.copy_from_slice(&fresh_nonce().to_le_bytes());
-            }
-            serve.ticket = Some(ticket);
+            serve.ticket = Some(ticket_for(args.ota_ticket_file.as_deref())?);
             serve.ahead = args.ota_ahead.unwrap_or(4);
             Some(serve)
         }

@@ -32,7 +32,8 @@ const NUS = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
 const RX = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"; // central -> board
 const TX = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"; // board -> central
 const wsUrl = new URLSearchParams(location.search).get("ws") || "ws://127.0.0.1:5599";
-const S = { events: [], toBoard: 0, toHost: 0, connects: 0, drops: 0, writeErrors: 0, up: false };
+const ackEvery = Number(new URLSearchParams(location.search).get("ack_every") || 0);
+const S = { events: [], toBoard: 0, toHost: 0, connects: 0, drops: 0, writeErrors: 0, up: false, sinceAck: 0, acked: 0 };
 window.S = S;
 let device = null, rx = null, ws = null, writes = Promise.resolve();
 
@@ -40,6 +41,8 @@ function log(m) {
   const line = `${(performance.now() / 1000).toFixed(3)} ${m}`;
   S.events.push(line);
   if (S.events.length > 500) S.events.shift();
+  // The host records the page's own story beside the board's.
+  if (ws && ws.readyState === 1) ws.send(`log ${line}`);
   document.getElementById("log").textContent = S.events.slice(-40).join("\n");
   document.getElementById("state").textContent =
     `${S.up ? "up" : "down"} · ws ${ws && ws.readyState === 1 ? "open" : "closed"} · ` +
@@ -55,9 +58,23 @@ function openWs() {
     if (typeof e.data === "string") return;
     const frame = new Uint8Array(e.data);
     // One write at a time, in order: the link's frames must arrive as sent.
+    // Chrome resolves a write WITHOUT response at once, and macOS drops what
+    // overflows its queue; with `?ack_every=N` every Nth frame goes as a
+    // write WITH response, which completes only once the board has it. In
+    // order, so the writes queued before it have gone too: the radio, not
+    // the page, sets the pace.
     writes = writes.then(async () => {
       if (!rx) return;
-      try { await rx.writeValueWithoutResponse(frame); S.toBoard++; }
+      try {
+        if (ackEvery > 0 && ++S.sinceAck >= ackEvery) {
+          S.sinceAck = 0;
+          await rx.writeValueWithResponse(frame);
+          S.acked++;
+        } else {
+          await rx.writeValueWithoutResponse(frame);
+        }
+        S.toBoard++;
+      }
       catch (err) { S.writeErrors++; log(`write failed: ${err.message}`); }
     });
   };
