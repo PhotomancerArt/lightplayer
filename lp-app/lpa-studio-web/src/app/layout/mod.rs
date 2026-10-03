@@ -28,7 +28,7 @@ pub mod version_badge;
 pub(crate) mod version_badge_stories;
 
 pub use cloud_account::CloudAccountControl;
-pub use link_reconnecting_strip::LinkReconnectingStrip;
+pub use link_reconnecting_strip::{LinkReconnectingStrip, ReconnectingCurtain};
 pub use local_store_banner::LocalStoreBanner;
 pub use pane_frame::PaneFrame;
 pub use recording_badge::RecordingBadge;

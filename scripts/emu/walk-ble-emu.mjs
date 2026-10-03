@@ -9,6 +9,7 @@
 //     add over Bluetooth → identify (flash disabled, with its reason)
 //       → clear + push a project over Bluetooth → the editor (authoring,
 //       counted for comparison) → Play → idle → turn a knob
+//       → the radio drops → Bluefy's phantom drop
 //
 // and it states the one number M5 owes: the bytes per second an idle,
 // connected Studio in Play mode puts on a `ble:` link, both directions,
@@ -25,6 +26,13 @@
 // adopts a sibling's). Every wait is the page's or the polyfill's; the one
 // deliberate duration is the idle window, and it is a counting window, not a
 // claim about how long anything took.
+//
+// THE TWO DROPS (defect 2026-10-02-a-dropped-link-sends-the-editor-to-devices):
+// a Bluetooth link that drops under Play must keep the page on Play with a
+// quiet "Reconnecting…" strip, and the same session must take a knob turn
+// once the link is back. `drop` is the radio going (the event fires);
+// `phantom` is Bluefy's (`gatt.connected` false, no event, the board's side
+// still up) seen the way iOS shows it — when the page is shown again.
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -279,6 +287,71 @@ async function main() {
       return JSON.stringify(report.idle);
     });
 
+    const turnKnob = async () => {
+      const s0 = await stats();
+      const before = await driver.evaluate(
+        `document.querySelector('#main [role="slider"]').getAttribute('aria-valuenow')`,
+      );
+      await driver.evaluate(`(() => {
+        const knob = document.querySelector('#main [role="slider"]');
+        knob.focus();
+        const key = Number(knob.getAttribute('aria-valuenow')) >= Number(knob.getAttribute('aria-valuemax')) ? 'Home' : 'End';
+        knob.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+      })()`);
+      await driver.waitFor(
+        `(() => { const s = window.__lpEmuBluetooth.stats(${JSON.stringify(BOARD)}); return s.writes > ${s0.writes}; })()`,
+        { timeoutMs: STEP_DEADLINE_MS, what: "the panel write to go out over Bluetooth" },
+      );
+      await driver.waitFor(
+        `document.querySelector('#main [role="slider"]').getAttribute('aria-valuenow') !== ${JSON.stringify(before)}`,
+        { timeoutMs: STEP_DEADLINE_MS, what: "the board's panel state to come back with the new value" },
+      );
+      return `${before} → ${await driver.evaluate(
+        `document.querySelector('#main [role="slider"]').getAttribute('aria-valuenow')`,
+      )}`;
+    };
+    /// One drop under Play: never leave `/play`, say Reconnecting, come
+    /// back to a working knob on the same page.
+    const dropUnderPlay = async (name, describe, cause) => {
+      await step(`${name}-held`, `${describe}: the page stays on Play and says Reconnecting`, async () => {
+        const opens = (await stats()).linkOpens;
+        const route = await driver.evaluate("location.pathname + location.search");
+        await driver.evaluate(cause);
+        await driver.waitFor(`Boolean(document.querySelector('[data-reconnecting="true"]'))`, {
+          timeoutMs: STEP_DEADLINE_MS,
+          what: "the Reconnecting strip",
+        });
+        // Settled, not mid-fade: the curtain has faded all the way in.
+        await driver.waitFor(
+          `getComputedStyle(document.querySelector('[data-reconnecting="true"]')).opacity === '1'`,
+          { timeoutMs: STEP_DEADLINE_MS, what: "the curtain to finish fading in" },
+        );
+        const now = await driver.evaluate("location.pathname + location.search");
+        if (now !== route) throw new Error(`the route moved: ${route} → ${now}`);
+        if (!(await driver.evaluate(`Boolean(document.querySelector('#main [role="slider"]'))`))) {
+          throw new Error("the Play panel went away");
+        }
+        report[name] = { route, opensBefore: opens };
+        return `still at ${now}`;
+      });
+      await step(`${name}-back`, "the link comes back on its own; the strip goes and the same Play takes a knob turn", async () => {
+        await driver.waitFor(`!document.querySelector('[data-reconnecting="true"]')`, {
+          timeoutMs: STEP_DEADLINE_MS,
+          what: "the strip to go (the board back)",
+        });
+        await driver.waitFor(
+          `[...document.querySelectorAll('[data-reconnecting]')].every((c) => getComputedStyle(c).visibility === 'hidden')`,
+          { timeoutMs: STEP_DEADLINE_MS, what: "the curtain to finish fading out" },
+        );
+        const now = await driver.evaluate("location.pathname + location.search");
+        if (now !== report[name].route) throw new Error(`the route moved: ${report[name].route} → ${now}`);
+        const opens = (await stats()).linkOpens - report[name].opensBefore;
+        const knob = await turnKnob();
+        report[name] = { ...report[name], linkOpensAfterDrop: opens, knob };
+        return `${opens} new link open(s); knob ${knob}`;
+      });
+    };
+
     await step("knob", "turn the first knob to its end; the board takes it and says so", async () => {
       const s0 = await stats();
       await driver.evaluate(`window.__lpBleCensus = {}`);
@@ -323,6 +396,18 @@ async function main() {
       };
       return JSON.stringify(report.knob);
     });
+
+    await dropUnderPlay(
+      "drop",
+      "the radio drops the link",
+      `window.__lpEmuBluetooth.devices.get(${JSON.stringify(BOARD)}).gatt.drop("the walk dropped the radio link")`,
+    );
+    await dropUnderPlay(
+      "phantom",
+      "Bluefy's phantom drop, found when the page is shown again",
+      `(() => { window.__lpEmuBluetooth.phantomDrop(${JSON.stringify(BOARD)});
+                document.dispatchEvent(new Event('visibilitychange')); })()`,
+    );
   } catch (error) {
     fatal = error;
   }
@@ -368,7 +453,7 @@ async function main() {
     console.error(`\nThe walk's steps passed, but the page panicked ${panics.length} time(s).`);
     process.exit(1);
   }
-  console.log("\n✓ the Bluetooth walk finished: add → identify → push → Play → idle → knob, with no board.");
+  console.log("\n✓ the Bluetooth walk finished: add → identify → push → Play → idle → knob → two drops ridden out on Play, with no board.");
 }
 
 await main();

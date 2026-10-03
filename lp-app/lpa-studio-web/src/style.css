@@ -623,7 +623,44 @@ label:has(> input:not(:disabled)) {
     color: var(--studio-status-neutral-text);
 }
 
-/* The "Reconnecting…" strip's icon (plan D13): a slow turn, calm rather
+/* The "Reconnecting…" curtain (`link_reconnecting_strip.rs`): over the
+   page, never in its flow. Off, it is invisible and lets clicks through;
+   on, it fades in after a short beat (a blip that recovers at once never
+   shows) and holds the page still; back, it fades out with no delay. */
+.ux-reconnect-curtain {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition:
+        opacity 280ms ease-out,
+        visibility 0s linear 280ms;
+}
+
+.ux-reconnect-curtain[data-reconnecting="true"] {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+    transition:
+        opacity 320ms ease-out 180ms,
+        visibility 0s linear 180ms;
+}
+
+.ux-reconnect-curtain .ux-reconnect-card {
+    transform: translateY(-6px);
+    transition: transform 320ms ease-out 180ms;
+}
+
+.ux-reconnect-curtain[data-reconnecting="true"] .ux-reconnect-card {
+    transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ux-reconnect-curtain .ux-reconnect-card {
+        transform: none;
+    }
+}
+
+/* The "Reconnecting…" card's icon (plan D13): a slow turn, calm rather
    than urgent; still for reduced motion. */
 .ux-reconnect-spin svg {
     animation: ux-reconnect-turn 2.4s linear infinite;

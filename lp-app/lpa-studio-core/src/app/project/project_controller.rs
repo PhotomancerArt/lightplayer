@@ -2732,6 +2732,14 @@ impl ProjectController {
         }
     }
 
+    /// Withdraw a sync failure the link caused, not the project (the pull
+    /// in flight when the editor's link went away).
+    pub fn withdraw_project_sync_failure(&mut self) {
+        if let Some(sync) = &mut self.sync {
+            sync.withdraw_failure();
+        }
+    }
+
     pub fn mark_no_running_project(&mut self) {
         self.running_project_status = RunningProjectStatus::NoneKnown;
         self.state = ProjectState::NotLoaded;
