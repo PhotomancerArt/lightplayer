@@ -15,7 +15,7 @@ use crate::core::{OfferParamsForm, OfferPressButton};
     description = "The generic parameter form over three offers core publishes. FLASH A BLANK CHIP (`devices/new-3/flash`): the `board` choice as option rows — the chip-narrowed boards only, because `all_boards` (the toggle at the bottom) is off — the optional `name` field with core's placeholder, and the press, Routine on a blank chip. Nothing is preselected (two C6 boards fit), so the press waits, saying why in core's words. START A BOARD HERE (`devices/new-sim`): two choices, `board` and `runtime`, pre-filled here the way the app agent would hand them over (a XIAO, emulated) — so the press is live. Every value is an `OfferArgs` the form writes; the press is the offer's own binding, never an op the web builds."
 )]
 fn generic_form() -> Element {
-    let flash = flash_pending_offer(&blank_chip(), OfferPath::board(&BoardRef::New(DeviceId(3))))
+    let flash = flash_pending_offer(&blank_chip(), OfferPath::board(&BoardRef::New(3)))
         .expect("a blank chip flashes");
     let sim = new_sim_offer();
     let sim_args = OfferArgs::new()

@@ -1951,7 +1951,7 @@ fn pick_popover_push() -> UiOffer {
 
 /// Where a story board's verbs live (the ref is never drawn).
 fn story_board_prefix(device: DeviceId) -> lpa_studio_core::OfferPath {
-    lpa_studio_core::OfferPath::board(&lpa_studio_core::BoardRef::New(device))
+    lpa_studio_core::OfferPath::board(&lpa_studio_core::BoardRef::New(device.0 as u32))
 }
 
 /// Forty saved projects: the library size the inline picker could not hold.

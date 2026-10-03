@@ -37,21 +37,46 @@ pub struct AppAgentSession {
     /// A card whose press opened a platform chooser: it settles on the
     /// chooser's answer, not on the press (which only opened it).
     pub grant_wait: Option<CardGrantWait>,
-    /// An open from Home the agent started that is still under way: it
-    /// lands (or fails) after the run that pressed it has ended, and the
-    /// run that follows hears how it went.
-    pub open_wait: Option<AgentOpenWait>,
-    /// How the agent's open ended, waiting for a run to hear it: the next
-    /// resume carries it, unless a card is waiting for the user — then the
-    /// card's settle carries both.
-    pub open_settled: Option<String>,
+    /// Something the agent started that is still under way — an open from
+    /// Home, a flash, a push: it ends after the run that pressed it has
+    /// ended, and the run that follows hears how it went.
+    pub wait: Option<AgentWait>,
+    /// How what the agent waited on ended, waiting for a run to hear it:
+    /// the next resume carries it, unless a card is waiting for the user —
+    /// then the card's settle carries both.
+    pub wait_settled: Option<String>,
 }
 
-/// An open from Home the agent pressed, by the key the open is pending
-/// under (the library uid of the project being opened).
+/// What the agent started that is still under way. One at a time: a newer
+/// one replaces it.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct AgentOpenWait {
-    pub key: String,
+pub enum AgentWait {
+    /// An open from Home, by the key the open is pending under (the
+    /// library uid of the project being opened).
+    Open { key: String },
+    /// A device activity (flash, push, erase, remove-project).
+    Activity(AgentActivityWait),
+}
+
+/// A device activity the agent's press started (or a card it handed the
+/// user, which is the same press).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AgentActivityWait {
+    /// The device it runs on — followed through a merge, should the board
+    /// fold into a remembered one while it runs.
+    pub device: crate::DeviceId,
+    pub kind: lpa_devices::ActivityKind,
+    /// The journal seq read up to: the activity's start, then each look.
+    pub seen_through: u64,
+    /// The board's name when it started (the note's fallback when the
+    /// board has gone by the end).
+    pub board: String,
+    /// What a push sends, by the name the push's `source` listed.
+    pub project: Option<String>,
+    /// A success that is held for the board's report of what it runs, and
+    /// since when (device clock): the note says what the board runs, not
+    /// "it has not said yet", when the report is a moment away.
+    pub succeeded: Option<(lpa_devices::ActivityOutcome, lpa_devices::Millis)>,
 }
 
 /// A card waiting on the chooser its press opened.
@@ -76,8 +101,8 @@ impl Default for AppAgentSession {
             cards_minted: 0,
             resume: Vec::new(),
             grant_wait: None,
-            open_wait: None,
-            open_settled: None,
+            wait: None,
+            wait_settled: None,
         }
     }
 }
@@ -180,40 +205,40 @@ impl AppAgentSession {
         }
     }
 
-    /// The agent pressed an open that is still under way (`key` is what
-    /// the open is pending under). One wait at a time: a newer open
-    /// replaces it.
-    pub fn agent_open_started(&mut self, key: String) {
-        self.open_wait = Some(AgentOpenWait { key });
-        self.open_settled = None;
+    /// The agent started something that is still under way. One wait at
+    /// a time: a newer one replaces it (and anything an older one had
+    /// settled but not yet told).
+    pub fn agent_wait_started(&mut self, wait: AgentWait) {
+        self.wait = Some(wait);
+        self.wait_settled = None;
     }
 
-    /// The agent's open ended: queue `note` for the run that follows.
-    /// `false` when the agent was not waiting on an open (so one open
-    /// resumes the agent at most once).
-    pub fn agent_open_settled(&mut self, note: String) -> bool {
-        if self.open_wait.take().is_none() {
+    /// What the agent waited on ended: queue `note` for the run that
+    /// follows. `false` when the agent was not waiting (so one wait resumes
+    /// the agent at most once).
+    pub fn agent_wait_settled(&mut self, note: String) -> bool {
+        if self.wait.take().is_none() {
             return false;
         }
-        self.open_settled = Some(note);
+        self.wait_settled = Some(note);
         true
     }
 
-    /// The agent's open was superseded by one the user started, or the
-    /// user spoke or stopped the agent: nobody is owed a resume for it.
-    pub fn forget_agent_open(&mut self) {
-        self.open_wait = None;
-        self.open_settled = None;
+    /// The user spoke, stopped the agent, or started something else over
+    /// what it waited on: nobody is owed a resume for it.
+    pub fn forget_agent_wait(&mut self) {
+        self.wait = None;
+        self.wait_settled = None;
     }
 
     /// Everything the next resumed run should hear, taken: what the user
-    /// did with cards, then how the agent's open ended — the latter held
+    /// did with cards, then how what the agent waited on ended — the latter held
     /// back while a card is still waiting for the user (the card's settle
     /// carries it). Empty when nothing is owed.
     pub fn take_resume(&mut self) -> Vec<String> {
         let mut lines = std::mem::take(&mut self.resume);
         if self.pending_card().is_none()
-            && let Some(note) = self.open_settled.take()
+            && let Some(note) = self.wait_settled.take()
         {
             lines.push(note);
         }
@@ -238,15 +263,15 @@ impl AppAgentSession {
 mod tests {
     use super::*;
 
-    /// One open resumes the agent once; a second settle of the same open
+    /// One wait resumes the agent once; a second settle of the same wait
     /// is not owed anything.
     #[test]
-    fn an_open_settles_once() {
+    fn a_wait_settles_once() {
         let mut session = AppAgentSession::default();
-        assert!(!session.agent_open_settled("[late]".into()), "no open");
-        session.agent_open_started("prj1".into());
-        assert!(session.agent_open_settled("[open]".into()));
-        assert!(!session.agent_open_settled("[again]".into()));
+        assert!(!session.agent_wait_settled("[late]".into()), "no wait");
+        session.agent_wait_started(open("prj1"));
+        assert!(session.agent_wait_settled("[open]".into()));
+        assert!(!session.agent_wait_settled("[again]".into()));
         assert_eq!(session.take_resume(), ["[open]"]);
         assert!(session.take_resume().is_empty());
     }
@@ -254,9 +279,9 @@ mod tests {
     /// While a card waits for the user, the open's note waits with it and
     /// rides the run the card's settle starts, after what the user did.
     #[test]
-    fn a_pending_card_holds_the_open_note_until_it_settles() {
+    fn a_pending_card_holds_the_wait_note_until_it_settles() {
         let mut session = AppAgentSession::default();
-        session.agent_open_started("prj1".into());
+        session.agent_wait_started(open("prj1"));
         // Any action will do: the card's press is not what this is about.
         let new = crate::app::home::new_project_offer(true)
             .press(&crate::OfferArgs::new())
@@ -267,7 +292,7 @@ mod tests {
             crate::OfferPath::project().child("new"),
             crate::OfferArgs::new(),
         );
-        assert!(session.agent_open_settled("[open]".into()));
+        assert!(session.agent_wait_settled("[open]".into()));
         assert!(session.take_resume().is_empty(), "the card is waiting");
         assert!(session.settle_card(&card.id, UiAgentCardState::Dismissed, None));
         let resume = session.take_resume();
@@ -277,11 +302,29 @@ mod tests {
 
     /// The user spoke (or stopped the agent): nothing is owed.
     #[test]
-    fn a_forgotten_open_owes_nothing() {
+    fn a_forgotten_wait_owes_nothing() {
         let mut session = AppAgentSession::default();
-        session.agent_open_started("prj1".into());
-        session.forget_agent_open();
-        assert!(!session.agent_open_settled("[open]".into()));
+        session.agent_wait_started(open("prj1"));
+        session.forget_agent_wait();
+        assert!(!session.agent_wait_settled("[open]".into()));
         assert!(session.take_resume().is_empty());
+    }
+
+    /// A newer wait replaces an older one, and with it a note the older
+    /// one had settled but no run had heard yet.
+    #[test]
+    fn a_newer_wait_replaces_the_older() {
+        let mut session = AppAgentSession::default();
+        session.agent_wait_started(open("prj1"));
+        assert!(session.agent_wait_settled("[open]".into()));
+        session.agent_wait_started(open("prj2"));
+        assert!(session.take_resume().is_empty());
+        assert_eq!(session.wait, Some(open("prj2")));
+    }
+
+    fn open(key: &str) -> AgentWait {
+        AgentWait::Open {
+            key: key.to_string(),
+        }
     }
 }

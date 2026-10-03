@@ -82,10 +82,11 @@ pub fn build_app_system_prompt(reference: &str) -> String {
          (`project`: one of those it lists). `edit_project` works only once \
          a project is open. An open starts the device the project runs on \
          first; while <app_state> has an `opening:` line the open is under \
-         way and the editor comes up by itself — do not press open again. \
-         After starting an open that is still under way, end your turn with \
-         one short line: you will be told when the project is open (or that \
-         the open failed), and you continue from there.\n\
+         way and the editor comes up by itself — do not press open again.\n\
+         - Anything you started that is still under way when `act` returns \
+         — an open, a flash, a push — finishes by itself: end your turn \
+         with one short line. You will be told when it finishes (or that it \
+         failed), and you continue from there.\n\
          - A flash or a firmware update leaves the board running nothing. \
          When one finishes, look at that board's line under devices. If it \
          runs nothing, or not the user's project, put the project on it \
@@ -186,8 +187,9 @@ mod tests {
             "an open in flight is waited for"
         );
         assert!(
-            prompt.contains("you will be told when the project is open"),
-            "an open in flight ends the turn; the open resumes it"
+            prompt.contains("an open, a flash, a push — finishes by itself")
+                && prompt.contains("You will be told when it finishes"),
+            "anything in flight ends the turn; its end resumes it"
         );
         assert!(
             prompt.contains("the card is their button"),

@@ -124,8 +124,8 @@ fn an_unscripted_question_without_otherwise_ends_the_run() {
 
 /// S18 on the device seat, the plumbing: the agent's connect press is a
 /// card the person clicks; it flashes the blank board itself (Routine, no
-/// card); the follow-up comes once the board has settled, and its push
-/// lands; the board reports running it. The project checks are S18's
+/// card); the flash's end resumes it, and its push lands; the board
+/// reports running it. The project checks are S18's
 /// board checks; what the example draws is not S18's project.
 #[test]
 fn the_device_seat_connects_flashes_and_pushes_on_a_scripted_model() {
@@ -160,7 +160,8 @@ fn the_device_seat_connects_flashes_and_pushes_on_a_scripted_model() {
             ),
             say("Flashing LightPlayer onto it."),
         ],
-        // The follow-up, once the board is Ready and says it runs nothing.
+        // The run the flash's end resumes ("it runs LightPlayer and no
+        // project yet"): push to it — no user message in between.
         vec![
             act_turn(
                 "p1",
@@ -169,6 +170,9 @@ fn the_device_seat_connects_flashes_and_pushes_on_a_scripted_model() {
             ),
             say("Sent."),
         ],
+        // The run the push's end resumes, then the follow-up's.
+        vec![say("It runs it now.")],
+        vec![say("Glad you like it.")],
     ];
     let outcome = run_scenario(&scenario, &EvalDriver::Scripted(scripts));
     write_outcome(&eval_run_dir("scripted"), "corpus-device-seat", &outcome).expect("written");
@@ -218,15 +222,17 @@ fn the_device_seat_opens_a_new_project_on_a_sim_and_names_the_flashed_board() {
             say("Click the card to pick your board's USB port."),
         ],
         vec![
-            // The sim took the first provisional id; the board has the
-            // second.
+            // The board is the only unidentified entry: `new-1`, whatever
+            // its roster handle (the sim's record pushed those past
+            // 9223372036854775807).
             act_turn(
                 "f1",
-                "devices/new-9223372036854775809/flash",
+                "devices/new-1/flash",
                 &[("board", "seeed/xiao-esp32-c6")],
             ),
             say("Flashing LightPlayer onto it."),
         ],
+        // The run the flash's end resumes.
         vec![
             call_turn(
                 "r1",
@@ -240,6 +246,9 @@ fn the_device_seat_opens_a_new_project_on_a_sim_and_names_the_flashed_board() {
             ),
             say("Sent."),
         ],
+        // The run the push's end resumes, then the follow-up's.
+        vec![say("It runs it now.")],
+        vec![say("Glad you like it.")],
     ];
     let outcome = run_scenario(&scenario, &EvalDriver::Scripted(scripts));
     let steps = &outcome.transcript.steps;
