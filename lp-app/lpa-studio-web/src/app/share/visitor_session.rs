@@ -21,8 +21,13 @@
 //! - **The pull loop** (Q11/CFS-D5) — on open, on window focus, and on a
 //!   ~30 s timer. Pristine + behind fast-forwards **into the open editor**
 //!   (apply to the mounted stores, then `ProjectOp::ReloadActiveProject`)
-//!   with the ratified toast — but never over a dirty session overlay
-//!   (D18: [`should_apply_fast_forward`]). The decide-half is the pure,
+//!   — but never over a dirty session overlay (D18:
+//!   [`should_apply_fast_forward`]). That reload is dispatched through the
+//!   plain command queue (no reply channel), so the ratified toast waits
+//!   for `open_progress::reload_outcome` to confirm it before speaking
+//!   ([`should_say_updated`]) — a refusal (a damaged collaborator update,
+//!   #907) closes the editor with its own failure notice instead, and the
+//!   toast must not contradict it. The decide-half is the pure,
 //!   host-tested logic in `visitor_banner`; this file is the IO glue, with
 //!   the timer behind one local factory fn (the `make_pull_timer` idiom).
 //! - **The refused-push consequence** — a view-visitor's save flips the
@@ -496,6 +501,7 @@ mod io {
     use lpa_cloud_client::sync::apply_fast_forward;
     use lpa_cloud_client::{LocalProject, SyncError, call, pull, push};
     use lpa_studio_core::app::library::{CatalogOp, PackageProvenance};
+    use lpa_studio_core::app::open_progress;
     use lpa_studio_core::{ProjectController, ProjectOp, StudioCommand, UiAction};
     use lpc_cloud_api::CloudError;
     use lpc_cloud_api::request::GetProject;
@@ -504,8 +510,10 @@ mod io {
     use lpc_history::{EventLog, PrefixedUid, SyncRelation, UidPrefix};
     use lpfs::{LpFs, LpFsMemory, LpPath};
 
-    use super::{PullTrigger, VisitorSession, VisitorUx};
-    use crate::app::share::visitor_banner::{BannerState, banner_state, should_apply_fast_forward};
+    use super::{PullTrigger, VisitorSession, VisitorUx, make_pull_timer};
+    use crate::app::share::visitor_banner::{
+        BannerState, banner_state, should_apply_fast_forward, should_say_updated,
+    };
     use crate::app::share::visitor_mode::share_mode;
     use crate::cloud::FetchCloudPort;
     use crate::cloud::shared_open::all_files;
@@ -651,11 +659,21 @@ mod io {
             match apply_fast_forward(&project, &report) {
                 Ok(applied) if applied.applied_events > 0 => {
                     session.relation.set(Some(SyncRelation::AtHead));
+                    let generation = open_progress::note_reload_dispatched();
                     session.tx.send(StudioCommand::Action(UiAction::from_op(
                         ProjectController::NODE_ID,
                         ProjectOp::ReloadActiveProject,
                     )));
-                    session.say(super::UPDATED_LINE);
+                    // Fire-and-forget: `CommandSender` has no reply
+                    // channel, so wait for the actor to settle THIS
+                    // dispatch before claiming the editor caught up — a
+                    // refused re-push closes the editor with its own
+                    // failure notice (D24/#907), which this toast must
+                    // not contradict.
+                    let outcome = await_reload_outcome(generation).await;
+                    if should_say_updated(outcome) {
+                        session.say(super::UPDATED_LINE);
+                    }
                 }
                 Ok(_) => {}
                 Err(error) => {
@@ -668,6 +686,28 @@ mod io {
         mount.finish().await;
         recompute_banner(session.clone(), uid, false).await;
         Ok(())
+    }
+
+    /// Poll budget for [`await_reload_outcome`]: generous margin over a
+    /// local sim reload — the `write_ack` idiom's "one round trip plus
+    /// generous margin" (`agent_host_bridge.rs`), well short of the ~20 s a
+    /// stalled device open times out at, since this reload never reaches a
+    /// physical board.
+    const RELOAD_OUTCOME_POLL_STEP_MS: u32 = 100;
+    const RELOAD_OUTCOME_POLL_ATTEMPTS: u32 = 80;
+
+    /// Wait for the actor to settle the reload requested as `generation`
+    /// ([`open_progress::reload_outcome`]) — the only way to learn it,
+    /// since `CommandSender::send` has no reply channel. `None` on
+    /// timeout: the actor had not (or will never have) processed it.
+    async fn await_reload_outcome(generation: u64) -> Option<bool> {
+        for _ in 0..RELOAD_OUTCOME_POLL_ATTEMPTS {
+            if let Some(outcome) = open_progress::reload_outcome(generation) {
+                return Some(outcome);
+            }
+            make_pull_timer(RELOAD_OUTCOME_POLL_STEP_MS).await;
+        }
+        None
     }
 
     /// Re-classify the strip from the stores (and optionally announce the
