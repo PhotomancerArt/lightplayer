@@ -57,6 +57,7 @@ fn qmul_trunc_zero(lhs: i32, rhs: i32) -> i32 {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::excessive_precision, clippy::approx_constant)] // golden values copied verbatim from the reference; precision is the point
     #[cfg(test)]
     extern crate std;
     use super::*;
