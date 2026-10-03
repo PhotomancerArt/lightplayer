@@ -941,7 +941,12 @@ fn the_direct_load_enters_the_app_where_the_bootloader_would() {
     };
     let app_entry = machine.app().expect("app").entry;
     assert_eq!(machine.harts[0].pc(), app_entry);
-    assert_eq!(app_entry, 0x4008_0844, "`Reset` in the shipped image");
+    // 0x4008_0844 until the link thread (P4 of
+    // `lp2025/2026-10-02-1918-io-thread-other-boards`): the shipped image
+    // compiles esp-rtos with `esp-radio` + `alloc` since, its IRAM scheduler
+    // code's literal pool — which `.rwtext` places ahead of `Reset` — grew by
+    // two words, and `.rwtext`'s size did not change. No linker-script change.
+    assert_eq!(app_entry, 0x4008_084C, "`Reset` in the shipped image");
     assert_eq!(machine.harts[0].ps(), 0x0006_0720, "PS_BOOT | OWB(7)");
     let frame = machine.boot_frame().expect("a direct load seeds a frame");
     assert_eq!(frame.sp, BOOTLOADER_SP_AT_APP_ENTRY);

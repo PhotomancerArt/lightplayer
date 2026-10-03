@@ -11,16 +11,19 @@
 //!   pacer) owns UART0 and only moves bytes, through
 //!   [`uart_link_pipes`] — RX FIFO in, whole frames out, RX drained between
 //!   the chunks of every write;
-//! - the **link task** ([`uart_link_task::run_uart_link`], thread executor)
-//!   owns the one [`Link`](lp_link::Link): it feeds it the bytes that
+//! - the **link task** ([`uart_link_task::run_uart_link`]) owns the one
+//!   [`Link`](lp_link::Link)'s timers and frames: it feeds it the bytes that
 //!   arrived, queues its frames, moves log records from the ring onto the log
 //!   channel, and sleeps until a timer, the I/O task's news, or a send
-//!   doorbell;
+//!   doorbell. The chip runs it on a priority-1 esp-rtos thread of its own
+//!   (`fw-esp32v3`'s `io_thread`, pinned to core 0), or on the main thread
+//!   executor beside the engine;
 //! - the **server transport** ([`uart_link_transport::UartLinkTransport`],
-//!   thread executor) takes whole wire messages off the proto channel and
-//!   queues replies onto it, sharing the link with the link task through a
-//!   `RefCell` ([`UartLinkShared`]) — sound because both are on one executor
-//!   and the I/O task never touches it (ruling DD20).
+//!   main thread executor) takes whole wire messages off the proto channel
+//!   and queues replies onto it, sharing the link with the link task through
+//!   [`UartLinkShared`] — a `RefCell` borrowed inside a lock the chip
+//!   injects when the two run on different threads. The I/O task never
+//!   touches it (ruling DD20).
 //!
 //! The board's configuration is [`uart_board_link_config`], measured against
 //! the classic's heap before any of this was built (P1).

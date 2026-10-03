@@ -13,6 +13,8 @@ extern crate alloc;
 
 pub mod jit_fns;
 #[cfg(any(feature = "usb-link", feature = "uart-link"))]
+pub mod link_lock;
+#[cfg(any(feature = "usb-link", feature = "uart-link"))]
 pub mod log_ring_logger;
 pub mod logger;
 pub mod output;

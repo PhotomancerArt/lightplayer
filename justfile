@@ -1129,6 +1129,15 @@ clippy-fw-esp32v3:
     # server stack compiles with it.
     echo "clippy: --features bench_render_loop"
     cargo clippy --profile release-esp32v3 --features bench_render_loop -- --no-deps -D warnings
+    # The link thread's two other shapes (`src/io_thread.rs`): the desk-only
+    # stack diagnostic, and the app WITHOUT the thread (the link task back on
+    # the main executor, no messages-first — P2's arrangement). Both are cfg'd
+    # out of the defaults, so nothing else here compiles them with f32 on.
+    echo "clippy: --features io_thread_stack_diag"
+    cargo clippy --profile release-esp32v3 --features io_thread_stack_diag -- --no-deps -D warnings
+    echo "clippy: io-thread OFF"
+    cargo clippy --profile release-esp32v3 --no-default-features \
+        --features esp32,server,float-f32,json-pack -- --no-deps -D warnings
     # Every harness, individually — the same loop fw-esp32s3 carries, and for
     # the same reason: a `test_*` feature sets `fw_harness`, which cfg's the
     # whole app path out, so linting the defaults leaves harness code completely
