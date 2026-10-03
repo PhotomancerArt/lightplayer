@@ -8451,6 +8451,65 @@ fn a_pull_after_the_firmware_write_holds_the_files_and_finish_update_moves_them(
     assert_eq!(sorted(after), sorted(before), "every file, byte for byte");
 }
 
+/// G1 rehearsal (2026-10-03): a held board runs on a memory filesystem —
+/// its real `/.lp/access.json` waits in the old region with its files — so
+/// Studio's USB sync found no list, added this browser's key to a store that
+/// exists only in RAM (a toast with Undo), and the card read "Who has
+/// access 1" for a board whose own list held 16. Nothing is added to a held
+/// board, and the card shows no list for it: its list is the one Finish
+/// update moves.
+#[test]
+fn a_held_board_gets_no_access_entries_and_shows_no_access_list() {
+    let device = legacy_light_player(Vec::new());
+    let (mut bench, tasks) = identified(&device, "usb-layout-held-access");
+    let target = bench.view().devices[0].id;
+    // The board on its own files: the connect's sync lists it as usual.
+    access_panel(&mut bench, &tasks, target);
+    let added_before = bench.controller.view().access_added.map(|a| a.generation);
+
+    update(&mut bench, target);
+    let panel = layout_panel(&mut bench, &tasks, target);
+    device.interrupt_next_plan_after(1);
+    press(&mut bench, &panel.continue_action.unwrap());
+    settle(&mut bench, &tasks);
+    assert_eq!(
+        device.fake_board_files().1,
+        Some(lpc_wire::FsBootState::LegacyHeld)
+    );
+    bench.run_until(&tasks, "the held board to say so", |bench| {
+        bench
+            .controller
+            .device_roster_view()
+            .layout
+            .get(&target)
+            .is_some_and(|layout| layout.finish_update.is_some())
+    });
+    // Give the held link's window every chance to sync: before the fix the
+    // sync's add landed well inside this (a second toast, a RAM-only list).
+    // The fake's server runs on its own thread, so real time passes too.
+    let until = std::time::Instant::now() + Duration::from_secs(3);
+    while std::time::Instant::now() < until {
+        bench.step(&tasks);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+
+    let added_after = bench.controller.view().access_added.map(|a| a.generation);
+    assert_eq!(
+        added_after, added_before,
+        "nothing was added to the held board's RAM store"
+    );
+    let shown = bench
+        .controller
+        .device_roster_view()
+        .access
+        .get(&target)
+        .and_then(|access| access.panel.clone());
+    assert!(
+        shown.is_none(),
+        "no \"Who has access\" for a held board: {shown:?}"
+    );
+}
+
 /// The cable is pulled mid filesystem write: the board boots formatted, the
 /// card offers the stored backup back, and Restore puts every file back.
 #[test]

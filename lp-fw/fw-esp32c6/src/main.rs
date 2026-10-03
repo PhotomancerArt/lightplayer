@@ -623,13 +623,15 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
 
     // BLE: on unless the device store turns it off, read once here (a
     // missing store is `fresh()`: Bluetooth on, locked, no keys; a damaged
-    // one is `locked()`: off). After the Wi-Fi/ESP-NOW bring-up above (the
-    // order M2's Run G proved), after the board quirks (the token), before
-    // the server exists. A board whose store says off never touches the BLE
-    // controller.
+    // one is `locked()`: off; a board HOLDING its files for the layout
+    // change is `locked()` too — its real store waits in the old region,
+    // and it must not be more open than that store says). After the
+    // Wi-Fi/ESP-NOW bring-up above (the order M2's Run G proved), after the
+    // board quirks (the token), before the server exists. A board whose
+    // store says off never touches the BLE controller.
     #[cfg(feature = "ble")]
     let ble_started = {
-        let store = lpa_server::access_store::read_device_store(base_fs.as_ref());
+        let store = lpa_server::access_store::device_store_at_boot(base_fs.as_ref(), fs_boot_state);
         #[cfg(feature = "desk_ble_params")]
         if let Ok(bytes) = base_fs.read_file(ble::desk_params_path().as_path()) {
             ble::configure_desk_params(core::str::from_utf8(&bytes).unwrap_or(""));
@@ -642,6 +644,13 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
             }
             (true, None) => {
                 log::error!("[ble] enabled, but the BT peripheral is gone — BLE off");
+                false
+            }
+            (false, _) if fs_boot_state == lpc_wire::FsBootState::LegacyHeld => {
+                log::info!(
+                    "[ble] off (files held for the layout change: the device store waits with \
+                     them)"
+                );
                 false
             }
             (false, _) => {

@@ -500,7 +500,17 @@ async function main() {
         said.includes("holding: not formatting") || said.includes("legacy-layout filesystem found"),
         (said.match(/\[FS\][^\n]*/) ?? [""])[0].slice(0, 120),
       );
-      step("the card offers Finish update", (await driver.evaluate(MAIN_TEXT)).includes("Finish update"), "");
+      // A held board's device store waits with its files: it keeps Bluetooth
+      // off (it must not be more open than that store), and Studio neither
+      // writes nor lists access for it (G1 rehearsal, 2026-10-03).
+      step(
+        "the held board kept Bluetooth off",
+        said.includes("[ble] off (files held") && !said.includes("[ble] enabled"),
+        (said.match(/\[ble\][^\n]*/) ?? ["(no [ble] line)"])[0].slice(0, 120),
+      );
+      const heldPage = await driver.evaluate(MAIN_TEXT);
+      step("the card shows no access list for it", !heldPage.includes("Who has access"), "");
+      step("the card offers Finish update", heldPage.includes("Finish update"), "");
       await pressLasting(driver, "Finish update");
     } else if (scenario === "W7b") {
       step("formatted board offers its backup", (await driver.evaluate(MAIN_TEXT)).includes("Restore files"), "");
