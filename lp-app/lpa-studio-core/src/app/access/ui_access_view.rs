@@ -67,6 +67,28 @@ pub struct UiAccessPanel {
     pub notice: Option<String>,
 }
 
+impl UiAccessPanel {
+    /// A panel before the device has answered its list: nothing known.
+    pub fn reading(device: DeviceId) -> Self {
+        Self {
+            device,
+            open: OpenTo::Nobody,
+            play: UiPasswordLine::NotSet,
+            author: UiPasswordLine::NotSet,
+            keys: Vec::new(),
+            used: 0,
+            capacity: lpc_access::MAX_SECRETS_PER_FILE,
+            ble_enabled: None,
+            restart_pending: false,
+            can_restart: true,
+            over_bluetooth: false,
+            writing: false,
+            error: None,
+            notice: None,
+        }
+    }
+}
+
 /// One "Who nearby can…" line.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum UiPasswordLine {
@@ -111,6 +133,19 @@ pub struct UiKeyGroup {
 impl UiKeyGroup {
     pub fn count(&self) -> usize {
         self.salts.len()
+    }
+}
+
+/// What a change or a sync says about the browser keys it dropped to make
+/// room on a full device.
+pub fn dropped_sentence(dropped: &[super::DroppedKey]) -> Option<String> {
+    match dropped {
+        [] => None,
+        [one] => Some(format!("To make room, an older {} was dropped.", one.label)),
+        many => Some(format!(
+            "To make room, {} older browser keys were dropped.",
+            many.len()
+        )),
     }
 }
 

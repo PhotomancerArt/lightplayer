@@ -68,7 +68,7 @@ pub use login_key_cache::{DEFAULT_KDF_ITERATIONS, LoginKeyCache};
 pub use remembered_passwords::{MAX_REMEMBERED_PASSWORDS, RememberedPasswords};
 pub use ui_access_view::{
     PLAY_ONLY_SENTENCE, UiAccessPanel, UiDeviceAccess, UiKeyGroup, UiLoginPrompt, UiPasswordLine,
-    UiUnlockOffer, open_summary,
+    UiUnlockOffer, dropped_sentence, open_summary,
 };
 
 /// Who nearby gets in with no password.

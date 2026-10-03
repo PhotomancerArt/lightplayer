@@ -44,7 +44,7 @@ use super::access_command::AccessCommand;
 use super::access_session::{AccessPhase, AccessSession, AccessStep, LoginWindow, TypedPassword};
 use super::account_keys::AccountKeys;
 use super::browser_key::{BrowserKey, FALLBACK_BROWSER_NAME};
-use super::device_access_ops::{AccessOp, DroppedKey, run_access_ops, sync_access};
+use super::device_access_ops::{AccessOp, run_access_ops, sync_access};
 use super::device_access_record::{DeviceAccessChange, DeviceAccessRecords, SetHere};
 use super::key_groups::key_groups;
 use super::key_holder::{HeldKey, held_keys};
@@ -54,7 +54,7 @@ use super::remembered_passwords::RememberedPasswords;
 use super::two_passwords::{device_password_salts, password_lines, plan_password};
 use super::ui_access_view::{
     UiAccessPanel, UiDeviceAccess, UiLoginPrompt, UiPasswordLine, UiUnlockOffer, access_line,
-    prompt_sentence,
+    dropped_sentence, prompt_sentence,
 };
 use crate::app::devices::device_effects::{DeviceEffects, DeviceTaskFuture, DeviceTimerFuture};
 
@@ -1009,18 +1009,6 @@ fn login_window(device: &Device) -> Option<LoginWindow> {
     })
 }
 
-/// What a change says about the keys it dropped to make room.
-fn dropped_sentence(dropped: &[DroppedKey]) -> Option<String> {
-    match dropped {
-        [] => None,
-        [one] => Some(format!("To make room, an older {} was dropped.", one.label)),
-        many => Some(format!(
-            "To make room, {} older browser keys were dropped.",
-            many.len()
-        )),
-    }
-}
-
 /// Whole epoch seconds, for an entry's `addedAt`.
 fn epoch_secs(now_secs: f64) -> u64 {
     if now_secs.is_finite() && now_secs > 0.0 {
@@ -1093,6 +1081,7 @@ pub(crate) async fn run_step<Io: lpa_client::ClientIo>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::access::DroppedKey;
     use crate::app::access::PromptReason;
     use crate::app::access::account_keys::tests::account;
     use crate::app::access::key_holder::InstallableKey;

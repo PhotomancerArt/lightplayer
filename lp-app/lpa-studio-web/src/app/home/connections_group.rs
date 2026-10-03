@@ -5,7 +5,7 @@
 //! |---|---|
 //! | USB | "connected" / "not connected" |
 //! | Bluetooth | the icon, "Bluetooth", a switch — nothing else |
-//! | Who has access · N › | opens the list (edit links only) |
+//! | Access · open to anyone nearby › | opens the access panel (author links only) |
 //!
 //! Bluetooth is on by default, so most people never touch the switch. The
 //! board reads it once, at boot: flipped over USB, Studio restarts the
@@ -15,7 +15,9 @@
 //! later.)
 
 use dioxus::prelude::*;
-use lpa_studio_core::{AccessCommand, DeviceAccessChange, DeviceId, UiDeviceAccess};
+use lpa_studio_core::{
+    AccessCommand, DeviceAccessChange, DeviceId, OpenTo, UiDeviceAccess, open_summary,
+};
 
 use super::access_fields::Switch;
 use super::device_access_panel::DeviceAccessPanel;
@@ -26,10 +28,9 @@ use crate::base::{DetailPopover, DetailSection, PopoverPlacement, StudioIcon, St
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub(crate) fn ConnectionsGroup(
     device: DeviceId,
-    device_name: String,
     access: UiDeviceAccess,
     on_access: EventHandler<AccessCommand>,
-    /// Stories only: mount "Who has access" open.
+    /// Stories only: mount the access panel open.
     #[props(default)]
     who_open: bool,
 ) -> Element {
@@ -78,8 +79,8 @@ pub(crate) fn ConnectionsGroup(
                 div { class: "tw:grid tw:[&>span]:w-full tw:[&>span]:place-items-stretch",
                 DetailPopover {
                     icon: StudioIconName::AccessPeople,
-                    label: "Who has access".to_string(),
-                    title: "Who has access".to_string(),
+                    label: "Access".to_string(),
+                    title: "Access".to_string(),
                     placement: PopoverPlacement::TopEnd,
                     initially_open: who_open,
                     layer_keeps_layout: true,
@@ -89,14 +90,16 @@ pub(crate) fn ConnectionsGroup(
                         span { class: "tw:inline-flex tw:flex-none tw:text-status-neutral-foreground",
                             StudioIcon { name: StudioIconName::AccessPeople, size: 15 }
                         }
-                        span { class: "tw:min-w-0 tw:flex-1 tw:text-left", "Who has access" }
-                        span { class: VALUE_CLASS,
-                            "{panel.count}"
+                        span { class: "tw:min-w-0 tw:flex-1 tw:text-left", "Access" }
+                        // A new board is open to anyone nearby: the card
+                        // says so where it can be seen.
+                        span { class: if panel.open == OpenTo::Edit { OPEN_VALUE_CLASS } else { VALUE_CLASS },
+                            if panel.ble_enabled.is_some() { "{open_summary(panel.open)}" }
                             StudioIcon { name: StudioIconName::Collapsed, size: 14 }
                         }
                     },
                     DetailSection {
-                        DeviceAccessPanel { panel, device_name, on_access }
+                        DeviceAccessPanel { panel, on_access }
                     }
                 }
                 }
@@ -156,6 +159,9 @@ const WHO_ROW_CLASS: &str = "tw:flex tw:min-h-11 tw:w-full tw:min-w-0 tw:cursor-
 
 const VALUE_CLASS: &str = "tw:inline-flex tw:flex-none tw:items-center tw:gap-1.5 tw:text-xs tw:font-semibold tw:text-subtle-foreground";
 
+/// The access row's value while anyone nearby can author: warning-tinted.
+const OPEN_VALUE_CLASS: &str = "tw:inline-flex tw:flex-none tw:items-center tw:gap-1.5 tw:text-xs tw:font-semibold tw:text-status-warning-foreground";
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -196,16 +202,8 @@ mod tests {
             line: None,
             unlock: None,
             panel: Some(UiAccessPanel {
-                device: DeviceId(1),
-                entries: Vec::new(),
-                count: 0,
                 ble_enabled,
-                open: false,
-                restart_pending: false,
-                can_restart: true,
-                over_bluetooth: false,
-                writing: false,
-                error: None,
+                ..UiAccessPanel::reading(DeviceId(1))
             }),
         }
     }
