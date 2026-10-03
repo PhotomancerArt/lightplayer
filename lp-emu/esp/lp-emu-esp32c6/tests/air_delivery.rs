@@ -45,6 +45,12 @@ use lp_emu_esp32c6::memmap;
 const FRAME_FROM_THE_OTHER_BOARD: &str = "d0000000ffffffffffffa0f26285a87cffffffffffff00007f18fe34\
 e2b3830ddd1618fe340402504c01016285a87c000000000100000000";
 
+/// The RX DMA ring the `test_espnow` image's blob posts: the firmware's
+/// `static_rx_buf_num` (`lp-fw/fw-esp32c6/src/hardware/espnow_controller_config.rs`;
+/// esp-radio's default is ten, the product has asked for four since
+/// 2026-10-01). A figure of the image, not of the machine.
+const RX_RING_DESCRIPTORS: u64 = 4;
+
 /// The `WIFI_MAC` window's base, for the experiments that read the RX
 /// registers back.
 const WIFI_MAC: u32 = 0x600a_0000;
@@ -272,19 +278,22 @@ fn the_symmetric_pair_talks_both_ways() {
     }
 }
 
-/// **G2-5, the ring's end.** The blob posts ten descriptors and the chain
-/// ends in a NULL rather than wrapping. Twelve frames into a guest that
-/// cannot drain them fills it, and the eleventh and twelfth are **dropped,
-/// counted and logged once** — never silently.
+/// **G2-5, the ring's end.** The blob posts [`RX_RING_DESCRIPTORS`]
+/// descriptors and the chain ends in a NULL rather than wrapping. Twelve
+/// frames into a guest that cannot drain them fills it, and every frame past
+/// the ring is **dropped, counted and logged once** — never silently.
 ///
 /// The observed behaviour that decided the policy is in the run: this guest
 /// does **not** re-post a descriptor the air filled (`owner` stays clear on
-/// every one of the ten afterwards), so following the chain from the base on
+/// every one of them afterwards), so following the chain from the base on
 /// every delivery is not enough on its own and the drop-count-log rule
 /// stands.
+///
+/// This was `the_eleventh_frame_is_dropped_counted_and_logged` while the
+/// image posted esp-radio's default ten.
 #[test]
 #[ignore = "needs a test_espnow ELF in LP_EMU_C6_ESPNOW_ELF"]
-fn the_eleventh_frame_is_dropped_counted_and_logged() {
+fn the_frame_past_the_ring_is_dropped_counted_and_logged() {
     let Some(elf) = espnow_elf() else { return };
     let mut m = a_listening_machine(&elf);
     let bytes = hex_to_bytes(FRAME_FROM_THE_OTHER_BOARD);
@@ -299,10 +308,14 @@ fn the_eleventh_frame_is_dropped_counted_and_logged() {
         m.air_frames_undelivered()
     );
     assert_eq!(m.air_frames_offered(), 12);
-    assert_eq!(m.air_frames_delivered(), 10, "ten descriptors, ten frames");
-    assert_eq!(m.air_frames_undelivered(), 2);
+    assert_eq!(
+        m.air_frames_delivered(),
+        RX_RING_DESCRIPTORS,
+        "one frame per descriptor"
+    );
+    assert_eq!(m.air_frames_undelivered(), 12 - RX_RING_DESCRIPTORS);
 
-    // And the ring really is the guest's ten, all handed back.
+    // And the ring really is the guest's, every descriptor handed back.
     let base = m.peek_word(WIFI_MAC + 0x4084).expect("the ring base");
     let mut desc = base;
     let mut owned_by_hardware = 0;
@@ -319,8 +332,8 @@ fn the_eleventh_frame_is_dropped_counted_and_logged() {
         }
     }
     println!("ring: {n} descriptors, {owned_by_hardware} still the hardware's");
-    assert_eq!(n, 10, "the ring the blob posted");
-    assert_eq!(owned_by_hardware, 0, "all ten were filled and handed back");
+    assert_eq!(n, RX_RING_DESCRIPTORS, "the ring the blob posted");
+    assert_eq!(owned_by_hardware, 0, "all were filled and handed back");
 }
 
 /// **G2-7, determinism.** Two runs of the same staggered pair are the same

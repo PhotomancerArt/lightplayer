@@ -255,6 +255,10 @@ Append; do not editorialize old entries.
 - If WiFi ships: decide TLS vs. LAN-only HTTP early, since it is the
   difference between a ~60 KB and a ~180 KB claim on the budget, and
   re-check the RAM budget before the flash budget.
+  **2026-10-01:** the ESP-NOW radio now asks for lean Wi-Fi driver buffers.
+  That costs 0 B of flash and saves 10,320 B of radio heap
+  (`2026-09-02-esp32c6-ram-split.md`, Amendment 2026-10-01). A station that
+  joins a network should re-check those counts before it ships.
 - Streaming/staged firmware update design, if WiFi delivery is wanted (A/B OTA
   is off the table in 4 MB).
 - Revisit `-Zfmt-debug=none` if on-device debugging becomes painful; the
