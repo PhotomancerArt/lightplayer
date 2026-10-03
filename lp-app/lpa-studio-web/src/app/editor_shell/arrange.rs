@@ -2,8 +2,8 @@
 //! cutover): sprite building — resolve loaded map2d bodies, display
 //! subsampling, honest placeholder/strip fallbacks, auto-pack — plus the
 //! drag-override-until-echo lifecycle, project-space fit bounds, and the
-//! event wiring from the crate canvas's fixture grammar to
-//! [`lpa_studio_core::EditorMetaOp`] / `PatchSelect` dispatch.
+//! event wiring from the crate canvas's fixture grammar to the fixtures'
+//! `arrange/set` offers (pressed once, on release) and `PatchSelect`.
 //!
 //! The canvas ([`lpa_mapping_editor::EditorCanvas`]) is the SURFACE: it
 //! renders [`FixtureSprite`]s and emits [`FixtureEvent`]s; every
@@ -20,8 +20,8 @@ use lpa_mapping_editor::{
     object_color, point_cells, tool_hint,
 };
 use lpa_studio_core::{
-    ArtifactLocation, EditorMetaFixture, EditorMetaOp, EditorMetaVerb, NodeId, ProjectController,
-    ProjectEditorOp, UiAction, UiArrangeTransform, UiPatchSurface, UiPatchTarget, UiSelection,
+    ArtifactLocation, NodeId, ProjectEditorOp, UiAction, UiArrangeTransform, UiPatchSurface,
+    UiPatchTarget, UiSelection,
 };
 use lpc_mapping::{Bounds2d, Map2dDoc, Map2dShape, PathAlign, ResolvedMap2d};
 
@@ -476,7 +476,7 @@ pub(crate) fn ProjectCanvasHost(
         }
     }
 
-    let dispatch_set_many = arrange_set_many_dispatch(&surface);
+    let arrange_surface = surface.clone();
     let select = move |target: Option<UiPatchTarget>| {
         on_action.call(UiAction::from_op(
             lpa_studio_core::ProjectEditorTarget::NodeTree.node_id(),
@@ -578,23 +578,31 @@ pub(crate) fn ProjectCanvasHost(
                     .map(|(key, placement)| (key.clone(), transform_of(placement)))
                     .collect();
                 if commit {
-                    // One gesture = one op = one undo step — however many
-                    // fixtures moved. The override stays up (committed)
-                    // until the snapshot echoes the write — no snap-back.
+                    // Press on release (M6e): each moved fixture's
+                    // `arrange/set`, folded into one write and one undo
+                    // step however many fixtures moved. The override stays
+                    // up (committed) until the snapshot echoes the write —
+                    // no snap-back. The live drag above stays this view's.
                     drag_override.set(Some(DragOverride {
                         transforms: transforms.clone(),
                         committed: true,
                     }));
-                    let entries: Vec<lpa_studio_core::EditorMetaSet> = transforms
+                    let presses: Option<Vec<UiAction>> = transforms
                         .iter()
-                        .map(|(key, transform)| lpa_studio_core::EditorMetaSet {
-                            node_key: key.clone(),
-                            node: nodes.get(key).copied(),
-                            transform: *transform,
+                        .map(|(key, transform)| {
+                            let node = nodes.get(key).copied()?;
+                            let set = arrange_surface
+                                .arrange_verbs_of(node)?
+                                .child(lpa_studio_core::ARRANGE_SET_VERB);
+                            crate::app::editor_shell::bind_arrange(
+                                &offers.peek(),
+                                &set,
+                                &crate::app::editor_shell::placement_args(transform),
+                            )
                         })
                         .collect();
-                    if let Some(op) = dispatch_set_many(entries) {
-                        on_action.call(UiAction::from_op(ProjectController::NODE_ID, op));
+                    if let Some(gesture) = presses.and_then(lpa_studio_core::arrange_batch) {
+                        on_action.call(gesture);
                     }
                 } else {
                     drag_override.set(Some(DragOverride {
@@ -795,37 +803,6 @@ fn sprite_target(
         // Under a display stride the clicked lamp can fall in a gap between
         // spans; the fixture is the honest answer rather than a guess.
         None => fixture,
-    }
-}
-
-/// Prebuild the `EditorMetaOp::SetMany` factory: `editor.json` artifact +
-/// the fixture facts every write refreshes footprints through. `None` =
-/// the artifact is unknown (surface not settled), so moves no-op
-/// honestly. A single-fixture gesture is simply a set of one — same op,
-/// same one undo step.
-fn arrange_set_many_dispatch(
-    surface: &UiPatchSurface,
-) -> impl Fn(Vec<lpa_studio_core::EditorMetaSet>) -> Option<EditorMetaOp> + Clone + 'static {
-    let artifact = surface.editor_meta_artifact.clone();
-    let fixtures: Vec<EditorMetaFixture> = surface
-        .fixtures
-        .iter()
-        .filter_map(|fixture| {
-            Some(EditorMetaFixture {
-                node_key: fixture.address.clone()?,
-                mapping_artifact: fixture.mapping_artifact.clone(),
-            })
-        })
-        .collect();
-    move |entries| {
-        if entries.is_empty() {
-            return None;
-        }
-        Some(EditorMetaOp {
-            artifact: artifact.clone()?,
-            fixtures: fixtures.clone(),
-            verb: EditorMetaVerb::SetMany { entries },
-        })
     }
 }
 

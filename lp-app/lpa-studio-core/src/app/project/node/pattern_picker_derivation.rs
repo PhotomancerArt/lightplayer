@@ -3,25 +3,26 @@
 //! The controller gathers the facts — the playlist face's entry strip, the
 //! playing key, the cycle and skip values (live before authored), the failed
 //! keys out of the playlist's warning, and the two channels' write targets —
-//! and [`derive_pattern_picker`] turns them into names, states and ready
-//! actions. Keeping this pure is what lets the rules below be tested without
-//! a server:
+//! and [`derive_pattern_picker`] turns them into names and states. The
+//! gestures are the playlist's offers, built from the SAME facts
+//! ([`super::playlist_offers`]), so the instrument and the verbs anyone
+//! presses cannot disagree. Keeping this pure is what lets the rules below
+//! be tested without a server:
 //!
 //! - **States**, in precedence: playing, failed, skipped, available.
-//! - **Tap** = `PlaylistActivateOp` for every entry but the one playing.
 //! - **Next/prev** = the adjacent authored key after the playing one,
 //!   wrapping, passing over skipped and failed entries (plan PD7 — Studio
 //!   picks the key and sends an activate; there is no wire command).
-//! - **On/off** = the whole skip list, rewritten with one key flipped.
+//! - **On/off** = the whole skip list, rewritten with one key changed.
 //! - **Cycle** = the whole `PlaylistCycle`: off is `Hold`; on is a cycle at
 //!   the authored step (or [`DEFAULT_STEP_SECONDS`]); the step moves along
 //!   [`STEP_LADDER_SECONDS`].
 
-use lpc_model::{PlaylistCycle, ToLpValue};
+use lpc_model::PlaylistCycle;
 
 use crate::{
-    ControllerId, PanelWriteOp, PlaylistActivateOp, ProjectController, ProjectNodeAddress,
-    UiAction, UiPanelTarget, UiPatternEntryState, UiPatternPicker, UiPatternPickerEntry,
+    OfferPath, ProjectNodeAddress, UiPanelTarget, UiPatternEntryState, UiPatternPicker,
+    UiPatternPickerEntry,
 };
 
 /// The step a cycle starts at when nothing authored one.
@@ -80,23 +81,12 @@ pub fn derive_pattern_picker(facts: PatternPickerFacts) -> UiPatternPicker {
         entries,
         active,
         cycle,
-        authored_cycle,
-        default_fade,
         skip,
         failed,
         cycle_target,
         skip_target,
+        ..
     } = facts;
-
-    let keys: Vec<u32> = entries.iter().map(|entry| entry.key).collect();
-    let movable = |key: u32| !skip.contains(&key) && !failed.contains(&key);
-    let step_to = |direction: StepDirection| {
-        let current = active?;
-        let target = adjacent_enabled_key(&keys, current, direction, movable)?;
-        Some(activate_action(&playlist, target, direction.label()))
-    };
-    let prev = step_to(StepDirection::Previous);
-    let next = step_to(StepDirection::Next);
 
     let entries = entries
         .into_iter()
@@ -111,66 +101,22 @@ pub fn derive_pattern_picker(facts: PatternPickerFacts) -> UiPatternPicker {
             } else {
                 UiPatternEntryState::Available
             };
-            let play = (state != UiPatternEntryState::Playing)
-                .then(|| activate_action(&playlist, entry.key, &format!("Play {}", entry.name)));
-            let toggle = skip_target.as_ref().map(|target| {
-                let verb = if enabled { "Skip" } else { "Include" };
-                panel_write_action(
-                    target,
-                    toggled_skip(&skip, entry.key).to_lp_value(),
-                    format!("{verb} {} in the cycle", entry.name),
-                )
-            });
             UiPatternPickerEntry {
                 key: entry.key,
                 name: entry.name,
                 state,
                 enabled,
-                play,
-                toggle,
             }
         })
         .collect();
 
-    let cycling = !cycle.is_frozen();
-    let cycle_toggle = cycle_target.as_ref().map(|target| {
-        let (value, label) = if cycling {
-            (PlaylistCycle::Hold, "Stop the cycle")
-        } else {
-            (
-                started_cycle(authored_cycle, default_fade),
-                "Cycle the patterns",
-            )
-        };
-        panel_write_action(target, value.to_lp_value(), label.to_string())
-    });
-    let step_write = |step: Option<f32>| -> Option<UiAction> {
-        let (target, step) = (cycle_target.as_ref()?, step?);
-        let value = PlaylistCycle::Cycle {
-            step_seconds: step,
-            fade_seconds: cycle.fade_seconds(),
-        };
-        Some(panel_write_action(
-            target,
-            value.to_lp_value(),
-            format!("Step every {}", format_step_seconds(step)),
-        ))
-    };
-    let running = cycle.running_step_seconds();
-    let step_shorter = step_write(running.and_then(shorter_step));
-    let step_longer = step_write(running.and_then(longer_step));
-
     UiPatternPicker {
+        verbs: OfferPath::project_node(&playlist),
         entries,
         active,
         cycle,
         cycle_target,
         skip_target,
-        cycle_toggle,
-        step_shorter,
-        step_longer,
-        prev,
-        next,
     }
 }
 
@@ -181,15 +127,6 @@ pub enum StepDirection {
     Next,
     /// Towards the previous authored key, wrapping to the last.
     Previous,
-}
-
-impl StepDirection {
-    fn label(self) -> &'static str {
-        match self {
-            Self::Next => "Next pattern",
-            Self::Previous => "Previous pattern",
-        }
-    }
 }
 
 /// The key next/prev plays: the nearest authored key after (or before)
@@ -224,12 +161,11 @@ pub fn adjacent_enabled_key(
         .find(|key| *key != current && enabled(*key))
 }
 
-/// The skip list with `key` switched: added when it was on, removed when it
-/// was off. Sorted and without repeats, so one set of switches always writes
-/// the same bytes.
-pub fn toggled_skip(skip: &[u32], key: u32) -> Vec<u32> {
+/// The skip list with `key` skipped (`skipped`) or included: sorted and
+/// without repeats, so one set of switches always writes the same bytes.
+pub fn skip_list_with(skip: &[u32], key: u32, skipped: bool) -> Vec<u32> {
     let mut next: Vec<u32> = skip.iter().copied().filter(|other| *other != key).collect();
-    if !skip.contains(&key) {
+    if skipped {
         next.push(key);
     }
     next.sort_unstable();
@@ -292,38 +228,9 @@ pub fn format_step_seconds(step: f32) -> String {
     }
 }
 
-fn activate_action(playlist: &ProjectNodeAddress, entry: u32, label: &str) -> UiAction {
-    UiAction::from_op(
-        ControllerId::new(ProjectController::NODE_ID),
-        PlaylistActivateOp {
-            node: playlist.clone(),
-            entry,
-        },
-    )
-    .with_label(label.to_string())
-}
-
-fn panel_write_action(
-    target: &UiPanelTarget,
-    value: lpc_model::LpValue,
-    label: String,
-) -> UiAction {
-    UiAction::from_op(
-        ControllerId::new(ProjectController::NODE_ID),
-        PanelWriteOp {
-            scope: target.scope,
-            channel: target.channel.clone(),
-            value,
-            ttl_ms: None,
-        },
-    )
-    .with_label(label)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lpc_model::{FromLpValue, LpValue};
 
     #[test]
     fn next_and_prev_wrap_and_pass_over_disabled_keys() {
@@ -392,10 +299,20 @@ mod tests {
     }
 
     #[test]
-    fn toggling_skip_is_sorted_and_whole() {
-        assert_eq!(toggled_skip(&[5, 2], 3), vec![2, 3, 5]);
-        assert_eq!(toggled_skip(&[2, 3, 5], 3), vec![2, 5]);
-        assert_eq!(toggled_skip(&[], 1), vec![1]);
+    fn a_skip_list_is_sorted_and_whole() {
+        assert_eq!(skip_list_with(&[5, 2], 3, true), vec![2, 3, 5]);
+        assert_eq!(skip_list_with(&[2, 3, 5], 3, false), vec![2, 5]);
+        assert_eq!(skip_list_with(&[], 1, true), vec![1]);
+        assert_eq!(
+            skip_list_with(&[3], 3, true),
+            vec![3],
+            "skipping a skipped entry writes the same list"
+        );
+        assert_eq!(
+            skip_list_with(&[2], 3, false),
+            vec![2],
+            "including an included entry writes the same list"
+        );
     }
 
     #[test]
@@ -490,116 +407,11 @@ mod tests {
     }
 
     #[test]
-    fn a_tap_activates_every_entry_but_the_playing_one() {
-        let picker = derive_pattern_picker(facts(|facts| facts.active = Some(2)));
-        let played: Vec<Option<u32>> = picker
-            .entries
-            .iter()
-            .map(|entry| activated(entry.play.as_ref()))
-            .collect();
-        assert_eq!(played, vec![Some(1), None, Some(3), Some(4), Some(5)]);
-        let op = picker.entries[0]
-            .play
-            .as_ref()
-            .and_then(|action| action.op_as::<PlaylistActivateOp>())
-            .expect("activate");
+    fn the_picker_names_the_playlist_its_verbs_live_under() {
+        let picker = derive_pattern_picker(facts(|_| {}));
         assert_eq!(
-            op.node,
-            playlist_address(),
-            "the playlist node is addressed"
-        );
-    }
-
-    #[test]
-    fn next_and_prev_are_activates_of_the_neighbouring_enabled_keys() {
-        let picker = derive_pattern_picker(facts(|facts| {
-            facts.active = Some(1);
-            facts.skip = vec![2];
-            facts.failed = vec![5];
-        }));
-        assert_eq!(activated(picker.next.as_ref()), Some(3), "passes skipped 2");
-        assert_eq!(
-            activated(picker.prev.as_ref()),
-            Some(4),
-            "wraps, passes failed 5"
-        );
-
-        let nothing_playing = derive_pattern_picker(facts(|facts| facts.active = None));
-        assert!(nothing_playing.next.is_none() && nothing_playing.prev.is_none());
-    }
-
-    #[test]
-    fn an_on_off_switch_writes_the_whole_skip_list() {
-        let picker = derive_pattern_picker(facts(|facts| {
-            facts.active = Some(1);
-            facts.skip = vec![4];
-        }));
-        assert_eq!(
-            written(picker.entries[2].toggle.as_ref()),
-            ("playlist.skip", vec![3u32, 4].to_lp_value())
-        );
-        assert_eq!(
-            written(picker.entries[3].toggle.as_ref()).1,
-            Vec::<u32>::new().to_lp_value()
-        );
-
-        let no_channel = derive_pattern_picker(facts(|facts| facts.skip_target = None));
-        assert!(
-            no_channel
-                .entries
-                .iter()
-                .all(|entry| entry.toggle.is_none()),
-            "no channel, no switch"
-        );
-    }
-
-    #[test]
-    fn the_cycle_switch_and_step_write_the_whole_cycle() {
-        let holding = derive_pattern_picker(facts(|facts| {
-            facts.authored_cycle = Some(PlaylistCycle::Cycle {
-                step_seconds: 30.0,
-                fade_seconds: 2.0,
-            });
-        }));
-        assert!(!holding.cycling());
-        let (channel, value) = written(holding.cycle_toggle.as_ref());
-        assert_eq!(channel, "playlist.cycle");
-        assert_eq!(
-            PlaylistCycle::from_lp_value(&value).expect("cycle"),
-            PlaylistCycle::Cycle {
-                step_seconds: 30.0,
-                fade_seconds: 2.0
-            },
-            "switching on takes the authored step"
-        );
-        assert!(holding.step_shorter.is_none() && holding.step_longer.is_none());
-
-        let cycling = derive_pattern_picker(facts(|facts| {
-            facts.cycle = PlaylistCycle::Cycle {
-                step_seconds: 20.0,
-                fade_seconds: 1.5,
-            };
-        }));
-        assert!(cycling.cycling());
-        assert_eq!(
-            PlaylistCycle::from_lp_value(&written(cycling.cycle_toggle.as_ref()).1).expect("cycle"),
-            PlaylistCycle::Hold,
-            "switching off holds"
-        );
-        assert_eq!(
-            PlaylistCycle::from_lp_value(&written(cycling.step_longer.as_ref()).1).expect("cycle"),
-            PlaylistCycle::Cycle {
-                step_seconds: 30.0,
-                fade_seconds: 1.5
-            },
-            "a step keeps the fade"
-        );
-        assert_eq!(
-            PlaylistCycle::from_lp_value(&written(cycling.step_shorter.as_ref()).1).expect("cycle"),
-            PlaylistCycle::Cycle {
-                step_seconds: 15.0,
-                fade_seconds: 1.5
-            }
+            picker.verbs.to_string(),
+            "project/main.show/playlist.playlist"
         );
     }
 
@@ -637,21 +449,5 @@ mod tests {
 
     fn playlist_address() -> ProjectNodeAddress {
         ProjectNodeAddress::parse("/main.show/playlist.playlist").expect("address")
-    }
-
-    fn activated(action: Option<&UiAction>) -> Option<u32> {
-        Some(action?.op_as::<PlaylistActivateOp>()?.entry)
-    }
-
-    fn written(action: Option<&UiAction>) -> (&'static str, LpValue) {
-        let op = action
-            .and_then(|action| action.op_as::<PanelWriteOp>())
-            .expect("a panel write");
-        let channel = match op.channel.as_str() {
-            lpc_model::PLAYLIST_CYCLE_CHANNEL => lpc_model::PLAYLIST_CYCLE_CHANNEL,
-            lpc_model::PLAYLIST_SKIP_CHANNEL => lpc_model::PLAYLIST_SKIP_CHANNEL,
-            other => panic!("unexpected channel {other}"),
-        };
-        (channel, op.value.clone())
     }
 }

@@ -79,9 +79,13 @@ fn node_cards() -> Element {
     rsx! {
         div { class: "tw:flex tw:w-full tw:items-start tw:gap-3.5 tw:p-4",
             div { class: "tw:min-w-0 tw:flex-1",
-                NodePane {
-                    view: readme_playlist_node(),
-                    on_action: |_| {},
+                // The strip's non-active chips press the playlist's `play`.
+                crate::core::OffersProvider {
+                    offers: crate::app::node::face_story_fixtures::playlist_strip_offers(),
+                    NodePane {
+                        view: readme_playlist_node(),
+                        on_action: |_| {},
+                    }
                 }
             }
             div { class: "tw:min-w-0 tw:flex-1",

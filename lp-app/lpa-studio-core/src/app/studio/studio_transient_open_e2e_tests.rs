@@ -278,12 +278,15 @@ fn a_clean_save_forks_the_transient_session_with_no_edits() {
         "no edits were made — the overlay is clean"
     );
 
-    // The pristine save: no edits precede it. Sent straight, not pressed:
-    // the header's `project/save` is offered only while edits are pending,
-    // and the pristine "Save a copy" is not in the offer tree yet.
-    actor_clicks(&mut actor, &handle.tx).not_offered("project/save");
-    handle.tx.send(project_action(ProjectOp::SaveOverlay));
-    drive(actor.run_one_batch_for_test());
+    // The pristine save: no edits precede it. The header's `project/save`
+    // is offered only while edits are pending; the project panel's "Save a
+    // copy" is `project/save-copy`, offered while the session is transient.
+    let mut clicks = actor_clicks(&mut actor, &handle.tx);
+    clicks.not_offered("project/save");
+    clicks.press(
+        format!("project/{}", crate::SAVE_COPY_VERB),
+        crate::OfferArgs::new(),
+    );
     let snapshot = view.try_recv().expect("save emits a snapshot");
 
     // D7/Q5: the clean save still forked — same identity, no reload.
@@ -291,6 +294,7 @@ fn a_clean_save_forks_the_transient_session_with_no_edits() {
         !snapshot.open_project_transient,
         "a save with nothing to write still forks: the session is ordinary now"
     );
+    actor_clicks(&mut actor, &handle.tx).not_offered(format!("project/{}", crate::SAVE_COPY_VERB));
     assert_eq!(snapshot.transient_fork_generation, 1, "one fork completed");
     assert_eq!(
         snapshot.open_project_uid.as_deref(),

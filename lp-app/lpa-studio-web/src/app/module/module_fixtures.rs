@@ -1157,7 +1157,7 @@ pub(crate) fn playlist_face() -> UiPlaylistFace {
                 duration_ms: Some(180_000),
                 cue: false,
                 thumb: Some(aurora_preview(18, 10, 3.1)),
-                action: None,
+                focus: None,
             },
             UiPlaylistEntry {
                 key: 1,
@@ -1165,7 +1165,7 @@ pub(crate) fn playlist_face() -> UiPlaylistFace {
                 duration_ms: Some(240_000),
                 cue: false,
                 thumb: Some(aurora_preview(18, 10, 6.5)),
-                action: None,
+                focus: None,
             },
         ],
         active: Some(0),

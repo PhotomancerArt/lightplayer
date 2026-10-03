@@ -18,8 +18,10 @@
 //! 4. **On/off per pattern.** A squared block at the end of each row: off
 //!    means the cycle, next and prev pass it by. A tap still plays it.
 //!
-//! Everything a gesture sends is a ready [`UiAction`] on the picker — this
-//! component decides nothing. While the panel holds the cycle or the switch
+//! Every gesture presses one of the playlist's offers, published by core
+//! under [`UiPatternPicker::verbs`] (`play`, `skip`, `cycle`,
+//! `step-shorter`/`step-longer`, `prev`/`next`) — this component decides
+//! nothing, and a verb core does not publish draws inert. While the panel holds the cycle or the switch
 //! set, those controls wear the engaged gold and a reset glyph releases
 //! them (panel.md P2: clear is always one obvious gesture).
 //!
@@ -28,11 +30,15 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    UiAction, UiPanelTarget, UiPatternEntryState, UiPatternPicker, UiPatternPickerEntry,
+    OfferArgs, PLAYLIST_CYCLE_VERB, PLAYLIST_CYCLING_PARAM, PLAYLIST_ENTRY_PARAM,
+    PLAYLIST_NEXT_VERB, PLAYLIST_PLAY_VERB, PLAYLIST_PREV_VERB, PLAYLIST_SKIP_VERB,
+    PLAYLIST_SKIPPED_PARAM, PLAYLIST_STEP_LONGER_VERB, PLAYLIST_STEP_SHORTER_VERB, UiAction,
+    UiOffer, UiPanelTarget, UiPatternEntryState, UiPatternPicker, UiPatternPickerEntry,
 };
 
 use crate::app::module::PanelGesture;
 use crate::base::{StudioIcon, StudioIconName};
+use crate::core::use_offers;
 
 /// A squared block button: the discrete-control language (panel.md; the
 /// stepped knob's blocks).
@@ -60,6 +66,23 @@ pub fn PatternPicker(
         .skip_target
         .as_ref()
         .is_some_and(|target| target.engaged);
+    // The playlist's verbs, as core publishes them now.
+    let offers = use_offers();
+    let verb = |name: &str| {
+        offers
+            .read()
+            .get(&picker.verbs.clone().child(name))
+            .cloned()
+    };
+    let prev = verb(PLAYLIST_PREV_VERB);
+    let next = verb(PLAYLIST_NEXT_VERB);
+    let play = verb(PLAYLIST_PLAY_VERB);
+    let skip = verb(PLAYLIST_SKIP_VERB);
+    let cycle = PickerCycleVerbs {
+        cycle: verb(PLAYLIST_CYCLE_VERB),
+        shorter: verb(PLAYLIST_STEP_SHORTER_VERB),
+        longer: verb(PLAYLIST_STEP_LONGER_VERB),
+    };
 
     rsx! {
         div { class: "tw:grid tw:min-w-0 tw:gap-2.5",
@@ -68,7 +91,7 @@ pub fn PatternPicker(
                 ActionBlock {
                     label: "◀",
                     title: "Previous pattern",
-                    action: picker.prev.clone(),
+                    offer: prev,
                     on_action,
                 }
                 div {
@@ -85,12 +108,12 @@ pub fn PatternPicker(
                 ActionBlock {
                     label: "▶",
                     title: "Next pattern",
-                    action: picker.next.clone(),
+                    offer: next,
                     on_action,
                 }
             }
             // 2. cycle
-            CycleRow { picker: picker.clone(), held: cycle_held, on_action, on_panel }
+            CycleRow { picker: picker.clone(), verbs: cycle, held: cycle_held, on_action, on_panel }
             // 3 + 4. the set, with its on/off blocks
             div { class: "tw:grid tw:min-w-0 tw:gap-1",
                 div { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-1.5",
@@ -111,6 +134,8 @@ pub fn PatternPicker(
                         PatternRow {
                             key: "{entry.key}",
                             entry,
+                            play: play.clone(),
+                            skip: skip.clone(),
                             held: skip_held,
                             on_action,
                         }
@@ -121,11 +146,32 @@ pub fn PatternPicker(
     }
 }
 
+/// The cycle row's verbs: the switch and the step pair.
+#[derive(Clone, Debug, PartialEq)]
+struct PickerCycleVerbs {
+    cycle: Option<UiOffer>,
+    shorter: Option<UiOffer>,
+    longer: Option<UiOffer>,
+}
+
+/// Press `offer` with `args` and hand the bound action to `on_action`; a
+/// press core refuses is logged, never dispatched.
+fn press(offer: &UiOffer, args: OfferArgs, on_action: Option<EventHandler<UiAction>>) {
+    let Some(handler) = on_action else {
+        return;
+    };
+    match offer.press(&args) {
+        Ok(action) => handler.call(action),
+        Err(error) => log::warn!("pattern: `{}` refused the press: {error}", offer.path),
+    }
+}
+
 /// The cycle switch, and the step while it runs.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn CycleRow(
     picker: UiPatternPicker,
+    verbs: PickerCycleVerbs,
     held: bool,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
     #[props(default)] on_panel: Option<EventHandler<PanelGesture>>,
@@ -150,7 +196,7 @@ fn CycleRow(
     } else {
         "tw:h-2.5 tw:w-2.5 tw:flex-none tw:rounded-[1px] tw:border tw:border-dim-foreground"
     };
-    let toggle = picker.cycle_toggle.clone();
+    let toggle = verbs.cycle.clone();
     let step = picker
         .step_seconds()
         .map(lpa_studio_core::app::project::node::pattern_picker_derivation::format_step_seconds);
@@ -166,8 +212,10 @@ fn CycleRow(
                 title: if cycling { "Cycling — tap to stay on the playing pattern" } else { "Holding — tap to cycle the patterns" },
                 onclick: move |event| {
                     event.stop_propagation();
-                    if let (Some(action), Some(handler)) = (toggle.clone(), on_action) {
-                        handler.call(action);
+                    if let Some(offer) = &toggle {
+                        let args = OfferArgs::new()
+                            .with(PLAYLIST_CYCLING_PARAM, (!cycling).to_string());
+                        press(offer, args, on_action);
                     }
                 },
                 span { class: pip_class }
@@ -177,7 +225,7 @@ fn CycleRow(
                 ActionBlock {
                     label: "−",
                     title: "Shorter step",
-                    action: picker.step_shorter.clone(),
+                    offer: verbs.shorter.clone(),
                     on_action,
                 }
                 span { class: "tw:inline-flex tw:h-8 tw:min-w-[4.5rem] tw:items-center tw:justify-center tw:font-mono tw:text-xs tw:tabular-nums tw:text-strong-foreground",
@@ -186,7 +234,7 @@ fn CycleRow(
                 ActionBlock {
                     label: "+",
                     title: "Longer step",
-                    action: picker.step_longer.clone(),
+                    offer: verbs.longer.clone(),
                     on_action,
                 }
             } else {
@@ -208,6 +256,11 @@ fn CycleRow(
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn PatternRow(
     entry: UiPatternPickerEntry,
+    /// The playlist's `play`: a tap plays this entry (absent or playing:
+    /// inert).
+    play: Option<UiOffer>,
+    /// The playlist's `skip`: the on/off block flips this entry.
+    skip: Option<UiOffer>,
     /// The panel holds the switch set: the blocks wear the engaged gold.
     held: bool,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
@@ -256,8 +309,9 @@ fn PatternRow(
         UiPatternEntryState::Skipped => format!("Play {} (it is off in the cycle)", entry.name),
         UiPatternEntryState::Available => format!("Play {}", entry.name),
     };
-    let play = entry.play.clone();
-    let toggle = entry.toggle.clone();
+    let key = entry.key.to_string();
+    let play = play.filter(|_| entry.state != UiPatternEntryState::Playing);
+    let enabled = entry.enabled;
     let block_class = "tw:inline-flex tw:w-9 tw:flex-none tw:cursor-pointer tw:appearance-none tw:items-center tw:justify-center tw:border-0 tw:border-l tw:border-solid tw:border-border-muted tw:bg-transparent tw:p-0";
     let square_class = match (entry.enabled, held) {
         (true, true) => "tw:h-3.5 tw:w-3.5 tw:rounded-[1px] tw:bg-status-engaged-foreground",
@@ -281,10 +335,14 @@ fn PatternRow(
                 title: "{title}",
                 aria_label: "{title}",
                 aria_current: if entry.state == UiPatternEntryState::Playing { "true" } else { "false" },
-                onclick: move |event| {
-                    event.stop_propagation();
-                    if let (Some(action), Some(handler)) = (play.clone(), on_action) {
-                        handler.call(action);
+                onclick: {
+                    let key = key.clone();
+                    move |event: MouseEvent| {
+                        event.stop_propagation();
+                        if let Some(offer) = &play {
+                            let args = OfferArgs::new().with(PLAYLIST_ENTRY_PARAM, key.clone());
+                            press(offer, args, on_action);
+                        }
                     }
                 },
                 span { class: name_class, "{entry.name}" }
@@ -299,11 +357,15 @@ fn PatternRow(
                 aria_checked: "{entry.enabled}",
                 aria_label: "{switch_label}",
                 title: "{switch_label}",
-                disabled: toggle.is_none(),
+                disabled: skip.is_none(),
                 onclick: move |event| {
                     event.stop_propagation();
-                    if let (Some(action), Some(handler)) = (toggle.clone(), on_action) {
-                        handler.call(action);
+                    if let Some(offer) = &skip {
+                        // On in the cycle now: the switch skips it.
+                        let args = OfferArgs::new()
+                            .with(PLAYLIST_ENTRY_PARAM, key.clone())
+                            .with(PLAYLIST_SKIPPED_PARAM, enabled.to_string());
+                        press(offer, args, on_action);
                     }
                 },
                 span { class: square_class }
@@ -312,17 +374,17 @@ fn PatternRow(
     }
 }
 
-/// A squared block that dispatches one ready action, or sits inert when
-/// there is none.
+/// A squared block that presses one parameterless offer, or sits inert
+/// when core publishes none.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn ActionBlock(
     label: &'static str,
     title: &'static str,
-    action: Option<UiAction>,
+    offer: Option<UiOffer>,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
-    let class = if action.is_some() {
+    let class = if offer.is_some() {
         BLOCK_CLASS
     } else {
         BLOCK_INERT_CLASS
@@ -333,11 +395,11 @@ fn ActionBlock(
             r#type: "button",
             title,
             aria_label: title,
-            disabled: action.is_none(),
+            disabled: offer.is_none(),
             onclick: move |event| {
                 event.stop_propagation();
-                if let (Some(action), Some(handler)) = (action.clone(), on_action) {
-                    handler.call(action);
+                if let Some(offer) = &offer {
+                    press(offer, OfferArgs::new(), on_action);
                 }
             },
             "{label}"
