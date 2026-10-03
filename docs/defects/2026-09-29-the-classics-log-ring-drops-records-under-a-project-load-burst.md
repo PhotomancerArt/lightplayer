@@ -154,3 +154,14 @@ log path sized for one chip's drain rate (the C6's USB link task) moved
 unchanged onto a chip whose line is ~10x slower and whose link task the
 engine can hold off; the burst that exposed it is exactly the moment the
 logs are most wanted: a project coming up.
+
+**Silicon, 2026-10-03 (agent-run desk sitting, DOM-Z-102)** — the emulated
+result holds on the board. Uploading `projects/test/five-wire` (which resets
+the board through the CH340 and then loads it), main `d68791d96` reported
+`[LINK] 16`/`19 log records dropped` at boot, before the link came up, and
+`[LINK] 4 log records dropped` in the load burst, both uploads alike; PR
+#943's `96dfc8cca` reported **none, of either kind**, over two uploads (and
+none in any of its six other boots). The silicon burst is smaller than the
+emulator's (4 vs 25 records): the board's frame is ~14× longer in real time
+than the emulated one, which plausibly spreads the burst over more link passes (not measured)
+(`2026-10-03-the-emulated-classic-renders-14x-faster-than-silicon-…`).
