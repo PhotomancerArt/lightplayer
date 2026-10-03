@@ -18,7 +18,18 @@
 //!    only overdue if its ACK has not *arrived*, not if the ACK waits unread
 //!    in the FIFO while this task writes (that was every spurious resend on
 //!    the emulator's clean link);
-//! 4. sleep until the link's next timer, input, or the transport's doorbell.
+//! 4. sleep until the link's next timer, input, or the doorbell — rung by the
+//!    transport when it queues a reply and by the log ring when a record
+//!    lands ([`crate::log_ring_logger::ring_on_record`]). Nothing wakes the
+//!    task on a cadence of its own: with nothing to do it sleeps until the
+//!    link's own timers (SYN every 100 ms without a host, keepalive every
+//!    250 ms with one) or [`IDLE_BACKSTOP_US`].
+//!
+//! Waking on events and not on a timer matters once the task has a thread of
+//! its own (the C6's `io-thread`): every pass then preempts the render, and
+//! silicon charges ~300 µs for a pass that finds nothing to do. A 10 ms
+//! cadence cost ~10% of a project's frame rate on the C6
+//! (`lp2025/2026-10-01-1200-io-thread-spike`).
 //!
 //! A write the host does not drain in time is abandoned: the link resends
 //! what matters. There is no "host not draining" latch any more (D8): with
@@ -41,8 +52,10 @@ use super::usb_link_shared::UsbLinkShared;
 pub const WRITE_TIMEOUT: Duration = Duration::from_millis(250);
 /// Frames written per pass before the task looks at the RX side again.
 pub const FRAMES_PER_PASS: usize = 8;
-/// The longest the task sleeps with nothing to do (the log ring's cadence).
-pub const IDLE_CAP_US: Micros = 10_000;
+/// The longest the task sleeps with nothing to do. A backstop only: log
+/// records and queued replies ring the doorbell, and the link's own timers
+/// come sooner whenever a host is there or being looked for.
+pub const IDLE_BACKSTOP_US: Micros = 250_000;
 /// Log records moved onto the log channel per pass. Each is popped under its
 /// own short critical section (see [`crate::log_ring_logger::pump`]).
 const LOG_RECORDS_PER_PASS: usize = 4;
@@ -104,6 +117,7 @@ pub async fn run_usb_link<R: Read, W: Write, C: UsbLinkChip>(
     let mut enumerated = true;
     let mut sof_sampled_at: Micros = 0;
     let mut drain_asked_at: Option<Micros> = None;
+    crate::log_ring_logger::ring_on_record(shared.doorbell_signal());
 
     loop {
         chip.note_io_alive();
@@ -117,9 +131,10 @@ pub async fn run_usb_link<R: Read, W: Write, C: UsbLinkChip>(
         drain_rx(&mut rx, shared, &mut buf).await;
 
         let now = now_us();
-        shared.with_link(|link| {
-            crate::log_ring_logger::pump(link, now, LOG_RECORDS_PER_PASS);
+        let logs_moved = shared.with_link(|link| {
+            let moved = crate::log_ring_logger::pump(link, now, LOG_RECORDS_PER_PASS);
             usb_link_counters::note_stalled(link.is_stalled(now));
+            moved
         });
 
         let mut more = false;
@@ -173,10 +188,14 @@ pub async fn run_usb_link<R: Read, W: Write, C: UsbLinkChip>(
             }
         }
 
-        let wake = if more {
+        // A burst longer than one pass's records: go round again while the
+        // link keeps taking them. A pass that moved none waits for the event
+        // that makes room (an ACK arriving, a timer) or a new record.
+        let log_backlog = logs_moved > 0 && crate::log_ring_logger::has_records();
+        let wake = if more || log_backlog {
             now_us()
         } else {
-            wake_at(shared, IDLE_CAP_US)
+            wake_at(shared, IDLE_BACKSTOP_US)
         };
         match select3(
             rx.read(&mut buf),
@@ -229,8 +248,8 @@ async fn drain_rx<R: Read>(rx: &mut R, shared: &UsbLinkShared, buf: &mut [u8; 64
     }
 }
 
-/// When the link next needs a pass for a timer, capped so the log ring is
-/// pumped at least every `cap_us`.
+/// When the link next needs a pass for a timer, and at the latest `cap_us`
+/// from now.
 fn wake_at(shared: &UsbLinkShared, cap_us: Micros) -> Micros {
     let now = now_us();
     shared.with_link(|link| {

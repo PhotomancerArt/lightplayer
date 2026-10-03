@@ -220,11 +220,41 @@ impl Roster {
     /// Rehydrate persisted records at startup: each becomes a detached
     /// device, so a granted port can be re-matched to a device the user
     /// already named.
-    pub fn load_records(&mut self, records: impl IntoIterator<Item = DeviceRecord>) {
-        for record in records {
+    ///
+    /// **One id, one entry.** Every input reaches a device BY ITS ID, so two
+    /// entries sharing one would split a board in two: the hello merges into
+    /// one, every later frame and every rename lands on the other. A
+    /// persisted id is only a hint — each page mints its own from 1, so two
+    /// tabs, or a record that loads after a link has already minted the same
+    /// number, can leave two rows on disk wearing it. A record whose id is
+    /// already held (by a device, a pending link, or an earlier record of
+    /// this batch) is loaded under a freshly minted one; the next persist
+    /// writes the new id back. Returns the id each record was loaded under,
+    /// in order.
+    pub fn load_records(
+        &mut self,
+        records: impl IntoIterator<Item = DeviceRecord>,
+    ) -> Vec<DeviceId> {
+        let records: Vec<DeviceRecord> = records.into_iter().collect();
+        // Raise the mint past every persisted id FIRST, so a re-keyed record
+        // can never take a number a later record of this batch still wears.
+        for record in &records {
             self.state.next_device_id = self.state.next_device_id.max(record.device.0);
+        }
+        let mut loaded = Vec::with_capacity(records.len());
+        for mut record in records {
+            if self.id_is_held(record.device) {
+                record.device = self.state.mint_device_id();
+            }
+            loaded.push(record.device);
             self.devices.push(Device::from_record(record));
         }
+        loaded
+    }
+
+    /// Whether a device or a pending link already answers to `id`.
+    fn id_is_held(&self, id: DeviceId) -> bool {
+        self.index_of(id).is_some() || self.pending.iter().any(|entry| entry.device_id() == id)
     }
 
     pub fn config(&self) -> &RosterConfig {
@@ -1467,6 +1497,114 @@ mod tests {
             blocked(&roster, LinkId(1)).is_over_bluetooth(),
             "opened, still identifying"
         );
+    }
+
+    /// Two saved records that share a `DeviceId` on disk (ids are minted
+    /// per page, so another tab — or a record that loaded after a link had
+    /// already minted its number — can write the same one twice) must load
+    /// as two entries with two ids. Sharing one, every input addressed to
+    /// the id reached whichever entry came first: the board's hello merged
+    /// into its own record, and every frame after it landed on the OTHER
+    /// record as an `IdentityConflict`, and a rename aimed at the board
+    /// renamed its neighbour (docs/defects/
+    /// 2026-10-02-saved-records-sharing-a-device-id-misroute-the-board.md).
+    #[test]
+    fn records_sharing_an_id_load_apart_and_the_board_keeps_its_own_frames() {
+        for fast in [false, true] {
+            let mut roster = Roster::new(RosterConfig::default());
+            let facts = roster_proto(&roster);
+            roster.load_records(vec![
+                DeviceRecord {
+                    name: Some("Porch sign".to_string()),
+                    ..DeviceRecord::new(DeviceId(1), mac_chain("02:00:00:00:00:01"))
+                },
+                DeviceRecord::new(DeviceId(1), mac_chain(DESK_MAC)),
+            ]);
+
+            roster.handle(Millis(0), attach(LinkId(1), "usb-2"));
+            if !fast {
+                roster.handle(Millis(10), opened(LinkId(1), "usb-2"));
+            }
+            // The boot hello, then the board's next frames — a second hello
+            // (an identify's own ask) and a heartbeat-borne identity.
+            for at in [20, 30, 40] {
+                roster.handle(Millis(at), hello_mac(LinkId(1), &facts, DESK_MAC));
+            }
+
+            let conflicts: Vec<String> = roster
+                .journal()
+                .notes()
+                .filter(|(_, note)| matches!(note, JournalNote::IdentityConflict { .. }))
+                .map(|(_, note)| format!("{note:?}"))
+                .collect();
+            assert!(conflicts.is_empty(), "fast hello {fast}: {conflicts:?}");
+            assert!(roster.pending().is_empty());
+            assert_eq!(roster.devices().len(), 2, "merged into its record, no twin");
+            let board = roster
+                .devices()
+                .iter()
+                .find(|device| device.identity.mac == Some(MacAddress(DESK_MAC.to_string())))
+                .expect("the saved board");
+            assert_eq!(board.link(), Some(LinkId(1)), "the link is the board's");
+            let board_id = board.id;
+
+            roster.handle(
+                Millis(50),
+                Input::Action(Action::SetName {
+                    device: board_id,
+                    name: "Desk C6".to_string(),
+                }),
+            );
+            let titles: Vec<String> = roster.devices().iter().map(Device::title).collect();
+            assert!(titles.contains(&"Desk C6".to_string()), "{titles:?}");
+            assert!(
+                titles.contains(&"Porch sign".to_string()),
+                "a rename aimed at the board never lands on its neighbour: {titles:?}"
+            );
+            let ids: Vec<DeviceId> = roster.devices().iter().map(|device| device.id).collect();
+            assert_ne!(ids[0], ids[1], "one id, one entry (fast hello: {fast})");
+        }
+    }
+
+    /// Where the shared ids come from: a record that loads AFTER a link has
+    /// minted the same number (the library hydrate is asynchronous). The
+    /// loaded record has to take a fresh id, or a different board on that
+    /// link is promoted under the record's id and both are persisted with it.
+    #[test]
+    fn a_record_loaded_after_a_link_minted_its_id_takes_a_fresh_one() {
+        let mut roster = Roster::new(RosterConfig::default());
+        let facts = roster_proto(&roster);
+        roster.handle(Millis(0), attach(LinkId(1), "usb-1"));
+        let minted = roster.pending()[0].device_id();
+
+        roster.load_records(vec![DeviceRecord::new(minted, mac_chain(DESK_MAC))]);
+        roster.handle(Millis(10), opened(LinkId(1), "usb-1"));
+        roster.handle(
+            Millis(20),
+            hello_mac(LinkId(1), &facts, "02:00:00:00:00:01"),
+        );
+        roster.handle(Millis(30), attach(LinkId(2), "usb-2"));
+
+        let mut ids: Vec<DeviceId> = roster.devices().iter().map(|device| device.id).collect();
+        ids.extend(roster.pending().iter().map(PendingLink::device_id));
+        let mut unique = ids.clone();
+        unique.sort();
+        unique.dedup();
+        assert_eq!(ids.len(), 3, "two boards and a fresh link: {ids:?}");
+        assert_eq!(
+            unique.len(),
+            ids.len(),
+            "every entry has its own id: {ids:?}"
+        );
+    }
+
+    const DESK_MAC: &str = "10:bd:a3:b0:8e:30";
+
+    fn mac_chain(mac: &str) -> IdentityChain {
+        IdentityChain {
+            mac: Some(MacAddress(mac.to_string())),
+            ..Default::default()
+        }
     }
 
     fn roster_proto(roster: &Roster) -> HelloFacts {

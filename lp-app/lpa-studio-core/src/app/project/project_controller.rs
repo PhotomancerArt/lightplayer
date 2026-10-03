@@ -3409,15 +3409,20 @@ impl ProjectController {
     /// checked-out files are already there — and replaces the runtime's
     /// loaded project with that content.
     ///
-    /// No lock is taken (the open already holds it), and no format
-    /// migration runs: a tracking copy must not be diverged from its own
-    /// history by a local rewrite, so content this build cannot load
-    /// surfaces as the open error it is.
+    /// No lock is taken (the open already holds it). The same open
+    /// pre-flight runs here too (`migrate_package_on_open`): a head that
+    /// moved past this build's format must be refused with the classified
+    /// "newer LightPlayer" reason rather than handed to the runtime as a
+    /// parser failure, and a head still behind the current format is
+    /// migrated and saved in place exactly as an open would — a tracking
+    /// copy only diverges from its own history when a LOCAL rewrite does
+    /// that, and the migrator's write is recorded as its own history event
+    /// (the undo path), not a silent local edit.
     pub(crate) async fn reload_active_from_library(
         &mut self,
         server: &mut StudioServerClient,
     ) -> Result<Vec<UiLogDraft>, UiError> {
-        let (uid, slug, package_fs, history_fs, transient) = {
+        let (uid, slug, package_fs, history_fs, transient, now) = {
             let context = self.library.as_ref().ok_or_else(no_library_error)?;
             let active = context.active.as_ref().ok_or_else(|| {
                 UiError::MissingSession("no active library project to reload".to_string())
@@ -3428,11 +3433,17 @@ impl ProjectController {
                 std::rc::Rc::clone(&active.handle.package_fs),
                 std::rc::Rc::clone(&active.handle.history_fs),
                 active.transient.clone(),
+                (context.now_secs)(),
             )
         };
-        let handle = crate::app::library::PackageHandle::load(uid, slug, package_fs, history_fs)
-            .map_err(library_ui_error)?;
+        let mut handle =
+            crate::app::library::PackageHandle::load(uid, slug, package_fs, history_fs)
+                .map_err(library_ui_error)?;
         let title = handle.slug.clone();
+        // Pre-flight (same as `open_opened_package`'s, P3): BEFORE anything
+        // reads the package for the push, so a refused or upgraded head
+        // never reaches `open_library_project`'s hash check.
+        self.migrate_package_on_open(&mut handle, now)?;
         let files = handle.read_all_files().map_err(library_ui_error)?;
         let expected_hash = handle.content_hash().map_err(library_ui_error)?.to_string();
         let loaded = server
@@ -3467,11 +3478,22 @@ impl ProjectController {
     ) -> Result<(), UiError> {
         use crate::app::library::{PackageHealth, classify_package, health_for};
 
-        let class = {
+        // The strict manifest read is the gallery card's "Damaged project
+        // file" check, and the runtime's loader parses `project.json` the
+        // same way (`ProjectManifest::read_json`): a current-format
+        // manifest it refuses must stop here, before the push clears what
+        // the runtime is running. `health_for` ignores the defect for any
+        // other class, so an upgradable manifest still migrates.
+        let (class, manifest_defect) = {
             let package_fs = handle.package_fs.borrow();
-            classify_package(&*package_fs)
+            (
+                classify_package(&*package_fs),
+                crate::app::library::package_manifest::read_manifest(&*package_fs)
+                    .err()
+                    .map(|error| error.to_string()),
+            )
         };
-        match health_for(&class, None) {
+        match health_for(&class, manifest_defect.as_deref()) {
             PackageHealth::Ready => return Ok(()),
             PackageHealth::UpgradesOnOpen { .. } => {}
             PackageHealth::Blocked { headline, remedy } => {
@@ -10974,6 +10996,109 @@ mod tests {
         };
         assert_eq!(issue.message, "the runtime went away");
         assert_eq!(issue.detail, None);
+    }
+
+    /// A current-format `project.json` the strict reader refuses: the
+    /// gallery card already calls it "Damaged project file" and offers no
+    /// Open, but an address (`/p/<slug>-<uid>`) still reaches the open. The
+    /// pre-flight must give the card's verdict BEFORE the push — not clear
+    /// the runtime's running project and come back with the loader's
+    /// parser complaint.
+    #[test]
+    fn a_damaged_current_format_manifest_is_refused_before_anything_is_sent() {
+        use crate::app::studio::studio_edit_e2e_tests::{
+            InProcessServerIo, device_e2e_server, drive, edit_e2e_files,
+        };
+        use lpc_model::AsLpPath;
+
+        // The runtime is running a project in the storage dir the open
+        // replaces.
+        let runtime_dir = format!(
+            "/projects/{}",
+            crate::app::project::demo_project::DEMO_PROJECT_STORAGE_ID
+        );
+        let mut server = device_e2e_server();
+        for (name, body) in edit_e2e_files() {
+            server
+                .base_fs_mut()
+                .write_file(
+                    format!("{runtime_dir}/{name}").as_str().as_path(),
+                    body.as_bytes(),
+                )
+                .unwrap();
+        }
+        server
+            .load_project(runtime_dir.as_str().as_path())
+            .expect("the runtime's own project loads");
+        let server = Rc::new(RefCell::new(server));
+        let sent = Rc::new(RefCell::new(Vec::new()));
+        let mut client = StudioServerClient::from_io_for_test(
+            "in-process",
+            Box::new(InProcessServerIo {
+                server: Rc::clone(&server),
+                inbox: Rc::new(RefCell::new(std::collections::VecDeque::new())),
+                sent: Rc::clone(&sent),
+            }),
+        );
+
+        // A healthy library package, damaged after install the way a hand
+        // edit or a newer writer would: still format 11, one key too many.
+        let files: Vec<(&str, &[u8])> = edit_e2e_files()
+            .iter()
+            .map(|(name, body)| (*name, body.as_bytes()))
+            .collect();
+        let (store, summary) = package_for_open(&files);
+        let damaged = format!(
+            r#"{{"format":{},"uid":"{}","surprise":true}}"#,
+            lpc_model::PROJECT_FORMAT_VERSION,
+            summary.uid
+        );
+        store
+            .open(summary.uid)
+            .unwrap()
+            .package_fs
+            .borrow()
+            .write_file("/project.json".as_path(), damaged.as_bytes())
+            .unwrap();
+        let card = store
+            .list()
+            .unwrap()
+            .into_iter()
+            .find(|card| card.uid == summary.uid)
+            .expect("the card stays on screen");
+        assert_eq!(
+            card.health.blocked().map(|(headline, _)| headline),
+            Some("Damaged project file"),
+            "the gallery's verdict"
+        );
+
+        let (mut project, _host) = ready_with_library(&store);
+        let error = drive(project.open_library_package(&mut client, &summary.uid.to_string()))
+            .expect_err("a manifest the loader refuses does not open");
+        project.fail(error.to_string());
+
+        let ProjectState::Failed { issue } = &project.state else {
+            panic!("expected the failed state, got {:?}", project.state);
+        };
+        assert!(
+            issue.message.contains("Damaged project file"),
+            "the card's words, not a parser string: {}",
+            issue.message
+        );
+        assert!(
+            sent.borrow().is_empty(),
+            "nothing reached the runtime: {:?}",
+            sent.borrow()
+        );
+        assert_eq!(
+            server
+                .borrow()
+                .project_manager()
+                .list_loaded_projects()
+                .len(),
+            1,
+            "the runtime's running project was not cleared"
+        );
     }
 
     /// GV fix 4: the project title (pane AND root card) comes from the

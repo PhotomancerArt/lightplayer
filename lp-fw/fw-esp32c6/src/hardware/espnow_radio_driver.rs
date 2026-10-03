@@ -11,13 +11,14 @@ use alloc::vec::Vec;
 use core::cell::RefCell;
 use lp_collection::{VecMap, VecSet};
 
+use crate::hardware::espnow_controller_config::espnow_controller_config;
 use esp_hal::efuse::{InterfaceMacAddress, interface_mac_address};
 use esp_hal::peripherals::WIFI;
 use esp_radio::esp_now::{
     BROADCAST_ADDRESS, EspNow, EspNowError, EspNowManager, EspNowReceiver, EspNowSender,
     ReceivedData,
 };
-use esp_radio::wifi::{ControllerConfig, WifiController};
+use esp_radio::wifi::WifiController;
 use lpc_hardware::{
     HardwareEndpointError, HardwareLease, HwAddress, HwCapability, HwClaim, HwDriver, HwEndpoint,
     HwEndpointId, HwEndpointKind, HwEndpointSpec, HwEndpointStatus, HwRegistry,
@@ -60,7 +61,7 @@ impl Esp32EspNowRadioDriver {
         default_channel: u8,
     ) -> Result<Self, HardwareEndpointError> {
         validate_channel(default_channel)?;
-        let (controller, interfaces) = esp_radio::wifi::new(wifi, ControllerConfig::default())
+        let (controller, interfaces) = esp_radio::wifi::new(wifi, espnow_controller_config())
             .map_err(|error| HardwareEndpointError::Other {
                 message: format!("ESP-NOW Wi-Fi init failed: {error:?}"),
             })?;

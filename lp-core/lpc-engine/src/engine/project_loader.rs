@@ -30,7 +30,7 @@ use lpc_model::{FixtureDef, MappingConfig};
 use lpc_model::{AssetContentType, AssetLocation};
 #[cfg(any(feature = "node-shader", feature = "node-fixture"))]
 use lpc_registry::AssetText;
-use lpc_registry::{ParseCtx, ProjectRegistry};
+use lpc_registry::{ParseCtx, ProjectRegistry, RegistryError};
 use lpc_wire::{NodeRuntimeStatus, WireChildKind, WireSlotIndex};
 use lpfs::LpFs;
 use lpfs::lp_path::{LpPath, LpPathBuf};
@@ -208,9 +208,27 @@ impl ProjectLoader {
 
         let load_result = registry
             .load_root(root, project_path.as_path(), frame, &ctx)
-            .map_err(|e| ProjectLoadError::ProjectParse {
-                file: project_path.as_str().to_string(),
-                error: e.to_string(),
+            .map_err(|e| {
+                // `load_root` checks the `project.json` container manifest
+                // (format gate) before it ever touches the root module
+                // artifact at `project_path`. A `Manifest`/`FormatVersion`
+                // error is about that container manifest, not the module —
+                // name the file the error actually came from, or the
+                // refusal blames the wrong path (e.g. a format mismatch in
+                // `project.json` reported as "parse /module.json: ...").
+                let file = match &e {
+                    RegistryError::Manifest { .. } | RegistryError::FormatVersion { .. } => {
+                        ProjectRegistry::CONTAINER_MANIFEST_PATH.to_string()
+                    }
+                    RegistryError::InvalidPath { .. }
+                    | RegistryError::SpecifierResolution { .. } => {
+                        project_path.as_str().to_string()
+                    }
+                };
+                ProjectLoadError::ProjectParse {
+                    file,
+                    error: e.to_string(),
+                }
             })?;
         Self::validate_loaded_root(&registry, &load_result.root, project_path.as_path())?;
         match preload {
@@ -3987,6 +4005,36 @@ mod tests {
         let text = err.to_string();
         assert!(text.contains("project.json"), "{text}");
         assert!(text.contains("manifest"), "{text}");
+    }
+
+    /// A `project.json` written by an older LightPlayer (unsupported
+    /// `format`) must be named in the refusal — not `/module.json`, which
+    /// the format gate never reads. Before this fix the wrapping
+    /// `ProjectLoadError::ProjectParse` always used the *root module's*
+    /// path, so a container-manifest format mismatch was misreported as a
+    /// `/module.json` parse failure.
+    #[test]
+    fn stale_project_json_format_names_project_json_not_module_json() {
+        let fs = LpFsMemory::new();
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 10\n}\n")
+            .expect("container manifest");
+        fs.write_file(
+            "/module.json".as_path(),
+            br#"{ "kind": "Module", "nodes": {} }"#,
+        )
+        .expect("module.json");
+        let root_path = TreePath::parse("/p.show").expect("path");
+        let services = EngineServices::new(root_path);
+        let err = match ProjectLoader::load_from_root(&fs, services) {
+            Err(e) => e,
+            Ok(_) => panic!("expected load error"),
+        };
+        let text = err.to_string();
+        assert!(
+            text.contains("project.json") && !text.contains("module.json"),
+            "expected the refusal to name project.json, not module.json: {text}"
+        );
+        assert!(text.contains("unsupported project format 10"), "{text}");
     }
 
     #[test]

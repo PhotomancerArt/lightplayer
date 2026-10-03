@@ -197,9 +197,13 @@ fn program0() -> Vec<(u32, Inst)> {
         ));
         insts.push(Inst::Store(StoreOp::S32i, a5, a3, 4 * i));
     }
-    // The product's own publish ends with an `isync`, and so does this: it is
-    // a whole flush on the core, and the seam has to survive one landing in
-    // the middle of a translated stay.
+    // The product's own publish is store-only, with no barrier at all —
+    // `lp-shader/lpvm-native/src/codemem_esp32.rs`'s `DeviceCodeSink` and
+    // `docs/adr/2026-09-05-classic-jit-code-lives-in-sram0.md` measured zero
+    // stale results with none, `fence`, and `fence`+`isync` alike. This test
+    // issues an `isync` anyway for its own reason, not the product's: it is a
+    // whole flush on the core, and the seam has to survive one landing in the
+    // middle of a translated stay.
     insts.push(Inst::Nullary(NullaryOp::Isync));
 
     // Call the bytes just written, and store what came back.
