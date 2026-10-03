@@ -8400,16 +8400,117 @@ fn a_pull_mid_filesystem_write_offers_the_backup_and_restore_puts_it_back() {
     );
 }
 
+/// G1 walk, 2026-10-03: the spare C6's device store was FULL (16 entries,
+/// "anyone nearby" on) and this browser's key was not on it. The USB
+/// connect's sync read the list, then its add was refused — and the list it
+/// had read went down with the refusal, so the panel never learned it: "Who
+/// has access 0", "Reading the device's list…", and the Bluetooth switch
+/// locked, before the update and after it. A refused add must not cost the
+/// panel the list the board answered, and the panel says why this browser
+/// is not on it.
+#[test]
+fn a_full_device_store_is_listed_and_its_switches_stay_usable_across_a_migration() {
+    let full = full_access_store();
+    let device = legacy_light_player_with_access(full.clone(), Vec::new());
+    let (mut bench, tasks) = identified(&device, "usb-layout-full-access");
+    let target = bench.view().devices[0].id;
+
+    let panel = access_panel(&mut bench, &tasks, target);
+    assert_eq!(panel.ble_enabled, Some(true), "the board's own switch");
+    assert!(panel.open, "anyone nearby, as stored");
+    assert_eq!(panel.entries.len(), lpc_access::MAX_SECRETS_PER_FILE);
+    assert_eq!(panel.count, lpc_access::MAX_SECRETS_PER_FILE + 1);
+    assert!(!panel.restart_pending, "{panel:?}");
+    let why = panel
+        .error
+        .clone()
+        .expect("the panel says why this browser is not listed");
+    assert!(why.contains("full"), "{why}");
+
+    // The update moves every file, and the board, read again on its new
+    // boot, is still listed with both switches usable.
+    update(&mut bench, target);
+    let question = layout_panel(&mut bench, &tasks, target);
+    press(&mut bench, &question.continue_action.unwrap());
+    settle(&mut bench, &tasks);
+    assert!(bench.view().devices[0].last_outcome.clone().unwrap().ok);
+    let (after, _) = device.fake_board_files();
+    assert!(
+        after
+            .iter()
+            .any(|(path, bytes)| path == "/.lp/access.json" && *bytes == full),
+        "the store moved untouched"
+    );
+    let panel = access_panel(&mut bench, &tasks, target);
+    assert_eq!(panel.ble_enabled, Some(true));
+    assert!(panel.open);
+    assert_eq!(panel.entries.len(), lpc_access::MAX_SECRETS_PER_FILE);
+    assert!(!panel.restart_pending, "{panel:?}");
+}
+
+/// A device store at the cap: 16 password entries, Bluetooth on, anyone
+/// nearby on — none of them this browser's.
+fn full_access_store() -> Vec<u8> {
+    let secrets = (0..lpc_access::MAX_SECRETS_PER_FILE as u8)
+        .map(|n| {
+            lpc_access::SecretEntry::from_password(
+                &format!("guest {n}"),
+                lpc_access::Tier::Play,
+                b"x",
+                [n + 100; 16],
+                1,
+            )
+        })
+        .collect();
+    let store = lpc_access::DeviceAccessFile {
+        version: lpc_access::DeviceAccessFile::VERSION,
+        secrets,
+        ble_enabled: true,
+        open: true,
+    };
+    store.to_json().expect("a valid store").into_bytes()
+}
+
+/// Wait for `device`'s access panel to hold the board's list, with no write
+/// in flight.
+fn access_panel(
+    bench: &mut DeviceBench,
+    tasks: &TaskPool,
+    device: crate::DeviceId,
+) -> crate::UiAccessPanel {
+    bench.run_until(tasks, "the board's access list", |bench| {
+        bench
+            .controller
+            .device_roster_view()
+            .access
+            .get(&device)
+            .and_then(|access| access.panel.as_ref())
+            .is_some_and(|panel| panel.ble_enabled.is_some() && !panel.writing)
+    });
+    bench.controller.device_roster_view().access[&device]
+        .panel
+        .clone()
+        .unwrap()
+}
+
 /// A LightPlayer board still on the pre-repartition layout, holding a
 /// project, the board manifest Studio stamped when it first flashed it (so
 /// its hello names its board, and the record learns it), an access file and
 /// its identity (plus `extra` root files).
 fn legacy_light_player(extra: Vec<(String, Vec<u8>)>) -> FakeEsp32Device {
+    legacy_light_player_with_access(b"{\"version\":1}".to_vec(), extra)
+}
+
+/// [`legacy_light_player`] with this device store at `/.lp/access.json`.
+fn legacy_light_player_with_access(
+    access: Vec<u8>,
+    extra: Vec<(String, Vec<u8>)>,
+) -> FakeEsp32Device {
     let manifest = lpa_boards::runtime_manifest_json(&c6_board_choice().board_id)
         .expect("a served board has a manifest");
     let mut root_files = vec![
         ("/hardware.json".to_string(), manifest.as_bytes().to_vec()),
-        ("/.lp/access.json".to_string(), b"{\"version\":1}".to_vec()),
+        ("/.lp/access.json".to_string(), access),
     ];
     root_files.extend(extra);
     FakeEsp32Device::new(FakeDeviceScript::new(FakeBootState::LightPlayer(
