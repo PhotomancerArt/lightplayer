@@ -282,23 +282,63 @@ async function pressMaybeArmed(driver, text) {
   if (armed) await driver.click(text);
 }
 
+/// The card's words for each step of an update (`lpa_devices::FlashStep`,
+/// G1 walk 2026-10-03): the card names the step it is on, so the walk reads
+/// which ones it showed, in order. The terminal's lines carry no ellipsis,
+/// so these match the card alone.
+const STEP_LABELS = ["Reading the board…", "Waiting for your answer…", "Flashing firmware…", "Moving files…", "Checking the files…"];
+const STEPS_NOW = `(() => { const t = ${MAIN_TEXT}; return ${JSON.stringify(STEP_LABELS)}.filter((l) => t.includes(l)); })()`;
+
+/// The steps the card names until `until` holds, each once, in the order it
+/// first showed them. Polled (every 250 ms): a step can be shorter than one
+/// of the page's own mutation-driven waits would notice.
+async function watchSteps(driver, until, { timeoutMs, what }) {
+  const seen = [];
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    for (const label of await driver.evaluate(STEPS_NOW)) if (!seen.includes(label)) seen.push(label);
+    if (await driver.evaluate(until)) return seen;
+    if (Date.now() > deadline) throw new Error(`${what} never came (the card's steps so far: ${seen.join(" → ") || "none"})`);
+    await new Promise((r) => setTimeout(r, 250));
+  }
+}
+
+/// Whether `want` appears in `seen` in this order (others may sit between).
+function inOrder(seen, want) {
+  let at = 0;
+  for (const label of seen) if (label === want[at]) at += 1;
+  return at === want.length;
+}
+
+/// The steps the card showed, across one scenario's waits.
+const cardSteps = [];
+
 async function awaitQuestion(driver) {
-  await driver.waitFor(`${PAGE_TEXT}.includes("Move this board's files to the new layout") || ${PAGE_TEXT}.includes("Put this board's files back") || ${PAGE_TEXT}.includes("don't fit the new firmware")`, {
-    timeoutMs: MIGRATION_MS,
-    what: "the layout question (or refusal)",
-  });
+  const question = `${PAGE_TEXT}.includes("Move this board's files to the new layout") || ${PAGE_TEXT}.includes("Put this board's files back") || ${PAGE_TEXT}.includes("don't fit the new firmware")`;
+  for (const label of await watchSteps(driver, question, { timeoutMs: MIGRATION_MS, what: "the layout question (or refusal)" })) cardSteps.push(label);
+  // Behind an open question the card says it is waiting for the answer.
+  for (const label of await driver.evaluate(STEPS_NOW)) cardSteps.push(label);
   return driver.evaluate(PAGE_TEXT);
 }
 
+/// The sheet IS the question, so Continue acts on its one press — it never
+/// arms a "Confirm continue" (G1 walk 2026-10-03, Yona: "they already
+/// committed to it once"). One click, and the question closes.
+async function pressContinue(driver) {
+  const dialog = `document.querySelector('[role="dialog"]')`;
+  await driver.click("Continue", { scope: dialog });
+  await driver.waitFor(`!document.querySelector('[role="dialog"]')`, {
+    timeoutMs: 15_000,
+    what: "the question to close on ONE press of Continue (did it arm instead?)",
+  });
+}
+
 async function awaitInstalled(driver) {
-  // The activity ends when the card stops saying it is flashing; whether it
+  // The activity ends when the card stops naming a step; whether it
   // succeeded is read after (a terminal line can say "failed" mid-run —
   // esptool-js's own connect retries do).
-  await driver.waitFor(`${MAIN_TEXT}.includes('Flashing firmware')`, { timeoutMs: STEP_MS, what: "the update to start" });
-  await driver.waitFor(`!${MAIN_TEXT}.includes('Flashing firmware')`, {
-    timeoutMs: MIGRATION_MS,
-    what: "the update to end",
-  });
+  await driver.waitFor(`${STEPS_NOW}.length > 0`, { timeoutMs: STEP_MS, what: "the update to start" });
+  for (const label of await watchSteps(driver, `${STEPS_NOW}.length === 0`, { timeoutMs: MIGRATION_MS, what: "the update to end" })) cardSteps.push(label);
   // The activity's OUTCOME line is the last thing it writes (after the
   // board-manifest stamp); give it its moment before anything is closed.
   await driver
@@ -559,7 +599,8 @@ async function main() {
           await driver.waitFor(`${MAIN_TEXT}.includes('Update firmware')`, { timeoutMs: MIGRATION_MS, what: "the board back on its firmware" });
           await shot("cancelled");
         } else {
-          await pressLasting(driver, "Continue");
+          await pressContinue(driver);
+          step("Continue acted on one press", true, "the question closed on the first click; nothing armed");
           if (scenario === "W5") {
             // The firmware's own write: esptool-js writes the merged image
             // from 0x0 first and the filesystem (0x35…) only after it, so a
@@ -601,7 +642,7 @@ async function main() {
             const again = await awaitQuestion(driver);
             await shot("question-again");
             step("asked again", again.includes("Move this board's files") || again.includes("Put this board's files back"), "");
-            await pressLasting(driver, "Continue");
+            await pressContinue(driver);
             const text = await awaitInstalled(driver);
             await shot("installed");
             step("update installed", text.includes("firmware installed"), text.match(/firmware installed[^\n]*/)?.[0] ?? "");
@@ -616,7 +657,7 @@ async function main() {
             const deadline = Date.now() + MIGRATION_MS;
             let seen = "";
             while (!(await driver.evaluate(when))) {
-              const line = (await driver.evaluate(MAIN_TEXT)).match(/(Writing firmware|Moving files|Verifying files|Reading the board's [a-z]+|Resetting the board|Flashing firmware)[^\n]*/)?.[0] ?? "";
+              const line = (await driver.evaluate(MAIN_TEXT)).match(/(Writing firmware|Moving files|Verifying files|Reading the board|Resetting the board|Flashing firmware|Checking the files)[^\n]*/)?.[0] ?? "";
               if (line !== seen) {
                 seen = line;
                 console.log(`    card: ${line}`);
@@ -777,6 +818,15 @@ async function main() {
         );
         step("the chip is on the new layout", /0x350000/.test(after.layout) || !/pre-2026-10/.test(after.layout), after.layout);
         step("old superblock retired", !legacySuperblock, "");
+        // The card named the update's steps as they happened (G1 walk,
+        // 2026-10-03: it said "Flashing firmware…" from the first read to
+        // the last check). W5's first pass was cut short by the cable; its
+        // second pass still shows every step, in this order.
+        step(
+          "the card named each step",
+          inOrder(cardSteps, ["Reading the board…", "Waiting for your answer…", "Flashing firmware…", "Moving files…", "Checking the files…"]),
+          cardSteps.join(" → "),
+        );
         step(
           "the board mounted them, as itself",
           said.includes("Flash filesystem mounted") && !said.includes("holding: not formatting")
@@ -800,6 +850,7 @@ async function main() {
       }
       case "W3":
       case "W4": {
+        step("the card read the board before it answered", cardSteps.includes("Reading the board…"), cardSteps.join(" → "));
         // Against the chip as the update found it (after the connect's own
         // access-file write): a refusal or a cancel writes NOTHING.
         const fixture = readFileSync(path.join(out, `as-found-${scenario}.bin`));
