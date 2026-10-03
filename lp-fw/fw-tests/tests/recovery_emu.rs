@@ -703,6 +703,24 @@ async fn fuel_exhausted_shader_errors_without_reboot_or_blame() {
     let snapshot = recovery_snapshot(&emulator, area_addr);
     assert_eq!(snapshot.level, RecoveryLevel::Green);
 
+    // The compile-window deferral frame. Nothing consumes the looping
+    // shader, so this probe is its first render ever — and since 71aa31adf8
+    // (ADR 2026-08-03-memory-pressure-at-compile-safe-points) a render that
+    // wants a compile only REQUESTS a window and serves keep-last-good, which
+    // before any compile is the black fallback. The shader body has not run,
+    // so there is nothing to abort yet; the compile (and the fuel trap) come
+    // with the next render.
+    advance_guest_time(&emulator, 40);
+    match probe_render(&client, handle, bad_shader).await {
+        RenderProductProbeResult::Texture { bytes, .. } => assert!(
+            bytes.iter().all(|byte| *byte == 0),
+            "the deferral frame must be the black fallback, not a render"
+        ),
+        other => panic!("expected the black deferral texture, got {other:?}"),
+    }
+    let snapshot = recovery_snapshot(&emulator, area_addr);
+    assert_eq!(snapshot.level, RecoveryLevel::Green);
+
     // Offense 1: the render aborts in-frame (the probe read completes over
     // the live transport — a hang would exhaust the transport's instruction
     // budget instead) with the legible fuel diagnostic.
@@ -753,10 +771,13 @@ async fn fuel_exhausted_shader_errors_without_reboot_or_blame() {
         entry_states(&snapshot)
     );
 
-    // The node status carries the fuel error.
+    // The node status carries the fuel error as a FAULT, not an Error: the
+    // GLSL is valid and the runtime failed it, so the fix is never an edit
+    // (9333c18abe, ADR 2026-09-02-fault-is-never-black, which names a
+    // render trap as a Fault).
     let status = read_node_status(&client, handle, bad_shader).await;
-    let NodeRuntimeStatus::Error(status_message) = status else {
-        panic!("expected error status on the looping shader, got: {status:?}");
+    let NodeRuntimeStatus::Fault(status_message) = status else {
+        panic!("expected fault status on the looping shader, got: {status:?}");
     };
     assert!(
         status_message.contains("shader fuel exhausted"),
