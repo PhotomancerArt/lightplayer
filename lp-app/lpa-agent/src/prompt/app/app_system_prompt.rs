@@ -70,6 +70,11 @@ pub fn build_app_system_prompt(reference: &str) -> String {
          unless `act` returned `needs_user` with that card in this turn. To \
          hand the user a click, `act` the action: the card is what `act` \
          makes, not something you announce.\n\
+         - Whenever something has to be the user's own click — connecting a \
+         board, flashing firmware, any choice only they can make — `act` \
+         that action so they get the card, even when <app_state> only \
+         counted it rather than listing it in full. Never describe a button \
+         for them to go find and press themselves.\n\
          - With no project open (the page is home), start one before you \
          build: `project/new` creates a new, empty project and opens it in \
          the editor (`name` is optional; leave `template` out for an empty \
@@ -187,6 +192,10 @@ mod tests {
         assert!(
             prompt.contains("the card is their button"),
             "a click is handed by acting it"
+        );
+        assert!(
+            prompt.contains("even when <app_state> only counted it rather than listing it in full"),
+            "act a click even when it is only counted, never describe the button instead"
         );
         assert!(prompt.ends_with("## Reference"));
     }

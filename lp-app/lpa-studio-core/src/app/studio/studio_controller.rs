@@ -6653,6 +6653,14 @@ impl StudioController {
         }
         let roster = self.device_roster_view();
         text.push_str(&device_lines(&roster));
+        // A real board is one on the bus right now (not a remembered,
+        // offline one) that wears no runtime band — a band marks a sim
+        // (D38). `false` keeps the add-a-board offers listed in full on
+        // every page (see the readout's own doc).
+        let has_real_board = crate::split_roster(&roster)
+            .connected
+            .iter()
+            .any(|device| !roster.runtime_bands.contains_key(&device.id));
         // Every offer in the view's tree, in publish order: the project's
         // own verbs (Save and Revert while there are edits to save, Clear
         // debug while an override is active, and the root picker's
@@ -6671,6 +6679,7 @@ impl StudioController {
             text,
             offers: view.offers.iter().cloned().collect(),
             focus: view.offers.focus().clone(),
+            has_real_board,
         }
     }
 

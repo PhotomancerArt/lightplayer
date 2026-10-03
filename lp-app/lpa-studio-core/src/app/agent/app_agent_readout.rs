@@ -13,6 +13,13 @@
 //! grows, while every offer in the view's tree stays pressable by its path
 //! (`project/save`, `project/demo.module/orbit.shader/remove`): `act` looks
 //! a path up in the whole tree, never just in what was listed.
+//!
+//! One exception to "counted elsewhere": with no real board connected or
+//! attached, `devices/connect-usb` and `devices/connect-ble` are listed in
+//! full on every page, not folded into the devices area's counted line —
+//! they are the user's next step wherever they are, and only a full listing
+//! carries the `[needs the user's click]` mark that tells the agent to
+//! `act` it rather than describe the button.
 
 use std::fmt::Write as _;
 
@@ -38,6 +45,17 @@ pub struct AppReadoutSnapshot {
     /// Where the user is, as offer prefixes: which offers are listed in
     /// full and which are counted.
     pub focus: UiOfferFocus,
+    /// Whether a real (non-sim) board is connected or attached right now.
+    /// `false` keeps `devices/connect-usb` and `devices/connect-ble` listed
+    /// in full on every page, not just a devices-focused one: getting a
+    /// board onto the bus is the user's next step and the only one only
+    /// they can take, so its `[needs the user's click]` mark (and the
+    /// doctrine tied to it) must show instead of being folded into a
+    /// counted "devices: connect-usb, connect-ble" line the agent reads
+    /// past (live corpus S18, 2026-10-03: with no board attached, the
+    /// agent told the user to press "Connect a board via USB" instead of
+    /// `act`ing the offer that hands them the card).
+    pub has_real_board: bool,
 }
 
 impl AppReadoutSnapshot {
@@ -76,15 +94,28 @@ impl AppReadoutSnapshot {
         self.offers.iter().find(|offer| &offer.path == path)
     }
 
-    /// Whether `offer` is listed in full: a verb of the node in focus, or
-    /// a verb on the page's own area that is not some other node's.
+    /// Whether `offer` is listed in full: a verb of the node in focus, a
+    /// verb on the page's own area that is not some other node's, or — with
+    /// no real board on the bus — one of the two add-a-board offers,
+    /// wherever the user is.
     fn lists_in_full(&self, offer: &UiOffer) -> bool {
+        if !self.has_real_board && is_add_board_offer(&offer.path) {
+            return true;
+        }
         match self.focus.nearness(&offer.path) {
             OfferNearness::Own => true,
             OfferNearness::Under | OfferNearness::Elsewhere => false,
             OfferNearness::Area => !owned_by_a_node(offer),
         }
     }
+}
+
+/// Whether `path` is one of the add-a-board offers (`devices/connect-usb`,
+/// `devices/connect-ble`): with no real board attached, the user's next
+/// step from anywhere in the app.
+fn is_add_board_offer(path: &OfferPath) -> bool {
+    path.owner().as_ref() == Some(&OfferPath::devices())
+        && matches!(path.last(), Some("connect-usb") | Some("connect-ble"))
 }
 
 /// One offer as the readout (and `read`) lists it: `- <path>: <label>`
@@ -584,6 +615,9 @@ mod tests {
             ));
         }
         readout.text = "project: \"Demo\"\n".to_string();
+        // A real board is on the bus, so the add-a-board offers fold into
+        // the counted devices line like any other off-area offer.
+        readout.has_real_board = true;
 
         let text = readout.render();
         assert!(
@@ -613,6 +647,58 @@ mod tests {
         assert!(
             readout.offer(&clock).is_some(),
             "a counted verb is still pressable"
+        );
+    }
+
+    /// Live corpus S18 (2026-10-03): in the project editor with no real
+    /// board attached, the agent read "devices: connect-usb, connect-ble"
+    /// — a counted line with no `[needs the user's click]` mark — and told
+    /// the user to press the button itself instead of `act`ing the offer
+    /// that hands them the card. With no real board, the two add-a-board
+    /// offers must list in full even while the focus area is the project,
+    /// not devices.
+    #[test]
+    fn with_no_real_board_the_add_board_offers_list_in_full_on_every_page() {
+        let mut readout = snapshot();
+        // Both real offers need a real click (`navigator.serial
+        // .requestPort()`, `navigator.bluetooth.requestDevice()`) — the
+        // mark this fix exists to surface.
+        readout.offers.push(UiOffer::new(
+            OfferPath::devices().child("connect-usb"),
+            "usb",
+            save_action()
+                .with_label("Connect a board via USB")
+                .needs_user_activation(),
+        ));
+        readout.offers.push(UiOffer::new(
+            OfferPath::devices().child("connect-ble"),
+            "bluetooth",
+            save_action()
+                .with_label("Connect a board via Bluetooth")
+                .needs_user_activation(),
+        ));
+        readout.has_real_board = false;
+        // The focus is the project, not devices — the usual rule would
+        // count both offers under "- devices: …" instead of listing them.
+        assert_eq!(readout.focus.areas, vec![OfferPath::project()]);
+
+        let text = readout.render();
+        assert!(
+            text.contains(
+                "- devices/connect-usb: Connect a board via USB [needs the user's click]\n"
+            ),
+            "{text}"
+        );
+        assert!(
+            text.contains(
+                "- devices/connect-ble: Connect a board via Bluetooth \
+                 [needs the user's click]\n"
+            ),
+            "{text}"
+        );
+        assert!(
+            !text.contains("devices: connect-usb"),
+            "the add-board offers are listed, not folded into a counted line: {text}"
         );
     }
 
