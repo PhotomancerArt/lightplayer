@@ -90,6 +90,10 @@ lpc_model::lp_embed_manifest_core! {
 mod board;
 #[cfg(not(fw_harness))]
 mod flash_storage;
+#[cfg(all(feature = "io-thread", not(fw_harness)))]
+mod io_thread;
+#[cfg(all(feature = "io_thread_stack_diag", not(fw_harness)))]
+mod io_thread_stack_diag;
 // Not simply `not(fw_harness)`: the `test_button` harness drives the same
 // registry-facing driver the app path registers, and a self-test against a
 // different driver would prove nothing.
@@ -129,8 +133,9 @@ use {
     lpfs::LpFsMemory,
     lpfs::lp_path::AsLpPath,
     output::{Esp32OutputProvider, Esp32S3RmtWs281xDriver},
-    serial::usb_link_task,
 };
+#[cfg(all(not(feature = "io-thread"), not(fw_harness)))]
+use serial::usb_link_task;
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
@@ -375,6 +380,10 @@ fn reset_now() -> ! {
 /// structural, neither is invented).
 #[cfg(not(fw_harness))]
 fn heartbeat_memory_stats() -> Option<lpc_wire::server::MemoryStats> {
+    // The link thread's stack high-water, at the heartbeat's cadence, when it
+    // grows (`io_thread_stack_diag` only; a product image has no such line).
+    #[cfg(feature = "io_thread_stack_diag")]
+    io_thread_stack_diag::log_if_grown();
     let free = esp_alloc::HEAP.free().min(u32::MAX as usize) as u32;
     let used = esp_alloc::HEAP.used().min(u32::MAX as usize) as u32;
     Some(lpc_wire::server::MemoryStats {
@@ -454,9 +463,25 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     // The host link runs lp-link over USB-Serial-JTAG (plan
     // `lp-link-usb-cutover`): a random session nonce per boot, so a host
     // learns the board restarted.
-    let usb_link = UsbLinkShared::leak(esp_hal::rng::Rng::new().random());
-    spawner.spawn(usb_link_task(usb_device, usb_link).unwrap());
-    esp_println::println!("[INIT] USB link task spawned");
+    let nonce = esp_hal::rng::Rng::new().random();
+    // The link task on a thread of its own (`io_thread`, pinned to core 0),
+    // created this early because its stack comes off the heap; the link is
+    // then shared across two threads, so it takes the thread's lock.
+    #[cfg(feature = "io-thread")]
+    let usb_link = {
+        // Nothing else rides the main executor here; the link has its own.
+        let _ = spawner;
+        let usb_link = UsbLinkShared::leak_locked(nonce, io_thread::link_lock);
+        io_thread::start(usb_device, usb_link);
+        usb_link
+    };
+    #[cfg(not(feature = "io-thread"))]
+    let usb_link = {
+        let usb_link = UsbLinkShared::leak(nonce);
+        spawner.spawn(usb_link_task(usb_device, usb_link).unwrap());
+        esp_println::println!("[INIT] USB link task spawned");
+        usb_link
+    };
 
     // From here on `log::*` rides the link's log channel; the `esp_println!`
     // lines above are raw text outside frames.
@@ -544,6 +569,12 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     // aborted and reset the board instead of being refused.
     server.set_read_headroom_probe(Some(read_headroom_probe));
     server.set_read_gate(Some(READ_GATE));
+    // With the link on its own thread, answer a tick's requests before its
+    // render: the replies then go out while the frame renders (`io_thread`).
+    // Never without the thread: on the shared executor the link task would
+    // still wait for the frame to put the reply on the wire.
+    #[cfg(feature = "io-thread")]
+    server.set_messages_first(true);
     server.set_hello_identity(
         lpc_wire::HelloIdentity::new(
             "fw-esp32s3",
