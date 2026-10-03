@@ -186,7 +186,15 @@ fn with_note(error: ClientError, note: &str) -> ClientError {
 /// unreadable one (a link below the edit tier may not read outside
 /// `/projects/`), or one naming a folder that is gone has nothing to
 /// replace, and the push falls back as it always did.
-async fn saved_startup_project<Io: ClientIo>(client: &mut LpClient<Io>) -> Option<String> {
+///
+/// Shared with [`crate::device_remove::remove_project`]: a dark board's
+/// fallback slot, there as here, is only for a board with no saved folder
+/// at all — a freshly flashed one. A board that boots dark because it
+/// refused a saved folder has that folder removed too, the same one a push
+/// would replace.
+pub(crate) async fn saved_startup_project<Io: ClientIo>(
+    client: &mut LpClient<Io>,
+) -> Option<String> {
     use lpc_model::AsLpPathBuf;
     use lpc_model::server::server_config::ServerConfig;
 

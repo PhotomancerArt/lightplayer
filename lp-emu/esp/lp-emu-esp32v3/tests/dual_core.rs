@@ -1100,9 +1100,15 @@ fn pub_program0() -> Vec<(u32, Inst)> {
 
 /// The publish fixture, with the block cache on or off.
 fn pub_fixture(block_cache: bool) -> Machine {
+    pub_fixture_strict(block_cache, false)
+}
+
+/// The publish fixture, optionally under `--strict-bus`.
+fn pub_fixture_strict(block_cache: bool, strict: bool) -> Machine {
     let mut machine = Esp32V3Builder::new()
         .boot_mode(BootMode::RomUp)
         .block_cache(block_cache)
+        .strict(strict)
         // The flash caches are off in this fixture — nothing enables them —
         // and the D4 cache-off watch installs a `MemoryCost`, which makes
         // `Bus::fetch_is_pure` false and bypasses the block cache entirely.
@@ -1135,6 +1141,50 @@ fn pub_fixture(block_cache: bool) -> Machine {
         .seed_boot_state(PUB_CODE0, BootFrame::at(memmap::ROM_PRO_STACK_TOP))
         .expect("seeded");
     machine
+}
+
+/// **`--strict-bus` does not call a store-published word a missing fence.**
+///
+/// This chip publishes code by store (M7 XD3), and silicon runs freshly
+/// written SRAM0 code with no barrier at all (`test_sram0_exec`, 2026-09-05).
+/// So the bus's RV32 missing-fence checker, which waits for a `fence.i` the
+/// classic never owes, is not armed here. Before it was, a ROM-up strict-bus
+/// boot logged ~400 "firmware bug" ERRORs for the second-stage bootloader
+/// placing the app's IRAM over the pages it had run from.
+///
+/// The same fixture with the RV32 contract armed by hand does report: that
+/// leg is what says the fixture executes a word the guest rewrote on a page
+/// it had already run from — the shape of the bootloader's copy — and that
+/// the zero is not a fixture that never reaches the checker.
+#[test]
+fn strict_bus_does_not_report_a_store_published_word_as_a_missing_fence() {
+    for (block_cache, fence_contract) in
+        [(true, false), (false, false), (true, true), (false, true)]
+    {
+        let mut m = pub_fixture_strict(block_cache, true);
+        if fence_contract {
+            m.bus_mut().set_fence_contract(true);
+        }
+        run_until_state(&mut m, "core 1 reaches the stub", |m| {
+            m.harts[1].cpu().a(4) == 111
+        });
+        run_until_state(&mut m, "core 1 runs the published bytes", |m| {
+            m.harts[1].cpu().a(4) == 222
+        });
+        let reports = m.bus().missing_fence_reports();
+        if fence_contract {
+            assert!(
+                reports >= 1,
+                "block_cache={block_cache}: armed by hand, the RV32 checker sees the \
+                 store-published word, or this fixture is not testing the checker"
+            );
+        } else {
+            assert_eq!(
+                reports, 0,
+                "block_cache={block_cache}: a store into SRAM0 is the publish on this chip"
+            );
+        }
+    }
 }
 
 /// **Core 0 writes code core 1 has cached, and core 1's next window runs the

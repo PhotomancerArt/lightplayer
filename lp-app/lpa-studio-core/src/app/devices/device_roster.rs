@@ -17,7 +17,7 @@
 //! controller AFTER the fold — never inside it (invariant I7).
 
 use lpa_devices::event::{Command, Event, Input};
-use lpa_devices::identity::DeviceId;
+use lpa_devices::identity::{DeviceId, IdentityChain};
 use lpa_devices::journal::Scope;
 use lpa_devices::link::LinkId;
 use lpa_devices::record::DeviceRecord;
@@ -259,34 +259,58 @@ impl DeviceRoster {
     /// tab's transaction, a device row this roster just wrote), and loading a
     /// row the roster already holds would put a second card on screen for one
     /// board — the exact failure the rebuild exists to end. Rows already
-    /// represented, by the model's handle or by uid, are skipped.
+    /// represented — by their registry key, or by the model's handle when
+    /// the identities agree — are skipped.
+    ///
+    /// A row's `device_id` is a hint, not an identity: each page mints ids
+    /// from 1, so two rows can wear the same one. The model re-keys such a
+    /// row on load (`Roster::load_records`), and the key map follows the id
+    /// it was ACTUALLY loaded under.
     pub fn load_records(&mut self, rows: &[RegisteredDevice]) {
         let mut records: Vec<DeviceRecord> = Vec::new();
+        let mut keys: Vec<String> = Vec::new();
         for row in rows {
             if self.is_already_known(row) {
                 continue;
             }
             let fallback = self.next_legacy_id;
             self.next_legacy_id = self.next_legacy_id.saturating_add(1);
-            let record = super::device_records::record_from_registry_row(row, fallback);
-            self.keys.insert(record.device.0, row.uid.clone());
-            records.push(record);
+            records.push(super::device_records::record_from_registry_row(
+                row, fallback,
+            ));
+            keys.push(row.uid.clone());
         }
         if records.is_empty() {
             return;
         }
-        self.roster.load_records(records);
+        let loaded = self.roster.load_records(records);
+        for (device, key) in loaded.into_iter().zip(keys) {
+            self.keys.insert(device.0, key);
+        }
     }
 
     /// Whether the roster already has an entry for this row.
+    ///
+    /// By KEY first: the device this roster loaded the row into or last
+    /// persisted to it, or a device whose own identity keys to the row (a
+    /// MAC-keyed row included — a uid-only comparison missed every board
+    /// Studio flashes, which have no provisioned uid). By the model's handle
+    /// only when the device wearing it does not contradict the row's
+    /// identity: two boards whose rows share an id are two boards, and
+    /// skipping the second hid its card and handed its frames and renames
+    /// to the first (docs/defects/
+    /// 2026-10-02-saved-records-sharing-a-device-id-misroute-the-board.md).
     fn is_already_known(&self, row: &RegisteredDevice) -> bool {
+        let row_identity = super::device_records::record_from_registry_row(row, 0).identity;
         self.roster.devices().iter().any(|device| {
+            if self.keys.get(&device.id.0) == Some(&row.uid)
+                || super::device_records::registry_key(&device.identity).as_deref()
+                    == Some(row.uid.as_str())
+            {
+                return true;
+            }
             row.device_id == Some(device.id.0)
-                || device
-                    .identity
-                    .uid
-                    .as_ref()
-                    .is_some_and(|uid| uid.0 == row.uid)
+                && !identities_contradict(&device.identity, &row_identity)
         })
     }
 
@@ -405,6 +429,15 @@ fn scope_label(scope: Scope) -> String {
     }
 }
 
+/// Whether two chains name different boards: a uid or a MAC both hold and
+/// disagree on. Absence is not disagreement — a row written before the board
+/// was provisioned has no uid, and that is the same board.
+fn identities_contradict(left: &IdentityChain, right: &IdentityChain) -> bool {
+    let uids_differ = matches!((&left.uid, &right.uid), (Some(a), Some(b)) if a != b);
+    let macs_differ = matches!((&left.mac, &right.mac), (Some(a), Some(b)) if a != b);
+    uids_differ || macs_differ
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -492,6 +525,34 @@ mod tests {
             .collect();
 
         assert_eq!(ids, vec![LEGACY_ID_BASE, LEGACY_ID_BASE + 1]);
+    }
+
+    /// Two boards whose rows wear the same model handle are two cards with
+    /// two ids, each keyed to its own row — and re-hydrating (every library
+    /// settle does) adds nothing.
+    #[test]
+    fn rows_sharing_a_handle_load_as_two_boards_and_stay_loaded_once() {
+        let row = |mac: &str| RegisteredDevice {
+            uid: format!("mac:{mac}"),
+            hardware_id: Some(format!("efuse:{mac}")),
+            device_id: Some(1),
+            ..RegisteredDevice::default()
+        };
+        let rows = [row("02:00:00:00:00:01"), row("10:bd:a3:b0:8e:30")];
+        let mut roster = DeviceRoster::new(RosterConfig::default());
+        roster.load_records(&rows);
+        roster.load_records(&rows);
+
+        let ids: Vec<DeviceId> = roster
+            .roster()
+            .devices()
+            .iter()
+            .map(|device| device.id)
+            .collect();
+        assert_eq!(ids.len(), 2, "one card per board, loaded once: {ids:?}");
+        assert_ne!(ids[0], ids[1]);
+        assert_eq!(roster.key_for(ids[0]), Some("mac:02:00:00:00:00:01"));
+        assert_eq!(roster.key_for(ids[1]), Some("mac:10:bd:a3:b0:8e:30"));
     }
 
     #[test]
