@@ -67,6 +67,7 @@
 //! file and the registry row's `transport`, both of them Studio's own
 //! bookkeeping.
 
+use lpa_devices::BoardKey;
 use lpa_devices::identity::{DeviceUid, EndpointKey, MacAddress};
 use lpa_devices::link::LinkInfo;
 use lpfs::{AsLpPath, FsError, LpFs};
@@ -239,7 +240,10 @@ pub struct SimRecord {
     /// board id. What the runtime manifest is looked up by.
     pub target: String,
     /// The minted, locally administered base MAC this runtime reports.
-    /// `aa:bb:cc:dd:ee:ff`, lowercase — the hello's own form.
+    /// `aa:bb:cc:dd:ee:ff`, lowercase — the hello's own form. It is also
+    /// the runtime's board id ([`BoardKey`]; its offers live at
+    /// `devices/sim-<12 hex>/…` or `devices/emu-<12 hex>/…`): every
+    /// sidecar since v1 carries it, so no record is ever without one.
     pub base_mac: String,
     /// Epoch seconds (the studio clock) when the runtime was created.
     pub created_at: f64,
@@ -271,26 +275,23 @@ impl SimRecord {
 
 /// Mint a runtime's identity from six caller-supplied random bytes.
 ///
-/// Octet 0 gets the locally-administered bit set (`0x02`) and the multicast
-/// bit cleared (`0x01`), which is what makes the address legal to invent:
-/// the IEEE reserves that range for addresses nobody bought. It also makes
-/// the two rejected addresses unreachable by construction — all-zero needs
-/// bit 1 clear and all-ones needs bit 0 set — so this cannot mint the
-/// identity a *failed* efuse read looks like.
+/// The MAC is [`BoardKey::locally_administered`]'s — the one generator
+/// every made board's id comes from: octet 0 gets the locally-administered
+/// bit set (`0x02`) and the multicast bit cleared (`0x01`), which is what
+/// makes the address legal to invent (the IEEE reserves that range for
+/// addresses nobody bought). It also makes the two rejected addresses
+/// unreachable by construction — all-zero needs bit 1 clear and all-ones
+/// needs bit 0 set — so this cannot mint the identity a *failed* efuse read
+/// looks like.
 ///
 /// The uid comes from [`HardwareId::device_uid`] and nowhere else: two
 /// Studio installs must agree on a device's uid, and the derivation bytes
 /// are a G1-approved contract.
 pub fn mint_sim_identity(random: &[u8; 6]) -> (MacAddress, DeviceUid) {
-    let mut mac = *random;
-    mac[0] = (mac[0] | 0x02) & !0x01;
-    let hardware_id = HardwareId::EspEfuse { mac };
-    let text = format!(
-        "{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
-        mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]
-    );
+    let key = BoardKey::locally_administered(*random);
+    let hardware_id = HardwareId::EspEfuse { mac: key.octets() };
     (
-        MacAddress(text),
+        key.to_mac_address(),
         DeviceUid(hardware_id.device_uid().to_string()),
     )
 }
@@ -434,6 +435,15 @@ mod tests {
             .device_uid()
             .to_string();
         assert_eq!(uid.0, derived, "no second derivation exists");
+    }
+
+    /// A made board's id is its minted MAC, read the way silicon's is.
+    #[test]
+    fn a_minted_identity_is_the_runtimes_board_id() {
+        let (mac, _) = mint_sim_identity(&RANDOM);
+        let key = BoardKey::from_mac(&mac).expect("a minted MAC is a board id");
+        assert_eq!(key.to_string(), "122233445566");
+        assert!(key.is_locally_administered());
     }
 
     /// Studio must mint the same uid twice for the same address, and

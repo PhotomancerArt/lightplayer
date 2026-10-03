@@ -16,6 +16,58 @@ Two stages, so each runs where its tools are:
   on **GPIO16 (XIAO D6)** are decoded: whole, error-free, the right LED
   count, lit, and changing over time.
 
+## E4: the device journey (deterministic only)
+
+E1–E3 build a project; E4 asks whether the agent can get a board to run
+one: connect a board, flash a **blank** board, push a project, and see it
+run — every step an `act` on a device offer by its path, with its values in
+`args` (`devices/connect-usb`, `devices/new-<n>/flash` with `board`,
+`devices/mac-<hex>/push` with `source`). Two tests, in
+`src/app/studio/studio_device_e2e_tests/agent_device_journey_tests.rs`:
+
+- `e4_the_agent_connects_flashes_a_blank_board_pushes_and_sees_it_run` —
+  the connect press is a card (the browser's chooser needs a real click) and
+  opens no port until the user's click; the blank board's Flash is Routine,
+  so the agent's press flashes the board it named; the push sends the
+  gallery's example; the readout of the agent's last turn says the board
+  runs it.
+- `e4_the_agents_flash_over_firmware_is_a_card_and_flashes_nothing` — a
+  board running other firmware: the agent's Flash is Lasting, so it becomes
+  a card pre-filled with the agent's board, a second press while the card
+  waits is refused, and nothing is flashed.
+
+**The seam.** E4 is not a scenario TOML and has no live leg. The eval
+driver above has no device transport, so E4 seats the same app chat on the
+device e2e bench (`DeviceBench`) instead. Only two things are fake:
+
+- **The model.** The evals' `ScriptedProvider` plays fixed turns.
+  Everything after it is the product's code: the run, the `act` tool, the
+  host bridge's `AgentOp::AppAct` on the command queue, and the
+  controller's offer press. A small seat applies the run's commands and
+  refreshes the readout after each batch, as the actor does.
+- **The board.** `FakeEsp32Device` behind the bench's scripted USB
+  transport. Its flash is a scripted transition to LightPlayer (with a
+  heartbeat, so it reports what it runs), and the preflight "reads" a fixed
+  MAC (`60:55:f9:0a:0b:0c`). After the flash it speaks the real wire to a
+  real host `LpServer`, so the push is the real conversation.
+
+**What an emulated C6 would add** (`lp-emu-esp32c6`, as `just walk-no-board`
+uses):
+
+- the shipped `fw-esp32c6` bytes written to emulated flash and booted
+  through the ROM and bootloader, rather than a state change;
+- the MAC read from emulated eFuse;
+- the hello and heartbeat from real firmware over `lp-link` on the emulated
+  USB-Serial-JTAG;
+- the project compiled by the device's own JIT and rendered to the LED pin,
+  rather than a host server reporting it loaded.
+
+That walk proves the same journey by hand-driven UI, with no agent in it.
+
+```bash
+cargo test -p lpa-studio-core e4_
+```
+
 ## Layout
 
 | Path | What |
@@ -56,6 +108,7 @@ what it saw.
 ```bash
 # Deterministic legs (CI): goldens pass, negatives fail.
 cargo test -p lpa-studio-core app_agent
+cargo test -p lpa-studio-core e4_      # the device journey (above)
 just test-emu-c6-cli          # includes stage B on both goldens
 
 # Stage B alone against CI's images (no firmware build):
