@@ -1,7 +1,7 @@
 ---
 status: fixed
 found: 2026-10-02      # how: live-debugging (reading the access flow while chasing a Bluefy flapping report)
-fixed: this change
+fixed: 26958de2c
 area: lpa-studio-core app/access (`AccessSession::logged_in`)
 class: state-conflation
 related:
@@ -54,16 +54,14 @@ without the fix (`link 2: left None, right Some(Edit)`). `?ble=emu` could not
 have caught this: the emulated board's Bluetooth link is its trusted USB link,
 so it never asks for an unlock (ADR S5).
 
-**Not settled here** — what flapped the open board. A lead from its console
-(#891 firmware, 2026-10-02): with a Bluetooth link up and a USB host that had
-stopped reading, the board logged `[usb_link] the host stopped reading
-mid-reply and a radio link needs the frame buffer: restarting the USB
-session`, then `[RECOVERY] io task silent > 2000 ms; withholding watchdog
-feed`, and render fell from 33 to 13 fps. With no Bluetooth link, an absent
-or stalled USB host did neither. The USB link and the radio mux share one
-frame buffer (`release_frame_buf`), and that buffer is on main too. Whether
-the Bluetooth link drops in that state, and on which firmware, still needs
-the A/B with a central (`spikes/ble-lab` on the Mac's Chrome, or a phone).
+**What flapped the open board** (settled later the same day) — not this
+defect, and not the USB/radio frame-buffer lead this entry first pointed at.
+It was Studio's write chunking: Bluefy sends a typed-array view's whole
+buffer, so any request over 512 B, such as a palette pin, was refused as a
+long write and the page tore the link down
+(`docs/defects/2026-10-02-bluefy-writes-a-views-whole-buffer.md`). The
+frame-buffer contention is real but separate: on the spare XIAO it showed
+`io task silent` and fps drops on main and on #891 alike.
 
 **Lesson** — a guard that rations attempts should count failures, not
 attempts. "Spent" tied to the act of trying also catches success, and on a

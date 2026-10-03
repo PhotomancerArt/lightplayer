@@ -114,6 +114,12 @@ class VirtualBluetooth extends EventTarget {
     // M4's unauthenticated-link timeout. Page-internal: the conformance
     // suite shortens it, because its runner allows the whole suite ~20 s.
     this.unauthTimeoutMs = UNAUTHENTICATED_TIMEOUT_MS;
+    // Bluefy (2026-10-02): a write of a typed-array VIEW sends the view's
+    // whole underlying buffer, not the view, so a chunk cut with
+    // `subarray()` carries the entire line, and past 512 B it is refused.
+    // Off by default (a standard browser sends the view); the conformance
+    // suite turns it on.
+    this.wholeBufferWrites = false;
     this.onCableOut = (event) => {
       const boardId = event?.detail?.port?.boardId;
       if (!boardId) return;
@@ -409,7 +415,10 @@ class VirtualRxCharacteristic {
     if (!gatt.connected || !gatt.emulator) {
       throw domError("NetworkError", "GATT Server is disconnected.");
     }
-    const bytes = toBytes(value);
+    const bytes =
+      gatt.device.bluetooth.wholeBufferWrites && ArrayBuffer.isView(value)
+        ? new Uint8Array(value.buffer)
+        : toBytes(value);
     if (bytes.length > MAX_WRITE_BYTES) {
       throw domError("InvalidModificationError", "Value can't exceed 512 bytes.");
     }

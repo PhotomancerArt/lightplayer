@@ -142,6 +142,10 @@ name = "lp-json-pack"
 version = "40.0.0"
 
 [[package]]
+name = "lp-link"
+version = "40.0.0"
+
+[[package]]
 name = "lp-xt-emu-guest"
 version = "0.1.0"
 
@@ -218,6 +222,7 @@ dependencies = [
  "base64",
  "lp-collection",
  "lp-json-pack",
+ "lp-link",
  "lpc-access",
  "lpc-model",
  "ryu-js",

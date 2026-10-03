@@ -24,7 +24,7 @@ pub mod app_agent_reference;
 pub mod app_agent_session;
 /// App-agent evals, stage A (test-only).
 #[cfg(test)]
-mod evals;
+pub(crate) mod evals;
 pub mod ui_agent_card;
 pub mod ui_agent_view;
 pub mod ui_app_agent_view;

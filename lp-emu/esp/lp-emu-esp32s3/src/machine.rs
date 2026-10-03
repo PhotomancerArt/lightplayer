@@ -1474,6 +1474,16 @@ impl Esp32S3Builder {
 
         let mut bus = crate::bus_setup::build();
         bus.set_strict(self.strict);
+        // This chip publishes code by **store**, not by barrier, as the
+        // classic does: the product's JIT writes a shader into the heap
+        // through SRAM1's D-bus view and calls it through the I-bus alias
+        // with no `memw` or `isync` (`lpvm_native`'s `JitBuffer::from_code`
+        // fences on RV32 only), internal SRAM has no cache in front of it
+        // (the ICache serves the flash/PSRAM windows, `crate::cache`), and
+        // silicon renders on that path (shader-oracle, 2026-07-30). The
+        // machine's own invalidation keys off the store. `--strict-bus`'s
+        // RV32 missing-fence checker would call each publish a firmware bug.
+        bus.set_fence_contract(false);
         if let Some(TraceSink(sink)) = self.trace {
             bus.trace =
                 lp_emu_esp_common::Trace::to_sink(sink).with_block_filter(self.trace_blocks);
