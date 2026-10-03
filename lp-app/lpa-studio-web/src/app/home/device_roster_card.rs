@@ -306,6 +306,10 @@ pub(crate) fn DeviceRosterCard(
         .as_ref()
         .and_then(|layout| layout.line.clone())
         .filter(|_| busy_zone.is_none());
+    // The waiting-files line is a sentence with a verb in it ("…Finish
+    // update moves them."); cut to one line at a card's width it lost the
+    // verb (G1 rehearsal: "Finish update mov…"), so it wraps instead.
+    let firmware_line_wraps = layout_line.is_some();
     let firmware_line = match layout_line {
         Some(line) => line,
         None => firmware_line_text(&card, identity_line.board.as_deref(), busy_zone),
@@ -537,7 +541,7 @@ pub(crate) fn DeviceRosterCard(
             section { class: combined_zone_class(),
                 div { class: zone_rows_class(),
                 div { class: armed_line_and_bar_class(),
-                    p { class: info_line_class(), title: "{firmware_line}", "{firmware_line}" }
+                    p { class: firmware_line_class(firmware_line_wraps), title: "{firmware_line}", "{firmware_line}" }
                     ZoneBar { activity: card.activity.clone(), lit: busy_zone == Some(ZoneKind::Firmware) }
                 }
                 div { class: verb_row_class(),
@@ -1374,6 +1378,19 @@ fn info_line_class() -> &'static str {
     "tw:m-0 tw:h-[17px] tw:truncate tw:text-xs tw:leading-[17px] tw:text-subtle-foreground"
 }
 
+/// The firmware zone's line: the info line, except a board's waiting-files
+/// line (held files, or files in a backup), which wraps — it is a sentence
+/// naming the verb that resolves it, and truncated it hid that verb. Its
+/// first line keeps the info line's height, so the bar below sits where it
+/// always does on a one-line card.
+fn firmware_line_class(wraps: bool) -> &'static str {
+    if wraps {
+        "tw:m-0 tw:min-h-[17px] tw:text-xs tw:leading-[17px] tw:text-subtle-foreground"
+    } else {
+        info_line_class()
+    }
+}
+
 /// The info line when a degraded board's fault is what it carries: the
 /// Attention tone the status chip already wears for this state, semibold
 /// because it is the reason the chip changed. NOT the error voice — an error
@@ -1848,6 +1865,24 @@ mod tests {
             project_line_text(&card, Some(ZoneKind::Firmware)),
             "node /studio.show/s faulted"
         );
+    }
+
+    /// G1 rehearsal (2026-10-03): the held card's line read "This board's
+    /// files are waiting — Finish update mov…", the verb cut off at a
+    /// card's width. A waiting-files line wraps; every other firmware line
+    /// stays the one-line info line.
+    #[test]
+    fn a_waiting_files_line_wraps_and_the_others_stay_one_line() {
+        assert!(
+            !firmware_line_class(true).contains("tw:truncate"),
+            "the waiting-files line wraps"
+        );
+        assert!(
+            !firmware_line_class(true).contains("tw:h-["),
+            "and is not held to one line's height"
+        );
+        assert_eq!(firmware_line_class(false), info_line_class());
+        assert!(info_line_class().contains("tw:truncate"));
     }
 
     /// The FIRMWARE line: the flash's narration, then the blank verdict,
