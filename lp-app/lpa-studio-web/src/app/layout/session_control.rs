@@ -104,6 +104,18 @@ pub enum ControlSegment {
     History,
 }
 
+impl ControlSegment {
+    /// The section as core's place names it (M7).
+    fn place_section(self) -> lpa_studio_core::UiSessionSection {
+        match self {
+            Self::Device => lpa_studio_core::UiSessionSection::Device,
+            Self::Project => lpa_studio_core::UiSessionSection::Project,
+            Self::Changes => lpa_studio_core::UiSessionSection::Changes,
+            Self::History => lpa_studio_core::UiSessionSection::History,
+        }
+    }
+}
+
 /// Everything the header control renders: THE session (core's control
 /// projection), the open project's detail content if a project is open at
 /// all — a connected board with nothing loaded is a real state, and the
@@ -190,6 +202,22 @@ pub fn SessionProjectControl(control: ChromeSessionControl) -> Element {
     // backdrop closes it, the segments toggle it).
     let section = use_signal(|| initially_open.unwrap_or(ControlSegment::Device));
     let panel_open = use_signal(|| initially_open.is_some());
+    // Place (M7): which section the panel shows while it is open, for the
+    // web app to report to core. Read-only there; nothing opens it back.
+    let place_slot = crate::place_report::use_session_panel_place();
+    use_effect(move || {
+        let showing = panel_open().then(|| section().place_section());
+        if let Some(crate::place_report::SessionPanelPlace(mut slot)) = place_slot
+            && *slot.peek() != showing
+        {
+            slot.set(showing);
+        }
+    });
+    use_drop(move || {
+        if let Some(crate::place_report::SessionPanelPlace(mut slot)) = place_slot {
+            slot.set(None);
+        }
+    });
     // The anchor id: the merged outline welds the panel to the WHOLE
     // shell — the bar is the tab row (D15), so the panel hangs off the
     // bar, not off one segment.

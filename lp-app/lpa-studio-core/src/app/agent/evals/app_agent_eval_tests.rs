@@ -398,6 +398,195 @@ fn the_readout_of_seans_project_is_small_and_says_what_matters() {
     assert!(readout.len() / 4 <= 1_500, "{readout}");
 }
 
+/// M7's budget: on a big project the readout lists in full only what the
+/// user is looking at and counts the rest, so it stays under its ceiling
+/// however many verbs each node card publishes — while every offer stays
+/// pressable by path. The project is real (Sean's, with more patterns); the
+/// extra verbs per node stand in for the editor offers M6 adds.
+#[test]
+fn a_big_projects_readout_leads_with_place_and_stays_under_budget() {
+    let mut studio = EvalStudio::with_project(&big_project(PATTERN_COPIES));
+    studio.settle(6);
+    studio.act(crate::StudioCommand::Place(
+        crate::UiPlace::new(crate::UiPage::Project {
+            uid: "prjbig".to_string(),
+            view: crate::UiProjectView::Nodes,
+        })
+        .with_panel(crate::UiPanel::AppChat),
+    ));
+    let nodes = studio.node_statuses().len();
+    assert!(nodes >= 15, "a big project: {nodes} nodes");
+    let mut snapshot = studio.readout_snapshot();
+    let real = snapshot.render();
+    eprintln!(
+        "{nodes} nodes, {} offers: readout {} chars ≈ {} tokens, a flat listing ≈ {} \
+         tokens\n{real}",
+        snapshot.offers.len(),
+        real.len(),
+        real.len() / 4,
+        flat_len(&snapshot) / 4
+    );
+    assert!(
+        real.starts_with("page: project editor, nodes view\nyou are looking at: node "),
+        "it leads with where the user is: {real}"
+    );
+    assert!(
+        real.contains("open over the page: the assistant chat\n"),
+        "{real}"
+    );
+
+    // M6's editor offers, simulated: ten more verbs on every node card.
+    let mut node_owners: Vec<crate::OfferPath> = Vec::new();
+    for offer in &snapshot.offers {
+        if let Some(owner) = offer.path.owner().filter(crate::OfferPath::names_node)
+            && !node_owners.contains(&owner)
+        {
+            node_owners.push(owner);
+        }
+    }
+    let template = snapshot.offers[0].clone();
+    for owner in &node_owners {
+        for at in 0..10 {
+            let mut offer = template.clone();
+            offer.path = owner.clone().child(format!("set-knob-{at}"));
+            snapshot.offers.push(offer);
+        }
+    }
+    let readout = snapshot.render();
+    let flat = flat_len(&snapshot);
+    eprintln!(
+        "with ten more verbs a node: {} offers, readout ≈ {} tokens, a flat listing ≈ {} \
+         tokens\n{readout}",
+        snapshot.offers.len(),
+        readout.len() / 4,
+        flat / 4
+    );
+    let focus = snapshot
+        .focus
+        .node
+        .clone()
+        .expect("the editor focuses a node");
+    for line in readout
+        .lines()
+        .filter(|line| line.starts_with("- project/"))
+    {
+        let (path, _) = line[2..].split_once(": ").expect("a listed action");
+        let owner = crate::OfferPath::parse(path).unwrap().owner().unwrap();
+        assert!(
+            !owner.names_node() || owner == focus,
+            "only the focused node ({focus}) lists its verbs: {line}"
+        );
+    }
+    assert!(
+        readout.contains("set-knob-0 ×"),
+        "the other nodes' verbs are counted: {readout}"
+    );
+    // ≤1.5k tokens (≈ 4 chars a token), the small project's ceiling, where
+    // listing every verb would not fit.
+    assert!(readout.len() / 4 <= 1_500, "{readout}");
+    assert!(flat / 4 > 1_500, "the case is big enough to need the bound");
+}
+
+/// Place is read, never obeyed: what the web reports moves the readout's
+/// lead and the ⌘K order, and nothing else.
+#[test]
+fn the_reported_place_moves_the_readouts_lead_and_the_palettes_order() {
+    let mut studio = EvalStudio::with_project(&big_project(2));
+    studio.settle(6);
+    let place = |view| {
+        crate::StudioCommand::Place(crate::UiPlace::new(crate::UiPage::Project {
+            uid: "prjbig".to_string(),
+            view,
+        }))
+    };
+
+    // Nothing reported (the headless default): the editor's focused node.
+    let view = studio.view.clone().expect("a view");
+    let focus = view.offers.focus().clone();
+    let node = focus.node.clone().expect("the editor focuses a node");
+    assert_eq!(focus.area, Some(crate::OfferPath::project()));
+    let first = view.offers.search("remove")[0].path.clone();
+    assert_eq!(
+        first.owner(),
+        Some(node.clone()),
+        "⌘K: the focused node's Remove leads"
+    );
+    assert_eq!(
+        view.offers.search("")[0].path.owner(),
+        Some(node.clone()),
+        "⌘K with nothing typed: the focused node's verbs first"
+    );
+
+    // Play mode shows a panel, not a node.
+    studio.act(place(crate::UiProjectView::Play));
+    let readout = studio.readout();
+    assert!(
+        readout.starts_with("page: project editor, play mode\nyou are looking at: no node"),
+        "{readout}"
+    );
+    assert!(readout.contains("actions here: none\n"), "{readout}");
+    let view = studio.view.clone().expect("a view");
+    assert_eq!(view.offers.focus().node, None);
+
+    // Back to the nodes view: the node is in focus again, its verbs listed.
+    studio.act(place(crate::UiProjectView::Nodes));
+    let readout = studio.readout();
+    assert!(
+        readout.contains(&format!("- {node}/remove: Remove node [undoable]\n")),
+        "{readout}"
+    );
+    assert!(
+        studio.view.clone().expect("a view").offers.focus().node == Some(node),
+        "the same node as before"
+    );
+}
+
+/// How long the readout would be listing every offer in full (its shape
+/// before M7).
+fn flat_len(snapshot: &crate::app::agent::app_agent_readout::AppReadoutSnapshot) -> usize {
+    snapshot.lead.len()
+        + snapshot.text.len()
+        + snapshot
+            .offers
+            .iter()
+            .map(|offer| crate::app::agent::app_agent_readout::offer_lines(offer).len())
+            .sum::<usize>()
+}
+
+/// How many extra pattern modules [`big_project`] adds at the root. More
+/// than four and the in-process eval server's project sync gives up.
+const PATTERN_COPIES: usize = 4;
+
+/// Sean's golden project with `copies` more pattern modules at the root,
+/// each a module holding a shader: 2·`copies` more nodes. They all draw to
+/// the one picture channel, so the fixture reports the ambiguity — a long
+/// status line, which a readout must carry too.
+fn big_project(copies: usize) -> ProjectTree {
+    let mut tree = golden_tree("sean-250-d6");
+    let mut module: Value = tree.json("module.json").expect("module.json");
+    let spiral: Vec<(String, Vec<u8>)> = tree
+        .files
+        .iter()
+        .filter_map(|(path, bytes)| {
+            path.strip_prefix("modules/spiral/")
+                .map(|file| (file.to_string(), bytes.clone()))
+        })
+        .collect();
+    for at in 0..copies {
+        for (file, bytes) in &spiral {
+            tree.files
+                .insert(format!("patterns/p{at}/{file}"), bytes.clone());
+        }
+        module["nodes"][format!("pattern_{at}")] =
+            serde_json::json!({ "ref": format!("./patterns/p{at}/module.json") });
+    }
+    tree.files.insert(
+        "module.json".to_string(),
+        serde_json::to_vec_pretty(&module).expect("json"),
+    );
+    tree
+}
+
 #[test]
 fn read_answers_nodes_patterns_boards_and_names_what_exists_on_a_miss() {
     let scenario = Scenario::load("e2-make-it-300").expect("e2");

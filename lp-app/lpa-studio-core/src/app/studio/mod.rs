@@ -8,6 +8,7 @@ pub(crate) mod offer_press_test_api;
 /// registry) and the incoming lamp extent (the upstream node's produced
 /// control product) — the facts the project walk cannot see.
 mod output_face_decoration;
+pub mod place;
 pub mod play_view_op;
 pub mod refresh_cadence;
 pub mod studio_actor;
@@ -78,6 +79,7 @@ pub use crate::core::log::{
 pub use crate::core::notice::UiNotices;
 pub use crate::core::notice::{UiNotice, UiNoticeLevel};
 pub use console_command::ConsoleCommand;
+pub use place::{UiPage, UiPanel, UiPlace, UiProjectView, UiSessionSection};
 pub use play_view_op::PlayViewOp;
 pub use refresh_cadence::{
     BLE_PLAY_IDLE_REFRESH_INTERVAL, DEVICE_CARD_FEED_INTERVAL, DEVICE_HEARTBEAT_INTERVAL,

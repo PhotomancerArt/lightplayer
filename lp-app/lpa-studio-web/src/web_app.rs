@@ -1202,6 +1202,18 @@ pub fn App() -> Element {
     // mounted below every route's body, so it stays open across
     // navigation — share them.
     let app_chat = crate::app::agent::use_provide_app_chat_chrome();
+    // Place (M7): the route and the chrome's open flags, reported to core
+    // whenever they change. Core reads them (the agent's readout, ⌘K's
+    // ranking) and never navigates on them; the session control writes
+    // which section its panel shows into the slot provided here.
+    let session_panel_place = crate::place_report::use_provide_session_panel_place();
+    crate::place_report::use_report_place(
+        bridge.tx.clone(),
+        route,
+        app_chat.open,
+        palette_open,
+        session_panel_place,
+    );
     // Bluetooth access: the Unlock sheet, the card's Connections group and
     // "Who has access", and the Devices page's access settings all sit
     // under the shell; their callback and the view slice they read ride
