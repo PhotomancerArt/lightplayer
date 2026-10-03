@@ -516,12 +516,13 @@ M8's, and each file names what it would extract.
 `scripts/m4-hardware-walk.sh` — which defaults to this very chip — with this
 machine where the XIAO S3 goes: the current tree's shipped image plus
 `frame-dump`, merged into an 8 MiB flash part, booted from the reset vector
-through the real mask ROM and the real IDF bootloader, served on a socket,
-`lp-cli upload projects/test/shader-oracle` against it, and the rendered frame
-held against the host oracle **twice** — the firmware's own `[OUT] dump` line
-and the waveform decoded back off gpio9 by a decoder that never spoke to the
-firmware. It fails if those two disagree with each other, which is the
-comparison a board cannot be asked to make.
+through the real mask ROM and the real IDF bootloader, with `lp-cli emu run
+--chip esp32s3 --host-link --upload projects/test/shader-oracle`
+(`scripts/emu/m4-walk.sh`) hosting the link and uploading the project in one
+call, and the rendered frame held against the host oracle **twice** — the
+firmware's own `[OUT] dump` line and the waveform decoded back off gpio9 by
+a decoder that never spoke to the firmware. It fails if those two disagree
+with each other, which is the comparison a board cannot be asked to make.
 
 ⚠️ **This walk is M6's only end-to-end exercise of the I-bus/D-bus alias.**
 The oracle project compiles its shader ON THE DEVICE: the JIT writes code
