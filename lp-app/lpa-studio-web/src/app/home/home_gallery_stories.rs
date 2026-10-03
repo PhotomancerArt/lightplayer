@@ -890,6 +890,14 @@ fn devices_card_update_steps() -> Element {
         title: "Porch C6".to_string(),
         detected_chip: Some("esp32c6".to_string()),
         board_id: Some("seeed/xiao-esp32-c6".to_string()),
+        firmware_face: lpa_studio_core::DeviceFirmwareFace::LightPlayer {
+            firmware: Some("fw-esp32c6 abc1234".to_string()),
+            wire: lpa_studio_core::DeviceWireVersion::Match,
+        },
+        terminal: vec![
+            story_line(DeviceTerminalKind::Studio, "Flashing firmware"),
+            story_line(DeviceTerminalKind::Studio, "Reading the board's files"),
+        ],
         ..roster_fixture().roster.devices.remove(0)
     };
     let at = |step: DeviceFlashStep, percent: Option<u8>| DeviceView {
@@ -952,10 +960,25 @@ fn devices_card_older_firmware() -> Element {
         last_outcome: None,
         activity: None,
         escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
+        terminal: vec![
+            story_line(DeviceTerminalKind::Board, "Opened the port"),
+            story_line(
+                DeviceTerminalKind::Wire,
+                "hello · proto 32 · seeed/xiao-esp32-c6 · another wire: only its version and \
+                 board were read",
+            ),
+        ],
         ..roster_fixture().roster.devices.remove(0)
     };
     let unnamed = DeviceView {
         board_id: None,
+        terminal: vec![
+            story_line(DeviceTerminalKind::Board, "Opened the port"),
+            story_line(
+                DeviceTerminalKind::Wire,
+                "hello · proto 32 · ? · another wire: only its version and board were read",
+            ),
+        ],
         ..older.clone()
     };
     rsx! {
