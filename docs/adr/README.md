@@ -209,7 +209,7 @@ holds the full context.
 | Peripheral latency 4 halves connected-idle ESP-NOW loss but its supervision drops cluster; it stays a `desk_ble_params` knob | `2026-09-24-ble-transport` (2026-09-24 amendment) | A longer run, or a longer supervision timeout, before it could replace latency 0 |
 | `Identify` (blink the board you are connecting to) was not built | `2026-09-23-ble-access-model` (M7 amendment) | The next PR that bumps the wire anyway |
 | The C6's link thread is created through esp-radio-rtos-driver's `task_create` (esp-rtos's own is crate-private); its stack's high-water is read only in the `io_thread_stack_diag` build | `2026-10-02-c6-link-io-thread` | esp-rtos exposes thread creation and a stack range, or an esp-rtos bump moves `task_create` |
-| A link thread (and messages-first) for the S3, the classic and the S31; only the C6 has one | `2026-10-02-c6-link-io-thread`; `2026-08-25-classic-uart-io-task-executor-isolation` (2026-10-02 amendment) | The Wi-Fi control roadmap's board-porting milestone (M2) |
+| A link thread (and messages-first) for the S31; the C6, the S3 and the classic each have one now (S3/classic pending their desk-walk gates, PR #942/#943) | `2026-10-02-c6-link-io-thread` (2026-10-03 S3 and classic amendments); `2026-08-25-classic-uart-io-task-executor-isolation` (2026-10-03 amendment) | The S31 gets esp-hal support and a desk board |
 
 ## Relationship To Shared Planning
 
