@@ -3880,7 +3880,11 @@ fn the_patch_surface_derives_both_grains_and_selection_round_trips() {
 /// whole thing back one gesture at a time.
 #[test]
 fn verbs_author_the_small_dome_install_byte_identically() {
-    use crate::{PatchVerbKind, PatchVerbOp, PatchVerbSubject};
+    use crate::{
+        PATCH_ASSIGN_VERB, PATCH_CLEAR_VERB, PATCH_LAMP_PARAM, PATCH_OUTPUT_PARAM, PATCH_REDO_VERB,
+        PATCH_REVERSE_VERB, PATCH_ROTATE_VERB, PATCH_STEPS_PARAM, PATCH_SUBJECT_PARAM,
+        PATCH_UNDO_VERB, PATCH_WHOLE_FIXTURE, patch_history_path,
+    };
 
     let example =
         crate::app::home::embedded_example("catalog/small-dome").expect("small-dome embedded");
@@ -3914,9 +3918,11 @@ fn verbs_author_the_small_dome_install_byte_identically() {
     let snapshot = snapshot.expect("a refresh emits a snapshot");
 
     // Fetch every fixture's patch + map2d bodies (what the page does).
+    let surface = project_editor(&snapshot)
+        .patch_surface
+        .clone()
+        .expect("surface");
     let (dome, doors) = {
-        let editor = project_editor(&snapshot);
-        let surface = editor.patch_surface.as_ref().expect("surface");
         let by_label = |needle: &str| {
             surface
                 .fixtures
@@ -3951,44 +3957,37 @@ fn verbs_author_the_small_dome_install_byte_identically() {
         }
     }
 
-    let fixtures = || {
-        [&dome, &doors]
-            .iter()
-            .map(|fixture| crate::PatchVerbFixture {
-                node: fixture.node,
-                patch_artifact: fixture.patch_artifact.clone().expect("patch artifact"),
-                mapping_artifact: fixture.mapping_artifact.clone(),
-                lamp_count: fixture.patch.lamps,
-            })
-            .collect::<Vec<_>>()
-    };
+    // Every verb is pressed by its path, the way the panel's buttons, the
+    // arm's second click and the agent press it: `project/<fixture>/patch/
+    // <verb>` with the picks as args.
     macro_rules! verb {
-        ($subject_fixture:expr, $path:expr, $kind:expr) => {{
-            handle
-                .tx
-                .send(StudioCommand::Action(crate::UiAction::from_op(
-                    ProjectController::NODE_ID,
-                    PatchVerbOp {
-                        subject_fixture: Some($subject_fixture),
-                        subject: PatchVerbSubject {
-                            path: ($path as Option<&str>).map(str::to_string),
-                            range: None,
-                        },
-                        fixtures: fixtures(),
-                        assign_output_name: None,
-                        verb: $kind,
-                    },
-                )));
-            drive(actor.run_one_batch_for_test());
+        ($fixture:expr, $verb:expr, $args:expr) => {{
+            let path = surface
+                .patch_verbs_of($fixture.node)
+                .expect("the fixture's patch verbs")
+                .child($verb);
+            actor_clicks(&mut actor, &handle.tx).press(path, $args);
         }};
     }
+    let subject = |path: &str| OfferArgs::new().with(PATCH_SUBJECT_PARAM, path);
+    // A patch entry names its output by NAME; the assign's `output` choice
+    // names the output node.
+    let output_value = |name: &str| {
+        surface
+            .outputs
+            .iter()
+            .find(|output| output.name.as_deref() == Some(name))
+            .and_then(|output| output.patch_output_value())
+            .unwrap_or_else(|| panic!("no output named {name}"))
+    };
 
     // Clear both docs, then replay the shipped rows in document order:
     // assign, then reverse and stride-stepped rotation where the row
     // carries them (panel stride 40 — one side; door stride 180 — one
-    // leg, both authored in the mapping documents).
-    verb!(dome.node, None, PatchVerbKind::Clear);
-    verb!(doors.node, None, PatchVerbKind::Clear);
+    // leg, both authored in the mapping documents, and what the rotate
+    // offer steps by).
+    verb!(dome, PATCH_CLEAR_VERB, subject(PATCH_WHOLE_FIXTURE));
+    verb!(doors, PATCH_CLEAR_VERB, subject(PATCH_WHOLE_FIXTURE));
     let rows_of = |file: &str| -> Vec<(String, String, u32, bool, u32)> {
         let doc = lpc_mapping::PatchDoc::from_json(
             std::str::from_utf8(shipped[file]).expect("utf8 patch doc"),
@@ -4017,25 +4016,21 @@ fn verbs_author_the_small_dome_install_byte_identically() {
     ] {
         for (path, output, lamp, reversed, offset) in rows_of(file) {
             verb!(
-                fixture.node,
-                Some(path.as_str()),
-                PatchVerbKind::Assign {
-                    output_name: Some(output),
-                    lamp,
-                }
+                fixture,
+                PATCH_ASSIGN_VERB,
+                subject(&path)
+                    .with(PATCH_OUTPUT_PARAM, output_value(&output))
+                    .with(PATCH_LAMP_PARAM, lamp.to_string())
             );
             if reversed {
-                verb!(fixture.node, Some(path.as_str()), PatchVerbKind::Reverse);
+                verb!(fixture, PATCH_REVERSE_VERB, subject(&path));
             }
             if offset > 0 {
                 assert_eq!(offset % stride, 0, "rotation steps by the stride");
                 verb!(
-                    fixture.node,
-                    Some(path.as_str()),
-                    PatchVerbKind::Rotate {
-                        steps: (offset / stride) as i32,
-                        stride,
-                    }
+                    fixture,
+                    PATCH_ROTATE_VERB,
+                    subject(&path).with(PATCH_STEPS_PARAM, (offset / stride).to_string())
                 );
             }
         }
@@ -4075,7 +4070,8 @@ fn verbs_author_the_small_dome_install_byte_identically() {
 
     // Undo restores the exact prior bytes, one gesture at a time.
     let before_undo = body_of(doors.patch_artifact.as_ref().unwrap());
-    verb!(doors.node, None, PatchVerbKind::Undo);
+    actor_clicks(&mut actor, &handle.tx)
+        .press(patch_history_path(PATCH_UNDO_VERB), OfferArgs::new());
     actor_clicks(&mut actor, &handle.tx).press("project/save", OfferArgs::new());
     while view.try_recv().is_some() {}
     let after_undo = body_of(doors.patch_artifact.as_ref().unwrap());
@@ -4084,7 +4080,8 @@ fn verbs_author_the_small_dome_install_byte_identically() {
         after_undo.ends_with('\n'),
         "undo restores the same newline-terminated bytes a forward write produces"
     );
-    verb!(doors.node, None, PatchVerbKind::Redo);
+    actor_clicks(&mut actor, &handle.tx)
+        .press(patch_history_path(PATCH_REDO_VERB), OfferArgs::new());
     actor_clicks(&mut actor, &handle.tx).press("project/save", OfferArgs::new());
     while view.try_recv().is_some() {}
     assert_eq!(
@@ -4101,7 +4098,10 @@ fn verbs_author_the_small_dome_install_byte_identically() {
 /// what the panel reads.
 #[test]
 fn the_flow_flag_and_unmap_all_are_one_undo_step_each() {
-    use crate::{PatchVerbKind, PatchVerbOp, PatchVerbSubject};
+    use crate::{
+        PATCH_FLOW_MANUAL, PATCH_FLOW_PARAM, PATCH_SET_FLOW_VERB, PATCH_UNDO_VERB,
+        PATCH_UNMAP_ALL_VERB, patch_history_path,
+    };
 
     let example =
         crate::app::home::embedded_example("catalog/small-dome").expect("small-dome embedded");
@@ -4129,15 +4129,19 @@ fn the_flow_flag_and_unmap_all_are_one_undo_step_each() {
     }
     let snapshot = snapshot.expect("a refresh emits a snapshot");
 
-    let doors = {
+    let (doors, doors_verbs) = {
         let editor = project_editor(&snapshot);
         let surface = editor.patch_surface.as_ref().expect("surface");
-        surface
+        let doors = surface
             .fixtures
             .iter()
             .find(|fixture| fixture.label.to_lowercase().contains("door"))
             .expect("no doors fixture")
-            .clone()
+            .clone();
+        let verbs = surface
+            .patch_verbs_of(doors.node)
+            .expect("the doors' patch verbs");
+        (doors, verbs)
     };
     assert!(
         !doors.manual_flow,
@@ -4167,29 +4171,14 @@ fn the_flow_flag_and_unmap_all_are_one_undo_step_each() {
     }
     prefetch!();
 
-    let fixtures = vec![crate::PatchVerbFixture {
-        node: doors.node,
-        patch_artifact: doors.patch_artifact.clone().expect("patch artifact"),
-        mapping_artifact: doors.mapping_artifact.clone(),
-        lamp_count: doors.patch.lamps,
-    }];
+    // The verbs are pressed by path: the panel's flow cards and its
+    // "unmap all" press these same offers.
     macro_rules! verb {
-        ($kind:expr) => {{
-            handle
-                .tx
-                .send(StudioCommand::Action(crate::UiAction::from_op(
-                    ProjectController::NODE_ID,
-                    PatchVerbOp {
-                        subject_fixture: Some(doors.node),
-                        subject: PatchVerbSubject::default(),
-                        fixtures: fixtures.clone(),
-                        assign_output_name: None,
-                        verb: $kind,
-                    },
-                )));
-            drive(actor.run_one_batch_for_test());
+        ($path:expr, $args:expr) => {{
+            actor_clicks(&mut actor, &handle.tx).press($path, $args);
         }};
     }
+    let undo = patch_history_path(PATCH_UNDO_VERB);
 
     let project_dir = format!("/projects/{}", example.id.replace('/', "-"));
     let patch_path = format!(
@@ -4220,7 +4209,10 @@ fn the_flow_flag_and_unmap_all_are_one_undo_step_each() {
     let shipped = body();
 
     // Auto → manual: the flag moves, the entries do not.
-    verb!(PatchVerbKind::SetFlow { manual: true });
+    verb!(
+        doors_verbs.clone().child(PATCH_SET_FLOW_VERB),
+        OfferArgs::new().with(PATCH_FLOW_PARAM, PATCH_FLOW_MANUAL)
+    );
     save!();
     let manual = body();
     assert!(manual.contains("\"flow\": \"manual\""), "{manual}");
@@ -4229,7 +4221,12 @@ fn the_flow_flag_and_unmap_all_are_one_undo_step_each() {
 
     // Unmap all: ONE write that empties the document, flag intact.
     prefetch!();
-    verb!(PatchVerbKind::UnmapAll);
+    // The prefetch is also what lets the offer see the flag: it reads the
+    // flow off the cached bytes, and unmap-all waits for a manual fixture.
+    verb!(
+        doors_verbs.clone().child(PATCH_UNMAP_ALL_VERB),
+        OfferArgs::new()
+    );
     save!();
     let unmapped = body();
     assert!(unmapped.contains("\"entries\": []"), "{unmapped}");
@@ -4274,7 +4271,7 @@ fn the_flow_flag_and_unmap_all_are_one_undo_step_each() {
     // Trimmed because the undo path replays the snapshot bytes verbatim
     // while the write path appends a trailing newline — a pre-existing
     // cosmetic asymmetry in the verb stack, not a P5b claim.
-    verb!(PatchVerbKind::Undo);
+    verb!(undo.clone(), OfferArgs::new());
     save!();
     assert_eq!(
         body().trim_end(),
@@ -4282,13 +4279,162 @@ fn the_flow_flag_and_unmap_all_are_one_undo_step_each() {
         "one step undid the whole unmap-all"
     );
     prefetch!();
-    verb!(PatchVerbKind::Undo);
+    verb!(undo.clone(), OfferArgs::new());
     save!();
     assert_eq!(
         body().trim_end(),
         shipped.trim_end(),
         "and one more undid the flag alone"
     );
+}
+
+/// The app agent and the patch verbs (M6b): with the doors selected in the
+/// Patching view, the readout lists the doors' patch verbs in full — the
+/// focused patch target's, M7's focus-first — with what each takes; the
+/// agent presses one by its path (`act`, the tool's own route), a bad pick
+/// is refused naming the choices, and the press lands as one patch-history
+/// step, so Undo is offered next.
+#[test]
+fn the_agent_reads_and_presses_the_selected_fixtures_patch_verbs() {
+    use crate::{
+        PATCH_CLEAR_VERB, PATCH_FLOW_PARAM, PATCH_SET_FLOW_VERB, PATCH_SUBJECT_PARAM,
+        PATCH_UNDO_VERB, UiPatchTarget, patch_history_path,
+    };
+
+    let example =
+        crate::app::home::embedded_example("catalog/small-dome").expect("small-dome embedded");
+    let server = Rc::new(RefCell::new(example_e2e_server(&example)));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let controller = StudioController::connected_with_client_for_test(client);
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    connect_running_project(&handle.tx);
+    drive(actor.run_one_batch_for_test());
+    let _ = view.try_recv().expect("connect emits a snapshot");
+    let mut snapshot = None;
+    for _ in 0..4 {
+        handle.tx.send(project_action(ProjectOp::RefreshProject));
+        drive(actor.run_one_batch_for_test());
+        if let Some(next) = view.try_recv() {
+            snapshot = Some(next);
+        }
+    }
+    let snapshot = snapshot.expect("a refresh emits a snapshot");
+    let surface = project_editor(&snapshot)
+        .patch_surface
+        .clone()
+        .expect("surface");
+    let doors = surface
+        .fixtures
+        .iter()
+        .find(|fixture| fixture.label.to_lowercase().contains("door"))
+        .expect("no doors fixture")
+        .clone();
+    let verbs = surface
+        .patch_verbs_of(doors.node)
+        .expect("the doors' patch verbs");
+    for artifact in [doors.patch_artifact.clone(), doors.mapping_artifact.clone()]
+        .into_iter()
+        .flatten()
+    {
+        handle
+            .tx
+            .send(StudioCommand::Action(crate::UiAction::from_op(
+                ProjectController::NODE_ID,
+                crate::AssetContentFetchOp { artifact },
+            )));
+        drive(actor.run_one_batch_for_test());
+    }
+
+    // The user is on the Patching view with the doors selected.
+    actor
+        .controller_mut_for_test()
+        .set_place(crate::UiPlace::new(crate::UiPage::Example {
+            slug: example.id.to_string(),
+            view: crate::UiProjectView::Patch,
+        }));
+    handle
+        .tx
+        .send(StudioCommand::Action(crate::UiAction::from_op(
+            crate::ProjectEditorTarget::NodeTree.node_id(),
+            crate::ProjectEditorOp::PatchSelect {
+                selection: crate::UiSelection::one(UiPatchTarget::Fixture { node: doors.node }),
+            },
+        )));
+    drive(actor.run_one_batch_for_test());
+
+    let readout = actor
+        .controller_mut_for_test()
+        .app_agent_readout_for_test()
+        .render();
+    let listed = readout
+        .split("more actions, counted")
+        .next()
+        .expect("the listed part");
+    let set_flow = verbs.clone().child(PATCH_SET_FLOW_VERB);
+    let clear = verbs.clone().child(PATCH_CLEAR_VERB);
+    assert!(
+        listed.contains(&format!("- {set_flow}: Set flow [choose a flow in args]")),
+        "the selected fixture's patch verbs are listed in full: {readout}"
+    );
+    assert!(
+        listed.contains("takes flow: one of auto (auto-mapped), manual (manual)"),
+        "{readout}"
+    );
+    assert!(
+        listed.contains(&format!("- {clear}: Unmap the whole fixture [undoable]")),
+        "the selection is the default subject, and Unmap says it is undoable: {readout}"
+    );
+    assert!(
+        !listed.contains("/out_"),
+        "an output's patch verbs are not the selection's: {readout}"
+    );
+
+    let act = |actor: &mut StudioActor<_>, action: &str, args: &[(&str, &str)]| {
+        let input: lpa_agent::ActInput = serde_json::from_value(serde_json::json!({
+            "action": action,
+            "args": args
+                .iter()
+                .map(|(name, value)| (name.to_string(), serde_json::json!(value)))
+                .collect::<serde_json::Map<_, _>>(),
+            "why": "the test asked",
+        }))
+        .expect("an act input");
+        drive(
+            actor
+                .controller_mut_for_test()
+                .app_agent_act_for_test(input),
+        )
+    };
+    let refused = act(
+        &mut actor,
+        &clear.to_string(),
+        &[(PATCH_SUBJECT_PARAM, "/no-such-door")],
+    );
+    assert!(
+        matches!(&refused, lpa_agent::ActOutcome::Refused { reason, .. }
+            if reason.contains("`subject` must be one of all, ")),
+        "a bad pick is refused with the choices: {refused:?}"
+    );
+
+    let outcome = act(
+        &mut actor,
+        &set_flow.to_string(),
+        &[(PATCH_FLOW_PARAM, "manual")],
+    );
+    assert!(
+        matches!(outcome, lpa_agent::ActOutcome::Done { .. }),
+        "{outcome:?}"
+    );
+    actor
+        .controller_mut_for_test()
+        .offered(patch_history_path(PATCH_UNDO_VERB));
 }
 
 /// The Arrange substrate end-to-end (unified-editor P2): the editor.json
@@ -4673,8 +4819,8 @@ fn editor_meta_arranges_a_fixture_with_byte_stable_undo() {
 #[test]
 fn edit_seq_interleaves_verbs_meta_ops_and_switch_events() {
     use crate::{
-        EditorMetaFixture, EditorMetaOp, EditorMetaVerb, PatchVerbKind, PatchVerbOp,
-        PatchVerbSubject, UiArrangeTransform, UiEditJournalEvent, UiEditorMode,
+        EditorMetaFixture, EditorMetaOp, EditorMetaVerb, PATCH_REVERSE_VERB, PATCH_SUBJECT_PARAM,
+        PATCH_UNDO_VERB, UiArrangeTransform, UiEditJournalEvent, UiEditorMode, patch_history_path,
     };
 
     let example =
@@ -4703,16 +4849,19 @@ fn edit_seq_interleaves_verbs_meta_ops_and_switch_events() {
     }
     let snapshot = snapshot.expect("a refresh emits a snapshot");
 
-    let (dome, editor_artifact) = {
+    let (dome, dome_verbs, editor_artifact) = {
         let editor = project_editor(&snapshot);
         let surface = editor.patch_surface.as_ref().expect("surface");
+        let dome = surface
+            .fixtures
+            .iter()
+            .find(|fixture| fixture.label.to_lowercase().contains("dome"))
+            .expect("dome")
+            .clone();
+        let verbs = surface.patch_verbs_of(dome.node).expect("the dome's verbs");
         (
-            surface
-                .fixtures
-                .iter()
-                .find(|fixture| fixture.label.to_lowercase().contains("dome"))
-                .expect("dome")
-                .clone(),
+            dome,
+            verbs,
             surface.editor_meta_artifact.clone().expect("artifact"),
         )
     };
@@ -4741,27 +4890,10 @@ fn edit_seq_interleaves_verbs_meta_ops_and_switch_events() {
     drive(actor.run_one_batch_for_test());
 
     // Interleave: verb → mode switch → arrange set → node switch → verb undo.
-    handle
-        .tx
-        .send(StudioCommand::Action(crate::UiAction::from_op(
-            ProjectController::NODE_ID,
-            PatchVerbOp {
-                subject_fixture: Some(dome.node),
-                subject: PatchVerbSubject {
-                    path: Some("/rim-a/1".to_string()),
-                    range: None,
-                },
-                fixtures: vec![crate::PatchVerbFixture {
-                    node: dome.node,
-                    patch_artifact: dome.patch_artifact.clone().expect("patch artifact"),
-                    mapping_artifact: dome.mapping_artifact.clone(),
-                    lamp_count: dome.patch.lamps,
-                }],
-                assign_output_name: None,
-                verb: PatchVerbKind::Reverse,
-            },
-        )));
-    drive(actor.run_one_batch_for_test());
+    actor_clicks(&mut actor, &handle.tx).press(
+        dome_verbs.child(PATCH_REVERSE_VERB),
+        OfferArgs::new().with(PATCH_SUBJECT_PARAM, "/rim-a/1"),
+    );
     handle
         .tx
         .send(StudioCommand::Action(crate::UiAction::from_op(
@@ -4806,19 +4938,8 @@ fn edit_seq_interleaves_verbs_meta_ops_and_switch_events() {
             },
         )));
     drive(actor.run_one_batch_for_test());
-    handle
-        .tx
-        .send(StudioCommand::Action(crate::UiAction::from_op(
-            ProjectController::NODE_ID,
-            PatchVerbOp {
-                subject_fixture: None,
-                subject: PatchVerbSubject::default(),
-                fixtures: Vec::new(),
-                assign_output_name: None,
-                verb: PatchVerbKind::Undo,
-            },
-        )));
-    drive(actor.run_one_batch_for_test());
+    actor_clicks(&mut actor, &handle.tx)
+        .press(patch_history_path(PATCH_UNDO_VERB), OfferArgs::new());
 
     handle.tx.send(project_action(ProjectOp::RefreshProject));
     drive(actor.run_one_batch_for_test());
@@ -4941,7 +5062,7 @@ fn every_patch_target_arm_round_trips_through_selection() {
 /// exactly where it is needed most.
 #[test]
 fn a_fully_unmapped_project_keeps_its_outputs_and_their_free_ports() {
-    use crate::{PatchVerbKind, PatchVerbOp, PatchVerbSubject};
+    use crate::{PATCH_FLOW_MANUAL, PATCH_FLOW_PARAM, PATCH_SET_FLOW_VERB, PATCH_UNMAP_ALL_VERB};
 
     let example =
         crate::app::home::embedded_example("catalog/small-dome").expect("small-dome embedded");
@@ -4969,22 +5090,12 @@ fn a_fully_unmapped_project_keeps_its_outputs_and_their_free_ports() {
     }
     let snapshot = snapshot.expect("a refresh emits a snapshot");
 
-    let all: Vec<crate::UiPatchSurfaceFixture> = project_editor(&snapshot)
+    let surface = project_editor(&snapshot)
         .patch_surface
-        .as_ref()
-        .expect("surface")
-        .fixtures
-        .clone();
+        .clone()
+        .expect("surface");
+    let all: Vec<crate::UiPatchSurfaceFixture> = surface.fixtures.clone();
     assert_eq!(all.len(), 2, "the small-dome patches two fixtures");
-    let verb_fixtures: Vec<crate::PatchVerbFixture> = all
-        .iter()
-        .map(|fixture| crate::PatchVerbFixture {
-            node: fixture.node,
-            patch_artifact: fixture.patch_artifact.clone().expect("patch artifact"),
-            mapping_artifact: fixture.mapping_artifact.clone(),
-            lamp_count: fixture.patch.lamps,
-        })
-        .collect();
     // The page's mount prefetch, re-run before every verb: a save drops the
     // cached bodies, and a verb ahead of its body blocks rather than writes.
     macro_rules! prefetch {
@@ -5011,30 +5122,27 @@ fn a_fully_unmapped_project_keeps_its_outputs_and_their_free_ports() {
             }
         }};
     }
+    // Each verb pressed by its path, then saved.
     macro_rules! verb {
-        ($node:expr, $kind:expr) => {{
-            handle
-                .tx
-                .send(StudioCommand::Action(crate::UiAction::from_op(
-                    ProjectController::NODE_ID,
-                    PatchVerbOp {
-                        subject_fixture: Some($node),
-                        subject: PatchVerbSubject::default(),
-                        fixtures: verb_fixtures.clone(),
-                        assign_output_name: None,
-                        verb: $kind,
-                    },
-                )));
-            drive(actor.run_one_batch_for_test());
+        ($node:expr, $verb:expr, $args:expr) => {{
+            let path = surface
+                .patch_verbs_of($node)
+                .expect("the fixture's patch verbs")
+                .child($verb);
+            actor_clicks(&mut actor, &handle.tx).press(path, $args);
             actor_clicks(&mut actor, &handle.tx).press("project/save", OfferArgs::new());
         }};
     }
     // Both fixtures manual, both emptied — the walk's own opening gesture.
     for fixture in &all {
         prefetch!();
-        verb!(fixture.node, PatchVerbKind::SetFlow { manual: true });
+        verb!(
+            fixture.node,
+            PATCH_SET_FLOW_VERB,
+            OfferArgs::new().with(PATCH_FLOW_PARAM, PATCH_FLOW_MANUAL)
+        );
         prefetch!();
-        verb!(fixture.node, PatchVerbKind::UnmapAll);
+        verb!(fixture.node, PATCH_UNMAP_ALL_VERB, OfferArgs::new());
     }
 
     prefetch!();

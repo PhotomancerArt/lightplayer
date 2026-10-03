@@ -44,6 +44,7 @@ pub(crate) mod output_lamp_coverage;
 pub(crate) mod patch_bay_derivation;
 pub mod patch_preview;
 pub mod patch_pulse;
+pub(crate) mod patch_verb_offers;
 pub(crate) mod patch_verb_op;
 pub(crate) mod patch_verbs;
 pub mod project_connect_result;
@@ -98,6 +99,14 @@ pub use node_card_ui_state::{
 pub use patch_preview::{FROZEN_PREVIEW_PHASE, UiPatchChasePreview, chase_preview, preview_phase};
 pub use patch_pulse::{
     PatchPulseLamps, PatchPulseLanguage, PatchPulseOp, PatchPulseSpace, PatchPulseSubject,
+};
+pub use patch_verb_offers::{
+    PATCH_ASSIGN_VERB, PATCH_CLEAR_VERB, PATCH_DELTA_PARAM, PATCH_FLOW_AUTO, PATCH_FLOW_MANUAL,
+    PATCH_FLOW_PARAM, PATCH_GROUP, PATCH_LAMP_PARAM, PATCH_LAMPS_PARAM, PATCH_OUTPUT_PARAM,
+    PATCH_PORT_PARAM, PATCH_RE_ANCHOR_VERB, PATCH_REDO_VERB, PATCH_REVERSE_VERB, PATCH_ROTATE_VERB,
+    PATCH_SET_FLOW_VERB, PATCH_SHIFT_PORT_VERB, PATCH_START_PARAM, PATCH_STEPS_PARAM,
+    PATCH_SUBJECT_PARAM, PATCH_SWAP_PORTS_VERB, PATCH_UNDO_VERB, PATCH_UNMAP_ALL_VERB,
+    PATCH_WHOLE_FIXTURE, PATCH_WITH_PARAM, patch_history_path, publish_patch_verb_offers,
 };
 pub use patch_verb_op::{
     PatchVerbFixture, PatchVerbKind, PatchVerbOp, PatchVerbSubject, PatchVerbWindow,

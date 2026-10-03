@@ -7791,15 +7791,16 @@ enum SimWake {
     Refused(String),
 }
 
-/// The verbs directly under `prefix`, each as the readout lists an action
-/// in full (`- <path>: <label> [state]`, then what it takes): what the app
-/// agent's `read` answers for a node or a device.
+/// The verbs of `prefix`'s own (its direct verbs and the ones it groups,
+/// a fixture's `patch/…`), each as the readout lists an action in full
+/// (`- <path>: <label> [state]`, then what it takes): what the app agent's
+/// `read` answers for a node or a device.
 fn agent_actions_under(
     offers: &crate::UiOfferTree,
     prefix: &crate::OfferPath,
 ) -> serde_json::Value {
     let lines: Vec<String> = offers
-        .verbs_of(prefix)
+        .own_verbs_of(prefix)
         .map(|offer| {
             crate::app::agent::app_agent_readout::offer_lines(offer)
                 .trim_end()

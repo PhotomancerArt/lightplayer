@@ -2572,6 +2572,18 @@ impl ProjectController {
         // onto the faces (bays + fixture rows) plus each fixture's own
         // map2d body — built here so the two can never disagree.
         let surface = self.build_patch_surface(&nodes);
+        // The surface's verbs (M6b) publish off the surface they write
+        // through, so a subject or a port is an option exactly when the
+        // surface lists it; the history's only while it has a step.
+        if let Some(surface) = &surface {
+            super::patch_verb_offers::publish_patch_verb_offers(
+                offers,
+                surface,
+                self.patch_selection.single(),
+                !self.patch_undo.is_empty(),
+                !self.patch_redo.is_empty(),
+            );
+        }
         // Module faces derive LAST: a module's panel aggregates the panel
         // targets its finished subtree carries, so every card below it must
         // already be built (and card-UI-overlaid) before it can be read.
