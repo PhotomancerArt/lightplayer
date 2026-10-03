@@ -694,7 +694,7 @@ async fn fuel_exhausted_shader_errors_without_reboot_or_blame() {
     // Blame identity is the node's full tree path (hashed); ledger entries
     // DISPLAY it truncated (CRASH_FRAME_NAME_CAP = 14 bytes), so entry
     // names are asserted as prefixes of this path.
-    let bad_shader_path = read_node_path(&client, handle, bad_shader).await;
+    let _bad_shader_path = read_node_path(&client, handle, bad_shader).await;
 
     // Baseline: healthy chain renders, ledger green.
     advance_guest_time(&emulator, 40);

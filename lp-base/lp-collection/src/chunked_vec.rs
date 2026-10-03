@@ -419,8 +419,8 @@ mod tests {
         // 6,144 B chunk — bigger than the classic ESP32's whole remaining heap
         // at the point it OOM'd compiling a shader.
         assert!(CHUNK * size_of::<i32>() <= CHUNK_BYTES);
-        assert!(ChunkedVec::<[u8; 96]>::CHUNK_SIZE * 96 <= CHUNK_BYTES);
-        assert!(ChunkedVec::<[u8; 20]>::CHUNK_SIZE * 20 <= CHUNK_BYTES);
+        const { assert!(ChunkedVec::<[u8; 96]>::CHUNK_SIZE * 96 <= CHUNK_BYTES) };
+        const { assert!(ChunkedVec::<[u8; 20]>::CHUNK_SIZE * 20 <= CHUNK_BYTES) };
         // An element larger than the whole budget still gets a chunk, not a
         // divide-by-zero.
         assert_eq!(ChunkedVec::<[u8; CHUNK_BYTES * 2]>::CHUNK_SIZE, 1);
@@ -521,7 +521,7 @@ mod tests {
     fn iter_yields_sequence() {
         let mut v = chunked_vec_new();
         for i in 0..10 {
-            v.push(i as i32);
+            v.push(i);
         }
         let collected: Vec<i32> = v.iter().copied().collect();
         assert_eq!(collected, (0..10).collect::<Vec<_>>());
@@ -572,7 +572,7 @@ mod tests {
     fn swap_remove() {
         let mut v = chunked_vec_new();
         for i in 0..5 {
-            v.push(i as i32);
+            v.push(i);
         }
         let removed = v.swap_remove(1);
         assert_eq!(removed, Some(1));
@@ -599,7 +599,7 @@ mod tests {
     fn iter_from() {
         let mut v = chunked_vec_new();
         for i in 0..25 {
-            v.push(i as i32);
+            v.push(i);
         }
         let from_10: Vec<i32> = v.iter_from(10).copied().collect();
         assert_eq!(from_10, (10..25).collect::<Vec<_>>());

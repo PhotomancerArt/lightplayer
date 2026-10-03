@@ -21,11 +21,12 @@ use lpc_model::{AsLpPath, LpValue};
 use lpc_shared::output::MemoryOutputProvider;
 use lpfs::LpFsMemory;
 
+use crate::app::studio::offer_press_test_api::{OfferPressTestApi, actor_clicks};
 use crate::app::studio::studio_edit_e2e_tests::{
     InProcessServerIo, card_matching, drive, editor_dirty, project_action, project_editor,
 };
 use crate::{
-    ControllerId, NodeCardUiState, NodeUiOp, PlaylistActivateOp, ProjectController,
+    ControllerId, NodeCardUiState, NodeUiOp, OfferArgs, PlaylistActivateOp, ProjectController,
     ProjectEditorOp, ProjectEditorTarget, ProjectOp, ProjectSlotAddress, SlotEditOp, StudioActor,
     StudioCommand, StudioController, StudioServerClient, UiAction, UiLogLevel, UiNodeDirtyState,
     UiNodeFace, UiNodeView, UiPanelControl, UiPanelWidget, UiPlaylistFace, UiSlotValueKind,
@@ -250,8 +251,7 @@ fn node_faces_derive_and_edit_end_to_end() {
     assert_eq!(fader.state.dirty, UiNodeDirtyState::Dirty);
 
     // -- save: both edits commit through the ONE overlay write path ---------
-    handle.tx.send(project_action(ProjectOp::SaveOverlay));
-    drive(actor.run_one_batch_for_test());
+    actor_clicks(&mut actor, &handle.tx).press("project/save", OfferArgs::new());
     handle.tx.send(project_action(ProjectOp::RefreshProject));
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("save + refresh emit a snapshot");
@@ -3370,8 +3370,7 @@ fn output_face_derives_multi_channel_wires_end_to_end() {
         "and the remainder shrinks by the same four lamps"
     );
 
-    handle.tx.send(project_action(ProjectOp::SaveOverlay));
-    drive(actor.run_one_batch_for_test());
+    actor_clicks(&mut actor, &handle.tx).press("project/save", OfferArgs::new());
     let output_json = read_output_project_file(&server, "output.json");
     assert!(
         output_json.contains("\"count\":8"),
@@ -4086,8 +4085,7 @@ fn verbs_author_the_small_dome_install_byte_identically() {
 
     // Persist the overlay so the authored bytes are on disk (the same
     // save the user presses), then read them back.
-    handle.tx.send(project_action(ProjectOp::SaveOverlay));
-    drive(actor.run_one_batch_for_test());
+    actor_clicks(&mut actor, &handle.tx).press("project/save", OfferArgs::new());
     handle.tx.send(project_action(ProjectOp::RefreshProject));
     drive(actor.run_one_batch_for_test());
     while view.try_recv().is_some() {}
@@ -4120,8 +4118,7 @@ fn verbs_author_the_small_dome_install_byte_identically() {
     // Undo restores the exact prior bytes, one gesture at a time.
     let before_undo = body_of(doors.patch_artifact.as_ref().unwrap());
     verb!(doors.node, None, PatchVerbKind::Undo);
-    handle.tx.send(project_action(ProjectOp::SaveOverlay));
-    drive(actor.run_one_batch_for_test());
+    actor_clicks(&mut actor, &handle.tx).press("project/save", OfferArgs::new());
     while view.try_recv().is_some() {}
     let after_undo = body_of(doors.patch_artifact.as_ref().unwrap());
     assert_ne!(before_undo, after_undo, "undo moved the document back");
@@ -4130,8 +4127,7 @@ fn verbs_author_the_small_dome_install_byte_identically() {
         "undo restores the same newline-terminated bytes a forward write produces"
     );
     verb!(doors.node, None, PatchVerbKind::Redo);
-    handle.tx.send(project_action(ProjectOp::SaveOverlay));
-    drive(actor.run_one_batch_for_test());
+    actor_clicks(&mut actor, &handle.tx).press("project/save", OfferArgs::new());
     while view.try_recv().is_some() {}
     assert_eq!(
         body_of(doors.patch_artifact.as_ref().unwrap()),
@@ -4260,8 +4256,7 @@ fn the_flow_flag_and_unmap_all_are_one_undo_step_each() {
     };
     macro_rules! save {
         () => {{
-            handle.tx.send(project_action(ProjectOp::SaveOverlay));
-            drive(actor.run_one_batch_for_test());
+            actor_clicks(&mut actor, &handle.tx).press("project/save", OfferArgs::new());
         }};
     }
     // The shipped bytes, straight off disk — no save needed, and a save
@@ -4482,8 +4477,7 @@ fn editor_meta_arranges_a_fixture_with_byte_stable_undo() {
     drive(actor.run_one_batch_for_test());
 
     // Persist and read the file back: canonical, byte-stable, footprinted.
-    handle.tx.send(project_action(ProjectOp::SaveOverlay));
-    drive(actor.run_one_batch_for_test());
+    actor_clicks(&mut actor, &handle.tx).press("project/save", OfferArgs::new());
     let project_dir = format!("/projects/{}", example.id.replace('/', "-"));
     let editor_json = || {
         let path = format!("{project_dir}/editor.json");
@@ -4557,8 +4551,7 @@ fn editor_meta_arranges_a_fixture_with_byte_stable_undo() {
             },
         )));
     drive(actor.run_one_batch_for_test());
-    handle.tx.send(project_action(ProjectOp::SaveOverlay));
-    drive(actor.run_one_batch_for_test());
+    actor_clicks(&mut actor, &handle.tx).press("project/save", OfferArgs::new());
     let shipped_editor = example
         .files
         .iter()
@@ -4583,8 +4576,7 @@ fn editor_meta_arranges_a_fixture_with_byte_stable_undo() {
             },
         )));
     drive(actor.run_one_batch_for_test());
-    handle.tx.send(project_action(ProjectOp::SaveOverlay));
-    drive(actor.run_one_batch_for_test());
+    actor_clicks(&mut actor, &handle.tx).press("project/save", OfferArgs::new());
     assert_eq!(
         editor_json().expect("editor.json exists"),
         written,
@@ -4660,8 +4652,7 @@ fn editor_meta_arranges_a_fixture_with_byte_stable_undo() {
             },
         )));
     drive(actor.run_one_batch_for_test());
-    handle.tx.send(project_action(ProjectOp::SaveOverlay));
-    drive(actor.run_one_batch_for_test());
+    actor_clicks(&mut actor, &handle.tx).press("project/save", OfferArgs::new());
     let multi_written = editor_json().expect("editor.json after SetMany");
     let multi_parsed =
         lpc_mapping::EditorMetaDoc::from_json(&multi_written).expect("canonical doc parses");
@@ -4696,8 +4687,7 @@ fn editor_meta_arranges_a_fixture_with_byte_stable_undo() {
             },
         )));
     drive(actor.run_one_batch_for_test());
-    handle.tx.send(project_action(ProjectOp::SaveOverlay));
-    drive(actor.run_one_batch_for_test());
+    actor_clicks(&mut actor, &handle.tx).press("project/save", OfferArgs::new());
     assert_eq!(
         editor_json().expect("editor.json exists"),
         written,
@@ -5088,8 +5078,7 @@ fn a_fully_unmapped_project_keeps_its_outputs_and_their_free_ports() {
                     },
                 )));
             drive(actor.run_one_batch_for_test());
-            handle.tx.send(project_action(ProjectOp::SaveOverlay));
-            drive(actor.run_one_batch_for_test());
+            actor_clicks(&mut actor, &handle.tx).press("project/save", OfferArgs::new());
         }};
     }
     // Both fixtures manual, both emptied — the walk's own opening gesture.

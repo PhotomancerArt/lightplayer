@@ -123,31 +123,13 @@ mod tests {
 
     #[test]
     fn test_overflow_saturation() {
-        // Test values that would overflow
-        let large_a = float_to_fixed(1000.0);
-        let large_neg_b = float_to_fixed(-1000.0);
-        let result = __lp_lpir_fsub_q32(large_a, large_neg_b);
-
-        // Result should be saturated to MAX_FIXED
-        assert!(
-            result <= MAX_FIXED,
-            "Overflow should saturate to MAX_FIXED, got {}",
-            result
-        );
+        let result = __lp_lpir_fsub_q32(MAX_FIXED, MIN_FIXED); // overflows the widened i64 sub
+        assert_eq!(result, MAX_FIXED, "Overflow should saturate to MAX_FIXED");
     }
 
     #[test]
     fn test_underflow_saturation() {
-        // Test values that would underflow
-        let large_neg_a = float_to_fixed(-1000.0);
-        let large_b = float_to_fixed(1000.0);
-        let result = __lp_lpir_fsub_q32(large_neg_a, large_b);
-
-        // Result should be saturated to MIN_FIXED (if negative) or within range
-        assert!(
-            result >= MIN_FIXED,
-            "Underflow should saturate to MIN_FIXED or be within range, got {}",
-            result
-        );
+        let result = __lp_lpir_fsub_q32(MIN_FIXED, MAX_FIXED); // underflows the widened i64 sub
+        assert_eq!(result, MIN_FIXED, "Underflow should saturate to MIN_FIXED");
     }
 }

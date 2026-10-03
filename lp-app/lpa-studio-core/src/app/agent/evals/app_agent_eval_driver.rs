@@ -29,6 +29,7 @@ use super::app_agent_project_tree::ProjectTree;
 use super::app_agent_scenario::{Scenario, ScenarioStart};
 use super::app_agent_transcript::{EvalStep, EvalTranscript};
 use crate::app::library::{LibraryStore, MemoryLibraryHost, PackageProvenance};
+use crate::app::studio::offer_press_test_api::OfferPressTestApi;
 use crate::app::studio::studio_edit_e2e_tests::{InProcessServerIo, drive};
 use crate::app::studio::studio_view_channel::{CommandSender, StudioViewReceiver};
 use crate::{
@@ -237,10 +238,11 @@ impl AgentEvalStudio {
         self.drive_runs(limits);
     }
 
-    /// Press `action` the way the user's click does (a card's button, or
-    /// the button it names), and drive any run the press resumes to its
-    /// end.
-    pub(crate) fn press(&mut self, action: UiAction, limits: RunLimits) {
+    /// Press a card's `action` the way the user's click does (the card's
+    /// button, or the button it names), and drive any run the press
+    /// resumes to its end. An offer is pressed by path through
+    /// [`OfferPressTestApi`] instead.
+    pub(crate) fn press_card(&mut self, action: UiAction, limits: RunLimits) {
         self.act(action);
         self.drive_runs(limits);
     }
@@ -493,6 +495,20 @@ pub(crate) struct RunLimits {
     pub(crate) usd: f64,
     /// Model turns across the scenario.
     pub(crate) turns: u32,
+}
+
+/// The eval studio presses offers through its command queue, as the
+/// web's click does; a run the press resumes is driven by the caller.
+impl OfferPressTestApi for AgentEvalStudio {
+    type Outcome = ();
+
+    fn offer_tree(&mut self) -> crate::UiOfferTree {
+        self.controller().view().offers
+    }
+
+    fn dispatch_press(&mut self, action: UiAction) {
+        self.act(action);
+    }
 }
 
 /// Run one scenario on the real app chat. Scripted replies answer the
