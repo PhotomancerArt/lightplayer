@@ -51,10 +51,10 @@
 //! `fixture-no-in-endpoint-gate`) beside the shipped, gated one through the
 //! same conversation:
 //!
-//! 1. **no lag**: neither loses a byte, which is the finding that the model's
-//!    default has no path to this loss. The block measures how soon after a
-//!    drain each image touches the endpoint: the ungated one's next `ep1`
-//!    write, the gated one's next `ep1_conf` read;
+//! 1. **no lag**: neither loses a byte in the conversation, which is the
+//!    finding that the model's default has no path to this loss. The block
+//!    measures how soon after a drain each image touches the endpoint: the
+//!    ungated one's next `ep1` write, the gated one's next `ep1_conf` read;
 //! 2. **the timing**, reported: on the lp-link image the gate's check comes
 //!    first (before proto 30 it came second, and step 2 asserted that);
 //! 3. **a lag past the ungated write**: neither image writes a byte into
@@ -78,6 +78,17 @@
 //! On #894 the run's soonest became one of those and put the lag below the
 //! wake nearly every drain takes, so the test no longer covered the path it
 //! is about.
+//!
+//! **Boot has two writers** since the C6's link task got a thread of its own
+//! (`io-thread`, plan `lp2025/2026-10-01-1756-c6-link-io-thread`): the link
+//! thread sends its SYNs while the main thread is still printing the boot
+//! text raw through esp-println, so "one writer on the IN endpoint" holds
+//! only once boot is over. The ungated image writes a SYN frame onto a busy
+//! endpoint there and the block refuses it (23 B, measured at
+//! lp-emu:esp32c6:t1); the gated image waits for the buffer and refuses
+//! nothing. That is the gate doing its job on a path that needs no
+//! hypothesis, so the gated image is held to zero over the whole run, and
+//! the lag questions below count only the conversation.
 //!
 //! It lives in `lp-cli` because the link host is a product crate, which
 //! nothing under `lp-emu/` may depend on (the MIT fence).
@@ -123,6 +134,13 @@ fn a_free_lag_tears_neither_image_once_esp_hal_checks_the_free_bit() {
         assert_eq!(run.tried, 0, "{name}: {} B refused", run.tried);
         assert_eq!(run.replies, REQUESTS as usize, "{name}: {}", run.summary());
     }
+    // Boot's two writers (module docs): the gate keeps the shipped image's
+    // SYNs off a busy endpoint.
+    assert_eq!(
+        after.tried_in_boot, 0,
+        "gated: {} B refused during boot",
+        after.tried_in_boot
+    );
 
     // 2. The timing, reported. Before proto 30 the gate's free check came
     //    LATER than esp-hal's unchecked write, and a lag between the two
@@ -236,8 +254,12 @@ struct Run {
     app_errors: u32,
     /// Distinct Hellos of this conversation answered.
     replies: usize,
-    /// Bytes the guest wrote and the block refused.
+    /// Bytes the guest wrote and the block refused, from the first request
+    /// on.
     tried: usize,
+    /// Bytes the block refused before the first request: boot, where the
+    /// link thread and esp-println both write (module docs).
+    tried_in_boot: usize,
     /// The soonest `ep1` write after a drain, in ns.
     write_ns: Option<u64>,
     /// The soonest `ep1_conf` read after a drain, in ns.
@@ -254,13 +276,14 @@ struct Run {
 impl Run {
     fn summary(&self) -> String {
         format!(
-            "lp-emu:esp32c6:t1 — {} of {REQUESTS} Hellos answered, {} B refused; host link {} \
-             damaged, {} stale partials, {} resent, {} resets, {} payload errors; board {} write \
+            "lp-emu:esp32c6:t1 — {} of {REQUESTS} Hellos answered, {} B refused ({} B in boot); \
+             host link {} damaged, {} stale partials, {} resent, {} resets, {} payload errors; board {} write \
              timeouts; \
              next write {:?} ns / next free check {:?} ns after a drain at the soonest, \
              {:?} ns / {:?} ns typically",
             self.replies,
             self.tried,
+            self.tried_in_boot,
             self.host.damaged,
             self.host.stale_partials,
             self.host.resends,
@@ -290,13 +313,16 @@ fn converse(elf: &std::path::Path, lag_ns: u64) -> Run {
         .build()
         .expect("the image builds a machine");
     let mut host = EmuLinkHost::new(C6Board::new(machine).unwrap(), 0x0F4E_E1A6, true);
+    let mut tried_in_boot = 0;
     // One window of wake stats per request, so one odd drain moves one
     // window's soonest, not the run's (module docs).
     let mut windows = Vec::new();
     for n in 0..REQUESTS {
         host.run_until((FIRST_AT_MS + n * EVERY_MS) * 1_000, None)
             .expect("the run");
-        if n > 0 {
+        if n == 0 {
+            tried_in_boot = host.board.machine.usb_sj_tried().len();
+        } else {
             windows.push(soonest_wake(&mut host.board.machine));
         }
         restart_wake_stats(&mut host.board.machine, lag_ns);
@@ -329,7 +355,7 @@ fn converse(elf: &std::path::Path, lag_ns: u64) -> Run {
     let check_ns = soonest(|w| w.1);
     let typical_write_ns = typical(|w| w.0);
     let typical_check_ns = typical(|w| w.1);
-    let tried = m.usb_sj_tried().len();
+    let tried = m.usb_sj_tried().len() - tried_in_boot;
     let board_write_timeouts = m
         .peek_symbol("fw_esp32_common::usb_link::usb_link_counters::WRITE_TIMEOUTS")
         .expect("the image carries the link task's counters")
@@ -339,6 +365,7 @@ fn converse(elf: &std::path::Path, lag_ns: u64) -> Run {
         app_errors: host.link_errors,
         replies: ids.len(),
         tried,
+        tried_in_boot,
         write_ns,
         check_ns,
         typical_write_ns,

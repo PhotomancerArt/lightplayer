@@ -18,16 +18,19 @@ use lpc_cloud_api::AccountAccessInfo;
 
 use crate::app::home::access_added_toast::AccessAddedToast;
 use crate::app::home::access_settings_section::AccessSettingsSection;
-use crate::app::home::ble_reach::BleReach;
+use crate::app::home::ble_reach::BluetoothReach;
 use crate::app::home::browser_identity::BrowserPlatform;
 use crate::app::home::device_access_panel::DeviceAccessPanel;
-use crate::app::home::device_roster_card::{DeviceRosterCard, PendingLinkCard};
+use crate::app::home::device_offer_story_fixtures::{
+    StoryDeviceCard, StoryPendingCard, add_slot_tree,
+};
 use crate::app::home::devices_page::AddDeviceCard;
 use crate::app::home::share_access_sheet::ShareAccessSheet;
 use crate::app::home::unlock_link::UnlockLink;
 use crate::app::home::unlock_page::UnlockPage;
 use crate::app::home::unlock_sheet::UnlockSheet;
 use crate::cloud::account_access::AccountAccessState;
+use crate::core::OffersProvider;
 
 // --- 1 · Connections ------------------------------------------------------
 
@@ -37,7 +40,7 @@ use crate::cloud::account_access::AccountAccessState;
 fn ble_connections_usb_on() -> Element {
     rsx! {
         div { class: CARD_FRAME,
-            DeviceRosterCard {
+            StoryDeviceCard {
                 card: usb_card(),
                 projects: Vec::new(),
                 examples: Vec::new(),
@@ -55,7 +58,7 @@ fn ble_connections_usb_on() -> Element {
 fn ble_connections_usb_off_and_restarting() -> Element {
     rsx! {
         div { class: "tw:grid tw:gap-3 tw:p-3 tw:sm:grid-cols-2",
-            DeviceRosterCard {
+            StoryDeviceCard {
                 card: usb_card(),
                 projects: Vec::new(),
                 examples: Vec::new(),
@@ -63,7 +66,7 @@ fn ble_connections_usb_off_and_restarting() -> Element {
                 access: Some(usb_access(Some(false), false, typical())),
                 on_action: |_| {},
             }
-            DeviceRosterCard {
+            StoryDeviceCard {
                 card: usb_card(),
                 projects: Vec::new(),
                 examples: Vec::new(),
@@ -90,7 +93,7 @@ fn ble_connections_over_bluetooth() -> Element {
     };
     rsx! {
         div { class: CARD_FRAME,
-            DeviceRosterCard {
+            StoryDeviceCard {
                 card: ble_card(),
                 projects: Vec::new(),
                 examples: Vec::new(),
@@ -211,7 +214,7 @@ fn ble_play_only_prompt() -> Element {
     };
     rsx! {
         div { class: CARD_FRAME,
-            DeviceRosterCard {
+            StoryDeviceCard {
                 card: ble_card(),
                 projects: Vec::new(),
                 examples: Vec::new(),
@@ -235,7 +238,7 @@ fn ble_card_locked() -> Element {
     };
     rsx! {
         div { class: CARD_FRAME,
-            DeviceRosterCard {
+            StoryDeviceCard {
                 card: DeviceView {
                     loaded_project: DeviceLoadedProject::Empty,
                     can_remove_project: false,
@@ -333,21 +336,25 @@ fn ble_friend_page() -> Element {
     };
     rsx! {
         div { class: "tw:grid tw:gap-3 tw:p-3 tw:sm:grid-cols-2",
-            UnlockPage {
-                this_word: "phone".to_string(),
-                on_access: |_| {},
-                on_action: |_| {},
-                link: Some(link.clone()),
-                ble_reach: Some(BleReach::Ready),
-                page_url: Some("https://lightplayer.app/unlock".to_string()),
+            OffersProvider { offers: add_slot_tree(true, BluetoothReach::Ready),
+                UnlockPage {
+                    this_word: "phone".to_string(),
+                    on_access: |_| {},
+                    on_action: |_| {},
+                    link: Some(link.clone()),
+                    ble_reach: Some(BluetoothReach::Ready),
+                    page_url: Some("https://lightplayer.app/unlock".to_string()),
+                }
             }
-            UnlockPage {
-                this_word: "phone".to_string(),
-                on_access: |_| {},
-                on_action: |_| {},
-                link: Some(link),
-                ble_reach: Some(BleReach::Ios),
-                page_url: Some("https://lightplayer.app/unlock".to_string()),
+            OffersProvider { offers: add_slot_tree(false, BluetoothReach::Ios),
+                UnlockPage {
+                    this_word: "phone".to_string(),
+                    on_access: |_| {},
+                    on_action: |_| {},
+                    link: Some(link),
+                    ble_reach: Some(BluetoothReach::Ios),
+                    page_url: Some("https://lightplayer.app/unlock".to_string()),
+                }
             }
         }
     }
@@ -420,35 +427,35 @@ fn ble_add_slot_by_browser() -> Element {
     description = "The add slot in Chrome or Edge on a computer (G3): \"Connect a board\", both buttons live, one full-width column — via USB the spectrum Primary, via Bluetooth the Secondary under it — and \"start a board here\" below."
 )]
 fn ble_add_slot_chrome() -> Element {
-    rsx! { AddSlotAs { reach: BleReach::Ready, usb: true } }
+    rsx! { AddSlotAs { reach: BluetoothReach::Ready, usb: true } }
 }
 
 #[story(
     description = "The add slot in Brave (G3): via USB live; via Bluetooth DISABLED — \"Brave keeps Bluetooth behind a flag.\" — with the flag's address as select-and-copy text, because a page cannot open a brave:// link."
 )]
 fn ble_add_slot_brave() -> Element {
-    rsx! { AddSlotAs { reach: BleReach::Brave, usb: true } }
+    rsx! { AddSlotAs { reach: BluetoothReach::Brave, usb: true } }
 }
 
 #[story(
     description = "The add slot in Firefox (G3): both buttons DISABLED — USB needs Chrome or Edge on a computer, Bluetooth needs Chrome or Edge — and this page's address, once, as select-and-copy text to open there."
 )]
 fn ble_add_slot_firefox() -> Element {
-    rsx! { AddSlotAs { reach: BleReach::Firefox, usb: false } }
+    rsx! { AddSlotAs { reach: BluetoothReach::Firefox, usb: false } }
 }
 
 #[story(
     description = "The add slot in Safari on iPhone — and Chrome on iPhone, which is the same WebKit (G3): via USB DISABLED (it needs a computer, with this page's address to open there); via Bluetooth DISABLED with the way through: \"Get Bluefy on the App Store\", then this page's address to open in Bluefy."
 )]
 fn ble_add_slot_iphone_safari() -> Element {
-    rsx! { AddSlotAs { reach: BleReach::Ios, usb: false } }
+    rsx! { AddSlotAs { reach: BluetoothReach::Ios, usb: false } }
 }
 
 #[story(
     description = "The add slot in Bluefy on iPhone (G3): Web Bluetooth but no Web Serial. via USB DISABLED with its reason and this page's address to open on a computer; via Bluetooth live."
 )]
 fn ble_add_slot_bluefy() -> Element {
-    rsx! { AddSlotAs { reach: BleReach::Ready, usb: false } }
+    rsx! { AddSlotAs { reach: BluetoothReach::Ready, usb: false } }
 }
 
 #[story(
@@ -488,9 +495,9 @@ fn ble_pending_card_over_bluetooth() -> Element {
     };
     rsx! {
         div { class: "tw:grid tw:gap-3 tw:p-3 tw:sm:grid-cols-2",
-            PendingLinkCard { pending: ble, on_action: |_| {} }
-            PendingLinkCard { pending: usb, on_action: |_| {} }
-            PendingLinkCard { pending: ble_needs_firmware, on_action: |_| {} }
+            StoryPendingCard { pending: ble, on_action: |_| {} }
+            StoryPendingCard { pending: usb, on_action: |_| {} }
+            StoryPendingCard { pending: ble_needs_firmware, on_action: |_| {} }
         }
     }
 }
@@ -498,28 +505,30 @@ fn ble_pending_card_over_bluetooth() -> Element {
 // --- fixtures -------------------------------------------------------------
 
 /// Each browser as the real ones pair Bluetooth reach with Web Serial.
-const ADD_SLOT_BROWSERS: [(&str, BleReach, bool); 7] = [
-    ("Chrome / Edge", BleReach::Ready, true),
-    ("Brave", BleReach::Brave, true),
-    ("Firefox", BleReach::Firefox, false),
-    ("Safari (Mac)", BleReach::Safari, false),
-    ("iPhone Safari / Chrome", BleReach::Ios, false),
-    ("Bluefy (iPhone)", BleReach::Ready, false),
-    ("Chrome, Bluetooth off", BleReach::Off, true),
+const ADD_SLOT_BROWSERS: [(&str, BluetoothReach, bool); 7] = [
+    ("Chrome / Edge", BluetoothReach::Ready, true),
+    ("Brave", BluetoothReach::Brave, true),
+    ("Firefox", BluetoothReach::Firefox, false),
+    ("Safari (Mac)", BluetoothReach::Safari, false),
+    ("iPhone Safari / Chrome", BluetoothReach::Ios, false),
+    ("Bluefy (iPhone)", BluetoothReach::Ready, false),
+    ("Chrome, Bluetooth off", BluetoothReach::Off, true),
 ];
 
 /// The add slot pinned to one browser's answers, with the product's own
 /// address in its copy lines (never the story server's).
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn AddSlotAs(reach: BleReach, usb: bool) -> Element {
+fn AddSlotAs(reach: BluetoothReach, usb: bool) -> Element {
     rsx! {
         div { class: "tw:p-3",
-            AddDeviceCard {
-                ble_reach: Some(reach),
-                usb_available: usb,
-                page_url: Some("https://lightplayer.app/devices".to_string()),
-                on_action: |_| {},
+            OffersProvider { offers: add_slot_tree(usb, reach),
+                AddDeviceCard {
+                    ble_reach: Some(reach),
+                    usb_available: usb,
+                    page_url: Some("https://lightplayer.app/devices".to_string()),
+                    on_action: |_| {},
+                }
             }
         }
     }

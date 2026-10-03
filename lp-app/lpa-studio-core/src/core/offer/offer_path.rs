@@ -4,7 +4,7 @@
 use core::fmt;
 use core::str::FromStr;
 
-use crate::ProjectNodeAddress;
+use crate::{BoardRef, ProjectNodeAddress};
 
 /// The stable id of one offer: a sequence of segments, written `a/b/c`.
 ///
@@ -18,6 +18,16 @@ use crate::ProjectNodeAddress;
 ///
 /// So `project/demo.module/orbit.shader/remove` reads as: the project
 /// namespace, the node `/demo.module/orbit.shader`, the verb `remove`.
+///
+/// A **board** segment under `devices` is the board's id ([`BoardRef`]),
+/// naming what kind of id it is: `mac-<12 hex>` for a board known by its
+/// silicon MAC (`devices/mac-a0f26287b48c/flash`), `sim-<12 hex>` for an
+/// in-browser sim and `emu-<12 hex>` for an in-tab emulated board, each by
+/// its minted MAC, or, for a link that has not said who it is yet, a
+/// provisional `new-<n>` (`devices/new-3/flash`) that changes once it does.
+/// None has a dot, and the depth tells a board's verb from a namespace
+/// verb: `devices/<board>/<verb>` has three segments, `devices/connect-usb`
+/// two.
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct OfferPath {
     segments: Vec<String>,
@@ -46,6 +56,13 @@ impl OfferPath {
     /// `devices`, the device namespace.
     pub fn devices() -> Self {
         Self::root(Self::DEVICES)
+    }
+
+    /// `devices/<board>`: the prefix a board's verbs live under
+    /// (`devices/mac-a0f26287b48c`, `devices/sim-122233445566`,
+    /// `devices/new-3`).
+    pub fn board(board: &BoardRef) -> Self {
+        Self::devices().child(board.to_string())
     }
 
     /// `project/<node tree path>`: the prefix a node card asks
@@ -208,6 +225,30 @@ mod tests {
 
         let node = OfferPath::project_node(&ProjectNodeAddress::parse("/demo.module").unwrap());
         assert!(!node.starts_with(&OfferPath::parse("project/demo.mod").unwrap()));
+    }
+
+    #[test]
+    fn a_board_is_addressed_by_its_kind_and_id() {
+        use lpa_devices::{BoardKey, DeviceId};
+
+        let desk = BoardKey::parse("a0:f2:62:87:b4:8c").unwrap();
+        let made = BoardKey::parse("12:22:33:44:55:66").unwrap();
+        for (board, text) in [
+            (BoardRef::Mac(desk), "devices/mac-a0f26287b48c/flash"),
+            (BoardRef::Sim(made), "devices/sim-122233445566/flash"),
+            (BoardRef::Emu(made), "devices/emu-122233445566/flash"),
+            (BoardRef::New(DeviceId(3)), "devices/new-3/flash"),
+        ] {
+            let flash = OfferPath::board(&board).child("flash");
+            assert_eq!(flash.to_string(), text);
+            assert_eq!(OfferPath::parse(text).unwrap(), flash);
+            assert!(flash.starts_with(&OfferPath::devices()));
+            assert_eq!(
+                BoardRef::parse(&flash.segments()[1]),
+                Ok(board),
+                "the segment reads back as the board"
+            );
+        }
     }
 
     #[test]
