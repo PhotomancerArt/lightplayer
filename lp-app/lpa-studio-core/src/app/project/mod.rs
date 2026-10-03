@@ -21,6 +21,7 @@
 //! read requests, response application, and `ProjectView`. It does not own
 //! Studio controller state.
 
+pub(crate) mod agent_focus;
 pub(crate) mod agent_project_edits;
 pub(crate) mod agent_project_summary;
 pub(crate) mod agent_slot_json;

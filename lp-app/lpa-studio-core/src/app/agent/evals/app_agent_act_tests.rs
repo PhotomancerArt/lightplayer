@@ -116,13 +116,20 @@ fn the_agent_presses_save_once_and_a_stale_press_is_refused() {
     studio.not_offered("project/save");
 }
 
-/// Q6: the readout lists a nested node's verbs, not only the root card's,
+/// Q6, as M7 bounds it: the readout counts a nested node's verbs when the
+/// user is not looking at that node, `read` on the node lists them in full,
 /// and the agent presses Remove by its path. Remove is undoable (Revert
 /// brings the node back until a save), so it is pressed, not carded.
 #[test]
-fn the_agent_sees_a_nested_nodes_remove_and_presses_it() {
+fn the_agent_reads_a_nested_nodes_remove_and_presses_it() {
     let scenario = Scenario::load("e2-make-it-300").expect("e2");
     let remove = format!("project/{ROOT}/clock.clock/remove");
+    let mut read = call(
+        "r0",
+        lpa_agent::READ_TOOL_NAME,
+        serde_json::json!({ "what": "node", "name": "clock" }),
+    );
+    read.push(turn_done(StopReason::ToolUse));
     let mut press = call(
         "r1",
         lpa_agent::ACT_TOOL_NAME,
@@ -130,6 +137,7 @@ fn the_agent_sees_a_nested_nodes_remove_and_presses_it() {
     );
     press.push(turn_done(StopReason::ToolUse));
     let scripts = vec![vec![
+        read,
         press,
         vec![
             TurnEvent::TextDelta("I removed the clock.".into()),
@@ -153,10 +161,23 @@ fn the_agent_sees_a_nested_nodes_remove_and_presses_it() {
         })
         .expect("the readout the model saw");
     assert!(
-        state.contains(&format!("- {remove}: Remove node [undoable]\n")),
-        "{state}"
+        !state.contains(&format!("- {remove}: ")),
+        "the clock is not in focus, so its verbs are counted: {state}"
     );
-    let result = tool_results(&steps).remove(0);
+    assert!(state.contains("remove ×"), "{state}");
+    let mut results = tool_results(&steps);
+    let read = results.remove(0);
+    let actions: Vec<&str> = read["actions"]
+        .as_array()
+        .expect("read lists the node's actions")
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .collect();
+    assert!(
+        actions.contains(&format!("- {remove}: Remove node [undoable]").as_str()),
+        "{read:#}"
+    );
+    let result = results.remove(0);
     assert!(result.get("done").is_some(), "{result:#}");
     assert!(studio.cards().is_empty(), "an undoable press is no card");
     assert!(!has_kind(&mut studio, "Clock"), "the clock is gone");
