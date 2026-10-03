@@ -174,7 +174,9 @@ async fn a_long_line_goes_out_in_awaited_180_byte_writes() {
 #[wasm_bindgen_test]
 async fn a_long_line_survives_a_browser_that_writes_a_views_whole_buffer() {
     polyfill_over(&["c6-a"]).await;
-    JsFuture::from(js_ble_whole_buffer_writes(true)).await.unwrap();
+    JsFuture::from(js_ble_whole_buffer_writes(true))
+        .await
+        .unwrap();
     let device = pick().await;
     let mut link = open_link(&device).await;
     let before = stats("c6-a").await;
