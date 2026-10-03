@@ -52,7 +52,7 @@ use crate::{
     DeviceAction, DeviceEffectCall, DeviceEffectFacts, DeviceEffectProgress, DeviceInput,
     DeviceTaskFuture, DeviceTransport, DeviceTransportFuture, DevicesOp, GrantedLink, LensLineTap,
     LensTapEvent, ProjectController, ProjectOp, SimBacking, SimDeviceTransport, SimLinkSource,
-    SimRuntimeControl, SimSession, StudioController, UiAction,
+    SimRuntimeControl, SimSession, StudioController, UiAction, UiNotices,
 };
 
 /// Wall-clock ceiling on a `run_until`. Generous: the fake boots a real host
@@ -937,6 +937,18 @@ impl DeviceBench {
     fn push_gesture(&mut self, device: crate::DeviceId, source: crate::PushSource) {
         let action: UiAction = crate::DevicePushOp::action_for(device, source);
         drive(self.controller.dispatch(action)).expect("a push gesture never fails loudly");
+    }
+
+    /// [`Self::push_gesture`], but handing back the notices the dispatch
+    /// produced — the push upgrade notice lives there, not in the roster
+    /// view.
+    fn push_gesture_notices(
+        &mut self,
+        device: crate::DeviceId,
+        source: crate::PushSource,
+    ) -> UiNotices {
+        let action: UiAction = crate::DevicePushOp::action_for(device, source);
+        drive(self.controller.dispatch(action)).expect("a push gesture never fails loudly")
     }
 
     /// Open a library project ON a named device — the `?on=mac:` arrival
@@ -6800,6 +6812,100 @@ fn pushing_an_old_format_library_project_sends_the_current_format() {
         bench.library_head(uid),
         before,
         "the library copy was upgraded"
+    );
+}
+
+/// The same real push path as the test above, pinning the user-facing half
+/// of #870's migration: the push must say what happened to the library
+/// copy, in the same words the editor open's own migration notice uses
+/// (`ProjectController::migrate_package_on_open`).
+#[test]
+fn pushing_an_old_format_library_project_shows_the_upgrade_notice() {
+    use lpc_model::PROJECT_FORMAT_VERSION;
+
+    let device = empty_light_player("dev000000daqf6dvvr2");
+    let (mut bench, _tasks) = identified(&device, "usb-old-format-2");
+
+    // The same real v10 fixture as the test above, installed as-is.
+    let old = PROJECT_FORMAT_VERSION - 1;
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join(format!("../lpa-upgrade/tests/corpus/v{old}/button-sign"));
+    let mut files = Vec::new();
+    for entry in std::fs::read_dir(&dir).expect("the corpus fixture exists") {
+        let entry = entry.unwrap();
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name == "README.md" {
+            continue;
+        }
+        files.push((name, std::fs::read(entry.path()).unwrap()));
+    }
+    let summary = bench
+        .store
+        .install_package(
+            "Old sign",
+            &files,
+            crate::app::library::PackageProvenance::Created,
+            1.0,
+        )
+        .expect("the old package installs");
+    let uid = summary.uid;
+    let slug = summary.slug;
+    bench.settle_library();
+
+    let card = bench.view().devices[0].clone();
+    let notices = bench.push_gesture_notices(
+        card.id,
+        crate::PushSource::Library {
+            project_uid: uid.to_string(),
+        },
+    );
+
+    assert_eq!(
+        notices.notices.len(),
+        1,
+        "the migration should produce exactly one notice: {notices:?}"
+    );
+    assert_eq!(
+        notices.notices[0].message,
+        format!("Upgraded \"{slug}\" from format {old} to {PROJECT_FORMAT_VERSION}"),
+        "the push's notice must read like the editor open's"
+    );
+}
+
+/// The notice's other half: a library project already at the current
+/// format produces none — the migration never ran, so there is nothing to
+/// say.
+#[test]
+fn pushing_a_current_format_library_project_shows_no_upgrade_notice() {
+    let device = empty_light_player("dev000000daqf6dvvr3");
+    let (mut bench, _tasks) = identified(&device, "usb-current-format-1");
+
+    let example = crate::app::home::embedded_example::embedded_example(
+        crate::first_bundled_example_id().expect("this build bundles examples"),
+    )
+    .expect("the bundled example resolves");
+    let uid = bench
+        .store
+        .install_package(
+            "Current sign",
+            &example.files(),
+            crate::app::library::PackageProvenance::Created,
+            1.0,
+        )
+        .expect("the current package installs")
+        .uid;
+    bench.settle_library();
+
+    let card = bench.view().devices[0].clone();
+    let notices = bench.push_gesture_notices(
+        card.id,
+        crate::PushSource::Library {
+            project_uid: uid.to_string(),
+        },
+    );
+    assert!(
+        notices.notices.is_empty(),
+        "a current-format push must show no migration notice: {notices:?}"
     );
 }
 
