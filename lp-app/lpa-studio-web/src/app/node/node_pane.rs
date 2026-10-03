@@ -174,6 +174,8 @@ pub fn NodePane(
                         actions: header_actions,
                         on_action,
                         trailing: rsx! {
+                            // Indicator spike: "changed by the assistant".
+                            crate::app::agent::AgentEditedChip { path: node_prefix.clone() }
                             if streaming_live {
                                 NodeLiveChip {}
                             }

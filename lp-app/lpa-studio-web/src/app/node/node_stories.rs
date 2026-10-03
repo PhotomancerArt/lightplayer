@@ -113,6 +113,33 @@ pub(crate) fn agent_lit_remove() -> Element {
 }
 
 #[story(
+    label = "Agent indicator spike — node Remove",
+    description = "INDICATOR SPIKE (not for merge): the node card's Remove icon the assistant just pressed, in each candidate look — ring (shipped), spectrum, badge, sweep, fill."
+)]
+pub(crate) fn agent_spike_remove() -> Element {
+    let mut view = playlist_node_view();
+    view.action = Some(story_focus_action());
+    let remove = node_delete_offer();
+    rsx! {
+        div { class: "tw:grid tw:max-w-xl",
+            for (label, class) in crate::app::agent::SPIKE_LOOKS {
+                crate::app::agent::SpikeCell { key: "{label}", label: label.to_string(), class: class.to_string(),
+                    OffersProvider { offers: story_offers([remove.clone()]),
+                        crate::app::agent::AgentActivityProvider {
+                            activity: crate::app::agent::story_activity([(
+                                remove.path.clone(),
+                                lpa_studio_core::AgentActivityKind::Pressed,
+                            )]),
+                            NodePane { view: view.clone(), on_action: move |_| {} }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[story(
     description = "D7 variant (a), unsaved: header-only yellow tint; the yellow edit-pencil detail trigger is the whole announcement (no count chips — counts live in the popup)."
 )]
 pub(crate) fn dirty_unsaved_header_tint() -> Element {

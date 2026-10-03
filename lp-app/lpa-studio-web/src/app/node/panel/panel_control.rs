@@ -126,6 +126,13 @@ pub fn PanelControl(
         }
     };
 
+    // Indicator spike: the slot the assistant changed wears the light.
+    let slot_lit = crate::app::agent::use_agent_slot_lit(control.address.clone());
+    let outer_class = format!(
+        "{outer_class} {}{}",
+        crate::app::agent::agent_slot_class(slot_lit),
+        if slot_lit.is_some() { " ux-agent-slot-pad" } else { "" }
+    );
     rsx! {
         div { id: "{anchor_id}", class: outer_class,
             PanelControlBody { control, label: label_trigger, on_action }

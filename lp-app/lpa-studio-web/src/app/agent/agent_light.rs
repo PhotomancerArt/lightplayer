@@ -17,7 +17,9 @@
 //! stories' capture (which freezes animation) shows that same still ring.
 
 use dioxus::prelude::*;
-use lpa_studio_core::{OfferPath, UiAgentActivity, UiAgentReveal};
+use lpa_studio_core::{
+    AgentActivityKind, OfferPath, ProjectSlotAddress, UiAgentActivity, UiAgentReveal,
+};
 
 /// The agent's activity, shared through Dioxus context like the offer tree.
 #[derive(Clone, Copy)]
@@ -40,9 +42,11 @@ fn use_agent_activity() -> Signal<UiAgentActivity> {
     use_hook(try_consume_context::<AgentActivityContext>).map_or(fallback, |context| context.0)
 }
 
-/// The newest light on `path` (its seq), memoized so a control re-renders
-/// only when its own light changes.
-pub(crate) fn use_agent_lit(path: Option<OfferPath>) -> Memo<Option<u64>> {
+/// The newest light on `path` (its seq and kind), memoized so a control
+/// re-renders only when its own light changes.
+pub(crate) fn use_agent_lit(
+    path: Option<OfferPath>,
+) -> Memo<Option<(u64, AgentActivityKind)>> {
     let activity = use_agent_activity();
     let mut at = use_signal(|| path.clone());
     if *at.peek() != path {
@@ -51,7 +55,7 @@ pub(crate) fn use_agent_lit(path: Option<OfferPath>) -> Memo<Option<u64>> {
     use_memo(move || {
         let at = at.read();
         let path = at.as_ref()?;
-        activity.read().lit_at(path).map(|lit| lit.seq)
+        activity.read().lit_at(path).map(|lit| (lit.seq, lit.kind))
     })
 }
 
@@ -62,8 +66,85 @@ pub(crate) fn use_agent_lit(path: Option<OfferPath>) -> Memo<Option<u64>> {
 pub(crate) fn AgentMark(#[props(into)] path: Option<OfferPath>, children: Element) -> Element {
     let lit = use_agent_lit(path.clone())();
     let path = path.map(|path| path.to_string());
+    let edited = matches!(lit, Some((_, AgentActivityKind::Edited)));
+    let class = agent_mark_class(lit.map(|(seq, _)| seq));
+    let class = if edited {
+        format!("{class} ux-agent-lit-edited")
+    } else {
+        class.to_string()
+    };
     rsx! {
-        div { class: agent_mark_class(lit), "data-offer-path": path, {children} }
+        div { class, "data-offer-path": path, {children} }
+    }
+}
+
+// -- Indicator spike (2026-10-03): slot-level lights + the edited chip ------
+//
+// SPIKE ONLY. The edited-node variants light the slot the assistant changed
+// instead of (or beside) the whole card. Core does not carry the changed
+// slots yet: a real version adds them to the Edited entry
+// (`AgentEditLanding` already knows each edit's `ProjectSlotAddress`), and
+// `UiAgentLit` would carry `slots: Vec<ProjectSlotAddress>`. Until then a
+// story provides them through this context.
+
+/// The slots lit right now (with the light's seq), shared like the activity.
+#[derive(Clone, Copy)]
+struct AgentSlotLightsContext(Signal<Vec<(ProjectSlotAddress, u64)>>);
+
+/// The light on the slot at `address`, if one is lit.
+pub(crate) fn use_agent_slot_lit(address: Option<ProjectSlotAddress>) -> Option<u64> {
+    let context = use_hook(try_consume_context::<AgentSlotLightsContext>)?;
+    let address = address?;
+    context
+        .0
+        .read()
+        .iter()
+        .rev()
+        .find(|(lit, _)| *lit == address)
+        .map(|(_, seq)| *seq)
+}
+
+/// The classes a lit slot (a panel control, a settings row) wears: the
+/// same light as a mark's child, on the slot's own box.
+pub(crate) fn agent_slot_class(lit: Option<u64>) -> &'static str {
+    match lit {
+        None => "",
+        Some(seq) if seq % 2 == 0 => "ux-agent-slot ux-agent-slot-a",
+        Some(_) => "ux-agent-slot ux-agent-slot-b",
+    }
+}
+
+/// Stories (spike): light `slots` as the assistant's edit would.
+#[cfg(feature = "stories")]
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+pub(crate) fn AgentSlotLightsProvider(slots: Vec<ProjectSlotAddress>, children: Element) -> Element {
+    let lit = slots.into_iter().map(|slot| (slot, 1)).collect::<Vec<_>>();
+    use_context_provider(|| AgentSlotLightsContext(Signal::new(lit)));
+    children
+}
+
+/// "Changed by the assistant": the edited card's header chip. Drawn only
+/// while the card is lit as Edited; the spike's CSS shows it only under
+/// the chip variant (`.ux-agent-e-chip`), so other variants keep the header
+/// exactly as it was.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+pub(crate) fn AgentEditedChip(#[props(into)] path: Option<OfferPath>) -> Element {
+    let lit = use_agent_lit(path)();
+    let Some((seq, AgentActivityKind::Edited)) = lit else {
+        return rsx! {};
+    };
+    let class = if seq % 2 == 0 {
+        "ux-agent-chip ux-agent-chip-a"
+    } else {
+        "ux-agent-chip ux-agent-chip-b"
+    };
+    rsx! {
+        span { class, title: "The assistant changed this node",
+            crate::base::StudioIcon { name: crate::base::StudioIconName::Agent, size: 11 }
+            "changed by the assistant"
+        }
     }
 }
 
@@ -95,6 +176,33 @@ pub(crate) fn story_activity(
             })
             .collect(),
         reveal: None,
+    }
+}
+
+/// Indicator spike: the looks a lit control can wear, as (label, ancestor
+/// class). `ring` is the shipped light (no class).
+#[cfg(feature = "stories")]
+pub(crate) const SPIKE_LOOKS: [(&str, &str); 5] = [
+    ("ring (shipped)", ""),
+    ("spectrum", "ux-agent-v-spectrum"),
+    ("badge", "ux-agent-v-badge"),
+    ("sweep", "ux-agent-v-sweep"),
+    ("fill", "ux-agent-v-fill"),
+];
+
+/// Indicator spike: one labelled cell of a comparison story. `class` picks
+/// the look (and edit mode); the frame-strip capture finds the cell by
+/// `data-spike-cell`.
+#[cfg(feature = "stories")]
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+pub(crate) fn SpikeCell(label: String, class: String, children: Element) -> Element {
+    rsx! {
+        div { class: "tw:grid tw:min-w-0 tw:content-start tw:gap-2 tw:p-4 {class}",
+            "data-spike-cell": "{label}",
+            span { class: "tw:font-mono tw:text-[11px] tw:text-subtle-foreground", "{label}" }
+            {children}
+        }
     }
 }
 

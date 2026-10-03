@@ -82,6 +82,12 @@ pub fn ConfigSlotRow(
         _ if slot.state.debug => format!("{} lp-debug-row-floor", slot_row_class(primary, index)),
         _ => slot_row_class(primary, index).to_string(),
     };
+    // Indicator spike: the slot the assistant changed wears the light.
+    let slot_lit = crate::app::agent::use_agent_slot_lit(slot.address.clone());
+    let row_class = format!(
+        "{row_class} {}",
+        crate::app::agent::agent_slot_class(slot_lit)
+    );
     let indent = depth * 14;
     // Value edits on a present option row target the interior `some` slot;
     // the option's own address is the some/none toggle's remove target.

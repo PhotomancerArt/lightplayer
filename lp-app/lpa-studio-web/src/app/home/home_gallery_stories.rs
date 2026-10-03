@@ -838,6 +838,35 @@ fn devices_card_agent_lit() -> Element {
     }
 }
 
+#[story(
+    label = "Agent indicator spike — device card verb",
+    description = "INDICATOR SPIKE (not for merge): a device card's Remove the assistant just pressed, in each candidate look — ring (shipped), spectrum, badge, sweep, fill."
+)]
+fn devices_card_agent_spike() -> Element {
+    let card = roster_fixture().roster.devices.remove(0);
+    let path = story_board_prefix(card.id).child("remove-project");
+    rsx! {
+        div { class: "tw:grid tw:max-w-sm",
+            for (label, class) in crate::app::agent::SPIKE_LOOKS {
+                crate::app::agent::SpikeCell { key: "{label}", label: label.to_string(), class: class.to_string(),
+                    crate::app::agent::AgentActivityProvider {
+                        activity: crate::app::agent::story_activity([(
+                            path.clone(),
+                            lpa_studio_core::AgentActivityKind::Pressed,
+                        )]),
+                        StoryDeviceCard {
+                            card: card.clone(),
+                            projects: vec![],
+                            examples: vec![],
+                            on_action: |_| {},
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// The running card of `roster_fixture`, as it reads once the board reports
 /// a faulted node — the bench case, with the ledger's own denial as the
 /// runtime's reason.

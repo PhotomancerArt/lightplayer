@@ -14,7 +14,7 @@ use lpa_studio_web_story_macros::story;
 use crate::app::node::face_story_fixtures::{
     period_knob, shader_face, shader_face_bound_output, shader_face_one_d,
     shader_face_stacked_preview, shader_node_view, shader_node_view_with_face, shader_sections,
-    shader_space_section_mismatch,
+    shader_space_section_mismatch, story_slot_address,
 };
 use crate::app::node::{NodeFaceBody, NodePane, PanelControl, ShaderFace};
 use crate::base::Platform;
@@ -369,6 +369,50 @@ fn preview_space_one_d_only() -> Element {
                 face,
                 node: "/fyeah_sign.show/comet.shader".to_string(),
                 on_action: move |_| {},
+            }
+        }
+    }
+}
+
+/// Indicator spike: the edited-node cells — (label, look + edit mode, light
+/// the changed slot).
+const SPIKE_EDITS: [(&str, &str, bool); 8] = [
+    ("card · ring (shipped)", "", false),
+    ("card · spectrum", "ux-agent-v-spectrum", false),
+    ("slot · ring", "ux-agent-e-slot", true),
+    ("slot + chip · ring", "ux-agent-e-chip", true),
+    ("slot + chip · spectrum", "ux-agent-e-chip ux-agent-v-spectrum", true),
+    ("slot + chip · badge", "ux-agent-e-chip ux-agent-v-badge", true),
+    ("slot + chip · sweep", "ux-agent-e-chip ux-agent-v-sweep", true),
+    ("slot + chip · fill", "ux-agent-e-chip ux-agent-v-fill", true),
+];
+
+#[story(
+    label = "Agent indicator spike — edited node",
+    description = "INDICATOR SPIKE (not for merge): the assistant set this shader's `hue` (edit_project). `card` cells light the whole card (shipped: ring); `slot` cells light only the hue knob it changed; `slot + chip` add a \"changed by the assistant\" chip in the header. Core does not carry the changed slot yet — the story provides it (see agent_light.rs)."
+)]
+fn agent_spike_edited() -> Element {
+    let node = lpa_studio_core::ProjectNodeAddress::parse("/fyeah_sign.show/aurora.shader")
+        .expect("valid story node address");
+    let prefix = lpa_studio_core::OfferPath::project_node(&node);
+    rsx! {
+        div { class: "tw:grid tw:max-w-md",
+            for (label, class, slot) in SPIKE_EDITS {
+                crate::app::agent::SpikeCell { key: "{label}", label: label.to_string(), class: class.to_string(),
+                    crate::app::agent::AgentActivityProvider {
+                        activity: crate::app::agent::story_activity([(
+                            prefix.clone(),
+                            lpa_studio_core::AgentActivityKind::Edited,
+                        )]),
+                        crate::app::agent::AgentSlotLightsProvider {
+                            slots: if slot { vec![story_slot_address("controls.hue")] } else { vec![] },
+                            NodePane {
+                                view: shader_node_view(false, UiAgentStatus::Idle),
+                                on_action: move |_| {},
+                            }
+                        }
+                    }
+                }
             }
         }
     }

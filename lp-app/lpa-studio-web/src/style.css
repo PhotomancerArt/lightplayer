@@ -5889,6 +5889,410 @@ label:has(> input:not(:disabled)) {
     }
 }
 
+/* --------------------------------------------------------------------------
+   Agent light — INDICATOR SPIKE (2026-10-03, branch spike/agent-indicator).
+   NOT FOR MERGE. Story-switchable variants of the light above, chosen by a
+   class on an ancestor: `.ux-agent-v-<look>` picks how a lit control is
+   drawn, `.ux-agent-e-<mode>` picks how an EDITED node shows. No ancestor
+   class = the shipped ring + bloom (`ring`).
+
+   Looks: spectrum (spinning iridescent ring, the hover light's family),
+   badge (faint ring + a sparkle badge on the corner), sweep (faint ring +
+   a light band passing twice), fill (a focus-ring wash that flashes and
+   settles). Every look keeps the 4 s rise/hold/fade and has a still form
+   under reduced motion (the pseudo's resting paint).
+   Edit modes: card (the whole card, shipped), slot (only the changed
+   slot), chip (the slot + a "changed by the assistant" chip).
+
+   Lit slots (`.ux-agent-slot`, a panel control or a settings row) wear the
+   same look; `.ux-agent-slot-pad` (panel controls) draws it OUTSIDE the
+   control with a soft pad, since a knob column has no box of its own.
+   Colours: only existing tokens (focus-ring, glow, spectrum, spectrum-cool,
+   surface-raised); the badge's sparkle is an SVG whose stops repeat the
+   spectrum-cool values (a data URI cannot read a var).
+   -------------------------------------------------------------------------- */
+
+/* Slots in the shipped look (ring + bloom). */
+.ux-agent-slot {
+    box-shadow:
+        inset 0 0 0 2px var(--studio-color-focus-ring),
+        0 2px 22px var(--studio-glow);
+}
+
+.ux-agent-slot-a {
+    animation: ux-agent-light-a 4s ease-out forwards;
+}
+
+.ux-agent-slot-b {
+    animation: ux-agent-light-b 4s ease-out forwards;
+}
+
+.ux-agent-slot-pad {
+    border-radius: 10px;
+    box-shadow:
+        0 0 0 6px color-mix(in srgb, var(--studio-color-focus-ring) 14%, transparent),
+        0 0 0 8px var(--studio-color-focus-ring),
+        0 2px 26px var(--studio-glow);
+}
+
+.ux-agent-slot-pad.ux-agent-slot-a,
+.ux-agent-slot-pad.ux-agent-slot-b {
+    animation: ux-agent-pad-light 4s ease-out forwards;
+}
+
+@keyframes ux-agent-pad-light {
+    0% {
+        box-shadow:
+            0 0 0 6px transparent,
+            0 0 0 14px transparent,
+            0 2px 26px transparent;
+    }
+    8% {
+        box-shadow:
+            0 0 0 6px color-mix(in srgb, var(--studio-color-focus-ring) 22%, transparent),
+            0 0 0 9px var(--studio-color-focus-ring),
+            0 2px 30px var(--studio-glow);
+    }
+    20%,
+    70% {
+        box-shadow:
+            0 0 0 6px color-mix(in srgb, var(--studio-color-focus-ring) 14%, transparent),
+            0 0 0 8px var(--studio-color-focus-ring),
+            0 2px 26px var(--studio-glow);
+    }
+    100% {
+        box-shadow:
+            0 0 0 6px transparent,
+            0 0 0 8px transparent,
+            0 2px 26px transparent;
+    }
+}
+
+/* -- shared machinery of the pseudo-element looks ------------------------- */
+
+:is(.ux-agent-v-spectrum, .ux-agent-v-badge, .ux-agent-v-sweep, .ux-agent-v-fill)
+    :is(.ux-agent-lit > *, .ux-agent-slot) {
+    position: relative;
+    box-shadow: none;
+    animation: none;
+}
+
+:is(.ux-agent-v-spectrum, .ux-agent-v-badge, .ux-agent-v-sweep)
+    :is(.ux-agent-lit > *, .ux-agent-slot)::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 4;
+    border-radius: inherit;
+    pointer-events: none;
+}
+
+:is(.ux-agent-v-spectrum, .ux-agent-v-badge, .ux-agent-v-sweep, .ux-agent-v-fill)
+    .ux-agent-slot-pad::after {
+    inset: -8px;
+    border-radius: 12px;
+}
+
+/* The host's bloom, risen and faded with the light. */
+@keyframes ux-agent-bloom {
+    0% {
+        box-shadow: 0 2px 22px transparent;
+    }
+    8% {
+        box-shadow: 0 2px 30px var(--studio-glow);
+    }
+    20%,
+    70% {
+        box-shadow: 0 2px 22px var(--studio-glow);
+    }
+    100% {
+        box-shadow: 0 2px 22px transparent;
+    }
+}
+
+/* The faint ring the badge and sweep looks keep under their accent. */
+@keyframes ux-agent-faint-ring {
+    0% {
+        box-shadow:
+            inset 0 0 0 1.5px transparent,
+            0 2px 22px transparent;
+    }
+    8%,
+    70% {
+        box-shadow:
+            inset 0 0 0 1.5px color-mix(in srgb, var(--studio-color-focus-ring) 75%, transparent),
+            0 2px 18px var(--studio-glow);
+    }
+    100% {
+        box-shadow:
+            inset 0 0 0 1.5px transparent,
+            0 2px 18px transparent;
+    }
+}
+
+@keyframes ux-agent-fade {
+    0% {
+        opacity: 0;
+    }
+    8%,
+    70% {
+        opacity: 1;
+    }
+    100% {
+        opacity: 0;
+    }
+}
+
+/* -- spectrum: the hover light's iridescent ring, spinning, 2px --------- */
+
+.ux-agent-v-spectrum :is(.ux-agent-lit > *, .ux-agent-slot) {
+    box-shadow: 0 2px 22px var(--studio-glow);
+    animation: ux-agent-bloom 4s ease-out forwards;
+}
+
+.ux-agent-v-spectrum :is(.ux-agent-lit > *, .ux-agent-slot)::after {
+    padding: 2px;
+    background: conic-gradient(from var(--ux-ir-angle), var(--studio-spectrum), #5fe08b);
+    mask:
+        linear-gradient(#000 0 0) content-box,
+        linear-gradient(#000 0 0);
+    mask-composite: exclude;
+    -webkit-mask:
+        linear-gradient(#000 0 0) content-box,
+        linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    animation:
+        ux-agent-fade 4s ease-out forwards,
+        ux-ir-spin 1.6s linear infinite;
+}
+
+.ux-agent-v-spectrum .ux-agent-slot-pad {
+    box-shadow:
+        0 0 0 8px color-mix(in srgb, var(--studio-color-focus-ring) 10%, transparent),
+        0 2px 22px var(--studio-glow);
+}
+
+/* -- badge: faint ring + a sparkle on the corner ------------------------ */
+
+.ux-agent-v-badge :is(.ux-agent-lit > *, .ux-agent-slot) {
+    box-shadow:
+        inset 0 0 0 1.5px color-mix(in srgb, var(--studio-color-focus-ring) 75%, transparent),
+        0 2px 18px var(--studio-glow);
+    animation: ux-agent-faint-ring 4s ease-out forwards;
+}
+
+.ux-agent-v-badge :is(.ux-agent-lit > *, .ux-agent-slot)::after {
+    inset: -6px -6px auto auto;
+    width: 16px;
+    height: 16px;
+    border-radius: 999px;
+    border: 1px solid color-mix(in srgb, var(--studio-color-focus-ring) 60%, transparent);
+    background:
+        url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%235fe08b'/%3E%3Cstop offset='.5' stop-color='%2353c6f2'/%3E%3Cstop offset='1' stop-color='%23a58af7'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath fill='url(%23g)' d='M12 1.5c.4 4.6 1.9 8.3 10.5 10.5C13.9 14.2 12.4 17.9 12 22.5 11.6 17.9 10.1 14.2 1.5 12 10.1 9.8 11.6 6.1 12 1.5z'/%3E%3C/svg%3E")
+            center / 11px 11px no-repeat,
+        var(--studio-color-surface-raised-strong);
+    box-shadow: 0 0 10px var(--studio-glow);
+    animation: ux-agent-badge-pop 4s ease-out forwards;
+}
+
+.ux-agent-v-badge .ux-agent-slot-pad::after {
+    inset: -10px -10px auto auto;
+}
+
+.ux-agent-v-badge .ux-agent-slot-pad {
+    box-shadow:
+        0 0 0 6px color-mix(in srgb, var(--studio-color-focus-ring) 10%, transparent),
+        0 0 0 7.5px color-mix(in srgb, var(--studio-color-focus-ring) 75%, transparent);
+}
+
+@keyframes ux-agent-badge-pop {
+    0% {
+        opacity: 0;
+        transform: scale(0.2);
+    }
+    7% {
+        opacity: 1;
+        transform: scale(1.35);
+    }
+    14%,
+    70% {
+        opacity: 1;
+        transform: scale(1);
+    }
+    100% {
+        opacity: 0;
+        transform: scale(1);
+    }
+}
+
+/* -- sweep: faint ring + a light band that passes twice ----------------- */
+
+.ux-agent-v-sweep :is(.ux-agent-lit > *, .ux-agent-slot) {
+    box-shadow:
+        inset 0 0 0 1.5px color-mix(in srgb, var(--studio-color-focus-ring) 75%, transparent),
+        0 2px 18px var(--studio-glow);
+    animation: ux-agent-faint-ring 4s ease-out forwards;
+}
+
+.ux-agent-v-sweep :is(.ux-agent-lit > *, .ux-agent-slot)::after {
+    overflow: hidden;
+    background: linear-gradient(
+            105deg,
+            transparent 38%,
+            color-mix(in srgb, var(--studio-color-focus-ring) 55%, transparent) 48%,
+            color-mix(in srgb, white 60%, transparent) 50%,
+            color-mix(in srgb, var(--studio-color-focus-ring) 55%, transparent) 52%,
+            transparent 62%
+        )
+        no-repeat;
+    background-size: 300% 100%;
+    background-position: 120% 0;
+    mix-blend-mode: screen;
+    animation: ux-agent-sweep 1.3s ease-in-out 0.1s 2 both;
+}
+
+@keyframes ux-agent-sweep {
+    from {
+        background-position: 120% 0;
+    }
+    to {
+        background-position: -20% 0;
+    }
+}
+
+/* -- fill: a wash that flashes and settles ------------------------------ */
+
+.ux-agent-v-fill :is(.ux-agent-lit > *, .ux-agent-slot) {
+    box-shadow:
+        inset 0 0 0 999px color-mix(in srgb, var(--studio-color-focus-ring) 16%, transparent),
+        inset 0 0 0 1.5px var(--studio-color-focus-ring),
+        0 2px 22px var(--studio-glow);
+    animation: ux-agent-fill 4s ease-out forwards;
+}
+
+.ux-agent-v-fill .ux-agent-slot-pad {
+    box-shadow:
+        0 0 0 6px color-mix(in srgb, var(--studio-color-focus-ring) 16%, transparent),
+        inset 0 0 0 999px color-mix(in srgb, var(--studio-color-focus-ring) 16%, transparent),
+        0 0 0 7.5px var(--studio-color-focus-ring),
+        0 2px 22px var(--studio-glow);
+    animation: ux-agent-fill-pad 4s ease-out forwards;
+}
+
+@keyframes ux-agent-fill {
+    0% {
+        box-shadow:
+            inset 0 0 0 999px transparent,
+            inset 0 0 0 1.5px transparent,
+            0 2px 22px transparent;
+    }
+    6% {
+        box-shadow:
+            inset 0 0 0 999px color-mix(in srgb, var(--studio-color-focus-ring) 50%, transparent),
+            inset 0 0 0 1.5px var(--studio-color-focus-ring),
+            0 2px 30px var(--studio-glow);
+    }
+    30%,
+    70% {
+        box-shadow:
+            inset 0 0 0 999px color-mix(in srgb, var(--studio-color-focus-ring) 16%, transparent),
+            inset 0 0 0 1.5px var(--studio-color-focus-ring),
+            0 2px 22px var(--studio-glow);
+    }
+    100% {
+        box-shadow:
+            inset 0 0 0 999px transparent,
+            inset 0 0 0 1.5px transparent,
+            0 2px 22px transparent;
+    }
+}
+
+@keyframes ux-agent-fill-pad {
+    0% {
+        box-shadow:
+            0 0 0 6px transparent,
+            inset 0 0 0 999px transparent,
+            0 0 0 7.5px transparent,
+            0 2px 22px transparent;
+    }
+    6% {
+        box-shadow:
+            0 0 0 6px color-mix(in srgb, var(--studio-color-focus-ring) 50%, transparent),
+            inset 0 0 0 999px color-mix(in srgb, var(--studio-color-focus-ring) 50%, transparent),
+            0 0 0 7.5px var(--studio-color-focus-ring),
+            0 2px 30px var(--studio-glow);
+    }
+    30%,
+    70% {
+        box-shadow:
+            0 0 0 6px color-mix(in srgb, var(--studio-color-focus-ring) 16%, transparent),
+            inset 0 0 0 999px color-mix(in srgb, var(--studio-color-focus-ring) 16%, transparent),
+            0 0 0 7.5px var(--studio-color-focus-ring),
+            0 2px 22px var(--studio-glow);
+    }
+    100% {
+        box-shadow:
+            0 0 0 6px transparent,
+            inset 0 0 0 999px transparent,
+            0 0 0 7.5px transparent,
+            0 2px 22px transparent;
+    }
+}
+
+/* -- edit modes ----------------------------------------------------------- */
+
+/* slot / chip: the card itself stays dark; the changed slot carries it. */
+:is(.ux-agent-e-slot, .ux-agent-e-chip) .ux-agent-lit-edited > * {
+    box-shadow: none;
+    animation: none;
+}
+
+:is(.ux-agent-e-slot, .ux-agent-e-chip) .ux-agent-lit-edited > *::after {
+    content: none;
+}
+
+.ux-agent-chip {
+    display: none;
+}
+
+.ux-agent-e-chip .ux-agent-chip {
+    display: inline-flex;
+    align-self: center;
+    align-items: center;
+    gap: 4px;
+    margin-right: 4px;
+    padding: 2px 8px 2px 6px;
+    border-radius: var(--studio-radius-pill);
+    border: 1px solid color-mix(in srgb, var(--studio-color-focus-ring) 55%, transparent);
+    background: color-mix(in srgb, var(--studio-color-focus-ring) 14%, transparent);
+    color: var(--studio-color-focus-ring);
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1;
+    white-space: nowrap;
+    box-shadow: 0 0 14px var(--studio-glow);
+    animation: ux-agent-fade 4s ease-out forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ux-agent-slot-a,
+    .ux-agent-slot-b,
+    .ux-agent-slot-pad.ux-agent-slot-a,
+    .ux-agent-slot-pad.ux-agent-slot-b,
+    :is(.ux-agent-v-spectrum, .ux-agent-v-badge, .ux-agent-v-sweep, .ux-agent-v-fill)
+        :is(.ux-agent-lit > *, .ux-agent-slot),
+    :is(.ux-agent-v-spectrum, .ux-agent-v-badge, .ux-agent-v-sweep, .ux-agent-v-fill)
+        :is(.ux-agent-lit > *, .ux-agent-slot)::after,
+    .ux-agent-e-chip .ux-agent-chip {
+        animation: none;
+    }
+
+    /* The sweep's still form: a faint wash where the band would pass. */
+    .ux-agent-v-sweep :is(.ux-agent-lit > *, .ux-agent-slot)::after {
+        background: color-mix(in srgb, var(--studio-color-focus-ring) 12%, transparent);
+    }
+}
+
 /* Gallery-card lift, composed with the inset ring. Kept a separate class
    from the ring so `prefers-reduced-motion` can drop the translate below
    without touching the light. */
