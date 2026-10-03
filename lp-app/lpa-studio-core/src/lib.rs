@@ -125,13 +125,15 @@ pub use app::preview_host::{
     PreviewSource, PreviewTier, is_teardown_abort_reason,
 };
 pub use app::project::{
-    ASK_AGENT_REQUEST_PARAM, ASK_AGENT_VERB, AgentEngineStatus, AssetContentFetchOp, AssetEditOp,
-    DirtySummary, EDIT_JOURNAL_CAP, EDITOR_META_PATH, EditorMetaFetchOp, EditorMetaFixture,
-    EditorMetaOp, EditorMetaSet, EditorMetaVerb, FROZEN_PREVIEW_PHASE, HISTORY_ROW_CAP,
-    IMPORT_BUILTIN_SECTION, IMPORT_LIBRARY_SECTION, ImportSource, LoadedProjectChoice,
-    MAX_ASSET_BODY_BYTES, ModuleExportOp, ModuleHeroProduct, NodeCardDrawer, NodeCardUiState,
-    NodeClearDebugOp, NodeController, NodeControllerState, NodeCopyOp, NodeCreateOp, NodeImportOp,
-    NodePasteOp, NodeRemoveOp, NodeRevertOp, NodeUiOp, PanelAutoSaveOp, PanelClearOp, PanelWriteOp,
+    ADD_NODE_KIND_PARAM, ADD_NODE_VERB, ASK_AGENT_REQUEST_PARAM, ASK_AGENT_VERB, AgentEngineStatus,
+    AssetContentFetchOp, AssetEditOp, CLEAR_DEBUG_VERB, COPY_NODE_VERB, DirtySummary,
+    EDIT_JOURNAL_CAP, EDITOR_META_PATH, EditorMetaFetchOp, EditorMetaFixture, EditorMetaOp,
+    EditorMetaSet, EditorMetaVerb, FROZEN_PREVIEW_PHASE, HISTORY_ROW_CAP, IMPORT_BUILTIN_SECTION,
+    IMPORT_LIBRARY_SECTION, IMPORT_PATTERN_PARAM, IMPORT_PATTERN_VERB, ImportSource,
+    LoadedProjectChoice, MAX_ASSET_BODY_BYTES, ModuleExportOp, ModuleHeroProduct, NodeCardDrawer,
+    NodeCardUiState, NodeClearDebugOp, NodeController, NodeControllerState, NodeCopyOp,
+    NodeCreateOp, NodeImportOp, NodePasteOp, NodeRemoveOp, NodeRevertOp, NodeUiOp,
+    PASTE_NODE_CLIPBOARD_PARAM, PASTE_NODE_VERB, PanelAutoSaveOp, PanelClearOp, PanelWriteOp,
     PatchPulseLamps, PatchPulseLanguage, PatchPulseOp, PatchPulseSpace, PatchPulseSubject,
     PatchVerbFixture, PatchVerbKind, PatchVerbOp, PatchVerbSubject, PatchVerbWindow,
     PendingAssetEdit, PendingEdit, PendingEditOp, PendingEditPhase, PlaylistActivateOp,
@@ -149,7 +151,7 @@ pub use app::project::{
     UiPatchSurfaceOutput, UiPatchTarget, UiPendingEdit, UiPendingEditKind, UiPendingEditPhase,
     UiPreviewSpaces, UiProductSpaceRequest, UiProjectHistory, UiProjectHistoryEntry,
     UiProjectManifest, UiSelection, UiShaderError, UiTimebaseRead, chase_preview,
-    editor_meta_artifact, preview_phase, visual_probe_request,
+    editor_meta_artifact, is_header_verb, preview_phase, visual_probe_request,
 };
 pub use app::rich_object::{
     RichChip, RichLine, RichObjectView, RichRollup, RichSection, RichWeight,

@@ -35,6 +35,7 @@ pub(crate) mod edit_journal;
 pub(crate) mod editor_meta_op;
 pub(crate) mod entry_check;
 pub mod export_lint;
+pub mod header_verbs;
 pub mod loaded_project_choice;
 pub mod node;
 pub mod node_card_ui_state;
@@ -79,14 +80,16 @@ pub use editor_meta_op::{
     EditorMetaVerb, editor_meta_artifact,
 };
 pub use export_lint::{ExportGraphContext, ExportGraphNode, check_export_graph};
+pub use header_verbs::{CLEAR_DEBUG_VERB, is_header_verb};
 pub use loaded_project_choice::LoadedProjectChoice;
 pub use node::{
-    ASK_AGENT_REQUEST_PARAM, ASK_AGENT_VERB, IMPORT_BUILTIN_SECTION, IMPORT_LIBRARY_SECTION,
+    ADD_NODE_KIND_PARAM, ADD_NODE_VERB, ASK_AGENT_REQUEST_PARAM, ASK_AGENT_VERB, COPY_NODE_VERB,
+    IMPORT_BUILTIN_SECTION, IMPORT_LIBRARY_SECTION, IMPORT_PATTERN_PARAM, IMPORT_PATTERN_VERB,
     ImportSource, ModuleExportOp, NodeClearDebugOp, NodeController, NodeControllerState,
     NodeCopyOp, NodeCreateOp, NodeImportOp, NodePasteOp, NodeRemoveOp, NodeRevertOp,
-    PanelAutoSaveOp, PanelClearOp, PanelWriteOp, PlaylistActivateOp, ProjectNodeAddress,
-    ProjectNodeTarget, ProjectProductSubscriptionIntent, UiAddNodeMenu, UiAddNodeMenuEntry,
-    UiAttachTarget, UiImportablePattern, UiNodeRemovePreflight,
+    PASTE_NODE_CLIPBOARD_PARAM, PASTE_NODE_VERB, PanelAutoSaveOp, PanelClearOp, PanelWriteOp,
+    PlaylistActivateOp, ProjectNodeAddress, ProjectNodeTarget, ProjectProductSubscriptionIntent,
+    UiAddNodeMenu, UiAddNodeMenuEntry, UiAttachTarget, UiImportablePattern, UiNodeRemovePreflight,
 };
 pub use node_card_ui_state::{
     ModuleHeroProduct, NodeCardDrawer, NodeCardUiState, NodeUiOp, UiPreviewSpaces,

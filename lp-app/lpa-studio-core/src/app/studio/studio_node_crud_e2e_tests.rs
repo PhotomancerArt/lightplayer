@@ -266,12 +266,12 @@ fn create_into_playlist_adds_entry_and_child() {
     drive(actor.run_one_batch_for_test());
     let _ = view.try_recv().expect("connect emits a snapshot");
 
-    // A fresh playlist at the project root…
-    handle.tx.send(create_action(
-        NodeKind::Playlist,
-        UiAttachTarget::ProjectRoot,
-    ));
-    drive(actor.run_one_batch_for_test());
+    // A fresh playlist at the project root, through the root picker's
+    // offer…
+    actor_clicks(&mut actor, &handle.tx).press(
+        "project/add-node",
+        OfferArgs::new().with(crate::ADD_NODE_KIND_PARAM, "playlist"),
+    );
     let snapshot = view.try_recv().expect("playlist create emits a snapshot");
     let playlist_id = child_card_paths(&snapshot)
         .into_iter()
@@ -300,10 +300,16 @@ fn create_into_playlist_adds_entry_and_child() {
         .find(|entry| entry.kind == NodeKind::Shader)
         .expect("shader entry offered");
 
-    // Create into the playlist by dispatching the picker entry's own action
-    // (pane grammar: the controller-produced action is the whole gesture).
-    handle.tx.send(StudioCommand::Action(entry.action.clone()));
-    drive(actor.run_one_batch_for_test());
+    // Create into the playlist by pressing the playlist's own `add-node`
+    // offer with the row's value, as the picker row does.
+    let playlist_add = crate::OfferPath::project_node(
+        &ProjectNodeAddress::parse(&playlist_id).expect("card path is a node address"),
+    )
+    .child(crate::ADD_NODE_VERB);
+    actor_clicks(&mut actor, &handle.tx).press(
+        &playlist_add,
+        OfferArgs::new().with(crate::ADD_NODE_KIND_PARAM, &entry.value),
+    );
     let snapshot = view.try_recv().expect("entry create emits a snapshot");
 
     // The playlist def gained `entries[1]` (entries are 1-based so the first
@@ -382,9 +388,13 @@ fn create_into_playlist_adds_entry_and_child() {
         .entries
         .iter()
         .find(|entry| entry.kind == NodeKind::Fluid)
-        .expect("fluid entry offered");
-    handle.tx.send(StudioCommand::Action(entry.action.clone()));
-    drive(actor.run_one_batch_for_test());
+        .expect("fluid entry offered")
+        .value
+        .clone();
+    actor_clicks(&mut actor, &handle.tx).press(
+        &playlist_add,
+        OfferArgs::new().with(crate::ADD_NODE_KIND_PARAM, &entry),
+    );
     let snapshot = view.try_recv().expect("re-add emits a snapshot");
     let playlist_def = read_file(&server, "playlist.json");
     assert!(

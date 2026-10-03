@@ -2109,11 +2109,14 @@ fn an_applied_shader_body_keeps_the_header_dirty_across_the_refresh_ticks() {
     let mut snapshot = view.try_recv().expect("apply emits a snapshot");
     assert_eq!(editor_dirty(&snapshot), (1, 0), "right after the apply");
     // What the header dispatches is the project-level save, not a second
-    // asset-only verb: the control renders the `project/*` offers as-is.
+    // asset-only verb: the control renders the `project/*` header verbs
+    // as-is (the add-node picker's, also at `project/`, have their own
+    // control).
     assert_eq!(
         snapshot
             .offers
             .verbs_of(&crate::OfferPath::project())
+            .filter(|offer| offer.path.last().is_some_and(crate::is_header_verb))
             .count(),
         2
     );
@@ -2144,6 +2147,7 @@ fn an_applied_shader_body_keeps_the_header_dirty_across_the_refresh_ticks() {
             snapshot
                 .offers
                 .verbs_of(&crate::OfferPath::project())
+                .filter(|offer| offer.path.last().is_some_and(crate::is_header_verb))
                 .count(),
             2,
             "the header keeps Save/Revert across refresh tick {tick}"
