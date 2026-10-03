@@ -288,7 +288,7 @@ export async function writeBootControl(portId, esptoolModulePath, address, recor
       // FLASH_DEFL_*/READ_FLASH commands are a different path. Gating on the
       // warning blocked every boot-control write on that board; comparing
       // the record byte-for-byte in flash is the guarantee we actually want.
-      const readBack = await loader.readFlash(address, record.byteLength ?? record.length);
+      const readBack = await readFlashSafely(loader, address, record.byteLength ?? record.length);
       const written = new Uint8Array(record);
       const matches =
         readBack &&
@@ -371,7 +371,7 @@ export async function readRawFilesystem(portId, esptoolModulePath, resolveRegion
       // The region is the device's OWN table's `lpfs` row (Rust parses it):
       // a C6 flashed before the 2026-10 repartition and one flashed after
       // keep their files in different places.
-      const partitionTable = await loader.readFlash(PARTITION_TABLE_OFFSET, PARTITION_TABLE_LEN);
+      const partitionTable = await readFlashSafely(loader, PARTITION_TABLE_OFFSET, PARTITION_TABLE_LEN);
       const region = resolveRegion(new Uint8Array(partitionTable));
       if (!region) {
         throw new Error(
@@ -379,10 +379,11 @@ export async function readRawFilesystem(portId, esptoolModulePath, resolveRegion
             "(its partition table has no lpfs row).",
         );
       }
-      const image = await loader.readFlash(
+      const image = await readFlashSafely(
+        loader,
         region.offset,
         region.length,
-        (_packet, bytesRead, totalBytes) => {
+        (bytesRead, totalBytes) => {
           const percent = totalBytes > 0 ? Math.round((bytesRead / totalBytes) * 100) : 0;
           pushProgress(progress, onEvent, {
             label: "Reading filesystem",
@@ -488,7 +489,7 @@ export async function inspectLayout(
       let read = nextRead(chipName ? String(chipName) : "", new Uint8Array(targetTable), null);
       while (read) {
         const label = read.length > 0x10000 ? "Reading the board's files" : "Reading the board's layout";
-        const bytes = await loader.readFlash(read.offset, read.length, (_p, done, total) => {
+        const bytes = await readFlashSafely(loader, read.offset, read.length, (done, total) => {
           pushProgress(progress, onEvent, {
             label,
             completedSteps: done,
@@ -611,7 +612,7 @@ export async function executePlan(
         } else if (step.kind === "write") {
           await write([{ data: new Uint8Array(step.data), address: step.offset }], "Moving files");
         } else if (step.kind === "verify") {
-          const bytes = await loader.readFlash(step.offset, step.length, (_p, done, total) => {
+          const bytes = await readFlashSafely(loader, step.offset, step.length, (done, total) => {
             pushProgress(progress, onEvent, {
               label: "Verifying files",
               completedSteps: done,
@@ -653,6 +654,153 @@ export async function executePlan(
     reportFailure("esp32-plan", error, onEvent);
     throw error;
   }
+}
+
+/// The packet size of every flash read this file makes, and why it is small.
+///
+/// esptool-js's own `readFlash` asks the stub for 4 KB packets with 1024 of
+/// them in flight. On a Mac, Chromium's Web Serial opens the port with
+/// `PARMRK` set, so the kernel's tty queue stores each `0xFF` byte TWICE in
+/// its 1,024 slots, and once doubling pushes the queue past 1,020 it drops
+/// bytes silently (`docs/defects/2026-09-26-web-serial-on-macos-drops-bytes-of-packed-frames.md`).
+/// Flash is mostly `0xFF` — an erased sector is nothing else — so a 4 KB
+/// packet of it is 8 KB of tty slots, and the read loses a run of bytes the
+/// first time the page reads late. esptool-js then waits for the rest of a
+/// packet the stub believes it sent, the stub waits for the ack, and the read
+/// stalls for esptool-js's 100 s packet timeout (G1-F2, 2026-10-02:
+/// `docs/defects/2026-10-02-studio-reading-a-boards-files-stalls-on-a-mac.md`).
+///
+/// One packet in flight of at most 384 bytes is at most 770 slots — every
+/// data byte costs at most two (a doubled `0xFF`, or a SLIP-escaped `0xC0` /
+/// `0xDB`), plus the two SLIP delimiters — under the 1,020 the tty can hold
+/// with no reader at all, so nothing can be dropped however late the page
+/// reads; the stub sends the next packet only after the ack, which the page
+/// writes only once it has read the whole packet out of the tty. The cost is
+/// a round trip per packet: 960 KB took 14.2 s at 384 bytes (21.7 s at 256)
+/// over a desk C6's Web Serial in headless Brave on macOS (2026-10-02), where
+/// esptool-js's 4 KB packets took 4.8 s on a lossless path and, on the Mac's
+/// real one, stalled at 310 KB.
+const SAFE_READ_PACKET = 384;
+/// One packet unacknowledged. Whether the stub counts this in packets or in
+/// bytes, 1 means it sends a packet and then waits for the ack.
+const SAFE_READ_IN_FLIGHT = 1;
+/// A packet that has not arrived in this long is lost, not slow: fail with a
+/// message instead of esptool-js's 100 s silence.
+const SAFE_READ_PACKET_TIMEOUT_MS = 3000;
+
+/// Read `length` bytes of flash at `offset` over the stub, in packets a
+/// Mac's serial path cannot drop (see [`SAFE_READ_PACKET`]). Every packet's
+/// length is checked as it arrives and the stub's closing MD5 digest is
+/// compared with the bytes, so a read that lost or changed anything fails
+/// loudly rather than returning a short or wrong image.
+///
+/// `onProgress(bytesRead, totalBytes)` is called every 4 KB and at the end.
+export async function readFlashSafely(loader, offset, length, onProgress = null) {
+  const int32 = (value) => loader._intToByteArray(value);
+  let request = loader._appendArray(int32(offset), int32(length));
+  request = loader._appendArray(request, int32(SAFE_READ_PACKET));
+  request = loader._appendArray(request, int32(SAFE_READ_IN_FLIGHT));
+  const status = await loader.checkCommand("read flash", loader.ESP_READ_FLASH, request);
+  if (status != 0) {
+    throw new Error(`The board refused to read flash at 0x${offset.toString(16)}: ${status}`);
+  }
+  const bytes = new Uint8Array(length);
+  let received = 0;
+  while (received < length) {
+    const packet = await loader.transport.read(SAFE_READ_PACKET_TIMEOUT_MS);
+    const expected = Math.min(SAFE_READ_PACKET, length - received);
+    if (!(packet instanceof Uint8Array) || packet.length !== expected) {
+      throw new Error(
+        `Flash read at 0x${offset.toString(16)} lost bytes: a packet of ` +
+          `${packet?.length ?? 0} bytes where ${expected} were sent ` +
+          `(${received} of ${length} read).`,
+      );
+    }
+    bytes.set(packet, received);
+    received += packet.length;
+    await loader.transport.write(int32(received));
+    // Every 4 KB, not every packet: the card does not need 16 times the
+    // events esptool-js's own reads sent.
+    if (onProgress && (received % 4096 === 0 || received === length)) {
+      onProgress(received, length);
+    }
+  }
+  const digest = await loader.transport.read(SAFE_READ_PACKET_TIMEOUT_MS);
+  const expectedDigest = md5Hex(bytes);
+  const gotDigest = digest instanceof Uint8Array && digest.length === 16 ? toHex(digest) : null;
+  if (gotDigest !== expectedDigest) {
+    throw new Error(
+      `Flash read at 0x${offset.toString(16)} does not match the board's digest ` +
+        `(board ${gotDigest ?? "sent no digest"}, read ${expectedDigest}).`,
+    );
+  }
+  return bytes;
+}
+
+function toHex(bytes) {
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/// MD5 (RFC 1321) of `bytes` as lowercase hex — the stub's read digest.
+/// Here only to check a transfer, never for anything a secret depends on.
+function md5Hex(bytes) {
+  const shifts = [7, 12, 17, 22, 5, 9, 14, 20, 4, 11, 16, 23, 6, 10, 15, 21];
+  const k = new Uint32Array(64);
+  for (let i = 0; i < 64; i += 1) {
+    k[i] = Math.floor(Math.abs(Math.sin(i + 1)) * 0x100000000) >>> 0;
+  }
+  const paddedLength = (((bytes.length + 8) >>> 6) + 1) << 6;
+  const padded = new Uint8Array(paddedLength);
+  padded.set(bytes);
+  padded[bytes.length] = 0x80;
+  const view = new DataView(padded.buffer);
+  view.setUint32(paddedLength - 8, (bytes.length * 8) >>> 0, true);
+  view.setUint32(paddedLength - 4, Math.floor(bytes.length / 0x20000000), true);
+  let a0 = 0x67452301;
+  let b0 = 0xefcdab89;
+  let c0 = 0x98badcfe;
+  let d0 = 0x10325476;
+  const m = new Uint32Array(16);
+  for (let chunk = 0; chunk < paddedLength; chunk += 64) {
+    for (let i = 0; i < 16; i += 1) {
+      m[i] = view.getUint32(chunk + i * 4, true);
+    }
+    let a = a0;
+    let b = b0;
+    let c = c0;
+    let d = d0;
+    for (let i = 0; i < 64; i += 1) {
+      let f;
+      let g;
+      if (i < 16) {
+        f = (b & c) | (~b & d);
+        g = i;
+      } else if (i < 32) {
+        f = (d & b) | (~d & c);
+        g = (5 * i + 1) % 16;
+      } else if (i < 48) {
+        f = b ^ c ^ d;
+        g = (3 * i + 5) % 16;
+      } else {
+        f = c ^ (b | ~d);
+        g = (7 * i) % 16;
+      }
+      const s = shifts[(i >>> 4) * 4 + (i % 4)];
+      const sum = (a + f + k[i] + m[g]) >>> 0;
+      a = d;
+      d = c;
+      c = b;
+      b = (b + ((sum << s) | (sum >>> (32 - s)))) >>> 0;
+    }
+    a0 = (a0 + a) >>> 0;
+    b0 = (b0 + b) >>> 0;
+    c0 = (c0 + c) >>> 0;
+    d0 = (d0 + d) >>> 0;
+  }
+  const out = new Uint8Array(16);
+  const outView = new DataView(out.buffer);
+  [a0, b0, c0, d0].forEach((word, i) => outView.setUint32(i * 4, word, true));
+  return toHex(out);
 }
 
 /// Judge an erase by its OWN outcome, not by the flash-ID probe.

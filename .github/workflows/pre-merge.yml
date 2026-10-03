@@ -2707,7 +2707,7 @@ jobs:
       # test failure is passed straight through. See
       # `docs/defects/2026-09-09-browser-crash-reported-as-test-failure.md`.
       - name: Browser wasm tests
-        run: cd lp2025 && just lpa-fs-opfs-test fw-browser-test lpa-link-browser-test
+        run: cd lp2025 && just lpa-fs-opfs-test fw-browser-test lpa-link-browser-test lpa-link-js-test
 
       - name: sccache stats
         if: always()

@@ -249,6 +249,14 @@ lpa-fs-opfs-test: install-wasm32-target
     CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER="$PWD/scripts/browser-test-harness.sh" \
         cargo test -p lpa-fs-opfs --target wasm32-unknown-unknown
 
+# The Web Serial JS layer's node tests (`lp-app/lpa-link/tests/js/*.test.mjs`):
+# no browser, no board. Today: the Mac serial-path model `virtual_serial.js`
+# puts between emulated boards and a page on a Mac, and the flash read that
+# survives it (G1-F2, docs/defects/2026-10-02-studio-reading-a-boards-files-stalls-on-a-mac.md).
+# Seconds. CI runs it in `validate-browser`; `just test` runs it locally.
+lpa-link-js-test:
+    node --test lp-app/lpa-link/tests/js/*.test.mjs
+
 # The Web Serial JS layer in a real Chrome — the harness
 # `docs/debt/web-serial-js-untestable.md` has been asking for since
 # 2026-07-10 (emulator plan two, M2).
@@ -2721,7 +2729,7 @@ test: build-rv32-builtins build-xt-builtins build-xt-fixtures _test-parallel
 
 [parallel]
 [private]
-_test-parallel: test-rust test-filetests test-emu-lab
+_test-parallel: test-rust test-filetests test-emu-lab lpa-link-js-test
 
 test-rust-core:
     cargo test
