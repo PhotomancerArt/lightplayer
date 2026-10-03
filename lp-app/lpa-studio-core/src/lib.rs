@@ -79,9 +79,9 @@ pub use app::devices::{
 pub use app::devices::{LINK_COUNTERS_CAPTION, LinkTrouble, UiLinkCounterRow, link_counter_rows};
 pub use app::docs_host::DocsSimHost;
 pub use app::studio::PlayViewOp;
+pub use app::studio::{UiPage, UiPanel, UiPlace, UiProjectView, UiSessionSection};
 /// A board's MAC, as the roster records it.
 pub use lpa_devices::identity::MacAddress;
-pub use app::studio::{UiPage, UiPanel, UiPlace, UiProjectView, UiSessionSection};
 // The project's declared hardware (D41): the web shell's Hardware row and
 // the gallery card's "for <board>" badge both read it.
 pub use app::access::{

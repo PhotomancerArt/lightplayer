@@ -238,9 +238,8 @@ impl Device {
         // never regresses to `None`.
         record.board_id = self
             .evidence
-            .classification
-            .hello()
-            .and_then(|hello| hello.board_id.clone())
+            .hello_board_id()
+            .map(str::to_string)
             .or(record.board_id);
         record.chip = self
             .evidence
@@ -275,7 +274,7 @@ impl Device {
             return false;
         };
         let hello = self.evidence.classification.hello();
-        let board_id = hello.and_then(|hello| hello.board_id.as_deref());
+        let board_id = self.evidence.hello_board_id();
         let firmware = hello.and_then(|hello| hello.firmware.as_deref());
         let chip = self.evidence.detected_chip();
         (board_id.is_some() && board_id != record.board_id.as_deref())

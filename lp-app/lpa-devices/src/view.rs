@@ -323,9 +323,8 @@ pub fn device_view(device: &Device, now: Millis) -> DeviceView {
             }),
         board_id: device
             .evidence
-            .classification
-            .hello()
-            .and_then(|hello| hello.board_id.clone())
+            .hello_board_id()
+            .map(str::to_string)
             .or_else(|| {
                 device
                     .record

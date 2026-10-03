@@ -91,6 +91,15 @@ Nothing else of the other wire's hello is read, so this is the version
 check working, not a decoder for an old shape. See
 `docs/defects/2026-10-02-a-wire-32-board-reads-as-pre-hello-firmware.md`.
 
+**Amended 2026-10-03 (G1 walk, Q6):** one more field, read the same way
+and only then: `msg.hello.hardware.boardId` (`lpc_wire::hello_board_id`),
+the board the stamped `/hardware.json` names. Without it the way forward
+for an older board — "update the firmware" — asked the user to pick the
+board from every board the catalog has, on a board that had said exactly
+what it is. It is read separately from `proto`, so a board field of
+another shape costs the board and never the version. That is the whole
+list: version and board, nothing else.
+
 ### Conservative policy: always upgrade the firmware
 
 When versions differ (or the hello is absent), assume **nothing** works.

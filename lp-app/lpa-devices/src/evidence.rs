@@ -255,6 +255,18 @@ impl Evidence {
         self.observations.hello.is_some() || self.observations.other_wire_hello.is_some()
     }
 
+    /// The board this window's hello named: a hello this build reads, or —
+    /// the one other fact read off it — a hello from another wire. The card
+    /// reads it before the record's memory, so an older LightPlayer that
+    /// said which board it is gets Update firmware for that board, not a
+    /// pick of every board (G1 walk, 2026-10-03).
+    pub fn hello_board_id(&self) -> Option<&str> {
+        self.classification
+            .hello()
+            .and_then(|hello| hello.board_id.as_deref())
+            .or(self.observations.other_wire_board.as_deref())
+    }
+
     /// When the current window's hello was heard, if one has been. This is
     /// how an activity tells a hello that answered ITS reopen from one the
     /// board sent before the activity began: the window survives a close,
@@ -854,6 +866,9 @@ struct Observations {
     /// was heard this window ([`ServerFrameBody::HelloOnOtherWire`]).
     #[serde(default)]
     other_wire_hello: Option<u32>,
+    /// The board that hello named, when it named one.
+    #[serde(default)]
+    other_wire_board: Option<String>,
     /// When this window's hello was heard. The Flash ladder asks whether a
     /// hello is NEWER than its write effect's end: a close does not clear
     /// the window, so a board that ran LightPlayer before a flash still
@@ -945,9 +960,10 @@ impl Observations {
             }
             // A hello all the same, on a wire this build cannot read: kept
             // as its version, the one fact read off it. See `classify`.
-            ServerFrameBody::HelloOnOtherWire { proto } => {
+            ServerFrameBody::HelloOnOtherWire { proto, board_id } => {
                 self.frames_seen += 1;
                 self.other_wire_hello = Some(*proto);
+                self.other_wire_board = board_id.clone();
             }
         }
     }
@@ -1024,7 +1040,7 @@ impl Observations {
                 Classification::OlderLightPlayer { proto: Some(proto) }
             } else {
                 Classification::LightPlayer {
-                    hello: HelloFacts::version_only(proto),
+                    hello: HelloFacts::version_only(proto, self.other_wire_board.clone()),
                 }
             };
         }
@@ -1162,9 +1178,10 @@ fn wire_summary(body: &ServerFrameBody) -> String {
         } => heartbeat_summary(loaded, recovery),
         ServerFrameBody::Loaded { loaded } => loaded_summary(loaded),
         ServerFrameBody::Other { label } => label.clone(),
-        ServerFrameBody::HelloOnOtherWire { proto } => {
-            format!("hello · proto {proto} · another wire: only its version was read")
-        }
+        ServerFrameBody::HelloOnOtherWire { proto, board_id } => format!(
+            "hello · proto {proto} · {} · another wire: only its version and board were read",
+            board_id.as_deref().unwrap_or("?"),
+        ),
     }
 }
 
@@ -1801,7 +1818,7 @@ mod tests {
         );
         older.fold(
             Millis(20),
-            &frame(ServerFrame::hello_on_other_wire(0, 32)),
+            &frame(ServerFrame::hello_on_other_wire(0, 32, None)),
             &mut identity,
             &config,
         );
@@ -1822,7 +1839,7 @@ mod tests {
         newer.fold(Millis(0), &opened(), &mut identity, &config);
         newer.fold(
             Millis(10),
-            &frame(ServerFrame::hello_on_other_wire(0, 34)),
+            &frame(ServerFrame::hello_on_other_wire(0, 34, None)),
             &mut identity,
             &config,
         );
@@ -1838,6 +1855,42 @@ mod tests {
                 studio: 33
             })
         );
+    }
+
+    /// G1 walk (2026-10-03): an older LightPlayer's hello names its board,
+    /// and the fold keeps it — on the older verdict and the newer one alike
+    /// — so the card can offer Update firmware for that board.
+    #[test]
+    fn a_hello_from_another_wire_names_its_board() {
+        let config = studio_config();
+        let board = || Some("seeed/xiao-esp32-c6".to_string());
+        for proto in [32, 34] {
+            let mut evidence = Evidence::default();
+            let mut identity = IdentityChain::default();
+            evidence.fold(Millis(0), &opened(), &mut identity, &config);
+            assert_eq!(evidence.hello_board_id(), None, "nothing said yet");
+            evidence.fold(
+                Millis(10),
+                &frame(ServerFrame::hello_on_other_wire(0, proto, board())),
+                &mut identity,
+                &config,
+            );
+            assert_eq!(
+                evidence.hello_board_id(),
+                Some("seeed/xiao-esp32-c6"),
+                "wire {proto}"
+            );
+        }
+        let mut unstamped = Evidence::default();
+        let mut identity = IdentityChain::default();
+        unstamped.fold(Millis(0), &opened(), &mut identity, &config);
+        unstamped.fold(
+            Millis(10),
+            &frame(ServerFrame::hello_on_other_wire(0, 32, None)),
+            &mut identity,
+            &config,
+        );
+        assert_eq!(unstamped.hello_board_id(), None, "no stamp, no board");
     }
 
     /// The boot marker names its proto; an older one is older LightPlayer

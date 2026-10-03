@@ -779,6 +779,59 @@ mod tests {
         assert_eq!(firmware_verb(&unknown), Some(FirmwareVerb::Flash));
     }
 
+    /// G1 walk (2026-10-03), Yona: "it really shouldn't say 8 boards fit,
+    /// right? because we know it's a C6? ideally we'd know what board it
+    /// is." A fresh browser (no record), attached mid-stream (no boot
+    /// banner, so no chip off it): the wire-32 hello itself names the board
+    /// Studio stamped, so the card knows the board — and through it the
+    /// chip — and offers Update firmware for it in one click, with no pick.
+    /// Its identity line no longer says "no firmware" beside "Older
+    /// LightPlayer firmware".
+    #[test]
+    fn a_wire_32_board_names_its_board_and_updates_without_the_pick() {
+        use super::super::device_identity::device_identity_line;
+        use lpa_devices::event::Input;
+        use lpa_devices::link::LinkId;
+        use lpa_devices::replay::{Replay, Step};
+        use lpa_devices::time::Millis;
+
+        let hello =
+            include_str!("../../../../../lp-core/lpc-wire/testdata/hello-proto32-xiao-c6.json");
+        let mut replay = Replay::new(lpa_link::device_link::wire::roster_config());
+        replay.step(Millis(0), Step::attach(1, "usb-spare"));
+        replay.step(Millis(20), Step::opened(1));
+        let heartbeat = || Step::Heartbeat {
+            link: 1,
+            uid: None,
+            mac: Some("10:bd:a3:b0:8e:30".to_string()),
+            fps: None,
+        };
+        replay.step(Millis(60), heartbeat());
+        let event = lpa_link::device_link::demux::demux_line(&format!("M!{}", hello.trim()));
+        replay.feed(Millis(200), Input::link(LinkId(1), event));
+        replay.step(Millis(1_200), heartbeat());
+
+        let view = replay.view();
+        let card = view.devices.first().expect("the board has a card");
+        assert_eq!(
+            card.firmware_face,
+            FirmwareFace::OlderLightPlayer { proto: Some(32) }
+        );
+        assert_eq!(card.detected_chip, None, "the premise: no banner was heard");
+        assert_eq!(
+            card.board_id.as_deref(),
+            Some("seeed/xiao-esp32-c6"),
+            "the hello named its board"
+        );
+        let Some(FirmwareVerb::Update(choice)) = firmware_verb(card) else {
+            panic!("Update firmware for the known board, not the pick: {card:?}");
+        };
+        assert_eq!(choice.board_id, "seeed/xiao-esp32-c6");
+        let identity = device_identity_line(card).display();
+        assert!(!identity.contains("no firmware"), "{identity}");
+        assert!(identity.contains("XIAO ESP32-C6"), "{identity}");
+    }
+
     #[test]
     fn the_update_verb_matches_the_older_firmware_line() {
         use super::super::device_firmware_face::device_firmware_line;

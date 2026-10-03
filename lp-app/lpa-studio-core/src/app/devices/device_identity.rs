@@ -72,6 +72,11 @@ pub enum IdentityFirmware {
     /// No verdict this window; the record remembers what the board last
     /// reported.
     Remembered(String),
+    /// An older LightPlayer: its hello was heard, on a wire this Studio
+    /// cannot read, so its label was not. Never "no firmware" — the card
+    /// beside it says "Older LightPlayer firmware" (G1 walk, 2026-10-03:
+    /// "· no firmware" on that card contradicted it).
+    Older,
     /// Nothing reported and nothing remembered — or a verdict that there
     /// is no LightPlayer on the flash.
     None,
@@ -82,7 +87,7 @@ impl IdentityFirmware {
     pub fn label(&self) -> Option<&str> {
         match self {
             Self::Reported(label) | Self::Remembered(label) => Some(label),
-            Self::None => None,
+            Self::Older | Self::None => None,
         }
     }
 
@@ -93,6 +98,7 @@ impl IdentityFirmware {
     pub fn label_text(&self) -> &str {
         match self {
             Self::Reported(label) | Self::Remembered(label) => label,
+            Self::Older => "older LightPlayer",
             Self::None => "no firmware",
         }
     }
@@ -104,7 +110,7 @@ impl IdentityFirmware {
     pub fn memory_mark(&self) -> Option<&'static str> {
         match self {
             Self::Remembered(_) => Some("last seen"),
-            Self::Reported(_) | Self::None => None,
+            Self::Reported(_) | Self::Older | Self::None => None,
         }
     }
 }
@@ -251,6 +257,9 @@ pub fn device_identity_line(view: &DeviceView) -> DeviceIdentityLine {
 fn identity_firmware(view: &DeviceView) -> IdentityFirmware {
     if let Some(firmware) = view.firmware_face.firmware() {
         return IdentityFirmware::Reported(firmware.to_string());
+    }
+    if matches!(view.firmware_face, FirmwareFace::OlderLightPlayer { .. }) {
+        return IdentityFirmware::Older;
     }
     // Unknown = no verdict yet (closed port, fresh row); Silent = the board
     // said nothing, which is no statement about its flash either. Every
@@ -604,7 +613,6 @@ mod tests {
             FirmwareFace::Blank,
             FirmwareFace::Bootloader,
             FirmwareFace::NoHello,
-            FirmwareFace::OlderLightPlayer { proto: None },
             FirmwareFace::Foreign { label: None },
         ] {
             let mut view = card();
@@ -615,6 +623,26 @@ mod tests {
             assert_eq!(line.firmware, IdentityFirmware::None, "{face:?}");
             assert!(line.display().ends_with("no firmware"), "{face:?}");
         }
+    }
+
+    /// An older LightPlayer outranks the memory too, but it IS firmware:
+    /// the line says so rather than "no firmware" beside a card reading
+    /// "Older LightPlayer firmware" (G1 walk, 2026-10-03).
+    #[test]
+    fn an_older_light_player_reads_older_never_no_firmware() {
+        use lpa_devices::view::FirmwareFace;
+        let mut view = card();
+        view.firmware_face = FirmwareFace::OlderLightPlayer { proto: Some(32) };
+        view.remembered_firmware = Some("fw-esp32c6 5f8febc".to_string());
+        let line = device_identity_line(&view);
+        assert_eq!(line.firmware, IdentityFirmware::Older);
+        assert_eq!(line.firmware.memory_mark(), None);
+        assert!(
+            line.display().ends_with("older LightPlayer"),
+            "{}",
+            line.display()
+        );
+        assert!(!line.display().contains("no firmware"));
     }
 
     /// An unresolvable board id still names itself, verbatim, rather than

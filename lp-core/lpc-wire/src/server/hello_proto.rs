@@ -10,13 +10,26 @@
 //! read as one that never said hello at all (G1-F1, 2026-10-02: every
 //! fielded C6 showed "pre-hello firmware" in a wire-33 Studio).
 //!
-//! So this reads ONE field, from the one place every hello since wire 1 has
-//! carried it — `{"msg":{"hello":{"proto":N}}}` — and nothing else. It is
-//! not a second decoder for an old hello shape: no other field of an old
-//! hello is read, and nothing here grows when the hello changes. Call it
-//! only after the full decode failed.
+//! So [`hello_proto`] reads ONE field, from the one place every hello since
+//! wire 1 has carried it — `{"msg":{"hello":{"proto":N}}}`. It is not a
+//! second decoder for an old hello shape: nothing here grows when the hello
+//! changes. Call it only after the full decode failed.
+//!
+//! [`hello_board_id`] is the one other field read the same way: the board
+//! the hello names (`hardware.boardId`, the id the board's stamped
+//! `/hardware.json` gives its firmware). Without it a host knows a board is
+//! an older LightPlayer but not WHICH board, and the way forward — Update
+//! firmware — became "pick your board from all of them" on a board that had
+//! said exactly what it is (G1 walk, 2026-10-03: "it really shouldn't say 8
+//! boards fit … ideally we'd know what board it is"). It is read
+//! separately from `proto`, so an old hello whose board field has some
+//! other shape still names its version. That is the whole list: two
+//! fields, both of which every hello since the stamp existed has carried in
+//! the same place.
 //!
 //! [`ServerHello`]: crate::ServerHello
+
+use alloc::string::String;
 
 use serde::Deserialize;
 
@@ -29,6 +42,41 @@ pub fn hello_proto(json: &str) -> Option<u32> {
     crate::json::from_str::<HelloEnvelope>(json)
         .ok()
         .map(|envelope| envelope.msg.hello.proto)
+}
+
+/// The board id a hello names (`{"msg":{"hello":{"hardware":{"boardId":"…"}}}}`),
+/// whatever else the hello holds; `None` when `json` is not a hello, or the
+/// hello names no board (one nobody stamped). The companion of
+/// [`hello_proto`], under the same rule: call it only after the full decode
+/// failed.
+pub fn hello_board_id(json: &str) -> Option<String> {
+    crate::json::from_str::<BoardEnvelope>(json)
+        .ok()
+        .and_then(|envelope| envelope.msg.hello.hardware)
+        .and_then(|hardware| hardware.board_id)
+        .filter(|board| !board.is_empty())
+}
+
+#[derive(Deserialize)]
+struct BoardEnvelope {
+    msg: BoardBody,
+}
+
+#[derive(Deserialize)]
+struct BoardBody {
+    hello: BoardHello,
+}
+
+#[derive(Deserialize)]
+struct BoardHello {
+    #[serde(default)]
+    hardware: Option<BoardHardware>,
+}
+
+#[derive(Deserialize)]
+struct BoardHardware {
+    #[serde(default, rename = "boardId")]
+    board_id: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -88,5 +136,38 @@ mod tests {
             None
         );
         assert_eq!(hello_proto("not json"), None);
+    }
+
+    /// G1 walk (2026-10-03): the fielded C6's wire-32 hello names its board
+    /// (Studio stamped it), and that is the one other fact read off it.
+    #[test]
+    fn a_wire_32_hello_names_its_board() {
+        assert_eq!(
+            hello_board_id(HELLO_PROTO_32.trim()).as_deref(),
+            Some("seeed/xiao-esp32-c6")
+        );
+    }
+
+    #[test]
+    fn a_hello_naming_no_board_names_none_and_keeps_its_proto() {
+        let stamped = r#""boardId":"seeed/xiao-esp32-c6""#;
+        let unstamped = HELLO_PROTO_32.trim().replace(stamped, r#""boardId":null"#);
+        assert_eq!(hello_board_id(&unstamped), None);
+        // A board field of some other shape costs the board, never the
+        // version.
+        let odd = HELLO_PROTO_32
+            .trim()
+            .replace(stamped, r#""boardId":{"id":7}"#);
+        assert_eq!(hello_board_id(&odd), None);
+        assert_eq!(hello_proto(&odd), Some(32));
+        assert_eq!(
+            hello_board_id(r#"{"id":0,"msg":{"heartbeat":{"hardware":{"boardId":"x"}}}}"#),
+            None,
+            "not a hello"
+        );
+        assert_eq!(
+            hello_board_id(r#"{"id":0,"msg":{"hello":{"proto":32}}}"#),
+            None
+        );
     }
 }

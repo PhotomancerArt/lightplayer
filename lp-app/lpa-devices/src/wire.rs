@@ -126,12 +126,12 @@ impl ServerFrame {
         }
     }
 
-    /// A hello of which only the wire version could be read. See
-    /// [`ServerFrameBody::HelloOnOtherWire`].
-    pub fn hello_on_other_wire(request_id: u32, proto: u32) -> Self {
+    /// A hello of which only the wire version (and the board it names)
+    /// could be read. See [`ServerFrameBody::HelloOnOtherWire`].
+    pub fn hello_on_other_wire(request_id: u32, proto: u32, board_id: Option<String>) -> Self {
         Self {
             request_id,
-            body: ServerFrameBody::HelloOnOtherWire { proto },
+            body: ServerFrameBody::HelloOnOtherWire { proto, board_id },
         }
     }
 
@@ -261,13 +261,18 @@ pub enum ServerFrameBody {
         label: String,
     },
     /// A hello this build could not decode, of which only its wire version
-    /// was read (`lpc_wire::hello_proto`): a board on another wire whose
-    /// hello changed shape. Still a hello — the board is a LightPlayer on
-    /// that wire — never the "no hello" of pre-hello firmware (G1-F1: every
-    /// wire-32 C6 read "pre-hello firmware" in a wire-33 Studio). Nothing
-    /// else of it is read.
+    /// was read (`lpc_wire::hello_proto`) — and the board it names
+    /// (`lpc_wire::hello_board_id`): a board on another wire whose hello
+    /// changed shape. Still a hello — the board is a LightPlayer on that
+    /// wire — never the "no hello" of pre-hello firmware (G1-F1: every
+    /// wire-32 C6 read "pre-hello firmware" in a wire-33 Studio). The board
+    /// is what lets the card offer Update firmware for it, rather than a
+    /// pick of every board (G1 walk, 2026-10-03). Nothing else of it is
+    /// read.
     HelloOnOtherWire {
         proto: u32,
+        #[serde(default)]
+        board_id: Option<String>,
     },
 }
 
@@ -395,14 +400,15 @@ pub enum BoardFs {
 }
 
 impl HelloFacts {
-    /// The facts of a hello of which only the wire version is known
-    /// ([`ServerFrameBody::HelloOnOtherWire`]). Everything else is "did not
-    /// say" — no identity (heartbeats carry that), no firmware label, no
-    /// board, `fs` unknown — because nothing else of a hello from another
+    /// The facts of a hello of which only the wire version and its board
+    /// are known ([`ServerFrameBody::HelloOnOtherWire`]). Everything else is
+    /// "did not say" — no identity (heartbeats carry that), no firmware
+    /// label, `fs` unknown — because nothing else of a hello from another
     /// wire is read.
-    pub fn version_only(proto: u32) -> Self {
+    pub fn version_only(proto: u32, board_id: Option<String>) -> Self {
         Self {
             proto,
+            board_id,
             ..Self::default()
         }
     }

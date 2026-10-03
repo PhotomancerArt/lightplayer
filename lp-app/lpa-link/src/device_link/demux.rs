@@ -97,10 +97,11 @@ pub fn demux_read(read: WireRead) -> LinkEvent {
 /// [`demux_line`] for the resync and the app-range rule.
 ///
 /// A hello from another wire that this build cannot decode is still a
-/// hello: its version is read (and nothing else — `lpc_wire::hello_proto`)
-/// and it becomes [`ServerFrameBody::HelloOnOtherWire`], so the board reads
-/// as an older (or newer) LightPlayer instead of one that never said hello
-/// (G1-F1). A hello that claims THIS wire and does not decode is malformed,
+/// hello: its version and the board it names are read (and nothing else —
+/// `lpc_wire::hello_proto`, `lpc_wire::hello_board_id`) and it becomes
+/// [`ServerFrameBody::HelloOnOtherWire`], so the board reads as an older
+/// (or newer) LightPlayer of a known board instead of one that never said
+/// hello (G1-F1). A hello that claims THIS wire and does not decode is malformed,
 /// and stays an anomaly.
 ///
 /// [`ServerFrameBody::HelloOnOtherWire`]: lpa_devices::wire::ServerFrameBody::HelloOnOtherWire
@@ -144,6 +145,7 @@ fn hello_on_other_wire(frame_json: &str, proto: u32) -> Option<ServerFrame> {
     Some(ServerFrame::hello_on_other_wire(
         u32::try_from(id).unwrap_or(u32::MAX),
         proto,
+        lpc_wire::hello_board_id(frame_json),
     ))
 }
 
@@ -273,7 +275,15 @@ mod tests {
             panic!("a hello, not an anomaly: {event:?}");
         };
         assert_eq!(frame.request_id, 0);
-        assert_eq!(frame.body, ServerFrameBody::HelloOnOtherWire { proto: 32 });
+        assert_eq!(
+            frame.body,
+            ServerFrameBody::HelloOnOtherWire {
+                proto: 32,
+                // The board the stamp named — the one other fact read off
+                // it (G1 walk, 2026-10-03).
+                board_id: Some("seeed/xiao-esp32-c6".to_string()),
+            }
+        );
     }
 
     #[test]

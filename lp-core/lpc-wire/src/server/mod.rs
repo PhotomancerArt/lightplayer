@@ -24,7 +24,7 @@ pub use hello::{
     BuildFacts, HardwareFacts, HardwareIdentity, HelloIdentity, ServerHello, WIRE_PROTO_VERSION,
 };
 pub use hello_auth::HelloAuth;
-pub use hello_proto::hello_proto;
+pub use hello_proto::{hello_board_id, hello_proto};
 pub use link_counters::{LinkCounters, LinkResets};
 pub use output_wire_status::OutputWireStatus;
 pub use recovery_status::{CrashSummaryWire, RecoveryLevelWire, RecoveryPathWire, RecoveryStatus};
