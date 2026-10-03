@@ -38,7 +38,7 @@
 //! The ledger triple (`[stack]`, `[MEM]`, `[JIT]`, added to this image by
 //! P04b / PR #742) is **elicited**, as the classic's is: a `stopAllProjects`
 //! over the wire, one millisecond after `[INIT] I/O task spawned` — the same
-//! directive P08's `walks/s3-stop-all.script` carries.
+//! directive P08's `lp-emu/lp-emu-validate/walks/s3-stop-all.script` carries.
 //! [`the_ledger_triple_is_elicited_by_a_stop_all_on_the_wire`] is that run.
 //!
 //! # The link's one send buffer, and the firmware's gate
