@@ -1106,6 +1106,14 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
         None,
         graphics,
     );
+    // Messages-first (answer a tick's requests before rendering) was
+    // measured here on the emulator, P2 of
+    // `lp2025/2026-10-02-1918-io-thread-other-boards`: request p50 did not
+    // clear the plan's ~0.3-frame improvement bar over the event-driven
+    // wake alone (it came back flat to the wake-only run, within the
+    // emulator's own timing quantum — see PR C's body for the numbers), so
+    // it stays off here. P4 turns it on once the link runs on its own
+    // thread, where the render's own duration gives it something to win.
     // Identity only — capabilities (build.features, hardware facts) are
     // computed inside the constructor from the engine's gates and the
     // services just injected — never restated here.
