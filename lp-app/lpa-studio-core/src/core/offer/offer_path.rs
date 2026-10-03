@@ -136,6 +136,49 @@ impl OfferPath {
     pub fn starts_with(&self, prefix: &OfferPath) -> bool {
         self.segments.starts_with(&prefix.segments)
     }
+
+    /// The path one segment up — an offer's **owner**, the prefix its card
+    /// asks [`crate::UiOfferTree::verbs_of`] for (`project/save` →
+    /// `project`). `None` for a one-segment path.
+    pub fn owner(&self) -> Option<OfferPath> {
+        let (_, owner) = self.segments.split_last()?;
+        (!owner.is_empty()).then(|| Self {
+            segments: owner.to_vec(),
+        })
+    }
+
+    /// Whether the last segment names a node (it holds a `.`): true for
+    /// `project/demo.module`, the owner of that node's verbs.
+    pub fn names_node(&self) -> bool {
+        self.last().is_some_and(|segment| segment.contains('.'))
+    }
+
+    /// Whether this is a verb of `owner` itself: a path under it with no
+    /// node segment after it. `project/a.fixture/remove` and the grouped
+    /// `project/a.fixture/patch/assign` are `project/a.fixture`'s own;
+    /// `project/a.fixture/b.shader/remove` is its child's.
+    pub fn is_own_verb_of(&self, owner: &OfferPath) -> bool {
+        self.len() > owner.len()
+            && self.starts_with(owner)
+            && !self.segments[owner.len()..]
+                .iter()
+                .any(|segment| segment.contains('.'))
+    }
+
+    /// The node this offer is a verb of, and the verb as it reads under
+    /// that node (`patch/assign` for a grouped one): the longest prefix
+    /// whose last segment names a node. `None` when no segment before the
+    /// verb names one (`project/save`, `devices/<board>/flash`).
+    pub fn node_and_verb(&self) -> Option<(OfferPath, String)> {
+        let (_, before) = self.segments.split_last()?;
+        let at = before.iter().rposition(|segment| segment.contains('.'))?;
+        Some((
+            Self {
+                segments: self.segments[..=at].to_vec(),
+            },
+            self.segments[at + 1..].join("/"),
+        ))
+    }
 }
 
 impl fmt::Display for OfferPath {
@@ -209,6 +252,61 @@ mod tests {
                 "{text}"
             );
         }
+    }
+
+    #[test]
+    fn an_offers_owner_is_one_segment_up_and_says_whether_it_is_a_node() {
+        let address = ProjectNodeAddress::parse("/demo.module/orbit.shader").unwrap();
+        let remove = OfferPath::project_node(&address).child("remove");
+        let owner = remove.owner().expect("a verb has an owner");
+
+        assert_eq!(owner, OfferPath::project_node(&address));
+        assert!(owner.names_node());
+        let save_owner = OfferPath::project().child("save").owner().unwrap();
+        assert_eq!(save_owner, OfferPath::project());
+        assert!(!save_owner.names_node(), "the project header is not a node");
+        assert!(
+            !OfferPath::parse("devices/mac-a0f26287b48c")
+                .unwrap()
+                .names_node()
+        );
+        assert_eq!(OfferPath::project().owner(), None);
+    }
+
+    #[test]
+    fn a_grouped_verb_is_its_nodes_own_and_a_childs_is_not() {
+        let fixture = OfferPath::parse("project/demo.module/dome.fixture").unwrap();
+        let grouped = fixture.clone().child("patch").child("assign");
+        let direct = fixture.clone().child("remove");
+        let child = OfferPath::parse("project/demo.module/dome.fixture/a.shader/remove").unwrap();
+
+        assert!(direct.is_own_verb_of(&fixture));
+        assert!(
+            grouped.is_own_verb_of(&fixture),
+            "a group is the node's own"
+        );
+        assert!(!child.is_own_verb_of(&fixture), "a child's verb is not");
+        assert!(
+            !fixture.is_own_verb_of(&fixture),
+            "a node is not its own verb"
+        );
+
+        assert_eq!(
+            grouped.node_and_verb(),
+            Some((fixture.clone(), "patch/assign".to_string()))
+        );
+        assert_eq!(
+            direct.node_and_verb(),
+            Some((fixture, "remove".to_string()))
+        );
+        assert_eq!(
+            OfferPath::parse("project/patch/undo")
+                .unwrap()
+                .node_and_verb(),
+            None,
+            "the project's own group names no node"
+        );
+        assert_eq!(OfferPath::project().child("save").node_and_verb(), None);
     }
 
     #[test]

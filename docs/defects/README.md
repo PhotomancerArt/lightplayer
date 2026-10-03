@@ -255,6 +255,9 @@ genuinely fits none of these, and define it here in one line.
   bounded by how often it is woken rather than by the link, and anything
   that makes wakes rarer (a longer frame, a slower emulator) turns into
   latency proportional to message size.
+- **`absence-from-incomplete-search`** — a search over a candidate set
+  that never contained the answer reports "not found", and the result is
+  recorded as a fact about the thing searched for, not about the search.
 
 ## Index
 
@@ -365,6 +368,7 @@ a fifth still lands somewhere the new `Fault` status and pattern don't reach.
 
 | Class | Date | Entry | Status | Area |
 | --- | --- | --- | --- | --- |
+| absence-from-incomplete-search | 2026-10-03 | [xiao-c6-d4-d5-unmapped](2026-10-03-xiao-c6-d4-d5-unmapped.md) | fixed | lpc-hardware `boards/seeed/xiao-esp32-c6.json`: D4/D5 were `not-found` with no GPIO, so no project could put LEDs on them (a user asked for D5). The 2026-05 calibration only pulses GPIOs the manifest already lists, and the first profile listed GPIO0–21; D4/D5 are GPIO22/23 (Seeed pin list). Now assigned, with resources, sidecar pins and a regression test |
 | stand-in-divergence | 2026-10-03 | [a-held-board-runs-a-fresh-access-store-in-ram](2026-10-03-a-held-board-runs-a-fresh-access-store-in-ram.md) | fixed | fw-esp32c6 BLE start × lpa-studio-core AccessController: a board held for the C6 layout change runs on a RAM fs, read its missing store as `fresh()` (Bluetooth on) and took Studio's USB key add into RAM ("Who has access 1" while its real 16-entry store waited at 0x310000). More open than its own list when that list said Bluetooth off. A held board now boots `locked()` (`access_store::device_store_at_boot`), and Studio neither syncs nor lists access for it. Nothing reached flash before or after |
 | partial-knowledge-loss | 2026-10-03 | [a-full-device-store-loses-the-list-studio-read](2026-10-03-a-full-device-store-loses-the-list-studio-read.md) | fixed (`d71091bf3`) | lpa-studio-core `sync_access`: on a device store already at its 16-entry cap, the USB sync's add of this browser's key was refused, and the refusal replaced the list the sync had just read. With no cached record the panel stayed "still reading" (`ble_enabled: None`): "Who has access 0" and the Bluetooth switch locked — G1's spare C6 after its migration (the migration was not the cause; any connect did it). The list now survives a refusal and the panel says the list is full |
 | partial-knowledge-loss | 2026-10-02 | [a-wire-32-board-reads-as-pre-hello-firmware](2026-10-02-a-wire-32-board-reads-as-pre-hello-firmware.md) | fixed (`1afe61e7b`) | lpa-link demux × lpc-wire hello: wire 33 made `hardware.fs` required, so a wire-32 hello failed the full decode and was dropped as an anomaly with its `proto` in it; every fielded C6 read "pre-hello firmware" at G1. `lpc_wire::hello_proto` now reads that one field, and the fold calls the board older LightPlayer firmware (Update firmware when its board resolves). `lp-cli`'s `DeviceSession` had the same gap (2026-10-03 rehearsal: "predates the wire hello"); it reads the proto too now |

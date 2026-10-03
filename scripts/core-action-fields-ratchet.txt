@@ -10,7 +10,6 @@
 1 lp-app/lpa-studio-core/src/app/node/ui_produced_product.rs
 1 lp-app/lpa-studio-core/src/app/node/ui_slot_aspect.rs
 1 lp-app/lpa-studio-core/src/app/open_progress.rs
-1 lp-app/lpa-studio-core/src/app/project/node/ui_add_node_menu.rs
 1 lp-app/lpa-studio-core/src/app/project/project_node_tree_view.rs
 1 lp-app/lpa-studio-core/src/app/project/ui_pending_edit.rs
 1 lp-app/lpa-studio-core/src/core/view/pane_view.rs

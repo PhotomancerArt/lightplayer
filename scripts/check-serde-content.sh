@@ -23,6 +23,7 @@ ALLOWLIST=(
     "lp-fw/fw-checks/src/checks/shader_compile/records.rs" # host check tool only
     "lp-app/lpa-agent/src/provider/anthropic/anthropic_wire.rs" # Anthropic API wire format — internally tagged by the external API contract; Studio wasm/host only, not in fw graph
     "lp-app/lpa-agent/src/provider/model_provider.rs" # provider-neutral chat content blocks serialized to external provider wire; Studio wasm/host only, not in fw graph
+    "lp-app/lpa-studio-core/src/app/agent/evals/app_agent_check_spec.rs" # agent-corpus scenario TOML (`[[check]] kind = "…"`): behind #[cfg(test)], host test binary only, never in any fw graph
     "lp-shader/lps-probe/src/experiment_spec.rs" # agent tool JSON: untagged BindingValue (number|bool|array) per the iterate tool schema; Studio wasm + host evals only, not in fw graph
 )
 

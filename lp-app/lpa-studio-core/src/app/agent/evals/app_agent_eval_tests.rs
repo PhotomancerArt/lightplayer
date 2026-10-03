@@ -6,27 +6,31 @@ use serde_json::Value;
 
 use lpa_agent::{StopReason, TokenUsage, TurnEvent};
 
+use super::app_agent_check_spec::CheckSpec;
 use super::app_agent_checks::{
-    D6_ENDPOINT, XIAO_C6_BOARD_ID, all_nodes_ok, asked_about, minimal_strip_diff, output_on,
-    playlist_cycles, strip_of,
+    D6_ENDPOINT, XIAO_C6_BOARD_ID, all_nodes_ok, minimal_strip_diff, output_on, playlist_cycles,
+    strip_of,
 };
+use super::app_agent_conversation_checks::asked_about;
 use super::app_agent_eval_driver::{AgentEvalStudio, ModelSource, drive_scenario};
 use super::app_agent_eval_harness::{
     EvalDriver, EvalStudio, eval_run_dir, golden_tree, run_scenario, write_outcome,
 };
 use super::app_agent_project_tree::ProjectTree;
-use super::app_agent_scenario::Scenario;
+use super::app_agent_scenario::{Scenario, Selection};
 use super::app_agent_transcript::EvalStep;
 use crate::app::home::generate_board_project;
 
 #[test]
 fn every_scenario_passes_on_its_golden_project() {
     let run_dir = eval_run_dir("golden");
+    let mut judged = 0;
     for scenario in Scenario::all().expect("scenarios load") {
-        let golden = scenario
-            .golden
-            .clone()
-            .unwrap_or_else(|| panic!("{} names no golden", scenario.name));
+        // Pending scenarios run their golden too, when they have one.
+        let Some(golden) = scenario.golden.clone() else {
+            continue;
+        };
+        judged += 1;
         let outcome = run_scenario(&scenario, &EvalDriver::Golden(golden));
         write_outcome(&run_dir, &scenario.name, &outcome).expect("the outcome is written");
         assert!(
@@ -36,6 +40,7 @@ fn every_scenario_passes_on_its_golden_project() {
             outcome.failures()
         );
     }
+    assert!(judged >= 10, "only {judged} scenarios have a golden");
 }
 
 #[test]
@@ -57,22 +62,24 @@ fn the_generated_board_project_fails_the_d6_and_strip_checks() {
 fn a_playlist_that_does_not_cycle_fails_playlist_cycles() {
     let golden = golden_tree("sean-250-d6");
     let colourful = colourful();
-    playlist_cycles(&golden, 3, [10.0, 60.0], &colourful).expect("the golden cycles");
+    playlist_cycles(&golden, 3, Some([10.0, 60.0]), &colourful).expect("the golden cycles");
 
     let no_cycle = edit_json(&golden, "playlist.json", |playlist| {
         playlist.as_object_mut().expect("object").remove("cycle");
     });
-    let reason = playlist_cycles(&no_cycle, 3, [10.0, 60.0], &colourful).expect_err("no cycle");
+    let reason =
+        playlist_cycles(&no_cycle, 3, Some([10.0, 60.0]), &colourful).expect_err("no cycle");
     assert!(reason.contains("does not cycle"), "{reason}");
 
     let too_fast = edit_json(&golden, "playlist.json", |playlist| {
         playlist["cycle"]["step_seconds"] = 2.0.into();
     });
-    let reason = playlist_cycles(&too_fast, 3, [10.0, 60.0], &colourful).expect_err("2 s step");
+    let reason =
+        playlist_cycles(&too_fast, 3, Some([10.0, 60.0]), &colourful).expect_err("2 s step");
     assert!(reason.contains("outside"), "{reason}");
 
     // Meteor is a catalog pattern but not on the colourful list.
-    let reason = playlist_cycles(&golden, 3, [10.0, 60.0], &["meteor".to_string()])
+    let reason = playlist_cycles(&golden, 3, Some([10.0, 60.0]), &["meteor".to_string()])
         .expect_err("nothing colourful");
     assert!(reason.contains("not on the colourful list"), "{reason}");
 }
@@ -122,7 +129,7 @@ fn the_app_chat_runs_a_scenario_end_to_end_on_a_scripted_model() {
         ]],
     ];
     let mut studio = AgentEvalStudio::new(ModelSource::Scripted(scripts));
-    let run = drive_scenario(&mut studio, &scenario, golden_tree);
+    let run = drive_scenario(&mut studio, &scenario);
 
     let steps = &run.transcript.steps;
     let kinds: Vec<&str> = steps
@@ -134,6 +141,12 @@ fn the_app_chat_runs_a_scenario_end_to_end_on_a_scripted_model() {
             EvalStep::ToolCall { .. } => "tool_call",
             EvalStep::ToolResult { .. } => "tool_result",
             EvalStep::ScriptedReply { .. } => "reply",
+            EvalStep::Question { .. } => "question",
+            EvalStep::FallbackReply { .. } => "fallback",
+            EvalStep::FollowUp { .. } => "follow_up",
+            EvalStep::CardHanded { .. } => "card",
+            EvalStep::CardClicked { .. } => "click",
+            EvalStep::CardLeft { .. } => "leave",
             EvalStep::Stopped { .. } => "stopped",
             EvalStep::Notice { .. } => "notice",
         })
@@ -144,6 +157,7 @@ fn the_app_chat_runs_a_scenario_end_to_end_on_a_scripted_model() {
             "user",
             "state",
             "assistant",
+            "question",
             "reply",
             "user",
             "state",
@@ -336,10 +350,10 @@ fn an_agent_that_only_talks_fails_every_project_check() {
     assert_eq!(
         failed,
         [
-            "output_on_d6",
-            "target_is_xiao_c6",
-            "strip_of",
-            "playlist_cycles",
+            "output_on(D6)",
+            "target_is(seeed/xiao-esp32-c6)",
+            "strip_of(250)",
+            "playlist",
             "graph_wired"
         ],
         // `all_nodes_ok` passes: the blank root module runs and nothing
@@ -396,6 +410,207 @@ fn the_readout_of_seans_project_is_small_and_says_what_matters() {
         readout.len() / 4
     );
     assert!(readout.len() / 4 <= 1_500, "{readout}");
+}
+
+/// M7's budget: on a big project the readout lists in full only what the
+/// user is looking at and counts the rest, so it stays under its ceiling
+/// however many verbs each node card publishes — while every offer stays
+/// pressable by path. The project is real (Sean's, with more patterns); the
+/// extra verbs per node stand in for the editor offers M6 adds.
+#[test]
+fn a_big_projects_readout_leads_with_place_and_stays_under_budget() {
+    let mut studio = EvalStudio::with_project(&big_project(PATTERN_COPIES));
+    studio.settle(6);
+    studio.act(crate::StudioCommand::Place(
+        crate::UiPlace::new(crate::UiPage::Project {
+            uid: "prjbig".to_string(),
+            view: crate::UiProjectView::Nodes,
+        })
+        .with_panel(crate::UiPanel::AppChat),
+    ));
+    let nodes = studio.node_statuses().len();
+    assert!(nodes >= 15, "a big project: {nodes} nodes");
+    let mut snapshot = studio.readout_snapshot();
+    let real = snapshot.render();
+    eprintln!(
+        "{nodes} nodes, {} offers: readout {} chars ≈ {} tokens, a flat listing ≈ {} \
+         tokens\n{real}",
+        snapshot.offers.len(),
+        real.len(),
+        real.len() / 4,
+        flat_len(&snapshot) / 4
+    );
+    assert!(
+        real.starts_with("page: project editor, nodes view\nyou are looking at: node "),
+        "it leads with where the user is: {real}"
+    );
+    assert!(
+        real.contains("open over the page: the assistant chat\n"),
+        "{real}"
+    );
+
+    // M6's editor offers, simulated: ten more verbs on every node card.
+    let mut node_owners: Vec<crate::OfferPath> = Vec::new();
+    for offer in &snapshot.offers {
+        if let Some(owner) = offer.path.owner().filter(crate::OfferPath::names_node)
+            && !node_owners.contains(&owner)
+        {
+            node_owners.push(owner);
+        }
+    }
+    let template = snapshot.offers[0].clone();
+    for owner in &node_owners {
+        for at in 0..10 {
+            let mut offer = template.clone();
+            offer.path = owner.clone().child(format!("set-knob-{at}"));
+            snapshot.offers.push(offer);
+        }
+    }
+    let readout = snapshot.render();
+    let flat = flat_len(&snapshot);
+    eprintln!(
+        "with ten more verbs a node: {} offers, readout ≈ {} tokens, a flat listing ≈ {} \
+         tokens\n{readout}",
+        snapshot.offers.len(),
+        readout.len() / 4,
+        flat / 4
+    );
+    let focus = snapshot
+        .focus
+        .node
+        .clone()
+        .expect("the editor focuses a node");
+    for line in readout
+        .lines()
+        .filter(|line| line.starts_with("- project/"))
+    {
+        let (path, _) = line[2..].split_once(": ").expect("a listed action");
+        let owner = crate::OfferPath::parse(path).unwrap().owner().unwrap();
+        assert!(
+            !owner.names_node() || owner == focus,
+            "only the focused node ({focus}) lists its verbs: {line}"
+        );
+    }
+    assert!(
+        readout.contains("set-knob-0 ×"),
+        "the other nodes' verbs are counted: {readout}"
+    );
+    // ≤1.5k tokens (≈ 4 chars a token), the small project's ceiling, where
+    // listing every verb would not fit.
+    assert!(readout.len() / 4 <= 1_500, "{readout}");
+    assert!(flat / 4 > 1_500, "the case is big enough to need the bound");
+}
+
+/// Place is read, never obeyed: what the web reports moves the readout's
+/// lead and the ⌘K order, and nothing else.
+#[test]
+fn the_reported_place_moves_the_readouts_lead_and_the_palettes_order() {
+    let mut studio = EvalStudio::with_project(&big_project(2));
+    studio.settle(6);
+    let place = |view| {
+        crate::StudioCommand::Place(crate::UiPlace::new(crate::UiPage::Project {
+            uid: "prjbig".to_string(),
+            view,
+        }))
+    };
+
+    // Nothing reported (the headless default): the editor's focused node.
+    let view = studio.view.clone().expect("a view");
+    let focus = view.offers.focus().clone();
+    let node = focus.node.clone().expect("the editor focuses a node");
+    assert_eq!(focus.area, Some(crate::OfferPath::project()));
+    let first = view.offers.search("remove")[0].path.clone();
+    assert_eq!(
+        first.owner(),
+        Some(node.clone()),
+        "⌘K: the focused node's Remove leads"
+    );
+    assert_eq!(
+        view.offers.search("")[0].path.owner(),
+        Some(node.clone()),
+        "⌘K with nothing typed: the focused node's verbs first"
+    );
+
+    // Play mode shows a panel, not a node.
+    studio.act(place(crate::UiProjectView::Play));
+    let readout = studio.readout();
+    assert!(
+        readout.starts_with("page: project editor, play mode\nyou are looking at: no node"),
+        "{readout}"
+    );
+    // No node is in focus, so no node's verbs are listed in full; the
+    // project's own verbs (the root picker's add-node and friends) are the
+    // page's actions.
+    let here = readout
+        .split("actions here")
+        .nth(1)
+        .and_then(|rest| rest.split("\nproject: ").next())
+        .unwrap_or_default();
+    assert!(
+        !here.contains("/remove"),
+        "no node verbs in full: {readout}"
+    );
+    assert!(here.contains("- project/add-node: "), "{readout}");
+    let view = studio.view.clone().expect("a view");
+    assert_eq!(view.offers.focus().node, None);
+
+    // Back to the nodes view: the node is in focus again, its verbs listed.
+    studio.act(place(crate::UiProjectView::Nodes));
+    let readout = studio.readout();
+    assert!(
+        readout.contains(&format!("- {node}/remove: Remove node [undoable]\n")),
+        "{readout}"
+    );
+    assert!(
+        studio.view.clone().expect("a view").offers.focus().node == Some(node),
+        "the same node as before"
+    );
+}
+
+/// How long the readout would be listing every offer in full (its shape
+/// before M7).
+fn flat_len(snapshot: &crate::app::agent::app_agent_readout::AppReadoutSnapshot) -> usize {
+    snapshot.lead.len()
+        + snapshot.text.len()
+        + snapshot
+            .offers
+            .iter()
+            .map(|offer| crate::app::agent::app_agent_readout::offer_lines(offer).len())
+            .sum::<usize>()
+}
+
+/// How many extra pattern modules [`big_project`] adds at the root. More
+/// than four and the in-process eval server's project sync gives up.
+const PATTERN_COPIES: usize = 4;
+
+/// Sean's golden project with `copies` more pattern modules at the root,
+/// each a module holding a shader: 2·`copies` more nodes. They all draw to
+/// the one picture channel, so the fixture reports the ambiguity — a long
+/// status line, which a readout must carry too.
+fn big_project(copies: usize) -> ProjectTree {
+    let mut tree = golden_tree("sean-250-d6");
+    let mut module: Value = tree.json("module.json").expect("module.json");
+    let spiral: Vec<(String, Vec<u8>)> = tree
+        .files
+        .iter()
+        .filter_map(|(path, bytes)| {
+            path.strip_prefix("modules/spiral/")
+                .map(|file| (file.to_string(), bytes.clone()))
+        })
+        .collect();
+    for at in 0..copies {
+        for (file, bytes) in &spiral {
+            tree.files
+                .insert(format!("patterns/p{at}/{file}"), bytes.clone());
+        }
+        module["nodes"][format!("pattern_{at}")] =
+            serde_json::json!({ "ref": format!("./patterns/p{at}/module.json") });
+    }
+    tree.files.insert(
+        "module.json".to_string(),
+        serde_json::to_vec_pretty(&module).expect("json"),
+    );
+    tree
 }
 
 #[test]
@@ -468,34 +683,114 @@ fn read_answers_nodes_patterns_boards_and_names_what_exists_on_a_miss() {
     );
 }
 
-/// The live leg (`just app-agent-eval`): every selected scenario, against a
-/// real OpenRouter model, written under `target/app-agent-evals/<run>/`.
-/// A measurement, not a gate: failures are reported, not asserted.
+/// The least room under the run's cap a scenario starts with.
+const MIN_SCENARIO_USD: f64 = 0.05;
+
+/// The live leg (`just app-agent-eval`, `just app-agent-corpus`): every
+/// selected scenario, against a real OpenRouter model, written under
+/// `target/app-agent-evals/<run>/`. A measurement, not a gate: failures
+/// are reported, not asserted.
+///
+/// Selection comes from the environment (`Selection::from_env`). The cap
+/// (`LPA_APP_EVAL_MAX_USD`, default 2) is held by cutting each scenario's
+/// own budget to the room left under it, and starting none with less than
+/// [`MIN_SCENARIO_USD`] left; `LPA_APP_EVAL_DRY=1` lists what would run,
+/// and why the rest would not, without a model or a key.
 #[test]
-#[ignore = "live leg: `just app-agent-eval <scenario> --model <slug>`"]
+#[ignore = "live leg: `just app-agent-corpus` / `just app-agent-eval <scenario> --model <slug>`"]
 fn app_agent_eval_live() {
-    let which = std::env::var("LPA_APP_EVAL_SCENARIO").unwrap_or_else(|_| "all".to_string());
-    let model = std::env::var("LPA_EVAL_MODEL").expect("LPA_EVAL_MODEL=<openrouter slug>");
+    let selection = Selection::from_env();
+    let dry = std::env::var("LPA_APP_EVAL_DRY").is_ok_and(|value| value == "1");
+    let model = std::env::var("LPA_EVAL_MODEL").unwrap_or_default();
+    assert!(dry || !model.is_empty(), "LPA_EVAL_MODEL=<openrouter slug>");
     let run = std::env::var("LPA_APP_EVAL_RUN").unwrap_or_else(|_| "live".to_string());
     let repeat: u32 = std::env::var("LPA_APP_EVAL_REPEAT")
         .ok()
         .and_then(|n| n.parse().ok())
         .unwrap_or(1);
+    let max_usd: f64 = std::env::var("LPA_APP_EVAL_MAX_USD")
+        .ok()
+        .and_then(|usd| usd.parse().ok())
+        .unwrap_or(2.0);
+    let all = Scenario::all().expect("scenarios load");
+    let mut picked = Vec::new();
+    for scenario in &all {
+        match selection.picks(scenario) {
+            Ok(()) => picked.push(scenario.clone()),
+            Err(why) => eprintln!(
+                "app-agent-eval: skip {} {} — {why}",
+                scenario.id, scenario.name
+            ),
+        }
+    }
+    assert!(
+        !picked.is_empty(),
+        "no scenario matches the selection {selection:?}"
+    );
+    let ceiling: f64 = picked.iter().map(|s| s.budget.usd).sum::<f64>() * f64::from(repeat);
+    eprintln!(
+        "app-agent-eval: {} scenario(s) × {repeat}, per-scenario budgets sum to ${ceiling:.2} \
+         (the worst case); run cap ${max_usd:.2}",
+        picked.len()
+    );
+    if dry {
+        for scenario in &picked {
+            eprintln!(
+                "  {:>3} {:<32} {:?} seat, {} check(s), budget {} turns / ${}{}{}",
+                scenario.id,
+                scenario.name,
+                scenario.seat(),
+                scenario.checks.len(),
+                scenario.budget.turns,
+                scenario.budget.usd,
+                match scenario.stage_b() {
+                    Some(stage_b) => format!(", stage B pad {} × {}", stage_b.pad, stage_b.leds),
+                    None => String::new(),
+                },
+                match scenario.waits_for.is_empty() {
+                    true => String::new(),
+                    false => format!(" (pending on {})", scenario.waits_for),
+                }
+            );
+        }
+        return;
+    }
     let run_dir = eval_run_dir(&run);
     let mut lines = Vec::new();
-    for scenario in Scenario::select(&which).expect("scenario") {
+    let mut spent = 0.0;
+    'scenarios: for scenario in &picked {
         for n in 1..=repeat {
-            let outcome = run_scenario(
-                &scenario,
-                &EvalDriver::Live {
-                    model: model.clone(),
-                },
-            );
             let dir_name = if repeat == 1 {
                 scenario.name.clone()
             } else {
                 format!("{}-r{n}", scenario.name)
             };
+            // The cap holds whatever the model does: a scenario starts only
+            // with room left, and its own budget is cut to that room, so a
+            // runaway stops at the cap (Stop lands between events, so at
+            // most one model turn past it).
+            let room = max_usd - spent;
+            if room < MIN_SCENARIO_USD {
+                let line = format!(
+                    "{dir_name}: SKIPPED — ${spent:.4} spent of the ${max_usd:.2} cap \
+                     (and every scenario after it)"
+                );
+                eprintln!("app-agent-eval [{model}] {line}");
+                lines.push(line);
+                break 'scenarios;
+            }
+            let mut capped = scenario.clone();
+            capped.budget.usd = capped.budget.usd.min(room);
+            let outcome = run_scenario(
+                &capped,
+                &EvalDriver::Live {
+                    model: model.clone(),
+                },
+            );
+            spent += outcome
+                .usage
+                .reported_cost_usd()
+                .unwrap_or(scenario.budget.usd);
             let dir = write_outcome(&run_dir, &dir_name, &outcome).expect("written");
             let line = format!(
                 "{dir_name}: {} — {} turns, {} in / {} out tokens, {}{}",
@@ -520,7 +815,10 @@ fn app_agent_eval_live() {
             lines.push(line);
         }
     }
-    eprintln!("\napp-agent-eval {run} — {model}\n{}", lines.join("\n"));
+    eprintln!(
+        "\napp-agent-eval {run} — {model} — ${spent:.4} reported\n{}",
+        lines.join("\n")
+    );
 }
 
 // --- helpers ---------------------------------------------------------------
@@ -608,8 +906,13 @@ fn turn_done(stop_reason: StopReason) -> TurnEvent {
 fn colourful() -> Vec<String> {
     Scenario::load("e1-sean-from-empty")
         .expect("e1")
-        .playlist
-        .colourful
+        .checks
+        .into_iter()
+        .find_map(|check| match check {
+            CheckSpec::Playlist { from, .. } => Some(from),
+            _ => None,
+        })
+        .expect("S1 has a playlist check")
 }
 
 /// `tree` with one JSON file edited.

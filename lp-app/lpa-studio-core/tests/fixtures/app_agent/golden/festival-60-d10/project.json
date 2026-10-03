@@ -1,0 +1,5 @@
+{
+  "format": 11,
+  "name": "Festival",
+  "target": "seeed/xiao-esp32-c6"
+}

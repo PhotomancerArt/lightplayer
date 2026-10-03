@@ -32,9 +32,12 @@ pub fn build_app_system_prompt(reference: &str) -> String {
          can decide sensibly yourself.\n\
          - The current state of the app arrives in an <app_state> block with \
          each message and after each of your tool calls. Trust it over your \
-         memory of earlier turns. Its actions are listed by path \
-         (`project/save`, `project/<node path>/remove`); a path is good for \
-         as long as <app_state> lists it.\n\
+         memory of earlier turns. It starts with where the user is: the \
+         page, the node they are looking at, and the actions there, listed \
+         by path (`project/save`, `project/<node path>/remove`). Other \
+         nodes' and devices' actions are only counted; `read` a node or a \
+         device to list its actions in full. A path is good for as long as \
+         <app_state> lists or counts it.\n\
          - Before you change a field you have not seen, `read` the node: its \
          definition shows the exact paths and values `set` takes.\n\
          - After edits, read the `project` section of the result: a node in \
@@ -61,6 +64,25 @@ pub fn build_app_system_prompt(reference: &str) -> String {
          use, set to your values, and the user's click on it is what does \
          it (they may change a value first). After `needs_user`, stop: say in one line which card to click \
          and why. Never ask the user to type yes instead of clicking.\n\
+         - <app_state> also lists the Add node picker's actions: \
+         `project/add-node` (`kind`), `project/import-pattern` (`pattern`) \
+         and `project/paste-node`, plus the same under each playlist. They \
+         are what the user's picker presses. To build or change content, \
+         still use `edit_project`: it creates, imports and sets in one \
+         call, and later edits can name what earlier ones created. An \
+         `edit_project` `remove_node` that would throw away unsaved edits \
+         is refused with the node's `remove` path; `act` that path, which \
+         hands the user the button as a card.\n\
+         - Patching (which object of a fixture goes on which output, at \
+         which lamp) is actions too: a fixture's are at \
+         `project/<node path>/patch/…` (`assign`, `re-anchor`, `reverse`, \
+         `rotate`, `clear`, `set-flow`, `unmap-all`), an output's are \
+         `swap-ports` and `shift-port`, and `project/patch/undo` and \
+         `project/patch/redo` walk the patch edits back and forth. The \
+         selected fixture's are listed in full; `read` a fixture or an \
+         output for its own. A `subject` defaults to what the user has \
+         selected; `lamp`, `steps`, `start`, `lamps` and `delta` are whole \
+         numbers.\n\
          - You do not write shader code. When the user asks to change what \
          a shader itself does — its colors, motion or shape, as code — `act` \
          that shader node's `ask-agent` action with their request in \
@@ -92,6 +114,14 @@ mod tests {
         assert!(prompt.contains("project/save"));
         assert!(prompt.contains("\"args\": {\"board\""), "an args example");
         assert!(prompt.contains("`ask-agent`"), "the shader hand-off");
+        assert!(
+            prompt.contains("`project/add-node`") && prompt.contains("still use `edit_project`"),
+            "the picker's offers, and edit_project for content"
+        );
+        assert!(
+            prompt.contains("only counted"),
+            "how to expand a counted node"
+        );
         assert!(prompt.ends_with("## Reference"));
     }
 }

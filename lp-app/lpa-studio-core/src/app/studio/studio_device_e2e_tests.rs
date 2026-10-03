@@ -70,6 +70,9 @@ const STEP_MS: f64 = 0.005;
 
 /// E4: the app agent's device journey over this bench.
 mod agent_device_journey_tests;
+/// The app chat seated on this bench (E4's seat, and the corpus's device
+/// seat).
+pub(crate) mod agent_device_seat;
 
 // ---------------------------------------------------------------------
 // The transport

@@ -1,0 +1,653 @@
+//! The device seat: the app chat seated on the device bench, on a scripted
+//! or a live model (plan `m-agent-activity-corpus`, P3).
+//!
+//! [`AgentSeat`] is E4's seat, moved here from the journey tests so the
+//! corpus can use it too: the agent runs exactly as in the product — the
+//! app chat's run future, its tools, the host bridge's ops on the command
+//! queue, the controller pressing offers as the tree has it at the press —
+//! and the seat stands in for the actor's batch loop, applying what the run
+//! queues and refreshing the readout after each batch. Only the model
+//! (when scripted) and the board are fake.
+//!
+//! [`DeviceScenarioSeat`] wraps it as a corpus [`ScenarioSeat`]: it builds
+//! the board a scenario starts with (blank, somebody else's firmware, or
+//! LightPlayer running the start project, which the library holds and the
+//! editor has open), and reads back what the board ended up running.
+//!
+//! The bench lives in this test module and is private to it, which is why
+//! the seat lives beside it rather than beside the eval driver.
+
+use std::collections::VecDeque;
+
+use lpa_agent::provider::ReqwestTransport;
+use lpa_agent::{ChatRole, ContentBlock, OpenAiCompatProvider, TurnEvent, TurnRequest};
+
+use super::*;
+use crate::app::agent::evals::app_agent_checks::NodeStatusRow;
+use crate::app::agent::evals::app_agent_eval_driver::{
+    ModelSource, PROGRESS_EVERY, ScriptedProvider,
+};
+use crate::app::agent::evals::app_agent_eval_harness::{EvalStudio, golden_tree};
+use crate::app::agent::evals::app_agent_project_tree::ProjectTree;
+use crate::app::agent::evals::app_agent_scenario::{BoardState, ForeignFirmware, Scenario};
+use crate::app::agent::evals::app_agent_scenario_seat::{
+    BoardRow, DeviceSummary, RunLimits, ScenarioSeat,
+};
+use crate::app::library::PackageProvenance;
+use crate::app::studio::studio_view_channel::{CommandReceiver, command_channel};
+use crate::{AgentController, AgentOp, ControllerId, SettingsCommand, StudioCommand};
+
+/// The MAC every corpus board reports (its efuse, and the flash
+/// preflight's — the bench's scripted preflight reads this one).
+const CORPUS_BOARD_MAC: &str = "60:55:f9:0a:0b:0c";
+
+/// The stamped uid of a board that was LightPlayer before the scenario.
+const CORPUS_BOARD_UID: &str = "dev000000corpus0001";
+
+/// What a WLED build with `WLED_DEBUG` prints at boot.
+const WLED_BOOT_LINE: &str = "---WLED 0.15.0 2412100 INIT---";
+
+/// How long a live run may wait, in real time, for a hung run to end after
+/// it was told to stop.
+const STOP_GRACE: Duration = Duration::from_secs(30);
+
+/// The app chat seated on a [`DeviceBench`]'s controller.
+pub(super) struct AgentSeat {
+    /// Where the run's acts and feedback land (the actor's queue, here).
+    rx: CommandReceiver,
+    runs: Rc<RefCell<Vec<crate::AgentTaskFuture>>>,
+    /// One turn script per run, consumed as runs start (scripted model).
+    scripts: Rc<RefCell<VecDeque<Vec<Vec<TurnEvent>>>>>,
+    /// Every request a scripted model received, in order.
+    requests: Rc<RefCell<Vec<TurnRequest>>>,
+    /// A live model: the seat paces the bench to wall-clock time while it
+    /// thinks.
+    live: bool,
+}
+
+impl AgentSeat {
+    /// The seat on a scripted model whose runs are queued with
+    /// [`Self::script`].
+    pub(super) fn new(bench: &mut DeviceBench) -> Self {
+        Self::with_source(bench, ModelSource::Scripted(Vec::new()))
+    }
+
+    /// The seat on `source`. A scripted source's runs are queued first;
+    /// [`Self::script`] adds more.
+    pub(super) fn with_source(bench: &mut DeviceBench, source: ModelSource) -> Self {
+        let (tx, rx) = command_channel();
+        let runs: Rc<RefCell<Vec<crate::AgentTaskFuture>>> = Rc::new(RefCell::new(Vec::new()));
+        let scripts: Rc<RefCell<VecDeque<Vec<Vec<TurnEvent>>>>> =
+            Rc::new(RefCell::new(VecDeque::new()));
+        let requests: Rc<RefCell<Vec<TurnRequest>>> = Rc::new(RefCell::new(Vec::new()));
+        let controller = &mut bench.controller;
+        controller.set_agent_command_sender(tx);
+        // The ack waits poll a timer between checks; one yield per wait
+        // gives the seat a turn to apply what the run queued.
+        controller.set_agent_timer(|_| Box::pin(YieldOnce::default()) as crate::AgentTimerFuture);
+        let (model, api_key, live) = match &source {
+            ModelSource::Live { model, api_key } => (model.clone(), api_key.clone(), true),
+            ModelSource::Scripted(_) => (
+                "scripted/model".to_string(),
+                "sk-or-scripted".to_string(),
+                false,
+            ),
+        };
+        for command in [
+            SettingsCommand::SetAgentProvider(Some(crate::AgentProvider::OpenRouter)),
+            SettingsCommand::SetAgentOpenRouterApiKey(Some(api_key)),
+            SettingsCommand::SetAppAgentModel(Some(model)),
+        ] {
+            controller.apply_settings_command(command);
+        }
+        controller.set_agent_spawner({
+            let runs = Rc::clone(&runs);
+            move |run| runs.borrow_mut().push(run)
+        });
+        match source {
+            ModelSource::Live { .. } => controller.set_agent_provider_factory(|config| {
+                let crate::AgentProviderConfig::OpenAiCompat(config) = config else {
+                    panic!("OpenRouter resolves to the OpenAI-compatible provider");
+                };
+                Box::new(OpenAiCompatProvider::new(
+                    config.clone(),
+                    ReqwestTransport::new(),
+                ))
+            }),
+            ModelSource::Scripted(first) => {
+                scripts.borrow_mut().extend(first);
+                controller.set_agent_provider_factory({
+                    let scripts = Rc::clone(&scripts);
+                    let requests = Rc::clone(&requests);
+                    move |_| {
+                        let turns = scripts.borrow_mut().pop_front().unwrap_or_default();
+                        Box::new(ScriptedProvider::new(turns, Rc::clone(&requests)))
+                    }
+                });
+            }
+        }
+        Self {
+            rx,
+            runs,
+            scripts,
+            requests,
+            live,
+        }
+    }
+
+    /// Queue the turns of the next run.
+    pub(super) fn script(&self, turns: Vec<Vec<TurnEvent>>) {
+        self.scripts.borrow_mut().push_back(turns);
+    }
+
+    /// The user's message to the app chat; the run is driven to its end.
+    pub(super) fn send(&mut self, bench: &mut DeviceBench, tasks: &TaskPool, text: &str) {
+        self.press(bench, tasks, send_action(text));
+    }
+
+    /// The user's click (a card's button); any run it starts or resumes is
+    /// driven to its end. A run that does not end inside the bench's
+    /// wall-clock ceiling is a hang, and fails the test.
+    pub(super) fn press(&mut self, bench: &mut DeviceBench, tasks: &TaskPool, action: UiAction) {
+        let deadline = std::time::Instant::now() + REAL_TIME_LIMIT;
+        if !self.drive(bench, tasks, action, None, deadline, false) {
+            panic!(
+                "the agent's run did not end; roster now: {:?}",
+                bench.view()
+            );
+        }
+    }
+
+    /// [`Self::press`] under a scenario's limits: past one, the run is
+    /// stopped the way Stop stops it. `false` when it did not end even so.
+    ///
+    /// What the press set moving (a chooser's port identifying, a board
+    /// coming back) settles before the run it resumes takes its first
+    /// look: a live model's own latency gives it that much, and a scripted
+    /// one has none. (A design call of the corpus harness: the product
+    /// resumes the run at once.)
+    pub(super) fn press_within(
+        &mut self,
+        bench: &mut DeviceBench,
+        tasks: &TaskPool,
+        action: UiAction,
+        limits: RunLimits,
+    ) -> bool {
+        self.drive(
+            bench,
+            tasks,
+            action,
+            Some(limits),
+            limits.deadline + STOP_GRACE,
+            true,
+        )
+    }
+
+    fn drive(
+        &mut self,
+        bench: &mut DeviceBench,
+        tasks: &TaskPool,
+        action: UiAction,
+        limits: Option<RunLimits>,
+        give_up: std::time::Instant,
+        quiet_first: bool,
+    ) -> bool {
+        drive(bench.controller.dispatch(action)).expect("the press dispatches");
+        self.apply(bench);
+        // A press that opened a chooser settles its card on the chooser's
+        // answer, which a step folds; the run it resumes starts there.
+        bench.step(tasks);
+        self.apply(bench);
+        if quiet_first {
+            wait_quiet(bench, tasks);
+            self.apply(bench);
+        }
+        let waker = noop_waker();
+        let mut cx = Context::from_waker(&waker);
+        let mut next_progress = std::time::Instant::now() + PROGRESS_EVERY;
+        loop {
+            let Some(mut run) = self.runs.borrow_mut().pop() else {
+                return true;
+            };
+            while run.as_mut().poll(&mut cx).is_pending() {
+                self.apply(bench);
+                bench.step(tasks);
+                if let Some(limits) = limits {
+                    let session = bench.controller.agent_for_test().app_session();
+                    let (usage, turns) = (session.mirror.usage, session.mirror.turn_stats.len());
+                    if limits.passed(&usage, turns as u32) {
+                        bench.controller.agent_for_test().request_app_stop();
+                    }
+                }
+                if std::time::Instant::now() > give_up {
+                    return false;
+                }
+                if self.live {
+                    // The model thinks in real time: keep the bench's clock
+                    // near it (as `run_until` does), so the board's own
+                    // timers are not raced past what its server answers.
+                    std::thread::sleep(Duration::from_millis(1));
+                    if std::time::Instant::now() > next_progress {
+                        next_progress = std::time::Instant::now() + PROGRESS_EVERY;
+                        let session = bench.controller.agent_for_test().app_session();
+                        eprintln!(
+                            "app-agent-eval (device seat): … {} turns, {} out tokens, ${:.4}",
+                            session.mirror.turn_stats.len(),
+                            session.mirror.usage.output_tokens,
+                            session.mirror.usage.reported_cost_usd().unwrap_or(0.0)
+                        );
+                    }
+                }
+            }
+            self.apply(bench);
+        }
+    }
+
+    /// What the actor does with a batch the run queued: its acts through
+    /// the ordinary dispatch, its feedback in order, then the refreshed
+    /// readout (`view_if_changed`).
+    fn apply(&mut self, bench: &mut DeviceBench) {
+        while self.rx.peek_any(|_| true) {
+            for command in drive(self.rx.recv_coalesced()).unwrap_or_default() {
+                match command {
+                    StudioCommand::Action(action) => {
+                        // As the actor does: a refused op is the agent's
+                        // to hear (its ack carries the error) and a log line,
+                        // never the end of the run — a live model may well
+                        // try an edit before a project is open.
+                        if let Err(error) = drive(bench.controller.dispatch(action)) {
+                            bench.controller.note_action_error(&error);
+                        }
+                    }
+                    StudioCommand::Agent(feedback) => {
+                        bench.controller.apply_agent_feedback(feedback)
+                    }
+                    other => panic!("the app chat queued {other:?}"),
+                }
+            }
+        }
+        let _ = bench.controller.view_if_changed();
+    }
+
+    pub(super) fn requests(&self) -> usize {
+        self.requests.borrow().len()
+    }
+
+    /// The last readout in request `index` (what the model saw that turn).
+    pub(super) fn readout_of_request(&self, index: usize) -> String {
+        let requests = self.requests.borrow();
+        requests[index]
+            .messages
+            .iter()
+            .filter(|message| message.role == ChatRole::User)
+            .flat_map(|message| &message.content)
+            .filter_map(|block| match block {
+                ContentBlock::Text { text }
+                    if text.starts_with(lpa_agent::toolset::APP_STATE_OPEN) =>
+                {
+                    Some(text.clone())
+                }
+                _ => None,
+            })
+            .last()
+            .expect("every request carries the readout")
+    }
+
+    /// The newest user message in request `index` that is not the readout
+    /// (a run's opening text: the user's message, or what a card did).
+    pub(super) fn last_user_text(&self, index: usize) -> String {
+        let requests = self.requests.borrow();
+        requests[index]
+            .messages
+            .iter()
+            .filter(|message| message.role == ChatRole::User)
+            .flat_map(|message| &message.content)
+            .filter_map(|block| match block {
+                ContentBlock::Text { text }
+                    if !text.starts_with(lpa_agent::toolset::APP_STATE_OPEN) =>
+                {
+                    Some(text.clone())
+                }
+                _ => None,
+            })
+            .last()
+            .expect("a run opens with text")
+    }
+
+    /// The app chat's visible assistant turns, in order.
+    pub(super) fn assistant_texts(&self, bench: &mut DeviceBench) -> Vec<String> {
+        bench
+            .controller
+            .agent_for_test()
+            .app_session()
+            .mirror
+            .turns
+            .iter()
+            .filter_map(|turn| match turn {
+                crate::UiAgentTurn::Assistant { text } => Some(text.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Every `act` result the model was handed, in order.
+    pub(super) fn tool_results(&self, bench: &mut DeviceBench) -> Vec<serde_json::Value> {
+        let session = bench.controller.agent_for_test().app_session();
+        let runtime = session.runtime.borrow();
+        let runtime = runtime.as_ref().expect("a run happened");
+        runtime
+            .transcript()
+            .messages
+            .iter()
+            .flat_map(|message| &message.content)
+            .filter_map(|block| match block {
+                ContentBlock::ToolResult { content, .. } => serde_json::from_str(content).ok(),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The app chat's cards, in transcript order.
+    pub(super) fn cards(&self, bench: &mut DeviceBench) -> Vec<crate::UiAgentCard> {
+        app_cards(bench)
+    }
+}
+
+/// Step the bench until no card is busy, every board has said what it
+/// runs, and every pending link has settled — as a person waits for the
+/// card to stop moving. Bounded by the bench's ceiling, never a hang: a
+/// board that never settles is the checks' to report.
+fn wait_quiet(bench: &mut DeviceBench, tasks: &TaskPool) {
+    let deadline = std::time::Instant::now() + REAL_TIME_LIMIT;
+    while std::time::Instant::now() < deadline {
+        bench.step(tasks);
+        let view = bench.view();
+        let quiet = view.devices.iter().all(|card| {
+            card.activity.is_none()
+                && card.loaded_project != lpa_devices::view::LoadedProject::Unknown
+        }) && view.pending.iter().all(|pending| pending.needs_firmware());
+        if quiet {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
+/// The app chat's Send.
+fn send_action(text: &str) -> UiAction {
+    UiAction::from_op(
+        ControllerId::new(AgentController::NODE_ID),
+        AgentOp::AppSend {
+            text: text.to_string(),
+        },
+    )
+}
+
+// ---------------------------------------------------------------------
+// The corpus seat
+// ---------------------------------------------------------------------
+
+/// A corpus scenario's device seat: the bench, the fake board it starts
+/// with, and the app chat seated on it.
+pub(crate) struct DeviceScenarioSeat {
+    bench: DeviceBench,
+    tasks: TaskPool,
+    device: FakeEsp32Device,
+    seat: AgentSeat,
+    /// The board the fake is: its pin map is the one the board's outputs
+    /// open against, and the one the end project is judged on.
+    board: String,
+}
+
+impl DeviceScenarioSeat {
+    /// The bench with the board `scenario` starts with plugged in (granted
+    /// when `connected`), and the app chat on `source`.
+    pub(crate) fn new(source: ModelSource, scenario: &Scenario) -> Self {
+        let board = scenario
+            .board_id()
+            .expect("a validated scenario names its board")
+            .to_string();
+        let start = &scenario.start.board;
+        let state = start.state.expect("the device seat has a board state");
+        let manifest = lpa_boards::runtime_manifest_json(&board)
+            .expect("a validated scenario's board has a pin map");
+        let boot = match state {
+            BoardState::Blank => FakeBootState::BlankFlash,
+            BoardState::Foreign => FakeBootState::ForeignFirmware,
+            BoardState::Running | BoardState::Older => {
+                let provenance = match state {
+                    BoardState::Older => {
+                        lpa_link::providers::fake_device::fake_provenance("fake-older-firmware")
+                    }
+                    _ => lpa_link::providers::fake_device::fake_provenance("fake-firmware"),
+                };
+                FakeBootState::LightPlayer(FakeLightPlayerState {
+                    provenance,
+                    ..FakeLightPlayerState::new()
+                        .with_identity(FakeDeviceIdentity::new(CORPUS_BOARD_UID, "Venue lights"))
+                        .with_base_mac(CORPUS_BOARD_MAC)
+                        .with_heartbeat_interval(Duration::from_millis(20))
+                })
+            }
+        };
+        let mut script = FakeDeviceScript::new(boot)
+            .with_flashed_heartbeat_interval(Duration::from_millis(20))
+            .with_board_manifest(manifest);
+        if scenario.chip().as_deref() == Some("esp32") {
+            script = script.with_classic_esp32_rom();
+        }
+        if start.firmware == Some(ForeignFirmware::Wled) {
+            script = script.with_foreign_banner(&[WLED_BOOT_LINE]);
+        }
+        let device = FakeEsp32Device::new(script);
+        let running = matches!(state, BoardState::Running | BoardState::Older);
+        let (mut bench, tasks) = match start.connected || running {
+            true => DeviceBench::granted(&device, "usb-corpus"),
+            false => DeviceBench::ungranted(&device, "usb-corpus"),
+        };
+        let seat = AgentSeat::with_source(&mut bench, source);
+        Self {
+            bench,
+            tasks,
+            device,
+            seat,
+            board,
+        }
+    }
+
+    /// A running board's start: the start project goes into the library
+    /// and onto the board through the card's own push, and the editor
+    /// opens on the board — Jordan's lights as he got them.
+    fn start_running(&mut self, golden: &str) {
+        let (bench, tasks) = (&mut self.bench, &self.tasks);
+        bench.run_until(tasks, "the board to identify", |bench| {
+            bench
+                .view()
+                .devices
+                .first()
+                .is_some_and(|card| card.activity.is_none() && card.state_label == "Ready")
+        });
+        let files: Vec<(String, Vec<u8>)> = golden_tree(golden).files.into_iter().collect();
+        let summary = bench
+            .store
+            .install_package("Venue lights", &files, PackageProvenance::Created, 2.0)
+            .expect("the start project installs");
+        bench.settle_library();
+        let card = bench.view().devices[0].clone();
+        bench.run_until(tasks, "the card to offer a push", |bench| {
+            let offers = bench.controller.view().offers;
+            offers
+                .device_prefix(card.id)
+                .is_some_and(|prefix| offers.get(&prefix.clone().child("push")).is_some())
+        });
+        bench.push_gesture(
+            card.id,
+            crate::PushSource::Library {
+                project_uid: summary.uid.to_string(),
+            },
+        );
+        bench.run_until(tasks, "the board to run the start project", |bench| {
+            bench.view().devices.first().is_some_and(|card| {
+                card.activity.is_none()
+                    && matches!(
+                        card.loaded_project,
+                        lpa_devices::view::LoadedProject::Running { .. }
+                    )
+            })
+        });
+        let uid = bench.registry()[0].uid.clone();
+        bench
+            .open_lens(&uid)
+            .expect("the editor opens on the running board");
+        bench.run_until(tasks, "the editor to be ready on the board", |bench| {
+            bench.ready_handle().is_some()
+        });
+    }
+
+    /// The files of the project the board has loaded, read over the board's
+    /// own wire (`None` when it runs nothing or will not say).
+    fn board_project(&mut self) -> Option<ProjectTree> {
+        let mut client =
+            lpa_client::LpClient::new(FakeDeviceIo::new(&self.device)).on_borrowed_wire();
+        let loaded = drive(client.project_list_loaded()).ok()?.into_value();
+        let project = loaded.first()?.path.clone();
+        let paths = drive(client.fs_list_dir(project.as_path(), true))
+            .ok()?
+            .into_value();
+        let prefix = format!("{}/", project.as_str().trim_end_matches('/'));
+        let mut files = Vec::new();
+        for path in paths {
+            let Some(relative) = path.as_str().strip_prefix(&prefix) else {
+                continue;
+            };
+            if let Ok(bytes) = drive(client.fs_read(path.as_path())) {
+                files.push((relative.to_string(), bytes.into_value()));
+            }
+        }
+        Some(ProjectTree::from_files(files.into_iter().filter(
+            |(path, _)| !path.starts_with(".lp/") && !path.is_empty(),
+        )))
+    }
+}
+
+impl ScenarioSeat for DeviceScenarioSeat {
+    fn controller(&mut self) -> &mut StudioController {
+        &mut self.bench.controller
+    }
+
+    fn start(&mut self, scenario: &Scenario) {
+        let context = scenario.context_line();
+        if !context.is_empty() {
+            self.bench
+                .controller
+                .agent_for_test()
+                .set_app_context_notes(vec![format!("context: {context}")]);
+        }
+        if let Some(golden) = scenario.start_golden() {
+            self.start_running(golden);
+        } else if scenario.start.board.connected {
+            let (bench, tasks) = (&mut self.bench, &self.tasks);
+            bench.run_until(tasks, "the board's verdict to settle", |bench| {
+                bench
+                    .view()
+                    .pending
+                    .first()
+                    .is_some_and(|pending| pending.needs_firmware())
+            });
+        }
+    }
+
+    /// The person waits for the cards to stop moving before they type:
+    /// a flash or a push the last turn started lands first.
+    fn send(&mut self, text: &str, limits: RunLimits) {
+        wait_quiet(&mut self.bench, &self.tasks);
+        self.press(send_action(text), limits);
+    }
+
+    fn press(&mut self, action: UiAction, limits: RunLimits) {
+        let (bench, tasks) = (&mut self.bench, &self.tasks);
+        if !self.seat.press_within(bench, tasks, action, limits) {
+            eprintln!("app-agent-eval (device seat): the run did not end after Stop");
+        }
+    }
+
+    fn settle(&mut self) {
+        wait_quiet(&mut self.bench, &self.tasks);
+        for _ in 0..100 {
+            self.bench.step(&self.tasks);
+        }
+    }
+
+    fn saved_tree(&mut self) -> ProjectTree {
+        match self.board_project() {
+            Some(tree) => tree,
+            // The board would not say: the last bytes Studio pushed.
+            None => self
+                .bench
+                .pushed
+                .borrow()
+                .last()
+                .map(|files| ProjectTree::from_files(files.clone()))
+                .unwrap_or_default(),
+        }
+    }
+
+    fn unsaved(&mut self) -> bool {
+        crate::has_unsaved_work(&self.bench.controller.project_for_test().dirty_summary())
+    }
+
+    /// The board's project, settled on a server wearing the board's pin
+    /// map: what the board's own engine would report.
+    fn node_statuses(&mut self) -> Vec<NodeStatusRow> {
+        let tree = self.saved_tree();
+        if tree.files.is_empty() {
+            return Vec::new();
+        }
+        let mut studio = EvalStudio::on_board(&tree, &self.board);
+        studio.settle(6);
+        studio.node_statuses()
+    }
+
+    fn device_summary(&mut self) -> Option<DeviceSummary> {
+        let view = self.bench.view();
+        let flashed = self
+            .bench
+            .manifest_writes
+            .borrow()
+            .iter()
+            .map(|json| {
+                lpa_boards::RUNTIME_MANIFEST_SOURCES
+                    .iter()
+                    .find(|(_, source)| source == json)
+                    .map(|(id, _)| id.to_string())
+                    .unwrap_or_else(|| "(an unknown board manifest)".to_string())
+            })
+            .collect();
+        Some(DeviceSummary {
+            boards: view
+                .devices
+                .iter()
+                .map(|card| BoardRow {
+                    state: card.state_label.clone(),
+                    loaded: match &card.loaded_project {
+                        lpa_devices::view::LoadedProject::Running { label } => {
+                            format!("running {label:?}")
+                        }
+                        other => format!("{other:?}").to_lowercase(),
+                    },
+                    running: matches!(
+                        card.loaded_project,
+                        lpa_devices::view::LoadedProject::Running { .. }
+                    ),
+                })
+                .collect(),
+            pending: view
+                .pending
+                .iter()
+                .map(|pending| format!("{} ({:?})", pending.state_label, pending.firmware_face))
+                .collect(),
+            flashed,
+            pushes: self.bench.pushed.borrow().len(),
+        })
+    }
+}
