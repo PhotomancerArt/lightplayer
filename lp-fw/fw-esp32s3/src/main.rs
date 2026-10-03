@@ -114,6 +114,8 @@ mod stack_probe;
 #[cfg(fw_harness)]
 mod tests;
 
+#[cfg(all(not(feature = "io-thread"), not(fw_harness)))]
+use serial::usb_link_task;
 #[cfg(not(fw_harness))]
 use {
     alloc::{boxed::Box, rc::Rc, sync::Arc},
@@ -134,8 +136,6 @@ use {
     lpfs::lp_path::AsLpPath,
     output::{Esp32OutputProvider, Esp32S3RmtWs281xDriver},
 };
-#[cfg(all(not(feature = "io-thread"), not(fw_harness)))]
-use serial::usb_link_task;
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
