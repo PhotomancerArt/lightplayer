@@ -31,7 +31,17 @@ import { StudioDriver } from "./studio-driver.mjs";
 import { startDoor, stopDoor, studioUrlFor } from "./emulated-lane.mjs";
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
-const BOARD = process.env.WALK_BOARD ?? "c6-a";
+/// `WALK_BACKING=tab` holds the board in the page (`?emu=tab`, a Worker,
+/// no server) instead of an `emu serve` door. The tab's board starts blank,
+/// so that lane flashes it first.
+const TAB = (process.env.WALK_BACKING ?? "") === "tab";
+const BOARD = process.env.WALK_BOARD ?? (TAB ? "tab-c6" : "c6-a");
+const BOARD_MODEL = process.env.WALK_BOARD_MODEL ?? "XIAO ESP32-C6";
+const FLASH_DEADLINE_MS = 900_000;
+/// How long the cable stays out before it goes back in. The one deliberate
+/// duration here: a person re-seating a cable takes seconds, not the
+/// instant the walk would otherwise take.
+const DETACHED_MS = Number(process.env.WALK_DETACHED_MS ?? 0);
 const PROJECT = process.env.WALK_PROJECT ?? "Peach (1D)";
 /// `WALK_VIEWPORT=390x844` walks it at a phone's width (where the report
 /// came from); the default is the desk's.
@@ -58,7 +68,7 @@ async function studioUp(port) {
 }
 
 async function main() {
-  const out = path.join(ROOT, "target", "walk-drop-emu", `${VIEW_W}x${VIEW_H}`);
+  const out = path.join(ROOT, "target", "walk-drop-emu", `${TAB ? "tab-" : ""}${VIEW_W}x${VIEW_H}`);
   const shots = path.join(out, "shots");
   mkdirSync(shots, { recursive: true });
 
@@ -71,7 +81,7 @@ async function main() {
     process.exit(1);
   }
 
-  const door = await startDoor({
+  const door = TAB ? null : await startDoor({
     root: ROOT,
     id: "walk-drop",
     boards: [`${BOARD}={fw}`],
@@ -82,12 +92,16 @@ async function main() {
   });
   const url = studioUrlFor({
     studioPort: port,
-    doorAddr: door.addr,
+    doorAddr: door?.addr ?? null,
     sinkUrl: "http://127.0.0.1:9/none",
   }).replace(/&record=[^&]*/, "");
 
   console.log("\nTHE DROPPED-LINK WALK WITH NO BOARD");
-  console.log(`  emulated board   ${BOARD} (packaged fw-esp32c6), door http://${door.addr}/boards`);
+  console.log(
+    door
+      ? `  emulated board   ${BOARD} (packaged fw-esp32c6), door http://${door.addr}/boards`
+      : `  emulated board   ${BOARD}, a Worker in the page (?emu=tab), flashed by Studio first`,
+  );
   console.log(`  the page         ${url}\n`);
 
   const driver = await StudioDriver.launch({ width: VIEW_W, height: VIEW_H });
@@ -138,6 +152,7 @@ async function main() {
       return `still at ${now}`;
     });
     await step(`${name}-in`, "the cable goes back in: the strip goes, the same page carries on", async () => {
+      if (DETACHED_MS > 0) await new Promise((resolve) => setTimeout(resolve, DETACHED_MS));
       await driver.attach(BOARD);
       await driver.waitFor(`!document.querySelector('[data-reconnecting="true"]')`, {
         timeoutMs: STEP_DEADLINE_MS,
@@ -166,6 +181,28 @@ async function main() {
     await step("connect", "Connect a board via USB, and pick the board in the chooser", async () => {
       await driver.clickWhenReady("via USB", { timeoutMs: STEP_DEADLINE_MS });
       await driver.pickBoard(BOARD, { timeoutMs: STEP_DEADLINE_MS });
+      if (TAB) {
+        // The tab's board is blank: Studio's own flash flow first.
+        await driver.waitFor(`${MAIN_TEXT}.includes('needs firmware')`, {
+          timeoutMs: STEP_DEADLINE_MS,
+          what: "the blank-flash face",
+        });
+        await driver.clickWhenReady("boards fit", { timeoutMs: STEP_DEADLINE_MS });
+        await driver.waitFor(`Boolean(document.querySelector('[id^="ux-popover-panel"]'))`, {
+          timeoutMs: STEP_DEADLINE_MS,
+          what: "the board-model picker",
+        });
+        await driver.click(BOARD_MODEL, { scope: `document.querySelector('[id^="ux-popover-panel"]')` });
+        await driver.clickWhenReady("Flash firmware", { timeoutMs: STEP_DEADLINE_MS });
+        await driver.waitFor(`${MAIN_TEXT}.includes('Flashing firmware')`, {
+          timeoutMs: STEP_DEADLINE_MS,
+          what: "the flash to start",
+        });
+        await driver.waitFor(
+          `(() => { const t = ${MAIN_TEXT}; return !t.includes('Flashing firmware') && !t.includes('needs firmware'); })()`,
+          { timeoutMs: FLASH_DEADLINE_MS, what: "the flash to finish" },
+        );
+      }
       await driver.waitFor(`${MAIN_TEXT}.includes('Ready')`, { timeoutMs: STEP_DEADLINE_MS, what: "Ready" });
       return "Ready";
     });
@@ -260,7 +297,7 @@ async function main() {
   console.log(`\n  report → ${path.join(out, "walk-drop-emu.json")}`);
 
   await driver.close();
-  stopDoor(door);
+  if (door) stopDoor(door);
 
   if (fatal) {
     console.error(`\nThe dropped-link walk did not finish: ${fatal.message}`);
