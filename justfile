@@ -1027,6 +1027,15 @@ clippy-fw-esp32s3:
     # close, for the same reason.
     echo "clippy: --features frame-dump"
     cargo clippy --release --features frame-dump -- --no-deps -D warnings
+    # The link thread's two other shapes (`src/io_thread.rs`): the desk-only
+    # stack diagnostic, and the app WITHOUT the thread (the link task back on
+    # the main executor, no messages-first). Both are cfg'd out of the
+    # defaults, so nothing else here compiles them.
+    echo "clippy: --features io_thread_stack_diag"
+    cargo clippy --release --features io_thread_stack_diag -- --no-deps -D warnings
+    echo "clippy: io-thread OFF"
+    cargo clippy --release --no-default-features \
+        --features esp32s3,server,float-f32,json-pack -- --no-deps -D warnings
     # Every harness, individually. Harness code is cfg'd out of the app build,
     # so linting only the default features would leave it completely uncovered
     # — which is exactly how 13 fw-esp32 harnesses rotted uncompiled in this
