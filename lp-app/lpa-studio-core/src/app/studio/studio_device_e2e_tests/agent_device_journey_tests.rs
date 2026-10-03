@@ -181,6 +181,73 @@ fn e4_the_agent_connects_flashes_a_blank_board_pushes_and_sees_it_run() {
     );
 }
 
+/// The user clicks the connect card and closes the browser's chooser
+/// without picking a port: the press only opened the chooser, so the card
+/// is NOT done — it stays pending to be clicked again — and the agent
+/// hears that the picker was cancelled. The click after that picks a port
+/// and settles the card. Each run the card resumes is its own assistant
+/// turn, never glued onto the previous run's text.
+#[test]
+fn a_cancelled_chooser_leaves_the_connect_card_pending_and_the_agent_hears_it() {
+    let device = light_player("dev_agent_cancel");
+    let (mut bench, tasks) = DeviceBench::ungranted(&device, "usb-agent-cancel");
+    let mut seat = AgentSeat::new(&mut bench);
+    seat.script(vec![
+        act_turn("a1", "devices/connect-usb", &[]),
+        say("Click Connect on the card."),
+    ]);
+    // The run the cancelled picker resumes, then the one the pick resumes.
+    seat.script(vec![say("No board was picked. Click the card again.")]);
+    seat.script(vec![say("Connected.")]);
+    seat.send(&mut bench, &tasks, "Connect my board.");
+    let card = seat.cards(&mut bench).remove(0);
+    assert!(card.is_pending());
+
+    // The user closes the chooser with nothing picked.
+    bench.chooser_grants.set(false);
+    seat.press(&mut bench, &tasks, card.press.clone());
+    let cards = seat.cards(&mut bench);
+    assert!(
+        cards[0].is_pending(),
+        "a cancelled picker is not a done press: {:?}",
+        cards[0]
+    );
+    let heard = seat.last_user_text(seat.requests() - 1);
+    assert!(
+        heard.contains("on card c1 but cancelled the browser's picker"),
+        "the agent hears the picker was cancelled: {heard}"
+    );
+    assert_eq!(
+        seat.assistant_texts(&mut bench),
+        [
+            "Click Connect on the card.",
+            "No board was picked. Click the card again."
+        ],
+        "the resumed run is its own turn"
+    );
+    assert!(bench.view().pending.is_empty() && bench.view().devices.is_empty());
+
+    // The second click picks a port: now the card is done.
+    bench.chooser_grants.set(true);
+    seat.press(&mut bench, &tasks, card.press.clone());
+    let cards = seat.cards(&mut bench);
+    assert_eq!(
+        cards[0].state,
+        crate::UiAgentCardState::Done {
+            outcome: "a board was picked".to_string()
+        }
+    );
+    let heard = seat.last_user_text(seat.requests() - 1);
+    assert!(
+        heard.contains("[I clicked \"Connect a board via USB\" on card c1: a board was picked]"),
+        "{heard}"
+    );
+    assert_eq!(seat.assistant_texts(&mut bench).len(), 3);
+    bench.run_until(&tasks, "the picked port to identify", |bench| {
+        !bench.view().devices.is_empty()
+    });
+}
+
 /// The negative: asked to flash a board that runs somebody else's firmware,
 /// the agent's press is Lasting — the firmware on it would be lost — so it
 /// becomes a card pre-filled with the agent's board, a second press while
@@ -322,6 +389,10 @@ impl AgentSeat {
     fn press(&mut self, bench: &mut DeviceBench, tasks: &TaskPool, action: UiAction) {
         drive(bench.controller.dispatch(action)).expect("the press dispatches");
         self.apply(bench);
+        // A press that opened a chooser settles its card on the chooser's
+        // answer, which a step folds; the run it resumes starts there.
+        bench.step(tasks);
+        self.apply(bench);
         let waker = noop_waker();
         let mut cx = Context::from_waker(&waker);
         let deadline = std::time::Instant::now() + REAL_TIME_LIMIT;
@@ -384,6 +455,43 @@ impl AgentSeat {
             })
             .last()
             .expect("every request carries the readout")
+    }
+
+    /// The newest user message in request `index` that is not the readout
+    /// (a run's opening text: the user's message, or what a card did).
+    fn last_user_text(&self, index: usize) -> String {
+        let requests = self.requests.borrow();
+        requests[index]
+            .messages
+            .iter()
+            .filter(|message| message.role == ChatRole::User)
+            .flat_map(|message| &message.content)
+            .filter_map(|block| match block {
+                ContentBlock::Text { text }
+                    if !text.starts_with(lpa_agent::toolset::APP_STATE_OPEN) =>
+                {
+                    Some(text.clone())
+                }
+                _ => None,
+            })
+            .last()
+            .expect("a run opens with text")
+    }
+
+    /// The app chat's visible assistant turns, in order.
+    fn assistant_texts(&self, bench: &mut DeviceBench) -> Vec<String> {
+        bench
+            .controller
+            .agent_for_test()
+            .app_session()
+            .mirror
+            .turns
+            .iter()
+            .filter_map(|turn| match turn {
+                crate::UiAgentTurn::Assistant { text } => Some(text.clone()),
+                _ => None,
+            })
+            .collect()
     }
 
     /// Every `act` result the model was handed, in order.

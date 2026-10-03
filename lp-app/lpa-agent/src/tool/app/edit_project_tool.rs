@@ -253,6 +253,12 @@ pub async fn run_edit_project(input_json: &Value, host: &mut dyn AppAgentHost) -
             if let Some(project) = outcome.project {
                 content["project"] = project;
             }
+            let rows: Vec<Value> = input
+                .edits
+                .iter()
+                .zip(&outcome.results)
+                .map(|(edit, status)| edit_summary_row(edit, status))
+                .collect();
             ToolOutcome {
                 content: content.to_string(),
                 is_error: false,
@@ -261,6 +267,11 @@ pub async fn run_edit_project(input_json: &Value, host: &mut dyn AppAgentHost) -
                     "edits": input.edits.len(),
                     "applied": applied,
                     "saved": matches!(outcome.saved, Some(Ok(()))),
+                    "save_error": match &outcome.saved {
+                        Some(Err(reason)) => Some(reason.clone()),
+                        _ => None,
+                    },
+                    "rows": rows,
                 }),
             }
         }
@@ -270,6 +281,54 @@ pub async fn run_edit_project(input_json: &Value, host: &mut dyn AppAgentHost) -
             summary: json!({ "note": note, "error": "host error" }),
         },
     }
+}
+
+/// One edit, compact, for the tool row's expandable list: what kind of
+/// edit, what it was about, and how it went. The UI words it; this only
+/// carries the facts (the edit's own fields, never the whole asset text).
+fn edit_summary_row(edit: &ProjectEdit, status: &EditStatus) -> Value {
+    let mut row = json!({ "edit": edit.verb() });
+    match edit {
+        ProjectEdit::CreateNode(create) => {
+            row["target"] = create.kind.clone().into();
+            row["in"] = create.in_playlist.clone().into();
+        }
+        ProjectEdit::ImportPattern(import) => {
+            row["target"] = import.pattern.clone().into();
+            row["in"] = import.in_playlist.clone().into();
+        }
+        ProjectEdit::RemoveNode(node) => row["target"] = node.node.clone().into(),
+        ProjectEdit::Set(set) => {
+            row["target"] = set.node.clone().into();
+            row["path"] = set.path.clone().into();
+            row["value"] = set.value.clone();
+        }
+        ProjectEdit::Ensure(slot) | ProjectEdit::Remove(slot) => {
+            row["target"] = slot.node.clone().into();
+            row["path"] = slot.path.clone().into();
+        }
+        ProjectEdit::SetAsset(asset) => {
+            row["target"] = asset.node.clone().into();
+            row["path"] = asset.file.clone().into();
+        }
+        ProjectEdit::SetTarget(target) => row["target"] = target.board.clone().into(),
+    }
+    match status {
+        EditStatus::Applied { detail } => {
+            row["ok"] = true.into();
+            row["detail"] = detail.clone().into();
+        }
+        EditStatus::Rejected { reason } => {
+            row["ok"] = false.into();
+            row["reason"] = reason.clone().into();
+        }
+        EditStatus::Skipped { reason } => {
+            row["ok"] = false.into();
+            row["skipped"] = true.into();
+            row["reason"] = reason.clone().into();
+        }
+    }
+    row
 }
 
 #[cfg(test)]
@@ -323,5 +382,41 @@ mod tests {
             }))
             .is_err()
         );
+    }
+
+    #[test]
+    fn the_summary_carries_one_row_per_edit_with_its_outcome() {
+        let set = ProjectEdit::Set(SetEdit {
+            node: "output".into(),
+            path: "ports[0].endpoint".into(),
+            value: json!("ws281x:local:D6"),
+        });
+        let row = edit_summary_row(
+            &set,
+            &EditStatus::Applied {
+                detail: "set".into(),
+            },
+        );
+        assert_eq!(row["edit"], "set");
+        assert_eq!(row["target"], "output");
+        assert_eq!(row["path"], "ports[0].endpoint");
+        assert_eq!(row["value"], "ws281x:local:D6");
+        assert_eq!(row["ok"], true);
+
+        let import = ProjectEdit::ImportPattern(ImportPatternEdit {
+            pattern: "spiral".into(),
+            in_playlist: Some("playlist".into()),
+        });
+        let row = edit_summary_row(
+            &import,
+            &EditStatus::Skipped {
+                reason: "an earlier create failed".into(),
+            },
+        );
+        assert_eq!(row["target"], "spiral");
+        assert_eq!(row["in"], "playlist");
+        assert_eq!(row["ok"], false);
+        assert_eq!(row["skipped"], true);
+        assert_eq!(row["reason"], "an earlier create failed");
     }
 }

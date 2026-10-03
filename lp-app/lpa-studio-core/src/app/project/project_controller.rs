@@ -3946,6 +3946,14 @@ impl ProjectController {
                 self.apply_node_ui_op(op);
                 Ok(UiNotices::new())
             }
+            // The `ask-agent` hand-off: the tree row's focus (the card
+            // reveals itself), then the agent section open with the draft.
+            ProjectEditorOp::AskAgent { node, draft } => {
+                self.focus_editor_target(&target);
+                self.active_editor_target = Some(target);
+                self.apply_node_ui_op(NodeUiOp::OpenAgent { node, draft });
+                Ok(UiNotices::new())
+            }
             // The patch surface's one shared selection — local and
             // synchronous like the card ops.
             ProjectEditorOp::PatchSelect { selection } => {

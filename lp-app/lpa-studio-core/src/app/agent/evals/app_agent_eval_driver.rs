@@ -282,6 +282,21 @@ impl AgentEvalStudio {
             .unwrap_or_default()
     }
 
+    /// Every visible assistant turn's text, in order.
+    pub(crate) fn assistant_texts(&mut self) -> Vec<String> {
+        self.controller()
+            .agent_for_test()
+            .app_session()
+            .mirror
+            .turns
+            .iter()
+            .filter_map(|turn| match turn {
+                UiAgentTurn::Assistant { text } => Some(text.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
     /// Every notice the app chat has shown, in order.
     pub(crate) fn notices(&mut self) -> Vec<String> {
         self.controller()

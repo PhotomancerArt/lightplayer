@@ -153,6 +153,17 @@ impl UiAgentCard {
         }
     }
 
+    /// The line the resumed run reads when the card's press opened the
+    /// browser's picker and the user closed it with nothing picked: the
+    /// card is still pending, so the user can press it again.
+    pub fn chooser_cancelled_text(&self) -> String {
+        format!(
+            "[I clicked \"{}\" on card {} but cancelled the browser's picker without \
+             picking anything; the card is still there to click again]",
+            self.title, self.id
+        )
+    }
+
     /// ` with board = b (you chose a)` for each value the user's press set
     /// differently from the agent's; empty when they pressed it as handed
     /// over.
