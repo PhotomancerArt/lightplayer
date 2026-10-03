@@ -424,6 +424,9 @@ pub(super) fn describe(outcome: &Outcome) -> String {
             "hit the wall-clock net — raise --wall-timeout, or lower --timeout".to_string()
         }
         Outcome::Breakpoint { pc, .. } => format!("stopped at a breakpoint, pc {pc:#010x}"),
+        Outcome::DeepSleep { wake, .. } => {
+            format!("guest entered deep sleep ({wake})")
+        }
     }
 }
 

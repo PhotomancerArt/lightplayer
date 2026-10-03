@@ -176,6 +176,10 @@ pub struct UiStudioView {
     /// The app-level chat (one per page): the assistant that builds and
     /// edits a project.
     pub app_agent: crate::UiAppAgentView,
+    /// Every verb this view offers, by path, in publish order — the one
+    /// place the web renders migrated surfaces' buttons from and the app
+    /// agent reads and presses (`docs/adr/2026-10-01-agentic-control-offers-in-core.md`).
+    pub offers: crate::UiOfferTree,
 }
 
 impl UiStudioView {
@@ -200,6 +204,7 @@ impl UiStudioView {
             lens_reconnecting: None,
             access_added: None,
             app_agent: crate::UiAppAgentView::default(),
+            offers: crate::UiOfferTree::default(),
         }
     }
 
@@ -290,6 +295,12 @@ impl UiStudioView {
 
     pub fn with_app_agent(mut self, app_agent: crate::UiAppAgentView) -> Self {
         self.app_agent = app_agent;
+        self
+    }
+
+    /// The view's offer tree.
+    pub fn with_offers(mut self, offers: crate::UiOfferTree) -> Self {
+        self.offers = offers;
         self
     }
 

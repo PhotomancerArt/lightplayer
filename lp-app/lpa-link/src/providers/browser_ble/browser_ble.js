@@ -423,7 +423,10 @@ export function write(id, bytes) {
       if (session.generation !== generation) {
         return;
       }
-      const chunk = data.subarray(offset, offset + WRITE_CHUNK_BYTES);
+      // A copy, never a `subarray` view: Bluefy writes a view's whole
+      // underlying buffer, so a view-cut chunk carried the entire line and
+      // a line past 512 B was refused as a long write.
+      const chunk = data.slice(offset, offset + WRITE_CHUNK_BYTES);
       try {
         if (typeof rx.writeValueWithResponse === "function") {
           await rx.writeValueWithResponse(chunk);

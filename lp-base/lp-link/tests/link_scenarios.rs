@@ -799,6 +799,175 @@ fn a_small_send_budget_refuses_big_ring_messages_but_not_external_ones() {
     assert!(a.external_in_flight());
 }
 
+/// The same behaviours with both links secure (feature `secure`): the host
+/// the initiator, the board the responder with a scripted key table.
+#[cfg(feature = "secure")]
+mod secure {
+    use super::{assert_clean, interactive, random};
+    use lp_link::secure_channel::Psk;
+    use lp_link::sim::pipe::Faults;
+    use lp_link::sim::secure_sim::{LookupDelay, SecureSim};
+    use lp_link::sim::{Report, Scenario, Transport, Workload, run};
+    use lp_link::{Arq, LinkConfig, NoArq, SelectiveRepeat};
+
+    fn secure(t: Transport, p: f64, workload: Workload, seed: u64) -> Scenario {
+        let mut sc = Scenario::new(t, p, workload, 2_000_000, seed);
+        if t == Transport::Ble {
+            // One sealed frame per notification.
+            sc = sc.with_configs(LinkConfig::ble().secured());
+        }
+        sc.secure = Some(SecureSim::matched());
+        sc
+    }
+
+    fn handshook(r: &Report) {
+        assert!(r.host.handshakes >= 1 && r.board.handshakes >= 1, "{r:?}");
+        assert_eq!(r.host.seal_failures + r.board.seal_failures, 0);
+    }
+
+    #[test]
+    fn every_preset_is_clean_on_a_perfect_pipe() {
+        for t in [
+            Transport::Usb,
+            Transport::BleStream,
+            Transport::Ble,
+            Transport::Udp,
+        ] {
+            let r = run::<SelectiveRepeat>(&secure(t, 0.0, interactive(), 1));
+            assert_clean(&r, t);
+            handshook(&r);
+            assert!(r.down.delivered > 0 && r.up.delivered > 0);
+        }
+        let r = run::<NoArq>(&secure(Transport::Ws, 0.0, random(), 7));
+        assert_clean(&r, Transport::Ws);
+        handshook(&r);
+        assert_eq!(r.up.delivered, r.up.sent);
+        assert_eq!(r.down.delivered, r.down.sent);
+        assert_eq!(r.host.resets + r.board.resets, 0);
+    }
+
+    #[test]
+    fn faults_across_the_handshake_and_after_it_are_healed() {
+        for (t, seed) in [
+            (Transport::Usb, 3),
+            (Transport::BleStream, 4),
+            (Transport::Ble, 5),
+            (Transport::Udp, 6),
+        ] {
+            let r = run::<SelectiveRepeat>(&secure(t, 0.05, random(), seed));
+            assert_clean(&r, t);
+            handshook(&r);
+            assert!(r.down.delivered > 0 && r.up.delivered > 0, "{}", t.name());
+        }
+    }
+
+    #[test]
+    fn udp_duplicates_are_refused_as_replays_and_cost_nothing() {
+        let mut sc = secure(Transport::Udp, 0.0, random(), 9);
+        let dup = Faults {
+            duplicate: 0.2,
+            ..Faults::none()
+        };
+        sc.faults_up = dup.clone();
+        sc.faults_down = dup;
+        let r = run::<SelectiveRepeat>(&sc);
+        assert_clean(&r, Transport::Udp);
+        assert!(r.host.replays + r.board.replays > 0);
+        assert_eq!(r.host.resets + r.board.resets, 0);
+    }
+
+    #[test]
+    fn a_board_reboot_brings_a_fresh_handshake_and_the_new_session_works() {
+        let mut sc = secure(Transport::Usb, 0.0, interactive(), 12);
+        sc.board_reboots = vec![700_000];
+        let r = run::<SelectiveRepeat>(&sc);
+        assert_clean(&r, Transport::Usb);
+        assert!(r.host.handshakes >= 2, "{:?}", r.host);
+        assert!(r.host_resets >= 1);
+    }
+
+    /// No ARQ under loss: every gap resets the session (the reset reports
+    /// it), so the delivery property holds where a plain no-ARQ link loses
+    /// messages silently.
+    #[test]
+    fn no_arq_resets_on_loss_rather_than_deliver_around_it() {
+        let mut sc = secure(Transport::Ws, 0.0, random(), 21);
+        let lossy = Faults {
+            drop_packet: 0.01,
+            corrupt: 0.005,
+            ..Faults::none()
+        };
+        sc.faults_up = lossy.clone();
+        sc.faults_down = lossy;
+        let r = run::<NoArq>(&sc);
+        assert_clean(&r, Transport::Ws);
+        assert!(
+            r.host.counter_gaps + r.board.counter_gaps > 0,
+            "loss was seen"
+        );
+        assert!(r.host_resets + r.board_resets > 0);
+        assert!(r.down.delivered > 0 && r.up.delivered > 0);
+    }
+
+    #[test]
+    fn a_lookup_answered_a_few_steps_late_comes_up() {
+        let mut sc = secure(Transport::Usb, 0.0, interactive(), 13);
+        if let Some(s) = sc.secure.as_mut() {
+            s.lookup_delay = LookupDelay::Steps(5);
+        }
+        let r = run::<SelectiveRepeat>(&sc);
+        assert_clean(&r, Transport::Usb);
+        handshook(&r);
+    }
+
+    #[test]
+    fn a_lookup_never_answered_never_comes_up() {
+        let mut sc = secure(Transport::Usb, 0.0, interactive(), 14);
+        if let Some(s) = sc.secure.as_mut() {
+            s.lookup_delay = LookupDelay::Never;
+        }
+        let r = run::<SelectiveRepeat>(&sc);
+        assert!(r.violations.iter().any(|v| v.contains("not up")));
+        assert_eq!(r.up.delivered + r.down.delivered, 0);
+        assert!(r.board.handshake_refusals >= 1);
+    }
+
+    #[test]
+    fn a_wrong_key_never_comes_up_and_moves_no_data() {
+        for (name, report) in [
+            ("sr/usb", wrong_key::<SelectiveRepeat>(Transport::Usb)),
+            ("no-arq/ws", wrong_key::<NoArq>(Transport::Ws)),
+        ] {
+            assert!(
+                report.violations.iter().any(|v| v.contains("not up")),
+                "{name}"
+            );
+            assert_eq!(report.up.delivered + report.down.delivered, 0, "{name}");
+            assert_eq!(report.host.handshake_refusals, 1, "{name}: refused once");
+        }
+    }
+
+    fn wrong_key<A: Arq>(t: Transport) -> Report {
+        let mut sc = secure(t, 0.0, interactive(), 15);
+        if let Some(s) = sc.secure.as_mut() {
+            s.board_table[0].1 = vec![Psk::new([0xEE; 32])];
+        }
+        run::<A>(&sc)
+    }
+
+    #[test]
+    fn an_unknown_key_is_refused_once_and_the_host_stops() {
+        let mut sc = secure(Transport::Usb, 0.0, interactive(), 16);
+        if let Some(s) = sc.secure.as_mut() {
+            s.board_table.clear();
+        }
+        let r = run::<SelectiveRepeat>(&sc);
+        assert_eq!(r.host.handshake_refusals, 1);
+        assert_eq!(r.board.handshake_refusals, 1);
+        assert_eq!(r.up.delivered + r.down.delivered, 0);
+    }
+}
+
 /// A lossy, damaging wire for the external-message scenario: drop 3%, flip a
 /// byte in 2%.
 fn mangle(rng: &mut u64, mut f: Vec<u8>) -> Option<Vec<u8>> {

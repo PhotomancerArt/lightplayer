@@ -234,6 +234,13 @@ impl LoginState {
             .is_some_and(|pending| now_ms < pending.expires_at_ms)
     }
 
+    /// The device's backoff, shared with secure-link handshakes: a wrong key
+    /// there is a failed guess like a wrong login answer, and a right one
+    /// clears the slate like a login.
+    pub fn rate_limit_mut(&mut self) -> &mut RateLimit {
+        &mut self.rate_limit
+    }
+
     /// The device's backoff, for inspection.
     #[must_use]
     pub fn rate_limit(&self) -> &RateLimit {
