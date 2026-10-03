@@ -46,9 +46,7 @@ fn node_faces_derive_and_edit_end_to_end() {
     let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
     let mut view = handle.view;
 
-    handle
-        .tx
-        .send(project_action(ProjectOp::ConnectRunningProject));
+    connect_running_project(&handle.tx);
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("connect emits a snapshot");
 
@@ -301,9 +299,7 @@ fn agent_collapse_preserves_the_composer_draft_end_to_end() {
     let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
     let mut view = handle.view;
 
-    handle
-        .tx
-        .send(project_action(ProjectOp::ConnectRunningProject));
+    connect_running_project(&handle.tx);
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("connect emits a snapshot");
     let shader = node_by_kind(&snapshot, "Shader");
@@ -376,9 +372,7 @@ fn ask_agent_hands_a_request_to_the_shader_agent_without_sending_it() {
     let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
     let mut view = handle.view;
 
-    handle
-        .tx
-        .send(project_action(ProjectOp::ConnectRunningProject));
+    connect_running_project(&handle.tx);
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("connect emits a snapshot");
     let shader = node_by_kind(&snapshot, "Shader");
@@ -438,9 +432,7 @@ fn playlist_face_derives_and_keeps_one_live_surface() {
     let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
     let mut view = handle.view;
 
-    handle
-        .tx
-        .send(project_action(ProjectOp::ConnectRunningProject));
+    connect_running_project(&handle.tx);
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("connect emits a snapshot");
 
@@ -527,9 +519,7 @@ fn playlist_entry_click_activates_on_the_real_server() {
     let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
     let mut view = handle.view;
 
-    handle
-        .tx
-        .send(project_action(ProjectOp::ConnectRunningProject));
+    connect_running_project(&handle.tx);
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("connect emits a snapshot");
     let face = playlist_face(&snapshot);
@@ -608,9 +598,7 @@ fn playlist_activate_rejects_an_unknown_entry_gracefully() {
     let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
     let mut view = handle.view;
 
-    handle
-        .tx
-        .send(project_action(ProjectOp::ConnectRunningProject));
+    connect_running_project(&handle.tx);
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("connect emits a snapshot");
     let face = playlist_face(&snapshot);
@@ -691,9 +679,7 @@ fn playlist_with_a_dangling_idle_entry_plays_its_first_entry() {
     let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
     let mut view = handle.view;
 
-    handle
-        .tx
-        .send(project_action(ProjectOp::ConnectRunningProject));
+    connect_running_project(&handle.tx);
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("connect emits a snapshot");
 
@@ -736,9 +722,7 @@ fn a_bound_panel_uniform_keeps_an_interactive_control() {
     let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
     let mut view = handle.view;
 
-    handle
-        .tx
-        .send(project_action(ProjectOp::ConnectRunningProject));
+    connect_running_project(&handle.tx);
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("connect emits a snapshot");
 
@@ -808,9 +792,7 @@ fn a_bound_panel_uniform_inside_a_playlist_entry_stays_interactive() {
     let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
     let mut view = handle.view;
 
-    handle
-        .tx
-        .send(project_action(ProjectOp::ConnectRunningProject));
+    connect_running_project(&handle.tx);
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("connect emits a snapshot");
 
@@ -957,9 +939,7 @@ fn the_active_playlist_entrys_controls_bubble_onto_the_module_panel() {
     let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
     let mut view = handle.view;
 
-    handle
-        .tx
-        .send(project_action(ProjectOp::ConnectRunningProject));
+    connect_running_project(&handle.tx);
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("connect emits a snapshot");
 
@@ -1078,9 +1058,7 @@ fn the_root_module_card_derives_its_panel_from_scoped_channels() {
     let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
     let mut view = handle.view;
 
-    handle
-        .tx
-        .send(project_action(ProjectOp::ConnectRunningProject));
+    connect_running_project(&handle.tx);
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("connect emits a snapshot");
 
@@ -1340,9 +1318,7 @@ fn the_panel_transport_drives_all_three_clock_channels() {
     let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
     let mut view = handle.view;
 
-    handle
-        .tx
-        .send(project_action(ProjectOp::ConnectRunningProject));
+    connect_running_project(&handle.tx);
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("connect emits a snapshot");
 
@@ -1785,9 +1761,7 @@ fn a_patch_pulse_lights_the_subjects_lamps_on_the_live_wire() {
     let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
     let mut view = handle.view;
 
-    handle
-        .tx
-        .send(project_action(ProjectOp::ConnectRunningProject));
+    connect_running_project(&handle.tx);
     drive(actor.run_one_batch_for_test());
     let _ = view.try_recv().expect("connect emits a snapshot");
     macro_rules! refresh {
@@ -2038,9 +2012,7 @@ fn the_module_hero_leads_with_the_control_product_and_the_toggle_flips_it() {
     let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
     let mut view = handle.view;
 
-    handle
-        .tx
-        .send(project_action(ProjectOp::ConnectRunningProject));
+    connect_running_project(&handle.tx);
     drive(actor.run_one_batch_for_test());
     let _ = view.try_recv().expect("connect emits a snapshot");
     // The connect read arms the product subscriptions; the probe answers on
@@ -2193,9 +2165,7 @@ fn a_dome_scale_layout_arrives_over_the_wire() {
     let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
     let mut view = handle.view;
 
-    handle
-        .tx
-        .send(project_action(ProjectOp::ConnectRunningProject));
+    connect_running_project(&handle.tx);
     drive(actor.run_one_batch_for_test());
     let _ = view.try_recv().expect("connect emits a snapshot");
     // The connect read arms the product subscriptions; the probe answers on
@@ -2762,9 +2732,7 @@ fn a_default_bound_palette_with_panel_show_is_a_panel_write_target() {
     let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
     let mut view = handle.view;
 
-    handle
-        .tx
-        .send(project_action(ProjectOp::ConnectRunningProject));
+    connect_running_project(&handle.tx);
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("connect emits a snapshot");
 
@@ -2810,9 +2778,7 @@ fn a_palette_panel_write_reads_back_on_the_swatch_that_wrote_it() {
     let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
     let mut view = handle.view;
 
-    handle
-        .tx
-        .send(project_action(ProjectOp::ConnectRunningProject));
+    connect_running_project(&handle.tx);
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("connect emits a snapshot");
 
@@ -2892,9 +2858,7 @@ fn successive_palette_writes_compose_instead_of_clobbering() {
     let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
     let mut view = handle.view;
 
-    handle
-        .tx
-        .send(project_action(ProjectOp::ConnectRunningProject));
+    connect_running_project(&handle.tx);
     drive(actor.run_one_batch_for_test());
     let mut snapshot = view.try_recv().expect("connect emits a snapshot");
     let target = shader_control(&snapshot, "Palette")
@@ -3301,9 +3265,7 @@ fn output_face_derives_multi_channel_wires_end_to_end() {
     let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
     let mut view = handle.view;
 
-    handle
-        .tx
-        .send(project_action(ProjectOp::ConnectRunningProject));
+    connect_running_project(&handle.tx);
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("connect emits a snapshot");
 
@@ -3397,9 +3359,7 @@ fn space_sections_derive_and_claim_their_rows_end_to_end() {
     let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
     let mut view = handle.view;
 
-    handle
-        .tx
-        .send(project_action(ProjectOp::ConnectRunningProject));
+    connect_running_project(&handle.tx);
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("connect emits a snapshot");
 
@@ -3940,9 +3900,7 @@ fn verbs_author_the_small_dome_install_byte_identically() {
     let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
     let mut view = handle.view;
 
-    handle
-        .tx
-        .send(project_action(ProjectOp::ConnectRunningProject));
+    connect_running_project(&handle.tx);
     drive(actor.run_one_batch_for_test());
     let _ = view.try_recv().expect("connect emits a snapshot");
     let mut snapshot = None;
@@ -4158,9 +4116,7 @@ fn the_flow_flag_and_unmap_all_are_one_undo_step_each() {
     let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
     let mut view = handle.view;
 
-    handle
-        .tx
-        .send(project_action(ProjectOp::ConnectRunningProject));
+    connect_running_project(&handle.tx);
     drive(actor.run_one_batch_for_test());
     let _ = view.try_recv().expect("connect emits a snapshot");
     let mut snapshot = None;
@@ -4359,9 +4315,7 @@ fn editor_meta_arranges_a_fixture_with_byte_stable_undo() {
     let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
     let mut view = handle.view;
 
-    handle
-        .tx
-        .send(project_action(ProjectOp::ConnectRunningProject));
+    connect_running_project(&handle.tx);
     drive(actor.run_one_batch_for_test());
     let _ = view.try_recv().expect("connect emits a snapshot");
     let mut snapshot = None;
@@ -4736,9 +4690,7 @@ fn edit_seq_interleaves_verbs_meta_ops_and_switch_events() {
     let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
     let mut view = handle.view;
 
-    handle
-        .tx
-        .send(project_action(ProjectOp::ConnectRunningProject));
+    connect_running_project(&handle.tx);
     drive(actor.run_one_batch_for_test());
     let _ = view.try_recv().expect("connect emits a snapshot");
     let mut snapshot = None;
@@ -4926,9 +4878,7 @@ fn every_patch_target_arm_round_trips_through_selection() {
     let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
     let mut view = handle.view;
 
-    handle
-        .tx
-        .send(project_action(ProjectOp::ConnectRunningProject));
+    connect_running_project(&handle.tx);
     drive(actor.run_one_batch_for_test());
     let _ = view.try_recv().expect("connect emits a snapshot");
     let node = lpc_model::NodeId::new(3);
@@ -5006,9 +4956,7 @@ fn a_fully_unmapped_project_keeps_its_outputs_and_their_free_ports() {
     let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
     let mut view = handle.view;
 
-    handle
-        .tx
-        .send(project_action(ProjectOp::ConnectRunningProject));
+    connect_running_project(&handle.tx);
     drive(actor.run_one_batch_for_test());
     let _ = view.try_recv().expect("connect emits a snapshot");
     let mut snapshot = None;
@@ -5156,4 +5104,12 @@ fn a_fully_unmapped_project_keeps_its_outputs_and_their_free_ports() {
             fixture.label
         );
     }
+}
+
+/// Connect the running project, the way every face test opens its project.
+/// No offer covers this step yet: it is a pane action before the project is
+/// ready (`ProjectController::actions`), so it is built here once rather
+/// than at every call site.
+fn connect_running_project(tx: &crate::app::studio::studio_view_channel::CommandSender) {
+    tx.send(project_action(ProjectOp::ConnectRunningProject));
 }
