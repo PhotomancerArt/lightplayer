@@ -288,6 +288,11 @@ pub struct FakeDeviceScript {
     /// When set, the NEXT `manage()` operation fails with this message
     /// (consumed once).
     pub manage_failure: Option<String>,
+    /// The heartbeat cadence of the LightPlayer a scripted flash
+    /// (`fake_flash`) installs. Real firmware heartbeats, and the
+    /// loaded-project fact rides the heartbeat; `None` keeps the silent
+    /// default every other script relies on.
+    pub flashed_heartbeat_interval: Option<Duration>,
 }
 
 impl FakeDeviceScript {
@@ -296,6 +301,7 @@ impl FakeDeviceScript {
             boot,
             manage_latency: Duration::ZERO,
             manage_failure: None,
+            flashed_heartbeat_interval: None,
         }
     }
 
@@ -306,6 +312,11 @@ impl FakeDeviceScript {
 
     pub fn with_manage_failure(mut self, message: impl Into<String>) -> Self {
         self.manage_failure = Some(message.into());
+        self
+    }
+
+    pub fn with_flashed_heartbeat_interval(mut self, interval: Duration) -> Self {
+        self.flashed_heartbeat_interval = Some(interval);
         self
     }
 }

@@ -266,7 +266,8 @@ mod tests {
     /// that never did. Its version still reaches the fold.
     #[test]
     fn a_hello_from_another_wire_reaches_the_fold_as_its_version() {
-        let hello = include_str!("../../../../lp-core/lpc-wire/testdata/hello-proto32-xiao-c6.json");
+        let hello =
+            include_str!("../../../../lp-core/lpc-wire/testdata/hello-proto32-xiao-c6.json");
         let event = demux_line(&format!("M!{}", hello.trim()));
         let LinkEvent::Frame(frame) = event else {
             panic!("a hello, not an anomaly: {event:?}");

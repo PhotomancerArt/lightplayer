@@ -13,6 +13,7 @@ use lpa_studio_core::{
 use lpa_studio_web_story_macros::story;
 
 use crate::app::home::ProjectOpeningFrame;
+use crate::app::home::device_offer_story_fixtures::CardOffers;
 use crate::app::home::project_opening_frame::{EnginePhase, OpeningState};
 
 // Named `default`, not `overview`: `<component>/overview` is reserved for the
@@ -173,20 +174,100 @@ fn choker() -> OpenDevice {
     }
 }
 
-/// The frame on the canvas the shell gives it.
+/// The frame on the canvas the shell gives it, under the board's offers
+/// (its exits are the board's own verbs).
 fn frame(state: OpeningState) -> Element {
+    let board = story_board(&state);
     rsx! {
         section { class: "tw:p-4",
-            ProjectOpeningFrame { state }
+            CardOffers { card: board,
+                ProjectOpeningFrame { state }
+            }
         }
     }
 }
 
 /// The frame with its step held for `secs`.
 fn stalled(state: OpeningState, secs: u64) -> Element {
+    let board = story_board(&state);
     rsx! {
         section { class: "tw:p-4",
-            ProjectOpeningFrame { state, stalled_secs: secs }
+            CardOffers { card: board,
+                ProjectOpeningFrame { state, stalled_secs: secs }
+            }
         }
+    }
+}
+
+/// The board `choker()` names, as the roster would project it in `state`:
+/// remembered but with no port (not connected), identifying (connected,
+/// its identify still running), or connected and idle — so core offers it
+/// exactly the verbs the frame's exits ask for.
+fn story_board(state: &OpeningState) -> lpa_studio_core::DeviceView {
+    use lpa_studio_core::{
+        DeviceActivityKind, DeviceActivityView, DeviceEscape, DeviceFirmwareFace,
+        DeviceLoadedProject, DeviceStatus, DeviceView, DeviceWireVersion,
+    };
+    let ready = DeviceView {
+        id: DeviceId(1),
+        title: "XIAO ESP32-C6 · Sep 24".to_string(),
+        status: DeviceStatus::Ready,
+        state_label: "Ready".to_string(),
+        detail: None,
+        freshness_label: None,
+        identity_label: None,
+        detected_chip: Some("esp32c6".to_string()),
+        board_id: Some("seeed/xiao-esp32-c6".to_string()),
+        firmware_face: DeviceFirmwareFace::LightPlayer {
+            firmware: None,
+            wire: DeviceWireVersion::Match,
+        },
+        remembered_firmware: None,
+        degraded: None,
+        loaded_project: DeviceLoadedProject::Empty,
+        engine_fps: None,
+        link_counters: None,
+        can_receive_project: true,
+        can_remove_project: false,
+        activity: None,
+        last_outcome: None,
+        terminal: Vec::new(),
+        terminal_dropped: 0,
+        firmware_blocked: None,
+        escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
+    };
+    match state {
+        OpeningState::WaitingForDevice(DeviceWait {
+            reason: DeviceWaitReason::NotConnected,
+            ..
+        }) => DeviceView {
+            status: DeviceStatus::Offline,
+            state_label: "Not connected".to_string(),
+            escapes: vec![DeviceEscape::Reconnect, DeviceEscape::Forget],
+            ..ready
+        },
+        OpeningState::WaitingForDevice(DeviceWait {
+            reason: DeviceWaitReason::Identifying,
+            ..
+        }) => DeviceView {
+            status: DeviceStatus::Busy,
+            state_label: "Identifying…".to_string(),
+            activity: Some(DeviceActivityView {
+                kind: DeviceActivityKind::Identify,
+                label: "Identifying…".to_string(),
+                percent: None,
+                cancellable: true,
+                cancel_requested: false,
+                layout: None,
+            }),
+            can_receive_project: false,
+            escapes: vec![
+                DeviceEscape::Cancel,
+                DeviceEscape::Disconnect,
+                DeviceEscape::Forget,
+            ],
+            ..ready
+        },
+        _ => ready,
     }
 }

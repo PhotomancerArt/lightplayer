@@ -398,7 +398,7 @@ impl DeviceRoster {
             access: std::collections::BTreeMap::new(),
             // The verbs land in a scratch tree here; the studio view
             // publishes them for real (`publish_layout_offers`).
-            layout: self.layout_views(now, &mut crate::UiOfferTree::new()),
+            layout: self.layout_views(now, &mut crate::UiOfferTree::new(), None),
             backup_download: self.effects.layout().download(),
         }
     }
@@ -407,17 +407,27 @@ impl DeviceRoster {
     /// question's Continue and Cancel, Download backup, Restore files,
     /// Finish update) into the view's offer tree — the same verbs, from the
     /// same decision, that [`Self::view`]'s layout facts name by path.
-    pub fn publish_layout_offers(&self, now: Millis, offers: &mut crate::UiOfferTree) {
-        self.layout_views(now, offers);
+    /// `prefixes` is where the controller placed each device's verbs
+    /// (`devices/<board>`), so these land beside the rest of its card's.
+    pub fn publish_layout_offers(
+        &self,
+        now: Millis,
+        offers: &mut crate::UiOfferTree,
+        prefixes: &std::collections::BTreeMap<lpa_devices::DeviceId, crate::OfferPath>,
+    ) {
+        self.layout_views(now, offers, Some(prefixes));
     }
 
     /// The card's layout facts (C6 repartition) for every device with
     /// something to say: the question, the refusal, a board holding its
-    /// files, a backup waiting to go back. Their verbs go into `offers`.
+    /// files, a backup waiting to go back. Their verbs go into `offers`,
+    /// under the device's prefix from `prefixes` when the controller placed
+    /// one, else under its own [`crate::BoardRef`].
     fn layout_views(
         &self,
         now: Millis,
         offers: &mut crate::UiOfferTree,
+        prefixes: Option<&std::collections::BTreeMap<lpa_devices::DeviceId, crate::OfferPath>>,
     ) -> std::collections::BTreeMap<lpa_devices::DeviceId, super::UiDeviceLayout> {
         let layout = self.effects.layout();
         self.roster
@@ -434,9 +444,18 @@ impl DeviceRoster {
                     .mac
                     .as_ref()
                     .and_then(|mac| layout.pending_for(&mac.0));
+                let offers_at = prefixes
+                    .and_then(|prefixes| prefixes.get(&device.id))
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        crate::OfferPath::board(&crate::BoardRef::for_identity(
+                            &device.identity,
+                            device.id,
+                        ))
+                    });
                 super::device_layout_view::device_layout_view(
                     &view,
-                    device.identity.mac.as_ref(),
+                    offers_at,
                     fs,
                     has_uid,
                     staged.as_ref(),

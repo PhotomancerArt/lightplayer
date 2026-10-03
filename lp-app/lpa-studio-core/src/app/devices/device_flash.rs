@@ -734,7 +734,8 @@ mod tests {
         use lpa_devices::replay::{Replay, Step};
         use lpa_devices::time::Millis;
 
-        let hello = include_str!("../../../../../lp-core/lpc-wire/testdata/hello-proto32-xiao-c6.json");
+        let hello =
+            include_str!("../../../../../lp-core/lpc-wire/testdata/hello-proto32-xiao-c6.json");
         let mut replay = Replay::new(lpa_link::device_link::wire::roster_config());
         replay.step(Millis(0), Step::attach(1, "usb-spare"));
         replay.step(Millis(20), Step::opened(1));

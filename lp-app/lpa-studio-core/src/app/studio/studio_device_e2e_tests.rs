@@ -67,6 +67,9 @@ const REAL_TIME_LIMIT: Duration = Duration::from_secs(15);
 /// skipping past a window the model is watching.
 const STEP_MS: f64 = 0.005;
 
+/// E4: the app agent's device journey over this bench.
+mod agent_device_journey_tests;
+
 // ---------------------------------------------------------------------
 // The transport
 // ---------------------------------------------------------------------
@@ -5057,6 +5060,631 @@ fn factory_reset_wipes_the_board_and_the_card_comes_back_blank() {
     );
 }
 
+/// A wiped board's Flash is an offer at its MAC's path, taking its board:
+/// the options are the core pick for its chip, nothing on the chip is lost
+/// so it is Routine (Q3), and a press through the offer runs the same flash
+/// the picker's button does — named after the board, back to Ready.
+#[test]
+fn a_blank_boards_flash_offer_lists_its_boards_and_flashes_through_a_press() {
+    let device = light_player("dev_wipeme");
+    let (mut bench, tasks) = DeviceBench::granted(&device, "usb-offer-flash");
+    bench.run_until(&tasks, "the hello to settle the link", |bench| {
+        !bench.view().devices.is_empty()
+    });
+    let wiped = bench.view().devices[0].id;
+    let flash = crate::OfferPath::parse("devices/mac-6055f90a0b0c/flash").unwrap();
+    assert!(
+        bench.controller.view().offers.get(&flash).is_none(),
+        "a running LightPlayer updates; it has no Flash"
+    );
+
+    bench.gesture(DeviceAction::Erase { device: wiped });
+    bench.run_until(&tasks, "the erase to settle as a blank verdict", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.needs_firmware() && card.activity.is_none())
+    });
+
+    let view = bench.controller.view();
+    let offer = view
+        .offers
+        .get(&flash)
+        .expect("the blank card's Flash, at its MAC");
+    assert!(
+        offer.consequence().is_routine(),
+        "a blank chip loses nothing"
+    );
+    let choice = c6_board_choice();
+    let crate::OfferParamKind::Choice { options, .. } = &offer.params()[0].kind else {
+        panic!("board is a choice: {:?}", offer.params());
+    };
+    assert!(
+        options.iter().any(|option| option.value == choice.board_id),
+        "{options:?}"
+    );
+    let readout = bench.controller.app_agent_readout_for_test().render();
+    assert!(
+        readout.contains("- devices/mac-6055f90a0b0c/flash: Flash firmware"),
+        "{readout}"
+    );
+    assert!(readout.contains("  takes board: one of "), "{readout}");
+    assert!(
+        readout.contains("; name: optional text; all_boards: true or false [now false]\n"),
+        "the chip narrowed the list, so show-all is offered: {readout}"
+    );
+
+    assert!(
+        offer
+            .press(&crate::OfferArgs::new().with("board", "no-such-board"))
+            .is_err(),
+        "an unknown board is refused before anything is dispatched"
+    );
+    let action = offer
+        .press(&crate::OfferArgs::new().with("board", &choice.board_id))
+        .expect("a candidate binds");
+    drive(bench.controller.dispatch(action)).expect("the bound flash dispatches");
+    bench.run_until(&tasks, "the flashed board to land Ready", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.state_label == "Ready" && card.activity.is_none())
+    });
+    assert!(
+        bench.view().devices[0]
+            .last_outcome
+            .as_ref()
+            .is_some_and(|outcome| outcome.ok && outcome.summary.contains("firmware installed")),
+        "{:?}",
+        bench.view().devices[0]
+    );
+}
+
+/// A connected Ready board publishes every verb its card draws, at its
+/// MAC's path, each at its op's level: what loses something for good
+/// (Update over firmware, Factory reset, Forget) is Lasting; a push onto an
+/// empty board and the rest are Routine.
+#[test]
+fn a_ready_board_publishes_its_verbs_at_its_mac_with_their_levels() {
+    let device = empty_light_player("dev000000daqf6dvvqz");
+    let (mut bench, tasks) = identified(&device, "usb-offers-ready");
+    bench.run_until(&tasks, "the board to report nothing loaded", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.loaded_project == lpa_devices::view::LoadedProject::Empty)
+    });
+
+    let view = bench.controller.view();
+    let verbs = board_verbs(&view, "devices/mac-6055f90a0b0c");
+    let names: Vec<&str> = verbs.iter().map(|(verb, _)| verb.as_str()).collect();
+    for verb in [
+        "push",
+        "erase",
+        "identify",
+        "reset-board",
+        "disconnect",
+        "rename",
+        "autoconnect",
+        "forget",
+    ] {
+        assert!(names.contains(&verb), "{verb} missing from {names:?}");
+    }
+    for absent in [
+        "flash",
+        "connect",
+        "reconnect",
+        "cancel",
+        "retry",
+        "remove-project",
+    ] {
+        assert!(
+            !names.contains(&absent),
+            "{absent} on a Ready, empty board: {names:?}"
+        );
+    }
+    for (verb, lasting) in &verbs {
+        let expected = matches!(verb.as_str(), "erase" | "forget" | "update-firmware");
+        assert_eq!(*lasting, expected, "{verb}");
+    }
+    assert!(
+        view.offers
+            .get(&crate::OfferPath::devices().child("new-sim"))
+            .is_some(),
+        "the add slot's sim verb is published beside the roster"
+    );
+}
+
+/// Push through its offer, end to end: an empty board lists the sources
+/// (the gallery's example among them), an Example binds and runs over the
+/// real conversation — and once the board runs it with no association the
+/// library can stand behind (an unstamped board banks nothing), the next
+/// push is Lasting with copy that names what would go (Q4).
+#[test]
+fn push_lists_sources_binds_an_example_and_is_lasting_over_an_unbanked_project() {
+    let device = empty_light_player_unstamped();
+    let (mut bench, tasks) = identified(&device, "usb-offers-push");
+    bench.run_until(&tasks, "the board to report nothing loaded", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.loaded_project == lpa_devices::view::LoadedProject::Empty)
+    });
+    let push_path = crate::OfferPath::parse("devices/mac-6055f90a0b0c/push").unwrap();
+    let example_key = format!(
+        "example:{}",
+        crate::first_bundled_example_id().expect("this build bundles examples")
+    );
+
+    let view = bench.controller.view();
+    let offer = view
+        .offers
+        .get(&push_path)
+        .expect("an empty board takes a push");
+    assert!(offer.consequence().is_routine(), "nothing on it to lose");
+    let crate::OfferParamKind::Choice { options, .. } = &offer.params()[0].kind else {
+        panic!("source is a choice: {:?}", offer.params());
+    };
+    assert!(
+        options.iter().any(|option| option.value == example_key),
+        "{options:?}"
+    );
+    let action = offer
+        .press(&crate::OfferArgs::new().with("source", &example_key))
+        .expect("an example binds");
+    assert_eq!(
+        action.op_as::<crate::DevicePushOp>().map(|op| &op.source),
+        Some(&bundled_example())
+    );
+    drive(bench.controller.dispatch(action)).expect("the bound push dispatches");
+    bench.run_until(&tasks, "the board to run what was pushed", |bench| {
+        bench.view().devices.first().is_some_and(|card| {
+            card.activity.is_none()
+                && matches!(
+                    card.loaded_project,
+                    lpa_devices::view::LoadedProject::Running { .. }
+                )
+        })
+    });
+    assert!(
+        bench.registry()[0].association.is_none(),
+        "an unstamped board banks nothing"
+    );
+
+    let view = bench.controller.view();
+    let offer = view
+        .offers
+        .get(&push_path)
+        .expect("a running board takes a push");
+    let copy = offer
+        .consequence()
+        .copy()
+        .expect("over an un-banked project, a push is Lasting");
+    assert_eq!(copy.title, "Replace what this board is running?");
+    assert!(copy.message.contains("will be gone"), "{copy:?}");
+}
+
+/// The same push onto a STAMPED board banks the association, and the next
+/// push over the project it banked is Routine: the library copy stands
+/// behind it.
+#[test]
+fn a_push_over_a_banked_project_is_routine() {
+    let device = empty_light_player("dev000000daqf6dvvqz");
+    let (mut bench, tasks) = identified(&device, "usb-offers-banked");
+    bench.run_until(&tasks, "the board to report nothing loaded", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.loaded_project == lpa_devices::view::LoadedProject::Empty)
+    });
+    let push_path = crate::OfferPath::parse("devices/mac-6055f90a0b0c/push").unwrap();
+    let example_key = format!(
+        "example:{}",
+        crate::first_bundled_example_id().expect("this build bundles examples")
+    );
+    let action = bench
+        .controller
+        .view()
+        .offers
+        .get(&push_path)
+        .expect("an empty board takes a push")
+        .press(&crate::OfferArgs::new().with("source", &example_key))
+        .unwrap();
+    drive(bench.controller.dispatch(action)).expect("the bound push dispatches");
+    bench.run_until(&tasks, "the board to run what was pushed", |bench| {
+        bench.view().devices.first().is_some_and(|card| {
+            card.activity.is_none()
+                && matches!(
+                    card.loaded_project,
+                    lpa_devices::view::LoadedProject::Running { .. }
+                )
+        })
+    });
+    bench.settle_library();
+    assert!(bench.registry()[0].association.is_some(), "the push banked");
+
+    let view = bench.controller.view();
+    let offer = view
+        .offers
+        .get(&push_path)
+        .expect("a running board takes a push");
+    assert!(
+        offer.consequence().is_routine(),
+        "the library holds what it runs: {:?}",
+        offer.consequence()
+    );
+}
+
+/// Rename through its offer: the typed name binds into `SetName`, and the
+/// card wears it.
+#[test]
+fn rename_binds_its_text_and_the_card_wears_it() {
+    let device = light_player("dev_rename");
+    let (mut bench, tasks) = identified(&device, "usb-offers-rename");
+    let view = bench.controller.view();
+    let offer = view
+        .offers
+        .get(&crate::OfferPath::parse("devices/mac-6055f90a0b0c/rename").unwrap())
+        .expect("every card is renameable");
+    let action = offer
+        .press(&crate::OfferArgs::new().with("name", "  Kitchen  "))
+        .expect("text binds");
+    drive(bench.controller.dispatch(action)).expect("the rename dispatches");
+    bench.run_until(&tasks, "the card to wear its new name", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.title == "Kitchen")
+    });
+}
+
+/// New sim through its offer: it lists the runnable targets, and a press
+/// with a board and a runtime mints that sim and powers it on — the same
+/// creation the add slot's row dispatches. The sim's verbs then live at its
+/// `sim-` ref.
+#[test]
+fn new_sim_lists_targets_and_a_press_starts_one() {
+    let device = sim_light_player();
+    let (mut bench, tasks) = DeviceBench::build(&device, "unused-serial-port", false, false);
+    let sims = Rc::new(SimDeviceTransport::new(Rc::new(ScriptedSimSource {
+        device: device.clone(),
+        restarts: Rc::new(Cell::new(0)),
+        manifests: Rc::new(RefCell::new(Vec::new())),
+    })));
+    bench.sims = Some(Rc::clone(&sims));
+    bench.controller.set_device_sim_transport(sims);
+    bench.controller.set_random(|| {
+        let mut bytes = [0u8; 16];
+        bytes[..6].copy_from_slice(&SIM_RANDOM);
+        bytes
+    });
+
+    let view = bench.controller.view();
+    let offer = view
+        .offers
+        .get(&crate::OfferPath::devices().child("new-sim"))
+        .expect("the add slot's sim verb");
+    let crate::OfferParamKind::Choice { options, .. } = &offer.params()[0].kind else {
+        panic!("board is a choice: {:?}", offer.params());
+    };
+    assert!(
+        options.iter().any(|option| option.value == SIM_TARGET),
+        "{options:?}"
+    );
+    let action = offer
+        .press(
+            &crate::OfferArgs::new()
+                .with("board", SIM_TARGET)
+                .with("backing", "sim"),
+        )
+        .expect("a runnable row binds");
+    drive(bench.controller.dispatch(action)).expect("the press starts a device");
+    bench.run_until(&tasks, "the new sim to identify", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.state_label == "Ready")
+    });
+
+    let (_, base_mac) = sim_identity();
+    let sim_ref = format!("devices/sim-{}", base_mac.replace(':', ""));
+    let view = bench.controller.view();
+    let verbs = board_verbs(&view, &sim_ref);
+    assert!(
+        verbs.iter().any(|(verb, _)| verb == "disconnect"),
+        "the sim's verbs live at its sim- ref: {verbs:?}"
+    );
+    assert_eq!(
+        view.offers
+            .get(&crate::OfferPath::parse(&format!("{sim_ref}/disconnect")).unwrap())
+            .map(|offer| offer.label().to_string()),
+        Some("Power off".to_string()),
+        "a sim is powered off, not disconnected"
+    );
+    assert!(
+        !verbs.iter().any(|(verb, _)| verb == "autoconnect"),
+        "a sim has no port to appear"
+    );
+}
+
+/// A fresh blank chip, before it is kept: its Flash is published at its
+/// provisional `new-<n>` ref, Routine (Q3), beside Reset and Dismiss — and
+/// no separate adopt, because the Flash adopts. A press through the offer
+/// runs the flash to Ready, and the board's verbs move to its MAC.
+#[test]
+fn a_pending_blank_chip_publishes_its_flash_at_new_n() {
+    let device = blank_board();
+    let (mut bench, tasks) = DeviceBench::granted(&device, "usb-offers-blank");
+    bench.run_until(&tasks, "the blank verdict to settle", |bench| {
+        bench
+            .view()
+            .pending
+            .first()
+            .is_some_and(|pending| pending.needs_firmware())
+    });
+    let provisional = bench.view().pending[0].device;
+    let prefix = format!("devices/new-{}", provisional.0);
+    let view = bench.controller.view();
+    assert_eq!(
+        board_verbs(&view, &prefix),
+        [
+            ("flash".to_string(), false),
+            ("reset-board".to_string(), false),
+            ("dismiss".to_string(), true)
+        ]
+    );
+
+    let offer = view
+        .offers
+        .get(&crate::OfferPath::parse(&format!("{prefix}/flash")).unwrap())
+        .unwrap();
+    let action = offer
+        .press(&crate::OfferArgs::new().with("board", c6_board_choice().board_id))
+        .expect("a C6 board binds");
+    drive(bench.controller.dispatch(action)).expect("the bound flash dispatches");
+    bench.run_until(&tasks, "the flashed board to land Ready", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.state_label == "Ready" && card.activity.is_none())
+    });
+    let view = bench.controller.view();
+    assert!(
+        board_verbs(&view, &prefix).is_empty(),
+        "the provisional ref is gone"
+    );
+    assert!(
+        !board_verbs(&view, "devices/mac-6055f90a0b0c").is_empty(),
+        "the board's verbs live at its MAC now"
+    );
+}
+
+/// The app agent flashes a board that runs somebody else's firmware: a
+/// guessed board is refused with every board the chip takes, a press with
+/// none is refused naming the choices, and a press with a board — Lasting,
+/// the firmware on it is lost — becomes a card that hands the user the
+/// Flash offer pre-filled with the agent's board. Nothing is flashed until
+/// the user presses; they pick ANOTHER board on the card, that board is the
+/// one flashed, the card settles, and the agent hears what they changed.
+#[test]
+fn the_agents_flash_over_firmware_is_a_card_the_user_may_re_pick() {
+    let device = FakeEsp32Device::new(FakeDeviceScript::new(FakeBootState::ForeignFirmware));
+    let (mut bench, tasks) = DeviceBench::granted(&device, "usb-agent-flash");
+    bench.run_until(&tasks, "the foreign verdict to settle", |bench| {
+        bench
+            .view()
+            .pending
+            .first()
+            .is_some_and(|pending| pending.needs_firmware())
+    });
+    let provisional = bench.view().pending[0].device;
+    let flash = format!("devices/new-{}/flash", provisional.0);
+    let path = crate::OfferPath::parse(&flash).unwrap();
+    let offer = bench
+        .controller
+        .view()
+        .offers
+        .get(&path)
+        .cloned()
+        .expect("the foreign board's Flash");
+    assert!(
+        offer.consequence().arms(),
+        "flashing over firmware loses it: Lasting"
+    );
+    let fits = crate::flash_offer(Some("esp32c6")).candidates;
+    let [agents, users, ..] = fits.as_slice() else {
+        panic!("two C6 boards fit, so the pick is the user's: {fits:?}");
+    };
+    let readout = bench.controller.app_agent_readout_for_test().render();
+    assert!(
+        readout.contains(&format!(
+            "- {flash}: Flash firmware [choose a board in args] [needs the user's click]\n"
+        )),
+        "{readout}"
+    );
+    assert!(
+        readout.contains(&format!("  takes board: one of {} (", agents.board_id)),
+        "{readout}"
+    );
+
+    // A guess is refused with every board the chip takes.
+    let refused = act(&mut bench, &flash, &[("board", "esp8266-board")]);
+    let lpa_agent::ActOutcome::Refused { reason, .. } = &refused else {
+        panic!("a board that is not an option is refused: {refused:?}");
+    };
+    assert!(
+        reason.contains("`board` must be one of ") && reason.contains("It takes board: one of "),
+        "{reason}"
+    );
+    for fit in &fits {
+        assert!(reason.contains(&fit.board_id), "{reason}");
+    }
+    // No board: two fit, so nothing is preselected and the board is the
+    // user's to name.
+    let refused = act(&mut bench, &flash, &[]);
+    let lpa_agent::ActOutcome::Refused { reason, .. } = &refused else {
+        panic!("a missing board is refused: {refused:?}");
+    };
+    assert!(
+        reason.contains("`board` is required: choose a board. It takes board: one of "),
+        "{reason}"
+    );
+
+    // The agent's board: a card, pre-filled, and nothing flashed.
+    let outcome = act(&mut bench, &flash, &[("board", &agents.board_id)]);
+    assert!(
+        matches!(&outcome, lpa_agent::ActOutcome::NeedsUser { card, .. } if card == "c1"),
+        "{outcome:?}"
+    );
+    let card = app_cards(&mut bench).remove(0);
+    assert!(card.is_pending());
+    assert_eq!(card.offer.as_ref(), Some(&path), "the card names the offer");
+    assert_eq!(
+        card.args,
+        crate::OfferArgs::new().with("board", &agents.board_id),
+        "the agent's board is the pre-selection"
+    );
+    assert!(card.destructive, "the firmware on it is lost for good");
+    for _ in 0..20 {
+        bench.step(&tasks);
+    }
+    assert!(
+        bench.view().devices.is_empty() && bench.view().pending[0].needs_firmware(),
+        "nothing runs before the user's click: {:?}",
+        bench.view()
+    );
+
+    // The user picks another board on the card's own picker and presses.
+    let user_args = card.args.clone().with("board", &users.board_id);
+    let action = bench
+        .controller
+        .view()
+        .offers
+        .get(&path)
+        .expect("still offered")
+        .press(&user_args)
+        .expect("the user's board binds");
+    assert!(
+        !card.press.same_op(&action),
+        "another board is another op; the card answers to its offer"
+    );
+    drive(bench.controller.dispatch(action)).expect("the user's flash dispatches");
+    bench.run_until(&tasks, "the flashed board to land Ready", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.state_label == "Ready" && card.activity.is_none())
+    });
+    assert_eq!(
+        bench.manifest_writes.borrow().as_slice(),
+        [lpa_boards::runtime_manifest_json(&users.board_id).expect("a served board")],
+        "the user's board was flashed, not the agent's"
+    );
+    assert_eq!(
+        bench.view().devices[0].title,
+        format!("{} · Jan 1", users.title),
+        "named after the user's board"
+    );
+    let card = app_cards(&mut bench).remove(0);
+    assert!(
+        matches!(card.state, crate::UiAgentCardState::Done { .. }),
+        "{card:?}"
+    );
+    assert_eq!(card.user_args.as_ref(), Some(&user_args));
+    assert!(
+        card.resume_text().contains(&format!(
+            " with board = {} (you chose {})",
+            users.board_id, agents.board_id
+        )),
+        "the agent hears what the user changed: {}",
+        card.resume_text()
+    );
+}
+
+/// A Routine verb with a value is pressed outright: the agent renames a
+/// board through `devices/mac-<hex>/rename`, and the card wears the name. A
+/// name the offer does not take is refused, naming what it does take.
+#[test]
+fn the_agent_renames_a_board_through_its_offer() {
+    let device = light_player("dev_agent_rename");
+    let (mut bench, tasks) = identified(&device, "usb-agent-rename");
+    let rename = "devices/mac-6055f90a0b0c/rename";
+
+    let refused = act(&mut bench, rename, &[("title", "Kitchen")]);
+    assert!(
+        matches!(&refused, lpa_agent::ActOutcome::Refused { reason, .. }
+            if reason.contains("no parameter `title`; it takes name")),
+        "{refused:?}"
+    );
+    let outcome = act(&mut bench, rename, &[("name", "Kitchen")]);
+    assert!(
+        matches!(outcome, lpa_agent::ActOutcome::Done { .. }),
+        "{outcome:?}"
+    );
+    assert!(app_cards(&mut bench).is_empty(), "a rename needs no card");
+    bench.run_until(&tasks, "the card to wear its new name", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.title == "Kitchen")
+    });
+}
+
+/// One `act` the way the app agent's tool calls it.
+fn act(bench: &mut DeviceBench, action: &str, args: &[(&str, &str)]) -> lpa_agent::ActOutcome {
+    let input: lpa_agent::ActInput = serde_json::from_value(serde_json::json!({
+        "action": action,
+        "args": args
+            .iter()
+            .map(|(name, value)| (name.to_string(), serde_json::json!(value)))
+            .collect::<serde_json::Map<_, _>>(),
+        "why": "the test asked",
+    }))
+    .expect("an act input");
+    drive(bench.controller.app_agent_act_for_test(input))
+}
+
+/// The app chat's cards, in transcript order.
+fn app_cards(bench: &mut DeviceBench) -> Vec<crate::UiAgentCard> {
+    bench
+        .controller
+        .agent_for_test()
+        .app_session()
+        .mirror
+        .turns
+        .iter()
+        .filter_map(|turn| match turn {
+            crate::UiAgentTurn::Card(card) => Some(card.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The verbs published directly under `prefix`, in publish order, each with
+/// whether it is Lasting.
+fn board_verbs(view: &crate::UiStudioView, prefix: &str) -> Vec<(String, bool)> {
+    let prefix = crate::OfferPath::parse(prefix).unwrap();
+    view.offers
+        .verbs_of(&prefix)
+        .map(|offer| {
+            (
+                offer.path.last().unwrap_or_default().to_string(),
+                offer.consequence().arms(),
+            )
+        })
+        .collect()
+}
+
 /// The bench's dead end and its way out (G1, 2026-08-31): a board arrives
 /// running a project from a previous life and the running face has no verbs
 /// on it — "how do I push?" with no answer short of throwing the firmware
@@ -6688,8 +7316,8 @@ fn a_board_seen_over_usb_and_over_bluetooth_is_one_registry_row() {
 /// iPhone/Bluefy's shape: a sim half and a Bluetooth half, and NO serial
 /// transport, because the browser has no Web Serial. The roster is still
 /// reachable, but the view says USB is not — which is what keeps the add
-/// slot's USB verb away. Installing a serial transport (Web Serial, or the
-/// `?emu=` shim) is exactly what turns it back on.
+/// slot's USB verb disabled with its reason. Installing a serial transport
+/// (Web Serial, or the `?emu=` shim) is exactly what turns it back on.
 #[test]
 fn a_build_without_web_serial_says_usb_is_unavailable() {
     let board = || {
@@ -6716,9 +7344,17 @@ fn a_build_without_web_serial_says_usb_is_unavailable() {
         "sims and Bluetooth, but no port to reach"
     );
     let connect_usb = crate::OfferPath::devices().child("connect-usb");
-    assert!(
-        controller.view().offers.get(&connect_usb).is_none(),
-        "no USB offer without a port to reach"
+    let view = controller.view();
+    let offer = view
+        .offers
+        .get(&connect_usb)
+        .expect("devices/connect-usb is always offered");
+    assert_eq!(
+        offer.action.meta().enablement,
+        crate::ActionEnablement::Disabled {
+            reason: crate::USB_NEEDS_WEB_SERIAL.to_string()
+        },
+        "disabled, with the reason, without a port to reach"
     );
 
     let usb_side = board();
@@ -6732,8 +7368,56 @@ fn a_build_without_web_serial_says_usb_is_unavailable() {
         .offers
         .get(&connect_usb)
         .expect("devices/connect-usb is offered while USB is available");
+    assert!(offer.is_enabled());
     assert_eq!(offer.icon, "usb");
     assert_eq!(offer.label(), "Connect a board via USB");
+}
+
+/// `devices/connect-ble` is always offered, and whether it can be pressed
+/// is the browser's answer the web reports: disabled while Studio is still
+/// asking, disabled with the family's sentence when Bluetooth cannot work
+/// here, and pressable (by the user's own click) when it can.
+#[test]
+fn connect_ble_follows_the_reach_the_web_reports() {
+    let mut controller = StudioController::new(|| 0.0);
+    let connect_ble = crate::OfferPath::devices().child("connect-ble");
+    let reason = |controller: &StudioController| {
+        let view = controller.view();
+        let offer = view
+            .offers
+            .get(&connect_ble)
+            .expect("devices/connect-ble is always offered")
+            .clone();
+        assert_eq!(offer.icon, "bluetooth");
+        assert_eq!(offer.label(), "Connect a board via Bluetooth");
+        assert!(
+            offer.action.meta().needs_user_activation,
+            "the browser's chooser"
+        );
+        match &offer.action.meta().enablement {
+            crate::ActionEnablement::Enabled => None,
+            crate::ActionEnablement::Disabled { reason } => Some(reason.clone()),
+        }
+    };
+
+    assert_eq!(
+        reason(&controller).as_deref(),
+        crate::BluetoothReach::Checking.disabled_reason()
+    );
+    controller.set_bluetooth_reach(crate::BluetoothReach::Brave);
+    assert_eq!(
+        reason(&controller).as_deref(),
+        Some("Brave keeps Bluetooth behind a flag.")
+    );
+    controller.set_bluetooth_reach(crate::BluetoothReach::Ready);
+    assert_eq!(reason(&controller), None);
+    let readout = controller.app_agent_readout_for_test().render();
+    assert!(
+        readout.contains(
+            "- devices/connect-ble: Connect a board via Bluetooth [needs the user's click]\n"
+        ),
+        "{readout}"
+    );
 }
 
 /// One Bluetooth board, always present: a fake-device link at a `ble:`
@@ -7485,17 +8169,22 @@ fn updating_a_legacy_board_backs_up_asks_and_keeps_every_file() {
     );
 
     // The card's verbs are the view's offers, at the BOARD's path: its MAC,
-    // which survives a Forget and a reload where the DeviceId does not.
-    let board = crate::MacAddress("60:55:f9:0a:0b:0c".to_string());
+    // which survives a Forget and a reload where the DeviceId does not —
+    // beside the rest of the card's verbs, under the prefix the controller
+    // placed it at.
     let continue_path = panel.continue_action.expect("a migration can continue");
     assert_eq!(
         continue_path.to_string(),
         "devices/mac-6055f90a0b0c/continue-update"
     );
-    assert_eq!(
-        continue_path,
-        crate::device_offer_path(target, Some(&board)).child("continue-update")
-    );
+    let board = bench
+        .controller
+        .view()
+        .offers
+        .device_prefix(target)
+        .cloned()
+        .expect("the card's verbs are placed");
+    assert_eq!(continue_path, board.clone().child("continue-update"));
     let continue_action = offer(&bench, &continue_path);
     assert!(
         continue_action.meta().enablement.is_enabled(),
@@ -7522,16 +8211,19 @@ fn updating_a_legacy_board_backs_up_asks_and_keeps_every_file() {
             .is_none(),
         "nothing left to say on the card"
     );
-    assert_eq!(
-        bench
-            .controller
-            .view()
-            .offers
-            .verbs_of(&crate::device_offer_path(target, Some(&board)))
-            .count(),
-        0,
-        "and nothing left offered"
-    );
+    let offers = bench.controller.view().offers;
+    for verb in [
+        "continue-update",
+        "cancel-update",
+        "download-backup",
+        "restore-files",
+        "finish-update",
+    ] {
+        assert!(
+            offers.get(&board.clone().child(verb)).is_none(),
+            "and no layout verb left offered: {verb}"
+        );
+    }
 }
 
 /// Files that do not fit the new layout: the update is refused before

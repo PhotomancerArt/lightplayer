@@ -11,7 +11,6 @@
 //! Plain language on purpose (Yona gets lost in plan-speak): "files",
 //! "board", "backup" — never `lpfs`, "superblock" or a phase name.
 
-use lpa_devices::identity::MacAddress;
 use lpa_devices::wire::BoardFs;
 use lpa_devices::{Action, DeviceId, DeviceView, LayoutVerdict};
 
@@ -20,35 +19,7 @@ use super::device_backup_store::BackupEntry;
 use super::device_flash::{FirmwareVerb, firmware_verb};
 use super::device_layout_step::LayoutStaging;
 use super::devices_op::DevicesOp;
-use crate::{ActionConfirmation, ActionConsequence, OfferPath, UiAction, UiOffer, UiOfferTree};
-
-/// `devices/<board>`: the prefix every verb of one device card lives under.
-///
-/// A board is named by its MAC, as `mac-` plus 12 lowercase hex digits with
-/// no separators (`devices/mac-a0f2b1c3d4e5/finish-update`): the one board id
-/// that survives a Forget and a reload, where a [`DeviceId`] is reused. The
-/// `mac-` prefix tells a real board's path apart from `devices/new-<n>` at a
-/// glance. A link whose board has not said who it is yet has no MAC to name
-/// it by, and is `devices/new-<n>` (`n` its `DeviceId`) until it does. Never
-/// invented: a MAC that does not normalize is treated as absent.
-pub fn device_offer_path(device: DeviceId, mac: Option<&MacAddress>) -> OfferPath {
-    let segment = mac
-        .and_then(|mac| mac_segment(&mac.0))
-        .map(|digits| format!("mac-{digits}"))
-        .unwrap_or_else(|| format!("new-{}", device.0));
-    OfferPath::devices().child(segment)
-}
-
-/// `aa:bb:cc:dd:ee:ff` (any case, `:` or `-` or no separators) as
-/// `aabbccddeeff`; `None` unless it is exactly twelve hex digits.
-fn mac_segment(mac: &str) -> Option<String> {
-    let digits: String = mac
-        .chars()
-        .filter(|c| *c != ':' && *c != '-')
-        .map(|c| c.to_ascii_lowercase())
-        .collect();
-    (digits.len() == 12 && digits.chars().all(|c| c.is_ascii_hexdigit())).then_some(digits)
-}
+use crate::{ActionConfirmation, OfferPath, UiAction, UiOffer, UiOfferTree};
 
 /// `devices/<board>/continue-update`: the question's Continue.
 pub const CONTINUE_UPDATE: &str = "continue-update";
@@ -64,9 +35,9 @@ pub const FINISH_UPDATE: &str = "finish-update";
 /// The card's layout facts for one device.
 #[derive(Clone, Debug, PartialEq)]
 pub struct UiDeviceLayout {
-    /// Where this card's verbs are offered (`devices/<board>`, see
-    /// [`device_offer_path`]): the card reads its verbs from here rather
-    /// than spelling the path itself.
+    /// Where this card's verbs are offered (`devices/<board>`, the card's
+    /// [`crate::BoardRef`]): the card reads its verbs from here rather than
+    /// spelling the path itself.
     pub offers_at: OfferPath,
     /// The panel the firmware zone shows instead of its verb row: the
     /// question, or the refusal.
@@ -101,14 +72,14 @@ pub struct UiLayoutPanel {
 /// The card's layout facts, or `None` when there is nothing to say; every
 /// verb they name is published into `offers`.
 ///
-/// `mac` is the board's MAC as the roster knows it (its record's identity),
-/// which names the offers' path; `fs` is the board's last hello's
+/// `offers_at` is the card's `devices/<board>` prefix (where the rest of its
+/// verbs are placed); `fs` is the board's last hello's
 /// filesystem state and `has_uid` whether that hello named a stamped
 /// identity; `pending` the stored backup still marked pending for its base
 /// MAC; `staged` what its last inspection staged.
 pub fn device_layout_view(
     view: &DeviceView,
-    mac: Option<&MacAddress>,
+    offers_at: OfferPath,
     fs: BoardFs,
     has_uid: bool,
     staged: Option<&LayoutStaging>,
@@ -116,7 +87,6 @@ pub fn device_layout_view(
     offers: &mut UiOfferTree,
 ) -> Option<UiDeviceLayout> {
     let device = view.id;
-    let offers_at = device_offer_path(device, mac);
     let mut publish = |verb: &str, icon: &str, action: UiAction| {
         let path = offers_at.clone().child(verb);
         offers.publish(UiOffer::new(path.clone(), icon, action));
@@ -204,13 +174,13 @@ pub fn device_layout_view(
                 )
                 // Lasting, as every Flash is (D7) — with words that say what
                 // this one changes for good: the old layout is retired.
-                .with_consequence(ActionConsequence::Lasting(ActionConfirmation::new(
+                .lasting(ActionConfirmation::new(
                     "Finish moving this board's files?",
                     "The board gets the new firmware again, its waiting files move to the new \
                      layout, and the old layout is retired. Studio asks once more, with a \
                      backup, before the files move.",
                     "finish",
-                ))),
+                )),
             ));
         }
         return Some(layout);
@@ -249,7 +219,7 @@ pub fn device_layout_view(
                     date(entry.captured_at_epoch_seconds)
                 ))
                 // Lasting (D7): it writes over the board's filesystem.
-                .with_consequence(ActionConsequence::Lasting(ActionConfirmation::new(
+                .lasting(ActionConfirmation::new(
                     "Replace this board's files with the backup?",
                     format!(
                         "Whatever is on the board now is replaced by the files backed up on {}. \
@@ -257,7 +227,7 @@ pub fn device_layout_view(
                         date(entry.captured_at_epoch_seconds)
                     ),
                     "restore",
-                ))),
+                )),
             ));
         }
         layout.download = Some(publish(
@@ -422,7 +392,7 @@ mod tests {
         let offered = |fs, has_uid| {
             device_layout_view(
                 &view,
-                Some(&mac()),
+                prefix(),
                 fs,
                 has_uid,
                 None,
@@ -443,7 +413,7 @@ mod tests {
         assert!(
             device_layout_view(
                 &view,
-                Some(&mac()),
+                prefix(),
                 BoardFs::Mounted,
                 false,
                 None,
@@ -466,7 +436,7 @@ mod tests {
         use lpa_devices::{ActivityKind, FlashLayoutView};
 
         let at = |verb: &str| {
-            let path = device_offer_path(DeviceId(7), Some(&mac())).child(verb);
+            let path = prefix().child(verb);
             assert_eq!(path.to_string(), format!("devices/mac-6055f90a0b0c/{verb}"));
             path
         };
@@ -507,7 +477,7 @@ mod tests {
         let mut offers = UiOfferTree::new();
         device_layout_view(
             &asking,
-            Some(&mac()),
+            prefix(),
             BoardFs::Mounted,
             true,
             None,
@@ -530,7 +500,7 @@ mod tests {
         let mut offers = UiOfferTree::new();
         device_layout_view(
             &running_c6(),
-            Some(&mac()),
+            prefix(),
             BoardFs::LegacyHeld,
             true,
             None,
@@ -556,7 +526,7 @@ mod tests {
         let mut offers = UiOfferTree::new();
         device_layout_view(
             &running_c6(),
-            Some(&mac()),
+            prefix(),
             BoardFs::Formatted,
             false,
             None,
@@ -573,29 +543,16 @@ mod tests {
         assert!(download.action.meta().needs_user_activation);
     }
 
-    /// A board's verbs live under its MAC, never its reusable `DeviceId`;
-    /// a board with no MAC yet is a provisional `new-<n>`, and a MAC that
-    /// does not normalize is not invented into one.
+    /// The layout facts carry the path their verbs were published at: the
+    /// card's own `devices/<board>` prefix (a board known by its MAC is
+    /// `mac-` and its 12 hex digits — `crate::BoardRef`), handed in by the
+    /// controller beside the rest of the card's verbs.
     #[test]
-    fn a_board_s_offers_are_keyed_by_its_mac() {
-        let id = DeviceId(7);
-        assert_eq!(
-            device_offer_path(id, Some(&mac())).to_string(),
-            "devices/mac-6055f90a0b0c"
-        );
-        assert_eq!(
-            device_offer_path(id, Some(&MacAddress("A0-F2-B1-C3-D4-E5".to_string()))).to_string(),
-            "devices/mac-a0f2b1c3d4e5"
-        );
-        assert_eq!(device_offer_path(id, None).to_string(), "devices/new-7");
-        assert_eq!(
-            device_offer_path(id, Some(&MacAddress("not a mac".to_string()))).to_string(),
-            "devices/new-7"
-        );
+    fn the_layout_facts_name_the_prefix_their_verbs_are_under() {
         // And the layout facts carry the path their verbs were published at.
         let layout = device_layout_view(
             &running_c6(),
-            Some(&mac()),
+            prefix(),
             BoardFs::LegacyHeld,
             true,
             None,
@@ -610,9 +567,13 @@ mod tests {
         );
     }
 
-    /// The fixture board's MAC, as the roster records it.
-    fn mac() -> MacAddress {
-        MacAddress("60:55:f9:0a:0b:0c".to_string())
+    /// The fixture board's verbs' prefix: its MAC as the roster records it,
+    /// through the same `BoardRef` the controller places every card's verbs
+    /// by.
+    fn prefix() -> OfferPath {
+        let mac = lpa_devices::identity::MacAddress("60:55:f9:0a:0b:0c".to_string());
+        let key = lpa_devices::BoardKey::from_mac(&mac).expect("a MAC");
+        OfferPath::board(&crate::BoardRef::Mac(key))
     }
 
     /// A running C6 on a resolved board (the Update verb resolves).

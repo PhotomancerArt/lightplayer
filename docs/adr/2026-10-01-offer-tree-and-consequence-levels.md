@@ -4,6 +4,9 @@
   see `notes.md`)
 - **Deciders:** Yona
 - **Refines:** `docs/adr/2026-10-01-agentic-control-offers-in-core.md`
+- **Refined by:** `docs/adr/2026-10-02-board-ids-and-typed-offer-parameters.md`
+  (device offers at `devices/<board ref>/…`, typed parameters; it closes
+  the blank-board Flash gap below)
 - **Evidence:** planning dir
   `lp2025/2026-10-01-1255-agentic-ui-roadmap/m1-offer-model/` (`plan.md`,
   `notes.md`, P1–P3 Implementation Results); PR #892.

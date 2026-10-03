@@ -1824,7 +1824,11 @@ mod tests {
             &mut identity,
             &config,
         );
-        assert!(newer.classification.is_light_player(), "{:?}", newer.classification);
+        assert!(
+            newer.classification.is_light_player(),
+            "{:?}",
+            newer.classification
+        );
         assert_eq!(
             newer.wire_version(),
             Some(WireVersion::BoardNewer {

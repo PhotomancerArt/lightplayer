@@ -57,7 +57,10 @@ mod tests {
 
     #[test]
     fn a_wire_32_hello_does_not_decode_at_this_wire_version_but_names_its_proto() {
-        assert_eq!(WIRE_PROTO_VERSION, 33, "re-read this test when the version moves");
+        assert_eq!(
+            WIRE_PROTO_VERSION, 33,
+            "re-read this test when the version moves"
+        );
         assert!(
             crate::json::from_str::<WireServerMessage>(HELLO_PROTO_32.trim()).is_err(),
             "the premise: a wire-32 hello lacks the required hardware.fs"
@@ -80,7 +83,10 @@ mod tests {
             hello_proto(r#"{"id":0,"msg":{"heartbeat":{"proto":32}}}"#),
             None
         );
-        assert_eq!(hello_proto(r#"{"id":0,"msg":{"hello":{"proto":"32"}}}"#), None);
+        assert_eq!(
+            hello_proto(r#"{"id":0,"msg":{"hello":{"proto":"32"}}}"#),
+            None
+        );
         assert_eq!(hello_proto("not json"), None);
     }
 }

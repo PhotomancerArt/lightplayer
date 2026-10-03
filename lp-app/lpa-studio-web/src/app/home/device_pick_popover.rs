@@ -14,22 +14,32 @@
 //! why the panel may never be an in-flow sibling — it would be clipped to
 //! nothing.
 //!
-//! # The three sources, and who decides
+//! # The offer decides; this file draws (M3)
 //!
-//! The gallery popover offers exactly what
-//! [`push_offer`](lpa_studio_core::push_offer) grouped: **Examples** (the
-//! bundled gallery), **My projects** (the library), and **New** (a starter
-//! generated for this board — or the honest reason there is none). Core owns
-//! the grouping, the preselect and the copy; this file only lays them out
-//! and dispatches the op the offer handed back. The board popover is the
-//! same shape over [`flash_offer`](lpa_studio_core::flash_offer).
+//! Each popover renders ONE offer from the tree: the gallery is a board's
+//! `push` offer, the board pick a firmware verb's (`flash`, or
+//! `update-firmware` when its board did not resolve). The offer's
+//! parameters are the controls — its `source` choice the gallery's cards,
+//! a firmware verb's `board` choice the tiles, the optional `name` the name
+//! row, the toggles the "show all" escape and the "Name the board the
+//! same" tick — and the verb is the offer's own press with the values
+//! picked ([`OfferRowCta`]). Nothing here builds an op, so the app agent,
+//! pressing the same offer with the same values, does exactly what the
+//! card does.
 //!
-//! A pick is **ephemeral UI state** — a `use_signal` holding one key. It is
-//! journaled by nothing: the decision reaches the model as a parameter on the
-//! Push (or Flash) action the CTA dispatches, which is the card ruling ("no
-//! wizard state anywhere"). A pick the offer no longer contains (the library
-//! changed under it, or the chip filter was re-applied) falls back to the
-//! offer's own preselect rather than being dispatched — the stale-pick guard.
+//! The gallery offers what [`push_offer`](lpa_studio_core::push_offer)
+//! grouped: **Examples** (the bundled gallery), **My projects** (the
+//! library), and **New** (a starter generated for this board — or the
+//! honest reason there is none). The cards are the offer's options; their
+//! tab, section and poster are read off core's push offer for the same key.
+//!
+//! A pick is **ephemeral UI state** — the `Signal<OfferArgs>` the controls
+//! write. It is journaled by nothing: the decision reaches the model as the
+//! values of the one press, which is the card ruling ("no wizard state
+//! anywhere"). A pick the offer no longer draws (the library changed under
+//! it, or the chip filter was re-applied) falls back to the offer's own
+//! preselect rather than being dispatched — the stale-pick guard
+//! ([`resolved_args`](crate::core::resolved_args)).
 //!
 //! # The chip filter, stated and escapable (AC4)
 //!
@@ -71,20 +81,22 @@
 use dioxus::prelude::*;
 use lpa_boards::{BoardDiagram, DiagramMode};
 use lpa_studio_core::{
-    DeviceAction, DeviceId, DevicePushOp, DeviceView, DevicesOp, FirmwareVerb, FlashBoardChoice,
-    PreviewSource, PushOffer, PushSource, PushSourceChoice, PushSourceGroup, UiAction,
-    UiExampleCard, UiPackageCard, device_chip, flash_offer, push_offer,
+    ActionEnablement, DeviceView, FLASH_ALL_BOARDS_PARAM, FLASH_BOARD_PARAM, FLASH_NAME_PARAM,
+    FirmwareVerb, OfferArgs, OfferChoice, OfferParam, PUSH_NAME_BOARD_PARAM, PUSH_NAME_PARAM,
+    PUSH_SOURCE_PARAM, PreviewSource, PushOffer, PushSource, PushSourceChoice, PushSourceGroup,
+    UiAction, UiExampleCard, UiOffer, UiPackageCard, device_chip, push_offer,
 };
 
 use super::card_thumb::{CardThumb, thumb_swatch_style};
-use super::device_roster_card::{RowCta, RowCtaDisabled, row_note_class};
+use super::device_roster_card::{LINE_VERB_CLASS, RowCta, RowCtaDisabled, row_note_class};
 use super::package_card::platform_now_secs;
 use super::thumb_poster::cached_poster;
 use crate::base::{
     OPTION_CARD_CHECK_CLASS, PopoverButton, PopoverCloseHandle, PopoverPlacement, StudioIcon,
     StudioIconName,
 };
-use crate::core::quiet_action_class;
+use crate::core::offer::offer_params_form::{picked_choice, pressed_or_refused, toggle_value};
+use crate::core::{quiet_action_class, visible_options};
 
 /// Where a board's chip fact came from — the panel says so, because "the
 /// list was filtered" only earns trust when the user can see what it was
@@ -152,62 +164,75 @@ impl PickTab {
     }
 }
 
-/// The empty face's verb row: the gallery popover's trigger plus the one
-/// primary verb, on the row's 30px line.
+/// How the gallery pick is being asked for.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ProjectPickMode {
+    /// The empty face's verb row: the trigger fills the row, the primary
+    /// verb sits beside it, and picking only updates the trigger.
+    Row,
+    /// The running face: "Replace…" at the end of the project line opens
+    /// the same gallery, and the verb rides the panel's foot, because the
+    /// row already holds Open and Remove. Over a project the library has no copy of, the verb
+    /// is Lasting and arms there (Q4).
+    Verb,
+}
+
+/// The board's `push` offer, drawn as the gallery pick: its `source`
+/// choice as the three-tab card grid, its optional `name` as the New tab's
+/// name row, `name_board` as the "Name the board the same" tick — and the
+/// press as the verb. Nothing here builds an op: the press is the offer's.
 ///
-/// Renders BOTH halves because they share one pick — the trigger shows it,
-/// the CTA dispatches it — and nothing is journaled in between.
+/// The cards are the offer's options, in the offer's order; what a card
+/// shows beyond its title (its tab, its section, its poster) is read off
+/// core's push offer for the same key ([`push_offer`]), the list the
+/// options were made from.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub(crate) fn ProjectPickPopover(
+    /// `devices/<board>/push`.
+    offer: UiOffer,
     card: DeviceView,
     projects: Vec<UiPackageCard>,
     examples: Vec<UiExampleCard>,
+    #[props(default = ProjectPickMode::Row)] mode: ProjectPickMode,
     /// Stories only: mount the panel open (capture cannot click).
     #[props(default = false)]
     initially_open: bool,
-    /// Stories only: the choice key to mount picked, so a capture can open
-    /// the panel on the tab that pick lives in (the New tab's name form).
+    /// Where the values start: empty for a fresh pick, or what someone
+    /// already chose (a story's pick, the app agent's).
     #[props(default)]
-    initial_pick: Option<String>,
+    initial_args: OfferArgs,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     // Every hook first: the "nothing to offer" row below is an early
     // return, and a hook behind one would shift the hook order the frame a
     // library appeared.
-    let mut pick = use_signal(|| initial_pick);
-    // The New tab's naming (optional, like everything about naming here):
-    // the project's name — `None` until typed, meaning "the board's own
-    // name", which is what a board and the piece it runs usually share —
-    // and whether a name typed for the project renames the board to match.
-    let mut typed_project_name = use_signal(|| None::<String>);
-    let mut name_board_too = use_signal(|| true);
-
-    let device = card.id;
-    let offer = push_offer(&card, &projects, &examples);
+    let args = use_signal(|| initial_args);
 
     // Nothing at all to offer: the row says why, in the words core chose.
-    if let Some(unavailable) = offer.unavailable.clone() {
+    let Some(source) = offer
+        .params()
+        .iter()
+        .find(|param| param.name == PUSH_SOURCE_PARAM)
+    else {
+        let reason = disabled_reason(&offer.action);
         return rsx! {
-            p { class: row_note_class(), title: "{unavailable}", "{unavailable}" }
+            p { class: row_note_class(), title: "{reason}", "{reason}" }
         };
-    }
-
-    // The stale-pick guard: a key the offer no longer carries (the library
-    // changed while the card sat there) falls back to the offer's own
-    // preselect rather than dispatching something that is gone.
-    let selected_key = pick()
-        .filter(|key| offer.choices.iter().any(|choice| &choice.key == key))
-        .or_else(|| offer.preselect.clone());
-    let chosen = selected_key
+    };
+    let current = args.read().clone();
+    let full = push_offer(&card, &projects, &examples);
+    let choices = push_choices(&offer, &full);
+    let picked_key = picked_choice(&offer, source, &current);
+    let chosen = picked_key
         .as_deref()
-        .and_then(|key| offer.choices.iter().find(|choice| choice.key == key))
+        .and_then(|key| choices.iter().find(|choice| choice.key == key))
         .cloned();
 
     let trigger_title = chosen
         .as_ref()
         .map(|choice| choice.title.clone())
-        .unwrap_or_else(|| format!("{} to choose from", offer.choices.len()));
+        .unwrap_or_else(|| format!("{} to choose from", choices.len()));
     let trigger_tag = chosen
         .as_ref()
         .map(|choice| provenance_tag(choice.group).to_string())
@@ -217,89 +242,138 @@ pub(crate) fn ProjectPickPopover(
         .as_ref()
         .map(|choice| choice.key.clone())
         .unwrap_or_else(|| "no-pick".to_string());
-    // The effective project name for a New push: what was typed, else the
-    // board's title. The board is renamed to match only when the name
-    // actually differs and the offer is still ticked.
-    let device_title = card.title.trim().to_string();
-    let project_name = typed_project_name()
-        .map(|name| name.trim().to_string())
-        .filter(|name| !name.is_empty())
-        .unwrap_or_else(|| device_title.clone());
-    let differs_from_board = project_name != device_title;
-    let naming = NewProjectNaming {
-        name: project_name.clone(),
-        differs_from_board,
-        name_board_too: name_board_too(),
-    };
-    let source = chosen.map(|choice| match choice.source {
-        PushSource::NewForBoard { board_id, .. } => PushSource::NewForBoard {
-            board_id,
-            name: Some(project_name.clone()),
-        },
-        other => other,
-    });
-    let device_name = match &source {
-        Some(PushSource::NewForBoard { .. }) if differs_from_board && name_board_too() => {
-            Some(project_name.clone())
+    let press_args = push_press_args(&current, chosen.as_ref());
+    let board_title = card.title.trim().to_string();
+    let panel = rsx! {
+        ProjectPickPanel {
+            offer: offer.clone(),
+            args,
+            choices: choices.clone(),
+            board_title,
+            new_unavailable: full.new_project_unavailable.clone(),
+            verb_in_foot: mode == ProjectPickMode::Verb,
+            on_action,
         }
-        _ => None,
     };
 
-    rsx! {
-        div { class: trigger_slot_class(),
+    match mode {
+        ProjectPickMode::Verb => rsx! {
             PopoverButton {
-                class: pick_trigger_class().to_string(),
-                open_class: pick_trigger_class().to_string(),
+                class: LINE_VERB_CLASS.to_string(),
+                open_class: LINE_VERB_CLASS.to_string(),
                 trigger: rsx! {
-                    ProjectSwatch { seed: trigger_seed, poster: trigger_poster }
-                    span { class: trigger_label_class(), "{trigger_title}" }
-                    if !trigger_tag.is_empty() {
-                        span { class: trigger_tag_class(), "{trigger_tag}" }
-                    }
-                    span { class: trigger_caret_class(), "\u{25be}" }
+                    span { "{REPLACE_LABEL}" }
                 },
-                label: "Choose what to put on this board".to_string(),
-                title: "Choose what to put on this board".to_string(),
+                label: "Choose something else to put on this board".to_string(),
+                title: offer.summary().to_string(),
                 popup_class: GALLERY_POPUP_CLASS.to_string(),
                 chrome_class: "ux-popover-chrome-neutral".to_string(),
                 placement: PopoverPlacement::BottomStart,
                 layer_keeps_layout: true,
                 initially_open,
-                ProjectPickPanel {
-                    offer,
-                    selected: selected_key,
-                    naming,
-                    on_pick: move |key: String| pick.set(Some(key)),
-                    on_name: move |name: String| typed_project_name.set(Some(name)),
-                    on_name_board_too: move |ticked: bool| name_board_too.set(ticked),
+                {panel}
+            }
+        },
+        ProjectPickMode::Row => rsx! {
+            div { class: trigger_slot_class(),
+                PopoverButton {
+                    class: pick_trigger_class().to_string(),
+                    open_class: pick_trigger_class().to_string(),
+                    trigger: rsx! {
+                        ProjectSwatch { seed: trigger_seed, poster: trigger_poster }
+                        span { class: trigger_label_class(), "{trigger_title}" }
+                        if !trigger_tag.is_empty() {
+                            span { class: trigger_tag_class(), "{trigger_tag}" }
+                        }
+                        span { class: trigger_caret_class(), "\u{25be}" }
+                    },
+                    label: "Choose what to put on this board".to_string(),
+                    title: "Choose what to put on this board".to_string(),
+                    popup_class: GALLERY_POPUP_CLASS.to_string(),
+                    chrome_class: "ux-popover-chrome-neutral".to_string(),
+                    placement: PopoverPlacement::BottomStart,
+                    layer_keeps_layout: true,
+                    initially_open,
+                    {panel}
                 }
             }
-        }
-        match source {
-            Some(source) => rsx! {
-                RowCta {
-                    action: DevicePushOp { device, source: source.clone(), device_name }.into_action(),
-                    on_action,
-                }
-            },
-            // Several things to choose from and none preselected: the verb
-            // waits rather than guessing which project the user meant.
-            None => rsx! {
-                RowCtaDisabled {
-                    label: "Put it on the board".to_string(),
-                    hint: "Pick what to put on the board first.".to_string(),
-                }
-            },
-        }
+            OfferRowCta { offer, args: press_args, on_action }
+        },
     }
 }
 
-/// The gallery panel: three tabs with counts, a title filter, a card grid,
-/// and the line saying these are the same cards the library pages show.
-///
-/// A component (rather than an inline fragment) so it has a scope of its own
-/// to read the enclosing popover's [`PopoverCloseHandle`] from — picking is a
-/// completed gesture, so it closes (the add-node picker's rule).
+/// The running face's gallery trigger: the pick replaces what runs.
+const REPLACE_LABEL: &str = "Replace\u{2026}";
+
+/// The offer's source options as cards, in the offer's order, each with
+/// what core's push offer says about the same key (tab, section, poster).
+/// An option core's list no longer carries is drawn from the option alone.
+fn push_choices(offer: &UiOffer, full: &PushOffer) -> Vec<PushSourceChoice> {
+    let Some(source) = offer
+        .params()
+        .iter()
+        .find(|param| param.name == PUSH_SOURCE_PARAM)
+    else {
+        return Vec::new();
+    };
+    visible_options(offer, source, &OfferArgs::new())
+        .into_iter()
+        .filter_map(|option| {
+            full.choices
+                .iter()
+                .find(|choice| choice.key == option.value)
+                .cloned()
+        })
+        .collect()
+}
+
+/// The press's values: what was picked, with the name and its tick only
+/// when the pick is the starter — they name a NEW project, and the offer
+/// refuses a name for an example or a library project.
+fn push_press_args(args: &OfferArgs, chosen: Option<&PushSourceChoice>) -> OfferArgs {
+    let starter = chosen.is_some_and(|choice| choice.group == PushSourceGroup::New);
+    let mut press = OfferArgs::new();
+    for (name, value) in args.iter() {
+        if !starter && (name == PUSH_NAME_PARAM || name == PUSH_NAME_BOARD_PARAM) {
+            continue;
+        }
+        press.insert(name, value);
+    }
+    press
+}
+
+/// The verb row's Primary for a parameterised offer: the press with `args`
+/// when it binds ([`RowCta`], which arms a Lasting binding), the verb
+/// waiting with why when it does not.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+pub(crate) fn OfferRowCta(
+    offer: UiOffer,
+    args: OfferArgs,
+    on_action: EventHandler<UiAction>,
+) -> Element {
+    let action = pressed_or_refused(&offer, &args);
+    match action.meta().enablement.is_enabled() {
+        true => rsx! {
+            RowCta { action, on_action }
+        },
+        false => rsx! {
+            RowCtaDisabled {
+                label: offer.label().to_string(),
+                hint: disabled_reason(&action),
+            }
+        },
+    }
+}
+
+/// An action's disabled reason, or nothing.
+fn disabled_reason(action: &UiAction) -> String {
+    match &action.meta().enablement {
+        ActionEnablement::Disabled { reason } => reason.clone(),
+        ActionEnablement::Enabled => String::new(),
+    }
+}
+
 /// The New tab's naming state, as the panel draws it.
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct NewProjectNaming {
@@ -312,51 +386,88 @@ struct NewProjectNaming {
     name_board_too: bool,
 }
 
+/// The gallery panel: three tabs with counts, a title filter, a card grid,
+/// and the line saying these are the same cards the library pages show.
+///
+/// A component (rather than an inline fragment) so it has a scope of its own
+/// to read the enclosing popover's [`PopoverCloseHandle`] from — picking is a
+/// completed gesture, so it closes (the add-node picker's rule) — except when
+/// the verb rides the foot, where picking only chooses and the verb closes.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn ProjectPickPanel(
-    offer: PushOffer,
-    selected: Option<String>,
-    naming: NewProjectNaming,
-    on_pick: EventHandler<String>,
-    on_name: EventHandler<String>,
-    on_name_board_too: EventHandler<bool>,
+    offer: UiOffer,
+    args: Signal<OfferArgs>,
+    choices: Vec<PushSourceChoice>,
+    /// What the board is called now: the starter's name when none is typed.
+    board_title: String,
+    /// Why the New tab has no starter, in core's words, when it has none.
+    #[props(default)]
+    new_unavailable: Option<String>,
+    /// The running face's reading: the press sits in the panel's foot.
+    #[props(default)]
+    verb_in_foot: bool,
+    on_action: EventHandler<UiAction>,
 ) -> Element {
     let close = try_consume_context::<PopoverCloseHandle>();
+    let current = args.read().clone();
+    let selected = offer
+        .params()
+        .iter()
+        .find(|param| param.name == PUSH_SOURCE_PARAM)
+        .and_then(|source| picked_choice(&offer, source, &current));
     // Open on the tab the current pick already lives in — the palette
     // chooser's rule ("the chooser opens on the tab its config already
     // is"). No pick means the gallery, which is where a first plug goes.
     let opening_tab = selected
         .as_deref()
-        .and_then(|key| offer.choices.iter().find(|choice| choice.key == key))
+        .and_then(|key| choices.iter().find(|choice| choice.key == key))
         .map_or(PickTab::Examples, |choice| PickTab::for_group(choice.group));
     let mut tab = use_signal(|| opening_tab);
     let mut query = use_signal(String::new);
 
-    let current = tab();
+    let current_tab = tab();
     let filter = query().trim().to_lowercase();
-    let visible: Vec<PushSourceChoice> = offer
-        .choices
+    let visible: Vec<PushSourceChoice> = choices
         .iter()
-        .filter(|choice| choice.group == current.group())
+        .filter(|choice| choice.group == current_tab.group())
         .filter(|choice| filter.is_empty() || choice.title.to_lowercase().contains(&filter))
         .cloned()
         .collect();
     let counts: Vec<(PickTab, usize)> = [PickTab::Examples, PickTab::Mine, PickTab::New]
         .into_iter()
         .map(|candidate| {
-            let count = offer
-                .choices
+            let count = choices
                 .iter()
                 .filter(|choice| choice.group == candidate.group())
                 .count();
             (candidate, count)
         })
         .collect();
-    let new_unavailable = offer.new_project_unavailable.clone();
+    let takes_a_name = offer
+        .params()
+        .iter()
+        .any(|param| param.name == PUSH_NAME_PARAM);
     // The name form rides the New tab under its one card: a starter is the
     // one source that has no name yet.
-    let show_naming = current == PickTab::New && !visible.is_empty();
+    let show_naming = current_tab == PickTab::New && !visible.is_empty() && takes_a_name;
+    let typed = current
+        .text(PUSH_NAME_PARAM)
+        .map(str::to_string)
+        .unwrap_or_else(|| board_title.clone());
+    let naming = NewProjectNaming {
+        differs_from_board: typed != board_title,
+        name: current
+            .get(PUSH_NAME_PARAM)
+            .map(str::to_string)
+            .unwrap_or_else(|| board_title.clone()),
+        name_board_too: toggle_value(&offer, &current, PUSH_NAME_BOARD_PARAM),
+    };
+    let chosen = selected
+        .as_deref()
+        .and_then(|key| choices.iter().find(|choice| choice.key == key))
+        .cloned();
+    let press_args = push_press_args(&current, chosen.as_ref());
     // The visible choices in their sections, encounter order: the Examples
     // tab reads "Projects" then "Patterns" (core's grouping); the other
     // tabs have one unlabelled section.
@@ -379,7 +490,7 @@ fn ProjectPickPanel(
                     for (candidate , count) in counts {
                         button {
                             key: "{candidate:?}",
-                            class: tab_class(candidate == current),
+                            class: tab_class(candidate == current_tab),
                             r#type: "button",
                             onclick: move |event: MouseEvent| {
                                 event.stop_propagation();
@@ -404,7 +515,7 @@ fn ProjectPickPanel(
                 // board has not said which board it is".
                 if nothing_visible {
                     p { class: panel_note_class(),
-                        if current == PickTab::New {
+                        if current_tab == PickTab::New {
                             {
                                 new_unavailable
                                     .clone()
@@ -430,8 +541,8 @@ fn ProjectPickPanel(
                                             choice: choice.clone(),
                                             selected: picked,
                                             on_pick: move |_| {
-                                                on_pick.call(key.clone());
-                                                if let Some(mut close) = close {
+                                                args.write().insert(PUSH_SOURCE_PARAM, key.clone());
+                                                if !verb_in_foot && let Some(mut close) = close {
                                                     close.close();
                                                 }
                                             },
@@ -451,7 +562,7 @@ fn ProjectPickPanel(
                         r#type: "text",
                         aria_label: "Project name",
                         value: "{naming.name}",
-                        oninput: move |event| on_name.call(event.value()),
+                        oninput: move |event| args.write().insert(PUSH_NAME_PARAM, event.value()),
                     }
                 }
                 if naming.differs_from_board {
@@ -459,13 +570,29 @@ fn ProjectPickPanel(
                         input {
                             r#type: "checkbox",
                             checked: naming.name_board_too,
-                            onchange: move |event| on_name_board_too.call(event.checked()),
+                            onchange: move |event| {
+                                args.write().insert(PUSH_NAME_BOARD_PARAM, event.checked().to_string())
+                            },
                         }
                         "Name the board the same"
                     }
                 } else {
                     p { class: panel_name_hint_class(),
                         "Named after the board \u{2014} a piece and the board that runs it usually share a name."
+                    }
+                }
+            }
+            if verb_in_foot {
+                div { class: panel_verb_row_class(),
+                    OfferRowCta {
+                        offer: offer.clone(),
+                        args: press_args,
+                        on_action: move |action: UiAction| {
+                            on_action.call(action);
+                            if let Some(mut close) = close {
+                                close.close();
+                            }
+                        },
                     }
                 }
             }
@@ -533,140 +660,62 @@ pub(crate) enum BoardPickMode {
     Verb,
 }
 
-/// The board pick, as a popover (AC4).
+/// A firmware verb's board pick (`devices/<board>/flash`, or
+/// `update-firmware` when its board did not resolve), as a popover (AC4):
+/// the offer's `board` choice as the tiles, its `all_boards` toggle as the
+/// filter line's escape, its optional `name` as the name row, and the
+/// offer's press as the verb. Nothing here builds an op.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub(crate) fn BoardPickPopover(
-    device: DeviceId,
-    /// The joined chip and the source that answered — `None` when neither
-    /// source knows it, which widens the offer to every served board.
+    /// The firmware verb's offer.
+    offer: UiOffer,
+    /// The joined chip and the source that answered — the filter line's
+    /// words. `None` when neither source knows it (the offer was never
+    /// narrowed, so it has no `all_boards` toggle).
     #[props(default = None)]
     chip: Option<(String, ChipSource)>,
     #[props(default = BoardPickMode::Row)] mode: BoardPickMode,
     /// Stories only: mount the panel open (capture cannot click).
     #[props(default = false)]
     initially_open: bool,
+    /// Where the values start: empty for a fresh pick, or what someone
+    /// already chose (the app agent's).
+    #[props(default)]
+    initial_args: OfferArgs,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     // Hooks before the early return, for the same reason the gallery's are.
-    let mut show_all = use_signal(|| false);
-    let mut pick = use_signal(|| None::<String>);
-    // The optional name typed at setup. Blank leaves the derived
-    // "<board> · <Mon D>" (the no-naming-step ruling); typed, it rides the
-    // Flash as the board's name from the first hello on.
-    let mut typed_name = use_signal(String::new);
+    let args = use_signal(|| initial_args);
 
-    let chip_name = chip.as_ref().map(|(name, _)| name.clone());
-    // Show-all is local UI state: the escape from the chip filter, never a
-    // fact about the device.
-    let filter_chip = match show_all() {
-        true => None,
-        false => chip_name.as_deref(),
-    };
-    let offer = flash_offer(filter_chip);
-
-    if let Some(unavailable) = offer.unavailable.clone() {
+    // Nothing to choose: this Studio serves no build for the chip. The row
+    // says why, in core's words.
+    let Some(board) = board_param(&offer) else {
+        let reason = disabled_reason(&offer.action);
         return rsx! {
-            p { class: row_note_class(), title: "{unavailable}", "{unavailable}" }
+            p { class: row_note_class(), title: "{reason}", "{reason}" }
         };
-    }
-
-    // The same stale-pick guard as the gallery: a board id the (possibly
-    // re-filtered) offer no longer carries falls back to its preselect.
-    let selected_id = pick()
-        .filter(|id| {
-            offer
-                .candidates
-                .iter()
-                .any(|candidate| &candidate.board_id == id)
-        })
-        .or_else(|| offer.preselect.clone());
-    let chosen = selected_id
-        .as_deref()
-        .and_then(|id| {
-            offer
-                .candidates
-                .iter()
-                .find(|candidate| candidate.board_id == id)
-        })
-        .cloned();
-
-    let flash_action = move |choice: &FlashBoardChoice| {
-        let name = typed_name.read().trim().to_string();
-        DevicesOp::action_for(DeviceAction::Flash {
-            device,
-            board_id: choice.board_id.clone(),
-            build_id: choice.build_id.clone(),
-            park_first: choice.park_first,
-            name: (!name.is_empty()).then_some(name),
-            restore_backup: false,
-        })
     };
-    // What the board will be called if the field stays blank: the derived
-    // name the app mints for the picked board (the collision suffix is the
-    // app's, at flash time).
-    let name_placeholder = chosen
-        .as_ref()
-        .map(|choice| {
-            lpa_studio_core::app::devices::derive_flash_name(
-                &choice.title,
-                platform_now_secs(),
-                &[],
-            )
-        })
-        .unwrap_or_else(|| "Named after the board".to_string());
-    // Only the needs-firmware row names a board: an update is a re-flash of
-    // a board that already has its name.
-    let name_field = match mode {
-        BoardPickMode::Row => Some(typed_name()),
-        BoardPickMode::Verb => None,
-    };
-
-    let lead = board_filter_lead(
-        chip.as_ref().map(|(name, source)| (name.as_str(), *source)),
-        offer.candidates.len(),
-        show_all(),
-    );
-    let escape = board_filter_escape(chip_name.as_deref(), show_all());
-    // The verb whose pick this is, when the verb itself opened it: the
-    // Update-with-pick verb, whose reason line core wrote.
-    let verb = match mode {
+    let current = args.read().clone();
+    let options = visible_options(&offer, &board, &current).len();
+    let chosen = picked_choice(&offer, &board, &current).and_then(|value| {
+        visible_options(&offer, &board, &current)
+            .into_iter()
+            .find(|option| option.value == value)
+            .cloned()
+    });
+    let why = match mode {
         BoardPickMode::Row => None,
-        BoardPickMode::Verb => Some(FirmwareVerb::UpdatePick),
+        BoardPickMode::Verb => FirmwareVerb::UpdatePick.pick_reason().map(str::to_string),
     };
-    let why = verb
-        .as_ref()
-        .and_then(|verb| verb.pick_reason())
-        .map(str::to_string);
-    let candidates = offer.candidates.clone();
-    let candidates_for_pick = offer.candidates.clone();
     let panel = rsx! {
         BoardPickPanel {
-            candidates,
-            chip: chip_name.clone(),
-            selected: selected_id,
-            lead,
+            offer: offer.clone(),
+            args,
+            chip: chip.clone(),
             why,
-            name: name_field,
-            name_placeholder,
-            on_name: move |name: String| typed_name.set(name),
-            escape_label: escape.as_ref().map(|escape| escape.label.clone()),
-            escape_show_all: escape.map(|escape| escape.show_all).unwrap_or_default(),
-            on_show_all: move |next: bool| show_all.set(next),
-            on_pick: move |board_id: String| {
-                match mode {
-                    BoardPickMode::Row => pick.set(Some(board_id)),
-                    // The verb was already pressed: picking IS the flash.
-                    BoardPickMode::Verb => {
-                        if let Some(choice) = candidates_for_pick
-                            .iter()
-                            .find(|candidate| candidate.board_id == board_id)
-                        {
-                            on_action.call(flash_action(choice));
-                        }
-                    }
-                }
-            },
+            press_on_pick: mode == BoardPickMode::Verb,
+            on_action,
         }
     };
 
@@ -676,10 +725,10 @@ pub(crate) fn BoardPickPopover(
                 class: quiet_action_class().to_string(),
                 open_class: quiet_action_class().to_string(),
                 trigger: rsx! {
-                    span { "{FirmwareVerb::UpdatePick.label()}" }
+                    span { "{offer.label()}" }
                 },
-                label: FirmwareVerb::UpdatePick.label().to_string(),
-                title: FirmwareVerb::UpdatePick.summary(),
+                label: offer.label().to_string(),
+                title: offer.summary().to_string(),
                 popup_class: BOARD_POPUP_CLASS.to_string(),
                 chrome_class: "ux-popover-chrome-neutral".to_string(),
                 placement: PopoverPlacement::BottomStart,
@@ -694,11 +743,9 @@ pub(crate) fn BoardPickPopover(
                     class: pick_trigger_class().to_string(),
                     open_class: pick_trigger_class().to_string(),
                     trigger: rsx! {
-                        BoardSwatch {
-                            board_id: chosen.as_ref().map(|choice| choice.board_id.clone()),
-                        }
-                        span { class: trigger_label_class(), "{board_trigger_label(&chosen, offer.candidates.len())}" }
-                        if let Some(family) = chosen.as_ref().and_then(|choice| board_family(&choice.board_id)) {
+                        BoardSwatch { board_id: chosen.as_ref().map(|choice| choice.value.clone()) }
+                        span { class: trigger_label_class(), "{board_trigger_label(&chosen, options)}" }
+                        if let Some(family) = chosen.as_ref().and_then(|choice| board_family(&choice.value)) {
                             span { class: trigger_tag_class(), "{family}" }
                         }
                         span { class: trigger_caret_class(), "\u{25be}" }
@@ -714,69 +761,113 @@ pub(crate) fn BoardPickPopover(
                     {panel}
                 }
             }
-            match chosen {
-                Some(choice) => rsx! {
-                    RowCta { action: flash_action(&choice), on_action }
-                },
-                // The pin map is written to the device, so an unresolved
-                // pick leaves the verb waiting rather than guessing.
-                None => rsx! {
-                    RowCtaDisabled {
-                        label: "Flash firmware".to_string(),
-                        hint: "Pick the board first — the pin map is written to the device."
-                            .to_string(),
-                    }
-                },
-            }
+            // The pin map is written to the device, so an unresolved pick
+            // leaves the verb waiting rather than guessing.
+            OfferRowCta { offer, args: current, on_action }
         },
     }
 }
 
-/// The board panel: the filter line and its escape, the board tiles, and the
-/// sentence that says why the pick matters and why a wrong one is survivable.
+/// The offer's board choice, when it has one.
+fn board_param(offer: &UiOffer) -> Option<OfferParam> {
+    offer
+        .params()
+        .iter()
+        .find(|param| param.name == FLASH_BOARD_PARAM)
+        .cloned()
+}
+
+/// The board panel: the filter line and its escape, the board tiles, the
+/// optional name row, and the sentence that says why the pick matters and
+/// why a wrong one is survivable — all drawn from a firmware verb's offer
+/// over `args`, so the same panel renders the card's pick and a pick handed
+/// over pre-filled.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn BoardPickPanel(
-    candidates: Vec<FlashBoardChoice>,
-    /// The chip the list was filtered by, for the tiles' "matches" mark.
-    chip: Option<String>,
-    selected: Option<String>,
-    lead: String,
+pub(crate) fn BoardPickPanel(
+    offer: UiOffer,
+    args: Signal<OfferArgs>,
+    /// The chip the list was filtered by and its source, for the filter
+    /// line and the tiles' "matches" mark.
+    #[props(default)]
+    chip: Option<(String, ChipSource)>,
     /// Why a pick is being asked for on THIS verb, when the verb itself
     /// opened the panel (a running board whose board is unknown). Core's
     /// words; `None` on the needs-firmware row, where the pick is the face.
     #[props(default)]
     why: Option<String>,
-    escape_label: Option<String>,
-    escape_show_all: bool,
-    /// The optional board-name field's value; `None` draws no field (the
-    /// Update verb's pick — that board has its name).
+    /// Picking a tile presses the offer (the Update verb's pick: the verb
+    /// was already pressed). Off, picking only chooses.
     #[props(default)]
-    name: Option<String>,
-    /// What the board is called if the field stays blank.
-    #[props(default)]
-    name_placeholder: String,
-    on_show_all: EventHandler<bool>,
-    on_pick: EventHandler<String>,
-    on_name: EventHandler<String>,
+    press_on_pick: bool,
+    on_action: EventHandler<UiAction>,
 ) -> Element {
     let close = try_consume_context::<PopoverCloseHandle>();
+    let Some(board) = board_param(&offer) else {
+        return rsx! {};
+    };
+    let current = args.read().clone();
+    let candidates: Vec<OfferChoice> = visible_options(&offer, &board, &current)
+        .into_iter()
+        .cloned()
+        .collect();
+    let selected = picked_choice(&offer, &board, &current);
+    let narrowable = offer
+        .params()
+        .iter()
+        .any(|param| param.name == FLASH_ALL_BOARDS_PARAM);
+    let show_all = toggle_value(&offer, &current, FLASH_ALL_BOARDS_PARAM);
+    let chip_name = chip.as_ref().map(|(name, _)| name.clone());
+    let lead = board_filter_lead(
+        chip.as_ref().map(|(name, source)| (name.as_str(), *source)),
+        candidates.len(),
+        show_all,
+    );
+    let escape = board_filter_escape(chip_name.as_deref().filter(|_| narrowable), show_all);
+    // Only the needs-firmware verb names a board: an update is a re-flash
+    // of a board that already has its name.
+    let name = offer
+        .params()
+        .iter()
+        .any(|param| param.name == FLASH_NAME_PARAM)
+        .then(|| {
+            current
+                .get(FLASH_NAME_PARAM)
+                .unwrap_or_default()
+                .to_string()
+        });
+    // What the board will be called if the field stays blank: the derived
+    // name the app mints for the picked board (the collision suffix is the
+    // app's, at flash time).
+    let name_placeholder = selected
+        .as_deref()
+        .and_then(|value| candidates.iter().find(|choice| choice.value == value))
+        .map(|choice| {
+            lpa_studio_core::app::devices::derive_flash_name(
+                &choice.label,
+                platform_now_secs(),
+                &[],
+            )
+        })
+        .unwrap_or_else(|| "Named after the board".to_string());
+    let pick_offer = offer.clone();
 
     rsx! {
         div { class: "tw:grid tw:min-w-0",
             div { class: panel_top_class(),
                 p { class: filter_line_class(),
                     "{lead}"
-                    if let Some(label) = escape_label.clone() {
+                    if let Some(escape) = escape {
                         " \u{b7} "
                         button {
                             class: filter_escape_class(),
                             r#type: "button",
                             onclick: move |event: MouseEvent| {
                                 event.stop_propagation();
-                                on_show_all.call(escape_show_all);
+                                args.write()
+                                    .insert(FLASH_ALL_BOARDS_PARAM, escape.show_all.to_string());
                             },
-                            "{label}"
+                            "{escape.label}"
                         }
                     }
                 }
@@ -788,18 +879,27 @@ fn BoardPickPanel(
                 div { class: board_grid_class(),
                     for candidate in candidates {
                         {
-                            let picked = selected.as_deref() == Some(candidate.board_id.as_str());
-                            let board_id = candidate.board_id.clone();
-                            let family = board_family(&candidate.board_id);
-                            let matches = family.is_some() && family.as_deref() == chip.as_deref();
+                            let picked = selected.as_deref() == Some(candidate.value.as_str());
+                            let board_id = candidate.value.clone();
+                            let family = board_family(&candidate.value);
+                            let matches = family.is_some() && family.as_deref() == chip_name.as_deref();
+                            let pick_offer = pick_offer.clone();
                             rsx! {
                                 button {
-                                    key: "{candidate.board_id}",
+                                    key: "{candidate.value}",
                                     class: board_tile_class(picked),
                                     r#type: "button",
+                                    disabled: candidate.disabled.is_some(),
+                                    title: candidate.disabled.clone().unwrap_or_default(),
                                     onclick: move |event: MouseEvent| {
                                         event.stop_propagation();
-                                        on_pick.call(board_id.clone());
+                                        args.write().insert(FLASH_BOARD_PARAM, board_id.clone());
+                                        if press_on_pick {
+                                            let action = pressed_or_refused(&pick_offer, &args.read());
+                                            if action.meta().enablement.is_enabled() {
+                                                on_action.call(action);
+                                            }
+                                        }
                                         if let Some(mut close) = close {
                                             close.close();
                                         }
@@ -809,9 +909,9 @@ fn BoardPickPanel(
                                             StudioIcon { name: StudioIconName::StepComplete, size: 10 }
                                         }
                                     }
-                                    BoardFigure { board_id: candidate.board_id.clone() }
-                                    span { class: board_tile_title_class(), "{candidate.title}" }
-                                    span { class: board_tile_sub_class(), "{candidate.blurb}" }
+                                    BoardFigure { board_id: candidate.value.clone() }
+                                    span { class: board_tile_title_class(), "{candidate.label}" }
+                                    span { class: board_tile_sub_class(), {candidate.detail.clone().unwrap_or_default()} }
                                     if let Some(family) = family {
                                         span { class: board_tile_family_class(matches),
                                             "{family_tag_text(&family, matches)}"
@@ -832,7 +932,7 @@ fn BoardPickPanel(
                         aria_label: "Board name (optional)",
                         placeholder: "{name_placeholder}",
                         value: "{name}",
-                        oninput: move |event| on_name.call(event.value()),
+                        oninput: move |event| args.write().insert(FLASH_NAME_PARAM, event.value()),
                     }
                 }
             }
@@ -909,9 +1009,9 @@ fn board_count(fits: usize) -> String {
 }
 
 /// The board trigger's label: the pick, or how many are waiting for one.
-fn board_trigger_label(chosen: &Option<FlashBoardChoice>, candidates: usize) -> String {
+fn board_trigger_label(chosen: &Option<OfferChoice>, candidates: usize) -> String {
     match chosen {
-        Some(choice) => choice.title.clone(),
+        Some(choice) => choice.label.clone(),
         None => board_count(candidates),
     }
 }
@@ -1136,6 +1236,12 @@ fn panel_name_offer_class() -> &'static str {
     "tw:flex tw:cursor-pointer tw:items-center tw:gap-1.5 tw:px-2.5 tw:pb-2 tw:text-[11px] tw:text-muted-foreground"
 }
 
+/// The running face's gallery: the verb rides the panel's foot, above the
+/// foot line, in the name row's hairline grammar.
+fn panel_verb_row_class() -> &'static str {
+    "tw:flex tw:min-w-0 tw:items-center tw:justify-end tw:border-t tw:border-border-muted tw:px-2.5 tw:py-2"
+}
+
 fn panel_name_hint_class() -> &'static str {
     "tw:m-0 tw:px-2.5 tw:pb-2 tw:text-[11px] tw:leading-snug tw:text-dim-foreground"
 }
@@ -1242,6 +1348,7 @@ fn board_tile_family_class(matches: bool) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lpa_studio_core::{DeviceId, flash_offer};
 
     /// AC4: the filter line states the filter AND the source that answered
     /// it, says how many boards survived, and reads honestly in the two
@@ -1414,7 +1521,10 @@ mod tests {
             .cloned()
             .expect("the catalog ships a C6 board");
         let title = choice.title.clone();
-        assert_eq!(board_trigger_label(&Some(choice), 2), title);
+        assert_eq!(
+            board_trigger_label(&Some(OfferChoice::new(choice.board_id, choice.title)), 2),
+            title
+        );
     }
 
     fn card_fixture() -> DeviceView {

@@ -41,6 +41,7 @@
 //! - `README.md` and `docs/adr/2026-08-25-event-fold-device-model.md`.
 
 pub mod activity;
+pub mod board_key;
 pub mod bootloader;
 pub mod device;
 pub mod event;
@@ -61,6 +62,7 @@ pub use activity::{
     ActivityCell, ActivityKind, ActivityOutcome, CancelPhase, FlashLayoutView, LayoutVerdict,
     PushActivity,
 };
+pub use board_key::{BoardKey, BoardKeyError};
 pub use device::{Device, DeviceStatus};
 pub use event::{Action, ActivityMarker, Command, EffectId, EffectRequest, Event, Input};
 pub use evidence::{
