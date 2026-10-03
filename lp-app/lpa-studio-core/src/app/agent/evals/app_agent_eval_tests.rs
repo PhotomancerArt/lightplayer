@@ -504,7 +504,7 @@ fn the_reported_place_moves_the_readouts_lead_and_the_palettes_order() {
     let view = studio.view.clone().expect("a view");
     let focus = view.offers.focus().clone();
     let node = focus.node.clone().expect("the editor focuses a node");
-    assert_eq!(focus.area, Some(crate::OfferPath::project()));
+    assert_eq!(focus.areas, [crate::OfferPath::project()]);
     let first = view.offers.search("remove")[0].path.clone();
     assert_eq!(
         first.owner(),

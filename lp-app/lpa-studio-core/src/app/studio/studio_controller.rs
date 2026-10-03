@@ -646,11 +646,19 @@ impl StudioController {
             None if home => Some(crate::OfferPath::devices()),
             None => Some(crate::OfferPath::project()),
         };
+        let mut areas: Vec<crate::OfferPath> = area.into_iter().collect();
+        // With no project open, the gallery pages are where a project is
+        // started or opened: Home's `project/new` and `project/open` are
+        // the page's own verbs there (and the only project verbs in the
+        // tree), so they rank and list with the devices'.
+        if home && areas.contains(&crate::OfferPath::devices()) {
+            areas.push(crate::OfferPath::project());
+        }
         let node = self
             .editor_view_in_place(home)
             .and_then(|view| self.project.looked_at_node(view))
             .map(|node| crate::OfferPath::project_node(node.address()));
-        crate::UiOfferFocus { node, area }
+        crate::UiOfferFocus { node, areas }
     }
 
     /// (Re)install whichever transport this build's halves add up to, and
@@ -2183,6 +2191,11 @@ impl StudioController {
     pub fn view(&self) -> UiStudioView {
         let mut offers = crate::UiOfferTree::new();
         if let Some(home) = self.home_view() {
+            // Home's own verbs first: with no project open, starting or
+            // opening one is what the page is for.
+            for offer in crate::home_offers(&home) {
+                offers.publish(offer);
+            }
             self.publish_device_offers(&mut offers);
             offers.set_focus(self.offer_focus(true));
             return UiStudioView::new(Vec::new(), self.console_view())
@@ -7458,6 +7471,14 @@ impl StudioController {
     #[cfg(test)]
     pub(crate) fn project_for_test(&self) -> &ProjectController {
         &self.project
+    }
+
+    /// Drop the test builders' stand-in project, so the view is Home (no
+    /// project open), as a fresh tab shows it.
+    #[cfg(test)]
+    pub(crate) fn show_home_for_test(&mut self) {
+        self.project.reset();
+        self.mark_dirty();
     }
 
     pub(crate) fn pending_device_lens_for_test(&self) -> Option<String> {

@@ -64,6 +64,29 @@ pub fn build_app_system_prompt(reference: &str) -> String {
          use, set to your values, and the user's click on it is what does \
          it (they may change a value first). After `needs_user`, stop: say in one line which card to click \
          and why. Never ask the user to type yes instead of clicking.\n\
+         - Never tell the user that a card or a button is waiting for them \
+         unless `act` returned `needs_user` with that card in this turn. To \
+         hand the user a click, `act` the action: the card is what `act` \
+         makes, not something you announce.\n\
+         - With no project open (the page is home), start one before you \
+         build: `project/new` creates a new, empty project and opens it in \
+         the editor (`name` is optional; leave `template` out for an empty \
+         one), and `project/open` opens one from the user's library \
+         (`project`: one of those it lists). `edit_project` works only once \
+         a project is open.\n\
+         - A flash or a firmware update leaves the board running nothing. \
+         When one finishes, look at that board's line under devices. If it \
+         runs nothing, or not the user's project, put the project on it \
+         with the board's `push` (its `source` lists the library's projects, \
+         the open one among them; save first, so the board gets the latest \
+         edits). If it has not said yet what it runs, `read` the device \
+         again. Never finish at a board that runs nothing when the user \
+         wanted their lights running.\n\
+         - A playlist rotates through its patterns only while its `cycle` \
+         is on (see Playlist cycle below). Whenever the user wants several \
+         patterns to take turns (\"cycle a few patterns\", \"rotate\", \"a \
+         show\"), set `cycle` in the same `edit_project` that fills the \
+         playlist.\n\
          - <app_state> also lists the Add node picker's actions: \
          `project/add-node` (`kind`), `project/import-pattern` (`pattern`) \
          and `project/paste-node`, plus the same under each playlist. They \
@@ -121,6 +144,22 @@ mod tests {
         assert!(
             prompt.contains("only counted"),
             "how to expand a counted node"
+        );
+        assert!(
+            prompt.contains("`project/new`") && prompt.contains("`project/open`"),
+            "how to start a project from home"
+        );
+        assert!(
+            prompt.contains("unless `act` returned `needs_user` with that card"),
+            "never announce a card it did not make"
+        );
+        assert!(
+            prompt.contains("leaves the board running nothing"),
+            "push after a flash"
+        );
+        assert!(
+            prompt.contains("only while its `cycle`"),
+            "a playlist cycles only with cycle on"
         );
         assert!(prompt.ends_with("## Reference"));
     }

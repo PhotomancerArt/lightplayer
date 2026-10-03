@@ -443,10 +443,25 @@ pub fn device_lines(roster: &DeviceRosterView) -> String {
             _ => "other firmware",
         };
         // What it runs is the board's own report; before its first one,
-        // nothing is claimed.
+        // nothing is claimed — but a LightPlayer that has not reported yet
+        // says so, because right after a flash or an update that is the
+        // state the agent must not read as done. A board that runs nothing
+        // says it plainly: its lights are dark until a project is pushed
+        // (the corpus's S15 and S19 stopped there, at a blank board).
+        let lightplayer = matches!(
+            device.firmware_face,
+            lpa_devices::FirmwareFace::LightPlayer { .. }
+        );
         let loaded = match &device.loaded_project {
             lpa_devices::view::LoadedProject::Running { label } => format!("; running {label:?}"),
-            lpa_devices::view::LoadedProject::Empty => "; no project loaded".to_string(),
+            lpa_devices::view::LoadedProject::Empty => {
+                " — no project on it; it runs nothing and its lights stay dark until one \
+                 is pushed"
+                    .to_string()
+            }
+            lpa_devices::view::LoadedProject::Unknown if lightplayer => {
+                "; has not said yet what it runs".to_string()
+            }
             lpa_devices::view::LoadedProject::Unknown => String::new(),
         };
         let _ = writeln!(
@@ -475,7 +490,7 @@ mod tests {
             lead: "page: project editor\n".to_string(),
             focus: UiOfferFocus {
                 node: Some(node.clone()),
-                area: Some(OfferPath::project()),
+                areas: vec![OfferPath::project()],
             },
             offers: vec![
                 UiOffer::new(
@@ -719,12 +734,69 @@ mod tests {
     fn devices_page() -> UiOfferFocus {
         UiOfferFocus {
             node: None,
-            area: Some(OfferPath::devices()),
+            areas: vec![OfferPath::devices()],
         }
     }
 
     fn save_action() -> UiAction {
         UiAction::from_op(ControllerId::new("studio|project"), ProjectOp::SaveOverlay)
+    }
+
+    /// A board that runs nothing says so in words the agent cannot read
+    /// as done (S15, S19), and a LightPlayer that has not reported yet
+    /// says that instead of nothing.
+    #[test]
+    fn a_board_that_runs_nothing_says_so_plainly() {
+        use lpa_devices::view::LoadedProject;
+        let line = |loaded: LoadedProject| {
+            let mut roster = DeviceRosterView::default();
+            roster.roster.devices.push(lightplayer_board(loaded));
+            device_lines(&roster)
+        };
+        assert_eq!(
+            line(LoadedProject::Empty),
+            "devices:\n- \"Bench board\": chip esp32c6; board seeed/xiao-esp32-c6; \
+             LightPlayer; Ready — no project on it; it runs nothing and its lights stay \
+             dark until one is pushed\n"
+        );
+        assert!(line(LoadedProject::Unknown).ends_with("; Ready; has not said yet what it runs\n"));
+        assert!(
+            line(LoadedProject::Running {
+                label: "porch".to_string()
+            })
+            .ends_with("; Ready; running \"porch\"\n")
+        );
+    }
+
+    fn lightplayer_board(loaded: lpa_devices::view::LoadedProject) -> lpa_devices::DeviceView {
+        lpa_devices::DeviceView {
+            id: crate::DeviceId(7),
+            title: "Bench board".to_string(),
+            status: lpa_devices::device::DeviceStatus::Ready,
+            state_label: "Ready".to_string(),
+            detail: None,
+            freshness_label: None,
+            identity_label: None,
+            detected_chip: Some("esp32c6".to_string()),
+            board_id: Some("seeed/xiao-esp32-c6".to_string()),
+            firmware_face: lpa_devices::FirmwareFace::LightPlayer {
+                firmware: None,
+                wire: lpa_devices::WireVersion::Match,
+            },
+            remembered_firmware: None,
+            degraded: None,
+            loaded_project: loaded,
+            engine_fps: None,
+            link_counters: None,
+            can_receive_project: true,
+            can_remove_project: false,
+            activity: None,
+            last_outcome: None,
+            terminal: Vec::new(),
+            terminal_dropped: 0,
+            firmware_blocked: None,
+            escapes: Vec::new(),
+        }
     }
 
     #[test]

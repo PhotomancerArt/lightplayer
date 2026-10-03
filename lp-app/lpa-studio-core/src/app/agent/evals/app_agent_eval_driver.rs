@@ -218,6 +218,18 @@ impl AgentEvalStudio {
         }
     }
 
+    /// Start with no project open: the user is on Home.
+    pub(crate) fn start_on_home(&mut self) {
+        self.controller().show_home_for_test();
+        // One batch hydrates the gallery's library inputs, as a page load
+        // does before Home can offer anything from the library.
+        self.command(StudioCommand::LibraryChanged);
+        assert!(
+            self.controller().view().home.is_some(),
+            "no project open shows Home"
+        );
+    }
+
     /// Facts the readout cannot show (the scenario's board line).
     pub(crate) fn set_context(&mut self, context: &str) {
         self.controller()

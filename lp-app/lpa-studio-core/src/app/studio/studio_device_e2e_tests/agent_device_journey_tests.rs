@@ -137,7 +137,8 @@ fn e4_the_agent_connects_flashes_a_blank_board_pushes_and_sees_it_run() {
     seat.send(&mut bench, &tasks, "Now put something colourful on it.");
     let seen = seat.readout_of_request(seat.requests() - 2);
     assert!(
-        seen.contains("; Ready; no project loaded\n") && seen.contains(&format!("- {push}: ")),
+        seen.contains("; Ready — no project on it; it runs nothing")
+            && seen.contains(&format!("- {push}: ")),
         "{seen}"
     );
     let results = seat.tool_results(&mut bench);

@@ -28,6 +28,7 @@ use lpa_studio_core::{
     DeviceView, OutcomeView, PendingLinkView, RosterView,
 };
 
+use crate::app::home::ExplorePage;
 use crate::app::home::card_thumb::CardThumb;
 use crate::app::home::device_offer_story_fixtures::StoryDevicesPage;
 use crate::app::home::device_offer_story_fixtures::{
@@ -38,8 +39,8 @@ use crate::app::home::device_pick_popover::{
 };
 use crate::app::home::device_terminal::DeviceTerminal;
 use crate::app::home::gallery_preview::ThumbPreviewBadge;
+use crate::app::home::home_offer_story_fixtures::StoryProjectsPage;
 use crate::app::home::target_pick_popover::TargetPickPopover;
-use crate::app::home::{ExplorePage, ProjectsPage};
 use crate::core::OffersProvider;
 use lpa_studio_core::{BluetoothReach, OfferArgs, PUSH_SOURCE_PARAM, UiOffer};
 
@@ -1767,7 +1768,7 @@ fn GalleryPages(
     rsx! {
         div { class: "tw:grid tw:gap-10",
             StoryDevicesPage { home: home.clone(), on_action }
-            ProjectsPage { home: home.clone(), now_secs, on_action }
+            StoryProjectsPage { home: home.clone(), now_secs, on_action }
             ExplorePage { home: Some(home), on_action }
         }
     }
