@@ -92,6 +92,7 @@ use fw_esp32_common::boot;
     feature = "test_espnow",
     feature = "test_espnow_broadcast",
     feature = "test_gpio_input",
+    feature = "test_ble_coex",
 ))]
 mod hardware;
 #[cfg(all(feature = "heap_map_diag", not(fw_harness)))]
@@ -102,6 +103,10 @@ pub use fw_esp32_common::logger;
 // The app, plus the five harnesses that light a strip. `test_gpio` used to be
 // in this list and drives pins directly, so it only pulled in an output tree
 // nothing in that build touches.
+#[cfg(all(feature = "io-thread", not(fw_harness)))]
+mod io_thread;
+#[cfg(all(feature = "io_thread_stack_diag", not(fw_harness)))]
+mod io_thread_stack_diag;
 #[cfg(any(
     not(fw_harness),
     feature = "test_rmt",
@@ -148,6 +153,8 @@ use fw_esp32_common::lp_fs;
 use hardware::espnow_radio_driver::Esp32EspNowRadioDriver;
 #[cfg(not(fw_harness))]
 use lpfs::lp_path::AsLpPath;
+#[cfg(all(not(feature = "io-thread"), not(fw_harness)))]
+use serial::usb_link_task;
 #[cfg(not(fw_harness))]
 use {
     alloc::{boxed::Box, rc::Rc, sync::Arc},
@@ -162,7 +169,6 @@ use {
     lpc_shared::output::OutputProvider,
     lpfs::LpFsMemory,
     output::{Esp32C6RmtWs281xDriver, Esp32OutputProvider},
-    serial::usb_link_task,
     time::Esp32TimeProvider,
 };
 
@@ -228,9 +234,9 @@ esp_bootloader_esp_idf::esp_app_desc!();
 /// stays absent).
 #[cfg(not(fw_harness))]
 fn heartbeat_memory_stats() -> Option<lpc_wire::server::MemoryStats> {
-    // Piggybacks on the heartbeat cadence: one scan of the main stack per
-    // second, a log line only when the mark grows.
-    stack_probe::log_if_grown("heartbeat");
+    // The heartbeat's stack lines are due; [`log_heartbeat_stack_lines`]
+    // writes them once the heartbeat itself has gone out.
+    HEARTBEAT_STACK_LINES_DUE.store(true, core::sync::atomic::Ordering::Relaxed);
     esp32_memory_stats().map(|(free_bytes, used_bytes)| lpc_wire::server::MemoryStats {
         free_bytes,
         used_bytes,
@@ -238,6 +244,32 @@ fn heartbeat_memory_stats() -> Option<lpc_wire::server::MemoryStats> {
         largest_free_block: read_headroom_probe(),
         oom_retry_saves: None,
     })
+}
+
+/// Set when a heartbeat's figures are taken; cleared once its stack lines are
+/// logged.
+#[cfg(not(fw_harness))]
+static HEARTBEAT_STACK_LINES_DUE: core::sync::atomic::AtomicBool =
+    core::sync::atomic::AtomicBool::new(false);
+
+/// The heartbeat's stack lines, logged AFTER the heartbeat went out: one scan
+/// of the main stack per heartbeat, a line only when the mark grows (and the
+/// link thread's, under `io_thread_stack_diag`). Run from the server loop's
+/// per-iteration upkeep, which follows the heartbeat in the same iteration.
+///
+/// They used to be logged while the heartbeat was built, which put them on
+/// the wire after it only because the link task ran later. With the link on
+/// its own thread (`io_thread`) a record goes out the moment it is written,
+/// so a line logged before the send overtook the heartbeat, and a capture
+/// stopping on `[stack] heartbeat: high-water` (`boot-idle`'s sentinel)
+/// would stop short of it.
+#[cfg(not(fw_harness))]
+fn log_heartbeat_stack_lines() {
+    if HEARTBEAT_STACK_LINES_DUE.swap(false, core::sync::atomic::Ordering::Relaxed) {
+        stack_probe::log_if_grown("heartbeat");
+        #[cfg(feature = "io_thread_stack_diag")]
+        io_thread_stack_diag::log_if_grown();
+    }
 }
 
 /// This chip's ProjectRead memory gate (`lpa_server::ReadGate`): refuse a
@@ -382,11 +414,25 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
 
     // The session nonce: random per boot, so a host learns the board
     // restarted (the RNG is the same one the login challenges draw from).
-    let usb_link =
-        fw_esp32_common::usb_link::UsbLinkShared::leak(esp_hal::rng::Rng::new().random());
-    esp_println::println!("[INIT] Spawning USB link task...");
-    spawner.spawn(usb_link_task(usb_device, usb_link).unwrap());
-    esp_println::println!("[INIT] USB link task spawned");
+    let nonce = esp_hal::rng::Rng::new().random();
+    // The link task on a thread of its own (`io_thread`), created this early
+    // because its stack comes off the heap; the link is then shared across
+    // two threads, so it takes the thread's lock.
+    #[cfg(feature = "io-thread")]
+    let usb_link = {
+        let usb_link =
+            fw_esp32_common::usb_link::UsbLinkShared::leak_locked(nonce, io_thread::link_lock);
+        io_thread::start(usb_device, usb_link);
+        usb_link
+    };
+    #[cfg(not(feature = "io-thread"))]
+    let usb_link = {
+        let usb_link = fw_esp32_common::usb_link::UsbLinkShared::leak(nonce);
+        esp_println::println!("[INIT] Spawning USB link task...");
+        spawner.spawn(usb_link_task(usb_device, usb_link).unwrap());
+        esp_println::println!("[INIT] USB link task spawned");
+        usb_link
+    };
 
     fw_esp32_common::log_ring_logger::init();
 
@@ -608,6 +654,10 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     );
     server.set_read_headroom_probe(Some(read_headroom_probe));
     server.set_read_gate(Some(READ_GATE));
+    // With the link on its own thread, answer a tick's requests before its
+    // render: the replies then go out while the frame renders (`io_thread`).
+    #[cfg(feature = "io-thread")]
+    server.set_messages_first(true);
     // Wire hello identity: compile-time provenance from build.rs, injected
     // into the server (sans-IO: the server never reads env/git itself),
     // plus the boot-time read of the root-stamped device identity. The
@@ -873,7 +923,10 @@ async fn main(spawner: embassy_executor::Spawner) {
                 app.transport,
                 app.time_provider,
                 heartbeat_memory_stats,
-                move |now_ms| watchdog.feed(now_ms),
+                move |now_ms| {
+                    watchdog.feed(now_ms);
+                    log_heartbeat_stack_lines();
+                },
             )
             .await;
         }
@@ -905,7 +958,10 @@ async fn main(spawner: embassy_executor::Spawner) {
                 app.transport,
                 app.time_provider,
                 heartbeat_memory_stats,
-                move |now_ms| watchdog.feed(now_ms),
+                move |now_ms| {
+                    watchdog.feed(now_ms);
+                    log_heartbeat_stack_lines();
+                },
                 bench::render_loop::budget(),
                 |cycles| stats.record(cycles),
             )

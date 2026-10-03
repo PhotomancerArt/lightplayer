@@ -19,11 +19,14 @@
 //! detection and its `Reset`, on both ends at once.
 
 /// Missed polls before declaring the host gone. The link task samples SOF at
-/// most every 2 ms and at least every 10 ms, and the bit is latched between
-/// samples, so three samples without one is at least 6 ms without SOF —
-/// enough to ride out tick jitter while still noticing an unplug quickly.
-/// (Sampling faster than the 1 ms SOF period would count misses that are not
-/// there; the task's rate limit is what makes this threshold mean time.)
+/// most every 2 ms, once per pass, and the bit is latched between samples, so
+/// three samples without one is at least 6 ms without SOF — enough to ride
+/// out tick jitter. An idle task passes only on the link's own timers (SYN
+/// every 100 ms with no host, keepalive every 250 ms with one) or its 250 ms
+/// backstop, so an unplug while nothing moves is noticed within three of
+/// those passes. (Sampling faster than the 1 ms SOF period would count misses
+/// that are not there; the task's rate limit is what makes this threshold
+/// mean time.)
 pub const DISCONNECT_THRESHOLD: u8 = 3;
 
 /// The chip-free half of a USB-Serial-JTAG cable monitor.
