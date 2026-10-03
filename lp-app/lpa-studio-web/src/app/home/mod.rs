@@ -5,8 +5,8 @@
 //! chrome C reorg split it.
 
 pub(crate) mod access_added_toast;
-pub(crate) mod access_entry_row;
 pub(crate) mod access_fields;
+pub(crate) mod access_key_group_row;
 pub(crate) mod access_settings_section;
 pub(crate) mod access_ui_context;
 #[cfg(feature = "stories")]
@@ -52,7 +52,6 @@ pub mod project_opening_frame;
 pub(crate) mod project_opening_frame_stories;
 pub mod projects_page;
 pub(crate) mod reach_note;
-pub(crate) mod share_access_sheet;
 pub(crate) mod share_words;
 pub(crate) mod target_pick_popover;
 /// Poster capture is the wasm thumb path; host builds of this crate render

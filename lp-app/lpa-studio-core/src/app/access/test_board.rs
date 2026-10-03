@@ -18,7 +18,7 @@ use std::rc::Rc;
 
 use lpa_client::{ClientIo, LpClient};
 use lpa_server::access_store;
-use lpc_access::{BeginOutcome, DeviceAccessFile, LoginState, SecretEntry, Tier};
+use lpc_access::{BeginOutcome, DeviceAccessFile, LoginState, OpenTo, SecretEntry, Tier};
 use lpc_wire::server::{FsRequest, FsResponse};
 use lpc_wire::{
     ClientMessage, ClientRequest, TransportError, WireServerMessage, WireServerMsgBody,
@@ -56,7 +56,7 @@ pub struct FakeBoard {
 
 impl FakeBoard {
     /// A board with no device store at all (as it ships: Bluetooth on,
-    /// locked, no keys).
+    /// open to anyone nearby at edit, no keys).
     pub fn fresh() -> Self {
         Self {
             state: Rc::new(RefCell::new(BoardState {
@@ -86,15 +86,16 @@ impl FakeBoard {
         let board = Self::fresh();
         let mut store = DeviceAccessFile::fresh();
         store.secrets = entries;
+        store.open = OpenTo::Nobody;
         board.write_store(&store);
         board
     }
 
-    /// The same board, `open`: play without a login.
-    pub fn open(secrets: &[(&str, Tier, &str)]) -> Self {
+    /// The same board, open to `open` without a login.
+    pub fn open(secrets: &[(&str, Tier, &str)], open: OpenTo) -> Self {
         let board = Self::locked(secrets);
         let mut store = board.store();
-        store.open = true;
+        store.open = open;
         board.write_store(&store);
         board
     }
@@ -161,7 +162,7 @@ impl FakeBoard {
     pub fn granted(&self) -> Option<Tier> {
         let state = self.state.borrow();
         let open = access_store::read_device_store(&state.fs).open;
-        state.granted.or(open.then_some(Tier::Play))
+        state.granted.max(open.tier())
     }
 }
 
@@ -179,7 +180,7 @@ impl FakeBoardIo {
         let held = if self.trusted {
             Some(Tier::Edit)
         } else {
-            state.granted.or(open.then_some(Tier::Play))
+            state.granted.max(open.tier())
         };
         match request {
             ClientRequest::Hello => WireServerMsgBody::Hello(lpc_wire::ServerHello {

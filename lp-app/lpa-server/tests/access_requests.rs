@@ -22,8 +22,8 @@ use core::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 use lp_gfx_lpvm::TargetLpvmGraphics;
 use lpa_server::{LpGraphics, LpServer};
 use lpc_access::{
-    DeviceAccessFile, LoginMac, LoginOutcome, MAX_SECRETS_PER_FILE, SecretEntry, SecretKind, Tier,
-    derive_login_key,
+    DeviceAccessFile, LoginMac, LoginOutcome, MAX_SECRETS_PER_FILE, OpenTo, SecretEntry,
+    SecretKind, Tier, derive_login_key,
 };
 use lpc_model::AsLpPath;
 use lpc_shared::output::MemoryOutputProvider;
@@ -47,11 +47,15 @@ const V1_STORE: &str = "{\"version\":1,\"secrets\":[{\"label\":\"mine\",\"tier\"
     \"k\":\"pZ2gub4bSR+JKUDoo7R8TI1TQxtWxa3rc2kPufJ978E=\"}],\"bleEnabled\":true,\"open\":false}";
 
 #[test]
-fn a_device_with_no_store_lists_bluetooth_on_locked_and_no_keys() {
+fn a_device_with_no_store_lists_bluetooth_on_open_and_no_keys() {
     let mut rig = Rig::new(None);
     let list = rig.list(USB);
     assert!(list.ble_enabled);
-    assert!(!list.open);
+    assert_eq!(
+        list.open,
+        OpenTo::Edit,
+        "a new board is open to anyone nearby, for now"
+    );
     assert!(list.entries.is_empty());
     assert!(
         !rig.store_exists(),
@@ -140,14 +144,16 @@ fn switches_set_what_is_given_and_leave_the_rest() {
     let mut rig = Rig::new(None);
     let list = rig.switches(USB, Some(false), None);
     assert!(!list.ble_enabled);
-    assert!(!list.open);
-    let list = rig.switches(USB, None, Some(true));
+    assert_eq!(list.open, OpenTo::Edit);
+    let list = rig.switches(USB, None, Some(OpenTo::Play));
     assert!(!list.ble_enabled, "an absent switch is left as it was");
-    assert!(list.open);
+    assert_eq!(list.open, OpenTo::Play);
     // `open` is live at once: an untrusted link now holds play.
     assert_eq!(rig.server.link_tier(BLE), Some(Tier::Play));
-    rig.switches(USB, None, Some(false));
+    rig.switches(USB, None, Some(OpenTo::Nobody));
     assert_eq!(rig.server.link_tier(BLE), None);
+    rig.switches(USB, None, Some(OpenTo::Edit));
+    assert_eq!(rig.server.link_tier(BLE), Some(Tier::Edit));
 }
 
 #[test]
@@ -160,6 +166,7 @@ fn nothing_below_edit_is_answered() {
             [3; 16],
             1,
         )],
+        open: OpenTo::Nobody,
         ..DeviceAccessFile::fresh()
     };
     let mut rig = Rig::new(Some(store.to_json().unwrap()));
@@ -189,6 +196,12 @@ fn nothing_below_edit_is_answered() {
 fn a_key_added_over_usb_unlocks_over_bluetooth() {
     let mut rig = Rig::new(None);
     rig.add(USB, browser_key("Yona's MacBook", 1));
+    assert_eq!(
+        rig.server.link_tier(BLE),
+        Some(Tier::Edit),
+        "adding a key leaves a new board open"
+    );
+    rig.switches(USB, None, Some(OpenTo::Nobody));
     assert_eq!(rig.server.link_tier(BLE), None);
     assert!(matches!(
         rig.login(BLE, b"browser-secret"),
@@ -222,7 +235,7 @@ fn no_reply_carries_a_key() {
 }
 
 #[test]
-fn a_v1_store_lists_as_passwords_and_is_rewritten_as_v2_on_the_first_add() {
+fn a_v1_store_lists_as_passwords_and_is_rewritten_as_v3_on_the_first_add() {
     let mut rig = Rig::new(Some(String::from(V1_STORE)));
     let list = rig.list(USB);
     assert_eq!(list.entries.len(), 1);
@@ -237,7 +250,7 @@ fn a_v1_store_lists_as_passwords_and_is_rewritten_as_v2_on_the_first_add() {
 
     rig.add(USB, browser_key("Yona's MacBook", 1));
     let raw = rig.raw_store();
-    assert!(raw.starts_with("{\"version\":2,"), "{raw}");
+    assert!(raw.starts_with("{\"version\":3,"), "{raw}");
     let stored = rig.stored();
     assert_eq!(stored.secrets.len(), 2);
     assert_eq!(stored.secrets[0].kind, SecretKind::Password);
@@ -256,7 +269,7 @@ fn a_v1_store_lists_as_passwords_and_is_rewritten_as_v2_on_the_first_add() {
 /// What an `AccessList` answer carries.
 struct Listed {
     ble_enabled: bool,
-    open: bool,
+    open: OpenTo,
     entries: Vec<AccessEntryInfo>,
 }
 
@@ -335,7 +348,7 @@ impl Rig {
         self.listed(link, ClientRequest::AccessRemove { salt })
     }
 
-    fn switches(&mut self, link: Link, ble_enabled: Option<bool>, open: Option<bool>) -> Listed {
+    fn switches(&mut self, link: Link, ble_enabled: Option<bool>, open: Option<OpenTo>) -> Listed {
         self.listed(link, ClientRequest::AccessSetSwitches { ble_enabled, open })
     }
 
@@ -430,7 +443,7 @@ fn access_requests() -> [ClientRequest; 4] {
         ClientRequest::AccessRemove { salt: [3; 16] },
         ClientRequest::AccessSetSwitches {
             ble_enabled: Some(false),
-            open: Some(true),
+            open: Some(OpenTo::Edit),
         },
     ]
 }

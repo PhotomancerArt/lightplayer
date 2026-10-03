@@ -172,7 +172,7 @@ pub enum ServerMsgBody {
     NotPermitted {
         needs: lpc_access::Tier,
     },
-    /// Who has access to this device: the device store's two switches and
+    /// Who has access to this device: the device store's two settings and
     /// every secret in it, without `k`. The answer to
     /// [`crate::ClientRequest::AccessList`] and to each access change
     /// (`AccessAdd`, `AccessRemove`, `AccessSetSwitches`), which reply with
@@ -184,7 +184,8 @@ pub enum ServerMsgBody {
     #[serde(rename_all = "camelCase")]
     AccessList {
         ble_enabled: bool,
-        open: bool,
+        /// Who nearby gets in with no password.
+        open: lpc_access::OpenTo,
         entries: Vec<crate::server::AccessEntryInfo>,
     },
 }
@@ -473,7 +474,7 @@ mod tests {
         let json = crate::json::to_string(&access_list_sample()).unwrap();
         assert_eq!(
             json,
-            r#"{"accessList":{"bleEnabled":true,"open":false,"entries":[{"label":"Yona's MacBook","kind":"browser","tier":"edit","salt":"BQUFBQUFBQUFBQUFBQUFBQ==","addedAt":1790000000}]}}"#
+            r#"{"accessList":{"bleEnabled":true,"open":"play","entries":[{"label":"Yona's MacBook","kind":"browser","tier":"edit","salt":"BQUFBQUFBQUFBQUFBQUFBQ==","addedAt":1790000000}]}}"#
         );
         match crate::json::from_str::<ServerMsgBody>(&json).unwrap() {
             ServerMsgBody::AccessList {
@@ -482,7 +483,7 @@ mod tests {
                 entries,
             } => {
                 assert!(ble_enabled);
-                assert!(!open);
+                assert_eq!(open, lpc_access::OpenTo::Play);
                 assert_eq!(entries[0].kind, lpc_access::SecretKind::Browser);
             }
             other => panic!("expected an access list, got {other:?}"),
@@ -531,7 +532,7 @@ mod tests {
         .with_added_at(1_790_000_000);
         ServerMsgBody::AccessList {
             ble_enabled: true,
-            open: false,
+            open: lpc_access::OpenTo::Play,
             entries: alloc::vec![crate::server::AccessEntryInfo::from(&entry)],
         }
     }

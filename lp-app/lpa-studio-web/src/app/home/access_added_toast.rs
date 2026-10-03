@@ -7,12 +7,15 @@
 //! exactly those — and stops Studio adding them to that device again this
 //! session.
 //!
+//! On a full device, the toast also says which older browser key made room
+//! ("To make room, an older Brave on Mac was dropped.").
+//!
 //! It sits at the bottom of the page, where a thumb is, and fades itself
 //! out after about ten seconds (CSS, `.ux-access-toast`). A new add is a
 //! new `generation` and so a new toast, even when it names the same things.
 
 use dioxus::prelude::*;
-use lpa_studio_core::{AccessAdded, AccessCommand};
+use lpa_studio_core::{AccessAdded, AccessCommand, dropped_sentence};
 
 use crate::base::{StudioIcon, StudioIconName};
 use crate::core::quiet_action_class;
@@ -44,7 +47,12 @@ pub(crate) fn AccessAddedToast(
             span { class: "tw:inline-flex tw:flex-none tw:pt-px tw:text-status-good-foreground",
                 StudioIcon { name: StudioIconName::AccessDone, size: 16 }
             }
-            span { class: "tw:min-w-0 tw:flex-1", {sentence(&added.names, &device_name)} }
+            span { class: "tw:min-w-0 tw:flex-1",
+                {sentence(&added.names, &device_name)}
+                if let Some(dropped) = dropped_sentence(&added.dropped) {
+                    " {dropped}"
+                }
+            }
             button {
                 class: quiet_action_class(),
                 r#type: "button",

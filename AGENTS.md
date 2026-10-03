@@ -278,8 +278,8 @@ the app through the same view model and presses the same actions. See
 
 - The wire's "no compatibility" freedom stops at anything **persisted**:
   project.json / package files, the cloud store, stamped device
-  identity, and the two access files (`<project>/.lp/access.json`, root
-  `/.lp/access.json` — each its own `version: 1` format with a schema in
+  identity, and the two access files (`<project>/.lp/access.json` at
+  `version: 2`, root `/.lp/access.json` at `version: 3` — each its own format with a schema in
   `schemas/`, outside `PROJECT_FORMAT_VERSION`). Real user data already exists at the current
   `PROJECT_FORMAT_VERSION`, and it does not redeploy in lockstep.
 - **A change to persisted bytes IS a format bump, even when no field is
