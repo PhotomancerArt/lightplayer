@@ -27,7 +27,10 @@ pub mod ui_add_node_menu;
 
 pub use module_export_op::ModuleExportOp;
 pub use node_clear_debug_op::NodeClearDebugOp;
-pub use node_controller::{NodeController, NodeControllerState, ProjectProductSubscriptionIntent};
+pub use node_controller::{
+    ASK_AGENT_REQUEST_PARAM, ASK_AGENT_VERB, NodeController, NodeControllerState,
+    ProjectProductSubscriptionIntent,
+};
 pub(in crate::app::project) use node_controller::{human_label as human_node_label, root_slot_key};
 pub use node_create_op::{NodeCreateOp, UiAttachTarget};
 pub use node_import_op::{ImportSource, NodeImportOp};

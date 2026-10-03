@@ -299,7 +299,7 @@ vec4 render_2d(vec2 pos) { return vec4(pos, 0.0, 1.0); }
     let naga = compile(glsl).expect("parse");
     let spec = sample_texture_binding_spec();
     let mut texture_specs = VecMap::new();
-    texture_specs.insert(String::from("inputColor"), spec.clone());
+    texture_specs.insert(String::from("inputColor"), spec);
     let options = LowerOptions {
         texture_specs,
         ..Default::default()

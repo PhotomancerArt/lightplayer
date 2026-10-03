@@ -234,6 +234,8 @@ impl Evidence {
             } => {
                 notes.extend(identity_notes(identity.learn(observed)));
             }
+            // Roster news; a device never hears it.
+            Event::GrantAnswered { .. } => {}
         }
         self.reclassify(now, config);
         notes

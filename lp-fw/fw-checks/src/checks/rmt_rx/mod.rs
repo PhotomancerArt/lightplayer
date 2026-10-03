@@ -321,6 +321,10 @@ mod tests {
     use super::*;
     use crate::checks::rmt_chase::{chase_frame, frame_bytes};
 
+    #[allow(
+        unused_extern_crates,
+        reason = "this crate is #![no_std] by default; tests need std back"
+    )]
     extern crate std;
     use std::string::String;
     use std::vec;

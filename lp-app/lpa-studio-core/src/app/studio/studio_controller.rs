@@ -1116,6 +1116,12 @@ impl StudioController {
     pub fn fold_device_input(&mut self, input: crate::DeviceInput) {
         let now = self.device_now();
         self.link_health.observe(&input);
+        let grant_answer = match &input {
+            crate::DeviceInput::Event(crate::DeviceEvent::GrantAnswered { link, answer }) => {
+                Some((*link, answer.clone()))
+            }
+            _ => None,
+        };
         for line in self.devices.handle(now, input) {
             self.record_device_event(
                 None,
@@ -1135,6 +1141,13 @@ impl StudioController {
         // A Bluetooth link that opened, said hello or dropped may need a
         // login conversation (BLE M6).
         self.drive_device_access();
+        // A chooser an agent card's press opened has answered: that is the
+        // press's outcome, and the run it resumes reads the roster after it.
+        if let Some((link, answer)) = grant_answer
+            && self.agent.app_session_mut().grant_answered(link, &answer)
+        {
+            self.resume_app_agent();
+        }
         self.mark_dirty();
     }
 
@@ -2796,9 +2809,28 @@ impl StudioController {
         // values the user settled on.
         let card = self.agent.app_session_mut().pending_card_for(&action);
         let press = action.offer_press().cloned();
+        let chooser_before = self.devices.effects().last_grant_request();
         let result = self.dispatch_inner(action, updates.clone()).await;
         if let Some(card) = card {
-            self.app_card_pressed(&card, &result, press);
+            // A press that opened a platform chooser (connect over USB or
+            // Bluetooth, reconnect) has not happened yet: what the user
+            // picks — or that they cancelled — is the outcome.
+            let chooser = self
+                .devices
+                .effects()
+                .last_grant_request()
+                .filter(|link| result.is_ok() && Some(*link) != chooser_before);
+            match chooser {
+                Some(link) => {
+                    self.agent.app_session_mut().grant_wait =
+                        Some(crate::app::agent::app_agent_session::CardGrantWait {
+                            card,
+                            link,
+                            press,
+                        });
+                }
+                None => self.app_card_pressed(&card, &result, press),
+            }
         }
         // Release closed projects' locks and re-hydrate the gallery when
         // the action made either due (open/close/save/home ops).

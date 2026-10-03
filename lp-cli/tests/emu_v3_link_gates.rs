@@ -1311,7 +1311,10 @@ fn reported(r: &mut FiveWireRun, wires: &[u32], carried: usize) -> usize {
 }
 
 /// A frame without its clock: what two runs at two quanta must agree on.
-#[allow(clippy::type_complexity)]
+#[allow(
+    clippy::type_complexity,
+    reason = "a tuple mirroring Frame's own fields reads clearer here than a named type"
+)]
 fn shapes(frames: &[(u8, Vec<Frame>)]) -> Vec<(u8, Vec<(u64, usize, Vec<u8>, u8, u64, bool)>)> {
     frames
         .iter()

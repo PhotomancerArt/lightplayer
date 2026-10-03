@@ -9,6 +9,7 @@ use super::app_agent_eval_driver::{AgentEvalStudio, ModelSource, RunLimits};
 use super::app_agent_eval_harness::golden_tree;
 use super::app_agent_scenario::Scenario;
 use super::app_agent_transcript::EvalStep;
+use crate::app::studio::offer_press_test_api::OfferPressTestApi;
 
 #[test]
 fn a_path_the_readout_never_offered_is_refused_with_the_current_offers() {
@@ -112,6 +113,7 @@ fn the_agent_presses_save_once_and_a_stale_press_is_refused() {
         results[2]
     );
     assert!(!studio.unsaved(), "the press saved the project");
+    studio.not_offered("project/save");
 }
 
 /// Q6: the readout lists a nested node's verbs, not only the root card's,
@@ -215,7 +217,7 @@ fn revert_to_saved_becomes_a_card() {
     assert_eq!(needs["says"], card.title.as_str());
     assert!(card.destructive, "a lasting card wears the error tint");
 
-    studio.press(card.press.clone(), limits());
+    studio.press_card(card.press.clone(), limits());
 
     assert!(!studio.unsaved(), "the card's press reverted the edits");
     assert!(
@@ -225,6 +227,13 @@ fn revert_to_saved_becomes_a_card() {
         ),
         "{:#?}",
         studio.cards()
+    );
+    // The run the press resumed is its own assistant turn, not glued onto
+    // the one that asked for the click.
+    assert_eq!(studio.last_assistant_text(), "Reverted.");
+    assert_eq!(
+        studio.assistant_texts(),
+        ["Click Revert on the card.", "Reverted."]
     );
 }
 

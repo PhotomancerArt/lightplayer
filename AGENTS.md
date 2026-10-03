@@ -195,6 +195,12 @@ the app through the same view model and presses the same actions. See
   `Toggle`) and a binder in core, and `UiOffer::press(args)` validates and
   binds. The web draws them with `OfferParamsForm` (or a picker that
   renders the same params) and never builds the op itself.
+- **Core tests press offers by path** (`OfferPressTestApi` in
+  `lpa-studio-core/src/app/studio/offer_press_test_api.rs`: `press`,
+  `press_lasting`, `offered`, `not_offered`, `offer_reason`), so a test fails
+  the moment the UI stops offering its verb. **`just lint-core-test-ops`**
+  (in `check-lint`) is the third ratchet: core test sites that build a
+  user-verb action directly may only go down per file.
 - The rework toward migrating every surface onto the tree is a roadmap
   (`lp2025/2026-10-01-1255-agentic-ui-roadmap`). Don't migrate whole
   surfaces ad hoc. Don't add new web-built actions either.

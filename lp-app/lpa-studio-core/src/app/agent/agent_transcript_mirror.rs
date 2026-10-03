@@ -10,6 +10,7 @@
 use lpa_agent::{AgentEvent, StopReason, TokenUsage};
 
 use crate::UiNoticeLevel;
+use crate::app::agent::ui_agent_edit_batch::UiAgentEditBatch;
 use crate::app::agent::ui_agent_view::{UiAgentStatus, UiAgentToolRow, UiAgentTurn, UiAgentUsage};
 
 /// Per-turn cap on retained thinking text (bytes). Thinking can run long;
@@ -45,6 +46,10 @@ pub struct AgentTranscriptMirror {
     pub usage: TokenUsage,
     /// Per-turn stop reason + usage, in turn order (debug-export data).
     pub turn_stats: Vec<AgentTurnStat>,
+    /// A run began since the last turn was pushed: the next text or
+    /// thinking starts its own turn instead of continuing the previous
+    /// run's (a run a card resumes shows no user turn between them).
+    run_boundary: bool,
 }
 
 impl Default for AgentTranscriptMirror {
@@ -54,28 +59,39 @@ impl Default for AgentTranscriptMirror {
             status: UiAgentStatus::Idle,
             usage: TokenUsage::default(),
             turn_stats: Vec::new(),
+            run_boundary: false,
         }
     }
 }
 
 impl AgentTranscriptMirror {
+    /// A new run starts: whatever it streams is its own turn, even with no
+    /// user turn in between (the run a settled card resumes).
+    pub fn begin_run(&mut self) {
+        self.run_boundary = true;
+    }
+
     /// Fold one streamed event into the mirror.
     pub fn apply_event(&mut self, event: AgentEvent) -> Option<ExecutedTool> {
         match event {
             AgentEvent::TextDelta(text) => {
                 self.status = UiAgentStatus::Streaming;
+                let fresh = core::mem::take(&mut self.run_boundary);
                 match self.turns.last_mut() {
-                    Some(UiAgentTurn::Assistant { text: existing }) => existing.push_str(&text),
+                    Some(UiAgentTurn::Assistant { text: existing }) if !fresh => {
+                        existing.push_str(&text)
+                    }
                     _ => self.turns.push(UiAgentTurn::Assistant { text }),
                 }
             }
             AgentEvent::ThinkingDelta(text) => {
                 self.status = UiAgentStatus::Streaming;
+                let fresh = core::mem::take(&mut self.run_boundary);
                 match self.turns.last_mut() {
                     Some(UiAgentTurn::Thinking {
                         text: existing,
                         done: false,
-                    }) => {
+                    }) if !fresh => {
                         existing.push_str(&text);
                         cap_thinking_text(existing);
                     }
@@ -87,10 +103,12 @@ impl AgentTranscriptMirror {
                     *done = true;
                 }
             }
-            AgentEvent::ToolUseStart { id, .. } => {
+            AgentEvent::ToolUseStart { id, name } => {
                 self.status = UiAgentStatus::RunningTool;
-                self.turns
-                    .push(UiAgentTurn::Tool(UiAgentToolRow::started(id)));
+                self.run_boundary = false;
+                self.turns.push(UiAgentTurn::Tool(
+                    UiAgentToolRow::started(id).for_tool(name),
+                ));
             }
             // The raw input JSON stays in core/debug; the row renders the
             // executed summary instead.
@@ -137,6 +155,11 @@ impl AgentTranscriptMirror {
                         });
                     row.detail = serde_json::to_string_pretty(&summary_json)
                         .unwrap_or_else(|_| summary_json.to_string());
+                    row.tool = name.clone();
+                    row.edits = (name == "edit_project")
+                        .then(|| UiAgentEditBatch::from_summary(&summary_json))
+                        .flatten();
+                    row.headline = app_tool_headline(&name, &summary_json);
                 }
                 return Some(ExecutedTool {
                     id,
@@ -253,6 +276,40 @@ impl AgentTranscriptMirror {
     }
 }
 
+/// A finished app-agent `act` or `read`, in words: what was pressed (or
+/// handed to the user on a card, or refused), what was read. `None` for
+/// every other tool.
+fn app_tool_headline(name: &str, summary: &serde_json::Value) -> Option<String> {
+    let text = |key: &str| summary[key].as_str().unwrap_or("").to_string();
+    match name {
+        "act" => {
+            let action = text("action");
+            Some(if summary["done"].as_bool() == Some(true) {
+                format!("pressed {action}")
+            } else if let Some(card) = summary["card"].as_str() {
+                format!("asked you to click card {card}: {action}")
+            } else if let Some(reason) = summary["refused"].as_str() {
+                format!("{action} — refused: {reason}")
+            } else if summary["input_error"].as_bool() == Some(true) {
+                "invalid act input".to_string()
+            } else {
+                format!("{action} — failed")
+            })
+        }
+        "read" => {
+            if summary["input_error"].as_bool() == Some(true) {
+                return Some("invalid read input".to_string());
+            }
+            let what = format!("read {} {}", text("read"), text("name"));
+            Some(match summary["error"].as_str() {
+                Some(error) => format!("{} — {error}", what.trim_end()),
+                None => what.trim_end().to_string(),
+            })
+        }
+        _ => None,
+    }
+}
+
 /// The user-facing copy for a truncated run. `MaxTokens` gets the
 /// actionable phrasing (retry, or ask for something smaller); an unknown
 /// `Other` stop reason is surfaced verbatim.
@@ -287,4 +344,85 @@ fn cap_thinking_text(text: &mut String) {
         .find(|&index| text.is_char_boundary(index))
         .unwrap_or(text.len());
     text.replace_range(..boundary, "…");
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn an_edit_project_call_folds_into_an_edit_row() {
+        let mut mirror = AgentTranscriptMirror::default();
+        mirror.apply_event(AgentEvent::ToolUseStart {
+            id: "tu_1".into(),
+            name: "edit_project".into(),
+        });
+        let Some(UiAgentTurn::Tool(row)) = mirror.turns.last() else {
+            panic!("a tool row");
+        };
+        assert_eq!(row.summary_line(), "Editing the project…");
+        mirror.apply_event(AgentEvent::ToolExecuted {
+            id: "tu_1".into(),
+            name: "edit_project".into(),
+            summary_json: json!({
+                "note": "build it", "edits": 1, "applied": 1, "saved": true,
+                "rows": [{ "edit": "create_node", "target": "Playlist", "ok": true }]
+            }),
+        });
+        let Some(UiAgentTurn::Tool(row)) = mirror.turns.last() else {
+            panic!("a tool row");
+        };
+        assert_eq!(row.summary_line(), "added Playlist, saved");
+        assert_eq!(row.note.as_deref(), Some("build it"));
+    }
+
+    /// A run a card resumes shows no user turn: its text is still its own
+    /// assistant turn, never glued onto the previous run's.
+    #[test]
+    fn a_new_run_starts_a_new_assistant_turn() {
+        let mut mirror = AgentTranscriptMirror::default();
+        mirror.begin_run();
+        mirror.apply_event(AgentEvent::TextDelta("Click Connect ".into()));
+        mirror.apply_event(AgentEvent::TextDelta("on the card.".into()));
+        mirror.begin_run();
+        mirror.apply_event(AgentEvent::ThinkingDelta("it worked".into()));
+        mirror.apply_event(AgentEvent::ThinkingDone);
+        mirror.apply_event(AgentEvent::TextDelta("Connected.".into()));
+        mirror.begin_run();
+        mirror.apply_event(AgentEvent::TextDelta("Again.".into()));
+        let texts: Vec<&str> = mirror
+            .turns
+            .iter()
+            .filter_map(|turn| match turn {
+                UiAgentTurn::Assistant { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            texts,
+            ["Click Connect on the card.", "Connected.", "Again."]
+        );
+    }
+
+    #[test]
+    fn act_and_read_calls_say_what_they_did() {
+        assert_eq!(
+            app_tool_headline("act", &json!({ "action": "project/save", "done": true })),
+            Some("pressed project/save".into())
+        );
+        assert_eq!(
+            app_tool_headline(
+                "act",
+                &json!({ "action": "devices/connect-usb", "card": "c1" })
+            ),
+            Some("asked you to click card c1: devices/connect-usb".into())
+        );
+        assert_eq!(
+            app_tool_headline("read", &json!({ "read": "node", "name": "fixture" })),
+            Some("read node fixture".into())
+        );
+        assert_eq!(app_tool_headline("iterate", &json!({})), None);
+    }
 }

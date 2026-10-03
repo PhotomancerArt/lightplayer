@@ -1,5 +1,9 @@
 pub mod console_command;
 pub mod lens_reconnect;
+/// Tests press offers by path (`press`, `press_lasting`, `offered`, …), on
+/// every bench: the offer tree's third consumer, after the web and the agent.
+#[cfg(test)]
+pub(crate) mod offer_press_test_api;
 /// Studio-level decoration of output-node faces: board identity (device
 /// registry) and the incoming lamp extent (the upstream node's produced
 /// control product) — the facts the project walk cannot see.

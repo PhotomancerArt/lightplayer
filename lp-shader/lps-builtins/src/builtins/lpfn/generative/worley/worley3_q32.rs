@@ -415,6 +415,7 @@ fn get_point_3d(index: usize, cell_x: i32, cell_y: i32, cell_z: i32) -> (Q32, Q3
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::manual_range_contains, reason = "golden-table range")]
     #[cfg(test)]
     extern crate std;
     use super::*;

@@ -248,6 +248,7 @@ impl ActivityReducer for RemoveProjectActivity {
                 Event::TimerFired { .. } => self.handle_timer(now, ctx),
                 Event::Link { event, .. } => self.handle_link_event(now, event, ctx),
                 Event::IdentityObserved { .. }
+                | Event::GrantAnswered { .. }
                 | Event::LinkAttached { .. }
                 | Event::LinkDetached { .. }
                 | Event::LinkBorrow { .. } => ActivityStep::nothing(),
