@@ -53,8 +53,10 @@ use serde_json::{Value, json};
 
 use super::args::RttArgs;
 use super::lab_port::{LabPort, TermiosMode};
+use super::rtt_emu_boards::ChipReport;
+use crate::commands::emu::args::EmuChip;
 use crate::commands::emu::link_host::{
-    C6Board, EmuLinkHost, EmuUsbBoard, SLICE_US, console_lines, fresh_nonce,
+    C6Board, EmuLinkHost, EmuUsbBoard, S3Board, SLICE_US, V3Board, console_lines, fresh_nonce,
 };
 
 /// First request id: far from anything else on the link.
@@ -69,7 +71,9 @@ const NO_FILE_PATH: &str = "/lp-cli-link-rtt-none.bin";
 /// Run the measurement on `args.target`.
 pub fn rtt(args: &RttArgs) -> Result<()> {
     let wall = Instant::now();
-    let mut session = match args.target.strip_prefix("emu:") {
+    let elf = args.target.strip_prefix("emu:");
+    check_chip_on_target(&args.target, elf.is_some(), args.chip)?;
+    let mut session = match elf {
         Some(elf) => open_emu(args, Path::new(elf))?,
         None => open_serial(args)?,
     };
@@ -527,12 +531,15 @@ impl Pipe for SerialPipe {
     }
 }
 
-/// The emulated C6 in this process: emulated time.
-struct EmuPipe {
-    board: C6Board,
+/// An emulated board in this process: emulated time. Generic over which
+/// chip (`B: EmuUsbBoard`); the end-of-run report is chip-specific
+/// ([`ChipReport`], `rtt_emu_boards.rs` — the three machines' RMT models
+/// don't share one `RefillStats` type).
+struct EmuPipe<B: EmuUsbBoard> {
+    board: B,
 }
 
-impl Pipe for EmuPipe {
+impl<B: EmuUsbBoard + ChipReport> Pipe for EmuPipe<B> {
     fn advance(&mut self) -> Result<()> {
         self.board
             .run_for_us(SLICE_US)
@@ -553,48 +560,72 @@ impl Pipe for EmuPipe {
     }
 
     fn report(&mut self) -> Value {
-        let m = &mut self.board.machine;
-        let mut pads = Vec::new();
-        for (pad, _) in m.routed_pads() {
-            let frames = m.frames(pad.0);
-            if frames.is_empty() {
-                continue;
-            }
-            let starts: Vec<f64> = frames
-                .iter()
-                .map(|f| f.start as f64 / lp_emu_esp32c6::memmap::CYCLES_PER_US as f64)
-                .collect();
-            let gaps: Vec<f64> = starts.windows(2).map(|w| (w[1] - w[0]) / 1000.0).collect();
-            pads.push(json!({
-                "pad": pad.0,
-                "frames": frames.len(),
-                "errors": frames.iter().map(|f| f.error_count).sum::<u64>(),
-                "incomplete": frames.iter().filter(|f| !f.is_complete()).count(),
-                "leds": frames.last().map(|f| f.leds()),
-                "interval_ms": stats(&gaps),
-                "frame_starts_us": starts.iter().map(|s| s.round() as u64).collect::<Vec<_>>(),
-            }));
-        }
-        let mut refills = Vec::new();
-        // The C6 has two RMT TX channels.
-        for ch in 0..2 {
-            let r = m.rmt_refill_stats(ch);
-            if r.refills == 0 && r.unanswered == 0 {
-                continue;
-            }
-            refills.push(json!({
-                "ch": ch,
-                "refills": r.refills,
-                "unanswered": r.unanswered,
-                "entry_max_words": r.entry_max,
-                "fill_max_words": r.fill_max,
-                "half_words": r.half_words,
-                "entry_hist": r.entry_hist.to_vec(),
-                "fill_hist": r.fill_hist.to_vec(),
-            }));
-        }
-        json!({ "ws281x": pads, "rmt_refill": refills, "instructions": m.instructions() })
+        self.board.chip_report()
     }
+}
+
+/// `--chip` only means anything on an `emu:` target: a serial device is real
+/// hardware, and it picks its own chip.
+fn check_chip_on_target(target: &str, is_emu: bool, chip: Option<EmuChip>) -> Result<()> {
+    if !is_emu && chip.is_some() {
+        bail!(
+            "--chip only applies to an emu: target; {target} is a serial device (real hardware \
+             picks its own chip)"
+        );
+    }
+    Ok(())
+}
+
+/// A chip's name, as `--chip` spells it, for error messages.
+fn chip_label(chip: EmuChip) -> &'static str {
+    match chip {
+        EmuChip::Esp32C6 => "esp32c6",
+        EmuChip::Esp32S3 => "esp32s3",
+        EmuChip::Esp32V3 => "esp32v3",
+    }
+}
+
+/// `--grade`, resolved per chip: the C6 has two grades and defaults to t2;
+/// the S3 and classic have only t1 (their emulators' one grade) and are
+/// refused anything else.
+fn resolve_grade(chip: EmuChip, requested: Option<&str>) -> Result<&'static str> {
+    match chip {
+        EmuChip::Esp32C6 => match requested.unwrap_or("t2") {
+            "t1" => Ok("t1"),
+            "t2" => Ok("t2"),
+            g => bail!("--grade must be t1 or t2, not {g}"),
+        },
+        EmuChip::Esp32S3 | EmuChip::Esp32V3 => match requested {
+            None | Some("t1") => Ok("t1"),
+            Some(g) => bail!(
+                "--grade {g}: the {} emulator has one time grade, t1",
+                chip_label(chip)
+            ),
+        },
+    }
+}
+
+/// The project `emu:` deploys when `--project` is not given. The PLAYFUL
+/// choker targets the C6's own XIAO board (D10); the S3's default is
+/// `shader-oracle` — the same project `scripts/emu/m4-walk.sh --chip
+/// esp32s3` uploads (`ws281x:local:D10`, which both the XIAO C6 and XIAO S3
+/// Plus profiles alias, so it renders unmodified on either chip); the
+/// classic's is `five-wire` — the DOM-Z-102's four fused pads plus a spare,
+/// what `emu_v3_link_gates.rs`'s log-drop load deploys and what P4 reuses
+/// for the same check.
+fn default_project_path(chip: EmuChip) -> PathBuf {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    match chip {
+        EmuChip::Esp32C6 => root.join("../catalog/projects/playful-choker"),
+        EmuChip::Esp32S3 => root.join("../projects/test/shader-oracle"),
+        EmuChip::Esp32V3 => root.join("../projects/test/five-wire"),
+    }
+}
+
+fn project_dir(args: &RttArgs, chip: EmuChip) -> PathBuf {
+    args.project
+        .clone()
+        .unwrap_or_else(|| default_project_path(chip))
 }
 
 fn open_serial(args: &RttArgs) -> Result<Session> {
@@ -619,13 +650,25 @@ fn open_serial(args: &RttArgs) -> Result<Session> {
     Ok(session)
 }
 
+/// Open the `emu:` target: build the chip's machine, bring its host link up,
+/// deploy the chip's project (`--project`, or its own default), and hand
+/// back a [`Session`] over it. `--chip` picks the machine (default: C6, so
+/// every pre-P1 `emu:` invocation is unchanged).
 fn open_emu(args: &RttArgs, elf: &Path) -> Result<Session> {
+    match args.chip.unwrap_or_default() {
+        EmuChip::Esp32C6 => open_emu_c6(args, elf),
+        EmuChip::Esp32S3 => open_emu_s3(args, elf),
+        EmuChip::Esp32V3 => open_emu_v3(args, elf),
+    }
+}
+
+fn open_emu_c6(args: &RttArgs, elf: &Path) -> Result<Session> {
     use lp_emu_esp32c6::flash::FlashBacking;
     use lp_emu_esp32c6::machine::{AppSource, Esp32C6Builder, TimeGrade, UsbHost};
-    let grade = match args.grade.as_str() {
+    let grade = match resolve_grade(EmuChip::Esp32C6, args.grade.as_deref())? {
         "t1" => TimeGrade::T1,
         "t2" => TimeGrade::T2,
-        g => bail!("--grade must be t1 or t2, not {g}"),
+        g => unreachable!("resolve_grade only returns t1/t2 for the C6: {g}"),
     };
     let machine = Esp32C6Builder::new()
         .app(AppSource::Path(elf.to_path_buf()))
@@ -636,13 +679,49 @@ fn open_emu(args: &RttArgs, elf: &Path) -> Result<Session> {
         .usb_sj_queue_source()
         .build()
         .map_err(|e| anyhow::anyhow!("the image builds no machine: {e:?}"))?;
-    let mut host = EmuLinkHost::new(C6Board::new(machine)?, fresh_nonce(), true);
+    let host = EmuLinkHost::new(C6Board::new(machine)?, fresh_nonce(), true);
+    finish_open(args, host, project_dir(args, EmuChip::Esp32C6))
+}
+
+fn open_emu_s3(args: &RttArgs, elf: &Path) -> Result<Session> {
+    use lp_emu_esp32s3::machine::{AppSource, BootMode, Esp32S3Builder, TimeGrade, UsbHost};
+    resolve_grade(EmuChip::Esp32S3, args.grade.as_deref())?;
+    let builder = Esp32S3Builder::new()
+        .time_grade(TimeGrade::T1)
+        .strict(false)
+        .boot_mode(BootMode::Direct)
+        .app(AppSource::Path(elf.to_path_buf()));
+    let board = S3Board::build(builder, UsbHost::Attached { draining: true })
+        .map_err(|e| anyhow::anyhow!("the image builds no machine: {e}"))?;
+    let host = EmuLinkHost::new(board, fresh_nonce(), true);
+    finish_open(args, host, project_dir(args, EmuChip::Esp32S3))
+}
+
+fn open_emu_v3(args: &RttArgs, elf: &Path) -> Result<Session> {
+    use lp_emu_esp32v3::machine::{AppSource, BootMode, Esp32V3Builder, TimeGrade};
+    resolve_grade(EmuChip::Esp32V3, args.grade.as_deref())?;
+    let builder = Esp32V3Builder::new()
+        .time_grade(TimeGrade::T1)
+        .strict(false)
+        .boot_mode(BootMode::Direct)
+        .app(AppSource::Path(elf.to_path_buf()));
+    let board =
+        V3Board::build(builder).map_err(|e| anyhow::anyhow!("the image builds no machine: {e}"))?;
+    let host = EmuLinkHost::new(board, fresh_nonce(), true);
+    finish_open(args, host, project_dir(args, EmuChip::Esp32V3))
+}
+
+/// Bring a fresh [`EmuLinkHost`] up (wait for its hello), deploy `dir`, and
+/// hand the board and its link port off to a [`Session`] — the chip-generic
+/// back half of every `open_emu_*`.
+fn finish_open<B: EmuUsbBoard + ChipReport + 'static>(
+    args: &RttArgs,
+    mut host: EmuLinkHost<B>,
+    dir: PathBuf,
+) -> Result<Session> {
     if host.wait_for_line("\"hello\":{", 5_000_000)?.is_none() {
         bail!("no hello:\n{}", host.console().join("\n"));
     }
-    let dir: PathBuf = args.project.clone().unwrap_or_else(|| {
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../catalog/projects/playful-choker")
-    });
     let (uid, _) = crate::commands::dev::validation::validate_local_project(&dir)
         .with_context(|| format!("{} validates", dir.display()))?;
     let files =
@@ -698,7 +777,7 @@ fn window_fps(beats: &[Value]) -> Option<f64> {
 }
 
 /// n, min, p10, p50, p90, p99, max, mean.
-fn stats(xs: &[f64]) -> Value {
+pub(super) fn stats(xs: &[f64]) -> Value {
     if xs.is_empty() {
         return json!({ "n": 0 });
     }
@@ -789,5 +868,76 @@ mod tests {
         let first: Vec<u64> = (0..4).map(|_| a.next()).collect();
         assert_eq!(first, (0..4).map(|_| b.next()).collect::<Vec<_>>());
         assert_ne!(first[0], first[1]);
+    }
+
+    #[test]
+    fn chip_is_refused_on_a_serial_target_but_fine_on_emu() {
+        assert!(
+            check_chip_on_target("/dev/cu.usbmodem1101", false, Some(EmuChip::Esp32S3)).is_err()
+        );
+        assert!(check_chip_on_target("/dev/cu.usbmodem1101", false, None).is_ok());
+        assert!(check_chip_on_target("emu:fw-esp32c6", true, Some(EmuChip::Esp32S3)).is_ok());
+        assert!(check_chip_on_target("emu:fw-esp32c6", true, None).is_ok());
+    }
+
+    #[test]
+    fn grade_defaults_to_t2_on_the_c6_and_t1_elsewhere_and_refuses_the_other_grade() {
+        assert_eq!(resolve_grade(EmuChip::Esp32C6, None).unwrap(), "t2");
+        assert_eq!(resolve_grade(EmuChip::Esp32C6, Some("t1")).unwrap(), "t1");
+        assert_eq!(resolve_grade(EmuChip::Esp32C6, Some("t2")).unwrap(), "t2");
+        assert!(resolve_grade(EmuChip::Esp32C6, Some("t3")).is_err());
+
+        for chip in [EmuChip::Esp32S3, EmuChip::Esp32V3] {
+            assert_eq!(resolve_grade(chip, None).unwrap(), "t1");
+            assert_eq!(resolve_grade(chip, Some("t1")).unwrap(), "t1");
+            assert!(
+                resolve_grade(chip, Some("t2")).is_err(),
+                "{chip:?} has only t1"
+            );
+        }
+    }
+
+    #[test]
+    fn each_chip_has_its_own_default_project() {
+        assert!(
+            default_project_path(EmuChip::Esp32C6).ends_with("catalog/projects/playful-choker")
+        );
+        assert!(default_project_path(EmuChip::Esp32S3).ends_with("projects/test/shader-oracle"));
+        assert!(default_project_path(EmuChip::Esp32V3).ends_with("projects/test/five-wire"));
+    }
+
+    #[test]
+    fn project_dir_prefers_an_explicit_project_over_the_chip_default() {
+        let args = RttArgs {
+            target: "emu:fw".to_string(),
+            chip: Some(EmuChip::Esp32S3),
+            json: None,
+            console: None,
+            count: 1,
+            max_gap_ms: 1,
+            seed: 1,
+            reads: 1,
+            read_bytes: 1,
+            writes: 1,
+            write_bytes: 1,
+            warmup_s: 0.0,
+            idle_s: 0.0,
+            transfers_at_s: 0.0,
+            requests_at_s: 0.0,
+            tail_s: 0.0,
+            grade: None,
+            project: Some(PathBuf::from("/explicit/project")),
+            label: String::new(),
+        };
+        assert_eq!(
+            project_dir(&args, EmuChip::Esp32S3),
+            PathBuf::from("/explicit/project")
+        );
+        let mut no_override = args;
+        no_override.project = None;
+        assert_eq!(
+            project_dir(&no_override, EmuChip::Esp32S3),
+            default_project_path(EmuChip::Esp32S3)
+        );
     }
 }
