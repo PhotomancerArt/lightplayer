@@ -1,23 +1,29 @@
-//! "Who has access" (spike §2): every key on the device, read from it.
+//! The device's access panel (spike `access-panel-tidy`, concept 4B).
 //!
-//! It opens from the card's Connections group ("Who has access · N ›") into
-//! a panel in the top layer, so the card keeps its height. Only a link that
-//! holds edit sees it: USB (the trusted link) or a Bluetooth unlock at edit
-//! — the board answers the list at edit only.
+//! It opens from the card's Connections group ("Access · open to anyone
+//! nearby ›") into a panel in the top layer, so the card keeps its height.
+//! Only a link that holds author sees it: USB (the trusted link) or a
+//! Bluetooth link at author — the board answers the list at that tier only.
 //!
-//! One flat list, in the order people think of them: this browser, other
-//! browsers, accounts, the account's passwords, shared passwords
-//! ([`super::access_entry_row::ordered`]), then the "Anyone nearby" switch.
-//! Each row's trash can is the two-tap confirm. "+ Add a password" at the
-//! list's end swaps the panel for Share ([`super::share_access_sheet`]) in
-//! place — the add sits where the new row will appear.
+//! Top: "Who nearby can…" Play and Author, each Anyone or Password.
+//! Password shows a box with a random password already in it, selected
+//! when you click in, so typing replaces it; ↻ rolls another; it saves when
+//! you click away (or press Enter). Anyone saves at once, no confirm. While
+//! Author is Anyone, Play follows it.
+//!
+//! Under a separator, one line: "Your browsers & account · always get in ·
+//! N of 16 · added by USB", which opens the keys, grouped
+//! ([`super::access_key_group_row`]). "This isn't enterprise banking
+//! software" (Yona): nothing else.
 
 use dioxus::prelude::*;
-use lpa_studio_core::{AccessCommand, DeviceAccessChange, UiAccessPanel};
+use lpa_studio_core::{
+    AccessCommand, AccessTier, DeviceAccessChange, DeviceId, UiAccessPanel, UiPasswordLine,
+};
 
-use super::access_entry_row::{AccessEntryRow, ICON_TILE_CLASS, ordered};
-use super::access_fields::{HELP_CLASS, Switch, TEXT_LINK_CLASS};
-use super::share_access_sheet::ShareAccessSheet;
+use super::access_fields::HELP_CLASS;
+use super::access_key_group_row::{AccessKeyGroupRow, ICON_TILE_CLASS};
+use super::share_words::fresh_share_words;
 use crate::base::{StudioIcon, StudioIconName};
 
 /// The panel body (the popover's content, and the stories' subject).
@@ -25,98 +31,293 @@ use crate::base::{StudioIcon, StudioIconName};
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub(crate) fn DeviceAccessPanel(
     panel: UiAccessPanel,
-    /// The device's name, for Share's title and link.
-    device_name: String,
     on_access: EventHandler<AccessCommand>,
-    /// Stories only: the entry (by salt) whose trash can starts armed.
+    /// Stories only: open the keys list.
+    #[props(default)]
+    keys_open_preview: bool,
+    /// Stories only: the key group (by first salt) whose trash can starts
+    /// armed.
     #[props(default)]
     armed_preview: Option<[u8; 16]>,
-    /// Stories only: open on Share.
+    /// Stories only: the words a fresh box starts with.
     #[props(default)]
-    sharing_preview: bool,
-    /// Stories only: Share's fixed words.
-    #[props(default)]
-    share_words: Option<String>,
-    /// Stories only: the product's origin for Share's link.
-    #[props(default)]
-    share_origin: Option<String>,
+    words_preview: Option<String>,
 ) -> Element {
     let device = panel.device;
-    let busy = panel.writing;
-    let mut sharing = use_signal(|| sharing_preview);
-    if sharing() {
-        return rsx! {
-            ShareAccessSheet {
-                device,
-                device_name,
-                on_access,
-                on_done: move |_| sharing.set(false),
-                words: share_words.clone(),
-                origin: share_origin.clone(),
-                busy,
-            }
-        };
-    }
-    let open = panel.open;
-    let entries = ordered(&panel.entries);
+    let busy = panel.writing || panel.ble_enabled.is_none();
+    let mut keys_open = use_signal(|| keys_open_preview);
+    let author_anyone = panel.author.is_anyone();
     rsx! {
-        div { class: "tw:grid tw:min-w-0 tw:gap-2 tw:py-1.5",
-            div { class: "tw:flex tw:items-center tw:gap-2 tw:text-status-neutral-foreground",
-                StudioIcon { name: StudioIconName::AccessPeople, size: 15 }
-                h3 { class: "tw:m-0 tw:text-sm tw:font-bold tw:text-strong-foreground", "Who has access" }
+        div { class: "tw:grid tw:min-w-0 tw:gap-1.5 tw:py-1",
+            p { class: "tw:m-0 tw:text-xs tw:font-semibold tw:text-muted-foreground", "Who nearby can…" }
+            PasswordRow {
+                key: "play-{line_key(&panel.play)}",
+                device,
+                tier: AccessTier::Play,
+                line: panel.play.clone(),
+                locked: busy || author_anyone,
+                words: words_preview.clone(),
+                on_access,
+            }
+            PasswordRow {
+                key: "author-{line_key(&panel.author)}",
+                device,
+                tier: AccessTier::Edit,
+                line: panel.author.clone(),
+                locked: busy,
+                words: words_preview.clone(),
+                on_access,
+            }
+            if let Some(notice) = panel.notice.clone() {
+                p { class: "tw:m-0 tw:text-xs tw:leading-snug tw:text-status-good-foreground", "{notice}" }
             }
             if panel.ble_enabled.is_none() {
                 p { class: HELP_CLASS, "Reading the device's list…" }
             }
-            ul { class: "tw:m-0 tw:grid tw:list-none tw:p-0",
-                for entry in entries {
-                    AccessEntryRow {
-                        key: "{entry.salt_id:?}",
-                        armed_preview: armed_preview == Some(entry.salt_id),
-                        entry,
-                        device,
-                        busy,
-                        on_access,
-                    }
-                }
-                li { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-2.5 tw:border-t tw:border-border-muted tw:py-2 tw:first:border-t-0",
-                    span { class: "{ICON_TILE_CLASS} tw:border-status-live-border tw:bg-status-live-bg tw:text-status-live-foreground",
-                        StudioIcon { name: StudioIconName::AccessNearby, size: 15 }
-                    }
-                    span { class: "tw:grid tw:min-w-0 tw:flex-1 tw:gap-px",
-                        span { class: "tw:text-[13px] tw:font-bold tw:text-strong-foreground", "Anyone nearby" }
-                        span { class: "tw:truncate tw:text-[11px] tw:text-dim-foreground",
-                            if open { "can play without a password" } else { "off — needs a key or password" }
-                        }
-                    }
-                    Switch {
-                        on: open,
-                        label: "Anyone nearby can play".to_string(),
-                        locked: busy || panel.ble_enabled.is_none(),
-                        on_toggle: move |on| on_access.call(AccessCommand::Change {
-                            device,
-                            change: DeviceAccessChange::SetOpen(on),
-                        }),
-                    }
-                }
-            }
-            // Add sits where the new row will appear: under the list.
-            div { class: "tw:flex tw:flex-wrap tw:items-center tw:justify-between tw:gap-x-3 tw:gap-y-1",
-                button {
-                    class: TEXT_LINK_CLASS,
-                    r#type: "button",
-                    disabled: busy || panel.ble_enabled.is_none(),
-                    onclick: move |_| sharing.set(true),
-                    "+ Add a password"
-                }
-                span { class: HELP_CLASS, "USB always gets in." }
-            }
-            if busy {
+            if panel.writing {
                 p { class: HELP_CLASS, "Writing to the device…" }
             }
             if let Some(error) = panel.error.clone() {
                 p { class: "tw:m-0 tw:text-xs tw:leading-relaxed tw:text-status-error-foreground", "{error}" }
             }
+            div { class: "tw:mt-1 tw:border-t tw:border-border-muted tw:pt-1.5",
+                button {
+                    class: "tw:flex tw:w-full tw:min-w-0 tw:cursor-pointer tw:appearance-none tw:items-center tw:gap-2.5 tw:border-0 tw:bg-transparent tw:p-0 tw:py-1 tw:text-left ux-focus-ring",
+                    r#type: "button",
+                    aria_expanded: "{keys_open()}",
+                    onclick: move |_| {
+                        let was = keys_open();
+                        keys_open.set(!was);
+                    },
+                    span { class: "{ICON_TILE_CLASS} tw:border-status-neutral-border tw:bg-status-neutral-bg tw:text-status-neutral-foreground",
+                        StudioIcon { name: StudioIconName::AccessLaptop, size: 15 }
+                    }
+                    span { class: "tw:grid tw:min-w-0 tw:flex-1 tw:gap-px",
+                        span { class: "tw:text-[13px] tw:font-bold tw:text-strong-foreground", "Your browsers & account" }
+                        span { class: "tw:truncate tw:text-[11px] tw:text-dim-foreground",
+                            "always get in · {panel.used} of {panel.capacity} · added by USB"
+                        }
+                    }
+                    span { class: if keys_open() { "tw:inline-flex tw:rotate-90 tw:text-dim-foreground" } else { "tw:inline-flex tw:text-dim-foreground" },
+                        StudioIcon { name: StudioIconName::Collapsed, size: 14 }
+                    }
+                }
+                if keys_open() {
+                    ul { class: "tw:m-0 tw:ml-[40px] tw:grid tw:list-none tw:p-0",
+                        for group in panel.keys.clone() {
+                            AccessKeyGroupRow {
+                                key: "{group.salts[0]:?}",
+                                armed_preview: armed_preview == group.salts.first().copied(),
+                                group,
+                                device,
+                                busy: panel.writing,
+                                on_access,
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// One "Who nearby can…" line: its name, Anyone | Password, and the box.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn PasswordRow(
+    device: DeviceId,
+    tier: AccessTier,
+    line: UiPasswordLine,
+    /// Busy, or Play while Author is Anyone.
+    locked: bool,
+    words: Option<String>,
+    on_access: EventHandler<AccessCommand>,
+) -> Element {
+    let saved = match &line {
+        UiPasswordLine::Shown(password) => password.clone(),
+        _ => String::new(),
+    };
+    let start = match &line {
+        UiPasswordLine::Shown(password) => password.clone(),
+        UiPasswordLine::SetElsewhere | UiPasswordLine::NotSet => String::new(),
+        UiPasswordLine::Anyone | UiPasswordLine::FollowsAuthor => {
+            words.clone().unwrap_or_else(fresh_share_words)
+        }
+    };
+    let mut draft = use_signal(|| start);
+    let mut just_focused = use_signal(|| false);
+    let anyone = line.is_anyone();
+    let name = match tier {
+        AccessTier::Play => "Play",
+        AccessTier::Edit => "Author",
+    };
+    let set = move |password: Option<String>| {
+        on_access.call(AccessCommand::Change {
+            device,
+            change: DeviceAccessChange::SetPassword { tier, password },
+        });
+    };
+    let saved_for_commit = saved.clone();
+    let commit = move || {
+        let typed = draft.read().clone();
+        if !typed.trim().is_empty() && typed != saved_for_commit {
+            set(Some(typed));
+        }
+    };
+    let commit_on_blur = commit.clone();
+    let commit_on_enter = commit.clone();
+    let commit_on_save = commit;
+    let dirty = !anyone && !draft.read().trim().is_empty() && *draft.read() != saved;
+    let note = match (&line, draft.read().is_empty()) {
+        (UiPasswordLine::SetElsewhere, true) => {
+            Some("Set from another browser, so it can't be shown — type a new one to replace it.")
+        }
+        (UiPasswordLine::NotSet, true) => {
+            Some("No password on the device yet — type one, or only your browsers get in.")
+        }
+        _ => None,
+    };
+    let placeholder = match line {
+        UiPasswordLine::SetElsewhere => "type a new one",
+        _ => "type a password",
+    };
+    rsx! {
+        div { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-2.5",
+            span { class: "tw:w-[52px] tw:flex-none tw:text-[13px] tw:font-bold tw:text-strong-foreground", "{name}" }
+            div { class: if locked { "{SEGMENTS_CLASS} tw:opacity-50" } else { "{SEGMENTS_CLASS}" },
+                role: "group",
+                aria_label: "Who nearby can {name.to_lowercase()}",
+                button {
+                    class: segment_class(anyone),
+                    r#type: "button",
+                    aria_pressed: "{anyone}",
+                    disabled: locked,
+                    onclick: move |_| if !anyone { set(None) },
+                    "Anyone"
+                }
+                button {
+                    class: segment_class(!anyone),
+                    r#type: "button",
+                    aria_pressed: "{!anyone}",
+                    disabled: locked,
+                    onclick: move |_| {
+                        if anyone {
+                            let mut typed = draft.read().clone();
+                            if typed.trim().is_empty() {
+                                typed = fresh_share_words();
+                                draft.set(typed.clone());
+                            }
+                            set(Some(typed));
+                        }
+                    },
+                    "Password"
+                }
+            }
+            if anyone {
+                span { class: "tw:min-w-0 tw:truncate tw:text-xs tw:text-dim-foreground",
+                    if line == UiPasswordLine::FollowsAuthor { "follows Author" } else { "no password" }
+                }
+            }
+        }
+        if !anyone {
+            div { class: "tw:ml-[62px] tw:flex tw:min-w-0 tw:items-center tw:gap-1",
+                input {
+                    class: "tw:min-w-0 tw:flex-1 tw:rounded tw:border tw:border-border-strong tw:bg-terminal tw:px-2 tw:py-1.5 tw:font-mono tw:text-[13px] tw:text-strong-foreground",
+                    r#type: "text",
+                    aria_label: "{name} password",
+                    placeholder,
+                    spellcheck: "false",
+                    autocomplete: "off",
+                    disabled: locked,
+                    value: "{draft}",
+                    oninput: move |event| draft.set(event.value()),
+                    // Type to replace it: the whole password is selected
+                    // when the box takes focus.
+                    onfocus: move |_| {
+                        select_focused_input();
+                        just_focused.set(true);
+                    },
+                    // The focusing click's mouseup would drop the selection.
+                    onmouseup: move |event| {
+                        if just_focused() {
+                            event.prevent_default();
+                            just_focused.set(false);
+                        }
+                    },
+                    onblur: move |_| commit_on_blur(),
+                    onkeydown: move |event| {
+                        if event.key() == Key::Enter {
+                            commit_on_enter();
+                        }
+                    },
+                }
+                if dirty {
+                    button {
+                        class: "tw:flex-none tw:cursor-pointer tw:appearance-none tw:rounded tw:border-0 tw:bg-white/10 tw:px-2 tw:py-1.5 tw:text-xs tw:font-bold tw:text-strong-foreground ux-focus-ring",
+                        r#type: "button",
+                        disabled: locked,
+                        onclick: move |_| commit_on_save(),
+                        "Save"
+                    }
+                }
+                button {
+                    class: "tw:inline-flex tw:flex-none tw:cursor-pointer tw:appearance-none tw:items-center tw:rounded tw:border-0 tw:bg-transparent tw:p-1.5 tw:text-muted-foreground tw:hover:text-strong-foreground ux-focus-ring",
+                    r#type: "button",
+                    title: "Another random one",
+                    aria_label: "Another random password",
+                    disabled: locked,
+                    onclick: move |_| draft.set(fresh_share_words()),
+                    StudioIcon { name: StudioIconName::AccessRegenerate, size: 14 }
+                }
+            }
+            if let Some(note) = note {
+                p { class: "tw:m-0 tw:ml-[62px] tw:text-[11.5px] tw:leading-snug tw:text-subtle-foreground", "{note}" }
+            }
+        }
+    }
+}
+
+/// A key that changes when the device's answer does, so a row's box
+/// starts over from what the device now holds.
+fn line_key(line: &UiPasswordLine) -> String {
+    match line {
+        UiPasswordLine::Anyone => "anyone".to_string(),
+        UiPasswordLine::FollowsAuthor => "follows".to_string(),
+        UiPasswordLine::SetElsewhere => "elsewhere".to_string(),
+        UiPasswordLine::NotSet => "unset".to_string(),
+        // The length and a checksum, not the password.
+        UiPasswordLine::Shown(password) => format!(
+            "shown-{}-{}",
+            password.len(),
+            password.bytes().fold(0u32, |sum, b| sum
+                .wrapping_mul(31)
+                .wrapping_add(u32::from(b)))
+        ),
+    }
+}
+
+const SEGMENTS_CLASS: &str =
+    "tw:flex tw:flex-none tw:overflow-hidden tw:rounded tw:border tw:border-border-strong";
+
+fn segment_class(pressed: bool) -> &'static str {
+    if pressed {
+        "tw:cursor-pointer tw:appearance-none tw:border-0 tw:bg-white/10 tw:px-2.5 tw:py-1 tw:text-xs tw:font-bold tw:text-strong-foreground tw:disabled:cursor-not-allowed ux-focus-ring"
+    } else {
+        "tw:cursor-pointer tw:appearance-none tw:border-0 tw:bg-transparent tw:px-2.5 tw:py-1 tw:text-xs tw:font-semibold tw:text-muted-foreground tw:hover:text-strong-foreground tw:disabled:cursor-not-allowed ux-focus-ring"
+    }
+}
+
+/// Select the focused input's whole text.
+fn select_focused_input() {
+    #[cfg(target_arch = "wasm32")]
+    {
+        use wasm_bindgen::JsCast;
+        if let Some(input) = web_sys::window()
+            .and_then(|window| window.document())
+            .and_then(|document| document.active_element())
+            .and_then(|element| element.dyn_into::<web_sys::HtmlInputElement>().ok())
+        {
+            input.select();
         }
     }
 }
