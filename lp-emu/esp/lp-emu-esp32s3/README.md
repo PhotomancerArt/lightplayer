@@ -547,15 +547,19 @@ stack, no analog anything, no silicon — **no S3 board has been read at all**
 (M6 P09 owns that), so nothing this walk prints is a measurement of hardware.
 And two things it carries rather than hides:
 
-- The walk still carries the workarounds for
+- **Nothing replays `walks/shader-oracle.script`.** It is the pre-lp-link
+  `M!` record of this walk, captured before wire proto 30 moved the shipped
+  image onto lp-link; today's image would ignore its bytes outright. The
+  script's only remaining job is
+  `tests/pin_frames.rs::the_walk_is_the_c6s_captured_bytes`, which checks
+  its payload against the C6's copy as text.
+- The workarounds this walk used to carry for
   `docs/defects/2026-09-13-the-s3-link-drops-the-io-tasks-next-chunk-on-a-stale-serial-in-empty.md`
-  (DD103), which the firmware's IN-endpoint gate fixed on 2026-09-24: it
-  asks `lp-cli upload` for no deploy ack (`--no-wait`), takes its "is it
-  running?" evidence from lit frames on the pad rather than a `projectRead`
-  stream, `walks/shader-oracle.script` waits on the handler's log line
-  rather than the stop-all reply, and `LP_WALK_BOOT=direct` is documented as
-  unable to complete an upload. Re-pointing them at the plain calls is the
-  walk's own follow-up, to be proved by a run of the walk.
+  (DD103) are gone: the firmware's IN-endpoint gate fixed the drop on
+  2026-09-24, and `just walk-esp32s3-emu` now hosts the link and uploads in
+  one call (`lp-cli emu run --host-link --upload`, `scripts/emu/m4-walk.sh`),
+  the same shape as the C6's walk — no `--no-wait`, and no waiting on a log
+  line in place of the deploy ack.
 
 It builds a firmware image, a merged image and a release `lp-cli`, then runs
 eight emulated seconds, so it costs minutes rather than seconds and belongs in
@@ -566,7 +570,7 @@ a session rather than in a PR gate (R6/DD49). What it proves per tick is
 `just heap-budget-check-chips-s3` is the other thing that reads this machine
 for a gate: the shipped image's own first-heartbeat allocator figures,
 ratcheted into `scripts/heap-budget-record/chips/esp32s3.json`. ⚠️ Its triple is
-**elicited** (`walks/s3-stop-all.script`), as the classic's is and as the
+**elicited** (`lp-emu/lp-emu-validate/walks/s3-stop-all.script`), as the classic's is and as the
 C6's is not, and it is measured on a **direct load with no flash chip**, so
 the firmware runs on its memory FS — the record's `boot_shape` says what that
 costs against the ROM-up figures, and the two must never be compared as if
