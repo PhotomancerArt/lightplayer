@@ -9,6 +9,7 @@
 
 pub mod board_project;
 pub mod embedded_example;
+pub mod home_offers;
 pub mod home_op;
 pub mod home_view_builder;
 pub mod pattern_from_export;
@@ -25,6 +26,10 @@ pub use board_project::{
 pub use embedded_example::{
     CatalogBucket, EmbeddedExample, canonical_example_id, embedded_example,
     embedded_example_by_slug, embedded_examples,
+};
+pub use home_offers::{
+    NEW_PROJECT_NAME_PARAM, NEW_PROJECT_TEMPLATE_PARAM, OPEN_PROJECT_PARAM, home_offers,
+    new_project_offer, open_project_offer,
 };
 pub use home_op::{HOME_NODE_ID, HomeOp, ProjectTemplate, ZipBytes};
 pub use home_view_builder::importable_patterns;

@@ -6,9 +6,9 @@
 
 use lpa_agent::{StopReason, TokenUsage, TurnEvent};
 
-use super::app_agent_eval_driver::{AgentEvalStudio, ModelSource, RunLimits};
-use super::app_agent_eval_harness::golden_tree;
+use super::app_agent_eval_driver::{AgentEvalStudio, ModelSource};
 use super::app_agent_scenario::Scenario;
+use super::app_agent_scenario_seat::RunLimits;
 use crate::app::studio::offer_press_test_api::OfferPressTestApi;
 use crate::{
     AGENT_ACTIVITY_LIT_SECS, AgentActivityKind, OfferArgs, OfferPath, UiAgentTurn, UiStudioView,
@@ -134,7 +134,7 @@ fn edited_then_saved() -> AgentEvalStudio {
         ],
     ]];
     let mut studio = AgentEvalStudio::new(ModelSource::Scripted(scripts));
-    studio.start(&scenario.start, golden_tree);
+    studio.start(&scenario);
     studio.send("make it 300 and save", limits());
     assert!(!studio.unsaved(), "the agent's press saved");
     studio
@@ -199,6 +199,7 @@ fn limits() -> RunLimits {
         deadline: std::time::Instant::now() + std::time::Duration::from_secs(60),
         usd: 1.0,
         turns: 8,
+        tokens: None,
     }
 }
 

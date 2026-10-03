@@ -1,0 +1,29 @@
+{
+  "kind": "Playlist",
+  "bindings": {
+    "time": {
+      "source": "bus:time"
+    }
+  },
+  "idle_entry": 1,
+  "default_fade": 1.5,
+  "cycle": {
+    "kind": "cycle",
+    "step_seconds": 60.0,
+    "fade_seconds": 1.5
+  },
+  "entries": {
+    "1": {
+      "name": "palette_waves",
+      "node": {
+        "ref": "./modules/palette_waves/module.json"
+      }
+    },
+    "2": {
+      "name": "spiral",
+      "node": {
+        "ref": "./modules/spiral/module.json"
+      }
+    }
+  }
+}

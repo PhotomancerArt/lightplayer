@@ -1,11 +1,14 @@
-//! The stage-A checks: pure functions over a [`ProjectTree`] (plus, for
-//! the two that need them, the run's node statuses and transcript).
+//! The project and board checks: pure functions over a [`ProjectTree`]
+//! (plus, for the ones that need them, the run's node statuses and the
+//! board's end state), and [`run_check`], which dispatches every
+//! [`CheckSpec`] — the conversation's own checks live in
+//! `app_agent_conversation_checks.rs`.
 //!
 //! Each returns a [`CheckResult`] whose `reason` names what it saw, so a
 //! failed eval reads as "the Output's endpoint is `ws281x:local:D10`", not
 //! "check 3 failed". The checks are proved in both directions in this
-//! file's tests and in `app_agent_eval_tests.rs`: the goldens pass, and the
-//! negative fixtures fail the checks they should.
+//! file's tests and in `app_agent_eval_tests.rs` / `app_agent_corpus_tests.rs`:
+//! the goldens pass, and the negative fixtures fail the checks they should.
 //!
 //! Stage B (`lp-cli/tests/app_agent_emu_decode.rs`) is the ground truth for
 //! "the LEDs light"; these judge the project the agent built.
@@ -15,12 +18,13 @@ use std::collections::BTreeMap;
 use lpc_model::HwEndpointSpec;
 use serde_json::Value;
 
+use super::app_agent_check_spec::{CheckSpec, FirmwareIs};
+use super::app_agent_conversation_checks as conversation;
 use super::app_agent_project_tree::{ProjectTree, TreeNode};
-use super::app_agent_scenario::{CheckId, Scenario};
-use super::app_agent_transcript::{EvalStep, EvalTranscript};
+use super::app_agent_scenario_seat::DeviceSummary;
+use super::app_agent_transcript::EvalTranscript;
 
-/// The XIAO ESP32-C6's catalog board id (`lpc-hardware/boards/seeed/xiao-esp32-c6.json`).
-pub(crate) const XIAO_C6_BOARD_ID: &str = "seeed/xiao-esp32-c6";
+pub(crate) use super::app_agent_check_spec::XIAO_C6_BOARD_ID;
 
 /// The endpoint every Sean scenario wants: XIAO D6 = GPIO16.
 pub(crate) const D6_ENDPOINT: &str = "ws281x:local:D6";
@@ -28,32 +32,25 @@ pub(crate) const D6_ENDPOINT: &str = "ws281x:local:D6";
 /// One check's verdict.
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub(crate) struct CheckResult {
+    /// The check and its key parameter (`output_on(D6)`).
     pub(crate) name: String,
+    /// The check's kind (`output_on`), for grouping.
+    pub(crate) kind: String,
     pub(crate) passed: bool,
     pub(crate) reason: String,
 }
 
 impl CheckResult {
-    fn pass(check: CheckId, reason: impl Into<String>) -> Self {
+    fn from(check: &CheckSpec, result: Result<String, String>) -> Self {
+        let (passed, reason) = match result {
+            Ok(reason) => (true, reason),
+            Err(reason) => (false, reason),
+        };
         Self {
-            name: check.name().to_string(),
-            passed: true,
-            reason: reason.into(),
-        }
-    }
-
-    fn fail(check: CheckId, reason: impl Into<String>) -> Self {
-        Self {
-            name: check.name().to_string(),
-            passed: false,
-            reason: reason.into(),
-        }
-    }
-
-    fn from(check: CheckId, result: Result<String, String>) -> Self {
-        match result {
-            Ok(reason) => Self::pass(check, reason),
-            Err(reason) => Self::fail(check, reason),
+            name: check.name(),
+            kind: check.kind(),
+            passed,
+            reason,
         }
     }
 }
@@ -76,65 +73,117 @@ pub(crate) struct NodeStatusRow {
 
 /// Everything a run hands the checks.
 pub(crate) struct CheckInput<'a> {
-    pub(crate) scenario: &'a Scenario,
-    /// The project the run started from (`None` for a Blank start).
+    /// The checks to run, in report order.
+    pub(crate) checks: &'a [CheckSpec],
+    /// The project the run started from (`None` for a Blank or empty start).
     pub(crate) start: Option<&'a ProjectTree>,
-    /// The project the run left (saved bytes).
+    /// The project the run left (saved bytes, or what the board runs).
     pub(crate) project: &'a ProjectTree,
     /// Node statuses after the server advanced (`None`: not observed).
     pub(crate) statuses: Option<&'a [NodeStatusRow]>,
     /// Whether unsaved edits remain (`None`: not observed).
     pub(crate) unsaved: Option<bool>,
     pub(crate) transcript: &'a EvalTranscript,
+    /// Model turns across the run.
+    pub(crate) turns: u32,
+    /// The board's end state (device seat).
+    pub(crate) device: Option<&'a DeviceSummary>,
 }
 
-/// Run every check the scenario names, in its order.
+/// Run every check, in order.
 pub(crate) fn run_checks(input: &CheckInput<'_>) -> Vec<CheckResult> {
     input
-        .scenario
         .checks
         .iter()
-        .map(|check| run_check(*check, input))
+        .map(|check| run_check(check, input))
         .collect()
 }
 
-pub(crate) fn run_check(check: CheckId, input: &CheckInput<'_>) -> CheckResult {
-    let scenario = input.scenario;
+/// One check's verdict.
+pub(crate) fn run_check(check: &CheckSpec, input: &CheckInput<'_>) -> CheckResult {
+    CheckResult::from(check, verdict(check, input))
+}
+
+fn verdict(check: &CheckSpec, input: &CheckInput<'_>) -> Result<String, String> {
+    let project = input.project;
+    let transcript = input.transcript;
+    let start = || input.start.ok_or("needs a starting project".to_string());
     match check {
-        CheckId::OutputOnD6 => CheckResult::from(check, output_on(input.project, D6_ENDPOINT)),
-        CheckId::TargetIsXiaoC6 => {
-            CheckResult::from(check, target_is(input.project, XIAO_C6_BOARD_ID))
-        }
-        CheckId::StripOf => CheckResult::from(check, strip_of(input.project, scenario.leds)),
-        CheckId::PlaylistCycles => CheckResult::from(
-            check,
-            playlist_cycles(
-                input.project,
-                scenario.playlist.min_entries,
-                scenario.playlist.step_seconds,
-                &scenario.playlist.colourful,
-            ),
+        CheckSpec::TargetIs { board } => target_is(project, board),
+        CheckSpec::TargetIsXiaoC6 => target_is(project, XIAO_C6_BOARD_ID),
+        CheckSpec::OutputOn { pin } => output_on(project, &format!("ws281x:local:{pin}")),
+        CheckSpec::OutputOnD6 => output_on(project, D6_ENDPOINT),
+        CheckSpec::StripOf { leds } => strip_of(project, *leds),
+        CheckSpec::LampCount { leds } => lamp_count(project, *leds),
+        CheckSpec::Playlist {
+            min_entries,
+            step_seconds,
+            from,
+        } => playlist_cycles(project, *min_entries, *step_seconds, from),
+        CheckSpec::GraphWired => graph_wired(project),
+        CheckSpec::AllNodesOk => match input.statuses {
+            Some(rows) => all_nodes_ok(rows),
+            None => Err("node statuses were not observed".to_string()),
+        },
+        CheckSpec::Saved => match input.unsaved {
+            Some(false) => Ok("no unsaved edits".to_string()),
+            Some(true) => Err("unsaved edits remain".to_string()),
+            None => Err("the save state was not observed".to_string()),
+        },
+        CheckSpec::MinimalDiff { allow } => minimal_diff(start()?, project, allow),
+        CheckSpec::Unchanged => unchanged(start()?, project),
+        CheckSpec::Field {
+            node,
+            path,
+            equals,
+            between,
+            default,
+        } => field(
+            project,
+            node,
+            path,
+            equals.as_ref(),
+            *between,
+            default.as_ref(),
         ),
-        CheckId::GraphWired => CheckResult::from(check, graph_wired(input.project)),
-        CheckId::AllNodesOk => match input.statuses {
-            Some(rows) => CheckResult::from(check, all_nodes_ok(rows)),
-            None => CheckResult::fail(check, "node statuses were not observed"),
-        },
-        CheckId::Saved => match input.unsaved {
-            Some(false) => CheckResult::pass(check, "no unsaved edits"),
-            Some(true) => CheckResult::fail(check, "unsaved edits remain"),
-            None => CheckResult::fail(check, "the save state was not observed"),
-        },
-        CheckId::AskedAboutBoard => {
-            CheckResult::from(check, asked_about(input.transcript, "board"))
+        CheckSpec::EntriesRemoved { patterns } => entries_removed(project, patterns),
+        CheckSpec::EntriesKept { patterns } => entries_kept(start()?, project, patterns),
+        CheckSpec::EntriesAdded { min, from } => entries_added(input.start, project, *min, from),
+        CheckSpec::AnyOf { of } => {
+            let verdicts: Vec<Result<String, String>> =
+                of.iter().map(|check| verdict(check, input)).collect();
+            match verdicts.iter().find_map(|v| v.as_ref().ok()) {
+                Some(reason) => Ok(reason.clone()),
+                None => Err(verdicts
+                    .into_iter()
+                    .filter_map(Result::err)
+                    .collect::<Vec<_>>()
+                    .join("; and ")),
+            }
         }
-        CheckId::NoDLabelBeforeBoard => {
-            CheckResult::from(check, no_d_label_before_board(input.transcript))
+        CheckSpec::Asked { topic } => conversation::asked_about(transcript, topic),
+        CheckSpec::AskedAboutBoard => conversation::asked_about(transcript, "board"),
+        CheckSpec::AskedBefore { topic, before } => {
+            conversation::asked_before(transcript, topic, *before)
         }
-        CheckId::MinimalDiff => match input.start {
-            Some(start) => CheckResult::from(check, minimal_strip_diff(start, input.project)),
-            None => CheckResult::fail(check, "minimal_diff needs a starting project"),
+        CheckSpec::NoDLabelBeforeBoard => conversation::no_d_label_before_board(transcript),
+        CheckSpec::MaxQuestions { n, per_turn } => {
+            conversation::max_questions(transcript, *n, *per_turn)
+        }
+        CheckSpec::MaxTurns { n } => match input.turns <= *n {
+            true => Ok(format!("{} turns", input.turns)),
+            false => Err(format!("{} turns, more than {n}", input.turns)),
         },
+        CheckSpec::CardHanded { offer } => conversation::card_handed(transcript, offer),
+        CheckSpec::Never { what } => conversation::never(transcript, what),
+        CheckSpec::SaidAny { words, last } => conversation::said_any(transcript, words, *last),
+        CheckSpec::SaidNone { words } => conversation::said_none(transcript, words),
+        CheckSpec::BoardRunsProject => {
+            board_runs_project(input.device.ok_or("no board was observed")?)
+        }
+        CheckSpec::BoardFirmware { is } => {
+            board_firmware(input.device.ok_or("no board was observed")?, *is)
+        }
     }
 }
 
@@ -217,12 +266,32 @@ pub(crate) fn strip_of(project: &ProjectTree, leds: u32) -> Result<String, Strin
     ))
 }
 
-/// A Playlist on Cycle with a step in range, and at least `min_entries`
-/// entries that are catalog patterns from the `colourful` allowlist.
+/// The project's Fixtures map `leds` lamps between them, in any shape.
+pub(crate) fn lamp_count(project: &ProjectTree, leds: u32) -> Result<String, String> {
+    let fixtures = project.nodes_of_kind("Fixture");
+    if fixtures.is_empty() {
+        return Err("no Fixture node".to_string());
+    }
+    let mut total = 0;
+    for fixture in &fixtures {
+        total += fixture_lamps(project, fixture)?.len();
+    }
+    match total == leds as usize {
+        true => Ok(format!("{} fixture(s) map {leds} lamps", fixtures.len())),
+        false => Err(format!(
+            "{} fixture(s) map {total} lamps, not {leds}",
+            fixtures.len()
+        )),
+    }
+}
+
+/// A Playlist on Cycle with a step in range (when one is given), and at
+/// least `min_entries` entries that are catalog patterns from the
+/// `colourful` allowlist (any catalog pattern when it is empty).
 pub(crate) fn playlist_cycles(
     project: &ProjectTree,
     min_entries: usize,
-    step_range: [f64; 2],
+    step_range: Option<[f64; 2]>,
     colourful: &[String],
 ) -> Result<String, String> {
     let playlists = project.nodes_of_kind("Playlist");
@@ -231,24 +300,6 @@ pub(crate) fn playlist_cycles(
         [] => return Err("no Playlist node".to_string()),
         many => return Err(format!("{} Playlist nodes; expected one", many.len())),
     };
-    let cycle = &playlist.def["cycle"];
-    if cycle.get("kind").and_then(Value::as_str) != Some("cycle") {
-        return Err(format!(
-            "the playlist does not cycle (cycle = {})",
-            if cycle.is_null() {
-                "unset".to_string()
-            } else {
-                cycle.to_string()
-            }
-        ));
-    }
-    let step = cycle["step_seconds"].as_f64().unwrap_or(0.0);
-    if !(step_range[0]..=step_range[1]).contains(&step) {
-        return Err(format!(
-            "the cycle steps every {step} s, outside {}–{} s",
-            step_range[0], step_range[1]
-        ));
-    }
     let def_file = playlist
         .file
         .clone()
@@ -263,7 +314,9 @@ pub(crate) fn playlist_cycles(
         };
         let module = ProjectTree::resolve(&def_file, reference);
         match entry_pattern(project, &module, &catalog) {
-            Some(slug) if colourful.iter().any(|allowed| *allowed == slug) => {
+            Some(slug)
+                if colourful.is_empty() || colourful.iter().any(|allowed| *allowed == slug) =>
+            {
                 identified.push(slug);
             }
             Some(slug) => {
@@ -271,6 +324,33 @@ pub(crate) fn playlist_cycles(
             }
             None => strangers.push(format!("entry {key} (not a catalog pattern)")),
         }
+    }
+    // Checked after the entries are read, so a playlist that does not
+    // cycle says what it holds too: "does not cycle" over ONE entry (the
+    // agent built a single-pattern project and never tried `cycle`) and
+    // over four (it forgot `cycle`) are different failures (S7, 2026-10-03).
+    let cycle = &playlist.def["cycle"];
+    if cycle.get("kind").and_then(Value::as_str) != Some("cycle") {
+        let mut entries = identified.clone();
+        entries.extend(strangers.iter().cloned());
+        return Err(format!(
+            "the playlist does not cycle (cycle = {}); it holds {} entr{} {entries:?}",
+            if cycle.is_null() {
+                "unset".to_string()
+            } else {
+                cycle.to_string()
+            },
+            entries.len(),
+            if entries.len() == 1 { "y" } else { "ies" },
+        ));
+    }
+    let step = cycle["step_seconds"].as_f64().unwrap_or(0.0);
+    if let Some([lo, hi]) = step_range
+        && !(lo..=hi).contains(&step)
+    {
+        return Err(format!(
+            "the cycle steps every {step} s, outside {lo}–{hi} s"
+        ));
     }
     if identified.len() < min_entries {
         return Err(format!(
@@ -385,43 +465,23 @@ pub(crate) fn all_nodes_ok(rows: &[NodeStatusRow]) -> Result<String, String> {
     ))
 }
 
-/// The run consumed a scripted reply about `topic`: the agent asked.
-pub(crate) fn asked_about(transcript: &EvalTranscript, topic: &str) -> Result<String, String> {
-    if transcript
-        .steps
+/// Starting from `start`, only what `allow` names changed, and something
+/// did. `strip_size` (the default when `allow` is empty): the fixture's
+/// render size and map body, and an output port's `count`.
+/// `<Kind>.<path>`: that field of every node of that kind. `modules`:
+/// anything under `modules/` (pattern folders). The manifest keeps its
+/// name, target and format.
+pub(crate) fn minimal_diff(
+    start: &ProjectTree,
+    end: &ProjectTree,
+    allow: &[String],
+) -> Result<String, String> {
+    let strip_size = allow.is_empty() || allow.iter().any(|token| token == "strip_size");
+    let modules = allow.iter().any(|token| token == "modules");
+    let fields: Vec<(&str, &str)> = allow
         .iter()
-        .any(|step| matches!(step, EvalStep::ScriptedReply { about, .. } if about == topic))
-    {
-        Ok(format!("the agent asked about the {topic}"))
-    } else {
-        Err(format!("the agent never asked about the {topic}"))
-    }
-}
-
-/// No tool call before the board reply wrote a `ws281x:local:D<n>` spec.
-pub(crate) fn no_d_label_before_board(transcript: &EvalTranscript) -> Result<String, String> {
-    for step in &transcript.steps {
-        match step {
-            EvalStep::ScriptedReply { about, .. } if about == "board" => {
-                return Ok("no D-label endpoint was written before the board was known".into());
-            }
-            EvalStep::ToolCall { name, input } => {
-                if let Some(spec) = d_label_spec(input) {
-                    return Err(format!(
-                        "`{name}` wrote {spec:?} before the user said which board it is"
-                    ));
-                }
-            }
-            _ => {}
-        }
-    }
-    Ok("no D-label endpoint was written".into())
-}
-
-/// Starting from `start`, only the strip's size changed: the fixture's
-/// render size and map body, and an output port's `count`. The manifest
-/// keeps its name, target and format.
-pub(crate) fn minimal_strip_diff(start: &ProjectTree, end: &ProjectTree) -> Result<String, String> {
+        .filter_map(|token| token.split_once('.'))
+        .collect();
     let fixture_file = |tree: &ProjectTree| {
         tree.nodes_of_kind("Fixture")
             .into_iter()
@@ -438,9 +498,12 @@ pub(crate) fn minimal_strip_diff(start: &ProjectTree, end: &ProjectTree) -> Resu
             .into_iter()
             .find_map(|node| node.file)
     };
-    let allowed_body = [map_file(start), map_file(end)];
-    let fixture = fixture_file(start);
-    let output = output_file(start);
+    let allowed_body = match strip_size {
+        true => [map_file(start), map_file(end)],
+        false => [None, None],
+    };
+    let fixture = fixture_file(start).filter(|_| strip_size);
+    let output = output_file(start).filter(|_| strip_size);
 
     let mut paths: Vec<&String> = start.files.keys().chain(end.files.keys()).collect();
     paths.sort();
@@ -455,6 +518,10 @@ pub(crate) fn minimal_strip_diff(start: &ProjectTree, end: &ProjectTree) -> Resu
         let path_opt = Some(path.clone());
         if allowed_body.contains(&path_opt) {
             changes.push(format!("{path} (strip body)"));
+            continue;
+        }
+        if modules && path.starts_with("modules/") {
+            changes.push(format!("{path} (pattern folder)"));
             continue;
         }
         let (Some(before), Some(after)) = (before, after) else {
@@ -486,8 +553,15 @@ pub(crate) fn minimal_strip_diff(start: &ProjectTree, end: &ProjectTree) -> Resu
             strip_port_counts(&mut a);
             strip_port_counts(&mut b);
         }
+        for (kind, field) in &fields {
+            for def in [&mut a, &mut b] {
+                if def["kind"].as_str() == Some(kind) {
+                    remove_path(def, field);
+                }
+            }
+        }
         if a == b {
-            changes.push(format!("{path} (size)"));
+            changes.push(format!("{path} (allowed)"));
         } else {
             extra.push(format!("{path} changed beyond the strip size"));
         }
@@ -499,9 +573,291 @@ pub(crate) fn minimal_strip_diff(start: &ProjectTree, end: &ProjectTree) -> Resu
         return Err("nothing changed".to_string());
     }
     Ok(format!(
-        "only the strip size changed: {}",
+        "only what {} allows changed: {}",
+        if allow.is_empty() {
+            "strip_size".to_string()
+        } else {
+            allow.join(", ")
+        },
         changes.join(", ")
     ))
+}
+
+/// The E2 rule: only the strip's size changed.
+pub(crate) fn minimal_strip_diff(start: &ProjectTree, end: &ProjectTree) -> Result<String, String> {
+    minimal_diff(start, end, &[])
+}
+
+/// The project's bytes, read by meaning, equal `start`'s. The manifest
+/// compares by its name, target and format (a save stamps the rest).
+pub(crate) fn unchanged(start: &ProjectTree, end: &ProjectTree) -> Result<String, String> {
+    let manifest = |tree: &ProjectTree| {
+        tree.manifest()
+            .map(|v| (v["name"].clone(), v["target"].clone(), v["format"].clone()))
+    };
+    let mut paths: Vec<&String> = start.files.keys().chain(end.files.keys()).collect();
+    paths.sort();
+    paths.dedup();
+    let changed: Vec<String> = paths
+        .into_iter()
+        .filter(|path| {
+            if path.as_str() == "project.json" {
+                return manifest(start) != manifest(end);
+            }
+            let (before, after) = (start.files.get(*path), end.files.get(*path));
+            before != after
+                && match (before, after) {
+                    (Some(a), Some(b)) => {
+                        canonical_json(a).is_none_or(|a| Some(a) != canonical_json(b))
+                    }
+                    _ => true,
+                }
+        })
+        .map(
+            |path| match (start.files.contains_key(path), end.files.contains_key(path)) {
+                (false, _) => format!("{path} added"),
+                (_, false) => format!("{path} removed"),
+                _ => format!("{path} changed"),
+            },
+        )
+        .collect();
+    match changed.is_empty() {
+        true => Ok("the project is unchanged".to_string()),
+        false => Err(changed.join("; ")),
+    }
+}
+
+/// The one root-level node of kind `node` has `path` (dotted) equal to
+/// `equals`, or a number within `between`; `default` stands in for an
+/// absent field.
+pub(crate) fn field(
+    project: &ProjectTree,
+    node: &str,
+    path: &str,
+    equals: Option<&Value>,
+    between: Option<[f64; 2]>,
+    default: Option<&Value>,
+) -> Result<String, String> {
+    let nodes: Vec<TreeNode> = project
+        .nodes_of_kind(node)
+        .into_iter()
+        .filter(|found| !found.in_playlist)
+        .collect();
+    let [found] = nodes.as_slice() else {
+        return Err(format!(
+            "expected exactly one root-level {node}, found {}",
+            nodes.len()
+        ));
+    };
+    let value = path
+        .split('.')
+        .try_fold(&found.def, |value, key| value.get(key))
+        .or(default)
+        .ok_or_else(|| format!("{node} `{}` has no {path}", found.name))?;
+    if let Some(want) = equals {
+        let same = match (value.as_f64(), want.as_f64()) {
+            (Some(a), Some(b)) => (a - b).abs() < 1e-6,
+            _ => match (value.as_str(), want.as_str()) {
+                (Some(a), Some(b)) => a.eq_ignore_ascii_case(b),
+                _ => value == want,
+            },
+        };
+        return match same {
+            true => Ok(format!("{node}.{path} = {value}")),
+            false => Err(format!("{node}.{path} is {value}, not {want}")),
+        };
+    }
+    let [lo, hi] = between.ok_or("field names neither `equals` nor `between`")?;
+    let number = value
+        .as_f64()
+        .ok_or_else(|| format!("{node}.{path} is {value}, not a number"))?;
+    match (lo..=hi).contains(&number) {
+        true => Ok(format!("{node}.{path} = {number}")),
+        false => Err(format!("{node}.{path} is {number}, outside {lo}–{hi}")),
+    }
+}
+
+/// No playlist entry plays any of `patterns`.
+pub(crate) fn entries_removed(
+    project: &ProjectTree,
+    patterns: &[String],
+) -> Result<String, String> {
+    let playing = playlist_patterns(project);
+    let still: Vec<&String> = patterns
+        .iter()
+        .filter(|pattern| playing.iter().any(|(slug, _)| slug == *pattern))
+        .collect();
+    match still.is_empty() {
+        true => Ok(format!(
+            "none of {patterns:?} plays; the playlist plays {:?}",
+            slugs(&playing)
+        )),
+        false => Err(format!("{still:?} still in the playlist")),
+    }
+}
+
+/// Every one of `patterns` still plays, its folder unchanged from `start`.
+pub(crate) fn entries_kept(
+    start: &ProjectTree,
+    end: &ProjectTree,
+    patterns: &[String],
+) -> Result<String, String> {
+    let before = playlist_patterns(start);
+    let after = playlist_patterns(end);
+    let mut problems = Vec::new();
+    for pattern in patterns {
+        let Some((_, dir)) = after.iter().find(|(slug, _)| slug == pattern) else {
+            problems.push(format!("{pattern} no longer plays"));
+            continue;
+        };
+        if let Some((_, start_dir)) = before.iter().find(|(slug, _)| slug == pattern) {
+            let files = |tree: &ProjectTree, dir: &str| -> Vec<(String, Option<Value>)> {
+                tree.files
+                    .iter()
+                    .filter_map(|(path, bytes)| {
+                        path.strip_prefix(dir)
+                            .map(|rest| (rest.to_string(), canonical_json(bytes)))
+                    })
+                    .collect()
+            };
+            if files(start, start_dir) != files(end, dir) {
+                problems.push(format!("{pattern}'s folder {dir} changed"));
+            }
+        }
+    }
+    match problems.is_empty() {
+        true => Ok(format!("{patterns:?} still play, untouched")),
+        false => Err(problems.join("; ")),
+    }
+}
+
+/// At least `min` playlist entries play a catalog pattern `start` did not
+/// (from `from`, when it is not empty).
+pub(crate) fn entries_added(
+    start: Option<&ProjectTree>,
+    end: &ProjectTree,
+    min: usize,
+    from: &[String],
+) -> Result<String, String> {
+    let mut before = start
+        .map(playlist_patterns)
+        .map(|p| slugs(&p))
+        .unwrap_or_default();
+    let mut added = Vec::new();
+    for slug in slugs(&playlist_patterns(end)) {
+        match before.iter().position(|had| *had == slug) {
+            Some(at) => {
+                before.remove(at);
+            }
+            None if from.is_empty() || from.contains(&slug) => added.push(slug),
+            None => {}
+        }
+    }
+    match added.len() >= min {
+        true => Ok(format!("added {added:?}")),
+        false => Err(format!(
+            "added {} qualifying pattern(s) ({added:?}); need {min}{}",
+            added.len(),
+            match from.is_empty() {
+                true => String::new(),
+                false => format!(" from {from:?}"),
+            }
+        )),
+    }
+}
+
+/// A board reports running a project.
+pub(crate) fn board_runs_project(device: &DeviceSummary) -> Result<String, String> {
+    match device.boards.iter().find(|board| board.running) {
+        Some(board) => Ok(format!("the board is {}; {}", board.state, board.loaded)),
+        None => Err(format!(
+            "no board runs a project: boards {:?}, pending {:?}",
+            device
+                .boards
+                .iter()
+                .map(|board| format!("{} ({})", board.state, board.loaded))
+                .collect::<Vec<_>>(),
+            device.pending
+        )),
+    }
+}
+
+/// What firmware the board ended with.
+pub(crate) fn board_firmware(device: &DeviceSummary, is: FirmwareIs) -> Result<String, String> {
+    match is {
+        FirmwareIs::Lightplayer => match device.boards.iter().find(|b| b.state == "Ready") {
+            Some(_) => Ok("the board runs LightPlayer".to_string()),
+            None => Err(format!(
+                "no board runs LightPlayer: boards {:?}, pending {:?}",
+                device
+                    .boards
+                    .iter()
+                    .map(|board| board.state.clone())
+                    .collect::<Vec<_>>(),
+                device.pending
+            )),
+        },
+        FirmwareIs::Flashed => match device.flashed.as_slice() {
+            [] => Err("nothing was flashed".to_string()),
+            boards => Ok(format!("flashed as {boards:?}")),
+        },
+        FirmwareIs::Untouched => match device.flashed.as_slice() {
+            [] => Ok("nothing was flashed".to_string()),
+            boards => Err(format!("flashed as {boards:?}")),
+        },
+    }
+}
+
+/// Every playlist entry's catalog pattern, with its module's folder
+/// (`modules/spiral/`), in entry order.
+fn playlist_patterns(project: &ProjectTree) -> Vec<(String, String)> {
+    let catalog = catalog_shader_slugs();
+    let mut out = Vec::new();
+    for playlist in project.nodes_of_kind("Playlist") {
+        let def_file = playlist
+            .file
+            .clone()
+            .unwrap_or_else(|| "module.json".into());
+        let mut entries: Vec<(&String, &Value)> = playlist.def["entries"]
+            .as_object()
+            .map(|entries| entries.iter().collect())
+            .unwrap_or_default();
+        entries.sort_by_key(|(key, _)| key.parse::<u64>().unwrap_or(u64::MAX));
+        for (_, entry) in entries {
+            let Some(reference) = entry["node"]["ref"].as_str() else {
+                continue;
+            };
+            let module = ProjectTree::resolve(&def_file, reference);
+            if let Some(slug) = entry_pattern(project, &module, &catalog) {
+                let dir = match module.rfind('/') {
+                    Some(at) => module[..=at].to_string(),
+                    None => String::new(),
+                };
+                out.push((slug, dir));
+            }
+        }
+    }
+    out
+}
+
+fn slugs(patterns: &[(String, String)]) -> Vec<String> {
+    patterns.iter().map(|(slug, _)| slug.clone()).collect()
+}
+
+/// Remove the dotted `path` from `value`, if it is there.
+fn remove_path(value: &mut Value, path: &str) {
+    match path.split_once('.') {
+        None => {
+            if let Some(map) = value.as_object_mut() {
+                map.remove(path);
+            }
+        }
+        Some((head, rest)) => {
+            if let Some(child) = value.get_mut(head) {
+                remove_path(child, rest);
+            }
+        }
+    }
 }
 
 // --- helpers ---------------------------------------------------------------
@@ -642,26 +998,6 @@ fn entry_pattern(
         .find_map(|(_, bytes)| catalog.get(bytes).cloned())
 }
 
-/// A `ws281x:local:D<n>` spec anywhere in a tool input.
-fn d_label_spec(value: &Value) -> Option<String> {
-    match value {
-        Value::String(text) => {
-            let at = text.find("ws281x:local:D")?;
-            let rest = &text[at + "ws281x:local:D".len()..];
-            rest.chars().next().filter(char::is_ascii_digit).map(|_| {
-                text[at..]
-                    .split(|c: char| c == '"' || c.is_whitespace())
-                    .next()
-                    .unwrap_or("")
-                    .to_string()
-            })
-        }
-        Value::Array(items) => items.iter().find_map(d_label_spec),
-        Value::Object(map) => map.values().find_map(d_label_spec),
-        _ => None,
-    }
-}
-
 fn strip_keys(value: &mut Value, keys: &[&str]) {
     if let Some(map) = value.as_object_mut() {
         for key in keys {
@@ -691,41 +1027,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-
-    #[test]
-    fn a_d_label_written_before_the_board_reply_fails() {
-        let before = EvalTranscript {
-            steps: vec![
-                EvalStep::ToolCall {
-                    name: "edit_project".into(),
-                    input: json!({"edits":[{"set":{"value":"ws281x:local:D6"}}]}),
-                },
-                EvalStep::ScriptedReply {
-                    about: "board".into(),
-                    text: "XIAO".into(),
-                },
-            ],
-        };
-        let reason = no_d_label_before_board(&before).expect_err("guessed the board");
-        assert!(reason.contains("ws281x:local:D6"), "{reason}");
-
-        let after = EvalTranscript {
-            steps: before.steps.iter().rev().cloned().collect(),
-        };
-        no_d_label_before_board(&after).expect("asked first");
-        asked_about(&after, "board").expect("asked");
-        asked_about(&EvalTranscript::default(), "board").expect_err("never asked");
-    }
-
-    #[test]
-    fn gpio_specs_are_not_d_labels() {
-        assert_eq!(d_label_spec(&json!("ws281x:local:GPIO16")), None);
-        assert_eq!(d_label_spec(&json!("ws281x:local:Data")), None);
-        assert_eq!(
-            d_label_spec(&json!({"a":["x", "ws281x:local:D10"]})),
-            Some("ws281x:local:D10".into())
-        );
-    }
+    use crate::app::agent::evals::app_agent_scenario_seat::BoardRow;
 
     #[test]
     fn strip_order_is_monotone_along_an_axis() {
@@ -752,5 +1054,71 @@ mod tests {
             "{reason}"
         );
         all_nodes_ok(&[]).expect_err("nothing runs");
+    }
+
+    #[test]
+    fn remove_path_walks_dots() {
+        let mut value = json!({"power": {"budget_ma": 900, "lamp_type": "ws2812b"}, "a": 1});
+        remove_path(&mut value, "power.budget_ma");
+        remove_path(&mut value, "missing.deeper");
+        assert_eq!(value, json!({"power": {"lamp_type": "ws2812b"}, "a": 1}));
+    }
+
+    #[test]
+    fn the_board_checks_read_the_roster() {
+        let running = DeviceSummary {
+            boards: vec![BoardRow {
+                state: "Ready".into(),
+                loaded: "running \"Festival\"".into(),
+                running: true,
+            }],
+            pending: Vec::new(),
+            flashed: vec!["seeed/xiao-esp32-c6".into()],
+            pushes: 1,
+        };
+        board_runs_project(&running).expect("running");
+        board_firmware(&running, FirmwareIs::Lightplayer).expect("LightPlayer");
+        board_firmware(&running, FirmwareIs::Flashed).expect("flashed");
+        board_firmware(&running, FirmwareIs::Untouched).expect_err("it was flashed");
+        let foreign = DeviceSummary {
+            pending: vec!["needs firmware (WLED)".into()],
+            ..DeviceSummary::default()
+        };
+        let reason = board_runs_project(&foreign).expect_err("nothing runs");
+        assert!(reason.contains("WLED"), "{reason}");
+        board_firmware(&foreign, FirmwareIs::Lightplayer).expect_err("WLED");
+        board_firmware(&foreign, FirmwareIs::Untouched).expect("untouched");
+    }
+
+    #[test]
+    fn any_of_passes_on_one_and_names_every_miss() {
+        let tree = ProjectTree::default();
+        let transcript = EvalTranscript::default();
+        let checks = [CheckSpec::AnyOf {
+            of: vec![
+                CheckSpec::StripOf { leds: 60 },
+                CheckSpec::MaxTurns { n: 3 },
+            ],
+        }];
+        let input = CheckInput {
+            checks: &checks,
+            start: None,
+            project: &tree,
+            statuses: None,
+            unsaved: None,
+            transcript: &transcript,
+            turns: 2,
+            device: None,
+        };
+        let results = run_checks(&input);
+        assert!(results[0].passed, "{results:?}");
+        let input = CheckInput { turns: 9, ..input };
+        let result = &run_checks(&input)[0];
+        assert!(!result.passed);
+        assert!(
+            result.reason.contains("Fixture") && result.reason.contains("9 turns"),
+            "{}",
+            result.reason
+        );
     }
 }

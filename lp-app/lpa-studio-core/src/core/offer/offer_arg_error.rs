@@ -37,6 +37,9 @@ pub enum OfferArgError {
     /// rest of the press picked (a push's `name` names a new project, never
     /// an example).
     Inapplicable { name: String, reason: String },
+    /// A value the parameter's kind accepts, but that does not hold what
+    /// the verb needs (text that is not a copied node).
+    Invalid { name: String, reason: String },
     /// The offer cannot be pressed right now at all, whatever it is given.
     Unavailable { reason: String },
 }
@@ -78,6 +81,7 @@ impl fmt::Display for OfferArgError {
             Self::Inapplicable { name, reason } => {
                 write!(f, "`{name}` does not apply here: {reason}")
             }
+            Self::Invalid { name, reason } => write!(f, "`{name}` is not usable: {reason}"),
             Self::Unavailable { reason } => write!(f, "this cannot be done right now: {reason}"),
         }
     }
@@ -149,6 +153,13 @@ mod tests {
                     reason: "it names a new project".to_string(),
                 },
                 "`name` does not apply here: it names a new project",
+            ),
+            (
+                OfferArgError::Invalid {
+                    name: "clipboard".to_string(),
+                    reason: "it holds an lp.project, not a node".to_string(),
+                },
+                "`clipboard` is not usable: it holds an lp.project, not a node",
             ),
             (
                 OfferArgError::Unavailable {

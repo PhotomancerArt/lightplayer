@@ -14,10 +14,12 @@ pub struct UiOfferFocus {
     /// The focused node's prefix (`project/demo.module/orbit.shader`), when
     /// a project editor shows a focused node.
     pub node: Option<OfferPath>,
-    /// The current page's area: `project` in the project editor, `devices`
-    /// on the gallery pages. `None` on pages that offer nothing (the docs,
-    /// the boards catalog).
-    pub area: Option<OfferPath>,
+    /// The current page's areas: `project` in the project editor,
+    /// `devices` on the gallery pages — and `project` there too while no
+    /// project is open, where Home's own `project/new` and `project/open`
+    /// are the only project verbs. Empty on pages that offer nothing (the
+    /// docs, the boards catalog).
+    pub areas: Vec<OfferPath>,
 }
 
 impl UiOfferFocus {
@@ -32,15 +34,18 @@ impl UiOfferFocus {
         if let Some(node) = &self.node
             && path.starts_with(node)
         {
-            return if path.len() == node.len() + 1 {
+            // A verb the node groups under a namespace of its own (a
+            // fixture's `patch/assign`) is still its own; only a verb past
+            // another node segment is a child's.
+            return if path.is_own_verb_of(node) {
                 OfferNearness::Own
             } else {
                 OfferNearness::Under
             };
         }
-        match &self.area {
-            Some(area) if path.starts_with(area) => OfferNearness::Area,
-            _ => OfferNearness::Elsewhere,
+        match self.areas.iter().any(|area| path.starts_with(area)) {
+            true => OfferNearness::Area,
+            false => OfferNearness::Elsewhere,
         }
     }
 }
@@ -49,7 +54,8 @@ impl UiOfferFocus {
 /// order is the ranking).
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum OfferNearness {
-    /// A verb of the focused node itself.
+    /// A verb of the focused node itself, grouped ones included
+    /// (`project/<fixture>/patch/reverse`).
     Own,
     /// A verb of a node inside the focused one.
     Under,
@@ -70,11 +76,16 @@ mod tests {
         let shader = ProjectNodeAddress::parse("/demo.module/orbit.shader").unwrap();
         let focus = UiOfferFocus {
             node: Some(OfferPath::project_node(&module)),
-            area: Some(OfferPath::project()),
+            areas: vec![OfferPath::project()],
         };
 
         let at = |path: &str| focus.nearness(&OfferPath::parse(path).unwrap());
         assert_eq!(at("project/demo.module/revert"), OfferNearness::Own);
+        assert_eq!(
+            at("project/demo.module/patch/reverse"),
+            OfferNearness::Own,
+            "a verb the node groups is still its own"
+        );
         assert_eq!(
             at(&OfferPath::project_node(&shader).child("remove").to_string()),
             OfferNearness::Under
@@ -85,5 +96,17 @@ mod tests {
             UiOfferFocus::none().nearness(&OfferPath::parse("project/save").unwrap()),
             OfferNearness::Elsewhere
         );
+    }
+
+    #[test]
+    fn a_page_with_two_areas_counts_both_as_the_page() {
+        let focus = UiOfferFocus {
+            node: None,
+            areas: vec![OfferPath::devices(), OfferPath::project()],
+        };
+        let at = |path: &str| focus.nearness(&OfferPath::parse(path).unwrap());
+        assert_eq!(at("devices/connect-usb"), OfferNearness::Area);
+        assert_eq!(at("project/new"), OfferNearness::Area);
+        assert_eq!(at("library/x"), OfferNearness::Elsewhere);
     }
 }

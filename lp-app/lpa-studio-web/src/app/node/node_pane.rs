@@ -100,7 +100,9 @@ pub fn NodePane(
     let kind_label = view.header.kind.clone();
     let focus_action = view.action.clone();
     let issues = view.issues.clone();
-    let header_actions = verbs();
+    // Only the verbs the header draws: Copy and a playlist picker's verbs
+    // sit at this prefix too, pressed from their own controls.
+    let header_actions = crate::app::project::project_pane::header_verbs(verbs());
     // Face + drawers replace the generic tab/section body when the
     // controller supplies a kind-specific face (shader/fixture/playlist
     // today); every other kind keeps the classic sections fallback.

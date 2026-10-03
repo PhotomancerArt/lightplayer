@@ -48,7 +48,10 @@ use lpc_wire::{
 };
 
 use super::node::node_naming::{file_stem, node_kind_slug, sanitize_node_name, unique_node_name};
-use super::node::{UiAttachTarget, UiNodeRemovePreflight, add_node_menu, gate_add_node_menu};
+use super::node::{
+    UiAttachTarget, UiNodeRemovePreflight, add_node_menu, gate_add_node_menu,
+    publish_add_node_offers,
+};
 use super::{
     NodeController, ProjectProductSubscriptionIntent, SlotController, SlotKind, node::root_slot_key,
 };
@@ -2492,7 +2495,24 @@ impl ProjectController {
             .map(|node| node.dirty_summary(&edits))
             .sum::<DirtySummary>()
             + edits.unmapped_asset_dirty_summary();
-        publish_project_offers(offers, &dirty);
+        // The project root's picker (and its offers, `project/add-node` and
+        // its siblings) is built up front so its verbs publish beside the
+        // project's own, ahead of the cards'.
+        let mut root_add_node_menu = add_node_menu(&UiAttachTarget::ProjectRoot);
+        // The import source (P5) is attached before the device gate, so a
+        // board with no module runtime disables the vendoring rows too
+        // rather than offering a create it cannot run.
+        crate::app::project::node::set_import_source(
+            &mut root_add_node_menu,
+            &self.import_patterns,
+            self.active_library_uid().as_deref(),
+        );
+        gate_add_node_menu(
+            &mut root_add_node_menu,
+            self.lens_device_features.as_deref(),
+        );
+        publish_project_offers(offers, &dirty, edits.debug_override_count());
+        publish_add_node_offers(offers, &root_add_node_menu);
         let mut nodes = self
             .root_nodes
             .iter()
@@ -2517,8 +2537,10 @@ impl ProjectController {
             // The lens device's gate lands here, on every menu at once —
             // node views are built deep in `NodeController` where the
             // session is not visible, so one pass at the top keeps a
-            // playlist's picker honest with the project pane's.
-            self.gate_add_node_menus(node);
+            // playlist's picker honest with the project pane's. Each gated
+            // menu's offers publish in the same pass (after the cards'
+            // verbs), so an offer's options match its picker's rows.
+            self.gate_and_offer_add_node_menus(node, offers);
             self.stamp_selection_streaming(node);
         }
         // The root card IS the project (GV fix 4): its header carries the
@@ -2550,23 +2572,22 @@ impl ProjectController {
         // onto the faces (bays + fixture rows) plus each fixture's own
         // map2d body — built here so the two can never disagree.
         let surface = self.build_patch_surface(&nodes);
+        // The surface's verbs (M6b) publish off the surface they write
+        // through, so a subject or a port is an option exactly when the
+        // surface lists it; the history's only while it has a step.
+        if let Some(surface) = &surface {
+            super::patch_verb_offers::publish_patch_verb_offers(
+                offers,
+                surface,
+                self.patch_selection.single(),
+                !self.patch_undo.is_empty(),
+                !self.patch_redo.is_empty(),
+            );
+        }
         // Module faces derive LAST: a module's panel aggregates the panel
         // targets its finished subtree carries, so every card below it must
         // already be built (and card-UI-overlaid) before it can be read.
         self.apply_module_faces(&mut nodes);
-        let mut root_add_node_menu = add_node_menu(&UiAttachTarget::ProjectRoot);
-        // The import source (P5) is attached before the device gate, so a
-        // board with no module runtime disables the vendoring rows too
-        // rather than offering a create it cannot run.
-        crate::app::project::node::set_import_source(
-            &mut root_add_node_menu,
-            &self.import_patterns,
-            self.active_library_uid().as_deref(),
-        );
-        gate_add_node_menu(
-            &mut root_add_node_menu,
-            self.lens_device_features.as_deref(),
-        );
         let root_slots = self
             .root_nodes
             .first()
@@ -3997,7 +4018,8 @@ impl ProjectController {
     }
 
     /// Apply the lens device's capability gate to a node view's add-node
-    /// picker. Node views are built inside [`NodeController`], which cannot
+    /// picker, and publish each menu's offers. Node views are built inside
+    /// [`NodeController`], which cannot
     /// see the session; the gate therefore lands here, at the one place
     /// that knows the lens, so a playlist's "+" agrees with the project
     /// pane's.
@@ -4005,11 +4027,12 @@ impl ProjectController {
     /// The walk descends the nested-card tree: after the flat-root reversal
     /// a playlist is always a [`crate::UiNodeChild`] under the root card, so
     /// an un-recursed gate would leave every playlist picker ungated.
-    fn gate_add_node_menus(&self, node: &mut UiNodeView) {
+    fn gate_and_offer_add_node_menus(&self, node: &mut UiNodeView, offers: &mut UiOfferTree) {
         if let Some(menu) = node.add_node_menu.as_mut() {
             gate_add_node_menu(menu, self.lens_device_features.as_deref());
+            publish_add_node_offers(offers, menu);
         }
-        self.gate_child_add_node_menus(&mut node.children);
+        self.gate_and_offer_child_add_node_menus(&mut node.children, offers);
     }
 
     /// Tell every card, nested ones included, whether selecting it is what
@@ -4030,12 +4053,17 @@ impl ProjectController {
         !matches!(self.lens_transport, Some(crate::LinkTransport::Sim))
     }
 
-    fn gate_child_add_node_menus(&self, children: &mut [crate::UiNodeChild]) {
+    fn gate_and_offer_child_add_node_menus(
+        &self,
+        children: &mut [crate::UiNodeChild],
+        offers: &mut UiOfferTree,
+    ) {
         for child in children {
             if let Some(menu) = child.add_node_menu.as_mut() {
                 gate_add_node_menu(menu, self.lens_device_features.as_deref());
+                publish_add_node_offers(offers, menu);
             }
-            self.gate_child_add_node_menus(&mut child.children);
+            self.gate_and_offer_child_add_node_menus(&mut child.children, offers);
         }
     }
 
@@ -9896,13 +9924,17 @@ fn slot_path_display(address: &ProjectSlotAddress) -> String {
     }
 }
 
-/// Publish the project header's verbs (D4/D5), `project/save` and
-/// `project/revert` ("Revert to saved"), while persisted edits are pending.
+/// Publish the project's own verbs: the header's (D4/D5) `project/save` and
+/// `project/revert` ("Revert to saved"), while persisted edits are pending,
+/// and `project/clear-debug` while a debug override is active.
 /// Adding nodes does NOT ride the header: the add affordance is the node
 /// tree's "Add node…" row and the workspace's add button, both fed by
 /// [`ProjectEditorView::add_node_menu`] (review round, 2026-07-27 — put
-/// buttons where people look for them; the title-bar "+" was dropped).
-fn publish_project_offers(offers: &mut UiOfferTree, dirty: &DirtySummary) {
+/// buttons where people look for them; the title-bar "+" was dropped). Its
+/// verbs (`project/add-node` and siblings) are published beside these by
+/// [`publish_add_node_offers`], and a header never draws them
+/// ([`crate::is_header_verb`]).
+fn publish_project_offers(offers: &mut UiOfferTree, dirty: &DirtySummary, debug_overrides: usize) {
     if dirty.persisted > 0 {
         offers.publish(UiOffer::new(
             OfferPath::project().child("save"),
@@ -9913,6 +9945,16 @@ fn publish_project_offers(offers: &mut UiOfferTree, dirty: &DirtySummary) {
             OfferPath::project().child("revert"),
             "revert",
             project_action(ProjectOp::RevertAllEdits).with_label("Revert to saved"),
+        ));
+    }
+    // Debug overrides are not dirty (D7): they never reach Save, and only
+    // this verb (the "Debug active" chip) clears them all. Routine — a
+    // debug override is a live poke the project never saved.
+    if debug_overrides > 0 {
+        offers.publish(UiOffer::new(
+            OfferPath::project().child(crate::CLEAR_DEBUG_VERB),
+            "clear",
+            project_action(ProjectOp::ClearDebugEdits).with_label("Clear all debug overrides"),
         ));
     }
 }
@@ -16431,7 +16473,19 @@ mod tests {
         let view = project.editor_view("demo", 7, &ProjectInventorySummary::default(), &mut offers);
         // Clean project: no project-header verbs — adding rides the tree row
         // and the workspace button, both fed by the picker data on the view.
-        assert_eq!(offers.verbs_of(&OfferPath::project()).count(), 0);
+        assert_eq!(header_verbs(&offers, &OfferPath::project()).count(), 0);
+        // …though its picker's verbs are in the tree, at `project/…`, for
+        // the picker and the agent to press.
+        for verb in ["add-node", "import-pattern", "paste-node"] {
+            assert!(
+                offers.get(&OfferPath::project().child(verb)).is_some(),
+                "project/{verb}"
+            );
+        }
+        assert!(
+            offers.get(&offer_path("project/clear-debug")).is_none(),
+            "no debug override, no clear"
+        );
         let menu = view
             .add_node_menu
             .as_ref()
@@ -16495,14 +16549,26 @@ mod tests {
                 .collect::<Vec<_>>()
         };
 
-        // Clean: no revert anywhere, and Remove on every removable card
-        // below the root (the playlist's entry has no resolvable site in
-        // this fixture, so it offers none).
+        // Clean: no revert anywhere, Remove on every removable card below
+        // the root (the playlist's entry has no resolvable site in this
+        // fixture, so it offers none), Copy on every card, and each
+        // picker's verbs — the root's beside the project's own, ahead of
+        // the cards; a playlist's after them, once its menu is gated (it
+        // imports nothing, so it has no import-pattern).
         assert_eq!(
             paths(&project),
             [
+                "project/add-node",
+                "project/import-pattern",
+                "project/paste-node",
+                "project/demo.module/copy",
                 "project/demo.module/group.playlist/remove",
+                "project/demo.module/group.playlist/copy",
+                "project/demo.module/group.playlist/leaf.shader/copy",
                 "project/demo.module/clock.clock/remove",
+                "project/demo.module/clock.clock/copy",
+                "project/demo.module/group.playlist/add-node",
+                "project/demo.module/group.playlist/paste-node",
             ]
         );
 
@@ -16528,18 +16594,39 @@ mod tests {
             [
                 "project/save",
                 "project/revert",
+                "project/add-node",
+                "project/import-pattern",
+                "project/paste-node",
                 "project/demo.module/revert",
+                "project/demo.module/copy",
                 "project/demo.module/group.playlist/revert",
                 "project/demo.module/group.playlist/remove",
+                "project/demo.module/group.playlist/copy",
                 "project/demo.module/group.playlist/leaf.shader/revert",
+                "project/demo.module/group.playlist/leaf.shader/copy",
                 "project/demo.module/clock.clock/revert",
                 "project/demo.module/clock.clock/remove",
+                "project/demo.module/clock.clock/copy",
+                "project/demo.module/group.playlist/add-node",
+                "project/demo.module/group.playlist/paste-node",
             ]
         );
     }
 
     fn offer_path(text: &str) -> OfferPath {
         OfferPath::parse(text).expect("offer path")
+    }
+
+    /// The verbs a header at `prefix` draws as its own buttons: the tree's
+    /// verbs there, less those another control presses
+    /// ([`crate::is_header_verb`]).
+    fn header_verbs<'a>(
+        offers: &'a UiOfferTree,
+        prefix: &OfferPath,
+    ) -> impl Iterator<Item = &'a UiOffer> + 'a {
+        offers
+            .verbs_of(prefix)
+            .filter(|offer| offer.path.last().is_some_and(crate::is_header_verb))
     }
 
     fn config_slot<'a>(nodes: &'a [crate::UiNodeView], label: &str) -> &'a crate::UiConfigSlot {
@@ -17283,7 +17370,7 @@ mod tests {
             offers
         };
         assert_eq!(
-            offers(&project).verbs_of(&node).count(),
+            header_verbs(&offers(&project), &node).count(),
             0,
             "a clean node header offers no verbs"
         );
@@ -17303,7 +17390,7 @@ mod tests {
         );
 
         let offers = offers(&project);
-        let actions = offers.verbs_of(&node).collect::<Vec<_>>();
+        let actions = header_verbs(&offers, &node).collect::<Vec<_>>();
         assert_eq!(actions.len(), 1);
         assert_eq!(
             actions[0].path.to_string(),
@@ -18545,7 +18632,7 @@ mod tests {
         );
         assert_eq!(editor.dirty, expected);
         assert_eq!(
-            offers.verbs_of(&OfferPath::project()).count(),
+            header_verbs(&offers, &OfferPath::project()).count(),
             2,
             "a pending asset body enables Save/Revert"
         );
@@ -19143,8 +19230,7 @@ mod tests {
         assert_eq!(editor.tree.roots.len(), 1);
         assert_eq!(editor.tree.roots[0].dirty, expected);
         assert_eq!(
-            offers
-                .verbs_of(&OfferPath::project())
+            header_verbs(&offers, &OfferPath::project())
                 .map(|offer| offer.icon.as_str())
                 .collect::<Vec<_>>(),
             Vec::<&str>::new(),
@@ -19181,7 +19267,7 @@ mod tests {
         assert!(editor.tree.roots[0].children.is_empty());
         // No project-header verbs on a clean project (adding rides the node
         // list).
-        assert_eq!(offers.verbs_of(&OfferPath::project()).count(), 0);
+        assert_eq!(header_verbs(&offers, &OfferPath::project()).count(), 0);
     }
 
     #[test]
@@ -19200,7 +19286,7 @@ mod tests {
             &mut offers,
         );
 
-        let header = offers.verbs_of(&OfferPath::project()).collect::<Vec<_>>();
+        let header = header_verbs(&offers, &OfferPath::project()).collect::<Vec<_>>();
         assert_eq!(header.len(), 2, "save + revert");
         let save = header[0];
         assert_eq!(save.path.to_string(), "project/save");
@@ -19274,12 +19360,20 @@ mod tests {
             "a debug-only project does not tint its header"
         );
         assert_eq!(
-            offers
-                .verbs_of(&OfferPath::project())
+            header_verbs(&offers, &OfferPath::project())
                 .map(|offer| offer.icon.as_str())
                 .collect::<Vec<_>>(),
             Vec::<&str>::new(),
             "debug overrides do not surface Save/Revert"
+        );
+        // …but the "Debug active" chip's verb is on offer, Routine.
+        let clear = offers
+            .get(&offer_path("project/clear-debug"))
+            .expect("clear-debug while an override is active");
+        assert!(clear.consequence().is_routine());
+        assert_eq!(
+            clear.action.op_as::<ProjectOp>(),
+            Some(&ProjectOp::ClearDebugEdits)
         );
     }
 
