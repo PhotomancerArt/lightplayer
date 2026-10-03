@@ -55,10 +55,18 @@ impl AppAgentSession {
         self.mirror.apply_event(event);
     }
 
-    /// Put a pending card for `action` in the transcript; its id.
-    pub fn add_card(&mut self, action: crate::UiAction, why: &str) -> UiAgentCard {
+    /// Put a pending card for `action` in the transcript — the press of
+    /// the offer at `offer` with the agent's `args` — and return it.
+    pub fn add_card(
+        &mut self,
+        action: crate::UiAction,
+        why: &str,
+        offer: crate::OfferPath,
+        args: crate::OfferArgs,
+    ) -> UiAgentCard {
         self.cards_minted += 1;
-        let card = UiAgentCard::new(format!("c{}", self.cards_minted), action, why);
+        let card =
+            UiAgentCard::new(format!("c{}", self.cards_minted), action, why).for_offer(offer, args);
         self.mirror.turns.push(UiAgentTurn::Card(card.clone()));
         card
     }
@@ -68,16 +76,25 @@ impl AppAgentSession {
         self.cards().find(|card| card.is_pending())
     }
 
-    /// The pending card `action` presses, if any.
+    /// The pending card `action` presses, if any: the same operation as
+    /// the card's press, or any press of the offer the card hands over
+    /// ([`UiAgentCard::answered_by`]).
     pub fn pending_card_for(&self, action: &crate::UiAction) -> Option<String> {
         self.cards()
-            .find(|card| card.is_pending() && card.press.same_op(action))
+            .find(|card| card.is_pending() && card.answered_by(action))
             .map(|card| card.id.clone())
     }
 
-    /// Settle card `id` and queue what the user did for the assistant.
+    /// Settle card `id` and queue what the user did for the assistant;
+    /// `press` is where the user's press came from, so a press of the
+    /// card's own offer tells the agent which values the user settled on.
     /// `false` when no such pending card exists.
-    pub fn settle_card(&mut self, id: &str, state: UiAgentCardState) -> bool {
+    pub fn settle_card(
+        &mut self,
+        id: &str,
+        state: UiAgentCardState,
+        press: Option<crate::OfferPress>,
+    ) -> bool {
         let Some(card) = self.mirror.turns.iter_mut().find_map(|turn| match turn {
             UiAgentTurn::Card(card) if card.id == id && card.is_pending() => Some(card),
             _ => None,
@@ -85,6 +102,9 @@ impl AppAgentSession {
             return false;
         };
         card.state = state;
+        card.user_args = press
+            .filter(|press| card.offer.as_ref() == Some(&press.path))
+            .map(|press| press.args);
         self.resume.push(card.resume_text());
         true
     }

@@ -9,7 +9,7 @@ pub mod app_toolset;
 pub mod edit_project_tool;
 pub mod read_tool;
 
-pub use act_tool::{ACT_TOOL_NAME, ActInput, ActOutcome, act_tool_def, run_act};
+pub use act_tool::{ACT_TOOL_NAME, ActArgValue, ActInput, ActOutcome, act_tool_def, run_act};
 pub use app_agent_host::AppAgentHost;
 pub use app_toolset::AppToolset;
 pub use edit_project_tool::{

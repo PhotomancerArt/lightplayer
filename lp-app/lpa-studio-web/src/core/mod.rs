@@ -37,7 +37,10 @@ pub use action::{
 pub use issue_view::IssueView;
 pub use log_list::LogList;
 pub use metric_grid::MetricGrid;
-pub use offer::{OffersProvider, use_offers, use_provide_offers, use_verbs_of};
+pub use offer::{
+    OfferParamsForm, OfferPressButton, OffersProvider, resolved_args, use_device_verbs,
+    use_offer_at, use_offers, use_provide_offers, use_verbs_of, verb_named, visible_options,
+};
 pub use progress_bar::ProgressBar;
 pub use rich_detail::RichDetailSection;
 pub use status_chip::StatusChip;

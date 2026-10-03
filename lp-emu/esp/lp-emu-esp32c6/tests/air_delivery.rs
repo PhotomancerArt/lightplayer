@@ -385,7 +385,16 @@ fn a_machine_not_in_an_air_retires_the_same_instructions() {
     );
     // The figure M4 P0 §7 measured with the TX log off, with it on, and
     // before the flag existed. It must not have moved.
-    assert_eq!(plain.instructions(), 79_871_852);
+    //
+    // It is a hand-pinned literal, not a `lp_emu_esp_figures::Figures` entry
+    // `bless-chips` re-records: this test needs the separately-built
+    // `test_espnow` image (see the module doc's build command), which
+    // `bless-chips` does not build. A firmware change to the ESP-NOW guest
+    // moves this count; re-measure it with the module doc's `cargo build` +
+    // `LP_EMU_C6_ESPNOW_ELF=<elf> cargo test --release -p lp-emu-esp32c6
+    // --test air_delivery -- --ignored --nocapture` and paste in whatever it
+    // prints — never tune this toward an expected value.
+    assert_eq!(plain.instructions(), 79_871_692);
 }
 
 /// Every bit of the MAC's event word, against the RX oracle, **with a frame
@@ -1227,7 +1236,10 @@ fn a_machine_not_in_an_air_still_never_completes_a_tx() {
     let Some(elf) = espnow_elf() else { return };
     let mut plain = machine(&elf, "a0:f2:62:87:b4:8c");
     plain.run_until(&until(ms(1_500)));
-    assert_eq!(plain.instructions(), 79_871_852, "M4 P0 §7's figure");
+    // Same hand-pinned literal as `a_machine_not_in_an_air_retires_the_same_
+    // instructions` above, for the same reason: no `bless-chips` figure
+    // covers an image it does not build. Re-measure the same way.
+    assert_eq!(plain.instructions(), 79_871_692, "M4 P0 §7's figure");
     assert!(
         !plain.usb_sj().text().contains("tx simulated_button"),
         "a machine nobody asked for radio behaviour from completed a TX"

@@ -472,6 +472,33 @@ always meant Desktop, and one spelling on disk is enough. Projects created
 in this library declare Desktop at creation (D32); imports and forks keep
 whatever they arrived with.
 
+### Device verbs are offers, and some take values
+
+Every verb a device card, the add slot or a pending link draws is a
+`UiOffer` in the tree at `devices/<board ref>/<verb>`
+(`devices/device_offers.rs`, `pending_link_offers.rs`,
+`add_device_offers.rs`, `new_sim_offer.rs`). The ref is a `BoardRef`
+(`devices/board_ref.rs`): `mac-<12 hex>` for a board known by its silicon
+MAC, `sim-…` and `emu-…` for made boards by their generated MAC, and
+`new-<n>` for a link that has not said who it is yet. The card, the add
+slot, the agent and the palette all read the same offers.
+
+A verb that needs a value declares typed `params` (`core/offer/`:
+`OfferParam` of kind `Choice`, `Text` or `Toggle`) and holds an
+`OfferBinder` that turns the values into the op. `UiOffer::press(&args)`
+is the one place values are checked: an unknown name, a value that is not
+an enabled option, text over its limit, or a missing required value is
+refused with an `OfferArgError` that names the choices. Flash and Update
+take `board` (from the chip's candidates, with an `all_boards` toggle that
+widens the list through `OfferChoice::only_with`). Push takes `source`.
+Rename takes `name`, Autoconnect takes `enabled`, and New sim takes `board`
+and `backing`. A level can depend on the board. Flashing a blank chip is
+Routine and flashing over firmware is Lasting. A push over a project the
+library has no copy of is Lasting, and Routine otherwise. Bluetooth reach
+is a core fact (`devices/bluetooth_reach.rs`), so `devices/connect-ble`
+is published disabled with its reason. See
+`docs/adr/2026-10-02-board-ids-and-typed-offer-parameters.md`.
+
 ## Device Management UX
 
 Blank-device provisioning and recovery are modeled as Device actions backed by
