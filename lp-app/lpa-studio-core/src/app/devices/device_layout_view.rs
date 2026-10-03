@@ -494,7 +494,10 @@ mod tests {
         };
 
         // The question: Continue is Lasting, Cancel routine, the download a
-        // real click that loses nothing.
+        // real click that loses nothing. Continue stays Lasting although the
+        // sheet draws it as one press (G1 walk, 2026-10-03): the sheet is
+        // the asking, and this level is what keeps the agent handing it to
+        // the user.
         let mut asking = running_c6();
         asking.activity = Some(ActivityView {
             kind: ActivityKind::Flash,

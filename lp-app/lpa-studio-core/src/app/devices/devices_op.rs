@@ -208,7 +208,9 @@ impl ControllerOp for DevicesOp {
             // The layout question's yes (the C6 repartition): the backup is
             // already stored, and the board is rewritten now. The user's
             // decision, never an assistant's (D7: Lasting, so the agent
-            // hands it over).
+            // hands it over). The layout sheet that asks the question draws
+            // it as one press — the sheet is the asking (G1 walk,
+            // 2026-10-03) — and only the sheet: the level stays Lasting.
             Action::ConfirmFlashLayout { .. } => ActionMeta::new(
                 "Continue",
                 "Write the new firmware and move this board's files to it.",

@@ -8304,6 +8304,20 @@ fn updating_a_legacy_board_backs_up_asks_and_keeps_every_file() {
         continue_action.meta().enablement.is_enabled(),
         "the backup is stored: {continue_action:?}"
     );
+    // The sheet draws Continue as one press (G1 walk, 2026-10-03), but the
+    // app agent still never presses it: it becomes the user's card, and
+    // nothing is written.
+    let outcome = act(&mut bench, &continue_path.to_string(), &[]);
+    assert!(
+        matches!(outcome, lpa_agent::ActOutcome::NeedsUser { .. }),
+        "the agent hands Continue to the user: {outcome:?}"
+    );
+    assert_eq!(app_cards(&mut bench).len(), 1, "one card, the user's");
+    assert_eq!(
+        device.fake_board_files().0,
+        before,
+        "nothing written on the agent's say-so"
+    );
     drive(bench.controller.dispatch(continue_action)).expect("Continue dispatches");
     settle(&mut bench, &tasks);
 

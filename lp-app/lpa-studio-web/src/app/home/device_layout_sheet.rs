@@ -4,8 +4,17 @@
 //! Core decides every word and every verb ([`UiLayoutPanel`] for the words,
 //! the view's offers under `devices/<board>` for the verbs, which the card
 //! resolves into [`LayoutSheetVerbs`]); this sheet only lays them out —
-//! Download backup always, Continue and Cancel while the question is open. Page-level like the Unlock sheet, so it rises over
-//! whatever the user is looking at and never changes the card's height.
+//! Download backup always, Continue and Cancel while the question is open.
+//! Page-level like the Unlock sheet, so it rises over whatever the user is
+//! looking at and never changes the card's height.
+//!
+//! The sheet IS the question, so its Continue acts on one press: the user
+//! pressed Update (an armed press of its own) to get here, and the sheet
+//! asks, in full, what Continue's own arm would ask again (G1 walk,
+//! 2026-10-03, Yona: "the continue button on the dialog doesn't really need
+//! a confirm … they already committed to it once"). Continue keeps its
+//! Lasting level and tint, so the app agent still hands it to the user —
+//! see `ActionButton`'s `asked_by_surface`.
 
 use dioxus::prelude::*;
 use lpa_studio_core::{UiAction, UiLayoutPanel};
@@ -92,6 +101,7 @@ pub(crate) fn DeviceLayoutSheet(
                             action: next,
                             running: false,
                             variant: ActionButtonVariant::Outline,
+                            asked_by_surface: CONTINUE_ASKED_BY_THE_SHEET,
                             on_action,
                         }
                     }
@@ -127,6 +137,10 @@ pub(crate) fn BackupDownloadWatcher(download: Option<lpa_studio_core::BackupDown
     }));
     rsx! {}
 }
+
+/// The sheet's title and body are the question Continue answers, so
+/// Continue does not ask again (see the module doc).
+const CONTINUE_ASKED_BY_THE_SHEET: bool = true;
 
 /// The viewport overlay: a dim backdrop, the sheet at the bottom on a
 /// phone and centred from `sm` up (the Unlock sheet's frame).

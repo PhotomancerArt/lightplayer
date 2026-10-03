@@ -753,7 +753,7 @@ fn devices_card_not_responding() -> Element {
 }
 
 #[story(
-    description = "An update that moves a board's files to the new layout (the C6 repartition), in its four faces, all drawn from core's own copy (`device_layout_view`). Top left: the question while the update waits — Studio has already stored a backup in this browser, so Continue is live; Download backup is always there, Cancel leaves the board untouched. Top right: the same question when this browser could NOT keep the backup and the board will be nearly full afterwards — Continue stays disabled until the backup is downloaded. Bottom left: the refusal when the files do not fit; nothing was changed, and the files can still be downloaded. Bottom right: a board that came back holding its files after an interrupted update — the firmware line says they are waiting and the Update verb reads Finish update. The sheets are pinned in their boxes for capture; on the page they rise over it, so asking never changes the card's height."
+    description = "An update that moves a board's files to the new layout (the C6 repartition), in its four faces, all drawn from core's own copy (`device_layout_view`). Top left: the question while the update waits — Studio has already stored a backup in this browser, so Continue is live, and it acts on ONE press: the sheet is the question, so Continue does not arm a second time (G1 walk 2026-10-03; it keeps its Lasting tint, and the app agent still hands it to the user). Download backup is always there, Cancel leaves the board untouched. Behind the sheet the card says \"Waiting for your answer…\", not \"Flashing firmware…\". Top right: the same question when this browser could NOT keep the backup and the board will be nearly full afterwards — Continue stays disabled until the backup is downloaded. Bottom left: the refusal when the files do not fit; nothing was changed, and the files can still be downloaded. Bottom right: a board that came back holding its files after an interrupted update — the firmware line says they are waiting and the Update verb reads Finish update. The sheets are pinned in their boxes for capture; on the page they rise over it, so asking never changes the card's height."
 )]
 fn devices_card_layout_change() -> Element {
     use lpa_studio_core::app::devices::device_layout_step::LayoutStaging;
@@ -772,12 +772,13 @@ fn devices_card_layout_change() -> Element {
         },
         ..roster_fixture().roster.devices.remove(0)
     };
+    let waiting = lpa_studio_core::DeviceFlashStep::WaitingForAnswer.label();
     let asking = |verdict: DeviceLayoutVerdict| DeviceView {
         status: DeviceStatus::Busy,
-        state_label: "Flashing firmware".to_string(),
+        state_label: waiting.to_string(),
         activity: Some(DeviceActivityView {
             kind: DeviceActivityKind::Flash,
-            label: "Waiting for your answer".to_string(),
+            label: waiting.to_string(),
             percent: None,
             cancellable: true,
             cancel_requested: false,
@@ -874,6 +875,104 @@ fn devices_card_layout_change() -> Element {
                 {cell(unstored, DeviceBoardFs::Mounted, None)}
                 {cell(refused, DeviceBoardFs::Mounted, Some(&refused_staging))}
                 {cell(held, DeviceBoardFs::LegacyHeld, None)}
+            }
+        }
+    }
+}
+
+#[story(
+    description = "An update's steps, as the card names them (G1 walk 2026-10-03, Yona: \"the 'Flashing firmware…' label isn't really right for the first phase\"). Left to right, top to bottom, in the order an update that moves a board's files runs: Reading the board… (its layout, and its files when they must move — nothing is written yet), Waiting for your answer… (the question is up; no stale percent from the read), Flashing firmware…, Moving files…, Checking the files… (the read-back, and the board's own boot proving they mounted). The words are the device model's own (`FlashStep`), and the card's status label reads the same words. A flash that moves no files reads the board, then says Flashing firmware… to the end, as before."
+)]
+fn devices_card_update_steps() -> Element {
+    use lpa_studio_core::DeviceFlashStep;
+
+    let running = DeviceView {
+        title: "Porch C6".to_string(),
+        detected_chip: Some("esp32c6".to_string()),
+        board_id: Some("seeed/xiao-esp32-c6".to_string()),
+        ..roster_fixture().roster.devices.remove(0)
+    };
+    let at = |step: DeviceFlashStep, percent: Option<u8>| DeviceView {
+        status: DeviceStatus::Busy,
+        state_label: step.label().to_string(),
+        activity: Some(DeviceActivityView {
+            kind: DeviceActivityKind::Flash,
+            label: step.label().to_string(),
+            percent,
+            cancellable: true,
+            cancel_requested: false,
+            layout: None,
+        }),
+        can_remove_project: false,
+        escapes: vec![
+            DeviceEscape::Cancel,
+            DeviceEscape::Disconnect,
+            DeviceEscape::Forget,
+        ],
+        ..running.clone()
+    };
+    let steps = [
+        at(DeviceFlashStep::ReadingBoard, Some(40)),
+        at(DeviceFlashStep::WaitingForAnswer, None),
+        at(DeviceFlashStep::FlashingFirmware, Some(35)),
+        at(DeviceFlashStep::MovingFiles, Some(70)),
+        at(DeviceFlashStep::CheckingFiles, Some(100)),
+    ];
+    rsx! {
+        section { class: "tw:p-4",
+            div { class: "tw:grid tw:grid-cols-[repeat(auto-fill,minmax(300px,400px))] tw:items-start tw:gap-4",
+                for card in steps {
+                    StoryDeviceCard {
+                        card,
+                        projects: vec![],
+                        examples: vec![],
+                        on_action: |_| {},
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[story(
+    description = "An older LightPlayer board — the hello of a board on a wire this Studio cannot read (every fielded C6 at wire 32, in a wire-33 Studio) — in a fresh browser, attached mid-stream so no boot banner named its chip. LEFT: its hello named the board Studio stamped on it (`hardware.boardId`, the one other field read off an older hello), so the card knows the board — and through it the chip — and offers Update firmware for it in one click, with no board pick (G1 walk 2026-10-03, Yona: \"it really shouldn't say 8 boards fit … ideally we'd know what board it is\"). Its identity row reads \"older LightPlayer\", not the old contradictory \"no firmware\". RIGHT: the same board when nothing names it (never stamped, nothing remembered) — the one case left for the pick, over every board."
+)]
+fn devices_card_older_firmware() -> Element {
+    let older = DeviceView {
+        title: "Spare C6".to_string(),
+        status: DeviceStatus::NeedsAttention,
+        state_label: "Older LightPlayer firmware".to_string(),
+        detected_chip: None,
+        board_id: Some("seeed/xiao-esp32-c6".to_string()),
+        identity_label: Some("10:bd:a3:b0:8e:30".to_string()),
+        firmware_face: lpa_studio_core::DeviceFirmwareFace::OlderLightPlayer { proto: Some(32) },
+        remembered_firmware: None,
+        loaded_project: DeviceLoadedProject::Unknown,
+        can_remove_project: false,
+        last_outcome: None,
+        activity: None,
+        escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
+        ..roster_fixture().roster.devices.remove(0)
+    };
+    let unnamed = DeviceView {
+        board_id: None,
+        ..older.clone()
+    };
+    rsx! {
+        section { class: "tw:p-4",
+            div { class: "tw:grid tw:grid-cols-[repeat(2,400px)] tw:items-start tw:gap-4",
+                StoryDeviceCard {
+                    card: older,
+                    projects: vec![],
+                    examples: vec![],
+                    on_action: |_| {},
+                }
+                StoryDeviceCard {
+                    card: unnamed,
+                    projects: vec![],
+                    examples: vec![],
+                    on_action: |_| {},
+                }
             }
         }
     }
