@@ -219,6 +219,36 @@ impl ActivityCell {
         }
     }
 
+    /// The card's label for what this activity is doing now: a Flash names
+    /// its step ([`super::FlashStep`]); every other activity its kind.
+    pub fn label(&self) -> String {
+        match &self.reducer {
+            Reducer::Flash(flash) => flash
+                .step(
+                    self.progress
+                        .as_ref()
+                        .map(|progress| progress.label.as_str()),
+                )
+                .label()
+                .to_string(),
+            _ => format!("{}…", self.kind.label()),
+        }
+    }
+
+    /// The percent the card shows beside [`Self::label`]: the coarse
+    /// effect's latest, except while a Flash waits for the user's answer —
+    /// the read's closing 100 % is not a reading of the question.
+    pub fn percent(&self) -> Option<u8> {
+        let waiting = match &self.reducer {
+            Reducer::Flash(flash) => flash.step(None) == super::FlashStep::WaitingForAnswer,
+            _ => false,
+        };
+        match waiting {
+            true => None,
+            false => self.progress.as_ref().and_then(|progress| progress.percent),
+        }
+    }
+
     /// A Flash activity's layout step (C6 repartition), for the card.
     pub fn flash_layout(&self) -> Option<super::FlashLayoutView> {
         match &self.reducer {

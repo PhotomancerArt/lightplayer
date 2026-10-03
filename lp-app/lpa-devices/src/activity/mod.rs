@@ -22,6 +22,7 @@
 pub(crate) mod activity_cell;
 pub mod erase;
 pub mod flash;
+pub mod flash_step;
 pub mod identify;
 pub mod layout_verdict;
 pub mod push;
@@ -33,6 +34,7 @@ pub use activity_cell::{
 };
 pub use erase::EraseActivity;
 pub use flash::FlashActivity;
+pub use flash_step::FlashStep;
 pub use identify::IdentifyActivity;
 pub use layout_verdict::{FlashLayoutView, LayoutVerdict};
 pub use push::PushActivity;

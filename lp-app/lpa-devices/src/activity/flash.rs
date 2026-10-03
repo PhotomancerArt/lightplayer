@@ -90,6 +90,7 @@ use crate::wire::ClientFrame;
 use super::activity_cell::{
     ActivityCtx, ActivityKind, ActivityOutcome, ActivityReducer, ActivityStep,
 };
+use super::flash_step::FlashStep;
 use super::layout_verdict::{FlashLayoutView, LayoutVerdict};
 use crate::wire::BoardFs;
 
@@ -260,6 +261,33 @@ impl FlashActivity {
             verdict,
             awaiting_consent: matches!(self.phase, FlashPhase::AwaitingConsent { .. }),
         })
+    }
+
+    /// Which step the card names, given the label of the coarse effect's
+    /// latest progress (G1 walk, 2026-10-03: the card said "Flashing
+    /// firmware…" through the read, the question and the file move).
+    pub fn step(&self, progress: Option<&str>) -> FlashStep {
+        let carries = self.carries_files();
+        match self.phase {
+            // Parking before anything was read is the read's own first move;
+            // a re-park after it is the write's.
+            FlashPhase::Parking { .. } if self.layout.is_none() && !self.inspected => {
+                FlashStep::ReadingBoard
+            }
+            FlashPhase::Parking { .. } => FlashStep::FlashingFirmware,
+            FlashPhase::Inspecting => FlashStep::ReadingBoard,
+            FlashPhase::AwaitingConsent { .. } => FlashStep::WaitingForAnswer,
+            FlashPhase::Writing => FlashStep::of_write(progress, carries),
+            // A write that moved the files is proven by the board's own boot
+            // (its hello must say they mounted): that is still checking
+            // them. A plain flash's ladder is the firmware write's end.
+            FlashPhase::Reconnecting { .. } | FlashPhase::Stamping { .. } if carries => {
+                FlashStep::CheckingFiles
+            }
+            FlashPhase::Reconnecting { .. } | FlashPhase::Stamping { .. } => {
+                FlashStep::FlashingFirmware
+            }
+        }
     }
 
     /// While the card waits for the user's yes, supervision must not evict
@@ -1256,6 +1284,132 @@ mod tests {
                     ..
                 }])
         ));
+    }
+
+    /// G1 walk (2026-10-03), Yona: "the 'Flashing firmware…' label isn't
+    /// really right for the first phase." The card's label names each step
+    /// of an update that moves the board's files, in the order they happen:
+    /// the read, the question, the firmware, the files, the check — and
+    /// the board's own boot is still the check.
+    #[test]
+    fn each_step_of_a_carried_update_names_itself() {
+        let config = RosterConfig::default();
+        let mut evidence = Evidence::default();
+        opened(&mut evidence, Millis(0), &config);
+        let mut activity = FlashActivity::new(
+            DeviceId(1),
+            "seeed-xiao-esp32c6".to_string(),
+            "esp32c6-4mb".to_string(),
+            true,
+        );
+        with_ctx(&evidence, &config, |ctx| {
+            activity.spawn_commands(Millis(0), ctx)
+        });
+        assert_eq!(
+            activity.step(None),
+            FlashStep::ReadingBoard,
+            "parked to be read"
+        );
+        // The park answered; the read starts once the port has settled.
+        with_ctx(&evidence, &config, |ctx| {
+            activity.handle(
+                Millis(100),
+                &Input::Event(Event::Link {
+                    link: LinkId(1),
+                    event: LinkEvent::ResetOutcome {
+                        kind: ResetKind::UsbJtagDownload,
+                        ok: true,
+                    },
+                }),
+                ctx,
+            )
+        });
+        with_ctx(&evidence, &config, |ctx| {
+            activity.handle(Millis(3_000), &timer(), ctx)
+        });
+        assert_eq!(
+            activity.step(Some("Reading the board's files")),
+            FlashStep::ReadingBoard
+        );
+        with_ctx(&evidence, &config, |ctx| {
+            activity.handle(Millis(4_000), &layout(migrate()), ctx)
+        });
+        with_ctx(&evidence, &config, |ctx| {
+            activity.handle(
+                Millis(5_000),
+                &ended(ActivityOutcome::Succeeded {
+                    summary: "inspected".to_string(),
+                }),
+                ctx,
+            )
+        });
+        assert_eq!(
+            activity.step(Some("Reading the board's files")),
+            FlashStep::WaitingForAnswer,
+            "the question, not the read's last progress"
+        );
+        with_ctx(&evidence, &config, |ctx| {
+            activity.handle(
+                Millis(9_000),
+                &Input::Action(Action::ConfirmFlashLayout {
+                    device: DeviceId(1),
+                }),
+                ctx,
+            )
+        });
+        for (progress, step) in [
+            ("Writing firmware", FlashStep::FlashingFirmware),
+            ("Moving files", FlashStep::MovingFiles),
+            ("Verifying files", FlashStep::CheckingFiles),
+            ("Resetting the board", FlashStep::CheckingFiles),
+        ] {
+            assert_eq!(activity.step(Some(progress)), step, "{progress}");
+        }
+        with_ctx(&evidence, &config, |ctx| {
+            activity.handle(
+                Millis(60_000),
+                &ended(ActivityOutcome::Succeeded {
+                    summary: "written".to_string(),
+                }),
+                ctx,
+            )
+        });
+        assert_eq!(
+            activity.step(Some("Resetting the board")),
+            FlashStep::CheckingFiles,
+            "the board's own boot proves the files"
+        );
+    }
+
+    /// A flash that moves no files keeps its one label after the read.
+    #[test]
+    fn a_plain_flash_reads_then_flashes() {
+        let config = RosterConfig::default();
+        let mut evidence = Evidence::default();
+        opened(&mut evidence, Millis(0), &config);
+        let mut activity = flash();
+        with_ctx(&evidence, &config, |ctx| {
+            activity.spawn_commands(Millis(0), ctx)
+        });
+        assert_eq!(activity.step(None), FlashStep::ReadingBoard);
+        inspected(&mut activity, &evidence, &config, LayoutVerdict::Plain);
+        assert_eq!(
+            activity.step(Some("Writing firmware image 1/3")),
+            FlashStep::FlashingFirmware
+        );
+        with_ctx(&evidence, &config, |ctx| {
+            activity.handle(
+                Millis(60_000),
+                &ended(ActivityOutcome::Succeeded {
+                    summary: "written".to_string(),
+                }),
+                ctx,
+            )
+        });
+        assert_eq!(
+            activity.step(Some("Resetting the board")),
+            FlashStep::FlashingFirmware
+        );
     }
 
     #[test]

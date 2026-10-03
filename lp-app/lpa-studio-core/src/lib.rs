@@ -231,7 +231,7 @@ pub use lpa_devices::wire::BoardFs as DeviceBoardFs;
 pub use lpa_devices::{
     Action as DeviceAction, ActivityKind as DeviceActivityKind, DeviceId, DeviceStatus,
     EndpointKey as DeviceEndpointKey, Event as DeviceEvent,
-    FlashLayoutView as DeviceFlashLayoutView, Input as DeviceInput,
+    FlashLayoutView as DeviceFlashLayoutView, FlashStep as DeviceFlashStep, Input as DeviceInput,
     LayoutVerdict as DeviceLayoutVerdict, LinkCounterFacts as DeviceLinkCounters,
     LinkId as DeviceLinkId, LinkInfo as DeviceLinkInfo, Millis as DeviceMillis,
     RosterConfig as DeviceRosterConfig, TerminalKind as DeviceTerminalKind,

@@ -8263,6 +8263,14 @@ fn updating_a_legacy_board_backs_up_asks_and_keeps_every_file() {
     let panel = layout_panel(&mut bench, &tasks, target);
     assert_eq!(panel.title, "Move this board's files to the new layout");
     assert!(panel.body.contains("saved a backup"), "{panel:?}");
+    // Behind the question the card names the step it is on — never
+    // "Flashing firmware…", which is not happening (G1 walk, 2026-10-03) —
+    // and shows no stale percent from the read that came before it.
+    let asking = &bench.view().devices[0];
+    let activity = asking.activity.as_ref().expect("the update is running");
+    assert_eq!(activity.label, "Waiting for your answer…");
+    assert_eq!(activity.percent, None);
+    assert_eq!(asking.state_label, "Waiting for your answer…");
     // The backup is stored (pending) before a single byte was written.
     let index = drive(crate::DeviceBackupStore::index(&bench.backups));
     assert_eq!(index.entries.len(), 1, "{index:?}");

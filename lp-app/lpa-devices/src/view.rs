@@ -16,7 +16,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::activity::{ActivityKind, ActivityOutcome, CancelPhase};
+use crate::activity::{ActivityCell, ActivityKind, ActivityOutcome, CancelPhase};
 use crate::device::{Device, DeviceStatus};
 use crate::evidence::{
     Classification, Evidence, IncompatibleReason, Liveness, TerminalLine, WireVersion,
@@ -253,8 +253,8 @@ pub fn device_view(device: &Device, now: Millis) -> DeviceView {
     let loaded = loaded_project(device);
     let activity = device.activity.as_ref().map(|cell| ActivityView {
         kind: cell.kind,
-        label: format!("{}…", cell.kind.label()),
-        percent: cell.progress.as_ref().and_then(|progress| progress.percent),
+        label: cell.label(),
+        percent: cell.percent(),
         cancellable: !cell.is_cancel_requested(),
         cancel_requested: matches!(cell.cancel, CancelPhase::CancelRequested { .. }),
         layout: cell.flash_layout(),
@@ -682,8 +682,9 @@ pub fn pending_link_view(entry: &PendingLink, now: Millis) -> PendingLinkView {
 fn state_label(device: &Device, status: DeviceStatus) -> String {
     match status {
         DeviceStatus::Busy => device
-            .activity_kind()
-            .map(|kind| format!("{}…", kind.label()))
+            .activity
+            .as_ref()
+            .map(ActivityCell::label)
             .unwrap_or_else(|| "Working…".to_string()),
         DeviceStatus::Offline => "Offline".to_string(),
         // "port closed" was true and useless: it named an implementation

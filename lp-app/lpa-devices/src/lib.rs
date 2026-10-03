@@ -59,8 +59,8 @@ pub mod view;
 pub mod wire;
 
 pub use activity::{
-    ActivityCell, ActivityKind, ActivityOutcome, CancelPhase, FlashLayoutView, LayoutVerdict,
-    PushActivity,
+    ActivityCell, ActivityKind, ActivityOutcome, CancelPhase, FlashLayoutView, FlashStep,
+    LayoutVerdict, PushActivity,
 };
 pub use board_key::{BoardKey, BoardKeyError};
 pub use device::{Device, DeviceStatus};
