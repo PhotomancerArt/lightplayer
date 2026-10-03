@@ -28,6 +28,7 @@ use lpa_studio_core::{
     UiProductPreview,
 };
 
+use crate::app::agent::AgentCardView;
 use crate::app::node::ProductPreviewCanvas;
 use crate::base::MarkdownText;
 use crate::core::outline_action_class;
@@ -172,9 +173,20 @@ pub fn AgentChatPane(
                         UiAgentTurn::Notice { text, level } => rsx! {
                             p { key: "{index}", class: notice_class(*level), "{text}" }
                         },
-                        // Cards belong to the app chat; the shader agent
-                        // has no `act` and never makes one.
-                        UiAgentTurn::Card(_) => rsx! {},
+                        // Cards come from the app agent's `act` (the
+                        // shader agent has none); the transcript draws one
+                        // wherever it holds one, as the real control.
+                        UiAgentTurn::Card(card) => rsx! {
+                            AgentCardView {
+                                key: "{index}-{card.id}",
+                                card: card.clone(),
+                                on_action: move |action| {
+                                    if let Some(handler) = on_action {
+                                        handler.call(action);
+                                    }
+                                },
+                            }
+                        },
                     }
                 }
                 if thinking_row {

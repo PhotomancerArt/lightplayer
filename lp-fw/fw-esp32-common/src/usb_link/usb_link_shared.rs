@@ -1,12 +1,33 @@
 //! The one USB host link, as the link task and the server transport share it.
 //!
-//! Both run on the chip's one thread executor (the main task and a task it
-//! spawned), so a plain [`RefCell`] is the lock: every borrow is taken inside
-//! a synchronous call and dropped before any `.await`, so the two never
-//! overlap. That is deliberate — a critical-section mutex here would mask
-//! interrupts for as long as `Link::send` copies a 16 KB reply, and the RMT
-//! refill (the LEDs) cannot wait that long. The one cross-task wake is the
-//! send doorbell, a [`Signal`].
+//! Every use of the link goes through [`UsbLinkShared::with_link`]: a
+//! synchronous call whose [`RefCell`] borrow is dropped before any `.await`.
+//! The one cross-task wake is the doorbell, a [`Signal`] — rung by the
+//! transport when it queues a reply and by the log ring when a record lands
+//! (see [`super::usb_link_task`]).
+//!
+//! **Two arrangements, one lock hook.**
+//!
+//! - *One executor* (the S3; the C6 without `io-thread`): the link task is a
+//!   task the main task spawned, so the two users never run at once and the
+//!   `RefCell` alone keeps them apart. [`UsbLinkShared::leak`] injects no
+//!   lock. A critical-section mutex here would be wrong — it would mask
+//!   interrupts for as long as a closure ran, and the RMT refill (the LEDs)
+//!   cannot wait.
+//! - *Two threads* (the C6's link thread, `fw-esp32c6/src/io_thread.rs`): the
+//!   link thread can preempt the main thread inside a borrow, so the chip
+//!   injects a [`LinkLock`] ([`UsbLinkShared::leak_locked`]) that every
+//!   `with_link` runs inside. The C6's masks only the scheduler's interrupt
+//!   priority, so no thread switch lands inside a borrow while the RMT refill
+//!   still preempts it. The `RefCell` stays, as the reentrancy check.
+//!
+//! **Closures under `with_link` stay short.** With a real lock they hold off
+//! the scheduler (and everything at its priority) for as long as they run,
+//! so nothing copies a large buffer under one. Today's work is bounded: an
+//! `on_bytes` of at most 64 B, one frame of at most 256 B cut into the task's
+//! own buffer, an event pop, a reply queued by `send_external` without a copy
+//! (the link reads it from the static frame buffer later, a frame at a time),
+//! and a log pump of at most four records. Keep it that way.
 
 use alloc::boxed::Box;
 use core::cell::RefCell;
@@ -53,11 +74,30 @@ const KEEP_REASSEMBLY: usize = 1024;
 /// only the backstop.
 const MIN_RTO_US: u64 = 200_000;
 
+/// Runs its argument with the link's two users kept apart (see the module
+/// docs), and must run it exactly once. The default ([`UsbLinkShared::leak`])
+/// runs it directly: both users on one executor.
+pub type LinkLock = fn(&mut dyn FnMut());
+
+fn no_lock(f: &mut dyn FnMut()) {
+    f()
+}
+
 /// The link, and the doorbell that wakes its task.
 pub struct UsbLinkShared {
     link: RefCell<Link<SelectiveRepeat>>,
     doorbell: Signal<CriticalSectionRawMutex, ()>,
+    lock: LinkLock,
 }
+
+// SAFETY: `link` is the only field that is not `Sync`, and it is reached only
+// through `with_link`, which borrows it inside `lock`. With the default lock
+// (`leak`) both users share one executor and never run at once; a chip that
+// puts them on different threads must inject a lock that keeps them apart
+// (`leak_locked`), and the `RefCell` turns any overlap the lock lets through
+// into a panic rather than an aliased `&mut`. The doorbell is a
+// critical-section `Signal`, `Sync` on its own.
+unsafe impl Sync for UsbLinkShared {}
 
 impl UsbLinkShared {
     /// The board's link configuration: lp-link's USB preset, its buffers cut
@@ -90,17 +130,35 @@ impl UsbLinkShared {
     /// share. `nonce` must be random per boot (the chip's RNG): it is how the
     /// host learns the board restarted.
     pub fn leak(nonce: u32) -> &'static Self {
+        Self::leak_locked(nonce, no_lock)
+    }
+
+    /// [`Self::leak`] for a chip whose link task and transport run on
+    /// different threads: every [`Self::with_link`] runs inside `lock` (see
+    /// the module docs).
+    pub fn leak_locked(nonce: u32, lock: LinkLock) -> &'static Self {
         Box::leak(Box::new(Self {
             link: RefCell::new(Link::new(Self::config(), nonce)),
             doorbell: Signal::new(),
+            lock,
         }))
     }
 
-    /// Run `f` on the link. Never call this from inside another `with_link`,
-    /// and never hold what `f` returns across an `.await` (see the module
-    /// docs).
+    /// Run `f` on the link, inside the link's lock. Keep `f` short, never
+    /// call this from inside another `with_link`, and never hold what `f`
+    /// returns across an `.await` (see the module docs).
     pub fn with_link<R>(&self, f: impl FnOnce(&mut Link<SelectiveRepeat>) -> R) -> R {
-        f(&mut self.link.borrow_mut())
+        let mut f = Some(f);
+        let mut out = None;
+        (self.lock)(&mut || {
+            if let Some(f) = f.take() {
+                out = Some(f(&mut self.link.borrow_mut()));
+            }
+        });
+        match out {
+            Some(out) => out,
+            None => unreachable!("a LinkLock must run its argument"),
+        }
     }
 
     /// Whether a host has the link up right now.
@@ -140,11 +198,34 @@ impl UsbLinkShared {
     pub(crate) async fn doorbell(&self) {
         self.doorbell.wait().await;
     }
+
+    /// The doorbell itself, for the log ring to ring when a record lands
+    /// ([`crate::log_ring_logger::ring_on_record`]).
+    pub(crate) fn doorbell_signal(&'static self) -> &'static Signal<CriticalSectionRawMutex, ()> {
+        &self.doorbell
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use core::sync::atomic::{AtomicU32, Ordering};
+
+    /// Every `with_link` runs inside the injected lock, exactly once each.
+    #[test]
+    fn every_with_link_runs_inside_the_injected_lock() {
+        static ENTERED: AtomicU32 = AtomicU32::new(0);
+        fn counting_lock(f: &mut dyn FnMut()) {
+            ENTERED.fetch_add(1, Ordering::Relaxed);
+            f()
+        }
+        let shared = UsbLinkShared::leak_locked(7, counting_lock);
+        assert!(!shared.is_established());
+        assert!(!shared.frame_buf_in_use());
+        let state = shared.with_link(|link| link.state());
+        assert_eq!(state, LinkState::Connecting);
+        assert_eq!(ENTERED.load(Ordering::Relaxed), 3);
+    }
 
     /// The board's cut holds together, carries the largest reply, and costs
     /// well under the preset. (`--nocapture` prints the figures.)

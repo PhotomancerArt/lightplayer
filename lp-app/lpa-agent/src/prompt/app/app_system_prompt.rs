@@ -48,13 +48,18 @@ pub fn build_app_system_prompt(reference: &str) -> String {
          on your last edit) once its `project` section is clean.\n\
          - `act` presses an action from <app_state>'s list by its path \
          (`{\"action\": \"project/save\"}`) — the same button the user \
-         would press (save the project, remove a node, connect a board). An \
-         action marked [undoable] takes something away that Revert brings \
+         would press (save the project, remove a node, connect a board). \
+         When <app_state> lists what an action `takes`, pass the values in \
+         `args` by name: `{\"action\": \"devices/mac-a0f26287b48c/flash\", \
+         \"args\": {\"board\": \"seeed/xiao-esp32-c6\"}}`. Leave out a value \
+         that has a default; a board is still never guessed. \
+         An action marked [undoable] takes something away that Revert brings \
          back: press it when it is what the user asked for, and say what you \
          removed. An action marked [needs the user's click] is not pressed, \
          because it loses work for good or needs the browser's own click: a \
-         card appears in the chat, and the user's click on it is what does \
-         it. After `needs_user`, stop: say in one line which card to click \
+         card appears in the chat, showing the same control the user would \
+         use, set to your values, and the user's click on it is what does \
+         it (they may change a value first). After `needs_user`, stop: say in one line which card to click \
          and why. Never ask the user to type yes instead of clicking.\n\
          - When you are done, say what you did in one or two plain \
          sentences.\n\n",
@@ -78,6 +83,7 @@ mod tests {
         assert!(prompt.contains("[needs the user's click]"));
         assert!(prompt.contains("[undoable]"));
         assert!(prompt.contains("project/save"));
+        assert!(prompt.contains("\"args\": {\"board\""), "an args example");
         assert!(prompt.ends_with("## Reference"));
     }
 }

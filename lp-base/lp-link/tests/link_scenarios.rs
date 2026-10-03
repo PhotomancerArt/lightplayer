@@ -368,6 +368,33 @@ fn a_frame_written_in_slow_pieces_is_received_whole() {
 }
 
 #[test]
+fn the_rtt_accessors_report_the_round_trip_a_frame_took() {
+    let (mut a, mut b) = pair::<SelectiveRepeat>(LinkConfig::usb());
+    let mut now = 0;
+    handshake(&mut a, &mut b, &mut now);
+    let _ = drain(&mut a);
+    let _ = drain(&mut b);
+    let (_, before) = a.rtt_last_sample();
+
+    // One data frame out at `now`; it arrives at once, and the peer's ACK
+    // comes back 7 ms later.
+    a.send(CH_PROTO, &[1; 32]).unwrap();
+    let sent_at = now;
+    let frame = a.poll_transmit(now).unwrap().to_vec();
+    b.on_bytes(now, &frame);
+    now += 7_000;
+    while let Some(ack) = b.poll_transmit(now) {
+        let ack = ack.to_vec();
+        a.on_bytes(now, &ack);
+    }
+
+    let (last, count) = a.rtt_last_sample();
+    assert_eq!(count, before.wrapping_add(1), "one new sample");
+    assert_eq!(last, now - sent_at, "send to ACK");
+    assert!(a.srtt() > 0 && a.srtt() <= LinkConfig::usb().initial_rto);
+}
+
+#[test]
 fn a_peer_restart_is_reported_once_on_each_side() {
     let (mut a, mut b) = pair::<Gbn>(LinkConfig::usb());
     let mut now = 0;

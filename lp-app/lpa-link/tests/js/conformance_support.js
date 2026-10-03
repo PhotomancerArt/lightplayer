@@ -747,6 +747,11 @@ export async function blePhantomDrop(boardId) {
   (await bluetoothModule()).bluetooth().phantomDrop(boardId);
 }
 
+/// Model Bluefy's writes: a view sends its whole underlying buffer.
+export async function bleWholeBufferWrites(on) {
+  (await bluetoothModule()).bluetooth().wholeBufferWrites = on;
+}
+
 /// The next GATT connect to this board never settles.
 export async function bleHangNextConnect(boardId) {
   (await bluetoothModule()).bluetooth().hangNextConnect(boardId);

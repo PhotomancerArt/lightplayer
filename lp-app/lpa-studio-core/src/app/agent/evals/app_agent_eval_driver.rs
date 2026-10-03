@@ -128,10 +128,7 @@ impl AgentEvalStudio {
                 let log = Rc::clone(&requests);
                 controller.set_agent_provider_factory(move |_| {
                     let turns = remaining.borrow_mut().pop_front().unwrap_or_default();
-                    Box::new(ScriptedProvider {
-                        turns: RefCell::new(turns.into()),
-                        requests: Rc::clone(&log),
-                    })
+                    Box::new(ScriptedProvider::new(turns, Rc::clone(&log)))
                 });
             }
         }
@@ -683,10 +680,21 @@ impl Wake for NoopWake {
     fn wake(self: Arc<Self>) {}
 }
 
-/// One-turn-script provider (the e2e tests' pattern).
-struct ScriptedProvider {
+/// One-turn-script provider (the e2e tests' pattern): each `run_turn`
+/// answers with the next scripted turn and logs the request it was sent.
+/// The device journey eval (E4) seats it on the device bench too.
+pub(crate) struct ScriptedProvider {
     turns: RefCell<VecDeque<Vec<TurnEvent>>>,
     requests: Rc<RefCell<Vec<TurnRequest>>>,
+}
+
+impl ScriptedProvider {
+    pub(crate) fn new(turns: Vec<Vec<TurnEvent>>, requests: Rc<RefCell<Vec<TurnRequest>>>) -> Self {
+        Self {
+            turns: RefCell::new(turns.into()),
+            requests,
+        }
+    }
 }
 
 impl ModelProvider for ScriptedProvider {
