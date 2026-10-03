@@ -5,8 +5,13 @@
 //!   [ticket:[u8;16]] — an offer; the ticket is required over radio
 //!   ([`super::update_ticket`])
 //! - board → host `Q` — "what do you have?" (answered with an offer)
-//! - board → host `R` kind:u8 offset:u32 len:u32 — a request (`C`ore/`E`ngine)
+//! - board → host `R` kind:u8 offset:u32 len:u32 [flags:u8] — a request
+//!   (`C`ore/`E`ngine); flag bit 0: this core takes `Z`
 //! - host → board `D` kind:u8 offset:u32 bytes… — the answer
+//! - host → board `Z` kind:u8 offset:u32 deflate… — the answer compressed:
+//!   raw deflate against the 32 KiB written before it
+//!   ([`super::update_window`] has the rule); a host sends `Z` only to a
+//!   request that set the flag, and only when it is smaller
 //! - board → host `F` build:u32 — refused: that build failed its trial here
 //! - board → host `A` — refused: an untrusted link must log in (engine
 //!   running) or bring this board's ticket (core-only)
@@ -33,6 +38,7 @@ use super::boot_state::BootState;
 use super::split_flash::{SECTOR, SectorBuf, SplitFlash};
 use super::system_reset::system_reset;
 use super::update_ticket::{self, Ticket};
+use super::update_window::UpdateWindow;
 
 #[cfg(feature = "ble")]
 use fw_esp32_common::radio_link::{RadioLinkEvent, RadioLinkPort};
@@ -188,6 +194,7 @@ pub async fn core_only(
     let ticket = update_ticket::read(&mut flash);
     let mut buf = Box::new(SectorBuf([0xff; SECTOR as usize]));
     let mut plan = Plan::Idle;
+    let mut window: Option<UpdateWindow> = None;
     let mut source: Option<Peer> = None;
     let mut queried = false;
     #[cfg(feature = "ble")]
@@ -236,6 +243,7 @@ pub async fn core_only(
                         &state,
                         &mut flash,
                         &mut buf,
+                        &mut window,
                     );
                 }
                 _ => {}
@@ -275,6 +283,7 @@ pub async fn core_only(
                                 &state,
                                 &mut flash,
                                 &mut buf,
+                                &mut window,
                             );
                         }
                         _ => {}
@@ -297,6 +306,7 @@ fn step(
     state: &BootState,
     flash: &mut SplitFlash,
     buf: &mut SectorBuf,
+    window: &mut Option<UpdateWindow>,
 ) -> Plan {
     if let Some(offer) = Offer::parse(msg) {
         if !peer.trusted() && (ticket.is_none() || offer.ticket != ticket) {
@@ -398,25 +408,52 @@ fn step(
             next: first,
         };
     }
-    // Data belongs to the link that asked for it.
-    if *source != Some(peer) || msg.len() < 6 || msg[0] != b'D' {
+    // Data belongs to the link that asked for it: `D` raw, `Z` compressed
+    // against the window (asked for with the request's flag).
+    if *source != Some(peer) || msg.len() < 6 || !(msg[0] == b'D' || msg[0] == b'Z') {
         return plan;
     }
     let kind = msg[1];
     let off = u32::from_le_bytes(msg[2..6].try_into().unwrap_or_default());
-    let data = &msg[6..];
-    match plan {
-        Plan::Core {
-            dest,
-            len,
-            next,
-            build,
-        } if kind == b'C' && off == next => {
-            if !flash.write_sector(buf, dest + off, data) {
-                super::say!("[OTA] write at {:#x} failed — update abandoned", dest + off);
-                return Plan::Idle;
+    let (dest, len, next) = match plan {
+        Plan::Core { dest, len, next, .. } if kind == b'C' => (dest, len, next),
+        Plan::Engine { dest, len, next } if kind == b'E' => (dest, len, next),
+        _ => return plan,
+    };
+    if off != next {
+        return plan; // ahead of or behind the sector waited for (a host sending ahead)
+    }
+    let expect = SECTOR.min(len - off) as usize;
+    let wrote = if msg[0] == b'Z' {
+        let w = window.get_or_insert_with(UpdateWindow::new);
+        match w.decode(kind, off, dest, expect, &msg[6..], flash) {
+            Some(data) => flash.write_sector(buf, dest + off, data),
+            None => {
+                // Ask for this one uncompressed instead.
+                request_raw(links, peer, kind, off, len);
+                return plan;
             }
-            let next = off + data.len() as u32;
+        }
+    } else {
+        let ok = msg.len() - 6 == expect && flash.write_sector(buf, dest + off, &msg[6..]);
+        if ok && let Some(w) = window.as_mut() {
+            w.written(kind, off, expect, Some(&msg[6..]));
+        }
+        ok
+    };
+    if !wrote {
+        super::say!("[OTA] write at {:#x} failed — update abandoned", dest + off);
+        return Plan::Idle;
+    }
+    if msg[0] == b'Z'
+        && let Some(w) = window.as_mut()
+    {
+        w.written(kind, off, expect, None);
+    }
+    let n = expect as u32;
+    match plan {
+        Plan::Core { build, .. } => {
+            let next = off + n;
             if next < len {
                 request(links, peer, b'C', next, len);
                 return Plan::Core {
@@ -426,16 +463,14 @@ fn step(
                     build,
                 };
             }
+            log_decoding(window);
             state.write_trial_record(flash, buf, dest, len, build);
             super::say!("[OTA] core written ({len} B) and named on trial — resetting into it");
             system_reset();
         }
-        Plan::Engine { dest, len, next } if kind == b'E' && off == next => {
-            if !flash.write_sector(buf, dest + off, data) {
-                super::say!("[OTA] write at {:#x} failed — update abandoned", dest + off);
-                return Plan::Idle;
-            }
+        Plan::Engine { .. } => {
             if off == 0 {
+                log_decoding(window);
                 // The update the ticket authorized is done.
                 update_ticket::clear(flash);
                 // A new engine deserves a fair start: clear the crash count.
@@ -443,20 +478,43 @@ fn step(
                 super::say!("[OTA] engine written ({len} B), header last — resetting");
                 system_reset();
             }
-            let after = off + data.len() as u32;
+            let after = off + n;
             let next = if after < len { after } else { 0 };
             request(links, peer, b'E', next, len);
             Plan::Engine { dest, len, next }
         }
-        _ => plan,
+        Plan::Idle => plan,
     }
 }
 
+fn log_decoding(window: &Option<UpdateWindow>) {
+    if let Some(w) = window
+        && w.decoded > 0
+    {
+        super::say!(
+            "[OTA] {} chunks arrived compressed; decoding took {} ms",
+            w.decoded,
+            w.decode_us / 1000
+        );
+    }
+}
+
+/// A request, with the flag that says this core takes `Z` (compressed) chunks.
 fn request(links: &Links, peer: Peer, kind: u8, off: u32, total: u32) {
+    send_request(links, peer, kind, off, total, true);
+}
+
+/// A request for a chunk uncompressed (its `Z` did not decode).
+fn request_raw(links: &Links, peer: Peer, kind: u8, off: u32, total: u32) {
+    send_request(links, peer, kind, off, total, false);
+}
+
+fn send_request(links: &Links, peer: Peer, kind: u8, off: u32, total: u32, inflate: bool) {
     let len = SECTOR.min(total - off);
-    let mut m = Vec::with_capacity(10);
+    let mut m = Vec::with_capacity(11);
     m.extend_from_slice(&[b'R', kind]);
     m.extend_from_slice(&off.to_le_bytes());
     m.extend_from_slice(&len.to_le_bytes());
+    m.push(u8::from(inflate));
     links.send(peer, &m);
 }

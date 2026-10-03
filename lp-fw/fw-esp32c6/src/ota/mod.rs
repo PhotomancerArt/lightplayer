@@ -39,10 +39,12 @@ pub(crate) use say;
 
 mod boot_state;
 mod engine_window;
+mod inflate;
 mod split_flash;
 mod system_reset;
 mod update_channel;
 mod update_ticket;
+mod update_window;
 
 pub use boot_state::BootState;
 pub use engine_window::{ENGINE_VADDR, map_engine};
