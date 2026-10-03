@@ -67,6 +67,9 @@ const REAL_TIME_LIMIT: Duration = Duration::from_secs(15);
 /// skipping past a window the model is watching.
 const STEP_MS: f64 = 0.005;
 
+/// E4: the app agent's device journey over this bench.
+mod agent_device_journey_tests;
+
 // ---------------------------------------------------------------------
 // The transport
 // ---------------------------------------------------------------------
@@ -5305,7 +5308,7 @@ fn the_agents_flash_over_firmware_is_a_card_the_user_may_re_pick() {
 }
 
 /// A Routine verb with a value is pressed outright: the agent renames a
-/// board through `devices/<mac>/rename`, and the card wears the name. A
+/// board through `devices/mac-<hex>/rename`, and the card wears the name. A
 /// name the offer does not take is refused, naming what it does take.
 #[test]
 fn the_agent_renames_a_board_through_its_offer() {

@@ -290,7 +290,8 @@ pub fn selection_line(selection: Option<String>) -> String {
     }
 }
 
-/// The device roster, one row per device.
+/// The device roster, one row per device: its name, chip, board, firmware,
+/// state, and what it runs once it has said.
 pub fn device_lines(roster: &DeviceRosterView) -> String {
     let devices = &roster.roster.devices;
     if devices.is_empty() {
@@ -303,9 +304,16 @@ pub fn device_lines(roster: &DeviceRosterView) -> String {
             lpa_devices::FirmwareFace::Unknown => "not identified yet",
             _ => "other firmware",
         };
+        // What it runs is the board's own report; before its first one,
+        // nothing is claimed.
+        let loaded = match &device.loaded_project {
+            lpa_devices::view::LoadedProject::Running { label } => format!("; running {label:?}"),
+            lpa_devices::view::LoadedProject::Empty => "; no project loaded".to_string(),
+            lpa_devices::view::LoadedProject::Unknown => String::new(),
+        };
         let _ = writeln!(
             text,
-            "- {:?}: chip {}; board {}; {firmware}; {}",
+            "- {:?}: chip {}; board {}; {firmware}; {}{loaded}",
             device.title,
             device.detected_chip.as_deref().unwrap_or("unknown"),
             device.board_id.as_deref().unwrap_or("unknown"),
