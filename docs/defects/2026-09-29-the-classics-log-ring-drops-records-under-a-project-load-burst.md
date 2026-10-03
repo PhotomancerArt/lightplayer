@@ -1,13 +1,16 @@
 ---
-status: open           # narrowed 2026-09-29 (P7): the silent loss is fixed; the ring's counted overflow remains
+status: fixed (emulated; silicon at the M2 desk walk)   # the ring's own overflow, open since 2026-09-29, measured at 0 drops once the link task left the render's thread (M2 P4, 2026-10-03)
+fixed: this change
 found: 2026-09-29      # how: emulator walk (lp-emu:esp32v3:t1), plan classic-uart-on-lp-link P5
 area: fw-esp32-common `log_ring_logger` (4 KiB `LOG_RING`, `pump`) × `uart_link/uart_link_task.rs` (2 records per pass, thread executor)
 class: wake-quantum-throttle
 related:
   - ../adr/2026-09-27-lp-link-one-comms-layer.md
   - ../adr/2026-08-25-classic-uart-io-task-executor-isolation.md
+  - ../adr/2026-10-02-c6-link-io-thread.md (2026-10-03 classic amendment)
   - 2026-08-02-serial-line-interleaving.md
   - lp2025/2026-09-28-2015-classic-uart-on-lp-link (plan dir, P5 §8, ruling DD37, P7)
+  - lp2025/2026-10-02-1918-io-thread-other-boards (plan dir, P4)
 ---
 # The classic's log ring drops records under a multi-output project-load burst
 
@@ -117,6 +120,32 @@ pass the line cannot carry a load's log as fast as the load writes it.
   `scripts/emu/build-merged-image.sh --chip esp32 <elf> <merged.bin>`.)
 - The five-wire gate still accepts IO18's open line **or** the ring's drop
   notice, and now prints which arrived.
+
+**Update 2026-10-03 (M2 P4)** — root cause 2 ("the ring overflows while
+nothing drains it") is a direct consequence of the link task sharing the
+render's thread executor: it gets no pass while the engine holds the
+executor for a load burst, which is exactly when a project's logs are
+loudest. Plan `lp2025/2026-10-02-1918-io-thread-other-boards` moves the
+link task (and its log pump) to its own priority-1 esp-rtos thread, pinned
+to core 0 (`fw-esp32v3/src/io_thread.rs`, feature `io-thread`, default on;
+`docs/adr/2026-10-02-c6-link-io-thread.md`'s classic amendment). A thread
+of its own gets scheduled even while the render holds its own thread, so
+the ring is pumped during a load burst instead of only after it. Measured
+on `lp-cli/tests/emu_v3_link_gates.rs`'s five-wire load
+(`lp-emu:esp32v3:t1`, lp-emu `ab8345d38`): drops fell from main's 25 (P2's
+event-driven-wake-only arrangement: 14) to **0** — IO18's open line
+arrives. The reboot gate's **second boot** still drops 32/32/33 records
+(main/P2/P4) on all three arrangements: those are logged during the reboot
+itself, before any host has the link back up to drain them, which no
+thread placement can fix (there is no reader yet) — a separate, narrower
+gap than the one this entry tracks, not reopened here.
+
+This closes the entry **on the emulator**; root cause 1 (the datagram-room
+fix) was already closed on 2026-09-29. Status is `fixed (emulated; silicon
+at the M2 desk walk)` because no desk sitting has run this arrangement yet
+(`desk-classic.md`, batched with #884's owed classic lp-link walk) — a
+silicon disagreement with this emulated result would be a fidelity defect
+to file before reopening this one.
 
 **Lesson** — a best-effort queue that refuses is only honest if nothing was
 taken to offer it: popping from one bounded buffer into another that can
