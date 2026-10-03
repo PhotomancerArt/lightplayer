@@ -191,7 +191,7 @@ async fn wrong_proto_hello_is_incompatible() {
 
 /// G1 rehearsal (2026-10-03): `lp-cli upload` / `hardware stamp` against a
 /// fielded C6 (wire 32) said the board "predates the wire hello". Its hello
-/// was there, but wire 33 made `hardware.fs` required, so the full decode
+/// was there, but wire 34 made `hardware.fs` required, so the full decode
 /// dropped it and the deadline reached the pre-hello verdict — the mistake
 /// G1-F1 fixed in Studio's fold. The session reads the hello's `proto` alone
 /// (`lpc_wire::hello_proto`) and names the board for what it is.

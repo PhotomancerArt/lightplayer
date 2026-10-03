@@ -5489,8 +5489,8 @@ fn a_pending_blank_chip_publishes_its_flash_at_new_n() {
             .first()
             .is_some_and(|pending| pending.needs_firmware())
     });
-    let provisional = bench.view().pending[0].device;
-    let prefix = format!("devices/new-{}", provisional.0);
+    // The only unidentified board is `new-1`, whatever its roster handle.
+    let prefix = "devices/new-1".to_string();
     let view = bench.controller.view();
     assert_eq!(
         board_verbs(&view, &prefix),
@@ -5545,8 +5545,7 @@ fn the_agents_flash_over_firmware_is_a_card_the_user_may_re_pick() {
             .first()
             .is_some_and(|pending| pending.needs_firmware())
     });
-    let provisional = bench.view().pending[0].device;
-    let flash = format!("devices/new-{}/flash", provisional.0);
+    let flash = "devices/new-1/flash".to_string();
     let path = crate::OfferPath::parse(&flash).unwrap();
     let offer = bench
         .controller
@@ -8604,9 +8603,12 @@ fn a_full_device_store_is_listed_and_its_switches_stay_usable_across_a_migration
 
     let panel = access_panel(&mut bench, &tasks, target);
     assert_eq!(panel.ble_enabled, Some(true), "the board's own switch");
-    assert!(panel.open, "anyone nearby, as stored");
-    assert_eq!(panel.entries.len(), lpc_access::MAX_SECRETS_PER_FILE);
-    assert_eq!(panel.count, lpc_access::MAX_SECRETS_PER_FILE + 1);
+    assert_eq!(
+        panel.open,
+        lpc_access::OpenTo::Play,
+        "anyone nearby, as stored"
+    );
+    assert_eq!(panel.used, lpc_access::MAX_SECRETS_PER_FILE);
     assert!(!panel.restart_pending, "{panel:?}");
     let why = panel
         .error
@@ -8630,8 +8632,8 @@ fn a_full_device_store_is_listed_and_its_switches_stay_usable_across_a_migration
     );
     let panel = access_panel(&mut bench, &tasks, target);
     assert_eq!(panel.ble_enabled, Some(true));
-    assert!(panel.open);
-    assert_eq!(panel.entries.len(), lpc_access::MAX_SECRETS_PER_FILE);
+    assert_eq!(panel.open, lpc_access::OpenTo::Play);
+    assert_eq!(panel.used, lpc_access::MAX_SECRETS_PER_FILE);
     assert!(!panel.restart_pending, "{panel:?}");
 }
 
@@ -8653,7 +8655,7 @@ fn full_access_store() -> Vec<u8> {
         version: lpc_access::DeviceAccessFile::VERSION,
         secrets,
         ble_enabled: true,
-        open: true,
+        open: lpc_access::OpenTo::Play,
     };
     store.to_json().expect("a valid store").into_bytes()
 }

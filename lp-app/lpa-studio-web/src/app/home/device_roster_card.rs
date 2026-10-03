@@ -679,12 +679,11 @@ pub(crate) fn DeviceRosterCard(
             // mid-activity, which the shipped system could not do.
             footer { class: device_zone_class(),
                 // Connections (spike §1): USB, the Bluetooth switch, and
-                // "Who has access" where this link may see it. Only a board
+                // "Access" where this link may see it. Only a board
                 // Studio talks to as LightPlayer has one.
                 if let Some(access) = access.clone().filter(|_| linked) {
                     super::connections_group::ConnectionsGroup {
                         device,
-                        device_name: card.title.clone(),
                         access,
                         on_access,
                         who_open: access_panel_open,

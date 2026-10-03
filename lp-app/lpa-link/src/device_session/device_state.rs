@@ -98,7 +98,7 @@ pub enum IncompatibleReason {
     /// A hello arrived with a wire proto other than [`WIRE_PROTO_VERSION`].
     ProtoMismatch { hello: ServerHello },
     /// A hello arrived from another wire that this build cannot decode (a
-    /// breaking change to the hello itself — wire 33 made `hardware.fs`
+    /// breaking change to the hello itself — wire 34 made `hardware.fs`
     /// required): only its `proto` was read (`lpc_wire::hello_proto`). It
     /// is still a LightPlayer that said hello, never pre-hello firmware.
     HelloOnOtherWire { proto: u32 },

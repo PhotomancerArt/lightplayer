@@ -4,7 +4,7 @@
 //! a host compares its `proto` with [`WIRE_PROTO_VERSION`] and treats any
 //! difference as "assume nothing works; update the firmware". That only
 //! works if the host can SEE the `proto` of a hello it cannot otherwise
-//! decode — and a breaking change to the hello itself (wire 33 added a
+//! decode — and a breaking change to the hello itself (wire 34 added a
 //! required `hardware.fs`) is exactly when it cannot: the full
 //! [`ServerHello`] decode fails, and a board that just said hello at wire 32
 //! read as one that never said hello at all (G1-F1, 2026-10-02: every
@@ -106,7 +106,7 @@ mod tests {
     #[test]
     fn a_wire_32_hello_does_not_decode_at_this_wire_version_but_names_its_proto() {
         assert_eq!(
-            WIRE_PROTO_VERSION, 33,
+            WIRE_PROTO_VERSION, 34,
             "re-read this test when the version moves"
         );
         assert!(
@@ -114,6 +114,24 @@ mod tests {
             "the premise: a wire-32 hello lacks the required hardware.fs"
         );
         assert_eq!(hello_proto(HELLO_PROTO_32.trim()), Some(32));
+    }
+
+    /// Main's wire 33 (the device store's `open` as a word, PR #929) kept
+    /// the hello's shape: a board flashed from it sends the fielded hello
+    /// with `proto` 33 and no `hardware.fs`. It does not decode at 34, and
+    /// it names its proto and its board all the same — an older LightPlayer
+    /// like the fielded wire-32 boards.
+    #[test]
+    fn a_wire_33_hello_does_not_decode_either_and_names_its_proto_and_board() {
+        let hello = HELLO_PROTO_32
+            .trim()
+            .replace(r#""proto":32"#, r#""proto":33"#);
+        assert!(crate::json::from_str::<WireServerMessage>(&hello).is_err());
+        assert_eq!(hello_proto(&hello), Some(33));
+        assert_eq!(
+            hello_board_id(&hello).as_deref(),
+            Some("seeed/xiao-esp32-c6")
+        );
     }
 
     #[test]

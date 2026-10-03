@@ -250,6 +250,11 @@ genuinely fits none of these, and define it here in one line.
   that is never reused is sized by every id ever minted, not by what is
   alive, so removal leaves a tombstone that is never reclaimed. Harmless
   while removal is rare; a leak the day a feature makes removal routine.
+- **`capped-store-without-eviction`** — a store with a hard cap is fed
+  by an identity that multiplies on its own (one per origin, per install),
+  has no rule for what leaves when it is full, and its refusal at the cap
+  is swallowed — so it fills on a schedule nobody chose and then quietly
+  stops accepting anyone new.
 - **`wake-quantum-throttle`** — a task that services a stream takes a
   fixed quantum (one packet, one line) per scheduler wake, so throughput is
   bounded by how often it is woken rather than by the link, and anything
@@ -368,6 +373,7 @@ a fifth still lands somewhere the new `Fault` status and pattern don't reach.
 
 | Class | Date | Entry | Status | Area |
 | --- | --- | --- | --- | --- |
+| capped-store-without-eviction | 2026-10-02 | [a-full-device-store-refuses-new-access-silently](2026-10-02-a-full-device-store-refuses-new-access-silently.md) | fixed | lpa-studio-core access sync + lpc-access cap: every dev-server origin is its own browser key, so Yona's desk C6 filled with 16 × "Brave on Mac" and the 17th USB connect's `TooManySecrets` was only logged. A full board now drops its oldest other browser key (never this browser's, an account's, or a password) and says which; retired keys go first; a failed sync shows in the panel |
 | absence-from-incomplete-search | 2026-10-03 | [xiao-c6-d4-d5-unmapped](2026-10-03-xiao-c6-d4-d5-unmapped.md) | fixed | lpc-hardware `boards/seeed/xiao-esp32-c6.json`: D4/D5 were `not-found` with no GPIO, so no project could put LEDs on them (a user asked for D5). The 2026-05 calibration only pulses GPIOs the manifest already lists, and the first profile listed GPIO0–21; D4/D5 are GPIO22/23 (Seeed pin list). Now assigned, with resources, sidecar pins and a regression test |
 | stand-in-divergence | 2026-10-03 | [a-held-board-runs-a-fresh-access-store-in-ram](2026-10-03-a-held-board-runs-a-fresh-access-store-in-ram.md) | fixed | fw-esp32c6 BLE start × lpa-studio-core AccessController: a board held for the C6 layout change runs on a RAM fs, read its missing store as `fresh()` (Bluetooth on) and took Studio's USB key add into RAM ("Who has access 1" while its real 16-entry store waited at 0x310000). More open than its own list when that list said Bluetooth off. A held board now boots `locked()` (`access_store::device_store_at_boot`), and Studio neither syncs nor lists access for it. Nothing reached flash before or after |
 | partial-knowledge-loss | 2026-10-03 | [a-full-device-store-loses-the-list-studio-read](2026-10-03-a-full-device-store-loses-the-list-studio-read.md) | fixed (`d71091bf3`) | lpa-studio-core `sync_access`: on a device store already at its 16-entry cap, the USB sync's add of this browser's key was refused, and the refusal replaced the list the sync had just read. With no cached record the panel stayed "still reading" (`ble_enabled: None`): "Who has access 0" and the Bluetooth switch locked — G1's spare C6 after its migration (the migration was not the cause; any connect did it). The list now survives a refusal and the panel says the list is full |

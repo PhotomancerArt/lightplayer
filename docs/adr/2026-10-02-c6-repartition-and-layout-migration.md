@@ -41,7 +41,7 @@ copying blocks, and today's firmware formats any partition it cannot mount.
    `lpfs` will not mount and a LightPlayer filesystem is present at the old
    offset, it boots on a memory filesystem and says so (the legacy guard).
 4. **The hello says how the filesystem came up**: `fs` =
-   `mounted | formatted | memory | legacy_held` (wire proto 33). Studio and
+   `mounted | formatted | memory | legacy_held` (wire proto 34: written as 33, renumbered when main's #929 took 33 first). Studio and
    `lp-cli` verify a migration by it — files mounted and the board's own uid —
    not by "the flash finished".
 5. **The migration is file-level, in ONE bootloader session** (not over the

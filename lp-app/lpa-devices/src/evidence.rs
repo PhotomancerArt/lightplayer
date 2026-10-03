@@ -1839,7 +1839,7 @@ mod tests {
         newer.fold(Millis(0), &opened(), &mut identity, &config);
         newer.fold(
             Millis(10),
-            &frame(ServerFrame::hello_on_other_wire(0, 34, None)),
+            &frame(ServerFrame::hello_on_other_wire(0, 35, None)),
             &mut identity,
             &config,
         );
@@ -1851,9 +1851,25 @@ mod tests {
         assert_eq!(
             newer.wire_version(),
             Some(WireVersion::BoardNewer {
-                board: 34,
-                studio: 33
+                board: 35,
+                studio: 34
             })
+        );
+
+        // Main's wire 33 (PR #929) is older too: a board flashed from it
+        // reads as older LightPlayer firmware, like a fielded wire-32 one.
+        let mut older_33 = Evidence::default();
+        let mut identity = IdentityChain::default();
+        older_33.fold(Millis(0), &opened(), &mut identity, &config);
+        older_33.fold(
+            Millis(10),
+            &frame(ServerFrame::hello_on_other_wire(0, 33, None)),
+            &mut identity,
+            &config,
+        );
+        assert_eq!(
+            older_33.classification,
+            Classification::OlderLightPlayer { proto: Some(33) }
         );
     }
 
@@ -1864,7 +1880,7 @@ mod tests {
     fn a_hello_from_another_wire_names_its_board() {
         let config = studio_config();
         let board = || Some("seeed/xiao-esp32-c6".to_string());
-        for proto in [32, 34] {
+        for proto in [32, 33, 35] {
             let mut evidence = Evidence::default();
             let mut identity = IdentityChain::default();
             evidence.fold(Millis(0), &opened(), &mut identity, &config);
@@ -1899,8 +1915,8 @@ mod tests {
     fn a_boot_marker_older_than_studio_is_older_light_player_firmware() {
         const MARKER_30: &str = "[INIT] fw-esp32 initialized, starting server loop... \
                                  proto=30 commit=4caa5b658157 dirty=false";
-        const MARKER_33: &str = "[INIT] fw-esp32 initialized, starting server loop... \
-                                 proto=33 commit=4caa5b658157 dirty=false";
+        const MARKER_34: &str = "[INIT] fw-esp32 initialized, starting server loop... \
+                                 proto=34 commit=4caa5b658157 dirty=false";
         let config = studio_config();
 
         let mut older = Evidence::default();
@@ -1915,7 +1931,7 @@ mod tests {
         let mut current = Evidence::default();
         let mut identity = IdentityChain::default();
         current.fold(Millis(0), &opened(), &mut identity, &config);
-        current.fold(Millis(10), &line(MARKER_33), &mut identity, &config);
+        current.fold(Millis(10), &line(MARKER_34), &mut identity, &config);
         assert_eq!(current.classification, Classification::Unknown);
     }
 
@@ -1995,11 +2011,11 @@ mod tests {
         );
     }
 
-    /// Studio's own roster config: this build's wire proto (33, the hello's
+    /// Studio's own roster config: this build's wire proto (34, the hello's
     /// `fs` boot state), not the model's placeholder default.
     fn studio_config() -> RosterConfig {
         RosterConfig {
-            expected_proto: 33,
+            expected_proto: 34,
             ..RosterConfig::default()
         }
     }

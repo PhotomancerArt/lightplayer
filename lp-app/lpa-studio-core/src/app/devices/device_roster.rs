@@ -448,10 +448,14 @@ impl DeviceRoster {
                     .and_then(|prefixes| prefixes.get(&device.id))
                     .cloned()
                     .unwrap_or_else(|| {
-                        crate::OfferPath::board(&crate::BoardRef::for_identity(
-                            &device.identity,
-                            device.id,
-                        ))
+                        // No placement handed in: a board in a layout flow
+                        // has said its MAC (the inspection probes it), so
+                        // its ref is the controller's too. One that has not
+                        // is `new-1` here, a prefix only this read uses.
+                        crate::OfferPath::board(
+                            &crate::BoardRef::known(&device.identity)
+                                .unwrap_or(crate::BoardRef::New(1)),
+                        )
                     });
                 super::device_layout_view::device_layout_view(
                     &view,

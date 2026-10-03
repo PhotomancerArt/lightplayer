@@ -8,7 +8,9 @@
   `2026-09-24-ble-transport-studio.md` when this was written, since folded
   in): log in with an account default password; the device store written
   whole, never read
-- **Superseded by:** None
+- **Superseded by:** in part, `2026-10-02-two-passwords-open-by-default.md`
+  (a new board is open to anyone nearby; the panel is two passwords, Play
+  and Author; the Share sheet is retired; a full board makes room)
 
 ## Context
 

@@ -81,7 +81,7 @@ version-mismatch signal — no dual classifier, no format probing, no
 "legacy mode". This covers all pre-M2 firmware with zero compat surface.
 
 **Amended 2026-10-02 (G1-F1 of the C6 repartition):** a hello the host
-cannot DECODE is not an absent hello. Wire 33 made the hello's
+cannot DECODE is not an absent hello. Wire 34 (33 when this was written) made the hello's
 `hardware.fs` required, a wire-32 hello stopped decoding, and every
 fielded board read as pre-hello firmware. When the full decode fails, the
 host reads exactly one field — `msg.hello.proto`, which every hello since

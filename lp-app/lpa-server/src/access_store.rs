@@ -15,15 +15,16 @@
 //! and is logged — damage only ever takes access away.
 //!
 //! The device store itself: a **missing** store is
-//! [`DeviceAccessFile::fresh`] (Bluetooth on, locked, no keys), and a
-//! **damaged** one is [`DeviceAccessFile::locked`] (Bluetooth off).
+//! [`DeviceAccessFile::fresh`] (Bluetooth on, open to anyone nearby, no
+//! keys), and a **damaged** one is [`DeviceAccessFile::locked`] (Bluetooth
+//! off, open to nobody).
 
 extern crate alloc;
 
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
-use lpc_access::{DeviceAccessFile, ProjectAccessFile, SALT_BYTES, SecretEntry};
+use lpc_access::{DeviceAccessFile, OpenTo, ProjectAccessFile, SALT_BYTES, SecretEntry};
 use lpc_model::{AsLpPath, LpPathBuf};
 use lpc_wire::server::{AccessEntryInfo, ServerMsgBody};
 use lpfs::LpFs;
@@ -126,14 +127,14 @@ pub fn access_remove(fs: &dyn LpFs, salt: &[u8; SALT_BYTES]) -> ServerMsgBody {
     write_and_list(fs, &store)
 }
 
-/// `AccessSetSwitches`: set whichever switches are given and answer the
+/// `AccessSetSwitches`: set whichever settings are given and answer the
 /// list. `ble_enabled` applies at the next boot; the list reports the
-/// stored value.
+/// stored value. `open` applies at once.
 #[inline(never)]
 pub fn access_set_switches(
     fs: &dyn LpFs,
     ble_enabled: Option<bool>,
-    open: Option<bool>,
+    open: Option<OpenTo>,
 ) -> ServerMsgBody {
     let mut store = read_device_store(fs);
     if let Some(ble_enabled) = ble_enabled {
@@ -203,12 +204,12 @@ mod tests {
     use lpfs::LpFsMemory;
 
     #[test]
-    fn a_missing_store_is_fresh_with_bluetooth_on() {
+    fn a_missing_store_is_fresh_open_and_with_bluetooth_on() {
         let fs = LpFsMemory::new();
         let store = read_device_store(&fs);
         assert_eq!(store, DeviceAccessFile::fresh());
         assert!(store.ble_enabled);
-        assert!(!store.open);
+        assert_eq!(store.open, OpenTo::Edit);
     }
 
     /// G1 rehearsal (2026-10-03): the spare C6, held for the layout change
@@ -227,7 +228,7 @@ mod tests {
         let store = device_store_at_boot(&fs, lpc_wire::FsBootState::LegacyHeld);
         assert_eq!(store, DeviceAccessFile::locked());
         assert!(!store.ble_enabled);
-        assert!(!store.open);
+        assert_eq!(store.open, OpenTo::Nobody);
         assert!(store.secrets.is_empty());
         // Every other boot reads the store as before.
         for fs_state in [
@@ -253,6 +254,7 @@ mod tests {
         let store = read_device_store(&fs);
         assert_eq!(store, DeviceAccessFile::locked());
         assert!(!store.ble_enabled);
+        assert_eq!(store.open, OpenTo::Nobody);
     }
 
     #[test]

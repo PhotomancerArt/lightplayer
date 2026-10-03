@@ -262,7 +262,7 @@ mod tests {
         );
     }
 
-    /// G1-F1: a fielded C6's hello at wire 32 lacks wire 33's required
+    /// G1-F1: a fielded C6's hello at wire 32 lacks wire 34's required
     /// `hardware.fs`, so it does not decode — and it used to vanish as an
     /// anomaly, leaving a board that had just said hello to read as one
     /// that never did. Its version still reaches the fold.

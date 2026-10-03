@@ -62,7 +62,7 @@ pub(crate) fn card_tree(
     projects: &[UiPackageCard],
     examples: &[UiExampleCard],
 ) -> UiOfferTree {
-    let prefix = OfferPath::board(&BoardRef::New(card.id));
+    let prefix = OfferPath::board(&BoardRef::New(card.id.0 as u32));
     let facts = DeviceOfferFacts {
         prefix: prefix.clone(),
         face,
@@ -84,7 +84,7 @@ pub(crate) fn card_tree(
 pub(crate) fn pending_tree(pending: &[PendingLinkView]) -> UiOfferTree {
     let mut tree = UiOfferTree::new();
     for link in pending {
-        let prefix = OfferPath::board(&BoardRef::New(link.device));
+        let prefix = OfferPath::board(&BoardRef::New(link.device.0 as u32));
         for offer in pending_link_offers(link, &prefix) {
             tree.publish(offer);
         }

@@ -77,14 +77,28 @@ fn e4_the_agent_connects_flashes_a_blank_board_pushes_and_sees_it_run() {
         "the click settled the card"
     );
 
-    // 2. Flash the blank board, by its provisional ref and a board in args.
-    let flash = format!("devices/new-{}/flash", bench.view().pending[0].device.0);
+    // 2. Flash the blank board, by its provisional ref (`new-1`: the only
+    // unidentified board) and a board in args. The flash runs on after the
+    // turn ends, and its end resumes the agent with a note.
+    let flash = "devices/new-1/flash".to_string();
     seat.script(vec![
         act_turn("f1", &flash, &[("board", &board.board_id)]),
         say("Flashing LightPlayer onto it."),
     ]);
+    seat.script(vec![say("It is flashed and runs nothing yet.")]);
+    let before = seat.requests();
     seat.send(&mut bench, &tasks, "It's plugged in. Go ahead.");
-    let seen = seat.readout_of_request(seat.requests() - 2);
+    assert_eq!(
+        seat.requests(),
+        before + 3,
+        "the flash's run, then its note's"
+    );
+    let heard = seat.last_user_text(before + 2);
+    assert!(
+        heard.starts_with("[flashing \"") && heard.contains("\" finished: it runs LightPlayer"),
+        "the flash's end resumed the agent: {heard}"
+    );
+    let seen = seat.readout_of_request(before);
     assert!(
         seen.contains(&format!(
             "- {flash}: Flash firmware [choose a board in args]\n"
@@ -132,10 +146,24 @@ fn e4_the_agent_connects_flashes_a_blank_board_pushes_and_sees_it_run() {
         act_turn("p1", push, &[("source", &example)]),
         say("Sending the example to it."),
     ]);
+    seat.script(vec![say("It runs the example now.")]);
+    let before = seat.requests();
     seat.send(&mut bench, &tasks, "Now put something colourful on it.");
-    let seen = seat.readout_of_request(seat.requests() - 2);
+    assert_eq!(
+        seat.requests(),
+        before + 3,
+        "the push's run, then its note's"
+    );
     assert!(
-        seen.contains("; Ready; no project loaded\n") && seen.contains(&format!("- {push}: ")),
+        seat.last_user_text(before + 2)
+            .ends_with(" finished: it runs it now]"),
+        "{}",
+        seat.last_user_text(before + 2)
+    );
+    let seen = seat.readout_of_request(before);
+    assert!(
+        seen.contains("; Ready — no project on it; it runs nothing")
+            && seen.contains(&format!("- {push}: ")),
         "{seen}"
     );
     let results = seat.tool_results(&mut bench);
@@ -263,7 +291,7 @@ fn e4_the_agents_flash_over_firmware_is_a_card_and_flashes_nothing() {
             .first()
             .is_some_and(|pending| pending.needs_firmware())
     });
-    let flash = format!("devices/new-{}/flash", bench.view().pending[0].device.0);
+    let flash = "devices/new-1/flash".to_string();
     let board = c6_board_choice();
     let mut turn = act_turn("f1", &flash, &[("board", &board.board_id)]);
     // A second press in the same turn, while the card waits.

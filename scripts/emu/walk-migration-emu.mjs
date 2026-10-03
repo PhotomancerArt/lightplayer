@@ -746,7 +746,7 @@ async function main() {
         // The panel says why this browser is not on the list.
         await driver.click("Who has access").catch(() => {});
         await new Promise((r) => setTimeout(r, 1_000));
-        verdict.access.full = (await driver.evaluate(PAGE_TEXT)).includes("list is full");
+        verdict.access.full = (await driver.evaluate(PAGE_TEXT)).includes("device is full");
         await shot("access-panel");
       }
       // Judged after the files (below): a run that fails here still says

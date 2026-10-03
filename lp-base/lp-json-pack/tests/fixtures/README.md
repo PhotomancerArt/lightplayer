@@ -28,7 +28,14 @@ all read this one file.
   card 90 s, **Open in editor** 150 s, Fixture 90 s.
   `?wire=json` keeps the host from opting into packed, so every board→host
   message is JSON.
-- **Wire shapes:** proto 33. Every line re-parses into the wire types and
+- **Edited since, by hand (proto 34):** the three `accessList` replies'
+  `"open":false` became `"open":"nobody"` — the device store's `open` became
+  a word (`lpc_access::OpenTo`, main's wire 33, merged under this branch's
+  wire 34), and `nobody` is exactly what that board's `false` reads as. The
+  hellos still say `proto 33`, the number this branch's firmware carried
+  when it was cut; nothing else in the recording changed, and the byte
+  counts above are the original cut's.
+- **Wire shapes:** proto 34. Every line re-parses into the wire types and
   re-serializes byte for byte (`lpc-wire`'s
   `recorded_traffic_reserializes_byte_for_byte`).
 - **Cut with:** since proto 30 the tap holds lp-link frames, so it is first

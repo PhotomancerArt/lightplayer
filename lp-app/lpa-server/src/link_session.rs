@@ -1,6 +1,6 @@
 //! What the server remembers about one link.
 
-use lpc_access::Tier;
+use lpc_access::{OpenTo, Tier};
 use lpc_shared::transport::LinkTrust;
 
 /// Per-link server state, created the first time a link is seen and
@@ -29,18 +29,16 @@ impl LinkSession {
     /// The tier this link holds right now.
     ///
     /// - Trusted → edit, always (physical possession is the recovery path).
-    /// - Untrusted → what its login granted; failing that, play when the
-    ///   device is explicitly `open`; failing that, nothing.
+    /// - Untrusted → the higher of what its login granted and what the
+    ///   device is open to (a play login on a board open at edit holds
+    ///   edit); with neither, nothing.
     /// - Keyed → the same, where the grant is the tier of the key its
     ///   secure handshake matched (the anonymous key grants nothing).
     #[must_use]
-    pub fn effective_tier(&self, device_open: bool) -> Option<Tier> {
+    pub fn effective_tier(&self, device_open: OpenTo) -> Option<Tier> {
         match self.trust {
             LinkTrust::Trusted => Some(Tier::Edit),
-            LinkTrust::Untrusted | LinkTrust::Keyed => {
-                self.granted
-                    .or(if device_open { Some(Tier::Play) } else { None })
-            }
+            LinkTrust::Untrusted | LinkTrust::Keyed => self.granted.max(device_open.tier()),
         }
     }
 }
@@ -52,27 +50,35 @@ mod tests {
     #[test]
     fn trusted_links_hold_edit_whatever_else_is_true() {
         let mut session = LinkSession::new(LinkTrust::Trusted);
-        assert_eq!(session.effective_tier(false), Some(Tier::Edit));
+        assert_eq!(session.effective_tier(OpenTo::Nobody), Some(Tier::Edit));
         session.granted = Some(Tier::Play);
-        assert_eq!(session.effective_tier(true), Some(Tier::Edit));
+        assert_eq!(session.effective_tier(OpenTo::Play), Some(Tier::Edit));
     }
 
     #[test]
-    fn keyed_links_hold_their_handshake_grant_then_open_then_nothing() {
+    fn keyed_links_hold_the_higher_of_their_handshake_grant_and_open() {
         let mut session = LinkSession::new(LinkTrust::Keyed);
-        assert_eq!(session.effective_tier(false), None);
-        assert_eq!(session.effective_tier(true), Some(Tier::Play));
+        assert_eq!(session.effective_tier(OpenTo::Nobody), None);
+        assert_eq!(session.effective_tier(OpenTo::Play), Some(Tier::Play));
+        assert_eq!(session.effective_tier(OpenTo::Edit), Some(Tier::Edit));
         session.granted = Some(Tier::Play);
-        assert_eq!(session.effective_tier(false), Some(Tier::Play));
+        assert_eq!(session.effective_tier(OpenTo::Nobody), Some(Tier::Play));
     }
 
     #[test]
-    fn untrusted_links_hold_their_grant_then_open_then_nothing() {
+    fn untrusted_links_hold_the_higher_of_their_grant_and_open() {
         let mut session = LinkSession::new(LinkTrust::Untrusted);
-        assert_eq!(session.effective_tier(false), None);
-        assert_eq!(session.effective_tier(true), Some(Tier::Play));
+        assert_eq!(session.effective_tier(OpenTo::Nobody), None);
+        assert_eq!(session.effective_tier(OpenTo::Play), Some(Tier::Play));
+        assert_eq!(session.effective_tier(OpenTo::Edit), Some(Tier::Edit));
         session.granted = Some(Tier::Edit);
-        assert_eq!(session.effective_tier(false), Some(Tier::Edit));
-        assert_eq!(session.effective_tier(true), Some(Tier::Edit));
+        assert_eq!(session.effective_tier(OpenTo::Nobody), Some(Tier::Edit));
+        assert_eq!(session.effective_tier(OpenTo::Play), Some(Tier::Edit));
+        session.granted = Some(Tier::Play);
+        assert_eq!(
+            session.effective_tier(OpenTo::Edit),
+            Some(Tier::Edit),
+            "a play login on a board open at edit still authors"
+        );
     }
 }

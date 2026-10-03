@@ -27,7 +27,8 @@ use core::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 use lp_gfx_lpvm::TargetLpvmGraphics;
 use lpa_server::{LpGraphics, LpServer};
 use lpc_access::{
-    DeviceAccessFile, LoginOutcome, ProjectAccessFile, SecretEntry, SecretKind, Tier, link_psk,
+    DeviceAccessFile, LoginOutcome, OpenTo, ProjectAccessFile, SecretEntry, SecretKind, Tier,
+    link_psk,
 };
 use lpc_model::AsLpPath;
 use lpc_shared::output::MemoryOutputProvider;
@@ -46,7 +47,7 @@ use secure_link_transport::SecureLinkTransport;
 
 #[test]
 fn a_play_key_gets_play_and_is_refused_edit() {
-    let mut w = World::new(false, key(PLAY_SALT));
+    let mut w = World::new(OpenTo::Nobody, key(PLAY_SALT));
     w.run_until_up();
     assert_eq!(
         w.last_hello_auth(),
@@ -67,7 +68,7 @@ fn a_play_key_gets_play_and_is_refused_edit() {
 
 #[test]
 fn an_edit_key_gets_edit() {
-    let mut w = World::new(false, key(EDIT_SALT));
+    let mut w = World::new(OpenTo::Nobody, key(EDIT_SALT));
     w.run_until_up();
     assert_eq!(w.last_hello_auth().granted, Some(Tier::Edit));
     assert!(matches!(
@@ -78,7 +79,7 @@ fn an_edit_key_gets_edit() {
 
 #[test]
 fn the_anonymous_key_gets_what_open_gives() {
-    for (open, granted) in [(false, None), (true, Some(Tier::Play))] {
+    for (open, granted) in [(OpenTo::Nobody, None), (OpenTo::Play, Some(Tier::Play))] {
         let mut w = World::new(open, (KeyId::ANONYMOUS, Psk::ANONYMOUS));
         w.run_until_up();
         assert_eq!(
@@ -87,7 +88,7 @@ fn the_anonymous_key_gets_what_open_gives() {
                 required: true,
                 granted
             },
-            "open = {open}"
+            "open = {open:?}"
         );
         assert!(matches!(
             w.request(ClientRequest::AccessList),
@@ -98,7 +99,7 @@ fn the_anonymous_key_gets_what_open_gives() {
 
 #[test]
 fn a_key_in_a_loaded_projects_sidecar_grants_its_tier() {
-    let mut w = World::new(false, key(SIDECAR_SALT));
+    let mut w = World::new(OpenTo::Nobody, key(SIDECAR_SALT));
     w.write_sidecar_and_load_project();
     w.run_until_up();
     assert_eq!(w.last_hello_auth().granted, Some(Tier::Play));
@@ -108,7 +109,7 @@ fn a_key_in_a_loaded_projects_sidecar_grants_its_tier() {
 
 #[test]
 fn an_unknown_key_is_refused_unknown_and_costs_nothing() {
-    let mut w = World::new(false, (KeyId([0x77; 16]), Psk::new([1; 32])));
+    let mut w = World::new(OpenTo::Nobody, (KeyId([0x77; 16]), Psk::new([1; 32])));
     // Far more unknown attempts than the free ones: none is charged.
     for _ in 0..6 {
         w.run_for(100_000);
@@ -123,7 +124,7 @@ fn an_unknown_key_is_refused_unknown_and_costs_nothing() {
 
 #[test]
 fn a_wrong_key_is_refused_wrong_and_charged_to_the_backoff() {
-    let mut w = World::new(false, (KeyId(EDIT_SALT), Psk::new([0xEE; 32])));
+    let mut w = World::new(OpenTo::Nobody, (KeyId(EDIT_SALT), Psk::new([0xEE; 32])));
     for attempt in 1..=4 {
         w.run_for(100_000);
         assert_eq!(
@@ -155,7 +156,7 @@ fn a_wrong_key_is_refused_wrong_and_charged_to_the_backoff() {
 
 #[test]
 fn login_answer_is_refused_on_a_keyed_link_and_login_begin_takes_no_slot() {
-    let mut w = World::new(false, (KeyId::ANONYMOUS, Psk::ANONYMOUS));
+    let mut w = World::new(OpenTo::Nobody, (KeyId::ANONYMOUS, Psk::ANONYMOUS));
     w.run_until_up();
     // LoginBegin gives the offers (a typed-password client's salts) …
     let offers = match w.request(ClientRequest::LoginBegin) {
@@ -189,7 +190,7 @@ fn login_answer_is_refused_on_a_keyed_link_and_login_begin_takes_no_slot() {
 
 #[test]
 fn a_reset_re_handshakes_and_re_grants() {
-    let mut w = World::new(false, key(EDIT_SALT));
+    let mut w = World::new(OpenTo::Nobody, key(EDIT_SALT));
     w.run_until_up();
     let first = w.transport.link();
     w.port.restart(w.now);
@@ -207,7 +208,7 @@ fn a_reset_re_handshakes_and_re_grants() {
 
 #[test]
 fn a_key_removed_between_sessions_grants_nothing_on_the_next() {
-    let mut w = World::new(false, key(PLAY_SALT));
+    let mut w = World::new(OpenTo::Nobody, key(PLAY_SALT));
     w.run_until_up();
     assert_eq!(w.last_hello_auth().granted, Some(Tier::Play));
     // Over USB, the play key is removed.
@@ -257,7 +258,7 @@ struct World {
 }
 
 impl World {
-    fn new(open: bool, (key_id, psk): (KeyId, Psk)) -> Self {
+    fn new(open: OpenTo, (key_id, psk): (KeyId, Psk)) -> Self {
         rewind_entropy();
         let store = DeviceAccessFile {
             version: DeviceAccessFile::VERSION,

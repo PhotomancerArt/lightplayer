@@ -1,5 +1,6 @@
 //! Generated device passwords: `word-word-NN` ("maple-otter-42"), easy to
-//! say across a campfire and to type on a phone.
+//! say across a campfire and to type on a phone. The access panel's Play
+//! and Author boxes start with one; typing replaces it.
 //!
 //! Two words from a list of 128 and a number from 10 to 99: about 20
 //! bits. That is a play password for someone nearby, behind the board's
@@ -34,6 +35,20 @@ pub(crate) fn share_words(random: [u8; 4]) -> String {
     }
     let number = 10 + u16::from_le_bytes([random[2], random[3]]) % 90;
     format!("{first}-{second}-{number}")
+}
+
+/// Fresh words from the browser's crypto (host builds: fixed, for tests
+/// and stories).
+pub(crate) fn fresh_share_words() -> String {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let bytes = crate::library_host_opfs::random_bytes();
+        share_words([bytes[0], bytes[1], bytes[2], bytes[3]])
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        share_words([0, 1, 2, 3])
+    }
 }
 
 #[cfg(test)]
