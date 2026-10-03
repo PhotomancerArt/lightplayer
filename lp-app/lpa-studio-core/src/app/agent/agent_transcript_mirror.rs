@@ -10,6 +10,7 @@
 use lpa_agent::{AgentEvent, StopReason, TokenUsage};
 
 use crate::UiNoticeLevel;
+use crate::app::agent::ui_agent_edit_batch::UiAgentEditBatch;
 use crate::app::agent::ui_agent_view::{UiAgentStatus, UiAgentToolRow, UiAgentTurn, UiAgentUsage};
 
 /// Per-turn cap on retained thinking text (bytes). Thinking can run long;
@@ -87,10 +88,11 @@ impl AgentTranscriptMirror {
                     *done = true;
                 }
             }
-            AgentEvent::ToolUseStart { id, .. } => {
+            AgentEvent::ToolUseStart { id, name } => {
                 self.status = UiAgentStatus::RunningTool;
-                self.turns
-                    .push(UiAgentTurn::Tool(UiAgentToolRow::started(id)));
+                self.turns.push(UiAgentTurn::Tool(
+                    UiAgentToolRow::started(id).for_tool(name),
+                ));
             }
             // The raw input JSON stays in core/debug; the row renders the
             // executed summary instead.
@@ -137,6 +139,11 @@ impl AgentTranscriptMirror {
                         });
                     row.detail = serde_json::to_string_pretty(&summary_json)
                         .unwrap_or_else(|_| summary_json.to_string());
+                    row.tool = name.clone();
+                    row.edits = (name == "edit_project")
+                        .then(|| UiAgentEditBatch::from_summary(&summary_json))
+                        .flatten();
+                    row.headline = app_tool_headline(&name, &summary_json);
                 }
                 return Some(ExecutedTool {
                     id,
@@ -253,6 +260,40 @@ impl AgentTranscriptMirror {
     }
 }
 
+/// A finished app-agent `act` or `read`, in words: what was pressed (or
+/// handed to the user on a card, or refused), what was read. `None` for
+/// every other tool.
+fn app_tool_headline(name: &str, summary: &serde_json::Value) -> Option<String> {
+    let text = |key: &str| summary[key].as_str().unwrap_or("").to_string();
+    match name {
+        "act" => {
+            let action = text("action");
+            Some(if summary["done"].as_bool() == Some(true) {
+                format!("pressed {action}")
+            } else if let Some(card) = summary["card"].as_str() {
+                format!("asked you to click card {card}: {action}")
+            } else if let Some(reason) = summary["refused"].as_str() {
+                format!("{action} — refused: {reason}")
+            } else if summary["input_error"].as_bool() == Some(true) {
+                "invalid act input".to_string()
+            } else {
+                format!("{action} — failed")
+            })
+        }
+        "read" => {
+            if summary["input_error"].as_bool() == Some(true) {
+                return Some("invalid read input".to_string());
+            }
+            let what = format!("read {} {}", text("read"), text("name"));
+            Some(match summary["error"].as_str() {
+                Some(error) => format!("{} — {error}", what.trim_end()),
+                None => what.trim_end().to_string(),
+            })
+        }
+        _ => None,
+    }
+}
+
 /// The user-facing copy for a truncated run. `MaxTokens` gets the
 /// actionable phrasing (retry, or ask for something smaller); an unknown
 /// `Other` stop reason is surfaced verbatim.
@@ -287,4 +328,57 @@ fn cap_thinking_text(text: &mut String) {
         .find(|&index| text.is_char_boundary(index))
         .unwrap_or(text.len());
     text.replace_range(..boundary, "…");
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn an_edit_project_call_folds_into_an_edit_row() {
+        let mut mirror = AgentTranscriptMirror::default();
+        mirror.apply_event(AgentEvent::ToolUseStart {
+            id: "tu_1".into(),
+            name: "edit_project".into(),
+        });
+        let Some(UiAgentTurn::Tool(row)) = mirror.turns.last() else {
+            panic!("a tool row");
+        };
+        assert_eq!(row.summary_line(), "Editing the project…");
+        mirror.apply_event(AgentEvent::ToolExecuted {
+            id: "tu_1".into(),
+            name: "edit_project".into(),
+            summary_json: json!({
+                "note": "build it", "edits": 1, "applied": 1, "saved": true,
+                "rows": [{ "edit": "create_node", "target": "Playlist", "ok": true }]
+            }),
+        });
+        let Some(UiAgentTurn::Tool(row)) = mirror.turns.last() else {
+            panic!("a tool row");
+        };
+        assert_eq!(row.summary_line(), "added Playlist, saved");
+        assert_eq!(row.note.as_deref(), Some("build it"));
+    }
+
+    #[test]
+    fn act_and_read_calls_say_what_they_did() {
+        assert_eq!(
+            app_tool_headline("act", &json!({ "action": "project/save", "done": true })),
+            Some("pressed project/save".into())
+        );
+        assert_eq!(
+            app_tool_headline(
+                "act",
+                &json!({ "action": "devices/connect-usb", "card": "c1" })
+            ),
+            Some("asked you to click card c1: devices/connect-usb".into())
+        );
+        assert_eq!(
+            app_tool_headline("read", &json!({ "read": "node", "name": "fixture" })),
+            Some("read node fixture".into())
+        );
+        assert_eq!(app_tool_headline("iterate", &json!({})), None);
+    }
 }

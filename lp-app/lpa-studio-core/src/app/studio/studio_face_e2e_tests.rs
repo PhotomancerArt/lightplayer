@@ -359,6 +359,73 @@ fn agent_collapse_preserves_the_composer_draft_end_to_end() {
 }
 
 #[test]
+fn ask_agent_hands_a_request_to_the_shader_agent_without_sending_it() {
+    // The app chat's hand-off (M5 A6): the shader card publishes
+    // `project/<node>/ask-agent` with a `request` text parameter; pressing
+    // it with a request focuses the card, opens its agent section and puts
+    // the request in the composer (bumping the seed a mounted composer
+    // adopts) — and nothing is sent.
+    let server = Rc::new(RefCell::new(face_e2e_server()));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let controller = StudioController::connected_with_client_for_test(client);
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("connect emits a snapshot");
+    let shader = node_by_kind(&snapshot, "Shader");
+    let node = crate::ProjectNodeAddress::parse(&shader.header.path).expect("a node path");
+    let path = crate::OfferPath::project_node(&node).child(crate::ASK_AGENT_VERB);
+    let offer = snapshot
+        .offers
+        .get(&path)
+        .cloned()
+        .unwrap_or_else(|| panic!("the shader card offers {path}"));
+    assert!(
+        !offer.consequence().arms() && !offer.action.meta().needs_user(),
+        "routine: the app agent presses it freely"
+    );
+    assert_eq!(offer.params().len(), 1);
+    assert_eq!(offer.params()[0].name, crate::ASK_AGENT_REQUEST_PARAM);
+    assert!(
+        snapshot
+            .offers
+            .iter()
+            .filter(|offer| offer.path.last() == Some(crate::ASK_AGENT_VERB))
+            .count()
+            == 1,
+        "only the GLSL shader card has an agent to hand to"
+    );
+
+    let press = offer
+        .press(&crate::OfferArgs::new().with(crate::ASK_AGENT_REQUEST_PARAM, "make it slower"))
+        .expect("a request binds");
+    handle.tx.send(StudioCommand::Action(press));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("the hand-off emits a snapshot");
+    let shader = node_by_kind(&snapshot, "Shader");
+    assert!(!shader.card_ui.agent_collapsed, "the agent section opens");
+    assert_eq!(shader.card_ui.composer_draft, "make it slower");
+    assert_eq!(shader.card_ui.draft_seed, 1, "a mounted composer adopts it");
+    assert!(shader.focused, "the card is focused, so it reveals itself");
+    let agent = match shader.face.as_ref() {
+        Some(crate::UiNodeFace::Shader(face)) => face.agent.clone(),
+        _ => None,
+    };
+    if let Some(agent) = agent {
+        assert!(agent.turns.is_empty(), "nothing was sent");
+    }
+}
+
+#[test]
 fn playlist_face_derives_and_keeps_one_live_surface() {
     let server = Rc::new(RefCell::new(playlist_e2e_server(1)));
     let io = InProcessServerIo {

@@ -766,13 +766,63 @@ impl AgentController {
 /// Display-ready cost for a session's cumulative usage: what the provider
 /// reported charging when it reports (OpenRouter — exact, no `~`), else the
 /// price-table estimate; `None` without either, or before any usage.
+///
+/// Never "$0" for tokens that were spent: a reported total of zero beside
+/// real usage is a provider that did not price the call (an open-weights
+/// slug it reports nothing for), so it falls through to the table — and an
+/// unknown model there shows no cost at all rather than a made-up one.
 pub(crate) fn estimated_cost(usage: UiAgentUsage, rates: Option<AgentCostRates>) -> Option<String> {
-    if let Some(micro) = usage.cost_micro_usd {
-        return Some(format_cost_usd(micro as f64 / 1_000_000.0));
-    }
-    let rates = rates?;
     if usage.is_zero() {
         return None;
     }
-    Some(format!("~{}", format_cost_usd(rates.estimate_usd(usage))))
+    if let Some(micro) = usage.cost_micro_usd.filter(|micro| *micro > 0) {
+        return Some(format_cost_usd(micro as f64 / 1_000_000.0));
+    }
+    let usd = rates?.estimate_usd(usage);
+    (usd > 0.0).then(|| format!("~{}", format_cost_usd(usd)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn usage(cost_micro_usd: Option<u64>) -> UiAgentUsage {
+        UiAgentUsage {
+            input_tokens: 2_000,
+            output_tokens: 500,
+            cost_micro_usd,
+            ..UiAgentUsage::default()
+        }
+    }
+
+    #[test]
+    fn the_reported_cost_wins_and_is_exact() {
+        let rates = AgentCostRates::from_io(3.0, 15.0);
+        assert_eq!(
+            estimated_cost(usage(Some(4_200)), Some(rates)).as_deref(),
+            Some("$0.0042")
+        );
+    }
+
+    #[test]
+    fn spent_tokens_never_read_as_zero_dollars() {
+        // A reported zero beside real usage falls through to the table…
+        let rates = AgentCostRates::from_io(3.0, 15.0);
+        assert_eq!(
+            estimated_cost(usage(Some(0)), Some(rates)).as_deref(),
+            Some("~$0.01")
+        );
+        // …and an open-weights slug with no rates shows no cost at all.
+        assert_eq!(estimated_cost(usage(Some(0)), None), None);
+        assert_eq!(estimated_cost(usage(None), None), None);
+        assert_eq!(
+            estimated_cost(usage(None), Some(AgentCostRates::from_io(0.0, 0.0))),
+            None
+        );
+    }
+
+    #[test]
+    fn no_usage_has_no_cost() {
+        assert_eq!(estimated_cost(UiAgentUsage::default(), None), None);
+    }
 }

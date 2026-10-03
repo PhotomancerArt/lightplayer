@@ -6,7 +6,7 @@
 
 pub mod account;
 pub(crate) mod affordance;
-/// The app agent's cards, handed to the user in the chat.
+/// The agent chats' shared parts and the app chat's window.
 pub(crate) mod agent;
 #[cfg(feature = "stories")]
 pub(crate) mod board_diagram_stories;
