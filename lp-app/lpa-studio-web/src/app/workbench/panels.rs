@@ -26,8 +26,8 @@ use lpa_mapping_editor::{
     structural_child_count,
 };
 use lpa_studio_core::{
-    NodeId, PatchVerbKind, ProjectController, ProjectEditorOp, UiAction, UiArrangeTransform,
-    UiPatchCell, UiPatchInstance, UiPatchSurface, UiPatchSurfaceFixture, UiPatchSurfaceModule,
+    NodeId, ProjectController, ProjectEditorOp, UiAction, UiArrangeTransform, UiPatchCell,
+    UiPatchInstance, UiPatchSurface, UiPatchSurfaceFixture, UiPatchSurfaceModule,
     UiPatchSurfaceOutput, UiPatchTarget, UiSelection,
 };
 use lpc_mapping::{Map2dDoc, Map2dShape};
@@ -36,9 +36,9 @@ use crate::app::editor_shell::patching::{
     ArmedVerb, PatchingUi, complete_assign_on_object, is_armable,
 };
 use crate::app::patch::verb_ui::{
-    dispatch_assign, dispatch_verb, free_runs, instance_target, port_next_free, port_window,
-    segment_at_free_run,
+    free_runs, instance_target, port_next_free, press_assign, press_swap, segment_at_free_run,
 };
+use crate::core::use_offers;
 
 /// The editor-canvas object palette (OBJECT_COLORS), indexed per fixture:
 /// the one colour language — objects wear it everywhere, ports never do.
@@ -231,6 +231,9 @@ pub fn FixturesPanel(
     // in the Outputs dock); absent outside the workbench frame — panel
     // stories then simply have no arm to complete.
     let patching_ui = use_hook(try_consume_context::<PatchingUi>);
+    // Core's offer tree: a row that completes an armed assign presses the
+    // fixture's `assign` offer.
+    let offers = use_offers();
     let Some(surface) = surface else {
         return rsx! {
             p { class: "tw:mt-3 tw:px-2 tw:text-center tw:text-xs tw:text-dim-foreground",
@@ -285,7 +288,14 @@ pub fn FixturesPanel(
                 // multi-selection is not armable, and `single()` is how
                 // that rule reads here.
                 let single = selection.single().cloned();
-                complete_assign_on_object(&on_action, &surface, &single, patching_ui, &target);
+                complete_assign_on_object(
+                    &on_action,
+                    &offers.peek(),
+                    &surface,
+                    &single,
+                    patching_ui,
+                    &target,
+                );
             }
             select(&on_action, Some(target));
         })
@@ -757,6 +767,8 @@ pub fn OutputsPanel(
     // absent when the panel renders outside the workbench frame (its own
     // stories), which simply means there is no arm to complete.
     let patching_ui = use_hook(try_consume_context::<PatchingUi>);
+    // Core's offer tree: the arm's second click presses its offer.
+    let offers = use_offers();
     let Some(surface) = surface else {
         return rsx! {
             p { class: "tw:mt-3 tw:px-2 tw:text-center tw:text-xs tw:text-dim-foreground",
@@ -808,17 +820,21 @@ pub fn OutputsPanel(
                 let mut segment_size = ui.segment_size;
                 let current = armed.peek().clone();
                 match current {
-                    // An armed swap completes on the next port click.
-                    Some(ArmedVerb::Swap(a)) => {
+                    // An armed swap completes on the next port click: the
+                    // armed output's `swap-ports`, pressed with both ports.
+                    Some(ArmedVerb::Swap {
+                        output: armed_output,
+                        port: armed_port,
+                    }) => {
                         armed.set(None);
-                        if let Some(b) = port_window(output, port_key) {
-                            dispatch_verb(
-                                &on_action,
-                                &surface,
-                                &selection,
-                                PatchVerbKind::SwapPorts { a, b },
-                            );
-                        }
+                        press_swap(
+                            &on_action,
+                            &offers.peek(),
+                            &surface,
+                            (armed_output, armed_port),
+                            output,
+                            port_key,
+                        );
                         return;
                     }
                     // An armed assign over a fixture-side selection: the
@@ -845,7 +861,14 @@ pub fn OutputsPanel(
                                 &surface, target,
                             );
                             if let Some(lamp) = lamp
-                                && dispatch_assign(&on_action, &surface, &subject, output, lamp)
+                                && press_assign(
+                                    &on_action,
+                                    &offers.peek(),
+                                    &surface,
+                                    &subject,
+                                    output,
+                                    lamp,
+                                )
                             {
                                 // The override was fine-tuning for the
                                 // segment the write just spent: the next

@@ -16,7 +16,6 @@
 1 lp-app/lpa-studio-web/src/app/node/node_detail_popover.rs
 11 lp-app/lpa-studio-web/src/app/node/slot_edit_actions.rs
 1 lp-app/lpa-studio-web/src/app/patch/patch_panel.rs
-2 lp-app/lpa-studio-web/src/app/patch/verb_ui.rs
 1 lp-app/lpa-studio-web/src/app/project/mismatch_page.rs
 1 lp-app/lpa-studio-web/src/app/share/relationship.rs
 4 lp-app/lpa-studio-web/src/app/share/visitor_session.rs

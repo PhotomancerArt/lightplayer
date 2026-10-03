@@ -32,7 +32,10 @@ impl UiOfferFocus {
         if let Some(node) = &self.node
             && path.starts_with(node)
         {
-            return if path.len() == node.len() + 1 {
+            // A verb the node groups under a namespace of its own (a
+            // fixture's `patch/assign`) is still its own; only a verb past
+            // another node segment is a child's.
+            return if path.is_own_verb_of(node) {
                 OfferNearness::Own
             } else {
                 OfferNearness::Under
@@ -49,7 +52,8 @@ impl UiOfferFocus {
 /// order is the ranking).
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum OfferNearness {
-    /// A verb of the focused node itself.
+    /// A verb of the focused node itself, grouped ones included
+    /// (`project/<fixture>/patch/reverse`).
     Own,
     /// A verb of a node inside the focused one.
     Under,
@@ -75,6 +79,11 @@ mod tests {
 
         let at = |path: &str| focus.nearness(&OfferPath::parse(path).unwrap());
         assert_eq!(at("project/demo.module/revert"), OfferNearness::Own);
+        assert_eq!(
+            at("project/demo.module/patch/reverse"),
+            OfferNearness::Own,
+            "a verb the node groups is still its own"
+        );
         assert_eq!(
             at(&OfferPath::project_node(&shader).child("remove").to_string()),
             OfferNearness::Under
