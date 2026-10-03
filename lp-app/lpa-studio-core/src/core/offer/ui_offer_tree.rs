@@ -2,6 +2,8 @@
 
 use std::collections::BTreeMap;
 
+use lpa_devices::DeviceId;
+
 use crate::{OfferPath, UiOffer};
 
 /// Every offer the view publishes, addressed by path, in **publish order**.
@@ -10,10 +12,17 @@ use crate::{OfferPath, UiOffer};
 /// surface draws its verbs in that order (Save before Revert), and the
 /// agent's readout lists them the same way. A path is published at most
 /// once per build; publishing one twice is a bug in the publisher.
+///
+/// The tree also knows where each device's verbs live
+/// ([`Self::device_prefix`]): a device card is handed a roster handle, and
+/// its verbs are at `devices/<board ref>` — a ref only core can work out
+/// (the MAC, the kind its endpoint names, and the de-duplication when two
+/// entries answer to one MAC).
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct UiOfferTree {
     offers: Vec<UiOffer>,
     index: BTreeMap<OfferPath, usize>,
+    devices: BTreeMap<DeviceId, OfferPath>,
 }
 
 impl UiOfferTree {
@@ -47,6 +56,18 @@ impl UiOfferTree {
         for offer in other.offers {
             self.publish(offer);
         }
+        self.devices.extend(other.devices);
+    }
+
+    /// Say that `device`'s verbs live under `prefix` (`devices/<board ref>`).
+    pub fn place_device(&mut self, device: DeviceId, prefix: OfferPath) {
+        self.devices.insert(device, prefix);
+    }
+
+    /// Where `device`'s verbs live, when the roster has it: the prefix a
+    /// card hands [`Self::verbs_of`].
+    pub fn device_prefix(&self, device: DeviceId) -> Option<&OfferPath> {
+        self.devices.get(&device)
     }
 
     /// The offer at `path`, if one is published.
@@ -138,6 +159,26 @@ mod tests {
         tree.append(side);
 
         assert_eq!(paths(tree.iter()), ["project/save", "devices/connect-usb"]);
+    }
+
+    #[test]
+    fn a_device_is_found_by_its_handle() {
+        let mut tree = UiOfferTree::new();
+        let prefix = OfferPath::board(&crate::BoardRef::New(DeviceId(4)));
+        tree.publish(offer(prefix.clone().child("forget")));
+        tree.place_device(DeviceId(4), prefix.clone());
+
+        let found = tree.device_prefix(DeviceId(4)).expect("placed");
+        assert_eq!(paths(tree.verbs_of(found)), ["devices/new-4/forget"]);
+        assert_eq!(tree.device_prefix(DeviceId(5)), None);
+
+        let mut other = UiOfferTree::new();
+        other.append(tree);
+        assert_eq!(
+            other.device_prefix(DeviceId(4)),
+            Some(&prefix),
+            "append keeps it"
+        );
     }
 
     #[test]

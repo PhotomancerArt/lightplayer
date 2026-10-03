@@ -1084,6 +1084,46 @@ async fn a_port_open_across_a_replug_reopens_on_the_new_generation() {
     shim_off().await;
 }
 
+/// An open that RACES the connect-edge sweep still opens the new generation.
+///
+/// Nothing orders a link's `Open` after the sweep: the model's timers (the
+/// flash ladder's reopen knocks, an eviction's reopen) queue opens on the
+/// link's own future, while the sweep that adopts a re-enumerated port waits
+/// its turn in the studio actor's command queue. So `openPort` adopts first,
+/// the way `getPort` does; before it did, this open met the dead object and
+/// failed with `NetworkError` — the same words as a port held elsewhere.
+#[wasm_bindgen_test]
+async fn an_open_that_races_the_connect_sweep_opens_the_new_generation() {
+    shim_over(&["c6-a"]).await;
+    let board = board_ids().await.first().cloned().expect("a board");
+    let id = granted_sessions().await[0].id;
+    let dead = live_port(&board).await;
+
+    JsFuture::from(js_replug_over_the_cable(&board))
+        .await
+        .expect("a replug over the cable");
+    let live = live_port(&board).await;
+    assert!(!Object::is(&live, &dead), "the port object did not move");
+
+    // No `getGrantedPorts` here: the sweep has not run yet.
+    open_port(id, false)
+        .await
+        .map_err(|error| error_text(&error))
+        .expect("openPort before the connect sweep adopted the new generation");
+    assert!(
+        !js_port_readable_is_null(&live),
+        "openPort did not open the live generation"
+    );
+    let after = granted_sessions().await;
+    assert_eq!(ids(&after), vec![id], "the session survived the replug");
+    log("an open racing the connect sweep opened the new generation");
+
+    JsFuture::from(js_release_port(id))
+        .await
+        .expect("releasePort");
+    shim_off().await;
+}
+
 /// The bytes go both ways through the real controller: `writeBytes` reaches
 /// the board's byte channel unchanged, and what the board says comes back as
 /// lines.

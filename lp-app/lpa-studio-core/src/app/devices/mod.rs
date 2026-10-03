@@ -38,7 +38,10 @@
 
 /// The Bluetooth transport (M5): a control-only link, host-tested through
 /// its source seam.
+pub mod add_device_offers;
 pub mod ble_transport;
+pub mod bluetooth_reach;
+pub mod board_ref;
 /// Bluetooth devices backed by the page's Web Bluetooth. wasm-only, and only
 /// when the studio is built with the provider that owns them.
 #[cfg(all(feature = "browser-ble", target_arch = "wasm32"))]
@@ -63,17 +66,22 @@ pub mod device_effects;
 pub mod device_feed_op;
 pub mod device_firmware_face;
 pub mod device_flash;
+pub mod device_flash_offer;
 pub mod device_frame_feed;
 pub mod device_frame_snapshot;
 pub mod device_identity;
 pub mod device_link_counter_rows;
+pub mod device_offers;
 pub mod device_push;
+pub mod device_push_offer;
 pub mod device_records;
 pub mod device_roster;
 pub mod device_transport;
 pub mod devices_op;
 pub mod emu_transport;
 pub mod link_health;
+pub mod new_sim_offer;
+pub mod pending_link_offers;
 pub mod runtime_backing;
 pub mod runtime_band;
 pub mod shared_link_client_io;
@@ -83,7 +91,10 @@ pub mod sim_transport;
 pub mod target_offer;
 pub mod wire_conversation;
 
+pub use add_device_offers::{USB_NEEDS_WEB_SERIAL, add_device_offers};
 pub use ble_transport::{BleDeviceTransport, BleLinkSource};
+pub use bluetooth_reach::BluetoothReach;
+pub use board_ref::{BoardRef, BoardRefError};
 #[cfg(all(feature = "browser-ble", target_arch = "wasm32"))]
 pub use browser_ble_source::BrowserBleSource;
 #[cfg(all(feature = "emulator-tab", target_arch = "wasm32"))]
@@ -113,6 +124,10 @@ pub use device_flash::{
     derive_flash_name, firmware_verb, flash_offer, flash_offer_for, reflash_choice,
     taken_device_titles,
 };
+pub use device_flash_offer::{
+    FLASH_ALL_BOARDS_PARAM, FLASH_BOARD_PARAM, FLASH_NAME_PARAM, flash_consequence,
+    flash_device_offer, flash_pending_offer, update_firmware_offer,
+};
 pub use device_frame_feed::{DEVICE_FEED_PARK_AFTER_FAILURES, DeviceFrameFeed, DeviceFrameFeeds};
 pub use device_frame_snapshot::DEVICE_FRAME_SNAPSHOT_INTERVAL_SECS;
 pub use device_identity::{
@@ -120,9 +135,15 @@ pub use device_identity::{
     device_identity_line, pending_identity_rows,
 };
 pub use device_link_counter_rows::{LINK_COUNTERS_CAPTION, UiLinkCounterRow, link_counter_rows};
+pub use device_offers::{
+    AUTOCONNECT_ENABLED_PARAM, DeviceOfferFacts, RENAME_NAME_PARAM, device_offers, escape_verb,
+};
 pub use device_push::{
     DevicePushOp, PushOffer, PushSource, PushSourceChoice, PushSourceGroup,
     first_bundled_example_id, push_offer,
+};
+pub use device_push_offer::{
+    PUSH_NAME_BOARD_PARAM, PUSH_NAME_PARAM, PUSH_SOURCE_PARAM, PushOver, push_device_offer,
 };
 pub use device_records::{
     EMU_TRANSPORT, SIM_TRANSPORT, auto_record_name, record_from_registry_row,
@@ -140,6 +161,8 @@ pub use emu_transport::{
     EmuBacking, EmuDeviceTransport, EmuLinkSource, EmuRuntimeControl, EmuSession,
 };
 pub use link_health::{LinkHealth, LinkHealthMap, LinkTrouble};
+pub use new_sim_offer::{NEW_SIM_BACKING_PARAM, NEW_SIM_BOARD_PARAM, new_sim_offer};
+pub use pending_link_offers::pending_link_offers;
 pub use runtime_backing::{Backing, EMULATED_TARGETS, backing_for, emu_offered_for};
 pub use runtime_band::{UiRuntimeBand, speed_word};
 pub use shared_link_client_io::{ConversationInbox, SharedLinkClientIo};

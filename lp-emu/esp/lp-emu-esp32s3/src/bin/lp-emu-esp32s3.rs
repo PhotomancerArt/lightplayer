@@ -478,9 +478,11 @@ fn print_refill_lag(machine: &Machine) {
 /// deterministic.
 ///
 /// `idle` counts the deterministic idle skips. `fence` is the shared bus's
-/// `missing_fence_reports`: guest code executed from bytes the guest itself
-/// wrote without publishing them — **reported, never gated**, and on this
-/// chip it is the counter the JIT path will move.
+/// `missing_fence_reports`, and on this chip it is **always zero**: the S3
+/// publishes code by store, not by `fence.i` — the JIT writes SRAM1 through
+/// the D-bus view and runs it through the I-bus alias with no barrier — so
+/// the machine never arms that RV32 checker (`SocBus::set_fence_contract`).
+/// The column stays so the `run:` line keeps one shape across the three chips.
 fn print_run_summary(machine: &Machine) {
     let bus = machine.bus();
     let per_core: Vec<String> = (0..CORES)

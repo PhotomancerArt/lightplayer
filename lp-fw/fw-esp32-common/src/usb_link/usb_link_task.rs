@@ -18,7 +18,18 @@
 //!    only overdue if its ACK has not *arrived*, not if the ACK waits unread
 //!    in the FIFO while this task writes (that was every spurious resend on
 //!    the emulator's clean link);
-//! 4. sleep until the link's next timer, input, or the transport's doorbell.
+//! 4. sleep until the link's next timer, input, or the doorbell — rung by the
+//!    transport when it queues a reply and by the log ring when a record
+//!    lands ([`crate::log_ring_logger::ring_on_record`]). Nothing wakes the
+//!    task on a cadence of its own: with nothing to do it sleeps until the
+//!    link's own timers (SYN every 100 ms without a host, keepalive every
+//!    250 ms with one) or [`IDLE_BACKSTOP_US`].
+//!
+//! Waking on events and not on a timer matters once the task has a thread of
+//! its own (the C6's `io-thread`): every pass then preempts the render, and
+//! silicon charges ~300 µs for a pass that finds nothing to do. A 10 ms
+//! cadence cost ~10% of a project's frame rate on the C6
+//! (`lp2025/2026-10-01-1200-io-thread-spike`).
 //!
 //! A write the host does not drain in time is abandoned: the link resends
 //! what matters. There is no "host not draining" latch any more (D8): with
@@ -41,17 +52,23 @@ use super::usb_link_shared::UsbLinkShared;
 pub const WRITE_TIMEOUT: Duration = Duration::from_millis(250);
 /// Frames written per pass before the task looks at the RX side again.
 pub const FRAMES_PER_PASS: usize = 8;
-/// The longest the task sleeps with nothing to do (the log ring's cadence).
-pub const IDLE_CAP_US: Micros = 10_000;
+/// The longest the task sleeps with nothing to do. A backstop only: log
+/// records and queued replies ring the doorbell, and the link's own timers
+/// come sooner whenever a host is there or being looked for.
+pub const IDLE_BACKSTOP_US: Micros = 250_000;
 /// Log records moved onto the log channel per pass. Each is popped under its
 /// own short critical section (see [`crate::log_ring_logger::pump`]).
 const LOG_RECORDS_PER_PASS: usize = 4;
 /// Shortest spacing of two SOF samples (see
 /// [`crate::serial::usb_connection::DISCONNECT_THRESHOLD`]).
 const SOF_SAMPLE_US: Micros = 2_000;
-/// The largest frame the link writes: a 256-byte payload with its header and
-/// CRC, COBS-FF-encoded and delimited, fits with room to spare.
-const FRAME_BYTES: usize = 512;
+/// The largest frame the link writes, delimiters included: a 256-byte
+/// payload (`LinkConfig::usb()`'s `max_payload`), its header and CRC-32C,
+/// COBS-FF-encoded with every byte escaped (533 B; a typical frame is much
+/// smaller). Mirrors the classic's `uart_link_pipes::MAX_FRAME_BYTES`: a
+/// hard-coded 512 here used to sit below this worst case, so a frame that
+/// long would have been discarded and resent forever instead of written.
+const FRAME_BYTES: usize = lp_link::frame::max_encoded_len(256, lp_link::CrcKind::Crc32c);
 
 /// The chip facts the loop needs, supplied by the chip crate (no esp-hal in
 /// this crate — ADR 2026-07-29-per-chip-fw-toolchains).
@@ -100,6 +117,7 @@ pub async fn run_usb_link<R: Read, W: Write, C: UsbLinkChip>(
     let mut enumerated = true;
     let mut sof_sampled_at: Micros = 0;
     let mut drain_asked_at: Option<Micros> = None;
+    crate::log_ring_logger::ring_on_record(shared.doorbell_signal());
 
     loop {
         chip.note_io_alive();
@@ -113,9 +131,10 @@ pub async fn run_usb_link<R: Read, W: Write, C: UsbLinkChip>(
         drain_rx(&mut rx, shared, &mut buf).await;
 
         let now = now_us();
-        shared.with_link(|link| {
-            crate::log_ring_logger::pump(link, now, LOG_RECORDS_PER_PASS);
+        let logs_moved = shared.with_link(|link| {
+            let moved = crate::log_ring_logger::pump(link, now, LOG_RECORDS_PER_PASS);
             usb_link_counters::note_stalled(link.is_stalled(now));
+            moved
         });
 
         let mut more = false;
@@ -169,10 +188,14 @@ pub async fn run_usb_link<R: Read, W: Write, C: UsbLinkChip>(
             }
         }
 
-        let wake = if more {
+        // A burst longer than one pass's records: go round again while the
+        // link keeps taking them. A pass that moved none waits for the event
+        // that makes room (an ACK arriving, a timer) or a new record.
+        let log_backlog = logs_moved > 0 && crate::log_ring_logger::has_records();
+        let wake = if more || log_backlog {
             now_us()
         } else {
-            wake_at(shared, IDLE_CAP_US)
+            wake_at(shared, IDLE_BACKSTOP_US)
         };
         match select3(
             rx.read(&mut buf),
@@ -225,8 +248,8 @@ async fn drain_rx<R: Read>(rx: &mut R, shared: &UsbLinkShared, buf: &mut [u8; 64
     }
 }
 
-/// When the link next needs a pass for a timer, capped so the log ring is
-/// pumped at least every `cap_us`.
+/// When the link next needs a pass for a timer, and at the latest `cap_us`
+/// from now.
 fn wake_at(shared: &UsbLinkShared, cap_us: Micros) -> Micros {
     let now = now_us();
     shared.with_link(|link| {
@@ -252,6 +275,71 @@ fn note_write_timeout<C: UsbLinkChip>(shared: &UsbLinkShared, chip: &C) {
              in_ep_free={in_ep_free}",
             usb_link_counters::edge().write_timeouts_live,
             Instant::now().as_millis(),
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::vec::Vec;
+
+    use lp_link::frame::{self, FrameKind, Header};
+    use lp_link::{CH_PROTO, CrcKind, LinkConfig};
+
+    use super::FRAME_BYTES;
+
+    /// `FRAME_BYTES`'s assumptions about the USB preset still hold — the
+    /// same check the classic's `uart_link_pipes` makes of its own constant.
+    #[test]
+    fn frame_bytes_assumes_the_usb_preset() {
+        let cfg = LinkConfig::usb();
+        assert_eq!(cfg.max_payload, 256, "FRAME_BYTES assumes it");
+        assert_eq!(cfg.crc, CrcKind::Crc32c, "FRAME_BYTES assumes it");
+        assert_eq!(
+            FRAME_BYTES, 533,
+            "the worst-case encoded frame at this config"
+        );
+    }
+
+    /// A worst-case frame — the largest payload, every byte needing a COBS-FF
+    /// escape — still fits the stack buffer the link task writes into. Before
+    /// `FRAME_BYTES` was derived from [`frame::max_encoded_len`], the
+    /// hard-coded `512` was 21 bytes short of this (533 B), so a frame this
+    /// long would have been silently discarded every pass.
+    #[test]
+    fn a_worst_case_frame_fits_frame_bytes() {
+        let header = Header {
+            kind: FrameKind::Data,
+            fin: true,
+            first: true,
+            chan: CH_PROTO,
+            seq: 0xFF,
+            ack: 0xFF,
+            win: 0xFF,
+        };
+        // Every payload byte is 0xFF: COBS-FF must escape all of them, the
+        // worst case the encoding bound accounts for.
+        let body = alloc::vec![0xFFu8; LinkConfig::usb().max_payload as usize];
+        let mut raw = Vec::new();
+        let mut out = Vec::new();
+        frame::encode(
+            CrcKind::Crc32c,
+            0xFFFF_FFFF,
+            &header,
+            &body,
+            &mut raw,
+            &mut out,
+        );
+        assert!(
+            out.len() <= FRAME_BYTES,
+            "worst-case frame encoded to {} B, FRAME_BYTES is {FRAME_BYTES}",
+            out.len()
+        );
+        // The hard-coded 512 this replaced was below even this all-0xFF
+        // encoding, so it would have discarded a frame this long forever.
+        assert!(
+            out.len() > 512,
+            "sanity: this encoding should exceed the old hard-coded bound"
         );
     }
 }

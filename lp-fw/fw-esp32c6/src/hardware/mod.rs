@@ -14,6 +14,16 @@ pub mod button;
 // Power-off belongs to the product server loop only.
 #[cfg(all(not(fw_harness), feature = "server"))]
 pub mod power;
+// The radio's driver config is shared by every bring-up that mirrors the
+// product's: the driver itself, the stress builds, the desk ESP-NOW meter and
+// the BLE coexistence harness.
+#[cfg(any(
+    all(feature = "radio", not(fw_harness)),
+    feature = "test_espnow",
+    feature = "test_espnow_broadcast",
+    feature = "test_ble_coex"
+))]
+pub mod espnow_controller_config;
 // The radio *driver* is compiled out of P4 stress builds: there the radio
 // stack belongs to the load generators in `stress.rs` instead.
 #[cfg(all(

@@ -227,6 +227,7 @@ fn run_for(m: &mut Machine, cycles: u64) {
     );
 }
 
+#[cfg(feature = "jit")]
 fn entries_in(report: &str) -> u64 {
     report
         .split_once(": ")

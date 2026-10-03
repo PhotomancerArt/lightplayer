@@ -578,7 +578,9 @@ pub fn SessionDevicePanel(
     // to change (the sim is the sim). The same section the device card's
     // header menu holds, because this panel is the other place the name
     // is shown.
-    let rename = session.device.zip(on_action);
+    // `devices/<board>/rename`, found by the device's roster handle.
+    let verbs = crate::core::use_device_verbs(session.device)();
+    let rename = crate::core::verb_named(&verbs, "rename").zip(on_action);
     rsx! {
         section { class: "tw:grid tw:gap-0.5 tw:bg-card-muted tw:px-3 tw:py-2",
             div { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-2",
@@ -599,8 +601,8 @@ pub fn SessionDevicePanel(
                 }
             }
         }
-        if let Some((device, on_action)) = rename {
-            DeviceRenameSection { device, title: session.name.clone(), on_action }
+        if let Some((offer, on_action)) = rename {
+            DeviceRenameSection { offer, title: session.name.clone(), on_action }
         }
         section { class: "tw:border-t tw:border-border-muted tw:px-3 tw:py-1.5",
             p { class: "tw:m-0 tw:text-[10px] tw:italic tw:leading-snug tw:text-dim-foreground",

@@ -1049,6 +1049,56 @@ mod tests {
         assert_eq!(board.granted(), Some(Tier::Edit));
     }
 
+    /// Bluefy, 2026-10-02: every silent reconnect after the first unlock
+    /// came up locked, the board dropped it at its unlock deadline, and the
+    /// phone showed a native "disconnected" alert per lap. Each new link is
+    /// unlocked with the browser's key again — one answer, no sheet.
+    #[test]
+    fn every_silent_reconnect_is_unlocked_again_with_the_browser_key() {
+        let access = controller();
+        let browser = access.browser_key().unwrap().installable();
+        let board = FakeBoard::with_entries(vec![browser.entry(1)]);
+        let mut session = unlock(&access, &board, &[]);
+        let held = access.held();
+        for link in 2..=4 {
+            board.drop_link();
+            session.observe(None);
+            session.observe(Some(window(link)));
+            let mut client = board.client();
+            let step = session.next_step(Millis(5), &held, &[]).unwrap();
+            assert_eq!(step, AccessStep::Check(window(link)));
+            session.started(&step);
+            let checked = block_on(run_step(
+                &mut client,
+                DeviceId(1),
+                step,
+                &access.keys(),
+                instant_timer(),
+            ));
+            let AccessCommand::Checked {
+                result: Ok((required, granted)),
+                ..
+            } = checked
+            else {
+                panic!("{checked:?}")
+            };
+            assert_eq!(
+                (required, granted),
+                (true, None),
+                "a new link holds nothing"
+            );
+            session.checked(window(link), required, granted, true);
+            let step = session
+                .next_step(Millis(6), &held, &[])
+                .expect("the new link is unlocked, not left to time out");
+            run_login_on(&access, &mut client, &mut session, step, Millis(7));
+            assert_eq!(board.granted(), Some(Tier::Edit), "link {link}");
+            assert_eq!(session.prompt, None, "link {link}: no sheet");
+        }
+        assert_eq!(board.answers(), 4, "one answer per link");
+        assert_eq!(board.failures(), 0);
+    }
+
     #[test]
     fn the_account_key_unlocks_a_board_this_browser_never_touched() {
         let mut access = controller();
