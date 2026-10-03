@@ -57,6 +57,92 @@ pub enum LinkSubcommand {
     ///       --request reboot --request hello --seconds 20
     #[command(verbatim_doc_comment)]
     Capture(CaptureArgs),
+    /// Measure how promptly a rendering board answers: request round trips,
+    /// the link's own round trips (send → ACK), transfer rates both ways,
+    /// and the idle frame rate.
+    ///
+    /// Phases: warm-up → idle (fps from heartbeats) → transfers (a file
+    /// written and read back; `WriteChunk`s the board refuses without
+    /// touching flash) → requests (`ListLoadedProjects`, one at a time, each
+    /// after a random pause, from a fixed board time) → tail. A summary on
+    /// stderr; `--json` holds every sample.
+    ///
+    /// Targets: a serial device (wall-clock time; the board renders whatever
+    /// project it loads at boot), or `emu:<fw-esp32c6 ELF>` (the C6 in this
+    /// process, EMULATED time, with `--project` — the PLAYFUL choker by
+    /// default — deployed first; the report adds the WS281x frames decoded
+    /// off the pads). Compare emulated runs in frames, never against
+    /// silicon in ms.
+    ///
+    /// Examples:
+    ///
+    ///   lp-cli link rtt /dev/cu.usbmodem2101 --json silicon.json
+    ///
+    ///   lp-cli link rtt emu:target/riscv32imac-unknown-none-elf/release-esp32/fw-esp32c6 \
+    ///       --requests-at-s 40 --json emu.json --console emu.console.txt
+    #[command(verbatim_doc_comment)]
+    Rtt(RttArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct RttArgs {
+    /// A serial device, or `emu:<fw-esp32c6 ELF>`.
+    pub target: String,
+    /// Write the full report (every sample) here, as JSON.
+    #[arg(long)]
+    pub json: Option<PathBuf>,
+    /// Write the board's whole console here.
+    #[arg(long)]
+    pub console: Option<PathBuf>,
+    /// Requests to time.
+    #[arg(long, default_value_t = 150)]
+    pub count: usize,
+    /// Largest random pause before each request, ms.
+    #[arg(long, default_value_t = 40)]
+    pub max_gap_ms: u64,
+    /// Seed for the pauses, so two runs pause alike.
+    #[arg(long, default_value_t = 7)]
+    pub seed: u64,
+    /// Reads of the file (the board → host rate).
+    #[arg(long, default_value_t = 10)]
+    pub reads: usize,
+    /// Size of the file written and read back, bytes.
+    #[arg(long, default_value_t = 10240)]
+    pub read_bytes: usize,
+    /// Refused chunk writes (the host → board rate).
+    #[arg(long, default_value_t = 10)]
+    pub writes: usize,
+    /// Size of each refused chunk, bytes.
+    #[arg(long, default_value_t = 8192)]
+    pub write_bytes: usize,
+    /// Seconds before anything is measured.
+    #[arg(long, default_value_t = 6.0)]
+    pub warmup_s: f64,
+    /// Seconds of render alone, for the idle frame rate (≥ 10 for two
+    /// heartbeats).
+    #[arg(long, default_value_t = 20.0)]
+    pub idle_s: f64,
+    /// Board time to start the transfers at, seconds: since power-on on
+    /// `emu:`, the board's uptime (from its heartbeats) on a serial device.
+    /// 0 = right after the idle phase.
+    #[arg(long, default_value_t = 0.0)]
+    pub transfers_at_s: f64,
+    /// Board time to start the requests at, as `--transfers-at-s`. 0 = right
+    /// after the transfers.
+    #[arg(long, default_value_t = 0.0)]
+    pub requests_at_s: f64,
+    /// Seconds after the requests (≥ 10 for two more heartbeats).
+    #[arg(long, default_value_t = 11.0)]
+    pub tail_s: f64,
+    /// `emu:` only: the time grade, t1 or t2.
+    #[arg(long, default_value = "t2")]
+    pub grade: String,
+    /// `emu:` only: the project to deploy (default: the PLAYFUL choker).
+    #[arg(long)]
+    pub project: Option<PathBuf>,
+    /// A label carried into the JSON report.
+    #[arg(long, default_value = "")]
+    pub label: String,
 }
 
 #[derive(Debug, Args)]
