@@ -47,8 +47,13 @@ held:
 
 - the project mirror stays;
 - the dead wire client is dropped and the borrow given back;
-- the page shows the same calm strip ("Reconnecting to *board*… The
-  connection dropped. You stay right here…") over Play or the editor;
+- a card ("Reconnecting… Lost the connection to *board*. Attempting to
+  reconnect.") floats over Play or the editor on a dim curtain. Both fade
+  in after a short beat and out when the board is back, and the page under
+  them is `inert`, so nothing reflows and nothing can be pressed meanwhile
+  (Yona's review: a strip pushed into the flow reflowed the page, which is
+  as jarring as the thing it replaced). Stalls and resets (plan D13) wear
+  the same curtain;
 - passive pulls stop, and the actor looks for the board every 250 ms.
 
 When the same board is Ready again (by uid, on whatever new link it came back
@@ -88,7 +93,8 @@ project's). `lens_hold.rs` unit tests cover the awake-time grace.
 `just walk-drop-emu` (new) proves it in real Studio over the emulated USB
 cable: connect, push, open, cable out and back in under the editor, Play,
 cable out and back in under Play, then a knob turn on the resumed session.
-Each pull must keep the route, show the strip and clear it.
+Each pull must keep the route, and the curtain must fade fully in and then
+fully out.
 
 `just walk-ble-emu` gained the Bluetooth twin under Play: `drop` (the radio
 drops) and `phantom` (Bluefy's phantom drop, found when the page is shown

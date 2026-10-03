@@ -1380,12 +1380,12 @@ fn unplugging_mid_lens_holds_the_editor_until_the_grace_runs_out() {
     let strip = view
         .lens_reconnecting
         .expect("the page says it is reconnecting");
+    assert_eq!(strip.headline, "Reconnecting…");
     assert!(
-        strip.headline.starts_with("Reconnecting to "),
+        strip.detail.starts_with("Lost the connection"),
         "{}",
-        strip.headline
+        strip.detail
     );
-    assert!(strip.detail.contains("dropped"), "{}", strip.detail);
     assert_eq!(bench.lens_session_id(), session, "the same session, held");
     assert!(bench.tick().is_none(), "a held lens pulls nothing");
 
@@ -1868,12 +1868,8 @@ fn a_link_reset_under_the_lens_keeps_the_editor_and_says_reconnecting() {
         .view()
         .lens_reconnecting
         .expect("the page says it is reconnecting");
-    assert!(
-        strip.headline.starts_with("Reconnecting to "),
-        "{}",
-        strip.headline
-    );
-    assert!(strip.detail.contains("restarted"), "{}", strip.detail);
+    assert_eq!(strip.headline, "Reconnecting…");
+    assert!(strip.detail.contains("was reset"), "{}", strip.detail);
 
     // Well past the dead-wire count: the pulls fail, the editor stays.
     for _ in 0..5 {
@@ -1987,7 +1983,11 @@ fn a_stall_under_the_lens_shows_reconnecting_until_the_board_answers() {
         .view()
         .lens_reconnecting
         .expect("a stall says reconnecting");
-    assert!(strip.detail.contains("went quiet"), "{}", strip.detail);
+    assert!(
+        strip.detail.contains("stopped responding"),
+        "{}",
+        strip.detail
+    );
 
     bench
         .controller

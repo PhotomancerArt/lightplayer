@@ -317,10 +317,15 @@ async function main() {
         const opens = (await stats()).linkOpens;
         const route = await driver.evaluate("location.pathname + location.search");
         await driver.evaluate(cause);
-        await driver.waitFor(`${MAIN_TEXT}.includes('Reconnecting to')`, {
+        await driver.waitFor(`Boolean(document.querySelector('[data-reconnecting="true"]'))`, {
           timeoutMs: STEP_DEADLINE_MS,
           what: "the Reconnecting strip",
         });
+        // Settled, not mid-fade: the curtain has faded all the way in.
+        await driver.waitFor(
+          `getComputedStyle(document.querySelector('[data-reconnecting="true"]')).opacity === '1'`,
+          { timeoutMs: STEP_DEADLINE_MS, what: "the curtain to finish fading in" },
+        );
         const now = await driver.evaluate("location.pathname + location.search");
         if (now !== route) throw new Error(`the route moved: ${route} → ${now}`);
         if (!(await driver.evaluate(`Boolean(document.querySelector('#main [role="slider"]'))`))) {
@@ -330,10 +335,14 @@ async function main() {
         return `still at ${now}`;
       });
       await step(`${name}-back`, "the link comes back on its own; the strip goes and the same Play takes a knob turn", async () => {
-        await driver.waitFor(`!${MAIN_TEXT}.includes('Reconnecting to')`, {
+        await driver.waitFor(`!document.querySelector('[data-reconnecting="true"]')`, {
           timeoutMs: STEP_DEADLINE_MS,
           what: "the strip to go (the board back)",
         });
+        await driver.waitFor(
+          `[...document.querySelectorAll('[data-reconnecting]')].every((c) => getComputedStyle(c).visibility === 'hidden')`,
+          { timeoutMs: STEP_DEADLINE_MS, what: "the curtain to finish fading out" },
+        );
         const now = await driver.evaluate("location.pathname + location.search");
         if (now !== report[name].route) throw new Error(`the route moved: ${report[name].route} → ${now}`);
         const opens = (await stats()).linkOpens - report[name].opensBefore;

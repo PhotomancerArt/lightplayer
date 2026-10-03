@@ -122,10 +122,15 @@ async function main() {
     await step(`${name}-out`, `the cable comes out under ${where}: the page stays and says Reconnecting`, async () => {
       const route = await driver.evaluate(ROUTE);
       await driver.detach(BOARD);
-      await driver.waitFor(`${MAIN_TEXT}.includes('Reconnecting to')`, {
+      await driver.waitFor(`Boolean(document.querySelector('[data-reconnecting="true"]'))`, {
         timeoutMs: STEP_DEADLINE_MS,
         what: "the Reconnecting strip",
       });
+      // Settled, not mid-fade: the curtain has faded all the way in.
+      await driver.waitFor(
+        `getComputedStyle(document.querySelector('[data-reconnecting="true"]')).opacity === '1'`,
+        { timeoutMs: STEP_DEADLINE_MS, what: "the curtain to finish fading in" },
+      );
       const now = await driver.evaluate(ROUTE);
       if (now !== route) throw new Error(`the route moved: ${route} → ${now}`);
       if (!(await driver.evaluate(stillThere))) throw new Error(`${where} went away`);
@@ -134,10 +139,14 @@ async function main() {
     });
     await step(`${name}-in`, "the cable goes back in: the strip goes, the same page carries on", async () => {
       await driver.attach(BOARD);
-      await driver.waitFor(`!${MAIN_TEXT}.includes('Reconnecting to')`, {
+      await driver.waitFor(`!document.querySelector('[data-reconnecting="true"]')`, {
         timeoutMs: STEP_DEADLINE_MS,
         what: "the strip to go (the board back)",
       });
+      await driver.waitFor(
+        `[...document.querySelectorAll('[data-reconnecting]')].every((c) => getComputedStyle(c).visibility === 'hidden')`,
+        { timeoutMs: STEP_DEADLINE_MS, what: "the curtain to finish fading out" },
+      );
       const now = await driver.evaluate(ROUTE);
       if (now !== report[name].route) throw new Error(`the route moved: ${report[name].route} → ${now}`);
       if (!(await driver.evaluate(stillThere))) throw new Error(`${where} went away`);
