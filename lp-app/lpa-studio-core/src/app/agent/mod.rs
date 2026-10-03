@@ -26,6 +26,7 @@ pub mod app_agent_session;
 #[cfg(test)]
 pub(crate) mod evals;
 pub mod ui_agent_card;
+pub mod ui_agent_edit_batch;
 pub mod ui_agent_view;
 pub mod ui_app_agent_view;
 
@@ -43,6 +44,7 @@ pub use agent_session_key::AgentSessionKey;
 pub use app_agent_host_bridge::{AppAgentBridgeState, AppAgentHostBridge};
 pub use app_agent_session::AppAgentSession;
 pub use ui_agent_card::{UiAgentCard, UiAgentCardState};
+pub use ui_agent_edit_batch::{UiAgentEditBatch, UiAgentEditLine, UiAgentEditOutcome};
 pub use ui_agent_view::{
     UiAgentAvailability, UiAgentDebugDump, UiAgentHistoryEntry, UiAgentModelView, UiAgentStatus,
     UiAgentToolRow, UiAgentTurn, UiAgentUsage, UiAgentView,

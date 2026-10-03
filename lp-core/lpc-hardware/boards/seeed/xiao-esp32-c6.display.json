@@ -90,20 +90,22 @@
       {
         "label": "D4",
         "role": "io",
+        "gpio": 22,
         "caps": [
           {
-            "text": "not found",
-            "kind": "warn"
+            "text": "SDA",
+            "kind": "i2c"
           }
         ]
       },
       {
         "label": "D5",
         "role": "io",
+        "gpio": 23,
         "caps": [
           {
-            "text": "not found",
-            "kind": "warn"
+            "text": "SCL",
+            "kind": "i2c"
           }
         ]
       },

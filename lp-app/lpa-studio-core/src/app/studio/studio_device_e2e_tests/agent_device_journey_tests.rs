@@ -4,22 +4,20 @@
 //! The agent runs exactly as in the product: the app chat's run future, its
 //! `act` tool, the host bridge's `AgentOp::AppAct` on the command queue, the
 //! controller pressing the offer as the tree has it at the press. Only the
-//! model is scripted (the evals' [`ScriptedProvider`]) and only the board is
+//! model is scripted (the evals' `ScriptedProvider`) and only the board is
 //! faked: [`DeviceBench`]'s scripted USB port and flasher over a
-//! `FakeEsp32Device` whose host server is a real `LpServer`. The seat below
-//! stands in for the actor's batch loop — it applies what the run queues and
-//! refreshes the readout after each batch, as `StudioActor::process_batch`
-//! does — so the bench keeps its own clock and pump. What is faked, and what
-//! an emulated C6 would add: `tests/fixtures/app_agent/README.md`.
+//! `FakeEsp32Device` whose host server is a real `LpServer`. The seat
+//! ([`AgentSeat`], in `agent_device_seat.rs`, which the corpus's device
+//! scenarios share) stands in for the actor's batch loop — it applies what
+//! the run queues and refreshes the readout after each batch, as
+//! `StudioActor::process_batch` does — so the bench keeps its own clock and
+//! pump. What is faked, and what an emulated C6 would add:
+//! `tests/fixtures/app_agent/README.md`.
 
-use std::collections::VecDeque;
+use lpa_agent::{StopReason, TokenUsage, TurnEvent};
 
-use lpa_agent::{ChatRole, ContentBlock, StopReason, TokenUsage, TurnEvent, TurnRequest};
-
+use super::agent_device_seat::AgentSeat;
 use super::*;
-use crate::app::agent::evals::app_agent_eval_driver::ScriptedProvider;
-use crate::app::studio::studio_view_channel::{CommandReceiver, command_channel};
-use crate::{AgentController, AgentOp, ControllerId, SettingsCommand, StudioCommand};
 
 /// The journey: the user asks for a board to be set up; the agent asks for
 /// the port through `devices/connect-usb` (the browser's chooser needs a
@@ -181,6 +179,73 @@ fn e4_the_agent_connects_flashes_a_blank_board_pushes_and_sees_it_run() {
     );
 }
 
+/// The user clicks the connect card and closes the browser's chooser
+/// without picking a port: the press only opened the chooser, so the card
+/// is NOT done — it stays pending to be clicked again — and the agent
+/// hears that the picker was cancelled. The click after that picks a port
+/// and settles the card. Each run the card resumes is its own assistant
+/// turn, never glued onto the previous run's text.
+#[test]
+fn a_cancelled_chooser_leaves_the_connect_card_pending_and_the_agent_hears_it() {
+    let device = light_player("dev_agent_cancel");
+    let (mut bench, tasks) = DeviceBench::ungranted(&device, "usb-agent-cancel");
+    let mut seat = AgentSeat::new(&mut bench);
+    seat.script(vec![
+        act_turn("a1", "devices/connect-usb", &[]),
+        say("Click Connect on the card."),
+    ]);
+    // The run the cancelled picker resumes, then the one the pick resumes.
+    seat.script(vec![say("No board was picked. Click the card again.")]);
+    seat.script(vec![say("Connected.")]);
+    seat.send(&mut bench, &tasks, "Connect my board.");
+    let card = seat.cards(&mut bench).remove(0);
+    assert!(card.is_pending());
+
+    // The user closes the chooser with nothing picked.
+    bench.chooser_grants.set(false);
+    seat.press(&mut bench, &tasks, card.press.clone());
+    let cards = seat.cards(&mut bench);
+    assert!(
+        cards[0].is_pending(),
+        "a cancelled picker is not a done press: {:?}",
+        cards[0]
+    );
+    let heard = seat.last_user_text(seat.requests() - 1);
+    assert!(
+        heard.contains("on card c1 but cancelled the browser's picker"),
+        "the agent hears the picker was cancelled: {heard}"
+    );
+    assert_eq!(
+        seat.assistant_texts(&mut bench),
+        [
+            "Click Connect on the card.",
+            "No board was picked. Click the card again."
+        ],
+        "the resumed run is its own turn"
+    );
+    assert!(bench.view().pending.is_empty() && bench.view().devices.is_empty());
+
+    // The second click picks a port: now the card is done.
+    bench.chooser_grants.set(true);
+    seat.press(&mut bench, &tasks, card.press.clone());
+    let cards = seat.cards(&mut bench);
+    assert_eq!(
+        cards[0].state,
+        crate::UiAgentCardState::Done {
+            outcome: "a board was picked".to_string()
+        }
+    );
+    let heard = seat.last_user_text(seat.requests() - 1);
+    assert!(
+        heard.contains("[I clicked \"Connect a board via USB\" on card c1: a board was picked]"),
+        "{heard}"
+    );
+    assert_eq!(seat.assistant_texts(&mut bench).len(), 3);
+    bench.run_until(&tasks, "the picked port to identify", |bench| {
+        !bench.view().devices.is_empty()
+    });
+}
+
 /// The negative: asked to flash a board that runs somebody else's firmware,
 /// the agent's press is Lasting — the firmware on it would be lost — so it
 /// becomes a card pre-filled with the agent's board, a second press while
@@ -245,168 +310,6 @@ fn e4_the_agents_flash_over_firmware_is_a_card_and_flashes_nothing() {
         "the board still runs its own firmware: {:?}",
         bench.view()
     );
-}
-
-// ---------------------------------------------------------------------
-// The seat: the app chat over a scripted model, on the device bench
-// ---------------------------------------------------------------------
-
-/// The app chat seated on a [`DeviceBench`]'s controller.
-struct AgentSeat {
-    /// Where the run's acts and feedback land (the actor's queue, here).
-    rx: CommandReceiver,
-    runs: Rc<RefCell<Vec<crate::AgentTaskFuture>>>,
-    /// One turn script per run, consumed as runs start.
-    scripts: Rc<RefCell<VecDeque<Vec<Vec<TurnEvent>>>>>,
-    /// Every request the model received, in order.
-    requests: Rc<RefCell<Vec<TurnRequest>>>,
-}
-
-impl AgentSeat {
-    fn new(bench: &mut DeviceBench) -> Self {
-        let (tx, rx) = command_channel();
-        let runs: Rc<RefCell<Vec<crate::AgentTaskFuture>>> = Rc::new(RefCell::new(Vec::new()));
-        let scripts: Rc<RefCell<VecDeque<Vec<Vec<TurnEvent>>>>> =
-            Rc::new(RefCell::new(VecDeque::new()));
-        let requests: Rc<RefCell<Vec<TurnRequest>>> = Rc::new(RefCell::new(Vec::new()));
-        let controller = &mut bench.controller;
-        controller.set_agent_command_sender(tx);
-        // The ack waits poll a timer between checks; one yield per wait
-        // gives the seat a turn to apply what the run queued.
-        controller.set_agent_timer(|_| Box::pin(YieldOnce::default()) as crate::AgentTimerFuture);
-        for command in [
-            SettingsCommand::SetAgentProvider(Some(crate::AgentProvider::OpenRouter)),
-            SettingsCommand::SetAgentOpenRouterApiKey(Some("sk-or-scripted".to_string())),
-            SettingsCommand::SetAppAgentModel(Some("scripted/model".to_string())),
-        ] {
-            controller.apply_settings_command(command);
-        }
-        controller.set_agent_spawner({
-            let runs = Rc::clone(&runs);
-            move |run| runs.borrow_mut().push(run)
-        });
-        controller.set_agent_provider_factory({
-            let scripts = Rc::clone(&scripts);
-            let requests = Rc::clone(&requests);
-            move |_| {
-                let turns = scripts.borrow_mut().pop_front().unwrap_or_default();
-                Box::new(ScriptedProvider::new(turns, Rc::clone(&requests)))
-            }
-        });
-        Self {
-            rx,
-            runs,
-            scripts,
-            requests,
-        }
-    }
-
-    /// Queue the turns of the next run.
-    fn script(&self, turns: Vec<Vec<TurnEvent>>) {
-        self.scripts.borrow_mut().push_back(turns);
-    }
-
-    /// The user's message to the app chat; the run is driven to its end.
-    fn send(&mut self, bench: &mut DeviceBench, tasks: &TaskPool, text: &str) {
-        let send = UiAction::from_op(
-            ControllerId::new(AgentController::NODE_ID),
-            AgentOp::AppSend {
-                text: text.to_string(),
-            },
-        );
-        self.press(bench, tasks, send);
-    }
-
-    /// The user's click (a card's button); any run it starts or resumes is
-    /// driven to its end.
-    fn press(&mut self, bench: &mut DeviceBench, tasks: &TaskPool, action: UiAction) {
-        drive(bench.controller.dispatch(action)).expect("the press dispatches");
-        self.apply(bench);
-        let waker = noop_waker();
-        let mut cx = Context::from_waker(&waker);
-        let deadline = std::time::Instant::now() + REAL_TIME_LIMIT;
-        loop {
-            let Some(mut run) = self.runs.borrow_mut().pop() else {
-                break;
-            };
-            while run.as_mut().poll(&mut cx).is_pending() {
-                self.apply(bench);
-                bench.step(tasks);
-                assert!(
-                    std::time::Instant::now() < deadline,
-                    "the agent's run did not end; roster now: {:?}",
-                    bench.view()
-                );
-            }
-            self.apply(bench);
-        }
-    }
-
-    /// What the actor does with a batch the run queued: its acts through
-    /// the ordinary dispatch, its feedback in order, then the refreshed
-    /// readout (`view_if_changed`).
-    fn apply(&mut self, bench: &mut DeviceBench) {
-        while self.rx.peek_any(|_| true) {
-            for command in drive(self.rx.recv_coalesced()).unwrap_or_default() {
-                match command {
-                    StudioCommand::Action(action) => {
-                        drive(bench.controller.dispatch(action)).expect("the run's op dispatches");
-                    }
-                    StudioCommand::Agent(feedback) => {
-                        bench.controller.apply_agent_feedback(feedback)
-                    }
-                    other => panic!("the app chat queued {other:?}"),
-                }
-            }
-        }
-        let _ = bench.controller.view_if_changed();
-    }
-
-    fn requests(&self) -> usize {
-        self.requests.borrow().len()
-    }
-
-    /// The last readout in request `index` (what the model saw that turn).
-    fn readout_of_request(&self, index: usize) -> String {
-        let requests = self.requests.borrow();
-        requests[index]
-            .messages
-            .iter()
-            .filter(|message| message.role == ChatRole::User)
-            .flat_map(|message| &message.content)
-            .filter_map(|block| match block {
-                ContentBlock::Text { text }
-                    if text.starts_with(lpa_agent::toolset::APP_STATE_OPEN) =>
-                {
-                    Some(text.clone())
-                }
-                _ => None,
-            })
-            .last()
-            .expect("every request carries the readout")
-    }
-
-    /// Every `act` result the model was handed, in order.
-    fn tool_results(&self, bench: &mut DeviceBench) -> Vec<serde_json::Value> {
-        let session = bench.controller.agent_for_test().app_session();
-        let runtime = session.runtime.borrow();
-        let runtime = runtime.as_ref().expect("a run happened");
-        runtime
-            .transcript()
-            .messages
-            .iter()
-            .flat_map(|message| &message.content)
-            .filter_map(|block| match block {
-                ContentBlock::ToolResult { content, .. } => serde_json::from_str(content).ok(),
-                _ => None,
-            })
-            .collect()
-    }
-
-    /// The app chat's cards, in transcript order.
-    fn cards(&self, bench: &mut DeviceBench) -> Vec<crate::UiAgentCard> {
-        app_cards(bench)
-    }
 }
 
 /// One model turn that presses `action` with `args` and stops for the result.

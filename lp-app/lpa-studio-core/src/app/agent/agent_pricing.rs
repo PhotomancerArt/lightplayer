@@ -48,6 +48,9 @@ impl AgentCostRates {
     /// Table rates for a model id (longest configured prefix wins), or
     /// `None` for unknown models.
     pub fn for_model(model: &str) -> Option<Self> {
+        // OpenRouter names a model `vendor/model` (`anthropic/claude-…`);
+        // the table keys on the model part.
+        let model = model.rsplit('/').next().unwrap_or(model);
         MODEL_PRICES
             .iter()
             .filter(|(prefix, _, _)| model.starts_with(prefix))
@@ -116,6 +119,14 @@ mod tests {
     fn unknown_model_has_no_rates() {
         assert_eq!(AgentCostRates::for_model("gpt-5.2-mini"), None);
         assert_eq!(AgentCostRates::for_model(""), None);
+        // An open-weights slug is not in the table: no rates, so no cost.
+        assert_eq!(AgentCostRates::for_model("z-ai/glm-5.3"), None);
+    }
+
+    #[test]
+    fn a_vendor_prefixed_slug_finds_its_family() {
+        let rates = AgentCostRates::for_model("anthropic/claude-sonnet-5").expect("known");
+        assert_eq!(rates.input_per_mtok, 3.0);
     }
 
     #[test]

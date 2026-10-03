@@ -14,7 +14,7 @@
 //! `2026-08-24-1100-logo-triangle-chip` plan, D1, and `brand_hero.rs`.
 
 use dioxus::prelude::*;
-use lpa_studio_core::{HomeOp, UiAction, UiHomeView, example_groups};
+use lpa_studio_core::{HomeOp, UiAction, UiAppAgentView, UiHomeView, example_groups};
 
 use crate::app::home::brand_hero::BrandHero;
 use crate::app::home::example_card::{ExampleCard, embedded_example_cards};
@@ -34,7 +34,14 @@ pub fn HomePage(
     /// compiled-in content and render regardless.
     #[props(default)]
     home: Option<UiHomeView>,
+    /// The app chat, for the front door under the hero (plan A3). `None`
+    /// (stories that are not about it, host mounts) draws no front door.
+    #[props(default)]
+    app_agent: Option<UiAppAgentView>,
 ) -> Element {
+    // The front door shares the drawer's open flag and draft (web chrome
+    // the web app provides); without it there is nowhere to open.
+    let app_chat = crate::app::agent::use_app_chat_chrome();
     // A `/p/` link that landed here (P6): one quiet line about where it
     // stands — opening, or the calm refusal that never says which of
     // restricted/archived/absent it was. Stories provide no context and
@@ -75,6 +82,16 @@ pub fn HomePage(
                     "Friendly shaders, everywhere"
                 }
                 EditArtworkPill { on_action }
+            }
+            // The app chat's front door: the same session as the header's
+            // drawer, which a send opens.
+            if let (Some(view), Some(chrome)) = (app_agent, app_chat) {
+                crate::app::agent::AppChatFrontDoor {
+                    view,
+                    open: chrome.open,
+                    draft: chrome.draft,
+                    on_action,
+                }
             }
             // One 880px column holds everything below the hero (landing
             // cohesion spike, ruled 2026-08-30: B's sectioned column under

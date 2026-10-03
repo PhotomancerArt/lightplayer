@@ -277,6 +277,27 @@ pub enum Event {
         device: DeviceId,
         identity: crate::identity::PeerIdentity,
     },
+    /// The platform chooser a [`Command::RequestUsbGrant`] or
+    /// [`Command::RequestBleGrant`] opened has answered. `link` is the id
+    /// the grant attaches as when a device was picked (its
+    /// [`Self::LinkAttached`] arrives first). Journal news only: it moves
+    /// no evidence, but it is the one way the app learns a chooser was
+    /// closed with nothing picked — which no other event says.
+    GrantAnswered {
+        link: LinkId,
+        answer: GrantAnswer,
+    },
+}
+
+/// What the user did with a platform chooser.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub enum GrantAnswer {
+    /// A device was picked; it attached as the event's link.
+    Picked,
+    /// The chooser was closed with nothing picked.
+    Dismissed,
+    /// The platform refused or failed the request.
+    Failed { error: String },
 }
 
 /// The bracket-and-progress vocabulary of an activity's lifetime. The device

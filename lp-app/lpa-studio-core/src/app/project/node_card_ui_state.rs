@@ -76,6 +76,11 @@ pub struct NodeCardUiState {
     /// The composer draft as last mirrored by the web (write-on-collapse;
     /// see the module doc — this is the remount seed, not the live text).
     pub composer_draft: String,
+    /// Bumped each time something other than the composer itself puts a
+    /// draft in [`Self::composer_draft`] (the app agent's hand-off, the
+    /// node's `ask-agent` offer): a mounted composer adopts the mirror
+    /// when it sees this move, where it otherwise only seeds on mount.
+    pub draft_seed: u32,
     /// Whether the fixture card's Shape declaration moment is showing
     /// (D13, plan-B P5): a freshly created fixture renders its
     /// dimensionality section in guided clothing — preset tiles — until a
@@ -98,6 +103,7 @@ impl Default for NodeCardUiState {
             hero_product: ModuleHeroProduct::default(),
             preview_spaces: None,
             composer_draft: String::new(),
+            draft_seed: 0,
             shape_guided: false,
         }
     }
@@ -120,6 +126,13 @@ impl NodeCardUiState {
             }
             NodeUiOp::SetDraft { draft, .. } => {
                 self.composer_draft = draft.clone();
+            }
+            NodeUiOp::OpenAgent { draft, .. } => {
+                self.agent_collapsed = false;
+                if let Some(draft) = draft {
+                    self.composer_draft = draft.clone();
+                    self.draft_seed = self.draft_seed.wrapping_add(1);
+                }
             }
             NodeUiOp::SetHeroProduct { product, .. } => {
                 self.hero_product = *product;
@@ -271,6 +284,11 @@ pub enum NodeUiOp {
     /// Mirror the composer draft (write-on-collapse; the web seeds its
     /// view-local draft signal from this on mount).
     SetDraft { node: String, draft: String },
+    /// Open the agent section, putting `draft` in its composer when given
+    /// (the `ask-agent` hand-off): never sends — the user reads it, edits
+    /// it and presses Send. Bumps [`NodeCardUiState::draft_seed`] so a
+    /// composer already on screen takes the draft too.
+    OpenAgent { node: String, draft: Option<String> },
     /// Point the module face's hero at one of its scope's two products
     /// (the hero's upper-right toggle).
     SetHeroProduct {
@@ -298,6 +316,7 @@ impl NodeUiOp {
             Self::SetDrawer { node, .. }
             | Self::SetAgentCollapsed { node, .. }
             | Self::SetDraft { node, .. }
+            | Self::OpenAgent { node, .. }
             | Self::SetHeroProduct { node, .. }
             | Self::SetPreviewSpaces { node, .. }
             | Self::SetShapeGuided { node, .. } => node,
@@ -355,6 +374,23 @@ impl NodeUiOp {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn open_agent_expands_and_seeds_the_draft_only_when_given_one() {
+        let mut state = NodeCardUiState::default();
+        state.apply(&NodeUiOp::OpenAgent {
+            node: "/a.shader".into(),
+            draft: None,
+        });
+        assert!(!state.agent_collapsed);
+        assert_eq!(state.draft_seed, 0, "no draft, nothing to adopt");
+        state.apply(&NodeUiOp::OpenAgent {
+            node: "/a.shader".into(),
+            draft: Some("make it slower".into()),
+        });
+        assert_eq!(state.composer_draft, "make it slower");
+        assert_eq!(state.draft_seed, 1);
+    }
 
     #[test]
     fn ops_round_trip_through_the_state() {
@@ -444,6 +480,7 @@ mod tests {
                     two_d: true,
                 }),
                 composer_draft: "make it pulse".to_string(),
+                draft_seed: 0,
                 shape_guided: false,
             }
         );

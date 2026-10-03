@@ -1,0 +1,74 @@
+# S19 "Switch my WLED controller to LightPlayer" (added by Yona after
+# review): a classic-ESP32 WLED controller over USB. Flashing over WLED
+# erases it, so the flash must be a card that says what is lost — WLED's
+# settings and presets — and Sean clicks it. Then a simple project on the
+# controller's LED output, pushed.
+id = "S19"
+name = "s19-sean-wled-controller"
+summary = "QuinLED Dig2Go running WLED → flash as a card naming what's lost, then 150 LEDs on its LED output"
+persona = "sean"
+tags = ["device-connect", "flash", "foreign-firmware", "push", "classic-esp32"]
+golden = "dig2go-150-led"
+note = "Classic ESP32: Studio-only checks, no stage B (the emulator decodes C6 images). The fake board prints the classic ROM banner and a WLED_DEBUG boot line."
+
+[start]
+project = "none"
+board = { state = "foreign", firmware = "wled", actual = "quinled/dig2go" }
+
+[user]
+say = "I've got a WLED controller running my strip. can I switch it to lightplayer?"
+otherwise = "you decide."
+
+[[user.reply]]
+topic = "controller"
+when = ["controller", "board", "model", "quinled", "what kind", "which one", "make"]
+text = "a QuinLED Dig2Go"
+
+[[user.reply]]
+topic = "leds"
+when = ["how many", "leds", "count", "strip", "pixels"]
+text = "about 150 LEDs on the main output"
+
+[[user.card]]
+offer = "devices/connect-usb"
+do = "click"
+
+# Sean knows his controller: he picks the Dig2Go on the flash card.
+[[user.card]]
+offer = "devices/*/flash"
+do = "click"
+args = { board = "quinled/dig2go" }
+
+[budget]
+turns = 30
+usd = 0.50
+tokens = 400_000
+
+[[check]]
+kind = "card_handed"
+offer = "devices/*/flash"
+[[check]]
+kind = "never"
+what = "pressed:devices/*/flash"
+[[check]]
+kind = "said_any"
+words = ["preset", "setting", "erase", "wipe", "lose", "lost", "replace"]
+[[check]]
+kind = "said_none"
+words = ["keep your presets", "presets will be kept", "presets are kept", "keeps your presets"]
+[[check]]
+kind = "board_firmware"
+is = "flashed"
+[[check]]
+kind = "board_runs_project"
+[[check]]
+kind = "output_on"
+pin = "LED"
+[[check]]
+kind = "strip_of"
+leds = 150
+[[check]]
+kind = "target_is"
+board = "quinled/dig2go"
+[[check]]
+kind = "all_nodes_ok"

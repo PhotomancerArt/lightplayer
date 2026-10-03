@@ -21,6 +21,7 @@
 //! read requests, response application, and `ProjectView`. It does not own
 //! Studio controller state.
 
+pub(crate) mod agent_focus;
 pub(crate) mod agent_project_edits;
 pub(crate) mod agent_project_summary;
 pub(crate) mod agent_slot_json;
@@ -35,6 +36,7 @@ pub(crate) mod edit_journal;
 pub(crate) mod editor_meta_op;
 pub(crate) mod entry_check;
 pub mod export_lint;
+pub mod header_verbs;
 pub mod loaded_project_choice;
 pub mod node;
 pub mod node_card_ui_state;
@@ -42,6 +44,7 @@ pub(crate) mod output_lamp_coverage;
 pub(crate) mod patch_bay_derivation;
 pub mod patch_preview;
 pub mod patch_pulse;
+pub(crate) mod patch_verb_offers;
 pub(crate) mod patch_verb_op;
 pub(crate) mod patch_verbs;
 pub mod project_connect_result;
@@ -79,13 +82,16 @@ pub use editor_meta_op::{
     EditorMetaVerb, editor_meta_artifact,
 };
 pub use export_lint::{ExportGraphContext, ExportGraphNode, check_export_graph};
+pub use header_verbs::{CLEAR_DEBUG_VERB, is_header_verb};
 pub use loaded_project_choice::LoadedProjectChoice;
 pub use node::{
-    IMPORT_BUILTIN_SECTION, IMPORT_LIBRARY_SECTION, ImportSource, ModuleExportOp, NodeClearDebugOp,
-    NodeController, NodeControllerState, NodeCopyOp, NodeCreateOp, NodeImportOp, NodePasteOp,
-    NodeRemoveOp, NodeRevertOp, PanelAutoSaveOp, PanelClearOp, PanelWriteOp, PlaylistActivateOp,
-    ProjectNodeAddress, ProjectNodeTarget, ProjectProductSubscriptionIntent, UiAddNodeMenu,
-    UiAddNodeMenuEntry, UiAttachTarget, UiImportablePattern, UiNodeRemovePreflight,
+    ADD_NODE_KIND_PARAM, ADD_NODE_VERB, ASK_AGENT_REQUEST_PARAM, ASK_AGENT_VERB, COPY_NODE_VERB,
+    IMPORT_BUILTIN_SECTION, IMPORT_LIBRARY_SECTION, IMPORT_PATTERN_PARAM, IMPORT_PATTERN_VERB,
+    ImportSource, ModuleExportOp, NodeClearDebugOp, NodeController, NodeControllerState,
+    NodeCopyOp, NodeCreateOp, NodeImportOp, NodePasteOp, NodeRemoveOp, NodeRevertOp,
+    PASTE_NODE_CLIPBOARD_PARAM, PASTE_NODE_VERB, PanelAutoSaveOp, PanelClearOp, PanelWriteOp,
+    PlaylistActivateOp, ProjectNodeAddress, ProjectNodeTarget, ProjectProductSubscriptionIntent,
+    UiAddNodeMenu, UiAddNodeMenuEntry, UiAttachTarget, UiImportablePattern, UiNodeRemovePreflight,
 };
 pub use node_card_ui_state::{
     ModuleHeroProduct, NodeCardDrawer, NodeCardUiState, NodeUiOp, UiPreviewSpaces,
@@ -93,6 +99,14 @@ pub use node_card_ui_state::{
 pub use patch_preview::{FROZEN_PREVIEW_PHASE, UiPatchChasePreview, chase_preview, preview_phase};
 pub use patch_pulse::{
     PatchPulseLamps, PatchPulseLanguage, PatchPulseOp, PatchPulseSpace, PatchPulseSubject,
+};
+pub use patch_verb_offers::{
+    PATCH_ASSIGN_VERB, PATCH_CLEAR_VERB, PATCH_DELTA_PARAM, PATCH_FLOW_AUTO, PATCH_FLOW_MANUAL,
+    PATCH_FLOW_PARAM, PATCH_GROUP, PATCH_LAMP_PARAM, PATCH_LAMPS_PARAM, PATCH_OUTPUT_PARAM,
+    PATCH_PORT_PARAM, PATCH_RE_ANCHOR_VERB, PATCH_REDO_VERB, PATCH_REVERSE_VERB, PATCH_ROTATE_VERB,
+    PATCH_SET_FLOW_VERB, PATCH_SHIFT_PORT_VERB, PATCH_START_PARAM, PATCH_STEPS_PARAM,
+    PATCH_SUBJECT_PARAM, PATCH_SWAP_PORTS_VERB, PATCH_UNDO_VERB, PATCH_UNMAP_ALL_VERB,
+    PATCH_WHOLE_FIXTURE, PATCH_WITH_PARAM, patch_history_path, publish_patch_verb_offers,
 };
 pub use patch_verb_op::{
     PatchVerbFixture, PatchVerbKind, PatchVerbOp, PatchVerbSubject, PatchVerbWindow,

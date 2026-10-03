@@ -589,3 +589,12 @@ cargo check -p lpa-studio-core
 cargo test -p lpa-studio-core
 cargo check -p lpa-studio-core --target wasm32-unknown-unknown --features browser-worker,browser-serial-esp32
 ```
+
+Tests press offers by path, the way a click and the app agent do:
+`OfferPressTestApi` (`src/app/studio/offer_press_test_api.rs`) gives every
+bench — a `StudioController`, an actor through `actor_clicks`, the device
+bench, the agent eval studio — `press(path, args)`, `press_lasting` (a
+Lasting verb's second click; a plain `press` on one panics naming it),
+`offered`, `not_offered` and `offer_reason`. A test that builds the op itself
+never notices when the UI stops offering the verb, so `just lint-core-test-ops`
+ratchets the sites that still do, per file (`scripts/core-test-ops-ratchet.txt`).

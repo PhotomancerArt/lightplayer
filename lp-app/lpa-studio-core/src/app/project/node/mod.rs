@@ -5,6 +5,7 @@
 //! [`ProjectNodeTarget`] adds the current runtime `NodeId` for actions that
 //! need to talk back to the server.
 
+pub mod add_node_offers;
 pub mod import_pattern;
 pub mod module_export_op;
 pub mod node_clear_debug_op;
@@ -25,9 +26,16 @@ pub mod project_node_address;
 pub mod project_node_target;
 pub mod ui_add_node_menu;
 
+pub use add_node_offers::{
+    ADD_NODE_KIND_PARAM, ADD_NODE_VERB, IMPORT_PATTERN_PARAM, IMPORT_PATTERN_VERB,
+    PASTE_NODE_CLIPBOARD_PARAM, PASTE_NODE_VERB, publish_add_node_offers,
+};
 pub use module_export_op::ModuleExportOp;
 pub use node_clear_debug_op::NodeClearDebugOp;
-pub use node_controller::{NodeController, NodeControllerState, ProjectProductSubscriptionIntent};
+pub use node_controller::{
+    ASK_AGENT_REQUEST_PARAM, ASK_AGENT_VERB, COPY_NODE_VERB, NodeController, NodeControllerState,
+    ProjectProductSubscriptionIntent,
+};
 pub(in crate::app::project) use node_controller::{human_label as human_node_label, root_slot_key};
 pub use node_create_op::{NodeCreateOp, UiAttachTarget};
 pub use node_import_op::{ImportSource, NodeImportOp};

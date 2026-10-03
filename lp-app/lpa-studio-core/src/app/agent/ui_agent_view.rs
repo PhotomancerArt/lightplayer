@@ -223,6 +223,9 @@ pub enum UiAgentTurn {
 pub struct UiAgentToolRow {
     /// Provider tool-use id (row identity for updates and expansion).
     pub id: String,
+    /// The tool's name (`iterate`, `edit_project`, `act`, …); empty when
+    /// the start event did not name it.
+    pub tool: String,
     /// The model's one-line intent for this call.
     pub note: Option<String>,
     /// Live activity label while executing ("compiling", "probe 2/5", …);
@@ -247,6 +250,13 @@ pub struct UiAgentToolRow {
     pub error: Option<String>,
     /// Pretty-printed summary JSON for the expanded detail view.
     pub detail: String,
+    /// An app-agent `edit_project` call's edits and how each went: the
+    /// row's summary line and its expandable list (`None` for every other
+    /// tool).
+    pub edits: Option<crate::app::agent::ui_agent_edit_batch::UiAgentEditBatch>,
+    /// A finished app-agent `act` or `read` call, in words ("pressed
+    /// project/save", "read node fixture"); `None` for every other tool.
+    pub headline: Option<String>,
 }
 
 impl UiAgentToolRow {
@@ -254,6 +264,7 @@ impl UiAgentToolRow {
     pub fn started(id: impl Into<String>) -> Self {
         Self {
             id: id.into(),
+            tool: String::new(),
             note: None,
             phase: None,
             done: false,
@@ -264,11 +275,33 @@ impl UiAgentToolRow {
             warnings: 0,
             error: None,
             detail: String::new(),
+            edits: None,
+            headline: None,
         }
+    }
+
+    /// The same row, naming its tool.
+    pub fn for_tool(mut self, tool: impl Into<String>) -> Self {
+        self.tool = tool.into();
+        self
+    }
+
+    /// Whether this row reports something that went wrong: a failed call,
+    /// a compile error, or an edit batch with a refused edit.
+    pub fn has_problem(&self) -> bool {
+        self.error.is_some()
+            || self.shader_ok == Some(false)
+            || self
+                .edits
+                .as_ref()
+                .is_some_and(|edits| edits.has_problems())
     }
 
     /// The compact one-line summary the collapsed row shows.
     pub fn summary_line(&self) -> String {
+        if let Some(line) = self.app_tool_line() {
+            return line;
+        }
         if !self.done {
             // Live activity: prefer the current phase ("compiling",
             // "probe 2/5", …) over the generic "running".
@@ -308,6 +341,33 @@ impl UiAgentToolRow {
             Some(note) => format!("{note} — {outcome}"),
             None => outcome,
         }
+    }
+
+    /// The app agent's tools in their own words: an edit batch's summary,
+    /// a finished `act`/`read`, or what a running one is doing. `None` for
+    /// the shader agent's tools, which keep the experiment wording.
+    fn app_tool_line(&self) -> Option<String> {
+        let running = match self.tool.as_str() {
+            "edit_project" => "Editing the project",
+            "act" => "Pressing",
+            "read" => "Reading",
+            _ => return None,
+        };
+        if !self.done {
+            return Some(format!("{running}…"));
+        }
+        if let Some(edits) = &self.edits {
+            return Some(edits.summary());
+        }
+        if let Some(error) = &self.error {
+            return Some(format!("Tool failed: {error}"));
+        }
+        Some(
+            self.headline
+                .clone()
+                .or_else(|| self.note.clone())
+                .unwrap_or_else(|| "done".to_string()),
+        )
     }
 }
 
@@ -408,6 +468,27 @@ mod tests {
         assert_eq!(row.summary_line(), "Experiment — probe 2/5");
         row.note = Some("go green".into());
         assert_eq!(row.summary_line(), "go green — probe 2/5");
+    }
+
+    #[test]
+    fn app_tool_rows_speak_in_their_own_words() {
+        let mut row = UiAgentToolRow::started("tu_1").for_tool("edit_project");
+        assert_eq!(row.summary_line(), "Editing the project…");
+        row.done = true;
+        row.edits = crate::app::agent::ui_agent_edit_batch::UiAgentEditBatch::from_summary(
+            &serde_json::json!({ "rows": [
+                { "edit": "set", "target": "fixture", "path": "count", "value": 250, "ok": true },
+                { "edit": "set", "target": "o", "path": "x", "ok": false, "reason": "no" }
+            ] }),
+        );
+        assert_eq!(row.summary_line(), "set count 250, 1 rejected");
+        assert!(row.has_problem());
+
+        let mut act = UiAgentToolRow::started("tu_2").for_tool("act");
+        act.done = true;
+        act.headline = Some("pressed project/save".into());
+        assert_eq!(act.summary_line(), "pressed project/save");
+        assert!(!act.has_problem());
     }
 
     #[test]
