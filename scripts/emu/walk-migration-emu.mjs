@@ -760,8 +760,21 @@ async function main() {
       case "W5":
       case "W12":
       case "W9":
-      case "W7b":
-        step("files moved, byte for byte", files.same, JSON.stringify(files));
+      case "W7b": {
+        // A held board (W9) gets no access write while it holds its files
+        // (its store waits with them), so the connect's ordinary add of this
+        // browser's key lands AFTER the move, on the real store: the one
+        // file Studio itself writes may differ from the fixture, and the
+        // card's count below (fixture entries + this browser) says the old
+        // entries survived. Everywhere else the add came before the
+        // as-found read, so every byte must match.
+        const studiosAfterHeld = scenario === "W9" && files.missing.length === 0 && files.extra.length === 0
+          && files.changed.length > 0 && files.changed.every((p) => p === "/.lp/access.json");
+        step(
+          studiosAfterHeld ? "files moved, byte for byte (but /.lp/access.json: Studio's key add after the move)" : "files moved, byte for byte",
+          files.same || studiosAfterHeld,
+          JSON.stringify(files),
+        );
         step("the chip is on the new layout", /0x350000/.test(after.layout) || !/pre-2026-10/.test(after.layout), after.layout);
         step("old superblock retired", !legacySuperblock, "");
         step(
@@ -771,6 +784,7 @@ async function main() {
           JSON.stringify(verdict.console),
         );
         break;
+      }
       case "W2": {
         // A plain update moves nothing; Studio's own documented writes are
         // the only changes: the browser's key into /.lp/access.json on a

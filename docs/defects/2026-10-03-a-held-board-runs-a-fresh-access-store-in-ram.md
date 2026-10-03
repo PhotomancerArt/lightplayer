@@ -1,7 +1,7 @@
 ---
 status: fixed
 found: 2026-10-03      # hardware-walk rehearsal (C6 repartition G1, scene 4, the spare XIAO C6)
-fixed: see the commit that adds this file
+fixed: b3c0f0284
 area: fw-esp32c6 BLE start × lpa-server access_store × lpa-studio-core AccessController
 class: stand-in-divergence
 related:

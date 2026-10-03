@@ -106,6 +106,21 @@ half done that way); `stopDoor` now interrupts and waits. And the card's
 layout verbs are offered at the board's MAC now,
 `devices/<12 hex>/<verb>` (a link not yet identified is `devices/new-<n>`).
 
+**Re-walked after the G1 rehearsal's fixes** (2026-10-03, `b3c0f0284`
+plus the walk change below, main merged at `1059c5c51`; firmware
+`fw-esp32c6 b3c0f0284cb0`, 3,036,704 B merged, release bundle rebuilt at
+that head; `lp-emu:esp32c6:t1`): W1, W3, W4, W7a, W7b and W9 **pass**. W9
+now also judges the held board: its console says `[ble] off (files held for
+the layout change: the device store waits with them)` and never `[ble]
+enabled`, and the card shows no "Who has access" for it
+(`docs/defects/2026-10-03-a-held-board-runs-a-fresh-access-store-in-ram.md`).
+Because Studio no longer writes access into a held board's RAM store, the
+connect's ordinary key add lands on the REAL store after the move, so W9
+accepts `/.lp/access.json` as the one changed file and leans on the card's
+count (the fixture's entry plus this browser's, 2) for the old entries. W3's
+refusal now reads in blocks: "This board's files take more than the new
+layout's 176 blocks of 4 KB (an update must also keep 16 of them free)."
+
 ## Found and fixed during the walk
 
 - **Emulator fidelity** — `power-cycle` after a USB download dance came back
