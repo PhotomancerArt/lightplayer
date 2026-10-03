@@ -68,7 +68,15 @@ pub(crate) fn DeviceAccessPanel(
             if panel.ble_enabled.is_none() {
                 p { class: HELP_CLASS, "Reading the device's list…" }
             }
-            ul { class: "tw:m-0 tw:grid tw:list-none tw:p-0",
+            // Caps its own height (the `DetailPopover` convention — see
+            // `pending_edit_section.rs`'s `PendingEditList`): an uncapped
+            // list grows the panel past the viewport on a device with many
+            // keys, and the popover's trigger-vs-panel geometry only hides
+            // the collapsed "Who has access · N ›" row when the panel fully
+            // covers it — a panel clamped back across the trigger without
+            // covering it left that row painted over the list's own rows
+            // (ticket 2026-10-02-access-popover-overlap-and-indistinct-keys).
+            ul { class: "tw:m-0 tw:grid tw:max-h-80 tw:list-none tw:overflow-y-auto tw:p-0",
                 for entry in entries {
                     AccessEntryRow {
                         key: "{entry.salt_id:?}",

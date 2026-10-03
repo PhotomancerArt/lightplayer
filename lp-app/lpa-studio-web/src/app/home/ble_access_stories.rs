@@ -153,6 +153,25 @@ fn ble_who_has_access_open() -> Element {
 }
 
 #[story(
+    description = "Who has access, OPENED as the device card's actual popover with many keys (17, Yona's count): proves the open list never sits under the collapsed \"Who has access · 17 ›\" row — once the list is showing, the row that triggered it must read as closed chrome, never as a second row painted over the first entries."
+)]
+fn ble_who_has_access_popover_open() -> Element {
+    rsx! {
+        div { class: CARD_FRAME,
+            StoryDeviceCard {
+                card: usb_card(),
+                projects: Vec::new(),
+                examples: Vec::new(),
+                open_uid: Some("dev000000daqf6dvvqz".to_string()),
+                access: Some(usb_access(Some(true), false, many())),
+                access_panel_open: true,
+                on_action: |_| {},
+            }
+        }
+    }
+}
+
+#[story(
     description = "One trash can ARMED (the studio's two-tap confirm): red fill, \"Remove\", the quiet 4 s drain under it; the row dims and its second line hides. The can was already as wide as \"Remove\", so nothing moved. A second tap removes; blur or 4 s stands it down."
 )]
 fn ble_who_has_access_armed() -> Element {
@@ -717,6 +736,25 @@ fn crowded() -> Vec<UiAccessEntry> {
             60,
         ),
     ]
+}
+
+/// `typical()` plus enough other browsers to reach 17 — Yona's count in the
+/// popover-overlap screenshot. Distinct labels (the key-naming question is a
+/// separate, out-of-scope ticket): this fixture exists only to make the list
+/// tall enough to force the popover's viewport clamp.
+fn many() -> Vec<UiAccessEntry> {
+    let mut entries = typical();
+    for i in 0..13u64 {
+        entries.push(entry(
+            &format!("Guest browser {}", i + 1),
+            SecretKind::Browser,
+            AccessTier::Edit,
+            false,
+            false,
+            i * 3 + 1,
+        ));
+    }
+    entries
 }
 
 fn panel(ble_enabled: Option<bool>, open: bool, entries: Vec<UiAccessEntry>) -> UiAccessPanel {
