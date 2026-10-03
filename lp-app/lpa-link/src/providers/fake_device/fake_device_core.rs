@@ -600,10 +600,10 @@ impl FakeDeviceCore {
                 // boot's own. The server sends its unsolicited id-0 hello
                 // first; it is kept and said first on every link session.
                 self.boots = self.boots.wrapping_add(1);
-                self.link = Some(FakeBoardLink::new(
-                    lp.link_config.clone(),
-                    boot_nonce(self.boots),
-                ));
+                self.link = Some(
+                    FakeBoardLink::new(lp.link_config.clone(), boot_nonce(self.boots))
+                        .with_hello_json(lp.hello_json_override.clone()),
+                );
             }
             Err(error) => {
                 self.push_line(&format!("[fake-device] server start failed: {error}"));

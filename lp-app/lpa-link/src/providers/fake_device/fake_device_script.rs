@@ -107,6 +107,11 @@ pub struct FakeLightPlayerState {
     /// [`lpc_wire::WIRE_PROTO_VERSION`]: mimics firmware built from an
     /// incompatible wire revision.
     pub proto_override: Option<u32>,
+    /// Say THIS JSON, verbatim, wherever the board would say hello (the
+    /// boot hello and every answer to a hello request): a board on another
+    /// wire whose hello this build cannot decode, such as the wire-32 hello
+    /// a fielded C6 sends (no `hardware.fs`). `None`: the server's own.
+    pub hello_json_override: Option<String>,
     /// Auto-load the seeded project at boot, like real firmware's
     /// startup-project resume (fw-esp32c6 `boot::auto_load_project`): the
     /// server reports it via `project_list_loaded` from the first request.
@@ -156,6 +161,7 @@ impl FakeLightPlayerState {
             drop_responses: false,
             heartbeat_interval: None,
             proto_override: None,
+            hello_json_override: None,
             load_project_at_boot: false,
             project_dir: FAKE_DEVICE_PROJECT_DIR.to_string(),
             packs: true,
@@ -243,6 +249,14 @@ impl FakeLightPlayerState {
 
     pub fn with_proto_override(mut self, proto: u32) -> Self {
         self.proto_override = Some(proto);
+        self
+    }
+
+    /// Say `json` verbatim as every hello: a board on another wire whose
+    /// hello this build may not be able to decode
+    /// ([`Self::hello_json_override`]).
+    pub fn with_hello_json(mut self, json: impl Into<String>) -> Self {
+        self.hello_json_override = Some(json.into());
         self
     }
 
