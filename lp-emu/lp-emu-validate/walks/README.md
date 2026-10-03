@@ -11,7 +11,7 @@ beside the registry that points at them rather than beside a machine.
 | file | payload | what it is |
 |---|---|---|
 | `v3-stop-all.script` | `boot-idle` on `esp32v3` | one request, on the appearance of `[INIT] I/O task spawned`: the classic's heartbeat triple is **elicited**, and this is the eliciting |
-| `s3-stop-all.script` | `boot-idle` on `esp32s3` | the same request on the same trigger line, because the S3's triple is elicited too (M6 P04b put the printer on the elicitation points, never on the heartbeat) |
+| `s3-stop-all.script` | `boot-idle` on `esp32s3` | the same **request**, on this chip's own trigger line (not the classic's — see provenance below), because the S3's triple is elicited too (M6 P04b put the printer on the elicitation points, never on the heartbeat) |
 
 ## `v3-stop-all.script`'s provenance
 
@@ -48,12 +48,25 @@ is compared for this payload.
 
 The classic's file, checked against the classic's file — `the_s3_stop_all_script_is_the_classics_stimulus`
 (`lp-emu-validate/src/payload.rs`) asserts that the two carry the **same
-single directive**, and the classic's is in turn asserted against
-`lp-emu-esp32v3/tests/boot_idle.rs`'s constants, so the S3's walk is two
-links away from a gate rather than from an eye. A second assertion checks the
-trigger line against `lp-emu-esp32s3/tests/boot_idle.rs`'s `HELLO`, which
-pins this image's whole `[INIT]` chain byte for byte: a trigger that is not a
-line the firmware prints is a run that waits for ever.
+request** (the `+<ms> "M!…"` tail, after the trigger), and the classic's is
+in turn asserted against `lp-emu-esp32v3/tests/boot_idle.rs`'s constants, so
+the S3's walk is two links away from a gate rather than from an eye. The
+**trigger** line is not asserted equal to the classic's: it names each
+chip's own real last pre-filesystem `[INIT]` line, and the S3's has moved
+twice since this file was authored at M6 P08 — the lp-link USB cutover
+renamed it from `[INIT] I/O task spawned` to `[INIT] USB link task
+spawned`, and M2's `io-thread` feature renamed it again, to the line this
+file now carries. A second assertion checks that trigger line against
+`lp-emu-esp32s3/tests/boot_idle.rs`'s `HELLO`, which pins this image's whole
+`[INIT]` chain byte for byte: a trigger that is not a line the firmware
+prints is a run that waits for ever.
+
+⚠️ **Not what the live heap-budget gate reads.** Since wire proto 30 the
+S3's console is lp-link, and `scripts/heap-budget-check.sh`'s `esp32s3` arm
+asks for the triple with a `stopAllProjects` request over the hosted link
+once the hello arrives, not by scripting raw `M!` bytes after this trigger.
+This file stays the `boot-idle` payload's `host_script` for the RomUp arm
+and the classic cross-check above.
 
 Why one stimulus and not a chip-shaped one: the answer a `boot-idle`
 transcript carries is a heap ledger, and two chips asked different questions
