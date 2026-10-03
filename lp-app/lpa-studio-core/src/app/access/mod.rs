@@ -16,7 +16,9 @@
 //! | one unlock conversation over a link | [`login_attempt`] |
 //! | the client-side KDF and its session cache | [`login_key_cache`] |
 //! | passwords this browser remembers | [`remembered_passwords`] |
-//! | the device's list: read, add, remove, switch | [`device_access_ops`] |
+//! | the device's list: read, add, remove, switch, make room | [`device_access_ops`] |
+//! | Play and Author: the two passwords and `open` | [`two_passwords`] |
+//! | the keys that always get in, folded by name | [`key_groups`] |
 //! | each device's last list, cached; panel changes | [`device_access_record`] |
 //! | what a USB connect added on its own | [`access_added`] |
 //! | the controller that runs all of it | [`access_controller`] |
@@ -36,10 +38,12 @@ pub mod account_keys;
 pub mod browser_key;
 pub mod device_access_ops;
 pub mod device_access_record;
+pub mod key_groups;
 pub mod key_holder;
 pub mod login_attempt;
 pub mod login_key_cache;
 pub mod remembered_passwords;
+pub mod two_passwords;
 pub mod ui_access_view;
 
 #[cfg(test)]
@@ -54,15 +58,24 @@ pub use access_session::{
 };
 pub use account_keys::AccountKeys;
 pub use browser_key::BrowserKey;
-pub use device_access_ops::{AccessListing, AccessOp};
-pub use device_access_record::{DeviceAccessChange, DeviceAccessRecord, DeviceAccessRecords};
+pub use device_access_ops::{AccessListing, AccessOp, DroppedKey};
+pub use device_access_record::{
+    DeviceAccessChange, DeviceAccessRecord, DeviceAccessRecords, SetHere,
+};
 pub use key_holder::{HeldKey, KeyHolder};
 pub use login_attempt::{LoginAttemptOutcome, try_login};
 pub use login_key_cache::{DEFAULT_KDF_ITERATIONS, LoginKeyCache};
 pub use remembered_passwords::{MAX_REMEMBERED_PASSWORDS, RememberedPasswords};
 pub use ui_access_view::{
-    PLAY_ONLY_SENTENCE, UiAccessEntry, UiAccessPanel, UiDeviceAccess, UiLoginPrompt, UiUnlockOffer,
+    PLAY_ONLY_SENTENCE, UiAccessPanel, UiDeviceAccess, UiKeyGroup, UiLoginPrompt, UiPasswordLine,
+    UiUnlockOffer, open_summary,
 };
+
+/// Who nearby gets in with no password.
+pub use lpc_access::OpenTo;
+
+/// How many entries one device holds.
+pub use lpc_access::MAX_SECRETS_PER_FILE;
 
 /// The access tier, as the UI names it.
 pub use lpc_access::Tier as AccessTier;
@@ -75,15 +88,16 @@ pub use lpc_access::SecretKind;
 /// action error, the card's push outcome and the sheet.
 pub fn not_permitted_sentence(needs: lpc_access::Tier) -> &'static str {
     match needs {
-        lpc_access::Tier::Edit => "This needs an edit device password — unlock again with one.",
+        lpc_access::Tier::Edit => "This needs an author device password — unlock again with one.",
         lpc_access::Tier::Play => "This needs a device password — unlock first.",
     }
 }
 
-/// A tier's word in the UI ("play", "edit").
+/// A tier's word in the UI ("play", "author"). The edit tier is "author"
+/// to people: "edit" read as editing the password.
 pub fn tier_word(tier: lpc_access::Tier) -> &'static str {
     match tier {
         lpc_access::Tier::Play => "play",
-        lpc_access::Tier::Edit => "edit",
+        lpc_access::Tier::Edit => "author",
     }
 }

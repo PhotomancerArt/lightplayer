@@ -5,7 +5,7 @@
 //! stories say the same thing.
 
 use lpa_devices::identity::DeviceId;
-use lpc_access::Tier;
+use lpc_access::{OpenTo, SecretKind, Tier};
 
 /// One device's access facts, joined onto its card.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -26,26 +26,31 @@ pub struct UiDeviceAccess {
 pub enum UiUnlockOffer {
     /// Nothing Studio holds unlocked it: "Unlock" opens the sheet.
     Locked,
-    /// Unlocked for play only: "Editing needs an edit password, or plug it
-    /// in by USB", with "Enter a password".
+    /// Unlocked for play only: [`PLAY_ONLY_SENTENCE`], with "Enter a
+    /// password".
     PlayOnly,
 }
 
-/// The device access panel: "Who has access", read from the board.
+/// The device access panel, read from the board: "Who nearby can…" Play
+/// and Author, then the keys that always get in, folded into one line.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct UiAccessPanel {
     pub device: DeviceId,
-    /// Every entry on the device, in the board's order (the last listing;
-    /// empty until the device has answered one).
-    pub entries: Vec<UiAccessEntry>,
-    /// The "Who has access · N" count: the entries, plus one for "Anyone
-    /// nearby" when the device is open.
-    pub count: usize,
+    /// Who nearby gets in with no password (nobody until a listing).
+    pub open: OpenTo,
+    /// The Play line.
+    pub play: UiPasswordLine,
+    /// The Author line (the edit tier).
+    pub author: UiPasswordLine,
+    /// "Your browsers & account": every other entry, grouped — this
+    /// browser first, then other browsers by name, then the account's.
+    pub keys: Vec<UiKeyGroup>,
+    /// Entries on the device, of [`Self::capacity`].
+    pub used: usize,
+    pub capacity: usize,
     /// The device's STORED Bluetooth switch: `None` until it has answered a
     /// listing. A change applies at its next boot.
     pub ble_enabled: Option<bool>,
-    /// "Anyone nearby can play".
-    pub open: bool,
     /// Bluetooth was switched since the device last restarted.
     pub restart_pending: bool,
     /// "Restart now" works here (a USB link has the reset lines).
@@ -57,23 +62,66 @@ pub struct UiAccessPanel {
     pub writing: bool,
     /// The last change's failure, in words.
     pub error: Option<String>,
+    /// What the last change did on its own ("Author is open now, so play is
+    /// too.", a key dropped to make room).
+    pub notice: Option<String>,
 }
 
-/// One row of "Who has access".
+/// One "Who nearby can…" line.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct UiAccessEntry {
+pub enum UiPasswordLine {
+    /// Anyone nearby, no password.
+    Anyone,
+    /// Play while Author is Anyone: it follows Author.
+    FollowsAuthor,
+    /// A password this browser set, shown so it can be told or typed over.
+    Shown(String),
+    /// A password set from another browser: it cannot be shown, only
+    /// replaced.
+    SetElsewhere,
+    /// Password, but none is on the device: only the keys get in.
+    NotSet,
+}
+
+impl UiPasswordLine {
+    /// The line reads Anyone (its own, or following Author).
+    pub fn is_anyone(&self) -> bool {
+        matches!(self, Self::Anyone | Self::FollowsAuthor)
+    }
+}
+
+/// One row of "Your browsers & account": entries that share a name and a
+/// kind, folded ("Brave on Mac ×11").
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UiKeyGroup {
     pub label: String,
-    pub kind: lpc_access::SecretKind,
+    pub kind: SecretKind,
     pub tier: Tier,
-    /// The entry's identity on the board: what
-    /// [`super::DeviceAccessChange::Remove`] names.
-    pub salt_id: [u8; lpc_access::SALT_BYTES],
-    /// This browser's own key.
+    /// Every entry in the group: what its trash can removes.
+    pub salts: Vec<[u8; lpc_access::SALT_BYTES]>,
+    /// This browser's own key (always a group of one).
     pub is_this_browser: bool,
-    /// One of the signed-in account's entries (its key or a password).
+    /// The signed-in account's key or one of its passwords.
     pub is_account: bool,
-    /// When it was added (epoch seconds), when the adding client said.
-    pub added_at: Option<u64>,
+    /// The earliest and latest `addedAt` in the group, epoch seconds.
+    pub first_added: Option<u64>,
+    pub last_added: Option<u64>,
+}
+
+impl UiKeyGroup {
+    pub fn count(&self) -> usize {
+        self.salts.len()
+    }
+}
+
+/// What the card's access row says, decided once ("open to anyone
+/// nearby" is the callout a new board needs).
+pub fn open_summary(open: OpenTo) -> &'static str {
+    match open {
+        OpenTo::Edit => "open to anyone nearby",
+        OpenTo::Play => "anyone can play",
+        OpenTo::Nobody => "password",
+    }
 }
 
 /// The password sheet.
@@ -106,9 +154,9 @@ pub fn prompt_sentence(reason: &super::PromptReason, device_name: &str) -> Strin
     }
 }
 
-/// What a device unlocked for play says about editing — on the card and on
-/// the sheet it opens.
-pub const PLAY_ONLY_SENTENCE: &str = "Editing needs an edit password, or plug it in by USB.";
+/// What a device unlocked for play says about authoring — on the card and
+/// on the sheet it opens.
+pub const PLAY_ONLY_SENTENCE: &str = "Authoring needs an author password, or plug it in by USB.";
 
 /// The card's login line for a Bluetooth link.
 pub fn access_line(phase: &super::AccessPhase) -> Option<String> {
@@ -196,7 +244,7 @@ mod tests {
         assert!(!sentence.to_lowercase().contains("failed"));
         assert_eq!(
             prompt_sentence(&PromptReason::NeedsEdit, "Choker"),
-            "Editing needs an edit password, or plug it in by USB."
+            "Authoring needs an author password, or plug it in by USB."
         );
         assert_eq!(
             prompt_sentence(&PromptReason::NoPasswordKnown, "Choker"),
