@@ -1727,7 +1727,6 @@ fn PlacementCard(
     let arrange = fixture.arrange.clone().unwrap_or_default();
     let transform = arrange.transform;
     let node = fixture.node;
-    let node_key = fixture.address.clone();
     let can_edit_mapping = fixture.mapping_artifact.is_some();
     let range_grain = fixture.instances.is_empty();
     let meta = if range_grain {
@@ -1739,17 +1738,19 @@ fn PlacementCard(
             fixture.instances.len()
         )
     };
-    let dispatch = crate::app::editor_shell::arrange_dispatch(&surface);
+    // Each commit presses the fixture's `arrange/set` (M6e).
+    let offers = use_offers();
+    let set = surface
+        .arrange_verbs_of(node)
+        .map(|at| at.child(lpa_studio_core::ARRANGE_SET_VERB));
     let commit = EventHandler::new(move |transform: UiArrangeTransform| {
-        let Some(node_key) = node_key.clone() else {
-            return;
-        };
-        if let Some(op) = dispatch(lpa_studio_core::EditorMetaVerb::Set {
-            node_key,
-            node: Some(node),
-            transform,
-        }) {
-            on_action.call(UiAction::from_op(ProjectController::NODE_ID, op));
+        if let Some(set) = &set {
+            crate::app::editor_shell::press_arrange(
+                &on_action,
+                &offers.peek(),
+                set,
+                crate::app::editor_shell::placement_args(&transform),
+            );
         }
     });
     let card_class = if selected {

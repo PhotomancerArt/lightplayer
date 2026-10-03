@@ -129,6 +129,19 @@ pub fn build_app_system_prompt(reference: &str) -> String {
          output for its own. A `subject` defaults to what the user has \
          selected; `lamp`, `steps`, `start`, `lamps` and `delta` are whole \
          numbers.\n\
+         - A playlist's live controls are actions on the playlist node: \
+         `play` (`entry`: which pattern), `next`, `prev`, `cycle` \
+         (`cycling`: on or off), `step-shorter`, `step-longer` and `skip` \
+         (`entry`, and `skipped`: on leaves it out of the cycle, off puts \
+         it back). They change what plays now, not the saved project; to \
+         change the project's own cycle or skip list, use `edit_project`.\n\
+         - Placing a fixture on the arrange canvas is \
+         `project/<node path>/arrange/set` (`x`, `y`, `rotation` in degrees, \
+         `scale`; a value left out stays), and `project/arrange/undo` and \
+         `project/arrange/redo` walk those placements. One pending edit is \
+         reverted with `project/revert-edit` (`edit`: which one), and a \
+         built-in example is kept as the user's own with \
+         `project/save-copy`.\n\
          - You do not write shader code. When the user asks to change what \
          a shader itself does — its colors, motion or shape, as code — `act` \
          that shader node's `ask-agent` action with their request in \

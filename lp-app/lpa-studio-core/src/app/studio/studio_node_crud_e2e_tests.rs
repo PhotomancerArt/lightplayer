@@ -482,10 +482,13 @@ fn remove_stages_rows_revert_restores_and_save_deletes_on_disk() {
         "staged removal deletes nothing before save"
     );
 
-    // Revert from the row: the node comes back whole.
-    let revert = removed_row.revert.clone().expect("row revert offered");
-    handle.tx.send(StudioCommand::Action(revert));
-    drive(actor.run_one_batch_for_test());
+    // Revert from the row: the node comes back whole. The row's button
+    // presses `project/revert-edit` with its own key.
+    let key = removed_row.key.clone().expect("row revert offered");
+    actor_clicks(&mut actor, &handle.tx).press(
+        format!("project/{}", crate::REVERT_EDIT_VERB),
+        OfferArgs::new().with(crate::REVERT_EDIT_PARAM, key),
+    );
     handle.tx.send(project_action(ProjectOp::RefreshProject));
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("revert + refresh emit a snapshot");

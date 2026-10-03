@@ -17,9 +17,12 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    UiAction, UiAddNodeMenu, UiPlaylistEntry, UiPlaylistFace as UiPlaylistFaceData, UiProductKind,
+    OfferArgs, OfferPath, PLAYLIST_ENTRY_PARAM, PLAYLIST_PLAY_VERB, ProjectNodeAddress, UiAction,
+    UiAddNodeMenu, UiOffer, UiPlaylistEntry, UiPlaylistFace as UiPlaylistFaceData, UiProductKind,
     UiProductPreviewFrame, UiProductTrackingState,
 };
+
+use crate::core::use_offer_at;
 
 use crate::app::node::produced_product_view::ProductPreview;
 use crate::app::node::{AddNodePicker, NodeCardSection};
@@ -33,6 +36,11 @@ const STRIP_THUMB_FRAME: UiProductPreviewFrame = UiProductPreviewFrame::new(9, 5
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn PlaylistFace(
     face: UiPlaylistFaceData,
+    /// The playlist node's address path: a non-active chip presses its
+    /// `play` offer (`project/<playlist>/play`). `None` (a surface with no
+    /// address) leaves those chips inert.
+    #[props(default = None)]
+    node: Option<String>,
     /// The playlist's add-node picker data (attach = this playlist's
     /// entries); with a dispatcher present, the strip's tail renders the add
     /// chip.
@@ -40,6 +48,14 @@ pub fn PlaylistFace(
     add_node_menu: Option<UiAddNodeMenu>,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
+    // The playlist's `play`, as core publishes it now (M6e).
+    let play = use_offer_at(
+        node.as_deref()
+            .and_then(|node| ProjectNodeAddress::parse(node).ok())
+            .map(|address| OfferPath::project_node(&address).child(PLAYLIST_PLAY_VERB))
+            .unwrap_or_else(|| OfferPath::project().child(PLAYLIST_PLAY_VERB)),
+    )();
+    let play = play.filter(|_| node.is_some());
     let add_chip = match (add_node_menu, on_action) {
         (Some(menu), Some(handler)) => Some((menu, handler)),
         _ => None,
@@ -68,6 +84,7 @@ pub fn PlaylistFace(
                         key: "{entry.key}",
                         active: face.active == Some(entry.key),
                         entry,
+                        play: play.clone(),
                         on_action,
                     }
                 }
@@ -105,14 +122,18 @@ fn PlaylistAddChip(menu: UiAddNodeMenu, on_action: EventHandler<UiAction>) -> El
 }
 
 /// One strip entry: thumbnail (badged ACTIVE when playing), name, cue tag,
-/// and duration chip. With an entry action and a dispatcher present the
-/// chip is a button — clicking selects/focuses the entry's child node (the
-/// reused node-select action; activation-by-click has no wire op today).
+/// and duration chip. With a dispatcher present the chip is a button: the
+/// ACTIVE chip selects/focuses its child node (the reused node-select
+/// action), and every other chip presses the playlist's `play` with its
+/// key — activate now, a runtime poke.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn PlaylistEntryChip(
     entry: UiPlaylistEntry,
     active: bool,
+    /// The playlist's `play` offer, when core publishes one.
+    #[props(default = None)]
+    play: Option<UiOffer>,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
     let chip_class = if active {
@@ -170,12 +191,23 @@ fn PlaylistEntryChip(
         }
     };
 
-    if let (Some(action), Some(handler)) = (entry.action.clone(), on_action) {
+    // The ACTIVE chip focuses its child; any other presses `play` with its
+    // key (an option core may draw disabled, which leaves the chip inert).
+    let action = if active {
+        entry.focus.clone()
+    } else {
+        play.as_ref().and_then(|offer| {
+            offer
+                .press(&OfferArgs::new().with(PLAYLIST_ENTRY_PARAM, entry.key.to_string()))
+                .ok()
+        })
+    };
+    if let (Some(action), Some(handler)) = (action, on_action) {
         return rsx! {
             button {
                 class: "{chip_class} tw:cursor-pointer tw:p-0 tw:text-left tw:hover:border-border",
                 r#type: "button",
-                title: "Select {name}",
+                title: if active { format!("Select {name}") } else { format!("Play {name}") },
                 onclick: move |event| {
                     event.stop_propagation();
                     handler.call(action.clone());
@@ -219,7 +251,7 @@ mod tests {
             duration_ms: None,
             cue: false,
             thumb: None,
-            action: None,
+            focus: None,
         }
     }
 
