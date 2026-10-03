@@ -1,0 +1,33 @@
+{
+  "save": [
+    {"label": "focus blue (shipped)", "class": ""},
+    {"label": "orchid", "class": "ux-agent-p-orchid"},
+    {"label": "opal", "class": "ux-agent-p-opal"},
+    {"label": "twilight", "class": "ux-agent-p-twilight"},
+    {"label": "synth", "class": "ux-agent-p-synth"}
+  ],
+  "node-verb": [
+    {"label": "focus blue (shipped)", "class": ""},
+    {"label": "orchid", "class": "ux-agent-p-orchid"},
+    {"label": "opal", "class": "ux-agent-p-opal"},
+    {"label": "twilight", "class": "ux-agent-p-twilight"},
+    {"label": "synth", "class": "ux-agent-p-synth"}
+  ],
+  "device-button": [
+    {"label": "focus blue (shipped)", "class": ""},
+    {"label": "orchid", "class": "ux-agent-p-orchid"},
+    {"label": "opal", "class": "ux-agent-p-opal"},
+    {"label": "twilight", "class": "ux-agent-p-twilight"},
+    {"label": "synth", "class": "ux-agent-p-synth"}
+  ],
+  "edited-node": [
+    {"label": "card · focus blue (shipped)", "class": ""},
+    null,
+    null,
+    {"label": "knob + tab · focus blue", "class": "ux-agent-e-chip"},
+    {"label": "knob + tab · orchid", "class": "ux-agent-e-chip ux-agent-p-orchid"},
+    {"label": "knob + tab · opal", "class": "ux-agent-e-chip ux-agent-p-opal"},
+    {"label": "knob + tab · twilight", "class": "ux-agent-e-chip ux-agent-p-twilight"},
+    {"label": "knob + tab · synth", "class": "ux-agent-e-chip ux-agent-p-synth"}
+  ]
+}

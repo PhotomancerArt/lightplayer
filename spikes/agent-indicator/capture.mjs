@@ -26,6 +26,8 @@ const site = path.join(repo, "target/dx/lpa-studio-web/release/web/public");
 const argv = process.argv.slice(2);
 const cssAt = argv.indexOf("--css");
 const overrideCss = cssAt >= 0 ? await (await import("node:fs/promises")).readFile(argv.splice(cssAt, 2)[1], "utf8") : "";
+const cellsAt = argv.indexOf("--cells");
+const cellMap = cellsAt >= 0 ? JSON.parse(await (await import("node:fs/promises")).readFile(argv.splice(cellsAt, 2)[1], "utf8")) : {};
 const outDir = path.resolve(argv[0] ?? "spike-out");
 const only = argv.slice(1);
 
@@ -158,6 +160,17 @@ async function openStory(story, reduced) {
       console.error("not ready:", await evaluate(`({ href: location.href, cap: !!document.querySelector('[data-story-capture]'), capId: document.querySelector('[data-story-capture]')?.getAttribute('data-story-id'), text: document.body.innerText.slice(0, 300) })`));
     }
   }
+  if (cellMap[currentKey]) {
+    await evaluate(`(() => {
+      const map = ${JSON.stringify(cellMap[currentKey])};
+      [...document.querySelectorAll('[data-spike-cell]')].forEach((cell, i) => {
+        const m = map[i];
+        if (!m) { cell.style.display = 'none'; return; }
+        cell.setAttribute('data-spike-cell', m.label);
+        cell.className = 'tw:grid tw:min-w-0 tw:content-start tw:gap-2 tw:p-4 ' + m.class;
+      });
+    })()`);
+  }
   await evaluate(`(() => {
     const s = document.createElement("style");
     s.textContent = ${JSON.stringify("[data-spike-cell] > span:first-child { visibility: hidden; }\n")} + ${JSON.stringify(overrideCss)};
@@ -176,7 +189,7 @@ async function pauseAt(t) {
 async function cellRects(control) {
   return evaluate(`(() => {
     const pad = ${JSON.stringify(control.pad)};
-    return [...document.querySelectorAll('[data-spike-cell]')].map((cell) => {
+    return [...document.querySelectorAll('[data-spike-cell]')].filter((c) => c.style.display !== 'none').map((cell) => {
       const t = cell.querySelector(${JSON.stringify(control.target)});
       const r = t.getBoundingClientRect();
       let bottom = r.bottom;
@@ -195,7 +208,7 @@ async function cellRects(control) {
 }
 
 async function stripRects(control) {
-  return evaluate(`(() => [...document.querySelectorAll('[data-spike-cell]')].map((cell) => {
+  return evaluate(`(() => [...document.querySelectorAll('[data-spike-cell]')].filter((c) => c.style.display !== 'none').map((cell) => {
     const els = [...cell.querySelectorAll(${JSON.stringify(control.strip)})].map((e) => e.getBoundingClientRect());
     const l = Math.min(...els.map((r) => r.left)), r = Math.max(...els.map((r) => r.right));
     const t = Math.min(...els.map((r) => r.top)), b = Math.max(...els.map((r) => r.bottom));
@@ -211,7 +224,9 @@ async function shoot(rect, file) {
 const slug = (s) => s.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase();
 const manifest = {};
 
+let currentKey = null;
 for (const control of CONTROLS) {
+  currentKey = control.key;
   const dir = path.join(outDir, control.key);
   await rm(dir, { recursive: true, force: true });
   await mkdir(dir, { recursive: true });

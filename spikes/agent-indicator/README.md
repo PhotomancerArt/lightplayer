@@ -12,3 +12,8 @@ Frame strips, stills and motion clips:
     dx build --web -p lpa-studio-web --features stories --release --debug-symbols false
     node spikes/agent-indicator/capture.mjs <out-dir> [save|node-verb|device-button|edited-node]
     # --css <file> appends override CSS for quick iteration without a rebuild
+
+Round 2 (agent palettes) is an override on the round-1 build:
+
+    node spikes/agent-indicator/capture.mjs --css spikes/agent-indicator/rounds/r2-palettes.css \
+      --cells spikes/agent-indicator/rounds/r2-palettes.cells.json <out-dir>

@@ -1,0 +1,172 @@
+/* Agent palettes (candidate NEW tokens): the spectrum's gradient ring, in
+   the agent's own colours. Stops loop back to the first so the conic seam
+   never shows. */
+.ux-agent-p-orchid {
+    --ux-agent-stops: #ff6ec7, #e46bff, #ff9bd2, #ff6ec7;
+    --ux-agent-ink: #ff8fd6;
+    --ux-agent-glow: rgba(255, 110, 199, 0.34);
+}
+.ux-agent-p-opal {
+    --ux-agent-stops: #f6ecff, #c4f1ff, #fff1cc, #ffd3ef, #f6ecff;
+    --ux-agent-ink: #f1e6ff;
+    --ux-agent-glow: rgba(235, 225, 255, 0.3);
+}
+.ux-agent-p-twilight {
+    --ux-agent-stops: #7c8cff, #b47bff, #ff6ec7, #7c8cff;
+    --ux-agent-ink: #c08aff;
+    --ux-agent-glow: rgba(160, 120, 255, 0.36);
+}
+.ux-agent-p-synth {
+    --ux-agent-stops: #3ee8d0, #7a9bff, #ff5fd2, #3ee8d0;
+    --ux-agent-ink: #ff7fdc;
+    --ux-agent-glow: rgba(255, 95, 210, 0.3);
+}
+
+:is(.ux-agent-p-orchid, .ux-agent-p-opal, .ux-agent-p-twilight, .ux-agent-p-synth)
+    :is(.ux-agent-lit > *, .ux-agent-slot) {
+    position: relative;
+    box-shadow: 0 2px 22px var(--ux-agent-glow);
+    animation: ux-agent-p-host 4s ease-out forwards;
+}
+
+:is(.ux-agent-p-orchid, .ux-agent-p-opal, .ux-agent-p-twilight, .ux-agent-p-synth)
+    :is(.ux-agent-lit > *, .ux-agent-slot)::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 4;
+    border-radius: inherit;
+    pointer-events: none;
+    padding: 2px;
+    background: conic-gradient(from var(--ux-ir-angle), var(--ux-agent-stops));
+    mask:
+        linear-gradient(#000 0 0) content-box,
+        linear-gradient(#000 0 0);
+    mask-composite: exclude;
+    -webkit-mask:
+        linear-gradient(#000 0 0) content-box,
+        linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    animation:
+        ux-agent-fade 4s ease-out forwards,
+        ux-ir-spin 2.4s linear infinite;
+}
+
+:is(.ux-agent-p-orchid, .ux-agent-p-opal, .ux-agent-p-twilight, .ux-agent-p-synth)
+    .ux-agent-slot-pad {
+    box-shadow:
+        0 0 0 8px color-mix(in srgb, var(--ux-agent-ink) 10%, transparent),
+        0 2px 22px var(--ux-agent-glow);
+    animation: ux-agent-p-pad 4s ease-out forwards;
+}
+
+:is(.ux-agent-p-orchid, .ux-agent-p-opal, .ux-agent-p-twilight, .ux-agent-p-synth)
+    .ux-agent-slot-pad::after {
+    inset: -8px;
+    border-radius: 12px;
+}
+
+/* The press: a wash of the agent's ink that flashes and clears, under the
+   spinning ring and the glow. */
+@keyframes ux-agent-p-host {
+    0% {
+        box-shadow:
+            inset 0 0 0 999px transparent,
+            0 2px 22px transparent;
+    }
+    6% {
+        box-shadow:
+            inset 0 0 0 999px color-mix(in srgb, var(--ux-agent-ink) 32%, transparent),
+            0 2px 30px var(--ux-agent-glow);
+    }
+    30%,
+    70% {
+        box-shadow:
+            inset 0 0 0 999px color-mix(in srgb, var(--ux-agent-ink) 6%, transparent),
+            0 2px 22px var(--ux-agent-glow);
+    }
+    100% {
+        box-shadow:
+            inset 0 0 0 999px transparent,
+            0 2px 22px transparent;
+    }
+}
+
+@keyframes ux-agent-p-pad {
+    0% {
+        box-shadow:
+            0 0 0 8px transparent,
+            0 2px 22px transparent;
+    }
+    6% {
+        box-shadow:
+            0 0 0 8px color-mix(in srgb, var(--ux-agent-ink) 30%, transparent),
+            0 2px 30px var(--ux-agent-glow);
+    }
+    30%,
+    70% {
+        box-shadow:
+            0 0 0 8px color-mix(in srgb, var(--ux-agent-ink) 10%, transparent),
+            0 2px 22px var(--ux-agent-glow);
+    }
+    100% {
+        box-shadow:
+            0 0 0 8px transparent,
+            0 2px 22px transparent;
+    }
+}
+
+/* The chip in the agent's colours: gradient edge, ink sparkle. */
+:is(.ux-agent-p-orchid, .ux-agent-p-opal, .ux-agent-p-twilight, .ux-agent-p-synth).ux-agent-e-chip
+    .ux-agent-chip {
+    border: 1px solid transparent;
+    background:
+        linear-gradient(var(--studio-color-surface-raised), var(--studio-color-surface-raised)) padding-box,
+        linear-gradient(90deg, var(--ux-agent-stops)) border-box;
+    color: var(--studio-color-text-soft);
+    box-shadow: 0 0 14px var(--ux-agent-glow);
+}
+
+:is(.ux-agent-p-orchid, .ux-agent-p-opal, .ux-agent-p-twilight, .ux-agent-p-synth).ux-agent-e-chip
+    .ux-agent-chip > :first-child {
+    color: var(--ux-agent-ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    :is(.ux-agent-p-orchid, .ux-agent-p-opal, .ux-agent-p-twilight, .ux-agent-p-synth)
+        :is(.ux-agent-lit > *, .ux-agent-slot),
+    :is(.ux-agent-p-orchid, .ux-agent-p-opal, .ux-agent-p-twilight, .ux-agent-p-synth)
+        :is(.ux-agent-lit > *, .ux-agent-slot)::after {
+        animation: none;
+    }
+}
+
+/* knob + tab: the card itself stays dark under a palette too. */
+:is(.ux-agent-e-slot, .ux-agent-e-chip) .ux-agent-mark.ux-agent-lit-edited > * {
+    box-shadow: none;
+    animation: none;
+}
+:is(.ux-agent-e-slot, .ux-agent-e-chip) .ux-agent-mark.ux-agent-lit-edited > *::after {
+    content: none;
+}
+
+/* (round-1 fixes, in source but not in this build) */
+.ux-agent-e-chip .ux-agent-lit-edited > * {
+    position: relative;
+    overflow: visible;
+}
+.ux-agent-e-chip .ux-agent-chip {
+    position: absolute;
+    top: -10px;
+    left: 40px;
+    z-index: 6;
+    margin: 0;
+}
+.ux-agent-e-chip:not(.ux-agent-p-orchid, .ux-agent-p-opal, .ux-agent-p-twilight, .ux-agent-p-synth) .ux-agent-chip {
+    background:
+        linear-gradient(
+            color-mix(in srgb, var(--studio-color-focus-ring) 18%, transparent),
+            color-mix(in srgb, var(--studio-color-focus-ring) 18%, transparent)
+        ),
+        var(--studio-color-surface);
+}
