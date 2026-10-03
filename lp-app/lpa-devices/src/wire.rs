@@ -126,6 +126,15 @@ impl ServerFrame {
         }
     }
 
+    /// A hello of which only the wire version could be read. See
+    /// [`ServerFrameBody::HelloOnOtherWire`].
+    pub fn hello_on_other_wire(request_id: u32, proto: u32) -> Self {
+        Self {
+            request_id,
+            body: ServerFrameBody::HelloOnOtherWire { proto },
+        }
+    }
+
     pub fn other(request_id: u32, label: impl Into<String>) -> Self {
         Self {
             request_id,
@@ -140,7 +149,9 @@ impl ServerFrame {
         match &self.body {
             ServerFrameBody::Hello(hello) => Some(&hello.identity),
             ServerFrameBody::Heartbeat { identity, .. } => identity.as_ref(),
-            ServerFrameBody::Loaded { .. } | ServerFrameBody::Other { .. } => None,
+            ServerFrameBody::Loaded { .. }
+            | ServerFrameBody::Other { .. }
+            | ServerFrameBody::HelloOnOtherWire { .. } => None,
         }
     }
 
@@ -149,7 +160,9 @@ impl ServerFrame {
         match &self.body {
             ServerFrameBody::Heartbeat { loaded, .. } => loaded.as_deref(),
             ServerFrameBody::Loaded { loaded } => Some(loaded),
-            ServerFrameBody::Hello(_) | ServerFrameBody::Other { .. } => None,
+            ServerFrameBody::Hello(_)
+            | ServerFrameBody::Other { .. }
+            | ServerFrameBody::HelloOnOtherWire { .. } => None,
         }
     }
 }
@@ -246,6 +259,15 @@ pub enum ServerFrameBody {
     },
     Other {
         label: String,
+    },
+    /// A hello this build could not decode, of which only its wire version
+    /// was read (`lpc_wire::hello_proto`): a board on another wire whose
+    /// hello changed shape. Still a hello — the board is a LightPlayer on
+    /// that wire — never the "no hello" of pre-hello firmware (G1-F1: every
+    /// wire-32 C6 read "pre-hello firmware" in a wire-33 Studio). Nothing
+    /// else of it is read.
+    HelloOnOtherWire {
+        proto: u32,
     },
 }
 
@@ -373,6 +395,18 @@ pub enum BoardFs {
 }
 
 impl HelloFacts {
+    /// The facts of a hello of which only the wire version is known
+    /// ([`ServerFrameBody::HelloOnOtherWire`]). Everything else is "did not
+    /// say" — no identity (heartbeats carry that), no firmware label, no
+    /// board, `fs` unknown — because nothing else of a hello from another
+    /// wire is read.
+    pub fn version_only(proto: u32) -> Self {
+        Self {
+            proto,
+            ..Self::default()
+        }
+    }
+
     /// Short display label: what the user should read on a ready card.
     pub fn label(&self) -> String {
         match (&self.board_id, &self.firmware) {

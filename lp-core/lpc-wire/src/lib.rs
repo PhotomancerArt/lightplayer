@@ -120,7 +120,7 @@ pub use server::{
     FaultedNodeWire, FsBootState, FsRequest, FsResponse, HardwareFacts, HardwareIdentity,
     HeartbeatIdentity, HelloAuth, HelloIdentity, LinkCounters, LinkResets, LoadedProject,
     MemoryStats, ProjectFaultWire, SampleStats, ServerConfig, ServerHello, ServerMsgBody,
-    WIRE_PROTO_VERSION,
+    WIRE_PROTO_VERSION, hello_proto,
 };
 pub use slot::{
     WireSlotChange, WireSlotData, WireSlotFullSync, WireSlotPatch, WireSlotRootSnapshot,
