@@ -38,6 +38,10 @@ impl OfferPath {
     pub const PROJECT: &'static str = "project";
     /// The namespace every device offer lives under.
     pub const DEVICES: &'static str = "devices";
+    /// The namespace of Show: `show/<target>` brings the control at
+    /// `<target>` into view (the app chat's link to where the agent
+    /// pressed or edited something).
+    pub const SHOW: &'static str = "show";
 
     /// A one-segment path: a namespace or verb (no `.`).
     pub fn root(segment: impl Into<String>) -> Self {
@@ -63,6 +67,27 @@ impl OfferPath {
     /// `devices/new-3`).
     pub fn board(board: &BoardRef) -> Self {
         Self::devices().child(board.to_string())
+    }
+
+    /// `show/<target>`: the Show offer for the control at `target`
+    /// (`show/project/save`, `show/project/demo.module/fixture.fixture`).
+    /// A namespace of its own, so no surface's [`crate::UiOfferTree::verbs_of`]
+    /// ever draws it as one of its buttons.
+    pub fn show_of(target: &OfferPath) -> Self {
+        let mut segments = Vec::with_capacity(target.len() + 1);
+        segments.push(Self::SHOW.to_string());
+        segments.extend(target.segments.iter().cloned());
+        Self { segments }
+    }
+
+    /// The target a `show/<target>` path shows; `None` for any other path.
+    pub fn shown_target(&self) -> Option<OfferPath> {
+        match self.segments.split_first() {
+            Some((first, rest)) if first == Self::SHOW && !rest.is_empty() => Some(Self {
+                segments: rest.to_vec(),
+            }),
+            _ => None,
+        }
     }
 
     /// `project/<node tree path>`: the prefix a node card asks
@@ -244,6 +269,16 @@ mod tests {
                 .names_node()
         );
         assert_eq!(OfferPath::project().owner(), None);
+    }
+
+    #[test]
+    fn show_wraps_a_target_and_reads_it_back() {
+        let node = OfferPath::project_node(&ProjectNodeAddress::parse("/demo.module").unwrap());
+        let show = OfferPath::show_of(&node);
+        assert_eq!(show.to_string(), "show/project/demo.module");
+        assert_eq!(show.shown_target(), Some(node.clone()));
+        assert_eq!(node.shown_target(), None);
+        assert_eq!(OfferPath::root("show").shown_target(), None);
     }
 
     #[test]

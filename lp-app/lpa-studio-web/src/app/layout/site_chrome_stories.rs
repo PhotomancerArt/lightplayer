@@ -432,6 +432,25 @@ fn frame(width: u32, section: SiteSection, chip: BuildChip, menu_open: bool) -> 
     }
 }
 
+#[story(
+    label = "Agent light — Save in the header",
+    description = "The agent light (agentic-UI M8) on the header's Save: the assistant just pressed `project/save`, so the Save beside the CHANGES segment wears the press flare's ring — the focus-ring blue inset ring and the glow bloom, the same light a press of yours gets. It is a moment, not a state: live it rises, holds and fades over four seconds (core's clock puts it out); with reduced motion, and in this capture, it is the still ring. It never takes focus and never scrolls — watching the assistant work shows where Save lives without moving anything under your hands. TOP: at rest. BOTTOM: lit."
+)]
+pub(crate) fn agent_lit_save() -> Element {
+    let lit = crate::app::agent::story_activity([(
+        OfferPath::project().child("save"),
+        lpa_studio_core::AgentActivityKind::Pressed,
+    )]);
+    rsx! {
+        div { class: "tw:grid tw:gap-3",
+            {control_row(1000, sim_control(Some("ESP32-C6")), Some(control_content(3, 0, UiStatus::good("Ready"))), None)}
+            crate::app::agent::AgentActivityProvider { activity: lit,
+                {control_row(1000, sim_control(Some("ESP32-C6")), Some(control_content(3, 0, UiStatus::good("Ready"))), None)}
+            }
+        }
+    }
+}
+
 /// One control frame: `SectionSession` (studio mode) at a fixed width, so
 /// the folds trigger off the FRAME rather than the story viewport — the
 /// same technique `frame`/`chip_frame` used for the retired session strip

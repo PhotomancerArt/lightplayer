@@ -807,6 +807,36 @@ fn devices_page_degraded_card() -> Element {
     }
 }
 
+#[story(
+    label = "Agent light — a device card's verb",
+    description = "The agent light (agentic-UI M8) on a device card. The assistant pressed this board's Remove (`devices/<board>/remove-project`) — or handed it to you on a card — so that chip in the PROJECT zone's verb row wears the light, and the same chip on the docked lens card would too: every control that draws an offer is keyed by the offer's path. LEFT: at rest. RIGHT: lit. The card's size, its zones and every other verb stay exactly where they were."
+)]
+fn devices_card_agent_lit() -> Element {
+    let card = roster_fixture().roster.devices.remove(0);
+    let lit = crate::app::agent::story_activity([(
+        story_board_prefix(card.id).child("remove-project"),
+        lpa_studio_core::AgentActivityKind::Pressed,
+    )]);
+    rsx! {
+        div { class: "tw:grid tw:max-w-xl tw:grid-cols-2 tw:gap-3 tw:p-4",
+            StoryDeviceCard {
+                card: card.clone(),
+                projects: vec![],
+                examples: vec![],
+                on_action: |_| {},
+            }
+            crate::app::agent::AgentActivityProvider { activity: lit,
+                StoryDeviceCard {
+                    card,
+                    projects: vec![],
+                    examples: vec![],
+                    on_action: |_| {},
+                }
+            }
+        }
+    }
+}
+
 /// The running card of `roster_fixture`, as it reads once the board reports
 /// a faulted node — the bench case, with the ledger's own denial as the
 /// runtime's reason.

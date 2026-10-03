@@ -86,6 +86,15 @@ impl UiOfferTree {
         self.devices.get(&device)
     }
 
+    /// The device whose verbs live under `prefix` (`devices/<board ref>`),
+    /// the reverse of [`Self::device_prefix`].
+    pub fn device_at(&self, prefix: &OfferPath) -> Option<DeviceId> {
+        self.devices
+            .iter()
+            .find(|(_, at)| *at == prefix)
+            .map(|(device, _)| *device)
+    }
+
     /// The offer at `path`, if one is published.
     pub fn get(&self, path: &OfferPath) -> Option<&UiOffer> {
         self.index.get(path).map(|&at| &self.offers[at])

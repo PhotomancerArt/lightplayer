@@ -24,12 +24,16 @@ pub use lpc_history::{ContentHash, SyncRelation};
 pub use self::core::issue::UiIssue;
 pub use self::core::view::progress_state::ProgressState;
 pub use app::agent::{
+    AGENT_ACTIVITY_KEPT, AGENT_ACTIVITY_LIT_SECS, AgentActivity, AgentActivityEntry,
+    AgentActivityKind, UiAgentActivity, UiAgentLit, UiAgentPlace, UiAgentReveal,
+};
+pub use app::agent::{
     AgentController, AgentCostRates, AgentEditRecord, AgentFeedback, AgentModelsFetchFuture,
     AgentOp, AgentProviderConfig, AgentRunContext, AgentSessionKey, AgentTaskFuture,
-    AgentTimerFactory, AgentTimerFuture, AgentViewContext, MAX_EDIT_RECORDS, UiAgentAvailability,
-    UiAgentCard, UiAgentCardState, UiAgentDebugDump, UiAgentEditBatch, UiAgentEditLine,
-    UiAgentEditOutcome, UiAgentHistoryEntry, UiAgentModelView, UiAgentStatus, UiAgentToolRow,
-    UiAgentTurn, UiAgentUsage, UiAgentView, UiAppAgentView, instant_agent_timer,
+    AgentTimerFactory, AgentTimerFuture, AgentViewContext, MAX_EDIT_RECORDS, UiAgentActPress,
+    UiAgentAvailability, UiAgentCard, UiAgentCardState, UiAgentDebugDump, UiAgentEditBatch,
+    UiAgentEditLine, UiAgentEditOutcome, UiAgentHistoryEntry, UiAgentModelView, UiAgentStatus,
+    UiAgentToolRow, UiAgentTurn, UiAgentUsage, UiAgentView, UiAppAgentView, instant_agent_timer,
 };
 pub use app::bus::{
     UiBusChannelPreview, UiBusChannelView, UiBusSiteOrigin, UiBusSiteView, UiBusView,

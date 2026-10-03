@@ -5885,6 +5885,20 @@ impl ProjectController {
         }
     }
 
+    /// Focus the card of the node whose offers live at `prefix`
+    /// (`project/demo.module/fixture.fixture`), the way a tree-row click
+    /// does — the user's Show on an app-chat row. `false` when no node
+    /// lives there.
+    pub(crate) fn focus_node_at_prefix(&mut self, prefix: &crate::OfferPath) -> bool {
+        let Some(node) = self.node_at_prefix(prefix) else {
+            return false;
+        };
+        let target = ProjectEditorTarget::addressed_node(node.target().clone());
+        self.focus_editor_target(&target);
+        self.active_editor_target = Some(target);
+        true
+    }
+
     fn focus_editor_target(&mut self, target: &ProjectEditorTarget) {
         // An explicit selection (a click, Show live, the URL's target, a
         // created node): from here on selection streams as it always has.

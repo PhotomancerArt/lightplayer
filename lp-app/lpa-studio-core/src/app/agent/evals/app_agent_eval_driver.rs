@@ -395,6 +395,24 @@ impl AgentEvalStudio {
         }
     }
 
+    /// The view as the page would get it now.
+    pub(crate) fn view(&mut self) -> crate::UiStudioView {
+        self.controller().view()
+    }
+
+    /// The app agent's readout as its next turn would read it.
+    pub(crate) fn readout(&mut self) -> String {
+        self.controller().app_agent_readout_for_test().render()
+    }
+
+    /// Move the injected clock on by `secs` and run the change gate the
+    /// actor runs after a batch: `Some` view when something moved.
+    pub(crate) fn advance_clock(&mut self, secs: f64) -> Option<crate::UiStudioView> {
+        let controller = self.controller();
+        controller.advance_clock_for_test(secs);
+        controller.view_if_changed()
+    }
+
     fn controller(&mut self) -> &mut StudioController {
         self.actor.controller_mut_for_test()
     }

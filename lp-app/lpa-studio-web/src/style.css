@@ -5789,6 +5789,106 @@ label:has(> input:not(:disabled)) {
         0 2px 26px var(--studio-glow);
 }
 
+/* --------------------------------------------------------------------------
+   Agent light (agentic-UI roadmap M8): the app agent pressed this, handed it
+   over on a card, or edited this node. It wears the PRESS flare's language
+   (the focus-ring blue ring + the glow bloom) because it is a press — the
+   assistant's — and it is a moment, not a state: it rises, holds and fades
+   over the light's lifetime (core's AGENT_ACTIVITY_LIT_SECS, 4 s), and core
+   puts the class out when it expires.
+
+   `.ux-agent-mark` is `display: contents` — no box, so wrapping any control
+   moves nothing — and the light lands on its child. The ring is INSET so a
+   clipping host (the pane header, a card's overflow) never swallows it; the
+   bloom outside is a bonus where there is room. Two identical animations,
+   `-a`/`-b`, alternate by the light's seq so a re-light of a still-lit
+   control starts over (a changed animation-name restarts it).
+
+   Reduced motion (and the story capture's freeze): no animation, so the
+   base rule — the full light — holds still until core removes the class.
+   -------------------------------------------------------------------------- */
+.ux-agent-mark {
+    display: contents;
+}
+
+.ux-agent-lit > * {
+    box-shadow:
+        inset 0 0 0 2px var(--studio-color-focus-ring),
+        0 0 0 3px color-mix(in srgb, var(--studio-color-focus-ring) 35%, transparent),
+        0 2px 22px var(--studio-glow);
+}
+
+.ux-agent-lit-a > * {
+    animation: ux-agent-light-a 4s ease-out forwards;
+}
+
+.ux-agent-lit-b > * {
+    animation: ux-agent-light-b 4s ease-out forwards;
+}
+
+@keyframes ux-agent-light-a {
+    0% {
+        box-shadow:
+            inset 0 0 0 2px transparent,
+            0 0 0 10px transparent,
+            0 2px 22px transparent;
+    }
+    8% {
+        box-shadow:
+            inset 0 0 0 2px var(--studio-color-focus-ring),
+            0 0 0 5px color-mix(in srgb, var(--studio-color-focus-ring) 45%, transparent),
+            0 2px 28px var(--studio-glow);
+    }
+    20%,
+    70% {
+        box-shadow:
+            inset 0 0 0 2px var(--studio-color-focus-ring),
+            0 0 0 3px color-mix(in srgb, var(--studio-color-focus-ring) 35%, transparent),
+            0 2px 22px var(--studio-glow);
+    }
+    100% {
+        box-shadow:
+            inset 0 0 0 2px transparent,
+            0 0 0 3px transparent,
+            0 2px 22px transparent;
+    }
+}
+
+@keyframes ux-agent-light-b {
+    0% {
+        box-shadow:
+            inset 0 0 0 2px transparent,
+            0 0 0 10px transparent,
+            0 2px 22px transparent;
+    }
+    8% {
+        box-shadow:
+            inset 0 0 0 2px var(--studio-color-focus-ring),
+            0 0 0 5px color-mix(in srgb, var(--studio-color-focus-ring) 45%, transparent),
+            0 2px 28px var(--studio-glow);
+    }
+    20%,
+    70% {
+        box-shadow:
+            inset 0 0 0 2px var(--studio-color-focus-ring),
+            0 0 0 3px color-mix(in srgb, var(--studio-color-focus-ring) 35%, transparent),
+            0 2px 22px var(--studio-glow);
+    }
+    100% {
+        box-shadow:
+            inset 0 0 0 2px transparent,
+            0 0 0 3px transparent,
+            0 2px 22px transparent;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ux-agent-lit-a > *,
+    .ux-agent-lit-b > * {
+        animation: none;
+    }
+}
+
 /* Gallery-card lift, composed with the inset ring. Kept a separate class
    from the ring so `prefers-reduced-motion` can drop the translate below
    without touching the light. */
