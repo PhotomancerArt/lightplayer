@@ -13,8 +13,9 @@
 //! `lpc_wire::WireLinkPort`, serviced between 250 us slices of emulated time,
 //! with every wire message rendered back as its `M!{json}` console line).
 //!
-//! - **G2-1** attached and draining from boot: the boot, the link coming up,
-//!   the hello, the boot lines, one heartbeat and the stack line, in order,
+//! - **G2-1** attached and draining from boot: the boot, the link coming up
+//!   (during boot: the link task has its own thread), the boot lines, the
+//!   hello, one heartbeat and the stack line, in order,
 //!   with the `hello.proto` and `heartbeat.total_bytes` figures
 //!   (`lp-emu/esp/figures/esp32c6.json`, re-recorded by `just bless-chips
 //!   esp32c6`).
@@ -54,22 +55,26 @@ use lpc_wire::{ClientMessage, ClientRequest};
 const NONCE: u32 = 0x4057_C6A7;
 
 /// G2-1's markers in the decoded console, in order. A marker with a figure
-/// key is followed by that figure's digits.
+/// key is followed by that figure's digits. The link task runs on its own
+/// thread (`fw-esp32c6`'s `io-thread`), so the link is up while the board is
+/// still booting, and the boot's log records reach the host as they are
+/// written — before the server loop starts and its hello goes out.
 const CONSOLE_IN_ORDER: &[(&str, Option<&str>)] = &[
     ("[INIT] Initializing board...", None),
-    ("starting server loop... proto=", None),
+    ("[INIT] io thread: stack 3072 B, priority 1", None),
     ("[link] up (session 0)", None),
+    (
+        "Esp32C6RmtWs281xDriver: 2 WS281x channels for 2 declared",
+        None,
+    ),
+    ("ESP-NOW radio ready", None),
+    ("starting server loop... proto=", None),
     (
         "M!{\"id\":0,\"msg\":{\"hello\":{\"proto\":",
         Some("hello.proto"),
     ),
     ("\"boardId\":\"seeed/xiao-esp32-c6\"", None),
     ("\"baseMac\":\"a0:f2:62:87:b4:8c\"", None),
-    (
-        "Esp32C6RmtWs281xDriver: 2 WS281x channels for 2 declared",
-        None,
-    ),
-    ("ESP-NOW radio ready", None),
     ("[RECOVERY] boot complete", None),
     ("M!{\"id\":0,\"msg\":{\"heartbeat\":{", None),
     ("\"totalBytes\":", Some("heartbeat.total_bytes")),
