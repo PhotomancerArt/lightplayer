@@ -139,6 +139,9 @@ pub struct StudioController {
     /// The transport that reaches BLUETOOTH devices (M5), when this build
     /// has one. `dyn`-free for symmetry with the other two halves.
     ble_transport: Option<Rc<crate::BleDeviceTransport>>,
+    /// What the browser answered about Bluetooth, reported by the web layer
+    /// (`StudioCommand::BluetoothReach`); `Checking` until it does.
+    bluetooth_reach: crate::BluetoothReach,
     /// How many Play surfaces are mounted on the lens right now (the
     /// `PlayViewOp` lease). Play is the one mode with an idle read budget
     /// over Bluetooth; everything else is authoring.
@@ -407,6 +410,7 @@ impl StudioController {
             sim_transport: None,
             emu_transport: None,
             ble_transport: None,
+            bluetooth_reach: crate::BluetoothReach::Checking,
             play_views: 0,
             device_sims: std::collections::BTreeMap::new(),
             pool: RuntimePool::new(),
@@ -581,6 +585,17 @@ impl StudioController {
     pub fn set_ble_transport(&mut self, transport: Rc<crate::BleDeviceTransport>) {
         self.ble_transport = Some(transport);
         self.install_device_transport();
+    }
+
+    /// What the browser answered about Bluetooth. A platform fact the web
+    /// layer reports (it alone can ask `navigator.bluetooth`), as installing
+    /// a serial transport reports Web Serial: it decides whether
+    /// `devices/connect-ble` can be pressed.
+    pub fn set_bluetooth_reach(&mut self, reach: crate::BluetoothReach) {
+        if self.bluetooth_reach != reach {
+            self.bluetooth_reach = reach;
+            self.mark_dirty();
+        }
     }
 
     /// (Re)install whichever transport this build's halves add up to, and
@@ -1333,8 +1348,8 @@ impl StudioController {
     /// Whether this page can reach a board over USB. Web Serial (or the
     /// `?emu=` shim that polyfills it) is what built a serial transport;
     /// without one the add slot keeps its USB verb out of the primary
-    /// position (iPhone, Bluefy, Firefox, Safari), and the offer tree has
-    /// no `devices/connect-usb`.
+    /// position (iPhone, Bluefy, Firefox, Safari), and the offer tree's
+    /// `devices/connect-usb` is disabled with the reason.
     fn usb_available(&self) -> bool {
         self.serial_transport.is_some()
     }
@@ -2174,24 +2189,125 @@ impl StudioController {
             .with_offers(offers)
     }
 
-    /// Publish the device verbs that live in the offer tree.
+    /// Publish every device verb into the offer tree.
     ///
-    /// `devices/connect-usb`: the add-device slot's USB path, named for what
-    /// it does (the slot's heading says "Connect a board"; the button alone
-    /// reads "via USB"), while this browser has Web Serial. It needs the
-    /// user's click (the browser's picker). Bluetooth stays out: whether
-    /// this browser has it is asked by the web layer (`use_ble_reach`), not
-    /// known here. Nothing on the web renders it from the tree yet; the app
-    /// agent reads it.
+    /// - `devices/connect-usb` and `devices/connect-ble`: the add-device
+    ///   slot's two paths ([`crate::add_device_offers`]), always published,
+    ///   each disabled with its reason where this browser cannot drive it
+    ///   (no Web Serial; the [`crate::BluetoothReach`] the web reports).
+    /// - `devices/new-sim`: the slot's "start a board here", taking the
+    ///   board and the runtime ([`crate::new_sim_offer`]), wherever the slot
+    ///   is drawn.
+    /// - `devices/<board>/<verb>` for every pending link
+    ///   ([`crate::pending_link_offers`]) and every device on the roster
+    ///   ([`crate::device_offers`]). `<board>` is the card's
+    ///   [`crate::BoardRef`]: `mac-`, `sim-` or `emu-` and its MAC, or
+    ///   `new-<n>` while it has none.
+    ///
+    /// The stalled-open exits ask for the same verbs: Reconnect is the
+    /// offline board's `reconnect`, the closed port's Connect its
+    /// `connect`, Reset its `reset-board`, and the no-device USB path
+    /// `devices/connect-usb`.
     fn publish_device_offers(&self, offers: &mut crate::UiOfferTree) {
-        if self.usb_available() {
-            offers.publish(crate::UiOffer::new(
-                crate::OfferPath::devices().child("connect-usb"),
-                "usb",
-                crate::DevicesOp::action_for(lpa_devices::Action::AddFromUsb)
-                    .with_label("Connect a board via USB"),
-            ));
+        for offer in crate::add_device_offers(self.usb_available(), self.bluetooth_reach) {
+            offers.publish(offer);
         }
+        let roster = self.device_roster_view();
+        if roster.transport_available {
+            offers.publish(crate::new_sim_offer());
+        }
+        // The push's two lists are the gallery's, read the way the home
+        // view reads them — there is no separate device-side source.
+        let sources = home_view_builder::build_home_view(self.home_inputs.as_ref(), None, None);
+        let mut taken = std::collections::BTreeSet::new();
+        for pending in &roster.roster.pending {
+            let prefix = self.device_offer_prefix(pending.device, &mut taken);
+            for offer in crate::pending_link_offers(pending, &prefix) {
+                offers.publish(offer);
+            }
+            offers.place_device(pending.device, prefix);
+        }
+        for view in &roster.roster.devices {
+            let device = self.devices.roster().device(view.id);
+            let facts = crate::DeviceOfferFacts {
+                prefix: self.device_offer_prefix(view.id, &mut taken),
+                // A runtime wears a band; silicon wears none (the card's
+                // own reading of which words the power verbs take).
+                face: match roster.runtime_bands.contains_key(&view.id) {
+                    true => crate::DeviceFace::Sim,
+                    false => crate::DeviceFace::Wire,
+                },
+                autoconnect: device.is_some_and(|device| device.intent.autoconnect),
+                locked: roster
+                    .access
+                    .get(&view.id)
+                    .is_some_and(|access| access.unlock == Some(crate::UiUnlockOffer::Locked)),
+                banked: self.runs_a_banked_project(view.id, &sources.projects),
+                projects: &sources.projects,
+                examples: &sources.examples,
+            };
+            for offer in crate::device_offers(view, &facts) {
+                offers.publish(offer);
+            }
+            offers.place_device(view.id, facts.prefix);
+        }
+    }
+
+    /// Whether what `device` runs is a project this library holds (Q4): its
+    /// registry row's association — written when a push verified — names a
+    /// project in `projects`.
+    ///
+    /// The association can be stale (another browser pushed since), and the
+    /// wire names only a storage dir, so this is the best Studio can say;
+    /// it errs toward Lasting, because a board with no association, or one
+    /// naming a project this library lacks, reads as un-banked.
+    fn runs_a_banked_project(
+        &self,
+        device: crate::DeviceId,
+        projects: &[crate::UiPackageCard],
+    ) -> bool {
+        let Some(inputs) = self.home_inputs.as_ref() else {
+            return false;
+        };
+        let Some(key) =
+            self.devices.roster().device(device).and_then(|device| {
+                crate::app::devices::device_records::registry_key(&device.identity)
+            })
+        else {
+            return false;
+        };
+        crate::app::devices::device_by_base_mac::last_given_project(&inputs.registered, &key)
+            .is_some_and(|uid| projects.iter().any(|project| project.uid == uid))
+    }
+
+    /// The offer-path prefix a device's or pending link's verbs live under:
+    /// once the roster knows its MAC, `devices/mac-<12 hex>` — or
+    /// `sim-`/`emu-` when its endpoint says it is a sim or an in-tab
+    /// emulated board ([`crate::BoardRef`]) — else the provisional
+    /// `devices/new-<n>` by its roster handle.
+    ///
+    /// `taken` holds the refs already handed out in this build: should two
+    /// entries answer to one MAC (a pending link whose preflight read the
+    /// MAC of a board the roster already remembers), the second is offered
+    /// by its handle instead, so no path is published twice.
+    fn device_offer_prefix(
+        &self,
+        device: crate::DeviceId,
+        taken: &mut std::collections::BTreeSet<crate::BoardRef>,
+    ) -> crate::OfferPath {
+        let mut board = match self.devices.roster().identity(device) {
+            Some(identity) => crate::BoardRef::for_identity(identity, device),
+            None => crate::BoardRef::New(device),
+        };
+        if !taken.insert(board) {
+            log::warn!(
+                "two roster entries answer to {board}; {device:?} is offered as new-{}",
+                device.0
+            );
+            board = crate::BoardRef::New(device);
+            taken.insert(board);
+        }
+        crate::OfferPath::board(&board)
     }
 
     /// The LENS session's docked card (D43): the device the editor is open
@@ -2652,11 +2768,14 @@ impl StudioController {
     ) -> UiResult {
         updates.emit(UxUpdate::View(self.view()));
         // A press of the action an app-agent card carries IS the card's
-        // press, wherever it came from (the card, or the button it names).
+        // press, wherever it came from (the card, or the button it names) —
+        // and so is any press of the offer a card hands over, with whatever
+        // values the user settled on.
         let card = self.agent.app_session_mut().pending_card_for(&action);
+        let press = action.offer_press().cloned();
         let result = self.dispatch_inner(action, updates.clone()).await;
         if let Some(card) = card {
-            self.app_card_pressed(&card, &result);
+            self.app_card_pressed(&card, &result, press);
         }
         // Release closed projects' locks and re-hydrate the gallery when
         // the action made either due (open/close/save/home ops).
@@ -4737,7 +4856,7 @@ impl StudioController {
                 name,
             }));
         }
-        let staged = self.prepare_push(&op.source).await;
+        let (staged, migration_notice) = self.prepare_push(&op.source).await;
         if let Err(reason) = &staged {
             log::warn!("nothing to push to {:?}: {reason}", op.device);
         }
@@ -4746,7 +4865,11 @@ impl StudioController {
             device: op.device,
         }));
         self.settle_device_records().await;
-        Ok(UiNotices::new())
+        let mut notices = UiNotices::new();
+        if let Some(notice) = migration_notice {
+            notices = notices.with_notice(notice);
+        }
+        Ok(notices)
     }
 
     /// Resolve a picked source into the bytes that will go on the board.
@@ -4758,7 +4881,25 @@ impl StudioController {
     /// example is INSTALLED first (fresh uid minted at install, the incoming
     /// manifest untouched — the examples vision's rule) and a starter is
     /// GENERATED into the library first.
-    async fn prepare_push(&mut self, source: &crate::PushSource) -> crate::StagedPush {
+    ///
+    /// Alongside the staged payload, the second slot carries the notice a
+    /// library-format migration produced — see [`Self::read_push_payload`].
+    async fn prepare_push(
+        &mut self,
+        source: &crate::PushSource,
+    ) -> (crate::StagedPush, Option<UiNotice>) {
+        match self.prepare_push_inner(source).await {
+            Ok((payload, notice)) => (Ok(payload), notice),
+            Err(error) => (Err(error), None),
+        }
+    }
+
+    /// [`Self::prepare_push`]'s body, kept `Result`-shaped so the three
+    /// sources can still converge through `?`.
+    async fn prepare_push_inner(
+        &mut self,
+        source: &crate::PushSource,
+    ) -> Result<(crate::PushPayload, Option<UiNotice>), String> {
         let uid = match source {
             crate::PushSource::Library { project_uid } => project_uid.clone(),
             crate::PushSource::Example { example_id } => {
@@ -4783,15 +4924,18 @@ impl StudioController {
                 .await?
             }
         };
-        let (files, content_hash, label) = self.read_push_payload(&uid).await?;
-        Ok(crate::PushPayload {
-            project_uid: uid,
-            label,
-            files,
-            content_hash,
-            fallback_storage_id: crate::app::project::demo_project::DEMO_PROJECT_STORAGE_ID
-                .to_string(),
-        })
+        let (files, content_hash, label, notice) = self.read_push_payload(&uid).await?;
+        Ok((
+            crate::PushPayload {
+                project_uid: uid,
+                label,
+                files,
+                content_hash,
+                fallback_storage_id: crate::app::project::demo_project::DEMO_PROJECT_STORAGE_ID
+                    .to_string(),
+            },
+            notice,
+        ))
     }
 
     /// Run a creation-shaped catalog op and return the uid it installed.
@@ -4813,10 +4957,18 @@ impl StudioController {
     /// lock), otherwise through a read-only open whose receipt is abandoned
     /// the moment the bytes are in hand, so a push never leaves a lock
     /// behind.
+    ///
+    /// The fourth slot is the migration notice, present only on the
+    /// read-only path below and only when the catalog op actually migrated
+    /// something — the live handle is always current (the editor's own open
+    /// already migrated it). Same wording and surface as the editor open's
+    /// notice (`ProjectController::migrate_package_on_open`); it omits that
+    /// notice's per-step notes/warnings because [`crate::app::library::CatalogOutcome`]
+    /// does not carry them past the catalog op, only the migrated-from format.
     async fn read_push_payload(
         &mut self,
         uid: &str,
-    ) -> Result<(Vec<(String, Vec<u8>)>, String, String), String> {
+    ) -> Result<(Vec<(String, Vec<u8>)>, String, String, Option<UiNotice>), String> {
         if let Some(read) = self.project.read_open_package(uid) {
             let (files, hash) = read.map_err(|error| error.to_string())?;
             // The open handle has no slug to hand back through this seam, so
@@ -4828,7 +4980,7 @@ impl StudioController {
                 .and_then(|inputs| inputs.projects.iter().find(|card| card.uid == uid))
                 .map(|card| card.slug.clone())
                 .unwrap_or_else(|| uid.to_string());
-            return Ok((files, hash, label));
+            return Ok((files, hash, label, None));
         }
         // A board never migrates (ADR 2026-07-05) and refuses old bytes at
         // load, AFTER the push has already stopped and cleared it — so an
@@ -4837,16 +4989,18 @@ impl StudioController {
         // editor's open uses. Current packages are left alone; a package no
         // step can migrate refuses the push with the classifier's sentence
         // before the board is touched.
-        self.run_catalog_op(CatalogOp::UpgradePackageFormat {
-            project_uid: uid.to_string(),
-        })
-        .await
-        .map_err(|error| error.to_string())?;
+        let outcome = self
+            .run_catalog_op(CatalogOp::UpgradePackageFormat {
+                project_uid: uid.to_string(),
+            })
+            .await
+            .map_err(|error| error.to_string())?;
         let host = self.library_host().map_err(|error| error.to_string())?;
         let opened = host
             .open_project(uid)
             .await
             .map_err(|error| self.library_error_with_name(error).to_string())?;
+        let slug = opened.slug.clone();
         let handle = crate::app::library::PackageHandle::load(
             opened.uid,
             opened.slug.clone(),
@@ -4864,7 +5018,13 @@ impl StudioController {
         // `close_project` on top would be closing something nothing holds.
         opened.receipt.abandon();
         let (files, hash) = payload?;
-        Ok((files, hash, opened.slug))
+        let notice = outcome.upgraded_from.map(|from| {
+            UiNotice::info(format!(
+                "Upgraded \"{slug}\" from format {from} to {}",
+                lpc_model::PROJECT_FORMAT_VERSION
+            ))
+        });
+        Ok((files, hash, slug, notice))
     }
 
     /// The auto-names due right now: one `SetName` per registered board that
@@ -5901,9 +6061,11 @@ impl StudioController {
                 Ok(UiNotices::new())
             }
             crate::AgentOp::CardDismissed { card } => {
-                self.agent
-                    .app_session_mut()
-                    .settle_card(&card, crate::UiAgentCardState::Dismissed);
+                self.agent.app_session_mut().settle_card(
+                    &card,
+                    crate::UiAgentCardState::Dismissed,
+                    None,
+                );
                 self.resume_app_agent();
                 self.mark_dirty();
                 Ok(UiNotices::new())
@@ -6093,9 +6255,14 @@ impl StudioController {
     }
 
     /// One app-agent `act`: look the offer path up in the offer tree as it
-    /// is NOW (the same enablement the user sees), then press it through
-    /// the ordinary dispatch — or, when only the user may press it, put it
-    /// on a card (D6, PD6). While a card waits, nothing else is pressed.
+    /// is NOW (the same enablement the user sees), press it with the
+    /// agent's values the way the user's own picker does
+    /// ([`crate::UiOffer::press`]: unknown names, values that are not
+    /// allowed and missing required ones are refused in plain words, with
+    /// the choices), then dispatch it through the ordinary dispatch — or,
+    /// when only the user may press it, put it on a card that hands the
+    /// user the offer pre-filled with those values (D6, PD6). While a card
+    /// waits, nothing else is pressed.
     async fn app_agent_act(&mut self, input: lpa_agent::ActInput) -> lpa_agent::ActOutcome {
         use lpa_agent::ActOutcome;
         if let Some(card) = self.agent.app_session_mut().pending_card() {
@@ -6109,11 +6276,7 @@ impl StudioController {
         }
         let fresh = self.app_agent_readout();
         let path = crate::OfferPath::parse(input.action.trim()).ok();
-        let Some(action) = path
-            .as_ref()
-            .and_then(|path| fresh.offer(path))
-            .map(|offer| offer.action.clone())
-        else {
+        let Some(offer) = path.as_ref().and_then(|path| fresh.offer(path)).cloned() else {
             let reason = if path
                 .as_ref()
                 .is_some_and(|path| self.agent.app_offer_was_shown(path))
@@ -6130,14 +6293,24 @@ impl StudioController {
                 offers: Some(fresh.render()),
             };
         };
-        if let crate::ActionEnablement::Disabled { reason } = &action.meta().enablement {
-            return ActOutcome::Refused {
-                reason: format!("{:?} is disabled: {reason}", action.meta().label),
-                offers: None,
-            };
+        let mut args = crate::OfferArgs::new();
+        for (name, value) in &input.args {
+            args.insert(name.clone(), value.as_text());
         }
+        let action = match offer.press(&args) {
+            Ok(action) => action,
+            Err(error) => {
+                return ActOutcome::Refused {
+                    reason: crate::app::agent::app_agent_readout::press_refusal(&offer, &error),
+                    offers: None,
+                };
+            }
+        };
         if action.meta().needs_user() {
-            let card = self.agent.app_session_mut().add_card(action, &input.why);
+            let card =
+                self.agent
+                    .app_session_mut()
+                    .add_card(action, &input.why, offer.path.clone(), args);
             self.mark_dirty();
             return ActOutcome::NeedsUser {
                 card: card.id,
@@ -6159,9 +6332,24 @@ impl StudioController {
         }
     }
 
+    /// Run one `act` without the run around it (the device tests press
+    /// offers the way the agent does).
+    #[cfg(test)]
+    pub(crate) async fn app_agent_act_for_test(
+        &mut self,
+        input: lpa_agent::ActInput,
+    ) -> lpa_agent::ActOutcome {
+        self.app_agent_act(input).await
+    }
+
     /// The user pressed what card `card` carries: settle it with what the
     /// press came to, and let the assistant hear it.
-    fn app_card_pressed(&mut self, card: &str, result: &UiResult) {
+    fn app_card_pressed(
+        &mut self,
+        card: &str,
+        result: &UiResult,
+        press: Option<crate::OfferPress>,
+    ) {
         let state = match result {
             Ok(notices) => crate::UiAgentCardState::Done {
                 outcome: notices
@@ -6175,7 +6363,7 @@ impl StudioController {
                 error: error.to_string(),
             },
         };
-        self.agent.app_session_mut().settle_card(card, state);
+        self.agent.app_session_mut().settle_card(card, state, press);
         self.resume_app_agent();
     }
 

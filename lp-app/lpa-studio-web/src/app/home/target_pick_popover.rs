@@ -4,9 +4,10 @@
 //! two decisions that differ are props:
 //!
 //! - **The Devices page's add slot** — the quiet second verb "start a board
-//!   here ▾". Its rows are tagged with what picking them would start
-//!   (`emu` / `sim`, from core's capability table), and picking one
-//!   dispatches [`SimCreateOp`]: mint the record, power it on, and the card
+//!   here ▾". It draws the `devices/new-sim` offer: its rows are the
+//!   offer's `board` × `backing` pairs that bind, each tagged with what
+//!   picking it would start (`emu` / `sim`), and picking one presses the
+//!   offer with that pair: mint the record, power it on, and the card
 //!   appears in the grid beside the slot that made it. A board this build
 //!   can emulate has TWO rows (D1), so a row is identified by its board id
 //!   **and** its backing — the key, the roving cursor and the pick all
@@ -36,8 +37,9 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    Backing, HomeOp, SimCreateOp, TargetChoice, TargetGroup, TargetOffer, TargetScope, UiAction,
-    target_offer,
+    Backing, DESKTOP_BOARD_ID, HomeOp, NEW_SIM_BACKING_PARAM, NEW_SIM_BOARD_PARAM, OfferArgs,
+    OfferParamKind, OfferPath, TargetChoice, TargetGroup, TargetOffer, TargetScope, UiAction,
+    UiOffer, target_offer,
 };
 use wasm_bindgen::JsCast;
 
@@ -47,6 +49,7 @@ use crate::base::{
     OPTION_CARD_CHECK_CLASS, PopoverButton, PopoverCloseHandle, PopoverPlacement, StudioIcon,
     StudioIconName,
 };
+use crate::core::use_offer_at;
 
 /// The add slot's second verb, verbatim (spike 2a). Lowercase because it
 /// is a quiet aside beside the CTA, not a second button.
@@ -64,6 +67,12 @@ pub(crate) fn TargetPickPopover(
     initially_open: bool,
     on_action: EventHandler<UiAction>,
 ) -> Element {
+    // `devices/new-sim`: core publishes it wherever a runtime can be
+    // started (the add slot is drawn only there).
+    let Some(offer) = use_offer_at(OfferPath::devices().child("new-sim"))() else {
+        return rsx! {};
+    };
+    let menu = new_sim_menu(&offer);
     rsx! {
         PopoverButton {
             class: target_trigger_class().to_string(),
@@ -80,14 +89,73 @@ pub(crate) fn TargetPickPopover(
             layer_keeps_layout: true,
             initially_open,
             TargetPickMenu {
-                offer: target_offer(TargetScope::Runnable),
+                offer: menu,
                 show_tags: true,
                 on_pick: move |choice: TargetChoice| {
-                    on_action.call(SimCreateOp::action_for(choice.board_id, choice.backing));
+                    let args = OfferArgs::new()
+                        .with(NEW_SIM_BOARD_PARAM, choice.board_id)
+                        .with(NEW_SIM_BACKING_PARAM, choice.backing.tag());
+                    if let Ok(action) = offer.press(&args) {
+                        on_action.call(action);
+                    }
                 },
             }
         }
     }
+}
+
+/// `devices/new-sim`'s two choices as the menu's rows: every `board` ×
+/// `backing` pair the offer binds (emu first within a board, as core lists
+/// the backings), in the offer's board order. Desktop leads in its own
+/// group. The hint explains the emu/sim choice where one is on offer —
+/// core's sentence, from the same menu the offer was made from.
+fn new_sim_menu(offer: &UiOffer) -> TargetOffer {
+    let options = |name: &str| {
+        offer
+            .params()
+            .iter()
+            .find(|param| param.name == name)
+            .and_then(|param| match &param.kind {
+                OfferParamKind::Choice { options, .. } => Some(options.clone()),
+                _ => None,
+            })
+            .unwrap_or_default()
+    };
+    let backings: Vec<Backing> = options(NEW_SIM_BACKING_PARAM)
+        .iter()
+        .filter_map(|option| {
+            [Backing::Emu, Backing::Sim]
+                .into_iter()
+                .find(|b| b.tag() == option.value)
+        })
+        .collect();
+    let mut choices = Vec::new();
+    for board in options(NEW_SIM_BOARD_PARAM) {
+        for backing in &backings {
+            let args = OfferArgs::new()
+                .with(NEW_SIM_BOARD_PARAM, &board.value)
+                .with(NEW_SIM_BACKING_PARAM, backing.tag());
+            if offer.press(&args).is_err() {
+                continue;
+            }
+            choices.push(TargetChoice {
+                board_id: board.value.clone(),
+                title: board.label.clone(),
+                group: match board.value == DESKTOP_BOARD_ID {
+                    true => TargetGroup::Desktop,
+                    false => TargetGroup::Boards,
+                },
+                backing: *backing,
+                runnable: true,
+            });
+        }
+    }
+    let hint = choices
+        .iter()
+        .any(|choice| choice.backing == Backing::Emu)
+        .then(|| target_offer(TargetScope::Runnable).hint)
+        .flatten();
+    TargetOffer { choices, hint }
 }
 
 /// The Hardware row's trigger and menu (spike 3D): the project's current
@@ -377,6 +445,23 @@ mod tests {
         assert_eq!(offer.group(TargetGroup::Desktop).count(), 1);
         assert!(offer.choices.iter().all(|choice| choice.runnable));
         assert!(offer.group(TargetGroup::Boards).count() >= 5);
+    }
+
+    /// The slot's menu is `devices/new-sim` read back: the same rows, in
+    /// the same order, as the runnable target menu it was made from — so
+    /// drawing the offer changed nothing on screen.
+    #[test]
+    fn the_new_sim_offer_draws_the_runnable_menu() {
+        let drawn = new_sim_menu(&lpa_studio_core::new_sim_offer());
+        let rows = |offer: &TargetOffer| {
+            offer
+                .choices
+                .iter()
+                .map(|choice| (choice.board_id.clone(), choice.backing, choice.group))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(rows(&drawn), rows(&target_offer(TargetScope::Runnable)));
+        assert_eq!(drawn.hint, target_offer(TargetScope::Runnable).hint);
     }
 
     /// Every row a menu can render has a class, and the inert ones cannot
