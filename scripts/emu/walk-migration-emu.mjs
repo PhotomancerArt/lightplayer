@@ -82,14 +82,47 @@ function args() {
   const argv = process.argv.slice(2);
   const scenario = argv.find((a) => !a.startsWith("--"));
   if (!scenario || !SCENARIOS[scenario]) {
-    console.error(`usage: node scripts/emu/walk-migration-emu.mjs <${Object.keys(SCENARIOS).join("|")}> [--out <dir>]`);
+    console.error(`usage: node scripts/emu/walk-migration-emu.mjs <${Object.keys(SCENARIOS).join("|")}> [--out <dir>] [--full-access]`);
     process.exit(2);
   }
   const outAt = argv.indexOf("--out");
   // The b halves continue their a half: same state, same browser profile.
   const family = scenario.replace(/[ab]$/, "");
   const out = outAt >= 0 ? argv[outAt + 1] : path.join(ROOT, "target/walk-migration-emu", family);
+  // G1's spare C6 (2026-10-03): a device store at its 16-entry cap, anyone
+  // nearby on, none of the entries this browser's — so the connect's add of
+  // this browser's key is refused. A b half inherits its a half's board.
+  FULL_ACCESS = argv.includes("--full-access");
   return { scenario, family, out };
+}
+
+/// `--full-access`: the fixture's device store is full (see `args`).
+let FULL_ACCESS = false;
+
+/// The device store the fixture board holds: one browser key (the walk's
+/// own fixture), or, with `--full-access`, sixteen play passwords — the cap
+/// — with anyone nearby on.
+function fixtureAccessJson() {
+  if (!FULL_ACCESS) {
+    return '{"version":2,"bleEnabled":true,"open":false,"secrets":[{"label":"walk browser","kind":"browser","tier":"edit","salt":"AAECAwQFBgcICQoLDA0ODw==","iterations":1,"k":"ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8="}]}';
+  }
+  const secrets = Array.from({ length: 16 }, (_, n) => ({
+    label: `guest ${n}`,
+    kind: "password",
+    tier: "play",
+    salt: Buffer.alloc(16, 100 + n).toString("base64"),
+    iterations: 1,
+    k: Buffer.alloc(32, n + 1).toString("base64"),
+  }));
+  return JSON.stringify({ version: 2, bleEnabled: true, open: true, secrets });
+}
+
+/// What the card's access rows must say once the board is back: "Who has
+/// access" counts the store's entries (plus one for anyone nearby), and the
+/// Bluetooth switch is on and usable. The default fixture's one entry gains
+/// this browser's key on connect; the full store gains nothing.
+function expectedWhoCount() {
+  return FULL_ACCESS ? 17 : 2;
 }
 
 // --- the fixture board ---------------------------------------------------
@@ -127,12 +160,7 @@ function fixtureTree(dir, overFull) {
   copyDir(path.join(ROOT, "catalog/projects/playful-choker"), "/projects/playful-choker", files);
   files.push(["/hardware.json", readFileSync(path.join(ROOT, "lp-core/lpc-hardware/boards/seeed/xiao-esp32-c6.json"))]);
   files.push(["/.lp/device.json", Buffer.from(JSON.stringify({ uid: UID, name: "Porch" }))]);
-  files.push([
-    "/.lp/access.json",
-    Buffer.from(
-      '{"version":2,"bleEnabled":true,"open":false,"secrets":[{"label":"walk browser","kind":"browser","tier":"edit","salt":"AAECAwQFBgcICQoLDA0ODw==","iterations":1,"k":"ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8="}]}',
-    ),
-  ]);
+  files.push(["/.lp/access.json", Buffer.from(fixtureAccessJson())]);
   files.push(["/notes/long.txt", noise(9000, 1)]);
   if (overFull) files.push(["/projects/big/blob.bin", noise(720 * 1024, 2)]);
   for (const [file, bytes] of files) {
@@ -436,6 +464,8 @@ async function main() {
   // What the board held when the update began (see the question step);
   // the fixture until then.
   let baseline = fixtureReport;
+  // The card's access rows (judged last; null = not judged).
+  let accessOk = null;
   // What the board has said: the door's console file, or (tab) the page's.
   const consoleText = async () => (door ? boardConsole(door) : await driver.evaluate(`window.__walkConsole ?? ""`));
   try {
@@ -627,6 +657,44 @@ async function main() {
       }
       await new Promise((r) => setTimeout(r, 1_000));
     }
+    // The card's access rows, once the board is back on its own firmware
+    // (G1, 2026-10-03: after the spare's migration the Bluetooth switch was
+    // locked, "Who has access 0" on a fresh profile — the connect's refused
+    // add had thrown away the list it read). Studio reads the list once per
+    // connection; wait for that, then say what the card shows. W7a's board
+    // is formatted, so its list is a different one and is not judged here.
+    if (scenario !== "W7a") {
+      const rows = `(() => {
+        const sw = document.querySelector('button[role="switch"][aria-label="Bluetooth"]');
+        const who = [...document.querySelectorAll('button')].find((b) => (b.innerText || '').trim().startsWith('Who has access'));
+        return {
+          bluetooth: sw ? { on: sw.getAttribute('aria-checked') === 'true', disabled: sw.disabled } : null,
+          who: who ? Number((who.innerText.match(/(\\d+)\\s*$/) || [])[1]) : null,
+          reading: (document.querySelector('#main')?.innerText || '').includes("Reading the device's list"),
+        };
+      })()`;
+      const want = expectedWhoCount();
+      const ready = await driver
+        .waitFor(`(() => { const r = ${rows}; return r.bluetooth && r.bluetooth.on && !r.bluetooth.disabled && r.who === ${want}; })()`, {
+          timeoutMs: 60_000,
+          what: "the card's access rows",
+        })
+        .then(() => true, () => false);
+      const seen = await driver.evaluate(rows);
+      verdict.access = seen;
+      if (FULL_ACCESS) {
+        // The panel says why this browser is not on the list.
+        await driver.click("Who has access").catch(() => {});
+        await new Promise((r) => setTimeout(r, 1_000));
+        verdict.access.full = (await driver.evaluate(PAGE_TEXT)).includes("list is full");
+        await shot("access-panel");
+      }
+      // Judged after the files (below): a run that fails here still says
+      // whether every file moved.
+      accessOk = ready && (!FULL_ACCESS || verdict.access.full);
+      console.log(`    card access rows: ${JSON.stringify(verdict.access)}`);
+    }
+
     // The tab's chip and console are the page's: read both before it goes.
     let tabConsole = "";
     if (!door) {
@@ -735,6 +803,13 @@ async function main() {
         break;
       default:
         break;
+    }
+    if (accessOk !== null) {
+      step(
+        "the card's access rows are the board's: Bluetooth on and usable, every entry counted",
+        accessOk,
+        JSON.stringify(verdict.access),
+      );
     }
     verdict.ok = true;
   } catch (error) {
