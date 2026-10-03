@@ -1,4 +1,4 @@
-//! The "Reconnecting…" strip (plan D13) in both of its causes. The strip in
+//! The "Reconnecting…" strip (plan D13) in all three of its causes. The strip in
 //! place, over the project page, is `workbench_link_reconnecting`.
 
 use dioxus::prelude::*;
@@ -8,7 +8,7 @@ use lpa_studio_web_story_macros::story;
 use crate::app::layout::LinkReconnectingStrip;
 
 #[story(
-    description = "The Reconnecting strip, both causes (plan D13). Top: the board went quiet on an established link (an lp-link stall). Bottom: the link's session restarted and the board has not said hello yet. Neutral tint, a slowly turning icon, no buttons — a blip the link recovers from on its own is not an error and asks nothing of the user. It sits over the project page, which stays as it was; it goes when the board is heard again, and a board that does not come back within 20 s closes the editor the old way."
+    description = "The Reconnecting strip, all three causes. Top: the board went quiet on an established link (an lp-link stall). Middle: the link's session restarted and the board has not said hello yet. Bottom: the link went away altogether — a Bluetooth drop, a USB cable re-seated — and the editor is held until the same board is back on a new link (defect 2026-10-02). Neutral tint, a slowly turning icon, no buttons — a blip the link recovers from on its own is not an error and asks nothing of the user. It sits over the project page or Play, which stays as it was; it goes when the board is heard again, and a board that does not come back within the grace (20 s for a stall or reset, 45 s of awake time for a dropped link) closes the editor the old way."
 )]
 fn link_reconnecting_strip() -> Element {
     rsx! {
@@ -19,6 +19,7 @@ fn link_reconnecting_strip() -> Element {
             LinkReconnectingStrip {
                 reconnecting: UiLensReconnecting::new("Porch sign", LinkTrouble::Restarted),
             }
+            LinkReconnectingStrip { reconnecting: UiLensReconnecting::link_lost("Porch sign") }
         }
     }
 }

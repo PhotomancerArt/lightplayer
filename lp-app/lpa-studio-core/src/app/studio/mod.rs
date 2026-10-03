@@ -1,4 +1,5 @@
 pub mod console_command;
+pub mod lens_hold;
 pub mod lens_reconnect;
 /// Studio-level decoration of output-node faces: board identity (device
 /// registry) and the incoming lamp extent (the upstream node's produced

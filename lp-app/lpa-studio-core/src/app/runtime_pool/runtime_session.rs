@@ -270,6 +270,36 @@ impl RuntimeSession {
         self.install_client(client);
     }
 
+    /// Drop the wire client of a session whose link went away, keeping
+    /// everything else — the server standing the editor's view reads, the
+    /// console tail, the attachment (see `lens_hold`). Until
+    /// [`Self::rebind_device`] installs a fresh one, every wire op reports
+    /// `MissingSession`.
+    pub fn drop_client(&mut self) -> Option<StudioServerClient> {
+        self.record_refresh_success();
+        self.client.take()
+    }
+
+    /// Put a held session back on the wire: the board is back, on `link`
+    /// (a reconnect is a new link), with a fresh client over it.
+    pub fn rebind_device(
+        &mut self,
+        attachment: DeviceLensAttachment,
+        client: StudioServerClient,
+    ) {
+        let RuntimePayload::Device(device) = &mut self.payload;
+        let features = device.features.take();
+        *device = DeviceLensAttachment {
+            features: attachment.features.or(features),
+            ..attachment
+        };
+        self.install_client(client);
+        self.record_refresh_success();
+        // Pull at once: the editor catches up with whatever happened while
+        // the board was away.
+        self.last_refresh_completed_at = None;
+    }
+
     /// The engine fps the latest heartbeat on this session reported — the
     /// number the card's ▶ meta row shows next to the frame age.
     pub fn engine_fps(&self) -> Option<f32> {

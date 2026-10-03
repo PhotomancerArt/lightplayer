@@ -36,6 +36,7 @@ use crate::app::home::{HOME_NODE_ID, HomeOp, UiHomeView, home_view_builder};
 use crate::app::library::{CatalogOp, LibraryHost};
 use crate::app::project::device_bind::BindOutcome;
 use crate::app::studio::console_command::ConsoleCommand;
+use crate::app::studio::lens_hold::{LENS_HOLD_GRACE, LENS_HOLD_POLL, LensHold};
 use crate::app::studio::lens_reconnect::{LENS_RECONNECT_GRACE, LensReconnect, LensReconnectEdge};
 use crate::app::studio::refresh_cadence::RefreshCadence;
 use crate::app::studio::ui_console_view::UiConsoleView;
@@ -238,6 +239,10 @@ pub struct StudioController {
     /// shows "Reconnecting…" and failed pulls do not close the editor
     /// until [`LENS_RECONNECT_GRACE`] has passed.
     lens_reconnect: Option<LensReconnect>,
+    /// The editor lens HELD across a wire link that went away: the project
+    /// stays open, the page says "Reconnecting…", and the session rebinds
+    /// when the same board is back (see [`lens_hold`](super::lens_hold)).
+    lens_hold: Option<LensHold>,
     /// Injected randomness for uid minting. The web shell installs crypto
     /// randomness at startup; the default is a clock-derived fallback good
     /// enough for tests.
@@ -432,6 +437,7 @@ impl StudioController {
             open_mismatch: None,
             link_health: crate::app::devices::LinkHealthMap::default(),
             lens_reconnect: None,
+            lens_hold: None,
             random: Rc::new(clock_fallback_random),
             local_stamp: {
                 let clock = Rc::clone(&now_secs_for_stamp);
@@ -1702,6 +1708,11 @@ impl StudioController {
         if let Some(feed) = self.device_feed_due_in(now) {
             delay = Some(delay.map_or(feed, |current| current.min(feed)));
         }
+        // A held lens looks for its board often: the reconnect should
+        // show the moment it lands, not a Play-mode idle gap later.
+        if self.lens_hold.is_some() {
+            delay = Some(delay.map_or(LENS_HOLD_POLL, |current| current.min(LENS_HOLD_POLL)));
+        }
         delay.unwrap_or_else(|| RefreshCadence::default().interval())
     }
 
@@ -1793,6 +1804,10 @@ impl StudioController {
     /// is a wire with nobody on it, so the lens closes honestly and the
     /// gallery takes over.
     pub fn record_passive_refresh_failure(&mut self) {
+        // A held lens has no wire to fail on: its own grace decides.
+        if self.lens_hold.is_some() {
+            return;
+        }
         let Ok(session) = self.pool.lens_session_mut() else {
             return;
         };
@@ -1833,6 +1848,11 @@ impl StudioController {
     /// once and the editor catches up instead of waiting out a backoff the
     /// blip earned.
     fn observe_lens_link(&mut self) {
+        // A held lens's link is gone; the hold is its whole story.
+        if self.lens_hold.is_some() {
+            self.lens_reconnect = None;
+            return;
+        }
         let now = (self.now_secs)();
         let trouble = self.pool.lens_session().and_then(|session| {
             let link = session.attachment().link;
@@ -1869,6 +1889,9 @@ impl StudioController {
 
     /// The "Reconnecting…" strip, while the lens's link is in trouble.
     fn lens_reconnecting_view(&self) -> Option<crate::UiLensReconnecting> {
+        if let Some(hold) = &self.lens_hold {
+            return Some(crate::UiLensReconnecting::link_lost(&hold.name));
+        }
         let reconnect = self.lens_reconnect?;
         let session = self.pool.lens_session()?;
         (session.attachment().link == reconnect.link)
@@ -2687,6 +2710,10 @@ impl StudioController {
         Cancel: CancelSignal + ?Sized,
     {
         self.try_pending_device_lens().await;
+        self.try_resume_held_lens().await;
+        if self.lens_hold.is_some() {
+            return Ok(None);
+        }
         if !self.project_is_loaded() || !self.has_lightplayer_state() {
             return Ok(None);
         }
@@ -5347,6 +5374,7 @@ impl StudioController {
     pub(crate) fn close_device_lens(&mut self) {
         self.pending_device_lens = None;
         self.lens_reconnect = None;
+        self.lens_hold = None;
         let Some(session) = self.pool.attached_session() else {
             return;
         };
@@ -5376,10 +5404,16 @@ impl StudioController {
     /// The unplug-mid-lens row: once the lens's wire is gone — the model
     /// stopped routing the link (departure sweep, forget), or the fold
     /// heard the port close under the lens (the io's port error, teed
-    /// through the tap) — the session has no wire and goes with it, no
-    /// refresh needed. The card's own detach evidence is already in the
-    /// fold; this only keeps the pool honest.
+    /// through the tap) — the session has no wire. A wire link is HELD
+    /// (`hold_device_lens`): the editor stays and rebinds when the board is
+    /// back. Anything else goes with its wire, no refresh needed. The card's
+    /// own detach evidence is already in the fold; this only keeps the pool
+    /// honest.
     fn drop_device_lens_if_wireless(&mut self) {
+        // Already held: the dead link is the hold's to wait out.
+        if self.lens_hold.is_some() {
+            return;
+        }
         let Some(attachment) = self
             .pool
             .attached_session()
@@ -5396,12 +5430,153 @@ impl StudioController {
         if self.devices.link_is_routable(link) && port_open {
             return;
         }
+        if self.hold_device_lens(&attachment) {
+            return;
+        }
         self.push_log(UiLogDraft::new(
             UiLogLevel::Warn,
             UiLogOrigin::Studio,
             "the board under the editor went away; the editor is closed".to_string(),
         ));
         self.close_device_lens();
+    }
+
+    /// Hold the editor across a wire link that went away, instead of
+    /// closing it (see [`lens_hold`](super::lens_hold)): the project stays,
+    /// the dead client is dropped and the wire handed back, and the page
+    /// says "Reconnecting…". Returns whether it held.
+    ///
+    /// Only a WIRE is held — a USB port, a Bluetooth link, and whatever
+    /// network link joins them. A sim or an in-tab emulated board has no
+    /// cable to lose: its link goes away when it is powered off, and that
+    /// is the end of it. An open still in flight is not held either; its
+    /// own failure path says what happened.
+    fn hold_device_lens(&mut self, attachment: &crate::DeviceLensAttachment) -> bool {
+        if !attachment.transport.is_wire()
+            || !self.project_is_loaded()
+            || self.pending_open.is_some()
+            || self.pool.lens().is_none()
+        {
+            return false;
+        }
+        let Ok(session) = self.pool.lens_session_mut() else {
+            return false;
+        };
+        let id = session.id();
+        let pending = session.take_pending_logs();
+        drop(session.drop_client());
+        self.record_session_logs(id, pending);
+        self.devices.effects_mut().release_lens_wire(attachment.link);
+        self.lens_reconnect = None;
+        self.lens_hold = Some(LensHold::new(
+            attachment.uid.clone(),
+            attachment.name.clone(),
+            (self.now_secs)(),
+        ));
+        self.push_log(UiLogDraft::new(
+            UiLogLevel::Info,
+            UiLogOrigin::Studio,
+            format!(
+                "the connection to {} dropped; the editor stays open while it reconnects",
+                attachment.name
+            ),
+        ));
+        self.record_device_event(
+            Some(&id.to_string()),
+            None,
+            DeviceEventKind::Pool {
+                action: "hold".to_string(),
+                detail: format!("device lens {} held across a dropped link", attachment.uid),
+            },
+        );
+        self.mark_dirty();
+        true
+    }
+
+    /// Look at a held lens (from the tick): put it back on the wire once
+    /// its board is ready again, on whatever link it came back on, or let
+    /// the editor go once the grace has run out.
+    pub(crate) async fn try_resume_held_lens(&mut self) {
+        let now = (self.now_secs)();
+        let Some(hold) = self.lens_hold.as_mut() else {
+            return;
+        };
+        hold.observe(now);
+        let expired = hold.expired(now);
+        let uid = hold.uid.clone();
+        let name = hold.name.clone();
+        if expired {
+            self.lens_hold = None;
+            self.push_log(UiLogDraft::new(
+                UiLogLevel::Warn,
+                UiLogOrigin::Studio,
+                format!(
+                    "{name} did not come back within {} s; the editor is closed",
+                    LENS_HOLD_GRACE.as_secs()
+                ),
+            ));
+            self.close_device_lens();
+            return;
+        }
+        // Not back yet (offline, identifying, unlocking, busy): keep holding.
+        let Ok(attachment) = self.device_lens_attachment(&uid) else {
+            return;
+        };
+        let Ok(deadline) = self.device_request_deadline() else {
+            return;
+        };
+        let link = attachment.link;
+        let Ok(io) = self.devices.effects_mut().attach_lens_wire(link) else {
+            return;
+        };
+        let protocol = match attachment.transport {
+            crate::LinkTransport::Ble => "ble-nus",
+            crate::LinkTransport::Sim => "browser-worker",
+            crate::LinkTransport::Emu | crate::LinkTransport::Serial => "usb-serial",
+        };
+        let client = crate::StudioServerClient::from_lens_io(io, deadline, protocol);
+        let Ok(session) = self.pool.lens_session_mut() else {
+            self.devices.effects_mut().release_lens_wire(link);
+            self.lens_hold = None;
+            return;
+        };
+        let id = session.id();
+        session.rebind_device(attachment, client);
+        if let Err(error) = self.read_device_build(id).await {
+            // Ready to the fold, but not answering the lens yet: back to
+            // waiting, and the next look tries again.
+            self.push_log(UiLogDraft::new(
+                UiLogLevel::Info,
+                UiLogOrigin::Studio,
+                format!("{name} is back but not answering the editor yet: {error}"),
+            ));
+            if let Ok(session) = self.pool.lens_session_mut() {
+                drop(session.drop_client());
+            }
+            self.devices.effects_mut().release_lens_wire(link);
+            return;
+        }
+        self.lens_hold = None;
+        self.sync_lens_probe_policy();
+        self.push_log(UiLogDraft::new(
+            UiLogLevel::Info,
+            UiLogOrigin::Studio,
+            format!("{name} is back; the editor picks up where it left off"),
+        ));
+        self.record_device_event(
+            Some(&id.to_string()),
+            None,
+            DeviceEventKind::Pool {
+                action: "resume".to_string(),
+                detail: format!("device lens {uid} back on {link:?}"),
+            },
+        );
+        self.mark_dirty();
+    }
+
+    /// Whether the editor is holding on for a board that went away.
+    pub fn lens_is_held(&self) -> bool {
+        self.lens_hold.is_some()
     }
 
     /// Attach a held `/device/<uid>` intent once its board is ready. Runs
