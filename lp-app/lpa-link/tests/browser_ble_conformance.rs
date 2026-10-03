@@ -16,6 +16,7 @@
 //! | the GATT subset the provider calls is the polyfill's whole surface | [`a_picked_device_is_connected_present_and_wears_a_ble_endpoint`] |
 //! | lines re-join across notifications through the ONE `LineSplitter` | [`a_line_split_across_notifications_arrives_whole`] |
 //! | writes are chunked to ≤ 180 B and awaited, in order | [`a_long_line_goes_out_in_awaited_180_byte_writes`] |
+//! | each chunk is its own buffer (Bluefy writes a view's whole buffer) | [`a_long_line_survives_a_browser_that_writes_a_views_whole_buffer`] |
 //! | a drop is a departure, then a reconnect with no gesture | [`a_drop_is_a_departure_and_the_session_reconnects_by_itself`] |
 //! | a drop the page never heard is found by the visibility re-check | [`a_drop_the_page_never_heard_is_found_on_the_recheck`] |
 //! | a drop tears the radio link down, so the reconnect is a fresh link | [`a_phantom_drop_is_torn_down_and_the_reconnect_is_a_fresh_link`] |
@@ -69,6 +70,9 @@ extern "C" {
 
     #[wasm_bindgen(js_name = blePhantomDrop)]
     fn js_ble_phantom_drop(board_id: &str) -> Promise;
+
+    #[wasm_bindgen(js_name = bleWholeBufferWrites)]
+    fn js_ble_whole_buffer_writes(on: bool) -> Promise;
 
     #[wasm_bindgen(js_name = bleHangNextConnect)]
     fn js_ble_hang_next_connect(board_id: &str) -> Promise;
@@ -158,6 +162,43 @@ async fn a_long_line_goes_out_in_awaited_180_byte_writes() {
     // 601 bytes → 180 + 180 + 180 + 61.
     assert_eq!(after.writes - before.writes, 4, "{before:?} → {after:?}");
     assert_eq!(after.written - before.written, 601);
+
+    polyfill_off().await;
+}
+
+/// Bluefy, 2026-10-02: pinning a palette (a > 512 B request) dropped the
+/// link every time. Bluefy writes a typed-array view's whole underlying
+/// buffer, so a chunk cut with `subarray()` carried the entire line; the
+/// board refused it as a long write past 512 B, and the page tore the link
+/// down. Every chunk must be a buffer of its own.
+#[wasm_bindgen_test]
+async fn a_long_line_survives_a_browser_that_writes_a_views_whole_buffer() {
+    polyfill_over(&["c6-a"]).await;
+    JsFuture::from(js_ble_whole_buffer_writes(true))
+        .await
+        .unwrap();
+    let device = pick().await;
+    let mut link = open_link(&device).await;
+    let before = stats("c6-a").await;
+
+    let long = format!("M!{}", "p".repeat(698));
+    link.submit(LinkCommand::SendLine(long.clone()));
+    for _ in 0..200 {
+        if js_received_bytes("c6-a").contains(&format!("{long}\n")) {
+            break;
+        }
+        tick(20).await;
+    }
+
+    assert!(
+        js_received_bytes("c6-a").ends_with(&format!("{long}\n")),
+        "the board received the line once, whole"
+    );
+    let after = stats("c6-a").await;
+    // 701 bytes → 180 + 180 + 180 + 161, each its own buffer.
+    assert_eq!(after.writes - before.writes, 4, "{before:?} → {after:?}");
+    assert_eq!(after.written - before.written, 701);
+    assert_eq!(after.link_closes, before.link_closes, "the link stayed up");
 
     polyfill_off().await;
 }
