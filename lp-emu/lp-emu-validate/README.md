@@ -516,9 +516,11 @@ and **not** on the five-second heartbeat, which takes
 `heartbeat_memory_stats` and prints nothing. So the S3 has the classic's
 shape and not the C6's: `second_boot` is true, the `sentinel` override is
 `[JIT] used=`, and the arm carries a `host_script`
-(`walks/s3-stop-all.script`) whose single directive is byte-identical to the
-classic's — checked by `the_s3_stop_all_script_is_the_classics_stimulus`, so
-all three chips answer one question with one stimulus.
+(`walks/s3-stop-all.script`) whose **request** is byte-identical to the
+classic's (the trigger line is each chip's own — `walks/README.md`'s
+provenance section) — checked by
+`the_s3_stop_all_script_is_the_classics_stimulus`, so all three chips answer
+one question with one stimulus.
 
 ⚠️ **That arm's run cannot complete until M6 P06.** The shipped S3 image
 mounts `lpfs` through SPI1 after `[INIT] I/O task spawned`, SPI1 is an accept
