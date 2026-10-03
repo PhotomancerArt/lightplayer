@@ -86,8 +86,8 @@ impl core::fmt::Display for Refusal {
                 blocks_available,
             } => write!(
                 f,
-                "{files} files ({bytes} bytes) do not fit the new filesystem \
-                 ({blocks_available} blocks)"
+                "{files} files ({bytes} bytes) take more than the new filesystem's \
+                 {blocks_available} blocks of 4 KB"
             ),
             Self::TooTight {
                 files,
@@ -97,7 +97,8 @@ impl core::fmt::Display for Refusal {
             } => write!(
                 f,
                 "{files} files ({bytes} bytes) would fill {blocks_used} of {blocks_available} \
-                 blocks, leaving too little room to work"
+                 blocks of 4 KB, and a migration keeps {} of them free",
+                super::FREE_BLOCK_FLOOR
             ),
             Self::SourceUnreadable(error) => write!(f, "the board's files cannot be read: {error}"),
             Self::RepackFailed(error) => write!(f, "re-packing the files failed: {error}"),

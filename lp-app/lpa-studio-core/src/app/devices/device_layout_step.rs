@@ -11,8 +11,11 @@ use lpa_devices::LayoutVerdict;
 use lpa_link::layout_migration::device_backup_archive::{
     BACKUP_FORMAT_VERSION, BackupManifest, BackupPurpose, backup_file_name, write_archive,
 };
+use lpa_link::layout_migration::lpfs_geometry::LPFS_BLOCK_SIZE;
 use lpa_link::layout_migration::lpfs_tree::LpfsTree;
-use lpa_link::layout_migration::{LayoutDecision, LayoutProbe, LpfsGeometry, Refusal, decide};
+use lpa_link::layout_migration::{
+    FREE_BLOCK_FLOOR, LayoutDecision, LayoutProbe, LpfsGeometry, Refusal, decide,
+};
 use lpa_link::{FlashPlan, LinkLayoutInspection, PartitionTable, normalize_base_mac};
 
 use super::device_backup_store::{BackupEntry, BackupStatus};
@@ -157,7 +160,7 @@ pub fn stage_layout(
                 downloaded: false,
             })
         }
-        Err(Refusal::DoesNotFit { files, bytes, .. } | Refusal::TooTight { files, bytes, .. }) => {
+        Err(refusal @ (Refusal::DoesNotFit { .. } | Refusal::TooTight { .. })) => {
             let target_geometry =
                 LpfsGeometry::from_table(&target).ok_or("the firmware has no filesystem")?;
             // A refused board keeps everything; the backup is still offered
@@ -175,11 +178,21 @@ pub fn stage_layout(
                 )
                 .ok()
             });
+            // The planner's own measure: blocks, and the reserve it keeps.
+            let (files, blocks_needed) = match refusal {
+                Refusal::TooTight {
+                    files, blocks_used, ..
+                } => (files, Some(blocks_used)),
+                Refusal::DoesNotFit { files, .. } => (files, None),
+                _ => unreachable!("matched above"),
+            };
             Ok(LayoutStaging {
                 verdict: LayoutVerdict::Refused {
                     files,
-                    bytes,
-                    room_bytes: u64::from(target_geometry.len()),
+                    blocks_needed,
+                    blocks_total: target_geometry.block_count,
+                    blocks_reserved: FREE_BLOCK_FLOOR,
+                    block_bytes: LPFS_BLOCK_SIZE,
                 },
                 plan: None,
                 archive,
@@ -237,11 +250,11 @@ fn archive_of(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use lpa_link::layout_migration::{LEGACY_C6_V1_LPFS, build_image, legacy_c6_v1_table};
 
-    fn d1() -> PartitionTable {
+    pub(crate) fn d1() -> PartitionTable {
         let mut entries = legacy_c6_v1_table().entries().to_vec();
         entries[3].size = 0x34_0000;
         entries[4].offset = 0x35_0000;
@@ -249,7 +262,7 @@ mod tests {
         PartitionTable::new(entries)
     }
 
-    fn tree(files: usize) -> LpfsTree {
+    pub(crate) fn tree(files: usize) -> LpfsTree {
         let mut all = vec![
             ("/hardware.json".to_string(), b"{}".to_vec()),
             (
@@ -261,7 +274,7 @@ mod tests {
         LpfsTree::from_files(all)
     }
 
-    fn inspection_of(flash: &[u8]) -> LinkLayoutInspection {
+    pub(crate) fn inspection_of(flash: &[u8]) -> LinkLayoutInspection {
         let target = d1();
         let mut probe = LayoutProbe::new(target.clone(), true);
         let mut reads = Vec::new();
@@ -282,7 +295,7 @@ mod tests {
         }
     }
 
-    fn legacy_chip(tree: &LpfsTree) -> Vec<u8> {
+    pub(crate) fn legacy_chip(tree: &LpfsTree) -> Vec<u8> {
         let mut flash = vec![0xFFu8; 0x40_0000];
         let table = legacy_c6_v1_table().to_bytes();
         flash[0x8000..0x8000 + table.len()].copy_from_slice(&table);

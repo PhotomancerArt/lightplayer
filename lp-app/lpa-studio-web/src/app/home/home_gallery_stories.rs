@@ -811,8 +811,10 @@ fn devices_card_layout_change() -> Element {
     });
     let refused_verdict = DeviceLayoutVerdict::Refused {
         files: 40,
-        bytes: 802_816,
-        room_bytes: 655_360,
+        blocks_needed: Some(170),
+        blocks_total: 176,
+        blocks_reserved: 16,
+        block_bytes: 4096,
     };
     let refused = DeviceView {
         last_outcome: Some(OutcomeView {

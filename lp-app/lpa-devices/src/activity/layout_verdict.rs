@@ -38,11 +38,22 @@ pub enum LayoutVerdict {
     },
     /// The files do not fit the new layout. Nothing is written; the board
     /// goes back to its old firmware with every file.
+    ///
+    /// In the planner's own measure — filesystem blocks, not bytes: every
+    /// file takes at least a block, so a board holding fewer bytes than the
+    /// new layout's size can still be refused, and a byte count would say
+    /// it fits (G1 rehearsal, 2026-10-03).
     Refused {
         files: u32,
-        bytes: u64,
-        /// Room the new filesystem has, in bytes.
-        room_bytes: u64,
+        /// Blocks the files take re-packed into the new layout; `None` when
+        /// they do not fit in it at all.
+        blocks_needed: Option<u32>,
+        /// Blocks the new layout holds.
+        blocks_total: u32,
+        /// Blocks an update keeps free (it refuses to leave fewer).
+        blocks_reserved: u32,
+        /// Bytes per block.
+        block_bytes: u32,
     },
 }
 
@@ -55,6 +66,32 @@ impl LayoutVerdict {
     /// Does the write carry the board's files (a plan, not a plain flash)?
     pub fn carries_files(&self) -> bool {
         self.needs_consent()
+    }
+
+    /// A refusal in plain words, in the measure the planner refused by
+    /// (blocks and the reserve); `None` for any other verdict.
+    pub fn refusal_sentence(&self) -> Option<String> {
+        let Self::Refused {
+            blocks_needed,
+            blocks_total,
+            blocks_reserved,
+            block_bytes,
+            ..
+        } = self
+        else {
+            return None;
+        };
+        let kb = block_bytes / 1024;
+        Some(match blocks_needed {
+            Some(needed) => format!(
+                "This board's files take {needed} blocks of {kb} KB; the new layout holds \
+                 {blocks_total} and an update must keep {blocks_reserved} of them free."
+            ),
+            None => format!(
+                "This board's files take more than the new layout's {blocks_total} blocks of \
+                 {kb} KB (an update must also keep {blocks_reserved} of them free)."
+            ),
+        })
     }
 
     /// The uid a carried write must bring back.

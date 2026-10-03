@@ -123,19 +123,13 @@ pub fn device_layout_view(
             .last_outcome
             .as_ref()
             .is_some_and(|outcome| !outcome.ok)
-        && let Some(LayoutVerdict::Refused {
-            files,
-            bytes,
-            room_bytes,
-        }) = staged.map(|s| &s.verdict)
+        && let Some(sentence) = staged.and_then(|s| s.verdict.refusal_sentence())
     {
         layout.panel = Some(UiLayoutPanel {
             title: "This board's files don't fit the new firmware".to_string(),
             body: format!(
-                "This board holds {files} files ({}); after the update it has room for {}. \
-                 Nothing was changed. Remove a project from the board, then update again.",
-                size(*bytes),
-                size(*room_bytes)
+                "{sentence} Nothing was changed. Remove a project from the board, then update \
+                 again."
             ),
             warning: None,
             download: publish(
@@ -366,6 +360,52 @@ fn date(epoch_secs: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// G1 rehearsal (2026-10-03): the refusal said "36 files (834 KB) …
+    /// room for 704 KB" while the test that refused is littlefs blocks plus
+    /// a reserve — so a board holding LESS than 704 KB can be refused with
+    /// numbers that say it fits. The refusal states the planner's own
+    /// measure: blocks of 4 KB, out of the new layout's 176, with the
+    /// reserve an update keeps.
+    #[test]
+    fn a_refusal_states_the_measure_the_planner_refused_by() {
+        use super::super::device_layout_step::stage_layout;
+        use super::super::device_layout_step::tests as step;
+        // 190 files of 3 KB (570 KB): under 704 KB, and still refused —
+        // every file takes a block of its own.
+        let tree = step::tree(190);
+        assert!(tree.total_bytes() < 720_896, "the premise: under 704 KB");
+        let staging = stage_layout(
+            &step::inspection_of(&step::legacy_chip(&tree)),
+            None,
+            false,
+            1.0,
+        )
+        .unwrap();
+        let mut view = running_c6();
+        view.last_outcome = Some(lpa_devices::view::OutcomeView {
+            summary: "not updated".to_string(),
+            ok: false,
+        });
+        let layout = device_layout_view(
+            &view,
+            prefix(),
+            BoardFs::Mounted,
+            true,
+            Some(&staging),
+            None,
+            &mut UiOfferTree::new(),
+        )
+        .expect("the refusal");
+        let body = layout.panel.expect("the refusal panel").body;
+        assert!(body.contains("blocks of 4 KB"), "{body}");
+        assert!(body.contains("176"), "the new layout's blocks: {body}");
+        assert!(body.contains("keep 16"), "the reserve: {body}");
+        assert!(
+            !body.contains("704 KB"),
+            "never a byte room the test did not use: {body}"
+        );
+    }
 
     #[test]
     fn dates_and_sizes_read_naturally() {

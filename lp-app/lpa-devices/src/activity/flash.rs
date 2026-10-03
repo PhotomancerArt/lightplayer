@@ -121,15 +121,6 @@ fn hung_bootloader_message(pc: u32) -> String {
     )
 }
 
-/// `1.5 KB`, `704 KB` — sizes as a user reads them.
-fn kib(bytes: u64) -> String {
-    if bytes < 10 * 1024 {
-        format!("{:.1} KB", bytes as f64 / 1024.0)
-    } else {
-        format!("{} KB", bytes / 1024)
-    }
-}
-
 /// The honest failure copy when a carried write's board came back without
 /// its files mounted, or as somebody else.
 const LAYOUT_NOT_CONFIRMED: &str = "the new firmware is running, but the board's files were not \
@@ -376,18 +367,12 @@ impl FlashActivity {
                 };
                 ActivityStep::nothing()
             }
-            Some(LayoutVerdict::Refused {
-                files,
-                bytes,
-                room_bytes,
-            }) => self.release_untouched(
+            Some(refused @ LayoutVerdict::Refused { .. }) => self.release_untouched(
                 ActivityOutcome::Failed {
                     message: format!(
-                        "not updated: this board holds {files} files ({}); after the update \
-                         it has room for {}. Nothing was changed — remove a project from the \
+                        "not updated: {} Nothing was changed — remove a project from the \
                          board, then update again.",
-                        kib(bytes),
-                        kib(room_bytes)
+                        refused.refusal_sentence().unwrap_or_default()
                     ),
                 },
                 ctx,
@@ -1285,8 +1270,10 @@ mod tests {
             &config,
             LayoutVerdict::Refused {
                 files: 200,
-                bytes: 800_000,
-                room_bytes: 720_896,
+                blocks_needed: None,
+                blocks_total: 176,
+                blocks_reserved: 16,
+                block_bytes: 4096,
             },
         );
         let ActivityStep::Done { outcome, commands } = step else {
