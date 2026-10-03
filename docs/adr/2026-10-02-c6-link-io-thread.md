@@ -288,8 +288,34 @@ host comparison. Link-thread stack high-water (diag build): 1,680 B of
 16-aligned, plus the task record and executor); largest free block
 −4,480 B. Full tables: PR #942's body.
 
-**Silicon: at the desk walk** (`desk-s3.md`, this plan's planning
-directory) — not yet run as this amendment is written.
+**Silicon** (`desk-s3.md`, 2026-10-03, desk ESP32-S3 `D8:3B:DA:47:29:70`,
+main `9f70f39da` vs branch `20e9b64e5`; full tables in PR #942's body): idle
+fps −0.6 % (within the 2 % bar); request RTT p50 1.70 → **0.80 frame**
+(target met); p90 2.10 → **1.21 frame** — over the ~1 frame target, at the
+same structural floor the emulated number predicted: the fastest possible
+request has a fixed ~0.24 frame service cost (link RTT plus the board's
+answer), so p90 ≈ 0.9 frame of wait + that floor and cannot clear one frame
+by tuning the thread. Link RTT p50 ~14.6 → 1.15–1.27 ms; transfers
+13–14 → 232–242 KiB/s both ways (≥ 100 KiB/s target cleared by 2×). Link
+thread stack high-water (`io_thread_stack_diag`): **1,632 B of 4,176 B
+(39 %)**, close to the emulated 1,680 B. Heap: **+4,588 B** used on first
+upload (emulated ratchet predicted +4,480 B — within 0.5 KB). F32 checksums
+identical across 47 `[OUT]` lines under load; `m4-hardware-walk.sh`
+byte-identical against both host oracles.
+
+At Studio's own request rate (~7/s, a matched-rate follow-up run on the
+same board and images): the branch costs **≈1.6×** the render time per
+request that main does (≈0.36 vs ≈0.22 frame — **≈5 % vs ≈3 % fps**), for
+roughly half the request latency (p50 15 vs 30 ms, p90 22 vs 38 ms). The
+emulator disagreed with silicon on the frame-rate cost of link load (it
+showed +0.2 %; silicon loses 7–20 %, rate-dependent) — filed as a fidelity
+defect:
+`docs/defects/2026-10-03-the-emulated-s3-shows-no-frame-rate-cost-for-link-load.md`.
+
+**Yona accepted both the p90 structural floor and the per-request render
+cost as measured (2026-10-03).** The G-S3 desk walk passed: Studio against
+the branch image, Yona's own words — "working so much better than before.
+Very snappy, and I even left it on for an hour and everything went well."
 
 ### Follow-up: the S3's second core
 
