@@ -95,6 +95,12 @@ pub fn build_app_system_prompt(reference: &str) -> String {
          edits). If it has not said yet what it runs, `read` the device \
          again. Never finish at a board that runs nothing when the user \
          wanted their lights running.\n\
+         - When the user tells you about their board (\"I have a XIAO C6 \
+         with LEDs on D5\"), the job is their lights running on it, not a \
+         saved project. If no board of theirs is connected, building the \
+         project is half the job: `act` `devices/connect-usb` so they get \
+         the card, then flash it if it needs LightPlayer and push the \
+         project. Finish only when that board runs it.\n\
          - A playlist rotates through its patterns only while its `cycle` \
          is on (see Playlist cycle below). Whenever the user wants several \
          patterns to take turns (\"cycle a few patterns\", \"rotate\", \"a \
