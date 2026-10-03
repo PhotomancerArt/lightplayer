@@ -1,7 +1,7 @@
 ---
 status: fixed
 found: 2026-10-03      # hardware-walk (C6 repartition G1, scene 1, the spare XIAO C6)
-fixed: this change
+fixed: d71091bf3
 area: lpa-studio-core access (device_access_ops::sync_access, AccessController)
 class: partial-knowledge-loss
 related:
@@ -57,6 +57,16 @@ clears it). No wire or firmware change.
 (a legacy C6 with a full store: listed with Bluetooth and anyone-nearby as
 stored, the switch usable, the reason said; migrated; listed again) — times
 out waiting for the list before the fix. `device_access_ops::tests::a_full_store_is_listed_and_the_add_that_cannot_fit_is_named`.
+`just walk-migration-emu <scenario> [--full-access]` now judges the card's
+access rows after every scenario but W7a; `--full-access` seeds G1's spare
+(16 play passwords, anyone nearby on). Reproduced there on the emulated C6
+(`lp-emu:esp32c6`, branch at `d71091bf3`, release Studio built without the
+fix): W1 moved every file byte for byte, the board logged `[ble] enabled …
+starting` and advertised after the update, Studio's console logged `cannot
+add access: 17 secrets in one access file (at most 16)` on each connect, and
+the card read `{bluetooth: off, disabled; who: 0}`. With the fix: W1
+`--full-access` `{on, usable; who: 17}` and the panel's "list is full"
+sentence; W1, W7a→W7b, and W7a→W7b `--full-access` pass.
 
 **Lesson** — A read-then-write conversation must hand back what it read when
 the write is refused; "silent" error handling is only safe when the error
