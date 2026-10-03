@@ -208,6 +208,7 @@ holds the full context.
 | Continuous interactive input over BLE (XY pad, BLE MIDI) is a separate real-time class | `2026-09-24-ble-transport` (Consequences, Follow-ups) | A design puts continuous input on the BLE transport: measure ESP-NOW loss under that load first |
 | Peripheral latency 4 halves connected-idle ESP-NOW loss but its supervision drops cluster; it stays a `desk_ble_params` knob | `2026-09-24-ble-transport` (2026-09-24 amendment) | A longer run, or a longer supervision timeout, before it could replace latency 0 |
 | `Identify` (blink the board you are connecting to) was not built | `2026-09-23-ble-access-model` (M7 amendment) | The next PR that bumps the wire anyway |
+| A new board is open to anyone nearby at author (`DeviceAccessFile::FRESH_OPEN`) | `2026-10-02-two-passwords-open-by-default` | LightPlayer leaves alpha, or a board ships to someone who did not ask for public access |
 
 ## Relationship To Shared Planning
 
