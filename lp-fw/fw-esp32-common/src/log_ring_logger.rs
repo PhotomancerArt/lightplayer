@@ -10,6 +10,12 @@
 //! ring keeps the newest records and counts the ones it dropped, and the next
 //! record out says how many.
 //!
+//! A link task that pumps the ring registers its doorbell
+//! ([`ring_on_record`]) and every record rings it, so the task wakes for log
+//! output instead of polling the ring on a timer. Ringing is one
+//! critical-section `Signal`, safe from any task or thread; logging from an
+//! interrupt handler stays forbidden, as it always was.
+//!
 //! One record is `level ‖ "<module path>: <message>"`, cut at
 //! [`lp_link::log_ring::MAX_RECORD_TEXT`] bytes. The host renders it as the
 //! console line this image used to write raw (`[INFO] module: message`).
@@ -21,8 +27,11 @@
 
 use core::cell::RefCell;
 use core::fmt::Write;
+use core::sync::atomic::{AtomicPtr, Ordering};
 
 use critical_section::Mutex;
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::signal::Signal;
 use lp_link::log_ring::LogRing;
 
 /// Bytes of log records the board holds while no host is draining them.
@@ -31,6 +40,11 @@ pub const LOG_RING_BYTES: usize = 4096;
 /// The one ring every log call writes into.
 pub static LOG_RING: Mutex<RefCell<LogRing<LOG_RING_BYTES>>> =
     Mutex::new(RefCell::new(LogRing::new()));
+
+/// The doorbell a record rings, once a link task has registered one
+/// ([`ring_on_record`]); null until then.
+static RECORD_DOORBELL: AtomicPtr<Signal<CriticalSectionRawMutex, ()>> =
+    AtomicPtr::new(core::ptr::null_mut());
 
 /// Default for the process-global `log::max_level()` gate applied at init,
 /// the same as [`crate::logger`]'s: the client moves it at runtime with the
@@ -50,9 +64,21 @@ pub fn init() {
     }
 }
 
-/// Move up to `max` records into `link`'s log channel. Called by the link
-/// task; does nothing while the link is down or stalled (the ring keeps the
-/// records).
+/// Ring `doorbell` whenever a record lands in the ring, from now on. The link
+/// task that pumps the ring calls this once, when it starts; a second call
+/// replaces the first.
+pub fn ring_on_record(doorbell: &'static Signal<CriticalSectionRawMutex, ()>) {
+    RECORD_DOORBELL.store(core::ptr::from_ref(doorbell).cast_mut(), Ordering::Release);
+}
+
+/// Whether the ring holds records no link has taken yet.
+pub fn has_records() -> bool {
+    critical_section::with(|cs| LOG_RING.borrow_ref(cs).len() > 0)
+}
+
+/// Move up to `max` records into `link`'s log channel, returning how many it
+/// moved. Called by the link task; does nothing while the link is down or
+/// stalled (the ring keeps the records).
 ///
 /// One record per critical section, not `Link::pump_log` under one: that
 /// holds the ring's lock for the whole batch (up to the link's 32-record
@@ -68,8 +94,12 @@ pub fn init() {
 /// `datagramsDropped` counted it — and that is how a `[OUT] dump` lost its
 /// parts under a project load
 /// (`docs/defects/2026-09-29-the-classics-log-ring-drops-records-under-a-project-load-burst.md`).
-pub fn pump<A: lp_link::Arq>(link: &mut lp_link::Link<A>, now: lp_link::Micros, max: usize) {
-    pump_ring(&LOG_RING, link, now, max);
+pub fn pump<A: lp_link::Arq>(
+    link: &mut lp_link::Link<A>,
+    now: lp_link::Micros,
+    max: usize,
+) -> usize {
+    pump_ring(&LOG_RING, link, now, max)
 }
 
 /// [`pump`], from any ring (the tests' own).
@@ -78,20 +108,23 @@ fn pump_ring<A: lp_link::Arq, const N: usize>(
     link: &mut lp_link::Link<A>,
     now: lp_link::Micros,
     max: usize,
-) {
+) -> usize {
     if link.state() != lp_link::LinkState::Established || link.is_stalled(now) {
-        return;
+        return 0;
     }
     let mut record = [0u8; 1 + lp_link::log_ring::MAX_RECORD_TEXT];
+    let mut moved = 0;
     for _ in 0..max.min(link.datagram_room()) {
         let Some(n) = critical_section::with(|cs| ring.borrow_ref_mut(cs).pop_into(&mut record))
         else {
-            return;
+            break;
         };
         if link.send(lp_link::CH_LOG, &record[..n]).is_err() {
-            return;
+            break;
         }
+        moved += 1;
     }
+    moved
 }
 
 /// Records the ring has dropped since boot (while no host drained it).
@@ -125,6 +158,11 @@ impl log::Log for RingLogger {
         critical_section::with(|cs| {
             LOG_RING.borrow_ref_mut(cs).push(level, line.as_bytes());
         });
+        // SAFETY: the pointer is null or came from a `&'static Signal`
+        // (`ring_on_record`), so it is valid for ever.
+        if let Some(doorbell) = unsafe { RECORD_DOORBELL.load(Ordering::Acquire).as_ref() } {
+            doorbell.signal(());
+        }
     }
 
     fn flush(&self) {}
