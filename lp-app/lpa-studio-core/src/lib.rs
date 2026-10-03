@@ -74,6 +74,7 @@ pub use app::devices::{
 pub use app::devices::{LINK_COUNTERS_CAPTION, LinkTrouble, UiLinkCounterRow, link_counter_rows};
 pub use app::docs_host::DocsSimHost;
 pub use app::studio::PlayViewOp;
+pub use app::studio::{UiPage, UiPanel, UiPlace, UiProjectView, UiSessionSection};
 // The project's declared hardware (D41): the web shell's Hardware row and
 // the gallery card's "for <board>" badge both read it.
 pub use app::access::{
@@ -189,8 +190,8 @@ pub use app::studio::{
 pub use core::log::{DeviceEventKind, DeviceEventRecorder};
 pub use core::notice::UiNotices;
 pub use core::offer::{
-    OfferArgError, OfferArgs, OfferBinder, OfferChoice, OfferParam, OfferParamKind, OfferPath,
-    OfferPathError, OfferPress, UiOffer, UiOfferTree,
+    OfferArgError, OfferArgs, OfferBinder, OfferChoice, OfferNearness, OfferParam, OfferParamKind,
+    OfferPath, OfferPathError, OfferPress, UiOffer, UiOfferFocus, UiOfferTree,
 };
 pub use core::view::activity_view::UiActivityStep;
 pub use core::view::activity_view::UiActivityStepState;

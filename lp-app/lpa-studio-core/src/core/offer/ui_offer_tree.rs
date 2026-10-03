@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use lpa_devices::DeviceId;
 
-use crate::{OfferPath, UiOffer};
+use crate::{OfferPath, UiOffer, UiOfferFocus};
 
 /// Every offer the view publishes, addressed by path, in **publish order**.
 ///
@@ -18,11 +18,16 @@ use crate::{OfferPath, UiOffer};
 /// its verbs are at `devices/<board ref>` — a ref only core can work out
 /// (the MAC, the kind its endpoint names, and the de-duplication when two
 /// entries answer to one MAC).
+///
+/// And it knows where the user is ([`Self::focus`]): the focused node and
+/// the page's area, as prefixes. [`Self::search`] ranks by it, so the ⌘K
+/// palette and any other consumer get the same focus-near-first order.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct UiOfferTree {
     offers: Vec<UiOffer>,
     index: BTreeMap<OfferPath, usize>,
     devices: BTreeMap<DeviceId, OfferPath>,
+    focus: UiOfferFocus,
 }
 
 impl UiOfferTree {
@@ -62,6 +67,17 @@ impl UiOfferTree {
     /// Say that `device`'s verbs live under `prefix` (`devices/<board ref>`).
     pub fn place_device(&mut self, device: DeviceId, prefix: OfferPath) {
         self.devices.insert(device, prefix);
+    }
+
+    /// Say where the user is (core works it out from place and the focused
+    /// node, after publishing).
+    pub fn set_focus(&mut self, focus: UiOfferFocus) {
+        self.focus = focus;
+    }
+
+    /// Where the user is, as offer prefixes.
+    pub fn focus(&self) -> &UiOfferFocus {
+        &self.focus
     }
 
     /// Where `device`'s verbs live, when the roster has it: the prefix a

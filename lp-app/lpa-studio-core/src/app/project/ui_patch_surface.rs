@@ -286,6 +286,22 @@ pub enum UiPatchTarget {
 }
 
 impl UiPatchTarget {
+    /// The node this target is part of — the output, fixture or module —
+    /// or `None` for a bay cell, which names a run rather than a node.
+    #[must_use]
+    pub fn node(&self) -> Option<NodeId> {
+        match self {
+            Self::Module { node }
+            | Self::Output { node }
+            | Self::Port { node, .. }
+            | Self::Segment { node, .. }
+            | Self::Instance { node, .. }
+            | Self::Fixture { node }
+            | Self::Range { node, .. } => Some(*node),
+            Self::Cell { .. } => None,
+        }
+    }
+
     /// Which space this selection kind counts its lamps in — the numbering
     /// half of the surface's vocabulary (the panel's blue edge reads this
     /// too). `None` = a level that names no lamps at all.

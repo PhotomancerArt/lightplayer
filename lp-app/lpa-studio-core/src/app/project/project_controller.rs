@@ -1148,7 +1148,7 @@ impl ProjectController {
     }
 
     /// Find the node controller currently carrying a runtime node id.
-    fn node_by_runtime_id(&self, id: lpc_model::NodeId) -> Option<&NodeController> {
+    pub(super) fn node_by_runtime_id(&self, id: lpc_model::NodeId) -> Option<&NodeController> {
         fn walk(node: &NodeController, id: lpc_model::NodeId) -> Option<&NodeController> {
             if node.target().node_id == id {
                 return Some(node);
@@ -3979,6 +3979,12 @@ impl ProjectController {
             .apply(&op);
     }
 
+    /// The card UI view-state saved for the node at `address` (its
+    /// address path), when the card has been touched.
+    pub(super) fn node_card_ui_state(&self, address: &str) -> Option<&NodeCardUiState> {
+        self.node_card_ui.get(address)
+    }
+
     /// Overlay the saved card UI view-state onto a built node DTO and its
     /// nested children (keyed by address: `header.path` for panes,
     /// `detail` for children) — the same pattern as the device roster's
@@ -5758,7 +5764,7 @@ impl ProjectController {
         item
     }
 
-    fn is_focused_node(&self, node: &NodeController) -> bool {
+    pub(super) fn is_focused_node(&self, node: &NodeController) -> bool {
         if node.state().focused {
             return true;
         }

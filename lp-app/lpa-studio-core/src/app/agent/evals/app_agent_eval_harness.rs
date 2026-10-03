@@ -331,10 +331,16 @@ impl EvalStudio {
 
     /// The app agent's readout of this studio, offers listed by path.
     pub(crate) fn readout(&mut self) -> String {
+        self.readout_snapshot().render()
+    }
+
+    /// The readout before it is rendered: its text and every offer.
+    pub(crate) fn readout_snapshot(
+        &mut self,
+    ) -> crate::app::agent::app_agent_readout::AppReadoutSnapshot {
         self.actor
             .controller_mut_for_test()
             .app_agent_readout_for_test()
-            .render()
     }
 
     /// Whether unsaved authored edits remain.
