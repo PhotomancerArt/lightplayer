@@ -26,6 +26,7 @@ fn half_i64_to_i32(value: i64) -> i32 {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::excessive_precision, reason = "golden refs")]
     #[cfg(test)]
     extern crate std;
     use super::*;

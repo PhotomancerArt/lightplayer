@@ -337,6 +337,7 @@ fn surflet_3d(gradient_index: usize, x: Q32, y: Q32, z: Q32) -> Q32 {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::manual_range_contains, reason = "golden-table range")]
     #[cfg(test)]
     extern crate std;
     use super::*;

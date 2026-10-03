@@ -46,12 +46,14 @@
 use dioxus::prelude::*;
 use gloo_timers::future::TimeoutFuture;
 use lpa_studio_core::{
-    AccessCommand, ActionPriority, DeviceAction, DeviceOpenProgress, DeviceOpenStep, DeviceWait,
-    DeviceWaitReason, DevicesOp, OpenDevice, OpenStage, RuntimeOp, UiAction,
+    AccessCommand, ActionPriority, DeviceOpenProgress, DeviceOpenStep, DeviceWait,
+    DeviceWaitReason, OfferPath, OpenDevice, OpenStage, RuntimeOp, UiAction, UiOffer,
 };
 
 use crate::app::home::access_ui_context::access_handler;
-use crate::core::{quiet_action_class, solid_action_class};
+use crate::core::{
+    quiet_action_class, solid_action_class, use_device_verbs, use_offers, verb_named,
+};
 use crate::router::StudioRoute;
 
 /// How often the frame re-reads the platform's open signals.
@@ -603,30 +605,35 @@ pub fn ProjectOpeningFrame(
 ///
 /// Its own component for the reason [`OpenFailureNotice`] is: the handlers
 /// are built from props, not from a closure the poll loop rebuilds.
+///
+/// Every exit but Cancel is one of the board's offers (M3) — the same verb
+/// its card draws: Reconnect is the offline board's `reconnect`, the closed
+/// port's Connect its `connect`, Reset its `reset-board` (offered busy or
+/// not, because this is where a stuck open is left), and a board this page
+/// has never had a port for `devices/connect-usb`.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn DeviceOpenExits(state: OpeningState, on_action: Option<EventHandler<UiAction>>) -> Element {
-    let Some(device) = state.device().cloned() else {
+    let device_id = state.device().and_then(|device| device.id);
+    let verbs = use_device_verbs(device_id)();
+    let tree = use_offers();
+    if state.device().is_none() {
         return rsx! {};
-    };
+    }
     let connect = match &state {
-        OpeningState::WaitingForDevice(wait) => match (&wait.reason, device.id) {
+        OpeningState::WaitingForDevice(wait) => match (&wait.reason, device_id) {
             // The chooser: `requestPort()` rides this click's activation.
-            (DeviceWaitReason::NotConnected, Some(id)) => {
-                Some(DevicesOp::action_for(DeviceAction::Reconnect {
-                    device: id,
-                }))
-            }
-            (DeviceWaitReason::NotConnected, None) => {
-                Some(DevicesOp::action_for(DeviceAction::AddFromUsb))
-            }
-            (DeviceWaitReason::PortClosed, Some(id)) => {
-                Some(DevicesOp::action_for(DeviceAction::Connect { device: id }))
-            }
+            (DeviceWaitReason::NotConnected, Some(_)) => verb_named(&verbs, "reconnect"),
+            (DeviceWaitReason::NotConnected, None) => tree
+                .read()
+                .get(&OfferPath::devices().child("connect-usb"))
+                .cloned(),
+            (DeviceWaitReason::PortClosed, Some(_)) => verb_named(&verbs, "connect"),
             _ => None,
         },
         _ => None,
-    };
+    }
+    .map(|offer| offer.action);
     // A reset needs a wire: a board with no port has nothing to pulse.
     let reset = match &state {
         OpeningState::WaitingForDevice(wait)
@@ -637,9 +644,7 @@ fn DeviceOpenExits(state: OpeningState, on_action: Option<EventHandler<UiAction>
         {
             None
         }
-        _ => device
-            .id
-            .map(|id| DevicesOp::action_for(DeviceAction::ResetBoard { device: id })),
+        _ => verb_named(&verbs, "reset-board").map(|offer| offer.action),
     };
     let cancel_and = move |then: Option<UiAction>| {
         // Wake the parked request first, so the actor is free for what the
@@ -660,6 +665,8 @@ fn DeviceOpenExits(state: OpeningState, on_action: Option<EventHandler<UiAction>
                 button {
                     r#type: "button",
                     class: solid_action_class(ActionPriority::Primary),
+                    disabled: !connect.meta().enablement.is_enabled(),
+                    title: "{disabled_title(&connect)}",
                     onclick: move |_| {
                         if let Some(on_action) = on_action {
                             on_action.call(connect.clone());
@@ -672,7 +679,8 @@ fn DeviceOpenExits(state: OpeningState, on_action: Option<EventHandler<UiAction>
                 button {
                     r#type: "button",
                     class: solid_action_class(ActionPriority::Secondary),
-                    title: "Stop opening, reset the board's hardware, and go to Devices.",
+                    disabled: !reset.meta().enablement.is_enabled(),
+                    title: "{reset_title(&reset, \"Stop opening, reset the board's hardware, and go to Devices.\")}",
                     onclick: move |_| cancel_and(Some(reset.clone())),
                     "Reset the board"
                 }
@@ -801,9 +809,10 @@ pub(crate) fn OpenFailureNotice(
     };
     let board = device.as_ref().and_then(|device| device.id);
     let unlock = board.filter(|_| needs_unlock);
-    let reset = board
-        .filter(|_| !needs_unlock)
-        .map(|id| DevicesOp::action_for(DeviceAction::ResetBoard { device: id }));
+    // The board's own `reset-board` offer (M3).
+    let verbs = use_device_verbs(board)();
+    let reset: Option<UiOffer> = verb_named(&verbs, "reset-board").filter(|_| !needs_unlock);
+    let reset = reset.map(|offer| offer.action);
     let on_access = access_handler();
     rsx! {
         section { class: "tw:grid tw:max-w-[560px] tw:gap-3.5",
@@ -839,7 +848,8 @@ pub(crate) fn OpenFailureNotice(
                     button {
                         r#type: "button",
                         class: solid_action_class(ActionPriority::Secondary),
-                        title: "Reset the board's hardware; Retry once it says hello again.",
+                        disabled: !reset.meta().enablement.is_enabled(),
+                        title: "{reset_title(&reset, \"Reset the board's hardware; Retry once it says hello again.\")}",
                         onclick: move |_| {
                             if let Some(on_action) = on_action {
                                 on_action.call(reset.clone());
@@ -855,6 +865,23 @@ pub(crate) fn OpenFailureNotice(
                 }
             }
         }
+    }
+}
+
+/// A disabled exit's tooltip: why it cannot be pressed (core's reason).
+fn disabled_title(action: &UiAction) -> String {
+    match &action.meta().enablement {
+        lpa_studio_core::ActionEnablement::Disabled { reason } => reason.clone(),
+        lpa_studio_core::ActionEnablement::Enabled => String::new(),
+    }
+}
+
+/// Reset's tooltip: what it does, or — over a link with no reset lines —
+/// why it cannot.
+fn reset_title(action: &UiAction, does: &str) -> String {
+    match action.meta().enablement.is_enabled() {
+        true => does.to_string(),
+        false => disabled_title(action),
     }
 }
 

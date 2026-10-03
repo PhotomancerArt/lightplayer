@@ -31,11 +31,12 @@ use lpc_model::AsLpPath;
 use lpfs::LpFsMemory;
 
 use crate::app::library::{LibraryStore, MemoryLibraryHost, PackageProvenance};
+use crate::app::studio::offer_press_test_api::{OfferPressTestApi, actor_clicks};
 use crate::app::studio::studio_edit_e2e_tests::{
     InProcessServerIo, device_e2e_server, drive, project_editor,
 };
 use crate::{
-    ControllerId, HOME_NODE_ID, HomeOp, StudioActor, StudioCommand, StudioController,
+    ControllerId, HOME_NODE_ID, HomeOp, OfferArgs, StudioActor, StudioCommand, StudioController,
     StudioServerClient, UiAction, UiStudioView,
 };
 
@@ -253,17 +254,9 @@ fn importing_a_pattern_vendors_the_folder_stamps_it_and_dedupes_a_second_copy() 
         "family rows name the package AND the export: {labels:?}"
     );
     assert!(
-        menu.imports.iter().all(|entry| {
-            entry
-                .action
-                .op_as::<crate::NodeImportOp>()
-                .is_some_and(|op| {
-                    op.source
-                        == crate::ImportSource::Library {
-                            package_uid: source_uid.clone(),
-                        }
-                })
-        }),
+        menu.imports
+            .iter()
+            .all(|entry| entry.value.starts_with(&format!("library/{source_uid}/"))),
         "the open project is never offered as an import source"
     );
     let fire = menu
@@ -271,12 +264,14 @@ fn importing_a_pattern_vendors_the_folder_stamps_it_and_dedupes_a_second_copy() 
         .iter()
         .find(|entry| entry.label.ends_with("· fire"))
         .expect("the fire row")
-        .action
+        .value
         .clone();
 
     // -- import ------------------------------------------------------------
-    handle.tx.send(StudioCommand::Action(fire.clone()));
-    drive(actor.run_one_batch_for_test());
+    // The row presses the root picker's `import-pattern` offer with its
+    // value, as the agent would by path.
+    let import_args = OfferArgs::new().with(crate::IMPORT_PATTERN_PARAM, &fire);
+    actor_clicks(&mut actor, &handle.tx).press("project/import-pattern", import_args.clone());
     let snapshot = view.try_recv().expect("import emits a snapshot");
 
     // Files landed under `modules/<key>/`, whole folder.
@@ -354,8 +349,7 @@ fn importing_a_pattern_vendors_the_folder_stamps_it_and_dedupes_a_second_copy() 
     );
 
     // -- import the same export again: deduped, not rejected ---------------
-    handle.tx.send(StudioCommand::Action(fire));
-    drive(actor.run_one_batch_for_test());
+    actor_clicks(&mut actor, &handle.tx).press("project/import-pattern", import_args);
     let snapshot = view.try_recv().expect("second import emits a snapshot");
 
     assert!(
@@ -423,11 +417,10 @@ fn an_empty_library_still_offers_the_built_in_patterns() {
         "rows read as the entries' names: {labels:?}"
     );
     assert!(
-        menu.imports_builtin.iter().all(|entry| entry
-            .action
-            .op_as::<crate::NodeImportOp>()
-            .is_some_and(|op| matches!(op.source, crate::ImportSource::BuiltIn { .. }))),
-        "built-in rows dispatch built-in imports"
+        menu.imports_builtin
+            .iter()
+            .all(|entry| entry.value.starts_with("catalog/")),
+        "built-in rows press built-in imports"
     );
 }
 
@@ -459,11 +452,14 @@ fn importing_a_built_in_pattern_vendors_its_effect_folder_under_its_slug() {
         .iter()
         .find(|entry| entry.label == "Comet")
         .expect("the comet row")
-        .action
+        .value
         .clone();
+    assert_eq!(comet, "catalog/comet");
 
-    handle.tx.send(StudioCommand::Action(comet));
-    drive(actor.run_one_batch_for_test());
+    actor_clicks(&mut actor, &handle.tx).press(
+        "project/import-pattern",
+        OfferArgs::new().with(crate::IMPORT_PATTERN_PARAM, &comet),
+    );
     let snapshot = view.try_recv().expect("import emits a snapshot");
 
     // The folder landed whole, keyed by the SLUG (every catalog pattern

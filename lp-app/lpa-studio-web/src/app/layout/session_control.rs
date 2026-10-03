@@ -104,6 +104,18 @@ pub enum ControlSegment {
     History,
 }
 
+impl ControlSegment {
+    /// The section as core's place names it (M7).
+    fn place_section(self) -> lpa_studio_core::UiSessionSection {
+        match self {
+            Self::Device => lpa_studio_core::UiSessionSection::Device,
+            Self::Project => lpa_studio_core::UiSessionSection::Project,
+            Self::Changes => lpa_studio_core::UiSessionSection::Changes,
+            Self::History => lpa_studio_core::UiSessionSection::History,
+        }
+    }
+}
+
 /// Everything the header control renders: THE session (core's control
 /// projection), the open project's detail content if a project is open at
 /// all — a connected board with nothing loaded is a real state, and the
@@ -190,6 +202,22 @@ pub fn SessionProjectControl(control: ChromeSessionControl) -> Element {
     // backdrop closes it, the segments toggle it).
     let section = use_signal(|| initially_open.unwrap_or(ControlSegment::Device));
     let panel_open = use_signal(|| initially_open.is_some());
+    // Place (M7): which section the panel shows while it is open, for the
+    // web app to report to core. Read-only there; nothing opens it back.
+    let place_slot = crate::place_report::use_session_panel_place();
+    use_effect(move || {
+        let showing = panel_open().then(|| section().place_section());
+        if let Some(crate::place_report::SessionPanelPlace(mut slot)) = place_slot
+            && *slot.peek() != showing
+        {
+            slot.set(showing);
+        }
+    });
+    use_drop(move || {
+        if let Some(crate::place_report::SessionPanelPlace(mut slot)) = place_slot {
+            slot.set(None);
+        }
+    });
     // The anchor id: the merged outline welds the panel to the WHOLE
     // shell — the bar is the tab row (D15), so the panel hangs off the
     // bar, not off one segment.
@@ -578,7 +606,9 @@ pub fn SessionDevicePanel(
     // to change (the sim is the sim). The same section the device card's
     // header menu holds, because this panel is the other place the name
     // is shown.
-    let rename = session.device.zip(on_action);
+    // `devices/<board>/rename`, found by the device's roster handle.
+    let verbs = crate::core::use_device_verbs(session.device)();
+    let rename = crate::core::verb_named(&verbs, "rename").zip(on_action);
     rsx! {
         section { class: "tw:grid tw:gap-0.5 tw:bg-card-muted tw:px-3 tw:py-2",
             div { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-2",
@@ -599,8 +629,8 @@ pub fn SessionDevicePanel(
                 }
             }
         }
-        if let Some((device, on_action)) = rename {
-            DeviceRenameSection { device, title: session.name.clone(), on_action }
+        if let Some((offer, on_action)) = rename {
+            DeviceRenameSection { offer, title: session.name.clone(), on_action }
         }
         section { class: "tw:border-t tw:border-border-muted tw:px-3 tw:py-1.5",
             p { class: "tw:m-0 tw:text-[10px] tw:italic tw:leading-snug tw:text-dim-foreground",

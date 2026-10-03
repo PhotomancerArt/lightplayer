@@ -27,14 +27,10 @@ mod tests {
 
     #[test]
     fn grad_lut_matches_sincos_pair() {
-        for h in 0..289 {
+        for (h, &expected) in GRAD_COS_SIN_LUT.iter().enumerate() {
             let base = (h as i32).wrapping_mul(HASH_MULT_0_07482_RAW);
             let (sin_b, cos_b) = lps_sincos_q32_pair(base);
-            assert_eq!(
-                GRAD_COS_SIN_LUT[h],
-                (cos_b, sin_b),
-                "LUT mismatch at hash index {h}"
-            );
+            assert_eq!(expected, (cos_b, sin_b), "LUT mismatch at hash index {h}");
         }
     }
 
@@ -45,8 +41,8 @@ mod tests {
     #[ignore]
     fn emit_grad_lut_entries() {
         std::println!("[");
-        for h in 0..289 {
-            let base = (h as i32).wrapping_mul(HASH_MULT_0_07482_RAW);
+        for h in 0i32..289 {
+            let base = h.wrapping_mul(HASH_MULT_0_07482_RAW);
             let (sin_b, cos_b) = lps_sincos_q32_pair(base);
             let comma = if h == 288 { "" } else { "," };
             std::println!("    ({cos_b}, {sin_b}){comma}");

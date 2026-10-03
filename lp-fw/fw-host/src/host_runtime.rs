@@ -175,9 +175,42 @@ fn create_memory_server() -> LpServer {
 /// The hello's capability half is the server's own, derived from the
 /// services wired below — a fake device cannot lie about it.
 pub fn create_memory_server_with(fs: LpFsMemory, identity: lpc_wire::HelloIdentity) -> LpServer {
-    let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new_permissive()));
+    create_memory_server_on_board(fs, identity, None)
+}
+
+/// [`create_memory_server_with`] on a particular board: with
+/// `board_manifest` (a checked-in `boards/<vendor>/<product>.json`) the
+/// server opens outputs against that board's pin map, strictly, as its
+/// firmware does — a pin the board does not have fails to open. `None` is
+/// the permissive in-memory sink over the XIAO C6's registry.
+///
+/// # Panics
+///
+/// When `board_manifest` is not a board manifest: it is a checked-in file,
+/// and a fake standing for a board that does not parse is a broken test.
+pub fn create_memory_server_on_board(
+    fs: LpFsMemory,
+    identity: lpc_wire::HelloIdentity,
+    board_manifest: Option<&str>,
+) -> LpServer {
+    let (output_provider, registry) = match board_manifest {
+        Some(json) => {
+            let manifest = lpc_hardware::HardwareManifestFile::read_json(json)
+                .and_then(|file| file.to_manifest())
+                .expect("a fake board's manifest is a checked-in board file");
+            (
+                MemoryOutputProvider::with_hardware_manifest(manifest.clone()),
+                manifest,
+            )
+        }
+        None => (
+            MemoryOutputProvider::new_permissive(),
+            default_esp32c6_hardware_manifest(),
+        ),
+    };
+    let output_provider = Rc::new(RefCell::new(output_provider));
     let hardware = Rc::new(HardwareSystem::with_virtual_drivers(Rc::new(
-        HwRegistry::new(default_esp32c6_hardware_manifest()),
+        HwRegistry::new(registry),
     )));
     let button_service: Rc<dyn ButtonService> = hardware.clone();
     let radio_service: Rc<dyn RadioService> = hardware;

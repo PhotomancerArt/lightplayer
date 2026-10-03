@@ -346,6 +346,14 @@ impl LibraryStore {
     ) -> Result<PackageSummary, LibraryError> {
         // Validate BEFORE the first write: a refused install must not leave
         // a half-written package directory behind.
+        //
+        // Classify first, parse second (`package_format`'s order): a newer
+        // LightPlayer's manifest may carry keys the strict uid read below
+        // rejects, and "made by a newer LightPlayer" is the honest reason,
+        // not the parser's complaint. The verdict is the import gate's: an
+        // older-but-upgradable copy installs verbatim and migrates on open;
+        // anything this build cannot open is refused, never installed.
+        synced_install_format_gate(package_files)?;
         let uid = synced_install_uid(package_files)?;
         if self.slug_for_uid(uid)?.is_some() {
             return Err(LibraryError::Manifest(format!(
@@ -737,6 +745,26 @@ fn fnv1a64(input: &[u8]) -> u64 {
 
 /// The uid a synced install arrives under: read from the incoming manifest
 /// bytes before anything touches the store, so a refusal costs no cleanup.
+/// Refuse a synced install whose manifest is at a format this build cannot
+/// open (below the floor, from a newer LightPlayer, unreadable), with the
+/// classifier's own sentence. A missing manifest passes here and is refused
+/// by [`synced_install_uid`] in its own words.
+fn synced_install_format_gate(package_files: &[(String, Vec<u8>)]) -> Result<(), LibraryError> {
+    let Some((_, manifest)) = package_files
+        .iter()
+        .find(|(path, _)| path.trim_start_matches('/') == "project.json")
+    else {
+        return Ok(());
+    };
+    let files: lpa_upgrade::ProjectFiles = [(lpa_upgrade::PROJECT_MANIFEST, manifest.clone())]
+        .into_iter()
+        .collect();
+    match lpa_upgrade::classify(&files) {
+        FormatClass::Current | FormatClass::Upgradable { .. } => Ok(()),
+        other => Err(LibraryError::Format(other.describe())),
+    }
+}
+
 fn synced_install_uid(package_files: &[(String, Vec<u8>)]) -> Result<PrefixedUid, LibraryError> {
     let manifest = package_files
         .iter()
@@ -991,6 +1019,24 @@ mod tests {
         vec![("events.jsonl".to_string(), bytes)]
     }
 
+    /// No package directory and no history root: a refused install left the
+    /// library exactly as it was.
+    fn assert_nothing_installed(store: &LibraryStore, uid: PrefixedUid) {
+        assert!(store.list().unwrap().is_empty(), "no package was written");
+        assert!(
+            !store
+                .fs
+                .borrow()
+                .file_exists(
+                    format!("{HISTORY_DIR}/{uid}/events.jsonl")
+                        .as_str()
+                        .as_path()
+                )
+                .unwrap(),
+            "no history was written"
+        );
+    }
+
     /// The refusals validate before writing: no uid, and no event log,
     /// both leave the store untouched.
     #[test]
@@ -1019,6 +1065,65 @@ mod tests {
                 .is_err()
         );
         assert!(store.list().unwrap().is_empty(), "nothing was written");
+    }
+
+    /// A shared link to a project a newer LightPlayer made is refused the
+    /// way an import of one is — before the first write, with the
+    /// classifier's own "newer LightPlayer" sentence — whether or not the
+    /// newer manifest also carries keys this build cannot parse.
+    #[test]
+    fn install_synced_refuses_a_newer_format_before_writing() {
+        let next = lpc_model::PROJECT_FORMAT_VERSION + 1;
+        for extra in ["", r#","sparkle":true"#] {
+            let store = store();
+            let uid = PrefixedUid::mint(UidPrefix::Project, &[44u8; 16]);
+            let mut files = demo_files();
+            files[0].1 =
+                format!(r#"{{"format":{next},"uid":"{uid}","name":"demo"{extra}}}"#).into_bytes();
+
+            let error = store
+                .install_synced(
+                    "demo",
+                    &files,
+                    &synced_history(),
+                    PackageProvenance::OpenedFromLink,
+                    1.0,
+                )
+                .expect_err("a newer format is refused");
+
+            assert!(
+                matches!(&error, LibraryError::Format(m) if m.contains("newer LightPlayer")),
+                "manifest {extra:?}: {error:?}"
+            );
+            assert_nothing_installed(&store, uid);
+        }
+    }
+
+    /// An unknown key at the CURRENT format is not a newer format — the
+    /// strict uid read refuses it, and also before the first write.
+    #[test]
+    fn install_synced_refuses_an_unknown_manifest_key_before_writing() {
+        let store = store();
+        let uid = PrefixedUid::mint(UidPrefix::Project, &[45u8; 16]);
+        let mut files = demo_files();
+        files[0].1 = format!(
+            r#"{{"format":{},"uid":"{uid}","name":"demo","sparkle":true}}"#,
+            lpc_model::PROJECT_FORMAT_VERSION
+        )
+        .into_bytes();
+
+        let error = store
+            .install_synced(
+                "demo",
+                &files,
+                &synced_history(),
+                PackageProvenance::OpenedFromLink,
+                1.0,
+            )
+            .expect_err("an unparseable manifest is refused");
+
+        assert!(matches!(error, LibraryError::Manifest(_)), "{error:?}");
+        assert_nothing_installed(&store, uid);
     }
 
     #[test]

@@ -66,6 +66,10 @@ pub fn summarize_command(command: &StudioCommand) -> Option<(String, String)> {
         StudioCommand::PageVisibility { visible } => {
             ("PageVisibility".to_string(), format!("visible={visible}"))
         }
+        StudioCommand::BluetoothReach(reach) => {
+            ("BluetoothReach".to_string(), format!("{reach:?}"))
+        }
+        StudioCommand::Place(place) => ("Place".to_string(), bounded_debug(place)),
         StudioCommand::LibraryChanged => ("LibraryChanged".to_string(), String::new()),
         StudioCommand::Shutdown => ("Shutdown".to_string(), String::new()),
     };

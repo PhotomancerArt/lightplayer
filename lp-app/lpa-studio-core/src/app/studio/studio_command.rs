@@ -66,6 +66,15 @@ pub enum StudioCommand {
     /// The page went hidden or came back (`document.visibilityState`). The
     /// device cards' live feeds pull only while it is visible. Latest wins.
     PageVisibility { visible: bool },
+    /// What the browser answered about Bluetooth (the web layer's probe of
+    /// `navigator.bluetooth`). A platform fact, not a gesture: it decides
+    /// whether `devices/connect-ble` can be pressed. Latest wins.
+    BluetoothReach(crate::BluetoothReach),
+    /// Where the user is: the page the router shows and the panels open
+    /// over it (roadmap D3). A fact core reads — the agent's readout and
+    /// the ⌘K ranking — never a request: core does not navigate. Latest
+    /// wins.
+    Place(crate::UiPlace),
     /// The library changed under us (another tab's catalog transaction or
     /// save, via the host's BroadcastChannel). Coalescable like
     /// `RefreshTick`: the actor schedules one gallery re-hydration.

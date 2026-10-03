@@ -4,7 +4,7 @@
 use core::fmt;
 use core::str::FromStr;
 
-use crate::ProjectNodeAddress;
+use crate::{BoardRef, ProjectNodeAddress};
 
 /// The stable id of one offer: a sequence of segments, written `a/b/c`.
 ///
@@ -18,6 +18,16 @@ use crate::ProjectNodeAddress;
 ///
 /// So `project/demo.module/orbit.shader/remove` reads as: the project
 /// namespace, the node `/demo.module/orbit.shader`, the verb `remove`.
+///
+/// A **board** segment under `devices` is the board's id ([`BoardRef`]),
+/// naming what kind of id it is: `mac-<12 hex>` for a board known by its
+/// silicon MAC (`devices/mac-a0f26287b48c/flash`), `sim-<12 hex>` for an
+/// in-browser sim and `emu-<12 hex>` for an in-tab emulated board, each by
+/// its minted MAC, or, for a link that has not said who it is yet, a
+/// provisional `new-<n>` (`devices/new-3/flash`) that changes once it does.
+/// None has a dot, and the depth tells a board's verb from a namespace
+/// verb: `devices/<board>/<verb>` has three segments, `devices/connect-usb`
+/// two.
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct OfferPath {
     segments: Vec<String>,
@@ -46,6 +56,13 @@ impl OfferPath {
     /// `devices`, the device namespace.
     pub fn devices() -> Self {
         Self::root(Self::DEVICES)
+    }
+
+    /// `devices/<board>`: the prefix a board's verbs live under
+    /// (`devices/mac-a0f26287b48c`, `devices/sim-122233445566`,
+    /// `devices/new-3`).
+    pub fn board(board: &BoardRef) -> Self {
+        Self::devices().child(board.to_string())
     }
 
     /// `project/<node tree path>`: the prefix a node card asks
@@ -118,6 +135,49 @@ impl OfferPath {
     /// by segment: `project/save` starts with `project`, never with `proj`.
     pub fn starts_with(&self, prefix: &OfferPath) -> bool {
         self.segments.starts_with(&prefix.segments)
+    }
+
+    /// The path one segment up — an offer's **owner**, the prefix its card
+    /// asks [`crate::UiOfferTree::verbs_of`] for (`project/save` →
+    /// `project`). `None` for a one-segment path.
+    pub fn owner(&self) -> Option<OfferPath> {
+        let (_, owner) = self.segments.split_last()?;
+        (!owner.is_empty()).then(|| Self {
+            segments: owner.to_vec(),
+        })
+    }
+
+    /// Whether the last segment names a node (it holds a `.`): true for
+    /// `project/demo.module`, the owner of that node's verbs.
+    pub fn names_node(&self) -> bool {
+        self.last().is_some_and(|segment| segment.contains('.'))
+    }
+
+    /// Whether this is a verb of `owner` itself: a path under it with no
+    /// node segment after it. `project/a.fixture/remove` and the grouped
+    /// `project/a.fixture/patch/assign` are `project/a.fixture`'s own;
+    /// `project/a.fixture/b.shader/remove` is its child's.
+    pub fn is_own_verb_of(&self, owner: &OfferPath) -> bool {
+        self.len() > owner.len()
+            && self.starts_with(owner)
+            && !self.segments[owner.len()..]
+                .iter()
+                .any(|segment| segment.contains('.'))
+    }
+
+    /// The node this offer is a verb of, and the verb as it reads under
+    /// that node (`patch/assign` for a grouped one): the longest prefix
+    /// whose last segment names a node. `None` when no segment before the
+    /// verb names one (`project/save`, `devices/<board>/flash`).
+    pub fn node_and_verb(&self) -> Option<(OfferPath, String)> {
+        let (_, before) = self.segments.split_last()?;
+        let at = before.iter().rposition(|segment| segment.contains('.'))?;
+        Some((
+            Self {
+                segments: self.segments[..=at].to_vec(),
+            },
+            self.segments[at + 1..].join("/"),
+        ))
     }
 }
 
@@ -195,6 +255,61 @@ mod tests {
     }
 
     #[test]
+    fn an_offers_owner_is_one_segment_up_and_says_whether_it_is_a_node() {
+        let address = ProjectNodeAddress::parse("/demo.module/orbit.shader").unwrap();
+        let remove = OfferPath::project_node(&address).child("remove");
+        let owner = remove.owner().expect("a verb has an owner");
+
+        assert_eq!(owner, OfferPath::project_node(&address));
+        assert!(owner.names_node());
+        let save_owner = OfferPath::project().child("save").owner().unwrap();
+        assert_eq!(save_owner, OfferPath::project());
+        assert!(!save_owner.names_node(), "the project header is not a node");
+        assert!(
+            !OfferPath::parse("devices/mac-a0f26287b48c")
+                .unwrap()
+                .names_node()
+        );
+        assert_eq!(OfferPath::project().owner(), None);
+    }
+
+    #[test]
+    fn a_grouped_verb_is_its_nodes_own_and_a_childs_is_not() {
+        let fixture = OfferPath::parse("project/demo.module/dome.fixture").unwrap();
+        let grouped = fixture.clone().child("patch").child("assign");
+        let direct = fixture.clone().child("remove");
+        let child = OfferPath::parse("project/demo.module/dome.fixture/a.shader/remove").unwrap();
+
+        assert!(direct.is_own_verb_of(&fixture));
+        assert!(
+            grouped.is_own_verb_of(&fixture),
+            "a group is the node's own"
+        );
+        assert!(!child.is_own_verb_of(&fixture), "a child's verb is not");
+        assert!(
+            !fixture.is_own_verb_of(&fixture),
+            "a node is not its own verb"
+        );
+
+        assert_eq!(
+            grouped.node_and_verb(),
+            Some((fixture.clone(), "patch/assign".to_string()))
+        );
+        assert_eq!(
+            direct.node_and_verb(),
+            Some((fixture, "remove".to_string()))
+        );
+        assert_eq!(
+            OfferPath::parse("project/patch/undo")
+                .unwrap()
+                .node_and_verb(),
+            None,
+            "the project's own group names no node"
+        );
+        assert_eq!(OfferPath::project().child("save").node_and_verb(), None);
+    }
+
+    #[test]
     fn starts_with_is_segment_wise() {
         let save = OfferPath::project().child("save");
 
@@ -208,6 +323,30 @@ mod tests {
 
         let node = OfferPath::project_node(&ProjectNodeAddress::parse("/demo.module").unwrap());
         assert!(!node.starts_with(&OfferPath::parse("project/demo.mod").unwrap()));
+    }
+
+    #[test]
+    fn a_board_is_addressed_by_its_kind_and_id() {
+        use lpa_devices::{BoardKey, DeviceId};
+
+        let desk = BoardKey::parse("a0:f2:62:87:b4:8c").unwrap();
+        let made = BoardKey::parse("12:22:33:44:55:66").unwrap();
+        for (board, text) in [
+            (BoardRef::Mac(desk), "devices/mac-a0f26287b48c/flash"),
+            (BoardRef::Sim(made), "devices/sim-122233445566/flash"),
+            (BoardRef::Emu(made), "devices/emu-122233445566/flash"),
+            (BoardRef::New(DeviceId(3)), "devices/new-3/flash"),
+        ] {
+            let flash = OfferPath::board(&board).child("flash");
+            assert_eq!(flash.to_string(), text);
+            assert_eq!(OfferPath::parse(text).unwrap(), flash);
+            assert!(flash.starts_with(&OfferPath::devices()));
+            assert_eq!(
+                BoardRef::parse(&flash.segments()[1]),
+                Ok(board),
+                "the segment reads back as the board"
+            );
+        }
     }
 
     #[test]

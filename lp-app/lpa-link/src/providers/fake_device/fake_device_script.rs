@@ -239,6 +239,28 @@ pub struct FakeDeviceScript {
     /// When set, the NEXT `manage()` operation fails with this message
     /// (consumed once).
     pub manage_failure: Option<String>,
+    /// The heartbeat cadence of the LightPlayer a scripted flash
+    /// (`fake_flash`) installs. Real firmware heartbeats, and the
+    /// loaded-project fact rides the heartbeat; `None` keeps the silent
+    /// default every other script relies on.
+    pub flashed_heartbeat_interval: Option<Duration>,
+    /// What the boot ROM prints on every reset, before anything else: the
+    /// chip's own banner. A C6's ROM by default; a classic ESP32's is its
+    /// fixed build date ([`CLASSIC_ESP32_ROM_BANNER`]), which is how Studio
+    /// tells the chips apart.
+    pub rom_banner: Vec<String>,
+    /// What the [`FakeBootState::ForeignFirmware`] state prints after the
+    /// ROM banner: the Seeed XIAO C6's factory demo by default; a WLED
+    /// controller's is its own boot line (`---WLED … INIT---`).
+    pub foreign_banner: Vec<String>,
+    /// The board's runtime pin map (`boards/<vendor>/<product>.json`), when
+    /// the fake stands for a particular board. Like the efuse MAC it is the
+    /// BOARD's, not a boot state's: every LightPlayer this device runs —
+    /// scripted, or installed by a flash — opens its outputs against it, so
+    /// a project on a pin the board does not have fails here the way it
+    /// fails on silicon. `None` keeps the permissive outputs every other
+    /// script relies on.
+    pub board_manifest: Option<String>,
 }
 
 impl FakeDeviceScript {
@@ -247,7 +269,33 @@ impl FakeDeviceScript {
             boot,
             manage_latency: Duration::ZERO,
             manage_failure: None,
+            flashed_heartbeat_interval: None,
+            rom_banner: vec![C6_ROM_BANNER.to_string()],
+            foreign_banner: vec![XIAO_FACTORY_DEMO_LINE.to_string()],
+            board_manifest: None,
         }
+    }
+
+    /// The ROM banner a classic ESP32 prints (its fixed build date), in
+    /// place of the C6's — a classic-shaped board.
+    pub fn with_classic_esp32_rom(mut self) -> Self {
+        self.rom_banner = vec![
+            CLASSIC_ESP32_ROM_BANNER.to_string(),
+            "rst:0x1 (POWERON_RESET),boot:0x13 (SPI_FAST_FLASH_BOOT)".to_string(),
+        ];
+        self
+    }
+
+    /// What foreign firmware says at boot, after the ROM banner.
+    pub fn with_foreign_banner(mut self, lines: &[&str]) -> Self {
+        self.foreign_banner = lines.iter().map(|line| line.to_string()).collect();
+        self
+    }
+
+    /// The board's runtime pin map, as its checked-in JSON.
+    pub fn with_board_manifest(mut self, json: impl Into<String>) -> Self {
+        self.board_manifest = Some(json.into());
+        self
     }
 
     pub fn with_manage_latency(mut self, latency: Duration) -> Self {
@@ -259,7 +307,22 @@ impl FakeDeviceScript {
         self.manage_failure = Some(message.into());
         self
     }
+
+    pub fn with_flashed_heartbeat_interval(mut self, interval: Duration) -> Self {
+        self.flashed_heartbeat_interval = Some(interval);
+        self
+    }
 }
+
+/// The ESP32-C6 mask ROM's banner, the fake's default chip.
+pub const C6_ROM_BANNER: &str = "ESP-ROM:esp32c6-20220919";
+
+/// The classic ESP32 mask ROM's banner: a fixed build date, the line Studio
+/// reads the chip off.
+pub const CLASSIC_ESP32_ROM_BANNER: &str = "ets Jun  8 2016 00:22:57";
+
+/// The line the Seeed XIAO C6's factory demo prints at boot.
+pub const XIAO_FACTORY_DEMO_LINE: &str = "Hello from Seeed Studio XIAO ESP32-C6";
 
 /// A plausible fake firmware identity whose `commit` is the given image
 /// identity.

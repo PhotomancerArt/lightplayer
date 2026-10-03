@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use lpa_agent::{AgentEvent, AgentSession, AppToolset, ModelProvider};
+use lpa_devices::GrantAnswer;
 
 use crate::UiAgentTurn;
 use crate::app::agent::agent_transcript_mirror::AgentTranscriptMirror;
@@ -33,6 +34,20 @@ pub struct AppAgentSession {
     /// What the user did with a card while a run was still out: the run
     /// that follows it hears it.
     pub resume: Vec<String>,
+    /// A card whose press opened a platform chooser: it settles on the
+    /// chooser's answer, not on the press (which only opened it).
+    pub grant_wait: Option<CardGrantWait>,
+}
+
+/// A card waiting on the chooser its press opened.
+#[derive(Clone, Debug)]
+pub struct CardGrantWait {
+    pub card: String,
+    /// The link id the chooser answers for
+    /// ([`lpa_devices::Event::GrantAnswered`]).
+    pub link: crate::DeviceLinkId,
+    /// Where the user's press came from (see [`AppAgentSession::settle_card`]).
+    pub press: Option<crate::OfferPress>,
 }
 
 impl Default for AppAgentSession {
@@ -45,6 +60,7 @@ impl Default for AppAgentSession {
             abort: Arc::new(AtomicBool::new(false)),
             cards_minted: 0,
             resume: Vec::new(),
+            grant_wait: None,
         }
     }
 }
@@ -55,10 +71,18 @@ impl AppAgentSession {
         self.mirror.apply_event(event);
     }
 
-    /// Put a pending card for `action` in the transcript; its id.
-    pub fn add_card(&mut self, action: crate::UiAction, why: &str) -> UiAgentCard {
+    /// Put a pending card for `action` in the transcript — the press of
+    /// the offer at `offer` with the agent's `args` — and return it.
+    pub fn add_card(
+        &mut self,
+        action: crate::UiAction,
+        why: &str,
+        offer: crate::OfferPath,
+        args: crate::OfferArgs,
+    ) -> UiAgentCard {
         self.cards_minted += 1;
-        let card = UiAgentCard::new(format!("c{}", self.cards_minted), action, why);
+        let card =
+            UiAgentCard::new(format!("c{}", self.cards_minted), action, why).for_offer(offer, args);
         self.mirror.turns.push(UiAgentTurn::Card(card.clone()));
         card
     }
@@ -68,16 +92,25 @@ impl AppAgentSession {
         self.cards().find(|card| card.is_pending())
     }
 
-    /// The pending card `action` presses, if any.
+    /// The pending card `action` presses, if any: the same operation as
+    /// the card's press, or any press of the offer the card hands over
+    /// ([`UiAgentCard::answered_by`]).
     pub fn pending_card_for(&self, action: &crate::UiAction) -> Option<String> {
         self.cards()
-            .find(|card| card.is_pending() && card.press.same_op(action))
+            .find(|card| card.is_pending() && card.answered_by(action))
             .map(|card| card.id.clone())
     }
 
-    /// Settle card `id` and queue what the user did for the assistant.
+    /// Settle card `id` and queue what the user did for the assistant;
+    /// `press` is where the user's press came from, so a press of the
+    /// card's own offer tells the agent which values the user settled on.
     /// `false` when no such pending card exists.
-    pub fn settle_card(&mut self, id: &str, state: UiAgentCardState) -> bool {
+    pub fn settle_card(
+        &mut self,
+        id: &str,
+        state: UiAgentCardState,
+        press: Option<crate::OfferPress>,
+    ) -> bool {
         let Some(card) = self.mirror.turns.iter_mut().find_map(|turn| match turn {
             UiAgentTurn::Card(card) if card.id == id && card.is_pending() => Some(card),
             _ => None,
@@ -85,8 +118,49 @@ impl AppAgentSession {
             return false;
         };
         card.state = state;
+        card.user_args = press
+            .filter(|press| card.offer.as_ref() == Some(&press.path))
+            .map(|press| press.args);
         self.resume.push(card.resume_text());
         true
+    }
+
+    /// The chooser that answers for `link` came back: settle the card that
+    /// waits on it. A device picked is Done; a refusal is Failed; a chooser
+    /// closed with nothing picked leaves the card pending — the user can
+    /// press it again — and the assistant hears that the picker was
+    /// cancelled. `false` when no pending card waits on `link`.
+    pub fn grant_answered(&mut self, link: crate::DeviceLinkId, answer: &GrantAnswer) -> bool {
+        let Some(wait) = self.grant_wait.take_if(|wait| wait.link == link) else {
+            return false;
+        };
+        match answer {
+            GrantAnswer::Picked => self.settle_card(
+                &wait.card,
+                UiAgentCardState::Done {
+                    outcome: "a board was picked".to_string(),
+                },
+                wait.press,
+            ),
+            GrantAnswer::Failed { error } => self.settle_card(
+                &wait.card,
+                UiAgentCardState::Failed {
+                    error: error.clone(),
+                },
+                wait.press,
+            ),
+            GrantAnswer::Dismissed => {
+                let Some(card) = self
+                    .cards()
+                    .find(|card| card.id == wait.card && card.is_pending())
+                else {
+                    return false;
+                };
+                let line = card.chooser_cancelled_text();
+                self.resume.push(line);
+                true
+            }
+        }
     }
 
     fn cards(&self) -> impl Iterator<Item = &UiAgentCard> {

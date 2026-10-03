@@ -208,6 +208,9 @@ pub(crate) fn ProjectCanvasHost(
     // The frame-scoped arm; absent outside the workbench frame (stories).
     let patching_ui =
         use_hook(try_consume_context::<crate::app::editor_shell::patching::PatchingUi>);
+    // Core's offer tree: a sprite click that completes an armed assign
+    // presses the fixture's `assign` offer.
+    let offers = crate::core::use_offers();
     // Geometry is derived per (surface, bodies, pack, selection) change —
     // resolver runs are cheap at fixture grain and the memo keeps drag
     // overrides and camera work off that path.
@@ -525,6 +528,7 @@ pub(crate) fn ProjectCanvasHost(
                     if patch_verbs {
                         crate::app::editor_shell::patching::complete_assign_on_object(
                             &on_action,
+                            &offers.peek(),
                             &grammar_surface,
                             &grammar_selection,
                             patching_ui,

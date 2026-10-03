@@ -156,7 +156,8 @@ The core is IO-free state machines; async belongs to platform edges. See
 Studio's view is humble, and the app agent is its second consumer: it sees
 the app through the same view model and presses the same actions. See
 `docs/adr/2026-10-01-agentic-control-offers-in-core.md`, refined by
-`docs/adr/2026-10-01-offer-tree-and-consequence-levels.md`.
+`docs/adr/2026-10-01-offer-tree-and-consequence-levels.md` and
+`docs/adr/2026-10-02-board-ids-and-typed-offer-parameters.md`.
 
 - **A button the user can press is a `UiAction` built in `lpa-studio-core`**
   and published on a view model, never constructed in `lpa-studio-web`. An
@@ -183,6 +184,29 @@ the app through the same view model and presses the same actions. See
   loses its old DTO action field — there is nowhere else left to look.
   **`just lint-core-action-fields`** (in `check-lint`) is a second ratchet:
   action-carrying fields on core view types may only go down.
+- **Device offers live at `devices/<board ref>/<verb>`**, where the ref
+  names its kind: `mac-<12 hex>` (silicon, or an `emu serve` board),
+  `sim-…`, `emu-…` (generated, locally administered MACs), or `new-<n>`
+  until the board says who it is. Never a `DeviceId`: it is per-browser
+  and can be reused.
+- **A verb that takes a value declares typed `params`** (`Choice`, `Text`,
+  `Toggle`) and a binder in core, and `UiOffer::press(args)` validates and
+  binds. The web draws them with `OfferParamsForm` (or a picker that
+  renders the same params) and never builds the op itself.
+- **Core tests press offers by path** (`OfferPressTestApi` in
+  `lpa-studio-core/src/app/studio/offer_press_test_api.rs`: `press`,
+  `press_lasting`, `offered`, `not_offered`, `offer_reason`), so a test fails
+  the moment the UI stops offering its verb. **`just lint-core-test-ops`**
+  (in `check-lint`) is the third ratchet: core test sites that build a
+  user-verb action directly may only go down per file.
+- **Place is a read-only fact in core.** The web reports where the user
+  is — `StudioCommand::Place(UiPlace)`: the route's page and the drawers
+  and panels open over it (`lpa-studio-web/src/place_report.rs`) — and
+  core reads it: the agent's readout leads with it and lists only the
+  focused node's verbs in full, ⌘K ranks by it. Core never navigates,
+  routes or opens anything because of it; navigation stays in
+  `router.rs`. Don't report what core already owns (node focus, card
+  sections, `UiSelection`): read it.
 - The rework toward migrating every surface onto the tree is a roadmap
   (`lp2025/2026-10-01-1255-agentic-ui-roadmap`). Don't migrate whole
   surfaces ad hoc. Don't add new web-built actions either.
@@ -237,6 +261,12 @@ the app through the same view model and presses the same actions. See
   to BLE and `fw-emu`, the only `M!` board links left (BLE until its own
   milestone, M3, lands). See `lp-base/lp-link/README.md` and
   `docs/adr/2026-09-27-lp-link-one-comms-layer.md`.
+- **On the C6 the USB link task has its own thread** (`io-thread`, priority
+  1, 3 KB stack) and the server answers a tick's requests before it renders.
+  Every `UsbLinkShared::with_link` closure there masks priority-1 interrupts
+  (the scheduler's and esp-radio's, not the RMT refill's), so **keep those
+  closures short** — no large copy under one. See
+  `docs/adr/2026-10-02-c6-link-io-thread.md`.
 - **lp-link's `secure` feature is off on every product link.** Turning it on
   for one (M6's LAN WebSocket is the first) is a wire change: bump
   `WIRE_PROTO_VERSION` in the same change. A plain link's bytes are pinned by

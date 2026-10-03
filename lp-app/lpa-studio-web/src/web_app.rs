@@ -1008,6 +1008,18 @@ pub fn App() -> Element {
         );
     });
 
+    // Bluetooth reach is a platform fact core needs (`devices/connect-ble`
+    // is disabled with the browser's reason when it cannot work), and only
+    // the page can ask the browser: ask once and report the answer, the way
+    // installing a serial transport reports Web Serial.
+    let reach_tx = bridge.tx.clone();
+    use_hook(move || {
+        spawn(async move {
+            let reach = crate::app::home::ble_reach::ask_browser().await;
+            reach_tx.send(StudioCommand::BluetoothReach(reach));
+        });
+    });
+
     // The local project library: probed in the startup hook below (which
     // also attaches the library host and only then fires the connect
     // action).
@@ -1178,9 +1190,30 @@ pub fn App() -> Element {
     // link to a project this library does NOT have never gets here: the
     // route resolution above lands it on Home with a pending intent.
     let current_view = view.read().clone();
+    // The offer tree, for every surface the app draws — the chrome (the
+    // session panel's Rename), the Unlock page's Connect, and everything
+    // under the shell, which provides the same tree again for its stories.
+    crate::core::use_provide_offers(&current_view.offers);
     // The ⌘K command palette's open state: web chrome, like a popover's,
     // held here so the chrome's hint and the palette share it.
     let mut palette_open = use_signal(|| false);
+    // The app chat's drawer and draft: web chrome too (plan A2), held here
+    // so the header button, the home page's front door and the drawer —
+    // mounted below every route's body, so it stays open across
+    // navigation — share them.
+    let app_chat = crate::app::agent::use_provide_app_chat_chrome();
+    // Place (M7): the route and the chrome's open flags, reported to core
+    // whenever they change. Core reads them (the agent's readout, ⌘K's
+    // ranking) and never navigates on them; the session control writes
+    // which section its panel shows into the slot provided here.
+    let session_panel_place = crate::place_report::use_provide_session_panel_place();
+    crate::place_report::use_report_place(
+        bridge.tx.clone(),
+        route,
+        app_chat.open,
+        palette_open,
+        session_panel_place,
+    );
     // Bluetooth access: the Unlock sheet, the card's Connections group and
     // "Who has access", and the Devices page's access settings all sit
     // under the shell; their callback and the view slice they read ride
@@ -1341,16 +1374,19 @@ pub fn App() -> Element {
             ChromeSessionControl {
                 session,
                 // The project's own verbs come from the view's offer tree
-                // (`project/save`, `project/revert`), like the pane header's.
+                // (`project/save`, `project/revert`), like the pane header's
+                // (and, like it, less the picker's and the debug chip's).
                 project: editor.map(|(editor, status)| {
                     ProjectDetailContent::new(
                         editor,
                         status,
-                        current_view
-                            .offers
-                            .verbs_of(&lpa_studio_core::OfferPath::project())
-                            .cloned()
-                            .collect(),
+                        crate::app::project::project_pane::header_verbs(
+                            current_view
+                                .offers
+                                .verbs_of(&lpa_studio_core::OfferPath::project())
+                                .cloned()
+                                .collect(),
+                        ),
                     )
                 }),
                 relationship,
@@ -1400,6 +1436,8 @@ pub fn App() -> Element {
     // The palette lists the view's whole offer tree. It mounts here, not in
     // the shell, because the shell's offers context is not on every page.
     let palette_offers = current_view.offers.clone();
+    // The app chat's slice, for the drawer mounted after every route body.
+    let app_agent_view = current_view.app_agent.clone();
 
     // The workbench keeps a modest desktop inset (the workbench frame draws
     // no box of its own now — see `app::workbench`), and below the fold
@@ -1445,6 +1483,12 @@ pub fn App() -> Element {
                     class: if session_control_present { "tw:hidden tw:@min-[900px]:flex" } else { "tw:hidden tw:@min-[560px]:flex" },
                     VersionBadge {}
                 }
+                // The app chat's door, beside the AI settings it runs on.
+                crate::app::agent::AppChatButton {
+                    open: app_chat.open,
+                    pending_card: current_view.app_agent.has_pending_card(),
+                    busy: current_view.app_agent.busy(),
+                }
                 StudioSettingsPopover { settings, on_settings }
                 // Last of the chrome's children, so the account slot sits
                 // exactly where the spike puts it: after the settings
@@ -1466,6 +1510,7 @@ pub fn App() -> Element {
                     crate::app::HomePage {
                         on_action,
                         home: current_view.home.clone().map(|home| *home),
+                        app_agent: Some(current_view.app_agent.clone()),
                     }
                 },
                 StudioRoute::Account => rsx! {
@@ -1533,6 +1578,19 @@ pub fn App() -> Element {
             // ⌘K from anywhere: every offer the view publishes, pressed
             // through this same dispatch.
             CommandPalette { offers: palette_offers, open: palette_open, on_action }
+            // The app chat, over the right edge of every route (A2). Its
+            // cards look their offers up in the tree this component
+            // provides above, and press through this same dispatch — a
+            // card's click is the user's own click, so a browser picker
+            // behind it (connect a board) sees the gesture.
+            crate::app::agent::AppChatDrawer {
+                view: app_agent_view,
+                open: app_chat.open,
+                draft: app_chat.draft,
+                on_action,
+                on_connect: move |_| crate::openrouter_oauth::begin_connect(Some(openrouter_error)),
+                connect_error: openrouter_error(),
+            }
             // Last, and outside every section: one line at the page's
             // bottom for acts with no other visible consequence (a link on
             // the clipboard, an access level flipped, a project archived).

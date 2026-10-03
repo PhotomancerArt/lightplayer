@@ -1,0 +1,71 @@
+{
+  "kind": "Shader",
+  "source": "shader.glsl",
+  "render_order": 0,
+  "coords": "pattern",
+  "bindings": {
+    "output": {
+      "target": "bus:visual.out"
+    },
+    "detail": {
+      "source": "bus:detail"
+    },
+    "rate": {
+      "source": "bus:rate"
+    },
+    "palette": {
+      "source": "bus:palette"
+    }
+  },
+  "consumed": {
+    "detail": {
+      "kind": "value",
+      "value": "f32",
+      "default": 1,
+      "min": 0.25,
+      "max": 4,
+      "label": "Detail",
+      "description": "Divides how far a ring spreads: 1 reaches most of the way across; 2 stops at half that"
+    },
+    "rate": {
+      "kind": "value",
+      "value": "f32",
+      "default": 3,
+      "min": 1,
+      "max": 6,
+      "label": "Rate",
+      "description": "How many rings are spreading at once"
+    },
+    "rainPhase": {
+      "kind": "phasor",
+      "value": "f32",
+      "phasor": {
+        "period_seconds": 24.0,
+        "waveform": "ramp",
+        "phase_offset": 0.0
+      },
+      "default": 0,
+      "label": "Rain",
+      "description": "Position in the rain cycle: eight ring lifetimes per cycle (0-1)"
+    },
+    "palette": {
+      "kind": "palette",
+      "value": "sampler2D",
+      "label": "Palette",
+      "description": "Ring colours come from the upper part of this ramp; the dark end is the water",
+      "gradient": {
+        "kind": "static",
+        "step_seconds": 0.0,
+        "fade_seconds": 0.0,
+        "pinned": -1,
+        "set": [
+          {
+            "space": "oklab",
+            "method": "smooth",
+            "stops": "(0.101513,0.022834,-0.051201) (0.295995,0.036889,-0.14002) (0.518421,0.047007,-0.248073) (0.840638,-0.067656,-0.075618) (0.984705,-0.020962,-0.00633)"
+          }
+        ]
+      }
+    }
+  }
+}

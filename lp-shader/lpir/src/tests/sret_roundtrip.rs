@@ -16,7 +16,7 @@ fn sret_function_roundtrip() {
     let module = parse_module(src).expect("parse");
     validate_module(&module).expect("validate");
     let printed = print_module(&module);
-    assert_eq!(src, printed, "{}", printed);
+    assert_eq!(src, printed, "{printed}");
     let func = module.functions.values().next().expect("one func");
     assert_eq!(func.sret_arg, Some(VReg(1)));
     assert!(func.return_types.is_empty());
@@ -33,7 +33,7 @@ fn sret_function_with_user_params_roundtrip() {
     let module = parse_module(src).expect("parse");
     validate_module(&module).expect("validate");
     let printed = print_module(&module);
-    assert_eq!(src, printed, "{}", printed);
+    assert_eq!(src, printed, "{printed}");
     let func = module.functions.values().next().expect("one func");
     assert_eq!(func.sret_arg, Some(VReg(1)));
     assert_eq!(func.param_count, 2);
@@ -48,7 +48,7 @@ fn sret_import_roundtrip() {
     let module = parse_module(src).expect("parse");
     validate_module(&module).expect("validate");
     let printed = print_module(&module);
-    assert_eq!(src, printed, "{}", printed);
+    assert_eq!(src, printed, "{printed}");
     assert!(module.imports[0].sret);
     assert_eq!(module.imports[0].param_types, [IrType::Pointer]);
     assert!(module.imports[0].return_types.is_empty());

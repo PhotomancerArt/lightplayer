@@ -18,6 +18,8 @@ pub(crate) mod card_footer;
 pub(crate) mod card_thumb;
 pub(crate) mod connections_group;
 pub(crate) mod device_access_panel;
+#[cfg(feature = "stories")]
+pub(crate) mod device_offer_story_fixtures;
 pub(crate) mod device_pick_popover;
 pub(crate) mod device_roster_card;
 pub(crate) mod device_terminal;

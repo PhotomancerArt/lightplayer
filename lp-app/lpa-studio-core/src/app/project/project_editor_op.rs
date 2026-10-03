@@ -11,6 +11,15 @@ pub enum ProjectEditorOp {
     /// collapse, mirrored composer draft) — the node arm of the CardUiState
     /// re-home. Applied synchronously in the controller, like `Focus`.
     NodeUi(crate::app::project::node_card_ui_state::NodeUiOp),
+    /// Hand a request to one shader's agent (the node's `ask-agent`
+    /// offer): focus the node's card like a tree-row click, open its agent
+    /// section and put `draft` in the composer. It never sends. The action's
+    /// editor target is the node; `node` is its address path, the card UI
+    /// state key.
+    AskAgent {
+        node: String,
+        draft: Option<String>,
+    },
     /// Set the surface's ONE selection (D36 + unified-selection D2;
     /// core-owned so e2e can drive it and the verbs can read it). The op
     /// carries the whole [`crate::UiSelection`] VALUE — surfaces compute
@@ -43,6 +52,11 @@ impl ControllerOp for ProjectEditorOp {
                 "Change what this node card is showing.",
                 ActionPriority::Tertiary,
             ),
+            Self::AskAgent { .. } => ActionMeta::new(
+                "Ask the shader agent",
+                "Open this shader's agent chat with the request typed in; you press Send.",
+                ActionPriority::Secondary,
+            ),
             Self::PatchSelect { .. } => ActionMeta::new(
                 "Select patch target",
                 "Point the patch surface's selection.",
@@ -66,6 +80,7 @@ impl ControllerOp for ProjectEditorOp {
         match self {
             Self::Focus
             | Self::NodeUi(_)
+            | Self::AskAgent { .. }
             | Self::PatchSelect { .. }
             | Self::EditorJournal { .. } => ActionClass::Foreground {
                 deadline: PROJECT_EDITOR_ACTION_DEADLINE,

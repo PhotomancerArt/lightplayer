@@ -316,6 +316,12 @@ where
         if let Some(visible) = plan.page_visibility {
             self.controller.set_device_feeds_page_visible(visible);
         }
+        if let Some(reach) = plan.bluetooth_reach {
+            self.controller.set_bluetooth_reach(reach);
+        }
+        if let Some(place) = plan.place {
+            self.controller.set_place(place);
+        }
         for command in plan.console {
             self.controller.apply_console_command(command);
         }
@@ -681,6 +687,10 @@ struct CommandPlan {
     library_changed: bool,
     /// The page's latest visibility edge in the batch (latest wins).
     page_visibility: Option<bool>,
+    /// The browser's latest Bluetooth answer in the batch (latest wins).
+    bluetooth_reach: Option<crate::BluetoothReach>,
+    /// The page's latest place report in the batch (latest wins).
+    place: Option<crate::UiPlace>,
 }
 
 /// One planned device step: fold an input, or make the effects layer look.
@@ -702,6 +712,8 @@ impl CommandPlan {
         let mut attach_library = None;
         let mut library_changed = false;
         let mut page_visibility = None;
+        let mut bluetooth_reach = None;
+        let mut place = None;
         for command in batch {
             match command {
                 StudioCommand::AttachLibrary(attachment) => attach_library = Some(attachment),
@@ -709,6 +721,8 @@ impl CommandPlan {
                 StudioCommand::DeviceHotplug(edge) => device.push(DeviceStep::Hotplug(edge)),
                 StudioCommand::LibraryChanged => library_changed = true,
                 StudioCommand::PageVisibility { visible } => page_visibility = Some(visible),
+                StudioCommand::BluetoothReach(reach) => bluetooth_reach = Some(reach),
+                StudioCommand::Place(reported) => place = Some(reported),
                 StudioCommand::Action(action) => push_action_coalesced(&mut actions, action),
                 // Not a local console mutation: a runtime-level change is
                 // a server round-trip, so convert it into the equivalent
@@ -747,6 +761,8 @@ impl CommandPlan {
             attach_library,
             library_changed,
             page_visibility,
+            bluetooth_reach,
+            place,
         }
     }
 }

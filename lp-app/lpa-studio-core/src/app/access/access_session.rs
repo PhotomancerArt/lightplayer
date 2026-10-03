@@ -362,6 +362,21 @@ impl AccessSession {
             self.auto_spent = true;
             self.prompt = Some(PromptReason::NoPasswordKnown);
         }
+        // A grant answers a sheet raised while the link was locked (a
+        // reconnect, a dropped link, or the board opening): a stale
+        // "no password" or "refused" prompt does not survive it. It does
+        // NOT answer "this needs edit" — `logged_in`'s rule for the same
+        // outcome — or a login the user asked for, so those stay up.
+        if matches!(self.phase, AccessPhase::Granted { .. })
+            && matches!(
+                self.prompt,
+                Some(PromptReason::NoPasswordKnown) | Some(PromptReason::Refused { .. })
+            )
+        {
+            self.prompt = None;
+            self.last_refusal = None;
+            self.challenge = None;
+        }
     }
 
     /// A login conversation ended.
@@ -857,6 +872,77 @@ mod tests {
                 tier: Tier::Edit,
                 label: Some("mine".to_string())
             }
+        );
+    }
+
+    /// Bluefy, 2026-10-02: a sheet raised while the board was locked
+    /// survived the board being switched to "anyone nearby can play", a
+    /// disconnect/reconnect, and the next hello — so an open board that
+    /// grants Play still showed the "no password" sheet. `checked` set
+    /// `phase = Granted` but never cleared `prompt`/`last_refusal`/
+    /// `challenge`; `logged_in`'s Granted arm already does.
+    #[test]
+    fn a_board_that_opens_while_the_sheet_is_up_closes_it_on_the_next_hello() {
+        let mut session = AccessSession::default();
+        let w1 = window(1, 10);
+        session.observe(Some(w1));
+        session.started(&AccessStep::Check(w1));
+        session.checked(w1, true, None, true);
+        let step = session.next_step(Millis(11), &[held_key()], &[]).unwrap();
+        session.started(&step);
+        let challenge = lpc_access::Challenge {
+            nonce: [9; 32],
+            offers: Vec::new(),
+        };
+        session.logged_in(
+            w1,
+            &LoginAttemptOutcome::NothingMatched {
+                challenge: challenge.clone(),
+            },
+            false,
+            Millis(100),
+        );
+        assert_eq!(session.prompt, Some(PromptReason::NoPasswordKnown));
+
+        // The link drops; the board is opened; the next hello grants Play
+        // with no login at all.
+        session.observe(None);
+        let w2 = window(2, 5_000);
+        session.observe(Some(w2));
+        session.started(&AccessStep::Check(w2));
+        session.checked(w2, true, Some(Tier::Play), false);
+        assert_eq!(session.prompt, None, "the board opened; the sheet closes");
+        assert_eq!(
+            session.phase,
+            AccessPhase::Granted {
+                tier: Tier::Play,
+                label: None
+            }
+        );
+    }
+
+    /// The kept case: a play grant does not answer "this needs edit", so a
+    /// `NeedsEdit` prompt survives a play grant from `checked` too, exactly
+    /// as it already does from `logged_in`.
+    #[test]
+    fn a_needs_edit_prompt_survives_a_play_grant_from_checked() {
+        let mut session = AccessSession::default();
+        let w = window(1, 10);
+        session.observe(Some(w));
+        session.started(&AccessStep::Check(w));
+        session.checked(w, true, Some(Tier::Play), false);
+        session.needs_edit();
+        assert_eq!(session.prompt, Some(PromptReason::NeedsEdit));
+
+        session.observe(None);
+        let w2 = window(2, 5_000);
+        session.observe(Some(w2));
+        session.started(&AccessStep::Check(w2));
+        session.checked(w2, true, Some(Tier::Play), false);
+        assert_eq!(
+            session.prompt,
+            Some(PromptReason::NeedsEdit),
+            "a play grant does not answer 'this needs edit'"
         );
     }
 

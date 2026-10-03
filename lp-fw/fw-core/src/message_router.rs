@@ -208,8 +208,8 @@ mod tests {
 
         // Fill channel to capacity (32 messages)
         for i in 0..32 {
-            let result = router.send(format!("msg{}", i));
-            assert!(result.is_ok(), "Should be able to send message {}", i);
+            let result = router.send(format!("msg{i}"));
+            assert!(result.is_ok(), "Should be able to send message {i}");
         }
 
         // Verify channel is full by trying to send one more message
