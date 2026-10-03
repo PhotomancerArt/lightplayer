@@ -2,7 +2,8 @@
 //! AI settings trigger. It toggles the drawer (web-local chrome, like a
 //! popover's open flag), wears the pressed look while the drawer is open,
 //! and carries a dot while the drawer is closed and something is waiting
-//! on the user — a card to click — or the assistant is still working.
+//! on the user — a card to click, a steady attention-orange dot — or the
+//! assistant is still working (the working family's pulsing dot).
 
 use dioxus::prelude::*;
 
@@ -53,6 +54,6 @@ const TRIGGER_CLASS: &str = "tw:relative tw:inline-flex tw:h-7 tw:w-7 tw:flex-no
 
 const TRIGGER_OPEN_CLASS: &str = "tw:relative tw:inline-flex tw:h-7 tw:w-7 tw:flex-none tw:cursor-pointer tw:items-center tw:justify-center tw:rounded-full tw:border tw:border-strong-foreground tw:bg-card-raised tw:p-0 tw:text-strong-foreground tw:transition tw:duration-300";
 
-const PENDING_DOT_CLASS: &str = "tw:absolute tw:-right-0.5 tw:-top-0.5 tw:h-2 tw:w-2 tw:rounded-full tw:bg-status-warning-foreground";
+const PENDING_DOT_CLASS: &str = "tw:absolute tw:-right-0.5 tw:-top-0.5 tw:h-2 tw:w-2 tw:rounded-full tw:bg-status-attention-foreground";
 
 const BUSY_DOT_CLASS: &str = "tw:absolute tw:-right-0.5 tw:-top-0.5 tw:h-2 tw:w-2 tw:animate-pulse tw:rounded-full tw:bg-status-working-foreground";

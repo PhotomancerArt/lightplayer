@@ -46,6 +46,10 @@ pub struct AgentTranscriptMirror {
     pub usage: TokenUsage,
     /// Per-turn stop reason + usage, in turn order (debug-export data).
     pub turn_stats: Vec<AgentTurnStat>,
+    /// A run began since the last turn was pushed: the next text or
+    /// thinking starts its own turn instead of continuing the previous
+    /// run's (a run a card resumes shows no user turn between them).
+    run_boundary: bool,
 }
 
 impl Default for AgentTranscriptMirror {
@@ -55,28 +59,39 @@ impl Default for AgentTranscriptMirror {
             status: UiAgentStatus::Idle,
             usage: TokenUsage::default(),
             turn_stats: Vec::new(),
+            run_boundary: false,
         }
     }
 }
 
 impl AgentTranscriptMirror {
+    /// A new run starts: whatever it streams is its own turn, even with no
+    /// user turn in between (the run a settled card resumes).
+    pub fn begin_run(&mut self) {
+        self.run_boundary = true;
+    }
+
     /// Fold one streamed event into the mirror.
     pub fn apply_event(&mut self, event: AgentEvent) -> Option<ExecutedTool> {
         match event {
             AgentEvent::TextDelta(text) => {
                 self.status = UiAgentStatus::Streaming;
+                let fresh = core::mem::take(&mut self.run_boundary);
                 match self.turns.last_mut() {
-                    Some(UiAgentTurn::Assistant { text: existing }) => existing.push_str(&text),
+                    Some(UiAgentTurn::Assistant { text: existing }) if !fresh => {
+                        existing.push_str(&text)
+                    }
                     _ => self.turns.push(UiAgentTurn::Assistant { text }),
                 }
             }
             AgentEvent::ThinkingDelta(text) => {
                 self.status = UiAgentStatus::Streaming;
+                let fresh = core::mem::take(&mut self.run_boundary);
                 match self.turns.last_mut() {
                     Some(UiAgentTurn::Thinking {
                         text: existing,
                         done: false,
-                    }) => {
+                    }) if !fresh => {
                         existing.push_str(&text);
                         cap_thinking_text(existing);
                     }
@@ -90,6 +105,7 @@ impl AgentTranscriptMirror {
             }
             AgentEvent::ToolUseStart { id, name } => {
                 self.status = UiAgentStatus::RunningTool;
+                self.run_boundary = false;
                 self.turns.push(UiAgentTurn::Tool(
                     UiAgentToolRow::started(id).for_tool(name),
                 ));
@@ -360,6 +376,34 @@ mod tests {
         };
         assert_eq!(row.summary_line(), "added Playlist, saved");
         assert_eq!(row.note.as_deref(), Some("build it"));
+    }
+
+    /// A run a card resumes shows no user turn: its text is still its own
+    /// assistant turn, never glued onto the previous run's.
+    #[test]
+    fn a_new_run_starts_a_new_assistant_turn() {
+        let mut mirror = AgentTranscriptMirror::default();
+        mirror.begin_run();
+        mirror.apply_event(AgentEvent::TextDelta("Click Connect ".into()));
+        mirror.apply_event(AgentEvent::TextDelta("on the card.".into()));
+        mirror.begin_run();
+        mirror.apply_event(AgentEvent::ThinkingDelta("it worked".into()));
+        mirror.apply_event(AgentEvent::ThinkingDone);
+        mirror.apply_event(AgentEvent::TextDelta("Connected.".into()));
+        mirror.begin_run();
+        mirror.apply_event(AgentEvent::TextDelta("Again.".into()));
+        let texts: Vec<&str> = mirror
+            .turns
+            .iter()
+            .filter_map(|turn| match turn {
+                UiAgentTurn::Assistant { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            texts,
+            ["Click Connect on the card.", "Connected.", "Again."]
+        );
     }
 
     #[test]

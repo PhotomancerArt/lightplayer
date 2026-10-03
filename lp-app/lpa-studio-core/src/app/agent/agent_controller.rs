@@ -380,6 +380,7 @@ impl AgentController {
         app.abort = session.abort_handle();
         app.running = true;
         app.mirror.status = crate::UiAgentStatus::Streaming;
+        app.mirror.begin_run();
         if shown {
             app.mirror
                 .turns

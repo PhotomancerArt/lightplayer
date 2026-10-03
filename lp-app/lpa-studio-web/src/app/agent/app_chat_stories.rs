@@ -25,7 +25,7 @@ use crate::app::node::face_story_fixtures::shader_node_view;
 use crate::core::OffersProvider;
 
 #[story(
-    description = "The header's chat button, beside the AI settings trigger (the sparkles: the assistant's own mark). TOP: at rest. MIDDLE: the drawer is closed while the assistant is still working — a pulsing working dot. BOTTOM: the drawer is closed and a card is waiting for the user's click (connect or flash a board) — a warning dot, and the tooltip says so. The button toggles the drawer; its open flag is web chrome, like a popover's."
+    description = "The header's chat button, beside the AI settings trigger (the sparkles: the assistant's own mark). TOP: at rest. MIDDLE: the drawer is closed while the assistant is still working — a pulsing working dot. BOTTOM: the drawer is closed and a card is waiting for the user's click (connect or flash a board) — a steady attention-orange dot (the \"needs a look\" colour, distinct from the working dot's pulsing yellow), and the tooltip says so. The button toggles the drawer; its open flag is web chrome, like a popover's."
 )]
 fn drawer_closed() -> Element {
     rsx! {
