@@ -1,4 +1,8 @@
-#![allow(dead_code, unused_imports)]
+#![allow(
+    dead_code,
+    unused_imports,
+    reason = "shared test support: each test binary only uses a subset"
+)]
 
 pub mod assertions;
 pub mod identifiers;

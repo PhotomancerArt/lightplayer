@@ -14,9 +14,7 @@
 //! cargo test -p fw-tests --test pattern_space_emu
 //! ```
 
-use std::cell::RefCell;
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 use fw_tests::transport_emu_serial::SerialEmuClientTransport;

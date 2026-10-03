@@ -127,7 +127,7 @@ pub struct OutputFrameEntry {
     pub geometry: RevisionGateResult<OutputFrameGeometry>,
     /// The published buffer, verbatim at `U16` or rounded to `U8` as the
     /// request asked; empty when it asked for none.
-    #[cfg_attr(feature = "schema-gen", schemars(with = "String"))]
+    #[cfg_attr(feature = "schema-gen", schemars(with = "alloc::string::String"))]
     #[serde(with = "crate::serde_base64")]
     pub bytes: Vec<u8>,
 }

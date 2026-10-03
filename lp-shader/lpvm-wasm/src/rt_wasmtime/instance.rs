@@ -853,7 +853,7 @@ mod tests {
         let (ir, meta) = render_frame_module(None);
         let engine = WasmLpvmEngine::new(WasmOptions::default()).expect("engine");
         let module = engine.compile(&ir, &meta).expect("compile");
-        let mut inst = module.instantiate().expect("instantiate");
+        let inst = module.instantiate().expect("instantiate");
         let out = engine.memory().alloc(4 * 4, 4).expect("alloc rgba8 out");
         let out_ptr = i32::try_from(out.guest_base()).expect("out ptr fits i32");
 
@@ -906,7 +906,7 @@ mod tests {
         let (ir, meta) = render_frame_module(Some(k as i32 * Q_ONE));
         let engine = WasmLpvmEngine::new(WasmOptions::default()).expect("engine");
         let module = engine.compile(&ir, &meta).expect("compile");
-        let mut inst = module.instantiate().expect("instantiate");
+        let inst = module.instantiate().expect("instantiate");
         let out = engine.memory().alloc(4 * 4, 4).expect("alloc rgba8 out");
         let out_ptr = i32::try_from(out.guest_base()).expect("out ptr fits i32");
 

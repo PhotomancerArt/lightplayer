@@ -436,8 +436,8 @@ mod tests {
         let mut map: VecMap<u32, alloc::vec::Vec<u32>> = VecMap::new();
         map.entry(5).or_default().push(1);
         map.entry(5).or_default().push(2);
-        map.entry(7).or_insert_with(alloc::vec::Vec::new).push(9);
-        map.entry(5).and_modify(|v| v.push(3));
+        map.entry(7).or_default().push(9);
+        let _ = map.entry(5).and_modify(|v| v.push(3));
         map.entry(11).and_modify(|v| v.push(0)).or_default();
 
         assert_eq!(map.get(&5).unwrap().as_slice(), &[1, 2, 3]);
