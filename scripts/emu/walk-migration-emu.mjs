@@ -128,7 +128,7 @@ function expectedOpenSummary() {
 }
 
 /// The card's Access row (`button` whose text starts "Access"), if drawn.
-const ACCESS_ROW = `[...document.querySelectorAll('button')].find((b) => /^Access\b/.test((b.innerText || '').trim()))`;
+const ACCESS_ROW = `[...document.querySelectorAll('button')].find((b) => /^Access\\b/.test((b.innerText || '').trim()))`;
 
 // --- the fixture board ---------------------------------------------------
 
