@@ -1,4 +1,6 @@
 //! The share link (plan D14): `https://<origin>/unlock#<device>&<password>`.
+//! Studio no longer makes them; the page still reads the ones already
+//! shared.
 //!
 //! The password rides in the `#fragment`, which a browser never sends to a
 //! server — opening the link reaches our page and nothing else. The page
@@ -21,7 +23,11 @@ pub(crate) struct UnlockLink {
 }
 
 impl UnlockLink {
-    /// The full link, from `origin` (`https://lightplayer.app`).
+    /// The full link, from `origin` (`https://lightplayer.app`). Nothing
+    /// makes these any more (the access panel has no share sheet); links
+    /// already shared still land on `/unlock`, and the tests prove the
+    /// format they were made in.
+    #[cfg(test)]
     pub(crate) fn url(&self, origin: &str) -> String {
         format!(
             "{}{UNLOCK_PATH}#{}&{}",
@@ -55,6 +61,7 @@ impl UnlockLink {
 }
 
 /// `encodeURIComponent`.
+#[cfg(test)]
 pub(crate) fn encode_component(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for byte in text.bytes() {

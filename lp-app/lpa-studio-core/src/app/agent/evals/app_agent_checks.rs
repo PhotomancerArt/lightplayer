@@ -300,25 +300,6 @@ pub(crate) fn playlist_cycles(
         [] => return Err("no Playlist node".to_string()),
         many => return Err(format!("{} Playlist nodes; expected one", many.len())),
     };
-    let cycle = &playlist.def["cycle"];
-    if cycle.get("kind").and_then(Value::as_str) != Some("cycle") {
-        return Err(format!(
-            "the playlist does not cycle (cycle = {})",
-            if cycle.is_null() {
-                "unset".to_string()
-            } else {
-                cycle.to_string()
-            }
-        ));
-    }
-    let step = cycle["step_seconds"].as_f64().unwrap_or(0.0);
-    if let Some([lo, hi]) = step_range
-        && !(lo..=hi).contains(&step)
-    {
-        return Err(format!(
-            "the cycle steps every {step} s, outside {lo}–{hi} s"
-        ));
-    }
     let def_file = playlist
         .file
         .clone()
@@ -343,6 +324,33 @@ pub(crate) fn playlist_cycles(
             }
             None => strangers.push(format!("entry {key} (not a catalog pattern)")),
         }
+    }
+    // Checked after the entries are read, so a playlist that does not
+    // cycle says what it holds too: "does not cycle" over ONE entry (the
+    // agent built a single-pattern project and never tried `cycle`) and
+    // over four (it forgot `cycle`) are different failures (S7, 2026-10-03).
+    let cycle = &playlist.def["cycle"];
+    if cycle.get("kind").and_then(Value::as_str) != Some("cycle") {
+        let mut entries = identified.clone();
+        entries.extend(strangers.iter().cloned());
+        return Err(format!(
+            "the playlist does not cycle (cycle = {}); it holds {} entr{} {entries:?}",
+            if cycle.is_null() {
+                "unset".to_string()
+            } else {
+                cycle.to_string()
+            },
+            entries.len(),
+            if entries.len() == 1 { "y" } else { "ies" },
+        ));
+    }
+    let step = cycle["step_seconds"].as_f64().unwrap_or(0.0);
+    if let Some([lo, hi]) = step_range
+        && !(lo..=hi).contains(&step)
+    {
+        return Err(format!(
+            "the cycle steps every {step} s, outside {lo}–{hi} s"
+        ));
     }
     if identified.len() < min_entries {
         return Err(format!(

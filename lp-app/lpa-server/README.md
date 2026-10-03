@@ -19,7 +19,8 @@ transport (`lpc_shared::transport::LinkTrust`):
 
 - **Trusted** (USB, the host process): edit, always.
 - **Untrusted** (BLE): nothing until an HMAC login (`LoginBegin` /
-  `LoginAnswer`), else play when the device is `open`.
+  `LoginAnswer`), else what the device is `open` to
+  (nobody, play or edit; the higher of the two wins).
 - **Keyed** (a secure lp-link network link): the tier of the access entry
   its handshake matched. The transport reports the handshake
   (`ServerTransport::take_secure_events`); the server answers each key lookup

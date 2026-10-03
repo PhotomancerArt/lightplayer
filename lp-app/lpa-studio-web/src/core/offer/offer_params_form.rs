@@ -329,7 +329,7 @@ mod tests {
     }
 
     fn prefix() -> OfferPath {
-        OfferPath::board(&lpa_studio_core::BoardRef::New(DeviceId(3)))
+        OfferPath::board(&lpa_studio_core::BoardRef::New(3))
     }
 
     fn pending(chip: Option<&str>) -> lpa_studio_core::PendingLinkView {

@@ -17,8 +17,9 @@ use lpa_studio_core::{
     UiNodeTab, UiNodeView, UiPackageCard, UiPaneView, UiStatus, UiStudioView, UiViewContent,
 };
 
+use crate::app::home::ExplorePage;
 use crate::app::home::device_offer_story_fixtures::StoryDevicesPage;
-use crate::app::home::{ExplorePage, ProjectsPage};
+use crate::app::home::home_offer_story_fixtures::StoryProjectsPage;
 use crate::app::node::NodePane;
 use crate::app::node::face_story_fixtures::{
     fixture_node_view, playlist_node_face_view, shader_face, shader_sections,
@@ -59,7 +60,7 @@ fn home_gallery() -> Element {
         section { class: "tw:p-4",
             div { class: "tw:grid tw:gap-10",
                 StoryDevicesPage { home: readme_home_view(), on_action: |_| {} }
-                ProjectsPage {
+                StoryProjectsPage {
                     home: readme_home_view(),
                     now_secs: Some(STORY_NOW),
                     on_action: |_| {},

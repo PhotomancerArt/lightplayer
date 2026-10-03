@@ -237,7 +237,8 @@ mod tests {
         };
         assert_eq!(
             options.iter().map(|o| o.value.as_str()).collect::<Vec<_>>(),
-            ["example:catalog/plasma", "library:prj_1"]
+            ["library:prj_1", "example:catalog/plasma"],
+            "the library's own projects come before the catalog"
         );
         assert_eq!(preselect, &None, "two to choose from");
         assert!(!offer.is_enabled(), "choose a project first");

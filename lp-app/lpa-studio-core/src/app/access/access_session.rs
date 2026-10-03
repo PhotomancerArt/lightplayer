@@ -131,11 +131,13 @@ pub enum AccessStep {
         added_at: u64,
     },
     /// Change the device's access list (the panel, or Undo). `bluetooth` is
-    /// the switch it sets, if any.
+    /// the switch it sets, if any; `keep` the salts never dropped to make
+    /// room (this browser's own keys).
     Change {
         ops: Vec<AccessOp>,
         added_at: u64,
         bluetooth: Option<bool>,
+        keep: Vec<[u8; SALT_BYTES]>,
     },
 }
 
