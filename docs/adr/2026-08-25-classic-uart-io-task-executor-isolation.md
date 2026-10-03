@@ -1,6 +1,6 @@
 # Classic ESP32: io_task executor isolation — interrupt executor + hardware pacer + byte shuttling
 
-- Status: accepted (amended 2026-09-29 — the host link above io_task is lp-link now; see the end)
+- Status: accepted (amended 2026-09-29 — the host link above io_task is lp-link now; amended 2026-10-02 — esp-rtos thread creation is reachable after all; see the end)
 - Date: 2026-08-25
 - Plan: `lp2025/2026-08-24-1823-uart-io-task-starvation` (PR #448)
 - Fixes: `docs/debt/shared-uart-io-task-starvation.md`
@@ -272,3 +272,24 @@ not line damage), and a `--uart-faults` soak finishes five
 project loads with 0 app errors. The desk walk (`hardware-walk-protocol.md`
 in the plan directory) is what checks the pacer and the thread-side link
 under silicon's own interrupt latency.
+
+## Amended 2026-10-02 — an esp-rtos thread is reachable (C6 link thread)
+
+The alternative above, **"a second esp-rtos OS thread … not public API"**,
+no longer holds as written. esp-rtos 0.3's own thread creation is still
+crate-private, but `esp_radio_rtos_driver::task_create` (esp-radio-rtos-driver
+0.3, the call esp-radio starts its Wi-Fi and BLE threads through) is public,
+and esp-rtos implements it whenever its `esp-radio` feature is on. The C6 now
+runs its USB link task on such a thread — priority 1, a 3 KB heap stack, its
+own embassy `Executor`, working embassy-time — beside answering requests
+before the render: `docs/adr/2026-10-02-c6-link-io-thread.md` (plan
+`lp2025/2026-10-01-1756-c6-link-io-thread`, PR #891).
+
+**The classic's arrangement is unchanged.** Nothing here moves io_task off
+swi2, retires the pacer, or moves the classic's `Link` (which stays on the
+thread executor, per the 2026-09-29 amendment). Whether the classic should
+take a thread instead is a question for the Wi-Fi control roadmap's
+board-porting milestone (`lp2025/2026-10-01-1832-wifi-control`, M2), to be
+answered with its own measurements — the classic needs `esp-rtos/esp-radio`
+for `task_create`, and its io_task's 1 ms byte service is a constraint a
+thread would have to keep.

@@ -44,11 +44,11 @@ const SERIAL_IN_EMPTY: u32 = 1 << 3;
 
 /// The delivered log's markers, in order: the raw boot text a host reads
 /// before the link task owns the port, ending at the boot marker the server
-/// loop prints as it starts.
+/// loop prints as it starts. The shipped image starts the link task on its
+/// own thread (`fw-esp32c6`'s `io-thread`), which says so in one line.
 const DELIVERED_IN_ORDER: &[&str] = &[
     "[INIT] Initializing board...\n",
-    "[INIT] Spawning USB link task...",
-    "[INIT] USB link task spawned",
+    "[INIT] io thread: stack 3072 B, priority 1",
     "[INIT] LpServer created",
     "[INIT] fw-esp32 initialized, starting server loop... proto=",
 ];

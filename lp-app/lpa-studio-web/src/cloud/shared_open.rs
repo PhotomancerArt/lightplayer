@@ -45,6 +45,12 @@ pub enum SharedOpenState {
     NotFound,
     /// The service could not be asked (offline, gateway down).
     Unreachable,
+    /// The project was fetched, but a newer LightPlayer made it: its format
+    /// is ahead of this build's. Nothing was installed.
+    NewerFormat,
+    /// The project was fetched, but its format is one this build cannot
+    /// open (too old to upgrade, or unreadable). Nothing was installed.
+    UnsupportedFormat,
 }
 
 impl SharedOpenState {
@@ -59,6 +65,12 @@ impl SharedOpenState {
             SharedOpenState::Unreachable => Some(
                 "Couldn't reach the service to open this link — check your connection and try again.",
             ),
+            SharedOpenState::NewerFormat => Some(
+                "This project was made by a newer LightPlayer — update LightPlayer to open it.",
+            ),
+            SharedOpenState::UnsupportedFormat => {
+                Some("This project's format can't be opened by this version of LightPlayer.")
+            }
         }
     }
 
@@ -66,7 +78,10 @@ impl SharedOpenState {
     pub fn is_refusal(&self) -> bool {
         matches!(
             self,
-            SharedOpenState::NotFound | SharedOpenState::Unreachable
+            SharedOpenState::NotFound
+                | SharedOpenState::Unreachable
+                | SharedOpenState::NewerFormat
+                | SharedOpenState::UnsupportedFormat
         )
     }
 }
@@ -96,6 +111,34 @@ pub(crate) fn all_files(fs: &dyn LpFs) -> Result<Vec<(String, Vec<u8>)>, FsError
     }
     files.sort_by(|a, b| a.0.cmp(&b.0));
     Ok(files)
+}
+
+/// The refusal for a fetched package this build cannot open, or `None` when
+/// it opens (current, or older and upgradable on open). The library refuses
+/// such an install too, before writing (`LibraryStore::install_synced`); this
+/// is what lets the user hear why instead of "couldn't reach the service".
+#[cfg_attr(
+    not(target_arch = "wasm32"),
+    allow(
+        dead_code,
+        reason = "the flow that reads it is browser-only; tests cover it on host"
+    )
+)]
+pub(crate) fn format_refusal(package: &dyn LpFs) -> Option<SharedOpenState> {
+    use lpa_studio_core::app::library::{classify_package, health_for};
+
+    let class = classify_package(package);
+    if health_for(&class, None).is_openable() {
+        return None;
+    }
+    let newer = class
+        .found()
+        .is_some_and(|found| found > lpc_model::PROJECT_FORMAT_VERSION);
+    Some(if newer {
+        SharedOpenState::NewerFormat
+    } else {
+        SharedOpenState::UnsupportedFormat
+    })
 }
 
 /// What consuming a `/p/` link produced (examples vision P5): the mode
@@ -175,6 +218,13 @@ pub async fn open_shared_link(uid: PrefixedUid) -> Result<SharedOpenOutcome, Sha
         });
     }
 
+    // Classified before the install so the refusal names its reason; the
+    // install refuses it too, but as an opaque library error.
+    if let Some(refusal) = format_refusal(&package) {
+        log::warn!("shared open of {uid}: format refused: {refusal:?}");
+        return Err(refusal);
+    }
+
     let outcome = host
         .catalog(CatalogOp::InstallSyncedProject {
             name,
@@ -214,6 +264,40 @@ mod tests {
         assert!(SharedOpenState::Unreachable.is_refusal());
         assert!(!SharedOpenState::Opening.is_refusal());
         assert_eq!(SharedOpenState::Idle.line(), None);
+    }
+
+    /// A newer LightPlayer's project is refused with that reason — whether
+    /// or not it also carries keys this build cannot parse; one this build
+    /// cannot open for another reason gets its own line; current and
+    /// upgradable ones go on to install.
+    #[test]
+    fn format_refusal_names_a_newer_lightplayer() {
+        let at = |manifest: String| {
+            let fs = LpFsMemory::new();
+            fs.write_file(LpPath::new("/project.json"), manifest.as_bytes())
+                .unwrap();
+            format_refusal(&fs)
+        };
+        let current = lpc_model::PROJECT_FORMAT_VERSION;
+        assert_eq!(
+            at(format!(r#"{{"format":{}}}"#, current + 1)),
+            Some(SharedOpenState::NewerFormat)
+        );
+        assert_eq!(
+            at(format!(r#"{{"format":{},"sparkle":true}}"#, current + 1)),
+            Some(SharedOpenState::NewerFormat)
+        );
+        assert_eq!(
+            at(r#"{"format":3}"#.to_string()),
+            Some(SharedOpenState::UnsupportedFormat)
+        );
+        assert_eq!(at(format!(r#"{{"format":{current}}}"#)), None);
+        assert_eq!(at(r#"{"format":5}"#.to_string()), None);
+
+        let line = SharedOpenState::NewerFormat.line().unwrap();
+        assert!(line.contains("newer LightPlayer"), "{line}");
+        assert!(SharedOpenState::NewerFormat.is_refusal());
+        assert!(SharedOpenState::UnsupportedFormat.is_refusal());
     }
 
     #[test]

@@ -52,7 +52,7 @@ use crate::{
     DeviceAction, DeviceEffectCall, DeviceEffectFacts, DeviceEffectProgress, DeviceInput,
     DeviceTaskFuture, DeviceTransport, DeviceTransportFuture, DevicesOp, GrantedLink, LensLineTap,
     LensTapEvent, ProjectController, ProjectOp, SimBacking, SimDeviceTransport, SimLinkSource,
-    SimRuntimeControl, SimSession, StudioController, UiAction,
+    SimRuntimeControl, SimSession, StudioController, UiAction, UiNotices,
 };
 
 /// Wall-clock ceiling on a `run_until`. Generous: the fake boots a real host
@@ -937,6 +937,18 @@ impl DeviceBench {
     fn push_gesture(&mut self, device: crate::DeviceId, source: crate::PushSource) {
         let action: UiAction = crate::DevicePushOp::action_for(device, source);
         drive(self.controller.dispatch(action)).expect("a push gesture never fails loudly");
+    }
+
+    /// [`Self::push_gesture`], but handing back the notices the dispatch
+    /// produced — the push upgrade notice lives there, not in the roster
+    /// view.
+    fn push_gesture_notices(
+        &mut self,
+        device: crate::DeviceId,
+        source: crate::PushSource,
+    ) -> UiNotices {
+        let action: UiAction = crate::DevicePushOp::action_for(device, source);
+        drive(self.controller.dispatch(action)).expect("a push gesture never fails loudly")
     }
 
     /// Open a library project ON a named device — the `?on=mac:` arrival
@@ -6803,6 +6815,100 @@ fn pushing_an_old_format_library_project_sends_the_current_format() {
     );
 }
 
+/// The same real push path as the test above, pinning the user-facing half
+/// of #870's migration: the push must say what happened to the library
+/// copy, in the same words the editor open's own migration notice uses
+/// (`ProjectController::migrate_package_on_open`).
+#[test]
+fn pushing_an_old_format_library_project_shows_the_upgrade_notice() {
+    use lpc_model::PROJECT_FORMAT_VERSION;
+
+    let device = empty_light_player("dev000000daqf6dvvr2");
+    let (mut bench, _tasks) = identified(&device, "usb-old-format-2");
+
+    // The same real v10 fixture as the test above, installed as-is.
+    let old = PROJECT_FORMAT_VERSION - 1;
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join(format!("../lpa-upgrade/tests/corpus/v{old}/button-sign"));
+    let mut files = Vec::new();
+    for entry in std::fs::read_dir(&dir).expect("the corpus fixture exists") {
+        let entry = entry.unwrap();
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name == "README.md" {
+            continue;
+        }
+        files.push((name, std::fs::read(entry.path()).unwrap()));
+    }
+    let summary = bench
+        .store
+        .install_package(
+            "Old sign",
+            &files,
+            crate::app::library::PackageProvenance::Created,
+            1.0,
+        )
+        .expect("the old package installs");
+    let uid = summary.uid;
+    let slug = summary.slug;
+    bench.settle_library();
+
+    let card = bench.view().devices[0].clone();
+    let notices = bench.push_gesture_notices(
+        card.id,
+        crate::PushSource::Library {
+            project_uid: uid.to_string(),
+        },
+    );
+
+    assert_eq!(
+        notices.notices.len(),
+        1,
+        "the migration should produce exactly one notice: {notices:?}"
+    );
+    assert_eq!(
+        notices.notices[0].message,
+        format!("Upgraded \"{slug}\" from format {old} to {PROJECT_FORMAT_VERSION}"),
+        "the push's notice must read like the editor open's"
+    );
+}
+
+/// The notice's other half: a library project already at the current
+/// format produces none — the migration never ran, so there is nothing to
+/// say.
+#[test]
+fn pushing_a_current_format_library_project_shows_no_upgrade_notice() {
+    let device = empty_light_player("dev000000daqf6dvvr3");
+    let (mut bench, _tasks) = identified(&device, "usb-current-format-1");
+
+    let example = crate::app::home::embedded_example::embedded_example(
+        crate::first_bundled_example_id().expect("this build bundles examples"),
+    )
+    .expect("the bundled example resolves");
+    let uid = bench
+        .store
+        .install_package(
+            "Current sign",
+            &example.files(),
+            crate::app::library::PackageProvenance::Created,
+            1.0,
+        )
+        .expect("the current package installs")
+        .uid;
+    bench.settle_library();
+
+    let card = bench.view().devices[0].clone();
+    let notices = bench.push_gesture_notices(
+        card.id,
+        crate::PushSource::Library {
+            project_uid: uid.to_string(),
+        },
+    );
+    assert!(
+        notices.notices.is_empty(),
+        "a current-format push must show no migration notice: {notices:?}"
+    );
+}
+
 /// Like [`drive`], but sleeps between polls for the fake device's thread.
 fn drive_real<F: Future>(future: F) -> F::Output {
     let waker = noop_waker();
@@ -6958,6 +7064,152 @@ fn a_refused_reload_fails_the_editor_instead_of_reading_ready() {
             },
         ),
         "Retry reopens the same package"
+    );
+}
+
+/// Companion to the test above: a fast-forward (or Discard) that lands a
+/// head THIS BUILD CANNOT RUN must be refused by the same open pre-flight
+/// the open path runs, not handed to the runtime as a parser complaint —
+/// `migrate_package_on_open` now runs inside `reload_active_from_library`
+/// (2026-10-01-fast-forward-skips-format-check). The runtime must never see
+/// the newer-format bytes at all: unlike the test above (refused by the
+/// RUNTIME, which drops the lens), this is refused before the push, so the
+/// sim's loaded project is untouched.
+#[test]
+fn a_reload_to_a_newer_format_is_refused_before_it_reaches_the_runtime() {
+    let (mut bench, tasks, device, good) = sim_open_bench();
+    open_package(&mut bench, &tasks, &good);
+    let name = bench
+        .controller
+        .project_for_test()
+        .active_library_display_name()
+        .expect("the opened project names itself");
+    let before = sim_loaded(&device);
+    assert_eq!(before.len(), 1);
+
+    // What a fast-forward (or Discard) does: a head from a newer LightPlayer
+    // lands in the library copy. Bump `format` ALONE, in place — the rest of
+    // the manifest (including `name`, which the failure notice below must
+    // still read correctly) stays exactly as the open left it.
+    let mut copy = bench.store.open(good.parse().expect("uid")).expect("open");
+    let manifest = copy
+        .read_all_files()
+        .expect("read")
+        .into_iter()
+        .find(|(path, _)| path == "project.json")
+        .map(|(_, bytes)| bytes)
+        .expect("project.json");
+    let mut manifest: serde_json::Value = serde_json::from_slice(&manifest).expect("parses");
+    manifest["format"] = serde_json::json!(lpc_model::PROJECT_FORMAT_VERSION + 1);
+    copy.apply_update(
+        "/project.json".as_path(),
+        Some(&serde_json::to_vec(&manifest).expect("re-encode")),
+    )
+    .expect("write");
+    copy.record_save(2.0).expect("save");
+
+    let result = drive_real(bench.controller.dispatch(UiAction::from_op(
+        crate::ControllerId::new(ProjectController::NODE_ID),
+        ProjectOp::ReloadActiveProject,
+    )));
+    let error = result.expect_err("a newer-format head is refused");
+    assert!(
+        error.to_string().contains("made by a newer LightPlayer"),
+        "the classified reason reaches the caller: {error}"
+    );
+
+    // Refused BEFORE the push: the runtime still holds exactly what it did.
+    assert_eq!(
+        sim_loaded(&device),
+        before,
+        "the runtime is never handed the newer-format bytes"
+    );
+
+    let crate::app::open_progress::OpenStage::Failed(failure) =
+        crate::app::open_progress::open_stage()
+    else {
+        panic!(
+            "the reload left no verdict for the user: {:?}",
+            crate::app::open_progress::open_stage()
+        );
+    };
+    assert!(
+        failure.message.contains(&name),
+        "the notice names the project: {:?}",
+        failure.message
+    );
+    assert!(
+        failure.message.contains("made by a newer LightPlayer"),
+        "the notice carries the classified reason: {:?}",
+        failure.message
+    );
+}
+
+/// The other half: a head still behind the current format (reachable via
+/// Discard, or a collaborator's fast-forward to an older save) must migrate
+/// in place and load — not be refused the way the open path never refuses an
+/// upgradable package. A real v10 fixture from the upgrader's own corpus
+/// replaces the active package's files wholesale, standing in for whatever
+/// landed the old head.
+#[test]
+fn a_reload_to_an_older_format_migrates_in_place_and_loads() {
+    let (mut bench, tasks, device, good) = sim_open_bench();
+    open_package(&mut bench, &tasks, &good);
+    assert_eq!(sim_loaded(&device).len(), 1);
+    let uid: lpc_history::PrefixedUid = good.parse().expect("uid");
+
+    // Replace the active package's whole file set with the real v10
+    // fixture — the fast-forward/Discard landed an older-but-supported head.
+    // The fixture's own `project.json` states no `uid` (the lenient reader
+    // falls back to one derived from the slug, same as the catalog example
+    // it is a fixture OF), so it is stamped with THIS package's own uid —
+    // exactly what `install_package`'s `ensure_uid` already did for the
+    // active head — or a later-by-uid lookup would call this package gone.
+    let mut copy = bench.store.open(uid).expect("open");
+    for (path, _) in copy.read_all_files().expect("read the old file set") {
+        copy.apply_update(format!("/{path}").as_path(), None)
+            .expect("clear the old file");
+    }
+    for (path, bytes) in v10_corpus_files() {
+        let bytes = if path == "project.json" {
+            let mut manifest: serde_json::Value = serde_json::from_slice(&bytes).expect("parses");
+            manifest["uid"] = serde_json::Value::String(uid.to_string());
+            serde_json::to_vec(&manifest).expect("re-encode")
+        } else {
+            bytes
+        };
+        copy.apply_update(format!("/{path}").as_path(), Some(&bytes))
+            .expect("write the v10 fixture");
+    }
+    copy.record_save(2.0).expect("save");
+
+    let result = drive_real(bench.controller.dispatch(UiAction::from_op(
+        crate::ControllerId::new(ProjectController::NODE_ID),
+        ProjectOp::ReloadActiveProject,
+    )));
+    result.expect("an older-but-supported head migrates and loads");
+    assert_eq!(
+        sim_loaded(&device).len(),
+        1,
+        "the migrated project is loaded"
+    );
+
+    // The library copy itself is upgraded, not left at v10 for next time.
+    let manifest = bench
+        .store
+        .open(uid)
+        .expect("open")
+        .read_all_files()
+        .expect("read")
+        .into_iter()
+        .find(|(path, _)| path == "project.json")
+        .map(|(_, bytes)| bytes)
+        .expect("project.json is in the migrated package");
+    let format = serde_json::from_slice::<serde_json::Value>(&manifest).unwrap()["format"].clone();
+    assert_eq!(
+        format,
+        serde_json::json!(lpc_model::PROJECT_FORMAT_VERSION),
+        "the library head is at the current format: {format}"
     );
 }
 
