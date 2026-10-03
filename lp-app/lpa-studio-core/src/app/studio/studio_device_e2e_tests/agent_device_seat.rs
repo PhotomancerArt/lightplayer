@@ -251,7 +251,13 @@ impl AgentSeat {
             for command in drive(self.rx.recv_coalesced()).unwrap_or_default() {
                 match command {
                     StudioCommand::Action(action) => {
-                        drive(bench.controller.dispatch(action)).expect("the run's op dispatches");
+                        // As the actor does: a refused op is the agent's
+                        // to hear (its ack carries the error) and a log line,
+                        // never the end of the run — a live model may well
+                        // try an edit before a project is open.
+                        if let Err(error) = drive(bench.controller.dispatch(action)) {
+                            bench.controller.note_action_error(&error);
+                        }
                     }
                     StudioCommand::Agent(feedback) => {
                         bench.controller.apply_agent_feedback(feedback)
