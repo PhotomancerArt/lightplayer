@@ -117,13 +117,18 @@ function fixtureAccessJson() {
   return JSON.stringify({ version: 2, bleEnabled: true, open: true, secrets });
 }
 
-/// What the card's access rows must say once the board is back: "Who has
-/// access" counts the store's entries (plus one for anyone nearby), and the
-/// Bluetooth switch is on and usable. The default fixture's one entry gains
-/// this browser's key on connect; the full store gains nothing.
-function expectedWhoCount() {
-  return FULL_ACCESS ? 17 : 2;
+/// What the card's Access row must say once the board is back: who gets
+/// in with no password, as the board's own store has it — a summary the row
+/// shows only once the list was read (main's #929 panel; it replaced the
+/// old "Who has access N" count). The default fixture's store is a version-2
+/// file with `open: false` (nobody: "password"); the full store has `open:
+/// true` (play: "anyone can play").
+function expectedOpenSummary() {
+  return FULL_ACCESS ? "anyone can play" : "password";
 }
+
+/// The card's Access row (`button` whose text starts "Access"), if drawn.
+const ACCESS_ROW = `[...document.querySelectorAll('button')].find((b) => /^Access\b/.test((b.innerText || '').trim()))`;
 
 // --- the fixture board ---------------------------------------------------
 
@@ -558,7 +563,7 @@ async function main() {
         (said.match(/\[ble\][^\n]*/) ?? ["(no [ble] line)"])[0].slice(0, 120),
       );
       const heldPage = await driver.evaluate(MAIN_TEXT);
-      step("the card shows no access list for it", !heldPage.includes("Who has access"), "");
+      step("the card shows no access list for it", !(await driver.evaluate(`Boolean(${ACCESS_ROW})`)), "");
       step("the card offers Finish update", heldPage.includes("Finish update"), "");
       await pressLasting(driver, "Finish update");
     } else if (scenario === "W7b") {
@@ -726,16 +731,16 @@ async function main() {
     if (scenario !== "W7a") {
       const rows = `(() => {
         const sw = document.querySelector('button[role="switch"][aria-label="Bluetooth"]');
-        const who = [...document.querySelectorAll('button')].find((b) => (b.innerText || '').trim().startsWith('Who has access'));
+        const row = ${ACCESS_ROW};
         return {
           bluetooth: sw ? { on: sw.getAttribute('aria-checked') === 'true', disabled: sw.disabled } : null,
-          who: who ? Number((who.innerText.match(/(\\d+)\\s*$/) || [])[1]) : null,
+          open: row ? row.innerText.trim().replace(/^Access\\s*/, '').trim() : null,
           reading: (document.querySelector('#main')?.innerText || '').includes("Reading the device's list"),
         };
       })()`;
-      const want = expectedWhoCount();
+      const want = JSON.stringify(expectedOpenSummary());
       const ready = await driver
-        .waitFor(`(() => { const r = ${rows}; return r.bluetooth && r.bluetooth.on && !r.bluetooth.disabled && r.who === ${want}; })()`, {
+        .waitFor(`(() => { const r = ${rows}; return r.bluetooth && r.bluetooth.on && !r.bluetooth.disabled && r.open === ${want}; })()`, {
           timeoutMs: 60_000,
           what: "the card's access rows",
         })
@@ -744,7 +749,7 @@ async function main() {
       verdict.access = seen;
       if (FULL_ACCESS) {
         // The panel says why this browser is not on the list.
-        await driver.click("Who has access").catch(() => {});
+        await driver.evaluate(`${ACCESS_ROW}?.click()`).catch(() => {});
         await new Promise((r) => setTimeout(r, 1_000));
         verdict.access.full = (await driver.evaluate(PAGE_TEXT)).includes("device is full");
         await shot("access-panel");
@@ -890,7 +895,7 @@ async function main() {
     }
     if (accessOk !== null) {
       step(
-        "the card's access rows are the board's: Bluetooth on and usable, every entry counted",
+        "the card's access rows are the board's: Bluetooth on and usable, its store's access read",
         accessOk,
         JSON.stringify(verdict.access),
       );
