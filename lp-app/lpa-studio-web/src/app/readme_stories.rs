@@ -17,7 +17,8 @@ use lpa_studio_core::{
     UiNodeTab, UiNodeView, UiPackageCard, UiPaneView, UiStatus, UiStudioView, UiViewContent,
 };
 
-use crate::app::home::{DevicesPage, ExplorePage, ProjectsPage};
+use crate::app::home::device_offer_story_fixtures::StoryDevicesPage;
+use crate::app::home::{ExplorePage, ProjectsPage};
 use crate::app::node::NodePane;
 use crate::app::node::face_story_fixtures::{
     fixture_node_view, playlist_node_face_view, shader_face, shader_sections,
@@ -57,7 +58,7 @@ fn home_gallery() -> Element {
     rsx! {
         section { class: "tw:p-4",
             div { class: "tw:grid tw:gap-10",
-                DevicesPage { home: readme_home_view(), on_action: |_| {} }
+                StoryDevicesPage { home: readme_home_view(), on_action: |_| {} }
                 ProjectsPage {
                     home: readme_home_view(),
                     now_secs: Some(STORY_NOW),

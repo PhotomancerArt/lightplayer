@@ -460,21 +460,29 @@ fn control_row_as(
     relationship: ProjectRelationship,
     initially_open: Option<ControlSegment>,
 ) -> Element {
+    // The device segment's Rename is the device's `rename` offer: the
+    // tree the app provides, built for the story's session.
+    let offers = crate::app::home::device_offer_story_fixtures::session_device_tree(
+        session.device,
+        &session.name,
+    );
     rsx! {
         div {
             class: "tw:border tw:border-dashed tw:border-border-muted tw:px-4 tw:pt-3",
             style: "max-width: {width}px;",
-            SiteChrome {
-                section: SiteSection::Session,
-                session_control: Some(ChromeSessionControl {
-                    session,
-                    project,
-                    relationship,
-                    project_popover: ProjectPopoverInputs::default(),
-                    on_action: EventHandler::new(|_| {}),
-                    initially_open,
-                }),
-                VersionChipPreview { chip: branch_chip() }
+            crate::core::OffersProvider { offers,
+                SiteChrome {
+                    section: SiteSection::Session,
+                    session_control: Some(ChromeSessionControl {
+                        session,
+                        project,
+                        relationship,
+                        project_popover: ProjectPopoverInputs::default(),
+                        on_action: EventHandler::new(|_| {}),
+                        initially_open,
+                    }),
+                    VersionChipPreview { chip: branch_chip() }
+                }
             }
         }
     }
