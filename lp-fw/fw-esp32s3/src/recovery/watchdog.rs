@@ -9,9 +9,9 @@
 //!
 //! Feed policy (aggregator): the server loop feeds every frame, but only while
 //! the I/O task has proven itself alive within [`IO_SILENCE_LIMIT_MS`]. The I/O
-//! task ticks [`note_io_alive`] every loop iteration (~1 ms cadence, USB
-//! connected or not), so silence really means a wedged task — we stop feeding
-//! and let the RWDT do its job.
+//! task ticks [`note_io_alive`] every loop iteration (at least every 250 ms,
+//! USB connected or not — the link task's idle backstop), so silence really
+//! means a wedged task — we stop feeding and let the RWDT do its job.
 //!
 //! The timeout is deliberately generous: shader compiles legitimately take
 //! seconds and run inside the server loop. We are catching escapes, not

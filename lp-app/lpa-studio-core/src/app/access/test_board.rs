@@ -150,6 +150,13 @@ impl FakeBoard {
         self.state.borrow().answers
     }
 
+    /// The untrusted link drops: the next [`Self::client`] is a new link
+    /// that holds nothing until it unlocks, as the firmware gives every
+    /// Bluetooth connection.
+    pub fn drop_link(&self) {
+        self.state.borrow_mut().granted = None;
+    }
+
     /// The tier the untrusted link holds right now.
     pub fn granted(&self) -> Option<Tier> {
         let state = self.state.borrow();

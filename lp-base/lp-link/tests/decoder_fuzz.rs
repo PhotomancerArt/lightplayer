@@ -191,6 +191,50 @@ fn a_frame_at_the_senders_next_seq_does_not_stall_the_link() {
     }
 }
 
+/// Regression for 2026-09-28-link-fuzz-rekey-coverage: `Op::Crafted` used to
+/// key every non-SYN frame with the FIRST session's nonces
+/// (`NONCE_PEER ^ NONCE_LINK`). Once a reset repicked either side's nonce,
+/// every later crafted frame failed [`frame::verify`] under that stale key,
+/// so from there on the fuzz exercised only the checksum-reject path. One
+/// `restart` here forces exactly that; the crafted frame right after must
+/// still reach the receive path under the link's new session key.
+#[test]
+fn a_crafted_frame_after_a_reset_still_reaches_the_receive_path() {
+    let mut w = World::<SelectiveRepeat>::new(LinkConfig::usb(), Mode::Plain);
+    w.exchange(64);
+    assert_eq!(w.link.state(), LinkState::Established);
+
+    w.link.restart(w.now);
+    assert_eq!(
+        w.link.generation(),
+        1,
+        "the restart must have bumped the session"
+    );
+    w.exchange(20);
+    assert_eq!(
+        w.link.state(),
+        LinkState::Established,
+        "the real pair must come back up before the crafted frame"
+    );
+
+    let before = w.link.counters().frames_rx;
+    w.apply(&Op::Crafted {
+        b0: 2, // FrameKind::Ack
+        seq: 0,
+        ack: 1,
+        win: 4,
+        body: vec![],
+        syn_key: false,
+        flip: None,
+    });
+    let after = w.link.counters().frames_rx;
+    assert!(
+        after > before,
+        "a crafted frame keyed with the CURRENT session must reach the receive \
+         path after a reset (frames_rx {before} -> {after})"
+    );
+}
+
 #[cfg(all(feature = "secure", feature = "sim"))]
 proptest! {
     #![proptest_config(config())]
@@ -371,7 +415,7 @@ impl<A: Arq> World<A> {
                 syn_key,
                 flip,
             } => {
-                let key = if *syn_key { 0 } else { NONCE_PEER ^ NONCE_LINK };
+                let key = if *syn_key { 0 } else { self.session_key() };
                 let mut raw = vec![*b0, *seq, *ack, *win];
                 raw.extend_from_slice(body);
                 self.feed_crafted(raw, key, *flip);
@@ -432,6 +476,19 @@ impl<A: Arq> World<A> {
             let f = f.to_vec();
             self.feed_peer(&f);
         }
+    }
+
+    /// The key [`Link::on_frame`] verifies a non-SYN frame under right now.
+    /// `Link` has no public accessor for its own nonce, but the key is both
+    /// nonces XORed, and each half is observable from the real traffic this
+    /// harness already relays: `peer.peer_nonce()` is the link-under-test's
+    /// own nonce, as heard by the peer in a real SYN; `link.peer_nonce()` is
+    /// the peer's nonce, as heard by the link. Using the FIRST session's
+    /// nonces here (a fixed constant) is exactly the bug this guards
+    /// against: every later crafted frame goes stale forever after any
+    /// reset repicks either side's nonce (2026-09-28-link-fuzz-rekey-coverage).
+    fn session_key(&self) -> u32 {
+        self.peer.peer_nonce().unwrap_or(NONCE_LINK) ^ self.link.peer_nonce().unwrap_or(NONCE_PEER)
     }
 
     /// `raw` (header and body), checksummed under `key`, framed, maybe with
