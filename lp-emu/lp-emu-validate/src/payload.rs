@@ -3105,7 +3105,10 @@ mod tests {
                 i += 1;
             }
             let close = close.unwrap_or_else(|| panic!("no closing quote for the trigger: {line}"));
-            (rest[..close].to_string(), rest[close + 1..].trim_start().to_string())
+            (
+                rest[..close].to_string(),
+                rest[close + 1..].trim_start().to_string(),
+            )
         };
         let classic = directive("lp-emu/lp-emu-validate/walks/v3-stop-all.script");
         let s3 = directive("lp-emu/lp-emu-validate/walks/s3-stop-all.script");
