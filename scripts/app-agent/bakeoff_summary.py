@@ -10,62 +10,19 @@ prints, as Markdown:
   cost as OpenRouter reported it;
 - every failed run with its failure category and first reason.
 
-A run passes when every stage-A check passed and stage B passed (or was not
-asked for: a project-less scenario has nothing to deploy).
+A run passes when every stage-A check passed and stage B passed (or did not
+apply). The scenarios are whichever the reports name (`corpus_report.py`'s
+loader), in corpus-id order; the failure categories are the checks' kinds.
 
     scripts/app-agent/bakeoff_summary.py <run-dir> [bakeoff.toml]
 """
 
-import glob
-import json
 import os
 import statistics
 import sys
 import tomllib
 
-SCENARIOS = ["e1-sean-from-empty", "e2-make-it-300", "e3-never-guess-the-board"]
-SHORT = {
-    "e1-sean-from-empty": "E1 Sean from empty",
-    "e2-make-it-300": "E2 make it 300",
-    "e3-never-guess-the-board": "E3 ask the board",
-}
-
-
-def category(report):
-    """One word-ish label for why a run failed, most telling first."""
-    checks = {c["name"]: c for c in report.get("checks", [])}
-    failed = [name for name, c in checks.items() if not c["passed"]]
-    stopped = report.get("stopped") or ""
-    if "provider error" in stopped:
-        return "provider error"
-    if "budget" in stopped:
-        return "budget"
-    if "no_d_label_before_board" in failed:
-        return "guessed the board"
-    if "asked_about_board" in failed:
-        return "never asked the board"
-    if not failed and report.get("stage_b") == "fail":
-        return "dark on the emulated C6"
-    order = [
-        ("output_on_d6", "wrong pin"),
-        ("target_is_xiao_c6", "board not set"),
-        ("strip_of", "wrong strip"),
-        ("playlist_cycles", "no cycling playlist"),
-        ("graph_wired", "not wired"),
-        ("minimal_diff", "changed too much"),
-        ("all_nodes_ok", "node in error"),
-        ("saved", "not saved"),
-    ]
-    for name, label in order:
-        if name in failed:
-            return label
-    return "other"
-
-
-def passed(report):
-    if not report.get("passed"):
-        return False
-    return report.get("stage_b", "pass") == "pass"
+from corpus_report import category, load_reports, passed, scenario_key, id_order
 
 
 def main():
@@ -76,30 +33,28 @@ def main():
         reference = {c["model"] for c in config.get("candidate", []) if c.get("reference")}
 
     by_model = {}
-    for path in sorted(glob.glob(os.path.join(run_dir, "*", "*", "report.json"))):
-        if os.sep + "probe" in path or "-probe" + os.sep in path:
+    for report in load_reports(run_dir, depth=2):
+        if "probe" in report["_dir"].split(os.sep)[0]:
             continue
-        report = json.load(open(path))
-        transcript_path = os.path.join(os.path.dirname(path), "transcript.json")
-        stopped = None
-        if os.path.exists(transcript_path):
-            for step in json.load(open(transcript_path)).get("steps", []):
-                if "stopped" in step:
-                    stopped = step["stopped"].get("reason")
-        report["stopped"] = stopped
         model = report["driver"].removeprefix("openrouter:")
-        report["_dir"] = os.path.relpath(os.path.dirname(path), run_dir)
         by_model.setdefault(model, []).append(report)
 
+    ids = {}
+    for reports in by_model.values():
+        for report in reports:
+            name = scenario_key(report)
+            ids[name] = ids.get(name) or report.get("id", "")
+    scenarios = sorted(((sid, name) for name, sid in ids.items()),
+                       key=lambda pair: (id_order(pair[0]), pair[1]))
     total = 0.0
-    lines = ["| model | " + " | ".join(SHORT[s] for s in SCENARIOS)
+    lines = ["| model | " + " | ".join(f"{sid} {name}".strip() for sid, name in scenarios)
              + " | median turns | mean tokens in/out | mean $/run | total $ |",
-             "|---|" + "---:|" * (len(SCENARIOS) + 4)]
+             "|---|" + "---:|" * (len(scenarios) + 4)]
     failures = []
     for model, reports in sorted(by_model.items(), key=lambda kv: -sum(passed(r) for r in kv[1])):
         cells = []
-        for scenario in SCENARIOS:
-            runs = [r for r in reports if r["scenario"] == scenario]
+        for _, scenario in scenarios:
+            runs = [r for r in reports if scenario_key(r) == scenario]
             cells.append(f"{sum(passed(r) for r in runs)}/{len(runs)}" if runs else "–")
         turns = statistics.median(r.get("turns", 0) for r in reports)
         tin = statistics.mean(r.get("tokens_in", 0) for r in reports)

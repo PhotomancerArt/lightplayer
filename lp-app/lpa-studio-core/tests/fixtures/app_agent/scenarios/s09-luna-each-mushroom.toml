@@ -1,0 +1,40 @@
+# S9 "Each mushroom its own light": five rings of 12 in a rough circle, a
+# ripple moving from one to the next. The engine can draw rings
+# (`ring`, `repeat` in map2d), but the agent only knows the straight-strip
+# map format until the knowledge base teaches it.
+id = "S9"
+name = "s09-luna-each-mushroom"
+summary = "Five 12-LED rings in a circle → a map of five rings, a pattern that moves across"
+persona = "luna"
+tags = ["mapping", "edit", "knowledge"]
+status = "pending"
+waits_for = "M10"
+note = "The ring-map check (5 groups of 12, arranged in a circle, in wiring order) lands with M10; today: 60 lamps, D10, running."
+
+[start]
+project = { golden = "luna-60-d10" }
+board = { known = "seeed/xiao-esp32-c6" }
+
+[user]
+say = "can each mushroom be its own thing? like a ripple that moves from one mushroom to the next"
+otherwise = "whatever you think looks good."
+
+[[user.reply]]
+topic = "layout"
+when = ["layout", "arranged", "arrangement", "position", "where", "shape", "laid out", "spaced"]
+text = "they're in a rough circle, about a foot apart. Each cap's LEDs go round in a ring."
+
+[budget]
+turns = 24
+usd = 0.60
+
+[[check]]
+kind = "lamp_count"
+leds = 60
+[[check]]
+kind = "output_on"
+pin = "D10"
+[[check]]
+kind = "all_nodes_ok"
+[[check]]
+kind = "saved"
