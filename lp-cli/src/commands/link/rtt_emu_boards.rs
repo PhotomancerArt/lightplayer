@@ -47,13 +47,15 @@ impl ChipReport for C6Board {
             let r = m.rmt_refill_stats(ch);
             if let Some(v) = refill_entry(
                 ch,
-                r.refills,
-                r.unanswered,
-                r.entry_max,
-                r.fill_max,
-                r.half_words,
-                &r.entry_hist,
-                &r.fill_hist,
+                RefillFields {
+                    refills: r.refills,
+                    unanswered: r.unanswered,
+                    entry_max: r.entry_max,
+                    fill_max: r.fill_max,
+                    half_words: r.half_words,
+                    entry_hist: &r.entry_hist,
+                    fill_hist: &r.fill_hist,
+                },
             ) {
                 refills.push(v);
             }
@@ -78,13 +80,15 @@ impl ChipReport for S3Board {
             let r = m.rmt_refill_stats(ch);
             if let Some(v) = refill_entry(
                 ch,
-                r.refills,
-                r.unanswered,
-                r.entry_max,
-                r.fill_max,
-                r.half_words,
-                &r.entry_hist,
-                &r.fill_hist,
+                RefillFields {
+                    refills: r.refills,
+                    unanswered: r.unanswered,
+                    entry_max: r.entry_max,
+                    fill_max: r.fill_max,
+                    half_words: r.half_words,
+                    entry_hist: &r.entry_hist,
+                    fill_hist: &r.fill_hist,
+                },
             ) {
                 refills.push(v);
             }
@@ -109,13 +113,15 @@ impl ChipReport for V3Board {
             let r = m.rmt_refill_stats(ch);
             if let Some(v) = refill_entry(
                 ch,
-                r.refills,
-                r.unanswered,
-                r.entry_max,
-                r.fill_max,
-                r.half_words,
-                &r.entry_hist,
-                &r.fill_hist,
+                RefillFields {
+                    refills: r.refills,
+                    unanswered: r.unanswered,
+                    entry_max: r.entry_max,
+                    fill_max: r.fill_max,
+                    half_words: r.half_words,
+                    entry_hist: &r.entry_hist,
+                    fill_hist: &r.fill_hist,
+                },
             ) {
                 refills.push(v);
             }
@@ -143,32 +149,34 @@ fn pad_entry(pad: u8, frames: &[Frame], cycles_per_us: u64) -> Value {
     })
 }
 
-/// One RMT channel's refill race, or `None` when it carried nothing (the
-/// common case for a channel a project never drives). Scalar arguments, not
-/// a `RefillStats` by type, because the C6/S3 and the classic do not share
-/// one.
-#[allow(clippy::too_many_arguments)]
-fn refill_entry(
-    ch: usize,
+/// The fields of one RMT channel's refill race, read out of whichever
+/// `RefillStats` the chip has (the C6/S3 and the classic do not share one
+/// type, so this is built from the fields at each call site instead of
+/// taking the struct itself).
+struct RefillFields<'a> {
     refills: u64,
     unanswered: u64,
     entry_max: u64,
     fill_max: u64,
     half_words: u32,
-    entry_hist: &[u64],
-    fill_hist: &[u64],
-) -> Option<Value> {
-    if refills == 0 && unanswered == 0 {
+    entry_hist: &'a [u64],
+    fill_hist: &'a [u64],
+}
+
+/// One RMT channel's refill race, or `None` when it carried nothing (the
+/// common case for a channel a project never drives).
+fn refill_entry(ch: usize, r: RefillFields<'_>) -> Option<Value> {
+    if r.refills == 0 && r.unanswered == 0 {
         return None;
     }
     Some(json!({
         "ch": ch,
-        "refills": refills,
-        "unanswered": unanswered,
-        "entry_max_words": entry_max,
-        "fill_max_words": fill_max,
-        "half_words": half_words,
-        "entry_hist": entry_hist,
-        "fill_hist": fill_hist,
+        "refills": r.refills,
+        "unanswered": r.unanswered,
+        "entry_max_words": r.entry_max,
+        "fill_max_words": r.fill_max,
+        "half_words": r.half_words,
+        "entry_hist": r.entry_hist,
+        "fill_hist": r.fill_hist,
     }))
 }
