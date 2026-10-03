@@ -296,7 +296,11 @@ async function watchSteps(driver, until, { timeoutMs, what }) {
   const seen = [];
   const deadline = Date.now() + timeoutMs;
   for (;;) {
-    for (const label of await driver.evaluate(STEPS_NOW)) if (!seen.includes(label)) seen.push(label);
+    for (const label of await driver.evaluate(STEPS_NOW)) {
+      if (seen.includes(label)) continue;
+      seen.push(label);
+      await onStepShown(label);
+    }
     if (await driver.evaluate(until)) return seen;
     if (Date.now() > deadline) throw new Error(`${what} never came (the card's steps so far: ${seen.join(" → ") || "none"})`);
     await new Promise((r) => setTimeout(r, 250));
@@ -313,11 +317,15 @@ function inOrder(seen, want) {
 /// The steps the card showed, across one scenario's waits.
 const cardSteps = [];
 
+/// Called once per step the first time the card shows it (`main` points it
+/// at a screenshot, so a run leaves one picture per step label).
+let onStepShown = async () => {};
+
 async function awaitQuestion(driver) {
   const question = `${PAGE_TEXT}.includes("Move this board's files to the new layout") || ${PAGE_TEXT}.includes("Put this board's files back") || ${PAGE_TEXT}.includes("don't fit the new firmware")`;
   for (const label of await watchSteps(driver, question, { timeoutMs: MIGRATION_MS, what: "the layout question (or refusal)" })) cardSteps.push(label);
   // Behind an open question the card says it is waiting for the answer.
-  for (const label of await driver.evaluate(STEPS_NOW)) cardSteps.push(label);
+  for (const label of await driver.evaluate(STEPS_NOW)) if (cardSteps.at(-1) !== label) cardSteps.push(label);
   return driver.evaluate(PAGE_TEXT);
 }
 
@@ -500,6 +508,7 @@ async function main() {
       await driver.screenshot(path.join(shots, `${verdict.steps.length + 1}-${name}.png`));
     } catch { /* the page may be gone */ }
   };
+  onStepShown = async (label) => shot(`step-${label.replace(/[^a-z]+/gi, "-").replace(/^-|-$/g, "").toLowerCase()}`);
   let fatal = null;
   // What the board held when the update began (see the question step);
   // the fixture until then.
