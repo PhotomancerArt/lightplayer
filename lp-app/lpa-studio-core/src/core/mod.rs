@@ -25,7 +25,10 @@ pub use crate::controller::{
     PROJECT_EDITOR_ACTION_DEADLINE, PROJECT_LOAD_DEADLINE, UiAction, UiActions, UxNodePath,
 };
 pub use metric::UiMetric;
-pub use offer::{OfferPath, OfferPathError, UiOffer, UiOfferTree};
+pub use offer::{
+    OfferArgError, OfferArgs, OfferBinder, OfferChoice, OfferParam, OfferParamKind, OfferPath,
+    OfferPathError, OfferPress, UiOffer, UiOfferTree,
+};
 pub use progress::UiProgress;
 pub use status::UiStatus;
 pub use status::UiStatusKind;

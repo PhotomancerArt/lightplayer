@@ -12,7 +12,7 @@
 //! verbs change, never because some other card's did.
 
 use dioxus::prelude::*;
-use lpa_studio_core::{OfferPath, UiOffer, UiOfferTree};
+use lpa_studio_core::{DeviceId, OfferPath, UiOffer, UiOfferTree};
 
 /// The view's offer tree, shared through Dioxus context.
 #[derive(Clone, Copy)]
@@ -49,6 +49,44 @@ pub fn use_verbs_of(prefix: Option<OfferPath>) -> Memo<Vec<UiOffer>> {
         Some(prefix) => tree.read().verbs_of(prefix).cloned().collect(),
         None => Vec::new(),
     })
+}
+
+/// A device's verbs, by its roster handle: the tree knows which
+/// `devices/<board ref>` prefix the handle lives at
+/// ([`UiOfferTree::device_prefix`]). `None` — or a handle the tree has not
+/// placed — has none. Memoized like [`use_verbs_of`].
+pub fn use_device_verbs(device: Option<DeviceId>) -> Memo<Vec<UiOffer>> {
+    let tree = use_offers();
+    let mut at = use_signal(|| device);
+    if *at.peek() != device {
+        at.set(device);
+    }
+    use_memo(move || {
+        let tree = tree.read();
+        match at().and_then(|device| tree.device_prefix(device)) {
+            Some(prefix) => tree.verbs_of(prefix).cloned().collect(),
+            None => Vec::new(),
+        }
+    })
+}
+
+/// The offer at `path`, when the tree publishes one. Memoized: the caller
+/// re-renders only when that offer changes.
+pub fn use_offer_at(path: OfferPath) -> Memo<Option<UiOffer>> {
+    let tree = use_offers();
+    let mut at = use_signal(|| path.clone());
+    if *at.peek() != path {
+        at.set(path);
+    }
+    use_memo(move || tree.read().get(&at.read()).cloned())
+}
+
+/// The verb named `verb` (the path's last segment) among `verbs`.
+pub fn verb_named(verbs: &[UiOffer], verb: &str) -> Option<UiOffer> {
+    verbs
+        .iter()
+        .find(|offer| offer.path.last() == Some(verb))
+        .cloned()
 }
 
 /// Provide `offers` to `children` — the stories' way to hand a surface the
