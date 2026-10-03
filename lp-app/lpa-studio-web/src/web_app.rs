@@ -1374,16 +1374,19 @@ pub fn App() -> Element {
             ChromeSessionControl {
                 session,
                 // The project's own verbs come from the view's offer tree
-                // (`project/save`, `project/revert`), like the pane header's.
+                // (`project/save`, `project/revert`), like the pane header's
+                // (and, like it, less the picker's and the debug chip's).
                 project: editor.map(|(editor, status)| {
                     ProjectDetailContent::new(
                         editor,
                         status,
-                        current_view
-                            .offers
-                            .verbs_of(&lpa_studio_core::OfferPath::project())
-                            .cloned()
-                            .collect(),
+                        crate::app::project::project_pane::header_verbs(
+                            current_view
+                                .offers
+                                .verbs_of(&lpa_studio_core::OfferPath::project())
+                                .cloned()
+                                .collect(),
+                        ),
                     )
                 }),
                 relationship,

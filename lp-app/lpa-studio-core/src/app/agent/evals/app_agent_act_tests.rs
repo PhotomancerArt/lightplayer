@@ -258,6 +258,166 @@ fn revert_to_saved_becomes_a_card() {
     );
 }
 
+/// QF: `edit_project`'s `remove_node` goes through the node's own Remove
+/// offer. A node carrying unsaved edits is a Lasting removal (it sweeps
+/// them for good), so the edit is refused, nothing changes, and the reason
+/// names the offer; `act`ing that path hands the user the button as a
+/// card, and the user's click removes it.
+#[test]
+fn a_lasting_removal_by_edit_project_is_refused_and_points_at_the_card() {
+    let scenario = Scenario::load("e2-make-it-300").expect("e2");
+    let path = super::app_agent_scenario::fixtures_dir().join("scripts/make-it-300.json");
+    let mut script: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).expect("script")).expect("json");
+    script["save"] = serde_json::Value::Bool(false);
+    let mut edit = call("e1", lpa_agent::EDIT_PROJECT_TOOL_NAME, script);
+    edit.push(turn_done(StopReason::ToolUse));
+    let mut remove = call(
+        "e2",
+        lpa_agent::EDIT_PROJECT_TOOL_NAME,
+        serde_json::json!({ "edits": [{ "remove_node": { "node": "fixture" } }] }),
+    );
+    remove.push(turn_done(StopReason::ToolUse));
+    let scripts = vec![vec![
+        edit,
+        remove,
+        vec![
+            TurnEvent::TextDelta("That one is yours to click.".into()),
+            turn_done(StopReason::EndTurn),
+        ],
+    ]];
+    let mut studio = AgentEvalStudio::new(ModelSource::Scripted(scripts));
+    studio.start(&scenario.start, golden_tree);
+    studio.send("make it 300, then drop the fixture", limits());
+
+    let results = tool_results(&studio.transcript_steps());
+    assert_eq!(results.len(), 2, "{results:#?}");
+    let status = &results[1]["results"][0];
+    assert_eq!(status["ok"], false, "{:#}", results[1]);
+    let reason = status["reason"]
+        .as_str()
+        .unwrap_or_else(|| panic!("the removal is refused: {:#}", results[1]));
+    assert!(
+        reason.contains("unsaved edits") && reason.contains("`act` project/"),
+        "the refusal names the offer to act: {reason}"
+    );
+    let offer = reason
+        .split_whitespace()
+        .find(|word| word.starts_with("project/") && word.ends_with("/remove"))
+        .unwrap_or_else(|| panic!("an offer path: {reason}"))
+        .to_string();
+    assert!(has_kind(&mut studio, "Fixture"), "nothing was removed");
+    assert!(studio.unsaved(), "the edits it would sweep are still there");
+    assert!(studio.cards().is_empty(), "a refused edit makes no card");
+    assert!(
+        studio.offered(&offer).consequence().arms(),
+        "the path it names is the Lasting Remove"
+    );
+}
+
+/// QF's other half: a removal Revert can undo (the clock has no edits to
+/// sweep) is still the agent's to make through `edit_project`.
+#[test]
+fn an_undoable_removal_by_edit_project_still_removes() {
+    let scenario = Scenario::load("e2-make-it-300").expect("e2");
+    let mut remove = call(
+        "e1",
+        lpa_agent::EDIT_PROJECT_TOOL_NAME,
+        serde_json::json!({ "edits": [{ "remove_node": { "node": "clock" } }] }),
+    );
+    remove.push(turn_done(StopReason::ToolUse));
+    let scripts = vec![vec![
+        remove,
+        vec![
+            TurnEvent::TextDelta("I removed the clock.".into()),
+            turn_done(StopReason::EndTurn),
+        ],
+    ]];
+    let mut studio = AgentEvalStudio::new(ModelSource::Scripted(scripts));
+    studio.start(&scenario.start, golden_tree);
+    assert!(has_kind(&mut studio, "Clock"));
+    studio.send("remove the clock", limits());
+
+    let result = tool_results(&studio.transcript_steps()).remove(0);
+    assert_eq!(
+        result["results"][0]["ok"], true,
+        "the removal applied: {result:#}"
+    );
+    assert!(!has_kind(&mut studio, "Clock"), "the clock is gone");
+    assert!(studio.unsaved(), "until Save or Revert");
+    assert!(studio.cards().is_empty());
+}
+
+/// M6a: the readout lists the Add node picker's offers, the long kind
+/// list named in part, and the agent presses `project/add-node` by path
+/// with a `kind`, exactly as a picker row does.
+#[test]
+fn the_agent_reads_and_presses_the_add_node_offer() {
+    let scenario = Scenario::load("e2-make-it-300").expect("e2");
+    let mut press = call(
+        "a1",
+        lpa_agent::ACT_TOOL_NAME,
+        serde_json::json!({
+            "action": "project/add-node",
+            "args": { "kind": "clock" },
+            "why": "you asked for a second clock",
+        }),
+    );
+    press.push(turn_done(StopReason::ToolUse));
+    let scripts = vec![vec![
+        press,
+        vec![
+            TurnEvent::TextDelta("I added a clock.".into()),
+            turn_done(StopReason::EndTurn),
+        ],
+    ]];
+    let mut studio = AgentEvalStudio::new(ModelSource::Scripted(scripts));
+    studio.start(&scenario.start, golden_tree);
+    let clocks = |studio: &mut AgentEvalStudio| {
+        studio
+            .node_statuses()
+            .iter()
+            .filter(|row| row.kind == "Clock")
+            .count()
+    };
+    let before = clocks(&mut studio);
+    studio.send("add another clock", limits());
+
+    let steps = studio.transcript_steps();
+    let state = steps
+        .iter()
+        .find_map(|step| match step {
+            EvalStep::State { text } => Some(text.clone()),
+            _ => None,
+        })
+        .expect("the readout the model saw");
+    for line in [
+        "- project/add-node: Add node [choose a kind in args]\n",
+        "  takes kind: one of shader (Shader), texture (Texture), ",
+        "and 4 more\n",
+        "- project/import-pattern: Import pattern [choose a pattern in args]\n",
+        "- project/paste-node: Paste node [choose a copied node in args]\n",
+        "  takes clipboard: text\n",
+    ] {
+        assert!(state.contains(line), "{line:?} in:\n{state}");
+    }
+    // Every node publishes Copy; the readout lists the focused node's in
+    // full and counts the rest (M7).
+    assert!(
+        state.contains(&format!(
+            "- project/{ROOT}/fixture.fixture/copy: Copy JSON\n"
+        )),
+        "{state}"
+    );
+    assert!(
+        state.contains("copy ×6"),
+        "the other nodes' Copy, counted: {state}"
+    );
+    let result = tool_results(&steps).remove(0);
+    assert!(result.get("done").is_some(), "{result:#}");
+    assert_eq!(clocks(&mut studio), before + 1, "a clock was added");
+}
+
 /// The golden's tree root, as its node segment in an offer path.
 const ROOT: &str = "studio.show";
 

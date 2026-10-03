@@ -284,7 +284,8 @@ pub fn press_refusal(offer: &UiOffer, error: &OfferArgError) -> String {
     let about = match error {
         OfferArgError::Missing { name, .. }
         | OfferArgError::NotAnOption { name, .. }
-        | OfferArgError::OptionDisabled { name, .. } => Some(name.as_str()),
+        | OfferArgError::OptionDisabled { name, .. }
+        | OfferArgError::Invalid { name, .. } => Some(name.as_str()),
         _ => None,
     };
     let params: Vec<&OfferParam> = match about {

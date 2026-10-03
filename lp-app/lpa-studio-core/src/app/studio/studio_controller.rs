@@ -6542,15 +6542,18 @@ impl StudioController {
         }
         let roster = self.device_roster_view();
         text.push_str(&device_lines(&roster));
-        // Every offer in the view's tree, in publish order: the project
-        // header's Save and Revert while there are edits to save, every
-        // node card's verbs (nested nodes included), and the device verbs —
-        // the buttons the user sees, with their enablement. The render
-        // lists the ones near the user in full and counts the rest; `act`
-        // finds any of them. The pane's own actions stay out: a project
+        // Every offer in the view's tree, in publish order: the project's
+        // own verbs (Save and Revert while there are edits to save, Clear
+        // debug while an override is active, and the root picker's
+        // add-node / import-pattern / paste-node), every node card's verbs
+        // (nested nodes included, Copy among them), each playlist picker's,
+        // and the device verbs — the buttons the user sees, with their
+        // enablement. The render lists the ones near the user in full and
+        // counts the rest; `act` finds any of them. A long choice (the
+        // kinds, the patterns) is named in part and counted
+        // (`CHOICES_LISTED`). The pane's own actions stay out: a project
         // pane offers none once the project is ready, and every other state
-        // shows home. Tree focus actions and add-node menus stay out too
-        // (the edit tool covers those).
+        // shows home. Tree focus actions stay out too.
         let view = self.view();
         AppReadoutSnapshot {
             lead,

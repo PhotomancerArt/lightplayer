@@ -524,7 +524,19 @@ fn the_reported_place_moves_the_readouts_lead_and_the_palettes_order() {
         readout.starts_with("page: project editor, play mode\nyou are looking at: no node"),
         "{readout}"
     );
-    assert!(readout.contains("actions here: none\n"), "{readout}");
+    // No node is in focus, so no node's verbs are listed in full; the
+    // project's own verbs (the root picker's add-node and friends) are the
+    // page's actions.
+    let here = readout
+        .split("actions here")
+        .nth(1)
+        .and_then(|rest| rest.split("\nproject: ").next())
+        .unwrap_or_default();
+    assert!(
+        !here.contains("/remove"),
+        "no node verbs in full: {readout}"
+    );
+    assert!(here.contains("- project/add-node: "), "{readout}");
     let view = studio.view.clone().expect("a view");
     assert_eq!(view.offers.focus().node, None);
 

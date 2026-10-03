@@ -64,6 +64,15 @@ pub fn build_app_system_prompt(reference: &str) -> String {
          use, set to your values, and the user's click on it is what does \
          it (they may change a value first). After `needs_user`, stop: say in one line which card to click \
          and why. Never ask the user to type yes instead of clicking.\n\
+         - <app_state> also lists the Add node picker's actions: \
+         `project/add-node` (`kind`), `project/import-pattern` (`pattern`) \
+         and `project/paste-node`, plus the same under each playlist. They \
+         are what the user's picker presses. To build or change content, \
+         still use `edit_project`: it creates, imports and sets in one \
+         call, and later edits can name what earlier ones created. An \
+         `edit_project` `remove_node` that would throw away unsaved edits \
+         is refused with the node's `remove` path; `act` that path, which \
+         hands the user the button as a card.\n\
          - You do not write shader code. When the user asks to change what \
          a shader itself does — its colors, motion or shape, as code — `act` \
          that shader node's `ask-agent` action with their request in \
@@ -95,6 +104,10 @@ mod tests {
         assert!(prompt.contains("project/save"));
         assert!(prompt.contains("\"args\": {\"board\""), "an args example");
         assert!(prompt.contains("`ask-agent`"), "the shader hand-off");
+        assert!(
+            prompt.contains("`project/add-node`") && prompt.contains("still use `edit_project`"),
+            "the picker's offers, and edit_project for content"
+        );
         assert!(
             prompt.contains("only counted"),
             "how to expand a counted node"

@@ -1,11 +1,19 @@
 //! Add-node picker data (controller-produced, pane-grammar style).
+//!
+//! The picker's rows are presentation: a kind's glyph, its label, the
+//! section it sits in, and why it is disabled. What a row *does* is an offer
+//! in the view's offer tree ([`super::add_node_offers`]): the kind rows press
+//! `…/add-node` with their [`UiAddNodeMenuEntry::value`] as `kind`, the
+//! import rows press `…/import-pattern` with theirs as `pattern`. Both offers
+//! are built from this same menu after the device gate, so a row and the
+//! option it presses can never disagree.
 
 use lpc_model::{LpFeature, NodeKind};
 
-use crate::{ControllerId, UiAction};
+use crate::OfferPath;
 
-use super::node_create_op::{NodeCreateOp, UiAttachTarget};
-use super::node_import_op::{ImportSource, NodeImportOp};
+use super::node_create_op::UiAttachTarget;
+use super::node_import_op::ImportSource;
 use super::node_naming::{node_kind_label, node_kind_slug};
 
 /// Picker order: the common authoring targets first, hardware-/niche kinds
@@ -39,14 +47,16 @@ const PICKER_KINDS: &[NodeKind] = &[
 #[derive(Clone, Debug, PartialEq)]
 pub struct UiAddNodeMenu {
     pub entries: Vec<UiAddNodeMenuEntry>,
-    /// Where this menu's creates attach. Carried alongside the entries so
-    /// the picker can offer sources the controller cannot pre-build an
-    /// action for — paste needs the clipboard's contents, which only the
-    /// browser edge can read (`docs/adr/2026-07-28-share-envelopes.md`).
+    /// Where this menu's creates attach — which also says where its offers
+    /// live ([`Self::offers_at`]): `add-node`, `import-pattern` and
+    /// `paste-node`, the last of which takes the clipboard's contents that
+    /// only the browser edge can read
+    /// (`docs/adr/2026-07-28-share-envelopes.md`).
     pub attach: UiAttachTarget,
     /// The **import** source (module authoring unit, P5): one row per
-    /// pattern export the local library offers, each dispatching a
-    /// [`NodeImportOp`] that vendors the folder into this project.
+    /// pattern export the local library offers, each pressing the menu's
+    /// `import-pattern` offer, which vendors the folder into this project
+    /// ([`super::NodeImportOp`]).
     ///
     /// The picker's third source after kinds and the clipboard. Empty on
     /// every non-root menu — this round vendors into the project `nodes`
@@ -65,6 +75,45 @@ pub struct UiAddNodeMenu {
     /// means "draw nothing" — either the rows are there, or this menu is
     /// not an import site.
     pub imports_empty: Option<String>,
+    /// What each import row's `value` vendors: the source and the export
+    /// folder. Core's own lookup for the `import-pattern` offer's binder —
+    /// a renderer only ever hands the value back.
+    import_sources: Vec<ImportChoice>,
+}
+
+/// One import row's value and what it vendors.
+#[derive(Clone, Debug, PartialEq)]
+struct ImportChoice {
+    value: String,
+    source: ImportSource,
+    export: String,
+}
+
+impl UiAddNodeMenu {
+    /// Where this menu's offers live: `project` for the project root's
+    /// picker (`project/add-node`), the playlist's node path for a
+    /// playlist's (`project/<playlist>/add-node`).
+    pub fn offers_at(&self) -> OfferPath {
+        match &self.attach {
+            UiAttachTarget::ProjectRoot => OfferPath::project(),
+            UiAttachTarget::Playlist { node } => OfferPath::project_node(node),
+        }
+    }
+
+    /// What the import row whose value is `value` vendors: its source and
+    /// export folder.
+    pub(crate) fn import_source(&self, value: &str) -> Option<(&ImportSource, &str)> {
+        self.import_sources
+            .iter()
+            .find(|choice| choice.value == value)
+            .map(|choice| (&choice.source, choice.export.as_str()))
+    }
+
+    /// Every import row, library first, then built-in: the
+    /// `import-pattern` offer's options, in the picker's order.
+    pub(crate) fn import_rows(&self) -> impl Iterator<Item = &UiAddNodeMenuEntry> {
+        self.imports.iter().chain(self.imports_builtin.iter())
+    }
 }
 
 /// One pattern export the picker can vendor into the open project: a
@@ -117,23 +166,49 @@ pub fn set_import_source(
         ImportSource::Library { package_uid } => exclude_uid == Some(package_uid.as_str()),
         ImportSource::BuiltIn { .. } => false,
     };
-    menu.imports = patterns
+    let library: Vec<&UiImportablePattern> = patterns
         .iter()
         .filter(|pattern| matches!(pattern.source, ImportSource::Library { .. }))
         .filter(|pattern| !excluded(pattern))
-        .map(|pattern| import_entry(pattern, &menu.attach))
         .collect();
-    menu.imports_builtin = crate::app::home::home_view_builder::builtin_importable_patterns()
+    let builtin = crate::app::home::home_view_builder::builtin_importable_patterns();
+    menu.imports = library
         .iter()
-        .map(|pattern| import_entry(pattern, &menu.attach))
+        .map(|pattern| import_entry(pattern))
+        .collect();
+    menu.imports_builtin = builtin.iter().map(import_entry).collect();
+    menu.import_sources = library
+        .into_iter()
+        .chain(builtin.iter())
+        .map(|pattern| ImportChoice {
+            value: import_value(pattern),
+            source: pattern.source.clone(),
+            export: pattern.export.clone(),
+        })
         .collect();
     menu.imports_empty = (menu.imports.is_empty() && menu.imports_builtin.is_empty())
         .then(|| NO_PATTERNS_COPY.to_string());
 }
 
-/// One import row. Same entry shape as a kind row — glyph, label, ready
-/// action — so the picker renders both through one component.
-fn import_entry(pattern: &UiImportablePattern, attach: &UiAttachTarget) -> UiAddNodeMenuEntry {
+/// An import row's choice value: `catalog/<slug>` for a built-in pattern
+/// (its registry id, the name the app agent's catalog reference uses),
+/// `library/<package uid>` for a library package's, with `/<export>` after
+/// either when the package designates more than one export.
+fn import_value(pattern: &UiImportablePattern) -> String {
+    let package = match &pattern.source {
+        ImportSource::Library { package_uid } => format!("library/{package_uid}"),
+        ImportSource::BuiltIn { example_id } => example_id.clone(),
+    };
+    if pattern.family {
+        format!("{package}/{}", pattern.export)
+    } else {
+        package
+    }
+}
+
+/// One import row. Same entry shape as a kind row — glyph, label, the value
+/// its offer takes — so the picker renders both through one component.
+fn import_entry(pattern: &UiImportablePattern) -> UiAddNodeMenuEntry {
     let label = if pattern.family {
         format!("{} · {}", pattern.package_label, pattern.export)
     } else {
@@ -153,22 +228,15 @@ fn import_entry(pattern: &UiImportablePattern, attach: &UiAttachTarget) -> UiAdd
         kind: NodeKind::Module,
         label,
         icon: node_kind_slug(NodeKind::Module).to_string(),
-        action: UiAction::from_op(
-            ControllerId::new(crate::ProjectController::NODE_ID),
-            NodeImportOp {
-                source: pattern.source.clone(),
-                export: pattern.export.clone(),
-                attach: attach.clone(),
-            },
-        )
-        .with_label(format!("Import {}", pattern.export))
-        .with_summary(summary),
+        value: import_value(pattern),
+        summary,
         unavailable: None,
     }
 }
 
-/// One picker entry. `action` is the ready-to-dispatch create (pane grammar:
-/// actions are controller-produced data; the renderer never assembles ops).
+/// One picker entry: what the row shows, and the value its offer takes.
+/// The row presses an offer from the view's offer tree — never an action
+/// of its own (pane grammar: the renderer never assembles ops).
 #[derive(Clone, Debug, PartialEq)]
 pub struct UiAddNodeMenuEntry {
     pub kind: NodeKind,
@@ -176,8 +244,13 @@ pub struct UiAddNodeMenuEntry {
     pub label: String,
     /// Icon token for the renderer (the kind's name slug).
     pub icon: String,
-    /// Dispatches [`NodeCreateOp`] for this kind at the menu's attach site.
-    pub action: UiAction,
+    /// The value the row's offer takes: the `kind` of the menu's
+    /// `add-node` offer (the kind's slug, `shader`) for a kind row, the
+    /// `pattern` of its `import-pattern` offer for an import row
+    /// (`catalog/comet`).
+    pub value: String,
+    /// What the row does, in a sentence (the row's tooltip).
+    pub summary: String,
     /// Why this entry is unavailable, when it is — the connected device's
     /// firmware carries no runtime for the kind. `None` = offer it.
     ///
@@ -219,6 +292,7 @@ pub fn add_node_menu(attach: &UiAttachTarget) -> UiAddNodeMenu {
         imports: Vec::new(),
         imports_builtin: Vec::new(),
         imports_empty: None,
+        import_sources: Vec::new(),
         entries: PICKER_KINDS
             .iter()
             .filter(|kind| kind_fits_attach(**kind, attach))
@@ -228,15 +302,8 @@ pub fn add_node_menu(attach: &UiAttachTarget) -> UiAddNodeMenu {
                     kind: *kind,
                     label: label.to_string(),
                     icon: node_kind_slug(*kind).to_string(),
-                    action: UiAction::from_op(
-                        ControllerId::new(crate::ProjectController::NODE_ID),
-                        NodeCreateOp {
-                            kind: *kind,
-                            attach: attach.clone(),
-                        },
-                    )
-                    .with_label(format!("Add {label}"))
-                    .with_summary(format!("Create a new {} node.", label.to_lowercase())),
+                    value: node_kind_slug(*kind).to_string(),
+                    summary: format!("Create a new {} node.", label.to_lowercase()),
                     unavailable: None,
                 }
             })
@@ -335,19 +402,23 @@ mod tests {
         assert!(menu.entries.iter().all(|e| e.unavailable.is_none()));
     }
 
+    /// A kind row carries the kind's slug: the `kind` its menu's
+    /// `add-node` offer takes, and where that offer lives follows the
+    /// menu's attach site.
     #[test]
-    fn entry_actions_dispatch_create_at_the_menu_site() {
-        let playlist = UiAttachTarget::Playlist {
-            node: crate::ProjectNodeAddress::parse("/demo.module/loop.playlist").unwrap(),
-        };
-        let menu = add_node_menu(&playlist);
+    fn kind_rows_carry_the_value_their_offer_takes() {
+        let playlist = crate::ProjectNodeAddress::parse("/demo.module/loop.playlist").unwrap();
+        let menu = add_node_menu(&UiAttachTarget::Playlist {
+            node: playlist.clone(),
+        });
         let entry = &menu.entries[0];
-
-        assert!(entry.action.is_for_node(crate::ProjectController::NODE_ID));
-        let op = entry.action.op_as::<NodeCreateOp>().expect("create op");
-        assert_eq!(op.kind, NodeKind::Shader);
-        assert_eq!(op.attach, playlist);
-        assert_eq!(entry.action.meta().label, "Add Shader");
+        assert_eq!(entry.value, "shader");
+        assert_eq!(entry.summary, "Create a new shader node.");
+        assert_eq!(menu.offers_at(), OfferPath::project_node(&playlist));
+        assert_eq!(
+            add_node_menu(&UiAttachTarget::ProjectRoot).offers_at(),
+            OfferPath::project()
+        );
     }
 
     /// A device that reports its build disables exactly the kinds it lacks
@@ -428,18 +499,21 @@ mod tests {
             vec!["aurora", "sparkle-pack · fire", "sparkle-pack · ice"],
         );
         assert_eq!(menu.imports_empty, None);
-        let op = menu.imports[1]
-            .action
-            .op_as::<NodeImportOp>()
-            .expect("import op");
+        let values: Vec<&str> = menu.imports.iter().map(|e| e.value.as_str()).collect();
         assert_eq!(
-            op.source,
-            ImportSource::Library {
-                package_uid: "prj_b".to_string()
-            }
+            values,
+            vec!["library/prj_a", "library/prj_b/fire", "library/prj_b/ice"],
+            "a family names its export; a single export reads as its package"
         );
-        assert_eq!(op.export, "fire");
-        assert_eq!(op.attach, UiAttachTarget::ProjectRoot);
+        assert_eq!(
+            menu.import_source("library/prj_b/fire"),
+            Some((
+                &ImportSource::Library {
+                    package_uid: "prj_b".to_string()
+                },
+                "fire"
+            ))
+        );
         assert_eq!(menu.imports[1].kind, NodeKind::Module);
     }
 
@@ -459,12 +533,11 @@ mod tests {
                 .map(|e| e.label.as_str())
                 .collect::<Vec<_>>()
         );
-        let op = menu.imports_builtin[0]
-            .action
-            .op_as::<NodeImportOp>()
-            .expect("import op");
-        assert!(matches!(op.source, ImportSource::BuiltIn { .. }));
-        assert_eq!(op.export, "effect");
+        let value = &menu.imports_builtin[0].value;
+        assert!(value.starts_with("catalog/"), "{value}");
+        let (source, export) = menu.import_source(value).expect("its source");
+        assert!(matches!(source, ImportSource::BuiltIn { .. }));
+        assert_eq!(export, "effect");
     }
 
     /// A playlist's picker imports too, and each import row attaches to
@@ -482,11 +555,7 @@ mod tests {
             None,
         );
         assert_eq!(menu.imports.len(), 1);
-        let op = menu.imports[0]
-            .action
-            .op_as::<NodeImportOp>()
-            .expect("import op");
-        assert_eq!(op.attach, UiAttachTarget::Playlist { node: playlist });
+        assert_eq!(menu.offers_at(), OfferPath::project_node(&playlist));
         assert!(!menu.imports_builtin.is_empty(), "catalog rows too");
     }
 
