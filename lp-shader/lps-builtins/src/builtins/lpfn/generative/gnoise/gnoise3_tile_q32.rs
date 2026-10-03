@@ -138,6 +138,7 @@ pub extern "C" fn __lp_lpfn_gnoise3_tile_q32(
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::manual_range_contains, reason = "golden-table range")]
     #[cfg(test)]
     extern crate std;
     use super::*;
