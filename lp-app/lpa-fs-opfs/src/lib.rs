@@ -36,6 +36,6 @@ pub use library_locks::{
 };
 pub use lp_fs_opfs::{FlushReport, LpFsOpfs};
 pub use opfs_error::OpfsError;
-pub use opfs_read::{list_child_dirs, load_tree, load_tree_filtered};
+pub use opfs_read::{list_child_dirs, load_tree, load_tree_filtered, read_file};
 pub use opfs_root::{open_dir, opfs_root};
 pub use opfs_write::{remove_path, write_file};

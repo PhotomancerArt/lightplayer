@@ -67,6 +67,11 @@
 // pattern-matches a dance and never sends a verb of its own.
 
 import { nativeBacking } from "./emulator_port.js";
+import { MacTtyModel } from "./mac_tty_model.js";
+
+/// How often, at most, a page behind the Mac serial model reads (see
+/// `_attachMacStreams`): a page busy for a frame now and then.
+const MAC_PAGE_READ_EVERY_MS = 16;
 
 const VENDOR_ID = 0x303a;
 const PRODUCT_ID = 0x1001;
@@ -94,9 +99,14 @@ let hadOwnProperty = false;
 /// (M3). With one, `requestPort()` asks it and the page starts with NO grants,
 /// which is what a fresh Chrome profile looks like. Without one, every board
 /// is granted at load and `requestPort()` resolves to the first match.
-export async function createBus(baseUrl, { boards = null, backing = null, picker = null } = {}) {
+/// `hostTty` — `"mac"` puts a model of the Mac's serial path between each
+/// board and the page (`mac_tty_model.js`): `0xFF`-heavy bytes the page reads
+/// late are dropped where a Mac drops them. Null (the default) is a lossless
+/// pipe. `index.html` turns it on for a page running on a Mac.
+export async function createBus(baseUrl, { boards = null, backing = null, picker = null, hostTty = null } = {}) {
   const source = backing ?? nativeBacking(baseUrl);
   const bus = new VirtualSerial(source, picker);
+  bus.hostTty = hostTty;
   await bus.load(boards);
   return bus;
 }
@@ -165,6 +175,8 @@ class VirtualSerial extends EventTarget {
     // pairs dead generations to replacements IN ORDER, so a bus that shuffled
     // its ports when a board rebooted would cross two boards' sessions.
     this.boardIds = [];
+    // `"mac"` or null; see `createBus`.
+    this.hostTty = null;
   }
 
   async load(only) {
@@ -609,6 +621,10 @@ class VirtualSerialPort {
   }
 
   _attachStreams() {
+    if (this.bus.hostTty === "mac") {
+      this._attachMacStreams();
+      return;
+    }
     const port = this;
     this._readable = new ReadableStream({
       start(controller) {
@@ -628,6 +644,85 @@ class VirtualSerialPort {
         port._releaseByteListeners();
       },
     });
+    this._writable = new WritableStream({
+      write(chunk) {
+        port.emulator.write(chunk);
+      },
+    });
+  }
+
+  // The same streams with a Mac's serial path in the middle
+  // (`mac_tty_model.js`). The readable is PULLED, at most a pipe's worth per
+  // read, the way Chromium hands the page what its 255-byte pipe holds: bytes
+  // that arrive between two reads queue in the model's tty, and the ones a
+  // Mac would drop are dropped, and counted on the port (`ttyDropped`).
+  _attachMacStreams() {
+    const port = this;
+    const tty = new MacTtyModel();
+    this.tty = tty;
+    const readEveryMs = MAC_PAGE_READ_EVERY_MS;
+    let waiting = null;
+    let lastRead = -Infinity;
+    let timer = null;
+    // A page that reads late: at most one read per `readEveryMs`. An
+    // emulated board delivers slower than silicon, so a page that read
+    // the instant bytes landed would never fall behind the way a busy page
+    // on a Mac does — and never see what a Mac drops.
+    const deliver = () => {
+      if (!waiting) return;
+      const now = globalThis.performance?.now?.() ?? Date.now();
+      const early = lastRead + readEveryMs - now;
+      if (early > 0) {
+        timer ??= setTimeout(() => {
+          timer = null;
+          deliver();
+        }, early);
+        return;
+      }
+      const bytes = tty.read();
+      if (bytes.length === 0) return;
+      lastRead = now;
+      const resolve = waiting;
+      waiting = null;
+      resolve(bytes);
+    };
+    this._readable = new ReadableStream(
+      {
+        start(controller) {
+          port._streamController = controller;
+          port._unsubscribe = port.emulator.onBytes((bytes) => {
+            const before = tty.dropped;
+            tty.arrive(bytes);
+            if (tty.dropped !== before) {
+              port.ttyDropped = tty.dropped;
+              console.warn(`[emu] ${port.boardId}: the Mac serial model dropped ${tty.dropped - before} B (${tty.dropped} B so far)`);
+            }
+            deliver();
+          });
+          port._offBytesError = port.emulator.on("byteserror", (detail) => {
+            port._errorStream(detail?.reason ?? "The device has been lost.");
+          });
+        },
+        pull(controller) {
+          return new Promise((resolve) => {
+            waiting = (bytes) => {
+              try {
+                controller.enqueue(bytes);
+              } catch {
+                // the consumer cancelled between frames
+              }
+              resolve();
+            };
+            deliver();
+          });
+        },
+        cancel() {
+          waiting = null;
+          port._releaseByteListeners();
+        },
+      },
+      { highWaterMark: 0 },
+    );
     this._writable = new WritableStream({
       write(chunk) {
         port.emulator.write(chunk);

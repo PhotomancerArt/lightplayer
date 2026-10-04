@@ -44,9 +44,13 @@
 //! real ROM and the real bootloader, and every line below is a place the two
 //! paths can disagree:
 //!
-//! 1. **The partition table is never read or validated.** No
-//!    `esp_app_desc` check, no image-hash check, no secure-boot or
-//!    flash-encryption path. A corrupt image boots here and does not there.
+//! 1. **The partition table is staged, never read or validated by a
+//!    bootloader.** [`stage_image_in_flash`] writes the C6's compiled table
+//!    (`flash::c6_partition_table_bytes`) at `0x8000` when the chip has none,
+//!    because the firmware reads `lpfs` from it; nothing on this path checks
+//!    it against the app. No `esp_app_desc` check, no image-hash check, no
+//!    secure-boot or flash-encryption path. A corrupt image boots here and
+//!    does not there.
 //! 2. **The MMU page table is programmed by the loader, not by a
 //!    bootloader** ([`stage_image_in_flash`], M4). The bytes go into the
 //!    flash chip at `factory + (vaddr - 0x4200_0000)` and the table maps
@@ -478,6 +482,9 @@ pub struct FlashStaging {
     pub bytes: u32,
     /// The chip size written into `rom_spiflash_legacy_data`.
     pub chip_size: u32,
+    /// Whether [`crate::flash::c6_partition_table_bytes`] was staged at
+    /// `0x8000` (false when the chip already held a table).
+    pub table_staged: bool,
 }
 
 /// Put the flash-resident half of an image into the flash chip and program
@@ -490,7 +497,7 @@ pub struct FlashStaging {
 /// the RAM region behind the window and left the MMU empty
 /// (`the module docs, item 2`). That works right up until something asks the
 /// flash *chip* a question, and this milestone's firmware does: littlefs
-/// mounts `lpfs` at `0x0031_0000` through the mask ROM's
+/// mounts `lpfs` at `0x0035_0000` through the mask ROM's
 /// `esp_rom_spiflash_read`, which reads the same part the app's `.text`
 /// lives in. So the chip has to hold the app too, or the two halves of the
 /// address space would be describing different boards.
@@ -559,6 +566,21 @@ pub fn stage_image_in_flash(
         }
     }
 
+    // The partition table a flasher would have written beside the app. The
+    // firmware reads `lpfs` from it at boot (`fw-esp32c6/src/flash_storage.rs`);
+    // without one a direct-load run would quietly fall to memory FS. A chip
+    // that already holds a table (a `--flash` file that was really flashed)
+    // keeps its own — that is the layout being tested.
+    {
+        let mut chip = flash.lock().unwrap();
+        if !crate::flash::holds_partition_table(chip.bytes()) {
+            let table = crate::flash::c6_partition_table_bytes();
+            if chip.stage(crate::flash::PARTITION_TABLE_OFFSET, &table) {
+                staging.table_staged = true;
+            }
+        }
+    }
+
     touched.sort_unstable();
     let mut mmu = mmu.lock().unwrap();
     for page in touched {
@@ -589,7 +611,7 @@ pub fn stage_image_in_flash(
 /// bltu  a5, a4, +0xae      ; → return 1
 /// ```
 ///
-/// and `lpfs` starts at `0x0031_0000`, which is past 2 MiB. On silicon the
+/// and `lpfs` starts at `0x0035_0000`, which is past 2 MiB. On silicon the
 /// bootloader calls `esp_rom_spiflash_config_param` with the size from the
 /// image header's flash-size field; here the loader writes the same word,
 /// derived from the image the machine was actually given. Without it every

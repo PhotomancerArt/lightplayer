@@ -29,9 +29,9 @@
     "[INIT] JIT code region: sram0 ibus 0x4008"
   ],
   "boot_idle.path_high_water_gap": 0,
-  "determinism.single_core_prefix.cycles": 3243792,
+  "determinism.single_core_prefix.cycles": 3243888,
   "determinism.single_core_prefix.idle_skips": 0,
-  "determinism.single_core_prefix.instructions": 3243768,
+  "determinism.single_core_prefix.instructions": 3243864,
   "init_chain.prefix": [
     "[INIT] fw-esp32v3 boot",
     "[INIT] chip=esp32 arch=xtensa heap=15072+112640+98304+15536=241552 (ROM PRO stack + dram_seg arena + SRAM1 tail + ROM APP stack)",

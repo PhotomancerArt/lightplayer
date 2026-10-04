@@ -61,7 +61,34 @@ pub struct LinkRawFilesystemEraseResult {
 pub struct LinkRawFilesystemReadResult {
     pub image: Vec<u8>,
     pub region: LinkFlashRegion,
+    /// The device's partition table as read at `0x8000` — where `region`
+    /// came from.
+    pub partition_table: Vec<u8>,
     pub chip_name: Option<String>,
+    pub logs: Vec<String>,
+    pub progress: Vec<LinkManagementProgress>,
+}
+
+/// What [`crate::LinkManagementRequest::InspectLayout`] read.
+///
+/// Raw facts only — the reads verbatim, in the order the layout probe asked
+/// for them — so the caller classifies them with the same pure code every
+/// provider shares (`layout_migration::LayoutProbe::replay`), and a plan is
+/// never built from a provider's own summary of the bytes.
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+pub struct LinkLayoutInspection {
+    /// What the bootloader named itself as.
+    pub chip_name: Option<String>,
+    /// The base MAC read in the session, as reported (normalize before use).
+    pub probed_mac: Option<String>,
+    /// The partition table the package about to be written carries (its
+    /// merged image at `0x8000`) — the target layout.
+    pub target_table: Vec<u8>,
+    /// The package's merged image length: whether the firmware write itself
+    /// reaches the legacy filesystem.
+    pub target_image_len: u32,
+    /// Every read, `(region, bytes)`, in order.
+    pub reads: Vec<(LinkFlashRegion, Vec<u8>)>,
     pub logs: Vec<String>,
     pub progress: Vec<LinkManagementProgress>,
 }
@@ -87,5 +114,6 @@ pub enum LinkManagementResult {
     EraseDeviceFlash(LinkEraseDeviceResult),
     EraseRawFilesystem(LinkRawFilesystemEraseResult),
     ReadRawFilesystem(LinkRawFilesystemReadResult),
+    InspectLayout(LinkLayoutInspection),
     SetBootControl(LinkBootControlResult),
 }

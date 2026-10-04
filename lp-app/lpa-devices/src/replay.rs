@@ -403,6 +403,7 @@ impl Step {
                         identity: peer_identity(uid, mac, name).unwrap_or_default(),
                         firmware: Some("fw-esp32c6 test".to_string()),
                         board_id: board,
+                        fs: Default::default(),
                     },
                 )),
             ),
@@ -446,6 +447,7 @@ impl Step {
                 build_id: build,
                 park_first: false,
                 name,
+                restore_backup: false,
             }),
             Self::Push { device } => Input::Action(Action::Push {
                 device: DeviceId(device),

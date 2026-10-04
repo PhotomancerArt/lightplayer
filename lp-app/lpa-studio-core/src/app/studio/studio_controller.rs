@@ -419,7 +419,14 @@ impl StudioController {
         let now_secs_for_stamp = Rc::clone(&now_secs);
         let device_events = Rc::new(std::cell::RefCell::new(DeviceEventLog::new()));
         Self {
-            devices: crate::DeviceRoster::new(device_roster_config()),
+            devices: {
+                let mut devices = crate::DeviceRoster::new(device_roster_config());
+                // Backup archives (the C6 repartition's layout step) are
+                // stamped with the app's own clock; core reads none.
+                let clock = Rc::clone(&now_secs);
+                devices.effects_mut().set_clock(Rc::new(move || clock()));
+                devices
+            },
             device_feeds: crate::DeviceFrameFeeds::new(),
             pending_device_lens: None,
             device_sweep_pending: false,
@@ -1155,6 +1162,13 @@ impl StudioController {
                 .map(lpa_devices::Device::title)
                 .unwrap_or_else(|| "This device".to_string())
         })
+    }
+
+    /// Install the store a board's backup goes into before a layout
+    /// migration writes it (OPFS in the browser; the C6 repartition).
+    /// Without one, every migration asks for a download first.
+    pub fn set_device_backup_store(&mut self, store: Rc<dyn crate::DeviceBackupStore>) {
+        self.devices.effects_mut().set_backup_store(store);
     }
 
     /// Install the platform timer factory device waits run on (called by
@@ -2496,6 +2510,10 @@ impl StudioController {
     ///   ([`crate::device_offers`]). `<board>` is the card's
     ///   [`crate::BoardRef`]: `mac-`, `sim-` or `emu-` and its MAC, or
     ///   `new-<n>` while it has none.
+    /// - `devices/<board>/{continue-update,cancel-update,download-backup,
+    ///   restore-files,finish-update}`: each card's layout verbs across the
+    ///   C6 repartition, under the same `<board>` prefix
+    ///   ([`crate::app::devices::DeviceRoster::publish_layout_offers`]).
     ///
     /// The stalled-open exits ask for the same verbs: Reconnect is the
     /// offline board's `reconnect`, the closed port's Connect its
@@ -2551,6 +2569,9 @@ impl StudioController {
             }
             offers.place_device(view.id, facts.prefix);
         }
+        // The layout verbs (C6 repartition) under the same prefixes.
+        self.devices
+            .publish_layout_offers(self.device_now(), offers, &prefixes);
     }
 
     /// Whether what `device` runs is a project this library holds (Q4): its
@@ -3246,6 +3267,16 @@ impl StudioController {
                 true => self.play_views.saturating_add(1),
                 false => self.play_views.saturating_sub(1),
             };
+            return Ok(UiNotices::new());
+        }
+        if node_id.as_str() == crate::DeviceBackupOp::NODE_ID {
+            let op = action.into_op::<crate::DeviceBackupOp>()?;
+            let device = self.devices.roster().device(op.device);
+            let base_mac = device.and_then(|d| d.identity.mac.as_ref().map(|mac| mac.0.clone()));
+            let label = device.map(lpa_devices::Device::title);
+            self.devices
+                .effects_mut()
+                .request_backup_download(op.device, base_mac, label);
             return Ok(UiNotices::new());
         }
         if node_id.as_str() == crate::DeviceFeedOp::NODE_ID {

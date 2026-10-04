@@ -1,0 +1,16 @@
+[package]
+name = "lp-deflate"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "A small no_std, no-alloc raw-deflate (RFC 1951) decoder, written from the spec"
+
+[lints]
+workspace = true
+
+[dependencies]
+
+[dev-dependencies]
+miniz_oxide = { version = "0.8.9", default-features = false, features = ["with-alloc"] }

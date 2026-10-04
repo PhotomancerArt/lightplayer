@@ -832,7 +832,7 @@ async function runOneEmulated(spec, state, studio, sinkUrl, options) {
   const consoleNoise = driver.consoleLines().filter((line) => line.startsWith("[error]") || line.startsWith("[exception]"));
   await driver.close();
   state.active = null;
-  stopDoorSafely(door);
+  await stopDoorSafely(door);
 
   console.log(`\nCaptured ${records.length} events.`);
   // The census matters more than it looks: an `expect` naming a kind that is
@@ -875,9 +875,9 @@ function laneImage() {
   return LANE_PACKAGED_C6_ELF;
 }
 
-function stopDoorSafely(door) {
+async function stopDoorSafely(door) {
   try {
-    lane_stopDoor(door);
+    await lane_stopDoor(door);
   } catch (error) {
     console.warn(`  (could not stop emu serve ${door.pid}: ${error.message})`);
   }

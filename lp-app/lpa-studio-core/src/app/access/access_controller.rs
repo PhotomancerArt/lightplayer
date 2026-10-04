@@ -548,8 +548,21 @@ impl AccessController {
                         self.records.record(&key, synced.listing, now_secs, None);
                         self.persist_devices();
                     }
-                    if matches!(self.writes.get(&device), Some(WriteStatus::Failed(_))) {
-                        self.writes.remove(&device);
+                    // A refused add (a full device nothing can make room on)
+                    // is said in the panel, under the list the board did
+                    // answer; a sync that went through clears what an
+                    // earlier one said.
+                    match &synced.refused {
+                        Some(why) => {
+                            if !matches!(self.writes.get(&device), Some(WriteStatus::Writing)) {
+                                self.writes.insert(device, WriteStatus::Failed(why.clone()));
+                            }
+                        }
+                        None => {
+                            if matches!(self.writes.get(&device), Some(WriteStatus::Failed(_))) {
+                                self.writes.remove(&device);
+                            }
+                        }
                     }
                     if !synced.added.is_empty() {
                         self.undo
@@ -564,10 +577,11 @@ impl AccessController {
                     }
                 }
                 Err(error) => {
-                    // The panel says why (a full device nothing can be
-                    // dropped from, an older firmware) and still shows
-                    // what it last knew.
-                    log::warn!("access: reading or adding to {device:?}'s list failed: {error}");
+                    // The list itself was not read (an older firmware, a
+                    // lost link). The panel says why and still shows what
+                    // it last knew. (A full device is not this: its list
+                    // arrives with the refusal, above.)
+                    log::warn!("access: reading {device:?}'s list failed: {error}");
                     self.writes.insert(device, WriteStatus::Failed(error));
                 }
             },
@@ -881,6 +895,11 @@ impl AccessController {
         if !evidence.presence.is_open() || !evidence.classification.is_light_player() {
             return None;
         }
+        // A held board's list waits with its files (see `holds_its_files`):
+        // it has none to show, and none may be started in RAM.
+        if holds_its_files(device) {
+            return None;
+        }
         let over_bluetooth = endpoint.is_bluetooth();
         if over_bluetooth && self.granted_tier(device.id) != Some(Tier::Edit) {
             return None;
@@ -994,6 +1013,23 @@ fn syncs_over_usb(device: &Device) -> bool {
             .0
             .starts_with(crate::app::devices::sim_record::SIM_ENDPOINT_PREFIX)
         && device.evidence.classification.is_light_player()
+        && !holds_its_files(device)
+}
+
+/// A board holding its files for the C6 layout change (its hello's `fs` is
+/// `legacy_held`): it runs on a RAM filesystem, and its real device store —
+/// keys, switches — waits in the old region with every other file until
+/// Finish update moves it. Studio neither reads nor writes access there: an
+/// add would land in a store that exists only until the next reboot, and a
+/// list read from it is not the board's (G1 rehearsal, 2026-10-03: "Who has
+/// access 1" on a board whose own list held 16). The firmware keeps
+/// Bluetooth off on such a board for the same reason.
+fn holds_its_files(device: &Device) -> bool {
+    device
+        .evidence
+        .classification
+        .hello()
+        .is_some_and(|hello| hello.fs == lpa_devices::wire::BoardFs::LegacyHeld)
 }
 
 /// The device's current connection window, when its link is open and has

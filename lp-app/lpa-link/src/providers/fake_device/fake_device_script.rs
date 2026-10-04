@@ -107,6 +107,11 @@ pub struct FakeLightPlayerState {
     /// [`lpc_wire::WIRE_PROTO_VERSION`]: mimics firmware built from an
     /// incompatible wire revision.
     pub proto_override: Option<u32>,
+    /// Say THIS JSON, verbatim, wherever the board would say hello (the
+    /// boot hello and every answer to a hello request): a board on another
+    /// wire whose hello this build cannot decode, such as the wire-32 hello
+    /// a fielded C6 sends (no `hardware.fs`). `None`: the server's own.
+    pub hello_json_override: Option<String>,
     /// Auto-load the seeded project at boot, like real firmware's
     /// startup-project resume (fw-esp32c6 `boot::auto_load_project`): the
     /// server reports it via `project_list_loaded` from the first request.
@@ -121,6 +126,22 @@ pub struct FakeLightPlayerState {
     /// port reopens or the device resets. On by default, as it is on every
     /// ESP firmware; `false` is a board that cannot pack (hello `0`).
     pub packs: bool,
+    /// Files at absolute device paths beside the project (`/hardware.json`,
+    /// `/.lp/access.json`, …), seeded at the fs root. A board rebuilt from a
+    /// migrated flash image holds every file here.
+    pub root_files: Vec<(String, Vec<u8>)>,
+    /// Which partition layout the board's flash is on — what an
+    /// `InspectLayout` reads, and where a raw read finds the files
+    /// (`fake_flash_layout`). `Current` by default.
+    pub layout: FakeFlashLayout,
+    /// How the board's filesystem came up, reported in its hello
+    /// (`HardwareFacts::fs`). `Mounted` by default, as a flashed board's is.
+    pub fs_boot_state: lpc_wire::FsBootState,
+    /// The board's whole flash, when a plan the fake executed wrote it —
+    /// then THIS is what layout operations read, not an image synthesized
+    /// from the files above (`fake_flash_layout`). `None` for a scripted
+    /// board.
+    pub flash: Option<std::sync::Arc<Vec<u8>>>,
     /// The board end's link configuration. `LinkConfig::usb()` by default: the
     /// C6 and S3 on USB-Serial-JTAG. A classic-shaped double (its UART0 link,
     /// plan `classic-uart-on-lp-link`) takes `LinkConfig::uart()` or a cut of it
@@ -140,11 +161,35 @@ impl FakeLightPlayerState {
             drop_responses: false,
             heartbeat_interval: None,
             proto_override: None,
+            hello_json_override: None,
             load_project_at_boot: false,
             project_dir: FAKE_DEVICE_PROJECT_DIR.to_string(),
             packs: true,
+            root_files: Vec::new(),
+            layout: FakeFlashLayout::Current,
+            fs_boot_state: lpc_wire::FsBootState::Mounted,
+            flash: None,
             link_config: lpc_wire::lp_link::LinkConfig::usb(),
         }
+    }
+
+    /// Files at absolute device paths, seeded at the fs root.
+    pub fn with_root_files(mut self, files: Vec<(String, Vec<u8>)>) -> Self {
+        self.root_files = files;
+        self
+    }
+
+    /// A board still on the pre-repartition C6 layout (its files at
+    /// `0x310000`): what a fielded board looks like to an `InspectLayout`.
+    pub fn with_legacy_layout(mut self) -> Self {
+        self.layout = FakeFlashLayout::Legacy;
+        self
+    }
+
+    /// Report this filesystem boot state in the hello.
+    pub fn with_fs_boot_state(mut self, fs: lpc_wire::FsBootState) -> Self {
+        self.fs_boot_state = fs;
+        self
     }
 
     /// The board end of the link on `config` rather than the USB preset: a
@@ -207,6 +252,14 @@ impl FakeLightPlayerState {
         self
     }
 
+    /// Say `json` verbatim as every hello: a board on another wire whose
+    /// hello this build may not be able to decode
+    /// ([`Self::hello_json_override`]).
+    pub fn with_hello_json(mut self, json: impl Into<String>) -> Self {
+        self.hello_json_override = Some(json.into());
+        self
+    }
+
     /// Boot with the seeded project LOADED (the real-hardware shape since
     /// the standalone startup-resume): connect-time probes see a running
     /// project.
@@ -227,6 +280,16 @@ impl Default for FakeLightPlayerState {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Which partition layout a scripted board's flash is on.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FakeFlashLayout {
+    /// The layout the fake firmware package carries
+    /// (`fake_flash_layout::fake_target_table`): nothing to migrate.
+    Current,
+    /// The frozen pre-repartition C6 layout: an Update must migrate.
+    Legacy,
 }
 
 /// The whole device script: the current boot state plus scripted management
