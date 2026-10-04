@@ -1,7 +1,7 @@
 # ADR: The C6's link IO runs on its own thread, and requests are answered before the render
 
-- **Status:** Accepted (amended 2026-10-03 — the S3, and the classic's own
-  link thread, roadmap M2; see the end)
+- **Status:** Accepted (amended 2026-10-03 — the S3, and the classic, whose
+  link thread measured worse on silicon and is opt-in; roadmap M2; see the end)
 - **Date:** 2026-10-02
 - **Deciders:** Photomancer (Yona; feel gate passed 2026-10-02)
 - **Plan:** `lp2025/2026-10-01-1756-c6-link-io-thread` (PR #891), milestone M1
@@ -401,7 +401,8 @@ the pairing, on a frame-bound project.
 
 ### Step 2 — the `Link` on its own core-0 thread
 
-`fw-esp32v3/src/io_thread.rs` (feature `io-thread`, default on): the
+`fw-esp32v3/src/io_thread.rs` (feature `io-thread`; default on as first
+built, **off by default since the silicon A/B below**): the
 unchanged `uart_link_task` (`fw-esp32-common/src/uart_link/`) now runs on a
 priority-1 esp-rtos thread, **`pin_to_core: Some(0)`**, a 3 KB stack, its
 own `esp_rtos::embassy::Executor`, under `RawPriorityLimitedMutex` at
@@ -451,7 +452,8 @@ frame (2.3 ms) is shorter than the UART round trip itself.
 
 - **Heap** (the ~5 KB stop line, OQ2): free 217,592 → 214,136 B
   (**−3,456 B**), largest free 102,353 → 98,898 B (−3,455 B) at the shipped
-  3 KB stack — under the line, so the thread stays on.
+  3 KB stack — under the line (the silicon A/B below turned the thread off
+  by default on other grounds).
 - **Stack** (`io_thread_stack_diag`): high-water 1,660 B at both 4 KB and
   3 KB, 1,692 B under the `--uart-faults` soak — 55 % of 3 KB.
 - **Log drops** (the open log-ring defect, five-wire load,
@@ -469,3 +471,49 @@ frame (2.3 ms) is shorter than the UART round trip itself.
 
 Update the earlier "The host and browser servers keep their threading…"
 Consequences bullet above: it now points here for the classic's own thread.
+
+### Silicon (2026-10-03): the thread goes off by default, and messages-first stays off
+
+The desk A/B the emulator could not do (DOM-Z-102, agent-run, a ~16 fps
+project; `frame_pace_diag` timestamps every frame as it reaches the RMT
+driver; every row on one merged base, origin/main `626a1b851`). Frame
+interval p50/p90 and judder p90 in ms; "slow frames" are those longer than
+1.5× the median.
+
+| arrangement | no host: frames · judder | `link rtt`: idle · transfers p90 · requests p90 · request RTT p50 · transfers | real Studio editor, per 5 s: frames · slow frames · judder |
+|---|---|---|---|
+| main executor, render-first (main) | 61.0/61.1 · 0.2 | 61.1 · ~66 · ~65.6 · 105 ms · 13.5 KiB/s | 47 · 13 at ~222 ms · ~3.5 |
+| **main executor, event-driven wake (P2; the default now)** | **57.5/57.7 · 0.5** | **57.6 · ~62 · ~61.9 · 98 ms · 14 KiB/s** | **50 · 14 at ~209 ms · ~3.3** |
+| thread, every event, messages-first (as first built; older base) | — | 58.0 · 194 · 71.0 · 46 ms · 56–68 KiB/s | 39 · 15 at ~240 ms · **181** |
+| thread, ≥ 25 ms between passes, messages-first | — | 69.0 · ~94 · ~83.7 · 60 ms · 28–31 KiB/s | 34 · 13 at ~270 ms · **195** |
+| thread, ≥ 25 ms between passes, render-first | 66.7/68.9 · 2.5 | 66.7 · ~93 · ~77.5 · 125 ms · 25 KiB/s | 41 · 11–12 at ~258 ms · ~6–8 |
+
+What the emulator could not see, and why the rows fall this way:
+
+- **A preemption costs the classic's render ~4–5 ms**, several times the
+  link pass itself (~0.5–0.9 ms on silicon, 13 µs emulated): on an idle
+  board, frames a keepalive pass landed in rendered ~4.8 ms slower than the
+  frames it missed. The render's code and data come through the flash cache,
+  and a pass displaces them. An event-driven thread woke for every piece of
+  I/O-task news — 300–450 passes a second during a transfer — and stretched
+  frames to ~190 ms. Holding passes ≥ 25 ms apart
+  (`PassPacing::CLASSIC_LINK_THREAD`) bounds that, but the thread still
+  preempts on keepalives, SYNs and the backstop: −9 % frame rate with no
+  host at all.
+- **Messages-first is a judder source on this board.** Studio's editor
+  read costs the classic ~140–175 ms of CPU
+  (`docs/defects/2026-10-03-studios-editor-read-costs-the-classic-a-frame-and-a-half-of-cpu.md`).
+  Answered before the render, that lands between the moment a frame takes
+  its clock and the moment it reaches the LEDs: judder ~180–195 ms. Answered
+  after, the next frame is merely late and motion stays true. The C6/S3 rule
+  ("the thread and messages-first go together") holds only where the host's
+  requests are cheap next to a frame.
+- **Without messages-first the thread buys no latency** (request RTT 125 ms
+  against the default's 98 ms) — only transfer speed — and costs frames in
+  every setting. So the classic ships **without** the thread: `io-thread` is
+  an opt-in feature (with its 25 ms pacing and render-first), kept for the day
+  the host's requests are cheap enough here for messages-first to pay. The
+  event-driven wake (P2) is the default and is the best row in all three
+  settings.
+- The Studio editor still hitches on every arrangement; that is the read's
+  cost, not the link's, and it is its own defect.

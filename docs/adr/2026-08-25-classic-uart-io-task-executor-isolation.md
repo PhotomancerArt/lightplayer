@@ -301,7 +301,13 @@ M2 answered the question the 2026-10-02 amendment left open. Plan
 classic's `Link` off the thread executor it shared with the server loop
 (the 2026-09-29 arrangement) onto its own priority-1 `esp_rtos::embassy::Executor`,
 thread-pinned to core 0 (`fw-esp32v3/src/io_thread.rs`, feature
-`io-thread`, default on) — the C6/S3 shape, not a new one.
+`io-thread`) — the C6/S3 shape, not a new one. **On silicon it measured
+worse than the main-executor arrangement in every setting, so it ships
+opt-in, off by default** (the C6 link-thread ADR's classic amendment,
+"Silicon (2026-10-03)": a preemption costs this chip's render ~4–5 ms of
+flash-cache refill, and messages-first, the thread's whole latency win,
+turns Studio's costly reads into judder here). Everything below describes
+the thread when it is built.
 
 **What does not change, and why this ADR still governs it**: io_task stays
 exactly as this ADR specifies — the swi2 `InterruptExecutor` at Priority2,
