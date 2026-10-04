@@ -13,6 +13,8 @@ description = "The host side of an over-the-air update (protocol v1): serving, t
 # `lpc-firmware-release` is Part B's (B-P02).
 [dependencies]
 lp-crc32 = { path = "../../lp-base/lp-crc32" }
+# M1's version comparison (FirmwareAge), reused rather than written twice.
+lpa-devices = { path = "../lpa-devices" }
 lpc-access = { path = "../../lp-core/lpc-access" }
 lpc-update = { path = "../../lp-core/lpc-update" }
 sha2 = { workspace = true }

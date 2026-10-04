@@ -51,6 +51,7 @@ impl BoardSession {
             total: t.record.len,
             busy: t.owner != link
                 && owner_live(&self.links, t.owner, now_ms, self.config.owner_quiet_ms),
+            build_hash: t.record.build,
         });
         let state = if transfer.is_some() {
             BoardState::Updating

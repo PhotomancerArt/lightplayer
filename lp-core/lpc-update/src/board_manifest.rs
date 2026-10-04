@@ -39,6 +39,11 @@
 //! | `regionLen` | `core.length` + `engine.length` | the board decides fit; the host only predicts it |
 //! | `proto`, `state`, `refusedBuild`, `transfer` | — | board only |
 //!
+//! `transfer`, while a transfer is pending or running, is
+//! `{ kind, done, total, busy, buildHash }`: the piece (`core`/`engine`),
+//! bytes written and read back, the piece's length, whether another link
+//! owns it and is live, and the build hash of the build it installs.
+//!
 //! `chip` is the chip **word** (`"esp32c6"`), never the offer's `u16` code.
 //! `engineLen` is `null` when the core cannot know it: `needs-engine` with
 //! the engine header gone, since the digest slot holds no length (a heal's
@@ -119,6 +124,11 @@ pub struct TransferView {
     pub total: u32,
     /// Another link owns it and is live (E6): a new host gets `N`/`B`.
     pub busy: bool,
+    /// The build hash of the build the transfer installs (the progress
+    /// record's `build`; for an engine transfer, this core's own). It lets a
+    /// host tell "continue my update" from "another build is pending"
+    /// (E2, DM16) from the manifest alone, never from its own memory.
+    pub build_hash: u32,
 }
 
 impl BoardManifest {
@@ -188,6 +198,7 @@ mod tests {
             done: 8192,
             total: 1_160_000,
             busy: true,
+            build_hash: 0x1234_5678,
         });
         let json = m.to_json();
         assert_eq!(BoardManifest::from_json(&json).unwrap(), m);

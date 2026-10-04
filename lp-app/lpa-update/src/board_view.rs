@@ -16,6 +16,8 @@ pub struct Updating {
     pub total: u32,
     /// Another link owns it and is live (E6).
     pub busy: bool,
+    /// The build hash of the build it installs.
+    pub build_hash: u32,
 }
 
 /// The host's view of one board.
@@ -98,6 +100,7 @@ impl BoardView {
             done: t.done,
             total: t.total,
             busy: t.busy,
+            build_hash: t.build_hash,
         })
     }
 

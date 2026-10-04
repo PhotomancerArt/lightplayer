@@ -12,7 +12,7 @@ use alloc::vec::Vec;
 use lpc_update::build_id::{BUILD_ID_LEN, build_hash, build_id_field};
 use lpc_update::code_table::{CHUNK, PROTO_V1, chip_code};
 use lpc_update::hash_rules::{core_sha256, engine_sha256};
-use lpc_update::{Offer, PieceKind};
+use lpc_update::{BoardManifest, Offer, PieceKind, sha256_from_hex};
 
 use crate::encoded_piece::{EncodedPiece, EncodedPieceError};
 
@@ -35,10 +35,14 @@ pub struct HostIdentity {
     pub min_loader: u16,
 }
 
-/// One piece the host holds.
+/// One piece the host holds — or, for a heal's core, only knows of.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HostPiece {
+    /// The bytes; empty for a piece the host only knows by hash and length
+    /// (a heal's core: the board's own, which the host never sends).
     pub bytes: Vec<u8>,
+    /// The piece's length, as the offer states it.
+    pub len: u32,
     /// By the hash rules (`lpc_update::hash_rules`), computed here.
     pub sha256: [u8; 32],
     /// Encoding 1 of this piece, if the host has it.
@@ -86,6 +90,10 @@ pub enum HostBuildError {
     EmptyPiece(PieceKind),
     /// An encoding does not describe its piece.
     Encoding(PieceKind, EncodedPieceError),
+    /// A board manifest's hashes are not 64 hex digits.
+    BadManifest,
+    /// The engine does not hash to what the board's core needs.
+    EngineMismatch,
 }
 
 /// A build the host can offer and serve.
@@ -129,6 +137,48 @@ impl HostBuild {
         })
     }
 
+    /// The build a heal serves (E1, Y8): the board's own identity and core,
+    /// known only by hash and length from its manifest, and the engine its
+    /// core needs, which must hash to the manifest's `engineSha256`. Its
+    /// offer is an engine install by the hash rule; a request for the core
+    /// is never served.
+    pub fn for_heal(board: &BoardManifest, engine: Vec<u8>) -> Result<Self, HostBuildError> {
+        let core_sha = sha256_from_hex(&board.core_sha256).ok_or(HostBuildError::BadManifest)?;
+        let engine_sha =
+            sha256_from_hex(&board.engine_sha256).ok_or(HostBuildError::BadManifest)?;
+        if engine_sha256(&engine) != engine_sha {
+            return Err(HostBuildError::EngineMismatch);
+        }
+        let identity = HostIdentity {
+            target: board.target.clone(),
+            chip: board.chip.clone(),
+            version: board.version.clone(),
+            build_id: board.build_id.clone(),
+            wire_proto: board.wire_proto,
+            layout: board.layout,
+            min_loader: board.loader,
+        };
+        let chip_code = chip_code(&identity.chip)
+            .ok_or_else(|| HostBuildError::UnknownChip(identity.chip.clone()))?;
+        let build_id_field =
+            build_id_field(identity.build_id.as_bytes()).ok_or(HostBuildError::BuildId)?;
+        let core = HostPiece {
+            bytes: Vec::new(),
+            len: board.core_len,
+            sha256: core_sha,
+            encoded: None,
+            offsets: Vec::new(),
+        };
+        let engine = piece(PieceKind::Engine, engine_sha, engine, None)?;
+        Ok(Self {
+            identity,
+            core,
+            engine,
+            chip_code,
+            build_id_field,
+        })
+    }
+
     /// The piece of `kind`.
     #[must_use]
     pub fn piece(&self, kind: PieceKind) -> &HostPiece {
@@ -153,8 +203,8 @@ impl HostBuild {
             chip: self.chip_code,
             layout: self.identity.layout,
             min_loader: self.identity.min_loader,
-            core_len: self.core.bytes.len() as u32,
-            engine_len: self.engine.bytes.len() as u32,
+            core_len: self.core.len,
+            engine_len: self.engine.len,
             core_sha256: self.core.sha256,
             engine_sha256: self.engine.sha256,
             build_id: self.build_id_field,
@@ -180,6 +230,7 @@ fn piece(
         .map(EncodedPiece::offsets)
         .unwrap_or_default();
     Ok(HostPiece {
+        len: bytes.len() as u32,
         bytes,
         sha256,
         encoded,

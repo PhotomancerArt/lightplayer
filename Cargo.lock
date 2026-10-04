@@ -6517,6 +6517,7 @@ dependencies = [
  "flate2",
  "lp-crc32",
  "lp-deflate",
+ "lpa-devices",
  "lpc-access",
  "lpc-update",
  "sha2",
