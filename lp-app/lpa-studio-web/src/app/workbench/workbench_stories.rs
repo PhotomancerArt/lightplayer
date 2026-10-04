@@ -262,14 +262,11 @@ fn workbench_nodes_view() -> Element {
 }
 
 #[story(
-    description = "The project page while the board's link reconnects (plan D13): the same Nodes view, whole and untouched, with the calm Reconnecting strip over it. Before lp-link, a link reset failed the editor's reads and three failures closed the editor and sent the page to Devices; now the page stays, the strip says what is happening, and it goes the moment the board says hello again. A board that is really gone (unplugged, or silent past 20 s) still closes the editor as before."
+    description = "The project page while the board's link is away: the same Nodes view, untouched and unmoved, under a dim curtain that holds it still, with the Reconnecting card floating at the top. It comes for a link that stalls, resets (plan D13) or drops and is expected back (defect 2026-10-02: a Bluetooth drop or a re-seated cable used to send the page to Devices), and goes the moment the board is back. A board that does not come back within the grace still closes the editor as before."
 )]
 fn workbench_link_reconnecting() -> Element {
     let view = view_with_surface(None).with_lens_reconnecting(Some(
-        lpa_studio_core::UiLensReconnecting::new(
-            "Desktop sim",
-            lpa_studio_core::LinkTrouble::Restarted,
-        ),
+        lpa_studio_core::UiLensReconnecting::link_lost("Porch sign"),
     ));
     rsx! {
         div { class: "tw:flex tw:h-[720px] tw:flex-col",
