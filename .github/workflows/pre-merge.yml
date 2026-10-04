@@ -536,8 +536,9 @@ jobs:
             # c6_layout gates `emu-c6-layout-migration` (`just
             # test-emu-layout-migration`): the old→new C6 partition migration
             # (#896, docs/adr/2026-10-02-c6-repartition-and-layout-migration.md)
-            # proved end to end on the emulated C6. ~16 minutes of test alone,
-            # so it is deliberately the NARROWEST filter here: the table, the
+            # proved end to end on the emulated C6. ~29 minutes of test alone
+            # on this runner (16 on an M2 Max), ~35 for the job, so it is
+            # deliberately the NARROWEST filter here: the table, the
             # C6's flash layout, the board's legacy guard and filesystem boot,
             # the host side of the migration (`lpa-link`'s layout_migration
             # and partition/flash planning, the host flasher, `lp-cli hardware
@@ -572,9 +573,6 @@ jobs:
               - 'lp-cli/tests/emu_layout_migration.rs'
               - 'lp-emu/esp/lp-emu-esp32c6/src/flash.rs'
               - 'scripts/emu/build-merged-image.sh'
-              # TEMPORARY: lets the PR that adds the job run it once on this
-              # runner before it reaches main. Removed in that PR's next commit.
-              - '.github/workflows/pre-merge.yml'
 
       # `core` is the negative gate for lint + validate-x64: with
       # predicate-quantifier: every, a changed file counts only if it matches
@@ -2468,10 +2466,10 @@ jobs:
   emu-c6-layout-migration:
     name: C6 layout migration (x64)
     runs-on: ubuntu-24.04
-    # Expected ~25-35 min: ~1 min setup, ~6 min release lp-cli test tree
-    # (sccache floor, as heap-budget-chips), ~2 min fw-esp32c6, and the test,
-    # ~16 min on an M2 Max and slower per thread on this runner. First CI
-    # number in the PR that added the job; re-measure before tightening.
+    # Measured 34m40s on the PR that added it (#970, 2026-10-04): 33 s setup,
+    # 5m23s release lp-cli test tree, 1m17s fw-esp32c6, 28m40s for the four
+    # scenarios (W10's migration alone ~13 min) — 1.8x the M2 Max's 16 min.
+    # 60 is headroom for a cold cache; re-measure before tightening.
     timeout-minutes: 60
     needs: detect-changes
     if: needs.detect-changes.outputs.c6_layout == 'true'
@@ -2677,7 +2675,9 @@ jobs:
       # on an M2 Max (3m44s) — the sccache floor this file's header warns
       # about. The fw-emu IMAGE is NOT shared with scene_render_emu's: the
       # suite builds it with `-Z build-std=core,alloc` (`with_build_std`),
-      # a second cross-target build of fw-emu (57 s cold on an M2 Max).
+      # a second cross-target build of fw-emu. Measured on #970: 1m27s for
+      # the step, ~85 s of it that image (sccache read-only on a PR), the
+      # test binary 0.49 s (nothing compiled), the eight tests ~1 s.
       #
       # It runs even when the heap ratchet failed, so a red figure does not
       # hide a recovery regression; it needs the Validate step's build.
