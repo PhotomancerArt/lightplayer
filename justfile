@@ -1138,14 +1138,14 @@ clippy-fw-esp32v3:
     # server stack compiles with it.
     echo "clippy: --features bench_render_loop"
     cargo clippy --profile release-esp32v3 --features bench_render_loop -- --no-deps -D warnings
-    # The link thread's two other shapes (`src/io_thread.rs`): the desk-only
-    # stack diagnostic, and the app WITHOUT the thread (the link task back on
-    # the main executor, no messages-first — P2's arrangement). Both are cfg'd
-    # out of the defaults, so nothing else here compiles them with f32 on.
     # `frame_pace_diag` is additive too: the `[pace]` frame-timing lines PR
     # #943's desk A/B and the editor-read defect were measured with.
     echo "clippy: --features frame_pace_diag"
     cargo clippy --profile release-esp32v3 --features frame_pace_diag -- --no-deps -D warnings
+    # The link thread's two other shapes (`src/io_thread.rs`): the desk-only
+    # stack diagnostic, and the app WITHOUT the thread (the link task back on
+    # the main executor, no messages-first — P2's arrangement). Both are cfg'd
+    # out of the defaults, so nothing else here compiles them with f32 on.
     echo "clippy: --features io_thread_stack_diag"
     cargo clippy --profile release-esp32v3 --features io_thread_stack_diag -- --no-deps -D warnings
     echo "clippy: io-thread OFF"
