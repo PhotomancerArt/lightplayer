@@ -116,6 +116,14 @@ A recording is **unredacted**. It holds all device traffic, including the
 access handshake (the keys that unlock a board), and your projects. Keep
 recordings on your machine and don't share them publicly.
 
+**A Wi‑Fi password is in it** if you set one while recording: the raw
+transport bytes carry the `networkSet` request as sent (USB is not
+encrypted). The structured request log names only `wifi.set`, and Studio's
+command record redacts the password, but the byte capture cannot be
+redacted without breaking what it is for. The same holds for a
+`?wire-capture=1` capture and an `LP_EMU_WIRE_TAP` tap. See
+`docs/adr/2026-10-04-device-wifi-settings.md`.
+
 ## Phones
 
 Not supported yet. A phone on `https://lightplayer.app` cannot post to

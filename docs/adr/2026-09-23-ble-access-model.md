@@ -383,3 +383,18 @@ true on its own. Detail: `2026-09-24-easy-bluetooth-access.md` and plan
 - **The phone walk (G4) passed** on 2026-09-25: Yona's iPhone in Bluefy and
   his laptop, one board (the PLAYFUL choker, XIAO C6 `10:BD:A3:B0:A5:2C`),
   one room. Record: `docs/reports/2026-09-25-ble-remote-control-walks.md`.
+
+## Amendment 2026-10-04: two write-only files (Wi‑Fi settings, M5)
+
+"The access files / Write-only, on every link" now covers a second device
+secret: the Wi‑Fi network file, root `/.lp/network.json`
+(`lpc_access::NetworkFile`, its own `version: 1`). One predicate,
+`lpc_access::is_write_only_file_path`, matches both `.lp/access.json` and
+`.lp/network.json` with the same generous spelling and replaced
+`is_access_file_path` at every site that refused or skipped an access file
+(fs read on every link, changes-since, package hash, `AccessGuardedFs`,
+Studio's zip export). The readers of the device's secrets are now the
+access store and the server's network store (`lpa-server/src/network_store.rs`),
+both through the base filesystem, never the wire fs path. The three network
+requests are edit tier in the classifier. Decision record:
+`docs/adr/2026-10-04-device-wifi-settings.md`.

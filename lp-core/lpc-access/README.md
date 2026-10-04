@@ -24,7 +24,10 @@ never readable back over any link.
 | `project_access_file.rs` | `<project>/.lp/access.json`, `version: 2` (v1 still reads) |
 | `device_access_file.rs` | root `/.lp/access.json`, `version: 3` (v2 and v1 still read); a missing store is `fresh()` (Bluetooth on, open to anyone nearby at edit, for now), a damaged one `locked()` (Bluetooth off, open to nobody); merge by salt |
 | `open_to.rs` | `OpenTo`: who nearby holds what with no login — `nobody`, `play`, `edit` |
-| `access_file_path.rs` | which paths are access files (the fs gate's predicate) |
+| `write_only_file_path.rs` | `is_write_only_file_path`: the fs gate's predicate — `.lp/access.json` and `.lp/network.json`, any spelling, refused to every link at every tier |
+| `network_file.rs` | root `/.lp/network.json`, `version: 1`: the saved Wi-Fi network and `lanOnly`; missing or damaged = no network |
+| `wifi_network.rs` | `WifiNetwork { ssid, password, enabled }` and the 802.11/WPA2 rules (`validate_ssid`, `validate_password`); `Debug` never prints the password |
+| `network_file_error.rs` | why the network file, or a network to save, was refused — no variant carries a password |
 | `access_file_error.rs` | why an access file could not be read (every variant is a refusal) |
 | `base64_bytes.rs` | serde for fixed-size keys, salts and MACs as base64; the wrong length is refused |
 | `login_state.rs` | begin → challenge → answer → verdict; one login in flight |
@@ -47,10 +50,16 @@ session at the `open` tier only, so **no entry may have an all-zero salt**:
 Only adding is refused; no stored shape changes, so this is not a format
 change. See `docs/adr/2026-10-01-network-link-security.md`.
 
-Both access files are persisted formats with schemas under `schemas/`
-(`project-access.schema.json`, `device-access.schema.json`). A change to
-their serde shape is a format change: bump the file's `VERSION`, and ship the
-reader for the old one with it.
+Both access files and the network file are persisted formats with schemas
+under `schemas/` (`project-access.schema.json`, `device-access.schema.json`,
+`device-network.schema.json`). A change to their serde shape is a format
+change: bump the file's `VERSION`, and ship the reader for the old one with
+it.
+
+The network file holds the Wi-Fi password **in plaintext** — a C6 has no
+secret to hide a key in, and physical possession is already everything. What
+the product guarantees is that no link reads it back. See
+[`docs/adr/2026-10-04-device-wifi-settings.md`](../../docs/adr/2026-10-04-device-wifi-settings.md).
 
 RustCrypto's `hmac` and `pbkdf2` crates are dev-dependency **oracles** only;
 the tests also carry RFC 4231 and the published PBKDF2-SHA256 vectors.

@@ -280,9 +280,11 @@ the app through the same view model and presses the same actions. See
 
 - The wire's "no compatibility" freedom stops at anything **persisted**:
   project.json / package files, the cloud store, stamped device
-  identity, and the two access files (`<project>/.lp/access.json` at
-  `version: 2`, root `/.lp/access.json` at `version: 3` — each its own format with a schema in
-  `schemas/`, outside `PROJECT_FORMAT_VERSION`). Real user data already exists at the current
+  identity, the two access files (`<project>/.lp/access.json` at
+  `version: 2`, root `/.lp/access.json` at `version: 3`) and the device
+  network file (root `/.lp/network.json` at `version: 1`, write-only like
+  the access files) — each its own format with a schema in
+  `schemas/`, outside `PROJECT_FORMAT_VERSION`. Real user data already exists at the current
   `PROJECT_FORMAT_VERSION`, and it does not redeploy in lockstep.
 - **A change to persisted bytes IS a format bump, even when no field is
   added or removed.** The 2026-08-07 uid-format change re-rendered a
@@ -339,7 +341,7 @@ runtime.
 | `lpvm-native`    | LPIR → custom RV32 machine code        | yes              |
 | `lpvm-cranelift` | LPIR → Cranelift → machine code        | yes              |
 | `lp-engine`      | Shader runtime, node graph             | yes              |
-| `lpc-access`     | Access core: secrets, tiers, HMAC login, backoff (sans-IO) | yes |
+| `lpc-access`     | Access core: secrets, tiers, HMAC login, backoff, the device network file and the write-only predicate (sans-IO) | yes |
 | `lp-server`      | Project management, client connections | yes              |
 | `lp-json-pack`   | JSON Pack: a compact binary form of JSON that decodes back to byte-identical JSON text (`lp-base/`, generic; names coded against an injected seed and a per-connection learned table) | yes |
 | `lp-link`        | Sans-IO link layer under the device wire: framing, CRC-32C, channels, selective-repeat ARQ, session handshake (`lp-base/`, generic; one crate on both ends). Runs the product's USB link and the classic's UART0 link (board, host, Studio, tools); BLE/fw-emu are still the pre-lp-link `M!` framing. Optional `secure` feature: Noise NNpsk0 inside the SYN + sealed frames, the key match as the login (`LinkTrust::Keyed`), off on every product link until the Wi-Fi milestones | yes |

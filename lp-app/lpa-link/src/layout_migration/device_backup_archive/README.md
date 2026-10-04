@@ -82,6 +82,15 @@ backup and a naive restore writes it back. Restoring one board's backup onto
 another would give two boards the same uid, and Studio's device registry keys
 on it. `baseMac` is burned into the chip; a restore checks it.
 
+### An archive holds the board's secrets
+
+Every file in `lpfs` rides, so an archive carries the device store
+(`/.lp/access.json`: the keys that unlock the board) and the network file
+(`/.lp/network.json`: the Wi‑Fi password, in plaintext). A restore must
+bring both back, so neither is filtered out. **Treat an archive like the
+board itself**: keep it on your machine, don't share it. See
+`docs/adr/2026-10-04-device-wifi-settings.md`.
+
 ## Where the code lives
 
 | File | Job |

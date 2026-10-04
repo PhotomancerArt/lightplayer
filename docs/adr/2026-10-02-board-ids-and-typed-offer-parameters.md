@@ -222,3 +222,17 @@ scheme went through three answers that day:
   chat transcript renderer and in stories.
 - A Lasting press with a required value missing is refused. It could
   instead become a card that asks the user for the value.
+
+## Amendment 2026-10-04: secret text parameters (Wi‑Fi settings, M5)
+
+A `Text` parameter may be **secret** (`OfferParam::secret()`): a renderer
+draws it as a password field (`OfferParamsForm`: `type="password"`,
+`autocomplete="new-password"`, no spellcheck, Show/Hide). `UiOffer::press`
+binds with the real value but stamps `OfferPress.args` with `•••`
+(`SECRET_MARKER`) in its place, so the card answer the app agent hears
+never carries it; the op that carries it redacts its own `Debug`. The
+agent's readout lists it as "secret — the user types it", `act` refuses any
+value for it, and an offer that takes a secret is always the user's card
+(pre-filled with the agent's non-secret values). First use: the Wi‑Fi
+password at `devices/<board>/wifi/set`. Decision record:
+`docs/adr/2026-10-04-device-wifi-settings.md`.
