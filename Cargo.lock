@@ -5866,6 +5866,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "lp-crc32"
+version = "40.0.0"
+
+[[package]]
 name = "lp-deflate"
 version = "40.0.0"
 dependencies = [
@@ -6665,6 +6669,18 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "lpc-update"
+version = "40.0.0"
+dependencies = [
+ "lp-crc32",
+ "lp-deflate",
+ "lpc-access",
+ "serde",
+ "serde_json",
+ "sha2",
 ]
 
 [[package]]
