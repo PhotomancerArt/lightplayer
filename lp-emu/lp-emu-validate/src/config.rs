@@ -246,6 +246,41 @@ mod tests {
         }
     }
 
+    /// 2026-10-03: frame rate under link load is not a grade this table
+    /// backs on any emulated chip — the S3 and classic desk sittings (PRs
+    /// #942/#943) found it off by 4-14x with the opposite sign from the C6's
+    /// own cold-code-path defect, and nothing promotes `timing` to fix it.
+    /// This is a cheap tripwire: if a future edit to `validate.toml` drops
+    /// the caveat from one of these `because` strings, this fails instead of
+    /// silently letting an agent quote an emulated fps-under-load figure
+    /// again. It does not grade anything and does not change a grade.
+    #[test]
+    fn frame_rate_under_link_load_is_not_graded_on_any_emulated_chip() {
+        let cfg = ValidateConfig::embedded();
+        for name in [
+            "lp-emu:esp32c6:t1",
+            "lp-emu:esp32c6:t2",
+            "lp-emu:esp32c6:t3",
+            "lp-emu:esp32v3:t1",
+            "lp-emu:esp32s3:t1",
+        ] {
+            let entry = cfg.configuration(name).unwrap();
+            // The grade stays whatever it already was (`modeled` or, for
+            // t3, `documented`) — this test asserts the caveat text exists,
+            // never a grade.
+            let why = entry
+                .trust
+                .because(FieldClass::Timing)
+                .unwrap_or_else(|| panic!("{name}: no `timing` trust entry"));
+            assert!(
+                why.to_lowercase().contains("frame rate under link load")
+                    && why.to_lowercase().contains("not graded"),
+                "{name}: `timing` trust entry does not say frame rate under \
+                 link load is not graded: `{why}`"
+            );
+        }
+    }
+
     #[test]
     fn a_set_naming_an_unknown_payload_is_refused() {
         let err = ValidateConfig::parse(
