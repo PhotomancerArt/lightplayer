@@ -17,6 +17,9 @@ logic.
   projects, and serving the `lpc-wire` API over app-provided transports.
 - `lpa-client` — client-side transport/API layer for talking to a LightPlayer
   server or firmware target.
+- `lpa-update` — the host side of an over-the-air update (protocol v1):
+  serving, the read-back backup, the login client, the decision, the update
+  driver, and (feature `pack`) the one packer of encoding 1.
 - `lpa-link` — low-level endpoint/link layer for discovery, status,
   management, diagnostics, logs, and opening server/client connections.
 - `lpa-agent` — model-facing shader-agent core: `ModelProvider` abstraction
