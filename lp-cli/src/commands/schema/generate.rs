@@ -25,6 +25,8 @@
 //! - `device-access.schema.json` — the device access store
 //!   ([`lpc_access::DeviceAccessFile`], root `/.lp/access.json`) via
 //!   `schemars`.
+//! - `device-network.schema.json` — the device network file
+//!   ([`lpc_access::NetworkFile`], root `/.lp/network.json`) via `schemars`.
 //! - `shapes/<shape-name>.json` — the serialized [`SlotShape`] for each
 //!   registered static shape (the source-of-truth dump a future format
 //!   upgrader consumes), plus `shapes/_index.json` mapping registry shape
@@ -107,6 +109,10 @@ fn generate_outputs() -> Result<BTreeMap<String, String>> {
     outputs.insert(
         String::from("device-access.schema.json"),
         render_schema(device_access_schema()?, "device-access.schema.json")?,
+    );
+    outputs.insert(
+        String::from("device-network.schema.json"),
+        render_schema(device_network_schema()?, "device-network.schema.json")?,
     );
 
     let mut index = Map::new();
@@ -314,6 +320,14 @@ fn project_access_schema() -> Result<Value> {
 fn device_access_schema() -> Result<Value> {
     let schema = schemars::schema_for!(lpc_access::DeviceAccessFile);
     serde_json::to_value(&schema).context("serializing device access schema")
+}
+
+/// Schema for the device network file, root `/.lp/network.json`. Plain
+/// serde; its own persisted format (`version: 1`), write-only over every
+/// link.
+fn device_network_schema() -> Result<Value> {
+    let schema = schemars::schema_for!(lpc_access::NetworkFile);
+    serde_json::to_value(&schema).context("serializing device network schema")
 }
 
 /// File stem for a shape dump: the registry name with Rust path separators

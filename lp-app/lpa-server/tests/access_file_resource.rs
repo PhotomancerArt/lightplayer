@@ -52,10 +52,7 @@ fn a_project_loaded_with_the_sidecar_as_a_source_is_refused_without_the_bytes() 
         .load_project(PROJECT.as_path())
         .expect_err("the shader's source cannot be read");
     let error = format!("{error:?}");
-    assert!(
-        error.contains("access files are not readable by a project"),
-        "{error}"
-    );
+    assert!(error.contains("are not readable by a project"), "{error}");
     assert!(!error.contains(CANARY), "{error}");
 }
 
@@ -102,7 +99,7 @@ fn a_shader_retargeted_at_the_sidecar_reads_nothing() {
         "a byte of the access file reached a reply:\n{replies}"
     );
     assert!(
-        replies.contains("access files are not readable by a project"),
+        replies.contains("are not readable by a project"),
         "the asset reports why it did not load:\n{replies}"
     );
 }

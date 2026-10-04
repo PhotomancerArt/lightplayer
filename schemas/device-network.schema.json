@@ -1,0 +1,62 @@
+{
+  "$defs": {
+    "WifiNetwork": {
+      "additionalProperties": false,
+      "description": "A saved Wi-Fi network, inside [`crate::NetworkFile`].\n\n`Debug` is written by hand and **never prints the password** — logs on\nthe server and the firmware format with `{:?}`.",
+      "properties": {
+        "enabled": {
+          "description": "Join when on; kept but unused when off.",
+          "type": "boolean"
+        },
+        "password": {
+          "description": "`\"\"` for an open network; else 8–63 printable ASCII characters, or a\nraw key of exactly 64 hex digits. Never leaves the board.",
+          "type": "string"
+        },
+        "ssid": {
+          "description": "The network name: 1–32 bytes of UTF-8.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ssid",
+        "password",
+        "enabled"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://lightplayer.dev/schemas/device-network.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "The device's network settings, at root `/.lp/network.json` — a sibling\nof the device store (`/.lp/access.json`) with its own `version`.\n\n```json\n{\"version\":1,\"wifi\":{\"ssid\":\"lp-walk-net\",\"password\":\"…\",\"enabled\":true},\"lanOnly\":false}\n```\n\n- `wifi` — the saved network ([`WifiNetwork`]); absent when none is.\n- `lanOnly` — never dial the relay. The relay is on by default, so the\n  flag is off by default.\n\n**Write-only on every link.** The password is a secret: no link at any\ntier reads this file ([`crate::is_write_only_file_path`]); the server\nreads it through its own filesystem and answers a status that carries\nthe network name and whether a password is set, never the password.\n`Debug` never prints it either.\n\nA missing file is [`Self::none`] (no network, relay allowed). A file\nthat fails to parse reads as no network too (the caller logs it) and is\nnot rewritten until the next change.\n\n**Format bumps.** A serde change to this type or to [`WifiNetwork`] is a\nformat change, even one that adds or removes no field: bump\n[`Self::VERSION`], keep a private reader for every older version that\nconverts on read (as [`crate::DeviceAccessFile`] keeps v1 and v2), pin\nthe old bytes as a `const` in a test, and regenerate\n`schemas/device-network.schema.json`. The device reads old versions and\nwrites the current one; `lpa-upgrade` (projects) is not involved, and\nthe file is outside `PROJECT_FORMAT_VERSION`.",
+  "properties": {
+    "lanOnly": {
+      "default": false,
+      "description": "Never dial the relay (the relay is on by default).",
+      "type": "boolean"
+    },
+    "version": {
+      "description": "Format version; always [`NetworkFile::VERSION`] when written.",
+      "format": "uint32",
+      "maximum": 1,
+      "minimum": 1,
+      "type": "integer"
+    },
+    "wifi": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/WifiNetwork"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The saved Wi-Fi network; absent when none is saved."
+    }
+  },
+  "required": [
+    "version"
+  ],
+  "title": "NetworkFile",
+  "type": "object"
+}

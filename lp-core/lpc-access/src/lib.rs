@@ -21,8 +21,12 @@
 //!   `version: 3`, v1 and v2 still read).
 //! - **Open to anyone nearby** ([`OpenTo`]): what a link holds with no
 //!   login — nobody, play, or play and edit. A board with no store is open
-//!   at edit, for now. Neither is ever
-//!   readable over any link ([`is_access_file_path`]).
+//!   at edit, for now.
+//! - **The device network file** ([`NetworkFile`], root `/.lp/network.json`,
+//!   `version: 1`): the saved Wi-Fi network ([`WifiNetwork`], validated to
+//!   the 802.11 / WPA2 rules) and the `lanOnly` relay switch.
+//! - **Write-only files.** Neither access file, nor the network file, is
+//!   ever readable over any link at any tier ([`is_write_only_file_path`]).
 //!
 //! Sans-IO throughout: time is a caller-supplied millisecond count and
 //! randomness is caller-supplied bytes. Nothing here reads a clock, draws a
@@ -40,7 +44,6 @@ extern crate alloc;
 extern crate std;
 
 pub mod access_file_error;
-pub mod access_file_path;
 pub mod base64_bytes;
 pub mod constant_time_eq;
 pub mod device_access_file;
@@ -48,6 +51,8 @@ pub mod hmac_sha256;
 pub mod key_lookup;
 pub mod link_psk;
 pub mod login_state;
+pub mod network_file;
+pub mod network_file_error;
 pub mod open_to;
 pub mod pbkdf2_sha256;
 pub mod project_access_file;
@@ -55,9 +60,10 @@ pub mod rate_limit;
 pub mod secret_entry;
 pub mod secret_kind;
 pub mod tier;
+pub mod wifi_network;
+pub mod write_only_file_path;
 
 pub use access_file_error::AccessFileError;
-pub use access_file_path::{is_access_file_path, is_within_dir};
 pub use constant_time_eq::constant_time_eq;
 pub use device_access_file::DeviceAccessFile;
 pub use hmac_sha256::{HMAC_SHA256_BYTES, HmacSha256, hmac_sha256};
@@ -67,6 +73,8 @@ pub use login_state::{
     BeginOutcome, CHALLENGE_TTL_MS, Challenge, LoginMac, LoginOffer, LoginOutcome, LoginState,
     NONCE_BYTES,
 };
+pub use network_file::NetworkFile;
+pub use network_file_error::NetworkFileError;
 pub use open_to::OpenTo;
 pub use pbkdf2_sha256::{derive_login_key, pbkdf2_sha256};
 pub use project_access_file::ProjectAccessFile;
@@ -74,6 +82,8 @@ pub use rate_limit::RateLimit;
 pub use secret_entry::{KEY_BYTES, SALT_BYTES, SecretEntry};
 pub use secret_kind::SecretKind;
 pub use tier::Tier;
+pub use wifi_network::{WifiNetwork, validate_password, validate_ssid};
+pub use write_only_file_path::{is_within_dir, is_write_only_file_path};
 
 /// Most secrets one access file may hold. The login challenge offers every
 /// installed secret in one frame, and a client runs one KDF per offer, so

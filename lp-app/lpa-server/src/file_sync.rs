@@ -61,10 +61,11 @@ pub fn handle_changes_since(
             }
         }
     }
-    // The fs gate: an access file never rides a changes walk — not its
-    // bytes, and not a tombstone either (nothing about it leaves the device).
+    // The fs gate: a write-only file (an access file, the network file)
+    // never rides a changes walk — not its bytes, and not a tombstone either
+    // (nothing about it leaves the device).
     items.retain(|(rel, _)| {
-        !lpc_access::is_access_file_path(join_prefix(prefix, rel.as_path()).as_str())
+        !lpc_access::is_write_only_file_path(join_prefix(prefix, rel.as_path()).as_str())
     });
     items.sort_by(|a, b| a.0.as_str().as_bytes().cmp(b.0.as_str().as_bytes()));
 
@@ -226,15 +227,16 @@ pub fn handle_write_chunk(
 /// hash over an access file would be an offline oracle on the key inside
 /// it. The canonical hash already excludes the package's OWN `/.lp/`
 /// (`lpc_history`'s hash rules), which covers a project's sidecar; a prefix
-/// that would take any other access file into the hash — the device root,
-/// `/projects`, a `.lp` directory itself — is refused.
+/// that would take any other access file (or the network file) into the
+/// hash — the device root, `/projects`, a `.lp` directory itself — is
+/// refused.
 pub fn handle_hash_package(fs: &dyn LpFs, prefix: LpPathBuf) -> FsResponse {
-    if hash_would_cover_an_access_file(fs, prefix.as_path()) {
+    if hash_would_cover_a_write_only_file(fs, prefix.as_path()) {
         return FsResponse::PackageHash {
             prefix,
             hash: alloc::string::String::new(),
             error: Some(alloc::string::String::from(
-                "refused: this package hash would cover an access file (.lp/access.json)",
+                "refused: this package hash would cover a write-only file (.lp/access.json or .lp/network.json)",
             )),
         };
     }
@@ -266,14 +268,15 @@ pub fn handle_hash_package(fs: &dyn LpFs, prefix: LpPathBuf) -> FsResponse {
     }
 }
 
-/// Whether the canonical hash of `prefix` would take in an access file: one
+/// Whether the canonical hash of `prefix` would take in a write-only file
+/// (an access file, the network file): one
 /// lies under `prefix` and is not in the package's own excluded `/.lp/`.
-fn hash_would_cover_an_access_file(fs: &dyn LpFs, prefix: &LpPath) -> bool {
+fn hash_would_cover_a_write_only_file(fs: &dyn LpFs, prefix: &LpPath) -> bool {
     let Ok(paths) = fs.list_dir(prefix, true) else {
         return false;
     };
     paths.iter().any(|path| {
-        lpc_access::is_access_file_path(path.as_str())
+        lpc_access::is_write_only_file_path(path.as_str())
             && relativize(prefix, path.as_path())
                 .is_some_and(|rel| lpc_history::hash::is_hashed_path(rel.as_path()))
     })
