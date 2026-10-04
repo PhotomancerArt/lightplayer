@@ -55,3 +55,12 @@ smoke) should pin it.
 only as faithful as the assumption that both endpoints frame the same way.
 When one side's framing changes, every relay that joined it to something
 else has to be found and checked in the same change.
+
+**Incidents**
+
+- 2026-10-04 — hit again by the Wi‑Fi settings walk (Wi‑Fi roadmap M5,
+  `just walk-wifi-emu ble`): pairs over the polyfill, then sits at
+  **Identifying** ("No response — try flashing firmware"), so the `?ble=emu`
+  half of M5's walk could not run. The USB half (`just walk-wifi-emu usb`)
+  passed; the Wi‑Fi controls over a Bluetooth link at author are covered by
+  `lpa-studio-core`'s reach tests only, not by a walk, until this is fixed.
