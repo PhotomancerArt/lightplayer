@@ -1,5 +1,10 @@
 //! The boot-control sector: a flash-persisted instruction to the next boot.
 //!
+//! Also the split-link image's **boot records** ([`BootRecord`], [`choose`],
+//! [`SplitLayout`]): which core the loader boots next, and where the core and
+//! the engine live — the same idea, an instruction to the next boot kept in
+//! flash, at a second place in the image.
+//!
 //! One 4 KB flash sector carrying a small record that the firmware reads
 //! **before** it auto-loads a project. Its purpose is to make a device
 //! recoverable when its own project is what prevents it from running — a
@@ -53,10 +58,23 @@
 
 #![no_std]
 
+mod boot_choice;
 mod boot_control;
 mod boot_flags;
+mod boot_record;
 mod crc32;
 mod sector;
+mod split_layout;
+
+pub use boot_choice::{BootChoice, choose};
+pub use boot_record::{
+    ATTEMPTED_MARK_OFFSET, BOOT_RECORD_LEN, BOOT_RECORD_READ_LEN, BOOT_RECORD_VERSION, BootMarks,
+    BootRecord, BootSlot, CONFIRMED_MARK_OFFSET, RECORD_MAGIC, build_hash,
+};
+pub use split_layout::{
+    BOOT_RECORD_SECTORS, Extent, LOADER_MAX_LEN, LOADER_OFFSET, REGION_END_C6_4MB, REGION_START,
+    SplitLayout,
+};
 
 pub use boot_control::{BootAction, BootControl, DecodeOutcome, decode};
 pub use boot_flags::BootFlags;
