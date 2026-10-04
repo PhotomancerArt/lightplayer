@@ -187,6 +187,9 @@ pub(crate) fn DeviceRosterCard(
     /// Stories only: mount "Who has access" open.
     #[props(default)]
     access_panel_open: bool,
+    /// Stories only: mount "Who has access"'s keys list open too.
+    #[props(default)]
+    keys_open_preview: bool,
     /// Open the header's ⋯ menu immediately (stories only).
     #[props(default = false)]
     menu_initially_open: bool,
@@ -599,6 +602,7 @@ pub(crate) fn DeviceRosterCard(
                         access,
                         on_access,
                         who_open: access_panel_open,
+                        keys_open_preview,
                     }
                 }
                 // Unlocked for play only: say what editing needs, and the
