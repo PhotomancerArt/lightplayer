@@ -170,16 +170,20 @@ pub async fn run_uart_link(shared: &'static UartLinkShared, pacing: PassPacing) 
         } else {
             wake_at(shared, IDLE_BACKSTOP_US)
         };
+        // On a thread of its own, sleep out the interval FIRST and only then
+        // wait for news: the pipes' wake and the doorbell are latched, so
+        // anything that arrives meanwhile ends the wait at once. Waiting for
+        // the news first and holding after it would wake the thread twice a
+        // pass — twice the preemptions the interval exists to save.
+        if let Some(hold) = pacing.hold_until(pass_started, now_us()) {
+            Timer::at(Instant::from_micros(hold)).await;
+        }
         select3(
             uart_link_pipes::wake(),
             Timer::at(Instant::from_micros(wake)),
             shared.doorbell(),
         )
         .await;
-        // Woken; on a thread of its own, the pass waits out its interval.
-        if let Some(hold) = pacing.hold_until(pass_started, now_us()) {
-            Timer::at(Instant::from_micros(hold)).await;
-        }
     }
 }
 

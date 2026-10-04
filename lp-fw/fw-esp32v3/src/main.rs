@@ -1159,14 +1159,15 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
         None,
         graphics,
     );
-    // With the link on its own thread, answer a tick's requests before its
-    // render: the reply's frames then leave while the frame renders
-    // (`io_thread`). Without the thread it stays off: P2 of
-    // `lp2025/2026-10-02-1918-io-thread-other-boards` measured it on the
-    // emulator with the event-driven wake alone and it did not clear the
-    // plan's ~0.3-frame bar (PR #943's body has both projects' numbers).
-    #[cfg(feature = "io-thread")]
-    server.set_messages_first(true);
+    // Render first, answer after — even with the link on its own thread,
+    // unlike the C6 and S3. On this board a request can cost far more CPU
+    // than a frame: Studio's editor read takes ~150-175 ms of the classic's
+    // render-sized tick. Answered before the render, every such read delays
+    // the frame's display against the clock it was rendered at (~190 ms
+    // judder p90 under a real Studio editor on the DOM-Z-102, PR #943's desk
+    // A/B); answered after, it only makes the next frame late, and motion
+    // stays true. Messages-first is the server's default-off order, so
+    // nothing is set here.
     // Identity only — capabilities (build.features, hardware facts) are
     // computed inside the constructor from the engine's gates and the
     // services just injected — never restated here.

@@ -407,8 +407,12 @@ The `uart_link_task` above runs on its own priority-1 esp-rtos thread,
 pinned to core 0 (`src/io_thread.rs`), instead of sharing the main thread
 executor with the server loop — the C6/S3 treatment, M2 of the Wi-Fi
 control roadmap (plan `2026-10-02-1918-io-thread-other-boards`, PR #943).
-Messages-first ships with it (`LpServer::set_messages_first`), so a reply
-is queued while the frame renders instead of after it. io_task (swi2, the
+Its passes are at least 25 ms apart (`PassPacing::CLASSIC_LINK_THREAD`):
+on this board's silicon each preemption costs the render several ms of
+flash-cache refill, so an every-event thread stretched frames ~3× during a
+transfer. Messages-first stays **off** here, unlike the C6/S3: Studio's
+editor read costs the classic ~150–175 ms of CPU, and answered before the
+render it delays every frame's display by that much. io_task (swi2, the
 1 ms pacer) is untouched and still the only thing that touches UART0; see
 `docs/adr/2026-08-25-classic-uart-io-task-executor-isolation.md`'s
 2026-10-03 amendment and `docs/adr/2026-10-02-c6-link-io-thread.md`'s

@@ -84,10 +84,10 @@ server = [
 json-pack = ["server", "fw-esp32-common/json-pack"]
 
 # The lp-link `Link` on a preemptive esp-rtos thread of its own (priority 1,
-# pinned to core 0, its own embassy executor), and the server answering a
-# tick's requests before it renders (`LpServer::set_messages_first`). On by
-# default; without it the link task shares the main executor with the engine
-# and the server renders first, as P2 of the io-thread plan left it. io_task
+# pinned to core 0, its own embassy executor, at most one pass per 25 ms).
+# The server renders first either way (messages-first stays off on this
+# board; see `src/main.rs`). On by default; without it the link task shares
+# the main executor with the engine, as P2 of the io-thread plan left it. io_task
 # (swi2 interrupt executor + 1 ms pacer) is the same either way: it moves
 # UART0's bytes, and never polls the `Link` (ruling DD20). See
 # `src/io_thread.rs` and the C6/S3 twins.

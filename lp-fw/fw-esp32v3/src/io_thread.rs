@@ -11,9 +11,14 @@
 //! thread at [`PRIORITY`] — above the main task's (0) — with its own
 //! [`esp_rtos::embassy::Executor`], which runs the unchanged
 //! [`crate::serial::uart_link_task`]. A woken link task (the I/O task's news,
-//! a timer, the doorbell) preempts the render at once. The server answers a
-//! tick's requests before it renders (`LpServer::set_messages_first`), so a
-//! reply is on the wire while the frame renders instead of after it.
+//! a timer, the doorbell) preempts the render — at most once per
+//! [`fw_esp32_common::uart_link::PassPacing::CLASSIC_LINK_THREAD`] (25 ms):
+//! on this board's silicon a preemption costs the render ~4–5 ms of flash
+//! cache refill, several times the pass itself, so the thread batches.
+//! Unlike the C6 and S3 the server still renders first and answers after
+//! (messages-first stays off): a request can cost this board more CPU than
+//! a frame, and answered first it would delay the frame's display against
+//! its own clock (`main.rs`, at the server's construction).
 //!
 //! **What does not change.** io_task — the swi2 interrupt executor at
 //! Priority2, its 1 ms TIMG0 pacer, `SendUart` and the two pipes — is
