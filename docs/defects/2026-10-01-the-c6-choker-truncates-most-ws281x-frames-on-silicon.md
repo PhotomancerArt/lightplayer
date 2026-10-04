@@ -125,8 +125,14 @@ remaining entry delay is whatever runs with interrupts masked or at a
 higher priority when the refill is due; it is not named here.
 
 **`t3` is the gate's grade for this class.** `t2` decodes every frame
-whole on the before image too; the next walk that checks the RMT should
-read `trips` at `t3`.
+whole on the before image, by the same command at `--time-grade t2`:
+
+```text
+t2, before: [WS281X] t_ms=30037 ch=0 half=24 frames=2111 complete=2111 trips=0 skips=0 errors=0 refills=154103 wanted=154103 lag_avg=4.8 lag_max=5 over_half=0 hist=2111:151992:0:0:0:0:0:0:0 entry_max=19 entry_hist=153188:253:167:125:165:121:84:0:0 trip_at=0
+```
+
+(2,139 of 2,154 decoded frames 1,752 bits, the rest empty.) The next walk
+that checks the RMT should read `trips` at `t3`.
 
 **Desk check owed (Yona)** — the fix image on the XIAO C6 rendering the
 Choker under `lp-cli link rtt`, 90 s of `ws281x_telemetry`: pass is
