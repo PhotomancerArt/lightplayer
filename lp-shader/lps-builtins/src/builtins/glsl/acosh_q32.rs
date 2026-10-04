@@ -39,6 +39,7 @@ pub extern "C" fn __lps_acosh_q32(x: i32) -> i32 {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::excessive_precision, reason = "golden refs")]
     #[cfg(test)]
     extern crate std;
     use super::*;

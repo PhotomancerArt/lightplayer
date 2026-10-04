@@ -1,0 +1,37 @@
+# S8 "The colours are wrong": the classic WS2812 problem — the strip wants
+# GRB. The fix is the fixture's colour order, and nothing else.
+id = "S8"
+name = "s08-luna-colours-wrong"
+summary = "Purple looks green, red shows green → colour order GRB, nothing else"
+persona = "luna"
+tags = ["troubleshoot", "edit", "minimal-change"]
+golden = "luna-60-d10-grb"
+
+[start]
+project = { golden = "luna-60-d10" }
+board = { known = "seeed/xiao-esp32-c6" }
+
+[user]
+say = "everything's wired but the colours are off, the purple looks green-ish and red shows up green"
+otherwise = "they're WS2812B, the cheap ones from Amazon."
+
+[budget]
+turns = 12
+usd = 0.30
+
+[[check]]
+kind = "field"
+node = "Fixture"
+path = "color_order"
+equals = "grb"
+# Not the patterns, not the wiring: only the colour order.
+[[check]]
+kind = "minimal_diff"
+allow = ["Fixture.color_order"]
+[[check]]
+kind = "said_any"
+words = ["grb", "colour order", "color order"]
+[[check]]
+kind = "all_nodes_ok"
+[[check]]
+kind = "saved"

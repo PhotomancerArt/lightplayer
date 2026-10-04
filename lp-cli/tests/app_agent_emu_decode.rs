@@ -12,8 +12,10 @@
 //!   golden projects (`lpa-studio-core/tests/fixtures/app_agent/golden/`)
 //!   must drive complete, error-free, lit, changing frames of the right
 //!   length on pad 16.
-//! - **Live leg** (`just app-agent-eval`): `LP_APP_AGENT_PROJECT=<dir>` and
-//!   `LP_APP_AGENT_LEDS=<n>` point at the tree a model run produced.
+//! - **Live leg** (`just app-agent-eval`, `just app-agent-corpus`):
+//!   `LP_APP_AGENT_PROJECT=<dir>`, `LP_APP_AGENT_LEDS=<n>` and
+//!   `LP_APP_AGENT_PAD=<gpio>` (the scenario's pin through its board's pin
+//!   map; 16, XIAO D6, when unset) point at the tree a model run produced.
 //!
 //! `#[ignore]`d: they need a built `fw-esp32c6` ELF (`LP_EMU_BUILD_FW=1`,
 //! or CI's images via `LP_CI_IMAGES`). Times are emulated (`lp-emu:esp32c6:t1`);
@@ -36,8 +38,9 @@ use lp_emu_esp32c6::test_support::{FwImage, fw_esp32c6_image};
 /// One fixed host nonce, so two runs are the same run.
 const NONCE: u32 = 0x4057_C6A7;
 
-/// The XIAO ESP32-C6's D6 pin.
-const PAD: u8 = 16;
+/// The XIAO ESP32-C6's D6 pin: the goldens' pad, and the live leg's when
+/// the scenario names none.
+const XIAO_D6_PAD: u8 = 16;
 
 /// The RMT output signals a WS281x channel routes onto its pad (two
 /// channels on the C6).
@@ -65,13 +68,13 @@ const CHANGE_GAP_US: u64 = 500_000;
 #[test]
 #[ignore = "needs a built fw-esp32c6 ELF; `just test-emu-c6-cli` runs it"]
 fn the_sean_250_golden_lights_250_leds_on_d6() {
-    decode_and_check(&golden("sean-250-d6"), 250);
+    decode_and_check(&golden("sean-250-d6"), 250, XIAO_D6_PAD);
 }
 
 #[test]
 #[ignore = "needs a built fw-esp32c6 ELF; `just test-emu-c6-cli` runs it"]
 fn the_sean_300_golden_lights_300_leds_on_d6() {
-    decode_and_check(&golden("sean-300-d6"), 300);
+    decode_and_check(&golden("sean-300-d6"), 300, XIAO_D6_PAD);
 }
 
 /// The project the golden edit script built from Blank, through the real
@@ -80,14 +83,14 @@ fn the_sean_300_golden_lights_300_leds_on_d6() {
 #[test]
 #[ignore = "needs a built fw-esp32c6 ELF; `just test-emu-c6-cli` runs it"]
 fn the_sean_script_replay_lights_250_leds_on_d6() {
-    decode_and_check(&replayed("e1-sean-from-empty"), 250);
+    decode_and_check(&replayed("e1-sean-from-empty"), 250, XIAO_D6_PAD);
 }
 
 /// The 300-LED script, replayed on the 250 golden.
 #[test]
 #[ignore = "needs a built fw-esp32c6 ELF; `just test-emu-c6-cli` runs it"]
 fn the_make_it_300_script_replay_lights_300_leds_on_d6() {
-    decode_and_check(&replayed("e2-make-it-300"), 300);
+    decode_and_check(&replayed("e2-make-it-300"), 300, XIAO_D6_PAD);
 }
 
 /// The judge can fail: the 250 golden is not a 300-LED strip.
@@ -97,7 +100,7 @@ fn the_sean_golden_is_judged_against_its_own_count() {
     let Some(elf) = image() else {
         return;
     };
-    let run = deploy_and_render(&elf, &golden("sean-250-d6"));
+    let run = deploy_and_render(&elf, &golden("sean-250-d6"), XIAO_D6_PAD);
     let reason = judge(&run, 300).expect_err("250 LEDs are not 300");
     assert!(reason.contains("wrong LED count"), "{reason}");
 }
@@ -105,8 +108,8 @@ fn the_sean_golden_is_judged_against_its_own_count() {
 /// The live leg: a project tree a model run wrote (stage A's
 /// `target/app-agent-evals/<run>/<scenario>/project/`).
 #[test]
-#[ignore = "live leg: set LP_APP_AGENT_PROJECT and LP_APP_AGENT_LEDS (`just app-agent-eval`)"]
-fn an_agent_built_project_lights_its_leds_on_d6() {
+#[ignore = "live leg: set LP_APP_AGENT_PROJECT, LP_APP_AGENT_LEDS and LP_APP_AGENT_PAD (`just app-agent-eval`)"]
+fn an_agent_built_project_lights_its_leds_on_its_pad() {
     let Ok(dir) = std::env::var("LP_APP_AGENT_PROJECT") else {
         panic!("LP_APP_AGENT_PROJECT is not set — `just app-agent-eval` sets it");
     };
@@ -114,16 +117,20 @@ fn an_agent_built_project_lights_its_leds_on_d6() {
         .ok()
         .and_then(|n| n.parse().ok())
         .expect("LP_APP_AGENT_LEDS=<led count>");
-    decode_and_check(Path::new(&dir), leds);
+    let pad: u8 = std::env::var("LP_APP_AGENT_PAD")
+        .ok()
+        .map(|pad| pad.parse().expect("LP_APP_AGENT_PAD=<gpio number>"))
+        .unwrap_or(XIAO_D6_PAD);
+    decode_and_check(Path::new(&dir), leds, pad);
 }
 
 /// Deploy `dir` to a booted C6, render until it lights (or the cap), and judge
-/// the frames on pad 16 against `leds`. Prints one summary line.
-fn decode_and_check(dir: &Path, leds: usize) {
+/// the frames on `pad` against `leds`. Prints one summary line.
+fn decode_and_check(dir: &Path, leds: usize, pad: u8) {
     let Some(elf) = image() else {
         return;
     };
-    let run = deploy_and_render(&elf, dir);
+    let run = deploy_and_render(&elf, dir, pad);
     match judge(&run, leds) {
         Ok(summary) => println!(
             "app-agent stage B (lp-emu:esp32c6:t1, lp-emu {}): {} — {summary}",
@@ -134,7 +141,7 @@ fn decode_and_check(dir: &Path, leds: usize) {
     }
 }
 
-/// Whether the frames on pad 16 are `leds` LEDs long, whole, clean, lit and
+/// Whether the frames on the run's pad are `leds` LEDs long, whole, clean, lit and
 /// changing: `Ok(summary)` or `Err(what is wrong)`.
 fn judge(run: &RenderRun, leds: usize) -> Result<String, String> {
     if let Some(stopped) = &run.stopped {
@@ -148,24 +155,25 @@ fn judge(run: &RenderRun, leds: usize) -> Result<String, String> {
         ));
     }
     if !run.routed.iter().any(|(pad, source)| {
-        *pad == PadId(PAD)
+        *pad == PadId(run.pad)
             && RMT_SIGNALS
                 .iter()
                 .any(|sig| *source == RouteSource::Signal(SignalId(*sig), false))
     }) {
         return Err(format!(
-            "gpio16 (D6) is not routed to an RMT channel: {:?}",
-            run.routed
+            "gpio{} is not routed to an RMT channel: {:?}",
+            run.pad, run.routed
         ));
     }
     let frames = &run.frames;
     if frames.is_empty() {
-        return Err("no frame reached gpio16".to_string());
+        return Err(format!("no frame reached gpio{}", run.pad));
     }
     let Some(lit) = frames.iter().position(|f| f.wire.iter().any(|b| *b != 0)) else {
         return Err(format!(
-            "{} frames on gpio16 and every one of them black",
-            frames.len()
+            "{} frames on gpio{} and every one of them black",
+            frames.len(),
+            run.pad
         ));
     };
     // Every frame from the first lit one on, except a last frame the window
@@ -211,8 +219,9 @@ fn judge(run: &RenderRun, leds: usize) -> Result<String, String> {
         ));
     }
     Ok(format!(
-        "{} frames on gpio16, first lit n={} at {:.3} ms, {} whole {leds}-LED frames after it",
+        "{} frames on gpio{}, first lit n={} at {:.3} ms, {} whole {leds}-LED frames after it",
         frames.len(),
+        run.pad,
         first.n,
         first.start as f64 / memmap::CYCLES_PER_US as f64 / 1_000.0,
         judged.len()
@@ -220,6 +229,8 @@ fn judge(run: &RenderRun, leds: usize) -> Result<String, String> {
 }
 
 struct RenderRun {
+    /// The pad the frames were decoded on.
+    pad: u8,
     /// Why the board stopped before the window ended (a watchdog reset).
     stopped: Option<String>,
     console: Vec<String>,
@@ -230,7 +241,7 @@ struct RenderRun {
 /// Boot, wait for the hello, deploy `dir` over the link as `lp-cli upload`
 /// does, then render until the first lit frame (at most
 /// [`FIRST_LIT_CAP_US`]) and [`AFTER_LIT_US`] beyond it, in emulated time.
-fn deploy_and_render(elf: &Path, dir: &Path) -> RenderRun {
+fn deploy_and_render(elf: &Path, dir: &Path, pad: u8) -> RenderRun {
     let mut host = hosted(elf);
     let hello = host
         .wait_for_line("\"hello\":{", 3_000_000)
@@ -260,7 +271,7 @@ fn deploy_and_render(elf: &Path, dir: &Path) -> RenderRun {
         if host
             .board
             .machine
-            .frames(PAD)
+            .frames(pad)
             .iter()
             .any(|f| f.wire.iter().any(|b| *b != 0))
         {
@@ -275,9 +286,10 @@ fn deploy_and_render(elf: &Path, dir: &Path) -> RenderRun {
     host.board.machine.flush_frames();
     assert_eq!(host.link_errors, 0, "{}", host.console().join("\n"));
     RenderRun {
+        pad,
         stopped,
         console: host.console().to_vec(),
-        frames: host.board.machine.frames(PAD).to_vec(),
+        frames: host.board.machine.frames(pad).to_vec(),
         routed: host.board.machine.routed_pads(),
     }
 }

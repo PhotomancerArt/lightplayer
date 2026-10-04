@@ -2,7 +2,9 @@
 
 use std::collections::BTreeMap;
 
-use crate::{OfferPath, UiOffer};
+use lpa_devices::DeviceId;
+
+use crate::{OfferPath, UiOffer, UiOfferFocus};
 
 /// Every offer the view publishes, addressed by path, in **publish order**.
 ///
@@ -10,10 +12,22 @@ use crate::{OfferPath, UiOffer};
 /// surface draws its verbs in that order (Save before Revert), and the
 /// agent's readout lists them the same way. A path is published at most
 /// once per build; publishing one twice is a bug in the publisher.
+///
+/// The tree also knows where each device's verbs live
+/// ([`Self::device_prefix`]): a device card is handed a roster handle, and
+/// its verbs are at `devices/<board ref>` — a ref only core can work out
+/// (the MAC, the kind its endpoint names, and the de-duplication when two
+/// entries answer to one MAC).
+///
+/// And it knows where the user is ([`Self::focus`]): the focused node and
+/// the page's area, as prefixes. [`Self::search`] ranks by it, so the ⌘K
+/// palette and any other consumer get the same focus-near-first order.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct UiOfferTree {
     offers: Vec<UiOffer>,
     index: BTreeMap<OfferPath, usize>,
+    devices: BTreeMap<DeviceId, OfferPath>,
+    focus: UiOfferFocus,
 }
 
 impl UiOfferTree {
@@ -47,6 +61,29 @@ impl UiOfferTree {
         for offer in other.offers {
             self.publish(offer);
         }
+        self.devices.extend(other.devices);
+    }
+
+    /// Say that `device`'s verbs live under `prefix` (`devices/<board ref>`).
+    pub fn place_device(&mut self, device: DeviceId, prefix: OfferPath) {
+        self.devices.insert(device, prefix);
+    }
+
+    /// Say where the user is (core works it out from place and the focused
+    /// node, after publishing).
+    pub fn set_focus(&mut self, focus: UiOfferFocus) {
+        self.focus = focus;
+    }
+
+    /// Where the user is, as offer prefixes.
+    pub fn focus(&self) -> &UiOfferFocus {
+        &self.focus
+    }
+
+    /// Where `device`'s verbs live, when the roster has it: the prefix a
+    /// card hands [`Self::verbs_of`].
+    pub fn device_prefix(&self, device: DeviceId) -> Option<&OfferPath> {
+        self.devices.get(&device)
     }
 
     /// The offer at `path`, if one is published.
@@ -67,6 +104,18 @@ impl UiOfferTree {
         self.offers.iter().filter(move |offer| {
             offer.path.len() == prefix.len() + 1 && offer.path.starts_with(&prefix)
         })
+    }
+
+    /// A node's own verbs: [`Self::verbs_of`] plus the verbs it groups
+    /// under a namespace of its own (`project/<fixture>/patch/assign`),
+    /// never a child node's. What the agent's `read` lists for a node; a
+    /// card's header still asks [`Self::verbs_of`], because a group's verbs
+    /// have controls of their own.
+    pub fn own_verbs_of(&self, prefix: &OfferPath) -> impl Iterator<Item = &UiOffer> + '_ {
+        let prefix = prefix.clone();
+        self.offers
+            .iter()
+            .filter(move |offer| offer.path.is_own_verb_of(&prefix))
     }
 
     /// How many offers are published.
@@ -130,6 +179,35 @@ mod tests {
     }
 
     #[test]
+    fn own_verbs_of_adds_the_nodes_grouped_verbs_but_never_a_childs() {
+        let node = OfferPath::project_node(&ProjectNodeAddress::parse("/demo.module").unwrap());
+        let child = OfferPath::project_node(
+            &ProjectNodeAddress::parse("/demo.module/dome.fixture").unwrap(),
+        );
+        let mut tree = UiOfferTree::new();
+        tree.publish(offer(node.clone().child("revert")));
+        tree.publish(offer(child.clone().child("remove")));
+        tree.publish(offer(child.clone().child("patch").child("reverse")));
+
+        assert_eq!(
+            paths(tree.own_verbs_of(&node)),
+            ["project/demo.module/revert"]
+        );
+        assert_eq!(
+            paths(tree.own_verbs_of(&child)),
+            [
+                "project/demo.module/dome.fixture/remove",
+                "project/demo.module/dome.fixture/patch/reverse"
+            ]
+        );
+        assert_eq!(
+            paths(tree.verbs_of(&child)),
+            ["project/demo.module/dome.fixture/remove"],
+            "a header's verbs stay one segment down"
+        );
+    }
+
+    #[test]
     fn append_keeps_both_orders() {
         let mut tree = UiOfferTree::new();
         tree.publish(offer(OfferPath::project().child("save")));
@@ -138,6 +216,26 @@ mod tests {
         tree.append(side);
 
         assert_eq!(paths(tree.iter()), ["project/save", "devices/connect-usb"]);
+    }
+
+    #[test]
+    fn a_device_is_found_by_its_handle() {
+        let mut tree = UiOfferTree::new();
+        let prefix = OfferPath::board(&crate::BoardRef::New(4));
+        tree.publish(offer(prefix.clone().child("forget")));
+        tree.place_device(DeviceId(4), prefix.clone());
+
+        let found = tree.device_prefix(DeviceId(4)).expect("placed");
+        assert_eq!(paths(tree.verbs_of(found)), ["devices/new-4/forget"]);
+        assert_eq!(tree.device_prefix(DeviceId(5)), None);
+
+        let mut other = UiOfferTree::new();
+        other.append(tree);
+        assert_eq!(
+            other.device_prefix(DeviceId(4)),
+            Some(&prefix),
+            "append keeps it"
+        );
     }
 
     #[test]

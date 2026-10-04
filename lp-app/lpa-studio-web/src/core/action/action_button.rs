@@ -33,6 +33,10 @@ pub fn ActionButton(
     /// deterministically. Real surfaces never set this.
     #[props(default)]
     armed_preview: bool,
+    /// The disabled reason is said once elsewhere on the row (a row of
+    /// verbs disabled for one cause), so this button does not repeat it.
+    #[props(default)]
+    reason_said_elsewhere: bool,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let action_to_run = action.clone();
@@ -41,7 +45,9 @@ pub fn ActionButton(
     // One look per consequence level, in every variant (D7, Q7): Routine is
     // plain, Undoable wears the error tint, Lasting wears it and arms.
     let class = action_class(variant, meta.priority, meta.consequence.wears_error_tint());
-    let disabled_reason = disabled_reason(&meta.enablement).map(ToString::to_string);
+    let disabled_reason = disabled_reason(&meta.enablement)
+        .filter(|_| !reason_said_elsewhere)
+        .map(ToString::to_string);
     let icon = action_icon_name(meta.icon.as_deref());
     let arms = meta.consequence.arms();
     let copy = meta.consequence.copy().cloned();

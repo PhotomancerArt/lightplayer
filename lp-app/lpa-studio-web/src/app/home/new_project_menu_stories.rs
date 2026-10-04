@@ -11,6 +11,7 @@ use lpa_studio_web_story_macros::story;
 use crate::app::home::new_project_menu::NewProjectMenu;
 use crate::app::home::section_title_class;
 use crate::base::{StudioIcon, StudioIconName};
+use crate::core::OffersProvider;
 use crate::core::quiet_action_class;
 
 #[story(
@@ -31,27 +32,32 @@ pub(crate) fn trigger_at_rest() -> Element {
 /// `ProjectsPage`'s own header row so the story cannot drift from the
 /// shipped layout without someone noticing.
 fn header(open: bool) -> Element {
+    // `project/new` as core publishes it with a library mounted.
+    let mut offers = lpa_studio_core::UiOfferTree::new();
+    offers.publish(lpa_studio_core::new_project_offer(true));
     rsx! {
-        div { class: "tw:grid tw:min-h-[320px] tw:content-start tw:gap-3 tw:p-4",
-            header { class: "tw:flex tw:items-baseline tw:justify-between tw:gap-3",
-                h2 { class: section_title_class(), "Projects" }
-                div { class: "tw:flex tw:items-center tw:gap-2",
-                    NewProjectMenu { initially_open: open, on_action: |_| {} }
-                    button {
-                        class: quiet_action_class(),
-                        r#type: "button",
-                        span { class: "tw:inline-flex tw:h-[15px] tw:w-[15px] tw:items-center tw:justify-center", aria_hidden: "true",
-                            StudioIcon { name: StudioIconName::Upload, size: 14 }
+        OffersProvider { offers,
+            div { class: "tw:grid tw:min-h-[320px] tw:content-start tw:gap-3 tw:p-4",
+                header { class: "tw:flex tw:items-baseline tw:justify-between tw:gap-3",
+                    h2 { class: section_title_class(), "Projects" }
+                    div { class: "tw:flex tw:items-center tw:gap-2",
+                        NewProjectMenu { initially_open: open, on_action: |_| {} }
+                        button {
+                            class: quiet_action_class(),
+                            r#type: "button",
+                            span { class: "tw:inline-flex tw:h-[15px] tw:w-[15px] tw:items-center tw:justify-center", aria_hidden: "true",
+                                StudioIcon { name: StudioIconName::Upload, size: 14 }
+                            }
+                            span { "Import" }
                         }
-                        span { "Import" }
-                    }
-                    button {
-                        class: quiet_action_class(),
-                        r#type: "button",
-                        span { class: "tw:inline-flex tw:h-[15px] tw:w-[15px] tw:items-center tw:justify-center", aria_hidden: "true",
-                            StudioIcon { name: StudioIconName::Copy, size: 14 }
+                        button {
+                            class: quiet_action_class(),
+                            r#type: "button",
+                            span { class: "tw:inline-flex tw:h-[15px] tw:w-[15px] tw:items-center tw:justify-center", aria_hidden: "true",
+                                StudioIcon { name: StudioIconName::Copy, size: 14 }
+                            }
+                            span { "Paste" }
                         }
-                        span { "Paste" }
                     }
                 }
             }

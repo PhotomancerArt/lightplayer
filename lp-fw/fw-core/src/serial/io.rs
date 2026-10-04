@@ -94,6 +94,6 @@ mod tests {
     #[test]
     fn test_serial_error_display() {
         let err = SerialError::WriteFailed("test".into());
-        assert!(format!("{}", err).contains("Write failed"));
+        assert!(format!("{err}").contains("Write failed"));
     }
 }

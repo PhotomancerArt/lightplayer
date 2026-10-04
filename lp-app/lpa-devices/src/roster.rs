@@ -27,6 +27,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::board_key::BoardKey;
 use crate::device::Device;
 use crate::event::{Action, Command, Event, Input};
 use crate::evidence::{Classification, Evidence};
@@ -277,6 +278,29 @@ impl Roster {
         &self.pending
     }
 
+    /// The identity chain of a device or a pending link, or `None` for an
+    /// id the roster does not hold.
+    pub fn identity(&self, id: DeviceId) -> Option<&IdentityChain> {
+        match self.device(id) {
+            Some(device) => Some(&device.identity),
+            None => self
+                .pending
+                .iter()
+                .find(|pending| pending.device_id() == id)
+                .map(PendingLink::identity),
+        }
+    }
+
+    /// The board id of a device or a pending link: its MAC, once something
+    /// has read one (a hello, or the flash preflight's efuse read). `None`
+    /// for an id the roster does not hold, and for one that has not said
+    /// who it is yet — a fresh port before its hello, a blank chip before
+    /// the preflight — which is the provisional case an offer path names
+    /// `devices/new-<n>`.
+    pub fn board_key(&self, id: DeviceId) -> Option<BoardKey> {
+        self.identity(id)?.mac.as_ref().and_then(BoardKey::from_mac)
+    }
+
     /// What the effects layer told us about a link that is still attached.
     pub fn link_info(&self, link: LinkId) -> Option<&LinkInfo> {
         self.links.get(&link)
@@ -409,6 +433,12 @@ impl Roster {
             Event::TimerFired { timer } => self.dispatch_timer(now, *timer, input),
             Event::ActivityMarker { device, .. } | Event::IdentityObserved { device, .. } => {
                 self.dispatch_to_device(now, *device, input)
+            }
+            // A chooser's answer is roster news: a picked device already
+            // arrived as its `LinkAttached`.
+            Event::GrantAnswered { .. } => {
+                self.state.journal.record_input(now, Scope::Roster, input);
+                Vec::new()
             }
         }
     }
@@ -1424,6 +1454,28 @@ mod tests {
     /// and then over Bluetooth — both links up at once, which the firmware
     /// allows (DD12) — is ONE device, identified by the hello's base MAC. The
     /// Bluetooth arrival is a pending link until its hello, then merges.
+    /// A chooser closed with nothing picked is journaled for the app to
+    /// read, and changes nothing else: no device, no pending link, no
+    /// command.
+    #[test]
+    fn a_dismissed_chooser_is_journaled_and_changes_nothing() {
+        let mut roster = Roster::new(RosterConfig::default());
+        assert_eq!(
+            roster.handle(Millis(0), Input::Action(Action::AddFromUsb)),
+            vec![Command::RequestUsbGrant]
+        );
+        let answer = Input::Event(Event::GrantAnswered {
+            link: LinkId(1),
+            answer: crate::GrantAnswer::Dismissed,
+        });
+        assert!(roster.handle(Millis(1), answer.clone()).is_empty());
+        assert!(roster.devices().is_empty());
+        assert!(roster.pending().is_empty());
+        assert!(roster.journal().entries_for(Scope::Roster).any(|entry| {
+            entry.record == crate::journal::JournalRecord::Input((&answer).into())
+        }));
+    }
+
     #[test]
     fn a_board_heard_over_usb_and_bluetooth_at_once_is_one_device() {
         let mut roster = Roster::new(RosterConfig::default());
@@ -1465,6 +1517,31 @@ mod tests {
             crate::view::device_view(device, Millis(210)).firmware_blocked,
             None
         );
+    }
+
+    /// A board's id is its MAC once something has read one, and nothing
+    /// before that: a pending link that has not said hello has no key, and
+    /// the key it gets is the one the device keeps after it is adopted.
+    #[test]
+    fn a_board_key_is_the_mac_once_one_is_known() {
+        let mut roster = Roster::new(RosterConfig::default());
+        let facts = roster_proto(&roster);
+        roster.handle(Millis(0), attach(LinkId(1), "usb-1"));
+        let pending = roster.pending()[0].device_id();
+        assert_eq!(roster.board_key(pending), None, "no hello, no key yet");
+
+        roster.handle(Millis(10), opened(LinkId(1), "usb-1"));
+        roster.handle(
+            Millis(20),
+            hello_mac(LinkId(1), &facts, "A0:F2:62:87:B4:8C"),
+        );
+        let device = roster.devices()[0].id;
+        assert_eq!(
+            roster.board_key(device).map(|key| key.to_string()),
+            Some("a0f26287b48c".to_string()),
+            "any spelling the hello used, one canonical key"
+        );
+        assert_eq!(roster.board_key(DeviceId(999)), None, "not on the roster");
     }
 
     /// A Bluetooth link still identifying has no reset lines either: its

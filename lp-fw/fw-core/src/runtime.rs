@@ -233,11 +233,14 @@ mod tests {
             auths,
             alloc::vec![
                 (LinkId::PRIMARY, lpc_wire::HelloAuth::TRUSTED),
+                // No device store: a new board is open to anyone nearby at
+                // author, for now (DeviceAccessFile::FRESH_OPEN) — the
+                // grant a trusted link holds.
                 (
                     radio.id,
                     lpc_wire::HelloAuth {
                         required: true,
-                        granted: None
+                        granted: lpc_wire::HelloAuth::TRUSTED.granted
                     }
                 ),
             ]

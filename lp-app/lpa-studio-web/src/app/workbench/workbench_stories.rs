@@ -10,6 +10,7 @@ use lpa_studio_web_story_macros::story;
 use super::panels::{FixturesPanel, OutputsPanel, PropsPanel, TreeGrain};
 use super::{DockState, PanelMemory, WorkbenchFrame, WorkbenchHrefs, WorkbenchView};
 use crate::app::StudioShell;
+use crate::app::home::device_offer_story_fixtures;
 use crate::app::patch::patch_story_fixtures::{
     peach_surface, small_dome_surface, small_dome_walkup_surface,
 };
@@ -106,7 +107,29 @@ fn view_with_surface(selection: Option<UiPatchTarget>) -> UiStudioView {
             editor.patch_selection = lpa_studio_core::UiSelection::from_option(selection.clone());
         }
     }
+    // `StudioShell` always re-publishes the offer context from
+    // `view.offers` (never an ancestor's), so the lens card's Device panel
+    // needs its verbs folded in here (devices-as-offers) or it draws with
+    // none.
+    if let Some(card) = &view.lens_card {
+        view.offers = device_offer_story_fixtures::lens_card_offer_tree(card);
+    }
     view
+}
+
+/// The lens device's offer tree, the way `web_app.rs` provides it in
+/// production (devices-as-offers): every bare `WorkbenchFrame` mount in
+/// this file docks `simulator_lens_card()` as its runtime surface, so a
+/// Device panel drawn inside `body` needs the same tree — without it the
+/// panel renders with no buttons. (A `StudioShell` mount instead folds
+/// this into its `UiStudioView::offers`, in [`view_with_surface`]: wrapping
+/// the shell from outside has no effect, since it always re-publishes its
+/// own.)
+fn with_lens_offers(body: Element) -> Element {
+    let offers = device_offer_story_fixtures::lens_card_offer_tree(&simulator_lens_card());
+    rsx! {
+        crate::core::OffersProvider { offers, {body} }
+    }
 }
 
 /// Through the shell, like production: route-view in, workbench out.
@@ -276,7 +299,7 @@ fn workbench_patching_view() -> Element {
     description = "The fold in the PATCHING view with the Outputs panel summoned — the destination of the object-first invitation below 820px (round 3, #6): the ports come to the user rather than an inline dropdown, and picking there completes the assign and dismisses the panel. At sm the panel replaces main outright (phone); at md it is the TABLET SHEET — dock width, anchored right, the canvas with the waiting object still visible beside the pick (the G1 2026-08-24 fix: full-width panels at md were phone behavior at tablet width). The Patching view's Outputs panel carries the walk-up grammar (free runs are click targets), which is what makes it a pick surface rather than a readout. The surface is the walk-up pose: manual fixtures, sector 4 still waiting, IO13 empty. At lg the same mount shows the ordinary Patch workbench with that object selected — the invitation state in place."
 )]
 fn workbench_patching_mobile_pick() -> Element {
-    rsx! {
+    with_lens_offers(rsx! {
         div { class: "tw:flex tw:h-[640px] tw:flex-col",
             WorkbenchFrame {
                 view: WorkbenchView::Patching,
@@ -296,14 +319,14 @@ fn workbench_patching_mobile_pick() -> Element {
                 on_action: move |_| {},
             }
         }
-    }
+    })
 }
 
 #[story(
     description = "The fold (≤820px — the G1 ruling moved it down from 960 so md widths keep real docks) with a panel summoned: the summon strip carries the view switch plus the view's ROSTERED panel toggles. At sm the summoned Outputs panel replaces the main view under a back header (phone); at md it is the tablet sheet — dock width, anchored to its home side (right), dock fill + hairline + shadow, the canvas live beside it, dismissed by ✕. At lg the same mount shows the band and docks."
 )]
 fn workbench_mobile_outputs_summoned() -> Element {
-    rsx! {
+    with_lens_offers(rsx! {
         div { class: "tw:flex tw:h-[640px] tw:flex-col",
             WorkbenchFrame {
                 view: WorkbenchView::Mapping,
@@ -323,14 +346,14 @@ fn workbench_mobile_outputs_summoned() -> Element {
                 on_action: move |_| {},
             }
         }
-    }
+    })
 }
 
 #[story(
     description = "The tablet sheet's LEFT anchor: the Tree summoned on the Map view at md — the sheet slides from the panel's home side (Tree lives in the left dock), so the fixture tree comes up on the left at its dock's width with the canvas beside it, mirroring the right-side sheet's grammar. At sm the same summon is the full phone replace; at lg the ordinary docks."
 )]
 fn workbench_tablet_tree_summoned() -> Element {
-    rsx! {
+    with_lens_offers(rsx! {
         div { class: "tw:flex tw:h-[640px] tw:flex-col",
             WorkbenchFrame {
                 view: WorkbenchView::Mapping,
@@ -350,7 +373,7 @@ fn workbench_tablet_tree_summoned() -> Element {
                 on_action: move |_| {},
             }
         }
-    }
+    })
 }
 
 #[story(
@@ -402,7 +425,7 @@ fn workbench_mixed_dock_states() -> Element {
 /// The Nodes-view frame with preset dock memory — the strip/tab stories'
 /// shared mount.
 fn workbench_memory_story(memory: PanelMemory) -> Element {
-    rsx! {
+    with_lens_offers(rsx! {
         div { class: "tw:flex tw:h-[560px] tw:flex-col",
             WorkbenchFrame {
                 view: WorkbenchView::Nodes,
@@ -415,7 +438,7 @@ fn workbench_memory_story(memory: PanelMemory) -> Element {
                 on_action: move |_| {},
             }
         }
-    }
+    })
 }
 
 /// The props-stack stories' surface: the small-dome with the dome fixture's

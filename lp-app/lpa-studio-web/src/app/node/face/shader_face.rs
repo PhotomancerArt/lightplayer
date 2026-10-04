@@ -29,7 +29,9 @@
 //! survives the collapse: the collapsed branch unmounts
 //! [`AgentChatPane`], so the draft signal lives HERE — above the unmount
 //! boundary — seeded from the core-mirrored draft on mount and mirrored
-//! back (`NodeUiOp::SetDraft`) whenever the section collapses. Typing
+//! back (`NodeUiOp::SetDraft`) whenever the section collapses — and
+//! adopting the mirror while mounted when its `draft_seed` moves (the app
+//! chat's `ask-agent` hand-off typed a request in). Typing
 //! itself stays view-local: per-keystroke ops through the actor would
 //! rebuild the whole editor DTO per character (see the
 //! `NodeCardUiState` module doc).
@@ -66,6 +68,11 @@ pub fn ShaderFace(
     /// signal on mount (restore-on-remount; see the module doc).
     #[props(default)]
     composer_draft: String,
+    /// Moves when core put a draft in [`Self::composer_draft`] from
+    /// outside the composer (the `ask-agent` hand-off): the mounted
+    /// composer takes that draft, where it otherwise only seeds on mount.
+    #[props(default)]
+    draft_seed: u32,
     /// Open this control's label-trigger detail popover on first render
     /// (stories).
     #[props(default = None)]
@@ -96,7 +103,15 @@ pub fn ShaderFace(
     let openrouter_error = try_consume_context::<Signal<Option<String>>>();
     // The composer draft, owned ABOVE the collapse boundary so the
     // collapsed branch's unmount of `AgentChatPane` cannot destroy it.
-    let draft = use_signal(move || composer_draft);
+    let seed_draft = composer_draft.clone();
+    let mut draft = use_signal(move || seed_draft);
+    // The hand-off's seed: adopt core's draft when it moves (never on an
+    // ordinary re-render, which would clobber what the user is typing).
+    let mut adopted_seed = use_signal(|| draft_seed);
+    if *adopted_seed.peek() != draft_seed {
+        adopted_seed.set(draft_seed);
+        draft.set(composer_draft);
+    }
     let toggle_node = node.clone();
     let on_toggle_agent = move |()| {
         let Some(handler) = on_action else {

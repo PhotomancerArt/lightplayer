@@ -353,6 +353,7 @@ fn run_leg(translate: bool) -> (Readings, u64, Vec<String>) {
 }
 
 /// The `N` out of a core's `core<i>: N entries, …` report line.
+#[cfg(feature = "jit")]
 fn entries_in(report: &str) -> u64 {
     report
         .split_once(": ")

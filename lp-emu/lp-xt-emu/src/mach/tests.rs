@@ -125,13 +125,6 @@ impl TestBus {
         }
     }
 
-    /// Declare `[lo, hi)` executable-and-writable: a guest store inside it
-    /// that changes bytes is a code publish. See [`TestBus::code_span`].
-    fn with_code_span(mut self, lo: u32, hi: u32) -> Self {
-        self.code_span = Some((lo, hi));
-        self
-    }
-
     fn offset(
         &self,
         address: u32,

@@ -5,7 +5,7 @@ use dioxus_icons::lucide::{
     Copy, Cpu, Download, Droplet, Ellipsis, Eraser, Eye, Flag, FlaskConical, Folder, Funnel, Hash,
     History, Image, Info, KeyRound, Laptop, Lightbulb, Link, Link2, Link2Off, ListMusic, Locate,
     LocateFixed, Lock, LockOpen, Maximize2, Minimize2, MonitorPlay, MousePointerClick, Pencil, Pin,
-    Play, Plus, Power, Radio, RadioTower, Route, Save, Settings, Smartphone, Sparkles,
+    Play, Plus, Power, Radio, RadioTower, RefreshCw, Route, Save, Settings, Smartphone, Sparkles,
     SquareArrowRight, SquareTerminal, Trash2, TriangleAlert, Undo2, Upload, Usb, Users, Waypoints,
     X, Zap,
 };
@@ -100,6 +100,7 @@ pub fn StudioIcon(name: StudioIconName, size: u32) -> Element {
         StudioIconName::AccessUnlocked => rsx! { LockOpen { size } },
         StudioIconName::AccessLocked => rsx! { Lock { size } },
         StudioIconName::AccessDone => rsx! { CircleCheck { size } },
+        StudioIconName::AccessRegenerate => rsx! { RefreshCw { size } },
     }
 }
 
@@ -119,6 +120,7 @@ pub fn action_icon_name(icon: Option<&str>) -> Option<StudioIconName> {
         Some("download") => Some(StudioIconName::Download),
         Some("upload") => Some(StudioIconName::Upload),
         Some("grow") => Some(StudioIconName::Grow),
+        Some("agent") => Some(StudioIconName::Agent),
         _ => None,
     }
 }
@@ -251,6 +253,8 @@ pub enum StudioIconName {
     /// A ticked circle: the "can now unlock" toast, the friend page's
     /// "Saved".
     AccessDone,
+    /// Circling arrows: another random password.
+    AccessRegenerate,
 }
 
 /// The per-node-type glyph family. Mapped from the node's human-readable

@@ -44,6 +44,26 @@ pub enum ProjectTemplate {
 }
 
 impl ProjectTemplate {
+    /// Every template, in the order the New menu (and `project/new`'s
+    /// `template` choice) offers them: blank first — it is what `New` has
+    /// always meant — then the two library scaffolds.
+    pub const ALL: [Self; 3] = [Self::Blank, Self::Pattern1d, Self::Pattern2d];
+
+    /// The value `project/new`'s `template` choice carries for this
+    /// template.
+    pub fn tag(self) -> &'static str {
+        match self {
+            Self::Blank => "blank",
+            Self::Pattern1d => "pattern-1d",
+            Self::Pattern2d => "pattern-2d",
+        }
+    }
+
+    /// The template a [`Self::tag`] names.
+    pub fn from_tag(tag: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|template| template.tag() == tag)
+    }
+
     /// Menu row title.
     pub fn label(self) -> &'static str {
         match self {

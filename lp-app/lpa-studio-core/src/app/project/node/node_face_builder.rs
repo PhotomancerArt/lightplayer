@@ -59,12 +59,11 @@ use crate::app::project::format_lp_value;
 use crate::app::project::node::human_node_label;
 use crate::app::project::node::node_space_section;
 use crate::{
-    ControllerId, PlaylistActivateOp, ProjectController, ProjectNodeAddress, ProjectSlotAddress,
-    UiAction, UiAssetEditor, UiAssetEditorKind, UiConfigSlot, UiConfigSlotBody, UiFixtureFace,
-    UiFixturePower, UiNodeChild, UiNodeFace, UiNodeSection, UiOutputFace, UiOutputPortRow,
-    UiPanelControl, UiPanelWidget, UiPlaylistEntry, UiPlaylistFace, UiProducedProduct,
-    UiProductKind, UiProductPreview, UiShaderFace, UiSlotAspect, UiSlotAspectKind,
-    UiSlotEditorHint, UiSlotSourceState, UiSlotValue, UiSlotValueKind,
+    ProjectSlotAddress, UiAssetEditor, UiAssetEditorKind, UiConfigSlot, UiConfigSlotBody,
+    UiFixtureFace, UiFixturePower, UiNodeChild, UiNodeFace, UiNodeSection, UiOutputFace,
+    UiOutputPortRow, UiPanelControl, UiPanelWidget, UiPlaylistEntry, UiPlaylistFace,
+    UiProducedProduct, UiProductKind, UiProductPreview, UiShaderFace, UiSlotAspect,
+    UiSlotAspectKind, UiSlotEditorHint, UiSlotSourceState, UiSlotValue, UiSlotValueKind,
 };
 
 /// Build the kind-specific face for a node's card from its projected
@@ -84,7 +83,6 @@ use crate::{
 /// filtering, since there are no entry children to filter.
 pub(in crate::app::project) fn kind_face(
     ty: &str,
-    address: &ProjectNodeAddress,
     sections: &[UiNodeSection],
     children: &mut Vec<UiNodeChild>,
     status_detail: Option<&str>,
@@ -93,7 +91,7 @@ pub(in crate::app::project) fn kind_face(
         ShaderDef::KIND => shader_face(sections, status_detail).map(UiNodeFace::Shader),
         FixtureDef::KIND => fixture_face(sections).map(UiNodeFace::Fixture),
         PlaylistDef::KIND => {
-            let (face, active_child) = playlist_face(address, sections, children)?;
+            let (face, active_child) = playlist_face(sections, children)?;
             if let Some(index) = active_child {
                 let active = children.swap_remove(index);
                 children.clear();
@@ -1070,7 +1068,6 @@ fn string_field(fields: &[UiConfigSlot], name: &str) -> Option<String> {
 /// child to filter) — a freshly created playlist's card is the strip's
 /// empty state, not the generic fallback.
 fn playlist_face(
-    address: &ProjectNodeAddress,
     sections: &[UiNodeSection],
     children: &[UiNodeChild],
 ) -> Option<(UiPlaylistFace, Option<usize>)> {
@@ -1085,7 +1082,7 @@ fn playlist_face(
     let mut entries: Vec<(UiPlaylistEntry, Option<usize>)> = entries_map
         .fields
         .iter()
-        .filter_map(|row| playlist_entry(address, row, children))
+        .filter_map(|row| playlist_entry(row, children))
         .collect();
     if entries.is_empty() {
         let face = UiPlaylistFace {
@@ -1100,10 +1097,11 @@ fn playlist_face(
     let active_key = produced_u32(sections, "active_entry")?;
     // The ACTIVE entry is already playing, so its chip keeps the child's
     // select action (activating it would be a no-op poke); every other
-    // chip activates. P7 spec: "the activate op for non-active entries".
+    // chip presses the playlist's `play` offer. P7 spec: "the activate op
+    // for non-active entries".
     for (entry, child) in &mut entries {
         if entry.key == active_key {
-            entry.action = child.and_then(|index| children[index].action.clone());
+            entry.focus = child.and_then(|index| children[index].action.clone());
         }
     }
     let active_child = entries
@@ -1152,7 +1150,6 @@ pub(crate) fn playlist_entry_expected_child_name(
 /// entry `name`, else `entry_<key>`). Dangling entries (no mounted child)
 /// still chip into the strip, name-only and inert.
 fn playlist_entry(
-    address: &ProjectNodeAddress,
     row: &UiConfigSlot,
     children: &[UiNodeChild],
 ) -> Option<(UiPlaylistEntry, Option<usize>)> {
@@ -1179,7 +1176,6 @@ fn playlist_entry(
         .map(|raw| human_node_label(&raw))
         .or_else(|| child.map(|index| children[index].label.clone()))
         .unwrap_or_else(|| format!("Entry {key}"));
-    let activate_label = format!("Activate {name}");
     let entry = UiPlaylistEntry {
         key,
         name,
@@ -1188,20 +1184,9 @@ fn playlist_entry(
             .map(|seconds| (f64::from(seconds) * 1000.0).round() as u64),
         cue: option_list_field_is_non_empty(fields, "trigger_ids"),
         thumb: child.and_then(|index| child_visual_snapshot(&children[index])),
-        // Entry click = activate NOW through the runtime command channel
-        // (P7). A poke, not an edit: nothing stages in the overlay. Every
-        // entry gets it, mounted child or not — activation addresses the
-        // entries-map key, which exists independent of child mounting.
-        action: Some(
-            UiAction::from_op(
-                ControllerId::new(ProjectController::NODE_ID),
-                PlaylistActivateOp {
-                    node: address.clone(),
-                    entry: key,
-                },
-            )
-            .with_label(activate_label),
-        ),
+        // A non-active chip presses the playlist's `play` offer (M6e); only
+        // the ACTIVE chip carries an action of its own, set below.
+        focus: None,
     };
     Some((entry, child))
 }
@@ -1501,29 +1486,23 @@ mod tests {
 
     /// The stable authored address faces are built for; entry activation
     /// actions carry it (P7's runtime command channel).
-    fn test_address() -> ProjectNodeAddress {
-        ProjectNodeAddress::parse("/demo.module/node.playlist").expect("valid address")
-    }
-
     /// [`super::kind_face`] for a HEALTHY node — the status detail is only
     /// read for the shader face's space mismatch (D1), and every test that
     /// cares calls the real function directly. Shadows the glob import on
     /// purpose so the face tests stay about faces.
     fn kind_face(
         ty: &str,
-        address: &ProjectNodeAddress,
         sections: &[UiNodeSection],
         children: &mut Vec<UiNodeChild>,
     ) -> Option<UiNodeFace> {
-        super::kind_face(ty, address, sections, children, None)
+        super::kind_face(ty, sections, children, None)
     }
 
     #[test]
     fn shader_face_builds_knobs_from_bound_uniforms() {
         let sections = shader_sections();
 
-        let face =
-            kind_face("shader", &test_address(), &sections, &mut Vec::new()).expect("shader face");
+        let face = kind_face("shader", &sections, &mut Vec::new()).expect("shader face");
         let UiNodeFace::Shader(face) = face else {
             panic!("expected a shader face");
         };
@@ -1570,9 +1549,7 @@ mod tests {
             ]),
         ];
 
-        let Some(UiNodeFace::Shader(face)) =
-            kind_face("shader", &test_address(), &sections, &mut Vec::new())
-        else {
+        let Some(UiNodeFace::Shader(face)) = kind_face("shader", &sections, &mut Vec::new()) else {
             panic!("expected a shader face");
         };
         assert_eq!(
@@ -1604,12 +1581,9 @@ mod tests {
             ]
         };
         let step_of = |name: &str, uniform| {
-            let Some(UiNodeFace::Shader(face)) = kind_face(
-                "shader",
-                &test_address(),
-                &sections(name, uniform),
-                &mut Vec::new(),
-            ) else {
+            let Some(UiNodeFace::Shader(face)) =
+                kind_face("shader", &sections(name, uniform), &mut Vec::new())
+            else {
                 panic!("expected a shader face");
             };
             let UiPanelWidget::Knob { step, .. } = face.controls[0].widget else {
@@ -1678,9 +1652,7 @@ mod tests {
     fn bound_uniform_wears_the_binding_rows_violet_aspect() {
         let sections = shader_sections_with(channel_endpoint("bus:time", "time", 2));
 
-        let Some(UiNodeFace::Shader(face)) =
-            kind_face("shader", &test_address(), &sections, &mut Vec::new())
-        else {
+        let Some(UiNodeFace::Shader(face)) = kind_face("shader", &sections, &mut Vec::new()) else {
             panic!("expected a shader face");
         };
         assert!(
@@ -1696,9 +1668,7 @@ mod tests {
         // editing the authored default it can no longer affect.
         let sections = shader_sections_with(channel_endpoint("bus:glow", "glow", 3));
 
-        let Some(UiNodeFace::Shader(face)) =
-            kind_face("shader", &test_address(), &sections, &mut Vec::new())
-        else {
+        let Some(UiNodeFace::Shader(face)) = kind_face("shader", &sections, &mut Vec::new()) else {
             panic!("expected a shader face");
         };
         let target = face.controls[0]
@@ -1720,12 +1690,9 @@ mod tests {
     /// panel write.
     #[test]
     fn only_bound_uniforms_get_knobs_and_they_keep_their_slot_address() {
-        let Some(UiNodeFace::Shader(face)) = kind_face(
-            "shader",
-            &test_address(),
-            &shader_sections(),
-            &mut Vec::new(),
-        ) else {
+        let Some(UiNodeFace::Shader(face)) =
+            kind_face("shader", &shader_sections(), &mut Vec::new())
+        else {
             panic!("expected a shader face");
         };
         // `time` is unbound in the fixture; only `speed` reaches the panel.
@@ -1749,9 +1716,7 @@ mod tests {
         if let UiNodeSection::ConfigSlots(rows) = &mut unbound[1] {
             rows.retain(|row| row.key != "speed");
         }
-        let Some(UiNodeFace::Shader(face)) =
-            kind_face("shader", &test_address(), &unbound, &mut Vec::new())
-        else {
+        let Some(UiNodeFace::Shader(face)) = kind_face("shader", &unbound, &mut Vec::new()) else {
             panic!("expected a shader face");
         };
         assert!(
@@ -1774,9 +1739,7 @@ mod tests {
                 .with_live_value("12.5"),
         );
 
-        let Some(UiNodeFace::Shader(face)) =
-            kind_face("shader", &test_address(), &sections, &mut Vec::new())
-        else {
+        let Some(UiNodeFace::Shader(face)) = kind_face("shader", &sections, &mut Vec::new()) else {
             panic!("expected a shader face");
         };
         assert!(
@@ -1791,9 +1754,7 @@ mod tests {
         // The same row, AUTHORED, is public — the exclusion turns on the
         // origin flag alone.
         let authored = shader_sections_with(channel_endpoint("bus:time", "time", 2));
-        let Some(UiNodeFace::Shader(face)) =
-            kind_face("shader", &test_address(), &authored, &mut Vec::new())
-        else {
+        let Some(UiNodeFace::Shader(face)) = kind_face("shader", &authored, &mut Vec::new()) else {
             panic!("expected a shader face");
         };
         assert_eq!(face.controls.len(), 1);
@@ -1807,9 +1768,7 @@ mod tests {
             channel_endpoint("bus:master-tempo", "master-tempo", 4).with_live_value("2.72"),
         );
 
-        let Some(UiNodeFace::Shader(face)) =
-            kind_face("shader", &test_address(), &sections, &mut Vec::new())
-        else {
+        let Some(UiNodeFace::Shader(face)) = kind_face("shader", &sections, &mut Vec::new()) else {
             panic!("expected a shader face");
         };
         assert_eq!(
@@ -1828,8 +1787,7 @@ mod tests {
     fn fixture_face_projects_the_panel_fader_at_the_interior_address() {
         let sections = fixture_sections();
 
-        let Some(UiNodeFace::Fixture(face)) =
-            kind_face("fixture", &test_address(), &sections, &mut Vec::new())
+        let Some(UiNodeFace::Fixture(face)) = kind_face("fixture", &sections, &mut Vec::new())
         else {
             panic!("expected a fixture face");
         };
@@ -1864,29 +1822,16 @@ mod tests {
     #[test]
     fn other_kinds_and_faceless_sections_stay_generic() {
         assert_eq!(
-            kind_face(
-                "clock",
-                &test_address(),
-                &shader_sections(),
-                &mut Vec::new()
-            ),
+            kind_face("clock", &shader_sections(), &mut Vec::new()),
             None
         );
         assert_eq!(
-            kind_face(
-                "playlist",
-                &test_address(),
-                &shader_sections(),
-                &mut Vec::new()
-            ),
+            kind_face("playlist", &shader_sections(), &mut Vec::new()),
             None
         );
         // A shader with no produced visual row keeps the sections view.
         let no_products = vec![UiNodeSection::ConfigSlots(Vec::new())];
-        assert_eq!(
-            kind_face("shader", &test_address(), &no_products, &mut Vec::new()),
-            None
-        );
+        assert_eq!(kind_face("shader", &no_products, &mut Vec::new()), None);
         // A fixture whose rows carry no mappable editor hint keeps the
         // sections view.
         let unflagged = vec![
@@ -1897,19 +1842,17 @@ mod tests {
                 UiSlotValue::u32(64),
             )]),
         ];
-        assert_eq!(
-            kind_face("fixture", &test_address(), &unflagged, &mut Vec::new()),
-            None
-        );
+        assert_eq!(kind_face("fixture", &unflagged, &mut Vec::new()), None);
     }
 
     #[test]
     fn playlist_face_derives_the_strip_and_keeps_only_the_active_child() {
         let sections = playlist_sections(Some(1));
         let mut children = playlist_children();
+        let children_before_filter_focus = children[0].action.clone();
+        assert!(children_before_filter_focus.is_some());
 
-        let Some(UiNodeFace::Playlist(face)) =
-            kind_face("playlist", &test_address(), &sections, &mut children)
+        let Some(UiNodeFace::Playlist(face)) = kind_face("playlist", &sections, &mut children)
         else {
             panic!("expected a playlist face");
         };
@@ -1934,8 +1877,12 @@ mod tests {
             "the non-active entry reuses its child's cached snapshot"
         );
         assert!(
-            cued.action.is_some(),
-            "strip click reuses the child's node-select action"
+            cued.focus.is_none(),
+            "a non-active chip presses the playlist's `play` offer instead"
+        );
+        assert_eq!(
+            idle.focus, children_before_filter_focus,
+            "the ACTIVE chip reuses its child's node-select action"
         );
 
         // The one-live-surface rule: only the ACTIVE entry's child remains.
@@ -1953,10 +1900,7 @@ mod tests {
         let sections = playlist_sections(None);
         let mut children = playlist_children();
 
-        assert_eq!(
-            kind_face("playlist", &test_address(), &sections, &mut children),
-            None
-        );
+        assert_eq!(kind_face("playlist", &sections, &mut children), None);
         assert_eq!(children.len(), 2, "fallback renders every child as today");
     }
 
@@ -1974,8 +1918,7 @@ mod tests {
         }
         let mut children = Vec::new();
 
-        let Some(UiNodeFace::Playlist(face)) =
-            kind_face("playlist", &test_address(), &sections, &mut children)
+        let Some(UiNodeFace::Playlist(face)) = kind_face("playlist", &sections, &mut children)
         else {
             panic!("expected an empty playlist face");
         };
@@ -1990,7 +1933,7 @@ mod tests {
             entries.fields.clear();
         }
         assert!(matches!(
-            kind_face("playlist", &test_address(), &early, &mut Vec::new()),
+            kind_face("playlist", &early, &mut Vec::new()),
             Some(UiNodeFace::Playlist(_))
         ));
     }
@@ -2001,10 +1944,7 @@ mod tests {
         let sections = playlist_sections(Some(7));
         let mut children = playlist_children();
 
-        assert_eq!(
-            kind_face("playlist", &test_address(), &sections, &mut children),
-            None
-        );
+        assert_eq!(kind_face("playlist", &sections, &mut children), None);
         assert_eq!(children.len(), 2);
     }
 
@@ -2028,14 +1968,16 @@ mod tests {
         let mut children = playlist_children();
         children.push(child("entry_3", "Entry 3"));
 
-        let Some(UiNodeFace::Playlist(face)) =
-            kind_face("playlist", &test_address(), &sections, &mut children)
+        let Some(UiNodeFace::Playlist(face)) = kind_face("playlist", &sections, &mut children)
         else {
             panic!("expected a playlist face");
         };
         let entry = face.entries.iter().find(|entry| entry.key == 3).unwrap();
         assert_eq!(entry.name, "Entry 3", "falls back to the child's label");
-        assert!(entry.action.is_some(), "matched via the entry_<key> rule");
+        assert!(
+            entry.focus.is_none(),
+            "a non-active entry plays through the playlist's offer"
+        );
     }
 
     #[test]
@@ -2064,8 +2006,7 @@ mod tests {
         // name (matched by the loader's naming rule) must follow it.
         children[0] = child("noise_soft", "Idle");
 
-        let Some(UiNodeFace::Playlist(face)) =
-            kind_face("playlist", &test_address(), &sections, &mut children)
+        let Some(UiNodeFace::Playlist(face)) = kind_face("playlist", &sections, &mut children)
         else {
             panic!("expected a playlist face");
         };
@@ -2083,9 +2024,7 @@ mod tests {
             (1, "ws281x:local:IO2", None),
         ]);
 
-        let Some(UiNodeFace::Output(face)) =
-            kind_face("output", &test_address(), &sections, &mut Vec::new())
-        else {
+        let Some(UiNodeFace::Output(face)) = kind_face("output", &sections, &mut Vec::new()) else {
             panic!("expected an output face");
         };
 
@@ -2137,8 +2076,7 @@ mod tests {
         // The shape every format-2 output migrated into: one wire, no count.
         let sections = output_sections(&[(0, "ws281x:local:D10", None)]);
 
-        let Some(UiNodeFace::Output(mut face)) =
-            kind_face("output", &test_address(), &sections, &mut Vec::new())
+        let Some(UiNodeFace::Output(mut face)) = kind_face("output", &sections, &mut Vec::new())
         else {
             panic!("expected an output face");
         };
@@ -2159,9 +2097,7 @@ mod tests {
             (2, "ws281x:local:IO14", Some(30)),
         ]);
 
-        let Some(UiNodeFace::Output(face)) =
-            kind_face("output", &test_address(), &sections, &mut Vec::new())
-        else {
+        let Some(UiNodeFace::Output(face)) = kind_face("output", &sections, &mut Vec::new()) else {
             panic!("expected an output face");
         };
         assert_eq!(
@@ -2179,9 +2115,7 @@ mod tests {
         // No wires yet: the face's empty state (with the map's own add
         // affordance) is the card's surface, exactly like a new playlist.
         let empty = output_sections(&[]);
-        let Some(UiNodeFace::Output(face)) =
-            kind_face("output", &test_address(), &empty, &mut Vec::new())
-        else {
+        let Some(UiNodeFace::Output(face)) = kind_face("output", &empty, &mut Vec::new()) else {
             panic!("expected an empty output face");
         };
         assert!(face.ports.is_empty());
@@ -2189,19 +2123,14 @@ mod tests {
 
         // No `channels` row at all is not an output card we understand.
         let no_channels = vec![UiNodeSection::ConfigSlots(Vec::new())];
-        assert_eq!(
-            kind_face("output", &test_address(), &no_channels, &mut Vec::new()),
-            None
-        );
+        assert_eq!(kind_face("output", &no_channels, &mut Vec::new()), None);
     }
 
     #[test]
     fn an_unparseable_endpoint_leaves_the_pin_unresolved_but_shown() {
         let sections = output_sections(&[(0, "nonsense", Some(4))]);
 
-        let Some(UiNodeFace::Output(face)) =
-            kind_face("output", &test_address(), &sections, &mut Vec::new())
-        else {
+        let Some(UiNodeFace::Output(face)) = kind_face("output", &sections, &mut Vec::new()) else {
             panic!("expected an output face");
         };
         assert_eq!(face.ports[0].endpoint_display, "nonsense");
@@ -2365,9 +2294,7 @@ mod tests {
     }
 
     fn phasor_face(sections: &[UiNodeSection]) -> UiShaderFace {
-        let Some(UiNodeFace::Shader(face)) =
-            kind_face("shader", &test_address(), sections, &mut Vec::new())
-        else {
+        let Some(UiNodeFace::Shader(face)) = kind_face("shader", sections, &mut Vec::new()) else {
             panic!("expected a shader face");
         };
         face
@@ -2779,9 +2706,7 @@ mod tests {
             ]),
         ];
 
-        let Some(UiNodeFace::Clock(face)) =
-            kind_face("clock", &test_address(), &sections, &mut Vec::new())
-        else {
+        let Some(UiNodeFace::Clock(face)) = kind_face("clock", &sections, &mut Vec::new()) else {
             panic!("expected a clock face");
         };
         assert_eq!(face.product.kind, UiProductKind::Time);
@@ -2821,9 +2746,7 @@ mod tests {
             ]),
         ];
 
-        let Some(UiNodeFace::Clock(face)) =
-            kind_face("clock", &test_address(), &sections, &mut Vec::new())
-        else {
+        let Some(UiNodeFace::Clock(face)) = kind_face("clock", &sections, &mut Vec::new()) else {
             panic!("expected a clock face");
         };
         let transport = face.transport.expect("three rows present → block present");
@@ -2859,9 +2782,7 @@ mod tests {
             ]),
         ];
 
-        let Some(UiNodeFace::Clock(face)) =
-            kind_face("clock", &test_address(), &sections, &mut Vec::new())
-        else {
+        let Some(UiNodeFace::Clock(face)) = kind_face("clock", &sections, &mut Vec::new()) else {
             panic!("expected a clock face");
         };
         let transport = face.transport.expect("values still lift");
@@ -2892,9 +2813,7 @@ mod tests {
             ]),
         ];
 
-        let Some(UiNodeFace::Clock(face)) =
-            kind_face("clock", &test_address(), &sections, &mut Vec::new())
-        else {
+        let Some(UiNodeFace::Clock(face)) = kind_face("clock", &sections, &mut Vec::new()) else {
             panic!("expected a clock face");
         };
         let transport = face.transport.expect("block present");
@@ -2942,9 +2861,7 @@ mod tests {
 
     fn clock_controls(rows: Vec<UiConfigSlot>) -> Vec<UiPanelControl> {
         let sections = clock_sections(rows);
-        let Some(UiNodeFace::Clock(face)) =
-            kind_face("clock", &test_address(), &sections, &mut Vec::new())
-        else {
+        let Some(UiNodeFace::Clock(face)) = kind_face("clock", &sections, &mut Vec::new()) else {
             panic!("expected a clock face");
         };
         face.controls
@@ -3026,9 +2943,7 @@ mod tests {
             transport_row("rate", UiSlotValue::f32(1.0)),
             transport_row("scrub_offset_seconds", UiSlotValue::f32(0.0)),
         ]);
-        let Some(UiNodeFace::Clock(face)) =
-            kind_face("clock", &test_address(), &sections, &mut Vec::new())
-        else {
+        let Some(UiNodeFace::Clock(face)) = kind_face("clock", &sections, &mut Vec::new()) else {
             panic!("expected a clock face");
         };
 
@@ -3116,9 +3031,7 @@ mod tests {
             live_rate,
             transport_row("scrub_offset_seconds", UiSlotValue::f32(-2.0)),
         ]);
-        let Some(UiNodeFace::Clock(face)) =
-            kind_face("clock", &test_address(), &sections, &mut Vec::new())
-        else {
+        let Some(UiNodeFace::Clock(face)) = kind_face("clock", &sections, &mut Vec::new()) else {
             panic!("expected a clock face");
         };
 
@@ -3138,7 +3051,6 @@ mod tests {
         assert_eq!(
             kind_face(
                 "clock",
-                &test_address(),
                 &[UiNodeSection::ConfigSlots(Vec::new())],
                 &mut Vec::new()
             ),
@@ -3259,8 +3171,7 @@ mod tests {
             ));
         }
 
-        let Some(UiNodeFace::Fixture(face)) =
-            kind_face("fixture", &test_address(), &sections, &mut Vec::new())
+        let Some(UiNodeFace::Fixture(face)) = kind_face("fixture", &sections, &mut Vec::new())
         else {
             panic!("expected a fixture face");
         };
@@ -3275,12 +3186,9 @@ mod tests {
 
     #[test]
     fn an_unwired_brightness_fader_still_edits_its_slot() {
-        let Some(UiNodeFace::Fixture(face)) = kind_face(
-            "fixture",
-            &test_address(),
-            &fixture_sections(),
-            &mut Vec::new(),
-        ) else {
+        let Some(UiNodeFace::Fixture(face)) =
+            kind_face("fixture", &fixture_sections(), &mut Vec::new())
+        else {
             panic!("expected a fixture face");
         };
         assert!(face.brightness.panel_target.is_none());

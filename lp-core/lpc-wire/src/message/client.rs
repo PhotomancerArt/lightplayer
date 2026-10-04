@@ -124,15 +124,16 @@ pub enum ClientRequest {
         #[serde(with = "lpc_access::base64_bytes")]
         salt: [u8; lpc_access::SALT_BYTES],
     },
-    /// Set either or both device-store switches; an absent one is left as
+    /// Set either or both device-store settings; an absent one is left as
     /// it is. `bleEnabled` applies at the next boot (the client restarts
-    /// the device). Answered with the list. Edit tier.
+    /// the device); `open` is who nearby gets in with no password
+    /// (`"nobody"`, `"play"`, `"edit"`). Answered with the list. Edit tier.
     #[serde(rename_all = "camelCase")]
     AccessSetSwitches {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         ble_enabled: Option<bool>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        open: Option<bool>,
+        open: Option<lpc_access::OpenTo>,
     },
 }
 
@@ -360,11 +361,11 @@ mod tests {
         let json = crate::json::to_string(&switches).unwrap();
         assert_eq!(json, r#"{"accessSetSwitches":{"bleEnabled":false}}"#);
         assert!(matches!(
-            crate::json::from_str::<ClientRequest>(r#"{"accessSetSwitches":{"open":true}}"#)
+            crate::json::from_str::<ClientRequest>(r#"{"accessSetSwitches":{"open":"edit"}}"#)
                 .unwrap(),
             ClientRequest::AccessSetSwitches {
                 ble_enabled: None,
-                open: Some(true)
+                open: Some(lpc_access::OpenTo::Edit)
             }
         ));
     }

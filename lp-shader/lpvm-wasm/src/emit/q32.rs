@@ -380,7 +380,10 @@ mod tests {
     /// `emit_q32_fabs` leak (`abs()` in an `if` inside a `for`).
     #[test]
     fn q32_helpers_are_stack_neutral() {
-        #[allow(clippy::type_complexity)]
+        #[allow(
+            clippy::type_complexity,
+            reason = "a name+fn-pointer pair per case is clearer than a named struct here"
+        )]
         let cases: Vec<(&str, fn(&mut InstructionSink<'_>))> = vec![
             ("emit_q32_fabs", |s| emit_q32_fabs(s, 0, 1)),
             ("emit_q32_fadd_wrap", |s| emit_q32_fadd_wrap(s, 0, 1, 2)),

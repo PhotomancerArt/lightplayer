@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::task::{Context, Poll, Wake, Waker};
 use std::time::{Duration, Instant};
 
-use fw_host::{HostRuntime, create_memory_server_with};
+use fw_host::{HostRuntime, create_memory_server_on_board};
 use lpc_model::AsLpPath;
 use lpc_wire::lp_link::sniffer::{Direction, LinkSniffer, SniffEvent};
 use lpc_wire::lp_link::{CH_PROTO, Micros};
@@ -178,15 +178,18 @@ impl FakeEsp32Device {
     /// The base MAC is NOT fresh: it is burned into efuse, so it survives
     /// every flash and erase this fake can script. The new firmware
     /// reports the same one the board always had, and speaks the board's
-    /// own link (its `link_config`).
+    /// own link (its `link_config`). It heartbeats at the script's
+    /// `flashed_heartbeat_interval`, if one is set.
     pub fn fake_flash(&self, image_identity: &str) {
         let mut core = self.lock();
         let base_mac = core.efuse_mac.clone();
         let link_config = core.board_link.clone();
+        let heartbeat_interval = core.script.flashed_heartbeat_interval;
         core.script.boot = FakeBootState::LightPlayer(FakeLightPlayerState {
             provenance: fake_provenance(image_identity),
             base_mac,
             link_config,
+            heartbeat_interval,
             ..FakeLightPlayerState::new()
         });
         core.reset_current();
@@ -404,7 +407,7 @@ impl FakeDeviceCore {
                 *last_emit = Some(Instant::now());
                 let mut lines: Vec<String> = Vec::new();
                 if first {
-                    lines.push("ESP-ROM:esp32c6-20220919".to_string());
+                    lines.extend(self.script.rom_banner.iter().cloned());
                 }
                 lines.push("invalid header: 0xffffffff".to_string());
                 for line in lines {
@@ -416,12 +419,13 @@ impl FakeDeviceCore {
                     && !*announced
                 {
                     *announced = true;
-                    for line in [
-                        "ESP-ROM:esp32c6-20220919",
-                        "boot:0x16 (DOWNLOAD(USB/UART0/SDIO_REI_FEO))",
-                        "waiting for download",
-                    ] {
-                        self.push_line(line);
+                    let mut lines = self.script.rom_banner.clone();
+                    lines.extend([
+                        "boot:0x16 (DOWNLOAD(USB/UART0/SDIO_REI_FEO))".to_string(),
+                        "waiting for download".to_string(),
+                    ]);
+                    for line in lines {
+                        self.push_line(&line);
                     }
                 }
             }
@@ -430,11 +434,10 @@ impl FakeDeviceCore {
                     && !*announced
                 {
                     *announced = true;
-                    for line in [
-                        "ESP-ROM:esp32c6-20220919",
-                        "Hello from Seeed Studio XIAO ESP32-C6",
-                    ] {
-                        self.push_line(line);
+                    let mut lines = self.script.rom_banner.clone();
+                    lines.extend(self.script.foreign_banner.iter().cloned());
+                    for line in lines {
+                        self.push_line(&line);
                     }
                 }
             }
@@ -463,7 +466,9 @@ impl FakeDeviceCore {
     /// Emit the boot banner (including the real M2-shaped server-start
     /// line) and start the real host server over a seeded memory fs.
     fn finish_light_player_boot(&mut self, lp: &FakeLightPlayerState) {
-        self.push_line("ESP-ROM:esp32c6-20220919");
+        for line in self.script.rom_banner.clone() {
+            self.push_line(&line);
+        }
         self.push_line("[INIT] LightPlayer fake device booting");
         self.push_line(&format!(
             "[INIT] fw-esp32 initialized, starting server loop... proto={} commit={} dirty={}",
@@ -478,6 +483,7 @@ impl FakeDeviceCore {
         let identity = lp.identity.clone();
         let base_mac = lp.base_mac.clone();
         let packs = lp.packs;
+        let board_manifest = self.script.board_manifest.clone();
         let reboot_requests = Arc::clone(&self.reboot_requests);
         let hello_identity = lp
             .provenance
@@ -503,7 +509,8 @@ impl FakeDeviceCore {
                     eprintln!("[fake-device] failed to stamp identity: {error}");
                 }
             }
-            let mut server = create_memory_server_with(fs, hello_identity);
+            let mut server =
+                create_memory_server_on_board(fs, hello_identity, board_manifest.as_deref());
             // What the ESP firmwares do: the hello names this build's
             // dictionary and an opt-in naming it is answered `packed`.
             server.set_packed_encoding_supported(packs);

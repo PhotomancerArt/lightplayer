@@ -22,7 +22,8 @@ never readable back over any link.
 | `secret_entry.rs` | `SecretEntry { label, kind, tier, salt, iterations, k, addedAt? }` |
 | `secret_kind.rs` | `SecretKind { Browser, Account, Password }` — who holds a secret |
 | `project_access_file.rs` | `<project>/.lp/access.json`, `version: 2` (v1 still reads) |
-| `device_access_file.rs` | root `/.lp/access.json`, `version: 2` (v1 still reads); a missing store is `fresh()` (Bluetooth on, locked), a damaged one `locked()`; merge by salt |
+| `device_access_file.rs` | root `/.lp/access.json`, `version: 3` (v2 and v1 still read); a missing store is `fresh()` (Bluetooth on, open to anyone nearby at edit, for now), a damaged one `locked()` (Bluetooth off, open to nobody); merge by salt |
+| `open_to.rs` | `OpenTo`: who nearby holds what with no login — `nobody`, `play`, `edit` |
 | `access_file_path.rs` | which paths are access files (the fs gate's predicate) |
 | `access_file_error.rs` | why an access file could not be read (every variant is a refusal) |
 | `base64_bytes.rs` | serde for fixed-size keys, salts and MACs as base64; the wrong length is refused |

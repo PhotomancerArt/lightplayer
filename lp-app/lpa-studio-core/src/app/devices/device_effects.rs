@@ -36,7 +36,9 @@ use std::collections::{BTreeMap, VecDeque};
 use std::rc::{Rc, Weak};
 
 use lpa_devices::activity::{ActivityKind, ActivityOutcome};
-use lpa_devices::event::{ActivityMarker, Command, EffectId, EffectRequest, Event, Input};
+use lpa_devices::event::{
+    ActivityMarker, Command, EffectId, EffectRequest, Event, GrantAnswer, Input,
+};
 use lpa_devices::identity::{DeviceId, EndpointKey, MacAddress, PeerIdentity};
 use lpa_devices::link::{Link, LinkCommand, LinkId, LinkInfo};
 use lpa_devices::record::DeviceRecord;
@@ -215,6 +217,10 @@ pub struct DeviceEffects {
     /// [`Self::arrivals`] exists.
     completed_pushes: Rc<RefCell<Vec<CompletedPush>>>,
     next_link: u64,
+    /// The link id the latest chooser request will attach as: its
+    /// [`Event::GrantAnswered`] carries it, so a caller that opened a
+    /// chooser can tell which answer is its own.
+    last_grant_request: Option<LinkId>,
 }
 
 impl Default for DeviceEffects {
@@ -236,6 +242,7 @@ impl DeviceEffects {
             staged_pushes: BTreeMap::new(),
             completed_pushes: Rc::new(RefCell::new(Vec::new())),
             next_link: 0,
+            last_grant_request: None,
         }
     }
 
@@ -279,6 +286,12 @@ impl DeviceEffects {
     /// on, so a lens pull and a device timer cannot drift onto two clocks.
     pub fn timer_factory(&self) -> Option<Rc<RefCell<dyn FnMut(Duration) -> DeviceTimerFuture>>> {
         self.timer.clone()
+    }
+
+    /// The link id the latest chooser request will answer for (see
+    /// [`Event::GrantAnswered`]); `None` until one was opened.
+    pub fn last_grant_request(&self) -> Option<LinkId> {
+        self.last_grant_request
     }
 
     /// Whether the seams a real device needs are all installed.
@@ -737,18 +750,28 @@ impl DeviceEffects {
             return;
         };
         let link = self.mint_link_id();
+        self.last_grant_request = Some(link);
         let register = self.registrar();
         spawn(Box::pin(async move {
             let picked = match chooser {
                 GrantChooser::Usb => transport.request_grant().await,
                 GrantChooser::Bluetooth => transport.request_ble_grant().await,
             };
-            match picked {
-                // The chooser was dismissed: no port, no news, no error.
-                Ok(None) => {}
-                Ok(Some(granted)) => register(link, granted, sink),
-                Err(error) => log::warn!("device grant request failed: {error}"),
-            }
+            // Whatever the chooser said is news: a dismissed one is the
+            // only answer no other event carries, and a press that opened
+            // it (an agent card) waits on exactly this.
+            let answer = match picked {
+                Ok(None) => GrantAnswer::Dismissed,
+                Ok(Some(granted)) => {
+                    register(link, granted, Rc::clone(&sink));
+                    GrantAnswer::Picked
+                }
+                Err(error) => {
+                    log::warn!("device grant request failed: {error}");
+                    GrantAnswer::Failed { error }
+                }
+            };
+            sink(Input::Event(Event::GrantAnswered { link, answer }));
         }));
     }
 

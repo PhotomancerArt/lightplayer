@@ -28,15 +28,21 @@ use lpa_studio_core::{
     DeviceView, OutcomeView, PendingLinkView, RosterView,
 };
 
+use crate::app::home::ExplorePage;
 use crate::app::home::card_thumb::CardThumb;
+use crate::app::home::device_offer_story_fixtures::StoryDevicesPage;
+use crate::app::home::device_offer_story_fixtures::{
+    StoryDeviceCard, StoryPendingCard, add_slot_tree,
+};
 use crate::app::home::device_pick_popover::{
     BoardPickMode, BoardPickPopover, ChipSource, ProjectPickPopover,
 };
-use crate::app::home::device_roster_card::{DeviceRosterCard, PendingLinkCard};
 use crate::app::home::device_terminal::DeviceTerminal;
 use crate::app::home::gallery_preview::ThumbPreviewBadge;
+use crate::app::home::home_offer_story_fixtures::StoryProjectsPage;
 use crate::app::home::target_pick_popover::TargetPickPopover;
-use crate::app::home::{DevicesPage, ExplorePage, ProjectsPage};
+use crate::core::OffersProvider;
+use lpa_studio_core::{BluetoothReach, OfferArgs, PUSH_SOURCE_PARAM, UiOffer};
 
 /// A fixed "now" so relative times in baselines never drift.
 const STORY_NOW: f64 = 1_800_000_000.0;
@@ -477,7 +483,7 @@ fn devices_page_story(remembered_open: bool) -> Element {
     };
     rsx! {
         section { class: "tw:p-4",
-            DevicesPage { home, remembered_open, on_action: |_| {} }
+            StoryDevicesPage { home, remembered_open, on_action: |_| {} }
         }
     }
 }
@@ -491,7 +497,9 @@ fn devices_target_pick_open() -> Element {
         // under them. The panel floats in the top layer, so a section that
         // merely fits the trigger clips exactly the half this story is for.
         section { class: "tw:grid tw:min-h-[720px] tw:w-[360px] tw:place-items-center tw:p-4",
-            TargetPickPopover { initially_open: true, on_action: |_| {} }
+            OffersProvider { offers: add_slot_tree(true, BluetoothReach::Ready),
+                TargetPickPopover { initially_open: true, on_action: |_| {} }
+            }
         }
     }
 }
@@ -510,7 +518,7 @@ fn devices_card_sim_powered_off() -> Element {
     };
     rsx! {
         section { class: "tw:p-4",
-            DevicesPage { home, remembered_open: true, on_action: |_| {} }
+            StoryDevicesPage { home, remembered_open: true, on_action: |_| {} }
         }
     }
 }
@@ -574,7 +582,7 @@ fn devices_page_remembered_last_frame() -> Element {
     };
     rsx! {
         section { class: "tw:p-4",
-            DevicesPage { home, remembered_open: true, on_action: |_| {} }
+            StoryDevicesPage { home, remembered_open: true, on_action: |_| {} }
         }
     }
 }
@@ -592,7 +600,7 @@ fn devices_card_states() -> Element {
                         p { class: "tw:m-0 tw:text-[0.68rem] tw:font-bold tw:uppercase tw:tracking-wide tw:text-subtle-foreground",
                             "{label}"
                         }
-                        DeviceRosterCard {
+                        StoryDeviceCard {
                             card,
                             open_uid,
                             // The real gallery lists, so the empty face
@@ -645,7 +653,7 @@ fn devices_card_live_feed() -> Element {
                         p { class: "tw:m-0 tw:text-[0.68rem] tw:font-bold tw:uppercase tw:tracking-wide tw:text-subtle-foreground",
                             "{label}"
                         }
-                        DeviceRosterCard {
+                        StoryDeviceCard {
                             card: card.clone(),
                             open_uid: open_uid.clone(),
                             feed: Some(feed),
@@ -677,14 +685,14 @@ fn devices_card_pending() -> Element {
                         p { class: "tw:m-0 tw:text-[0.68rem] tw:font-bold tw:uppercase tw:tracking-wide tw:text-subtle-foreground",
                             "{label}"
                         }
-                        PendingLinkCard { pending, on_action: |_| {} }
+                        StoryPendingCard { pending, on_action: |_| {} }
                     }
                 }
                 div { key: "settled", class: "tw:grid tw:gap-2",
                     p { class: "tw:m-0 tw:text-[0.68rem] tw:font-bold tw:uppercase tw:tracking-wide tw:text-subtle-foreground",
                         "settled neighbour · {settled_label}"
                     }
-                    DeviceRosterCard {
+                    StoryDeviceCard {
                         card: settled,
                         open_uid: settled_open,
                         projects: packages(),
@@ -732,7 +740,7 @@ fn devices_card_not_responding() -> Element {
     rsx! {
         section { class: "tw:p-4",
             div { class: "tw:w-[400px]",
-                DeviceRosterCard {
+                StoryDeviceCard {
                     card: not_responding_card_fixture(),
                     projects: packages(),
                     examples: examples(),
@@ -751,20 +759,20 @@ fn devices_card_armed() -> Element {
     rsx! {
         section { class: "tw:p-4",
             div { class: "tw:grid tw:grid-cols-[repeat(3,340px)] tw:items-start tw:gap-3",
-                DeviceRosterCard {
+                StoryDeviceCard {
                     card: card.clone(),
                     projects: vec![],
                     examples: vec![],
                     on_action: |_| {},
                 }
-                DeviceRosterCard {
+                StoryDeviceCard {
                     card: card.clone(),
                     projects: vec![],
                     examples: vec![],
                     armed_preview: true,
                     on_action: |_| {},
                 }
-                DeviceRosterCard {
+                StoryDeviceCard {
                     card,
                     projects: vec![],
                     examples: vec![],
@@ -784,13 +792,13 @@ fn devices_page_degraded_card() -> Element {
     let degraded = degraded_card_fixture();
     rsx! {
         div { class: "tw:grid tw:max-w-xl tw:grid-cols-2 tw:gap-3 tw:p-4",
-            DeviceRosterCard {
+            StoryDeviceCard {
                 card: healthy,
                 projects: vec![],
                 examples: vec![],
                 on_action: |_| {},
             }
-            DeviceRosterCard {
+            StoryDeviceCard {
                 card: degraded,
                 projects: vec![],
                 examples: vec![],
@@ -1191,7 +1199,7 @@ fn devices_card_firmware_faces() -> Element {
                         p { class: "tw:m-0 tw:text-[0.68rem] tw:font-bold tw:uppercase tw:tracking-wide tw:text-subtle-foreground",
                             "{label}"
                         }
-                        DeviceRosterCard {
+                        StoryDeviceCard {
                             card,
                             open_uid,
                             projects: packages(),
@@ -1537,7 +1545,7 @@ fn devices_card_sim_faces() -> Element {
                         p { class: "tw:m-0 tw:text-[0.68rem] tw:font-bold tw:uppercase tw:tracking-wide tw:text-subtle-foreground",
                             "{label}"
                         }
-                        DeviceRosterCard {
+                        StoryDeviceCard {
                             card,
                             runtime,
                             feed,
@@ -1574,7 +1582,7 @@ fn devices_card_emu_band() -> Element {
                         p { class: "tw:m-0 tw:text-[0.68rem] tw:font-bold tw:uppercase tw:tracking-wide tw:text-subtle-foreground",
                             "{label}"
                         }
-                        DeviceRosterCard {
+                        StoryDeviceCard {
                             card: sim_card_view(31, "XIAO ESP32-C6 (emu)", "seeed/xiao-esp32-c6"),
                             runtime: Some(UiRuntimeBand::emu("seeed/xiao-esp32-c6", dilation)),
                             feed: None,
@@ -1591,7 +1599,7 @@ fn devices_card_emu_band() -> Element {
                     p { class: "tw:m-0 tw:text-[0.68rem] tw:font-bold tw:uppercase tw:tracking-wide tw:text-subtle-foreground",
                         "For comparison · the sim's band"
                     }
-                    DeviceRosterCard {
+                    StoryDeviceCard {
                         card: sim_card_view(32, "XIAO ESP32-C6 (sim)", "seeed/xiao-esp32-c6"),
                         runtime: Some(UiRuntimeBand::sim("seeed/xiao-esp32-c6", Some("cpu"))),
                         feed: None,
@@ -1625,7 +1633,7 @@ fn devices_card_emu_needs_firmware() -> Element {
     rsx! {
         section { class: "tw:p-4",
             div { class: "tw:grid tw:w-[400px] tw:gap-2",
-                DeviceRosterCard {
+                StoryDeviceCard {
                     card,
                     runtime: Some(UiRuntimeBand::emu("seeed/xiao-esp32-c6", None)),
                     feed: None,
@@ -1759,8 +1767,8 @@ fn GalleryPages(
 ) -> Element {
     rsx! {
         div { class: "tw:grid tw:gap-10",
-            DevicesPage { home: home.clone(), on_action }
-            ProjectsPage { home: home.clone(), now_secs, on_action }
+            StoryDevicesPage { home: home.clone(), on_action }
+            StoryProjectsPage { home: home.clone(), now_secs, on_action }
             ExplorePage { home: Some(home), on_action }
         }
     }
@@ -1929,6 +1937,23 @@ fn pick_popover_card() -> DeviceView {
     card
 }
 
+/// The empty face's `push` offer over the pick stories' library.
+fn pick_popover_push() -> UiOffer {
+    lpa_studio_core::push_device_offer(
+        &pick_popover_card(),
+        story_board_prefix(pick_popover_card().id),
+        &pick_popover_library(),
+        &pick_popover_examples(),
+        false,
+    )
+    .expect("an empty LightPlayer takes a project")
+}
+
+/// Where a story board's verbs live (the ref is never drawn).
+fn story_board_prefix(device: DeviceId) -> lpa_studio_core::OfferPath {
+    lpa_studio_core::OfferPath::board(&lpa_studio_core::BoardRef::New(device.0 as u32))
+}
+
 /// Forty saved projects: the library size the inline picker could not hold.
 fn pick_popover_library() -> Vec<UiPackageCard> {
     let names = [
@@ -2000,11 +2025,13 @@ fn device_pick_popover_new_tab() -> Element {
         section { class: "tw:min-h-[520px] tw:w-[420px] tw:p-4",
             div { class: "tw:flex tw:h-[30px] tw:min-w-0 tw:items-center tw:gap-1.5 tw:overflow-hidden tw:whitespace-nowrap",
                 ProjectPickPopover {
+                    offer: pick_popover_push(),
                     card: pick_popover_card(),
                     projects: pick_popover_library(),
                     examples: pick_popover_examples(),
                     initially_open: true,
-                    initial_pick: Some("new:seeed/xiao-esp32-c6".to_string()),
+                    initial_args: OfferArgs::new()
+                        .with(PUSH_SOURCE_PARAM, "new:seeed/xiao-esp32-c6"),
                     on_action: |_| {},
                 }
             }
@@ -2020,7 +2047,7 @@ fn devices_card_menu_open() -> Element {
     rsx! {
         section { class: "tw:min-h-[560px] tw:p-4",
             div { class: "tw:w-[400px]",
-                DeviceRosterCard {
+                StoryDeviceCard {
                     card,
                     open_uid: Some("dev000000daqf6dvvqz".to_string()),
                     projects: packages(),
@@ -2051,7 +2078,7 @@ fn devices_card_menu_link_counters() -> Element {
     rsx! {
         section { class: "tw:min-h-[640px] tw:p-4",
             div { class: "tw:w-[400px]",
-                DeviceRosterCard {
+                StoryDeviceCard {
                     card,
                     open_uid: Some("dev000000daqf6dvvqz".to_string()),
                     projects: packages(),
@@ -2072,6 +2099,7 @@ fn device_pick_popover_open() -> Element {
         section { class: "tw:min-h-[520px] tw:w-[420px] tw:p-4",
             div { class: "tw:flex tw:h-[30px] tw:min-w-0 tw:items-center tw:gap-1.5 tw:overflow-hidden tw:whitespace-nowrap",
                 ProjectPickPopover {
+                    offer: pick_popover_push(),
                     card: pick_popover_card(),
                     projects: pick_popover_library(),
                     examples: pick_popover_examples(),
@@ -2097,13 +2125,35 @@ fn device_update_pick_open() -> Element {
     board_pick_story(BoardPickMode::Verb, ("esp32", ChipSource::BootBanner))
 }
 
-/// One 420px column with the board pick popover mounted open.
+/// One 420px column with the board pick popover mounted open: Row is a
+/// blank chip's `flash` (a pending link the boot banner named), Verb the
+/// bench classic's `update-firmware` with its board unknown.
 fn board_pick_story(mode: BoardPickMode, chip: (&str, ChipSource)) -> Element {
+    let offer = match mode {
+        BoardPickMode::Row => {
+            let blank = PendingLinkView {
+                device: DeviceId(3),
+                firmware_face: lpa_studio_core::DeviceFirmwareFace::Blank,
+                detected_chip: Some(chip.0.to_string()),
+                ..roster_fixture().roster.pending[1].clone()
+            };
+            lpa_studio_core::flash_pending_offer(&blank, story_board_prefix(DeviceId(3)))
+                .expect("a blank chip flashes")
+        }
+        BoardPickMode::Verb => {
+            let (_, older_unknown, _) = firmware_face_fixtures()
+                .into_iter()
+                .find(|(label, _, _)| *label == "Older, board unknown")
+                .expect("the bench classic");
+            lpa_studio_core::update_firmware_offer(&older_unknown, story_board_prefix(DeviceId(3)))
+                .expect("a running LightPlayer updates")
+        }
+    };
     rsx! {
         section { class: "tw:min-h-[420px] tw:w-[420px] tw:p-4",
             div { class: "tw:flex tw:h-[30px] tw:min-w-0 tw:items-center tw:gap-1.5 tw:overflow-hidden tw:whitespace-nowrap",
                 BoardPickPopover {
-                    device: DeviceId(3),
+                    offer,
                     chip: Some((chip.0.to_string(), chip.1)),
                     mode,
                     initially_open: true,

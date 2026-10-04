@@ -513,7 +513,11 @@ pub fn apply_catalog_op(
             package_files,
             history_files,
             provenance,
-        } => Some(store.install_synced(&name, &package_files, &history_files, provenance, now)?),
+        } => Some(
+            store
+                .install_synced(&name, &package_files, &history_files, provenance, now)
+                .map_err(install_synced_refusal)?,
+        ),
     };
     Ok(CatalogOutcome {
         summary,
@@ -532,6 +536,22 @@ fn import_refusal(error: &LibraryError, context: String) -> LibraryHostError {
     match error {
         LibraryError::Format(message) => LibraryHostError::Refused(format!("{context}: {message}")),
         other => LibraryHostError::Host(format!("{context}: {other}")),
+    }
+}
+
+/// Wrap an `install_synced` failure for the UI: a refusal over the
+/// package's own contents — a format this build cannot open, or a
+/// manifest it cannot parse (a key added within the current format that an
+/// older Studio never learned, a bad/duplicate uid) — travels as
+/// [`LibraryHostError::Refused`], like [`import_refusal`] already gives
+/// those two. LOCAL to this op: `Fs`/`Meta`/`History`/`NotFound`, and every
+/// other `CatalogOp`, still go through the blanket [`From<LibraryError>`].
+fn install_synced_refusal(error: LibraryError) -> LibraryHostError {
+    match error {
+        LibraryError::Format(message) | LibraryError::Manifest(message) => {
+            LibraryHostError::Refused(message)
+        }
+        other => other.into(),
     }
 }
 
@@ -756,5 +776,99 @@ impl LibraryHost for MemoryLibraryHost {
 
     fn notify_saved(&self, uid: &str) {
         self.saved_notifications.borrow_mut().push(uid.to_string());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lpc_history::{EventKind, EventLog, HistoryEvent, ProjectHistory, UidPrefix};
+    use lpc_model::AsLpPath;
+    use lpfs::LpFsMemory;
+
+    fn store() -> LibraryStore {
+        let counter = Rc::new(RefCell::new(0u8));
+        LibraryStore::new(
+            Rc::new(RefCell::new(LpFsMemory::new())),
+            Rc::new(move || {
+                *counter.borrow_mut() += 1;
+                [*counter.borrow(); 16]
+            }),
+            Rc::new(|| "2026-10-02-1200".to_string()),
+        )
+    }
+
+    /// The service-shaped history a tracking copy arrives with — one real
+    /// event, so `install_synced`'s own-event-log check passes.
+    fn synced_history() -> Vec<(String, Vec<u8>)> {
+        let fs = LpFsMemory::new();
+        let log = EventLog::new(&fs);
+        let history = ProjectHistory::new(HistoryEvent {
+            at: 1.0,
+            kind: EventKind::Created,
+        })
+        .unwrap();
+        log.append(history.events().first().unwrap()).unwrap();
+        let bytes = fs
+            .read_file(lpc_history::event::event_log::EVENT_LOG_PATH.as_path())
+            .unwrap();
+        vec![("events.jsonl".to_string(), bytes)]
+    }
+
+    /// A same-format manifest with a key this build doesn't know (a newer
+    /// Studio's addition within the current format), and a newer-format
+    /// one, both reach the UI as `Refused` — not the generic `Host` the
+    /// blanket `From<LibraryError>` gives everything else.
+    #[test]
+    fn install_synced_project_reports_content_problems_as_refused() {
+        let next = lpc_model::PROJECT_FORMAT_VERSION + 1;
+        for (manifest, needle) in [
+            (
+                format!(
+                    r#"{{"format":{},"uid":"{}","name":"demo","sparkle":true}}"#,
+                    lpc_model::PROJECT_FORMAT_VERSION,
+                    PrefixedUid::mint(UidPrefix::Project, &[7u8; 16]),
+                ),
+                "sparkle",
+            ),
+            (
+                format!(
+                    r#"{{"format":{next},"uid":"{}","name":"demo"}}"#,
+                    PrefixedUid::mint(UidPrefix::Project, &[8u8; 16]),
+                ),
+                "newer LightPlayer",
+            ),
+        ] {
+            let error = apply_catalog_op(
+                &store(),
+                CatalogOp::InstallSyncedProject {
+                    name: "demo".to_string(),
+                    package_files: vec![("project.json".to_string(), manifest.into_bytes())],
+                    history_files: synced_history(),
+                    provenance: PackageProvenance::OpenedFromLink,
+                },
+                1.0,
+            )
+            .expect_err("refused");
+            assert!(
+                matches!(&error, LibraryHostError::Refused(m) if m.contains(needle)),
+                "{error:?}"
+            );
+        }
+    }
+
+    /// The blanket `From<LibraryError>` — what every OTHER catalog op still
+    /// goes through — keeps mapping `Format`/`Manifest` to `Host`; the
+    /// override above is local to the synced-install op only.
+    #[test]
+    fn the_blanket_conversion_is_unchanged_for_other_ops() {
+        assert!(matches!(
+            LibraryHostError::from(LibraryError::Format("x".to_string())),
+            LibraryHostError::Host(_)
+        ));
+        assert!(matches!(
+            LibraryHostError::from(LibraryError::Manifest("x".to_string())),
+            LibraryHostError::Host(_)
+        ));
     }
 }
