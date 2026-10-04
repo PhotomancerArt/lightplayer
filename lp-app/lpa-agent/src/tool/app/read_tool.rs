@@ -1,6 +1,8 @@
 //! The `read` tool: the app agent's drill-down (plan P06). The readout says
 //! what is there; `read` says everything about one thing — a node's whole
-//! definition, a catalog pattern, a board's pins, a device. Read-only.
+//! definition and its actions, a catalog pattern, a board's pins, a device
+//! and its actions. Read-only. It is how the agent expands a node or a
+//! device whose actions the readout only counts (M7).
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -29,13 +31,13 @@ pub struct ReadInput {
 #[serde(rename_all = "snake_case")]
 pub enum ReadWhat {
     /// A node of the open project: its whole definition (the values `set`
-    /// writes, by the same paths), status and issues.
+    /// writes, by the same paths), status, issues and actions.
     Node,
     /// A catalog pattern: what it looks like, its knobs, 1D or 2D.
     Pattern,
     /// A board: its LED-capable pin labels and the GPIO each one is.
     Board,
-    /// A device on the roster: its card.
+    /// A device on the roster: its card and its actions.
     Device,
 }
 
@@ -49,9 +51,9 @@ pub fn read_tool_def() -> ToolDef {
 
 const DESCRIPTION: &str = "\
 Read one thing in full: a node's whole definition (its JSON, status and \
-issues — the paths you `set`), a catalog pattern (description, knobs, 1D or \
-2D), a board (its LED pin labels and GPIOs), or a device on the roster. \
-Read-only; changes nothing.";
+issues — the paths you `set`) and its actions, a catalog pattern \
+(description, knobs, 1D or 2D), a board (its LED pin labels and GPIOs), or \
+a device on the roster and its actions. Read-only; changes nothing.";
 
 /// Run one `read` call against `host`.
 pub async fn run_read(input_json: &Value, host: &mut dyn AppAgentHost) -> ToolOutcome {

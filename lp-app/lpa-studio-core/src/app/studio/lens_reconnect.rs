@@ -10,9 +10,10 @@
 //! younger than [`LENS_RECONNECT_GRACE`], failed pulls keep their backoff but
 //! do not close the editor; the page shows "Reconnecting…" instead.
 //!
-//! What stays exactly as it was: a port that is gone (unplug, a lost
-//! device) closes the lens through `drop_device_lens_if_wireless`, and a
-//! link that stays in trouble past the grace is a dead wire again.
+//! A port that is GONE (unplug, a Bluetooth drop) is the next case out and
+//! not this one's: the lens is held across it and rebinds when the board is
+//! back on a new link (see [`lens_hold`](super::lens_hold)). A link that
+//! stays in trouble past the grace is a dead wire again.
 
 use core::time::Duration;
 

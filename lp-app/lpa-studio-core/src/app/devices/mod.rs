@@ -82,6 +82,7 @@ pub mod emu_transport;
 pub mod link_health;
 pub mod new_sim_offer;
 pub mod pending_link_offers;
+pub mod provisional_board_numbers;
 pub mod runtime_backing;
 pub mod runtime_band;
 pub mod shared_link_client_io;
@@ -163,6 +164,7 @@ pub use emu_transport::{
 pub use link_health::{LinkHealth, LinkHealthMap, LinkTrouble};
 pub use new_sim_offer::{NEW_SIM_BACKING_PARAM, NEW_SIM_BOARD_PARAM, new_sim_offer};
 pub use pending_link_offers::pending_link_offers;
+pub use provisional_board_numbers::ProvisionalBoardNumbers;
 pub use runtime_backing::{Backing, EMULATED_TARGETS, backing_for, emu_offered_for};
 pub use runtime_band::{UiRuntimeBand, speed_word};
 pub use shared_link_client_io::{ConversationInbox, SharedLinkClientIo};

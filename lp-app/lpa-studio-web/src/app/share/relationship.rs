@@ -20,7 +20,7 @@
 //! button to still work.
 
 use lpa_studio_core::app::studio::studio_view_channel::CommandSender;
-use lpa_studio_core::{ControllerId, ProjectController, ProjectOp, StudioCommand, UiAction};
+use lpa_studio_core::{OfferArgs, OfferPath, SAVE_COPY_VERB, StudioCommand, UiOfferTree};
 use lpc_cloud_api::Actor;
 
 use crate::base::StudioIconName;
@@ -145,24 +145,38 @@ pub fn relationship_face(relationship: ProjectRelationship) -> RelationshipFace 
     }
 }
 
-/// Fork the active transient session: dispatch the explicit save that
-/// `fork_transient_at_save` (`project_controller.rs:5968`) promotes into
-/// the library. Reaches the controller even for a CLEAN overlay — a
-/// pristine save commits nothing (`written == 0`) but still runs the
-/// fork, because `pulled` only turns false on a failed commit — so this
-/// is exactly the verb a "Save a copy" button on a pristine example
-/// needs, without waiting for an edit first.
+/// Fork the active transient session: press core's `project/save-copy`,
+/// the explicit save that `fork_transient_at_save` promotes into the
+/// library. It reaches the controller even for a CLEAN overlay — a
+/// pristine save commits nothing (`written == 0`) but still runs the fork,
+/// because `pulled` only turns false on a failed commit — so this is
+/// exactly the verb a "Save a copy" button on a pristine example needs,
+/// without waiting for an edit first. Core offers it while the open
+/// session is transient (M6e).
 ///
-/// Mirrors `VisitorSession::fork`'s transient arm
-/// (`visitor_session.rs:189-195`) but does not require a `VisitorSession`:
-/// an embedded example's transient session has no `/p/<uid>` route to key
-/// a `VisitorSession` off, so this dispatches straight to the controller
-/// instead.
-pub fn fork_transient_session(tx: &CommandSender) {
-    tx.send(StudioCommand::Action(UiAction::from_op(
-        ControllerId::new(ProjectController::NODE_ID),
-        ProjectOp::SaveOverlay,
-    )));
+/// Mirrors `VisitorSession::fork`'s transient arm, but does not require a
+/// `VisitorSession`: an embedded example's transient session has no
+/// `/p/<uid>` route to key a `VisitorSession` off, so this sends straight
+/// to the controller instead. Returns whether the offer was there to press.
+pub fn fork_transient_session(tx: &CommandSender, offers: &UiOfferTree) -> bool {
+    let path = OfferPath::project().child(SAVE_COPY_VERB);
+    match offers
+        .get(&path)
+        .map(|offer| offer.press(&OfferArgs::new()))
+    {
+        Some(Ok(action)) => {
+            tx.send(StudioCommand::Action(action));
+            true
+        }
+        Some(Err(error)) => {
+            log::warn!("share: `{path}` refused the press: {error}");
+            false
+        }
+        None => {
+            log::warn!("share: `{path}` is not offered");
+            false
+        }
+    }
 }
 
 #[cfg(test)]

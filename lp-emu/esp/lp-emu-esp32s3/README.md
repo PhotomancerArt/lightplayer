@@ -570,13 +570,19 @@ a session rather than in a PR gate (R6/DD49). What it proves per tick is
 
 `just heap-budget-check-chips-s3` is the other thing that reads this machine
 for a gate: the shipped image's own first-heartbeat allocator figures,
-ratcheted into `scripts/heap-budget-record/chips/esp32s3.json`. ⚠️ Its triple is
-**elicited** (`lp-emu/lp-emu-validate/walks/s3-stop-all.script`), as the classic's is and as the
-C6's is not, and it is measured on a **direct load with no flash chip**, so
-the firmware runs on its memory FS — the record's `boot_shape` says what that
-costs against the ROM-up figures, and the two must never be compared as if
-they were the same boot. The band is one host's until the CI job reports a
-second (`docs/heap-budget-gate.md`).
+ratcheted into `scripts/heap-budget-record/chips/esp32s3.json`. ⚠️ Its triple
+is **elicited**, as the classic's is and as the C6's is not — but, since
+wire proto 30, not by `lp-emu/lp-emu-validate/walks/s3-stop-all.script`'s
+scripted `M!` bytes: the gate asks for it with a `stopAllProjects` request
+over the hosted link once the board's hello arrives (the same shape as
+`lp-cli/tests/emu_s3_link_gates.rs`), because the lp-link image no longer
+reads unsolicited `M!` text on the port. `s3-stop-all.script` stays the
+`boot-idle` payload's committed stimulus for the RomUp arm and the classic
+cross-check (`walks/README.md`). The measurement is on a **direct load with
+no flash chip**, so the firmware runs on its memory FS — the record's
+`boot_shape` says what that costs against the ROM-up figures, and the two
+must never be compared as if they were the same boot. The band is one
+host's until the CI job reports a second (`docs/heap-budget-gate.md`).
 
 ### Two things the accept blocks needed that a PAC reset does not give
 

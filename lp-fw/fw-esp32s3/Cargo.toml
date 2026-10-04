@@ -9,7 +9,7 @@ rust-version.workspace = true
 description = "LightPlayer firmware for ESP32-S3 (Xtensa LX7)."
 
 [features]
-default = ["esp32s3", "server", "float-f32", "json-pack"]
+default = ["esp32s3", "server", "float-f32", "json-pack", "io-thread"]
 esp32s3 = [
     "esp-backtrace/esp32s3",
     "esp-bootloader-esp-idf/esp32s3",
@@ -42,6 +42,26 @@ server = [
 # host opted in (`ClientRequest::SetEncoding`); every other link stays JSON.
 # On by default; without it the board answers every opt-in "json".
 json-pack = ["server", "fw-esp32-common/json-pack"]
+
+# The USB link task on a preemptive esp-rtos thread of its own (priority 1,
+# 4 KB stack, pinned to core 0, its own embassy executor), and the server
+# answering a tick's requests before it renders (`LpServer::set_messages_first`).
+# On by default; without it the link task shares the main executor and the
+# server renders first, as before. See `src/io_thread.rs` and the C6's twin.
+#
+# Thread creation is esp-rtos's radio-facing `esp_radio_rtos_driver::task_create`,
+# which exists only with `esp-rtos/esp-radio`. That feature links esp-rtos's
+# small esp-radio glue (task/semaphore/queue shims) and the driver crate's
+# trait — **not** the radio stack: this chip still has no `esp-radio`
+# dependency. `esp-rtos/esp-alloc` is required beside it: `esp-radio` turns on
+# esp-rtos's `alloc`, and `alloc` without `esp-alloc` makes the firmware supply
+# a C `malloc_internal`/`free_internal` pair (`esp-rtos-0.3.0/src/lib.rs`). The
+# C6 gets it through `radio`.
+io-thread = ["esp-rtos/esp-radio", "esp-rtos/esp-alloc", "dep:esp-radio-rtos-driver"]
+# The link thread's stack high-water, painted at thread start and logged as
+# `[iostack]` at the heartbeat — OFF by default, never shipped: it finds the
+# stack by scanning esp-rtos's private task record (`src/io_thread_stack_diag.rs`).
+io_thread_stack_diag = ["io-thread"]
 
 # Print every transmitted WS281x frame to the serial log: one full hex dump per
 # channel after open/resize, then a periodic checksum and lit-LED count. This is
@@ -193,6 +213,9 @@ esp-println = { version = "0.17.0", default-features = false, features = ["esp32
 esp-alloc = { version = "0.10.0", features = ["internal-heap-stats"] }
 esp-rtos = { version = "0.3.0", default-features = false, features = ["embassy", "log-04"] }
 log = { workspace = true, default-features = false }
+# `io-thread` only: esp-rtos's own thread creation is crate-private; this is
+# the public face esp-radio itself creates its threads through.
+esp-radio-rtos-driver = { version = "0.3.0", optional = true }
 
 # Abort-tier crash recovery (ADR 2026-07-29-per-chip-fw-toolchains): the
 # arch-neutral ledger, plus the backtrace capture the panic path stages. Both

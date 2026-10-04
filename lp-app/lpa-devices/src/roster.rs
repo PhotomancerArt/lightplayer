@@ -434,6 +434,12 @@ impl Roster {
             Event::ActivityMarker { device, .. } | Event::IdentityObserved { device, .. } => {
                 self.dispatch_to_device(now, *device, input)
             }
+            // A chooser's answer is roster news: a picked device already
+            // arrived as its `LinkAttached`.
+            Event::GrantAnswered { .. } => {
+                self.state.journal.record_input(now, Scope::Roster, input);
+                Vec::new()
+            }
         }
     }
 
@@ -1448,6 +1454,28 @@ mod tests {
     /// and then over Bluetooth — both links up at once, which the firmware
     /// allows (DD12) — is ONE device, identified by the hello's base MAC. The
     /// Bluetooth arrival is a pending link until its hello, then merges.
+    /// A chooser closed with nothing picked is journaled for the app to
+    /// read, and changes nothing else: no device, no pending link, no
+    /// command.
+    #[test]
+    fn a_dismissed_chooser_is_journaled_and_changes_nothing() {
+        let mut roster = Roster::new(RosterConfig::default());
+        assert_eq!(
+            roster.handle(Millis(0), Input::Action(Action::AddFromUsb)),
+            vec![Command::RequestUsbGrant]
+        );
+        let answer = Input::Event(Event::GrantAnswered {
+            link: LinkId(1),
+            answer: crate::GrantAnswer::Dismissed,
+        });
+        assert!(roster.handle(Millis(1), answer.clone()).is_empty());
+        assert!(roster.devices().is_empty());
+        assert!(roster.pending().is_empty());
+        assert!(roster.journal().entries_for(Scope::Roster).any(|entry| {
+            entry.record == crate::journal::JournalRecord::Input((&answer).into())
+        }));
+    }
+
     #[test]
     fn a_board_heard_over_usb_and_bluetooth_at_once_is_one_device() {
         let mut roster = Roster::new(RosterConfig::default());

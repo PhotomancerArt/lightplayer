@@ -193,6 +193,20 @@ the app through the same view model and presses the same actions. See
   `Toggle`) and a binder in core, and `UiOffer::press(args)` validates and
   binds. The web draws them with `OfferParamsForm` (or a picker that
   renders the same params) and never builds the op itself.
+- **Core tests press offers by path** (`OfferPressTestApi` in
+  `lpa-studio-core/src/app/studio/offer_press_test_api.rs`: `press`,
+  `press_lasting`, `offered`, `not_offered`, `offer_reason`), so a test fails
+  the moment the UI stops offering its verb. **`just lint-core-test-ops`**
+  (in `check-lint`) is the third ratchet: core test sites that build a
+  user-verb action directly may only go down per file.
+- **Place is a read-only fact in core.** The web reports where the user
+  is — `StudioCommand::Place(UiPlace)`: the route's page and the drawers
+  and panels open over it (`lpa-studio-web/src/place_report.rs`) — and
+  core reads it: the agent's readout leads with it and lists only the
+  focused node's verbs in full, ⌘K ranks by it. Core never navigates,
+  routes or opens anything because of it; navigation stays in
+  `router.rs`. Don't report what core already owns (node focus, card
+  sections, `UiSelection`): read it.
 - The rework toward migrating every surface onto the tree is a roadmap
   (`lp2025/2026-10-01-1255-agentic-ui-roadmap`). Don't migrate whole
   surfaces ad hoc. Don't add new web-built actions either.
@@ -264,8 +278,8 @@ the app through the same view model and presses the same actions. See
 
 - The wire's "no compatibility" freedom stops at anything **persisted**:
   project.json / package files, the cloud store, stamped device
-  identity, and the two access files (`<project>/.lp/access.json`, root
-  `/.lp/access.json` — each its own `version: 1` format with a schema in
+  identity, and the two access files (`<project>/.lp/access.json` at
+  `version: 2`, root `/.lp/access.json` at `version: 3` — each its own format with a schema in
   `schemas/`, outside `PROJECT_FORMAT_VERSION`). Real user data already exists at the current
   `PROJECT_FORMAT_VERSION`, and it does not redeploy in lockstep.
 - **A change to persisted bytes IS a format bump, even when no field is
@@ -334,7 +348,7 @@ runtime.
 | `lp-xt-emu`      | Xtensa emulator + machine-mode hart (host) — in `lp-emu/` | yes (+std feat)  |
 | `lp-emu-esp32c6` | ESP32-C6 SoC emulator (host) — `lp-emu/esp/` | no        |
 | `lp-emu-esp32v3` | Classic ESP32 (v3, Xtensa LX6) SoC emulator (host) — `lp-emu/esp/`. **Two cores** on a deterministic quantum interleave. Boots the shipped `fw-esp32v3` on **both** paths (direct load, and from the mask ROM's reset vector through the real IDF bootloader), takes a real upload over its UART0 lp-link with the CH340 cable modelled (hosted in process by `lp-cli emu run --chip esp32v3 --host-link`), and renders a frame that is byte-identical on all three readings. `--uart-faults <spec>` damages UART0's byte stream in 64-byte windows, the C6's `--usb-faults` over a UART (a test switch, off by default). `just test-emu-esp32v3-gate`, `just walk-esp32v3-emu`; the gates that need the link live in `lp-cli/tests/emu_v3_link_gates.rs` and `emu_uart_link.rs` (the fault soak), run by `test-emu-esp32v3-boot`; the walk record is `docs/reports/2026-09-11-esp32v3-emulator-walk.md`. Speed: `just bench-emu-esp32v3` (an oracle, never a gate) and `scripts/emu/v3-oracle.sh <out-dir> <slug> <window>` — the identity oracle WITHIN one binary, the fast path against `--no-block-cache`, on the three pinned images; `--bin-a`/`--bin-b` runs it ACROSS binaries with the fast path off, which is what proves the interpreter did not move, and `--flags-a`/`--flags-b` (with `--name-a`/`--name-b`) runs any other pair — M7 P04's is `--jit` against `--interpreter`. **`--jit` needs `--features jit`** and today escapes every instruction back to the interpreter, so it is SLOWER than not asking for it; what it proves is identity | no |
-| `lp-emu-esp32s3` | ESP32-S3 (Xtensa LX7) SoC emulator (host) — `lp-emu/esp/`. **M6 P01: register tables and a vendored ROM only — no map, no hart, no peripheral, no boot yet.** What the shipped image actually does is `docs/reports/2026-09-11-esp32s3-firmware-inventory.md` | no |
+| `lp-emu-esp32s3` | ESP32-S3 (Xtensa LX7) SoC emulator (host) — `lp-emu/esp/`. Boots the shipped `fw-esp32s3` image both ways (direct load, and ROM-up through the mask ROM and the real IDF bootloader), speaks its USB link (lp-link since proto 30) and models the RMT for WS281x output. `just walk-esp32s3-emu`; the link gates are `lp-cli/tests/emu_s3_link_gates.rs`, run by `test-emu-esp32s3-gate`; a heap ratchet at `lp-emu:esp32s3:t1`. **Core 1 is held, not started** — a core-1 move (the link thread's filed follow-up) cannot be emulated until it is | no |
 | `lp-emu-validate` | The validation runner (host) — `lp-emu/`. Payloads, configurations, transcripts and their sidecars, replay, and the **trust table** (`validate.toml`) every claim in the two walk records is graded by. Reached through `lp-cli validate list\|record\|run\|replay` | no |
 
 Every emulator crate lives under **`lp-emu/`** and is **MIT**, not AGPL —
@@ -686,7 +700,9 @@ second lens on the same session.
 `navigator.bluetooth` with `public/lpa-link/virtual_bluetooth.js`, the NUS
 GATT subset over the same emulated boards, so Studio's `ble:` link, the
 device card and Play run unchanged; `just walk-ble-emu` is its walk. It
-models the firmware's link rules as far as the page can see them: the link
+models the firmware's link rules as far as the page can see them (⚠️ but
+it does not identify a board since the lp-link USB cut-over:
+`docs/defects/2026-10-02-the-ble-emu-polyfill-relays-lp-link-bytes-as-m-lines.md`): the link
 opens when the central subscribes, each link gets its own hello, an
 unauthenticated link is dropped after 10 s, and Bluefy's phantom
 drop, where the page hears a disconnect while the radio link stays

@@ -1,8 +1,11 @@
 //! The add-node kind picker: one popover listing every instantiable kind.
 //!
-//! Renders controller-produced [`UiAddNodeMenu`] data (authoring P4): each
-//! entry carries a ready-to-dispatch create action, so a row click is a
-//! plain dispatch — the renderer never assembles ops. One shared component
+//! Renders controller-produced [`UiAddNodeMenu`] data (authoring P4): the
+//! rows are the menu's, and a row click presses the menu's offer from the
+//! view's offer tree — `…/add-node` with the row's value as `kind`,
+//! `…/import-pattern` with it as `pattern`, `…/paste-node` with the
+//! clipboard's text — exactly as the app agent presses them by path. The
+//! renderer never assembles ops. One shared component
 //! serves every add surface: the node tree's "Add node…" row, the
 //! workspace's add button ([`WorkspaceAddNodeButton`]) — both attach at the
 //! project root — and the playlist strip's add chip (attach = that
@@ -18,19 +21,21 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    IMPORT_BUILTIN_SECTION, IMPORT_LIBRARY_SECTION, NODE_KIND, NodePasteOp, ProjectController,
-    UiAction, UiAddNodeMenu, UiAddNodeMenuEntry, UiAttachTarget, peek_header,
+    ADD_NODE_KIND_PARAM, ADD_NODE_VERB, IMPORT_BUILTIN_SECTION, IMPORT_LIBRARY_SECTION,
+    IMPORT_PATTERN_PARAM, IMPORT_PATTERN_VERB, OfferArgs, PASTE_NODE_CLIPBOARD_PARAM,
+    PASTE_NODE_VERB, UiAction, UiAddNodeMenu, UiAddNodeMenuEntry, UiOffer,
 };
 
 use crate::base::{
     DetailPopover, DetailSection, PopoverCloseHandle, PopoverPlacement, StudioIcon, StudioIconName,
     focus_ring_class, node_kind_icon, row_edge_class,
 };
-use crate::core::menu_item_action_class;
+use crate::core::{menu_item_action_class, use_offer_at};
 
 /// The kind picker behind an arbitrary trigger (the `DetailPopover`
 /// custom-trigger mode): a vertical menu of the menu's entries — kind glyph
-/// plus label — where one click dispatches the entry's create action.
+/// plus label — where one click presses the menu's offer with the entry's
+/// value.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn AddNodePicker(
@@ -49,6 +54,12 @@ pub fn AddNodePicker(
     initially_open: bool,
     on_action: EventHandler<UiAction>,
 ) -> Element {
+    // The menu's verbs, from the offer tree (outside a provider — a story —
+    // there are none, and a row press does nothing).
+    let at = menu.offers_at();
+    let add = use_offer_at(at.clone().child(ADD_NODE_VERB))();
+    let import = use_offer_at(at.clone().child(IMPORT_PATTERN_VERB))();
+    let paste = use_offer_at(at.child(PASTE_NODE_VERB))();
     rsx! {
         DetailPopover {
             icon: StudioIconName::Add,
@@ -65,17 +76,17 @@ pub fn AddNodePicker(
             DetailSection { title: "Add node",
                 div { class: "tw:grid tw:gap-0.5",
                     for entry in menu.entries.clone() {
-                        AddNodeMenuRow { entry, on_action }
+                        AddNodeMenuRow { entry, offer: add.clone(), param: ADD_NODE_KIND_PARAM, on_action }
                     }
                 }
             }
             // The second source: a node someone copied, here or elsewhere.
-            // The clipboard read is async and permission-gated, so this
-            // cannot be a controller-built action like the kind rows —
-            // the edge reads, then dispatches.
+            // The clipboard read is async and permission-gated, and only
+            // the browser can do it — so the edge reads, then presses the
+            // `paste-node` offer with the text.
             DetailSection { title: "From clipboard",
                 div { class: "tw:grid tw:gap-0.5",
-                    PasteNodeMenuRow { attach: menu.attach.clone(), on_action }
+                    PasteNodeMenuRow { offer: paste, on_action }
                 }
             }
             // The third source: a pattern already in your library, or one
@@ -92,13 +103,13 @@ pub fn AddNodePicker(
                             ImportSubheading { label: IMPORT_LIBRARY_SECTION }
                         }
                         for entry in menu.imports.clone() {
-                            AddNodeMenuRow { entry, on_action }
+                            AddNodeMenuRow { entry, offer: import.clone(), param: IMPORT_PATTERN_PARAM, on_action }
                         }
                         if !menu.imports.is_empty() && !menu.imports_builtin.is_empty() {
                             ImportSubheading { label: IMPORT_BUILTIN_SECTION }
                         }
                         for entry in menu.imports_builtin.clone() {
-                            AddNodeMenuRow { entry, on_action }
+                            AddNodeMenuRow { entry, offer: import.clone(), param: IMPORT_PATTERN_PARAM, on_action }
                         }
                         if let Some(reason) = menu.imports_empty.clone() {
                             EmptySourceRow { reason }
@@ -141,13 +152,14 @@ fn EmptySourceRow(reason: String) -> Element {
     }
 }
 
-/// "Paste node": read the clipboard, and dispatch a paste if it holds an
-/// `lp.node` envelope. A clipboard holding something else (or a denied
-/// read) logs and does nothing — the row cannot know in advance, because
-/// checking would itself need the permission-gated read.
+/// "Paste node": read the clipboard, and press the `paste-node` offer with
+/// its text. Core refuses text that is not a copied node (another envelope,
+/// or no envelope at all); a refusal — or a denied read — logs and does
+/// nothing, because the row cannot know in advance: checking would itself
+/// need the permission-gated read.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn PasteNodeMenuRow(attach: UiAttachTarget, on_action: EventHandler<UiAction>) -> Element {
+fn PasteNodeMenuRow(offer: Option<UiOffer>, on_action: EventHandler<UiAction>) -> Element {
     let close = try_consume_context::<PopoverCloseHandle>();
     rsx! {
         button {
@@ -156,7 +168,9 @@ fn PasteNodeMenuRow(attach: UiAttachTarget, on_action: EventHandler<UiAction>) -
             title: "Create a node from a copied node on the clipboard.",
             onclick: move |event| {
                 event.stop_propagation();
-                paste_node_from_clipboard(attach.clone(), on_action);
+                if let Some(offer) = offer.clone() {
+                    paste_node_from_clipboard(offer, on_action);
+                }
                 if let Some(mut close) = close {
                     close.close();
                 }
@@ -169,25 +183,13 @@ fn PasteNodeMenuRow(attach: UiAttachTarget, on_action: EventHandler<UiAction>) -
     }
 }
 
-/// Read the clipboard and dispatch the paste. Kept beside the row so the
-/// classification rule — only `lp.node` envelopes paste here — is next to
-/// the affordance that relies on it.
-fn paste_node_from_clipboard(attach: UiAttachTarget, on_action: EventHandler<UiAction>) {
-    crate::clipboard::read_text(move |text| match peek_header(&text) {
-        Ok(header) if header.kind == NODE_KIND => {
-            on_action.call(UiAction::from_op(
-                ProjectController::NODE_ID,
-                NodePasteOp {
-                    envelope: text,
-                    attach,
-                },
-            ));
+/// Read the clipboard and press the paste with what it holds.
+fn paste_node_from_clipboard(offer: UiOffer, on_action: EventHandler<UiAction>) {
+    crate::clipboard::read_text(move |text| {
+        match offer.press(&OfferArgs::new().with(PASTE_NODE_CLIPBOARD_PARAM, text)) {
+            Ok(action) => on_action.call(action),
+            Err(error) => log::warn!("paste node: {error}"),
         }
-        Ok(header) => log::warn!(
-            "paste node: the clipboard holds a {} envelope, not a node",
-            header.kind
-        ),
-        Err(error) => log::warn!("paste node: {error}"),
     });
 }
 
@@ -230,29 +232,38 @@ pub fn WorkspaceAddNodeButton(
     }
 }
 
-/// One picker row: kind glyph + label, dispatching the entry's create
-/// action and closing the popover (a selection is a completed gesture). A
-/// bespoke row (not `ActionButton { variant: MenuItem }`) only because the
-/// glyph is the KIND's, which is outside the `ActionMeta` icon vocabulary —
-/// the classes and dispatch shape are the shared menu-row ones
+/// One picker row: kind glyph + label, pressing `offer` with the entry's
+/// value as `param` and closing the popover (a selection is a completed
+/// gesture). A bespoke row (not `ActionButton { variant: MenuItem }`) only
+/// because the glyph is the KIND's, which is outside the `ActionMeta` icon
+/// vocabulary — the classes and dispatch shape are the shared menu-row ones
 /// (`package_card`'s export-zip precedent).
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn AddNodeMenuRow(entry: UiAddNodeMenuEntry, on_action: EventHandler<UiAction>) -> Element {
+fn AddNodeMenuRow(
+    entry: UiAddNodeMenuEntry,
+    /// The menu's offer the row presses (`add-node` or `import-pattern`).
+    offer: Option<UiOffer>,
+    /// The offer's parameter the row's value fills (`kind`, `pattern`).
+    param: &'static str,
+    on_action: EventHandler<UiAction>,
+) -> Element {
     let icon = node_kind_icon(&entry.icon);
     // A kind the connected device cannot run stays in the list, DISABLED,
-    // annotated with why — hiding it would teach a false catalog.
+    // annotated with why — hiding it would teach a false catalog. The
+    // offer's option is disabled with the same reason (core builds both
+    // from the one gated menu).
     let unavailable = entry.unavailable.clone();
     let title = match &unavailable {
-        Some(reason) => format!("{reason} — {}", entry.action.meta().summary),
-        None => entry.action.meta().summary.clone(),
+        Some(reason) => format!("{reason} — {}", entry.summary),
+        None => entry.summary.clone(),
     };
     let class = match unavailable {
         Some(_) => format!("{} tw:opacity-55", menu_item_action_class()),
         None => menu_item_action_class().to_string(),
     };
     let annotation = entry.unavailable.clone();
-    let action = entry.action.clone();
+    let args = OfferArgs::new().with(param, entry.value.clone());
     let disabled = annotation.is_some();
     let close = try_consume_context::<PopoverCloseHandle>();
 
@@ -264,7 +275,11 @@ fn AddNodeMenuRow(entry: UiAddNodeMenuEntry, on_action: EventHandler<UiAction>) 
             disabled,
             onclick: move |event| {
                 event.stop_propagation();
-                on_action.call(action.clone());
+                match offer.as_ref().map(|offer| offer.press(&args)) {
+                    Some(Ok(action)) => on_action.call(action),
+                    Some(Err(error)) => log::warn!("add node: {error}"),
+                    None => log::warn!("add node: the picker's offer is not published"),
+                }
                 if let Some(mut close) = close {
                     close.close();
                 }

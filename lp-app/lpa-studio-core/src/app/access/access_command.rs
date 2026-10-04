@@ -11,7 +11,7 @@ use lpc_access::Tier;
 
 use super::access_session::{LoginWindow, TypedPassword};
 use super::account_keys::AccountKeys;
-use super::device_access_ops::{AccessListing, AccessSynced};
+use super::device_access_ops::{AccessChanged, AccessSynced};
 use super::device_access_record::DeviceAccessChange;
 use super::login_attempt::LoginAttemptOutcome;
 
@@ -92,7 +92,7 @@ pub enum AccessCommand {
     /// set, if it set one.
     Changed {
         device: DeviceId,
-        result: Result<AccessListing, String>,
+        result: Result<AccessChanged, String>,
         bluetooth: Option<bool>,
     },
 }
@@ -193,10 +193,9 @@ mod tests {
         assert!(!format!("{command:?}").contains("hunter2"));
         let command = AccessCommand::Change {
             device: DeviceId(1),
-            change: DeviceAccessChange::AddPassword {
-                label: "friends".to_string(),
+            change: DeviceAccessChange::SetPassword {
                 tier: Tier::Play,
-                password: "hunter2".to_string(),
+                password: Some("hunter2".to_string()),
             },
         };
         assert!(!format!("{command:?}").contains("hunter2"));

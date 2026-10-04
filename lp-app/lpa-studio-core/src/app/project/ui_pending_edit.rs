@@ -1,9 +1,8 @@
 //! Save-panel change-list DTO: one labeled entry per pending overlay edit.
 
-use crate::UiAction;
-
 /// One pending edit in the project's save panel (plan D5): node label + slot
-/// path + op/value display + phase, with a per-entry revert action.
+/// path + op/value display + phase, with the key its revert is pressed by
+/// (`project/revert-edit`, `edit` = [`Self::key`]).
 ///
 /// Entries are produced by `ProjectController::pending_edits` from the same
 /// edit-state join `DirtySummary` counting uses, so the list length per
@@ -44,11 +43,14 @@ pub struct UiPendingEdit {
     /// Which save-panel section the entry belongs to — matches the entry's
     /// [`crate::DirtySummary`] bucket exactly.
     pub phase: UiPendingEditPhase,
-    /// Revert action for this entry (dispatches `SlotEditOp::Revert` at the
-    /// entry's address; for failed entries this is the clear/retry
-    /// affordance). `None` only for stale entries, which have no node
-    /// address to dispatch through.
-    pub revert: Option<UiAction>,
+    /// This entry's value in `project/revert-edit`'s `edit` choice: the
+    /// row's revert presses that offer with it (it dispatches
+    /// `SlotEditOp::Revert` at the entry's address, or `AssetEditOp::Revert`
+    /// for a file row; for failed entries this is the clear/retry
+    /// affordance). Stable for as long as the edit is pending. `None` only
+    /// for stale entries, which have no node address to dispatch through,
+    /// so nothing to revert by.
+    pub key: Option<String>,
 }
 
 /// The operation a pending edit performs, in display form.

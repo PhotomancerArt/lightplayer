@@ -187,6 +187,10 @@ pub fn parse_u8(bytes: &[u8]) -> Option<u8> {
 
 #[cfg(test)]
 mod tests {
+    #[allow(
+        unused_extern_crates,
+        reason = "this crate is #![no_std] by default; tests need std back"
+    )]
     extern crate std;
 
     use std::format;

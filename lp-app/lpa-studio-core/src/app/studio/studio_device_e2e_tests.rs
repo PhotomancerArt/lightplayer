@@ -48,11 +48,12 @@ use crate::app::library::{
     MemoryLibraryHost, OpenedProject,
 };
 use crate::app::places::DeviceRegistry;
+use crate::app::studio::offer_press_test_api::OfferPressTestApi;
 use crate::{
     DeviceAction, DeviceEffectCall, DeviceEffectFacts, DeviceEffectProgress, DeviceInput,
     DeviceTaskFuture, DeviceTransport, DeviceTransportFuture, DevicesOp, GrantedLink, LensLineTap,
-    LensTapEvent, ProjectController, ProjectOp, SimBacking, SimDeviceTransport, SimLinkSource,
-    SimRuntimeControl, SimSession, StudioController, UiAction, UiNotices,
+    LensTapEvent, OfferArgs, ProjectController, ProjectOp, SimBacking, SimDeviceTransport,
+    SimLinkSource, SimRuntimeControl, SimSession, StudioController, UiAction, UiNotices,
 };
 
 /// Wall-clock ceiling on a `run_until`. Generous: the fake boots a real host
@@ -69,6 +70,9 @@ const STEP_MS: f64 = 0.005;
 
 /// E4: the app agent's device journey over this bench.
 mod agent_device_journey_tests;
+/// The app chat seated on this bench (E4's seat, and the corpus's device
+/// seat).
+pub(crate) mod agent_device_seat;
 
 // ---------------------------------------------------------------------
 // The transport
@@ -671,6 +675,39 @@ struct DeviceBench {
     record_push_attempts: Rc<Cell<usize>>,
 }
 
+/// The bench presses offers on its controller, dispatching in place.
+impl OfferPressTestApi for DeviceBench {
+    type Outcome = crate::UiResult;
+
+    fn offer_tree(&mut self) -> crate::UiOfferTree {
+        self.controller.view().offers
+    }
+
+    fn dispatch_press(&mut self, action: UiAction) -> crate::UiResult {
+        drive(self.controller.dispatch(action))
+    }
+}
+
+/// The push offer's args for `source`: its picker key, and a starter's
+/// typed name.
+fn push_args(source: crate::PushSource) -> OfferArgs {
+    match source {
+        crate::PushSource::Example { example_id } => {
+            OfferArgs::new().with("source", format!("example:{example_id}"))
+        }
+        crate::PushSource::Library { project_uid } => {
+            OfferArgs::new().with("source", format!("library:{project_uid}"))
+        }
+        crate::PushSource::NewForBoard { board_id, name } => {
+            let args = OfferArgs::new().with("source", format!("new:{board_id}"));
+            match name {
+                Some(name) => args.with("name", name),
+                None => args,
+            }
+        }
+    }
+}
+
 /// Wraps a [`MemoryLibraryHost`], counting `CatalogOp::RecordPush` attempts
 /// without changing what any op does or returns.
 struct RecordPushCountingHost {
@@ -929,29 +966,51 @@ impl DeviceBench {
         self.controller.device_roster_view().roster
     }
 
-    /// Dispatch a device gesture the way the UI does — through the ordinary
-    /// action path, not by reaching into the roster.
-    fn gesture(&mut self, action: DeviceAction) {
+    /// Press `device`'s card verb `verb` by its path
+    /// (`devices/<board ref>/<verb>`), as the card's button does: it must be
+    /// offered and enabled now ([`OfferPressTestApi::press`]).
+    fn press_device(&mut self, device: crate::DeviceId, verb: &str, args: OfferArgs) -> UiNotices {
+        let path = self.device_verb(device, verb);
+        self.press(path, args)
+            .expect("a device press never fails loudly")
+    }
+
+    /// [`Self::press_device`] for a Lasting verb: the user's second click.
+    fn press_device_lasting(
+        &mut self,
+        device: crate::DeviceId,
+        verb: &str,
+        args: OfferArgs,
+    ) -> UiNotices {
+        let path = self.device_verb(device, verb);
+        self.press_lasting(path, args)
+            .expect("a device press never fails loudly")
+    }
+
+    /// Step until `device`'s card offers `verb`, as a user waits for the
+    /// button to appear before pressing it.
+    fn wait_for_verb(&mut self, tasks: &TaskPool, device: crate::DeviceId, verb: &str) {
+        self.run_until(tasks, &format!("the card to offer `{verb}`"), |bench| {
+            let offers = bench.controller.view().offers;
+            offers
+                .device_prefix(device)
+                .is_some_and(|prefix| offers.get(&prefix.clone().child(verb)).is_some())
+        });
+    }
+
+    /// Dispatch a device action that is NOT offered in the state the row
+    /// puts the card in — a race, or the model's own refusal — straight
+    /// through the ordinary action path. Anything a card offers is pressed
+    /// with [`Self::press_device`] instead.
+    fn unoffered_gesture(&mut self, action: DeviceAction) {
         let action: UiAction = DevicesOp::action_for(action);
         drive(self.controller.dispatch(action)).expect("a device gesture never fails loudly");
     }
 
-    /// The empty face's gesture, through the ordinary action path.
-    fn push_gesture(&mut self, device: crate::DeviceId, source: crate::PushSource) {
-        let action: UiAction = crate::DevicePushOp::action_for(device, source);
-        drive(self.controller.dispatch(action)).expect("a push gesture never fails loudly");
-    }
-
-    /// [`Self::push_gesture`], but handing back the notices the dispatch
-    /// produced — the push upgrade notice lives there, not in the roster
-    /// view.
-    fn push_gesture_notices(
-        &mut self,
-        device: crate::DeviceId,
-        source: crate::PushSource,
-    ) -> UiNotices {
-        let action: UiAction = crate::DevicePushOp::action_for(device, source);
-        drive(self.controller.dispatch(action)).expect("a push gesture never fails loudly")
+    /// The empty face's push of `source`, pressed through the card's
+    /// `push` offer (its `source` choice, and the starter's `name`).
+    fn push_gesture(&mut self, device: crate::DeviceId, source: crate::PushSource) -> UiNotices {
+        self.press_device(device, "push", push_args(source))
     }
 
     /// Open a library project ON a named device — the `?on=mac:` arrival
@@ -996,6 +1055,28 @@ impl DeviceBench {
     fn detach_lens(&mut self) {
         let action = UiAction::from_op(ProjectController::NODE_ID, ProjectOp::DetachLens);
         drive(self.controller.dispatch(action)).expect("detach never fails loudly");
+    }
+
+    /// One passive tick, the way the actor runs it: the held-lens look and
+    /// the lens's pull behind it. `None` = nothing to pull (no project, or
+    /// the lens is held waiting for its board).
+    fn tick(&mut self) -> Option<crate::ProjectRefreshOutcome> {
+        let deadline = lpa_client::ProgressDeadline::new(crate::PASSIVE_REFRESH_DEADLINE, |_| {
+            core::future::pending::<()>()
+        });
+        drive(
+            self.controller
+                .refresh_loaded_project_tick_gated(deadline, &lpa_client::NeverCancel),
+        )
+        .expect("a passive tick never fails loudly here")
+    }
+
+    /// The runtime id of the lens session, when one is installed.
+    fn lens_session_id(&self) -> Option<crate::RuntimeId> {
+        self.controller
+            .runtime_pool_for_test()
+            .attached_session()
+            .map(crate::RuntimeSession::id)
     }
 
     /// The device lens session, when one is installed.
@@ -1348,31 +1429,16 @@ fn opening_the_lens_reads_the_board_build_for_the_picker_gate() {
     );
 }
 
-/// Unplug mid-lens (G2 row 3): the board's departure is card evidence AND
-/// the end of the lens session — no refresh needed, nothing held.
+/// Unplug mid-lens (G2 row 3), after the 2026-10-02 report ("kicking the
+/// user back to the devices tab on disconnect is jarring"): the board's
+/// departure is card evidence, but the editor HOLDS — the project stays, the
+/// page says "Reconnecting…", nothing routes to Devices. Only a board that
+/// stays away past the grace ends the session, and then the card offers a
+/// way back exactly as before.
 #[test]
-fn unplugging_mid_lens_closes_the_editor_and_leaves_an_honest_card() {
-    let device = empty_light_player("dev000000daqf6dvvr2");
-    let (mut bench, tasks) = identified(&device, "usb-lens-2");
-    bench.run_until(&tasks, "the board to report nothing loaded", |bench| {
-        bench
-            .view()
-            .devices
-            .first()
-            .is_some_and(|card| card.loaded_project == lpa_devices::view::LoadedProject::Empty)
-    });
-    let card = bench.view().devices[0].clone();
-    bench.push_gesture(card.id, bundled_example());
-    bench.run_until(&tasks, "the push to finish", |bench| {
-        bench
-            .view()
-            .devices
-            .first()
-            .is_some_and(|card| card.activity.is_none() && card.last_outcome.is_some())
-    });
-    let uid = bench.registry()[0].uid.clone();
-    bench.open_lens(&uid).expect("opens");
-    assert!(bench.lens_device_uid().is_some());
+fn unplugging_mid_lens_holds_the_editor_until_the_grace_runs_out() {
+    let (mut bench, tasks, _device) = lens_on_a_running_board("dev000000daqf6dvvr2", "usb-lens-2");
+    let session = bench.lens_session_id();
 
     // Unplugged under the lens: the browser drops the grant and fires
     // disconnect; the departure sweep stops routing the link.
@@ -1380,10 +1446,45 @@ fn unplugging_mid_lens_closes_the_editor_and_leaves_an_honest_card() {
     bench
         .controller
         .note_device_hotplug(crate::app::studio::studio_command::DeviceHotplug::Disconnected);
-    bench.run_until(&tasks, "the lens to close on the departure", |bench| {
-        bench.lens_device_uid().is_none()
+    bench.run_until(&tasks, "the lens to be held on the departure", |bench| {
+        bench.controller.lens_is_held()
     });
+    let view = bench.controller.view();
+    assert!(view.home.is_none(), "the project page stays");
+    let strip = view
+        .lens_reconnecting
+        .expect("the page says it is reconnecting");
+    assert_eq!(strip.headline, "Reconnecting…");
+    assert!(
+        strip.detail.starts_with("Lost the connection"),
+        "{}",
+        strip.detail
+    );
+    assert_eq!(bench.lens_session_id(), session, "the same session, held");
+    assert!(bench.tick().is_none(), "a held lens pulls nothing");
+
+    // The board stays away: awake time runs the grace out (in steps under
+    // the suspended-page gap, the way a running page's ticks would).
+    let grace = crate::app::studio::lens_hold::LENS_HOLD_GRACE.as_secs_f64();
+    let start = bench.clock.get();
+    while bench.clock.get() < start + grace + 1.0 {
+        bench.clock.set(bench.clock.get() + 1.0);
+        let _ = bench.tick();
+        if bench.lens_device_uid().is_none() {
+            break;
+        }
+    }
+    assert!(
+        bench.lens_device_uid().is_none(),
+        "past the grace the editor closes"
+    );
     assert!(bench.controller.runtime_pool_for_test().lens().is_none());
+    assert!(
+        bench.controller.view().home.is_some(),
+        "the gallery takes over"
+    );
+    assert!(bench.controller.view().lens_reconnecting.is_none());
+    bench.step(&tasks);
     let card = &bench.view().devices[0];
     assert!(
         card.escapes.contains(&lpa_devices::Escape::Reconnect)
@@ -1392,43 +1493,25 @@ fn unplugging_mid_lens_closes_the_editor_and_leaves_an_honest_card() {
     );
 }
 
-/// The 2026-09-24 walk, Studio's half: the editor is a lens on the board,
-/// the cable comes out (the hotplug DISCONNECT edge, the way a replug under
-/// the shim or Chrome delivers it), the page drops to the gallery, and the
-/// cable goes back in on the SAME endpoint (the session id survives a
-/// replug). The card must come back to Ready and the project must open
-/// again — never park at "Attached — not listening" with a board that is
-/// talking.
+/// The 2026-09-24 walk, Studio's half, and the 2026-10-02 report: the
+/// editor is a lens on the board, the cable comes out (the hotplug
+/// DISCONNECT edge, the way a replug under the shim or Chrome delivers it)
+/// and goes back in on the SAME endpoint. The editor never leaves: it holds
+/// behind "Reconnecting…", and when the board is Ready again — on a NEW link,
+/// as every reconnect is — the SAME session takes a fresh wire and pulls
+/// again. The card comes back to Ready, never parked at "Attached — not
+/// listening" with a board that is talking.
 ///
-/// The walk's own failure was below this layer: the shim left the dead
-/// generation's byte channel open, so the replugged port's `open()` was
+/// The 2026-09-24 walk's own failure was below this layer: the shim left the
+/// dead generation's byte channel open, so the replugged port's `open()` was
 /// refused (`docs/defects/2026-09-24-emulated-replug-leaves-the-old-byte-channel-open.md`,
 /// pinned by `a_port_open_across_a_replug_reopens_on_the_new_generation` in
-/// lpa-link's conformance suite). This row pins that nothing ABOVE the port
-/// strands the card on the same walk.
+/// lpa-link's conformance suite).
 #[test]
-fn a_replug_under_the_lens_comes_back_ready_and_opens_again() {
-    let device = empty_light_player("dev000000daqf6dvvr8");
-    let (mut bench, tasks) = identified(&device, "usb-lens-8");
-    bench.run_until(&tasks, "the board to report nothing loaded", |bench| {
-        bench
-            .view()
-            .devices
-            .first()
-            .is_some_and(|card| card.loaded_project == lpa_devices::view::LoadedProject::Empty)
-    });
-    let card = bench.view().devices[0].clone();
-    bench.push_gesture(card.id, bundled_example());
-    bench.run_until(&tasks, "the push to finish", |bench| {
-        bench
-            .view()
-            .devices
-            .first()
-            .is_some_and(|card| card.activity.is_none() && card.last_outcome.is_some())
-    });
-    let uid = bench.registry()[0].uid.clone();
-    bench.open_lens(&uid).expect("opens");
-    assert!(bench.lens_device_uid().is_some());
+fn a_replug_under_the_lens_resumes_the_same_editor_session() {
+    let (mut bench, tasks, device) = lens_on_a_running_board("dev000000daqf6dvvr8", "usb-lens-8");
+    let session = bench.lens_session_id();
+    let old_link = lens_link(&bench);
 
     // The cable comes out under the lens: the port dies AND the bus says so.
     device.set_failure_plan(
@@ -1439,9 +1522,10 @@ fn a_replug_under_the_lens_comes_back_ready_and_opens_again() {
     bench
         .controller
         .note_device_hotplug(crate::app::studio::studio_command::DeviceHotplug::Disconnected);
-    bench.run_until(&tasks, "the lens to close on the departure", |bench| {
-        bench.lens_device_uid().is_none()
+    bench.run_until(&tasks, "the lens to be held on the departure", |bench| {
+        bench.controller.lens_is_held()
     });
+    assert!(bench.controller.view().home.is_none(), "never the gallery");
 
     // …and goes back in: same endpoint, a live wire, the connect edge.
     device.set_failure_plan(lpa_link::providers::fake_device::FakeFailurePlan::none());
@@ -1449,18 +1533,42 @@ fn a_replug_under_the_lens_comes_back_ready_and_opens_again() {
     bench
         .controller
         .note_device_hotplug(crate::app::studio::studio_command::DeviceHotplug::Connected);
-    bench.run_until(&tasks, "the replugged board to come back Ready", |bench| {
-        bench
-            .view()
-            .devices
-            .first()
-            .is_some_and(|card| card.activity.is_none() && card.state_label == "Ready")
-    });
+    bench.run_until(
+        &tasks,
+        "the held editor to resume on the replugged board",
+        |bench| {
+            assert!(
+                bench.controller.view().home.is_none(),
+                "a replug must never route the editor to Devices"
+            );
+            bench
+                .view()
+                .devices
+                .first()
+                .is_some_and(|card| card.activity.is_none() && card.state_label == "Ready")
+        },
+    );
+    // The tick is what notices the board is back.
+    let deadline = std::time::Instant::now() + REAL_TIME_LIMIT;
+    while bench.controller.lens_is_held() {
+        let _ = bench.tick();
+        bench.step(&tasks);
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the held lens never resumed"
+        );
+    }
     assert_eq!(bench.view().devices.len(), 1, "one board, one card");
-    bench
-        .open_lens(&uid)
-        .expect("the replugged board opens again");
-    assert_eq!(bench.lens_device_uid().as_deref(), Some(uid.as_str()));
+    assert_eq!(bench.lens_session_id(), session, "the same session resumed");
+    assert_ne!(lens_link(&bench), old_link, "on the new link");
+    assert!(bench.controller.view().lens_reconnecting.is_none());
+    match bench.tick() {
+        Some(crate::ProjectRefreshOutcome::Synced(sync)) => {
+            assert!(sync.synced, "the resumed editor pulls again");
+        }
+        Some(_) => panic!("the resumed lens should pull at once, and succeed"),
+        None => panic!("the resumed lens had nothing to pull"),
+    }
 }
 
 /// The replug-under-the-lens flake, made deterministic: a link whose
@@ -1595,17 +1703,18 @@ fn a_card_verb_on_the_lens_device_closes_the_editor_and_then_runs() {
         .link;
 
     // A rename never touches the wire: the editor stays.
-    bench.gesture(DeviceAction::SetName {
-        device: card.id,
-        name: "porch board".to_string(),
-    });
+    bench.press_device(
+        card.id,
+        "rename",
+        OfferArgs::new().with("name", "porch board"),
+    );
     assert!(
         bench.lens_device_uid().is_some(),
         "a rename leaves the lens alone"
     );
 
     // Remove project needs the wire: the editor yields, the verb runs.
-    bench.gesture(DeviceAction::RemoveProject { device: card.id });
+    bench.press_device_lasting(card.id, "remove-project", OfferArgs::new());
     assert!(bench.lens_device_uid().is_none(), "the lens closed first");
     assert!(
         !bench
@@ -1644,7 +1753,7 @@ fn an_open_asked_before_the_board_is_ready_attaches_once_it_says_hello() {
     });
     let uid = bench.registry()[0].uid.clone();
     let device_id = bench.view().devices[0].id;
-    bench.gesture(DeviceAction::Disconnect { device: device_id });
+    bench.press_device(device_id, "disconnect", OfferArgs::new());
     bench.run_until(&tasks, "the port to close", |bench| {
         bench
             .view()
@@ -1662,7 +1771,7 @@ fn an_open_asked_before_the_board_is_ready_attaches_once_it_says_hello() {
     // The board comes back (the connect the sweep would perform) and says
     // hello; the tick attaches the held lens.
     let device_id = bench.view().devices[0].id;
-    bench.gesture(DeviceAction::Connect { device: device_id });
+    bench.press_device(device_id, "connect", OfferArgs::new());
     let deadline = std::time::Instant::now() + REAL_TIME_LIMIT;
     loop {
         bench.step(&tasks);
@@ -1686,31 +1795,13 @@ fn an_open_asked_before_the_board_is_ready_attaches_once_it_says_hello() {
 
 /// Unplug under the lens with NO hotplug event (the pump is paused, so the
 /// only witness is the lens io itself): the io's port error rides the tap,
-/// the fold hears error + close, and the lens drops — the road the walk
-/// found missing when the departure sweep did not fire.
+/// the fold hears error + close + departure, and the lens is HELD — the road
+/// the walk found missing when the departure sweep did not fire. The replug
+/// brings the board back and the held session resumes on it.
 #[test]
-fn a_port_that_dies_under_the_lens_closes_the_editor_through_the_tap() {
-    let device = empty_light_player("dev000000daqf6dvvr6");
-    let (mut bench, tasks) = identified(&device, "usb-lens-6");
-    bench.run_until(&tasks, "the board to report nothing loaded", |bench| {
-        bench
-            .view()
-            .devices
-            .first()
-            .is_some_and(|card| card.loaded_project == lpa_devices::view::LoadedProject::Empty)
-    });
-    let card = bench.view().devices[0].clone();
-    bench.push_gesture(card.id, bundled_example());
-    bench.run_until(&tasks, "the push to finish", |bench| {
-        bench
-            .view()
-            .devices
-            .first()
-            .is_some_and(|card| card.activity.is_none() && card.last_outcome.is_some())
-    });
-    let uid = bench.registry()[0].uid.clone();
-    bench.open_lens(&uid).expect("opens");
-    assert!(bench.lens_device_uid().is_some());
+fn a_port_that_dies_under_the_lens_holds_the_editor_through_the_tap() {
+    let (mut bench, tasks, device) = lens_on_a_running_board("dev000000daqf6dvvr6", "usb-lens-6");
+    let session = bench.lens_session_id();
 
     // The wire dies now: every read from here on is EOF. No hotplug edge
     // is delivered — the grant stays "held" as far as the sweep knows.
@@ -1724,17 +1815,30 @@ fn a_port_that_dies_under_the_lens_closes_the_editor_through_the_tap() {
         let refresh = UiAction::from_op(ProjectController::NODE_ID, ProjectOp::RefreshProject);
         let _ = drive(bench.controller.dispatch(refresh));
         bench.step(&tasks);
-        if bench.lens_device_uid().is_none() {
+        if bench.controller.lens_is_held() {
             break;
         }
         assert!(
             std::time::Instant::now() < deadline,
-            "the dead wire never closed the lens: {:?}",
+            "the dead wire never reached the lens: {:?}",
             bench.view()
         );
         std::thread::sleep(Duration::from_millis(1));
     }
-    assert!(bench.controller.runtime_pool_for_test().lens().is_none());
+    assert_eq!(bench.lens_session_id(), session, "held, not closed");
+    assert!(bench.controller.view().home.is_none());
+    // The pull that met the dead wire is the link's failure, not the
+    // project's: the strip says what happened, the project shows no issue.
+    let issue = bench
+        .controller
+        .snapshot()
+        .project
+        .sync
+        .and_then(|sync| sync.issue);
+    assert!(
+        issue.is_none(),
+        "a held editor shows no sync issue: {issue:?}"
+    );
     // A dead port is a departure: the board reads Offline, never
     // "attached but closed" with no way back.
     bench.run_until(&tasks, "the departure to reach the card", |bench| {
@@ -1747,23 +1851,25 @@ fn a_port_that_dies_under_the_lens_closes_the_editor_through_the_tap() {
     assert_eq!(bench.view().devices.len(), 1, "the card stays");
 
     // The replug: the wire works again, the connect edge sweeps the grant
-    // back in, the board re-identifies onto its own card and Open returns.
+    // back in, the board re-identifies onto its own card, and the held
+    // editor picks it up.
     device.set_failure_plan(lpa_link::providers::fake_device::FakeFailurePlan::none());
     bench
         .controller
         .note_device_hotplug(crate::app::studio::studio_command::DeviceHotplug::Connected);
-    bench.run_until(&tasks, "the replug to identify itself", |bench| {
-        bench
-            .view()
-            .devices
-            .first()
-            .is_some_and(|card| card.state_label == "Ready")
-    });
-    let uid = bench.registry()[0].uid.clone();
-    bench
-        .open_lens(&uid)
-        .expect("the replugged board opens again");
-    assert_eq!(bench.lens_device_uid().as_deref(), Some(uid.as_str()));
+    let deadline = std::time::Instant::now() + REAL_TIME_LIMIT;
+    while bench.controller.lens_is_held() {
+        let _ = bench.tick();
+        bench.step(&tasks);
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the replugged board never resumed the editor: {:?}",
+            bench.view()
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert_eq!(bench.lens_session_id(), session, "the same session resumed");
+    assert!(bench.controller.view().lens_reconnecting.is_none());
 }
 
 /// The dead-wire backstop: the browser can take minutes to report a USB
@@ -1837,12 +1943,8 @@ fn a_link_reset_under_the_lens_keeps_the_editor_and_says_reconnecting() {
         .view()
         .lens_reconnecting
         .expect("the page says it is reconnecting");
-    assert!(
-        strip.headline.starts_with("Reconnecting to "),
-        "{}",
-        strip.headline
-    );
-    assert!(strip.detail.contains("restarted"), "{}", strip.detail);
+    assert_eq!(strip.headline, "Reconnecting…");
+    assert!(strip.detail.contains("was reset"), "{}", strip.detail);
 
     // Well past the dead-wire count: the pulls fail, the editor stays.
     for _ in 0..5 {
@@ -1898,7 +2000,7 @@ fn studios_own_reset_keeps_the_editor_open() {
     let card = bench.view().devices[0].clone();
     let identifies_before = identify_count(&card);
 
-    bench.gesture(DeviceAction::ResetBoard { device: card.id });
+    bench.press_device(card.id, "reset-board", OfferArgs::new());
     assert!(
         bench.lens_device_uid().is_some(),
         "the reset command reaching the link must not close the lens on its own"
@@ -1956,7 +2058,11 @@ fn a_stall_under_the_lens_shows_reconnecting_until_the_board_answers() {
         .view()
         .lens_reconnecting
         .expect("a stall says reconnecting");
-    assert!(strip.detail.contains("went quiet"), "{}", strip.detail);
+    assert!(
+        strip.detail.contains("stopped responding"),
+        "{}",
+        strip.detail
+    );
 
     bench
         .controller
@@ -2600,14 +2706,14 @@ fn three_failed_pulls_park_the_feed_until_the_board_says_hello_again() {
     // The board answers again and the user reconnects: a new window, a new
     // hello, and the feed re-arms on it.
     device.set_drop_responses(false);
-    bench.gesture(DeviceAction::Disconnect { device: device_id });
+    bench.press_device(device_id, "disconnect", OfferArgs::new());
     bench.run_until(&tasks, "the port to close", |bench| {
         !bench.controller.devices_for_test().roster().devices()[0]
             .evidence
             .presence
             .is_open()
     });
-    bench.gesture(DeviceAction::Connect { device: device_id });
+    bench.press_device(device_id, "connect", OfferArgs::new());
     bench.run_until(&tasks, "the board to be Ready again", |bench| {
         bench.view().devices.first().is_some_and(|card| {
             card.activity.is_none()
@@ -2763,7 +2869,9 @@ fn add_a_device_pops_the_chooser_and_identifies_what_it_returns() {
     assert!(bench.view().devices.is_empty());
     assert!(bench.view().pending.is_empty(), "no grants, no ports");
 
-    bench.gesture(DeviceAction::AddFromUsb);
+    bench
+        .press("devices/connect-usb", OfferArgs::new())
+        .expect("the chooser press never fails loudly");
     bench.run_until(&tasks, "the chosen port to identify", |bench| {
         !bench.view().devices.is_empty()
     });
@@ -2778,7 +2886,9 @@ fn a_dismissed_chooser_leaves_the_roster_alone() {
     let (mut bench, tasks) = DeviceBench::ungranted(&device, "usb-bench-3");
     bench.chooser_grants.set(false);
 
-    bench.gesture(DeviceAction::AddFromUsb);
+    bench
+        .press("devices/connect-usb", OfferArgs::new())
+        .expect("the chooser press never fails loudly");
     for _ in 0..50 {
         bench.step(&tasks);
     }
@@ -2809,7 +2919,10 @@ fn cancelling_mid_identify_ends_the_activity_and_leaves_a_way_out() {
         .next()
         .expect("the pending link carries a provisional device id");
 
-    bench.gesture(DeviceAction::CancelActivity { device: device_id });
+    // Not pressed: a pending link offers no Cancel — its card's escape
+    // dismisses the link (`devices/<ref>/dismiss`). This row pins the
+    // model's own cancel of a provisional device's identification.
+    bench.unoffered_gesture(DeviceAction::CancelActivity { device: device_id });
     bench.run_until(&tasks, "the activity to wind down", |bench| {
         bench
             .view()
@@ -2846,7 +2959,7 @@ fn forgetting_an_identified_device_deletes_its_row_and_gives_the_grant_back() {
     )
     .unwrap();
 
-    bench.gesture(DeviceAction::Forget { device: device_id });
+    bench.press_device_lasting(device_id, "forget", OfferArgs::new());
     bench.step(&tasks);
 
     assert!(bench.view().devices.is_empty(), "the card is gone");
@@ -2972,13 +3085,11 @@ fn a_flash_from_the_blank_pending_card_runs_to_ready_named_and_registered() {
     let target = pending.device;
     let choice = c6_board_choice();
 
-    bench.gesture(DeviceAction::Flash {
-        device: target,
-        board_id: choice.board_id.clone(),
-        build_id: choice.build_id.clone(),
-        park_first: false,
-        name: None,
-    });
+    bench.press_device(
+        target,
+        "flash",
+        OfferArgs::new().with("board", &choice.board_id),
+    );
 
     // The gesture adopts: the pending card becomes a device card, busy
     // flashing, with the effect's progress visibly on it (the 2026-07-28
@@ -3054,13 +3165,13 @@ fn a_flash_with_a_typed_name_wears_it_instead_of_the_derived_one() {
     let target = bench.view().pending[0].device;
     let choice = c6_board_choice();
 
-    bench.gesture(DeviceAction::Flash {
-        device: target,
-        board_id: choice.board_id.clone(),
-        build_id: choice.build_id.clone(),
-        park_first: false,
-        name: Some("Porch lantern".to_string()),
-    });
+    bench.press_device(
+        target,
+        "flash",
+        OfferArgs::new()
+            .with("board", &choice.board_id)
+            .with("name", "Porch lantern"),
+    );
     bench.run_until(&tasks, "the flashed board to land Ready", |bench| {
         bench
             .view()
@@ -3097,13 +3208,11 @@ fn a_mid_write_failure_lands_on_an_honest_face_with_retry_in_place() {
     let target = bench.view().pending[0].device;
     let choice = c6_board_choice();
 
-    bench.gesture(DeviceAction::Flash {
-        device: target,
-        board_id: choice.board_id,
-        build_id: choice.build_id,
-        park_first: false,
-        name: None,
-    });
+    bench.press_device(
+        target,
+        "flash",
+        OfferArgs::new().with("board", &choice.board_id),
+    );
     bench.run_until(&tasks, "the failure to settle", |bench| {
         bench
             .view()
@@ -3148,13 +3257,11 @@ fn post_flash_silence_climbs_the_ladder_then_fails_with_honest_guidance() {
     let target = bench.view().pending[0].device;
     let choice = c6_board_choice();
 
-    bench.gesture(DeviceAction::Flash {
-        device: target,
-        board_id: choice.board_id,
-        build_id: choice.build_id,
-        park_first: true,
-        name: None,
-    });
+    bench.press_device(
+        target,
+        "flash",
+        OfferArgs::new().with("board", &choice.board_id),
+    );
     bench.run_until(&tasks, "the ladder to exhaust", |bench| {
         bench
             .view()
@@ -3201,13 +3308,11 @@ fn forgetting_mid_flash_evicts_the_hung_effect_and_cleans_up() {
     let target = bench.view().pending[0].device;
     let choice = c6_board_choice();
 
-    bench.gesture(DeviceAction::Flash {
-        device: target,
-        board_id: choice.board_id,
-        build_id: choice.build_id,
-        park_first: false,
-        name: None,
-    });
+    bench.press_device(
+        target,
+        "flash",
+        OfferArgs::new().with("board", &choice.board_id),
+    );
     bench.run_until(&tasks, "the flash to be visibly running", |bench| {
         bench
             .view()
@@ -3216,7 +3321,7 @@ fn forgetting_mid_flash_evicts_the_hung_effect_and_cleans_up() {
             .is_some_and(|card| card.activity.is_some())
     });
 
-    bench.gesture(DeviceAction::Forget { device: target });
+    bench.press_device_lasting(target, "forget", OfferArgs::new());
     for _ in 0..20 {
         bench.step(&tasks);
     }
@@ -3659,7 +3764,7 @@ fn connecting_the_board_a_held_open_waits_on_lands_the_open() {
     let key = library_package(&bench, "Choker", SIM_TARGET);
     bench.settle_library();
     let board = bench.view().devices[0].id;
-    bench.gesture(DeviceAction::Disconnect { device: board });
+    bench.press_device(board, "disconnect", OfferArgs::new());
     bench.run_until(&tasks, "the port to close", |bench| {
         bench.view().devices[0].state_label != "Ready"
     });
@@ -3672,7 +3777,7 @@ fn connecting_the_board_a_held_open_waits_on_lands_the_open() {
     };
     assert_eq!(wait.reason, DeviceWaitReason::PortClosed);
 
-    bench.gesture(DeviceAction::Connect { device: board });
+    bench.press_device(board, "connect", OfferArgs::new());
     let deadline = std::time::Instant::now() + REAL_TIME_LIMIT;
     while bench.controller.view().open_project_uid.is_none() {
         bench.step(&tasks);
@@ -4770,6 +4875,9 @@ fn a_named_starter_push_names_the_library_package_and_the_board() {
     let device_id = bench.view().devices[0].id;
     assert_ne!(bench.view().devices[0].title, "Porch sign");
 
+    // Dispatched straight, not pressed: this bench's board never reports a
+    // board id, so its push offer lists no starter (`new:…`) and takes no
+    // `name`. The row pins what the picker's New tab dispatches.
     let action = crate::DevicePushOp {
         device: device_id,
         source: crate::PushSource::NewForBoard {
@@ -4863,13 +4971,16 @@ fn a_project_that_cannot_be_prepared_fails_on_the_card_not_in_a_log() {
     });
     let device_id = bench.view().devices[0].id;
 
-    bench.push_gesture(
+    // Not an option the push offer lists, so dispatched straight: the
+    // row is the model's own refusal of a board the catalog never had.
+    drive(bench.controller.dispatch(crate::DevicePushOp::action_for(
         device_id,
         crate::PushSource::NewForBoard {
             board_id: "no-such-board".to_string(),
             name: None,
         },
-    );
+    )))
+    .expect("a push gesture never fails loudly");
     bench.run_until(&tasks, "the refusal to settle", |bench| {
         bench
             .view()
@@ -4914,7 +5025,7 @@ fn cancelling_mid_push_is_held_then_bounded_by_eviction() {
             .is_some_and(|card| card.activity.is_some())
     });
 
-    bench.gesture(DeviceAction::CancelActivity { device: device_id });
+    bench.press_device(device_id, "cancel", OfferArgs::new());
     assert!(
         bench.view().devices[0]
             .activity
@@ -4984,7 +5095,7 @@ fn factory_reset_wipes_the_board_and_the_card_comes_back_blank() {
     assert_eq!(card.state_label, "Ready", "{card:?}");
     let wiped = card.id;
 
-    bench.gesture(DeviceAction::Erase { device: wiped });
+    bench.press_device_lasting(wiped, "erase", OfferArgs::new());
     bench.run_until(&tasks, "the erase to settle as a blank verdict", |bench| {
         bench
             .view()
@@ -5032,7 +5143,7 @@ fn a_blank_boards_flash_offer_lists_its_boards_and_flashes_through_a_press() {
         "a running LightPlayer updates; it has no Flash"
     );
 
-    bench.gesture(DeviceAction::Erase { device: wiped });
+    bench.press_device_lasting(wiped, "erase", OfferArgs::new());
     bench.run_until(&tasks, "the erase to settle as a blank verdict", |bench| {
         bench
             .view()
@@ -5383,8 +5494,8 @@ fn a_pending_blank_chip_publishes_its_flash_at_new_n() {
             .first()
             .is_some_and(|pending| pending.needs_firmware())
     });
-    let provisional = bench.view().pending[0].device;
-    let prefix = format!("devices/new-{}", provisional.0);
+    // The only unidentified board is `new-1`, whatever its roster handle.
+    let prefix = "devices/new-1".to_string();
     let view = bench.controller.view();
     assert_eq!(
         board_verbs(&view, &prefix),
@@ -5439,8 +5550,7 @@ fn the_agents_flash_over_firmware_is_a_card_the_user_may_re_pick() {
             .first()
             .is_some_and(|pending| pending.needs_firmware())
     });
-    let provisional = bench.view().pending[0].device;
-    let flash = format!("devices/new-{}/flash", provisional.0);
+    let flash = "devices/new-1/flash".to_string();
     let path = crate::OfferPath::parse(&flash).unwrap();
     let offer = bench
         .controller
@@ -5682,7 +5792,7 @@ fn removing_the_project_clears_the_board_and_leaves_the_library_alone() {
     );
 
     // Take it off — through the ordinary action path, like the UI.
-    bench.gesture(DeviceAction::RemoveProject { device: device_id });
+    bench.press_device_lasting(device_id, "remove-project", OfferArgs::new());
     bench.run_until(&tasks, "the removal to settle", |bench| {
         bench
             .view()
@@ -5747,7 +5857,7 @@ fn a_refused_removal_leaves_the_running_face_and_says_why() {
     });
 
     bench.remove_plan.set(RemovePlan::Fail);
-    bench.gesture(DeviceAction::RemoveProject { device: device_id });
+    bench.press_device_lasting(device_id, "remove-project", OfferArgs::new());
     bench.run_until(&tasks, "the failure to settle", |bench| {
         bench
             .view()
@@ -5808,7 +5918,7 @@ fn cancelling_mid_removal_is_held_then_bounded_by_eviction() {
 
     // The delete takes the wire and never gives it back.
     bench.remove_plan.set(RemovePlan::Hang);
-    bench.gesture(DeviceAction::RemoveProject { device: device_id });
+    bench.press_device_lasting(device_id, "remove-project", OfferArgs::new());
     bench.run_until(&tasks, "the removal to be visibly running", |bench| {
         bench
             .view()
@@ -5817,7 +5927,7 @@ fn cancelling_mid_removal_is_held_then_bounded_by_eviction() {
             .is_some_and(|card| card.activity.is_some())
     });
 
-    bench.gesture(DeviceAction::CancelActivity { device: device_id });
+    bench.press_device(device_id, "cancel", OfferArgs::new());
     let asked_at = bench.controller.device_now_for_test().0;
     assert!(
         bench.view().devices[0]
@@ -5928,7 +6038,7 @@ fn an_effect_that_outlives_its_activity_gives_the_wire_back_and_the_pump_resumes
 
     // Cancel is held through the write window; the grace evicts. The
     // effect's future is STILL pending at this point — nothing can stop it.
-    bench.gesture(DeviceAction::CancelActivity { device: device_id });
+    bench.press_device(device_id, "cancel", OfferArgs::new());
     bench.run_until(&tasks, "the cancel grace to bound the hold", |bench| {
         bench
             .view()
@@ -5963,7 +6073,7 @@ fn an_effect_that_outlives_its_activity_gives_the_wire_back_and_the_pump_resumes
 
     // And the wire genuinely works: a re-ask reaches the board and comes
     // back, over the pump that was handed the port back.
-    bench.gesture(DeviceAction::Identify { device: device_id });
+    bench.press_device(device_id, "identify", OfferArgs::new());
     bench.run_until(&tasks, "the re-identify to settle", |bench| {
         bench
             .view()
@@ -6001,7 +6111,7 @@ fn a_board_unplugged_with_its_port_closed_departs_and_a_replug_brings_it_back() 
     let device_id = bench.view().devices[0].id;
 
     // The user closes the port. The board is still plugged in.
-    bench.gesture(DeviceAction::Disconnect { device: device_id });
+    bench.press_device(device_id, "disconnect", OfferArgs::new());
     bench.run_until(&tasks, "the port to close", |bench| {
         bench
             .view()
@@ -6072,7 +6182,7 @@ fn an_unrelated_disconnect_leaves_a_still_granted_port_alone() {
             .is_some_and(|card| card.state_label == "Ready")
     });
     let device_id = bench.view().devices[0].id;
-    bench.gesture(DeviceAction::Disconnect { device: device_id });
+    bench.press_device(device_id, "disconnect", OfferArgs::new());
     bench.run_until(&tasks, "the port to close", |bench| {
         bench
             .view()
@@ -6111,7 +6221,8 @@ fn powered_on_sim() -> (DeviceBench, TaskPool, String, FakeEsp32Device) {
     let (mut bench, tasks, uid) = DeviceBench::with_sim(&device, SIM_TARGET);
     let target = bench.view().devices[0].id;
 
-    bench.gesture(DeviceAction::Connect { device: target });
+    // A powered-off sim's Power on sits in the card's Reconnect slot (Q5).
+    bench.press_device(target, "reconnect", OfferArgs::new());
     bench.run_until(&tasks, "the sim to identify", |bench| {
         bench
             .view()
@@ -6146,11 +6257,14 @@ fn the_picker_mints_a_sim_of_the_picked_target_and_powers_it_on() {
 
     assert!(bench.registry().is_empty(), "nothing before the pick");
 
-    drive(bench.controller.dispatch(crate::SimCreateOp::action_for(
-        SIM_TARGET,
-        crate::Backing::Sim,
-    )))
-    .expect("the pick starts a device");
+    bench
+        .press(
+            "devices/new-sim",
+            OfferArgs::new()
+                .with("board", SIM_TARGET)
+                .with("backing", crate::Backing::Sim.tag()),
+        )
+        .expect("the pick starts a device");
 
     let rows = bench.registry();
     assert_eq!(rows.len(), 1, "the pick created ONE device: {rows:?}");
@@ -6307,7 +6421,7 @@ fn powering_a_sim_off_keeps_the_record_and_its_sidecar() {
     let (mut bench, tasks, uid, _device) = powered_on_sim();
     let target = bench.view().devices[0].id;
 
-    bench.gesture(DeviceAction::Disconnect { device: target });
+    bench.press_device(target, "disconnect", OfferArgs::new());
     for _ in 0..40 {
         bench.step(&tasks);
     }
@@ -6342,7 +6456,7 @@ fn forgetting_a_sim_takes_its_record_and_its_sidecar() {
     let target = bench.view().devices[0].id;
     assert!(bench.sim_sidecar(&uid).is_some());
 
-    bench.gesture(DeviceAction::Forget { device: target });
+    bench.press_device_lasting(target, "forget", OfferArgs::new());
     for _ in 0..40 {
         bench.step(&tasks);
     }
@@ -6373,7 +6487,11 @@ fn flashing_a_sim_ends_with_the_scripted_summary_and_no_fake_facts() {
     let (_, minted_mac) = sim_identity();
     let choice = c6_board_choice();
 
-    bench.gesture(DeviceAction::Flash {
+    // Dispatched straight, not pressed: a running sim offers no Flash, only
+    // `update-firmware`, which binds the C6's `park_first: true` — and the
+    // scripted sim, parked, never answers again (the row then fails with
+    // "the board never answered"). This row pins the unparked ladder.
+    bench.unoffered_gesture(DeviceAction::Flash {
         device: target,
         board_id: choice.board_id.clone(),
         build_id: choice.build_id.clone(),
@@ -6737,7 +6855,7 @@ fn powering_the_sim_off_and_reopening_the_project_starts_it_again() {
     let uid = bench.registry()[0].uid.clone();
     let card = bench.view().devices[0].id;
 
-    bench.gesture(DeviceAction::Disconnect { device: card });
+    bench.press_device(card, "disconnect", OfferArgs::new());
     assert!(
         !bench
             .sims
@@ -7508,7 +7626,7 @@ fn pushing_an_old_format_library_project_shows_the_upgrade_notice() {
     use lpc_model::PROJECT_FORMAT_VERSION;
 
     let device = empty_light_player("dev000000daqf6dvvr2");
-    let (mut bench, _tasks) = identified(&device, "usb-old-format-2");
+    let (mut bench, tasks) = identified(&device, "usb-old-format-2");
 
     // The same real v10 fixture as the test above, installed as-is.
     let old = PROJECT_FORMAT_VERSION - 1;
@@ -7537,7 +7655,8 @@ fn pushing_an_old_format_library_project_shows_the_upgrade_notice() {
     bench.settle_library();
 
     let card = bench.view().devices[0].clone();
-    let notices = bench.push_gesture_notices(
+    bench.wait_for_verb(&tasks, card.id, "push");
+    let notices = bench.push_gesture(
         card.id,
         crate::PushSource::Library {
             project_uid: uid.to_string(),
@@ -7562,7 +7681,7 @@ fn pushing_an_old_format_library_project_shows_the_upgrade_notice() {
 #[test]
 fn pushing_a_current_format_library_project_shows_no_upgrade_notice() {
     let device = empty_light_player("dev000000daqf6dvvr3");
-    let (mut bench, _tasks) = identified(&device, "usb-current-format-1");
+    let (mut bench, tasks) = identified(&device, "usb-current-format-1");
 
     let example = crate::app::home::embedded_example::embedded_example(
         crate::first_bundled_example_id().expect("this build bundles examples"),
@@ -7581,7 +7700,8 @@ fn pushing_a_current_format_library_project_shows_no_upgrade_notice() {
     bench.settle_library();
 
     let card = bench.view().devices[0].clone();
-    let notices = bench.push_gesture_notices(
+    bench.wait_for_verb(&tasks, card.id, "push");
+    let notices = bench.push_gesture(
         card.id,
         crate::PushSource::Library {
             project_uid: uid.to_string(),

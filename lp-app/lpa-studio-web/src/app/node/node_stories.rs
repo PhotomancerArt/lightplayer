@@ -311,11 +311,13 @@ pub(crate) fn dirty_detail_popup() -> Element {
 
     rsx! {
         div { class: "tw:flex tw:min-h-[620px] tw:justify-end",
-            NodeDetailPopover {
-                header: view.header,
-                pending_edits: playlist_pending_edits(),
-                on_action: move |_| {},
-                initially_open: true,
+            OffersProvider { offers: crate::app::story_fixtures::revert_edit_offers(&playlist_pending_edits()),
+                NodeDetailPopover {
+                    header: view.header,
+                    pending_edits: playlist_pending_edits(),
+                    on_action: move |_| {},
+                    initially_open: true,
+                }
             }
         }
     }

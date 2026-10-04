@@ -388,7 +388,7 @@ mod tests {
             u64::from(id),
             ServerMsgBody::AccessList {
                 ble_enabled: true,
-                open: false,
+                open: lpc_access::OpenTo::Nobody,
                 entries: Vec::new(),
             },
         );

@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use lpa_devices::DeviceId;
 
-use crate::{OfferPath, UiOffer};
+use crate::{OfferPath, UiOffer, UiOfferFocus};
 
 /// Every offer the view publishes, addressed by path, in **publish order**.
 ///
@@ -18,11 +18,16 @@ use crate::{OfferPath, UiOffer};
 /// its verbs are at `devices/<board ref>` — a ref only core can work out
 /// (the MAC, the kind its endpoint names, and the de-duplication when two
 /// entries answer to one MAC).
+///
+/// And it knows where the user is ([`Self::focus`]): the focused node and
+/// the page's area, as prefixes. [`Self::search`] ranks by it, so the ⌘K
+/// palette and any other consumer get the same focus-near-first order.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct UiOfferTree {
     offers: Vec<UiOffer>,
     index: BTreeMap<OfferPath, usize>,
     devices: BTreeMap<DeviceId, OfferPath>,
+    focus: UiOfferFocus,
 }
 
 impl UiOfferTree {
@@ -64,6 +69,17 @@ impl UiOfferTree {
         self.devices.insert(device, prefix);
     }
 
+    /// Say where the user is (core works it out from place and the focused
+    /// node, after publishing).
+    pub fn set_focus(&mut self, focus: UiOfferFocus) {
+        self.focus = focus;
+    }
+
+    /// Where the user is, as offer prefixes.
+    pub fn focus(&self) -> &UiOfferFocus {
+        &self.focus
+    }
+
     /// Where `device`'s verbs live, when the roster has it: the prefix a
     /// card hands [`Self::verbs_of`].
     pub fn device_prefix(&self, device: DeviceId) -> Option<&OfferPath> {
@@ -88,6 +104,18 @@ impl UiOfferTree {
         self.offers.iter().filter(move |offer| {
             offer.path.len() == prefix.len() + 1 && offer.path.starts_with(&prefix)
         })
+    }
+
+    /// A node's own verbs: [`Self::verbs_of`] plus the verbs it groups
+    /// under a namespace of its own (`project/<fixture>/patch/assign`),
+    /// never a child node's. What the agent's `read` lists for a node; a
+    /// card's header still asks [`Self::verbs_of`], because a group's verbs
+    /// have controls of their own.
+    pub fn own_verbs_of(&self, prefix: &OfferPath) -> impl Iterator<Item = &UiOffer> + '_ {
+        let prefix = prefix.clone();
+        self.offers
+            .iter()
+            .filter(move |offer| offer.path.is_own_verb_of(&prefix))
     }
 
     /// How many offers are published.
@@ -151,6 +179,35 @@ mod tests {
     }
 
     #[test]
+    fn own_verbs_of_adds_the_nodes_grouped_verbs_but_never_a_childs() {
+        let node = OfferPath::project_node(&ProjectNodeAddress::parse("/demo.module").unwrap());
+        let child = OfferPath::project_node(
+            &ProjectNodeAddress::parse("/demo.module/dome.fixture").unwrap(),
+        );
+        let mut tree = UiOfferTree::new();
+        tree.publish(offer(node.clone().child("revert")));
+        tree.publish(offer(child.clone().child("remove")));
+        tree.publish(offer(child.clone().child("patch").child("reverse")));
+
+        assert_eq!(
+            paths(tree.own_verbs_of(&node)),
+            ["project/demo.module/revert"]
+        );
+        assert_eq!(
+            paths(tree.own_verbs_of(&child)),
+            [
+                "project/demo.module/dome.fixture/remove",
+                "project/demo.module/dome.fixture/patch/reverse"
+            ]
+        );
+        assert_eq!(
+            paths(tree.verbs_of(&child)),
+            ["project/demo.module/dome.fixture/remove"],
+            "a header's verbs stay one segment down"
+        );
+    }
+
+    #[test]
     fn append_keeps_both_orders() {
         let mut tree = UiOfferTree::new();
         tree.publish(offer(OfferPath::project().child("save")));
@@ -164,7 +221,7 @@ mod tests {
     #[test]
     fn a_device_is_found_by_its_handle() {
         let mut tree = UiOfferTree::new();
-        let prefix = OfferPath::board(&crate::BoardRef::New(DeviceId(4)));
+        let prefix = OfferPath::board(&crate::BoardRef::New(4));
         tree.publish(offer(prefix.clone().child("forget")));
         tree.place_device(DeviceId(4), prefix.clone());
 

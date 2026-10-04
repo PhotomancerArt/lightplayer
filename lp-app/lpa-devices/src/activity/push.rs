@@ -255,6 +255,7 @@ impl ActivityReducer for PushActivity {
                 Event::TimerFired { .. } => self.handle_timer(now, ctx),
                 Event::Link { event, .. } => self.handle_link_event(now, event, ctx),
                 Event::IdentityObserved { .. }
+                | Event::GrantAnswered { .. }
                 | Event::LinkAttached { .. }
                 | Event::LinkDetached { .. }
                 // The borrow this push's own effect holds: fold business

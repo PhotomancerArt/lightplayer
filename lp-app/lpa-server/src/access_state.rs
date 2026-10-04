@@ -15,8 +15,8 @@ use alloc::vec::Vec;
 use core::cell::Cell;
 use hashbrown::HashMap;
 use lpc_access::{
-    BeginOutcome, LoginMac, LoginOffer, LoginOutcome, LoginState, NONCE_BYTES, SALT_BYTES, Tier,
-    key_candidates,
+    BeginOutcome, LoginMac, LoginOffer, LoginOutcome, LoginState, NONCE_BYTES, OpenTo, SALT_BYTES,
+    Tier, key_candidates,
 };
 use lpc_shared::transport::{KeyAnswer, Link, LinkId, LinkTrust};
 use lpc_wire::HelloAuth;
@@ -45,10 +45,10 @@ pub struct AccessState {
     login_owner: Option<LinkId>,
     /// Milliseconds of frame time since the server started.
     clock_ms: u64,
-    /// The device store's `open` flag, cached so an untrusted link's every
-    /// request does not read flash. Invalidated by any fs mutation the
+    /// The device store's `open` setting, cached so an untrusted link's
+    /// every request does not read flash. Invalidated by any fs mutation the
     /// server handles (`invalidate_device_store`).
-    device_open: Cell<Option<bool>>,
+    device_open: Cell<Option<OpenTo>>,
     entropy: Option<EntropySource>,
     /// Secure links: the tier each candidate of a link's last key lookup
     /// grants (`None` for the anonymous key), until its handshake says which
@@ -124,10 +124,11 @@ impl AccessState {
             .copied()
             .unwrap_or_else(|| LinkSession::new(link.trust));
         match session.trust {
-            LinkTrust::Trusted => session.effective_tier(false),
+            LinkTrust::Trusted => session.effective_tier(OpenTo::Nobody),
+            // A link already granted edit never reads the store.
             LinkTrust::Untrusted | LinkTrust::Keyed => match session.granted {
-                Some(granted) => Some(granted),
-                None => session.effective_tier(self.device_open(fs)),
+                Some(Tier::Edit) => Some(Tier::Edit),
+                _ => session.effective_tier(self.device_open(fs)),
             },
         }
     }
@@ -141,7 +142,7 @@ impl AccessState {
         }
     }
 
-    /// Drop the cached `open` flag: the device store may have changed.
+    /// Drop the cached `open` setting: the device store may have changed.
     pub fn invalidate_device_store(&self) {
         self.device_open.set(None);
     }
@@ -306,7 +307,7 @@ impl AccessState {
         Some(self.key_lookups.swap_remove(at).1)
     }
 
-    fn device_open(&self, fs: &dyn LpFs) -> bool {
+    fn device_open(&self, fs: &dyn LpFs) -> OpenTo {
         if let Some(open) = self.device_open.get() {
             return open;
         }

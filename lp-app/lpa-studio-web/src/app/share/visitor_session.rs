@@ -192,18 +192,13 @@ impl VisitorSession {
     /// loaded project, and this dispatch bypasses `on_action`'s gate).
     pub fn fork(&self) {
         // A TRANSIENT view session (P5): the explicit save IS the fork —
-        // dispatching it keeps the unsaved edits (they ride the save into
-        // the fork), so no discard confirm applies.
+        // core's `project/save-copy` keeps the unsaved edits (they ride the
+        // save into the fork), so no discard confirm applies.
         if let Some(uid) = self.uid()
             && self.is_open(uid)
             && self.view.peek().open_project_transient
         {
-            self.tx.send(lpa_studio_core::StudioCommand::Action(
-                lpa_studio_core::UiAction::from_op(
-                    lpa_studio_core::ControllerId::new(lpa_studio_core::ProjectController::NODE_ID),
-                    lpa_studio_core::ProjectOp::SaveOverlay,
-                ),
-            ));
+            crate::app::share::fork_transient_session(&self.tx, &self.view.peek().offers);
             return;
         }
         if self.overlay_dirty()

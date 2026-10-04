@@ -21,8 +21,8 @@ use core::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 use lp_gfx_lpvm::TargetLpvmGraphics;
 use lpa_server::{HeartbeatStatus, LpGraphics, LpServer, Required};
 use lpc_access::{
-    CHALLENGE_TTL_MS, DeviceAccessFile, LoginMac, LoginOutcome, ProjectAccessFile, SecretEntry,
-    Tier, derive_login_key,
+    CHALLENGE_TTL_MS, DeviceAccessFile, LoginMac, LoginOutcome, OpenTo, ProjectAccessFile,
+    SecretEntry, Tier, derive_login_key,
 };
 use lpc_model::{AsLpPath, AsLpPathBuf, LpValue, NodeAttachSite, NodeId};
 use lpc_shared::output::MemoryOutputProvider;
@@ -440,7 +440,7 @@ fn locking_the_device_over_usb_takes_open_play_away() {
     let mut rig = Rig::for_state(LinkState::UntrustedOpen);
     assert_eq!(rig.server.link_tier(BLE_A), Some(Tier::Play));
     let locked = DeviceAccessFile {
-        open: false,
+        open: OpenTo::Nobody,
         ..rig.store.clone()
     };
     let reply = rig.request(
@@ -455,6 +455,41 @@ fn locking_the_device_over_usb_takes_open_play_away() {
         WireServerMsgBody::Filesystem(FsResponse::Write { error: None, .. })
     ));
     assert_eq!(rig.server.link_tier(BLE_A), None);
+}
+
+/// A device open at edit (a new board's default, for now) lets anyone
+/// nearby author with no login — and a play login there authors too.
+#[test]
+fn open_at_edit_grants_edit_to_anyone_nearby() {
+    for state in [LinkState::UntrustedNone, LinkState::UntrustedPlay] {
+        let mut rig = Rig::for_state(state);
+        let open = DeviceAccessFile {
+            open: OpenTo::Edit,
+            ..rig.store.clone()
+        };
+        let reply = rig.request(
+            USB,
+            ClientRequest::AccessSetSwitches {
+                ble_enabled: None,
+                open: Some(open.open),
+            },
+        );
+        assert!(
+            matches!(
+                reply,
+                WireServerMsgBody::AccessList {
+                    open: OpenTo::Edit,
+                    ..
+                }
+            ),
+            "{reply:?}"
+        );
+        assert_eq!(rig.server.link_tier(BLE_A), Some(Tier::Edit), "{state:?}");
+        assert!(matches!(
+            rig.request(BLE_A, ClientRequest::StopAllProjects),
+            WireServerMsgBody::StopAllProjects
+        ));
+    }
 }
 
 // --- the table's rows -------------------------------------------------------
@@ -790,11 +825,11 @@ impl LinkState {
         }
     }
 
-    fn device_open(self) -> bool {
-        matches!(
-            self,
-            LinkState::UntrustedOpen | LinkState::KeyedAnonymousOpen
-        )
+    fn device_open(self) -> OpenTo {
+        match self {
+            LinkState::UntrustedOpen | LinkState::KeyedAnonymousOpen => OpenTo::Play,
+            _ => OpenTo::Nobody,
+        }
     }
 }
 
