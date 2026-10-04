@@ -192,7 +192,7 @@ fn a_board_whose_files_do_not_fit_is_refused_and_left_byte_identical() {
         told(&cli)
     );
     assert!(
-        told(&cli).contains("fit"),
+        told(&cli).contains("blocks of 4 KB"),
         "the refusal says why:\n{}",
         told(&cli)
     );
