@@ -22,6 +22,11 @@ engines belongs in `lp-app`, `lp-fw`, or another app-facing layer.
   updates.
 - `lpc-shared` — small shared support utilities used by core/app crates.
 - `lpc-update` — over-the-air update protocol v1 (channel 3): the codec, the board manifest, the progress record, and the board's sans-IO update session.
+- `lpc-firmware-release` — the firmware distribution contract
+  (`ota-manifest.json` format 1, release asset names, the
+  `/firmware/<target>/<release>/<file>` lookup grammar). Not
+  engine-internal: it lives here because `lp-cloud-server` serves it and
+  lp-cloud depends on lp-core, never on lp-app.
 
 ## Naming boundaries (M4.3b)
 

@@ -1,0 +1,264 @@
+{
+  "$defs": {
+    "EncodedPieceFile": {
+      "description": "One piece's compressed file: its chunks back to back, with no header.",
+      "properties": {
+        "chunks": {
+          "description": "`chunks[i]` = the compressed length of raw chunk `i`; **`0` means \"no\ncompressed form, send raw\"**. One entry per `ceil(piece length /\nchunkBytes)` chunk; offsets are the running sum.",
+          "items": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "file": {
+          "description": "The file's name inside the release (`core.z`).",
+          "type": "string"
+        },
+        "length": {
+          "description": "The file's length in bytes: the sum of `chunks`.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "sha256": {
+          "description": "SHA-256 of the file, lowercase hex.",
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "file",
+        "length",
+        "sha256",
+        "chunks"
+      ],
+      "type": "object"
+    },
+    "Encoding1": {
+      "description": "Encoding 1: a `.z` file per piece, its chunks back to back, indexed here.",
+      "properties": {
+        "chunkBytes": {
+          "description": "Raw piece bytes per chunk: `4096` (the last chunk is short).",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "codec": {
+          "description": "For people and tools: `\"deflate-raw\"` (RFC 1951, preset dictionary).",
+          "type": "string"
+        },
+        "core": {
+          "$ref": "#/$defs/EncodedPieceFile",
+          "description": "The core's compressed chunks."
+        },
+        "engine": {
+          "$ref": "#/$defs/EncodedPieceFile",
+          "description": "The engine's compressed chunks."
+        },
+        "id": {
+          "description": "Always `1`.",
+          "format": "uint32",
+          "maximum": 1,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "windowBytes": {
+          "description": "The dictionary window: `32768`.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "codec",
+        "chunkBytes",
+        "windowBytes",
+        "core",
+        "engine"
+      ],
+      "type": "object"
+    },
+    "EncodingEntry": {
+      "description": "One compressed copy of the pieces. Readers choose by `id` alone and skip an id they do not know, whatever its other keys; only `id` is required. `id: 1` is the update protocol's dictionary rule (lpc-update) and must have Encoding1's shape.",
+      "if": {
+        "properties": {
+          "id": {
+            "const": 1
+          }
+        }
+      },
+      "properties": {
+        "id": {
+          "maximum": 4294967295,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "then": {
+        "$ref": "#/$defs/Encoding1"
+      },
+      "type": "object"
+    },
+    "PackageRef": {
+      "description": "The USB package this build came from.",
+      "properties": {
+        "file": {
+          "description": "The package manifest's name inside the lookup (`package.json`).",
+          "type": "string"
+        },
+        "image": {
+          "$ref": "#/$defs/PieceFile",
+          "description": "The merged image the package flashes."
+        },
+        "length": {
+          "description": "Length in bytes.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "sha256": {
+          "description": "SHA-256, lowercase hex.",
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "file",
+        "length",
+        "sha256",
+        "image"
+      ],
+      "type": "object"
+    },
+    "PieceFile": {
+      "description": "A file the manifest names: its name in the lookup, length, SHA-256.",
+      "properties": {
+        "file": {
+          "description": "The file's name inside the release (`core.bin`).",
+          "type": "string"
+        },
+        "length": {
+          "description": "Length in bytes.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "sha256": {
+          "description": "SHA-256, lowercase hex.",
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "file",
+        "length",
+        "sha256"
+      ],
+      "type": "object"
+    },
+    "Requires": {
+      "description": "What a board must have to take a build over the air. Only a prediction:\nthe board decides.",
+      "properties": {
+        "layout": {
+          "description": "The flash layout; the board's must be **equal** (M4's code table:\n`1` = layout 1).",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "loader": {
+          "description": "The loader version; the board's must be **≥** this (M4's code table:\n`1` = M2's loader, `0` = no version word).",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "layout",
+        "loader"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://lightplayer.dev/schemas/ota-manifest.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "The OTA release manifest, format 1 (lpc_firmware_release::OtaManifest). Readers refuse another format and ignore unknown fields and unknown encoding ids; an additive field or a new encoding keeps format 1. See the firmware-distribution ADR.",
+  "properties": {
+    "chip": {
+      "description": "The chip word, as the build def's `chip.name` and the board say it.",
+      "type": "string"
+    },
+    "commit": {
+      "description": "The full commit, 40 lowercase hex.",
+      "pattern": "^[0-9a-f]{40}$",
+      "type": "string"
+    },
+    "core": {
+      "$ref": "#/$defs/PieceFile",
+      "description": "`core.bin`."
+    },
+    "encodings": {
+      "default": [],
+      "description": "Compressed copies, chosen by `id`; possibly empty (raw only).",
+      "items": {
+        "$ref": "#/$defs/EncodingEntry"
+      },
+      "type": "array"
+    },
+    "engine": {
+      "$ref": "#/$defs/PieceFile",
+      "description": "`engine.bin`, exactly as flashed (header committed)."
+    },
+    "format": {
+      "description": "Shape version; always `1` ([`OTA_MANIFEST_FORMAT`]).",
+      "format": "uint32",
+      "maximum": 1,
+      "minimum": 1,
+      "type": "integer"
+    },
+    "package": {
+      "$ref": "#/$defs/PackageRef",
+      "description": "The USB package (schemaVersion 2 `package.json`) and its merged image."
+    },
+    "requires": {
+      "$ref": "#/$defs/Requires",
+      "description": "What a board must have to take this build without USB."
+    },
+    "target": {
+      "description": "The target (a line of builds, e.g. `esp32c6-4mb`); opaque.",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
+      "type": "string"
+    },
+    "version": {
+      "description": "The app version: a release (`2026.10.05-3`) or, in a local package\nonly, a dev version (`abc1234[-dirty-HHMMSSPT]`).",
+      "type": "string"
+    },
+    "wireProto": {
+      "description": "The device wire protocol version, from the image's manifest core.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "format",
+    "target",
+    "chip",
+    "version",
+    "commit",
+    "wireProto",
+    "requires",
+    "core",
+    "engine",
+    "package"
+  ],
+  "title": "ota-manifest.json",
+  "type": "object"
+}

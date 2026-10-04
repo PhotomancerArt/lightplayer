@@ -5762,6 +5762,7 @@ dependencies = [
  "lpa-upgrade",
  "lpc-access",
  "lpc-engine",
+ "lpc-firmware-release",
  "lpc-hardware",
  "lpc-mapping",
  "lpc-model",
@@ -6588,6 +6589,16 @@ dependencies = [
  "serde",
  "serde_json",
  "spin",
+]
+
+[[package]]
+name = "lpc-firmware-release"
+version = "40.0.0"
+dependencies = [
+ "schemars",
+ "serde",
+ "serde_json",
+ "sha2",
 ]
 
 [[package]]
