@@ -458,7 +458,13 @@ fn the_manifest_reports_each_state_and_every_identity_field() {
     let t = m.transfer.unwrap();
     assert_eq!(
         (t.kind, t.done, t.total, t.busy, t.build_hash),
-        (PieceKind::Core, 0, y.core.len() as u32, false, y.build_hash())
+        (
+            PieceKind::Core,
+            0,
+            y.core.len() as u32,
+            false,
+            y.build_hash()
+        )
     );
     let mut host = Host::new(y.clone());
     rig.link_up(3, USB, LinkTrust::Trusted);
