@@ -1,0 +1,41 @@
+# S11 "What's a playlist? Can a button change it?": a correct, short
+# explanation; a true answer about buttons (a Button node and playlist
+# triggers exist); a free pin suggestion that is not the LED pin; nothing
+# changed until she says go.
+id = "S11"
+name = "s11-viatrix-playlist-button"
+summary = "Explains playlists and buttons truthfully, suggests a free pin, changes nothing"
+persona = "viatrix"
+tags = ["knowledge", "teach"]
+status = "pending"
+waits_for = "M10"
+note = "The agent knows nothing about Button nodes or playlist triggers and has no help pages until M10."
+
+[start]
+project = { golden = "viatrix-120-d6" }
+board = { known = "seeed/xiao-esp32-c6" }
+
+[user]
+say = "what's a playlist? and could I put a button on the skirt to switch patterns?"
+otherwise = "I don't know, what do you think?"
+
+[[user.reply]]
+topic = "pin"
+when = ["pin", "solder", "wire", "which one"]
+text = "I haven't soldered it yet. Which one should I use?"
+
+[budget]
+turns = 10
+usd = 0.25
+
+[[check]]
+kind = "unchanged"
+[[check]]
+kind = "said_any"
+words = ["playlist"]
+[[check]]
+kind = "said_any"
+words = ["button"]
+[[check]]
+kind = "said_any"
+words = ["D0", "D1", "D2", "D3", "D7", "D8", "D9", "D10"]

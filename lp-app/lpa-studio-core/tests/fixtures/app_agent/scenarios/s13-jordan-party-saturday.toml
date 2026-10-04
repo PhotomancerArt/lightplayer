@@ -1,0 +1,46 @@
+# S13 "Party Saturday": Jordan's board is connected and running his
+# project, the same project is open in Studio, and his library holds it.
+# He wants it more energetic, on the lights — not a project on a shelf.
+id = "S13"
+name = "s13-jordan-party-saturday"
+summary = "Running board → faster changes and a livelier pattern, on the board, pin and count untouched"
+persona = "jordan"
+tags = ["edit", "push", "device"]
+golden = "jordan-party"
+
+[start]
+project = { golden = "jordan-venue" }
+board = { state = "running", actual = "seeed/xiao-esp32-c6", connected = true }
+
+[user]
+say = "we've got a party saturday, can you make the lights feel more energetic? faster changes, more colour"
+otherwise = "yeah go for it."
+
+[budget]
+turns = 24
+usd = 0.60
+
+[[check]]
+kind = "playlist"
+min_entries = 4
+step_seconds = [1.0, 15.0]
+[[check]]
+kind = "entries_added"
+min = 1
+from = ["plasma", "plasma-duo", "spiral", "ripples", "heartbeat", "color-wipe", "comet", "meteor", "scanner", "twinkle", "palette-waves", "noise-hard", "veins"]
+# The board runs the new version (these read the board's own project).
+[[check]]
+kind = "board_runs_project"
+[[check]]
+kind = "output_on"
+pin = "D6"
+[[check]]
+kind = "strip_of"
+leds = 200
+[[check]]
+kind = "target_is"
+board = "seeed/xiao-esp32-c6"
+[[check]]
+kind = "all_nodes_ok"
+[[check]]
+kind = "saved"

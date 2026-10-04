@@ -4216,6 +4216,7 @@ dependencies = [
  "esp-bootloader-esp-idf",
  "esp-hal",
  "esp-println",
+ "esp-radio-rtos-driver",
  "esp-rtos",
  "esp-storage",
  "fw-checks",

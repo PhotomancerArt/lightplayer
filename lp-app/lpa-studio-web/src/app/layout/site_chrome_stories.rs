@@ -11,7 +11,7 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{
     ControllerId, DirtySummary, OfferPath, ProjectController, ProjectNodeAddress, ProjectOp,
-    ProjectSlotAddress, ProjectSlotRoot, ProjectSyncPhase, SlotEditOp, SlotPath, UiAction,
+    ProjectSlotAddress, ProjectSlotRoot, ProjectSyncPhase, SlotPath, UiAction,
     UiChromeSessionControl, UiChromeSessionStatus, UiHistoryKind, UiOffer, UiPendingEdit,
     UiPendingEditKind, UiPendingEditPhase, UiProjectHistory, UiProjectHistoryEntry, UiStatus,
 };
@@ -248,10 +248,11 @@ pub(crate) fn control_history_popover_open() -> Element {
     description = "The changes panel, mounted directly, on a project whose projection knows its next version: the receipt says \"Save banks v13\" — the same number the History segment's newest row will wear after the save. The two segments read one ledger from opposite ends, which is why they sit next door to each other."
 )]
 pub(crate) fn control_changes_panel_dirty() -> Element {
+    let changes = dirty_content_with_history().changes();
+    let offers = crate::app::story_fixtures::revert_edit_offers(&changes.pending_edits);
     changes_panel_frame(rsx! {
-        SessionChangesPanel {
-            changes: dirty_content_with_history().changes(),
-            on_action: EventHandler::new(|_| {}),
+        crate::core::OffersProvider { offers,
+            SessionChangesPanel { changes, on_action: EventHandler::new(|_| {}) }
         }
     })
 }
@@ -432,6 +433,25 @@ fn frame(width: u32, section: SiteSection, chip: BuildChip, menu_open: bool) -> 
     }
 }
 
+#[story(
+    label = "Agent light — Save in the header",
+    description = "The agent light (agentic-UI M8) on the header's Save: the assistant just pressed `project/save`, so the Save beside the CHANGES segment wears the assistant's own light — a 2px orchid gradient ring spinning around it over an orchid glow, with a brief orchid wash at the press. Orchid means the assistant and nothing else in Studio (error is pale red, bound is violet). It is a moment, not a state: live it rises, holds and fades over four seconds (core's clock puts it out); with reduced motion, and in this capture, it is the still ring. It never takes focus and never scrolls — watching the assistant work shows where Save lives without moving anything under your hands. TOP: at rest. BOTTOM: lit."
+)]
+pub(crate) fn agent_lit_save() -> Element {
+    let lit = crate::app::agent::story_activity([(
+        OfferPath::project().child("save"),
+        lpa_studio_core::AgentActivityKind::Pressed,
+    )]);
+    rsx! {
+        div { class: "tw:grid tw:gap-3",
+            {control_row(1000, sim_control(Some("ESP32-C6")), Some(control_content(3, 0, UiStatus::good("Ready"))), None)}
+            crate::app::agent::AgentActivityProvider { activity: lit,
+                {control_row(1000, sim_control(Some("ESP32-C6")), Some(control_content(3, 0, UiStatus::good("Ready"))), None)}
+            }
+        }
+    }
+}
+
 /// One control frame: `SectionSession` (studio mode) at a fixed width, so
 /// the folds trigger off the FRAME rather than the story viewport — the
 /// same technique `frame`/`chip_frame` used for the retired session strip
@@ -462,10 +482,16 @@ fn control_row_as(
 ) -> Element {
     // The device segment's Rename is the device's `rename` offer: the
     // tree the app provides, built for the story's session.
-    let offers = crate::app::home::device_offer_story_fixtures::session_device_tree(
+    let mut offers = crate::app::home::device_offer_story_fixtures::session_device_tree(
         session.device,
         &session.name,
     );
+    // Each change-list row's revert presses `project/revert-edit`.
+    if let Some(project) = &project {
+        offers.append(crate::app::story_fixtures::revert_edit_offers(
+            &project.changes().pending_edits,
+        ));
+    }
     rsx! {
         div {
             class: "tw:border tw:border-dashed tw:border-border-muted tw:px-4 tw:pt-3",
@@ -669,10 +695,7 @@ fn pending_edit(node_label: &str, path: &str, value_display: &str) -> UiPendingE
         },
         old_value: None,
         phase: UiPendingEditPhase::Persisted,
-        revert: Some(UiAction::from_op(
-            ControllerId::new(ProjectController::NODE_ID),
-            SlotEditOp::Revert { address },
-        )),
+        key: Some(format!("{}:def:{}", address.node, address.path)),
     }
 }
 

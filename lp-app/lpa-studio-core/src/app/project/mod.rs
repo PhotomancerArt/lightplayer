@@ -26,6 +26,7 @@ pub(crate) mod agent_project_edits;
 pub(crate) mod agent_project_summary;
 pub(crate) mod agent_slot_json;
 pub(crate) mod agent_support;
+pub(crate) mod arrange_offers;
 pub mod asset;
 pub(crate) mod binding_graph_cache;
 pub(crate) mod control_geometry_cache;
@@ -65,12 +66,18 @@ pub mod project_sync_run;
 pub mod project_sync_summary;
 pub mod project_target_encoding;
 pub mod project_value_format;
+pub(crate) mod revert_edit_offer;
 pub mod slot;
 pub mod ui_affordance;
 pub(crate) mod ui_patch_surface;
 pub mod ui_pending_edit;
 
 pub use agent_support::AgentEngineStatus;
+pub use arrange_offers::{
+    ARRANGE_GROUP, ARRANGE_REDO_VERB, ARRANGE_ROTATION_PARAM, ARRANGE_SCALE_PARAM,
+    ARRANGE_SET_VERB, ARRANGE_UNDO_VERB, ARRANGE_X_PARAM, ARRANGE_Y_PARAM, arrange_batch,
+    arrange_history_path, publish_arrange_offers,
+};
 pub use asset::{
     AssetContentFetchOp, AssetEditOp, MAX_ASSET_BODY_BYTES, PendingAssetEdit, UiAssetContent,
     UiAssetContentBody, UiShaderError,
@@ -82,16 +89,21 @@ pub use editor_meta_op::{
     EditorMetaVerb, editor_meta_artifact,
 };
 pub use export_lint::{ExportGraphContext, ExportGraphNode, check_export_graph};
-pub use header_verbs::{CLEAR_DEBUG_VERB, is_header_verb};
+pub use header_verbs::{
+    CLEAR_DEBUG_VERB, REVERT_EDIT_PARAM, REVERT_EDIT_VERB, SAVE_COPY_VERB, is_header_verb,
+};
 pub use loaded_project_choice::LoadedProjectChoice;
 pub use node::{
     ADD_NODE_KIND_PARAM, ADD_NODE_VERB, ASK_AGENT_REQUEST_PARAM, ASK_AGENT_VERB, COPY_NODE_VERB,
     IMPORT_BUILTIN_SECTION, IMPORT_LIBRARY_SECTION, IMPORT_PATTERN_PARAM, IMPORT_PATTERN_VERB,
     ImportSource, ModuleExportOp, NodeClearDebugOp, NodeController, NodeControllerState,
     NodeCopyOp, NodeCreateOp, NodeImportOp, NodePasteOp, NodeRemoveOp, NodeRevertOp,
-    PASTE_NODE_CLIPBOARD_PARAM, PASTE_NODE_VERB, PanelAutoSaveOp, PanelClearOp, PanelWriteOp,
-    PlaylistActivateOp, ProjectNodeAddress, ProjectNodeTarget, ProjectProductSubscriptionIntent,
-    UiAddNodeMenu, UiAddNodeMenuEntry, UiAttachTarget, UiImportablePattern, UiNodeRemovePreflight,
+    PASTE_NODE_CLIPBOARD_PARAM, PASTE_NODE_VERB, PLAYLIST_CYCLE_VERB, PLAYLIST_CYCLING_PARAM,
+    PLAYLIST_ENTRY_PARAM, PLAYLIST_NEXT_VERB, PLAYLIST_PLAY_VERB, PLAYLIST_PREV_VERB,
+    PLAYLIST_SKIP_VERB, PLAYLIST_SKIPPED_PARAM, PLAYLIST_STEP_LONGER_VERB,
+    PLAYLIST_STEP_SHORTER_VERB, PanelAutoSaveOp, PanelClearOp, PanelWriteOp, PlaylistActivateOp,
+    ProjectNodeAddress, ProjectNodeTarget, ProjectProductSubscriptionIntent, UiAddNodeMenu,
+    UiAddNodeMenuEntry, UiAttachTarget, UiImportablePattern, UiNodeRemovePreflight,
 };
 pub use node_card_ui_state::{
     ModuleHeroProduct, NodeCardDrawer, NodeCardUiState, NodeUiOp, UiPreviewSpaces,
@@ -137,6 +149,7 @@ pub use project_value_format::{
     format_gradient_chip, format_gradient_summary, format_live_panel_value, format_live_scalar,
     format_lp_value, format_slot_map_key, gradient_config_value, phasor_config_period,
 };
+pub use revert_edit_offer::revert_edit_offer;
 pub use slot::{
     PendingEdit, PendingEditOp, PendingEditPhase, ProjectSlotAddress, ProjectSlotRoot,
     SlotBindingFact, SlotBindingFactKind, SlotController, SlotControllerState, SlotEditOp,

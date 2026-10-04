@@ -19,6 +19,8 @@ pub struct AccessAdded {
     /// The labels added, in the order they were ("Yona's MacBook", "Yona's
     /// account").
     pub names: Vec<String>,
+    /// Browser keys dropped to make room for them (a full device).
+    pub dropped: Vec<super::DroppedKey>,
     /// Monotonic per tab; a new value is a new toast.
     pub generation: u64,
 }

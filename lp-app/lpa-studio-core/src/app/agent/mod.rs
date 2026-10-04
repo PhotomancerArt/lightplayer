@@ -8,6 +8,7 @@
 //! action queue as [`AgentOp`]s; a spawned run reports progress back through
 //! [`AgentFeedback`] commands.
 
+pub mod agent_activity;
 pub mod agent_chat_session;
 pub mod agent_controller;
 pub mod agent_debug_export;
@@ -22,14 +23,20 @@ pub mod app_agent_host_bridge;
 pub mod app_agent_readout;
 pub mod app_agent_reference;
 pub mod app_agent_session;
+pub(crate) mod app_agent_show;
 /// App-agent evals, stage A (test-only).
 #[cfg(test)]
 pub(crate) mod evals;
+pub mod ui_agent_activity;
 pub mod ui_agent_card;
 pub mod ui_agent_edit_batch;
 pub mod ui_agent_view;
 pub mod ui_app_agent_view;
 
+pub use agent_activity::{
+    AGENT_ACTIVITY_KEPT, AGENT_ACTIVITY_LIT_SECS, AgentActivity, AgentActivityEntry,
+    AgentActivityKind,
+};
 pub use agent_chat_session::{AgentEditRecord, MAX_EDIT_RECORDS};
 pub use agent_controller::{
     AgentController, AgentModelsFetchFuture, AgentRunContext, AgentTaskFuture, AgentTimerFactory,
@@ -43,10 +50,11 @@ pub use agent_provider_config::AgentProviderConfig;
 pub use agent_session_key::AgentSessionKey;
 pub use app_agent_host_bridge::{AppAgentBridgeState, AppAgentHostBridge};
 pub use app_agent_session::AppAgentSession;
+pub use ui_agent_activity::{UiAgentActivity, UiAgentLit, UiAgentPlace, UiAgentReveal};
 pub use ui_agent_card::{UiAgentCard, UiAgentCardState};
 pub use ui_agent_edit_batch::{UiAgentEditBatch, UiAgentEditLine, UiAgentEditOutcome};
 pub use ui_agent_view::{
-    UiAgentAvailability, UiAgentDebugDump, UiAgentHistoryEntry, UiAgentModelView, UiAgentStatus,
-    UiAgentToolRow, UiAgentTurn, UiAgentUsage, UiAgentView,
+    UiAgentActPress, UiAgentAvailability, UiAgentDebugDump, UiAgentHistoryEntry, UiAgentModelView,
+    UiAgentStatus, UiAgentToolRow, UiAgentTurn, UiAgentUsage, UiAgentView,
 };
 pub use ui_app_agent_view::UiAppAgentView;

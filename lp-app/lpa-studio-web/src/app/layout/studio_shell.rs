@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{UiAction, UiLensCard, UiNodeFace, UiPaneView, UiStudioView, UiViewContent};
 
-use crate::app::layout::LinkReconnectingStrip;
+use crate::app::layout::ReconnectingCurtain;
 use crate::app::module::{PlayModeSurface, panel_gesture_actions};
 use crate::app::project::MismatchPage;
 use crate::app::workbench::{WorkbenchFrame, WorkbenchHrefs, view_for_route};
@@ -95,7 +95,7 @@ pub fn StudioShell(
         // project's own Bluetooth list (plan D9)
         login_prompt: _,
         lens_access_line,
-        // the "Reconnecting…" strip rides over the project page below
+        // the "Reconnecting…" curtain rides over the project page below
         lens_reconnecting,
         // the web app raises the "can now unlock" toast
         access_added: _,
@@ -157,10 +157,9 @@ pub fn StudioShell(
     // patching pass. The interim full-page surface is retired.)
     if play && let Some(face) = play_mode_face(project_editor.as_ref()) {
         return rsx! {
-            div { class: "tw:grid tw:min-w-0 tw:grid-cols-1",
-                if let Some(reconnecting) = lens_reconnecting.clone() {
-                    LinkReconnectingStrip { reconnecting }
-                }
+            ReconnectingCurtain {
+                reconnecting: lens_reconnecting.clone(),
+                class: "tw:grid tw:min-w-0 tw:grid-cols-1",
                 PlayModeSurface {
                     panel: face.panel,
                     preview: face.preview,
@@ -182,20 +181,21 @@ pub fn StudioShell(
         // tabs drawable without navigation.
         let hrefs = workbench_hrefs.unwrap_or_else(WorkbenchHrefs::inert_default);
         return rsx! {
-            // Plan D13: a link stall or reset keeps the page and says so
-            // over it; the workbench below is untouched.
-            if let Some(reconnecting) = lens_reconnecting.clone() {
-                LinkReconnectingStrip { reconnecting }
-            }
-            WorkbenchFrame {
-                view,
-                panes: main,
-                project_editor,
-                lens_card: lens_card.map(|card| *card),
-                running,
-                now_secs,
-                hrefs,
-                on_action,
+            // A link that stalls, resets or drops keeps the page and says
+            // so over it; the workbench below does not move.
+            ReconnectingCurtain {
+                reconnecting: lens_reconnecting.clone(),
+                class: "tw:flex tw:min-h-0 tw:flex-1 tw:flex-col",
+                WorkbenchFrame {
+                    view,
+                    panes: main,
+                    project_editor,
+                    lens_card: lens_card.map(|card| *card),
+                    running,
+                    now_secs,
+                    hrefs,
+                    on_action,
+                }
             }
         };
     }

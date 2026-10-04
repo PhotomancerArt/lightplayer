@@ -14,7 +14,7 @@ use lpa_studio_web_story_macros::story;
 use crate::app::node::face_story_fixtures::{
     period_knob, shader_face, shader_face_bound_output, shader_face_one_d,
     shader_face_stacked_preview, shader_node_view, shader_node_view_with_face, shader_sections,
-    shader_space_section_mismatch,
+    shader_space_section_mismatch, story_slot_address,
 };
 use crate::app::node::{NodeFaceBody, NodePane, PanelControl, ShaderFace};
 use crate::base::Platform;
@@ -369,6 +369,29 @@ fn preview_space_one_d_only() -> Element {
                 face,
                 node: "/fyeah_sign.show/comet.shader".to_string(),
                 on_action: move |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    label = "Agent edited — a lit knob and the tab",
+    description = "The agent light (agentic-UI M8) on an edited node: the assistant set this shader's `hue` (`edit_project`). The card itself stays dark; the knob whose slot the edit wrote wears the assistant's orchid ring outside its box over a soft orchid pad, and the card carries the \"changed by the assistant\" tab on its top edge (an orchid gradient edge and Sparkles; out of the header's flow, so the name keeps its room). Live the ring spins and the light rises, holds and fades over core's four seconds, the tab with it; with reduced motion, and in this capture, it holds still. Core carries the changed slots on the edit's light (`UiAgentLit::slots`)."
+)]
+fn agent_edited_knob() -> Element {
+    let node = lpa_studio_core::ProjectNodeAddress::parse("/fyeah_sign.show/aurora.shader")
+        .expect("valid story node address");
+    let edited = crate::app::agent::story_edit_activity(
+        lpa_studio_core::OfferPath::project_node(&node),
+        vec![story_slot_address("controls.hue")],
+    );
+    rsx! {
+        div { class: "tw:grid tw:max-w-md tw:pt-4",
+            crate::app::agent::AgentActivityProvider { activity: edited,
+                NodePane {
+                    view: shader_node_view(false, UiAgentStatus::Idle),
+                    on_action: move |_| {},
+                }
             }
         }
     }

@@ -113,7 +113,7 @@ pub fn NodeFaceBody(
                     }
                 },
                 UiNodeFace::Playlist(playlist) => rsx! {
-                    PlaylistFace { face: playlist, add_node_menu, on_action }
+                    PlaylistFace { face: playlist, node: Some(node.clone()), add_node_menu, on_action }
                     NodeCardDrawers {
                         node,
                         sections,

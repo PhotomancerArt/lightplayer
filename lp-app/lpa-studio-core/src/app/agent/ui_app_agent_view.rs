@@ -20,6 +20,9 @@ pub struct UiAppAgentView {
     /// Display-ready cost (reported by the provider when it reports).
     pub estimated_cost: Option<String>,
     pub model: UiAgentModelView,
+    /// What the agent just did, by offer path: the controls the page
+    /// lights for a moment, and the reveal the user's last Show asked for.
+    pub activity: crate::UiAgentActivity,
 }
 
 impl Default for UiAppAgentView {
@@ -32,6 +35,7 @@ impl Default for UiAppAgentView {
             usage: UiAgentUsage::default(),
             estimated_cost: None,
             model: UiAgentModelView::default(),
+            activity: crate::UiAgentActivity::default(),
         }
     }
 }

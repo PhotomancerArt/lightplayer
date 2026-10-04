@@ -112,6 +112,14 @@
     --studio-spectrum-cool: #5fe08b, #53c6f2, #a58af7;
     /* Hover bloom color (Aurora: cool violet-blue). */
     --studio-glow: rgba(140, 170, 255, 0.3);
+    /* The assistant's own colour, orchid (M8 agent light, picked
+       2026-10-03): its gradient ring, ink and glow mean "the assistant did
+       this" and nothing else. Magenta was the one free family — error is
+       pale red, bound is violet, the spectrum's red stop is #ff5d5d. The
+       stops loop back to the first so a conic seam never shows. */
+    --studio-agent-spectrum: #ff6ec7, #e46bff, #ff9bd2, #ff6ec7;
+    --studio-agent-ink: #ff8fd6;
+    --studio-agent-glow: rgba(255, 110, 199, 0.34);
     /* Overlay glass material (R3: liquid + spectrum edge; blur is a var so
        G1 can tune it live). */
     --studio-glass-bg: rgba(12, 12, 20, 0.55);
@@ -623,7 +631,44 @@ label:has(> input:not(:disabled)) {
     color: var(--studio-status-neutral-text);
 }
 
-/* The "Reconnecting…" strip's icon (plan D13): a slow turn, calm rather
+/* The "Reconnecting…" curtain (`link_reconnecting_strip.rs`): over the
+   page, never in its flow. Off, it is invisible and lets clicks through;
+   on, it fades in after a short beat (a blip that recovers at once never
+   shows) and holds the page still; back, it fades out with no delay. */
+.ux-reconnect-curtain {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition:
+        opacity 280ms ease-out,
+        visibility 0s linear 280ms;
+}
+
+.ux-reconnect-curtain[data-reconnecting="true"] {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+    transition:
+        opacity 320ms ease-out 180ms,
+        visibility 0s linear 180ms;
+}
+
+.ux-reconnect-curtain .ux-reconnect-card {
+    transform: translateY(-6px);
+    transition: transform 320ms ease-out 180ms;
+}
+
+.ux-reconnect-curtain[data-reconnecting="true"] .ux-reconnect-card {
+    transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ux-reconnect-curtain .ux-reconnect-card {
+        transform: none;
+    }
+}
+
+/* The "Reconnecting…" card's icon (plan D13): a slow turn, calm rather
    than urgent; still for reduced motion. */
 .ux-reconnect-spin svg {
     animation: ux-reconnect-turn 2.4s linear infinite;
@@ -5787,6 +5832,318 @@ label:has(> input:not(:disabled)) {
     box-shadow:
         0 0 0 3px color-mix(in srgb, var(--studio-color-focus-ring) 35%, transparent),
         0 2px 26px var(--studio-glow);
+}
+
+/* --------------------------------------------------------------------------
+   Agent light (agentic-UI roadmap M8): the app agent pressed this, handed it
+   over on a card, or edited this node. It wears the assistant's own colour,
+   orchid (`--studio-agent-*`), drawn as the spectrum's spinning gradient
+   ring, so watching it teaches where things are and never reads as the
+   user's own selection or hover light. It is a moment, not a state: it
+   rises, holds and fades over the light's lifetime (core's
+   AGENT_ACTIVITY_LIT_SECS, 4 s), and core puts the class out when it
+   expires.
+
+   Hosts:
+   - a pressed or handed control: `.ux-agent-mark` is `display: contents`
+     (no box, so wrapping any control moves nothing) and the light lands on
+     its child, `.ux-agent-lit > *`;
+   - an edited node: the card stays dark (`.ux-agent-lit-edited`) and the
+     slots the edit wrote light instead — a settings row (`.ux-agent-slot`,
+     the ring inside the row) or a face control (`.ux-agent-slot-pad`, the
+     ring outside its box over a soft pad, since a knob column has no box
+     of its own) — while the card carries the "changed by the assistant"
+     tab (`.ux-agent-chip`) on its top edge. An edit with no visible slot
+     (a created node, a file's text, a collapsed card) is the tab alone.
+
+   The ring is an `::after` over the host (the hover ring's mask recipe), so
+   the host is made a containing block — unless it is already positioned.
+   Two identical animation sets, `-a`/`-b`, alternate by the light's seq so a
+   re-light of a still-lit control starts over (a changed animation-name
+   restarts it) — the host's, the ring's and the tab's alike.
+
+   Reduced motion (and the story capture's freeze): no spin, no flash, no
+   fade — the base rules below are the full light, held still until core
+   removes the class.
+   -------------------------------------------------------------------------- */
+.ux-agent-mark {
+    display: contents;
+}
+
+.ux-agent-lit:not(.ux-agent-lit-edited) > *,
+.ux-agent-slot {
+    box-shadow:
+        inset 0 0 0 999px color-mix(in srgb, var(--studio-agent-ink) 6%, transparent),
+        0 2px 22px var(--studio-agent-glow);
+}
+
+.ux-agent-slot-pad {
+    border-radius: 10px;
+    box-shadow:
+        0 0 0 8px color-mix(in srgb, var(--studio-agent-ink) 10%, transparent),
+        0 2px 22px var(--studio-agent-glow);
+}
+
+:is(.ux-agent-lit > *, .ux-agent-slot):not(.tw\:absolute, .tw\:fixed, .tw\:sticky) {
+    position: relative;
+}
+
+/* The tab overhangs the edited card's top edge. */
+.ux-agent-lit-edited > * {
+    overflow: visible;
+}
+
+/* The ring. It takes over the host's own `::after` while lit (a spectrum
+   CTA's halo, a toggle's thumb are on other boxes or reset here), except
+   an armed two-click control's drain track: once the user arms it, the
+   arm's feedback wins and the glow alone stays. */
+.ux-agent-lit:not(.ux-agent-lit-edited) > :not(.ux-armed)::after,
+.ux-agent-slot::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    width: auto;
+    height: auto;
+    z-index: 4;
+    border-radius: inherit;
+    padding: 2px;
+    opacity: 1;
+    transform: none;
+    filter: none;
+    clip-path: none;
+    transition: none;
+    background: conic-gradient(from var(--ux-ir-angle), var(--studio-agent-spectrum));
+    mask:
+        linear-gradient(#000 0 0) content-box,
+        linear-gradient(#000 0 0);
+    mask-composite: exclude;
+    -webkit-mask:
+        linear-gradient(#000 0 0) content-box,
+        linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    pointer-events: none;
+}
+
+.ux-agent-slot-pad::after {
+    inset: -8px;
+    border-radius: 12px;
+}
+
+/* "Changed by the assistant": a tab on the edited card's top edge, out of
+   the header's flow (in it, it truncated the node's name for its 4 s). */
+.ux-agent-chip {
+    position: absolute;
+    top: -10px;
+    left: 40px;
+    z-index: 6;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin: 0;
+    padding: 2px 8px 2px 6px;
+    border: 1px solid transparent;
+    border-radius: var(--studio-radius-pill);
+    background:
+        linear-gradient(var(--studio-color-surface-raised), var(--studio-color-surface-raised))
+            padding-box,
+        linear-gradient(90deg, var(--studio-agent-spectrum)) border-box;
+    color: var(--studio-color-text-soft);
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1;
+    white-space: nowrap;
+    box-shadow: 0 0 14px var(--studio-agent-glow);
+    pointer-events: none;
+}
+
+.ux-agent-chip > :first-child {
+    color: var(--studio-agent-ink);
+}
+
+/* -- motion: the -a / -b sets ------------------------------------------- */
+
+.ux-agent-lit-a:not(.ux-agent-lit-edited) > *,
+.ux-agent-slot-a {
+    animation: ux-agent-host-a 4s ease-out forwards;
+}
+
+.ux-agent-lit-b:not(.ux-agent-lit-edited) > *,
+.ux-agent-slot-b {
+    animation: ux-agent-host-b 4s ease-out forwards;
+}
+
+.ux-agent-slot-pad.ux-agent-slot-a {
+    animation: ux-agent-pad-a 4s ease-out forwards;
+}
+
+.ux-agent-slot-pad.ux-agent-slot-b {
+    animation: ux-agent-pad-b 4s ease-out forwards;
+}
+
+.ux-agent-lit-a:not(.ux-agent-lit-edited) > :not(.ux-armed)::after,
+.ux-agent-slot-a::after {
+    animation:
+        ux-agent-fade-a 4s ease-out forwards,
+        ux-ir-spin 2.4s linear infinite;
+}
+
+.ux-agent-chip-a {
+    animation: ux-agent-fade-a 4s ease-out forwards;
+}
+
+.ux-agent-lit-b:not(.ux-agent-lit-edited) > :not(.ux-armed)::after,
+.ux-agent-slot-b::after {
+    animation:
+        ux-agent-fade-b 4s ease-out forwards,
+        ux-ir-spin 2.4s linear infinite;
+}
+
+.ux-agent-chip-b {
+    animation: ux-agent-fade-b 4s ease-out forwards;
+}
+
+/* The press: an orchid wash flashes in and clears under the ring and the
+   glow. */
+@keyframes ux-agent-host-a {
+    0% {
+        box-shadow:
+            inset 0 0 0 999px transparent,
+            0 2px 22px transparent;
+    }
+    6% {
+        box-shadow:
+            inset 0 0 0 999px color-mix(in srgb, var(--studio-agent-ink) 32%, transparent),
+            0 2px 30px var(--studio-agent-glow);
+    }
+    30%,
+    70% {
+        box-shadow:
+            inset 0 0 0 999px color-mix(in srgb, var(--studio-agent-ink) 6%, transparent),
+            0 2px 22px var(--studio-agent-glow);
+    }
+    100% {
+        box-shadow:
+            inset 0 0 0 999px transparent,
+            0 2px 22px transparent;
+    }
+}
+
+@keyframes ux-agent-host-b {
+    0% {
+        box-shadow:
+            inset 0 0 0 999px transparent,
+            0 2px 22px transparent;
+    }
+    6% {
+        box-shadow:
+            inset 0 0 0 999px color-mix(in srgb, var(--studio-agent-ink) 32%, transparent),
+            0 2px 30px var(--studio-agent-glow);
+    }
+    30%,
+    70% {
+        box-shadow:
+            inset 0 0 0 999px color-mix(in srgb, var(--studio-agent-ink) 6%, transparent),
+            0 2px 22px var(--studio-agent-glow);
+    }
+    100% {
+        box-shadow:
+            inset 0 0 0 999px transparent,
+            0 2px 22px transparent;
+    }
+}
+
+@keyframes ux-agent-pad-a {
+    0% {
+        box-shadow:
+            0 0 0 8px transparent,
+            0 2px 22px transparent;
+    }
+    6% {
+        box-shadow:
+            0 0 0 8px color-mix(in srgb, var(--studio-agent-ink) 30%, transparent),
+            0 2px 30px var(--studio-agent-glow);
+    }
+    30%,
+    70% {
+        box-shadow:
+            0 0 0 8px color-mix(in srgb, var(--studio-agent-ink) 10%, transparent),
+            0 2px 22px var(--studio-agent-glow);
+    }
+    100% {
+        box-shadow:
+            0 0 0 8px transparent,
+            0 2px 22px transparent;
+    }
+}
+
+@keyframes ux-agent-pad-b {
+    0% {
+        box-shadow:
+            0 0 0 8px transparent,
+            0 2px 22px transparent;
+    }
+    6% {
+        box-shadow:
+            0 0 0 8px color-mix(in srgb, var(--studio-agent-ink) 30%, transparent),
+            0 2px 30px var(--studio-agent-glow);
+    }
+    30%,
+    70% {
+        box-shadow:
+            0 0 0 8px color-mix(in srgb, var(--studio-agent-ink) 10%, transparent),
+            0 2px 22px var(--studio-agent-glow);
+    }
+    100% {
+        box-shadow:
+            0 0 0 8px transparent,
+            0 2px 22px transparent;
+    }
+}
+
+/* The ring and the tab rise, hold and fade with the light. */
+@keyframes ux-agent-fade-a {
+    0% {
+        opacity: 0;
+    }
+    8%,
+    70% {
+        opacity: 1;
+    }
+    100% {
+        opacity: 0;
+    }
+}
+
+@keyframes ux-agent-fade-b {
+    0% {
+        opacity: 0;
+    }
+    8%,
+    70% {
+        opacity: 1;
+    }
+    100% {
+        opacity: 0;
+    }
+}
+
+/* The same selectors as the motion rules above, so each is matched at its
+   own specificity. */
+@media (prefers-reduced-motion: reduce) {
+    .ux-agent-lit-a:not(.ux-agent-lit-edited) > *,
+    .ux-agent-lit-b:not(.ux-agent-lit-edited) > *,
+    .ux-agent-slot-a,
+    .ux-agent-slot-b,
+    .ux-agent-slot-pad.ux-agent-slot-a,
+    .ux-agent-slot-pad.ux-agent-slot-b,
+    .ux-agent-lit-a:not(.ux-agent-lit-edited) > :not(.ux-armed)::after,
+    .ux-agent-lit-b:not(.ux-agent-lit-edited) > :not(.ux-armed)::after,
+    .ux-agent-slot-a::after,
+    .ux-agent-slot-b::after,
+    .ux-agent-chip-a,
+    .ux-agent-chip-b {
+        animation: none;
+    }
 }
 
 /* Gallery-card lift, composed with the inset ring. Kept a separate class

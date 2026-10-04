@@ -26,11 +26,11 @@ use crate::app::studio::studio_edit_e2e_tests::{
     InProcessServerIo, card_matching, drive, editor_dirty, project_action, project_editor,
 };
 use crate::{
-    ControllerId, NodeCardUiState, NodeUiOp, OfferArgs, PlaylistActivateOp, ProjectController,
-    ProjectEditorOp, ProjectEditorTarget, ProjectOp, ProjectSlotAddress, SlotEditOp, StudioActor,
-    StudioCommand, StudioController, StudioServerClient, UiAction, UiLogLevel, UiNodeDirtyState,
-    UiNodeFace, UiNodeView, UiPanelControl, UiPanelWidget, UiPlaylistFace, UiSlotValueKind,
-    UiStudioView,
+    ControllerId, NodeCardUiState, NodeUiOp, OfferArgs, PLAYLIST_ENTRY_PARAM, PLAYLIST_PLAY_VERB,
+    PlaylistActivateOp, ProjectController, ProjectEditorOp, ProjectEditorTarget, ProjectOp,
+    ProjectSlotAddress, SlotEditOp, StudioActor, StudioCommand, StudioController,
+    StudioServerClient, UiAction, UiLogLevel, UiNodeDirtyState, UiNodeFace, UiNodeView,
+    UiPanelControl, UiPanelWidget, UiPlaylistFace, UiSlotValueKind, UiStudioView,
 };
 
 #[test]
@@ -475,9 +475,9 @@ fn playlist_face_derives_and_keeps_one_live_surface() {
     );
     assert!(!child.focused);
 
-    // -- strip clicks: ACTIVE chip focuses the child, others activate -------
+    // -- strip clicks: ACTIVE chip focuses the child, others press `play` --
     let select_idle = idle
-        .action
+        .focus
         .clone()
         .expect("the ACTIVE entry's chip carries the child select action");
     assert!(
@@ -485,14 +485,20 @@ fn playlist_face_derives_and_keeps_one_live_surface() {
         "activating what already plays is a no-op — the ACTIVE chip keeps \
          the focus gesture"
     );
-    let activate_cued = cued
-        .action
-        .clone()
-        .expect("non-active entries carry the activate action");
-    let activate_op = activate_cued
+    assert!(cued.focus.is_none(), "a non-active chip presses `play`");
+    let play = playlist_verb(&snapshot, PLAYLIST_PLAY_VERB);
+    let activate_op = play
+        .press(&OfferArgs::new().with(PLAYLIST_ENTRY_PARAM, "2"))
+        .expect("the non-active entry plays")
         .op_as::<PlaylistActivateOp>()
-        .expect("non-active chip clicks are runtime activate pokes");
+        .expect("non-active chip clicks are runtime activate pokes")
+        .clone();
     assert_eq!(activate_op.entry, 2);
+    assert!(
+        play.press(&OfferArgs::new().with(PLAYLIST_ENTRY_PARAM, "1"))
+            .is_err(),
+        "the playing entry is not offered to play again"
+    );
 
     handle.tx.send(StudioCommand::Action(select_idle));
     drive(actor.run_one_batch_for_test());
@@ -524,19 +530,17 @@ fn playlist_entry_click_activates_on_the_real_server() {
     let snapshot = view.try_recv().expect("connect emits a snapshot");
     let face = playlist_face(&snapshot);
     assert_eq!(face.active, Some(1));
-    let activate = face.entries[1]
-        .action
-        .clone()
-        .expect("non-active entry carries the activate action");
 
-    // Click: the activate op rides the runtime command channel to the real
-    // server (nothing staged — no overlay row, no dirty state); the
-    // playlist validates and queues the switch. Every in-process message
-    // ticks one engine frame, BEFORE it is handled: the next frame decides
-    // the switch, and the frame after loads the (dormant) entry at the
-    // pre-tick residency step — `active_entry` names it from then on.
-    handle.tx.send(StudioCommand::Action(activate));
-    drive(actor.run_one_batch_for_test());
+    // Click: the chip presses the playlist's `play`, whose activate op
+    // rides the runtime command channel to the real server (nothing
+    // staged — no overlay row, no dirty state); the playlist validates and
+    // queues the switch. Every in-process message ticks one engine frame,
+    // BEFORE it is handled: the next frame decides the switch, and the
+    // frame after loads the (dormant) entry at the pre-tick residency step
+    // — `active_entry` names it from then on.
+    let play = playlist_path(&snapshot, PLAYLIST_PLAY_VERB);
+    actor_clicks(&mut actor, &handle.tx)
+        .press(&play, OfferArgs::new().with(PLAYLIST_ENTRY_PARAM, "2"));
     let snapshot = view.try_recv().expect("dispatch emits a snapshot");
     assert_eq!(
         editor_dirty(&snapshot),
@@ -569,16 +573,18 @@ fn playlist_entry_click_activates_on_the_real_server() {
     );
     assert_eq!(playlist.children[0].label, "Active");
     // The chips swap roles with the placard: the newly active entry keeps
-    // its child's select action, the idle entry becomes the activate poke.
-    let idle_op = face.entries[0]
-        .action
-        .as_ref()
-        .and_then(|action| action.op_as::<PlaylistActivateOp>())
-        .expect("the now-inactive idle entry carries the activate action");
+    // its child's select action, the idle entry is the one `play` offers.
+    let idle_op = playlist_verb(&snapshot, PLAYLIST_PLAY_VERB)
+        .press(&OfferArgs::new().with(PLAYLIST_ENTRY_PARAM, "1"))
+        .expect("the now-inactive idle entry plays")
+        .op_as::<PlaylistActivateOp>()
+        .expect("an activate")
+        .clone();
     assert_eq!(idle_op.entry, 1);
+    assert!(face.entries[0].focus.is_none());
     assert!(
         face.entries[1]
-            .action
+            .focus
             .as_ref()
             .is_some_and(|action| action.op_as::<PlaylistActivateOp>().is_none()),
         "the now-active entry's chip carries the child select action"
@@ -601,12 +607,11 @@ fn playlist_activate_rejects_an_unknown_entry_gracefully() {
     connect_running_project(&handle.tx);
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("connect emits a snapshot");
-    let face = playlist_face(&snapshot);
-    let node = face.entries[1]
-        .action
-        .as_ref()
-        .and_then(|action| action.op_as::<PlaylistActivateOp>())
-        .expect("activate action carries the playlist address")
+    let node = playlist_verb(&snapshot, PLAYLIST_PLAY_VERB)
+        .press(&OfferArgs::new().with(PLAYLIST_ENTRY_PARAM, "2"))
+        .expect("entry 2 plays")
+        .op_as::<PlaylistActivateOp>()
+        .expect("the activate carries the playlist address")
         .node
         .clone();
     let status_before = node_by_kind(&snapshot, "Playlist").header.status.clone();
@@ -644,11 +649,9 @@ fn playlist_activate_rejects_an_unknown_entry_gracefully() {
 
     // The channel still works after a rejection: a valid activate lands
     // (the dormant entry loads the frame after the switch is decided).
-    handle.tx.send(StudioCommand::Action(UiAction::from_op(
-        ControllerId::new(ProjectController::NODE_ID),
-        PlaylistActivateOp { node, entry: 2 },
-    )));
-    drive(actor.run_one_batch_for_test());
+    let play = playlist_path(&snapshot, PLAYLIST_PLAY_VERB);
+    actor_clicks(&mut actor, &handle.tx)
+        .press(&play, OfferArgs::new().with(PLAYLIST_ENTRY_PARAM, "2"));
     handle.tx.send(project_action(ProjectOp::RefreshProject));
     drive(actor.run_one_batch_for_test());
     let _ = view.try_recv().expect("refresh emits a snapshot");
@@ -3582,6 +3585,23 @@ fn control_for_channel<'a>(
     find(&face.panel, channel).unwrap_or_else(|| panic!("module panel carries a {channel} control"))
 }
 
+/// Where the playlist card's verb `verb` lives (`project/<playlist>/<verb>`).
+fn playlist_path(view: &UiStudioView, verb: &str) -> crate::OfferPath {
+    let playlist = node_by_kind(view, "Playlist");
+    let address =
+        crate::ProjectNodeAddress::parse(&playlist.header.path).expect("the playlist's address");
+    crate::OfferPath::project_node(&address).child(verb)
+}
+
+/// The playlist card's verb `verb`, as `view` publishes it.
+fn playlist_verb(view: &UiStudioView, verb: &str) -> crate::UiOffer {
+    let path = playlist_path(view, verb);
+    view.offers
+        .get(&path)
+        .unwrap_or_else(|| panic!("`{path}` is offered"))
+        .clone()
+}
+
 fn playlist_face(view: &UiStudioView) -> UiPlaylistFace {
     let Some(UiNodeFace::Playlist(face)) = node_by_kind(view, "Playlist").face else {
         panic!("playlist face present");
@@ -4446,7 +4466,11 @@ fn the_agent_reads_and_presses_the_selected_fixtures_patch_verbs() {
 /// and every edit stamps the correlation journal.
 #[test]
 fn editor_meta_arranges_a_fixture_with_byte_stable_undo() {
-    use crate::{EditorMetaFixture, EditorMetaOp, EditorMetaVerb, UiArrangeTransform};
+    use crate::{
+        ARRANGE_REDO_VERB, ARRANGE_ROTATION_PARAM, ARRANGE_SCALE_PARAM, ARRANGE_SET_VERB,
+        ARRANGE_UNDO_VERB, ARRANGE_X_PARAM, ARRANGE_Y_PARAM, UiArrangeTransform,
+        arrange_history_path,
+    };
 
     let example =
         crate::app::home::embedded_example("catalog/small-dome").expect("small-dome embedded");
@@ -4549,32 +4573,27 @@ fn editor_meta_arranges_a_fixture_with_byte_stable_undo() {
         drive(actor.run_one_batch_for_test());
     }
 
-    // One drag gesture = one Set op.
+    // One drag gesture = one press of the dome's `arrange/set`, on release.
     let dome_key = dome.address.clone().expect("dome address");
-    let set_op = |transform: UiArrangeTransform| EditorMetaOp {
-        artifact: editor_artifact.clone(),
-        fixtures: vec![EditorMetaFixture {
-            node_key: dome_key.clone(),
-            mapping_artifact: dome.mapping_artifact.clone(),
-        }],
-        verb: EditorMetaVerb::Set {
-            node_key: dome_key.clone(),
-            node: Some(dome.node),
-            transform,
-        },
+    let dome_set = project_editor(&snapshot)
+        .patch_surface
+        .as_ref()
+        .and_then(|surface| surface.arrange_verbs_of(dome.node))
+        .expect("the dome's arrange verbs")
+        .child(ARRANGE_SET_VERB);
+    let placement = |x: f64, y: f64, rotation: f64, scale: f64| {
+        OfferArgs::new()
+            .with(ARRANGE_X_PARAM, x.to_string())
+            .with(ARRANGE_Y_PARAM, y.to_string())
+            .with(ARRANGE_ROTATION_PARAM, rotation.to_string())
+            .with(ARRANGE_SCALE_PARAM, scale.to_string())
     };
     let dragged = UiArrangeTransform {
         t: [40.0, -12.5],
         r: 90.0,
         s: 1.0,
     };
-    handle
-        .tx
-        .send(StudioCommand::Action(crate::UiAction::from_op(
-            ProjectController::NODE_ID,
-            set_op(dragged),
-        )));
-    drive(actor.run_one_batch_for_test());
+    actor_clicks(&mut actor, &handle.tx).press(&dome_set, placement(40.0, -12.5, 90.0, 1.0));
 
     // Persist and read the file back: canonical, byte-stable, footprinted.
     actor_clicks(&mut actor, &handle.tx).press("project/save", OfferArgs::new());
@@ -4640,17 +4659,8 @@ fn editor_meta_arranges_a_fixture_with_byte_stable_undo() {
 
     // Undo restores the exact pre-arrange bytes — the SHIPPED document
     // (the example ships an identity arrangement).
-    handle
-        .tx
-        .send(StudioCommand::Action(crate::UiAction::from_op(
-            ProjectController::NODE_ID,
-            EditorMetaOp {
-                artifact: editor_artifact.clone(),
-                fixtures: Vec::new(),
-                verb: EditorMetaVerb::Undo,
-            },
-        )));
-    drive(actor.run_one_batch_for_test());
+    actor_clicks(&mut actor, &handle.tx)
+        .press(arrange_history_path(ARRANGE_UNDO_VERB), OfferArgs::new());
     actor_clicks(&mut actor, &handle.tx).press("project/save", OfferArgs::new());
     let shipped_editor = example
         .files
@@ -4665,17 +4675,8 @@ fn editor_meta_arranges_a_fixture_with_byte_stable_undo() {
     );
 
     // Redo replays the arrangement byte-for-byte.
-    handle
-        .tx
-        .send(StudioCommand::Action(crate::UiAction::from_op(
-            ProjectController::NODE_ID,
-            EditorMetaOp {
-                artifact: editor_artifact.clone(),
-                fixtures: Vec::new(),
-                verb: EditorMetaVerb::Redo,
-            },
-        )));
-    drive(actor.run_one_batch_for_test());
+    actor_clicks(&mut actor, &handle.tx)
+        .press(arrange_history_path(ARRANGE_REDO_VERB), OfferArgs::new());
     actor_clicks(&mut actor, &handle.tx).press("project/save", OfferArgs::new());
     assert_eq!(
         editor_json().expect("editor.json exists"),
@@ -4697,7 +4698,7 @@ fn editor_meta_arranges_a_fixture_with_byte_stable_undo() {
         )));
     drive(actor.run_one_batch_for_test());
     let snapshot = refresh_snapshot!(snapshot);
-    let (doors_key, doors_node, doors_artifact) = {
+    let (doors_key, doors_set) = {
         let editor = project_editor(&snapshot);
         let surface = editor.patch_surface.as_ref().expect("surface");
         let doors = surface
@@ -4707,50 +4708,36 @@ fn editor_meta_arranges_a_fixture_with_byte_stable_undo() {
             .expect("small-dome has a second fixture");
         (
             doors.address.clone().expect("doors address"),
-            doors.node,
-            doors.mapping_artifact.clone(),
+            surface
+                .arrange_verbs_of(doors.node)
+                .expect("the doors' arrange verbs")
+                .child(ARRANGE_SET_VERB),
         )
     };
-    handle
-        .tx
-        .send(StudioCommand::Action(crate::UiAction::from_op(
-            ProjectController::NODE_ID,
-            EditorMetaOp {
-                artifact: editor_artifact.clone(),
-                fixtures: vec![
-                    EditorMetaFixture {
-                        node_key: dome_key.clone(),
-                        mapping_artifact: dome.mapping_artifact.clone(),
-                    },
-                    EditorMetaFixture {
-                        node_key: doors_key.clone(),
-                        mapping_artifact: doors_artifact,
-                    },
-                ],
-                verb: EditorMetaVerb::SetMany {
-                    entries: vec![
-                        crate::EditorMetaSet {
-                            node_key: dome_key.clone(),
-                            node: Some(dome.node),
-                            transform: UiArrangeTransform {
-                                t: [80.0, 25.0],
-                                r: 90.0,
-                                s: 2.0,
-                            },
-                        },
-                        crate::EditorMetaSet {
-                            node_key: doors_key.clone(),
-                            node: Some(doors_node),
-                            transform: UiArrangeTransform {
-                                t: [-30.0, 5.0],
-                                r: 0.0,
-                                s: 0.5,
-                            },
-                        },
-                    ],
-                },
-            },
-        )));
+    // The gesture presses each moved fixture's `set` and folds the presses
+    // into one write (`arrange_batch`), the way the canvas's release does.
+    let presses = {
+        let mut clicks = actor_clicks(&mut actor, &handle.tx);
+        vec![
+            clicks
+                .offered(&dome_set)
+                .press(&placement(80.0, 25.0, 90.0, 2.0))
+                .expect("the dome's placement binds"),
+            clicks
+                .offered(&doors_set)
+                .press(&placement(-30.0, 5.0, 0.0, 0.5))
+                .expect("the doors' placement binds"),
+        ]
+    };
+    let gesture = crate::arrange_batch(presses).expect("two placements fold into one");
+    assert!(
+        matches!(
+            gesture.op_as::<crate::EditorMetaOp>().map(|op| &op.verb),
+            Some(crate::EditorMetaVerb::SetMany { entries }) if entries.len() == 2
+        ),
+        "one SetMany write"
+    );
+    handle.tx.send(StudioCommand::Action(gesture));
     drive(actor.run_one_batch_for_test());
     actor_clicks(&mut actor, &handle.tx).press("project/save", OfferArgs::new());
     let multi_written = editor_json().expect("editor.json after SetMany");
@@ -4776,17 +4763,8 @@ fn editor_meta_arranges_a_fixture_with_byte_stable_undo() {
             .t,
         [-30.0, 5.0]
     );
-    handle
-        .tx
-        .send(StudioCommand::Action(crate::UiAction::from_op(
-            ProjectController::NODE_ID,
-            EditorMetaOp {
-                artifact: editor_artifact.clone(),
-                fixtures: Vec::new(),
-                verb: EditorMetaVerb::Undo,
-            },
-        )));
-    drive(actor.run_one_batch_for_test());
+    actor_clicks(&mut actor, &handle.tx)
+        .press(arrange_history_path(ARRANGE_UNDO_VERB), OfferArgs::new());
     actor_clicks(&mut actor, &handle.tx).press("project/save", OfferArgs::new());
     assert_eq!(
         editor_json().expect("editor.json exists"),
@@ -4819,8 +4797,8 @@ fn editor_meta_arranges_a_fixture_with_byte_stable_undo() {
 #[test]
 fn edit_seq_interleaves_verbs_meta_ops_and_switch_events() {
     use crate::{
-        EditorMetaFixture, EditorMetaOp, EditorMetaVerb, PATCH_REVERSE_VERB, PATCH_SUBJECT_PARAM,
-        PATCH_UNDO_VERB, UiArrangeTransform, UiEditJournalEvent, UiEditorMode, patch_history_path,
+        ARRANGE_SET_VERB, ARRANGE_X_PARAM, ARRANGE_Y_PARAM, PATCH_REVERSE_VERB,
+        PATCH_SUBJECT_PARAM, PATCH_UNDO_VERB, UiEditJournalEvent, UiEditorMode, patch_history_path,
     };
 
     let example =
@@ -4865,6 +4843,12 @@ fn edit_seq_interleaves_verbs_meta_ops_and_switch_events() {
             surface.editor_meta_artifact.clone().expect("artifact"),
         )
     };
+    let dome_arrange = project_editor(&snapshot)
+        .patch_surface
+        .as_ref()
+        .and_then(|surface| surface.arrange_verbs_of(dome.node))
+        .expect("the dome's arrange verbs")
+        .child(ARRANGE_SET_VERB);
 
     // Prefetch what the ops need: dome bodies + editor.json presence.
     for artifact in [dome.patch_artifact.clone(), dome.mapping_artifact.clone()]
@@ -4905,28 +4889,12 @@ fn edit_seq_interleaves_verbs_meta_ops_and_switch_events() {
             },
         )));
     drive(actor.run_one_batch_for_test());
-    handle
-        .tx
-        .send(StudioCommand::Action(crate::UiAction::from_op(
-            ProjectController::NODE_ID,
-            EditorMetaOp {
-                artifact: editor_artifact.clone(),
-                fixtures: vec![EditorMetaFixture {
-                    node_key: dome.address.clone().expect("address"),
-                    mapping_artifact: dome.mapping_artifact.clone(),
-                }],
-                verb: EditorMetaVerb::Set {
-                    node_key: dome.address.clone().expect("address"),
-                    node: Some(dome.node),
-                    transform: UiArrangeTransform {
-                        t: [10.0, 10.0],
-                        r: 0.0,
-                        s: 1.0,
-                    },
-                },
-            },
-        )));
-    drive(actor.run_one_batch_for_test());
+    actor_clicks(&mut actor, &handle.tx).press(
+        &dome_arrange,
+        OfferArgs::new()
+            .with(ARRANGE_X_PARAM, "10")
+            .with(ARRANGE_Y_PARAM, "10"),
+    );
     handle
         .tx
         .send(StudioCommand::Action(crate::UiAction::from_op(

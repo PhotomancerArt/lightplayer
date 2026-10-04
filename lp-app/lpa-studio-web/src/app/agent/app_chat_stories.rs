@@ -9,10 +9,11 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    AgentProvider, BluetoothReach, OfferArgs, UiAgentAvailability, UiAgentCard, UiAgentCardState,
-    UiAgentEditBatch, UiAgentEditLine, UiAgentEditOutcome, UiAgentModelView, UiAgentStatus,
-    UiAgentToolRow, UiAgentTurn, UiAgentUsage, UiAppAgentView, UiOfferTree, add_device_offers,
-    provider_guidance,
+    AgentController, AgentOp, AgentProvider, BluetoothReach, ControllerId, OfferArgs, OfferPath,
+    ProjectNodeAddress, UiAction, UiAgentActPress, UiAgentAvailability, UiAgentCard,
+    UiAgentCardState, UiAgentEditBatch, UiAgentEditLine, UiAgentEditOutcome, UiAgentModelView,
+    UiAgentPlace, UiAgentStatus, UiAgentToolRow, UiAgentTurn, UiAgentUsage, UiAppAgentView,
+    UiOffer, UiOfferTree, add_device_offers, provider_guidance,
 };
 use lpa_studio_web_story_macros::story;
 
@@ -78,6 +79,19 @@ fn not_configured() -> Element {
 fn seans_project() -> Element {
     rsx! {
         DrawerFrame { view: ready_view(seans_transcript(), UiAgentStatus::Idle), tool_rows_expanded: true }
+    }
+}
+
+#[story(
+    label = "Rows say where, with Show",
+    description = "Each row says where its press or edit lives (agentic-UI M8), in the page's words, and links there. The `edit_project` rows carry one Show per node they changed (Show playlist, Show output, Show fixture) — the refused fixture edit in the first batch landed nowhere, so it links nowhere. The `act` rows read \"pressed Save in the project header\" (no Show: Save is gone once saved — the row still says where it was), \"pressed Remove node on the clock card\" (Show), and a press on a board's card with its Show drawn disabled, because that card is on the Devices page and the user is in the editor — the tooltip says so. Show is a core offer (`show/<path>`), not a web link: pressing it focuses a node's card the way a tree-row click does, lights the control again, and scrolls it into view — scroll only, never keyboard focus, so it never steals the caret from someone typing."
+)]
+fn rows_with_show() -> Element {
+    let (turns, offers) = placed_transcript();
+    rsx! {
+        OffersProvider { offers,
+            DrawerFrame { view: ready_view(turns, UiAgentStatus::Idle) }
+        }
     }
 }
 
@@ -265,6 +279,7 @@ fn ready_view(turns: Vec<UiAgentTurn>, status: UiAgentStatus) -> UiAppAgentView 
         turns,
         usage,
         model: model(),
+        activity: Default::default(),
     }
 }
 
@@ -397,6 +412,8 @@ fn line(
         path: path.map(str::to_string),
         value: value.map(str::to_string),
         outcome,
+        node: None,
+        place: None,
     }
 }
 
@@ -413,6 +430,110 @@ fn act_row(id: &str, headline: &str) -> UiAgentTurn {
     UiAgentTurn::Tool(UiAgentToolRow {
         done: true,
         headline: Some(headline.to_string()),
+        ..UiAgentToolRow::started(id).for_tool("act")
+    })
+}
+
+/// Sean's build again, placed the way the studio's view places it: the
+/// transcript, and the tree with the Show offers its rows link to.
+fn placed_transcript() -> (Vec<UiAgentTurn>, UiOfferTree) {
+    let node = |path: &str| {
+        OfferPath::project_node(&ProjectNodeAddress::parse(path).expect("a story node"))
+    };
+    let playlist = node("/sean.show/playlist.playlist");
+    let output = node("/sean.show/output.output");
+    let fixture = node("/sean.show/fixture.fixture");
+    let clock = node("/sean.show/clock.clock");
+    let push = OfferPath::parse("devices/mac-a0f26287b48c/update-firmware").expect("a path");
+    let mut offers = UiOfferTree::new();
+    for (target, label, blocked) in [
+        (&playlist, "playlist", None),
+        (&output, "output", None),
+        (&fixture, "fixture", None),
+        (&clock.clone().child("remove"), "Remove node", None),
+        (&push, "Update firmware", Some("It is on the Devices page.")),
+    ] {
+        offers.publish(show_offer(target, label, blocked));
+    }
+    let placed = |target: &OfferPath, label: &str, place: &str| UiAgentPlace {
+        label: label.to_string(),
+        place: place.to_string(),
+        show: offers
+            .get(&OfferPath::show_of(target))
+            .map(|offer| offer.path.clone()),
+    };
+    let mut turns = seans_transcript();
+    let mut batches = turns.iter_mut().filter_map(|turn| match turn {
+        UiAgentTurn::Tool(row) => row.edits.as_mut(),
+        _ => None,
+    });
+    let first = batches.next().expect("the first batch");
+    for line in &mut first.lines {
+        line.place = match (line.verb.as_str(), line.target.as_str()) {
+            ("create_node", "Playlist") => {
+                Some(placed(&playlist, "playlist", "on the playlist card"))
+            }
+            ("set", "output") => Some(placed(&output, "output", "on the output card")),
+            _ => None,
+        };
+    }
+    let second = batches.next().expect("the second batch");
+    second.lines[0].place = Some(placed(&fixture, "fixture", "on the fixture card"));
+    turns.extend([
+        placed_act_row(
+            "tu_3",
+            OfferPath::project().child("save"),
+            placed(
+                &OfferPath::project().child("save"),
+                "Save",
+                "in the project header",
+            ),
+        ),
+        UiAgentTurn::User {
+            text: "Drop the clock, I don't need it.".to_string(),
+        },
+        placed_act_row(
+            "tu_4",
+            clock.clone().child("remove"),
+            placed(&clock.child("remove"), "Remove node", "on the clock card"),
+        ),
+        placed_act_row(
+            "tu_5",
+            push.clone(),
+            placed(&push, "Update firmware", "on Shelf lamp's card"),
+        ),
+        UiAgentTurn::Assistant {
+            text: "Removed the clock, and updated Shelf lamp's firmware so it can run the \
+                   playlist. **Show** on a row takes you to where I did it."
+                .to_string(),
+        },
+    ]);
+    (turns, offers)
+}
+
+/// The Show offer core publishes for a row's target (`show/<target>`).
+fn show_offer(target: &OfferPath, label: &str, blocked: Option<&str>) -> UiOffer {
+    let action = UiAction::from_op(
+        ControllerId::new(AgentController::NODE_ID),
+        AgentOp::Show {
+            target: target.clone(),
+        },
+    )
+    .with_label(format!("Show {label}"))
+    .with_summary(format!("Bring {label} into view and light it."));
+    let action = match blocked {
+        Some(reason) => action.disabled(reason),
+        None => action,
+    };
+    UiOffer::new(OfferPath::show_of(target), "show", action)
+}
+
+fn placed_act_row(id: &str, path: OfferPath, place: UiAgentPlace) -> UiAgentTurn {
+    UiAgentTurn::Tool(UiAgentToolRow {
+        done: true,
+        headline: Some(format!("pressed {path}")),
+        act: Some(UiAgentActPress { path, card: None }),
+        place: Some(place),
         ..UiAgentToolRow::started(id).for_tool("act")
     })
 }

@@ -5,9 +5,9 @@
 
 use lpa_agent::{StopReason, TokenUsage, TurnEvent};
 
-use super::app_agent_eval_driver::{AgentEvalStudio, ModelSource, RunLimits};
-use super::app_agent_eval_harness::golden_tree;
+use super::app_agent_eval_driver::{AgentEvalStudio, ModelSource};
 use super::app_agent_scenario::Scenario;
+use super::app_agent_scenario_seat::{RunLimits, ScenarioSeat};
 use super::app_agent_transcript::EvalStep;
 use crate::app::studio::offer_press_test_api::OfferPressTestApi;
 
@@ -33,7 +33,7 @@ fn a_path_the_readout_never_offered_is_refused_with_the_current_offers() {
         ],
     ]];
     let mut studio = AgentEvalStudio::new(ModelSource::Scripted(scripts));
-    studio.start(&scenario.start, golden_tree);
+    studio.start(&scenario);
     studio.send("press it", limits());
 
     let result = studio
@@ -88,7 +88,7 @@ fn the_agent_presses_save_once_and_a_stale_press_is_refused() {
         ],
     ]];
     let mut studio = AgentEvalStudio::new(ModelSource::Scripted(scripts));
-    studio.start(&scenario.start, golden_tree);
+    studio.start(&scenario);
     studio.send("make it 300 and save", limits());
 
     let results: Vec<serde_json::Value> = studio
@@ -145,7 +145,7 @@ fn the_agent_reads_a_nested_nodes_remove_and_presses_it() {
         ],
     ]];
     let mut studio = AgentEvalStudio::new(ModelSource::Scripted(scripts));
-    studio.start(&scenario.start, golden_tree);
+    studio.start(&scenario);
     assert!(
         has_kind(&mut studio, "Clock"),
         "the golden has a clock to remove"
@@ -220,7 +220,7 @@ fn revert_to_saved_becomes_a_card() {
         ]],
     ];
     let mut studio = AgentEvalStudio::new(ModelSource::Scripted(scripts));
-    studio.start(&scenario.start, golden_tree);
+    studio.start(&scenario);
     studio.send("make it 300, then undo all of it", limits());
 
     let results = tool_results(&studio.transcript_steps());
@@ -287,7 +287,7 @@ fn a_lasting_removal_by_edit_project_is_refused_and_points_at_the_card() {
         ],
     ]];
     let mut studio = AgentEvalStudio::new(ModelSource::Scripted(scripts));
-    studio.start(&scenario.start, golden_tree);
+    studio.start(&scenario);
     studio.send("make it 300, then drop the fixture", limits());
 
     let results = tool_results(&studio.transcript_steps());
@@ -334,7 +334,7 @@ fn an_undoable_removal_by_edit_project_still_removes() {
         ],
     ]];
     let mut studio = AgentEvalStudio::new(ModelSource::Scripted(scripts));
-    studio.start(&scenario.start, golden_tree);
+    studio.start(&scenario);
     assert!(has_kind(&mut studio, "Clock"));
     studio.send("remove the clock", limits());
 
@@ -372,7 +372,7 @@ fn the_agent_reads_and_presses_the_add_node_offer() {
         ],
     ]];
     let mut studio = AgentEvalStudio::new(ModelSource::Scripted(scripts));
-    studio.start(&scenario.start, golden_tree);
+    studio.start(&scenario);
     let clocks = |studio: &mut AgentEvalStudio| {
         studio
             .node_statuses()
@@ -418,6 +418,74 @@ fn the_agent_reads_and_presses_the_add_node_offer() {
     assert_eq!(clocks(&mut studio), before + 1, "a clock was added");
 }
 
+/// The corpus's S4/S18 gap: with no project open, Home publishes
+/// `project/new` and `project/open` and the readout lists them in full; the
+/// agent presses `project/new` by path, the new project opens in the
+/// editor, and the `edit_project` that was refused on Home now applies.
+#[test]
+fn from_home_the_agent_starts_a_project_and_then_edits_it() {
+    let mut press = call(
+        "n1",
+        lpa_agent::ACT_TOOL_NAME,
+        serde_json::json!({
+            "action": "project/new",
+            "args": { "name": "Porch" },
+            "why": "nothing is open yet",
+        }),
+    );
+    press.push(turn_done(StopReason::ToolUse));
+    let mut edit = call(
+        "e1",
+        lpa_agent::EDIT_PROJECT_TOOL_NAME,
+        serde_json::json!({ "edits": [{ "create_node": { "kind": "Clock" } }], "save": false }),
+    );
+    edit.push(turn_done(StopReason::ToolUse));
+    let scripts = vec![vec![
+        press,
+        edit,
+        vec![
+            TurnEvent::TextDelta("Started a project with a clock.".into()),
+            turn_done(StopReason::EndTurn),
+        ],
+    ]];
+    let mut studio = AgentEvalStudio::new(ModelSource::Scripted(scripts));
+    studio.start_on_home();
+    assert!(studio.offered("project/new").is_enabled());
+    assert_eq!(
+        studio.offer_reason("project/open"),
+        "your library has no projects yet"
+    );
+    studio.send("make me something", limits());
+
+    let steps = studio.transcript_steps();
+    let state = steps
+        .iter()
+        .find_map(|step| match step {
+            EvalStep::State { text } => Some(text.clone()),
+            _ => None,
+        })
+        .expect("the readout the model saw");
+    for line in [
+        "page: home (no project open)\n",
+        "actions here (press one with `act` by its path):\n- project/new: New project\n",
+        "  takes template: one of blank (Blank), pattern-1d (1D pattern project), \
+         pattern-2d (2D pattern project) [default blank]; name: optional text\n",
+        "- project/open: Open project [disabled: your library has no projects yet]\n",
+    ] {
+        assert!(state.contains(line), "{line:?} in:\n{state}");
+    }
+    let results = tool_results(&steps);
+    assert_eq!(results.len(), 2, "{results:#?}");
+    assert!(results[0].get("done").is_some(), "{:#}", results[0]);
+    assert_eq!(
+        results[1]["results"][0]["ok"], true,
+        "the edit applied to the new project: {:#}",
+        results[1]
+    );
+    assert!(has_kind(&mut studio, "Clock"), "the clock is in it");
+    studio.not_offered("project/new");
+}
+
 /// The golden's tree root, as its node segment in an offer path.
 const ROOT: &str = "studio.show";
 
@@ -453,6 +521,7 @@ fn limits() -> RunLimits {
         deadline: std::time::Instant::now() + std::time::Duration::from_secs(60),
         usd: 1.0,
         turns: 8,
+        tokens: None,
     }
 }
 

@@ -4,15 +4,18 @@
 //! loaded, so a picker knows every other entry by its def alone — a key and
 //! an authored name — and knows the playing one's knobs because that entry
 //! is the one loaded. The instrument itself is built by core's own
-//! [`derive_pattern_picker`] from those facts, so a story shows exactly
-//! the names, states and actions the real derivation would.
+//! [`derive_pattern_picker`] from those facts, and its verbs by core's own
+//! [`playlist_offers`] ([`picker_offers`]), so a story shows exactly the
+//! names, states and verbs the real derivation would.
 
 use lpa_studio_core::app::project::node::pattern_picker_derivation::{
     PatternPickerEntryFacts, PatternPickerFacts, derive_pattern_picker,
 };
+use lpa_studio_core::app::project::node::playlist_offers;
 use lpa_studio_core::{
-    ProjectNodeAddress, UiAction, UiPanelControl, UiPanelControlState, UiPanelControlView,
-    UiPanelEmit, UiPanelGroup, UiPanelTarget, UiPanelWidget, UiSlotFieldState, UiSlotValue,
+    ProjectNodeAddress, UiAction, UiOfferTree, UiPanelControl, UiPanelControlState,
+    UiPanelControlView, UiPanelEmit, UiPanelGroup, UiPanelTarget, UiPanelWidget, UiSlotFieldState,
+    UiSlotValue,
 };
 use lpc_model::{FromLpValue, PlaylistCycle};
 
@@ -154,6 +157,16 @@ pub(crate) fn pattern_group(facts: &PatternPickerFacts) -> UiPanelGroup {
         UiPanelControlView::new(lpc_model::PLAYLIST_CYCLE_CHANNEL, control)
             .with_state(state, None::<String>),
     ])
+}
+
+/// The playlist's verbs for these facts, as core publishes them — what a
+/// story hands the picker in place of the shell's offer tree.
+pub(crate) fn picker_offers(facts: &PatternPickerFacts) -> UiOfferTree {
+    let mut tree = UiOfferTree::new();
+    for offer in playlist_offers(facts) {
+        tree.publish(offer);
+    }
+    tree
 }
 
 /// Apply one of the picker's own actions to the facts, the way the device

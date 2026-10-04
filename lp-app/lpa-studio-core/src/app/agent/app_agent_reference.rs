@@ -258,13 +258,41 @@ fn cycle_section(p: &mut String) {
     else {
         return;
     };
+    let cycling = cycle_kind(&lpc_model::PlaylistCycle::Cycle {
+        step_seconds: 30.0,
+        fade_seconds: 1.5,
+    });
+    let hold = cycle_kind(&lpc_model::PlaylistCycle::Hold);
     let _ = write!(
         p,
         "## Playlist cycle\n\nA playlist plays one entry at a time. Its `cycle` is {}. \
          `step_seconds` is how long each entry plays before the next; `fade_seconds` is \
-         the crossfade between them. Without a `cycle` the playlist holds on one entry.\n\n",
+         the crossfade between them.\n\n\
+         **A playlist rotates through its entries only while `cycle` is on**: \
+         `{{\"kind\": \"{cycling}\", \"step_seconds\": 30, \"fade_seconds\": 1.5}}`, \
+         with `step_seconds` above 0. With no `cycle`, with `\"kind\": \"{hold}\"`, or \
+         with `step_seconds` 0, it stays on one entry, however many patterns \
+         are in it. So when the user wants patterns to take turns (\"cycle a few \
+         patterns\", \"rotate\", \"switch between\", \"a show\"), importing them into \
+         the playlist is not enough: also `set` its `cycle`, every time.\n\n",
         describe_shape(&registry, cycle.shape(), 0)
     );
+}
+
+/// The `kind` tag `cycle` is stored with, read off the model's own value
+/// (so the reference cannot name a tag the model does not read).
+fn cycle_kind(cycle: &lpc_model::PlaylistCycle) -> String {
+    use lpc_model::{LpValue, ToLpValue};
+    let LpValue::Struct { fields, .. } = cycle.to_lp_value() else {
+        return "?".to_string();
+    };
+    fields
+        .into_iter()
+        .find_map(|(name, value)| match (name.as_str(), value) {
+            ("kind", LpValue::String(kind)) => Some(kind),
+            _ => None,
+        })
+        .unwrap_or_else(|| "?".to_string())
 }
 
 /// The catalog's patterns: what `import_pattern` can bring in.
@@ -328,6 +356,9 @@ mod tests {
             "step_seconds",
             "`render_size`",
             "\"edit_project\"",
+            "only while `cycle` is on",
+            "\"kind\": \"cycle\"",
+            "\"kind\": \"hold\"",
         ] {
             let found = reference.contains(needle)
                 || (needle == "\"edit_project\"" && reference.contains("edit_project"));

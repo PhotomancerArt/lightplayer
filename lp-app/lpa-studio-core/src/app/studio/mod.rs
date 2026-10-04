@@ -1,4 +1,5 @@
 pub mod console_command;
+pub mod lens_hold;
 pub mod lens_reconnect;
 /// Tests press offers by path (`press`, `press_lasting`, `offered`, …), on
 /// every bench: the offer tree's third consumer, after the web and the agent.
@@ -24,7 +25,7 @@ pub mod studio_controller;
 /// tests). See the module doc for why nothing here fakes at the model's own
 /// vocabulary.
 #[cfg(test)]
-mod studio_device_e2e_tests;
+pub(crate) mod studio_device_e2e_tests;
 /// End-to-end edit-flow tests against an in-process `lpa-server` (host-only
 /// dev-dependency; never part of the wasm lib build).
 #[cfg(test)]

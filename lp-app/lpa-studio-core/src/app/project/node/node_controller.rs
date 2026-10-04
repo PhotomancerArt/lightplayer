@@ -326,7 +326,6 @@ impl NodeController {
     ) -> Option<UiNodeFace> {
         super::node_face_builder::kind_face(
             self.node_ty()?,
-            self.address(),
             sections,
             children,
             self.error_detail(),

@@ -28,6 +28,7 @@ use lpa_studio_core::{
     DeviceView, OutcomeView, PendingLinkView, RosterView,
 };
 
+use crate::app::home::ExplorePage;
 use crate::app::home::card_thumb::CardThumb;
 use crate::app::home::device_offer_story_fixtures::StoryDevicesPage;
 use crate::app::home::device_offer_story_fixtures::{
@@ -38,8 +39,8 @@ use crate::app::home::device_pick_popover::{
 };
 use crate::app::home::device_terminal::DeviceTerminal;
 use crate::app::home::gallery_preview::ThumbPreviewBadge;
+use crate::app::home::home_offer_story_fixtures::StoryProjectsPage;
 use crate::app::home::target_pick_popover::TargetPickPopover;
-use crate::app::home::{ExplorePage, ProjectsPage};
 use crate::core::OffersProvider;
 use lpa_studio_core::{BluetoothReach, OfferArgs, PUSH_SOURCE_PARAM, UiOffer};
 
@@ -802,6 +803,36 @@ fn devices_page_degraded_card() -> Element {
                 projects: vec![],
                 examples: vec![],
                 on_action: |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    label = "Agent light — a device card's verb",
+    description = "The agent light (agentic-UI M8) on a device card. The assistant pressed this board's Remove (`devices/<board>/remove-project`) — or handed it to you on a card — so that chip in the PROJECT zone's verb row wears the assistant's orchid ring (spinning live, still here), and the same chip on the docked lens card would too: every control that draws an offer is keyed by the offer's path. LEFT: at rest. RIGHT: lit. The card's size, its zones and every other verb stay exactly where they were."
+)]
+fn devices_card_agent_lit() -> Element {
+    let card = roster_fixture().roster.devices.remove(0);
+    let lit = crate::app::agent::story_activity([(
+        story_board_prefix(card.id).child("remove-project"),
+        lpa_studio_core::AgentActivityKind::Pressed,
+    )]);
+    rsx! {
+        div { class: "tw:grid tw:max-w-xl tw:grid-cols-2 tw:gap-3 tw:p-4",
+            StoryDeviceCard {
+                card: card.clone(),
+                projects: vec![],
+                examples: vec![],
+                on_action: |_| {},
+            }
+            crate::app::agent::AgentActivityProvider { activity: lit,
+                StoryDeviceCard {
+                    card,
+                    projects: vec![],
+                    examples: vec![],
+                    on_action: |_| {},
+                }
             }
         }
     }
@@ -1767,7 +1798,7 @@ fn GalleryPages(
     rsx! {
         div { class: "tw:grid tw:gap-10",
             StoryDevicesPage { home: home.clone(), on_action }
-            ProjectsPage { home: home.clone(), now_secs, on_action }
+            StoryProjectsPage { home: home.clone(), now_secs, on_action }
             ExplorePage { home: Some(home), on_action }
         }
     }
@@ -1950,7 +1981,7 @@ fn pick_popover_push() -> UiOffer {
 
 /// Where a story board's verbs live (the ref is never drawn).
 fn story_board_prefix(device: DeviceId) -> lpa_studio_core::OfferPath {
-    lpa_studio_core::OfferPath::board(&lpa_studio_core::BoardRef::New(device))
+    lpa_studio_core::OfferPath::board(&lpa_studio_core::BoardRef::New(device.0 as u32))
 }
 
 /// Forty saved projects: the library size the inline picker could not hold.

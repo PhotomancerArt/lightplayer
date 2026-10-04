@@ -1830,8 +1830,18 @@ impl ProjectController {
     /// unmapped ones — every asset row carries a revert, which needs only the
     /// artifact ([`AssetEditOp::Revert`]).
     pub fn pending_edits(&self) -> Vec<UiPendingEdit> {
+        self.pending_edit_rows()
+            .into_iter()
+            .map(|(edit, _)| edit)
+            .collect()
+    }
+
+    /// [`Self::pending_edits`], each with the action that reverts it — what
+    /// `project/revert-edit` binds its `edit` choice to
+    /// ([`publish_revert_edit_offer`]). Stale entries carry none.
+    fn pending_edit_rows(&self) -> Vec<(UiPendingEdit, Option<UiAction>)> {
         let join = self.slot_edit_join();
-        let mut edits: Vec<UiPendingEdit> = join
+        let mut edits: Vec<(UiPendingEdit, Option<UiAction>)> = join
             .entries()
             .into_iter()
             // D7: a Debug override carries no dirty weight, so it belongs in
@@ -1844,7 +1854,11 @@ impl ProjectController {
                 self.ui_pending_edit(&entry, old_value)
             })
             .collect();
-        edits.extend(self.stale_pending_edits());
+        edits.extend(
+            self.stale_pending_edits()
+                .into_iter()
+                .map(|edit| (edit, None)),
+        );
         edits.extend(
             join.asset_entries()
                 .into_iter()
@@ -1859,7 +1873,10 @@ impl ProjectController {
     /// (`ClearArtifact`). Like slot entries, the phase derives from the
     /// entry's own [`DirtySummary`] classification, so list and counts
     /// cannot drift.
-    fn ui_pending_asset_edit(&self, entry: &AssetEditEntry<'_>) -> UiPendingEdit {
+    fn ui_pending_asset_edit(
+        &self,
+        entry: &AssetEditEntry<'_>,
+    ) -> (UiPendingEdit, Option<UiAction>) {
         let node_label = entry
             .node
             .and_then(|address| self.node(address))
@@ -1880,7 +1897,7 @@ impl ProjectController {
         } else {
             UiPendingEditPhase::Persisted
         };
-        UiPendingEdit {
+        let edit = UiPendingEdit {
             node_label,
             // Asset artifacts are not def artifacts, so they reverse-map to
             // no node; the row lists at the project level (no node popover
@@ -1894,13 +1911,15 @@ impl ProjectController {
             // Whole-file replace: no meaningful saved-value display.
             old_value: None,
             phase,
-            revert: Some(UiAction::from_op(
-                ControllerId::new(Self::NODE_ID),
-                AssetEditOp::Revert {
-                    artifact: entry.artifact.clone(),
-                },
-            )),
-        }
+            key: Some(format!("file:{}", entry.artifact.file_path().as_str())),
+        };
+        let revert = UiAction::from_op(
+            ControllerId::new(Self::NODE_ID),
+            AssetEditOp::Revert {
+                artifact: entry.artifact.clone(),
+            },
+        );
+        (edit, Some(revert))
     }
 
     /// Project one join entry into its change-list DTO. The phase derives
@@ -1915,7 +1934,7 @@ impl ProjectController {
         &self,
         entry: &SlotEditEntry<'_>,
         old_value: Option<String>,
-    ) -> UiPendingEdit {
+    ) -> (UiPendingEdit, Option<UiAction>) {
         let mut node_label = self
             .node(&entry.address.node)
             .map(|node| node.label().to_string())
@@ -1956,20 +1975,27 @@ impl ProjectController {
         } else {
             UiPendingEditPhase::Persisted
         };
-        UiPendingEdit {
+        let edit = UiPendingEdit {
             node_label,
             node_path: entry.address.node.to_string(),
             slot_path_display: slot_path_display(entry.address),
             kind,
             old_value,
             phase,
-            revert: Some(UiAction::from_op(
-                ControllerId::new(Self::NODE_ID),
-                SlotEditOp::Revert {
-                    address: entry.address.clone(),
-                },
+            key: Some(format!(
+                "{}:{}:{}",
+                entry.address.node,
+                entry.address.root.name(),
+                entry.address.path
             )),
-        }
+        };
+        let revert = UiAction::from_op(
+            ControllerId::new(Self::NODE_ID),
+            SlotEditOp::Revert {
+                address: entry.address.clone(),
+            },
+        );
+        (edit, Some(revert))
     }
 
     /// Change-list entries for overlay edits whose artifact does not
@@ -2013,7 +2039,7 @@ impl ProjectController {
                 kind: acked_edit_kind(op),
                 old_value: sync.base_value_at(artifact, path).map(str::to_string),
                 phase: UiPendingEditPhase::Persisted,
-                revert: None,
+                key: None,
             })
             .collect()
     }
@@ -2512,6 +2538,15 @@ impl ProjectController {
             self.lens_device_features.as_deref(),
         );
         publish_project_offers(offers, &dirty, edits.debug_override_count());
+        // The changes list's per-row revert, and the transient session's
+        // "Save a copy" (M6e), beside the project's own verbs.
+        let pending_rows = self.pending_edit_rows();
+        publish_revert_edit_offer(offers, &pending_rows);
+        let pending_edits: Vec<UiPendingEdit> =
+            pending_rows.into_iter().map(|(edit, _)| edit).collect();
+        if self.active_is_transient() {
+            publish_save_copy_offer(offers);
+        }
         publish_add_node_offers(offers, &root_add_node_menu);
         let mut nodes = self
             .root_nodes
@@ -2583,7 +2618,17 @@ impl ProjectController {
                 !self.patch_undo.is_empty(),
                 !self.patch_redo.is_empty(),
             );
+            // The arrange canvas's commits (M6e), off the same surface.
+            super::arrange_offers::publish_arrange_offers(
+                offers,
+                surface,
+                !self.arrange_undo.is_empty(),
+                !self.arrange_redo.is_empty(),
+            );
         }
+        // Every playlist's live verbs (M6e), off the facts its Pattern
+        // instrument derives from.
+        self.publish_playlist_offers(&nodes, offers);
         // Module faces derive LAST: a module's panel aggregates the panel
         // targets its finished subtree carries, so every card below it must
         // already be built (and card-UI-overlaid) before it can be read.
@@ -2608,7 +2653,7 @@ impl ProjectController {
         .with_library_identity(self.active_library_uid().zip(self.active_library_slug()))
         .with_dirty(dirty)
         .with_debug_overrides(edits.debug_override_count())
-        .with_pending_edits(self.pending_edits())
+        .with_pending_edits(pending_edits)
         .with_add_node_menu(root_add_node_menu)
         .with_edits_in_flight(self.edits_in_flight())
         .with_patch_surface(surface, self.patch_selection.clone())
@@ -2750,6 +2795,14 @@ impl ProjectController {
     pub fn mark_project_sync_failed(&mut self, message: impl Into<String>) {
         if let Some(sync) = &mut self.sync {
             sync.fail(message.into());
+        }
+    }
+
+    /// Withdraw a sync failure the link caused, not the project (the pull
+    /// in flight when the editor's link went away).
+    pub fn withdraw_project_sync_failure(&mut self) {
+        if let Some(sync) = &mut self.sync {
+            sync.withdraw_failure();
         }
     }
 
@@ -5380,78 +5433,12 @@ impl ProjectController {
         card: &crate::UiNodeChild,
         face: &crate::UiPlaylistFace,
     ) -> Option<crate::UiPanelGroup> {
-        use lpc_model::FromLpValue;
+        use super::node::pattern_picker_derivation::derive_pattern_picker;
 
-        use super::node::pattern_picker_derivation::{
-            PatternPickerEntryFacts, PatternPickerFacts, derive_pattern_picker,
-        };
-
-        if face.entries.is_empty() {
-            return None;
-        }
         let address = ProjectNodeAddress::parse(&card.detail).ok()?;
-        let node = self.node(&address)?;
-        let playlist = node.target().node_id;
-        let cycle_target =
-            self.playlist_channel_target(graph, playlist, lpc_model::PLAYLIST_CYCLE_CHANNEL);
-        let skip_target =
-            self.playlist_channel_target(graph, playlist, lpc_model::PLAYLIST_SKIP_CHANNEL);
-
-        // Live before authored, the swatch's rule — but "live" only when a
-        // writer actually holds the channel (or a write is on its way): an
-        // unwritten channel's reading is not a statement about the cycle.
-        let authored_cycle = def_slot_value(node, &["cycle", "some"])
-            .and_then(|value| lpc_model::PlaylistCycle::from_lp_value(value).ok());
-        let cycle = cycle_target
-            .as_ref()
-            .and_then(|target| self.written_channel_value(graph, target))
-            .and_then(|value| lpc_model::PlaylistCycle::from_lp_value(value).ok())
-            .or(authored_cycle)
-            .unwrap_or_default();
-        let skip = skip_target
-            .as_ref()
-            .and_then(|target| self.written_channel_value(graph, target))
-            .and_then(|value| Vec::<u32>::from_lp_value(value).ok())
-            .or_else(|| {
-                def_slot_value(node, &["skip", "some"])
-                    .and_then(|value| Vec::<u32>::from_lp_value(value).ok())
-            })
-            .unwrap_or_default();
-        // The device keeps each entry's failure to itself (plan PD10); its
-        // one outward sign is the playlist's warning, read with the parser
-        // paired to the engine's formatter (director ruling 1).
-        let failed = match (node.status().tone, node.status().detail.as_deref()) {
-            (crate::ProjectNodeStatusTone::Warning, Some(detail)) => {
-                lpc_model::parse_playlist_failed_entries(detail)
-            }
-            _ => Vec::new(),
-        };
-        let default_fade = match def_slot_value(node, &["default_fade"]) {
-            Some(lpc_model::LpValue::F32(seconds)) => Some(*seconds),
-            _ => None,
-        };
-
-        let picker = derive_pattern_picker(PatternPickerFacts {
-            playlist: address,
-            entries: face
-                .entries
-                .iter()
-                .map(|entry| PatternPickerEntryFacts {
-                    key: entry.key,
-                    // The entry's authored `name` is a node name
-                    // (`noise_soft`); it reads the way its card does.
-                    name: super::node::human_node_label(&entry.name),
-                })
-                .collect(),
-            active: face.active,
-            cycle,
-            authored_cycle,
-            default_fade,
-            skip,
-            failed,
-            cycle_target: cycle_target.clone(),
-            skip_target,
-        });
+        let facts = self.pattern_picker_facts(Some(graph), address, face)?;
+        let cycle_target = facts.cycle_target.clone();
+        let picker = derive_pattern_picker(facts);
         let (mut state, mut source) = match cycle_target.as_ref() {
             Some(target) => self.panel_control_state(graph, target.scope, target),
             None => (crate::UiPanelControlState::ReadDefault, None),
@@ -5498,6 +5485,115 @@ impl ProjectController {
                 },
             ]),
         )
+    }
+
+    /// Everything one playlist's Pattern instrument and its live verbs
+    /// derive from ([`super::node::pattern_picker_derivation`],
+    /// [`super::node::playlist_offers`]): the set as its face lists it, the
+    /// playing key, the cycle and skip values (live before authored), the
+    /// failed keys, and the two channels' write targets.
+    ///
+    /// `None` for a playlist with no entries or a node no controller backs.
+    fn pattern_picker_facts(
+        &self,
+        graph: Option<&lpc_wire::WireBindingGraph>,
+        address: ProjectNodeAddress,
+        face: &crate::UiPlaylistFace,
+    ) -> Option<super::node::pattern_picker_derivation::PatternPickerFacts> {
+        use lpc_model::FromLpValue;
+
+        use super::node::pattern_picker_derivation::{PatternPickerEntryFacts, PatternPickerFacts};
+
+        if face.entries.is_empty() {
+            return None;
+        }
+        let node = self.node(&address)?;
+        let playlist = node.target().node_id;
+        // No binding graph yet (an early read): no channel targets, so only
+        // the plays and steps, which need none.
+        let target = |channel: &str| {
+            graph.and_then(|graph| self.playlist_channel_target(graph, playlist, channel))
+        };
+        let cycle_target = target(lpc_model::PLAYLIST_CYCLE_CHANNEL);
+        let skip_target = target(lpc_model::PLAYLIST_SKIP_CHANNEL);
+        let written = |target: &crate::UiPanelTarget| {
+            graph.and_then(|graph| self.written_channel_value(graph, target))
+        };
+
+        // Live before authored, the swatch's rule — but "live" only when a
+        // writer actually holds the channel (or a write is on its way): an
+        // unwritten channel's reading is not a statement about the cycle.
+        let authored_cycle = def_slot_value(node, &["cycle", "some"])
+            .and_then(|value| lpc_model::PlaylistCycle::from_lp_value(value).ok());
+        let cycle = cycle_target
+            .as_ref()
+            .and_then(written)
+            .and_then(|value| lpc_model::PlaylistCycle::from_lp_value(value).ok())
+            .or(authored_cycle)
+            .unwrap_or_default();
+        let skip = skip_target
+            .as_ref()
+            .and_then(written)
+            .and_then(|value| Vec::<u32>::from_lp_value(value).ok())
+            .or_else(|| {
+                def_slot_value(node, &["skip", "some"])
+                    .and_then(|value| Vec::<u32>::from_lp_value(value).ok())
+            })
+            .unwrap_or_default();
+        // The device keeps each entry's failure to itself (plan PD10); its
+        // one outward sign is the playlist's warning, read with the parser
+        // paired to the engine's formatter (director ruling 1).
+        let failed = match (node.status().tone, node.status().detail.as_deref()) {
+            (crate::ProjectNodeStatusTone::Warning, Some(detail)) => {
+                lpc_model::parse_playlist_failed_entries(detail)
+            }
+            _ => Vec::new(),
+        };
+        let default_fade = match def_slot_value(node, &["default_fade"]) {
+            Some(lpc_model::LpValue::F32(seconds)) => Some(*seconds),
+            _ => None,
+        };
+        Some(PatternPickerFacts {
+            playlist: address,
+            entries: face
+                .entries
+                .iter()
+                .map(|entry| PatternPickerEntryFacts {
+                    key: entry.key,
+                    // The entry's authored `name` is a node name
+                    // (`noise_soft`); it reads the way its card does.
+                    name: super::node::human_node_label(&entry.name),
+                })
+                .collect(),
+            active: face.active,
+            cycle,
+            authored_cycle,
+            default_fade,
+            skip,
+            failed,
+            cycle_target,
+            skip_target,
+        })
+    }
+
+    /// Publish every playlist's live verbs (`project/<playlist>/play`, …;
+    /// [`super::node::playlist_offers`]) off the same facts its Pattern
+    /// instrument derives from, once per playlist card with a face.
+    fn publish_playlist_offers(&self, nodes: &[UiNodeView], offers: &mut UiOfferTree) {
+        let graph = self.binding_graph();
+        walk_faces_ref(nodes, &mut |path, face| {
+            let crate::UiNodeFace::Playlist(face) = face else {
+                return;
+            };
+            let Ok(address) = ProjectNodeAddress::parse(path) else {
+                return;
+            };
+            if let Some(facts) = self.pattern_picker_facts(graph, address, face) {
+                for offer in super::node::playlist_offers(&facts) {
+                    offers.publish(offer);
+                }
+            }
+        });
     }
 
     /// The write target of one of a playlist's own consumed channels
@@ -5911,6 +6007,20 @@ impl ProjectController {
         for child in node.children() {
             self.collect_subscribed_products(child, products);
         }
+    }
+
+    /// Focus the card of the node whose offers live at `prefix`
+    /// (`project/demo.module/fixture.fixture`), the way a tree-row click
+    /// does — the user's Show on an app-chat row. `false` when no node
+    /// lives there.
+    pub(crate) fn focus_node_at_prefix(&mut self, prefix: &crate::OfferPath) -> bool {
+        let Some(node) = self.node_at_prefix(prefix) else {
+            return false;
+        };
+        let target = ProjectEditorTarget::addressed_node(node.target().clone());
+        self.focus_editor_target(&target);
+        self.active_editor_target = Some(target);
+        true
     }
 
     fn focus_editor_target(&mut self, target: &ProjectEditorTarget) {
@@ -9943,6 +10053,33 @@ fn publish_project_offers(offers: &mut UiOfferTree, dirty: &DirtySummary, debug_
             project_action(ProjectOp::ClearDebugEdits).with_label("Clear all debug overrides"),
         ));
     }
+}
+
+/// Publish `project/revert-edit` over the changes list's revertible rows
+/// ([`super::revert_edit_offer`]).
+fn publish_revert_edit_offer(offers: &mut UiOfferTree, rows: &[(UiPendingEdit, Option<UiAction>)]) {
+    let revertible: Vec<(UiPendingEdit, UiAction)> = rows
+        .iter()
+        .filter_map(|(edit, revert)| Some((edit.clone(), revert.clone()?)))
+        .collect();
+    if let Some(offer) = super::revert_edit_offer(&revertible) {
+        offers.publish(offer);
+    }
+}
+
+/// `project/save-copy`: keep the open transient session (a built-in
+/// example, or a project opened only to look at) as a project of your own.
+/// The explicit save IS the fork (`fork_transient_at_save`): it runs even
+/// on a clean overlay, so a pristine example is kept with no edit first.
+/// Routine: nothing is lost, a project is gained.
+fn publish_save_copy_offer(offers: &mut UiOfferTree) {
+    offers.publish(UiOffer::new(
+        OfferPath::project().child(crate::SAVE_COPY_VERB),
+        "save",
+        project_action(ProjectOp::SaveOverlay)
+            .with_label("Save a copy")
+            .with_summary("Keep this project as your own, in your library."),
+    ));
 }
 
 /// An action dispatched to the project controller itself.
@@ -16300,7 +16437,19 @@ mod tests {
             .expect("NodeRemoved row listed");
         assert_eq!(removed.node_label, "Clock");
         assert_eq!(removed.slot_path_display, "nodes[clock]");
-        assert!(removed.revert.is_some(), "the row offers a revert");
+        let mut offers = UiOfferTree::new();
+        let _ = project.editor_view(
+            "loaded-project",
+            7,
+            &ProjectInventorySummary::default(),
+            &mut offers,
+        );
+        assert!(
+            revert_edit_press(&offers, removed)
+                .op_as::<crate::SlotEditOp>()
+                .is_some(),
+            "the row offers a revert"
+        );
         assert!(
             edits.iter().any(|edit| {
                 matches!(&edit.kind, crate::UiPendingEditKind::AssetBody { detail } if detail == "deleted")
@@ -16561,7 +16710,8 @@ mod tests {
         // A pending edit on the nested clock and one on the playlist's
         // entry, two levels down: each dirty subtree offers its revert, the
         // project header offers Save and Revert first, and the order is the
-        // tree's (a node's own verbs before its children's).
+        // tree's (a node's own verbs before its children's). The changes
+        // list's per-row revert follows the header's (M6e).
         for node in [
             "/demo.module/clock.clock",
             "/demo.module/group.playlist/leaf.shader",
@@ -16580,6 +16730,7 @@ mod tests {
             [
                 "project/save",
                 "project/revert",
+                "project/revert-edit",
                 "project/add-node",
                 "project/import-pattern",
                 "project/paste-node",
@@ -18000,6 +18151,17 @@ mod tests {
 
     // --- Save-panel change list (P5) -----------------------------------------
 
+    /// The action a row's revert dispatches: `project/revert-edit` pressed
+    /// with the row's key, the way the row's button presses it.
+    fn revert_edit_press(offers: &UiOfferTree, edit: &crate::UiPendingEdit) -> UiAction {
+        let key = edit.key.clone().expect("the row has a key to revert by");
+        offers
+            .get(&OfferPath::project().child(crate::REVERT_EDIT_VERB))
+            .expect("`project/revert-edit` is offered while an edit is pending")
+            .press(&crate::OfferArgs::new().with(crate::REVERT_EDIT_PARAM, key))
+            .expect("the row's key is one of the choice's options")
+    }
+
     fn pending_edits_by_phase(edits: &[crate::UiPendingEdit]) -> DirtySummary {
         edits
             .iter()
@@ -18069,11 +18231,12 @@ mod tests {
             },
         );
 
+        let mut offers = UiOfferTree::new();
         let editor = project.editor_view(
             "loaded-project",
             7,
             &ProjectInventorySummary::default(),
-            &mut UiOfferTree::new(),
+            &mut offers,
         );
 
         assert_eq!(
@@ -18115,17 +18278,21 @@ mod tests {
             }
         );
         // Every entry is node-labeled, carries the node's stable address
-        // string (the node detail popup filters on it), and carries a revert
-        // at its address.
+        // string (the node detail popup filters on it), and is revertible
+        // at its address through `project/revert-edit`.
         let node_path = structural_address("entries[a]").node.to_string();
         for edit in &editor.pending_edits {
             assert_eq!(edit.node_label, "Orbit");
             assert_eq!(edit.node_path, node_path);
-            let revert = edit.revert.as_ref().expect("mapped entries carry revert");
+            let revert = revert_edit_press(&offers, edit);
             assert!(revert.is_for_node(ProjectController::NODE_ID));
+            assert!(
+                revert.meta().consequence == crate::ActionConsequence::Undoable,
+                "one edit's revert is Undoable, like a node's"
+            );
         }
         assert_eq!(
-            editor.pending_edits[0].revert.as_ref().unwrap().op_as(),
+            revert_edit_press(&offers, &editor.pending_edits[0]).op_as(),
             Some(&crate::SlotEditOp::Revert {
                 address: structural_address("entries[a]")
             })
@@ -18251,7 +18418,7 @@ mod tests {
             }
         );
         assert_eq!(stale.phase, crate::UiPendingEditPhase::Persisted);
-        assert!(stale.revert.is_none());
+        assert!(stale.key.is_none(), "nothing to revert a stale entry by");
     }
 
     /// S4: the stale-entry path classifies by role like every other entry.
@@ -18788,11 +18955,12 @@ mod tests {
         let (mut project, _client, _sent) = editable_project_with_scripted_client(Vec::new());
         seed_acked_asset_body(&mut project, glsl_artifact(), &vec![b'x'; 3277]);
 
+        let mut offers = UiOfferTree::new();
         let editor = project.editor_view(
             "loaded-project",
             7,
             &ProjectInventorySummary::default(),
-            &mut UiOfferTree::new(),
+            &mut offers,
         );
 
         assert_eq!(editor.pending_edits.len(), 1);
@@ -18809,7 +18977,7 @@ mod tests {
             }
         );
         assert_eq!(row.phase, UiPendingEditPhase::Persisted);
-        let revert = row.revert.as_ref().expect("asset rows carry revert");
+        let revert = revert_edit_press(&offers, row);
         assert!(revert.is_for_node(ProjectController::NODE_ID));
         assert_eq!(
             revert.op_as::<crate::AssetEditOp>(),

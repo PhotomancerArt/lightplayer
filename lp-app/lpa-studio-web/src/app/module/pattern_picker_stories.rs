@@ -4,24 +4,31 @@
 //! instrument lives: shared knobs on top, then the Pattern group, then the
 //! playing pattern's own knobs (vision D15/D21). The picker in each is
 //! built by core's own derivation from device-honest facts — one entry
-//! loaded, every other known by its def's key and name.
+//! loaded, every other known by its def's key and name — and its verbs are
+//! core's own playlist offers for the same facts.
 
 use dioxus::prelude::*;
 use lpa_studio_web_story_macros::story;
 
+use lpa_studio_core::app::project::node::pattern_picker_derivation::PatternPickerFacts;
+
 use super::PlayModeSurface;
 use super::pattern_picker_fixtures::{
-    CHOKER_SET, TWENTY_FIVE, apply_picker_action, authored_cycle, cycle_held, piece_panel,
-    set_facts, skip_held,
+    CHOKER_SET, TWENTY_FIVE, apply_picker_action, authored_cycle, cycle_held, picker_offers,
+    piece_panel, set_facts, skip_held,
 };
+use crate::core::OffersProvider;
 
-/// The phone frame every story renders in.
+/// The phone frame every story renders in, with the playlist's verbs for
+/// `facts` in place of the shell's offer tree.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn Phone(children: Element) -> Element {
+fn Phone(facts: PatternPickerFacts, children: Element) -> Element {
     rsx! {
-        div { class: "tw:h-[900px] tw:w-[375px] tw:overflow-auto tw:border tw:border-border",
-            {children}
+        OffersProvider { offers: picker_offers(&facts),
+            div { class: "tw:h-[900px] tw:w-[375px] tw:overflow-auto tw:border tw:border-border",
+                {children}
+            }
         }
     }
 }
@@ -34,7 +41,7 @@ fn cycling() -> Element {
     facts.authored_cycle = Some(authored_cycle(20.0));
     facts.cycle = authored_cycle(20.0);
     rsx! {
-        Phone {
+        Phone { facts: facts.clone(),
             PlayModeSurface { panel: piece_panel(&facts), on_panel: move |_| {}, on_action: move |_| {} }
         }
     }
@@ -46,7 +53,7 @@ fn cycling() -> Element {
 fn holding() -> Element {
     let facts = set_facts(CHOKER_SET, 1);
     rsx! {
-        Phone {
+        Phone { facts: facts.clone(),
             PlayModeSurface { panel: piece_panel(&facts), on_panel: move |_| {}, on_action: move |_| {} }
         }
     }
@@ -61,7 +68,7 @@ fn one_skipped() -> Element {
     facts.cycle = authored_cycle(20.0);
     facts.authored_cycle = Some(authored_cycle(20.0));
     rsx! {
-        Phone {
+        Phone { facts: facts.clone(),
             PlayModeSurface { panel: piece_panel(&facts), on_panel: move |_| {}, on_action: move |_| {} }
         }
     }
@@ -76,7 +83,7 @@ fn one_failed() -> Element {
     facts.cycle = authored_cycle(20.0);
     facts.authored_cycle = Some(authored_cycle(20.0));
     rsx! {
-        Phone {
+        Phone { facts: facts.clone(),
             PlayModeSurface { panel: piece_panel(&facts), on_panel: move |_| {}, on_action: move |_| {} }
         }
     }
@@ -89,7 +96,7 @@ fn twenty_five_at_phone_width() -> Element {
     let mut facts = cycle_held(set_facts(TWENTY_FIVE, 12));
     facts.cycle = authored_cycle(30.0);
     rsx! {
-        Phone {
+        Phone { facts: facts.clone(),
             PlayModeSurface { panel: piece_panel(&facts), on_panel: move |_| {}, on_action: move |_| {} }
         }
     }
@@ -101,7 +108,7 @@ fn twenty_five_at_phone_width() -> Element {
 fn two_entries() -> Element {
     let facts = set_facts(&["idle", "blast"], 1);
     rsx! {
-        Phone {
+        Phone { facts: facts.clone(),
             PlayModeSurface { panel: piece_panel(&facts), on_panel: move |_| {}, on_action: move |_| {} }
         }
     }
@@ -114,7 +121,7 @@ fn walk() -> Element {
     let mut facts = use_signal(|| set_facts(CHOKER_SET, 1));
     let panel = piece_panel(&facts());
     rsx! {
-        Phone {
+        Phone { facts: facts(),
             PlayModeSurface {
                 panel,
                 on_panel: move |_| {},

@@ -1,0 +1,79 @@
+# S10 "Light-up skirt, first time": Viatrix is learning and asks why as
+# often as how. The agent explains in plain words, asks one thing at a
+# time, never guesses the board, the count or the pin.
+id = "S10"
+name = "s10-viatrix-first-skirt"
+summary = "Nothing known → one question at a time, then 120 LEDs on D6 with a few patterns, explained plainly"
+persona = "viatrix"
+tags = ["build", "ask-dont-guess", "teach"]
+golden = "viatrix-120-d6"
+note = "Jargon is a keyword check in v1: the words are banned outright, where the spec allows them explained."
+
+[start]
+project = "blank"
+board = { actual = "seeed/xiao-esp32-c6" }
+
+[user]
+say = "hi!! I sewed LEDs into a skirt and I have no idea what I'm doing. how do I make it light up?"
+otherwise = "I don't know, what do you think?"
+
+[[user.reply]]
+topic = "board"
+when = ["board", "microcontroller", "controller", "chip", "brain", "xiao", "esp32"]
+text = "it says XIAO ESP32C6 on the back?"
+
+[[user.reply]]
+topic = "count"
+when = ["how many", "count", "number of", "long"]
+text = "4 strands going down, 30 on each, and they're all connected in one long line"
+
+[[user.reply]]
+topic = "pin"
+when = ["pin", "soldered", "data", "wire", "connected to", "hooked"]
+text = "the wire is soldered to the one that says D6"
+
+[budget]
+turns = 30
+usd = 0.75
+
+[[check]]
+kind = "asked_before"
+topic = "board"
+before = "pin"
+[[check]]
+kind = "asked_before"
+topic = "count"
+before = "edit"
+[[check]]
+kind = "asked_before"
+topic = "pin"
+before = "pin"
+# One thing at a time (no question wall), and not too many.
+[[check]]
+kind = "max_questions"
+n = 4
+per_turn = 2
+[[check]]
+kind = "output_on"
+pin = "D6"
+[[check]]
+kind = "target_is"
+board = "seeed/xiao-esp32-c6"
+[[check]]
+kind = "strip_of"
+leds = 120
+[[check]]
+kind = "playlist"
+min_entries = 2
+[[check]]
+kind = "all_nodes_ok"
+[[check]]
+kind = "saved"
+# Its last message says what it did and what she can try next.
+[[check]]
+kind = "said_any"
+words = ["try", "next", "you can"]
+last = true
+[[check]]
+kind = "said_none"
+words = ["endpoint", "bus:", "node path", "ws281x:"]

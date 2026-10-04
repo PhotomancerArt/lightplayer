@@ -166,13 +166,13 @@ const HELLO: &str = "\
 [RECOVERY] boot: cause=power-on level=green safe_mode=false prior_boot_complete=true
 [RECOVERY] RWDT armed: boot 30000 ms, runtime 8000 ms
 [INIT] runtime started
-[INIT] USB link task spawned
+[INIT] io thread: stack 4096 B, priority 1, core 0
 ";
 
 /// [`HELLO`]'s length and sha256, so a change to any byte of it is a failure
 /// that names the diff rather than a diff a reader has to spot.
-const HELLO_BYTES: usize = 258;
-const HELLO_SHA: &str = "373e7a52efe39079977dd7397208d35241e5e8870a94867d07556f2b2f570995";
+const HELLO_BYTES: usize = 280;
+const HELLO_SHA: &str = "ada9ac611c14dc1cbe3bfb97f7880c0fe877ddbfbb268dc0a993e2f26665c138";
 
 fn sha(bytes: &[u8]) -> String {
     let mut h = Sha256::new();
@@ -527,11 +527,11 @@ fn a_usb_script_resolves_its_walk_forms_and_two_runs_are_the_same_run() {
     // The cable goes in at 1 ms and the port opens at 2 ms — so the first
     // line is printed into an endpoint with nobody there, and the transition
     // is what delivers it. Then the host answers the boot: one chunk when the
-    // device says it spawned its io task, a second 2 ms after the first.
+    // device says it started its link thread, a second 2 ms after the first.
     const SCRIPT: &str = "\
 1   attach
 2   open
-after \"[INIT] USB link task spawned\" +1ms \"M!{\\\"id\\\":1}\\n\"
+after \"[INIT] io thread: stack\" +1ms \"M!{\\\"id\\\":1}\\n\"
 then +2ms 4d 21 0a
 ";
     let build = || {

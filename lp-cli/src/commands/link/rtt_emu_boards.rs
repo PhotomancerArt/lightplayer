@@ -11,6 +11,8 @@
 //! (`Rmt::refill_stats` indexes a `Vec` sized at build time). Three small,
 //! near-identical bodies, not one generic over a type nothing unifies.
 
+use std::collections::HashSet;
+
 use serde_json::{Value, json};
 
 use lp_emu_esp_common::strip::ws281x::Frame;
@@ -150,6 +152,7 @@ fn pad_entry(pad: u8, frames: &[Frame], cycles_per_us: u64) -> Value {
         .map(|f| f.start as f64 / cycles_per_us as f64)
         .collect();
     let gaps: Vec<f64> = starts.windows(2).map(|w| (w[1] - w[0]) / 1000.0).collect();
+    let content = wire_content(frames, cycles_per_us);
     json!({
         "pad": pad,
         "frames": frames.len(),
@@ -158,7 +161,39 @@ fn pad_entry(pad: u8, frames: &[Frame], cycles_per_us: u64) -> Value {
         "leds": frames.last().map(|f| f.leds()),
         "interval_ms": stats(&gaps),
         "frame_starts_us": starts.iter().map(|s| s.round() as u64).collect::<Vec<_>>(),
+        "wire_distinct_after_first": content.distinct_after_first,
+        "wire_changes_after_first_us": content.changes_us,
     })
+}
+
+/// Most frame-content changes [`wire_content`] lists by time.
+const WIRE_CHANGES_LISTED: usize = 32;
+
+/// What the frames after the first carried, for a static (time-invariant)
+/// project's self-consistency check: every frame after the first identical
+/// with the link quiet and under load means `distinct_after_first == 1` and
+/// no changes.
+struct WireContent {
+    /// Distinct `wire` byte strings among `frames[1..]`.
+    distinct_after_first: usize,
+    /// Start times, µs, of the first [`WIRE_CHANGES_LISTED`] frames (after
+    /// the second) whose bytes differ from the frame before.
+    changes_us: Vec<u64>,
+}
+
+fn wire_content(frames: &[Frame], cycles_per_us: u64) -> WireContent {
+    let rest = frames.get(1..).unwrap_or(&[]);
+    let distinct: HashSet<&[u8]> = rest.iter().map(|f| f.wire.as_slice()).collect();
+    let changes_us = rest
+        .windows(2)
+        .filter(|w| w[0].wire != w[1].wire)
+        .take(WIRE_CHANGES_LISTED)
+        .map(|w| w[1].start / cycles_per_us)
+        .collect();
+    WireContent {
+        distinct_after_first: distinct.len(),
+        changes_us,
+    }
 }
 
 /// The fields of one RMT channel's refill race, read out of whichever
@@ -191,4 +226,46 @@ fn refill_entry(ch: usize, r: RefillFields<'_>) -> Option<Value> {
         "entry_hist": r.entry_hist,
         "fill_hist": r.fill_hist,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lp_emu_esp_common::pins::PadId;
+
+    #[test]
+    fn a_static_run_has_one_content_after_the_first_frame() {
+        let frames = [frame(0, &[9, 9]), frame(10, &[1, 2]), frame(20, &[1, 2])];
+        let c = wire_content(&frames, 10);
+        assert_eq!(c.distinct_after_first, 1);
+        assert!(c.changes_us.is_empty());
+    }
+
+    #[test]
+    fn a_changed_frame_is_counted_and_timed() {
+        let frames = [
+            frame(0, &[9]),
+            frame(10, &[1]),
+            frame(20, &[2]),
+            frame(30, &[1]),
+        ];
+        let c = wire_content(&frames, 10);
+        assert_eq!(c.distinct_after_first, 2);
+        assert_eq!(c.changes_us, vec![2, 3]);
+    }
+
+    fn frame(start: u64, wire: &[u8]) -> Frame {
+        Frame {
+            pad: PadId(9),
+            n: 0,
+            start,
+            end: start + 1,
+            bits: wire.len() * 8,
+            wire: wire.to_vec(),
+            trailing_bits: 0,
+            errors: Vec::new(),
+            error_count: 0,
+            reset_cycles: Some(0),
+        }
+    }
 }

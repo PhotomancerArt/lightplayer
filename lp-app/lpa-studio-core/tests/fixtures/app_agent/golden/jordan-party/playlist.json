@@ -1,0 +1,47 @@
+{
+  "kind": "Playlist",
+  "bindings": {
+    "time": {
+      "source": "bus:time"
+    }
+  },
+  "idle_entry": 1,
+  "default_fade": 1.5,
+  "cycle": {
+    "kind": "cycle",
+    "step_seconds": 12.0,
+    "fade_seconds": 1.5
+  },
+  "entries": {
+    "1": {
+      "name": "aurora",
+      "node": {
+        "ref": "./modules/aurora/module.json"
+      }
+    },
+    "2": {
+      "name": "noise_soft",
+      "node": {
+        "ref": "./modules/noise_soft/module.json"
+      }
+    },
+    "3": {
+      "name": "fire2012",
+      "node": {
+        "ref": "./modules/fire2012/module.json"
+      }
+    },
+    "4": {
+      "name": "plasma",
+      "node": {
+        "ref": "./modules/plasma/module.json"
+      }
+    },
+    "5": {
+      "name": "heartbeat",
+      "node": {
+        "ref": "./modules/heartbeat/module.json"
+      }
+    }
+  }
+}
