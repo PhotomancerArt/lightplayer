@@ -12,12 +12,15 @@
     reason = "one harness serves four test binaries; each uses the part of it that it needs"
 )]
 
+use std::sync::Arc;
+
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, Response, StatusCode, header};
 use http_body_util::BodyExt as _;
 use lp_cloud_server::app_state::AppState;
 use lp_cloud_server::config::ServerConfig;
+use lp_cloud_server::firmware::firmware_upstream::FirmwareUpstream;
 use lp_cloud_server::page::static_site::StaticSite;
 use lp_cloud_server::ports::{AnyBlobStore, AnyMetaStore};
 use lp_cloud_server::router::build_router;
@@ -37,6 +40,11 @@ pub const INDEX_HTML: &str =
 pub const ASSET_PATH: &str = "/assets/app-a1b2c3d4.js";
 pub const ASSET_BODY: &str = "console.log('studio')";
 
+/// The Studio bundle's own firmware package manifest — two segments after
+/// `/firmware/`, served by the static fallback, never by the lookup route.
+pub const BUNDLE_FIRMWARE_MANIFEST_PATH: &str = "/firmware/esp32c6-4mb/manifest.json";
+pub const BUNDLE_FIRMWARE_MANIFEST_BODY: &str = r#"{"schemaVersion":2}"#;
+
 /// A service under test.
 pub struct TestServer {
     router: Router,
@@ -55,7 +63,22 @@ impl TestServer {
     /// harness owns (`LP_CLOUD_STORE`/`LP_CLOUD_BLOBS` are always `mem`, and
     /// the base URL is a localhost one unless a test overrides it).
     pub fn with_vars(vars: &[(&str, &str)]) -> Self {
+        Self::build(vars, None)
+    }
+
+    /// A service whose `/firmware/` lookup fetches through `upstream` (an
+    /// in-process stub) instead of the network.
+    pub fn with_firmware_upstream(upstream: Arc<dyn FirmwareUpstream>) -> Self {
+        Self::build(&[], Some(upstream))
+    }
+
+    fn build(vars: &[(&str, &str)], upstream: Option<Arc<dyn FirmwareUpstream>>) -> Self {
         let artifact = tempfile::tempdir().expect("a temp artifact directory");
+        let bundle_manifest = artifact
+            .path()
+            .join(BUNDLE_FIRMWARE_MANIFEST_PATH.trim_start_matches('/'));
+        std::fs::create_dir_all(bundle_manifest.parent().unwrap()).unwrap();
+        std::fs::write(bundle_manifest, BUNDLE_FIRMWARE_MANIFEST_BODY).unwrap();
         std::fs::write(artifact.path().join("index.html"), INDEX_HTML).unwrap();
         std::fs::create_dir_all(artifact.path().join("assets")).unwrap();
         std::fs::write(
@@ -82,12 +105,15 @@ impl TestServer {
         })
         .expect("the harness configuration parses");
 
-        let state = AppState::new(
+        let mut state = AppState::new(
             config,
             AnyMetaStore::new(MemMetaStore::new()),
             AnyBlobStore::new(MemBlobStore::new()),
             StaticSite::open(Some(artifact.path())),
         );
+        if let Some(upstream) = upstream {
+            state = state.with_firmware_upstream(upstream);
+        }
 
         Self {
             router: build_router(state),
@@ -108,6 +134,15 @@ impl TestServer {
     pub async fn get(&self, path: &str) -> Response<Body> {
         self.request(Request::builder().uri(path).body(Body::empty()).unwrap())
             .await
+    }
+
+    /// `method path` with extra headers and no session.
+    pub async fn send(&self, method: &str, path: &str, headers: &[(&str, &str)]) -> Response<Body> {
+        let mut request = Request::builder().method(method).uri(path);
+        for (name, value) in headers {
+            request = request.header(*name, *value);
+        }
+        self.request(request.body(Body::empty()).unwrap()).await
     }
 
     /// `GET path` carrying a session cookie.

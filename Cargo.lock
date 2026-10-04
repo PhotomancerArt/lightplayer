@@ -5814,6 +5814,7 @@ dependencies = [
  "lp-cloud-store-mem",
  "lp-cloud-store-sqlite",
  "lpc-cloud-api",
+ "lpc-firmware-release",
  "lpc-history",
  "lpfs",
  "reqwest",
