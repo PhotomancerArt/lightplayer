@@ -1,7 +1,6 @@
 # ADR: The C6 repartition (3.25 MB app, 704 KB lpfs) and the layout migration that carries every board's files
 
-- **Status:** Proposed (Accepted once the real-board migration walk, G1 of
-  plan `lp2025/2026-10-01-1843-c6-repartition`, passes)
+- **Status:** Accepted (G1, the real-board migration walk, passed 2026-10-03)
 - **Date:** 2026-10-02
 - **Deciders:** Photomancer
 - **Supersedes:** None (spends the reserve `2026-07-28-esp32c6-flash-budget.md`
@@ -101,10 +100,43 @@ copying blocks, and today's firmware formats any partition it cannot mount.
   the files on the host with no protocol to finish.
 - **A selective-carry UI** for over-full boards: deferred (MQ5).
 
+## G1 outcome (2026-10-03)
+
+The real-board migration walk passed. Yona ran the measurement and the
+happy path on his own boards, and walked scene 1 (inspect/measure) live on
+the spare XIAO C6 (`10:bd:a3:b0:8e:30`); an agent rehearsed scenes 2–5
+(refused, bypassed, interrupted, happy path) on that same spare over real
+Web Serial; scene 6, the PLAYFUL choker update on Yona's bench C6, read
+back afterwards with every one of its 37 files present and only the
+expected ones changed (`/hardware.json`'s re-stamp, `/.lp/access.json`'s
+key add). The walk found and fixed, on silicon, what no emulator run had
+shown: a macOS Web Serial read stall on erased flash (Chromium drops
+`0xFF`-heavy bytes a page reads late; fixed in the executor and modelled
+into the emulator so `walk-migration-emu` now reproduces it), a wire-32
+board reading as "pre-hello firmware" instead of "older LightPlayer" (the
+wire-33 hello's required `fs` field failed the whole decode; fixed by
+reading `proto` and the board id out of an undecodable hello, in both
+Studio and `lp-cli`), a full access store silently dropping the list
+Studio had just read when its own sync add was refused (the panel showed
+"Who has access 0" instead of what the board actually held), a held board
+running a fresh access store in RAM and granting Bluetooth on in the
+process instead of failing closed (now locked, and Studio neither syncs
+nor lists access for it), and a refusal whose numbers were in the wrong
+unit (bytes dressed as if they were the planner's blocks, which could
+understate what a board needed to drop). Yona's Q6 (copy) answers were
+implemented directly: the card now names the board from an older hello
+instead of offering a picker, the card names each step of an update
+(reading, waiting for an answer, flashing, moving files, checking) instead
+of "Flashing firmware…" throughout, and the files sheet's Continue acts on
+one press instead of arming a second confirmation inside a surface that
+already asked the question (landed in `828dcb97c`).
+
 ## Follow-ups
 
 - Studio ZIP-file import of a device backup — before the image crosses
   `0x300000` (Decision 11).
 - `docs/defects/2026-10-02-a-closed-tab-mid-stamp-leaves-hardware-json-truncated.md`
-  (open).
-- Flip to Accepted after G1.
+  (fixed, journaled stamp).
+- `docs/defects/2026-10-02-updating-a-tab-hosted-board-erases-its-files.md`
+  (open; a tab-hosted emulated board's update erases its whole chip, on
+  main too — not specific to this repartition).

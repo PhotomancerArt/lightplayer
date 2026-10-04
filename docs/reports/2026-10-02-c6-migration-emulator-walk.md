@@ -146,3 +146,79 @@ Chromium's own USB stack (re-enumeration timing, a grant revoked by a
 replug), radio, a real flash part's erase/program timing and wear, a board
 on battery (the walk's "cable pull" is power and data together), and a
 pre-repartition firmware image. Those are G1's desk sitting.
+
+## G1 — the real-board walk (2026-10-03, PASSED)
+
+Run on the spare XIAO C6 (`10:bd:a3:b0:8e:30`, old layout, #891 firmware)
+and the PLAYFUL choker's bench C6, real Studio over Web Serial — not the
+emulator. Scene 1 (inspect/measure) was walked by Yona himself; scenes 2–5
+(refused, bypassed, interrupted, happy path) were rehearsed on that same
+spare by an agent over real silicon before Yona's own pass; scene 6 (the
+choker's update) ran on Yona's bench C6. All scenes passed.
+
+**Scene 6 read-back** — after the choker's update, `hardware lpfs report`
+against the bench C6 listed all **37 of 37** files present, byte for byte,
+with only the changes an update is expected to make: `/hardware.json`
+re-stamped (the new layout's board manifest) and `/.lp/access.json` gaining
+this browser's key. The project, the stamp's board name, the Bluetooth lock
+and the browser's BLE connection all survived, matching the emulator's W1
+and the plan's G1 question 5.
+
+**What silicon found that no emulator run had shown** (none of these were
+caught by `just walk-migration-emu`, because the emulator's serial path and
+every fielded board's hello were not modelled faithfully enough yet):
+
+- **A macOS Web Serial read stall.** `inspectLayout`'s `readFlash` of 960 KB
+  of mostly-erased flash stalled at "Reading the board's files" and never
+  finished — Chromium's Web Serial on macOS drops `0xFF`-heavy bytes a page
+  reads late (the 2026-09-26 loss, met for the first time by a read that is
+  almost entirely `0xFF`). Fixed with a safer read protocol
+  (`readFlashSafely`: small packets, one in flight, length + MD5 checked),
+  and the emulator's serial shim gained a macOS tty model
+  (`mac_tty_model.js`) so `walk-migration-emu` now reproduces and passes
+  this exact failure.
+  (`docs/defects/2026-10-02-studio-reading-a-boards-files-stalls-on-a-mac.md`,
+  `docs/defects/2026-10-02-the-emulated-serial-path-never-drops-a-byte.md`)
+- **A wire-32 board read as "pre-hello firmware."** Every fielded board
+  (wire 32) failed this branch's wire-33 hello decode (the new `fs` field
+  is required) and fell back to the generic "no hello ever seen" verdict,
+  with a board picker, instead of "older LightPlayer — flash to update."
+  Fixed by reading `proto` (and then the board id) out of a hello that
+  otherwise fails to decode, in both Studio's demux and `lp-cli`'s
+  `DeviceSession`.
+  (`docs/defects/2026-10-02-a-wire-32-board-reads-as-pre-hello-firmware.md`)
+- **A full access store lost the list Studio had just read.** On a board
+  whose access store was already at its 16-entry cap, the USB connect's
+  own key-add was refused, and the refusal threw away the list the same
+  sync had just read — the panel showed "Who has access 0" and a locked
+  Bluetooth switch for a board that in fact had a full, working list.
+  Fixed: the sync keeps the list it read even when its own add is refused.
+  (`docs/defects/2026-10-03-a-full-device-store-loses-the-list-studio-read.md`)
+- **A held board's access failed open, not closed.** A board holding its
+  old filesystem for the migration boots on a memory filesystem with no
+  store; the firmware read "no store" as a brand-new board (Bluetooth on,
+  unlocked for anyone), and Studio's USB sync wrote this browser's key
+  into that RAM store ("Who has access 1") while the board's real 16-entry
+  store sat untouched at `0x310000`. Fixed: a held board now boots locked,
+  and Studio neither syncs nor lists access for it.
+  (`docs/defects/2026-10-03-a-held-board-runs-a-fresh-access-store-in-ram.md`)
+- **The refusal's numbers were in the wrong unit.** The over-full refusal
+  stated bytes as if they were the planner's 4 KB blocks, which could read
+  as a board fitting when it did not. Fixed: the refusal states the same
+  measure (blocks of 4 KB, out of 176, with the 16-block reserve) the
+  planner refused by.
+
+**Q6 (copy) answers, implemented directly from Yona's live walk notes:**
+the card now names the board from an older board's hello instead of
+offering a picker ("it really shouldn't say 8 boards fit… ideally we'd
+know what board it is"); the card names each step of an update — Reading
+the board…, Waiting for your answer…, Flashing firmware…, Moving files…,
+Checking the files… — instead of "Flashing firmware…" throughout ("the
+'Flashing firmware…' label isn't really right for the first phase"); and
+the files sheet's Continue acts on one press instead of arming a second
+confirmation inside a surface that already asked the question ("the
+continue button on the dialog doesn't really need a confirm… they already
+committed to it once"). Landed in `828dcb97c`.
+
+Re-walked on the emulator after every silicon-found fix (above): W1, W3,
+W4, W7a, W7b and W9 pass.
