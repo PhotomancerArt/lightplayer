@@ -5854,6 +5854,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "lp-deflate"
+version = "40.0.0"
+dependencies = [
+ "miniz_oxide",
+]
+
+[[package]]
 name = "lp-emu-abi"
 version = "40.0.0"
 dependencies = [
