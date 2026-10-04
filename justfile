@@ -3259,7 +3259,12 @@ lint-tag-next-version:
 test-emu-c6: test-emu-c6-boot test-emu-c6-cli
 
 # The emulator's own suite: boot tests against built fw-esp32c6 ELFs, then the
-# lp-emu-validate replays. CI's `Emulator C6 (x64)` job runs this half.
+# lp-emu-validate replays. CI's `Emulator C6 (x64)` job runs this half. It
+# includes the SPLIT image's gates (`tests/split_boot.rs`): the shipped split
+# image ROM-up from the reset vector through the loader to the engine, and a
+# direct load of its loader over the flashed chip against that boot — which
+# builds the split image (`lp-fw-split`, two link passes) under
+# `LP_EMU_BUILD_FW=1`.
 #
 # `test-emu-serve` rides along at the end (DD13, plan two): the M1 gates want
 # the reference image, and this is the one recipe whose CI job has already
@@ -3304,6 +3309,7 @@ test-emu-c6-cli:
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_usb_link_gates -- --include-ignored --nocapture
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test link_capture -- --include-ignored --nocapture
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_frag_reads -- --include-ignored --nocapture
+    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_split_boot -- --include-ignored --nocapture
     cargo test -p lpa-studio-core --lib app_agent_eval_tests::the_
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test app_agent_emu_decode -- --include-ignored --nocapture the_
 

@@ -364,6 +364,13 @@ jobs:
             emu_c6:
               - 'lp-emu/**'
               - 'lp-fw/fw-esp32c6/**'
+              # The split image (the C6's shipped one) the boot gates and
+              # the heap ratchet run: its loader, the boot-record formats
+              # the loader and the core share, and the pipeline that links
+              # and lays it out.
+              - 'lp-fw/fw-esp32c6-loader/**'
+              - 'lp-base/lp-bootctl/**'
+              - 'tools/lp-fw-split/**'
               # The server loop and wire code both chips' firmware share.
               # Neither `emu_c6` nor `emu_esp32v3` covered it before, which
               # meant a change here — including to the boot path both
