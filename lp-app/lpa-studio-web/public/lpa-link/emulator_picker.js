@@ -214,6 +214,12 @@ function row(board, onPick, kind = "serial") {
 /// boards the bus is holding, and carries the one control a person watching
 /// needs that Studio deliberately cannot offer: the cable.
 ///
+/// Beside the cable, one switch per pad the bus holds (`createBus({ holds })`):
+/// the dev page holds D0 on, the power-button switch of a project like the
+/// PLAYFUL choker. Off, a switch-mode power button powers the board down the
+/// moment the cable comes out — which is what the firmware means to do, and
+/// what an emulated pad nobody drove used to do by accident.
+///
 /// `attach`/`detach` are here rather than in Studio because they are the
 /// EMULATOR's verbs — a cable going in and out — and because the control
 /// channel admits one client per board (the door answers a second with 409),
@@ -438,8 +444,43 @@ function boardRow(bus, board, refresh) {
   cable.addEventListener("click", () => run(cable, () => bus.detach(board.boardId)));
   plug.addEventListener("click", () => run(plug, () => bus.attach(board.boardId)));
 
-  row.append(name, detail, cable, plug);
+  const switches = (board.holds ?? []).map(({ pad, level }) => {
+    const flip = document.createElement("button");
+    flip.type = "button";
+    flip.className = "lp-emu-banner-switch";
+    flip.dataset.boardId = board.boardId;
+    flip.dataset.pad = String(pad);
+    flip.setAttribute("aria-pressed", String(level));
+    const pin = padName(pad);
+    flip.textContent = `${pin} ${level ? "on" : "off"}`;
+    flip.title = board.holdError
+      ? `${pin} switch: not held — ${board.holdError}`
+      : `${pin} switch, held ${level ? "high" : "low"} from outside the chip. ` +
+        "A switch-mode power button reads it: off, the board powers itself " +
+        "off when the cable comes out.";
+    style(flip, {
+      ...buttonStyle(),
+      marginLeft: "auto",
+      color: board.holdError ? PALETTE.warn : level ? PALETTE.accent : PALETTE.dim,
+      borderColor: board.holdError ? PALETTE.warn : level ? PALETTE.accent : PALETTE.edge,
+    });
+    flip.addEventListener("click", () =>
+      run(flip, () => bus.hold(board.boardId, pad, !level)),
+    );
+    return flip;
+  });
+  if (switches.length > 0) {
+    cable.style.marginLeft = "";
+  }
+
+  row.append(name, detail, ...switches, cable, plug);
   return row;
+}
+
+/// The name a person reads off the board: D0 is GPIO0 on the XIAO ESP32-C6,
+/// and what a project's `button:local:D0` endpoint names.
+function padName(pad) {
+  return pad === 0 ? "D0" : `GPIO${pad}`;
 }
 
 function buttonStyle() {

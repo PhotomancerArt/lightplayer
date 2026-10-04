@@ -433,6 +433,12 @@
                     ]);
                     const options = {
                         picker: chrome.createPicker({ backingUrl: label }),
+                        // D0 held ON on every board: the switch a
+                        // switch-mode power button reads (the PLAYFUL
+                        // choker's `button:local:D0`). Undriven it reads
+                        // "off", and the banner's `detach` then powered the
+                        // board off. The banner flips it per board.
+                        holds: { 0: true },
                     };
                     if (isTab) {
                         // The module is a content-hashed sidecar, so its URL
