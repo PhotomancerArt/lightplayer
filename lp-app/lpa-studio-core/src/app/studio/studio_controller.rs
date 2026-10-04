@@ -419,7 +419,14 @@ impl StudioController {
         let now_secs_for_stamp = Rc::clone(&now_secs);
         let device_events = Rc::new(std::cell::RefCell::new(DeviceEventLog::new()));
         Self {
-            devices: crate::DeviceRoster::new(device_roster_config()),
+            devices: {
+                let mut devices = crate::DeviceRoster::new(device_roster_config());
+                // Backup archives (the C6 repartition's layout step) are
+                // stamped with the app's own clock; core reads none.
+                let clock = Rc::clone(&now_secs);
+                devices.effects_mut().set_clock(Rc::new(move || clock()));
+                devices
+            },
             device_feeds: crate::DeviceFrameFeeds::new(),
             pending_device_lens: None,
             device_sweep_pending: false,
@@ -1155,6 +1162,13 @@ impl StudioController {
                 .map(lpa_devices::Device::title)
                 .unwrap_or_else(|| "This device".to_string())
         })
+    }
+
+    /// Install the store a board's backup goes into before a layout
+    /// migration writes it (OPFS in the browser; the C6 repartition).
+    /// Without one, every migration asks for a download first.
+    pub fn set_device_backup_store(&mut self, store: Rc<dyn crate::DeviceBackupStore>) {
+        self.devices.effects_mut().set_backup_store(store);
     }
 
     /// Install the platform timer factory device waits run on (called by
@@ -2232,6 +2246,7 @@ impl StudioController {
             }
             self.publish_device_offers(&mut offers);
             offers.set_focus(self.offer_focus(true));
+            let app_agent = self.app_agent_view_placed(&mut offers);
             return UiStudioView::new(Vec::new(), self.console_view())
                 .with_home(Some(home))
                 .with_lens(self.lens_runtime())
@@ -2242,7 +2257,7 @@ impl StudioController {
                     self.login_prompt_view(),
                     self.access.access_added().cloned(),
                 )
-                .with_app_agent(self.agent.app_view(&self.agent_view_context()))
+                .with_app_agent(app_agent)
                 .with_offers(offers);
         }
         // gallery-always (D24): home covers every no-project state, so the
@@ -2281,6 +2296,7 @@ impl StudioController {
         // off the module that owns the scope. The pane column is the
         // Project pane alone.
         let panes = vec![project_pane];
+        let app_agent = self.app_agent_view_placed(&mut offers);
         UiStudioView::new(panes, self.console_view())
             .with_lens(self.lens_runtime())
             .with_open_project(
@@ -2302,8 +2318,182 @@ impl StudioController {
             .with_lens_access_line(self.lens_access_line())
             .with_lens_reconnecting(self.lens_reconnecting_view())
             .with_dirty(dirty)
-            .with_app_agent(self.agent.app_view(&self.agent_view_context()))
+            .with_app_agent(app_agent)
             .with_offers(offers)
+    }
+
+    /// The app chat's view with the agent's activity on it (roadmap M8):
+    /// the lights still on, the Show offers its rows link to — published
+    /// into `offers`, the one tree, so Show is a core offer like any other
+    /// — and each row's place.
+    fn app_agent_view_placed(&self, offers: &mut crate::UiOfferTree) -> crate::UiAppAgentView {
+        use crate::app::agent::app_agent_show::{place_turns, show_offer};
+        let now = (self.now_secs)();
+        let activity = self.agent.app_activity();
+        for target in activity.targets() {
+            let Some(entry) = activity.latest(target) else {
+                continue;
+            };
+            if !self.agent_target_exists(target, offers) {
+                continue;
+            }
+            let blocked = self.agent_show_blocked(target, offers);
+            offers.publish(show_offer(entry, blocked));
+        }
+        let mut view = self.agent.app_view(&self.agent_view_context());
+        view.activity = activity.view(now);
+        place_turns(&mut view.turns, activity, offers);
+        view
+    }
+
+    /// Whether the control at an activity target is there to show: a node
+    /// that still exists, or an offer the tree publishes now.
+    fn agent_target_exists(&self, target: &crate::OfferPath, offers: &crate::UiOfferTree) -> bool {
+        if target.names_node() {
+            return self.project.node_at_prefix(target).is_some();
+        }
+        offers.get(target).is_some()
+    }
+
+    /// Why Show cannot bring `target` into view from where the user is
+    /// (place): the control is on another page, or in the node view while
+    /// Play shows. `None` when it can — and always without a reported place
+    /// (the headless tests and evals have no page).
+    fn agent_show_blocked(
+        &self,
+        target: &crate::OfferPath,
+        offers: &crate::UiOfferTree,
+    ) -> Option<String> {
+        let place = self.place.as_ref()?;
+        let area = target.segments().first().map(String::as_str);
+        match area {
+            Some(crate::OfferPath::PROJECT) => {
+                let view = self.editor_view_in_place(self.home_view().is_some());
+                match view {
+                    None => Some("It is in the project editor.".to_string()),
+                    Some(crate::UiProjectView::Play)
+                        if crate::app::agent::app_agent_show::node_prefix_of(target).is_some() =>
+                    {
+                        Some("It is on a node card: switch to the nodes view.".to_string())
+                    }
+                    Some(_) => None,
+                }
+            }
+            Some(crate::OfferPath::DEVICES) => {
+                if place.page.offer_area() == Some(crate::OfferPath::devices()) {
+                    return None;
+                }
+                // In the editor, the lens board's card is docked beside the
+                // project: its verbs are on this page too.
+                let lens = self
+                    .pool
+                    .attached_session()
+                    .map(|session| session.attachment().device);
+                let owner = target.owner();
+                let on_lens_card = lens.is_some()
+                    && owner.as_ref().and_then(|owner| offers.device_at(owner)) == lens;
+                (!(place.page.is_editor() && on_lens_card))
+                    .then(|| "It is on the Devices page.".to_string())
+            }
+            _ => None,
+        }
+    }
+
+    /// Where the control at `target` is, in the page's words, for the
+    /// chat row that names it ("in the project header", "on the fixture
+    /// card", "on Shelf lamp's card").
+    fn agent_place_phrase(&self, target: &crate::OfferPath) -> String {
+        use crate::app::agent::app_agent_show::{node_prefix_of, place_phrase};
+        let node_name = node_prefix_of(target).map(|prefix| {
+            self.project
+                .node_name_at_prefix(&prefix)
+                .unwrap_or_else(|| {
+                    // A node no longer in the tree: its own segment's name.
+                    prefix
+                        .last()
+                        .and_then(|segment| segment.split('.').next())
+                        .unwrap_or_default()
+                        .to_string()
+                })
+        });
+        let device_title = (target.segments().first().map(String::as_str)
+            == Some(crate::OfferPath::DEVICES)
+            && target.len() > 2)
+            .then(|| {
+                let owner = target.owner()?;
+                let device = self.view_offers_for_activity().device_at(&owner)?;
+                self.device_roster_view()
+                    .roster
+                    .devices
+                    .into_iter()
+                    .find(|card| card.id == device)
+                    .map(|card| card.title)
+            })
+            .flatten();
+        place_phrase(target, node_name.as_deref(), device_title.as_deref())
+    }
+
+    /// The device half of the offer tree (where each board's verbs live),
+    /// for naming a board from its path. Only what places a device: the
+    /// whole view is not built for it.
+    fn view_offers_for_activity(&self) -> crate::UiOfferTree {
+        let mut offers = crate::UiOfferTree::new();
+        self.publish_device_offers(&mut offers);
+        offers
+    }
+
+    /// Record that the agent did `kind` at `target`, stamped with the
+    /// injected clock; the page lights it and the chat says where it is.
+    fn record_agent_activity(
+        &mut self,
+        target: crate::OfferPath,
+        kind: crate::AgentActivityKind,
+        label: String,
+        place: String,
+    ) {
+        let now = (self.now_secs)();
+        self.agent
+            .app_session_mut()
+            .activity
+            .record(target, kind, label, place, now);
+        self.mark_dirty();
+    }
+
+    /// Record that the agent edited the node at `target` (its prefix),
+    /// writing `slots`: [`Self::record_agent_activity`] for an edit, so the
+    /// page lights the changed slots and the card's "changed by the
+    /// assistant" tab.
+    fn record_agent_edit(
+        &mut self,
+        target: crate::OfferPath,
+        slots: Vec<crate::ProjectSlotAddress>,
+        label: String,
+        place: String,
+    ) {
+        let now = (self.now_secs)();
+        self.agent
+            .app_session_mut()
+            .activity
+            .record_edit(target, slots, label, place, now);
+        self.mark_dirty();
+    }
+
+    /// The user's Show on an app-chat row: a node (or a node's verb)
+    /// focuses that node's card, the way a tree-row click does; then the
+    /// control is lit again and the page asked to bring it into view. It
+    /// moves no keyboard focus.
+    fn show_agent_target(&mut self, target: &crate::OfferPath) -> UiResult {
+        if let Some(prefix) = crate::app::agent::app_agent_show::node_prefix_of(target) {
+            self.project.focus_node_at_prefix(&prefix);
+        }
+        let now = (self.now_secs)();
+        if !self.agent.app_session_mut().activity.show(target, now) {
+            return Err(UiError::UnsupportedAction(format!(
+                "the assistant did nothing at {target} to show"
+            )));
+        }
+        self.mark_dirty();
+        Ok(UiNotices::new())
     }
 
     /// Publish every device verb into the offer tree.
@@ -2320,6 +2510,10 @@ impl StudioController {
     ///   ([`crate::device_offers`]). `<board>` is the card's
     ///   [`crate::BoardRef`]: `mac-`, `sim-` or `emu-` and its MAC, or
     ///   `new-<n>` while it has none.
+    /// - `devices/<board>/{continue-update,cancel-update,download-backup,
+    ///   restore-files,finish-update}`: each card's layout verbs across the
+    ///   C6 repartition, under the same `<board>` prefix
+    ///   ([`crate::app::devices::DeviceRoster::publish_layout_offers`]).
     ///
     /// The stalled-open exits ask for the same verbs: Reconnect is the
     /// offline board's `reconnect`, the closed port's Connect its
@@ -2375,6 +2569,9 @@ impl StudioController {
             }
             offers.place_device(view.id, facts.prefix);
         }
+        // The layout verbs (C6 repartition) under the same prefixes.
+        self.devices
+            .publish_layout_offers(self.device_now(), offers, &prefixes);
     }
 
     /// Whether what `device` runs is a project this library holds (Q4): its
@@ -2659,6 +2856,11 @@ impl StudioController {
                 self.agent
                     .refresh_app_project(revision, self.project.agent_project_summary());
             }
+        }
+        // A light the last view showed went out: publish without it.
+        let now = (self.now_secs)();
+        if self.agent.app_session_mut().activity.went_dark(now) {
+            self.mark_dirty();
         }
         let revision = self.current_revision();
         let advanced = revision != self.applied_revision;
@@ -3065,6 +3267,16 @@ impl StudioController {
                 true => self.play_views.saturating_add(1),
                 false => self.play_views.saturating_sub(1),
             };
+            return Ok(UiNotices::new());
+        }
+        if node_id.as_str() == crate::DeviceBackupOp::NODE_ID {
+            let op = action.into_op::<crate::DeviceBackupOp>()?;
+            let device = self.devices.roster().device(op.device);
+            let base_mac = device.and_then(|d| d.identity.mac.as_ref().map(|mac| mac.0.clone()));
+            let label = device.map(lpa_devices::Device::title);
+            self.devices
+                .effects_mut()
+                .request_backup_download(op.device, base_mac, label);
             return Ok(UiNotices::new());
         }
         if node_id.as_str() == crate::DeviceFeedOp::NODE_ID {
@@ -6428,6 +6640,7 @@ impl StudioController {
                 self.mark_dirty();
                 Ok(UiNotices::new())
             }
+            crate::AgentOp::Show { target } => self.show_agent_target(&target),
             crate::AgentOp::CardDismissed { card } => {
                 self.agent.app_session_mut().settle_card(
                     &card,
@@ -6478,12 +6691,47 @@ impl StudioController {
                 "no project is open — open or create one first".to_string(),
             ));
         }
-        let (results, runs) = {
+        let (landings, runs) = {
             let server = self.pool.lens_session_mut()?.client_mut()?;
             self.project
                 .apply_agent_project_edits(server, &input.edits)
                 .await
         };
+        // Each node an edit landed on is lit, once per batch (a create and
+        // three sets on the fixture light the fixture card once), carrying
+        // every slot the batch wrote on it.
+        let mut lit: Vec<(crate::ProjectNodeAddress, Vec<crate::ProjectSlotAddress>)> = Vec::new();
+        for landing in &landings {
+            let Some(node) = landing.node.as_ref() else {
+                continue;
+            };
+            let slots = match lit.iter_mut().find(|(at, _)| at == node) {
+                Some((_, slots)) => slots,
+                None => {
+                    lit.push((node.clone(), Vec::new()));
+                    &mut lit.last_mut().expect("just pushed").1
+                }
+            };
+            for slot in &landing.slots {
+                if !slots.contains(slot) {
+                    slots.push(slot.clone());
+                }
+            }
+        }
+        for (node, slots) in lit {
+            let prefix = crate::OfferPath::project_node(&node);
+            let name = match crate::app::project::agent_project_edits::node_display_name(&node) {
+                name if name.is_empty() => "the root module".to_string(),
+                name => name,
+            };
+            let place = self.agent_place_phrase(&prefix);
+            self.record_agent_edit(prefix, slots, name, place);
+        }
+        let nodes = landings
+            .iter()
+            .map(|landing| landing.node.as_ref().map(ToString::to_string))
+            .collect();
+        let results = landings.into_iter().map(|landing| landing.status).collect();
         let mut notices = UiNotices::new();
         for run in runs {
             notices
@@ -6510,6 +6758,7 @@ impl StudioController {
                 results,
                 saved,
                 project: None,
+                nodes,
             },
             notices,
         ))
@@ -6687,12 +6936,23 @@ impl StudioController {
                 };
             }
         };
+        // Where it lives, named before the press: a press can take its own
+        // control away (Save, Remove).
+        let place = self.agent_place_phrase(&offer.path);
+        let label = offer.label().to_string();
         if action.meta().needs_user() {
             let card =
                 self.agent
                     .app_session_mut()
                     .add_card(action, &input.why, offer.path.clone(), args);
-            self.mark_dirty();
+            // The card stands for a real control: light it, so the user
+            // learns where it lives.
+            self.record_agent_activity(
+                offer.path.clone(),
+                crate::AgentActivityKind::Handed,
+                label,
+                place,
+            );
             return ActOutcome::NeedsUser {
                 card: card.id,
                 says: card.title,
@@ -6705,13 +6965,21 @@ impl StudioController {
         let dispatched = Box::pin(self.dispatch(action)).await;
         self.agent_pressing = false;
         match dispatched {
-            Ok(notices) => ActOutcome::Done {
-                notices: notices
-                    .notices
-                    .into_iter()
-                    .map(|notice| notice.message)
-                    .collect(),
-            },
+            Ok(notices) => {
+                self.record_agent_activity(
+                    offer.path.clone(),
+                    crate::AgentActivityKind::Pressed,
+                    label,
+                    place,
+                );
+                ActOutcome::Done {
+                    notices: notices
+                        .notices
+                        .into_iter()
+                        .map(|notice| notice.message)
+                        .collect(),
+                }
+            }
             Err(error) => ActOutcome::Refused {
                 reason: error.to_string(),
                 offers: None,
@@ -7176,10 +7444,18 @@ impl StudioController {
         // pane offers none once the project is ready, and every other state
         // shows home. Tree focus actions stay out too.
         let view = self.view();
+        // Show (`show/…`) is the chat's link for the user, never a verb the
+        // agent presses: it moves the user's view.
+        let show = crate::OfferPath::root(crate::OfferPath::SHOW);
         AppReadoutSnapshot {
             lead,
             text,
-            offers: view.offers.iter().cloned().collect(),
+            offers: view
+                .offers
+                .iter()
+                .filter(|offer| !offer.path.starts_with(&show))
+                .cloned()
+                .collect(),
             focus: view.offers.focus().clone(),
             has_real_board,
         }
@@ -7881,11 +8157,134 @@ impl StudioController {
         // it is on — the per-dispatch sync ran before this op moved the lens.
         self.sync_lens_probe_policy();
         // A home-card open skips the running-project probe: opening IS a
-        // push of the library head, regardless of what runs (D19).
+        // push of the library head, regardless of what runs (D19) — on a
+        // sim. A board is a place that keeps what it was given, so an open
+        // the address named checks what it is running first.
         if self.pending_open.is_some() {
+            if let Some(settled) = self.open_meets_what_the_board_runs(updates.clone()).await {
+                return settled;
+            }
             return self.open_pending_package(updates).await;
         }
         self.connect_running_project(updates).await
+    }
+
+    /// A board open nobody has answered for yet — the address's
+    /// `?on=mac:`, never the mismatch page's "push here" — asks the board
+    /// what it is running before it pushes, now that the wire is up to say.
+    ///
+    /// The check before the lens ([`Self::open_on_named_device`]) reads the
+    /// roster, and a page that has only just loaded has no heartbeat in it:
+    /// every board reads "running nothing". So a reload of
+    /// `/p/<slug>?on=mac:…` pushed the project the board was already running
+    /// all over again (the classic, 2026-10-03: the whole project re-sent on
+    /// every refresh), and over a DIFFERENT project it pushed without ever
+    /// stopping at the mismatch page.
+    ///
+    /// - Nothing loaded: `None`, and the push goes ahead.
+    /// - Exactly this project's library head: connect and bind, sending
+    ///   nothing (D1). A reload reattaches.
+    /// - Another project this library names: the mismatch page (D50), the
+    ///   stop a warm open makes.
+    /// - Anything else (this project at another version, a project the
+    ///   library cannot name, a board that will not answer): `None`, and
+    ///   the open is what it always was.
+    async fn open_meets_what_the_board_runs(&mut self, updates: UxUpdateSink) -> Option<UiResult> {
+        let Some(PendingOpen::Package {
+            key,
+            on:
+                OpenOn::Device {
+                    base_mac,
+                    over_running_project: false,
+                },
+        }) = self.pending_open.clone()
+        else {
+            return None;
+        };
+        let on_board = self
+            .pool
+            .lens_session()
+            .is_some_and(|session| session.attachment().transport != crate::LinkTransport::Sim);
+        if !on_board {
+            return None;
+        }
+        let (running, logs) = {
+            let server = self
+                .pool
+                .lens_session_mut()
+                .and_then(crate::RuntimeSession::client_mut)
+                .ok()?;
+            let loaded = server.list_loaded_projects().await.ok()?;
+            if loaded.projects.is_empty() {
+                return None;
+            }
+            let (running, mut logs) = self.project.read_running_package(server).await.ok()?;
+            logs.splice(0..0, loaded.logs);
+            (running, logs)
+        };
+        self.record_logs(logs);
+
+        if self.library_head_hash(&key).await == Some(running.hash) {
+            self.pending_open = None;
+            let name = self
+                .library_uid_for_key(&key)
+                .and_then(|uid| self.library_project_named(&uid))
+                .map_or(key, |project| project.name);
+            self.push_log(UiLogDraft::new(
+                UiLogLevel::Info,
+                UiLogOrigin::Studio,
+                format!("the board is already running {name} — reattached, nothing sent"),
+            ));
+            return Some(self.connect_running_project(updates).await);
+        }
+
+        let project_uid = self.library_uid_for_key(&key).unwrap_or(key);
+        let running_uid = match self.library_package_at_hash(running.hash).await {
+            Some(uid) => uid,
+            None => self.lens_associated_project()?,
+        };
+        if running_uid == project_uid {
+            return None;
+        }
+        let running = self.library_project_named(&running_uid)?;
+        let mismatch = self.board_mismatch(&base_mac, project_uid, running)?;
+        self.open_mismatch = Some(Box::new(mismatch));
+        self.pending_open = None;
+        self.mark_dirty();
+        updates.emit(UxUpdate::View(self.view()));
+        Some(Ok(UiNotices::new()))
+    }
+
+    /// The mismatch page's material (D50) for the board at `base_mac`,
+    /// once the board itself has said what it runs.
+    fn board_mismatch(
+        &self,
+        base_mac: &str,
+        project_uid: String,
+        running: crate::UiRunningProject,
+    ) -> Option<crate::UiOpenMismatch> {
+        let registry = self
+            .home_inputs
+            .as_ref()
+            .map(|inputs| inputs.registered.as_slice())
+            .unwrap_or_default();
+        let found = crate::app::devices::device_by_base_mac(
+            self.devices.roster().devices(),
+            registry,
+            &self.device_sims,
+            base_mac,
+        )?;
+        Some(crate::UiOpenMismatch {
+            project_name: self
+                .library_project_named(&project_uid)
+                .map(|project| project.name)
+                .unwrap_or_else(|| project_uid.clone()),
+            project_uid,
+            device_key: found.key,
+            device_name: found.name,
+            device_base_mac: base_mac.to_string(),
+            running: Some(running),
+        })
     }
 
     async fn refresh_project(&mut self, updates: UxUpdateSink) -> UiResult {

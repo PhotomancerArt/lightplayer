@@ -232,6 +232,7 @@ impl FirmwareVerb {
             build_id: String::new(),
             park_first: false,
             name: None,
+            restore_backup: false,
         })
         .with_label(self.label())
         .with_summary(self.summary())
@@ -253,6 +254,7 @@ impl FirmwareVerb {
                 park_first: choice.park_first,
                 // An update never renames: the board already has a name.
                 name: None,
+                restore_backup: false,
             })
             .with_label(self.label())
             .with_summary(self.summary()),
@@ -270,11 +272,21 @@ impl FirmwareVerb {
 /// link's evidence. Update rides the link (`Escape::Disconnect` is offered
 /// exactly when the model has one), and its pick is only offered on a board
 /// that is actually up (Ready, or Degraded — a refinement of Ready).
+///
+/// An older LightPlayer (one whose wire this Studio cannot speak) is the
+/// running-board case too — a LightPlayer, its project staying — so when
+/// its board resolves it UPDATES in one click; when it does not, it falls
+/// back to Flash's pick, which needs nothing known (G1-F1: every fielded
+/// wire-32 C6, in a wire-33 Studio).
 pub fn firmware_verb(view: &DeviceView) -> Option<FirmwareVerb> {
     if view.activity.is_some() {
         return None;
     }
     match &view.firmware_face {
+        FirmwareFace::OlderLightPlayer { .. } => Some(
+            reflash_choice(device_chip(view).as_deref(), view.board_id.as_deref())
+                .map_or(FirmwareVerb::Flash, FirmwareVerb::Update),
+        ),
         face if face.wants_flash() => Some(FirmwareVerb::Flash),
         FirmwareFace::LightPlayer { .. } => {
             if !view.escapes.contains(&Escape::Disconnect) {
@@ -293,7 +305,6 @@ pub fn firmware_verb(view: &DeviceView) -> Option<FirmwareVerb> {
         // `wants_flash` covered every other face; the arm keeps the match
         // exhaustive so a new face is a compile error here.
         FirmwareFace::NoHello
-        | FirmwareFace::OlderLightPlayer { .. }
         | FirmwareFace::Blank
         | FirmwareFace::Bootloader
         | FirmwareFace::Foreign { .. }
@@ -709,6 +720,118 @@ mod tests {
 
     /// The line and the verb agree: an older board's line says "update
     /// recommended" and its verb says Update — never Flash beside it.
+    /// G1-F1, end to end from the bytes: the hello a fielded XIAO C6 sends
+    /// at wire 32 (captured off the spare board, 2026-10-02) — which a
+    /// wire-33 Studio cannot decode — through the real demux and the real
+    /// fold onto a card. It used to read "No LightPlayer hello — pre-hello
+    /// firmware" with a Flash picker; it is older LightPlayer firmware,
+    /// whose project stays, and with its board known it UPDATES in one
+    /// click.
+    #[test]
+    fn a_wire_32_board_is_older_light_player_firmware_that_updates() {
+        use lpa_devices::event::Input;
+        use lpa_devices::link::LinkId;
+        use lpa_devices::replay::{Replay, Step};
+        use lpa_devices::time::Millis;
+
+        let hello =
+            include_str!("../../../../../lp-core/lpc-wire/testdata/hello-proto32-xiao-c6.json");
+        let mut replay = Replay::new(lpa_link::device_link::wire::roster_config());
+        replay.step(Millis(0), Step::attach(1, "usb-spare"));
+        replay.step(Millis(20), Step::opened(1));
+        replay.step(Millis(40), Step::line(1, "ESP-ROM:esp32c6-20220919"));
+        // The board's heartbeats name it (its MAC), as a wire-32 board's do.
+        let heartbeat = || Step::Heartbeat {
+            link: 1,
+            uid: None,
+            mac: Some("10:bd:a3:b0:8e:30".to_string()),
+            fps: None,
+        };
+        replay.step(Millis(60), heartbeat());
+        let event = lpa_link::device_link::demux::demux_line(&format!("M!{}", hello.trim()));
+        replay.feed(Millis(200), Input::link(LinkId(1), event));
+        replay.step(Millis(1_200), heartbeat());
+
+        let view = replay.view();
+        let card = view.devices.first().expect("the board has a card");
+        assert_eq!(
+            card.firmware_face,
+            FirmwareFace::OlderLightPlayer { proto: Some(32) },
+            "{card:?}"
+        );
+        assert_eq!(
+            super::super::device_firmware_face::device_firmware_line(&card.firmware_face, None),
+            "Older LightPlayer firmware — flash to update; the project stays"
+        );
+
+        // The board's own record names it (Studio stamped it at its last
+        // flash): one click, "Update firmware".
+        let mut known = card.clone();
+        known.board_id = Some("seeed/xiao-esp32-c6".to_string());
+        let verb = firmware_verb(&known).expect("an older board has a verb");
+        assert!(matches!(verb, FirmwareVerb::Update(_)), "{verb:?}");
+        assert_eq!(verb.label(), "Update firmware");
+
+        // Nothing names it: still a way forward, through the pick.
+        let mut unknown = card.clone();
+        unknown.board_id = None;
+        unknown.detected_chip = None;
+        assert_eq!(firmware_verb(&unknown), Some(FirmwareVerb::Flash));
+    }
+
+    /// G1 walk (2026-10-03), Yona: "it really shouldn't say 8 boards fit,
+    /// right? because we know it's a C6? ideally we'd know what board it
+    /// is." A fresh browser (no record), attached mid-stream (no boot
+    /// banner, so no chip off it): the wire-32 hello itself names the board
+    /// Studio stamped, so the card knows the board — and through it the
+    /// chip — and offers Update firmware for it in one click, with no pick.
+    /// Its identity line no longer says "no firmware" beside "Older
+    /// LightPlayer firmware".
+    #[test]
+    fn a_wire_32_board_names_its_board_and_updates_without_the_pick() {
+        use super::super::device_identity::device_identity_line;
+        use lpa_devices::event::Input;
+        use lpa_devices::link::LinkId;
+        use lpa_devices::replay::{Replay, Step};
+        use lpa_devices::time::Millis;
+
+        let hello =
+            include_str!("../../../../../lp-core/lpc-wire/testdata/hello-proto32-xiao-c6.json");
+        let mut replay = Replay::new(lpa_link::device_link::wire::roster_config());
+        replay.step(Millis(0), Step::attach(1, "usb-spare"));
+        replay.step(Millis(20), Step::opened(1));
+        let heartbeat = || Step::Heartbeat {
+            link: 1,
+            uid: None,
+            mac: Some("10:bd:a3:b0:8e:30".to_string()),
+            fps: None,
+        };
+        replay.step(Millis(60), heartbeat());
+        let event = lpa_link::device_link::demux::demux_line(&format!("M!{}", hello.trim()));
+        replay.feed(Millis(200), Input::link(LinkId(1), event));
+        replay.step(Millis(1_200), heartbeat());
+
+        let view = replay.view();
+        let card = view.devices.first().expect("the board has a card");
+        assert_eq!(
+            card.firmware_face,
+            FirmwareFace::OlderLightPlayer { proto: Some(32) }
+        );
+        assert_eq!(card.detected_chip, None, "the premise: no banner was heard");
+        assert_eq!(
+            card.board_id.as_deref(),
+            Some("seeed/xiao-esp32-c6"),
+            "the hello named its board"
+        );
+        let Some(FirmwareVerb::Update(choice)) = firmware_verb(card) else {
+            panic!("Update firmware for the known board, not the pick: {card:?}");
+        };
+        assert_eq!(choice.board_id, "seeed/xiao-esp32-c6");
+        let identity = device_identity_line(card).display();
+        assert!(!identity.contains("no firmware"), "{identity}");
+        assert!(identity.contains("XIAO ESP32-C6"), "{identity}");
+    }
+
     #[test]
     fn the_update_verb_matches_the_older_firmware_line() {
         use super::super::device_firmware_face::device_firmware_line;
@@ -750,6 +873,7 @@ mod tests {
                 percent: Some(40),
                 cancellable: true,
                 cancel_requested: false,
+                layout: None,
             }),
             ..base.clone()
         };

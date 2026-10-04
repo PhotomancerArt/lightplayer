@@ -24,12 +24,16 @@ pub use lpc_history::{ContentHash, SyncRelation};
 pub use self::core::issue::UiIssue;
 pub use self::core::view::progress_state::ProgressState;
 pub use app::agent::{
+    AGENT_ACTIVITY_KEPT, AGENT_ACTIVITY_LIT_SECS, AgentActivity, AgentActivityEntry,
+    AgentActivityKind, UiAgentActivity, UiAgentLit, UiAgentPlace, UiAgentReveal,
+};
+pub use app::agent::{
     AgentController, AgentCostRates, AgentEditRecord, AgentFeedback, AgentModelsFetchFuture,
     AgentOp, AgentProviderConfig, AgentRunContext, AgentSessionKey, AgentTaskFuture,
-    AgentTimerFactory, AgentTimerFuture, AgentViewContext, MAX_EDIT_RECORDS, UiAgentAvailability,
-    UiAgentCard, UiAgentCardState, UiAgentDebugDump, UiAgentEditBatch, UiAgentEditLine,
-    UiAgentEditOutcome, UiAgentHistoryEntry, UiAgentModelView, UiAgentStatus, UiAgentToolRow,
-    UiAgentTurn, UiAgentUsage, UiAgentView, UiAppAgentView, instant_agent_timer,
+    AgentTimerFactory, AgentTimerFuture, AgentViewContext, MAX_EDIT_RECORDS, UiAgentActPress,
+    UiAgentAvailability, UiAgentCard, UiAgentCardState, UiAgentDebugDump, UiAgentEditBatch,
+    UiAgentEditLine, UiAgentEditOutcome, UiAgentHistoryEntry, UiAgentModelView, UiAgentStatus,
+    UiAgentToolRow, UiAgentTurn, UiAgentUsage, UiAgentView, UiAppAgentView, instant_agent_timer,
 };
 pub use app::bus::{
     UiBusChannelPreview, UiBusChannelView, UiBusSiteOrigin, UiBusSiteView, UiBusView,
@@ -72,10 +76,17 @@ pub use app::devices::{
     transport_label_for_endpoint, uid_from_emu_endpoint, uid_from_sim_endpoint,
     update_firmware_offer, write_sim_record,
 };
+pub use app::devices::{
+    BackupDownload, BackupEntry, BackupIndex, BackupStatus, BackupStoreError, DeviceBackupOp,
+    DeviceBackupStore, MemoryBackupStore, UiDeviceLayout, UiLayoutPanel, check_store_contract,
+    device_layout_view,
+};
 pub use app::devices::{LINK_COUNTERS_CAPTION, LinkTrouble, UiLinkCounterRow, link_counter_rows};
 pub use app::docs_host::DocsSimHost;
 pub use app::studio::PlayViewOp;
 pub use app::studio::{UiPage, UiPanel, UiPlace, UiProjectView, UiSessionSection};
+/// A board's MAC, as the roster records it.
+pub use lpa_devices::identity::MacAddress;
 // The project's declared hardware (D41): the web shell's Hardware row and
 // the gallery card's "for <board>" badge both read it.
 pub use app::access::{
@@ -230,11 +241,14 @@ pub use lpa_devices::view::{
     FirmwareFace as DeviceFirmwareFace, LoadedProject as DeviceLoadedProject, OutcomeView,
     PendingLinkView, RosterView,
 };
+pub use lpa_devices::wire::BoardFs as DeviceBoardFs;
 pub use lpa_devices::{
     Action as DeviceAction, ActivityKind as DeviceActivityKind, DeviceId, DeviceStatus,
-    EndpointKey as DeviceEndpointKey, Event as DeviceEvent, Input as DeviceInput,
-    LinkCounterFacts as DeviceLinkCounters, LinkId as DeviceLinkId, LinkInfo as DeviceLinkInfo,
-    Millis as DeviceMillis, RosterConfig as DeviceRosterConfig, TerminalKind as DeviceTerminalKind,
+    EndpointKey as DeviceEndpointKey, Event as DeviceEvent,
+    FlashLayoutView as DeviceFlashLayoutView, FlashStep as DeviceFlashStep, Input as DeviceInput,
+    LayoutVerdict as DeviceLayoutVerdict, LinkCounterFacts as DeviceLinkCounters,
+    LinkId as DeviceLinkId, LinkInfo as DeviceLinkInfo, Millis as DeviceMillis,
+    RosterConfig as DeviceRosterConfig, TerminalKind as DeviceTerminalKind,
     TerminalLine as DeviceTerminalLine, WireVersion as DeviceWireVersion,
 };
 

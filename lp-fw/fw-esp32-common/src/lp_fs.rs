@@ -29,21 +29,69 @@ struct LpFsFlashInner<S: Storage> {
     changes: HashMap<LpPathBuf, (FsVersion, FsEventKind)>,
 }
 
+/// What [`LpFsFlash::init_guarded`] is told before it formats a partition
+/// that would not mount.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FormatVerdict {
+    /// Nothing worth keeping is there: format it.
+    Format,
+    /// Something worth keeping is there (on the C6, a pre-repartition
+    /// filesystem the new partition overlaps): do NOT format.
+    Hold,
+}
+
+/// How [`LpFsFlash::init_guarded`] came out.
+pub enum FlashFsInit<S: Storage> {
+    /// An existing filesystem mounted.
+    Mounted(LpFsFlash<S>),
+    /// None mounted; the partition was formatted and mounted fresh.
+    Formatted(LpFsFlash<S>),
+    /// None mounted, and the verdict said [`FormatVerdict::Hold`]: nothing was
+    /// written. The caller serves a RAM filesystem.
+    Held,
+}
+
 impl<S: Storage> LpFsFlash<S> {
     /// Initialize flash filesystem by mounting the lpfs partition.
     ///
     /// If the partition is unformatted or corrupted, formats it and retries.
-    /// Returns `Err` only if both mount and format-then-mount fail.
-    pub fn init(storage: S, make_config: fn() -> Config) -> Result<Self, LfsError> {
+    /// Returns `Err` only if both mount and format-then-mount fail. The bool
+    /// is `true` when it had to format (the hello's `formatted`).
+    pub fn init(storage: S, make_config: fn() -> Config) -> Result<(Self, bool), LfsError> {
+        match Self::init_guarded(storage, make_config, |_| FormatVerdict::Format)? {
+            FlashFsInit::Mounted(fs) => Ok((fs, false)),
+            FlashFsInit::Formatted(fs) => Ok((fs, true)),
+            // The verdict above never holds.
+            FlashFsInit::Held => Err(LfsError::Io),
+        }
+    }
+
+    /// [`Self::init`], asking `may_format` before it formats.
+    ///
+    /// `may_format` gets the storage the failed mount handed back, so a chip
+    /// can look elsewhere on the same flash (the C6 probes its pre-repartition
+    /// filesystem read-only — see `lpfs_mounts_read_only`). This crate stays
+    /// layout-agnostic: the S3 and the classic call [`Self::init`], which
+    /// always formats.
+    pub fn init_guarded(
+        storage: S,
+        make_config: fn() -> Config,
+        may_format: impl FnOnce(&mut S) -> FormatVerdict,
+    ) -> Result<FlashFsInit<S>, LfsError> {
         let config = make_config();
 
-        let (mut storage, config) = match Filesystem::mount(storage, config) {
-            Ok(fs) => return Ok(Self::from_fs(fs)),
-            Err((e, storage)) => {
-                log::warn!("[FS] Mount failed ({e}), formatting partition...");
-                (storage, make_config())
-            }
+        let (mut storage, config, mount_error) = match Filesystem::mount(storage, config) {
+            Ok(fs) => return Ok(FlashFsInit::Mounted(Self::from_fs(fs))),
+            Err((e, storage)) => (storage, make_config(), e),
         };
+
+        if may_format(&mut storage) == FormatVerdict::Hold {
+            log::warn!("[FS] Mount failed ({mount_error}), holding: not formatting");
+            return Ok(FlashFsInit::Held);
+        }
+        // The exact line the validation payloads parse (`lp-emu-validate`'s
+        // `[FS] Mount failed …` pattern): keep its words.
+        log::warn!("[FS] Mount failed ({mount_error}), formatting partition...");
 
         Filesystem::format(&mut storage, &config).map_err(|e| {
             log::warn!("[FS] Format failed: {e}");
@@ -56,7 +104,7 @@ impl<S: Storage> LpFsFlash<S> {
         })?;
 
         log::info!("[FS] Formatted and mounted fresh filesystem");
-        Ok(Self::from_fs(fs))
+        Ok(FlashFsInit::Formatted(Self::from_fs(fs)))
     }
 
     fn from_fs(fs: Filesystem<S>) -> Self {
@@ -498,5 +546,152 @@ impl<S: Storage + 'static> LpFs for LpFsFlash<S> {
         for change in changes {
             self.record_change(change.path.as_path(), change.kind);
         }
+    }
+}
+
+/// Does a littlefs filesystem mount from `storage` with `config` — without
+/// ever writing to it?
+///
+/// The pure half of the C6's legacy guard (plan
+/// `lp2025/2026-10-01-1843-c6-repartition`, MQ2): before formatting an `lpfs`
+/// that would not mount, the C6 asks whether a LightPlayer filesystem in the
+/// pre-repartition layout is still at the old offset. littlefs's mount only
+/// reads, and [`ReadOnlyStorage`] makes sure of it: any write or erase it
+/// attempted would fail with `Io` rather than touch the flash. Mounted
+/// filesystems are unmounted again (a read-only unmount writes nothing).
+pub fn lpfs_mounts_read_only<S: Storage>(storage: S, config: Config) -> bool {
+    match Filesystem::mount(ReadOnlyStorage(storage), config) {
+        Ok(fs) => {
+            let _ = fs.unmount();
+            true
+        }
+        Err(_) => false,
+    }
+}
+
+/// A littlefs `Storage` that forwards reads and refuses every write and
+/// erase with `Io` — what [`lpfs_mounts_read_only`] probes through.
+pub struct ReadOnlyStorage<S: Storage>(pub S);
+
+impl<S: Storage> Storage for ReadOnlyStorage<S> {
+    fn read(&mut self, block: u32, offset: u32, buf: &mut [u8]) -> Result<(), LfsError> {
+        self.0.read(block, offset, buf)
+    }
+
+    fn write(&mut self, _block: u32, _offset: u32, _data: &[u8]) -> Result<(), LfsError> {
+        Err(LfsError::Io)
+    }
+
+    fn erase(&mut self, _block: u32) -> Result<(), LfsError> {
+        Err(LfsError::Io)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use littlefs_rust::RamStorage;
+
+    const BLOCK: u32 = 4096;
+
+    fn config(blocks: u32) -> Config {
+        let mut c = Config::new(BLOCK, blocks);
+        c.cache_size = 512;
+        c.lookahead_size = 64;
+        c
+    }
+
+    /// A 240-block filesystem holding files, the way a pre-repartition C6's
+    /// `lpfs` does.
+    fn legacy_image() -> RamStorage {
+        let mut storage = RamStorage::new(BLOCK, 240);
+        Filesystem::format(&mut storage, &config(240)).unwrap();
+        let fs = Filesystem::mount(storage, config(240))
+            .map_err(|(e, _)| e)
+            .unwrap();
+        fs.mkdir("projects").unwrap();
+        fs.mkdir("projects/basic").unwrap();
+        fs.write_file("projects/basic/project.json", b"{\"name\":\"basic\"}")
+            .unwrap();
+        fs.write_file("hardware.json", &[7u8; 5000]).unwrap();
+        fs.unmount().unwrap()
+    }
+
+    #[test]
+    fn a_filesystem_with_files_mounts_read_only_and_is_not_written() {
+        let storage = legacy_image();
+        let before = storage.data().to_vec();
+        // Probe through a borrowed view so the bytes can be compared after.
+        struct View<'a>(&'a mut RamStorage);
+        impl Storage for View<'_> {
+            fn read(&mut self, b: u32, o: u32, buf: &mut [u8]) -> Result<(), LfsError> {
+                self.0.read(b, o, buf)
+            }
+            fn write(&mut self, b: u32, o: u32, d: &[u8]) -> Result<(), LfsError> {
+                self.0.write(b, o, d)
+            }
+            fn erase(&mut self, b: u32) -> Result<(), LfsError> {
+                self.0.erase(b)
+            }
+        }
+        let mut storage = storage;
+        assert!(lpfs_mounts_read_only(View(&mut storage), config(240)));
+        assert_eq!(
+            storage.data(),
+            &before[..],
+            "the probe wrote to the filesystem"
+        );
+    }
+
+    #[test]
+    fn blank_flash_does_not_mount() {
+        assert!(!lpfs_mounts_read_only(
+            RamStorage::new(BLOCK, 240),
+            config(240)
+        ));
+    }
+
+    /// The overlap the guard exists for: the post-repartition `lpfs` starts
+    /// 64 blocks into the old one, so mounting at the new offset fails (no
+    /// superblock there) while the old filesystem is still whole.
+    #[test]
+    fn the_new_region_inside_an_old_filesystem_does_not_mount_but_the_old_one_does() {
+        let legacy = legacy_image();
+        let tail = legacy.data()[64 * BLOCK as usize..].to_vec();
+        let mut new_region = RamStorage::new(BLOCK, 176);
+        for (block, chunk) in tail.chunks(BLOCK as usize).enumerate() {
+            new_region.write(block as u32, 0, chunk).unwrap();
+        }
+        assert!(!lpfs_mounts_read_only(new_region, config(176)));
+        assert!(lpfs_mounts_read_only(legacy, config(240)));
+    }
+
+    #[test]
+    fn a_held_verdict_never_formats() {
+        let storage = RamStorage::new(BLOCK, 176);
+        fn cfg() -> Config {
+            config(176)
+        }
+        let outcome = LpFsFlash::init_guarded(storage, cfg, |_| FormatVerdict::Hold).unwrap();
+        assert!(matches!(outcome, FlashFsInit::Held));
+    }
+
+    #[test]
+    fn a_format_verdict_formats_and_an_existing_filesystem_just_mounts() {
+        fn cfg() -> Config {
+            config(240)
+        }
+        let blank = RamStorage::new(BLOCK, 240);
+        let outcome = LpFsFlash::init_guarded(blank, cfg, |_| FormatVerdict::Format).unwrap();
+        assert!(matches!(outcome, FlashFsInit::Formatted(_)));
+
+        let mut asked = false;
+        let outcome = LpFsFlash::init_guarded(legacy_image(), cfg, |_| {
+            asked = true;
+            FormatVerdict::Hold
+        })
+        .unwrap();
+        assert!(matches!(outcome, FlashFsInit::Mounted(_)));
+        assert!(!asked, "a filesystem that mounts never asks for a verdict");
     }
 }

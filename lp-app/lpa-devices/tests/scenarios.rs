@@ -263,14 +263,33 @@ fn a_marker_from_an_evicted_effect_never_ends_the_activity_that_replaced_it() {
         replay.journal_notes()
     );
 
-    // The LIVE effect's own end still works, on the same device.
+    // The LIVE effect's own end still works, on the same device. The live
+    // effect is the layout inspection (the C6 repartition); its end starts
+    // the write, and the write's end drives the ladder.
+    let commands = replay.step(
+        Millis(21_500),
+        Step::EffectEnded {
+            device: device.0,
+            ok: true,
+            message: Some("inspected".to_string()),
+            effect: Some(live_effect.0),
+            kind: None,
+        },
+    );
+    let write_effect = commands
+        .iter()
+        .find_map(|command| match command {
+            lpa_devices::Command::RunEffect { effect_id, .. } => Some(*effect_id),
+            _ => None,
+        })
+        .expect("the inspection's end starts the write");
     replay.step(
         Millis(22_000),
         Step::EffectEnded {
             device: device.0,
             ok: true,
             message: Some("written".to_string()),
-            effect: Some(live_effect.0),
+            effect: Some(write_effect.0),
             kind: None,
         },
     );
@@ -909,11 +928,12 @@ fn flashing_a_blank_pending_link_adopts_joins_identity_and_lands_ready() {
     );
     assert!(replay.roster().pending().is_empty(), "flash adopts");
     assert_eq!(replay.roster().devices().len(), 1);
+    // The layout inspection (C6 repartition) is the first coarse effect.
     assert!(
         commands.iter().any(|command| matches!(
             command,
             lpa_devices::Command::RunEffect {
-                effect: lpa_devices::EffectRequest::Flash { .. },
+                effect: lpa_devices::EffectRequest::InspectLayout { .. },
                 ..
             }
         )),
@@ -943,6 +963,18 @@ fn flashing_a_blank_pending_link_adopts_joins_identity_and_lands_ready() {
                 if record.identity.mac.as_ref().is_some_and(|mac| mac.0 == "60:55:f9:0a:0b:0c"))
         ),
         "the MAC join persists: {commands:?}"
+    );
+
+    // The layout inspection ends with no verdict: a plain flash starts.
+    replay.step(
+        Millis(10_000),
+        Step::EffectEnded {
+            device: device.0,
+            ok: true,
+            message: None,
+            effect: None,
+            kind: None,
+        },
     );
 
     // Progress reaches the projection.
@@ -994,7 +1026,7 @@ fn flashing_a_blank_pending_link_adopts_joins_identity_and_lands_ready() {
         commands.iter().any(|command| matches!(
             command,
             lpa_devices::Command::RunEffect {
-                effect: lpa_devices::EffectRequest::WriteBoardManifest { board_id },
+                effect: lpa_devices::EffectRequest::WriteBoardManifest { board_id, .. },
                 ..
             } if board_id == "seeed-xiao-esp32c6"
         )),
@@ -1043,6 +1075,18 @@ fn a_silent_board_after_a_flash_climbs_the_ladder_then_fails_honestly() {
             board: "dig-uno".to_string(),
             build: "esp32-4mb".to_string(),
             name: None,
+        },
+    );
+    // The layout inspection (C6 repartition) answers first: no verdict,
+    // a plain flash.
+    replay.step(
+        Millis(2001),
+        Step::EffectEnded {
+            device: device.0,
+            ok: true,
+            message: None,
+            effect: None,
+            kind: None,
         },
     );
     replay.step(
@@ -1116,7 +1160,20 @@ fn a_native_usb_board_after_a_flash_never_gets_the_ch34x_rung() {
             build_id: "esp32c6-4mb".to_string(),
             park_first: true,
             name: None,
+            restore_backup: false,
         }),
+    );
+    // The layout inspection (C6 repartition) answers first — once the park
+    // has handed it the wire: no verdict, a plain flash.
+    replay.step(
+        Millis(29_000),
+        Step::EffectEnded {
+            device: device.0,
+            ok: true,
+            message: None,
+            effect: None,
+            kind: None,
+        },
     );
     replay.step(
         Millis(30_000),
@@ -1189,6 +1246,18 @@ fn a_hung_bootloader_saved_pc_ends_the_ladder_early_with_replug_guidance() {
             board: "dig-uno".to_string(),
             build: "esp32-4mb".to_string(),
             name: None,
+        },
+    );
+    // The layout inspection (C6 repartition) answers first: no verdict,
+    // a plain flash.
+    replay.step(
+        Millis(2001),
+        Step::EffectEnded {
+            device: device.0,
+            ok: true,
+            message: None,
+            effect: None,
+            kind: None,
         },
     );
     replay.step(
@@ -1271,6 +1340,18 @@ fn a_saved_pc_outside_the_bootloader_is_not_a_hang() {
             name: None,
         },
     );
+    // The layout inspection (C6 repartition) answers first: no verdict,
+    // a plain flash.
+    replay.step(
+        Millis(2001),
+        Step::EffectEnded {
+            device: device.0,
+            ok: true,
+            message: None,
+            effect: None,
+            kind: None,
+        },
+    );
     replay.step(
         Millis(30_000),
         Step::EffectEnded {
@@ -1336,6 +1417,18 @@ fn a_pre_flash_hello_never_starts_the_stamp_before_the_port_comes_back() {
             board: "dig-uno".to_string(),
             build: "esp32-4mb".to_string(),
             name: None,
+        },
+    );
+    // The layout inspection (C6 repartition) answers first: no verdict,
+    // a plain flash.
+    replay.step(
+        Millis(2001),
+        Step::EffectEnded {
+            device: device.0,
+            ok: true,
+            message: None,
+            effect: None,
+            kind: None,
         },
     );
     // The flasher closed the port under its borrow (the release half of the
@@ -1407,7 +1500,7 @@ fn a_pre_flash_hello_never_starts_the_stamp_before_the_port_comes_back() {
         commands.iter().any(|command| matches!(
             command,
             lpa_devices::Command::RunEffect {
-                effect: lpa_devices::EffectRequest::WriteBoardManifest { board_id },
+                effect: lpa_devices::EffectRequest::WriteBoardManifest { board_id, .. },
                 ..
             } if board_id == "dig-uno"
         )),
@@ -1453,6 +1546,18 @@ fn a_stamp_that_hears_nothing_back_says_unconfirmed_not_that_the_default_stands(
             board: "dig-uno".to_string(),
             build: "esp32-4mb".to_string(),
             name: None,
+        },
+    );
+    // The layout inspection (C6 repartition) answers first: no verdict,
+    // a plain flash.
+    replay.step(
+        Millis(2001),
+        Step::EffectEnded {
+            device: device.0,
+            ok: true,
+            message: None,
+            effect: None,
+            kind: None,
         },
     );
     replay.step(Millis(29_000), Step::closed(1));
@@ -1518,6 +1623,18 @@ fn a_stamp_the_board_refused_carries_the_conversations_words_not_a_pin_map_verdi
             name: None,
         },
     );
+    // The layout inspection (C6 repartition) answers first: no verdict,
+    // a plain flash.
+    replay.step(
+        Millis(2001),
+        Step::EffectEnded {
+            device: device.0,
+            ok: true,
+            message: None,
+            effect: None,
+            kind: None,
+        },
+    );
     replay.step(Millis(29_000), Step::closed(1));
     replay.step(
         Millis(30_000),
@@ -1578,6 +1695,18 @@ fn forget_mid_flash_evicts_and_cleans_up() {
             board: "dig-uno".to_string(),
             build: "esp32-4mb".to_string(),
             name: None,
+        },
+    );
+    // The layout inspection (C6 repartition) answers first: no verdict,
+    // a plain flash.
+    replay.step(
+        Millis(2001),
+        Step::EffectEnded {
+            device: device.0,
+            ok: true,
+            message: None,
+            effect: None,
+            kind: None,
         },
     );
     assert!(replay.roster().device(device).expect("device").is_busy());
@@ -1837,6 +1966,18 @@ fn the_terminal_panel_keeps_boot_lines_and_effect_narration_across_a_reopen() {
             board: "dig-uno".to_string(),
             build: "esp32-4mb".to_string(),
             name: None,
+        },
+    );
+    // The layout inspection (C6 repartition) answers first: no verdict,
+    // a plain flash.
+    replay.step(
+        Millis(401),
+        Step::EffectEnded {
+            device: device.0,
+            ok: true,
+            message: None,
+            effect: None,
+            kind: None,
         },
     );
     for at in [500_u64, 520, 540] {

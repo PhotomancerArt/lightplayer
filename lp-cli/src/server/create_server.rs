@@ -83,6 +83,11 @@ pub fn create_server(
     // batching/refusal code path the device runs, so budget regressions
     // surface in host CI instead of on silicon.
     server.set_project_read_frame_budget(Some(HOST_LINK_FRAME_BUDGET_BYTES));
+    // A directory on disk persisted from before: the hello's `mounted`. The
+    // in-memory server keeps the server's default, `memory`.
+    if !memory {
+        server.set_fs_boot_state(lpc_wire::FsBootState::Mounted);
+    }
 
     // Create a new filesystem instance to return (same type as what was created)
     let returned_fs = create_filesystem(dir, memory)?;

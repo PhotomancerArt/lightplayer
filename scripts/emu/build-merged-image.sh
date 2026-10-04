@@ -124,6 +124,26 @@ if [[ ! -f "$elf" ]]; then
     exit 1
 fi
 
+# A REFERENCE image (`target/emu-ref/<commit>-<slug>/…`, built at a pinned
+# commit by build-reference-image.sh) takes the partition table of ITS commit,
+# not this checkout's: the table is part of what was flashed, and the C6's
+# moved in the 2026-10 repartition (0x310000 → 0x350000), so an old image
+# merged with today's table is a board that never existed — and its boot log
+# no longer matches the silicon transcript taken of it.
+elf_dir="$(cd "$(dirname "$elf")" && pwd)"
+if [[ "$(basename "$(dirname "$elf_dir")")" == "emu-ref" \
+    && "$(basename "$elf_dir")" =~ ^([0-9a-f]{7,40})- ]]; then
+    pinned_commit="${BASH_REMATCH[1]}"
+    rel_partitions="${partitions#"$repo"/}"
+    pinned_partitions="$elf_dir/partitions.csv"
+    if ! git -C "$repo" show "$pinned_commit:$rel_partitions" > "$pinned_partitions.partial"; then
+        echo "build-merged-image: cannot read $rel_partitions at $pinned_commit (the reference image's commit)" >&2
+        exit 1
+    fi
+    mv "$pinned_partitions.partial" "$pinned_partitions"
+    partitions="$pinned_partitions"
+fi
+
 mkdir -p "$(dirname "$out")"
 # Publish by `mv`, for the reason `build-reference-image.sh` spells out: a
 # test process may be reading this path while another writes it.

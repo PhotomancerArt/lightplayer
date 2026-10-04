@@ -46,7 +46,7 @@ fw_esp32v3_elf := "target/" + xt_v3_target + "/release-esp32v3/fw-esp32v3"
 v3_flash_size := "4mb"
 
 # The C6's 4 MB flash, matching lp-fw/fw-esp32c6/partitions.csv
-# (0x310000 + 0xF0000 = 0x400000) and the runner in
+# (0x350000 + 0xB0000 = 0x400000) and the runner in
 # lp-fw/fw-esp32c6/.cargo/config.toml, which cannot read this var — same
 # reasoning as s3_flash_size above. CANONICAL SOURCE:
 # lp-fw/builds/esp32c6-4mb.json (`flashSizeMb`).
@@ -248,6 +248,14 @@ lpa-fs-opfs-test: install-wasm32-target
     fi
     CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER="$PWD/scripts/browser-test-harness.sh" \
         cargo test -p lpa-fs-opfs --target wasm32-unknown-unknown
+
+# The Web Serial JS layer's node tests (`lp-app/lpa-link/tests/js/*.test.mjs`):
+# no browser, no board. Today: the Mac serial-path model `virtual_serial.js`
+# puts between emulated boards and a page on a Mac, and the flash read that
+# survives it (G1-F2, docs/defects/2026-10-02-studio-reading-a-boards-files-stalls-on-a-mac.md).
+# Seconds. CI runs it in `validate-browser`; `just test` runs it locally.
+lpa-link-js-test:
+    node --test lp-app/lpa-link/tests/js/*.test.mjs
 
 # The Web Serial JS layer in a real Chrome — the harness
 # `docs/debt/web-serial-js-untestable.md` has been asking for since
@@ -1492,7 +1500,7 @@ flash-fw-esp32s3 port="" features="" monitor="monitor": (build-fw-esp32s3 featur
 # `303a:1001` and both come up as `/dev/cu.usbmodem14332xx`. Resolve by MAC
 # first (`scripts/emu/board-port.py A0:F2:62:87:B4:8C`) and pass the port
 # explicitly rather than letting espflash pick.
-flash-fw-esp32c6 port="" features="" monitor="monitor": (build-fw-esp32c6 features)
+flash-fw-esp32c6 port="" features="" monitor="monitor" migrate="" discard="": (build-fw-esp32c6 features)
     #!/usr/bin/env bash
     set -euo pipefail
     args=(--chip esp32c6 --partition-table lp-fw/fw-esp32c6/partitions.csv --flash-size {{ c6_flash_size }} --after hard-reset)
@@ -1501,8 +1509,31 @@ flash-fw-esp32c6 port="" features="" monitor="monitor": (build-fw-esp32c6 featur
       no-monitor) ;;
       *) echo "monitor must be 'monitor' or 'no-monitor', not '{{ monitor }}'" >&2; exit 2 ;;
     esac
-    if [[ -n "{{ port }}" ]]; then
-      args+=(--port "{{ port }}")
+    # The layout preflight (C6 repartition, docs/adr/2026-10-02-c6-repartition-and-layout-migration.md):
+    # a board whose partition table differs from this image's — either way;
+    # a downgrade formats over a migrated board's files — is refused unless
+    # migrate=1 (move the files, writing this image) or discard=1 (erase them,
+    # test boards). It needs the port, so resolve it the way every recipe does.
+    port="{{ port }}"
+    if [[ -z "$port" ]]; then
+      port="$(cargo run -q -p lp-cli -- fwcheck port --chip esp32c6)"
+    fi
+    args+=(--port "$port")
+    preflight=(--port "$port" --table lp-fw/fw-esp32c6/partitions.csv)
+    [[ -n "{{ discard }}" ]] && preflight+=(--discard-lpfs)
+    [[ -n "{{ migrate }}" ]] && preflight+=(--migrate)
+    set +e
+    cargo run -q -p lp-cli -- hardware lpfs preflight "${preflight[@]}"
+    verdict=$?
+    set -e
+    if [[ $verdict -eq 4 ]]; then
+      merged="target/riscv32imac-unknown-none-elf/{{ fw_esp32c6_profile }}/fw-esp32c6-merged-for-migrate.bin"
+      espflash save-image --chip esp32c6 --merge --partition-table lp-fw/fw-esp32c6/partitions.csv \
+        --flash-size {{ c6_flash_size }} {{ fw_esp32c6_elf }} "$merged"
+      cargo run -q -p lp-cli -- hardware lpfs migrate --port "$port" --merged "$merged" --yes
+      exit 0
+    elif [[ $verdict -ne 0 ]]; then
+      exit $verdict
     fi
     espflash flash "${args[@]}" {{ fw_esp32c6_elf }}
 
@@ -2033,10 +2064,10 @@ fw-esp32c6-size-check margin="65536": install-rv32-target
     #!/usr/bin/env bash
     set -euo pipefail
     (cd lp-fw/fw-esp32c6 && cargo build --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} --features esp32c6,server)
-    # Keep `partition` in sync with the `factory` app partition in
-    # lp-fw/fw-esp32c6/partitions.csv.
-    just _fw-size-check esp32c6 esp32c6 {{ c6_flash_size }} {{ fw_esp32c6_elf }} 3145728 {{ margin }} \
-        "See docs/adr/2026-07-28-esp32c6-flash-budget.md."
+    # The partition is read from the `factory` row of the table the chip is
+    # flashed with, so the budget cannot drift from the layout again.
+    just _fw-size-check esp32c6 esp32c6 {{ c6_flash_size }} {{ fw_esp32c6_elf }} lp-fw/fw-esp32c6/partitions.csv {{ margin }} \
+        "See docs/adr/2026-07-28-esp32c6-flash-budget.md and docs/adr/2026-10-02-c6-repartition-and-layout-migration.md."
     just fw-esp32c6-rodata-layout-check
 
 # The image just linked must carry `build.rs`'s MERGED rodata layout, not
@@ -2121,9 +2152,9 @@ fw-manifest-check-emu: build-fw-emu
 fw-esp32s3-size-check margin="65536": build-fw-esp32s3
     #!/usr/bin/env bash
     set -euo pipefail
-    # Keep `partition` in sync with the `factory` app partition in
-    # lp-fw/fw-esp32s3/partitions.csv (0x600000).
-    just _fw-size-check esp32s3 esp32s3 {{ s3_flash_size }} {{ fw_esp32s3_elf }} 6291456 {{ margin }} \
+    # The partition is read from the `factory` row of
+    # lp-fw/fw-esp32s3/partitions.csv.
+    just _fw-size-check esp32s3 esp32s3 {{ s3_flash_size }} {{ fw_esp32s3_elf }} lp-fw/fw-esp32s3/partitions.csv {{ margin }} \
         "See lp-fw/fw-esp32s3/README.md 'Partitions'."
 
 # Fail when the esp32v3 (classic ESP32) app image gets too close to its 3 MB
@@ -2137,9 +2168,9 @@ fw-esp32s3-size-check margin="65536": build-fw-esp32s3
 fw-esp32v3-size-check margin="65536": build-fw-esp32v3
     #!/usr/bin/env bash
     set -euo pipefail
-    # Keep `partition` in sync with the `factory` app partition in
-    # lp-fw/fw-esp32v3/partitions.csv (0x300000).
-    just _fw-size-check esp32v3 esp32 {{ v3_flash_size }} {{ fw_esp32v3_elf }} 3145728 {{ margin }} \
+    # The partition is read from the `factory` row of
+    # lp-fw/fw-esp32v3/partitions.csv.
+    just _fw-size-check esp32v3 esp32 {{ v3_flash_size }} {{ fw_esp32v3_elf }} lp-fw/fw-esp32v3/partitions.csv {{ margin }} \
         "See lp-fw/fw-esp32v3/README.md 'Partitions'."
 
 # Shared tail of the per-chip size checks: measure the flashable image and
@@ -2149,13 +2180,21 @@ fw-esp32v3-size-check margin="65536": build-fw-esp32v3
 #
 # Callers build the ELF first; the build differs per chip (target, profile,
 # features, toolchain) but the measurement does not.
-_fw-size-check name chip flash_size elf partition margin doc:
+_fw-size-check name chip flash_size elf csv margin doc:
     #!/usr/bin/env bash
     set -euo pipefail
     if ! command -v espflash >/dev/null 2>&1; then
         echo "espflash not found. Install it before running the firmware size check."
         exit 1
     fi
+    # The app partition: the `factory` row of the table this chip is flashed
+    # with (a literal here drifted from the CSV once already).
+    factory="$(awk -F, '$1=="factory"{gsub(/[ \t]/,"",$5); print $5}' {{ csv }})"
+    if [ -z "${factory}" ]; then
+        echo "::error::no factory row in {{ csv }}"
+        exit 1
+    fi
+    partition=$(( factory ))
     # No --partition-table here on purpose: espflash errors out when the image
     # overruns the real table, and we want to report *how far* over it is.
     #
@@ -2172,10 +2211,22 @@ _fw-size-check name chip flash_size elf partition margin doc:
     trap 'rm -f "${img}"' EXIT
     espflash save-image --chip {{ chip }} --flash-size {{ flash_size }} {{ elf }} "${img}" >/dev/null
     size="$(wc -c < "${img}" | tr -d ' ')"
-    headroom=$(( {{ partition }} - size ))
-    echo "fw-{{ name }} image ${size} B / {{ partition }} B — headroom ${headroom} B (margin {{ margin }} B)"
+    headroom=$(( partition - size ))
+    echo "fw-{{ name }} image ${size} B / ${partition} B — headroom ${headroom} B (margin {{ margin }} B)"
     if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
-        echo "{{ name }} image \`${size}\` B of \`{{ partition }}\` B — headroom \`${headroom}\` B" >> "$GITHUB_STEP_SUMMARY"
+        echo "{{ name }} image \`${size}\` B of \`${partition}\` B — headroom \`${headroom}\` B" >> "$GITHUB_STEP_SUMMARY"
+    fi
+    # The C6's pre-repartition lpfs began at 0x310000 (frozen at
+    # lp-app/lpa-link/testdata/partitions-esp32c6-legacy-v1.csv). Once the app
+    # image crosses it, a migration must retire the old filesystem BEFORE the
+    # firmware is written (plan MQ6/MQ9) — informational, never a failure.
+    if [ "{{ name }}" = "esp32c6" ]; then
+        overlap=$(( 0x300000 - size ))
+        if [ "${overlap}" -ge 0 ]; then
+            echo "legacy overlap: ${overlap} B before the image reaches the old lpfs at 0x310000"
+        else
+            echo "legacy overlap: crossed — the image runs $(( -overlap )) B into the old lpfs at 0x310000"
+        fi
     fi
     if [ "${headroom}" -lt "{{ margin }}" ]; then
         echo "::error::{{ name }} image headroom ${headroom} B is under the {{ margin }} B margin. {{ doc }}"
@@ -2698,7 +2749,7 @@ test: build-rv32-builtins build-xt-builtins build-xt-fixtures _test-parallel
 
 [parallel]
 [private]
-_test-parallel: test-rust test-filetests test-emu-lab
+_test-parallel: test-rust test-filetests test-emu-lab lpa-link-js-test
 
 test-rust-core:
     cargo test
@@ -2718,6 +2769,9 @@ test-rust-core:
     # `lpc_wire` dependency. Plain `cargo test` above never turns it on, so
     # these tests (and the classic's uart_link pair below) never ran in CI
     # until this line (docs: lp2025/_auto/2026-10-01-fw-common-link-tests-never-run).
+    # Both runs turn on `server`, so they also run that crate's `lp_fs`
+    # legacy guard and the boot loader's interrupted-stamp test
+    # (`hardware::manifest_loader`).
     cargo test -p fw-esp32-common --features usb-link,server
     # ...and the classic's UART0 host link (feature `uart-link`), same reason.
     cargo test -p fw-esp32-common --features uart-link,server
@@ -3143,6 +3197,16 @@ test-emu-c6-boot:
     cargo test -p lp-emu-validate --test cycle_probe_two_clocks
     cargo test -p lp-emu-validate --test band_contract
     just test-emu-serve
+
+# The C6 repartition's host path on the emulated C6 (plan
+# lp2025/2026-10-01-1843-c6-repartition, P08): `lp-cli hardware lpfs` reading,
+# migrating, refusing and preflighting a "fielded board" built from this
+# tree's image on the pre-2026-10 table, through espflash's stub over a pty.
+# ~16 minutes of wall clock (a migration is ~180 s emulated), so it is NOT in
+# `test-emu-c6-cli` and no CI job runs it yet — run it when the layout
+# migration or the host flasher changes.
+test-emu-layout-migration:
+    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_layout_migration -- --include-ignored --nocapture --test-threads=1
 
 # lp-cli's emulator-backed tests. Both resolve the ELF through
 # `lp_emu_esp32c6::test_support` under `LP_EMU_BUILD_FW=1` — a plain
@@ -4380,8 +4444,21 @@ device-scenario *args:
 #
 # Diff a produced trace against the silicon fixture for the same scenario with
 #   node scripts/emu/trace-diff.mjs <silicon>.jsonl <emulated>.emu.jsonl
+#
+# `--serve-release` runs it with no dev server: the walk serves the release
+# bundle (`just studio-web-story-build`) and the packaged firmware itself.
 walk-no-board *args:
     node scripts/emu/walk-no-board.mjs {{ args }}
+
+# The C6 repartition's migration walk (P08): real Studio, headless, updating
+# an emulated C6 that is a fielded board (current firmware, pre-2026-10
+# table, files at 0x310000). One scenario per run — W1 W2 W3 W4 W5 W9 W7a
+# W7b W12 (W12: the board a Worker in the page, `?emu=tab`), see the script
+# header. Serves the RELEASE bundle itself (no dev
+# server); needs `just studio-web-story-build`,
+# `just studio-firmware-package-served` and `cargo build -p lp-cli`. Not CI.
+walk-migration-emu *args:
+    node scripts/emu/walk-migration-emu.mjs {{ args }}
 
 # The Bluetooth twin (M5 of the BLE remote-control plan): add over Bluetooth
 # → identify → push → Play → idle → knob, over `?ble=emu` against an emulated

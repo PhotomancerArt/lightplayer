@@ -65,6 +65,8 @@ fn done_tool_row() -> UiAgentToolRow {
         detail: "{\n  \"note\": \"slow the rings down\",\n  \"probes\": 2,\n  \"shader_ok\": true,\n  \"staged\": true,\n  \"warnings\": 0\n}".to_string(),
         edits: None,
         headline: None,
+        act: None,
+        place: None,
     }
 }
 

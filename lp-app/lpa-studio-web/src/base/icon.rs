@@ -86,6 +86,7 @@ pub fn StudioIcon(name: StudioIconName, size: u32) -> Element {
         StudioIconName::Console => rsx! { SquareTerminal { size } },
         StudioIconName::Cue => rsx! { Flag { size } },
         StudioIconName::Agent => rsx! { Sparkles { size } },
+        StudioIconName::Show => rsx! { Eye { size } },
         StudioIconName::Performance => rsx! { ChartLine { size } },
         StudioIconName::Danger => rsx! { TriangleAlert { size } },
         StudioIconName::RelationshipPrivate => rsx! { Lock { size } },
@@ -121,6 +122,7 @@ pub fn action_icon_name(icon: Option<&str>) -> Option<StudioIconName> {
         Some("upload") => Some(StudioIconName::Upload),
         Some("grow") => Some(StudioIconName::Grow),
         Some("agent") => Some(StudioIconName::Agent),
+        Some("show") => Some(StudioIconName::Show),
         _ => None,
     }
 }
@@ -218,6 +220,9 @@ pub enum StudioIconName {
     /// Sparkles: the shader-editing agent — the role marker on the node
     /// face's agent section (P2b item 2).
     Agent,
+    /// Show: bring what the assistant touched into view (the app chat's
+    /// link to where a press or edit lives).
+    Show,
     /// Line chart: the device card's data-adaptive Performance tab.
     Performance,
     /// Warning triangle: the device card's Danger tab.

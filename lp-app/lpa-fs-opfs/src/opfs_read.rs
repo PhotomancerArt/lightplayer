@@ -79,6 +79,28 @@ pub async fn load_tree_filtered(
     Ok(out)
 }
 
+/// Read one file at `path` (absolute lp-style) below `root`: `Ok(None)` when
+/// it (or a parent directory) does not exist, or exceeds the size cap.
+pub async fn read_file(
+    root: &FileSystemDirectoryHandle,
+    path: &str,
+) -> Result<Option<Vec<u8>>, OpfsError> {
+    let (parent_path, name) = match path.rsplit_once('/') {
+        Some((parent, name)) => (parent, name),
+        None => ("", path),
+    };
+    let Ok(parent) = crate::opfs_root::open_dir(root, parent_path, false).await else {
+        return Ok(None);
+    };
+    let Ok(handle) = JsFuture::from(parent.get_file_handle(name)).await else {
+        return Ok(None);
+    };
+    let handle: FileSystemFileHandle = handle
+        .dyn_into()
+        .map_err(|e| OpfsError::new("get_file_handle", path.to_string(), e))?;
+    read_file_bytes(&handle, path).await
+}
+
 /// Names of the immediate child *directories* of `dir` (files skipped).
 ///
 /// The husk-pruning primitive: the flusher removes files but never

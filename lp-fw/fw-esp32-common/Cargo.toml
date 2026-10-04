@@ -90,3 +90,8 @@ server = ["dep:littlefs-rust", "dep:lp-json-pack", "dep:lp-recovery", "dep:lpa-s
 critical-section = { workspace = true, features = ["std"] }
 # The USB link transport's host tests read the clock and may wait for room.
 embassy-time = { version = "0.5.0", features = ["std", "generic-queue-8"] }
+# The interrupted-stamp test (`hardware::manifest_loader`): the real client
+# conversation against the real server's file handler, then the boot loader.
+# Host-only; no image links any of this.
+lpa-client = { path = "../../lp-app/lpa-client", default-features = false }
+async-trait = "0.1"

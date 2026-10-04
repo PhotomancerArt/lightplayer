@@ -37,9 +37,14 @@ lpfs = { path = "../../lp-base/lpfs", optional = true, features = ["std"] }
 js-sys = { version = "0.3", optional = true }
 # Verifies the MD5 the ROM/stub sends after a raw flash read. Host-only:
 # the browser path gets its checksum from esptool-js.
-md-5 = { version = "0.10", optional = true }
+# The partition table's MD5 row (`provider/partition_table.rs`, every build,
+# wasm included) and the ROM/stub's checksum after a host raw flash read.
+md-5 = "0.10"
 serde = { workspace = true, features = ["derive"] }
 serde-wasm-bindgen = { version = "0.6", optional = true }
+# The device backup archive (`layout_migration/device_backup_archive`). The
+# same crate and features `lpa-studio-core` already builds for wasm.
+zip = { version = "2", default-features = false, features = ["deflate"], optional = true }
 serde_json = { workspace = true, optional = true }
 serialport = { version = "4.8", optional = true }
 strum = { version = "0.27", features = ["derive"] }
@@ -81,9 +86,14 @@ web-sys = { version = "0.3", features = ["Window"] }
 
 [features]
 default = []
+# Moving a board's files across a partition-layout change (the C6
+# repartition): the pure planner, the re-pack, the backup archive
+# (`layout_migration`). Every provider that flashes an ESP32 implies it.
+layout-migration = ["dep:littlefs-rust", "dep:serde_json", "dep:zip"]
 browser-serial-esp32 = [
     "device-link",
     "device-session",
+    "layout-migration",
     "dep:js-sys",
     "dep:lpc-model",
     "dep:wasm-bindgen",
@@ -147,7 +157,7 @@ fake-device = [
     "lpc-wire/ser-write-json",
     "device-session-host",
     "dep:fw-host",
-    "dep:littlefs-rust",
+    "layout-migration",
     "lpa-client/serial",
     "dep:lpc-model",
     "dep:lpfs",
@@ -160,10 +170,10 @@ host-process = [
 ]
 host-serial-esp32 = [
     "device-session-host",
+    "layout-migration",
     "lpa-client/serial",
     "dep:espflash",
     "dep:lpc-model",
-    "dep:md-5",
     "dep:serde_json",
     "dep:serialport",
     "dep:tokio",

@@ -26,11 +26,17 @@ const S3_PARTITIONS: &str = include_str!("../../../lp-fw/fw-esp32s3/partitions.c
 const COMMON_LOW_REGION: &[(&str, u32)] =
     &[("nvs", 0x9000), ("phy_init", 0xf000), ("factory", 0x10000)];
 
-/// `lpfs` must not move on either board — an existing device's filesystem
+/// `lpfs` must not move without a migration — an existing device's filesystem
 /// image stays valid only if its partition stays put. The expected offset is
 /// per-board because the S3's 8 MB floor placed it differently.
+///
+/// The C6's moved ONCE, deliberately (2026-10, `0x310000` → `0x350000`), and
+/// only because Studio's Update firmware and `lp-cli hardware lpfs migrate`
+/// carry every fielded board's files across
+/// (`docs/adr/2026-10-02-c6-repartition-and-layout-migration.md`). Changing a
+/// row here again needs a migration of its own, not just a new number.
 const LPFS_OFFSETS: &[(&str, u32, u32)] = &[
-    ("esp32c6", 0x310000, 0x40_0000),
+    ("esp32c6", 0x350000, 0x40_0000),
     ("esp32s3", 0x610000, 0x80_0000),
 ];
 
@@ -74,7 +80,7 @@ fn the_low_region_is_identical_on_every_board() {
 }
 
 #[test]
-fn lpfs_stays_put_on_each_board() {
+fn lpfs_moves_only_with_a_migration() {
     for &(board, expected_offset, _) in LPFS_OFFSETS {
         let csv = csv_for(board);
         let lpfs = partition(csv, "lpfs")
@@ -82,7 +88,7 @@ fn lpfs_stays_put_on_each_board() {
         assert_eq!(
             lpfs.offset, expected_offset,
             "{board}: lpfs moved — existing devices' filesystem images would \
-             be invalidated"
+             be invalidated unless a migration carries them (see LPFS_OFFSETS)"
         );
     }
 }

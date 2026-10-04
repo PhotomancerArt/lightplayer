@@ -33,25 +33,31 @@ use crate::{
 };
 
 impl ProjectController {
-    /// Apply one `edit_project` batch's edits, in order. Returns one status
-    /// per edit plus every run (for the caller's notices and logs). The
-    /// save is the caller's (it is a project op of its own).
+    /// Apply one `edit_project` batch's edits, in order. Returns one
+    /// [`AgentEditLanding`] per edit (its status, the node it landed on and
+    /// the slots it wrote)
+    /// plus every run (for the caller's notices and logs). The save is the
+    /// caller's (it is a project op of its own).
     pub(crate) async fn apply_agent_project_edits(
         &mut self,
         server: &mut StudioServerClient,
         edits: &[ProjectEdit],
-    ) -> (Vec<EditStatus>, Vec<ProjectEditRun>) {
+    ) -> (Vec<AgentEditLanding>, Vec<ProjectEditRun>) {
         let mut statuses = Vec::with_capacity(edits.len());
         let mut runs = Vec::new();
         let mut halted: Option<String> = None;
         for (index, edit) in edits.iter().enumerate() {
             if let Some(reason) = &halted {
-                statuses.push(EditStatus::Skipped {
-                    reason: reason.clone(),
+                statuses.push(AgentEditLanding {
+                    status: EditStatus::Skipped {
+                        reason: reason.clone(),
+                    },
+                    node: None,
+                    slots: Vec::new(),
                 });
                 continue;
             }
-            let (status, run) = self.apply_agent_content_edit(server, edit).await;
+            let (status, run, node, slots) = self.apply_agent_content_edit(server, edit).await;
             let creates = matches!(
                 edit,
                 ProjectEdit::CreateNode(_) | ProjectEdit::ImportPattern(_)
@@ -59,13 +65,94 @@ impl ProjectController {
             if creates && let EditStatus::Rejected { reason } = &status {
                 halted = Some(format!("edit {index} ({}) failed: {reason}", edit.verb()));
             }
-            statuses.push(status);
+            // Only an edit that landed has a node (or slots) to point at.
+            let landed = matches!(status, EditStatus::Applied { .. });
+            let node = node.filter(|_| landed);
+            let slots = if landed { slots } else { Vec::new() };
+            statuses.push(AgentEditLanding {
+                status,
+                node,
+                slots,
+            });
             runs.extend(run);
         }
         (statuses, runs)
     }
 
+    /// One edit: its status, its run, the node it is about (the created
+    /// one for a create), and the slots it writes.
     async fn apply_agent_content_edit(
+        &mut self,
+        server: &mut StudioServerClient,
+        edit: &ProjectEdit,
+    ) -> (
+        EditStatus,
+        Option<ProjectEditRun>,
+        Option<ProjectNodeAddress>,
+        Vec<ProjectSlotAddress>,
+    ) {
+        let named = match edit {
+            ProjectEdit::RemoveNode(node) => Some(node.node.as_str()),
+            ProjectEdit::Set(set) => Some(set.node.as_str()),
+            ProjectEdit::Ensure(slot) | ProjectEdit::Remove(slot) => Some(slot.node.as_str()),
+            ProjectEdit::SetAsset(asset) => Some(asset.node.as_str()),
+            ProjectEdit::CreateNode(_)
+            | ProjectEdit::ImportPattern(_)
+            | ProjectEdit::SetTarget(_) => None,
+        };
+        // Resolved before the edit runs: a removed node is gone after it.
+        let node = named
+            .and_then(|name| self.agent_node(name).ok())
+            .map(|node| node.address().clone());
+        let slots = self.agent_edit_slots(edit);
+        let creates = matches!(
+            edit,
+            ProjectEdit::CreateNode(_) | ProjectEdit::ImportPattern(_)
+        );
+        let before = creates.then(|| self.agent_node_addresses());
+        let (status, run) = self.apply_agent_content_edit_status(server, edit).await;
+        let node = match before {
+            Some(before) => self.created_node(&before),
+            None => node,
+        };
+        (status, run, node, slots)
+    }
+
+    /// The slots a slot edit writes, resolved the way the edit itself
+    /// resolves them: the leaf addresses of its overlay edits, in order,
+    /// each once. Empty for an edit that writes no slot (a create, a
+    /// removal, a file's text, the board) or one that does not resolve
+    /// (it is rejected anyway).
+    fn agent_edit_slots(&self, edit: &ProjectEdit) -> Vec<ProjectSlotAddress> {
+        let found = match edit {
+            ProjectEdit::Set(set) => self.agent_slot_edits(&set.node, &set.path, Some(&set.value)),
+            ProjectEdit::Ensure(slot) => self.agent_slot_edits(&slot.node, &slot.path, None),
+            ProjectEdit::Remove(slot) => {
+                return self
+                    .agent_slot_address(&slot.node, &slot.path)
+                    .map(|address| vec![address])
+                    .unwrap_or_default();
+            }
+            ProjectEdit::CreateNode(_)
+            | ProjectEdit::ImportPattern(_)
+            | ProjectEdit::RemoveNode(_)
+            | ProjectEdit::SetAsset(_)
+            | ProjectEdit::SetTarget(_) => return Vec::new(),
+        };
+        let Ok((node, edits)) = found else {
+            return Vec::new();
+        };
+        let mut slots: Vec<ProjectSlotAddress> = Vec::new();
+        for edit in edits {
+            let address = ProjectSlotAddress::new(node.clone(), ProjectSlotRoot::Def, edit.path);
+            if !slots.contains(&address) {
+                slots.push(address);
+            }
+        }
+        slots
+    }
+
+    async fn apply_agent_content_edit_status(
         &mut self,
         server: &mut StudioServerClient,
         edit: &ProjectEdit,
@@ -82,7 +169,7 @@ impl ProjectController {
                 };
                 let before = self.agent_node_addresses();
                 let run = self.create_node(server, kind, &attach).await;
-                self.settle_create(run, before, &attach, &format!("{kind:?}"))
+                self.settle_create(run, &before, &attach, &format!("{kind:?}"))
             }
             ProjectEdit::ImportPattern(import) => {
                 let slug = import.pattern.trim().trim_start_matches("catalog/");
@@ -110,7 +197,7 @@ impl ProjectController {
                         &attach,
                     )
                     .await;
-                self.settle_create(run, before, &attach, &format!("pattern {slug}"))
+                self.settle_create(run, &before, &attach, &format!("pattern {slug}"))
             }
             ProjectEdit::RemoveNode(node) => {
                 let address = match self.agent_node(&node.node) {
@@ -217,7 +304,7 @@ impl ProjectController {
     fn settle_create(
         &mut self,
         run: Result<ProjectEditRun, UiError>,
-        before: BTreeSet<ProjectNodeAddress>,
+        before: &BTreeSet<ProjectNodeAddress>,
         attach: &UiAttachTarget,
         what: &str,
     ) -> (EditStatus, Option<ProjectEditRun>) {
@@ -235,18 +322,7 @@ impl ProjectController {
         if let Some(reason) = warning_text(&run) {
             return (EditStatus::Rejected { reason }, Some(run));
         }
-        let created: Vec<ProjectNodeAddress> = self
-            .agent_node_addresses()
-            .into_iter()
-            .filter(|address| !before.contains(address))
-            .collect();
-        // The shallowest new address is the created node (an import also
-        // brings the module's own children).
-        let Some(node) = created
-            .iter()
-            .min_by_key(|address| address.path().0.len())
-            .cloned()
-        else {
+        let Some(node) = self.created_node(before) else {
             if let UiAttachTarget::Playlist { node } = attach {
                 return (
                     EditStatus::Applied {
@@ -447,11 +523,30 @@ impl ProjectController {
         Ok((facts, self.def_artifact_for(node)))
     }
 
+    /// The node a create made: the shallowest address that was not there
+    /// `before` (an import also brings the module's own children).
+    fn created_node(&self, before: &BTreeSet<ProjectNodeAddress>) -> Option<ProjectNodeAddress> {
+        self.agent_node_addresses()
+            .into_iter()
+            .filter(|address| !before.contains(address))
+            .min_by_key(|address| address.path().0.len())
+    }
+
     fn agent_node_addresses(&self) -> BTreeSet<ProjectNodeAddress> {
         let mut all = Vec::new();
         collect_nodes(self.root_nodes(), &mut all);
         all.into_iter().map(|node| node.address().clone()).collect()
     }
+}
+
+/// One edit's outcome as the batch reports it: its status, the node it
+/// landed on (`None` for an edit about no node, or one that did not land),
+/// and the slots it wrote (empty unless it landed and wrote slots).
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct AgentEditLanding {
+    pub status: EditStatus,
+    pub node: Option<ProjectNodeAddress>,
+    pub slots: Vec<ProjectSlotAddress>,
 }
 
 /// A node's name as the agent addresses it: its path of names below the

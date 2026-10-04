@@ -381,6 +381,12 @@ pub fn App() -> Element {
         #[cfg(target_arch = "wasm32")]
         {
             controller.set_device_spawner(wasm_bindgen_futures::spawn_local);
+            // Where a board's backup goes before an update moves its files
+            // to a new layout (the C6 repartition): OPFS, read back before
+            // the board is written.
+            controller.set_device_backup_store(Rc::new(
+                crate::device_backup_store_opfs::OpfsDeviceBackupStore,
+            ));
             let provider = Rc::new(lpa_studio_core::BrowserSerialEsp32Provider::with_options(
                 Default::default(),
             ));
@@ -1194,6 +1200,10 @@ pub fn App() -> Element {
     // session panel's Rename), the Unlock page's Connect, and everything
     // under the shell, which provides the same tree again for its stories.
     crate::core::use_provide_offers(&current_view.offers);
+    // What the app agent just did (M8): every control below lights by its
+    // offer path, and the user's Show scrolls to the one it names.
+    crate::app::agent::use_provide_agent_activity(&current_view.app_agent.activity);
+    crate::app::agent::use_agent_reveal(current_view.app_agent.activity.reveal.clone());
     // The ⌘K command palette's open state: web chrome, like a popover's,
     // held here so the chrome's hint and the palette share it.
     let mut palette_open = use_signal(|| false);

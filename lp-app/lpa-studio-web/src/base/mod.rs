@@ -73,6 +73,6 @@ pub use option_cards::{
 };
 pub use popover::{IconPopoverButton, PopoverButton, PopoverCloseHandle, PopoverPlacement};
 pub use qr::{QrCode, QrCodeSvg};
-pub use reveal_on_focus::{reveal_selected_pane, use_reveal_on_focus};
+pub use reveal_on_focus::{reveal_offer_path, reveal_selected_pane, use_reveal_on_focus};
 pub use tabs::{TabItem, Tabs};
 pub use toast::{ToastHost, ToastMessage, ToastTone, Toasts, use_toast_provider};

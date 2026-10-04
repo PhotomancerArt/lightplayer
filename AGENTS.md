@@ -68,12 +68,14 @@ and the correct solution was always to fix the dependency.
 
 ## How to Handle Binary Size Issues
 
-The ESP32-C6 app image must fit a 3 MB partition, and the budget is tight —
+The ESP32-C6 app image must fit a 3.25 MB partition, and the budget is tight —
 read `docs/adr/2026-07-28-esp32c6-flash-budget.md` before doing size work. It
 records what has already been spent (a ~200 KB diagnostics-for-flash flag
-stack, the deliberately-kept 500 KB WiFi blob), what is reserved (the lpfs
-partition, held for the future radio/WiFi decision), and what has been measured
-and *rejected* so you don't re-run dead ends.
+stack, the deliberately-kept 500 KB WiFi blob), what was reserved and is now
+spent (256 KB of the lpfs partition, given to the app for Wi-Fi by the 2026-10
+repartition — `docs/adr/2026-10-02-c6-repartition-and-layout-migration.md`;
+moving `lpfs` again needs a migration, never just a new table), and what has
+been measured and *rejected* so you don't re-run dead ends.
 
 Check where you stand at any time:
 
@@ -714,6 +716,16 @@ write acknowledged and dropped) were invisible to it. Access enforcement is
 proven by `lpa-server/tests/access_gate.rs` and the desk check
 (`spikes/ble-lab`). See `docs/adr/2026-09-24-ble-transport.md`, S5.
 
+**On a Mac, `?emu=` pages model the Mac's serial path** (`?emu-tty=mac|none`
+overrides): `public/lpa-link/mac_tty_model.js` drops `0xFF`-heavy bytes a
+late page has not read, as Chromium's Web Serial on macOS does, and the page
+reads at most every 16 ms. Without it a flash read that stalled on every Mac
+passed the migration walk (G1-F2,
+`docs/defects/2026-10-02-the-emulated-serial-path-never-drops-a-byte.md`).
+Each drop is a `[emu] … the Mac serial model dropped N B` console warning;
+`walk-migration-emu` writes the page console and the count (`macTtyDrops`)
+beside its verdict.
+
 Two more dev-only flags tune the device wire for a measurement (read once at
 page load by `lpa-studio-web/src/dev_url_flags.rs`; no UI, no persistence):
 `?lens-pause-ms=N` sets the editor lens's pause between device reads
@@ -1028,6 +1040,7 @@ lp-cli emu run --merged <chip.bin> --link 127.0.0.1:5591 --monitor   # a C6 you 
 lp-cli upload projects/test/basic serial:tcp://127.0.0.1:5591        # …in another terminal
 
 just walk-esp32c6-emu                           # THE WALK (see below) — minutes, not seconds
+just walk-migration-emu W1                       # the C6 repartition's migration, real Studio on an emulated fielded board (W1–W4, W7a/b, W9)
 just test-emu-c6                                # its gates (builds firmware)
 just heap-budget-check-chips                    # the firmware's own heap ledger, ratcheted
 just bless-chips [esp32c6|esp32v3|esp32s3|engine]   # a firmware change moved a pinned figure: re-record them all (docs/chip-figures.md)
