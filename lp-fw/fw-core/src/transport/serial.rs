@@ -505,4 +505,68 @@ mod tests {
         assert!(received.is_some());
         assert_eq!(received.unwrap().id, 1);
     }
+
+    /// A line carrying a Wi-Fi password never reaches a log, at any level:
+    /// not the parsed line (debug), not a line that failed to parse (warn),
+    /// not a partial line's previews (trace, string and hex).
+    #[test]
+    fn a_wifi_password_never_reaches_a_log() {
+        extern crate std;
+        use std::string::String;
+        use std::sync::Mutex;
+
+        static CAPTURED: Mutex<Vec<String>> = Mutex::new(Vec::new());
+        struct Capture;
+        impl log::Log for Capture {
+            fn enabled(&self, _: &log::Metadata) -> bool {
+                true
+            }
+            fn log(&self, record: &log::Record) {
+                CAPTURED
+                    .lock()
+                    .unwrap()
+                    .push(alloc::format!("{}", record.args()));
+            }
+            fn flush(&self) {}
+        }
+        static LOGGER: Capture = Capture;
+        let _ = log::set_logger(&LOGGER);
+        log::set_max_level(log::LevelFilter::Trace);
+
+        const PASSWORD: &str = "correct-horse-42";
+        let set = ClientMessage {
+            id: 7,
+            msg: ClientRequest::NetworkSet {
+                ssid: Some(String::from("a")),
+                password: Some(lpc_wire::WifiPassword::new(PASSWORD)),
+                enabled: None,
+                lan_only: None,
+            },
+        };
+        let line = json::to_serial_line(&set).unwrap();
+        let mock_io = MockSerialIo::new();
+        let mut transport = SerialTransport::new(mock_io);
+
+        // A partial line first (trace previews), then the rest (debug).
+        let (head, tail) = line.as_bytes().split_at(line.len() - 4);
+        transport.io.push_read(head);
+        assert!(pollster::block_on(transport.receive()).unwrap().is_none());
+        transport.io.push_read(tail);
+        assert!(pollster::block_on(transport.receive()).unwrap().is_some());
+        // A line that does not parse (warn).
+        let broken = line.replace("\"id\":7", "\"id\":\"x\"");
+        transport.io.push_read(broken.as_bytes());
+        assert!(pollster::block_on(transport.receive()).unwrap().is_none());
+
+        let captured = CAPTURED.lock().unwrap();
+        assert!(
+            captured.iter().any(|line| line.contains("withheld")),
+            "the transport logged nothing to check: {captured:?}"
+        );
+        let hex: String = PASSWORD.bytes().map(|b| alloc::format!("{b:02x} ")).collect();
+        for logged in captured.iter() {
+            assert!(!logged.contains(PASSWORD), "{logged}");
+            assert!(!logged.contains(hex.trim_end()), "{logged}");
+        }
+    }
 }
