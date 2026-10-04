@@ -692,7 +692,7 @@ are the cable. You need **no** WebSerial grant, no `just serial-grant`, no
 bench port and no Chromium policy profile: a polyfilled `navigator.serial`
 grants itself.
 
-Each board's banner row also carries a **D0 switch**, held **on** by default:
+Each board's banner row also carries a **D0 power** toggle, **on** by default:
 the switch a switch-mode `PowerButton` reads (`button:local:D0`, e.g. the
 PLAYFUL choker). An emulated pad nobody drives reads low, which that firmware
 takes as "switch off", and with the switch off a `detach` powers the board off

@@ -298,7 +298,7 @@ async function main() {
         const flipped = await driver.evaluate(`(() => {
           const flip = document.querySelector(
             '.lp-emu-banner-switch[data-board-id=' + CSS.escape(${JSON.stringify(BOARD)}) + '][data-pad="0"]');
-          if (!flip || flip.getAttribute('aria-pressed') !== 'true') return false;
+          if (!flip || flip.getAttribute('aria-checked') !== 'true') return false;
           flip.click();
           return true;
         })()`);
