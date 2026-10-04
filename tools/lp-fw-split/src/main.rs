@@ -83,7 +83,8 @@ fn run(command: Command) -> Result<bool> {
         }
         Command::Reach { elf, map, emit_ld } => {
             let graph = SectionGraph::load(&elf, &map)?;
-            let split = Split::compute(&graph, &[]);
+            let roots = lp_fw_split::split_build::core_roots(&graph, &std::fs::read(&elf)?)?;
+            let split = Split::compute(&graph, &roots);
             let rules = EngineRules::from_split(&graph, &split);
             std::fs::write(&emit_ld, rules.script())?;
             eprintln!(

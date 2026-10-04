@@ -1,5 +1,5 @@
-//! Raw flash access for the update path: the region the boot records, the
-//! core images and the engine live in, outside any filesystem.
+//! Raw flash access for the boot bookkeeping: the region the boot records,
+//! the core images and the engine live in, outside any filesystem.
 //!
 //! Two rules, both learned on silicon (XIAO C6, 2026-10-02):
 //!
@@ -8,37 +8,40 @@
 //!   every bounds check then refused, and the core read its boot records as
 //!   "missing". This uses esp-storage's low-level ROM calls instead, with the
 //!   bounds below.
-//! - **Writes are fenced.** Nothing is erased or written unless it lies in
-//!   the region and outside the running core's own extent, or is one of the
-//!   two boot-record sectors — and nothing at all until [`protect`] has been
-//!   told where the running core is. The same bad read above computed the
+//! - **Writes are fenced.** Nothing is written unless it lies in the region
+//!   and outside the running core's own extent, or is one of the two
+//!   boot-record sectors — and nothing at all until [`protect`] has been told
+//!   where the running core is and where the region ends (the end the
+//!   flashed partition table gives). The same bad read above computed the
 //!   engine's room as starting on top of the running core; the fence turns
-//!   that class of bug into a refused update instead of a self-erasing board.
+//!   that class of bug into a refused write instead of a self-erasing board.
 //!
 //! [`protect`]: SplitFlash::protect
 
-use lp_bootctl::{BOOT_RECORD_SECTORS, Extent, REGION_END_C6_4MB, REGION_START};
+use lp_bootctl::{BOOT_RECORD_SECTORS, Extent, REGION_START};
 
-pub const SECTOR: u32 = 4096;
+const SECTOR: u32 = 4096;
 
-/// The SPI flash, for the update path only.
+/// The SPI flash, for the boot bookkeeping only.
 pub struct SplitFlash {
-    /// The running core's extent; `None` = no writes at all.
-    core: Option<Extent>,
+    /// The running core's extent and the region's end; `None` = no writes
+    /// at all.
+    fence: Option<(Extent, u32)>,
     unlocked: bool,
 }
 
 impl SplitFlash {
     pub fn take() -> Self {
         Self {
-            core: None,
+            fence: None,
             unlocked: false,
         }
     }
 
-    /// Allow writes, never inside `core` (the running core's extent).
-    pub fn protect(&mut self, core: Extent) {
-        self.core = Some(core);
+    /// Allow writes inside the region ending at `region_end`, never inside
+    /// `core` (the running core's extent).
+    pub fn protect(&mut self, core: Extent, region_end: u32) {
+        self.fence = Some((core, region_end));
     }
 
     /// Read `out.len()` bytes at `at` (both multiples of 4).
@@ -69,7 +72,7 @@ impl SplitFlash {
     }
 
     fn allowed(&self, at: u32, len: u32) -> bool {
-        let Some(core) = self.core else {
+        let Some((core, region_end)) = self.fence else {
             return false;
         };
         if BOOT_RECORD_SECTORS
@@ -78,7 +81,7 @@ impl SplitFlash {
         {
             return true;
         }
-        let in_region = at >= REGION_START && at + len <= REGION_END_C6_4MB;
+        let in_region = at >= REGION_START && at + len <= region_end;
         let clear_of_core = at + len <= core.start || at >= core.end;
         in_region && clear_of_core
     }

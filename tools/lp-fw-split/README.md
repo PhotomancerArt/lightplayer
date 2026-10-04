@@ -42,7 +42,20 @@ come from `lp-bootctl` itself.
 7. **Split.** `engine.bin` is the two engine sections' bytes from
    `0x4240_0000`. The core's ESP image is espflash's own image of the pass-2
    ELF with the engine's two section headers re-typed `NOBITS`.
-8. **Loader.** Built from its own directory; its ESP image by espflash.
+   **Then the patches, in this order** (all through `lp-bootctl`):
+   1. the engine header's `len` and `crc` are filled, after checking it is a
+      committed v1 header whose build id equals the core's own copy
+      (`LP_BUILD_ID`);
+   2. SHA-256 of `engine.bin` — exactly as flashed, header patched and
+      committed — is written into the core's digest slot
+      (`LP_ENGINE_DIGEST`, found by symbol; both statics are extra core
+      roots, so they are never placed in the engine);
+   3. only then is the core's ESP image made, so its checksum and appended
+      hash cover the patched slot. The tool checks the slot equals the
+      engine's SHA-256 and refuses the build otherwise.
+8. **Loader.** Built from its own directory; its ESP image by espflash. The
+   build refuses a loader image without this tree's version word
+   (`lp_bootctl::loader_identity`) or longer than `LOADER_MAX_LEN`.
 9. **`app.bin`** for `0x10000`: loader, record sector 0 (seq 1, proven),
    record sector 1 erased, core at `0x18000`, engine at the first 32 KiB page
    after the core — all through `lp-bootctl`.

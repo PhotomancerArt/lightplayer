@@ -12,7 +12,10 @@ MEMORY {
      segments (its rodata and its text: `rom_index == 2`). The loader has
      neither, so it carries two 16-byte placeholders, apart so the image
      tool keeps them as two segments, inside one page so the image stays
-     small. The loader never reads them; it remaps this page for the core. */
+     small. The loader never reads them; it remaps this page for the core.
+     The first carries the loader's version word ("LPLV", version, 0 —
+     lp_bootctl::loader_identity), which a core finds by scanning the
+     loader image's first 4 KiB of flash. */
   ROMSTUB : ORIGIN = 0x42000020, LENGTH = 0x200
 }
 ENTRY(_start)
@@ -22,7 +25,7 @@ PROVIDE(rtc_get_reset_reason = 0x40000018);
 PROVIDE(Cache_Invalidate_ICache_All = 0x4000064c);
 
 SECTIONS {
-  .drom_stub : { LONG(0x4c504452) LONG(0) LONG(0) LONG(0) } > ROMSTUB
+  .drom_stub : { KEEP(*(.loader_identity)) LONG(0) LONG(0) } > ROMSTUB
   .irom_stub 0x42000120 : { LONG(0x4c504952) LONG(0) LONG(0) LONG(0) } > ROMSTUB
   .text : ALIGN(4) {
     KEEP(*(.text.entry))

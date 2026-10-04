@@ -86,7 +86,9 @@ pub struct BootRecord {
     pub trial: bool,
 }
 
-/// The 32-bit name a record gives a build: CRC-32 of its build id.
+/// The 32-bit name a record gives a build: CRC-32 (IEEE) of its build id's
+/// text, `"<version>+<commit>"`, without the zero padding the engine header
+/// stores it with.
 pub fn build_hash(build_id: &[u8]) -> u32 {
     crc32(build_id)
 }

@@ -15,6 +15,7 @@
 //! constants. See `README.md`.
 
 pub mod app_image;
+pub mod elf_symbol;
 pub mod engine_script;
 pub mod merged_image;
 pub mod pass_link;

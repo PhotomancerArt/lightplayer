@@ -1,8 +1,6 @@
 //! The engine's window: where it is linked, and the MMU entries behind it.
 
-use lp_bootctl::Extent;
-
-/// Where the engine is linked (the split tool's `--engine-base`).
+/// Where the engine is linked (`tools/lp-fw-split`'s `ENGINE_BASE`).
 pub const ENGINE_VADDR: usize = 0x4240_0000;
 
 const SPI0: usize = 0x6000_2000;
@@ -19,20 +17,20 @@ pub fn page_size() -> u32 {
     0x1_0000 >> mode
 }
 
-/// Map `extent` behind [`ENGINE_VADDR`], one MMU entry per page. Pages past
-/// what was written read as erased flash, which the header check rejects.
-pub fn map_engine(extent: Extent) {
+/// Map `len` bytes of flash from `start` (page-aligned) behind
+/// [`ENGINE_VADDR`], one MMU entry per page.
+pub fn map_engine(start: u32, len: u32) {
     let page = page_size();
     let shift = page.trailing_zeros();
     let first_entry = ((ENGINE_VADDR - 0x4200_0000) >> shift) as u32;
-    for k in 0..extent.len().div_ceil(page) {
+    for k in 0..len.div_ceil(page) {
         // SAFETY: entries of the engine window only, which nothing has
         // touched; the code doing it runs from the core's own pages.
         unsafe {
             core::ptr::write_volatile(MMU_ITEM_INDEX as *mut u32, first_entry + k);
             core::ptr::write_volatile(
                 MMU_ITEM_CONTENT as *mut u32,
-                ((extent.start >> shift) + k) | MMU_VALID,
+                ((start >> shift) + k) | MMU_VALID,
             );
         }
     }

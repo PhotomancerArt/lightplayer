@@ -16,7 +16,7 @@ use crate::mmu;
 /// Where flash is mapped for reading.
 const SCRATCH: u32 = 0x4260_0000;
 /// How much of it there is.
-const SCRATCH_LEN: u32 = 0x0020_0000;
+pub const SCRATCH_LEN: u32 = 0x0020_0000;
 
 /// A run of flash mapped for reading; `read` copies out of it.
 pub struct FlashWindow {

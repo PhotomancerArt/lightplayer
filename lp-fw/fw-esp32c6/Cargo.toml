@@ -338,6 +338,15 @@ fixture-no-hello = ["lpa-server/fixture-no-hello", "fw-core/fixture-no-hello"]
 # Since the link runs lp-link that loss is resent and counted, not seen.
 # Not `test_*`: that prefix selects a harness entrypoint instead of the app.
 fixture-no-in-endpoint-gate = []
+# Emulator FIXTURES, never shipped and never in a build def: a split-image
+# core that, booted on TRIAL, marks itself attempted and then panics
+# (`fixture-trial-dies`) or spins without feeding the watchdog
+# (`fixture-trial-hangs`) before it marks itself started — the two ways a new
+# core fails its first boot, for the loader's rollback and cold-cap scenarios
+# (`just test-emu-c6-split-boot`, lp-cli/tests/emu_split_boot.rs). Inert in a
+# plain (unsplit) build. Not `test_*`, for the reason above.
+fixture-trial-dies = []
+fixture-trial-hangs = []
 
 [dependencies]
 lp-collection = { workspace = true, features = ["serde"] }

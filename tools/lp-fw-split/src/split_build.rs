@@ -9,6 +9,7 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 use crate::app_image::{self, PAGE};
+use crate::elf_symbol;
 use crate::engine_script::{ENGINE_BASE, EngineRules, pass1_script};
 use crate::merged_image;
 use crate::pass_link;
@@ -53,13 +54,24 @@ pub struct Piece {
     pub sha256: String,
 }
 
+/// The core's copy of the build id (`"<version>+<commit>"`, zero-padded).
+pub const BUILD_ID_SYMBOL: &str = "LP_BUILD_ID";
+/// The core's engine digest slot.
+pub const ENGINE_DIGEST_SYMBOL: &str = "LP_ENGINE_DIGEST";
+/// The layout `lp_bootctl::SplitLayout` describes.
+pub const LAYOUT: u32 = 1;
+
 /// `split.json`: where everything is, for the packager and the tests.
 #[derive(Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct SplitReport {
+    pub layout: u32,
     pub page: u32,
     pub region_end: u32,
     pub app_version: String,
+    /// `"<version>+<commit>"`: the engine header's and the core's.
+    pub build_id: String,
+    pub loader_version: u16,
     pub loader: Piece,
     pub core: Piece,
     pub engine: Piece,
@@ -89,7 +101,7 @@ pub fn build(opts: &BuildOptions) -> Result<SplitReport> {
     eprintln!("==> pass 1 ({}; version {app_version})", opts.features);
     let p1 = pass_link::link_firmware(&repo, &out, "p1", &pass1_x, &opts.features, &app_version)?;
     let graph = SectionGraph::load(&p1.elf, &p1.map)?;
-    let split = Split::compute(&graph, &[]);
+    let split = Split::compute(&graph, &core_roots(&graph, &fs::read(&p1.elf)?)?);
     let rules = EngineRules::from_split(&graph, &split);
     let engine_x = out.join("engine.x");
     fs::write(&engine_x, rules.script())?;
@@ -119,19 +131,41 @@ pub fn build(opts: &BuildOptions) -> Result<SplitReport> {
     fs::write(out.join("loader.elf"), &loader_elf)?;
     let loader = split_artifacts::app_image(&loader_elf)?;
     fs::write(out.join("loader.bin"), &loader)?;
+    let loader_version = lp_bootctl::find_loader_version(&loader);
+    if loader_version != lp_bootctl::LOADER_VERSION {
+        bail!(
+            "loader.bin carries version {loader_version}, not {}",
+            lp_bootctl::LOADER_VERSION
+        );
+    }
 
     eprintln!("==> split");
-    let p2_elf = fs::read(&p2.elf)?;
-    let (engine_base, engine) = split_artifacts::engine_bin(&p2_elf)?;
+    let mut p2_elf = fs::read(&p2.elf)?;
+    let (engine_base, mut engine) = split_artifacts::engine_bin(&p2_elf)?;
     if engine_base != ENGINE_BASE {
         bail!("the engine starts at {engine_base:#x}, not {ENGINE_BASE:#x}");
+    }
+    // The engine header: len and CRC filled, checked against the core's own
+    // copy of the build id.
+    let build_id = core_build_id(&p2_elf)?;
+    lp_bootctl::engine_header::patch(&mut engine, &build_id)
+        .map_err(|e| anyhow::anyhow!("engine header: {e:?}"))?;
+    let engine_sha256: [u8; 32] = Sha256::digest(&engine).into();
+    // The core's digest slot, patched BEFORE its image is made, so the
+    // image's checksum and appended hash cover it.
+    let slot = elf_symbol::find(&p2_elf, ENGINE_DIGEST_SYMBOL)?;
+    lp_bootctl::engine_digest::patch(slot.get_mut(&mut p2_elf), &engine_sha256)
+        .map_err(|e| anyhow::anyhow!("engine digest slot: {e:?}"))?;
+    if lp_bootctl::engine_digest::decode(slot.get(&p2_elf)) != Some(engine_sha256) {
+        bail!("the core's digest slot does not hold engine.bin's SHA-256 after patching");
     }
     let core = split_artifacts::app_image(&split_artifacts::core_elf(&p2_elf)?)?;
     fs::write(out.join("engine.bin"), &engine)?;
     fs::write(out.join("core.bin"), &core)?;
 
     let region_end = factory_end(&opts.partitions)?;
-    let build = engine_build_hash(&engine)?;
+    let build_id_text = build_id_text(&build_id);
+    let build = lp_bootctl::build_hash(build_id_text.as_bytes());
     let app = app_image::assemble(&loader, &core, &engine, region_end, build)?;
     fs::write(out.join("app.bin"), &app.bytes)?;
     let merged = merged_image::merge(
@@ -148,9 +182,12 @@ pub fn build(opts: &BuildOptions) -> Result<SplitReport> {
         sha256: hex(&Sha256::digest(bytes)),
     };
     let report = SplitReport {
+        layout: LAYOUT,
         page: PAGE,
         region_end,
         app_version: app_version.clone(),
+        build_id: build_id_text,
+        loader_version,
         loader: piece(lp_bootctl::LOADER_OFFSET, &loader),
         core: piece(app.core_off, &core),
         engine: piece(app.engine_off, &engine),
@@ -188,8 +225,9 @@ pub fn build(opts: &BuildOptions) -> Result<SplitReport> {
 /// Verify one link: its graph, its split, the verdict.
 pub fn verify(elf: &Path, map: &Path) -> Result<Verification> {
     let graph = SectionGraph::load(elf, map)?;
-    let split = Split::compute(&graph, &[]);
-    let names = demangled_symbols(&fs::read(elf)?)?;
+    let bytes = fs::read(elf)?;
+    let split = Split::compute(&graph, &core_roots(&graph, &bytes)?);
+    let names = demangled_symbols(&bytes)?;
     Ok(Verification::run(
         &graph,
         &split,
@@ -198,12 +236,32 @@ pub fn verify(elf: &Path, map: &Path) -> Result<Verification> {
     ))
 }
 
-/// The record's `build` from the engine header: `build_hash` of its build id.
-fn engine_build_hash(engine: &[u8]) -> Result<u32> {
-    if engine.get(..8) != Some(b"LPENGIN1".as_slice()) {
-        bail!("engine.bin has no LPENGIN1 header");
+/// Nodes that are core whatever reaches them: the digest slot and the
+/// build id the packager reads and patches by name.
+pub fn core_roots(graph: &SectionGraph, elf: &[u8]) -> Result<Vec<usize>> {
+    let mut roots = Vec::new();
+    for name in [ENGINE_DIGEST_SYMBOL, BUILD_ID_SYMBOL] {
+        let sym = elf_symbol::find(elf, name)?;
+        let node = graph
+            .node_at(i64::from(sym.vaddr))
+            .with_context(|| format!("`{name}` is in no input section of the map"))?;
+        roots.push(node);
     }
-    Ok(lp_bootctl::build_hash(&engine[8..56]))
+    Ok(roots)
+}
+
+/// The core's copy of the build id.
+fn core_build_id(elf: &[u8]) -> Result<[u8; lp_bootctl::engine_header::ENGINE_BUILD_ID_LEN]> {
+    let sym = elf_symbol::find(elf, BUILD_ID_SYMBOL)?;
+    sym.get(elf)
+        .try_into()
+        .with_context(|| format!("`{BUILD_ID_SYMBOL}` is {} B, not 64", sym.size))
+}
+
+/// A zero-padded build id as text.
+fn build_id_text(field: &[u8]) -> String {
+    let len = field.iter().position(|b| *b == 0).unwrap_or(field.len());
+    String::from_utf8_lossy(&field[..len]).into_owned()
 }
 
 /// Where `factory` ends in the table the image is flashed with.

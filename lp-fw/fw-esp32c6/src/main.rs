@@ -140,6 +140,8 @@ mod bench;
 #[cfg(all(not(feature = "memory_fs"), not(fw_harness),))]
 mod bootctl;
 #[cfg(all(not(feature = "memory_fs"), not(fw_harness),))]
+mod flash_layout;
+#[cfg(all(not(feature = "memory_fs"), not(fw_harness),))]
 mod flash_storage;
 #[cfg(all(not(feature = "memory_fs"), not(fw_harness),))]
 mod legacy_layout;
@@ -490,28 +492,32 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
     #[cfg(lp_split)]
     let ota_state;
     #[cfg(not(feature = "memory_fs"))]
-    let (boot_control, flash) = {
+    let (boot_control, flash, flash_layout) = {
         let mut flash_storage = esp_storage::FlashStorage::new(flash);
+        // The partition table, read once: `lpfs` for the filesystem, and
+        // `factory` for a split image's region end.
+        let flash_layout = crate::flash_layout::FlashLayout::locate(&mut flash_storage);
         // Split builds: read the boot records — and a trial core marks itself
         // attempted — right here, before any radio or driver comes up (a new
         // core that dies in that bring-up must still read as a failed trial,
-        // or the loader would keep retrying it). NOT before this line: the
-        // split path reads flash through the ROM, and any ROM flash access
-        // before `FlashStorage::new` leaves esp-storage's SPI1 RDID size
-        // probe returning garbage on silicon — every lpfs read then fails
-        // (two XIAO C6s, 2026-10-02).
+        // or the loader would keep retrying it). NOT before `FlashStorage::new`:
+        // the split path reads flash through the ROM, and any ROM flash access
+        // before it leaves esp-storage's SPI1 RDID size probe returning
+        // garbage on silicon — every lpfs read then fails (two XIAO C6s,
+        // 2026-10-02).
         #[cfg(lp_split)]
         {
-            ota_state = ota::begin();
+            ota_state = ota::begin(flash_layout.factory.map(|f| (f.offset, f.len)));
         }
         let outcome = crate::bootctl::read_and_consume(&mut flash_storage);
-        (outcome, flash_storage)
+        (outcome, flash_storage, flash_layout)
     };
     #[cfg(feature = "memory_fs")]
     let boot_control = lp_bootctl::DecodeOutcome::Blank;
+    // No flash driver, no table: the boot state is untrusted (no writes).
     #[cfg(all(lp_split, feature = "memory_fs"))]
     {
-        ota_state = ota::begin();
+        ota_state = ota::begin(None);
     }
 
     // Create filesystem before hardware providers so /hardware.json can override board policy.
@@ -519,8 +525,8 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
         #[cfg(not(feature = "memory_fs"))]
         {
             use lpc_wire::FsBootState;
-            let mut flash_storage = flash;
-            match crate::flash_storage::LpfsPartition::locate(&mut flash_storage) {
+            let flash_storage = flash;
+            match flash_layout.lpfs {
                 // Not a runtime condition: the image was flashed without
                 // `--partition-table lp-fw/fw-esp32c6/partitions.csv` and
                 // espflash substituted its default. Say so rather than guess
@@ -1188,117 +1194,209 @@ async fn main(spawner: embassy_executor::Spawner) {
     }
 }
 
-/// A split build after `core_boot`: enter the engine the boot records and
-/// the header agree on, or stay core-only.
+/// A split build after `core_boot`: mark a trial started, then enter the
+/// engine the header and the boot records agree on, or stay core-only.
 #[cfg(all(lp_split, not(fw_harness)))]
 async fn split_boot(mut core: CoreBoot) {
-    let state = core::mem::replace(&mut core.ota_state, ota::BootState::placeholder());
-    let id = build_id();
-    let id_len = id.iter().position(|b| *b == 0).unwrap_or(id.len());
-    ota::say!(
-        "[CORE] build {} @{:#x}{}",
-        core::str::from_utf8(&id[..id_len]).unwrap_or("?"),
-        state.core_off,
-        if state.on_trial() { " (trial)" } else { "" }
-    );
-    if state.rolled_back() {
-        ota::say!(
-            "[OTA] rolled back: the newer core (build {:#010x}) never confirmed",
-            state.failed_build.unwrap_or(0)
-        );
+    let mut state = core::mem::replace(&mut core.ota_state, ota::BootState::placeholder());
+    // Test images only (never in a build def): a trial core that dies, or
+    // hangs, after marking itself attempted and before it starts — what the
+    // loader's rollback and cold cap exist for.
+    #[cfg(feature = "fixture-trial-dies")]
+    if state.on_trial() {
+        panic!("fixture-trial-dies: dying on trial before started");
     }
-    ota::map_engine(state.engine_extent());
+    #[cfg(feature = "fixture-trial-hangs")]
+    if state.on_trial() {
+        log::error!("fixture-trial-hangs: hanging on trial before started");
+        loop {
+            core::hint::spin_loop();
+        }
+    }
+    // Radios and links are up: from here a power cycle never counts
+    // against a trial.
+    ota::mark_started(&mut state);
+
+    let engine = if state.on_trial() {
+        Err(ota::CoreOnlyReason::OnTrial)
+    } else {
+        find_engine(&state).map_err(|e| ota::CoreOnlyReason::NoEngine(e.describe()))
+    };
     let incomplete = lp_recovery::snapshot()
         .map(|s| s.consecutive_incomplete_boots)
         .unwrap_or(0);
-    let engine_crashing = incomplete >= ota::INCOMPLETE_BOOTS_TO_CORE_ONLY;
-    let entry = engine_entry();
-    match entry {
-        // A trial core never starts an engine: it proves itself core-only
-        // first (the engine of a new build comes after the core confirms).
-        Some(entry) if !engine_crashing && !state.on_trial() => entry(core),
-        _ => {
-            if engine_crashing && entry.is_some() {
-                ota::say!("[OTA] {incomplete} incomplete boots — not starting the engine");
-            }
+    let engine = match engine {
+        Ok(_) if incomplete >= ota::INCOMPLETE_BOOTS_TO_CORE_ONLY => {
+            Err(ota::CoreOnlyReason::EngineKeepsCrashing(incomplete))
+        }
+        other => other,
+    };
+    log_boot_state(&state, &engine);
+    match engine {
+        Ok((entry, _)) => entry(core),
+        Err(why) => {
             let CoreBoot {
                 usb_link, watchdog, ..
             } = core;
-            ota::core_only(usb_link, watchdog, state, engine_crashing).await;
+            ota::core_only(usb_link, watchdog, state, why).await;
         }
     }
 }
 
-/// The engine's header, the first bytes of the engine region (split builds).
-/// The core never names it — it reads it through a plain address — so no
-/// relocation in the core points into the engine, and the split tool's
+/// The one boot-state line: where this core is and how it came to run, the
+/// loader, the region, the page, the engine (or why not) and the digest the
+/// core carries for it.
+#[cfg(all(lp_split, not(fw_harness)))]
+fn log_boot_state(
+    state: &ota::BootState,
+    engine: &Result<(fn(CoreBoot), u32), ota::CoreOnlyReason>,
+) {
+    let digest = engine_digest();
+    let region_end = state.layout.map_or(0, |l| l.region_end);
+    let id = &BUILD_ID;
+    let id_len = id.iter().position(|b| *b == 0).unwrap_or(id.len());
+    let build = core::str::from_utf8(&id[..id_len]).unwrap_or("?");
+    let engine_words: alloc::string::String = match engine {
+        Ok((_, len)) => alloc::format!("engine {len} B"),
+        Err(ota::CoreOnlyReason::OnTrial) => "engine not started (trial)".into(),
+        Err(ota::CoreOnlyReason::NoEngine(why)) => alloc::format!("no engine: {why}"),
+        Err(ota::CoreOnlyReason::EngineKeepsCrashing(n)) => {
+            alloc::format!("engine keeps crashing ({n} incomplete boots)")
+        }
+    };
+    log::info!(
+        "[CORE] core @{:#x} +{} ({}) build {build} · loader v{} · region end {region_end:#x} · \
+         page {:#x} · {engine_words} · digest {:02x}{:02x}{:02x}{:02x}",
+        state.core_off,
+        state.core_len,
+        state.standing(),
+        state.loader_version,
+        ota::page_size(),
+        digest[0],
+        digest[1],
+        digest[2],
+        digest[3],
+    );
+    if let Some(why) = state.untrusted {
+        log::error!("[CORE] boot state not trusted ({why}) — nothing is written this boot");
+    }
+    if state.rolled_back() {
+        log::warn!(
+            "[CORE] rolled back: the newer core (build {:#010x}) failed its trial",
+            state.failed_build.unwrap_or(0)
+        );
+    }
+    if state.counted_cold_retry {
+        log::warn!("[CORE] trial cold retry counted: the last boot died before it started");
+    }
+}
+
+/// The engine's header, the first bytes of the engine region (split
+/// builds): the `#[repr(C)]` mirror of `lp_bootctl::engine_header`'s v1
+/// layout. The core never names it — it reads it through a plain address —
+/// so no relocation in the core points into the engine, and the split tool's
 /// reachability walk from the core's roots never crosses into it.
 #[cfg(all(lp_split, not(fw_harness)))]
 #[repr(C)]
 struct EngineHeader {
-    magic: [u8; 8],
-    build_id: [u8; 48],
+    magic: u32,
+    version: u16,
+    header_len: u16,
     entry: fn(CoreBoot),
+    /// Patched by the packager: `engine.bin`'s length.
+    len: u32,
+    build_id: [u8; lp_bootctl::engine_header::ENGINE_BUILD_ID_LEN],
+    /// Patched by the packager: CRC-32 of the bytes before it.
+    crc: u32,
+    commit: u32,
 }
 
 #[cfg(all(lp_split, not(fw_harness)))]
-const ENGINE_MAGIC: [u8; 8] = *b"LPENGIN1";
+const _: () = {
+    use core::mem::{offset_of, size_of};
+    use lp_bootctl::engine_header as eh;
+    assert!(offset_of!(EngineHeader, entry) == eh::ENGINE_ENTRY_OFFSET);
+    assert!(offset_of!(EngineHeader, len) == eh::ENGINE_LEN_OFFSET);
+    assert!(offset_of!(EngineHeader, build_id) == eh::ENGINE_BUILD_ID_OFFSET);
+    assert!(offset_of!(EngineHeader, crc) == eh::ENGINE_CRC_OFFSET);
+    assert!(offset_of!(EngineHeader, commit) == eh::ENGINE_COMMIT_OFFSET);
+    assert!(size_of::<EngineHeader>() == eh::ENGINE_HEADER_LEN);
+};
 
-/// Lockstep: core and engine carry the same id because they come from the
-/// same link: commit + dirty flag.
+/// This build's id, `"<version>+<commit>"`: core and engine carry the same
+/// one because they come from the same link. A named static, so the split
+/// tool can read the core's copy and check the engine header's against it.
 #[cfg(all(lp_split, not(fw_harness)))]
-const fn build_id() -> [u8; 48] {
-    const fn append(out: &mut [u8; 48], at: usize, src: &[u8]) -> usize {
-        let mut i = 0;
-        while i < src.len() && at + i < 48 {
-            out[at + i] = src[i];
-            i += 1;
-        }
-        at + i
-    }
-    let mut out = [0u8; 48];
-    append(
-        &mut out,
-        0,
-        concat!(env!("LP_BUILD_COMMIT"), "-", env!("LP_BUILD_DIRTY")).as_bytes(),
+#[unsafe(no_mangle)]
+static LP_BUILD_ID: [u8; lp_bootctl::engine_header::ENGINE_BUILD_ID_LEN] =
+    lp_bootctl::engine_header::build_id_field(
+        concat!(env!("LP_APP_VERSION"), "+", env!("LP_BUILD_COMMIT")).as_bytes(),
     );
-    out
+#[cfg(all(lp_split, not(fw_harness)))]
+use LP_BUILD_ID as BUILD_ID;
+
+/// The engine digest slot: SHA-256 of this build's `engine.bin` exactly as
+/// flashed, patched in by the packager (`lp_bootctl::engine_digest`). Named
+/// so the split tool finds it, and a core root there, so it is never placed
+/// in the engine.
+#[cfg(all(lp_split, not(fw_harness)))]
+#[unsafe(no_mangle)]
+static LP_ENGINE_DIGEST: [u8; lp_bootctl::engine_digest::ENGINE_DIGEST_LEN] =
+    lp_bootctl::engine_digest::ENGINE_DIGEST_UNPATCHED;
+
+/// The digest the core carries: read volatile, so the compiler cannot fold
+/// the zeros it linked.
+#[cfg(all(lp_split, not(fw_harness)))]
+fn engine_digest() -> [u8; 32] {
+    // SAFETY: a plain read of a static the packager patched in flash.
+    let slot = unsafe { core::ptr::read_volatile(&raw const LP_ENGINE_DIGEST) };
+    lp_bootctl::engine_digest::decode(&slot).unwrap_or([0; 32])
 }
 
 #[cfg(all(lp_split, not(fw_harness)))]
 #[unsafe(link_section = ".engine_header")]
 #[used]
 static ENGINE_HEADER: EngineHeader = EngineHeader {
-    magic: ENGINE_MAGIC,
-    build_id: build_id(),
+    magic: lp_bootctl::engine_header::ENGINE_MAGIC,
+    version: lp_bootctl::engine_header::ENGINE_HEADER_VERSION,
+    header_len: lp_bootctl::engine_header::ENGINE_HEADER_LEN as u16,
     entry: lp_engine_entry,
+    len: 0,
+    build_id: lp_bootctl::engine_header::build_id_field(
+        concat!(env!("LP_APP_VERSION"), "+", env!("LP_BUILD_COMMIT")).as_bytes(),
+    ),
+    crc: 0,
+    commit: lp_bootctl::engine_header::ENGINE_COMMITTED,
 };
 
-/// The engine's entry, if a matching engine is mapped.
+/// The engine's entry and length, if a committed engine of this build is in
+/// the room the layout leaves it. Maps the header's page, validates the
+/// header, then maps exactly its length.
 #[cfg(all(lp_split, not(fw_harness)))]
-fn engine_entry() -> Option<fn(CoreBoot)> {
-    let header = ota::ENGINE_VADDR as *const EngineHeader;
-    // SAFETY: the window is mapped (erased flash reads as 0xff); volatile so
-    // the compiler cannot assume anything about bytes it did not write.
-    let (magic, id) = unsafe {
-        (
-            core::ptr::read_volatile(core::ptr::addr_of!((*header).magic)),
-            core::ptr::read_volatile(core::ptr::addr_of!((*header).build_id)),
-        )
-    };
-    if magic != ENGINE_MAGIC {
-        ota::say!(
-            "[CORE] no engine at {:#x} — core-only mode",
-            ota::ENGINE_VADDR
-        );
-        return None;
+fn find_engine(
+    state: &ota::BootState,
+) -> Result<(fn(CoreBoot), u32), lp_bootctl::EngineHeaderError> {
+    use lp_bootctl::EngineHeaderError;
+    use lp_bootctl::engine_header::ENGINE_HEADER_LEN;
+    let room = state.engine_room();
+    if room.is_empty() || room.start % ota::page_size() != 0 {
+        return Err(EngineHeaderError::DoesNotFit);
     }
-    if id != build_id() {
-        ota::say!("[CORE] engine build id mismatch — core-only mode");
-        return None;
+    ota::map_engine(room.start, ENGINE_HEADER_LEN as u32);
+    let mut bytes = [0u8; ENGINE_HEADER_LEN];
+    for (i, b) in bytes.iter_mut().enumerate() {
+        // SAFETY: the header's page is mapped (erased flash reads as 0xff);
+        // volatile so the compiler cannot assume anything about bytes it
+        // did not write.
+        *b = unsafe { core::ptr::read_volatile((ota::ENGINE_VADDR as *const u8).add(i)) };
     }
-    // SAFETY: magic and build id match, so this header came from this link.
-    Some(unsafe { core::ptr::read_volatile(core::ptr::addr_of!((*header).entry)) })
+    let header = lp_bootctl::EngineHeader::decode(&bytes)?;
+    header.validate(&BUILD_ID, room.len())?;
+    ota::map_engine(room.start, header.len);
+    // SAFETY: a committed header of this build, from this link: its entry
+    // is `lp_engine_entry`'s address in the engine now mapped behind it.
+    let entry: fn(CoreBoot) = unsafe { core::mem::transmute(header.entry as usize) };
+    Ok((entry, header.len))
 }
 
 // Same gate as its only caller, `lp_engine_entry`: the hardware harnesses
