@@ -247,9 +247,8 @@ pub use lpa_devices::{
     DeviceId, DeviceStatus, EndpointKey as DeviceEndpointKey, Event as DeviceEvent,
     FirmwareAge as DeviceFirmwareAge, FlashLayoutView as DeviceFlashLayoutView,
     FlashStep as DeviceFlashStep, Input as DeviceInput, LayoutVerdict as DeviceLayoutVerdict,
-    LinkCounterFacts as DeviceLinkCounters,
-    LinkId as DeviceLinkId, LinkInfo as DeviceLinkInfo, Millis as DeviceMillis,
-    RosterConfig as DeviceRosterConfig, TerminalKind as DeviceTerminalKind,
+    LinkCounterFacts as DeviceLinkCounters, LinkId as DeviceLinkId, LinkInfo as DeviceLinkInfo,
+    Millis as DeviceMillis, RosterConfig as DeviceRosterConfig, TerminalKind as DeviceTerminalKind,
     TerminalLine as DeviceTerminalLine, WireVersion as DeviceWireVersion,
 };
 

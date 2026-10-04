@@ -635,6 +635,7 @@ mod tests {
             firmware_face: FirmwareFace::LightPlayer {
                 firmware: Some("fw-esp32c6 abc1234".to_string()),
                 wire: lpa_devices::WireVersion::Match,
+                age: lpa_devices::FirmwareAge::Unknown,
             },
             remembered_firmware: None,
             degraded: None,

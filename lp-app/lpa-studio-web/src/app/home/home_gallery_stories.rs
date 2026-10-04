@@ -770,6 +770,7 @@ fn devices_card_layout_change() -> Element {
         firmware_face: DeviceFirmwareFace::LightPlayer {
             firmware: Some("fw-esp32c6 abc1234".to_string()),
             wire: DeviceWireVersion::Match,
+            age: lpa_studio_core::DeviceFirmwareAge::Unknown,
         },
         ..roster_fixture().roster.devices.remove(0)
     };
@@ -894,6 +895,7 @@ fn devices_card_update_steps() -> Element {
         firmware_face: lpa_studio_core::DeviceFirmwareFace::LightPlayer {
             firmware: Some("fw-esp32c6 abc1234".to_string()),
             wire: lpa_studio_core::DeviceWireVersion::Match,
+            age: lpa_studio_core::DeviceFirmwareAge::Unknown,
         },
         terminal: vec![
             story_line(DeviceTerminalKind::Studio, "Flashing firmware"),
