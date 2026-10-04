@@ -8,12 +8,15 @@
 //! directly).
 
 use dioxus::prelude::*;
-use lpa_studio_core::{AccessCommand, UiDeviceSettingsView};
+use lpa_studio_core::{AccessCommand, NetworkCommand, UiDeviceSettingsView};
 
 /// See the module doc.
 #[derive(Clone, Copy)]
 pub(crate) struct AccessUi {
     pub on_access: Callback<AccessCommand>,
+    /// The Wi‑Fi panel's refresh (the card's Wi‑Fi row rides the same
+    /// context: it sits beside Access in the Connections group).
+    pub on_network: Callback<NetworkCommand>,
     pub device_settings: Signal<UiDeviceSettingsView>,
 }
 
@@ -26,6 +29,14 @@ pub(crate) fn use_access_ui() -> Option<AccessUi> {
 pub(crate) fn access_handler() -> EventHandler<AccessCommand> {
     match use_access_ui() {
         Some(ui) => EventHandler::new(move |command| ui.on_access.call(command)),
+        None => EventHandler::new(|_| {}),
+    }
+}
+
+/// The Wi‑Fi panel's command callback, or an inert one (stories).
+pub(crate) fn network_handler() -> EventHandler<NetworkCommand> {
+    match use_access_ui() {
+        Some(ui) => EventHandler::new(move |command| ui.on_network.call(command)),
         None => EventHandler::new(|_| {}),
     }
 }

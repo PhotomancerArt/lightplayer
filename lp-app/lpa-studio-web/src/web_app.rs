@@ -1234,9 +1234,16 @@ pub fn App() -> Element {
             access_bridge.tx.send(StudioCommand::Access(command));
         })
     });
+    let network_bridge = bridge.clone();
+    let on_network_command = use_hook(move || {
+        Callback::new(move |command| {
+            network_bridge.tx.send(StudioCommand::Network(command));
+        })
+    });
     let mut device_settings = use_signal(lpa_studio_core::UiDeviceSettingsView::default);
     use_context_provider(|| crate::app::home::access_ui_context::AccessUi {
         on_access: on_access_command,
+        on_network: on_network_command,
         device_settings,
     });
     // The account's device key and passwords, from the cloud into core

@@ -185,6 +185,10 @@ pub(crate) fn DeviceRosterCard(
     /// Joined at the app view; `None` for a board with neither.
     #[props(default)]
     access: Option<lpa_studio_core::UiDeviceAccess>,
+    /// The board's Wi‑Fi facts (the Connections group's Wi‑Fi row). Joined
+    /// at the app view; `None` for a board the link shows no row for.
+    #[props(default)]
+    wifi: Option<lpa_studio_core::UiDeviceWifi>,
     /// Stories only: mount "Who has access" open.
     #[props(default)]
     access_panel_open: bool,
@@ -360,6 +364,7 @@ pub(crate) fn DeviceRosterCard(
         None => device_line_text(&card, busy_zone),
     };
     let on_access = super::access_ui_context::access_handler();
+    let on_network = super::access_ui_context::network_handler();
     let unlock = access.as_ref().and_then(|access| access.unlock);
     // The fault takes the project line only when no project work is
     // running: the push's own narration outranks it (the terminal keeps the
@@ -705,6 +710,9 @@ pub(crate) fn DeviceRosterCard(
                         device,
                         access,
                         on_access,
+                        wifi: wifi.clone(),
+                        on_action,
+                        on_network,
                         who_open: access_panel_open,
                         keys_open_preview,
                     }

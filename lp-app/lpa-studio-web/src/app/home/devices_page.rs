@@ -127,6 +127,8 @@ pub fn DevicesPage(
                                 runtime: devices.runtime_bands.get(&card.id).cloned(),
                                 // Its login line and access panel (BLE M6).
                                 access: devices.access.get(&card.id).cloned(),
+                                // Its Wi‑Fi row (Wi‑Fi roadmap M5).
+                                wifi: devices.wifi.get(&card.id).cloned(),
                                 // Its files across a layout change (the
                                 // C6 repartition): question, refusal, a
                                 // held board, a backup to put back.

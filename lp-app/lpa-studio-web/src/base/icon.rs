@@ -7,7 +7,7 @@ use dioxus_icons::lucide::{
     LocateFixed, Lock, LockOpen, Maximize2, Minimize2, MonitorPlay, MousePointerClick, Pencil, Pin,
     Play, Plus, Power, Radio, RadioTower, RefreshCw, Route, Save, Settings, Smartphone, Sparkles,
     SquareArrowRight, SquareTerminal, Trash2, TriangleAlert, Undo2, Upload, Usb, Users, Waypoints,
-    X, Zap,
+    Wifi, X, Zap,
 };
 
 #[component]
@@ -17,6 +17,7 @@ pub fn StudioIcon(name: StudioIconName, size: u32) -> Element {
         StudioIconName::Play => rsx! { Play { size } },
         StudioIconName::Usb => rsx! { Usb { size } },
         StudioIconName::Bluetooth => rsx! { Bluetooth { size } },
+        StudioIconName::Wifi => rsx! { Wifi { size } },
         StudioIconName::Simulator => rsx! { MonitorPlay { size } },
         StudioIconName::Test => rsx! { FlaskConical { size } },
         StudioIconName::StatusRunning => rsx! { Play { size } },
@@ -110,6 +111,7 @@ pub fn action_icon_name(icon: Option<&str>) -> Option<StudioIconName> {
         Some("play") => Some(StudioIconName::Play),
         Some("usb") => Some(StudioIconName::Usb),
         Some("bluetooth") => Some(StudioIconName::Bluetooth),
+        Some("wifi") => Some(StudioIconName::Wifi),
         Some("test-tube") => Some(StudioIconName::Test),
         Some("save") => Some(StudioIconName::Save),
         Some("revert") => Some(StudioIconName::Revert),
@@ -132,6 +134,8 @@ pub enum StudioIconName {
     Play,
     Usb,
     Bluetooth,
+    /// Wi‑Fi: the device card's Wi‑Fi row and its verbs.
+    Wifi,
     /// The sim runtime's card glyph — where a device card shows its
     /// transport, a sim card shows this instead (D36).
     Simulator,

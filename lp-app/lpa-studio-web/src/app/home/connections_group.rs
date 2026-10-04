@@ -6,22 +6,30 @@
 //! | USB | "connected" / "not connected" |
 //! | Bluetooth | the icon, "Bluetooth", a switch — nothing else |
 //! | Access · open › | opens the access panel (author links only) |
+//! | Wi‑Fi · <network> › | opens the Wi‑Fi panel ([`super::wifi_panel`]): the board's network, set over this link |
 //!
 //! Bluetooth is on by default, so most people never touch the switch. The
 //! board reads it once, at boot: flipped over USB, Studio restarts the
 //! device to apply it and the row says so until the device is back. Over
 //! Bluetooth the switch is locked — you cannot turn off the radio you are
-//! talking over — and the row says how instead. (Wi‑Fi joins as a row
-//! later.)
+//! talking over — and the row says how instead.
+//!
+//! The Wi‑Fi row shows on every LightPlayer board a link reaches (core's
+//! [`UiDeviceWifi`]); its verbs are offers at `devices/<board>/wifi/…`,
+//! published only while the link holds author — below that the panel says
+//! what it needs. Opening the panel asks the board again.
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    AccessCommand, DeviceAccessChange, DeviceId, OpenTo, UiDeviceAccess, open_summary,
+    AccessCommand, DeviceAccessChange, DeviceId, NetworkCommand, OpenTo, UiAction, UiDeviceAccess,
+    UiDeviceWifi, UiOffer, open_summary,
 };
 
 use super::access_fields::Switch;
 use super::device_access_panel::DeviceAccessPanel;
+use super::wifi_panel::WifiPanel;
 use crate::base::{DetailPopover, PopoverPlacement, StudioIcon, StudioIconName};
+use crate::core::offer::use_offers;
 
 /// See the module doc.
 #[component]
@@ -36,8 +44,47 @@ pub(crate) fn ConnectionsGroup(
     /// Stories only: mount the access panel's keys list open too.
     #[props(default)]
     keys_open_preview: bool,
+    /// The board's Wi‑Fi facts; `None` shows no Wi‑Fi row.
+    #[props(default)]
+    wifi: Option<UiDeviceWifi>,
+    /// Where the Wi‑Fi panel's presses go.
+    on_action: EventHandler<UiAction>,
+    /// The Wi‑Fi panel's refresh on open.
+    on_network: EventHandler<NetworkCommand>,
+    /// Stories only: mount the Wi‑Fi panel open.
+    #[props(default)]
+    wifi_open: bool,
+    /// Stories only: the Wi‑Fi verbs (the app reads them from the offer
+    /// tree, which a story has none of).
+    #[props(default)]
+    wifi_offers_preview: Option<Vec<UiOffer>>,
+    /// Stories only: what the Wi‑Fi form starts holding.
+    #[props(default)]
+    wifi_args_preview: Option<lpa_studio_core::OfferArgs>,
+    /// Stories only: the Wi‑Fi panel's Forget starts armed.
+    #[props(default)]
+    wifi_forget_armed_preview: bool,
 ) -> Element {
     let panel = access.panel.clone();
+    // The Wi‑Fi verbs: `devices/<board>/wifi/…` in the view's tree.
+    let tree = use_offers();
+    let wifi_offers = wifi_offers_preview.unwrap_or_else(|| {
+        let tree = tree.read();
+        tree.device_prefix(device)
+            .map(|prefix| {
+                tree.verbs_of(&prefix.clone().child("wifi"))
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default()
+    });
+    // Opening the Wi‑Fi panel asks the board again (plan Q7).
+    let wifi_open_signal = use_signal(|| wifi_open);
+    use_effect(move || {
+        if wifi_open_signal() {
+            on_network.call(NetworkCommand::Refresh { device });
+        }
+    });
     let over_bluetooth = access.over_bluetooth;
     let bluetooth = bluetooth_row(&access);
     rsx! {
@@ -102,6 +149,37 @@ pub(crate) fn ConnectionsGroup(
                         }
                     },
                     DeviceAccessPanel { panel, on_access, keys_open_preview }
+                }
+                }
+            }
+            if let Some(wifi) = wifi {
+                div { class: "tw:grid tw:[&>span]:w-full tw:[&>span]:place-items-stretch",
+                DetailPopover {
+                    icon: StudioIconName::Wifi,
+                    label: "Wi‑Fi".to_string(),
+                    title: "Wi‑Fi".to_string(),
+                    placement: PopoverPlacement::TopEnd,
+                    open_signal: Some(wifi_open_signal),
+                    layer_keeps_layout: true,
+                    trigger_class: WHO_ROW_CLASS.to_string(),
+                    trigger_open_class: format!("{WHO_ROW_CLASS} tw:bg-white/5"),
+                    trigger: rsx! {
+                        span { class: "tw:inline-flex tw:flex-none tw:text-status-neutral-foreground",
+                            StudioIcon { name: StudioIconName::Wifi, size: 15 }
+                        }
+                        span { class: "tw:min-w-0 tw:flex-1 tw:text-left", "Wi‑Fi" }
+                        span { class: VALUE_CLASS,
+                            span { class: "tw:max-w-36 tw:truncate", "{wifi.row_value()}" }
+                            StudioIcon { name: StudioIconName::Collapsed, size: 14 }
+                        }
+                    },
+                    WifiPanel {
+                        wifi,
+                        offers: wifi_offers,
+                        on_action,
+                        args_preview: wifi_args_preview,
+                        forget_armed_preview: wifi_forget_armed_preview,
+                    }
                 }
                 }
             }
