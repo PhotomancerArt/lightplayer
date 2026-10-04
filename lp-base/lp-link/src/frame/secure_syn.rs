@@ -71,8 +71,10 @@ pub struct SecureSyn {
 }
 
 impl SecureSyn {
-    /// Parse a SYN body. A plain SYN (no `SECURE`) must be exactly 12 bytes,
-    /// as a plain link requires; a secure one must carry exactly the
+    /// Parse a SYN body. A plain SYN (no `SECURE`) parses here only when it
+    /// is exactly 12 bytes; a longer one is `None`, and a *plain* link then
+    /// reads it through its own prefix rule (`SynBody::parse`, which ignores
+    /// an extension it does not know). A secure one must carry exactly the
     /// extension its content names, with the reserved bits clear.
     pub fn parse(body: &[u8]) -> Option<SecureSyn> {
         let (base, flags) = SynBody::parse_prefix(body)?;
