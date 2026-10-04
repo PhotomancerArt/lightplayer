@@ -6,6 +6,7 @@ use lpa_studio_core::{
     UiSlotComposite, UiSlotFieldState, UiSlotMapKeyKind, UiSlotSourceState,
 };
 
+use crate::app::agent::{agent_slot_class, use_agent_slot_lit};
 use crate::app::node::slot_edit_actions::{slot_clear_action, slot_revert_action};
 use crate::app::node::slot_option_presence::{
     OptionPresenceWidth, option_presence_child_slot, option_presence_chip,
@@ -82,6 +83,12 @@ pub fn ConfigSlotRow(
         _ if slot.state.debug => format!("{} lp-debug-row-floor", slot_row_class(primary, index)),
         _ => slot_row_class(primary, index).to_string(),
     };
+    // The agent light (M8): the row whose slot the assistant's edit wrote.
+    // A row whose parts are drawn as their own rows lights only for its own
+    // slot (the changed part lights below it); folded, or with no part
+    // rows, an edit anywhere under it lights it.
+    let agent_lit = use_agent_slot_lit(slot.address.clone(), !(has_children && expanded()));
+    let row_class = format!("{row_class} {}", agent_slot_class(agent_lit, false));
     let indent = depth * 14;
     // Value edits on a present option row target the interior `some` slot;
     // the option's own address is the some/none toggle's remove target.

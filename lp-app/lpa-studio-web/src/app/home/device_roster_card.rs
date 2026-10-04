@@ -138,6 +138,7 @@ use super::device_pick_popover::{
 };
 use super::device_terminal::DeviceTerminal;
 use super::play_feed_text::frame_age_label;
+use crate::app::agent::AgentMark;
 use crate::app::node::lamp_view::LampView;
 use crate::base::{
     DetailPopover, DetailSection, PopoverCloseHandle, PopoverPlacement, StudioIcon, StudioIconName,
@@ -396,13 +397,15 @@ pub(crate) fn DeviceRosterCard(
                             // it offers. With nothing to choose from it would
                             // open an empty gallery, so it is not drawn.
                             if let Some(push) = replace_push.clone() {
-                                ProjectPickPopover {
-                                    offer: push,
-                                    card: card.clone(),
-                                    projects: projects.clone(),
-                                    examples: examples.clone(),
-                                    mode: ProjectPickMode::Verb,
-                                    on_action,
+                                AgentMark { path: push.path.clone(),
+                                    ProjectPickPopover {
+                                        offer: push,
+                                        card: card.clone(),
+                                        projects: projects.clone(),
+                                        examples: examples.clone(),
+                                        mode: ProjectPickMode::Verb,
+                                        on_action,
+                                    }
                                 }
                             }
                         }
@@ -419,23 +422,26 @@ pub(crate) fn DeviceRosterCard(
                     if busy_zone == Some(ZoneKind::Project) {
                         // The push's own way out, on the push's own zone.
                         if let Some(cancel) = cancel.clone() {
-                            ActionButton {
-                                key: "{\"cancel-project\"}",
-                                action: cancel.action,
-                                running: false,
-                                variant: ActionButtonVariant::Quiet,
-                                on_action,
+                            AgentMark { key: "{\"cancel-project\"}", path: cancel.path.clone(),
+                                ActionButton {
+                                    action: cancel.action,
+                                    running: false,
+                                    variant: ActionButtonVariant::Quiet,
+                                    on_action,
+                                }
                             }
                         }
                     } else if card.activity.is_some() {
                         // D9: withdrawn at its height while other work runs.
                     } else if let Some(push) = push.clone().filter(|_| card.loaded_project == DeviceLoadedProject::Empty) {
-                        ProjectPickPopover {
-                            offer: push,
-                            card: card.clone(),
-                            projects: projects.clone(),
-                            examples: examples.clone(),
-                            on_action,
+                        AgentMark { path: push.path.clone(),
+                            ProjectPickPopover {
+                                offer: push,
+                                card: card.clone(),
+                                projects: projects.clone(),
+                                examples: examples.clone(),
+                                on_action,
+                            }
                         }
                     } else {
                         if let Some(href) = open_href.clone() {
@@ -451,12 +457,13 @@ pub(crate) fn DeviceRosterCard(
                         // healthy card would invite a gesture with nothing
                         // to do.
                         if let Some(clear) = verb("clear-faults") {
-                            ActionButton {
-                                key: "{\"clear-faults\"}",
-                                action: clear.action,
-                                running: false,
-                                variant: ActionButtonVariant::Quiet,
-                                on_action,
+                            AgentMark { key: "{\"clear-faults\"}", path: clear.path.clone(),
+                                ActionButton {
+                                    action: clear.action,
+                                    running: false,
+                                    variant: ActionButtonVariant::Quiet,
+                                    on_action,
+                                }
                             }
                         }
                         span { class: "tw:min-w-0 tw:flex-1" }
@@ -465,13 +472,14 @@ pub(crate) fn DeviceRosterCard(
                         // that never reported one would be a verb aimed at
                         // a guess.
                         if let Some(remove) = verb("remove-project") {
-                            ActionButton {
-                                key: "{\"remove-project\"}",
-                                action: remove.action,
-                                running: false,
-                                variant: ActionButtonVariant::Quiet,
-                                armed_preview: armed_remove_preview,
-                                on_action,
+                            AgentMark { key: "{\"remove-project\"}", path: remove.path.clone(),
+                                ActionButton {
+                                    action: remove.action,
+                                    running: false,
+                                    variant: ActionButtonVariant::Quiet,
+                                    armed_preview: armed_remove_preview,
+                                    on_action,
+                                }
                             }
                         }
                     }
@@ -490,12 +498,13 @@ pub(crate) fn DeviceRosterCard(
                 div { class: verb_row_class(),
                     if busy_zone == Some(ZoneKind::Firmware) {
                         if let Some(cancel) = cancel.clone() {
-                            ActionButton {
-                                key: "{\"cancel-firmware\"}",
-                                action: cancel.action,
-                                running: false,
-                                variant: ActionButtonVariant::Quiet,
-                                on_action,
+                            AgentMark { key: "{\"cancel-firmware\"}", path: cancel.path.clone(),
+                                ActionButton {
+                                    action: cancel.action,
+                                    running: false,
+                                    variant: ActionButtonVariant::Quiet,
+                                    on_action,
+                                }
                             }
                         }
                     } else if card.activity.is_some() {
@@ -507,15 +516,18 @@ pub(crate) fn DeviceRosterCard(
                         // disabled with the reason.
                         if let Some(flash) = flash.clone() {
                             if firmware_blocked {
-                                ActionButton {
-                                    key: "{\"firmware-blocked\"}",
-                                    action: flash.action,
-                                    running: false,
-                                    variant: ActionButtonVariant::Quiet,
-                                    on_action,
+                                AgentMark { key: "{\"firmware-blocked\"}", path: flash.path.clone(),
+                                    ActionButton {
+                                        action: flash.action,
+                                        running: false,
+                                        variant: ActionButtonVariant::Quiet,
+                                        on_action,
+                                    }
                                 }
                             } else {
-                                BoardPickPopover { offer: flash, chip: chip.clone(), on_action }
+                                AgentMark { path: flash.path.clone(),
+                                    BoardPickPopover { offer: flash, chip: chip.clone(), on_action }
+                                }
                             }
                         }
                         // Update (#500) on a board that is already running
@@ -536,19 +548,22 @@ pub(crate) fn DeviceRosterCard(
                         // with its reason under it overflows a narrow dock.
                         if let Some(update) = update.clone() {
                             if update_one_click {
-                                ActionButton {
-                                    key: "{\"update-firmware\"}",
-                                    action: update.action,
-                                    running: false,
-                                    variant: ActionButtonVariant::Quiet,
-                                    on_action,
+                                AgentMark { key: "{\"update-firmware\"}", path: update.path.clone(),
+                                    ActionButton {
+                                        action: update.action,
+                                        running: false,
+                                        variant: ActionButtonVariant::Quiet,
+                                        on_action,
+                                    }
                                 }
                             } else {
-                                BoardPickPopover {
-                                    offer: update,
-                                    chip: chip.clone(),
-                                    mode: BoardPickMode::Verb,
-                                    on_action,
+                                AgentMark { path: update.path.clone(),
+                                    BoardPickPopover {
+                                        offer: update,
+                                        chip: chip.clone(),
+                                        mode: BoardPickMode::Verb,
+                                        on_action,
+                                    }
                                 }
                             }
                         }
@@ -559,13 +574,14 @@ pub(crate) fn DeviceRosterCard(
                         // (erasing a blank flash does nothing). Blocked, its
                         // reason is the firmware verb's, said once beside it.
                         if let Some(erase) = verb("erase") {
-                            ActionButton {
-                                key: "{\"factory-reset\"}",
-                                action: erase.action,
-                                running: false,
-                                variant: ActionButtonVariant::Quiet,
-                                reason_said_elsewhere: firmware_blocked,
-                                on_action,
+                            AgentMark { key: "{\"factory-reset\"}", path: erase.path.clone(),
+                                ActionButton {
+                                    action: erase.action,
+                                    running: false,
+                                    variant: ActionButtonVariant::Quiet,
+                                    reason_said_elsewhere: firmware_blocked,
+                                    on_action,
+                                }
                             }
                         }
                     }
@@ -637,12 +653,13 @@ pub(crate) fn DeviceRosterCard(
                 div { class: verb_row_class(),
                     if busy_zone == Some(ZoneKind::Device) {
                         if let Some(cancel) = cancel.clone() {
-                            ActionButton {
-                                key: "{\"cancel-device\"}",
-                                action: cancel.action,
-                                running: false,
-                                variant: ActionButtonVariant::Quiet,
-                                on_action,
+                            AgentMark { key: "{\"cancel-device\"}", path: cancel.path.clone(),
+                                ActionButton {
+                                    action: cancel.action,
+                                    running: false,
+                                    variant: ActionButtonVariant::Quiet,
+                                    on_action,
+                                }
                             }
                         }
                     }
@@ -653,34 +670,37 @@ pub(crate) fn DeviceRosterCard(
                     // open); the card withdraws it while an activity runs
                     // (D9), as it does every verb that is not an escape.
                     if let Some(reset) = verb("reset-board").filter(|_| idle) {
-                        ActionButton {
-                            key: "{\"reset-board\"}",
-                            action: reset.action,
-                            running: false,
-                            variant: ActionButtonVariant::Quiet,
-                            on_action,
+                        AgentMark { key: "{\"reset-board\"}", path: reset.path.clone(),
+                            ActionButton {
+                                action: reset.action,
+                                running: false,
+                                variant: ActionButtonVariant::Quiet,
+                                on_action,
+                            }
                         }
                     }
                     // Retry, Disconnect, Reconnect — the escapes that act on
                     // the wire.
                     for escape in wire_escapes {
-                        ActionButton {
-                            key: "{escape.path}",
-                            action: escape.action,
-                            running: false,
-                            variant: ActionButtonVariant::Quiet,
-                            on_action,
+                        AgentMark { key: "{escape.path}", path: escape.path.clone(),
+                            ActionButton {
+                                action: escape.action,
+                                running: false,
+                                variant: ActionButtonVariant::Quiet,
+                                on_action,
+                            }
                         }
                     }
                     span { class: "tw:min-w-0 tw:flex-1" }
                     if let Some(forget) = verb("forget") {
-                        ActionButton {
-                            key: "{\"forget\"}",
-                            action: forget.action,
-                            running: false,
-                            variant: ActionButtonVariant::Quiet,
-                            armed_preview,
-                            on_action,
+                        AgentMark { key: "{\"forget\"}", path: forget.path.clone(),
+                            ActionButton {
+                                action: forget.action,
+                                running: false,
+                                variant: ActionButtonVariant::Quiet,
+                                armed_preview,
+                                on_action,
+                            }
                         }
                     }
                 }

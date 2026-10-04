@@ -58,10 +58,46 @@ pub fn reveal_selected_pane() {
     }
 }
 
+/// The Show half (agentic-UI M8): bring the element carrying an offer
+/// path into view — the `AgentMark` wrapper's first element, since the
+/// wrapper itself draws no box. Scrolls only, with the same mostly-hidden
+/// restraint; it never moves keyboard focus, so a user typing elsewhere
+/// keeps their caret. Smooth unless the user asked for reduced motion.
+pub fn reveal_offer_path(path: &str) {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let Some(document) = window.document() else {
+        return;
+    };
+    let selector = format!("[data-offer-path=\"{path}\"]");
+    let Ok(Some(mark)) = document.query_selector(&selector) else {
+        return;
+    };
+    let Some(target) = mark.first_element_child() else {
+        return;
+    };
+    let reduced = window
+        .match_media("(prefers-reduced-motion: reduce)")
+        .ok()
+        .flatten()
+        .is_some_and(|query| query.matches());
+    let behavior = if reduced {
+        web_sys::ScrollBehavior::Auto
+    } else {
+        web_sys::ScrollBehavior::Smooth
+    };
+    reveal_with(&target, behavior);
+}
+
 /// Scroll `target` into view unless it is already mostly visible in its
 /// nearest scrollable ancestor. No ancestor scrolls (everything fits) —
 /// nothing to do.
 fn reveal_if_mostly_hidden(target: &web_sys::Element) {
+    reveal_with(target, web_sys::ScrollBehavior::Smooth);
+}
+
+fn reveal_with(target: &web_sys::Element, behavior: web_sys::ScrollBehavior) {
     let Some(scroller) = scroll_parent(target) else {
         return;
     };
@@ -71,7 +107,7 @@ fn reveal_if_mostly_hidden(target: &web_sys::Element) {
         return;
     }
     let options = web_sys::ScrollIntoViewOptions::new();
-    options.set_behavior(web_sys::ScrollBehavior::Smooth);
+    options.set_behavior(behavior);
     options.set_block(web_sys::ScrollLogicalPosition::Nearest);
     target.scroll_into_view_with_scroll_into_view_options(&options);
 }

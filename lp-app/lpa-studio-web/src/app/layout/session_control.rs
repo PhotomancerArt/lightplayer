@@ -68,6 +68,7 @@ use lpa_studio_core::{
 use lpc_cloud_api::Access;
 
 use crate::app::affordance::affordance_trigger_style;
+use crate::app::agent::AgentMark;
 use crate::app::home::device_roster_card::DeviceRenameSection;
 use crate::app::home::package_export::ExportTarget;
 use crate::app::project::pending_edit_section::{
@@ -379,13 +380,15 @@ pub fn SessionProjectControl(control: ChromeSessionControl) -> Element {
             // changes popup — a destructive verb belongs where the thing it
             // destroys is listed.
             if let Some(save) = save.clone() {
-                button {
-                    class: SAVE_BUTTON_CLASS,
-                    r#type: "button",
-                    title: "{save.meta().summary}",
-                    onclick: move |_| on_action.call(save.clone()),
-                    span { class: "tw:text-[11px] tw:font-semibold tw:text-status-warning-foreground",
-                        "Save"
+                AgentMark { path: OfferPath::project().child("save"),
+                    button {
+                        class: SAVE_BUTTON_CLASS,
+                        r#type: "button",
+                        title: "{save.meta().summary}",
+                        onclick: move |_| on_action.call(save.clone()),
+                        span { class: "tw:text-[11px] tw:font-semibold tw:text-status-warning-foreground",
+                            "Save"
+                        }
                     }
                 }
             }
@@ -717,13 +720,15 @@ pub fn SessionChangesPanel(changes: ProjectChanges, on_action: EventHandler<UiAc
                 }
                 div { class: "tw:flex tw:items-center tw:gap-2 tw:pt-1.5",
                     if let Some(save) = save.clone() {
-                        button {
-                            class: SAVE_BUTTON_CLASS,
-                            r#type: "button",
-                            title: "{save.meta().summary}",
-                            onclick: move |_| on_action.call(save.clone()),
-                            span { class: "tw:text-[11px] tw:font-semibold tw:text-status-warning-foreground",
-                                "Save"
+                        AgentMark { path: OfferPath::project().child("save"),
+                            button {
+                                class: SAVE_BUTTON_CLASS,
+                                r#type: "button",
+                                title: "{save.meta().summary}",
+                                onclick: move |_| on_action.call(save.clone()),
+                                span { class: "tw:text-[11px] tw:font-semibold tw:text-status-warning-foreground",
+                                    "Save"
+                                }
                             }
                         }
                     }
@@ -732,11 +737,13 @@ pub fn SessionChangesPanel(changes: ProjectChanges, on_action: EventHandler<UiAc
                     // its first click exactly as every other Lasting verb.
                     if let Some(revert) = revert.clone() {
                         div { class: "tw:ml-auto",
-                            ActionButton {
-                                action: revert,
-                                running: false,
-                                variant: ActionButtonVariant::Quiet,
-                                on_action,
+                            AgentMark { path: OfferPath::project().child("revert"),
+                                ActionButton {
+                                    action: revert,
+                                    running: false,
+                                    variant: ActionButtonVariant::Quiet,
+                                    on_action,
+                                }
                             }
                         }
                     }

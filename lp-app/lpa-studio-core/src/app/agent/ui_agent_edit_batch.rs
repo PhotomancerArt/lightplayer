@@ -34,6 +34,13 @@ pub struct UiAgentEditLine {
     /// A `set`'s value, as compact JSON text.
     pub value: Option<String>,
     pub outcome: UiAgentEditOutcome,
+    /// The node the edit landed on, as its tree path
+    /// (`/demo.module/fixture.fixture`), when the app said; `None` for an
+    /// edit about no node (the board) or one that did not land.
+    pub node: Option<String>,
+    /// Where that node's card is, and its Show — decorated by the studio's
+    /// view from the agent's activity (`None` until then).
+    pub place: Option<crate::UiAgentPlace>,
 }
 
 /// How one edit went.
@@ -207,6 +214,8 @@ impl UiAgentEditLine {
                 value => Some(value.to_string()),
             },
             outcome,
+            node: text("node"),
+            place: None,
         }
     }
 

@@ -257,6 +257,23 @@ pub struct UiAgentToolRow {
     /// A finished app-agent `act` or `read` call, in words ("pressed
     /// project/save", "read node fixture"); `None` for every other tool.
     pub headline: Option<String>,
+    /// What a finished `act` pressed or handed over on a card; `None` for
+    /// a refused one and for every other tool.
+    pub act: Option<UiAgentActPress>,
+    /// Where that press lives on the page, and its Show — decorated by the
+    /// studio's view from the agent's activity (`None` until then).
+    pub place: Option<crate::UiAgentPlace>,
+}
+
+/// What one `act` did: the offer it pressed, or the card it put that offer
+/// on for the user.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UiAgentActPress {
+    /// The offer's path (`project/save`).
+    pub path: crate::OfferPath,
+    /// The card's id when the agent handed the press to the user (`c1`);
+    /// `None` when it pressed the offer itself.
+    pub card: Option<String>,
 }
 
 impl UiAgentToolRow {
@@ -277,6 +294,8 @@ impl UiAgentToolRow {
             detail: String::new(),
             edits: None,
             headline: None,
+            act: None,
+            place: None,
         }
     }
 
@@ -361,6 +380,15 @@ impl UiAgentToolRow {
         }
         if let Some(error) = &self.error {
             return Some(format!("Tool failed: {error}"));
+        }
+        // A press the view placed says where it was, in the page's words:
+        // "pressed Save in the project header".
+        if let (Some(act), Some(place)) = (&self.act, &self.place) {
+            let at = format!("{} {}", place.label, place.place);
+            return Some(match &act.card {
+                None => format!("pressed {}", at.trim_end()),
+                Some(card) => format!("asked you to click card {card}: {}", at.trim_end()),
+            });
         }
         Some(
             self.headline
@@ -489,6 +517,23 @@ mod tests {
         act.headline = Some("pressed project/save".into());
         assert_eq!(act.summary_line(), "pressed project/save");
         assert!(!act.has_problem());
+
+        // Placed by the view, the press says where it lives.
+        act.act = Some(UiAgentActPress {
+            path: crate::OfferPath::project().child("save"),
+            card: None,
+        });
+        act.place = Some(crate::UiAgentPlace {
+            label: "Save".into(),
+            place: "in the project header".into(),
+            show: None,
+        });
+        assert_eq!(act.summary_line(), "pressed Save in the project header");
+        act.act.as_mut().unwrap().card = Some("c2".into());
+        assert_eq!(
+            act.summary_line(),
+            "asked you to click card c2: Save in the project header"
+        );
     }
 
     #[test]

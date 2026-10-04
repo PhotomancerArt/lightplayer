@@ -25,6 +25,8 @@ pub(crate) mod app_agent_user_side;
 #[cfg(test)]
 mod app_agent_act_tests;
 #[cfg(test)]
+mod app_agent_activity_tests;
+#[cfg(test)]
 mod app_agent_corpus_tests;
 #[cfg(test)]
 mod app_agent_eval_tests;
