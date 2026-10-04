@@ -597,6 +597,16 @@ impl ProjectSync {
         self.issue = Some(UiIssue::new(issue));
     }
 
+    /// Withdraw a failure that was not the project's: the pull in flight when
+    /// the link went away (see `studio::lens_hold`). The mirror is untouched
+    /// and still valid; the next pull after the board is back re-reads.
+    pub fn withdraw_failure(&mut self) {
+        if self.phase == ProjectSyncPhase::Failed {
+            self.phase = ProjectSyncPhase::Ready;
+            self.issue = None;
+        }
+    }
+
     /// Drop the accumulated mirror so the next request re-reads from
     /// `since = 0`.
     ///

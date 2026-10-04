@@ -4380,6 +4380,14 @@ walk-no-board *args:
 walk-ble-emu *args:
     node scripts/emu/walk-ble-emu.mjs {{ args }}
 
+# The dropped-link walk: an emulated C6 over `?emu=` USB, the cable pulled
+# and re-seated under the editor and under Play — the page must stay put
+# behind "Reconnecting…" and resume the same session (defect
+# 2026-10-02-a-dropped-link-sends-the-editor-to-devices). Needs a Studio on
+# this worktree's port; never a CI job.
+walk-drop-emu *args:
+    node scripts/emu/walk-drop-emu.mjs {{ args }}
+
 # The hardware-validation system: payloads, configurations, transcripts,
 # replay. `just validate list` with no other args; `replay <transcript>
 # --against <transcript|configuration>`; `run <set> --config <name> --port …
