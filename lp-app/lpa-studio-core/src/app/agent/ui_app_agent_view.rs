@@ -45,6 +45,14 @@ impl UiAppAgentView {
         )
     }
 
+    /// Whether a card is waiting for the user's click (the header's chat
+    /// button says so while the drawer is closed).
+    pub fn has_pending_card(&self) -> bool {
+        self.turns
+            .iter()
+            .any(|turn| matches!(turn, UiAgentTurn::Card(card) if card.is_pending()))
+    }
+
     /// The Send action for one composed message.
     pub fn send_action(&self, text: &str) -> UiAction {
         UiAction::from_op(

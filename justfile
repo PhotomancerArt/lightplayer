@@ -1027,6 +1027,15 @@ clippy-fw-esp32s3:
     # close, for the same reason.
     echo "clippy: --features frame-dump"
     cargo clippy --release --features frame-dump -- --no-deps -D warnings
+    # The link thread's two other shapes (`src/io_thread.rs`): the desk-only
+    # stack diagnostic, and the app WITHOUT the thread (the link task back on
+    # the main executor, no messages-first). Both are cfg'd out of the
+    # defaults, so nothing else here compiles them.
+    echo "clippy: --features io_thread_stack_diag"
+    cargo clippy --release --features io_thread_stack_diag -- --no-deps -D warnings
+    echo "clippy: io-thread OFF"
+    cargo clippy --release --no-default-features \
+        --features esp32s3,server,float-f32,json-pack -- --no-deps -D warnings
     # Every harness, individually. Harness code is cfg'd out of the app build,
     # so linting only the default features would leave it completely uncovered
     # — which is exactly how 13 fw-esp32 harnesses rotted uncompiled in this
@@ -2947,7 +2956,7 @@ test-glsl-filetests:
 # Warm ~1s, cold ~47s locally; it runs beside clippy, the Lint job's long
 # pole. See docs/debt/wasm-cloud-check-not-in-just-check.md.
 [parallel]
-check-lint: fmt-check clippy check-wasm-cloud check-lp-link-targets check-lpc-engine-gates check-studio-core-minimal lint-serde-content lint-browser-test-harness lint-classic-capture lint-pcb-export lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-nested-patches lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities lint-red-main-needs lint-tag-next-version lint-web-actions lint-core-action-fields
+check-lint: fmt-check clippy check-wasm-cloud check-lp-link-targets check-lpc-engine-gates check-studio-core-minimal lint-serde-content lint-browser-test-harness lint-classic-capture lint-pcb-export lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-nested-patches lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities lint-red-main-needs lint-tag-next-version lint-web-actions lint-core-action-fields lint-core-test-ops
 
 [parallel]
 check: check-lint schema-check fw-manifest-check-emu
@@ -3021,6 +3030,13 @@ lint-web-actions *args:
 # (docs/adr/2026-10-01-agentic-control-offers-in-core.md). `--bless` records a drop.
 lint-core-action-fields *args:
     python3 scripts/check-core-action-fields.py {{ args }}
+
+# The core test-ops ratchet: Studio core tests that build a user-verb action
+# directly (instead of pressing its offer by path through
+# `offer_press_test_api.rs`) may only go down per file
+# (docs/adr/2026-10-01-agentic-control-offers-in-core.md). `--bless` records a drop.
+lint-core-test-ops *args:
+    python3 scripts/check-core-test-ops.py {{ args }}
 
 # Guard against schemars reaching the RV32 firmware graphs (schema generation is host-only; see script).
 lint-schemars-fw:
@@ -3142,21 +3158,39 @@ test-emu-c6-cli:
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test app_agent_emu_decode -- --include-ignored --nocapture the_
 
 # App-agent evals, live leg (plan lp2025/2026-10-01-0126-app-agent-harness):
-# a model builds the scenario's project in a headless Studio (stage A,
-# project checks), then the tree it wrote runs on an emulated C6 with the
-# frames on D6 decoded (stage B). Costs real money: OPENROUTER_API_KEY or
+# a model works the scenario in its seat (stage A: a headless Studio, or the
+# device bench with a fake board; the checks judge what it left), then the
+# tree it left runs on an emulated C6 with the frames on the scenario's pad
+# decoded (stage B). Costs real money: OPENROUTER_API_KEY or
 # ~/.lightplayer/settings.json `agent.openrouter_api_key`. Never CI.
 #
 #   just app-agent-eval e1 --model <openrouter slug>
-#   just app-agent-eval all --model <slug> --repeat 3
+#   just app-agent-eval S18 --model <slug> --repeat 3
+#   just app-agent-eval all --model <slug> --tag device --max-usd 1
+#   just app-agent-eval all --dry-run --include-pending   # what would run; no model, no key
 #
-# The deterministic legs (goldens, negatives) are `cargo test -p
-# lpa-studio-core app_agent` and `test-emu-c6-cli`. See
+# The deterministic legs (goldens, negatives, scripted seats) are `cargo
+# test -p lpa-studio-core app_agent` and `test-emu-c6-cli`. See
 # lp-app/lpa-studio-core/tests/fixtures/app_agent/README.md.
 app-agent-eval scenario="all" *args:
     scripts/app-agent/eval.sh {{ scenario }} {{ args }}
 
-# Every bake-off candidate × E1–E3 × 3 runs, one table (plan P07).
+# The agent activity corpus (plan …/m-agent-activity-corpus): every active
+# scenario, live, at GLM-5.3 by default, capped at $2 of reported spend
+# (`--max-usd`), then corpus.md — per scenario, tag and persona, and the
+# diff against the last run with the same model. Never CI.
+#
+#   just app-agent-corpus
+#   just app-agent-corpus --max-usd 1 --tag device
+#   just app-agent-corpus --only S4,S7 --include-pending --model <slug>
+#   just app-agent-corpus --dry-run
+#
+# Live agent corpus run, capped at --max-usd (default $2), with corpus.md.
+app-agent-corpus *args:
+    scripts/app-agent/corpus.sh {{ args }}
+
+# `--scenarios S1,S5,S18` picks scenarios other than the default S1–S3.
+# Every bake-off candidate × S1–S3 (E1–E3) × 3 runs, one table (plan P07).
 app-agent-bakeoff *args:
     scripts/app-agent/bakeoff.sh {{ args }}
 
@@ -4354,6 +4388,14 @@ walk-no-board *args:
 # Proves the transport, the UI and Play — not access enforcement.
 walk-ble-emu *args:
     node scripts/emu/walk-ble-emu.mjs {{ args }}
+
+# The dropped-link walk: an emulated C6 over `?emu=` USB, the cable pulled
+# and re-seated under the editor and under Play — the page must stay put
+# behind "Reconnecting…" and resume the same session (defect
+# 2026-10-02-a-dropped-link-sends-the-editor-to-devices). Needs a Studio on
+# this worktree's port; never a CI job.
+walk-drop-emu *args:
+    node scripts/emu/walk-drop-emu.mjs {{ args }}
 
 # The hardware-validation system: payloads, configurations, transcripts,
 # replay. `just validate list` with no other args; `replay <transcript>

@@ -444,10 +444,7 @@ fn story_pending_edit(
         kind,
         old_value: None,
         phase,
-        revert: Some(UiAction::from_op(
-            ControllerId::new("story.module"),
-            SlotEditOp::Revert { address },
-        )),
+        key: Some(format!("{}:def:{}", address.node, address.path)),
     }
 }
 

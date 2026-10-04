@@ -631,6 +631,45 @@ pub(crate) fn project_save_revert_offers() -> UiOfferTree {
     offers
 }
 
+/// `project/revert-edit` over `edits`, as core publishes it beside the
+/// changes list: each row's revert button presses it with the row's key.
+/// The story actions revert the row's slot (or, for a file row, its file).
+pub(crate) fn revert_edit_offers(edits: &[lpa_studio_core::UiPendingEdit]) -> UiOfferTree {
+    use lpa_studio_core::{
+        ArtifactLocation, AssetEditOp, ProjectNodeAddress, ProjectSlotAddress, ProjectSlotRoot,
+        SlotEditOp, SlotPath,
+    };
+    let revert = |edit: &lpa_studio_core::UiPendingEdit| {
+        let controller = ControllerId::new(ProjectController::NODE_ID);
+        let slot = ProjectNodeAddress::parse(&edit.node_path)
+            .ok()
+            .zip(SlotPath::parse(&edit.slot_path_display).ok());
+        match slot {
+            Some((node, path)) if !edit.slot_path_display.starts_with('/') => UiAction::from_op(
+                controller,
+                SlotEditOp::Revert {
+                    address: ProjectSlotAddress::new(node, ProjectSlotRoot::def(), path),
+                },
+            ),
+            _ => UiAction::from_op(
+                controller,
+                AssetEditOp::Revert {
+                    artifact: ArtifactLocation::file(edit.slot_path_display.as_str()),
+                },
+            ),
+        }
+    };
+    let rows: Vec<_> = edits
+        .iter()
+        .map(|edit| (edit.clone(), revert(edit)))
+        .collect();
+    let mut offers = UiOfferTree::new();
+    if let Some(offer) = lpa_studio_core::revert_edit_offer(&rows) {
+        offers.publish(offer);
+    }
+    offers
+}
+
 pub(crate) fn project_ready_state() -> ProjectState {
     ProjectState::Ready {
         project_id: "studio-demo".to_string(),

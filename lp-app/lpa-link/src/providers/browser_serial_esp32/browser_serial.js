@@ -121,7 +121,14 @@ export async function requestPort() {
 // ("normal" | "rts-only" | "usb-jtag-download" | "both-then-drop"); it is
 // ignored when `reset` is false. The Rust side owns the naming
 // (`browser_serial.rs`'s reset_kind_js_name).
+//
+// Adopts first, like `getPort`: nothing orders a link's open after the
+// connect-edge sweep that would otherwise adopt a re-enumerated port (the
+// model's timers queue opens on the link's own future, the sweep waits in
+// the studio actor's queue), and an open on the dead generation fails with
+// the same NetworkError a port held elsewhere does.
 export async function openPort(id, baudRate, reset = true, resetKind = "normal") {
+  await adoptFromLiveGrants();
   return requireSession(id).openProtocol({ baudRate, reset, resetKind });
 }
 
@@ -202,6 +209,8 @@ export async function releasePort(id) {
 }
 
 export async function resetAndRead(id, baudRate, readWindowMs, resetKind = "normal") {
+  // It opens the port too, so it adopts first for `openPort`'s reason.
+  await adoptFromLiveGrants();
   return requireSession(id).resetAndRead({
     baudRate,
     readWindowMs,
@@ -217,16 +226,23 @@ export async function getPort(id) {
   // 2026-08-31: flashing the blank C6 lost the race on the first try).
   // Adoption is what pairs the dead generation to the replacement, and it
   // previously ran only on hotplug sweeps, never at resolution time.
-  const serial = navigator.serial;
-  if (serial?.getPorts) {
-    try {
-      await adoptReenumeratedPorts(await serial.getPorts());
-    } catch (error) {
-      // Resolution still answers with what the session holds; a failed
-      // adoption pass must not mask the real open error downstream.
-    }
-  }
+  await adoptFromLiveGrants();
   return requireSession(id).port;
+}
+
+// One adoption pass over what `getPorts()` enumerates now, for every path
+// that is about to open a session's port.
+async function adoptFromLiveGrants() {
+  const serial = globalThis.navigator?.serial;
+  if (!serial?.getPorts) {
+    return;
+  }
+  try {
+    await adoptReenumeratedPorts(await serial.getPorts());
+  } catch (error) {
+    // The caller still acts on what the session holds; a failed adoption
+    // pass must not mask the real open error downstream.
+  }
 }
 
 function requireSession(id) {

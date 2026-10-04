@@ -62,8 +62,8 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    ControllerId, ProjectController, ProjectOp, UiAction, UiAssetContentBody,
-    UiAssetEditor as UiAssetEditorData, UiAssetEditorKind, UiShaderError, UiShaderUniform,
+    OfferPath, UiAction, UiAssetContentBody, UiAssetEditor as UiAssetEditorData, UiAssetEditorKind,
+    UiShaderError, UiShaderUniform,
 };
 use lps_glsl::{ParamQualifier, SymbolAnalysis};
 use std::cell::RefCell;
@@ -74,6 +74,7 @@ use crate::base::{
     CodeEditorLanguage, DetailPopover, DetailSection, HelpLink, IconMenuTone, Platform,
     StudioIconName, keyboard,
 };
+use crate::core::use_offer_at;
 
 /// Quiet period after the last keystroke before an auto-apply fires — long
 /// enough to not race normal typing, short enough to feel live next to the
@@ -135,6 +136,10 @@ pub fn AssetEditor(
     // view dispatches the fetch exactly once (a failed fetch does not loop;
     // any successful resolution clears the guard for the next invalidation).
     let fetch_requested = use_hook(|| Rc::new(RefCell::new(None::<String>)));
+    // The bar's Save and ⌘S press the project's own Save offer
+    // (`project/save`) — one Save in the app, the same verb the header and
+    // the agent press. Core publishes it while persisted edits are pending.
+    let save_offer = use_offer_at(OfferPath::project().child("save"));
 
     if let Some(content_text) = editor.content.as_ref().and_then(|content| content.text()) {
         *last_doc.borrow_mut() = Some(content_text.to_string());
@@ -237,15 +242,17 @@ pub fn AssetEditor(
         }
     };
     // Save gate shared by the bar's Save button and the editor's Cmd/Ctrl+S
-    // path: SaveOverlay is project-level, so only an applied-but-unsaved edit
+    // path: Save is project-level, so only an applied-but-unsaved edit
     // is worth dispatching — a stray ⌘S is a harmless no-op (the editor
     // swallows the keystroke either way, so the browser dialog never opens).
     let on_save = move |_: ()| {
         if !dirty {
             return;
         }
-        if let Some(handler) = on_action {
-            handler.call(save_overlay_action());
+        match (on_action, save_offer.peek().as_ref()) {
+            (Some(handler), Some(save)) => handler.call(save.action.clone()),
+            (Some(_), None) => log::warn!("save: the project offers no Save"),
+            (None, _) => {}
         }
     };
     // Revert discards the applied-but-unsaved edit and returns the running
@@ -795,15 +802,6 @@ fn persist_button_class(enabled: bool) -> String {
     )
 }
 
-/// The project-level Save action the editor's ⌘S and the bar's Save button
-/// both dispatch — the same `SaveOverlay` op as the project pane's Save.
-fn save_overlay_action() -> UiAction {
-    UiAction::from_op(
-        ControllerId::new(ProjectController::NODE_ID),
-        ProjectOp::SaveOverlay,
-    )
-}
-
 fn editor_language(kind: UiAssetEditorKind) -> CodeEditorLanguage {
     match kind {
         UiAssetEditorKind::Glsl => CodeEditorLanguage::Glsl,
@@ -1070,13 +1068,6 @@ vec3 tonemap(vec3 color, float exposure) { return color * exposure; }
             auto_apply_verdict(gate(true, true, false), true),
             AutoApplyVerdict::Wait
         );
-    }
-
-    #[test]
-    fn save_action_targets_the_project_controllers_save_overlay() {
-        let action = save_overlay_action();
-        assert!(action.is_for_node(ProjectController::NODE_ID));
-        assert_eq!(action.op_as::<ProjectOp>(), Some(&ProjectOp::SaveOverlay));
     }
 
     #[test]

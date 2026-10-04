@@ -4,8 +4,13 @@
 //! Ranking lives here, beside the tree, so the palette only renders it and
 //! any other consumer (a test, the agent) gets the same order. The query
 //! text and whether a palette is open are the web's own chrome.
+//!
+//! Where the user is counts too (M7): the tree carries its focus
+//! ([`UiOfferTree::focus`]), and among equally good matches the focused
+//! node's verbs come first, then the verbs of nodes inside it, then the
+//! page's area, then the rest.
 
-use crate::{UiOffer, UiOfferTree};
+use crate::{OfferNearness, UiOffer, UiOfferTree};
 
 impl UiOfferTree {
     /// The offers `query` finds, best first.
@@ -19,20 +24,42 @@ impl UiOfferTree {
     /// substring only: it is a sentence, and nearly any short query is a
     /// subsequence of one.
     ///
+    /// Nearness to the user's focus ([`OfferNearness`]) decides between
+    /// matches of the same field and the same kind — a whole-query
+    /// substring of the label near the user beats one far from it — but
+    /// never lifts a weaker match over a stronger one: "rev" still finds
+    /// "Revert" anywhere before "Remove" on the focused node. Only then
+    /// does the match's position or spread count.
+    ///
     /// Ties keep publish order, and an empty (or all-whitespace) query
-    /// returns every offer in publish order.
+    /// returns every offer nearest first, in publish order within each
+    /// nearness — publish order alone when the tree has no focus.
     pub fn search(&self, query: &str) -> Vec<&UiOffer> {
         let query = OfferQuery::new(query);
+        let focus = self.focus();
         if query.is_empty() {
-            return self.iter().collect();
+            let mut all: Vec<(OfferNearness, usize, &UiOffer)> = self
+                .iter()
+                .enumerate()
+                .map(|(at, offer)| (focus.nearness(&offer.path), at, offer))
+                .collect();
+            all.sort_by_key(|(near, at, _)| (*near, *at));
+            return all.into_iter().map(|(_, _, offer)| offer).collect();
         }
-        let mut hits: Vec<(OfferRank, usize, &UiOffer)> = self
+        let mut hits: Vec<(OfferRank, OfferNearness, usize, usize, &UiOffer)> = self
             .iter()
             .enumerate()
-            .filter_map(|(at, offer)| query.rank(offer).map(|rank| (rank, at, offer)))
+            .filter_map(|(at, offer)| {
+                query.rank(offer).map(|rank| {
+                    let near = focus.nearness(&offer.path);
+                    (rank, near, rank.kind.detail(), at, offer)
+                })
+            })
             .collect();
-        hits.sort_by_key(|(rank, at, _)| (*rank, *at));
-        hits.into_iter().map(|(_, _, offer)| offer).collect()
+        hits.sort_by_key(|(rank, near, detail, at, _)| {
+            (rank.field, rank.kind.class(), *near, *detail, *at)
+        });
+        hits.into_iter().map(|(_, _, _, _, offer)| offer).collect()
     }
 }
 
@@ -60,6 +87,26 @@ enum MatchKind {
     /// The query's letters in order from a word's start, spread over this
     /// many bytes.
     Subsequence { span: usize },
+}
+
+impl MatchKind {
+    /// Which kind of match, strongest first: a substring (0) or letters in
+    /// order (1).
+    fn class(self) -> u8 {
+        match self {
+            Self::Substring { .. } => 0,
+            Self::Subsequence { .. } => 1,
+        }
+    }
+
+    /// Where the substring starts, or how far the letters spread: lower is
+    /// better, within one class.
+    fn detail(self) -> usize {
+        match self {
+            Self::Substring { at } => at,
+            Self::Subsequence { span } => span,
+        }
+    }
 }
 
 /// A query, folded once for every offer it is matched against.
@@ -153,7 +200,7 @@ fn letters_end(text: &str, letters: &[char]) -> Option<usize> {
 mod tests {
     use crate::{
         ActionConfirmation, ControllerId, OfferPath, ProjectNodeAddress, ProjectOp, UiAction,
-        UiOffer, UiOfferTree,
+        UiOffer, UiOfferFocus, UiOfferTree,
     };
 
     #[test]
@@ -257,6 +304,89 @@ mod tests {
         let tree = dirty_project_tree();
 
         assert_eq!(paths(tree.search("rev saved")), ["project/revert"]);
+    }
+
+    #[test]
+    fn with_a_focus_the_focused_nodes_verbs_lead_an_empty_query() {
+        let mut tree = dirty_project_tree();
+        tree.publish(offer("devices/connect-usb", "Connect via USB", ""));
+        tree.set_focus(UiOfferFocus {
+            node: Some(OfferPath::project_node(
+                &ProjectNodeAddress::parse("/demo.module/orbit.shader").unwrap(),
+            )),
+            areas: vec![OfferPath::project()],
+        });
+
+        assert_eq!(
+            paths(tree.search("")),
+            [
+                "project/demo.module/orbit.shader/remove",
+                "project/save",
+                "project/revert",
+                "project/demo.module/revert",
+                "devices/connect-usb",
+            ],
+            "the focused node, then the page's area in publish order, then elsewhere"
+        );
+    }
+
+    #[test]
+    fn a_match_near_the_focus_beats_an_equal_match_far_from_it() {
+        let mut tree = UiOfferTree::new();
+        for node in ["/clock.clock", "/fixture.fixture", "/orbit.shader"] {
+            let address = ProjectNodeAddress::parse(node).unwrap();
+            tree.publish(UiOffer::new(
+                OfferPath::project_node(&address).child("remove"),
+                "remove",
+                UiAction::from_op(ControllerId::new("studio|project"), ProjectOp::SaveOverlay)
+                    .with_label("Remove node"),
+            ));
+        }
+        tree.publish(offer("devices/remove-all", "Remove every board", ""));
+        let unfocused = paths(tree.search("remove"));
+        assert_eq!(
+            unfocused[0], "project/clock.clock/remove",
+            "no focus: publish order"
+        );
+
+        tree.set_focus(UiOfferFocus {
+            node: Some(OfferPath::project_node(
+                &ProjectNodeAddress::parse("/fixture.fixture").unwrap(),
+            )),
+            areas: vec![OfferPath::devices()],
+        });
+        assert_eq!(
+            paths(tree.search("remove")),
+            [
+                "project/fixture.fixture/remove",
+                "devices/remove-all",
+                "project/clock.clock/remove",
+                "project/orbit.shader/remove",
+            ],
+            "the focused node's Remove, then the page's, then the rest"
+        );
+    }
+
+    #[test]
+    fn nearness_never_lifts_a_weaker_match_over_a_stronger_one() {
+        let mut tree = dirty_project_tree();
+        tree.set_focus(UiOfferFocus {
+            node: Some(OfferPath::project_node(
+                &ProjectNodeAddress::parse("/demo.module/orbit.shader").unwrap(),
+            )),
+            areas: vec![OfferPath::project()],
+        });
+
+        // "rev" is a substring of both reverts and only letters-in-order in
+        // the focused node's "Remove": the substrings still lead.
+        assert_eq!(
+            paths(tree.search("rev")),
+            [
+                "project/revert",
+                "project/demo.module/revert",
+                "project/demo.module/orbit.shader/remove",
+            ]
+        );
     }
 
     /// The tree a dirty project publishes: Save, Revert to saved, and a

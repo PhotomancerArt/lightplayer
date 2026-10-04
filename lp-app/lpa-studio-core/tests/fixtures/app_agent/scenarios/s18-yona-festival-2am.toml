@@ -1,0 +1,71 @@
+# S18 "2am at a festival": a brand-new blank C6 out of the bag, plugged in
+# but not connected. Everything is given, so: the connect card, the agent
+# flashes the blank board itself (nothing is lost, so no card), builds,
+# pushes, done — fast, and no other click asked of Yona.
+id = "S18"
+name = "s18-yona-festival-2am"
+summary = "Blank C6 out of the bag → connect card, flashed, 60 LEDs on D10 running, battery-safe, ≤12 turns"
+persona = "yona"
+tags = ["device-connect", "flash", "push", "build", "speed"]
+golden = "festival-60-d10"
+note = "Power: a fixture with no budget is capped at 1 A by default (lpc-model FixturePower), so the default passes the power check; setting it unlimited (0) or above 2 A fails it."
+
+[start]
+project = "none"
+board = { state = "blank", actual = "seeed/xiao-esp32-c6" }
+
+[user]
+say = "quick, xiao c6, 60 leds on D10, running off a usb battery, just make it pretty"
+otherwise = "anything, go."
+
+[[user.card]]
+offer = "devices/connect-usb"
+do = "click"
+
+[budget]
+turns = 16
+usd = 0.40
+tokens = 400_000
+
+[[check]]
+kind = "max_questions"
+n = 0
+[[check]]
+kind = "card_handed"
+offer = "devices/connect-*"
+# The connect card is the only click: no card for the blank flash, the
+# push, or anything in the project.
+[[check]]
+kind = "never"
+what = "card:devices/*/*"
+[[check]]
+kind = "never"
+what = "card:project/**"
+[[check]]
+kind = "board_firmware"
+is = "flashed"
+[[check]]
+kind = "board_runs_project"
+[[check]]
+kind = "output_on"
+pin = "D10"
+[[check]]
+kind = "strip_of"
+leds = 60
+[[check]]
+kind = "target_is"
+board = "seeed/xiao-esp32-c6"
+[[check]]
+kind = "playlist"
+min_entries = 2
+[[check]]
+kind = "any_of"
+of = [
+  { kind = "field", node = "Fixture", path = "power.budget_ma", between = [1.0, 2000.0], default = 1000 },
+  { kind = "field", node = "Fixture", path = "brightness", between = [0.0, 0.5] },
+]
+[[check]]
+kind = "all_nodes_ok"
+[[check]]
+kind = "max_turns"
+n = 12

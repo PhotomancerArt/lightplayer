@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Access panel, tidied</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  /* ---- studio palette (lp-app/lpa-studio-web/src/style.css, via spikes/ble-easy-access) ---- */
+  :root {
+    --bg: #101317;
+    --bg-wash: rgba(255,255,255,.04);
+    --surface: #171b20;
+    --surface-subtle: #14181d;
+    --surface-muted: #11161b;
+    --surface-raised: #20272e;
+    --terminal: #0c1114;
+    --border: #2a3138;
+    --border-muted: #252d34;
+    --border-subtle: #293039;
+    --border-strong: #3e4852;
+    --text: #f2f0e8;
+    --strong: #fffaf0;
+    --muted: #c7cbd0;
+    --subtle: #99a2ad;
+    --dim: #9ba4ad;
+    --heading: #94b8aa;
+    --accent: #7be0b2;
+    --accent-border: #65bd96;
+    --neutral-bg: #12171c;
+    --neutral-border: #3a444c;
+    --neutral-text: #d9e2df;
+    --good-bg: #13241d;   --good-border: #365545;  --good-text: #7be0b2;
+    --warn-bg: #292614;   --warn-border: #796c33;  --warn-text: #f0dc7a;
+    --live-bg: #142330;   --live-border: #3c5c78;  --live-text: #9cc8ee;
+    --bound-bg: #241a33;  --bound-border: #5f4a85; --bound-text: #c9b1f5;
+    --err-text: #ef7a76;  --err-border: #79403e;   --err-bg: #2b1817;
+    --sans: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, monospace;
+  }
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body {
+    margin: 0; padding: 28px 32px 160px;
+    background: linear-gradient(180deg, var(--bg-wash), transparent 240px), var(--bg);
+    color: var(--text);
+    font: 14px/1.45 var(--sans);
+  }
+  h1 { font-size: 13px; letter-spacing: .12em; color: var(--muted); text-transform: uppercase; margin: 0 0 6px; }
+  p.hint { color: var(--dim); font-size: 12px; margin: 0 0 10px; max-width: 920px; line-height: 1.55; }
+  p.hint b { color: var(--muted); }
+  h2 { font-size: 12px; letter-spacing: .1em; color: var(--muted); text-transform: uppercase; margin: 46px 0 4px; }
+  h2 .n { color: var(--dim); margin-right: 6px; }
+  p.sub { color: var(--dim); font-size: 12px; margin: 0 0 14px; max-width: 920px; line-height: 1.55; }
+  p.sub b { color: var(--muted); font-weight: 600; }
+  button, input { font-family: var(--sans); }
+  .bug { max-width: 920px; border: 1px solid var(--err-border); background: var(--err-bg); border-radius: 8px; padding: 9px 14px;
+    font-size: 12px; color: var(--muted); margin: 0 0 12px; line-height: 1.55; }
+  .bug b { color: var(--err-text); }
+
+  /* ---- exploration controls ---- */
+  .controls { position: sticky; top: 10px; z-index: 40; display: flex; gap: 18px; flex-wrap: wrap; align-items: center;
+    padding: 10px 14px; border: 1px dashed var(--border-strong); border-radius: 8px; color: var(--muted); font-size: 12px; margin: 14px 0 10px;
+    background: color-mix(in srgb, var(--surface-subtle) 92%, transparent); backdrop-filter: blur(6px); }
+  .controls .group { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .controls .group > b { color: var(--text); font-weight: 600; margin-right: 2px; }
+  .chip { appearance: none; border: 1px solid var(--border-strong); background: transparent; color: var(--subtle); font-size: 11.5px;
+    font-weight: 600; border-radius: 999px; padding: 3px 10px; cursor: pointer; }
+  .chip:hover { color: var(--text); }
+  .chip[aria-pressed=true] { color: var(--accent); border-color: var(--accent-border); background: rgba(123,224,178,.08); }
+
+  /* ---- concepts row ---- */
+  .row { display: flex; gap: 22px; flex-wrap: wrap; align-items: flex-start; }
+  .concept { width: min(360px, 100%); flex: none; }
+  .concept .cap { display: flex; align-items: baseline; gap: 8px; margin: 0 0 6px; }
+  .concept .cap .cid { font: 700 11px var(--mono); color: var(--dim); }
+  .concept .cap .cname { font-size: 12.5px; font-weight: 700; color: var(--strong); }
+  .concept .cnote { font-size: 11.5px; color: var(--dim); margin: 0 0 8px; line-height: 1.45; min-height: 50px; }
+  .concept .cnote b { color: var(--muted); }
+  .concept.today .cap .cname::after { content: "today"; margin-left: 8px; font: 600 10px var(--mono);
+    color: var(--warn-text); border: 1px solid var(--warn-border); border-radius: 999px; padding: 1px 7px; }
+  .concept.lean .cap .cname::after { content: "lean"; margin-left: 8px; font: 700 10px var(--mono);
+    color: var(--accent); border: 1px solid var(--accent-border); border-radius: 999px; padding: 1px 7px; }
+
+  /* the panel frame: the popover the card's "Who has access · N ›" opens */
+  .pop { border: 1px solid var(--border-strong); border-radius: 10px; background: var(--surface); padding: 10px 13px 12px;
+    box-shadow: 0 14px 40px rgba(0,0,0,.45); display: grid; gap: 8px; position: relative; overflow: hidden; }
+  .pop .ph { display: flex; align-items: center; gap: 8px; color: var(--neutral-text); }
+  .pop .ph h3 { margin: 0; font-size: 14px; font-weight: 700; color: var(--strong); }
+  .pop .ph .cnt { margin-left: auto; font: 600 11px var(--mono); color: var(--subtle); }
+  .pop .ph .cnt.full { color: var(--warn-text); }
+  .scroll { max-height: 470px; overflow-y: auto; margin: 0 -4px; padding: 0 4px; }
+
+  .help { font-size: 11.5px; color: var(--dim); line-height: 1.45; margin: 0; }
+  .help b { color: var(--muted); font-weight: 650; }
+  .tlink { appearance: none; border: 0; background: transparent; padding: 0; cursor: pointer; font: 700 12px var(--sans);
+    color: var(--strong); text-decoration: underline dotted; text-underline-offset: 3px; white-space: nowrap; }
+  .tlink.q { color: var(--subtle); font-weight: 600; }
+  .tlink[disabled] { opacity: .45; cursor: default; }
+  .btn { appearance: none; cursor: pointer; border-radius: 6px; padding: 8px 12px; font: 700 12.5px/1 var(--sans);
+    color: var(--neutral-text); background: var(--neutral-bg); border: 1px solid var(--neutral-border); white-space: nowrap; }
+  .btn:hover { color: var(--strong); border-color: var(--border-strong); }
+  .btn.primary { color: var(--strong); border-color: var(--accent-border); background: rgba(123,224,178,.10); }
+  .btn.warn { color: var(--warn-text); border-color: var(--warn-border); background: transparent; }
+  .btn.sm { padding: 6px 9px; font-size: 11.5px; }
+  .btn.wide { width: 100%; justify-content: center; }
+  .btn[disabled] { opacity: .45; cursor: default; }
+  .btn.armed { color: var(--err-text); background: var(--err-bg); border-color: var(--err-border); }
+
+  .note { border-radius: 7px; border: 1px solid var(--warn-border); background: var(--warn-bg); color: var(--warn-text);
+    font-size: 12px; padding: 8px 10px; line-height: 1.45; display: grid; gap: 7px; }
+  .note b { color: var(--strong); }
+  .note .acts { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .note.good { border-color: var(--good-border); background: var(--good-bg); color: var(--good-text); }
+  .note.live { border-color: var(--live-border); background: var(--live-bg); color: var(--live-text); }
+
+  /* rows */
+  .krow { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-top: 1px solid var(--border-muted); min-width: 0; }
+  .krow.first, .krows > .krow:first-child { border-top: 0; }
+  .kicon { width: 30px; height: 30px; border-radius: 8px; flex: none; display: inline-flex; align-items: center; justify-content: center;
+    border: 1px solid var(--neutral-border); background: var(--neutral-bg); color: var(--neutral-text); position: relative; }
+  .kicon.acct { border-radius: 50%; border-color: var(--good-border); background: var(--good-bg); color: var(--good-text); font: 800 12px var(--sans); }
+  .kicon.pw { color: var(--warn-text); border-color: var(--warn-border); background: var(--warn-bg); }
+  .kicon.open { color: var(--live-text); border-color: var(--live-border); background: var(--live-bg); }
+  .kicon .stack { position: absolute; right: -7px; top: -7px; min-width: 18px; height: 16px; padding: 0 4px; border-radius: 999px;
+    font: 800 9.5px/16px var(--mono); text-align: center; background: var(--surface-raised); border: 1px solid var(--border-strong); color: var(--strong); }
+  .kicon .stack.warn { color: var(--warn-text); border-color: var(--warn-border); background: var(--warn-bg); }
+  .kwho { min-width: 0; flex: 1; display: grid; gap: 1px; }
+  .kwho .nm { font-size: 13px; font-weight: 700; color: var(--strong); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .kwho .nm .me { font: 700 9.5px var(--mono); color: var(--accent); margin-left: 6px; letter-spacing: .04em; text-transform: uppercase; }
+  .kwho .nm .x { font: 700 11px var(--mono); color: var(--subtle); margin-left: 5px; }
+  .kwho .sd { font-size: 11px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .playchip { font: 700 9.5px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; border-radius: 4px; padding: 3px 5px;
+    border: 1px solid var(--live-border); color: var(--live-text); flex: none; }
+  .chev { appearance: none; border: 0; background: transparent; color: var(--subtle); cursor: pointer; padding: 4px; display: inline-flex; flex: none; }
+  .chev svg { transition: transform .15s; }
+  .chev.open svg { transform: rotate(90deg); }
+  .kids { margin: 0 0 4px 40px; border-left: 1px solid var(--border-muted); padding-left: 10px; }
+  .kids .krow { padding: 4px 0; }
+  .kids .kwho .nm { font-size: 12px; font-weight: 600; color: var(--muted); }
+  .clickable { cursor: pointer; }
+  .clickable:hover .nm { text-decoration: underline dotted; text-underline-offset: 3px; }
+
+  /* the armed trash (studio: ux-armed-chip, action_button.rs; 4 s window) */
+  .trash { --win: 4000ms; position: relative; flex: none; appearance: none; cursor: pointer; border-radius: 6px; height: 28px; min-width: 28px;
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 6px;
+    border: 1px solid transparent; background: transparent; color: var(--subtle); font: 700 12px var(--sans); }
+  .trash:hover { color: var(--err-text); border-color: var(--err-border); }
+  .trash .lbl { display: none; white-space: nowrap; }
+  .trash.armed { color: var(--err-text); background: var(--err-bg); border-color: var(--err-border); animation: knock .22s ease-out; }
+  .trash.armed .lbl { display: inline; }
+  .trash::after { content: ""; position: absolute; left: 4px; right: 4px; bottom: 1px; height: 1.5px; border-radius: 2px;
+    background: var(--err-border); transform-origin: left; transform: scaleX(0); opacity: 0; }
+  .trash.armed::after { opacity: .55; animation: drain var(--win) linear forwards; }
+  @keyframes knock { 35% { transform: scale(1.07); } }
+  @keyframes drain { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+  .krow:has(> .trash.armed) .kicon, .krow:has(> .trash.armed) .kwho { opacity: .4; filter: saturate(.3); }
+
+  /* switch + segmented */
+  .switch { width: 36px; height: 21px; border-radius: 999px; border: 1px solid var(--border-strong); background: var(--neutral-bg);
+    position: relative; flex: none; cursor: pointer; appearance: none; padding: 0; }
+  .switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 15px; height: 15px; border-radius: 50%; background: var(--subtle); transition: .2s; }
+  .switch.on { background: rgba(123,224,178,.25); border-color: var(--accent-border); }
+  .switch.on::after { left: 17px; background: var(--accent); }
+  .seg { display: inline-flex; border: 1px solid var(--border-strong); border-radius: 6px; overflow: hidden; flex: none; }
+  .seg button { appearance: none; border: 0; background: transparent; padding: 6px 10px; font: 700 12px var(--sans); color: var(--subtle); cursor: pointer; }
+  .seg button.on { background: var(--surface-raised); color: var(--strong); }
+  .seg.big { display: flex; }
+  .seg.big button { flex: 1; padding: 8px 6px; display: grid; gap: 1px; text-align: left; }
+  .seg.big button small { font-weight: 500; font-size: 10.5px; color: var(--dim); }
+
+  /* slot meter */
+  .slots { display: grid; grid-template-columns: repeat(16, 1fr); gap: 3px; }
+  .slot { height: 10px; border-radius: 2px; background: var(--neutral-bg); border: 1px solid var(--border-muted); transition: outline .1s; }
+  .slot.b { background: #39434c; border-color: #4a5560; }
+  .slot.me { background: var(--accent); border-color: var(--accent-border); }
+  .slot.a { background: var(--good-border); border-color: var(--good-border); }
+  .slot.p { background: var(--warn-border); border-color: var(--warn-border); }
+  .slot.hot { outline: 1.5px solid var(--strong); outline-offset: 1px; }
+  .slotcap { display: flex; justify-content: space-between; font: 600 10.5px var(--mono); color: var(--dim); margin-top: 4px; }
+  .slotcap .full { color: var(--warn-text); }
+
+  /* buckets (1C) */
+  .bucket { border: 1px solid var(--border); border-radius: 9px; background: var(--surface-subtle); padding: 8px 10px; display: grid; gap: 4px; }
+  .bucket .bh { display: flex; align-items: center; gap: 8px; font: 800 10px var(--sans); letter-spacing: .08em; text-transform: uppercase; color: var(--dim); }
+  .bucket .bh .r { margin-left: auto; text-transform: none; letter-spacing: 0; font-weight: 600; }
+  .pills { display: flex; flex-wrap: wrap; gap: 5px; }
+  .pill { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--neutral-border); background: var(--neutral-bg); color: var(--neutral-text);
+    border-radius: 999px; padding: 3px 9px; font: 650 11.5px var(--sans); white-space: nowrap; max-width: 100%; }
+  .pill.me { border-color: var(--accent-border); color: var(--strong); }
+  .pill .c { font: 800 10px var(--mono); color: var(--subtle); }
+  .pill .c.warn { color: var(--warn-text); }
+
+  /* forms (§2) */
+  .field { display: grid; gap: 4px; min-width: 0; }
+  .field > span { font: 700 10.5px var(--sans); color: var(--dim); letter-spacing: .02em; }
+  .inp { display: flex; align-items: center; gap: 4px; border: 1px solid var(--border-strong); background: var(--terminal); border-radius: 6px; padding: 0 4px 0 0; min-width: 0; }
+  .inp:focus-within { border-color: var(--accent-border); box-shadow: 0 0 0 2px rgba(123,224,178,.15); }
+  .inp input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--strong); padding: 8px 10px; font: 13px var(--sans); }
+  .inp.mono input { font: 600 14px var(--mono); letter-spacing: .02em; }
+  .inp.huge input { font: 700 19px var(--mono); padding: 11px 12px; text-align: center; }
+  .icobtn { appearance: none; border: 0; background: transparent; color: var(--subtle); cursor: pointer; padding: 5px; border-radius: 5px; display: inline-flex; flex: none; }
+  .icobtn:hover { color: var(--strong); background: var(--surface-raised); }
+  .pwbig { font: 700 18px var(--mono); color: var(--strong); letter-spacing: .03em; user-select: all; overflow-wrap: anywhere; }
+  .qrbox { display: flex; gap: 11px; align-items: center; min-width: 0; }
+  canvas.qr { width: 96px; height: 96px; border-radius: 6px; flex: none; background: #fffaf0; image-rendering: pixelated; }
+  code.link { display: block; user-select: all; overflow-wrap: anywhere; border-radius: 4px; background: var(--surface-muted); padding: 4px 6px;
+    font: 10.5px/1.4 var(--mono); color: var(--subtle); }
+  .inline-add { border: 1px dashed var(--accent-border); border-radius: 8px; padding: 8px; display: grid; gap: 7px; background: rgba(123,224,178,.04); }
+  .twoadd { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .twoadd .btn { display: grid; gap: 3px; padding: 10px; text-align: left; line-height: 1.2; }
+  .twoadd .btn small { font-weight: 500; font-size: 10.5px; color: var(--dim); }
+  .tip { font-size: 10.5px; color: var(--dim); }
+  .tip kbd { font: 600 10px var(--mono); border: 1px solid var(--border-strong); border-bottom-width: 2px; border-radius: 3px; padding: 0 4px; color: var(--muted); }
+
+  .toast { border: 1px solid var(--good-border); background: #15201b; border-radius: 9px; padding: 9px 11px; font-size: 12px; color: var(--text);
+    display: flex; gap: 9px; align-items: flex-start; box-shadow: 0 10px 30px rgba(0,0,0,.5); }
+  .toast svg { color: var(--accent); flex: none; margin-top: 1px; }
+  .toast b { color: var(--strong); }
+  .toast .tlink { margin-left: auto; }
+
+  .flash { animation: flash 1.2s ease; }
+  @keyframes flash { 0% { background: rgba(123,224,178,.2); } 100% { background: transparent; } }
+
+  svg.i { width: 15px; height: 15px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  @media (max-width: 700px) {
+    body { padding: 16px 16px 120px; }
+    .controls { position: static; gap: 10px; }
+  }
+  /* ---- round 3: the tightened panel ---- */
+  .concept.wide { width: min(375px, 100%); }
+  .pop.tight { gap: 4px; padding: 9px 12px 10px; }
+  .pop.tight .krow { padding: 5px 0; }
+  .pop.tight .kicon { width: 26px; height: 26px; border-radius: 7px; }
+  .pop.tight .kicon svg { width: 14px; height: 14px; }
+  .fullline { font-size: 11px; color: var(--warn-text); line-height: 1.4; margin: -1px 0 2px; }
+  .sech { font: 800 10px var(--sans); letter-spacing: .08em; text-transform: uppercase; color: var(--dim);
+    border-top: 1px solid var(--border-muted); padding-top: 8px; margin-top: 2px; }
+  .pwline { display: flex; align-items: center; gap: 9px; min-height: 34px; min-width: 0; }
+  .pwline .lab { width: 54px; flex: none; font-size: 13px; font-weight: 700; color: var(--strong); }
+  .pwline.off .lab { color: var(--muted); }
+  .pwline .inp { flex: 1; }
+  .pwline .inp input { padding: 6px 8px; font: 600 13px var(--mono); letter-spacing: .01em; }
+  .pwline.off .inp { opacity: .5; }
+  .pwline.off .inp:focus-within { opacity: 1; }
+  .pwline .side { flex: 1; font-size: 11.5px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pwsay { font-size: 11px; color: var(--dim); line-height: 1.4; margin: -2px 0 2px 45px; }
+  .pwsay.good { color: var(--good-text); }
+  .switch.sm { width: 32px; height: 19px; }
+  .switch.sm::after { width: 13px; height: 13px; }
+  .switch.sm.on::after { left: 15px; }
+  .savebtn { appearance: none; cursor: pointer; border-radius: 5px; padding: 3px 7px; font: 700 11px var(--sans); flex: none;
+    color: var(--strong); border: 1px solid var(--accent-border); background: rgba(123,224,178,.12); }
+  .reject { border: 1px dashed var(--border-strong); border-radius: 8px; padding: 10px 14px; font-size: 12px; color: var(--dim); max-width: 920px; line-height: 1.6; }
+  .reject b { color: var(--muted); }
+  .gate { max-width: 920px; border: 1px solid var(--good-border); background: var(--good-bg); border-radius: 8px; padding: 9px 14px;
+    font-size: 12px; color: var(--good-text); margin: 0 0 8px; line-height: 1.55; }
+  .gate b { color: var(--strong); }
+  /* ---- round 4: two passwords at the top ---- */
+  .gbox { border: 1px solid var(--border); border-radius: 9px; background: var(--surface-subtle); padding: 6px 10px 8px; display: grid; gap: 2px; }
+  .gbox .say { font-size: 12px; color: var(--muted); line-height: 1.4; padding: 2px 0 4px; }
+  .gbox .say b { color: var(--strong); }
+  .gline { display: flex; align-items: center; gap: 9px; min-height: 34px; min-width: 0; }
+  .gline .lab { width: 54px; flex: none; font-size: 13px; font-weight: 700; color: var(--strong); }
+  .gline .free { flex: 1; font-size: 12px; color: var(--live-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .gline .free.dim { color: var(--dim); }
+  .gline .inp { flex: 1; }
+  .gline .inp input { padding: 6px 8px; font: 600 13px var(--mono); letter-spacing: .01em; }
+  .gline.locked .switch { opacity: .4; cursor: not-allowed; }
+  .gsay { font-size: 11px; color: var(--dim); line-height: 1.4; margin: -2px 0 2px 45px; }
+  .gsay.good { color: var(--good-text); }
+  .seg.mini button { padding: 4px 8px; font-size: 11.5px; }
+  .seg.mini button.on.free { color: var(--live-text); }
+  .ladder { display: grid; gap: 4px; }
+  .rung { display: flex; gap: 9px; align-items: flex-start; border: 1px solid var(--border-muted); border-radius: 8px; padding: 7px 9px; cursor: pointer; background: transparent; text-align: left; color: inherit; font: inherit; }
+  .rung:hover { border-color: var(--border-strong); }
+  .rung.on { border-color: var(--accent-border); background: rgba(123,224,178,.06); }
+  .rung .dot { width: 14px; height: 14px; border-radius: 50%; border: 1.5px solid var(--border-strong); flex: none; margin-top: 2px; }
+  .rung.on .dot { border: 4px solid var(--accent); }
+  .rung .t { font-size: 12.5px; font-weight: 700; color: var(--strong); }
+  .rung .d { font-size: 11px; color: var(--dim); }
+  .keysline { display: flex; align-items: center; gap: 9px; padding: 8px 0 0; margin-top: 4px; border-top: 1px solid var(--border-muted); cursor: pointer; }
+  .who { font-size: 12px; color: var(--dim); margin: 2px 0 -2px; }
+  .keysline .t { font-size: 12.5px; font-weight: 700; color: var(--muted); }
+  .keysline .d { font-size: 11px; color: var(--dim); }
+  .boardchange { max-width: 920px; border: 1px solid var(--bound-border); background: var(--bound-bg); border-radius: 8px; padding: 9px 14px;
+    font-size: 12px; color: var(--muted); margin: 0 0 12px; line-height: 1.55; }
+  .boardchange b { color: var(--bound-text); }
+  .boardchange code { font: 11px var(--mono); color: var(--neutral-text); }
+</style>
+</head>
+<body>
+
+<h1>Access panel — two passwords</h1>
+<div class="gate"><b>Yona, round 4 (2026-10-02):</b> “Try again … something closer to Google Docs … it occurs to me you might want <b>view with no password,
+  only edit password</b>. So maybe it’s just two options — <b>the play and edit passwords. If they’re off, then you can do that thing without a password.
+  The shared keys bypass it.</b> … and that should be on the top of the box.” Earlier, still standing: call edit <b>Author</b>; a password is prefilled with a
+  random one you type over; saves when you click away; old browser keys make room automatically; “this isn’t enterprise banking software.”</div>
+<p class="hint">
+  <b>The model:</b> two choices. <b>Play:</b> Anyone → anyone nearby can play; Password → it takes the password. <b>Author</b> the same, for changing
+  the show. Your browsers and your account always get in — those keys are added when you plug in by USB and sit in one quiet
+  line below. <b>One rule falls out:</b> anyone who can author can play, so while Author is Anyone a play password means nothing — Play rests on Anyone
+  (“follows Author”), and setting Author to Anyone sets Play with it.
+</p>
+<div class="boardchange"><b>Needs a board change:</b> today the store’s <code>open</code> is a yes/no that grants <b>play</b> only
+  (<code>lpc-access/src/device_access_file.rs</code>, store <code>version: 2</code>). “Author password off” means anyone nearby can author, so
+  <code>open</code> becomes a tier — none / play / author — in a <b>version 3</b> store with a v2 reader (persisted format: migration in the same change).
+  Everything else here is Studio.</div>
+<div class="bug"><b>Separate bug, still filed on its own:</b> “Anyone nearby can play” didn’t work on the choker.</div>
+
+<div class="controls" id="controls">
+  <span class="group"><button class="chip" data-k="reset" data-v="1">↺ reset</button></span>
+</div>
+
+<div class="gate"><b>Round 4 gate:</b> “<b>4B is close</b> to what I wanted. But let’s not do box-in-box — the separator is plenty. ‘USB always gets in’ is
+  weird to say.”</div>
+
+<div class="gate"><b>Round 5 — converged (Yona, 2026-10-02):</b> 4B as drawn. “<b>We ship open, by default. For now.</b> With such a tiny group of people
+  using it, that’s a better default.” Author set to Anyone really means anyone nearby can author: “for now, yes. I share your concern, but we have to remember
+  that no one knows this exists. <b>We call that out in the device pane.</b> It’s not hard to change the default later, but for development and alpha testing,
+  I want public access — like WLED <i>still</i> does after … 15 years?”</div>
+
+<h2><span class="n">1</span>The panel, in its four states</h2>
+<p class="sub">4B, live in each — press Anyone / Password, type over a password (it’s selected when you click), click away to save, open your keys.</p>
+<div class="row" id="s1"></div>
+
+<h2><span class="n">2</span>Round 4’s other two ways</h2>
+<p class="sub">Kept for contrast: 4A two switches (with a sentence on top), 4C three levels.</p>
+<div class="row" id="s2"></div>
+
+<h2><span class="n">3</span>Set aside</h2>
+<div class="reject">Round 4: <b>4A</b> two switches and <b>4C</b> three levels (section 2 above). Rounds 1–3 (commits <code>094662568</code> → <code>0144fb89f</code>): the “Who has access” list as the panel’s main subject, with an
+  Anyone-nearby switch and the two passwords under it. Round 4 turns that around: the passwords are the panel; the keys are a footnote.</div>
+
+<script>
+const I = {
+  laptop: '<svg class="i" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="11" rx="1.5"/><path d="M2 19h20"/></svg>',
+  phone: '<svg class="i" viewBox="0 0 24 24"><rect x="7" y="2.5" width="10" height="19" rx="2"/><path d="M11 18.5h2"/></svg>',
+  people: '<svg class="i" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3 20c.6-3.6 3-5.5 6-5.5s5.4 1.9 6 5.5"/><circle cx="17" cy="9" r="2.4"/><path d="M16 14.5c2.6.2 4.4 2 5 5"/></svg>',
+  lock: '<svg class="i" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>',
+  chev: '<svg class="i" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>',
+  dice: '<svg class="i" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.7"/><path d="M20 4v4h-4"/></svg>',
+  done: '<svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.6 2.6L16 9.7"/></svg>',
+  trash: '<svg class="i" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>',
+};
+const WORDS = ['amber','anchor','aspen','badger','banjo','beacon','birch','cedar','comet','coral','cricket','ember','falcon','fern','firefly',
+  'garnet','gecko','glacier','harbor','heron','iris','jade','kayak','lantern','lotus','lynx','maple','meadow','moss','nova','orbit','otter',
+  'pebble','plum','prism','quartz','raven','river','robin','sage','sparrow','summit','thistle','tiger','tulip','velvet','willow','zephyr'];
+let seed = 11;
+const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+const roll = () => { const a = WORDS[rnd() * WORDS.length | 0]; let b; do { b = WORDS[rnd() * WORDS.length | 0]; } while (b === a);
+  return `${a}-${b}-${10 + (rnd() * 90 | 0)}`; };
+const esc = (s) => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+// ---------------------------------------------------------------- state
+const S = { start: 'view', where: 'here' };
+for (const [k, v] of new URLSearchParams(location.search)) if (k in S) S[k] = v;
+const START = { fresh: [false, true], view: [false, true], both: [true, true], open: [false, false] };
+const KEYS = [
+  { label: "Yona's MacBook", me: true, n: 1, phone: false },
+  { label: 'Brave on Mac', n: 11, phone: false, span: 'Sep 26 – Oct 2' },
+  { label: 'Bluefy on iPhone', n: 1, phone: true },
+  { label: "Yona's account", n: 1, acct: true },
+];
+const P = {};
+// A password: on, value (the box), saved (what this browser knows is on the
+// board; undefined = set from another browser, so unknown), status.
+function makePanel(play, author) {
+  const known = S.where === 'here';
+  const pw = (on) => { const v = roll(); return { on, saved: on ? (known ? v : undefined) : null, value: on && !known ? '' : v, status: null }; };
+  return { play: pw(play), edit: pw(author), keysOpen: false, toast: null };
+}
+function resetPanels() {
+  seed = 11;
+  const [play, author] = START[S.start];
+  for (const id of ['A', 'B', 'C']) P[id] = makePanel(play, author);
+  P.S_open = makePanel(false, false); P.S_view = makePanel(false, true); P.S_both = makePanel(true, true);
+  P.S_else = makePanel(true, true); P.S_else.play.saved = 'x'; P.S_else.play.value = 'x';
+  P.S_else.edit = { on: true, saved: undefined, value: '', status: null };
+  P.S_else.play = { on: true, saved: 'camp-glow-17', value: 'camp-glow-17', status: null };
+}
+
+// ---------------------------------------------------------------- rules
+// Anyone who can author can play: a play password only means something while
+// authoring takes a password.
+function sentence(p) {
+  if (!p.edit.on) return '<b>Anyone nearby</b> can play and author.';
+  if (!p.play.on) return '<b>Anyone nearby</b> can play. Authoring takes the password.';
+  return 'Playing and authoring each take <b>a password</b>.';
+}
+function setOn(p, k, on) {
+  const s = p[k];
+  if (on) { if (!s.value.trim()) s.value = roll(); s.on = true; save(p, k); }
+  else {
+    s.on = false; s.status = null; if (!s.value) s.value = roll();
+    if (k === 'edit' && p.play.on) { p.play.on = false; p.toast = 'Author is open now, so play is too.'; }
+  }
+}
+function save(p, k) {
+  const s = p[k]; if (!s.value.trim()) return;
+  if (s.on && s.value !== s.saved) { s.saved = s.value; s.status = 'saved'; setTimeout(() => { if (s.status === 'saved') { s.status = null; renderAll(); } }, 2000); }
+}
+const NAME = { play: 'Play', edit: 'Author' };
+
+// ---------------------------------------------------------------- pieces
+function box(pid, k, opts = {}) {
+  const s = P[pid][k];
+  const unknown = s.on && s.saved === undefined;
+  const dirty = s.on && s.value.trim() && s.value !== s.saved;
+  return `<span class="inp"${s.on ? '' : ' style="opacity:.5"'}><input data-p="${pid}" data-k="${k}" data-bind="pw" data-selectall="1" value="${esc(s.value)}"
+      spellcheck="false" autocomplete="off" placeholder="${unknown ? 'type a new one' : ''}" aria-label="${NAME[k]} password">
+    ${dirty ? `<button class="savebtn" data-p="${pid}" data-act="save" data-k="${k}">Save</button>` : ''}
+    <button class="icobtn" data-p="${pid}" data-act="roll" data-k="${k}" title="Another random one">${I.dice}</button></span>`;
+}
+function note(pid, k) {
+  const p = P[pid], s = p[k];
+  if (s.status === 'saved') return `<p class="gsay good">Saved to the device.</p>`;
+  if (s.on && s.saved === undefined && !s.value) return `<p class="gsay">Set from another browser, so it can’t be shown — type a new one to replace it.</p>`;
+  return '';
+}
+function keysLine(pid) {
+  const p = P[pid], total = KEYS.reduce((n, k) => n + k.n, 0) + (p.play.on ? 1 : 0) + (p.edit.on ? 1 : 0);
+  return `<div class="keysline" data-p="${pid}" data-act="keys">
+      <span class="kicon">${I.laptop}</span>
+      <span class="kwho"><span class="t">Your browsers &amp; account</span>
+      <span class="d">always get in · ${total} of 16 · added by USB</span></span>
+      <button class="chev${p.keysOpen ? ' open' : ''}" aria-label="Show them">${I.chev}</button></div>
+    ${p.keysOpen ? `<div class="kids" style="margin-left:36px">${KEYS.map(k => `<div class="krow">
+      <span class="kwho"><span class="nm">${esc(k.label)}${k.n > 1 ? `<span class="x">×${k.n}</span>` : ''}${k.me ? '<span class="me">this browser</span>' : ''}</span>
+      <span class="sd">${k.acct ? 'any browser signed in as you' : k.span || 'added by USB'}</span></span>
+      <button class="trash" title="Remove">${I.trash}</button></div>`).join('')}</div>` : ''}`;
+}
+function frame(pid, inner) {
+  const p = P[pid];
+  return `<div class="pop tight">
+    <div class="ph">${I.lock}<h3>Access</h3><span class="cnt">PLAYFUL choker</span></div>
+    ${inner}
+    ${keysLine(pid)}
+    ${p.toast ? `<div class="toast">${I.done}<span>${p.toast}</span><button class="tlink q" data-p="${pid}" data-act="untoast">OK</button></div>` : ''}
+  </div>`;
+}
+
+// A: two switches, a sentence that says what they add up to.
+function lineA(pid, k) {
+  const p = P[pid], s = p[k];
+  const locked = k === 'play' && !p.edit.on;
+  const free = locked ? 'open, since Author is' : `open — anyone nearby can ${k === 'play' ? 'play' : 'author'}`;
+  return `<div class="gline${locked ? ' locked' : ''}">
+      <button class="switch sm${s.on ? ' on' : ''}" data-p="${pid}" data-act="toggle" data-k="${k}" ${locked ? 'disabled' : ''} aria-label="${NAME[k]} password"></button>
+      <span class="lab">${NAME[k]}</span>
+      ${s.on ? box(pid, k) : `<span class="free${locked ? ' dim' : ''}">${free}</span>`}
+    </div>${note(pid, k)}`;
+}
+function renderA(pid = 'A') {
+  const p = P[pid];
+  return frame(pid, `<div class="gbox"><div class="say">${sentence(p)}</div>${lineA(pid, 'play')}${lineA(pid, 'edit')}</div>`);
+}
+// B: per thing, Anyone | Password (Google Docs' "Anyone with the link" turned sideways).
+function lineB(pid, k) {
+  const p = P[pid], s = p[k];
+  const locked = k === 'play' && !p.edit.on;
+  return `<div class="gline">
+      <span class="lab">${NAME[k]}</span>
+      <span class="seg mini" role="group"${locked ? ' style="opacity:.45"' : ''}>
+        <button class="${s.on ? '' : 'on free'}" data-p="${pid}" data-act="set" data-k="${k}" data-v="0" ${locked ? 'disabled' : ''}>Anyone</button>
+        <button class="${s.on ? 'on' : ''}" data-p="${pid}" data-act="set" data-k="${k}" data-v="1" ${locked ? 'disabled' : ''}>Password</button></span>
+      ${s.on ? '' : `<span class="free${locked ? ' dim' : ''}">${locked ? 'follows Author' : 'no password'}</span>`}
+    </div>${s.on ? `<div class="gline" style="min-height:0;margin:-2px 0 4px 63px">${box(pid, k)}</div>` : ''}${note(pid, k)}`;
+}
+function renderB(pid = 'B') {
+  return frame(pid, `<div class="who">Who nearby can…</div>${lineB(pid, 'play')}${lineB(pid, 'edit')}`);
+}
+// C: the three combinations that make sense, as one choice; the boxes follow it.
+function renderC() {
+  const pid = 'C', p = P[pid];
+  const level = !p.edit.on ? 0 : !p.play.on ? 1 : 2;
+  const rungs = [
+    ['Open', 'Anyone nearby can play and author.'],
+    ['Play open, author locked', 'Anyone can play; authoring takes a password.'],
+    ['Both locked', 'Playing takes one password, authoring another.'],
+  ];
+  const fields = `${p.edit.on ? `<div class="gline"><span class="lab">Author</span>${box(pid, 'edit')}</div>${note(pid, 'edit')}` : ''}
+    ${p.play.on ? `<div class="gline"><span class="lab">Play</span>${box(pid, 'play')}</div>${note(pid, 'play')}` : ''}`;
+  return frame(pid, `<div class="gbox"><div class="ladder">${rungs.map(([t, d], i) => `<button class="rung${i === level ? ' on' : ''}" data-p="${pid}" data-act="level" data-v="${i}">
+      <span class="dot"></span><span><span class="t">${t}</span><br><span class="d">${d}</span></span></button>`).join('')}</div>${fields}</div>`);
+}
+
+// ---------------------------------------------------------------- mount
+const S2_WAYS = [
+  ['A', 'Two switches', '', 'Exactly the ask: Play and Author, each a switch. Off says who can; on shows the password. One sentence on top says what they add up to.', () => renderA('A')],
+  ['C', 'Three levels', '', 'The three combinations that make sense, as one choice — so the impossible one (play locked, author open) can’t be picked at all.', renderC],
+];
+const STATES = [
+  ['S_open', 'Wide open — a new board', 'The default, for now: anyone nearby can play and author. Author is Anyone, so Play follows it.'],
+  ['S_view', 'Play open, author locked', 'Watching is free, changing the show isn’t.'],
+  ['S_both', 'Both locked', 'Two passwords.'],
+  ['S_else', 'Set from another browser', 'Author was set elsewhere: it can’t be shown, only replaced.'],
+];
+function renderAll() {
+  const a = document.activeElement;
+  const focused = a?.dataset?.bind ? [a.dataset.p, a.dataset.k, a.selectionStart, a.selectionEnd] : null;
+  document.getElementById('s1').innerHTML = STATES.map(([id, name, note_]) => `<div class="concept wide"><div class="cap"><span class="cname">${name}</span></div>
+    <p class="cnote" style="min-height:34px">${note_}</p>${renderB(id)}</div>`).join('');
+  document.getElementById('s2').innerHTML = S2_WAYS.map(([id, name, tag, note_, fn]) => `<div class="concept wide"><div class="cap"><span class="cid">4${id}</span>
+    <span class="cname">${name}</span></div><p class="cnote">${note_}</p>${fn()}</div>`).join('');
+  if (focused) {
+    const inp = document.querySelector(`input[data-p="${focused[0]}"][data-k="${focused[1]}"]`);
+    if (inp) { restoring = true; inp.focus(); inp.setSelectionRange(focused[2], focused[3]); restoring = false; }
+  }
+  document.querySelectorAll('#controls .chip').forEach(b => b.setAttribute('aria-pressed', String(S[b.dataset.k] === b.dataset.v)));
+}
+
+// ---------------------------------------------------------------- events
+document.addEventListener('click', ev => {
+  const t = ev.target.closest('[data-act], #controls .chip'); if (!t) return;
+  if (t.matches('#controls .chip')) { resetPanels(); renderAll(); return; }
+  const p = P[t.dataset.p]; if (!p) return;
+  const act = t.dataset.act, k = t.dataset.k;
+  if (act === 'toggle') setOn(p, k, !p[k].on);
+  else if (act === 'set') setOn(p, k, t.dataset.v === '1');
+  else if (act === 'level') {
+    const v = +t.dataset.v;
+    setOn(p, 'edit', v >= 1); if (v >= 1) setOn(p, 'play', v === 2);
+  }
+  else if (act === 'roll') { p[k].value = roll(); p[k].status = null; }
+  else if (act === 'save') save(p, k);
+  else if (act === 'keys') p.keysOpen = !p.keysOpen;
+  else if (act === 'untoast') p.toast = null;
+  renderAll();
+});
+document.addEventListener('input', ev => {
+  const t = ev.target; if (t.dataset.bind !== 'pw') return;
+  const s = P[t.dataset.p][t.dataset.k]; s.value = t.value; s.status = null; renderAll();
+});
+document.addEventListener('keydown', ev => {
+  const t = ev.target; if (ev.key !== 'Enter' || t.dataset.bind !== 'pw') return;
+  save(P[t.dataset.p], t.dataset.k); renderAll();
+});
+// Saves when you click away; Save and Enter are the visible ways to do the same.
+document.addEventListener('focusout', ev => {
+  const t = ev.target; if (t.dataset.bind !== 'pw' || restoring) return;
+  const p = P[t.dataset.p], k = t.dataset.k;
+  setTimeout(() => { save(p, k); renderAll(); });
+});
+// Type to replace it: the whole password is selected on focus (not when a
+// re-render puts focus back mid-typing). Swallow the focusing click's mouseup.
+let restoring = false, selectOnUp = null;
+document.addEventListener('focusin', ev => {
+  const t = ev.target; if (!t.dataset.selectall || restoring) return;
+  t.select(); selectOnUp = t;
+});
+document.addEventListener('mouseup', ev => { if (ev.target === selectOnUp) { ev.preventDefault(); selectOnUp.select(); } selectOnUp = null; });
+
+resetPanels(); renderAll();
+</script>
+</body>
+</html>

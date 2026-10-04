@@ -9,6 +9,11 @@
 //! overlay, dirty tracking and Revert as theirs, and its status is the
 //! notice the person would have seen.
 //!
+//! A removal is checked against the node's own Remove offer first: one that
+//! would sweep unsaved edits (Lasting) is the user's click, so the edit is
+//! refused and points the agent at the offer, whose `act` makes a card
+//! (QF, M6a).
+//!
 //! Order rule: a rejected slot edit does not stop the batch (later edits do
 //! not depend on it), but a failed node create or import does — later
 //! edits would address a node that does not exist — and the rest come back
@@ -112,6 +117,9 @@ impl ProjectController {
                     Ok(node) => node.address().clone(),
                     Err(reason) => return (EditStatus::Rejected { reason }, None),
                 };
+                if let Err(reason) = self.agent_removal_is_undoable(&address, &node.node) {
+                    return (EditStatus::Rejected { reason }, None);
+                }
                 let run = self.remove_node(server, &address).await;
                 settle(run, || format!("removed `{}` (until Save)", node.node))
             }
@@ -323,6 +331,38 @@ impl ProjectController {
             ProjectSlotRoot::Def,
             path,
         ))
+    }
+
+    /// A removal goes through the node's own `remove` offer: the same
+    /// action, at the same level, the card's Remove button presses
+    /// ([`ProjectController::node_remove_action`]). An Undoable one (Revert
+    /// brings the node back) is the agent's to make. A Lasting one — it
+    /// would sweep unsaved edits on the subtree that no revert restores — is
+    /// the user's: the edit is refused, changing nothing, and the reason
+    /// names the offer to `act`, which hands the user that button as a card.
+    ///
+    /// Refused rather than turned into a card inside the batch, so a batch
+    /// stays "these edits, applied or refused, in order" and never pauses
+    /// halfway on a click; the rest of the batch goes on (a refused removal
+    /// leaves every node a later edit could name still there).
+    fn agent_removal_is_undoable(
+        &self,
+        address: &ProjectNodeAddress,
+        name: &str,
+    ) -> Result<(), String> {
+        let path = crate::OfferPath::project_node(address).child("remove");
+        let Some(remove) = self.node_remove_action(address) else {
+            return Err(format!(
+                "`{name}` cannot be removed: Studio offers no Remove for it"
+            ));
+        };
+        if remove.meta().consequence.arms() {
+            return Err(format!(
+                "removing `{name}` would discard unsaved edits on it for good, so it is the \
+                 user's click, not an edit: `act` {path} to hand them the button as a card"
+            ));
+        }
+        Ok(())
     }
 
     /// `None` = the project root; a playlist's name = its next entry.

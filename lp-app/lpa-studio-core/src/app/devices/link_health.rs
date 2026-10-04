@@ -9,8 +9,9 @@
 //! the pump and from the editor lens's tap alike.
 //!
 //! This is NOT a loss. A port that is gone closes the link (the model's
-//! `Closed`/`LinkDetached` evidence) and the editor leaves as it always did;
-//! health only covers a link whose port is still there.
+//! `Closed`/`LinkDetached` evidence), and the editor holds on for the board
+//! to come back on a new link (`studio::lens_hold`); health only covers a
+//! link whose port is still there.
 
 use std::collections::BTreeMap;
 

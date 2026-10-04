@@ -38,9 +38,8 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    ControllerId, DirtySummary, OfferPath, ProjectController, ProjectEditorView, ProjectOp,
-    ProjectSyncPhase, UiAction, UiAffordance, UiConfigSlot, UiMetric, UiOffer, UiPendingEdit,
-    UiStatus,
+    CLEAR_DEBUG_VERB, DirtySummary, OfferPath, ProjectEditorView, ProjectSyncPhase, UiAction,
+    UiAffordance, UiConfigSlot, UiMetric, UiOffer, UiPendingEdit, UiStatus, is_header_verb,
 };
 
 use crate::app::affordance::{affordance_pane_tone, affordance_trigger_style};
@@ -48,7 +47,7 @@ use crate::app::layout::{PaneChrome, StudioPane};
 use crate::app::node::node_status_label_class;
 use crate::app::project::{ProjectNodeTree, ProjectSettingsSection};
 use crate::base::{DetailPopover, DetailSection, PopoverPlacement};
-use crate::core::use_verbs_of;
+use crate::core::{use_offer_at, use_verbs_of};
 
 /// Everything the project's detail popup shows, gathered from the editor view
 /// plus the pane-level status — one value so the SAME sections can render in
@@ -221,8 +220,9 @@ pub fn ProjectPane(
     add_picker_initially_open: bool,
 ) -> Element {
     // The header's verbs are the project's offers (`project/save`,
-    // `project/revert`), read from the view's offer tree.
-    let header_offers = use_verbs_of(Some(OfferPath::project()))();
+    // `project/revert`), read from the view's offer tree — less the ones
+    // another control presses (the add-node picker's, the debug chip's).
+    let header_offers = header_verbs(use_verbs_of(Some(OfferPath::project()))());
     let detail_content = ProjectDetailContent::new(&view, status.clone(), header_offers.clone());
     let affordance = detail_content.affordance;
     let chrome = PaneChrome {
@@ -312,20 +312,20 @@ pub fn ProjectPane(
 /// they are not dirty (D7), so they never reach the header wash, the Save
 /// affordances, or the save panel's change list.
 ///
-/// Pressing it dispatches [`ProjectOp::ClearDebugEdits`] (label "Clear all"
-/// already lives on the op's `ActionMeta`, so the chip stays pure
-/// presentation); persisted edits survive untouched — this is not Revert-all.
+/// Pressing it presses the project's `project/clear-debug` offer
+/// ([`lpa_studio_core::ProjectOp::ClearDebugEdits`], published while an override is active);
+/// persisted edits survive untouched — this is not Revert-all.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub(crate) fn DebugActiveChip(count: usize, on_action: EventHandler<UiAction>) -> Element {
+    let clear = use_offer_at(OfferPath::project().child(CLEAR_DEBUG_VERB))();
     if count == 0 {
         return rsx! {};
     }
-    let action = UiAction::from_op(
-        ControllerId::new(ProjectController::NODE_ID),
-        ProjectOp::ClearDebugEdits,
-    );
-    let summary = action.meta().summary.clone();
+    let summary = clear
+        .as_ref()
+        .map_or(CLEAR_DEBUG_SUMMARY, |offer| offer.summary())
+        .to_string();
 
     rsx! {
         div { class: "tw:flex tw:items-center tw:pr-1",
@@ -336,12 +336,29 @@ pub(crate) fn DebugActiveChip(count: usize, on_action: EventHandler<UiAction>) -
                 aria_label: "Clear all debug overrides",
                 onclick: move |event| {
                     event.stop_propagation();
-                    on_action.call(action.clone());
+                    if let Some(clear) = clear.as_ref() {
+                        on_action.call(clear.action.clone());
+                    }
                 },
                 "Debug active · {count} · Clear all"
             }
         }
     }
+}
+
+/// The chip's tooltip when no offer tree is provided (a story): the same
+/// sentence the offer's summary carries.
+const CLEAR_DEBUG_SUMMARY: &str = "Clear every debug override in this project.";
+
+/// The verbs among `offers` a pane header draws as its own buttons
+/// ([`is_header_verb`]): Save and Revert on the project header, Revert,
+/// Remove and Ask agent on a card. The rest at the same prefix — the
+/// add-node picker's, Copy, Clear debug — have controls of their own.
+pub(crate) fn header_verbs(offers: Vec<UiOffer>) -> Vec<UiOffer> {
+    offers
+        .into_iter()
+        .filter(|offer| offer.path.last().is_some_and(is_header_verb))
+        .collect()
 }
 
 /// The detail popup on the shared [`DetailPopover`] base — the project's

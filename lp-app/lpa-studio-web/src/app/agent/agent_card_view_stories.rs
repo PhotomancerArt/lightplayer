@@ -88,7 +88,7 @@ fn StoryFlashCard(armed: bool) -> Element {
 /// and a name, handed over at the offer's path with those values as the
 /// pre-selection. (A typed name also keeps the capture free of the date the
 /// name field's placeholder would show.)
-fn agent_card(offer: &UiOffer) -> UiAgentCard {
+pub(crate) fn agent_card(offer: &UiOffer) -> UiAgentCard {
     let args = OfferArgs::new()
         .with(FLASH_BOARD_PARAM, AGENT_BOARD)
         .with(FLASH_NAME_PARAM, "Shelf lamp");
@@ -103,12 +103,9 @@ fn agent_card(offer: &UiOffer) -> UiAgentCard {
 
 /// `devices/new-3/flash` on a XIAO still running its factory demo: Lasting,
 /// the C6 boards first, every other served board behind "show all".
-fn foreign_flash() -> UiOffer {
-    flash_pending_offer(
-        &foreign_board(),
-        OfferPath::board(&BoardRef::New(DeviceId(3))),
-    )
-    .expect("a board with somebody else's firmware flashes")
+pub(crate) fn foreign_flash() -> UiOffer {
+    flash_pending_offer(&foreign_board(), OfferPath::board(&BoardRef::New(3)))
+        .expect("a board with somebody else's firmware flashes")
 }
 
 fn foreign_board() -> PendingLinkView {

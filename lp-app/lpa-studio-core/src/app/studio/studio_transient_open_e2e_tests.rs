@@ -12,13 +12,14 @@ use lpc_model::LpValue;
 use lpfs::LpFsMemory;
 
 use crate::app::library::{LibraryStore, MemoryLibraryHost, PackageProvenance};
+use crate::app::studio::offer_press_test_api::{OfferPressTestApi, actor_clicks};
 use crate::app::studio::studio_edit_e2e_tests::{
     InProcessServerIo, drive, edit_e2e_files, edit_e2e_server, editor_dirty, find_slot,
     project_action, set_value_action,
 };
 use crate::{
-    ControllerId, HOME_NODE_ID, HomeOp, ProjectOp, StudioActor, StudioCommand, StudioController,
-    StudioServerClient, UiAction,
+    ControllerId, HOME_NODE_ID, HomeOp, OfferArgs, ProjectOp, StudioActor, StudioCommand,
+    StudioController, StudioServerClient, UiAction,
 };
 
 /// All files under a handle's store root (history payloads included) —
@@ -158,8 +159,7 @@ fn explicit_save_forks_the_transient_session_into_the_library() {
         "play installs nothing"
     );
 
-    handle.tx.send(project_action(ProjectOp::SaveOverlay));
-    drive(actor.run_one_batch_for_test());
+    actor_clicks(&mut actor, &handle.tx).press("project/save", OfferArgs::new());
     let _ = view.try_recv().expect("save emits a snapshot");
     handle.tx.send(project_action(ProjectOp::RefreshProject));
     drive(actor.run_one_batch_for_test());
@@ -225,8 +225,7 @@ fn explicit_save_forks_the_transient_session_into_the_library() {
     ));
     drive(actor.run_one_batch_for_test());
     let _ = view.try_recv().expect("second edit emits a snapshot");
-    handle.tx.send(project_action(ProjectOp::SaveOverlay));
-    drive(actor.run_one_batch_for_test());
+    actor_clicks(&mut actor, &handle.tx).press("project/save", OfferArgs::new());
     let _ = view.try_recv().expect("second save emits a snapshot");
 
     let handle_installed = store.open(installed[0].uid).expect("installed reopens");
@@ -279,9 +278,15 @@ fn a_clean_save_forks_the_transient_session_with_no_edits() {
         "no edits were made — the overlay is clean"
     );
 
-    // The pristine save: no edits precede it.
-    handle.tx.send(project_action(ProjectOp::SaveOverlay));
-    drive(actor.run_one_batch_for_test());
+    // The pristine save: no edits precede it. The header's `project/save`
+    // is offered only while edits are pending; the project panel's "Save a
+    // copy" is `project/save-copy`, offered while the session is transient.
+    let mut clicks = actor_clicks(&mut actor, &handle.tx);
+    clicks.not_offered("project/save");
+    clicks.press(
+        format!("project/{}", crate::SAVE_COPY_VERB),
+        crate::OfferArgs::new(),
+    );
     let snapshot = view.try_recv().expect("save emits a snapshot");
 
     // D7/Q5: the clean save still forked — same identity, no reload.
@@ -289,6 +294,7 @@ fn a_clean_save_forks_the_transient_session_with_no_edits() {
         !snapshot.open_project_transient,
         "a save with nothing to write still forks: the session is ordinary now"
     );
+    actor_clicks(&mut actor, &handle.tx).not_offered(format!("project/{}", crate::SAVE_COPY_VERB));
     assert_eq!(snapshot.transient_fork_generation, 1, "one fork completed");
     assert_eq!(
         snapshot.open_project_uid.as_deref(),
@@ -435,8 +441,7 @@ fn a_shared_view_link_opens_transiently_and_forks_a_fresh_identity() {
     ));
     drive(actor.run_one_batch_for_test());
     let _ = view.try_recv().expect("edit emits a snapshot");
-    handle.tx.send(project_action(ProjectOp::SaveOverlay));
-    drive(actor.run_one_batch_for_test());
+    actor_clicks(&mut actor, &handle.tx).press("project/save", OfferArgs::new());
     let snapshot = view.try_recv().expect("save emits a snapshot");
 
     assert!(

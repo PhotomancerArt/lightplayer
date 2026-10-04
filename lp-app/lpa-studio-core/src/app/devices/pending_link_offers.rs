@@ -129,7 +129,7 @@ mod tests {
     }
 
     fn prefix() -> OfferPath {
-        OfferPath::board(&crate::BoardRef::New(DeviceId(3)))
+        OfferPath::board(&crate::BoardRef::New(3))
     }
 
     fn pending(face: FirmwareFace) -> PendingLinkView {

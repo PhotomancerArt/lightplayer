@@ -4,7 +4,7 @@ pub mod host_runtime;
 pub mod host_runtime_error;
 mod server_loop;
 
-pub use host_runtime::{HostRuntime, create_memory_server_with};
+pub use host_runtime::{HostRuntime, create_memory_server_on_board, create_memory_server_with};
 pub use host_runtime_error::HostRuntimeError;
 // The root identity-file convention, for embedders that seed the server fs
 // (lpa-link's fake device stamps it so the hello carries the scripted uid).
