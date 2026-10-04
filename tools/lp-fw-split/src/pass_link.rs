@@ -18,6 +18,14 @@ use anyhow::{Context, Result, bail};
 pub const TARGET: &str = "riscv32imac-unknown-none-elf";
 pub const PROFILE: &str = "release-esp32";
 
+/// What the two passes must agree on.
+pub struct Identity<'a> {
+    pub features: &'a str,
+    pub app_version: &'a str,
+    /// `LP_FW_TARGET`; unset builds as `unknown`.
+    pub target: Option<&'a str>,
+}
+
 /// What one pass produced.
 pub struct Pass {
     pub elf: PathBuf,
@@ -31,8 +39,7 @@ pub fn link_firmware(
     out: &Path,
     name: &str,
     script: &Path,
-    features: &str,
-    app_version: &str,
+    identity: &Identity<'_>,
 ) -> Result<Pass> {
     let crate_dir = repo.join("lp-fw/fw-esp32c6");
     let main_rs = crate_dir.join("src/main.rs");
@@ -43,12 +50,19 @@ pub fn link_firmware(
         .with_context(|| format!("touching {}", main_rs.display()))?;
     let map = out.join(format!("{name}.map"));
     let started = Instant::now();
-    let output = Command::new("cargo")
+    let mut command = Command::new("cargo");
+    scrub_outer_build_env(&mut command);
+    command
         .current_dir(&crate_dir)
         .env("LP_SPLIT_LINK", "1")
-        .env("APP_VERSION", app_version)
+        .env("APP_VERSION", identity.app_version);
+    match identity.target {
+        Some(target) => command.env("LP_FW_TARGET", target),
+        None => command.env_remove("LP_FW_TARGET"),
+    };
+    let output = command
         .args(["rustc", "--quiet", "--target", TARGET, "--profile", PROFILE])
-        .args(["--features", features])
+        .args(["--features", identity.features])
         .args(["--message-format", "json-render-diagnostics"])
         .args(["--", "-C", "link-arg=--emit-relocs"])
         .arg("-C")
@@ -74,7 +88,9 @@ pub fn link_firmware(
 /// Build the loader from its own directory; its ELF.
 pub fn build_loader(repo: &Path) -> Result<PathBuf> {
     let dir = repo.join("lp-fw/fw-esp32c6-loader");
-    let output = Command::new("cargo")
+    let mut command = Command::new("cargo");
+    scrub_outer_build_env(&mut command);
+    let output = command
         .current_dir(&dir)
         .args(["build", "--release", "--quiet"])
         .args(["--message-format", "json-render-diagnostics"])
@@ -85,6 +101,27 @@ pub fn build_loader(repo: &Path) -> Result<PathBuf> {
         bail!("building fw-esp32c6-loader failed");
     }
     executable(&output.stdout, "fw-esp32c6-loader")
+}
+
+/// Drop an outer build's toolchain environment from a child cargo: when
+/// this runs under `cargo run`, rustup's `RUSTUP_TOOLCHAIN` (and `RUSTC`,
+/// `CARGO`) would override the crate directory's `rust-toolchain.toml`, and
+/// the host's `RUSTFLAGS` have no business in a bare-metal image (the same
+/// list `lp-cli firmware build` scrubs).
+fn scrub_outer_build_env(command: &mut Command) {
+    for key in [
+        "RUSTUP_TOOLCHAIN",
+        "RUSTC",
+        "RUSTDOC",
+        "CARGO",
+        "CARGO_MAKEFLAGS",
+        "RUSTFLAGS",
+        "CARGO_ENCODED_RUSTFLAGS",
+        "CARGO_MANIFEST_DIR",
+        "CARGO_MANIFEST_PATH",
+    ] {
+        command.env_remove(key);
+    }
 }
 
 /// The executable cargo reported for `target_name`.

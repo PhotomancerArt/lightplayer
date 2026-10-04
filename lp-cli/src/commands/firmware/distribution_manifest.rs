@@ -9,6 +9,13 @@
 //! source file; both are gone.
 //!
 //! Consumers version + refuse: `schemaVersion` 2 only, no dual decode.
+//!
+//! A split build (the ESP32-C6) adds a `split` block — additive, so the
+//! schema stays 2: where the loader, the core and the engine sit **inside the
+//! merged image** (flash offsets), with their lengths and SHA-256s, so a
+//! later Studio can slice the parts out of the bytes it already has. Once
+//! published, a package manifest is read by every future Studio that
+//! reinstalls that release: keys are only ever added.
 
 use serde::Serialize;
 use serde_json::Value;
@@ -39,6 +46,44 @@ pub struct DistributionManifest {
     pub flash: FlashPolicy,
     /// The images, in flash order.
     pub images: Vec<ManifestImage>,
+    /// Where a split image's pieces are inside the merged image; absent for
+    /// a single linked image.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub split: Option<SplitBlock>,
+}
+
+/// The `split` block: the layout (an integer, the same one the board
+/// reports), the MMU page it assumes, the build id the core and engine
+/// share, and the three pieces.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SplitBlock {
+    /// `1`: the layout `lp_bootctl::SplitLayout` describes.
+    pub layout: u32,
+    /// The MMU page the layout assumes, in bytes.
+    pub page: u32,
+    /// `"<version>+<commit>"`.
+    pub build_id: String,
+    pub loader: SplitPiece,
+    pub core: SplitPiece,
+    pub engine: SplitPiece,
+}
+
+/// One piece of a split image, inside the merged image.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SplitPiece {
+    /// Flash offset, hex.
+    pub offset: String,
+    pub size_bytes: u64,
+    /// Lowercase hex SHA-256 of the piece exactly as flashed.
+    pub sha256: String,
+    /// The loader's version word.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<u16>,
+    /// The engine header's version.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub header: Option<u16>,
 }
 
 /// Flashing policy — the destructive-operation contract the link layer and
@@ -122,6 +167,7 @@ mod tests {
                 size_bytes: 3_022_960,
                 sha256: "ab".repeat(32),
             }],
+            split: None,
         };
 
         let json: Value = serde_json::from_str(&serde_json::to_string(&manifest).unwrap()).unwrap();
@@ -134,5 +180,47 @@ mod tests {
         assert_eq!(json["flash"]["mayAffectDeviceData"], true);
         assert_eq!(json["images"][0]["sizeBytes"], 3_022_960);
         assert_eq!(json["images"][0]["address"], "0x0");
+        assert!(
+            json.get("split").is_none(),
+            "a single image has no split block"
+        );
+    }
+
+    /// The split block's shape, as a later Studio reads it.
+    #[test]
+    fn serializes_the_split_block() {
+        let piece = |offset: &str, size_bytes| SplitPiece {
+            offset: offset.to_string(),
+            size_bytes,
+            sha256: "cd".repeat(32),
+            version: None,
+            header: None,
+        };
+        let block = SplitBlock {
+            layout: 1,
+            page: 32768,
+            build_id: "2026.10.05-1+abc123456789".to_string(),
+            loader: SplitPiece {
+                version: Some(1),
+                ..piece("0x10000", 2800)
+            },
+            core: piece("0x18000", 1_161_104),
+            engine: SplitPiece {
+                header: Some(1),
+                ..piece("0x138000", 1_824_152)
+            },
+        };
+        let json: Value = serde_json::to_value(&block).unwrap();
+        assert_eq!(json["layout"], 1);
+        assert_eq!(json["page"], 32768);
+        assert_eq!(json["buildId"], "2026.10.05-1+abc123456789");
+        assert_eq!(json["loader"]["offset"], "0x10000");
+        assert_eq!(json["loader"]["version"], 1);
+        assert!(json["loader"].get("header").is_none());
+        assert_eq!(json["core"]["sizeBytes"], 1_161_104);
+        assert!(json["core"].get("version").is_none());
+        assert_eq!(json["engine"]["header"], 1);
+        assert_eq!(json["engine"]["sha256"], "cd".repeat(32));
+        assert!(json.get("engineDigestInCore").is_none());
     }
 }

@@ -5,7 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::app_image::{self, PAGE};
@@ -29,6 +29,9 @@ pub struct BuildOptions {
     pub bootloader: Option<PathBuf>,
     /// The partition table the image is flashed with.
     pub partitions: PathBuf,
+    /// The target (`lp-fw/builds/` id) the image is built as, embedded in
+    /// its manifest core; `None` builds it as `unknown`.
+    pub target: Option<String>,
 }
 
 impl BuildOptions {
@@ -40,12 +43,13 @@ impl BuildOptions {
             features: "esp32c6,server".into(),
             bootloader: None,
             partitions,
+            target: None,
         }
     }
 }
 
 /// One piece of the image, for `split.json`.
-#[derive(Serialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct Piece {
     /// Flash offset.
@@ -62,7 +66,7 @@ pub const ENGINE_DIGEST_SYMBOL: &str = "LP_ENGINE_DIGEST";
 pub const LAYOUT: u32 = 1;
 
 /// `split.json`: where everything is, for the packager and the tests.
-#[derive(Serialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct SplitReport {
     pub layout: u32,
@@ -99,7 +103,12 @@ pub fn build(opts: &BuildOptions) -> Result<SplitReport> {
     let pass1_x = out.join("engine-pass1.x");
     fs::write(&pass1_x, pass1_script())?;
     eprintln!("==> pass 1 ({}; version {app_version})", opts.features);
-    let p1 = pass_link::link_firmware(&repo, &out, "p1", &pass1_x, &opts.features, &app_version)?;
+    let identity = pass_link::Identity {
+        features: &opts.features,
+        app_version: &app_version,
+        target: opts.target.as_deref(),
+    };
+    let p1 = pass_link::link_firmware(&repo, &out, "p1", &pass1_x, &identity)?;
     let graph = SectionGraph::load(&p1.elf, &p1.map)?;
     let split = Split::compute(&graph, &core_roots(&graph, &fs::read(&p1.elf)?)?);
     let rules = EngineRules::from_split(&graph, &split);
@@ -112,7 +121,7 @@ pub fn build(opts: &BuildOptions) -> Result<SplitReport> {
     );
 
     eprintln!("==> pass 2");
-    let p2 = pass_link::link_firmware(&repo, &out, "p2", &engine_x, &opts.features, &app_version)?;
+    let p2 = pass_link::link_firmware(&repo, &out, "p2", &engine_x, &identity)?;
     before.check_unchanged(&repo)?;
 
     let verification = verify(&p2.elf, &p2.map)?;
@@ -163,7 +172,11 @@ pub fn build(opts: &BuildOptions) -> Result<SplitReport> {
     fs::write(out.join("engine.bin"), &engine)?;
     fs::write(out.join("core.bin"), &core)?;
 
-    let region_end = factory_end(&opts.partitions)?;
+    let (factory_offset, factory_len) = factory_extent(&opts.partitions)?;
+    if factory_offset != lp_bootctl::LOADER_OFFSET {
+        bail!("`factory` starts at {factory_offset:#x}, not where the loader goes");
+    }
+    let region_end = factory_offset + factory_len;
     let build_id_text = build_id_text(&build_id);
     let build = lp_bootctl::build_hash(build_id_text.as_bytes());
     let app = app_image::assemble(&loader, &core, &engine, region_end, build)?;
@@ -264,12 +277,12 @@ fn build_id_text(field: &[u8]) -> String {
     String::from_utf8_lossy(&field[..len]).into_owned()
 }
 
-/// Where `factory` ends in the table the image is flashed with.
-pub fn factory_end(partitions: &Path) -> Result<u32> {
+/// `factory`'s `(offset, len)` in the table the image is flashed with.
+pub fn factory_extent(partitions: &Path) -> Result<(u32, u32)> {
     let table =
         espflash::flasher::parse_partition_table(partitions).map_err(|e| anyhow::anyhow!("{e}"))?;
     let factory = table
         .find("factory")
         .with_context(|| format!("no `factory` partition in {}", partitions.display()))?;
-    Ok(factory.offset() + factory.size())
+    Ok((factory.offset(), factory.size()))
 }

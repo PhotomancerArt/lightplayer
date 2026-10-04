@@ -997,6 +997,10 @@ build-rv32-release: build-rv32
 #
 # The optional argument is extra features, in the shape `build-fw-esp32s3`
 # takes them. `esp32c6` is always added — it is the chip gate, not an option.
+#
+# A plain, MONOLITHIC build (no loader, no boot records) — the dev image. The
+# product image is the split one: `just fw-esp32c6-split`, or the packaged
+# `lp-cli firmware package esp32c6-4mb` (docs/adr/2026-10-04-c6-split-link-firmware-loader-and-boot-records.md).
 build-fw-esp32c6 features="": install-rv32-target
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1503,6 +1507,10 @@ flash-fw-esp32s3 port="" features="" monitor="monitor": (build-fw-esp32s3 featur
 # `303a:1001` and both come up as `/dev/cu.usbmodem14332xx`. Resolve by MAC
 # first (`scripts/emu/board-port.py A0:F2:62:87:B4:8C`) and pass the port
 # explicitly rather than letting espflash pick.
+#
+# This flashes the MONOLITHIC dev image (`build-fw-esp32c6`), not the split
+# product image; for that, flash `just fw-esp32c6-split`'s merged.bin or the
+# packaged `lp-cli firmware package esp32c6-4mb` image.
 flash-fw-esp32c6 port="" features="" monitor="monitor" migrate="" discard="": (build-fw-esp32c6 features)
     #!/usr/bin/env bash
     set -euo pipefail
@@ -2058,20 +2066,73 @@ fwtest-button-esp32s3 port="":
     fi
     espflash flash "${args[@]}" {{ fw_esp32s3_elf }}
 
-# Fail when the esp32c6 app image gets too close to its 3 MB partition.
-# The image overran the partition twice in 2026 and both times it surfaced as a
-# red post-merge deploy, because nothing pre-merge built the firmware. This
-# always prints the headroom, so size is a trended number and not a cliff.
-# See docs/adr/2026-07-28-esp32c6-flash-budget.md.
-fw-esp32c6-size-check margin="65536": install-rv32-target
+# Build the ESP32-C6 SPLIT image — the product image: the loader, the boot
+# records, the core and the engine, laid out inside `factory` — with
+# `tools/lp-fw-split` into target/fw-split/<slug>/ (`shipped` for the shipped
+# features; otherwise the features, `,` → `_`). Two link passes (roughly two
+# fat-LTO links), the verifier, the loader, app.bin, the whole-chip merged.bin
+# the emulator boots, and split.json. The shipped build is built as the target
+# `esp32c6-4mb` (embedded in its manifest core); a variant says `unknown`.
+#
+#   just fw-esp32c6-split                                   # shipped
+#   just fw-esp32c6-split esp32c6,server,radio,frame-dump   # the walk's image
+fw-esp32c6-split features="": install-rv32-target
     #!/usr/bin/env bash
     set -euo pipefail
-    (cd lp-fw/fw-esp32c6 && cargo build --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} --features esp32c6,server)
-    # The partition is read from the `factory` row of the table the chip is
-    # flashed with, so the budget cannot drift from the layout again.
-    just _fw-size-check esp32c6 esp32c6 {{ c6_flash_size }} {{ fw_esp32c6_elf }} lp-fw/fw-esp32c6/partitions.csv {{ margin }} \
-        "See docs/adr/2026-07-28-esp32c6-flash-budget.md and docs/adr/2026-10-02-c6-repartition-and-layout-migration.md."
-    just fw-esp32c6-rodata-layout-check
+    if [[ -z "{{ features }}" ]]; then
+        cargo run -q -p lp-fw-split --release -- build --out target/fw-split/shipped \
+            --features esp32c6,server --target esp32c6-4mb
+    else
+        slug="$(echo "{{ features }}" | tr ',' '_')"
+        cargo run -q -p lp-fw-split --release -- build --out "target/fw-split/${slug}" \
+            --features "{{ features }}"
+    fi
+
+# Fail when the esp32c6 image gets too close to the room it has. The image
+# overran the partition twice in 2026 and both times it surfaced as a red
+# post-merge deploy, because nothing pre-merge built the firmware. This always
+# prints the headroom, so size is a trended number and not a cliff. See
+# docs/adr/2026-07-28-esp32c6-flash-budget.md.
+#
+# It builds the SPLIT image (the product's), runs the verifier — 0 core nodes
+# in the engine region, or the build fails — and reports, each saying which it
+# is (`lp-fw-split headroom`):
+#   - image headroom: `factory` − app.bin (the old single number's successor);
+#   - steady headroom, core low (as flashed) and core high (after an update):
+#     the region − the page-rounded core − the engine;
+#   - update headroom: whether a second core of the same size fits beside it;
+#   - legacy overlap: app.bin's end to the pre-repartition lpfs at 0x310000.
+# The GATE is the smallest of the steady and update headrooms, against
+# `margin`. `unsplit=1` also builds the monolithic image and prints the code
+# and image deltas against it (informational; CI does not pay that build).
+fw-esp32c6-size-check margin="65536" unsplit="": install-rv32-target
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just fw-esp32c6-split
+    out=target/fw-split/shipped
+    verdict="$(head -1 "${out}/verify.txt")"
+    echo "${verdict}"
+    # The shader compiler lands in the engine: the evidence, by crate.
+    compiler="$(grep -E ' (lps_glsl|lpvm_native|lpc_engine)$' "${out}/verify.txt" | head -3 | sed 's/^ *//' | paste -sd ',' - || true)"
+    echo "in the engine (bytes, crate): ${compiler}"
+    if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+        { echo "#### esp32c6 split image"; echo "- \`${verdict}\`"; echo "- in the engine: \`${compiler}\`"; } >> "$GITHUB_STEP_SUMMARY"
+    fi
+    cargo run -q -p lp-fw-split --release -- headroom "${out}/split.json" --margin {{ margin }}
+    if [ -n "{{ unsplit }}" ]; then
+        (cd lp-fw/fw-esp32c6 && LP_FW_TARGET=esp32c6-4mb cargo build --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} --features esp32c6,server)
+        img="$(mktemp)"
+        trap 'rm -f "${img}"' EXIT
+        espflash save-image --chip esp32c6 --flash-size {{ c6_flash_size }} {{ fw_esp32c6_elf }} "${img}" >/dev/null
+        mono="$(wc -c < "${img}" | tr -d ' ')"
+        core="$(wc -c < "${out}/core.bin" | tr -d ' ')"
+        engine="$(wc -c < "${out}/engine.bin" | tr -d ' ')"
+        app="$(wc -c < "${out}/app.bin" | tr -d ' ')"
+        echo "monolithic image ${mono} B; split core ${core} B + engine ${engine} B; app.bin ${app} B"
+        echo "code delta (core + engine − monolithic): $(( core + engine - mono )) B"
+        echo "image delta (app.bin − monolithic): $(( app - mono )) B"
+    fi
+    just fw-esp32c6-rodata-layout-check "${out}/p2.elf"
 
 # The image just linked must carry `build.rs`'s MERGED rodata layout, not
 # esp-hal's stock one.
@@ -2091,10 +2152,10 @@ fw-esp32c6-size-check margin="65536": install-rv32-target
 # `.rodata.wifi` output section exists, or `.flash.appdesc` is placed BELOW
 # `.rodata` (stock puts it first in the region; under the patch it is an
 # orphan and lands after).
-fw-esp32c6-rodata-layout-check:
+fw-esp32c6-rodata-layout-check elf=fw_esp32c6_elf:
     #!/usr/bin/env bash
     set -euo pipefail
-    table="$(python3 scripts/emu/elf-section-digest.py {{ fw_esp32c6_elf }})"
+    table="$(python3 scripts/emu/elf-section-digest.py {{ elf }})"
     # Drop the `[ 8]` / `[10]` index column before splitting: it is one awk
     # field when the index is two digits and two when it is one, which silently
     # moves every column after it. Normalised, $1 is the name and $3 the addr.
@@ -2126,8 +2187,10 @@ fw-esp32c6-rodata-layout-check:
 # describes ITSELF — these checks prove the extraction path and catch feature
 # drift; they never re-state what a build contains. Build the target first
 # (the CI jobs run them right after their size checks, which build).
+# Reads the shipped SPLIT image's pass-2 ELF (`fw-esp32c6-size-check` builds
+# it; CI runs the two in that order) — the build that carries the target.
 fw-manifest-check-esp32c6:
-    node scripts/extract-fw-manifest.mjs {{ fw_esp32c6_elf }} --stable | diff -u lp-fw/fw-esp32c6/manifest-core.expected.json -
+    node scripts/extract-fw-manifest.mjs target/fw-split/shipped/p2.elf --stable | diff -u lp-fw/fw-esp32c6/manifest-core.expected.json -
 
 fw-manifest-check-esp32s3:
     node scripts/extract-fw-manifest.mjs {{ fw_esp32s3_elf }} --stable | diff -u lp-fw/fw-esp32s3/manifest-core.expected.json -

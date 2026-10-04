@@ -31,10 +31,12 @@ use std::process::Command;
 /// `LP_BUILD_FEATURES` (this crate's enabled cargo features, comma-separated
 /// and sorted) for the validation system's transcript header.
 ///
-/// Plus `LP_APP_VERSION`, the build's app version, from the one helper every
+/// Plus `LP_APP_VERSION`, the build's app version, and `LP_FW_TARGET`, the
+/// target (build def id) it was built as, from the one helper every
 /// versioned build uses (`tools/lp-app-version`) — never computed here.
 fn emit_build_provenance() {
     lp_app_version::emit();
+    lp_app_version::emit_target();
     emit_git_head_watches();
     let commit =
         git_output(&["rev-parse", "--short=12", "HEAD"]).unwrap_or_else(|| "unknown".into());

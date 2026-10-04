@@ -3,6 +3,7 @@
 //!   lp-fw-split build --out target/fw-split/<slug> [--features esp32c6,server]
 //!   lp-fw-split reach <elf> <map> --emit-ld <engine.x>
 //!   lp-fw-split verify <elf> <map>
+//!   lp-fw-split headroom <out>/split.json [--margin 65536]
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -40,6 +41,21 @@ enum Command {
         /// The repository root (default: the current directory).
         #[arg(long, default_value = ".")]
         repo: PathBuf,
+        /// The target (`lp-fw/builds/` id) to embed in the manifest core;
+        /// omitted, the image says `unknown`.
+        #[arg(long)]
+        target: Option<String>,
+    },
+    /// Report the split image's headrooms and gate the smallest of the
+    /// steady and update ones against a margin.
+    Headroom {
+        /// A build's `split.json`.
+        split_json: PathBuf,
+        /// The partition table it is flashed with.
+        #[arg(long, default_value = "lp-fw/fw-esp32c6/partitions.csv")]
+        partitions: PathBuf,
+        #[arg(long, default_value_t = 65536)]
+        margin: i64,
     },
     /// Split one link and write the engine's placement script.
     Reach {
@@ -71,10 +87,12 @@ fn run(command: Command) -> Result<bool> {
             bootloader,
             partitions,
             repo,
+            target,
         } => {
             let mut opts = BuildOptions::new(repo, out);
             opts.features = features;
             opts.bootloader = bootloader;
+            opts.target = target;
             if let Some(p) = partitions {
                 opts.partitions = p;
             }
@@ -93,6 +111,36 @@ fn run(command: Command) -> Result<bool> {
                 rules.rodata.len(),
                 rules.text.len()
             );
+            Ok(true)
+        }
+        Command::Headroom {
+            split_json,
+            partitions,
+            margin,
+        } => {
+            let report: lp_fw_split::SplitReport =
+                serde_json::from_str(&std::fs::read_to_string(&split_json)?)?;
+            let (_, factory_len) = lp_fw_split::split_build::factory_extent(&partitions)?;
+            let h = lp_fw_split::headroom::Headroom::of(&report, factory_len);
+            let gated = h.gated();
+            let mut lines = h.lines();
+            lines.push(format!(
+                "split headroom gate: {gated} B (smallest of steady and update; margin {margin} B)"
+            ));
+            for line in &lines {
+                println!("{line}");
+            }
+            if let Ok(summary) = std::env::var("GITHUB_STEP_SUMMARY") {
+                use std::io::Write as _;
+                let mut f = std::fs::OpenOptions::new().append(true).open(summary)?;
+                for line in &lines {
+                    writeln!(f, "- {line}")?;
+                }
+            }
+            if gated < margin {
+                eprintln!("FAIL: split headroom {gated} B is under the {margin} B margin");
+                return Ok(false);
+            }
             Ok(true)
         }
         Command::Verify { elf, map } => {

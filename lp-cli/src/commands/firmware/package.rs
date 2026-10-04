@@ -22,6 +22,7 @@ use super::build_def::{BuildDef, find_repo_root, load_build_def};
 use super::distribution_manifest::{
     DistributionManifest, FlashPolicy, MANIFEST_SCHEMA_VERSION, ManifestImage,
 };
+use super::split_package::package_split;
 
 /// Where packaged firmware lands by default, relative to the repo root. The
 /// Studio web build and the Pages artifact copy `firmware/<id>/` from here.
@@ -45,8 +46,20 @@ pub fn handle_package(args: PackageArgs) -> Result<()> {
 }
 
 /// Merge, extract, verify and write. Returns the manifest path.
+///
+/// A split def packages the split build's merged image (up to `app.bin`'s
+/// end) and adds the manifest's `split` block; its parts go beside the
+/// package, never into it (`split_package`).
 fn package_build(repo_root: &Path, def: &BuildDef, out_dir: &Path) -> Result<PathBuf> {
-    let elf = def.elf_path(repo_root);
+    let split = if def.split {
+        Some(package_split(repo_root, def)?)
+    } else {
+        None
+    };
+    let elf = match &split {
+        Some(split) => split.elf.clone(),
+        None => def.elf_path(repo_root),
+    };
     if !elf.exists() {
         bail!(
             "{} does not exist — run `lp-cli firmware build {}` first",
@@ -66,7 +79,11 @@ fn package_build(repo_root: &Path, def: &BuildDef, out_dir: &Path) -> Result<Pat
 
     let image_name = format!("{}-merged.bin", def.package);
     let image_path = out_dir.join(&image_name);
-    save_merged_image(repo_root, def, &elf, &image_path)?;
+    match &split {
+        Some(split) => std::fs::write(&image_path, &split.image)
+            .with_context(|| format!("writing {}", image_path.display()))?,
+        None => save_merged_image(repo_root, def, &elf, &image_path)?,
+    }
 
     // Package-time drift assertion: what espflash wrote must describe the
     // same build as the ELF we extracted from. A mismatch means the merge
@@ -100,6 +117,7 @@ fn package_build(repo_root: &Path, def: &BuildDef, out_dir: &Path) -> Result<Pat
             size_bytes: image_bytes.len() as u64,
             sha256: sha256_hex(&image_bytes),
         }],
+        split: split.as_ref().map(|s| s.block.clone()),
     };
 
     let manifest_path = out_dir.join("manifest.json");
@@ -113,6 +131,15 @@ fn package_build(repo_root: &Path, def: &BuildDef, out_dir: &Path) -> Result<Pat
         manifest.images[0].size_bytes,
         manifest.images[0].sha256
     );
+    if let Some(split) = &split {
+        println!(
+            "split image: loader/core/engine at {}/{}/{}; parts in {}",
+            split.block.loader.offset,
+            split.block.core.offset,
+            split.block.engine.offset,
+            split.parts_dir.display()
+        );
+    }
     Ok(manifest_path)
 }
 
@@ -146,21 +173,22 @@ fn extract_core(bytes: &[u8], source: &Path) -> Result<(Value, ManifestCore)> {
 fn check_core_matches_def(def: &BuildDef, core: &ManifestCore, elf: &Path) -> Result<()> {
     let mismatches: Vec<String> = [
         ("package", def.package.as_str(), core.package.as_str()),
+        ("target", def.id.as_str(), core.target.as_str()),
         ("profile", def.profile.as_str(), core.profile.as_str()),
         (
             "cargoTarget",
             def.cargo_target.as_str(),
-            core.target.cargo_target.as_str(),
+            core.platform.cargo_target.as_str(),
         ),
         (
             "chip.family",
             def.chip.family.as_str(),
-            core.target.family.as_str(),
+            core.platform.family.as_str(),
         ),
         (
             "chip.name",
             def.chip.name.as_str(),
-            core.target.chip.as_str(),
+            core.platform.chip.as_str(),
         ),
     ]
     .into_iter()
@@ -244,10 +272,11 @@ mod tests {
 
     // The version as the firmware embeds it: a fixed-width slot, the
     // string followed by JSON whitespace.
-    const CORE_JSON: &str = r#"{"lpManifestCore":2,"package":"fw-esp32c6",
+    const CORE_JSON: &str = r#"{"lpManifestCore":3,"package":"fw-esp32c6",
         "version":"2026.10.03-1"            ,
+        "target":"esp32c6-4mb"     ,
         "profile":"release-esp32","commit":"abc123456789","dirty":false,
-        "target":{"family":"esp32","chip":"esp32c6",
+        "platform":{"family":"esp32","chip":"esp32c6",
         "cargoTarget":"riscv32imac-unknown-none-elf"},
         "features":["node.shader","gfx.lpvm"],
         "limits":{"flashAppBytes":3145728},"wireProto":4}"#;

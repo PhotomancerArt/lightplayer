@@ -37,7 +37,7 @@ use crate::{
     LinkManagementProgress, LinkRawFilesystemReadResult,
 };
 
-/// The espflash chip a manifest's `core.target.chip` names, or `None` for a
+/// The espflash chip a manifest's `core.platform.chip` names, or `None` for a
 /// chip this build has no `Chip` variant for.
 ///
 /// The image decides which chip we are willing to talk to — not a constant.
@@ -919,7 +919,7 @@ pub(super) fn load_manifest(
     let manifest = LinkFirmwareManifest {
         firmware_id: raw.firmware_id,
         display_name: raw.display_name,
-        target_chip: raw.core.target.chip,
+        target_chip: raw.core.platform.chip,
         image_count: raw.images.len() as u32,
         total_bytes,
         manifest_path: Some(manifest_path.display().to_string()),
@@ -955,11 +955,11 @@ struct RawManifest {
 
 #[derive(Deserialize)]
 struct RawCore {
-    target: RawTarget,
+    platform: RawPlatform,
 }
 
 #[derive(Deserialize)]
-struct RawTarget {
+struct RawPlatform {
     chip: String,
 }
 
@@ -981,12 +981,13 @@ mod tests {
         "displayName": "LightPlayer ESP32-C6 server firmware",
         "generatedAt": "2026-08-01T12:00:00Z",
         "core": {
-            "lpManifestCore": 1,
+            "lpManifestCore": 3,
             "package": "fw-esp32c6",
+            "target": "esp32c6-4mb",
             "profile": "release-esp32",
             "commit": "abc123456789",
             "dirty": false,
-            "target": {
+            "platform": {
                 "family": "esp32",
                 "chip": "esp32c6",
                 "cargoTarget": "riscv32imac-unknown-none-elf"
@@ -1051,7 +1052,7 @@ mod tests {
                 "schemaVersion": 2,
                 "firmwareId": "x",
                 "displayName": "x",
-                "core": { "target": { "chip": "esp32c6" } },
+                "core": { "platform": { "chip": "esp32c6" } },
                 "images": []
             }"#,
         )
@@ -1079,7 +1080,7 @@ mod tests {
         assert_eq!(manifest_chip("esp32s3"), Some(Chip::Esp32s3));
         assert_eq!(manifest_chip("esp32"), Some(Chip::Esp32));
         // esptool-js's chatty spelling reaches this through the manifest's
-        // `core.target.chip` only in principle, but normalizing costs
+        // `core.platform.chip` only in principle, but normalizing costs
         // nothing and keeps the two providers' rules identical.
         assert_eq!(manifest_chip("ESP32-C6"), Some(Chip::Esp32c6));
         assert_eq!(manifest_chip("esp32c3"), None);

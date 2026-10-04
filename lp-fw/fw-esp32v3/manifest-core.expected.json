@@ -1,7 +1,8 @@
 {
-  "lpManifestCore": 2,
+  "lpManifestCore": 3,
   "package": "fw-esp32v3",
-  "target": {
+  "target": "unknown",
+  "platform": {
     "family": "esp32",
     "chip": "esp32",
     "cargoTarget": "xtensa-esp32-none-elf"

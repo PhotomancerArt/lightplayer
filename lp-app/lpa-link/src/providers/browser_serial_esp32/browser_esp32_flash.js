@@ -1083,7 +1083,7 @@ function summarizeManifest(manifest, manifestPath) {
   return {
     firmwareId: String(manifest.firmwareId),
     displayName: String(manifest.displayName ?? manifest.firmwareId),
-    targetChip: String(manifest.core?.target?.chip ?? "esp32c6"),
+    targetChip: String(manifest.core?.platform?.chip ?? "esp32c6"),
     imageCount: manifest.images.length,
     totalBytes: manifest.images.reduce((total, image) => total + Number(image.sizeBytes ?? 0), 0),
     manifestPath,

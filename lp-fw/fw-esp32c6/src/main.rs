@@ -24,6 +24,7 @@ use core::panic::PanicInfo;
 #[cfg(feature = "server")]
 lpc_model::lp_embed_manifest_core! {
     package: env!("CARGO_PKG_NAME"),
+    target: env!("LP_FW_TARGET"),
     chip_family: "esp32",
     chip: "esp32c6",
     cargo_target: "riscv32imac-unknown-none-elf",
