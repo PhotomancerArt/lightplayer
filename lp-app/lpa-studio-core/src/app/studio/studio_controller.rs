@@ -2422,6 +2422,25 @@ impl StudioController {
         self.mark_dirty();
     }
 
+    /// Record that the agent edited the node at `target` (its prefix),
+    /// writing `slots`: [`Self::record_agent_activity`] for an edit, so the
+    /// page lights the changed slots and the card's "changed by the
+    /// assistant" tab.
+    fn record_agent_edit(
+        &mut self,
+        target: crate::OfferPath,
+        slots: Vec<crate::ProjectSlotAddress>,
+        label: String,
+        place: String,
+    ) {
+        let now = (self.now_secs)();
+        self.agent
+            .app_session_mut()
+            .activity
+            .record_edit(target, slots, label, place, now);
+        self.mark_dirty();
+    }
+
     /// The user's Show on an app-chat row: a node (or a node's verb)
     /// focuses that node's card, the way a tree-row click does; then the
     /// control is lit again and the page asked to bring it into view. It
@@ -6463,25 +6482,34 @@ impl StudioController {
                 .await
         };
         // Each node an edit landed on is lit, once per batch (a create and
-        // three sets on the fixture light the fixture card once).
-        let mut lit: Vec<crate::OfferPath> = Vec::new();
-        for node in landings.iter().filter_map(|landing| landing.node.as_ref()) {
-            let prefix = crate::OfferPath::project_node(node);
-            if lit.contains(&prefix) {
+        // three sets on the fixture light the fixture card once), carrying
+        // every slot the batch wrote on it.
+        let mut lit: Vec<(crate::ProjectNodeAddress, Vec<crate::ProjectSlotAddress>)> = Vec::new();
+        for landing in &landings {
+            let Some(node) = landing.node.as_ref() else {
                 continue;
+            };
+            let slots = match lit.iter_mut().find(|(at, _)| at == node) {
+                Some((_, slots)) => slots,
+                None => {
+                    lit.push((node.clone(), Vec::new()));
+                    &mut lit.last_mut().expect("just pushed").1
+                }
+            };
+            for slot in &landing.slots {
+                if !slots.contains(slot) {
+                    slots.push(slot.clone());
+                }
             }
-            let name = match crate::app::project::agent_project_edits::node_display_name(node) {
+        }
+        for (node, slots) in lit {
+            let prefix = crate::OfferPath::project_node(&node);
+            let name = match crate::app::project::agent_project_edits::node_display_name(&node) {
                 name if name.is_empty() => "the root module".to_string(),
                 name => name,
             };
             let place = self.agent_place_phrase(&prefix);
-            self.record_agent_activity(
-                prefix.clone(),
-                crate::AgentActivityKind::Edited,
-                name,
-                place,
-            );
-            lit.push(prefix);
+            self.record_agent_edit(prefix, slots, name, place);
         }
         let nodes = landings
             .iter()

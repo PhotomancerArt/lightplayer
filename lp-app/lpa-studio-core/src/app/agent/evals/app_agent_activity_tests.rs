@@ -52,6 +52,34 @@ fn an_edit_and_a_press_light_their_controls_until_the_lights_expire() {
 }
 
 #[test]
+fn an_edit_names_the_slots_it_wrote_and_a_file_edit_adds_none() {
+    // `make-it-300` sets `render_size` (one value leaf, width and height
+    // together) and replaces the fixture's map file (no slot).
+    let mut studio = edited_then_saved();
+    let view = studio.view();
+    let fixture = fixture_prefix(&view);
+    let lit = view
+        .app_agent
+        .activity
+        .lit_at(&fixture)
+        .expect("the fixture card is lit");
+    let paths: Vec<String> = lit.slots.iter().map(|slot| slot.path.to_string()).collect();
+    assert_eq!(
+        paths,
+        vec!["render_size"],
+        "the set's slot, and nothing for the file: {lit:#?}"
+    );
+    let render_size = lit.slots[0].clone();
+    assert!(
+        view.app_agent
+            .activity
+            .slot_lit(&render_size, false)
+            .is_some(),
+        "the render-size row is lit"
+    );
+}
+
+#[test]
 fn rows_say_where_and_show_brings_the_node_back_lit() {
     let mut studio = edited_then_saved();
     let view = studio.view();
