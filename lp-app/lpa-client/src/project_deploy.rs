@@ -144,6 +144,9 @@ pub fn request_label(request: &ClientRequest) -> &'static str {
         ClientRequest::AccessAdd { .. } => "access.add",
         ClientRequest::AccessRemove { .. } => "access.remove",
         ClientRequest::AccessSetSwitches { .. } => "access.set_switches",
+        ClientRequest::NetworkStatus => "wifi.status",
+        ClientRequest::NetworkSet { .. } => "wifi.set",
+        ClientRequest::NetworkForget => "wifi.forget",
     }
 }
 

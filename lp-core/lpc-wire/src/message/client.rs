@@ -135,6 +135,34 @@ pub enum ClientRequest {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         open: Option<lpc_access::OpenTo>,
     },
+    /// The device's network settings: answered with
+    /// [`crate::server::ServerMsgBody::NetworkStatus`] — the saved network
+    /// without its password, `lanOnly`, and what the station is doing.
+    /// Edit tier.
+    NetworkStatus,
+    /// Change the saved network settings; an absent field is left as it is.
+    /// An `ssid` different from the saved one (or with none saved) needs
+    /// `password` too — `""` for an open network — so an old password is
+    /// never offered to a new network. The board checks the 802.11 / WPA2
+    /// rules and answers an error, writing nothing, when they fail.
+    /// `password` is write-only: no reply carries it, and its `Debug` never
+    /// prints it ([`crate::message::WifiPassword`]). Answered with the
+    /// status as it now stands. Edit tier.
+    #[serde(rename_all = "camelCase")]
+    NetworkSet {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ssid: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        password: Option<crate::message::WifiPassword>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        enabled: Option<bool>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        lan_only: Option<bool>,
+    },
+    /// Forget the saved Wi-Fi network (its name and password); `lanOnly`
+    /// stays. Forgetting with nothing saved is not an error. Answered with
+    /// the status. Edit tier.
+    NetworkForget,
 }
 
 #[cfg(test)]
@@ -366,6 +394,67 @@ mod tests {
             ClientRequest::AccessSetSwitches {
                 ble_enabled: None,
                 open: Some(lpc_access::OpenTo::Edit)
+            }
+        ));
+    }
+
+    /// Network requests: bare unit spellings for status and forget,
+    /// camelCase optional fields for set (an absent one is omitted), and
+    /// the password as a bare string that `Debug` never prints.
+    #[test]
+    fn test_network_requests() {
+        assert_eq!(
+            crate::json::to_string(&ClientRequest::NetworkStatus).unwrap(),
+            r#""networkStatus""#
+        );
+        assert_eq!(
+            crate::json::to_string(&ClientRequest::NetworkForget).unwrap(),
+            r#""networkForget""#
+        );
+
+        let set = ClientRequest::NetworkSet {
+            ssid: Some(String::from("lp-walk-net")),
+            password: Some(crate::message::WifiPassword::new("correct-horse-42")),
+            enabled: None,
+            lan_only: None,
+        };
+        let json = crate::json::to_string(&set).unwrap();
+        assert_eq!(
+            json,
+            r#"{"networkSet":{"ssid":"lp-walk-net","password":"correct-horse-42"}}"#
+        );
+        let shown = alloc::format!("{set:?} {set:#?}");
+        assert!(!shown.contains("correct-horse-42"), "{shown}");
+        match crate::json::from_str::<ClientRequest>(&json).unwrap() {
+            ClientRequest::NetworkSet {
+                ssid,
+                password,
+                enabled: None,
+                lan_only: None,
+            } => {
+                assert_eq!(ssid.as_deref(), Some("lp-walk-net"));
+                assert_eq!(password.unwrap().expose(), "correct-horse-42");
+            }
+            other => panic!("wrong request type: {other:?}"),
+        }
+
+        let lan = ClientRequest::NetworkSet {
+            ssid: None,
+            password: None,
+            enabled: Some(false),
+            lan_only: Some(true),
+        };
+        assert_eq!(
+            crate::json::to_string(&lan).unwrap(),
+            r#"{"networkSet":{"enabled":false,"lanOnly":true}}"#
+        );
+        assert!(matches!(
+            crate::json::from_str::<ClientRequest>(r#"{"networkSet":{}}"#).unwrap(),
+            ClientRequest::NetworkSet {
+                ssid: None,
+                password: None,
+                enabled: None,
+                lan_only: None
             }
         ));
     }

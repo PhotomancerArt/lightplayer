@@ -360,6 +360,12 @@ pub fn server_message_detail(msg: &lpc_wire::WireServerMessage) -> String {
         lpc_wire::server::ServerMsgBody::AccessList { entries, .. } => {
             format!("AccessList entries={}", entries.len())
         }
+        // Never the SSID or anything else from the file: a kind is enough.
+        lpc_wire::server::ServerMsgBody::NetworkStatus(status) => format!(
+            "NetworkStatus wifi={} station={}",
+            if status.wifi.is_some() { "set" } else { "none" },
+            status.station.kind()
+        ),
     }
 }
 

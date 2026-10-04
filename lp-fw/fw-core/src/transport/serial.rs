@@ -158,21 +158,27 @@ impl<Io: SerialIo> ServerTransport for SerialTransport<Io> {
                 return Ok(None);
             };
 
-            // Parse JSON
+            // Parse JSON. A line that may carry a Wi-Fi password
+            // (`networkSet`) is never echoed into a log, only its length.
+            let shown = if lpc_wire::may_carry_secret(json_str) {
+                "<withheld: may carry a Wi-Fi password>"
+            } else {
+                json_str
+            };
             match json::from_str::<ClientMessage>(json_str) {
                 Ok(msg) => {
                     log::debug!(
                         "SerialTransport: Received message id={} ({} bytes): {}",
                         msg.id,
                         message_bytes.len(),
-                        json_str
+                        shown
                     );
                     Ok(Some(Incoming::primary(msg)))
                 }
                 Err(e) => {
                     // Parse error - ignore with warning (as specified)
                     log::warn!(
-                        "SerialTransport: Failed to parse JSON message: {e} | json: {json_str}"
+                        "SerialTransport: Failed to parse JSON message: {e} | json: {shown}"
                     );
                     Ok(None)
                 }
@@ -181,7 +187,14 @@ impl<Io: SerialIo> ServerTransport for SerialTransport<Io> {
             // No complete message yet
             // Log buffer contents (first 100 bytes as hex, first 50 bytes as string if valid UTF-8)
             let preview_len = self.read_buffer.len().min(100);
-            let hex_preview = if preview_len > 0 {
+            // A partial line that may carry a Wi-Fi password is withheld
+            // from both previews, hex included.
+            let withheld = lpc_wire::may_carry_secret(&alloc::string::String::from_utf8_lossy(
+                &self.read_buffer,
+            ));
+            let hex_preview = if withheld {
+                alloc::string::String::from("<withheld>")
+            } else if preview_len > 0 {
                 self.read_buffer[..preview_len]
                     .iter()
                     .take(50) // Limit hex output to first 50 bytes
@@ -192,7 +205,9 @@ impl<Io: SerialIo> ServerTransport for SerialTransport<Io> {
                 alloc::string::String::from("(empty)")
             };
 
-            let string_preview = if preview_len > 0 {
+            let string_preview = if withheld {
+                alloc::string::String::from("<withheld: may carry a Wi-Fi password>")
+            } else if preview_len > 0 {
                 match core::str::from_utf8(&self.read_buffer[..preview_len.min(50)]) {
                     Ok(s) => {
                         // Convert &str to String in no_std, escape control chars

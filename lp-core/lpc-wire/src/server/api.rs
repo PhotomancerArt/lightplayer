@@ -188,6 +188,12 @@ pub enum ServerMsgBody {
         open: lpc_access::OpenTo,
         entries: Vec<crate::server::AccessEntryInfo>,
     },
+    /// The device's network settings and what its station is doing: the
+    /// saved network without its password, `lanOnly`, and the station
+    /// state. The answer to [`crate::ClientRequest::NetworkStatus`] and to
+    /// each network change (`NetworkSet`, `NetworkForget`), which reply
+    /// with the status as it now stands. Edit tier only.
+    NetworkStatus(crate::server::NetworkStatus),
 }
 
 /// Log severity carried by [`ServerMsgBody::Log`] frames and
@@ -468,6 +474,50 @@ mod tests {
         );
     }
 
+    /// The network status the board sends, through the device serializer.
+    #[cfg(feature = "ser-write-json")]
+    #[test]
+    fn network_status_encodes_identically_through_the_device_serializer() {
+        for body in network_status_samples() {
+            let mut out = alloc::vec::Vec::new();
+            ser_write_json::ser::to_writer(&mut out, &body).unwrap();
+            assert_eq!(
+                core::str::from_utf8(&out).unwrap(),
+                crate::json::to_string(&body).unwrap()
+            );
+        }
+    }
+
+    /// The network status: camelCase, the saved network without a password,
+    /// `wifi` omitted when none is saved.
+    #[test]
+    fn network_status_round_trips() {
+        let [saved, none, joined] = network_status_samples();
+        let json = crate::json::to_string(&saved).unwrap();
+        assert_eq!(
+            json,
+            r#"{"networkStatus":{"wifi":{"ssid":"lp-walk-net","hasPassword":true,"enabled":true},"lanOnly":false,"station":"unsupported"}}"#
+        );
+        assert!(!json.contains("password\":"), "{json}");
+        assert_eq!(
+            crate::json::to_string(&none).unwrap(),
+            r#"{"networkStatus":{"lanOnly":true,"station":"off"}}"#
+        );
+        let json = crate::json::to_string(&joined).unwrap();
+        match crate::json::from_str::<ServerMsgBody>(&json).unwrap() {
+            ServerMsgBody::NetworkStatus(status) => {
+                assert_eq!(
+                    status.station,
+                    crate::server::StationState::Joined {
+                        ip: String::from("10.0.0.7"),
+                        rssi: -48
+                    }
+                );
+            }
+            other => panic!("expected a network status, got {other:?}"),
+        }
+    }
+
     /// Who has access: camelCase switches, one entry per secret, no key.
     #[test]
     fn access_list_round_trips_without_a_key() {
@@ -518,6 +568,35 @@ mod tests {
         let json = crate::json::to_string(&ServerMsgBody::SetLogLevel).unwrap();
         let deserialized: ServerMsgBody = crate::json::from_str(&json).unwrap();
         assert!(matches!(deserialized, ServerMsgBody::SetLogLevel));
+    }
+
+    fn network_status_samples() -> [ServerMsgBody; 3] {
+        use crate::server::{NetworkStatus, StationState, WifiInfo};
+        let wifi = WifiInfo {
+            ssid: String::from("lp-walk-net"),
+            has_password: true,
+            enabled: true,
+        };
+        [
+            ServerMsgBody::NetworkStatus(NetworkStatus {
+                wifi: Some(wifi.clone()),
+                lan_only: false,
+                station: StationState::Unsupported,
+            }),
+            ServerMsgBody::NetworkStatus(NetworkStatus {
+                wifi: None,
+                lan_only: true,
+                station: StationState::Off,
+            }),
+            ServerMsgBody::NetworkStatus(NetworkStatus {
+                wifi: Some(wifi),
+                lan_only: false,
+                station: StationState::Joined {
+                    ip: String::from("10.0.0.7"),
+                    rssi: -48,
+                },
+            }),
+        ]
     }
 
     fn access_list_sample() -> ServerMsgBody {

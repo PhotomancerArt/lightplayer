@@ -27,6 +27,7 @@ use crate::access_gate::classify;
 use crate::access_state::{AccessState, EntropySource};
 use crate::access_store;
 use crate::heartbeat_status::HeartbeatStatus;
+use crate::network_store;
 use lpfs::{FsEvent, LpFs};
 
 /// Optional callback returning (free_bytes, used_bytes) for memory logging.
@@ -39,6 +40,13 @@ pub type MemoryStatsFn = fn() -> Option<(u32, u32)>;
 /// that cannot report it (hosts, browser) leave the probe unset and reads are
 /// never refused.
 pub type ReadHeadroomProbe = fn() -> Option<u32>;
+
+/// Embedder-supplied probe for what the Wi-Fi station is doing, reported in
+/// every [`lpc_wire::server::NetworkStatus`]. Unset (every M5 image) =
+/// [`lpc_wire::StationState::Unsupported`]: the firmware does not join
+/// Wi-Fi. A plain `fn`, read when a network request is answered; the
+/// server never touches a radio (sans-IO).
+pub type StationProbe = fn() -> lpc_wire::StationState;
 
 /// Embedder-supplied "restart this device now" action, backing
 /// [`lpc_wire::ClientRequest::Reboot`].
@@ -159,6 +167,9 @@ pub struct LpServer {
     /// LoadProject headroom refusal gates. Unset (hosts/browser) = requests
     /// are never refused.
     read_headroom_probe: Option<ReadHeadroomProbe>,
+    /// Optional Wi-Fi station probe behind the network status. Unset =
+    /// `unsupported`.
+    station_probe: Option<StationProbe>,
     /// The ProjectRead memory gate's floors, per chip (see [`ReadGate`]).
     /// Unset (hosts/browser) = reads are never refused.
     read_gate: Option<ReadGate>,
@@ -354,6 +365,7 @@ impl LpServer {
             project_read_frame_budget: Some(lpc_wire::PROJECT_READ_FRAME_MAX_BYTES),
             memory_stats,
             read_headroom_probe: None,
+            station_probe: None,
             read_gate: None,
             messages_first: false,
             reboot_hook: None,
@@ -930,6 +942,44 @@ impl LpServer {
                         .map_err(|error| ServerError::Core(format!("{error}")))?;
                     response_count += 1;
                 }
+                // Network settings: edit tier (the gate above has already
+                // refused anything less). Read-modify-write of the network
+                // file through the BASE fs, never the wire fs path, which
+                // stays write-only; the answer never carries the password.
+                // A board holding its files for the layout change runs on a
+                // RAM fs, so it refuses changes (they would vanish) and
+                // answers the status (no network).
+                ClientRequest::NetworkStatus
+                | ClientRequest::NetworkSet { .. }
+                | ClientRequest::NetworkForget => {
+                    let fs = &*self.base_fs;
+                    let station = self.station_state();
+                    let held = self.hello.hardware.fs == lpc_wire::FsBootState::LegacyHeld;
+                    let body = match client_msg.msg {
+                        ClientRequest::NetworkSet { .. } | ClientRequest::NetworkForget if held => {
+                            lpc_wire::server::ServerMsgBody::Error {
+                                error: alloc::string::String::from(
+                                    network_store::HELD_BOARD_REFUSAL,
+                                ),
+                            }
+                        }
+                        ClientRequest::NetworkSet {
+                            ssid,
+                            password,
+                            enabled,
+                            lan_only,
+                        } => network_store::network_set(
+                            fs, station, ssid, password, enabled, lan_only,
+                        ),
+                        ClientRequest::NetworkForget => network_store::network_forget(fs, station),
+                        _ => network_store::network_status(fs, station),
+                    };
+                    transport
+                        .send(link.id, WireServerMessage::new(msg_id, body))
+                        .await
+                        .map_err(|error| ServerError::Core(format!("{error}")))?;
+                    response_count += 1;
+                }
                 ClientRequest::ProjectRead { handle, request } => {
                     let sink_frame_budget = self.sink_frame_budget();
                     // One read of the heap's figures serves both the gate
@@ -1185,6 +1235,18 @@ impl LpServer {
     /// a largest block.
     pub fn set_read_headroom_probe(&mut self, probe: Option<ReadHeadroomProbe>) {
         self.read_headroom_probe = probe;
+    }
+
+    /// Install the Wi-Fi station probe the network status reports. Unset =
+    /// [`lpc_wire::StationState::Unsupported`] (no M5 image installs one).
+    pub fn set_station_probe(&mut self, probe: Option<StationProbe>) {
+        self.station_probe = probe;
+    }
+
+    /// What the station is doing, from the probe (`unsupported` without one).
+    fn station_state(&self) -> lpc_wire::StationState {
+        self.station_probe
+            .map_or(lpc_wire::StationState::Unsupported, |probe| probe())
     }
 
     /// Install this chip's ProjectRead memory gate (see [`ReadGate`]): a read

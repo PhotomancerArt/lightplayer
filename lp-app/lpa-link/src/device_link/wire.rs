@@ -315,6 +315,7 @@ fn body_label(body: &ServerMsgBody) -> &'static str {
         ServerMsgBody::LoginResult(_) => "LoginResult",
         ServerMsgBody::NotPermitted { .. } => "NotPermitted",
         ServerMsgBody::AccessList { .. } => "AccessList",
+        ServerMsgBody::NetworkStatus(_) => "NetworkStatus",
     }
 }
 

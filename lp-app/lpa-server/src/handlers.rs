@@ -155,6 +155,15 @@ pub fn handle_client_message(
                 "access requests are answered beside the access gate, not a handler".into(),
             ));
         }
+        // And the network requests: `tick_and_send` answers them from the
+        // network file, where the fs boot state and the station probe are.
+        lpc_wire::ClientRequest::NetworkStatus
+        | lpc_wire::ClientRequest::NetworkSet { .. }
+        | lpc_wire::ClientRequest::NetworkForget => {
+            return Err(ServerError::Core(
+                "network requests are answered beside the access gate, not a handler".into(),
+            ));
+        }
         lpc_wire::ClientRequest::ProjectCommand { handle, command } => {
             ServerMessagePayload::ProjectCommand {
                 response: handle_project_command(project_manager, handle, command)?,
@@ -596,8 +605,9 @@ mod tests {
         );
     }
 
-    /// The fs gate: an access file's bytes are never returned — the device
-    /// store, a project sidecar, or either spelled around the check.
+    /// The fs gate: a write-only file's bytes are never returned — the
+    /// device store, a project sidecar, the network file, or any of them
+    /// spelled around the check.
     #[test]
     fn access_files_are_never_read() {
         use lpc_model::{AsLpPath, AsLpPathBuf};
@@ -606,12 +616,18 @@ mod tests {
             .unwrap();
         fs.write_file("/projects/x/.lp/access.json".as_path(), b"SECRET")
             .unwrap();
+        fs.write_file("/.lp/network.json".as_path(), b"SECRET")
+            .unwrap();
 
         for path in [
             "/.lp/access.json",
             "/projects/x/.lp/access.json",
             "/projects/x/.lp/../.lp/access.json",
             "//.lp//access.json",
+            "/.lp/network.json",
+            "/.lp/../.lp/network.json",
+            "//.lp//network.json/",
+            "/.LP/Network.JSON",
         ] {
             let response = handle_fs_request(
                 &mut fs,

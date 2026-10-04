@@ -10,10 +10,11 @@
 //! |---|---|
 //! | Public | `Hello`, `LoginBegin`, `LoginAnswer` |
 //! | Play | `ProjectRead`; `ProjectCommand` `PanelWrite`/`PanelClear`/`ReadOverlay`/`ReadInventory`; `ListAvailableProjects`, `ListLoadedProjects`; read-only fs (`Read`, `ListDir`, `ChangesSince`, `HashPackage`) inside the projects directory |
-//! | Edit | everything else: `LoadProject`, `UnloadProject`, `StopAllProjects`, every other `ProjectCommand`, every fs write/delete and every fs read outside the projects directory, `SetLogLevel`, `Reboot`, `ClearFaults`, and the access requests (`AccessList`, `AccessAdd`, `AccessRemove`, `AccessSetSwitches`) |
+//! | Edit | everything else: `LoadProject`, `UnloadProject`, `StopAllProjects`, every other `ProjectCommand`, every fs write/delete and every fs read outside the projects directory, `SetLogLevel`, `Reboot`, `ClearFaults`, the access requests (`AccessList`, `AccessAdd`, `AccessRemove`, `AccessSetSwitches`), and the network requests (`NetworkStatus`, `NetworkSet`, `NetworkForget`) |
 //!
 //! Separately, and on EVERY link at EVERY tier, the fs handlers never
-//! return an access file's bytes (`handlers::handle_fs_request`,
+//! return a write-only file's bytes — an access file or the network file
+//! (`handlers::handle_fs_request`,
 //! `file_sync`); that gate is not a tier and lives with the fs code.
 
 use lpc_access::{Tier, is_within_dir};
@@ -77,7 +78,13 @@ pub fn classify(request: &ClientRequest, projects_dir: &str) -> Required {
         | ClientRequest::AccessList
         | ClientRequest::AccessAdd { .. }
         | ClientRequest::AccessRemove { .. }
-        | ClientRequest::AccessSetSwitches { .. } => Required::Edit,
+        | ClientRequest::AccessSetSwitches { .. }
+        // Wi-Fi settings: edit, on every link that holds it — BLE at
+        // author too, though the password crosses the air unsealed until
+        // BLE links are (an accepted limitation; see the Wi-Fi settings ADR).
+        | ClientRequest::NetworkStatus
+        | ClientRequest::NetworkSet { .. }
+        | ClientRequest::NetworkForget => Required::Edit,
     }
 }
 

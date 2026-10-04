@@ -346,7 +346,8 @@ mod tests {
             assert_eq!(error, None, "{prefix}");
             for entry in &entries {
                 assert!(
-                    !entry.path.as_str().ends_with("access.json"),
+                    !entry.path.as_str().ends_with("access.json")
+                        && !entry.path.as_str().ends_with("network.json"),
                     "{prefix}: {} rode the walk",
                     entry.path.as_str()
                 );
@@ -388,10 +389,38 @@ mod tests {
         }
     }
 
+    /// The network file alone (no access file anywhere) is enough to refuse
+    /// a hash rooted at `/.lp`; a hash of the device root leaves the root's
+    /// own `.lp/` out, so it never depends on the file's bytes.
+    #[test]
+    fn a_hash_over_the_network_file_is_refused() {
+        let fs = lpfs::LpFsMemory::new();
+        fs.write_file("/.lp/network.json".as_path(), b"{\"wifi\":\"SECRET\"}")
+            .unwrap();
+        fs.write_file("/projects/x/project.json".as_path(), b"{}")
+            .unwrap();
+        match handle_hash_package(&fs, LpPathBuf::from("/.lp")) {
+            FsResponse::PackageHash { error, hash, .. } => {
+                assert!(error.is_some(), "/.lp was hashed");
+                assert!(hash.is_empty());
+            }
+            other => panic!("{other:?}"),
+        }
+        let root = |fs: &lpfs::LpFsMemory| match handle_hash_package(fs, LpPathBuf::from("/")) {
+            FsResponse::PackageHash { hash, .. } => hash,
+            other => panic!("{other:?}"),
+        };
+        let before = root(&fs);
+        fs.write_file("/.lp/network.json".as_path(), b"{\"wifi\":\"OTHER\"}")
+            .unwrap();
+        assert_eq!(root(&fs), before);
+    }
+
     fn seeded_fs() -> lpfs::LpFsMemory {
         let fs = lpfs::LpFsMemory::new();
         for (path, bytes) in [
             ("/.lp/access.json", &b"{\"device\":\"SECRET\"}"[..]),
+            ("/.lp/network.json", b"{\"wifi\":\"SECRET\"}"),
             ("/projects/x/project.json", b"{\"format\":10}"),
             ("/projects/x/.lp/state.json", b"{}"),
             ("/projects/x/.lp/access.json", b"{\"project\":\"SECRET\"}"),

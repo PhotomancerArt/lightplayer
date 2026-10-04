@@ -8,8 +8,11 @@ pub mod hello;
 pub mod hello_auth;
 pub mod hello_proto;
 pub mod link_counters;
+pub mod network_status;
 pub mod output_wire_status;
 pub mod recovery_status;
+pub mod station_state;
+pub mod wifi_info;
 
 pub use access_entry_info::AccessEntryInfo;
 pub use api::{
@@ -26,5 +29,8 @@ pub use hello::{
 pub use hello_auth::HelloAuth;
 pub use hello_proto::{hello_board_id, hello_proto};
 pub use link_counters::{LinkCounters, LinkResets};
+pub use network_status::NetworkStatus;
 pub use output_wire_status::OutputWireStatus;
 pub use recovery_status::{CrashSummaryWire, RecoveryLevelWire, RecoveryPathWire, RecoveryStatus};
+pub use station_state::StationState;
+pub use wifi_info::WifiInfo;
