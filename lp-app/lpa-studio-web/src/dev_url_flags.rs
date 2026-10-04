@@ -8,6 +8,7 @@
 //! | `?wire=json` / `?wire=packed` | whether this page asks boards to pack their replies (the default is packed, everywhere), so JSON and packed can be measured on one build |
 //! | `?wire-capture=1` | tee every raw byte the Web Serial read pump hands to Rust into a 16 MiB in-memory buffer; `lpWireCapture()` in the console downloads it as `wire-capture-<unix-ms>.bin` (`lpa_link::device_link::wire_capture`) |
 //! | `?device-log=<level>` | once per link, after the board's hello and the packed-reply opt-in, ask it for `trace`/`debug`/`info`/`warn`/`error` logging (`SetLogLevel`) |
+//! | `?firmware-store=<origin>` | the firmware store Studio fetches engines from, instead of `https://lightplayer.app` — **loopback and private-LAN origins only** (the `?record=` sink rule, `record_sink::check_sink`), so a link someone else wrote cannot point Studio at another store's "latest"; a refused origin keeps the default and says so once in the console |
 //!
 //! Validated the way `?record=` is (`device_events_io.rs`): a query is
 //! user input, a value that does not parse reads as no flag, and the page
@@ -34,6 +35,8 @@ pub struct DevUrlFlags {
     pub wire_capture: bool,
     /// `?device-log=<level>`.
     pub device_log: Option<LogLevel>,
+    /// `?firmware-store=<origin>`, judged.
+    pub firmware_store: Option<FirmwareStoreFlag>,
     /// Flags present but unreadable, for the console.
     pub ignored: Vec<String>,
 }
@@ -71,6 +74,9 @@ impl DevUrlFlags {
                     Some(level) => flags.device_log = Some(level),
                     None => flags.ignored.push(pair.to_string()),
                 },
+                "firmware-store" if !value.trim().is_empty() => {
+                    flags.firmware_store = Some(judge_firmware_store(value.trim()));
+                }
                 _ => {}
             }
         }
@@ -83,6 +89,94 @@ impl DevUrlFlags {
 pub enum WireChoice {
     Json,
     Packed,
+}
+
+/// What became of a `?firmware-store=` value.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum FirmwareStoreFlag {
+    /// Use this origin (`http(s)://host[:port]`, no path).
+    Accepted(String),
+    /// Keep the default; `reason` is for the console.
+    Refused { value: String, reason: String },
+}
+
+/// Judge a (still percent-encoded) `?firmware-store=` value: an `http(s)`
+/// origin — no path, query or credentials — whose host passes exactly the
+/// check `?record=` applies to its sink (loopback, RFC 1918, `*.local`).
+pub fn judge_firmware_store(raw: &str) -> FirmwareStoreFlag {
+    let value = percent_decode(raw);
+    let refuse = |reason: &str| FirmwareStoreFlag::Refused {
+        value: value.clone(),
+        reason: reason.to_string(),
+    };
+    let Some((scheme, rest)) = value.split_once("://") else {
+        return refuse("not an http(s) origin");
+    };
+    let scheme = scheme.to_ascii_lowercase();
+    let authority = rest.strip_suffix('/').unwrap_or(rest);
+    if authority.is_empty() || authority.contains(['/', '?', '#', '@', ' ']) {
+        return refuse("an origin is scheme://host[:port], with no path, query or credentials");
+    }
+    let host = authority.to_ascii_lowercase();
+    let hostname = if host.starts_with('[') {
+        match host.find(']') {
+            Some(end) => host[..=end].to_string(),
+            None => return refuse("an unterminated IPv6 address"),
+        }
+    } else {
+        match host.rsplit_once(':') {
+            Some((name, port)) if port.bytes().all(|b| b.is_ascii_digit()) => name.to_string(),
+            Some(_) => return refuse("a port must be a number"),
+            None => host.clone(),
+        }
+    };
+    match crate::record_sink::check_sink(&format!("{scheme}:"), &hostname, &host) {
+        crate::record_sink::SinkCheck::Accepted { host } => {
+            FirmwareStoreFlag::Accepted(format!("{scheme}://{host}"))
+        }
+        crate::record_sink::SinkCheck::Refused { reason, .. } => refuse(&reason),
+    }
+}
+
+/// `%XX` escapes decoded (a query value is percent-encoded).
+fn percent_decode(value: &str) -> String {
+    let bytes = value.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%'
+            && let Some(hex) = value.get(i + 1..i + 3)
+            && let Ok(byte) = u8::from_str_radix(hex, 16)
+        {
+            out.push(byte);
+            i += 3;
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// The firmware store origin this page uses: the accepted
+/// `?firmware-store=` value, else `https://lightplayer.app`. Read once by
+/// [`install`]; the shell asks for it when it builds the store client.
+#[cfg_attr(
+    not(target_arch = "wasm32"),
+    allow(
+        dead_code,
+        reason = "read by the wasm install; host builds only run the unit tests"
+    )
+)]
+pub fn firmware_store_origin() -> String {
+    FIRMWARE_STORE_ORIGIN
+        .with(|origin| origin.borrow().clone())
+        .unwrap_or_else(|| lpa_firmware_store::DEFAULT_FIRMWARE_STORE_ORIGIN.to_string())
+}
+
+thread_local! {
+    static FIRMWARE_STORE_ORIGIN: std::cell::RefCell<Option<String>> =
+        const { std::cell::RefCell::new(None) };
 }
 
 /// A `?device-log=` value, case-insensitive.
@@ -132,6 +226,19 @@ pub fn install() {
     if let Some(level) = flags.device_log {
         lpa_link::device_link::wire_reader::set_device_log_level(Some(level));
         log::info!("dev flag: each board is asked for {level:?} logging once it is ready");
+    }
+    match flags.firmware_store {
+        Some(FirmwareStoreFlag::Accepted(origin)) => {
+            log::info!("dev flag: firmware store at {origin} (?firmware-store=)");
+            FIRMWARE_STORE_ORIGIN.with(|slot| *slot.borrow_mut() = Some(origin));
+        }
+        Some(FirmwareStoreFlag::Refused { value, reason }) => {
+            log::warn!(
+                "dev flag ?firmware-store={value} refused ({reason}); the firmware store stays {}",
+                lpa_firmware_store::DEFAULT_FIRMWARE_STORE_ORIGIN
+            );
+        }
+        None => {}
     }
 }
 
@@ -205,6 +312,65 @@ mod tests {
         assert_eq!(DevUrlFlags::parse(""), DevUrlFlags::default());
         assert_eq!(DevUrlFlags::parse("?on=mac:aa"), DevUrlFlags::default());
         assert_eq!(DevUrlFlags::parse("?emu=tab"), DevUrlFlags::default());
+    }
+
+    #[test]
+    fn local_firmware_store_origins_are_accepted() {
+        for (raw, origin) in [
+            ("http://127.0.0.1:2812", "http://127.0.0.1:2812"),
+            ("http%3A%2F%2F127.0.0.1%3A2812%2F", "http://127.0.0.1:2812"),
+            ("http://localhost:31415", "http://localhost:31415"),
+            ("HTTP://LocalHost:9", "http://localhost:9"),
+            ("https://192.168.1.20", "https://192.168.1.20"),
+            ("http://10.0.0.5:8080", "http://10.0.0.5:8080"),
+            (
+                "http://studio-mac.local:2812",
+                "http://studio-mac.local:2812",
+            ),
+            ("http://[::1]:2812", "http://[::1]:2812"),
+        ] {
+            assert_eq!(
+                judge_firmware_store(raw),
+                FirmwareStoreFlag::Accepted(origin.to_string()),
+                "{raw}"
+            );
+        }
+        let flags = DevUrlFlags::parse("?emu=tab&firmware-store=http%3A%2F%2F127.0.0.1%3A2812");
+        assert_eq!(
+            flags.firmware_store,
+            Some(FirmwareStoreFlag::Accepted("http://127.0.0.1:2812".into()))
+        );
+    }
+
+    #[test]
+    fn other_firmware_store_values_are_refused() {
+        for raw in [
+            "https://lightplayer.app",
+            "https://evil.example",
+            "https%3A%2F%2Fevil.example",
+            "http://8.8.8.8",
+            "http://127.0.0.1.nip.io",
+            "http://localhost.evil.example",
+            "ftp://127.0.0.1",
+            "127.0.0.1:2812",
+            "http://127.0.0.1:2812/firmware",
+            "http://127.0.0.1:2812?x=1",
+            "http://user@127.0.0.1",
+            "http://127.0.0.1:port",
+            "http://",
+            "http://[::1",
+        ] {
+            assert!(
+                matches!(judge_firmware_store(raw), FirmwareStoreFlag::Refused { .. }),
+                "{raw}"
+            );
+        }
+        assert_eq!(DevUrlFlags::parse("?firmware-store=").firmware_store, None);
+    }
+
+    #[test]
+    fn the_default_origin_is_lightplayer_app() {
+        assert_eq!(firmware_store_origin(), "https://lightplayer.app");
     }
 
     #[test]

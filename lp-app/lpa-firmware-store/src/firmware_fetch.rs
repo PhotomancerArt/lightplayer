@@ -31,3 +31,11 @@ pub trait FirmwareFetch {
     /// `Ok(None)` is a 404. `Err` is offline, a 5xx, or a protocol error.
     fn get(&self, url: &str) -> LocalBoxFuture<'_, Result<Option<Vec<u8>>, FetchError>>;
 }
+
+/// A shared fetch is a fetch, so an edge can hold one type-erased
+/// (`FirmwareStore<Rc<dyn FirmwareFetch>>`).
+impl<T: FirmwareFetch + ?Sized> FirmwareFetch for std::rc::Rc<T> {
+    fn get(&self, url: &str) -> LocalBoxFuture<'_, Result<Option<Vec<u8>>, FetchError>> {
+        (**self).get(url)
+    }
+}
