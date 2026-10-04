@@ -117,6 +117,8 @@ pub async fn run_uart_link(shared: &'static UartLinkShared, pacing: PassPacing) 
 
     loop {
         let pass_started = now_us();
+        #[cfg(feature = "frame-pace-diag")]
+        let pace_pass_start = crate::frame_pace_diag::now_us();
         feed_rx(shared, &mut buf);
 
         let now = now_us();
@@ -159,6 +161,10 @@ pub async fn run_uart_link(shared: &'static UartLinkShared, pacing: PassPacing) 
             }
         }
 
+        #[cfg(feature = "frame-pace-diag")]
+        crate::frame_pace_diag::link_pass(
+            crate::frame_pace_diag::now_us().saturating_sub(pace_pass_start) as u32,
+        );
         // A burst longer than one pass's records: go round again while the
         // link keeps taking them (the datagram queue's own room gates it).
         // A pass that moved none waits for the event that makes room (an ACK

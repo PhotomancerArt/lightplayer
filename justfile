@@ -1031,6 +1031,10 @@ clippy-fw-esp32s3:
     # stack diagnostic, and the app WITHOUT the thread (the link task back on
     # the main executor, no messages-first). Both are cfg'd out of the
     # defaults, so nothing else here compiles them.
+    # `frame_pace_diag` is additive too: the `[pace]` frame-timing lines PR
+    # #943's desk A/B and the editor-read defect were measured with.
+    echo "clippy: --features frame_pace_diag"
+    cargo clippy --profile release-esp32v3 --features frame_pace_diag -- --no-deps -D warnings
     echo "clippy: --features io_thread_stack_diag"
     cargo clippy --release --features io_thread_stack_diag -- --no-deps -D warnings
     echo "clippy: io-thread OFF"

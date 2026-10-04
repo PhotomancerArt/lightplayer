@@ -106,6 +106,12 @@ io-thread = ["server", "esp-rtos/esp-radio", "esp-rtos/esp-alloc", "dep:esp-radi
 # `[iostack]` at the heartbeat — OFF by default, never shipped: it finds the
 # stack by scanning esp-rtos's private task record (`src/io_thread_stack_diag.rs`).
 io_thread_stack_diag = ["io-thread"]
+# Frame pacing measured on the board — OFF by default, never shipped: one
+# `[pace]` line every 5 s with frame intervals, render offset and judder, the
+# tick's cost with and without requests, and the link task's passes
+# (`fw_esp32_common::frame_pace_diag`). For "do the LEDs stutter while a host
+# talks to the board?", which the average frame rate cannot answer.
+frame_pace_diag = ["server", "fw-esp32-common/frame-pace-diag"]
 
 # Periodic WS281x telemetry over the serial link — OFF by default.
 #
