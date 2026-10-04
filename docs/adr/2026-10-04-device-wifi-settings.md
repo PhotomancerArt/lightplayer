@@ -25,7 +25,7 @@ says so.
 ### The file: `/.lp/network.json`, its own `version: 1`
 
 ```json
-{"version":1,"wifi":{"ssid":"lp-walk-net","password":"…","enabled":true},"lanOnly":false}
+{"version":1,"wifi":{"ssid":"lp-walk-net","password":"…","enabled":true},"cloudRelay":true}
 ```
 
 `lpc_access::NetworkFile` (`lp-core/lpc-access/src/network_file.rs`), schema
@@ -105,17 +105,22 @@ USB is the trusted, physical link.
   backup) carries `network.json` in plaintext, as it carries the access
   keys: a restore must bring Wi‑Fi back. Treat an archive like the board.
 
-### One relay switch: `lanOnly`, default false (WQ5)
+### One relay switch: `cloudRelay`, default true (WQ5)
 
-The relay is on by default (roadmap D9); `lanOnly: true` means never dial
-it. One field, not a `relay` flag that would be the same bit inverted.
-Studio shows the switch now, with "applies once this firmware uses the
-relay" while the firmware does not join.
+The relay is on by default (roadmap D9): `cloudRelay: true` lets
+lightplayer.app reach the board through the cloud, `false` keeps it to its
+own network. A missing field reads as on. The switch is named for what it
+turns on, not for what it forbids (Yona's review of PR #972: "positive
+options are better"), so Studio's toggle reads "Cloud relay", on by
+default, with "Lets lightplayer.app reach this board through the cloud"
+under it, and `lp-cli wifi set --cloud-relay on|off`. Studio shows the
+switch now, with "applies once this firmware uses the relay" while the
+firmware does not join.
 
 ### The status never carries the password (WQ6)
 
 Every request answers `ServerMsgBody::NetworkStatus { wifi?: { ssid,
-hasPassword, enabled }, lanOnly, station }`. The SSID reads back (it is
+hasPassword, enabled }, cloudRelay, station }`. The SSID reads back (it is
 broadcast anyway); the password never. A new SSID requires `password`
 (`""` for open), so an old password is never offered to a new network.
 `station` is `unsupported | off | joining | joined{ip,rssi} |
@@ -127,7 +132,7 @@ unchanged (the learned dictionary needs nothing for new variants).
 ### Secret offer parameters (WQ8)
 
 Studio's Wi‑Fi verbs are offers at `devices/<board>/wifi/{set, enabled,
-lan-only, forget}` (Forget Lasting). Offer `Text` parameters gain
+cloud-relay, forget}` (Forget Lasting). Offer `Text` parameters gain
 `secret`: a renderer draws it as a password field; a press's stamp
 (`OfferPress.args`, what the app agent hears) carries `•••`
 (`SECRET_MARKER`) in its place while the binder sees the real value; the

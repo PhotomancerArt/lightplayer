@@ -24,7 +24,7 @@
 //!   at edit, for now.
 //! - **The device network file** ([`NetworkFile`], root `/.lp/network.json`,
 //!   `version: 1`): the saved Wi-Fi network ([`WifiNetwork`], validated to
-//!   the 802.11 / WPA2 rules) and the `lanOnly` relay switch.
+//!   the 802.11 / WPA2 rules) and the `cloudRelay` switch (on by default).
 //! - **Write-only files.** Neither access file, nor the network file, is
 //!   ever readable over any link at any tier ([`is_write_only_file_path`]).
 //!

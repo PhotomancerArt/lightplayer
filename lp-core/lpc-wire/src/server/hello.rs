@@ -40,10 +40,10 @@ use crate::server::hello_auth::HelloAuth;
 /// - 36: Wi-Fi settings on the device (plan
 ///   `lp2025/2026-10-04-0808-wifi-settings`, Wi-Fi roadmap M5) — three
 ///   edit-tier requests, `ClientRequest::NetworkStatus`, `NetworkSet`
-///   (partial: `ssid`, a write-only `password`, `enabled`, `lanOnly`) and
+///   (partial: `ssid`, a write-only `password`, `enabled`, `cloudRelay`) and
 ///   `NetworkForget`, each answered with the new
 ///   `ServerMsgBody::NetworkStatus` (the saved network without its
-///   password, `lanOnly`, and a `StationState` that every M5 image reports
+///   password, `cloudRelay`, and a `StationState` that every M5 image reports
 ///   as `unsupported`). The board keeps them in `/.lp/network.json`,
 ///   write-only on every link. New enum variants both ways: an old board
 ///   cannot decode the requests and an old client cannot decode the reply.

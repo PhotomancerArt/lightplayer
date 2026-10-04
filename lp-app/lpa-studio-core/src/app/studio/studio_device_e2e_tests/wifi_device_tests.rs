@@ -15,7 +15,7 @@ const PASSWORD: &str = "correct-horse-42";
 
 /// Connect over USB → the status is read once; set name and password through
 /// the offer → the board holds them and the card reads them back; the
-/// toggles change one setting each; Forget is Lasting and leaves `lanOnly`.
+/// toggles change one setting each; Forget is Lasting and leaves `cloudRelay`.
 /// Nothing Studio shows or logs holds the password.
 #[test]
 fn wifi_is_read_on_connect_set_through_its_offer_and_forgotten() {
@@ -25,7 +25,7 @@ fn wifi_is_read_on_connect_set_through_its_offer_and_forgotten() {
 
     let status = wifi_status(&mut bench, &tasks, target);
     assert_eq!(status.wifi, None, "a fresh board has no network");
-    assert!(!status.lan_only);
+    assert!(status.cloud_relay, "the relay is on by default");
     assert_eq!(status.station, crate::StationState::Unsupported);
     let set = wifi_verb(&mut bench, target, "set");
     assert!(bench.offered(&set).takes_a_secret());
@@ -67,15 +67,15 @@ fn wifi_is_read_on_connect_set_through_its_offer_and_forgotten() {
     assert_eq!(wifi_status(&mut bench, &tasks, target).wifi, status.wifi);
 
     // One switch at a time.
-    let lan_only = wifi_verb(&mut bench, target, "lan-only");
+    let cloud_relay = wifi_verb(&mut bench, target, "cloud-relay");
     bench
         .press(
-            lan_only,
-            OfferArgs::new().with(crate::WIFI_ENABLED_PARAM, "true"),
+            cloud_relay,
+            OfferArgs::new().with(crate::WIFI_ENABLED_PARAM, "false"),
         )
         .expect("the switch starts");
     let status = wifi_status(&mut bench, &tasks, target);
-    assert!(status.lan_only);
+    assert!(!status.cloud_relay);
     let enabled = wifi_verb(&mut bench, target, "enabled");
     bench
         .press(
@@ -98,7 +98,7 @@ fn wifi_is_read_on_connect_set_through_its_offer_and_forgotten() {
         .expect("the forget starts");
     let status = wifi_status(&mut bench, &tasks, target);
     assert_eq!(status.wifi, None);
-    assert!(status.lan_only, "lanOnly outlives the network");
+    assert!(!status.cloud_relay, "cloudRelay outlives the network");
     assert_no_password_anywhere(&mut bench);
 }
 

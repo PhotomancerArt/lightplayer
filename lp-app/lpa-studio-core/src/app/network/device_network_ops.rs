@@ -3,7 +3,7 @@
 //! tier).
 //!
 //! Each request is answered with the status as it now stands — the saved
-//! network without its password, `lanOnly`, and what the station is doing —
+//! network without its password, `cloudRelay`, and what the station is doing —
 //! so one conversation is one request. [`run_network_step`] runs it and
 //! says how it went as a [`NetworkCommand`], posted back onto the actor's
 //! queue like every other device conversation.
@@ -26,7 +26,7 @@ pub enum NetworkStep {
         ssid: Option<String>,
         password: PasswordChange,
         enabled: Option<bool>,
-        lan_only: Option<bool>,
+        cloud_relay: Option<bool>,
     },
     /// `NetworkForget`.
     Forget,
@@ -55,10 +55,10 @@ pub async fn run_network_step<Io: ClientIo>(
             ssid,
             password,
             enabled,
-            lan_only,
+            cloud_relay,
         } => {
             client
-                .network_set(ssid, password.to_wire(), enabled, lan_only)
+                .network_set(ssid, password.to_wire(), enabled, cloud_relay)
                 .await
         }
         NetworkStep::Forget => client.network_forget().await,
@@ -113,7 +113,7 @@ mod tests {
             ssid: ssid.map(str::to_string),
             password,
             enabled: None,
-            lan_only: None,
+            cloud_relay: None,
         }
     }
 

@@ -52,7 +52,7 @@ fn a_fresh_board_has_no_network_and_says_it_cannot_join() {
         status,
         NetworkStatus {
             wifi: None,
-            lan_only: false,
+            cloud_relay: true,
             station: StationState::Unsupported,
         }
     );
@@ -96,7 +96,7 @@ fn no_reply_carries_the_password() {
         set(Some(SSID), Some(PASSWORD), None, None),
         ClientRequest::NetworkStatus,
         set(None, None, Some(false), None),
-        set(None, None, None, Some(true)),
+        set(None, None, None, Some(false)),
         set(None, Some(PASSWORD), None, None),
         ClientRequest::NetworkForget,
     ] {
@@ -116,11 +116,11 @@ fn partial_updates_change_only_what_is_given() {
 
     let status = rig.set(USB, None, None, Some(false), None);
     assert!(!status.wifi.as_ref().unwrap().enabled);
-    assert!(!status.lan_only);
+    assert!(status.cloud_relay);
     assert_eq!(rig.stored().wifi.unwrap().password, PASSWORD);
 
-    let status = rig.set(USB, None, None, None, Some(true));
-    assert!(status.lan_only);
+    let status = rig.set(USB, None, None, None, Some(false));
+    assert!(!status.cloud_relay);
     assert!(
         !status.wifi.as_ref().unwrap().enabled,
         "an absent field is left as it was"
@@ -202,9 +202,9 @@ fn enabled_or_password_with_no_network_saved_is_refused() {
         NO_NETWORK_SAVED
     );
     assert!(!rig.file_exists());
-    // `lanOnly` alone is fine with nothing saved.
-    let status = rig.set(USB, None, None, None, Some(true));
-    assert!(status.lan_only);
+    // `cloudRelay` alone is fine with nothing saved.
+    let status = rig.set(USB, None, None, None, Some(false));
+    assert!(!status.cloud_relay);
     assert!(status.wifi.is_none());
 }
 
@@ -216,12 +216,12 @@ fn a_network_saved_switched_off_stays_off() {
 }
 
 #[test]
-fn forget_drops_the_network_and_keeps_lan_only() {
+fn forget_drops_the_network_and_keeps_cloud_relay() {
     let mut rig = Rig::new();
-    rig.set(USB, Some(SSID), Some(PASSWORD), None, Some(true));
+    rig.set(USB, Some(SSID), Some(PASSWORD), None, Some(false));
     let status = rig.forget(USB);
     assert!(status.wifi.is_none());
-    assert!(status.lan_only);
+    assert!(!status.cloud_relay, "the relay switch outlives the network");
     let raw = rig.raw();
     assert!(!raw.contains(PASSWORD), "{raw}");
     assert!(!raw.contains(SSID), "{raw}");
@@ -503,9 +503,9 @@ impl Rig {
         ssid: Option<&str>,
         password: Option<&str>,
         enabled: Option<bool>,
-        lan_only: Option<bool>,
+        cloud_relay: Option<bool>,
     ) -> NetworkStatus {
-        self.answered(link, set(ssid, password, enabled, lan_only))
+        self.answered(link, set(ssid, password, enabled, cloud_relay))
     }
 
     fn forget(&mut self, link: Link) -> NetworkStatus {
@@ -589,13 +589,13 @@ fn set(
     ssid: Option<&str>,
     password: Option<&str>,
     enabled: Option<bool>,
-    lan_only: Option<bool>,
+    cloud_relay: Option<bool>,
 ) -> ClientRequest {
     ClientRequest::NetworkSet {
         ssid: ssid.map(String::from),
         password: password.map(WifiPassword::new),
         enabled,
-        lan_only,
+        cloud_relay,
     }
 }
 

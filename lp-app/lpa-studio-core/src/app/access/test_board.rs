@@ -278,9 +278,14 @@ impl FakeBoardIo {
                         ssid,
                         password,
                         enabled,
-                        lan_only,
+                        cloud_relay,
                     } => network_store::network_set(
-                        &state.fs, station, ssid, password, enabled, lan_only,
+                        &state.fs,
+                        station,
+                        ssid,
+                        password,
+                        enabled,
+                        cloud_relay,
                     ),
                     ClientRequest::NetworkForget => {
                         network_store::network_forget(&state.fs, station)

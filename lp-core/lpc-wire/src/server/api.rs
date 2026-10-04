@@ -189,7 +189,7 @@ pub enum ServerMsgBody {
         entries: Vec<crate::server::AccessEntryInfo>,
     },
     /// The device's network settings and what its station is doing: the
-    /// saved network without its password, `lanOnly`, and the station
+    /// saved network without its password, `cloudRelay`, and the station
     /// state. The answer to [`crate::ClientRequest::NetworkStatus`] and to
     /// each network change (`NetworkSet`, `NetworkForget`), which reply
     /// with the status as it now stands. Edit tier only.
@@ -496,12 +496,12 @@ mod tests {
         let json = crate::json::to_string(&saved).unwrap();
         assert_eq!(
             json,
-            r#"{"networkStatus":{"wifi":{"ssid":"lp-walk-net","hasPassword":true,"enabled":true},"lanOnly":false,"station":"unsupported"}}"#
+            r#"{"networkStatus":{"wifi":{"ssid":"lp-walk-net","hasPassword":true,"enabled":true},"cloudRelay":true,"station":"unsupported"}}"#
         );
         assert!(!json.contains("password\":"), "{json}");
         assert_eq!(
             crate::json::to_string(&none).unwrap(),
-            r#"{"networkStatus":{"lanOnly":true,"station":"off"}}"#
+            r#"{"networkStatus":{"cloudRelay":false,"station":"off"}}"#
         );
         let json = crate::json::to_string(&joined).unwrap();
         match crate::json::from_str::<ServerMsgBody>(&json).unwrap() {
@@ -580,17 +580,17 @@ mod tests {
         [
             ServerMsgBody::NetworkStatus(NetworkStatus {
                 wifi: Some(wifi.clone()),
-                lan_only: false,
+                cloud_relay: true,
                 station: StationState::Unsupported,
             }),
             ServerMsgBody::NetworkStatus(NetworkStatus {
                 wifi: None,
-                lan_only: true,
+                cloud_relay: false,
                 station: StationState::Off,
             }),
             ServerMsgBody::NetworkStatus(NetworkStatus {
                 wifi: Some(wifi),
-                lan_only: false,
+                cloud_relay: true,
                 station: StationState::Joined {
                     ip: String::from("10.0.0.7"),
                     rssi: -48,

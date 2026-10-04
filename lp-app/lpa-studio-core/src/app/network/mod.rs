@@ -36,10 +36,10 @@ pub use network_controller::{NetworkController, WifiReach, wifi_reach_for};
 pub use network_op::{NetworkChange, NetworkOp};
 pub use ui_device_wifi::{NEEDS_AUTHOR, READING, UiDeviceWifi, WIFI_ABOUT};
 pub use wifi_offers::{
-    WIFI_BUSY, WIFI_ENABLED_PARAM, WIFI_NETWORK_PARAM, WIFI_PASSWORD_PARAM, WIFI_SEGMENT,
-    wifi_offers,
+    WIFI_BUSY, WIFI_CLOUD_RELAY_SUMMARY, WIFI_ENABLED_PARAM, WIFI_NETWORK_PARAM,
+    WIFI_PASSWORD_PARAM, WIFI_SEGMENT, wifi_offers,
 };
 pub use wifi_password_change::PasswordChange;
 pub use wifi_status_sentence::{
-    NOT_SET, SAVED_UNSUPPORTED, lan_only_sentence, wifi_status_sentence,
+    NOT_SET, RELAY_OFF, RELAY_ON, SAVED_UNSUPPORTED, cloud_relay_sentence, wifi_status_sentence,
 };

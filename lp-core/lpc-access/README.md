@@ -25,7 +25,7 @@ never readable back over any link.
 | `device_access_file.rs` | root `/.lp/access.json`, `version: 3` (v2 and v1 still read); a missing store is `fresh()` (Bluetooth on, open to anyone nearby at edit, for now), a damaged one `locked()` (Bluetooth off, open to nobody); merge by salt |
 | `open_to.rs` | `OpenTo`: who nearby holds what with no login — `nobody`, `play`, `edit` |
 | `write_only_file_path.rs` | `is_write_only_file_path`: the fs gate's predicate — `.lp/access.json` and `.lp/network.json`, any spelling, refused to every link at every tier |
-| `network_file.rs` | root `/.lp/network.json`, `version: 1`: the saved Wi-Fi network and `lanOnly`; missing or damaged = no network |
+| `network_file.rs` | root `/.lp/network.json`, `version: 1`: the saved Wi-Fi network and `cloudRelay` (default on); missing or damaged = no network |
 | `wifi_network.rs` | `WifiNetwork { ssid, password, enabled }` and the 802.11/WPA2 rules (`validate_ssid`, `validate_password`); `Debug` never prints the password |
 | `network_file_error.rs` | why the network file, or a network to save, was refused — no variant carries a password |
 | `access_file_error.rs` | why an access file could not be read (every variant is a refusal) |

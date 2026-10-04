@@ -276,12 +276,12 @@ impl NetworkController {
                 ssid,
                 password,
                 enabled,
-                lan_only,
+                cloud_relay,
             } => NetworkStep::Set {
                 ssid,
                 password,
                 enabled,
-                lan_only,
+                cloud_relay,
             },
             NetworkChange::Forget => NetworkStep::Forget,
         };
@@ -405,7 +405,7 @@ mod tests {
         let effects = DeviceEffects::new();
         let status = NetworkStatus {
             wifi: None,
-            lan_only: false,
+            cloud_relay: true,
             station: lpc_wire::server::StationState::Unsupported,
         };
         network.apply(

@@ -68,7 +68,7 @@ pub fn write_network_file(fs: &dyn LpFs, file: &NetworkFile) -> Result<(), Strin
         .map_err(|error| format!("{error}"))
 }
 
-/// `NetworkStatus`: the saved network without its password, `lanOnly`, and
+/// `NetworkStatus`: the saved network without its password, `cloudRelay`, and
 /// `station`.
 #[inline(never)]
 pub fn network_status(fs: &dyn LpFs, station: StationState) -> ServerMsgBody {
@@ -83,7 +83,7 @@ pub fn network_status(fs: &dyn LpFs, station: StationState) -> ServerMsgBody {
 /// - `enabled` or `password` with no network saved and no `ssid` is refused.
 /// - A network saved for the first time is switched on unless `enabled`
 ///   says otherwise.
-/// - `lan_only` may be set with no network saved.
+/// - `cloud_relay` may be set with no network saved.
 ///
 /// A broken rule answers [`ServerMsgBody::Error`] with a sentence that names
 /// the rule (never the password) and writes nothing.
@@ -94,7 +94,7 @@ pub fn network_set(
     ssid: Option<String>,
     password: Option<WifiPassword>,
     enabled: Option<bool>,
-    lan_only: Option<bool>,
+    cloud_relay: Option<bool>,
 ) -> ServerMsgBody {
     let current = read_network_file(fs);
     let mut next = current.clone();
@@ -122,15 +122,15 @@ pub fn network_set(
             }
             next.wifi = Some(saved);
         }
-        // Nothing saved and no name: only `lanOnly` can change.
+        // Nothing saved and no name: only `cloudRelay` can change.
         (None, _) => {
             if password.is_some() || enabled.is_some() {
                 return error(NO_NETWORK_SAVED);
             }
         }
     }
-    if let Some(lan_only) = lan_only {
-        next.lan_only = lan_only;
+    if let Some(cloud_relay) = cloud_relay {
+        next.cloud_relay = cloud_relay;
     }
     if let Some(wifi) = &next.wifi {
         if let Err(rule) =
@@ -143,7 +143,7 @@ pub fn network_set(
 }
 
 /// `NetworkForget`: drop the saved network (name and password), keep
-/// `lanOnly`, and answer the status. Forgetting with nothing saved is not
+/// `cloudRelay`, and answer the status. Forgetting with nothing saved is not
 /// an error, and writes nothing.
 #[inline(never)]
 pub fn network_forget(fs: &dyn LpFs, station: StationState) -> ServerMsgBody {

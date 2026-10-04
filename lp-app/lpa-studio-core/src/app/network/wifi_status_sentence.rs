@@ -28,20 +28,25 @@ pub fn wifi_status_sentence(status: &NetworkStatus) -> String {
     }
 }
 
-/// The relay line: "Relay on (default)" or "LAN only — never uses the
-/// relay", with "applies once this firmware uses the relay" while the
-/// firmware does not join at all.
-pub fn lan_only_sentence(status: &NetworkStatus) -> String {
-    let line = if status.lan_only {
-        "LAN only — never uses the relay"
+/// The relay line: [`RELAY_ON`] or [`RELAY_OFF`], with "applies once this
+/// firmware uses the relay" while the firmware does not join at all.
+pub fn cloud_relay_sentence(status: &NetworkStatus) -> String {
+    let line = if status.cloud_relay {
+        RELAY_ON
     } else {
-        "Relay on (default)"
+        RELAY_OFF
     };
     match status.station {
         StationState::Unsupported => format!("{line} · applies once this firmware uses the relay"),
         _ => line.to_string(),
     }
 }
+
+/// The cloud relay is on (the default).
+pub const RELAY_ON: &str = "Relay on (default)";
+
+/// The cloud relay is switched off.
+pub const RELAY_OFF: &str = "Relay off — local network only";
 
 /// No network saved.
 pub const NOT_SET: &str = "Not set.";
@@ -54,14 +59,14 @@ mod tests {
     use super::*;
     use lpc_wire::server::WifiInfo;
 
-    fn status(station: StationState, saved: bool, lan_only: bool) -> NetworkStatus {
+    fn status(station: StationState, saved: bool, cloud_relay: bool) -> NetworkStatus {
         NetworkStatus {
             wifi: saved.then(|| WifiInfo {
                 ssid: "lp-walk-net".to_string(),
                 has_password: true,
                 enabled: true,
             }),
-            lan_only,
+            cloud_relay,
             station,
         }
     }
@@ -100,7 +105,7 @@ mod tests {
         ];
         for (station, saved, sentence) in cases {
             assert_eq!(
-                wifi_status_sentence(&status(station.clone(), saved, false)),
+                wifi_status_sentence(&status(station.clone(), saved, true)),
                 sentence,
                 "{station:?}"
             );
@@ -110,12 +115,12 @@ mod tests {
     #[test]
     fn the_relay_line_says_whether_it_applies_yet() {
         assert_eq!(
-            lan_only_sentence(&status(StationState::Unsupported, true, false)),
+            cloud_relay_sentence(&status(StationState::Unsupported, true, true)),
             "Relay on (default) · applies once this firmware uses the relay"
         );
         assert_eq!(
-            lan_only_sentence(&status(StationState::Off, true, true)),
-            "LAN only — never uses the relay"
+            cloud_relay_sentence(&status(StationState::Off, true, false)),
+            RELAY_OFF
         );
     }
 }

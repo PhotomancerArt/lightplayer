@@ -3,7 +3,7 @@
 use lpa_devices::DeviceId;
 use lpc_wire::server::NetworkStatus;
 
-use super::wifi_status_sentence::{lan_only_sentence, wifi_status_sentence};
+use super::wifi_status_sentence::{cloud_relay_sentence, wifi_status_sentence};
 
 /// One device's Wi‑Fi facts, joined onto its card (the Connections
 /// group's Wi‑Fi row). Present for every LightPlayer board on a link that
@@ -47,9 +47,9 @@ impl UiDeviceWifi {
         self.status.as_ref().map(wifi_status_sentence)
     }
 
-    /// The relay line ([`lan_only_sentence`]), once read.
-    pub fn lan_line(&self) -> Option<String> {
-        self.status.as_ref().map(lan_only_sentence)
+    /// The relay line ([`cloud_relay_sentence`]), once read.
+    pub fn relay_line(&self) -> Option<String> {
+        self.status.as_ref().map(cloud_relay_sentence)
     }
 
     /// What the popover says above the form while there is no status:
@@ -97,7 +97,7 @@ mod tests {
                 has_password: true,
                 enabled: true,
             }),
-            lan_only: false,
+            cloud_relay: true,
             station: StationState::Unsupported,
         };
         assert_eq!(wifi(Some(saved.clone()), true).row_value(), "lp-walk-net");

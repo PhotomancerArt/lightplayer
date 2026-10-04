@@ -17,8 +17,9 @@ pub struct NetworkStatus {
     /// The saved network, without its password; absent when none is saved.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wifi: Option<WifiInfo>,
-    /// Never dial the relay.
-    pub lan_only: bool,
+    /// Lets lightplayer.app reach this board through the cloud relay (on
+    /// by default).
+    pub cloud_relay: bool,
     /// What the station is doing.
     pub station: StationState,
 }
@@ -29,7 +30,7 @@ impl NetworkStatus {
     pub fn of(file: &NetworkFile, station: StationState) -> Self {
         Self {
             wifi: file.wifi.as_ref().map(WifiInfo::from),
-            lan_only: file.lan_only,
+            cloud_relay: file.cloud_relay,
             station,
         }
     }

@@ -540,7 +540,7 @@ mod tests {
                 ssid: Some(String::from("a")),
                 password: Some(lpc_wire::WifiPassword::new(PASSWORD)),
                 enabled: None,
-                lan_only: None,
+                cloud_relay: None,
             },
         };
         let line = json::to_serial_line(&set).unwrap();

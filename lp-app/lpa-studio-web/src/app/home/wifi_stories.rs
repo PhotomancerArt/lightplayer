@@ -1,7 +1,7 @@
 //! Wi‑Fi stories (Wi‑Fi roadmap M5, plan P5): the card's Wi‑Fi row, and the
 //! Wi‑Fi panel in every state a board can answer — not set, saved on a
 //! firmware that cannot join yet (every M5 image), M6's joining / joined /
-//! failed, LAN only, reading, a refusal in the board's words, a link below
+//! failed, the cloud relay off, reading, a refusal in the board's words, a link below
 //! author, a change in flight, and Forget armed.
 //!
 //! Functional, not designed: the UX pass is later. Every one is also
@@ -32,7 +32,7 @@ fn wifi_row_on_the_card() -> Element {
                 examples: Vec::new(),
                 open_uid: Some("dev000000daqf6dvvqz".to_string()),
                 access: Some(usb_access(Some(true), false)),
-                wifi: Some(wifi(saved(StationState::Unsupported, false))),
+                wifi: Some(wifi(saved(StationState::Unsupported, true))),
                 on_action: |_| {},
             }
         }
@@ -42,17 +42,17 @@ fn wifi_row_on_the_card() -> Element {
 // --- 2 · The panel ----------------------------------------------------------
 
 #[story(
-    description = "No network saved: \"Not set.\", the relay line, and the form — a network name (required) and a password field (dots, Show/Hide; blank means an open network). No Forget and no on/off switch until something is saved; the LAN-only switch is always there."
+    description = "No network saved: \"Not set.\", the relay line, and the form — a network name (required) and a password field (dots, Show/Hide; blank means an open network). No Forget and no on/off switch until something is saved; the Cloud relay switch (on by default, \"Lets lightplayer.app reach this board through the cloud.\") is always there."
 )]
 fn wifi_not_set() -> Element {
     panel(wifi(not_set()), None)
 }
 
 #[story(
-    description = "The M5 reality: a network saved on a firmware that does not join yet — \"Saved. This firmware doesn't join Wi‑Fi yet.\" The name field shows the saved name as its placeholder; the password field says \"unchanged\" (the board never gives the password back). Join this network, LAN only, and Forget below."
+    description = "The M5 reality: a network saved on a firmware that does not join yet — \"Saved. This firmware doesn't join Wi‑Fi yet.\" The name field shows the saved name as its placeholder; the password field says \"unchanged\" (the board never gives the password back). Join this network, Cloud relay, and Forget below."
 )]
 fn wifi_saved_unsupported() -> Element {
-    panel(wifi(saved(StationState::Unsupported, false)), None)
+    panel(wifi(saved(StationState::Unsupported, true)), None)
 }
 
 #[story(
@@ -75,18 +75,18 @@ fn wifi_typing_a_network() -> Element {
 fn wifi_station_states() -> Element {
     rsx! {
         div { class: "tw:grid tw:gap-3 tw:sm:grid-cols-3",
-            {panel(wifi(saved(StationState::Joining, false)), None)}
-            {panel(wifi(saved(StationState::Joined { ip: "192.168.1.40".to_string(), rssi: -58 }, false)), None)}
-            {panel(wifi(saved(StationState::Failed { reason: "wrong password".to_string() }, false)), None)}
+            {panel(wifi(saved(StationState::Joining, true)), None)}
+            {panel(wifi(saved(StationState::Joined { ip: "192.168.1.40".to_string(), rssi: -58 }, true)), None)}
+            {panel(wifi(saved(StationState::Failed { reason: "wrong password".to_string() }, true)), None)}
         }
     }
 }
 
 #[story(
-    description = "LAN only on: \"LAN only — never uses the relay\" (with \"applies once this firmware uses the relay\" while the firmware does not join)."
+    description = "The cloud relay switched off: \"Relay off — local network only\" (with \"applies once this firmware uses the relay\" while the firmware does not join), and the Cloud relay switch off."
 )]
-fn wifi_lan_only() -> Element {
-    panel(wifi(saved(StationState::Unsupported, true)), None)
+fn wifi_cloud_relay_off() -> Element {
+    panel(wifi(saved(StationState::Unsupported, false)), None)
 }
 
 #[story(
@@ -115,7 +115,7 @@ fn wifi_refused() -> Element {
     description = "A Bluetooth link unlocked for play only: the board is not asked, and the panel says what it needs — \"Needs Author access — unlock with an author password.\" No verbs."
 )]
 fn wifi_needs_author() -> Element {
-    let mut play = wifi(saved(StationState::Unsupported, false));
+    let mut play = wifi(saved(StationState::Unsupported, true));
     play.can_edit = false;
     play.status = None;
     panel(play, None)
@@ -125,7 +125,7 @@ fn wifi_needs_author() -> Element {
     description = "A change on its way: \"Writing to the device…\", and every verb drawn disabled (never hidden) until the board answers."
 )]
 fn wifi_writing() -> Element {
-    let mut writing = wifi(saved(StationState::Unsupported, false));
+    let mut writing = wifi(saved(StationState::Unsupported, true));
     writing.writing = true;
     panel(writing, None)
 }
@@ -134,7 +134,7 @@ fn wifi_writing() -> Element {
     description = "Forget armed (the user's first click): it is Lasting — the board forgets lp-walk-net and its password, and only the user can bring the password back."
 )]
 fn wifi_forget_armed() -> Element {
-    let wifi = wifi(saved(StationState::Unsupported, false));
+    let wifi = wifi(saved(StationState::Unsupported, true));
     let offers = offers(&wifi);
     rsx! {
         div { class: PANEL_FRAME,
@@ -175,19 +175,19 @@ fn wifi(status: NetworkStatus) -> UiDeviceWifi {
 fn not_set() -> NetworkStatus {
     NetworkStatus {
         wifi: None,
-        lan_only: false,
+        cloud_relay: true,
         station: StationState::Unsupported,
     }
 }
 
-fn saved(station: StationState, lan_only: bool) -> NetworkStatus {
+fn saved(station: StationState, cloud_relay: bool) -> NetworkStatus {
     NetworkStatus {
         wifi: Some(WifiInfo {
             ssid: "lp-walk-net".to_string(),
             has_password: true,
             enabled: true,
         }),
-        lan_only,
+        cloud_relay,
         station,
     }
 }

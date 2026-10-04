@@ -10,12 +10,12 @@ use crate::wifi_network::WifiNetwork;
 /// of the device store (`/.lp/access.json`) with its own `version`.
 ///
 /// ```json
-/// {"version":1,"wifi":{"ssid":"lp-walk-net","password":"…","enabled":true},"lanOnly":false}
+/// {"version":1,"wifi":{"ssid":"lp-walk-net","password":"…","enabled":true},"cloudRelay":true}
 /// ```
 ///
 /// - `wifi` — the saved network ([`WifiNetwork`]); absent when none is.
-/// - `lanOnly` — never dial the relay. The relay is on by default, so the
-///   flag is off by default.
+/// - `cloudRelay` — lets lightplayer.app reach this board through the
+///   cloud relay. On by default, so a missing field reads as on.
 ///
 /// **Write-only on every link.** The password is a secret: no link at any
 /// tier reads this file ([`crate::is_write_only_file_path`]); the server
@@ -45,9 +45,10 @@ pub struct NetworkFile {
     /// The saved Wi-Fi network; absent when none is saved.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wifi: Option<WifiNetwork>,
-    /// Never dial the relay (the relay is on by default).
-    #[serde(default)]
-    pub lan_only: bool,
+    /// Lets lightplayer.app reach this board through the cloud relay. On by
+    /// default: a missing field reads as on.
+    #[serde(default = "cloud_relay_default")]
+    pub cloud_relay: bool,
 }
 
 impl NetworkFile {
@@ -64,7 +65,7 @@ impl NetworkFile {
         Self {
             version: Self::VERSION,
             wifi: None,
-            lan_only: false,
+            cloud_relay: true,
         }
     }
 
@@ -99,6 +100,11 @@ impl Default for NetworkFile {
     }
 }
 
+/// The cloud relay is on unless the file turns it off.
+fn cloud_relay_default() -> bool {
+    true
+}
+
 /// Where the parse stopped — never serde's message, which may quote a value.
 fn malformed(error: serde_json::Error) -> NetworkFileError {
     NetworkFileError::Malformed {
@@ -115,7 +121,7 @@ mod tests {
 
     /// The version-1 file exactly as this writer produces it.
     const V1_FILE: &str = "{\"version\":1,\"wifi\":{\"ssid\":\"lp-walk-net\",\
-        \"password\":\"correct-horse-42\",\"enabled\":true},\"lanOnly\":false}";
+        \"password\":\"correct-horse-42\",\"enabled\":true},\"cloudRelay\":true}";
 
     fn saved() -> NetworkFile {
         NetworkFile {
@@ -125,7 +131,7 @@ mod tests {
                 password: "correct-horse-42".to_string(),
                 enabled: true,
             }),
-            lan_only: false,
+            cloud_relay: true,
         }
     }
 
@@ -137,19 +143,23 @@ mod tests {
     }
 
     #[test]
-    fn absent_wifi_and_absent_lan_only_read_as_none() {
+    fn absent_wifi_and_absent_cloud_relay_read_as_none() {
         let file = NetworkFile::from_json(b"{\"version\":1}").unwrap();
         assert_eq!(file, NetworkFile::none());
-        let lan = NetworkFile::from_json(b"{\"version\":1,\"lanOnly\":true}").unwrap();
-        assert!(lan.lan_only);
-        assert!(lan.wifi.is_none());
+        assert!(
+            file.cloud_relay,
+            "a missing cloudRelay means the relay is on"
+        );
+        let off = NetworkFile::from_json(b"{\"version\":1,\"cloudRelay\":false}").unwrap();
+        assert!(!off.cloud_relay);
+        assert!(off.wifi.is_none());
     }
 
     #[test]
     fn none_writes_no_wifi_key() {
         assert_eq!(
             NetworkFile::none().to_json().unwrap(),
-            "{\"version\":1,\"lanOnly\":false}"
+            "{\"version\":1,\"cloudRelay\":true}"
         );
         assert_eq!(NetworkFile::default(), NetworkFile::none());
     }

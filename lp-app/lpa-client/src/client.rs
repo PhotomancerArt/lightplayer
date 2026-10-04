@@ -365,7 +365,7 @@ where
     }
 
     /// The board's network settings: the saved Wi-Fi network without its
-    /// password, `lanOnly`, and what the station is doing. Edit tier.
+    /// password, `cloudRelay`, and what the station is doing. Edit tier.
     pub async fn network_status(
         &mut self,
     ) -> ClientResult<ClientOutcome<lpc_wire::server::NetworkStatus>> {
@@ -382,14 +382,14 @@ where
         ssid: Option<String>,
         password: Option<lpc_wire::WifiPassword>,
         enabled: Option<bool>,
-        lan_only: Option<bool>,
+        cloud_relay: Option<bool>,
     ) -> ClientResult<ClientOutcome<lpc_wire::server::NetworkStatus>> {
         self.network_request(
             ClientRequest::NetworkSet {
                 ssid,
                 password,
                 enabled,
-                lan_only,
+                cloud_relay,
             },
             "wifi.set",
         )
@@ -397,7 +397,7 @@ where
     }
 
     /// Forget the board's saved Wi-Fi network (name and password);
-    /// `lanOnly` stays.
+    /// `cloudRelay` stays.
     pub async fn network_forget(
         &mut self,
     ) -> ClientResult<ClientOutcome<lpc_wire::server::NetworkStatus>> {

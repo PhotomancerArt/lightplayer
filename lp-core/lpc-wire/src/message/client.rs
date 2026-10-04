@@ -137,7 +137,7 @@ pub enum ClientRequest {
     },
     /// The device's network settings: answered with
     /// [`crate::server::ServerMsgBody::NetworkStatus`] — the saved network
-    /// without its password, `lanOnly`, and what the station is doing.
+    /// without its password, `cloudRelay`, and what the station is doing.
     /// Edit tier.
     NetworkStatus,
     /// Change the saved network settings; an absent field is left as it is.
@@ -157,9 +157,9 @@ pub enum ClientRequest {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         enabled: Option<bool>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        lan_only: Option<bool>,
+        cloud_relay: Option<bool>,
     },
-    /// Forget the saved Wi-Fi network (its name and password); `lanOnly`
+    /// Forget the saved Wi-Fi network (its name and password); `cloudRelay`
     /// stays. Forgetting with nothing saved is not an error. Answered with
     /// the status. Edit tier.
     NetworkForget,
@@ -416,7 +416,7 @@ mod tests {
             ssid: Some(String::from("lp-walk-net")),
             password: Some(crate::message::WifiPassword::new("correct-horse-42")),
             enabled: None,
-            lan_only: None,
+            cloud_relay: None,
         };
         let json = crate::json::to_string(&set).unwrap();
         assert_eq!(
@@ -430,7 +430,7 @@ mod tests {
                 ssid,
                 password,
                 enabled: None,
-                lan_only: None,
+                cloud_relay: None,
             } => {
                 assert_eq!(ssid.as_deref(), Some("lp-walk-net"));
                 assert_eq!(password.unwrap().expose(), "correct-horse-42");
@@ -438,15 +438,15 @@ mod tests {
             other => panic!("wrong request type: {other:?}"),
         }
 
-        let lan = ClientRequest::NetworkSet {
+        let relay_off = ClientRequest::NetworkSet {
             ssid: None,
             password: None,
             enabled: Some(false),
-            lan_only: Some(true),
+            cloud_relay: Some(false),
         };
         assert_eq!(
-            crate::json::to_string(&lan).unwrap(),
-            r#"{"networkSet":{"enabled":false,"lanOnly":true}}"#
+            crate::json::to_string(&relay_off).unwrap(),
+            r#"{"networkSet":{"enabled":false,"cloudRelay":false}}"#
         );
         assert!(matches!(
             crate::json::from_str::<ClientRequest>(r#"{"networkSet":{}}"#).unwrap(),
@@ -454,7 +454,7 @@ mod tests {
                 ssid: None,
                 password: None,
                 enabled: None,
-                lan_only: None
+                cloud_relay: None
             }
         ));
     }

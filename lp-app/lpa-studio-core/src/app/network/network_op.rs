@@ -29,10 +29,10 @@ pub enum NetworkChange {
         ssid: Option<String>,
         password: PasswordChange,
         enabled: Option<bool>,
-        lan_only: Option<bool>,
+        cloud_relay: Option<bool>,
     },
     /// `NetworkForget`: the board drops the saved network and its password;
-    /// `lanOnly` stays.
+    /// `cloudRelay` stays.
     Forget,
 }
 
@@ -125,7 +125,7 @@ mod tests {
                 ssid: None,
                 password: PasswordChange::Keep,
                 enabled: Some(false),
-                lan_only: None,
+                cloud_relay: None,
             },
         );
         assert!(set.meta().consequence.is_routine());
@@ -140,7 +140,7 @@ mod tests {
                 ssid: Some("lp-walk-net".to_string()),
                 password: PasswordChange::Set("correct-horse-42".to_string()),
                 enabled: None,
-                lan_only: None,
+                cloud_relay: None,
             },
         );
         let printed = format!("{set:?}");

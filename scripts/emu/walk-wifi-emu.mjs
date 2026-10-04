@@ -12,7 +12,7 @@
 //       → the board's own flash holds the network file
 //       → reload the page, connect again → the network reads back from the
 //         board (Studio never stores it)
-//       → LAN only on → Forget (two clicks) → "Not set."
+//       → Cloud relay off (on by default) → Forget (two clicks) → "Not set."
 //
 // ⚠️ WHAT THIS PROVES: the transport, the UI and the board's store. NOT
 // access: the emulated firmware sees its trusted link on both lanes (the
@@ -246,16 +246,22 @@ async function main() {
       return `${how}; the row names ${SSID}; the password field says "unchanged"`;
     });
 
-    await step("lan-only", "turn LAN only on: the board's answer says so", async () => {
-      await driver.evaluate(`${PANEL}.querySelector('button[role="switch"][aria-label^="LAN only"]').click()`);
-      await driver.waitFor(`${PANEL_TEXT}.includes('LAN only — never uses the relay')`, {
+    await step("relay-off", "turn the cloud relay off (it is on by default): the board's answer says so", async () => {
+      const relay = `${PANEL}.querySelector('button[role="switch"][aria-label="Cloud relay"]')`;
+      const before = await driver.evaluate(`${relay}?.getAttribute('aria-checked')`);
+      if (before !== "true") throw new Error(`the Cloud relay switch starts ${before}, not on`);
+      if (!(await driver.evaluate(`${PANEL_TEXT}.includes('Relay on (default)')`))) {
+        throw new Error("the panel does not say the relay is on by default");
+      }
+      await driver.evaluate(`${relay}.click()`);
+      await driver.waitFor(`${PANEL_TEXT}.includes('Relay off — local network only') && ${relay}?.getAttribute('aria-checked') === 'false'`, {
         timeoutMs: STEP_MS,
-        what: "the board's status (LAN only)",
+        what: "the board's status (relay off)",
       });
-      return "LAN only — never uses the relay";
+      return "Relay on (default) → Relay off — local network only";
     });
 
-    await step("forget", "Forget (Lasting: arm, then confirm): the board forgets the network, LAN only stays", async () => {
+    await step("forget", "Forget (Lasting: arm, then confirm): the board forgets the network, the relay stays off", async () => {
       await driver.click("Forget", { scope: PANEL });
       // Armed (red, the 4 s window): the second click inside it acts.
       await driver.waitFor(`Boolean(${PANEL}.querySelector('.ux-armed'))`, {
@@ -263,11 +269,11 @@ async function main() {
         what: "Forget to arm",
       });
       await driver.click("Forget", { scope: PANEL });
-      await driver.waitFor(`${PANEL_TEXT}.includes('Not set.') && ${PANEL_TEXT}.includes('LAN only — never uses the relay')`, {
+      await driver.waitFor(`${PANEL_TEXT}.includes('Not set.') && ${PANEL_TEXT}.includes('Relay off — local network only')`, {
         timeoutMs: STEP_MS,
-        what: "the board's status (Not set., LAN only kept)",
+        what: "the board's status (Not set., relay still off)",
       });
-      return "Not set.; LAN only kept";
+      return "Not set.; the relay stays off";
     });
   } catch (error) {
     fatal = error;
@@ -300,7 +306,7 @@ async function main() {
     console.error(`\nThe walk's steps passed, but the page console printed the password ${leaked.length} time(s).`);
     process.exit(1);
   }
-  console.log(`\n✓ the Wi‑Fi walk (${lane}) finished: set → saved on the chip → read back after a reload → LAN only → forget, with no board.`);
+  console.log(`\n✓ the Wi‑Fi walk (${lane}) finished: set → saved on the chip → read back after a reload → cloud relay off → forget, with no board.`);
 }
 
 await main();

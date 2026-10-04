@@ -104,7 +104,7 @@ async fn request<Io: lpa_client::ClientIo>(
                     args.ssid,
                     password,
                     args.enabled.map(|on| on.is_on()),
-                    args.lan_only.map(|on| on.is_on()),
+                    args.cloud_relay.map(|on| on.is_on()),
                 )
                 .await
         }
@@ -152,9 +152,12 @@ pub fn status_lines(status: &NetworkStatus) -> Vec<String> {
             if wifi.enabled { "on" } else { "off" }
         ),
     };
-    let lan_only = format!("lan only: {}", if status.lan_only { "on" } else { "off" });
+    let cloud_relay = format!(
+        "cloud relay: {}",
+        if status.cloud_relay { "on" } else { "off" }
+    );
     let station = format!("station: {}", station_words(&status.station));
-    vec![network, lan_only, station]
+    vec![network, cloud_relay, station]
 }
 
 fn station_words(station: &StationState) -> String {
@@ -180,14 +183,14 @@ mod tests {
                 has_password: true,
                 enabled: true,
             }),
-            lan_only: false,
+            cloud_relay: true,
             station: StationState::Unsupported,
         };
         assert_eq!(
             status_lines(&status),
             [
                 "network: lp-walk-net (password set, on)",
-                "lan only: off",
+                "cloud relay: on",
                 "station: this firmware doesn't join Wi-Fi yet",
             ]
         );
@@ -197,11 +200,11 @@ mod tests {
     fn no_network_and_every_station_state() {
         let mut status = NetworkStatus {
             wifi: None,
-            lan_only: true,
+            cloud_relay: false,
             station: StationState::Off,
         };
         assert_eq!(status_lines(&status)[0], "network: not set");
-        assert_eq!(status_lines(&status)[1], "lan only: on");
+        assert_eq!(status_lines(&status)[1], "cloud relay: off");
         status.station = StationState::Joined {
             ip: String::from("10.0.0.7"),
             rssi: -48,

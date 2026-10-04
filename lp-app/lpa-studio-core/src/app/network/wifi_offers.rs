@@ -4,7 +4,7 @@
 //! |---|---|---|---|
 //! | `wifi/set` | `network` text (≤ 32), `password` **secret** text | Routine | a set: same name + blank password keeps it; a new name + blank is an open network |
 //! | `wifi/enabled` | `enabled` toggle | Routine | switch the saved network on or off — only when one is saved |
-//! | `wifi/lan-only` | `enabled` toggle | Routine | never use the relay |
+//! | `wifi/cloud-relay` | `enabled` toggle | Routine | let lightplayer.app reach the board through the cloud (on by default) |
 //! | `wifi/forget` | — | **Lasting** | the board forgets the network and its password — only when one is saved |
 //!
 //! Published only while the link holds edit and the board has answered its
@@ -32,6 +32,10 @@ pub const WIFI_PASSWORD_PARAM: &str = "password";
 /// The two toggle offers' parameter.
 pub const WIFI_ENABLED_PARAM: &str = "enabled";
 
+/// What the cloud-relay switch does: its offer's summary, drawn under it.
+pub const WIFI_CLOUD_RELAY_SUMMARY: &str =
+    "Lets lightplayer.app reach this board through the cloud.";
+
 /// The Wi‑Fi namespace segment under a board's prefix.
 pub const WIFI_SEGMENT: &str = "wifi";
 
@@ -58,27 +62,29 @@ pub fn wifi_offers(prefix: &OfferPath, wifi: &UiDeviceWifi) -> Vec<UiOffer> {
             at("enabled"),
             device,
             "join this network",
+            None,
             saved.enabled,
             busy,
             |enabled| NetworkChange::Set {
                 ssid: None,
                 password: PasswordChange::Keep,
                 enabled: Some(enabled),
-                lan_only: None,
+                cloud_relay: None,
             },
         ));
     }
     offers.push(toggle_offer(
-        at("lan-only"),
+        at("cloud-relay"),
         device,
-        "LAN only — never use the relay",
-        status.lan_only,
+        "cloud relay",
+        Some(WIFI_CLOUD_RELAY_SUMMARY),
+        status.cloud_relay,
         busy,
-        |lan_only| NetworkChange::Set {
+        |cloud_relay| NetworkChange::Set {
             ssid: None,
             password: PasswordChange::Keep,
             enabled: None,
-            lan_only: Some(lan_only),
+            cloud_relay: Some(cloud_relay),
         },
     ));
     if let Some(saved) = saved {
@@ -133,7 +139,7 @@ fn set_offer(path: OfferPath, device: DeviceId, saved: Option<String>, busy: boo
             ssid: None,
             password: PasswordChange::Keep,
             enabled: None,
-            lan_only: None,
+            cloud_relay: None,
         },
     );
     UiOffer::with_params(
@@ -190,21 +196,30 @@ fn bind_set(
             ssid: Some(ssid),
             password,
             enabled: None,
-            lan_only: None,
+            cloud_relay: None,
         },
     ))
 }
 
-/// A one-switch offer: `enabled`, currently `value`.
+/// A one-switch offer: `enabled`, currently `value`, with `summary` as
+/// its help line when it has one.
 fn toggle_offer(
     path: OfferPath,
     device: DeviceId,
     label: &str,
+    summary: Option<&'static str>,
     value: bool,
     busy: bool,
     change: fn(bool) -> NetworkChange,
 ) -> UiOffer {
-    let set = move |on: bool| disabled_if(NetworkOp::action_for(device, change(on)), busy);
+    let set = move |on: bool| {
+        let action = NetworkOp::action_for(device, change(on));
+        let action = match summary {
+            Some(summary) => action.with_summary(summary),
+            None => action,
+        };
+        disabled_if(action, busy)
+    };
     UiOffer::with_params(
         path,
         "wifi",
@@ -232,9 +247,9 @@ mod tests {
     const PASSWORD: &str = "correct-horse-42";
 
     #[test]
-    fn a_board_with_no_network_offers_set_and_lan_only() {
+    fn a_board_with_no_network_offers_set_and_cloud_relay() {
         let offers = wifi_offers(&prefix(), &wifi(None));
-        assert_eq!(verbs(&offers), ["set", "lan-only"]);
+        assert_eq!(verbs(&offers), ["set", "cloud-relay"]);
         let set = &offers[0];
         assert!(set.takes_a_secret());
         assert!(!set.is_enabled(), "a new network needs its name");
@@ -254,7 +269,7 @@ mod tests {
                 ssid: Some("lp-walk-net".to_string()),
                 password: PasswordChange::Set(PASSWORD.to_string()),
                 enabled: None,
-                lan_only: None,
+                cloud_relay: None,
             }
         );
         // Nothing the agent or a log reads holds it.
@@ -280,7 +295,7 @@ mod tests {
     #[test]
     fn a_saved_network_keeps_its_password_unless_one_is_typed() {
         let offers = wifi_offers(&prefix(), &wifi(Some("lp-walk-net")));
-        assert_eq!(verbs(&offers), ["set", "enabled", "lan-only", "forget"]);
+        assert_eq!(verbs(&offers), ["set", "enabled", "cloud-relay", "forget"]);
         let set = &offers[0];
         assert!(set.is_enabled(), "the saved name stands in for a blank one");
         let keep = set.press(&OfferArgs::new()).unwrap();
@@ -290,7 +305,7 @@ mod tests {
                 ssid: Some("lp-walk-net".to_string()),
                 password: PasswordChange::Keep,
                 enabled: None,
-                lan_only: None,
+                cloud_relay: None,
             }
         );
         // A different name never takes the old password with it.
@@ -355,16 +370,19 @@ mod tests {
                 ssid: None,
                 password: PasswordChange::Keep,
                 enabled: Some(false),
-                lan_only: None,
+                cloud_relay: None,
             }
         );
-        let lan = offers[2]
-            .press(&OfferArgs::new().with(WIFI_ENABLED_PARAM, "true"))
+        let relay = &offers[2];
+        assert_eq!(relay.params()[0].label, "cloud relay");
+        assert_eq!(relay.summary(), WIFI_CLOUD_RELAY_SUMMARY);
+        let relay_off = relay
+            .press(&OfferArgs::new().with(WIFI_ENABLED_PARAM, "false"))
             .unwrap();
         assert!(matches!(
-            op(&lan).change,
+            op(&relay_off).change,
             NetworkChange::Set {
-                lan_only: Some(true),
+                cloud_relay: Some(false),
                 enabled: None,
                 ..
             }
@@ -419,7 +437,7 @@ mod tests {
                     has_password: true,
                     enabled: true,
                 }),
-                lan_only: false,
+                cloud_relay: true,
                 station: StationState::Unsupported,
             }),
             reading: false,

@@ -69,7 +69,7 @@ fn wifi_credentials_set_over_usb_survive_a_reset_and_stay_write_only() {
         assert_eq!(hello.proto, lpc_wire::WIRE_PROTO_VERSION);
         let status = block_on(client.network_status()).expect("status").value;
         assert_eq!(status.wifi, None);
-        assert!(!status.lan_only);
+        assert!(status.cloud_relay, "the relay is on by default");
         assert_eq!(status.station, StationState::Unsupported);
 
         // Set the network over the trusted USB link.

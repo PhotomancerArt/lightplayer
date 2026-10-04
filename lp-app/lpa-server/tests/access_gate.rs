@@ -123,7 +123,7 @@ fn a_read_of_the_network_file_is_refused_on_the_trusted_link_too() {
             ssid: Some(String::from("lp-walk-net")),
             password: Some(lpc_wire::WifiPassword::new("correct-horse-42")),
             enabled: None,
-            lan_only: None,
+            cloud_relay: None,
         },
     );
     for path in [
@@ -644,7 +644,7 @@ fn table_rows() -> Vec<Row> {
                 ssid: Some(String::from("lp-walk-net")),
                 password: Some(lpc_wire::WifiPassword::new("correct-horse-42")),
                 enabled: None,
-                lan_only: None,
+                cloud_relay: None,
             },
             Required::Edit,
         ),

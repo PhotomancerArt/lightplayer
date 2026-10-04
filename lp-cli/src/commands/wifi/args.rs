@@ -18,11 +18,13 @@ pub struct WifiCli {
 
 #[derive(Debug, Subcommand)]
 pub enum WifiCommand {
-    /// The saved network (without its password), LAN only, and the station.
+    /// The saved network (without its password), the cloud relay, and the
+    /// station.
     Status(StatusArgs),
     /// Save or change the network; an absent option is left as it is.
     Set(SetArgs),
-    /// Forget the saved network and its password (LAN only stays).
+    /// Forget the saved network and its password (the cloud relay setting
+    /// stays).
     Forget(StatusArgs),
 }
 
@@ -54,9 +56,10 @@ pub struct SetArgs {
     /// Join the network when on (kept but unused when off).
     #[arg(long, value_enum)]
     pub enabled: Option<OnOff>,
-    /// Never use the relay (it is used by default).
+    /// Let lightplayer.app reach this board through the cloud relay (on by
+    /// default).
     #[arg(long, value_enum)]
-    pub lan_only: Option<OnOff>,
+    pub cloud_relay: Option<OnOff>,
     /// Print the board's reply as JSON (it holds no password).
     #[arg(long)]
     pub json: bool,
