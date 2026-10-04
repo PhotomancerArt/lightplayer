@@ -16,8 +16,9 @@
 //!   arrived, queues its frames, moves log records from the ring onto the log
 //!   channel, and sleeps until a timer, the I/O task's news, or a send
 //!   doorbell. The chip runs it on a priority-1 esp-rtos thread of its own
-//!   (`fw-esp32v3`'s `io_thread`, pinned to core 0), or on the main thread
-//!   executor beside the engine;
+//!   (`fw-esp32v3`'s `io_thread`, pinned to core 0, at most one pass per
+//!   [`PassPacing::CLASSIC_LINK_THREAD`]), or on the main thread executor
+//!   beside the engine;
 //! - the **server transport** ([`uart_link_transport::UartLinkTransport`],
 //!   main thread executor) takes whole wire messages off the proto channel
 //!   and queues replies onto it, sharing the link with the link task through
@@ -31,6 +32,7 @@
 pub mod uart_link_config;
 pub mod uart_link_counters;
 pub mod uart_link_nonce;
+pub mod uart_link_pass_pacing;
 pub mod uart_link_pipes;
 pub mod uart_link_shared;
 pub mod uart_link_task;
@@ -39,6 +41,7 @@ pub mod uart_link_transport;
 
 pub use uart_link_config::uart_board_link_config;
 pub use uart_link_nonce::session_nonce;
+pub use uart_link_pass_pacing::PassPacing;
 pub use uart_link_shared::UartLinkShared;
 pub use uart_link_task::{run_uart_link, when_drained};
 #[cfg(feature = "server")]

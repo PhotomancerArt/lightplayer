@@ -963,7 +963,13 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
             // shares it.
             #[cfg(not(feature = "io-thread"))]
             {
-                spawner.spawn(uart_link_task(uart_link).unwrap());
+                spawner.spawn(
+                    uart_link_task(
+                        uart_link,
+                        fw_esp32_common::uart_link::PassPacing::EVERY_EVENT,
+                    )
+                    .unwrap(),
+                );
                 esp_println::println!("[INIT] UART link task spawned (lp-link, thread executor)");
             }
         }

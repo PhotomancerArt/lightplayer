@@ -27,7 +27,11 @@
 //!    (`crate::usb_link::usb_link_task::run_usb_link`). Nothing wakes the
 //!    task on a cadence of its own: with nothing to do it sleeps until the
 //!    link's own timers (SYN every 100 ms without a host, keepalive every
-//!    250 ms with one) or [`IDLE_BACKSTOP_US`].
+//!    250 ms with one) or [`IDLE_BACKSTOP_US`];
+//! 5. on a thread of its own, hold the next pass until the chip's
+//!    [`PassPacing`] says it may run: every pass preempts the render there,
+//!    and on the classic's silicon a preemption costs the render several
+//!    times what the pass does (`super::uart_link_pass_pacing`).
 //!
 //! **Where it runs decides how promptly it runs.** On its own thread
 //! (`io-thread`, pinned to core 0 at priority 1, above the main task's 0) a
@@ -58,6 +62,7 @@ use embassy_time::{Instant, Timer};
 use lp_link::{Link, LinkState, Micros, SelectiveRepeat};
 
 use super::uart_link_counters::{self, EdgeCounters};
+use super::uart_link_pass_pacing::PassPacing;
 use super::uart_link_pipes::{self, MAX_FRAME_BYTES};
 use super::uart_link_shared::UartLinkShared;
 
@@ -99,7 +104,10 @@ pub fn when_drained(action: fn() -> !) {
 
 /// Run the host link for ever. Spawn it on a thread executor — the link
 /// thread's, or the main one — never on the I/O task's interrupt executor.
-pub async fn run_uart_link(shared: &'static UartLinkShared) -> ! {
+/// `pacing` is how far apart its passes must start: the link thread's
+/// [`PassPacing::CLASSIC_LINK_THREAD`], or [`PassPacing::EVERY_EVENT`] on the
+/// main executor, where it only runs between frames anyway.
+pub async fn run_uart_link(shared: &'static UartLinkShared, pacing: PassPacing) -> ! {
     let mut buf = [0u8; RX_CHUNK];
     let mut frame = [0u8; MAX_FRAME_BYTES];
     let mut drain_asked_at: Option<Micros> = None;
@@ -108,6 +116,7 @@ pub async fn run_uart_link(shared: &'static UartLinkShared) -> ! {
     crate::log_ring_logger::ring_on_record(shared.doorbell_signal());
 
     loop {
+        let pass_started = now_us();
         feed_rx(shared, &mut buf);
 
         let now = now_us();
@@ -167,6 +176,10 @@ pub async fn run_uart_link(shared: &'static UartLinkShared) -> ! {
             shared.doorbell(),
         )
         .await;
+        // Woken; on a thread of its own, the pass waits out its interval.
+        if let Some(hold) = pacing.hold_until(pass_started, now_us()) {
+            Timer::at(Instant::from_micros(hold)).await;
+        }
     }
 }
 

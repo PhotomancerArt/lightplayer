@@ -133,6 +133,12 @@ extern "C" fn entry(param: *mut c_void) {
     let executor =
         alloc::boxed::Box::leak(alloc::boxed::Box::new(esp_rtos::embassy::Executor::new()));
     executor.run(move |spawner| {
-        spawner.spawn(crate::serial::uart_link_task(shared).unwrap());
+        spawner.spawn(
+            crate::serial::uart_link_task(
+                shared,
+                fw_esp32_common::uart_link::PassPacing::CLASSIC_LINK_THREAD,
+            )
+            .unwrap(),
+        );
     })
 }
