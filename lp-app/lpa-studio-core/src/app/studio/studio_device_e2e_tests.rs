@@ -7143,10 +7143,10 @@ fn a_sim_that_never_says_hello_fails_the_open_instead_of_holding_it() {
     );
     assert_eq!(
         failure.retry,
-        UiAction::from_op(
+        Some(UiAction::from_op(
             crate::ControllerId::new(crate::HOME_NODE_ID),
             crate::HomeOp::OpenPackage { key, prefer: None },
-        ),
+        )),
         "Retry is the same open"
     );
     assert!(
@@ -7902,13 +7902,13 @@ fn a_refused_reload_fails_the_editor_instead_of_reading_ready() {
     );
     assert_eq!(
         failure.retry,
-        UiAction::from_op(
+        Some(UiAction::from_op(
             crate::ControllerId::new(crate::HOME_NODE_ID),
             crate::HomeOp::OpenPackage {
                 key: good,
                 prefer: None,
             },
-        ),
+        )),
         "Retry reopens the same package"
     );
 }

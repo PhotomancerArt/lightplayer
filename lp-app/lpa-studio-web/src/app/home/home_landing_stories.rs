@@ -39,9 +39,11 @@ fn landing_failed_view_link() -> Element {
             OpenFailureNotice {
                 message: "engine wasm fetch/compile failed: NetworkError when attempting to fetch resource"
                     .to_string(),
-                retry: UiAction::from_op(
-                    ControllerId::new(HOME_NODE_ID),
-                    HomeOp::OpenExample { id: "catalog/fyeah-sign".to_string() },
+                retry: Some(
+                    UiAction::from_op(
+                        ControllerId::new(HOME_NODE_ID),
+                        HomeOp::OpenExample { id: "catalog/fyeah-sign".to_string() },
+                    ),
                 ),
                 on_action: None,
             }

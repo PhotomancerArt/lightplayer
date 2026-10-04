@@ -96,12 +96,14 @@ pub enum OpeningState {
     /// The project is going onto a board, one wire step at a time.
     OnDevice(DeviceOpenProgress),
     /// The open ended. `message` is the mapped `UiError` wording; `retry`
-    /// runs the same open again; `device` is the board it was on, if any;
-    /// `needs_unlock` when the board refused the link's tier, so the way
-    /// on is Unlock rather than a Reset.
+    /// runs the same open again, when retrying could help — `None` for a
+    /// refusal (a format/content issue `refuse_open` classified), where
+    /// retrying would fail the exact same way; `device` is the board it
+    /// was on, if any; `needs_unlock` when the board refused the link's
+    /// tier, so the way on is Unlock rather than a Reset.
     Failed {
         message: String,
-        retry: UiAction,
+        retry: Option<UiAction>,
         device: Option<OpenDevice>,
         needs_unlock: bool,
     },
@@ -791,7 +793,11 @@ pub(crate) fn OpeningProgressLine() -> Element {
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub(crate) fn OpenFailureNotice(
     message: String,
-    retry: UiAction,
+    /// Re-dispatching this runs the same open again. `None` for a
+    /// refusal (`refuse_open`'s classified format/content issue) — the
+    /// notice then has no Retry to offer, since retrying would fail the
+    /// exact same way.
+    retry: Option<UiAction>,
     /// The board the open failed on: the notice then offers to reset it,
     /// and the way back is Devices rather than Explore.
     #[props(default)]
@@ -825,15 +831,17 @@ pub(crate) fn OpenFailureNotice(
                 }
             }
             div { class: "tw:flex tw:flex-wrap tw:items-center tw:gap-2.5",
-                button {
-                    r#type: "button",
-                    class: solid_action_class(ActionPriority::Secondary),
-                    onclick: move |_| {
-                        if let Some(on_action) = on_action {
-                            on_action.call(retry.clone());
-                        }
-                    },
-                    "Retry"
+                if let Some(retry) = retry.clone() {
+                    button {
+                        r#type: "button",
+                        class: solid_action_class(ActionPriority::Secondary),
+                        onclick: move |_| {
+                            if let Some(on_action) = on_action {
+                                on_action.call(retry.clone());
+                            }
+                        },
+                        "Retry"
+                    }
                 }
                 if let Some(device) = unlock {
                     button {
@@ -1005,7 +1013,7 @@ mod tests {
             in_flight: false,
             stage: OpenStage::Failed(OpenFailure {
                 message: "the device did not start".to_string(),
-                retry: retry_action(),
+                retry: Some(retry_action()),
                 device: None,
                 needs_unlock: false,
             }),
@@ -1015,7 +1023,28 @@ mod tests {
             panic!("a finished failure must not fall back to the skeleton");
         };
         assert_eq!(message, "the device did not start");
-        assert_eq!(retry, retry_action());
+        assert_eq!(retry, Some(retry_action()));
+    }
+
+    /// A refusal (D11 follow-up, 2026-10-03): core reports no Retry, and
+    /// the state the notice reads must carry that through rather than
+    /// inventing one.
+    #[test]
+    fn a_refused_failure_carries_no_retry() {
+        let state = opening_state(&OpenProbe {
+            in_flight: false,
+            stage: OpenStage::Failed(OpenFailure {
+                message: "Format 3 — too old for this Studio".to_string(),
+                retry: None,
+                device: None,
+                needs_unlock: false,
+            }),
+            ..OpenProbe::default()
+        });
+        let OpeningState::Failed { retry, .. } = state else {
+            panic!("a finished failure must not fall back to the skeleton");
+        };
+        assert_eq!(retry, None, "retrying a refusal fails the same way");
     }
 
     #[test]
@@ -1060,7 +1089,7 @@ mod tests {
         let mut label = OpeningLabel::default();
         let failed = OpeningState::Failed {
             message: "engine wasm fetch/compile failed".to_string(),
-            retry: retry_action(),
+            retry: Some(retry_action()),
             device: None,
             needs_unlock: false,
         };
@@ -1074,7 +1103,7 @@ mod tests {
             in_flight: false,
             stage: OpenStage::Failed(OpenFailure {
                 message: "This needs an edit device password — unlock again with one.".to_string(),
-                retry: retry_action(),
+                retry: Some(retry_action()),
                 device: None,
                 needs_unlock: true,
             }),
