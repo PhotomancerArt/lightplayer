@@ -300,6 +300,11 @@ impl AgentController {
         self.app.bridge.borrow().shown.contains(path)
     }
 
+    /// What the app agent pressed, handed over and edited.
+    pub(crate) fn app_activity(&self) -> &crate::AgentActivity {
+        &self.app.activity
+    }
+
     /// The app chat's session, for the controller's card bookkeeping.
     pub(crate) fn app_session_mut(&mut self) -> &mut AppAgentSession {
         &mut self.app
@@ -419,6 +424,9 @@ impl AgentController {
             usage,
             estimated_cost: estimated_cost(usage, ctx.cost_rates),
             model: ctx.model.clone(),
+            // The studio controller fills it: it holds the clock, the
+            // offer tree and place the lights and Show are read against.
+            activity: crate::UiAgentActivity::default(),
         }
     }
 

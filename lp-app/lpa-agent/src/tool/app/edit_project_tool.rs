@@ -173,6 +173,13 @@ pub struct ProjectEditsOutcome {
     /// The project after the edits, compact (statuses, outputs, unsaved),
     /// when the host can report it.
     pub project: Option<Value>,
+    /// Where each edit landed, one per input edit when the host knows it:
+    /// the node's tree path (`/demo.module/fixture.fixture`), or `None`
+    /// for an edit that touched no node (the board) or did not land. It
+    /// rides the tool row's summary so the chat can link each edit to its
+    /// node; the model never sees it (it addresses nodes by name).
+    #[serde(skip)]
+    pub nodes: Vec<Option<String>>,
 }
 
 pub fn edit_project_tool_def() -> ToolDef {
@@ -257,7 +264,11 @@ pub async fn run_edit_project(input_json: &Value, host: &mut dyn AppAgentHost) -
                 .edits
                 .iter()
                 .zip(&outcome.results)
-                .map(|(edit, status)| edit_summary_row(edit, status))
+                .enumerate()
+                .map(|(index, (edit, status))| {
+                    let node = outcome.nodes.get(index).cloned().flatten();
+                    edit_summary_row(edit, status, node)
+                })
                 .collect();
             ToolOutcome {
                 content: content.to_string(),
@@ -284,10 +295,15 @@ pub async fn run_edit_project(input_json: &Value, host: &mut dyn AppAgentHost) -
 }
 
 /// One edit, compact, for the tool row's expandable list: what kind of
-/// edit, what it was about, and how it went. The UI words it; this only
-/// carries the facts (the edit's own fields, never the whole asset text).
-fn edit_summary_row(edit: &ProjectEdit, status: &EditStatus) -> Value {
+/// edit, what it was about, how it went, and — when the host said — the
+/// node it landed on (`node`, a tree path), so the row can link to it. The
+/// UI words it; this only carries the facts (the edit's own fields, never
+/// the whole asset text).
+fn edit_summary_row(edit: &ProjectEdit, status: &EditStatus, node: Option<String>) -> Value {
     let mut row = json!({ "edit": edit.verb() });
+    if let Some(node) = node {
+        row["node"] = node.into();
+    }
     match edit {
         ProjectEdit::CreateNode(create) => {
             row["target"] = create.kind.clone().into();
@@ -396,12 +412,14 @@ mod tests {
             &EditStatus::Applied {
                 detail: "set".into(),
             },
+            Some("/demo.module/output.output".into()),
         );
         assert_eq!(row["edit"], "set");
         assert_eq!(row["target"], "output");
         assert_eq!(row["path"], "ports[0].endpoint");
         assert_eq!(row["value"], "ws281x:local:D6");
         assert_eq!(row["ok"], true);
+        assert_eq!(row["node"], "/demo.module/output.output");
 
         let import = ProjectEdit::ImportPattern(ImportPatternEdit {
             pattern: "spiral".into(),
@@ -412,6 +430,7 @@ mod tests {
             &EditStatus::Skipped {
                 reason: "an earlier create failed".into(),
             },
+            None,
         );
         assert_eq!(row["target"], "spiral");
         assert_eq!(row["in"], "playlist");

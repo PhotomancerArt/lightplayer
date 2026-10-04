@@ -504,6 +504,8 @@ pub(crate) fn shader_agent_view(status: UiAgentStatus) -> UiAgentView {
                 detail: "{\n  \"probes\": 2,\n  \"shader_ok\": true\n}".to_string(),
                 edits: None,
                 headline: None,
+                act: None,
+                place: None,
             }),
             UiAgentTurn::Assistant {
                 text: "Done — falloff now eases the drift toward the rim. \

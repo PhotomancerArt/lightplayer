@@ -34,6 +34,7 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{UiAction, UiOffer};
 
+use crate::app::agent::AgentMark;
 use crate::base::{StudioIcon, StudioIconName, action_icon_name};
 use crate::core::action::armed_confirm_button::use_armed_confirm;
 
@@ -146,12 +147,15 @@ pub fn StudioPane(
                     }
                 }
                 div { class: "tw:flex tw:h-full tw:items-stretch",
+                    // Each verb wears the agent light when the assistant
+                    // pressed it (M8), keyed by its own path.
                     for offer in actions {
-                        PaneActionButton {
-                            key: "{offer.path}",
-                            offer,
-                            on_action,
-                            armed_preview,
+                        AgentMark { key: "{offer.path}", path: offer.path.clone(),
+                            PaneActionButton {
+                                offer,
+                                on_action,
+                                armed_preview,
+                            }
                         }
                     }
                     if let Some(trailing) = trailing {

@@ -1194,6 +1194,10 @@ pub fn App() -> Element {
     // session panel's Rename), the Unlock page's Connect, and everything
     // under the shell, which provides the same tree again for its stories.
     crate::core::use_provide_offers(&current_view.offers);
+    // What the app agent just did (M8): every control below lights by its
+    // offer path, and the user's Show scrolls to the one it names.
+    crate::app::agent::use_provide_agent_activity(&current_view.app_agent.activity);
+    crate::app::agent::use_agent_reveal(current_view.app_agent.activity.reveal.clone());
     // The ⌘K command palette's open state: web chrome, like a popover's,
     // held here so the chrome's hint and the palette share it.
     let mut palette_open = use_signal(|| false);
