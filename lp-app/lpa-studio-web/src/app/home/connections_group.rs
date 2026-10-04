@@ -33,6 +33,9 @@ pub(crate) fn ConnectionsGroup(
     /// Stories only: mount the access panel open.
     #[props(default)]
     who_open: bool,
+    /// Stories only: mount the access panel's keys list open too.
+    #[props(default)]
+    keys_open_preview: bool,
 ) -> Element {
     let panel = access.panel.clone();
     let over_bluetooth = access.over_bluetooth;
@@ -98,7 +101,7 @@ pub(crate) fn ConnectionsGroup(
                             StudioIcon { name: StudioIconName::Collapsed, size: 14 }
                         }
                     },
-                    DeviceAccessPanel { panel, on_access }
+                    DeviceAccessPanel { panel, on_access, keys_open_preview }
                 }
                 }
             }
