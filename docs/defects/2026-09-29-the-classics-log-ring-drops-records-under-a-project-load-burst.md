@@ -1,6 +1,5 @@
 ---
-status: fixed (emulated; silicon at the M2 desk walk)   # the ring's own overflow, open since 2026-09-29, measured at 0 drops once the link task left the render's thread (M2 P4, 2026-10-03)
-fixed: this change
+status: open   # reduced, not fixed, in the default build: the link thread that drained the ring during a load burst (M2 P4, 0 drops emulated) is opt-in since the 2026-10-03 silicon A/B; the default keeps P2's event-driven wake (14 drops emulated, against main's 25)
 found: 2026-09-29      # how: emulator walk (lp-emu:esp32v3:t1), plan classic-uart-on-lp-link P5
 area: fw-esp32-common `log_ring_logger` (4 KiB `LOG_RING`, `pump`) × `uart_link/uart_link_task.rs` (2 records per pass, thread executor)
 class: wake-quantum-throttle
@@ -146,6 +145,19 @@ at the M2 desk walk)` because no desk sitting has run this arrangement yet
 (`desk-classic.md`, batched with #884's owed classic lp-link walk) — a
 silicon disagreement with this emulated result would be a fidelity defect
 to file before reopening this one.
+
+**Update 2026-10-03 (silicon A/B) — reopened.** The desk A/B on the
+DOM-Z-102 found the link thread slower and less even than the main-executor
+arrangement in every setting (a preemption costs this chip's render ~4–5 ms
+of flash-cache refill), so `io-thread` is **opt-in, off by default**
+(`docs/adr/2026-10-02-c6-link-io-thread.md`, classic amendment, "Silicon
+(2026-10-03)"). The default build therefore pumps the ring only between
+frames again, with P2's event-driven wake: 14 drops on the five-wire load
+emulated, against main's 25 and the thread's 0. The desk sitting itself saw
+main drop 4 records in a five-wire load burst on silicon. Root cause 2 is
+open again; a fix that does not preempt the render (a bigger ring, fewer
+records per load, or pumping from the render's own yield points) is the
+next step.
 
 **Lesson** — a best-effort queue that refuses is only honest if nothing was
 taken to offer it: popping from one bounded buffer into another that can
