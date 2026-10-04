@@ -142,6 +142,7 @@ fn create_memory_server() -> LpServer {
         LpFsMemory::new(),
         lpc_wire::HelloIdentity::new(
             "fw-host",
+            crate::manifest_version(),
             "unknown",
             false,
             if cfg!(debug_assertions) {
@@ -293,7 +294,7 @@ mod tests {
     /// permissive one wears none and names none.
     #[test]
     fn a_server_on_a_board_names_the_board_in_its_hello() {
-        let identity = lpc_wire::HelloIdentity::new("fw-esp32c6", "test", false, "test");
+        let identity = lpc_wire::HelloIdentity::new("fw-esp32c6", "unknown", "test", false, "test");
         let on_board = create_memory_server_on_board(
             LpFsMemory::new(),
             identity.clone(),

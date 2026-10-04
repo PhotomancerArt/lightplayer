@@ -39,6 +39,9 @@ web-sys = { version = "0.3", features = ["OffscreenCanvas"] }
 # Single-threaded worker wasm: same fragile Send/Sync stance as lp-gfx-wgpu.
 wgpu = { version = "29", features = ["fragile-send-sync-non-atomic-wasm"] }
 
+[build-dependencies]
+lp-app-version = { path = "../../tools/lp-app-version" }
+
 [dev-dependencies]
 lpc-history = { path = "../../lp-core/lpc-history" }
 lpc-view = { path = "../../lp-core/lpc-view" }

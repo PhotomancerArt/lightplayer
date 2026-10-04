@@ -7,8 +7,8 @@ use dioxus::prelude::*;
 use lpa_studio_web_story_macros::story;
 
 use crate::app::layout::version_badge::{
-    BuildChip, ChangelogEntry, VersionBuild, VersionChipPreview, VersionDetails, VersionInfo,
-    VersionSource,
+    BakedBuild, BuildChip, ChangelogEntry, VersionBuild, VersionChipPreview, VersionDetails,
+    VersionInfo, VersionSource,
 };
 
 #[story(description = "Deployed build metadata with a recent-updates list.")]
@@ -17,6 +17,7 @@ pub(crate) fn loaded() -> Element {
         VersionDetails {
             info: Some(loaded_info()),
             changelog: changelog_entries(),
+            baked: None,
         }
     })
 }
@@ -39,7 +40,24 @@ pub(crate) fn chip_states() -> Element {
 #[story(description = "Local dev build with no version.json present.")]
 pub(crate) fn dev_fallback() -> Element {
     panel(rsx! {
-        VersionDetails { info: None, changelog: Vec::new() }
+        VersionDetails { info: None, changelog: Vec::new(), baked: None }
+    })
+}
+
+#[story(
+    description = "Local dev build with no version.json: the version compiled into the bundle leads, the commit after it."
+)]
+pub(crate) fn dev_build_version() -> Element {
+    panel(rsx! {
+        VersionDetails {
+            info: None,
+            changelog: Vec::new(),
+            baked: Some(BakedBuild {
+                version: "626a1b851-dirty-101500PT".to_string(),
+                sha: Some("626a1b85".to_string()),
+                dirty: true,
+            }),
+        }
     })
 }
 

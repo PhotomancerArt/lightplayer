@@ -454,3 +454,7 @@ littlefs-rust = { version = "0.1.0", default-features = false, features = ["allo
 
 [lints]
 workspace = true
+
+# The build stamps its app version (LP_APP_VERSION): tools/lp-app-version.
+[build-dependencies]
+lp-app-version = { path = "../../tools/lp-app-version" }

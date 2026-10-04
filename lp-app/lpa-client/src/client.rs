@@ -1230,6 +1230,7 @@ mod tests {
                     build: lpc_wire::BuildFacts {
                         features: Vec::new(),
                         package: "fw-esp32c6".to_string(),
+                        version: "unknown".into(),
                         commit: "abc1234".to_string(),
                         dirty: false,
                         profile: "release-esp32".to_string(),
@@ -1285,6 +1286,7 @@ mod tests {
             build: lpc_wire::server::hello::BuildFacts {
                 features: Vec::new(),
                 package: "fw-esp32c6".to_string(),
+                version: "unknown".into(),
                 commit: "fake-firmware".to_string(),
                 dirty: false,
                 profile: "release-esp32".to_string(),
