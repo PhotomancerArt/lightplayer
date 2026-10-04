@@ -14,7 +14,10 @@
 //! - [`dictionary_rule`]: what encoding 1 means;
 //! - [`transfer_record`]: the progress record v1 and its foreign-record rule;
 //! - [`hash_rules`]: the two hash rules;
-//! - [`build_id`]: the build id field and the build hash.
+//! - [`build_id`]: the build id field and the build hash;
+//! - [`board`]: the board's update session;
+//! - `testing` (feature `test-support`): a NOR model, a model board and a rig
+//!   for host tests.
 //!
 //! Protocol v1 binds from Part B's first release (the split image's D11);
 //! until then it changes here, not as versions. After that every format here
@@ -28,6 +31,7 @@
 
 extern crate alloc;
 
+pub mod board;
 pub mod board_manifest;
 pub mod build_id;
 pub mod chunk;
@@ -46,6 +50,9 @@ pub mod request;
 pub mod sha256_hex;
 pub mod transfer_record;
 mod wire_reader;
+
+#[cfg(feature = "test-support")]
+pub mod testing;
 
 pub use board_manifest::{BoardManifest, BoardState, TransferView};
 pub use build_id::{BUILD_ID_LEN, build_hash, build_hash_of_field, build_id_field, build_id_text};

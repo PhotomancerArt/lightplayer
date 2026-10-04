@@ -18,5 +18,14 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
 
+[features]
+# A NOR flash model with power cuts, a model board and a rig: for this
+# crate's tests and lpa-update's host x board simulation. Never in firmware.
+test-support = []
+
+[dev-dependencies]
+lpc-update = { path = ".", features = ["test-support"] }
+miniz_oxide = { version = "0.8.9", default-features = false, features = ["with-alloc"] }
+
 [lints]
 workspace = true

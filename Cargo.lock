@@ -6678,6 +6678,8 @@ dependencies = [
  "lp-crc32",
  "lp-deflate",
  "lpc-access",
+ "lpc-update",
+ "miniz_oxide",
  "serde",
  "serde_json",
  "sha2",
