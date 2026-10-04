@@ -7,7 +7,9 @@
 //! it can never refuse anything; this is where login is exercised against a
 //! board that can (plan D19). It answers exactly the requests the access flow
 //! sends — `Hello` (with this link's `auth`), `LoginBegin`/`LoginAnswer`, the
-//! four access requests, and a filesystem write — and refuses anything else
+//! four access requests, the three network requests (the REAL `lpa-server`
+//! network store, with a station knob, [`FakeBoard::set_station`]), and a
+//! filesystem write — and refuses anything else
 //! below edit with `NotPermitted`, the way `lpa-server`'s classifier does.
 //! [`FakeBoard::usb`] is a trusted link to the same board, the way USB is.
 
@@ -17,9 +19,9 @@ use std::collections::VecDeque;
 use std::rc::Rc;
 
 use lpa_client::{ClientIo, LpClient};
-use lpa_server::access_store;
+use lpa_server::{access_store, network_store};
 use lpc_access::{BeginOutcome, DeviceAccessFile, LoginState, OpenTo, SecretEntry, Tier};
-use lpc_wire::server::{FsRequest, FsResponse};
+use lpc_wire::server::{FsRequest, FsResponse, StationState};
 use lpc_wire::{
     ClientMessage, ClientRequest, TransportError, WireServerMessage, WireServerMsgBody,
 };
@@ -45,6 +47,8 @@ struct BoardState {
     nonce: u8,
     /// Login answers the board has heard.
     answers: u32,
+    /// What the board's station reports in every network status.
+    station: StationState,
 }
 
 /// One fake board; [`Self::client`] is an untrusted (Bluetooth) link to it
@@ -65,6 +69,7 @@ impl FakeBoard {
                 granted: None,
                 nonce: 1,
                 answers: 0,
+                station: StationState::Unsupported,
             })),
         }
     }
@@ -130,6 +135,17 @@ impl FakeBoard {
     fn write_store(&self, store: &DeviceAccessFile) {
         access_store::write_device_store(&self.state.borrow().fs, store)
             .expect("the fake board's fs takes the store");
+    }
+
+    /// The network file as the board reads it.
+    pub fn network(&self) -> lpc_access::NetworkFile {
+        network_store::read_network_file(&self.state.borrow().fs)
+    }
+
+    /// What the board's station reports from now on (every M5 image says
+    /// `unsupported`; M6's states are reachable here).
+    pub fn set_station(&self, station: StationState) {
+        self.state.borrow_mut().station = station;
     }
 
     /// Wrong answers already on the board's count (to reach its backoff).
@@ -243,6 +259,31 @@ impl FakeBoardIo {
                     }
                     ClientRequest::AccessSetSwitches { ble_enabled, open } => {
                         access_store::access_set_switches(&state.fs, ble_enabled, open)
+                    }
+                    _ => unreachable!("matched above"),
+                }
+            }
+            request @ (ClientRequest::NetworkStatus
+            | ClientRequest::NetworkSet { .. }
+            | ClientRequest::NetworkForget) => {
+                if held != Some(Tier::Edit) {
+                    return WireServerMsgBody::NotPermitted { needs: Tier::Edit };
+                }
+                let station = state.station.clone();
+                match request {
+                    ClientRequest::NetworkStatus => {
+                        network_store::network_status(&state.fs, station)
+                    }
+                    ClientRequest::NetworkSet {
+                        ssid,
+                        password,
+                        enabled,
+                        lan_only,
+                    } => network_store::network_set(
+                        &state.fs, station, ssid, password, enabled, lan_only,
+                    ),
+                    ClientRequest::NetworkForget => {
+                        network_store::network_forget(&state.fs, station)
                     }
                     _ => unreachable!("matched above"),
                 }

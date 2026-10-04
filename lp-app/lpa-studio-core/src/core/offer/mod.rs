@@ -26,7 +26,7 @@ pub use offer_args::OfferArgs;
 pub use offer_binder::OfferBinder;
 pub use offer_param::{OfferChoice, OfferParam, OfferParamKind};
 pub use offer_path::{OfferPath, OfferPathError};
-pub use offer_press::OfferPress;
+pub use offer_press::{OfferPress, SECRET_MARKER};
 pub use ui_offer::UiOffer;
 pub use ui_offer_focus::{OfferNearness, UiOfferFocus};
 pub use ui_offer_tree::UiOfferTree;

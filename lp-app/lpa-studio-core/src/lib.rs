@@ -107,6 +107,10 @@ pub use app::home::{
     open_project_offer, template_project_files,
 };
 pub use app::library::{DESKTOP_BOARD_ID, ProjectTarget};
+pub use app::network::{
+    NEEDS_AUTHOR, NetworkChange, NetworkCommand, NetworkOp, PasswordChange, READING, UiDeviceWifi,
+    WIFI_ABOUT, WIFI_ENABLED_PARAM, WIFI_NETWORK_PARAM, WIFI_PASSWORD_PARAM,
+};
 pub use app::node::{
     UiAssetEditor, UiAssetEditorKind, UiBindingAuthoring, UiBindingAuthoringDirection,
     UiBindingEndpoint, UiCellProjection, UiChannelChoice, UiClockFace, UiClockTransport,
@@ -221,7 +225,7 @@ pub use core::log::{DeviceEventKind, DeviceEventRecorder};
 pub use core::notice::UiNotices;
 pub use core::offer::{
     OfferArgError, OfferArgs, OfferBinder, OfferChoice, OfferNearness, OfferParam, OfferParamKind,
-    OfferPath, OfferPathError, OfferPress, UiOffer, UiOfferFocus, UiOfferTree,
+    OfferPath, OfferPathError, OfferPress, SECRET_MARKER, UiOffer, UiOfferFocus, UiOfferTree,
 };
 pub use core::view::activity_view::UiActivityStep;
 pub use core::view::activity_view::UiActivityStepState;
@@ -251,6 +255,8 @@ pub use lpa_devices::{
     Millis as DeviceMillis, RosterConfig as DeviceRosterConfig, TerminalKind as DeviceTerminalKind,
     TerminalLine as DeviceTerminalLine, WireVersion as DeviceWireVersion,
 };
+/// What a board reports about its saved network and station.
+pub use lpc_wire::server::{NetworkStatus, StationState, WifiInfo};
 
 pub const STUDIO_DEMO_PROJECT_ID: &str = "catalog/fyeah-sign";
 

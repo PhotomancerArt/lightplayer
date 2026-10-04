@@ -994,7 +994,7 @@ fn record_key(identity: &lpa_devices::identity::IdentityChain) -> Option<String>
     identity.uid.as_ref().map(|uid| uid.0.clone())
 }
 
-fn is_bluetooth(device: &Device) -> bool {
+pub(crate) fn is_bluetooth(device: &Device) -> bool {
     device
         .identity
         .endpoint
@@ -1024,7 +1024,7 @@ fn syncs_over_usb(device: &Device) -> bool {
 /// list read from it is not the board's (G1 rehearsal, 2026-10-03: "Who has
 /// access 1" on a board whose own list held 16). The firmware keeps
 /// Bluetooth off on such a board for the same reason.
-fn holds_its_files(device: &Device) -> bool {
+pub(crate) fn holds_its_files(device: &Device) -> bool {
     device
         .evidence
         .classification
@@ -1034,7 +1034,7 @@ fn holds_its_files(device: &Device) -> bool {
 
 /// The device's current connection window, when its link is open and has
 /// said hello.
-fn login_window(device: &Device) -> Option<LoginWindow> {
+pub(crate) fn login_window(device: &Device) -> Option<LoginWindow> {
     let evidence = &device.evidence;
     if !evidence.presence.is_open() {
         return None;

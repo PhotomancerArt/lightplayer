@@ -79,6 +79,10 @@ pub struct DeviceRosterView {
     /// and the device access panel where this link may write the store.
     pub access:
         std::collections::BTreeMap<lpa_devices::DeviceId, crate::app::access::UiDeviceAccess>,
+    /// Each device's Wi‑Fi facts (the Connections group's Wi‑Fi row): the
+    /// board's network status, read on a link that holds edit. Absent = no
+    /// row (a sim, a held board, a Bluetooth link nothing unlocked).
+    pub wifi: std::collections::BTreeMap<lpa_devices::DeviceId, crate::app::network::UiDeviceWifi>,
     /// Each device's layout facts (the C6 repartition): the question before
     /// its files move, the refusal, a board holding its files, a backup to
     /// put back. Absent = nothing to say.
@@ -101,6 +105,7 @@ impl Default for DeviceRosterView {
             feeds: std::collections::BTreeMap::new(),
             runtime_bands: std::collections::BTreeMap::new(),
             access: std::collections::BTreeMap::new(),
+            wifi: std::collections::BTreeMap::new(),
             layout: std::collections::BTreeMap::new(),
             backup_download: None,
         }
@@ -396,6 +401,7 @@ impl DeviceRoster {
             feeds: std::collections::BTreeMap::new(),
             runtime_bands: std::collections::BTreeMap::new(),
             access: std::collections::BTreeMap::new(),
+            wifi: std::collections::BTreeMap::new(),
             // The verbs land in a scratch tree here; the studio view
             // publishes them for real (`publish_layout_offers`).
             layout: self.layout_views(now, &mut crate::UiOfferTree::new(), None),
@@ -743,6 +749,7 @@ mod tests {
     fn split_roster_separates_offline_devices_into_remembered() {
         let view = DeviceRosterView {
             access: Default::default(),
+            wifi: Default::default(),
             roster: RosterView {
                 devices: vec![
                     ready_view(1, "Live board"),
@@ -801,6 +808,7 @@ mod tests {
     fn split_roster_preserves_connected_order() {
         let view = DeviceRosterView {
             access: Default::default(),
+            wifi: Default::default(),
             roster: RosterView {
                 devices: vec![ready_view(1, "A"), ready_view(2, "B"), ready_view(3, "C")],
                 pending: Vec::new(),
