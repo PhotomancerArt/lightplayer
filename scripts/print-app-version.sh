@@ -3,7 +3,12 @@ set -euo pipefail
 
 # Prints the app version for the current commit.
 # If a date-based tag exists (vYYYY.MM.DD-N), outputs that without the 'v'.
-# Otherwise outputs branch@sha (or sha-dirty-timestamp for uncommitted changes).
+# Otherwise outputs the short sha (sha-dirty-HHMMSSPT for uncommitted changes).
+#
+# This is THE version of a build. Firmware, Studio and lp-cli are stamped with
+# what it prints, at build time, through `tools/lp-app-version` (a
+# build-script helper that prefers an exported APP_VERSION, as the deploy
+# workflows set, and runs this script otherwise).
 #
 # Usage: scripts/print-app-version.sh [--require-tag]
 
@@ -38,9 +43,12 @@ if [ "$REQUIRE_TAG" = "true" ]; then
 fi
 
 SHA=$(git rev-parse --short HEAD)
-DIRTY=$(git status --porcelain | wc -l | tr -d ' ')
-if [ "$DIRTY" -gt 0 ]; then
+# A separate variable for the count: reusing one for both printed a clean
+# untagged tree's "0" after the sha (`626a1b8510`).
+CHANGED=$(git status --porcelain | wc -l | tr -d ' ')
+SUFFIX=""
+if [ "$CHANGED" -gt 0 ]; then
     TIMESTAMP="$(TZ="America/Los_Angeles" date +"%H%M%S")PT"
-    DIRTY="-dirty-$TIMESTAMP"
+    SUFFIX="-dirty-$TIMESTAMP"
 fi
-echo "$SHA$DIRTY"
+echo "$SHA$SUFFIX"

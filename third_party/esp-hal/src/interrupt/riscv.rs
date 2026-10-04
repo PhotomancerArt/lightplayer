@@ -400,6 +400,10 @@ pub(crate) fn current_raw_runlevel() -> u32 {
 /// This function must only be used to raise the runlevel and to restore it
 /// to a previous value. It must not be used to arbitrarily lower the
 /// runlevel.
+// LP fork: `#[ram]` — `handle_interrupts` calls this on entry and on exit of
+// every peripheral interrupt, so it is part of the dispatch path. See
+// README-LP.md, "The fourth diff".
+#[crate::ram]
 pub(crate) unsafe fn change_current_runlevel(level: RunLevel) -> RunLevel {
     let previous = cpu_int::change_current_runlevel(level);
     unwrap!(RunLevel::try_from_u32(previous as u32))
@@ -578,26 +582,15 @@ pub(crate) mod rt {
             }
         }
 
-        let handle_interrupts = || unsafe {
-            for interrupt_nr in status.iterator().filter(|&interrupt_nr| {
-                crate::interrupt::should_handle(Cpu::current(), interrupt_nr as u32, prio as u32)
-            }) {
-                let handler =
-                    crate::soc::pac::__EXTERNAL_INTERRUPTS[interrupt_nr as usize]._handler;
-
-                handler();
-            }
-        };
-
         // Do not enable nesting on the highest priority level. Older interrupt controllers couldn't
         // properly mask the highest priority interrupt, and for CLIC we don't want to waste
         // the cycles it takes to enable nesting unnecessarily.
         if prio != Priority::max() as u8 {
             unsafe {
-                riscv::interrupt::nested(handle_interrupts);
+                riscv::interrupt::nested(|| dispatch(status, prio));
             }
         } else {
-            handle_interrupts();
+            unsafe { dispatch(status, prio) };
         }
 
         cfg_if::cfg_if! {
@@ -612,6 +605,31 @@ pub(crate) mod rt {
             } else {
                 unsafe { change_current_runlevel(level) };
             }
+        }
+    }
+
+    /// Runs the registered handler of every pending peripheral interrupt that
+    /// is mapped to a vectored CPU interrupt at `prio`.
+    ///
+    /// LP fork: upstream writes this as a closure inside `handle_interrupts`,
+    /// with a `filter` closure for the level check. At `opt-level = "z"` the
+    /// closure is outlined into flash `.text` (with machine-outlined
+    /// prologue/epilogue helpers beside it), so every peripheral interrupt
+    /// left RAM before reaching its handler. A named `#[ram]` function keeps
+    /// the whole path in `.rwtext`; the loop is the same, the filter written
+    /// as a `continue`. See README-LP.md, "The fourth diff".
+    #[crate::ram]
+    unsafe fn dispatch(status: InterruptStatus, prio: u8) {
+        for interrupt_nr in status.iterator() {
+            if !crate::interrupt::should_handle(Cpu::current(), interrupt_nr as u32, prio as u32) {
+                continue;
+            }
+
+            // `Vector` is a union (`_handler` / `_reserved`).
+            let handler =
+                unsafe { crate::soc::pac::__EXTERNAL_INTERRUPTS[interrupt_nr as usize]._handler };
+
+            unsafe { handler() };
         }
     }
 }

@@ -86,9 +86,14 @@ const LENS_DEAD_WIRE_FAILURES: u32 = 3;
 /// the number. (`lpa_link::device_link::wire::roster_config` does the same
 /// thing at the transport seam; both read the same constant, and studio-core
 /// must not require a transport feature just to construct a roster.)
+///
+/// `expected_version` is this Studio's own build version
+/// ([`crate::STUDIO_VERSION`]): what "older than Studio" compares a board's
+/// hello version against.
 fn device_roster_config() -> crate::DeviceRosterConfig {
     crate::DeviceRosterConfig {
         expected_proto: lpc_wire::WIRE_PROTO_VERSION,
+        expected_version: crate::DeviceAppVersion::parse(crate::STUDIO_VERSION),
         ..Default::default()
     }
 }

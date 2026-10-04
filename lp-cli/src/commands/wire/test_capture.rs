@@ -173,6 +173,7 @@ pub fn hello(pack_format: u8) -> WireServerMessage {
             build: lpc_wire::BuildFacts {
                 features: vec![],
                 package: "fw-esp32c6".to_string(),
+                version: "unknown".into(),
                 commit: "unknown".to_string(),
                 dirty: false,
                 profile: "release-esp32".to_string(),

@@ -128,7 +128,7 @@ pub fn VersionBadge() -> Element {
             chrome_class: "ux-popover-chrome-neutral".to_string(),
             placement: PopoverPlacement::BottomEnd,
             layer_keeps_layout: true,
-            VersionDetails { info, changelog: changelog() }
+            VersionDetails { info, changelog: changelog(), baked: Some(baked_build()) }
         }
     }
 }
@@ -152,6 +152,27 @@ fn baked_git() -> Option<BakedGit> {
         branch: branch.to_string(),
         dirty: option_env!("STUDIO_GIT_DIRTY") == Some("1"),
     })
+}
+
+/// The build identity compiled into this bundle: the app version every
+/// versioned build is stamped with (`lpa_studio_core::STUDIO_VERSION`), and
+/// the commit `build.rs` baked beside it. What the details show when no
+/// deployed `version.json` was fetched — a local dev build.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BakedBuild {
+    pub version: String,
+    pub sha: Option<String>,
+    pub dirty: bool,
+}
+
+fn baked_build() -> BakedBuild {
+    BakedBuild {
+        version: lpa_studio_core::STUDIO_VERSION.to_string(),
+        sha: option_env!("STUDIO_GIT_SHA")
+            .filter(|sha| !sha.is_empty())
+            .map(str::to_string),
+        dirty: option_env!("STUDIO_GIT_DIRTY") == Some("1"),
+    }
 }
 
 /// What the header chip shows for a fetch state + baked git facts.
@@ -245,18 +266,28 @@ pub(crate) fn VersionChipPreview(chip: BuildChip) -> Element {
 
 /// Pure presentation of the build details + recent-updates list.
 ///
-/// `info == None` renders the local dev-build fallback. A non-empty `changelog`
-/// renders a secondary "Recent updates" section; an empty one omits it.
+/// `info == None` renders the local dev-build fallback: the compiled-in
+/// `baked` identity when there is one (version first, the commit after it),
+/// else a sentence. A non-empty `changelog` renders a secondary "Recent
+/// updates" section; an empty one omits it.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub fn VersionDetails(info: Option<VersionInfo>, changelog: Vec<ChangelogEntry>) -> Element {
+pub fn VersionDetails(
+    info: Option<VersionInfo>,
+    changelog: Vec<ChangelogEntry>,
+    baked: Option<BakedBuild>,
+) -> Element {
     let repo = repo_slug(info.as_ref());
     rsx! {
         div { class: "tw:grid tw:min-w-0 tw:gap-3 tw:p-3",
             div { class: "tw:grid tw:min-w-0 tw:gap-0.5",
                 strong { class: "tw:text-sm tw:text-strong-foreground", "Build info" }
                 span { class: "tw:text-xs tw:font-bold tw:text-subtle-foreground",
-                    "Sourced from the deployed artifact"
+                    if info.is_none() && baked.is_some() {
+                        "Compiled into this build"
+                    } else {
+                        "Sourced from the deployed artifact"
+                    }
                 }
             }
             match info {
@@ -272,10 +303,25 @@ pub fn VersionDetails(info: Option<VersionInfo>, changelog: Vec<ChangelogEntry>)
                         VersionDetailRow { label: "built", value: display_or(info.build.generated_at.as_deref(), "—") }
                     }
                 },
-                None => rsx! {
-                    p { class: "tw:m-0 tw:text-xs tw:text-muted-foreground",
-                        "Dev build — version metadata is only present in deployed builds."
-                    }
+                None => match baked {
+                    Some(baked) => rsx! {
+                        dl { class: "tw:m-0 tw:grid tw:min-w-0 tw:gap-2 tw:text-xs",
+                            VersionDetailRow { label: "version", value: baked.version.clone() }
+                            VersionDetailRow {
+                                label: "commit",
+                                value: commit_display(&VersionSource {
+                                    sha: baked.sha.clone(),
+                                    dirty: Some(baked.dirty),
+                                    ..VersionSource::default()
+                                }),
+                            }
+                        }
+                    },
+                    None => rsx! {
+                        p { class: "tw:m-0 tw:text-xs tw:text-muted-foreground",
+                            "Dev build — version metadata is only present in deployed builds."
+                        }
+                    },
                 },
             }
             if !changelog.is_empty() {

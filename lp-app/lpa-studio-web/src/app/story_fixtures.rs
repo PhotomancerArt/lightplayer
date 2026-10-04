@@ -61,6 +61,7 @@ fn sim_lens_device_view() -> lpa_studio_core::DeviceView {
         firmware_face: lpa_studio_core::DeviceFirmwareFace::LightPlayer {
             firmware: Some("fw-browser 0000000".to_string()),
             wire: lpa_studio_core::DeviceWireVersion::Match,
+            age: lpa_studio_core::DeviceFirmwareAge::Unknown,
         },
         remembered_firmware: Some("fw-browser 0000000".to_string()),
         degraded: None,
