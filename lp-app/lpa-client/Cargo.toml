@@ -11,6 +11,8 @@ lpc-model = { path = "../../lp-core/lpc-model" }
 lpc-wire = { path = "../../lp-core/lpc-wire" }
 # The tier a `NotPermitted` refusal names, and the login challenge/MAC types.
 lpc-access = { path = "../../lp-core/lpc-access" }
+# Where the board manifest and a stamp's staged copy live (`device_stamp`).
+lpc-hardware = { path = "../../lp-core/lpc-hardware", default-features = false }
 lpc-shared = { path = "../../lp-core/lpc-shared", optional = true }
 tokio = { version = "1", features = ["full"], optional = true }
 anyhow = { version = "1", optional = true }

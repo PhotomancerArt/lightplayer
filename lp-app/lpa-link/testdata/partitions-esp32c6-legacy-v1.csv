@@ -1,0 +1,13 @@
+# FROZEN — the ESP32-C6 partition table every board flashed before the
+# 2026-10 repartition holds (lp-fw/fw-esp32c6/partitions.csv as of
+# origin/main 0380c63f8). Never edit: a fielded board's flash is the fact,
+# and the migration recognizes it by these exact rows
+# (`lpa_link::layout_migration::legacy_layout`, which a test holds equal to
+# this file). See docs/adr/2026-10-02-c6-repartition-and-layout-migration.md.
+#
+# Name,   Type,  SubType, Offset,   Size,     Flags
+nvs,      data,  nvs,     0x9000,   0x5000,
+bootctl,  data,  undefined, 0xe000, 0x1000,
+phy_init, data,  phy,     0xf000,   0x1000,
+factory,  app,   factory, 0x10000,  0x300000,
+lpfs,     data,  spiffs,  0x310000, 0xF0000,

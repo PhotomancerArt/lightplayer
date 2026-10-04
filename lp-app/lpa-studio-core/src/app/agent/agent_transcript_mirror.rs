@@ -160,6 +160,9 @@ impl AgentTranscriptMirror {
                         .then(|| UiAgentEditBatch::from_summary(&summary_json))
                         .flatten();
                     row.headline = app_tool_headline(&name, &summary_json);
+                    row.act = (name == "act")
+                        .then(|| app_act_press(&summary_json))
+                        .flatten();
                 }
                 return Some(ExecutedTool {
                     id,
@@ -310,6 +313,20 @@ fn app_tool_headline(name: &str, summary: &serde_json::Value) -> Option<String> 
     }
 }
 
+/// What a finished `act` pressed, or handed to the user on a card: the
+/// offer's path and the card's id. `None` for a refused or failed press.
+fn app_act_press(summary: &serde_json::Value) -> Option<crate::UiAgentActPress> {
+    let path = crate::OfferPath::parse(summary["action"].as_str()?.trim()).ok()?;
+    if summary["done"].as_bool() == Some(true) {
+        return Some(crate::UiAgentActPress { path, card: None });
+    }
+    let card = summary["card"].as_str()?;
+    Some(crate::UiAgentActPress {
+        path,
+        card: Some(card.to_string()),
+    })
+}
+
 /// The user-facing copy for a truncated run. `MaxTokens` gets the
 /// actionable phrasing (retry, or ask for something smaller); an unknown
 /// `Other` stop reason is surfaced verbatim.
@@ -424,5 +441,21 @@ mod tests {
             Some("read node fixture".into())
         );
         assert_eq!(app_tool_headline("iterate", &json!({})), None);
+        assert_eq!(
+            app_act_press(&json!({ "action": "project/save", "done": true })),
+            Some(crate::UiAgentActPress {
+                path: crate::OfferPath::project().child("save"),
+                card: None,
+            })
+        );
+        assert_eq!(
+            app_act_press(&json!({ "action": "devices/connect-usb", "card": "c1" }))
+                .and_then(|press| press.card),
+            Some("c1".to_string())
+        );
+        assert_eq!(
+            app_act_press(&json!({ "action": "project/save", "refused": "no" })),
+            None
+        );
     }
 }

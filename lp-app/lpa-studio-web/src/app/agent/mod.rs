@@ -12,6 +12,7 @@ pub(crate) mod agent_card_view;
 pub(crate) mod agent_card_view_stories;
 pub(crate) mod agent_chat_footer;
 pub(crate) mod agent_composer;
+pub(crate) mod agent_light;
 pub(crate) mod agent_needs_key;
 pub(crate) mod agent_transcript;
 pub(crate) mod app_chat_button;
@@ -25,6 +26,12 @@ pub(crate) mod app_chat_stories;
 pub(crate) use agent_card_view::AgentCardView;
 pub(crate) use agent_chat_footer::AgentChatFooter;
 pub(crate) use agent_composer::AgentComposer;
+#[cfg(feature = "stories")]
+pub(crate) use agent_light::{AgentActivityProvider, story_activity, story_edit_activity};
+pub(crate) use agent_light::{
+    AgentEditedChip, AgentMark, agent_slot_class, use_agent_reveal, use_agent_slot_lit,
+    use_provide_agent_activity,
+};
 pub(crate) use agent_needs_key::AgentNeedsKey;
 pub(crate) use agent_transcript::{AgentErrorStrip, AgentTranscript};
 pub(crate) use app_chat_button::AppChatButton;

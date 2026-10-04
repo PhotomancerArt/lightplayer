@@ -37,6 +37,9 @@ pub struct AppAgentSession {
     /// A card whose press opened a platform chooser: it settles on the
     /// chooser's answer, not on the press (which only opened it).
     pub grant_wait: Option<CardGrantWait>,
+    /// What the agent pressed, handed over and edited, by where it lives:
+    /// the page lights it for a moment and the chat says where it is.
+    pub activity: crate::AgentActivity,
     /// Something the agent started that is still under way — an open from
     /// Home, a flash, a push: it ends after the run that pressed it has
     /// ended, and the run that follows hears how it went.
@@ -101,6 +104,7 @@ impl Default for AppAgentSession {
             cards_minted: 0,
             resume: Vec::new(),
             grant_wait: None,
+            activity: crate::AgentActivity::default(),
             wait: None,
             wait_settled: None,
         }

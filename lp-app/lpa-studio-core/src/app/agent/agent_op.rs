@@ -93,6 +93,12 @@ pub enum AgentOp {
     /// The user's No on an app-agent card: mark it dismissed and let the
     /// assistant hear it.
     CardDismissed { card: String },
+    /// The user's Show on an app-chat row (the `show/<target>` offer):
+    /// bring the control at `target` into view and light it again. A node
+    /// (or a node's verb) focuses that node's card, the way a tree-row
+    /// click does; the page scrolls to the control. It never moves
+    /// keyboard focus.
+    Show { target: crate::OfferPath },
 }
 
 impl ControllerOp for AgentOp {
@@ -152,6 +158,11 @@ impl ControllerOp for AgentOp {
                 "Dismiss",
                 "Don't do this; tell the assistant.",
                 ActionPriority::Secondary,
+            ),
+            Self::Show { .. } => ActionMeta::new(
+                "Show",
+                "Bring this into view and light it.",
+                ActionPriority::Tertiary,
             ),
             Self::AppStop => ActionMeta::new(
                 "Stop",

@@ -19,7 +19,7 @@
     },
     {
       "describe": "Erase the lpfs data partition (offset from lp-fw/fw-esp32c6/partitions.csv)",
-      "run": "espflash erase-region --port {port} 0x310000 0xF0000",
+      "run": "espflash erase-region --port {port} 0x350000 0xB0000",
       "verified": false
     },
     {

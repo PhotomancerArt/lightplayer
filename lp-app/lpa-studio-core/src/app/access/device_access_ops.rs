@@ -100,10 +100,17 @@ pub struct DroppedKey {
 /// How a sync ended.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AccessSynced {
+    /// The list as the board last answered it — after every change that
+    /// went through, and still the board's own when a change was refused.
     pub listing: AccessListing,
     pub added: Vec<AddedKey>,
     /// Browser keys dropped to make room for what was added.
     pub dropped: Vec<DroppedKey>,
+    /// Why a change the sync wanted did not happen (a full device nothing
+    /// on it can make room on, a refusal), in words for the panel. The list
+    /// above is still good: a refusal never costs the list the sync read
+    /// (G1 walk, 2026-10-03: "Who has access 0" on a full store).
+    pub refused: Option<String>,
 }
 
 /// How a panel change (or an Undo) ended.
@@ -166,9 +173,16 @@ pub fn plan_sync(
 }
 
 /// List, remove the retired, then install what is missing, making room
-/// as it goes. `added_at` is the caller's clock, epoch seconds. Stops at
-/// the first refusal (a full device nothing can be dropped from, a lost
-/// tier).
+/// as it goes. `added_at` is the caller's clock, epoch seconds.
+///
+/// Only the list itself can fail the sync (an older firmware, a lost
+/// link). Past it, a change the board refuses — or a new key nothing on a
+/// full device can make room for — ends the sync with the list as it then
+/// stood and the refusal beside it.
+///
+/// The list must survive a refusal: the G1 walk's spare C6 had a full store,
+/// and a sync that threw away the list it had read left the panel with
+/// nothing — "Who has access 0" and a Bluetooth switch locked for good.
 pub async fn sync_access<Io: ClientIo>(
     client: &mut LpClient<Io>,
     held: &[HeldKey],
@@ -177,23 +191,56 @@ pub async fn sync_access<Io: ClientIo>(
 ) -> Result<AccessSynced, String> {
     let mut listing = send(client, ClientRequest::AccessList).await?;
     let plan = plan_sync(&listing, held, stale);
-    // Retired keys go first: their slots are the room a new account key
-    // needs on a full device.
-    for salt in plan.remove {
-        listing = send(client, ClientRequest::AccessRemove { salt }).await?;
-    }
     let keep: Vec<[u8; SALT_BYTES]> = held.iter().map(HeldKey::salt).collect();
     let mut added = Vec::new();
     let mut dropped = Vec::new();
+    let refused = match apply_sync_plan(
+        client,
+        &plan,
+        added_at,
+        &keep,
+        &mut listing,
+        &mut added,
+        &mut dropped,
+    )
+    .await
+    {
+        Ok(()) => None,
+        Err(error) => Some(error),
+    };
+    Ok(AccessSynced {
+        listing,
+        added,
+        dropped,
+        refused,
+    })
+}
+
+/// The changes of a sync, in order, keeping `listing` at the board's last
+/// answer. A refusal ends it.
+async fn apply_sync_plan<Io: ClientIo>(
+    client: &mut LpClient<Io>,
+    plan: &SyncPlan,
+    added_at: u64,
+    keep: &[[u8; SALT_BYTES]],
+    listing: &mut AccessListing,
+    added: &mut Vec<AddedKey>,
+    dropped: &mut Vec<DroppedKey>,
+) -> Result<(), String> {
+    // Retired keys go first: their slots are the room a new account key
+    // needs on a full device.
+    for salt in &plan.remove {
+        *listing = send(client, ClientRequest::AccessRemove { salt: *salt }).await?;
+    }
     for key in &plan.add {
-        listing = add_with_room(client, listing, key, added_at, &keep, &mut dropped).await?;
+        *listing = add_with_room(client, listing.clone(), key, added_at, keep, dropped).await?;
         added.push(AddedKey {
             salt: key.salt,
             label: key.label.clone(),
         });
     }
     for key in &plan.relabel {
-        listing = send(
+        *listing = send(
             client,
             ClientRequest::AccessAdd {
                 entry: key.entry(added_at),
@@ -201,11 +248,7 @@ pub async fn sync_access<Io: ClientIo>(
         )
         .await?;
     }
-    Ok(AccessSynced {
-        listing,
-        added,
-        dropped,
-    })
+    Ok(())
 }
 
 /// Apply `ops` in order and answer the list as it then stands. An add on a
@@ -313,7 +356,7 @@ mod tests {
     use super::*;
     use crate::app::access::key_holder::KeyHolder;
     use crate::app::access::test_board::{FakeBoard, block_on};
-    use lpc_access::{SecretKind, Tier};
+    use lpc_access::{SecretEntry, SecretKind, Tier};
 
     fn held(label: &str, salt: u8) -> HeldKey {
         HeldKey {
@@ -362,6 +405,35 @@ mod tests {
         let again = block_on(sync_access(&mut usb, &[held("Mine", 1)], &[], 8)).unwrap();
         assert!(again.added.is_empty());
         assert_eq!(again.listing.entries.len(), 1);
+    }
+
+    /// The G1 walk's spare C6: a store full of passwords (nothing a sync
+    /// may drop to make room) answers its list, and a sync whose add cannot
+    /// fit keeps that list and says why — it does not fail.
+    #[test]
+    fn a_full_store_is_listed_and_the_add_that_cannot_fit_is_named() {
+        let full: Vec<SecretEntry> = (0..lpc_access::MAX_SECRETS_PER_FILE as u8)
+            .map(|n| {
+                let mut key = held(&format!("guest {n}"), n + 100).key;
+                key.kind = SecretKind::Password;
+                key.entry(1)
+            })
+            .collect();
+        let board = FakeBoard::with_entries(full);
+        let mut usb = board.usb();
+        let synced =
+            block_on(sync_access(&mut usb, &[held("Mine", 1)], &[], 7)).expect("the list was read");
+        assert_eq!(
+            synced.listing.entries.len(),
+            lpc_access::MAX_SECRETS_PER_FILE
+        );
+        assert!(synced.added.is_empty());
+        assert_eq!(synced.refused.as_deref(), Some(FULL_SENTENCE));
+        assert_eq!(
+            board.store().secrets.len(),
+            lpc_access::MAX_SECRETS_PER_FILE,
+            "nothing written"
+        );
     }
 
     #[test]
@@ -423,9 +495,11 @@ mod tests {
             .collect();
         let board = FakeBoard::with_entries(entries);
         let mut usb = board.usb();
-        let error = block_on(sync_access(&mut usb, &[held("Mine", 40)], &[], 9))
-            .expect_err("nothing may be dropped");
-        assert_eq!(error, FULL_SENTENCE);
+        // Nothing may be dropped: the sync says so, beside the list it read.
+        let synced = block_on(sync_access(&mut usb, &[held("Mine", 40)], &[], 9))
+            .expect("the list was read");
+        assert_eq!(synced.refused.as_deref(), Some(FULL_SENTENCE));
+        assert_eq!(synced.listing.entries.len(), MAX_SECRETS_PER_FILE);
         assert_eq!(board.store().secrets.len(), MAX_SECRETS_PER_FILE);
     }
 

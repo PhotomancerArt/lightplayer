@@ -1,24 +1,21 @@
-//! Raw flash regions a link operation can address, per chip.
+//! Raw flash regions a link operation can address.
 //!
 //! A raw read is meaningless without an offset and a length, and those are
-//! **per board**: the C6's `lpfs` sits at `0x310000` for 960 KB, the S3's at
-//! `0x610000` for 1.5 MB (its 8 MB partition floor —
-//! `docs/adr/2026-07-30-esp32s3-partition-floor.md`). Hardcoding the C6's
-//! numbers would silently read the wrong 960 KB off an S3 and hand the user
-//! a "backup" of somebody else's partition.
+//! **per board** — not even per chip since the 2026-10 C6 repartition: a C6
+//! flashed before it keeps `lpfs` at `0x310000` for 960 KB, one flashed after
+//! at `0x350000` for 704 KB, and the S3 at `0x610000`. A guessed region would
+//! hand the user a plausible-looking "backup" of somebody else's bytes.
 //!
-//! **The chip is discovered, not declared.** A device that cannot boot cannot
-//! tell Studio which board it is — that is the whole recovery scenario (see
-//! the M5 plan correction in the recovery plan's notes). What *can* answer is
-//! the esptool SYNC handshake both providers already perform before any flash
-//! operation, so the region is resolved from the chip name that handshake
-//! returns, at the moment of the read.
-//!
-//! The names arrive in two shapes: espflash's `Chip` renders `esp32c6`, while
-//! esptool-js reports something like `ESP32-C6 (QFN32) (revision v0.2)`.
-//! [`LinkFlashRegion::lpfs_for_chip`] normalizes both.
+//! **The region is read, not declared.** The answer is the device's own
+//! partition table, read at `0x8000` in the same bootloader session as the
+//! raw read ([`LinkFlashRegion::lpfs_in`]). A device that cannot boot cannot
+//! say where its filesystem is; its table can. A table with no `lpfs` row is
+//! not a LightPlayer layout, and the raw read refuses it rather than
+//! guessing.
 
 use serde::{Deserialize, Serialize};
+
+use super::partition_table::PartitionTable;
 
 /// A contiguous span of device flash, in bytes from the start of the chip.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
@@ -28,19 +25,14 @@ pub struct LinkFlashRegion {
 }
 
 impl LinkFlashRegion {
-    /// The `lpfs` partition on `chip_name`, or `None` for a chip this build
-    /// has no partition table for.
-    ///
-    /// Returning `None` rather than guessing is deliberate: a wrong region
-    /// produces a plausible-looking archive of the wrong bytes, which is
-    /// worse than a refusal in exactly the situation where the user is
-    /// trying to rescue their work.
-    pub fn lpfs_for_chip(chip_name: &str) -> Option<Self> {
-        let chip_id = super::chip::chip_id_from_reported(chip_name)?;
-        LPFS_PARTITIONS
-            .iter()
-            .find(|(chip, _)| *chip == chip_id)
-            .map(|(_, region)| *region)
+    /// The `lpfs` partition `table` declares, or `None` when it declares
+    /// none (not a LightPlayer layout).
+    pub fn lpfs_in(table: &PartitionTable) -> Option<Self> {
+        let row = table.find("lpfs")?;
+        Some(Self {
+            offset: row.offset,
+            length: row.size,
+        })
     }
 
     /// Block count for a littlefs mount over this region at `block_size`.
@@ -49,105 +41,49 @@ impl LinkFlashRegion {
     }
 }
 
-/// The `lpfs` partition of every board LightPlayer ships a partition table
-/// for. Guarded against the tables themselves by the tests below.
-///
-/// Keys are canonical chip ids ([`super::chip::KNOWN_CHIP_IDS`]), compared
-/// for equality after the reported name is resolved to one. This used to be
-/// a substring test, which happened to work only because `esp32` had no
-/// entry — every reported name contains it.
-const LPFS_PARTITIONS: &[(&str, LinkFlashRegion)] = &[
-    (
-        "esp32c6",
-        LinkFlashRegion {
-            offset: 0x0031_0000,
-            length: 0x000F_0000,
-        },
-    ),
-    (
-        "esp32s3",
-        LinkFlashRegion {
-            offset: 0x0061_0000,
-            length: 0x0018_0000,
-        },
-    ),
-];
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// The hand-maintained agreement between this table and the firmware
-    /// partition tables — the same guard `lp-bootctl` keeps over its sector
-    /// offset, for the same reason: nothing else would notice the drift, and
-    /// the failure mode is a silently wrong backup.
     #[test]
-    fn lpfs_regions_match_every_boards_partition_table() {
-        for (board, csv) in [
+    fn the_region_is_each_shipped_tables_lpfs_row() {
+        for (csv, offset, length, blocks) in [
             (
-                "esp32c6",
-                include_str!("../../../../lp-fw/fw-esp32c6/partitions.csv"),
-            ),
-            (
-                "esp32s3",
                 include_str!("../../../../lp-fw/fw-esp32s3/partitions.csv"),
+                0x0061_0000,
+                0x0018_0000,
+                384,
+            ),
+            (
+                include_str!("../../../../lp-fw/fw-esp32c6/partitions.csv"),
+                0x0035_0000,
+                0x000B_0000,
+                176,
+            ),
+            (
+                include_str!("../../testdata/partitions-esp32c6-legacy-v1.csv"),
+                0x0031_0000,
+                0x000F_0000,
+                240,
             ),
         ] {
-            let (offset, size) = lpfs_row(csv);
-            let region = LinkFlashRegion::lpfs_for_chip(board)
-                .unwrap_or_else(|| panic!("{board} has an lpfs region"));
-            assert_eq!(region.offset, offset, "{board}: lpfs offset drifted");
-            assert_eq!(region.length, size, "{board}: lpfs size drifted");
+            let table = PartitionTable::from_csv(csv).unwrap();
+            let region = LinkFlashRegion::lpfs_in(&table).unwrap();
+            assert_eq!((region.offset, region.length), (offset, length));
+            assert_eq!(region.block_count(4096), blocks);
         }
+        let c6 =
+            PartitionTable::from_csv(include_str!("../../../../lp-fw/fw-esp32c6/partitions.csv"))
+                .unwrap();
+        assert!(LinkFlashRegion::lpfs_in(&c6).is_some());
     }
 
     #[test]
-    fn chip_names_normalize_across_both_reporters() {
-        // espflash's `Chip` Display, and esptool-js's chatty banner.
-        let expected = LinkFlashRegion::lpfs_for_chip("esp32c6").unwrap();
-        for reported in [
-            "esp32c6",
-            "ESP32-C6",
-            "ESP32-C6 (QFN32) (revision v0.2)",
-            "esp32-c6",
-        ] {
-            assert_eq!(
-                LinkFlashRegion::lpfs_for_chip(reported),
-                Some(expected),
-                "{reported} should resolve to the C6 lpfs region"
-            );
-        }
-    }
-
-    #[test]
-    fn an_unknown_chip_refuses_rather_than_guessing() {
-        assert_eq!(LinkFlashRegion::lpfs_for_chip("ESP32-C3"), None);
-        assert_eq!(LinkFlashRegion::lpfs_for_chip(""), None);
-    }
-
-    #[test]
-    fn block_count_covers_the_whole_region() {
-        let c6 = LinkFlashRegion::lpfs_for_chip("esp32c6").unwrap();
-        assert_eq!(c6.block_count(4096), 240);
-        let s3 = LinkFlashRegion::lpfs_for_chip("esp32s3").unwrap();
-        assert_eq!(s3.block_count(4096), 384);
-    }
-
-    fn lpfs_row(csv: &str) -> (u32, u32) {
-        csv.lines()
-            .map(str::trim)
-            .filter(|line| !line.is_empty() && !line.starts_with('#'))
-            .map(|line| line.split(',').map(str::trim).collect::<Vec<_>>())
-            .find(|fields| fields.first() == Some(&"lpfs"))
-            .map(|fields| (parse_hex(fields[3]), parse_hex(fields[4])))
-            .expect("partitions.csv declares lpfs")
-    }
-
-    fn parse_hex(text: &str) -> u32 {
-        let digits = text
-            .strip_prefix("0x")
-            .or_else(|| text.strip_prefix("0X"))
-            .unwrap_or(text);
-        u32::from_str_radix(digits, 16).unwrap_or_else(|_| panic!("{text:?} is not hex"))
+    fn a_table_without_lpfs_refuses_rather_than_guessing() {
+        let mut csv = String::new();
+        csv.push_str("nvs, data, nvs, 0x9000, 0x6000,\n");
+        csv.push_str("factory, app, factory, 0x10000, 0x100000,\n");
+        let table = PartitionTable::from_csv(&csv).unwrap();
+        assert_eq!(LinkFlashRegion::lpfs_in(&table), None);
     }
 }

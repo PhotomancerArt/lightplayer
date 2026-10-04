@@ -15,11 +15,13 @@
 //!
 //! `#[ignore]`d for the usual reason (`test_support`).
 
-use lp_emu_esp32c6::flash::{FlashBacking, LPFS_OFFSET};
+use lp_emu_esp32c6::flash::FlashBacking;
 use lp_emu_esp32c6::machine::{
     AppSource, Esp32C6Builder, Esp32C6Machine, Outcome, StopCondition, TimeGrade,
 };
-use lp_emu_esp32c6::test_support::{ReferenceImage, reference_image, skip_notice};
+use lp_emu_esp32c6::test_support::{
+    ReferenceImage, reference_image, reference_lpfs_offset, skip_notice,
+};
 
 /// Long enough for the mount, the `/projects` scan and the first frame.
 const BOOT_US: u64 = 3_000_000;
@@ -87,14 +89,18 @@ fn the_second_boot_from_the_same_flash_file_mounts_what_the_first_formatted() {
     );
 
     // The file is a whole chip, and littlefs's superblock is where the
-    // firmware's `LPFS_PARTITION_OFFSET` says it should be.
+    // image's own partition table says `lpfs` is — the table at the image's
+    // commit, which predates the 2026-10 repartition (`0x310000`), not
+    // today's (`0x350000`).
     let image = std::fs::read(&path).expect("the flash file was written");
     assert_eq!(image.len() as u32, lp_emu_esp32c6::flash::DEFAULT_FLASH_LEN);
-    let at = LPFS_OFFSET as usize;
+    let lpfs = reference_lpfs_offset(&ReferenceImage::BOOT_IDLE)
+        .expect("the reference commit's partition table names lpfs");
+    let at = lpfs as usize;
     assert_eq!(
         &image[at + 8..at + 16],
         b"littlefs",
-        "no littlefs superblock at {LPFS_OFFSET:#x}"
+        "no littlefs superblock at {lpfs:#x}"
     );
 
     let second = boot(&elf, FlashBacking::File(path.clone()));

@@ -80,6 +80,26 @@ Therefore a connected, responding server that produces no hello IS the
 version-mismatch signal — no dual classifier, no format probing, no
 "legacy mode". This covers all pre-M2 firmware with zero compat surface.
 
+**Amended 2026-10-02 (G1-F1 of the C6 repartition):** a hello the host
+cannot DECODE is not an absent hello. Wire 34 (33 when this was written) made the hello's
+`hardware.fs` required, a wire-32 hello stopped decoding, and every
+fielded board read as pre-hello firmware. When the full decode fails, the
+host reads exactly one field — `msg.hello.proto`, which every hello since
+wire 1 carries in the same place (`lpc_wire::hello_proto`) — and treats
+the board as a LightPlayer on that wire (older: update the firmware).
+Nothing else of the other wire's hello is read, so this is the version
+check working, not a decoder for an old shape. See
+`docs/defects/2026-10-02-a-wire-32-board-reads-as-pre-hello-firmware.md`.
+
+**Amended 2026-10-03 (G1 walk, Q6):** one more field, read the same way
+and only then: `msg.hello.hardware.boardId` (`lpc_wire::hello_board_id`),
+the board the stamped `/hardware.json` names. Without it the way forward
+for an older board — "update the firmware" — asked the user to pick the
+board from every board the catalog has, on a board that had said exactly
+what it is. It is read separately from `proto`, so a board field of
+another shape costs the board and never the version. That is the whole
+list: version and board, nothing else.
+
 ### Conservative policy: always upgrade the firmware
 
 When versions differ (or the hello is absent), assume **nothing** works.

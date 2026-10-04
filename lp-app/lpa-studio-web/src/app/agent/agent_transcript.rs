@@ -18,13 +18,15 @@ use std::rc::Rc;
 use dioxus::prelude::*;
 use dioxus::{html::geometry::PixelsVector2D, prelude::dioxus_core::use_after_render};
 use lpa_studio_core::{
-    UiAction, UiAgentEditBatch, UiAgentEditOutcome, UiAgentHistoryEntry, UiAgentStatus,
-    UiAgentToolRow, UiAgentTurn, UiNoticeLevel, UiProductPreview,
+    ActionEnablement, OfferPath, UiAction, UiAgentEditBatch, UiAgentEditOutcome,
+    UiAgentHistoryEntry, UiAgentStatus, UiAgentToolRow, UiAgentTurn, UiNoticeLevel,
+    UiProductPreview,
 };
 
 use crate::app::agent::AgentCardView;
 use crate::app::node::ProductPreviewCanvas;
-use crate::base::MarkdownText;
+use crate::base::{MarkdownText, StudioIcon, StudioIconName};
+use crate::core::use_offer_at;
 
 /// Scroll slack under which the transcript stays glued to its bottom.
 const CHAT_STICKY_THRESHOLD_PX: f64 = 48.0;
@@ -125,6 +127,7 @@ pub(crate) fn AgentTranscript(
                             row: row.clone(),
                             default_open: tool_rows_expanded,
                             history_entry: history_entry_for_row(&history, row),
+                            on_action,
                         }
                     },
                     UiAgentTurn::Thinking { text, done } => rsx! {
@@ -260,8 +263,15 @@ fn ToolRow(
     /// for non-staging calls and cap-dropped records.
     #[props(default = None)]
     history_entry: Option<UiAgentHistoryEntry>,
+    /// Presses the row's Show links (core's `show/<target>` offers).
+    #[props(default)]
+    on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
     let mut open = use_signal(|| default_open);
+    // Where the press happened (M8): an `act` row's own Show, and an edit
+    // row's one Show per node it changed.
+    let act_show = row.place.as_ref().and_then(|place| place.show.clone());
+    let edit_shows = edit_row_shows(&row);
     let summary = row.summary_line();
     let has_detail = row.edits.is_some() || !row.detail.is_empty();
     let expand_title = if row.edits.is_some() {
@@ -273,8 +283,9 @@ fn ToolRow(
     };
     rsx! {
         div { class: "tw:min-w-0 tw:rounded-xs tw:border tw:border-border-subtle tw:bg-card-muted",
+            div { class: "tw:flex tw:min-w-0 tw:items-center",
             button {
-                class: "tw:flex tw:w-full tw:cursor-pointer tw:items-center tw:gap-2 tw:border-0 tw:bg-transparent tw:px-2.5 tw:py-1.5 tw:text-left tw:font-mono tw:text-xs tw:text-muted-foreground",
+                class: "tw:flex tw:min-w-0 tw:flex-1 tw:cursor-pointer tw:items-center tw:gap-2 tw:border-0 tw:bg-transparent tw:px-2.5 tw:py-1.5 tw:text-left tw:font-mono tw:text-xs tw:text-muted-foreground",
                 r#type: "button",
                 title: "{expand_title}",
                 onclick: move |_| open.set(!open()),
@@ -307,6 +318,22 @@ fn ToolRow(
                     }
                 }
             }
+            if let Some(show) = act_show {
+                AgentShowLink { show, text: "Show", on_action }
+            }
+            }
+            if !edit_shows.is_empty() {
+                div { class: "tw:flex tw:min-w-0 tw:flex-wrap tw:items-center tw:gap-x-1 tw:gap-y-0.5 tw:px-1 tw:pb-1",
+                    for (show, label) in edit_shows {
+                        AgentShowLink {
+                            key: "{show}",
+                            show,
+                            text: format!("Show {label}"),
+                            on_action,
+                        }
+                    }
+                }
+            }
             if open() && has_detail {
                 match &row.edits {
                     Some(edits) => rsx! {
@@ -321,6 +348,65 @@ fn ToolRow(
             }
         }
     }
+}
+
+/// A Show link on a chat row: the core offer at `show/<target>`, pressed
+/// like any other (it focuses a node's card, lights the control and asks
+/// the page to scroll to it). Drawn disabled with the reason when the
+/// control is on another page; absent when the tree no longer offers it.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn AgentShowLink(
+    show: OfferPath,
+    #[props(into)] text: String,
+    #[props(default)] on_action: Option<EventHandler<UiAction>>,
+) -> Element {
+    let Some(offer) = use_offer_at(show)() else {
+        return rsx! {};
+    };
+    let enabled = offer.is_enabled();
+    let title = match &offer.action.meta().enablement {
+        ActionEnablement::Disabled { reason } => reason.clone(),
+        ActionEnablement::Enabled => offer.summary().to_string(),
+    };
+    let press = offer.action.clone();
+    rsx! {
+        button {
+            class: SHOW_LINK_CLASS,
+            r#type: "button",
+            disabled: !enabled,
+            title: "{title}",
+            onclick: move |event| {
+                event.stop_propagation();
+                if let Some(handler) = on_action {
+                    handler.call(press.clone());
+                }
+            },
+            StudioIcon { name: StudioIconName::Show, size: 12 }
+            "{text}"
+        }
+    }
+}
+
+/// The Show link: a quiet text link that reads as a link, not a button.
+const SHOW_LINK_CLASS: &str = "tw:inline-flex tw:flex-none tw:cursor-pointer tw:items-center tw:gap-1 tw:rounded-xs tw:border-0 tw:bg-transparent tw:px-1.5 tw:py-1 tw:text-[11px] tw:font-semibold tw:text-muted-foreground tw:hover:bg-card-subtle tw:hover:text-strong-foreground tw:disabled:cursor-default tw:disabled:text-dim-foreground tw:disabled:hover:bg-transparent";
+
+/// An edit row's Show links: one per node its edits landed on, in the
+/// order they appear, each named by the node (`Show fixture`).
+fn edit_row_shows(row: &UiAgentToolRow) -> Vec<(OfferPath, String)> {
+    let mut shows: Vec<(OfferPath, String)> = Vec::new();
+    for line in row.edits.iter().flat_map(|edits| &edits.lines) {
+        let Some(place) = &line.place else {
+            continue;
+        };
+        let Some(show) = &place.show else {
+            continue;
+        };
+        if !shows.iter().any(|(at, _)| at == show) {
+            shows.push((show.clone(), place.label.clone()));
+        }
+    }
+    shows
 }
 
 /// An `edit_project` row's expanded list: the agent's note, then one line
@@ -467,6 +553,32 @@ mod tests {
             { "edit": "set", "target": "o", "path": "x", "ok": false, "reason": "no" }
         ] }));
         assert!(tool_dot_class(&edits).contains("status-error"));
+    }
+
+    #[test]
+    fn an_edit_row_links_each_node_it_changed_once() {
+        let mut edits = row().for_tool("edit_project");
+        edits.done = true;
+        edits.edits = UiAgentEditBatch::from_summary(&serde_json::json!({ "rows": [
+            { "edit": "set", "target": "fixture", "path": "a", "ok": true },
+            { "edit": "set", "target": "fixture", "path": "b", "ok": true },
+            { "edit": "set", "target": "output", "path": "c", "ok": true },
+            { "edit": "set_target", "target": "board", "ok": true }
+        ] }));
+        let place = |node: &str| lpa_studio_core::UiAgentPlace {
+            label: node.to_string(),
+            place: format!("on the {node} card"),
+            show: Some(OfferPath::parse(&format!("show/project/{node}.x")).unwrap()),
+        };
+        let lines = &mut edits.edits.as_mut().unwrap().lines;
+        lines[0].place = Some(place("fixture"));
+        lines[1].place = Some(place("fixture"));
+        lines[2].place = Some(place("output"));
+        let shows: Vec<String> = edit_row_shows(&edits)
+            .into_iter()
+            .map(|(_, label)| label)
+            .collect();
+        assert_eq!(shows, ["fixture", "output"]);
     }
 
     #[test]

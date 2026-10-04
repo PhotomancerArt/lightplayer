@@ -32,6 +32,7 @@ use lpa_studio_core::{
     UiSlotValueKind,
 };
 
+use crate::app::agent::{agent_slot_class, use_agent_slot_lit};
 use crate::app::node::slot_detail_button::primary_affordance;
 use crate::app::node::slot_edit_actions::panel_clear_action;
 use crate::app::node::{SlotDetailButton, SlotUnitSuffix};
@@ -126,6 +127,11 @@ pub fn PanelControl(
         }
     };
 
+    // The agent light (M8): the slot the assistant's edit wrote lights here,
+    // ring outside the control's box over a soft pad. The control edits its
+    // value whole, so an edit anywhere under its slot counts.
+    let agent_lit = use_agent_slot_lit(control.address.clone(), true);
+    let outer_class = format!("{outer_class} {}", agent_slot_class(agent_lit, true));
     rsx! {
         div { id: "{anchor_id}", class: outer_class,
             PanelControlBody { control, label: label_trigger, on_action }

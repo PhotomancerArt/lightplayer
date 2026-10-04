@@ -48,7 +48,10 @@ and reader so they cannot disagree.
 code references it, and `esp-radio`'s `NVS` is a 15-word **RAM** array
 (`common_adapter.rs`) plus stubbed ESP-IDF shims, not this partition. This
 placement moves **no other offset**, so `lpfs` stays at `0x310000` and
-existing devices' filesystem images remain valid. Both boards keep
+existing devices' filesystem images remain valid. *(True until the 2026-10 C6
+repartition moved the C6's `lpfs` to `0x350000` —
+`2026-10-02-c6-repartition-and-layout-migration.md`; `bootctl` at `0xe000`
+is unaffected.)* Both boards keep
 byte-identical layouts so the offset can be a constant rather than a
 partition-table lookup.
 

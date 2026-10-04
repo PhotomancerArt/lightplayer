@@ -64,6 +64,26 @@ impl ProjectController {
             .map(|node| OfferPath::project_node(node.address()))
     }
 
+    /// The node whose offers live at `prefix`
+    /// (`project/demo.module/fixture.fixture`), anywhere in the tree.
+    pub(crate) fn node_at_prefix(&self, prefix: &OfferPath) -> Option<&NodeController> {
+        let mut stack: Vec<&NodeController> = self.root_nodes().iter().collect();
+        while let Some(node) = stack.pop() {
+            if OfferPath::project_node(node.address()) == *prefix {
+                return Some(node);
+            }
+            stack.extend(node.children().iter());
+        }
+        None
+    }
+
+    /// The name the chat calls the node at `prefix` by (`playlist/spiral`;
+    /// empty for the project's root module).
+    pub(crate) fn node_name_at_prefix(&self, prefix: &OfferPath) -> Option<String> {
+        self.node_at_prefix(prefix)
+            .map(|node| node_display_name(node.address()))
+    }
+
     /// The node whose card has focus (first in tree order).
     fn focused_node(&self) -> Option<&NodeController> {
         let mut stack: Vec<&NodeController> = self.root_nodes().iter().rev().collect();

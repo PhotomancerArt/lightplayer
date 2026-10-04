@@ -304,6 +304,12 @@ impl DeviceTransport for SimDeviceTransport {
                         ..Default::default()
                     })
                 }
+                // A sim has no flash and no partition table: nothing to
+                // inspect, so its "update" is the plain restart above.
+                DeviceEffectCall::InspectLayout { .. } => Ok(DeviceEffectFacts {
+                    summary: "a sim has no flash layout".to_string(),
+                    ..Default::default()
+                }),
                 DeviceEffectCall::EraseFlash => {
                     progress("Restarting the sim".to_string(), Some(50));
                     control.restart().await?;
@@ -574,6 +580,7 @@ mod tests {
             sim_link_info("dev1", "Desktop"),
             DeviceEffectCall::FlashFirmware {
                 build_id: "esp32c6-4mb".to_string(),
+                plan: None,
             },
             Rc::new(|_, _| {}),
         ))
