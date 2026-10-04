@@ -100,7 +100,9 @@ fn wifi_credentials_set_over_usb_survive_a_reset_and_stay_write_only() {
 
     {
         let mut client = lpa_client::LpClient::new(&mut io).with_request_ids_from(1_000);
-        let hello = block_on(client.hello()).expect("hello after the reboot").value;
+        let hello = block_on(client.hello())
+            .expect("hello after the reboot")
+            .value;
         assert_eq!(hello.proto, lpc_wire::WIRE_PROTO_VERSION);
         // The settings came back from lpfs.
         let status = block_on(client.network_status())

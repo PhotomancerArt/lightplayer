@@ -206,7 +206,10 @@ mod tests {
             ip: String::from("10.0.0.7"),
             rssi: -48,
         };
-        assert_eq!(status_lines(&status)[2], "station: joined · 10.0.0.7 · -48 dBm");
+        assert_eq!(
+            status_lines(&status)[2],
+            "station: joined · 10.0.0.7 · -48 dBm"
+        );
         status.station = StationState::Failed {
             reason: String::from("wrong password"),
         };

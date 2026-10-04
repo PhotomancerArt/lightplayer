@@ -563,7 +563,10 @@ mod tests {
             captured.iter().any(|line| line.contains("withheld")),
             "the transport logged nothing to check: {captured:?}"
         );
-        let hex: String = PASSWORD.bytes().map(|b| alloc::format!("{b:02x} ")).collect();
+        let hex: String = PASSWORD
+            .bytes()
+            .map(|b| alloc::format!("{b:02x} "))
+            .collect();
         for logged in captured.iter() {
             assert!(!logged.contains(PASSWORD), "{logged}");
             assert!(!logged.contains(hex.trim_end()), "{logged}");
