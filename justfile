@@ -2667,6 +2667,17 @@ clippy-fw-esp32c6: install-rv32-target
     echo "clippy: --features frame-dump"
     cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} \
         --features esp32c6,frame-dump -- --no-deps -D warnings
+    # The split build's own code (`cfg(lp_split)`: the engine door through its
+    # header, the boot bookkeeping) is out of the plain build entirely, and
+    # the split image is the one that ships. `LP_SPLIT_LINK` is what the split
+    # pipeline sets; clippy never links, so no generated script is needed.
+    echo "clippy: split (LP_SPLIT_LINK=1)"
+    LP_SPLIT_LINK=1 cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} \
+        --features esp32c6,server -- --no-deps -D warnings
+    # The loader: a standalone crate (its own workspace, target and script).
+    echo "clippy: fw-esp32c6-loader"
+    cd ../fw-esp32c6-loader
+    cargo clippy --release -- --no-deps -D warnings
 
 # riscv32: every fw-esp32c6 hardware-harness feature (one build per harness).
 #
