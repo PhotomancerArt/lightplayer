@@ -258,6 +258,7 @@ fn story_board(state: &OpeningState) -> lpa_studio_core::DeviceView {
                 percent: None,
                 cancellable: true,
                 cancel_requested: false,
+                layout: None,
             }),
             can_receive_project: false,
             escapes: vec![

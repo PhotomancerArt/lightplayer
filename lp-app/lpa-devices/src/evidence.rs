@@ -249,9 +249,22 @@ impl Evidence {
     }
 
     /// Whether a hello has been heard in the CURRENT observation window —
-    /// any hello, whatever wire proto it claims (see [`Self::wire_version`]).
+    /// any hello, whatever wire proto it claims (see [`Self::wire_version`]),
+    /// including one from another wire that only told us its version.
     pub fn has_hello(&self) -> bool {
-        self.observations.hello.is_some()
+        self.observations.hello.is_some() || self.observations.other_wire_hello.is_some()
+    }
+
+    /// The board this window's hello named: a hello this build reads, or —
+    /// the one other fact read off it — a hello from another wire. The card
+    /// reads it before the record's memory, so an older LightPlayer that
+    /// said which board it is gets Update firmware for that board, not a
+    /// pick of every board (G1 walk, 2026-10-03).
+    pub fn hello_board_id(&self) -> Option<&str> {
+        self.classification
+            .hello()
+            .and_then(|hello| hello.board_id.as_deref())
+            .or(self.observations.other_wire_board.as_deref())
     }
 
     /// When the current window's hello was heard, if one has been. This is
@@ -274,7 +287,9 @@ impl Evidence {
         self.observations
             .hello
             .as_ref()
-            .map(|hello| WireVersion::compare(hello.proto, self.observations.expected_proto))
+            .map(|hello| hello.proto)
+            .or(self.observations.other_wire_hello)
+            .map(|proto| WireVersion::compare(proto, self.observations.expected_proto))
     }
 
     /// Non-hello frames absorbed in the current window: proof of a live peer,
@@ -458,7 +473,10 @@ impl Evidence {
             }
             LinkEvent::Frame(frame) => {
                 self.observations.observe_frame(&frame.body, config);
-                if matches!(frame.body, ServerFrameBody::Hello(_)) {
+                if matches!(
+                    frame.body,
+                    ServerFrameBody::Hello(_) | ServerFrameBody::HelloOnOtherWire { .. }
+                ) {
                     self.observations.hello_at = Some(now);
                 }
                 // Decoded to one readable line: this is what makes
@@ -536,6 +554,26 @@ impl Evidence {
             // bar's; the label is the line.
             ActivityMarker::Progress { label, .. } => {
                 self.push_output(TerminalKind::Studio, label);
+                Vec::new()
+            }
+            // The layout inspection's answer is narration too: the card's
+            // terminal says what was found before anything is written.
+            ActivityMarker::LayoutVerdict { verdict } => {
+                let line = match verdict {
+                    crate::activity::LayoutVerdict::Plain => {
+                        "layout: the board's files stay where they are".to_string()
+                    }
+                    crate::activity::LayoutVerdict::Migrate { files, .. } => {
+                        format!("layout: {files} files to move to the new layout")
+                    }
+                    crate::activity::LayoutVerdict::Restore { files, .. } => {
+                        format!("layout: {files} files to restore from the stored backup")
+                    }
+                    crate::activity::LayoutVerdict::Refused { files, .. } => {
+                        format!("layout: {files} files do not fit the new layout")
+                    }
+                };
+                self.push_output(TerminalKind::Studio, &line);
                 Vec::new()
             }
             ActivityMarker::Ended { outcome, .. } => {
@@ -824,6 +862,13 @@ struct Observations {
     #[serde(default)]
     last_bootloader_hung_pc: Option<u32>,
     hello: Option<HelloFacts>,
+    /// The wire version of a hello this build could not decode, when one
+    /// was heard this window ([`ServerFrameBody::HelloOnOtherWire`]).
+    #[serde(default)]
+    other_wire_hello: Option<u32>,
+    /// The board that hello named, when it named one.
+    #[serde(default)]
+    other_wire_board: Option<String>,
     /// When this window's hello was heard. The Flash ladder asks whether a
     /// hello is NEWER than its write effect's end: a close does not clear
     /// the window, so a board that ran LightPlayer before a flash still
@@ -913,6 +958,13 @@ impl Observations {
             ServerFrameBody::Other { .. } => {
                 self.frames_seen += 1;
             }
+            // A hello all the same, on a wire this build cannot read: kept
+            // as its version, the one fact read off it. See `classify`.
+            ServerFrameBody::HelloOnOtherWire { proto, board_id } => {
+                self.frames_seen += 1;
+                self.other_wire_hello = Some(*proto);
+                self.other_wire_board = board_id.clone();
+            }
         }
     }
 
@@ -976,6 +1028,20 @@ impl Observations {
             // Any hello: a LightPlayer, on whatever wire version it speaks.
             return Classification::LightPlayer {
                 hello: hello.clone(),
+            };
+        }
+        // A hello this build could not read is still a hello (G1-F1). From
+        // an OLDER wire it is the older-LightPlayer verdict — an update is
+        // the way forward and the project survives it; from a newer one it
+        // is a LightPlayer we warn about (this Studio is the old side), on
+        // the facts the version alone gives.
+        if let Some(proto) = self.other_wire_hello {
+            return if proto < self.expected_proto {
+                Classification::OlderLightPlayer { proto: Some(proto) }
+            } else {
+                Classification::LightPlayer {
+                    hello: HelloFacts::version_only(proto, self.other_wire_board.clone()),
+                }
             };
         }
         if self.rom_download > 0 {
@@ -1112,6 +1178,10 @@ fn wire_summary(body: &ServerFrameBody) -> String {
         } => heartbeat_summary(loaded, recovery),
         ServerFrameBody::Loaded { loaded } => loaded_summary(loaded),
         ServerFrameBody::Other { label } => label.clone(),
+        ServerFrameBody::HelloOnOtherWire { proto, board_id } => format!(
+            "hello · proto {proto} · {} · another wire: only its version and board were read",
+            board_id.as_deref().unwrap_or("?"),
+        ),
     }
 }
 
@@ -1729,14 +1799,124 @@ mod tests {
         assert!(evidence.classification.is_light_player());
     }
 
+    /// G1-F1: a hello from another wire that this build could not decode —
+    /// only its version read — is still a hello. From an older wire it is
+    /// the older-LightPlayer verdict at once (no settle wait, no "pre-hello
+    /// firmware"); from a newer one, a LightPlayer this Studio is behind.
+    #[test]
+    fn a_hello_from_another_wire_is_a_light_player_on_that_wire() {
+        let config = studio_config();
+
+        let mut older = Evidence::default();
+        let mut identity = IdentityChain::default();
+        older.fold(Millis(0), &opened(), &mut identity, &config);
+        older.fold(
+            Millis(10),
+            &frame(ServerFrame::heartbeat(None)),
+            &mut identity,
+            &config,
+        );
+        older.fold(
+            Millis(20),
+            &frame(ServerFrame::hello_on_other_wire(0, 32, None)),
+            &mut identity,
+            &config,
+        );
+        assert_eq!(
+            older.classification,
+            Classification::OlderLightPlayer { proto: Some(32) }
+        );
+        assert_eq!(
+            older.verdict_if_settled(Millis(5_000)),
+            Classification::OlderLightPlayer { proto: Some(32) },
+            "never the pre-hello verdict"
+        );
+        assert!(older.has_hello(), "it said hello; identify settles on it");
+        assert_eq!(older.hello_heard_at(), Some(Millis(20)));
+
+        let mut newer = Evidence::default();
+        let mut identity = IdentityChain::default();
+        newer.fold(Millis(0), &opened(), &mut identity, &config);
+        newer.fold(
+            Millis(10),
+            &frame(ServerFrame::hello_on_other_wire(0, 35, None)),
+            &mut identity,
+            &config,
+        );
+        assert!(
+            newer.classification.is_light_player(),
+            "{:?}",
+            newer.classification
+        );
+        assert_eq!(
+            newer.wire_version(),
+            Some(WireVersion::BoardNewer {
+                board: 35,
+                studio: 34
+            })
+        );
+
+        // Main's wire 33 (PR #929) is older too: a board flashed from it
+        // reads as older LightPlayer firmware, like a fielded wire-32 one.
+        let mut older_33 = Evidence::default();
+        let mut identity = IdentityChain::default();
+        older_33.fold(Millis(0), &opened(), &mut identity, &config);
+        older_33.fold(
+            Millis(10),
+            &frame(ServerFrame::hello_on_other_wire(0, 33, None)),
+            &mut identity,
+            &config,
+        );
+        assert_eq!(
+            older_33.classification,
+            Classification::OlderLightPlayer { proto: Some(33) }
+        );
+    }
+
+    /// G1 walk (2026-10-03): an older LightPlayer's hello names its board,
+    /// and the fold keeps it — on the older verdict and the newer one alike
+    /// — so the card can offer Update firmware for that board.
+    #[test]
+    fn a_hello_from_another_wire_names_its_board() {
+        let config = studio_config();
+        let board = || Some("seeed/xiao-esp32-c6".to_string());
+        for proto in [32, 33, 35] {
+            let mut evidence = Evidence::default();
+            let mut identity = IdentityChain::default();
+            evidence.fold(Millis(0), &opened(), &mut identity, &config);
+            assert_eq!(evidence.hello_board_id(), None, "nothing said yet");
+            evidence.fold(
+                Millis(10),
+                &frame(ServerFrame::hello_on_other_wire(0, proto, board())),
+                &mut identity,
+                &config,
+            );
+            assert_eq!(
+                evidence.hello_board_id(),
+                Some("seeed/xiao-esp32-c6"),
+                "wire {proto}"
+            );
+        }
+        let mut unstamped = Evidence::default();
+        let mut identity = IdentityChain::default();
+        unstamped.fold(Millis(0), &opened(), &mut identity, &config);
+        unstamped.fold(
+            Millis(10),
+            &frame(ServerFrame::hello_on_other_wire(0, 32, None)),
+            &mut identity,
+            &config,
+        );
+        assert_eq!(unstamped.hello_board_id(), None, "no stamp, no board");
+    }
+
     /// The boot marker names its proto; an older one is older LightPlayer
     /// firmware, this build's own is not (its hello follows as a frame).
     #[test]
     fn a_boot_marker_older_than_studio_is_older_light_player_firmware() {
         const MARKER_30: &str = "[INIT] fw-esp32 initialized, starting server loop... \
                                  proto=30 commit=4caa5b658157 dirty=false";
-        const MARKER_32: &str = "[INIT] fw-esp32 initialized, starting server loop... \
-                                 proto=32 commit=4caa5b658157 dirty=false";
+        const MARKER_34: &str = "[INIT] fw-esp32 initialized, starting server loop... \
+                                 proto=34 commit=4caa5b658157 dirty=false";
         let config = studio_config();
 
         let mut older = Evidence::default();
@@ -1751,7 +1931,7 @@ mod tests {
         let mut current = Evidence::default();
         let mut identity = IdentityChain::default();
         current.fold(Millis(0), &opened(), &mut identity, &config);
-        current.fold(Millis(10), &line(MARKER_32), &mut identity, &config);
+        current.fold(Millis(10), &line(MARKER_34), &mut identity, &config);
         assert_eq!(current.classification, Classification::Unknown);
     }
 
@@ -1831,11 +2011,11 @@ mod tests {
         );
     }
 
-    /// Studio's own roster config: this build's wire proto (32, the classic's
-    /// UART onto lp-link), not the model's placeholder default.
+    /// Studio's own roster config: this build's wire proto (34, the hello's
+    /// `fs` boot state), not the model's placeholder default.
     fn studio_config() -> RosterConfig {
         RosterConfig {
-            expected_proto: 32,
+            expected_proto: 34,
             ..RosterConfig::default()
         }
     }

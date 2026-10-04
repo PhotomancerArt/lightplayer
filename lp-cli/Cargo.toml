@@ -138,6 +138,10 @@ serde_json = "1"
 # the strip order the pad decoder un-permutes by.
 lp-emu-esp-figures = { path = "../lp-emu/esp/lp-emu-esp-figures" }
 lp-ws281x = { path = "../lp-fw/lp-ws281x", default-features = false }
+# The oracle for the partition-table parity test
+# (tests/c6_partition_table_parity.rs): espflash's own CSV parser and binary
+# encoder, already in the tree through espflash.
+esp-idf-part = "0.5"
 
 [features]
 default = ["serial"]

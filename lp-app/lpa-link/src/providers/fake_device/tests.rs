@@ -519,7 +519,10 @@ async fn provider_manage_runs_scripted_flash_and_erase_transitions() {
     let flashed = provider
         .manage(
             session.id(),
-            LinkManagementRequest::FlashFirmware { build_id: None },
+            LinkManagementRequest::FlashFirmware {
+                build_id: None,
+                plan: None,
+            },
         )
         .await
         .unwrap();
@@ -577,7 +580,10 @@ async fn scripted_manage_failure_fails_the_next_operation_once() {
     let failed = provider
         .manage(
             session.id(),
-            LinkManagementRequest::FlashFirmware { build_id: None },
+            LinkManagementRequest::FlashFirmware {
+                build_id: None,
+                plan: None,
+            },
         )
         .await;
     assert!(matches!(failed, Err(crate::LinkError::Other { .. })));
@@ -586,7 +592,10 @@ async fn scripted_manage_failure_fails_the_next_operation_once() {
     let retried = provider
         .manage(
             session.id(),
-            LinkManagementRequest::FlashFirmware { build_id: None },
+            LinkManagementRequest::FlashFirmware {
+                build_id: None,
+                plan: None,
+            },
         )
         .await;
     assert!(retried.is_ok());

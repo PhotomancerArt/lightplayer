@@ -663,8 +663,8 @@ jobs:
   # Xtensa Rust fork — no upstream target exists), so no other job compiles it.
   # That is precisely the shape that rots here: 13 fw-esp32 test harnesses
   # silently stopped compiling because CI never built them. This job is the
-  # anti-rot gate, and it measures the image against the same 3 MB partition
-  # the C6 has overrun twice.
+  # anti-rot gate, and it measures the image against its app partition the
+  # way the C6's job does (the C6 partition has overrun twice).
   #
   # Deliberately shares the broad `firmware` filter with firmware-size rather
   # than a narrow lp-fw/fw-esp32s3 one: that filter is the link closure of the
@@ -743,7 +743,8 @@ jobs:
       - name: Install espflash (prebuilt)
         run: cargo binstall --no-confirm --locked espflash@3.3.0
 
-      # Builds the crate and checks the image against its 3 MB app partition.
+      # Builds the crate and checks the image against its app partition (the
+      # `factory` row of lp-fw/fw-esp32s3/partitions.csv).
       - name: Check esp32s3 image size
         run: cd lp2025 && just fw-esp32s3-size-check
 
@@ -843,7 +844,8 @@ jobs:
       - name: Install espflash (prebuilt)
         run: cargo binstall --no-confirm --locked espflash@3.3.0
 
-      # Builds the crate and checks the image against its 3 MB app partition.
+      # Builds the crate and checks the image against its 3 MB app partition
+      # (the `factory` row of lp-fw/fw-esp32v3/partitions.csv).
       - name: Check esp32v3 image size
         run: cd lp2025 && just fw-esp32v3-size-check
 
@@ -1151,7 +1153,9 @@ jobs:
       - name: Xtensa filetest corpus (xtlpn.q32)
         run: cd lp2025 && scripts/filetests.sh -t xtlpn.q32 --summary
 
-  # The esp32c6 app image must fit a 3 MB partition. It has overrun twice, and
+  # The esp32c6 app image must fit its 3.25 MB partition (3 MB until the
+  # 2026-10 repartition, docs/adr/2026-10-02-c6-repartition-and-layout-migration.md;
+  # the recipe reads it from partitions.csv). It has overrun twice, and
   # both times the signal was a red `Build and deploy Studio` run *after* the merge,
   # because no pre-merge job built the device firmware. This job builds it and
   # fails under 64 KB of headroom; it prints the number either way, so the size
@@ -2703,7 +2707,7 @@ jobs:
       # test failure is passed straight through. See
       # `docs/defects/2026-09-09-browser-crash-reported-as-test-failure.md`.
       - name: Browser wasm tests
-        run: cd lp2025 && just lpa-fs-opfs-test fw-browser-test lpa-link-browser-test
+        run: cd lp2025 && just lpa-fs-opfs-test fw-browser-test lpa-link-browser-test lpa-link-js-test
 
       - name: sccache stats
         if: always()

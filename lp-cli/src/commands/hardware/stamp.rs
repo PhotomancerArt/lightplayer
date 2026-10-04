@@ -7,15 +7,12 @@
 //! re-stamps it from the command line. It takes effect on the next boot.
 
 use anyhow::{Context, Result};
-use lpa_client::{HostSpecifier, LpClient, MANIFEST_CHUNK_BYTES, write_file_in_chunks};
-use lpc_hardware::HardwareManifestFile;
-use lpc_model::AsLpPath;
+use lpa_client::{HostSpecifier, LpClient, MANIFEST_CHUNK_BYTES, stamp_board_manifest};
+use lpc_hardware::{HARDWARE_MANIFEST_PATH, HardwareManifestFile};
 
 use crate::client::cli_connect::{cli_connect, stderr_device_events};
 
 use super::args::StampArgs;
-
-const DEVICE_HARDWARE_MANIFEST_PATH: &str = "/hardware.json";
 
 pub fn handle_stamp(args: StampArgs) -> Result<()> {
     // Device connections are single-actor (`!Send`), as in `upload`.
@@ -47,9 +44,10 @@ async fn handle_stamp_async(args: StampArgs) -> Result<()> {
         .context("Failed to connect to the device")?;
     let mut client = LpClient::new(connection.client_io());
     let mut report = |label: String, _percent: Option<u8>| eprintln!("{label}");
-    let result = write_file_in_chunks(
+    // Journaled, like Studio's: a stamp cut part-way leaves the board a
+    // whole manifest (the previous one, or this one at its next boot).
+    let result = stamp_board_manifest(
         &mut client,
-        DEVICE_HARDWARE_MANIFEST_PATH.as_path(),
         json.as_bytes(),
         MANIFEST_CHUNK_BYTES,
         &mut report,
@@ -60,7 +58,7 @@ async fn handle_stamp_async(args: StampArgs) -> Result<()> {
     result.map_err(|error| anyhow::anyhow!("{error}"))?;
 
     println!(
-        "Stamped {} ({}) onto {DEVICE_HARDWARE_MANIFEST_PATH}. Reset the board to use it.",
+        "Stamped {} ({}) onto {HARDWARE_MANIFEST_PATH}. Reset the board to use it.",
         manifest.board_id(),
         manifest.board_name()
     );

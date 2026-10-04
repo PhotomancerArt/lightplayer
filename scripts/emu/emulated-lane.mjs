@@ -35,8 +35,9 @@
 // the query string, which composes with `?record=` because nothing
 // reads anything else's flag.
 
-import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, openSync, readFileSync, rmSync } from "node:fs";
+import { execFileSync, spawn } from "node:child_process";
+import { createReadStream, existsSync, mkdirSync, openSync, readFileSync, rmSync, statSync } from "node:fs";
+import { createServer } from "node:http";
 import path from "node:path";
 import process from "node:process";
 
@@ -112,13 +113,95 @@ function readListenAddress(logFile, child, id) {
   });
 }
 
-export function stopDoor(door) {
+export async function stopDoor(door, { timeoutMs = 30_000 } = {}) {
   // By pid, only what this lane started. Never `pkill -f`.
+  //
+  // SIGINT, and wait for the exit: the door writes every board's flash and
+  // console back on Ctrl-C (the shutdown path of `emu serve`) and NOT on
+  // SIGTERM, which kills it where it stands. A caller that reads the chip
+  // file after a SIGTERM reads the last two-second write-back instead — a
+  // snapshot that can sit in the middle of a write the board finished (the
+  // migration walk's W7b read a board-manifest stamp half done that way).
+  const alive = () => {
+    try {
+      process.kill(door.pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
   try {
-    process.kill(door.pid, "SIGTERM");
+    process.kill(door.pid, "SIGINT");
   } catch {
-    // already gone
+    return; // already gone
   }
+  const deadline = Date.now() + timeoutMs;
+  while (alive()) {
+    if (Date.now() > deadline) {
+      console.error(`stopDoor: emu serve (pid ${door.pid}) did not exit on SIGINT; killing it`);
+      try {
+        process.kill(door.pid, "SIGTERM");
+      } catch {
+        // gone in between
+      }
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+}
+
+// --- the release bundle, served by the walk itself -----------------------
+
+const BUNDLE_TYPES = { ".html": "text/html", ".js": "text/javascript", ".mjs": "text/javascript", ".wasm": "application/wasm", ".css": "text/css", ".json": "application/json", ".svg": "image/svg+xml", ".bin": "application/octet-stream", ".woff2": "font/woff2", ".png": "image/png" };
+
+/// Where `just studio-web-story-build` leaves the release Studio bundle (its
+/// sidecars included — the emulator module the tab lane runs), and where
+/// `just studio-firmware-package-served` leaves the firmware it flashes.
+export const RELEASE_BUNDLE = "target/dx/lpa-studio-web/release/web/public";
+export const SERVED_FIRMWARE = "target/studio-web-assets/firmware";
+
+/// This worktree's stable port for `slot` (`scripts/dev-port.sh`): stable,
+/// not ephemeral, because a browser's OPFS belongs to the ORIGIN and a walk
+/// that comes back in a new Chrome expects the same one.
+export function walkPort(root, slot) {
+  return Number(execFileSync("bash", ["scripts/dev-port.sh", slot], { cwd: root, encoding: "utf8" }).trim());
+}
+
+/// Serve the release Studio bundle and the packaged firmware on 127.0.0.1:
+/// `port`, the way the dev server serves them — no `dx serve` process, so a
+/// walk can run as one foreground command and never adopts a sibling
+/// worktree's listener. `route(request, response, url)` answers first and
+/// returns true for anything it handled (a walk's own endpoints).
+export function serveStudioBundle({ root, port, route = null }) {
+  const publicDir = path.join(root, RELEASE_BUNDLE);
+  const firmwareDir = path.join(root, SERVED_FIRMWARE);
+  for (const [what, at] of [["the release Studio bundle (just studio-web-story-build)", publicDir], ["the packaged firmware (just studio-firmware-package-served)", firmwareDir]]) {
+    if (!existsSync(at)) throw new Error(`missing ${what}: ${at}`);
+  }
+  const server = createServer((request, response) => {
+    const url = new URL(request.url, "http://x");
+    if (route?.(request, response, url)) return;
+    let file = null;
+    const firmware = url.pathname.match(/^\/firmware\/([^/]+)\/([^/]+)$/);
+    if (firmware) file = path.join(firmwareDir, firmware[1], firmware[2]);
+    else {
+      const candidate = path.join(publicDir, decodeURIComponent(url.pathname));
+      file = candidate.startsWith(publicDir) && existsSync(candidate) && statSync(candidate).isFile()
+        ? candidate
+        : path.join(publicDir, "index.html"); // the SPA's routes
+    }
+    if (!existsSync(file)) {
+      response.writeHead(404);
+      response.end();
+      return;
+    }
+    response.writeHead(200, { "content-type": BUNDLE_TYPES[path.extname(file)] ?? "application/octet-stream" });
+    createReadStream(file).pipe(response);
+  });
+  return new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(port, "127.0.0.1", () => resolve(server));
+  });
 }
 
 /// The door's LIVE registry. `describeBoards()` on the page is a page-load

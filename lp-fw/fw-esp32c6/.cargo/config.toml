@@ -9,7 +9,7 @@
 # flash-size field to 4MB regardless of the physical chip, and the bootloader
 # validates the partition table against that header rather than the chip.
 #
-# 4mb matches partitions.csv (0x310000 + 0xF0000 = 0x400000) and
+# 4mb matches partitions.csv (0x350000 + 0xB0000 = 0x400000) and
 # lp-fw/builds/esp32c6-4mb.json; `flash_size_mirrors_agree_with_the_defs` in
 # lp-cli fails if this drifts from the def.
 runner    = "espflash flash --chip esp32c6 --partition-table partitions.csv --flash-size 4mb --monitor --after hard-reset"
@@ -32,7 +32,7 @@ rustflags = [
   "-C", "link-arg=--gc-sections",     # Remove unused sections
   "-C", "link-arg=-znoseparate-code",  # Don't separate code segments (lld syntax: -z<option>)
 
-  # Flash-budget flags: the app image must fit a 3 MB partition, and these buy
+  # Flash-budget flags: the app image must fit a 3.25 MB partition, and these buy
   # ~155 KB by giving up on-device diagnostics. Measured 2026-07-28; see
   # docs/adr/2026-07-28-esp32c6-flash-budget.md. When you need real panic
   # output while debugging, delete the fmt-debug line first (see README).

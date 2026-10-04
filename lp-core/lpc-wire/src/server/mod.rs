@@ -3,8 +3,10 @@ pub mod api;
 pub mod config;
 pub mod file_chunk;
 pub mod fs_api;
+pub mod fs_boot_state;
 pub mod hello;
 pub mod hello_auth;
+pub mod hello_proto;
 pub mod link_counters;
 pub mod output_wire_status;
 pub mod recovery_status;
@@ -17,10 +19,12 @@ pub use api::{
 pub use config::ServerConfig;
 pub use file_chunk::{FileChangeKind, FileChunk, FileCursor};
 pub use fs_api::{FsRequest, FsResponse};
+pub use fs_boot_state::FsBootState;
 pub use hello::{
     BuildFacts, HardwareFacts, HardwareIdentity, HelloIdentity, ServerHello, WIRE_PROTO_VERSION,
 };
 pub use hello_auth::HelloAuth;
+pub use hello_proto::{hello_board_id, hello_proto};
 pub use link_counters::{LinkCounters, LinkResets};
 pub use output_wire_status::OutputWireStatus;
 pub use recovery_status::{CrashSummaryWire, RecoveryLevelWire, RecoveryPathWire, RecoveryStatus};

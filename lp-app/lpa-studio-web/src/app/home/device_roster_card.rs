@@ -188,6 +188,15 @@ pub(crate) fn DeviceRosterCard(
     /// Stories only: mount "Who has access" open.
     #[props(default)]
     access_panel_open: bool,
+    /// What the card says and offers about the board's files across a
+    /// layout change (the C6 repartition): the question or the refusal
+    /// (a sheet), a board holding its files, a backup waiting to go back.
+    /// Joined at the app view; `None` when there is nothing to say.
+    #[props(default)]
+    layout: Option<lpa_studio_core::UiDeviceLayout>,
+    /// Stories: pin the layout sheet in the card's box, not the viewport.
+    #[props(default)]
+    layout_sheet_inline: bool,
     /// Open the header's ⋯ menu immediately (stories only).
     #[props(default = false)]
     menu_initially_open: bool,
@@ -292,7 +301,55 @@ pub(crate) fn DeviceRosterCard(
     } else {
         project_line_text(&card, busy_zone)
     };
-    let firmware_line = firmware_line_text(&card, identity_line.board.as_deref(), busy_zone);
+    // A board whose files are waiting (held, or in a backup) says so in
+    // the firmware line rather than in a new row: the card's height holds.
+    let layout_line = layout
+        .as_ref()
+        .and_then(|layout| layout.line.clone())
+        .filter(|_| busy_zone.is_none());
+    // The waiting-files line is a sentence with a verb in it ("…Finish
+    // update moves them."); cut to one line at a card's width it lost the
+    // verb (G1 rehearsal: "Finish update mov…"), so it wraps instead.
+    let firmware_line_wraps = layout_line.is_some();
+    let firmware_line = match layout_line {
+        Some(line) => line,
+        None => firmware_line_text(&card, identity_line.board.as_deref(), busy_zone),
+    };
+    // The refusal sheet closes in the page (it has no Cancel: nothing is
+    // running). Remembered by value, so a NEW refusal rises again.
+    let mut closed_sheet = use_signal(|| None::<lpa_studio_core::UiLayoutPanel>);
+    let layout_sheet = layout
+        .as_ref()
+        .and_then(|layout| layout.panel.clone())
+        .filter(|panel| closed_sheet.read().as_ref() != Some(panel));
+    // The layout facts name their verbs by path; the verbs themselves are
+    // the view's offers under `devices/<board>` (core publishes them, the
+    // app agent presses the same ones), and the facts say where.
+    let device_verbs =
+        crate::core::use_verbs_of(layout.as_ref().map(|layout| layout.offers_at.clone()));
+    let offered = move |path: Option<&lpa_studio_core::OfferPath>| -> Option<UiAction> {
+        let path = path?;
+        device_verbs
+            .read()
+            .iter()
+            .find(|offer| &offer.path == path)
+            .map(|offer| offer.action.clone())
+    };
+    let finish_update = offered(
+        layout
+            .as_ref()
+            .and_then(|layout| layout.finish_update.as_ref()),
+    );
+    let restore_files = offered(layout.as_ref().and_then(|layout| layout.restore.as_ref()));
+    let backup_download = offered(layout.as_ref().and_then(|layout| layout.download.as_ref()));
+    let sheet_verbs =
+        layout_sheet
+            .as_ref()
+            .map(|panel| super::device_layout_sheet::LayoutSheetVerbs {
+                download: offered(Some(&panel.download)),
+                cancel: offered(panel.cancel.as_ref()),
+                continue_action: offered(panel.continue_action.as_ref()),
+            });
     let device_line = match access.as_ref().and_then(|access| access.line.as_deref()) {
         // Over Bluetooth the login leads: it is what decides what the
         // card can do, and at 375 px the freshness is what truncates.
@@ -492,7 +549,7 @@ pub(crate) fn DeviceRosterCard(
             section { class: combined_zone_class(),
                 div { class: zone_rows_class(),
                 div { class: armed_line_and_bar_class(),
-                    p { class: info_line_class(), title: "{firmware_line}", "{firmware_line}" }
+                    p { class: firmware_line_class(firmware_line_wraps), title: "{firmware_line}", "{firmware_line}" }
                     ZoneBar { activity: card.activity.clone(), lit: busy_zone == Some(ZoneKind::Firmware) }
                 }
                 div { class: verb_row_class(),
@@ -509,6 +566,37 @@ pub(crate) fn DeviceRosterCard(
                         }
                     } else if card.activity.is_some() {
                         // Withdrawn at its height while other work runs.
+                    } else if let Some(action) = finish_update.filter(|_| !firmware_blocked) {
+                        // A board holding its files for a layout change:
+                        // the Update verb, relabelled by core, finishes it.
+                        // Over a link that cannot carry firmware, the
+                        // blocked verb below says why instead.
+                        ActionButton {
+                            key: "{\"finish-update\"}",
+                            action,
+                            running: false,
+                            variant: ActionButtonVariant::Quiet,
+                            on_action,
+                        }
+                    } else if let Some(action) = restore_files.filter(|_| !firmware_blocked) {
+                        // A board that came back without its files while
+                        // a backup of them waits in this browser.
+                        ActionButton {
+                            key: "{\"restore-files\"}",
+                            action,
+                            running: false,
+                            variant: ActionButtonVariant::Quiet,
+                            on_action,
+                        }
+                        if let Some(action) = backup_download {
+                            ActionButton {
+                                key: "{\"download-backup\"}",
+                                action,
+                                running: false,
+                                variant: ActionButtonVariant::Quiet,
+                                on_action,
+                            }
+                        }
                     } else {
                         // The blank board's face: the chip-filtered board
                         // pick plus its Flash CTA, on one row — or, over a
@@ -703,6 +791,21 @@ pub(crate) fn DeviceRosterCard(
                             }
                         }
                     }
+                }
+            }
+            // The layout question (or refusal): a sheet over the page, so
+            // asking never changes the card's height.
+            if let (Some(panel), Some(verbs)) = (layout_sheet, sheet_verbs) {
+                super::device_layout_sheet::DeviceLayoutSheet {
+                    on_close: panel.cancel.is_none().then(|| {
+                        let refusal = panel.clone();
+                        EventHandler::new(move |_| closed_sheet.set(Some(refusal.clone())))
+                    }),
+                    panel,
+                    verbs,
+                    device_name: card.title.clone(),
+                    inline: layout_sheet_inline,
+                    on_action,
                 }
             }
         }
@@ -1294,6 +1397,19 @@ fn info_line_class() -> &'static str {
     "tw:m-0 tw:h-[17px] tw:truncate tw:text-xs tw:leading-[17px] tw:text-subtle-foreground"
 }
 
+/// The firmware zone's line: the info line, except a board's waiting-files
+/// line (held files, or files in a backup), which wraps — it is a sentence
+/// naming the verb that resolves it, and truncated it hid that verb. Its
+/// first line keeps the info line's height, so the bar below sits where it
+/// always does on a one-line card.
+fn firmware_line_class(wraps: bool) -> &'static str {
+    if wraps {
+        "tw:m-0 tw:min-h-[17px] tw:text-xs tw:leading-[17px] tw:text-subtle-foreground"
+    } else {
+        info_line_class()
+    }
+}
+
 /// The info line when a degraded board's fault is what it carries: the
 /// Attention tone the status chip already wears for this state, semibold
 /// because it is the reason the chip changed. NOT the error voice — an error
@@ -1668,6 +1784,7 @@ mod tests {
             percent: Some(42),
             cancellable: true,
             cancel_requested: false,
+            layout: None,
         };
         assert_eq!(activity_line_text(&activity), "Flashing firmware · 42%");
 
@@ -1755,6 +1872,7 @@ mod tests {
             percent: Some(40),
             cancellable: true,
             cancel_requested: false,
+            layout: None,
         });
         assert_eq!(
             project_line_text(&card, Some(ZoneKind::Project)),
@@ -1766,6 +1884,24 @@ mod tests {
             project_line_text(&card, Some(ZoneKind::Firmware)),
             "node /studio.show/s faulted"
         );
+    }
+
+    /// G1 rehearsal (2026-10-03): the held card's line read "This board's
+    /// files are waiting — Finish update mov…", the verb cut off at a
+    /// card's width. A waiting-files line wraps; every other firmware line
+    /// stays the one-line info line.
+    #[test]
+    fn a_waiting_files_line_wraps_and_the_others_stay_one_line() {
+        assert!(
+            !firmware_line_class(true).contains("tw:truncate"),
+            "the waiting-files line wraps"
+        );
+        assert!(
+            !firmware_line_class(true).contains("tw:h-["),
+            "and is not held to one line's height"
+        );
+        assert_eq!(firmware_line_class(false), info_line_class());
+        assert!(info_line_class().contains("tw:truncate"));
     }
 
     /// The FIRMWARE line: the flash's narration, then the blank verdict,
@@ -1818,6 +1954,7 @@ mod tests {
             percent: Some(62),
             cancellable: true,
             cancel_requested: false,
+            layout: None,
         });
         assert_eq!(
             firmware_line_text(&card, None, Some(ZoneKind::Firmware)),
@@ -1850,6 +1987,7 @@ mod tests {
             percent: Some(40),
             cancellable: true,
             cancel_requested: false,
+            layout: None,
         });
         assert_eq!(
             device_line_text(&card, Some(ZoneKind::Device)),
@@ -1927,6 +2065,7 @@ mod tests {
             percent: None,
             cancellable: true,
             cancel_requested: false,
+            layout: None,
         });
         assert_eq!(
             feed_pill(&busy, Some(&feed_fixture(FeedLiveness::Live, true))),
@@ -1978,6 +2117,7 @@ mod tests {
             percent: None,
             cancellable: true,
             cancel_requested: false,
+            layout: None,
         });
         assert_eq!(
             preview_slot_sentence(&busy, Some(&feed_fixture(FeedLiveness::Live, true))),
@@ -2040,6 +2180,7 @@ mod tests {
             percent: None,
             cancellable: true,
             cancel_requested: false,
+            layout: None,
         });
         assert_eq!(
             preview_sentence(&card),

@@ -3,14 +3,13 @@
 //! Implements `littlefs_rust::Storage` over `esp_storage::FlashStorage`,
 //! translating block/offset addressing to the `lpfs` partition.
 //!
-//! ## Why no offset constant (ported verbatim from fw-esp32s3)
+//! ## Why no offset constant (ported from fw-esp32s3)
 //!
-//! `fw-esp32c6/src/flash_storage.rs` hardcodes `LPFS_PARTITION_OFFSET =
-//! 0x310000` and `BLOCK_COUNT = 240`, transcribed by hand from that chip's
-//! `partitions.csv`. This crate's 4 MB table happens to put `lpfs` at exactly
-//! that offset with exactly that size (0x310000, 0xF0000 = 240 blocks — Q7 of
-//! the classic bring-up roadmap copies the C6 table), so transcribing would
-//! even be *correct* here today.
+//! This crate's 4 MB table puts `lpfs` at `0x310000`, 0xF0000 = 240 blocks
+//! (Q7 of the classic bring-up roadmap copied the C6's pre-2026-10 table), so
+//! transcribing would even be *correct* here today — the C6 did exactly that
+//! until 2026-10, when its own table moved and it too began reading its table
+//! (`docs/debt/firmware-partition-constants-transcribed.md`).
 //!
 //! It is still not done, for the reason the S3's copy gives: a transcribed
 //! offset that drifts from the flashed table does not fail, it erases running

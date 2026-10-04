@@ -189,6 +189,47 @@ async fn wrong_proto_hello_is_incompatible() {
     assert_eq!(hello.proto, WIRE_PROTO_VERSION + 999);
 }
 
+/// G1 rehearsal (2026-10-03): `lp-cli upload` / `hardware stamp` against a
+/// fielded C6 (wire 32) said the board "predates the wire hello". Its hello
+/// was there, but wire 34 made `hardware.fs` required, so the full decode
+/// dropped it and the deadline reached the pre-hello verdict — the mistake
+/// G1-F1 fixed in Studio's fold. The session reads the hello's `proto` alone
+/// (`lpc_wire::hello_proto`) and names the board for what it is.
+#[tokio::test]
+async fn a_hello_from_an_older_wire_is_older_firmware_not_pre_hello() {
+    const HELLO_PROTO_32: &str =
+        include_str!("../../../../lp-core/lpc-wire/testdata/hello-proto32-xiao-c6.json");
+    let (connector, endpoint_id, _device) = fake_device_connector(FakeDeviceScript::new(
+        FakeBootState::LightPlayer(FakeLightPlayerState::new().with_hello_json(HELLO_PROTO_32)),
+    ));
+    let session = DeviceSession::connect(
+        connector,
+        &endpoint_id,
+        short_ready_timers(Duration::from_millis(1500)),
+        DeviceEventSink::noop(),
+    )
+    .await
+    .unwrap();
+
+    let state = session.wait_ready().await;
+
+    assert_eq!(
+        state,
+        DeviceState::Incompatible {
+            reason: IncompatibleReason::HelloOnOtherWire { proto: 32 },
+        }
+    );
+    let message = state.unavailable_message().expect("not ready");
+    assert!(
+        message.contains("older LightPlayer firmware") && message.contains("wire 32"),
+        "the board is named for what it is: {message}"
+    );
+    assert!(
+        !message.contains("predates the wire hello"),
+        "never the pre-hello verdict for a board that said hello: {message}"
+    );
+}
+
 #[tokio::test]
 async fn channel_first_use_drives_readiness_without_wait_ready() {
     let (connector, endpoint_id, device) = fake_device_connector(FakeDeviceScript::new(
@@ -398,7 +439,10 @@ async fn flash_rebuilds_the_link_and_readiness_lands_ready_with_new_provenance()
 
     let outcome = session
         .manage(
-            LinkManagementRequest::FlashFirmware { build_id: None },
+            LinkManagementRequest::FlashFirmware {
+                build_id: None,
+                plan: None,
+            },
             sink,
         )
         .await
@@ -518,7 +562,10 @@ async fn scripted_manage_failure_sets_error_status_and_reconnect_recovers() {
 
     let error = session
         .manage(
-            LinkManagementRequest::FlashFirmware { build_id: None },
+            LinkManagementRequest::FlashFirmware {
+                build_id: None,
+                plan: None,
+            },
             DeviceEventSink::noop(),
         )
         .await
@@ -700,7 +747,10 @@ async fn stale_blank_flash_lines_do_not_misclassify_the_post_flash_rebuild() {
 
     let outcome = session
         .manage(
-            LinkManagementRequest::FlashFirmware { build_id: None },
+            LinkManagementRequest::FlashFirmware {
+                build_id: None,
+                plan: None,
+            },
             DeviceEventSink::noop(),
         )
         .await
@@ -871,7 +921,10 @@ async fn the_flash_preflight_records_a_normalized_probed_mac() {
 
     let outcome = session
         .manage(
-            LinkManagementRequest::FlashFirmware { build_id: None },
+            LinkManagementRequest::FlashFirmware {
+                build_id: None,
+                plan: None,
+            },
             DeviceEventSink::noop(),
         )
         .await
@@ -913,7 +966,10 @@ async fn probed_mac_evidence_outlives_the_link_generation_that_read_it() {
     assert!(session.wait_ready().await.is_ready());
     session
         .manage(
-            LinkManagementRequest::FlashFirmware { build_id: None },
+            LinkManagementRequest::FlashFirmware {
+                build_id: None,
+                plan: None,
+            },
             DeviceEventSink::noop(),
         )
         .await

@@ -17,6 +17,7 @@
 use std::collections::VecDeque;
 
 use lpa_devices::link::{APP_CONVERSATION_ID_BASE, LinkEvent};
+use lpa_devices::wire::ServerFrame;
 use lpc_wire::{WireChunk, WireServerMessage, WireStream};
 
 use crate::device_link::wire::{decode_server_message, server_frame};
@@ -94,16 +95,58 @@ pub fn demux_read(read: WireRead) -> LinkEvent {
 
 /// An `M!` body (or a decoded packed frame) → the event it is. See
 /// [`demux_line`] for the resync and the app-range rule.
+///
+/// A hello from another wire that this build cannot decode is still a
+/// hello: its version and the board it names are read (and nothing else —
+/// `lpc_wire::hello_proto`, `lpc_wire::hello_board_id`) and it becomes
+/// [`ServerFrameBody::HelloOnOtherWire`], so the board reads as an older
+/// (or newer) LightPlayer of a known board instead of one that never said
+/// hello (G1-F1). A hello that claims THIS wire and does not decode is malformed,
+/// and stays an anomaly.
+///
+/// [`ServerFrameBody::HelloOnOtherWire`]: lpa_devices::wire::ServerFrameBody::HelloOnOtherWire
 fn demux_frame_json(mut frame_json: &str) -> LinkEvent {
     loop {
         match decode_server_message(frame_json) {
             Ok(message) => return classify(frame_json, &message),
             Err(error) => match frame_json.find("M!").filter(|offset| *offset > 0) {
                 Some(offset) => frame_json = &frame_json[offset + 2..],
-                None => return LinkEvent::Error(error),
+                None => {
+                    return match lpc_wire::hello_proto(frame_json)
+                        .filter(|proto| *proto != lpc_wire::WIRE_PROTO_VERSION)
+                        .and_then(|proto| hello_on_other_wire(frame_json, proto))
+                    {
+                        Some(frame) => LinkEvent::Frame(frame),
+                        None => LinkEvent::Error(error),
+                    };
+                }
             },
         }
     }
+}
+
+/// The model's frame for a hello of which only `proto` could be read, or
+/// `None` when it answers an app conversation (that reply stays the
+/// conversation's to fail, as any reply it cannot decode does). Its id is
+/// read the same way as its proto, off the envelope: 0 for the board's
+/// unsolicited hello, the model's own id for an answer to its hello.
+fn hello_on_other_wire(frame_json: &str, proto: u32) -> Option<ServerFrame> {
+    #[derive(serde::Deserialize)]
+    struct Envelope {
+        #[serde(default)]
+        id: u64,
+    }
+    let id = lpc_wire::json::from_str::<Envelope>(frame_json)
+        .map(|envelope| envelope.id)
+        .unwrap_or(0);
+    if id >= u64::from(APP_CONVERSATION_ID_BASE) {
+        return None;
+    }
+    Some(ServerFrame::hello_on_other_wire(
+        u32::try_from(id).unwrap_or(u32::MAX),
+        proto,
+        lpc_wire::hello_board_id(frame_json),
+    ))
 }
 
 /// A decoded message → the model's frame, or an app conversation's
@@ -217,6 +260,48 @@ mod tests {
             matches!(events.pop_front(), Some(LinkEvent::Error(_))),
             "{events:?}"
         );
+    }
+
+    /// G1-F1: a fielded C6's hello at wire 32 lacks wire 34's required
+    /// `hardware.fs`, so it does not decode — and it used to vanish as an
+    /// anomaly, leaving a board that had just said hello to read as one
+    /// that never did. Its version still reaches the fold.
+    #[test]
+    fn a_hello_from_another_wire_reaches_the_fold_as_its_version() {
+        let hello =
+            include_str!("../../../../lp-core/lpc-wire/testdata/hello-proto32-xiao-c6.json");
+        let event = demux_line(&format!("M!{}", hello.trim()));
+        let LinkEvent::Frame(frame) = event else {
+            panic!("a hello, not an anomaly: {event:?}");
+        };
+        assert_eq!(frame.request_id, 0);
+        assert_eq!(
+            frame.body,
+            ServerFrameBody::HelloOnOtherWire {
+                proto: 32,
+                // The board the stamp named — the one other fact read off
+                // it (G1 walk, 2026-10-03).
+                board_id: Some("seeed/xiao-esp32-c6".to_string()),
+            }
+        );
+    }
+
+    #[test]
+    fn a_hello_on_this_wire_that_does_not_decode_stays_an_anomaly() {
+        let line = format!(
+            r#"M!{{"id":0,"msg":{{"hello":{{"proto":{}}}}}}}"#,
+            lpc_wire::WIRE_PROTO_VERSION
+        );
+        assert!(matches!(demux_line(&line), LinkEvent::Error(_)));
+    }
+
+    #[test]
+    fn an_app_conversations_hello_from_another_wire_stays_the_conversations() {
+        let line = format!(
+            r#"M!{{"id":{},"msg":{{"hello":{{"proto":32}}}}}}"#,
+            APP_CONVERSATION_ID_BASE + 1
+        );
+        assert!(matches!(demux_line(&line), LinkEvent::Error(_)));
     }
 
     #[test]
