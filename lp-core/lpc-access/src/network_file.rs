@@ -71,13 +71,7 @@ impl NetworkFile {
     /// Parse and validate the file's bytes. The version is checked first,
     /// so a newer file is refused by its number, not by a field it adds.
     pub fn from_json(bytes: &[u8]) -> Result<Self, NetworkFileError> {
-        #[derive(Deserialize)]
-        struct VersionProbe {
-            version: u32,
-        }
-        let version = serde_json::from_slice::<VersionProbe>(bytes)
-            .map_err(malformed)?
-            .version;
+        let version = crate::secret_entry::read_version_field(bytes).map_err(malformed)?;
         if version != Self::VERSION {
             return Err(NetworkFileError::UnsupportedVersion(version));
         }

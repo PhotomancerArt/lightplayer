@@ -45,28 +45,20 @@ pub const NEW_NETWORK_NEEDS_PASSWORD: &str =
 /// Missing is decided by `file_exists`, as the device store's is.
 pub fn read_network_file(fs: &dyn LpFs) -> NetworkFile {
     let path = NetworkFile::PATH.as_path();
-    match fs.file_exists(path) {
+    let read = match fs.file_exists(path) {
         Ok(false) => return NetworkFile::none(),
-        Ok(true) => {}
-        Err(error) => {
-            log::warn!("network: network file unreadable, treating as no network: {error}");
-            return NetworkFile::none();
-        }
-    }
-    let bytes = match fs.read_file(path) {
-        Ok(bytes) => bytes,
-        Err(error) => {
-            log::warn!("network: network file unreadable, treating as no network: {error}");
-            return NetworkFile::none();
-        }
+        Ok(true) => fs
+            .read_file(path)
+            .map_err(|error| format!("{error}"))
+            .and_then(|bytes| NetworkFile::from_json(&bytes).map_err(|error| format!("{error}"))),
+        Err(error) => Err(format!("{error}")),
     };
-    match NetworkFile::from_json(&bytes) {
-        Ok(file) => file,
-        Err(error) => {
-            log::warn!("network: network file unreadable, treating as no network: {error}");
-            NetworkFile::none()
-        }
-    }
+    // Neither error spells out the file's bytes: an fs error names the
+    // path, and `NetworkFileError` names a position or a rule.
+    read.unwrap_or_else(|error| {
+        log::warn!("network: network file unreadable, treating as no network: {error}");
+        NetworkFile::none()
+    })
 }
 
 /// Write the network file, always at the current version.
