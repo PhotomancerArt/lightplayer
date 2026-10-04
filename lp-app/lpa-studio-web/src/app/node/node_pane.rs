@@ -6,7 +6,7 @@ use lpa_studio_core::{
 };
 
 use crate::app::affordance::affordance_pane_tone;
-use crate::app::agent::AgentMark;
+use crate::app::agent::{AgentEditedChip, AgentMark};
 use crate::app::layout::{PaneCollapse, RichObjectPane};
 use crate::app::node::face::{face_space_badge, node_ui_action, space_badge_title};
 use crate::app::node::slot_edit_actions::node_clear_debug_action;
@@ -174,6 +174,9 @@ pub fn NodePane(
                         actions: header_actions,
                         on_action,
                         trailing: rsx! {
+                            // "Changed by the assistant": a tab on the
+                            // card's top edge, out of the header's flow.
+                            AgentEditedChip { path: node_prefix.clone() }
                             if streaming_live {
                                 NodeLiveChip {}
                             }
