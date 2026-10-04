@@ -1,0 +1,1083 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Wi‑Fi on a board</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  /* ---- studio palette (lp-app/lpa-studio-web/src/style.css, via spikes/access-panel-tidy) ---- */
+  :root {
+    --bg: #101317;
+    --bg-wash: rgba(255,255,255,.04);
+    --surface: #171b20;
+    --surface-subtle: #14181d;
+    --surface-muted: #11161b;
+    --surface-raised: #20272e;
+    --terminal: #0c1114;
+    --border: #2a3138;
+    --border-muted: #252d34;
+    --border-strong: #3e4852;
+    --text: #f2f0e8;
+    --strong: #fffaf0;
+    --muted: #c7cbd0;
+    --subtle: #99a2ad;
+    --dim: #9ba4ad;
+    --accent: #7be0b2;
+    --accent-border: #65bd96;
+    --neutral-bg: #12171c;
+    --neutral-border: #3a444c;
+    --neutral-text: #d9e2df;
+    --good-bg: #13241d;   --good-border: #365545;  --good-text: #7be0b2;
+    --warn-bg: #292614;   --warn-border: #796c33;  --warn-text: #f0dc7a;
+    --live-bg: #142330;   --live-border: #3c5c78;  --live-text: #9cc8ee;
+    --bound-bg: #241a33;  --bound-border: #5f4a85; --bound-text: #c9b1f5;
+    --err-text: #ef7a76;  --err-border: #79403e;   --err-bg: #2b1817;
+    --sans: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, monospace;
+  }
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body {
+    margin: 0; padding: 28px 32px 160px;
+    background: linear-gradient(180deg, var(--bg-wash), transparent 240px), var(--bg);
+    color: var(--text);
+    font: 14px/1.45 var(--sans);
+  }
+  h1 { font-size: 13px; letter-spacing: .12em; color: var(--muted); text-transform: uppercase; margin: 0 0 6px; }
+  p.hint { color: var(--dim); font-size: 12px; margin: 0 0 10px; max-width: 980px; line-height: 1.55; }
+  p.hint b { color: var(--muted); }
+  h2 { font-size: 12px; letter-spacing: .1em; color: var(--muted); text-transform: uppercase; margin: 46px 0 4px; }
+  h2 .n { color: var(--dim); margin-right: 6px; }
+  p.sub { color: var(--dim); font-size: 12px; margin: 0 0 14px; max-width: 980px; line-height: 1.55; }
+  p.sub b { color: var(--muted); font-weight: 600; }
+  button, input { font-family: var(--sans); }
+  code { font: 11px var(--mono); color: var(--neutral-text); }
+  .gate { max-width: 980px; border: 1px solid var(--good-border); background: var(--good-bg); border-radius: 8px; padding: 9px 14px;
+    font-size: 12px; color: var(--good-text); margin: 0 0 8px; line-height: 1.55; }
+  .gate b { color: var(--strong); }
+  .fact { max-width: 980px; border: 1px solid var(--live-border); background: var(--live-bg); border-radius: 8px; padding: 9px 14px;
+    font-size: 12px; color: var(--muted); margin: 0 0 8px; line-height: 1.55; }
+  .fact b { color: var(--live-text); }
+  .boardchange { max-width: 980px; border: 1px solid var(--bound-border); background: var(--bound-bg); border-radius: 8px; padding: 9px 14px;
+    font-size: 12px; color: var(--muted); margin: 0 0 12px; line-height: 1.55; }
+  .boardchange b { color: var(--bound-text); }
+
+  /* ---- exploration controls ---- */
+  .controls { position: sticky; top: 10px; z-index: 40; display: flex; gap: 8px 18px; flex-wrap: wrap; align-items: center;
+    padding: 10px 14px; border: 1px dashed var(--border-strong); border-radius: 8px; color: var(--muted); font-size: 12px; margin: 14px 0 10px;
+    background: color-mix(in srgb, var(--surface-subtle) 92%, transparent); backdrop-filter: blur(6px); }
+  .controls .group { display: inline-flex; gap: 5px; align-items: center; flex-wrap: wrap; }
+  .controls .group > b { color: var(--text); font-weight: 600; margin-right: 2px; }
+  .chip { appearance: none; border: 1px solid var(--border-strong); background: transparent; color: var(--subtle); font-size: 11.5px;
+    font-weight: 600; border-radius: 999px; padding: 3px 10px; cursor: pointer; }
+  .chip:hover { color: var(--text); }
+  .chip[aria-pressed=true] { color: var(--accent); border-color: var(--accent-border); background: rgba(123,224,178,.08); }
+
+  /* ---- concepts row ---- */
+  .row { display: flex; gap: 22px; flex-wrap: wrap; align-items: flex-start; }
+  .concept { width: min(336px, 100%); flex: none; }
+  .concept.phone { width: 375px; }
+  .concept .cap { display: flex; align-items: baseline; gap: 8px; margin: 0 0 6px; }
+  .concept .cap .cid { font: 700 11px var(--mono); color: var(--dim); }
+  .concept .cap .cname { font-size: 12.5px; font-weight: 700; color: var(--strong); }
+  .concept .cnote { font-size: 11.5px; color: var(--dim); margin: 0 0 8px; line-height: 1.45; min-height: 66px; }
+  .concept .cnote b { color: var(--muted); }
+  .concept.today .cap .cname::after { content: "#972 today"; margin-left: 8px; font: 600 10px var(--mono);
+    color: var(--warn-text); border: 1px solid var(--warn-border); border-radius: 999px; padding: 1px 7px; }
+  .concept.lean .cap .cname::after { content: "lean"; margin-left: 8px; font: 700 10px var(--mono);
+    color: var(--accent); border: 1px solid var(--accent-border); border-radius: 999px; padding: 1px 7px; }
+  .matrix .concept { width: min(330px, 100%); }
+  .matrix .concept .cnote { min-height: 34px; }
+
+  /* ---- the device card, trimmed to its Connections group ---- */
+  .card { border: 1px solid var(--border); border-radius: 12px; background: var(--surface); padding: 12px; display: grid; gap: 10px; }
+  .phone .card { border-radius: 16px; }
+  .chead { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .chead .thumb { width: 38px; height: 38px; border-radius: 8px; flex: none; border: 1px solid var(--border-strong);
+    background: radial-gradient(circle at 30% 35%, #ffb36b 0 18%, transparent 19%), radial-gradient(circle at 65% 60%, #e46fd0 0 22%, transparent 23%), #1c1420; }
+  .chead .t { min-width: 0; flex: 1; display: grid; }
+  .chead .t b { font-size: 14px; color: var(--strong); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .chead .t span { font-size: 11.5px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .chead .live { font: 700 10px var(--mono); color: var(--good-text); border: 1px solid var(--good-border); border-radius: 999px; padding: 2px 7px; flex: none; }
+  .grplabel { font: 800 10px var(--sans); letter-spacing: .08em; text-transform: uppercase; color: var(--dim); margin: 2px 0 -4px; }
+  .grp { overflow: hidden; border-radius: 7px; border: 1px solid var(--border); background: var(--surface-subtle); }
+  .crow { display: flex; min-height: 44px; min-width: 0; width: 100%; align-items: center; gap: 10px; border: 0; border-top: 1px solid var(--border-muted);
+    padding: 8px 12px; font: 600 13.5px var(--sans); color: var(--strong); background: transparent; text-align: left; }
+  .grp > .crow:first-child { border-top: 0; }
+  .crow > svg { flex: none; color: var(--neutral-text); }
+  .crow .f { flex: 1; min-width: 0; display: grid; }
+  .crow .f small { font-size: 11px; font-weight: 500; color: var(--dim); }
+  .crow .v { display: inline-flex; align-items: center; gap: 6px; flex: none; max-width: 62%; font-size: 12px; font-weight: 600; color: var(--subtle); }
+  .crow .v .tx { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .crow .v.warn { color: var(--warn-text); }
+  .crow .v.err { color: var(--err-text); }
+  .crow .v.good { color: var(--strong); }
+  .crow .v.cta { color: var(--accent); }
+  button.crow { cursor: pointer; }
+  button.crow:hover, button.crow.open { background: rgba(255,255,255,.05); }
+
+  /* ---- the popover the Wi-Fi row opens (sheet at phone width) ---- */
+  .pop { border: 1px solid var(--border-strong); border-radius: 10px; background: var(--surface); padding: 10px 12px 12px;
+    box-shadow: 0 14px 40px rgba(0,0,0,.45); display: grid; gap: 8px; position: relative; }
+  .pop::before { content: ""; position: absolute; right: 26px; top: -6px; width: 10px; height: 10px; transform: rotate(45deg);
+    background: var(--surface); border-left: 1px solid var(--border-strong); border-top: 1px solid var(--border-strong); }
+  .phone .pop { border-radius: 16px 16px 10px 10px; padding-top: 16px; }
+  .phone .pop::before { right: auto; left: 50%; top: 6px; width: 36px; height: 4px; transform: translateX(-50%); border: 0; border-radius: 3px; background: var(--border-strong); }
+  .ph { display: flex; align-items: center; gap: 8px; color: var(--neutral-text); min-width: 0; }
+  .ph h3 { margin: 0; font-size: 14px; font-weight: 700; color: var(--strong); }
+  .ph .r { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--subtle); }
+  .say { font-size: 12.5px; color: var(--muted); line-height: 1.45; margin: 0; }
+  .say b { color: var(--strong); }
+  .say.good b { color: var(--good-text); }
+  .say.warn { color: var(--warn-text); }
+  .say.warn b { color: var(--warn-text); }
+  .help { font-size: 11.5px; color: var(--dim); line-height: 1.45; margin: 0; }
+  .help b { color: var(--muted); font-weight: 650; }
+  .sech { display: flex; align-items: center; gap: 8px; font: 800 10px var(--sans); letter-spacing: .08em; text-transform: uppercase; color: var(--dim);
+    border-top: 1px solid var(--border-muted); padding-top: 8px; margin-top: 2px; }
+  .sech .r { margin-left: auto; text-transform: none; letter-spacing: 0; font-weight: 600; font-size: 11px; display: inline-flex; gap: 6px; align-items: center; }
+  .tlink { appearance: none; border: 0; background: transparent; padding: 0; cursor: pointer; font: 700 12px var(--sans);
+    color: var(--strong); text-decoration: underline dotted; text-underline-offset: 3px; white-space: nowrap; }
+  .tlink.q { color: var(--subtle); font-weight: 600; }
+  .btn { appearance: none; cursor: pointer; border-radius: 6px; padding: 8px 12px; font: 700 12.5px/1 var(--sans); display: inline-flex; align-items: center; gap: 6px;
+    color: var(--neutral-text); background: var(--neutral-bg); border: 1px solid var(--neutral-border); white-space: nowrap; justify-content: center; }
+  .btn:hover { color: var(--strong); border-color: var(--border-strong); }
+  .btn.primary { color: var(--strong); border-color: var(--accent-border); background: rgba(123,224,178,.12); }
+  .btn.sm { padding: 6px 9px; font-size: 11.5px; }
+  .btn.quiet { background: transparent; border-color: transparent; color: var(--subtle); }
+  .btn.armed { color: var(--err-text); background: var(--err-bg); border-color: var(--err-border); }
+  .btn.wide { width: 100%; }
+  .acts { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .acts.end { justify-content: flex-end; }
+
+  /* switch */
+  .switch { width: 36px; height: 21px; border-radius: 999px; border: 1px solid var(--border-strong); background: var(--neutral-bg);
+    position: relative; flex: none; cursor: pointer; appearance: none; padding: 0; }
+  .switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 15px; height: 15px; border-radius: 50%; background: var(--subtle); transition: .2s; }
+  .switch.on { background: rgba(123,224,178,.25); border-color: var(--accent-border); }
+  .switch.on::after { left: 17px; background: var(--accent); }
+  .switch.sm { width: 32px; height: 19px; }
+  .switch.sm::after { width: 13px; height: 13px; }
+  .switch.sm.on::after { left: 15px; }
+  .switch[disabled] { opacity: .45; cursor: not-allowed; }
+  .swrow { display: flex; align-items: center; gap: 10px; min-height: 36px; }
+  .swrow .t { flex: 1; min-width: 0; display: grid; gap: 1px; }
+  .swrow .t b { font-size: 13px; color: var(--strong); }
+  .swrow .t span { font-size: 11px; color: var(--dim); line-height: 1.35; }
+
+  /* fields */
+  .field { display: grid; gap: 4px; min-width: 0; }
+  .field > span { font: 700 10.5px var(--sans); color: var(--dim); letter-spacing: .02em; }
+  .inp { display: flex; align-items: center; gap: 4px; border: 1px solid var(--border-strong); background: var(--terminal); border-radius: 6px; padding: 0 4px 0 0; min-width: 0; flex: 1; }
+  .inp:focus-within { border-color: var(--accent-border); box-shadow: 0 0 0 2px rgba(123,224,178,.15); }
+  .inp input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--strong); padding: 8px 10px; font: 13px var(--sans); }
+  .inp input.pw { font: 600 13px var(--mono); }
+  .inp.big input { padding: 11px 12px; font-size: 15px; }
+  .icobtn { appearance: none; border: 0; background: transparent; color: var(--subtle); cursor: pointer; padding: 5px; border-radius: 5px; display: inline-flex; flex: none; }
+  .icobtn:hover { color: var(--strong); background: var(--surface-raised); }
+  .ferr { font-size: 11px; color: var(--err-text); margin: -2px 0 0; }
+
+  /* network rows */
+  .nlist { display: grid; }
+  .nrow { display: flex; align-items: center; gap: 10px; padding: 7px 4px; margin: 0 -4px; border-radius: 6px; min-width: 0; border: 0; background: transparent;
+    width: calc(100% + 8px); text-align: left; color: inherit; font: inherit; }
+  button.nrow { cursor: pointer; }
+  button.nrow:hover { background: rgba(255,255,255,.04); }
+  .nrow.sel { background: rgba(255,255,255,.05); }
+  .nrow .nm { flex: 1; min-width: 0; display: grid; gap: 1px; }
+  .nrow .nm b { font-size: 13px; color: var(--strong); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 650; }
+  .nrow .nm span { font-size: 11px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .nrow .nm span.good { color: var(--good-text); }
+  .nrow .nm span.warn { color: var(--warn-text); }
+  .nrow .nm span.err { color: var(--err-text); }
+  .nrow.inuse .nm b { color: var(--good-text); }
+  .nrow .lk { color: var(--subtle); flex: none; display: inline-flex; }
+  .nrow .lk svg { width: 12px; height: 12px; }
+  .tag { flex: none; font: 700 9.5px/1 var(--mono); letter-spacing: .04em; text-transform: uppercase; border-radius: 4px; padding: 3px 5px;
+    border: 1px solid var(--bound-border); color: var(--bound-text); display: inline-flex; gap: 4px; align-items: center; }
+  .tag svg { width: 10px; height: 10px; }
+  .tag.here { border-color: var(--accent-border); color: var(--accent); }
+  .nsub { margin: 0 0 6px 32px; display: grid; gap: 7px; }
+  .more { font-size: 11.5px; color: var(--dim); padding: 4px 0 2px 32px; }
+
+  /* signal bars */
+  .bars { flex: none; display: inline-flex; align-items: flex-end; gap: 2px; width: 22px; height: 14px; }
+  .bars i { display: block; width: 3.5px; border-radius: 1px; background: var(--border-strong); }
+  .bars i:nth-child(1) { height: 4px; } .bars i:nth-child(2) { height: 7px; } .bars i:nth-child(3) { height: 10px; } .bars i:nth-child(4) { height: 13px; }
+  .bars.b1 i:nth-child(-n+1), .bars.b2 i:nth-child(-n+2), .bars.b3 i:nth-child(-n+3), .bars.b4 i:nth-child(-n+4) { background: var(--neutral-text); }
+  .bars.use.b1 i:nth-child(-n+1), .bars.use.b2 i:nth-child(-n+2), .bars.use.b3 i:nth-child(-n+3), .bars.use.b4 i:nth-child(-n+4) { background: var(--accent); }
+  .bars.off i { background: var(--border-muted) !important; }
+  .ico { width: 22px; flex: none; display: inline-flex; justify-content: center; color: var(--subtle); }
+
+  /* the test join, step by step */
+  .check { display: grid; gap: 5px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-subtle); padding: 8px 10px; }
+  .check .st { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--dim); min-width: 0; }
+  .check .st .m { width: 16px; height: 16px; flex: none; display: inline-flex; align-items: center; justify-content: center; }
+  .check .st.done { color: var(--muted); }
+  .check .st.done .m { color: var(--accent); }
+  .check .st.now { color: var(--strong); font-weight: 600; }
+  .check .st.bad { color: var(--err-text); font-weight: 600; }
+  .check .st.todo .m::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--border-strong); }
+  .spin { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--border-strong); border-top-color: var(--accent); animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .check .res { font-size: 12px; line-height: 1.45; color: var(--muted); border-top: 1px solid var(--border-muted); padding-top: 7px; margin-top: 2px; display: grid; gap: 7px; }
+  .check .res b { color: var(--strong); }
+  .check .res.good b { color: var(--good-text); }
+  .check.compact { padding: 6px 9px; }
+  .pbar { display: grid; grid-auto-flow: column; gap: 3px; }
+  .pbar i { height: 4px; border-radius: 2px; background: var(--border-muted); }
+  .pbar i.on { background: var(--accent); }
+  .pbar i.now { background: linear-gradient(90deg, var(--accent), var(--border-muted)); background-size: 200% 100%; animation: shimmer 1s linear infinite; }
+  .pbar i.bad { background: var(--err-border); }
+  @keyframes shimmer { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+
+  /* the card's own suggestion strip (concept D) */
+  .strip { border-top: 1px solid var(--border-muted); padding: 9px 12px 11px; display: grid; gap: 8px; background: rgba(123,224,178,.035); }
+  .strip .say { font-size: 12px; }
+  .strip .line { display: flex; align-items: center; gap: 9px; min-width: 0; }
+  .strip .line .nm { flex: 1; min-width: 0; display: grid; }
+  .strip .line .nm b { font-size: 13px; color: var(--strong); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .strip .line .nm span { font-size: 11px; color: var(--dim); }
+
+  /* the guided sheet (concept B) */
+  .steps { display: flex; gap: 6px; align-items: center; font: 700 10.5px var(--sans); color: var(--dim); }
+  .steps span { display: inline-flex; align-items: center; gap: 5px; }
+  .steps span i { width: 16px; height: 16px; border-radius: 50%; border: 1px solid var(--border-strong); font: 700 9.5px/14px var(--mono); text-align: center; font-style: normal; }
+  .steps span.on { color: var(--strong); }
+  .steps span.on i { border-color: var(--accent-border); color: var(--accent); }
+  .steps span.done i { background: var(--accent); border-color: var(--accent); color: var(--bg); }
+  .steps .sep { flex: 1; height: 1px; background: var(--border-muted); min-width: 8px; }
+  .bigq { font-size: 15px; font-weight: 700; color: var(--strong); margin: 2px 0 0; }
+  .win { border: 1px solid var(--good-border); background: var(--good-bg); border-radius: 9px; padding: 12px; display: grid; gap: 6px; text-align: center; }
+  .win .big { font-size: 15px; font-weight: 800; color: var(--good-text); }
+  .win .d { font-size: 12px; color: var(--muted); line-height: 1.45; }
+
+  /* account list (concept C) */
+  .acct { border: 1px solid var(--bound-border); background: color-mix(in srgb, var(--bound-bg) 55%, transparent); border-radius: 9px; padding: 8px 10px; display: grid; gap: 4px; }
+  .acct .ah { display: flex; align-items: center; gap: 7px; font: 800 10px var(--sans); letter-spacing: .08em; text-transform: uppercase; color: var(--bound-text); }
+  .acct .ah .r { margin-left: auto; letter-spacing: 0; text-transform: none; font-weight: 600; color: var(--dim); font-size: 11px; }
+  .cb { width: 18px; height: 18px; border-radius: 5px; border: 1.5px solid var(--border-strong); background: var(--terminal); flex: none; display: inline-flex;
+    align-items: center; justify-content: center; color: var(--bg); cursor: pointer; appearance: none; padding: 0; }
+  .cb.on { background: var(--accent); border-color: var(--accent); }
+  .cb svg { width: 12px; height: 12px; stroke-width: 3; }
+
+  /* the armed trash (studio: ux-armed-chip, 4 s) */
+  .trash { position: relative; flex: none; appearance: none; cursor: pointer; border-radius: 6px; height: 26px; min-width: 26px;
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 5px;
+    border: 1px solid transparent; background: transparent; color: var(--subtle); font: 700 11.5px var(--sans); opacity: .7; }
+  .nrow:hover .trash, .trash.armed { opacity: 1; }
+  .trash:hover { color: var(--err-text); border-color: var(--err-border); }
+  .trash .lbl { display: none; white-space: nowrap; }
+  .trash.armed { color: var(--err-text); background: var(--err-bg); border-color: var(--err-border); }
+  .trash.armed .lbl { display: inline; }
+
+  .reject { border: 1px dashed var(--border-strong); border-radius: 8px; padding: 10px 14px; font-size: 12px; color: var(--dim); max-width: 980px; line-height: 1.6; }
+  .reject b { color: var(--muted); }
+  .opts { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; max-width: 1180px; }
+  .opt { border: 1px solid var(--border); border-radius: 10px; background: var(--surface); padding: 11px 13px; display: grid; gap: 6px; align-content: start; font-size: 12px; color: var(--muted); line-height: 1.5; }
+  .opt h4 { margin: 0; font-size: 13px; color: var(--strong); display: flex; gap: 8px; align-items: baseline; }
+  .opt h4 .cid { font: 700 11px var(--mono); color: var(--dim); }
+  .opt.lean { border-color: var(--accent-border); }
+  .opt.lean h4::after { content: "lean"; font: 700 10px var(--mono); color: var(--accent); border: 1px solid var(--accent-border); border-radius: 999px; padding: 1px 7px; }
+  .opt ul { margin: 0; padding-left: 16px; }
+  .opt .pro { color: var(--good-text); } .opt .con { color: var(--warn-text); }
+  pre.shape { max-width: 980px; margin: 0 0 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--terminal); padding: 10px 14px;
+    font: 11.5px/1.55 var(--mono); color: var(--neutral-text); overflow-x: auto; white-space: pre; }
+  pre.shape .c { color: var(--dim); }
+  pre.shape .k { color: var(--live-text); }
+  pre.shape .new { color: var(--accent); }
+
+  svg.i { width: 15px; height: 15px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  svg.i.s { width: 12px; height: 12px; }
+  @media (max-width: 700px) {
+    body { padding: 16px 16px 120px; }
+    .controls { position: static; gap: 10px; }
+    .concept.phone { width: 100%; }
+  }
+</style>
+</head>
+<body>
+
+<h1>Wi‑Fi on a board — set up and manage</h1>
+<div class="gate"><b>Yona (2026-10-04, on #972):</b> “Ideally the board can know about <b>more than one SSID</b>, and it should be <b>easy to be adding one</b>, and
+  <b>ensure that it actually works</b>. ‘Join this network’ is a weird option.” <b>And:</b> “It probably starts not set up … if we can get the SSID of the current
+  network from the computer or phone, we should. If we can get the list of nearby SSIDs from the board with signal power, we should. Once you select a network,
+  get the password and <b>verify that we can connect</b>. … I have Starlink in my truck, at my house, and at my apartment. They’re all different. <b>It would be
+  great if it just worked.</b> Make it as easy as possible. Bigger picture: saving the Wi‑Fi details to the <b>user’s account</b>.”</div>
+<p class="hint">
+  <b>The thesis:</b> Wi‑Fi is <b>a short list of places</b>, not one setting. A board keeps several networks and joins <b>the strongest one it can hear</b> — your truck,
+  your house, your apartment — with no order to manage. Adding one is <b>picking from what the board hears</b> (strongest first; ones your account already knows are
+  marked, and need no typing), then <b>the board actually tries it</b> — found · password accepted · got an address · reached lightplayer.app — and keeps it only when
+  it works. A network that isn’t in range (setting up the truck from the house) is saved for later on purpose. The confusing “Join this network” switch goes;
+  what’s left is one <b>Wi‑Fi</b> switch for the whole board and one <b>Cloud relay</b> switch, both on by default.
+</p>
+<div class="fact"><b>What a web page can’t do:</b> no browser tells a page the name of the Wi‑Fi the computer or phone is on — Chrome, Safari and Bluefy have no API
+  for it (Android Chrome’s Network Information API says “wifi”, never which). So “use the network I’m on” comes from two places that work: <b>the board’s own scan</b>
+  (it’s in the same room — its strongest network is almost always yours), and <b>your account</b> (a network you set up once is marked everywhere after).
+  <code>lp-cli</code> or a native app could read the SSID; Studio can’t. <b>The C6 hears 2.4 GHz only</b>, so a “-5G” network never appears — the copy says so where
+  it matters.</div>
+<div class="boardchange"><b>Needs firmware the board doesn’t have yet:</b> today’s image <b>stores</b> a network but can’t <b>scan</b> or <b>join</b> (roadmap M6).
+  Every concept degrades honestly — set <b>Firmware → stores only</b> in the strip: no scan (type a name), no test (saved, “joins after a firmware update”).
+  #972 is unmerged, so <code>/.lp/network.json</code> can still change shape at <code>version: 1</code> with no migration — section 5.</div>
+
+<div class="controls" id="controls">
+  <span class="group"><b>Firmware</b>
+    <button class="chip" data-k="fw" data-v="m6">joins + scans (M6)</button>
+    <button class="chip" data-k="fw" data-v="today">stores only (today)</button></span>
+  <span class="group"><b>Board knows</b>
+    <button class="chip" data-k="known" data-v="none">nothing</button>
+    <button class="chip" data-k="known" data-v="one">house</button>
+    <button class="chip" data-k="known" data-v="three">house · truck · apartment</button></span>
+  <span class="group"><b>Board is at</b>
+    <button class="chip" data-k="at" data-v="home">house</button>
+    <button class="chip" data-k="at" data-v="truck">truck</button>
+    <button class="chip" data-k="at" data-v="apt">apartment</button>
+    <button class="chip" data-k="at" data-v="cafe">a café</button></span>
+  <span class="group"><b>Station</b>
+    <button class="chip" data-k="force" data-v="auto">as it is</button>
+    <button class="chip" data-k="force" data-v="joining">joining</button>
+    <button class="chip" data-k="force" data-v="wrongpw">password changed on the router</button></span>
+  <span class="group"><b>Next test join</b>
+    <button class="chip" data-k="next" data-v="ok">works</button>
+    <button class="chip" data-k="next" data-v="wrongpw">wrong password</button>
+    <button class="chip" data-k="next" data-v="nointernet">no internet</button></span>
+  <span class="group"><b>Link</b>
+    <button class="chip" data-k="link" data-v="usb">USB</button>
+    <button class="chip" data-k="link" data-v="ble">Bluetooth (phone)</button></span>
+  <span class="group"><b>You can</b>
+    <button class="chip" data-k="tier" data-v="author">author</button>
+    <button class="chip" data-k="tier" data-v="play">only play</button></span>
+  <span class="group"><b>Account</b>
+    <button class="chip" data-k="acct" data-v="three">signed in · knows 3</button>
+    <button class="chip" data-k="acct" data-v="none">signed in · knows none</button>
+    <button class="chip" data-k="acct" data-v="out">signed out</button></span>
+  <span class="group"><button class="chip" data-k="reset" data-v="1">↺ reset</button></span>
+</div>
+
+<h2><span class="n">1</span>Four ways, beside #972</h2>
+<p class="sub">Each is the device card trimmed to its Connections group, with what the Wi‑Fi row opens. Everything is live: click a nearby network, type a
+  password (anything 8+), press Join and watch the board try it — the strip’s <b>Next test join</b> decides how that goes. Start from <b>Board knows → nothing</b>
+  to see the first-run path; switch <b>Board is at</b> to see several networks “just work”.</p>
+<div class="row" id="s1"></div>
+
+<h2><span class="n">2</span>“Make sure it actually works” — the test join</h2>
+<p class="sub">One checklist, used by every concept. The board tries the network <b>before it keeps it</b>; each step names what failed in words a person can act on.
+  The last step only shows while the cloud relay is on. Over Bluetooth the board keeps talking while it tries (the C6 shares its radio between the two).</p>
+<div class="row" id="s2"></div>
+
+<h2><span class="n">3</span>The lean, in every state</h2>
+<p class="sub"><b>A’s list as the panel + D’s one press on the card + C’s account marks.</b> Each tile is frozen at one state from the brief but still clickable.</p>
+<div class="row matrix" id="s3"></div>
+
+<h2><span class="n">4</span>Your account remembers networks — where the password lives</h2>
+<p class="sub">The payoff is the second board, and the truck: one press puts every network you’ve used onto a new board. The question is how the cloud holds a
+  house’s Wi‑Fi password. <b>Precedent:</b> the account’s Play/Author passwords are already stored readable by the service (easy-access ADR, D7) — “shareable
+  passwords, like a Wi‑Fi password”.</p>
+<div class="opts">
+  <div class="opt lean"><h4><span class="cid">4A</span>In the account, like its passwords</h4>
+    Stored with the account record, encrypted at rest with the service’s key; any browser signed in as you gets them, cached for a phone at camp with no internet.
+    Each network you add is remembered unless you untick it; Settings lists them with remove.
+    <ul><li class="pro">Same trust as the account passwords already there; one more table, no new crypto.</li>
+    <li class="pro">Works on a brand-new browser and on Bluefy.</li>
+    <li class="con">The service (and anyone who breaks into it) can read your house Wi‑Fi password.</li></ul></div>
+  <div class="opt"><h4><span class="cid">4B</span>Sealed to your devices</h4>
+    The cloud holds only ciphertext. The key comes from a passkey (WebAuthn PRF) or from a browser that already has it (handed over by QR/USB).
+    <ul><li class="pro">The service can’t read them.</li>
+    <li class="con">Sign-in is Google/GitHub today — no passkey to derive from; a new browser needs a ceremony before it sees your networks.</li>
+    <li class="con">Lost every key = networks gone (fine — retype them).</li></ul></div>
+  <div class="opt"><h4><span class="cid">4C</span>This browser only</h4>
+    Remembered in the browser (like the remembered access passwords), never uploaded.
+    <ul><li class="pro">Nothing new in the cloud.</li>
+    <li class="con">The phone you set the truck up from doesn’t know the house; the payoff mostly goes away.</li></ul></div>
+  <div class="opt"><h4><span class="cid">4D</span>Ask the board you already have</h4>
+    A board never gives a password back over the link (write-only, #972) — so “copy Wi‑Fi from my other board” would need the boards to hand it over between
+    themselves (ESP-NOW/BLE, sealed). <b>Not proposed</b>; listed because it’s the obvious ask and the answer is no.</div>
+</div>
+
+<h2><span class="n">5</span>What the board holds and says, for the lean</h2>
+<p class="sub">To reshape #972 before it merges (still <code>version: 1</code>, no migration). <span style="color:var(--accent)">Green</span> = new against #972.</p>
+<pre class="shape"><span class="c">// /.lp/network.json — write-only on every link (unchanged rule), plaintext at rest (unchanged, WQ2)</span>
+{
+  <span class="k">"version"</span>: 1,
+  <span class="k">"wifi"</span>: true,                  <span class="new">// the board-level switch ("Wi‑Fi"), replaces each network's "enabled"</span>
+  <span class="k">"cloudRelay"</span>: true,
+  <span class="new"><span class="k">"networks"</span>: [                  // replaces the single "wifi" object; at most 8; order = when added
+    { <span class="k">"ssid"</span>: "Starlink Home",  <span class="k">"password"</span>: "…" },
+    { <span class="k">"ssid"</span>: "Starlink Truck", <span class="k">"password"</span>: "…", <span class="k">"joined"</span>: true },  // has worked here at least once
+    { <span class="k">"ssid"</span>: "Back Office",    <span class="k">"password"</span>: "…", <span class="k">"hidden"</span>: true } // doesn't broadcast: probe by name
+  ]</span>
+}
+<span class="c">// which one it joins: the strongest saved network the scan hears. No priority order to manage.</span>
+
+<span class="c">// wire (edit tier unless noted)</span>
+NetworkStatus → {
+  wifi, cloudRelay,
+  <span class="new">networks: [{ ssid, hasPassword, joined, hidden? }]</span>,
+  station: unsupported | off | <span class="new">searching</span>                     <span class="new">// saved networks, none heard</span>
+         | joining { <span class="new">ssid</span> } | joined { <span class="new">ssid</span>, ip, rssi }
+         | failed { <span class="new">ssid</span>, reason: <span class="new">wrongPassword | notFound | noAddress</span> }   <span class="new">// a code; Studio words it</span>
+}
+<span class="new">NetworkScan → { heard: [{ ssid, rssi, secure }] }</span>          <span class="c">// M6; 2.4 GHz only; hidden networks omitted</span>
+<span class="new">NetworkAdd { ssid, password, try: bool }</span>                    <span class="c">// try=true: join first, save only if it worked; progress</span>
+                                                            <span class="c">//   arrives as station joining{ssid} → joined/failed + relay step</span>
+                                                            <span class="c">// try=false: save untested ("not here — join when in range")</span>
+                                                            <span class="c">// same ssid again = new password</span>
+<span class="new">NetworkForget { ssid }</span>
+NetworkSet { wifi?, cloudRelay? }                           <span class="c">// the two switches; no more ssid/password here</span>
+<span class="c">// M5 firmware: station=unsupported ⇒ Studio shows no scan and no test; NetworkAdd{try:true} is refused, try:false saves.</span>
+<span class="c">// Relay reachability (the checklist's last step) is M7's field on this reply.</span></pre>
+
+<h2><span class="n">6</span>Set aside</h2>
+<div class="reject"><b>A priority order</b> (drag to reorder, like macOS) — the truck/house/apartment case never has two in range; “strongest wins” covers the rare
+  overlap with no UI. <b>A per-network on/off</b> (#972’s “Join this network”) — forgetting is one tap and adding back is one tap from the account; a switch per
+  network was the confusing bit. <b>Studio ever showing a saved password</b> — still write-only; “change password” is adding it again.
+  <b>Reading the computer’s current SSID</b> — not possible from a page (top of page).</div>
+
+<script>
+// ---------------------------------------------------------------- icons
+const I = {
+  wifi: '<svg class="i" viewBox="0 0 24 24"><path d="M2.5 9a14 14 0 0 1 19 0"/><path d="M5.5 12.5a9.5 9.5 0 0 1 13 0"/><path d="M8.7 16a5 5 0 0 1 6.6 0"/><circle cx="12" cy="19.3" r="1" fill="currentColor"/></svg>',
+  usb: '<svg class="i" viewBox="0 0 24 24"><path d="M12 3v15"/><circle cx="12" cy="19.5" r="1.8"/><path d="M12 13l-4-3V7"/><path d="M12 11l4-2.5V6"/><rect x="6.6" y="5" width="2.8" height="2.4"/><circle cx="16" cy="5.3" r="1.2"/></svg>',
+  bt: '<svg class="i" viewBox="0 0 24 24"><path d="M7 7l10 10-5 4V3l5 4L7 17"/></svg>',
+  people: '<svg class="i" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3 20c.6-3.6 3-5.5 6-5.5s5.4 1.9 6 5.5"/><circle cx="17" cy="9" r="2.4"/><path d="M16 14.5c2.6.2 4.4 2 5 5"/></svg>',
+  lock: '<svg class="i" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>',
+  chev: '<svg class="i s" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>',
+  back: '<svg class="i s" viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg>',
+  ok: '<svg class="i s" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
+  x: '<svg class="i s" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+  eye: '<svg class="i" viewBox="0 0 24 24"><path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="2.8"/></svg>',
+  key: '<svg class="i s" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M17 6l3 3M14.5 8.5l2 2"/></svg>',
+  user: '<svg class="i s" viewBox="0 0 24 24"><circle cx="12" cy="8.5" r="3.6"/><path d="M5 20c.8-4 3.6-6 7-6s6.2 2 7 6"/></svg>',
+  refresh: '<svg class="i s" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.7"/><path d="M20 4v4h-4"/></svg>',
+  trash: '<svg class="i s" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>',
+  plus: '<svg class="i s" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>',
+  cloud: '<svg class="i" viewBox="0 0 24 24"><path d="M7 18h10a4 4 0 0 0 .6-8 6 6 0 0 0-11.4 1.5A3.3 3.3 0 0 0 7 18z"/></svg>',
+};
+const esc = (s) => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+// ---------------------------------------------------------------- the world
+const PLACES = {
+  home:  { ip: '192.168.1.42', heard: [['Starlink Home', -48, 1], ['NETGEAR42', -71, 1], ['xfinitywifi', -77, 0], ['HP-Print-3F-Officejet Pro 9015', -80, 1], ['DIRECT-roku-418', -84, 1]] },
+  truck: { ip: '192.168.1.17', heard: [['Starlink Truck', -41, 1], ['Pixel_7310', -66, 1], ['xfinitywifi', -86, 0]] },
+  apt:   { ip: '10.0.0.23',    heard: [['Starlink Apt', -57, 1], ['Apt 3C', -69, 1], ['MySpectrumWiFi7a-2G', -74, 1]] },
+  cafe:  { ip: '10.20.4.118',  heard: [['Ritual Coffee Guest', -58, 0], ['Ritual Staff', -62, 1], ['attwifi', -79, 0]] },
+};
+const heard = (ctx) => PLACES[ctx.at].heard.map(([ssid, rssi, secure]) => ({ ssid, rssi, secure: !!secure }));
+const hears = (ctx, ssid) => heard(ctx).find(n => n.ssid === ssid);
+const KNOWN = { none: [], one: ['Starlink Home'], three: ['Starlink Home', 'Starlink Truck', 'Starlink Apt'] };
+const ACCT_SEED = { three: ['Starlink Home', 'Starlink Truck', 'Starlink Apt'], none: [], out: [] };
+let ACCT = [];
+const acctList = (ctx) => ctx.live ? ACCT : ACCT_SEED[ctx.acct];
+const acctHas = (ctx, ssid) => ctx.acct !== 'out' && acctList(ctx).includes(ssid);
+const barsN = (rssi) => rssi >= -55 ? 4 : rssi >= -65 ? 3 : rssi >= -73 ? 2 : 1;
+const SIG = ['', 'weak', 'fair', 'good', 'strong'];
+const sig = (rssi) => SIG[barsN(rssi)];
+const bars = (rssi, use) => `<span class="bars b${rssi == null ? 0 : barsN(rssi)}${use ? ' use' : ''}${rssi == null ? ' off' : ''}" title="${rssi == null ? 'not heard' : rssi + ' dBm'}"><i></i><i></i><i></i><i></i></span>`;
+
+// ---------------------------------------------------------------- state
+const DEFAULTS = { fw: 'm6', known: 'none', at: 'home', force: 'auto', next: 'ok', link: 'usb', tier: 'author', acct: 'three', relay: true, wifi: true };
+const S = { ...DEFAULTS, live: true };
+for (const [k, v] of new URLSearchParams(location.search)) if (k in S) S[k] = v;
+const C = {}; // per concept: { ctx, board: [{ssid, state}], open, ... }
+
+function seedBoard(ctx) {
+  return KNOWN[ctx.known].map(ssid => ({ ssid, state: ctx.fw === 'today' ? 'untested' : 'ok' }));
+}
+function makeConcept(ctx, extra = {}) {
+  return { ctx, board: seedBoard(ctx), open: true, sel: null, pw: '', show: false, err: null, test: null, armed: null,
+    manual: false, mname: '', step: null, scanning: false, remember: true, moreOpen: false, ...extra };
+}
+
+// What the station is doing, from the board's list and where it is.
+function station(c) {
+  const ctx = c.ctx;
+  if (ctx.fw === 'today') return { kind: 'unsupported' };
+  if (!ctx.wifi) return { kind: 'off' };
+  if (!c.board.length) return { kind: 'none' };
+  const inRange = c.board.map(n => ({ n, h: hears(ctx, n.ssid) })).filter(x => x.h).sort((a, b) => b.h.rssi - a.h.rssi);
+  const best = inRange[0];
+  if (!best) return { kind: 'searching' };
+  if (best.n.state === 'wrongpw' || (ctx.force === 'wrongpw' && !best.n.fixed)) return { kind: 'failed', ssid: best.n.ssid, reason: 'wrongpw', rssi: best.h.rssi };
+  if (ctx.force === 'joining' && !best.n.fixed) return { kind: 'joining', ssid: best.n.ssid, rssi: best.h.rssi };
+  return { kind: 'joined', ssid: best.n.ssid, ip: PLACES[ctx.at].ip, rssi: best.h.rssi, others: inRange.slice(1).map(x => x.n.ssid) };
+}
+function addToBoard(c, ssid, state) {
+  const have = c.board.find(n => n.ssid === ssid);
+  if (have) have.state = state; else c.board.push({ ssid, state });
+}
+
+// ---------------------------------------------------------------- the test join
+function runTest(cid, ssid, opts = {}) {
+  const c = C[cid], ctx = c.ctx;
+  const h = hears(ctx, ssid);
+  const steps = [`Finding ${ssid}`, 'Checking the password', 'Getting an address'];
+  if (ctx.relay) steps.push('Reaching lightplayer.app');
+  let failAt = -1, fail = null;
+  if (!h) { failAt = 0; fail = 'notfound'; }
+  else if (ctx.next === 'wrongpw' && h.secure) { failAt = 1; fail = 'wrongpw'; }
+  else if (ctx.next === 'nointernet' && ctx.relay) { failAt = 3; fail = 'nointernet'; }
+  const t = c.test = { ssid, steps, step: 0, fail: null, done: false, rssi: h?.rssi, ip: PLACES[ctx.at].ip, opts };
+  const tick = () => {
+    if (c.test !== t) return;
+    if (t.step === failAt) {
+      t.fail = fail; t.done = true;
+      if (fail === 'nointernet') { addToBoard(c, ssid, 'ok'); remember(c, ssid); }
+      renderAll(); return;
+    }
+    t.step++;
+    if (t.step >= steps.length) {
+      t.done = true; addToBoard(c, ssid, 'ok'); remember(c, ssid);
+      const b = c.board.find(n => n.ssid === ssid); if (b) { b.state = 'ok'; b.fixed = true; }
+      opts.onOk?.(); renderAll(); return;
+    }
+    renderAll(); setTimeout(tick, 700);
+  };
+  renderAll(); setTimeout(tick, 700);
+}
+function remember(c, ssid) {
+  if (c.ctx.live && c.ctx.acct !== 'out' && c.remember && !ACCT.includes(ssid)) ACCT.push(ssid);
+}
+function saveUntested(cid, ssid) {
+  const c = C[cid]; addToBoard(c, ssid, 'untested'); remember(c, ssid);
+  c.test = { ssid, saved: true, done: true, steps: [], step: 0, fail: null }; renderAll();
+}
+const FAILS = {
+  notfound: (t, c) => `The board can’t hear <b>${esc(t.ssid)}</b> from here. It only hears 2.4 GHz networks — a “5G” name never shows.`,
+  wrongpw: (t) => `<b>${esc(t.ssid)}</b> didn’t take that password.`,
+  nointernet: (t) => `Joined <b>${esc(t.ssid)}</b> (${t.ip}) and saved it — but lightplayer.app didn’t answer. A café’s sign-in page does this; at home, check the internet.`,
+};
+function checklist(cid, t, compact) {
+  const c = C[cid];
+  if (t.saved) {
+    const today = c.ctx.fw === 'today';
+    return `<div class="check${compact ? ' compact' : ''}"><div class="res good" style="border:0;padding:0;margin:0">
+      <span><b>Saved ${esc(t.ssid)}.</b> ${today ? 'This firmware can’t join yet — the board joins it after a firmware update.' : 'Not tried: the board joins it whenever it hears it.'}</span>
+      <div class="acts end"><button class="btn sm quiet" data-c="${cid}" data-act="testclose">OK</button></div></div></div>`;
+  }
+  const rows = t.steps.map((s, i) => {
+    const cls = i < t.step ? 'done' : i === t.step ? (t.fail ? 'bad' : t.done ? 'done' : 'now') : 'todo';
+    const m = cls === 'done' ? I.ok : cls === 'bad' ? I.x : cls === 'now' ? '<span class="spin"></span>' : '';
+    return `<div class="st ${cls}"><span class="m">${m}</span><span>${esc(s)}${cls === 'done' && i === 2 ? ` · ${t.ip}` : ''}</span></div>`;
+  }).join('');
+  let res = '';
+  if (t.done && !t.fail) {
+    res = `<div class="res good"><span><b>It works.</b> ${esc(t.ssid)} · ${sig(t.rssi)} signal · ${t.ip}. Saved — the board joins it whenever it hears it.</span>
+      <div class="acts end"><button class="btn sm" data-c="${cid}" data-act="testclose">Done</button></div></div>`;
+  } else if (t.fail) {
+    const acts = t.fail === 'notfound'
+      ? `<button class="btn sm quiet" data-c="${cid}" data-act="testclose">Back</button><button class="btn sm primary" data-c="${cid}" data-act="savelater" data-ssid="${esc(t.ssid)}">Save for when it’s in range</button>`
+      : t.fail === 'wrongpw'
+      ? `<button class="btn sm quiet" data-c="${cid}" data-act="testclose">Cancel</button><button class="btn sm primary" data-c="${cid}" data-act="retry">Try another password</button>`
+      : `<button class="btn sm quiet" data-c="${cid}" data-act="forget" data-ssid="${esc(t.ssid)}">Remove it</button><button class="btn sm primary" data-c="${cid}" data-act="testclose">Keep it</button>`;
+    res = `<div class="res"><span>${FAILS[t.fail](t, c)}</span><div class="acts end">${acts}</div></div>`;
+  }
+  if (compact && !t.done) {
+    return `<div class="check compact"><div class="st now"><span class="m"><span class="spin"></span></span><span>${esc(t.steps[t.step])}…</span></div>
+      <div class="pbar">${t.steps.map((_, i) => `<i class="${i < t.step ? 'on' : i === t.step ? 'now' : ''}"></i>`).join('')}</div></div>`;
+  }
+  return `<div class="check${compact ? ' compact' : ''}">${rows}${res}</div>`;
+}
+
+// ---------------------------------------------------------------- shared pieces
+function cardHead(c) {
+  return `<div class="chead"><span class="thumb"></span><span class="t"><b>PLAYFUL choker</b><span>XIAO ESP32-C6 · Ember drift</span></span><span class="live">PLAYING</span></div>`;
+}
+function linkRows(c) {
+  const ble = c.ctx.link === 'ble', author = c.ctx.tier === 'author';
+  return `<div class="crow">${I.usb}<span class="f">USB</span><span class="v">${ble ? 'not connected' : 'connected'}</span></div>
+    <div class="crow">${I.bt}<span class="f">Bluetooth${ble ? '<small>connected this way — turn off by USB</small>' : ''}</span><button class="switch sm on" ${ble ? 'disabled' : ''} aria-label="Bluetooth"></button></div>
+    <div class="crow">${I.people}<span class="f">Access</span><span class="v ${author ? 'warn' : ''}"><span class="tx">${author ? 'open to anyone' : 'unlock to author'}</span>${I.chev}</span></div>`;
+}
+function wifiRow(c, value, cls = '') {
+  return `<button class="crow${c.open ? ' open' : ''}" data-c="${c.id}" data-act="open">${I.wifi}<span class="f">Wi‑Fi</span><span class="v ${cls}">${value}${I.chev}</span></button>`;
+}
+// The row's value, in the lean's words.
+function rowValue(c) {
+  const st = station(c), n = c.board.length;
+  if (c.ctx.tier !== 'author' && !n) return ['<span class="tx">not set up</span>', ''];
+  switch (st.kind) {
+    case 'unsupported': return n ? [`<span class="tx">${n === 1 ? esc(c.board[0].ssid) : n + ' saved'} · joins after an update</span>`, ''] : ['<span class="tx">Set up</span>', 'cta'];
+    case 'off': return ['<span class="tx">off</span>', ''];
+    case 'none': return ['<span class="tx">Set up</span>', 'cta'];
+    case 'searching': return ['<span class="tx">none of its networks here</span>', ''];
+    case 'joining': return [`<span class="tx">joining ${esc(st.ssid)}…</span>`, ''];
+    case 'failed': return [`<span class="tx">${esc(st.ssid)} · password changed?</span>`, 'warn'];
+    case 'joined': return [`${bars(st.rssi, true)}<span class="tx">${esc(st.ssid)}</span>`, 'good'];
+  }
+}
+function statusSay(c) {
+  const st = station(c), n = c.board.length;
+  switch (st.kind) {
+    case 'unsupported': return n
+      ? `<p class="say">Saved. <b>This firmware can’t join Wi‑Fi yet</b> — the board joins after a firmware update.</p>`
+      : `<p class="say">Not set up. This firmware saves networks; it joins after a firmware update.</p>`;
+    case 'off': return `<p class="say">Wi‑Fi is off. The board keeps its networks and joins none.</p>`;
+    case 'none': return `<p class="say">Not on Wi‑Fi yet. Pick the network the board is near.</p>`;
+    case 'searching': return `<p class="say">${n === 1 ? `<b>${esc(c.board[0].ssid)}</b> isn’t here.` : `None of its ${n} networks are here.`} It keeps listening, and joins ${n === 1 ? 'it' : 'one'} the moment it hears ${n === 1 ? 'it' : 'one'}.</p>`;
+    case 'joining': return `<p class="say"><span class="spin" style="display:inline-block;vertical-align:-2px;margin-right:6px"></span>Joining <b>${esc(st.ssid)}</b>…</p>`;
+    case 'failed': return `<p class="say warn"><b>${esc(st.ssid)}</b> stopped taking its password — changed on the router? Update it below.</p>`;
+    case 'joined': return `<p class="say good">On <b>${esc(st.ssid)}</b> · ${sig(st.rssi)} signal · ${st.ip}</p>`;
+  }
+}
+function switches(c, opts = {}) {
+  const ctx = c.ctx, today = ctx.fw === 'today';
+  const wifiSw = opts.noWifi ? '' : `<div class="swrow"><span class="t"><b>Wi‑Fi</b><span>Joins the strongest saved network it hears.${c.ctx.wifi ? '' : ' Bluetooth and ESP-NOW sync stay as they are.'}</span></span>
+      <button class="switch sm${ctx.wifi ? ' on' : ''}" data-c="${c.id}" data-act="wifi" aria-label="Wi‑Fi"></button></div>`;
+  return `${wifiSw}<div class="swrow"><span class="t"><b>Cloud relay</b><span>Reach this board from lightplayer.app anywhere, not just on its network.${today ? ' Starts with a firmware update.' : ''}</span></span>
+      <button class="switch sm${ctx.relay ? ' on' : ''}" data-c="${c.id}" data-act="relay" aria-label="Cloud relay"></button></div>`;
+}
+function pwField(c, label = 'Password', big = false) {
+  return `<span class="inp${big ? ' big' : ''}"><input class="pw" data-c="${c.id}" data-f="pw" type="${c.show ? 'text' : 'password'}" value="${esc(c.pw)}"
+      autocomplete="off" spellcheck="false" placeholder="${label}" aria-label="${label}">
+    <button class="icobtn" data-c="${c.id}" data-act="show" title="${c.show ? 'Hide' : 'Show'}">${I.eye}</button></span>`;
+}
+function needAuthor(c) {
+  const st = station(c);
+  const line = st.kind === 'joined' ? `On <b>${esc(st.ssid)}</b> · ${sig(st.rssi)} signal.` : c.board.length ? `${c.board.length} saved network${c.board.length > 1 ? 's' : ''}.` : 'Not set up.';
+  return `<p class="say">${line}</p><p class="help">Adding or forgetting a network needs <b>Author</b>. <button class="tlink" data-c="${c.id}">Unlock…</button></p>`;
+}
+function trash(c, ssid) {
+  const armed = c.armed === ssid;
+  return `<button class="trash${armed ? ' armed' : ''}" data-c="${c.id}" data-act="${armed ? 'forget' : 'arm'}" data-ssid="${esc(ssid)}" title="Forget">${I.trash}<span class="lbl">Forget</span></button>`;
+}
+function acctTag(c, ssid) { return acctHas(c.ctx, ssid) ? `<span class="tag" title="Your account knows its password">${I.user}yours</span>` : ''; }
+function rememberLine(c) {
+  if (c.ctx.acct === 'out') return '';
+  return `<div class="swrow" style="min-height:0;gap:8px"><button class="cb${c.remember ? ' on' : ''}" data-c="${c.id}" data-act="remember">${c.remember ? I.ok : ''}</button>
+    <span class="help" style="flex:1">Remember in my account — for the next board</span></div>`;
+}
+// Pick → password → Join, for one heard (or typed) network; shared by A, C, D.
+function joinBox(c, ssid, opts = {}) {
+  if (c.test && c.test.ssid === ssid) return checklist(c.id, c.test, opts.compact);
+  const h = hears(c.ctx, ssid), today = c.ctx.fw === 'today';
+  const st = station(c), stale = st.kind === 'failed' && st.ssid === ssid;
+  if (acctHas(c.ctx, ssid) && !stale) {
+    return `<p class="help">Your account knows its password — nothing to type.</p>
+      <div class="acts end"><button class="btn sm primary" data-c="${c.id}" data-act="join" data-ssid="${esc(ssid)}">${today ? 'Save' : 'Join'}</button></div>`;
+  }
+  if (h && !h.secure) {
+    return `<p class="help">Open network — no password. Anyone nearby can see its traffic.</p>
+      <div class="acts end"><button class="btn sm primary" data-c="${c.id}" data-act="join" data-ssid="${esc(ssid)}">${today ? 'Save' : 'Join'}</button></div>`;
+  }
+  return `<div style="display:flex;gap:6px;align-items:center">${pwField(c, `Password for ${ssid}`)}
+      <button class="btn sm primary" data-c="${c.id}" data-act="join" data-ssid="${esc(ssid)}">${today ? 'Save' : 'Join'}</button></div>
+    ${c.err ? `<p class="ferr">${c.err}</p>` : ''}${rememberLine(c)}`;
+}
+function manualBox(c) {
+  return `<div class="nsub" style="margin-left:0"><span class="inp"><input data-c="${c.id}" data-f="mname" value="${esc(c.mname)}" placeholder="Network name" aria-label="Network name" spellcheck="false"></span>
+    <div style="display:flex;gap:6px;align-items:center">${pwField(c, 'Password (empty if open)')}
+      <button class="btn sm primary" data-c="${c.id}" data-act="joinmanual">${c.ctx.fw === 'today' ? 'Save' : 'Join'}</button></div>
+    ${c.err ? `<p class="ferr">${c.err}</p>` : ''}${rememberLine(c)}
+    ${c.test && c.test.ssid === c.mname && !c.board.some(n => n.ssid === c.mname) ? checklist(c.id, c.test) : ''}</div>`;
+}
+
+// ---------------------------------------------------------------- 0 · #972 today (faithful)
+function render0(c) {
+  const st = station(c), saved = c.board[0];
+  const value = c.ctx.tier !== 'author' ? 'needs author' : saved ? esc(saved.ssid) : 'not set';
+  const line = !saved ? 'Not set.' : st.kind === 'unsupported' ? 'Saved. This firmware doesn’t join Wi‑Fi yet.' : st.kind === 'joined' && st.ssid === saved.ssid
+    ? `Joined ${esc(saved.ssid)} · ${st.ip} · ${st.rssi} dBm` : st.kind === 'failed' ? `Couldn’t join ${esc(saved.ssid)}: wrong password` : st.kind === 'joining' ? `Joining ${esc(saved.ssid)}…`
+    : st.kind === 'searching' ? `Couldn’t join ${esc(saved.ssid)}: not found` : 'Off.';
+  let pop = '';
+  if (c.open) {
+    pop = c.ctx.tier !== 'author'
+      ? `<div class="pop"><div class="ph">${I.wifi}<h3>Wi‑Fi</h3></div><p class="help">Needs Author access — unlock with an author password.</p></div>`
+      : `<div class="pop"><div class="ph">${I.wifi}<h3>Wi‑Fi</h3></div>
+      <p class="help">The network this board joins. Saved on the board; the password can't be read back.</p>
+      <p class="say"><b>${line}</b></p>
+      <p class="help">${c.ctx.relay ? 'Relay on (default)' : 'Relay off — local network only'}${c.ctx.fw === 'today' ? ' · applies once this firmware uses the relay' : ''}</p>
+      <label class="field"><span>Network name</span><span class="inp"><input data-c="${c.id}" data-f="mname" value="${esc(c.mname)}" placeholder="${saved ? esc(saved.ssid) : 'network name'}"></span></label>
+      <label class="field"><span>Password</span><span class="inp"><input class="pw" type="password" data-c="${c.id}" data-f="pw" value="${esc(c.pw)}" placeholder="${saved ? 'unchanged' : 'none — open network'}"></span></label>
+      <div class="acts end"><button class="btn sm" data-c="${c.id}" data-act="set0">Set Wi‑Fi</button></div>
+      <div class="sech"></div>
+      <div class="swrow"><span class="t"><b>Join this network</b></span><button class="switch sm${c.ctx.wifi ? ' on' : ''}" data-c="${c.id}" data-act="wifi"></button></div>
+      <div class="swrow"><span class="t"><b>Cloud relay</b><span>Lets lightplayer.app reach this board through the cloud.</span></span><button class="switch sm${c.ctx.relay ? ' on' : ''}" data-c="${c.id}" data-act="relay"></button></div>
+      ${saved ? `<div class="acts end"><button class="btn sm ${c.armed === saved.ssid ? 'armed' : 'quiet'}" data-c="${c.id}" data-act="${c.armed === saved.ssid ? 'forget' : 'arm'}" data-ssid="${esc(saved.ssid)}">${c.armed === saved.ssid ? `Forget ${esc(saved.ssid)}?` : 'Forget'}</button></div>` : ''}
+    </div>`;
+  }
+  return frame(c, wifiRow(c, `<span class="tx">${value}</span>`), pop);
+}
+
+// ---------------------------------------------------------------- A · one list, like your phone
+function renderA(c) {
+  const [value, cls] = rowValue(c);
+  if (!c.open) return frame(c, wifiRow(c, value, cls), '');
+  const ctx = c.ctx, st = station(c), today = ctx.fw === 'today';
+  if (ctx.tier !== 'author') return frame(c, wifiRow(c, value, cls), `<div class="pop"><div class="ph">${I.wifi}<h3>Wi‑Fi</h3></div>${needAuthor(c)}</div>`);
+  // saved, best first: in use, then heard, then not here
+  const saved = c.board.map(n => ({ ...n, h: hears(ctx, n.ssid) }));
+  saved.sort((a, b) => (b.ssid === st.ssid) - (a.ssid === st.ssid) || (b.h?.rssi ?? -999) - (a.h?.rssi ?? -999));
+  const savedRows = saved.map(n => {
+    const inUse = st.kind === 'joined' && st.ssid === n.ssid;
+    const failed = st.kind === 'failed' && st.ssid === n.ssid;
+    const sub = today ? (n.state === 'untested' ? 'saved — joins after a firmware update' : 'saved')
+      : inUse ? `<span class="good">in use · ${st.ip}</span>`
+      : failed ? '<span class="warn">password changed?</span>'
+      : st.kind === 'joining' && st.ssid === n.ssid ? 'joining…'
+      : !ctx.wifi ? 'saved'
+      : n.h ? `here too · using the stronger one`
+      : n.state === 'untested' ? 'saved, not tried yet · not here' : 'not here';
+    const expanded = c.sel === n.ssid || (c.test && c.test.ssid === n.ssid);
+    return `<div class="nrow${inUse ? ' inuse' : ''}">${bars(n.h && !today ? n.h.rssi : null, inUse)}
+        <span class="nm"><b>${esc(n.ssid)}</b><span>${sub}</span></span>
+        ${failed ? `<button class="btn sm" data-c="${c.id}" data-act="sel" data-ssid="${esc(n.ssid)}">Update</button>` : ''}${trash(c, n.ssid)}</div>
+      ${expanded ? `<div class="nsub">${joinBox(c, n.ssid)}</div>` : ''}`;
+  }).join('');
+  let nearby = '';
+  if (today) {
+    nearby = `<div class="sech">Add a network</div>
+      <p class="help">This firmware can’t listen for networks yet — type the name. It joins after a firmware update.</p>${manualBox(c)}`;
+  } else if (ctx.wifi) {
+    const list = heard(ctx).filter(h => !c.board.some(n => n.ssid === h.ssid));
+    // networks your account knows float to the top
+    list.sort((a, b) => acctHas(ctx, b.ssid) - acctHas(ctx, a.ssid) || b.rssi - a.rssi);
+    nearby = `<div class="sech">${c.board.length ? 'Add one it hears' : 'Networks it hears'}<span class="r">${c.scanning ? '<span class="spin"></span> listening…' : `<button class="tlink q" data-c="${c.id}" data-act="scan">${I.refresh} again</button>`}</span></div>
+      <div class="nlist">${list.map(h => `<button class="nrow${c.sel === h.ssid ? ' sel' : ''}" data-c="${c.id}" data-act="sel" data-ssid="${esc(h.ssid)}">${bars(h.rssi)}
+          <span class="nm"><b>${esc(h.ssid)}</b><span>${sig(h.rssi)}${h.secure ? '' : ' · open'}</span></span>${acctTag(c, h.ssid)}${h.secure ? `<span class="lk">${I.lock}</span>` : ''}</button>
+        ${c.sel === h.ssid ? `<div class="nsub">${joinBox(c, h.ssid)}</div>` : ''}`).join('')}</div>
+      ${c.manual ? manualBox(c) : `<button class="tlink q" style="justify-self:start" data-c="${c.id}" data-act="manual">${I.plus} Not listed — type a name</button>`}`;
+  }
+  return frame(c, wifiRow(c, value, cls), `<div class="pop">
+    <div class="ph">${I.wifi}<h3>Wi‑Fi</h3><span class="r"><button class="switch sm${ctx.wifi ? ' on' : ''}" data-c="${c.id}" data-act="wifi" aria-label="Wi‑Fi"></button></span></div>
+    ${statusSay(c)}
+    ${c.board.length ? `<div class="sech">On this board<span class="r">${c.board.length} of 8</span></div><div class="nlist">${savedRows}</div>` : ''}
+    ${nearby}
+    <div class="sech"></div>${switches(c, { noWifi: true })}
+  </div>`);
+}
+
+// ---------------------------------------------------------------- B · guided: pick, prove, done
+function renderB(c) {
+  const ctx = c.ctx, today = ctx.fw === 'today';
+  const [value, cls] = rowValue(c);
+  if (!c.open) return frame(c, wifiRow(c, value, cls), '');
+  if (ctx.tier !== 'author') return frame(c, wifiRow(c, value, cls), `<div class="pop"><div class="ph">${I.wifi}<h3>Wi‑Fi</h3></div>${needAuthor(c)}</div>`);
+  const step = c.step ?? (c.board.length ? 'summary' : 'pick');
+  const dots = (n) => `<div class="steps">${['Network', 'Password', today ? 'Save' : 'Check'].map((s, i) =>
+    `<span class="${i < n ? 'done' : i === n ? 'on' : ''}"><i>${i < n ? '✓' : i + 1}</i>${s}</span>`).join('<span class="sep"></span>')}</div>`;
+  let body = '';
+  if (step === 'summary') {
+    const st = station(c);
+    body = `<div class="ph">${I.wifi}<h3>Wi‑Fi</h3></div>${statusSay(c)}
+      <div class="nlist">${c.board.map(n => {
+        const h = hears(ctx, n.ssid), inUse = st.kind === 'joined' && st.ssid === n.ssid;
+        return `<div class="nrow${inUse ? ' inuse' : ''}">${bars(h && !today ? h.rssi : null, inUse)}<span class="nm"><b>${esc(n.ssid)}</b>
+          <span>${today ? 'saved' : inUse ? 'in use' : h ? 'here' : 'not here'}</span></span>${trash(c, n.ssid)}</div>`; }).join('')}</div>
+      <button class="btn sm wide" data-c="${c.id}" data-act="bstep" data-v="pick">${I.plus} Add a place</button>
+      <div class="sech"></div>${switches(c)}`;
+  } else if (step === 'pick') {
+    const list = heard(ctx).filter(h => !c.board.some(n => n.ssid === h.ssid));
+    list.sort((a, b) => acctHas(ctx, b.ssid) - acctHas(ctx, a.ssid) || b.rssi - a.rssi);
+    const top = list[0];
+    body = `${dots(0)}<p class="bigq">Which network is the board near?</p>
+      ${today || c.manual ? `<p class="help">${today ? 'This firmware can’t listen for networks yet — type the name.' : 'A network that doesn’t broadcast its name.'}</p>
+        <span class="inp big"><input data-c="${c.id}" data-f="mname" value="${esc(c.mname)}" placeholder="Network name"></span>
+        <div class="acts end">${c.board.length ? `<button class="btn sm quiet" data-c="${c.id}" data-act="bstep" data-v="summary">Cancel</button>` : ''}<button class="btn sm primary" data-c="${c.id}" data-act="bpickname">Next</button></div>`
+      : `<p class="help">What the board hears, strongest first.</p>
+      <div class="nlist">${list.map((h, i) => `<button class="nrow" data-c="${c.id}" data-act="bpick" data-ssid="${esc(h.ssid)}">${bars(h.rssi)}
+        <span class="nm"><b>${esc(h.ssid)}</b><span>${sig(h.rssi)}${h.secure ? '' : ' · open'}</span></span>
+        ${i === 0 && top ? `<span class="tag here">probably here</span>` : acctTag(c, h.ssid)}${I.chev}</button>`).join('')}</div>
+      <div class="acts">${c.board.length ? `<button class="btn sm quiet" data-c="${c.id}" data-act="bstep" data-v="summary">Cancel</button>` : ''}
+        <button class="tlink q" style="margin-left:auto" data-c="${c.id}" data-act="bmanual">Not listed — type a name</button></div>`}`;
+  } else if (step === 'pw') {
+    const known = acctHas(ctx, c.sel), h = hears(ctx, c.sel), open = h && !h.secure;
+    body = `${dots(1)}<p class="bigq">${open ? `${esc(c.sel)} is open` : `Password for ${esc(c.sel)}`}</p>
+      ${known ? `<p class="help">Filled in from your account.</p>` : ''}
+      ${open ? `<p class="help">No password. Anyone nearby can see its traffic.</p>` : pwField(c, known ? '••••••••••••' : 'Password', true)}
+      ${c.err ? `<p class="ferr">${c.err}</p>` : ''}${known ? '' : rememberLine(c)}
+      <div class="acts end"><button class="btn sm quiet" data-c="${c.id}" data-act="bstep" data-v="pick">${I.back} Back</button>
+        <button class="btn primary" data-c="${c.id}" data-act="btry">${today ? 'Save it' : 'Try it'}</button></div>`;
+  } else if (step === 'check') {
+    const t = c.test;
+    const won = t && t.done && (!t.fail || t.fail === 'nointernet');
+    body = `${dots(won ? 3 : 2)}${won && !t.fail ? `<div class="win"><span class="big">It works</span>
+        <span class="d">${esc(t.ssid)} · ${sig(t.rssi)} signal · ${t.ip}${ctx.relay ? ' · reached lightplayer.app' : ''}.<br>The board joins it whenever it hears it.</span></div>
+        <div class="acts end"><button class="btn sm" data-c="${c.id}" data-act="bstep" data-v="pick">${I.plus} Another place</button><button class="btn sm primary" data-c="${c.id}" data-act="bstep" data-v="summary">Done</button></div>`
+      : t?.saved ? `<div class="win"><span class="big">Saved</span><span class="d">${esc(t.ssid)}. ${today ? 'This firmware can’t join yet — it joins after a firmware update.' : 'Not tried: it joins when the board hears it.'}</span></div>
+        <div class="acts end"><button class="btn sm" data-c="${c.id}" data-act="bstep" data-v="pick">${I.plus} Another place</button><button class="btn sm primary" data-c="${c.id}" data-act="bstep" data-v="summary">Done</button></div>`
+      : `<p class="bigq">Trying ${esc(c.sel)}…</p>${t ? checklist(c.id, t) : ''}`}`;
+  }
+  return frame(c, wifiRow(c, value, cls), `<div class="pop">${body}</div>`);
+}
+
+// ---------------------------------------------------------------- C · your networks follow you
+function renderC(c) {
+  const ctx = c.ctx, today = ctx.fw === 'today', st = station(c);
+  const [value, cls] = rowValue(c);
+  if (!c.open) return frame(c, wifiRow(c, value, cls), '');
+  if (ctx.tier !== 'author') return frame(c, wifiRow(c, value, cls), `<div class="pop"><div class="ph">${I.wifi}<h3>Wi‑Fi</h3></div>${needAuthor(c)}</div>`);
+  const mine = acctList(ctx), out = ctx.acct === 'out';
+  const onBoard = (s) => c.board.some(n => n.ssid === s);
+  const missing = mine.filter(s => !onBoard(s));
+  const sub = (s) => {
+    const h = hears(ctx, s);
+    if (!onBoard(s)) return h ? `here · ${sig(h.rssi)}` : 'not on this board';
+    if (today) return 'on this board — joins after an update';
+    if (st.kind === 'joined' && st.ssid === s) return `<span class="good">in use · ${st.ip}</span>`;
+    if (st.kind === 'failed' && st.ssid === s) return '<span class="warn">password stopped working</span>';
+    return h ? 'here too' : 'on this board · not here';
+  };
+  const acctBox = out
+    ? `<div class="acct"><div class="ah">${I.user} Your networks</div><p class="help">Sign in and the networks you set up here are ready on your next board — one press, no typing.</p>
+        <div class="acts"><button class="btn sm">Sign in</button></div></div>`
+    : `<div class="acct"><div class="ah">${I.user} Your networks<span class="r">in your account · ${mine.length}</span></div>
+        ${mine.length ? mine.map(s => {
+          const h = hears(ctx, s), on = onBoard(s), inUse = st.kind === 'joined' && st.ssid === s;
+          return `<div class="nrow${inUse ? ' inuse' : ''}"><button class="cb${on ? ' on' : ''}" data-c="${c.id}" data-act="ctoggle" data-ssid="${esc(s)}" title="${on ? 'On this board' : 'Put on this board'}">${on ? I.ok : ''}</button>
+            ${bars(h && !today ? h.rssi : null, inUse)}<span class="nm"><b>${esc(s)}</b><span>${sub(s)}</span></span></div>
+            ${c.test && c.test.ssid === s ? `<div class="nsub">${checklist(c.id, c.test)}</div>` : ''}`;
+        }).join('') : `<p class="help">None yet. The first one you add here is remembered for every board.</p>`}
+        ${missing.length > 1 ? `<button class="btn sm primary wide" data-c="${c.id}" data-act="call">Put ${missing.length === mine.length ? 'all ' + missing.length : 'the other ' + missing.length} on this board</button>
+          <p class="help" style="text-align:center">${today ? 'Saved now; joined after a firmware update.' : 'The one it hears is tried now; the rest join when it hears them.'}</p>` : ''}
+      </div>`;
+  const boardOnly = c.board.filter(n => out || !mine.includes(n.ssid));
+  const others = heard(ctx).filter(h => !mine.includes(h.ssid) && !onBoard(h.ssid)).sort((a, b) => b.rssi - a.rssi);
+  return frame(c, wifiRow(c, value, cls), `<div class="pop">
+    <div class="ph">${I.wifi}<h3>Wi‑Fi</h3><span class="r"><button class="switch sm${ctx.wifi ? ' on' : ''}" data-c="${c.id}" data-act="wifi" aria-label="Wi‑Fi"></button></span></div>
+    ${statusSay(c)}
+    ${acctBox}
+    ${boardOnly.length ? `<div class="sech">Only on this board</div>${boardOnly.map(n => `<div class="nrow">${bars(hears(ctx, n.ssid)?.rssi, st.ssid === n.ssid)}<span class="nm"><b>${esc(n.ssid)}</b><span>${sub(n.ssid)}</span></span>
+      ${out ? '' : `<button class="tlink q" data-c="${c.id}" data-act="cremember" data-ssid="${esc(n.ssid)}">Remember</button>`}${trash(c, n.ssid)}</div>
+      ${c.test && c.test.ssid === n.ssid ? `<div class="nsub">${checklist(c.id, c.test)}</div>` : ''}`).join('')}` : ''}
+    ${today ? `<div class="sech">Somewhere new</div>${manualBox(c)}` : `<div class="sech">Somewhere new<span class="r">${c.moreOpen ? '' : `${others.length} heard`}</span></div>
+      ${c.moreOpen ? `<div class="nlist">${others.map(h => `<button class="nrow${c.sel === h.ssid ? ' sel' : ''}" data-c="${c.id}" data-act="sel" data-ssid="${esc(h.ssid)}">${bars(h.rssi)}<span class="nm"><b>${esc(h.ssid)}</b>
+        <span>${sig(h.rssi)}${h.secure ? '' : ' · open'}</span></span>${h.secure ? `<span class="lk">${I.lock}</span>` : ''}</button>${c.sel === h.ssid ? `<div class="nsub">${joinBox(c, h.ssid)}</div>` : ''}`).join('')}</div>`
+        : `<button class="btn sm" style="justify-self:start" data-c="${c.id}" data-act="more">${I.plus} Add a network it hears</button>`}`}
+    <div class="sech"></div>${switches(c, { noWifi: true })}
+  </div>`);
+}
+
+// ---------------------------------------------------------------- D · one press on the card
+function renderD(c) {
+  const ctx = c.ctx, today = ctx.fw === 'today', st = station(c);
+  const [value, cls] = rowValue(c);
+  // the strip: the card itself offers the next step while there's one to take
+  let strip = '';
+  if (ctx.tier === 'author' && !c.open) {
+    if (c.test && !(c.test.done && !c.test.fail)) {
+      strip = `<div class="strip">${checklist(c.id, c.test, true)}</div>`;
+    } else if (c.test && c.test.done && !c.test.fail) {
+      strip = `<div class="strip"><p class="say good">${I.ok} <b>On ${esc(c.test.ssid)}</b> · ${sig(c.test.rssi)} signal · ${c.test.ip}
+        <button class="tlink q" style="float:right" data-c="${c.id}" data-act="testclose">OK</button></p></div>`;
+    } else if (today && !c.board.length) {
+      strip = `<div class="strip"><p class="say">Wi‑Fi comes with the next firmware update. Save a network now and it joins then.</p>
+        ${c.manual ? manualBox(c) : `<div class="acts"><button class="btn sm" data-c="${c.id}" data-act="manual">${I.plus} Save a network</button></div>`}</div>`;
+    } else if (!today && (st.kind === 'none' || st.kind === 'searching')) {
+      const list = heard(ctx).filter(h => !c.board.some(n => n.ssid === h.ssid));
+      list.sort((a, b) => acctHas(ctx, b.ssid) - acctHas(ctx, a.ssid) || b.rssi - a.rssi);
+      const top = list[0], known = top && acctHas(ctx, top.ssid);
+      if (top) {
+        strip = `<div class="strip">
+          <p class="say">${known ? `<b>${esc(top.ssid)}</b> is here, and your account knows it.` : st.kind === 'searching' ? `None of its networks are here. Strongest it hears:` : `Put the board on Wi‑Fi — strongest it hears:`}</p>
+          ${c.sel === top.ssid && !known ? joinBox(c, top.ssid, { compact: true })
+            : `<div class="line">${bars(top.rssi)}<span class="nm"><b>${esc(top.ssid)}</b><span>${sig(top.rssi)}${top.secure ? '' : ' · open'}</span></span>
+              <button class="btn sm primary" data-c="${c.id}" data-act="${known || !top.secure ? 'join' : 'sel'}" data-ssid="${esc(top.ssid)}">${known || !top.secure ? 'Join' : 'Join…'}</button></div>`}
+          <button class="tlink q" style="justify-self:start" data-c="${c.id}" data-act="open">Another network…</button></div>`;
+      }
+    } else if (st.kind === 'failed') {
+      strip = `<div class="strip"><p class="say warn"><b>${esc(st.ssid)}</b> stopped taking its password.</p>
+        ${c.sel === st.ssid ? joinBox(c, st.ssid, { compact: true }) : `<div class="acts"><button class="btn sm" data-c="${c.id}" data-act="sel" data-ssid="${esc(st.ssid)}">Update password</button></div>`}</div>`;
+    }
+  }
+  let pop = '';
+  if (c.open) {
+    if (ctx.tier !== 'author') pop = `<div class="pop"><div class="ph">${I.wifi}<h3>Wi‑Fi</h3></div>${needAuthor(c)}</div>`;
+    else {
+      // one merged list: in use, saved here, other networks heard; saved-not-here folded
+      const savedHere = c.board.filter(n => hears(ctx, n.ssid)).sort((a, b) => (b.ssid === st.ssid) - (a.ssid === st.ssid));
+      const away = c.board.filter(n => !hears(ctx, n.ssid));
+      const others = today ? [] : heard(ctx).filter(h => !c.board.some(n => n.ssid === h.ssid)).sort((a, b) => acctHas(ctx, b.ssid) - acctHas(ctx, a.ssid) || b.rssi - a.rssi);
+      const row = (ssid, sub, saved) => {
+        const h = hears(ctx, ssid), inUse = st.kind === 'joined' && st.ssid === ssid;
+        return `<${saved ? 'div' : 'button'} class="nrow${inUse ? ' inuse' : ''}${c.sel === ssid ? ' sel' : ''}" ${saved ? '' : `data-c="${c.id}" data-act="sel" data-ssid="${esc(ssid)}"`}>
+          ${bars(h && !today ? h.rssi : null, inUse)}<span class="nm"><b>${esc(ssid)}</b><span>${sub}</span></span>${saved ? '' : acctTag(c, ssid)}
+          ${saved ? trash(c, ssid) : h?.secure ? `<span class="lk">${I.lock}</span>` : ''}</${saved ? 'div' : 'button'}>
+          ${(c.sel === ssid && !saved) || (saved && c.test && c.test.ssid === ssid) ? `<div class="nsub">${joinBox(c, ssid)}</div>` : ''}`;
+      };
+      pop = `<div class="pop">
+        <div class="ph">${I.wifi}<h3>Wi‑Fi</h3><span class="r"><button class="switch sm${ctx.wifi ? ' on' : ''}" data-c="${c.id}" data-act="wifi" aria-label="Wi‑Fi"></button></span></div>
+        <div class="nlist">
+          ${savedHere.map(n => row(n.ssid, today ? 'saved' : st.ssid === n.ssid ? (st.kind === 'joined' ? `<span class="good">in use · ${st.ip}</span>` : st.kind === 'failed' ? '<span class="warn">password stopped working</span>' : 'joining…') : 'saved · here too', true)).join('')}
+          ${away.length ? (c.moreOpen ? away.map(n => row(n.ssid, today ? 'saved' : 'saved · not here', true)).join('')
+            : `<button class="nrow" data-c="${c.id}" data-act="more"><span class="ico">${I.plus}</span><span class="nm"><b style="color:var(--subtle)">${away.length} more saved</b><span>${away.map(n => esc(n.ssid)).join(', ')} · not here</span></span></button>`) : ''}
+          ${others.map(h => row(h.ssid, `${sig(h.rssi)}${h.secure ? '' : ' · open'}`, false)).join('')}
+        </div>
+        ${today ? `<p class="help">This firmware can’t listen for networks yet — type a name. It joins after a firmware update.</p>${manualBox(c)}`
+          : c.manual ? manualBox(c) : `<button class="tlink q" style="justify-self:start" data-c="${c.id}" data-act="manual">${I.plus} Not listed — type a name</button>`}
+        <div class="sech"></div>${switches(c, { noWifi: true })}
+      </div>`;
+    }
+  }
+  return frame(c, wifiRow(c, value, cls) + strip, pop);
+}
+
+function frame(c, wifiRowHtml, pop) {
+  return `<div class="card">${cardHead(c)}<div class="grplabel">Connections</div><div class="grp">${linkRows(c)}${wifiRowHtml}</div>${pop}</div>`;
+}
+
+// ---------------------------------------------------------------- sections
+const S1 = [
+  ['0', render0, 'Today’s form', 'today', 'One network: name, password, Set. “Join this network” is a switch per network; Forget is two clicks. <b>Holds one</b> — with three known, only the house survives.'],
+  ['A', renderA, 'One list, like your phone', 'lean', 'The popover is the board’s Wi‑Fi: <b>on this board</b> (in use first, then the rest, each saying why it isn’t in use), then <b>what it hears</b> — tap one, password, Join, and the check runs in the row.'],
+  ['D', renderD, 'One press on the card', 'lean', 'No popover for the common path: the card itself says <b>“Starlink Home is here, and your account knows it — Join”</b>, runs the check in the row, and goes quiet. The row opens one merged list for everything else.'],
+  ['B', renderB, 'Guided: pick, prove, done', '', 'A first run is three steps — <b>which network · password · check</b> — ending on a big “It works”. After that the panel is a short summary with <b>Add a place</b>, which re-runs the steps.'],
+  ['C', renderC, 'Your networks follow you', '', 'Starts from <b>your account’s networks</b>: tick which ones this board gets, or <b>put all three on</b> in one press. A new network goes to the board and the account together. Signed out, it says what signing in buys.'],
+];
+function mountLive() {
+  ACCT = [...ACCT_SEED[S.acct]];
+  for (const [id] of S1) { C[id] = makeConcept(S); C[id].id = id; C[id].open = id !== 'D'; }
+  C['0'].board = C['0'].board.slice(0, 1);
+}
+
+// section 2: frozen checklists
+const S2 = [
+  ['It works', { fw: 'm6' }, { step: 4, done: true }],
+  ['Wrong password', {}, { step: 1, done: true, fail: 'wrongpw' }],
+  ['Not heard', {}, { step: 0, done: true, fail: 'notfound', ssid: 'Starlink Home 5G' }],
+  ['Joined, no internet', { at: 'cafe' }, { step: 3, done: true, fail: 'nointernet', ssid: 'Ritual Coffee Guest' }],
+  ['Mid-check, in the card’s row (D)', {}, { step: 1, done: false, compact: true }],
+  ['Firmware that can’t try', { fw: 'today' }, { saved: true }],
+];
+function mountS2() {
+  S2.forEach(([name, ov, t], i) => {
+    const id = 'T' + i, ctx = { ...DEFAULTS, ...ov };
+    const c = C[id] = makeConcept(ctx); c.id = id;
+    const ssid = t.ssid || 'Starlink Home';
+    const steps = [`Finding ${ssid}`, 'Checking the password', 'Getting an address', 'Reaching lightplayer.app'];
+    c.test = { ssid, steps, step: t.step ?? 0, done: !!t.done, fail: t.fail || null, saved: !!t.saved, rssi: hears(ctx, ssid)?.rssi ?? -48, ip: PLACES[ctx.at].ip, compact: t.compact, frozen: true };
+  });
+}
+
+// section 3: the lean (A + D's strip) at each state
+const S3 = [
+  ['Not set up — the card offers one press', { known: 'none' }, { r: renderD }],
+  ['Not set up, no account — pick from what it hears', { known: 'none', acct: 'out' }, { open: true }],
+  ['One saved; this firmware can’t join yet', { fw: 'today', known: 'one' }, { open: true }],
+  ['Joining', { known: 'three', force: 'joining' }, { open: true }],
+  ['Joined — several saved, one in use (truck)', { known: 'three', at: 'truck' }, { open: true }],
+  ['Password changed on the router', { known: 'three', force: 'wrongpw' }, { open: true }],
+  ['None of its networks here (café)', { known: 'three', at: 'cafe' }, { open: true }],
+  ['Mid-check, adding the apartment', { known: 'one', at: 'apt', acct: 'none' }, { open: true, sel: 'Starlink Apt', test: 1 }],
+  ['Cloud relay off', { known: 'three', relay: false }, { open: true }],
+  ['Wi‑Fi off', { known: 'three', wifi: false }, { open: true }],
+  ['Over Bluetooth, at phone width', { known: 'one', link: 'ble', at: 'home' }, { open: true, phone: true }],
+  ['Connected without Author', { known: 'three', tier: 'play' }, { open: true }],
+];
+function mountS3() {
+  S3.forEach(([name, ov, o], i) => {
+    const id = 'M' + i, ctx = { ...DEFAULTS, ...ov };
+    const c = C[id] = makeConcept(ctx, { open: !!o.open, sel: o.sel || null }); c.id = id; c.render = o.r || renderA; c.phone = !!o.phone;
+    if (o.test) {
+      const ssid = o.sel;
+      c.test = { ssid, steps: [`Finding ${ssid}`, 'Checking the password', 'Getting an address', 'Reaching lightplayer.app'], step: o.test, done: false, fail: null, rssi: hears(ctx, ssid)?.rssi, ip: PLACES[ctx.at].ip, frozen: true };
+    }
+  });
+}
+
+function renderAll() {
+  const a = document.activeElement;
+  const focused = a?.dataset?.f ? [a.dataset.c, a.dataset.f, a.selectionStart, a.selectionEnd] : null;
+  const phone = S.link === 'ble';
+  document.getElementById('s1').innerHTML = S1.map(([id, fn, name, tag, note]) => `<div class="concept${phone ? ' phone' : ''} ${tag}">
+    <div class="cap"><span class="cid">${id}</span><span class="cname">${name}</span></div><p class="cnote">${note}</p>${fn(C[id])}</div>`).join('');
+  document.getElementById('s2').innerHTML = S2.map(([name], i) => `<div class="concept"><div class="cap"><span class="cname">${name}</span></div>${checklist('T' + i, C['T' + i].test, C['T' + i].test.compact)}</div>`).join('');
+  document.getElementById('s3').innerHTML = S3.map(([name], i) => { const c = C['M' + i];
+    return `<div class="concept${c.phone ? ' phone' : ''}"><div class="cap"><span class="cid">3.${i + 1}</span><span class="cname">${name}</span></div>${c.render(c)}</div>`; }).join('');
+  if (focused) {
+    const inp = document.querySelector(`input[data-c="${focused[0]}"][data-f="${focused[1]}"]`);
+    if (inp) { inp.focus(); try { inp.setSelectionRange(focused[2], focused[3]); } catch {} }
+  }
+  document.querySelectorAll('#controls .chip').forEach(b => b.setAttribute('aria-pressed', String(S[b.dataset.k] === b.dataset.v)));
+}
+
+// ---------------------------------------------------------------- events
+function pressJoin(c, ssid) {
+  const ctx = c.ctx, h = hears(ctx, ssid), known = acctHas(ctx, ssid);
+  const needsPw = !known && !(h && !h.secure) && !(c.mname === ssid && !h);
+  if (needsPw && c.pw.length < 8) { c.err = 'A Wi‑Fi password is at least 8 characters.'; renderAll(); return; }
+  c.err = null; c.pw = ''; c.show = false;
+  if (ctx.fw === 'today') { saveUntested(c.id, ssid); return; }
+  runTest(c.id, ssid);
+}
+document.addEventListener('click', ev => {
+  const chip = ev.target.closest('#controls .chip');
+  if (chip) {
+    if (chip.dataset.k === 'reset') Object.assign(S, DEFAULTS);
+    else S[chip.dataset.k] = chip.dataset.v;
+    mountLive(); renderAll(); return;
+  }
+  const t = ev.target.closest('[data-act]'); if (!t) return;
+  const c = C[t.dataset.c]; if (!c) return;
+  const act = t.dataset.act, ssid = t.dataset.ssid;
+  if (c.test?.frozen && ['testclose', 'retry', 'savelater', 'forget'].includes(act)) return;
+  if (act !== 'arm') c.armed = null;
+  switch (act) {
+    case 'open': c.open = !c.open; if (c.open && c.test?.done) c.test = null; break;
+    case 'sel': c.sel = c.sel === ssid ? null : ssid; c.err = null; c.pw = ''; if (c.test?.done) c.test = null; break;
+    case 'show': c.show = !c.show; break;
+    case 'join': pressJoin(c, ssid); return;
+    case 'joinmanual': {
+      const name = c.mname.trim(); if (!name) { c.err = 'Name the network.'; break; }
+      if (c.pw && c.pw.length < 8) { c.err = 'A Wi‑Fi password is at least 8 characters (or empty for an open network).'; break; }
+      c.err = null; c.pw = '';
+      if (c.ctx.fw === 'today') { saveUntested(c.id, name); c.mname = ''; c.manual = false; return; }
+      runTest(c.id, name); return;
+    }
+    case 'testclose': if (c.test && !c.test.frozen) { c.test = null; c.sel = null; c.manual = false; c.mname = ''; if (c.step === 'check') c.step = 'summary'; } break;
+    case 'retry': c.test = null; break;
+    case 'savelater': saveUntested(c.id, ssid); c.sel = null; return;
+    case 'arm': c.armed = ssid; setTimeout(() => { if (c.armed === ssid) { c.armed = null; renderAll(); } }, 4000); break;
+    case 'forget': c.board = c.board.filter(n => n.ssid !== ssid); if (c.test?.ssid === ssid) c.test = null; break;
+    case 'wifi': c.ctx === S ? (S.wifi = !S.wifi) : (c.ctx.wifi = !c.ctx.wifi); break;
+    case 'relay': c.ctx === S ? (S.relay = !S.relay) : (c.ctx.relay = !c.ctx.relay); break;
+    case 'remember': c.remember = !c.remember; break;
+    case 'manual': c.manual = !c.manual; c.err = null; break;
+    case 'more': c.moreOpen = !c.moreOpen; break;
+    case 'scan': c.scanning = true; setTimeout(() => { c.scanning = false; renderAll(); }, 1400); break;
+    case 'set0': {
+      const name = c.mname.trim() || c.board[0]?.ssid; if (!name) break;
+      c.board = [{ ssid: name, state: c.ctx.fw === 'today' ? 'untested' : 'ok' }]; c.mname = ''; c.pw = ''; break;
+    }
+    // B
+    case 'bstep': c.step = t.dataset.v; c.test = null; c.err = null; c.manual = false; break;
+    case 'bpick': c.sel = ssid; c.step = 'pw'; c.pw = ''; break;
+    case 'bpickname': if (c.mname.trim()) { c.sel = c.mname.trim(); c.mname = ''; c.step = 'pw'; } break;
+    case 'bmanual': c.manual = true; break;
+    case 'btry': {
+      const h = hears(c.ctx, c.sel), known = acctHas(c.ctx, c.sel);
+      if (!known && !(h && !h.secure) && c.pw.length < 8) { c.err = 'A Wi‑Fi password is at least 8 characters.'; break; }
+      c.err = null; c.pw = ''; c.step = 'check';
+      if (c.ctx.fw === 'today') { saveUntested(c.id, c.sel); return; }
+      runTest(c.id, c.sel); return;
+    }
+    // C
+    case 'ctoggle': {
+      if (c.board.some(n => n.ssid === ssid)) { c.board = c.board.filter(n => n.ssid !== ssid); break; }
+      if (c.ctx.fw === 'today' || !hears(c.ctx, ssid)) { addToBoard(c, ssid, 'untested'); break; }
+      runTest(c.id, ssid); return;
+    }
+    case 'call': {
+      const missing = acctList(c.ctx).filter(s => !c.board.some(n => n.ssid === s));
+      const here = missing.find(s => hears(c.ctx, s));
+      missing.filter(s => s !== here || c.ctx.fw === 'today').forEach(s => addToBoard(c, s, 'untested'));
+      if (here && c.ctx.fw !== 'today') { runTest(c.id, here); return; }
+      break;
+    }
+    case 'cremember': if (c.ctx.live && !ACCT.includes(ssid)) ACCT.push(ssid); break;
+  }
+  renderAll();
+});
+document.addEventListener('input', ev => {
+  const t = ev.target; const c = C[t.dataset.c]; if (!c || !t.dataset.f) return;
+  c[t.dataset.f] = t.value; c.err = null;
+});
+document.addEventListener('keydown', ev => {
+  const t = ev.target; if (ev.key !== 'Enter' || !t.dataset?.f) return;
+  const btn = t.closest('.pop, .strip, .nsub')?.querySelector('.btn.primary'); btn?.click();
+});
+
+mountLive(); mountS2(); mountS3(); renderAll();
+</script>
+</body>
+</html>
