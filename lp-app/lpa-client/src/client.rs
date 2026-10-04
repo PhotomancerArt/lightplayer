@@ -364,6 +364,60 @@ where
         }
     }
 
+    /// The board's network settings: the saved Wi-Fi network without its
+    /// password, `lanOnly`, and what the station is doing. Edit tier.
+    pub async fn network_status(
+        &mut self,
+    ) -> ClientResult<ClientOutcome<lpc_wire::server::NetworkStatus>> {
+        self.network_request(ClientRequest::NetworkStatus, "wifi.status")
+            .await
+    }
+
+    /// Change the board's network settings; `None` leaves a field as it is.
+    /// A new `ssid` needs `password` too (`""` for an open network). The
+    /// board validates and answers the status as it now stands, or a
+    /// [`ClientError::Server`] sentence that never quotes the password.
+    pub async fn network_set(
+        &mut self,
+        ssid: Option<String>,
+        password: Option<lpc_wire::WifiPassword>,
+        enabled: Option<bool>,
+        lan_only: Option<bool>,
+    ) -> ClientResult<ClientOutcome<lpc_wire::server::NetworkStatus>> {
+        self.network_request(
+            ClientRequest::NetworkSet {
+                ssid,
+                password,
+                enabled,
+                lan_only,
+            },
+            "wifi.set",
+        )
+        .await
+    }
+
+    /// Forget the board's saved Wi-Fi network (name and password);
+    /// `lanOnly` stays.
+    pub async fn network_forget(
+        &mut self,
+    ) -> ClientResult<ClientOutcome<lpc_wire::server::NetworkStatus>> {
+        self.network_request(ClientRequest::NetworkForget, "wifi.forget")
+            .await
+    }
+
+    async fn network_request(
+        &mut self,
+        request: ClientRequest,
+        label: &'static str,
+    ) -> ClientResult<ClientOutcome<lpc_wire::server::NetworkStatus>> {
+        let response = self.send_request(request).await?;
+        let events = response.events;
+        match response.value.msg {
+            WireServerMsgBody::NetworkStatus(status) => Ok(ClientOutcome::new(status, events)),
+            other => Err(ClientError::unexpected_response(label, other)),
+        }
+    }
+
     pub async fn fs_read(&mut self, path: &LpPath) -> ClientResult<ClientOutcome<Vec<u8>>> {
         let response = self
             .send_request(ClientRequest::Filesystem(FsRequest::Read {
