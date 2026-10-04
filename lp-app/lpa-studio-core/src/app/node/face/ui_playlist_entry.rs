@@ -17,13 +17,17 @@ pub struct UiPlaylistEntry {
     /// Thumbnail preview for the entry's child output, `None` before any
     /// probe lands.
     pub thumb: Option<UiProductPreview>,
-    /// Clicking a non-active chip activates the entry NOW — a
+    /// The ACTIVE entry's chip: select/Focus its mounted child (a view
+    /// gesture — activating what already plays is a no-op), `None` for
+    /// every other entry and when the active child is not mounted. A
+    /// non-active chip presses the playlist's `play` offer
+    /// (`project/<playlist>/play`, `entry` = [`Self::key`]): a
     /// `PlaylistActivateOp` runtime poke through the wire command channel
-    /// (`docs/adr/2026-07-27-runtime-node-command-channel.md`): nothing is
-    /// staged in the overlay, and the ACTIVE placard follows via ordinary
-    /// reads. Present for every non-active entry, mounted child or not.
-    /// The ACTIVE entry's chip instead carries the child select/Focus
-    /// action (activating what already plays is a no-op), `None` when its
-    /// child is not mounted.
-    pub action: Option<UiAction>,
+    /// (`docs/adr/2026-07-27-runtime-node-command-channel.md`), nothing
+    /// staged in the overlay.
+    ///
+    /// Still a core-built action on a DTO field: focus is a view gesture,
+    /// which stays web-local navigation until the roadmap's M9 decides how
+    /// view gestures are offered.
+    pub focus: Option<UiAction>,
 }

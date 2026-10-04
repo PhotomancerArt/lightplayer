@@ -173,3 +173,105 @@ fn the_ledger_triple_is_elicited_by_a_stop_all_over_the_link() {
         stack[0], mem[1], jit[1], counters.frames_tx, counters.frames_rx, counters.resends
     );
 }
+
+/// Hellos the boot check sends once the link is up.
+const BOOT_REQUESTS: u64 = 10;
+
+/// **Boot has two writers on the IN endpoint, and neither is refused**: the
+/// S3's twin of the boot half of `emu_usb_free_lag.rs`.
+///
+/// Since the S3's link task got a thread of its own (`io-thread`, plan
+/// `lp2025/2026-10-02-1918-io-thread-other-boards`, P3) the link thread
+/// sends its SYNs while the main thread is still printing the boot text raw
+/// through esp-println, so "one writer on the IN endpoint" holds only once
+/// boot is over. The IN-endpoint gate (`fw_esp32_common::serial::in_endpoint`)
+/// is what keeps a link packet off a buffer esp-println has filled, and the
+/// model refuses — onto its `tried` stream — any byte written while the
+/// buffer is not free. So, with the host attached from power-on: nothing is
+/// refused over the boot and a short conversation, the boot text arrives
+/// whole beside the link, the link never resets, no frame arrives damaged,
+/// and every request is answered. The claims the C6's test makes of its
+/// shipped image, no more.
+#[test]
+#[ignore = "needs LP_EMU_ESP32S3_ELF and LP_EMU_ESP32S3_MERGED; run through `just test-emu-esp32s3-boot`"]
+fn the_boot_text_and_the_link_thread_share_the_in_endpoint_cleanly() {
+    let (elf, merged) = match (
+        test_support::fw_esp32s3_image(),
+        test_support::merged_chip_image(),
+    ) {
+        (Ok(elf), Ok(merged)) => (elf, merged),
+        (Err(reason), _) | (_, Err(reason)) => {
+            test_support::skip_notice(
+                "the_boot_text_and_the_link_thread_share_the_in_endpoint_cleanly",
+                &reason,
+            );
+            return;
+        }
+    };
+    let builder = Esp32S3Builder::new()
+        .app(AppSource::Path(elf))
+        .flash(FlashBacking::Copy(merged))
+        .strict(true);
+    let board = S3Board::build(builder, UsbHost::Attached { draining: true })
+        .expect("the shipped image direct-loads");
+    let mut host = EmuLinkHost::new(board, 0x5E55_0302, true);
+
+    let hello = host.wait_for_line("\"hello\":{", GATE_US).expect("the run");
+    assert!(
+        hello.is_some(),
+        "no hello on the link:\n{}",
+        host.console().join("\n")
+    );
+    for n in 0..BOOT_REQUESTS {
+        let id = 100 + n;
+        host.send(&ClientMessage {
+            id,
+            msg: ClientRequest::Hello,
+        })
+        .expect("the link takes the request");
+        let answer = host
+            .wait_for_line(&format!("M!{{\"id\":{id},"), GATE_US)
+            .expect("the run");
+        assert!(
+            answer.is_some(),
+            "request {id} was never answered:\n{}",
+            host.console().join("\n")
+        );
+    }
+
+    let text = host.console().join("\n");
+    assert!(
+        host.board.machine.first_strict_violation().is_none(),
+        "no strict stop"
+    );
+    // The boot text, whole, beside the link: the line the main thread prints
+    // as it starts the thread, and the boot's last raw line, printed while
+    // the thread is already running.
+    for line in [
+        "[INIT] io thread: stack 4096 B, priority 1, core 0",
+        "[INIT] fw-esp32 initialized, starting server loop",
+    ] {
+        assert!(
+            host.console().iter().any(|l| l.starts_with(line)),
+            "boot line {line:?} missing or torn:\n{text}"
+        );
+    }
+    let tried = host.board.machine.usb_sj_tried();
+    assert!(
+        tried.is_empty(),
+        "{} B refused by the IN endpoint (a write onto a busy buffer): {:?}",
+        tried.len(),
+        String::from_utf8_lossy(&tried)
+    );
+    let counters = host.counters();
+    assert_eq!(counters.damaged, 0, "{counters:?}");
+    assert_eq!(counters.resets.total, 0, "the link reset: {counters:?}");
+    assert_eq!(counters.payload_errors, 0, "{counters:?}");
+    assert_eq!(host.link_errors, 0, "{text}");
+    println!(
+        "BOOT, TWO WRITERS (lp-emu:esp32s3:t1): 0 B refused, {BOOT_REQUESTS} of \
+         {BOOT_REQUESTS} answered; host link {} frames out / {} in, {} resent, 0 damaged, \
+         0 resets",
+        counters.frames_tx, counters.frames_rx, counters.resends
+    );
+}

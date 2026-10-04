@@ -1,6 +1,6 @@
 # ADR: The C6's link IO runs on its own thread, and requests are answered before the render
 
-- **Status:** Accepted
+- **Status:** Accepted (amended 2026-10-03 — the S3; see the end)
 - **Date:** 2026-10-02
 - **Deciders:** Photomancer (Yona; feel gate passed 2026-10-02)
 - **Plan:** `lp2025/2026-10-01-1756-c6-link-io-thread` (PR #891), milestone M1
@@ -192,17 +192,18 @@ separately.
   refuses 0 B in boot; `lp-cli/tests/emu_usb_free_lag.rs` pins it).
 - **Heap:** the thread costs its stack plus ~0.2 KB (emulated steady free
   −3,384 B, largest block −3,389 B); figures re-blessed.
-- **The S3, the classic, the host and browser servers keep their threading
-  and their order**: they inject no lock and leave messages-first off. One
-  shared change does reach the **S3**: the event-driven idle wake lives in
-  `fw-esp32-common`'s USB link loop, which the S3 runs too, so its link task
-  also sleeps until a timer, input or the doorbell (250 ms backstop) instead
-  of waking every 10 ms. On one executor that only removes idle passes from
-  the render's gaps; the watchdog's I/O-alive flag is still ticked every
-  pass (at least every 250 ms, far inside its silence limit). The classic's
-  UART link task is its own loop and is unchanged. Porting the thread to
-  other boards (the S3's second core, the classic's existing
-  `InterruptExecutor` io_task, the S31) is roadmap M2.
+- **At the time this ADR was accepted, the S3, the classic, the host and
+  browser servers kept their threading and their order**: they injected no
+  lock and left messages-first off. One shared change reached the **S3**
+  immediately: the event-driven idle wake lives in `fw-esp32-common`'s USB
+  link loop, which the S3 runs too, so its link task also slept until a
+  timer, input or the doorbell (250 ms backstop) instead of waking every
+  10 ms. On one executor that only removed idle passes from the render's
+  gaps; the watchdog's I/O-alive flag was still ticked every pass (at least
+  every 250 ms, far inside its silence limit). **The S3 now has its own
+  thread too — see the amendment below.** The classic's UART link task
+  remains its own loop; porting it to the classic's `InterruptExecutor`
+  io_task, and the S31, is the rest of roadmap M2.
 - **`io-thread` depends on `radio`** (esp-rtos's `esp-radio` feature). A C6
   build without radio falls back to the shared executor, render first.
 
@@ -236,3 +237,136 @@ separately.
 - Other boards on a link thread: roadmap M2.
 - BLE's host or a Wi-Fi stack on the thread: roadmap M6.
 - The emulator's cold-path cost: the open fidelity defect named above.
+
+## Amended 2026-10-03 — the S3 (M2)
+
+The ESP32-S3 gets the same treatment, on roadmap M2
+(`lp2025/2026-10-02-1918-io-thread-other-boards`, PR #942, phases P3/P5).
+
+**The shared USB link task runs on its own esp-rtos thread, priority 1,
+pinned to core 0** (`pin_to_core: Some(0)`, never `None`) — 4 KB stack,
+`lp-fw/fw-esp32s3/src/io_thread.rs` a per-chip copy of the C6's (OQ7: the
+thread API is not shared through `fw-esp32-common`, which names no esp-hal
+thread type). **Why pinned, and not left unpinned on a dual-core chip:**
+esp-rtos 0.3's SMP scheduler cross-wakes between cores, so an unpinned task
+can land on core 1 and raise that core's own SWI1 — on the classic that is
+the wire-pusher's doorbell; on the S3 core 1 is not started today (below),
+so pinning is cheap insurance against ever landing there. The link is
+shared behind `UsbLinkShared::leak_locked`, the same priority-1
+`RawPriorityLimitedMutex` the C6 injects — `esp-sync`'s lock is already
+cross-core on a `multi_core` build (keyed by core id, compare-and-swap), so
+this is the identical lock, not a port of it. `set_messages_first(true)`
+ships with the thread, never alone, per the C6's own finding above.
+
+**`io-thread` needs `esp-rtos/esp-radio` *and* `esp-rtos/esp-alloc`, and
+links esp-rtos's small esp-radio glue — not a radio stack.** Neither the S3
+nor the classic enables an actual radio; `esp_radio_rtos_driver::task_create`
+(the public thread-creation call, per the C6 ADR's own 2026-10-02 amendment
+above) exists only behind esp-rtos's `esp-radio` feature, and that feature
+turns on `alloc` without `esp-alloc`, so the firmware must supply it itself
+or esp-rtos's `malloc_internal` glue fails to link (discovered while
+planning M2; see the plan's Discovery section).
+
+**Numbers, emulated** (`lp-emu:esp32s3:t1`, lp-emu `ab8345d38`, main image
+`ab8345d38` vs branch image `a09383698`, the scaled rig P3 used because this
+emulator runs ~50x slower than board time): idle fps −0.10 %; request RTT
+p50 6.50 ms (1.56 frame) → 3.00 ms (**0.72 frame**, target ≤ ~0.8 ✓); p90
+7.75 ms (1.86 frame) → 4.75 ms (**1.14 frame**, target ≤ ~1 — **missed**: a
+request landing just after a frame starts waits for the rest of it plus the
+answering tick, so the tail sits a little over one frame; p50 meets its
+target and moved ~0.84 frame; not tuned, carried to the desk walk as a
+question rather than chased); link RTT p50 5.25 → 1.75 ms; transfers
+100.3/118.0 → 376.1/438.6 KiB/s; fps during transfers −9 % (the thread now
+moves 3.7× the bytes per second while a frame renders). F32 under the same
+load (`projects/test/shader-oracle-f32`, new in this plan — no Float-mode
+project existed under `projects/` before it): 1 distinct frame after the
+first across quiet warm-up, transfers and requests — identical with the
+link quiet and under load; the host oracle cannot render Float, so this is
+the self-consistency check the plan's Discovery section called for, not a
+host comparison. Link-thread stack high-water (diag build): 1,680 B of
+4,176 B (40 %). Image +6,032 B of 6 MB; heap +4,480 B (the 4 KB stack,
+16-aligned, plus the task record and executor); largest free block
+−4,480 B. Full tables: PR #942's body.
+
+**Silicon** (`desk-s3.md`, 2026-10-03, desk ESP32-S3 `D8:3B:DA:47:29:70`,
+main `9f70f39da` vs branch `20e9b64e5`; full tables in PR #942's body): idle
+fps −0.6 % (within the 2 % bar); request RTT p50 1.70 → **0.80 frame**
+(target met); p90 2.10 → **1.21 frame** — over the ~1 frame target, at the
+same structural floor the emulated number predicted: the fastest possible
+request has a fixed ~0.24 frame service cost (link RTT plus the board's
+answer), so p90 ≈ 0.9 frame of wait + that floor and cannot clear one frame
+by tuning the thread. Link RTT p50 ~14.6 → 1.15–1.27 ms; transfers
+13–14 → 232–242 KiB/s both ways (≥ 100 KiB/s target cleared by 2×). Link
+thread stack high-water (`io_thread_stack_diag`): **1,632 B of 4,176 B
+(39 %)**, close to the emulated 1,680 B. Heap: **+4,588 B** used on first
+upload (emulated ratchet predicted +4,480 B — within 0.5 KB). F32 checksums
+identical across 47 `[OUT]` lines under load; `m4-hardware-walk.sh`
+byte-identical against both host oracles.
+
+At Studio's own request rate (~7/s, a matched-rate follow-up run on the
+same board and images): the branch costs **≈1.6×** the render time per
+request that main does (≈0.36 vs ≈0.22 frame — **≈5 % vs ≈3 % fps**), for
+roughly half the request latency (p50 15 vs 30 ms, p90 22 vs 38 ms). The
+emulator disagreed with silicon on the frame-rate cost of link load (it
+showed +0.2 %; silicon loses 7–20 %, rate-dependent) — filed as a fidelity
+defect:
+`docs/defects/2026-10-03-the-emulated-s3-shows-no-frame-rate-cost-for-link-load.md`.
+
+**Yona accepted both the p90 structural floor and the per-request render
+cost as measured (2026-10-03).** The G-S3 desk walk passed: Studio against
+the branch image, Yona's own words — "working so much better than before.
+Very snappy, and I even left it on for an hour and everything went well."
+
+### Follow-up: the S3's second core
+
+Not in M2. Seed for the roadmap's future-work list:
+
+> **Move the S3's link thread to core 1.** `esp_rtos::start_second_core`
+> (swi1, a stack taken from the heap — `Stack` is `.bss` by the esp-rtos
+> API) already exists; the lock is already cross-core (above), so the move
+> changes the pin, not the lock.
+>
+> **Trigger:** radio on the S3 (esp-radio's S3 Wi-Fi adapter binds its MAC
+> interrupt to CPU0 at Priority1 — the C6's radio-interrupt problem, back
+> exactly, if the link thread stays on core 0 once Wi-Fi is on it), or a
+> measured render cost from the core-0 thread.
+>
+> **Prerequisites:** (1) a cooperative flash-write handshake with core 1 —
+> esp-storage's `multicore_auto_park` stalls core 1 at an arbitrary
+> instruction and then enters a critical section; a core-1 link task
+> allocates and logs, so if it held the critical-section spinlock (the heap
+> allocator, the log ring, every `Signal`) core 0 deadlocks on the write.
+> Core 1 must instead spin in IRAM, masked, until the write completes (the
+> ESP-IDF shape) — this does not exist today. (2) An S3 core-1 desk canary:
+> nobody has measured where an S3 core 1 begins. (3) Core-1 release in
+> `lp-emu-esp32s3` — slot 1 is held, deliberately, not started; a core-1
+> move cannot be emulated until it is. (4) `CPENABLE` armed on core 1 if F32
+> ever runs there (esp-hal's `float-save-restore` puts FP regs in the trap
+> frame esp-rtos switches, so core 0 should survive preemption today, but
+> core 1 starts with no guarantee `CPENABLE` carries over).
+
+### The ESP32-S31
+
+Nothing now (OQ8): no esp-hal support in the pinned esp-hal 1.1.1, and no
+desk board. When it arrives: RISC-V like the C6, so `io_thread.rs` ports
+nearly verbatim with `pin_to_core`; the lock is cross-core already, so it
+needs no change; RAM is large enough to put a comms thread with Noise/TLS
+stacks on the second core, which raises the same flash-handshake question
+as the S3's core 1.
+
+### The lock across boards (input to M6)
+
+| Board | Lock | Holds off (holder's core) | Never | Radio |
+|---|---|---|---|---|
+| C6 | `RawPriorityLimitedMutex(P1)` | sched SWI+tick, BT MAC, BT LP-timer, Wi-Fi MAC | RMT | M6 must solve |
+| S3 core 0 | same | sched, USB-SJ | RMT | none now; Wi-Fi MAC (P1, CPU0) if ever |
+| S3 core 1 (follow-up) | same (cross-core) | as above; other core spins | RMT | as above |
+| Classic core 0 | same | sched, io pacer, UART0 | io_task, RMT, wire-pusher doorbell | none |
+
+Two radio-safe shapes for M6 to choose between, both behind the existing
+`LinkLock` hook: (1) an esp-rtos mutex with priority inheritance
+(`esp_radio_rtos_driver::semaphore`, `SemaphoreKind::Mutex`) — masks
+nothing, cross-core, costs a scheduler critical section per take/give;
+valid because no `with_link` caller is an ISR. (2) Mask only the
+scheduler's own interrupt lines rather than the whole P1 level — cheaper,
+chip-specific. M2 did not need to wait on this choice.

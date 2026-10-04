@@ -1112,8 +1112,10 @@ pub(crate) fn fixture_node_view_with_face(face: UiFixtureFace) -> UiNodeView {
 }
 
 /// Playlist entries: three timed entries plus one cue entry; Aurora (key 1)
-/// is playing. Every entry carries the child-select action the P4
-/// derivation attaches (clicking a chip focuses the entry's child node).
+/// is playing. The ACTIVE entry carries the child-select action the P4
+/// derivation attaches (clicking its chip focuses its child node); every
+/// other chip presses the playlist's `play` offer
+/// ([`playlist_strip_offers`]).
 pub(crate) fn playlist_entries() -> Vec<UiPlaylistEntry> {
     vec![
         UiPlaylistEntry {
@@ -1122,7 +1124,7 @@ pub(crate) fn playlist_entries() -> Vec<UiPlaylistEntry> {
             duration_ms: Some(180_000),
             cue: false,
             thumb: Some(aurora_preview(18, 10, 3.1)),
-            action: Some(entry_select_action("Sunrise")),
+            focus: None,
         },
         UiPlaylistEntry {
             key: 1,
@@ -1130,7 +1132,7 @@ pub(crate) fn playlist_entries() -> Vec<UiPlaylistEntry> {
             duration_ms: Some(270_000),
             cue: false,
             thumb: Some(aurora_preview(18, 10, 4.8)),
-            action: Some(entry_select_action("Aurora")),
+            focus: Some(entry_select_action("Aurora")),
         },
         UiPlaylistEntry {
             key: 2,
@@ -1138,7 +1140,7 @@ pub(crate) fn playlist_entries() -> Vec<UiPlaylistEntry> {
             duration_ms: Some(165_000),
             cue: false,
             thumb: Some(aurora_preview(18, 10, 6.5)),
-            action: Some(entry_select_action("Embers")),
+            focus: None,
         },
         UiPlaylistEntry {
             key: 3,
@@ -1146,7 +1148,7 @@ pub(crate) fn playlist_entries() -> Vec<UiPlaylistEntry> {
             duration_ms: None,
             cue: true,
             thumb: Some(aurora_preview(18, 10, 8.2)),
-            action: Some(entry_select_action("Tide")),
+            focus: None,
         },
     ]
 }
@@ -1157,6 +1159,44 @@ fn entry_select_action(name: &str) -> UiAction {
     UiAction::from_op(ControllerId::new("story.module"), ProjectEditorOp::Focus)
         .with_label(format!("Select {name}"))
 }
+
+/// The story playlist's verbs (`play`, `next`, …), as core publishes them
+/// for [`playlist_face`]: what the strip's non-active chips press. No
+/// channel targets, so no cycle or skip.
+pub(crate) fn playlist_strip_offers() -> lpa_studio_core::UiOfferTree {
+    use lpa_studio_core::app::project::node::pattern_picker_derivation::{
+        PatternPickerEntryFacts, PatternPickerFacts,
+    };
+    let face = playlist_face();
+    let facts = PatternPickerFacts {
+        playlist: ProjectNodeAddress::parse(PLAYLIST_NODE_PATH)
+            .expect("valid story playlist address"),
+        entries: face
+            .entries
+            .iter()
+            .map(|entry| PatternPickerEntryFacts {
+                key: entry.key,
+                name: entry.name.clone(),
+            })
+            .collect(),
+        active: face.active,
+        cycle: lpc_model::PlaylistCycle::Hold,
+        authored_cycle: None,
+        default_fade: None,
+        skip: Vec::new(),
+        failed: Vec::new(),
+        cycle_target: None,
+        skip_target: None,
+    };
+    let mut tree = lpa_studio_core::UiOfferTree::new();
+    for offer in lpa_studio_core::app::project::node::playlist_offers(&facts) {
+        tree.publish(offer);
+    }
+    tree
+}
+
+/// The story playlist card's node address.
+pub(crate) const PLAYLIST_NODE_PATH: &str = "/fyeah_sign.show/evening.playlist";
 
 /// The playlist face with Aurora active.
 pub(crate) fn playlist_face() -> UiPlaylistFace {
@@ -1203,14 +1243,10 @@ pub(crate) fn playlist_sections() -> Vec<UiNodeSection> {
 /// derivation invariant (one rendering of the active child, zero of the
 /// others); it renders below the card as a sibling.
 pub(crate) fn playlist_node_face_view() -> UiNodeView {
-    let header = UiNodeHeader::new(
-        "Evening set",
-        "Playlist",
-        "/fyeah_sign.show/evening.playlist",
-    )
-    .with_source("evening.json")
-    .with_status(UiStatus::good("Running"))
-    .with_summary("playing 2/4");
+    let header = UiNodeHeader::new("Evening set", "Playlist", PLAYLIST_NODE_PATH)
+        .with_source("evening.json")
+        .with_status(UiStatus::good("Running"))
+        .with_summary("playing 2/4");
     let mut view = UiNodeView::new(header, vec![UiNodeTab::main(playlist_sections())])
         .with_node_id("playlist-evening")
         .with_children(vec![playlist_active_child()]);

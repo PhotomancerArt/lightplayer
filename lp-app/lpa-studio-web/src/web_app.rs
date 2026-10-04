@@ -1405,6 +1405,7 @@ pub fn App() -> Element {
                     &roster_state,
                     roster,
                     bridge.tx.clone(),
+                    current_view.offers.clone(),
                     on_action,
                     toasts,
                 ),
@@ -1706,6 +1707,7 @@ fn project_popover_inputs(
     roster_state: &RosterState,
     roster: ProjectRoster,
     tx: CommandSender,
+    offers: lpa_studio_core::UiOfferTree,
     on_action: EventHandler<UiAction>,
     toasts: crate::base::Toasts,
 ) -> ProjectPopoverInputs {
@@ -1766,7 +1768,9 @@ fn project_popover_inputs(
     );
     let (on_fork, fork_blocked) = if transient {
         (
-            Some(EventHandler::new(move |()| fork_transient_session(&tx))),
+            Some(EventHandler::new(move |()| {
+                fork_transient_session(&tx, &offers);
+            })),
             String::new(),
         )
     } else if let Some(uid) = library_uid {
