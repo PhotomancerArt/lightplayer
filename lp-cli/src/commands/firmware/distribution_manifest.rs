@@ -140,6 +140,19 @@ impl FlashPolicy {
                 .to_string(),
         }
     }
+
+    /// [`Self::merged_image`] for a split build: the same flash unit and
+    /// semantics, assembled by `tools/lp-fw-split` rather than espflash.
+    pub fn split_merged_image(flash_size_bytes: u64) -> Self {
+        Self {
+            notes: "Merged split image (loader, boot records, core, engine) \
+                    assembled by lp-fw-split, ending at app.bin's end. Treat as \
+                    destructive: it rewrites the bootloader, partition table \
+                    and app."
+                .to_string(),
+            ..Self::merged_image(flash_size_bytes)
+        }
+    }
 }
 
 #[cfg(test)]

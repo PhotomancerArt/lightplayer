@@ -110,7 +110,10 @@ fn package_build(repo_root: &Path, def: &BuildDef, out_dir: &Path) -> Result<Pat
         display_name: def.display_name.clone(),
         generated_at: chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string(),
         core: core_json,
-        flash: FlashPolicy::merged_image(def.flash_size_bytes()),
+        flash: match &split {
+            Some(_) => FlashPolicy::split_merged_image(def.flash_size_bytes()),
+            None => FlashPolicy::merged_image(def.flash_size_bytes()),
+        },
         images: vec![ManifestImage {
             path: image_name,
             address: "0x0".to_string(),
