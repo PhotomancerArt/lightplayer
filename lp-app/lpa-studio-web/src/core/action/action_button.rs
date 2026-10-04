@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use lpa_studio_core::{ActionEnablement, ActionPriority, UiAction};
+use lpa_studio_core::{ActionConsequence, ActionEnablement, ActionPriority, UiAction};
 
 use super::armed_confirm_button::use_armed_confirm;
 use crate::base::{StudioIcon, action_icon_name};
@@ -37,6 +37,17 @@ pub fn ActionButton(
     /// verbs disabled for one cause), so this button does not repeat it.
     #[props(default)]
     reason_said_elsewhere: bool,
+    /// The surface this button sits in IS the question its press answers:
+    /// a sheet whose title and body ask, in core's words, what a Lasting
+    /// press would otherwise ask on its own button (the layout sheet's
+    /// Continue — G1 walk, 2026-10-03, Yona: "they already committed to it
+    /// once"). The press acts at once instead of arming. Nothing else
+    /// moves: the button keeps its level's tint, and the level itself is
+    /// untouched, so the app agent still hands the offer to the user
+    /// (`ActionMeta::needs_user`) and every other place that draws it — the
+    /// palette, a chat card — still arms it.
+    #[props(default)]
+    asked_by_surface: bool,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let action_to_run = action.clone();
@@ -49,7 +60,7 @@ pub fn ActionButton(
         .filter(|_| !reason_said_elsewhere)
         .map(ToString::to_string);
     let icon = action_icon_name(meta.icon.as_deref());
-    let arms = meta.consequence.arms();
+    let arms = arms_on_press(&meta.consequence, asked_by_surface);
     let copy = meta.consequence.copy().cloned();
     let label = meta.label;
     let summary = meta.summary;
@@ -127,6 +138,14 @@ pub fn ActionButton(
             }
         }
     }
+}
+
+/// Whether a press arms rather than acts: a Lasting action arms on its own
+/// button, unless the surface around it has already asked (see
+/// `ActionButton`'s `asked_by_surface`). Kept as a plain function so the
+/// rule is testable without mounting.
+fn arms_on_press(consequence: &ActionConsequence, asked_by_surface: bool) -> bool {
+    consequence.arms() && !asked_by_surface
 }
 
 /// The two labels an arming chip renders AT THE SAME TIME: the
@@ -321,6 +340,24 @@ mod tests {
         ActionPriority::Secondary,
         ActionPriority::Tertiary,
     ];
+
+    /// A Lasting press arms on its own button — and acts at once inside the
+    /// surface that already asked (the layout sheet's Continue, G1 walk
+    /// 2026-10-03). Nothing that does not arm starts arming.
+    #[test]
+    fn a_lasting_press_arms_unless_its_surface_already_asked() {
+        let lasting = ActionConsequence::Lasting(lpa_studio_core::ActionConfirmation::new(
+            "Rewrite this board now?",
+            "It goes.",
+            "continue",
+        ));
+        assert!(arms_on_press(&lasting, false));
+        assert!(!arms_on_press(&lasting, true));
+        for level in [ActionConsequence::Routine, ActionConsequence::Undoable] {
+            assert!(!arms_on_press(&level, false));
+            assert!(!arms_on_press(&level, true));
+        }
+    }
 
     #[test]
     fn every_solid_tier_keeps_the_same_geometry() {

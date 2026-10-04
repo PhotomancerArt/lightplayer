@@ -1,5 +1,5 @@
 {
-  "lpManifestCore": 1,
+  "lpManifestCore": 2,
   "package": "fw-emu",
   "target": {
     "family": "emu",
@@ -19,5 +19,5 @@
     "gfx.lpvm"
   ],
   "limits": {},
-  "wireProto": 33
+  "wireProto": 35
 }

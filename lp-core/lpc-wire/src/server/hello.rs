@@ -15,11 +15,13 @@
 //! abilities, never a wire dialect, and is never negotiated. See
 //! `docs/adr/2026-08-01-capability-reporting-on-hello.md`.
 
+use alloc::borrow::Cow;
 use alloc::string::String;
 use alloc::vec::Vec;
 use lpc_model::LpFeature;
 use serde::{Deserialize, Serialize};
 
+use crate::server::fs_boot_state::FsBootState;
 use crate::server::hello_auth::HelloAuth;
 
 /// Wire protocol version spoken by this build of the workspace.
@@ -35,6 +37,28 @@ use crate::server::hello_auth::HelloAuth;
 ///
 /// # History
 ///
+/// - 35: the hello says which VERSION the build is — `BuildFacts` gains the
+///   required `version` (`2026.10.03-1` for a tagged release, the dev form
+///   `<short-sha>[-dirty-<HHMMSS>PT]` otherwise, `unknown` from an embedder
+///   with no VCS facts), placed after `package`. It is what
+///   `scripts/print-app-version.sh` prints, stamped at build time
+///   (`tools/lp-app-version`), and it is what Studio's "older than Studio"
+///   compares (plan `lp2025/2026-10-03-1330-ota-firmware-updates`, M1). A
+///   required field: an old client cannot decode a new hello, and an old
+///   board's hello lacks it — a board at 34 reads as older LightPlayer
+///   firmware through its `proto` and board id, as 32 and 33 do.
+///   `PACK_FORMAT_VERSION` is unchanged.
+/// - 34: the hello's hardware facts gain a required `fs` field
+///   ([`FsBootState`]: `mounted` / `formatted` / `memory` / `legacy_held`),
+///   how the filesystem came up at boot (plan
+///   `lp2025/2026-10-01-1843-c6-repartition`, MQ3). A C6 that finds its
+///   `lpfs` unmountable but a pre-repartition filesystem at the old offset
+///   refuses to format and says `legacy_held`; Studio reads `mounted` after
+///   a layout migration as the proof the files arrived. An old peer cannot
+///   decode a hello missing the field, nor the reverse — a board at 32 or
+///   33 reads as older LightPlayer firmware, through its `proto` and board
+///   id alone (`hello_proto`, `hello_board_id`). `PACK_FORMAT_VERSION` is
+///   unchanged.
 /// - 33: the device store's `open` is who nearby gets in with no password,
 ///   `"nobody" | "play" | "edit"` (`lpc_access::OpenTo`), in `AccessList`
 ///   and `AccessSetSwitches` — it was a bool that granted play only. A board
@@ -324,7 +348,7 @@ use crate::server::hello_auth::HelloAuth;
 /// as `None` on new Studio and a new firmware's extra fields are ignored
 /// by old Studio. Bumping for those would mark every board running
 /// current firmware Incompatible in exchange for nothing.
-pub const WIRE_PROTO_VERSION: u32 = 33;
+pub const WIRE_PROTO_VERSION: u32 = 35;
 
 /// Unsolicited/boot-time server identity, version, and capability report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -379,6 +403,15 @@ pub struct BuildFacts {
     pub features: Vec<LpFeature>,
     /// Crate/package that embeds the server (`fw-esp32c6`, `fw-host`, …).
     pub package: String,
+    /// The build's app version: `2026.10.03-1` for a tagged release, the
+    /// dev form `<short-sha>[-dirty-<HHMMSS>PT]` otherwise, or `"unknown"`
+    /// from an embedder with no VCS facts.
+    ///
+    /// A `Cow` so a firmware holds it as a borrow of its own static slot
+    /// (`lpc_model::manifest::VERSION_SLOT_BYTES`) rather than a heap copy
+    /// whose size would follow the version's length into the heap figures.
+    /// A decoded hello always owns it.
+    pub version: Cow<'static, str>,
     /// Short git commit the binary was built from, or `"unknown"`.
     pub commit: String,
     /// Whether the working tree was dirty at build time.
@@ -452,6 +485,12 @@ pub struct HardwareFacts {
     /// folded into [`Self::base_mac`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub eui64: Option<String>,
+    /// How the filesystem the server serves came up at boot — mounted,
+    /// formatted fresh, RAM-only, or a pre-repartition filesystem held for
+    /// migration (see [`FsBootState`]). Required on the wire (no default):
+    /// wire 34 added it. The embedder sets it (`LpServer::set_fs_boot_state`);
+    /// a server that never does reports [`FsBootState::Memory`].
+    pub fs: FsBootState,
 }
 
 /// Chip-level identity the server CANNOT derive: it lives in efuse (or, on
@@ -487,6 +526,9 @@ pub struct HelloIdentity {
     pub proto: u32,
     /// Crate/package that embeds the server.
     pub package: String,
+    /// The build's app version (see [`BuildFacts::version`]). A firmware
+    /// passes the `&'static str` its manifest core holds.
+    pub version: Cow<'static, str>,
     /// Short git commit the binary was built from, or `"unknown"`.
     pub commit: String,
     /// Whether the working tree was dirty at build time.
@@ -502,6 +544,7 @@ impl HelloIdentity {
     /// with no stamped uid.
     pub fn new(
         package: impl Into<String>,
+        version: impl Into<Cow<'static, str>>,
         commit: impl Into<String>,
         dirty: bool,
         profile: impl Into<String>,
@@ -509,6 +552,7 @@ impl HelloIdentity {
         Self {
             proto: WIRE_PROTO_VERSION,
             package: package.into(),
+            version: version.into(),
             commit: commit.into(),
             dirty,
             profile: profile.into(),
@@ -545,6 +589,7 @@ mod tests {
             build: BuildFacts {
                 features: vec![LpFeature::NodeShader, LpFeature::GfxLpvm],
                 package: "fw-esp32c6".to_string(),
+                version: "2026.10.03-1".into(),
                 commit: "abc123456789".to_string(),
                 dirty: true,
                 profile: "release-esp32".to_string(),
@@ -566,6 +611,10 @@ mod tests {
         assert!(json.contains("\"node.shader\""), "{json}");
         assert!(json.contains("\"gfx.lpvm\""), "{json}");
         assert!(json.contains("\"boardId\""), "{json}");
+        assert!(
+            json.contains("\"package\":\"fw-esp32c6\",\"version\":\"2026.10.03-1\","),
+            "the version rides right after the package: {json}"
+        );
         let back: ServerHello = crate::json::from_str(&json).unwrap();
         assert_eq!(back, hello);
     }
@@ -580,6 +629,7 @@ mod tests {
             build: BuildFacts {
                 features: vec![],
                 package: "fw-emu".to_string(),
+                version: "unknown".into(),
                 commit: "unknown".to_string(),
                 dirty: false,
                 profile: "release-emu".to_string(),
@@ -612,6 +662,7 @@ mod tests {
             build: BuildFacts {
                 features: vec![LpFeature::NodeClock],
                 package: "fw-host".to_string(),
+                version: "unknown".into(),
                 commit: "unknown".to_string(),
                 dirty: false,
                 profile: "debug".to_string(),
@@ -656,7 +707,7 @@ mod tests {
     #[test]
     fn the_proto_version_is_pinned_to_its_history() {
         assert_eq!(
-            WIRE_PROTO_VERSION, 33,
+            WIRE_PROTO_VERSION, 35,
             "if you meant to bump, add the History entry in this file's \
              doc comment and update this pin"
         );
@@ -666,7 +717,7 @@ mod tests {
     /// builders are the only way to move either.
     #[test]
     fn hello_identity_defaults_to_this_builds_proto() {
-        let identity = HelloIdentity::new("fw-host", "unknown", false, "debug");
+        let identity = HelloIdentity::new("fw-host", "unknown", "unknown", false, "debug");
         assert_eq!(identity.proto, WIRE_PROTO_VERSION);
         assert_eq!(identity.device_uid, None);
 

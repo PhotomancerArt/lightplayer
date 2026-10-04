@@ -34,6 +34,15 @@ pub enum CliConnection {
 }
 
 impl CliConnection {
+    /// The hello a device answered readiness with (`None` for a non-device
+    /// host).
+    pub fn hello(&self) -> Option<lpc_wire::ServerHello> {
+        match self {
+            Self::Device(session) => session.hello(),
+            Self::Transport(_) => None,
+        }
+    }
+
     /// The app-protocol channel for [`lpa_client::LpClient`].
     pub fn client_io(&self) -> Box<dyn ClientIo> {
         match self {

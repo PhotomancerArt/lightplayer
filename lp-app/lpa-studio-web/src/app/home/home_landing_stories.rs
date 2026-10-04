@@ -12,10 +12,12 @@
 //! same as the `logo_mark_stories` lockups.
 
 use dioxus::prelude::*;
+use lpa_studio_core::{ControllerId, HOME_NODE_ID, HomeOp, UiAction};
 use lpa_studio_web_story_macros::story;
 
 use crate::app::home::HomePage;
 use crate::app::home::brand_hero::BrandHero;
+use crate::app::home::project_opening_frame::OpenFailureNotice;
 
 #[story(
     description = "The landing page: brand hero (the mark's triangle as a window onto a live shader — here the fallback identity gradient with its Spill bloom, since stories run no engine), wordmark, tagline, the \"Edit the logo\" pill (inert here — a story has no dispatcher), the three dive-in cards, and the example row with its Explore-all link (cards render their poster/seeded thumbs — stories lease no previews). The shared-`/p/` line renders nothing without context."
@@ -24,6 +26,26 @@ fn landing() -> Element {
     rsx! {
         section { class: "tw:p-4",
             HomePage {}
+        }
+    }
+}
+
+#[story(
+    description = "A `/p/…` View link that reached Home and failed to open (a sim that would not boot, say): the same `OpenFailureNotice` Explore shows for its own failed opens, with Retry and a way back. Before this it just vanished — Home has no `state` seam like the opening frame's, since this reads the core's own open-stage signal directly, so the story poses the notice with the layout around it instead."
+)]
+fn landing_failed_view_link() -> Element {
+    rsx! {
+        section { class: "tw:flex tw:min-h-[60vh] tw:flex-col tw:items-center tw:justify-center tw:gap-8 tw:p-4 tw:text-center",
+            OpenFailureNotice {
+                message: "engine wasm fetch/compile failed: NetworkError when attempting to fetch resource"
+                    .to_string(),
+                retry: UiAction::from_op(
+                    ControllerId::new(HOME_NODE_ID),
+                    HomeOp::OpenExample { id: "catalog/fyeah-sign".to_string() },
+                ),
+                on_action: None,
+            }
+            BrandHero {}
         }
     }
 }

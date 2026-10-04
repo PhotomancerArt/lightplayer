@@ -285,7 +285,9 @@ grep -q "flash: image written back" "$emu_log" \
 # chip, formatted) its own filesystem partition, so the comparison is every
 # byte the merged image actually populates — and the script proves that is
 # all of them by checking that the rest of the image is erased flash.
-lpfs_offset=$((0x310000))
+# Read from the table the image carries, so this never drifts from the layout
+# (the C6's lpfs moved from 0x310000 to 0x350000 in the 2026-10 repartition).
+lpfs_offset=$(( $(awk -F, '$1=="lpfs"{gsub(/[ \t]/,"",$4); print $4}' lp-fw/fw-esp32c6/partitions.csv) ))
 if [[ $boot -eq 0 ]]; then
     cmp "$chip" "$image" \
         || die 14 "the chip is not the image — see $chip"

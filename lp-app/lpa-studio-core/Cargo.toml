@@ -27,7 +27,9 @@ lpa-devices = { path = "../lpa-devices" }
 # both already in this crate's graph. The host transport WIRE still arrives
 # via unification when a host provider feature is enabled (tests: fake-device
 # below; wasm: the browser features).
-lpa-link = { path = "../lpa-link", features = ["device-session", "device-link"] }
+# `layout-migration`: the C6 repartition's layout step (classify, plan,
+# back up — `app/devices/device_layout_step.rs`), pure and wasm-safe.
+lpa-link = { path = "../lpa-link", features = ["device-session", "device-link", "layout-migration"] }
 # Format classification + offline migration for authored projects. Studio is
 # the only crate that gets this dep: the library classifies every package it
 # lists, and opening an older-but-supported one migrates it in place.
@@ -49,11 +51,6 @@ lpc-wire = { path = "../../lp-core/lpc-wire" }
 # save. no_std + alloc, so this is fine on wasm too.
 lpc-engine = { path = "../../lp-core/lpc-engine" }
 lpc-registry = { path = "../../lp-core/lpc-registry" }
-# Mounts raw `lpfs` images in wasm for the device filesystem backup (see
-# `app/device/filesystem_backup`). Pure Rust, so the browser can do it.
-littlefs-rust = { version = "0.1.0", default-features = false, features = [
-    "alloc",
-] }
 lpfs = { path = "../../lp-base/lpfs", default-features = false }
 lps-probe = { path = "../../lp-shader/lps-probe" }
 log = { workspace = true }
@@ -145,3 +142,7 @@ browser-ble = [
 
 [lints]
 workspace = true
+
+# The build stamps its app version (LP_APP_VERSION): tools/lp-app-version.
+[build-dependencies]
+lp-app-version = { path = "../../tools/lp-app-version" }

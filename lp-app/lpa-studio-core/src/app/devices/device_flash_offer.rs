@@ -266,6 +266,7 @@ fn flash_action(
         build_id: choice.map(|c| c.build_id.clone()).unwrap_or_default(),
         park_first: choice.is_some_and(|c| c.park_first),
         name: name.map(str::to_string),
+        restore_backup: false,
     });
     if let Some(label) = &dress.label {
         action = action.with_label(label.clone());
@@ -353,6 +354,7 @@ mod tests {
                 build_id: first.build_id.clone(),
                 park_first: first.park_first,
                 name: Some("Desk".to_string()),
+                restore_backup: false,
             },
             "build and connect dance come from the core choice"
         );
@@ -462,6 +464,7 @@ mod tests {
             FirmwareFace::LightPlayer {
                 firmware: None,
                 wire: lpa_devices::WireVersion::Match,
+                age: lpa_devices::FirmwareAge::Unknown,
             },
             Some("esp32c6"),
         );
@@ -643,6 +646,7 @@ mod tests {
                 FirmwareFace::LightPlayer {
                     firmware: None,
                     wire: lpa_devices::WireVersion::Match,
+                    age: lpa_devices::FirmwareAge::Unknown,
                 },
                 chip,
             )

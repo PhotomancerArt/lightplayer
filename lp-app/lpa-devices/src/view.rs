@@ -16,11 +16,12 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::activity::{ActivityKind, ActivityOutcome, CancelPhase};
+use crate::activity::{ActivityCell, ActivityKind, ActivityOutcome, CancelPhase};
 use crate::device::{Device, DeviceStatus};
 use crate::evidence::{
     Classification, Evidence, IncompatibleReason, Liveness, TerminalLine, WireVersion,
 };
+use crate::firmware_age::FirmwareAge;
 use crate::identity::DeviceId;
 use crate::link::LinkId;
 use crate::roster::{PendingLink, Roster};
@@ -145,6 +146,10 @@ pub struct ActivityView {
     pub cancellable: bool,
     /// A cancel has been asked for and the activity is winding down.
     pub cancel_requested: bool,
+    /// A Flash's layout step (the C6 repartition): what the inspection found
+    /// and whether the card must ask before the board's files move.
+    #[serde(default)]
+    pub layout: Option<crate::activity::FlashLayoutView>,
 }
 
 /// What a board is running, as the card is allowed to state it.
@@ -249,10 +254,11 @@ pub fn device_view(device: &Device, now: Millis) -> DeviceView {
     let loaded = loaded_project(device);
     let activity = device.activity.as_ref().map(|cell| ActivityView {
         kind: cell.kind,
-        label: format!("{}…", cell.kind.label()),
-        percent: cell.progress.as_ref().and_then(|progress| progress.percent),
+        label: cell.label(),
+        percent: cell.percent(),
         cancellable: !cell.is_cancel_requested(),
         cancel_requested: matches!(cell.cancel, CancelPhase::CancelRequested { .. }),
+        layout: cell.flash_layout(),
     });
 
     let mut escapes = Vec::new();
@@ -318,9 +324,8 @@ pub fn device_view(device: &Device, now: Millis) -> DeviceView {
             }),
         board_id: device
             .evidence
-            .classification
-            .hello()
-            .and_then(|hello| hello.board_id.clone())
+            .hello_board_id()
+            .map(str::to_string)
             .or_else(|| {
                 device
                     .record
@@ -378,12 +383,15 @@ pub enum FirmwareFace {
     #[default]
     Unknown,
     /// A LightPlayer said hello — on whatever wire version it speaks.
-    /// `firmware` is the hello's package/commit label verbatim
-    /// (`"fw-esp32c6 abc1234"`), `None` when the firmware did not report
-    /// one; `wire` is the awareness the 2026-09-04 ruling asks for.
+    /// `firmware` is the hello's label verbatim, leading with the version
+    /// (`"fw-esp32c6 2026.10.03-1 · abc1234def01"`), `None` when the firmware
+    /// did not report one; `wire` is the awareness the 2026-09-04 ruling asks
+    /// for; `age` is its VERSION against this Studio's — what "older than
+    /// Studio" is read from.
     LightPlayer {
         firmware: Option<String>,
         wire: WireVersion,
+        age: FirmwareAge,
     },
     /// Speaks the framing, never said hello (pre-hello firmware).
     NoHello,
@@ -484,6 +492,7 @@ fn firmware_face(evidence: &Evidence) -> FirmwareFace {
         Classification::LightPlayer { hello } => FirmwareFace::LightPlayer {
             firmware: hello.firmware.clone(),
             wire: evidence.wire_version().unwrap_or(WireVersion::Match),
+            age: evidence.firmware_age().unwrap_or_default(),
         },
         Classification::Incompatible {
             reason: IncompatibleReason::NoHello,
@@ -678,8 +687,9 @@ pub fn pending_link_view(entry: &PendingLink, now: Millis) -> PendingLinkView {
 fn state_label(device: &Device, status: DeviceStatus) -> String {
     match status {
         DeviceStatus::Busy => device
-            .activity_kind()
-            .map(|kind| format!("{}…", kind.label()))
+            .activity
+            .as_ref()
+            .map(ActivityCell::label)
             .unwrap_or_else(|| "Working…".to_string()),
         DeviceStatus::Offline => "Offline".to_string(),
         // "port closed" was true and useless: it named an implementation

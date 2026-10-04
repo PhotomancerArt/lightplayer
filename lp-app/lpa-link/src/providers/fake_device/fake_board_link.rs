@@ -45,6 +45,8 @@ pub(crate) struct FakeBoardLink {
     /// Whether this session's hello has gone out.
     hello_sent: bool,
     tally: LinkCounterTally,
+    /// Said verbatim in place of every hello (a board on another wire).
+    hello_json: Option<String>,
 }
 
 impl FakeBoardLink {
@@ -58,7 +60,14 @@ impl FakeBoardLink {
             table: LearnedTable::boxed(),
             hello_sent: false,
             tally: LinkCounterTally::new(),
+            hello_json: None,
         }
+    }
+
+    /// Say `json` verbatim in place of every hello (`None`: the server's).
+    pub(crate) fn with_hello_json(mut self, json: Option<String>) -> Self {
+        self.hello_json = json;
+        self
     }
 
     /// Bytes from the host.
@@ -110,7 +119,15 @@ impl FakeBoardLink {
         } else {
             None
         };
-        let packed = encode_server_payload(message, table, &mut payload);
+        let packed = match (&self.hello_json, &message.msg) {
+            // A hello from another wire goes out as that wire's bytes, in
+            // JSON (a hello is said before any opt-in to packing).
+            (Some(json), lpc_wire::ServerMsgBody::Hello(_)) => {
+                payload.extend_from_slice(json.trim().as_bytes());
+                false
+            }
+            _ => encode_server_payload(message, table, &mut payload),
+        };
         match self.link.send(CH_PROTO, &payload) {
             Ok(()) => {
                 if matches!(message.msg, lpc_wire::ServerMsgBody::Hello(_)) {

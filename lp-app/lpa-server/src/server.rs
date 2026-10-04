@@ -338,6 +338,11 @@ impl LpServer {
             base_mac: None,
             chip_revision: None,
             eui64: None,
+            // How the filesystem came up: only the embedder knows (it
+            // mounted it), so it lands through `set_fs_boot_state`. A server
+            // that never says serves what it was handed as RAM — the honest
+            // default for every test and in-memory embedder.
+            fs: lpc_wire::FsBootState::Memory,
         };
         let features = server_features(&hardware, graphics.backend_name());
         Self {
@@ -363,6 +368,7 @@ impl LpServer {
                 build: lpc_wire::BuildFacts {
                     features,
                     package: "unknown".to_string(),
+                    version: "unknown".into(),
                     commit: "unknown".to_string(),
                     dirty: false,
                     profile: "unknown".to_string(),
@@ -393,6 +399,7 @@ impl LpServer {
         let lpc_wire::HelloIdentity {
             proto,
             package,
+            version,
             commit,
             dirty,
             profile,
@@ -407,6 +414,7 @@ impl LpServer {
             proto
         };
         self.hello.build.package = package;
+        self.hello.build.version = version;
         self.hello.build.commit = commit;
         self.hello.build.dirty = dirty;
         self.hello.build.profile = profile;
@@ -439,6 +447,16 @@ impl LpServer {
     /// so a running board had no road to newer firmware but Factory reset).
     pub fn set_board_id(&mut self, board_id: Option<alloc::string::String>) {
         self.hello.hardware.board_id = board_id;
+    }
+
+    /// Stamp how the filesystem the server was handed came up at boot —
+    /// mounted, formatted fresh, RAM-only, or a pre-repartition filesystem
+    /// held for migration ([`lpc_wire::FsBootState`]). Only the embedder
+    /// mounted it, so only the embedder can say; a server that never calls
+    /// this reports `Memory`. Call at construction, beside
+    /// [`Self::set_hardware_identity`].
+    pub fn set_fs_boot_state(&mut self, fs: lpc_wire::FsBootState) {
+        self.hello.hardware.fs = fs;
     }
 
     pub fn set_hardware_identity(&mut self, identity: lpc_wire::HardwareIdentity) {

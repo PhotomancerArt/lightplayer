@@ -89,3 +89,19 @@ happens.
   verify-before-write.
 - If the format is promoted to user-facing, document it outside the repo and
   add fixture archives per version to `schemas/`-style history.
+
+## Amendment, 2026-10-02 — format 2, revived in `lpa-link`, stored in OPFS
+
+The July code (`lpa-studio-core/src/app/device/filesystem_backup`) was deleted
+with its danger-zone UI on 2026-08-25. The C6 repartition
+(`2026-10-02-c6-repartition-and-layout-migration.md`) revived it as **format
+2** in `lp-app/lpa-link/src/layout_migration/device_backup_archive/`, shared
+by Studio and `lp-cli hardware lpfs save|restore|migrate`. Format 2 adds
+directories as entries (an empty directory survives a restore), the source
+and target geometry, the board's base MAC and the purpose (`backup` |
+`layout-migration`); the reader still versions and refuses, and validates
+every path. Studio stores a migration's archive in OPFS (`device-backups/`,
+an `index.json` of `version: 1` whose entries are `pending` until the board
+proves its files) and reads it back before the board is written. The
+normative reference is that directory's `README.md`.
+

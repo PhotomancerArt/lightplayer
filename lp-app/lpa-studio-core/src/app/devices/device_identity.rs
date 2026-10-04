@@ -72,6 +72,11 @@ pub enum IdentityFirmware {
     /// No verdict this window; the record remembers what the board last
     /// reported.
     Remembered(String),
+    /// An older LightPlayer: its hello was heard, on a wire this Studio
+    /// cannot read, so its label was not. Never "no firmware" — the card
+    /// beside it says "Older LightPlayer firmware" (G1 walk, 2026-10-03:
+    /// "· no firmware" on that card contradicted it).
+    Older,
     /// Nothing reported and nothing remembered — or a verdict that there
     /// is no LightPlayer on the flash.
     None,
@@ -82,7 +87,7 @@ impl IdentityFirmware {
     pub fn label(&self) -> Option<&str> {
         match self {
             Self::Reported(label) | Self::Remembered(label) => Some(label),
-            Self::None => None,
+            Self::Older | Self::None => None,
         }
     }
 
@@ -93,6 +98,7 @@ impl IdentityFirmware {
     pub fn label_text(&self) -> &str {
         match self {
             Self::Reported(label) | Self::Remembered(label) => label,
+            Self::Older => "older LightPlayer",
             Self::None => "no firmware",
         }
     }
@@ -104,7 +110,7 @@ impl IdentityFirmware {
     pub fn memory_mark(&self) -> Option<&'static str> {
         match self {
             Self::Remembered(_) => Some("last seen"),
-            Self::Reported(_) | Self::None => None,
+            Self::Reported(_) | Self::Older | Self::None => None,
         }
     }
 }
@@ -252,13 +258,25 @@ fn identity_firmware(view: &DeviceView) -> IdentityFirmware {
     if let Some(firmware) = view.firmware_face.firmware() {
         return IdentityFirmware::Reported(firmware.to_string());
     }
+    if matches!(view.firmware_face, FirmwareFace::OlderLightPlayer { .. }) {
+        return IdentityFirmware::Older;
+    }
     // Unknown = no verdict yet (closed port, fresh row); Silent = the board
     // said nothing, which is no statement about its flash either. Every
-    // other face IS a statement, and the memory yields to it.
-    let window_is_silent = matches!(
-        view.firmware_face,
-        FirmwareFace::Unknown | FirmwareFace::Silent
-    );
+    // other face IS a statement, and the memory yields to it — except while
+    // Studio's own Flash runs: the chip then sits in its ROM downloader
+    // because the flash parked it there, which says nothing about what is
+    // on the flash (the migration walk, 2026-10-03: "· no firmware" through
+    // every step of an update of a running board).
+    let flashing = view
+        .activity
+        .as_ref()
+        .is_some_and(|activity| activity.kind == lpa_devices::ActivityKind::Flash);
+    let window_is_silent = flashing
+        || matches!(
+            view.firmware_face,
+            FirmwareFace::Unknown | FirmwareFace::Silent
+        );
     match (&view.remembered_firmware, window_is_silent) {
         (Some(firmware), true) => IdentityFirmware::Remembered(firmware.clone()),
         _ => IdentityFirmware::None,
@@ -363,6 +381,7 @@ mod tests {
         view.firmware_face = lpa_devices::view::FirmwareFace::LightPlayer {
             firmware: Some("fw-esp32v3 7c80a27".to_string()),
             wire: lpa_devices::WireVersion::Match,
+            age: lpa_devices::FirmwareAge::Unknown,
         };
 
         let line = device_identity_line(&view);
@@ -415,6 +434,7 @@ mod tests {
             view.firmware_face = lpa_devices::view::FirmwareFace::LightPlayer {
                 firmware: Some("fw-esp32c6 abc1234".to_string()),
                 wire: lpa_devices::WireVersion::Match,
+                age: lpa_devices::FirmwareAge::Unknown,
             };
 
             let line = device_identity_line(&view);
@@ -509,6 +529,7 @@ mod tests {
         view.firmware_face = lpa_devices::view::FirmwareFace::LightPlayer {
             firmware: Some("fw-esp32c6 abc1234".to_string()),
             wire: lpa_devices::WireVersion::Match,
+            age: lpa_devices::FirmwareAge::Unknown,
         };
 
         let display = device_identity_line(&view).display();
@@ -581,6 +602,7 @@ mod tests {
         view.firmware_face = lpa_devices::view::FirmwareFace::LightPlayer {
             firmware: Some("fw-esp32v3 1111111".to_string()),
             wire: lpa_devices::WireVersion::Match,
+            age: lpa_devices::FirmwareAge::Unknown,
         };
         view.remembered_firmware = Some("fw-esp32v3 0000000".to_string());
 
@@ -604,7 +626,6 @@ mod tests {
             FirmwareFace::Blank,
             FirmwareFace::Bootloader,
             FirmwareFace::NoHello,
-            FirmwareFace::OlderLightPlayer { proto: None },
             FirmwareFace::Foreign { label: None },
         ] {
             let mut view = card();
@@ -615,6 +636,51 @@ mod tests {
             assert_eq!(line.firmware, IdentityFirmware::None, "{face:?}");
             assert!(line.display().ends_with("no firmware"), "{face:?}");
         }
+    }
+
+    /// While Studio's own Flash runs, the chip sits in its ROM downloader
+    /// because the flash parked it: that is no verdict on the flash, so the
+    /// line keeps what the board last ran, marked as memory.
+    #[test]
+    fn a_running_flash_keeps_the_remembered_firmware() {
+        use lpa_devices::view::{ActivityView, FirmwareFace};
+        let mut view = card();
+        view.firmware_face = FirmwareFace::Bootloader;
+        view.remembered_firmware = Some("fw-esp32c6 8b9a0db".to_string());
+        view.activity = Some(ActivityView {
+            kind: lpa_devices::ActivityKind::Flash,
+            label: "Moving files…".to_string(),
+            percent: Some(50),
+            cancellable: true,
+            cancel_requested: false,
+            layout: None,
+        });
+        let line = device_identity_line(&view);
+        assert_eq!(
+            line.firmware,
+            IdentityFirmware::Remembered("fw-esp32c6 8b9a0db".to_string())
+        );
+        assert!(line.display().ends_with("last seen"), "{}", line.display());
+    }
+
+    /// An older LightPlayer outranks the memory too, but it IS firmware:
+    /// the line says so rather than "no firmware" beside a card reading
+    /// "Older LightPlayer firmware" (G1 walk, 2026-10-03).
+    #[test]
+    fn an_older_light_player_reads_older_never_no_firmware() {
+        use lpa_devices::view::FirmwareFace;
+        let mut view = card();
+        view.firmware_face = FirmwareFace::OlderLightPlayer { proto: Some(32) };
+        view.remembered_firmware = Some("fw-esp32c6 5f8febc".to_string());
+        let line = device_identity_line(&view);
+        assert_eq!(line.firmware, IdentityFirmware::Older);
+        assert_eq!(line.firmware.memory_mark(), None);
+        assert!(
+            line.display().ends_with("older LightPlayer"),
+            "{}",
+            line.display()
+        );
+        assert!(!line.display().contains("no firmware"));
     }
 
     /// An unresolvable board id still names itself, verbatim, rather than

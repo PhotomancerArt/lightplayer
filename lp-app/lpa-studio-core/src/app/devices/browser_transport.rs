@@ -23,10 +23,6 @@ use super::device_transport::{
     DeviceTransportFuture, GrantedLink, LensLineTap, LensTapEvent,
 };
 
-/// Where the board runtime manifest lives on a device (read by the
-/// firmware's loader at boot — effective next restart, board-selection D4).
-const DEVICE_HARDWARE_MANIFEST_PATH: &str = "/hardware.json";
-
 /// The browser Web Serial transport.
 pub struct BrowserSerialTransport {
     provider: Rc<BrowserSerialEsp32Provider>,
@@ -120,7 +116,22 @@ impl DeviceTransport for BrowserSerialTransport {
                 ),
             });
             match call {
-                DeviceEffectCall::FlashFirmware { build_id } => {
+                DeviceEffectCall::InspectLayout { build_id } => {
+                    // The C6 repartition's layout read: one esptool session
+                    // that ends WITHOUT a reset, so the board waits parked
+                    // for the write (or the reset a refusal sends).
+                    let inspection = provider
+                        .inspect_layout_with_events(&endpoint, Some(&build_id), events)
+                        .await
+                        .map_err(|error| error.to_string())?;
+                    Ok(DeviceEffectFacts {
+                        summary: "read the board's layout".to_string(),
+                        probed_mac: inspection.probed_mac.clone(),
+                        chip_name: inspection.chip_name.clone(),
+                        inspection: Some(inspection),
+                    })
+                }
+                DeviceEffectCall::FlashFirmware { build_id, plan } => {
                     // `flashFirmware` in the JS releases the port's
                     // reader/writer and closes it before esptool builds its
                     // transport — the release half of the exclusive-borrow
@@ -128,14 +139,23 @@ impl DeviceTransport for BrowserSerialTransport {
                     // read half. The chip guard and the pre-write
                     // `readBaseMac` live in that same JS and are
                     // load-bearing — this path must never bypass them.
-                    let result = provider
-                        .flash_firmware_with_events(&endpoint, Some(&build_id), events)
-                        .await
-                        .map_err(|error| error.to_string())?;
+                    // A staged plan (a layout migration or restore) runs
+                    // through `executePlan`, which keeps both.
+                    let result = match plan {
+                        None => provider
+                            .flash_firmware_with_events(&endpoint, Some(&build_id), events)
+                            .await
+                            .map_err(|error| error.to_string())?,
+                        Some(plan) => provider
+                            .execute_plan_with_events(&endpoint, Some(&build_id), &plan, events)
+                            .await
+                            .map_err(|error| error.to_string())?,
+                    };
                     Ok(DeviceEffectFacts {
                         summary: format!("wrote {}", result.manifest.display_name),
                         probed_mac: result.base_mac,
                         chip_name: result.chip_name,
+                        inspection: None,
                     })
                 }
                 DeviceEffectCall::EraseFlash => {
@@ -179,12 +199,7 @@ impl DeviceTransport for BrowserSerialTransport {
                 }
                 DeviceEffectCall::WriteHardwareManifest { manifest_json } => {
                     provider
-                        .write_device_file(
-                            &endpoint,
-                            DEVICE_HARDWARE_MANIFEST_PATH,
-                            manifest_json.as_bytes(),
-                            events,
-                        )
+                        .stamp_board_manifest(&endpoint, manifest_json.as_bytes(), events)
                         .await
                         .map_err(|error| error.to_string())?;
                     Ok(DeviceEffectFacts {

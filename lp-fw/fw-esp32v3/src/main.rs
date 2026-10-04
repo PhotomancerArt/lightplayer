@@ -110,6 +110,7 @@ lpc_model::lp_embed_manifest_core! {
     chip: "esp32",
     cargo_target: "xtensa-esp32-none-elf",
     profile: env!("LP_BUILD_PROFILE"),
+    version: env!("LP_APP_VERSION"),
     commit: env!("LP_BUILD_COMMIT"),
     dirty: lpc_model::manifest::str_eq(env!("LP_BUILD_DIRTY"), "true"),
     wire_proto: lpc_wire::WIRE_PROTO_VERSION,
@@ -945,7 +946,7 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     // proto channel.
     let transport = UartLinkTransport::new(uart_link);
 
-    let base_fs = mount_filesystem(flash);
+    let (base_fs, fs_boot_state) = mount_filesystem(flash);
 
     // The render-loop benchmark's whole firmware difference, part one: the
     // filesystem is not empty. Everything after this line — the manifest, the
@@ -1112,6 +1113,7 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     server.set_hello_identity(
         lpc_wire::HelloIdentity::new(
             "fw-esp32v3",
+            crate::manifest_version(),
             env!("LP_BUILD_COMMIT"),
             env!("LP_BUILD_DIRTY") == "true",
             env!("LP_BUILD_PROFILE"),
@@ -1121,6 +1123,7 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     // The chip's own permanent identity (efuse): the factory MAC and the
     // silicon revision. The server cannot derive either.
     server.set_hardware_identity(chip_identity());
+    server.set_fs_boot_state(fs_boot_state);
     // The board this firmware is running as, from the loaded manifest — the
     // catalog key a card needs to re-flash or wire a new project for it.
     server.set_board_id(Some(alloc::string::String::from(
@@ -1193,7 +1196,9 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
 /// Mount the `lpfs` partition, falling back to RAM so an unformattable or
 /// mis-flashed board still comes up reachable and can say so over the wire.
 #[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
-fn mount_filesystem(flash: esp_hal::peripherals::FLASH<'static>) -> Box<dyn lpfs::LpFs> {
+fn mount_filesystem(
+    flash: esp_hal::peripherals::FLASH<'static>,
+) -> (Box<dyn lpfs::LpFs>, lpc_wire::FsBootState) {
     let mut flash_storage = esp_storage::FlashStorage::new(flash);
     let Some(partition) = LpfsPartition::locate(&mut flash_storage) else {
         // Not a runtime condition: it means the image was flashed without
@@ -1204,16 +1209,21 @@ fn mount_filesystem(flash: esp_hal::peripherals::FLASH<'static>) -> Box<dyn lpfs
             "[ERROR] no `lpfs` partition in the flashed table — reflash with \
              --partition-table lp-fw/fw-esp32v3/partitions.csv; using memory FS"
         );
-        return Box::new(LpFsMemory::new());
+        return (Box::new(LpFsMemory::new()), lpc_wire::FsBootState::Memory);
     };
     match lp_fs::LpFsFlash::init(LpFlashStorage::new(flash_storage, partition), lpfs_config) {
-        Ok(fs) => {
+        Ok((fs, formatted)) => {
             esp_println::println!("[INIT] flash filesystem mounted");
-            Box::new(fs)
+            let state = if formatted {
+                lpc_wire::FsBootState::Formatted
+            } else {
+                lpc_wire::FsBootState::Mounted
+            };
+            (Box::new(fs), state)
         }
         Err(e) => {
             esp_println::println!("[WARN] flash FS failed: {e}, falling back to memory");
-            Box::new(LpFsMemory::new())
+            (Box::new(LpFsMemory::new()), lpc_wire::FsBootState::Memory)
         }
     }
 }

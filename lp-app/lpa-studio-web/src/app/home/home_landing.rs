@@ -20,6 +20,7 @@ use crate::app::home::brand_hero::BrandHero;
 use crate::app::home::example_card::{ExampleCard, embedded_example_cards};
 use crate::app::home::gallery_preview::HoveredCard;
 use crate::app::home::package_card::home_action;
+use crate::app::home::project_opening_frame::OpenFailureNotice;
 use crate::base::{NodeKindIcon, StudioIcon, StudioIconName};
 use crate::cloud::SharedOpenState;
 
@@ -51,6 +52,17 @@ pub fn HomePage(
         let state = state();
         state.line().map(|line| (line, state.is_refusal()))
     });
+    // A View link whose fetch and format/content checks passed (#947
+    // catches those earlier, as `SharedOpenState::NewerFormat` /
+    // `ContentRefused` above) can still fail once the open itself runs —
+    // a sim that won't boot, a device or engine failure. Before this, the
+    // "Opening shared project…" line just vanished on failure and Home sat
+    // there with nothing to say; this is the same notice Explore shows
+    // (`explore_page.rs`) for the identical terminal state.
+    let failure = match lpa_studio_core::open_stage() {
+        lpa_studio_core::OpenStage::Failed(failure) => Some(failure),
+        _ => None,
+    };
     // Hover-to-play for the example grid, page-scoped like Explore's: one
     // signal names one hovered card, so the grid holds at most one live
     // preview lease at a time.
@@ -69,6 +81,13 @@ pub fn HomePage(
                     class: if refusal { "{SHARED_LINE_CLASS} tw:border-status-warning-border tw:bg-status-warning-bg tw:text-status-warning-foreground" } else { "{SHARED_LINE_CLASS} tw:border-border tw:bg-card tw:text-muted-foreground" },
                     role: "status",
                     "{line}"
+                }
+            }
+            if let Some(failure) = failure {
+                OpenFailureNotice {
+                    message: failure.message,
+                    retry: failure.retry,
+                    on_action,
                 }
             }
             BrandHero {}

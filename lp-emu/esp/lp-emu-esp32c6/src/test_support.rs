@@ -890,6 +890,33 @@ mod tests {
     }
 }
 
+/// Where a reference image's firmware keeps `lpfs`: the `lpfs` row of
+/// `lp-fw/fw-esp32c6/partitions.csv` AT THE IMAGE'S COMMIT. The C6's moved
+/// in the 2026-10 repartition, and every pinned image predates it, so
+/// [`crate::flash::LPFS_OFFSET`] (today's table) is the wrong answer for
+/// them.
+pub fn reference_lpfs_offset(image: &ReferenceImage) -> Result<u32, String> {
+    let root = workspace_root().ok_or("could not find the workspace root")?;
+    let spec = format!("{}:lp-fw/fw-esp32c6/partitions.csv", image.commit);
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(&root)
+        .args(["show", &spec])
+        .output()
+        .map_err(|e| format!("running git show {spec}: {e}"))?;
+    if !out.status.success() {
+        return Err(format!("git show {spec} failed: {}", out.status));
+    }
+    let csv = String::from_utf8_lossy(&out.stdout);
+    csv.lines()
+        .map(str::trim)
+        .filter(|line| !line.starts_with('#'))
+        .map(|line| line.split(',').map(str::trim).collect::<Vec<_>>())
+        .find(|fields| fields.first() == Some(&"lpfs") && fields.len() >= 5)
+        .and_then(|fields| u32::from_str_radix(fields[3].trim_start_matches("0x"), 16).ok())
+        .ok_or_else(|| format!("no lpfs row in {spec}"))
+}
+
 /// The **merged** flash image for a reference build: the second-stage
 /// bootloader at `0x0`, the partition table at `0x8000` and the app in the
 /// `factory` partition, in one 4 MiB file — the bytes a flasher writes, and

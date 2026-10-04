@@ -431,6 +431,20 @@
                         import("/lpa-link/virtual_serial.js"),
                         import("/lpa-link/emulator_picker.js"),
                     ]);
+                    // `?emu-tty=mac|none`: a model of the Mac's serial path
+                    // between the boards and the page (`mac_tty_model.js`),
+                    // which drops `0xFF`-heavy bytes the page reads late.
+                    // On by default when this page runs on a Mac, because
+                    // that is where the real path drops them: without it, a
+                    // flash read that stalled on every Mac passed the walk
+                    // (G1-F2, docs/defects/2026-10-02-the-emulated-serial-path-never-drops-a-byte.md).
+                    const ttyFlag = new URLSearchParams(window.location.search).get("emu-tty");
+                    const onMac = /mac/i.test(navigator.userAgentData?.platform ?? navigator.platform ?? "");
+                    const hostTty = ttyFlag === "mac" ? "mac" : ttyFlag === "none" ? null : onMac ? "mac" : null;
+                    if (ttyFlag !== null && ttyFlag !== "mac" && ttyFlag !== "none") {
+                        console.warn(`emu-tty ignored (not \`mac\` or \`none\`): ${ttyFlag}`);
+                    }
+                    console.info(`[emu] host serial path: ${hostTty === "mac" ? "a Mac's (drops late 0xFF bytes)" : "lossless"}`);
                     const options = {
                         picker: chrome.createPicker({ backingUrl: label }),
                         // D0 held ON on every board: the switch a
@@ -439,6 +453,7 @@
                         // "off", and the banner's `detach` then powered the
                         // board off. The banner flips it per board.
                         holds: { 0: true },
+                        hostTty,
                     };
                     if (isTab) {
                         // The module is a content-hashed sidecar, so its URL

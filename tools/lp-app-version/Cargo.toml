@@ -1,0 +1,13 @@
+[package]
+name = "lp-app-version"
+description = "Build-script helper: the one way a LightPlayer build learns its version (LP_APP_VERSION)"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true

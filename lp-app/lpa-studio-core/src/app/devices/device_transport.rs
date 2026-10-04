@@ -50,7 +50,19 @@ pub struct GrantedLink {
 pub enum DeviceEffectCall {
     /// esptool flash of a packaged build. The chip guard and the pre-write
     /// base-MAC read live below this seam and are load-bearing.
-    FlashFirmware { build_id: String },
+    ///
+    /// `plan`: a layout migration or restore staged by the inspection (the
+    /// C6 repartition) — run instead of the plain image write, confirmed
+    /// (its backup stored or downloaded) before it ever reaches here.
+    FlashFirmware {
+        build_id: String,
+        plan: Option<lpa_link::FlashPlan>,
+    },
+    /// Read the board's layout against the package `build_id` writes
+    /// (`LinkManagementRequest::InspectLayout`): leaves the chip in ROM
+    /// download. A transport with no such read (a sim, an emulated tab
+    /// board) answers with no inspection — a plain flash.
+    InspectLayout { build_id: String },
     /// esptool full-flash erase (the card's Factory reset). Verification —
     /// the completion line outranking the benign flash-id warning (C6 rev 2
     /// lore) — lives below this seam in the shipped JS.
@@ -96,6 +108,8 @@ pub struct DeviceEffectFacts {
     pub probed_mac: Option<String>,
     /// The chip the operation talked to, as the tool reported it.
     pub chip_name: Option<String>,
+    /// What an [`DeviceEffectCall::InspectLayout`] read.
+    pub inspection: Option<lpa_link::LinkLayoutInspection>,
 }
 
 /// Progress callback for a running effect: label + optional percent. Called

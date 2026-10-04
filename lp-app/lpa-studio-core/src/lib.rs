@@ -76,10 +76,17 @@ pub use app::devices::{
     transport_label_for_endpoint, uid_from_emu_endpoint, uid_from_sim_endpoint,
     update_firmware_offer, write_sim_record,
 };
+pub use app::devices::{
+    BackupDownload, BackupEntry, BackupIndex, BackupStatus, BackupStoreError, DeviceBackupOp,
+    DeviceBackupStore, MemoryBackupStore, UiDeviceLayout, UiLayoutPanel, check_store_contract,
+    device_layout_view,
+};
 pub use app::devices::{LINK_COUNTERS_CAPTION, LinkTrouble, UiLinkCounterRow, link_counter_rows};
 pub use app::docs_host::DocsSimHost;
 pub use app::studio::PlayViewOp;
 pub use app::studio::{UiPage, UiPanel, UiPlace, UiProjectView, UiSessionSection};
+/// A board's MAC, as the roster records it.
+pub use lpa_devices::identity::MacAddress;
 // The project's declared hardware (D41): the web shell's Hardware row and
 // the gallery card's "for <board>" badge both read it.
 pub use app::access::{
@@ -234,12 +241,22 @@ pub use lpa_devices::view::{
     FirmwareFace as DeviceFirmwareFace, LoadedProject as DeviceLoadedProject, OutcomeView,
     PendingLinkView, RosterView,
 };
+pub use lpa_devices::wire::BoardFs as DeviceBoardFs;
 pub use lpa_devices::{
-    Action as DeviceAction, ActivityKind as DeviceActivityKind, DeviceId, DeviceStatus,
-    EndpointKey as DeviceEndpointKey, Event as DeviceEvent, Input as DeviceInput,
+    Action as DeviceAction, ActivityKind as DeviceActivityKind, AppVersion as DeviceAppVersion,
+    DeviceId, DeviceStatus, EndpointKey as DeviceEndpointKey, Event as DeviceEvent,
+    FirmwareAge as DeviceFirmwareAge, FlashLayoutView as DeviceFlashLayoutView,
+    FlashStep as DeviceFlashStep, Input as DeviceInput, LayoutVerdict as DeviceLayoutVerdict,
     LinkCounterFacts as DeviceLinkCounters, LinkId as DeviceLinkId, LinkInfo as DeviceLinkInfo,
     Millis as DeviceMillis, RosterConfig as DeviceRosterConfig, TerminalKind as DeviceTerminalKind,
     TerminalLine as DeviceTerminalLine, WireVersion as DeviceWireVersion,
 };
 
 pub const STUDIO_DEMO_PROJECT_ID: &str = "catalog/fyeah-sign";
+
+/// This Studio's own app version: `2026.10.03-1` for a tagged release, the
+/// dev form `<short-sha>[-dirty-<HHMMSS>PT]` otherwise, stamped at build time
+/// by the one helper every versioned build uses (`tools/lp-app-version`).
+/// A board's hello version is compared against it to say "older than
+/// Studio" ([`DeviceFirmwareAge`]).
+pub const STUDIO_VERSION: &str = env!("LP_APP_VERSION");

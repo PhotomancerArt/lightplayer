@@ -1,0 +1,89 @@
+---
+status: fixed
+found: 2026-10-02      # how: hardware-walk (G1 of the C6 repartition, the spare XIAO C6)
+fixed: 1afe61e7b
+area: lpa-link device_link/demux × lpc-wire hello (wire 33) × lpa-devices evidence
+class: partial-knowledge-loss
+related:
+  - docs/adr/2026-07-14-wire-hello-versioning.md
+  - lp2025/2026-10-01-1843-c6-repartition (G1-F1)
+---
+# A wire-32 board reads as "pre-hello firmware" in a wire-33 Studio
+
+**Symptom** — G1, the branch's Studio (wire 33) and the spare XIAO C6 on
+#891's firmware (wire 32), heartbeats arriving and its project running:
+the card said "No LightPlayer hello — pre-hello firmware", "no firmware",
+"Pre-hello firmware — needs firmware", with the board picker, instead of an
+older LightPlayer to update. Every fielded board is on wire 32, so every
+user's first sight of this release would have been that card. `lp-cli link
+capture` on the same board printed the cause beside the hello:
+`a message did not parse: missing field fs at line 1 column 499`.
+
+**Root cause** — wire 33 made the hello's `hardware.fs` required. A
+wire-32 hello therefore fails the full `ServerMessage` decode, and the
+demux turned the failure into an anomaly (`LinkEvent::Error`) — dropping
+the one fact the version handshake exists to deliver: the `proto` was
+right there in the bytes. With no hello in the window and heartbeats
+flowing, the fold reached the verdict for firmware that never says hello.
+The hello-versioning ADR's rule ("absence of a hello is the mismatch
+signal") assumes a host can always see a hello's version; a breaking change
+to the hello itself is exactly when it could not. The emulator walk could
+not show it: its old-layout boards run the branch's own wire-33 firmware.
+
+**Fix** — `lpc_wire::hello_proto` reads ONE field, `msg.hello.proto`, from a
+message the full decode rejected — no other field of an older hello, so no
+second decoder for an old shape. The demux turns a hello from another wire
+into `ServerFrameBody::HelloOnOtherWire { proto }` (a hello claiming this
+wire that does not decode stays an anomaly; an app conversation's reply
+stays the conversation's). The fold keeps it as a hello: from an older wire
+the verdict is `OlderLightPlayer { proto: Some(32) }` — "Older LightPlayer
+firmware — flash to update; the project stays" — at once, without waiting
+out the identify deadline; from a newer wire, a LightPlayer this Studio is
+behind (`BoardNewer`). And an older LightPlayer whose board resolves now
+offers the running-board verb, one-click **Update firmware**, falling back
+to Flash's pick when nothing names the board.
+
+**Regression coverage** — the hello captured off the spare board at wire
+32 is `lp-core/lpc-wire/testdata/hello-proto32-xiao-c6.json`:
+`lpc-wire` `hello_proto` tests (it does not decode at wire 33, and names
+32); `lpa-link` `demux::tests::a_hello_from_another_wire_reaches_the_fold_as_its_version`
+(+ this-wire and app-range cases); `lpa-devices`
+`evidence::tests::a_hello_from_another_wire_is_a_light_player_on_that_wire`;
+and end to end from the bytes to the card,
+`lpa-studio-core` `device_flash::tests::a_wire_32_board_is_older_light_player_firmware_that_updates`.
+On silicon (2026-10-02, the spare on #891's wire-32 firmware, this branch's
+Studio in headless Brave over real Web Serial): the card read "Older
+LightPlayer firmware — flash to update; the project stays" with its project
+named. In that fresh browser profile nothing named the board model (no
+record, and the hello's `boardId` is deliberately not read), so the verb was
+Flash firmware with the pick ("2 boards fit" once the chip was seen); a
+browser that has flashed the board before has its record, and gets Update
+firmware.
+
+**The same mistake in `lp-cli` (found 2026-10-03, G1 rehearsal)** — the fix
+above covered Studio's fold, not `lpa-link`'s `DeviceSession`, which every
+`lp-cli` serial command (`upload`, `hardware stamp`, `fwcheck`) waits on.
+There the host transport drops a message that does not parse
+(`a message … did not parse: missing field fs`), the hello gate never sees
+it, and the readiness deadline reached `NoHello`: "device firmware started
+its server loop but predates the wire hello". On the spare C6 at wire 32 that
+broke the PR's own G1 re-seed steps (a pre-M3 image, then this branch's
+`lp-cli upload`). The session now reads the `proto` of an `M!` frame the full
+decode rejects with the same `lpc_wire::hello_proto`, and settles on
+`IncompatibleReason::HelloOnOtherWire { proto }`: "the board runs older
+LightPlayer firmware (wire 32; this build speaks wire 33) — update its
+firmware (Studio's Update firmware), then try again" (or "newer … update this
+tool"). A hello that decodes still reaches the gate (`ProtoMismatch`), and a
+hello claiming this wire that does not decode is not a version. No
+cross-version operation was added (no compat shim): `lp-cli` still cannot
+upload to a wire-32 board, it only says why. Regression:
+`lpa-link` `device_session::tests::a_hello_from_an_older_wire_is_older_firmware_not_pre_hello`
+(the fake board says the captured wire-32 hello verbatim,
+`FakeLightPlayerState::with_hello_json`); before the fix it settled on
+`Incompatible { reason: NoHello }`.
+
+**Lesson** — the version field is the one part of the hello that must be
+readable by every other version, and a typed decode of the whole message
+does not guarantee that: the first required field added to the hello made
+the version invisible to the very peers it was for. Read the version
+first (or on failure), by itself, and keep everything else typed.

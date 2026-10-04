@@ -327,6 +327,7 @@ mod tests {
             percent: None,
             cancellable: true,
             cancel_requested: false,
+            layout: None,
         });
         busy.can_receive_project = false;
         busy.escapes = vec![Escape::Cancel, Escape::Disconnect, Escape::Forget];
@@ -544,6 +545,7 @@ mod tests {
             firmware_face: FirmwareFace::LightPlayer {
                 firmware: None,
                 wire: lpa_devices::WireVersion::Match,
+                age: lpa_devices::FirmwareAge::Unknown,
             },
             remembered_firmware: None,
             degraded: None,

@@ -156,9 +156,13 @@ window.__lpWait = window.__lpWait || function (source, timeoutMs) {
 true`;
 
 export class StudioDriver {
-  static async launch({ chrome = findChrome(), width = 1440, height = 1100 } = {}) {
+  /// `profileDir`: a Chrome profile that OUTLIVES this browser (created if
+  /// missing, never deleted on close) — what a walk needs when the page's
+  /// OPFS must survive a closed tab (the migration walk's backup). Omitted,
+  /// the profile is a fresh temporary one, removed on close.
+  static async launch({ chrome = findChrome(), width = 1440, height = 1100, profileDir = null } = {}) {
     if (!chrome) throw new Error("no Chrome found; set CHROME_BIN");
-    const userDataDir = await mkdtemp(path.join(tmpdir(), "lp-emu-walk-chrome-"));
+    const userDataDir = profileDir ?? (await mkdtemp(path.join(tmpdir(), "lp-emu-walk-chrome-")));
     const child = spawn(
       chrome,
       [
@@ -197,10 +201,11 @@ export class StudioDriver {
     // hosting an emulator: a throttled Worker runs the guest at a fraction
     // of a per cent of real time, which reads as a board that never answered.
     await cdp.send("Emulation.setFocusEmulationEnabled", { enabled: true }, sessionId).catch(() => {});
-    return new StudioDriver({ cdp, sessionId, child, exited, userDataDir });
+    return new StudioDriver({ cdp, sessionId, child, exited, userDataDir, keepProfile: profileDir !== null });
   }
 
-  constructor({ cdp, sessionId, child, exited, userDataDir }) {
+  constructor({ cdp, sessionId, child, exited, userDataDir, keepProfile = false }) {
+    this.keepProfile = keepProfile;
     this.cdp = cdp;
     this.sessionId = sessionId;
     this.child = child;
@@ -413,7 +418,9 @@ export class StudioDriver {
         await Promise.race([this.exited, delay(2_000)]);
       }
       try {
-        await rm(this.userDataDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+        if (!this.keepProfile) {
+          await rm(this.userDataDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+        }
       } catch (error) {
         console.warn(`warning: could not remove ${this.userDataDir}: ${error}`);
       }

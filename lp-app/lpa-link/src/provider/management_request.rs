@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::LinkOperation;
+use crate::provider::flash_plan::FlashPlan;
 
 /// Provider-neutral request for a low-level link management operation.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
@@ -19,17 +20,43 @@ pub enum LinkManagementRequest {
     /// Which build a device *should* get is app policy, not provider
     /// policy: `lpa_boards::provisioning_build_id` computes it from the
     /// chip (necessary) and the picked board (refinement).
-    FlashFirmware { build_id: Option<String> },
+    ///
+    /// `plan`: `None` writes the package's merged image and nothing else —
+    /// today's flash, which keeps the board's filesystem. `Some` executes a
+    /// [`FlashPlan`] instead (a layout migration or a restore, decided by
+    /// `crate::layout_migration` from an [`Self::InspectLayout`]): its steps
+    /// in order, every `VerifyEquals` read back, the filesystem tail re-run
+    /// once on a mismatch. A plan whose `requires_backup` is not confirmed,
+    /// or whose `base_mac` is not the connected board's, is refused before
+    /// anything is written.
+    FlashFirmware {
+        build_id: Option<String>,
+        plan: Option<FlashPlan>,
+    },
+    /// Read what the board's flash holds relative to the package `build_id`
+    /// would write: its partition table, and — as
+    /// `crate::layout_migration::LayoutProbe` asks — a superblock pair or a
+    /// whole filesystem region. Answers with the reads verbatim plus the
+    /// package's own table and image length
+    /// ([`crate::LinkLayoutInspection`]); the caller classifies and plans.
+    ///
+    /// One bootloader session, and it **leaves the chip in ROM download**
+    /// (no reset at the end), so the board does not boot its old firmware —
+    /// and touch its filesystem — between the inspection and the write that
+    /// follows it. A caller that ends up not writing resets the board itself
+    /// ([`Self::ResetRuntime`]).
+    InspectLayout { build_id: Option<String> },
     /// Erase device flash so the endpoint returns to a blank state.
     EraseDeviceFlash,
     /// Erase the raw device filesystem partition below the running server.
     EraseRawFilesystem,
     /// Read the raw device filesystem partition back to the host, verbatim.
     ///
-    /// Takes no region: the partition is per board, and the board is
-    /// **discovered** by the SYNC handshake the provider performs anyway (see
-    /// [`crate::LinkFlashRegion`]). A device that cannot boot cannot be asked
-    /// what it is, which is exactly when this operation matters.
+    /// Takes no region: the partition is per board, and it is **read** —
+    /// the provider reads the device's partition table at `0x8000` in the
+    /// same session and takes its `lpfs` row (see [`crate::LinkFlashRegion`]),
+    /// refusing a table with none. A device that cannot boot cannot be asked
+    /// where its files are, which is exactly when this operation matters.
     ///
     /// Works from ROM download mode, so it is the one way to get a user's
     /// work off a board whose own project prevents it from running.
@@ -73,7 +100,9 @@ impl LinkManagementRequest {
             Self::FlashFirmware { .. } => LinkOperation::FlashFirmware,
             Self::EraseDeviceFlash => LinkOperation::EraseDeviceFlash,
             Self::EraseRawFilesystem => LinkOperation::WriteRawFilesystem,
-            Self::ReadRawFilesystem => LinkOperation::ReadRawFilesystem,
+            Self::ReadRawFilesystem | Self::InspectLayout { .. } => {
+                LinkOperation::ReadRawFilesystem
+            }
             Self::SetBootControl { .. } => LinkOperation::WriteBootControl,
         }
     }

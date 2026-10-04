@@ -28,6 +28,7 @@ lpc_model::lp_embed_manifest_core! {
     chip: "esp32c6",
     cargo_target: "riscv32imac-unknown-none-elf",
     profile: env!("LP_BUILD_PROFILE"),
+    version: env!("LP_APP_VERSION"),
     commit: env!("LP_BUILD_COMMIT"),
     dirty: lpc_model::manifest::str_eq(env!("LP_BUILD_DIRTY"), "true"),
     wire_proto: lpc_wire::WIRE_PROTO_VERSION,
@@ -138,6 +139,8 @@ mod bench;
 mod bootctl;
 #[cfg(all(not(feature = "memory_fs"), not(fw_harness),))]
 mod flash_storage;
+#[cfg(all(not(feature = "memory_fs"), not(fw_harness),))]
+mod legacy_layout;
 #[cfg(all(not(feature = "memory_fs"), not(fw_harness),))]
 use fw_esp32_common::lp_fs;
 
@@ -470,29 +473,72 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     let boot_control = lp_bootctl::DecodeOutcome::Blank;
 
     // Create filesystem before hardware providers so /hardware.json can override board policy.
-    let base_fs: Box<dyn lpfs::LpFs> = {
+    let (base_fs, fs_boot_state): (Box<dyn lpfs::LpFs>, lpc_wire::FsBootState) = {
         #[cfg(not(feature = "memory_fs"))]
         {
-            let flash_storage = flash;
-            match lp_fs::LpFsFlash::init(
-                crate::flash_storage::LpFlashStorage::new(flash_storage),
-                crate::flash_storage::lpfs_config,
-            ) {
-                Ok(fs) => {
-                    esp_println::println!("[INIT] Flash filesystem mounted");
-                    Box::new(fs)
+            use lpc_wire::FsBootState;
+            let mut flash_storage = flash;
+            match crate::flash_storage::LpfsPartition::locate(&mut flash_storage) {
+                // Not a runtime condition: the image was flashed without
+                // `--partition-table lp-fw/fw-esp32c6/partitions.csv` and
+                // espflash substituted its default. Say so rather than guess
+                // an offset and mount across whatever is there.
+                None => {
+                    esp_println::println!(
+                        "[ERROR] no `lpfs` partition in the flashed table — reflash with \
+                         --partition-table lp-fw/fw-esp32c6/partitions.csv; using memory FS"
+                    );
+                    (Box::new(LpFsMemory::new()), FsBootState::Memory)
                 }
-                Err(e) => {
-                    esp_println::println!("[WARN] Flash FS failed: {e}, falling back to memory");
-                    Box::new(LpFsMemory::new())
-                }
+                // The legacy guard (crate::legacy_layout): a partition that
+                // will not mount is formatted only when no pre-repartition
+                // filesystem is waiting at the old offset.
+                Some(partition) => match lp_fs::LpFsFlash::init_guarded(
+                    crate::flash_storage::LpFlashStorage::new(flash_storage, partition),
+                    crate::flash_storage::lpfs_config,
+                    |storage| {
+                        if storage.legacy_lpfs_present() {
+                            lp_fs::FormatVerdict::Hold
+                        } else {
+                            lp_fs::FormatVerdict::Format
+                        }
+                    },
+                ) {
+                    // One line for both: the format itself is logged by
+                    // `lp_fs` ("Formatted and mounted fresh filesystem").
+                    Ok(lp_fs::FlashFsInit::Mounted(fs)) => {
+                        esp_println::println!("[INIT] Flash filesystem mounted");
+                        (Box::new(fs), FsBootState::Mounted)
+                    }
+                    Ok(lp_fs::FlashFsInit::Formatted(fs)) => {
+                        esp_println::println!("[INIT] Flash filesystem mounted");
+                        (Box::new(fs), FsBootState::Formatted)
+                    }
+                    Ok(lp_fs::FlashFsInit::Held) => {
+                        esp_println::println!(
+                            "[FS] legacy-layout filesystem found at {:#x} — not formatting; \
+                             files are held for migration; using memory FS",
+                            crate::legacy_layout::LEGACY_LPFS_V1_OFFSET
+                        );
+                        (Box::new(LpFsMemory::new()), FsBootState::LegacyHeld)
+                    }
+                    Err(e) => {
+                        esp_println::println!(
+                            "[WARN] Flash FS failed: {e}, falling back to memory"
+                        );
+                        (Box::new(LpFsMemory::new()), FsBootState::Memory)
+                    }
+                },
             }
         }
         #[cfg(feature = "memory_fs")]
         {
             let _ = flash;
             esp_println::println!("[INIT] Creating in-memory filesystem...");
-            Box::new(LpFsMemory::new())
+            (
+                Box::new(LpFsMemory::new()) as Box<dyn lpfs::LpFs>,
+                lpc_wire::FsBootState::Memory,
+            )
         }
     };
     #[cfg(feature = "memory_fs")]
@@ -578,13 +624,15 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
 
     // BLE: on unless the device store turns it off, read once here (a
     // missing store is `fresh()`: Bluetooth on, locked, no keys; a damaged
-    // one is `locked()`: off). After the Wi-Fi/ESP-NOW bring-up above (the
-    // order M2's Run G proved), after the board quirks (the token), before
-    // the server exists. A board whose store says off never touches the BLE
-    // controller.
+    // one is `locked()`: off; a board HOLDING its files for the layout
+    // change is `locked()` too — its real store waits in the old region,
+    // and it must not be more open than that store says). After the
+    // Wi-Fi/ESP-NOW bring-up above (the order M2's Run G proved), after the
+    // board quirks (the token), before the server exists. A board whose
+    // store says off never touches the BLE controller.
     #[cfg(feature = "ble")]
     let ble_started = {
-        let store = lpa_server::access_store::read_device_store(base_fs.as_ref());
+        let store = lpa_server::access_store::device_store_at_boot(base_fs.as_ref(), fs_boot_state);
         #[cfg(feature = "desk_ble_params")]
         if let Ok(bytes) = base_fs.read_file(ble::desk_params_path().as_path()) {
             ble::configure_desk_params(core::str::from_utf8(&bytes).unwrap_or(""));
@@ -597,6 +645,13 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
             }
             (true, None) => {
                 log::error!("[ble] enabled, but the BT peripheral is gone — BLE off");
+                false
+            }
+            (false, _) if fs_boot_state == lpc_wire::FsBootState::LegacyHeld => {
+                log::info!(
+                    "[ble] off (files held for the layout change: the device store waits with \
+                     them)"
+                );
                 false
             }
             (false, _) => {
@@ -667,6 +722,7 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     server.set_hello_identity(
         lpc_wire::HelloIdentity::new(
             "fw-esp32c6",
+            crate::manifest_version(),
             env!("LP_BUILD_COMMIT"),
             env!("LP_BUILD_DIRTY") == "true",
             env!("LP_BUILD_PROFILE"),
@@ -677,6 +733,7 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     // silicon revision, and — the C6 has an 802.15.4 radio — its EUI-64.
     // The server cannot derive any of it.
     server.set_hardware_identity(chip_identity());
+    server.set_fs_boot_state(fs_boot_state);
     // The board this firmware is running as, from the loaded manifest — the
     // catalog key a card needs to re-flash or wire a new project for it.
     server.set_board_id(Some(alloc::string::String::from(
