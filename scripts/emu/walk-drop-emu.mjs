@@ -13,10 +13,19 @@
 //     connect over USB → push a project → open it → the cable comes out
 //       under the editor → back in → Play → out under Play → back in
 //       → turn a knob on the resumed session
+//       → (a power-button project) the banner's D0 switch off → cable out
+//         → the board powers itself off
 //
 // The cable is the shim's own detach/attach (the banner's buttons). The
 // Bluetooth twin of the same two steps lives in `walk-ble-emu`'s `drop` and
 // `phantom` steps.
+//
+// The default project is the PLAYFUL Choker, whose switch-mode power button
+// reads D0: with the switch off, a cable pull powers the board off, which is
+// the firmware's rule. The page holds D0 ON (the banner's switch), so the
+// cable pulls above are ridden out; the last step flips it off and checks the
+// board does power down. `WALK_PROJECT="Peach (1D)"` walks a project with no
+// power button, and skips that step.
 //
 // Like `walk-no-board`, it is not a CI job and must not become one, and it
 // needs a Studio already serving on this worktree's canonical port. Every
@@ -42,7 +51,10 @@ const FLASH_DEADLINE_MS = 900_000;
 /// duration here: a person re-seating a cable takes seconds, not the
 /// instant the walk would otherwise take.
 const DETACHED_MS = Number(process.env.WALK_DETACHED_MS ?? 0);
-const PROJECT = process.env.WALK_PROJECT ?? "Peach (1D)";
+const PROJECT = process.env.WALK_PROJECT ?? "PLAYFUL Choker";
+/// Whether the project carries a switch-mode power button on D0, so the walk
+/// ends by switching it off and pulling the cable (`WALK_POWER_OFF=0|1`).
+const POWER_OFF = (process.env.WALK_POWER_OFF ?? (/^PLAYFUL Choker/.test(PROJECT) ? "1" : "0")) === "1";
 /// `WALK_VIEWPORT=390x844` walks it at a phone's width (where the report
 /// came from); the default is the desk's.
 const [VIEW_W, VIEW_H] = (process.env.WALK_VIEWPORT ?? "1440x1100").split("x").map(Number);
@@ -221,7 +233,10 @@ async function main() {
       await driver.waitFor(`Boolean(document.querySelector('[id^="ux-popover-panel"]'))`, {
         what: "the project popover",
       });
-      await driver.click(PROJECT, { scope: `document.querySelector('[id^="ux-popover-panel"]')` });
+      await driver.click(PROJECT, {
+        scope: `document.querySelector('[id^="ux-popover-panel"]')`,
+        exact: true,
+      });
       await driver.clickWhenReady("Put it on the board", { timeoutMs: STEP_DEADLINE_MS });
       await driver.waitFor(`${MAIN_TEXT}.includes('Project loaded')`, {
         timeoutMs: STEP_DEADLINE_MS,
@@ -277,6 +292,44 @@ async function main() {
       );
       return `${before} → ${after}`;
     });
+
+    if (POWER_OFF) {
+      await step("switch-off", "the banner's D0 switch off, then the cable out: the board powers itself off", async () => {
+        const flipped = await driver.evaluate(`(() => {
+          const flip = document.querySelector(
+            '.lp-emu-banner-switch[data-board-id=' + CSS.escape(${JSON.stringify(BOARD)}) + '][data-pad="0"]');
+          if (!flip || flip.getAttribute('aria-pressed') !== 'true') return false;
+          flip.click();
+          return true;
+        })()`);
+        if (!flipped) throw new Error("the banner shows no D0 switch held ON for this board");
+        await driver.waitFor(
+          `window.__lpEmuSerial.bus.holdsFor(${JSON.stringify(BOARD)}).some((h) => h.pad === 0 && !h.level)`,
+          { timeoutMs: STEP_DEADLINE_MS, what: "D0 to read off" },
+        );
+        await driver.detach(BOARD);
+        // The board's own registry row: the door's `GET /boards` says
+        // `stopped`, the tab's Worker `deep-sleep`. Nothing in the page
+        // changes when a board sleeps behind a pulled cable, so this one wait
+        // asks the registry rather than watching the DOM.
+        const deadline = Date.now() + STEP_DEADLINE_MS;
+        for (;;) {
+          const state = await driver.evaluate(
+            `(async () => {
+               const emu = window.__lpEmuSerial;
+               const rows = emu.tabBacking
+                 ? await emu.tabBacking.listBoards()
+                 : (await (await fetch(new URL('boards', emu.base), { cache: 'no-store' })).json()).boards;
+               return rows.find((r) => r.id === ${JSON.stringify(BOARD)})?.state ?? null;
+             })()`,
+            { awaitPromise: true },
+          );
+          if (state === "stopped" || state === "deep-sleep") return `board state: ${state}`;
+          if (Date.now() > deadline) throw new Error(`the board is still ${state} with D0 off and the cable out`);
+          await new Promise((resolve) => setTimeout(resolve, 250));
+        }
+      });
+    }
   } catch (error) {
     fatal = error;
   }
@@ -307,7 +360,10 @@ async function main() {
     console.error(`\nThe walk's steps passed, but the page panicked ${panics.length} time(s).`);
     process.exit(1);
   }
-  console.log("\n✓ the dropped-link walk finished: two cable pulls ridden out, under the editor and under Play.");
+  console.log(
+    "\n✓ the dropped-link walk finished: two cable pulls ridden out, under the editor and under Play" +
+      (POWER_OFF ? ", and the D0 switch off powered the board down." : "."),
+  );
 }
 
 await main();

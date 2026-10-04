@@ -287,13 +287,18 @@ export class StudioDriver {
   /// Click the first enabled, visible control whose text contains `text`.
   /// Throws with the full control list when there is none — a rename should
   /// read as a rename, not as a timeout.
-  async click(text, { scope = "document", nth = 0 } = {}) {
+  /// `exact` keeps only controls with a leaf element whose whole text is
+  /// `text`, so "PLAYFUL Choker" does not also pick "PLAYFUL Choker Tryout".
+  async click(text, { scope = "document", nth = 0, exact = false } = {}) {
     const clicked = await this.evaluate(`
       (() => {
         const wanted = ${JSON.stringify(text.toLowerCase())};
+        const norm = (el) => (el.textContent || '').replace(/\\s+/g, ' ').trim().toLowerCase();
         const all = [...${scope}.querySelectorAll('button, [role="button"], a')]
           .filter((el) => !el.disabled)
-          .filter((el) => (el.textContent || '').replace(/\\s+/g, ' ').trim().toLowerCase().includes(wanted));
+          .filter((el) => norm(el).includes(wanted))
+          .filter((el) => !${exact} || [el, ...el.querySelectorAll('*')]
+            .some((n) => n.childElementCount === 0 && norm(n) === wanted));
         const el = all[${nth}];
         if (!el) return null;
         el.scrollIntoView({ block: 'center' });
