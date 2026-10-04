@@ -157,6 +157,11 @@ async function main() {
       timeoutMs: STEP_MS,
       what: "the Wi‑Fi panel",
     });
+    // Settled, not mid-fade, so the step's screenshot reads.
+    await driver.waitFor(`getComputedStyle(${PANEL}).opacity === '1'`, {
+      timeoutMs: 10_000,
+      what: "the panel to finish fading in",
+    }).catch(() => null);
   };
   /// The page never shows the password once pressed: not in text, not in a
   /// field, not in a title.
@@ -195,6 +200,12 @@ async function main() {
     });
 
     await step("saved", "Save: the board's answer says saved, and that this firmware does not join yet", async () => {
+      // Drawn disabled while a read is in flight (opening the panel asks
+      // the board again); the press waits for it.
+      await driver.waitFor(
+        `[...${PANEL}.querySelectorAll('button')].some((b) => !b.disabled && (b.innerText || '').trim() === 'Save')`,
+        { timeoutMs: STEP_MS, what: "Save to be pressable" },
+      );
       await driver.click("Save", { scope: PANEL });
       await driver.waitFor(`${PANEL_TEXT}.includes("Saved. This firmware doesn’t join")
                             || ${PANEL_TEXT}.includes("Saved. This firmware doesn't join")`, {
