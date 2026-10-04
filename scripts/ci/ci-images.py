@@ -73,7 +73,8 @@ SOURCE_PATHS = (
 # (`scripts/heap-budget-check.sh`, `chip_facts`), pointed at the same file the
 # boot suite reads, so `heap-budget-check-chips*` / `bless-chips` compose.
 HEAP_ALIAS = {
-    "esp32c6": ("LP_EMU_C6_ELF_ESP32C6_SERVER_RADIO", "tree/ESP32C6_SERVER_RADIO/fw-esp32c6"),
+    # The C6's is the split image's directory (the shipped bytes since M2).
+    "esp32c6": ("LP_EMU_C6_SPLIT_ESP32C6_SERVER_RADIO", "tree/ESP32C6_SERVER_RADIO_SPLIT"),
     "esp32v3": ("LP_EMU_V3_ELF_ESP32_SERVER_FLOAT_F32", "@LP_EMU_ESP32V3_ELF"),
     "esp32s3": ("LP_EMU_ESP32S3_ELF", "@LP_EMU_ESP32S3_ELF"),
 }

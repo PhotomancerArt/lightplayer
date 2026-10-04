@@ -362,3 +362,12 @@ The hardware twin is `scripts/m4-hardware-walk.sh --chip esp32c6`, which wants
 a board — resolve it by MAC (`LP_BOARD_MAC=…`, or
 `scripts/emu/board-port.py --list`) rather than letting a probe pick, because
 two C6s on one bus are indistinguishable by port name.
+
+**2026-10-04 (OTA M2):** the walk's C6 image is now the **split image** — the
+shipped one (`lp-fw-split`: loader, boot records, core, engine), built by
+`just fw-esp32c6-split esp32c6,frame-dump` and booted ROM-up from its own
+`merged.bin` through the ROM, the IDF bootloader and the loader
+(`[LOADER] core @0x18000 (proven)`); `--monolith` walks the one-link dev
+image. First run on it (lp-emu `a2328ae3a`, t1, 8 s): PASS, byte-identical on
+all three readings, 1,424 frames decoded off pad 18, 1,423 lit, 1 distinct.
+The artefacts now include `p2.elf` and `loader.elf` in place of the one ELF.

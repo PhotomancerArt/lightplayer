@@ -218,7 +218,13 @@ all about what the firmware around them costs.
 from the **SoC** emulator (`lp-emu/esp/lp-emu-esp32c6`, plan
 `2026-09-06-1001-esp-emulator`): the shipped `fw-esp32c6` image — the bytes a
 board is flashed with — booted whole, run to its first heartbeat, and read from
-the allocator figures the firmware itself reports over its own link.
+the allocator figures the firmware itself reports over its own link. Since
+OTA M2 (2026-10-04) the C6's shipped image is the **split image**
+(`lp-fw-split`: loader, boot records, core, engine): the ratchet builds it with
+`just fw-esp32c6-split`, direct-loads its loader over its flashed `merged.bin`
+(`lp-cli emu run --over`, held to a ROM-up boot by
+`lp-emu-esp32c6/tests/split_boot.rs`), and reads symbols from its `p2.elf`;
+`LP_EMU_C6_SPLIT_ESP32C6_SERVER_RADIO` names an already-built split directory.
 
 ```bash
 just heap-budget-check-chips     # the ratchet, both chips

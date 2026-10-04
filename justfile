@@ -3988,7 +3988,8 @@ test-emu-serve:
 # line, and the WS281x waveform decoded back off the emulated pad by a decoder
 # that never spoke to the firmware.
 #
-# ROM-up from a merged 4 MiB image by default (the closer twin of flashing and
+# The SPLIT image (the shipped one since OTA M2; `--monolith` for the dev
+# image), ROM-up from its merged 4 MiB image by default (the closer twin of flashing and
 # resetting a board); `LP_WALK_BOOT=direct` takes M7's faster direct load,
 # which reaches a byte-equal state at app entry.
 #
