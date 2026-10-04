@@ -280,6 +280,7 @@ mod tests {
             build: lpc_wire::BuildFacts {
                 features: alloc::vec![],
                 package: alloc::string::String::from("fw-esp32c6"),
+                version: "unknown".into(),
                 commit: alloc::string::String::from("unknown"),
                 dirty: false,
                 profile: alloc::string::String::from("release-esp32"),

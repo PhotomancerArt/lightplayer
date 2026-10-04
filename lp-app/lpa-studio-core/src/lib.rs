@@ -243,13 +243,21 @@ pub use lpa_devices::view::{
 };
 pub use lpa_devices::wire::BoardFs as DeviceBoardFs;
 pub use lpa_devices::{
-    Action as DeviceAction, ActivityKind as DeviceActivityKind, DeviceId, DeviceStatus,
-    EndpointKey as DeviceEndpointKey, Event as DeviceEvent,
-    FlashLayoutView as DeviceFlashLayoutView, FlashStep as DeviceFlashStep, Input as DeviceInput,
-    LayoutVerdict as DeviceLayoutVerdict, LinkCounterFacts as DeviceLinkCounters,
+    Action as DeviceAction, ActivityKind as DeviceActivityKind, AppVersion as DeviceAppVersion,
+    DeviceId, DeviceStatus, EndpointKey as DeviceEndpointKey, Event as DeviceEvent,
+    FirmwareAge as DeviceFirmwareAge, FlashLayoutView as DeviceFlashLayoutView,
+    FlashStep as DeviceFlashStep, Input as DeviceInput, LayoutVerdict as DeviceLayoutVerdict,
+    LinkCounterFacts as DeviceLinkCounters,
     LinkId as DeviceLinkId, LinkInfo as DeviceLinkInfo, Millis as DeviceMillis,
     RosterConfig as DeviceRosterConfig, TerminalKind as DeviceTerminalKind,
     TerminalLine as DeviceTerminalLine, WireVersion as DeviceWireVersion,
 };
 
 pub const STUDIO_DEMO_PROJECT_ID: &str = "catalog/fyeah-sign";
+
+/// This Studio's own app version: `2026.10.03-1` for a tagged release, the
+/// dev form `<short-sha>[-dirty-<HHMMSS>PT]` otherwise, stamped at build time
+/// by the one helper every versioned build uses (`tools/lp-app-version`).
+/// A board's hello version is compared against it to say "older than
+/// Studio" ([`DeviceFirmwareAge`]).
+pub const STUDIO_VERSION: &str = env!("LP_APP_VERSION");

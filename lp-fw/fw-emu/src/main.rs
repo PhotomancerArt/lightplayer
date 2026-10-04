@@ -44,6 +44,7 @@ lpc_model::lp_embed_manifest_core! {
     chip: "rv32imac",
     cargo_target: "riscv32imac-unknown-none-elf",
     profile: if cfg!(debug_assertions) { "debug" } else { "release" },
+    version: "unknown",
     commit: "unknown",
     dirty: false,
     wire_proto: lpc_wire::WIRE_PROTO_VERSION,

@@ -404,6 +404,7 @@ impl Step {
                         firmware: Some("fw-esp32c6 test".to_string()),
                         board_id: board,
                         fs: Default::default(),
+                        version: None,
                     },
                 )),
             ),

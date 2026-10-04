@@ -925,6 +925,7 @@ fn ble_card() -> DeviceView {
         firmware_face: lpa_studio_core::DeviceFirmwareFace::LightPlayer {
             firmware: Some("fw-esp32c6 abc1234".to_string()),
             wire: lpa_studio_core::DeviceWireVersion::Match,
+            age: lpa_studio_core::DeviceFirmwareAge::Unknown,
         },
         remembered_firmware: None,
         degraded: None,

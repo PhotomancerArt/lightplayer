@@ -658,8 +658,9 @@ pub static BRIDGE_READY: SeriesSpec = SeriesSpec {
 /// configuration that got it wrong would be lying about the link. Everything
 /// else here is `Structural` — which build, which board profile.
 ///
-/// Three fields are matched and deliberately **not** captured. `commit` and
-/// `dirty` are build provenance, which the sidecar carries as
+/// Four fields are matched and deliberately **not** captured. `version`
+/// (proto 35 on; optional, so a pre-35 transcript's hello still parses),
+/// `commit` and `dirty` are build provenance, which the sidecar carries as
 /// `firmware_commit` / `firmware_dirty`; the identity trio
 /// (`baseMac`, `chipRevision`, `eui64`) is eFuse content, which the sidecar
 /// carries as `mac` / `silicon_rev` and which the runner seeds an emulated
@@ -670,7 +671,8 @@ pub static HELLO: SeriesSpec = SeriesSpec {
     description: "the wire hello frame: protocol version, build and board profile",
     pattern: concat!(
         r#""hello":\{"proto":(?<proto>\d+),"build":\{"features":\[(?<features>[^\]]*)\],"#,
-        r#""package":"(?<package>[^"]+)","commit":"[0-9a-f]*","dirty":(?:true|false),"#,
+        r#""package":"(?<package>[^"]+)",(?:"version":"[^"]*",)?"#,
+        r#""commit":"[0-9a-f]*","dirty":(?:true|false),"#,
         r#""profile":"(?<profile>[^"]+)"\},"hardware":\{"radio":(?<radio>true|false),"#,
         r#""totalLedBudget":(?<total_led_budget>[^,]+),"button":(?<button>true|false),"#,
         r#""boardId":"(?<board_id>[^"]+)""#,
@@ -3325,9 +3327,30 @@ mod tests {
         assert_eq!(&caps["total_led_budget"], "null");
         // Provenance and identity are matched, never captured.
         let names: Vec<_> = HELLO.regex().capture_names().flatten().collect();
-        for absent in ["commit", "dirty", "baseMac", "chipRevision", "eui64"] {
+        for absent in [
+            "version",
+            "commit",
+            "dirty",
+            "baseMac",
+            "chipRevision",
+            "eui64",
+        ] {
             assert!(!names.contains(&absent), "`{absent}` must not be captured");
         }
+
+        // Proto 35's hello carries the build version after the package; the
+        // same series parses it, without capturing the version.
+        let versioned = hello.replacen(
+            r#""package":"fw-esp32c6","#,
+            r#""package":"fw-esp32c6","version":"2026.10.03-1","#,
+            1,
+        );
+        let caps = HELLO
+            .regex()
+            .captures(&versioned)
+            .expect("a proto-35 hello parses");
+        assert_eq!(&caps["package"], "fw-esp32c6");
+        assert_eq!(&caps["profile"], "release-esp32");
 
         let beat = concat!(
             r#"M!{"id":0,"msg":{"heartbeat":{"fps":{"avg":967,"sdev":0,"min":967,"max":967},"#,
