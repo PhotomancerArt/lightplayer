@@ -5995,6 +5995,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "lp-fw-split"
+version = "40.0.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "espflash",
+ "lp-app-version",
+ "lp-bootctl",
+ "object 0.37.3",
+ "rustc-demangle",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "lp-gfx"
 version = "40.0.0"
 dependencies = [
