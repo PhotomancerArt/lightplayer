@@ -253,6 +253,12 @@ async function main() {
       if (!(await driver.evaluate(`${PANEL_TEXT}.includes('Relay on (default)')`))) {
         throw new Error("the panel does not say the relay is on by default");
       }
+      // Drawn locked while a read is in flight (opening the panel asks the
+      // board again); a click on a locked switch does nothing.
+      await driver.waitFor(`${relay} && !${relay}.disabled`, {
+        timeoutMs: STEP_MS,
+        what: "the Cloud relay switch to be pressable",
+      });
       await driver.evaluate(`${relay}.click()`);
       await driver.waitFor(`${PANEL_TEXT}.includes('Relay off — local network only') && ${relay}?.getAttribute('aria-checked') === 'false'`, {
         timeoutMs: STEP_MS,
