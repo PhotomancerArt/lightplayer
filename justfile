@@ -3297,6 +3297,40 @@ test-emu-c6-boot:
 test-emu-layout-migration:
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_layout_migration -- --include-ignored --nocapture --test-threads=1
 
+# The split image's boot bookkeeping, scenario by scenario, on an emulated C6
+# (OTA M2, P08; `lp-cli/tests/emu_split_scenarios.rs`). Each scenario builds
+# the flash state an interrupted update would leave with `lp-bootctl`, boots
+# from the reset vector and reads the board's own words:
+#
+#   S1 the flashed image boots proven, engine and hello · S2 a trial confirms
+#   on its link and boots proven next time · S3 a trial that dies (warm) rolls
+#   back, naming the failed build · S4 a trial that hangs is retried cold up
+#   to the cap, then rolled back (E4, E11) · S4b a host's USB reset counts as
+#   cold (D10) · S5 a started trial with no host survives power cycles (D9) ·
+#   S7 reflashing the packaged image clears a stale newer record (D12) · S8 an
+#   uncommitted engine is not entered (core-only, no hello) · S9 the loader
+#   skips a core that will not load and boots the other (D4). S6 and S10 are
+#   named skips (each needs another fixture).
+#
+# NOT in CI (D19): four split builds (X, Y, Y with `fixture-trial-dies`, Y
+# with `fixture-trial-hangs`; two link passes each, a few minutes on an M2
+# Max) and a few minutes of scenarios. Run it when you touch `lp-bootctl`'s
+# records or `choose`, the loader (`lp-fw/fw-esp32c6-loader`) or
+# `fw-esp32c6/src/ota/`. `scenarios=<dir>` reuses images already built there.
+test-emu-c6-split-boot scenarios="": install-rv32-target
+    #!/usr/bin/env bash
+    set -euo pipefail
+    out="{{ scenarios }}"
+    if [[ -z "$out" ]]; then
+        out=target/split-scenarios
+        split() { APP_VERSION="$1" cargo run -q -p lp-fw-split --release -- build --out "$out/$2" --features "$3"; }
+        split x-test x esp32c6,server
+        split y-test y esp32c6,server
+        split y-test y-dies esp32c6,server,fixture-trial-dies
+        split y-test y-hangs esp32c6,server,fixture-trial-hangs
+    fi
+    LP_SPLIT_SCENARIOS="$(cd "$out" && pwd)" cargo test -p lp-cli --release --test emu_split_scenarios -- --include-ignored --nocapture --test-threads=1
+
 # lp-cli's emulator-backed tests. Both resolve the ELF through
 # `lp_emu_esp32c6::test_support` under `LP_EMU_BUILD_FW=1` — a plain
 # `cargo build`, not a reference image, so no espflash and no git history.

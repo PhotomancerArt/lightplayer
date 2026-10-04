@@ -30,7 +30,7 @@
 //!    comes up.
 //!
 //! The emulator scenarios for these rules are `just test-emu-c6-split-boot`
-//! (`lp-cli/tests/emu_split_boot.rs`): run them when you touch
+//! (`lp-cli/tests/emu_split_scenarios.rs`): run them when you touch
 //! `lp-bootctl`'s records, `choose`, the loader or this module.
 //!
 //! # Rules from silicon (XIAO C6, 2026-10-02)
