@@ -434,7 +434,7 @@ fn frame(width: u32, section: SiteSection, chip: BuildChip, menu_open: bool) -> 
 
 #[story(
     label = "Agent light — Save in the header",
-    description = "The agent light (agentic-UI M8) on the header's Save: the assistant just pressed `project/save`, so the Save beside the CHANGES segment wears the press flare's ring — the focus-ring blue inset ring and the glow bloom, the same light a press of yours gets. It is a moment, not a state: live it rises, holds and fades over four seconds (core's clock puts it out); with reduced motion, and in this capture, it is the still ring. It never takes focus and never scrolls — watching the assistant work shows where Save lives without moving anything under your hands. TOP: at rest. BOTTOM: lit."
+    description = "The agent light (agentic-UI M8) on the header's Save: the assistant just pressed `project/save`, so the Save beside the CHANGES segment wears the assistant's own light — a 2px orchid gradient ring spinning around it over an orchid glow, with a brief orchid wash at the press. Orchid means the assistant and nothing else in Studio (error is pale red, bound is violet). It is a moment, not a state: live it rises, holds and fades over four seconds (core's clock puts it out); with reduced motion, and in this capture, it is the still ring. It never takes focus and never scrolls — watching the assistant work shows where Save lives without moving anything under your hands. TOP: at rest. BOTTOM: lit."
 )]
 pub(crate) fn agent_lit_save() -> Element {
     let lit = crate::app::agent::story_activity([(

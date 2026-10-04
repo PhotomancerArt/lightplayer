@@ -810,7 +810,7 @@ fn devices_page_degraded_card() -> Element {
 
 #[story(
     label = "Agent light — a device card's verb",
-    description = "The agent light (agentic-UI M8) on a device card. The assistant pressed this board's Remove (`devices/<board>/remove-project`) — or handed it to you on a card — so that chip in the PROJECT zone's verb row wears the light, and the same chip on the docked lens card would too: every control that draws an offer is keyed by the offer's path. LEFT: at rest. RIGHT: lit. The card's size, its zones and every other verb stay exactly where they were."
+    description = "The agent light (agentic-UI M8) on a device card. The assistant pressed this board's Remove (`devices/<board>/remove-project`) — or handed it to you on a card — so that chip in the PROJECT zone's verb row wears the assistant's orchid ring (spinning live, still here), and the same chip on the docked lens card would too: every control that draws an offer is keyed by the offer's path. LEFT: at rest. RIGHT: lit. The card's size, its zones and every other verb stay exactly where they were."
 )]
 fn devices_card_agent_lit() -> Element {
     let card = roster_fixture().roster.devices.remove(0);
