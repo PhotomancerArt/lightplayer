@@ -15,10 +15,10 @@
 //!   [`Link`](lp_link::Link)'s timers and frames: it feeds it the bytes that
 //!   arrived, queues its frames, moves log records from the ring onto the log
 //!   channel, and sleeps until a timer, the I/O task's news, or a send
-//!   doorbell. The chip runs it on a priority-1 esp-rtos thread of its own
-//!   (`fw-esp32v3`'s `io_thread`, pinned to core 0, at most one pass per
-//!   [`PassPacing::CLASSIC_LINK_THREAD`]), or on the main thread executor
-//!   beside the engine;
+//!   doorbell. The chip runs it on the main thread executor beside the
+//!   engine (the classic's default), or on a priority-1 esp-rtos thread of
+//!   its own (`fw-esp32v3`'s opt-in `io_thread`, pinned to core 0, at most
+//!   one pass per [`PassPacing::CLASSIC_LINK_THREAD`]);
 //! - the **server transport** ([`uart_link_transport::UartLinkTransport`],
 //!   main thread executor) takes whole wire messages off the proto channel
 //!   and queues replies onto it, sharing the link with the link task through

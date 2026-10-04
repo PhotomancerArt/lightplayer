@@ -401,9 +401,12 @@ byte layer had to differ from fw-esp32s3's copy (no connection monitor; RX
 drained between TX chunks so a long write cannot overflow the 128-byte RX
 FIFO).
 
-### Link IO thread (`io-thread`, default on)
+### Link IO thread (`io-thread`, off by default)
 
-The `uart_link_task` above runs on its own priority-1 esp-rtos thread,
+By default the `uart_link_task` above shares the main thread executor with
+the server loop and runs between frames, waking on events (the I/O task's
+news, a timer, the doorbell, a log record), not on a cadence. With
+`--features io-thread` it runs on its own priority-1 esp-rtos thread,
 pinned to core 0 (`src/io_thread.rs`), instead of sharing the main thread
 executor with the server loop — the C6/S3 treatment, M2 of the Wi-Fi
 control roadmap (plan `2026-10-02-1918-io-thread-other-boards`, PR #943).
@@ -420,6 +423,13 @@ classic amendment for the numbers, the lock and why the thread is pinned
 to core 0 (never the APP core — it is the RMT core and stalls on every
 flash write). The diagnostic feature `io_thread_stack_diag` paints the
 thread's stack and logs its high-water mark (`[iostack]`); off by default.
+
+It is off because PR #943's desk A/B (DOM-Z-102, `frame_pace_diag`, a
+~16 fps project) found the thread slower and less even than the default in
+every setting: with no host 66.7 ms frames against 57.5 ms, under the
+`link rtt` rig 125 ms request round trips against 98 ms, and under a real
+Studio editor 41 frames per 5 s against 50. Its one gain is transfer speed
+(25 against 14 KiB/s).
 
 Round-trip verified on the desk DOM-Z-102, 2026-07-31:
 

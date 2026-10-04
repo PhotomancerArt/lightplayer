@@ -1,7 +1,7 @@
 //! The UART link task's loop: the one owner of the classic's [`Link`]'s
-//! timers and frames — on a priority-1 esp-rtos thread of its own
-//! (`fw-esp32v3`'s `io_thread`, the default), or on the main thread executor
-//! beside the engine (without `io-thread`).
+//! timers and frames — on the main thread executor beside the engine (the
+//! classic's default), or on a priority-1 esp-rtos thread of its own
+//! (`fw-esp32v3`'s opt-in `io-thread`).
 //!
 //! It never touches UART0. The classic's I/O task does, from its interrupt
 //! executor every 1 ms (`fw-esp32v3`'s `serial::io_task`), and hands bytes

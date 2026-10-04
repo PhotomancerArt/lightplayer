@@ -1,5 +1,6 @@
 //! The UART link task on a preemptive esp-rtos thread of its own (`io-thread`,
-//! on by default), pinned to core 0.
+//! OFF by default — see the feature's comment in `Cargo.toml` for why), pinned
+//! to core 0.
 //!
 //! The classic's copy of `fw-esp32c6/src/io_thread.rs` and
 //! `fw-esp32s3/src/io_thread.rs` (a per-chip copy by decision:
