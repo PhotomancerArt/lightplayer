@@ -1933,6 +1933,40 @@ mod tests {
         assert_eq!(unstamped.hello_board_id(), None, "no stamp, no board");
     }
 
+    /// The hello's version against the app's own: what "older than Studio"
+    /// reads. A board on this Studio's wire proto is still older when its
+    /// VERSION is, and nothing is claimed before a hello or without a
+    /// version.
+    #[test]
+    fn a_hello_names_its_firmware_age_against_studios_version() {
+        let config = RosterConfig {
+            expected_version: AppVersion::parse("2026.10.03-1"),
+            ..studio_config()
+        };
+        let age_after = |version: Option<&str>| {
+            let mut evidence = Evidence::default();
+            let mut identity = IdentityChain::default();
+            evidence.fold(Millis(0), &opened(), &mut identity, &config);
+            assert_eq!(evidence.firmware_age(), None, "nothing before a hello");
+            let hello = frame(ServerFrame::hello(
+                1,
+                HelloFacts {
+                    proto: config.expected_proto,
+                    version: version.map(str::to_string),
+                    ..Default::default()
+                },
+            ));
+            evidence.fold(Millis(10), &hello, &mut identity, &config);
+            assert_eq!(evidence.wire_version(), Some(WireVersion::Match));
+            evidence.firmware_age().expect("a hello was heard")
+        };
+        assert_eq!(age_after(Some("2026.10.02-3")), FirmwareAge::Older);
+        assert_eq!(age_after(Some("2026.10.03-1")), FirmwareAge::Current);
+        assert_eq!(age_after(Some("2026.10.04-1")), FirmwareAge::Newer);
+        assert_eq!(age_after(Some("unknown")), FirmwareAge::Unknown);
+        assert_eq!(age_after(None), FirmwareAge::Unknown);
+    }
+
     /// The boot marker names its proto; an older one is older LightPlayer
     /// firmware, this build's own is not (its hello follows as a frame).
     #[test]
