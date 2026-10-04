@@ -133,6 +133,11 @@ already asked the question (landed in `828dcb97c`).
 
 ## Follow-ups
 
+- 2026-10-04: the split image's high-end cores reuse `0x310000–0x350000`,
+  the old `lpfs` head — see
+  `2026-10-04-c6-split-link-firmware-loader-and-boot-records.md`,
+  Consequences.
+
 - Studio ZIP-file import of a device backup — before the image crosses
   `0x300000` (Decision 11).
 - `docs/defects/2026-10-02-a-closed-tab-mid-stamp-leaves-hardware-json-truncated.md`
