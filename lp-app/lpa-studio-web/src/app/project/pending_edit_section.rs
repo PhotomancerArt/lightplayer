@@ -1,4 +1,5 @@
-//! Save-panel change list: dense pending-edit rows with per-entry revert.
+//! Save-panel change list: dense pending-edit rows with per-entry revert —
+//! each row's button presses `project/revert-edit` with the row's key.
 //!
 //! The pending-edit surfaces share this module: the project detail popup's
 //! per-bucket sections (unsaved / failed) render the full editor list
@@ -9,9 +10,13 @@
 //! caps its own height) per the `DetailPopover` conventions.
 
 use dioxus::prelude::*;
-use lpa_studio_core::{UiAction, UiPendingEdit, UiPendingEditKind, UiPendingEditPhase};
+use lpa_studio_core::{
+    OfferArgs, OfferPath, REVERT_EDIT_PARAM, REVERT_EDIT_VERB, UiAction, UiPendingEdit,
+    UiPendingEditKind, UiPendingEditPhase,
+};
 
 use crate::base::{DetailSectionTint, InlineButton, InlineButtonTone};
+use crate::core::use_offer_at;
 
 /// The save-panel buckets, mirroring `UiPendingEditPhase` for filtering
 /// entries into their popup sections.
@@ -118,13 +123,21 @@ fn revert_label(edit: &UiPendingEdit) -> (&'static str, &'static str) {
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn PendingEditList(entries: Vec<UiPendingEdit>, on_action: EventHandler<UiAction>) -> Element {
+    // Core's `project/revert-edit`: every row's revert is one press of it.
+    let revert_edit = use_offer_at(OfferPath::project().child(REVERT_EDIT_VERB))();
     if entries.is_empty() {
         return rsx! {};
     }
     rsx! {
         div { class: "tw:grid tw:max-h-44 tw:content-start tw:overflow-y-auto tw:pt-0.5",
             for entry in entries {
-                PendingEditRow { entry, on_action }
+                PendingEditRow {
+                    revert: entry.key.as_ref().and_then(|key| {
+                        revert_edit.as_ref()?.press(&OfferArgs::new().with(REVERT_EDIT_PARAM, key.clone())).ok()
+                    }),
+                    entry,
+                    on_action,
+                }
             }
         }
     }
@@ -134,14 +147,20 @@ pub fn PendingEditList(entries: Vec<UiPendingEdit>, on_action: EventHandler<UiAc
 /// failure reason for failed entries, and the entry's small revert button.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn PendingEditRow(entry: UiPendingEdit, on_action: EventHandler<UiAction>) -> Element {
+fn PendingEditRow(
+    entry: UiPendingEdit,
+    /// What this row's revert presses: `project/revert-edit` bound to the
+    /// row's key. `None` (a stale entry, or core offers no revert) draws
+    /// no button.
+    revert: Option<UiAction>,
+    on_action: EventHandler<UiAction>,
+) -> Element {
     let kind = kind_display(&entry.kind, entry.old_value.as_deref());
     let (label, title) = revert_label(&entry);
     let reason = match &entry.phase {
         UiPendingEditPhase::Failed { reason } if !reason.is_empty() => Some(reason.clone()),
         _ => None,
     };
-    let revert = entry.revert.clone();
 
     rsx! {
         div { class: "tw:grid tw:grid-cols-[minmax(0,1fr)_auto] tw:items-center tw:gap-x-2 tw:border-t tw:border-border-muted tw:py-1 tw:first:border-t-0",
@@ -180,7 +199,7 @@ mod tests {
             kind: UiPendingEditKind::Added,
             old_value: None,
             phase,
-            revert: None,
+            key: None,
         }
     }
 

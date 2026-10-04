@@ -1,5 +1,5 @@
 # The S3's `boot-idle` heartbeat triple is ELICITED, exactly as the classic's
-# is — and this file is the asking, byte for byte the same asking.
+# is — and this file is the asking.
 #
 # `esp32_memory_stats` (`lp-fw/fw-esp32s3/src/main.rs`, added to this image by
 # M6 P04b / PR #742) is what prints `[stack] heartbeat:` / `[MEM] free=` /
@@ -20,20 +20,38 @@
 #
 # `stopAllProjects` is the smallest request that reaches the call site
 # (`handlers::handle_stop_all_projects` calls `log_memory` whether or not a
-# project is loaded), and it is the SAME bytes on the same trigger line as
-# `walks/v3-stop-all.script` — `the_s3_stop_all_script_is_the_classics_
-# stimulus` checks the two files against each other rather than trusting the
-# eye. One stimulus over three chips is what makes one payload name mean one
-# question.
+# project is loaded), and it is the SAME request (the `+1 "M!…"` bytes below)
+# as `walks/v3-stop-all.script` — `the_s3_stop_all_script_is_the_classics_
+# stimulus` checks the two files' requests against each other rather than
+# trusting the eye. One stimulus over three chips is what makes one payload
+# name mean one question.
 #
-# The trigger is `[INIT] I/O task spawned`, which is the last line of this
-# image's `[INIT]` chain before it reaches for the filesystem — pinned as part
-# of `HELLO` in `lp-emu/esp/lp-emu-esp32s3/tests/boot_idle.rs`.
+# ⚠️ **The TRIGGER line is not shared with the classic, and has moved twice
+# since this file was authored (M6 P08).** It names the last line of this
+# image's `[INIT]` chain before it reaches for the filesystem — pinned as
+# part of `HELLO` in `lp-emu/esp/lp-emu-esp32s3/tests/boot_idle.rs` — and
+# that line is this chip's own, not a shared constant: the lp-link USB
+# cutover (`lp2025/2026-09-27-0215-lp-link-usb-cutover`) renamed it from
+# `[INIT] I/O task spawned` to `[INIT] USB link task spawned`, and M2's
+# `io-thread` feature (the link task's own thread, `lp2025/2026-10-02-1918-
+# io-thread-other-boards`) renamed it again to the line below. Keep this
+# trigger in step with `HELLO` — `the_s3_stop_all_script_is_the_classics_
+# stimulus` fails the moment they drift, by design.
+#
+# ⚠️ **This script is not what the live heap-budget gate reads any more.**
+# Since wire proto 30 the S3's console is lp-link, and
+# `scripts/heap-budget-check.sh`'s `esp32s3` arm asks for the triple with a
+# `stopAllProjects` request over the hosted link once the board's hello
+# arrives, not by scripting raw `M!` bytes after this trigger (the lp-link
+# image does not read unsolicited `M!` text on the port before a host has
+# brought the link up). This file remains the `boot-idle` payload's
+# `host_script` for the RomUp arm and the classic cross-check above; it is
+# not dead data, just not the path `heap-budget-check-chips-s3` runs today.
 #
 # ⚠️ **Until M6 P06 this arm's run cannot complete, and the sentinel is not to
-# be weakened to make it.** After `[INIT] I/O task spawned` the shipped image
+# be weakened to make it.** After the trigger line the shipped image
 # calls `mount_filesystem(flash)`, which sets `SPI1.cmd`'s `usr` bit and spins
-# until hardware clears it; `SPI1` is an accept block on this machine today,
+# until hardware clears it; `SPI1` is an accept block on that machine today,
 # so the spin never ends and the server loop the wire needs never runs
 # (`lp-emu-esp32s3/tests/boot_idle.rs`'s
 # `the_boot_stops_where_p06_begins`). P06 lands the flash controller and the
@@ -43,4 +61,4 @@
 # time after the trigger, where a desk host's select loop polls at 50 ms.
 # That is host latency, and it is why nothing in the `timing` class is
 # compared for this payload.
-after "[INIT] I/O task spawned" +1 "M!{\"id\":1,\"msg\":\"stopAllProjects\"}\n"
+after "[INIT] io thread: stack 4096 B, priority 1, core 0" +1 "M!{\"id\":1,\"msg\":\"stopAllProjects\"}\n"

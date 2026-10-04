@@ -13,6 +13,13 @@
 //! grows, while every offer in the view's tree stays pressable by its path
 //! (`project/save`, `project/demo.module/orbit.shader/remove`): `act` looks
 //! a path up in the whole tree, never just in what was listed.
+//!
+//! One exception to "counted elsewhere": with no real board connected or
+//! attached, `devices/connect-usb` and `devices/connect-ble` are listed in
+//! full on every page, not folded into the devices area's counted line —
+//! they are the user's next step wherever they are, and only a full listing
+//! carries the `[needs the user's click]` mark that tells the agent to
+//! `act` it rather than describe the button.
 
 use std::fmt::Write as _;
 
@@ -38,6 +45,17 @@ pub struct AppReadoutSnapshot {
     /// Where the user is, as offer prefixes: which offers are listed in
     /// full and which are counted.
     pub focus: UiOfferFocus,
+    /// Whether a real (non-sim) board is connected or attached right now.
+    /// `false` keeps `devices/connect-usb` and `devices/connect-ble` listed
+    /// in full on every page, not just a devices-focused one: getting a
+    /// board onto the bus is the user's next step and the only one only
+    /// they can take, so its `[needs the user's click]` mark (and the
+    /// doctrine tied to it) must show instead of being folded into a
+    /// counted "devices: connect-usb, connect-ble" line the agent reads
+    /// past (live corpus S18, 2026-10-03: with no board attached, the
+    /// agent told the user to press "Connect a board via USB" instead of
+    /// `act`ing the offer that hands them the card).
+    pub has_real_board: bool,
 }
 
 impl AppReadoutSnapshot {
@@ -76,15 +94,28 @@ impl AppReadoutSnapshot {
         self.offers.iter().find(|offer| &offer.path == path)
     }
 
-    /// Whether `offer` is listed in full: a verb of the node in focus, or
-    /// a verb on the page's own area that is not some other node's.
+    /// Whether `offer` is listed in full: a verb of the node in focus, a
+    /// verb on the page's own area that is not some other node's, or — with
+    /// no real board on the bus — one of the two add-a-board offers,
+    /// wherever the user is.
     fn lists_in_full(&self, offer: &UiOffer) -> bool {
+        if !self.has_real_board && is_add_board_offer(&offer.path) {
+            return true;
+        }
         match self.focus.nearness(&offer.path) {
             OfferNearness::Own => true,
             OfferNearness::Under | OfferNearness::Elsewhere => false,
             OfferNearness::Area => !owned_by_a_node(offer),
         }
     }
+}
+
+/// Whether `path` is one of the add-a-board offers (`devices/connect-usb`,
+/// `devices/connect-ble`): with no real board attached, the user's next
+/// step from anywhere in the app.
+fn is_add_board_offer(path: &OfferPath) -> bool {
+    path.owner().as_ref() == Some(&OfferPath::devices())
+        && matches!(path.last(), Some("connect-usb") | Some("connect-ble"))
 }
 
 /// One offer as the readout (and `read`) lists it: `- <path>: <label>`
@@ -117,9 +148,10 @@ pub fn offer_lines(offer: &UiOffer) -> String {
     text
 }
 
-/// Whether `offer` is a node's verb (its owner's last segment is a node).
+/// Whether `offer` is a node's verb, directly (`…/orbit.shader/remove`) or
+/// in a group of the node's (`…/dome.fixture/patch/assign`).
 fn owned_by_a_node(offer: &UiOffer) -> bool {
-    offer.path.owner().is_some_and(|owner| owner.names_node())
+    offer.path.node_and_verb().is_some()
 }
 
 /// The actions not listed in full, counted: every node verb on one line,
@@ -130,20 +162,22 @@ fn counted_lines(counted: &[&UiOffer]) -> String {
         return String::new();
     }
     let mut nodes: Vec<OfferPath> = Vec::new();
-    let mut node_verbs: Vec<(&str, usize)> = Vec::new();
+    let mut node_verbs: Vec<(String, usize)> = Vec::new();
     let mut owners: Vec<(OfferPath, Vec<&str>)> = Vec::new();
     for offer in counted {
-        let owner = offer.path.owner().unwrap_or_else(|| offer.path.clone());
-        let verb = offer.path.last().unwrap_or("?");
-        if owner.names_node() {
-            if !nodes.contains(&owner) {
-                nodes.push(owner);
+        // A node's verb counts under its node, a grouped one by its group
+        // (`patch/assign ×2`).
+        if let Some((node, verb)) = offer.path.node_and_verb() {
+            if !nodes.contains(&node) {
+                nodes.push(node);
             }
             match node_verbs.iter_mut().find(|(name, _)| *name == verb) {
                 Some((_, count)) => *count += 1,
                 None => node_verbs.push((verb, 1)),
             }
         } else {
+            let owner = offer.path.owner().unwrap_or_else(|| offer.path.clone());
+            let verb = offer.path.last().unwrap_or("?");
             match owners.iter_mut().find(|(path, _)| *path == owner) {
                 Some((_, verbs)) => verbs.push(verb),
                 None => owners.push((owner, vec![verb])),
@@ -284,7 +318,8 @@ pub fn press_refusal(offer: &UiOffer, error: &OfferArgError) -> String {
     let about = match error {
         OfferArgError::Missing { name, .. }
         | OfferArgError::NotAnOption { name, .. }
-        | OfferArgError::OptionDisabled { name, .. } => Some(name.as_str()),
+        | OfferArgError::OptionDisabled { name, .. }
+        | OfferArgError::Invalid { name, .. } => Some(name.as_str()),
         _ => None,
     };
     let params: Vec<&OfferParam> = match about {
@@ -317,6 +352,23 @@ pub fn page_line(home: bool, page: Option<&UiPage>) -> String {
         None if home => "page: home (no project open)\n".to_string(),
         None => "page: project editor\n".to_string(),
     }
+}
+
+/// The line under the page line while an open from Home is in flight: the
+/// project is starting the device it runs on (a sim, in this tab) and lands
+/// in the editor by itself. Without it, the agent read Home after
+/// `project/new` answered "Waiting for the device", decided the open had
+/// failed, and pressed open again and again (activity corpus S4, S18 and
+/// S19, 2026-10-03).
+pub fn opening_line(key: &str, title: Option<&str>) -> String {
+    let name = match title {
+        Some(title) => format!("{title:?} ({key})"),
+        None => key.to_string(),
+    };
+    format!(
+        "opening: {name} — its device is starting; the editor opens by itself when it is \
+         up, so do not press open again\n"
+    )
 }
 
 /// What the user is looking at: the node in focus (or that none is), what
@@ -439,10 +491,25 @@ pub fn device_lines(roster: &DeviceRosterView) -> String {
             _ => "other firmware",
         };
         // What it runs is the board's own report; before its first one,
-        // nothing is claimed.
+        // nothing is claimed — but a LightPlayer that has not reported yet
+        // says so, because right after a flash or an update that is the
+        // state the agent must not read as done. A board that runs nothing
+        // says it plainly: its lights are dark until a project is pushed
+        // (the corpus's S15 and S19 stopped there, at a blank board).
+        let lightplayer = matches!(
+            device.firmware_face,
+            lpa_devices::FirmwareFace::LightPlayer { .. }
+        );
         let loaded = match &device.loaded_project {
             lpa_devices::view::LoadedProject::Running { label } => format!("; running {label:?}"),
-            lpa_devices::view::LoadedProject::Empty => "; no project loaded".to_string(),
+            lpa_devices::view::LoadedProject::Empty => {
+                " — no project on it; it runs nothing and its lights stay dark until one \
+                 is pushed"
+                    .to_string()
+            }
+            lpa_devices::view::LoadedProject::Unknown if lightplayer => {
+                "; has not said yet what it runs".to_string()
+            }
             lpa_devices::view::LoadedProject::Unknown => String::new(),
         };
         let _ = writeln!(
@@ -471,7 +538,7 @@ mod tests {
             lead: "page: project editor\n".to_string(),
             focus: UiOfferFocus {
                 node: Some(node.clone()),
-                area: Some(OfferPath::project()),
+                areas: vec![OfferPath::project()],
             },
             offers: vec![
                 UiOffer::new(
@@ -548,6 +615,9 @@ mod tests {
             ));
         }
         readout.text = "project: \"Demo\"\n".to_string();
+        // A real board is on the bus, so the add-a-board offers fold into
+        // the counted devices line like any other off-area offer.
+        readout.has_real_board = true;
 
         let text = readout.render();
         assert!(
@@ -577,6 +647,58 @@ mod tests {
         assert!(
             readout.offer(&clock).is_some(),
             "a counted verb is still pressable"
+        );
+    }
+
+    /// Live corpus S18 (2026-10-03): in the project editor with no real
+    /// board attached, the agent read "devices: connect-usb, connect-ble"
+    /// — a counted line with no `[needs the user's click]` mark — and told
+    /// the user to press the button itself instead of `act`ing the offer
+    /// that hands them the card. With no real board, the two add-a-board
+    /// offers must list in full even while the focus area is the project,
+    /// not devices.
+    #[test]
+    fn with_no_real_board_the_add_board_offers_list_in_full_on_every_page() {
+        let mut readout = snapshot();
+        // Both real offers need a real click (`navigator.serial
+        // .requestPort()`, `navigator.bluetooth.requestDevice()`) — the
+        // mark this fix exists to surface.
+        readout.offers.push(UiOffer::new(
+            OfferPath::devices().child("connect-usb"),
+            "usb",
+            save_action()
+                .with_label("Connect a board via USB")
+                .needs_user_activation(),
+        ));
+        readout.offers.push(UiOffer::new(
+            OfferPath::devices().child("connect-ble"),
+            "bluetooth",
+            save_action()
+                .with_label("Connect a board via Bluetooth")
+                .needs_user_activation(),
+        ));
+        readout.has_real_board = false;
+        // The focus is the project, not devices — the usual rule would
+        // count both offers under "- devices: …" instead of listing them.
+        assert_eq!(readout.focus.areas, vec![OfferPath::project()]);
+
+        let text = readout.render();
+        assert!(
+            text.contains(
+                "- devices/connect-usb: Connect a board via USB [needs the user's click]\n"
+            ),
+            "{text}"
+        );
+        assert!(
+            text.contains(
+                "- devices/connect-ble: Connect a board via Bluetooth \
+                 [needs the user's click]\n"
+            ),
+            "{text}"
+        );
+        assert!(
+            !text.contains("devices: connect-usb"),
+            "the add-board offers are listed, not folded into a counted line: {text}"
         );
     }
 
@@ -715,12 +837,69 @@ mod tests {
     fn devices_page() -> UiOfferFocus {
         UiOfferFocus {
             node: None,
-            area: Some(OfferPath::devices()),
+            areas: vec![OfferPath::devices()],
         }
     }
 
     fn save_action() -> UiAction {
         UiAction::from_op(ControllerId::new("studio|project"), ProjectOp::SaveOverlay)
+    }
+
+    /// A board that runs nothing says so in words the agent cannot read
+    /// as done (S15, S19), and a LightPlayer that has not reported yet
+    /// says that instead of nothing.
+    #[test]
+    fn a_board_that_runs_nothing_says_so_plainly() {
+        use lpa_devices::view::LoadedProject;
+        let line = |loaded: LoadedProject| {
+            let mut roster = DeviceRosterView::default();
+            roster.roster.devices.push(lightplayer_board(loaded));
+            device_lines(&roster)
+        };
+        assert_eq!(
+            line(LoadedProject::Empty),
+            "devices:\n- \"Bench board\": chip esp32c6; board seeed/xiao-esp32-c6; \
+             LightPlayer; Ready — no project on it; it runs nothing and its lights stay \
+             dark until one is pushed\n"
+        );
+        assert!(line(LoadedProject::Unknown).ends_with("; Ready; has not said yet what it runs\n"));
+        assert!(
+            line(LoadedProject::Running {
+                label: "porch".to_string()
+            })
+            .ends_with("; Ready; running \"porch\"\n")
+        );
+    }
+
+    fn lightplayer_board(loaded: lpa_devices::view::LoadedProject) -> lpa_devices::DeviceView {
+        lpa_devices::DeviceView {
+            id: crate::DeviceId(7),
+            title: "Bench board".to_string(),
+            status: lpa_devices::device::DeviceStatus::Ready,
+            state_label: "Ready".to_string(),
+            detail: None,
+            freshness_label: None,
+            identity_label: None,
+            detected_chip: Some("esp32c6".to_string()),
+            board_id: Some("seeed/xiao-esp32-c6".to_string()),
+            firmware_face: lpa_devices::FirmwareFace::LightPlayer {
+                firmware: None,
+                wire: lpa_devices::WireVersion::Match,
+            },
+            remembered_firmware: None,
+            degraded: None,
+            loaded_project: loaded,
+            engine_fps: None,
+            link_counters: None,
+            can_receive_project: true,
+            can_remove_project: false,
+            activity: None,
+            last_outcome: None,
+            terminal: Vec::new(),
+            terminal_dropped: 0,
+            firmware_blocked: None,
+            escapes: Vec::new(),
+        }
     }
 
     #[test]

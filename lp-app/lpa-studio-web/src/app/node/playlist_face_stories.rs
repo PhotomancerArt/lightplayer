@@ -14,13 +14,20 @@ use lpa_studio_core::{ProjectNodeAddress, UiAttachTarget, UiNodeFace};
 use lpa_studio_web_story_macros::story;
 
 use crate::app::node::NodePane;
-use crate::app::node::face_story_fixtures::{empty_playlist_node_view, playlist_node_face_view};
+use crate::app::node::face_story_fixtures::{
+    empty_playlist_node_view, playlist_node_face_view, playlist_strip_offers,
+};
+use crate::core::OffersProvider;
 
+/// The card's frame, with the playlist's verbs in place of the shell's
+/// offer tree: a non-active chip presses the playlist's `play`.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn PlaylistCardCanvas(children: Element) -> Element {
     rsx! {
-        div { class: "tw:w-full tw:max-w-md", {children} }
+        OffersProvider { offers: playlist_strip_offers(),
+            div { class: "tw:w-full tw:max-w-md", {children} }
+        }
     }
 }
 

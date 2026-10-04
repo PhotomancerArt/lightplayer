@@ -40,8 +40,10 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    ColorOrder, NodeId, PatchVerbKind, PatchVerbWindow, ProjectEditorOp, UiAction,
-    UiControlProductPreview, UiPatchCell, UiPatchSurface, UiPatchSurfaceFixture, UiPatchTarget,
+    ColorOrder, NodeId, OfferArgs, PATCH_CLEAR_VERB, PATCH_FLOW_PARAM, PATCH_REVERSE_VERB,
+    PATCH_ROTATE_VERB, PATCH_SET_FLOW_VERB, PATCH_STEPS_PARAM, PATCH_UNMAP_ALL_VERB,
+    ProjectEditorOp, UiAction, UiControlProductPreview, UiPatchCell, UiPatchSurface,
+    UiPatchSurfaceFixture, UiPatchTarget,
 };
 
 use crate::app::editor_shell::patching::{
@@ -53,11 +55,13 @@ use crate::app::node::lamp_view::{
 };
 use crate::app::patch::lamp_strip::{LampStrip, StripPresentation};
 use crate::app::patch::verb_ui::{
-    dispatch_assign, dispatch_verb, free_runs, instance_target, next_free_segment, port_next_free,
-    resize_segment, segment_at_free_run, selection_stride, shift_segment, target_is_unmapped,
+    free_runs, instance_target, next_free_segment, port_next_free, press_assign, press_node_verb,
+    press_shift, press_subject_verb, resize_segment, segment_at_free_run, shift_segment,
+    target_is_unmapped,
 };
 use crate::base::option_cards::{OptionCard, OptionCards};
 use crate::base::{InlineButtonTone, StudioIcon, StudioIconName, inline_text_button_class};
+use crate::core::use_offers;
 
 /// Stepped controls are squared blocks (the panel-language convention) —
 /// every transport button steps something discrete.
@@ -1114,6 +1118,8 @@ fn ObjectPane(
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let ui = use_hook(try_consume_context::<PatchingUi>);
+    // Core's offer tree: every transport button presses a patch offer.
+    let offers = use_offers();
     // Nothing here animates itself any more (Q9): every picture the panel
     // paints — published bytes or the controller's unmapped-chase preview —
     // arrives as data on the surface, so the panel keeps no clock at all.
@@ -1161,7 +1167,6 @@ fn ObjectPane(
                     let facts = object_facts(&object);
                     let colors = object_strip_colors(&surface, &object);
                     let target = Some(object.target.clone());
-                    let stride = selection_stride(&surface, &target);
                     let mapped = object.mapped;
                     // Q11: an AUTO-mapped fixture reflows its own lamps, so
                     // every transport verb here would be fought by the next
@@ -1174,11 +1179,21 @@ fn ObjectPane(
                     // the flow selector — it wears one here instead.
                     let scarf = object.whole_fixture;
                     let fixture = object.fixture;
+                    // Each transport button presses the object's fixture's
+                    // offer with the object as its subject (the stride a
+                    // rotate steps by is the offer's: the object's own).
                     let verb = {
                         let surface = surface.clone();
                         let target = target.clone();
-                        move |kind: PatchVerbKind| {
-                            dispatch_verb(&on_action, &surface, &target, kind);
+                        move |name: &'static str, args: OfferArgs| {
+                            press_subject_verb(
+                                &on_action,
+                                &offers.peek(),
+                                &surface,
+                                &target,
+                                name,
+                                args,
+                            );
                         }
                     };
                     rsx! {
@@ -1207,7 +1222,7 @@ fn ObjectPane(
                                     title: "Rotate one stride back (;)",
                                     onclick: {
                                         let verb = verb.clone();
-                                        move |_| verb(PatchVerbKind::Rotate { steps: -1, stride })
+                                        move |_| verb(PATCH_ROTATE_VERB, OfferArgs::new().with(PATCH_STEPS_PARAM, "-1"))
                                     },
                                     {keyed("‹", ";")}
                                 }
@@ -1217,7 +1232,7 @@ fn ObjectPane(
                                     title: "Rotate one stride forward (')",
                                     onclick: {
                                         let verb = verb.clone();
-                                        move |_| verb(PatchVerbKind::Rotate { steps: 1, stride })
+                                        move |_| verb(PATCH_ROTATE_VERB, OfferArgs::new().with(PATCH_STEPS_PARAM, "1"))
                                     },
                                     {keyed("›", "'")}
                                 }
@@ -1227,7 +1242,7 @@ fn ObjectPane(
                                     title: "Reverse the wire direction (r)",
                                     onclick: {
                                         let verb = verb.clone();
-                                        move |_| verb(PatchVerbKind::Reverse)
+                                        move |_| verb(PATCH_REVERSE_VERB, OfferArgs::new())
                                     },
                                     {keyed("flip", "r")}
                                 }
@@ -1237,7 +1252,7 @@ fn ObjectPane(
                                     title: "Take this object off the wire",
                                     onclick: {
                                         let verb = verb.clone();
-                                        move |_| verb(PatchVerbKind::Clear)
+                                        move |_| verb(PATCH_CLEAR_VERB, OfferArgs::new())
                                     },
                                     "unmap"
                                 }
@@ -1353,8 +1368,9 @@ fn ObjectPane(
                                                     &surface,
                                                     target,
                                                 );
-                                                if dispatch_assign(
+                                                if press_assign(
                                                         &on_action,
+                                                        &offers.peek(),
                                                         &surface,
                                                         &subject,
                                                         output,
@@ -1468,6 +1484,7 @@ fn FlowSelector(
     manual: bool,
     on_action: EventHandler<UiAction>,
 ) -> Element {
+    let offers = use_offers();
     let options = vec![
         OptionCard::new(
             FLOW_AUTO,
@@ -1489,21 +1506,26 @@ fn FlowSelector(
             selected: if manual { FLOW_MANUAL.to_string() } else { FLOW_AUTO.to_string() },
             on_pick: move |id: String| {
                 // The flow verb acts on the FIXTURE, whatever grain the
-                // selection named.
-                dispatch_verb(
+                // selection named: its `set-flow` offer, with the card's id
+                // (`auto` / `manual`, the offer's own values) as the flow.
+                press_node_verb(
                     &on_action,
+                    &offers.peek(),
                     &surface,
-                    &Some(UiPatchTarget::Fixture { node }),
-                    PatchVerbKind::SetFlow { manual: id == FLOW_MANUAL },
+                    node,
+                    PATCH_SET_FLOW_VERB,
+                    OfferArgs::new().with(PATCH_FLOW_PARAM, id),
                 );
             },
         }
     }
 }
 
-/// The flow selector's option ids — the values [`flow_label`] names.
-pub(crate) const FLOW_AUTO: &str = "auto";
-pub(crate) const FLOW_MANUAL: &str = "manual";
+/// The flow selector's option ids — the values [`flow_label`] names, and
+/// the `set-flow` offer's own `flow` values, so a picked card IS the press's
+/// value.
+pub(crate) const FLOW_AUTO: &str = lpa_studio_core::PATCH_FLOW_AUTO;
+pub(crate) const FLOW_MANUAL: &str = lpa_studio_core::PATCH_FLOW_MANUAL;
 
 /// Take every object of one fixture off the wire (undoable, like every other
 /// verb — so it is safe to try).
@@ -1514,16 +1536,19 @@ fn UnmapAllButton(
     node: NodeId,
     on_action: EventHandler<UiAction>,
 ) -> Element {
+    let offers = use_offers();
     rsx! {
         button {
             class: "{STEP}",
             title: "Take every object of this fixture off the wire (undoable)",
             onclick: move |_| {
-                dispatch_verb(
+                press_node_verb(
                     &on_action,
+                    &offers.peek(),
                     &surface,
-                    &Some(UiPatchTarget::Fixture { node }),
-                    PatchVerbKind::UnmapAll,
+                    node,
+                    PATCH_UNMAP_ALL_VERB,
+                    OfferArgs::new(),
                 );
             },
             span { class: "tw:mr-1 tw:inline-flex tw:items-center tw:align-[-1px]", aria_hidden: "true",
@@ -1553,6 +1578,8 @@ fn OutputPane(
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let ui = use_hook(try_consume_context::<PatchingUi>);
+    // Core's offer tree: the shift and the pickers press patch offers.
+    let offers = use_offers();
     // The strip reports which presentation its measured box chose, so the
     // fact line can name it (the spike's mode chip) — and so a walk-up gate
     // can see where the 7px threshold actually falls.
@@ -1564,7 +1591,7 @@ fn OutputPane(
         base.to_string()
     };
     let is_armed = matches!(armed, Some(ArmedVerb::Assign));
-    let swap_armed = matches!(armed, Some(ArmedVerb::Swap(_)));
+    let swap_armed = matches!(armed, Some(ArmedVerb::Swap { .. }));
     let arm_class = if is_armed {
         if animate {
             format!("{STEP_ARMED} ux-arm-pulse")
@@ -1623,35 +1650,23 @@ fn OutputPane(
                     let colors = output_strip_colors(frame, output.span, assumed);
                     let has_signal = !colors.is_empty();
                     let object_target = object.map(|object| object.target);
-                    let shift_window = output
-                        .window
-                        .filter(|_| !free)
-                        .map(|(start, count)| PatchVerbWindow {
-                            output_name: surface
-                                .outputs
-                                .iter()
-                                .find(|entry| entry.node == output.node)
-                                .and_then(|entry| entry.name.clone()),
-                            start,
-                            lamps: count,
-                        });
+                    let shift_window = output.window.filter(|_| !free);
+                    let output_node = output.node;
                     let nudge = {
                         let surface = surface.clone();
                         let selection = selection.clone();
-                        let shift_window = shift_window.clone();
                         move |delta: i32| {
                             match (&shift_window, selection.as_ref()) {
                                 // A MAPPED window moves with the verb (a
                                 // real, undoable write).
                                 (Some(window), _) => {
-                                    dispatch_verb(
+                                    press_shift(
                                         &on_action,
+                                        &offers.peek(),
                                         &surface,
-                                        &selection,
-                                        PatchVerbKind::ShiftPort {
-                                            window: window.clone(),
-                                            delta,
-                                        },
+                                        output_node,
+                                        *window,
+                                        delta,
                                     );
                                 }
                                 // A FREE window is selection only — a window
@@ -1722,8 +1737,9 @@ fn OutputPane(
                                                     target,
                                                 );
                                                 if let Some(lamp) = port_next_free(entry, key) {
-                                                    dispatch_assign(
+                                                    press_assign(
                                                         &on_action,
+                                                        &offers.peek(),
                                                         &surface,
                                                         &subject,
                                                         entry,
@@ -1960,8 +1976,9 @@ fn OutputPane(
                                             // transition.
                                             let subject = assign_subject_target(&surface, &target);
                                             if let Some(lamp) = port_next_free(entry, key)
-                                                && dispatch_assign(
+                                                && press_assign(
                                                     &on_action,
+                                                    &offers.peek(),
                                                     &surface,
                                                     &subject,
                                                     entry,

@@ -15,9 +15,13 @@
 //!   `secure` feature the client names an entry by its salt and proves it
 //!   holds `link_psk(K)` ([`link_psk`]) in the Noise handshake; the device
 //!   answers the lookup with [`key_candidates`], and the match is the login.
-//! - **Two persisted files**, both `version: 2` (v1 still reads): the project sidecar
-//!   ([`ProjectAccessFile`], `<project>/.lp/access.json`) and the device
-//!   store ([`DeviceAccessFile`], root `/.lp/access.json`). Neither is ever
+//! - **Two persisted files**: the project sidecar ([`ProjectAccessFile`],
+//!   `<project>/.lp/access.json`, `version: 2`, v1 still reads) and the
+//!   device store ([`DeviceAccessFile`], root `/.lp/access.json`,
+//!   `version: 3`, v1 and v2 still read).
+//! - **Open to anyone nearby** ([`OpenTo`]): what a link holds with no
+//!   login — nobody, play, or play and edit. A board with no store is open
+//!   at edit, for now. Neither is ever
 //!   readable over any link ([`is_access_file_path`]).
 //!
 //! Sans-IO throughout: time is a caller-supplied millisecond count and
@@ -44,6 +48,7 @@ pub mod hmac_sha256;
 pub mod key_lookup;
 pub mod link_psk;
 pub mod login_state;
+pub mod open_to;
 pub mod pbkdf2_sha256;
 pub mod project_access_file;
 pub mod rate_limit;
@@ -62,6 +67,7 @@ pub use login_state::{
     BeginOutcome, CHALLENGE_TTL_MS, Challenge, LoginMac, LoginOffer, LoginOutcome, LoginState,
     NONCE_BYTES,
 };
+pub use open_to::OpenTo;
 pub use pbkdf2_sha256::{derive_login_key, pbkdf2_sha256};
 pub use project_access_file::ProjectAccessFile;
 pub use rate_limit::RateLimit;

@@ -37,10 +37,11 @@ use lpa_mapping_editor::{
     DocOpen, EditorKeyOutcome, EditorViewOptions, Map2dDoc, MapTool, PolygonMode, handle_editor_key,
 };
 use lpa_studio_core::{
-    ArtifactLocation, AssetEditOp, EditorMetaOp, EditorMetaVerb, NodeId, ProjectController,
-    ProjectEditorOp, ProjectEditorView, UiAction, UiArrangeTransform, UiAssetEditor,
-    UiEditJournalEvent, UiEditorMode, UiNodeChild, UiNodeFace, UiNodeView, UiPatchSurface,
-    UiPatchTarget,
+    ARRANGE_REDO_VERB, ARRANGE_ROTATION_PARAM, ARRANGE_SCALE_PARAM, ARRANGE_SET_VERB,
+    ARRANGE_UNDO_VERB, ARRANGE_X_PARAM, ARRANGE_Y_PARAM, ArtifactLocation, AssetEditOp, NodeId,
+    OfferArgs, OfferPath, ProjectController, ProjectEditorOp, ProjectEditorView, UiAction,
+    UiArrangeTransform, UiAssetEditor, UiEditJournalEvent, UiEditorMode, UiNodeChild, UiNodeFace,
+    UiNodeView, UiOfferTree, UiPatchSurface, UiPatchTarget, arrange_history_path,
 };
 
 use arrange::{DiveHost, PackSlots, ProjectCanvasHost, refresh_pack_slots};
@@ -88,6 +89,9 @@ pub fn EditorShellCenter(
             NEXT_UPLOAD_INPUT_ID.fetch_add(1, Ordering::Relaxed)
         )
     });
+    // Core's offer tree: the arrange commits (the toolbar's turn and size
+    // steps, ⌘Z/⌘⇧Z) press the fixture's and the history's offers.
+    let offers = crate::core::use_offers();
     let Some(surface) = surface else {
         return rsx! {
             div { class: "tw:flex tw:min-h-0 tw:flex-1 tw:items-center tw:justify-center",
@@ -233,20 +237,20 @@ pub fn EditorShellCenter(
             }),
         _ => None,
     };
-    let arrange_op = arrange_dispatch(&surface);
-    let arrange_verb = {
-        let arrange_op = arrange_op.clone();
-        move |on_action: &EventHandler<UiAction>, verb: EditorMetaVerb| {
-            if let Some(op) = arrange_op(verb) {
-                on_action.call(UiAction::from_op(ProjectController::NODE_ID, op));
-            }
-        }
+    // The arrange history's undo/redo (`project/arrange/…`).
+    let arrange_verb = move |on_action: &EventHandler<UiAction>, verb: &str| {
+        press_arrange(
+            on_action,
+            &offers.peek(),
+            &arrange_history_path(verb),
+            OfferArgs::new(),
+        );
     };
     let adjust = {
         let selected = selected.clone();
-        let arrange_verb = arrange_verb.clone();
+        let surface = surface.clone();
         move |on_action: &EventHandler<UiAction>, dr: f64, ds: f64| {
-            let Some((key, node, transform)) = selected.clone() else {
+            let Some((_, node, transform)) = selected.clone() else {
                 return;
             };
             let next = UiArrangeTransform {
@@ -254,14 +258,14 @@ pub fn EditorShellCenter(
                 r: transform.r + dr,
                 s: (transform.s * if ds == 0.0 { 1.0 } else { ds }).clamp(0.05, 20.0),
             };
-            arrange_verb(
-                on_action,
-                EditorMetaVerb::Set {
-                    node_key: key,
-                    node: Some(node),
-                    transform: next,
-                },
-            );
+            if let Some(set) = surface.arrange_verbs_of(node) {
+                press_arrange(
+                    on_action,
+                    &offers.peek(),
+                    &set.child(ARRANGE_SET_VERB),
+                    placement_args(&next),
+                );
+            }
         }
     };
 
@@ -303,7 +307,6 @@ pub fn EditorShellCenter(
     let on_toolbar_item = {
         let adjust = adjust.clone();
         let enter_focus = enter_focus.clone();
-        let arrange_verb = arrange_verb.clone();
         let selected = selected.clone();
         let focused_editor = focused_editor.clone();
         let surface_fixtures: Vec<(NodeId, bool)> = surface
@@ -325,8 +328,8 @@ pub fn EditorShellCenter(
             "arrange.rot-cw" => adjust(&on_action, 15.0, 0.0),
             "arrange.shrink" => adjust(&on_action, 0.0, 1.0 / 1.15),
             "arrange.grow" => adjust(&on_action, 0.0, 1.15),
-            "arrange.undo" => arrange_verb(&on_action, EditorMetaVerb::Undo),
-            "arrange.redo" => arrange_verb(&on_action, EditorMetaVerb::Redo),
+            "arrange.undo" => arrange_verb(&on_action, ARRANGE_UNDO_VERB),
+            "arrange.redo" => arrange_verb(&on_action, ARRANGE_REDO_VERB),
             "tool.select" => dive_session.write().tool = MapTool::Select,
             "tool.grid" => dive_session.write().tool = MapTool::Grid,
             "tool.ring" => dive_session.write().tool = MapTool::Ring,
@@ -414,7 +417,6 @@ pub fn EditorShellCenter(
     // grammar — and esc's last rung exits the dive (Q4). Not dived, the
     // arrange byte stack answers ⌘Z alone.
     {
-        let arrange_verb = arrange_verb.clone();
         hotkeys::use_window_keydown(move |event: web_sys::KeyboardEvent| {
             let input = hotkeys::editor_key_input(&event);
             if focused.is_some() {
@@ -454,9 +456,9 @@ pub fn EditorShellCenter(
             if meta && is_z {
                 event.prevent_default();
                 let verb = if input.modifiers.shift() {
-                    EditorMetaVerb::Redo
+                    ARRANGE_REDO_VERB
                 } else {
-                    EditorMetaVerb::Undo
+                    ARRANGE_UNDO_VERB
                 };
                 arrange_verb(&on_action, verb);
             }
@@ -877,30 +879,52 @@ pub(crate) fn enter_dive(
     ));
 }
 
-/// Prebuild the arrange-op factory: `editor.json` artifact + the fixture
-/// facts every write refreshes footprints through. `None` op = the
-/// artifact is unknown (surface not settled), so verbs no-op honestly.
-pub(crate) fn arrange_dispatch(
-    surface: &UiPatchSurface,
-) -> impl Fn(EditorMetaVerb) -> Option<EditorMetaOp> + Clone + 'static {
-    let artifact = surface.editor_meta_artifact.clone();
-    let fixtures: Vec<lpa_studio_core::EditorMetaFixture> = surface
-        .fixtures
-        .iter()
-        .filter_map(|fixture| {
-            Some(lpa_studio_core::EditorMetaFixture {
-                node_key: fixture.address.clone()?,
-                mapping_artifact: fixture.mapping_artifact.clone(),
-            })
-        })
-        .collect();
-    move |verb| {
-        Some(EditorMetaOp {
-            artifact: artifact.clone()?,
-            fixtures: fixtures.clone(),
-            verb,
-        })
+/// Press the arrange offer at `path` with `args` — a fixture's
+/// `arrange/set` or the history's undo/redo — the way every arrange commit
+/// reaches core (M6e). A press core refuses (nothing to undo, a refused
+/// `editor.json`) is logged, never dispatched.
+pub(crate) fn press_arrange(
+    on_action: &EventHandler<UiAction>,
+    offers: &UiOfferTree,
+    path: &OfferPath,
+    args: OfferArgs,
+) -> bool {
+    match bind_arrange(offers, path, &args) {
+        Some(action) => {
+            on_action.call(action);
+            true
+        }
+        None => false,
     }
+}
+
+/// The action the arrange offer at `path` binds `args` to, or why not,
+/// logged.
+pub(crate) fn bind_arrange(
+    offers: &UiOfferTree,
+    path: &OfferPath,
+    args: &OfferArgs,
+) -> Option<UiAction> {
+    match offers.get(path).map(|offer| offer.press(args)) {
+        Some(Ok(action)) => Some(action),
+        Some(Err(error)) => {
+            log::warn!("arrange: `{path}` refused the press: {error}");
+            None
+        }
+        None => {
+            log::warn!("arrange: `{path}` is not offered");
+            None
+        }
+    }
+}
+
+/// A placement as `arrange/set`'s values: x, y, rotation and scale.
+pub(crate) fn placement_args(transform: &UiArrangeTransform) -> OfferArgs {
+    OfferArgs::new()
+        .with(ARRANGE_X_PARAM, transform.t[0].to_string())
+        .with(ARRANGE_Y_PARAM, transform.t[1].to_string())
+        .with(ARRANGE_ROTATION_PARAM, transform.r.to_string())
+        .with(ARRANGE_SCALE_PARAM, transform.s.to_string())
 }
 
 /// Every fixture mapping editor the snapshot carries, keyed by artifact:

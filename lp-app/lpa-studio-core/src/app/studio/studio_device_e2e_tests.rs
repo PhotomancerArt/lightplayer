@@ -70,6 +70,9 @@ const STEP_MS: f64 = 0.005;
 
 /// E4: the app agent's device journey over this bench.
 mod agent_device_journey_tests;
+/// The app chat seated on this bench (E4's seat, and the corpus's device
+/// seat).
+pub(crate) mod agent_device_seat;
 
 // ---------------------------------------------------------------------
 // The transport
@@ -5445,8 +5448,8 @@ fn a_pending_blank_chip_publishes_its_flash_at_new_n() {
             .first()
             .is_some_and(|pending| pending.needs_firmware())
     });
-    let provisional = bench.view().pending[0].device;
-    let prefix = format!("devices/new-{}", provisional.0);
+    // The only unidentified board is `new-1`, whatever its roster handle.
+    let prefix = "devices/new-1".to_string();
     let view = bench.controller.view();
     assert_eq!(
         board_verbs(&view, &prefix),
@@ -5501,8 +5504,7 @@ fn the_agents_flash_over_firmware_is_a_card_the_user_may_re_pick() {
             .first()
             .is_some_and(|pending| pending.needs_firmware())
     });
-    let provisional = bench.view().pending[0].device;
-    let flash = format!("devices/new-{}/flash", provisional.0);
+    let flash = "devices/new-1/flash".to_string();
     let path = crate::OfferPath::parse(&flash).unwrap();
     let offer = bench
         .controller

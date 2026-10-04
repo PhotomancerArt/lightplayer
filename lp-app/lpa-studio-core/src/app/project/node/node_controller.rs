@@ -6,10 +6,10 @@ use lpc_wire::{NodeRuntimeStatus, WireEntryState};
 
 use crate::app::project::slot::SlotEditJoin;
 use crate::{
-    ControllerId, DirtySummary, NodeRevertOp, OfferPath, ProjectController, ProjectEditorOp,
-    ProjectEditorTarget, ProjectNodeAddress, ProjectNodeStatusTone, ProjectNodeStatusView,
-    ProjectNodeTarget, ProjectSlotAddress, ProjectSlotRoot, SlotController, UiAction,
-    UiAssetEditor, UiConfigSlot, UiConfigSlotBody, UiNodeChild, UiNodeFace, UiNodeHeader,
+    ControllerId, DirtySummary, NodeCopyOp, NodeRevertOp, OfferPath, ProjectController,
+    ProjectEditorOp, ProjectEditorTarget, ProjectNodeAddress, ProjectNodeStatusTone,
+    ProjectNodeStatusView, ProjectNodeTarget, ProjectSlotAddress, ProjectSlotRoot, SlotController,
+    UiAction, UiAssetEditor, UiConfigSlot, UiConfigSlotBody, UiNodeChild, UiNodeFace, UiNodeHeader,
     UiNodeSection, UiNodeTab, UiNodeView, UiOffer, UiOfferTree, UiProductPreview, UiProductRef,
     UiProductTrackingState, UiSlotAsset, UiStatus,
 };
@@ -326,7 +326,6 @@ impl NodeController {
     ) -> Option<UiNodeFace> {
         super::node_face_builder::kind_face(
             self.node_ty()?,
-            self.address(),
             sections,
             children,
             self.error_detail(),
@@ -920,7 +919,11 @@ fn retire_face_claimed_debug_rows(
 /// - `remove`: the UNGATED delete-node action, when the caller resolved
 ///   one (its consequence and summary ride its `ActionMeta`);
 /// - `ask-agent`: the hand-off to a GLSL shader's own agent
-///   ([`ask_agent_offer`]), on shader cards only.
+///   ([`ask_agent_offer`]), on shader cards only;
+/// - `copy`: put the node (its saved def and assets) on the clipboard as an
+///   `lp.node` envelope ([`NodeCopyOp`]), on every card. The detail popup's
+///   "Copy JSON" row presses it, so a header never draws it
+///   ([`crate::is_header_verb`]).
 fn publish_node_offers(
     offers: &mut UiOfferTree,
     node: &ProjectNodeAddress,
@@ -945,7 +948,18 @@ fn publish_node_offers(
     if let Some(ask_agent) = ask_agent {
         offers.publish(ask_agent);
     }
+    offers.publish(UiOffer::new(
+        OfferPath::project_node(node).child(COPY_NODE_VERB),
+        "copy",
+        UiAction::from_op(
+            ControllerId::new(ProjectController::NODE_ID),
+            NodeCopyOp { node: node.clone() },
+        ),
+    ));
 }
+
+/// The verb segment of copying a node to the clipboard.
+pub const COPY_NODE_VERB: &str = "copy";
 
 /// The verb segment of the hand-off to a shader's own agent.
 pub const ASK_AGENT_VERB: &str = "ask-agent";

@@ -10,7 +10,7 @@
 //! - **This browser** — the name devices list it under, renameable (a
 //!   device re-labels it the next time it is plugged in).
 //! - **Your account** — the account key (Reset rotates it), and two
-//!   optional account passwords, play and edit, none by default: device
+//!   optional account passwords, play and author, none by default: device
 //!   passwords to tell friends, added next to the account key on every
 //!   device you set up or plug in.
 //! - **Remembered device passwords** — the ones friends shared with this
@@ -20,10 +20,10 @@ use dioxus::prelude::*;
 use lpa_studio_core::{AccessCommand, UiDeviceSettingsView};
 use lpc_cloud_api::AccountPasswordTier;
 
-use super::access_entry_row::ICON_TILE_CLASS;
 use super::access_fields::{
     GROUP_HEAD_CLASS, HELP_CLASS, NameField, PasswordField, TEXT_LINK_CLASS,
 };
+use super::access_key_group_row::ICON_TILE_CLASS;
 use super::browser_identity::BrowserPlatform;
 use super::section_title_class;
 use crate::base::{StudioIcon, StudioIconName};
@@ -238,7 +238,7 @@ fn AccountPasswordRow(
     let draft = use_signal(String::new);
     let title = match tier {
         AccountPasswordTier::Play => "Play password",
-        AccountPasswordTier::Edit => "Edit password",
+        AccountPasswordTier::Edit => "Author password",
     };
     let set = value
         .as_deref()

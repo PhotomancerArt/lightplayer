@@ -3043,19 +3043,28 @@ mod tests {
         }
     }
 
-    /// **The S3 asks the classic's question with the classic's bytes.**
+    /// **The S3 asks the classic's question — the trigger LINE is its own.**
     ///
     /// The classic's script is asserted against `lp-emu-esp32v3`'s gate
     /// constants by [`a_committed_stop_all_script_matches_boot_idles`]; this
-    /// asserts the S3's against the classic's, so the S3's walk is two links
-    /// from a gate rather than from an eye. It matters more than it looks: a
+    /// asserts the S3's **request** (the `+<ms> "M!…"` tail, after the
+    /// trigger) against the classic's, so the S3's walk is two links from a
+    /// gate rather than from an eye. It matters more than it looks: a
     /// `boot-idle` transcript's whole content is a heap ledger, and two chips
     /// asked different questions produce two ledgers nobody may compare.
     ///
-    /// The trigger line is checked separately against the S3 machine's own
-    /// committed `HELLO` — a trigger that is not a line the firmware prints
-    /// is a run that waits for ever, which is the failure this payload's
-    /// silicon sitting can least afford to discover at the bench.
+    /// The TRIGGER (what the directive waits on, before the tail) is not
+    /// asserted equal across chips: it names each chip's own real last
+    /// pre-filesystem `[INIT]` line, and the S3's has moved twice since this
+    /// test was written (M6 P08) while the classic's has not — the lp-link
+    /// USB cutover renamed `[INIT] I/O task spawned` to `[INIT] USB link
+    /// task spawned`, and M2's `io-thread` feature renamed it again. What
+    /// stays true across both chips is the REQUEST, which is why this test
+    /// splits the directive and compares only the tail. The S3's own trigger
+    /// is checked separately against its machine's committed `HELLO` — a
+    /// trigger that is not a line the firmware prints is a run that waits
+    /// for ever, which is the failure this payload's silicon sitting can
+    /// least afford to discover at the bench.
     #[test]
     fn the_s3_stop_all_script_is_the_classics_stimulus() {
         let root = repo_root();
@@ -3076,21 +3085,55 @@ mod tests {
             );
             lines.into_iter().next().unwrap()
         };
+        // Splits `after "<trigger>" +<n>[ms] "<request>"` at the trigger's
+        // closing quote (the trigger text itself holds no `"`, so the first
+        // unescaped one is it) and returns `(trigger, tail)`, where `tail` is
+        // everything from `+` on, byte for byte — the part two chips must
+        // still agree on even when their trigger lines do not.
+        let split_directive = |line: &str| -> (String, String) {
+            let rest = line
+                .strip_prefix("after \"")
+                .unwrap_or_else(|| panic!("expected `after \"…`: {line}"));
+            let bytes = rest.as_bytes();
+            let mut close = None;
+            let mut i = 0;
+            while i < bytes.len() {
+                if bytes[i] == b'"' && (i == 0 || bytes[i - 1] != b'\\') {
+                    close = Some(i);
+                    break;
+                }
+                i += 1;
+            }
+            let close = close.unwrap_or_else(|| panic!("no closing quote for the trigger: {line}"));
+            (
+                rest[..close].to_string(),
+                rest[close + 1..].trim_start().to_string(),
+            )
+        };
         let classic = directive("lp-emu/lp-emu-validate/walks/v3-stop-all.script");
         let s3 = directive("lp-emu/lp-emu-validate/walks/s3-stop-all.script");
+        let (_classic_trigger, classic_tail) = split_directive(&classic);
+        let (s3_trigger, s3_tail) = split_directive(&s3);
         assert_eq!(
-            s3, classic,
-            "the two Xtensa chips' `boot-idle` stimulus has drifted apart"
+            s3_tail, classic_tail,
+            "the two Xtensa chips' `boot-idle` REQUEST has drifted apart \
+             (the trigger line is allowed to differ — see the doc comment)"
         );
 
         // The trigger is a line this image really prints: the S3 machine's
-        // gate pins the whole `[INIT]` chain as `HELLO`, byte for byte.
+        // gate pins the whole `[INIT]` chain as `HELLO`, byte for byte. (The
+        // classic's own trigger is unchanged since M6 P08 and is already
+        // checked against its machine's gate constants by
+        // `a_committed_stop_all_script_matches_boot_idles`.)
         let gate =
             std::fs::read_to_string(root.join("lp-emu/esp/lp-emu-esp32s3/tests/boot_idle.rs"))
                 .expect("the S3 machine's boot_idle.rs");
         assert!(
-            gate.contains("[INIT] I/O task spawned"),
-            "the S3's trigger line is no longer in the machine gate's pinned hello"
+            gate.contains(&s3_trigger),
+            "the S3's trigger line (`{s3_trigger}`) is no longer in the \
+             machine gate's pinned hello — it has moved before (the lp-link \
+             cutover, then `io-thread`); update `s3-stop-all.script` to the \
+             image's new last pre-filesystem `[INIT]` line"
         );
 
         let arm = find_payload("boot-idle")

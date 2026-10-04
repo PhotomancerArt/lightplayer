@@ -4,7 +4,9 @@
 - **Date:** 2026-09-23
 - **Deciders:** Photomancer
 - **Supersedes:** None
-- **Superseded by:** None
+- **Superseded by:** in part, `2026-10-02-two-passwords-open-by-default.md`
+  (`open` is a tier — nobody, play or edit — and a board with no store is
+  open at edit, for now; device store version 3)
 
 ## Context
 

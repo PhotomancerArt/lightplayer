@@ -1,0 +1,29 @@
+{
+  "kind": "Playlist",
+  "bindings": {
+    "time": {
+      "source": "bus:time"
+    }
+  },
+  "idle_entry": 1,
+  "default_fade": 1.5,
+  "cycle": {
+    "kind": "cycle",
+    "step_seconds": 30.0,
+    "fade_seconds": 1.5
+  },
+  "entries": {
+    "1": {
+      "name": "veins",
+      "node": {
+        "ref": "./modules/veins/module.json"
+      }
+    },
+    "2": {
+      "name": "plasma_duo",
+      "node": {
+        "ref": "./modules/plasma_duo/module.json"
+      }
+    }
+  }
+}

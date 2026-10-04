@@ -1,0 +1,50 @@
+# S5 "Dial it in": S1's finished project; half as bright, a minute a
+# pattern, drop the colour wipe — and leave the pin, the count and the board.
+id = "S5"
+name = "s05-sean-dial-it-in"
+summary = "S1's project → brightness ~0.5, ~60 s steps, colour wipe gone, the rest untouched"
+persona = "sean"
+tags = ["edit", "tune"]
+golden = "sean-250-d6-dialed"
+
+[start]
+project = { golden = "sean-250-d6" }
+board = { known = "seeed/xiao-esp32-c6" }
+
+[user]
+say = "nice. can you make it about half as bright, let each pattern run for a minute, and drop the colour wipe one"
+otherwise = "you pick."
+
+[budget]
+turns = 16
+usd = 0.40
+
+[[check]]
+kind = "field"
+node = "Fixture"
+path = "brightness"
+between = [0.4, 0.6]
+[[check]]
+kind = "field"
+node = "Playlist"
+path = "cycle.step_seconds"
+between = [50.0, 70.0]
+[[check]]
+kind = "entries_removed"
+patterns = ["color-wipe"]
+[[check]]
+kind = "entries_kept"
+patterns = ["palette-waves", "spiral"]
+[[check]]
+kind = "output_on"
+pin = "D6"
+[[check]]
+kind = "strip_of"
+leds = 250
+[[check]]
+kind = "target_is"
+board = "seeed/xiao-esp32-c6"
+[[check]]
+kind = "all_nodes_ok"
+[[check]]
+kind = "saved"

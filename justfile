@@ -1027,6 +1027,15 @@ clippy-fw-esp32s3:
     # close, for the same reason.
     echo "clippy: --features frame-dump"
     cargo clippy --release --features frame-dump -- --no-deps -D warnings
+    # The link thread's two other shapes (`src/io_thread.rs`): the desk-only
+    # stack diagnostic, and the app WITHOUT the thread (the link task back on
+    # the main executor, no messages-first). Both are cfg'd out of the
+    # defaults, so nothing else here compiles them.
+    echo "clippy: --features io_thread_stack_diag"
+    cargo clippy --release --features io_thread_stack_diag -- --no-deps -D warnings
+    echo "clippy: io-thread OFF"
+    cargo clippy --release --no-default-features \
+        --features esp32s3,server,float-f32,json-pack -- --no-deps -D warnings
     # Every harness, individually. Harness code is cfg'd out of the app build,
     # so linting only the default features would leave it completely uncovered
     # — which is exactly how 13 fw-esp32 harnesses rotted uncompiled in this
@@ -3140,21 +3149,39 @@ test-emu-c6-cli:
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test app_agent_emu_decode -- --include-ignored --nocapture the_
 
 # App-agent evals, live leg (plan lp2025/2026-10-01-0126-app-agent-harness):
-# a model builds the scenario's project in a headless Studio (stage A,
-# project checks), then the tree it wrote runs on an emulated C6 with the
-# frames on D6 decoded (stage B). Costs real money: OPENROUTER_API_KEY or
+# a model works the scenario in its seat (stage A: a headless Studio, or the
+# device bench with a fake board; the checks judge what it left), then the
+# tree it left runs on an emulated C6 with the frames on the scenario's pad
+# decoded (stage B). Costs real money: OPENROUTER_API_KEY or
 # ~/.lightplayer/settings.json `agent.openrouter_api_key`. Never CI.
 #
 #   just app-agent-eval e1 --model <openrouter slug>
-#   just app-agent-eval all --model <slug> --repeat 3
+#   just app-agent-eval S18 --model <slug> --repeat 3
+#   just app-agent-eval all --model <slug> --tag device --max-usd 1
+#   just app-agent-eval all --dry-run --include-pending   # what would run; no model, no key
 #
-# The deterministic legs (goldens, negatives) are `cargo test -p
-# lpa-studio-core app_agent` and `test-emu-c6-cli`. See
+# The deterministic legs (goldens, negatives, scripted seats) are `cargo
+# test -p lpa-studio-core app_agent` and `test-emu-c6-cli`. See
 # lp-app/lpa-studio-core/tests/fixtures/app_agent/README.md.
 app-agent-eval scenario="all" *args:
     scripts/app-agent/eval.sh {{ scenario }} {{ args }}
 
-# Every bake-off candidate × E1–E3 × 3 runs, one table (plan P07).
+# The agent activity corpus (plan …/m-agent-activity-corpus): every active
+# scenario, live, at GLM-5.3 by default, capped at $2 of reported spend
+# (`--max-usd`), then corpus.md — per scenario, tag and persona, and the
+# diff against the last run with the same model. Never CI.
+#
+#   just app-agent-corpus
+#   just app-agent-corpus --max-usd 1 --tag device
+#   just app-agent-corpus --only S4,S7 --include-pending --model <slug>
+#   just app-agent-corpus --dry-run
+#
+# Live agent corpus run, capped at --max-usd (default $2), with corpus.md.
+app-agent-corpus *args:
+    scripts/app-agent/corpus.sh {{ args }}
+
+# `--scenarios S1,S5,S18` picks scenarios other than the default S1–S3.
+# Every bake-off candidate × S1–S3 (E1–E3) × 3 runs, one table (plan P07).
 app-agent-bakeoff *args:
     scripts/app-agent/bakeoff.sh {{ args }}
 

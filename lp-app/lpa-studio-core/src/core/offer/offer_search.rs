@@ -314,7 +314,7 @@ mod tests {
             node: Some(OfferPath::project_node(
                 &ProjectNodeAddress::parse("/demo.module/orbit.shader").unwrap(),
             )),
-            area: Some(OfferPath::project()),
+            areas: vec![OfferPath::project()],
         });
 
         assert_eq!(
@@ -353,7 +353,7 @@ mod tests {
             node: Some(OfferPath::project_node(
                 &ProjectNodeAddress::parse("/fixture.fixture").unwrap(),
             )),
-            area: Some(OfferPath::devices()),
+            areas: vec![OfferPath::devices()],
         });
         assert_eq!(
             paths(tree.search("remove")),
@@ -374,7 +374,7 @@ mod tests {
             node: Some(OfferPath::project_node(
                 &ProjectNodeAddress::parse("/demo.module/orbit.shader").unwrap(),
             )),
-            area: Some(OfferPath::project()),
+            areas: vec![OfferPath::project()],
         });
 
         // "rev" is a substring of both reverts and only letters-in-order in

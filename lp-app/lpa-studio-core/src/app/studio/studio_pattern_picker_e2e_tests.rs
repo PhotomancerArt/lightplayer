@@ -33,9 +33,12 @@ use crate::app::studio::studio_edit_e2e_tests::{
     InProcessServerIo, drive, project_action, project_editor,
 };
 use crate::{
-    PanelWriteOp, PlaylistActivateOp, ProjectOp, StudioActor, StudioCommand, StudioController,
-    StudioServerClient, UiAction, UiNodeFace, UiPanelGroup, UiPanelWidget, UiPatternEntryState,
-    UiPatternPicker, UiStudioView,
+    OfferArgs, OfferPath, PLAYLIST_CYCLE_VERB, PLAYLIST_CYCLING_PARAM, PLAYLIST_ENTRY_PARAM,
+    PLAYLIST_NEXT_VERB, PLAYLIST_PLAY_VERB, PLAYLIST_PREV_VERB, PLAYLIST_SKIP_VERB,
+    PLAYLIST_STEP_LONGER_VERB, PLAYLIST_STEP_SHORTER_VERB, PanelWriteOp, PlaylistActivateOp,
+    ProjectOp, StudioActor, StudioCommand, StudioController, StudioServerClient, UiAction,
+    UiNodeFace, UiOffer, UiPanelGroup, UiPanelWidget, UiPatternEntryState, UiPatternPicker,
+    UiStudioView,
 };
 
 #[test]
@@ -127,9 +130,8 @@ fn the_pattern_instruments_gestures_drive_the_real_playlist() {
     let mut session = Session::connect();
 
     // -- next: an activate of the neighbouring key, which loads it --------
-    let next = picker(&session.view).next.expect("a next entry");
-    assert_eq!(activated(&next), 2);
-    session.act(next);
+    assert_eq!(activated(&session.verb(PLAYLIST_NEXT_VERB).action), 2);
+    session.press(PLAYLIST_NEXT_VERB, OfferArgs::new());
     session.refresh_until("Aurora plays", |view| picker(view).active == Some(2));
     let view = session.view.clone();
     assert_eq!(
@@ -137,23 +139,28 @@ fn the_pattern_instruments_gestures_drive_the_real_playlist() {
         "Aurora",
         "this pattern's knobs follow the switch"
     );
-    assert_eq!(activated(picker(&view).prev.as_ref().expect("prev")), 1);
+    assert_eq!(activated(&session.verb(PLAYLIST_PREV_VERB).action), 1);
 
     // -- on/off: switch Scanner off; the cycle and next pass it by ---------
-    let toggle = picker(&view).entries[2].toggle.clone().expect("a switch");
-    let op = toggle
+    let skip = session.verb(PLAYLIST_SKIP_VERB);
+    let op = skip
+        .press(&OfferArgs::new().with(PLAYLIST_ENTRY_PARAM, "3"))
+        .expect("Scanner can be switched off")
         .op_as::<PanelWriteOp>()
         .expect("a panel write")
         .clone();
     assert_eq!(op.channel, lpc_model::PLAYLIST_SKIP_CHANNEL);
-    session.act(toggle);
+    session.press(
+        PLAYLIST_SKIP_VERB,
+        OfferArgs::new().with(PLAYLIST_ENTRY_PARAM, "3"),
+    );
     session.refresh_until("Scanner reads skipped", |view| {
         picker(view).entries[2].state == UiPatternEntryState::Skipped
     });
     let picker_now = picker(&session.view);
     assert!(!picker_now.entries[2].enabled);
     assert_eq!(
-        activated(picker_now.next.as_ref().expect("next")),
+        activated(&session.verb(PLAYLIST_NEXT_VERB).action),
         4,
         "next passes the skipped entry"
     );
@@ -177,8 +184,10 @@ fn the_pattern_instruments_gestures_drive_the_real_playlist() {
     );
 
     // -- cycle: switch it on; the playlist reads it back -------------------
-    let cycle = picker_now.cycle_toggle.clone().expect("a cycle switch");
-    session.act(cycle);
+    session.press(
+        PLAYLIST_CYCLE_VERB,
+        OfferArgs::new().with(PLAYLIST_CYCLING_PARAM, "true"),
+    );
     session.refresh_until("the cycle runs", |view| picker(view).cycling());
     let picker_now = picker(&session.view);
     assert_eq!(
@@ -189,11 +198,14 @@ fn the_pattern_instruments_gestures_drive_the_real_playlist() {
         },
         "the default step, with the playlist's own default_fade"
     );
-    assert!(picker_now.step_longer.is_some() && picker_now.step_shorter.is_some());
+    session.verb(PLAYLIST_STEP_LONGER_VERB);
+    session.verb(PLAYLIST_STEP_SHORTER_VERB);
 
     // -- a tap on a dormant entry plays it --------------------------------
-    let tap = picker_now.entries[0].play.clone().expect("tap to play");
-    session.act(tap);
+    session.press(
+        PLAYLIST_PLAY_VERB,
+        OfferArgs::new().with(PLAYLIST_ENTRY_PARAM, "1"),
+    );
     session.refresh_until("Soft Noise plays again", |view| {
         picker(view).active == Some(1)
     });
@@ -213,11 +225,10 @@ fn activating_a_dormant_entry_loads_it_and_opens_its_card() {
         "aurora starts dormant: absent from the tree entirely (AC1)"
     );
 
-    let tap = picker(&session.view).entries[1]
-        .play
-        .clone()
-        .expect("tap to play aurora");
-    session.act(tap);
+    session.press(
+        PLAYLIST_PLAY_VERB,
+        OfferArgs::new().with(PLAYLIST_ENTRY_PARAM, "2"),
+    );
     session.refresh_until("aurora's card lands, focused", |view| {
         node_focused(view, "Aurora") == Some(true)
     });
@@ -257,23 +268,25 @@ fn node_focused(view: &UiStudioView, label: &str) -> Option<bool> {
 fn a_pattern_that_fails_to_compile_reads_failed() {
     let mut session = Session::connect();
 
-    let tap = picker(&session.view).entries[3]
-        .play
-        .clone()
-        .expect("tap to play Broken");
-    session.act(tap);
+    session.press(
+        PLAYLIST_PLAY_VERB,
+        OfferArgs::new().with(PLAYLIST_ENTRY_PARAM, "4"),
+    );
     session.refresh_until("Broken reads failed", |view| {
         picker(view).entries[3].state == UiPatternEntryState::Failed
     });
     let picker_now = picker(&session.view);
     assert!(
-        picker_now.entries[3].play.is_some(),
+        session
+            .verb(PLAYLIST_PLAY_VERB)
+            .press(&OfferArgs::new().with(PLAYLIST_ENTRY_PARAM, "4"))
+            .is_ok(),
         "a failed entry can be tapped to try again"
     );
     assert_ne!(picker_now.active, Some(4), "and it is not what plays");
     let from = picker_now.active.expect("something plays");
-    for step in [picker_now.next.as_ref(), picker_now.prev.as_ref()] {
-        let target = activated(step.expect("a neighbour"));
+    for verb in [PLAYLIST_NEXT_VERB, PLAYLIST_PREV_VERB] {
+        let target = activated(&session.verb(verb).action);
         assert!(
             target != 4 && target != from,
             "next/prev pass the failed entry, got {target}"
@@ -319,6 +332,27 @@ impl Session {
             views,
             view,
         }
+    }
+
+    /// The playlist's verb `verb` (`project/<playlist>/<verb>`), as the
+    /// view publishes it now; it must be offered.
+    fn verb(&self, verb: &str) -> UiOffer {
+        let path: OfferPath = picker(&self.view).verbs.child(verb);
+        self.view
+            .offers
+            .get(&path)
+            .unwrap_or_else(|| panic!("`{path}` is not offered"))
+            .clone()
+    }
+
+    /// Press the playlist's verb `verb` with `args`, as the instrument's
+    /// click does.
+    fn press(&mut self, verb: &str, args: OfferArgs) {
+        let action = self
+            .verb(verb)
+            .press(&args)
+            .unwrap_or_else(|error| panic!("`{verb}` refused the press: {error}"));
+        self.act(action);
     }
 
     fn act(&mut self, action: UiAction) {

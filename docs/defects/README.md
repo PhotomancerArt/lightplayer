@@ -250,11 +250,19 @@ genuinely fits none of these, and define it here in one line.
   that is never reused is sized by every id ever minted, not by what is
   alive, so removal leaves a tombstone that is never reclaimed. Harmless
   while removal is rare; a leak the day a feature makes removal routine.
+- **`capped-store-without-eviction`** — a store with a hard cap is fed
+  by an identity that multiplies on its own (one per origin, per install),
+  has no rule for what leaves when it is full, and its refusal at the cap
+  is swallowed — so it fills on a schedule nobody chose and then quietly
+  stops accepting anyone new.
 - **`wake-quantum-throttle`** — a task that services a stream takes a
   fixed quantum (one packet, one line) per scheduler wake, so throughput is
   bounded by how often it is woken rather than by the link, and anything
   that makes wakes rarer (a longer frame, a slower emulator) turns into
   latency proportional to message size.
+- **`absence-from-incomplete-search`** — a search over a candidate set
+  that never contained the answer reports "not found", and the result is
+  recorded as a fact about the thing searched for, not about the search.
 
 ## Index
 
@@ -365,6 +373,9 @@ a fifth still lands somewhere the new `Fault` status and pattern don't reach.
 
 | Class | Date | Entry | Status | Area |
 | --- | --- | --- | --- | --- |
+| fidelity | 2026-10-03 | [the-emulated-s3-shows-no-frame-rate-cost-for-link-load](2026-10-03-the-emulated-s3-shows-no-frame-rate-cost-for-link-load.md) | **open** | lp-emu-esp32s3 time grade `t1` (its only grade): PR #942's desk sitting found the S3's frame rate falls 7–9 % (main) and 19–20 % (link thread + messages-first) on silicon while `link rtt` answers requests, where the emulator showed +0.2–0.3 %; request latency in frames carries over within ~0.1 frame. Silicon renders `shader-oracle` 4.3× slower than `t1` (55 vs 239 fps). Mechanism unproven — likely the C6's cold-code-path blind spot (no cache cost at `t1`), but no S3 cache fill has been measured. Also: main's frame-bound transfer moves 1.7–1.9× more bytes a frame emulated. `lp-emu:esp32s3:t1`, lp-emu `ab8345d38`; silicon `D8:3B:DA:47:29:70` |
+| capped-store-without-eviction | 2026-10-02 | [a-full-device-store-refuses-new-access-silently](2026-10-02-a-full-device-store-refuses-new-access-silently.md) | fixed | lpa-studio-core access sync + lpc-access cap: every dev-server origin is its own browser key, so Yona's desk C6 filled with 16 × "Brave on Mac" and the 17th USB connect's `TooManySecrets` was only logged. A full board now drops its oldest other browser key (never this browser's, an account's, or a password) and says which; retired keys go first; a failed sync shows in the panel |
+| absence-from-incomplete-search | 2026-10-03 | [xiao-c6-d4-d5-unmapped](2026-10-03-xiao-c6-d4-d5-unmapped.md) | fixed | lpc-hardware `boards/seeed/xiao-esp32-c6.json`: D4/D5 were `not-found` with no GPIO, so no project could put LEDs on them (a user asked for D5). The 2026-05 calibration only pulses GPIOs the manifest already lists, and the first profile listed GPIO0–21; D4/D5 are GPIO22/23 (Seeed pin list). Now assigned, with resources, sidecar pins and a regression test |
 | untested-path | 2026-10-02 | [ble-asks-password-when-open](2026-10-02-ble-asks-password-when-open.md) | fixed | lpa-studio-core `AccessSession::checked` vs `logged_in`: `logged_in`'s `Outcome::Granted` arm already clears a stale `prompt`/`last_refusal` on a grant it just earned (except `NeedsEdit`); `checked` set `phase = Granted` on the hello's own grant but never cleared them. A sheet raised while a board was locked survived the board being opened, a disconnect/reconnect, and the next hello — Bluefy on an iPhone asked for a password on an open-play board. The emulated BLE path (`?ble=emu`) is Studio's trusted link, so no walk ever drove `checked`'s `(required: true, ...)` branch |
 | backend-contract-divergence | 2026-10-02 | [bluefy-writes-a-views-whole-buffer](2026-10-02-bluefy-writes-a-views-whole-buffer.md) | fixed (phone-proven) | lpa-link browser_ble.js `write`: chunks were `subarray` views and Bluefy sends a view's WHOLE buffer, so every 180 B chunk carried the entire request; past 512 B the board refused the long write, the page tore the link down (0x13) and Bluefy alerted — pinning a palette dropped the link every time. Chunks are `slice` copies now; the `?ble=emu` polyfill models Bluefy (`wholeBufferWrites`). Explains the 2026-09-25 "why a long write" mystery |
 | state-conflation | 2026-10-02 | [a-bluetooth-reconnect-after-an-unlock-stays-locked-and-flaps](2026-10-02-a-bluetooth-reconnect-after-an-unlock-stays-locked-and-flaps.md) | fixed | lpa-studio-core `AccessSession::logged_in`: a successful automatic unlock marked the automatic tries spent, so a held key was never offered again. On a LOCKED board every silent Bluetooth reconnect came up locked, the board dropped it at its unlock deadline, and Web Bluetooth reconnected: one native Bluefy alert per lap, forever. Only a try that did not unlock is spent now. Found while chasing a Bluefy flapping report, but not that report's cause (that board is open; the cause was bluefy-writes-a-views-whole-buffer) |

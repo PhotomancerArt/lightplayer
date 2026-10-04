@@ -1,0 +1,30 @@
+# S14 "Switch to the fire one now": live Play controls, not an edit — the
+# board plays Fire right away and holds on it, the saved project untouched.
+id = "S14"
+name = "s14-jordan-fire-now"
+summary = "Running board → plays Fire now and holds, through live Play, project unchanged"
+persona = "jordan"
+tags = ["live-control", "device"]
+status = "pending"
+waits_for = "M6"
+note = "Live play controls are still web-built (M6e, the pattern picker and playlist part). The 'plays Fire now' check lands with them."
+
+[start]
+project = { golden = "jordan-venue" }
+board = { state = "running", actual = "seeed/xiao-esp32-c6", connected = true }
+
+[user]
+say = "switch it to the fire one now, keep it there for the next hour"
+otherwise = "yeah go for it."
+
+[budget]
+turns = 10
+usd = 0.25
+
+[[check]]
+kind = "unchanged"
+[[check]]
+kind = "never"
+what = "tool:edit_project"
+[[check]]
+kind = "board_runs_project"

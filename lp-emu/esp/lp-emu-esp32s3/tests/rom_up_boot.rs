@@ -858,7 +858,7 @@ fn the_rom_up_boot_log_is_the_roms_and_the_bootloaders_line_for_line() {
     let usb = String::from_utf8_lossy(&machine.usb_sj()).into_owned();
     for line in [
         "[INIT] fw-esp32s3 boot",
-        "[INIT] USB link task spawned",
+        "[INIT] io thread: stack 4096 B, priority 1, core 0",
         "[INIT] flash filesystem mounted",
         "[INIT] fw-esp32 initialized, starting server loop",
     ] {

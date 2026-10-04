@@ -1,0 +1,62 @@
+# S7 "Glowing mushrooms": Luna knows her board is a XIAO if asked, but
+# won't think to say so, and doesn't say the pin either.
+id = "S7"
+name = "s07-luna-mushrooms"
+summary = "60 LEDs, chip known, board and pin not → asks both, slow soft patterns on D10"
+persona = "luna"
+tags = ["build", "ask-dont-guess", "pin", "patterns"]
+golden = "luna-60-d10"
+note = "Colours: picking patterns whose colours fit, or handing the recolour to the shader's agent (a card), both pass; claiming a recolour it didn't make does not."
+
+[start]
+project = "blank"
+board = { chip = "esp32c6", actual = "seeed/xiao-esp32-c6" }
+
+[user]
+say = "I'm making glowing mushrooms for a garden piece. 5 mushrooms with 12 LEDs in each cap, all chained on one wire. Can you make them breathe slowly, kind of greens and purples?"
+otherwise = "whatever you think looks good."
+
+[[user.reply]]
+topic = "board"
+when = ["board", "which xiao", "microcontroller", "controller", "what kind", "model"]
+text = "Oh, it's a XIAO, the C6 one."
+
+[[user.reply]]
+topic = "pin"
+when = ["pin", "gpio", "data line", "data wire", "wired to", "connected to"]
+text = "D10."
+
+[budget]
+turns = 28
+usd = 0.75
+
+[[check]]
+kind = "asked_before"
+topic = "board"
+before = "pin"
+[[check]]
+kind = "asked_before"
+topic = "pin"
+before = "pin"
+[[check]]
+kind = "output_on"
+pin = "D10"
+[[check]]
+kind = "target_is"
+board = "seeed/xiao-esp32-c6"
+[[check]]
+kind = "strip_of"
+leds = 60
+[[check]]
+kind = "playlist"
+min_entries = 2
+from = ["pulse", "fireflies", "noise-soft", "aurora", "twinkle", "palette-waves", "plasma-duo", "veins"]
+[[check]]
+kind = "said_none"
+words = ["i recolored", "i recoloured", "i've recolored", "i've recoloured", "i changed the colors to", "i changed the colours to"]
+[[check]]
+kind = "graph_wired"
+[[check]]
+kind = "all_nodes_ok"
+[[check]]
+kind = "saved"

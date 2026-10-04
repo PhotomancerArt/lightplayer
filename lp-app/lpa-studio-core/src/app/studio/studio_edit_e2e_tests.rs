@@ -189,18 +189,22 @@ fn simulator_session_edit_save_and_revert_end_to_end() {
         "with the persisted edit written the project reads clean — the surviving debug override is not dirty"
     );
 
-    // Revert all: the overlay clears, every slot returns to Clean, and the
-    // *gated* refresh (since = last known revision) delivers the reverted
-    // def values directly — no reconnect/full resync. Reverting advances the
-    // effective def revisions monotonically (studio editing ADR follow-up
-    // (e)), so the delta read includes the reverted roots.
+    // Clear the debug override: the overlay clears, every slot returns to
+    // Clean, and the *gated* refresh (since = last known revision) delivers
+    // the reverted def values directly — no reconnect/full resync. Clearing
+    // advances the effective def revisions monotonically (studio editing
+    // ADR follow-up (e)), so the delta read includes the reverted roots.
     //
-    // Sent straight, not pressed: Revert to saved is offered only while
-    // persisted edits are pending, and with the save written the project
-    // reads clean — only the debug override survives.
-    actor_clicks(&mut actor, &handle.tx).not_offered("project/revert");
-    handle.tx.send(project_action(ProjectOp::RevertAllEdits));
-    drive(actor.run_one_batch_for_test());
+    // Revert to saved is offered only while persisted edits are pending,
+    // and with the save written the project reads clean: what is left is
+    // the debug override, whose verb is `project/clear-debug` (the "Debug
+    // active" chip) — the one way out the UI offers here (M6e).
+    let mut clicks = actor_clicks(&mut actor, &handle.tx);
+    clicks.not_offered("project/revert");
+    clicks.press(
+        format!("project/{}", crate::CLEAR_DEBUG_VERB),
+        crate::OfferArgs::new(),
+    );
     handle.tx.send(project_action(ProjectOp::RefreshProject));
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("revert emits a snapshot");
@@ -2109,11 +2113,14 @@ fn an_applied_shader_body_keeps_the_header_dirty_across_the_refresh_ticks() {
     let mut snapshot = view.try_recv().expect("apply emits a snapshot");
     assert_eq!(editor_dirty(&snapshot), (1, 0), "right after the apply");
     // What the header dispatches is the project-level save, not a second
-    // asset-only verb: the control renders the `project/*` offers as-is.
+    // asset-only verb: the control renders the `project/*` header verbs
+    // as-is (the add-node picker's, also at `project/`, have their own
+    // control).
     assert_eq!(
         snapshot
             .offers
             .verbs_of(&crate::OfferPath::project())
+            .filter(|offer| offer.path.last().is_some_and(crate::is_header_verb))
             .count(),
         2
     );
@@ -2144,6 +2151,7 @@ fn an_applied_shader_body_keeps_the_header_dirty_across_the_refresh_ticks() {
             snapshot
                 .offers
                 .verbs_of(&crate::OfferPath::project())
+                .filter(|offer| offer.path.last().is_some_and(crate::is_header_verb))
                 .count(),
             2,
             "the header keeps Save/Revert across refresh tick {tick}"

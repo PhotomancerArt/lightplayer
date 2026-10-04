@@ -235,6 +235,13 @@ pub struct StudioController {
     /// while the sim opens, and tells the connect flow which package
     /// to push instead of probing running projects.
     pending_open: Option<PendingOpen>,
+    /// The `new-<n>` numbers unidentified links and devices are offered
+    /// under ([`crate::ProvisionalBoardNumbers`]). Kept while the offer
+    /// tree is built (a `&self` build), hence the cell.
+    provisional_numbers: std::cell::RefCell<crate::ProvisionalBoardNumbers>,
+    /// True while an app-agent `act` dispatches its press: what that press
+    /// starts is the agent's to hear about ([`Self::dispatch`]).
+    agent_pressing: bool,
     /// The open that stopped at the mismatch page (D50). Cleared the
     /// moment any open starts — a new gesture supersedes the question the
     /// page was asking, exactly as it supersedes an open in flight.
@@ -439,6 +446,8 @@ impl StudioController {
             pending_reslug: None,
             library_refresh_pending: false,
             pending_open: None,
+            provisional_numbers: Default::default(),
+            agent_pressing: false,
             open_mismatch: None,
             link_health: crate::app::devices::LinkHealthMap::default(),
             lens_reconnect: None,
@@ -646,11 +655,19 @@ impl StudioController {
             None if home => Some(crate::OfferPath::devices()),
             None => Some(crate::OfferPath::project()),
         };
+        let mut areas: Vec<crate::OfferPath> = area.into_iter().collect();
+        // With no project open, the gallery pages are where a project is
+        // started or opened: Home's `project/new` and `project/open` are
+        // the page's own verbs there (and the only project verbs in the
+        // tree), so they rank and list with the devices'.
+        if home && areas.contains(&crate::OfferPath::devices()) {
+            areas.push(crate::OfferPath::project());
+        }
         let node = self
             .editor_view_in_place(home)
             .and_then(|view| self.project.looked_at_node(view))
             .map(|node| crate::OfferPath::project_node(node.address()));
-        crate::UiOfferFocus { node, area }
+        crate::UiOfferFocus { node, areas }
     }
 
     /// (Re)install whichever transport this build's halves add up to, and
@@ -1189,6 +1206,8 @@ impl StudioController {
         {
             self.resume_app_agent();
         }
+        // A device activity the agent started ends in a fold.
+        self.observe_agent_wait();
         self.mark_dirty();
     }
 
@@ -2183,6 +2202,11 @@ impl StudioController {
     pub fn view(&self) -> UiStudioView {
         let mut offers = crate::UiOfferTree::new();
         if let Some(home) = self.home_view() {
+            // Home's own verbs first: with no project open, starting or
+            // opening one is what the page is for.
+            for offer in crate::home_offers(&home) {
+                offers.publish(offer);
+            }
             self.publish_device_offers(&mut offers);
             offers.set_focus(self.offer_focus(true));
             return UiStudioView::new(Vec::new(), self.console_view())
@@ -2289,9 +2313,16 @@ impl StudioController {
         // The push's two lists are the gallery's, read the way the home
         // view reads them — there is no separate device-side source.
         let sources = home_view_builder::build_home_view(self.home_inputs.as_ref(), None, None);
-        let mut taken = std::collections::BTreeSet::new();
+        let entries: Vec<crate::DeviceId> = roster
+            .roster
+            .pending
+            .iter()
+            .map(|pending| pending.device)
+            .chain(roster.roster.devices.iter().map(|view| view.id))
+            .collect();
+        let prefixes = self.device_offer_prefixes(&entries);
         for pending in &roster.roster.pending {
-            let prefix = self.device_offer_prefix(pending.device, &mut taken);
+            let prefix = prefixes[&pending.device].clone();
             for offer in crate::pending_link_offers(pending, &prefix) {
                 offers.publish(offer);
             }
@@ -2300,7 +2331,7 @@ impl StudioController {
         for view in &roster.roster.devices {
             let device = self.devices.roster().device(view.id);
             let facts = crate::DeviceOfferFacts {
-                prefix: self.device_offer_prefix(view.id, &mut taken),
+                prefix: prefixes[&view.id].clone(),
                 // A runtime wears a band; silicon wears none (the card's
                 // own reading of which words the power verbs take).
                 face: match roster.runtime_bands.contains_key(&view.id) {
@@ -2350,34 +2381,57 @@ impl StudioController {
             .is_some_and(|uid| projects.iter().any(|project| project.uid == uid))
     }
 
-    /// The offer-path prefix a device's or pending link's verbs live under:
-    /// once the roster knows its MAC, `devices/mac-<12 hex>` — or
+    /// The offer-path prefix each device's or pending link's verbs live
+    /// under: once the roster knows its MAC, `devices/mac-<12 hex>` — or
     /// `sim-`/`emu-` when its endpoint says it is a sim or an in-tab
     /// emulated board ([`crate::BoardRef`]) — else the provisional
-    /// `devices/new-<n>` by its roster handle.
+    /// `devices/new-<n>`, numbered by [`crate::ProvisionalBoardNumbers`]
+    /// (`new-1` for the only unidentified board, kept while it stays so).
     ///
-    /// `taken` holds the refs already handed out in this build: should two
-    /// entries answer to one MAC (a pending link whose preflight read the
-    /// MAC of a board the roster already remembers), the second is offered
-    /// by its handle instead, so no path is published twice.
-    fn device_offer_prefix(
+    /// Should two entries answer to one MAC (a pending link whose
+    /// preflight read the MAC of a board the roster already remembers),
+    /// the second is offered as a `new-<n>` instead, so no path is
+    /// published twice.
+    fn device_offer_prefixes(
         &self,
-        device: crate::DeviceId,
-        taken: &mut std::collections::BTreeSet<crate::BoardRef>,
-    ) -> crate::OfferPath {
-        let mut board = match self.devices.roster().identity(device) {
-            Some(identity) => crate::BoardRef::for_identity(identity, device),
-            None => crate::BoardRef::New(device),
-        };
-        if !taken.insert(board) {
-            log::warn!(
-                "two roster entries answer to {board}; {device:?} is offered as new-{}",
-                device.0
-            );
-            board = crate::BoardRef::New(device);
-            taken.insert(board);
-        }
-        crate::OfferPath::board(&board)
+        entries: &[crate::DeviceId],
+    ) -> std::collections::BTreeMap<crate::DeviceId, crate::OfferPath> {
+        let mut taken = std::collections::BTreeSet::new();
+        let known: Vec<(crate::DeviceId, Option<crate::BoardRef>)> = entries
+            .iter()
+            .map(|device| {
+                let board = self
+                    .devices
+                    .roster()
+                    .identity(*device)
+                    .and_then(crate::BoardRef::known);
+                match board {
+                    Some(board) if !taken.insert(board) => {
+                        log::warn!(
+                            "two roster entries answer to {board}; {device:?} is offered as new"
+                        );
+                        (*device, None)
+                    }
+                    board => (*device, board),
+                }
+            })
+            .collect();
+        let unidentified: Vec<crate::DeviceId> = known
+            .iter()
+            .filter(|(_, board)| board.is_none())
+            .map(|(device, _)| *device)
+            .collect();
+        let mut numbers = self.provisional_numbers.borrow_mut();
+        numbers.renumber(&unidentified);
+        known
+            .into_iter()
+            .map(|(device, board)| {
+                let board = board.unwrap_or_else(|| {
+                    crate::BoardRef::New(numbers.number(device).unwrap_or_default())
+                });
+                (device, crate::OfferPath::board(&board))
+            })
+            .collect()
     }
 
     /// The LENS session's docked card (D43): the device the editor is open
@@ -2844,6 +2898,20 @@ impl StudioController {
         let card = self.agent.app_session_mut().pending_card_for(&action);
         let press = action.offer_press().cloned();
         let chooser_before = self.devices.effects().last_grant_request();
+        // What this press starts that is still under way when it returns —
+        // an open, a flash, a push — is the agent's to hear about when it
+        // ends, if the press was the agent's: its own `act`, or the card it
+        // handed the user. Any other press on the board the agent waits on
+        // is the user taking it over.
+        let agent_press = self.agent_pressing || card.is_some();
+        let started_before = AgentStartProbe {
+            opening: self.pending_open_card_key(),
+            journal: self.device_journal_seq(),
+            push_project: action
+                .op_as::<crate::DevicePushOp>()
+                .map(|op| self.push_source_label(&op.source)),
+        };
+        let user_device = (!agent_press).then(|| pressed_device(&action)).flatten();
         let result = self.dispatch_inner(action, updates.clone()).await;
         if let Some(card) = card {
             // A press that opened a platform chooser (connect over USB or
@@ -2866,9 +2934,18 @@ impl StudioController {
                 None => self.app_card_pressed(&card, &result, press),
             }
         }
+        if agent_press && result.is_ok() {
+            self.note_agent_started(started_before);
+        }
+        if let Some(device) = user_device {
+            self.user_pressed_device(device);
+        }
         // Release closed projects' locks and re-hydrate the gallery when
         // the action made either due (open/close/save/home ops).
         self.settle_library().await;
+        // What the agent waits on may have ended here (a Cancel, the
+        // user's own open replacing it, a push that failed at once).
+        self.observe_agent_wait();
         // A dispatched action changes local state (project state, focus,
         // logs, or an error to surface), so the actor's next gate must emit.
         self.mark_dirty();
@@ -4400,6 +4477,13 @@ impl StudioController {
         }))
     }
 
+    /// What the open in flight is pending under (any kind of open).
+    fn pending_open_card_key(&self) -> Option<String> {
+        self.pending_open
+            .as_ref()
+            .map(|pending| pending.card_key().to_string())
+    }
+
     /// The pending open's library key, when it has one.
     fn pending_open_key(&self) -> Option<String> {
         match &self.pending_open {
@@ -5657,6 +5741,13 @@ impl StudioController {
     /// from the refresh tick (the one recurring async seam); a board that
     /// is still not ready keeps the intent, one that vanished drops it.
     pub(crate) async fn try_pending_device_lens(&mut self) {
+        self.try_pending_device_lens_inner().await;
+        // A held open the agent started lands (or fails) here, and a
+        // flash's hold for the board's report runs out here.
+        self.observe_agent_wait();
+    }
+
+    async fn try_pending_device_lens_inner(&mut self) {
         let Some(uid) = self.pending_device_lens.clone() else {
             return;
         };
@@ -6140,6 +6231,9 @@ impl StudioController {
                 Ok(UiNotices::new())
             }
             crate::AgentOp::AppStop => {
+                // Stopped means stopped: an open still landing or a flash
+                // still running does not wake the agent back up.
+                self.agent.app_session_mut().forget_agent_wait();
                 self.agent.request_app_stop();
                 Ok(UiNotices::new())
             }
@@ -6350,6 +6444,9 @@ impl StudioController {
     /// Start one app-chat run. Unlike the shader chat it needs no open
     /// project: the app agent builds one from nothing.
     fn app_agent_send(&mut self, text: String) -> UiResult {
+        // The user spoke: what the agent is waiting on owes it nothing
+        // now — this run reads the page as it is.
+        self.agent.app_session_mut().forget_agent_wait();
         self.app_agent_start(text, true)
     }
 
@@ -6416,7 +6513,13 @@ impl StudioController {
                 says: card.title,
             };
         }
-        match Box::pin(self.dispatch(action)).await {
+        // What the press starts that is still under way when it returns (an
+        // open whose device is starting, a flash, a push) ends after this
+        // run has: the agent is resumed then ([`Self::observe_agent_wait`]).
+        self.agent_pressing = true;
+        let dispatched = Box::pin(self.dispatch(action)).await;
+        self.agent_pressing = false;
+        match dispatched {
             Ok(notices) => ActOutcome::Done {
                 notices: notices
                     .notices
@@ -6466,12 +6569,325 @@ impl StudioController {
         self.resume_app_agent();
     }
 
+    /// Remember what an agent's press started that is still under way —
+    /// an open from Home whose device is starting, or a device activity
+    /// (flash, firmware update, push, erase, remove-project) — so the
+    /// agent is resumed when it ends ([`Self::observe_agent_wait`]).
+    fn note_agent_started(&mut self, before: AgentStartProbe) {
+        use crate::app::agent::app_agent_session::{AgentActivityWait, AgentWait};
+        if let Some(key) = self.pending_open_card_key()
+            && before.opening.as_deref() != Some(key.as_str())
+        {
+            self.agent
+                .app_session_mut()
+                .agent_wait_started(AgentWait::Open { key });
+            return;
+        }
+        let Some((device, kind, seq)) = self.activity_started_after(before.journal) else {
+            return;
+        };
+        let board = self
+            .devices
+            .roster()
+            .device(device)
+            .map(lpa_devices::Device::title)
+            .unwrap_or_else(|| "the board".to_string());
+        let project = match kind {
+            crate::DeviceActivityKind::Push => before.push_project,
+            _ => None,
+        };
+        self.agent
+            .app_session_mut()
+            .agent_wait_started(AgentWait::Activity(AgentActivityWait {
+                device,
+                kind,
+                seen_through: seq,
+                board,
+                project,
+                succeeded: None,
+            }));
+    }
+
+    /// The user pressed something on `device` themselves: an activity the
+    /// agent is waiting on there is theirs now, and its end owes the
+    /// agent nothing.
+    fn user_pressed_device(&mut self, device: crate::DeviceId) {
+        use crate::app::agent::app_agent_session::AgentWait;
+        let session = self.agent.app_session_mut();
+        if matches!(&session.wait, Some(AgentWait::Activity(wait)) if wait.device == device) {
+            session.forget_agent_wait();
+        }
+    }
+
+    /// The device journal's newest seq (0 before anything was journaled).
+    fn device_journal_seq(&self) -> u64 {
+        self.devices
+            .roster()
+            .journal()
+            .entries()
+            .last()
+            .map_or(0, |entry| entry.seq)
+    }
+
+    /// The last device activity (other than identify) started after
+    /// journal seq `after`: its device, kind, and the seq it started at.
+    fn activity_started_after(
+        &self,
+        after: u64,
+    ) -> Option<(crate::DeviceId, crate::DeviceActivityKind, u64)> {
+        use lpa_devices::journal::JournalRecord;
+        self.devices
+            .roster()
+            .journal()
+            .entries()
+            .filter(|entry| entry.seq > after)
+            .filter_map(|entry| match (&entry.record, entry.scope) {
+                (
+                    JournalRecord::Note(lpa_devices::JournalNote::ActivityStarted { kind }),
+                    lpa_devices::Scope::Device(device),
+                ) if *kind != crate::DeviceActivityKind::Identify => {
+                    Some((device, *kind, entry.seq))
+                }
+                _ => None,
+            })
+            .last()
+    }
+
+    /// Resume the agent once what it started has ended — the editor is up
+    /// on the project it opened (or the open failed), a flash or a push it
+    /// started finished (or failed) — so a turn that ended at "I'll carry
+    /// on once it's done" carries on without the user saying anything
+    /// (activity corpus S4/S18/S19, 2026-10-03). Called wherever one can
+    /// end: every device fold, the tick that lands a held lens, and the
+    /// end of every dispatch.
+    fn observe_agent_wait(&mut self) {
+        use crate::app::agent::app_agent_session::AgentWait;
+        match self.agent.app_session_mut().wait.clone() {
+            None => {}
+            Some(AgentWait::Open { key }) => self.observe_agent_open(&key),
+            Some(AgentWait::Activity(wait)) => self.observe_agent_activity(wait),
+        }
+    }
+
+    fn observe_agent_open(&mut self, key: &str) {
+        match self.pending_open_card_key() {
+            // Still under way.
+            Some(pending) if pending == key => return,
+            // The user started another open over it: nothing is owed.
+            Some(_) => {
+                self.agent.app_session_mut().forget_agent_wait();
+                return;
+            }
+            None => {}
+        }
+        let note = match crate::app::open_progress::open_stage() {
+            crate::app::open_progress::OpenStage::Failed(failure) => format!(
+                "[opening {:?} failed: {}]",
+                self.agent_open_label(key),
+                failure.message
+            ),
+            _ if self.project_is_loaded() => format!(
+                "[the project {:?} you opened is now open in the editor]",
+                self.project.agent_project_name()
+            ),
+            _ => format!(
+                "[opening {:?} ended without opening the editor]",
+                self.agent_open_label(key)
+            ),
+        };
+        self.settle_agent_wait(note);
+    }
+
+    /// Read the device journal past where the wait last looked: the
+    /// activity's end (followed through a merge), or its eviction. A
+    /// successful flash or push is held a moment for the board's report of
+    /// what it runs ([`AGENT_WAIT_REPORT_HOLD_MS`]), so the note can say.
+    fn observe_agent_activity(
+        &mut self,
+        mut wait: crate::app::agent::app_agent_session::AgentActivityWait,
+    ) {
+        use crate::app::agent::app_agent_session::AgentWait;
+        use lpa_devices::journal::JournalRecord;
+        use lpa_devices::{ActivityOutcome, JournalNote, Scope};
+        let mut ended: Option<ActivityOutcome> = None;
+        for entry in self.devices.roster().journal().entries() {
+            if entry.seq <= wait.seen_through {
+                continue;
+            }
+            wait.seen_through = entry.seq;
+            let JournalRecord::Note(note) = &entry.record else {
+                continue;
+            };
+            let here = entry.scope == Scope::Device(wait.device);
+            match note {
+                JournalNote::DevicesMerged { from, into } if *from == wait.device => {
+                    wait.device = *into;
+                }
+                JournalNote::ActivityEnded { kind, outcome } if here && *kind == wait.kind => {
+                    ended = Some(outcome.clone());
+                    break;
+                }
+                JournalNote::ActivityEvicted { kind, reason } if here && *kind == wait.kind => {
+                    ended = Some(evicted_outcome(*reason));
+                    break;
+                }
+                _ => {}
+            }
+        }
+        let now = self.device_now();
+        let device = self.devices.roster().device(wait.device);
+        let reported = device.is_some_and(|device| device.evidence.loaded_projects().is_some());
+        if ended.is_none() && wait.succeeded.is_none() {
+            ended = match device {
+                // Gone with no end heard (forgotten between looks).
+                None if self.devices.roster().identity(wait.device).is_none() => {
+                    Some(ActivityOutcome::Interrupted {
+                        reason: "the board is gone".to_string(),
+                    })
+                }
+                // No longer running it, its end not in the journal any
+                // more: the outcome the device keeps.
+                Some(device) if device.activity_kind() != Some(wait.kind) => {
+                    Some(device.evidence.last_outcome.clone().unwrap_or(
+                        ActivityOutcome::Succeeded {
+                            summary: "done".to_string(),
+                        },
+                    ))
+                }
+                _ => None,
+            };
+        }
+        let outcome = match (ended, wait.succeeded.clone()) {
+            (Some(outcome), _)
+                if outcome.is_success()
+                    && !reported
+                    && device.is_some()
+                    && matches!(
+                        wait.kind,
+                        crate::DeviceActivityKind::Flash | crate::DeviceActivityKind::Push
+                    ) =>
+            {
+                wait.succeeded = Some((outcome, now));
+                None
+            }
+            (Some(outcome), _) => Some(outcome),
+            (None, Some((outcome, since)))
+                if reported
+                    || device.is_none()
+                    || now.0.saturating_sub(since.0) >= AGENT_WAIT_REPORT_HOLD_MS =>
+            {
+                Some(outcome)
+            }
+            (None, _) => None,
+        };
+        match outcome {
+            Some(outcome) => {
+                let note = self.agent_activity_note(&wait, &outcome);
+                self.settle_agent_wait(note);
+            }
+            None => self.agent.app_session_mut().wait = Some(AgentWait::Activity(wait)),
+        }
+    }
+
+    /// What an activity the agent waited on came to, in one plain line:
+    /// `[flashing "Porch" finished: it runs LightPlayer and no project
+    /// yet]`, `[pushing "porch" to "Porch" finished: it runs it now]`,
+    /// `[flashing "Porch" failed: <why>]`.
+    fn agent_activity_note(
+        &self,
+        wait: &crate::app::agent::app_agent_session::AgentActivityWait,
+        outcome: &lpa_devices::ActivityOutcome,
+    ) -> String {
+        use crate::DeviceActivityKind as Kind;
+        use lpa_devices::ActivityOutcome;
+        let device = self.devices.roster().device(wait.device);
+        let board = device
+            .map(lpa_devices::Device::title)
+            .unwrap_or_else(|| wait.board.clone());
+        let doing = match (wait.kind, &wait.project) {
+            (Kind::Flash, _) => format!("flashing {board:?}"),
+            (Kind::Push, Some(project)) => format!("pushing {project:?} to {board:?}"),
+            (Kind::Push, None) => format!("pushing the project to {board:?}"),
+            (Kind::Erase, _) => format!("erasing {board:?}"),
+            (Kind::RemoveProject, _) => format!("removing the project from {board:?}"),
+            (Kind::Identify, _) => format!("identifying {board:?}"),
+        };
+        match outcome {
+            ActivityOutcome::Succeeded { summary } => {
+                let loaded = device.and_then(|device| device.evidence.loaded_projects());
+                let runs = match (wait.kind, loaded) {
+                    (Kind::Erase, _) => summary.clone(),
+                    (Kind::Flash, Some([])) => "it runs LightPlayer and no project yet".to_string(),
+                    (Kind::Flash, Some([first, ..])) => {
+                        format!("it runs LightPlayer, with {:?} loaded", first.label())
+                    }
+                    (Kind::Flash, None) => {
+                        "it runs LightPlayer; it has not said yet what project it runs".to_string()
+                    }
+                    (_, Some([])) => "it runs no project".to_string(),
+                    // The push ends only once the board reports what it
+                    // loaded; its storage dir name is no name to repeat.
+                    (Kind::Push, Some([_, ..])) => "it runs it now".to_string(),
+                    (_, Some([first, ..])) => format!("it runs {:?}", first.label()),
+                    (_, None) => summary.clone(),
+                };
+                format!("[{doing} finished: {runs}]")
+            }
+            ActivityOutcome::Cancelled => format!("[{doing} was cancelled]"),
+            ActivityOutcome::Failed { message } => {
+                // The model's own words lead with what failed ("flash
+                // failed: …"); the note already says it.
+                let why = ["flash failed: ", "erase failed: "]
+                    .iter()
+                    .find_map(|said| message.strip_prefix(said))
+                    .unwrap_or(message);
+                format!("[{doing} failed: {why}]")
+            }
+            ActivityOutcome::TimedOut => format!("[{doing} failed: it timed out]"),
+            ActivityOutcome::Interrupted { reason } => {
+                format!("[{doing} failed: it was interrupted ({reason})]")
+            }
+        }
+    }
+
+    /// What the agent waited on ended with `note`: resume it once.
+    fn settle_agent_wait(&mut self, note: String) {
+        if self.agent.app_session_mut().agent_wait_settled(note) {
+            self.resume_app_agent();
+            self.mark_dirty();
+        }
+    }
+
+    /// What a push sends, by the name its `source` listed: the library
+    /// project's slug, the example's id, or the starter's name.
+    fn push_source_label(&self, source: &crate::PushSource) -> String {
+        match source {
+            crate::PushSource::Library { project_uid } => self.agent_open_label(project_uid),
+            crate::PushSource::Example { example_id } => example_id.clone(),
+            crate::PushSource::NewForBoard { name, .. } => {
+                name.clone().unwrap_or_else(|| "a new project".to_string())
+            }
+        }
+    }
+
+    /// The name Home's gallery gives the project under `key`, else the key.
+    fn agent_open_label(&self, key: &str) -> String {
+        self.home_view()
+            .and_then(|home| {
+                home.projects
+                    .into_iter()
+                    .find(|card| card.uid == key)
+                    .map(|card| card.slug)
+            })
+            .unwrap_or_else(|| key.to_string())
+    }
+
     /// Start the run a settled card owes the assistant, once no run is out.
     fn resume_app_agent(&mut self) {
         if self.agent.app_running() {
             return;
         }
-        let resume = std::mem::take(&mut self.agent.app_session_mut().resume);
+        let resume = self.agent.app_session_mut().take_resume();
         if resume.is_empty() {
             return;
         }
@@ -6519,12 +6935,24 @@ impl StudioController {
     /// are listed in full.
     fn app_agent_readout(&self) -> crate::app::agent::app_agent_readout::AppReadoutSnapshot {
         use crate::app::agent::app_agent_readout::{
-            AppReadoutSnapshot, device_lines, looking_at_lines, page_line, project_lines,
+            AppReadoutSnapshot, device_lines, looking_at_lines, opening_line, page_line,
+            project_lines,
         };
-        let home = self.home_view().is_some();
+        let home_view = self.home_view();
+        let home = home_view.is_some();
         let page = self.place.as_ref().map(|place| &place.page);
         let editor_view = self.editor_view_in_place(home);
         let mut lead = page_line(home, page);
+        if let Some(home_view) = &home_view
+            && let Some(key) = &home_view.opening
+        {
+            let title = home_view
+                .projects
+                .iter()
+                .find(|card| card.uid == *key)
+                .map(|card| card.slug.as_str());
+            lead.push_str(&opening_line(key, title));
+        }
         lead.push_str(&looking_at_lines(
             editor_view.is_some(),
             editor_view
@@ -6542,21 +6970,33 @@ impl StudioController {
         }
         let roster = self.device_roster_view();
         text.push_str(&device_lines(&roster));
-        // Every offer in the view's tree, in publish order: the project
-        // header's Save and Revert while there are edits to save, every
-        // node card's verbs (nested nodes included), and the device verbs —
-        // the buttons the user sees, with their enablement. The render
-        // lists the ones near the user in full and counts the rest; `act`
-        // finds any of them. The pane's own actions stay out: a project
+        // A real board is one on the bus right now (not a remembered,
+        // offline one) that wears no runtime band — a band marks a sim
+        // (D38). `false` keeps the add-a-board offers listed in full on
+        // every page (see the readout's own doc).
+        let has_real_board = crate::split_roster(&roster)
+            .connected
+            .iter()
+            .any(|device| !roster.runtime_bands.contains_key(&device.id));
+        // Every offer in the view's tree, in publish order: the project's
+        // own verbs (Save and Revert while there are edits to save, Clear
+        // debug while an override is active, and the root picker's
+        // add-node / import-pattern / paste-node), every node card's verbs
+        // (nested nodes included, Copy among them), each playlist picker's,
+        // and the device verbs — the buttons the user sees, with their
+        // enablement. The render lists the ones near the user in full and
+        // counts the rest; `act` finds any of them. A long choice (the
+        // kinds, the patterns) is named in part and counted
+        // (`CHOICES_LISTED`). The pane's own actions stay out: a project
         // pane offers none once the project is ready, and every other state
-        // shows home. Tree focus actions and add-node menus stay out too
-        // (the edit tool covers those).
+        // shows home. Tree focus actions stay out too.
         let view = self.view();
         AppReadoutSnapshot {
             lead,
             text,
             offers: view.offers.iter().cloned().collect(),
             focus: view.offers.focus().clone(),
+            has_real_board,
         }
     }
 
@@ -7457,6 +7897,14 @@ impl StudioController {
         &self.project
     }
 
+    /// Drop the test builders' stand-in project, so the view is Home (no
+    /// project open), as a fresh tab shows it.
+    #[cfg(test)]
+    pub(crate) fn show_home_for_test(&mut self) {
+        self.project.reset();
+        self.mark_dirty();
+    }
+
     pub(crate) fn pending_device_lens_for_test(&self) -> Option<String> {
         self.pending_device_lens.clone()
     }
@@ -7788,15 +8236,67 @@ enum SimWake {
     Refused(String),
 }
 
-/// The verbs directly under `prefix`, each as the readout lists an action
-/// in full (`- <path>: <label> [state]`, then what it takes): what the app
-/// agent's `read` answers for a node or a device.
+/// The verbs of `prefix`'s own (its direct verbs and the ones it groups,
+/// a fixture's `patch/…`), each as the readout lists an action in full
+/// (`- <path>: <label> [state]`, then what it takes): what the app agent's
+/// `read` answers for a node or a device.
+/// How long a successful flash or push waits for the board to say what
+/// it runs before the agent hears "it has not said yet" (device clock).
+const AGENT_WAIT_REPORT_HOLD_MS: u64 = 2_000;
+
+/// What stood before a press, so what it started can be told apart from
+/// what was already under way.
+struct AgentStartProbe {
+    /// The open in flight before the press.
+    opening: Option<String>,
+    /// The device journal's newest seq before the press.
+    journal: u64,
+    /// What a push press sends, by name.
+    push_project: Option<String>,
+}
+
+/// The board a device press is aimed at, when it is one that changes what
+/// runs there (not a rename or the autoconnect switch).
+fn pressed_device(action: &UiAction) -> Option<crate::DeviceId> {
+    if let Some(op) = action.op_as::<crate::DevicesOp>() {
+        return match op.action() {
+            crate::DeviceAction::SetName { .. } | crate::DeviceAction::SetAutoconnect { .. } => {
+                None
+            }
+            action => action.device(),
+        };
+    }
+    action.op_as::<crate::DevicePushOp>().map(|op| op.device)
+}
+
+/// The outcome an evicted activity comes to (the model's own mapping,
+/// `Device::evict`).
+fn evicted_outcome(reason: lpa_devices::journal::EvictionReason) -> lpa_devices::ActivityOutcome {
+    use lpa_devices::ActivityOutcome;
+    use lpa_devices::journal::EvictionReason;
+    match reason {
+        EvictionReason::DeadlineExpired => ActivityOutcome::TimedOut,
+        EvictionReason::CancelGraceExpired => ActivityOutcome::Interrupted {
+            reason: "cancel grace expired".to_string(),
+        },
+        EvictionReason::LinkLost => ActivityOutcome::Interrupted {
+            reason: "link lost".to_string(),
+        },
+        EvictionReason::UserDisconnected => ActivityOutcome::Interrupted {
+            reason: "disconnected".to_string(),
+        },
+        EvictionReason::DeviceForgotten => ActivityOutcome::Interrupted {
+            reason: "device forgotten".to_string(),
+        },
+    }
+}
+
 fn agent_actions_under(
     offers: &crate::UiOfferTree,
     prefix: &crate::OfferPath,
 ) -> serde_json::Value {
     let lines: Vec<String> = offers
-        .verbs_of(prefix)
+        .own_verbs_of(prefix)
         .map(|offer| {
             crate::app::agent::app_agent_readout::offer_lines(offer)
                 .trim_end()

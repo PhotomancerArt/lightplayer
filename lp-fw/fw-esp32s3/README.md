@@ -409,6 +409,29 @@ does not yet exist would boot-loop the board every 8 s.
 The default build is the LightPlayer app: `LpServer` over USB-Serial-JTAG,
 littlefs on the `lpfs` partition, and abort-tier recovery.
 
+### The link IO thread
+
+**`io-thread`** (default on): the shared USB link task
+(`fw-esp32-common::usb_link`) runs on its own esp-rtos thread — priority 1,
+pinned to **core 0** (never `None`: an unpinned task can wake on core 1 and
+raise that core's own SWI1), a 4 KB stack, its own embassy executor
+(`src/io_thread.rs`, a per-chip copy of the C6's — `fw-esp32-common` names no
+esp-hal thread API). The link is shared behind a priority-1
+`RawPriorityLimitedMutex` (`UsbLinkShared::leak_locked`), and the server
+answers a tick's requests before it renders
+(`set_messages_first(true)`, only with the thread). The feature needs
+`esp-rtos/esp-radio` **and** `esp-rtos/esp-alloc` — it links esp-rtos's small
+esp-radio glue (the public `task_create` call lives there), not a radio
+stack. Without the feature the old arrangement still builds: one thread-mode
+executor runs both the link and the server loop, render first.
+
+`io_thread_stack_diag` (off, never shipped) paints the thread's stack and
+logs `[iostack] high-water …` at the heartbeat; the Xtensa port reads `sp`
+from `a1` and scans the esp-rtos `Task` record, a scan that lives only in
+this diagnostic feature. See
+`docs/adr/2026-10-02-c6-link-io-thread.md`'s S3 amendment for the numbers,
+the lock and the core-1 follow-up.
+
 Two dependency lines carry almost all of its size, and both are choices a
 careless edit would silently reverse:
 

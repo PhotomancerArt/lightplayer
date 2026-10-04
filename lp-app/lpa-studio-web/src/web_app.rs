@@ -1374,16 +1374,19 @@ pub fn App() -> Element {
             ChromeSessionControl {
                 session,
                 // The project's own verbs come from the view's offer tree
-                // (`project/save`, `project/revert`), like the pane header's.
+                // (`project/save`, `project/revert`), like the pane header's
+                // (and, like it, less the picker's and the debug chip's).
                 project: editor.map(|(editor, status)| {
                     ProjectDetailContent::new(
                         editor,
                         status,
-                        current_view
-                            .offers
-                            .verbs_of(&lpa_studio_core::OfferPath::project())
-                            .cloned()
-                            .collect(),
+                        crate::app::project::project_pane::header_verbs(
+                            current_view
+                                .offers
+                                .verbs_of(&lpa_studio_core::OfferPath::project())
+                                .cloned()
+                                .collect(),
+                        ),
                     )
                 }),
                 relationship,
@@ -1396,6 +1399,7 @@ pub fn App() -> Element {
                     &roster_state,
                     roster,
                     bridge.tx.clone(),
+                    current_view.offers.clone(),
                     on_action,
                     toasts,
                 ),
@@ -1697,6 +1701,7 @@ fn project_popover_inputs(
     roster_state: &RosterState,
     roster: ProjectRoster,
     tx: CommandSender,
+    offers: lpa_studio_core::UiOfferTree,
     on_action: EventHandler<UiAction>,
     toasts: crate::base::Toasts,
 ) -> ProjectPopoverInputs {
@@ -1757,7 +1762,9 @@ fn project_popover_inputs(
     );
     let (on_fork, fork_blocked) = if transient {
         (
-            Some(EventHandler::new(move |()| fork_transient_session(&tx))),
+            Some(EventHandler::new(move |()| {
+                fork_transient_session(&tx, &offers);
+            })),
             String::new(),
         )
     } else if let Some(uid) = library_uid {
