@@ -207,10 +207,12 @@ impl BrowserFirmwareRuntime {
             server.set_latent_read_back(Some(state.graphics.clone()));
         }
         // Wire hello identity (sans-IO: injected here). Browser runtimes
-        // carry no git provenance or stamped identity; the hello's
-        // capability half comes from the constructor above.
+        // carry the app version their manifest core holds, but no commit or
+        // stamped identity; the hello's capability half comes from the
+        // constructor above.
         server.set_hello_identity(lpc_wire::HelloIdentity::new(
             "fw-browser",
+            crate::manifest_version(),
             "unknown",
             false,
             if cfg!(debug_assertions) {

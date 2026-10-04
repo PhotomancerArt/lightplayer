@@ -19,6 +19,7 @@ lpc_model::lp_embed_manifest_core! {
     chip: "native",
     cargo_target: env!("LP_CARGO_TARGET"),
     profile: env!("LP_BUILD_PROFILE"),
+    version: "unknown",
     commit: "unknown",
     dirty: false,
     wire_proto: lpc_wire::WIRE_PROTO_VERSION,

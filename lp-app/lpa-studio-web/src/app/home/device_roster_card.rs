@@ -1814,6 +1814,7 @@ mod tests {
             firmware_face: lpa_studio_core::DeviceFirmwareFace::LightPlayer {
                 firmware: None,
                 wire: lpa_studio_core::DeviceWireVersion::Match,
+                age: lpa_studio_core::DeviceFirmwareAge::Unknown,
             },
             remembered_firmware: None,
             degraded: None,
@@ -1917,6 +1918,7 @@ mod tests {
         card.firmware_face = lpa_studio_core::DeviceFirmwareFace::LightPlayer {
             firmware: Some("fw-esp32c6 0.9.3".to_string()),
             wire: lpa_studio_core::DeviceWireVersion::Match,
+            age: lpa_studio_core::DeviceFirmwareAge::Unknown,
         };
         assert_eq!(
             firmware_line_text(&card, Some("XIAO ESP32-C6"), None),
@@ -1930,6 +1932,7 @@ mod tests {
                 board: 19,
                 studio: 20,
             },
+            age: lpa_studio_core::DeviceFirmwareAge::Unknown,
         };
         assert_eq!(
             firmware_line_text(&card, Some("QuinLED-Dig-Uno"), None),

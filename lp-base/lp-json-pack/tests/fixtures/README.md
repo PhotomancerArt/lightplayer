@@ -35,7 +35,12 @@ all read this one file.
   hellos still say `proto 33`, the number this branch's firmware carried
   when it was cut; nothing else in the recording changed, and the byte
   counts above are the original cut's.
-- **Wire shapes:** proto 34. Every line re-parses into the wire types and
+- **Edited since, by hand (proto 35):** the three hellos' `build` gained
+  `"version":"unknown"` after `"package"` — the hello now says the build's
+  app version, a required field. The recorded board predates the field, so
+  it is given the value an embedder with no version reports rather than a
+  version it never said.
+- **Wire shapes:** proto 35. Every line re-parses into the wire types and
   re-serializes byte for byte (`lpc-wire`'s
   `recorded_traffic_reserializes_byte_for_byte`).
 - **Cut with:** since proto 30 the tap holds lp-link frames, so it is first

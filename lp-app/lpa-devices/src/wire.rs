@@ -369,8 +369,14 @@ impl RecoveryLevelFacts {
 pub struct HelloFacts {
     pub proto: u32,
     pub identity: PeerIdentity,
-    /// Firmware package/commit label for display ("fw-esp32c6 abc1234").
+    /// Firmware label for display, leading with the version
+    /// ("fw-esp32c6 2026.10.03-1 · abc1234def01").
     pub firmware: Option<String>,
+    /// The build's app version as the hello reported it (`2026.10.03-1`, the
+    /// dev form `<short-sha>[-dirty-<HHMMSS>PT]`, or `unknown`); read with
+    /// [`crate::AppVersion::parse`] to compare against this Studio's.
+    #[serde(default)]
+    pub version: Option<String>,
     /// Board identifier the firmware was built for, when it knows.
     pub board_id: Option<String>,
     /// How the board's filesystem came up at boot (the hello's `fs`, wire

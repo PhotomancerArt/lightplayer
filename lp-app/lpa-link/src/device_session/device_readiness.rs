@@ -508,6 +508,7 @@ mod tests {
             build: BuildFacts {
                 features: Vec::new(),
                 package: "fw-esp32c6".to_string(),
+                version: "unknown".into(),
                 commit: "test".to_string(),
                 dirty: false,
                 profile: "release-esp32".to_string(),

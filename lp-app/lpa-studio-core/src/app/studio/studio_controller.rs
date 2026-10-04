@@ -86,9 +86,14 @@ const LENS_DEAD_WIRE_FAILURES: u32 = 3;
 /// the number. (`lpa_link::device_link::wire::roster_config` does the same
 /// thing at the transport seam; both read the same constant, and studio-core
 /// must not require a transport feature just to construct a roster.)
+///
+/// `expected_version` is this Studio's own build version
+/// ([`crate::STUDIO_VERSION`]): what "older than Studio" compares a board's
+/// hello version against.
 fn device_roster_config() -> crate::DeviceRosterConfig {
     crate::DeviceRosterConfig {
         expected_proto: lpc_wire::WIRE_PROTO_VERSION,
+        expected_version: crate::DeviceAppVersion::parse(crate::STUDIO_VERSION),
         ..Default::default()
     }
 }
@@ -8157,11 +8162,134 @@ impl StudioController {
         // it is on — the per-dispatch sync ran before this op moved the lens.
         self.sync_lens_probe_policy();
         // A home-card open skips the running-project probe: opening IS a
-        // push of the library head, regardless of what runs (D19).
+        // push of the library head, regardless of what runs (D19) — on a
+        // sim. A board is a place that keeps what it was given, so an open
+        // the address named checks what it is running first.
         if self.pending_open.is_some() {
+            if let Some(settled) = self.open_meets_what_the_board_runs(updates.clone()).await {
+                return settled;
+            }
             return self.open_pending_package(updates).await;
         }
         self.connect_running_project(updates).await
+    }
+
+    /// A board open nobody has answered for yet — the address's
+    /// `?on=mac:`, never the mismatch page's "push here" — asks the board
+    /// what it is running before it pushes, now that the wire is up to say.
+    ///
+    /// The check before the lens ([`Self::open_on_named_device`]) reads the
+    /// roster, and a page that has only just loaded has no heartbeat in it:
+    /// every board reads "running nothing". So a reload of
+    /// `/p/<slug>?on=mac:…` pushed the project the board was already running
+    /// all over again (the classic, 2026-10-03: the whole project re-sent on
+    /// every refresh), and over a DIFFERENT project it pushed without ever
+    /// stopping at the mismatch page.
+    ///
+    /// - Nothing loaded: `None`, and the push goes ahead.
+    /// - Exactly this project's library head: connect and bind, sending
+    ///   nothing (D1). A reload reattaches.
+    /// - Another project this library names: the mismatch page (D50), the
+    ///   stop a warm open makes.
+    /// - Anything else (this project at another version, a project the
+    ///   library cannot name, a board that will not answer): `None`, and
+    ///   the open is what it always was.
+    async fn open_meets_what_the_board_runs(&mut self, updates: UxUpdateSink) -> Option<UiResult> {
+        let Some(PendingOpen::Package {
+            key,
+            on:
+                OpenOn::Device {
+                    base_mac,
+                    over_running_project: false,
+                },
+        }) = self.pending_open.clone()
+        else {
+            return None;
+        };
+        let on_board = self
+            .pool
+            .lens_session()
+            .is_some_and(|session| session.attachment().transport != crate::LinkTransport::Sim);
+        if !on_board {
+            return None;
+        }
+        let (running, logs) = {
+            let server = self
+                .pool
+                .lens_session_mut()
+                .and_then(crate::RuntimeSession::client_mut)
+                .ok()?;
+            let loaded = server.list_loaded_projects().await.ok()?;
+            if loaded.projects.is_empty() {
+                return None;
+            }
+            let (running, mut logs) = self.project.read_running_package(server).await.ok()?;
+            logs.splice(0..0, loaded.logs);
+            (running, logs)
+        };
+        self.record_logs(logs);
+
+        if self.library_head_hash(&key).await == Some(running.hash) {
+            self.pending_open = None;
+            let name = self
+                .library_uid_for_key(&key)
+                .and_then(|uid| self.library_project_named(&uid))
+                .map_or(key, |project| project.name);
+            self.push_log(UiLogDraft::new(
+                UiLogLevel::Info,
+                UiLogOrigin::Studio,
+                format!("the board is already running {name} — reattached, nothing sent"),
+            ));
+            return Some(self.connect_running_project(updates).await);
+        }
+
+        let project_uid = self.library_uid_for_key(&key).unwrap_or(key);
+        let running_uid = match self.library_package_at_hash(running.hash).await {
+            Some(uid) => uid,
+            None => self.lens_associated_project()?,
+        };
+        if running_uid == project_uid {
+            return None;
+        }
+        let running = self.library_project_named(&running_uid)?;
+        let mismatch = self.board_mismatch(&base_mac, project_uid, running)?;
+        self.open_mismatch = Some(Box::new(mismatch));
+        self.pending_open = None;
+        self.mark_dirty();
+        updates.emit(UxUpdate::View(self.view()));
+        Some(Ok(UiNotices::new()))
+    }
+
+    /// The mismatch page's material (D50) for the board at `base_mac`,
+    /// once the board itself has said what it runs.
+    fn board_mismatch(
+        &self,
+        base_mac: &str,
+        project_uid: String,
+        running: crate::UiRunningProject,
+    ) -> Option<crate::UiOpenMismatch> {
+        let registry = self
+            .home_inputs
+            .as_ref()
+            .map(|inputs| inputs.registered.as_slice())
+            .unwrap_or_default();
+        let found = crate::app::devices::device_by_base_mac(
+            self.devices.roster().devices(),
+            registry,
+            &self.device_sims,
+            base_mac,
+        )?;
+        Some(crate::UiOpenMismatch {
+            project_name: self
+                .library_project_named(&project_uid)
+                .map(|project| project.name)
+                .unwrap_or_else(|| project_uid.clone()),
+            project_uid,
+            device_key: found.key,
+            device_name: found.name,
+            device_base_mac: base_mac.to_string(),
+            running: Some(running),
+        })
     }
 
     async fn refresh_project(&mut self, updates: UxUpdateSink) -> UiResult {

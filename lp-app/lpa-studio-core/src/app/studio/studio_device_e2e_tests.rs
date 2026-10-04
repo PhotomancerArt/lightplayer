@@ -4218,6 +4218,138 @@ fn opening_a_board_binds_the_library_project_it_is_already_running() {
     );
 }
 
+/// Yona, 2026-10-03, on the classic: refreshing Studio on
+/// `/p/<slug>?on=mac:…` sent the whole project to the board again. A
+/// reload is the address arriving on a fresh page: the roster has no
+/// heartbeat yet, so the check before the lens read the board as running
+/// nothing, and the open pushed the library head over itself.
+///
+/// The board says what it runs once the lens is up, and when that is this
+/// project's head, the open binds it: the same runtime handle (a push would
+/// have loaded a new one), the library untouched, no page.
+#[test]
+fn a_reload_reattaches_to_the_project_the_board_is_running() {
+    let device = empty_light_player("dev000000daqf6dvvr3");
+    let (mut bench, tasks) = identified(&device, "usb-reload-bind");
+    let (device_uid, project) = a_board_running_a_library_project(&mut bench, &tasks);
+    let project_uid = project.to_string();
+    let head = bench.library_head(project);
+    bench
+        .open_lens(&device_uid)
+        .expect("the running board opens in the editor");
+    let handle = bench
+        .ready_handle()
+        .expect("the editor is on a ready project");
+
+    let (mut page, tasks) = reload_with_the_board_granted(bench, &device, "usb-reload-bind");
+    page.open_on_device(&project_uid, BENCH_BOARD_MAC, false)
+        .expect("the address's open runs");
+    land_the_open(&mut page, &tasks);
+
+    assert!(
+        page.mismatch().is_none(),
+        "the board runs what the address names: there is nothing to ask"
+    );
+    assert_eq!(
+        page.controller.view().open_project_uid.as_deref(),
+        Some(project_uid.as_str()),
+        "the reload lands on the project, bound by name"
+    );
+    assert_eq!(
+        page.ready_handle(),
+        Some(handle),
+        "no push and no reload: the page re-attached to what the board was running"
+    );
+    assert_eq!(page.library_head(project), head, "the library is untouched");
+}
+
+/// The other half of the same cold page: the address names project B and
+/// the board is running project A. A warm open stops at the mismatch page
+/// (D50); on a fresh page the roster could not say anything was running,
+/// so B went over A without the page. The board's own answer at the lens
+/// is the stop now — and A is still what it runs.
+#[test]
+fn a_reload_naming_another_project_stops_at_the_page_instead_of_pushing() {
+    let device = empty_light_player("dev000000daqf6dvvr3");
+    let (mut bench, tasks) = identified(&device, "usb-reload-other");
+    let (device_uid, project) = a_board_running_a_library_project(&mut bench, &tasks);
+    let running = project.to_string();
+    bench
+        .open_lens(&device_uid)
+        .expect("the running board opens in the editor");
+    let handle = bench
+        .ready_handle()
+        .expect("the editor is on a ready project");
+    let other = bench
+        .store
+        .create("other-project", 0.0)
+        .expect("the library takes a second project")
+        .uid
+        .to_string();
+
+    let (mut page, tasks) = reload_with_the_board_granted(bench, &device, "usb-reload-other");
+    page.open_on_device(&other, BENCH_BOARD_MAC, false)
+        .expect("a stop at the page is not a failure");
+    land_the_open(&mut page, &tasks);
+
+    let mismatch = page
+        .mismatch()
+        .expect("the open stopped at the page, not a push");
+    assert_eq!(mismatch.project_uid, other, "{mismatch:?}");
+    assert_eq!(
+        mismatch.running.as_ref().map(|running| running.uid.clone()),
+        Some(running.clone()),
+        "the page names what the board said it runs: {mismatch:?}"
+    );
+    assert_eq!(page.controller.view().open_project_uid, None);
+
+    page.open_lens(&device_uid)
+        .expect("the board opens in the editor");
+    assert_eq!(
+        page.ready_handle(),
+        Some(handle),
+        "nothing was pushed: the board still runs its project, never reloaded"
+    );
+    assert_eq!(
+        page.controller.view().open_project_uid.as_deref(),
+        Some(running.as_str())
+    );
+}
+
+/// A page reload with the board still on the desk and its port granted
+/// (Chrome keeps the grant): a fresh controller over the store `previous`
+/// wrote, the same board — still running whatever it was given — behind a
+/// new link, and the library settled.
+fn reload_with_the_board_granted(
+    previous: DeviceBench,
+    device: &FakeEsp32Device,
+    endpoint: &str,
+) -> (DeviceBench, TaskPool) {
+    let clock = Rc::new(Cell::new(previous.clock.get()));
+    let store = memory_store_sharing(&previous.store);
+    drop(previous);
+    let (mut page, tasks) = DeviceBench::build_on(device, endpoint, true, true, clock, store);
+    page.settle_library();
+    (page, tasks)
+}
+
+/// Step a fresh page until the open the address asked for lands: the
+/// project is open, or the open stopped at the mismatch page.
+fn land_the_open(page: &mut DeviceBench, tasks: &TaskPool) {
+    let deadline = std::time::Instant::now() + REAL_TIME_LIMIT;
+    while page.controller.view().open_project_uid.is_none() && page.mismatch().is_none() {
+        page.step(tasks);
+        drive(page.controller.try_pending_device_lens());
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the open never landed; stage {:?}, roster {:?}",
+            crate::app::open_progress::open_stage(),
+            page.view()
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
 /// D4: the library has the project the board was given, but not at the
 /// version the board is running — somebody saved here since. Nothing binds,
 /// nothing is written, and the console names both sides.
