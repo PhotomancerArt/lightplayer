@@ -155,7 +155,7 @@ fn a_reboot_request_restarts_the_board_and_the_next_request_goes_to_the_new_sess
 /// The capture's link lines and the lines that name the two requests' ids,
 /// for the test's own output.
 fn reboot_excerpt(text: &str) -> String {
-    let first = format!("\"id\":{},", REQUEST_ID_BASE);
+    let first = format!("\"id\":{REQUEST_ID_BASE},");
     let second = format!("\"id\":{},", REQUEST_ID_BASE + 1);
     text.lines()
         .filter(|l| {

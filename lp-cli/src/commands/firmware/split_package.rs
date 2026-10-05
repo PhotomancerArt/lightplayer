@@ -14,7 +14,8 @@
 //! `core.bin` and `engine.bin` go to `target/firmware-parts/<id>/`, never
 //! into the packaged directory: the Studio bundle does not grow by them, and
 //! a later Studio slices them out of the merged image by the `split`
-//! block's offsets.
+//! block's offsets. The same directory then receives the OTA files
+//! (`ota_files`): `ota-manifest.json`, `core.z` and `engine.z`.
 
 use std::path::{Path, PathBuf};
 
@@ -27,6 +28,14 @@ use super::distribution_manifest::{SplitBlock, SplitPiece};
 
 /// Where a split def's parts are written, relative to the repo root.
 pub const PARTS_ROOT: &str = "target/firmware-parts";
+
+/// A split target's parts directory, which is also its **OTA directory**:
+/// `core.bin` and `engine.bin` (written here), and `ota-manifest.json`,
+/// `core.z` and `engine.z` (`ota_files`). Never the packaged directory the
+/// Studio bundle copies.
+pub fn parts_dir(repo_root: &Path, target: &str) -> PathBuf {
+    repo_root.join(PARTS_ROOT).join(target)
+}
 
 /// What packaging a split build produces.
 pub struct SplitPackage {
@@ -76,7 +85,7 @@ pub fn package_split(repo_root: &Path, def: &BuildDef) -> Result<SplitPackage> {
     }
     check_core_carries_engine_digest(&core, &engine)?;
 
-    let parts_dir = repo_root.join(PARTS_ROOT).join(&def.id);
+    let parts_dir = parts_dir(repo_root, &def.id);
     std::fs::create_dir_all(&parts_dir)
         .with_context(|| format!("creating {}", parts_dir.display()))?;
     std::fs::write(parts_dir.join("core.bin"), &core)?;

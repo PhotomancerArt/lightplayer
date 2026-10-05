@@ -44,8 +44,19 @@ lpc-hardware = { path = "../lp-core/lpc-hardware", features = ["schema-gen"] }
 lpa-boards = { path = "../lp-app/lpa-boards", features = ["schema-gen"] }
 # The two persisted access files (project sidecar, device store).
 lpc-access = { path = "../lp-core/lpc-access", features = ["schema-gen"] }
-# `ota-manifest.json`, the OTA release manifest (schema only, today).
+# `ota-manifest.json`, the OTA release manifest: its schema (`schema gen`),
+# and `firmware package` / `release-assets` / `release-check`, which write,
+# stage and re-verify it.
 lpc-firmware-release = { path = "../lp-core/lpc-firmware-release", features = ["schema-gen"] }
+# `firmware package` of a split def: the one packer of encoding 1 (`pack`),
+# and the code table `ota-manifest.json`'s `requires` and `encodings[].id`
+# use. lp-cli never compresses firmware itself.
+lpa-update = { path = "../lp-app/lpa-update", features = ["pack"] }
+lpc-update = { path = "../lp-core/lpc-update" }
+# `firmware release-check` validates every `ota-manifest.json` against the
+# checked-in schema, embedded so the binary checks without a checkout. Also
+# the corpus conformance test's validator (tests/schema_conformance.rs).
+jsonschema = { version = "0.46", default-features = false }
 # `firmware package`: the bootloader-range guard checks the merged image
 # against the device model's hung-bootloader table.
 lpa-devices = { path = "../lp-app/lpa-devices" }
@@ -126,9 +137,6 @@ pollster = "0.3"
 
 [dev-dependencies]
 tempfile = "3"
-# Corpus conformance test (tests/schema_conformance.rs); same pinning as
-# lpc-model's schema_gen dev-dep.
-jsonschema = { version = "0.46", default-features = false }
 lpa-server = { path = "../lp-app/lpa-server" }
 lpc-hardware = { path = "../lp-core/lpc-hardware" }
 lpc-shared = { path = "../lp-core/lpc-shared" }

@@ -22,11 +22,12 @@ use super::build_def::{BuildDef, find_repo_root, load_build_def};
 use super::distribution_manifest::{
     DistributionManifest, FlashPolicy, MANIFEST_SCHEMA_VERSION, ManifestImage,
 };
+use super::ota_files::{git_resolve_commit, write_ota_files};
 use super::split_package::package_split;
 
 /// Where packaged firmware lands by default, relative to the repo root. The
 /// Studio web build and the Pages artifact copy `firmware/<id>/` from here.
-const DEFAULT_OUT_ROOT: &str = "target/studio-web-assets/firmware";
+pub const DEFAULT_OUT_ROOT: &str = "target/studio-web-assets/firmware";
 
 pub fn handle_package(args: PackageArgs) -> Result<()> {
     let repo_root = find_repo_root()?;
@@ -150,6 +151,12 @@ fn package_build(repo_root: &Path, def: &BuildDef, out_dir: &Path) -> Result<Pat
             split.block.engine.offset,
             split.parts_dir.display()
         );
+        // The OTA files, from the package just written and the parts beside
+        // it, with the one packer (one-way-doors §4).
+        let resolve = |short: &str| git_resolve_commit(repo_root, short);
+        if let Some(ota) = write_ota_files(def, out_dir, &split.parts_dir, &resolve)? {
+            println!("{}", ota.summary());
+        }
     }
     Ok(manifest_path)
 }
