@@ -1,9 +1,13 @@
 # ADR: Wi‑Fi settings on the device — a write-only network file, set over USB and Bluetooth
 
-- **Status:** Proposed (the ship gate decides; WQ2–WQ4 accepted by Yona,
-  2026-10-04: "yes, accept all three")
-- **Date:** 2026-10-04
-- **Deciders:** Yona (WQ2–WQ4), the director (WQ1, WQ5–WQ8, Q1–Q13)
+- **Status:** Accepted, 2026-10-05 — Yona passed the feel gate on screenshots
+  of the popover ("the ui looks good for now"; a hands-on look on an
+  emulated board is still owed, not a gate). WQ2–WQ4 accepted 2026-10-04
+  ("yes, accept all three"); the join rule and status tier below confirmed
+  "fine for now" at the same sitting.
+- **Date:** 2026-10-04 (accepted 2026-10-05)
+- **Deciders:** Yona (WQ2–WQ4, the feel gate, the join rule, the status
+  tier), the director (WQ1, WQ5–WQ8, Q1–Q13)
 - **Refines:** `docs/adr/2026-09-23-ble-access-model.md` ("WiFi reuses the
   model"), `docs/adr/2026-10-02-board-ids-and-typed-offer-parameters.md`
 - **Evidence:** planning dir `lp2025/2026-10-04-0808-wifi-settings/`
@@ -89,7 +93,11 @@ burn that breaks Studio's raw `lpfs` reads and the esptool-js update flow).
 
 `ClientRequest::{NetworkStatus, NetworkScan, NetworkAdd, NetworkForget,
 NetworkSet}` are all `Required::Edit` in the exhaustive classifier; nothing
-at play. USB always
+at play, so Wi‑Fi status (including whether the board is even connected) is
+Author-only — a play-tier viewer sees nothing about the board's network.
+Yona confirmed that reach "fine for now" (2026-10-05, ship gate); M8's LAN
+address for play-tier relay clients decides its own field rather than
+loosening this one. USB always
 holds edit; Bluetooth at author; M6's keyed links when they arrive. A
 fresh board is open at edit (`2026-10-02-two-passwords-open-by-default.md`),
 so **anyone nearby can set a fresh board's Wi‑Fi** — the same exposure as
@@ -155,7 +163,9 @@ new variants).
 
 The strongest saved network the board hears, skipping one whose password
 was refused; no priority order. Recorded here as the default the M6 station
-implements — **Yona has not objected; confirm at M6.** Nothing in M5 joins.
+implements — Yona confirmed it "fine for now" (2026-10-05, ship gate); M6
+re-checks it against a real station rather than treating this as closed.
+Nothing in M5 joins.
 
 ### The Studio popover: three pages, the test in the new row (2B)
 
@@ -234,7 +244,9 @@ the form until the press and in the op until the request leaves.
 - Fix `?ble=emu` and run `just walk-wifi-emu ble`.
 - "Use the same Wi‑Fi as my other board" — networks your account knows,
   marked "yours" on the connect page (a client-side store decision; the
-  spike's 4A–4C); DPP from phones.
+  spike's 4A–4C); DPP from phones. **Account-stored passwords are later
+  research** (confirmed 2026-10-05), not scheduled work — no placeholder UI
+  until that research lands.
 - M6: Studio polls the status while a just-added network's test runs (M5
   reads once per connection and on each answer, so a real station's steps
   would not advance on their own yet).
