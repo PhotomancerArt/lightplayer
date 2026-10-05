@@ -1,5 +1,7 @@
-//! The UART link task's loop: the one owner of the classic's [`Link`], on the
-//! thread executor.
+//! The UART link task's loop: the one owner of the classic's [`Link`]'s
+//! timers and frames — on the main thread executor beside the engine (the
+//! classic's default), or on a priority-1 esp-rtos thread of its own
+//! (`fw-esp32v3`'s opt-in `io-thread`).
 //!
 //! It never touches UART0. The classic's I/O task does, from its interrupt
 //! executor every 1 ms (`fw-esp32v3`'s `serial::io_task`), and hands bytes
@@ -19,14 +21,38 @@
 //!    one, **feeding the link RX between frames** — a frame is only overdue
 //!    if its ACK has not *arrived*, not if it waits unread in a pipe;
 //! 4. sleep until the link's next timer, the I/O task's news (bytes arrived,
-//!    or room for a frame), or the transport's doorbell.
+//!    or room for a frame), the transport's doorbell, or a log record
+//!    landing ([`crate::log_ring_logger::ring_on_record`]) — rung the same
+//!    way the C6/S3's USB loop does it
+//!    (`crate::usb_link::usb_link_task::run_usb_link`). Nothing wakes the
+//!    task on a cadence of its own: with nothing to do it sleeps until the
+//!    link's own timers (SYN every 100 ms without a host, keepalive every
+//!    250 ms with one) or [`IDLE_BACKSTOP_US`];
+//! 5. on a thread of its own, hold the next pass until the chip's
+//!    [`PassPacing`] says it may run: every pass preempts the render there,
+//!    and on the classic's silicon a preemption costs the render several
+//!    times what the pass does (`super::uart_link_pass_pacing`).
 //!
-//! Because this task shares the thread executor with the engine, it runs
-//! only between engine ticks (41–114 ms on a dome-scale project), and the
-//! board's resend floor is sized for that, not for the I/O task's 1 ms
+//! **Where it runs decides how promptly it runs.** On its own thread
+//! (`io-thread`, pinned to core 0 at priority 1, above the main task's 0) a
+//! wake — bytes from the I/O task, room in the TX pipe, the doorbell, a timer
+//! — preempts the render at once, so ACKs, resends, transfers and the log
+//! pump keep the I/O task's ~1 ms cadence while a frame renders; the link is
+//! then shared across two threads, under the lock the chip injects
+//! ([`UartLinkShared::leak_locked`], and its short-closure rule). Without the
+//! thread this task shares the main executor with the engine and runs only
+//! between engine ticks (41–114 ms on a dome-scale project). The board's
+//! resend floor is sized for the second case, not for the I/O task's 1 ms
 //! cadence (`uart_link_config`'s `MIN_RTO_US`). Liveness is the link's own
 //! (`Up`/`Reset`/`is_stalled`): a UART has no cable signal, and there is no
 //! connection monitor to replace.
+//!
+//! Waking on events and not on a 10 ms cadence matters because this task
+//! has a thread of its own (`io-thread`): every pass preempts the render,
+//! and a pass that finds nothing to do still costs something. The C6's USB
+//! loop made the same change in M1 (`lp2025/2026-10-01-1200-io-thread-spike`);
+//! P2 of `lp2025/2026-10-02-1918-io-thread-other-boards` ported it here
+//! ahead of the thread, which P4 of that plan added.
 
 use core::cell::Cell;
 
@@ -36,11 +62,18 @@ use embassy_time::{Instant, Timer};
 use lp_link::{Link, LinkState, Micros, SelectiveRepeat};
 
 use super::uart_link_counters::{self, EdgeCounters};
+use super::uart_link_pass_pacing::PassPacing;
 use super::uart_link_pipes::{self, MAX_FRAME_BYTES};
 use super::uart_link_shared::UartLinkShared;
 
-/// The longest the task sleeps with nothing to do (the log ring's cadence).
-pub const IDLE_CAP_US: Micros = 10_000;
+/// The longest the task sleeps with nothing to do. A backstop only: log
+/// records, queued replies and the I/O task's news (bytes arrived, room for
+/// a frame) all ring or wake sooner, and the link's own timers come sooner
+/// whenever a host is there or being looked for. Was `IDLE_CAP_US = 10_000`
+/// (a true 10 ms poll); event-driven since P2 of
+/// `lp2025/2026-10-02-1918-io-thread-other-boards`, mirroring the C6/S3 USB
+/// loop's `IDLE_BACKSTOP_US`.
+pub const IDLE_BACKSTOP_US: Micros = 250_000;
 /// Log records moved onto the log channel per pass: the board's datagram
 /// queue (`uart_link_config`'s two slots). Each is popped under its own
 /// short critical section (see [`crate::log_ring_logger::pump`]).
@@ -69,21 +102,30 @@ pub fn when_drained(action: fn() -> !) {
     critical_section::with(|cs| WHEN_DRAINED.borrow(cs).set(Some(action)));
 }
 
-/// Run the host link for ever. Spawn it on the thread executor.
-pub async fn run_uart_link(shared: &'static UartLinkShared) -> ! {
+/// Run the host link for ever. Spawn it on a thread executor — the link
+/// thread's, or the main one — never on the I/O task's interrupt executor.
+/// `pacing` is how far apart its passes must start: the link thread's
+/// [`PassPacing::CLASSIC_LINK_THREAD`], or [`PassPacing::EVERY_EVENT`] on the
+/// main executor, where it only runs between frames anyway.
+pub async fn run_uart_link(shared: &'static UartLinkShared, pacing: PassPacing) -> ! {
     let mut buf = [0u8; RX_CHUNK];
     let mut frame = [0u8; MAX_FRAME_BYTES];
     let mut drain_asked_at: Option<Micros> = None;
     let mut io_live_said = false;
     let mut edge_seen = EdgeCounters::default();
+    crate::log_ring_logger::ring_on_record(shared.doorbell_signal());
 
     loop {
+        let pass_started = now_us();
+        #[cfg(feature = "frame-pace-diag")]
+        let pace_pass_start = crate::frame_pace_diag::now_us();
         feed_rx(shared, &mut buf);
 
         let now = now_us();
-        shared.with_link(|link| {
-            crate::log_ring_logger::pump(link, now, LOG_RECORDS_PER_PASS);
+        let logs_moved = shared.with_link(|link| {
+            let moved = crate::log_ring_logger::pump(link, now, LOG_RECORDS_PER_PASS);
             uart_link_counters::note_stalled(link.is_stalled(now));
+            moved
         });
 
         // Whole frames, while the TX pipe has room for a largest one. When it
@@ -119,7 +161,29 @@ pub async fn run_uart_link(shared: &'static UartLinkShared) -> ! {
             }
         }
 
-        let wake = wake_at(shared, IDLE_CAP_US);
+        #[cfg(feature = "frame-pace-diag")]
+        crate::frame_pace_diag::link_pass(
+            crate::frame_pace_diag::now_us().saturating_sub(pace_pass_start) as u32,
+        );
+        // A burst longer than one pass's records: go round again while the
+        // link keeps taking them (the datagram queue's own room gates it).
+        // A pass that moved none waits for the event that makes room (an ACK
+        // arriving, a timer) or a new record — the C6/S3 USB loop's
+        // `log_backlog` rule.
+        let log_backlog = logs_moved > 0 && crate::log_ring_logger::has_records();
+        let wake = if log_backlog {
+            now_us()
+        } else {
+            wake_at(shared, IDLE_BACKSTOP_US)
+        };
+        // On a thread of its own, sleep out the interval FIRST and only then
+        // wait for news: the pipes' wake and the doorbell are latched, so
+        // anything that arrives meanwhile ends the wait at once. Waiting for
+        // the news first and holding after it would wake the thread twice a
+        // pass — twice the preemptions the interval exists to save.
+        if let Some(hold) = pacing.hold_until(pass_started, now_us()) {
+            Timer::at(Instant::from_micros(hold)).await;
+        }
         select3(
             uart_link_pipes::wake(),
             Timer::at(Instant::from_micros(wake)),
