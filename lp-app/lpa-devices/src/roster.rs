@@ -43,6 +43,18 @@ fn default_flash_consent_ms() -> u64 {
     600_000
 }
 
+/// The mint never raises past this, and never lands on anything above it.
+///
+/// #977 stops a NEW legacy row from taking an id near `u64::MAX/2`, but a
+/// `/registry.json` saved before #977 still holds one, and every load used
+/// to raise [`RosterState::next_device_id`] to match it — so every board
+/// added after loading that file kept getting huge ids too. A saved id
+/// above the ceiling now loads unchanged (persisted-format rule: a saved
+/// row always resolves to the same board) without moving the mint, and a
+/// saved `u64::MAX` can no longer reach [`RosterState::mint_device_id`]'s
+/// `+= 1` and overflow it.
+const MINT_CEILING: u64 = u32::MAX as u64;
+
 /// Every knob the model needs, supplied by the app. Deliberately no
 /// constants baked into the fold: the wire proto comes from `lpc-wire`, and
 /// the budgets are product decisions the app owns.
@@ -259,13 +271,17 @@ impl Roster {
         let records: Vec<DeviceRecord> = records.into_iter().collect();
         // Raise the mint past every persisted id FIRST, so a re-keyed record
         // can never take a number a later record of this batch still wears.
+        // An id above MINT_CEILING never raises it: that range is for a row
+        // saved before #977, not for the mint to keep handing out.
         for record in &records {
-            self.state.next_device_id = self.state.next_device_id.max(record.device.0);
+            if record.device.0 <= MINT_CEILING {
+                self.state.next_device_id = self.state.next_device_id.max(record.device.0);
+            }
         }
         let mut loaded = Vec::with_capacity(records.len());
         for mut record in records {
             if self.id_is_held(record.device) {
-                record.device = self.state.mint_device_id();
+                record.device = self.mint_unheld_device_id();
             }
             loaded.push(record.device);
             self.devices.push(Device::from_record(record));
@@ -276,6 +292,21 @@ impl Roster {
     /// Whether a device or a pending link already answers to `id`.
     fn id_is_held(&self, id: DeviceId) -> bool {
         self.index_of(id).is_some() || self.pending.iter().any(|entry| entry.device_id() == id)
+    }
+
+    /// Mint a fresh id that nothing already holds. Plain
+    /// [`RosterState::mint_device_id`] is a bare `+= 1` with no such check;
+    /// every caller that can hand its result to a NEW entry (as opposed to
+    /// re-keying one already past the check) goes through this instead, so
+    /// a huge saved id sitting outside the mint's range can never collide
+    /// with it.
+    fn mint_unheld_device_id(&mut self) -> DeviceId {
+        loop {
+            let id = self.state.mint_device_id();
+            if !self.id_is_held(id) {
+                return id;
+            }
+        }
     }
 
     pub fn config(&self) -> &RosterConfig {
@@ -608,7 +639,7 @@ impl Roster {
         self.state
             .journal
             .note(now, Scope::Roster, JournalNote::PendingLinkOpened { link });
-        let device_id = self.state.mint_device_id();
+        let device_id = self.mint_unheld_device_id();
         let mut provisional = Device::new(device_id, IdentityChain::default());
         let commands = {
             let Self { state, .. } = self;
@@ -1693,6 +1724,70 @@ mod tests {
             ids.len(),
             "every entry has its own id: {ids:?}"
         );
+    }
+
+    /// #977 stops a NEW legacy row from taking an id near `u64::MAX/2`, but
+    /// a registry saved before #977 still has one on disk, and loading it
+    /// used to raise the mint to match — so every board added after was
+    /// huge too. The saved row still loads under its own id (persisted-
+    /// format rule); only the mint stays small.
+    #[test]
+    fn a_saved_huge_id_loads_unchanged_and_the_next_mint_stays_small() {
+        const SAVED: u64 = u64::MAX / 2 + 1;
+        let mut roster = Roster::new(RosterConfig::default());
+        roster.load_records(vec![DeviceRecord::new(DeviceId(SAVED), mac_chain(DESK_MAC))]);
+
+        assert_eq!(
+            roster.devices()[0].id,
+            DeviceId(SAVED),
+            "the saved row keeps the id it was saved with"
+        );
+
+        roster.handle(Millis(0), attach(LinkId(1), "usb-1"));
+
+        assert_eq!(
+            roster.pending()[0].device_id(),
+            DeviceId(1),
+            "the mint never raised past MINT_CEILING"
+        );
+    }
+
+    /// The same bug at its sharpest edge: a saved `u64::MAX` used to raise
+    /// the mint to `u64::MAX`, and the next `+= 1` panicked in debug (wrapped
+    /// to `DeviceId(0)` in release). Loading it must neither panic nor move
+    /// the mint.
+    #[test]
+    fn a_saved_u64_max_does_not_panic_and_the_next_mint_stays_small() {
+        let mut roster = Roster::new(RosterConfig::default());
+        roster.load_records(vec![DeviceRecord::new(
+            DeviceId(u64::MAX),
+            mac_chain(DESK_MAC),
+        )]);
+
+        assert_eq!(roster.devices()[0].id, DeviceId(u64::MAX));
+
+        roster.handle(Millis(0), attach(LinkId(1), "usb-1"));
+
+        assert_eq!(
+            roster.pending()[0].device_id(),
+            DeviceId(1),
+            "the mint never raised past MINT_CEILING"
+        );
+    }
+
+    /// `mint_unheld_device_id` is the whole fix: a plain `mint_device_id`
+    /// would hand back whatever the counter next holds, held or not. Force
+    /// the counter behind an id the roster already holds (the module doc's
+    /// two-tabs case) and check the helper steps past it.
+    #[test]
+    fn a_mint_that_would_land_on_a_held_id_skips_it() {
+        let mut roster = Roster::new(RosterConfig::default());
+        roster.load_records(vec![DeviceRecord::new(DeviceId(1), mac_chain(DESK_MAC))]);
+        roster.state.next_device_id = 0;
+
+        let minted = roster.mint_unheld_device_id();
+
+        assert_eq!(minted, DeviceId(2), "skipped the already-held DeviceId(1)");
     }
 
     const DESK_MAC: &str = "10:bd:a3:b0:8e:30";
