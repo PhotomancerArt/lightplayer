@@ -696,6 +696,16 @@ are the cable. You need **no** WebSerial grant, no `just serial-grant`, no
 bench port and no Chromium policy profile: a polyfilled `navigator.serial`
 grants itself.
 
+Each board's banner row also carries a **D0 power** toggle, **on** by default:
+the switch a switch-mode `PowerButton` reads (`button:local:D0`, e.g. the
+PLAYFUL choker). An emulated pad nobody drives reads low, which that firmware
+takes as "switch off", and with the switch off a `detach` powers the board off
+(`ext1 wake: gpio0 high` deep sleep, state `stopped`) with no wake modelled, so
+nothing short of restarting `emu serve` brings it back. The switch is the
+control verb `pin 0 0|1`; the page re-sends it after every reboot (a restart
+drops outside drives), and `detach` waits for the firmware to have read it.
+Flip it **off** to test the power-off itself. It works the same on `?emu=tab`.
+
 The door admits **one client per board** (a second gets 409), so one Studio tab
 per `emu serve`, and use `?on=` (a different, orthogonal flag) if you want a
 second lens on the same session.

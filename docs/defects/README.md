@@ -513,6 +513,7 @@ a fifth still lands somewhere the new `Fault` status and pattern don't reach.
 | policy-leak | 2026-07-17 | [hardware-attach-opened-editor](2026-07-17-hardware-attach-opened-editor.md) | fixed | lpa-studio-core/studio |
 | stand-in-divergence | 2026-07-23 | [popover-open-resizes-card](2026-07-23-popover-open-resizes-card.md) | fixed | lpa-studio-web/base/popover |
 | stand-in-divergence | 2026-07-27 | [story-check-tolerance-ignores-amplitude](2026-07-27-story-check-tolerance-ignores-amplitude.md) | **open** | lpa-studio-web/scripts + CI |
+| stand-in-divergence | 2026-10-03 | [an-emulated-power-button-board-powered-off-on-detach](2026-10-03-an-emulated-power-button-board-powered-off-on-detach.md) | fixed | lpa-studio-web `?emu=` shim: an undriven D0 read "switch off", so a power-button project's board deep-slept on `detach` with no wake; the banner now holds a D0 switch on (`pin 0 1`), re-sent after reboots |
 | nondeterministic-capture | 2026-07-28 | [overview-composite-capture-races](2026-07-28-overview-composite-capture-races.md) | fixed | lpa-studio-web story capture (overview composites) |
 | retired-surface-still-reachable | 2026-07-28 | [retired-device-pane-still-reachable](2026-07-28-retired-device-pane-still-reachable.md) | fixed | lpa-studio-core/home + studio_shell |
 | stale-measurement | 2026-07-30 | [deploy-compiles-previous-upload](2026-07-30-deploy-compiles-previous-upload.md) | **fixed** (CLI-side; hardware confirmation pending P7) | lp-cli (upload observability) |
