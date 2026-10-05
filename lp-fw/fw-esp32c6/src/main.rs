@@ -410,6 +410,13 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     start_runtime(timg0, sw_int);
     esp_println::println!("[INIT] Runtime started");
 
+    // SPIKE ONLY (emulator seams M0 part B): bind the probe's wake handler
+    // and start its main-executor consumer, if an emulator engaged it.
+    #[cfg(feature = "spike_seam_wake_probe")]
+    if seams::wake_probe::install() {
+        spawner.spawn(seams::wake_probe::probe_task(0).unwrap());
+    }
+
     // The host link runs lp-link over USB-Serial-JTAG: its task owns the
     // peripheral, and `log` records ride its log channel from here on. The
     // `esp_println!` lines before and around this are raw text outside

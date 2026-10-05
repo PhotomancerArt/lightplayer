@@ -343,6 +343,11 @@ fixture-no-in-endpoint-gate = []
 # the emulator's existing idle skip does the work with no seam at all. A
 # silicon behaviour change (the RMT refill deadline), so a desk item.
 spike_l0_wfi_wait = []
+# SPIKE ONLY (emulator seams M0 part B; never merges): the wake-interrupt
+# probe — a pending word, a FROM_CPU_INTR3 handler in RAM, and two embassy
+# tasks (main executor, link IO thread executor) that drain the probe seam.
+# Inert unless an emulator engages the probe seam.
+spike_seam_wake_probe = []
 
 [dependencies]
 lp-collection = { workspace = true, features = ["serde"] }

@@ -95,5 +95,11 @@ extern "C" fn entry(param: *mut c_void) {
         alloc::boxed::Box::leak(alloc::boxed::Box::new(esp_rtos::embassy::Executor::new()));
     executor.run(move |spawner| {
         spawner.spawn(crate::serial::usb_link_task(usb_device, shared).unwrap());
+        // SPIKE ONLY (emulator seams M0 part B): the probe's second consumer,
+        // on this thread's executor.
+        #[cfg(feature = "spike_seam_wake_probe")]
+        if crate::seams::wake_probe::engaged_by_byte() {
+            spawner.spawn(crate::seams::wake_probe::probe_task(1).unwrap());
+        }
     })
 }

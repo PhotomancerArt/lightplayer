@@ -5909,6 +5909,7 @@ version = "40.0.0"
 dependencies = [
  "log",
  "lp-emu-core",
+ "lp-seam",
  "lp-ws281x",
  "object 0.37.3",
  "test-log",
@@ -5934,6 +5935,7 @@ dependencies = [
  "lp-emu-jit",
  "lp-emu-validate",
  "lp-riscv-emu",
+ "lp-seam",
  "lp-ws281x",
  "md-5",
  "rustc-demangle",

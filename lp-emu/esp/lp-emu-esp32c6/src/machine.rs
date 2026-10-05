@@ -1177,6 +1177,11 @@ pub struct Esp32C6Builder {
     usb_in_free_lag_ns: u64,
     /// The USB host link's fault injector (`--usb-faults`), off by default.
     usb_faults: Option<lp_emu_esp_common::link_faults::LinkFaults>,
+    /// Emulator seams to engage (`--seams`). Empty — today's machine — by
+    /// default.
+    seams: lp_emu_esp_common::seam::SeamRequest,
+    /// SPIKE: the wake probe's injection modes (`--seam-probe`).
+    seam_probe: Option<String>,
 }
 
 impl Default for Esp32C6Builder {
@@ -1244,6 +1249,8 @@ impl Esp32C6Builder {
             rmt_logs: false,
             usb_in_free_lag_ns: 0,
             usb_faults: None,
+            seams: lp_emu_esp_common::seam::SeamRequest::none(),
+            seam_probe: None,
         }
     }
 
@@ -1684,6 +1691,20 @@ impl Esp32C6Builder {
 
     /// Damage the USB host link's packets (`--usb-faults <spec>`) — a test
     /// switch, off by default. See `lp_emu_esp_common::link_faults`.
+    /// Engage these emulator seams (`--seams led=fast`). A seam asked for
+    /// that cannot engage fails the build (plan PD5).
+    pub fn seams(mut self, request: lp_emu_esp_common::seam::SeamRequest) -> Self {
+        self.seams = request;
+        self
+    }
+
+    /// SPIKE: the wake probe's injection modes (`steady,burst,…`); needs
+    /// `--seams probe=host`.
+    pub fn seam_probe(mut self, modes: Option<String>) -> Self {
+        self.seam_probe = modes;
+        self
+    }
+
     pub fn usb_faults(mut self, faults: lp_emu_esp_common::link_faults::LinkFaults) -> Self {
         self.usb_faults = Some(faults);
         self
@@ -1824,6 +1845,8 @@ impl Esp32C6Builder {
             rmt_logs,
             usb_in_free_lag_ns,
             usb_faults,
+            seams,
+            seam_probe,
         } = self;
 
         let rom_image = match rom {
@@ -2058,6 +2081,16 @@ impl Esp32C6Builder {
             // the window has just been filled from it, so nothing is stale.
             flash_handle.lock().unwrap().take_written_blocks();
         }
+
+        // Emulator seams, resolved against the chip's bytes now that a direct
+        // load has staged them (a ROM-up chip already holds its image). With
+        // none asked for this is a no-op: no scan, nothing armed.
+        let seam_state = crate::seams::engage(
+            &seams,
+            flash_handle.lock().unwrap().bytes(),
+            seam_probe.as_deref(),
+        )
+            .map_err(BuildError::Io)?;
 
         if let Some(faults) = usb_faults.filter(|f| !f.is_off()) {
             let set = bus
@@ -2316,6 +2349,7 @@ impl Esp32C6Builder {
             control_lines: 0,
             hook_calls: 0,
             idle_skips: 0,
+            seams: seam_state,
             stop_at: None,
             flash: flash_handle,
             cache: cache_handle,
@@ -2348,6 +2382,12 @@ impl Esp32C6Builder {
                 .bus
                 .with_peripheral::<crate::periph::uart::Uart, _>(i, |u, _| u.set_host_baud(baud));
         }
+        // Seams arm before the first translation event (the core below is
+        // built from guest memory, so it sees the `ebreak` and escapes there)
+        // and before the power-on snapshot (so a reboot restores an armed
+        // window). On a ROM-up boot nothing is mapped yet; the cache fills
+        // the bootloader causes arm them.
+        machine.arm_seams();
         if reboot_on_reset {
             machine.power_on = Some(machine.snapshot());
         }
@@ -2730,6 +2770,9 @@ pub struct Esp32C6Machine {
     control_lines: u64,
     hook_calls: u64,
     idle_skips: u64,
+    /// Emulator seams: what was asked for, where they are armed, and their
+    /// counters. Empty unless a run asked (`--seams`). See [`crate::seams`].
+    pub(crate) seams: crate::seams::SeamState,
     /// Set by a hook that answered [`HookResult::Stop`]; the run loop ends
     /// with [`Outcome::Breakpoint`] at that pc.
     stop_at: Option<u32>,
@@ -2817,7 +2860,14 @@ impl Esp32C6Machine {
         if !self.cache.lock().unwrap().has_dirty() {
             return;
         }
-        self.cache_fills += crate::cache::fill(&mut self.bus, &self.flash, &self.cache) as u64;
+        let filled = crate::cache::fill(&mut self.bus, &self.flash, &self.cache) as u64;
+        self.cache_fills += filled;
+        // A fill can erase a seam's patch (or map the app's page a ROM-up
+        // seam was waiting for). Only on a fill, so seam-off runs pay
+        // nothing and seam-on runs pay per fill, not per slice.
+        if filled > 0 {
+            self.arm_seams();
+        }
     }
 
     /// What the hart's pre-decoded block cache did, or `None` when it was
@@ -4630,7 +4680,7 @@ impl Esp32C6Machine {
     /// Write `bytes` into guest memory through the bus's own decode, word by
     /// word, read-modify-writing the two ends so a delivery never disturbs a
     /// byte outside its own range. `false` if any word refused.
-    fn poke_bytes(&mut self, address: u32, bytes: &[u8]) -> bool {
+    pub(crate) fn poke_bytes(&mut self, address: u32, bytes: &[u8]) -> bool {
         let mut at = address;
         let mut rest = bytes;
         while !rest.is_empty() {
@@ -5000,20 +5050,34 @@ impl Esp32C6Machine {
                 )
             });
 
-            self.bus.set_time(now);
-            let end = self.harts[0].run_slice(&mut self.bus, budget);
+            // An emulator seam's park (`led=fast`): while no interrupt the
+            // hart would wake for is asserted, the guest runs nothing and
+            // guest time moves event to event — the boundary below still
+            // runs each event, exactly as it does after a `wfi` skip. Never
+            // true on a seam-off run.
+            let staying_parked = self.seams.parked && !self.interrupt_wakes_hart();
+            self.seams.parked = staying_parked;
+            let end = if staying_parked {
+                self.idle_skip(now, stop_cycle);
+                self.seams.park_events += 1;
+                SliceEnd::BudgetExhausted
+            } else {
+                self.bus.set_time(now);
+                let end = self.harts[0].run_slice(&mut self.bus, budget);
 
-            // The second translation event (JD5). The hart's `fence.i` hook
-            // has already dropped the blocks whose bytes changed; this is
-            // where what the guest published gets translated. Checked
-            // between slices rather than inside the hook because rebuilding
-            // a core needs the machine, and the hart is what the hook has.
-            //
-            // A slice boundary is not a delay the guest can see: translated
-            // code is not architectural state, so the instructions between
-            // the `fence.i` and here are interpreted, exactly as they would
-            // have been with no core at all.
-            self.translate_if_code_was_published();
+                // The second translation event (JD5). The hart's `fence.i` hook
+                // has already dropped the blocks whose bytes changed; this is
+                // where what the guest published gets translated. Checked
+                // between slices rather than inside the hook because rebuilding
+                // a core needs the machine, and the hart is what the hook has.
+                //
+                // A slice boundary is not a delay the guest can see: translated
+                // code is not architectural state, so the instructions between
+                // the `fence.i` and here are interpreted, exactly as they would
+                // have been with no core at all.
+                self.translate_if_code_was_published();
+                end
+            };
 
             let census_end = match end {
                 SliceEnd::BudgetExhausted => slice_census::End::BudgetExhausted,
@@ -5029,30 +5093,26 @@ impl Esp32C6Machine {
                 // next instruction — today, the cache MMU after an entry
                 // write. Everything below the match is that attention.
                 SliceEnd::BusYield => {}
-                SliceEnd::Wfi => {
-                    // The deterministic idle skip: nothing can happen before
-                    // the next scheduled event, so move guest time there —
-                    // or before the next scripted command or socket poll,
-                    // which is the only thing that keeps a run with an idle
-                    // guest and a live control channel able to hear it.
-                    let mut wake = self
-                        .bus
-                        .sched
-                        .next_deadline()
-                        .or_else(|| self.bus.host.next_ready())
-                        .unwrap_or(stop_cycle);
-                    if let Some(at) = self.next_host_service(now) {
-                        wake = wake.min(at);
+                SliceEnd::Wfi => self.idle_skip(now, stop_cycle),
+                SliceEnd::Ebreak { pc } => match self.serve_breakpoint(pc) {
+                    Served::No => self.harts[0].deliver_breakpoint(pc),
+                    Served::Yes => {}
+                    // A seam's "sleep as `wfi` would": the same wake test the
+                    // hart's own `wfi` makes (an interrupt enabled in `mie`
+                    // and asserted ends the park at once, whatever
+                    // `mstatus.MIE` says), then the same idle skip.
+                    Served::Park => {
+                        if !self.interrupt_wakes_hart() {
+                            self.seams.parks += 1;
+                            self.idle_skip(now, stop_cycle);
+                            // Until an interrupt: see `staying_parked` above.
+                            // `LP_EMU_SEAM_SHALLOW_PARK` keeps the `wfi`
+                            // behaviour instead (return at the next event,
+                            // interrupt or not) — a measurement knob.
+                            self.seams.parked = !self.seams.shallow_park;
+                        }
                     }
-                    let wake = wake.max(self.cycles() + 1).min(stop_cycle);
-                    self.harts[0].advance_to_cycle(wake);
-                    self.idle_skips += 1;
-                }
-                SliceEnd::Ebreak { pc } => {
-                    if !self.serve_breakpoint(pc) {
-                        self.harts[0].deliver_breakpoint(pc);
-                    }
-                }
+                },
                 SliceEnd::Fault(fault) => {
                     // A strict refusal that turned into a double fault is
                     // still a strict refusal, and naming the access is more
@@ -5082,6 +5142,10 @@ impl Esp32C6Machine {
             // scripted command due by now, then — on the poll cadence — the
             // byte socket's client edge and the control channel's lines.
             let host_service = self.service_host(at);
+            // SPIKE: the wake probe's injections (never on a seam-off run).
+            if self.seams.probe.is_some() {
+                self.seam_probe_tick(at);
+            }
             let external = self.bus.pending_cpu_interrupt();
             let external_changed = external != last_external;
             last_external = external;
@@ -5766,11 +5830,40 @@ impl Esp32C6Machine {
         self.script.len()
     }
 
-    /// The ROM hook table's first refusal. `true` when a hook served the
-    /// `ebreak` and the machine performed the `ret`.
-    fn serve_breakpoint(&mut self, pc: u32) -> bool {
+    /// The deterministic idle skip: nothing can happen before the next
+    /// scheduled event, so move guest time there — or before the next
+    /// scripted command or socket poll, which is the only thing that keeps a
+    /// run with an idle guest and a live control channel able to hear it.
+    ///
+    /// `wfi`'s answer, and an emulator seam's park (the same code, so the two
+    /// cannot drift apart).
+    fn idle_skip(&mut self, now: Cycles, stop_cycle: Cycles) {
+        let mut wake = self
+            .bus
+            .sched
+            .next_deadline()
+            .or_else(|| self.bus.host.next_ready())
+            .unwrap_or(stop_cycle);
+        if let Some(at) = self.next_host_service(now) {
+            wake = wake.min(at);
+        }
+        let wake = wake.max(self.cycles() + 1).min(stop_cycle);
+        self.harts[0].advance_to_cycle(wake);
+        self.idle_skips += 1;
+    }
+
+    /// `wfi`'s wake condition: an interrupt asserted and enabled in `mie`,
+    /// whatever `mstatus.MIE` says (spec §3.3.3).
+    fn interrupt_wakes_hart(&self) -> bool {
+        let hart = &self.harts[0];
+        hart.external()
+            .is_some_and(|n| hart.csr().mie & (1u32 << (n & 31)) != 0)
+    }
+
+    /// The ROM hook table's first refusal, then the emulator seams'.
+    fn serve_breakpoint(&mut self, pc: u32) -> Served {
         let Some(hook) = self.hooks.get(pc) else {
-            return false;
+            return self.serve_seam(pc);
         };
         log::trace!("HOOK {} at {:#010x}", hook.symbol, hook.address);
         if self.bus.trace.is_enabled() {
@@ -5783,14 +5876,57 @@ impl Esp32C6Machine {
                 // `ret` is `jalr x0, 0(ra)`.
                 let ra = self.harts[0].regs()[1] as u32;
                 self.harts[0].set_pc(ra);
-                true
+                Served::Yes
             }
-            HookResult::Breakpoint => false,
+            HookResult::ParkThenReturn => {
+                let ra = self.harts[0].regs()[1] as u32;
+                self.harts[0].set_pc(ra);
+                Served::Park
+            }
+            HookResult::Breakpoint => Served::No,
             HookResult::Stop => {
                 self.stop_at = Some(pc);
-                true
+                Served::Yes
             }
         }
+    }
+
+    /// An engaged emulator seam's answer, when one claims `pc`.
+    ///
+    /// One answer exists (M0): `led=fast`'s wait step, which returns and
+    /// parks as `wfi` would. Not a hook-table entry and not counted in
+    /// `hook_calls`: seams have their own table and their own counters.
+    fn serve_seam(&mut self, pc: u32) -> Served {
+        let Some(arm) = self.seams.at(pc) else {
+            return Served::No;
+        };
+        let imp = arm.imp;
+        let answer = arm.answer;
+        self.seams.calls += 1;
+        if self.bus.trace.is_enabled() {
+            let line = format!(
+                "cyc={} pc={pc:#010x} SEAM {}={} {}",
+                self.cycles(),
+                imp.label,
+                imp.implementation,
+                imp.verb
+            );
+            self.bus.trace.note(&line);
+        }
+        let ra = self.harts[0].regs()[1] as u32;
+        self.harts[0].set_pc(ra);
+        if answer == crate::seams::Answer::Park {
+            return Served::Park;
+        }
+        self.answer_seam_call(answer);
+        Served::Yes
+    }
+
+    /// The run's configuration name, with one `+<seam>=<impl>` atom per
+    /// engaged seam (M9's provisional spelling). Exactly the time grade's
+    /// name when no seam is engaged.
+    pub fn configuration_label(&self) -> String {
+        self.seams.request.label(self.time_grade.configuration())
     }
 
     fn report_probe(&mut self, at: Cycles, name: &str) {
@@ -5889,6 +6025,8 @@ impl Esp32C6Machine {
             matrix: self.bus.matrix().save_state(),
             rng: self.rng,
             hook_calls: self.hook_calls,
+            seam_calls: self.seams.calls,
+            seam_arms: self.seams.arms_planted,
             uart0: self.uart0_log.bytes(),
             usb_sj: self.usb_sj_log.bytes(),
             usb_sj_tried: self.usb_sj_tried_log.bytes(),
@@ -5952,6 +6090,8 @@ impl Esp32C6Machine {
         self.bus.matrix_mut().load_state(&s.matrix);
         self.rng = s.rng;
         self.hook_calls = s.hook_calls;
+        self.seams.calls = s.seam_calls;
+        self.seams.arms_planted = s.seam_arms;
         self.uart0_log.replace(&s.uart0);
         self.usb_sj_log.replace(&s.usb_sj);
         self.usb_sj_tried_log.replace(&s.usb_sj_tried);
@@ -5964,7 +6104,20 @@ impl Esp32C6Machine {
             let wp = self.harts[0].triggers().watchpoint(slot);
             self.bus.set_watchpoint(slot, wp);
         }
+        // The restored window may hold a patch, or not; re-derive.
+        self.arm_seams();
     }
+}
+
+/// What [`Esp32C6Machine::serve_breakpoint`] did with an `ebreak`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Served {
+    /// Nobody claimed it: the guest gets the architectural breakpoint.
+    No,
+    /// A hook answered (or stopped the run).
+    Yes,
+    /// Answered with `pc = ra`; now park as `wfi` would.
+    Park,
 }
 
 #[cfg(test)]

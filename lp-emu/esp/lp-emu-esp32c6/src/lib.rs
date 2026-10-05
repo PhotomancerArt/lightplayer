@@ -71,6 +71,7 @@ pub mod periph;
 pub mod pinscript;
 pub mod regs;
 pub mod rom;
+pub mod seams;
 pub mod slice_census;
 pub mod snapshot;
 /// The `emu_*` slice ABI a JavaScript host drives the machine through, one

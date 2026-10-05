@@ -41,22 +41,33 @@ declare! {
         signature: fn() -> (),
         doc: "The render thread's wait between two polls of the WS281x RMT \
               driver's completion flag (`send_blocking`'s spin). On silicon: \
-              nothing observable, then return. Engaged: sleep exactly as `wfi` \
-              would (until the next event that can raise an interrupt), then \
-              return. The RMT model, the refill interrupt and the done \
+              nothing observable, then return. Engaged: sleep until the next \
+              interrupt the hart would wake for (`wfi`'s wake condition: \
+              asserted and enabled in `mie`), then return. The RMT model, the refill interrupt and the done \
               interrupt all run unchanged, so the wire time is billed by \
               emulated time passing.",
+    }
+
+    seam 0x7f00 engaged {
+        kind: Capability,
+        shape: Replace,
+        signature: fn(id: u32) -> u32,
+        doc: "SPIKE ONLY (feature `spike_seam_wake_probe`): the engaged \
+              check, mechanism (i) - a hooked query. On silicon: return 0. \
+              Engaged: return 1 for a seam id the emulator engaged.",
     }
 
     seam 0x7f01 probe_take {
         kind: Capability,
         shape: Switch,
-        signature: fn(buf: *mut u8, cap: u32) -> u32,
+        signature: fn(channel: u32, buf: *mut u8, cap: u32) -> u32,
         doc: "SPIKE ONLY (feature `spike_seam_wake_probe`, never merges): \
-              copy up to `cap` pending probe events (u32 sequence numbers, \
-              little-endian) into `buf` and return how many bytes were \
-              written. On silicon: return 0. The adapter drains until it \
-              returns 0 before it sleeps again.",
+              copy up to `cap` bytes of pending probe events for `channel` \
+              (u32 sequence numbers, little-endian) into `buf` and return \
+              how many bytes were written. On silicon: return 0. The adapter \
+              drains until it returns 0 before it sleeps again. Its entry's \
+              engaged byte is mechanism (ii): a flash byte the emulator \
+              patches to 1 in the cache window.",
     }
 }
 
