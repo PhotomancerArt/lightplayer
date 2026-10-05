@@ -611,3 +611,7 @@ lp-xt-fp-harness = { path = "../../lp-xt/lp-xt-fp-harness", optional = true }
 version = "0.18.0"
 optional = true
 features = ["esp32", "wifi", "esp-now", "esp-alloc", "unstable"]
+
+# The build stamps its app version (LP_APP_VERSION): tools/lp-app-version.
+[build-dependencies]
+lp-app-version = { path = "../../tools/lp-app-version" }

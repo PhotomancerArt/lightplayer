@@ -133,6 +133,31 @@ desk kernel — an interrupt-entry / wake-path probe in `cycle-probe` — not a
 constant to tune: fitting the fill cost or a per-wake term to this one
 number is exactly what the calibration record refused to do.
 
+**A second case: the WS281x refill (2026-10-03).** The same blind spot
+hid the PLAYFUL Choker's frame truncation
+(`2026-10-01-the-c6-choker-truncates-most-ws281x-frames-on-silicon.md`):
+silicon read 74–79 % of frames ending on a guard trip while `t2` decoded
+every frame whole. esp-hal's RISC-V dispatcher called into flash on the way
+to the RAM refill handler (`change_current_runlevel` and the per-source
+closure, ≈12 cache lines), and only `t3` charges that. The same command
+(`lp-cli emu run --elf <ws281x_telemetry ELF> --host-link --upload
+catalog/projects/playful-choker --time-grade t3 --timeout 32s`,
+`configuration=lp-emu:esp32c6:t3`, lp-emu `72de0d294`, base `113493d0b`),
+without and with esp-hal's fourth fork diff (`third_party/esp-hal/README-LP.md`)
+that puts the dispatcher in RAM:
+
+```text
+before: [WS281X] t_ms=30085 ch=0 half=24 frames=1056 complete=1028 trips=28 skips=29 errors=0 refills=75295 wanted=77088 lag_avg=4.9 lag_max=6 over_half=0 hist=1028:72200:2067:0:0:0:0:0:0 entry_max=34 entry_hist=74059:105:86:5:13:574:125:72:256 trip_at=72
+after:  [WS281X] t_ms=30082 ch=0 half=24 frames=1067 complete=1059 trips=8 skips=0 errors=0 refills=77618 wanted=77891 lag_avg=4.9 lag_max=6 over_half=0 hist=1059:76245:314:0:0:0:0:0:0 entry_max=19 entry_hist=77079:187:98:57:59:80:58:0:0 trip_at=648
+```
+
+`t3` reproduces the class (frames cut at exactly 72 bits, the 2026-09-02
+"first three LEDs" signature: 20 before, 0 after) and the fix moves it, but at a fraction of silicon's rate (2.7 %
+of frames at `t3` against 74–79 % on the board). That gap is this entry's
+open half again: `t3` charges the fills it sees and leaves out the rest of
+silicon's interrupt-entry cost. A refill deadline is a case where reading
+at `t1`/`t2` gives a confident wrong answer, not merely an optimistic one.
+
 **Regression coverage** — none. No test or walk runs a frame-rate or
 preemption comparison at `t3`; that is the gap.
 

@@ -28,6 +28,7 @@ lpc_model::lp_embed_manifest_core! {
     chip: "esp32c6",
     cargo_target: "riscv32imac-unknown-none-elf",
     profile: env!("LP_BUILD_PROFILE"),
+    version: env!("LP_APP_VERSION"),
     commit: env!("LP_BUILD_COMMIT"),
     dirty: lpc_model::manifest::str_eq(env!("LP_BUILD_DIRTY"), "true"),
     wire_proto: lpc_wire::WIRE_PROTO_VERSION,
@@ -721,6 +722,7 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     server.set_hello_identity(
         lpc_wire::HelloIdentity::new(
             "fw-esp32c6",
+            crate::manifest_version(),
             env!("LP_BUILD_COMMIT"),
             env!("LP_BUILD_DIRTY") == "true",
             env!("LP_BUILD_PROFILE"),

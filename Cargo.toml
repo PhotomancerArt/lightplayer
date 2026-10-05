@@ -40,6 +40,7 @@ members = [
     "lp-cli",
     # repo tooling: generators that emit checked-in assets
     "tools/lpt-geodome",
+    "tools/lp-app-version",
     "lp-fw/fw-esp32c6",
     "lp-fw/fw-esp32s3",
     # NOT in default-members (like the two above): a cross-target Xtensa crate
@@ -165,6 +166,7 @@ default-members = [
     "lp-fw/lp-ws281x",
     "lp-cli",
     "tools/lpt-geodome",
+    "tools/lp-app-version",
     "lp-core/lpc-mapping",
     "lp-core/lpc-model",
     "lp-core/lpc-registry",

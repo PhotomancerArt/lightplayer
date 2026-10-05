@@ -188,6 +188,9 @@ pub(crate) fn DeviceRosterCard(
     /// Stories only: mount "Who has access" open.
     #[props(default)]
     access_panel_open: bool,
+    /// Stories only: mount "Who has access"'s keys list open too.
+    #[props(default)]
+    keys_open_preview: bool,
     /// What the card says and offers about the board's files across a
     /// layout change (the C6 repartition): the question or the refusal
     /// (a sheet), a board holding its files, a backup waiting to go back.
@@ -703,6 +706,7 @@ pub(crate) fn DeviceRosterCard(
                         access,
                         on_access,
                         who_open: access_panel_open,
+                        keys_open_preview,
                     }
                 }
                 // Unlocked for play only: say what editing needs, and the
@@ -1814,6 +1818,7 @@ mod tests {
             firmware_face: lpa_studio_core::DeviceFirmwareFace::LightPlayer {
                 firmware: None,
                 wire: lpa_studio_core::DeviceWireVersion::Match,
+                age: lpa_studio_core::DeviceFirmwareAge::Unknown,
             },
             remembered_firmware: None,
             degraded: None,
@@ -1917,6 +1922,7 @@ mod tests {
         card.firmware_face = lpa_studio_core::DeviceFirmwareFace::LightPlayer {
             firmware: Some("fw-esp32c6 0.9.3".to_string()),
             wire: lpa_studio_core::DeviceWireVersion::Match,
+            age: lpa_studio_core::DeviceFirmwareAge::Unknown,
         };
         assert_eq!(
             firmware_line_text(&card, Some("XIAO ESP32-C6"), None),
@@ -1930,6 +1936,7 @@ mod tests {
                 board: 19,
                 studio: 20,
             },
+            age: lpa_studio_core::DeviceFirmwareAge::Unknown,
         };
         assert_eq!(
             firmware_line_text(&card, Some("QuinLED-Dig-Uno"), None),

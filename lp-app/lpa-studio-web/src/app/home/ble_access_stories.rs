@@ -251,6 +251,39 @@ fn ble_access_keys_crowded() -> Element {
     }
 }
 
+#[story(
+    description = "The access panel OPENED as the device card's actual popover, keys open, with many keys (17 rows, Yona's count in the original overlap screenshot): proves the open list never sits under the collapsed \"Access\" row — once the panel is showing, the row that triggered it must read as closed chrome, never as a second row painted over the list's own entries."
+)]
+fn ble_access_popover_open_many_keys() -> Element {
+    let mut panel = panel(
+        OpenTo::Edit,
+        UiPasswordLine::FollowsAuthor,
+        UiPasswordLine::Anyone,
+        keys_many(),
+    );
+    panel.ble_enabled = Some(true);
+    let access = UiDeviceAccess {
+        over_bluetooth: false,
+        line: None,
+        unlock: None,
+        panel: Some(panel),
+    };
+    rsx! {
+        div { class: CARD_FRAME,
+            StoryDeviceCard {
+                card: usb_card(),
+                projects: Vec::new(),
+                examples: Vec::new(),
+                open_uid: Some("dev000000daqf6dvvqz".to_string()),
+                access: Some(access),
+                access_panel_open: true,
+                keys_open_preview: true,
+                on_action: |_| {},
+            }
+        }
+    }
+}
+
 // --- 4 · Unlocking over Bluetooth -----------------------------------------
 
 #[story(
@@ -846,6 +879,28 @@ fn keys_crowded() -> Vec<UiKeyGroup> {
     ]
 }
 
+/// `keys_typical()` plus enough distinct other browsers to reach 17 rows —
+/// Yona's count in the original popover-overlap screenshot. Folding (#929)
+/// keeps a repeated browser to one row, so the reproduction needs rows that
+/// do NOT fold into each other: this fixture exists only to make the open
+/// keys list tall enough to force the popover's viewport clamp.
+fn keys_many() -> Vec<UiKeyGroup> {
+    let mut keys = keys_typical();
+    for i in 0..13u64 {
+        keys.push(group(
+            &format!("Guest browser {}", i + 1),
+            SecretKind::Browser,
+            AccessTier::Edit,
+            false,
+            false,
+            1,
+            i * 2 + 1,
+            i * 2 + 1,
+        ));
+    }
+    keys
+}
+
 fn panel(
     open: OpenTo,
     play: UiPasswordLine,
@@ -925,6 +980,7 @@ fn ble_card() -> DeviceView {
         firmware_face: lpa_studio_core::DeviceFirmwareFace::LightPlayer {
             firmware: Some("fw-esp32c6 abc1234".to_string()),
             wire: lpa_studio_core::DeviceWireVersion::Match,
+            age: lpa_studio_core::DeviceFirmwareAge::Unknown,
         },
         remembered_firmware: None,
         degraded: None,

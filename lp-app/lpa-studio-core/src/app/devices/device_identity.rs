@@ -381,6 +381,7 @@ mod tests {
         view.firmware_face = lpa_devices::view::FirmwareFace::LightPlayer {
             firmware: Some("fw-esp32v3 7c80a27".to_string()),
             wire: lpa_devices::WireVersion::Match,
+            age: lpa_devices::FirmwareAge::Unknown,
         };
 
         let line = device_identity_line(&view);
@@ -433,6 +434,7 @@ mod tests {
             view.firmware_face = lpa_devices::view::FirmwareFace::LightPlayer {
                 firmware: Some("fw-esp32c6 abc1234".to_string()),
                 wire: lpa_devices::WireVersion::Match,
+                age: lpa_devices::FirmwareAge::Unknown,
             };
 
             let line = device_identity_line(&view);
@@ -527,6 +529,7 @@ mod tests {
         view.firmware_face = lpa_devices::view::FirmwareFace::LightPlayer {
             firmware: Some("fw-esp32c6 abc1234".to_string()),
             wire: lpa_devices::WireVersion::Match,
+            age: lpa_devices::FirmwareAge::Unknown,
         };
 
         let display = device_identity_line(&view).display();
@@ -599,6 +602,7 @@ mod tests {
         view.firmware_face = lpa_devices::view::FirmwareFace::LightPlayer {
             firmware: Some("fw-esp32v3 1111111".to_string()),
             wire: lpa_devices::WireVersion::Match,
+            age: lpa_devices::FirmwareAge::Unknown,
         };
         view.remembered_firmware = Some("fw-esp32v3 0000000".to_string());
 

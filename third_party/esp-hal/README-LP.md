@@ -1,6 +1,6 @@
 # esp-hal — LP fork
 
-Vendored from crates.io **esp-hal 1.1.1**, verbatim except for the three diffs below.
+Vendored from crates.io **esp-hal 1.1.1**, verbatim except for the four diffs below.
 Patched in through the root `Cargo.toml`'s `[patch.crates-io]`, the same way
 `third_party/esp-alloc` and `third_party/esp-storage` are. The version stays
 `1.1.1` on purpose: `esp-rtos`, `esp-radio`, `esp-storage` and the three
@@ -90,6 +90,39 @@ rewording. After this diff the file differs from 1.2.0's only in those.
 **Drop on upgrade to esp-hal ≥ 1.2.0**: all three are in it. Nothing of ours
 is mixed in.
 
+## The fourth diff: the RISC-V dispatcher's own callees are `#[ram]`
+
+`src/interrupt/riscv.rs` changes two things inside the RISC-V
+`handle_interrupts` path, which is the C6's:
+
+| what | upstream | here | size on the C6 |
+|---|---|---|---|
+| `change_current_runlevel` | plain `fn`, called on entry and exit of every peripheral interrupt | `#[crate::ram]` | 98 B |
+| the per-source loop | a closure (`let handle_interrupts = \|\| …`) with a `filter` closure inside, passed to `riscv::interrupt::nested` or called directly | a named `#[crate::ram] unsafe fn dispatch(status, prio)`, called directly at `Priority::max()` and wrapped in a one-line closure only for `nested`; the filter is a `continue` | 178 B |
+
+Why: the first diff put `handle_interrupts`' three helpers in RAM, but
+`handle_interrupts` itself still left RAM twice on every interrupt. On the
+`ws281x_telemetry` C6 image (main `113493d0b`) `rust-nm` put
+`change_current_runlevel` at `0x42098462` and
+`handle_interrupts::{closure#0}` at `0x42098a04`, and the closure called two
+machine-outlined prologue/epilogue helpers (`OUTLINED_FUNCTION_119`/`_115`,
+`0x422345..`) — about a dozen cold 32-byte flash-cache lines between
+`Trap15` and `rmt_isr`, both of which are in RAM. A closure is its own
+codegen item and does not inherit the enclosing function's `link_section`;
+`#[inline]` would not help at `opt-level = "z"`. That cost lands on the
+WS281x refill, whose deadline is a 24-word RMT half (30 µs) on the C6's
+two-channel plan. See
+`docs/defects/2026-10-01-the-c6-choker-truncates-most-ws281x-frames-on-silicon.md`.
+
+After it, the whole path from `Trap15` through `handle_interrupts`,
+`change_current_runlevel`, `dispatch` and the first diff's three helpers to
+the bound handler is in `.rwtext`; the only flash targets left on it are
+panic paths (`unwrap_failed`, `panic_bounds_check`). Cost: `.rwtext`
++272 B, `.text` −266 B. Behaviour is unchanged — the same sources, in the
+same order, at the same runlevel, with nesting enabled on the same
+priorities. Check it with `rust-nm -C -n` and `rust-objdump -d`, not by
+reading the attributes.
+
 ## Nothing else
 
 No other linker-script edits, no feature changes.
@@ -97,7 +130,8 @@ No other linker-script edits, no feature changes.
 ## Upstream
 
 Candidate for an upstream PR to esp-rs/esp-hal (main still has the three
-functions unmarked as of 2026-09-07). Once it lands and the firmwares move to
+functions unmarked as of 2026-09-07; the fourth diff is the same kind of change
+and would ride the same PR). Once it lands and the firmwares move to
 that release, this directory can go — but only after the `links` key above has
 somewhere else to live, since upstream does not provide it and
 `fw-esp32c6/build.rs` refuses to build without it.
@@ -106,11 +140,13 @@ somewhere else to live, since upstream does not provide it and
 
 Copy the new version out of the cargo registry, delete `.cargo-ok`,
 `.cargo_vcs_info.json`, `Cargo.lock` and `Cargo.toml.orig` (mirroring
-`third_party/esp-storage`), then re-apply the first two diffs (the third is
+`third_party/esp-storage`), then re-apply the first, second and fourth diffs (the third is
 upstream's, so a ≥ 1.2.0 copy already has it; on a 1.1.x copy, re-apply it
 too — `grep -n INT_ENA_LOCK src/usb_serial_jtag.rs` finds it here):
 
 * the three `#[crate::ram]` attributes — `grep -n 'crate::ram'
   src/interrupt/mod.rs` finds them in this copy;
+* the fourth diff — `grep -n 'LP fork' src/interrupt/riscv.rs` finds both
+  hunks (`change_current_runlevel`'s attribute and `rt::dispatch`);
 * `links = "esp-hal"` in `Cargo.toml` and the `cargo::metadata=linker-scripts`
   line in `build.rs` — `grep -n 'linker-scripts' build.rs`.

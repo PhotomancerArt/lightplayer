@@ -580,6 +580,7 @@ mod tests {
             firmware_face: lpa_devices::view::FirmwareFace::LightPlayer {
                 firmware: Some("fw-esp32c6 abc1234".to_string()),
                 wire: lpa_devices::WireVersion::Match,
+                age: lpa_devices::FirmwareAge::Unknown,
             },
             remembered_firmware: None,
             degraded: None,
@@ -652,6 +653,7 @@ mod tests {
         FirmwareFace::LightPlayer {
             firmware: Some("fw-esp32v3 7c80a27".to_string()),
             wire,
+            age: lpa_devices::FirmwareAge::Unknown,
         }
     }
 

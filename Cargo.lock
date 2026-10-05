@@ -4037,6 +4037,7 @@ dependencies = [
  "fw-core",
  "js-sys",
  "log",
+ "lp-app-version",
  "lp-gfx-lpvm",
  "lp-gfx-wgpu",
  "lpa-server",
@@ -4176,6 +4177,7 @@ dependencies = [
  "libm",
  "littlefs-rust",
  "log",
+ "lp-app-version",
  "lp-bootctl",
  "lp-collection 1.0.0",
  "lp-gfx-lpvm",
@@ -4226,6 +4228,7 @@ dependencies = [
  "fw-esp32-common",
  "littlefs-rust",
  "log",
+ "lp-app-version",
  "lp-gfx-lpvm",
  "lp-recovery",
  "lp-shader",
@@ -4270,6 +4273,7 @@ dependencies = [
  "fw-esp32-common",
  "littlefs-rust",
  "log",
+ "lp-app-version",
  "lp-gfx-lpvm",
  "lp-recovery",
  "lp-shader",
@@ -5705,6 +5709,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "lp-app-version"
+version = "40.0.0"
+
+[[package]]
 name = "lp-bootctl"
 version = "1.0.0"
 
@@ -5728,6 +5736,7 @@ dependencies = [
  "jsonschema",
  "libc",
  "log",
+ "lp-app-version",
  "lp-collection 1.0.0",
  "lp-emu-core",
  "lp-emu-esp-common",
@@ -6413,6 +6422,7 @@ dependencies = [
  "js-sys",
  "jsonschema",
  "log",
+ "lp-app-version",
  "lp-gfx-lpvm",
  "lpa-agent",
  "lpa-boards",

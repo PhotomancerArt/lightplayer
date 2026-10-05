@@ -368,6 +368,7 @@ impl LpServer {
                 build: lpc_wire::BuildFacts {
                     features,
                     package: "unknown".to_string(),
+                    version: "unknown".into(),
                     commit: "unknown".to_string(),
                     dirty: false,
                     profile: "unknown".to_string(),
@@ -398,6 +399,7 @@ impl LpServer {
         let lpc_wire::HelloIdentity {
             proto,
             package,
+            version,
             commit,
             dirty,
             profile,
@@ -412,6 +414,7 @@ impl LpServer {
             proto
         };
         self.hello.build.package = package;
+        self.hello.build.version = version;
         self.hello.build.commit = commit;
         self.hello.build.dirty = dirty;
         self.hello.build.profile = profile;
