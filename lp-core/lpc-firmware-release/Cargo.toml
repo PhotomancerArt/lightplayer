@@ -1,0 +1,25 @@
+[package]
+name = "lpc-firmware-release"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "The firmware distribution contract: ota-manifest.json format 1, release asset names, the /firmware/<target>/<release>/<file> lookup grammar — no_std, sans-IO"
+
+[features]
+default = []
+std = []
+# JSON Schema derives for `ota-manifest.json` (host-side tooling: `lp-cli schema gen`)
+schema-gen = ["std", "dep:schemars"]
+
+# Never M4's `lpc-update` / `lpa-update`: this crate only DESCRIBES encodings
+# by id; what encoding 1 means (the dictionary rule) is theirs.
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+schemars = { workspace = true, optional = true }
+
+[lints]
+workspace = true

@@ -221,6 +221,9 @@ pub struct DeviceEffects {
     /// device's inspection staged, the store's index as last read, and
     /// the wall clock archives are stamped with.
     layout: super::device_layout_effect::LayoutEffects,
+    /// Where an engine comes from without a board: the engine cache and the
+    /// firmware store (OTA M5; read by the update flow, M4/M7).
+    firmware: super::device_firmware_sources::DeviceFirmwareSources,
     /// The link id the latest chooser request will attach as: its
     /// [`Event::GrantAnswered`] carries it, so a caller that opened a
     /// chooser can tell which answer is its own.
@@ -247,6 +250,7 @@ impl DeviceEffects {
             completed_pushes: Rc::new(RefCell::new(Vec::new())),
             next_link: 0,
             layout: super::device_layout_effect::LayoutEffects::default(),
+            firmware: super::device_firmware_sources::DeviceFirmwareSources::default(),
             last_grant_request: None,
         }
     }
@@ -255,6 +259,16 @@ impl DeviceEffects {
     /// plans, the cached backup index.
     pub fn layout(&self) -> &super::device_layout_effect::LayoutEffects {
         &self.layout
+    }
+
+    /// The engine cache and the firmware store.
+    pub fn firmware(&self) -> &super::device_firmware_sources::DeviceFirmwareSources {
+        &self.firmware
+    }
+
+    /// Install the engine cache or the store (the shell does, at start).
+    pub fn firmware_mut(&mut self) -> &mut super::device_firmware_sources::DeviceFirmwareSources {
+        &mut self.firmware
     }
 
     /// Install the backup store a layout migration writes to before it

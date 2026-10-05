@@ -1226,6 +1226,32 @@ impl StudioController {
         self.devices.effects_mut().set_backup_store(store);
     }
 
+    /// Install the engine cache (OPFS `firmware-cache/` in the browser).
+    /// Without one, Studio keeps engines in memory for the page's life.
+    pub fn set_engine_cache(&mut self, cache: Rc<dyn lpa_firmware_store::EngineCache>) {
+        self.devices
+            .effects_mut()
+            .firmware_mut()
+            .set_engine_cache(cache);
+    }
+
+    /// Install the firmware store client (lightplayer.app's `/firmware/`
+    /// lookup, or the `?firmware-store=` dev origin).
+    pub fn set_firmware_store(&mut self, store: Rc<crate::StudioFirmwareStore>) {
+        self.devices.effects_mut().firmware_mut().set_store(store);
+    }
+
+    /// The engine cache every engine Studio installs, fetches or reads back
+    /// goes into (a memory one until the shell installs its own).
+    pub fn engine_cache(&self) -> Rc<dyn lpa_firmware_store::EngineCache> {
+        self.devices.effects().firmware().engine_cache()
+    }
+
+    /// The firmware store, once the shell installed one.
+    pub fn firmware_store(&self) -> Option<Rc<crate::StudioFirmwareStore>> {
+        self.devices.effects().firmware().store()
+    }
+
     /// Install the platform timer factory device waits run on (called by
     /// `StudioActor::new`, from the same `make_timer` the pull deadlines use).
     pub fn set_device_timer(

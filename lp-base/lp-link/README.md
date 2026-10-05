@@ -194,6 +194,17 @@ sequence space is future work if a measurement ever calls for it).
    a COBS-FF frame).
 7. **Small and ours.** No_std + alloc, time injected (`Micros`), no executor.
    Prior art was read as specs only; no code was copied.
+8. **A plain receiver reads a SYN's 12-byte prefix and ignores the rest and
+   any unknown flag bit.** Of the flags byte it reads only `established`
+   (bit 0); every other bit, and every byte after the 12th, belongs to an
+   extension it does not know. This is the link's growth path once boards
+   update over the air through it (the update protocol's ADR, OTA Part B): a
+   new feature arrives the way `secure` did, as a SYN flag and an extension
+   the old end ignores, so a fielded board still comes up for a newer host.
+   It changes what a link *accepts*, never what it sends: a plain link still
+   sends exactly 12 bytes with every other bit zero
+   (`tests/plain_bytes_golden.rs`); `tests/plain_syn_tolerance.rs` pins the
+   rule. A body shorter than 12 bytes is still not a SYN.
 
 ## Sending without a copy: external messages
 

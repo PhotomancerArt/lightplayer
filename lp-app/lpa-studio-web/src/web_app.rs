@@ -387,6 +387,18 @@ pub fn App() -> Element {
             controller.set_device_backup_store(Rc::new(
                 crate::device_backup_store_opfs::OpfsDeviceBackupStore,
             ));
+            // Where an engine comes from without a board (OTA M5): every
+            // engine Studio installs, fetches or reads back is kept in OPFS
+            // `firmware-cache/`, and released ones are fetched from the
+            // firmware store (lightplayer.app, or `?firmware-store=`'s
+            // loopback/LAN origin). Nothing reads them until the update flow.
+            controller
+                .set_engine_cache(Rc::new(crate::engine_cache_opfs::OpfsEngineCache::default()));
+            controller.set_firmware_store(Rc::new(lpa_firmware_store::FirmwareStore::new(
+                crate::dev_url_flags::firmware_store_origin(),
+                Rc::new(crate::firmware_fetch_web::WebFirmwareFetch)
+                    as Rc<dyn lpa_firmware_store::FirmwareFetch>,
+            )));
             let provider = Rc::new(lpa_studio_core::BrowserSerialEsp32Provider::with_options(
                 Default::default(),
             ));

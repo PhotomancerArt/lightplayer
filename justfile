@@ -789,8 +789,11 @@ studio-firmware-package-served:
 # Nothing in `just check` compiles wasm32, and the browser edge builds
 # `lpa-cloud-client` WITHOUT its default `in-process` feature — a combination
 # no other recipe exercises. Seconds, not the minutes a dx build costs.
+# `lpa-firmware-store` rides along: the engine cache seam and the firmware
+# store client Studio's browser edge implements (OTA M5).
 check-wasm-cloud: install-wasm32-target
     cargo check -p lpa-cloud-client --no-default-features --target {{ wasm32_target }}
+    cargo check -p lpa-firmware-store --target {{ wasm32_target }}
 
 studio-web-build: install-wasm32-target studio-firmware-package-served
     #!/usr/bin/env bash
@@ -2521,6 +2524,9 @@ clippy-host:
     # same gap `test-rust-core` closes above for the tests.
     cargo clippy -p fw-esp32-common --features usb-link,server --all-targets -- --no-deps -D warnings
     cargo clippy -p fw-esp32-common --features uart-link,server --all-targets -- --no-deps -D warnings
+    # lpa-update's `pack` feature (the one packer of OTA encoding 1, std +
+    # flate2/zlib-rs) is off by default for the same reason.
+    cargo clippy -p lpa-update --features pack --all-targets -- --no-deps -D warnings
 
 # `lp-emu-esp32c6` with the `jit` feature on — the native translated build.
 #
@@ -2764,6 +2770,10 @@ test-rust-core:
     cargo test -p fw-esp32-common --features usb-link,server
     # ...and the classic's UART0 host link (feature `uart-link`), same reason.
     cargo test -p fw-esp32-common --features uart-link,server
+    # lpa-update's packer (feature `pack`: std + flate2/zlib-rs) and the host x
+    # board simulation's encoding-1 cases. Its own invocation, so flate2's
+    # zlib-rs backend never unifies into espflash's in the workspace run.
+    cargo test -p lpa-update --features pack
 
 # lp-link (the link-layer prototype, plan lp2025/2026-09-26-1720-reliable-device-link):
 # the delivery property at soak depth, 5,000 fault schedules per ARQ variant
