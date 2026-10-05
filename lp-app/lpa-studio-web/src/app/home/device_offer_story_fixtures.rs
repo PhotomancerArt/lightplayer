@@ -71,6 +71,7 @@ pub(crate) fn card_tree(
         banked: false,
         projects,
         examples,
+        update: Default::default(),
     };
     let mut tree = UiOfferTree::new();
     for offer in device_offers(card, &facts) {

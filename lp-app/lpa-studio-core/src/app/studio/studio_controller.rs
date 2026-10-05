@@ -148,6 +148,10 @@ pub struct StudioController {
     /// What the browser answered about Bluetooth, reported by the web layer
     /// (`StudioCommand::BluetoothReach`); `Checking` until it does.
     bluetooth_reach: crate::BluetoothReach,
+    /// This Studio's own build and the store's latest, by their facts: what
+    /// every card's update standing is read against. Empty until the update
+    /// host fills it, and with it empty no card changes.
+    update_build_facts: crate::UpdateBuildFacts,
     /// Where the user is, as the web last reported it
     /// (`StudioCommand::Place`); `None` until it does (and in the headless
     /// tests and evals, which have no page). Read-only: core never
@@ -440,6 +444,7 @@ impl StudioController {
             emu_transport: None,
             ble_transport: None,
             bluetooth_reach: crate::BluetoothReach::Checking,
+            update_build_facts: crate::UpdateBuildFacts::default(),
             place: None,
             play_views: 0,
             device_sims: std::collections::BTreeMap::new(),
@@ -1202,6 +1207,60 @@ impl StudioController {
         self.devices.effects().firmware().store()
     }
 
+    /// This Studio's own build and the store's latest, by their facts —
+    /// what every card's update standing is read against.
+    pub fn update_build_facts(&self) -> &crate::UpdateBuildFacts {
+        &self.update_build_facts
+    }
+
+    /// The same, for the update host to fill (its own build at start, the
+    /// store's latest when the store answers). Every card re-reads its
+    /// standing on the next view.
+    pub fn update_build_facts_mut(&mut self) -> &mut crate::UpdateBuildFacts {
+        self.mark_dirty();
+        &mut self.update_build_facts
+    }
+
+    /// `view`'s update standing and which way its update goes
+    /// (`device_update_standing`, `device_update_route`): the board's
+    /// update facts this window, this Studio's build facts, the user's tier
+    /// over Bluetooth (a USB link is trusted), and whether the link carries
+    /// lp-link's update channel.
+    pub fn device_update_facts(&self, view: &crate::DeviceView) -> crate::UpdateOfferFacts {
+        let evidence = self
+            .devices
+            .roster()
+            .device(view.id)
+            .map(|device| &device.evidence);
+        let facts = evidence.and_then(lpa_devices::Evidence::update_facts);
+        let link = match view.is_over_bluetooth() {
+            true => crate::UpdateLink::Bluetooth,
+            false => crate::UpdateLink::Usb,
+        };
+        let inputs = crate::UpdateStandingInputs {
+            view,
+            facts,
+            own: self.update_build_facts.own(),
+            tier: match link {
+                crate::UpdateLink::Bluetooth => self.access.granted_tier(view.id),
+                crate::UpdateLink::Usb => None,
+            },
+            link,
+            store_latest: self.update_build_facts.store_latest(),
+        };
+        let can_update_over_link = facts
+            .and_then(|facts| lpa_update::BoardView::from_json(facts.manifest_json.as_bytes()))
+            .is_some_and(|board| board.can_update_over_link());
+        crate::UpdateOfferFacts {
+            standing: crate::update_standing(&inputs),
+            route: crate::update_route(
+                can_update_over_link,
+                link,
+                evidence.is_some_and(lpa_devices::Evidence::carries_update_channel),
+            ),
+        }
+    }
+
     /// Install the platform timer factory device waits run on (called by
     /// `StudioActor::new`, from the same `make_timer` the pull deadlines use).
     pub fn set_device_timer(
@@ -1515,6 +1574,16 @@ impl StudioController {
                     .map(|access| (device.id, access))
             })
             .collect();
+        let updates = view
+            .roster
+            .devices
+            .iter()
+            .filter_map(|card| {
+                crate::update_words(&self.device_update_facts(card).standing)
+                    .map(|words| (card.id, words))
+            })
+            .collect();
+        view.updates = updates;
         view
     }
 
@@ -2035,14 +2104,41 @@ impl StudioController {
     }
 
     /// The "Reconnecting…" strip, while the lens's link is in trouble.
+    /// While the board runs an update, its link drops and comes back as the
+    /// board resets into its new firmware: the strip then names the update
+    /// (its card line), not a lost connection.
     fn lens_reconnecting_view(&self) -> Option<crate::UiLensReconnecting> {
         if let Some(hold) = &self.lens_hold {
-            return Some(crate::UiLensReconnecting::link_lost(&hold.name));
+            let updating = self
+                .devices
+                .device_for_key(&hold.uid)
+                .and_then(|device| self.running_update_line(device));
+            return Some(match updating {
+                Some(line) => crate::UiLensReconnecting::updating(&line),
+                None => crate::UiLensReconnecting::link_lost(&hold.name),
+            });
         }
         let reconnect = self.lens_reconnect?;
         let session = self.pool.lens_session()?;
-        (session.attachment().link == reconnect.link)
-            .then(|| crate::UiLensReconnecting::new(&session.attachment().name, reconnect.trouble))
+        let attachment = session.attachment();
+        (attachment.link == reconnect.link).then(|| {
+            match self
+                .devices
+                .roster()
+                .device(attachment.device)
+                .and_then(|device| self.running_update_line(device))
+            {
+                Some(line) => crate::UiLensReconnecting::updating(&line),
+                None => crate::UiLensReconnecting::new(&attachment.name, reconnect.trouble),
+            }
+        })
+    }
+
+    /// `device`'s update line while an Update activity runs on it.
+    fn running_update_line(&self, device: &lpa_devices::Device) -> Option<String> {
+        let view = lpa_devices::view::device_view(device, self.device_now());
+        view.activity.as_ref()?.update.as_ref()?;
+        crate::update_words(&self.device_update_facts(&view).standing).map(|words| words.line)
     }
 
     /// The lens session's current passive-refresh backoff delay (zero
@@ -2594,6 +2690,7 @@ impl StudioController {
                 banked: self.runs_a_banked_project(view.id, &sources.projects),
                 projects: &sources.projects,
                 examples: &sources.examples,
+                update: self.device_update_facts(view),
             };
             for offer in crate::device_offers(view, &facts) {
                 offers.publish(offer);
@@ -2728,6 +2825,14 @@ impl StudioController {
         if let Some(fps) = session.engine_fps() {
             facts.push(format!("{} fps", fps.round() as i64));
         }
+        let update = device.and_then(|device| {
+            let view = lpa_devices::view::device_view(device, self.device_now());
+            crate::update_session_words(
+                &self.device_update_facts(&view).standing,
+                crate::device_chip(&view).as_deref(),
+                view.identity_label.as_deref(),
+            )
+        });
         Some(crate::UiChromeSessionControl {
             face: match attachment.transport {
                 crate::LinkTransport::Sim => crate::DeviceFace::Sim,
@@ -2756,6 +2861,7 @@ impl StudioController {
                 .map(crate::board_display_name),
             status,
             stat_line: (!facts.is_empty()).then(|| facts.join(" · ")),
+            update,
         })
     }
 

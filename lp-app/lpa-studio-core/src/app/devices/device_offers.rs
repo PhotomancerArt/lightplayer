@@ -15,8 +15,10 @@
 //! | `clear-faults` | the board reported it is degraded, linked, idle |
 //! | `remove-project` | the board reported something running, port open, idle |
 //! | `flash` | the needs-firmware faces ([`flash_device_offer`]) |
-//! | `update-firmware` | a running LightPlayer ([`update_firmware_offer`]) |
-//! | `erase` | linked, idle, and not a needs-firmware face (erasing a blank flash does nothing) |
+//! | `update-firmware` | over the air: an update available ([`update_offers`], Routine); else the USB flash on a running LightPlayer ([`update_firmware_offer`], Lasting) |
+//! | `reinstall-firmware` | the board's firmware keeps crashing ([`update_offers`]) |
+//! | `install-firmware` | keeps crashing ("Other version…") or needs a version Studio can't get ("Install Y"): one `version` choice ([`update_offers`]) |
+//! | `erase` | linked, idle, not a needs-firmware face (erasing a blank flash does nothing), and not where the update standing withdraws it ([`update_offers`]) |
 //! | `identify` | linked and idle, where Retry (the same `Identify`) is not already offered |
 //! | `connect` | the port is there but closed |
 //! | `reset-board` | linked; disabled over Bluetooth (no reset lines) and while an activity runs (the model refuses a reset under one; Cancel is the escape) |
@@ -24,8 +26,9 @@
 //! | `autoconnect` | a board at the end of a wire: one Toggle param, `enabled` |
 //!
 //! Levels are the ops' own (Forget, Factory reset and Remove project are
-//! Lasting through their meta), plus the two that depend on the board:
-//! Flash (Q3) and Push (Q4).
+//! Lasting through their meta), plus the three that depend on the board:
+//! Flash (Q3), Push (Q4) and the over-the-air install (an older version is
+//! Lasting).
 
 use lpa_devices::Action;
 use lpa_devices::device::DeviceStatus;
@@ -40,6 +43,7 @@ pub const RESET_WAITS_FOR_ACTIVITY: &str =
     "Reset waits until Studio finishes what it is doing; cancel it first";
 use super::device_flash_offer::{flash_device_offer, update_firmware_offer};
 use super::device_push_offer::push_device_offer;
+use super::device_update_offers::{UpdateOfferFacts, update_offers};
 use super::devices_op::{DeviceFace, DevicesOp};
 use crate::app::home::{UiExampleCard, UiPackageCard};
 use crate::{OfferArgs, OfferBinder, OfferParam, OfferPath, UiAction, UiOffer};
@@ -68,6 +72,9 @@ pub struct DeviceOfferFacts<'a> {
     pub projects: &'a [UiPackageCard],
     /// The gallery's examples, for the push.
     pub examples: &'a [UiExampleCard],
+    /// The board's update standing and route ([`update_offers`]); the
+    /// default tells no story, and the card keeps today's firmware verbs.
+    pub update: UpdateOfferFacts,
 }
 
 /// Every offer `view`'s card makes, in the order the card reads: the
@@ -120,13 +127,17 @@ pub fn device_offers(view: &DeviceView, facts: &DeviceOfferFacts<'_>) -> Vec<UiO
     }
 
     // FIRMWARE
+    let update = update_offers(view, &facts.update, &facts.prefix);
     if let Some(flash) = flash_device_offer(view, facts.prefix.clone()) {
         offers.push(flash);
     }
-    if let Some(update) = update_firmware_offer(view, facts.prefix.clone()) {
-        offers.push(update);
+    if update.keep_flash
+        && let Some(flash) = update_firmware_offer(view, facts.prefix.clone())
+    {
+        offers.push(flash);
     }
-    if idle && linked && verb != Some(FirmwareVerb::Flash) {
+    offers.extend(update.offers);
+    if update.keep_erase && idle && linked && verb != Some(FirmwareVerb::Flash) {
         let erase = DevicesOp::action_for(Action::Erase { device });
         offers.push(UiOffer::new(
             at("erase"),
@@ -486,6 +497,81 @@ mod tests {
         );
     }
 
+    /// An over-the-air update replaces the USB flash at `update-firmware`,
+    /// one click; a crashing board trades Factory reset for its repairs.
+    #[test]
+    fn an_over_the_air_update_takes_the_flashs_place_at_one_click() {
+        use super::super::device_update_route::UpdateRoute;
+        use super::super::device_update_standing::UpdateStanding;
+        use super::super::device_update_version::UpdateVersion;
+
+        let x = UpdateVersion::new("2026.10.03-1");
+        let y = UpdateVersion::new("2026.10.05-2");
+        let available = DeviceOfferFacts {
+            update: UpdateOfferFacts {
+                standing: UpdateStanding::Available {
+                    board: x.clone(),
+                    to: y.clone(),
+                },
+                route: UpdateRoute::OverTheAir,
+            },
+            ..facts(DeviceFace::Wire)
+        };
+        let offers = device_offers(&ready(), &available);
+        assert_eq!(
+            paths(&offers),
+            [
+                "push",
+                "update-firmware",
+                "erase",
+                "identify",
+                "reset-board",
+                "disconnect",
+                "rename",
+                "autoconnect",
+                "forget"
+            ]
+        );
+        let update = find(&offers, "update-firmware");
+        assert_eq!(update.label(), "Update");
+        assert!(update.consequence().is_routine());
+        assert!(matches!(
+            update.action.op_as::<DevicesOp>().unwrap().action(),
+            Action::Update { .. }
+        ));
+
+        let crashing = DeviceOfferFacts {
+            update: UpdateOfferFacts {
+                standing: UpdateStanding::KeepsCrashing {
+                    board: y.clone(),
+                    choices: vec![y],
+                },
+                route: UpdateRoute::OverTheAir,
+            },
+            ..facts(DeviceFace::Wire)
+        };
+        let mut view = ready();
+        view.firmware_face = FirmwareFace::CoreOnly {
+            version: Some("2026.10.05-2".to_string()),
+            state: lpa_devices::UpdateBoardState::EngineCrashing,
+        };
+        view.can_receive_project = false;
+        assert_eq!(
+            paths(&device_offers(&view, &crashing)),
+            [
+                "reinstall-firmware",
+                "install-firmware",
+                "identify",
+                "reset-board",
+                "disconnect",
+                "rename",
+                "autoconnect",
+                "forget"
+            ],
+            "no Factory reset: installing is the repair"
+        );
+    }
+
     fn find<'a>(offers: &'a [UiOffer], verb: &str) -> &'a UiOffer {
         offers
             .iter()
@@ -524,6 +610,7 @@ mod tests {
             banked: false,
             projects: &[],
             examples: &EXAMPLES,
+            update: UpdateOfferFacts::default(),
         }
     }
 

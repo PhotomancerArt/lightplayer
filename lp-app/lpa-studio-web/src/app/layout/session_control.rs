@@ -1092,6 +1092,7 @@ mod tests {
             board: board.map(str::to_string),
             status: UiChromeSessionStatus::Run,
             stat_line: None,
+            update: None,
         }
     }
 

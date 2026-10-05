@@ -487,6 +487,7 @@ pub fn device_lines(roster: &DeviceRosterView) -> String {
     for device in devices {
         let firmware = match &device.firmware_face {
             lpa_devices::FirmwareFace::LightPlayer { .. } => "LightPlayer",
+            lpa_devices::FirmwareFace::CoreOnly { .. } => "LightPlayer, running only its core",
             lpa_devices::FirmwareFace::Unknown => "not identified yet",
             _ => "other firmware",
         };
@@ -512,9 +513,17 @@ pub fn device_lines(roster: &DeviceRosterView) -> String {
             }
             lpa_devices::view::LoadedProject::Unknown => String::new(),
         };
+        // The firmware update's own line, when the board has an update
+        // story: heal and finish start by themselves, so the agent reads
+        // them here rather than finding an action for them.
+        let update = roster
+            .updates
+            .get(&device.id)
+            .map(|update| format!("; firmware: {}", update.line))
+            .unwrap_or_default();
         let _ = writeln!(
             text,
-            "- {:?}: chip {}; board {}; {firmware}; {}{loaded}",
+            "- {:?}: chip {}; board {}; {firmware}; {}{loaded}{update}",
             device.title,
             device.detected_chip.as_deref().unwrap_or("unknown"),
             device.board_id.as_deref().unwrap_or("unknown"),

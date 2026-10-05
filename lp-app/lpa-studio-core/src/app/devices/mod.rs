@@ -83,6 +83,11 @@ pub mod device_push_offer;
 pub mod device_records;
 pub mod device_roster;
 pub mod device_transport;
+pub mod device_update_offers;
+pub mod device_update_route;
+pub mod device_update_standing;
+pub mod device_update_version;
+pub mod device_update_words;
 pub mod devices_op;
 pub mod emu_transport;
 pub mod link_health;
@@ -96,6 +101,7 @@ pub mod sim_create_op;
 pub mod sim_record;
 pub mod sim_transport;
 pub mod target_offer;
+pub mod update_build_facts;
 pub mod wire_conversation;
 
 pub use add_device_offers::{USB_NEEDS_WEB_SERIAL, add_device_offers};
@@ -171,6 +177,18 @@ pub use device_transport::{
     DeviceEffectCall, DeviceEffectFacts, DeviceEffectProgress, DeviceTransport,
     DeviceTransportFuture, GrantedLink, LensLineTap, LensTapEvent,
 };
+pub use device_update_offers::{
+    INSTALL_VERSION_PARAM, UpdateOfferFacts, UpdateOffers, update_offers,
+};
+pub use device_update_route::{USB_UPDATES_OVER_THE_AIR, UpdateLink, UpdateRoute, update_route};
+pub use device_update_standing::{
+    UpdateStanding, UpdateStandingInputs, update_standing, wants_auto_start,
+};
+pub use device_update_version::{UpdateVersion, UpdateVersionDisplay};
+pub use device_update_words::{
+    UiDeviceUpdate, UiSessionUpdate, UpdateLight, UpdateProgress, UpdateRowKind, UpdateRunTone,
+    UpdateRunWord, update_session_words, update_words,
+};
 pub use devices_op::{DeviceFace, DevicesOp};
 pub use emu_transport::{
     EmuBacking, EmuDeviceTransport, EmuLinkSource, EmuRuntimeControl, EmuSession,
@@ -193,3 +211,4 @@ pub use sim_transport::{
     SimBacking, SimDeviceTransport, SimLinkSource, SimRuntimeControl, SimSession, SimTier,
 };
 pub use target_offer::{TargetChoice, TargetGroup, TargetOffer, TargetScope, target_offer};
+pub use update_build_facts::{StoreLatest, UpdateBuildFacts};

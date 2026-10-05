@@ -10,7 +10,7 @@
 
 use core::any::Any;
 
-use lpa_devices::Action;
+use lpa_devices::{Action, UpdateIntentFacts};
 
 use crate::{ActionClass, ActionConfirmation, ActionMeta, ActionPriority, ControllerOp};
 
@@ -250,12 +250,45 @@ impl ControllerOp for DevicesOp {
                 "Send the picked project to this board and start it running.",
                 ActionPriority::Primary,
             ),
-            // An over-the-air update to this Studio's build. Plain for now;
-            // the card's own offers word it and set its level per intent
-            // (an older version is Lasting) when they are built in core.
+            // An over-the-air update keeps a copy of what it replaces and
+            // rolls back by itself, and the board keeps its files: nothing is
+            // lost, so it is Routine and the agent may press it (N9). An
+            // older version is the one exception — it may not read the
+            // board's project — so choosing one is Lasting. The card's
+            // offers (`device_update_offers`) set each verb's own label.
+            Action::Update {
+                intent:
+                    UpdateIntentFacts::Install {
+                        version,
+                        allow_downgrade: true,
+                    },
+                ..
+            } => ActionMeta::new(
+                "Install",
+                "Put an older version on this board over its own link.",
+                ActionPriority::Primary,
+            )
+            .lasting(ActionConfirmation::new(
+                "Install an older version?",
+                format!(
+                    "{version} is older than what this board runs, and an older version \
+                     may not read the board's project."
+                ),
+                "install",
+            )),
+            Action::Update {
+                intent: UpdateIntentFacts::Reinstall,
+                ..
+            } => ActionMeta::new(
+                "Reinstall",
+                "Write this board's own firmware again, from this Studio, its cache or the \
+                 release store.",
+                ActionPriority::Primary,
+            ),
             Action::Update { .. } => ActionMeta::new(
                 "Update",
-                "Update this board's firmware over its own link.",
+                "Update this board's firmware over its own link. Studio keeps a copy of \
+                 what it replaces, and a failed update rolls back by itself.",
                 ActionPriority::Primary,
             ),
             Action::ResetBoard { .. } => ActionMeta::new(

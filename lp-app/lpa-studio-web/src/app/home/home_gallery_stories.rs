@@ -537,6 +537,7 @@ fn powered_off_sim_fixture() -> DeviceRosterView {
     let id = card.id;
     DeviceRosterView {
         access: Default::default(),
+        updates: Default::default(),
         transport_available: true,
         usb_available: true,
         layout: Default::default(),
@@ -1119,6 +1120,7 @@ fn degraded_card_fixture() -> DeviceView {
 fn roster_fixture() -> DeviceRosterView {
     DeviceRosterView {
         access: Default::default(),
+        updates: Default::default(),
         transport_available: true,
         usb_available: true,
         layout: Default::default(),
@@ -1468,6 +1470,7 @@ fn roster_page_fixture() -> DeviceRosterView {
     let running = devices.remove(0);
     DeviceRosterView {
         access: Default::default(),
+        updates: Default::default(),
         transport_available: true,
         usb_available: true,
         layout: Default::default(),

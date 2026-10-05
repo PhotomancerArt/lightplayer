@@ -38,6 +38,12 @@ lpc-history = { path = "../../lp-core/lpc-history", default-features = false }
 # The engine cache seam and the firmware store client (OTA M5): installed
 # by the shell, read by the update flow (M4/M7). Sans-IO, wasm-safe.
 lpa-firmware-store = { path = "../lpa-firmware-store" }
+# The over-the-air update's host side (M7): `decide()` on this Studio's
+# build facts reads a board's standing for the card's words and offers
+# (`app/devices/device_update_standing.rs`); `lpc-update` parses the board
+# manifest the device model carries verbatim. Both no_std + alloc.
+lpa-update = { path = "../lpa-update" }
+lpc-update = { path = "../../lp-core/lpc-update" }
 # Which package files are access files (they never leave the library in an
 # export or a share envelope; a device push does carry them).
 lpc-access = { path = "../../lp-core/lpc-access" }

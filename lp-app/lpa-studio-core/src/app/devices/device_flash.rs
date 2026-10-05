@@ -302,8 +302,9 @@ pub fn firmware_verb(view: &DeviceView) -> Option<FirmwareVerb> {
             }
         }
         FirmwareFace::Unknown => None,
-        // P4: a core-only board's verb is the over-the-air update, never a
-        // flash; P4 offers it.
+        // A core-only board's verbs are its update standing's over-the-air
+        // offers (`device_update_offers`): its firmware comes back over its
+        // own link, never by a flash.
         FirmwareFace::CoreOnly { .. } => None,
         // `wants_flash` covered every other face; the arm keeps the match
         // exhaustive so a new face is a compile error here.

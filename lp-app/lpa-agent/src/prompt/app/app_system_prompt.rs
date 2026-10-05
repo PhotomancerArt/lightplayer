@@ -87,8 +87,9 @@ pub fn build_app_system_prompt(reference: &str) -> String {
          — an open, a flash, a push — finishes by itself: end your turn \
          with one short line. You will be told when it finishes (or that it \
          failed), and you continue from there.\n\
-         - A flash or a firmware update leaves the board running nothing. \
-         When one finishes, look at that board's line under devices. If it \
+         - A flash over USB leaves the board running nothing; an update \
+         over the board's own link keeps its project. When either \
+         finishes, look at that board's line under devices. If it \
          runs nothing, or not the user's project, put the project on it \
          with the board's `push` (its `source` lists the library's projects, \
          the open one among them; save first, so the board gets the latest \

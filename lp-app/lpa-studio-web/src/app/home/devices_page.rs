@@ -664,6 +664,7 @@ mod tests {
     fn view(roster: RosterView, transport_available: bool) -> DeviceRosterView {
         DeviceRosterView {
             access: Default::default(),
+            updates: Default::default(),
             roster,
             transport_available,
             usb_available: transport_available,
