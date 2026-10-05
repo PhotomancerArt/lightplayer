@@ -234,5 +234,5 @@ never carries it; the op that carries it redacts its own `Debug`. The
 agent's readout lists it as "secret — the user types it", `act` refuses any
 value for it, and an offer that takes a secret is always the user's card
 (pre-filled with the agent's non-secret values). First use: the Wi‑Fi
-password at `devices/<board>/wifi/set`. Decision record:
+password at `devices/<board>/wifi/add`. Decision record:
 `docs/adr/2026-10-04-device-wifi-settings.md`.

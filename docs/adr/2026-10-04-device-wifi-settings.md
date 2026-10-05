@@ -7,8 +7,10 @@
 - **Refines:** `docs/adr/2026-09-23-ble-access-model.md` ("WiFi reuses the
   model"), `docs/adr/2026-10-02-board-ids-and-typed-offer-parameters.md`
 - **Evidence:** planning dir `lp2025/2026-10-04-0808-wifi-settings/`
-  (`plan.md`, `notes.md` WQ1–WQ8 and Q1–Q13); the Wi‑Fi roadmap
-  `lp2025/2026-10-01-1832-wifi-control` (M5; decisions D1–D11); PR #972.
+  (`plan.md`, `notes.md` WQ1–WQ8 and Q1–Q13, `p7-network-list-reshape.md`);
+  the Wi‑Fi roadmap `lp2025/2026-10-01-1832-wifi-control` (M5; decisions
+  D1–D11); the UX spike `spikes/wifi-networks/index.html` (branch
+  `claude/wifi-ux-spike`, PR #976; Yona chose **2B**, 2026-10-05); PR #972.
 
 ## Context
 
@@ -25,16 +27,26 @@ says so.
 ### The file: `/.lp/network.json`, its own `version: 1`
 
 ```json
-{"version":1,"wifi":{"ssid":"lp-walk-net","password":"…","enabled":true},"cloudRelay":true}
+{"version":1,"wifi":true,"cloudRelay":true,
+ "networks":[{"ssid":"lp-walk-net","password":"…"},{"ssid":"lp-back-office","password":"…","hidden":true}]}
 ```
 
 `lpc_access::NetworkFile` (`lp-core/lpc-access/src/network_file.rs`), schema
 `schemas/device-network.schema.json` (generated, `just schema-check`). A
 sibling of the device store `/.lp/access.json` inside `lpfs`, so the backup
 archive and the C6 layout migration carry it like every other file.
-`wifi` is absent when no network is saved. **Missing** = no network, relay
-allowed; **damaged** = no network, logged (never its bytes), not rewritten
-until the next change. Validation follows 802.11/WPA2 and is the board's:
+A board keeps **up to eight networks**, in the order they were added; no
+two share a name, and adding a saved name again changes its password in
+place (that is Change password). `hidden` marks a network that does not
+broadcast its name (the station asks for it by name). `wifi` is the board's
+one Wi‑Fi switch — there is no per-network on/off (forgetting is two
+clicks) and no priority order. **Missing** = no network, Wi‑Fi and relay on;
+**damaged** = no network, logged (never its bytes), not rewritten until the
+next change.
+
+The first shape of PR #972 kept one network (`"wifi":{ssid,password,
+enabled}`). It never merged, so the list replaced it inside `version: 1`
+with no reader for the single-network form. Validation follows 802.11/WPA2 and is the board's:
 SSID 1–32 bytes of UTF-8; password `""` (open), 8–63 printable ASCII, or
 64 hex digits. No error or `Debug` prints a password.
 
@@ -75,14 +87,15 @@ burn that breaks Studio's raw `lpfs` reads and the esptool-js update flow).
 
 ### Who: edit tier, every link that holds it (WQ4)
 
-`ClientRequest::{NetworkStatus, NetworkSet, NetworkForget}` are all
-`Required::Edit` in the exhaustive classifier; nothing at play. USB always
+`ClientRequest::{NetworkStatus, NetworkScan, NetworkAdd, NetworkForget,
+NetworkSet}` are all `Required::Edit` in the exhaustive classifier; nothing
+at play. USB always
 holds edit; Bluetooth at author; M6's keyed links when they arrive. A
 fresh board is open at edit (`2026-10-02-two-passwords-open-by-default.md`),
 so **anyone nearby can set a fresh board's Wi‑Fi** — the same exposure as
 everything else on an open board. A board holding its files for the C6
-layout change (`fs: legacy_held`, a RAM filesystem) refuses set and forget
-("finish the update first") and answers status.
+layout change (`fs: legacy_held`, a RAM filesystem) refuses add, forget and
+set ("finish the update first") and answers status.
 
 ### Accepted limitation: the password crosses Bluetooth in the clear (WQ3)
 
@@ -97,10 +110,11 @@ USB is the trusted, physical link.
 - A session recording (`?record=`), a `?wire-capture=1` capture or an
   `LP_EMU_WIRE_TAP` tap taken while setting Wi‑Fi holds it in the raw
   transport bytes (USB is not encrypted). Redacting raw bytes would break
-  what a capture is for; the structured request log names only `wifi.set`.
+  what a capture is for; the structured request log names only `wifi.add`.
   Transports that echo raw request text into a log (fw-core's serial
   transport, the BLE line preview) withhold any line that names
-  `networkSet` (`lpc_wire::may_carry_secret`).
+  `networkAdd` — the one request that carries a password
+  (`lpc_wire::may_carry_secret`).
 - The device backup archive (`lp-cli hardware lpfs save`, Studio's migration
   backup) carries `network.json` in plaintext, as it carries the access
   keys: a restore must bring Wi‑Fi back. Treat an archive like the board.
@@ -114,25 +128,63 @@ turns on, not for what it forbids (Yona's review of PR #972: "positive
 options are better"), so Studio's toggle reads "Cloud relay", on by
 default, with "Lets lightplayer.app reach this board through the cloud"
 under it, and `lp-cli wifi set --cloud-relay on|off`. Studio shows the
-switch now, with "applies once this firmware uses the relay" while the
-firmware does not join.
+switch now, at the foot of the Wi‑Fi popover's root page.
 
 ### The status never carries the password (WQ6)
 
-Every request answers `ServerMsgBody::NetworkStatus { wifi?: { ssid,
-hasPassword, enabled }, cloudRelay, station }`. The SSID reads back (it is
-broadcast anyway); the password never. A new SSID requires `password`
-(`""` for open), so an old password is never offered to a new network.
-`station` is `unsupported | off | joining | joined{ip,rssi} |
-failed{reason}`: every M5 image says `unsupported` (an injectable probe on
-`LpServer`, unset); M6 fills the rest. Relay state is M7's. Wire proto
-**36** (the plan named 35; OTA M1 took it); `PACK_FORMAT_VERSION`
-unchanged (the learned dictionary needs nothing for new variants).
+`NetworkStatus`, `NetworkAdd { ssid, password, hidden? }`, `NetworkForget {
+ssid }` and `NetworkSet { wifi?, cloudRelay? }` all answer
+`ServerMsgBody::NetworkStatus { wifi, cloudRelay, networks: [{ ssid,
+hasPassword, hidden?, last? }], station }`. Names read back (they are
+broadcast anyway); passwords never. `last` is how the station's last
+attempt at a network went (`connected | wrongPassword | notFound |
+noAddress`), kept in RAM, never persisted. `station` is `unsupported | off |
+notConnected | connecting{ssid} | connected{ssid,ip,rssi} | failed{ssid,
+reason}`, the reason a code (`wrongPassword | notFound | noAddress`) that
+Studio words. Every M5 image says `unsupported` (an injectable probe on
+`LpServer`, unset); M6 fills the rest. A ninth network is refused with an
+error. `NetworkScan` answers `ServerMsgBody::NetworkScan`: `heard: [{ ssid,
+rssi, secure }]` (2.4 GHz only, hidden networks omitted) from a second
+probe, or `unsupported` — never an empty list from a radio that did not
+listen. Relay state is M7's. Wire proto **36** (the plan named 35; OTA M1
+took it; the list reshape is the same unreleased 36);
+`PACK_FORMAT_VERSION` unchanged (the learned dictionary needs nothing for
+new variants).
+
+### Which network the station joins (M6's, recorded as the default)
+
+The strongest saved network the board hears, skipping one whose password
+was refused; no priority order. Recorded here as the default the M6 station
+implements — **Yona has not objected; confirm at M6.** Nothing in M5 joins.
+
+### The Studio popover: three pages, the test in the new row (2B)
+
+The card's Wi‑Fi row opens a popover of three pages: **Networks** (the
+connected one first, then the other saved ones with a word each — "In
+range", "Not in range", "Wrong password", "Connecting…" — then "+ Connect
+to a network"; the Wi‑Fi switch in its header, Cloud relay at its foot),
+**Connect to a network** (what the board hears, strongest first, and "Other
+network…" for a hidden or out-of-range name), and **the network's page**
+(name, password, Connect). Nothing saved opens straight on the second.
+Connect saves first, then tests: the popover goes back to the list, where
+the new network is already listed and its test runs in its row — Looking
+for it → Checking the password → Getting an address → Reaching
+lightplayer.app (the last only once the board reports the relay, M7).
+Today's firmware cannot scan or connect, so the second page is "Add a
+network by name", Connect reads Save, and the new row says "Saved · this
+firmware can't connect to Wi‑Fi yet. It will after an update." A saved
+network's page shows its status, "Password: saved on the board. It can't be
+shown.", Change password and Forget (Lasting). Core decides every word
+(`lpa-studio-core/src/app/network/wifi_words.rs`); the popover keeps only
+which page shows.
 
 ### Secret offer parameters (WQ8)
 
-Studio's Wi‑Fi verbs are offers at `devices/<board>/wifi/{set, enabled,
-cloud-relay, forget}` (Forget Lasting). Offer `Text` parameters gain
+Studio's Wi‑Fi verbs are offers at `devices/<board>/wifi/{add, enabled,
+cloud-relay}` and one `devices/<board>/wifi/forget/<slug>` per saved
+network (Forget Lasting; the slug is the name made path-safe, `-2`, `-3` on
+a clash, because a network name may hold any character). The add verb reads
+Connect on a board that can connect and Save on one that cannot. Offer `Text` parameters gain
 `secret`: a renderer draws it as a password field; a press's stamp
 (`OfferPress.args`, what the app agent hears) carries `•••`
 (`SECRET_MARKER`) in its place while the binder sees the real value; the
@@ -147,11 +199,14 @@ the form until the press and in the op until the request leaves.
 - One more device secret behind the same gate; the gate is now named for
   what it does (`is_write_only_file_path`), so a third secret file is one
   line in one predicate.
-- Every firmware image grows by the handlers and serde for three requests
-  and one reply: C6 +14,000 B on CI's builds (2,976,560 → 2,990,560 at the
-  merge base vs the branch), under the plan's 16 KB stop and above its
-  8 KB expectation; `nm` shows new code, no duplicated monomorphization.
-  S3 +13,456 B, classic +13,872 B. Headroom on the C6 stays ~417 KB.
+- Every firmware image grows by the handlers and serde for five requests
+  and two replies: the single-network shape cost the C6 +14,000 B; the list
+  took it to +17,712 B (local build, against main at `db8b55b37`), and
+  trimming the store (no copy-and-compare, one log site, the version
+  stamped through a borrowed view, one out-of-line dispatch) brought it to
+  **+16,240 B**, under the plan's 16 KB (16,384 B) stop with little to
+  spare. `nm` shows new code — the list's serde on both sides of the file
+  and the wire — and no duplicated monomorphization.
 - The emulator walk proves the transport, UI and store over the USB shim;
   `?ble=emu` is blocked by an open defect
   (`2026-10-02-the-ble-emu-polyfill-relays-lp-link-bytes-as-m-lines.md`), so
@@ -176,6 +231,13 @@ the form until the press and in the op until the request leaves.
 - Seal Bluetooth links (`ble().secured()`), closing WQ3.
 - M6: the station, reading the file at boot, the probe's real states.
 - Fix `?ble=emu` and run `just walk-wifi-emu ble`.
-- "Use the same Wi‑Fi as my other board" (a client-side store decision);
-  more than one saved network; DPP from phones.
+- "Use the same Wi‑Fi as my other board" — networks your account knows,
+  marked "yours" on the connect page (a client-side store decision; the
+  spike's 4A–4C); DPP from phones.
+- M6: Studio polls the status while a just-added network's test runs (M5
+  reads once per connection and on each answer, so a real station's steps
+  would not advance on their own yet).
+- Studio does not offer the `hidden` flag yet (a typed name on "Other
+  network…" saves as not hidden); `lp-cli wifi add --hidden` and the offer's
+  `hidden` parameter set it.
 - Revisit storing the PMK (WQ2b) once M6 knows what esp-radio accepts.

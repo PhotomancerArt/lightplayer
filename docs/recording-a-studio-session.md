@@ -117,8 +117,8 @@ access handshake (the keys that unlock a board), and your projects. Keep
 recordings on your machine and don't share them publicly.
 
 **A Wi‑Fi password is in it** if you set one while recording: the raw
-transport bytes carry the `networkSet` request as sent (USB is not
-encrypted). The structured request log names only `wifi.set`, and Studio's
+transport bytes carry the `networkAdd` request as sent (USB is not
+encrypted). The structured request log names only `wifi.add`, and Studio's
 command record redacts the password, but the byte capture cannot be
 redacted without breaking what it is for. The same holds for a
 `?wire-capture=1` capture and an `LP_EMU_WIRE_TAP` tap. See
