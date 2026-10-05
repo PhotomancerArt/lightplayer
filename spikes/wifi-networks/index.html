@@ -306,6 +306,8 @@
   connected and there are no known networks</b>: default directly into the ‘connect’ page. The connect page shows networks like you show in A.” And: “show the
   <b>SSID and password, then a Connect button</b>. It gets added, then tests the connection like you show in the examples. Avoid text like ‘It works.’ —
   ‘Connected’ or something is fine.”</div>
+<div class="gate"><b>Round 2 gate — Yona (2026-10-05):</b> “I think <b>2B</b>, though I’ll need to see it in action later.” → 2B is the direction:
+  after Connect, back to the list, the new network testing in its row. The real thing gets a feel check in Studio against an emulated board.</div>
 <div class="gate"><b>Round 1 brief, still standing:</b> more than one network; easy to add one; make sure it actually connects; truck · house · apartment should just
   work; account-saved networks later; positive options (“Cloud relay”, on by default).</div>
 <p class="hint">
@@ -352,7 +354,7 @@
   <span class="group"><button class="chip" data-k="reset" data-v="1">↺ reset</button></span>
 </div>
 
-<h2><span class="n">1</span>The popover, live — where the test shows</h2>
+<h2><span class="n">1</span>The popover, live (2B, chosen)</h2>
 <p class="sub">Same three pages in both. Pick a network, type a password (8+), press <b>Connect</b>. <b>Next connect</b> in the strip decides how it goes.
   Tap a saved network for its page (change password, forget). Set <b>Board knows → house · truck · apartment</b> and move it between places.</p>
 <div class="row" id="s1"></div>
@@ -423,6 +425,7 @@ NetworkSet { wifi?, cloudRelay? }                           <span class="c">// t
   <b>C</b> an account-first panel (“your networks follow you”, put all three on in one press); <b>D</b> a one-press suggestion on the card itself.
   A won; its two lists became the Networks and Connect pages. <b>Try first, save only if it connects</b> (round 1’s A) — replaced by save-then-test.
   <b>A priority order</b> — strongest wins. <b>A per-network on/off</b> (#972’s “Join this network”) — forget is two clicks.
+  <b>2A</b> (round 2): the test on the network’s page after Connect — 2B won (“it gets added, then tests”); 2A is commit <code>be8b3eac6</code>.
   <b>Showing a saved password</b> — still write-only; Change password is typing a new one.</div>
 
 <script>
@@ -691,7 +694,6 @@ const render = (c) => frame(c, renderPop(c));
 
 // ---------------------------------------------------------------- sections
 const S1 = [
-  ['A', '2A · The test stays on the network’s page', 'Connect turns the page into the test; <b>Done</b> goes back to the list. A wrong password is fixed right there.'],
   ['B', '2B · Back to the list; the test runs in the new row', 'Connect goes straight back to <b>Networks</b> — the new one is already in the list, testing in its row.', 'lean'],
 ];
 function mountLive() {
