@@ -1211,7 +1211,7 @@ fn activity_zone(kind: lpa_studio_core::DeviceActivityKind) -> ZoneKind {
     use lpa_studio_core::DeviceActivityKind as Kind;
     match kind {
         Kind::Push | Kind::RemoveProject => ZoneKind::Project,
-        Kind::Flash | Kind::Erase => ZoneKind::Firmware,
+        Kind::Flash | Kind::Erase | Kind::Update => ZoneKind::Firmware,
         Kind::Identify => ZoneKind::Device,
     }
 }
@@ -1789,6 +1789,7 @@ mod tests {
             cancellable: true,
             cancel_requested: false,
             layout: None,
+            update: None,
         };
         assert_eq!(activity_line_text(&activity), "Flashing firmware · 42%");
 
@@ -1834,6 +1835,7 @@ mod tests {
             firmware_blocked: None,
             escapes: vec![DeviceEscape::Forget],
             update_blocked: None,
+            last_update_outcome: None,
         }
     }
 
@@ -1879,6 +1881,7 @@ mod tests {
             cancellable: true,
             cancel_requested: false,
             layout: None,
+            update: None,
         });
         assert_eq!(
             project_line_text(&card, Some(ZoneKind::Project)),
@@ -1963,6 +1966,7 @@ mod tests {
             cancellable: true,
             cancel_requested: false,
             layout: None,
+            update: None,
         });
         assert_eq!(
             firmware_line_text(&card, None, Some(ZoneKind::Firmware)),
@@ -1996,6 +2000,7 @@ mod tests {
             cancellable: true,
             cancel_requested: false,
             layout: None,
+            update: None,
         });
         assert_eq!(
             device_line_text(&card, Some(ZoneKind::Device)),
@@ -2074,6 +2079,7 @@ mod tests {
             cancellable: true,
             cancel_requested: false,
             layout: None,
+            update: None,
         });
         assert_eq!(
             feed_pill(&busy, Some(&feed_fixture(FeedLiveness::Live, true))),
@@ -2126,6 +2132,7 @@ mod tests {
             cancellable: true,
             cancel_requested: false,
             layout: None,
+            update: None,
         });
         assert_eq!(
             preview_slot_sentence(&busy, Some(&feed_fixture(FeedLiveness::Live, true))),
@@ -2189,6 +2196,7 @@ mod tests {
             cancellable: true,
             cancel_requested: false,
             layout: None,
+            update: None,
         });
         assert_eq!(
             preview_sentence(&card),

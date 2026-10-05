@@ -237,6 +237,7 @@ fn story_board(state: &OpeningState) -> lpa_studio_core::DeviceView {
         firmware_blocked: None,
         escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
         update_blocked: None,
+        last_update_outcome: None,
     };
     match state {
         OpeningState::WaitingForDevice(DeviceWait {
@@ -261,6 +262,7 @@ fn story_board(state: &OpeningState) -> lpa_studio_core::DeviceView {
                 cancellable: true,
                 cancel_requested: false,
                 layout: None,
+                update: None,
             }),
             can_receive_project: false,
             escapes: vec![

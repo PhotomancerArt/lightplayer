@@ -507,8 +507,9 @@ impl Roster {
             let Self { devices, state, .. } = self;
             let device = &mut devices[index];
             // `fold_only` deliberately skips eviction, so the dead
-            // generation's activity is evicted here — its ground is gone.
-            let mut commands = device.evict(now, EvictionReason::LinkLost, &mut state.ctx());
+            // generation's activity is evicted here — its ground is gone —
+            // unless it outlives its link (an update across a reset).
+            let mut commands = device.lose_link(now, &mut state.ctx());
             commands.extend(device.fold_only(
                 now,
                 &Event::LinkDetached { link: old },
@@ -545,10 +546,7 @@ impl Roster {
             let Self { pending, state, .. } = self;
             let entry = &mut pending[index];
             // Same eviction note as the device branch above.
-            let mut commands =
-                entry
-                    .provisional
-                    .evict(now, EvictionReason::LinkLost, &mut state.ctx());
+            let mut commands = entry.provisional.lose_link(now, &mut state.ctx());
             commands.extend(entry.provisional.fold_only(
                 now,
                 &Event::LinkDetached { link: old },
@@ -640,7 +638,15 @@ impl Roster {
             }
             Some(Owner::Pending(index)) => {
                 let mut commands = self.dispatch_to_pending(now, index, input);
-                let pending = self.pending.remove(index);
+                let mut pending = self.pending.remove(index);
+                // The entry goes with its link. An activity that outlives a
+                // link (an update) would otherwise leave with it unbracketed:
+                // a pending link has no card to come back to, so it ends here.
+                commands.extend(pending.provisional.evict(
+                    now,
+                    EvictionReason::LinkLost,
+                    &mut self.state.ctx(),
+                ));
                 self.state.journal.note(
                     now,
                     Scope::Roster,

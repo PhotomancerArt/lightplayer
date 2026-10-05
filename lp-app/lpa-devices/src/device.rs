@@ -29,8 +29,10 @@ use crate::activity::flash::FlashActivity;
 use crate::activity::identify::IdentifyActivity;
 use crate::activity::push::PushActivity;
 use crate::activity::remove_project::RemoveProjectActivity;
+use crate::activity::update::{UPDATE_DEADLINE_MS, UpdateActivity};
 use crate::activity::{
     ActivityCell, ActivityCtx, ActivityKind, ActivityOutcome, ActivityProgress, ActivityStep,
+    UpdateIntentFacts,
 };
 use crate::event::{Action, ActivityMarker, Command, EffectId, Event, Input};
 use crate::evidence::{Classification, Evidence};
@@ -202,6 +204,24 @@ impl Device {
         // line the reopened port carries.
         abandoned.extend(self.recovery_commands(reason, ctx));
         abandoned
+    }
+
+    /// The device's link is gone (unplugged, or superseded by a new
+    /// generation on the same endpoint): the ground under its activity went
+    /// with it, so the activity is evicted — unless it outlives its link.
+    /// An Update does: its board resets as part of the work, and a
+    /// native-USB port re-enumerates on every reset, so a vanished link is a
+    /// gap the activity waits out (and the card keeps saying "Updating…"
+    /// rather than flipping to the offline face).
+    pub(crate) fn lose_link(&mut self, now: Millis, ctx: &mut ModelCtx<'_>) -> Vec<Command> {
+        if self
+            .activity
+            .as_ref()
+            .is_some_and(ActivityCell::survives_link_loss)
+        {
+            return Vec::new();
+        }
+        self.evict(now, EvictionReason::LinkLost, ctx)
     }
 
     /// Let go of the coarse effect a cell that is coming down still owns.
@@ -482,6 +502,46 @@ impl Device {
         commands
     }
 
+    /// Spawn the Update activity, unless the device is already busy (I5) or
+    /// has no link to update over. Busy includes an Update already running:
+    /// the controller's no-click `Auto` spawn on a board that is already
+    /// updating is a no-op — no second activity, and no error line.
+    pub(crate) fn spawn_update(
+        &mut self,
+        now: Millis,
+        intent: &UpdateIntentFacts,
+        ctx: &mut ModelCtx<'_>,
+    ) -> Vec<Command> {
+        if self.activity.is_some() || self.link().is_none() {
+            return Vec::new();
+        }
+        let effect_id = self.mint_effect_id();
+        // A Bluetooth link reconnects by itself (the provider's own loop):
+        // between legs the activity only waits for it.
+        let reconnects_itself = self
+            .identity
+            .endpoint
+            .as_ref()
+            .is_some_and(|endpoint| endpoint.is_bluetooth());
+        let mut reducer = UpdateActivity::new(self.id, intent.clone(), reconnects_itself);
+        let commands = {
+            let activity_ctx = ActivityCtx {
+                link: self.evidence.link(),
+                evidence: &self.evidence,
+                config: ctx.config,
+                effect_id,
+            };
+            reducer.spawn_commands(now, &activity_ctx)
+        };
+        let cell = ActivityCell::new(
+            now,
+            now.plus_ms(UPDATE_DEADLINE_MS),
+            Reducer::Update(reducer),
+        );
+        self.install_activity(now, cell, effect_id, &commands, ctx);
+        commands
+    }
+
     /// Seat a freshly spawned activity: journal the bracket, raise the
     /// `Started` marker, and remember which coarse effect (if any) the
     /// spawn started, so that effect's markers can be told apart from a
@@ -648,6 +708,11 @@ impl Device {
                 self.intent.connection = ConnectionIntent::Connected;
                 self.spawn_remove_project(now, ctx)
             }
+            Action::Update { intent, .. } => {
+                // Updating implies wanting the board connected afterwards.
+                self.intent.connection = ConnectionIntent::Connected;
+                self.spawn_update(now, intent, ctx)
+            }
             Action::SetName { name, .. } => {
                 self.intent.name = Some(name.clone());
                 vec![Command::PersistRecord(self.record_snapshot())]
@@ -735,14 +800,40 @@ impl Device {
             );
         }
 
+        // An update's stage lands on its reducer (display only); the
+        // journal hears it when the card's words change, not per chunk.
+        let shown_before = match event {
+            Event::ActivityMarker {
+                marker: ActivityMarker::UpdateStage { .. },
+                ..
+            } => self
+                .activity
+                .as_ref()
+                .map(|cell| (cell.label(), cell.percent())),
+            _ => None,
+        };
+
         // 3. Forward to the activity.
         if let Some(step) = self.forward(now, &Input::Event(event.clone()), ctx) {
             commands.extend(self.apply_step(now, step, ctx));
         }
+        if let Some(before) = shown_before
+            && let Some(cell) = &self.activity
+        {
+            let (label, percent) = (cell.label(), cell.percent());
+            if (label.as_str(), percent) != (before.0.as_str(), before.1) {
+                ctx.journal.note(
+                    now,
+                    self.scope(),
+                    JournalNote::ActivityProgress { label, percent },
+                );
+            }
+        }
 
-        // 4. A vanished link removes the ground under any activity.
+        // 4. A vanished link removes the ground under any activity (but
+        // the one that outlives its link).
         if matches!(event, Event::LinkDetached { .. }) {
-            commands.extend(self.evict(now, EvictionReason::LinkLost, ctx));
+            commands.extend(self.lose_link(now, ctx));
         }
 
         // 5. Supervision looks at the clock last.
@@ -763,7 +854,10 @@ impl Device {
         let Some(cell) = &mut self.activity else {
             return Vec::new();
         };
-        if cell.is_cancel_requested() {
+        // An Update past backing up refuses a cancel outright (no Cancel
+        // once writing starts): it is never marked requested, so the cancel
+        // grace never evicts the update it refused to stop.
+        if cell.is_cancel_requested() || !cell.accepts_cancel() {
             return Vec::new();
         }
         let kind = cell.kind;
@@ -841,6 +935,12 @@ impl Device {
                     },
                 );
                 let failed = matches!(outcome, ActivityOutcome::Failed { .. });
+                // An update's typed ending outlives the activity on the
+                // evidence (the card's words are made of it) — the driver's
+                // word, or the model's own when the board never came back.
+                if let Some(update_outcome) = cell.update_outcome() {
+                    self.raise_marker(now, ActivityMarker::UpdateOutcome(update_outcome), ctx);
+                }
                 self.raise_marker(
                     now,
                     ActivityMarker::Ended {

@@ -34,7 +34,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::activity::ActivityKind;
+use crate::activity::{ActivityKind, UpdateIntentFacts, UpdateOutcomeFacts, UpdateStageFacts};
 use crate::device::DeviceStatus;
 use crate::event::{Action, Command, Event, Input};
 use crate::identity::{DeviceId, DeviceUid, EndpointKey, MacAddress, PeerIdentity};
@@ -213,6 +213,42 @@ pub enum Step {
     /// The Factory-reset gesture.
     Erase {
         device: u64,
+    },
+    /// The over-the-air update gesture (or the controller's no-click
+    /// spawn, with the default `Auto` intent). Not `Update`: that step is
+    /// one channel-3 message on a link.
+    UpdateFirmware {
+        device: u64,
+        #[serde(default)]
+        intent: UpdateIntentFacts,
+    },
+    /// An update leg's stage marker, as the effects layer sinks it.
+    UpdateStage {
+        device: u64,
+        stage: UpdateStageFacts,
+        #[serde(default)]
+        done: u32,
+        #[serde(default)]
+        total: u32,
+        #[serde(default)]
+        effect: Option<u64>,
+    },
+    /// How the update driver finished, reported just before the leg's end.
+    UpdateOutcome {
+        device: u64,
+        outcome: UpdateOutcomeFacts,
+        #[serde(default)]
+        effect: Option<u64>,
+    },
+    /// An update leg ended with its link (the board reset, or the link
+    /// dropped): `Ended { Interrupted }` with no outcome. `effect` defaults
+    /// to the device's running leg, the stamp the effects layer puts on it.
+    LegInterrupted {
+        device: u64,
+        #[serde(default)]
+        reason: Option<String>,
+        #[serde(default)]
+        effect: Option<u64>,
     },
     /// The Remove-project gesture (the always-actions row's second verb).
     RemoveProject {
@@ -526,6 +562,51 @@ impl Step {
             }),
             Self::Erase { device } => Input::Action(Action::Erase {
                 device: DeviceId(device),
+            }),
+            Self::UpdateFirmware { device, intent } => Input::Action(Action::Update {
+                device: DeviceId(device),
+                intent,
+            }),
+            Self::UpdateStage {
+                device,
+                stage,
+                done,
+                total,
+                effect,
+            } => Input::Event(Event::ActivityMarker {
+                device: DeviceId(device),
+                effect: effect.map(crate::event::EffectId),
+                marker: crate::event::ActivityMarker::UpdateStage { stage, done, total },
+            }),
+            Self::UpdateOutcome {
+                device,
+                outcome,
+                effect,
+            } => Input::Event(Event::ActivityMarker {
+                device: DeviceId(device),
+                effect: effect.map(crate::event::EffectId),
+                marker: crate::event::ActivityMarker::UpdateOutcome(outcome),
+            }),
+            Self::LegInterrupted {
+                device,
+                reason,
+                effect,
+            } => Input::Event(Event::ActivityMarker {
+                device: DeviceId(device),
+                effect: effect.map(crate::event::EffectId).or_else(|| {
+                    roster
+                        .devices()
+                        .iter()
+                        .find(|entry| entry.id == DeviceId(device))
+                        .and_then(|entry| entry.activity.as_ref())
+                        .and_then(|cell| cell.current_effect)
+                }),
+                marker: crate::event::ActivityMarker::Ended {
+                    kind: ActivityKind::Update,
+                    outcome: crate::activity::ActivityOutcome::Interrupted {
+                        reason: reason.unwrap_or_else(|| "the link closed".to_string()),
+                    },
+                },
             }),
             Self::RemoveProject { device } => Input::Action(Action::RemoveProject {
                 device: DeviceId(device),

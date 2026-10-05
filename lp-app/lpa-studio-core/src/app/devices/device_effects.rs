@@ -82,6 +82,11 @@ const HOTPLUG_SETTLE: Duration = Duration::from_millis(250);
 /// departure sweep uses the same ceiling for the same reason.
 const MAX_SWEEP_LINKS: usize = 8;
 
+/// How an over-the-air update leg ends while no update host runs legs: at
+/// once, as a plain failure with no typed outcome, so the Update activity
+/// ends instead of waiting for a board that never reset.
+const UPDATES_NOT_RUN_YET: &str = "updating over the board's own link is not available yet";
+
 /// The exclusive-wire-borrow token a link carries.
 ///
 /// The EFFECT'S OWN id, not a bare `bool`. An abandoned effect (its activity
@@ -629,6 +634,23 @@ impl DeviceEffects {
         effect: EffectRequest,
     ) {
         let kind = effect_kind(&effect);
+        if let EffectRequest::Update { .. } = effect {
+            // P5: the update host runs this leg. Until it does, the leg ends
+            // at once with a plain failure and no typed outcome — which the
+            // Update activity reads as "this leg could not run" and ends on,
+            // rather than as a reset to wait out (no loop).
+            if let Some(sink) = &self.sink {
+                sink(effect_ended(
+                    device,
+                    effect_id,
+                    kind,
+                    ActivityOutcome::Failed {
+                        message: UPDATES_NOT_RUN_YET.to_string(),
+                    },
+                ));
+            }
+            return;
+        }
         let (Some(transport), Some(spawn), Some(sink)) = (
             self.transport.clone(),
             self.spawn.clone(),
@@ -1209,6 +1231,7 @@ fn effect_kind(effect: &EffectRequest) -> ActivityKind {
         EffectRequest::Push => ActivityKind::Push,
         EffectRequest::Erase => ActivityKind::Erase,
         EffectRequest::RemoveProject => ActivityKind::RemoveProject,
+        EffectRequest::Update { .. } => ActivityKind::Update,
     }
 }
 
@@ -1267,6 +1290,9 @@ fn resolve_effect_call(
             fallback_storage_id: crate::app::project::demo_project::DEMO_PROJECT_STORAGE_ID
                 .to_string(),
         }),
+        // Never a borrowed-wire call: `run_effect` ends an update leg before
+        // it gets here (see `UPDATES_NOT_RUN_YET`).
+        EffectRequest::Update { .. } => Err(UPDATES_NOT_RUN_YET.to_string()),
     }
 }
 
@@ -1294,6 +1320,42 @@ mod tests {
         // Nothing to assert but survival: the alternative shape (panicking on
         // an unknown link, as the `lpa-link` bench does deliberately) would
         // take the whole page down on an ordinary race.
+    }
+
+    /// Until an update host runs legs, an update leg ends at once — a plain
+    /// failure with no typed outcome, which the Update activity ends on
+    /// rather than waiting out as a reset. Borrows no wire.
+    #[test]
+    fn an_update_leg_ends_at_once_while_no_host_runs_it() {
+        let mut effects = DeviceEffects::new();
+        let inputs = Rc::new(RefCell::new(Vec::new()));
+        let sink_inputs = Rc::clone(&inputs);
+        effects.set_input_sink(move |input| sink_inputs.borrow_mut().push(input));
+
+        effects.apply(vec![Command::RunEffect {
+            device: DeviceId(1),
+            link: LinkId(1),
+            effect_id: EffectId(3),
+            effect: EffectRequest::Update {
+                intent: lpa_devices::UpdateIntentFacts::Auto,
+            },
+        }]);
+
+        let inputs = inputs.borrow();
+        assert!(
+            matches!(
+                inputs.as_slice(),
+                [Input::Event(Event::ActivityMarker {
+                    effect: Some(EffectId(3)),
+                    marker: ActivityMarker::Ended {
+                        kind: ActivityKind::Update,
+                        outcome: ActivityOutcome::Failed { .. },
+                    },
+                    ..
+                })]
+            ),
+            "{inputs:?}"
+        );
     }
 
     /// Record writes accumulate for the caller and are taken exactly once —

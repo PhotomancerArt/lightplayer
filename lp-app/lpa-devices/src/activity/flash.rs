@@ -19,7 +19,8 @@
 //!    layer re-derives the handle for a re-enumerated port, so an open that
 //!    fails now succeeds a moment later. Each open window also *asks* for a
 //!    hello: a board that booted while the port was down never volunteers
-//!    one again.
+//!    one again. This rung is `reopen_rung`, shared with the
+//!    Update activity's gaps between legs.
 //! 2. Still quiet? [`ResetKind::Normal`] — the ordinary DTR/RTS reboot.
 //! 3. Native USB (`park_first`): still quiet? **Fail honestly** — no CH340
 //!    clause, and no [`ResetKind::BothThenDrop`]. That rung is the CH34x
@@ -85,13 +86,13 @@ use crate::event::{Action, ActivityMarker, Command, EffectRequest, Event, Input}
 use crate::identity::DeviceId;
 use crate::link::{LinkCommand, LinkEvent, ResetKind};
 use crate::time::Millis;
-use crate::wire::ClientFrame;
 
 use super::activity_cell::{
     ActivityCtx, ActivityKind, ActivityOutcome, ActivityReducer, ActivityStep,
 };
 use super::flash_step::FlashStep;
 use super::layout_verdict::{FlashLayoutView, LayoutVerdict};
+use super::reopen_rung::{self, ClosedPort};
 use crate::wire::BoardFs;
 
 /// How long a parked port gets to re-enumerate before esptool takes it.
@@ -408,30 +409,6 @@ impl FlashActivity {
         }
     }
 
-    fn ask_hello(&mut self, ctx: &ActivityCtx<'_>) -> Vec<Command> {
-        let Some(link) = ctx.link else {
-            return Vec::new();
-        };
-        let request_id = self.next_request_id;
-        self.next_request_id += 1;
-        vec![Command::Link {
-            link,
-            command: LinkCommand::SendFrame(ClientFrame::hello(request_id)),
-        }]
-    }
-
-    fn open_port(&self, ctx: &ActivityCtx<'_>) -> Vec<Command> {
-        let Some(link) = ctx.link else {
-            return Vec::new();
-        };
-        vec![Command::Link {
-            link,
-            command: LinkCommand::Open {
-                baud: ctx.config.open_baud,
-            },
-        }]
-    }
-
     /// Start the wind-down: give the port back and wait for the close.
     fn wind_down(&mut self, ctx: &ActivityCtx<'_>) -> ActivityStep {
         self.winding_down = true;
@@ -510,9 +487,7 @@ impl FlashActivity {
         let FlashPhase::Reconnecting { since, .. } = &self.phase else {
             return false;
         };
-        ctx.evidence
-            .hello_heard_at()
-            .is_some_and(|heard_at| heard_at >= *since)
+        reopen_rung::hello_heard_since(ctx.evidence, *since)
     }
 
     fn success(&self, ctx: &ActivityCtx<'_>) -> ActivityOutcome {
@@ -619,7 +594,7 @@ impl FlashActivity {
                             next_poke_at: now.plus_ms(ctx.config.flash_reopen_retry_ms),
                             since: now,
                         };
-                        ActivityStep::Continue(self.open_port(ctx))
+                        ActivityStep::Continue(reopen_rung::open_port(ctx))
                     }
                     other => ActivityStep::done(ActivityOutcome::Failed {
                         message: format!("flash failed: {}", other.summary()),
@@ -694,25 +669,27 @@ impl FlashActivity {
                 if now >= rung_deadline {
                     return self.escalate(now, rung, ctx);
                 }
-                if now >= next_poke_at {
-                    let commands = match ctx.evidence.presence.is_open() {
-                        // Open, quiet: the boot hello may already be gone —
-                        // ask for one (a connect cannot assume the power to
-                        // cause a boot).
-                        true => self.ask_hello(ctx),
-                        // Closed: keep knocking. Session adoption makes a
-                        // re-enumerated port answer one of these knocks.
-                        false => self.open_port(ctx),
-                    };
-                    self.phase = FlashPhase::Reconnecting {
-                        rung,
-                        rung_deadline,
-                        next_poke_at: now.plus_ms(ctx.config.flash_reopen_retry_ms),
-                        since,
-                    };
-                    return ActivityStep::Continue(commands);
-                }
-                ActivityStep::nothing()
+                // The reopen rung (shared with the Update's gaps): open,
+                // quiet — ask for the hello the boot may already have
+                // spent; closed — keep knocking, session adoption makes a
+                // re-enumerated port answer one of these knocks.
+                let mut next_poke_at = next_poke_at;
+                let Some(commands) = reopen_rung::knock_when_due(
+                    now,
+                    &mut next_poke_at,
+                    ctx,
+                    &mut self.next_request_id,
+                    ClosedPort::Reopen,
+                ) else {
+                    return ActivityStep::nothing();
+                };
+                self.phase = FlashPhase::Reconnecting {
+                    rung,
+                    rung_deadline,
+                    next_poke_at,
+                    since,
+                };
+                ActivityStep::Continue(commands)
             }
             FlashPhase::Stamping { deadline } => {
                 if now >= deadline {
@@ -770,7 +747,7 @@ impl FlashActivity {
             }
             // The port never even opened; a reset has nothing to drive.
             // Keep knocking — the rung deadline still moves the ladder on.
-            _ => self.open_port(ctx),
+            _ => reopen_rung::open_port(ctx),
         };
         let since = match self.phase {
             FlashPhase::Reconnecting { since, .. } => since,

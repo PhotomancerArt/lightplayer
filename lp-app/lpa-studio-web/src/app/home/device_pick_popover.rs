@@ -1554,6 +1554,7 @@ mod tests {
             firmware_blocked: None,
             escapes: vec![DeviceEscape::Forget],
             update_blocked: None,
+            last_update_outcome: None,
         }
     }
 }

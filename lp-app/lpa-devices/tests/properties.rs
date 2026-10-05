@@ -17,7 +17,10 @@
 use lpa_devices::replay::{Replay, Step};
 use lpa_devices::view::FIRMWARE_NEEDS_USB;
 use lpa_devices::view::{DeviceView, PendingLinkView, RosterView};
-use lpa_devices::{ActivityKind, Escape, Millis, RosterConfig, UpdateBoardState};
+use lpa_devices::{
+    ActivityKind, DeviceStatus, Escape, Millis, RosterConfig, UpdateBoardState, UpdateIntentFacts,
+    UpdateOutcomeFacts, UpdateStageFacts,
+};
 
 #[test]
 fn the_projection_is_total_and_always_escapable() {
@@ -283,10 +286,33 @@ fn assert_device(device: &DeviceView, case: &str) {
             device.escapes.contains(&Escape::Cancel),
             "[{case}] cancellable disagrees with the escape list"
         );
-        assert_eq!(
-            activity.cancellable, !activity.cancel_requested,
+        assert!(
+            !(activity.cancellable && activity.cancel_requested),
             "[{case}] cancel state is inconsistent"
         );
+        // Only an update ever refuses a cancel outright, and only once it
+        // writes (no Cancel once writing starts).
+        if !activity.cancellable && !activity.cancel_requested {
+            let update = activity
+                .update
+                .as_ref()
+                .unwrap_or_else(|| panic!("[{case}] a {:?} refused a cancel", activity.kind));
+            assert!(
+                update.stage.is_some_and(|stage| !stage.allows_cancel()),
+                "[{case}] an update refused a cancel while nothing was written: {update:?}"
+            );
+        }
+        assert_eq!(
+            activity.kind == ActivityKind::Update,
+            activity.update.is_some(),
+            "[{case}] the update's typed view belongs to an update, always"
+        );
+        // A link drop is not a failure: a running update keeps the card
+        // busy, never offline.
+        if activity.kind == ActivityKind::Update {
+            assert_eq!(device.status, DeviceStatus::Busy, "[{case}]");
+            assert_ne!(device.state_label, "Offline", "[{case}]");
+        }
     } else {
         assert!(
             !device.escapes.contains(&Escape::Cancel),
@@ -712,7 +738,145 @@ fn gestures() -> Vec<(&'static str, Vec<Step>)> {
             vec![Step::Adopt { link: 1 }, Step::Forget { device: 1 }],
         ),
         ("add from usb", vec![Step::AddFromUsb]),
+        ("update (no click)", vec![update(UpdateIntentFacts::Auto)]),
+        (
+            "update, backing up, then cancel",
+            vec![
+                update(install()),
+                update_stage(UpdateStageFacts::BackingUp),
+                Step::Cancel { device: 1 },
+            ],
+        ),
+        (
+            "update, writing, then cancel (refused)",
+            vec![
+                update(install()),
+                update_stage(UpdateStageFacts::Updating),
+                Step::Cancel { device: 1 },
+            ],
+        ),
+        (
+            "update, then the board resets",
+            vec![
+                update(UpdateIntentFacts::Reinstall),
+                update_stage(UpdateStageFacts::Updating),
+                Step::closed(1),
+                Step::LegInterrupted {
+                    device: 1,
+                    reason: None,
+                    effect: None,
+                },
+            ],
+        ),
+        (
+            "update, then the port re-enumerates",
+            vec![
+                update(install()),
+                update_stage(UpdateStageFacts::Finishing),
+                Step::detach(1),
+                Step::attach_with_update_channel(2, "usb-1"),
+            ],
+        ),
+        (
+            "update, then the board is back with its manifest alone",
+            vec![
+                update(UpdateIntentFacts::Auto),
+                update_stage(UpdateStageFacts::Restoring),
+                Step::closed(1),
+                Step::LegInterrupted {
+                    device: 1,
+                    reason: None,
+                    effect: None,
+                },
+                Step::opened(1),
+                Step::update_facts(1, UpdateBoardState::NeedsEngine),
+            ],
+        ),
+        (
+            "update ends up to date",
+            vec![
+                update(install()),
+                Step::UpdateOutcome {
+                    device: 1,
+                    outcome: UpdateOutcomeFacts::UpToDate,
+                    effect: None,
+                },
+                Step::EffectEnded {
+                    device: 1,
+                    ok: true,
+                    message: None,
+                    effect: None,
+                    kind: Some(ActivityKind::Update),
+                },
+            ],
+        ),
+        (
+            "update stops: needs USB once",
+            vec![
+                update(install()),
+                Step::UpdateOutcome {
+                    device: 1,
+                    outcome: UpdateOutcomeFacts::NeedsUsb,
+                    effect: None,
+                },
+                Step::EffectEnded {
+                    device: 1,
+                    ok: true,
+                    message: None,
+                    effect: None,
+                    kind: Some(ActivityKind::Update),
+                },
+            ],
+        ),
+        (
+            "update leg could not run",
+            vec![
+                update(UpdateIntentFacts::Auto),
+                Step::EffectEnded {
+                    device: 1,
+                    ok: false,
+                    message: Some("no update host".to_string()),
+                    effect: None,
+                    kind: Some(ActivityKind::Update),
+                },
+            ],
+        ),
+        (
+            "update, then another device holds the transfer",
+            vec![update(install()), update_stage(UpdateStageFacts::Waiting)],
+        ),
+        (
+            "update, then a no-click update while it runs",
+            vec![update(install()), update(UpdateIntentFacts::Auto)],
+        ),
+        (
+            "flash, then an update",
+            vec![flash_step(), update(install())],
+        ),
     ]
+}
+
+/// The update gesture (or the controller's no-click spawn) aimed at entry 1.
+fn update(intent: UpdateIntentFacts) -> Step {
+    Step::UpdateFirmware { device: 1, intent }
+}
+
+fn install() -> UpdateIntentFacts {
+    UpdateIntentFacts::Install {
+        version: "2026.10.05-2".to_string(),
+        allow_downgrade: false,
+    }
+}
+
+/// A stage marker, 40 % through its piece.
+fn update_stage(stage: UpdateStageFacts) -> Step {
+    Step::UpdateStage {
+        device: 1,
+        stage,
+        done: 400,
+        total: 1_000,
+        effect: None,
+    }
 }
 
 /// Instants worth landing on: before any deadline, past the identify

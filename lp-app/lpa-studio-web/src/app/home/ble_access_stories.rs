@@ -998,5 +998,6 @@ fn ble_card() -> DeviceView {
         firmware_blocked: Some("Firmware updates need USB".to_string()),
         escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
         update_blocked: None,
+        last_update_outcome: None,
     }
 }

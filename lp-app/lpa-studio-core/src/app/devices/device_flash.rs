@@ -599,6 +599,7 @@ mod tests {
             firmware_blocked: None,
             escapes: vec![Escape::Disconnect, Escape::Forget],
             update_blocked: None,
+            last_update_outcome: None,
         };
 
         assert_eq!(
@@ -651,6 +652,7 @@ mod tests {
             firmware_blocked: None,
             escapes: vec![Escape::Disconnect, Escape::Forget],
             update_blocked: None,
+            last_update_outcome: None,
         }
     }
 
@@ -881,6 +883,7 @@ mod tests {
                 cancellable: true,
                 cancel_requested: false,
                 layout: None,
+                update: None,
             }),
             ..base.clone()
         };

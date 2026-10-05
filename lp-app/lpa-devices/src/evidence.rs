@@ -21,7 +21,7 @@ use std::collections::VecDeque;
 
 use serde::{Deserialize, Serialize};
 
-use crate::activity::ActivityOutcome;
+use crate::activity::{ActivityKind, ActivityOutcome};
 use crate::app_version::AppVersion;
 use crate::bootloader::bootloader_code_ranges;
 use crate::event::{ActivityMarker, Event};
@@ -143,6 +143,13 @@ pub struct Evidence {
     /// Survives disconnect on purpose (invariant I4): "flash failed" must
     /// still be readable after the board drops off the bus.
     pub last_outcome: Option<ActivityOutcome>,
+    /// How the last update ended, typed — the driver's word, or the model's
+    /// own when the board never came back. Kept, like [`Self::last_outcome`],
+    /// until a new activity supersedes it: the card's words for "needs USB
+    /// once" or "the board did not come back" are made of it after the
+    /// activity is gone.
+    #[serde(default)]
+    pub last_update_outcome: Option<crate::activity::UpdateOutcomeFacts>,
     /// A coarse effect holds this device's wire exclusively.
     ///
     /// Folded from [`Event::LinkBorrow`], and read for exactly one thing:
@@ -235,8 +242,8 @@ impl Evidence {
                     notes.push(note);
                 }
             }
-            Event::ActivityMarker { marker, .. } => {
-                notes.extend(self.fold_marker(marker));
+            Event::ActivityMarker { marker, effect, .. } => {
+                notes.extend(self.fold_marker(marker, effect.is_some()));
             }
             // Identity learned out-of-band by a coarse effect (the flash
             // preflight's efuse MAC read). Pure identity news: it moves no
@@ -285,6 +292,21 @@ impl Evidence {
     /// so [`Self::has_hello`] alone cannot.
     pub fn hello_heard_at(&self) -> Option<Millis> {
         self.observations.hello_at
+    }
+
+    /// When the current window's channel-3 board manifest (`M`) was heard,
+    /// if one has been — the hello's own copy is [`Self::hello_heard_at`]'s.
+    /// How an update tells a core-only board that came back (it sends no
+    /// hello, only `M`) from the manifest it sent before its reset.
+    pub fn update_facts_heard_at(&self) -> Option<Millis> {
+        self.observations.update_facts_at
+    }
+
+    /// When the current observation window began (an attach, an open, a
+    /// successful reset or a detach). A window newer than an instant is a
+    /// link session newer than it.
+    pub fn window_started_at(&self) -> Option<Millis> {
+        self.observations.window_start
     }
 
     /// How the board's wire proto compares to this build's, once a hello has
@@ -605,6 +627,7 @@ impl Evidence {
             // speaking, so it counts as heard.
             LinkEvent::UpdateFacts(facts) => {
                 self.observations.update_facts = Some(facts.clone());
+                self.observations.update_facts_at = Some(now);
                 self.push_output(TerminalKind::Wire, update_summary(facts));
                 if let Some(note) = self.freshness.heard(now, false) {
                     notes.push(note);
@@ -614,11 +637,14 @@ impl Evidence {
         notes
     }
 
-    fn fold_marker(&mut self, marker: &ActivityMarker) -> Vec<JournalNote> {
+    /// `stamped`: the marker came from a coarse effect (it carries an
+    /// effect stamp), not from the device's own brackets.
+    fn fold_marker(&mut self, marker: &ActivityMarker, stamped: bool) -> Vec<JournalNote> {
         match marker {
             ActivityMarker::Started { kind } => {
                 // A new activity supersedes the previous outcome.
                 self.last_outcome = None;
+                self.last_update_outcome = None;
                 // No more "— … —" dressing: the Studio kind carries that
                 // the line is Studio's own narration.
                 self.push_output(TerminalKind::Studio, kind.label());
@@ -650,6 +676,26 @@ impl Evidence {
                     }
                 };
                 self.push_output(TerminalKind::Studio, &line);
+                Vec::new()
+            }
+            // An update LEG's end is not the activity's: the activity's own
+            // (unstamped) bracket carries the outcome. A leg that ended with
+            // its link is the board resetting — the card keeps "Updating…",
+            // and the terminal says it is reconnecting, never a failure.
+            ActivityMarker::Ended {
+                kind: ActivityKind::Update,
+                outcome,
+            } if stamped => {
+                if let ActivityOutcome::Interrupted { reason } = outcome {
+                    self.push_output(TerminalKind::Studio, format!("reconnecting — {reason}"));
+                }
+                Vec::new()
+            }
+            // Display only: the stage and percent live on the running cell,
+            // and the terminal lines are the effects layer's own narration.
+            ActivityMarker::UpdateStage { .. } => Vec::new(),
+            ActivityMarker::UpdateOutcome(outcome) => {
+                self.last_update_outcome = Some(*outcome);
                 Vec::new()
             }
             ActivityMarker::Ended { outcome, .. } => {
@@ -963,6 +1009,10 @@ struct Observations {
     /// stamp over the closed port on the ladder's first poke).
     #[serde(default)]
     hello_at: Option<Millis>,
+    /// When this window's channel-3 manifest was heard — the core-only
+    /// board's only word, so an update reads its return off this.
+    #[serde(default)]
+    update_facts_at: Option<Millis>,
     /// The board's own report of what it is running. Window-scoped like
     /// every other observation: a reopened port has to be told again.
     loaded: Option<Vec<LoadedProjectFacts>>,

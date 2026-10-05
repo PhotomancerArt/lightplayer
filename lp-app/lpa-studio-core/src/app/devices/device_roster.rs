@@ -795,6 +795,7 @@ mod tests {
             firmware_blocked: None,
             escapes: vec![Escape::Reconnect, Escape::Forget],
             update_blocked: None,
+            last_update_outcome: None,
         }
     }
 
@@ -824,6 +825,7 @@ mod tests {
             firmware_blocked: None,
             escapes: vec![Escape::Disconnect, Escape::Forget],
             update_blocked: None,
+            last_update_outcome: None,
         }
     }
 

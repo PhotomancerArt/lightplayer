@@ -7295,6 +7295,7 @@ impl StudioController {
             (Kind::Erase, _) => format!("erasing {board:?}"),
             (Kind::RemoveProject, _) => format!("removing the project from {board:?}"),
             (Kind::Identify, _) => format!("identifying {board:?}"),
+            (Kind::Update, _) => format!("updating {board:?}"),
         };
         match outcome {
             ActivityOutcome::Succeeded { summary } => {

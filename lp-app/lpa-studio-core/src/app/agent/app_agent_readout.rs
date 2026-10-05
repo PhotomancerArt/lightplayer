@@ -901,6 +901,7 @@ mod tests {
             firmware_blocked: None,
             escapes: Vec::new(),
             update_blocked: None,
+            last_update_outcome: None,
         }
     }
 

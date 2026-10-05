@@ -250,6 +250,14 @@ impl ControllerOp for DevicesOp {
                 "Send the picked project to this board and start it running.",
                 ActionPriority::Primary,
             ),
+            // An over-the-air update to this Studio's build. Plain for now;
+            // the card's own offers word it and set its level per intent
+            // (an older version is Lasting) when they are built in core.
+            Action::Update { .. } => ActionMeta::new(
+                "Update",
+                "Update this board's firmware over its own link.",
+                ActionPriority::Primary,
+            ),
             Action::ResetBoard { .. } => ActionMeta::new(
                 "Reset",
                 "Reboot the board (a hardware reset) and identify what starts up.",

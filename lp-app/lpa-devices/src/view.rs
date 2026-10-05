@@ -110,6 +110,13 @@ pub struct DeviceView {
     pub activity: Option<ActivityView>,
     /// Survives disconnect; cleared when a new activity supersedes it.
     pub last_outcome: Option<OutcomeView>,
+    /// How the last update ended, typed (survives and clears like
+    /// [`Self::last_outcome`]): what the card's words for an update that
+    /// stopped — needs USB once, the board did not come back — are made of
+    /// once the activity is gone. A running update's is
+    /// [`ActivityView::update`]'s.
+    #[serde(default)]
+    pub last_update_outcome: Option<crate::activity::UpdateOutcomeFacts>,
     /// The card's terminal panel: what the board said, what the wire
     /// carried and what Studio did to it, oldest first. Serial lines,
     /// decoded wire frames and activity narration interleaved, because that
@@ -159,6 +166,11 @@ pub struct ActivityView {
     /// and whether the card must ask before the board's files move.
     #[serde(default)]
     pub layout: Option<crate::activity::FlashLayoutView>,
+    /// An Update's stage, progress, outcome and whether it is waiting for
+    /// the board between legs — typed, so the card's words never parse
+    /// [`Self::label`].
+    #[serde(default)]
+    pub update: Option<crate::activity::UpdateActivityView>,
 }
 
 /// What a board is running, as the card is allowed to state it.
@@ -265,9 +277,12 @@ pub fn device_view(device: &Device, now: Millis) -> DeviceView {
         kind: cell.kind,
         label: cell.label(),
         percent: cell.percent(),
-        cancellable: !cell.is_cancel_requested(),
+        // An Update past backing up refuses a cancel: no Cancel once
+        // writing starts.
+        cancellable: cell.accepts_cancel() && !cell.is_cancel_requested(),
         cancel_requested: matches!(cell.cancel, CancelPhase::CancelRequested { .. }),
         layout: cell.flash_layout(),
+        update: cell.update_view(),
     });
 
     let mut escapes = Vec::new();
@@ -365,6 +380,7 @@ pub fn device_view(device: &Device, now: Millis) -> DeviceView {
             && device.activity.is_none(),
         activity,
         last_outcome: device.evidence.last_outcome.as_ref().map(outcome_view),
+        last_update_outcome: device.evidence.last_update_outcome,
         terminal: device.evidence.recent_output().cloned().collect(),
         terminal_dropped: device.evidence.terminal_dropped(),
         firmware_blocked: device

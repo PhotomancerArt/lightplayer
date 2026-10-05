@@ -328,6 +328,7 @@ mod tests {
             cancellable: true,
             cancel_requested: false,
             layout: None,
+            update: None,
         });
         busy.can_receive_project = false;
         busy.escapes = vec![Escape::Cancel, Escape::Disconnect, Escape::Forget];
@@ -561,6 +562,7 @@ mod tests {
             firmware_blocked: None,
             escapes: vec![Escape::Disconnect, Escape::Forget],
             update_blocked: None,
+            last_update_outcome: None,
         }
     }
 }
