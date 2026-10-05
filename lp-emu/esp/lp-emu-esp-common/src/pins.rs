@@ -415,6 +415,40 @@ impl Fabric {
         Self::index(pad).and_then(|i| self.driven[i])
     }
 
+    /// Put this fabric's **chip side** back to `snapshot` — routing, the
+    /// GPIO registers, signal levels and input routing — while keeping this
+    /// fabric's own **board side**: what [`drive_pad`](Self::drive_pad) is
+    /// holding on a pad from outside the chip, and every [`wire`](Self::wire)
+    /// tie.
+    ///
+    /// A chip reset or power cycle clears the chip's own registers, but
+    /// never touches what is wired to a pad from outside it — a switch to
+    /// ground, a jumper between two pads — so a restore that overwrote the
+    /// whole fabric from the power-on snapshot was dropping a bench driver's
+    /// level on every restart (the defect this method fixes). `snapshot` is
+    /// typically the power-on `Fabric` a reset or power cycle restores from;
+    /// the caller decides what counts as "chip side" by choosing the
+    /// snapshot.
+    ///
+    /// Every pad settles again at `at` once the swap is done, so a pad an
+    /// outside driver holds resolves to that level immediately — the
+    /// snapshot was taken before this call drove anything — and the edge, if
+    /// any, lands in [`take_edges`](Self::take_edges) like any other.
+    pub fn restore_chip_side(&mut self, snapshot: &Fabric, at: Cycles) {
+        let driven = core::mem::take(&mut self.driven);
+        let drivers = self.drivers;
+        let tie = core::mem::take(&mut self.tie);
+        let tied = self.tied;
+        *self = snapshot.clone();
+        self.driven = driven;
+        self.drivers = drivers;
+        self.tie = tie;
+        self.tied = tied;
+        for i in 0..MAX_PADS {
+            self.settle_group(i, at);
+        }
+    }
+
     /// Record `pad`'s **input enable** — the chip's IO_MUX `fun_ie`.
     ///
     /// Recorded, never gated on here: the pad's resolved level is the same
@@ -1291,6 +1325,55 @@ mod tests {
                 pad: PAD,
                 level: false
             }]
+        );
+    }
+
+    #[test]
+    fn restore_chip_side_keeps_a_bench_driver_and_a_wire_but_resets_the_routing() {
+        // The power-on snapshot: nothing routed, nothing driven — as a fresh
+        // `Fabric` would be.
+        let power_on = Fabric::new();
+
+        // The live fabric: the chip routed and drove the pad high, then a
+        // bench driver pulled it low from outside and two pads got wired.
+        let mut live = Fabric::new();
+        live.set_gpio_enable(PAD, true, 0);
+        live.route(PAD, RouteSource::GpioOut, false, 0);
+        live.set_gpio_out(PAD, true, 10);
+        live.drive_pad(PAD, false, 20);
+        live.wire(PadId(9), PadId(10), 25).unwrap();
+        live.drive_pad(PadId(9), true, 26);
+        let _ = live.take_edges();
+        assert!(!live.pad_level(PAD), "the outside driver already won");
+
+        // A reset: the chip side goes back to the power-on snapshot, but the
+        // bench driver and the wire are board-side and are not the chip's to
+        // clear (the defect this fixes — see `SocBus::restore_scalars`).
+        live.restore_chip_side(&power_on, 100);
+
+        assert_eq!(
+            live.driven_level(PAD),
+            Some(false),
+            "the bench driver on gpio18 survives the reset"
+        );
+        assert!(!live.pad_level(PAD), "and its level is still observed");
+        assert_eq!(
+            live.driven_level(PadId(9)),
+            Some(true),
+            "the bench driver on gpio9 survives too"
+        );
+        assert!(
+            live.pad_level(PadId(10)),
+            "the wire from gpio9 still carries it to gpio10"
+        );
+        assert_eq!(
+            live.route_of(PAD),
+            None,
+            "the chip's own routing came back from the power-on snapshot"
+        );
+        assert!(
+            !live.gpio_enable(PAD),
+            "the chip's output-enable register came back too"
         );
     }
 
