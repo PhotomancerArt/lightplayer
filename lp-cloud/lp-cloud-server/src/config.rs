@@ -19,6 +19,7 @@
 //! | `LP_CLOUD_DEV_AUTH` | `1` enables `GET /auth/dev` | off |
 //! | `LP_CLOUD_GOOGLE_CLIENT_ID` / `_SECRET` | OAuth; both required for `GET /auth/google` | — |
 //! | `LP_CLOUD_GOOGLE_ENDPOINT_BASE` | Point the OAuth dance at a stub (tests) | Google |
+//! | `LP_CLOUD_FIRMWARE_UPSTREAM` | Releases base the `/firmware/` lookup proxies (an `http(s)` URL) | [`DEFAULT_FIRMWARE_UPSTREAM`] |
 
 use std::fmt;
 use std::net::IpAddr;
@@ -37,6 +38,13 @@ pub const SESSION_TTL_SECONDS: f64 = 30.0 * 24.0 * 60.0 * 60.0;
 /// projects, and the ttl errs long. Guest-owned rows are DB-marked for
 /// pruning, which is the real lever against build-up.
 pub const GUEST_SESSION_TTL_SECONDS: f64 = 365.0 * 24.0 * 60.0 * 60.0;
+
+/// Where released firmware lives: the product repo's GitHub releases. The
+/// `/firmware/` lookup asks `{base}/download/v{version}/{asset}` and
+/// `{base}/latest/download/{asset}` and nothing else
+/// ([`crate::firmware::github_release_upstream`]).
+pub const DEFAULT_FIRMWARE_UPSTREAM: &str =
+    "https://github.com/PhotomancerArt/lightplayer/releases";
 
 /// The whole of the process's configuration.
 #[derive(Debug, Clone)]
@@ -76,6 +84,10 @@ pub struct ServerConfig {
     /// How long a minted GUEST session lasts, in seconds (much longer —
     /// see [`GUEST_SESSION_TTL_SECONDS`]).
     pub guest_session_ttl_seconds: f64,
+    /// The releases base the `/firmware/` lookup proxies, with no trailing
+    /// slash (`LP_CLOUD_FIRMWARE_UPSTREAM`; tests and the local smoke point
+    /// it at a stub).
+    pub firmware_upstream: String,
 }
 
 impl ServerConfig {
@@ -98,6 +110,15 @@ impl ServerConfig {
             "LP_CLOUD_BASE_URL",
             &format!("http://127.0.0.1:{port}"),
         ));
+
+        let firmware_upstream = parse_http_url(
+            &value(
+                &get,
+                "LP_CLOUD_FIRMWARE_UPSTREAM",
+                DEFAULT_FIRMWARE_UPSTREAM,
+            ),
+            "LP_CLOUD_FIRMWARE_UPSTREAM",
+        )?;
 
         if blobs == BlobBackend::S3 && get("LP_CLOUD_S3_BUCKET").is_none() {
             return Err(ConfigError::Missing("LP_CLOUD_S3_BUCKET"));
@@ -149,6 +170,7 @@ impl ServerConfig {
             },
             session_ttl_seconds: SESSION_TTL_SECONDS,
             guest_session_ttl_seconds: GUEST_SESSION_TTL_SECONDS,
+            firmware_upstream,
         })
     }
 
@@ -407,6 +429,23 @@ fn normalize_base_url(raw: &str) -> String {
     raw.trim().trim_end_matches('/').to_string()
 }
 
+/// An absolute `http(s)` URL with a host, trailing slashes removed. Anything
+/// else is refused rather than discovered at the first proxied request.
+fn parse_http_url(raw: &str, name: &'static str) -> Result<String, ConfigError> {
+    let url = normalize_base_url(raw);
+    let rest = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"));
+    let host = rest.and_then(|rest| rest.split('/').next()).unwrap_or("");
+    if host.is_empty() || url.contains(char::is_whitespace) {
+        return Err(ConfigError::Invalid {
+            name,
+            expected: "an http(s) URL",
+        });
+    }
+    Ok(url)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -419,6 +458,37 @@ mod tests {
         assert_eq!(config.base_url, "http://127.0.0.1:2812");
         assert!(!config.dev_auth);
         assert!(!config.cookies_are_secure());
+    }
+
+    #[test]
+    fn the_firmware_upstream_defaults_to_github_and_can_be_pointed_at_a_stub() {
+        assert_eq!(from(&[]).firmware_upstream, DEFAULT_FIRMWARE_UPSTREAM);
+        assert_eq!(
+            from(&[(
+                "LP_CLOUD_FIRMWARE_UPSTREAM",
+                "http://127.0.0.1:4000/releases/"
+            )])
+            .firmware_upstream,
+            "http://127.0.0.1:4000/releases"
+        );
+        for bad in [
+            "github.com/releases",
+            "ftp://example.com",
+            "https://",
+            "http:// x",
+        ] {
+            assert_eq!(
+                ServerConfig::from_vars(|name| {
+                    (name == "LP_CLOUD_FIRMWARE_UPSTREAM").then(|| bad.to_string())
+                })
+                .err(),
+                Some(ConfigError::Invalid {
+                    name: "LP_CLOUD_FIRMWARE_UPSTREAM",
+                    expected: "an http(s) URL",
+                }),
+                "{bad:?}"
+            );
+        }
     }
 
     #[test]

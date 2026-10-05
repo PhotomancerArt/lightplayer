@@ -190,6 +190,19 @@ pub enum ResetCause {
     /// `0x15` — the serial bridge asserted `chip_rst`. What espflash's
     /// `--after hard-reset` and M6's `reset` control command do.
     UsbUartHpSys,
+    /// `0x3` — the guest's own software reset of the HP system: a store
+    /// with `LP_AON.sys_cfg.hpsys_sw_reset` (bit 31) set, which is the mask
+    /// ROM's `software_reset` and so esp-hal's `software_reset()`.
+    ///
+    /// The evidence for the code, two sources that agree: the ROM's own
+    /// name table above (index 3 is `LP_SW_HPSYS`), and esp-hal 1.1.1's
+    /// `SocResetReason::CoreSw = 0x03` for this chip
+    /// (`rtc_cntl/rtc/esp32c6.rs`, "Software resets the digital core"),
+    /// which the firmware's `reset_cause_map` reads as `SoftwareReset`.
+    /// The ESP32-C6 TRM's reset-source table was not at hand when this was
+    /// modelled (2026-10-04), so the TRM is not cited; if it ever disagrees,
+    /// the ROM table is what a board's banner prints.
+    LpSwHpSys,
 }
 
 impl ResetCause {
@@ -207,6 +220,7 @@ impl ResetCause {
             ResetCause::LpWdtSys => 0x10,
             ResetCause::Tg1WdtCpu => 0x11,
             ResetCause::UsbUartHpSys => 0x15,
+            ResetCause::LpSwHpSys => 0x3,
         }
     }
 
@@ -222,6 +236,7 @@ impl ResetCause {
             ResetCause::LpWdtHpSys => "LP_WDT_HPSYS",
             ResetCause::LpWdtCpu => "LP_WDT_CPU",
             ResetCause::UsbUartHpSys => "USB_UART_HPSYS",
+            ResetCause::LpSwHpSys => "LP_SW_HPSYS",
         }
     }
 
@@ -240,6 +255,7 @@ impl ResetCause {
             // domains, which is why the machine answers it with
             // `power_cycle()` rather than `reboot()`.
             ResetSource::PowerOn => ResetCause::PowerOn,
+            ResetSource::Software => ResetCause::LpSwHpSys,
             ResetSource::Watchdog {
                 watchdog: Watchdog::Mwdt(0),
                 scope: ResetScope::Cpu,
@@ -318,6 +334,7 @@ impl ResetCause {
             ResetCause::LpWdtHpSys => "lp-wdt-hpsys",
             ResetCause::LpWdtCpu => "lp-wdt-cpu",
             ResetCause::UsbUartHpSys => "usb-uart",
+            ResetCause::LpSwHpSys => "lp-sw-hpsys",
         }
     }
 }

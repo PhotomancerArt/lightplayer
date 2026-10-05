@@ -3797,6 +3797,7 @@ checksum = "843fba2746e448b37e26a819579957415c8cef339bf08564fe8b7ddbd959573c"
 dependencies = [
  "crc32fast",
  "miniz_oxide",
+ "zlib-rs",
 ]
 
 [[package]]
@@ -5762,6 +5763,7 @@ dependencies = [
  "lpa-upgrade",
  "lpc-access",
  "lpc-engine",
+ "lpc-firmware-release",
  "lpc-hardware",
  "lpc-mapping",
  "lpc-model",
@@ -5813,6 +5815,7 @@ dependencies = [
  "lp-cloud-store-mem",
  "lp-cloud-store-sqlite",
  "lpc-cloud-api",
+ "lpc-firmware-release",
  "lpc-history",
  "lpfs",
  "reqwest",
@@ -5865,6 +5868,10 @@ source = "git+https://github.com/light-player/lp-common?branch=main#c27c24b3ce4b
 dependencies = [
  "rustc-hash 2.1.1",
 ]
+
+[[package]]
+name = "lp-crc32"
+version = "40.0.0"
 
 [[package]]
 name = "lp-deflate"
@@ -6320,6 +6327,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "lpa-firmware-store"
+version = "40.0.0"
+dependencies = [
+ "log",
+ "lpc-firmware-release",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "lpa-fs-opfs"
 version = "40.0.0"
 dependencies = [
@@ -6428,11 +6445,13 @@ dependencies = [
  "lpa-boards",
  "lpa-client",
  "lpa-devices",
+ "lpa-firmware-store",
  "lpa-link",
  "lpa-server",
  "lpa-upgrade",
  "lpc-access",
  "lpc-engine",
+ "lpc-firmware-release",
  "lpc-hardware",
  "lpc-history",
  "lpc-mapping",
@@ -6472,6 +6491,7 @@ dependencies = [
  "lpa-boards",
  "lpa-client",
  "lpa-cloud-client",
+ "lpa-firmware-store",
  "lpa-fs-opfs",
  "lpa-link",
  "lpa-mapping-editor",
@@ -6479,6 +6499,7 @@ dependencies = [
  "lpa-studio-core",
  "lpa-studio-web-story-macros",
  "lpc-cloud-api",
+ "lpc-firmware-release",
  "lpc-history",
  "lpc-mapping",
  "lpc-model",
@@ -6504,6 +6525,19 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "lpa-update"
+version = "40.0.0"
+dependencies = [
+ "flate2",
+ "lp-crc32",
+ "lp-deflate",
+ "lpa-devices",
+ "lpc-access",
+ "lpc-update",
+ "sha2",
 ]
 
 [[package]]
@@ -6571,6 +6605,16 @@ dependencies = [
  "serde",
  "serde_json",
  "spin",
+]
+
+[[package]]
+name = "lpc-firmware-release"
+version = "40.0.0"
+dependencies = [
+ "schemars",
+ "serde",
+ "serde_json",
+ "sha2",
 ]
 
 [[package]]
@@ -6666,6 +6710,20 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "lpc-update"
+version = "40.0.0"
+dependencies = [
+ "lp-crc32",
+ "lp-deflate",
+ "lpc-access",
+ "lpc-update",
+ "miniz_oxide",
+ "serde",
+ "serde_json",
+ "sha2",
 ]
 
 [[package]]
@@ -13006,6 +13064,12 @@ dependencies = [
  "thiserror 2.0.18",
  "zopfli",
 ]
+
+[[package]]
+name = "zlib-rs"
+version = "0.6.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b268e58e7c693d7c271f93ffc4ba3b380412554231c85bf61ca7af91042a4112"
 
 [[package]]
 name = "zmij"

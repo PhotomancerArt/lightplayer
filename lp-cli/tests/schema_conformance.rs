@@ -158,6 +158,49 @@ fn hardware_manifests_conform_to_checked_in_schema() -> Result<()> {
     Ok(())
 }
 
+/// `ota-manifest.json` has no authored corpus in the repo (releases carry
+/// it), so its format-1 compatibility pin stands in: the golden must
+/// validate, an unknown encoding must validate whatever its shape (readers
+/// skip it), and a malformed encoding 1 or another `format` must not.
+#[test]
+fn ota_manifest_golden_conforms_to_checked_in_schema() -> Result<()> {
+    let workspace = workspace_dir();
+    let validator = load_validator(&workspace, "schemas/ota-manifest.schema.json")?;
+    let rel = "lp-core/lpc-firmware-release/tests/fixtures/ota-manifest.v1.json";
+    let text = std::fs::read_to_string(workspace.join(rel)).with_context(|| rel.to_string())?;
+    let golden: Value = serde_json::from_str(&text)?;
+    let errors =
+        |v: &Value| -> Vec<String> { validator.iter_errors(v).map(|e| e.to_string()).collect() };
+    assert_eq!(errors(&golden), Vec::<String>::new(), "{rel}");
+
+    let mut unknown = golden.clone();
+    unknown["encodings"]
+        .as_array_mut()
+        .expect("encodings")
+        .push(serde_json::json!({ "id": 7, "codec": { "future": true }, "core": "elsewhere" }));
+    unknown["futureField"] = serde_json::json!({ "anything": 1 });
+    assert_eq!(
+        errors(&unknown),
+        Vec::<String>::new(),
+        "unknown encoding / field"
+    );
+
+    let mut malformed = golden.clone();
+    malformed["encodings"][0]
+        .as_object_mut()
+        .expect("encoding 1")
+        .remove("chunkBytes");
+    assert!(
+        !errors(&malformed).is_empty(),
+        "encoding 1 without chunkBytes"
+    );
+
+    let mut format2 = golden;
+    format2["format"] = serde_json::json!(2);
+    assert!(!errors(&format2).is_empty(), "format 2");
+    Ok(())
+}
+
 fn workspace_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()

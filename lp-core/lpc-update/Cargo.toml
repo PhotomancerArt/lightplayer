@@ -1,0 +1,31 @@
+[package]
+name = "lpc-update"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Over-the-air update protocol v1: the channel-3 codec, the board manifest, the progress record, and the board's update session (no_std, sans-IO)"
+
+# Never a dependency on `lpc-firmware-release` or `lpa-firmware-store` (the
+# firmware-distribution plan's crates): the dependency graph of the OTA plans
+# runs the other way (`lpa-update -> lpc-firmware-release`, added later).
+[dependencies]
+lp-crc32 = { path = "../../lp-base/lp-crc32" }
+lp-deflate = { path = "../../lp-base/lp-deflate" }
+lpc-access = { path = "../lpc-access" }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+
+[features]
+# A NOR flash model with power cuts, a model board and a rig: for this
+# crate's tests and lpa-update's host x board simulation. Never in firmware.
+test-support = []
+
+[dev-dependencies]
+lpc-update = { path = ".", features = ["test-support"] }
+miniz_oxide = { version = "0.8.9", default-features = false, features = ["with-alloc"] }
+
+[lints]
+workspace = true

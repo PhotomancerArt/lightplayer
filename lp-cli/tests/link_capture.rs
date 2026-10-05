@@ -78,15 +78,13 @@ fn a_capture_over_the_boards_socket_reaches_the_boot_idle_sentinel() {
 /// the hello goes to the REBOOTED board and is answered there. The desk's
 /// way to reboot a board with nothing else on its port.
 ///
-/// ⚠️ On this machine the restart is the LP watchdog's, not the software
-/// reset's: the emulated C6 stores the ROM's `LP_AON.sys_cfg.hpsys_sw_reset`
-/// write without acting on it, `esp_hal::system::software_reset` returns into
-/// the next function, and the RWDT reboots the chip seconds later
+/// The restart is the software reset's, performed at once and read by the
+/// rebooted firmware as `rst:0x3 (LP_SW_HPSYS)`; until 2026-10-04 the
+/// emulated C6 ignored the ROM's `LP_AON.sys_cfg.hpsys_sw_reset` write and the
+/// LP watchdog rebooted the chip seconds later
 /// (`docs/defects/2026-09-29-the-emulated-c6-does-not-perform-a-software-
-/// reset.md`). So no `--strict-bus` here — the fall-through writes to
-/// address 0 — and what this test proves is the capture's side: the request
-/// order, the restart seen as `PeerRestarted`, and the next request asked of
-/// the new session. How fast a board restarts is not in it.
+/// reset.md`, fixed). So it runs under `--strict-bus` again: the
+/// fall-through past the ROM's `ret`, which wrote to address 0, is gone.
 #[test]
 #[ignore = "needs a built fw-esp32c6 ELF; `just test-emu-c6-cli` runs it"]
 fn a_reboot_request_restarts_the_board_and_the_next_request_goes_to_the_new_session() {
@@ -96,7 +94,14 @@ fn a_reboot_request_restarts_the_board_and_the_next_request_goes_to_the_new_sess
         Command::new(env!("CARGO_BIN_EXE_lp-cli"))
             .args(["emu", "run", "--elf"])
             .arg(&elf)
-            .args(["--link", &addr, "--reboot-on-reset", "--timeout", "60s"])
+            .args([
+                "--link",
+                &addr,
+                "--reboot-on-reset",
+                "--strict-bus",
+                "--timeout",
+                "60s",
+            ])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()

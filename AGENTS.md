@@ -344,6 +344,8 @@ runtime.
 | `lp-json-pack`   | JSON Pack: a compact binary form of JSON that decodes back to byte-identical JSON text (`lp-base/`, generic; names coded against an injected seed and a per-connection learned table) | yes |
 | `lp-link`        | Sans-IO link layer under the device wire: framing, CRC-32C, channels, selective-repeat ARQ, session handshake (`lp-base/`, generic; one crate on both ends). Runs the product's USB link and the classic's UART0 link (board, host, Studio, tools); BLE/fw-emu are still the pre-lp-link `M!` framing. Optional `secure` feature: Noise NNpsk0 inside the SYN + sealed frames, the key match as the login (`LinkTrust::Keyed`), off on every product link until the Wi-Fi milestones | yes |
 | `lpa-devices`    | Device model: event fold, no IO, no UI | no (host + wasm) |
+| `lpc-update`     | OTA update protocol v1 (channel 3): codec, board manifest, progress record, and the board's sans-IO update session | yes |
+| `lpa-update`     | OTA host side: serving, backup, login client, decision, update driver; feature `pack` = the one packer of encoding 1 | no (host + wasm) |
 | `fw-esp32c6`       | ESP32 firmware                         | yes (bare metal) |
 | `fw-emu`         | RISC-V emulator firmware (CI)          | yes (bare metal) |
 | `lp-riscv-emu`   | RV32 emulator (host) — in `lp-emu/`    | yes (+std feat)  |
@@ -693,6 +695,16 @@ the shim, the backing URL and each board, with `detach` / `attach` buttons that
 are the cable. You need **no** WebSerial grant, no `just serial-grant`, no
 bench port and no Chromium policy profile: a polyfilled `navigator.serial`
 grants itself.
+
+Each board's banner row also carries a **D0 power** toggle, **on** by default:
+the switch a switch-mode `PowerButton` reads (`button:local:D0`, e.g. the
+PLAYFUL choker). An emulated pad nobody drives reads low, which that firmware
+takes as "switch off", and with the switch off a `detach` powers the board off
+(`ext1 wake: gpio0 high` deep sleep, state `stopped`) with no wake modelled, so
+nothing short of restarting `emu serve` brings it back. The switch is the
+control verb `pin 0 0|1`; the page re-sends it after every reboot (a restart
+drops outside drives), and `detach` waits for the firmware to have read it.
+Flip it **off** to test the power-off itself. It works the same on `?emu=tab`.
 
 The door admits **one client per board** (a second gets 409), so one Studio tab
 per `emu serve`, and use `?on=` (a different, orthogonal flag) if you want a

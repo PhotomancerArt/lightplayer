@@ -44,6 +44,8 @@ lpc-hardware = { path = "../lp-core/lpc-hardware", features = ["schema-gen"] }
 lpa-boards = { path = "../lp-app/lpa-boards", features = ["schema-gen"] }
 # The two persisted access files (project sidecar, device store).
 lpc-access = { path = "../lp-core/lpc-access", features = ["schema-gen"] }
+# `ota-manifest.json`, the OTA release manifest (schema only, today).
+lpc-firmware-release = { path = "../lp-core/lpc-firmware-release", features = ["schema-gen"] }
 # `firmware package`: the bootloader-range guard checks the merged image
 # against the device model's hung-bootloader table.
 lpa-devices = { path = "../lp-app/lpa-devices" }

@@ -18,6 +18,7 @@ crate is sans-IO.
 | `GET /auth/google/callback` | auth | the `lp_oauth_state` cookie is the credential |
 | `POST /auth/logout` | auth | the session cookie, if there is one |
 | `GET /auth/dev` | auth | localhost + `LP_CLOUD_DEV_AUTH` (404 otherwise) |
+| `GET\|HEAD\|OPTIONS /firmware/{target}/{release}/{file}` | firmware | none — public, verified by hash, any origin |
 | `GET /healthz` | ops | none |
 | anything else | page | a static file if it exists, else the SPA document |
 
@@ -25,6 +26,44 @@ Blobs and trees are separate routes because they are addressed differently:
 a blob by SHA-256 of its bytes, a tree by `TreeManifest::package_hash()`.
 See `src/content/tree_preimage.rs` for how a tree ends up stored at that
 address in a store that only ever hashes what it is given.
+
+## The firmware plane
+
+`/firmware/{target}/{release}/{file}` is the public lookup of released
+firmware (`src/firmware/`). GitHub release assets cannot be read by a browser
+cross-origin — no `Access-Control-Allow-Origin` on either hop of
+`releases/download`, no preflight answer, signed URLs that expire in an hour —
+so this server proxies them:
+
+- **Grammar** (`lpc-firmware-release`): `<release>` is `latest`, a release
+  version (`2026.10.05-3`) or a build id (`2026.10.05-3+<12 hex>`, `%2B`
+  accepted); every other non-digit word is reserved for a future channel.
+  Dev versions, reserved words, a bad target or file name, and a file the
+  release's manifest does not name are **404 without an upstream call**.
+- **Upstream** (`LP_CLOUD_FIRMWARE_UPSTREAM`, default
+  `https://github.com/PhotomancerArt/lightplayer/releases`): only
+  `{base}/download/v{version}/{target}.{file}` and
+  `{base}/latest/download/{target}.ota-manifest.json`. 30 s timeout, 16 MiB
+  body cap, redirects followed.
+- **Verification and cache:** a manifest must parse, validate and name the
+  target and version asked for; a file must have the manifest's length and
+  SHA-256. Checked files are kept in the blob store by SHA-256 (so a second
+  request never goes upstream, and the bytes are also readable at
+  `/b/<sha256>`); manifests (256), `latest` (5 min) and misses (60 s) are
+  held in memory. Anything that fails a check is a **502** and is never
+  stored.
+- **Headers:** every answer carries `Access-Control-Allow-Origin: *`. A 200
+  is `public, max-age=31536000, immutable` with `ETag: "<sha256>"` (and
+  `If-None-Match` answers 304); `latest` is a **302** to the version's path
+  with `max-age=60`; a 404 is `max-age=60`; a 502/504 is `no-store`.
+
+```sh
+curl -sI "$BASE/firmware/esp32c6-4mb/latest/ota-manifest.json"     # 302 → the version
+curl -sI "$BASE/firmware/esp32c6-4mb/abc1234/ota-manifest.json"    # 404, no upstream call
+```
+
+The Studio bundle's own `/firmware/<target>/manifest.json` (two segments)
+stays the static fallback's. Tests: `tests/firmware_plane.rs`.
 
 ## Running it
 
