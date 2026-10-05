@@ -2215,6 +2215,10 @@ impl SocBus {
     /// bus's was taken from a differently built machine and is refused
     /// loudly, as [`restore_regions`](Self::restore_regions) refuses one with
     /// a different region count.
+    ///
+    /// The pin fabric is the one scalar that is not restored whole: its
+    /// board side (an outside driver, a `--wire` tie) comes back as this bus
+    /// had it, not as `s` had it — see [`Fabric::restore_chip_side`].
     pub fn restore_scalars(&mut self, s: &BusScalars) {
         assert_eq!(
             s.ram_aliases,
@@ -2235,7 +2239,11 @@ impl SocBus {
         self.unmapped_writes = s.unmapped_writes;
         self.first_strict_violation = s.first_strict_violation;
         self.request = s.request;
-        self.pins = s.pins.clone();
+        // The chip side (routing, GPIO registers, signal levels) comes back
+        // from the snapshot; a bench driver's level on a pad and a `--wire`
+        // tie are board-side and survive a reset or power cycle the same way
+        // they would on silicon (see `Fabric::restore_chip_side`).
+        self.pins.restore_chip_side(&s.pins, s.now);
     }
 
     /// `true` if `address` falls in a declared MMIO window.
@@ -4685,6 +4693,38 @@ mod tests {
         assert_eq!(bus.unmapped_reads(), 1);
         assert_eq!(bus.unmapped_sites(), 1);
         assert_eq!(bus.peripheral(0).unwrap().save_state(), alloc::vec![1]);
+    }
+
+    /// A reset or power cycle is exactly this: save the power-on scalars
+    /// once, then restore them on every restart. A pad an outside driver —
+    /// a bench switch, a jumper — holds from outside the chip is wired to
+    /// the board, not the chip, so it must still read driven after the
+    /// restore, even though the snapshot was taken before anything drove it.
+    /// See `docs/defects/2026-10-04-emu-restart-drops-pad-drives.md`.
+    #[test]
+    fn restoring_scalars_keeps_a_pad_an_outside_driver_holds() {
+        use crate::pins::PadId;
+
+        let mut bus = SocBus::new();
+        let power_on = bus.save_scalars();
+
+        // After "boot", a bench driver pulls a pad low from outside the chip.
+        bus.pins.drive_pad(PadId(5), false, 10);
+        assert_eq!(bus.pins.driven_level(PadId(5)), Some(false));
+
+        // A reset restores the power-on scalars, the way `reboot`/
+        // `power_cycle` do (`lp-emu-esp32c6::Esp32C6Machine::restart`).
+        bus.restore_scalars(&power_on);
+
+        assert_eq!(
+            bus.pins.driven_level(PadId(5)),
+            Some(false),
+            "the outside driver is still there after the restart"
+        );
+        assert!(
+            !bus.pins.pad_level(PadId(5)),
+            "and the pad still reads the level it is driven to"
+        );
     }
 
     /// The reset-domain filter: an HP-only restore puts the HP block back and
