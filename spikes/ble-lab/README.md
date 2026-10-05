@@ -48,22 +48,34 @@ advertises as `LP-<project>` (or `LP-<last 4 MAC hex>`), so **Join** now
 accepts any `LP-…` name or any board advertising NUS. It starts BLE only when
 its device store says so, so provision the board over USB first.
 
-> **Framing gap, still open as of `lp2025/2026-09-28-1445-ble-on-lp-link`.**
-> Since that plan the board no longer speaks `M!{json}\n` lines over BLE at
-> all — see `docs/adr/2026-09-24-ble-transport.md`'s 2026-09-29 Amendment.
-> Every GATT write and notification is now exactly one lp-link Datagram
-> frame (a 4-byte header, the JSON/packed payload, a 4-byte CRC-32C), the
-> ATT long-write path is gone, and a Prepare Write on RX is refused
-> outright. **This spike's own wire-mode code was not ported in that
-> plan's P5 phase** — `index.html`'s `wireWrite`/`onWireBytes` (join on
-> newline, write in raw 180-byte chunks) and the `M!`-string builders below
-> in `lab.py`, `m4-desk-check.py` and `nus-probe.py`, plus `tapstat.py`'s
-> `M!`-vs-console classifier, all still assume the old line framing and
-> will not talk to current firmware. Porting them (reference
-> implementation: `lpa-link/src/providers/browser_ble/browser_ble.js` and
-> `ble_wire.rs`, already conformance-tested) is the **first step** of any
-> future rehearsal or soak session here — see that plan's P5 phase file,
-> "Silicon soak (pending the board)".
+> **This page's wire mode predates lp-link and does not talk to current
+> firmware.** Since wire proto 36 (PR #880,
+> `lp2025/2026-09-28-1445-ble-on-lp-link`) every GATT write and
+> notification is exactly one lp-link Datagram frame (4-byte header, the
+> JSON/packed payload, 4-byte CRC-32C), the board's link opens at the
+> subscribe and sends its hello after the handshake, and a Prepare Write on
+> RX is refused. `index.html`'s `wireWrite`/`onWireBytes` (join on newline,
+> write in raw 180-byte chunks), the `M!`-string builders in `lab.py`,
+> `m4-desk-check.py` and `nus-probe.py`, and `tapstat.py`'s classifier all
+> assume the old `M!` lines. The spike-image modes above (`echo`, `burst`,
+> `writes`, `idle`) are unaffected.
+>
+> Two tools speak the new link today:
+>
+> - **Studio itself** — the desk walk below. It is the product's own code
+>   (`lpa-link`'s `browser_ble.js` and `ble_link_port.rs`, pinned by
+>   `lpa-link/tests/browser_ble_conformance.rs`).
+> - **A frame pipe**: `spike/ota-ble`'s `pipe.html` (a page that only moves
+>   frames between Web Bluetooth and a WebSocket) with
+>   `lp-cli link capture blepipe:<port>` hosting the lp-link session in the
+>   terminal. It carried over-the-air updates to a C6 over this link on
+>   silicon during the OTA spike, and is being brought to product shape by
+>   the OTA plan (`lp2025/2026-10-04-0757-ota-update-protocol`, part C, P2).
+>   It is the tool for an unattended soak; the scripted battery below waits
+>   on it.
+
+The old wire mode's commands, kept for the record (they need the porting
+above before they work again):
 
 ```bash
 curl -s -X DELETE localhost:$P/serial                       # release the console
@@ -194,3 +206,49 @@ terminal. It can't run from an agent shell on macOS: TCC aborts a process
 whose responsible app doesn't declare `NSBluetoothAlwaysUsageDescription`
 (exit 134, no prompt). Run it from Terminal.app if you want the host-stack
 numbers.
+
+## The desk walk: Studio over Bluetooth on lp-link (PR #880's gate)
+
+What the walk answers: does Studio connect, edit and Play over Bluetooth on
+the new link, are the link counters sensible, and is there no drop beyond
+Bluefy's known phantom one. Nothing before this walk has proven the radio:
+host tests, the conformance suite and `?ble=emu` all stop short of it
+(`?ble=emu` rides the emulated board's USB link).
+
+1. **The emulated walk first, on this branch** (the rule is emulator first,
+   then hardware). With a Studio dev server running from the branch's
+   worktree (`just studio-dev`; its printed URL is the source of truth):
+
+   ```bash
+   just walk-ble-emu
+   ```
+
+   All steps should pass, including `drop` and `phantom`. Its idle numbers
+   are emulated: shape, not a silicon claim.
+2. **Put the branch's firmware on the board.** Open the same dev server's
+   Studio, connect the board over USB, and take **Update firmware** (the
+   image the dev server packaged from the branch: hello `proto 36`). Or from
+   a terminal: `just flash-fw-esp32c6 <port by MAC>`. A board on proto 36
+   no longer talks to lightplayer.app's Studio (proto 35, Bluetooth on `M!`
+   lines) until that deploy catches up, so flash the release image back
+   afterwards if the board must work with production.
+3. **Unplug USB and connect over Bluetooth**: Devices → add → Bluetooth →
+   `LP-…`. Log in if the board is locked (an open board needs nothing).
+   Expect the card to identify in a few seconds.
+4. **Edit**: open the project in the editor, change a slot and a shader
+   line, and push. **Play**: turn knobs, switch patterns. Then leave it in
+   Play, idle, for 15–20 minutes.
+5. **Read the link counters** in the device card's developer view:
+   `damaged` should stay at 0, `resets` at 0 apart from drops you caused,
+   `resends` low and explained (a busy radio). A drop shows the
+   "Reconnecting…" curtain and the page resumes on the new link without
+   leaving the editor or Play.
+6. **Phone (optional, closest to a user)**: the same from Bluefy on iOS,
+   over `tailscale serve --bg --https=8443 http://127.0.0.1:<studio port>`.
+   iOS negotiates ATT MTU 185, so frames carry 174 B of payload instead of
+   180: the board's log line at each connect (`ATT MTU …, frames … B + 8`) says
+   which.
+
+The board's console (USB, if left plugged into a second cable, or
+`scripts/emu/tty-capture.py`) logs one line per Bluetooth link: the ATT MTU,
+the frame size, the link's RAM and the heap at open.
