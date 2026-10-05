@@ -17,7 +17,10 @@
 //! it waits for.
 
 /// One wait step: call between two polls of `is_complete`.
-#[cfg_attr(fw_harness, allow(dead_code, reason = "harnesses do not use the app LED path"))]
+#[cfg_attr(
+    fw_harness,
+    allow(dead_code, reason = "harnesses do not use the app LED path")
+)]
 #[inline(always)]
 pub fn ws281x_wait_step() {
     #[cfg(not(feature = "spike_l0_wfi_wait"))]

@@ -10,8 +10,8 @@
 
 use std::path::PathBuf;
 
-use lp_emu_esp32c6::machine::{AppSource, Esp32C6Builder, StopCondition};
 use lp_emu_esp_common::seam::SeamRequest;
+use lp_emu_esp32c6::machine::{AppSource, Esp32C6Builder, StopCondition};
 
 #[test]
 #[ignore = "needs LP_M0_L1_ELF (the spike's shipped image)"]
@@ -37,7 +37,10 @@ fn a_refill_that_erases_the_patch_re_arms_it() {
     m.run_until(&StopCondition::after_micros(2_000));
 
     let s = m.seams();
-    assert_eq!(s.rearms, 1, "the refill erased the patch and it was planted again");
+    assert_eq!(
+        s.rearms, 1,
+        "the refill erased the patch and it was planted again"
+    );
     assert_eq!(s.arms_planted, 2);
     assert!(s.arms[0].armed);
     println!(
