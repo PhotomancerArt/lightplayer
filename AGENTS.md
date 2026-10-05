@@ -665,10 +665,14 @@ does not model. The full reasoning, in Yona's words, is
   starts the BLE controller and advertises, but no central ever answers, so
   nothing connects. A BLE claim comes from host tests (the access gate:
   `lpa-server/tests/access_gate.rs`), `?ble=emu` for Studio's transport and
-  UI (below), plus a desk walk through `spikes/ble-lab`. Its wire mode speaks the product's own link, and an agent
-  can drive it with no human using the Mac's Chrome as the central over CDP.
-  Its README is the runbook. A desk number names the board, the distance and
-  the central: Mac Chrome is not Bluefy on an iPhone.
+  UI (below), plus a desk walk. Since wire proto 36 the walk is Studio
+  itself over Bluetooth, and `spikes/ble-lab`'s README is its runbook; that
+  page's own `M!` wire mode predates lp-link and no longer talks to a board
+  (the README says what does). An agent can answer a Web Bluetooth chooser
+  with no human, using the Mac's Chrome as the central over CDP
+  (`spikes/ble-lab/scripts/cdp-central.mjs`). A desk number names the
+  board, the distance and the central: Mac Chrome is not Bluefy on an
+  iPhone.
 - **When you do a hardware walk, do the emulator walk first**, and what
   hardware checks is **parity**. If hardware disagrees with the emulator, fix
   the *emulator* first — file a fidelity defect under `docs/defects/` (e.g.
