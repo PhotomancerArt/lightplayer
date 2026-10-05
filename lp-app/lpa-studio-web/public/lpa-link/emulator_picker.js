@@ -405,14 +405,17 @@ function boardRow(bus, board, refresh) {
 
   const name = document.createElement("span");
   name.textContent = board.boardId;
-  style(name, { fontWeight: "600" });
+  style(name, { fontWeight: "600", whiteSpace: "nowrap" });
 
   // A detached board says so where a plugged-in one says whether an
   // application holds it open: with the cable out there is no port to be open.
   const state = board.attached === false ? "detached" : board.open ? "open" : "closed";
   const detail = document.createElement("span");
   detail.textContent = [board.mac, state].filter(Boolean).join("  ·  ");
-  style(detail, { color: board.attached === false ? PALETTE.warn : PALETTE.dim });
+  style(detail, {
+    minWidth: "0",
+    color: board.attached === false ? PALETTE.warn : PALETTE.dim,
+  });
 
   const cable = document.createElement("button");
   cable.type = "button";
@@ -466,6 +469,8 @@ function boardRow(bus, board, refresh) {
       display: "inline-flex",
       alignItems: "center",
       gap: "6px",
+      flexShrink: "0",
+      whiteSpace: "nowrap",
       marginLeft: "auto",
       padding: "2px 4px",
       border: "none",
