@@ -1735,7 +1735,10 @@ mod tests {
     fn a_saved_huge_id_loads_unchanged_and_the_next_mint_stays_small() {
         const SAVED: u64 = u64::MAX / 2 + 1;
         let mut roster = Roster::new(RosterConfig::default());
-        roster.load_records(vec![DeviceRecord::new(DeviceId(SAVED), mac_chain(DESK_MAC))]);
+        roster.load_records(vec![DeviceRecord::new(
+            DeviceId(SAVED),
+            mac_chain(DESK_MAC),
+        )]);
 
         assert_eq!(
             roster.devices()[0].id,
