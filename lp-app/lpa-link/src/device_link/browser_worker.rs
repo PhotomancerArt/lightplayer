@@ -289,6 +289,9 @@ impl WorkerLinkInner {
                     "a sim has no console to type at; dropped {line:?}"
                 ))),
             },
+            // A sim runs no update protocol, so it has no channel 3, and its
+            // `LinkInfo` says so: the model never asks. Dropped.
+            LinkCommand::SendUpdate(_) => {}
         }
     }
 

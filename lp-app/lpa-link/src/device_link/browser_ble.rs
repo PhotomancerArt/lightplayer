@@ -44,6 +44,7 @@ pub fn ble_link_info(device: &BleDevice) -> LinkInfo {
         endpoint: EndpointKey(format!("{BLE_ENDPOINT_PREFIX}{}", device.device_id)),
         usb: None,
         serial_number: None,
+        carries_update_channel: false,
     }
 }
 
@@ -137,6 +138,9 @@ impl BleLinkInner {
                 Err(error) => self.push(LinkEvent::Error(error)),
             },
             LinkCommand::SendLine(line) => self.write(format!("{line}\n").as_bytes()),
+            // Bluetooth is still `M!` lines with no channel 3 (M7 P12 adds
+            // it), and its `LinkInfo` says so: the model never asks. Dropped.
+            LinkCommand::SendUpdate(_) => {}
         }
     }
 

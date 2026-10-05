@@ -172,6 +172,9 @@ impl Link for EmulatorTabLink {
                     "not a request, and the link carries no raw text to the board: {line:?}"
                 ))),
             },
+            // This transport has no channel 3 yet (M7 P7 adds it), and its
+            // `LinkInfo` says so: the model never asks. Dropped.
+            LinkCommand::SendUpdate(_) => {}
         }
     }
 

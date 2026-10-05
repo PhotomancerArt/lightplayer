@@ -57,6 +57,11 @@ pub fn device_firmware_line(face: &FirmwareFace, board: Option<&str>) -> String 
             }
             line
         }
+        // P4: the core-only face's real words.
+        FirmwareFace::CoreOnly { version, .. } => match version {
+            Some(version) => format!("LightPlayer {version} — firmware update needed"),
+            None => "LightPlayer — firmware update needed".to_string(),
+        },
         FirmwareFace::NoHello => "Pre-hello firmware — needs firmware".to_string(),
         FirmwareFace::OlderLightPlayer { .. } => {
             "Older LightPlayer firmware — flash to update; the project stays".to_string()
@@ -89,6 +94,8 @@ pub fn pending_firmware_line(face: &FirmwareFace) -> String {
 pub fn firmware_face_preview_sentence(face: &FirmwareFace) -> Option<String> {
     let sentence = match face {
         FirmwareFace::Unknown | FirmwareFace::LightPlayer { .. } => return None,
+        // P4: the core-only face's real words.
+        FirmwareFace::CoreOnly { .. } => "No picture — the board is waiting for a firmware update.",
         FirmwareFace::NoHello => "No picture — this firmware is too old to say what it runs.",
         FirmwareFace::OlderLightPlayer { .. } => {
             "No picture — this LightPlayer firmware is too old for this Studio."

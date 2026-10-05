@@ -15,8 +15,9 @@
 //! random search for a space this shape.
 
 use lpa_devices::replay::{Replay, Step};
+use lpa_devices::view::FIRMWARE_NEEDS_USB;
 use lpa_devices::view::{DeviceView, PendingLinkView, RosterView};
-use lpa_devices::{ActivityKind, Escape, Millis, RosterConfig};
+use lpa_devices::{ActivityKind, Escape, Millis, RosterConfig, UpdateBoardState};
 
 #[test]
 fn the_projection_is_total_and_always_escapable() {
@@ -69,6 +70,10 @@ fn the_projection_is_total_and_always_escapable() {
 /// 2. a hello in the window puts its firmware label on the face;
 /// 3. a project report on an open port reaches the loaded-project face.
 ///
+/// Plus the update contract's two: a board that announced channel 3 is
+/// never offered a Flash, and the update is blocked exactly when the link
+/// does not carry the channel.
+///
 /// Facts are stated when reported; verdicts gate verbs, never facts.
 #[test]
 fn the_view_says_no_less_than_the_fold_knows() {
@@ -100,6 +105,9 @@ fn the_view_says_no_less_than_the_fold_knows() {
                         }
                         Classification::LightPlayer { .. } => {
                             matches!(card.firmware_face, FirmwareFace::LightPlayer { .. })
+                        }
+                        Classification::CoreOnly { .. } => {
+                            matches!(card.firmware_face, FirmwareFace::CoreOnly { .. })
                         }
                         Classification::Incompatible { .. } => {
                             matches!(card.firmware_face, FirmwareFace::NoHello)
@@ -141,6 +149,23 @@ fn the_view_says_no_less_than_the_fold_knows() {
                             "[{case}] the board reported what it runs and the card says nothing"
                         );
                     }
+
+                    // 4. a board that spoke channel 3 is a LightPlayer:
+                    // never a Flash face, never "no hello", never silent
+                    if evidence.announced_update_channel() {
+                        assert!(
+                            !card.firmware_face.wants_flash(),
+                            "[{case}] a Flash offered over a board that announced channel 3: {:?}",
+                            card.firmware_face
+                        );
+                    }
+
+                    // 5. the update is blocked iff the link lacks channel 3
+                    assert_eq!(
+                        card.update_blocked.is_none(),
+                        evidence.carries_update_channel(),
+                        "[{case}] update_blocked disagrees with the link"
+                    );
                     checked += 1;
                 }
             }
@@ -272,6 +297,12 @@ fn assert_device(device: &DeviceView, case: &str) {
         assert!(
             !outcome.summary.is_empty(),
             "[{case}] an outcome banner with no text"
+        );
+    }
+    if let Some(reason) = &device.update_blocked {
+        assert_eq!(
+            reason, FIRMWARE_NEEDS_USB,
+            "[{case}] an update blocked for a reason the card has no words for"
         );
     }
     if let Some(freshness) = &device.freshness_label {
@@ -441,6 +472,81 @@ fn link_lifecycles() -> Vec<(&'static str, Vec<Step>)> {
                     link: 1,
                     message: "read failed".to_string(),
                 },
+            ],
+        ),
+        (
+            "core-only, waiting for its engine",
+            vec![
+                Step::attach_with_update_channel(1, "usb-1"),
+                Step::opened(1),
+                Step::update_facts(1, UpdateBoardState::NeedsEngine),
+            ],
+        ),
+        (
+            "core-only, engine crashing, on a link without channel 3",
+            vec![
+                Step::attach(1, "usb-1"),
+                Step::opened(1),
+                Step::update_facts(1, UpdateBoardState::EngineCrashing),
+            ],
+        ),
+        (
+            "core-only, update bytes flowing",
+            vec![
+                Step::attach_with_update_channel(1, "usb-1"),
+                Step::opened(1),
+                Step::update_facts(1, UpdateBoardState::Updating),
+                Step::Update {
+                    link: 1,
+                    bytes: b"P".to_vec(),
+                },
+            ],
+        ),
+        (
+            "core-only on trial, then its hello",
+            vec![
+                Step::attach_with_update_channel(1, "usb-1"),
+                Step::opened(1),
+                Step::update_facts(1, UpdateBoardState::OnTrial),
+                Step::hello(1)
+                    .uid("dev_abc")
+                    .with_update(UpdateBoardState::Running),
+            ],
+        ),
+        (
+            "running board, manifest on channel 3 but no hello",
+            vec![
+                Step::attach_with_update_channel(1, "usb-1"),
+                Step::opened(1),
+                Step::update_facts(1, UpdateBoardState::Running),
+            ],
+        ),
+        (
+            "hello announcing channel 3",
+            vec![
+                Step::attach_with_update_channel(1, "usb-1"),
+                Step::opened(1),
+                Step::hello(1)
+                    .uid("dev_abc")
+                    .with_update(UpdateBoardState::Running),
+            ],
+        ),
+        (
+            "core-only, then reset",
+            vec![
+                Step::attach_with_update_channel(1, "usb-1"),
+                Step::opened(1),
+                Step::update_facts(1, UpdateBoardState::NeedsEngine),
+                Step::ResetOutcome { link: 1, ok: true },
+            ],
+        ),
+        (
+            "core-only, then unplugged",
+            vec![
+                Step::attach_with_update_channel(1, "usb-1"),
+                Step::opened(1),
+                Step::update_facts(1, UpdateBoardState::NeedsEngine),
+                Step::detach(1),
             ],
         ),
         (

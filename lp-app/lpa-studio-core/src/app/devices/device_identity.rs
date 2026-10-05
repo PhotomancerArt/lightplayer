@@ -339,6 +339,7 @@ mod tests {
             terminal_dropped: 0,
             firmware_blocked: None,
             escapes: vec![Escape::Forget],
+            update_blocked: None,
         }
     }
 

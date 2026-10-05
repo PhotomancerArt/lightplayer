@@ -31,6 +31,7 @@ use crate::journal::JournalNote;
 use crate::link::{LinkEvent, LinkId};
 use crate::roster::RosterConfig;
 use crate::time::Millis;
+use crate::update_facts::{UpdateBoardState, UpdateFacts};
 use crate::wire::{
     HelloFacts, LoadedProjectFacts, ProjectFaultFacts, RecoveryFacts, RecoveryLevelFacts,
     ServerFrameBody,
@@ -167,6 +168,13 @@ pub struct Evidence {
     /// the reconnect ladder that made it matter.
     #[serde(default)]
     terminal_dropped: u32,
+    /// The current link carries lp-link's update channel (channel 3), as its
+    /// [`LinkInfo`](crate::LinkInfo) said at attach and open. A fact about
+    /// the LINK, not the board, so it lives outside [`Observations`]: a
+    /// board's reset restarts the window but not the transport. Cleared on
+    /// detach.
+    #[serde(default)]
+    link_carries_update_channel: bool,
     observations: Observations,
 }
 
@@ -192,6 +200,7 @@ impl Evidence {
                     link: *link,
                     since: now,
                 };
+                self.link_carries_update_channel = info.carries_update_channel;
                 self.begin_window(now);
                 // A borrow belongs to the link it was taken on. This is a
                 // different link, so nothing is holding it.
@@ -202,6 +211,7 @@ impl Evidence {
             }
             Event::LinkDetached { .. } => {
                 self.presence = Presence::Detached { since: now };
+                self.link_carries_update_channel = false;
                 self.begin_window(now);
                 // Unplugged mid-effect: the release event the effect will
                 // eventually raise addresses a link this device no longer
@@ -367,6 +377,37 @@ impl Evidence {
         self.observations.link_counters
     }
 
+    /// The board's latest update facts this window: channel 3's own `M`
+    /// when one was heard (authoritative), else the hello's manifest.
+    /// `None` = the board has said nothing about its firmware's update
+    /// state in this window. What the effects layer reads to decide an
+    /// update, and what the core-only face is made of.
+    pub fn update_facts(&self) -> Option<&UpdateFacts> {
+        self.observations.update_facts.as_ref().or_else(|| {
+            self.observations
+                .hello
+                .as_ref()
+                .and_then(|hello| hello.update.as_ref())
+        })
+    }
+
+    /// Whether the board announced channel 3 in this window: a hello that
+    /// carried its manifest, or an `M` it sent. The effects layer asks this
+    /// before it sends anything on channel 3 — a board without the channel
+    /// would never acknowledge a reliable frame there and the link would
+    /// stall.
+    pub fn announced_update_channel(&self) -> bool {
+        self.update_facts().is_some()
+    }
+
+    /// Whether the current link carries lp-link's update channel at all —
+    /// the transport's fact, from its [`LinkInfo`](crate::LinkInfo). An
+    /// over-the-air update needs both this and
+    /// [`Self::announced_update_channel`].
+    pub fn carries_update_channel(&self) -> bool {
+        self.link_carries_update_channel && self.presence.is_attached()
+    }
+
     pub fn recovery(&self) -> Option<&RecoveryFacts> {
         self.observations.recovery.as_ref()
     }
@@ -474,6 +515,7 @@ impl Evidence {
         match event {
             LinkEvent::Opened { info } => {
                 self.presence = Presence::Open { link, since: now };
+                self.link_carries_update_channel = info.carries_update_channel;
                 // A fresh port is a fresh window: whatever we concluded
                 // about the previous generation is no longer evidence.
                 self.begin_window(now);
@@ -554,6 +596,20 @@ impl Evidence {
             // The transport narrating the link's encoding: journaled (that
             // is the point of it), and not evidence of anything.
             LinkEvent::WireNote(_) => {}
+            // Update traffic is routed, not folded: the effects layer hands
+            // it to the device's update driver. What the model needs of it
+            // arrives decoded, as `UpdateFacts` below.
+            LinkEvent::Update(_) => {}
+            // The board's own word about its firmware (channel 3's `M`):
+            // the core-only verdict is made of it, and it is the board
+            // speaking, so it counts as heard.
+            LinkEvent::UpdateFacts(facts) => {
+                self.observations.update_facts = Some(facts.clone());
+                self.push_output(TerminalKind::Wire, update_summary(facts));
+                if let Some(note) = self.freshness.heard(now, false) {
+                    notes.push(note);
+                }
+            }
         }
         notes
     }
@@ -685,6 +741,15 @@ pub enum Classification {
     LightPlayer { hello: HelloFacts },
     /// An `M!`-speaking peer that is not a compatible LightPlayer server.
     Incompatible { reason: IncompatibleReason },
+    /// A LightPlayer running only its core: it spoke channel 3 (its board
+    /// manifest) and no hello — waiting for its engine, engine crashing, a
+    /// new core on trial. A LightPlayer, not a blank chip: its way forward
+    /// is its engine back over the air, never a Flash. `version` is the
+    /// manifest's, the one name such a board gives.
+    CoreOnly {
+        version: Option<String>,
+        state: UpdateBoardState,
+    },
     /// LightPlayer firmware too old to speak this Studio's link: it prints
     /// its messages as `M!{json}` text lines, or its boot marker names a wire
     /// proto older than Studio's, and no hello ever arrives. `proto` is the
@@ -913,6 +978,10 @@ struct Observations {
     /// them. Window-scoped; read by the card's link section.
     #[serde(default)]
     link_counters: Option<crate::LinkCounterFacts>,
+    /// The board's update facts off the latest channel-3 `M` this window —
+    /// authoritative over the hello's copy (see [`Evidence::update_facts`]).
+    #[serde(default)]
+    update_facts: Option<UpdateFacts>,
     /// The wire-version notice has been journaled for this window.
     #[serde(default)]
     wire_mismatch_noted: bool,
@@ -1068,6 +1137,21 @@ impl Observations {
                 }
             };
         }
+        // A board that spoke channel 3 and no hello is a LightPlayer core
+        // (waiting for its engine, on trial, engine crashing) — never a
+        // blank chip, never "no hello". Its own word outranks boot banter,
+        // as a hello does. A RUNNING board's facts are not the verdict
+        // while its hello may still come; once identification has settled
+        // without one, the board that spoke the update protocol is still
+        // nothing a Flash should be offered over.
+        if let Some(facts) = &self.update_facts
+            && (facts.is_core_only() || settled)
+        {
+            return Classification::CoreOnly {
+                version: facts.version.clone(),
+                state: facts.state,
+            };
+        }
         if self.rom_download > 0 {
             return Classification::Bootloader;
         }
@@ -1213,6 +1297,23 @@ fn wire_summary(body: &ServerFrameBody) -> String {
 /// mirror crate carries no such facts on [`LoadedProjectFacts`] or
 /// [`RecoveryFacts`] today (see `wire.rs`'s module doc on why the mirror
 /// stays small), so the summary states only what the model actually knows.
+/// One terminal line for a board manifest heard on channel 3. Carries no
+/// byte counts, so a board re-reporting the same state collapses.
+fn update_summary(facts: &UpdateFacts) -> String {
+    let mut line = format!(
+        "update · {:?} · {}",
+        facts.state,
+        facts.version.as_deref().unwrap_or("?")
+    );
+    if let Some(transfer) = &facts.transfer {
+        line.push_str(&format!(" · {:?} transfer", transfer.kind));
+        if transfer.busy {
+            line.push_str(" (another link)");
+        }
+    }
+    line
+}
+
 fn heartbeat_summary(
     loaded: &Option<Vec<LoadedProjectFacts>>,
     recovery: &Option<RecoveryFacts>,
@@ -2069,6 +2170,206 @@ mod tests {
         );
     }
 
+    /// A board running only its core sends no hello — only its manifest on
+    /// channel 3. That is a LightPlayer waiting for its engine, at once and
+    /// still after identification settles: never "no hello", never silent.
+    #[test]
+    fn a_core_only_manifest_with_no_hello_is_core_only_even_when_settled() {
+        let mut evidence = Evidence::default();
+        let mut identity = IdentityChain::default();
+
+        fold(&mut evidence, &mut identity, Millis(0), opened());
+        fold(
+            &mut evidence,
+            &mut identity,
+            Millis(10),
+            update(update_facts(UpdateBoardState::NeedsEngine, "2026.10.05-1")),
+        );
+
+        let core_only = Classification::CoreOnly {
+            version: Some("2026.10.05-1".to_string()),
+            state: UpdateBoardState::NeedsEngine,
+        };
+        assert_eq!(evidence.classification, core_only);
+        assert_eq!(evidence.verdict_if_settled(Millis(5_000)), core_only);
+        assert!(evidence.announced_update_channel());
+        assert!(!evidence.has_hello());
+        assert_eq!(
+            evidence.freshness.state,
+            Liveness::Live,
+            "the board speaking channel 3 is the board speaking"
+        );
+    }
+
+    /// A running board's hello keeps the LightPlayer verdict, whatever its
+    /// manifest says, and the manifest is still its update facts.
+    #[test]
+    fn a_hello_carrying_a_manifest_keeps_the_light_player_verdict() {
+        let config = RosterConfig::default();
+        let mut evidence = Evidence::default();
+        let mut identity = IdentityChain::default();
+
+        fold(&mut evidence, &mut identity, Millis(0), opened());
+        fold(
+            &mut evidence,
+            &mut identity,
+            Millis(10),
+            frame(ServerFrame::hello(
+                1,
+                HelloFacts {
+                    proto: config.expected_proto,
+                    update: Some(update_facts(UpdateBoardState::Running, "2026.10.05-1")),
+                    ..Default::default()
+                },
+            )),
+        );
+
+        assert!(evidence.classification.is_light_player());
+        assert!(evidence.announced_update_channel());
+        assert_eq!(
+            evidence.update_facts().map(|facts| facts.state),
+            Some(UpdateBoardState::Running)
+        );
+    }
+
+    /// DM9: channel 3 is authoritative. When both the hello's copy and an
+    /// `M` were heard, the `M` is the board's update facts — whichever came
+    /// first.
+    #[test]
+    fn channel_three_wins_over_the_hellos_manifest() {
+        let config = RosterConfig::default();
+        let mut evidence = Evidence::default();
+        let mut identity = IdentityChain::default();
+
+        fold(&mut evidence, &mut identity, Millis(0), opened());
+        fold(
+            &mut evidence,
+            &mut identity,
+            Millis(10),
+            update(update_facts(UpdateBoardState::Updating, "2026.10.05-2")),
+        );
+        fold(
+            &mut evidence,
+            &mut identity,
+            Millis(20),
+            frame(ServerFrame::hello(
+                1,
+                HelloFacts {
+                    proto: config.expected_proto,
+                    update: Some(update_facts(UpdateBoardState::Running, "2026.10.05-1")),
+                    ..Default::default()
+                },
+            )),
+        );
+
+        let facts = evidence.update_facts().expect("facts heard");
+        assert_eq!(facts.state, UpdateBoardState::Updating);
+        assert_eq!(facts.version.as_deref(), Some("2026.10.05-2"));
+        assert!(
+            evidence.classification.is_light_player(),
+            "the hello still decides the verdict"
+        );
+    }
+
+    /// The update facts are this window's, like every other observation: a
+    /// board that reset is a machine we have not heard from yet.
+    #[test]
+    fn a_window_reset_clears_the_update_facts() {
+        let mut evidence = Evidence::default();
+        let mut identity = IdentityChain::default();
+
+        fold(&mut evidence, &mut identity, Millis(0), opened());
+        fold(
+            &mut evidence,
+            &mut identity,
+            Millis(10),
+            update(update_facts(UpdateBoardState::NeedsEngine, "2026.10.05-1")),
+        );
+        assert!(evidence.announced_update_channel());
+
+        fold(
+            &mut evidence,
+            &mut identity,
+            Millis(20),
+            Event::Link {
+                link: LinkId(1),
+                event: LinkEvent::ResetOutcome {
+                    kind: crate::link::ResetKind::Normal,
+                    ok: true,
+                },
+            },
+        );
+
+        assert!(evidence.update_facts().is_none());
+        assert!(!evidence.announced_update_channel());
+        assert_eq!(evidence.classification, Classification::Unknown);
+    }
+
+    /// Update bytes are the update driver's: the fold moves nothing for
+    /// them — no verdict, no freshness, no terminal line.
+    #[test]
+    fn update_bytes_leave_evidence_untouched() {
+        let mut evidence = Evidence::default();
+        let mut identity = IdentityChain::default();
+        fold(&mut evidence, &mut identity, Millis(0), opened());
+        let before = evidence.clone();
+
+        fold(
+            &mut evidence,
+            &mut identity,
+            Millis(10),
+            Event::Link {
+                link: LinkId(1),
+                event: LinkEvent::Update(b"Q".to_vec()),
+            },
+        );
+
+        assert_eq!(evidence, before);
+    }
+
+    /// Whether the link carries channel 3 is the transport's word, kept
+    /// across a board reset and forgotten on detach.
+    #[test]
+    fn the_update_channel_is_the_links_fact() {
+        let mut evidence = Evidence::default();
+        let mut identity = IdentityChain::default();
+        fold(
+            &mut evidence,
+            &mut identity,
+            Millis(0),
+            Event::LinkAttached {
+                link: LinkId(1),
+                info: LinkInfo {
+                    carries_update_channel: true,
+                    ..LinkInfo::default()
+                },
+            },
+        );
+        assert!(evidence.carries_update_channel());
+
+        fold(
+            &mut evidence,
+            &mut identity,
+            Millis(10),
+            Event::Link {
+                link: LinkId(1),
+                event: LinkEvent::ResetOutcome {
+                    kind: crate::link::ResetKind::Normal,
+                    ok: true,
+                },
+            },
+        );
+        assert!(evidence.carries_update_channel(), "a reset keeps the link");
+
+        fold(
+            &mut evidence,
+            &mut identity,
+            Millis(20),
+            Event::LinkDetached { link: LinkId(1) },
+        );
+        assert!(!evidence.carries_update_channel());
+    }
+
     /// Studio's own roster config: this build's wire proto (34, the hello's
     /// `fs` boot state), not the model's placeholder default.
     fn studio_config() -> RosterConfig {
@@ -2107,6 +2408,22 @@ mod tests {
         Event::Link {
             link: LinkId(1),
             event: LinkEvent::Line(text.to_string()),
+        }
+    }
+
+    fn update(facts: UpdateFacts) -> Event {
+        Event::Link {
+            link: LinkId(1),
+            event: LinkEvent::UpdateFacts(facts),
+        }
+    }
+
+    fn update_facts(state: UpdateBoardState, version: &str) -> UpdateFacts {
+        UpdateFacts {
+            state,
+            version: Some(version.to_string()),
+            manifest_json: "{}".to_string(),
+            ..UpdateFacts::default()
         }
     }
 

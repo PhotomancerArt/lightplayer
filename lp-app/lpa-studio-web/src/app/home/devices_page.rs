@@ -1107,6 +1107,7 @@ mod tests {
             terminal_dropped: 0,
             firmware_blocked: None,
             escapes: vec![DeviceEscape::Forget],
+            update_blocked: None,
         }
     }
 
@@ -1118,6 +1119,7 @@ mod tests {
                 endpoint: lpa_studio_core::DeviceEndpointKey("usb-1".to_string()),
                 usb: None,
                 serial_number: None,
+                carries_update_channel: false,
             },
         }
     }

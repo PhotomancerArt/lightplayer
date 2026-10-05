@@ -650,6 +650,7 @@ mod tests {
             terminal_dropped: 0,
             firmware_blocked: None,
             escapes: vec![Escape::Disconnect, Escape::Forget],
+            update_blocked: None,
         }
     }
 }

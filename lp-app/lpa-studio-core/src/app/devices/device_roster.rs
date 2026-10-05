@@ -543,6 +543,7 @@ mod tests {
             endpoint: EndpointKey(endpoint.to_string()),
             usb: None,
             serial_number: None,
+            carries_update_channel: false,
         }
     }
 
@@ -793,6 +794,7 @@ mod tests {
             terminal_dropped: 0,
             firmware_blocked: None,
             escapes: vec![Escape::Reconnect, Escape::Forget],
+            update_blocked: None,
         }
     }
 
@@ -821,6 +823,7 @@ mod tests {
             terminal_dropped: 0,
             firmware_blocked: None,
             escapes: vec![Escape::Disconnect, Escape::Forget],
+            update_blocked: None,
         }
     }
 

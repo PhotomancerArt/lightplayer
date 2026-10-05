@@ -1038,7 +1038,10 @@ impl Device {
                     false => DeviceStatus::Ready,
                 }
             }
-            Classification::Incompatible { .. }
+            // A core-only board asks for its engine: actionable as stored,
+            // like the needs-firmware family, though its verb is an update.
+            Classification::CoreOnly { .. }
+            | Classification::Incompatible { .. }
             | Classification::Blank
             | Classification::Bootloader
             | Classification::OlderLightPlayer { .. }

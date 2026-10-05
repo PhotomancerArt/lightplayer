@@ -1221,6 +1221,7 @@ fn roster_fixture() -> DeviceRosterView {
                     terminal_dropped: 0,
                     firmware_blocked: None,
                     escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
+                    update_blocked: None,
                 },
                 DeviceView {
                     id: DeviceId(2),
@@ -1274,6 +1275,7 @@ fn roster_fixture() -> DeviceRosterView {
                         DeviceEscape::Disconnect,
                         DeviceEscape::Forget,
                     ],
+                    update_blocked: None,
                 },
                 DeviceView {
                     id: DeviceId(3),
@@ -1319,6 +1321,7 @@ fn roster_fixture() -> DeviceRosterView {
                     terminal_dropped: 0,
                     firmware_blocked: None,
                     escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
+                    update_blocked: None,
                 },
                 // The EMPTY face (M3): a LightPlayer that has SAID it has
                 // nothing on it, wearing the one inline picker.
@@ -1380,6 +1383,7 @@ fn roster_fixture() -> DeviceRosterView {
                     terminal_dropped: 0,
                     firmware_blocked: None,
                     escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
+                    update_blocked: None,
                 },
                 // The remembered board (D7): known, named, and not on the
                 // bus — the roster still projects it, and the page splits
@@ -1414,6 +1418,7 @@ fn roster_fixture() -> DeviceRosterView {
                     // The two verbs an absent board can honestly offer.
                     firmware_blocked: None,
                     escapes: vec![DeviceEscape::Reconnect, DeviceEscape::Forget],
+                    update_blocked: None,
                 },
             ],
         },
@@ -1647,6 +1652,7 @@ fn firmware_face_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
         terminal_dropped: 0,
         firmware_blocked: None,
         escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
+        update_blocked: None,
     };
     let pre_hello = DeviceView {
         terminal: vec![
@@ -1759,6 +1765,7 @@ fn firmware_face_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
         // the terminal and the verb rows drawn at their fixed heights.
         firmware_blocked: None,
         escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
+        update_blocked: None,
     };
 
     vec![

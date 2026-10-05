@@ -900,6 +900,7 @@ mod tests {
             terminal_dropped: 0,
             firmware_blocked: None,
             escapes: Vec::new(),
+            update_blocked: None,
         }
     }
 

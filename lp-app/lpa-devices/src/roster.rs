@@ -1751,6 +1751,7 @@ mod tests {
             endpoint: EndpointKey(endpoint.to_string()),
             usb: None,
             serial_number: None,
+            carries_update_channel: false,
         }
     }
 }

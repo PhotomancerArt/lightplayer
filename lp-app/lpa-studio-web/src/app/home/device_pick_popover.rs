@@ -1553,6 +1553,7 @@ mod tests {
             terminal_dropped: 0,
             firmware_blocked: None,
             escapes: vec![DeviceEscape::Forget],
+            update_blocked: None,
         }
     }
 }

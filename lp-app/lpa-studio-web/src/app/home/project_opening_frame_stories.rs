@@ -236,6 +236,7 @@ fn story_board(state: &OpeningState) -> lpa_studio_core::DeviceView {
         terminal_dropped: 0,
         firmware_blocked: None,
         escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
+        update_blocked: None,
     };
     match state {
         OpeningState::WaitingForDevice(DeviceWait {
