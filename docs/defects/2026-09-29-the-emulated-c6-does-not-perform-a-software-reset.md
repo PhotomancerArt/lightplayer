@@ -1,6 +1,7 @@
 ---
-status: open
+status: fixed
 found: 2026-09-29      # how: live-debugging, the emulator-driven hardware walk's `--request reboot`
+fixed: OTA update protocol Part A, P1 (2026-10-04)
 area: lp-emu/esp/lp-emu-esp32c6 periph/accept.rs (LP_AON stored, not acted on)
 class: fidelity
 related:
@@ -42,18 +43,43 @@ Every software reset the firmware performs is affected: the `Reboot`
 request, `PowerButton`'s soft power-off path (`hardware/power.rs`), the
 recovery backend and the panic path.
 
-**Fix** — none yet. The shape: `LP_AON`'s `sys_cfg` write with bit 31 set
-raises the same reset request the LP_WDT's `ResetSystem` stage does, with
-the cause silicon reports for it (`rst:0x3`, `RTC_SW_SYS_RESET`, if the
-ROM's reset-reason table agrees), so `--reboot-on-reset` reboots at once
-and a run without it ends with `Outcome::Reset` as it does for the
-watchdog.
+**Fix** — `LP_AON` is no longer a bare accept block:
+`lp-emu/esp/lp-emu-esp32c6/src/periph/lp_aon.rs` wraps the same `RegFile`
+and performs the one bit in it that is not a memory. A store with
+`sys_cfg.hpsys_sw_reset` (bit 31 of `+0x034`) set raises
+`MachineRequest::Reset` with a new `ResetSource::Software`
+(`lp-emu-esp-common`), and ends the slice (`yield_to_machine`), so the guest
+runs no instruction after the store. The C6 maps it to
+`ResetCause::LpSwHpSys`, `rst:0x3 (LP_SW_HPSYS)`. Evidence for the code, two
+sources that agree: the vendored mask ROM's reset-reason name table (index 3
+is `LP_SW_HPSYS`, the table already transcribed in `loader.rs`), and esp-hal
+1.1.1's `SocResetReason::CoreSw = 0x03` for this chip, which the firmware's
+`reset_cause_map` reads as `SoftwareReset`. The ESP32-C6 TRM's reset-source
+table was not at hand; it is not cited. With `--reboot-on-reset` the machine
+reboots at once (HP domain restored, LP domain kept, the watchdog's path);
+without it the run ends with `Outcome::Reset`. The bit is stored cleared — a
+strobe — because `LP_AON` is LP-domain and survives the reset, and a kept bit
+would be written back by the next read-modify-write of `sys_cfg`.
 
-**Regression coverage** — none yet. When fixed,
-`lp-cli/tests/link_capture.rs`'s
+Before / after, `lp-cli link capture --request reboot --request hello`
+against `emu run --reboot-on-reset` (the shipped image): before, the restart
+came ~8 s of emulated time later as `rst:0x10 (LP_WDT_SYS)` and the run could
+not use `--strict-bus`; after, under `--strict-bus`, the capture reads `up (session 0) at 0.035 s`,
+`reset (PeerRestarted) at 0.110 s` and `up (session 1) at 0.113 s` (host
+wall-clock of the capture, not emulated time).
+
+`.rtc_fast.persistent` across the reset is unchanged: it is the same reboot
+path as the watchdog's, and
+`2026-09-22-emulated-reset-restores-rtc-fast-persistent.md` stays open.
+
+**Regression coverage** — `tests/rom_reset_reason.rs`
+(`a_software_reset_reboots_at_once_and_the_rom_reads_lp_sw_hpsys`,
+`without_reboot_on_reset_a_software_reset_ends_the_run_as_a_reset`: the
+ROM's own `software_reset` run on the machine, and the ROM's
+`rtc_get_reset_reason` reading `3` after it), `periph/lp_aon.rs`'s unit tests
+(the request, the strobe), and `lp-cli/tests/link_capture.rs`'s
 `a_reboot_request_restarts_the_board_and_the_next_request_goes_to_the_new_session`
-can take `--strict-bus` back (it runs without it because of this), and a
-test beside the RWDT's should assert the reset cause the firmware reads.
+back under `--strict-bus`.
 
 **Lesson** — an accept block is a claim that writes there have no effect
 worth modelling, and a reset bit is the opposite of that. A `-> !` function

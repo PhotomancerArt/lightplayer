@@ -1,0 +1,782 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Device card: firmware versions and update states · spike</title>
+<style>
+/* =====================================================================
+   Over-the-air updates on the device card — a LIGHT spike.
+
+   The card's structure is left alone on purpose (a device-pane rework is
+   coming later): four zones, fixed rows, the firmware zone owns firmware
+   (device_roster_card.rs). What this explores is only how the firmware
+   zone (and, in one concept, the preview slot and header chip) SAYS:
+     · the version, first, with the commit as detail;
+     · "up to date" / "update available: from → to";
+     · thirteen update states, read as three kinds:
+         progress (Studio or the board is doing it, nobody needs to act),
+         needs you (nothing moves until a person does something),
+         information (true, worth knowing, nothing to do).
+
+   Palette: src/style.css :root, verbatim (2026-10-03). Production never
+   imports from spikes/.
+   ===================================================================== */
+:root {
+  color-scheme: dark;
+  --font: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  --bg:#0d0d13; --card:#14141c; --card-subtle:#101017; --raised:#1d1d28; --terminal:#09090e;
+  --bd:#343444; --bd-mut:#2b2b39; --bd-strong:#4a4a5e;
+  --tx:#f2f0e8; --strong:#fffaf0; --muted:#c9c9d2; --subtle:#9c9cab; --dim:#9ea0ac;
+  --spectrum:#5fe08b,#53c6f2,#a58af7,#ff5d5d,#ffab4a,#f5e04e;
+  --glow:rgba(140,170,255,.3);
+
+  --good-bg:#13241d;      --good-bd:#365545;      --good-tx:#7be0b2;
+  --neutral-bg:#12171c;   --neutral-bd:#3a444c;   --neutral-tx:#d9e2df;
+  --working-bg:#24230f;   --working-bd:#706730;   --working-tx:#f2e6a2;
+  --live-bg:#142330;      --live-bd:#3c5c78;      --live-tx:#9cc8ee;
+  --warning-bg:#292614;   --warning-bd:#796c33;   --warning-tx:#f0dc7a;
+  --attention-bg:#291f14; --attention-bd:#795833; --attention-tx:#f0b97a;
+  --error-bg:#301b1d;     --error-bd:#874b4b;     --error-tx:#ffc7c7;
+  --bound-bg:#241a33;     --bound-bd:#5f4a85;     --bound-tx:#c9b1f5;
+
+  /* what the board's own LEDs show (the update light): solid, no animation */
+  --led-yellow:#8a6a00; --led-yellow-glow:rgba(160,120,0,.55);
+  --led-red:#7a1010;    --led-red-glow:rgba(150,20,20,.55);
+
+  --shell-bg:#0b0c0e; --shell-mut:#9a978f; --shell-dim:#6f6d66;
+  --shell-bd:#262a31; --shell-bd-strong:#3a3f48; --shell-tx:#e8e6e1;
+  --cardw: 330px;
+}
+* { box-sizing:border-box; }
+body { margin:0; padding:28px 32px 160px; background:var(--shell-bg); color:var(--shell-tx); font:14px/1.45 var(--font); }
+h1 { font-size:13px; letter-spacing:.12em; color:var(--shell-mut); text-transform:uppercase; margin:0 0 6px; }
+p.hint { color:var(--shell-dim); font-size:12px; margin:0 0 8px; max-width:980px; }
+p.hint b { color:var(--shell-mut); font-weight:600; }
+h2 { font-size:12px; letter-spacing:.1em; color:var(--shell-mut); text-transform:uppercase; margin:44px 0 6px; }
+h2 .n { color:var(--shell-dim); margin-right:6px; }
+h3.kind { font-size:11px; letter-spacing:.08em; text-transform:uppercase; margin:22px 0 8px; display:flex; align-items:center; gap:8px; color:var(--shell-mut); }
+h3.kind i { width:9px; height:9px; border-radius:50%; display:inline-block; }
+h3.kind .why { text-transform:none; letter-spacing:0; color:var(--shell-dim); font-weight:400; font-size:11.5px; }
+p.sub { color:var(--shell-dim); font-size:12px; margin:0 0 14px; max-width:980px; }
+p.sub b { color:var(--shell-mut); font-weight:600; }
+code, .code { font-family:var(--mono); font-size:11px; color:var(--shell-mut); }
+
+/* ---- exploration controls ------------------------------------------ */
+.controls { display:flex; gap:10px 14px; flex-wrap:wrap; align-items:center; padding:10px 14px; margin:14px 0 0;
+  border:1px dashed var(--shell-bd-strong); border-radius:8px; color:var(--shell-mut); font-size:12px;
+  position:sticky; top:8px; z-index:60; background:rgba(11,12,14,.94); backdrop-filter:blur(8px); }
+.controls b { color:var(--shell-tx); font-weight:600; }
+.controls button { appearance:none; font:inherit; cursor:pointer; background:#16181c; color:var(--shell-tx);
+  border:1px solid var(--shell-bd-strong); border-radius:6px; padding:2px 9px; font-size:11.5px; }
+.controls button:hover { background:#1e2126; }
+.controls button.active { border-color:#7be0b2; color:#7be0b2; }
+.controls button.k-progress.active { border-color:var(--working-tx); color:var(--working-tx); }
+.controls button.k-needs.active { border-color:var(--attention-tx); color:var(--attention-tx); }
+.controls .grp { display:flex; gap:4px; align-items:center; flex-wrap:wrap; }
+.controls .sep { width:1px; height:18px; background:var(--shell-bd-strong); }
+.controls .lbl { color:var(--shell-dim); margin-right:2px; }
+.controls .play button { border-style:dashed; }
+
+/* ---- concept scaffolding ------------------------------------------- */
+.row { display:flex; flex-wrap:wrap; gap:22px; align-items:flex-start; }
+.concept { width:var(--cardw); flex:none; min-width:0; }
+.chead { display:flex; align-items:baseline; gap:8px; margin:0 0 8px; flex-wrap:wrap; }
+.chead .name { font-size:13.5px; font-weight:700; color:var(--shell-tx); }
+.chead .thesis { font-size:11.5px; color:var(--shell-dim); }
+.chead .lean-tag { font-size:10px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:#7be0b2; border:1px solid #365545; border-radius:4px; padding:0 5px; }
+.cnotes { font-size:11.5px; color:var(--shell-mut); margin:8px 2px 0; line-height:1.55; }
+.cnotes b { color:var(--shell-tx); font-weight:600; }
+.lean { border:1px solid #365545; border-radius:8px; padding:12px 16px; margin-top:22px; font-size:12px; color:var(--shell-mut); max-width:980px; line-height:1.6; }
+.lean b { color:#7be0b2; }
+.lean ol, .lean ul { margin:6px 0 0 18px; padding:0; }
+.ruling { border:1px solid var(--attention-bd); border-radius:8px; padding:12px 16px; margin-top:16px; font-size:12px; color:var(--shell-mut); max-width:980px; line-height:1.6; }
+.ruling b { color:var(--attention-tx); }
+
+/* =====================================================================
+   The card (device_roster_card.rs, faithful): one box, no padding of its
+   own; each zone pads itself; full-bleed border-strong hairlines; FIXED
+   rows (info 17 · bar 4 · preview 120 · verbs 30).
+   ===================================================================== */
+.card { display:flex; flex-direction:column; border-radius:6px; border:1px solid var(--bd); background:var(--card); color:var(--tx); width:100%; font-size:13px; }
+.card * { min-width:0; }
+.zone { display:grid; gap:8px; padding:12px 16px; border-top:1px solid var(--bd-strong); }
+.zone.first { border-top:0; padding:16px 16px 12px; }
+.zone.fw { padding:0; gap:0; }
+.zone.fw > .rows { display:grid; gap:8px; padding:12px 16px; }
+.zone.dev { margin-top:auto; }
+.head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
+.card h4 { margin:0; font-size:14px; font-weight:700; color:var(--strong); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.idrows { display:grid; height:32px; align-content:start; }
+.mono { margin:0; height:16px; line-height:16px; font:10.9px/16px var(--mono); color:var(--subtle); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.mono .v { color:var(--muted); }
+.mono .c { color:#6d6f7a; }
+.chip { display:inline-flex; align-items:center; min-height:24px; padding:0 8px; border-radius:999px; border:1px solid; font-size:12px; font-weight:700; line-height:1; white-space:nowrap; flex:none; }
+.t-good      { background:var(--good-bg);      border-color:var(--good-bd);      color:var(--good-tx); }
+.t-neutral   { background:var(--neutral-bg);   border-color:var(--neutral-bd);   color:var(--neutral-tx); }
+.t-working   { background:var(--working-bg);   border-color:var(--working-bd);   color:var(--working-tx); }
+.t-live      { background:var(--live-bg);      border-color:var(--live-bd);      color:var(--live-tx); }
+.t-warning   { background:var(--warning-bg);   border-color:var(--warning-bd);   color:var(--warning-tx); }
+.t-attention { background:var(--attention-bg); border-color:var(--attention-bd); color:var(--attention-tx); }
+.t-error     { background:var(--error-bg);     border-color:var(--error-bd);     color:var(--error-tx); }
+.t-bound     { background:var(--bound-bg);     border-color:var(--bound-bd);     color:var(--bound-tx); }
+.menu { width:24px; height:24px; border-radius:4px; display:inline-grid; place-items:center; color:var(--subtle); font-size:14px; }
+
+.line { margin:0; height:17px; line-height:17px; font-size:12px; color:var(--subtle); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.line.k-needs { color:var(--attention-tx); font-weight:600; }
+.line.k-fail  { color:var(--error-tx); font-weight:600; }
+.line.dimmed { color:#6d6f7a; }
+.line .ver { font-family:var(--mono); font-size:11.3px; color:var(--muted); }
+.line.k-needs .ver { color:var(--attention-tx); }
+.line .good { color:var(--good-tx); }
+.line .arrow { color:var(--subtle); padding:0 1px; }
+.line .newv { font-family:var(--mono); font-size:11.3px; color:var(--strong); }
+.lb { display:grid; }
+.bar { height:4px; border-radius:999px; overflow:hidden; background:transparent; }
+.bar.on { background:var(--card-subtle); }
+.bar > i { display:block; height:100%; border-radius:999px; background:var(--working-tx); transition:width .25s linear; }
+.bar.other > i { background:var(--subtle); opacity:.7; }
+.bar > i.sweep { width:35%; animation:sweep 1.2s ease-in-out infinite; }
+@keyframes sweep { 0%{transform:translateX(-100%)} 100%{transform:translateX(300%)} }
+
+.verbs { display:flex; align-items:center; gap:6px; height:30px; white-space:nowrap; }
+.verbs .spring { flex:1; }
+.verbs .why { font-size:12px; color:var(--subtle); overflow:hidden; text-overflow:ellipsis; }
+.btn { appearance:none; font:inherit; cursor:pointer; display:inline-flex; align-items:center; gap:6px; border-radius:4px; border:1px solid var(--bd);
+  background:transparent; padding:4px 10px; font-size:12px; font-weight:600; color:var(--muted); white-space:nowrap; position:relative; }
+.btn:hover { border-color:var(--bd-strong); color:var(--strong); }
+.btn.danger { color:var(--error-tx); }
+.btn.danger:hover { border-color:var(--error-bd); }
+.btn:disabled { cursor:not-allowed; opacity:.6; }
+.btn.armed { background:var(--error-bg); border-color:var(--error-bd); color:var(--error-tx); }
+.btn.cta { border-color:transparent; color:var(--strong); font-weight:700; height:26px; padding:0 12px; text-decoration:none; }
+.btn.cta::before { content:""; position:absolute; inset:-1px; border-radius:inherit; padding:1px;
+  background:conic-gradient(from 0deg, var(--spectrum), #5fe08b);
+  mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); mask-composite:exclude;
+  -webkit-mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite:xor;
+  opacity:.62; pointer-events:none; }
+.btn.cta:hover { box-shadow:0 2px 24px var(--glow); }
+.btn .lvl { display:none; position:absolute; top:-8px; right:-6px; font:700 8.5px/1 var(--mono); padding:2px 3px; border-radius:3px; letter-spacing:.04em; }
+body.show-levels .btn .lvl { display:block; }
+.lvl.r { background:#1b2a22; color:var(--good-tx); border:1px solid var(--good-bd); }
+.lvl.u { background:var(--attention-bg); color:var(--attention-tx); border:1px solid var(--attention-bd); }
+.lvl.l { background:var(--error-bg); color:var(--error-tx); border:1px solid var(--error-bd); }
+
+/* preview slot */
+.play { position:relative; height:120px; border-radius:7px; background:#07080a; border:1px solid var(--bd); overflow:hidden; display:grid; place-items:center; }
+.play .sentence { padding:0 18px; text-align:center; font-size:12px; line-height:1.5; color:var(--subtle); }
+.play .lamps { position:absolute; inset:14px 18px 30px; display:grid; grid-template-columns:repeat(16,1fr); gap:6px; align-content:center; }
+.play .lamps i { aspect-ratio:1; border-radius:50%; }
+.play .pill { position:absolute; top:6px; right:6px; display:inline-flex; align-items:center; gap:5px; padding:1px 6px; border:1px solid var(--bd);
+  border-radius:4px; background:rgba(9,9,14,.8); font:800 9.5px var(--mono); letter-spacing:.07em; text-transform:uppercase; color:var(--good-tx); }
+.play .pill i { width:6px; height:6px; border-radius:50%; background:currentcolor; }
+.play.leds { place-items:stretch; }
+.play.leds .lamps { inset:14px 18px auto; grid-template-columns:repeat(16,1fr); }
+.play.leds .cap { position:absolute; left:12px; right:12px; bottom:8px; font-size:11.5px; line-height:1.4; color:var(--muted); text-align:center; }
+.play.leds .cap b { font-weight:600; }
+.led-y { background:var(--led-yellow); box-shadow:0 0 6px var(--led-yellow-glow); }
+.led-r { background:var(--led-red); box-shadow:0 0 6px var(--led-red-glow); }
+
+/* terminal */
+.term { background:var(--terminal); font:10.5px/1.5 var(--mono); padding:6px 16px; overflow:hidden; display:flex; flex-direction:column; justify-content:flex-end; border-bottom-left-radius:0; }
+.term p { margin:0; white-space:pre-wrap; word-break:break-all; padding-left:1.2em; text-indent:-1.2em; }
+.term .board { color:var(--muted); } .term .studio { color:var(--bound-tx); } .term .ok { color:var(--good-tx); }
+.term .fail { color:var(--error-tx); } .term .rec { color:var(--warning-tx); } .term .rom { color:#6d6f7a; }
+body.term-off .term { display:none; }
+.term { height:96px; } body.term-full .term { height:160px; }
+
+/* concept B: a small chip leading the firmware line */
+.fwchip { display:inline-flex; align-items:center; height:17px; padding:0 6px; border-radius:999px; border:1px solid; font-size:10.5px; font-weight:700; line-height:1; margin-right:6px; vertical-align:top; transform:translateY(0); }
+.lineB { display:flex; align-items:center; height:17px; }
+.lineB .line { flex:1; }
+
+/* "today" faithful overlay for states that do not exist yet */
+.na { position:relative; }
+.na::after { content:attr(data-na); position:absolute; inset:0; display:grid; place-items:center; background:rgba(13,13,19,.72); color:var(--shell-mut);
+  font-size:11.5px; text-align:center; padding:0 26px; border-radius:6px; border:1px dashed var(--shell-bd-strong); }
+
+/* matrix */
+.matrix .concept { width:var(--cardw); }
+.statecap { font-size:11.5px; color:var(--shell-mut); margin:0 0 6px; display:flex; gap:6px; align-items:baseline; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; height:17px; }
+.statecap b { flex:none; }
+.statecap .who { overflow:hidden; text-overflow:ellipsis; }
+.statecap b { color:var(--shell-tx); }
+.statecap .who { color:var(--shell-dim); font-size:11px; }
+
+/* version table */
+table.vt { border-collapse:collapse; font-size:12px; margin-top:6px; max-width:1240px; }
+table.vt th { text-align:left; color:var(--shell-dim); font-weight:600; font-size:11px; padding:6px 10px; border-bottom:1px solid var(--shell-bd-strong); }
+table.vt td { padding:7px 10px; border-bottom:1px solid var(--shell-bd); vertical-align:top; color:var(--shell-mut); }
+table.vt td.cardish { background:var(--card); width:300px; }
+table.vt td .mono { height:auto; }
+table.vt td.today { color:#6d6f7a; font-family:var(--mono); font-size:10.9px; }
+table.vt td.off { color:var(--shell-dim); white-space:nowrap; }
+.pill-l { display:inline-block; font:700 10px var(--mono); padding:1px 5px; border-radius:3px; }
+
+/* header popover (the editor's device segment) */
+.pop { width:300px; border:1px solid var(--bd-strong); border-radius:8px; background:var(--card); overflow:hidden; box-shadow:0 10px 30px rgba(0,0,0,.4); }
+.pop .band { background:#0f0f15; padding:8px 12px; display:grid; gap:2px; }
+.pop .band .top { display:flex; align-items:center; gap:8px; }
+.pop .band .glyph { width:13px; height:13px; border-radius:3px; border:1.5px solid var(--subtle); flex:none; }
+.pop .band strong { font-size:13px; color:var(--strong); }
+.pop .band .run { margin-left:auto; font-size:12px; white-space:nowrap; }
+.pop .band .stat { margin:0; padding-left:21px; font:10px var(--mono); color:var(--dim); }
+.pop .hintp { border-top:1px solid var(--bd-mut); padding:6px 12px; font-size:10px; font-style:italic; color:var(--dim); margin:0; }
+
+/* LED legend */
+.legend { display:flex; gap:26px; flex-wrap:wrap; }
+.legend .item { display:grid; gap:8px; width:390px; align-content:start; }
+.legend .strip { display:flex; gap:7px; padding:12px 14px; background:#07080a; border:1px solid var(--bd); border-radius:7px; }
+.legend .strip i { width:14px; height:14px; border-radius:50%; }
+.legend .t { font-size:12px; color:var(--shell-mut); line-height:1.5; }
+.legend .t b { color:var(--shell-tx); }
+
+/* offers table */
+table.ot { border-collapse:collapse; font-size:11.5px; max-width:1240px; }
+table.ot th { text-align:left; color:var(--shell-dim); font-weight:600; font-size:11px; padding:6px 9px; border-bottom:1px solid var(--shell-bd-strong); }
+table.ot td { padding:6px 9px; border-bottom:1px solid var(--shell-bd); color:var(--shell-mut); vertical-align:top; }
+table.ot td.path { font-family:var(--mono); font-size:10.5px; color:var(--shell-tx); white-space:nowrap; }
+</style>
+</head>
+<body>
+
+<h1>Device card · firmware versions and update states</h1>
+<p class="hint"><b>Thesis.</b> Once boards update over Bluetooth and Wi-Fi, the firmware zone has thirteen things to say instead of two.
+They sort into three kinds: <b>progress</b> (something is happening, nobody needs to act), <b>needs you</b> (nothing moves until a person
+does something), and <b>information</b> (true and worth knowing, nothing to do). A person should tell the kind at a glance, read the
+version as a version (<span class="code">2026.10.03-1</span>, not <span class="code">fw-esp32c6 a41c9e2</span>), and never meet a confirm
+dialog: an update is one button, and putting a board's firmware back is no button at all.</p>
+<p class="hint"><b>Deliberately light.</b> The card's four zones and fixed rows stay exactly as they are; a device-pane rework comes later. Every
+concept below fits inside today's rows except D, which adds one 17&nbsp;px line. Sample board: <i>Porch lights</i>, a XIAO ESP32-C6 on
+<span class="code">2026.10.03-1</span>; this Studio carries <span class="code">2026.10.05-2</span>.</p>
+
+<div class="controls" id="controls">
+  <span class="grp" id="stateGrp"><span class="lbl">state</span></span>
+  <span class="sep"></span>
+  <span class="grp"><span class="lbl">link</span><button data-o="transport" data-v="Bluetooth" class="active">Bluetooth</button><button data-o="transport" data-v="Wi-Fi">Wi-Fi</button></span>
+  <span class="grp"><span class="lbl">board build</span><button data-o="build" data-v="release" class="active">release</button><button data-o="build" data-v="dev">dev</button></span>
+  <span class="grp"><span class="lbl">terminal</span><button data-o="term" data-v="off">off</button><button data-o="term" data-v="on" class="active">on</button><button data-o="term" data-v="full">full</button></span>
+  <span class="grp"><span class="lbl">card</span><button data-o="width" data-v="320">320</button><button data-o="width" data-v="330" class="active">330</button><button data-o="width" data-v="375">375</button><button data-o="width" data-v="440">440</button></span>
+  <span class="grp"><button data-o="levels" data-v="toggle" id="lvlBtn">show offer levels</button></span>
+  <span class="sep"></span>
+  <span class="grp play"><span class="lbl">play</span><button data-play="happy">an update</button><button data-play="dev">a dev-build update</button><button data-play="resume">an interrupted one</button><button data-play="rollback">one that fails</button><button data-play="heal">a board missing its firmware</button><button data-play="stop">stop</button></span>
+</div>
+
+<!-- ================================================================ -->
+<div class="sec" data-sec="1">
+<h2><span class="n">1</span>Five ways the card says it, one state at a time</h2>
+<p class="sub">Pick a state in the strip (or press a <b>play</b> button to watch one run). <b>Today</b> is production, reproduced: over Bluetooth it
+cannot update at all, and the states that don't exist yet are marked. <b>A–D</b> are the directions. The buttons press: a Lasting one arms
+on the first click, as production's does.</p>
+<div class="row" id="concepts"></div>
+
+<!-- ================================================================ -->
+</div>
+<div class="sec" data-sec="2">
+<h2><span class="n">2</span>Every state at once, by kind</h2>
+<p class="sub">The gate's first question in one picture. Choose the concept to lay out:
+<span class="controls" style="position:static; display:inline-flex; margin:0 0 0 6px; padding:4px 8px;" id="mxGrp"></span></p>
+<div id="matrix" class="matrix"></div>
+
+<!-- ================================================================ -->
+</div>
+<div class="sec" data-sec="3">
+<h2><span class="n">3</span>The version, read as a version</h2>
+<p class="sub">The header's second identity row and the firmware line, for every way a board and this Studio can compare. The version leads;
+the commit is detail (dim, and in full on hover and in the terminal). "Out of date" only ever means an older <b>version</b>. A dev build
+compares by commit, and only when neither side is a release. The modified-tree suffix (<span class="code">-dirty-142233PT</span>) reads as
+"(modified)", with the raw string on hover.</p>
+<div id="versions"></div>
+
+<!-- ================================================================ -->
+</div>
+<div class="sec" data-sec="4">
+<h2><span class="n">4</span>The editor's device popover</h2>
+<p class="sub">The other place a board's state is shown: the header's device segment while the editor is open on it. Its run word takes
+the same short words, and its stat line the version. Nothing else changes there.</p>
+<div class="row" id="pops"></div>
+
+<!-- ================================================================ -->
+</div>
+<div class="sec" data-sec="5">
+<h2><span class="n">5</span>What the board's own lights show</h2>
+<p class="sub">During an update the show stops and the strip shows one solid colour, no animation, so a dark porch still says "alive".
+Two colours only. Concept C draws the same colour in the card's picture slot, so the card and the porch agree.</p>
+<div class="legend">
+  <div class="item"><div class="strip" id="legY"></div><div class="t"><b>Dark yellow: updating.</b> Firmware is being written, finished
+  or put back. Leave it powered; if it stops, any Studio picks it up again.</div></div>
+  <div class="item"><div class="strip" id="legR"></div><div class="t"><b>Dark red: waiting for its firmware.</b> Part of its firmware is
+  missing and no Studio has put it back yet. Connecting any Studio that has that version fixes it with no click.</div></div>
+</div>
+
+<!-- ================================================================ -->
+</div>
+<div class="sec" data-sec="6">
+<h2><span class="n">6</span>The buttons as offers</h2>
+<p class="sub">Every button above is an offer built in core, so the app agent sees and presses the same ones. "Studio does it" rows are
+not offers at all: finishing an interrupted update and putting missing firmware back happen on connect, with no click. <b>Level</b> is what
+pressing costs: <span class="pill-l lvl r">R</span> Routine (plain; the agent presses it), <span class="pill-l lvl u">U</span> Undoable
+(error tint, one click), <span class="pill-l lvl l">L</span> Lasting (error tint, two-click arm; the agent hands it to you).</p>
+<table class="ot" id="offers"></table>
+
+<div class="ruling"><b>One ruling to make: is an over-the-air update Routine or Lasting?</b> Today "Update firmware" is Lasting (it is
+the USB flash, and the copy says "Replace what this board runs?"). An over-the-air update is different: Studio holds a backup of the current
+firmware before writing a byte, a failed update rolls back by itself, and the project stays. Nothing is lost, so the honest level is
+<b>Routine</b>: one plain button, no error tint, no arm. The cost: the app agent may then update a board when asked, without handing the
+button to you. Lean: Routine for Update, Reinstall, Try again and installing this Studio's version; <b>Lasting</b> only for "Other
+version…" when the chosen version is <i>older</i> (an older build may not read the board's project), and for the USB flash and Factory reset
+as today.</div>
+
+</div>
+<div class="sec" data-sec="7">
+<div class="lean" id="leans"><b>Leans.</b>
+<ol>
+<li><b>Direction: C, which is A plus the picture slot.</b> A changes nothing structural (the firmware line, its bar and its buttons
+already exist) and the three kinds read by tone alone: a lit yellow bar is progress, orange text is needs-you, plain grey is information.
+C adds the picture slot, which costs nothing: in exactly the states where the show has stopped, the slot has no picture to show, and a
+dark-yellow (or dark-red) strip there says it louder than any chip, matches the porch, and has room for the whole sentence the 17&nbsp;px
+line has to cut. If C reads as too much, A alone is the fallback, "good enough until the pane rework".</li>
+<li><b>B's chip</b> is the clearest at a glance but adds a second status chip to a card that already has one in its header, and two
+chips that disagree ("Ready" up top, "Needs you" below) read as a bug.</li>
+<li><b>D's two lines</b> fit every sentence untruncated, which A cannot ("The update to 2026.10.05-2 didn't start, so the board went back
+to 2026.10.03-1" is 70 characters; the line holds about 45 at 330&nbsp;px). It costs 17&nbsp;px on every card in every state. Worth
+keeping for the pane rework, not now: A's long sentences live in the line's hover and the terminal, as an outcome already does.</li>
+<li><b>Update available</b> is information with an offer, not a needs-you: the board works fine, and an orange card for every board one
+build behind would make the needs-you colour mean nothing.</li>
+<li><b>No Cancel once writing starts.</b> Cancel is offered while backing up (nothing changed yet); after that, stopping would only leave
+the board waiting for its firmware, which the next connect puts back anyway.</li>
+</ol></div>
+
+</div>
+<script>
+/* ===================================================================== data */
+const B = { title:'Porch lights', board:'XIAO ESP32-C6', chip:'esp32c6', mac:'60:55:f9:0a:0b:0c', project:'Aurora drift',
+  path:'devices/mac-6055f90a0b0c' };
+const V = { board:'2026.10.03-1', boardCommit:'a41c9e2', studio:'2026.10.05-2', studioCommit:'626a1b8',
+  newer:'2026.10.07-4', newerCommit:'c08d1f3', needs:'2026.09.28-4', dev:'5eb70a7' };
+
+const O = { state:'available', transport:'Bluetooth', build:'release', term:'on', width:330, levels:false, pct:null, mx:'C' };
+
+const ver = v => `<span class="ver">${v}</span>`;
+const nver = v => `<span class="newv">${v}</span>`;
+const arrow = '<span class="arrow">→</span>';
+/* the board's version as the card names it (release or dev form) */
+const bv = o => o.build === 'dev' ? `dev ${V.dev}` : V.board;
+const bvLong = o => o.build === 'dev' ? `dev build ${V.dev}` : V.board;
+
+/* Buttons: id, label, level (r|u|l), kind ('cta'|'quiet'|'danger'), disabled reason */
+const btn = (label, level, extra={}) => ({ label, level, ...extra });
+const RESET = btn('Factory reset', 'l', { danger:true, right:true });
+
+/*
+  Each state: kind (progress|needs|info), the header chip production would show (hchip),
+  the short line (A/C), a chip (B), D's two lines, %, the LEDs, whether the show runs,
+  the buttons, the full sentence (hover + C's picture slot), terminal lines, and today's.
+*/
+const STATES = [
+  { id:'uptodate', name:'Up to date', kind:'info', who:'nothing to do',
+    hchip:['good','Ready'], running:true,
+    line:o => `${ver(o.build==='dev'?`dev ${V.studioCommit}`:V.studio)} · <span class="good">up to date</span>`,
+    full:o => `${o.build==='dev'?`Dev build ${V.studioCommit}`:V.studio}, the same as this Studio.`,
+    chipB:['good','Up to date'], dTop:o => ver(o.build==='dev'?`dev ${V.studioCommit}`:V.studio), dBot:o=>'<span class="good">Up to date</span> with this Studio',
+    verbs:o => [RESET], idver:o => o.build==='dev'?`dev ${V.studioCommit}`:V.studio, idcommit:V.studioCommit,
+    term:o => [['board','engine ready · project "Aurora drift" running'],['studio','firmware '+(o.build==='dev'?'dev '+V.studioCommit:V.studio)+' · same as this Studio']],
+    today:o => ({ line:`fw-esp32c6 ${V.studioCommit} · ${B.board}`, verbs:[btn('Update firmware','l'), RESET] }) },
+
+  { id:'available', name:'Update available', kind:'info', who:'one button, if you want it',
+    hchip:['good','Ready'], running:true,
+    line:o => o.build==='dev' ? `${ver('dev '+V.dev)} · Studio has ${nver(V.studio)}` : `${ver(V.board)} ${arrow} ${nver(V.studio)} available`,
+    full:o => o.build==='dev' ? `This board runs dev build ${V.dev}; this Studio has ${V.studio}.` : `Update available: ${V.board} → ${V.studio}.`,
+    chipB:['live','Update'], dTop:o => o.build==='dev' ? `${ver('dev '+V.dev)}` : `${ver(V.board)} ${arrow} ${nver(V.studio)}`,
+    dBot:o => o.build==='dev' ? `A dev build · Studio has ${V.studio}` : 'Update available',
+    verbs:o => [btn(o.build==='dev' ? `Install ${V.studio}` : 'Update', 'r', { primary:true, offer:'update-firmware' }), RESET],
+    term:o => [['board','engine ready · project "Aurora drift" running'],['studio',`firmware ${bv(o)} · this Studio has ${V.studio}`]],
+    today:o => ({ line:`fw-esp32c6 ${o.build==='dev'?V.dev:V.boardCommit} · ${B.board} — older than Studio, update recommended`,
+      verbs: o.transport==='Bluetooth' ? [btn('Update firmware','l',{disabled:'Firmware updates need USB.'}), RESET] : [btn('Update firmware','l'), RESET] }) },
+
+  { id:'backup', name:'Backing up', kind:'progress', who:'Studio is doing it', pct:18, sweep:false,
+    hchip:['working','Backing up'], running:true,
+    line:o => `Backing up current firmware… ${o.pct ?? 18}%`,
+    full:o => `Backing up current firmware… ${o.pct ?? 18}%. The show keeps running meanwhile.`,
+    chipB:['working','Backing up'], dTop:o => `${ver(bv(o))} ${arrow} ${nver(V.studio)}`, dBot:o => `Backing up current firmware… ${o.pct ?? 18}%`,
+    verbs:o => [btn('Cancel','r',{offer:'cancel'})], cancelOnly:true,
+    term:o => [['studio',`update ${bv(o)} → ${V.studio}: no copy of ${bv(o)} here or online`],['studio','backing up current firmware from the board'],['board',`read-back 331 / 1 822 KB`]],
+    today:o => ({ na:'No such step today: a USB flash keeps no copy of what it replaces.' }) },
+
+  { id:'updating', name:'Updating', kind:'progress', who:'Studio is doing it', pct:40, led:'y',
+    hchip:['working','Updating'], running:false,
+    line:o => `Updating over ${o.transport}… ${o.pct ?? 40}%`,
+    full:o => `Updating to ${V.studio} over ${o.transport}… ${o.pct ?? 40}%. Keep the board powered.`,
+    chipB:['working',`Updating`], dTop:o => `${ver(bv(o))} ${arrow} ${nver(V.studio)}`, dBot:o => `Updating over ${o.transport}… ${o.pct ?? 40}%`,
+    verbs:o => [], cancelOnly:true,
+    term:o => [['studio',`update to ${V.studio} (${o.transport})`],['board','core: engine stopped · lights dark yellow'],['board',`core: engine ${Math.round(1822*(o.pct??40)/100)} / 1 822 KB`]],
+    today:o => o.transport==='Bluetooth' ? ({ na:'Not possible today: over Bluetooth, "Firmware updates need USB."' }) :
+      ({ line:`Flashing firmware · ${o.pct ?? 40}%`, pct:o.pct ?? 40, verbs:[btn('Cancel','r')], hchip:['working','Flashing firmware'] }) },
+
+  { id:'finishing', name:'Finishing (resumed)', kind:'progress', who:'Studio does it on connect, no click', pct:70, led:'y',
+    hchip:['working','Updating'], running:false,
+    line:o => `Finishing the update… ${o.pct ?? 70}%`,
+    full:o => `Finishing the update to ${V.studio}… ${o.pct ?? 70}%. It was interrupted; this Studio is completing it.`,
+    chipB:['working','Finishing'], dTop:o => `${ver(bv(o))} ${arrow} ${nver(V.studio)}`, dBot:o => `Finishing the update… ${o.pct ?? 70}%`,
+    verbs:o => [], cancelOnly:true,
+    term:o => [['rec','link dropped during update at 40%'],['studio',`board is half-way to ${V.studio} · finishing it`],['board',`core: engine ${Math.round(1822*(o.pct??70)/100)} / 1 822 KB`]],
+    today:o => ({ na:'No such state today: an interrupted USB flash leaves the board needing another flash.' }) },
+
+  { id:'restoring', name:'Restoring (auto-heal)', kind:'progress', who:'Studio does it on connect, no click', pct:35, led:'y',
+    hchip:['working','Restoring firmware'], running:false,
+    line:o => `Restoring firmware… ${o.pct ?? 35}%`,
+    full:o => `Restoring firmware ${bv(o)}… ${o.pct ?? 35}%. Part of it was missing; this Studio had a copy.`,
+    chipB:['working','Restoring'], dTop:o => `${ver(bv(o))}`, dBot:o => `Restoring firmware… ${o.pct ?? 35}%`,
+    verbs:o => [], cancelOnly:true, idver:o => bv(o),
+    term:o => [['board','core: no engine · lights dark red · waiting'],['studio',`board is missing its ${bv(o)} engine · this Studio has it`],['board',`core: engine ${Math.round(1822*(o.pct??35)/100)} / 1 822 KB`]],
+    today:o => ({ na:'No such state today.' }) },
+
+  { id:'otherdevice', name:'Updating from another device', kind:'progress', who:'someone else is doing it', pct:40, led:'y', other:true,
+    hchip:['working','Updating'], running:false,
+    line:o => `Another device is updating it… ${o.pct ?? 40}%`,
+    full:o => `Another device is updating this board to ${V.studio}… ${o.pct ?? 40}%. If it stops, this Studio finishes it.`,
+    chipB:['neutral','Elsewhere'], dTop:o => `${ver(bv(o))} ${arrow} ${nver(V.studio)}`, dBot:o => `Another device is updating it… ${o.pct ?? 40}%`,
+    verbs:o => [], cancelOnly:true,
+    term:o => [['board',`core: update in progress from another link · ${o.pct ?? 40}%`]],
+    today:o => ({ na:'No such state today.' }) },
+
+  { id:'needsusb', name:'Needs USB once', kind:'needs', who:'you: plug it in once',
+    hchip:['good','Ready'], running:true,
+    line:o => `Needs one update over USB`,
+    full:o => `This board can't update over ${o.transport} yet. Update it over USB once; after that it updates without a cable.`,
+    chipB:['attention','Needs you'], dTop:o => `${ver(bv(o))} ${arrow} ${nver(V.studio)}`, dBot:o => `Needs one update over USB, then never again`,
+    verbs:o => [RESET], idcommit:V.boardCommit,
+    term:o => [['studio',`firmware ${bv(o)} predates wireless updates · USB once`]],
+    today:o => ({ line:`fw-esp32c6 ${V.boardCommit} · ${B.board} — older than Studio, update recommended`,
+      verbs:[btn('Update firmware','l',{disabled:'Firmware updates need USB.'}), RESET] }) },
+
+  { id:'crashing', name:'Keeps crashing', kind:'needs', who:'you: pick what to install', led:'r',
+    hchip:['attention','Needs firmware'], running:false,
+    line:o => `${ver(V.studio)} keeps crashing`,
+    full:o => `${V.studio} keeps crashing on this board, so it stopped trying. Reinstall it, or install another version.`,
+    chipB:['attention','Needs you'], dTop:o => ver(V.studio), dBot:o => 'Keeps crashing, so it stopped trying',
+    verbs:o => [btn('Reinstall','r',{offer:'reinstall-firmware'}), btn('Other version…','r',{offer:'install-firmware'})],
+    idver:o => V.studio, idcommit:V.studioCommit,
+    term:o => [['fail','engine crashed at boot (3 in a row) · stopped retrying'],['board','core: lights dark red · waiting']],
+    today:o => ({ na:'No such state today: the board would reboot-loop, and the card would say "Not responding".' }) },
+
+  { id:'missing', name:'Needs a version Studio lacks', kind:'needs', who:'you: get online, or install another', led:'r',
+    hchip:['attention','Needs firmware'], running:false,
+    line:o => `Needs ${ver(o.build==='dev'?'dev '+V.dev:V.needs)}, which Studio can't get`,
+    full:o => `This board needs ${o.build==='dev'?'dev build '+V.dev:V.needs} to start, and this Studio can't get it. Connect to the internet, or install ${V.studio} instead.`,
+    chipB:['attention','Needs you'], dTop:o => ver(o.build==='dev'?'dev '+V.dev:V.needs), dBot:o => `Needed to start; Studio can't get it`,
+    verbs:o => [btn(`Install ${V.studio}`,'r',{offer:'install-firmware', primary:true}), btn('Other version…','r',{offer:'install-firmware'})],
+    idver:o => o.build==='dev'?'dev '+V.dev:V.needs,
+    term:o => [['board','core: no engine · lights dark red · waiting'],['fail',`no copy of ${o.build==='dev'?'dev '+V.dev:V.needs} here, and the release store is unreachable`]],
+    today:o => ({ na:'No such state today.' }) },
+
+  { id:'rolledback', name:'Rolled back', kind:'info', who:'nothing to do (try again if you like)',
+    hchip:['good','Ready'], running:true,
+    line:o => `Back on ${ver(bv(o))} · the update didn't start`,
+    full:o => `The update to ${V.studio} didn't start, so the board went back to ${bv(o)}.`,
+    chipB:['warning','Rolled back'], dTop:o => `${ver(bv(o))}`, dBot:o => `The update to ${V.studio} didn't start, so it went back`,
+    verbs:o => [btn('Try again','r',{offer:'update-firmware'}), RESET],
+    term:o => [['fail',`${V.studio} did not start (trial boot failed)`],['rec',`board went back to ${bv(o)}`],['board','engine ready · project "Aurora drift" running']],
+    today:o => ({ na:'No such state today: a USB flash that fails leaves a board that needs flashing again.' }) },
+
+  { id:'newer', name:'Newer than this Studio', kind:'info', who:'nothing to do',
+    hchip:['good','Ready'], running:true,
+    line:o => `${ver(V.newer)} · newer than this Studio`,
+    full:o => `${V.newer} is newer than this Studio (${V.studio}). Reload Studio to catch up.`,
+    chipB:['neutral','Newer'], dTop:o => ver(V.newer), dBot:o => 'Newer than this Studio · reload to catch up',
+    verbs:o => [RESET], idver:o => V.newer, idcommit:V.newerCommit,
+    term:o => [['studio',`firmware ${V.newer} · newer than this Studio (${V.studio})`]],
+    today:o => ({ line:`fw-esp32c6 ${V.newerCommit} · ${B.board} — newer than Studio`, verbs:[btn('Update firmware','l'), RESET] }) },
+
+  { id:'playonly', name:'Play access only', kind:'info', who:'nothing offered without the author password',
+    hchip:['good','Ready'], running:true, play:true,
+    line:o => `${ver(V.board)} ${arrow} ${nver(V.studio)} available`,
+    full:o => `Update available: ${V.board} → ${V.studio}. Installing it needs the author password.`,
+    chipB:['live','Update'], dTop:o => `${ver(V.board)} ${arrow} ${nver(V.studio)}`, dBot:o => 'Available · installing needs the author password',
+    verbs:o => [], why:'Needs the author password',
+    term:o => [['studio',`firmware ${V.board} · this Studio has ${V.studio}`]],
+    today:o => ({ line:`fw-esp32c6 ${V.boardCommit} · ${B.board} — older than Studio, update recommended`, verbs:[btn('Update firmware','l',{disabled:'Firmware updates need USB.'})] }) },
+];
+const KINDS = { progress:{ name:'Progress', dot:'var(--working-tx)', why:'something is happening; nobody needs to act' },
+                needs:{ name:'Needs you', dot:'var(--attention-tx)', why:'nothing moves until a person does something' },
+                info:{ name:'Information', dot:'var(--subtle)', why:'true and worth knowing; nothing to do' } };
+const S = id => STATES.find(s => s.id === id);
+
+const CONCEPTS = [
+  { id:'T', name:'Today', thesis:'production, reproduced' },
+  { id:'A', name:'A · The line says it', thesis:'only the firmware line, its bar and its buttons change; the kind reads by tone' },
+  { id:'B', name:'B · A chip in the zone', thesis:'a small status chip leads the firmware line, so the kind is a word and a colour' },
+  { id:'C', name:'C · The lights in the picture', thesis:'A, plus: when the show stops, the picture slot shows what the LEDs show, with the whole sentence', lean:true },
+  { id:'D', name:'D · Two lines', thesis:'the zone gets a fixed second line: the version above, what is happening below' },
+];
+
+/* ===================================================================== render */
+const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+const strip = h => String(h).replace(/<[^>]+>/g,'');
+
+function lampsHTML(cls, n=32) {
+  let h = '';
+  for (let i = 0; i < n; i++) {
+    if (cls) { h += `<i class="${cls}"></i>`; continue; }
+    const t = i / n, hue = 170 + 140 * Math.sin(t * Math.PI * 1.3), l = 46 + 16 * Math.sin(t * 9);
+    h += `<i style="background:hsl(${hue} 80% ${l}%); box-shadow:0 0 7px hsl(${hue} 90% 55% / .55)"></i>`;
+  }
+  return `<div class="lamps">${h}</div>`;
+}
+
+function preview(c, s, o) {
+  if (c === 'C' && s.led) {
+    const cls = s.led === 'y' ? 'led-y' : 'led-r';
+    const said = s.led === 'y' ? '<b style="color:#d9b64a">Dark yellow</b>' : '<b style="color:#e07070">Dark red</b>';
+    return `<div class="play leds">${lampsHTML(cls, 16)}<div class="cap" title="${esc(strip(s.full(o)))}">${said} on the lights · ${esc(strip(s.full(o)))}</div></div>`;
+  }
+  if (c === 'C' && s.kind === 'needs' && !s.running) {
+    return `<div class="play"><div class="sentence" style="color:var(--attention-tx)">${esc(strip(s.full(o)))}</div></div>`;
+  }
+  if (!s.running) {
+    const why = s.led === 'r' ? 'Not running — the board is waiting for its firmware.' : 'Updating… the picture returns when the board does.';
+    return `<div class="play"><div class="sentence">${why}</div></div>`;
+  }
+  if (o.transport === 'Bluetooth') return `<div class="play"><div class="sentence">No live picture over Bluetooth — Open in editor to see and control it.</div></div>`;
+  return `<div class="play">${lampsHTML(null)}<span class="pill"><i></i>live · 30 fps</span></div>`;
+}
+
+function button(b, s) {
+  const lvl = `<span class="lvl ${b.level}">${b.level.toUpperCase()}</span>`;
+  const cls = ['btn', b.danger ? 'danger' : '', b.primary && !b.disabled ? '' : ''].join(' ');
+  const title = b.disabled ? b.disabled : ({ r:'Routine: one click', u:'Undoable: one click', l:'Lasting: arms on the first click' })[b.level];
+  return `<button class="${cls}" data-level="${b.level}" data-label="${esc(b.label)}" title="${esc(title)}" ${b.disabled ? 'disabled' : ''}>${esc(b.label)}${lvl}</button>`;
+}
+
+function verbsRow(list, extraLeft='') {
+  const left = list.filter(b => !b.right).map(b => button(b)).join('');
+  const right = list.filter(b => b.right).map(b => button(b)).join('');
+  return `<div class="verbs">${extraLeft}${left}<span class="spring"></span>${right}</div>`;
+}
+
+function barHTML(s, o, lit) {
+  if (!lit) return `<div class="bar"></div>`;
+  const p = o.pct ?? s.pct;
+  return `<div class="bar on ${s.other ? 'other' : ''}"><i style="width:${p}%"></i></div>`;
+}
+
+function card(c, s, o) {
+  const T = c === 'T' ? s.today(o) : null;
+  /* header */
+  let chip = s.hchip;
+  if (c === 'T') chip = (T && T.hchip) || ['good','Ready'];
+  if (c === 'C') chip = s.kind === 'progress' ? ['working', s.hchip[1]] : s.kind === 'needs' && !s.running ? ['attention','Needs you'] : s.hchip;
+  const idver = s.idver ? s.idver(o) : bv(o);
+  const idcommit = s.idcommit || (o.build === 'dev' ? '' : V.boardCommit);
+  const row2 = c === 'T'
+    ? `${B.mac} · fw-esp32c6 ${o.build==='dev' ? V.dev : (s.idcommit || V.boardCommit)}`
+    : `${B.mac} · <span class="v">${idver}</span>${idcommit && !idver.startsWith('dev') ? ` <span class="c">${idcommit}</span>` : ''}`;
+  const head = `<header class="zone first"><div class="head"><h4>${B.title}</h4><span style="display:flex;gap:6px;align-items:center"><span class="chip t-${chip[0]}">${chip[1]}</span><span class="menu">⋯</span></span></div>
+    <div class="idrows"><p class="mono">${B.board} · ${B.chip}</p><p class="mono" title="${esc(strip(row2))}">${row2}</p></div></header>`;
+
+  /* project zone */
+  const busy = s.kind === 'progress' && !s.running ? true : (s.id === 'backup');
+  const projLine = s.running ? B.project : `${B.project}`;
+  const projVerbs = s.running && !busy && !s.play
+    ? `<div class="verbs"><a class="btn cta" href="#" onclick="return false">Open in editor</a><span class="spring"></span>${button(btn('Remove','l',{danger:true}))}</div>`
+    : s.running && s.play ? `<div class="verbs"><a class="btn cta" href="#" onclick="return false">Open in editor</a></div>` : `<div class="verbs"></div>`;
+  const proj = `<section class="zone">${c==='T' && T && T.na ? preview('T', S('uptodate'), o) : preview(c, s, o)}
+    <div class="lb"><p class="line ${s.running ? '' : 'dimmed'}">${projLine}</p><div class="bar"></div></div>${c==='T' && T && T.na ? '<div class="verbs"></div>' : projVerbs}</section>`;
+
+  /* firmware zone */
+  let fw;
+  const lit = s.kind === 'progress';
+  const lineCls = s.kind === 'needs' ? 'k-needs' : '';
+  const verbs = s.verbs(o);
+  const why = s.why ? `<span class="why">${s.why}</span>` : '';
+  if (c === 'T') {
+    if (T.na) {
+      fw = `<div class="lb"><p class="line">fw-esp32c6 ${V.boardCommit} · ${B.board}</p><div class="bar"></div></div><div class="verbs"></div>`;
+    } else {
+      const disabledWhy = T.verbs.find(b => b.disabled);
+      fw = `<div class="lb"><p class="line" title="${esc(T.line)}">${esc(T.line)}</p>${T.pct != null ? `<div class="bar on"><i style="width:${T.pct}%"></i></div>` : '<div class="bar"></div>'}</div>
+        ${verbsRow(T.verbs, '')}${disabledWhy ? `<p class="line" style="margin-top:-4px">${disabledWhy.disabled}</p>` : ''}`;
+    }
+  } else if (c === 'A' || c === 'C') {
+    fw = `<div class="lb"><p class="line ${lineCls}" title="${esc(strip(s.full(o)))}">${s.line(o)}</p>${barHTML(s, o, lit)}</div>${verbsRow(verbs, why)}`;
+  } else if (c === 'B') {
+    const cb = s.chipB;
+    const label = s.kind === 'progress' && !s.chipNoPct ? `${cb[1]}` : cb[1];
+    fw = `<div class="lb"><div class="lineB"><span class="fwchip t-${cb[0]}">${label}</span><p class="line ${lineCls}" title="${esc(strip(s.full(o)))}">${s.line(o)}</p></div>${barHTML(s, o, lit)}</div>${verbsRow(verbs, why)}`;
+  } else if (c === 'D') {
+    const botCls = s.kind === 'needs' ? 'k-needs' : '';
+    fw = `<div class="lb"><p class="line">${s.dTop(o)}</p><p class="line ${botCls}" title="${esc(strip(s.full(o)))}">${s.dBot(o)}</p>${barHTML(s, o, lit)}</div>${verbsRow(verbs, why)}`;
+  }
+  const term = (s.term(o)).map(([k, t]) => `<p class="${k}">${esc(t)}</p>`).join('');
+  const fwz = `<section class="zone fw"><div class="rows">${fw}</div><div class="term">${term}</div></section>`;
+
+  /* device zone */
+  const devLine = s.play ? `Unlocked with friends · play · last heard 1 s ago` : `Unlocked by Yona's Mac · last heard 1 s ago`;
+  const playBanner = s.play ? `<div style="display:flex;gap:10px;align-items:center;border:1px solid var(--warning-bd);background:var(--warning-bg);border-radius:4px;padding:6px 10px"><span style="flex:1;font-size:12px;color:var(--warning-tx);line-height:1.35">Authoring needs an author password, or plug it in by USB.</span><button class="btn">Enter a password</button></div>` : '';
+  const dev = `<footer class="zone dev">${playBanner}<p class="line">${devLine}</p><div class="verbs">${button(btn('Disconnect','r'))}<span class="spring"></span>${button(btn('Forget','l',{danger:true}))}</div></footer>`;
+
+  const na = c === 'T' && T && T.na ? ` na" data-na="${esc(T.na)}` : '';
+  return `<article class="card${na}">${head}${proj}${fwz}${dev}</article>`;
+}
+
+/* ===================================================================== sections */
+function renderConcepts() {
+  const s = S(O.state);
+  document.getElementById('concepts').innerHTML = CONCEPTS.map(c => `
+    <div class="concept"><div class="chead"><span class="name">${c.name}</span>${c.lean ? '<span class="lean-tag">lean</span>' : ''}<span class="thesis">${c.thesis}</span></div>
+    ${card(c.id, s, O)}</div>`).join('');
+}
+
+function renderMatrix() {
+  const groups = ['progress','needs','info'];
+  document.getElementById('matrix').innerHTML = groups.map(k => `
+    <h3 class="kind"><i style="background:${KINDS[k].dot}"></i>${KINDS[k].name} <span class="why">— ${KINDS[k].why}</span></h3>
+    <div class="row">${STATES.filter(s => s.kind === k).map(s => `
+      <div class="concept"><p class="statecap"><b>${s.name}</b><span class="who">${s.who}</span></p>${card(O.mx, s, { ...O, pct:null })}</div>`).join('')}</div>`).join('');
+}
+
+function renderVersions() {
+  const rows = [
+    ['Same version', `${V.studio}`, V.studioCommit, `${ver(V.studio)} · <span class="good">up to date</span>`, '—', `fw-esp32c6 ${V.studioCommit} · ${B.board}`],
+    ['Board older', `${V.board}`, V.boardCommit, `${ver(V.board)} ${arrow} ${nver(V.studio)} available`, 'Update', `fw-esp32c6 ${V.boardCommit} · ${B.board} — older than Studio, update recommended`],
+    ['Board newer', `${V.newer}`, V.newerCommit, `${ver(V.newer)} · newer than this Studio`, '— (no downgrade offered)', `fw-esp32c6 ${V.newerCommit} · ${B.board} — newer than Studio`],
+    ['Board is a dev build, Studio a release', `dev ${V.dev}`, '', `${ver('dev '+V.dev)} · Studio has ${nver(V.studio)}`, `Install ${V.studio}`, `fw-esp32c6 ${V.dev} · ${B.board}`],
+    ['Board is a modified dev build', `dev ${V.dev} (modified)`, '', `${ver('dev '+V.dev+' (modified)')} · Studio has ${nver(V.studio)}`, `Install ${V.studio}`, `fw-esp32c6 ${V.dev}-dirty · ${B.board}`],
+    ['Both dev builds, same commit', `dev ${V.dev}`, '', `${ver('dev '+V.dev)} · <span class="good">same as this Studio</span>`, '—', `fw-esp32c6 ${V.dev} · ${B.board}`],
+    ['Both dev builds, different commits', `dev ${V.dev}`, '', `${ver('dev '+V.dev)} · this Studio is ${nver('dev '+V.studioCommit)}`, `Install dev ${V.studioCommit}`, `fw-esp32c6 ${V.dev} · ${B.board}`],
+    ['Studio is a dev build, board a release', `${V.board}`, V.boardCommit, `${ver(V.board)} · this Studio is ${nver('dev '+V.studioCommit)}`, `Install dev ${V.studioCommit}`, `fw-esp32c6 ${V.boardCommit} · ${B.board}`],
+    ['A long version', `2026.12.31-147`, 'f00dfac', `${ver('2026.12.31-146')} ${arrow} ${nver('2026.12.31-147')} available`, 'Update', `fw-esp32c6 f00dfac · ${B.board} — older than Studio, update recommended`],
+  ];
+  const w = Math.min(O.width, 330) - 32;
+  document.getElementById('versions').innerHTML = `<table class="vt"><tr><th>case</th><th>header, second row</th><th>firmware line (A)</th><th>offer</th><th>today</th></tr>
+    ${rows.map(r => `<tr><td>${r[0]}</td>
+      <td class="cardish"><p class="mono" style="width:${w}px" title="${B.mac} · ${r[1]}${r[2]?' · '+r[2]:''}${r[1].includes('modified')?' (raw: '+V.dev+'-dirty-142233PT)':''}">${B.mac} · <span class="v">${r[1]}</span>${r[2]?` <span class="c">${r[2]}</span>`:''}</p></td>
+      <td class="cardish"><p class="line" style="width:${w}px" title="${esc(strip(r[3]))}">${r[3]}</p></td>
+      <td class="off">${r[4]}</td><td class="today" title="${esc(r[5])}"><div style="width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r[5]}</div></td></tr>`).join('')}</table>`;
+}
+
+function renderPops() {
+  const P = [
+    ['uptodate', 'running', 'var(--good-tx)', `${B.chip} · ${V.studio} · ${B.mac}`],
+    ['available', 'running · update available', 'var(--live-tx)', `${B.chip} · ${V.board} → ${V.studio} · ${B.mac}`],
+    ['updating', 'Updating · 40%', 'var(--working-tx)', `${B.chip} · ${V.board} → ${V.studio} · ${B.mac}`],
+    ['crashing', 'Needs firmware', 'var(--attention-tx)', `${B.chip} · ${V.studio} keeps crashing · ${B.mac}`],
+  ];
+  document.getElementById('pops').innerHTML = P.map(([id, run, col, stat]) => `<div class="concept" style="width:300px"><p class="statecap"><b>${S(id).name}</b></p>
+    <div class="pop"><div class="band"><div class="top"><span class="glyph"></span><strong>${B.title}</strong><span class="run" style="color:${col}">${run}</span></div>
+    <p class="stat">${stat}</p></div><p class="hintp">This tab is the session: leaving the editor lets the board go.</p></div></div>`).join('');
+}
+
+function renderLegend() {
+  document.getElementById('legY').innerHTML = Array.from({length:16}, () => '<i class="led-y"></i>').join('');
+  document.getElementById('legR').innerHTML = Array.from({length:16}, () => '<i class="led-r"></i>').join('');
+}
+
+function renderOffers() {
+  const L = l => `<span class="pill-l lvl ${l}">${l.toUpperCase()}</span>`;
+  const rows = [
+    ['Update available', `${B.path}/update-firmware`, 'Update', 'r', `Routine (lean; today Lasting). Backs up first when it must, then writes; a failure rolls back by itself. Dev build: the label is "Install ${V.studio}".`],
+    ['Backing up', `${B.path}/cancel`, 'Cancel', 'r', 'Nothing has changed on the board yet.'],
+    ['Updating · Finishing · Restoring', '—', '(no offer)', '', 'Studio does it. Finishing and restoring start on connect with no click. No Cancel once writing starts.'],
+    ['Updating from another device', '—', '(no offer)', '', 'If that device goes away, this Studio finishes it on its own.'],
+    ['Rolled back', `${B.path}/update-firmware`, 'Try again', 'r', 'The same offer as Update, with the label it needs here.'],
+    ['Keeps crashing', `${B.path}/reinstall-firmware`, 'Reinstall', 'r', 'Same version again, from the cache or the release store.'],
+    ['Keeps crashing · Needs a version', `${B.path}/install-firmware`, 'Other version…', 'r', 'Takes a version parameter (its choices: the versions this Studio can get). Lasting when the pick is older than the board\'s project format.'],
+    ['Needs a version Studio lacks', `${B.path}/install-firmware`, `Install ${V.studio}`, 'r', 'The same offer with this Studio\'s own version preselected. The board has no running firmware, so nothing is lost.'],
+    ['Needs USB once (over USB)', `${B.path}/update-firmware`, 'Update firmware', 'l', 'Today\'s USB flash, unchanged. Over Bluetooth or Wi-Fi it is not offered at all: the line says what to do.'],
+    ['Play access only', '—', '(no offer)', '', 'The update is not offered; the device zone\'s "Enter a password" is the way to it.'],
+    ['Any board but the two below', `${B.path}/erase`, 'Factory reset', 'l', 'Unchanged.'],
+    ['Keeps crashing · Needs a version', '—', '(Factory reset withdrawn)', '', 'Three firmware buttons do not fit a 320 px card, and here installing is the repair; erasing would lose the project for nothing. A judgment call: say if Factory reset must stay.'],
+  ];
+  document.getElementById('offers').innerHTML = `<tr><th>state</th><th>path</th><th>button</th><th>level</th><th>why</th></tr>` +
+    rows.map(r => `<tr><td>${r[0]}</td><td class="path">${r[1]}</td><td>${r[2]}</td><td>${r[3] ? L(r[3]) : ''}</td><td>${r[4]}</td></tr>`).join('');
+}
+
+/* ===================================================================== controls */
+function renderStateStrip() {
+  const g = document.getElementById('stateGrp');
+  g.innerHTML = '<span class="lbl">state</span>' + STATES.map(s => `<button class="k-${s.kind} ${s.id === O.state ? 'active' : ''}" data-state="${s.id}">${s.name}</button>`).join('');
+  const m = document.getElementById('mxGrp');
+  m.innerHTML = CONCEPTS.filter(c => c.id !== 'T').map(c => `<button class="${c.id === O.mx ? 'active' : ''}" data-mx="${c.id}">${c.id}</button>`).join('');
+}
+
+function renderAll() {
+  document.documentElement.style.setProperty('--cardw', O.width + 'px');
+  document.body.classList.toggle('term-off', O.term === 'off');
+  document.body.classList.toggle('term-full', O.term === 'full');
+  document.body.classList.toggle('show-levels', O.levels);
+  renderStateStrip(); renderConcepts(); renderMatrix(); renderVersions(); renderPops(); renderOffers();
+  document.querySelectorAll('#controls button[data-o]').forEach(b => {
+    const k = b.dataset.o; if (k === 'levels') { b.classList.toggle('active', O.levels); return; }
+    b.classList.toggle('active', String(O[k]) === b.dataset.v);
+  });
+}
+
+document.addEventListener('click', e => {
+  const t = e.target.closest('button'); if (!t) return;
+  if (t.dataset.state) { stopPlay(); O.state = t.dataset.state; O.pct = null; renderAll(); return; }
+  if (t.dataset.mx) { O.mx = t.dataset.mx; renderAll(); return; }
+  if (t.dataset.o) {
+    const k = t.dataset.o;
+    if (k === 'levels') O.levels = !O.levels; else O[k] = k === 'width' ? +t.dataset.v : t.dataset.v;
+    renderAll(); return;
+  }
+  if (t.dataset.play) { play(t.dataset.play); return; }
+  /* card buttons: Lasting arms first (production's two-click arm), the rest just flash */
+  if (t.dataset.level) {
+    if (t.dataset.level === 'l' && !t.classList.contains('armed')) {
+      t.classList.add('armed'); t.firstChild.textContent = 'Click again to ' + t.dataset.label.toLowerCase();
+      setTimeout(() => { t.classList.remove('armed'); t.firstChild.textContent = t.dataset.label; }, 4000); return;
+    }
+    if (/^(Update|Try again|Install)/.test(t.dataset.label) && t.closest('#concepts')) play(O.build === 'dev' ? 'dev' : 'happy');
+    if (/^Reinstall/.test(t.dataset.label) && t.closest('#concepts')) play('reinstall');
+  }
+});
+
+/* ===================================================================== play */
+let timer = null;
+function stopPlay() { if (timer) { clearInterval(timer); timer = null; } }
+function play(kind) {
+  stopPlay(); if (kind === 'stop') return;
+  const steps = {
+    happy:    [['available',null,6], ['updating',0,100], ['uptodate',null,6]],
+    dev:      [['available',null,6], ['backup',0,100], ['updating',0,100], ['uptodate',null,6]],
+    resume:   [['updating',0,40], ['finishing',40,100], ['uptodate',null,6]],
+    rollback: [['updating',0,100], ['rolledback',null,8]],
+    heal:     [['restoring',0,100], ['available',null,6]],
+    reinstall:[['crashing',null,4], ['updating',0,100], ['uptodate',null,6]],
+  }[kind];
+  let i = 0, p = steps[0][1];
+  O.state = steps[0][0]; O.pct = p; renderAll();
+  timer = setInterval(() => {
+    const [id, from, to] = steps[i];
+    if (from === null) { p = (p ?? 0) + 1; if (p >= to) { i++; if (i >= steps.length) { stopPlay(); return; } p = steps[i][1]; O.state = steps[i][0]; } }
+    else { p += 2; if (p > to) { i++; if (i >= steps.length) { stopPlay(); return; } p = steps[i][1]; O.state = steps[i][0]; } }
+    O.pct = steps[i][1] === null ? null : p; renderAll();
+  }, 120);
+}
+
+/* ===================================================================== url state (for screenshots) */
+const q = new URLSearchParams(location.search);
+if (q.get('only')) {
+  const keep = q.get('only').split(',');
+  document.querySelectorAll('.sec').forEach(el => { if (!keep.includes(el.dataset.sec)) el.style.display = 'none'; });
+  if (!q.get('intro')) document.querySelectorAll('body > h1, body > p.hint').forEach(el => el.style.display = 'none');
+  if (!q.get('controls')) document.getElementById('controls').style.display = 'none';
+  document.querySelectorAll('.sec h2').forEach(h => h.style.marginTop = '4px');
+}
+for (const k of ['state','transport','build','term','mx']) if (q.get(k)) O[k] = q.get(k);
+if (q.get('width')) O.width = +q.get('width');
+if (q.get('levels')) O.levels = true;
+renderLegend(); renderAll();
+if (q.get('play')) play(q.get('play'));
+if (q.get('diag')) {
+  const over = [...document.querySelectorAll('.verbs, .line, .mono, .lineB')].filter(v => v.scrollWidth > v.clientWidth + 1 && v.closest('.sec'))
+    .map(v => (v.closest('.concept')?.querySelector('.name,.statecap b')?.textContent || '?') + ' :: ' + v.className + ' :: ' + v.textContent.trim().slice(0, 70));
+  const d = document.createElement('pre'); d.id = 'diag'; d.textContent = JSON.stringify({ pageW: document.documentElement.scrollWidth, over }, null, 1); document.body.appendChild(d);
+}
+</script>
+</body>
+</html>

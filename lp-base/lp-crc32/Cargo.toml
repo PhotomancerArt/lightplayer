@@ -1,0 +1,13 @@
+[package]
+name = "lp-crc32"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "The one CRC-32 (IEEE / ISO-HDLC) of the boot and update records: no_std, table-free, no dependencies"
+
+[dependencies]
+
+[lints]
+workspace = true
