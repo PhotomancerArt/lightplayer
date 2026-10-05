@@ -84,7 +84,10 @@ just fw-esp32c6-size-check
 ```
 
 This prints the image size and headroom, and pre-merge CI fails any PR that
-drops headroom below 64 KB.
+drops headroom below 64 KB. Since 2026-10-04 it builds the **split image**
+(loader, boot records, core, engine — what the C6 ships) and gates its
+smallest steady-or-update headroom; the four numbers are defined in the
+budget ADR's amendment.
 
 If the binary exceeds available flash:
 
@@ -347,6 +350,8 @@ runtime.
 | `lpc-update`     | OTA update protocol v1 (channel 3): codec, board manifest, progress record, and the board's sans-IO update session | yes |
 | `lpa-update`     | OTA host side: serving, backup, login client, decision, update driver; feature `pack` = the one packer of encoding 1 | no (host + wasm) |
 | `fw-esp32c6`       | ESP32 firmware                         | yes (bare metal) |
+| `fw-esp32c6-loader` | The C6 split image's RAM-only loader: boots the core a boot record names (standalone crate, own workspace) | yes (bare metal) |
+| `lp-fw-split`    | Host tool: the C6's two-pass split link, its verifier and layout (`tools/`; `docs/adr/2026-10-04-c6-split-link-firmware-loader-and-boot-records.md`) | no (host) |
 | `fw-emu`         | RISC-V emulator firmware (CI)          | yes (bare metal) |
 | `lp-riscv-emu`   | RV32 emulator (host) — in `lp-emu/`    | yes (+std feat)  |
 | `lp-xt-emu`      | Xtensa emulator + machine-mode hart (host) — in `lp-emu/` | yes (+std feat)  |

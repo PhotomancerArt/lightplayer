@@ -339,6 +339,10 @@ jobs:
               - 'lp-riscv/**'
               - 'lp-emu/**'
               - 'third_party/**'
+              # The split pipeline that links, verifies and lays out the
+              # C6's shipped image, and the version/target it stamps.
+              - 'tools/lp-fw-split/**'
+              - 'tools/lp-app-version/**'
               - 'Cargo.toml'
               - 'Cargo.lock'
               - 'rust-toolchain.toml'
@@ -364,6 +368,13 @@ jobs:
             emu_c6:
               - 'lp-emu/**'
               - 'lp-fw/fw-esp32c6/**'
+              # The split image (the C6's shipped one) the boot gates and
+              # the heap ratchet run: its loader, the boot-record formats
+              # the loader and the core share, and the pipeline that links
+              # and lays it out.
+              - 'lp-fw/fw-esp32c6-loader/**'
+              - 'lp-base/lp-bootctl/**'
+              - 'tools/lp-fw-split/**'
               # The server loop and wire code both chips' firmware share.
               # Neither `emu_c6` nor `emu_esp32v3` covered it before, which
               # meant a change here — including to the boot path both
@@ -1267,7 +1278,10 @@ jobs:
       - name: Install espflash (prebuilt)
         run: cargo binstall --no-confirm --locked espflash@3.3.0
 
-      - name: Check esp32c6 image size
+      # The SPLIT image (the product's): two link passes, the verifier (any
+      # core node in the engine region fails the job), and the split
+      # headrooms gated against the 64 KB floor — all in the step summary.
+      - name: Check esp32c6 split image (verifier + headroom)
         run: cd lp2025 && just fw-esp32c6-size-check
 
       # The image just built must describe itself correctly: extract the

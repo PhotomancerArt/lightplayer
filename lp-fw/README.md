@@ -13,6 +13,7 @@ they are not replacements for on-device shader compilation.
 | [`fw-esp32c6`](./fw-esp32c6/) | ESP32-C6 bare metal (RISC-V) | Reference embedded firmware target. Runs `lp-server` on device, with every node kind and every driver. |
 | [`fw-esp32s3`](./fw-esp32s3/) | ESP32-S3 bare metal (Xtensa LX7) | Second chip. Runs `lp-server` on device, JITs GLSL to **Xtensa** machine code, and drives real WS281x strips on 4 concurrent RMT channels via `lp-ws281x`. Deliberately partial: shader + fixture nodes only. See its README for what is gated off and why. |
 | [`fw-esp32v3`](./fw-esp32v3/) | classic ESP32 bare metal (Xtensa LX6) | Third chip — the WLED-class deployment target (4 MB flash, C6-shaped partition table). Runs `lp-server` on device over **UART0** (no USB-Serial-JTAG on this chip), JITs GLSL to Xtensa machine code (bit-exact against the host oracle), and drives WS281x strips via `lp-ws281x` with transmission on the second core — measured at 1,500 LEDs across 5 wires at 30 fps (the DOM-Z-102 soft-limit record). Desk board: DOM-Z-102. |
+| [`fw-esp32c6-loader`](./fw-esp32c6-loader/) | ESP32-C6 bare metal, RAM-only | The split image's loader: the app the IDF bootloader starts; reads the two boot records and boots the core they name. A standalone crate (own workspace, built from its directory by `tools/lp-fw-split`). |
 | [`fw-esp32-common`](./fw-esp32-common/) | chip-generic lib | Chip-generic firmware layer shared by the per-SOC ESP32 crates — `fw-esp32c6`, `fw-esp32s3` and `fw-esp32v3` all consume it. Builds under both the pinned nightly and the Espressif fork; no esp-* HAL deps. |
 | [`lp-ws281x`](./lp-ws281x/) | chip-agnostic `no_std` lib | Portable core of the multi-channel WS2811/WS2812 RMT driver — pulse encoding, ping-pong refill, guard-word flicker protection, and the second-core transmission pusher — behind the `RmtHw` trait a chip backend implements. Used by all three ESP32 targets. |
 | [`fw-emu`](./fw-emu/) | RV32 bare-metal emulator | Firmware image used by emulator-oriented validation. |
@@ -168,7 +169,18 @@ reads the variant's **build def** (`lp-fw/builds/<id>.json` — crate, cargo
 target/profile/features, flash size, partition table; see that directory's
 README), runs the build in the crate directory, merges the image with
 `espflash save-image --merge --skip-padding`, and then **extracts** the
-embedded manifest core from what it just built. The emitted `manifest.json` is
+embedded manifest core from what it just built.
+
+**The C6 is a split image** (`"split": true` in `esp32c6-4mb.json`;
+`docs/adr/2026-10-04-c6-split-link-firmware-loader-and-boot-records.md`):
+`lp-cli firmware build|package esp32c6-4mb` build it through
+`tools/lp-fw-split` — two link passes, the verifier, the loader, the boot
+records, the core and the engine laid out inside `factory` — and package
+its merged image at `0x0` with a `split` block in the manifest; `core.bin`
+and `engine.bin` go to `target/firmware-parts/<id>/`. `just
+fw-esp32c6-split` builds the same image into `target/fw-split/`. A plain
+`cargo build` (and `just build-fw-esp32c6` / `flash-fw-esp32c6`) is the
+one-link dev image. The emitted `manifest.json` is
 schemaVersion 2: the extracted core verbatim under `core`, plus distribution
 facts (variant id, flash policy, image sizes and SHA-256s). Nothing restates
 the feature list or the wire proto. Packaging re-extracts from the merged image

@@ -54,6 +54,11 @@ pub struct BuildDef {
     /// image until that table follows.
     #[serde(default)]
     pub bootloader: Option<String>,
+    /// Build the **split image** (`tools/lp-fw-split`): the loader, the boot
+    /// records, the core and the engine, laid out inside `factory`. Only the
+    /// ESP32-C6 has a split image; absent means a single linked image.
+    #[serde(default)]
+    pub split: bool,
 }
 
 /// Chip identity block of a build def.
@@ -110,6 +115,11 @@ impl BuildDef {
         Ok(Some(path))
     }
 
+    /// Where a split def's build lands (`lp-fw-split build --out`).
+    pub fn split_dir(&self, repo_root: &Path) -> PathBuf {
+        repo_root.join("target").join("fw-split").join(&self.id)
+    }
+
     /// Path of the linked ELF this def's build produces.
     pub fn elf_path(&self, repo_root: &Path) -> PathBuf {
         repo_root
@@ -134,6 +144,13 @@ pub fn parse_build_def(json: &str) -> Result<BuildDef> {
     }
     if def.cargo_features.is_empty() {
         bail!("build def `{}` lists no cargo features", def.id);
+    }
+    if def.split && def.chip.name != "esp32c6" {
+        bail!(
+            "build def `{}` sets `split`, which only the ESP32-C6 has (chip `{}`)",
+            def.id,
+            def.chip.name
+        );
     }
     Ok(def)
 }
@@ -224,10 +241,36 @@ mod tests {
         assert_eq!(def.flash_size_arg(), "4mb");
         assert_eq!(def.flash_size_bytes(), 4 * 1024 * 1024);
         assert_eq!(def.chip.name, "esp32c6");
+        assert!(!def.split, "absent means a single linked image");
         assert_eq!(
             def.elf_path(Path::new("/repo")),
             Path::new("/repo/target/riscv32imac-unknown-none-elf/release-esp32/fw-esp32c6")
         );
+    }
+
+    #[test]
+    fn split_is_an_optional_input_only_the_c6_may_set() {
+        let split = C6.replace(
+            "\"flashSizeMb\": 4,",
+            "\"flashSizeMb\": 4, \"split\": true,",
+        );
+        let def = parse_build_def(&split).unwrap();
+        assert!(def.split);
+        assert_eq!(
+            def.split_dir(Path::new("/repo")),
+            Path::new("/repo/target/fw-split/esp32c6-4mb")
+        );
+        let s3 = split.replace("\"name\": \"esp32c6\"", "\"name\": \"esp32s3\"");
+        let error = parse_build_def(&s3).unwrap_err().to_string();
+        assert!(error.contains("only the ESP32-C6"), "{error}");
+    }
+
+    /// The shipped C6 def builds the split image.
+    #[test]
+    fn the_c6_def_is_split() {
+        let repo_root = find_repo_root().unwrap();
+        assert!(load_build_def(&repo_root, "esp32c6-4mb").unwrap().split);
+        assert!(!load_build_def(&repo_root, "esp32s3-8mb").unwrap().split);
     }
 
     /// Version + refuse: a future format is an error, never a partial decode.

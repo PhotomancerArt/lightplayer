@@ -97,6 +97,14 @@ OPTIONS:
                             at exit (created blank if absent) — the board's
                             flash, surviving a run
     --flash-copy <file>     the same file read once and never written
+    --flash-holds-image     with --elf: the flash file is a whole flashed image;
+                            the ELF is direct-loaded over it and nothing is
+                            written into the chip (an app that is itself a
+                            loader)
+    --mmu-page <64k|32k|16k|8k>
+                            the cache MMU page size a direct load leaves, as
+                            the bootloader it stands in for would [64k, the
+                            reset value; espflash 3.3.0's picks 32k on 4 MB]
     --flash-size <4M|8M>    the modelled chip's size [4M]
     --usb-host absent|attached|attached-idle
                             the USB-Serial-JTAG host at power-on: no cable
@@ -417,6 +425,10 @@ struct Args {
     /// `--no-block-cache`. The cache is ON by default, so the flag is held
     /// as its negation: `Args` derives `Default`.
     no_block_cache: bool,
+    /// `--flash-holds-image`.
+    flash_holds_image: bool,
+    /// `--mmu-page`.
+    mmu_page_len: Option<u32>,
     /// `--interpreter`: refuse to install a translated core. Held as its
     /// negation for the same reason as `no_block_cache` — translation is the
     /// default wherever it exists.
@@ -474,6 +486,7 @@ fn run() -> Result<ExitCode, String> {
         .time_grade(args.time_grade)
         .strict(args.strict)
         .block_cache(!args.no_block_cache)
+        .flash_holds_image(args.flash_holds_image)
         .translate(!args.interpreter)
         .jit_report(args.jit_report)
         .blockprof(args.blockprof)
@@ -509,6 +522,9 @@ fn run() -> Result<ExitCode, String> {
     }
     if let Some(word) = args.lpperi_clk_en {
         builder = builder.lp_peri_clk_en(word);
+    }
+    if let Some(len) = args.mmu_page_len {
+        builder = builder.mmu_page_len(len);
     }
     if let Some(faults) = args.usb_faults.clone() {
         builder = builder.usb_faults(faults);
@@ -894,6 +910,11 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             }
             "--strict-bus" => args.strict = true,
             "--no-block-cache" => args.no_block_cache = true,
+            "--flash-holds-image" => args.flash_holds_image = true,
+            "--mmu-page" => {
+                let text = value("--mmu-page")?;
+                args.mmu_page_len = Some(parse_mmu_page(&text)?);
+            }
             "--interpreter" => args.interpreter = true,
             "--jit" => args.jit = true,
             "--jit-escape-all" => args.jit_escape_all = true,
@@ -1589,6 +1610,17 @@ fn report(machine: &mut Esp32C6Machine, outcome: &Outcome) {
         for (i, (address, symbol)) in machine.backtrace().into_iter().enumerate() {
             eprintln!("  #{i:<2} {address:#010x} {symbol}");
         }
+    }
+}
+
+/// `--mmu-page`'s spellings: `64k`, `32k`, `16k`, `8k`.
+fn parse_mmu_page(text: &str) -> Result<u32, String> {
+    match text.to_ascii_lowercase().as_str() {
+        "64k" => Ok(0x1_0000),
+        "32k" => Ok(0x8000),
+        "16k" => Ok(0x4000),
+        "8k" => Ok(0x2000),
+        _ => Err(format!("--mmu-page `{text}`: one of 64k, 32k, 16k, 8k")),
     }
 }
 

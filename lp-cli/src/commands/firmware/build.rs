@@ -13,7 +13,11 @@ pub fn handle_build(args: BuildArgs) -> Result<()> {
     let repo_root = find_repo_root()?;
     let def = load_build_def(&repo_root, &args.id)?;
     build_firmware(&repo_root, &def)?;
-    println!("built {}", def.elf_path(&repo_root).display());
+    if def.split {
+        println!("built {}", def.split_dir(&repo_root).display());
+    } else {
+        println!("built {}", def.elf_path(&repo_root).display());
+    }
     Ok(())
 }
 
@@ -21,7 +25,14 @@ pub fn handle_build(args: BuildArgs) -> Result<()> {
 /// crate-local `.cargo/config.toml` (linker scripts, build-std) and
 /// `rust-toolchain.toml` (the Xtensa fork's `esp` channel) apply — building
 /// from the workspace root fails at link time instead.
+///
+/// Either way the build is told its **target** (`LP_FW_TARGET`, the def's
+/// id), which the image embeds in its manifest core. A split def builds the
+/// split image through `lp_fw_split` into [`BuildDef::split_dir`].
 pub fn build_firmware(repo_root: &Path, def: &BuildDef) -> Result<()> {
+    if def.split {
+        return build_split(repo_root, def);
+    }
     let crate_dir = def.crate_dir(repo_root)?;
     let features = def.cargo_features.join(",");
     let mut command = Command::new("cargo");
@@ -30,7 +41,8 @@ pub fn build_firmware(repo_root: &Path, def: &BuildDef) -> Result<()> {
         .arg("build")
         .args(["--target", &def.cargo_target])
         .args(["--profile", &def.profile])
-        .args(["--features", &features]);
+        .args(["--features", &features])
+        .env("LP_FW_TARGET", &def.id);
     scrub_outer_build_env(&mut command);
 
     println!(
@@ -52,6 +64,36 @@ pub fn build_firmware(repo_root: &Path, def: &BuildDef) -> Result<()> {
             elf.display()
         );
     }
+    Ok(())
+}
+
+/// The split image, through the split tool's library: two passes, the
+/// verifier, the loader, `app.bin` and `merged.bin`.
+fn build_split(repo_root: &Path, def: &BuildDef) -> Result<()> {
+    if def.cargo_target != lp_fw_split::pass_link::TARGET
+        || def.profile != lp_fw_split::pass_link::PROFILE
+    {
+        bail!(
+            "build def `{}` asks for {} / {}, but the split image is built for {} / {}",
+            def.id,
+            def.cargo_target,
+            def.profile,
+            lp_fw_split::pass_link::TARGET,
+            lp_fw_split::pass_link::PROFILE
+        );
+    }
+    println!(
+        "building {} as a split image ({} / {})",
+        def.id, def.cargo_target, def.profile
+    );
+    let mut opts =
+        lp_fw_split::BuildOptions::new(repo_root.to_path_buf(), def.split_dir(repo_root));
+    opts.features = def.cargo_features.join(",");
+    opts.bootloader = def.bootloader_path(repo_root)?;
+    opts.partitions = repo_root.join(&def.partitions_csv);
+    opts.target = Some(def.id.clone());
+    lp_fw_split::build(&opts)
+        .with_context(|| format!("building the split image for `{}`", def.id))?;
     Ok(())
 }
 

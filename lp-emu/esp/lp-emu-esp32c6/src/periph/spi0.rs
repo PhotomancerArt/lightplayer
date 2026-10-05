@@ -70,6 +70,17 @@ impl Spi0 {
         }
     }
 
+    /// Put `mmu_power_ctrl`'s page mode (bits 4:3) where a second-stage
+    /// bootloader leaves it, without a guest write — what a direct load does
+    /// in the bootloader's place (`Esp32C6Builder::mmu_page_len`). The
+    /// register and the cache MMU change together, as on a guest write.
+    pub fn seed_page_mode(&mut self, mode: u8) {
+        let mode = mode & 3;
+        let word = (self.regs.stored(POWER_CTRL) & !(3 << 3)) | (u32::from(mode) << 3);
+        self.regs.poke(POWER_CTRL, word);
+        self.mmu.lock().unwrap().set_page_mode(mode);
+    }
+
     /// A `cmd` trigger this block does not perform: say so once, and leave
     /// the buffer alone.
     ///
@@ -180,6 +191,10 @@ impl Peripheral for Spi0 {
 
     fn load_state(&mut self, bytes: &[u8]) {
         self.regs.load_state(bytes);
+    }
+
+    fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
+        Some(self)
     }
 }
 

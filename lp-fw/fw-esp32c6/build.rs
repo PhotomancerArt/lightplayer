@@ -31,10 +31,12 @@ use std::process::Command;
 /// `LP_BUILD_FEATURES` (this crate's enabled cargo features, comma-separated
 /// and sorted) for the validation system's transcript header.
 ///
-/// Plus `LP_APP_VERSION`, the build's app version, from the one helper every
+/// Plus `LP_APP_VERSION`, the build's app version, and `LP_FW_TARGET`, the
+/// target (build def id) it was built as, from the one helper every
 /// versioned build uses (`tools/lp-app-version`) — never computed here.
 fn emit_build_provenance() {
     lp_app_version::emit();
+    lp_app_version::emit_target();
     emit_git_head_watches();
     let commit =
         git_output(&["rev-parse", "--short=12", "HEAD"]).unwrap_or_else(|| "unknown".into());
@@ -198,6 +200,16 @@ fn main() {
     // OOM/panic exercise rather than replacing the entrypoint — and it went
     // with the unwind tier it existed to validate.
     println!("cargo::rustc-check-cfg=cfg(fw_harness)");
+    // Split-link builds (the split pipeline sets `LP_SPLIT_LINK`): the core
+    // reaches the engine only through its header, and the boot-record path
+    // is compiled in. An env var rather than a feature: both link passes
+    // must see the same code, and a feature would change every crate's
+    // fingerprint.
+    println!("cargo::rustc-check-cfg=cfg(lp_split)");
+    println!("cargo:rerun-if-env-changed=LP_SPLIT_LINK");
+    if std::env::var_os("LP_SPLIT_LINK").is_some() {
+        println!("cargo::rustc-cfg=lp_split");
+    }
     let harness = std::env::vars().any(|(k, _)| k.starts_with("CARGO_FEATURE_TEST_"));
     if harness {
         println!("cargo::rustc-cfg=fw_harness");

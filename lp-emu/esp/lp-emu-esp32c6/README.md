@@ -234,6 +234,34 @@ board:
   so without this every filesystem read returns error 1 for a reason that has
   nothing to do with the filesystem.
 
+### A direct load over a chip that already holds its image
+
+`--flash-holds-image` (`Esp32C6Builder::flash_holds_image`; `lp-cli emu run
+--elf <app> --over <merged>`) is the same direct load over a flash file that
+is a **whole flashed image**: nothing is written into the chip. The app's
+flash-resident sections are compared with the bytes already there (section by
+section — an ESP image packs a segment's sections apart and fills the gap with
+its own headers — and the count is `FlashStaging::mismatched_bytes`), the page
+table is programmed for them as above, and neither a partition table nor the
+ROM's own window segment is staged (a ROM-up boot has neither). It is for an
+app that is itself a loader and does the rest as guest code — the ESP32-C6
+split image's `loader.elf` over its `merged.bin`.
+
+Such an app reads the MMU page size back, and the page size is the
+bootloader's choice, so the caller states it: `--mmu-page <64k|32k|16k|8k>`
+(`Esp32C6Builder::mmu_page_len`, seeded through `SPI0.mmu_power_ctrl` as the
+bootloader writes it). The chip resets to 64 KiB; espflash 3.3.0's bundled
+bootloader picks 32 KiB on a 4 MB C6, which the ROM-up boot measures.
+
+Unlike the ROM-up path's ROM and bootloader, the loader is the caller's own
+code, so the block cache and the translated core stay on and it is held to
+the `fence.i` contract like any app (`--strict-bus` reports it). For the
+split image it holds, and the identity oracle agrees (2026-10-04, this
+crate at the M2 PR's commit): `--no-block-cache` against the cache, and
+`--jit` against `--interpreter` with 25 % of 22.0 M instructions translated,
+give the same USB-Serial-JTAG bytes and the same stop line over 2 s.
+`tests/split_boot.rs` compares this path with a ROM-up boot of the same chip.
+
 ## Booting from the reset vector
 
 `--merged <chip.bin>` places **nothing**. The whole 4 MiB flash part goes

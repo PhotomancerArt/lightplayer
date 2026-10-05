@@ -28,6 +28,29 @@ justfile recipes.
 | `partitionsCsv` | Repo-relative partition table, the same file espflash flashes with. |
 | `chip.family` / `chip.name` | espflash chip identity (`--chip`). |
 | `bootloader` | Optional. Repo-relative second-stage bootloader to merge instead of the one the installed espflash bundles (`--bootloader`). Provenance and the rule for changing it: `lp-fw/bootloaders/README.md`. |
+| `split` | Optional, ESP32-C6 only. `true` builds the **split image** (`tools/lp-fw-split`): the loader, the boot records, the core and the engine inside `factory` (`docs/adr/2026-10-04-c6-split-link-firmware-loader-and-boot-records.md`). The package is still one merged image at `0x0`, plus a `split` block in `manifest.json`; `core.bin` and `engine.bin` go to `target/firmware-parts/<id>/`, never into the package. Absent: one linked image. |
+
+## The target
+
+A build def's `id` is a **target**: the name of a line of builds
+(`esp32c6-4mb`). Every image built from a def embeds it — `lp-cli firmware
+build <id>` hands it to the build as `LP_FW_TARGET`, and the image's manifest
+core carries it as `target` (a plain `cargo build`, with no def behind it,
+says `unknown`). The rules:
+
+- **A target is an opaque name.** No code parses a chip or a flash size out
+  of it; those are the def's fields and the manifest core's `platform`. (It
+  is already untrue that the name spells the chip: `esp32v3-4mb`'s chip is
+  `esp32`.)
+- The convention is `<chip>-<flash>[-<variant>]`, matching
+  `[a-z0-9][a-z0-9-]{0,63}`; the default variant has no suffix.
+- **A target is never renamed.** Boards report it and releases are filed
+  under it.
+- A release channel, a version, a board's wiring and runtime settings are
+  **not** part of a target.
+
+Three names, never confused: the **target** (`esp32c6-4mb`), the
+**version** (`2026.10.05-3`), and the **build id** (`<version>+<commit>`).
 
 ## Authoring rules
 
@@ -80,7 +103,8 @@ step in both deploy workflows.
 
 `lp-cli firmware package <id>` writes
 `target/studio-web-assets/firmware/<id>/` (merged image + `manifest.json`
-schemaVersion 2). `served.json` decides which of those directories reach the
+schemaVersion 2; a split def adds the manifest's `split` block and writes its
+parts to `target/firmware-parts/<id>/`). `served.json` decides which of those directories reach the
 Studio site / Pages artifact.
 
 ## Consumers

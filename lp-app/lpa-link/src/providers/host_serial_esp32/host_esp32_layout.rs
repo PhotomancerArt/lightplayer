@@ -23,7 +23,7 @@ use espflash::flasher::Flasher;
 
 use super::host_esp32_flash::{
     EventRecorder, ProgressBridge, ResolvedImage, assert_chip_matches_manifest, chip_name, connect,
-    load_manifest, manifest_chip, read_flash_region, restore_lp_analog_i2c_clock,
+    load_manifest, manifest_chip, read_flash_region, restore_lp_analog_i2c_clock, write_verified,
 };
 use crate::layout_migration::LayoutProbe;
 use crate::provider::flash_plan::{FlashPlan, FlashStepTarget, run_plan};
@@ -328,9 +328,12 @@ impl FlashStepTarget for EspflashTarget<'_, '_> {
                 image.address
             ));
             let mut bridge = ProgressBridge::new(self.recorder, "Writing firmware".to_string());
-            self.flasher
-                .write_bin_to_flash(image.address, data, Some(&mut bridge))
-                .map_err(|error| format!("firmware write failed: {error}"))?;
+            let md5 = write_verified(self.flasher, image.address, data, Some(&mut bridge))?;
+            self.recorder.log(format!(
+                "Verified {} bytes at 0x{:x} (MD5 {md5})",
+                data.len(),
+                image.address
+            ));
         }
         Ok(())
     }
@@ -345,8 +348,8 @@ impl FlashStepTarget for EspflashTarget<'_, '_> {
 
     fn write(&mut self, offset: u32, bytes: &[u8]) -> Result<(), String> {
         let mut bridge = ProgressBridge::new(self.recorder, "Moving files".to_string());
-        self.flasher
-            .write_bin_to_flash(offset, bytes, Some(&mut bridge))
+        write_verified(self.flasher, offset, bytes, Some(&mut bridge))
+            .map(|_| ())
             .map_err(|error| format!("write at {offset:#x} failed: {error}"))
     }
 
