@@ -589,6 +589,7 @@ mod tests {
     use alloc::vec;
     use lp_link::{LinkConfig, SelectiveRepeat};
     use lpc_shared::transport::LinkTrust;
+    #[cfg(feature = "json-pack")]
     use lpc_wire::WireEncoding;
 
     extern crate std;
@@ -718,6 +719,8 @@ mod tests {
         assert!(block(mux.send(link, error_reply(33, 10))).is_ok());
     }
 
+    /// Packing exists only with `json-pack`; without it every reply is JSON.
+    #[cfg(feature = "json-pack")]
     #[test]
     fn a_packed_session_codes_against_a_table_and_a_new_session_is_json_again() {
         let _turn = frame_buf_turn();
@@ -1187,6 +1190,7 @@ mod tests {
         )
     }
 
+    #[cfg(feature = "json-pack")]
     fn log_reply(n: u64) -> WireServerMessage {
         WireServerMessage::new(
             n,
@@ -1197,6 +1201,7 @@ mod tests {
         )
     }
 
+    #[cfg(feature = "json-pack")]
     fn set_encoding(encoding: WireEncoding) -> WireServerMessage {
         WireServerMessage::new(
             lpc_wire::PACK_OPT_IN_REQUEST_ID,
