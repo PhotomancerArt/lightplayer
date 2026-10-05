@@ -215,6 +215,14 @@ is now a rule of the code:
 - **Mark `attempted` right after `FlashStorage::new`**, before any radio
   comes up, so a core that dies in its bring-up is accountable.
 - **A power cut is a retry, never a rollback** (§4).
+- **An image ends on a flash sector, and a host write is checked**
+  (2026-10-05, the bench C6 `A0:F2:62:87:B4:8C`, P10's first run). The
+  packaged image ended at `0x2F55FE`; espflash 3.3.0's stub never wrote its
+  last 254 bytes, and the core started the short engine, which faulted on
+  every boot. The engine header's CRC covers the header only, so nothing at
+  boot can notice (D20 keeps it that way). The host flasher now checks each
+  write's MD5 before it resets the board.
+  `docs/defects/2026-10-05-the-host-flasher-dropped-the-split-images-last-bytes.md`.
 
 ### 8. Core-only
 
@@ -229,7 +237,11 @@ is on its link.
 
 The flash unit stays **one merged image at `0x0`** — bootloader, table and
 `app.bin` (loader, record 0 = sequence 1 proven, record 1 **erased**, core,
-engine), up to `app.bin`'s end. Studio's and the host's flashers write it
+engine), up to `app.bin`'s end. `app.bin` ends on a **4 KiB flash
+sector**, `0xFF` after the engine (`lp_fw_split::image_end`), and the
+packager holds every image to that rule (added 2026-10-05: an image ending
+mid-word lost its last 254 bytes to espflash 3.3.0's stub on silicon; see
+§7). Studio's and the host's flashers write it
 with no change, and their erase covers record 1, so a stale newer record on
 a board (one that ran the spike) is gone after one Studio update.
 `manifest.json` stays schema version 2 with an additive `split` block

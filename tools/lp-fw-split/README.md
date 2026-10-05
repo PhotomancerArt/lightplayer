@@ -58,7 +58,8 @@ come from `lp-bootctl` itself.
    (`lp_bootctl::loader_identity`) or longer than `LOADER_MAX_LEN`.
 9. **`app.bin`** for `0x10000`: loader, record sector 0 (seq 1, proven),
    record sector 1 erased, core at `0x18000`, engine at the first 32 KiB page
-   after the core — all through `lp-bootctl`.
+   after the core — all through `lp-bootctl` — then `0xFF` to the next 4 KiB
+   flash sector (`image_end`): no image this tool makes ends mid-word.
 10. **`merged.bin`**: the whole 4 MiB chip — espflash 3.3.0's bundled
     bootloader (or a build def's override), the partition table, `app.bin` —
     with the flash settings `scripts/emu/build-merged-image.sh` uses (DIO,

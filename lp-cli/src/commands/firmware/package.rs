@@ -85,15 +85,23 @@ fn package_build(repo_root: &Path, def: &BuildDef, out_dir: &Path) -> Result<Pat
         None => save_merged_image(repo_root, def, &elf, &image_path)?,
     }
 
-    // Package-time drift assertion: what espflash wrote must describe the
-    // same build as the ELF we extracted from. A mismatch means the merge
-    // picked up a stale or foreign artifact.
-    let image_bytes =
-        std::fs::read(&image_path).with_context(|| format!("reading {}", image_path.display()))?;
+    // Every packaged image ends on a flash sector, padded with 0xFF — the
+    // bytes a flasher's erase leaves there anyway. An image ending mid-word
+    // lost its last 254 bytes to espflash 3.3.0's stub on silicon
+    // (docs/defects/2026-10-05-the-host-flasher-dropped-the-split-images-last-bytes.md).
+    let image_bytes = sector_padded(
+        std::fs::read(&image_path).with_context(|| format!("reading {}", image_path.display()))?,
+    )?;
+    std::fs::write(&image_path, &image_bytes)
+        .with_context(|| format!("writing {}", image_path.display()))?;
+
     // The bootloader at the head of the image must load where Studio's
     // hung-bootloader detection expects it (`lpa_devices::bootloader`).
     check_bootloader_segments(&def.chip.name, &image_bytes)
         .with_context(|| format!("checking the bootloader in {}", image_path.display()))?;
+    // Package-time drift assertion: what espflash wrote must describe the
+    // same build as the ELF we extracted from. A mismatch means the merge
+    // picked up a stale or foreign artifact.
     let (_, image_core) = extract_core(&image_bytes, &image_path)?;
     if image_core != core {
         bail!(
@@ -248,6 +256,22 @@ fn save_merged_image(
     Ok(())
 }
 
+/// The image as it is packaged: padded with `0xFF` to the next flash sector
+/// (every packaged image is written at `0x0`). The rule is
+/// [`lp_fw_split::image_end`]'s; a split build's `app.bin` already obeys it,
+/// and this holds it for every image, the monolithic ones included.
+fn sector_padded(mut image: Vec<u8>) -> Result<Vec<u8>> {
+    use lp_fw_split::image_end::{image_end_is_aligned, pad_image_end};
+    pad_image_end(&mut image, 0);
+    if !image_end_is_aligned(0, image.len()) {
+        bail!(
+            "the packaged image is {} B, not a whole number of flash sectors",
+            image.len()
+        );
+    }
+    Ok(image)
+}
+
 /// Drop images and manifests from a previous packaging run so a failed merge
 /// cannot leave a stale image next to a fresh manifest.
 fn remove_stale_outputs(out_dir: &Path) -> Result<()> {
@@ -341,6 +365,23 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(error.contains("chip.name"), "{error}");
+    }
+
+    /// Every packaged image's length is a whole number of flash sectors,
+    /// whatever the build produced — `76959e7a4`'s split image (`0x2F55FE`
+    /// B) and an espflash `--skip-padding` merge (16-aligned) alike.
+    #[test]
+    fn every_packaged_image_ends_on_a_sector() {
+        for len in [0x2F_55FEusize, 0x10_0010, 0x1000, 1] {
+            let image = sector_padded(vec![0x5a; len]).unwrap();
+            assert_eq!(image.len() % 0x1000, 0, "{len:#x}");
+            assert!(image.len() >= len && image.len() - len < 0x1000);
+            assert!(image[len..].iter().all(|b| *b == 0xff), "{len:#x}");
+        }
+        assert_eq!(
+            sector_padded(vec![0x5a; 0x2F_55FE]).unwrap().len(),
+            0x2F_6000
+        );
     }
 
     #[test]

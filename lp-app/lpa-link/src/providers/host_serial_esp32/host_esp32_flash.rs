@@ -127,9 +127,13 @@ pub(super) fn flash_firmware(
         ));
         let mut bridge =
             ProgressBridge::new(&mut recorder, format!("Flashing 0x{:x}", image.address));
-        flasher
-            .write_bin_to_flash(image.address, &data, Some(&mut bridge))
-            .map_err(|error| LinkError::other(format!("flash write failed: {error}")))?;
+        let md5 = write_verified(&mut flasher, image.address, &data, Some(&mut bridge))
+            .map_err(LinkError::other)?;
+        recorder.log(format!(
+            "Verified {} bytes at 0x{:x} (MD5 {md5})",
+            data.len(),
+            image.address
+        ));
     }
 
     // `write_bin_to_flash`'s flash-target `finish` applied the connection's
@@ -155,6 +159,79 @@ pub(super) fn flash_firmware(
         logs: recorder.logs.clone(),
         progress: recorder.progress.clone(),
     })
+}
+
+/// Write `data` at `address` and prove it landed: the stub's MD5 of the
+/// written range must equal the bytes' own. Returns that MD5, hex.
+///
+/// espflash 3.3.0's `write_bin_to_flash` checks nothing (`verify` is off
+/// on every connection here, and its own check would run before
+/// `FLASH_DEFL_END`), and its stub silently dropped the last 254 bytes of a
+/// packaged image whose length was not a multiple of 4: the engine's last
+/// functions read back `0xFF` and it faulted on every boot
+/// (`docs/defects/2026-10-05-the-host-flasher-dropped-the-split-images-last-bytes.md`).
+/// The check runs after the write is finished, over the whole range, so any
+/// short or wrong write fails here, loudly, instead of on the next boot.
+///
+/// Needs the stub still up afterwards: a connection whose after-operation
+/// resets the chip (`HardReset`) cannot be checked.
+pub(super) fn write_verified(
+    flasher: &mut Flasher,
+    address: u32,
+    data: &[u8],
+    progress: Option<&mut dyn ProgressCallbacks>,
+) -> Result<String, String> {
+    flasher
+        .write_bin_to_flash(address, data, progress)
+        .map_err(|error| format!("flash write failed: {error}"))?;
+    let local: [u8; 16] = md5::Md5::digest(data).into();
+    let length = data.len() as u32;
+    let device = flasher
+        .connection()
+        .with_timeout(md5_timeout(length), |connection| {
+            connection
+                .command(Command::FlashMd5 {
+                    offset: address,
+                    size: length,
+                })?
+                .try_into()
+        })
+        .map_err(|error: espflash::error::Error| {
+            format!(
+                "could not check the write at {address:#x} (+{length} B): the flash MD5 \
+                 failed: {error}"
+            )
+        })
+        .map(|value: u128| value.to_be_bytes())?;
+    check_written(address, length, &local, &device)
+}
+
+/// The written range's MD5 against the bytes'. `Ok` carries it, hex.
+fn check_written(
+    address: u32,
+    length: u32,
+    local: &[u8; 16],
+    device: &[u8; 16],
+) -> Result<String, String> {
+    let hex = |d: &[u8; 16]| d.iter().map(|b| format!("{b:02x}")).collect::<String>();
+    if local == device {
+        Ok(hex(local))
+    } else {
+        Err(format!(
+            "the flash does not hold what was written at {address:#x} (+{length} B): its MD5 \
+             is {}, the image's is {} — the write is incomplete; flash again before resetting \
+             the board",
+            hex(device),
+            hex(local)
+        ))
+    }
+}
+
+/// How long the stub may take to hash `length` bytes of flash: esptool's
+/// 8 s per MB, never less than espflash's 8 s.
+fn md5_timeout(length: u32) -> Duration {
+    const PER_MB_MS: u64 = 8_000;
+    Duration::from_millis((u64::from(length) * PER_MB_MS / 1_000_000).max(PER_MB_MS))
 }
 
 /// Full-chip erase, leaving the device blank (the `BlankFlash` readiness
@@ -1121,5 +1198,30 @@ mod tests {
         assert_eq!(recorder.progress[1].completed_steps, 50);
         assert_eq!(recorder.progress[2].percent, Some(100));
         assert_eq!(recorder.progress[2].completed_steps, 200);
+    }
+
+    /// The bench C6's case: the flash held the image up to `0x2F54FF` and
+    /// `0xFF` after it, so its MD5 was not the image's. That is a refusal
+    /// naming the range, never a reset into a truncated engine.
+    #[test]
+    fn a_short_write_is_refused_by_its_md5() {
+        let image = vec![0x37u8; 0x2F_55FE];
+        let mut flash = image.clone();
+        flash[0x2F_5500..].fill(0xff);
+        let local: [u8; 16] = md5::Md5::digest(&image).into();
+        let device: [u8; 16] = md5::Md5::digest(&flash).into();
+        let error = check_written(0, image.len() as u32, &local, &device).unwrap_err();
+        assert!(
+            error.contains("does not hold what was written at 0x0"),
+            "{error}"
+        );
+        assert!(error.contains("+3102206 B"), "{error}");
+        assert_eq!(check_written(0, 4, &local, &local).unwrap().len(), 32);
+    }
+
+    #[test]
+    fn the_md5_timeout_grows_with_the_range() {
+        assert_eq!(md5_timeout(16), Duration::from_secs(8));
+        assert_eq!(md5_timeout(3_102_208), Duration::from_millis(24_817));
     }
 }

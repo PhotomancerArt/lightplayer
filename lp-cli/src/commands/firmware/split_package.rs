@@ -8,6 +8,8 @@
 //! erase covers record sector 1, so a stale newer record on a board is gone.
 //! It stops at `app.bin`'s end like `espflash save-image --skip-padding`:
 //! the tool's whole-chip `merged.bin` (the emulator's) would erase `lpfs`.
+//! `app.bin` ends on a flash sector (`lp_fw_split::image_end`), never
+//! mid-word, and the packager holds every image to that rule.
 //!
 //! `core.bin` and `engine.bin` go to `target/firmware-parts/<id>/`, never
 //! into the packaged directory: the Studio bundle does not grow by them, and
