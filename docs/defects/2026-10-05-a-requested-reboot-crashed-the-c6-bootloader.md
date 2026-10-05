@@ -7,6 +7,7 @@ related:
   - docs/defects/2026-10-05-the-host-flasher-dropped-the-split-images-last-bytes.md
   - docs/defects/2026-09-06-c6-analog-master-wedges-the-bootloader.md
   - lp2025/2026-10-04-0005-ota-split-image-ships (data/p10-tailfix-a0f26287b48c/link-reboot-attempt.txt)
+  - lp2025/2026-10-04-0005-ota-split-image-ships (data/reset-crash-ab/summary.txt)
 ---
 # A requested reboot crashed the C6's second-stage bootloader with an illegal instruction
 
@@ -29,25 +30,50 @@ by itself: Studio, in the user's browser, connected to it within seconds.
 Two `LP_SW_HPSYS` resets earlier the same day (the engine's panics, P10's
 first run) went through the same bootloader cleanly.
 
-**Root cause** — not known. One fact narrows it: `0x4087073a` is in the
-bootloader's second segment (`0x4086e610..0x40871378`), and the bundled
-`esp32c6-bootloader.bin` holds `0xce02` there, not `0x0010`. The
-bootloader's code in IRAM was overwritten after the ROM loaded it. Something
-that survives an `LP_SW_HPSYS` reset wrote into HP SRAM while the bootloader
-ran.
+**Root cause** — established 2026-10-05 by a silicon A/B
+(`lp2025/2026-10-04-0005-ota-split-image-ships/data/reset-crash-ab/summary.txt`).
+**Not specific to the split image, and pre-existing on main.** Main's
+monolithic image (`d52f32df1`) crashed the bootloader on 11 of 22 warm resets
+(RTS `rst:0x15` and requested reboot `rst:0x3`) with Bluetooth on and the
+project running, and on 1 of 8 with projects stopped. The split image (#971,
+`9177adfa3`/`b56bcd144`) crashed on 1 of 40 here (3 of 45 counting the
+earlier P10 runs). The board's old firmware (`30ed7c05edb0`) crashed on 0 of
+14. **Bluetooth off removes it**: 0 of 10 on main and 0 of 10 on split,
+toggled with `accessSetSwitches.bleEnabled` and a reboot.
 
-Hypothesis, untested: the Bluetooth controller (modem domain) keeps
-receiving into buffers that were the app's heap and are now the
-bootloader's IRAM. ESP-IDF's `esp_restart` stops the radios and resets the
-modem before its software reset, and our reboot may not. The panic resets
-that worked happened during project load, which may have been before
-advertising began.
+Every crash carries the identical registers from the original report:
+`PC 0x4087073a`, `RA 0x408707d0`, `SP 0x4087e1d0`, `MCAUSE 0x2`,
+`MTVAL 0x10`. In espflash 3.3.0's bundled bootloader, `0x4087073a` is
+`sw zero,0x1c(sp)`, reached right after the ROM `memcmp` that checks the
+app image's SHA-256 against the computed one — the hash matched, so the
+code branched into the corrupted spot.
 
-**Fix** — none yet. Next steps:
-- Repeat `--request reboot` on silicon with Bluetooth off and on.
-- Read what the reboot path does before `software_reset`.
-- Compare the monolithic image, to tell whether the split image matters.
-  Nothing in the split image is known to.
+Memory dumped while the bootloader hung (seven dumps, identical across main
+and the split image) found exactly two words, at `0x40870734` and
+`0x40870738`, reading `0x00100000` — shaped like a DMA descriptor's first
+word, not proof on its own. In the running app, `HEAP_DRAM2` covers
+`0x4086e610..0x4087e610`, which is where the bootloader's own IRAM lands
+after an HP-only reset. So **the Bluetooth controller, which keeps running
+across an HP-only reset, writes into memory the bootloader now occupies.**
+
+Main crashes more often than the split image purely because of timing: main
+hashes a ~3 MB app and reaches the clobbered instruction at ~730 ms after
+the ROM starts the bootloader, where the split image's ~2.8 KB loader
+reaches it at ~125 ms — a ~5.5x wider window for the stray write to land,
+against an observed crash-rate ratio of ~7x.
+
+**Consequence**: the app's RTC watchdog pulls the board back after ~9 s, and
+the recovery ledger then wrongly blames the user's shader node ("hang
+detected by hardware watchdog"), which can escalate against a healthy
+project.
+
+**Fix** — none yet. Untested directions, either of which should cover it:
+- keep the Bluetooth controller's DMA buffers out of the address range the
+  bootloader loads into (exclude it from the heap the controller allocates
+  from);
+- and/or stop or reset the controller before a software reset. An RTS reset
+  from the host can't be intercepted, so the placement fix is the one that
+  covers both reset paths.
 
 This matters for OTA (M4): an update ends in exactly this reboot.
 
