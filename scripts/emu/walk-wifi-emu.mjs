@@ -180,7 +180,8 @@ async function main() {
   const openWifi = async () => {
     await driver.waitFor(`Boolean(${WIFI_ROW})`, { timeoutMs: STEP_MS, what: "the Wi‑Fi row" });
     await driver.evaluate(`${WIFI_ROW}.click()`);
-    await driver.waitFor(`${PANEL_TEXT}.includes('The network this board joins')`, {
+    // Every root page ends on the Cloud relay switch.
+    await driver.waitFor(`${PANEL_TEXT}.includes('Cloud relay')`, {
       timeoutMs: STEP_MS,
       what: "the Wi‑Fi panel",
     });

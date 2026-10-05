@@ -200,11 +200,22 @@ pub fn OfferPressButton(
     /// Stories only: start armed.
     #[props(default)]
     armed_preview: bool,
+    /// Don't print why the press is refused under the button (the form
+    /// already shows what is missing, e.g. an empty field).
+    #[props(default)]
+    hide_refusal: bool,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let action = pressed_or_refused(&offer, &args);
     rsx! {
-        ActionButton { action, running: false, variant, armed_preview, on_action }
+        ActionButton {
+            action,
+            running: false,
+            variant,
+            armed_preview,
+            reason_said_elsewhere: hide_refusal,
+            on_action,
+        }
     }
 }
 

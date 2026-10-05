@@ -740,6 +740,8 @@ fn NetworkForm(
                 offer: add,
                 args: current,
                 variant: ActionButtonVariant::Outline,
+                // An empty name speaks for itself; a broken rule is said.
+                hide_refusal: ssid.is_none() && typed_name.is_empty(),
                 on_action: move |action| {
                     on_action.call(action);
                     // The password leaves the form with the press.
