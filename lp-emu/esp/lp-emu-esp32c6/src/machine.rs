@@ -2091,6 +2091,8 @@ impl Esp32C6Builder {
             seam_probe.as_deref(),
         )
             .map_err(BuildError::Io)?;
+        let mut seam_state = seam_state;
+        seam_state.waiting_for_app = seam_state.engaged() && boot_mode == BootMode::RomUp;
 
         if let Some(faults) = usb_faults.filter(|f| !f.is_off()) {
             let set = bus
@@ -5142,6 +5144,11 @@ impl Esp32C6Machine {
             // scripted command due by now, then — on the poll cadence — the
             // byte socket's client edge and the control channel's lines.
             let host_service = self.service_host(at);
+            // Seams on a ROM-up boot arm once the app runs (never on a
+            // seam-off run: `waiting_for_app` is false there).
+            if self.seams.waiting_for_app {
+                self.seams_watch_for_app();
+            }
             // SPIKE: the wake probe's injections (never on a seam-off run).
             if self.seams.probe.is_some() {
                 self.seam_probe_tick(at);

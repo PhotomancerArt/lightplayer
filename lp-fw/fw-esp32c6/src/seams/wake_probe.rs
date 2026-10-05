@@ -58,28 +58,54 @@ pub static OUT_OF_ORDER: [AtomicU32; CHANNELS] = [AtomicU32::new(0), AtomicU32::
 pub static WAKES: [AtomicU32; CHANNELS] = [AtomicU32::new(0), AtomicU32::new(0)];
 pub static ISR_RUNS: AtomicU32 = AtomicU32::new(0);
 
+// # Why these bodies are asm with register operands (K1, found by this probe)
+//
+// A seam that takes arguments or returns a value needs more than a kept
+// call. A binary's LTO internalizes even `#[no_mangle]` functions, and then
+// interprocedural constant propagation and dead-argument elimination see the
+// body: a first build with `let _ = (channel, buf, cap); 0` kept every CALL,
+// but dropped the argument set-up at the call site and folded the result to
+// 0 in the caller (`n == 0` → the drain loop never read the buffer;
+// `engaged_by_query()` → `false`). So the arguments go INTO the asm, bound to
+// the ABI registers, and the result comes OUT of it: the compiler can prove
+// nothing about either. No `nomem` on the take: the emulator writes `buf`.
+
 /// Engaged check (i): a hooked query. On silicon: 0.
 #[unsafe(no_mangle)]
 #[inline(never)]
 pub extern "C" fn lp_seam_engaged(id: u32) -> u32 {
-    // SAFETY: writes x0 only; the immediate makes the body unique.
+    let out: u32;
+    // SAFETY: an x0 hint and a load-immediate into the result register;
+    // touches nothing else. The immediate makes the body unique.
     unsafe {
-        core::arch::asm!("addi zero, zero, 0x300", options(nomem, nostack, preserves_flags));
+        core::arch::asm!(
+            "addi zero, zero, 0x300",
+            "li a0, 0",
+            inout("a0") id => out,
+            options(nomem, nostack, preserves_flags),
+        );
     }
-    let _ = id;
-    0
+    out
 }
 
 /// The probe's take seam. On silicon: nothing pending.
 #[unsafe(no_mangle)]
 #[inline(never)]
 pub extern "C" fn lp_seam_probe_take(channel: u32, buf: *mut u8, cap: u32) -> u32 {
-    // SAFETY: writes x0 only; the immediate makes the body unique.
+    let n: u32;
+    // SAFETY: as above; not `nomem`, because the emulator's answer writes
+    // up to `cap` bytes at `buf`, and the compiler must assume this did.
     unsafe {
-        core::arch::asm!("addi zero, zero, 0x301", options(nomem, nostack, preserves_flags));
+        core::arch::asm!(
+            "addi zero, zero, 0x301",
+            "li a0, 0",
+            inout("a0") channel => n,
+            in("a1") buf,
+            in("a2") cap,
+            options(nostack, preserves_flags),
+        );
     }
-    let _ = (channel, buf, cap);
-    0
+    n
 }
 
 const _: lp_seam::engaged::Signature = lp_seam_engaged;

@@ -53,6 +53,7 @@
 pub mod cache;
 pub mod control;
 pub mod flash;
+pub mod guest_profile;
 pub mod image;
 pub mod intmatrix;
 /// The translated core, behind the optional `jit` feature. See its own docs

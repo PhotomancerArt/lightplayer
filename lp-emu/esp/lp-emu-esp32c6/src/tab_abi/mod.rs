@@ -161,6 +161,9 @@ pub struct Config {
     usb_host: UsbHost,
     strap: Strap,
     reset_cause: ResetCause,
+    /// Emulator seams to engage (`seams=led=fast`; spike, M0). None by
+    /// default: a tab board is today's machine unless asked.
+    seams: lp_emu_esp_common::seam::SeamRequest,
 }
 
 impl Default for Config {
@@ -180,6 +183,7 @@ impl Default for Config {
             usb_host: UsbHost::Absent,
             strap: Strap::App,
             reset_cause: ResetCause::PowerOn,
+            seams: lp_emu_esp_common::seam::SeamRequest::none(),
         }
     }
 }
@@ -246,10 +250,14 @@ impl Config {
                     cfg.reset_cause = ResetCause::parse(value)
                         .ok_or_else(|| bad("a reset cause (poweron, usb-uart-hpsys)"))?;
                 }
+                "seams" => {
+                    cfg.seams = lp_emu_esp_common::seam::SeamRequest::parse(value)
+                        .map_err(|e| format!("line {}: {e}", n + 1))?;
+                }
                 other => {
                     return Err(format!(
                         "line {}: no config key `{other}` (mac, boot, grade, flash_len, strict, \
-                         reboot_on_reset, usb_host, strap, reset_cause)",
+                         reboot_on_reset, usb_host, strap, reset_cause, seams)",
                         n + 1
                     ));
                 }
@@ -270,6 +278,7 @@ impl Config {
             .strap(self.strap)
             .reset_cause(self.reset_cause)
             .usb_host(self.usb_host)
+            .seams(self.seams.clone())
             // Both logs are collected in memory and drained by the host; the
             // module has no stdout worth writing to.
             .uart0(Uart0Sink::Memory)

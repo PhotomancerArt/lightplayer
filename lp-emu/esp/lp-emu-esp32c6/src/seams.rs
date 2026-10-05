@@ -99,6 +99,15 @@ pub struct SeamState {
     pub shallow_park: bool,
     /// The spike's wake probe, when `probe=host` is engaged.
     pub probe: Option<ProbeDriver>,
+    /// ROM-up only: nothing is armed until the hart first executes app code
+    /// from the flash window. Before that the window is the bootloader's,
+    /// and it **reads the app through it** to checksum and hash the image —
+    /// a patch planted then fails the bootloader's checksum (found by this
+    /// spike: `esp_image: Checksum failed. Calculated 0xa6 read 0xa7`, from a
+    /// one-byte engaged-flag patch the mapping check alone had allowed).
+    pub waiting_for_app: bool,
+    /// The cycle the app was first seen running (ROM-up).
+    pub app_started_at: Option<Cycles>,
 }
 
 impl SeamState {
@@ -153,6 +162,15 @@ pub fn engage(
     if request.is_empty() {
         if probe_spec.is_some() {
             return Err("--seam-probe needs --seams probe=host".into());
+        }
+        if request.auto {
+            // PD5, the default half: nothing is asked for explicitly, so a
+            // table that cannot be read is one loud line, never an error.
+            let outcome = seam::scan(flash);
+            if !matches!(outcome, ScanOutcome::Found(_)) {
+                eprintln!("SEAM none engaged: {outcome}");
+            }
+            state.scan = Some(outcome);
         }
         return Ok(state);
     }
@@ -276,6 +294,7 @@ impl ProbeModes {
                 "locked" => m.locked = true,
                 "between" => m.between = true,
                 "parked" => m.parked = true,
+                "idle" => {}
                 "all" => {
                     m = ProbeModes {
                         steady: true,
@@ -306,6 +325,7 @@ pub struct ProbeDriver {
     burst_left: u32,
     next_cond: Cycles,
     between_due: bool,
+    next_between: Cycles,
     rr: usize,
     /// Per mode: (injected, latency µs samples).
     pub per_mode: Vec<(&'static str, u64, Vec<f64>)>,
@@ -313,6 +333,21 @@ pub struct ProbeDriver {
     pub takes: u64,
     pub empty_takes: u64,
     pub raises: u64,
+    /// Per channel: raise → take latencies (µs).
+    pub per_channel: [Vec<f64>; CHANNELS],
+    /// Raise → the guest's ISR swapped the pending word to zero (µs),
+    /// observed at slice boundaries: the wake itself, apart from how long
+    /// the consumer's executor then took to run.
+    pub isr_latency: Vec<f64>,
+    /// The worst wakes: (raise cycle, µs, pc at the raise, MIE, threshold).
+    pub worst: Vec<(Cycles, f64, String)>,
+    raised_ctx: String,
+    /// The oldest raise the guest's ISR has not yet consumed.
+    raised_at: Option<Cycles>,
+    /// No injection before this cycle: set 1 ms after the guest's engaged
+    /// query, so the wake handler is bound and the consumers are spawned
+    /// (and never into the bootloader's RAM on a ROM-up boot).
+    pub start_at: Option<Cycles>,
 }
 
 impl ProbeDriver {
@@ -327,12 +362,19 @@ impl ProbeDriver {
             burst_left: 0,
             next_cond: 0,
             between_due: false,
+            next_between: 0,
             rr: 0,
             per_mode: Vec::new(),
             taken: 0,
             takes: 0,
             empty_takes: 0,
             raises: 0,
+            start_at: None,
+            per_channel: Default::default(),
+            isr_latency: Vec::new(),
+            worst: Vec::new(),
+            raised_ctx: String::new(),
+            raised_at: None,
         }
     }
 
@@ -352,6 +394,9 @@ impl ProbeDriver {
     /// The end-of-run summary.
     pub fn report(&self) -> Vec<String> {
         let mut out = vec![format!(
+            "probe: injections began at cycle {:?} (1 ms after the guest's engaged query)",
+            self.start_at
+        ), format!(
             "probe: raises {}, takes {} ({} empty), events taken {}, left in queue {}",
             self.raises,
             self.takes,
@@ -373,6 +418,33 @@ impl ProbeDriver {
                 l.last().copied().unwrap_or(0.0)
             ));
         }
+        for (ch, lat) in self.per_channel.iter().enumerate() {
+            let mut l = lat.clone();
+            l.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            out.push(format!(
+                "probe channel {ch} ({}): {} events, raise->take p50 {:.1} us, p99 {:.1} us, max {:.1} us",
+                if ch == 0 { "main executor" } else { "link IO thread executor" },
+                l.len(),
+                pct(&l, 0.5),
+                pct(&l, 0.99),
+                l.last().copied().unwrap_or(0.0)
+            ));
+        }
+        for (at, us, ctx) in &self.worst {
+            out.push(format!(
+                "probe worst wake: raised at {:.3} ms, consumed {us:.1} us later; at the raise: {ctx}",
+                *at as f64 / (1000.0 * memmap::CYCLES_PER_US as f64)
+            ));
+        }
+        let mut l = self.isr_latency.clone();
+        l.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        out.push(format!(
+            "probe wake (raise -> ISR swapped the word): {} raises seen consumed, p50 {:.1} us, p99 {:.1} us, max {:.1} us",
+            l.len(),
+            pct(&l, 0.5),
+            pct(&l, 0.99),
+            l.last().copied().unwrap_or(0.0)
+        ));
         all.sort_by(|a, b| a.partial_cmp(b).unwrap());
         out.push(format!(
             "probe all: latency p50 {:.1} us, p99 {:.1} us, max {:.1} us over {} events",
@@ -398,7 +470,7 @@ impl crate::machine::Esp32C6Machine {
     /// site). Called once at build, after every cache fill, and after a
     /// restore.
     pub(crate) fn arm_seams(&mut self) {
-        if !self.seams.engaged() {
+        if !self.seams.engaged() || self.seams.waiting_for_app {
             return;
         }
         for i in 0..self.seams.arms.len() {
@@ -434,6 +506,20 @@ impl crate::machine::Esp32C6Machine {
         }
     }
 
+    /// ROM-up: at a slice boundary, has the app started? It has once the
+    /// hart is executing from the flash window — the ROM and the IDF
+    /// bootloader never do (they run from ROM and IRAM). One compare a slice
+    /// until then, nothing after.
+    pub(crate) fn seams_watch_for_app(&mut self) {
+        let pc = self.harts[0].pc();
+        let window = memmap::FLASH_CACHE_BASE..memmap::FLASH_CACHE_BASE + crate::cache::WINDOW_LEN;
+        if window.contains(&pc) {
+            self.seams.waiting_for_app = false;
+            self.seams.app_started_at = Some(self.cycles());
+            self.arm_seams();
+        }
+    }
+
     /// Read `len` (1, 2 or 4) bytes at `vaddr` straight from the region
     /// behind it: no trace, no grade, no cost.
     fn peek_code(&self, vaddr: u32, len: usize) -> Option<u32> {
@@ -461,6 +547,12 @@ impl crate::machine::Esp32C6Machine {
         let (a0, a1, a2) = (regs[10] as u32, regs[11] as u32, regs[12] as u32);
         let result = match answer {
             Answer::EngagedQuery => {
+                let now = self.cycles();
+                if let Some(p) = self.seams.probe.as_mut()
+                    && p.start_at.is_none()
+                {
+                    p.start_at = Some(now + MS);
+                }
                 let engaged = self.seams.request.engaged.iter().any(|i| u32::from(i.decl_id) == a0);
                 u32::from(engaged)
             }
@@ -487,16 +579,20 @@ impl crate::machine::Esp32C6Machine {
             bytes.extend_from_slice(&seq.to_le_bytes());
             probe.taken += 1;
             let slot = probe.mode_slot(mode);
-            probe.per_mode[slot]
-                .2
-                .push((now - raised) as f64 / memmap::CYCLES_PER_US as f64);
+            let us = (now - raised) as f64 / memmap::CYCLES_PER_US as f64;
+            probe.per_mode[slot].2.push(us);
+            probe.per_channel[channel].push(us);
         }
         if bytes.is_empty() {
             probe.empty_takes += 1;
             return 0;
         }
-        if probe.modes.between {
+        // At most one per ms: an injection after EVERY take is a flood the
+        // drain-until-0 loop never leaves (the first M0 run of this mode did
+        // exactly that and starved the render), not the race it is after.
+        if probe.modes.between && now >= probe.next_between {
             probe.between_due = true;
+            probe.next_between = now + MS;
         }
         // The buffer the call handed us: the only guest memory a seam writes.
         if !self.poke_bytes(buf, &bytes) {
@@ -511,6 +607,21 @@ impl crate::machine::Esp32C6Machine {
         let Some(mut probe) = self.seams.probe.take() else {
             return;
         };
+        if probe.start_at.is_none_or(|at| now < at) {
+            self.seams.probe = Some(probe);
+            return;
+        }
+        // Did the guest's ISR consume the last raise? (The word reads 0.)
+        if let Some(at) = probe.raised_at
+            && self.peek_word(probe.pending_addr) == Some(0)
+        {
+            let us = (now - at) as f64 / memmap::CYCLES_PER_US as f64;
+            probe.isr_latency.push(us);
+            probe.worst.push((at, us, std::mem::take(&mut probe.raised_ctx)));
+            probe.worst.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+            probe.worst.truncate(8);
+            probe.raised_at = None;
+        }
         let masked = !self.harts[0].csr().mie_enabled();
         let parked = self.seams.parked || self.harts[0].is_wfi();
         let locked = self.wake_line_masked();
@@ -563,6 +674,15 @@ impl crate::machine::Esp32C6Machine {
         let addr = probe.pending_addr;
         if bits != 0 {
             probe.raises += 1;
+            if probe.raised_at.is_none() {
+                probe.raised_at = Some(now);
+                let pc = self.harts[0].pc();
+                probe.raised_ctx = format!(
+                    "pc {pc:#010x} {} MIE={} masked-by-threshold={locked} parked={parked}",
+                    self.symbolize(pc).unwrap_or_default(),
+                    !masked
+                );
+            }
         }
         self.seams.probe = Some(probe);
         if bits != 0 {

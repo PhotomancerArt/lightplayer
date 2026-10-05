@@ -42,6 +42,11 @@ pub const IMPLEMENTATIONS: &[SeamImpl] = &[
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SeamRequest {
     pub engaged: Vec<SeamImpl>,
+    /// `auto`: engage the seams that are on by default (capability seams —
+    /// none exist yet), and when the image's table cannot be read, say so in
+    /// one loud line and engage nothing (PD5's default half). An explicit
+    /// request that cannot engage is a hard error instead.
+    pub auto: bool,
 }
 
 impl SeamRequest {
@@ -59,6 +64,12 @@ impl SeamRequest {
         let text = text.trim();
         if text.is_empty() || text == "none" {
             return Ok(Self::none());
+        }
+        if text == "auto" {
+            return Ok(Self {
+                engaged: Vec::new(),
+                auto: true,
+            });
         }
         let mut engaged: Vec<SeamImpl> = Vec::new();
         for atom in text.split(['+', ' ']).filter(|a| !a.is_empty()) {
@@ -87,7 +98,10 @@ impl SeamRequest {
             engaged.push(*found);
         }
         engaged.sort_by_key(|s| s.label);
-        Ok(Self { engaged })
+        Ok(Self {
+            engaged,
+            auto: false,
+        })
     }
 
     /// `base` plus one `+<seam>=<impl>` per engaged seam. With none engaged,

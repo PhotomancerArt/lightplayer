@@ -40,7 +40,7 @@ function parseArgs(argv) {
   const o = {
     stage: 'target/emu-bench-web', images: [], grades: [], modes: [], fnBlocks: [],
     timeout: '5500ms', wallTimeout: 600, exitOn: false, json: null, tail: false,
-    extraArgs: [], env: {}, dump: null,
+    extraArgs: [], env: {}, dump: null, files: [], variants: [], repeat: 1,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -57,6 +57,13 @@ function parseArgs(argv) {
     else if (a === '--tail') o.tail = true;
     else if (a === '--arg') o.extraArgs.push(next());
     else if (a === '--dump') o.dump = next();
+    // Emulator seams M0: an image outside the manifest, `<slug>=<path>`; a
+    // `.bin` path is a whole chip booted ROM-up.
+    else if (a === '--file') { const kv = next(); const i2 = kv.indexOf('='); o.files.push([kv.slice(0, i2), kv.slice(i2 + 1)]); o.images.push(kv.slice(0, i2)); }
+    // A/B arguments: `--variant name='--seams led=fast'` runs every row once
+    // per variant, interleaved within one invocation (best-of-N needs --repeat).
+    else if (a === '--variant') { const kv = next(); const i2 = kv.indexOf('='); o.variants.push([kv.slice(0, i2), kv.slice(i2 + 1).split(' ').filter(Boolean)]); }
+    else if (a === '--repeat') o.repeat = Number(next());
     else if (a === '--env') { const kv = next(); const i2 = kv.indexOf('='); if (i2 < 0) throw new Error('--env wants NAME=value, got ' + kv); o.env[kv.slice(0, i2)] = kv.slice(i2 + 1); }
     else if (a === '-h' || a === '--help') { console.log(readFileSync(new URL(import.meta.url)).toString().split('\n').filter((l) => l.startsWith('//')).join('\n')); process.exit(0); }
     else throw new Error('unknown option ' + a);
@@ -79,6 +86,13 @@ function engineName() {
 const o = parseArgs(process.argv.slice(2));
 const manifest = JSON.parse(readFileSync(join(o.stage, 'manifest.json'), 'utf8'));
 const bySlug = Object.fromEntries(manifest.images.map((i) => [i.slug, i]));
+const fileBytes = {};
+for (const [slug, path] of o.files) {
+  const name = slug + (path.endsWith('.bin') ? '.bin' : '.elf');
+  bySlug[slug] = { slug, elf: name };
+  fileBytes[slug] = new Uint8Array(readFileSync(path));
+}
+if (!o.variants.length) o.variants = [['-', []]];
 
 const wasmBytes = readFileSync(join(o.stage, 'emu.wasm'));
 const t0 = performance.now();
@@ -105,18 +119,25 @@ const rows = [];
 for (const slug of o.images) {
   const image = bySlug[slug];
   if (!image) throw new Error('no image ' + slug + ' in ' + o.stage + '/manifest.json');
-  const elfBytes = new Uint8Array(readFileSync(join(o.stage, image.elf)));
+  const elfBytes = fileBytes[slug] ?? new Uint8Array(readFileSync(join(o.stage, image.elf)));
   for (const grade of o.grades) {
     for (const mode of o.modes) {
       for (const fnBlocks of mode === 'jit' ? o.fnBlocks : [null]) {
+       for (let rep = 0; rep < o.repeat; rep++) {
+        for (const [variant, vargs] of o.variants) {
+        const cpu0 = process.cpuUsage();
         const r = await runOnce({
           compiled, image, elfBytes, grade, mode, fnBlocks,
           timeout: o.timeout, wallTimeout: o.wallTimeout, exitOn: o.exitOn,
-          extraArgs: o.extraArgs, env: o.env, keepText: !!o.dump,
+          extraArgs: [...o.extraArgs, ...vargs], env: o.env, keepText: !!o.dump,
         });
+        const cpu = process.cpuUsage(cpu0);
+        r.userS = cpu.user / 1e6;
+        r.variant = variant;
+        r.rep = rep;
         if (o.dump) {
           mkdirSync(o.dump, { recursive: true });
-          const p2 = join(o.dump, `${slug}-${grade}-${mode}-${fnBlocks ?? 'x'}.log`);
+          const p2 = join(o.dump, `${slug}-${grade}-${mode}-${fnBlocks ?? 'x'}-${variant}-${rep}.log`);
           writeFileSync(p2, r.fullText ?? '');
           delete r.fullText;
           console.log('  -> ' + p2);
@@ -124,6 +145,7 @@ for (const slug of o.images) {
         r.engine = engineName();
         r.loadavg = loadavg()[0];
         rows.push(r);
+        console.log('  ' + variant + ' rep ' + rep + ': user ' + r.userS.toFixed(2) + ' s, load ' + r.loadavg.toFixed(1));
         console.log([
           slug.padEnd(w[0]),
           grade.padStart(w[1]),
@@ -142,6 +164,8 @@ for (const slug of o.images) {
         if (r.selftestError) console.log('  !! table selftest: ' + r.selftestError);
         if (r.trap) console.log('  !! trap: ' + r.trap.split('\n')[0]);
         if (o.tail) console.log(r.tail.split('\n').map((l) => '  | ' + l).join('\n'));
+        }
+       }
       }
     }
   }
