@@ -779,6 +779,9 @@ impl Ws281xOutput for Esp32V3RmtWs281xOutput {
                 actual: data.len(),
             });
         }
+        // The frame reached the driver (`frame-pace-diag`; first wire wins).
+        #[cfg(feature = "frame_pace_diag")]
+        fw_esp32_common::frame_pace_diag::frame_emitted();
 
         // Dual-core: post to the APP-core pusher and return WITHOUT waiting
         // for a slot — the whole point of the overlap deployment. Admission,

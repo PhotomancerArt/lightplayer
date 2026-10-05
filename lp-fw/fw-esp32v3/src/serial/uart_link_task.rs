@@ -8,10 +8,10 @@
 //! transport through a `RefCell`, which is sound only while every user is on
 //! one executor (ruling DD20 of plan `classic-uart-on-lp-link`).
 
-use fw_esp32_common::uart_link::{UartLinkShared, run_uart_link};
+use fw_esp32_common::uart_link::{PassPacing, UartLinkShared, run_uart_link};
 
-/// The host link, for the life of the boot.
+/// The host link, for the life of the boot, its passes `pacing` apart.
 #[embassy_executor::task]
-pub async fn uart_link_task(shared: &'static UartLinkShared) {
-    run_uart_link(shared).await
+pub async fn uart_link_task(shared: &'static UartLinkShared, pacing: PassPacing) {
+    run_uart_link(shared, pacing).await
 }

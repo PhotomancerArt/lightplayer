@@ -8,7 +8,11 @@ mod dev_url_flags;
 mod device_backup_store_opfs;
 mod device_events_io;
 mod device_hint;
+#[cfg(target_arch = "wasm32")]
+mod engine_cache_opfs;
 pub mod exploration;
+#[cfg(target_arch = "wasm32")]
+mod firmware_fetch_web;
 #[cfg(target_arch = "wasm32")]
 mod library_host_opfs;
 mod local_model_probe;

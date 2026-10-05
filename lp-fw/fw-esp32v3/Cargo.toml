@@ -83,6 +83,42 @@ server = [
 # On by default; without it the board answers every opt-in "json".
 json-pack = ["server", "fw-esp32-common/json-pack"]
 
+# The lp-link `Link` on a preemptive esp-rtos thread of its own (priority 1,
+# pinned to core 0, its own embassy executor, at most one pass per 25 ms).
+# The server renders first either way (messages-first stays off on this
+# board; see `src/main.rs`). **Off by default**: on this board's silicon every
+# preemption of the render costs it ~4-5 ms of flash-cache refill, so the
+# thread made frames slower and less even in every setting PR #943's desk A/B
+# measured (no host, the `link rtt` rig, a real Studio), and with
+# messages-first off it did not even answer faster. Without it the link task
+# shares the main executor with the engine and runs between frames, with the
+# event-driven wake (P2 of the io-thread plan). Kept for the day the host's
+# requests are cheap enough on this board for messages-first to pay. io_task
+# (swi2 interrupt executor + 1 ms pacer) is the same either way: it moves
+# UART0's bytes, and never polls the `Link` (ruling DD20). See
+# `src/io_thread.rs` and the C6/S3 twins.
+#
+# Thread creation is esp-rtos's radio-facing `esp_radio_rtos_driver::task_create`,
+# which exists only with `esp-rtos/esp-radio`. That feature links esp-rtos's
+# small esp-radio glue (task/semaphore/queue shims) and the driver crate's
+# trait — **not** the radio stack: the product image still has no `esp-radio`
+# dependency (`radio_ram_probe` alone links one). `esp-rtos/esp-alloc` is
+# required beside it: `esp-radio` turns on esp-rtos's `alloc`, and `alloc`
+# without `esp-alloc` makes the firmware supply a C
+# `malloc_internal`/`free_internal` pair (`esp-rtos-0.3.0/src/lib.rs`) —
+# `radio_ram_probe` sets the same pair for the same reason.
+io-thread = ["server", "esp-rtos/esp-radio", "esp-rtos/esp-alloc", "dep:esp-radio-rtos-driver"]
+# The link thread's stack high-water, painted at thread start and logged as
+# `[iostack]` at the heartbeat — OFF by default, never shipped: it finds the
+# stack by scanning esp-rtos's private task record (`src/io_thread_stack_diag.rs`).
+io_thread_stack_diag = ["io-thread"]
+# Frame pacing measured on the board — OFF by default, never shipped: one
+# `[pace]` line every 5 s with frame intervals, render offset and judder, the
+# tick's cost with and without requests, and the link task's passes
+# (`fw_esp32_common::frame_pace_diag`). For "do the LEDs stutter while a host
+# talks to the board?", which the average frame rate cannot answer.
+frame_pace_diag = ["server", "fw-esp32-common/frame-pace-diag"]
+
 # Periodic WS281x telemetry over the serial link — OFF by default.
 #
 # Prints one `[WS281X]` line per configured channel every ~10 s from the
@@ -447,6 +483,9 @@ embassy-sync = { version = "0.8.0", optional = true }
 embassy-futures = { version = "0.1", optional = true }
 embedded-io-async = { version = "0.6", optional = true }
 esp-rtos = { version = "0.3.0", default-features = false, features = ["embassy", "log-04"], optional = true }
+# `io-thread` only: esp-rtos's own thread creation is crate-private; this is
+# the public face esp-radio itself creates its threads through.
+esp-radio-rtos-driver = { version = "0.3.0", optional = true }
 
 # Flash-backed filesystem. The lpfs partition is located by label at runtime
 # (see src/flash_storage.rs), not transcribed from partitions.csv.

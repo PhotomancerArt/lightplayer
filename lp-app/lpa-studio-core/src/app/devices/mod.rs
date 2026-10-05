@@ -67,6 +67,7 @@ pub mod device_card_feed_view;
 pub mod device_effects;
 pub mod device_feed_op;
 pub mod device_firmware_face;
+pub mod device_firmware_sources;
 pub mod device_flash;
 pub mod device_flash_offer;
 pub mod device_frame_feed;
@@ -130,6 +131,7 @@ pub use device_feed_op::DeviceFeedOp;
 pub use device_firmware_face::{
     device_firmware_line, firmware_face_preview_sentence, pending_firmware_line,
 };
+pub use device_firmware_sources::{DeviceFirmwareSources, StudioFirmwareStore};
 pub use device_flash::{
     FirmwareVerb, FlashBoardChoice, FlashOffer, RESET_NEEDS_USB, blocked_erase_action,
     derive_flash_name, firmware_verb, flash_offer, flash_offer_for, reflash_choice,
