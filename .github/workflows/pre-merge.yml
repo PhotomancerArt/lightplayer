@@ -182,7 +182,9 @@ jobs:
       emu_esp32s3: ${{ github.event_name != 'pull_request' && 'true' || steps.some.outputs.emu_esp32s3 }}
       emu_ref_recipe: ${{ github.event_name != 'pull_request' && 'true' || steps.some.outputs.emu_ref_recipe }}
       emu_esp32v3_fw: ${{ github.event_name != 'pull_request' && 'true' || steps.some.outputs.emu_esp32v3_fw }}
-      c6_layout: ${{ github.event_name != 'pull_request' && 'true' || steps.some.outputs.c6_layout }}
+      # The 35-minute layout-migration job runs only on PRs that touch its
+      # paths; main pushes skip it (Yona, 2026-10-05).
+      c6_layout: ${{ steps.some.outputs.c6_layout }}
     steps:
       # Default quantifier ("some"): a filter is true when ANY changed file
       # matches one of its globs. Each list is the *dependency closure* of what
@@ -2458,8 +2460,8 @@ jobs:
   #
   # Its own job rather than a step of `heap-budget-chips` so it runs beside
   # that job instead of after it. Path-gated on `c6_layout`, the narrowest
-  # filter in detect-changes (see its comment); pushes to main run it like
-  # every other gate, and main is where a filter miss surfaces.
+  # filter in detect-changes (see its comment); main pushes skip this job,
+  # and a filter miss shows up only on a PR.
   #
   # espflash 3.3.0 for `build-merged-image.sh` (the same prebuilt, pinned
   # call as `emu-c6`); no history needed, so a depth-1 checkout.
