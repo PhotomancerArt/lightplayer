@@ -24,6 +24,8 @@ pub(crate) mod device_offer_story_fixtures;
 pub(crate) mod device_pick_popover;
 pub(crate) mod device_roster_card;
 pub(crate) mod device_terminal;
+#[cfg(feature = "stories")]
+pub(crate) mod device_update_stories;
 pub mod devices_page;
 pub(crate) mod example_card;
 pub mod explore_page;

@@ -34,13 +34,14 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::activity::ActivityKind;
+use crate::activity::{ActivityKind, UpdateIntentFacts, UpdateOutcomeFacts, UpdateStageFacts};
 use crate::device::DeviceStatus;
 use crate::event::{Action, Command, Event, Input};
 use crate::identity::{DeviceId, DeviceUid, EndpointKey, MacAddress, PeerIdentity};
 use crate::link::{LinkEvent, LinkId, LinkInfo, ResetKind};
 use crate::roster::{Roster, RosterConfig};
 use crate::time::{Millis, TimerId};
+use crate::update_facts::{UpdateBoardState, UpdateFacts};
 use crate::view::{DeviceView, Escape, PendingLinkView, RosterView};
 use crate::wire::{HelloFacts, ServerFrame};
 
@@ -83,6 +84,9 @@ pub enum Step {
         endpoint: String,
         #[serde(default)]
         label: Option<String>,
+        /// The transport carries lp-link's update channel (channel 3).
+        #[serde(default)]
+        update_channel: bool,
     },
     Detach {
         link: u64,
@@ -137,6 +141,25 @@ pub enum Step {
         board: Option<String>,
         #[serde(default)]
         name: Option<String>,
+        /// The board manifest the hello carries, by its state — a board
+        /// that announces channel 3.
+        #[serde(default)]
+        update: Option<UpdateBoardState>,
+    },
+    /// A board manifest on channel 3 (`M`), decoded: the board's own word
+    /// about its firmware, and the only thing a core-only board says.
+    UpdateFacts {
+        link: u64,
+        state: UpdateBoardState,
+        #[serde(default)]
+        version: Option<String>,
+    },
+    /// One channel-3 message, verbatim — routed to the update driver,
+    /// never folded.
+    Update {
+        link: u64,
+        #[serde(default)]
+        bytes: Vec<u8>,
     },
     /// Any other decoded frame: live-peer evidence, never a verdict.
     Frame {
@@ -190,6 +213,42 @@ pub enum Step {
     /// The Factory-reset gesture.
     Erase {
         device: u64,
+    },
+    /// The over-the-air update gesture (or the controller's no-click
+    /// spawn, with the default `Auto` intent). Not `Update`: that step is
+    /// one channel-3 message on a link.
+    UpdateFirmware {
+        device: u64,
+        #[serde(default)]
+        intent: UpdateIntentFacts,
+    },
+    /// An update leg's stage marker, as the effects layer sinks it.
+    UpdateStage {
+        device: u64,
+        stage: UpdateStageFacts,
+        #[serde(default)]
+        done: u32,
+        #[serde(default)]
+        total: u32,
+        #[serde(default)]
+        effect: Option<u64>,
+    },
+    /// How the update driver finished, reported just before the leg's end.
+    UpdateOutcome {
+        device: u64,
+        outcome: UpdateOutcomeFacts,
+        #[serde(default)]
+        effect: Option<u64>,
+    },
+    /// An update leg ended with its link (the board reset, or the link
+    /// dropped): `Ended { Interrupted }` with no outcome. `effect` defaults
+    /// to the device's running leg, the stamp the effects layer puts on it.
+    LegInterrupted {
+        device: u64,
+        #[serde(default)]
+        reason: Option<String>,
+        #[serde(default)]
+        effect: Option<u64>,
     },
     /// The Remove-project gesture (the always-actions row's second verb).
     RemoveProject {
@@ -250,6 +309,17 @@ impl Step {
             link,
             endpoint: endpoint.to_string(),
             label: None,
+            update_channel: false,
+        }
+    }
+
+    /// An attach whose transport carries lp-link's update channel.
+    pub fn attach_with_update_channel(link: u64, endpoint: &str) -> Self {
+        Self::Attach {
+            link,
+            endpoint: endpoint.to_string(),
+            label: None,
+            update_channel: true,
         }
     }
 
@@ -301,6 +371,16 @@ impl Step {
             proto: None,
             board: None,
             name: None,
+            update: None,
+        }
+    }
+
+    /// A channel-3 board manifest in the given state, naming no version.
+    pub fn update_facts(link: u64, state: UpdateBoardState) -> Self {
+        Self::UpdateFacts {
+            link,
+            state,
+            version: None,
         }
     }
 
@@ -331,6 +411,15 @@ impl Step {
         self
     }
 
+    /// Make a `hello` step carry a board manifest in the given state.
+    pub fn with_update(mut self, state: UpdateBoardState) -> Self {
+        match &mut self {
+            Self::Hello { update, .. } => *update = Some(state),
+            _ => panic!("with_update() only applies to hello steps"),
+        }
+        self
+    }
+
     /// Set the board label on a `hello` step.
     pub fn board(mut self, value: &str) -> Self {
         match &mut self {
@@ -347,9 +436,13 @@ impl Step {
                 link,
                 endpoint,
                 label,
+                update_channel,
             } => Input::Event(Event::LinkAttached {
                 link: LinkId(link),
-                info: link_info(&endpoint, label.as_deref()),
+                info: LinkInfo {
+                    carries_update_channel: update_channel,
+                    ..link_info(&endpoint, label.as_deref())
+                },
             }),
             Self::Detach { link } => Input::Event(Event::LinkDetached { link: LinkId(link) }),
             Self::Opened { link, endpoint } => {
@@ -394,6 +487,7 @@ impl Step {
                 proto,
                 board,
                 name,
+                update,
             } => Input::link(
                 LinkId(link),
                 LinkEvent::Frame(ServerFrame::hello(
@@ -405,9 +499,22 @@ impl Step {
                         board_id: board,
                         fs: Default::default(),
                         version: None,
+                        update: update.map(update_facts),
                     },
                 )),
             ),
+            Self::UpdateFacts {
+                link,
+                state,
+                version,
+            } => Input::link(
+                LinkId(link),
+                LinkEvent::UpdateFacts(UpdateFacts {
+                    version,
+                    ..update_facts(state)
+                }),
+            ),
+            Self::Update { link, bytes } => Input::link(LinkId(link), LinkEvent::Update(bytes)),
             Self::Frame { link, label } => {
                 Input::link(LinkId(link), LinkEvent::Frame(ServerFrame::other(7, label)))
             }
@@ -455,6 +562,51 @@ impl Step {
             }),
             Self::Erase { device } => Input::Action(Action::Erase {
                 device: DeviceId(device),
+            }),
+            Self::UpdateFirmware { device, intent } => Input::Action(Action::Update {
+                device: DeviceId(device),
+                intent,
+            }),
+            Self::UpdateStage {
+                device,
+                stage,
+                done,
+                total,
+                effect,
+            } => Input::Event(Event::ActivityMarker {
+                device: DeviceId(device),
+                effect: effect.map(crate::event::EffectId),
+                marker: crate::event::ActivityMarker::UpdateStage { stage, done, total },
+            }),
+            Self::UpdateOutcome {
+                device,
+                outcome,
+                effect,
+            } => Input::Event(Event::ActivityMarker {
+                device: DeviceId(device),
+                effect: effect.map(crate::event::EffectId),
+                marker: crate::event::ActivityMarker::UpdateOutcome(outcome),
+            }),
+            Self::LegInterrupted {
+                device,
+                reason,
+                effect,
+            } => Input::Event(Event::ActivityMarker {
+                device: DeviceId(device),
+                effect: effect.map(crate::event::EffectId).or_else(|| {
+                    roster
+                        .devices()
+                        .iter()
+                        .find(|entry| entry.id == DeviceId(device))
+                        .and_then(|entry| entry.activity.as_ref())
+                        .and_then(|cell| cell.current_effect)
+                }),
+                marker: crate::event::ActivityMarker::Ended {
+                    kind: ActivityKind::Update,
+                    outcome: crate::activity::ActivityOutcome::Interrupted {
+                        reason: reason.unwrap_or_else(|| "the link closed".to_string()),
+                    },
+                },
             }),
             Self::RemoveProject { device } => Input::Action(Action::RemoveProject {
                 device: DeviceId(device),
@@ -1023,6 +1175,17 @@ fn link_info(endpoint: &str, label: Option<&str>) -> LinkInfo {
         endpoint: EndpointKey(endpoint.to_string()),
         usb: None,
         serial_number: None,
+        carries_update_channel: false,
+    }
+}
+
+/// The update facts a scripted board reports: its state, and a manifest
+/// JSON the fold never reads.
+fn update_facts(state: UpdateBoardState) -> UpdateFacts {
+    UpdateFacts {
+        state,
+        manifest_json: "{}".to_string(),
+        ..UpdateFacts::default()
     }
 }
 

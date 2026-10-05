@@ -11,12 +11,14 @@
 //! | corruption | none; one bad `D` (→ `N`/`H`, the piece restarts); one bad `Z` (→ asked for raw) |
 //! | access | trusted; untrusted + closed + a password; untrusted, no login |
 //! | start | running X → Y; engine-less X → heal (then Y); engine-crashing X → report; X with a core transfer pending + a host holding only X → heal (E2) |
+//! | intent | `Auto` (the matrix); `Install` and `Reinstall` ([`intents`]) |
 //!
 //! Every case asserts the end state (the build, a valid engine, or the
 //! expected report), that no frozen flash ever lacks a bootable core (the
 //! world checks it at every cut), that a cut mid-piece resumes rather than
 //! restarts, and that the backup the host kept is the old engine.
 
+mod intents;
 mod world;
 
 use lpa_update::{Decision, DriverConfig, Finish, HostBuild, ServeConfig, StopReason};

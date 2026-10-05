@@ -313,6 +313,8 @@ mod tests {
             terminal_dropped: 0,
             firmware_blocked: None,
             escapes: vec![lpa_devices::view::Escape::Forget],
+            update_blocked: None,
+            last_update_outcome: None,
         }
     }
 

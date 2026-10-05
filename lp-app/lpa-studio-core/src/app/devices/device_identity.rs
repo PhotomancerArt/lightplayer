@@ -339,6 +339,8 @@ mod tests {
             terminal_dropped: 0,
             firmware_blocked: None,
             escapes: vec![Escape::Forget],
+            update_blocked: None,
+            last_update_outcome: None,
         }
     }
 
@@ -654,6 +656,7 @@ mod tests {
             cancellable: true,
             cancel_requested: false,
             layout: None,
+            update: None,
         });
         let line = device_identity_line(&view);
         assert_eq!(

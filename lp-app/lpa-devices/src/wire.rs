@@ -21,6 +21,14 @@
 //! mirror only what a face or a verb turns on; everything that wants a real
 //! response body goes through `lpa-client`, above this seam.
 //!
+//! The board manifest joined the list for the same reason
+//! ([`UpdateFacts`], in `update_facts.rs`): a board running only its core
+//! sends no hello, and without its manifest the card called a board that
+//! only needs its engine back "no hello" and offered a two-click Flash. Its
+//! state, version, target, build, transfer and refused build decide a face
+//! or a verb; the rest of it rides verbatim as JSON for `lpa-studio-core`'s
+//! update decision, which the fold never reads.
+//!
 //! **M3 reconciliation:** `lpa-link` maps
 //! `lpc_wire::WireServerMessage` → [`ServerFrame`] (hello →
 //! [`HelloFacts`], `ServerMessage` id 0 heartbeat → [`ServerFrameBody::Heartbeat`],
@@ -35,6 +43,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::identity::PeerIdentity;
 use crate::link_counter_facts::LinkCounterFacts;
+use crate::update_facts::UpdateFacts;
 
 /// One decoded frame from the peer.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -384,6 +393,12 @@ pub struct HelloFacts {
     /// reads to say a board's files are waiting.
     #[serde(default)]
     pub fs: BoardFs,
+    /// The hello's board manifest (its `firmware` field, update protocol
+    /// Part B), mirrored: proof the board speaks channel 3, and its update
+    /// facts until channel 3 itself says otherwise. `None` from a board
+    /// that does not send one.
+    #[serde(default)]
+    pub update: Option<UpdateFacts>,
 }
 
 /// How a board's filesystem came up at boot — the model's copy of the
