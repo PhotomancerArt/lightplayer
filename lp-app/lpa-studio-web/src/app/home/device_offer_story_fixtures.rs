@@ -163,6 +163,7 @@ pub(crate) fn StoryDeviceCard(
     #[props(default)] runtime: Option<lpa_studio_core::UiRuntimeBand>,
     #[props(default)] access: Option<lpa_studio_core::UiDeviceAccess>,
     #[props(default)] access_panel_open: bool,
+    #[props(default)] keys_open_preview: bool,
     #[props(default)] menu_initially_open: bool,
     on_action: EventHandler<lpa_studio_core::UiAction>,
 ) -> Element {
@@ -187,6 +188,7 @@ pub(crate) fn StoryDeviceCard(
                 runtime,
                 access,
                 access_panel_open,
+                keys_open_preview,
                 menu_initially_open,
                 on_action,
             }
