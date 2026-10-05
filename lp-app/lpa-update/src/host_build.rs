@@ -5,6 +5,9 @@
 //! `from_ota_manifest`, which reads the firmware-distribution plan's
 //! `ota-manifest.json` and its files and picks the encoding by `id` alone;
 //! nothing here reads the split image's package `split` block.
+//!
+//! The decision never needs the bytes: [`HostBuild::facts`] is what it reads
+//! ([`crate::host_build_facts`]).
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -15,6 +18,7 @@ use lpc_update::hash_rules::{core_sha256, engine_sha256};
 use lpc_update::{BoardManifest, Offer, PieceKind, sha256_from_hex};
 
 use crate::encoded_piece::{EncodedPiece, EncodedPieceError};
+use crate::host_build_facts::{HostBuildFacts, HostPieceFacts};
 
 /// What a build says about itself: the identity fields of
 /// `ota-manifest.json` (doors #2/#3).
@@ -192,6 +196,21 @@ impl HostBuild {
     #[must_use]
     pub fn build_hash(&self) -> u32 {
         build_hash(self.identity.build_id.as_bytes())
+    }
+
+    /// What [`crate::decide()`] reads of this build: its identity and each
+    /// piece's hash and length, without the bytes.
+    #[must_use]
+    pub fn facts(&self) -> HostBuildFacts {
+        let piece = |p: &HostPiece| HostPieceFacts {
+            sha256: p.sha256,
+            len: p.len,
+        };
+        HostBuildFacts::from_parts(
+            self.identity.clone(),
+            piece(&self.core),
+            piece(&self.engine),
+        )
     }
 
     /// The offer of this build (`O`, flags 0: v1 defines no offer flag).

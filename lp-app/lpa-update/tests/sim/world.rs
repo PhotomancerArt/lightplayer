@@ -77,6 +77,8 @@ pub struct World {
     pub store: HashMap<[u8; 32], Vec<u8>>,
     pub credentials: Vec<Credential>,
     pub faults: Faults,
+    /// The type byte of every message the host sent, in order.
+    pub host_sent: Vec<u8>,
     delivered: u32,
     /// Requests the host has answered.
     served_requests: u32,
@@ -142,6 +144,7 @@ impl World {
             store: HashMap::new(),
             credentials: Vec::new(),
             faults: Faults::default(),
+            host_sent: Vec::new(),
             delivered: 0,
             served_requests: 0,
             out: Outcome {
@@ -297,6 +300,7 @@ impl World {
             for e in effects {
                 match e {
                     DriverEffect::Send(bytes) => {
+                        self.host_sent.extend(bytes.first());
                         if is_chunk(&bytes) {
                             chunks.push(bytes);
                         } else {

@@ -33,6 +33,12 @@
 //! refused builds do not stop it. Whether the host can get the engine a heal
 //! needs is the engine source's question ([`super::engine_source`]); a miss
 //! there is E13.
+//!
+//! **Facts, not bytes** (DS5): `decide()` reads a [`HostBuildFacts`] — the
+//! build's identity, hashes and lengths — so a card can decide without
+//! loading the build. A person's deliberate choice (Install, Reinstall) is
+//! one more step after this table, [`crate::decide_for_intent`]; the table
+//! itself is the automatic answer.
 
 use alloc::string::String;
 
@@ -41,13 +47,13 @@ use lpc_access::Tier;
 use lpc_update::{BoardState, PieceKind};
 
 use crate::board_view::BoardView;
-use crate::host_build::HostBuild;
+use crate::host_build_facts::HostBuildFacts;
 
 /// What the host knows about itself and its user.
 #[derive(Clone, Copy, Debug)]
 pub struct HostFacts<'a> {
-    /// The build this host would put on the board.
-    pub build: &'a HostBuild,
+    /// The build this host would put on the board, by its facts.
+    pub build: &'a HostBuildFacts,
     /// The user's tier on this board, if known (`None`: not known yet — an
     /// offer is still made, and the board says `N`/`A` if it must).
     pub user_tier: Option<Tier>,
@@ -100,6 +106,13 @@ pub enum Decision {
     },
     /// The engine keeps crashing (E10): report it, never heal on its own.
     ReportCrashing {
+        build_id: String,
+    },
+    /// Write the crashing board's own engine again (E10's Reinstall): an
+    /// engine install by hashes. Never decided by [`decide`] — only by the
+    /// person's [`crate::UpdateIntent::Reinstall`].
+    Reinstall {
+        engine_sha: [u8; 32],
         build_id: String,
     },
     NeedsUsb {
@@ -164,6 +177,19 @@ pub fn decide(board: &BoardView, host: &HostFacts<'_>) -> Decision {
             build_id: m.build_id.clone(),
         };
     }
+    decide_offer(board, host)
+}
+
+/// The rows after the board's own state (another target, up to date, needs
+/// USB, refused, newer, play only, offer): what putting the host's build on
+/// this board would be. [`decide`]'s tail, and what an `Install` intent asks
+/// of a board whose own state it overrides.
+pub(crate) fn decide_offer(board: &BoardView, host: &HostFacts<'_>) -> Decision {
+    let Some(m) = &board.manifest else {
+        return needs_usb(NeedsUsbWhy::NoUpdateChannel);
+    };
+    let build = host.build;
+    let holds_boards_core = board.core_sha256() == Some(build.core.sha256);
     let id = &build.identity;
     if m.target != id.target {
         return Decision::OtherTarget {

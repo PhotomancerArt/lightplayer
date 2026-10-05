@@ -1,6 +1,7 @@
 //! The decision: one test per host-side row of the roadmap's E1–E14 (E4,
 //! E11 and E14 have no host row; E13's miss is the engine source's, tested
-//! there and in the simulation).
+//! there and in the simulation). `decide()` reads the build's facts, not
+//! its bytes.
 
 use lpa_update::{BoardView, Decision, HostBuild, HostFacts, HostIdentity, NeedsUsbWhy, decide};
 use lpc_access::Tier;
@@ -53,7 +54,7 @@ fn decide_for(m: BoardManifest) -> Decision {
 }
 
 fn decide_with(m: BoardManifest, user_tier: Option<Tier>, allow_downgrade: bool) -> Decision {
-    let build = y();
+    let build = y().facts();
     decide(
         &BoardView::from_manifest(m),
         &HostFacts {
@@ -249,7 +250,7 @@ fn e8_another_chip_layout_an_old_loader_or_no_room_needs_usb() {
 
 #[test]
 fn e9_a_board_with_no_manifest_needs_usb() {
-    let build = y();
+    let build = y().facts();
     assert_eq!(
         decide(
             &BoardView::absent(),
