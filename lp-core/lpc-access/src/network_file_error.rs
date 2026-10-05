@@ -1,4 +1,4 @@
-//! Why the network file, or a network a client asked to save, was refused.
+//! Why the network file, or a network a client asked to add, was refused.
 
 use core::fmt;
 
@@ -29,6 +29,12 @@ pub enum NetworkFileError {
     /// A 64-character password that is not 64 hex digits (64 characters is
     /// how a raw WPA2 key is spelled, and only that).
     PasswordNotHexKey,
+    /// A ninth network: a board keeps at most
+    /// [`crate::NetworkFile::MAX_NETWORKS`].
+    TooManyNetworks { max: usize },
+    /// Two saved networks with the same name (a file written by hand; the
+    /// board itself replaces a network added again).
+    DuplicateSsid,
 }
 
 impl fmt::Display for NetworkFileError {
@@ -60,6 +66,11 @@ impl fmt::Display for NetworkFileError {
             Self::PasswordNotHexKey => f.write_str(
                 "a 64-character password must be a raw key of 64 hex digits; passwords allow 63 characters",
             ),
+            Self::TooManyNetworks { max } => write!(
+                f,
+                "the board keeps at most {max} networks; forget one first"
+            ),
+            Self::DuplicateSsid => f.write_str("two saved networks have the same name"),
         }
     }
 }

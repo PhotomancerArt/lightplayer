@@ -101,7 +101,7 @@ enum Cli {
     Record(record::RecordCli),
     /// Measure a board's host link: `link lab` against a `test_comms_lab` image.
     Link(link::LinkCli),
-    /// A board's Wi-Fi settings: `wifi status|set|forget <host>` (the password never on argv).
+    /// A board's Wi-Fi networks: `wifi status|scan|add|forget|set <host>` (a password never on argv).
     Wifi(wifi::WifiCli),
     /// Compile a GLSL file to LPIR text (stdout). Uses the same Naga → LPIR path as the JIT.
     ShaderLpir {

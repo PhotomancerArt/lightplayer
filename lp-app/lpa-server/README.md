@@ -38,12 +38,15 @@ transport (`lpc_shared::transport::LinkTrust`):
 
 ## Wi-Fi settings
 
-`NetworkStatus`, `NetworkSet` and `NetworkForget` (edit tier) read and
-change root `/.lp/network.json` through the base filesystem
-(`network_store.rs`) and each answer `NetworkStatus` — the saved network
-without its password, `cloudRelay`, and the station (an injectable probe on
-`LpServer`; unset, every image says `unsupported`). The file is write-only
-on every link, like the access files (`lpc_access::is_write_only_file_path`).
-A board holding its files for the C6 layout change refuses set and forget.
+`NetworkStatus`, `NetworkAdd`, `NetworkForget` and `NetworkSet` (edit
+tier) read and change root `/.lp/network.json` through the base filesystem
+(`network_store.rs`) and each answer `NetworkStatus` — the two switches
+(`wifi`, `cloudRelay`), every saved network without its password, and the
+station (an injectable probe on `LpServer`; unset, every image says
+`unsupported`). A board keeps at most eight networks; adding a saved name
+again changes its password in place. `NetworkScan` answers from a second
+probe, `unsupported` when unset. The file is write-only on every link, like
+the access files (`lpc_access::is_write_only_file_path`). A board holding
+its files for the C6 layout change refuses add, forget and set.
 Host tests: `tests/network_requests.rs`, `tests/access_gate.rs`,
 `tests/access_file_resource.rs`.

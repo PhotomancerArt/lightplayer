@@ -18,7 +18,7 @@ pub const PASSWORD_MAX_LEN: usize = 63;
 /// The length of a raw WPA2 key spelled in hex.
 pub const HEX_KEY_LEN: usize = 64;
 
-/// A saved Wi-Fi network, inside [`crate::NetworkFile`].
+/// One saved Wi-Fi network, an entry of [`crate::NetworkFile::networks`].
 ///
 /// `Debug` is written by hand and **never prints the password** — logs on
 /// the server and the firmware format with `{:?}`.
@@ -31,8 +31,10 @@ pub struct WifiNetwork {
     /// `""` for an open network; else 8–63 printable ASCII characters, or a
     /// raw key of exactly 64 hex digits. Never leaves the board.
     pub password: String,
-    /// Join when on; kept but unused when off.
-    pub enabled: bool,
+    /// The network does not broadcast its name: the station asks for it
+    /// by name. Omitted when false.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub hidden: bool,
 }
 
 impl WifiNetwork {
@@ -62,9 +64,13 @@ impl fmt::Debug for WifiNetwork {
                     "<none>"
                 },
             )
-            .field("enabled", &self.enabled)
+            .field("hidden", &self.hidden)
             .finish()
     }
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 /// A network name is 1–32 bytes of UTF-8 (the 802.11 limit is in bytes,
@@ -116,7 +122,7 @@ mod tests {
         WifiNetwork {
             ssid: ssid.to_string(),
             password: password.to_string(),
-            enabled: true,
+            hidden: false,
         }
     }
 

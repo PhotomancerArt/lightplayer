@@ -4,7 +4,7 @@ use alloc::string::String;
 use core::fmt;
 use serde::{Deserialize, Serialize};
 
-/// The password inside [`crate::ClientRequest::NetworkSet`].
+/// The password inside [`crate::ClientRequest::NetworkAdd`].
 ///
 /// Serialized as the bare string (`#[serde(transparent)]`); its `Debug` is
 /// written by hand and prints `WifiPassword(<redacted>)`, so a request
@@ -37,13 +37,13 @@ impl WifiPassword {
 }
 
 /// Whether raw request text (a `M!` line, a link payload, the start of a
-/// read buffer) may hold a Wi-Fi password: it names `networkSet`. A
+/// read buffer) may hold a Wi-Fi password: it names `networkAdd`. A
 /// transport that previews or echoes received text in a log checks this
 /// first and logs only the length — the parsed request's `Debug` is safe,
 /// the raw bytes are not.
 #[must_use]
 pub fn may_carry_secret(text: &str) -> bool {
-    text.contains("\"networkSet\"")
+    text.contains("\"networkAdd\"")
 }
 
 impl fmt::Debug for WifiPassword {

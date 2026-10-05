@@ -360,12 +360,19 @@ pub fn server_message_detail(msg: &lpc_wire::WireServerMessage) -> String {
         lpc_wire::server::ServerMsgBody::AccessList { entries, .. } => {
             format!("AccessList entries={}", entries.len())
         }
-        // Never the SSID or anything else from the file: a kind is enough.
+        // Never an SSID or anything else from the file: counts and a kind
+        // are enough.
         lpc_wire::server::ServerMsgBody::NetworkStatus(status) => format!(
-            "NetworkStatus wifi={} station={}",
-            if status.wifi.is_some() { "set" } else { "none" },
+            "NetworkStatus networks={} station={}",
+            status.networks.len(),
             status.station.kind()
         ),
+        lpc_wire::server::ServerMsgBody::NetworkScan(scan) => match scan {
+            lpc_wire::server::NetworkScan::Unsupported => String::from("NetworkScan unsupported"),
+            lpc_wire::server::NetworkScan::Heard(heard) => {
+                format!("NetworkScan heard={}", heard.len())
+            }
+        },
     }
 }
 

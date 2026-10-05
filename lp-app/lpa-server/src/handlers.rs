@@ -158,8 +158,10 @@ pub fn handle_client_message(
         // And the network requests: `tick_and_send` answers them from the
         // network file, where the fs boot state and the station probe are.
         lpc_wire::ClientRequest::NetworkStatus
-        | lpc_wire::ClientRequest::NetworkSet { .. }
-        | lpc_wire::ClientRequest::NetworkForget => {
+        | lpc_wire::ClientRequest::NetworkScan
+        | lpc_wire::ClientRequest::NetworkAdd { .. }
+        | lpc_wire::ClientRequest::NetworkForget { .. }
+        | lpc_wire::ClientRequest::NetworkSet { .. } => {
             return Err(ServerError::Core(
                 "network requests are answered beside the access gate, not a handler".into(),
             ));

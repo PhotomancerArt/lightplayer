@@ -159,7 +159,7 @@ impl<Io: SerialIo> ServerTransport for SerialTransport<Io> {
             };
 
             // Parse JSON. A line that may carry a Wi-Fi password
-            // (`networkSet`) is never echoed into a log, only its length.
+            // (`networkAdd`) is never echoed into a log, only its length.
             let shown = if lpc_wire::may_carry_secret(json_str) {
                 "<withheld: may carry a Wi-Fi password>"
             } else {
@@ -536,11 +536,10 @@ mod tests {
         const PASSWORD: &str = "correct-horse-42";
         let set = ClientMessage {
             id: 7,
-            msg: ClientRequest::NetworkSet {
-                ssid: Some(String::from("a")),
-                password: Some(lpc_wire::WifiPassword::new(PASSWORD)),
-                enabled: None,
-                cloud_relay: None,
+            msg: ClientRequest::NetworkAdd {
+                ssid: String::from("a"),
+                password: lpc_wire::WifiPassword::new(PASSWORD),
+                hidden: None,
             },
         };
         let line = json::to_serial_line(&set).unwrap();

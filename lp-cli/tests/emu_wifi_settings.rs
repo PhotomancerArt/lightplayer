@@ -4,12 +4,13 @@
 //! The emulated ESP32-C6 runs in this process, stepped slice by slice in
 //! EMULATED time, with the product's own host end: a
 //! `lpc_wire::WireLinkPort` under an `lpa-client` `LpClient` — the same
-//! client calls `lp-cli wifi` makes (`network_status`, `network_set`,
-//! `network_forget`). One claim, end to end:
+//! client calls `lp-cli wifi` makes (`network_status`, `network_scan`,
+//! `network_add`, `network_forget`). One claim, end to end:
 //!
-//! - a fresh board has no network and says its firmware cannot join;
-//! - credentials set over USB read back as the name and "password set",
-//!   never the password;
+//! - a fresh board has no network, says its firmware cannot connect, and
+//!   answers a scan as unsupported;
+//! - two networks added over USB read back as their names and "password
+//!   set", never a password;
 //! - they survive a reset (the board reboots, its flash kept), so they are
 //!   in `lpfs`, not RAM;
 //! - and the trusted USB link still cannot read `/.lp/network.json`.
@@ -31,7 +32,7 @@ use lp_emu_esp32c6::machine::{
 };
 use lp_emu_esp32c6::test_support::{FwImage, fw_esp32c6_image};
 use lpc_model::AsLpPath;
-use lpc_wire::server::{StationState, WifiInfo};
+use lpc_wire::server::{NetworkScan, SavedNetworkInfo, StationState};
 use lpc_wire::{
     ClientMessage, ClientRequest, PortRead, TransportError, WifiPassword, WireLinkPort,
     WireServerMessage, WireServerMsgBody,
@@ -49,10 +50,12 @@ const REBOOT_BUDGET_S: f64 = 30.0;
 
 const SSID: &str = "lp-walk-net";
 const PASSWORD: &str = "correct-horse-42";
+const SECOND_SSID: &str = "lp-back-office";
+const SECOND_PASSWORD: &str = "staple-battery-7";
 
 #[test]
 #[ignore = "needs a built fw-esp32c6 ELF; `just test-emu-c6` runs it"]
-fn wifi_credentials_set_over_usb_survive_a_reset_and_stay_write_only() {
+fn wifi_networks_added_over_usb_survive_a_reset_and_stay_write_only() {
     let elf = match fw_esp32c6_image(&FwImage::SHIPPED) {
         Ok(path) => path,
         Err(reason) => {
@@ -68,20 +71,24 @@ fn wifi_credentials_set_over_usb_survive_a_reset_and_stay_write_only() {
         let hello = block_on(client.hello()).expect("hello").value;
         assert_eq!(hello.proto, lpc_wire::WIRE_PROTO_VERSION);
         let status = block_on(client.network_status()).expect("status").value;
-        assert_eq!(status.wifi, None);
+        assert!(status.networks.is_empty());
+        assert!(status.wifi, "Wi-Fi is on by default");
         assert!(status.cloud_relay, "the relay is on by default");
         assert_eq!(status.station, StationState::Unsupported);
+        let scan = block_on(client.network_scan()).expect("scan").value;
+        assert_eq!(scan, NetworkScan::Unsupported, "no fake list");
 
-        // Set the network over the trusted USB link.
-        let status = block_on(client.network_set(
-            Some(String::from(SSID)),
-            Some(WifiPassword::new(PASSWORD)),
-            None,
+        // Add two networks over the trusted USB link.
+        block_on(client.network_add(String::from(SSID), WifiPassword::new(PASSWORD), None))
+            .expect("add");
+        let status = block_on(client.network_add(
+            String::from(SECOND_SSID),
+            WifiPassword::new(SECOND_PASSWORD),
             None,
         ))
-        .expect("set")
+        .expect("add a second")
         .value;
-        assert_eq!(status.wifi, Some(saved()));
+        assert_eq!(status.networks, saved());
         assert_eq!(status.station, StationState::Unsupported);
 
         // Reset the board; its flash is kept.
@@ -108,7 +115,7 @@ fn wifi_credentials_set_over_usb_survive_a_reset_and_stay_write_only() {
         let status = block_on(client.network_status())
             .expect("status after the reboot")
             .value;
-        assert_eq!(status.wifi, Some(saved()), "the network survived the reset");
+        assert_eq!(status.networks, saved(), "the networks survived the reset");
 
         // The trusted link still cannot read the file, and the refusal
         // carries no byte of it.
@@ -117,10 +124,13 @@ fn wifi_credentials_set_over_usb_survive_a_reset_and_stay_write_only() {
         let shown = format!("{error} {error:?}");
         assert!(shown.contains("write-only"), "{shown}");
         assert!(!shown.contains(PASSWORD), "{shown}");
+        assert!(!shown.contains(SECOND_PASSWORD), "{shown}");
 
-        // Forget it.
-        let status = block_on(client.network_forget()).expect("forget").value;
-        assert_eq!(status.wifi, None);
+        // Forget one; the other stays.
+        let status = block_on(client.network_forget(String::from(SSID)))
+            .expect("forget")
+            .value;
+        assert_eq!(status.networks, saved()[1..]);
     }
     assert_eq!(io.machine.reboots(), 1, "one software reboot");
     assert_eq!(io.unparsed, 0, "every message parsed");
@@ -131,12 +141,16 @@ fn wifi_credentials_set_over_usb_survive_a_reset_and_stay_write_only() {
     );
 }
 
-fn saved() -> WifiInfo {
-    WifiInfo {
-        ssid: String::from(SSID),
-        has_password: true,
-        enabled: true,
-    }
+fn saved() -> Vec<SavedNetworkInfo> {
+    [SSID, SECOND_SSID]
+        .into_iter()
+        .map(|ssid| SavedNetworkInfo {
+            ssid: String::from(ssid),
+            has_password: true,
+            hidden: false,
+            last: None,
+        })
+        .collect()
 }
 
 /// The product's host end of the link over the in-process board, which

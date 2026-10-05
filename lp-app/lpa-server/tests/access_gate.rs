@@ -119,11 +119,10 @@ fn a_read_of_the_network_file_is_refused_on_the_trusted_link_too() {
     let mut rig = Rig::for_state(LinkState::Trusted);
     rig.request(
         USB,
-        ClientRequest::NetworkSet {
-            ssid: Some(String::from("lp-walk-net")),
-            password: Some(lpc_wire::WifiPassword::new("correct-horse-42")),
-            enabled: None,
-            cloud_relay: None,
+        ClientRequest::NetworkAdd {
+            ssid: String::from("lp-walk-net"),
+            password: lpc_wire::WifiPassword::new("correct-horse-42"),
+            hidden: None,
         },
     );
     for path in [
@@ -630,27 +629,37 @@ fn table_rows() -> Vec<Row> {
             },
             Required::Edit,
         ),
-        // Wi-Fi settings: edit only, on every link that holds it. The set
-        // row names the network a later row would see and changes nothing
+        // Wi-Fi settings: edit only, on every link that holds it. The add
+        // row saves the network a later row would see and changes nothing
         // else; forget runs after it, so the table leaves no network saved.
         row(
             "networkStatus",
             ClientRequest::NetworkStatus,
             Required::Edit,
         ),
+        row("networkScan", ClientRequest::NetworkScan, Required::Edit),
         row(
-            "networkSet",
-            ClientRequest::NetworkSet {
-                ssid: Some(String::from("lp-walk-net")),
-                password: Some(lpc_wire::WifiPassword::new("correct-horse-42")),
-                enabled: None,
-                cloud_relay: None,
+            "networkAdd",
+            ClientRequest::NetworkAdd {
+                ssid: String::from("lp-walk-net"),
+                password: lpc_wire::WifiPassword::new("correct-horse-42"),
+                hidden: None,
             },
             Required::Edit,
         ),
         row(
             "networkForget",
-            ClientRequest::NetworkForget,
+            ClientRequest::NetworkForget {
+                ssid: String::from("lp-walk-net"),
+            },
+            Required::Edit,
+        ),
+        row(
+            "networkSet",
+            ClientRequest::NetworkSet {
+                wifi: None,
+                cloud_relay: None,
+            },
             Required::Edit,
         ),
     ];
@@ -1200,6 +1209,7 @@ fn body_name(body: &WireServerMsgBody) -> &'static str {
         WireServerMsgBody::LoginResult(_) => "LoginResult",
         WireServerMsgBody::AccessList { .. } => "AccessList",
         WireServerMsgBody::NetworkStatus(_) => "NetworkStatus",
+        WireServerMsgBody::NetworkScan(_) => "NetworkScan",
         _ => "Other",
     }
 }

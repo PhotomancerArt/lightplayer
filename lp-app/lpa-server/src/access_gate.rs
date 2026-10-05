@@ -10,7 +10,7 @@
 //! |---|---|
 //! | Public | `Hello`, `LoginBegin`, `LoginAnswer` |
 //! | Play | `ProjectRead`; `ProjectCommand` `PanelWrite`/`PanelClear`/`ReadOverlay`/`ReadInventory`; `ListAvailableProjects`, `ListLoadedProjects`; read-only fs (`Read`, `ListDir`, `ChangesSince`, `HashPackage`) inside the projects directory |
-//! | Edit | everything else: `LoadProject`, `UnloadProject`, `StopAllProjects`, every other `ProjectCommand`, every fs write/delete and every fs read outside the projects directory, `SetLogLevel`, `Reboot`, `ClearFaults`, the access requests (`AccessList`, `AccessAdd`, `AccessRemove`, `AccessSetSwitches`), and the network requests (`NetworkStatus`, `NetworkSet`, `NetworkForget`) |
+//! | Edit | everything else: `LoadProject`, `UnloadProject`, `StopAllProjects`, every other `ProjectCommand`, every fs write/delete and every fs read outside the projects directory, `SetLogLevel`, `Reboot`, `ClearFaults`, the access requests (`AccessList`, `AccessAdd`, `AccessRemove`, `AccessSetSwitches`), and the network requests (`NetworkStatus`, `NetworkScan`, `NetworkAdd`, `NetworkForget`, `NetworkSet`) |
 //!
 //! Separately, and on EVERY link at EVERY tier, the fs handlers never
 //! return a write-only file's bytes — an access file or the network file
@@ -83,8 +83,10 @@ pub fn classify(request: &ClientRequest, projects_dir: &str) -> Required {
         // author too, though the password crosses the air unsealed until
         // BLE links are (an accepted limitation; see the Wi-Fi settings ADR).
         | ClientRequest::NetworkStatus
-        | ClientRequest::NetworkSet { .. }
-        | ClientRequest::NetworkForget => Required::Edit,
+        | ClientRequest::NetworkScan
+        | ClientRequest::NetworkAdd { .. }
+        | ClientRequest::NetworkForget { .. }
+        | ClientRequest::NetworkSet { .. } => Required::Edit,
     }
 }
 

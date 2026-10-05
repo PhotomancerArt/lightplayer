@@ -2,42 +2,37 @@
 //! filesystem.
 //!
 //! The network file (`/.lp/network.json`, [`NetworkFile`]) holds the Wi-Fi
-//! password, so the wire can never read it (the fs gate refuses, on every
+//! passwords, so the wire can never read it (the fs gate refuses, on every
 //! link, as it does for the access files). The server reads it here,
 //! directly off its base fs, and answers the edit-tier network requests
-//! (`NetworkStatus`, `NetworkSet`, `NetworkForget`) here too — a
-//! read-modify-write that never goes through the wire fs path, and whose
-//! answer ([`NetworkStatus`]) never carries the password.
+//! (`NetworkStatus`, `NetworkAdd`, `NetworkForget`, `NetworkSet`) here too
+//! — a read-modify-write that never goes through the wire fs path, and
+//! whose answer ([`NetworkStatus`]) never carries a password.
 //!
-//! A **missing** file is [`NetworkFile::none`] (no network, relay allowed).
-//! A **damaged** one reads as no network too, logged without its bytes, and
-//! is left as it is until the next change replaces it.
+//! A **missing** file is [`NetworkFile::none`] (no network, Wi-Fi and the
+//! relay on). A **damaged** one reads as no network too, logged without its
+//! bytes, and is left as it is until the next change replaces it.
 //!
-//! Nothing here joins a network: what the station is doing comes from the
-//! embedder's probe ([`crate::StationProbe`]), and no M5 image installs one,
-//! so every board answers [`StationState::Unsupported`].
+//! Nothing here joins a network or listens for one: what the station is
+//! doing and what it hears come from the embedder's probes
+//! ([`crate::StationProbe`], [`crate::ScanProbe`]), and no M5 image
+//! installs either, so every board answers [`StationState::Unsupported`]
+//! and a scan [`NetworkScan::Unsupported`].
 
 extern crate alloc;
 
 use alloc::format;
 use alloc::string::String;
-use lpc_access::{NetworkFile, WifiNetwork, validate_password, validate_ssid};
+use lpc_access::{NetworkFile, WifiNetwork};
 use lpc_model::AsLpPath;
 use lpc_wire::WifiPassword;
-use lpc_wire::server::{NetworkStatus, ServerMsgBody, StationState};
+use lpc_wire::server::{NetworkScan, NetworkStatus, ServerMsgBody, StationState};
 use lpfs::LpFs;
 
 /// Why a change is refused on a board holding its files for the C6 layout
 /// change: it runs on a RAM filesystem, and a write there would vanish.
 pub const HELD_BOARD_REFUSAL: &str =
     "the board is holding its files for an update; finish the update first";
-
-/// Why `enabled` or `password` alone is refused with no network saved.
-pub const NO_NETWORK_SAVED: &str = "no network is saved; send its name";
-
-/// Why a new network name without a password is refused.
-pub const NEW_NETWORK_NEEDS_PASSWORD: &str =
-    "a new network needs its password (empty for an open network)";
 
 /// The network file at root `/.lp/network.json`: [`NetworkFile::none`] when
 /// there is none, and when it cannot be read (logged, never its bytes).
@@ -68,90 +63,73 @@ pub fn write_network_file(fs: &dyn LpFs, file: &NetworkFile) -> Result<(), Strin
         .map_err(|error| format!("{error}"))
 }
 
-/// `NetworkStatus`: the saved network without its password, `cloudRelay`, and
-/// `station`.
+/// `NetworkStatus`: the two switches, every saved network without its
+/// password, and `station`.
 #[inline(never)]
 pub fn network_status(fs: &dyn LpFs, station: StationState) -> ServerMsgBody {
     status_body(&read_network_file(fs), station)
 }
 
-/// `NetworkSet`: change whichever settings are given, write the file when
-/// something changed, and answer the status.
-///
-/// - A `ssid` different from the saved one (or with none saved) needs
-///   `password` too, so an old password is never offered to a new network.
-/// - `enabled` or `password` with no network saved and no `ssid` is refused.
-/// - A network saved for the first time is switched on unless `enabled`
-///   says otherwise.
-/// - `cloud_relay` may be set with no network saved.
-///
-/// A broken rule answers [`ServerMsgBody::Error`] with a sentence that names
-/// the rule (never the password) and writes nothing.
+/// `NetworkScan`: what the radio heard, or `unsupported` — the probe's
+/// answer, passed through.
 #[inline(never)]
-pub fn network_set(
+pub fn network_scan(scan: NetworkScan) -> ServerMsgBody {
+    ServerMsgBody::NetworkScan(scan)
+}
+
+/// `NetworkAdd`: save `ssid` with `password` and answer the status. A new
+/// name goes last; a saved one keeps its place and takes the new password
+/// (and `hidden`, when given). A ninth network, or one that breaks the
+/// 802.11 / WPA2 rules, answers [`ServerMsgBody::Error`] with a sentence
+/// that names the rule (never the password) and writes nothing.
+#[inline(never)]
+pub fn network_add(
     fs: &dyn LpFs,
     station: StationState,
-    ssid: Option<String>,
-    password: Option<WifiPassword>,
-    enabled: Option<bool>,
-    cloud_relay: Option<bool>,
+    ssid: String,
+    password: WifiPassword,
+    hidden: Option<bool>,
 ) -> ServerMsgBody {
     let current = read_network_file(fs);
     let mut next = current.clone();
-
-    match (next.wifi.take(), ssid) {
-        // A network named for the first time, or renamed: it needs its
-        // password, and starts switched on.
-        (saved, Some(ssid)) if saved.as_ref().is_none_or(|saved| saved.ssid != ssid) => {
-            let Some(password) = password else {
-                return error(NEW_NETWORK_NEEDS_PASSWORD);
-            };
-            next.wifi = Some(WifiNetwork {
-                ssid,
-                password: password.into_inner(),
-                enabled: enabled.unwrap_or(true),
-            });
-        }
-        // The saved network (named again, or not named): change what is given.
-        (Some(mut saved), _) => {
-            if let Some(password) = password {
-                saved.password = password.into_inner();
-            }
-            if let Some(enabled) = enabled {
-                saved.enabled = enabled;
-            }
-            next.wifi = Some(saved);
-        }
-        // Nothing saved and no name: only `cloudRelay` can change.
-        (None, _) => {
-            if password.is_some() || enabled.is_some() {
-                return error(NO_NETWORK_SAVED);
-            }
-        }
-    }
-    if let Some(cloud_relay) = cloud_relay {
-        next.cloud_relay = cloud_relay;
-    }
-    if let Some(wifi) = &next.wifi {
-        if let Err(rule) =
-            validate_ssid(&wifi.ssid).and_then(|()| validate_password(&wifi.password))
-        {
-            return error(&format!("cannot save the network: {rule}"));
-        }
+    let hidden = hidden.unwrap_or_else(|| next.network(&ssid).is_some_and(|saved| saved.hidden));
+    if let Err(rule) = next.add(WifiNetwork {
+        ssid,
+        password: password.into_inner(),
+        hidden,
+    }) {
+        return error(&format!("cannot save the network: {rule}"));
     }
     write_if_changed(fs, &current, &next, station)
 }
 
-/// `NetworkForget`: drop the saved network (name and password), keep
-/// `cloudRelay`, and answer the status. Forgetting with nothing saved is not
-/// an error, and writes nothing.
+/// `NetworkForget`: drop the saved network named `ssid` (name and
+/// password) and answer the status. Forgetting one that is not saved is
+/// not an error, and writes nothing.
 #[inline(never)]
-pub fn network_forget(fs: &dyn LpFs, station: StationState) -> ServerMsgBody {
+pub fn network_forget(fs: &dyn LpFs, station: StationState, ssid: &str) -> ServerMsgBody {
     let current = read_network_file(fs);
-    let next = NetworkFile {
-        wifi: None,
-        ..current.clone()
-    };
+    let mut next = current.clone();
+    next.forget(ssid);
+    write_if_changed(fs, &current, &next, station)
+}
+
+/// `NetworkSet`: change whichever switch is given and answer the status.
+#[inline(never)]
+pub fn network_set(
+    fs: &dyn LpFs,
+    station: StationState,
+    wifi: Option<bool>,
+    cloud_relay: Option<bool>,
+) -> ServerMsgBody {
+    let current = read_network_file(fs);
+    let mut next = current.clone();
+    if let Some(wifi) = wifi {
+        next.wifi = wifi;
+    }
+    if let Some(cloud_relay) = cloud_relay {
+        next.cloud_relay = cloud_relay;
+    }
     write_if_changed(fs, &current, &next, station)
 }
 
@@ -207,20 +185,50 @@ mod tests {
     }
 
     #[test]
-    fn a_rename_without_a_password_writes_nothing() {
+    fn a_short_password_writes_nothing() {
         let fs = LpFsMemory::new();
-        let body = network_set(
+        let body = network_add(
             &fs,
             StationState::Unsupported,
-            Some(String::from("lp-walk-net")),
-            None,
-            None,
+            String::from("lp-walk-net"),
+            WifiPassword::new("short"),
             None,
         );
         assert!(
-            matches!(&body, ServerMsgBody::Error { error } if error == NEW_NETWORK_NEEDS_PASSWORD),
+            matches!(&body, ServerMsgBody::Error { error } if error.contains("5 characters")),
             "{body:?}"
         );
         assert!(!fs.file_exists(NetworkFile::PATH.as_path()).unwrap());
+    }
+
+    #[test]
+    fn adding_again_keeps_hidden_unless_told() {
+        let fs = LpFsMemory::new();
+        let station = || StationState::Unsupported;
+        network_add(
+            &fs,
+            station(),
+            String::from("lp-back-office"),
+            WifiPassword::new(""),
+            Some(true),
+        );
+        network_add(
+            &fs,
+            station(),
+            String::from("lp-back-office"),
+            WifiPassword::new("staple-battery-7"),
+            None,
+        );
+        let file = read_network_file(&fs);
+        assert!(file.networks[0].hidden, "an absent hidden keeps it");
+        assert_eq!(file.networks[0].password, "staple-battery-7");
+        network_add(
+            &fs,
+            station(),
+            String::from("lp-back-office"),
+            WifiPassword::new("staple-battery-7"),
+            Some(false),
+        );
+        assert!(!read_network_file(&fs).networks[0].hidden);
     }
 }

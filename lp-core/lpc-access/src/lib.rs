@@ -23,8 +23,9 @@
 //!   login — nobody, play, or play and edit. A board with no store is open
 //!   at edit, for now.
 //! - **The device network file** ([`NetworkFile`], root `/.lp/network.json`,
-//!   `version: 1`): the saved Wi-Fi network ([`WifiNetwork`], validated to
-//!   the 802.11 / WPA2 rules) and the `cloudRelay` switch (on by default).
+//!   `version: 1`): up to eight saved Wi-Fi networks ([`WifiNetwork`], validated to
+//!   the 802.11 / WPA2 rules) and two switches, `wifi` and `cloudRelay` (both
+//!   on by default).
 //! - **Write-only files.** Neither access file, nor the network file, is
 //!   ever readable over any link at any tier ([`is_write_only_file_path`]).
 //!

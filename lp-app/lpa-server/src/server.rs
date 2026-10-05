@@ -48,6 +48,12 @@ pub type ReadHeadroomProbe = fn() -> Option<u32>;
 /// server never touches a radio (sans-IO).
 pub type StationProbe = fn() -> lpc_wire::StationState;
 
+/// Embedder-supplied probe for what the Wi-Fi radio hears, the answer to
+/// [`lpc_wire::ClientRequest::NetworkScan`]. Unset (every M5 image) =
+/// [`lpc_wire::NetworkScan::Unsupported`] — never an empty list, which
+/// would claim the radio listened.
+pub type ScanProbe = fn() -> lpc_wire::NetworkScan;
+
 /// Embedder-supplied "restart this device now" action, backing
 /// [`lpc_wire::ClientRequest::Reboot`].
 ///
@@ -170,6 +176,8 @@ pub struct LpServer {
     /// Optional Wi-Fi station probe behind the network status. Unset =
     /// `unsupported`.
     station_probe: Option<StationProbe>,
+    /// Optional Wi-Fi scan probe. Unset = `unsupported`.
+    scan_probe: Option<ScanProbe>,
     /// The ProjectRead memory gate's floors, per chip (see [`ReadGate`]).
     /// Unset (hosts/browser) = reads are never refused.
     read_gate: Option<ReadGate>,
@@ -366,6 +374,7 @@ impl LpServer {
             memory_stats,
             read_headroom_probe: None,
             station_probe: None,
+            scan_probe: None,
             read_gate: None,
             messages_first: false,
             reboot_hook: None,
@@ -950,33 +959,37 @@ impl LpServer {
                 // RAM fs, so it refuses changes (they would vanish) and
                 // answers the status (no network).
                 ClientRequest::NetworkStatus
-                | ClientRequest::NetworkSet { .. }
-                | ClientRequest::NetworkForget => {
+                | ClientRequest::NetworkScan
+                | ClientRequest::NetworkAdd { .. }
+                | ClientRequest::NetworkForget { .. }
+                | ClientRequest::NetworkSet { .. } => {
                     let fs = &*self.base_fs;
                     let station = self.station_state();
                     let held = self.hello.hardware.fs == lpc_wire::FsBootState::LegacyHeld;
                     let body = match client_msg.msg {
-                        ClientRequest::NetworkSet { .. } | ClientRequest::NetworkForget if held => {
+                        ClientRequest::NetworkAdd { .. }
+                        | ClientRequest::NetworkForget { .. }
+                        | ClientRequest::NetworkSet { .. }
+                            if held =>
+                        {
                             lpc_wire::server::ServerMsgBody::Error {
                                 error: alloc::string::String::from(
                                     network_store::HELD_BOARD_REFUSAL,
                                 ),
                             }
                         }
-                        ClientRequest::NetworkSet {
+                        ClientRequest::NetworkAdd {
                             ssid,
                             password,
-                            enabled,
-                            cloud_relay,
-                        } => network_store::network_set(
-                            fs,
-                            station,
-                            ssid,
-                            password,
-                            enabled,
-                            cloud_relay,
-                        ),
-                        ClientRequest::NetworkForget => network_store::network_forget(fs, station),
+                            hidden,
+                        } => network_store::network_add(fs, station, ssid, password, hidden),
+                        ClientRequest::NetworkForget { ssid } => {
+                            network_store::network_forget(fs, station, &ssid)
+                        }
+                        ClientRequest::NetworkSet { wifi, cloud_relay } => {
+                            network_store::network_set(fs, station, wifi, cloud_relay)
+                        }
+                        ClientRequest::NetworkScan => network_store::network_scan(self.scan()),
                         _ => network_store::network_status(fs, station),
                     };
                     transport
@@ -1252,6 +1265,18 @@ impl LpServer {
     fn station_state(&self) -> lpc_wire::StationState {
         self.station_probe
             .map_or(lpc_wire::StationState::Unsupported, |probe| probe())
+    }
+
+    /// Install the Wi-Fi scan probe a `NetworkScan` answers from. Unset =
+    /// [`lpc_wire::NetworkScan::Unsupported`] (no M5 image installs one).
+    pub fn set_scan_probe(&mut self, probe: Option<ScanProbe>) {
+        self.scan_probe = probe;
+    }
+
+    /// What the radio hears, from the probe (`unsupported` without one).
+    fn scan(&self) -> lpc_wire::NetworkScan {
+        self.scan_probe
+            .map_or(lpc_wire::NetworkScan::Unsupported, |probe| probe())
     }
 
     /// Install this chip's ProjectRead memory gate (see [`ReadGate`]): a read

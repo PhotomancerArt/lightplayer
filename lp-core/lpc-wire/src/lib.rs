@@ -119,9 +119,10 @@ pub use ser_write::{
 pub use server::{
     AccessEntryInfo, AvailableProject, BuildFacts, FAULT_MESSAGE_CAP_BYTES, FAULT_NODES_CAP,
     FaultedNodeWire, FsBootState, FsRequest, FsResponse, HardwareFacts, HardwareIdentity,
-    HeartbeatIdentity, HelloAuth, HelloIdentity, LinkCounters, LinkResets, LoadedProject,
-    MemoryStats, NetworkStatus, ProjectFaultWire, SampleStats, ServerConfig, ServerHello,
-    ServerMsgBody, StationState, WIRE_PROTO_VERSION, WifiInfo, hello_board_id, hello_proto,
+    HeardNetwork, HeartbeatIdentity, HelloAuth, HelloIdentity, LastAttempt, LinkCounters,
+    LinkResets, LoadedProject, MemoryStats, NetworkScan, NetworkStatus, ProjectFaultWire,
+    SampleStats, SavedNetworkInfo, ServerConfig, ServerHello, ServerMsgBody, StationFailure,
+    StationState, WIRE_PROTO_VERSION, hello_board_id, hello_proto,
 };
 pub use slot::{
     WireSlotChange, WireSlotData, WireSlotFullSync, WireSlotPatch, WireSlotRootSnapshot,

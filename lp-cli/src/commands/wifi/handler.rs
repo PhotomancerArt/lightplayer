@@ -1,21 +1,22 @@
-//! `lp-cli wifi status|set|forget <host>`: a board's Wi-Fi settings over
-//! its link, at the edit tier.
+//! `lp-cli wifi status|scan|add|forget|set <host>`: a board's Wi-Fi
+//! networks over its link, at the edit tier.
 //!
-//! The password never rides argv: it comes from `LP_WIFI_PASSWORD` (when
-//! `--ssid` names a network) or one line of stdin (`--password-stdin`), and
-//! nothing here prints it — the board's reply has none to print.
+//! A password never rides argv: it comes from `LP_WIFI_PASSWORD` or one
+//! line of stdin (`--password-stdin`), and nothing here prints it — the
+//! board's reply has none to print.
 
 use std::io::BufRead;
 
 use anyhow::{Context, Result, bail};
 use lpa_client::{HostSpecifier, LpClient};
-use lpa_server::network_store::NEW_NETWORK_NEEDS_PASSWORD;
 use lpc_wire::WifiPassword;
-use lpc_wire::server::{NetworkStatus, StationState};
+use lpc_wire::server::{
+    LastAttempt, NetworkScan, NetworkStatus, SavedNetworkInfo, StationFailure, StationState,
+};
 
 use crate::client::cli_connect::{cli_connect, stderr_device_events};
 
-use super::args::{SetArgs, WifiCli, WifiCommand};
+use super::args::{AddArgs, WifiCli, WifiCommand};
 
 /// The environment variable a password may come from.
 pub const PASSWORD_ENV: &str = "LP_WIFI_PASSWORD";
@@ -32,23 +33,49 @@ pub fn handle_wifi(cli: WifiCli) -> Result<()> {
 async fn handle_wifi_async(cli: WifiCli) -> Result<()> {
     match cli.command {
         WifiCommand::Status(args) => run(&args.host, args.json, Op::Status).await,
-        WifiCommand::Forget(args) => run(&args.host, args.json, Op::Forget).await,
+        WifiCommand::Scan(args) => run(&args.host, args.json, Op::Scan).await,
+        WifiCommand::Forget(args) => run(&args.host, args.json, Op::Forget(args.ssid)).await,
         WifiCommand::Set(args) => {
+            if args.wifi.is_none() && args.cloud_relay.is_none() {
+                bail!("nothing to set: give --wifi on|off, --cloud-relay on|off, or both");
+            }
+            let op = Op::Set {
+                wifi: args.wifi.map(|on| on.is_on()),
+                cloud_relay: args.cloud_relay.map(|on| on.is_on()),
+            };
+            run(&args.host, args.json, op).await
+        }
+        WifiCommand::Add(args) => {
             let password = password_for(&args)?;
-            let host = args.host.clone();
-            let json = args.json;
-            run(&host, json, Op::Set { args, password }).await
+            let op = Op::Add {
+                ssid: args.ssid,
+                password,
+                hidden: args.hidden.then_some(true),
+            };
+            run(&args.host, args.json, op).await
         }
     }
 }
 
 enum Op {
     Status,
-    Set {
-        args: SetArgs,
-        password: Option<WifiPassword>,
+    Scan,
+    Add {
+        ssid: String,
+        password: WifiPassword,
+        hidden: Option<bool>,
     },
-    Forget,
+    Forget(String),
+    Set {
+        wifi: Option<bool>,
+        cloud_relay: Option<bool>,
+    },
+}
+
+/// What the board answered: its status, or a scan.
+enum Reply {
+    Status(NetworkStatus),
+    Scan(NetworkScan),
 }
 
 async fn run(host: &str, json: bool, op: Op) -> Result<()> {
@@ -64,61 +91,47 @@ async fn run(host: &str, json: bool, op: Op) -> Result<()> {
     let result = request(&mut client, op).await;
     drop(client);
     connection.close().await;
-    let status = result?;
-    if json {
-        println!("{}", lpc_wire::json::to_string(&status)?);
-    } else {
-        for line in status_lines(&status) {
-            println!("{line}");
-        }
+    let lines = match result? {
+        Reply::Status(status) if json => vec![lpc_wire::json::to_string(&status)?],
+        Reply::Scan(scan) if json => vec![lpc_wire::json::to_string(&scan)?],
+        Reply::Status(status) => status_lines(&status),
+        Reply::Scan(scan) => scan_lines(&scan),
+    };
+    for line in lines {
+        println!("{line}");
     }
     Ok(())
 }
 
-async fn request<Io: lpa_client::ClientIo>(
-    client: &mut LpClient<Io>,
-    op: Op,
-) -> Result<NetworkStatus> {
-    let outcome = match op {
-        Op::Status => client.network_status().await,
-        Op::Forget => client.network_forget().await,
-        Op::Set { args, password } => {
-            // A new name with no password is refused here, in the board's
-            // words, before anything is sent: the saved name may be this
-            // one (then the password stays), so the board is asked first.
-            if let (Some(ssid), None) = (&args.ssid, &password) {
-                let saved = client
-                    .network_status()
-                    .await
-                    .map_err(|error| anyhow::anyhow!("{error}"))?
-                    .value;
-                if saved.wifi.as_ref().is_none_or(|wifi| &wifi.ssid != ssid) {
-                    bail!(
-                        "{NEW_NETWORK_NEEDS_PASSWORD}: give it in {PASSWORD_ENV}, \
-                         with --password-stdin, or pass --open"
-                    );
-                }
-            }
-            client
-                .network_set(
-                    args.ssid,
-                    password,
-                    args.enabled.map(|on| on.is_on()),
-                    args.cloud_relay.map(|on| on.is_on()),
-                )
+async fn request<Io: lpa_client::ClientIo>(client: &mut LpClient<Io>, op: Op) -> Result<Reply> {
+    let status = match op {
+        Op::Scan => {
+            return client
+                .network_scan()
                 .await
+                .map(|outcome| Reply::Scan(outcome.value))
+                .map_err(|error| anyhow::anyhow!("{error}"));
         }
+        Op::Status => client.network_status().await,
+        Op::Add {
+            ssid,
+            password,
+            hidden,
+        } => client.network_add(ssid, password, hidden).await,
+        Op::Forget(ssid) => client.network_forget(ssid).await,
+        Op::Set { wifi, cloud_relay } => client.network_set(wifi, cloud_relay).await,
     };
-    outcome
-        .map(|outcome| outcome.value)
+    status
+        .map(|outcome| Reply::Status(outcome.value))
         .map_err(|error| anyhow::anyhow!("{error}"))
 }
 
 /// Where the password comes from: `--open` (none), `--password-stdin` (one
-/// line), or `LP_WIFI_PASSWORD` when `--ssid` names a network — never argv.
-fn password_for(args: &SetArgs) -> Result<Option<WifiPassword>> {
+/// line), or `LP_WIFI_PASSWORD` — never argv. With none of them, the add
+/// is refused before anything is sent.
+fn password_for(args: &AddArgs) -> Result<WifiPassword> {
     if args.open {
-        return Ok(Some(WifiPassword::new("")));
+        return Ok(WifiPassword::new(""));
     }
     if args.password_stdin {
         let mut line = String::new();
@@ -127,71 +140,136 @@ fn password_for(args: &SetArgs) -> Result<Option<WifiPassword>> {
             .read_line(&mut line)
             .context("reading the password from stdin")?;
         let password = line.trim_end_matches(['\n', '\r']);
-        return Ok(Some(WifiPassword::new(password)));
+        return Ok(WifiPassword::new(password));
     }
-    if args.ssid.is_some()
-        && let Ok(password) = std::env::var(PASSWORD_ENV)
-    {
-        return Ok(Some(WifiPassword::new(password)));
+    if let Ok(password) = std::env::var(PASSWORD_ENV) {
+        return Ok(WifiPassword::new(password));
     }
-    Ok(None)
+    bail!(
+        "a network needs its password: give it in {PASSWORD_ENV}, with --password-stdin, \
+         or pass --open for an open network"
+    )
 }
 
-/// The status in plain words, one setting per line.
+/// The status in plain words: the switches, one line per saved network,
+/// the station.
 pub fn status_lines(status: &NetworkStatus) -> Vec<String> {
-    let network = match &status.wifi {
-        None => String::from("network: not set"),
-        Some(wifi) => format!(
-            "network: {} ({}, {})",
-            wifi.ssid,
-            if wifi.has_password {
-                "password set"
-            } else {
-                "open"
-            },
-            if wifi.enabled { "on" } else { "off" }
-        ),
-    };
-    let cloud_relay = format!(
-        "cloud relay: {}",
-        if status.cloud_relay { "on" } else { "off" }
-    );
-    let station = format!("station: {}", station_words(&status.station));
-    vec![network, cloud_relay, station]
+    let mut lines = vec![
+        format!("wifi: {}", on_off(status.wifi)),
+        format!("cloud relay: {}", on_off(status.cloud_relay)),
+    ];
+    if status.networks.is_empty() {
+        lines.push(String::from("networks: none saved"));
+    }
+    lines.extend(status.networks.iter().map(network_line));
+    lines.push(format!("station: {}", station_words(&status.station)));
+    lines
+}
+
+/// A scan in plain words, one line per network heard.
+pub fn scan_lines(scan: &NetworkScan) -> Vec<String> {
+    match scan {
+        NetworkScan::Unsupported => {
+            vec![String::from("scan: this firmware can't scan for Wi-Fi yet")]
+        }
+        NetworkScan::Heard(heard) if heard.is_empty() => {
+            vec![String::from("scan: no networks heard")]
+        }
+        NetworkScan::Heard(heard) => heard
+            .iter()
+            .map(|network| {
+                format!(
+                    "heard: {} · {} dBm{}",
+                    network.ssid,
+                    network.rssi,
+                    if network.secure { "" } else { " · open" }
+                )
+            })
+            .collect(),
+    }
+}
+
+fn network_line(network: &SavedNetworkInfo) -> String {
+    let mut facts = vec![if network.has_password {
+        "password set"
+    } else {
+        "open"
+    }];
+    if network.hidden {
+        facts.push("hidden");
+    }
+    if let Some(last) = network.last {
+        facts.push(match last {
+            LastAttempt::Connected => "last connected",
+            LastAttempt::WrongPassword => "wrong password",
+            LastAttempt::NotFound => "not in range",
+            LastAttempt::NoAddress => "got no address",
+        });
+    }
+    format!("network: {} ({})", network.ssid, facts.join(", "))
 }
 
 fn station_words(station: &StationState) -> String {
     match station {
-        StationState::Unsupported => String::from("this firmware doesn't join Wi-Fi yet"),
+        StationState::Unsupported => String::from("this firmware can't connect to Wi-Fi yet"),
         StationState::Off => String::from("off"),
-        StationState::Joining => String::from("joining"),
-        StationState::Joined { ip, rssi } => format!("joined · {ip} · {rssi} dBm"),
-        StationState::Failed { reason } => format!("couldn't join: {reason}"),
+        StationState::NotConnected => String::from("not connected"),
+        StationState::Connecting { ssid } => format!("connecting to {ssid}"),
+        StationState::Connected { ssid, ip, rssi } => {
+            format!("connected to {ssid} · {ip} · {rssi} dBm")
+        }
+        StationState::Failed { ssid, reason } => format!(
+            "couldn't connect to {ssid}: {}",
+            match reason {
+                StationFailure::WrongPassword => "wrong password",
+                StationFailure::NotFound => "not in range",
+                StationFailure::NoAddress => "got no address",
+            }
+        ),
     }
+}
+
+fn on_off(on: bool) -> &'static str {
+    if on { "on" } else { "off" }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lpc_wire::server::WifiInfo;
+    use lpc_wire::server::HeardNetwork;
+
+    fn network(ssid: &str, has_password: bool) -> SavedNetworkInfo {
+        SavedNetworkInfo {
+            ssid: String::from(ssid),
+            has_password,
+            hidden: false,
+            last: None,
+        }
+    }
 
     #[test]
-    fn a_saved_network_reads_in_plain_words() {
+    fn saved_networks_read_in_plain_words() {
         let status = NetworkStatus {
-            wifi: Some(WifiInfo {
-                ssid: String::from("lp-walk-net"),
-                has_password: true,
-                enabled: true,
-            }),
+            wifi: true,
             cloud_relay: true,
+            networks: vec![
+                network("lp-walk-net", true),
+                SavedNetworkInfo {
+                    hidden: true,
+                    last: Some(LastAttempt::WrongPassword),
+                    ..network("lp-back-office", false)
+                },
+            ],
             station: StationState::Unsupported,
         };
         assert_eq!(
             status_lines(&status),
             [
-                "network: lp-walk-net (password set, on)",
+                "wifi: on",
                 "cloud relay: on",
-                "station: this firmware doesn't join Wi-Fi yet",
+                "network: lp-walk-net (password set)",
+                "network: lp-back-office (open, hidden, wrong password)",
+                "station: this firmware can't connect to Wi-Fi yet",
             ]
         );
     }
@@ -199,26 +277,63 @@ mod tests {
     #[test]
     fn no_network_and_every_station_state() {
         let mut status = NetworkStatus {
-            wifi: None,
+            wifi: false,
             cloud_relay: false,
+            networks: Vec::new(),
             station: StationState::Off,
         };
-        assert_eq!(status_lines(&status)[0], "network: not set");
-        assert_eq!(status_lines(&status)[1], "cloud relay: off");
-        status.station = StationState::Joined {
-            ip: String::from("10.0.0.7"),
-            rssi: -48,
-        };
         assert_eq!(
-            status_lines(&status)[2],
-            "station: joined · 10.0.0.7 · -48 dBm"
+            status_lines(&status),
+            [
+                "wifi: off",
+                "cloud relay: off",
+                "networks: none saved",
+                "station: off"
+            ]
         );
-        status.station = StationState::Failed {
-            reason: String::from("wrong password"),
-        };
+        let cases = [
+            (StationState::NotConnected, "not connected"),
+            (
+                StationState::Connecting {
+                    ssid: String::from("lp-walk-net"),
+                },
+                "connecting to lp-walk-net",
+            ),
+            (
+                StationState::Connected {
+                    ssid: String::from("lp-walk-net"),
+                    ip: String::from("10.0.0.7"),
+                    rssi: -48,
+                },
+                "connected to lp-walk-net · 10.0.0.7 · -48 dBm",
+            ),
+            (
+                StationState::Failed {
+                    ssid: String::from("lp-walk-net"),
+                    reason: StationFailure::WrongPassword,
+                },
+                "couldn't connect to lp-walk-net: wrong password",
+            ),
+        ];
+        for (station, words) in cases {
+            status.station = station;
+            assert_eq!(status_lines(&status)[3], format!("station: {words}"));
+        }
+    }
+
+    #[test]
+    fn a_scan_reads_in_plain_words() {
         assert_eq!(
-            status_lines(&status)[2],
-            "station: couldn't join: wrong password"
+            scan_lines(&NetworkScan::Unsupported),
+            ["scan: this firmware can't scan for Wi-Fi yet"]
+        );
+        assert_eq!(
+            scan_lines(&NetworkScan::Heard(vec![HeardNetwork {
+                ssid: String::from("lp-cafe"),
+                rssi: -70,
+                secure: false,
+            }])),
+            ["heard: lp-cafe · -70 dBm · open"]
         );
     }
 }

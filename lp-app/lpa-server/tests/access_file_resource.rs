@@ -215,11 +215,11 @@ fn server_with_project(source: &str) -> LpServer {
     }
     // The device's own network file, its password the canary too.
     let network = lpc_access::NetworkFile {
-        wifi: Some(lpc_access::WifiNetwork {
+        networks: vec![lpc_access::WifiNetwork {
             ssid: String::from("lp-walk-net"),
             password: String::from(CANARY),
-            enabled: true,
-        }),
+            hidden: false,
+        }],
         ..lpc_access::NetworkFile::none()
     };
     server
