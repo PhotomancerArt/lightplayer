@@ -46,6 +46,8 @@ pub use app::devices::BrowserEmuLinkSource;
 pub use app::devices::BrowserSerialTransport;
 #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
 pub use app::devices::BrowserSimLinkSource;
+#[cfg(any(test, feature = "story-fixtures"))]
+pub use app::devices::device_update_fixtures::{UpdateFixture, UpdateFixtureRow};
 pub use app::devices::{
     AUTOCONNECT_ENABLED_PARAM, BLE_ENDPOINT_PREFIX, Backing, BleDeviceTransport, BleLinkSource,
     BluetoothReach, BoardRef, BoardRefError, CompletedPush, CompositeDeviceTransport,

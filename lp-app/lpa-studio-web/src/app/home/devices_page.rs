@@ -131,6 +131,11 @@ pub fn DevicesPage(
                                 // C6 repartition): question, refusal, a
                                 // held board, a backup to put back.
                                 layout: devices.layout.get(&card.id).cloned(),
+                                // Its firmware-update words (direction C):
+                                // the line and bar, chip and version, and
+                                // the picture slot's light; absent = no
+                                // update story, today's card.
+                                update: devices.updates.get(&card.id).cloned(),
                                 card,
                                 // The empty face's picker reads the SAME two
                                 // lists the gallery does — there is no

@@ -230,6 +230,20 @@
     --studio-status-example-border: #565177;
     --studio-status-example-text: #a8a3c4;
 
+    /* What a board's own LEDs show while its show has stopped for a
+       firmware update (the update-states spike, direction C, verbatim):
+       one solid colour, no animation. Dark yellow = updating; dark red =
+       waiting for its firmware. Not a status family — a picture of the
+       porch — so the device card's preview slot draws it and nothing else
+       does. */
+    --studio-update-light-yellow: #8a6a00;
+    --studio-update-light-yellow-glow: rgba(160, 120, 0, 0.55);
+    --studio-update-light-red: #7a1010;
+    --studio-update-light-red-glow: rgba(150, 20, 20, 0.55);
+    /* A version's commit beside it (spike §3: the version leads, the
+       commit is detail) — one step dimmer than `--studio-color-text-dim`. */
+    --studio-color-text-faint: #6d6f7a;
+
     --studio-step-marker-bg: #151a1f;
     --studio-step-active-bg: #2a2916;
     --studio-step-active-border: #717d44;
@@ -629,6 +643,75 @@ label:has(> input:not(:disabled)) {
 
 .ux-play-pill-offline {
     color: var(--studio-status-neutral-text);
+}
+
+/* The device card's firmware update, read as a version (update-states
+   spike §3): the version in mono, bright; its commit dim beside it. Inside
+   a line that needs a person, the version takes the line's own tone. */
+.ux-update-version {
+    font-family: var(--studio-font-mono);
+    font-size: 11.3px;
+    color: var(--studio-color-text-muted);
+}
+
+.ux-update-commit {
+    color: var(--studio-color-text-faint);
+}
+
+.ux-update-line-needs .ux-update-version {
+    color: inherit;
+}
+
+/* The preview slot while the show has stopped for an update (spike
+   direction C): a row of lamps lit solid in the board's light, and the
+   update's whole sentence under them. Every property set in every state:
+   the slot's look is classes only, never a style string. */
+.ux-update-light {
+    --update-led: var(--studio-update-light-yellow);
+    --update-led-glow: var(--studio-update-light-yellow-glow);
+}
+
+.ux-update-light-yellow {
+    --update-led: var(--studio-update-light-yellow);
+    --update-led-glow: var(--studio-update-light-yellow-glow);
+}
+
+.ux-update-light-red {
+    --update-led: var(--studio-update-light-red);
+    --update-led-glow: var(--studio-update-light-red-glow);
+}
+
+.ux-update-leds {
+    position: absolute;
+    top: 14px;
+    left: 18px;
+    right: 18px;
+    display: grid;
+    grid-template-columns: repeat(16, 1fr);
+    gap: 6px;
+}
+
+.ux-update-led {
+    aspect-ratio: 1;
+    border-radius: 50%;
+    background: var(--update-led);
+    box-shadow: 0 0 6px var(--update-led-glow);
+}
+
+.ux-update-light-sentence {
+    position: absolute;
+    left: 12px;
+    right: 12px;
+    bottom: 8px;
+    margin: 0;
+    color: var(--studio-color-text-muted);
+    font-size: 11.5px;
+    line-height: 1.4;
+    text-align: center;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 4;
+    overflow: hidden;
 }
 
 /* The "Reconnecting…" curtain (`link_reconnecting_strip.rs`): over the

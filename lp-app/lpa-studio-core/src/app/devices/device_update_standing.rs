@@ -424,13 +424,9 @@ fn percent_of(done: u32, total: u32) -> Option<u8> {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use lpa_devices::view::{ActivityView, Escape, FirmwareFace, LoadedProject};
-    use lpa_devices::{
-        ActivityKind, DeviceId, DeviceStatus, UpdateActivityView, UpdateBoardState,
-        UpdateIntentFacts,
-    };
-    use lpa_update::{HostIdentity, HostPieceFacts};
-    use lpc_update::{BoardManifest, PieceKind, TransferView, sha256_to_hex};
+    use lpa_devices::view::{Escape, FirmwareFace, LoadedProject};
+    use lpa_devices::{DeviceId, DeviceStatus};
+    use lpc_update::BoardManifest;
 
     use super::*;
 
@@ -622,165 +618,12 @@ pub(crate) mod tests {
         }
     }
 
-    /// This Studio's build Y: `2026.10.05-2`, core `BB…`, engine `BE…`.
-    pub(crate) fn studio_y() -> HostBuildFacts {
-        build("2026.10.05-2", [0xBB; 32], [0xBE; 32])
-    }
-
-    pub(crate) fn build(version: &str, core: [u8; 32], engine: [u8; 32]) -> HostBuildFacts {
-        HostBuildFacts::from_parts(
-            HostIdentity {
-                target: "esp32c6-4mb".into(),
-                chip: "esp32c6".into(),
-                version: version.into(),
-                build_id: format!("{version}+{}", commit_for(version)),
-                wire_proto: 36,
-                layout: 1,
-                min_loader: 1,
-            },
-            HostPieceFacts {
-                sha256: core,
-                len: 20_000,
-            },
-            HostPieceFacts {
-                sha256: engine,
-                len: 40_000,
-            },
-        )
-    }
-
-    /// A stable fake commit per version (a dev version is its own commit).
-    fn commit_for(version: &str) -> String {
-        if version.bytes().all(|b| b.is_ascii_hexdigit()) {
-            return format!("{version:0<12}");
-        }
-        match version {
-            "2026.10.03-1" => "a41c9e2d11f0".to_string(),
-            "2026.10.05-2" => "626a1b851aaa".to_string(),
-            "2026.10.07-4" => "c08d1f3eeee0".to_string(),
-            _ => "f00dfac00000".to_string(),
-        }
-    }
-
-    /// The board on X: `2026.10.03-1`, running.
-    pub(crate) fn board_x() -> BoardManifest {
-        manifest("2026.10.03-1", [0xAA; 32], [0xAE; 32])
-    }
-
-    pub(crate) fn manifest(version: &str, core: [u8; 32], engine: [u8; 32]) -> BoardManifest {
-        BoardManifest {
-            proto: 1,
-            target: "esp32c6-4mb".into(),
-            chip: "esp32c6".into(),
-            version: version.into(),
-            build_id: format!("{version}+{}", commit_for(version)),
-            wire_proto: 36,
-            core_sha256: sha256_to_hex(&core),
-            core_len: 18_000,
-            engine_sha256: sha256_to_hex(&engine),
-            engine_len: Some(38_000),
-            layout: 1,
-            loader: 1,
-            region_len: 3_375_104,
-            state: BoardState::Running,
-            refused_build: None,
-            transfer: None,
-        }
-    }
-
-    /// The board already on Y, by its hashes.
-    pub(crate) fn board_y() -> BoardManifest {
-        manifest("2026.10.05-2", [0xBB; 32], [0xBE; 32])
-    }
-
-    pub(crate) fn newer() -> BoardManifest {
-        manifest("2026.10.07-4", [0xCC; 32], [0xCE; 32])
-    }
-
-    pub(crate) fn refused() -> BoardManifest {
-        BoardManifest {
-            refused_build: Some(studio_y().build_hash()),
-            ..board_x()
-        }
-    }
-
-    pub(crate) fn crashing() -> BoardManifest {
-        BoardManifest {
-            state: BoardState::EngineCrashing,
-            ..board_x()
-        }
-    }
-
-    pub(crate) fn needs_engine() -> BoardManifest {
-        BoardManifest {
-            state: BoardState::NeedsEngine,
-            engine_len: None,
-            ..board_x()
-        }
-    }
-
-    pub(crate) fn on_trial_of_y() -> BoardManifest {
-        BoardManifest {
-            state: BoardState::OnTrial,
-            engine_len: None,
-            ..board_y()
-        }
-    }
-
-    pub(crate) fn continuing() -> BoardManifest {
-        BoardManifest {
-            state: BoardState::Updating,
-            transfer: Some(TransferView {
-                kind: PieceKind::Core,
-                done: 14_000,
-                total: 20_000,
-                busy: false,
-                build_hash: studio_y().build_hash(),
-            }),
-            ..board_x()
-        }
-    }
-
-    pub(crate) fn busy() -> BoardManifest {
-        BoardManifest {
-            state: BoardState::Updating,
-            transfer: Some(TransferView {
-                kind: PieceKind::Core,
-                done: 8_000,
-                total: 20_000,
-                busy: true,
-                build_hash: studio_y().build_hash(),
-            }),
-            ..board_x()
-        }
-    }
-
-    pub(crate) fn old_loader() -> BoardManifest {
-        BoardManifest {
-            loader: 0,
-            ..board_x()
-        }
-    }
-
-    /// The device model's mirror of `m`, as the evidence carries it.
-    pub(crate) fn facts_of(m: &BoardManifest) -> UpdateFacts {
-        UpdateFacts {
-            state: match m.state {
-                BoardState::Running => UpdateBoardState::Running,
-                BoardState::NeedsEngine => UpdateBoardState::NeedsEngine,
-                BoardState::EngineCrashing => UpdateBoardState::EngineCrashing,
-                BoardState::Updating => UpdateBoardState::Updating,
-                BoardState::OnTrial => UpdateBoardState::OnTrial,
-                BoardState::Unknown => UpdateBoardState::Unknown,
-            },
-            version: Some(m.version.clone()),
-            target: Some(m.target.clone()),
-            build_id: Some(m.build_id.clone()),
-            transfer: None,
-            refused_build: m.refused_build,
-            manifest_json: String::from_utf8(m.to_json()).unwrap(),
-        }
-    }
+    // The manifests and builds are the story fixtures' own, so a story
+    // and a test read the same board.
+    pub(crate) use super::super::device_update_fixtures::{
+        board_x, board_y, build, busy, continuing, crashing, facts_of, manifest, needs_engine,
+        newer, old_loader, on_trial_of_y, refused, studio_y,
+    };
 
     /// A Ready LightPlayer on an open USB port, idle.
     pub(crate) fn ready_view() -> DeviceView {
@@ -822,31 +665,6 @@ pub(crate) mod tests {
         stage: Option<UpdateStageFacts>,
         percent: Option<u8>,
     ) -> DeviceView {
-        let mut view = ready_view();
-        view.activity = Some(ActivityView {
-            kind: ActivityKind::Update,
-            label: "Updating…".to_string(),
-            percent,
-            cancellable: stage.is_none_or(UpdateStageFacts::allows_cancel),
-            cancel_requested: false,
-            layout: None,
-            update: Some(UpdateActivityView {
-                intent: UpdateIntentFacts::Install {
-                    version: "2026.10.05-2".to_string(),
-                    allow_downgrade: false,
-                },
-                stage,
-                done: 0,
-                total: 0,
-                outcome: None,
-                between_legs: false,
-            }),
-        });
-        view.escapes = if stage.is_none_or(UpdateStageFacts::allows_cancel) {
-            vec![Escape::Cancel, Escape::Disconnect, Escape::Forget]
-        } else {
-            vec![Escape::Disconnect, Escape::Forget]
-        };
-        view
+        super::super::device_update_fixtures::with_update_activity(ready_view(), stage, percent)
     }
 }

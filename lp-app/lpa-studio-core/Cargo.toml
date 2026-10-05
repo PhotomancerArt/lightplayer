@@ -154,6 +154,11 @@ browser-ble = [
     "lpa-link/browser-ble",
     "dep:wasm-bindgen-futures",
 ]
+# The update story's real inputs (`app/devices/device_update_fixtures.rs`):
+# a board manifest, this Studio's build facts and the device view, for the
+# web's stories to read through the same standing, words and offers the
+# controller does. Stories only; never in an app build.
+story-fixtures = []
 
 [lints]
 workspace = true

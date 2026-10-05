@@ -1388,17 +1388,10 @@ impl StudioController {
             link,
             store_latest: self.update_build_facts.store_latest(),
         };
-        let can_update_over_link = facts
-            .and_then(|facts| lpa_update::BoardView::from_json(facts.manifest_json.as_bytes()))
-            .is_some_and(|board| board.can_update_over_link());
-        crate::UpdateOfferFacts {
-            standing: crate::update_standing(&inputs),
-            route: crate::update_route(
-                can_update_over_link,
-                link,
-                evidence.is_some_and(lpa_devices::Evidence::carries_update_channel),
-            ),
-        }
+        crate::UpdateOfferFacts::read(
+            &inputs,
+            evidence.is_some_and(lpa_devices::Evidence::carries_update_channel),
+        )
     }
 
     /// Install the platform timer factory device waits run on (called by

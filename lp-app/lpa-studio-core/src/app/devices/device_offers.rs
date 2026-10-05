@@ -544,7 +544,7 @@ mod tests {
             update: UpdateOfferFacts {
                 standing: UpdateStanding::KeepsCrashing {
                     board: y.clone(),
-                    choices: vec![y],
+                    choices: vec![y, UpdateVersion::new("2026.10.07-4")],
                 },
                 route: UpdateRoute::OverTheAir,
             },

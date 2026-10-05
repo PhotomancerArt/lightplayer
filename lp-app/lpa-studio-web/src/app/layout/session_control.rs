@@ -917,6 +917,11 @@ fn save_and_revert(offers: &[UiOffer]) -> (Option<UiAction>, Option<UiAction>) {
 /// of core's own stat line ("60 fps · USB"). `None` when the session has
 /// published nothing honest to say.
 fn device_stat_line(session: &UiChromeSessionControl) -> Option<String> {
+    // A board with a firmware-update story states its version instead
+    // (`<chip> · X → Y · <mac>`, core's words).
+    if let Some(update) = &session.update {
+        return Some(update.stat_line.clone());
+    }
     let simulating = board_suffix(session).map(|board| format!("simulating {board}"));
     match (simulating, session.stat_line.clone()) {
         (Some(simulating), Some(stats)) => Some(format!("{simulating} · {stats}")),
@@ -937,6 +942,22 @@ struct RunWord {
 /// what a nav-away is refused for); it went with M2 of the device-model
 /// rebuild along with the ops that set it.
 fn run_word(session: &UiChromeSessionControl) -> RunWord {
+    // An update on offer, running or needed says so instead, in its own
+    // tone (core's word); without one the three-dot word stands.
+    if let Some(word) = session
+        .update
+        .as_ref()
+        .and_then(|update| update.run_word.as_ref())
+    {
+        return RunWord {
+            text: word.text.clone(),
+            class: match word.tone {
+                lpa_studio_core::UpdateRunTone::Live => "tw:text-status-live-foreground",
+                lpa_studio_core::UpdateRunTone::Working => "tw:text-status-working-foreground",
+                lpa_studio_core::UpdateRunTone::Attention => "tw:text-status-attention-foreground",
+            },
+        };
+    }
     match session.status {
         UiChromeSessionStatus::Run => RunWord {
             text: "running".to_string(),
@@ -1162,6 +1183,35 @@ mod tests {
         let mut empty = session(None);
         empty.status = UiChromeSessionStatus::Empty;
         assert_eq!(run_word(&empty).text, "idle");
+    }
+
+    /// A board with an update story: its run word (in its tone) and its
+    /// version stat line are core's; with no run word, the popover's own
+    /// "running" stands.
+    #[test]
+    fn an_update_story_takes_the_run_word_and_the_stat_line() {
+        let mut updating = session(None);
+        updating.update = Some(lpa_studio_core::UiSessionUpdate {
+            run_word: Some(lpa_studio_core::UpdateRunWord {
+                text: "Updating · 40%".to_string(),
+                tone: lpa_studio_core::UpdateRunTone::Working,
+            }),
+            stat_line: "esp32c6 · 2026.10.03-1 → 2026.10.05-2 · 60:55:f9:0a:0b:0c".to_string(),
+        });
+        let run = run_word(&updating);
+        assert_eq!(run.text, "Updating · 40%");
+        assert_eq!(run.class, "tw:text-status-working-foreground");
+        assert_eq!(
+            device_stat_line(&updating).as_deref(),
+            Some("esp32c6 · 2026.10.03-1 → 2026.10.05-2 · 60:55:f9:0a:0b:0c")
+        );
+
+        let mut current = session(None);
+        current.update = Some(lpa_studio_core::UiSessionUpdate {
+            run_word: None,
+            stat_line: "esp32c6 · 2026.10.05-2 · 60:55:f9:0a:0b:0c".to_string(),
+        });
+        assert_eq!(run_word(&current).text, "running");
     }
 
     /// Three segments, three accessible names: each one answers its OWN

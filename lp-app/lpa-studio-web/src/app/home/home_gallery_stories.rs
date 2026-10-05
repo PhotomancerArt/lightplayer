@@ -422,7 +422,7 @@ fn thumb_lamp_frame() -> UiControlProductPreview {
 /// [`thumb_lamp_frame`] as a board's card PULLS it: the same sign at 8 bits
 /// per sample (each linear unorm16 level as its sRGB8 code, the engine's
 /// rule), which is what the device card's feed carries over the wire.
-fn live_card_lamp_frame() -> UiControlProductPreview {
+pub(crate) fn live_card_lamp_frame() -> UiControlProductPreview {
     let frame = thumb_lamp_frame();
     let bytes: Vec<u8> = (0..frame.extent.sample_count() as usize)
         .map(|index| lpc_wire::linear16_to_srgb8(frame.unorm16_sample(index).unwrap_or(0)))

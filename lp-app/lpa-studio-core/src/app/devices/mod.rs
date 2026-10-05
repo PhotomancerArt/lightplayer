@@ -83,6 +83,9 @@ pub mod device_push_offer;
 pub mod device_records;
 pub mod device_roster;
 pub mod device_transport;
+/// The update story's inputs, built for tests and for the web's stories.
+#[cfg(any(test, feature = "story-fixtures"))]
+pub mod device_update_fixtures;
 pub mod device_update_offers;
 pub mod device_update_route;
 pub mod device_update_standing;

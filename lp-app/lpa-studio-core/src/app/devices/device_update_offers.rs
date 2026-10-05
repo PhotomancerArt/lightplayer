@@ -31,8 +31,8 @@
 use lpa_devices::view::{DeviceView, Escape};
 use lpa_devices::{Action, DeviceId, FirmwareAge, UpdateIntentFacts};
 
-use super::device_update_route::{UpdateLink, UpdateRoute};
-use super::device_update_standing::UpdateStanding;
+use super::device_update_route::{UpdateLink, UpdateRoute, update_route};
+use super::device_update_standing::{UpdateStanding, UpdateStandingInputs, update_standing};
 use super::device_update_version::UpdateVersion;
 use super::devices_op::DevicesOp;
 use crate::{OfferArgs, OfferBinder, OfferChoice, OfferParam, OfferPath, UiAction, UiOffer};
@@ -59,6 +59,23 @@ pub struct UpdateOffers {
 pub struct UpdateOfferFacts {
     pub standing: UpdateStanding,
     pub route: UpdateRoute,
+}
+
+impl UpdateOfferFacts {
+    /// A board's facts: its standing from `inputs`, and its route — over the
+    /// air when its manifest says it can update over its link and that link
+    /// `carries_update_channel`. The one reading the controller and the
+    /// stories share.
+    pub fn read(inputs: &UpdateStandingInputs<'_>, carries_update_channel: bool) -> Self {
+        let can_update_over_link = inputs
+            .facts
+            .and_then(|facts| lpa_update::BoardView::from_json(facts.manifest_json.as_bytes()))
+            .is_some_and(|board| board.can_update_over_link());
+        Self {
+            standing: update_standing(inputs),
+            route: update_route(can_update_over_link, inputs.link, carries_update_channel),
+        }
+    }
 }
 
 /// The update offers `view`'s card makes for `facts`, under `prefix`. See
@@ -118,14 +135,23 @@ pub fn update_offers(
                 "retry",
                 gate(reinstall, blocked),
             ));
-            set.offers.push(install_offer(
-                at("install-firmware"),
-                device,
-                board,
-                choices,
-                "Other version…",
-                blocked,
-            ));
+            // "Other version…" offers the versions this Studio can get
+            // other than the board's own: that one is Reinstall.
+            let others: Vec<UpdateVersion> = choices
+                .iter()
+                .filter(|choice| choice.version != board.version)
+                .cloned()
+                .collect();
+            if !others.is_empty() {
+                set.offers.push(install_offer(
+                    at("install-firmware"),
+                    device,
+                    board,
+                    &others,
+                    "Other version…",
+                    blocked,
+                ));
+            }
         }
         UpdateStanding::CantGetVersion {
             board,
@@ -158,7 +184,8 @@ fn withdraws_factory_reset(standing: &UpdateStanding) -> bool {
 
 /// `install-firmware`: one `version` choice — the versions this Studio can
 /// get, its own preselected — bound to an install of the chosen one, which
-/// is Lasting when it is older than the board's.
+/// is Lasting when it is older than the board's. With a single version
+/// there is nothing to choose, and the offer is that install, one press.
 fn install_offer(
     path: OfferPath,
     device: DeviceId,
@@ -181,6 +208,10 @@ fn install_offer(
     let template = bind(preselect.as_deref().unwrap_or_default());
     if let Some(reason) = blocked {
         return UiOffer::new(path, "download", template.disabled(reason));
+    }
+    // One version to get is no choice: the button installs it at one press.
+    if choices.len() == 1 {
+        return UiOffer::new(path, "download", template);
     }
     let options = choices
         .iter()
@@ -316,6 +347,7 @@ mod tests {
         });
         let set = update_offers(&ready_view(), &facts, &prefix());
         assert_eq!(set.offers[0].label(), "Install 2026.10.05-2");
+        assert!(set.offers[0].params().is_empty(), "Y alone: one press");
         let facts = over_the_air(UpdateStanding::Available {
             board: x(),
             to: UpdateVersion::new("626a1b851"),
@@ -438,7 +470,7 @@ mod tests {
     #[test]
     fn keeps_crashing_offers_reinstall_and_other_version_and_withdraws_factory_reset() {
         let facts = over_the_air(UpdateStanding::KeepsCrashing {
-            board: y(),
+            board: x(),
             choices: vec![y(), latest()],
         });
         assert_eq!(
@@ -468,6 +500,40 @@ mod tests {
         assert_eq!(values, ["2026.10.05-2", "2026.10.07-4"]);
     }
 
+    /// "Other version…" never repeats Reinstall, and one version to get is
+    /// one press, no pick.
+    #[test]
+    fn other_version_leaves_out_the_boards_own_and_a_single_version_is_one_press() {
+        let only_own = over_the_air(UpdateStanding::KeepsCrashing {
+            board: y(),
+            choices: vec![y()],
+        });
+        assert_eq!(
+            set_of(&ready_view(), &only_own),
+            (
+                vec![("reinstall-firmware".to_string(), false)],
+                false,
+                false
+            ),
+            "the board's own version is Reinstall's"
+        );
+        let one_other = over_the_air(UpdateStanding::KeepsCrashing {
+            board: y(),
+            choices: vec![y(), latest()],
+        });
+        let set = update_offers(&ready_view(), &one_other, &prefix());
+        let other = &set.offers[1];
+        assert_eq!(other.label(), "Other version…");
+        assert!(other.params().is_empty(), "nothing to pick");
+        assert_eq!(
+            bound_intent(other, &OfferArgs::new()),
+            UpdateIntentFacts::Install {
+                version: "2026.10.07-4".to_string(),
+                allow_downgrade: false
+            }
+        );
+    }
+
     #[test]
     fn a_version_studio_cant_get_offers_install_y_and_withdraws_factory_reset() {
         let facts = over_the_air(UpdateStanding::CantGetVersion {
@@ -481,6 +547,7 @@ mod tests {
         );
         let set = update_offers(&ready_view(), &facts, &prefix());
         assert_eq!(set.offers[0].label(), "Install 2026.10.05-2");
+        assert!(set.offers[0].params().is_empty(), "Y alone: one press");
         assert_eq!(
             bound_intent(&set.offers[0], &OfferArgs::new()),
             UpdateIntentFacts::Install {
@@ -496,7 +563,7 @@ mod tests {
     fn other_version_is_lasting_only_when_the_choice_is_older() {
         let facts = over_the_air(UpdateStanding::KeepsCrashing {
             board: latest(),
-            choices: vec![y(), latest()],
+            choices: vec![y(), x(), latest()],
         });
         let set = update_offers(&ready_view(), &facts, &prefix());
         let other = &set.offers[1];

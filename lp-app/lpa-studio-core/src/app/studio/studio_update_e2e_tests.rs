@@ -47,8 +47,8 @@ use lpc_update::{BoardManifest, BoardMessage, BoardState, PieceKind};
 use crate::app::studio::offer_press_test_api::OfferPressTestApi;
 use crate::{
     DeviceEffectCall, DeviceEffectFacts, DeviceEffectProgress, DeviceId, DeviceInput,
-    DeviceTaskFuture, DeviceTransport, DeviceTransportFuture, GrantedLink, INSTALL_VERSION_PARAM,
-    LensLineTap, MemoryOwnBuildSource, OfferArgs, StudioController, UpdateStanding,
+    DeviceTaskFuture, DeviceTransport, DeviceTransportFuture, GrantedLink, LensLineTap,
+    MemoryOwnBuildSource, OfferArgs, StudioController, UpdateStanding,
 };
 
 /// The model board's region (the sim's own size).
@@ -302,11 +302,8 @@ fn install_y_on_an_e13_board_puts_y_on_it() {
         )
     });
 
-    bench.press(
-        device,
-        "install-firmware",
-        OfferArgs::new().with(INSTALL_VERSION_PARAM, "2026.10.06-1"),
-    );
+    // Y is the one version this Studio can get: "Install Y" is one press.
+    bench.press(device, "install-firmware", OfferArgs::new());
     bench.run_until_update_ends(device);
     bench.assert_runs(&y());
     assert_eq!(bench.outcome(device), Some(UpdateOutcomeFacts::UpToDate));
