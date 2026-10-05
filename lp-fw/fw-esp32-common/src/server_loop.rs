@@ -105,6 +105,8 @@ pub async fn run_server_loop<T: ServerTransport + LinkUpkeep>(
 
     loop {
         let frame_start = time_provider.now_ms();
+        #[cfg(feature = "frame-pace-diag")]
+        crate::frame_pace_diag::frame_start();
 
         // A link that joined since the last frame (a radio connection) gets
         // its own hello before anything else is sent to it.
@@ -137,6 +139,8 @@ pub async fn run_server_loop<T: ServerTransport + LinkUpkeep>(
 
         // Tick server (synchronous)
         let tick_start = time_provider.now_ms();
+        #[cfg(feature = "frame-pace-diag")]
+        let pace_tick_start = crate::frame_pace_diag::now_us();
         let (tick_ms, send_ms, total_ms, response_count) = match server
             .tick_and_send(delta_ms.max(1), incoming_messages, &mut transport)
             .await
@@ -173,6 +177,11 @@ pub async fn run_server_loop<T: ServerTransport + LinkUpkeep>(
             }
         };
 
+        #[cfg(feature = "frame-pace-diag")]
+        crate::frame_pace_diag::frame_end(
+            crate::frame_pace_diag::now_us().saturating_sub(pace_tick_start),
+            response_count,
+        );
         last_tick = frame_start;
         frame_count += 1;
 

@@ -34,6 +34,7 @@ members = [
     "lp-app/lpa-fs-opfs",
     "lp-app/lpa-upgrade",
     "lp-app/lpa-cloud-client",
+    "lp-app/lpa-firmware-store",
     "lp-fw/fw-browser",
     "lp-fw/fw-esp32-common",
     "lp-fw/fw-core",
@@ -59,6 +60,7 @@ members = [
     "lp-core/lpc-registry",
     "lp-core/lpc-wire",
     "lp-core/lpc-cloud-api",
+    "lp-core/lpc-firmware-release",
     # lp-cloud workspace members
     "lp-cloud/lp-cloud-domain",
     "lp-cloud/lp-cloud-store-mem",
@@ -164,6 +166,7 @@ default-members = [
     "lp-app/lpa-studio-core",
     "lp-app/lpa-upgrade",
     "lp-app/lpa-cloud-client",
+    "lp-app/lpa-firmware-store",
     "lp-fw/fw-esp32-common",
     "lp-fw/fw-core",
     "lp-fw/fw-host",
@@ -178,6 +181,7 @@ default-members = [
     "lp-core/lpc-registry",
     "lp-core/lpc-wire",
     "lp-core/lpc-cloud-api",
+    "lp-core/lpc-firmware-release",
     # lp-cloud workspace members
     "lp-cloud/lp-cloud-domain",
     "lp-cloud/lp-cloud-store-mem",

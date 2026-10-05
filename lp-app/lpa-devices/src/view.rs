@@ -630,13 +630,27 @@ pub fn pending_link_view(entry: &PendingLink, now: Millis) -> PendingLinkView {
         // still running — and `Quiet`'s "Not responding" implies the board
         // spoke before it fell silent, which is not what happened here.
         // `last_outcome` is how identify's settled Failed becomes visible.
+        //
+        // That one Failed outcome covers two different physical events, and
+        // `presence` is what tells them apart: a refused `open()` never
+        // raises `LinkEvent::Opened`, so presence sits at `Present`
+        // (attached, port not open) all the way to the deadline — `errors`
+        // climbed instead (`evidence.rs`'s `fold_link_event`). A port that
+        // opened fine and then said nothing reaches `Present`'s `Open`
+        // first. Ticket 2026-10-02-studio-reopens-held-serial-port: the
+        // open-refused case is a held port — another app, or another
+        // Studio tab — not a silent board.
         Some(Classification::Unknown | Classification::Quiet { .. })
             if matches!(
                 entry.evidence().last_outcome,
                 Some(ActivityOutcome::Failed { .. })
             ) =>
         {
-            "New device found — no response (is another app using this port?)".to_string()
+            if entry.evidence().presence.is_open() {
+                "New device found — no response (is another app using this port?)".to_string()
+            } else {
+                "New device found — in use by another app or another Studio tab".to_string()
+            }
         }
         Some(classification) => format!(
             "New device found — {}",
@@ -847,15 +861,18 @@ mod tests {
         }
     }
 
-    /// Ticket 2026-09-27-busy-port-blocks-identify: a port that never opens
-    /// (another app holds it) hears nothing at all, so identify still
-    /// settles Failed at its deadline with the classification cascade's
-    /// `Quiet` fallback — whose ordinary "Not responding" label implies the
-    /// board spoke and then fell silent, which is not what happened. Before
-    /// the deadline the card must still say "identifying…"; once identify
-    /// has given up, it must say so plainly instead.
+    /// Ticket 2026-09-27-busy-port-blocks-identify, wording updated by
+    /// 2026-10-02-studio-reopens-held-serial-port: a port that never opens
+    /// (another app or another Studio tab holds it) hears nothing at all,
+    /// so identify still settles Failed at its deadline with the
+    /// classification cascade's `Quiet` fallback — whose ordinary "Not
+    /// responding" label implies the board spoke and then fell silent,
+    /// which is not what happened. Before the deadline the card must still
+    /// say "identifying…"; once identify has given up on a port that never
+    /// finished opening (`presence` never reached `Open`), it must name the
+    /// hold instead of guessing at silence.
     #[test]
-    fn a_pending_link_whose_identify_gave_up_says_so_instead_of_identifying_forever() {
+    fn a_pending_link_whose_open_was_refused_says_so_instead_of_identifying_forever() {
         use crate::replay::{Expect, Replay, Script, Step};
         use crate::roster::RosterConfig;
 
@@ -875,14 +892,48 @@ mod tests {
                         .pending_state("New device found — identifying…"),
                 )
                 // identify_deadline_ms defaults to 5_000; past it identify has
-                // settled Failed with no verdict ever reached.
+                // settled Failed with no verdict ever reached, and the port
+                // never got past `Error` to `Opened` — presence stayed
+                // `Present`, never `Open`.
+                .at(5_010, Step::Advance)
+                .expect(Expect::new().pending(1).pending_state(
+                    "New device found — in use by another app or another Studio tab",
+                ));
+
+        Replay::new(RosterConfig::default())
+            .run(&script.into_fixture("a busy port's identify gives up"))
+            .expect("scenario");
+    }
+
+    /// The other half of the same Failed outcome: a port that DID open
+    /// (`presence` reached `Open`) and then said nothing at all before
+    /// identify's deadline is a genuinely quiet board, not a held port, so
+    /// it keeps the original "no response" wording rather than the
+    /// refused-open one above.
+    #[test]
+    fn a_pending_link_that_opened_but_stayed_silent_still_blames_no_response() {
+        use crate::replay::{Expect, Replay, Script, Step};
+        use crate::roster::RosterConfig;
+
+        let script =
+            Script::new()
+                .at(0, Step::attach(1, "usb-1"))
+                .at(5, Step::opened(1))
+                .expect(
+                    Expect::new()
+                        .pending(1)
+                        .pending_state("New device found — identifying…"),
+                )
+                // identify_deadline_ms defaults to 5_000 from the open; past it
+                // identify has settled Failed having heard nothing at all over
+                // an open port.
                 .at(5_010, Step::Advance)
                 .expect(Expect::new().pending(1).pending_state(
                     "New device found — no response (is another app using this port?)",
                 ));
 
         Replay::new(RosterConfig::default())
-            .run(&script.into_fixture("a busy port's identify gives up"))
+            .run(&script.into_fixture("an opened port's identify gives up"))
             .expect("scenario");
     }
 }
