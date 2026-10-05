@@ -109,7 +109,9 @@ pub use app::home::{
 pub use app::library::{DESKTOP_BOARD_ID, ProjectTarget};
 pub use app::network::{
     NEEDS_AUTHOR, NetworkChange, NetworkCommand, NetworkOp, PasswordChange, READING, UiDeviceWifi,
-    WIFI_ABOUT, WIFI_ENABLED_PARAM, WIFI_NETWORK_PARAM, WIFI_PASSWORD_PARAM,
+    UiWifiNetworkRow, UiWifiTest, UiWifiTestResult, UiWifiTestStepLine, WIFI_ENABLED_PARAM,
+    WIFI_FORGET_SEGMENT, WIFI_HIDDEN_PARAM, WIFI_NETWORK_PARAM, WIFI_PASSWORD_PARAM, WifiStepState,
+    WifiTestNext, WifiTestOutcome, WifiTestProgress, WifiTestStep, WifiTone,
 };
 pub use app::node::{
     UiAssetEditor, UiAssetEditorKind, UiBindingAuthoring, UiBindingAuthoringDirection,
@@ -255,8 +257,11 @@ pub use lpa_devices::{
     Millis as DeviceMillis, RosterConfig as DeviceRosterConfig, TerminalKind as DeviceTerminalKind,
     TerminalLine as DeviceTerminalLine, WireVersion as DeviceWireVersion,
 };
-/// What a board reports about its saved network and station.
-pub use lpc_wire::server::{NetworkStatus, StationState, WifiInfo};
+/// What a board reports about its saved networks, its station and what it
+/// hears.
+pub use lpc_wire::server::{
+    HeardNetwork, LastAttempt, NetworkStatus, SavedNetworkInfo, StationFailure, StationState,
+};
 
 pub const STUDIO_DEMO_PROJECT_ID: &str = "catalog/fyeah-sign";
 

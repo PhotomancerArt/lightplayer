@@ -13,8 +13,15 @@
 //! **When it asks** (plan Q7): once per connection window on a link that
 //! holds edit — USB, or Bluetooth unlocked at author — never on a play or
 //! locked link; again when the popover opens ([`NetworkCommand::Refresh`]);
-//! and every change's answer replaces the status. No polling: nothing
-//! changes on a board that cannot join.
+//! and every change's answer replaces the status. It scans when the
+//! connect page asks ([`NetworkCommand::Scan`]), and never on a board whose
+//! station is `unsupported`. No polling: nothing changes on a board that
+//! cannot connect (M6 adds a poll while a test runs).
+//!
+//! **The in-row test** (the spike's 2B): a network added through the offer
+//! becomes the device's `testing` network once the board has saved it, and
+//! its row shows the test ([`super::UiWifiTest`]) until
+//! [`NetworkCommand::DismissTest`].
 //!
 //! **It never stores the password** (plan Q8): a change's password lives
 //! in its [`NetworkStep`] until the request leaves, and no state here holds
@@ -27,7 +34,7 @@ use lpa_devices::identity::DeviceId;
 use lpa_devices::link::LinkId;
 use lpa_devices::{Device, Roster};
 use lpc_access::Tier;
-use lpc_wire::server::NetworkStatus;
+use lpc_wire::server::{HeardNetwork, NetworkScan, NetworkStatus, StationState};
 
 use super::device_network_ops::{NetworkRefusal, NetworkStep, run_network_step};
 use super::network_command::{NetworkCommand, NetworkStepKind};
@@ -84,6 +91,13 @@ struct DeviceNetwork {
     /// The board refused for want of author: the controls are withdrawn
     /// until an answer comes back.
     needs_author: bool,
+    /// What the radio heard at the last scan.
+    heard: Option<Vec<HeardNetwork>>,
+    scanning: bool,
+    /// The network an add in flight is saving.
+    adding: Option<String>,
+    /// The network whose test shows in its row.
+    testing: Option<String>,
 }
 
 impl NetworkController {
@@ -194,18 +208,62 @@ impl NetworkController {
                     state.reading = true;
                 }
             }
+            NetworkCommand::Scan { device } => {
+                let Some(found) = roster.device(device) else {
+                    return;
+                };
+                let Some((window, WifiReach::Edit)) = reach(found, granted(device)) else {
+                    return;
+                };
+                let state = self.devices.entry(device).or_default();
+                let can_scan = state
+                    .status
+                    .as_ref()
+                    .is_some_and(|status| status.station != StationState::Unsupported);
+                if !can_scan || state.scanning || state.reading || state.writing {
+                    return;
+                }
+                if self.dispatch(device, window.link, NetworkStep::Scan, effects) {
+                    self.devices.entry(device).or_default().scanning = true;
+                }
+            }
+            NetworkCommand::DismissTest { device } => {
+                if let Some(state) = self.devices.get_mut(&device) {
+                    state.testing = None;
+                }
+            }
+            NetworkCommand::Scanned { device, result } => {
+                let state = self.devices.entry(device).or_default();
+                state.scanning = false;
+                match result {
+                    Ok(NetworkScan::Heard(heard)) => state.heard = Some(heard),
+                    Ok(NetworkScan::Unsupported) => state.heard = None,
+                    Err(NetworkRefusal::NotPermitted(_)) => state.needs_author = true,
+                    Err(NetworkRefusal::Said(error)) => state.error = Some(error),
+                }
+            }
             NetworkCommand::Answered {
                 device,
                 kind,
                 result,
             } => {
                 let state = self.devices.entry(device).or_default();
-                match kind {
-                    NetworkStepKind::Read => state.reading = false,
-                    NetworkStepKind::Write => state.writing = false,
-                }
+                let added = match kind {
+                    NetworkStepKind::Read => {
+                        state.reading = false;
+                        None
+                    }
+                    NetworkStepKind::Write => {
+                        state.writing = false;
+                        state.adding.take()
+                    }
+                };
                 match result {
                     Ok(status) => {
+                        if let Some(added) = added {
+                            // Saved: its test runs in its row (2B).
+                            state.testing = Some(added);
+                        }
                         state.status = Some(status);
                         state.error = None;
                         state.needs_author = false;
@@ -238,22 +296,24 @@ impl NetworkController {
         let result = self.try_start(op, roster, effects, granted);
         let state = self.devices.entry(device).or_default();
         match &result {
-            Ok(()) => {
+            Ok(adding) => {
                 state.writing = true;
                 state.error = None;
+                state.adding = adding.clone();
             }
             Err(error) => state.error = Some(error.clone()),
         }
-        result
+        result.map(|_| ())
     }
 
+    /// Start the change; `Ok` names the network an add is saving.
     fn try_start(
         &mut self,
         op: NetworkOp,
         roster: &Roster,
         effects: &DeviceEffects,
         granted: impl Fn(DeviceId) -> Option<Tier>,
-    ) -> Result<(), String> {
+    ) -> Result<Option<String>, String> {
         let device = op.device;
         let found = roster
             .device(device)
@@ -271,22 +331,26 @@ impl NetworkController {
                 "this device is busy (another job has it) — try again in a moment".to_string(),
             );
         }
-        let step = match op.change {
-            NetworkChange::Set {
+        let (step, adding) = match op.change {
+            NetworkChange::Add {
                 ssid,
                 password,
-                enabled,
-                cloud_relay,
-            } => NetworkStep::Set {
-                ssid,
-                password,
-                enabled,
-                cloud_relay,
-            },
-            NetworkChange::Forget => NetworkStep::Forget,
+                hidden,
+            } => (
+                NetworkStep::Add {
+                    ssid: ssid.clone(),
+                    password,
+                    hidden,
+                },
+                Some(ssid),
+            ),
+            NetworkChange::Forget { ssid } => (NetworkStep::Forget { ssid }, None),
+            NetworkChange::Switches { wifi, cloud_relay } => {
+                (NetworkStep::Switches { wifi, cloud_relay }, None)
+            }
         };
         if self.dispatch(device, window.link, step, effects) {
-            Ok(())
+            Ok(adding)
         } else {
             Err("this device cannot be changed from here right now".to_string())
         }
@@ -305,6 +369,9 @@ impl NetworkController {
             reading: state.is_some_and(|state| state.reading),
             writing: state.is_some_and(|state| state.writing),
             error: state.and_then(|state| state.error.clone()),
+            heard: state.and_then(|state| state.heard.clone()),
+            scanning: state.is_some_and(|state| state.scanning),
+            testing: state.and_then(|state| state.testing.clone()),
         })
     }
 }
@@ -404,8 +471,9 @@ mod tests {
         let roster = Roster::new(Default::default());
         let effects = DeviceEffects::new();
         let status = NetworkStatus {
-            wifi: None,
+            wifi: true,
             cloud_relay: true,
+            networks: Vec::new(),
             station: lpc_wire::server::StationState::Unsupported,
         };
         network.apply(
@@ -471,5 +539,55 @@ mod tests {
             |_| None,
         );
         assert!(!network.devices[&DeviceId(1)].needs_author);
+    }
+
+    /// An add that the board saved becomes the row's test; a refused one
+    /// does not; Done dismisses it.
+    #[test]
+    fn a_saved_add_becomes_the_rows_test() {
+        let mut network = NetworkController::new();
+        let roster = Roster::new(Default::default());
+        let effects = DeviceEffects::new();
+        let status = NetworkStatus {
+            wifi: true,
+            cloud_relay: true,
+            networks: vec![lpc_wire::server::SavedNetworkInfo {
+                ssid: "lp-walk-net".to_string(),
+                has_password: true,
+                hidden: false,
+                last: None,
+            }],
+            station: StationState::Unsupported,
+        };
+        let answered = |network: &mut NetworkController, result| {
+            network.apply(
+                NetworkCommand::Answered {
+                    device: DeviceId(1),
+                    kind: NetworkStepKind::Write,
+                    result,
+                },
+                &roster,
+                &effects,
+                |_| None,
+            )
+        };
+        network.devices.entry(DeviceId(1)).or_default().adding = Some("lp-walk-net".to_string());
+        answered(&mut network, Err(NetworkRefusal::Said("no".to_string())));
+        assert_eq!(network.devices[&DeviceId(1)].testing, None);
+        network.devices.entry(DeviceId(1)).or_default().adding = Some("lp-walk-net".to_string());
+        answered(&mut network, Ok(status));
+        assert_eq!(
+            network.devices[&DeviceId(1)].testing.as_deref(),
+            Some("lp-walk-net")
+        );
+        network.apply(
+            NetworkCommand::DismissTest {
+                device: DeviceId(1),
+            },
+            &roster,
+            &effects,
+            |_| None,
+        );
+        assert_eq!(network.devices[&DeviceId(1)].testing, None);
     }
 }

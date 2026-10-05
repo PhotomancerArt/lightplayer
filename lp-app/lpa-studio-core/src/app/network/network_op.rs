@@ -24,16 +24,20 @@ pub struct NetworkOp {
 /// What a [`NetworkOp`] changes.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum NetworkChange {
-    /// `NetworkSet`: `None` leaves a setting as it is.
-    Set {
-        ssid: Option<String>,
+    /// `NetworkAdd`: save a network, or give a saved one a new password.
+    /// `hidden: None` leaves a saved network's as it is.
+    Add {
+        ssid: String,
         password: PasswordChange,
-        enabled: Option<bool>,
+        hidden: Option<bool>,
+    },
+    /// `NetworkForget`: the board drops this network and its password.
+    Forget { ssid: String },
+    /// `NetworkSet`: the two switches; `None` leaves one as it is.
+    Switches {
+        wifi: Option<bool>,
         cloud_relay: Option<bool>,
     },
-    /// `NetworkForget`: the board drops the saved network and its password;
-    /// `cloudRelay` stays.
-    Forget,
 }
 
 impl NetworkOp {
@@ -52,34 +56,31 @@ impl NetworkOp {
 impl ControllerOp for NetworkOp {
     fn default_action_meta(&self) -> ActionMeta {
         match &self.change {
-            NetworkChange::Set {
-                ssid: Some(_),
-                password,
-                ..
-            } if *password != PasswordChange::Keep => ActionMeta::new(
-                "Save",
-                "Save this network on the board. The password can't be read back.",
+            NetworkChange::Add { .. } => ActionMeta::new(
+                "Connect",
+                "Save this network on the board, then connect to it. The password can't be \
+                 read back.",
                 ActionPriority::Primary,
             )
-            .with_icon("save"),
-            NetworkChange::Set { .. } => ActionMeta::new(
+            .with_icon("wifi"),
+            NetworkChange::Switches { .. } => ActionMeta::new(
                 "Save",
-                "Save the board's network settings.",
-                ActionPriority::Primary,
+                "Save the board's Wi‑Fi switches.",
+                ActionPriority::Secondary,
             )
             .with_icon("save"),
             // The board forgets a password Studio never kept: only the user
             // can bring it back.
-            NetworkChange::Forget => ActionMeta::new(
+            NetworkChange::Forget { ssid } => ActionMeta::new(
                 "Forget",
                 "The board forgets this network and its password.",
                 ActionPriority::Tertiary,
             )
             .with_icon("remove")
             .lasting(ActionConfirmation::new(
-                "Forget this network?",
-                "The board forgets the network and its password. You'll need the password \
-                 to set it again.",
+                format!("Forget {ssid}?"),
+                "The board forgets it and its password. You'll need the password to add it \
+                 again.",
                 "Forget",
             )),
         }
@@ -115,39 +116,41 @@ mod tests {
     use super::*;
 
     #[test]
-    fn forget_is_lasting_and_a_set_is_routine() {
-        let forget = NetworkOp::action_for(DeviceId(1), NetworkChange::Forget);
+    fn forget_is_lasting_and_the_switches_are_routine() {
+        let forget = NetworkOp::action_for(
+            DeviceId(1),
+            NetworkChange::Forget {
+                ssid: "lp-walk-net".to_string(),
+            },
+        );
         assert!(forget.meta().consequence.arms());
         assert!(forget.meta().needs_user());
-        let set = NetworkOp::action_for(
+        let switches = NetworkOp::action_for(
             DeviceId(1),
-            NetworkChange::Set {
-                ssid: None,
-                password: PasswordChange::Keep,
-                enabled: Some(false),
+            NetworkChange::Switches {
+                wifi: Some(false),
                 cloud_relay: None,
             },
         );
-        assert!(set.meta().consequence.is_routine());
+        assert!(switches.meta().consequence.is_routine());
     }
 
     /// The op as the recorder and every log see it carries no password.
     #[test]
     fn an_op_never_prints_its_password() {
-        let set = NetworkOp::action_for(
+        let add = NetworkOp::action_for(
             DeviceId(1),
-            NetworkChange::Set {
-                ssid: Some("lp-walk-net".to_string()),
+            NetworkChange::Add {
+                ssid: "lp-walk-net".to_string(),
                 password: PasswordChange::Set("correct-horse-42".to_string()),
-                enabled: None,
-                cloud_relay: None,
+                hidden: None,
             },
         );
-        let printed = format!("{set:?}");
+        let printed = format!("{add:?}");
         assert!(printed.contains("lp-walk-net"), "{printed}");
         assert!(!printed.contains("correct-horse-42"), "{printed}");
         let summary = crate::app::studio::studio_command_summary::summarize_command(
-            &crate::StudioCommand::Action(set),
+            &crate::StudioCommand::Action(add),
         )
         .unwrap();
         assert!(!summary.1.contains("correct-horse-42"), "{summary:?}");
