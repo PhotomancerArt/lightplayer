@@ -10,6 +10,7 @@
 
 use lpa_client::{ClientError, ClientIo, LpClient};
 use lpa_devices::DeviceId;
+use lpc_access::NetworkFileError;
 use lpc_wire::server::{NetworkScan, NetworkStatus};
 
 use super::network_command::{NetworkCommand, NetworkStepKind};
@@ -80,11 +81,16 @@ pub async fn run_network_step<Io: ClientIo>(
 fn refusal(error: ClientError) -> NetworkRefusal {
     match error {
         ClientError::NotPermitted { needs } => NetworkRefusal::NotPermitted(needs),
-        // The board's own code: it names the rule, never the password.
+        // The board sends a bare code, never a sentence (cheap on the
+        // device); `reword_refusal` turns it back into words here, off
+        // the device, so no user-visible text ever shows a raw code.
         // Studio's offer binder already turned the common cases into
-        // words before sending (`wifi_offers::bind_add`); this is what
-        // reaches a caller that skips that check, such as `lp-cli`.
-        ClientError::Server(error) => NetworkRefusal::Said(error),
+        // words before sending (`wifi_offers::bind_add`), so this path
+        // is the rare one: a caller with no early check of its own, or a
+        // race between two clients.
+        ClientError::Server(error) => {
+            NetworkRefusal::Said(NetworkFileError::reword_refusal(&error))
+        }
         error => NetworkRefusal::Said(format!("the device did not answer: {error}")),
     }
 }
@@ -200,11 +206,11 @@ mod tests {
     }
 
     #[test]
-    fn a_short_password_is_refused_in_the_boards_code() {
+    fn a_short_password_is_refused_in_the_boards_words() {
         // A conversation run directly (no offer binder in front, as
-        // `lp-cli` runs it): the board's own reply is the bare code, not
-        // a sentence — Studio's offer binder is what turns this into
-        // words, before a request like this is ever sent.
+        // `lp-cli` runs it): the board sends a bare code, and `refusal`
+        // (`NetworkFileError::reword_refusal`) turns it back into words
+        // here — a raw code never reaches this far.
         let board = FakeBoard::fresh();
         let mut usb = board.usb();
         let refused = answer(block_on(run_network_step(
@@ -213,10 +219,11 @@ mod tests {
             add("lp-walk-net", PasswordChange::Set("short".to_string())),
         )))
         .unwrap_err();
-        let NetworkRefusal::Said(code) = refused else {
+        let NetworkRefusal::Said(sentence) = refused else {
             panic!("{refused:?}");
         };
-        assert!(code.contains("passwordTooShort"), "{code}");
+        assert!(sentence.contains("too short"), "{sentence}");
+        assert!(!sentence.contains("passwordTooShort"), "{sentence}");
         assert!(board.network().networks.is_empty(), "nothing written");
     }
 

@@ -8,7 +8,8 @@
 use std::io::BufRead;
 
 use anyhow::{Context, Result, bail};
-use lpa_client::{HostSpecifier, LpClient};
+use lpa_client::{ClientError, HostSpecifier, LpClient};
+use lpc_access::NetworkFileError;
 use lpc_wire::WifiPassword;
 use lpc_wire::server::{
     LastAttempt, NetworkScan, NetworkStatus, SavedNetworkInfo, StationFailure, StationState,
@@ -110,7 +111,7 @@ async fn request<Io: lpa_client::ClientIo>(client: &mut LpClient<Io>, op: Op) ->
                 .network_scan()
                 .await
                 .map(|outcome| Reply::Scan(outcome.value))
-                .map_err(|error| anyhow::anyhow!("{error}"));
+                .map_err(worded);
         }
         Op::Status => client.network_status().await,
         Op::Add {
@@ -121,9 +122,20 @@ async fn request<Io: lpa_client::ClientIo>(client: &mut LpClient<Io>, op: Op) ->
         Op::Forget(ssid) => client.network_forget(ssid).await,
         Op::Set { wifi, cloud_relay } => client.network_set(wifi, cloud_relay).await,
     };
-    status
-        .map(|outcome| Reply::Status(outcome.value))
-        .map_err(|error| anyhow::anyhow!("{error}"))
+    status.map(|outcome| Reply::Status(outcome.value)).map_err(worded)
+}
+
+/// The board sends a bare error code (cheap on the device: see
+/// `NetworkFileError`'s `Display`); turn it into words here, the same way
+/// Studio does, so `lp-cli` never prints a raw code to a user who cannot
+/// act on it.
+fn worded(error: ClientError) -> anyhow::Error {
+    match error {
+        ClientError::Server(message) => {
+            anyhow::anyhow!("server error: {}", NetworkFileError::reword_refusal(&message))
+        }
+        other => anyhow::anyhow!("{other}"),
+    }
 }
 
 /// Where the password comes from: `--open` (none), `--password-stdin` (one

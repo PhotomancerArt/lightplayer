@@ -102,4 +102,123 @@ impl NetworkFileError {
             Self::DuplicateSsid => "two saved networks have the same name".to_string(),
         }
     }
+
+    /// The exact text `lpa-server`'s `network_store::network_add` puts
+    /// before the rule's code in a refusal (`"cannot save the network: "`).
+    const REFUSAL_PREFIX: &'static str = "cannot save the network: ";
+
+    /// Turn a device's refusal into words a user can read: the device
+    /// sends `"cannot save the network: <code>"` (cheap — see
+    /// [`Self::fmt`]), and this is the one place that reads a code back
+    /// out, for a caller that only has that text, with no concrete
+    /// `NetworkFileError` and no wire round trip of its own to re-run.
+    /// Studio (`device_network_ops::refusal`) and `lp-cli` (its wifi error
+    /// output) are the two callers; **never the device**, which keeps
+    /// sending the cheap code — a user-visible string with a bare code in
+    /// it is a bug in whichever of those two skipped this call, not a
+    /// reason to make the device spell sentences again.
+    ///
+    /// Text that isn't shaped like a refusal, or a code this build does
+    /// not recognize (a newer device than this one), is never shown
+    /// verbatim: the unshaped case passes through (it is already a full
+    /// sentence — an fs error, a transport error, …), and an unrecognized
+    /// code gets a plain, honest fallback instead of leaking raw text the
+    /// user cannot act on.
+    #[must_use]
+    pub fn reword_refusal(text: &str) -> String {
+        match text.strip_prefix(Self::REFUSAL_PREFIX) {
+            Some(code) => format!(
+                "{}{}",
+                Self::REFUSAL_PREFIX,
+                Self::words_for_code(code).unwrap_or_else(|| {
+                    "the board refused it for a reason it did not explain".to_string()
+                })
+            ),
+            None => text.to_string(),
+        }
+    }
+
+    /// [`Self::reword_refusal`]'s code table. Exact for a code whose rule
+    /// carries no number (`ssidEmpty`, `passwordNotPrintable`,
+    /// `passwordNotHexKey`, `duplicateSsid`) or whose number is a build
+    /// constant the caller already knows (`tooManyNetworks`,
+    /// [`crate::NetworkFile::MAX_NETWORKS`]); a generic phrasing, the
+    /// specific count dropped, for a code whose number was the caller's
+    /// own data (`ssidTooLong`, `passwordTooShort`, `passwordTooLong`) —
+    /// those never reach this far in practice, because Studio's own early
+    /// validation already holds the concrete value and words it with
+    /// [`Self::words`] before a request carrying one is ever sent; this
+    /// is the fallback for a caller with no such check of its own
+    /// (`lp-cli`), or a race between two clients.
+    fn words_for_code(code: &str) -> Option<String> {
+        Some(match code {
+            "ssidEmpty" => "the network name is empty".to_string(),
+            "ssidTooLong" => "the network name is too long; Wi-Fi allows 32 bytes".to_string(),
+            "passwordTooShort" => "the password is too short; Wi-Fi needs at least 8 characters (or none for an open network)".to_string(),
+            "passwordTooLong" => "the password is too long; Wi-Fi allows 63 characters (or a 64-digit hex key)".to_string(),
+            "passwordNotPrintable" => "the password may only use printable ASCII characters (letters, digits, spaces and punctuation)".to_string(),
+            "passwordNotHexKey" => "a 64-character password must be a raw key of 64 hex digits; passwords allow 63 characters".to_string(),
+            "tooManyNetworks" => format!(
+                "the board keeps at most {} networks; forget one first",
+                crate::NetworkFile::MAX_NETWORKS
+            ),
+            "duplicateSsid" => "two saved networks have the same name".to_string(),
+            _ => return None,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_devices_bare_code_is_reworded_exactly_for_too_many_networks() {
+        // The one code whose number is a build constant both ends
+        // already know: the reworded text matches `words()` exactly.
+        let device_text = format!("cannot save the network: {}", NetworkFileError::TooManyNetworks { max: 8 });
+        assert_eq!(device_text, "cannot save the network: tooManyNetworks");
+        assert_eq!(
+            NetworkFileError::reword_refusal(&device_text),
+            format!(
+                "cannot save the network: {}",
+                NetworkFileError::TooManyNetworks { max: 8 }.words()
+            )
+        );
+    }
+
+    #[test]
+    fn every_add_rule_codes_bare_display_reads_back_to_words_with_no_raw_code() {
+        for error in [
+            NetworkFileError::SsidEmpty,
+            NetworkFileError::SsidTooLong { bytes: 40 },
+            NetworkFileError::PasswordTooShort { len: 5 },
+            NetworkFileError::PasswordTooLong { len: 65 },
+            NetworkFileError::PasswordNotPrintable,
+            NetworkFileError::PasswordNotHexKey,
+            NetworkFileError::TooManyNetworks { max: 8 },
+            NetworkFileError::DuplicateSsid,
+        ] {
+            let code = error.to_string();
+            let device_text = format!("cannot save the network: {code}");
+            let reworded = NetworkFileError::reword_refusal(&device_text);
+            assert!(!reworded.contains(&code), "{reworded} still shows {code}");
+            assert_ne!(reworded, device_text, "{code} was not reworded at all");
+        }
+    }
+
+    #[test]
+    fn an_unrecognized_code_falls_back_to_a_plain_sentence_not_the_raw_code() {
+        let reworded = NetworkFileError::reword_refusal("cannot save the network: aFutureCode");
+        assert!(!reworded.contains("aFutureCode"), "{reworded}");
+        assert!(reworded.contains("cannot save the network"), "{reworded}");
+    }
+
+    #[test]
+    fn text_with_no_refusal_prefix_passes_through_unchanged() {
+        let message = "cannot save the network settings: disk full";
+        assert_eq!(NetworkFileError::reword_refusal(message), message);
+        let message = "the device did not answer: timed out";
+        assert_eq!(NetworkFileError::reword_refusal(message), message);
+    }
 }
