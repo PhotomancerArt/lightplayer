@@ -21,6 +21,7 @@ engines belongs in `lp-app`, `lp-fw`, or another app-facing layer.
 - `lpc-view` — client-side view/cache for one engine, built from `lpc-wire`
   updates.
 - `lpc-shared` — small shared support utilities used by core/app crates.
+- `lpc-update` — over-the-air update protocol v1 (channel 3): the codec, the board manifest, the progress record, and the board's sans-IO update session.
 
 ## Naming boundaries (M4.3b)
 

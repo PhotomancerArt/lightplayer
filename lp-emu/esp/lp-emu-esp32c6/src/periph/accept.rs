@@ -89,7 +89,9 @@ pub fn hp_apm() -> RegFile {
 }
 
 // ---- LP_AON: `store0..7` plain RW; `store1` carries the calibration value
-// the firmware writes and reads back (clock/mod.rs:518-520, :539-548).
+// the firmware writes and reads back (clock/mod.rs:518-520, :539-548). The
+// machine maps it through `super::lp_aon::LpAon`, which performs the one bit
+// here that is not a memory: `sys_cfg.hpsys_sw_reset`, the software reset.
 
 pub fn lp_aon() -> RegFile {
     RegFile::new("LP_AON", 0x400)
