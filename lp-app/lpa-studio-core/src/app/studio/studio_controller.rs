@@ -152,6 +152,9 @@ pub struct StudioController {
     /// every card's update standing is read against. Empty until the update
     /// host fills it, and with it empty no card changes.
     update_build_facts: crate::UpdateBuildFacts,
+    /// [`Self::drive_device_updates`] is running: the no-click start it
+    /// dispatches folds, and that fold must not start another.
+    driving_updates: bool,
     /// Where the user is, as the web last reported it
     /// (`StudioCommand::Place`); `None` until it does (and in the headless
     /// tests and evals, which have no page). Read-only: core never
@@ -445,6 +448,7 @@ impl StudioController {
             ble_transport: None,
             bluetooth_reach: crate::BluetoothReach::Checking,
             update_build_facts: crate::UpdateBuildFacts::default(),
+            driving_updates: false,
             place: None,
             play_views: 0,
             device_sims: std::collections::BTreeMap::new(),
@@ -1191,9 +1195,145 @@ impl StudioController {
     }
 
     /// Install the firmware store client (lightplayer.app's `/firmware/`
-    /// lookup, or the `?firmware-store=` dev origin).
+    /// lookup, or the `?firmware-store=` dev origin). A store installed is a
+    /// store online: a restore that missed for want of it may run again.
     pub fn set_firmware_store(&mut self, store: Rc<crate::StudioFirmwareStore>) {
         self.devices.effects_mut().firmware_mut().set_store(store);
+        self.devices.effects().update_host().note_store_online();
+    }
+
+    /// The browser came back online (the shell's `online` event): the
+    /// firmware store may answer again, so a restore that found no engine
+    /// for want of it may run again, and its `latest` is asked again.
+    pub fn note_firmware_store_online(&mut self) {
+        self.devices.effects().update_host().note_store_online();
+        self.drive_device_updates();
+    }
+
+    /// Install this Studio's own firmware build (the shell's port, P8):
+    /// its facts now — every card's update standing reads them — and its
+    /// bytes only when an update runs.
+    pub fn set_own_build_source(&mut self, source: Rc<dyn crate::OwnBuildSource>) {
+        let facts = source.facts();
+        self.devices
+            .effects()
+            .update_host()
+            .set_own_source(Some(source));
+        self.update_build_facts_mut().set_own(facts);
+        self.drive_device_updates();
+    }
+
+    /// The no-click half of updates, run after every device fold: hand the
+    /// update host the held keys and each Bluetooth board's tier, keep the
+    /// store's `latest` current, watch boards another device is updating
+    /// (DS8), and start a restore or a finish with no click (DS4) — unless
+    /// the host remembers a miss for that board on this link (E13: no loop).
+    pub(crate) fn drive_device_updates(&mut self) {
+        use crate::app::devices::update_auto_start as auto_start;
+        if core::mem::replace(&mut self.driving_updates, true) {
+            return;
+        }
+        let host = self.devices.effects().update_host().clone();
+        host.set_credentials(
+            self.access
+                .held()
+                .into_iter()
+                .map(|held| lpa_update::Credential::Key {
+                    salt: held.key.salt,
+                    material: held.key.material,
+                })
+                .collect(),
+        );
+        let latest = host.store_latest();
+        if latest.as_ref() != self.update_build_facts.store_latest() {
+            self.update_build_facts_mut().set_store_latest(latest);
+        }
+        let now = self.device_now();
+        let own = self.update_build_facts.own().cloned();
+        let store_latest = self.update_build_facts.store_latest().cloned();
+        let mut target = own.as_ref().map(|own| own.identity.target.clone());
+        let mut actions = Vec::new();
+        for device in self.devices.roster().devices() {
+            let evidence = &device.evidence;
+            let bluetooth = device
+                .identity
+                .endpoint
+                .as_ref()
+                .is_some_and(lpa_devices::EndpointKey::is_bluetooth);
+            let tier = match bluetooth {
+                true => self.access.granted_tier(device.id),
+                false => None,
+            };
+            host.set_tier(device.id, tier);
+            let Some(facts) = evidence.update_facts() else {
+                continue;
+            };
+            if target.is_none() {
+                target = facts.target.clone();
+            }
+            if device.activity.is_some()
+                || !evidence.presence.is_open()
+                || !evidence.carries_update_channel()
+            {
+                continue;
+            }
+            let view = lpa_devices::view::device_view(device, now);
+            let derived = auto_start::board_build_facts(facts);
+            let inputs = crate::UpdateStandingInputs {
+                view: &view,
+                facts: Some(facts),
+                own: own.as_ref().or(derived.as_ref()),
+                tier,
+                link: match bluetooth {
+                    true => crate::UpdateLink::Bluetooth,
+                    false => crate::UpdateLink::Usb,
+                },
+                store_latest: store_latest.as_ref(),
+            };
+            let verdict = auto_start::auto_update_for_standing(&crate::update_standing(&inputs));
+            actions.extend(auto_start::auto_action(&host, device.id, evidence, verdict));
+        }
+        for pending in self.devices.roster().pending() {
+            let evidence = pending.evidence();
+            let Some(facts) = evidence.update_facts() else {
+                continue;
+            };
+            if target.is_none() {
+                target = facts.target.clone();
+            }
+            if pending.activity_kind().is_some()
+                || !evidence.presence.is_open()
+                || !evidence.carries_update_channel()
+            {
+                continue;
+            }
+            let verdict = auto_start::auto_update_for_board(facts, own.as_ref(), None);
+            actions.extend(auto_start::auto_action(
+                &host,
+                pending.device_id(),
+                evidence,
+                verdict,
+            ));
+        }
+        let mut starts = Vec::new();
+        let mut watches = Vec::new();
+        for action in actions {
+            match action {
+                auto_start::AutoAction::Start(device) => starts.push(device),
+                auto_start::AutoAction::Watch(device, link) => watches.push((device, link)),
+            }
+        }
+        self.devices.effects_mut().set_update_watches(watches);
+        if let Some(target) = target {
+            self.devices.effects_mut().want_store_latest(&target);
+        }
+        for device in starts {
+            self.fold_device_input(crate::DeviceInput::Action(lpa_devices::Action::Update {
+                device,
+                intent: lpa_devices::UpdateIntentFacts::Auto,
+            }));
+        }
+        self.driving_updates = false;
     }
 
     /// The engine cache every engine Studio installs, fetches or reads back
@@ -1309,6 +1449,9 @@ impl StudioController {
         // A Bluetooth link that opened, said hello or dropped may need a
         // login conversation (BLE M6).
         self.drive_device_access();
+        // A board waiting for its engine, or holding this Studio's
+        // interrupted update, is restored or finished with no click (DS4).
+        self.drive_device_updates();
         // A chooser an agent card's press opened has answered: that is the
         // press's outcome, and the run it resumes reads the roster after it.
         if let Some((link, answer)) = grant_answer
@@ -1522,6 +1665,12 @@ impl StudioController {
     #[cfg(test)]
     pub(crate) fn set_device_roster_config_for_test(&mut self, config: crate::DeviceRosterConfig) {
         self.devices = crate::DeviceRoster::new(config);
+        // The fresh effects layer keeps the controller's clock, as `new`'s
+        // does (the update host times its legs and reconnects by it).
+        let clock = Rc::clone(&self.now_secs);
+        self.devices
+            .effects_mut()
+            .set_clock(Rc::new(move || clock()));
     }
 
     /// Provisional device ids of the links still being identified — the
@@ -8633,6 +8782,12 @@ impl StudioController {
 
     pub(crate) fn devices_for_test(&self) -> &crate::DeviceRoster {
         &self.devices
+    }
+
+    /// The access controller, for e2e rows that install this browser's key
+    /// on a model board.
+    pub(crate) fn access_for_test(&self) -> &crate::app::access::AccessController {
+        &self.access
     }
 
     pub(crate) fn runtime_pool_for_test(&self) -> &RuntimePool {

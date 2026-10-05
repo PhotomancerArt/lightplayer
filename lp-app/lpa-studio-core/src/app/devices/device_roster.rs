@@ -371,6 +371,8 @@ impl DeviceRoster {
         };
         let commands = self.roster.handle(now, input);
         self.note_dropped_links(&commands);
+        // An update leg starts from what the fold knows of its board (DS9).
+        self.effects.stage_update_legs(&self.roster, &commands);
         self.effects.apply(commands);
         // Only once a link's own attach has folded may the roster's silence
         // about it mean "let go" (see `DeviceEffects::retain_links`).
@@ -382,6 +384,9 @@ impl DeviceRoster {
         let roster = &self.roster;
         self.effects
             .retain_links(|link| roster.link_info(link).is_some());
+        // An update leg whose link went ends; a driver whose activity ended
+        // goes.
+        self.effects.reconcile_updates(&self.roster);
         self.drain_journal()
     }
 

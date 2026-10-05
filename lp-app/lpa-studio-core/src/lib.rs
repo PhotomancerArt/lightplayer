@@ -90,6 +90,7 @@ pub use app::devices::{
     update_standing, update_words, wants_auto_start,
 };
 pub use app::devices::{LINK_COUNTERS_CAPTION, LinkTrouble, UiLinkCounterRow, link_counter_rows};
+pub use app::devices::{MemoryOwnBuildSource, OwnBuildSource, UpdateHost};
 pub use app::docs_host::DocsSimHost;
 pub use app::studio::PlayViewOp;
 pub use app::studio::{UiPage, UiPanel, UiPlace, UiProjectView, UiSessionSection};

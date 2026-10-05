@@ -92,6 +92,7 @@ pub mod devices_op;
 pub mod emu_transport;
 pub mod link_health;
 pub mod new_sim_offer;
+pub mod own_build_source;
 pub mod pending_link_offers;
 pub mod provisional_board_numbers;
 pub mod runtime_backing;
@@ -101,7 +102,12 @@ pub mod sim_create_op;
 pub mod sim_record;
 pub mod sim_transport;
 pub mod target_offer;
+pub(crate) mod update_auto_start;
 pub mod update_build_facts;
+pub(crate) mod update_driver_mirror;
+pub mod update_host;
+pub(crate) mod update_narration;
+pub(crate) mod update_store_builds;
 pub mod wire_conversation;
 
 pub use add_device_offers::{USB_NEEDS_WEB_SERIAL, add_device_offers};
@@ -195,6 +201,7 @@ pub use emu_transport::{
 };
 pub use link_health::{LinkHealth, LinkHealthMap, LinkTrouble};
 pub use new_sim_offer::{NEW_SIM_BACKING_PARAM, NEW_SIM_BOARD_PARAM, new_sim_offer};
+pub use own_build_source::{MemoryOwnBuildSource, OwnBuildSource};
 pub use pending_link_offers::pending_link_offers;
 pub use provisional_board_numbers::ProvisionalBoardNumbers;
 pub use runtime_backing::{Backing, EMULATED_TARGETS, backing_for, emu_offered_for};
@@ -212,3 +219,4 @@ pub use sim_transport::{
 };
 pub use target_offer::{TargetChoice, TargetGroup, TargetOffer, TargetScope, target_offer};
 pub use update_build_facts::{StoreLatest, UpdateBuildFacts};
+pub use update_host::UpdateHost;
