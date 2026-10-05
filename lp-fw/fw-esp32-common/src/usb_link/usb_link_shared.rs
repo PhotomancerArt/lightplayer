@@ -74,14 +74,10 @@ const KEEP_REASSEMBLY: usize = 1024;
 /// only the backstop.
 const MIN_RTO_US: u64 = 200_000;
 
-/// Runs its argument with the link's two users kept apart (see the module
-/// docs), and must run it exactly once. The default ([`UsbLinkShared::leak`])
-/// runs it directly: both users on one executor.
-pub type LinkLock = fn(&mut dyn FnMut());
-
-fn no_lock(f: &mut dyn FnMut()) {
-    f()
-}
+/// The lock hook (see the module docs), shared with the classic's UART link:
+/// [`crate::link_lock`]. The default ([`UsbLinkShared::leak`]) is no lock.
+pub use crate::link_lock::LinkLock;
+use crate::link_lock::no_lock;
 
 /// The link, and the doorbell that wakes its task.
 pub struct UsbLinkShared {

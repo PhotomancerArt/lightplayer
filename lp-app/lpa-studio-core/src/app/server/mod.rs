@@ -1,5 +1,4 @@
 pub mod device_log_line;
-mod pending_server_messages;
 pub mod server_snapshot;
 pub mod server_state;
 pub mod studio_server_client;

@@ -105,3 +105,14 @@ byte for byte against the pad and the oracle. Emulated only
 AGENTS.md as a seam the emulator does not model, so the desk walk
 (`hardware-walk-protocol.md` in the plan dir) re-checks it on the
 DOM-Z-102 with a plain serial monitor.
+
+**Desk walk, 2026-10-03 (agent-run, DOM-Z-102, main `d68791d96` and PR
+#943 `96dfc8cca`)** — the steady-state half holds on silicon: every log
+record (`[MEM]`, `[stack]`, `[JIT]`, `[OUT] dump`, `[INFO] …`, `[WS281X]`)
+in eleven `link capture`s and nine `link rtt` runs arrived whole, nothing
+spliced, and the lit `[OUT] dump` after a software reboot matched the host
+oracle to the byte. The boot half does not: with a host already on the line
+across a reset, the raw `[INIT]` lines `boot_firmware` prints after io_task
+starts are lost or torn — the "one writer after boot" leaves a second writer
+during it. Filed separately:
+`docs/defects/2026-10-03-the-classic-loses-its-boot-text-when-a-host-holds-the-link.md`.
