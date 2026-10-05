@@ -204,10 +204,9 @@ the form until the press and in the op until the request leaves.
   took it to +17,712 B (local build, against main at `db8b55b37`), and
   trimming the store (no copy-and-compare, one log site, the version
   stamped through a borrowed view, one out-of-line dispatch, a shorter
-  firmware log line) brought it to **+16,368 B on CI's builds** (main
-  2,976,560 → 2,992,928; +16,112 B on a local build), under the plan's
-  16 KB (16,384 B) stop with almost nothing to spare. S3 +17,792 B, classic
-  +18,528 B. `nm` shows new code — the list's serde on both sides of the
+  firmware log line) brought it to **+16,176 B on CI's builds** (main
+  `0c801ad6b` 2,976,560 → 2,992,736), under the plan's 16 KB (16,384 B)
+  stop by 208 B. S3 +17,680 B, classic +18,144 B. `nm` shows new code — the list's serde on both sides of the
   file and the wire — and no duplicated monomorphization.
 - The emulator walk proves the transport, UI and store over the USB shim;
   `?ble=emu` is blocked by an open defect
