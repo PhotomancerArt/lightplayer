@@ -193,6 +193,78 @@ fn a_hook_can_stand_in_for_the_routine_if_a_later_phase_ever_needs_one() {
     assert_eq!(m.bus.unmapped_reads(), 0, "the ROM's own load never ran");
 }
 
+/// Run the ROM's own `software_reset` — what esp-hal's `software_reset()`
+/// calls — on a machine, with a parked `ebreak` behind it so a reset that
+/// did *not* happen shows up as the routine returning.
+fn run_rom_software_reset(machine: &mut Esp32C6Machine) -> lp_emu_esp32c6::Outcome {
+    let entry = machine
+        .rom()
+        .symbol("software_reset")
+        .expect("the vendored ROM has the routine")
+        .address;
+    assert_eq!(entry, 0x4001_973c);
+    machine
+        .bus
+        .load_image(RETURN_TO, &lp_emu_esp32c6::rom::EBREAK.to_le_bytes())
+        .unwrap();
+    machine.harts[0].set_pc(entry);
+    machine.harts[0].regs_mut()[1] = RETURN_TO as i32; // ra
+    machine.run_until(&lp_emu_esp32c6::StopCondition {
+        stop_cycle: Some(machine.cycles() + 1_000),
+        ..Default::default()
+    })
+}
+
+/// `docs/defects/2026-09-29-the-emulated-c6-does-not-perform-a-software-reset.md`:
+/// the ROM's `software_reset` used to return (the `LP_AON` store was
+/// remembered and ignored) and the RTC watchdog rebooted the chip ~8 s later
+/// as `rst:0x10 (LP_WDT_SYS)`. Now the store resets the chip at once, and the
+/// guest reads the cause silicon reports: the ROM's `rtc_get_reset_reason`
+/// answers `3` (`LP_SW_HPSYS`, the ROM table's own name for it), which
+/// esp-hal reads as `SocResetReason::CoreSw`.
+#[test]
+fn a_software_reset_reboots_at_once_and_the_rom_reads_lp_sw_hpsys() {
+    let mut m = Esp32C6Builder::new().reboot_on_reset(true).build().unwrap();
+    assert_eq!(call_rtc_get_reset_reason(&mut m), 1, "powered on");
+    let before = m.cycles();
+
+    let out = run_rom_software_reset(&mut m);
+
+    assert_eq!(m.reboots(), 1, "the store rebooted the chip ({out:?})");
+    assert_eq!(
+        m.reset_cause(),
+        lp_emu_esp32c6::ResetCause::LpSwHpSys,
+        "the machine's own record of why"
+    );
+    assert!(
+        m.cycles() < before + 1_000,
+        "at once — not a watchdog's seconds later"
+    );
+    assert_eq!(
+        call_rtc_get_reset_reason(&mut m),
+        3,
+        "the rebooted guest reads rst:0x3 (LP_SW_HPSYS)"
+    );
+    assert_eq!(
+        m.bus.unmapped_writes(),
+        0,
+        "no fall-through past the ROM's `ret`"
+    );
+}
+
+#[test]
+fn without_reboot_on_reset_a_software_reset_ends_the_run_as_a_reset() {
+    let mut m = Esp32C6Builder::new().build().unwrap();
+    let out = run_rom_software_reset(&mut m);
+    match out {
+        lp_emu_esp32c6::Outcome::Reset { source, .. } => {
+            assert_eq!(source, "LP_AON sys_cfg.hpsys_sw_reset")
+        }
+        other => panic!("the run should end as a reset, got {other:?}"),
+    }
+    assert_eq!(m.reboots(), 0);
+}
+
 /// A hart of the machine's own bus type, so the file's imports are the ones
 /// a reader would reach for.
 #[allow(dead_code, reason = "documents the concrete instantiation")]

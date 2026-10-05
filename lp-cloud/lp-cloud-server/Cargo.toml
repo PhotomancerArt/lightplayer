@@ -13,6 +13,8 @@ lp-cloud-store-mem = { path = "../lp-cloud-store-mem" }
 lp-cloud-store-sqlite = { path = "../lp-cloud-store-sqlite" }
 lpc-cloud-api = { path = "../../lp-core/lpc-cloud-api" }
 lpc-history = { path = "../../lp-core/lpc-history" }
+# The `/firmware/` lookup's grammar, `ota-manifest.json` and verification.
+lpc-firmware-release = { path = "../../lp-core/lpc-firmware-release" }
 lpfs = { path = "../../lp-base/lpfs" }
 
 serde = { workspace = true, features = ["std", "derive"] }

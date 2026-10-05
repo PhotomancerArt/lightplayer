@@ -50,6 +50,7 @@ pub mod gpio;
 pub mod i2c_ana_mst;
 pub mod intpri;
 pub mod io_mux;
+pub mod lp_aon;
 pub mod lp_i2c_ana_mst;
 pub mod lp_peri;
 pub mod lp_wdt;
@@ -140,7 +141,7 @@ pub fn boot_set(
         ),
         (base::LP_APM0, 0x800, Box::new(accept::lp_apm0())),
         (base::HP_APM, 0x800, Box::new(accept::hp_apm())),
-        (base::LP_AON, 0x400, Box::new(accept::lp_aon())),
+        (base::LP_AON, 0x400, Box::new(lp_aon::LpAon::new())),
         (base::PMU, 0x400, Box::new(accept::pmu())),
         (
             base::LP_CLKRST,

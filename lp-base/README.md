@@ -16,3 +16,4 @@ Inhabitants:
 - `lp-recovery` — crash-recovery bookkeeping: persistent breadcrumb
   region, recovery frame stack, blame ledger. See
   `docs/adr/2026-07-04-crash-recovery-model.md`.
+- `lp-crc32` — the one CRC-32 (IEEE) of the boot and update records, shared instead of copied.

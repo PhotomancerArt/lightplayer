@@ -15,6 +15,11 @@
 //!   the project is link-visible), the static app artifact, and an SPA
 //!   fallback for every path that is not a file.
 //!
+//! Beside them, the **firmware plane** — `GET /firmware/{target}/{release}/{file}`
+//! ([`firmware`]): released firmware proxied from GitHub releases, checked
+//! against its `ota-manifest.json`, cached in the blob store by SHA-256, and
+//! answered to any origin.
+//!
 //! Across all three sits [`auth`]: the Google sign-in round trip
 //! ([`auth::google_auth`]), the session cookie every plane reads
 //! ([`auth::session_cookie`]), and the localhost-only dev login
@@ -47,6 +52,7 @@ pub mod app_state;
 pub mod auth;
 pub mod config;
 pub mod content;
+pub mod firmware;
 pub mod page;
 pub mod ports;
 pub mod request_log;

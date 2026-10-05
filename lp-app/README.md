@@ -17,6 +17,9 @@ logic.
   projects, and serving the `lpc-wire` API over app-provided transports.
 - `lpa-client` — client-side transport/API layer for talking to a LightPlayer
   server or firmware target.
+- `lpa-update` — the host side of an over-the-air update (protocol v1):
+  serving, the read-back backup, the login client, the decision, the update
+  driver, and (feature `pack`) the one packer of encoding 1.
 - `lpa-link` — low-level endpoint/link layer for discovery, status,
   management, diagnostics, logs, and opening server/client connections.
 - `lpa-agent` — model-facing shader-agent core: `ModelProvider` abstraction
@@ -27,6 +30,9 @@ logic.
   services and exposes Studio controllers, views, node states, typed actions,
   logs, and project summaries to UI shells.
 - `lpa-studio-web` — static Dioxus browser shell for the first Studio UI slice.
+- `lpa-firmware-store` — Studio's engine cache seam (index, LRU + held
+  eviction, `MemoryEngineCache`) and the firmware store client over an
+  injected fetch port; sans-IO, host + wasm.
 - `web-demo` — browser demo and tooling for the shader pipeline.
 
 ## Boundary
