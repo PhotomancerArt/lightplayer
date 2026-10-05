@@ -70,6 +70,8 @@ pub fn link_info(endpoint: &LinkEndpoint, usb_vid_pid: Option<(u16, u16)>) -> Li
         endpoint: EndpointKey(endpoint.id.as_str().to_string()),
         usb: usb_vid_pid.map(|(vendor, product)| UsbIds { vendor, product }),
         serial_number: None,
+        // No transport here speaks lp-link's channel 3 yet (M7 P7).
+        carries_update_channel: false,
     }
 }
 
@@ -238,6 +240,9 @@ pub fn hello_facts(hello: &ServerHello) -> HelloFacts {
             lpc_wire::FsBootState::Memory => BoardFs::Memory,
             lpc_wire::FsBootState::LegacyHeld => BoardFs::LegacyHeld,
         },
+        // The hello carries no board manifest until update protocol Part B
+        // (B-P06); this adapter fills it then.
+        update: None,
     }
 }
 

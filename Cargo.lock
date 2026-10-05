@@ -5738,6 +5738,7 @@ dependencies = [
  "libc",
  "log",
  "lp-app-version",
+ "lp-bootctl",
  "lp-collection 1.0.0",
  "lp-emu-core",
  "lp-emu-esp-common",
@@ -5746,6 +5747,7 @@ dependencies = [
  "lp-emu-esp32s3",
  "lp-emu-esp32v3",
  "lp-emu-validate",
+ "lp-fw-split",
  "lp-gfx-lpvm",
  "lp-json-pack",
  "lp-link",
@@ -5992,6 +5994,22 @@ dependencies = [
  "serde_json",
  "sha2",
  "toml 0.8.23",
+]
+
+[[package]]
+name = "lp-fw-split"
+version = "40.0.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "espflash",
+ "lp-app-version",
+ "lp-bootctl",
+ "object 0.37.3",
+ "rustc-demangle",
+ "serde",
+ "serde_json",
+ "sha2",
 ]
 
 [[package]]
@@ -6448,6 +6466,7 @@ dependencies = [
  "lpa-firmware-store",
  "lpa-link",
  "lpa-server",
+ "lpa-update",
  "lpa-upgrade",
  "lpc-access",
  "lpc-engine",
@@ -6458,6 +6477,7 @@ dependencies = [
  "lpc-model",
  "lpc-registry",
  "lpc-shared",
+ "lpc-update",
  "lpc-view",
  "lpc-wire",
  "lpfs",

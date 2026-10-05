@@ -128,9 +128,10 @@ use dioxus::prelude::*;
 use lpa_studio_core::{
     DeviceActivityView, DeviceCardFeedView, DeviceEscape, DeviceFeedOp, DeviceLoadedProject,
     DeviceStatus, DeviceView, FeedLiveness, OfferArgs, PendingLinkView, RENAME_NAME_PARAM,
-    UiAction, UiExampleCard, UiOffer, UiPackageCard, UiRuntimeBand, UiStatus, UiUnlockOffer,
-    device_firmware_line, device_identity_line, device_status_kind, escape_verb,
-    firmware_face_preview_sentence, pending_firmware_line, pending_identity_rows,
+    UiAction, UiDeviceUpdate, UiExampleCard, UiOffer, UiPackageCard, UiRuntimeBand, UiStatus,
+    UiStatusKind, UiUnlockOffer, UpdateLight, UpdateRowKind, device_firmware_line,
+    device_identity_line, device_status_kind, escape_verb, firmware_face_preview_sentence,
+    pending_firmware_line, pending_identity_rows,
 };
 
 use super::device_pick_popover::{
@@ -141,10 +142,12 @@ use super::play_feed_text::frame_age_label;
 use crate::app::agent::AgentMark;
 use crate::app::node::lamp_view::LampView;
 use crate::base::{
-    DetailPopover, DetailSection, PopoverCloseHandle, PopoverPlacement, StudioIcon, StudioIconName,
+    DetailPopover, DetailSection, PopoverButton, PopoverCloseHandle, PopoverPlacement, StudioIcon,
+    StudioIconName,
 };
 use crate::core::{
-    ActionButton, ActionButtonVariant, StatusChip, quiet_action_class, use_device_verbs, verb_named,
+    ActionButton, ActionButtonVariant, OfferParamsForm, OfferPressButton, StatusChip,
+    quiet_action_class, use_device_verbs, verb_named,
 };
 
 /// One device card.
@@ -201,6 +204,14 @@ pub(crate) fn DeviceRosterCard(
     /// Joined at the app view; `None` when there is nothing to say.
     #[props(default)]
     layout: Option<lpa_studio_core::UiDeviceLayout>,
+    /// The board's firmware-update words (the update-states spike,
+    /// direction C), joined at the app view: the firmware line and its
+    /// bar, the header chip and version, and — while the show has stopped
+    /// — the picture slot's light and sentence. `None`: no update story,
+    /// and the card is today's. The update's buttons are offers on the
+    /// tree, drawn with the other firmware verbs.
+    #[props(default)]
+    update: Option<UiDeviceUpdate>,
     /// Stories: pin the layout sheet in the card's box, not the viewport.
     #[props(default)]
     layout_sheet_inline: bool,
@@ -222,10 +233,9 @@ pub(crate) fn DeviceRosterCard(
     // frame across the unmount. Plumbing, not a verb: it is no offer.
     use_effect(move || on_action.call(DeviceFeedOp::action_for(device, true)));
     use_drop(move || on_action.call(DeviceFeedOp::action_for(device, false)));
-    let status = UiStatus {
-        label: card.state_label.clone(),
-        kind: device_status_kind(card.status),
-    };
+    // The update STORY (core's words); `update` below is the verb.
+    let update_story = update;
+    let status = card_status(&card, update_story.as_ref());
     // The FIRMWARE zone's verbs, decided in core (ruled 2026-09-04):
     // `flash`, with the board pick, on a needs-firmware face;
     // `update-firmware` on a running LightPlayer — one click when its board
@@ -318,10 +328,25 @@ pub(crate) fn DeviceRosterCard(
     // update moves them."); cut to one line at a card's width it lost the
     // verb (G1 rehearsal: "Finish update mov…"), so it wraps instead.
     let firmware_line_wraps = layout_line.is_some();
+    // The board's update story, when it tells one, says the firmware
+    // line (core's words, verbatim) — unless its files are waiting, which
+    // is the line's other owner.
+    let update_line = update_story.clone().filter(|_| layout_line.is_none());
     let firmware_line = match layout_line {
         Some(line) => line,
         None => firmware_line_text(&card, identity_line.board.as_deref(), busy_zone),
     };
+    // The firmware zone's bar: lit while an update runs (or another device
+    // runs one, in a quieter fill), else by the zone's own activity.
+    let firmware_bar = match update_story.as_ref().and_then(|story| story.progress) {
+        Some(progress) => (true, progress.percent, progress.other_device),
+        None => (
+            busy_zone == Some(ZoneKind::Firmware),
+            card.activity.as_ref().and_then(|activity| activity.percent),
+            false,
+        ),
+    };
+    let activity_percent = card.activity.as_ref().and_then(|activity| activity.percent);
     // The refusal sheet closes in the page (it has no Cancel: nothing is
     // running). Remembered by value, so a NEW refusal rises again.
     let mut closed_sheet = use_signal(|| None::<lpa_studio_core::UiLayoutPanel>);
@@ -414,10 +439,25 @@ pub(crate) fn DeviceRosterCard(
                     // memory at a glance.
                     div { class: identity_rows_class(), title: "{identity}",
                         p { class: mono_line_class(), "{identity_rows.board}" }
-                        p { class: mono_line_class(),
-                            "{identity_rows.firmware}"
-                            if let Some(mark) = memory_mark {
-                                span { class: "tw:text-dim-foreground", " · {mark}" }
+                        if let Some(version) = update_story.as_ref().map(|story| story.version.clone()) {
+                            // The version, read as a version (spike §3):
+                            // it leads, bright; the commit is detail, dim;
+                            // the whole build id rides the hover.
+                            p { class: mono_line_class(),
+                                if let Some(mac) = identity_line.mac.as_deref() {
+                                    "{mac} · "
+                                }
+                                span { class: "ux-update-version", title: "{version.raw}", "{version.text}" }
+                                if let Some(commit) = version.commit {
+                                    span { class: "ux-update-commit", title: "{version.raw}", " {commit}" }
+                                }
+                            }
+                        } else {
+                            p { class: mono_line_class(),
+                                "{identity_rows.firmware}"
+                                if let Some(mark) = memory_mark {
+                                    span { class: "tw:text-dim-foreground", " · {mark}" }
+                                }
                             }
                         }
                     }
@@ -441,7 +481,7 @@ pub(crate) fn DeviceRosterCard(
                     // sits top-right INSIDE the frame, so the picture
                     // arriving moves nothing: the frame's height is fixed.
                     div { class: "ux-armed-dim tw:grid tw:min-w-0",
-                        {preview_slot(&card, feed.as_ref(), locked)}
+                        {preview_slot(&card, feed.as_ref(), locked, update_story.as_ref())}
                     }
                     div { class: line_and_bar_class(),
                         div { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-2",
@@ -477,7 +517,7 @@ pub(crate) fn DeviceRosterCard(
                         // bar slot (4px, flush under the line) — lit only
                         // for PROJECT work.
                         div { class: "ux-armed-dim tw:grid tw:min-w-0",
-                            ZoneBar { activity: card.activity.clone(), lit: busy_zone == Some(ZoneKind::Project) }
+                            ZoneBar { lit: busy_zone == Some(ZoneKind::Project), percent: activity_percent }
                         }
                     }
                 }
@@ -557,8 +597,16 @@ pub(crate) fn DeviceRosterCard(
             section { class: combined_zone_class(),
                 div { class: zone_rows_class(),
                 div { class: armed_line_and_bar_class(),
-                    p { class: firmware_line_class(firmware_line_wraps), title: "{firmware_line}", "{firmware_line}" }
-                    ZoneBar { activity: card.activity.clone(), lit: busy_zone == Some(ZoneKind::Firmware) }
+                    if let Some(story) = update_line.clone() {
+                        UpdateLine { update: story }
+                    } else {
+                        p { class: firmware_line_class(firmware_line_wraps), title: "{firmware_line}", "{firmware_line}" }
+                    }
+                    ZoneBar {
+                        lit: firmware_bar.0,
+                        percent: firmware_bar.1,
+                        other: firmware_bar.2,
+                    }
                 }
                 div { class: verb_row_class(),
                     if busy_zone == Some(ZoneKind::Firmware) {
@@ -660,6 +708,35 @@ pub(crate) fn DeviceRosterCard(
                                         mode: BoardPickMode::Verb,
                                         on_action,
                                     }
+                                }
+                            }
+                        }
+                        // The over-the-air repairs of a board whose
+                        // firmware will not start: the same build again,
+                        // and an install of a version picked from what this
+                        // Studio can get (or, where the board needs a
+                        // version Studio cannot get, this Studio's own).
+                        if let Some(reinstall) = verb("reinstall-firmware") {
+                            AgentMark { key: "{\"reinstall-firmware\"}", path: reinstall.path.clone(),
+                                ActionButton {
+                                    action: reinstall.action,
+                                    running: false,
+                                    variant: ActionButtonVariant::Quiet,
+                                    on_action,
+                                }
+                            }
+                        }
+                        if let Some(install) = verb("install-firmware") {
+                            AgentMark { key: "{\"install-firmware\"}", path: install.path.clone(),
+                                if install.params().is_empty() {
+                                    ActionButton {
+                                        action: install.action,
+                                        running: false,
+                                        variant: ActionButtonVariant::Quiet,
+                                        on_action,
+                                    }
+                                } else {
+                                    OfferChoicePopover { offer: install, on_action }
                                 }
                             }
                         }
@@ -977,21 +1054,87 @@ const HEADER_MENU_TRIGGER_CLASS: &str = "tw:grid tw:h-5 tw:w-5 tw:flex-none tw:c
 const RENAME_INPUT_CLASS: &str = "tw:min-w-0 tw:flex-1 tw:rounded tw:border tw:border-border tw:bg-terminal tw:px-2 tw:py-1 tw:text-sm tw:text-strong-foreground";
 
 /// One zone's 4px bar slot: present in every state, lit only when the
-/// activity running belongs to THIS zone.
+/// work running belongs to THIS zone — its activity's, or (the firmware
+/// zone) an update's, which may be another device's (`other`: a quieter
+/// fill, so the bar reads as someone else's).
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn ZoneBar(activity: Option<DeviceActivityView>, lit: bool) -> Element {
+fn ZoneBar(lit: bool, percent: Option<u8>, #[props(default)] other: bool) -> Element {
     rsx! {
         div { class: progress_slot_class(lit),
-            if let Some(activity) = activity.filter(|_| lit) {
+            if lit {
                 div {
-                    class: progress_fill_class(activity.percent),
-                    style: progress_fill_style(activity.percent),
+                    class: progress_fill_class(percent, other),
+                    style: progress_fill_style(percent),
                 }
             }
         }
     }
 }
+
+/// The firmware zone's line while the board tells an update story: core's
+/// line on the one 17px row, with the board's version set as a version
+/// (spike §3), and the whole sentence and the raw build on hover. A row
+/// that needs a person reads in the attention tone, as a degraded board's
+/// fault does.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn UpdateLine(update: UiDeviceUpdate) -> Element {
+    let title = format!("{}\n{}", update.sentence, update.version.raw);
+    let (before, version, after) = version_parts(&update.line, &update.version.text);
+    rsx! {
+        p { class: update_line_class(update.kind), title: "{title}",
+            "{before}"
+            if let Some(version) = version {
+                span { class: "ux-update-version", "{version}" }
+            }
+            "{after}"
+        }
+    }
+}
+
+/// An offer with parameters drawn from a verb row (an install's `version`
+/// choice): the quiet chip, in the offer's own words, opens a panel that
+/// floats in the top layer — so asking cannot change the card's height —
+/// holding the offer's parameters ([`OfferParamsForm`]) and its press
+/// ([`OfferPressButton`], which arms a Lasting binding on itself). The
+/// board pick's grammar, with the generic form for the values.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn OfferChoicePopover(offer: UiOffer, on_action: EventHandler<UiAction>) -> Element {
+    let args = use_signal(OfferArgs::new);
+    let current = args.read().clone();
+    rsx! {
+        PopoverButton {
+            class: quiet_action_class().to_string(),
+            open_class: quiet_action_class().to_string(),
+            trigger: rsx! {
+                span { "{offer.label()}" }
+            },
+            label: offer.label().to_string(),
+            title: offer.summary().to_string(),
+            popup_class: OFFER_CHOICE_POPUP_CLASS.to_string(),
+            chrome_class: "ux-popover-chrome-neutral".to_string(),
+            placement: PopoverPlacement::BottomStart,
+            layer_keeps_layout: true,
+            div { class: "tw:grid tw:min-w-0 tw:gap-2.5 tw:p-2.5",
+                OfferParamsForm { offer: offer.clone(), args }
+                div { class: "tw:flex tw:min-w-0 tw:justify-end",
+                    OfferPressButton {
+                        offer,
+                        args: current,
+                        variant: ActionButtonVariant::Outline,
+                        on_action,
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The parameter panel's box: narrow (a version list is short), in the
+/// popover's neutral chrome.
+const OFFER_CHOICE_POPUP_CLASS: &str = "tw:grid tw:w-[260px] tw:max-w-[calc(100vw-80px)] tw:min-w-0 tw:overflow-hidden tw:whitespace-normal tw:rounded-md tw:border tw:text-sm tw:text-muted-foreground";
 
 /// The roster's "new device found, identifying…" entry.
 ///
@@ -1219,7 +1362,7 @@ fn activity_zone(kind: lpa_studio_core::DeviceActivityKind) -> ZoneKind {
     use lpa_studio_core::DeviceActivityKind as Kind;
     match kind {
         Kind::Push | Kind::RemoveProject => ZoneKind::Project,
-        Kind::Flash | Kind::Erase => ZoneKind::Firmware,
+        Kind::Flash | Kind::Erase | Kind::Update => ZoneKind::Firmware,
         Kind::Identify => ZoneKind::Device,
     }
 }
@@ -1461,20 +1604,75 @@ fn progress_slot_class(lit: bool) -> &'static str {
 }
 
 /// The progress fill: a measured percentage, or the indeterminate sweep for
-/// an activity that cannot say how far along it is.
-fn progress_fill_class(percent: Option<u8>) -> &'static str {
-    match percent {
-        Some(_) => "tw:h-full tw:rounded-pill tw:bg-status-working-foreground",
-        None => {
+/// an activity that cannot say how far along it is — in the working tone,
+/// or, for work another device is doing, the subtle tone at 70%.
+fn progress_fill_class(percent: Option<u8>, other: bool) -> &'static str {
+    match (percent, other) {
+        (Some(_), false) => "tw:h-full tw:rounded-pill tw:bg-status-working-foreground",
+        (Some(_), true) => "tw:h-full tw:rounded-pill tw:bg-subtle-foreground tw:opacity-70",
+        (None, false) => {
             "tw:h-full tw:w-[35%] tw:rounded-pill tw:bg-status-working-foreground [animation:ux-progress-sweep_1.2s_ease-in-out_infinite]"
+        }
+        (None, true) => {
+            "tw:h-full tw:w-[35%] tw:rounded-pill tw:bg-subtle-foreground tw:opacity-70 [animation:ux-progress-sweep_1.2s_ease-in-out_infinite]"
         }
     }
 }
 
+/// The fill's width, set in every state: a whole-string `style` write never
+/// removes a property, so a sweep that follows a measured fill would keep
+/// the old width unless this says the sweep's own.
 fn progress_fill_style(percent: Option<u8>) -> String {
     match percent {
         Some(percent) => format!("width: {}%;", u32::from(percent).min(100)),
-        None => String::new(),
+        None => "width: 35%;".to_string(),
+    }
+}
+
+/// The header chip: the card's own state — or, while an update runs or
+/// the show has stopped for one, the update's chip in the tone its row
+/// reads in (spike direction C: progress is working, a stopped board that
+/// waits for a person is attention). One chip, never a second.
+fn card_status(card: &DeviceView, update: Option<&UiDeviceUpdate>) -> UiStatus {
+    match update {
+        Some(update) if update.kind == UpdateRowKind::Progress => UiStatus {
+            label: update.chip.clone(),
+            kind: UiStatusKind::Working,
+        },
+        Some(update) if update.light.is_some() => UiStatus {
+            label: update.chip.clone(),
+            kind: UiStatusKind::Attention,
+        },
+        _ => UiStatus {
+            label: card.state_label.clone(),
+            kind: device_status_kind(card.status),
+        },
+    }
+}
+
+/// The update line's tone: a row that needs a person reads in the
+/// attention voice (the fault line's), every other row in the info
+/// line's. Both are the same fixed 17px row.
+fn update_line_class(kind: UpdateRowKind) -> &'static str {
+    match kind {
+        UpdateRowKind::NeedsYou => {
+            "ux-update-line-needs tw:m-0 tw:h-[17px] tw:truncate tw:text-xs tw:font-semibold tw:leading-[17px] tw:text-status-attention-foreground"
+        }
+        UpdateRowKind::Progress | UpdateRowKind::Information => info_line_class(),
+    }
+}
+
+/// `line` cut around the first `version` in it, so the version can be set
+/// as one: (before, the version, after), or the whole line when it does
+/// not name it.
+fn version_parts(line: &str, version: &str) -> (String, Option<String>, String) {
+    match line.find(version).filter(|_| !version.is_empty()) {
+        Some(at) => (
+            line[..at].to_string(),
+            Some(version.to_string()),
+            line[at + version.len()..].to_string(),
+        ),
+        None => (line.to_string(), None, String::new()),
     }
 }
 
@@ -1500,7 +1698,40 @@ fn preview_frame_class() -> &'static str {
 ///
 /// A `locked` Bluetooth card (nothing unlocked it) says so in place of 2–5:
 /// the board answers nothing else until it is unlocked.
-fn preview_slot(card: &DeviceView, feed: Option<&DeviceCardFeedView>, locked: bool) -> Element {
+///
+/// Ahead of all of them, a board whose show has STOPPED for an update
+/// (`update`'s light, spike direction C): there is no picture to show, so
+/// the slot shows what the board's own lights show — one solid colour, no
+/// animation — over the update's whole sentence, which the 17px firmware
+/// line has to cut.
+fn preview_slot(
+    card: &DeviceView,
+    feed: Option<&DeviceCardFeedView>,
+    locked: bool,
+    update: Option<&UiDeviceUpdate>,
+) -> Element {
+    if let Some((light, sentence)) =
+        update.and_then(|update| update.light.map(|light| (light, update.sentence.clone())))
+    {
+        return rsx! {
+            UpdateLightSlot { light, sentence }
+        };
+    }
+    // An update with no light is one the show keeps running through (core:
+    // `light` is `None` while the show runs — a backup reads the old
+    // firmware back first), so its activity does not take the picture.
+    let idle_card;
+    let card = match update.is_some_and(|update| update.light.is_none()) && card.activity.is_some()
+    {
+        true => {
+            idle_card = DeviceView {
+                activity: None,
+                ..card.clone()
+            };
+            &idle_card
+        }
+        false => card,
+    };
     // A locked card has no feed to show (the board answers nothing but its
     // hello and the unlock), so it is read as having none.
     let feed = feed.filter(|_| !locked);
@@ -1537,6 +1768,36 @@ fn preview_slot(card: &DeviceView, feed: Option<&DeviceCardFeedView>, locked: bo
                 }
             }
         }
+    }
+}
+
+/// The preview slot while the show has stopped for an update: a strip of
+/// lamps lit in the board's light (dark yellow: updating; dark red:
+/// waiting for its firmware), solid, so the card and the porch agree —
+/// and the update's sentence under it.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn UpdateLightSlot(light: UpdateLight, sentence: String) -> Element {
+    rsx! {
+        div { class: "{preview_frame_class()} ux-update-light {update_light_class(light)}",
+            div { class: "ux-update-leds", aria_hidden: "true",
+                for lamp in 0..UPDATE_LIGHT_LAMPS {
+                    span { key: "{lamp}", class: "ux-update-led" }
+                }
+            }
+            p { class: "ux-update-light-sentence", title: "{sentence}", "{sentence}" }
+        }
+    }
+}
+
+/// How many lamps the light strip draws: one row across the slot.
+const UPDATE_LIGHT_LAMPS: usize = 16;
+
+/// The light's colour family (style.css `--studio-update-light-*`).
+fn update_light_class(light: UpdateLight) -> &'static str {
+    match light {
+        UpdateLight::DarkYellow => "ux-update-light-yellow",
+        UpdateLight::DarkRed => "ux-update-light-red",
     }
 }
 
@@ -1797,6 +2058,7 @@ mod tests {
             cancellable: true,
             cancel_requested: false,
             layout: None,
+            update: None,
         };
         assert_eq!(activity_line_text(&activity), "Flashing firmware · 42%");
 
@@ -1841,6 +2103,8 @@ mod tests {
             terminal_dropped: 0,
             firmware_blocked: None,
             escapes: vec![DeviceEscape::Forget],
+            update_blocked: None,
+            last_update_outcome: None,
         }
     }
 
@@ -1886,6 +2150,7 @@ mod tests {
             cancellable: true,
             cancel_requested: false,
             layout: None,
+            update: None,
         });
         assert_eq!(
             project_line_text(&card, Some(ZoneKind::Project)),
@@ -1970,6 +2235,7 @@ mod tests {
             cancellable: true,
             cancel_requested: false,
             layout: None,
+            update: None,
         });
         assert_eq!(
             firmware_line_text(&card, None, Some(ZoneKind::Firmware)),
@@ -2003,6 +2269,7 @@ mod tests {
             cancellable: true,
             cancel_requested: false,
             layout: None,
+            update: None,
         });
         assert_eq!(
             device_line_text(&card, Some(ZoneKind::Device)),
@@ -2081,6 +2348,7 @@ mod tests {
             cancellable: true,
             cancel_requested: false,
             layout: None,
+            update: None,
         });
         assert_eq!(
             feed_pill(&busy, Some(&feed_fixture(FeedLiveness::Live, true))),
@@ -2133,6 +2401,7 @@ mod tests {
             cancellable: true,
             cancel_requested: false,
             layout: None,
+            update: None,
         });
         assert_eq!(
             preview_slot_sentence(&busy, Some(&feed_fixture(FeedLiveness::Live, true))),
@@ -2196,10 +2465,119 @@ mod tests {
             cancellable: true,
             cancel_requested: false,
             layout: None,
+            update: None,
         });
         assert_eq!(
             preview_sentence(&card),
             "Flashing firmware… the picture returns when the board does."
         );
+    }
+
+    fn update_words(kind: UpdateRowKind, light: Option<UpdateLight>) -> UiDeviceUpdate {
+        UiDeviceUpdate {
+            kind,
+            line: "2026.10.03-1 → 2026.10.05-2 available".to_string(),
+            sentence: "Update available: 2026.10.03-1 → 2026.10.05-2.".to_string(),
+            light,
+            chip: "Updating".to_string(),
+            version: lpa_studio_core::UpdateVersion::with_build_id(
+                "2026.10.03-1",
+                "2026.10.03-1+a41c9e2d11f0",
+            )
+            .display(),
+            progress: None,
+        }
+    }
+
+    /// The board's version is set as a version wherever the line names
+    /// it; a line that does not keeps every word.
+    #[test]
+    fn the_update_line_sets_the_version_apart() {
+        assert_eq!(
+            version_parts("2026.10.03-1 → 2026.10.05-2 available", "2026.10.03-1"),
+            (
+                String::new(),
+                Some("2026.10.03-1".to_string()),
+                " → 2026.10.05-2 available".to_string()
+            )
+        );
+        assert_eq!(
+            version_parts(
+                "Back on 2026.10.03-1 · the update didn't start",
+                "2026.10.03-1"
+            ),
+            (
+                "Back on ".to_string(),
+                Some("2026.10.03-1".to_string()),
+                " · the update didn't start".to_string()
+            )
+        );
+        assert_eq!(
+            version_parts("Updating over Bluetooth… 40%", "2026.10.03-1"),
+            (
+                "Updating over Bluetooth… 40%".to_string(),
+                None,
+                String::new()
+            )
+        );
+        assert_eq!(
+            version_parts("anything", ""),
+            ("anything".to_string(), None, String::new())
+        );
+    }
+
+    /// Every update row's line is the same fixed 17px row; a row that
+    /// needs a person wears the attention tone.
+    #[test]
+    fn the_update_line_is_one_fixed_row_in_every_kind() {
+        for kind in [
+            UpdateRowKind::Progress,
+            UpdateRowKind::NeedsYou,
+            UpdateRowKind::Information,
+        ] {
+            let class = update_line_class(kind);
+            assert!(class.contains("tw:h-[17px]"), "{class}");
+            assert!(class.contains("tw:truncate"), "{class}");
+        }
+        assert!(
+            update_line_class(UpdateRowKind::NeedsYou)
+                .contains("tw:text-status-attention-foreground")
+        );
+        assert_eq!(
+            update_line_class(UpdateRowKind::Information),
+            info_line_class()
+        );
+    }
+
+    /// One header chip: the update's while it runs (working) or while the
+    /// show has stopped for it (attention); the card's own otherwise.
+    #[test]
+    fn the_header_chip_takes_the_updates_word_while_it_owns_the_board() {
+        let card = card_fixture();
+        let progress = card_status(&card, Some(&update_words(UpdateRowKind::Progress, None)));
+        assert_eq!(progress.label, "Updating");
+        assert_eq!(progress.kind, UiStatusKind::Working);
+        let stopped = card_status(
+            &card,
+            Some(&update_words(
+                UpdateRowKind::NeedsYou,
+                Some(UpdateLight::DarkRed),
+            )),
+        );
+        assert_eq!(stopped.kind, UiStatusKind::Attention);
+        let info = card_status(&card, Some(&update_words(UpdateRowKind::Information, None)));
+        assert_eq!(info.label, card.state_label);
+        assert_eq!(card_status(&card, None).label, card.state_label);
+    }
+
+    /// The bar's fill always says its width, so a sweep after a measured
+    /// fill never keeps the old one (a whole-string style write removes
+    /// nothing).
+    #[test]
+    fn the_fill_states_its_width_in_every_state() {
+        assert_eq!(progress_fill_style(Some(40)), "width: 40%;");
+        assert_eq!(progress_fill_style(None), "width: 35%;");
+        assert!(progress_fill_class(Some(40), true).contains("tw:opacity-70"));
+        assert!(!progress_fill_class(Some(40), false).contains("opacity"));
     }
 }

@@ -56,6 +56,7 @@ fn main() {
 /// versioned build uses (`tools/lp-app-version`) — never computed here.
 fn emit_build_provenance() {
     lp_app_version::emit();
+    lp_app_version::emit_target();
     emit_git_head_watches();
     let commit =
         git_output(&["rev-parse", "--short=12", "HEAD"]).unwrap_or_else(|| "unknown".into());

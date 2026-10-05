@@ -1064,7 +1064,7 @@ function chipIdFrom(reported, knownChipIds) {
 /// the handshake did not go the way this code assumes, and guessing there
 /// is the same bet the guard exists to refuse.
 function assertChipMatchesManifest(reportedChip, manifest, manifestPath, knownChipIds) {
-  const manifestChip = manifest.core?.target?.chip;
+  const manifestChip = manifest.core?.platform?.chip;
   const detected = chipIdFrom(reportedChip, knownChipIds);
   const expected = chipIdFrom(manifestChip, knownChipIds);
   if (detected && detected === expected) {
@@ -1083,7 +1083,7 @@ function summarizeManifest(manifest, manifestPath) {
   return {
     firmwareId: String(manifest.firmwareId),
     displayName: String(manifest.displayName ?? manifest.firmwareId),
-    targetChip: String(manifest.core?.target?.chip ?? "esp32c6"),
+    targetChip: String(manifest.core?.platform?.chip ?? "esp32c6"),
     imageCount: manifest.images.length,
     totalBytes: manifest.images.reduce((total, image) => total + Number(image.sizeBytes ?? 0), 0),
     manifestPath,
@@ -1116,8 +1116,8 @@ function validateManifest(manifest) {
   if (typeof manifest.firmwareId !== "string") {
     throw new Error("Firmware manifest is missing firmwareId.");
   }
-  if (typeof manifest.core?.target?.chip !== "string") {
-    throw new Error("Firmware manifest is missing the extracted core's target chip.");
+  if (typeof manifest.core?.platform?.chip !== "string") {
+    throw new Error("Firmware manifest is missing the extracted core's platform chip.");
   }
   if (!Array.isArray(manifest.images) || manifest.images.length === 0) {
     throw new Error("Firmware manifest does not list any flash images.");

@@ -6,10 +6,27 @@
 //! in the device fold, which is what makes verdicts naturally non-sticky.
 //! Implementations in M3 and later: browser Web Serial, host serial, the
 //! M9 fake, and eventually the sim.
+//!
+//! # The update channel is routed, not folded
+//!
+//! Firmware-update traffic (lp-link's channel 3, `CH_UPDATE`) travels beside
+//! the wire's channel 1 as its own pair: [`LinkEvent::Update`] in,
+//! [`LinkCommand::SendUpdate`] out, one channel-3 message each, verbatim.
+//! The fold IGNORES `Update` bytes, the way it ignores
+//! [`LinkEvent::Passthrough`]: the effects layer routes them to the device's
+//! update driver, which speaks the protocol. Nothing pauses the link for an
+//! update — channel 1's heartbeats keep the fold honest throughout.
+//!
+//! What the model needs from that traffic arrives separately, as evidence:
+//! [`LinkEvent::UpdateFacts`] is the adapter's decode of a board manifest
+//! (`M`). Speak channel 3 only to a board that announced it
+//! ([`crate::Evidence::announced_update_channel`]): a board without it would
+//! never acknowledge a reliable frame there, and the link would stall.
 
 use serde::{Deserialize, Serialize};
 
 use crate::identity::EndpointKey;
+use crate::update_facts::UpdateFacts;
 use crate::wire::{ClientFrame, ServerFrame};
 
 /// Request ids at or above this base belong to **app conversations**: an
@@ -45,6 +62,10 @@ pub struct LinkInfo {
     /// USB serial number, which on Espressif native-USB boards is the MAC —
     /// free identity before a single byte is read.
     pub serial_number: Option<String>,
+    /// The transport carries lp-link's update channel (channel 3), so an
+    /// over-the-air update can run on it. False on `M!` transports and sims.
+    #[serde(default)]
+    pub carries_update_channel: bool,
 }
 
 /// USB vendor/product pair, for board guessing and grant revocation.
@@ -100,16 +121,29 @@ pub enum LinkEvent {
     /// packed link's learned table lost step and was reset. At most one per
     /// change. The fold journals it and moves nothing.
     WireNote(String),
+    /// One channel-3 (update) message from the board, verbatim. The effects
+    /// layer routes it to the device's update driver; the fold ignores it,
+    /// like [`Self::Passthrough`]. See the module docs.
+    Update(Vec<u8>),
+    /// The adapter's decode of a board manifest (`M` on channel 3) —
+    /// evidence for the fold: what the board says about its firmware, and
+    /// proof it speaks channel 3.
+    UpdateFacts(UpdateFacts),
 }
 
 /// Everything the model can ask a transport to do.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum LinkCommand {
-    Open { baud: u32 },
+    Open {
+        baud: u32,
+    },
     Close,
     RunReset(ResetKind),
     SendFrame(ClientFrame),
     SendLine(String),
+    /// One channel-3 (update) message to the board, verbatim. Only for a
+    /// board that announced the channel; see the module docs.
+    SendUpdate(Vec<u8>),
 }
 
 /// The one thing a transport implements. Event-queue shaped on purpose: no

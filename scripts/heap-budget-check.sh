@@ -230,7 +230,12 @@ chip_facts() {
     case "$CHIP_ID" in
     esp32c6)
         CHIP_FEATURES="esp32c6,server,radio"
-        CHIP_ELF_ENV="LP_EMU_C6_ELF_ESP32C6_SERVER_RADIO"
+        # The SPLIT image's directory (`lp-fw-split`'s output: merged.bin,
+        # loader.elf, p2.elf, split.json) — the bytes a board is flashed with
+        # since M2 — not a single ELF; `chip_elf` prints its p2.elf, the
+        # symbol table, and `chip_measure` boots the loader over the merged
+        # chip. The name is `lp_emu_esp32c6::test_support::split_image`'s.
+        CHIP_ELF_ENV="LP_EMU_C6_SPLIT_ESP32C6_SERVER_RADIO"
         # Emulated microseconds. The C6's heartbeat is on a 5 s tick; 6.5 s
         # reaches the first one with room and stops well before the second, so
         # the figures are always the SAME sample (M6 P4's finding: keying on
@@ -294,6 +299,14 @@ chip_elf() {
     # trouble here; one indirect expansion is enough and is what the C6 arm
     # spelled out longhand before there were two chips.
     local explicit="${!CHIP_ELF_ENV:-}"
+    if [ -n "$explicit" ] && [ "$CHIP_ID" = "esp32c6" ]; then
+        if [ -f "$explicit/p2.elf" ] && [ -f "$explicit/loader.elf" ] && [ -f "$explicit/merged.bin" ]; then
+            echo "$explicit/p2.elf"
+            return 0
+        fi
+        echo "${CHIP_ELF_ENV} points at ${explicit}, which is not a split image directory" >&2
+        return 1
+    fi
     if [ -n "$explicit" ]; then
         if [ -f "$explicit" ]; then
             echo "$explicit"
@@ -321,9 +334,10 @@ cross-target firmware build." >&2
     fi
     case "$CHIP_ID" in
     esp32c6)
-        ( cd lp-fw/fw-esp32c6 && cargo build --quiet --target riscv32imac-unknown-none-elf \
-            --profile release-esp32 --features "$CHIP_FEATURES" ) >&2 || return 1
-        echo "target/riscv32imac-unknown-none-elf/release-esp32/fw-esp32c6"
+        # The split image, exactly as the size check and the packager build
+        # it (the shipped features, the target embedded): two link passes.
+        just fw-esp32c6-split >&2 || return 1
+        echo "target/fw-split/shipped/p2.elf"
         ;;
     esp32v3)
         # Through the justfile recipe, and not `cd … && cargo build` like the
@@ -406,7 +420,15 @@ chip_measure() {
     local ok=0
     case "$CHIP_ID" in
     esp32c6)
-        cargo run -q --release -p lp-cli -- emu run --elf "$elf" \
+        # The split image: its loader direct-loaded over the flashed chip, in
+        # the state espflash 3.3.0's bootloader leaves (32 KiB MMU pages), so
+        # the loader maps and starts the core as on a board
+        # (`lp-emu-esp32c6/tests/split_boot.rs` holds this path to a ROM-up
+        # boot of the same chip).
+        local split_dir
+        split_dir="$(dirname "$elf")"
+        cargo run -q --release -p lp-cli -- emu run --elf "$split_dir/loader.elf" \
+            --over "$split_dir/merged.bin" --mmu-page 32k \
             --host-link --json-replies \
             --timeout "$CHIP_TIMEOUT" --console "$dir/console.txt" \
             >"$dir/emu.out" 2>"$dir/emu.err" && ok=1

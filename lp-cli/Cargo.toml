@@ -74,6 +74,10 @@ dialoguer = "0.11"
 chrono = "0.4"
 # `firmware package` hashes the merged image for the distribution manifest.
 sha2 = { workspace = true }
+# `firmware build|package` of a split def (the ESP32-C6): the split pipeline
+# as a library, and the boot formats it lays out.
+lp-fw-split = { path = "../tools/lp-fw-split" }
+lp-bootctl = { path = "../lp-base/lp-bootctl" }
 # Both halves of the validation system, so the registry-parity test can see
 # them at once: fw-checks is the payload crate (AGPL, outside the lp-emu MIT
 # fence) and lp-emu-validate is the host side, which deliberately mirrors its

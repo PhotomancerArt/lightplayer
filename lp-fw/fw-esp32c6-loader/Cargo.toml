@@ -1,0 +1,24 @@
+[package]
+name = "fw-esp32c6-loader"
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-or-later"
+description = "The split-link loader: maps the core named by the boot record, loads its RAM segments, jumps"
+publish = false
+
+# Standalone on purpose: a bare-metal RV32 binary with no dependencies, built
+# from this directory (its `.cargo/config.toml` carries the target, build-std
+# and linker script). Excluded from the root workspace so host builds and the
+# workspace clippy never see it.
+[workspace]
+
+[dependencies]
+# The boot-record format and the layout: one definition, shared with the core.
+lp-bootctl = { path = "../../lp-base/lp-bootctl" }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+debug = 1

@@ -6,6 +6,7 @@ pub mod distribution_manifest;
 pub mod list;
 pub mod package;
 pub mod show;
+mod split_package;
 
 pub use args::FirmwareCli;
 

@@ -6,8 +6,11 @@
 //! link up → Q → M → decide
 //!   ├─ Heal            → engine source → offer → serve until the board resets and comes back
 //!   ├─ ContinueUpdate  → offer the host's build → serve
+//!   ├─ Reinstall       → like a heal: the host's own engine when it holds the
+//!   │     board's build, else the engine source (never a read-back)
 //!   ├─ OfferUpdate (once the caller says go) →
-//!   │     backup (engine source for the CURRENT engine, read-back last) →
+//!   │     backup (engine source for the CURRENT engine, read-back last;
+//!   │     none when the board holds no engine) →
 //!   │     offer → the board resets into core-only → (new link) Q → M updating →
 //!   │     log in on N/A → serve the core → the board resets on trial →
 //!   │     (new link) M on-trial → offer again: now an engine install → serve →
@@ -19,6 +22,14 @@
 //! reset is a link down and a new link up, and every new link starts with
 //! `Q`. What it keeps across links is only what makes it cheaper — a
 //! backup already held, a heal's engine already found — never what decides.
+//!
+//! **The person's intent** ([`UpdateIntent`], in [`DriverConfig`]) is one
+//! step after the decision ([`decide_for_intent`]): `Install` puts the
+//! driver's build on past a heal of another build, a crashing engine and
+//! (if asked) a newer board, and needs no `go`; `Reinstall` writes a
+//! crashing board's own engine again **once** — if the board comes back
+//! still crashing, the driver stops `ReportCrashing` (the crash is the
+//! build's, and a second write would only loop).
 //!
 //! Inputs: link up/down, board messages (with the credentials the caller
 //! holds, passed each time: nothing here stores them), engine-source
@@ -35,7 +46,9 @@ use crate::backup::{BackupSession, BackupStep};
 use crate::board_view::BoardView;
 use crate::decide::decision::{Decision, HostFacts, decide};
 use crate::decide::engine_source::{EngineSource, SourceEffect, SourceResult, SourceStep};
+use crate::drive::update_intent::{UpdateIntent, decide_for_intent};
 use crate::host_build::HostBuild;
+use crate::host_build_facts::HostBuildFacts;
 use crate::host_refusal::HostRefusal;
 use crate::login::{Credential, LoginClient, LoginEvent};
 use crate::serve::{ServeConfig, ServeCounters, ServeEvent, ServeSession};
@@ -114,7 +127,9 @@ pub enum DriverEffect {
 pub struct DriverConfig {
     pub serve: ServeConfig,
     pub user_tier: Option<Tier>,
-    pub allow_downgrade: bool,
+    /// What the person asked for (`Auto` unless they pressed something).
+    /// A downgrade is only ever `Install { allow_downgrade: true }`.
+    pub intent: UpdateIntent,
     /// Hash mismatches (`N`/`H`) tolerated before giving up.
     pub max_piece_retries: u8,
 }
@@ -124,7 +139,7 @@ impl Default for DriverConfig {
         Self {
             serve: ServeConfig::USB,
             user_tier: None,
-            allow_downgrade: false,
+            intent: UpdateIntent::Auto,
             max_piece_retries: 3,
         }
     }
@@ -169,6 +184,8 @@ enum Phase {
 /// The update driver. See the module docs.
 pub struct UpdateDriver {
     build: HostBuild,
+    /// `build`'s facts, for the decision.
+    facts: HostBuildFacts,
     config: DriverConfig,
     phase: Phase,
     board: BoardView,
@@ -184,19 +201,24 @@ pub struct UpdateDriver {
     retries: u8,
     /// This host served core chunks (only names the engine's stage).
     moved_core: bool,
+    /// The board asked for engine chunks under `Reinstall`: the engine was
+    /// erased and is being, or has been, written again.
+    reinstalled: bool,
     effects: Vec<DriverEffect>,
 }
 
 impl UpdateDriver {
-    /// A driver that would put `build` on the board.
+    /// A driver that would put `build` on the board. An `Install` intent is
+    /// already the go.
     #[must_use]
     pub fn new(build: HostBuild, config: DriverConfig) -> Self {
         Self {
+            facts: build.facts(),
             build,
             config,
             phase: Phase::Down,
             board: BoardView::absent(),
-            go: false,
+            go: matches!(config.intent, UpdateIntent::Install { .. }),
             serve: None,
             totals: ServeCounters::default(),
             heal_build: None,
@@ -207,6 +229,7 @@ impl UpdateDriver {
             login_retry_at: None,
             retries: 0,
             moved_core: false,
+            reinstalled: false,
             effects: Vec::new(),
         }
     }
@@ -317,6 +340,8 @@ impl UpdateDriver {
                     return;
                 };
                 self.moved_core |= r.kind == PieceKind::Core;
+                self.reinstalled |=
+                    r.kind == PieceKind::Engine && self.config.intent == UpdateIntent::Reinstall;
                 let stage = self.stage_of(which, r.kind);
                 let total = self.served_build(which).piece(r.kind).len;
                 self.effects.push(DriverEffect::Progress {
@@ -346,18 +371,22 @@ impl UpdateDriver {
         self.act();
     }
 
-    /// Decide on the latest manifest and do it.
+    /// Decide on the latest manifest, apply the intent, and do it.
     fn act(&mut self) {
+        let intent = self.intent_now();
         let facts = HostFacts {
-            build: &self.build,
+            build: &self.facts,
             user_tier: self.config.user_tier,
-            allow_downgrade: self.config.allow_downgrade,
+            allow_downgrade: intent.allows_downgrade(),
         };
         let decision = decide(&self.board, &facts);
+        let decision = decide_for_intent(decision, &self.board, &facts, intent);
         self.effects.push(DriverEffect::Decided(decision.clone()));
         match decision {
             Decision::Nothing => self.finish(Finish::UpToDate),
-            Decision::Heal { engine_sha, .. } => {
+            // A reinstall is a heal the person asked for: an engine install
+            // by the board's own hashes, no backup, no login.
+            Decision::Heal { engine_sha, .. } | Decision::Reinstall { engine_sha, .. } => {
                 if self.board.core_sha256() == Some(self.build.core.sha256) {
                     self.offer(Serving::Own);
                 } else if self.heal_build.as_ref().is_some_and(|b| {
@@ -372,7 +401,9 @@ impl UpdateDriver {
             Decision::OfferUpdate { .. } => {
                 if !self.go {
                     self.phase = Phase::WaitingGo;
-                } else if self.backup_held {
+                } else if self.backup_held || !self.board_holds_engine() {
+                    // Nothing to back up on a board waiting for an engine
+                    // (an `Install` past E13's heal).
                     self.offer(Serving::Own);
                 } else if let Some(b) = &mut self.backup {
                     // A read-back cut short by a dropped link: ask again
@@ -578,6 +609,22 @@ impl UpdateDriver {
     }
 
     // ---- Helpers ---------------------------------------------------------------
+
+    /// The intent for this decision: `Reinstall` only until its one write.
+    fn intent_now(&self) -> UpdateIntent {
+        match self.config.intent {
+            UpdateIntent::Reinstall if self.reinstalled => UpdateIntent::Auto,
+            intent => intent,
+        }
+    }
+
+    /// The board holds an engine to back up (running or crashing).
+    fn board_holds_engine(&self) -> bool {
+        matches!(
+            self.board.state(),
+            Some(BoardState::Running | BoardState::EngineCrashing)
+        )
+    }
 
     fn served_build(&self, which: Serving) -> &HostBuild {
         match (which, &self.heal_build) {

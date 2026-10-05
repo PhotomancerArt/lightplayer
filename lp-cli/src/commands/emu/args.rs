@@ -82,6 +82,23 @@ pub struct RunArgs {
     #[arg(long, group = "image")]
     pub merged: Option<PathBuf>,
 
+    /// With `--elf`: a whole merged flash image the chip ALREADY holds — what
+    /// a flasher wrote — and the ELF direct-loaded over it. Nothing is
+    /// written into the chip (a copy; never written back): the ELF's
+    /// flash-resident bytes must already be there, and the run says how many
+    /// are not. For an ELF that is itself a loader (the ESP32-C6 split
+    /// image's `loader.elf` over its `merged.bin`, with `--mmu-page 32k`),
+    /// which maps and copies the rest as guest code.
+    #[arg(long, requires = "elf", conflicts_with = "flash")]
+    pub over: Option<PathBuf>,
+
+    /// The cache MMU page size a direct load leaves programmed, as the
+    /// second-stage bootloader it stands in for would: `64k` (the chip's
+    /// reset value, the default), `32k` (espflash 3.3.0's bootloader on a
+    /// 4 MB C6 — what `--over` a split image needs), `16k`, `8k`.
+    #[arg(long = "mmu-page", requires = "elf")]
+    pub mmu_page: Option<String>,
+
     /// Address to serve the link on, for example `127.0.0.1:5591`. `lp-cli
     /// upload <project> serial:tcp://<addr>` connects to exactly this.
     ///

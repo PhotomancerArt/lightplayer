@@ -9,7 +9,9 @@ publish = false
 description = "Static Dioxus web shell for LightPlayer Studio"
 
 [features]
-stories = ["dep:lpa-studio-web-story-macros"]
+# The update stories build their boards from core's own update fixtures
+# (`lpa-studio-core/story-fixtures`), so a story card says what core decides.
+stories = ["dep:lpa-studio-web-story-macros", "lpa-studio-core/story-fixtures"]
 
 [dependencies]
 async-trait = "0.1"

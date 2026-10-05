@@ -45,6 +45,7 @@ members = [
     # repo tooling: generators that emit checked-in assets
     "tools/lpt-geodome",
     "tools/lp-app-version",
+    "tools/lp-fw-split",
     "lp-fw/fw-esp32c6",
     "lp-fw/fw-esp32s3",
     # NOT in default-members (like the two above): a cross-target Xtensa crate
@@ -129,8 +130,9 @@ members = [
 # Xtensa DEVICE-target crates (esp toolchain): lp-xt/fixtures is its own
 # workspace; lp-xt-emu-guest lives under lp-emu/ with the rest of the
 # emulation family but is a member of THAT workspace, not this one
-# (see lp-emu/README.md).
-exclude = ["lp-xt/fixtures", "lp-emu/lp-xt-emu-guest"]
+# (see lp-emu/README.md). fw-esp32c6-loader is a standalone bare-metal
+# RV32 crate with its own `[workspace]`, built from its own directory.
+exclude = ["lp-xt/fixtures", "lp-emu/lp-xt-emu-guest", "lp-fw/fw-esp32c6-loader"]
 resolver = "2"
 
 # Exclude lps-builtins-emu-app, lps-builtins-wasm, and fw-esp32c6 from default workspace builds (cross-target only)
@@ -176,6 +178,7 @@ default-members = [
     "lp-cli",
     "tools/lpt-geodome",
     "tools/lp-app-version",
+    "tools/lp-fw-split",
     "lp-core/lpc-mapping",
     "lp-core/lpc-model",
     "lp-core/lpc-registry",

@@ -422,7 +422,7 @@ fn thumb_lamp_frame() -> UiControlProductPreview {
 /// [`thumb_lamp_frame`] as a board's card PULLS it: the same sign at 8 bits
 /// per sample (each linear unorm16 level as its sRGB8 code, the engine's
 /// rule), which is what the device card's feed carries over the wire.
-fn live_card_lamp_frame() -> UiControlProductPreview {
+pub(crate) fn live_card_lamp_frame() -> UiControlProductPreview {
     let frame = thumb_lamp_frame();
     let bytes: Vec<u8> = (0..frame.extent.sample_count() as usize)
         .map(|index| lpc_wire::linear16_to_srgb8(frame.unorm16_sample(index).unwrap_or(0)))
@@ -538,6 +538,7 @@ fn powered_off_sim_fixture() -> DeviceRosterView {
     DeviceRosterView {
         access: Default::default(),
         wifi: Default::default(),
+        updates: Default::default(),
         transport_available: true,
         usb_available: true,
         layout: Default::default(),
@@ -789,6 +790,7 @@ fn devices_card_layout_change() -> Element {
                 verdict,
                 awaiting_consent: true,
             }),
+            update: None,
         }),
         escapes: vec![
             DeviceEscape::Cancel,
@@ -914,6 +916,7 @@ fn devices_card_update_steps() -> Element {
             cancellable: true,
             cancel_requested: false,
             layout: None,
+            update: None,
         }),
         can_remove_project: false,
         escapes: vec![
@@ -1119,6 +1122,7 @@ fn roster_fixture() -> DeviceRosterView {
     DeviceRosterView {
         access: Default::default(),
         wifi: Default::default(),
+        updates: Default::default(),
         transport_available: true,
         usb_available: true,
         layout: Default::default(),
@@ -1223,6 +1227,8 @@ fn roster_fixture() -> DeviceRosterView {
                     terminal_dropped: 0,
                     firmware_blocked: None,
                     escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
+                    update_blocked: None,
+                    last_update_outcome: None,
                 },
                 DeviceView {
                     id: DeviceId(2),
@@ -1257,6 +1263,7 @@ fn roster_fixture() -> DeviceRosterView {
                         cancellable: true,
                         cancel_requested: false,
                         layout: None,
+                        update: None,
                     }),
                     last_outcome: None,
                     // Mid-activity: the bar is in the state zone above and
@@ -1276,6 +1283,8 @@ fn roster_fixture() -> DeviceRosterView {
                         DeviceEscape::Disconnect,
                         DeviceEscape::Forget,
                     ],
+                    update_blocked: None,
+                    last_update_outcome: None,
                 },
                 DeviceView {
                     id: DeviceId(3),
@@ -1321,6 +1330,8 @@ fn roster_fixture() -> DeviceRosterView {
                     terminal_dropped: 0,
                     firmware_blocked: None,
                     escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
+                    update_blocked: None,
+                    last_update_outcome: None,
                 },
                 // The EMPTY face (M3): a LightPlayer that has SAID it has
                 // nothing on it, wearing the one inline picker.
@@ -1382,6 +1393,8 @@ fn roster_fixture() -> DeviceRosterView {
                     terminal_dropped: 0,
                     firmware_blocked: None,
                     escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
+                    update_blocked: None,
+                    last_update_outcome: None,
                 },
                 // The remembered board (D7): known, named, and not on the
                 // bus — the roster still projects it, and the page splits
@@ -1416,6 +1429,8 @@ fn roster_fixture() -> DeviceRosterView {
                     // The two verbs an absent board can honestly offer.
                     firmware_blocked: None,
                     escapes: vec![DeviceEscape::Reconnect, DeviceEscape::Forget],
+                    update_blocked: None,
+                    last_update_outcome: None,
                 },
             ],
         },
@@ -1458,6 +1473,7 @@ fn roster_page_fixture() -> DeviceRosterView {
     DeviceRosterView {
         access: Default::default(),
         wifi: Default::default(),
+        updates: Default::default(),
         transport_available: true,
         usb_available: true,
         layout: Default::default(),
@@ -1650,6 +1666,8 @@ fn firmware_face_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
         terminal_dropped: 0,
         firmware_blocked: None,
         escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
+        update_blocked: None,
+        last_update_outcome: None,
     };
     let pre_hello = DeviceView {
         terminal: vec![
@@ -1762,6 +1780,8 @@ fn firmware_face_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
         // the terminal and the verb rows drawn at their fixed heights.
         firmware_blocked: None,
         escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
+        update_blocked: None,
+        last_update_outcome: None,
     };
 
     vec![
@@ -1957,6 +1977,7 @@ fn card_state_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
             cancellable: true,
             cancel_requested: false,
             layout: None,
+            update: None,
         }),
         can_remove_project: false,
         escapes: vec![
@@ -1978,6 +1999,7 @@ fn card_state_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
             cancellable: true,
             cancel_requested: false,
             layout: None,
+            update: None,
         }),
         can_remove_project: false,
         escapes: vec![

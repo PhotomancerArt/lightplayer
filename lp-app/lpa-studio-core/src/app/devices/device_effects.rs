@@ -82,6 +82,10 @@ const HOTPLUG_SETTLE: Duration = Duration::from_millis(250);
 /// departure sweep uses the same ceiling for the same reason.
 const MAX_SWEEP_LINKS: usize = 8;
 
+/// What a borrowed-wire call says if it is ever handed an update leg: legs
+/// run on the update host, beside the wire, never as a coarse effect.
+const UPDATES_RUN_ON_THE_HOST: &str = "an update leg is not a borrowed-wire effect";
+
 /// The exclusive-wire-borrow token a link carries.
 ///
 /// The EFFECT'S OWN id, not a bare `bool`. An abandoned effect (its activity
@@ -228,6 +232,14 @@ pub struct DeviceEffects {
     /// [`Event::GrantAnswered`] carries it, so a caller that opened a
     /// chooser can tell which answer is its own.
     last_grant_request: Option<LinkId>,
+    /// The controller's clock (epoch seconds), for the update host.
+    clock: Option<Rc<dyn Fn() -> f64>>,
+    /// The over-the-air update's host (M7): one driver per device, fed the
+    /// channel-3 bytes the pumps route to it.
+    update: super::update_host::UpdateHost,
+    /// What the fold knew about each board when its update leg was asked
+    /// for, staged by the roster just before the leg's command is applied.
+    update_legs: BTreeMap<(DeviceId, EffectId), super::update_host::LegFacts>,
 }
 
 impl Default for DeviceEffects {
@@ -252,7 +264,96 @@ impl DeviceEffects {
             layout: super::device_layout_effect::LayoutEffects::default(),
             firmware: super::device_firmware_sources::DeviceFirmwareSources::default(),
             last_grant_request: None,
+            clock: None,
+            update: super::update_host::UpdateHost::new(),
+            update_legs: BTreeMap::new(),
         }
+    }
+
+    /// The over-the-air update's host.
+    pub fn update_host(&self) -> &super::update_host::UpdateHost {
+        &self.update
+    }
+
+    /// Hand the update host the seams it performs through (they are
+    /// installed one by one, so this runs before every call into it).
+    fn refresh_update_seams(&self) {
+        let (Some(spawn), Some(timer), Some(sink), Some(clock)) = (
+            self.spawn.clone(),
+            self.timer.clone(),
+            self.sink.clone(),
+            self.clock.clone(),
+        ) else {
+            return;
+        };
+        self.update.set_seams(super::update_host::UpdateSeams {
+            spawn,
+            timer,
+            sink,
+            clock,
+            cache: self.firmware.engine_cache(),
+            store: self.firmware.store(),
+        });
+    }
+
+    /// Stage what the fold knows about each board an update leg in
+    /// `commands` is for (DS9: has it announced channel 3?), so the leg can
+    /// start when its command is applied.
+    pub(crate) fn stage_update_legs(&mut self, roster: &lpa_devices::Roster, commands: &[Command]) {
+        for command in commands {
+            let Command::RunEffect {
+                device,
+                effect_id,
+                effect: EffectRequest::Update { .. },
+                ..
+            } = command
+            else {
+                continue;
+            };
+            let evidence = match roster.device(*device) {
+                Some(found) => Some(&found.evidence),
+                None => roster
+                    .pending()
+                    .iter()
+                    .find(|pending| pending.device_id() == *device)
+                    .map(lpa_devices::PendingLink::evidence),
+            };
+            let facts = super::update_host::LegFacts {
+                announced: evidence.is_some_and(|evidence| {
+                    evidence.announced_update_channel() && evidence.carries_update_channel()
+                }),
+                facts: evidence.and_then(|evidence| evidence.update_facts().cloned()),
+            };
+            self.update_legs.insert((*device, *effect_id), facts);
+        }
+    }
+
+    /// After every fold: the update host ends legs whose link went and
+    /// drops drivers whose activity ended.
+    pub(crate) fn reconcile_updates(&mut self, roster: &lpa_devices::Roster) {
+        self.refresh_update_seams();
+        self.update.reconcile(roster);
+    }
+
+    /// The boards whose transfer another device owns, to ask `Q` every 3 s
+    /// (DS8). A board whose link is gone is left out.
+    pub(crate) fn set_update_watches(&mut self, watches: Vec<(DeviceId, LinkId)>) {
+        self.refresh_update_seams();
+        let watches = watches
+            .into_iter()
+            .filter_map(|(device, link)| {
+                let slot = self.links.get(&link)?;
+                Some((device, link, Rc::downgrade(&slot.link)))
+            })
+            .collect();
+        self.update.set_watches(watches);
+    }
+
+    /// Ask the store for its latest release of `target` (once per target
+    /// and store epoch).
+    pub(crate) fn want_store_latest(&mut self, target: &str) {
+        self.refresh_update_seams();
+        self.update.want_store_latest(target);
     }
 
     /// The layout step's state (the C6 repartition): backup store, staged
@@ -302,7 +403,8 @@ impl DeviceEffects {
     /// Install the wall clock (epoch seconds) backup archives are stamped
     /// with. Core reads no clocks; the controller's own is injected.
     pub fn set_clock(&mut self, clock: Rc<dyn Fn() -> f64>) {
-        self.layout.set_clock(clock);
+        self.layout.set_clock(Rc::clone(&clock));
+        self.clock = Some(clock);
     }
 
     /// Stage what a [`Action::Push`](lpa_devices::Action::Push) gesture will
@@ -600,6 +702,8 @@ impl DeviceEffects {
     /// a no-op, and so is one that arrives after a newer effect has taken
     /// the same wire.
     fn abandon_effect(&mut self, link: LinkId, effect_id: EffectId) {
+        // An update leg borrows no wire; its driver goes with the effect.
+        self.update.abandon(effect_id);
         let Some(slot) = self.links.get(&link) else {
             return;
         };
@@ -629,6 +733,10 @@ impl DeviceEffects {
         effect: EffectRequest,
     ) {
         let kind = effect_kind(&effect);
+        if let EffectRequest::Update { intent } = effect {
+            self.run_update_leg(device, link, effect_id, intent);
+            return;
+        }
         let (Some(transport), Some(spawn), Some(sink)) = (
             self.transport.clone(),
             self.spawn.clone(),
@@ -803,6 +911,45 @@ impl DeviceEffects {
                 }
             }
         }));
+    }
+
+    /// One leg of an over-the-air update: the update host runs it beside the
+    /// wire (DS1) — no borrow, the pump keeps running, channel 1's
+    /// heartbeats keep the fold honest.
+    fn run_update_leg(
+        &mut self,
+        device: DeviceId,
+        link: LinkId,
+        effect_id: EffectId,
+        intent: lpa_devices::UpdateIntentFacts,
+    ) {
+        let facts = self
+            .update_legs
+            .remove(&(device, effect_id))
+            .unwrap_or_default();
+        self.refresh_update_seams();
+        let Some(slot) = self.links.get(&link) else {
+            if let Some(sink) = &self.sink {
+                sink(effect_ended(
+                    device,
+                    effect_id,
+                    ActivityKind::Update,
+                    ActivityOutcome::Interrupted {
+                        reason: "the port is gone".to_string(),
+                    },
+                ));
+            }
+            return;
+        };
+        self.update.start_leg(super::update_host::LegStart {
+            device,
+            link,
+            effect_id,
+            intent,
+            info: slot.info.clone(),
+            handle: Rc::downgrade(&slot.link),
+            facts,
+        });
     }
 
     fn submit(&mut self, link: LinkId, command: LinkCommand) {
@@ -1030,6 +1177,7 @@ impl DeviceEffects {
         let arrivals = Rc::clone(&self.arrivals);
         let spawn = self.spawn.clone();
         let timer = self.timer.clone();
+        let update = self.update.clone();
         move |link, granted, sink| {
             let info = granted.info.clone();
             let handle = Rc::new(RefCell::new(granted.link));
@@ -1054,6 +1202,7 @@ impl DeviceEffects {
                         borrowed,
                         inbox,
                         resets,
+                        update: update.clone(),
                     },
                     Rc::clone(&sink),
                 );
@@ -1095,6 +1244,7 @@ fn spawn_pump(
         borrowed,
         inbox,
         resets,
+        update,
     } = shared;
     let timer = Rc::clone(timer);
     spawn(Box::pin(async move {
@@ -1108,6 +1258,12 @@ fn spawn_pump(
                 let Some(event) = next else { break };
                 if let lpa_devices::link::LinkEvent::Passthrough { request_id, line } = event {
                     inbox.borrow_mut().push_back((request_id, line));
+                    continue;
+                }
+                // Channel 3 is the update host's, never the fold's (DS1);
+                // its decoded `UpdateFacts` still reach the fold below.
+                if let lpa_devices::link::LinkEvent::Update(bytes) = event {
+                    update.on_board(link, &bytes);
                     continue;
                 }
                 if let lpa_devices::link::LinkEvent::WireNote(note) = &event
@@ -1144,6 +1300,8 @@ struct PumpShared {
     borrowed: BorrowToken,
     inbox: ConversationInbox,
     resets: LinkResets,
+    /// Where channel-3 bytes go.
+    update: super::update_host::UpdateHost,
 }
 
 /// Whether a link error is the platform saying the port itself is gone —
@@ -1209,6 +1367,7 @@ fn effect_kind(effect: &EffectRequest) -> ActivityKind {
         EffectRequest::Push => ActivityKind::Push,
         EffectRequest::Erase => ActivityKind::Erase,
         EffectRequest::RemoveProject => ActivityKind::RemoveProject,
+        EffectRequest::Update { .. } => ActivityKind::Update,
     }
 }
 
@@ -1267,6 +1426,9 @@ fn resolve_effect_call(
             fallback_storage_id: crate::app::project::demo_project::DEMO_PROJECT_STORAGE_ID
                 .to_string(),
         }),
+        // Never a borrowed-wire call: `run_effect` hands an update leg to
+        // the update host before it gets here.
+        EffectRequest::Update { .. } => Err(UPDATES_RUN_ON_THE_HOST.to_string()),
     }
 }
 
@@ -1294,6 +1456,47 @@ mod tests {
         // Nothing to assert but survival: the alternative shape (panicking on
         // an unknown link, as the `lpa-link` bench does deliberately) would
         // take the whole page down on an ordinary race.
+    }
+
+    /// An update leg whose port vanished between the fold and the effect
+    /// ends `Interrupted` with no outcome: the Update activity waits for the
+    /// board to come back rather than failing (the detach behind it says
+    /// the rest). Legs run on the update host and borrow no wire.
+    #[test]
+    fn an_update_leg_on_a_vanished_port_is_interrupted_not_failed() {
+        let mut effects = DeviceEffects::new();
+        let inputs = Rc::new(RefCell::new(Vec::new()));
+        let sink_inputs = Rc::clone(&inputs);
+        effects.set_input_sink(move |input| sink_inputs.borrow_mut().push(input));
+        effects.set_spawner(|_task| {});
+        effects.set_timer(|_| Box::pin(core::future::pending()) as DeviceTimerFuture);
+        effects.set_clock(Rc::new(|| 1.0));
+
+        effects.apply(vec![Command::RunEffect {
+            device: DeviceId(1),
+            link: LinkId(1),
+            effect_id: EffectId(3),
+            effect: EffectRequest::Update {
+                intent: lpa_devices::UpdateIntentFacts::Auto,
+            },
+        }]);
+
+        let inputs = inputs.borrow();
+        assert!(
+            matches!(
+                inputs.as_slice(),
+                [Input::Event(Event::ActivityMarker {
+                    effect: Some(EffectId(3)),
+                    marker: ActivityMarker::Ended {
+                        kind: ActivityKind::Update,
+                        outcome: ActivityOutcome::Interrupted { .. },
+                    },
+                    ..
+                })]
+            ),
+            "{inputs:?}"
+        );
+        assert!(!effects.update_host().is_running(DeviceId(1)));
     }
 
     /// Record writes accumulate for the caller and are taken exactly once —

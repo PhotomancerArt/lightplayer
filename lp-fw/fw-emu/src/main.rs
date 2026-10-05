@@ -40,6 +40,7 @@ use time::SyscallTimeProvider;
 // lpc-engine directly, so the engine fragment comes from there.
 lpc_model::lp_embed_manifest_core! {
     package: env!("CARGO_PKG_NAME"),
+    target: "unknown",
     chip_family: "emu",
     chip: "rv32imac",
     cargo_target: "riscv32imac-unknown-none-elf",

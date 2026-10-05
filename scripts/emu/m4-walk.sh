@@ -4,6 +4,7 @@
 #   scripts/emu/m4-walk.sh                     # `just walk-esp32c6-emu`
 #   scripts/emu/m4-walk.sh --chip esp32s3      # `just walk-esp32s3-emu`
 #   scripts/emu/m4-walk.sh --keep              # leave the artefacts behind
+#   scripts/emu/m4-walk.sh --monolith          # the C6's unsplit dev image
 #
 # TWO chips, one script (M6 P10). Both have a native USB-Serial-JTAG link, the
 # same generation of RMT, and a board whose `D10` pad is the one
@@ -66,6 +67,20 @@
 # this script's whole point is to be the twin of one that flashes and resets
 # a board.
 #
+# ## The C6's image is the SPLIT image (since OTA M2)
+#
+# The walk asks whether the SHIPPED firmware renders what the host renders,
+# and since M2 the C6 ships the split image (`lp-fw-split`: a RAM-only loader,
+# boot records, the core and the engine inside `factory`). So that is the
+# default: `just fw-esp32c6-split` with the walk's features, its own
+# `merged.bin` booted ROM-up (the ROM, the IDF bootloader, the loader, the
+# core, the engine — the compiler is in the engine), and the readout checked
+# in its `p2.elf`. `LP_WALK_BOOT=direct` direct-loads its loader over that
+# merged chip instead (`--over`, 32 KiB pages, as `tests/split_boot.rs`
+# holds to the ROM-up boot). `--monolith` walks the one-link dev image that
+# `just build-fw-esp32c6` / `flash-fw-esp32c6` still produce. The S3 has no
+# split image and ignores the flag.
+#
 # ## ⚠️ On the S3 this walk is the milestone's only end-to-end exercise of
 # ## D2's alias
 #
@@ -85,8 +100,10 @@ PROJECT="${PROJECT:-projects/test/shader-oracle}"
 
 CHIP="${LP_WALK_CHIP:-esp32c6}"
 keep=0
+monolith=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --monolith) monolith=1; shift ;;
         --chip) CHIP="${2:?--chip needs a value: esp32c6 or esp32s3}"; shift 2 ;;
         --chip=*) CHIP="${1#*=}"; shift ;;
         --keep) keep=1; shift ;;
@@ -178,13 +195,23 @@ rm -f "$console" "$frames"
 # hardware walk flashes the current tree plus the same feature. Built from the
 # crate directory because its own `.cargo/config.toml` carries the linker
 # script.
+split_dir=""
 case "$CHIP" in
 esp32c6)
-    echo "==> building fw-esp32c6 (esp32c6,server,radio + frame-dump)"
-    ( cd lp-fw/fw-esp32c6 && cargo build --quiet \
-        --target riscv32imac-unknown-none-elf --profile release-esp32 \
-        --features esp32c6,frame-dump )
-    built="$REPO/target/riscv32imac-unknown-none-elf/release-esp32/fw-esp32c6"
+    if [[ "$monolith" == 1 ]]; then
+        echo "==> building fw-esp32c6 (esp32c6,server,radio + frame-dump), MONOLITHIC"
+        ( cd lp-fw/fw-esp32c6 && cargo build --quiet \
+            --target riscv32imac-unknown-none-elf --profile release-esp32 \
+            --features esp32c6,frame-dump )
+        built="$REPO/target/riscv32imac-unknown-none-elf/release-esp32/fw-esp32c6"
+    else
+        # The defaults (server, radio) stay on, as on the monolith's line.
+        echo "==> building the fw-esp32c6 SPLIT image (esp32c6,server,radio + frame-dump)"
+        just fw-esp32c6-split esp32c6,frame-dump
+        split_dir="$REPO/target/fw-split/esp32c6_frame-dump"
+        # The symbol table, and where the readout check looks: both halves.
+        built="$split_dir/p2.elf"
+    fi
     ;;
 esp32s3)
     # Through the justfile recipe, and not `cd … && cargo build` like the C6's:
@@ -221,10 +248,19 @@ if ! strings "$elf" | grep -a '\[OUT\] dump frame=' >/dev/null; then
 fi
 
 boot_args=()
+if [[ -n "$split_dir" ]]; then
+    # The split build's own whole-chip image: its bootloader, its table, the
+    # loader, the records, the core and the engine. Copied, so the walk's
+    # artefacts are its own.
+    cp "$split_dir/merged.bin" "$OUT/merged.bin"
+    cp "$split_dir/loader.elf" "$OUT/loader.elf"
+fi
 case "$BOOT" in
     rom-up)
-        echo "==> building the merged image for $MERGED_CHIP (the bytes a flasher writes)"
-        scripts/emu/build-merged-image.sh --chip "$MERGED_CHIP" "$elf" "$OUT/merged.bin"
+        if [[ -z "$split_dir" ]]; then
+            echo "==> building the merged image for $MERGED_CHIP (the bytes a flasher writes)"
+            scripts/emu/build-merged-image.sh --chip "$MERGED_CHIP" "$elf" "$OUT/merged.bin"
+        fi
         # `lp-cli emu run --chip esp32s3` infers rom-up from `--merged` the
         # same way the C6 does (`run_s3.rs`'s own boot-mode match) — no
         # `--boot-mode` flag here; that belonged to the standalone
@@ -237,7 +273,13 @@ case "$BOOT" in
         # `no lpfs partition in the flashed table … using memory FS` and runs
         # on the memory FS — a different allocator load from the ROM-up boot's
         # and a thing to remember before comparing figures across the two.
-        boot_args=(--elf "$elf")
+        if [[ -n "$split_dir" ]]; then
+            # The loader over the flashed chip, in the state the IDF
+            # bootloader leaves it: it maps and starts the core itself.
+            boot_args=(--elf "$OUT/loader.elf" --over "$OUT/merged.bin" --mmu-page 32k)
+        else
+            boot_args=(--elf "$elf")
+        fi
         ;;
     *)
         echo "LP_WALK_BOOT='$BOOT' — expected rom-up or direct" >&2

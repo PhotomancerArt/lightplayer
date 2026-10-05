@@ -83,6 +83,13 @@ pub struct DeviceRosterView {
     /// board's network status, read on a link that holds edit. Absent = no
     /// row (a sim, a held board, a Bluetooth link nothing unlocked).
     pub wifi: std::collections::BTreeMap<lpa_devices::DeviceId, crate::app::network::UiDeviceWifi>,
+    /// Each device's firmware-update words (the update-states spike,
+    /// direction C): the firmware zone's line and bar, the picture slot's
+    /// sentence and light, the header chip and version. Joined by the
+    /// controller from the board's update standing; absent = no update
+    /// story to tell, and the card keeps today's firmware line. Words
+    /// only — the update's buttons are offers on the tree.
+    pub updates: std::collections::BTreeMap<lpa_devices::DeviceId, super::UiDeviceUpdate>,
     /// Each device's layout facts (the C6 repartition): the question before
     /// its files move, the refusal, a board holding its files, a backup to
     /// put back. Absent = nothing to say.
@@ -106,6 +113,7 @@ impl Default for DeviceRosterView {
             runtime_bands: std::collections::BTreeMap::new(),
             access: std::collections::BTreeMap::new(),
             wifi: std::collections::BTreeMap::new(),
+            updates: std::collections::BTreeMap::new(),
             layout: std::collections::BTreeMap::new(),
             backup_download: None,
         }
@@ -368,6 +376,8 @@ impl DeviceRoster {
         };
         let commands = self.roster.handle(now, input);
         self.note_dropped_links(&commands);
+        // An update leg starts from what the fold knows of its board (DS9).
+        self.effects.stage_update_legs(&self.roster, &commands);
         self.effects.apply(commands);
         // Only once a link's own attach has folded may the roster's silence
         // about it mean "let go" (see `DeviceEffects::retain_links`).
@@ -379,6 +389,9 @@ impl DeviceRoster {
         let roster = &self.roster;
         self.effects
             .retain_links(|link| roster.link_info(link).is_some());
+        // An update leg whose link went ends; a driver whose activity ended
+        // goes.
+        self.effects.reconcile_updates(&self.roster);
         self.drain_journal()
     }
 
@@ -413,6 +426,7 @@ impl DeviceRoster {
             runtime_bands: std::collections::BTreeMap::new(),
             access: std::collections::BTreeMap::new(),
             wifi: std::collections::BTreeMap::new(),
+            updates: std::collections::BTreeMap::new(),
             // The verbs land in a scratch tree here; the studio view
             // publishes them for real (`publish_layout_offers`).
             layout: self.layout_views(now, &mut crate::UiOfferTree::new(), None),
@@ -549,6 +563,7 @@ mod tests {
             endpoint: EndpointKey(endpoint.to_string()),
             usb: None,
             serial_number: None,
+            carries_update_channel: false,
         }
     }
 
@@ -799,6 +814,8 @@ mod tests {
             terminal_dropped: 0,
             firmware_blocked: None,
             escapes: vec![Escape::Reconnect, Escape::Forget],
+            update_blocked: None,
+            last_update_outcome: None,
         }
     }
 
@@ -827,6 +844,8 @@ mod tests {
             terminal_dropped: 0,
             firmware_blocked: None,
             escapes: vec![Escape::Disconnect, Escape::Forget],
+            update_blocked: None,
+            last_update_outcome: None,
         }
     }
 
@@ -839,6 +858,7 @@ mod tests {
         let view = DeviceRosterView {
             access: Default::default(),
             wifi: Default::default(),
+            updates: Default::default(),
             roster: RosterView {
                 devices: vec![
                     ready_view(1, "Live board"),
@@ -898,6 +918,7 @@ mod tests {
         let view = DeviceRosterView {
             access: Default::default(),
             wifi: Default::default(),
+            updates: Default::default(),
             roster: RosterView {
                 devices: vec![ready_view(1, "A"), ready_view(2, "B"), ready_view(3, "C")],
                 pending: Vec::new(),

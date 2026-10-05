@@ -2510,6 +2510,7 @@ mod tests {
             board: Some("Desktop".to_string()),
             status: UiChromeSessionStatus::Run,
             stat_line: None,
+            update: None,
         }
     }
 

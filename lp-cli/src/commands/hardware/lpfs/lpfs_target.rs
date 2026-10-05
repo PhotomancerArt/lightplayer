@@ -60,7 +60,7 @@ pub fn package_manifest(args: &LpfsFirmwareArgs) -> Result<PathBuf> {
         "schemaVersion": 2,
         "firmwareId": "local-merged-image",
         "displayName": format!("{} (local merged image)", merged.display()),
-        "core": { "target": { "chip": args.chip } },
+        "core": { "platform": { "chip": args.chip } },
         "images": [{
             "path": merged.display().to_string(),
             "address": "0x0",

@@ -15,7 +15,8 @@ use dioxus::prelude::*;
 use lpa_studio_core::{
     BluetoothReach, BoardRef, DeviceFace, DeviceOfferFacts, DeviceRosterView, DeviceView,
     OfferPath, PendingLinkView, UiExampleCard, UiLensCard, UiOfferTree, UiPackageCard,
-    UiUnlockOffer, add_device_offers, device_offers, new_sim_offer, pending_link_offers,
+    UiUnlockOffer, UpdateOfferFacts, add_device_offers, device_offers, new_sim_offer,
+    pending_link_offers,
 };
 
 use crate::app::home::DevicesPage;
@@ -62,6 +63,20 @@ pub(crate) fn card_tree(
     projects: &[UiPackageCard],
     examples: &[UiExampleCard],
 ) -> UiOfferTree {
+    card_tree_with_update(card, face, locked, projects, examples, Default::default())
+}
+
+/// [`card_tree`] for a board with an update story: `update` is its
+/// standing and route, read by core from the board's facts
+/// ([`UpdateFixture::offer_facts`](lpa_studio_core::UpdateFixture::offer_facts)).
+pub(crate) fn card_tree_with_update(
+    card: &DeviceView,
+    face: DeviceFace,
+    locked: bool,
+    projects: &[UiPackageCard],
+    examples: &[UiExampleCard],
+    update: UpdateOfferFacts,
+) -> UiOfferTree {
     let prefix = OfferPath::board(&BoardRef::New(card.id.0 as u32));
     let facts = DeviceOfferFacts {
         prefix: prefix.clone(),
@@ -71,6 +86,7 @@ pub(crate) fn card_tree(
         banked: false,
         projects,
         examples,
+        update,
     };
     let mut tree = UiOfferTree::new();
     for offer in device_offers(card, &facts) {
@@ -103,13 +119,17 @@ pub(crate) fn CardOffers(
     #[props(default)] locked: bool,
     #[props(default)] projects: Vec<UiPackageCard>,
     #[props(default)] examples: Vec<UiExampleCard>,
+    /// The board's update standing and route, when it tells an update
+    /// story (core's, from the story's update fixture).
+    #[props(default)]
+    update: UpdateOfferFacts,
     children: Element,
 ) -> Element {
     let face = match sim {
         true => DeviceFace::Sim,
         false => DeviceFace::Wire,
     };
-    let offers = card_tree(&card, face, locked, &projects, &examples);
+    let offers = card_tree_with_update(&card, face, locked, &projects, &examples, update);
     rsx! {
         OffersProvider { offers, {children} }
     }
@@ -166,6 +186,12 @@ pub(crate) fn StoryDeviceCard(
     #[props(default)] access_panel_open: bool,
     #[props(default)] keys_open_preview: bool,
     #[props(default)] menu_initially_open: bool,
+    /// The card's update words (core's, from the story's update fixture).
+    #[props(default)]
+    update: Option<lpa_studio_core::UiDeviceUpdate>,
+    /// The board's update standing and route, for its offers.
+    #[props(default)]
+    update_facts: UpdateOfferFacts,
     on_action: EventHandler<lpa_studio_core::UiAction>,
 ) -> Element {
     let locked = access
@@ -178,7 +204,9 @@ pub(crate) fn StoryDeviceCard(
             locked,
             projects: projects.clone(),
             examples: examples.clone(),
+            update: update_facts,
             DeviceRosterCard {
+                update,
                 card,
                 projects,
                 examples,
@@ -309,5 +337,7 @@ fn ready_device(id: lpa_studio_core::DeviceId, title: &str) -> DeviceView {
         terminal_dropped: 0,
         firmware_blocked: None,
         escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
+        update_blocked: None,
+        last_update_outcome: None,
     }
 }

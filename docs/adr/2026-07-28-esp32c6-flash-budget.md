@@ -218,6 +218,32 @@ Append; do not editorialize old entries.
 | 2026-08-02 | **−796,032 B (a CREDIT)** — RV32 unwinding teardown (`docs/adr/2026-08-02-rv32-firmwares-are-abort-tier.md`) | Headroom 259,360 → 1,055,392 B. One panic posture across all four chips; the nightly pin decoupled from `unwinding`'s ABI; the esp-hal `text.x` patch retired | **n/a — this is a credit, not a spend.** Re-spending it means re-adopting unwinding, which needs ~41 KB of stack the chip does not have (it has ~34 KB) and which was non-functional on device for its last five weeks. Do not treat this as budget that appeared from nowhere: it is what the WiFi+TLS claim (~120–180 KB, Decision 3) and any C3 port will draw on |
 | 2026-08-01 | **+10,208 B** — resolver persistent resolution (PR #243, `docs/adr/2026-07-31-resolver-persistent-resolution.md`) | −54% engine cycles on the 1-fixture oracle; S3 quad-strips 20→25 fps | **Mostly none** — the spend is the feature; reverting costs the perf win back. The only cheap slice is the intern table's reverse-lookup + error-formatting paths (cycle errors would report ids instead of names): unmeasured, likely single-digit KB flash — its real holding is a few KB of *heap*, not flash. Do not spend an afternoon here expecting 10 KB. |
 
+## Amendment (2026-10-04): the split image's headroom
+
+Since `2026-10-04-c6-split-link-firmware-loader-and-boot-records.md` the C6
+ships a **split image** (loader, boot records, core and engine inside
+`factory`), and `just fw-esp32c6-size-check` builds and gates that image.
+One headroom number became four, and each report line says which it is:
+
+- **image headroom** — `factory`'s length minus `app.bin`'s (the old single
+  number's successor);
+- **steady headroom, core low** — the region (`factory` + `0x8000` to its
+  end) minus the page-rounded core minus the engine, with the core at
+  `0x18000` as flashed;
+- **steady headroom, core high** — the same with the core at the region's
+  high end, where an update leaves it;
+- **update headroom** — whether a second core of the same size fits beside
+  the running one while it is replaced.
+
+The **gate is the smallest of the steady and update headrooms**, against the
+same 64 KB floor. The split costs little code but up to two MMU pages
+(32 KiB each) of alignment, so the image grows more than the code does.
+Measured when it landed (same tree, `fw-esp32c6-size-check unsplit=1`):
+`app.bin` 3,036,670 B against `factory` 3,407,872 B — **image headroom
+371,202 B**, steady (low and high) 371,202 B, update 1,015,808 B; legacy
+overlap 109,058 B before `0x310000`; code delta +8,478 B and image delta
++59,790 B against the monolithic image of the same tree (2,976,880 B).
+
 ## Alternatives Considered
 
 - **Swap ESP-NOW for raw IEEE 802.15.4** (~460 KB). Rejected for now — see
