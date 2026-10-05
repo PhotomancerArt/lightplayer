@@ -176,7 +176,10 @@ mod tests {
     fn a_devices_bare_code_is_reworded_exactly_for_too_many_networks() {
         // The one code whose number is a build constant both ends
         // already know: the reworded text matches `words()` exactly.
-        let device_text = format!("cannot save the network: {}", NetworkFileError::TooManyNetworks { max: 8 });
+        let device_text = format!(
+            "cannot save the network: {}",
+            NetworkFileError::TooManyNetworks { max: 8 }
+        );
         assert_eq!(device_text, "cannot save the network: tooManyNetworks");
         assert_eq!(
             NetworkFileError::reword_refusal(&device_text),

@@ -122,7 +122,9 @@ async fn request<Io: lpa_client::ClientIo>(client: &mut LpClient<Io>, op: Op) ->
         Op::Forget(ssid) => client.network_forget(ssid).await,
         Op::Set { wifi, cloud_relay } => client.network_set(wifi, cloud_relay).await,
     };
-    status.map(|outcome| Reply::Status(outcome.value)).map_err(worded)
+    status
+        .map(|outcome| Reply::Status(outcome.value))
+        .map_err(worded)
 }
 
 /// The board sends a bare error code (cheap on the device: see
@@ -132,7 +134,10 @@ async fn request<Io: lpa_client::ClientIo>(client: &mut LpClient<Io>, op: Op) ->
 fn worded(error: ClientError) -> anyhow::Error {
     match error {
         ClientError::Server(message) => {
-            anyhow::anyhow!("server error: {}", NetworkFileError::reword_refusal(&message))
+            anyhow::anyhow!(
+                "server error: {}",
+                NetworkFileError::reword_refusal(&message)
+            )
         }
         other => anyhow::anyhow!("{other}"),
     }
