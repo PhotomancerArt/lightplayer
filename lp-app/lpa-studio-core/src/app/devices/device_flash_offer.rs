@@ -464,6 +464,7 @@ mod tests {
             FirmwareFace::LightPlayer {
                 firmware: None,
                 wire: lpa_devices::WireVersion::Match,
+                age: lpa_devices::FirmwareAge::Unknown,
             },
             Some("esp32c6"),
         );
@@ -645,6 +646,7 @@ mod tests {
                 FirmwareFace::LightPlayer {
                     firmware: None,
                     wire: lpa_devices::WireVersion::Match,
+                    age: lpa_devices::FirmwareAge::Unknown,
                 },
                 chip,
             )

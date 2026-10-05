@@ -885,6 +885,7 @@ mod tests {
             firmware_face: lpa_devices::FirmwareFace::LightPlayer {
                 firmware: None,
                 wire: lpa_devices::WireVersion::Match,
+                age: lpa_devices::FirmwareAge::Unknown,
             },
             remembered_firmware: None,
             degraded: None,

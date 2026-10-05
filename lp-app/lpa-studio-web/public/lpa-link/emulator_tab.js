@@ -538,6 +538,21 @@ export class TabEmulatorPort extends EmulatorPort {
     return data.length;
   }
 
+  /**
+   * Write `bytes` at `offset` the way a flasher does: only the 4 KiB sectors
+   * the range touches are erased (`emu_flash_write`'s own rule), and the rest
+   * of the chip — a board's filesystem among it — stays. One call per
+   * contiguous region; see that export for why.
+   */
+  async writeFlash(offset, bytes) {
+    const owned = (bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)).slice();
+    const reply = await this._hub.request(
+      { type: "flash-write", offset, bytes: owned.buffer },
+      [owned.buffer],
+    );
+    return reply.written;
+  }
+
   /** `state` and `pins` as the door answers them, plus what only a tab has. */
   async probes() {
     const [state, pins] = await Promise.all([this.state(), this.pins()]);

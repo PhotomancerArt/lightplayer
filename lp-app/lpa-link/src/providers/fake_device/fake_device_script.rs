@@ -388,7 +388,14 @@ pub const CLASSIC_ESP32_ROM_BANNER: &str = "ets Jun  8 2016 00:22:57";
 pub const XIAO_FACTORY_DEMO_LINE: &str = "Hello from Seeed Studio XIAO ESP32-C6";
 
 /// A plausible fake firmware identity whose `commit` is the given image
-/// identity.
+/// identity. Its version is `unknown`, so Studio makes no older/newer claim
+/// about a fake board unless a test sets one (`HelloIdentity::version`).
 pub fn fake_provenance(image_identity: &str) -> lpc_wire::HelloIdentity {
-    lpc_wire::HelloIdentity::new("fw-esp32c6", image_identity, false, "release-esp32")
+    lpc_wire::HelloIdentity::new(
+        "fw-esp32c6",
+        "unknown",
+        image_identity,
+        false,
+        "release-esp32",
+    )
 }

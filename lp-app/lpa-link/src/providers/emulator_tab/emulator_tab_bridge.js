@@ -372,14 +372,8 @@ export async function eraseEmuFlash(id) {
 }
 
 /**
- * Fetch a packaged firmware build and write it into the emulated chip.
- *
- * The same manifest the esptool path fetches, read with the same rules —
- * `schemaVersion` 2 or refuse, `espflash-merged-image` or refuse — and then
- * written as the whole chip, because the packager emits ONE merged image at
- * address 0 (`lp-cli`'s `firmware package`) and the tab port's write verb is
- * the whole chip. An image that claims any other address is refused by name
- * rather than written at the wrong offset.
+ * Fetch a packaged firmware build and write it into the emulated chip — an
+ * UPDATE: the board's files stay.
  *
  * The board is reset afterwards, so the card sees the boot the new image
  * produces rather than the one the old image is still running.
@@ -391,7 +385,26 @@ export async function flashEmuPackage(id, requestedUrl) {
   const e = entry(id);
   await e.queue;
   const port = await e.ready;
+  return await writeEmuPackage(port, requestedUrl);
+}
 
+/**
+ * `flashEmuPackage`'s body, on a port rather than a handle (the node test
+ * drives it: `lpa-link/tests/js/emulator_tab_update.test.mjs`).
+ *
+ * The same manifest the esptool path fetches, read with the same rules —
+ * `schemaVersion` 2 or refuse, `espflash-merged-image` or refuse. The
+ * packager emits ONE merged image at address 0 (`lp-cli`'s `firmware
+ * package`, `--skip-padding`: it ends where the app ends), and it is written
+ * the way esptool writes it without `--erase-all`: only the sectors the image
+ * covers are erased, so the filesystem partition after it — the board's
+ * projects, stamped `/hardware.json` and `/.lp/` files — stays. Never
+ * `putFlash`: that erases the whole chip, which is Erase, not Update
+ * (docs/defects/2026-10-02-updating-a-tab-hosted-board-erases-its-files.md).
+ * An image that claims any other address is refused by name rather than
+ * written at the wrong offset.
+ */
+export async function writeEmuPackage(port, requestedUrl) {
   const manifestUrl = packageUrl(requestedUrl);
   if (!manifestUrl) throw new Error("flash was asked for with no manifest URL");
 
@@ -415,7 +428,7 @@ export async function flashEmuPackage(id, requestedUrl) {
   if (address !== 0) {
     throw new Error(
       `${manifestUrl} puts its image at 0x${address.toString(16)}; ` +
-        "the tab backing writes the whole chip from zero",
+        "the tab backing writes the merged image from zero",
     );
   }
   const imageUrl = new URL(image.path, manifestUrl).toString();
@@ -424,7 +437,7 @@ export async function flashEmuPackage(id, requestedUrl) {
   const bytes = new Uint8Array(await response.arrayBuffer());
   if (bytes.length === 0) throw new Error(`${imageUrl} is empty`);
 
-  await port.putFlash(bytes);
+  await port.writeFlash(0, bytes);
   await port.reset();
   return manifest.displayName ?? manifest.firmwareId ?? "the firmware";
 }

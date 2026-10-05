@@ -22,8 +22,10 @@ use std::collections::VecDeque;
 use serde::{Deserialize, Serialize};
 
 use crate::activity::ActivityOutcome;
+use crate::app_version::AppVersion;
 use crate::bootloader::bootloader_code_ranges;
 use crate::event::{ActivityMarker, Event};
+use crate::firmware_age::FirmwareAge;
 use crate::identity::IdentityChain;
 use crate::journal::JournalNote;
 use crate::link::{LinkEvent, LinkId};
@@ -290,6 +292,24 @@ impl Evidence {
             .map(|hello| hello.proto)
             .or(self.observations.other_wire_hello)
             .map(|proto| WireVersion::compare(proto, self.observations.expected_proto))
+    }
+
+    /// How the board's app version compares to this build's, once a hello
+    /// has said it. `None` until one has; [`FirmwareAge::Unknown`] when
+    /// either side's version is not one this build can read.
+    ///
+    /// This is what "out of date" means (plan
+    /// `lp2025/2026-10-03-1330-ota-firmware-updates`, M1): an older VERSION,
+    /// not an older wire proto. Like [`Self::wire_version`] it is a fact,
+    /// never a verdict.
+    pub fn firmware_age(&self) -> Option<FirmwareAge> {
+        self.observations.hello.as_ref().map(|hello| {
+            let board = hello
+                .version
+                .as_deref()
+                .map_or(AppVersion::Unknown, AppVersion::parse);
+            FirmwareAge::compare(board, self.observations.expected_version)
+        })
     }
 
     /// Non-hello frames absorbed in the current window: proof of a live peer,
@@ -599,6 +619,7 @@ impl Evidence {
 
     fn reclassify(&mut self, now: Millis, config: &RosterConfig) {
         self.observations.expected_proto = config.expected_proto;
+        self.observations.expected_version = config.expected_version;
         if !self.presence.is_attached() {
             // Nothing is on the other end, so there is nothing to classify.
             // Saying "blank flash" about a board that is not plugged in is
@@ -898,6 +919,8 @@ struct Observations {
     errors: usize,
     settled: bool,
     expected_proto: u32,
+    #[serde(default)]
+    expected_version: AppVersion,
 }
 
 impl Observations {
@@ -910,6 +933,7 @@ impl Observations {
 
     fn observe_frame(&mut self, body: &ServerFrameBody, config: &RosterConfig) {
         self.expected_proto = config.expected_proto;
+        self.expected_version = config.expected_version;
         match body {
             // EVERY hello is kept, whatever proto it claims. Dropping the
             // mismatched ones here is how the card came to say "no firmware"
@@ -1907,6 +1931,40 @@ mod tests {
             &config,
         );
         assert_eq!(unstamped.hello_board_id(), None, "no stamp, no board");
+    }
+
+    /// The hello's version against the app's own: what "older than Studio"
+    /// reads. A board on this Studio's wire proto is still older when its
+    /// VERSION is, and nothing is claimed before a hello or without a
+    /// version.
+    #[test]
+    fn a_hello_names_its_firmware_age_against_studios_version() {
+        let config = RosterConfig {
+            expected_version: AppVersion::parse("2026.10.03-1"),
+            ..studio_config()
+        };
+        let age_after = |version: Option<&str>| {
+            let mut evidence = Evidence::default();
+            let mut identity = IdentityChain::default();
+            evidence.fold(Millis(0), &opened(), &mut identity, &config);
+            assert_eq!(evidence.firmware_age(), None, "nothing before a hello");
+            let hello = frame(ServerFrame::hello(
+                1,
+                HelloFacts {
+                    proto: config.expected_proto,
+                    version: version.map(str::to_string),
+                    ..Default::default()
+                },
+            ));
+            evidence.fold(Millis(10), &hello, &mut identity, &config);
+            assert_eq!(evidence.wire_version(), Some(WireVersion::Match));
+            evidence.firmware_age().expect("a hello was heard")
+        };
+        assert_eq!(age_after(Some("2026.10.02-3")), FirmwareAge::Older);
+        assert_eq!(age_after(Some("2026.10.03-1")), FirmwareAge::Current);
+        assert_eq!(age_after(Some("2026.10.04-1")), FirmwareAge::Newer);
+        assert_eq!(age_after(Some("unknown")), FirmwareAge::Unknown);
+        assert_eq!(age_after(None), FirmwareAge::Unknown);
     }
 
     /// The boot marker names its proto; an older one is older LightPlayer

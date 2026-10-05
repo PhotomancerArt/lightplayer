@@ -221,6 +221,7 @@ fn story_board(state: &OpeningState) -> lpa_studio_core::DeviceView {
         firmware_face: DeviceFirmwareFace::LightPlayer {
             firmware: None,
             wire: DeviceWireVersion::Match,
+            age: lpa_studio_core::DeviceFirmwareAge::Unknown,
         },
         remembered_firmware: None,
         degraded: None,

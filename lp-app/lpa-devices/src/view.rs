@@ -21,6 +21,7 @@ use crate::device::{Device, DeviceStatus};
 use crate::evidence::{
     Classification, Evidence, IncompatibleReason, Liveness, TerminalLine, WireVersion,
 };
+use crate::firmware_age::FirmwareAge;
 use crate::identity::DeviceId;
 use crate::link::LinkId;
 use crate::roster::{PendingLink, Roster};
@@ -382,12 +383,15 @@ pub enum FirmwareFace {
     #[default]
     Unknown,
     /// A LightPlayer said hello — on whatever wire version it speaks.
-    /// `firmware` is the hello's package/commit label verbatim
-    /// (`"fw-esp32c6 abc1234"`), `None` when the firmware did not report
-    /// one; `wire` is the awareness the 2026-09-04 ruling asks for.
+    /// `firmware` is the hello's label verbatim, leading with the version
+    /// (`"fw-esp32c6 2026.10.03-1 · abc1234def01"`), `None` when the firmware
+    /// did not report one; `wire` is the awareness the 2026-09-04 ruling asks
+    /// for; `age` is its VERSION against this Studio's — what "older than
+    /// Studio" is read from.
     LightPlayer {
         firmware: Option<String>,
         wire: WireVersion,
+        age: FirmwareAge,
     },
     /// Speaks the framing, never said hello (pre-hello firmware).
     NoHello,
@@ -488,6 +492,7 @@ fn firmware_face(evidence: &Evidence) -> FirmwareFace {
         Classification::LightPlayer { hello } => FirmwareFace::LightPlayer {
             firmware: hello.firmware.clone(),
             wire: evidence.wire_version().unwrap_or(WireVersion::Match),
+            age: evidence.firmware_age().unwrap_or_default(),
         },
         Classification::Incompatible {
             reason: IncompatibleReason::NoHello,

@@ -242,7 +242,10 @@ mod tests {
 
     use super::*;
 
-    const CORE_JSON: &str = r#"{"lpManifestCore":1,"package":"fw-esp32c6",
+    // The version as the firmware embeds it: a fixed-width slot, the
+    // string followed by JSON whitespace.
+    const CORE_JSON: &str = r#"{"lpManifestCore":2,"package":"fw-esp32c6",
+        "version":"2026.10.03-1"            ,
         "profile":"release-esp32","commit":"abc123456789","dirty":false,
         "target":{"family":"esp32","chip":"esp32c6",
         "cargoTarget":"riscv32imac-unknown-none-elf"},
@@ -263,9 +266,12 @@ mod tests {
         let bytes = artifact_with(CORE_JSON);
         let (raw, core) = extract_core(&bytes, Path::new("fake.elf")).unwrap();
         assert_eq!(core.package, "fw-esp32c6");
+        assert_eq!(core.version, "2026.10.03-1");
         assert_eq!(core.wire_proto, 4);
-        // Verbatim: every key the build emitted survives into the manifest.
+        // Verbatim: every key the build emitted survives into the manifest,
+        // the version included — the packaged manifest.json carries it.
         assert_eq!(raw["package"], "fw-esp32c6");
+        assert_eq!(raw["version"], "2026.10.03-1");
         assert_eq!(raw["limits"]["flashAppBytes"], 3_145_728);
         assert_eq!(raw["features"][0], "node.shader");
     }

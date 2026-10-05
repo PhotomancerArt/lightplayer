@@ -30,7 +30,11 @@ use std::process::Command;
 /// e.g. "release-esp32", falling back to the coarse `PROFILE` env), and
 /// `LP_BUILD_FEATURES` (this crate's enabled cargo features, comma-separated
 /// and sorted) for the validation system's transcript header.
+///
+/// Plus `LP_APP_VERSION`, the build's app version, from the one helper every
+/// versioned build uses (`tools/lp-app-version`) — never computed here.
 fn emit_build_provenance() {
+    lp_app_version::emit();
     emit_git_head_watches();
     let commit =
         git_output(&["rev-parse", "--short=12", "HEAD"]).unwrap_or_else(|| "unknown".into());

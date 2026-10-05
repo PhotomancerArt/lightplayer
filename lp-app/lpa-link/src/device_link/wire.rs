@@ -230,6 +230,7 @@ pub fn hello_facts(hello: &ServerHello) -> HelloFacts {
             name: None,
         },
         firmware: Some(firmware_label(hello)),
+        version: Some(hello.build.version.to_string()),
         board_id: hello.hardware.board_id.clone(),
         fs: match hello.hardware.fs {
             lpc_wire::FsBootState::Mounted => BoardFs::Mounted,
@@ -262,12 +263,29 @@ fn heartbeat_identity(identity: &lpc_wire::server::HeartbeatIdentity) -> PeerIde
     }
 }
 
-/// Display label for the firmware behind a hello ("fw-esp32c6 abc1234").
+/// Display label for the firmware behind a hello. It leads with the
+/// VERSION, with the commit as the secondary detail:
+///
+/// - a release: `fw-esp32c6 2026.10.03-1 · abc1234def01`;
+/// - a dev build, whose version already IS its commit (and says when it was
+///   dirty): `fw-esp32c6 626a1b851-dirty-101500PT`;
+/// - no version (`unknown`, an embedder with no VCS facts): the commit, as
+///   before — `fw-host unknown`, `fw-esp32c6 abc1234 (dirty)`.
 fn firmware_label(hello: &ServerHello) -> String {
     let build = &hello.build;
-    match build.dirty {
-        true => format!("{} {} (dirty)", build.package, build.commit),
-        false => format!("{} {}", build.package, build.commit),
+    let version = lpa_devices::AppVersion::parse(&build.version);
+    let commit = match build.dirty {
+        true => format!("{} (dirty)", build.commit),
+        false => build.commit.clone(),
+    };
+    match version {
+        lpa_devices::AppVersion::Release { .. } if build.commit != "unknown" => {
+            format!("{} {} · {commit}", build.package, build.version)
+        }
+        lpa_devices::AppVersion::Release { .. } | lpa_devices::AppVersion::Dev(_) => {
+            format!("{} {}", build.package, build.version)
+        }
+        lpa_devices::AppVersion::Unknown => format!("{} {commit}", build.package),
     }
 }
 
@@ -654,12 +672,61 @@ mod tests {
         assert_eq!(roster_config().expected_proto, WIRE_PROTO_VERSION);
     }
 
+    /// The card's firmware label leads with the version, the commit after
+    /// it; and the model gets the version verbatim to compare.
+    #[test]
+    fn the_firmware_label_leads_with_the_version() {
+        let label = |version: &'static str, commit: &str, dirty: bool| {
+            let mut hello = hello_with_version(version);
+            hello.build.commit = commit.to_string();
+            hello.build.dirty = dirty;
+            let facts = hello_facts(&hello);
+            assert_eq!(facts.version.as_deref(), Some(version));
+            facts.firmware.expect("a hello always has a label")
+        };
+        assert_eq!(
+            label("2026.10.03-1", "abc1234def01", false),
+            "fw-esp32c6 2026.10.03-1 · abc1234def01"
+        );
+        assert_eq!(
+            label("626a1b851-dirty-101500PT", "626a1b851ab3", true),
+            "fw-esp32c6 626a1b851-dirty-101500PT"
+        );
+        assert_eq!(
+            label("unknown", "abc1234", true),
+            "fw-esp32c6 abc1234 (dirty)"
+        );
+        assert_eq!(
+            label("2026.10.03-1", "unknown", false),
+            "fw-esp32c6 2026.10.03-1"
+        );
+    }
+
+    fn hello_with_version(version: &'static str) -> ServerHello {
+        ServerHello {
+            proto: WIRE_PROTO_VERSION,
+            build: lpc_wire::BuildFacts {
+                features: Vec::new(),
+                package: "fw-esp32c6".to_string(),
+                version: version.into(),
+                commit: "abc1234".to_string(),
+                dirty: false,
+                profile: "release-esp32".to_string(),
+            },
+            hardware: lpc_wire::HardwareFacts::default(),
+            device_uid: None,
+            pack_format: lpc_wire::PACK_FORMAT_VERSION,
+            auth: lpc_wire::HelloAuth::TRUSTED,
+        }
+    }
+
     fn encoded_hello(uid: &str, base_mac: Option<&str>, board_id: Option<&str>) -> String {
         let hello = ServerHello {
             proto: WIRE_PROTO_VERSION,
             build: lpc_wire::BuildFacts {
                 features: Vec::new(),
                 package: "fw-esp32c6".to_string(),
+                version: "unknown".into(),
                 commit: "abc1234".to_string(),
                 dirty: false,
                 profile: "release-esp32".to_string(),

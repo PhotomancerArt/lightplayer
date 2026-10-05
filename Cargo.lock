@@ -3797,6 +3797,7 @@ checksum = "843fba2746e448b37e26a819579957415c8cef339bf08564fe8b7ddbd959573c"
 dependencies = [
  "crc32fast",
  "miniz_oxide",
+ "zlib-rs",
 ]
 
 [[package]]
@@ -4037,6 +4038,7 @@ dependencies = [
  "fw-core",
  "js-sys",
  "log",
+ "lp-app-version",
  "lp-gfx-lpvm",
  "lp-gfx-wgpu",
  "lpa-server",
@@ -4176,6 +4178,7 @@ dependencies = [
  "libm",
  "littlefs-rust",
  "log",
+ "lp-app-version",
  "lp-bootctl",
  "lp-collection 1.0.0",
  "lp-gfx-lpvm",
@@ -4226,6 +4229,7 @@ dependencies = [
  "fw-esp32-common",
  "littlefs-rust",
  "log",
+ "lp-app-version",
  "lp-gfx-lpvm",
  "lp-recovery",
  "lp-shader",
@@ -4269,6 +4273,7 @@ dependencies = [
  "fw-esp32-common",
  "littlefs-rust",
  "log",
+ "lp-app-version",
  "lp-gfx-lpvm",
  "lp-recovery",
  "lp-shader",
@@ -5704,6 +5709,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "lp-app-version"
+version = "40.0.0"
+
+[[package]]
 name = "lp-bootctl"
 version = "1.0.0"
 
@@ -5727,6 +5736,7 @@ dependencies = [
  "jsonschema",
  "libc",
  "log",
+ "lp-app-version",
  "lp-collection 1.0.0",
  "lp-emu-core",
  "lp-emu-esp-common",
@@ -5855,6 +5865,10 @@ source = "git+https://github.com/light-player/lp-common?branch=main#c27c24b3ce4b
 dependencies = [
  "rustc-hash 2.1.1",
 ]
+
+[[package]]
+name = "lp-crc32"
+version = "40.0.0"
 
 [[package]]
 name = "lp-deflate"
@@ -6412,6 +6426,7 @@ dependencies = [
  "js-sys",
  "jsonschema",
  "log",
+ "lp-app-version",
  "lp-gfx-lpvm",
  "lpa-agent",
  "lpa-boards",
@@ -6493,6 +6508,19 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "lpa-update"
+version = "40.0.0"
+dependencies = [
+ "flate2",
+ "lp-crc32",
+ "lp-deflate",
+ "lpa-devices",
+ "lpc-access",
+ "lpc-update",
+ "sha2",
 ]
 
 [[package]]
@@ -6655,6 +6683,20 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "lpc-update"
+version = "40.0.0"
+dependencies = [
+ "lp-crc32",
+ "lp-deflate",
+ "lpc-access",
+ "lpc-update",
+ "miniz_oxide",
+ "serde",
+ "serde_json",
+ "sha2",
 ]
 
 [[package]]
@@ -12995,6 +13037,12 @@ dependencies = [
  "thiserror 2.0.18",
  "zopfli",
 ]
+
+[[package]]
+name = "zlib-rs"
+version = "0.6.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b268e58e7c693d7c271f93ffc4ba3b380412554231c85bf61ca7af91042a4112"
 
 [[package]]
 name = "zmij"

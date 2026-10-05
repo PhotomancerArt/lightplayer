@@ -51,6 +51,11 @@ pub struct RosterConfig {
     /// The wire proto this build speaks. The app MUST set this from
     /// `lpc_wire::WIRE_PROTO_VERSION`; this crate hardcodes no proto number.
     pub expected_proto: u32,
+    /// This build's own app version, parsed — what a board's hello version
+    /// is compared against to say "older than Studio" ([`crate::FirmwareAge`]).
+    /// The app sets it from its `LP_APP_VERSION`; the default (`Unknown`)
+    /// claims nothing about any board.
+    pub expected_version: crate::AppVersion,
     pub open_baud: u32,
     /// Budget from "port open" to a verdict. Mirrors `lpa-link`'s
     /// `DEFAULT_READY_DEADLINE`: boot can take seconds.
@@ -131,6 +136,7 @@ impl Default for RosterConfig {
     fn default() -> Self {
         Self {
             expected_proto: 1,
+            expected_version: crate::AppVersion::Unknown,
             open_baud: 921_600,
             identify_deadline_ms: 5_000,
             hello_request_interval_ms: 1_000,

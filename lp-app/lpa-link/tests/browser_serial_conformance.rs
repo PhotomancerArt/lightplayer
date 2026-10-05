@@ -1788,6 +1788,7 @@ fn hello(board: Board) -> lpc_wire::WireServerMessage {
             build: BuildFacts {
                 features: vec![],
                 package: board.package().to_string(),
+                version: "unknown".into(),
                 commit: "unknown".to_string(),
                 dirty: false,
                 profile: "release-esp32".to_string(),

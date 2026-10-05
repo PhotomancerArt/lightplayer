@@ -203,6 +203,12 @@ pub enum ResetSource {
         watchdog: Watchdog,
         scope: ResetScope,
     },
+    /// The guest asked for its own reset, of the high-power system — on the
+    /// C6, a store with `LP_AON.sys_cfg.hpsys_sw_reset` (bit 31) set, which
+    /// is the whole of the mask ROM's `software_reset` and so of esp-hal's
+    /// `software_reset()`. The LP domain survives it, as it survives a
+    /// watchdog's.
+    Software,
     /// The power came back: a cold chip, both domains cleared. Nothing
     /// *inside* the chip can ask for this one — it is the host taking the
     /// supply away, which on a bench is a hand on the cable and here is the
@@ -214,8 +220,9 @@ pub enum ResetSource {
 /// it itself: a reset. The bus holds at most one (the first wins) and the
 /// machine takes it at the next slice boundary.
 ///
-/// The producers are a watchdog whose stage action is a reset and the
-/// USB-Serial-JTAG block's `chip_rst` path (a host's DTR/RTS dance). The
+/// The producers are a watchdog whose stage action is a reset, the
+/// USB-Serial-JTAG block's `chip_rst` path (a host's DTR/RTS dance) and a
+/// chip's software-reset bit (the C6's `LP_AON.sys_cfg`). The
 /// peripheral cannot reset the hart — it does not see the hart — and a
 /// reset the emulator cannot yet perform (M7 owns the boot chain) is
 /// reported as a run outcome instead, which is also the more useful answer:

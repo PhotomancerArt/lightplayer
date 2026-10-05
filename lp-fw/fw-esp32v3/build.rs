@@ -50,7 +50,11 @@ fn main() {
 /// the same reason: the server is sans-IO and never reads git or env itself,
 /// so the binary has to bake them in. `main.rs` injects them into
 /// `LpServer::set_hello`.
+///
+/// Plus `LP_APP_VERSION`, the build's app version, from the one helper every
+/// versioned build uses (`tools/lp-app-version`) — never computed here.
 fn emit_build_provenance() {
+    lp_app_version::emit();
     emit_git_head_watches();
     let commit =
         git_output(&["rev-parse", "--short=12", "HEAD"]).unwrap_or_else(|| "unknown".into());
