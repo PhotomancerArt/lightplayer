@@ -80,7 +80,10 @@ pub async fn run_network_step<Io: ClientIo>(
 fn refusal(error: ClientError) -> NetworkRefusal {
     match error {
         ClientError::NotPermitted { needs } => NetworkRefusal::NotPermitted(needs),
-        // The board's own sentence: it names the rule, never the password.
+        // The board's own code: it names the rule, never the password.
+        // Studio's offer binder already turned the common cases into
+        // words before sending (`wifi_offers::bind_add`); this is what
+        // reaches a caller that skips that check, such as `lp-cli`.
         ClientError::Server(error) => NetworkRefusal::Said(error),
         error => NetworkRefusal::Said(format!("the device did not answer: {error}")),
     }
@@ -197,7 +200,11 @@ mod tests {
     }
 
     #[test]
-    fn a_short_password_is_refused_in_the_boards_words() {
+    fn a_short_password_is_refused_in_the_boards_code() {
+        // A conversation run directly (no offer binder in front, as
+        // `lp-cli` runs it): the board's own reply is the bare code, not
+        // a sentence — Studio's offer binder is what turns this into
+        // words, before a request like this is ever sent.
         let board = FakeBoard::fresh();
         let mut usb = board.usb();
         let refused = answer(block_on(run_network_step(
@@ -206,10 +213,10 @@ mod tests {
             add("lp-walk-net", PasswordChange::Set("short".to_string())),
         )))
         .unwrap_err();
-        let NetworkRefusal::Said(sentence) = refused else {
+        let NetworkRefusal::Said(code) = refused else {
             panic!("{refused:?}");
         };
-        assert!(sentence.contains("5 characters"), "{sentence}");
+        assert!(code.contains("passwordTooShort"), "{code}");
         assert!(board.network().networks.is_empty(), "nothing written");
     }
 

@@ -346,7 +346,7 @@ fn wifi_needs_author() -> Element {
 }
 
 #[story(
-    description = "A ninth network refused by the board, in its words under the list: \"cannot save the network: the board keeps at most 8 networks; forget one first\" — it names the rule, never a password."
+    description = "A ninth network refused by the board, in its own code under the list: \"cannot save the network: tooManyNetworks\" — it names the rule, never a password. Studio's add form catches this before it is ever sent (the offer binder mirrors the board's own rules); this is the rare fallback reply, as a caller with no early check of its own (e.g. `lp-cli`) would see it."
 )]
 fn wifi_refused() -> Element {
     let names: Vec<String> = (1..=8).map(|n| format!("lp-net-{n}")).collect();
@@ -354,9 +354,7 @@ fn wifi_refused() -> Element {
         StationState::Unsupported,
         names.iter().map(|ssid| saved(ssid, None)).collect(),
     );
-    refused.error = Some(
-        "cannot save the network: the board keeps at most 8 networks; forget one first".to_string(),
-    );
+    refused.error = Some("cannot save the network: tooManyNetworks".to_string());
     panel(refused, None, None)
 }
 

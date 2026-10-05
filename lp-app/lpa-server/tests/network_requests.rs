@@ -163,7 +163,7 @@ fn a_ninth_network_is_refused_and_nothing_is_written() {
     }
     let before = rig.raw();
     let error = rig.error(USB, add("lp-net-9", PASSWORD));
-    assert!(error.contains("at most 8 networks"), "{error}");
+    assert!(error.contains("tooManyNetworks"), "{error}");
     assert!(!error.contains(PASSWORD), "{error}");
     assert_eq!(rig.raw(), before);
     // With eight saved, a saved one's password still changes.
@@ -172,21 +172,25 @@ fn a_ninth_network_is_refused_and_nothing_is_written() {
 }
 
 #[test]
-fn every_broken_rule_is_refused_with_its_sentence_and_nothing_is_written() {
+fn every_broken_rule_is_refused_with_its_code_and_nothing_is_written() {
+    // The device's own reply is the rule's bare code (cheap on the
+    // device); Studio turns it into words before a request is ever
+    // sent, so this is the rare fallback path (`lp-cli`'s add, which does
+    // no early check of its own) — see `NetworkFileError::words`.
     let mut rig = Rig::new();
     rig.add(USB, SSID, PASSWORD);
     let before = rig.raw();
     let long_ssid = "a".repeat(33);
     let long_password = "x".repeat(64);
-    for (request, words) in [
-        (add("", PASSWORD), "name is empty"),
-        (add(&long_ssid, PASSWORD), "33 bytes"),
-        (add(SSID, "short"), "5 characters"),
-        (add(SSID, &long_password), "64 hex digits"),
-        (add(SSID, "pässwörd-long"), "printable ASCII"),
+    for (request, code) in [
+        (add("", PASSWORD), "ssidEmpty"),
+        (add(&long_ssid, PASSWORD), "ssidTooLong"),
+        (add(SSID, "short"), "passwordTooShort"),
+        (add(SSID, &long_password), "passwordNotHexKey"),
+        (add(SSID, "pässwörd-long"), "passwordNotPrintable"),
     ] {
         let error = rig.error(USB, request);
-        assert!(error.contains(words), "{error}");
+        assert!(error.contains(code), "{error}");
         assert_eq!(rig.raw(), before, "{error}");
     }
 }

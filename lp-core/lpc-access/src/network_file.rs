@@ -127,11 +127,57 @@ impl NetworkFile {
     /// Parse and validate the file's bytes. The version is checked first,
     /// so a newer file is refused by its number, not by a field it adds.
     pub fn from_json(bytes: &[u8]) -> Result<Self, NetworkFileError> {
-        let version = crate::secret_entry::read_version_field(bytes).map_err(malformed)?;
+        use serde_json::Value;
+        const BAD: NetworkFileError = NetworkFileError::Malformed { line: 0, column: 0 };
+        let text = core::str::from_utf8(bytes).map_err(|_| BAD)?;
+        let Value::Object(top) = serde_json::from_str::<Value>(text).map_err(malformed)? else {
+            return Err(BAD);
+        };
+        let version = top.get("version").and_then(Value::as_u64).ok_or(BAD)? as u32;
         if version != Self::VERSION {
             return Err(NetworkFileError::UnsupportedVersion(version));
         }
-        let file = serde_json::from_slice::<Self>(bytes).map_err(malformed)?;
+        let flag = |key: &str| match top.get(key) {
+            None => Ok(true),
+            Some(Value::Bool(on)) => Ok(*on),
+            Some(_) => Err(BAD),
+        };
+        let mut file = Self::none();
+        file.wifi = flag("wifi")?;
+        file.cloud_relay = flag("cloudRelay")?;
+        for key in top.keys() {
+            if !matches!(key.as_str(), "version" | "wifi" | "cloudRelay" | "networks") {
+                return Err(BAD);
+            }
+        }
+        match top.get("networks") {
+            None => {}
+            Some(Value::Array(list)) => {
+                for item in list {
+                    let Value::Object(entry) = item else {
+                        return Err(BAD);
+                    };
+                    let text = |key: &str| match entry.get(key) {
+                        Some(Value::String(s)) => Ok(s.clone()),
+                        _ => Err(BAD),
+                    };
+                    let hidden = match entry.get("hidden") {
+                        None => false,
+                        Some(Value::Bool(on)) => *on,
+                        Some(_) => return Err(BAD),
+                    };
+                    if entry.len() != 2 + usize::from(entry.contains_key("hidden")) {
+                        return Err(BAD);
+                    }
+                    file.networks.push(WifiNetwork {
+                        ssid: text("ssid")?,
+                        password: text("password")?,
+                        hidden,
+                    });
+                }
+            }
+            Some(_) => return Err(BAD),
+        }
         file.validate()?;
         Ok(file)
     }

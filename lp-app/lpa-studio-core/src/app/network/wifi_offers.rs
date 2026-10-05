@@ -180,9 +180,13 @@ fn bind_add(
             label: "network name".to_string(),
         });
     };
+    // `.words()`, not `.to_string()`: the error's `Display` is a bare code
+    // (cheap on the device, which is the only thing that sends one over
+    // the wire); this binder already holds the concrete value with no
+    // wire round trip, so it spells the rule out in full, as the gate saw.
     validate_ssid(ssid).map_err(|rule| OfferArgError::Invalid {
         name: WIFI_NETWORK_PARAM.to_string(),
-        reason: rule.to_string(),
+        reason: rule.words(),
     })?;
     if !rules.saved.iter().any(|saved| saved == ssid)
         && rules.saved.len() >= NetworkFile::MAX_NETWORKS
@@ -192,7 +196,7 @@ fn bind_add(
             reason: lpc_access::NetworkFileError::TooManyNetworks {
                 max: NetworkFile::MAX_NETWORKS,
             }
-            .to_string(),
+            .words(),
         });
     }
     // A password is taken as typed (spaces count), never trimmed.
@@ -204,7 +208,7 @@ fn bind_add(
             // The rule's words name the length, never the text.
             validate_password(password).map_err(|rule| OfferArgError::Invalid {
                 name: WIFI_PASSWORD_PARAM.to_string(),
-                reason: rule.to_string(),
+                reason: rule.words(),
             })?;
             PasswordChange::Set(password.to_string())
         }

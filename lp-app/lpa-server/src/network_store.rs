@@ -94,8 +94,11 @@ pub fn network_scan(scan: NetworkScan) -> ServerMsgBody {
 /// `NetworkAdd`: save `ssid` with `password` and answer the status. A new
 /// name goes last; a saved one keeps its place and takes the new password
 /// (and `hidden`, when given). A ninth network, or one that breaks the
-/// 802.11 / WPA2 rules, answers [`ServerMsgBody::Error`] with a sentence
-/// that names the rule (never the password) and writes nothing.
+/// 802.11 / WPA2 rules, answers [`ServerMsgBody::Error`] with the rule's
+/// code (never the password) and writes nothing — Studio's own early
+/// validation, run before a request is ever sent, is what the user
+/// actually sees in words; this reply is the rare fallback (e.g. `lp-cli`,
+/// which sends no early check of its own).
 #[inline(never)]
 pub fn network_add(
     fs: &dyn LpFs,
@@ -200,7 +203,7 @@ mod tests {
             None,
         );
         assert!(
-            matches!(&body, ServerMsgBody::Error { error } if error.contains("5 characters")),
+            matches!(&body, ServerMsgBody::Error { error } if error.contains("passwordTooShort")),
             "{body:?}"
         );
         assert!(!fs.file_exists(NetworkFile::PATH.as_path()).unwrap());
