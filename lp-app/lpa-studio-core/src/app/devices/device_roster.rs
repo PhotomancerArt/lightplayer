@@ -195,19 +195,7 @@ pub struct DeviceRoster {
     /// Which registry row each device's record lives in, by the model's
     /// handle. See [`Self::remember_key`].
     keys: std::collections::BTreeMap<u64, String>,
-    /// Ids handed to registry rows that predate the model (`device_id`
-    /// absent). Counted down from a high base so it can never collide with
-    /// the roster's own minting, which starts at 1.
-    next_legacy_id: u64,
 }
-
-/// Where legacy registry rows' device ids start.
-///
-/// The roster mints from 1 upward and `load_records` raises its counter to
-/// the highest id it loads — so a legacy row taking an id from up here would
-/// push every future mint above it. Counting DOWN keeps both ranges apart
-/// without either side knowing about the other.
-const LEGACY_ID_BASE: u64 = u64::MAX / 2;
 
 impl DeviceRoster {
     /// A roster with the app's config.
@@ -223,7 +211,6 @@ impl DeviceRoster {
             effects: DeviceEffects::new(),
             keys: std::collections::BTreeMap::new(),
             mirrored_through: 0,
-            next_legacy_id: LEGACY_ID_BASE,
         }
     }
 
@@ -280,15 +267,26 @@ impl DeviceRoster {
     /// from 1, so two rows can wear the same one. The model re-keys such a
     /// row on load (`Roster::load_records`), and the key map follows the id
     /// it was ACTUALLY loaded under.
+    ///
+    /// A row that predates the model (`device_id` absent) takes the next id
+    /// above every id this batch carries and every id the roster holds. Never
+    /// a reserved high range: `Roster::load_records` raises its mint past the
+    /// highest id it loads, so one id from up there dragged every later
+    /// device's id up with it — and onto disk (the 2026-10-03 legacy-id
+    /// ticket). Above the batch, no persisted row is re-keyed to make room;
+    /// above the held ids, no live device is collided with.
     pub fn load_records(&mut self, rows: &[RegisteredDevice]) {
         let mut records: Vec<DeviceRecord> = Vec::new();
         let mut keys: Vec<String> = Vec::new();
+        let mut next_legacy_id = self.highest_id_in_view(rows).saturating_add(1);
         for row in rows {
             if self.is_already_known(row) {
                 continue;
             }
-            let fallback = self.next_legacy_id;
-            self.next_legacy_id = self.next_legacy_id.saturating_add(1);
+            let fallback = next_legacy_id;
+            if row.device_id.is_none() {
+                next_legacy_id = next_legacy_id.saturating_add(1);
+            }
             records.push(super::device_records::record_from_registry_row(
                 row, fallback,
             ));
@@ -301,6 +299,19 @@ impl DeviceRoster {
         for (device, key) in loaded.into_iter().zip(keys) {
             self.keys.insert(device.0, key);
         }
+    }
+
+    /// The highest device id among `rows` and everything the roster holds
+    /// (devices and pending links); 0 when there is none.
+    fn highest_id_in_view(&self, rows: &[RegisteredDevice]) -> u64 {
+        let persisted = rows.iter().filter_map(|row| row.device_id);
+        let devices = self.roster.devices().iter().map(|device| device.id.0);
+        let pending = self
+            .roster
+            .pending()
+            .iter()
+            .map(|entry| entry.device_id().0);
+        persisted.chain(devices).chain(pending).max().unwrap_or(0)
     }
 
     /// Whether the roster already has an entry for this row.
@@ -587,11 +598,12 @@ mod tests {
         );
     }
 
-    /// Legacy rows (no `device_id`) get ids from a range the roster's own
-    /// minting never reaches, so a hello that creates a device cannot collide
-    /// with a rehydrated one.
+    /// Legacy rows (no `device_id`) take small ids, and so does every device
+    /// minted after them: a reserved high range for legacy rows dragged the
+    /// roster's mint up with it, and every later id landed — and was
+    /// persisted — near `u64::MAX / 2`.
     #[test]
-    fn legacy_rows_take_ids_the_roster_will_never_mint() {
+    fn a_roster_loaded_with_legacy_rows_mints_small_ids() {
         let mut roster = DeviceRoster::new(RosterConfig::default());
         roster.load_records(&[
             RegisteredDevice {
@@ -603,15 +615,92 @@ mod tests {
                 ..RegisteredDevice::default()
             },
         ]);
+        roster.handle(
+            Millis(0),
+            Input::Event(Event::LinkAttached {
+                link: LinkId(1),
+                info: info("usb-1"),
+            }),
+        );
 
-        let ids: Vec<u64> = roster
+        let loaded: Vec<u64> = roster
             .roster()
             .devices()
             .iter()
             .map(|device| device.id.0)
             .collect();
+        let minted: Vec<u64> = roster
+            .roster()
+            .pending()
+            .iter()
+            .map(|entry| entry.device_id().0)
+            .collect();
+        assert_eq!(loaded, vec![1, 2]);
+        assert_eq!(minted, vec![3], "a new port's id follows the legacy rows");
+        assert_eq!(roster.key_for(DeviceId(1)), Some("dev0000000000000001"));
+        assert_eq!(roster.key_for(DeviceId(2)), Some("dev0000000000000002"));
+    }
 
-        assert_eq!(ids, vec![LEGACY_ID_BASE, LEGACY_ID_BASE + 1]);
+    /// A legacy row takes an id above every persisted one in its batch, so a
+    /// persisted row later in the batch keeps the id it was saved with
+    /// rather than being re-keyed out of its way.
+    #[test]
+    fn a_legacy_row_never_displaces_a_persisted_id() {
+        let mut roster = DeviceRoster::new(RosterConfig::default());
+        roster.load_records(&[
+            RegisteredDevice {
+                uid: "dev0000000000000001".to_string(),
+                ..RegisteredDevice::default()
+            },
+            RegisteredDevice {
+                uid: "dev0000000000000002".to_string(),
+                device_id: Some(1),
+                ..RegisteredDevice::default()
+            },
+        ]);
+
+        assert_eq!(roster.key_for(DeviceId(1)), Some("dev0000000000000002"));
+        assert_eq!(roster.key_for(DeviceId(2)), Some("dev0000000000000001"));
+    }
+
+    /// A record already saved with an id from the old legacy range still
+    /// loads under that id and still resolves both ways — and loads once.
+    #[test]
+    fn a_record_saved_with_a_huge_id_still_loads_and_resolves() {
+        const SAVED: u64 = u64::MAX / 2 + 1;
+        let rows = [
+            RegisteredDevice {
+                uid: "dev0000000000000001".to_string(),
+                name: "Porch sign".to_string(),
+                device_id: Some(SAVED),
+                ..RegisteredDevice::default()
+            },
+            RegisteredDevice {
+                uid: "dev0000000000000002".to_string(),
+                ..RegisteredDevice::default()
+            },
+        ];
+        let mut roster = DeviceRoster::new(RosterConfig::default());
+        roster.load_records(&rows);
+        roster.load_records(&rows);
+
+        assert_eq!(roster.roster().devices().len(), 2, "loaded once");
+        assert_eq!(roster.key_for(DeviceId(SAVED)), Some("dev0000000000000001"));
+        let device = roster
+            .device_for_key("dev0000000000000001")
+            .expect("the saved row resolves by its key");
+        assert_eq!(device.id, DeviceId(SAVED));
+        assert_eq!(
+            device
+                .record
+                .as_ref()
+                .and_then(|record| record.name.as_deref()),
+            Some("Porch sign")
+        );
+        assert!(
+            roster.key_for(DeviceId(SAVED + 1)).is_some(),
+            "the legacy row sits beside it without colliding"
+        );
     }
 
     /// Two boards whose rows wear the same model handle are two cards with
