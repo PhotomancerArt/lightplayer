@@ -6,11 +6,13 @@ use crate::app::module::module_fixtures::{
     fire_export, inline_module_export, module_card_with_export,
 };
 use crate::app::node::node_story_fixtures::{
-    debug_rows_node_view, error_node_view, failed_dirty_node_view, fault_node_view,
-    nested_dirty_node_view, node_delete_pane_action, output_node_view, playlist_node_view,
-    playlist_pending_edits, unsaved_dirty_node_view, unsupported_node_view,
+    debug_rows_node_view, dirty_playlist_offers, error_node_view, failed_dirty_node_view,
+    fault_node_view, nested_dirty_node_view, nested_dirty_offers, node_delete_offer,
+    output_node_view, playlist_node_view, playlist_pending_edits, story_offers,
+    unsaved_dirty_node_view, unsupported_node_view,
 };
 use crate::app::node::{NodeDetailPopover, NodeDirtyTint, NodePane};
+use crate::core::OffersProvider;
 
 /// Story stand-in for the controller-built focus action so panes render the
 /// header select control.
@@ -71,10 +73,41 @@ pub(crate) fn error_node() -> Element {
 pub(crate) fn header_delete_action() -> Element {
     let mut view = playlist_node_view();
     view.action = Some(story_focus_action());
-    view.header_actions = vec![node_delete_pane_action()];
 
     rsx! {
-        NodePane { view, on_action: move |_| {} }
+        OffersProvider { offers: story_offers([node_delete_offer()]),
+            NodePane { view, on_action: move |_| {} }
+        }
+    }
+}
+
+#[story(
+    label = "Agent light — node Remove and an edited card",
+    description = "The agent light (agentic-UI M8) on a node card. LEFT: the assistant pressed `project/<node>/remove`, so the card header's Remove icon wears the assistant's orchid ring — inside the icon's box, so the header's clipping never swallows it — and nothing else on the card moves. RIGHT: the assistant edited this node, but nothing it changed is a slot on view (a created node, a file's text, or a folded card): the card itself stays dark and carries only the \"changed by the assistant\" tab on its top edge, out of the header's flow so the name keeps its room. An edit that wrote a slot also lights that slot (see Shader face → agent edited). Both are passive: no focus, no scroll; Show in the chat is what brings a card into view."
+)]
+pub(crate) fn agent_lit_remove() -> Element {
+    let mut view = playlist_node_view();
+    view.action = Some(story_focus_action());
+    let remove = node_delete_offer();
+    let node = remove.path.owner().expect("a verb has an owner");
+    let pressed = crate::app::agent::story_activity([(
+        remove.path.clone(),
+        lpa_studio_core::AgentActivityKind::Pressed,
+    )]);
+    let edited = crate::app::agent::story_edit_activity(node, Vec::new());
+    rsx! {
+        div { class: "tw:grid tw:grid-cols-2 tw:items-start tw:gap-4",
+            OffersProvider { offers: story_offers([remove.clone()]),
+                crate::app::agent::AgentActivityProvider { activity: pressed,
+                    NodePane { view: view.clone(), on_action: move |_| {} }
+                }
+            }
+            OffersProvider { offers: story_offers([remove]),
+                crate::app::agent::AgentActivityProvider { activity: edited,
+                    NodePane { view, on_action: move |_| {} }
+                }
+            }
+        }
     }
 }
 
@@ -86,10 +119,12 @@ pub(crate) fn dirty_unsaved_header_tint() -> Element {
     view.action = Some(story_focus_action());
 
     rsx! {
-        NodePane {
-            view,
-            on_action: move |_| {},
-            dirty_tint: NodeDirtyTint::HeaderOnly,
+        OffersProvider { offers: dirty_playlist_offers(),
+            NodePane {
+                view,
+                on_action: move |_| {},
+                dirty_tint: NodeDirtyTint::HeaderOnly,
+            }
         }
     }
 }
@@ -102,10 +137,12 @@ pub(crate) fn dirty_unsaved_surface_tint() -> Element {
     view.action = Some(story_focus_action());
 
     rsx! {
-        NodePane {
-            view,
-            on_action: move |_| {},
-            dirty_tint: NodeDirtyTint::FullSurface,
+        OffersProvider { offers: dirty_playlist_offers(),
+            NodePane {
+                view,
+                on_action: move |_| {},
+                dirty_tint: NodeDirtyTint::FullSurface,
+            }
         }
     }
 }
@@ -118,10 +155,12 @@ pub(crate) fn dirty_failed_header_tint() -> Element {
     view.action = Some(story_focus_action());
 
     rsx! {
-        NodePane {
-            view,
-            on_action: move |_| {},
-            dirty_tint: NodeDirtyTint::HeaderOnly,
+        OffersProvider { offers: dirty_playlist_offers(),
+            NodePane {
+                view,
+                on_action: move |_| {},
+                dirty_tint: NodeDirtyTint::HeaderOnly,
+            }
         }
     }
 }
@@ -134,10 +173,12 @@ pub(crate) fn dirty_failed_surface_tint() -> Element {
     view.action = Some(story_focus_action());
 
     rsx! {
-        NodePane {
-            view,
-            on_action: move |_| {},
-            dirty_tint: NodeDirtyTint::FullSurface,
+        OffersProvider { offers: dirty_playlist_offers(),
+            NodePane {
+                view,
+                on_action: move |_| {},
+                dirty_tint: NodeDirtyTint::FullSurface,
+            }
         }
     }
 }
@@ -150,7 +191,9 @@ pub(crate) fn nested_dirty_children() -> Element {
     view.action = Some(story_focus_action());
 
     rsx! {
-        NodePane { view, on_action: move |_| {} }
+        OffersProvider { offers: nested_dirty_offers(),
+            NodePane { view, on_action: move |_| {} }
+        }
     }
 }
 
@@ -202,7 +245,9 @@ pub(crate) fn debug_section_vs_unsaved() -> Element {
             NodePane { view: debug_rows_node_view(0, false), on_action: move |_| {} }
             NodePane { view: debug_rows_node_view(2, false), on_action: move |_| {} }
             NodePane { view: debug_rows_node_view(2, true), on_action: move |_| {} }
-            NodePane { view: unsaved, on_action: move |_| {} }
+            OffersProvider { offers: dirty_playlist_offers(),
+                NodePane { view: unsaved, on_action: move |_| {} }
+            }
         }
     }
 }
@@ -296,11 +341,13 @@ pub(crate) fn dirty_detail_popup() -> Element {
 
     rsx! {
         div { class: "tw:flex tw:min-h-[620px] tw:justify-end",
-            NodeDetailPopover {
-                header: view.header,
-                pending_edits: playlist_pending_edits(),
-                on_action: move |_| {},
-                initially_open: true,
+            OffersProvider { offers: crate::app::story_fixtures::revert_edit_offers(&playlist_pending_edits()),
+                NodeDetailPopover {
+                    header: view.header,
+                    pending_edits: playlist_pending_edits(),
+                    on_action: move |_| {},
+                    initially_open: true,
+                }
             }
         }
     }

@@ -307,7 +307,7 @@ impl DeviceTransport for EmuDeviceTransport {
             false => None,
         };
         let manifest_url = match &call {
-            DeviceEffectCall::FlashFirmware { build_id } => {
+            DeviceEffectCall::FlashFirmware { build_id, .. } => {
                 Some(self.firmware.firmware_manifest_path(build_id))
             }
             _ => None,
@@ -338,6 +338,22 @@ impl DeviceTransport for EmuDeviceTransport {
                         ..Default::default()
                     })
                 }
+                // The tab's board is written by the emulator's own package
+                // loader, not by esptool, so there is no bootloader read to
+                // inspect a layout with: an emulated tab board updates as a
+                // plain flash: the image's own sectors only, as esptool writes
+                // it, so a board on the current layout keeps its files
+                // (docs/defects/2026-10-02-updating-a-tab-hosted-board-erases-its-files.md).
+                // ⚠️ A board on the LEGACY layout is not migrated: its files
+                // are held at the old offset, and Finish update cannot move
+                // them on this transport (open:
+                // docs/defects/2026-10-04-a-legacy-tab-board-cannot-finish-its-update.md).
+                // The `?emu=tab` polyfill lane (esptool-js over the ROM) is
+                // not this path: it migrates like a board (walk W12).
+                DeviceEffectCall::InspectLayout { .. } => Ok(DeviceEffectFacts {
+                    summary: "an emulated tab board has no layout to read".to_string(),
+                    ..Default::default()
+                }),
                 // Manifest, push and removal are the REAL conversations, on
                 // the board's own wire — the same body a Bluetooth link runs
                 // (`wire_conversation.rs`), so a green push here means what
@@ -451,6 +467,7 @@ mod tests {
             emu_link_info("dev1", "XIAO ESP32-C6"),
             DeviceEffectCall::FlashFirmware {
                 build_id: "esp32c6-4mb".to_string(),
+                plan: None,
             },
             Rc::new(|_, _| {}),
         ))
@@ -520,9 +537,11 @@ mod tests {
             asked.borrow().as_slice(),
             [
                 "listLoadedProjects".to_string(),
-                "write /hardware.json {\"id\":\"x\"}".to_string()
+                "write /hardware.json.next {\"id\":\"x\"}".to_string(),
+                "write /hardware.json {\"id\":\"x\"}".to_string(),
+                "delete /hardware.json.next".to_string()
             ],
-            "ready first, then the write — the serial arm's order"
+            "ready first, then the journaled stamp — the serial arm's order"
         );
         assert_eq!(
             resets.get(),
@@ -646,6 +665,10 @@ mod tests {
                 ClientRequest::Filesystem(FsRequest::Write { path, data }) => (
                     format!("write {} {}", path.as_str(), String::from_utf8_lossy(&data)),
                     ServerMsgBody::Filesystem(FsResponse::Write { path, error: None }),
+                ),
+                ClientRequest::Filesystem(FsRequest::DeleteFile { path }) => (
+                    format!("delete {}", path.as_str()),
+                    ServerMsgBody::Filesystem(FsResponse::DeleteFile { path, error: None }),
                 ),
                 // Anything else is a conversation this double was not
                 // written for: recorded by name, and answered with a reply

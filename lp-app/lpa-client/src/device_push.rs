@@ -20,6 +20,17 @@
 //! by the CLI, or by an older Studio, runs from a dir of its own, and
 //! writing beside it would leave two projects on a device that loads one.
 //! Replacing the dir it ALREADY runs from is what makes a push idempotent.
+//! A board running nothing is asked which dir it BOOTS (`/lightplayer.json`):
+//! one that refused its saved project still holds it, and that is the dir
+//! the push replaces.
+//!
+//! Step 2 never writes over the dir the board runs from. It writes the
+//! OTHER slot ([`other_slot`]: `demo` ↔ `demo-b`) and removes the old dir
+//! only once the new one has loaded and hashed. A board that refuses the new
+//! project (format, parse, heap, a recovery gate) is told to load the old
+//! dir again, which is still whole — and which `startup_project` still
+//! names, since the server persists that only on a load that succeeded. A
+//! refused push used to leave the board dark over a folder it had refused.
 //!
 //! Step 3 is not optional. A serial wire drops bytes; a truncated write that
 //! loaded anyway would leave a board running something no library has, and
@@ -45,7 +56,10 @@ pub type PushProgress<'a> = &'a mut dyn FnMut(String, Option<u8>);
 /// Run the push conversation against a device that is already listening.
 ///
 /// `fallback_storage_id` is used only when the board reports nothing loaded
-/// — a freshly flashed board, which has no dir to replace.
+/// AND boots no saved folder (`/lightplayer.json`) — a freshly flashed
+/// board, which has no dir to replace. A board that boots dark (it refused
+/// its saved folder) has that folder replaced, the same way a running one
+/// does.
 pub async fn push_project<Io: ClientIo>(
     client: &mut LpClient<Io>,
     files: &[(String, Vec<u8>)],
@@ -55,29 +69,151 @@ pub async fn push_project<Io: ClientIo>(
 ) -> ClientResult<PushReport> {
     progress("Asking the board what it is running".to_string(), Some(5));
     let loaded = client.project_list_loaded().await?;
-    let storage_id = loaded
+    let running = loaded
         .value
         .first()
-        .and_then(|project| storage_id_of(project.path.as_str()))
-        .unwrap_or_else(|| fallback_storage_id.to_string());
+        .and_then(|project| storage_id_of(project.path.as_str()));
+    // A board running nothing may still hold the project it boots — one it
+    // refused (an old format, a heap gate). That folder is what this push
+    // replaces, exactly as it replaces a running one; writing the fallback
+    // beside it would leave the refused copy on flash for good.
+    let previous = match &running {
+        Some(running) => Some(running.clone()),
+        None => saved_startup_project(client).await,
+    };
+    let storage_id = match &previous {
+        Some(running) => other_slot(running),
+        None => fallback_storage_id.to_string(),
+    };
 
     progress(format!("Sending the project to {storage_id}"), Some(20));
-    let deploy = client.replace_and_load_project(&storage_id, files).await?;
-    let _ = deploy.value;
+    let landed = match client.replace_and_load_project(&storage_id, files).await {
+        Ok(_) => {
+            progress("Checking what the board received".to_string(), Some(85));
+            match client.hash_package(&storage_id).await {
+                Ok(outcome) if outcome.value == expected_hash => Ok(outcome.value),
+                // The bytes on the board are not the bytes in the library.
+                // Saying so beats a green card over a project nobody has.
+                Ok(outcome) => Err(ClientError::Protocol(format!(
+                    "the board ended up with different bytes than the library sent \
+                     (device {}, library {expected_hash}) — the project was not \
+                     fully written",
+                    outcome.value
+                ))),
+                Err(error) => Err(error),
+            }
+        }
+        Err(error) => Err(error),
+    };
 
-    progress("Checking what the board received".to_string(), Some(85));
-    let hash = client.hash_package(&storage_id).await?.value;
-    if hash != expected_hash {
-        // The bytes on the board are not the bytes in the library. Saying so
-        // beats a green card over a project nobody has.
-        return Err(ClientError::Protocol(format!(
-            "the board ended up with different bytes than the library sent \
-             (device {hash}, library {expected_hash}) — the project was not \
-             fully written"
-        )));
+    match (landed, previous) {
+        (Ok(hash), previous) => {
+            if let Some(old) = previous.filter(|old| *old != storage_id) {
+                // Best-effort: the new project runs and is verified. A dir
+                // that survives this is the next push's target slot, which
+                // that push clears first.
+                let _ = client.delete_project_dir(&old).await;
+            }
+            progress("Done".to_string(), Some(100));
+            Ok(PushReport { storage_id, hash })
+        }
+        (Err(error), Some(old)) if old != storage_id && running.is_none() => {
+            // The board ran nothing before and runs nothing now. Its saved
+            // folder was never touched and `startup_project` still names it
+            // (the server persists only a load that succeeded), so there is
+            // nothing to restore: drop what it refused and say what is left.
+            let _ = client.delete_project_dir(&storage_id).await;
+            Err(with_note(
+                error,
+                &format!(
+                    "the board is still running nothing; its saved project ({old}) \
+                     is untouched and is what it tries at the next boot"
+                ),
+            ))
+        }
+        (Err(error), Some(old)) if old != storage_id => {
+            // The old dir was never touched: put it back on, then drop what
+            // the board refused. The error is the refusal, with what became
+            // of the board appended — the card must not guess.
+            progress(
+                "The board refused it; restoring what it ran".to_string(),
+                Some(90),
+            );
+            let restored = client
+                .project_load(&crate::project_deploy::project_load_path(&old))
+                .await;
+            let _ = client.delete_project_dir(&storage_id).await;
+            Err(with_restore_note(error, &old, restored.is_ok()))
+        }
+        (Err(error), _) => Err(error),
     }
-    progress("Done".to_string(), Some(100));
-    Ok(PushReport { storage_id, hash })
+}
+
+/// The dir a push writes when the board runs from `running`: never the one
+/// it runs from, so a refusal leaves that one whole. Two slots alternate
+/// (`demo` ↔ `demo-b`), so a board never holds more than two copies and the
+/// dir name stays recognisable.
+pub(crate) fn other_slot(running: &str) -> String {
+    match running.strip_suffix(SLOT_B_SUFFIX) {
+        Some(base) if !base.is_empty() => base.to_string(),
+        _ => format!("{running}{SLOT_B_SUFFIX}"),
+    }
+}
+
+const SLOT_B_SUFFIX: &str = "-b";
+
+fn with_restore_note(error: ClientError, old: &str, restored: bool) -> ClientError {
+    let note = match restored {
+        true => format!("the board is running its previous project ({old}) again"),
+        false => format!(
+            "the board could not reload its previous project ({old}) either; \
+             it is still on the board and loads at the next boot"
+        ),
+    };
+    with_note(error, &note)
+}
+
+fn with_note(error: ClientError, note: &str) -> ClientError {
+    match error {
+        ClientError::Server(message) => ClientError::Server(format!("{message} — {note}")),
+        ClientError::Protocol(message) => ClientError::Protocol(format!("{message} — {note}")),
+        other => other,
+    }
+}
+
+/// The folder a board boots (`/lightplayer.json`'s `startup_project`), when
+/// that folder is on the board. Best-effort: a board with no config, an
+/// unreadable one (a link below the edit tier may not read outside
+/// `/projects/`), or one naming a folder that is gone has nothing to
+/// replace, and the push falls back as it always did.
+///
+/// Shared with [`crate::device_remove::remove_project`]: a dark board's
+/// fallback slot, there as here, is only for a board with no saved folder
+/// at all — a freshly flashed one. A board that boots dark because it
+/// refused a saved folder has that folder removed too, the same one a push
+/// would replace.
+pub(crate) async fn saved_startup_project<Io: ClientIo>(
+    client: &mut LpClient<Io>,
+) -> Option<String> {
+    use lpc_model::AsLpPathBuf;
+    use lpc_model::server::server_config::ServerConfig;
+
+    let config = ServerConfig::PATH.as_path_buf();
+    let bytes = client.fs_read(config.as_path()).await.ok()?.value;
+    let name = lpc_wire::json::from_slice::<ServerConfig>(&bytes)
+        .ok()?
+        .startup_project?;
+    // Only a plain folder name under `/projects/` is one a push may replace.
+    let id = storage_id_of(&format!("/projects/{name}")).filter(|id| *id == name)?;
+    let projects = "/projects".as_path_buf();
+    let on_board = client
+        .fs_list_dir(projects.as_path(), false)
+        .await
+        .ok()?
+        .value
+        .iter()
+        .any(|path| storage_id_of(path.as_str()).as_deref() == Some(id.as_str()));
+    on_board.then_some(id)
 }
 
 /// The storage dir name inside a reported project path (`/projects/demo` →
@@ -108,5 +244,14 @@ mod tests {
         // Not a project dir: a push must not replace it.
         assert_eq!(storage_id_of("/somewhere/else"), None);
         assert_eq!(storage_id_of("/projects/"), None);
+    }
+
+    #[test]
+    fn a_push_writes_the_slot_the_board_does_not_run_from() {
+        assert_eq!(other_slot("demo"), "demo-b");
+        assert_eq!(other_slot("demo-b"), "demo");
+        assert_eq!(other_slot("2026-08-30-porch"), "2026-08-30-porch-b");
+        // A dir literally named "-b" has no base; it alternates with "-b-b".
+        assert_eq!(other_slot("-b"), "-b-b");
     }
 }

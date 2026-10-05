@@ -62,12 +62,13 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    DirtySummary, UiAction, UiAffordance, UiChromeSessionControl, UiChromeSessionStatus,
-    UiPaneAction,
+    DirtySummary, OfferPath, UiAction, UiAffordance, UiChromeSessionControl, UiChromeSessionStatus,
+    UiOffer,
 };
 use lpc_cloud_api::Access;
 
 use crate::app::affordance::affordance_trigger_style;
+use crate::app::agent::AgentMark;
 use crate::app::home::device_roster_card::DeviceRenameSection;
 use crate::app::home::package_export::ExportTarget;
 use crate::app::project::pending_edit_section::{
@@ -80,9 +81,10 @@ use crate::app::share::{
     relationship_face,
 };
 use crate::base::{
-    DetailPopover, DetailSection, DetailSectionTint, IconMenuTone, InlineButton, InlineButtonTone,
-    PopoverPlacement, StudioIcon, StudioIconName,
+    DetailPopover, DetailSection, DetailSectionTint, IconMenuTone, PopoverPlacement, StudioIcon,
+    StudioIconName,
 };
+use crate::core::{ActionButton, ActionButtonVariant};
 
 static NEXT_SESSION_CONTROL_ID: AtomicUsize = AtomicUsize::new(1);
 
@@ -101,6 +103,18 @@ pub enum ControlSegment {
     /// re-ruled at G1 round 2: its own tab, not a lower half of changes —
     /// one box for both was too much, and two tab layers were worse).
     History,
+}
+
+impl ControlSegment {
+    /// The section as core's place names it (M7).
+    fn place_section(self) -> lpa_studio_core::UiSessionSection {
+        match self {
+            Self::Device => lpa_studio_core::UiSessionSection::Device,
+            Self::Project => lpa_studio_core::UiSessionSection::Project,
+            Self::Changes => lpa_studio_core::UiSessionSection::Changes,
+            Self::History => lpa_studio_core::UiSessionSection::History,
+        }
+    }
 }
 
 /// Everything the header control renders: THE session (core's control
@@ -189,6 +203,22 @@ pub fn SessionProjectControl(control: ChromeSessionControl) -> Element {
     // backdrop closes it, the segments toggle it).
     let section = use_signal(|| initially_open.unwrap_or(ControlSegment::Device));
     let panel_open = use_signal(|| initially_open.is_some());
+    // Place (M7): which section the panel shows while it is open, for the
+    // web app to report to core. Read-only there; nothing opens it back.
+    let place_slot = crate::place_report::use_session_panel_place();
+    use_effect(move || {
+        let showing = panel_open().then(|| section().place_section());
+        if let Some(crate::place_report::SessionPanelPlace(mut slot)) = place_slot
+            && *slot.peek() != showing
+        {
+            slot.set(showing);
+        }
+    });
+    use_drop(move || {
+        if let Some(crate::place_report::SessionPanelPlace(mut slot)) = place_slot {
+            slot.set(None);
+        }
+    });
     // The anchor id: the merged outline welds the panel to the WHOLE
     // shell — the bar is the tab row (D15), so the panel hangs off the
     // bar, not off one segment.
@@ -199,13 +229,14 @@ pub fn SessionProjectControl(control: ChromeSessionControl) -> Element {
 
     let affordance = project.as_ref().map(ProjectDetailContent::affordance);
     let style = affordance.map(affordance_trigger_style);
-    // The save moment: the controller publishes Save/Revert on the editor's
-    // `header_actions` exactly while persisted edits are pending, so their
-    // presence IS the dirty test — the control never recomputes dirtiness.
+    // The save moment: the controller publishes `project/save` and
+    // `project/revert` into the offer tree exactly while persisted edits are
+    // pending, so their presence IS the dirty test — the control never
+    // recomputes dirtiness.
     // Only Save rides the bar; revert-all retired into the changes popup.
     let save = project
         .as_ref()
-        .map(|project| save_and_revert(project.header_actions()).0)
+        .map(|project| save_and_revert(project.header_offers()).0)
         .unwrap_or_default();
     let changes = project.as_ref().map(ProjectDetailContent::changes);
     let dirty = changes.as_ref().map(|changes| changes.dirty);
@@ -349,13 +380,15 @@ pub fn SessionProjectControl(control: ChromeSessionControl) -> Element {
             // changes popup — a destructive verb belongs where the thing it
             // destroys is listed.
             if let Some(save) = save.clone() {
-                button {
-                    class: SAVE_BUTTON_CLASS,
-                    r#type: "button",
-                    title: "{save.meta().summary}",
-                    onclick: move |_| on_action.call(save.clone()),
-                    span { class: "tw:text-[11px] tw:font-semibold tw:text-status-warning-foreground",
-                        "Save"
+                AgentMark { path: OfferPath::project().child("save"),
+                    button {
+                        class: SAVE_BUTTON_CLASS,
+                        r#type: "button",
+                        title: "{save.meta().summary}",
+                        onclick: move |_| on_action.call(save.clone()),
+                        span { class: "tw:text-[11px] tw:font-semibold tw:text-status-warning-foreground",
+                            "Save"
+                        }
                     }
                 }
             }
@@ -576,7 +609,9 @@ pub fn SessionDevicePanel(
     // to change (the sim is the sim). The same section the device card's
     // header menu holds, because this panel is the other place the name
     // is shown.
-    let rename = session.device.zip(on_action);
+    // `devices/<board>/rename`, found by the device's roster handle.
+    let verbs = crate::core::use_device_verbs(session.device)();
+    let rename = crate::core::verb_named(&verbs, "rename").zip(on_action);
     rsx! {
         section { class: "tw:grid tw:gap-0.5 tw:bg-card-muted tw:px-3 tw:py-2",
             div { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-2",
@@ -597,8 +632,8 @@ pub fn SessionDevicePanel(
                 }
             }
         }
-        if let Some((device, on_action)) = rename {
-            DeviceRenameSection { device, title: session.name.clone(), on_action }
+        if let Some((offer, on_action)) = rename {
+            DeviceRenameSection { offer, title: session.name.clone(), on_action }
         }
         section { class: "tw:border-t tw:border-border-muted tw:px-3 tw:py-1.5",
             p { class: "tw:m-0 tw:text-[10px] tw:italic tw:leading-snug tw:text-dim-foreground",
@@ -632,12 +667,12 @@ pub fn SessionChangesPanel(changes: ProjectChanges, on_action: EventHandler<UiAc
         overlay_revision,
         edits_in_flight,
         pending_edits,
-        header_actions,
+        header_offers,
         history,
     } = changes;
     let unsaved_entries = entries_in(&pending_edits, PendingEditBucket::Persisted);
     let failed_entries = entries_in(&pending_edits, PendingEditBucket::Failed);
-    let (save, revert) = save_and_revert(&header_actions);
+    let (save, revert) = save_and_revert(&header_offers);
     let receipt = save_receipt_line(history.next_version);
     let anything_pending = dirty.persisted > 0
         || dirty.failed > 0
@@ -685,25 +720,31 @@ pub fn SessionChangesPanel(changes: ProjectChanges, on_action: EventHandler<UiAc
                 }
                 div { class: "tw:flex tw:items-center tw:gap-2 tw:pt-1.5",
                     if let Some(save) = save.clone() {
-                        button {
-                            class: SAVE_BUTTON_CLASS,
-                            r#type: "button",
-                            title: "{save.meta().summary}",
-                            onclick: move |_| on_action.call(save.clone()),
-                            span { class: "tw:text-[11px] tw:font-semibold tw:text-status-warning-foreground",
-                                "Save"
+                        AgentMark { path: OfferPath::project().child("save"),
+                            button {
+                                class: SAVE_BUTTON_CLASS,
+                                r#type: "button",
+                                title: "{save.meta().summary}",
+                                onclick: move |_| on_action.call(save.clone()),
+                                span { class: "tw:text-[11px] tw:font-semibold tw:text-status-warning-foreground",
+                                    "Save"
+                                }
                             }
                         }
                     }
+                    // Revert to saved is Lasting (D7): it draws through
+                    // `ActionButton`, so it wears the error tint and arms on
+                    // its first click exactly as every other Lasting verb.
                     if let Some(revert) = revert.clone() {
-                        InlineButton {
-                            label: "Revert all".to_string(),
-                            title: revert.meta().summary.clone(),
-                            text: "Revert all".to_string(),
-                            icon: StudioIconName::Revert,
-                            tone: InlineButtonTone::Warning,
-                            class: "tw:ml-auto".to_string(),
-                            on_press: move |_| on_action.call(revert.clone()),
+                        div { class: "tw:ml-auto",
+                            AgentMark { path: OfferPath::project().child("revert"),
+                                ActionButton {
+                                    action: revert,
+                                    running: false,
+                                    variant: ActionButtonVariant::Quiet,
+                                    on_action,
+                                }
+                            }
                         }
                     }
                 }
@@ -857,15 +898,17 @@ fn board_suffix(session: &UiChromeSessionControl) -> Option<String> {
         .filter(|board| !board.is_empty() && !session.name.contains(board.as_str()))
 }
 
-/// Save and Revert, picked out of the editor's `header_actions` by their
-/// icon tokens. Every home dispatches the SAME actions the pane header and
-/// the Tree row dispatch — one save verb in the app.
-fn save_and_revert(actions: &[UiPaneAction]) -> (Option<UiAction>, Option<UiAction>) {
-    let pick = |icon: &str| {
-        actions
+/// Save and Revert, picked out of the project's offers by their paths
+/// (`project/save`, `project/revert`). Every home dispatches the SAME
+/// actions the pane header and the Tree row dispatch — one save verb in the
+/// app.
+fn save_and_revert(offers: &[UiOffer]) -> (Option<UiAction>, Option<UiAction>) {
+    let pick = |verb: &str| {
+        let path = OfferPath::project().child(verb);
+        offers
             .iter()
-            .find(|action| action.icon == icon)
-            .map(|action| action.action.clone())
+            .find(|offer| offer.path == path)
+            .map(|offer| offer.action.clone())
     };
     (pick("save"), pick("revert"))
 }
@@ -1052,9 +1095,10 @@ mod tests {
         }
     }
 
-    fn pane_action(icon: &str, op: ProjectOp) -> UiPaneAction {
-        UiPaneAction::new(
-            icon,
+    fn project_offer(verb: &str, op: ProjectOp) -> UiOffer {
+        UiOffer::new(
+            OfferPath::project().child(verb),
+            verb,
             UiAction::from_op(ControllerId::new(ProjectController::NODE_ID), op),
         )
     }
@@ -1064,13 +1108,13 @@ mod tests {
     }
 
     /// Save (bar) and Revert-all (changes popup) are the controller's own
-    /// header actions — not a second pair minted here — so the bar, the
+    /// `project/*` offers — not a second pair minted here — so the bar, the
     /// popup, and the pane header can never save different things.
     #[test]
-    fn save_and_revert_come_from_the_editors_header_actions() {
+    fn save_and_revert_come_from_the_project_offers() {
         let actions = vec![
-            pane_action("save", ProjectOp::SaveOverlay),
-            pane_action("revert", ProjectOp::RevertAllEdits),
+            project_offer("save", ProjectOp::SaveOverlay),
+            project_offer("revert", ProjectOp::RevertAllEdits),
         ];
 
         let (save, revert) = save_and_revert(&actions);
@@ -1079,8 +1123,8 @@ mod tests {
         assert_eq!(revert, Some(actions[1].action.clone()));
     }
 
-    /// A clean project publishes no header actions, which is exactly the
-    /// dirty test: no actions, no Save sibling and no popup verbs.
+    /// A clean project publishes no `project/*` offers, which is exactly
+    /// the dirty test: no offers, no Save sibling and no popup verbs.
     #[test]
     fn a_clean_project_offers_no_save_verbs() {
         assert_eq!(save_and_revert(&[]), (None, None));

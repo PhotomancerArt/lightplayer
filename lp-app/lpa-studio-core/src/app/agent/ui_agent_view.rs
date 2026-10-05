@@ -212,6 +212,9 @@ pub enum UiAgentTurn {
     /// truncated run). `level` picks the presentation: `Info` renders dim,
     /// `Warning` warning-toned (a run that ended incomplete).
     Notice { text: String, level: UiNoticeLevel },
+    /// An action the app agent proposed that only the user may press
+    /// (the app chat only).
+    Card(crate::app::agent::ui_agent_card::UiAgentCard),
 }
 
 /// Compact projection of one `iterate` call for the tool row. Derived from
@@ -220,6 +223,9 @@ pub enum UiAgentTurn {
 pub struct UiAgentToolRow {
     /// Provider tool-use id (row identity for updates and expansion).
     pub id: String,
+    /// The tool's name (`iterate`, `edit_project`, `act`, …); empty when
+    /// the start event did not name it.
+    pub tool: String,
     /// The model's one-line intent for this call.
     pub note: Option<String>,
     /// Live activity label while executing ("compiling", "probe 2/5", …);
@@ -244,6 +250,30 @@ pub struct UiAgentToolRow {
     pub error: Option<String>,
     /// Pretty-printed summary JSON for the expanded detail view.
     pub detail: String,
+    /// An app-agent `edit_project` call's edits and how each went: the
+    /// row's summary line and its expandable list (`None` for every other
+    /// tool).
+    pub edits: Option<crate::app::agent::ui_agent_edit_batch::UiAgentEditBatch>,
+    /// A finished app-agent `act` or `read` call, in words ("pressed
+    /// project/save", "read node fixture"); `None` for every other tool.
+    pub headline: Option<String>,
+    /// What a finished `act` pressed or handed over on a card; `None` for
+    /// a refused one and for every other tool.
+    pub act: Option<UiAgentActPress>,
+    /// Where that press lives on the page, and its Show — decorated by the
+    /// studio's view from the agent's activity (`None` until then).
+    pub place: Option<crate::UiAgentPlace>,
+}
+
+/// What one `act` did: the offer it pressed, or the card it put that offer
+/// on for the user.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UiAgentActPress {
+    /// The offer's path (`project/save`).
+    pub path: crate::OfferPath,
+    /// The card's id when the agent handed the press to the user (`c1`);
+    /// `None` when it pressed the offer itself.
+    pub card: Option<String>,
 }
 
 impl UiAgentToolRow {
@@ -251,6 +281,7 @@ impl UiAgentToolRow {
     pub fn started(id: impl Into<String>) -> Self {
         Self {
             id: id.into(),
+            tool: String::new(),
             note: None,
             phase: None,
             done: false,
@@ -261,11 +292,35 @@ impl UiAgentToolRow {
             warnings: 0,
             error: None,
             detail: String::new(),
+            edits: None,
+            headline: None,
+            act: None,
+            place: None,
         }
+    }
+
+    /// The same row, naming its tool.
+    pub fn for_tool(mut self, tool: impl Into<String>) -> Self {
+        self.tool = tool.into();
+        self
+    }
+
+    /// Whether this row reports something that went wrong: a failed call,
+    /// a compile error, or an edit batch with a refused edit.
+    pub fn has_problem(&self) -> bool {
+        self.error.is_some()
+            || self.shader_ok == Some(false)
+            || self
+                .edits
+                .as_ref()
+                .is_some_and(|edits| edits.has_problems())
     }
 
     /// The compact one-line summary the collapsed row shows.
     pub fn summary_line(&self) -> String {
+        if let Some(line) = self.app_tool_line() {
+            return line;
+        }
         if !self.done {
             // Live activity: prefer the current phase ("compiling",
             // "probe 2/5", …) over the generic "running".
@@ -306,6 +361,42 @@ impl UiAgentToolRow {
             None => outcome,
         }
     }
+
+    /// The app agent's tools in their own words: an edit batch's summary,
+    /// a finished `act`/`read`, or what a running one is doing. `None` for
+    /// the shader agent's tools, which keep the experiment wording.
+    fn app_tool_line(&self) -> Option<String> {
+        let running = match self.tool.as_str() {
+            "edit_project" => "Editing the project",
+            "act" => "Pressing",
+            "read" => "Reading",
+            _ => return None,
+        };
+        if !self.done {
+            return Some(format!("{running}…"));
+        }
+        if let Some(edits) = &self.edits {
+            return Some(edits.summary());
+        }
+        if let Some(error) = &self.error {
+            return Some(format!("Tool failed: {error}"));
+        }
+        // A press the view placed says where it was, in the page's words:
+        // "pressed Save in the project header".
+        if let (Some(act), Some(place)) = (&self.act, &self.place) {
+            let at = format!("{} {}", place.label, place.place);
+            return Some(match &act.card {
+                None => format!("pressed {}", at.trim_end()),
+                Some(card) => format!("asked you to click card {card}: {}", at.trim_end()),
+            });
+        }
+        Some(
+            self.headline
+                .clone()
+                .or_else(|| self.note.clone())
+                .unwrap_or_else(|| "done".to_string()),
+        )
+    }
 }
 
 /// Cumulative token usage (mirrors `lpa_agent::TokenUsage`, kept `Eq`).
@@ -319,6 +410,9 @@ pub struct UiAgentUsage {
     pub output_tokens: u32,
     pub cache_write_tokens: u32,
     pub cache_read_tokens: u32,
+    /// What the provider reported charging, in millionths of a dollar
+    /// (OpenRouter); preferred over the price-table estimate when set.
+    pub cost_micro_usd: Option<u64>,
 }
 
 impl UiAgentUsage {
@@ -402,6 +496,44 @@ mod tests {
         assert_eq!(row.summary_line(), "Experiment — probe 2/5");
         row.note = Some("go green".into());
         assert_eq!(row.summary_line(), "go green — probe 2/5");
+    }
+
+    #[test]
+    fn app_tool_rows_speak_in_their_own_words() {
+        let mut row = UiAgentToolRow::started("tu_1").for_tool("edit_project");
+        assert_eq!(row.summary_line(), "Editing the project…");
+        row.done = true;
+        row.edits = crate::app::agent::ui_agent_edit_batch::UiAgentEditBatch::from_summary(
+            &serde_json::json!({ "rows": [
+                { "edit": "set", "target": "fixture", "path": "count", "value": 250, "ok": true },
+                { "edit": "set", "target": "o", "path": "x", "ok": false, "reason": "no" }
+            ] }),
+        );
+        assert_eq!(row.summary_line(), "set count 250, 1 rejected");
+        assert!(row.has_problem());
+
+        let mut act = UiAgentToolRow::started("tu_2").for_tool("act");
+        act.done = true;
+        act.headline = Some("pressed project/save".into());
+        assert_eq!(act.summary_line(), "pressed project/save");
+        assert!(!act.has_problem());
+
+        // Placed by the view, the press says where it lives.
+        act.act = Some(UiAgentActPress {
+            path: crate::OfferPath::project().child("save"),
+            card: None,
+        });
+        act.place = Some(crate::UiAgentPlace {
+            label: "Save".into(),
+            place: "in the project header".into(),
+            show: None,
+        });
+        assert_eq!(act.summary_line(), "pressed Save in the project header");
+        act.act.as_mut().unwrap().card = Some("c2".into());
+        assert_eq!(
+            act.summary_line(),
+            "asked you to click card c2: Save in the project header"
+        );
     }
 
     #[test]

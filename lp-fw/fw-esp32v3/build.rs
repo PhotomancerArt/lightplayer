@@ -50,7 +50,12 @@ fn main() {
 /// the same reason: the server is sans-IO and never reads git or env itself,
 /// so the binary has to bake them in. `main.rs` injects them into
 /// `LpServer::set_hello`.
+///
+/// Plus `LP_APP_VERSION`, the build's app version, from the one helper every
+/// versioned build uses (`tools/lp-app-version`) — never computed here.
 fn emit_build_provenance() {
+    lp_app_version::emit();
+    emit_git_head_watches();
     let commit =
         git_output(&["rev-parse", "--short=12", "HEAD"]).unwrap_or_else(|| "unknown".into());
     let dirty = match git_output(&["status", "--porcelain"]) {
@@ -155,6 +160,70 @@ fn emit_linker_search_path() {
         "cargo:rustc-link-search={}",
         PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR")).display()
     );
+}
+
+/// Watch git's HEAD so this script reruns when the checked-out commit moves —
+/// a commit, checkout, or rebase — even though nothing under the package
+/// directory changed. Without this, `LP_BUILD_COMMIT` above only gets
+/// re-read on an incremental build that also touched a file cargo was
+/// already watching, so a local build can keep reporting a stale commit in
+/// the manifest and the wire hello. Same helper as fw-esp32c6's build
+/// script; see there for the full reasoning.
+///
+/// Three paths, chosen to work in both a primary checkout and a worktree
+/// (where `.git` is a file, not a directory):
+/// - `<git-dir>/HEAD` — this checkout's own HEAD, present whether attached
+///   to a branch or detached. `git rev-parse --git-dir` already resolves
+///   the worktree indirection to the right place.
+/// - the ref HEAD points to, under the *common* dir (`git rev-parse
+///   --git-common-dir`) — branches are shared across worktrees, so a commit
+///   made from any of them updates the loose ref file there. Found via
+///   `git rev-parse --symbolic-full-name HEAD`; skipped on a detached HEAD,
+///   where that command's output is not a `refs/...` path and the HEAD file
+///   alone is enough.
+/// - `<common-dir>/packed-refs`, if present — covers a branch that is only
+///   packed (e.g. right after a fresh clone), where committing may update
+///   this file rather than create a loose ref.
+///
+/// If git is unavailable (e.g. a source tarball with no `.git`), this emits
+/// nothing extra; `LP_BUILD_COMMIT` already falls back to "unknown" in that
+/// case regardless.
+fn emit_git_head_watches() {
+    let Some(git_dir) = git_path("--git-dir") else {
+        return;
+    };
+    println!("cargo:rerun-if-changed={}", git_dir.join("HEAD").display());
+
+    let Some(common_dir) = git_path("--git-common-dir") else {
+        return;
+    };
+    if let Some(symbolic) = git_output(&["rev-parse", "--symbolic-full-name", "HEAD"]) {
+        if symbolic.starts_with("refs/") {
+            println!(
+                "cargo:rerun-if-changed={}",
+                common_dir.join(symbolic).display()
+            );
+        }
+    }
+    let packed_refs = common_dir.join("packed-refs");
+    if packed_refs.exists() {
+        println!("cargo:rerun-if-changed={}", packed_refs.display());
+    }
+}
+
+/// `git rev-parse <arg>` as a path, made absolute against
+/// `CARGO_MANIFEST_DIR` when git prints a relative one (cargo resolves a
+/// relative `rerun-if-changed` against the package root, which is this
+/// script's own current directory, but an explicit join avoids relying on
+/// that coincidence).
+fn git_path(arg: &str) -> Option<PathBuf> {
+    let raw = git_output(&["rev-parse", arg])?;
+    let path = PathBuf::from(raw);
+    Some(if path.is_absolute() {
+        path
+    } else {
+        PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR")).join(path)
+    })
 }
 
 fn git_output(args: &[&str]) -> Option<String> {

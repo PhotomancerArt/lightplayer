@@ -72,6 +72,7 @@ lpc_model::lp_embed_manifest_core! {
     chip: "esp32s3",
     cargo_target: "xtensa-esp32s3-none-elf",
     profile: env!("LP_BUILD_PROFILE"),
+    version: env!("LP_APP_VERSION"),
     commit: env!("LP_BUILD_COMMIT"),
     dirty: lpc_model::manifest::str_eq(env!("LP_BUILD_DIRTY"), "true"),
     wire_proto: lpc_wire::WIRE_PROTO_VERSION,
@@ -90,6 +91,10 @@ lpc_model::lp_embed_manifest_core! {
 mod board;
 #[cfg(not(fw_harness))]
 mod flash_storage;
+#[cfg(all(feature = "io-thread", not(fw_harness)))]
+mod io_thread;
+#[cfg(all(feature = "io_thread_stack_diag", not(fw_harness)))]
+mod io_thread_stack_diag;
 // Not simply `not(fw_harness)`: the `test_button` harness drives the same
 // registry-facing driver the app path registers, and a self-test against a
 // different driver would prove nothing.
@@ -110,6 +115,8 @@ mod stack_probe;
 #[cfg(fw_harness)]
 mod tests;
 
+#[cfg(all(not(feature = "io-thread"), not(fw_harness)))]
+use serial::usb_link_task;
 #[cfg(not(fw_harness))]
 use {
     alloc::{boxed::Box, rc::Rc, sync::Arc},
@@ -129,7 +136,6 @@ use {
     lpfs::LpFsMemory,
     lpfs::lp_path::AsLpPath,
     output::{Esp32OutputProvider, Esp32S3RmtWs281xDriver},
-    serial::usb_link_task,
 };
 
 esp_bootloader_esp_idf::esp_app_desc!();
@@ -150,10 +156,14 @@ esp_bootloader_esp_idf::esp_app_desc!();
 /// location counter backwards") rather than silently, which is the one mercy
 /// here: 300 KB — the C6's figure — does not link on this chip.
 ///
-/// This split leaves 52,896 B of stack against fw-esp32c6's proven 35,784 B
-/// (both read off the linked ELFs), which is the margin the Xtensa windowed
-/// ABI's larger frames deserve. The heartbeat's free-heap figure is the number
-/// to watch if a future node kind pushes it.
+/// This split leaves whatever `dram_seg` has left over for `.stack` once
+/// `HEAP_SIZE` and every other `.bss`/`.data` static are carved out — today's
+/// exact number is `stack_total_bytes` in `lp-emu/esp/figures/esp32s3.json`
+/// (re-measured by `just bless-chips esp32s3`; it moves with firmware
+/// changes, so it is not repeated here), against fw-esp32c6's own measured
+/// split (both read off the linked ELFs), which is the margin the Xtensa
+/// windowed ABI's larger frames deserve. The heartbeat's free-heap figure is
+/// the number to watch if a future node kind pushes it.
 ///
 /// The next lever, if one is needed, is `dram2_seg`
 /// (`0x3FCDB700..0x3FCED710`, ~72 KB) as a second `esp_alloc` region — not
@@ -371,6 +381,10 @@ fn reset_now() -> ! {
 /// structural, neither is invented).
 #[cfg(not(fw_harness))]
 fn heartbeat_memory_stats() -> Option<lpc_wire::server::MemoryStats> {
+    // The link thread's stack high-water, at the heartbeat's cadence, when it
+    // grows (`io_thread_stack_diag` only; a product image has no such line).
+    #[cfg(feature = "io_thread_stack_diag")]
+    io_thread_stack_diag::log_if_grown();
     let free = esp_alloc::HEAP.free().min(u32::MAX as usize) as u32;
     let used = esp_alloc::HEAP.used().min(u32::MAX as usize) as u32;
     Some(lpc_wire::server::MemoryStats {
@@ -450,9 +464,25 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     // The host link runs lp-link over USB-Serial-JTAG (plan
     // `lp-link-usb-cutover`): a random session nonce per boot, so a host
     // learns the board restarted.
-    let usb_link = UsbLinkShared::leak(esp_hal::rng::Rng::new().random());
-    spawner.spawn(usb_link_task(usb_device, usb_link).unwrap());
-    esp_println::println!("[INIT] USB link task spawned");
+    let nonce = esp_hal::rng::Rng::new().random();
+    // The link task on a thread of its own (`io_thread`, pinned to core 0),
+    // created this early because its stack comes off the heap; the link is
+    // then shared across two threads, so it takes the thread's lock.
+    #[cfg(feature = "io-thread")]
+    let usb_link = {
+        // Nothing else rides the main executor here; the link has its own.
+        let _ = spawner;
+        let usb_link = UsbLinkShared::leak_locked(nonce, io_thread::link_lock);
+        io_thread::start(usb_device, usb_link);
+        usb_link
+    };
+    #[cfg(not(feature = "io-thread"))]
+    let usb_link = {
+        let usb_link = UsbLinkShared::leak(nonce);
+        spawner.spawn(usb_link_task(usb_device, usb_link).unwrap());
+        esp_println::println!("[INIT] USB link task spawned");
+        usb_link
+    };
 
     // From here on `log::*` rides the link's log channel; the `esp_println!`
     // lines above are raw text outside frames.
@@ -460,7 +490,7 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
 
     let transport = UsbLinkTransport::new(usb_link);
 
-    let base_fs = mount_filesystem(flash);
+    let (base_fs, fs_boot_state) = mount_filesystem(flash);
 
     // The compiled-in fallback is the XIAO ESP32-S3 Plus profile — the desk
     // board. It is deliberately partial (no user LED, no castellated pads); see
@@ -540,9 +570,16 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     // aborted and reset the board instead of being refused.
     server.set_read_headroom_probe(Some(read_headroom_probe));
     server.set_read_gate(Some(READ_GATE));
+    // With the link on its own thread, answer a tick's requests before its
+    // render: the replies then go out while the frame renders (`io_thread`).
+    // Never without the thread: on the shared executor the link task would
+    // still wait for the frame to put the reply on the wire.
+    #[cfg(feature = "io-thread")]
+    server.set_messages_first(true);
     server.set_hello_identity(
         lpc_wire::HelloIdentity::new(
             "fw-esp32s3",
+            crate::manifest_version(),
             env!("LP_BUILD_COMMIT"),
             env!("LP_BUILD_DIRTY") == "true",
             env!("LP_BUILD_PROFILE"),
@@ -552,6 +589,7 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     // The chip's own permanent identity (efuse): the factory MAC and the
     // silicon revision. The server cannot derive either.
     server.set_hardware_identity(chip_identity());
+    server.set_fs_boot_state(fs_boot_state);
     // The board this firmware is running as, from the loaded manifest — the
     // catalog key a card needs to re-flash or wire a new project for it.
     server.set_board_id(Some(alloc::string::String::from(
@@ -603,7 +641,9 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
 /// Mount the `lpfs` partition, falling back to RAM so an unformattable or
 /// mis-flashed board still comes up reachable and can say so over the wire.
 #[cfg(not(fw_harness))]
-fn mount_filesystem(flash: esp_hal::peripherals::FLASH<'static>) -> Box<dyn lpfs::LpFs> {
+fn mount_filesystem(
+    flash: esp_hal::peripherals::FLASH<'static>,
+) -> (Box<dyn lpfs::LpFs>, lpc_wire::FsBootState) {
     let mut flash_storage = esp_storage::FlashStorage::new(flash);
     let Some(partition) = LpfsPartition::locate(&mut flash_storage) else {
         // Not a runtime condition: it means the image was flashed without
@@ -614,16 +654,21 @@ fn mount_filesystem(flash: esp_hal::peripherals::FLASH<'static>) -> Box<dyn lpfs
             "[ERROR] no `lpfs` partition in the flashed table — reflash with \
              --partition-table lp-fw/fw-esp32s3/partitions.csv; using memory FS"
         );
-        return Box::new(LpFsMemory::new());
+        return (Box::new(LpFsMemory::new()), lpc_wire::FsBootState::Memory);
     };
     match lp_fs::LpFsFlash::init(LpFlashStorage::new(flash_storage, partition), lpfs_config) {
-        Ok(fs) => {
+        Ok((fs, formatted)) => {
             esp_println::println!("[INIT] flash filesystem mounted");
-            Box::new(fs)
+            let state = if formatted {
+                lpc_wire::FsBootState::Formatted
+            } else {
+                lpc_wire::FsBootState::Mounted
+            };
+            (Box::new(fs), state)
         }
         Err(e) => {
             esp_println::println!("[WARN] flash FS failed: {e}, falling back to memory");
-            Box::new(LpFsMemory::new())
+            (Box::new(LpFsMemory::new()), lpc_wire::FsBootState::Memory)
         }
     }
 }
@@ -646,14 +691,38 @@ async fn main(spawner: embassy_executor::Spawner) {
     );
 
     let mut watchdog = app.watchdog;
-    run_server_loop(
+    OutlinedPoll(run_server_loop(
         app.server,
         app.transport,
         app.time_provider,
         heartbeat_memory_stats,
         move |now_ms| watchdog.feed(now_ms),
-    )
+    ))
     .await;
+}
+
+/// Keeps `run_server_loop`'s future out of `main`'s own generator frame.
+///
+/// Since the lp-link USB cut-over (#854) `run_server_loop`'s poll was inlined
+/// into `main`'s async-fn state machine, so its multi-KB frame stayed live
+/// under `boot_firmware` on the stack-high-water scan even though the two
+/// never run concurrently (ticket `2026-09-27-s3-stack-headroom`).
+/// `#[inline(never)]` on `poll` is what keeps the frame out-of-line; the
+/// wrapper itself adds nothing at runtime.
+#[cfg(not(fw_harness))]
+struct OutlinedPoll<F>(F);
+
+#[cfg(not(fw_harness))]
+impl<F: core::future::Future> core::future::Future for OutlinedPoll<F> {
+    type Output = F::Output;
+    #[inline(never)]
+    fn poll(
+        self: core::pin::Pin<&mut Self>,
+        cx: &mut core::task::Context<'_>,
+    ) -> core::task::Poll<F::Output> {
+        // SAFETY: structural pin projection; the field is never moved.
+        unsafe { self.map_unchecked_mut(|s| &mut s.0) }.poll(cx)
+    }
 }
 
 // Same gate as its only caller, `boot_firmware`: the hardware harnesses

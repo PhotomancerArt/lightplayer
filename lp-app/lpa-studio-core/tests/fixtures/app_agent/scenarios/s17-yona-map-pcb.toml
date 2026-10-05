@@ -1,0 +1,39 @@
+# S17 "Map a new PCB": a second fixture from a pick-and-place file, exact
+# points in chain order, chained after the existing 144 on the same D10
+# wire — and nothing else touched.
+id = "S17"
+name = "s17-yona-map-pcb"
+summary = "Pick-and-place for a 64-LED ring → a second fixture 'ring', 208 LEDs on D10, playlist untouched"
+persona = "yona"
+tags = ["mapping", "edit", "power-user", "minimal-change"]
+status = "pending"
+waits_for = "M10"
+note = "The product holds exact points (PathPoints), but the agent does not know the mapping formats well enough until M10 (easier after M6). The point-by-point check of 'ring' lands then; the S3 Plus has no stage B (Q8)."
+
+[start]
+project = { golden = "yona-s3-144-d10" }
+board = { known = "seeed/xiao-esp32-s3-plus" }
+
+[user]
+say = "Here's the pick-and-place for the new ring board, 64 LEDs, already in chain order (ref, x mm, y mm): D1 52.00 30.00; D2 51.89 32.16; D3 51.58 34.29; D4 51.05 36.39; D5 50.33 38.42; D6 49.40 40.37; D7 48.29 42.22; D8 47.01 43.96; D9 45.56 45.56; D10 43.96 47.01; D11 42.22 48.29; D12 40.37 49.40; D13 38.42 50.33; D14 36.39 51.05; D15 34.29 51.58; D16 32.16 51.89; D17 30.00 52.00; D18 27.84 51.89; D19 25.71 51.58; D20 23.61 51.05; D21 21.58 50.33; D22 19.63 49.40; D23 17.78 48.29; D24 16.04 47.01; D25 14.44 45.56; D26 12.99 43.96; D27 11.71 42.22; D28 10.60 40.37; D29 9.67 38.42; D30 8.95 36.39; D31 8.42 34.29; D32 8.11 32.16; D33 8.00 30.00; D34 8.11 27.84; D35 8.42 25.71; D36 8.95 23.61; D37 9.67 21.58; D38 10.60 19.63; D39 11.71 17.78; D40 12.99 16.04; D41 14.44 14.44; D42 16.04 12.99; D43 17.78 11.71; D44 19.63 10.60; D45 21.58 9.67; D46 23.61 8.95; D47 25.71 8.42; D48 27.84 8.11; D49 30.00 8.00; D50 32.16 8.11; D51 34.29 8.42; D52 36.39 8.95; D53 38.42 9.67; D54 40.37 10.60; D55 42.22 11.71; D56 43.96 12.99; D57 45.56 14.44; D58 47.01 16.04; D59 48.29 17.78; D60 49.40 19.63; D61 50.33 21.58; D62 51.05 23.61; D63 51.58 25.71; D64 51.89 27.84. Map it as a second fixture called `ring`, origin at the board centre, y up, long side -1..1. It's chained after the existing 144 on the same D10 wire. Don't touch the playlist."
+
+[budget]
+turns = 24
+usd = 0.75
+
+[[check]]
+kind = "max_questions"
+n = 0
+[[check]]
+kind = "lamp_count"
+leds = 208
+[[check]]
+kind = "entries_kept"
+patterns = ["veins", "plasma-duo"]
+[[check]]
+kind = "output_on"
+pin = "D10"
+[[check]]
+kind = "all_nodes_ok"
+[[check]]
+kind = "saved"

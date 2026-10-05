@@ -53,6 +53,10 @@ lpc-history = { path = "../../lp-core/lpc-history", default-features = false }
 # gates that combination cheaply.
 lpa-cloud-client = { path = "../lpa-cloud-client", default-features = false }
 lpc-cloud-api = { path = "../../lp-core/lpc-cloud-api" }
+# The engine cache seam + the firmware store client (OTA M5): this shell
+# implements them over OPFS and `fetch`, and the core holds them. Not
+# wasm-only: the `?firmware-store=` flag's default origin is host-tested.
+lpa-firmware-store = { path = "../lpa-firmware-store" }
 # The filesystem trait the cloud sync driver hands to `LocalProject`. Not
 # wasm-only: the sidecar producer reads a package manifest through it, and
 # that logic is host-tested.
@@ -85,6 +89,7 @@ web-sys = { version = "0.3", features = [
     "HtmlAnchorElement",
     "HtmlCanvasElement",
     "HtmlElement",
+    "HtmlInputElement",
     "ImageData",
     "IntersectionObserver",
     "IntersectionObserverEntry",
@@ -116,6 +121,8 @@ web-sys = { version = "0.3", features = [
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 lpa-fs-opfs = { path = "../lpa-fs-opfs" }
+# Hashes and the 64-hex key check for the OPFS engine cache's file names.
+lpc-firmware-release = { path = "../../lp-core/lpc-firmware-release" }
 wasm-bindgen-futures = "0.4"
 
 [build-dependencies]

@@ -423,6 +423,13 @@ pub struct SocBus {
     alias_sites: BTreeSet<(u32, u8)>,
 
     strict: bool,
+    /// Whether this chip's contract for publishing code is a guest barrier
+    /// (`fence.i`), so `--strict-bus` should also run the missing-fence
+    /// checker. See [`SocBus::set_fence_contract`].
+    fence_contract: bool,
+    /// `strict && fence_contract`, hoisted into one `bool` so the store and
+    /// fetch paths test exactly what they tested before the contract existed.
+    strict_fences: bool,
     /// `Some(level)`: an access to a register graded below `level` is
     /// refused like an unmapped one. See [`SocBus::set_strict_grade`].
     strict_grade: Option<RegGrade>,
@@ -663,6 +670,8 @@ impl SocBus {
             has_ram_alias: false,
             alias_sites: BTreeSet::new(),
             strict: false,
+            fence_contract: true,
+            strict_fences: false,
             strict_grade: None,
             strict_grade_blocks: None,
             sideband: false,
@@ -1160,6 +1169,30 @@ impl SocBus {
     /// a silent zero. The vision's honest-peripheral policy.
     pub fn set_strict(&mut self, strict: bool) {
         self.strict = strict;
+        self.strict_fences = self.strict && self.fence_contract;
+    }
+
+    /// Whether code is published by a guest barrier on this chip — and so
+    /// whether `--strict-bus` also runs the missing-fence checker
+    /// ([`SocBus::missing_fence_reports`]). **On by default**: RV32's contract
+    /// is the guest's `fence.i`.
+    ///
+    /// A chip whose contract is the **store address** turns it off. On the
+    /// classic ESP32 internal SRAM is fetched with no cache between, silicon
+    /// ran freshly written SRAM0 code with no barrier at all (`test_sram0_exec`,
+    /// 2026-09-05, `docs/adr/2026-09-05-classic-jit-code-lives-in-sram0.md`),
+    /// and the emulator's own invalidation keys off the store (M7 XD3). There
+    /// a store into executable memory *is* the publish, and a checker waiting
+    /// for a `fence.i` would call every one of them — the second-stage
+    /// bootloader placing the app's IRAM, the firmware's own JIT — a firmware
+    /// bug.
+    pub fn set_fence_contract(&mut self, on: bool) {
+        self.fence_contract = on;
+        self.strict_fences = self.strict && self.fence_contract;
+        if !self.strict_fences {
+            self.code_pages.clear();
+            self.unpublished_code_words.clear();
+        }
     }
 
     pub fn strict(&self) -> bool {
@@ -1867,6 +1900,9 @@ impl SocBus {
     /// the mask ROM and the ESP-IDF second-stage bootloader copy code into
     /// RAM and jump into it and we own neither (M5 MD13). That is what makes
     /// this a working checker rather than an untested one.
+    ///
+    /// Always zero on a chip that publishes by store rather than by barrier
+    /// ([`SocBus::set_fence_contract`]): the checker is not armed there.
     #[inline]
     pub fn missing_fence_reports(&self) -> u64 {
         self.missing_fence_reports
@@ -2179,6 +2215,10 @@ impl SocBus {
     /// bus's was taken from a differently built machine and is refused
     /// loudly, as [`restore_regions`](Self::restore_regions) refuses one with
     /// a different region count.
+    ///
+    /// The pin fabric is the one scalar that is not restored whole: its
+    /// board side (an outside driver, a `--wire` tie) comes back as this bus
+    /// had it, not as `s` had it — see [`Fabric::restore_chip_side`].
     pub fn restore_scalars(&mut self, s: &BusScalars) {
         assert_eq!(
             s.ram_aliases,
@@ -2199,7 +2239,11 @@ impl SocBus {
         self.unmapped_writes = s.unmapped_writes;
         self.first_strict_violation = s.first_strict_violation;
         self.request = s.request;
-        self.pins = s.pins.clone();
+        // The chip side (routing, GPIO registers, signal levels) comes back
+        // from the snapshot; a bench driver's level on a pad and a `--wire`
+        // tie are board-side and survive a reset or power cycle the same way
+        // they would on silicon (see `Fabric::restore_chip_side`).
+        self.pins.restore_chip_side(&s.pins, s.now);
     }
 
     /// `true` if `address` falls in a declared MMIO window.
@@ -2622,7 +2666,7 @@ impl SocBus {
                 return Err(fault);
             }
             let off = (address - self.arena_base) as usize;
-            if self.strict {
+            if self.strict_fences {
                 self.note_guest_code_write(off, address, len, value);
             }
             // **One** test against a `bool` the branch predictor owns — not
@@ -2915,7 +2959,7 @@ impl Bus for SocBus {
             return Err(fault());
         }
         self.last_fetch_region = i;
-        if self.strict {
+        if self.strict_fences {
             self.check_code_word(address, true);
         }
         if let Some(cost) = self.memory_cost.as_mut() {
@@ -2995,7 +3039,7 @@ impl Bus for SocBus {
             return Err(fault());
         }
         self.last_fetch_region = i;
-        if self.strict {
+        if self.strict_fences {
             self.check_code_word(pc, true);
         }
         if let Some(cost) = self.memory_cost.as_mut() {
@@ -3174,7 +3218,7 @@ impl Bus for SocBus {
     /// path, and a cached block has no fetch path — this is where it is told
     /// instead. Off by default and inlined away.
     fn note_cached_execute(&mut self, pc: u32, bytes: u32) {
-        if !self.strict {
+        if !self.strict_fences {
             return;
         }
         if self.unpublished_code_words.is_empty() {
@@ -4649,6 +4693,38 @@ mod tests {
         assert_eq!(bus.unmapped_reads(), 1);
         assert_eq!(bus.unmapped_sites(), 1);
         assert_eq!(bus.peripheral(0).unwrap().save_state(), alloc::vec![1]);
+    }
+
+    /// A reset or power cycle is exactly this: save the power-on scalars
+    /// once, then restore them on every restart. A pad an outside driver —
+    /// a bench switch, a jumper — holds from outside the chip is wired to
+    /// the board, not the chip, so it must still read driven after the
+    /// restore, even though the snapshot was taken before anything drove it.
+    /// See `docs/defects/2026-10-04-emu-restart-drops-pad-drives.md`.
+    #[test]
+    fn restoring_scalars_keeps_a_pad_an_outside_driver_holds() {
+        use crate::pins::PadId;
+
+        let mut bus = SocBus::new();
+        let power_on = bus.save_scalars();
+
+        // After "boot", a bench driver pulls a pad low from outside the chip.
+        bus.pins.drive_pad(PadId(5), false, 10);
+        assert_eq!(bus.pins.driven_level(PadId(5)), Some(false));
+
+        // A reset restores the power-on scalars, the way `reboot`/
+        // `power_cycle` do (`lp-emu-esp32c6::Esp32C6Machine::restart`).
+        bus.restore_scalars(&power_on);
+
+        assert_eq!(
+            bus.pins.driven_level(PadId(5)),
+            Some(false),
+            "the outside driver is still there after the restart"
+        );
+        assert!(
+            !bus.pins.pad_level(PadId(5)),
+            "and the pad still reads the level it is driven to"
+        );
     }
 
     /// The reset-domain filter: an HP-only restore puts the HP block back and

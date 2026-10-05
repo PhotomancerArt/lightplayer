@@ -16,6 +16,7 @@ use commands::{
 
 #[derive(Parser)]
 #[command(name = "lp-cli")]
+#[command(version = env!("LP_APP_VERSION"))]
 #[command(about = "LightPlayer CLI - Server and client modes")]
 enum Cli {
     /// Run server from a directory

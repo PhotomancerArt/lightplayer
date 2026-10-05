@@ -2,9 +2,9 @@
 //! the first tap ARMS (red fill, "Remove", the quiet 4 s drain), the second
 //! within the window acts, and blur or the window's end stands it down.
 //!
-//! [`ActionButton`](super::ActionButton) runs the same machine for actions
-//! whose confirmation is marked inline; the arming itself lives here, in
-//! [`use_armed_confirm`], so the two can never drift. The armed dress is
+//! [`ActionButton`](super::ActionButton) and the pane header's icon buttons
+//! run the same machine for every Lasting action; the arming itself lives
+//! here, in [`use_armed_confirm`], so they can never drift. The armed dress is
 //! the same CSS (`.ux-armed-chip` / `.ux-armed`, style.css).
 //!
 //! # The icon-only variant

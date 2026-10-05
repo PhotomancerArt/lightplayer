@@ -119,15 +119,11 @@ impl ControllerOp for DevicesOp {
                     "Remove this sim and the name you gave it. There is nothing else to remove.",
                     ActionPriority::Tertiary,
                 )
-                .destructive()
-                .with_confirmation(
-                    ActionConfirmation::new(
-                        "Forget this sim?",
-                        "Its record and name go; nothing else exists.",
-                        "Forget",
-                    )
-                    .inline(),
-                );
+                .lasting(ActionConfirmation::new(
+                    "Forget this sim?",
+                    "Its record and name go; nothing else exists.",
+                    "Forget",
+                ));
             }
             _ => {}
         }
@@ -142,7 +138,9 @@ impl ControllerOp for DevicesOp {
                 "Pick the USB port your LightPlayer board is plugged into.",
                 ActionPriority::Primary,
             )
-            .with_icon("usb"),
+            .with_icon("usb")
+            // `navigator.serial.requestPort()`: a real click or nothing.
+            .needs_user_activation(),
             // The sibling path. Its summary says what Bluetooth cannot do
             // up front, because a user who adds a piece over Bluetooth and
             // then looks for "Update firmware" is owed the reason before,
@@ -153,7 +151,9 @@ impl ControllerOp for DevicesOp {
                  Play and edit work over Bluetooth; firmware updates need USB.",
                 ActionPriority::Secondary,
             )
-            .with_icon("bluetooth"),
+            .with_icon("bluetooth")
+            // `navigator.bluetooth.requestDevice()`: a real click or nothing.
+            .needs_user_activation(),
             Action::AdoptLink { .. } => ActionMeta::new(
                 "Set up this device",
                 "Remember this board so it can be set up.",
@@ -164,16 +164,12 @@ impl ControllerOp for DevicesOp {
                 "Stop looking at this port and hand the grant back.",
                 ActionPriority::Tertiary,
             )
-            .destructive()
-            .with_confirmation(
-                ActionConfirmation::new(
-                    "Dismiss this port?",
-                    "Studio hands the browser's permission for this port back. \
+            .lasting(ActionConfirmation::new(
+                "Dismiss this port?",
+                "Studio hands the browser's permission for this port back. \
                      You can pick it again from the add-device card.",
-                    "Dismiss",
-                )
-                .inline(),
-            ),
+                "Dismiss",
+            )),
             Action::Connect { .. } => ActionMeta::new(
                 "Connect",
                 "Open the port and ask the board what it is.",
@@ -184,7 +180,9 @@ impl ControllerOp for DevicesOp {
                 "Pick this board's port again. Some boards can't be \
                  re-recognized after a replug, so the browser asks once more.",
                 ActionPriority::Primary,
-            ),
+            )
+            // The browser's chooser again: a real click or nothing.
+            .needs_user_activation(),
             Action::Disconnect { .. } => ActionMeta::new(
                 "Disconnect",
                 "Close the port. The board keeps running; Studio stops watching it.",
@@ -196,34 +194,53 @@ impl ControllerOp for DevicesOp {
                  browser's permission for its port.",
                 ActionPriority::Tertiary,
             )
-            .destructive()
-            .with_confirmation(
-                ActionConfirmation::new(
-                    "Forget this device?",
-                    "Studio removes the device, its remembered name, and the \
+            .lasting(ActionConfirmation::new(
+                "Forget this device?",
+                "Studio removes the device, its remembered name, and the \
                      browser's permission for its port. Nothing on the board changes.",
-                    "Forget",
-                )
-                .inline(),
-            ),
+                "Forget",
+            )),
             Action::CancelActivity { .. } => ActionMeta::new(
                 "Cancel",
                 "Stop what Studio is doing to this device.",
                 ActionPriority::Secondary,
             ),
+            // The layout question's yes (the C6 repartition): the backup is
+            // already stored, and the board is rewritten now. The user's
+            // decision, never an assistant's (D7: Lasting, so the agent
+            // hands it over). The layout sheet that asks the question draws
+            // it as one press — the sheet is the asking (G1 walk,
+            // 2026-10-03) — and only the sheet: the level stays Lasting.
+            Action::ConfirmFlashLayout { .. } => ActionMeta::new(
+                "Continue",
+                "Write the new firmware and move this board's files to it.",
+                ActionPriority::Primary,
+            )
+            .lasting(ActionConfirmation::new(
+                "Rewrite this board now?",
+                "The board gets the new firmware and its files move to the new layout. \
+                 The backup stays in this browser.",
+                "continue",
+            )),
             Action::Identify { .. } => ActionMeta::new(
                 "Identify again",
                 "Ask the board what it is, right now.",
                 ActionPriority::Secondary,
             ),
-            // No confirmation on purpose: the pick + the one primary verb IS
-            // the deliberate gesture (the card ruling), and the boards this
-            // face appears on have no LightPlayer install to lose.
+            // Whatever the chip ran before is gone: the user's call, even
+            // when an assistant proposes it (D7: Lasting, so the button arms
+            // and the agent hands it over).
             Action::Flash { .. } => ActionMeta::new(
                 "Flash firmware",
                 "Write LightPlayer firmware for the picked board onto this chip.",
                 ActionPriority::Primary,
-            ),
+            )
+            .lasting(ActionConfirmation::new(
+                "Replace what this board runs?",
+                "The firmware on this chip is replaced, and anything stored with \
+                 it may go too. Your library copies are untouched.",
+                "flash",
+            )),
             // No confirmation: the empty face's picker IS the deliberate
             // gesture, and a board with nothing on it has nothing to lose.
             // (Pushing OVER a project is M4's banking question, not this
@@ -252,16 +269,12 @@ impl ControllerOp for DevicesOp {
                 "Erase the firmware and everything stored on this board.",
                 ActionPriority::Tertiary,
             )
-            .destructive()
-            .with_confirmation(
-                ActionConfirmation::new(
-                    "Factory reset this board?",
-                    "Everything on its flash is erased — firmware, projects, settings. \
+            .lasting(ActionConfirmation::new(
+                "Factory reset this board?",
+                "Everything on its flash is erased — firmware, projects, settings. \
                      Its identity lives in silicon and survives; Studio keeps the entry.",
-                    "reset",
-                )
-                .inline(),
-            ),
+                "reset",
+            )),
             // Destructive on the BOARD and nowhere else, which is exactly
             // what the confirm has to say: the library copy is a different
             // object and this does not touch it.
@@ -273,17 +286,13 @@ impl ControllerOp for DevicesOp {
                 "Stop what this board is running and delete it from the board.",
                 ActionPriority::Tertiary,
             )
-            .destructive()
-            .with_confirmation(
-                ActionConfirmation::new(
-                    "Remove the project from this board?",
-                    "The board stops running it and the project is deleted from the \
+            .lasting(ActionConfirmation::new(
+                "Remove the project from this board?",
+                "The board stops running it and the project is deleted from the \
                      board's storage. The firmware stays, and your copy in the \
                      library is untouched.",
-                    "remove",
-                )
-                .inline(),
-            ),
+                "remove",
+            )),
             Action::SetName { .. } => ActionMeta::new(
                 "Rename",
                 "Change what Studio calls this device.",
@@ -350,6 +359,7 @@ mod tests {
                 build_id: "esp32c6-4mb".to_string(),
                 park_first: false,
                 name: None,
+                restore_backup: false,
             },
             Action::SetName {
                 device,
@@ -368,6 +378,47 @@ mod tests {
                 "{action:?} renders nothing"
             );
             assert_eq!(op.action_class(), ActionClass::Recovery, "{action:?}");
+        }
+    }
+
+    /// The verbs only the user's own click may press (PD5, D7): the
+    /// browser's pickers need user activation, and whatever is gone for
+    /// good — a flash, a forget, a wipe — is Lasting. Everything else an
+    /// assistant may press for them.
+    #[test]
+    fn the_pickers_and_the_flash_need_the_users_own_click() {
+        let device = DeviceId(1);
+        let flash = Action::Flash {
+            device,
+            board_id: "seeed/xiao-esp32-c6".to_string(),
+            build_id: "esp32c6-4mb".to_string(),
+            park_first: false,
+            name: None,
+            restore_backup: false,
+        };
+        // (action, needs a real click, lasting)
+        for (action, activation, lasting) in [
+            (Action::AddFromUsb, true, false),
+            (Action::AddFromBle, true, false),
+            (Action::Reconnect { device }, true, false),
+            (flash, false, true),
+            (Action::Forget { device }, false, true),
+            (Action::Erase { device }, false, true),
+            (Action::RemoveProject { device }, false, true),
+            (Action::Connect { device }, false, false),
+            (Action::Push { device }, false, false),
+            (Action::Disconnect { device }, false, false),
+        ] {
+            let meta = DevicesOp::new(action.clone()).default_action_meta();
+            assert_eq!(meta.needs_user_activation, activation, "{action:?}");
+            assert_eq!(meta.consequence.arms(), lasting, "{action:?}");
+            assert_eq!(meta.needs_user(), activation || lasting, "{action:?}");
+            if activation {
+                assert!(
+                    meta.consequence.is_routine(),
+                    "a picker is a platform fact, not a consequence: {action:?}"
+                );
+            }
         }
     }
 
@@ -434,9 +485,13 @@ mod tests {
             device: DeviceId(1),
         })
         .default_action_meta();
-        let confirmation = meta.confirmation.expect("forget always asks first");
+        let confirmation = meta
+            .consequence
+            .copy()
+            .cloned()
+            .expect("forget is lasting and says what goes");
 
-        assert!(meta.destructive);
+        assert!(meta.consequence.wears_error_tint());
         assert_eq!(confirmation.title, "Forget this sim?");
         assert_eq!(
             confirmation.message,
@@ -446,8 +501,10 @@ mod tests {
             device: DeviceId(1),
         })
         .default_action_meta()
-        .confirmation
-        .expect("forget always asks first");
+        .consequence
+        .copy()
+        .cloned()
+        .expect("forget is lasting and says what goes");
         assert!(
             wire.message.contains("permission for its port"),
             "a board's confirm still names the grant: {}",
@@ -480,8 +537,7 @@ mod tests {
         })
         .default_action_meta();
         assert_eq!(meta.label, "Clear faults");
-        assert!(!meta.destructive);
-        assert!(meta.confirmation.is_none());
+        assert!(meta.consequence.is_routine());
         assert_eq!(meta.priority, ActionPriority::Secondary);
         assert!(
             meta.summary.contains("degrades again"),
@@ -490,11 +546,11 @@ mod tests {
         );
     }
 
-    /// The two irreversible ones ask first. Forget is reachable everywhere by
-    /// model design, so the confirm is the only thing standing between a
-    /// stuck card and a deleted record.
+    /// The irreversible ones arm first. Forget is reachable everywhere by
+    /// model design, so the armed second click is the only thing standing
+    /// between a stuck card and a deleted record.
     #[test]
-    fn the_destructive_gestures_carry_a_confirmation() {
+    fn the_lasting_gestures_carry_their_copy() {
         for action in [
             Action::Forget {
                 device: DeviceId(1),
@@ -504,8 +560,8 @@ mod tests {
             },
         ] {
             let meta = DevicesOp::new(action.clone()).default_action_meta();
-            assert!(meta.destructive, "{action:?}");
-            assert!(meta.confirmation.is_some(), "{action:?}");
+            assert!(meta.consequence.arms(), "{action:?}");
+            assert!(meta.consequence.copy().is_some(), "{action:?}");
         }
     }
 }

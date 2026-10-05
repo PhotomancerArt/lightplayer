@@ -3,11 +3,11 @@
 use lpa_studio_core::{
     ColorOrder, ControlDisplayLayout, ControlExtent, ControlLamp2d, ControlLayout2d,
     ControlSampleEncoding, ControlSampleLayout, ControlSampleSpan, ControllerId, DirtySummary,
-    NodeCardUiState, NodeRemoveOp, NodeRevertOp, ProjectNodeAddress, ProjectSlotAddress,
+    NodeCardUiState, NodeRemoveOp, NodeRevertOp, OfferPath, ProjectNodeAddress, ProjectSlotAddress,
     ProjectSlotRoot, Revision, SlotEditOp, SlotPath, UiAction, UiAssetEditorKind,
     UiBindingEndpoint, UiConfigSlot, UiControlProductPreview, UiControlSampleFormat, UiNodeChild,
     UiNodeDirtyState, UiNodeHeader, UiNodeRemovePreflight, UiNodeSection, UiNodeTab, UiNodeTabBody,
-    UiNodeView, UiPaneAction, UiPendingEdit, UiPendingEditKind, UiPendingEditPhase,
+    UiNodeView, UiOffer, UiOfferTree, UiPendingEdit, UiPendingEditKind, UiPendingEditPhase,
     UiProducedBinding, UiProducedBindings, UiProducedProduct, UiProducedValue, UiProductPreview,
     UiProductTrackingState, UiSlotAsset, UiSlotEditorHint, UiSlotFieldState, UiSlotOptionality,
     UiSlotRecord, UiSlotSourceState, UiSlotUnit, UiSlotValue, UiStatus,
@@ -138,45 +138,69 @@ pub(crate) fn fault_node_view() -> UiNodeView {
     .with_node_id("shader-blast")
 }
 
-/// The node-header batch-revert pane action the controller supplies while a
-/// node's subtree summary is dirty (same "revert" icon token as the project
-/// header's Revert-to-saved).
-pub(crate) fn node_revert_pane_action() -> UiPaneAction {
-    UiPaneAction::new(
+/// The playlist card's node address (its header path).
+pub(crate) const PLAYLIST_NODE: &str = "/fyeah_sign.show/playlist.playlist";
+/// The nested-dirty fixture's active child and its grandchild.
+const IDLE_NODE: &str = "/fyeah_sign.show/playlist.playlist/idle.shader";
+const FLICKER_NODE: &str = "/fyeah_sign.show/playlist.playlist/idle.shader/flicker.shader";
+
+/// The node-header batch revert the controller publishes at
+/// `project/<node>/revert` while a node's subtree summary is dirty (same
+/// "revert" icon token as the project header's Revert-to-saved).
+pub(crate) fn node_revert_offer(node: &str) -> UiOffer {
+    let node = ProjectNodeAddress::parse(node).expect("valid story node address");
+    UiOffer::new(
+        OfferPath::project_node(&node).child("revert"),
         "revert",
-        UiAction::from_op(
-            ControllerId::new("story.module"),
-            NodeRevertOp {
-                node: ProjectNodeAddress::parse("/fyeah_sign.show/playlist.playlist")
-                    .expect("valid story node address"),
-            },
-        ),
+        UiAction::from_op(ControllerId::new("story.module"), NodeRevertOp { node }),
     )
 }
 
-/// The always-available delete-node pane action (authoring P4/P5): the
-/// `NodeRemoveOp` wearing the confirmation the controller composes from the
-/// removal pre-flight (dependents, swept pending edits, staged file
-/// deletions). Renders as the Trash2 icon through the generic pane-action
-/// path; the press runs the composed warning before dispatch.
-pub(crate) fn node_delete_pane_action() -> UiPaneAction {
+/// The always-available delete-node offer (authoring P4/P5) at
+/// `project/<playlist>/remove`: the `NodeRemoveOp`, Undoable, whose summary
+/// is what the controller composes from the removal pre-flight (dependents,
+/// swept pending edits, staged file deletions). Renders as the Trash2 icon
+/// in the error tint through the generic pane-action path; one click
+/// removes, and the save panel's revert brings it back.
+pub(crate) fn node_delete_offer() -> UiOffer {
     let preflight = UiNodeRemovePreflight {
         node_label: "Playlist".to_string(),
         dependent_count: 1,
         pending_edit_count: 2,
         staged_files: vec!["/playlist.json".to_string()],
     };
-    UiPaneAction::new(
+    let node = ProjectNodeAddress::parse(PLAYLIST_NODE).expect("valid story node address");
+    UiOffer::new(
+        OfferPath::project_node(&node).child("remove"),
         "remove",
-        UiAction::from_op(
-            ControllerId::new("story.module"),
-            NodeRemoveOp {
-                node: ProjectNodeAddress::parse("/fyeah_sign.show/playlist.playlist")
-                    .expect("valid story node address"),
-            },
-        )
-        .with_confirmation(preflight.confirmation()),
+        UiAction::from_op(ControllerId::new("story.module"), NodeRemoveOp { node })
+            .with_summary(preflight.summary()),
     )
+}
+
+/// An offer tree holding `offers`, in order — what a story hands
+/// `OffersProvider` in place of the shell's.
+pub(crate) fn story_offers(offers: impl IntoIterator<Item = UiOffer>) -> UiOfferTree {
+    let mut tree = UiOfferTree::new();
+    for offer in offers {
+        tree.publish(offer);
+    }
+    tree
+}
+
+/// The dirty playlist cards' verbs: the playlist's subtree revert.
+pub(crate) fn dirty_playlist_offers() -> UiOfferTree {
+    story_offers([node_revert_offer(PLAYLIST_NODE)])
+}
+
+/// [`nested_dirty_node_view`]'s verbs: a subtree revert on each dirty card
+/// (the playlist, its active child, and that child's grandchild).
+pub(crate) fn nested_dirty_offers() -> UiOfferTree {
+    story_offers([
+        node_revert_offer(PLAYLIST_NODE),
+        node_revert_offer(IDLE_NODE),
+        node_revert_offer(FLICKER_NODE),
+    ])
 }
 
 /// A multi-row Debug-section specimen: one persisted **Settings** section
@@ -349,15 +373,14 @@ fn probe_slot_address(path: &str) -> ProjectSlotAddress {
 }
 
 /// Playlist node whose subtree carries unsaved (persisted) edits — drives the
-/// yellow pencil affordance, the header batch-revert action, and D7 tint
-/// variants.
+/// yellow pencil affordance and D7 tint variants (its header batch revert is
+/// [`dirty_playlist_offers`]).
 pub(crate) fn unsaved_dirty_node_view() -> UiNodeView {
     let mut view = playlist_node_view();
     view.header.dirty = DirtySummary {
         persisted: 2,
         failed: 0,
     };
-    view.header_actions = vec![node_revert_pane_action()];
     view
 }
 
@@ -421,50 +444,46 @@ fn story_pending_edit(
         kind,
         old_value: None,
         phase,
-        revert: Some(UiAction::from_op(
-            ControllerId::new("story.module"),
-            SlotEditOp::Revert { address },
-        )),
+        key: Some(format!("{}:def:{}", address.node, address.path)),
     }
 }
 
 /// Playlist node whose subtree carries a rejected edit — drives the red
-/// warning affordance, the header batch-revert action, and D7 tint variants.
+/// warning affordance and D7 tint variants (its header batch revert is
+/// [`dirty_playlist_offers`]).
 pub(crate) fn failed_dirty_node_view() -> UiNodeView {
     let mut view = playlist_node_view();
     view.header.dirty = DirtySummary {
         persisted: 1,
         failed: 1,
     };
-    view.header_actions = vec![node_revert_pane_action()];
     view
 }
 
 /// Three-level bubbling fixture: the grandchild carries the edits and every
 /// ancestor's summary includes them, exactly as the controller's aggregation
 /// walk produces (grandchild {1p} → child {1p} → parent adds one persisted
-/// edit of its own → {2p}).
+/// edit of its own → {2p}). Each dirty card's revert is in
+/// [`nested_dirty_offers`].
 pub(crate) fn nested_dirty_node_view() -> UiNodeView {
     let bubbled = DirtySummary {
         persisted: 1,
         failed: 0,
     };
 
-    let mut grandchild =
-        UiNodeChild::new("flicker", "Shader", "./flicker.json").with_sections(vec![
-            UiNodeSection::ConfigSlots(vec![
-                UiConfigSlot::value(
-                    "rate",
-                    "Rate",
-                    UiSlotValue::f32(4.0).with_unit(UiSlotUnit::hertz()),
-                )
-                .with_state(UiSlotFieldState::editable().with_dirty(UiNodeDirtyState::Dirty)),
-            ]),
-        ]);
+    let mut grandchild = UiNodeChild::new("flicker", "Shader", FLICKER_NODE).with_sections(vec![
+        UiNodeSection::ConfigSlots(vec![
+            UiConfigSlot::value(
+                "rate",
+                "Rate",
+                UiSlotValue::f32(4.0).with_unit(UiSlotUnit::hertz()),
+            )
+            .with_state(UiSlotFieldState::editable().with_dirty(UiNodeDirtyState::Dirty)),
+        ]),
+    ]);
     grandchild.dirty = bubbled;
-    grandchild.header_actions = vec![node_revert_pane_action()];
 
-    let mut child = UiNodeChild::new("idle", "Shader", "./idle.json")
+    let mut child = UiNodeChild::new("idle", "Shader", IDLE_NODE)
         .active("active, fade_after 0.12 s")
         .with_sections(vec![UiNodeSection::ConfigSlots(vec![UiConfigSlot::value(
             "shader",
@@ -473,7 +492,6 @@ pub(crate) fn nested_dirty_node_view() -> UiNodeView {
         )])])
         .with_children(vec![grandchild]);
     child.dirty = bubbled;
-    child.header_actions = vec![node_revert_pane_action()];
 
     let mut view = UiNodeView::new(
         playlist_header(),
@@ -490,12 +508,11 @@ pub(crate) fn nested_dirty_node_view() -> UiNodeView {
         persisted: 1,
         failed: 0,
     });
-    view.header_actions = vec![node_revert_pane_action()];
     view
 }
 
 pub(crate) fn playlist_header() -> UiNodeHeader {
-    UiNodeHeader::new("Playlist", "Playlist", "/fyeah_sign.show/playlist.playlist")
+    UiNodeHeader::new("Playlist", "Playlist", PLAYLIST_NODE)
         .with_source("playlist.json")
         .with_status(UiStatus::good("Running"))
         .with_summary("entry 1")

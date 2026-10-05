@@ -21,6 +21,13 @@
 //! a new session ([`SniffEvent::Session`]): both directions' reassembly starts
 //! over, and so must any per-session state the caller keeps (the learned wire
 //! dictionary).
+//!
+//! **Secure links.** A sniffer holds no keys. Once it has seen a SYN with
+//! the `SECURE` flag (feature `secure` on the link; the sniffer reads the
+//! flag whatever its own features), it reports every later frame of that
+//! capture as opaque [`SniffEvent::Sealed`]: kind, channel and length are in
+//! the clear, the payload is not, and it never tries to read one as a
+//! message. A plain SYN from a new session ends that.
 
 use alloc::vec::Vec;
 
@@ -28,7 +35,7 @@ use crate::Micros;
 use crate::cobs;
 use crate::crc::CrcKind;
 use crate::deframer::{Deframed, Deframer, IdleFlush};
-use crate::frame::{self, FrameKind, HEADER_LEN, Header, SynBody};
+use crate::frame::{self, FrameKind, HEADER_LEN, Header, SYN_SECURE, SynBody};
 
 /// The largest frame payload the sniffer accepts (every preset is below it).
 const MAX_PAYLOAD: usize = 2048;
@@ -85,6 +92,15 @@ pub enum SniffEvent {
     /// Reliable frames the capture never saw, even resent: the message they
     /// belonged to is lost to the capture (not to the link). `skipped` frames.
     Gap { dir: Direction, skipped: u8 },
+    /// A frame of a secure session: its payload is sealed and the sniffer
+    /// has no key. `len` is the sealed body's length (counter, ciphertext and
+    /// tag); its checksum was verified when the capture knew the nonces.
+    Sealed {
+        dir: Direction,
+        kind: FrameKind,
+        chan: u8,
+        len: usize,
+    },
 }
 
 /// One reliable frame waiting for its turn.
@@ -138,6 +154,8 @@ pub struct LinkSniffer {
     /// The previous session's key, so a frame in flight across a reset is
     /// dropped quietly instead of reported damaged.
     prev_key: Option<u32>,
+    /// The capture has seen a secure SYN: frames are sealed.
+    sealed: bool,
 }
 
 impl LinkSniffer {
@@ -156,6 +174,7 @@ impl LinkSniffer {
             streams: [stream(), stream()],
             nonces: [None, None],
             prev_key: None,
+            sealed: false,
         }
     }
 
@@ -253,11 +272,17 @@ impl LinkSniffer {
             return false;
         };
         if hdr.kind == FrameKind::Syn {
-            let Some(syn) = frame::verify(self.crc, 0, raw).and_then(SynBody::parse) else {
+            let Some((syn, flags)) =
+                frame::verify(self.crc, 0, raw).and_then(SynBody::parse_prefix)
+            else {
                 on(SniffEvent::Damaged { dir });
                 return false;
             };
-            self.on_syn(dir, syn, on);
+            // A plain SYN longer than 12 bytes is read by its prefix, as a
+            // plain link reads it (`SynBody::parse`): the rest is an
+            // extension the sniffer, like the link, does not know.
+            let secure = flags & SYN_SECURE != 0;
+            self.on_syn(dir, syn, secure, on);
             return true;
         }
         let (body, verified) = match self.key() {
@@ -284,6 +309,15 @@ impl LinkSniffer {
                 (&raw[HEADER_LEN..raw.len() - n], false)
             }
         };
+        if self.sealed {
+            on(SniffEvent::Sealed {
+                dir,
+                kind: hdr.kind,
+                chan: hdr.chan,
+                len: body.len(),
+            });
+            return true;
+        }
         match hdr.kind {
             FrameKind::Data => self.on_data(dir, &hdr, body, verified, on),
             FrameKind::Datagram => on(SniffEvent::Message {
@@ -297,9 +331,21 @@ impl LinkSniffer {
         true
     }
 
-    fn on_syn(&mut self, dir: Direction, syn: SynBody, on: &mut impl FnMut(SniffEvent)) {
+    fn on_syn(
+        &mut self,
+        dir: Direction,
+        syn: SynBody,
+        secure: bool,
+        on: &mut impl FnMut(SniffEvent),
+    ) {
         let side = dir.index();
-        if self.nonces[side] != Some(syn.nonce) {
+        let new_session = self.nonces[side] != Some(syn.nonce);
+        if secure {
+            self.sealed = true;
+        } else if new_session {
+            self.sealed = false;
+        }
+        if new_session {
             if let Some(key) = self.key() {
                 self.prev_key = Some(key);
             }
@@ -604,6 +650,68 @@ mod tests {
             vec![SniffEvent::Damaged {
                 dir: Direction::BoardToHost
             }]
+        );
+    }
+
+    /// A secure session reads as sessions and sealed frames: never a
+    /// message, never damage, and the payload's bytes appear nowhere.
+    #[cfg(feature = "secure")]
+    #[test]
+    fn a_secure_capture_reads_as_sealed_frames() {
+        use crate::secure_channel::{KeyId, Psk, SecureEvent, SecureRole};
+        fn entropy(buf: &mut [u8]) {
+            static NEXT: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(1);
+            for b in buf {
+                *b = NEXT.fetch_add(37, core::sync::atomic::Ordering::Relaxed);
+            }
+        }
+        let (key_id, psk) = (KeyId([3; 16]), Psk::new([4; 32]));
+        let mut run = Pair::new();
+        run.board = Link::new_secure(
+            LinkConfig::usb(),
+            0x1111_2222,
+            SecureRole::Responder,
+            entropy,
+        );
+        run.host = Link::new_secure(
+            LinkConfig::usb(),
+            0x3333_4444,
+            SecureRole::Initiator {
+                key_id,
+                psk: psk.clone(),
+            },
+            entropy,
+        );
+        for _ in 0..5 {
+            run.settle();
+            while let Some(ev) = run.board.poll_secure_event() {
+                if let SecureEvent::KeyLookup { key_id } = ev {
+                    run.board.provide_keys(key_id, &[psk.clone()]);
+                }
+            }
+        }
+        let secret = b"a request nobody else may read";
+        run.host.send(CH_PROTO, secret).unwrap();
+        run.board.send(CH_LOG, b"\x03a sealed log line").unwrap();
+        run.settle();
+        assert!(run.board.session_auth().is_some(), "the pair came up");
+
+        let events = sniff(&run.capture);
+        assert!(messages_of(&events).is_empty());
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, SniffEvent::Damaged { .. }))
+        );
+        let sealed = events
+            .iter()
+            .filter(|e| matches!(e, SniffEvent::Sealed { .. }))
+            .count();
+        assert!(sealed > 2, "{sealed}");
+        assert!(
+            !run.capture
+                .iter()
+                .any(|(_, b)| b.windows(secret.len()).any(|w| w == secret))
         );
     }
 

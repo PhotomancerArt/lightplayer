@@ -1,0 +1,384 @@
+//! Stage B of the app-agent evals (plan `lp2025/2026-10-01-0126-app-agent-harness`,
+//! PD8): deploy a project tree to the shipped C6 image running in the
+//! emulator and decode what reaches the XIAO C6's D6 pad (GPIO16).
+//!
+//! Stage A (`lpa-studio-core`, `app/agent/evals`) judges the project the
+//! agent built at the model level and writes its tree to disk; this file is
+//! the ground truth for "Sean's LEDs light": the image's own JIT compiles
+//! the project's shaders, its RMT drives the pad, and the waveform decoder
+//! reads the frames back.
+//!
+//! - **Golden leg** (deterministic, `just test-emu-c6-cli`): the committed
+//!   golden projects (`lpa-studio-core/tests/fixtures/app_agent/golden/`)
+//!   must drive complete, error-free, lit, changing frames of the right
+//!   length on pad 16.
+//! - **Live leg** (`just app-agent-eval`, `just app-agent-corpus`):
+//!   `LP_APP_AGENT_PROJECT=<dir>`, `LP_APP_AGENT_LEDS=<n>` and
+//!   `LP_APP_AGENT_PAD=<gpio>` (the scenario's pin through its board's pin
+//!   map; 16, XIAO D6, when unset) point at the tree a model run produced.
+//!
+//! `#[ignore]`d: they need a built `fw-esp32c6` ELF (`LP_EMU_BUILD_FW=1`,
+//! or CI's images via `LP_CI_IMAGES`). Times are emulated (`lp-emu:esp32c6:t1`);
+//! nothing here reads the host clock.
+
+use std::future::Future;
+use std::path::{Path, PathBuf};
+use std::pin::pin;
+use std::sync::Arc;
+use std::task::{Context, Poll, Wake, Waker};
+
+use lp_cli::commands::emu::link_host::{C6Board, EmuLinkHost};
+use lp_emu_esp_common::pins::{PadId, RouteSource, SignalId};
+use lp_emu_esp_common::strip::ws281x::Frame;
+use lp_emu_esp32c6::flash::FlashBacking;
+use lp_emu_esp32c6::machine::{AppSource, Esp32C6Builder, TimeGrade, UsbHost};
+use lp_emu_esp32c6::memmap;
+use lp_emu_esp32c6::test_support::{FwImage, fw_esp32c6_image};
+
+/// One fixed host nonce, so two runs are the same run.
+const NONCE: u32 = 0x4057_C6A7;
+
+/// The XIAO ESP32-C6's D6 pin: the goldens' pad, and the live leg's when
+/// the scenario names none.
+const XIAO_D6_PAD: u8 = 16;
+
+/// The RMT output signals a WS281x channel routes onto its pad (two
+/// channels on the C6).
+const RMT_SIGNALS: [u16; 2] = [71, 72];
+
+/// Emulated time stage B waits for the first lit frame after the upload.
+/// Generous on purpose: the emulated C6 builds a graphics stage far slower
+/// than silicon (open defect
+/// `docs/defects/2026-09-10-the-emulated-c6-builds-a-graphics-stage-40x-slower-than-silicon.md`),
+/// so a project that loads in a blink on a board can take seconds here.
+/// A golden lights in about half a second, so the wait costs only the
+/// projects that need it.
+const FIRST_LIT_CAP_US: u64 = 30_000_000;
+
+/// Emulated time rendered after the first lit frame — the frames judged.
+const AFTER_LIT_US: u64 = 2_000_000;
+
+/// The step the wait advances by between looks at the pad.
+const WAIT_STEP_US: u64 = 500_000;
+
+/// Two frames at least this far apart (emulated) must differ: the patterns
+/// animate.
+const CHANGE_GAP_US: u64 = 500_000;
+
+#[test]
+#[ignore = "needs a built fw-esp32c6 ELF; `just test-emu-c6-cli` runs it"]
+fn the_sean_250_golden_lights_250_leds_on_d6() {
+    decode_and_check(&golden("sean-250-d6"), 250, XIAO_D6_PAD);
+}
+
+#[test]
+#[ignore = "needs a built fw-esp32c6 ELF; `just test-emu-c6-cli` runs it"]
+fn the_sean_300_golden_lights_300_leds_on_d6() {
+    decode_and_check(&golden("sean-300-d6"), 300, XIAO_D6_PAD);
+}
+
+/// The project the golden edit script built from Blank, through the real
+/// `edit_project` tool and Studio op (stage A's scripted replay writes it;
+/// `just test-emu-c6-cli` runs that replay first).
+#[test]
+#[ignore = "needs a built fw-esp32c6 ELF; `just test-emu-c6-cli` runs it"]
+fn the_sean_script_replay_lights_250_leds_on_d6() {
+    decode_and_check(&replayed("e1-sean-from-empty"), 250, XIAO_D6_PAD);
+}
+
+/// The 300-LED script, replayed on the 250 golden.
+#[test]
+#[ignore = "needs a built fw-esp32c6 ELF; `just test-emu-c6-cli` runs it"]
+fn the_make_it_300_script_replay_lights_300_leds_on_d6() {
+    decode_and_check(&replayed("e2-make-it-300"), 300, XIAO_D6_PAD);
+}
+
+/// The judge can fail: the 250 golden is not a 300-LED strip.
+#[test]
+#[ignore = "needs a built fw-esp32c6 ELF; `just test-emu-c6-cli` runs it"]
+fn the_sean_golden_is_judged_against_its_own_count() {
+    let Some(elf) = image() else {
+        return;
+    };
+    let run = deploy_and_render(&elf, &golden("sean-250-d6"), XIAO_D6_PAD);
+    let reason = judge(&run, 300).expect_err("250 LEDs are not 300");
+    assert!(reason.contains("wrong LED count"), "{reason}");
+}
+
+/// The live leg: a project tree a model run wrote (stage A's
+/// `target/app-agent-evals/<run>/<scenario>/project/`).
+#[test]
+#[ignore = "live leg: set LP_APP_AGENT_PROJECT, LP_APP_AGENT_LEDS and LP_APP_AGENT_PAD (`just app-agent-eval`)"]
+fn an_agent_built_project_lights_its_leds_on_its_pad() {
+    let Ok(dir) = std::env::var("LP_APP_AGENT_PROJECT") else {
+        panic!("LP_APP_AGENT_PROJECT is not set — `just app-agent-eval` sets it");
+    };
+    let leds: usize = std::env::var("LP_APP_AGENT_LEDS")
+        .ok()
+        .and_then(|n| n.parse().ok())
+        .expect("LP_APP_AGENT_LEDS=<led count>");
+    let pad: u8 = std::env::var("LP_APP_AGENT_PAD")
+        .ok()
+        .map(|pad| pad.parse().expect("LP_APP_AGENT_PAD=<gpio number>"))
+        .unwrap_or(XIAO_D6_PAD);
+    decode_and_check(Path::new(&dir), leds, pad);
+}
+
+/// Deploy `dir` to a booted C6, render until it lights (or the cap), and judge
+/// the frames on `pad` against `leds`. Prints one summary line.
+fn decode_and_check(dir: &Path, leds: usize, pad: u8) {
+    let Some(elf) = image() else {
+        return;
+    };
+    let run = deploy_and_render(&elf, dir, pad);
+    match judge(&run, leds) {
+        Ok(summary) => println!(
+            "app-agent stage B (lp-emu:esp32c6:t1, lp-emu {}): {} — {summary}",
+            lp_emu_commit(),
+            dir.display()
+        ),
+        Err(reason) => panic!("{}: {reason}\n{}", dir.display(), run.console.join("\n")),
+    }
+}
+
+/// Whether the frames on the run's pad are `leds` LEDs long, whole, clean, lit and
+/// changing: `Ok(summary)` or `Err(what is wrong)`.
+fn judge(run: &RenderRun, leds: usize) -> Result<String, String> {
+    if let Some(stopped) = &run.stopped {
+        // Named apart from a project fault: the emulated C6 builds a
+        // graphics stage far slower than silicon, and a heavy enough load
+        // trips the 8 s runtime watchdog here where a board would not
+        // (open defect, see FIRST_LIT_CAP_US).
+        return Err(format!(
+            "emu-watchdog: {stopped} — the emulated C6 reset while the project loaded; \
+             likely the open graphics-stage fidelity defect, not the project"
+        ));
+    }
+    if !run.routed.iter().any(|(pad, source)| {
+        *pad == PadId(run.pad)
+            && RMT_SIGNALS
+                .iter()
+                .any(|sig| *source == RouteSource::Signal(SignalId(*sig), false))
+    }) {
+        return Err(format!(
+            "gpio{} is not routed to an RMT channel: {:?}",
+            run.pad, run.routed
+        ));
+    }
+    let frames = &run.frames;
+    if frames.is_empty() {
+        return Err(format!("no frame reached gpio{}", run.pad));
+    }
+    let Some(lit) = frames.iter().position(|f| f.wire.iter().any(|b| *b != 0)) else {
+        return Err(format!(
+            "{} frames on gpio{} and every one of them black",
+            frames.len(),
+            run.pad
+        ));
+    };
+    // Every frame from the first lit one on, except a last frame the window
+    // cut open, is whole, clean, and the strip's length.
+    let last = frames.last().expect("frames").n;
+    let mut judged = Vec::new();
+    for f in &frames[lit..] {
+        if f.reset_cycles.is_none() {
+            if f.n != last {
+                return Err(format!("frame {} is open but not the last", f.n));
+            }
+            continue;
+        }
+        if f.error_count != 0 {
+            return Err(format!("frame {}: {:?}", f.n, f.errors));
+        }
+        if !f.is_complete() {
+            return Err(format!("frame {} was cut short: {f:?}", f.n));
+        }
+        if f.leds() != leds {
+            return Err(format!(
+                "frame {} carries the wrong LED count: {} instead of {leds}",
+                f.n,
+                f.leds()
+            ));
+        }
+        judged.push(f);
+    }
+    if judged.len() < 2 {
+        return Err(format!(
+            "only {} whole frames after the first lit one",
+            judged.len()
+        ));
+    }
+    let first = judged[0];
+    let gap = CHANGE_GAP_US * memmap::CYCLES_PER_US;
+    if !judged
+        .iter()
+        .any(|f| f.start >= first.start + gap && f.wire != first.wire)
+    {
+        return Err(format!(
+            "no frame {CHANGE_GAP_US} us after the first lit one differs from it — the strip is frozen"
+        ));
+    }
+    Ok(format!(
+        "{} frames on gpio{}, first lit n={} at {:.3} ms, {} whole {leds}-LED frames after it",
+        frames.len(),
+        run.pad,
+        first.n,
+        first.start as f64 / memmap::CYCLES_PER_US as f64 / 1_000.0,
+        judged.len()
+    ))
+}
+
+struct RenderRun {
+    /// The pad the frames were decoded on.
+    pad: u8,
+    /// Why the board stopped before the window ended (a watchdog reset).
+    stopped: Option<String>,
+    console: Vec<String>,
+    frames: Vec<Frame>,
+    routed: Vec<(PadId, RouteSource)>,
+}
+
+/// Boot, wait for the hello, deploy `dir` over the link as `lp-cli upload`
+/// does, then render until the first lit frame (at most
+/// [`FIRST_LIT_CAP_US`]) and [`AFTER_LIT_US`] beyond it, in emulated time.
+fn deploy_and_render(elf: &Path, dir: &Path, pad: u8) -> RenderRun {
+    let mut host = hosted(elf);
+    let hello = host
+        .wait_for_line("\"hello\":{", 3_000_000)
+        .expect("the boot");
+    assert!(hello.is_some(), "no hello:\n{}", host.console().join("\n"));
+
+    let dir = dir.to_path_buf();
+    let (uid, _) = lp_cli::commands::dev::validation::validate_local_project(&dir)
+        .expect("the project validates");
+    let files = lp_cli::commands::dev::collect_project_deploy_files(&lpfs::LpFsStd::new(dir))
+        .expect("the project's files");
+    {
+        let mut client = lpa_client::LpClient::new(&mut host);
+        block_on(client.deploy_project_files(&uid, files))
+            .unwrap_or_else(|e| panic!("the deploy failed: {e}"));
+    }
+    host.set_queue_messages(false);
+    let uploaded = host.board.machine.micros();
+    let mut lit_at = None;
+    let mut stopped = None;
+    while lit_at.is_none() && host.board.machine.micros() < uploaded + FIRST_LIT_CAP_US {
+        let until = host.board.machine.micros() + WAIT_STEP_US;
+        if let Err(error) = host.run_until(until, None) {
+            stopped = Some(error.to_string());
+            break;
+        }
+        if host
+            .board
+            .machine
+            .frames(pad)
+            .iter()
+            .any(|f| f.wire.iter().any(|b| *b != 0))
+        {
+            lit_at = Some(host.board.machine.micros());
+        }
+    }
+    if let Some(lit) = lit_at
+        && let Err(error) = host.run_until(lit + AFTER_LIT_US, None)
+    {
+        stopped = Some(error.to_string());
+    }
+    host.board.machine.flush_frames();
+    assert_eq!(host.link_errors, 0, "{}", host.console().join("\n"));
+    RenderRun {
+        pad,
+        stopped,
+        console: host.console().to_vec(),
+        frames: host.board.machine.frames(pad).to_vec(),
+        routed: host.board.machine.routed_pads(),
+    }
+}
+
+/// The shipped image, direct-loaded (not ROM-up: the mask ROM talks on
+/// UART0, which is GPIO16 — the pad under test), attached and draining
+/// from power-on with this process as the host on its link.
+fn hosted(elf: &Path) -> EmuLinkHost<C6Board> {
+    let machine = Esp32C6Builder::new()
+        .app(AppSource::Path(elf.to_path_buf()))
+        .flash(FlashBacking::Blank)
+        .strict(true)
+        .time_grade(TimeGrade::T1)
+        .usb_host(UsbHost::Attached { draining: true })
+        .usb_sj_queue_source()
+        .build()
+        .expect("the shipped image builds a machine");
+    EmuLinkHost::new(C6Board::new(machine).expect("a hosted board"), NONCE, true)
+}
+
+fn image() -> Option<PathBuf> {
+    match fw_esp32c6_image(&FwImage::SHIPPED) {
+        Ok(path) => Some(path),
+        Err(reason) => {
+            eprintln!("app_agent_emu_decode: skipped — {reason}");
+            None
+        }
+    }
+}
+
+/// A tree stage A's scripted replay wrote. Missing means the replay has not
+/// run in this target dir — said loudly, then the test fails.
+fn replayed(scenario: &str) -> PathBuf {
+    let target = std::env::var_os("CARGO_TARGET_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| repo_root().join("target"));
+    let dir = target
+        .join("app-agent-evals/scripted")
+        .join(scenario)
+        .join("project");
+    assert!(
+        dir.join("project.json").exists(),
+        "{} is missing — run `cargo test -p lpa-studio-core app_agent` first \
+         (`just test-emu-c6-cli` does)",
+        dir.display()
+    );
+    dir
+}
+
+fn golden(name: &str) -> PathBuf {
+    repo_root()
+        .join("lp-app/lpa-studio-core/tests/fixtures/app_agent/golden")
+        .join(name)
+}
+
+fn repo_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("lp-cli sits under the repo root")
+        .to_path_buf()
+}
+
+/// The `lp-emu` commit an emulated number is quoted against (AGENTS.md:
+/// emulated measurements name their emulator and its commit).
+fn lp_emu_commit() -> String {
+    std::process::Command::new("git")
+        .args(["log", "-1", "--format=%h", "--", "lp-emu"])
+        .current_dir(repo_root())
+        .output()
+        .ok()
+        .and_then(|out| String::from_utf8(out.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
+/// Drive a future whose every await completes synchronously (the host steps
+/// the board inside `receive`): tests are edges, and a null waker is enough.
+fn block_on<F: Future>(future: F) -> F::Output {
+    struct Noop;
+    impl Wake for Noop {
+        fn wake(self: Arc<Self>) {}
+    }
+    let waker = Waker::from(Arc::new(Noop));
+    let mut context = Context::from_waker(&waker);
+    let mut future = pin!(future);
+    loop {
+        if let Poll::Ready(output) = future.as_mut().poll(&mut context) {
+            return output;
+        }
+    }
+}

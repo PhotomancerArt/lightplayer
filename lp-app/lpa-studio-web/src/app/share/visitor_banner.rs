@@ -109,6 +109,20 @@ pub fn should_apply_fast_forward(can_fast_forward: bool, overlay_dirty: bool) ->
     can_fast_forward && !overlay_dirty
 }
 
+/// Whether the pull loop should say its fast-forward reached the open
+/// editor. The local apply already landed by the time this is asked — what
+/// this gates is the SEPARATE `ProjectOp::ReloadActiveProject` dispatch
+/// that catches the editor up to it, which can still fail (a damaged
+/// collaborator update, refused on re-push) after the toast used to fire
+/// unconditionally. `reload_outcome` is whatever the actor settled for that
+/// dispatch (`open_progress::reload_outcome`, polled with no reply
+/// channel): `None` (still unsettled when the poll budget ran out) and
+/// `Some(false)` (refused — the opening frame's own failure notice already
+/// covers it) both stay quiet; only a confirmed success speaks.
+pub fn should_say_updated(reload_outcome: Option<bool>) -> bool {
+    reload_outcome == Some(true)
+}
+
 /// What the strip renders — the two §3-A states plus the edit-link line.
 #[derive(Clone, Debug, PartialEq)]
 pub enum VisitorBannerView {
@@ -320,6 +334,20 @@ mod tests {
         assert!(!should_apply_fast_forward(true, true));
         assert!(!should_apply_fast_forward(false, false));
         assert!(!should_apply_fast_forward(false, true));
+    }
+
+    /// The toast speaks only on a CONFIRMED reload success — a refusal and
+    /// an unsettled poll both stay quiet, the one behavior this ticket
+    /// exists to enforce (2026-10-02: the toast used to fire before the
+    /// dispatch even ran).
+    #[test]
+    fn updated_is_said_only_on_a_confirmed_reload_success() {
+        assert!(should_say_updated(Some(true)));
+        assert!(
+            !should_say_updated(Some(false)),
+            "a refused reload stays quiet"
+        );
+        assert!(!should_say_updated(None), "an unsettled poll stays quiet");
     }
 
     // The strip's Copy/Fork buttons now render through

@@ -139,7 +139,7 @@ impl DoorLink {
         while let Some(frame) = self.port.poll_transmit(now) {
             let frame = frame.to_vec();
             self.socket
-                .send(Message::Binary(frame.into()))
+                .send(Message::Binary(frame))
                 .expect("writing a frame");
         }
     }

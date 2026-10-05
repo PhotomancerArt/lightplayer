@@ -26,15 +26,17 @@ pub(crate) mod fake_board_link;
 pub mod fake_device_core;
 pub mod fake_device_script;
 pub mod fake_device_stream;
-pub(crate) mod fake_filesystem_image;
+pub mod fake_flash_layout;
 
 pub use failure_injection::FakeFailurePlan;
 pub use fake_device_core::FakeEsp32Device;
 pub use fake_device_script::{
-    FAKE_DEVICE_PROJECT_DIR, FAKE_IMAGE_IDENTITY, FAKE_PROBED_MAC, FakeBootState,
-    FakeDeviceIdentity, FakeDeviceScript, FakeLightPlayerState, fake_provenance,
+    C6_ROM_BANNER, CLASSIC_ESP32_ROM_BANNER, FAKE_DEVICE_PROJECT_DIR, FAKE_IMAGE_IDENTITY,
+    FAKE_PROBED_MAC, FakeBootState, FakeDeviceIdentity, FakeDeviceScript, FakeFlashLayout,
+    FakeLightPlayerState, XIAO_FACTORY_DEMO_LINE, fake_provenance,
 };
 pub use fake_device_stream::FakeDeviceByteStream;
+pub use fake_flash_layout::{FAKE_FIRMWARE_LEN, fake_firmware_image, fake_target_table};
 
 #[cfg(test)]
 mod tests;

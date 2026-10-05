@@ -11,7 +11,7 @@
 // Usage:
 //   node scripts/extract-fw-manifest.mjs <artifact>            # raw payload
 //   node scripts/extract-fw-manifest.mjs <artifact> --stable   # provenance-
-//     free pretty JSON (commit/dirty/profile stripped) for diffing against a
+//     free pretty JSON (version/commit/dirty/profile stripped) for diffing against a
 //     checked-in manifest-core.expected.json.
 
 import { readFileSync } from "node:fs";
@@ -41,6 +41,7 @@ const payload = bytes.subarray(payloadStart, end).toString("utf8");
 
 if (mode === "--stable") {
   const core = JSON.parse(payload);
+  delete core.version;
   delete core.commit;
   delete core.dirty;
   delete core.profile;

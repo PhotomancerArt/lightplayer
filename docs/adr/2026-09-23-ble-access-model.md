@@ -4,7 +4,9 @@
 - **Date:** 2026-09-23
 - **Deciders:** Photomancer
 - **Supersedes:** None
-- **Superseded by:** None
+- **Superseded by:** in part, `2026-10-02-two-passwords-open-by-default.md`
+  (`open` is a tier — nobody, play or edit — and a board with no store is
+  open at edit, for now; device store version 3)
 
 ## Context
 
@@ -175,6 +177,13 @@ rather than mint predictable challenges.
 Nothing here is BLE-specific. A future WiFi (or any radio) link is one more
 `Untrusted` link on the same transport seam, gated by the same classifier,
 logging in with the same messages against the same access files.
+
+*Amended 2026-10-01:* a Wi-Fi link (LAN WebSocket, the relay) reuses the
+secrets, tiers, classifier and backoff, but not the HMAC login. It is a
+`LinkTrust::Keyed` link that logs in **by handshake**: lp-link's `secure`
+channel names an entry by its salt and proves `link_psk(K)`, and the match
+grants that entry's tier; `LoginAnswer` is refused there. See
+`docs/adr/2026-10-01-network-link-security.md`.
 
 ## Consequences
 

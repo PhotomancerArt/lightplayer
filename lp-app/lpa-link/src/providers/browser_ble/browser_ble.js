@@ -1,7 +1,7 @@
 // Studio's Web Bluetooth link: lp-link over a Nordic UART (NUS) GATT
 // service, owned here the way `browser_serial.js` owns a Web Serial port.
 //
-// Since `WIRE_PROTO_VERSION` 33 a board's Bluetooth links run lp-link, as
+// Since `WIRE_PROTO_VERSION` 36 a board's Bluetooth links run lp-link, as
 // its USB link does (plan `lp2025/2026-09-28-1445-ble-on-lp-link`): the
 // DATAGRAM framing, where one GATT value is one whole frame (a 4-byte
 // header, up to one payload, a 4-byte CRC-32C). This file does not read
@@ -459,6 +459,9 @@ export function write(id, frame) {
     session.errors.push("write on a bluetooth link that is not connected");
     return false;
   }
+  // A copy, never a view: Bluefy writes a view's whole underlying buffer
+  // (2026-10-02), and a frame from Rust is a view onto wasm memory. The
+  // copy owns a buffer exactly one frame long.
   const data = frame instanceof Uint8Array ? frame.slice() : new Uint8Array(frame);
   const generation = session.generation;
   const rx = session.rx;

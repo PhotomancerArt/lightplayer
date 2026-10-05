@@ -44,6 +44,8 @@ lpc-hardware = { path = "../lp-core/lpc-hardware", features = ["schema-gen"] }
 lpa-boards = { path = "../lp-app/lpa-boards", features = ["schema-gen"] }
 # The two persisted access files (project sidecar, device store).
 lpc-access = { path = "../lp-core/lpc-access", features = ["schema-gen"] }
+# `ota-manifest.json`, the OTA release manifest (schema only, today).
+lpc-firmware-release = { path = "../lp-core/lpc-firmware-release", features = ["schema-gen"] }
 # `firmware package`: the bootloader-range guard checks the merged image
 # against the device model's hung-bootloader table.
 lpa-devices = { path = "../lp-app/lpa-devices" }
@@ -138,6 +140,10 @@ serde_json = "1"
 # the strip order the pad decoder un-permutes by.
 lp-emu-esp-figures = { path = "../lp-emu/esp/lp-emu-esp-figures" }
 lp-ws281x = { path = "../lp-fw/lp-ws281x", default-features = false }
+# The oracle for the partition-table parity test
+# (tests/c6_partition_table_parity.rs): espflash's own CSV parser and binary
+# encoder, already in the tree through espflash.
+esp-idf-part = "0.5"
 
 [features]
 default = ["serial"]
@@ -145,3 +151,7 @@ serial = []
 
 [lints]
 workspace = true
+
+# The build stamps its app version (LP_APP_VERSION): tools/lp-app-version.
+[build-dependencies]
+lp-app-version = { path = "../tools/lp-app-version" }

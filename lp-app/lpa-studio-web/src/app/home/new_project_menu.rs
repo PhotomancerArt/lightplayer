@@ -12,9 +12,12 @@
 //! grid fights that cap. The sketches and the tree hint are recorded as a
 //! future embellishment, not dropped.
 //!
-//! The row strings come from [`ProjectTemplate`], not from here: adding a
-//! template is one arm in the core enum plus one in the file generator, and
-//! this menu grows the row for free.
+//! The menu is a renderer of core's `project/new` offer: its rows are the
+//! offer's `template` choices (titles and one-liners from
+//! [`lpa_studio_core::ProjectTemplate`]), and a row presses the offer with
+//! that template and the typed name — the same press the app agent makes.
+//! Adding a template is one arm in the core enum plus one in the file
+//! generator, and this menu grows the row for free.
 //!
 //! **One optional name field** sits above the rows (2026-09-06: Yona could
 //! not find how to name a project while setting up a piece). Blank keeps
@@ -24,25 +27,21 @@
 //! click.
 
 use dioxus::prelude::*;
-use lpa_studio_core::{HomeOp, ProjectTemplate, UiAction};
+use lpa_studio_core::{
+    NEW_PROJECT_NAME_PARAM, NEW_PROJECT_TEMPLATE_PARAM, OfferArgs, OfferChoice, OfferParamKind,
+    OfferPath, UiAction, UiOffer,
+};
 
-use crate::app::home::package_card::home_action;
 use crate::base::{
     DetailPopover, DetailSection, PopoverCloseHandle, PopoverPlacement, StudioIcon, StudioIconName,
 };
-use crate::core::quiet_action_class;
-
-/// Every template the New menu offers, in the order it offers them: the
-/// blank one first (it is what `New` has always meant), then the two
-/// library scaffolds.
-const TEMPLATES: [ProjectTemplate; 3] = [
-    ProjectTemplate::Blank,
-    ProjectTemplate::Pattern1d,
-    ProjectTemplate::Pattern2d,
-];
+use crate::core::{quiet_action_class, use_offer_at};
 
 /// The Projects header's New control. The trigger keeps the quiet-chip
 /// look it shares with Import and Paste — only what it opens changed.
+///
+/// Draws nothing when the view publishes no `project/new` (no project
+/// library, or a surface mounted outside the shell's offer tree).
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn NewProjectMenu(
@@ -54,13 +53,16 @@ pub fn NewProjectMenu(
     initially_open: bool,
     on_action: EventHandler<UiAction>,
 ) -> Element {
+    let offer = use_offer_at(OfferPath::project().child("new"))();
     let rest = quiet_action_class().to_string();
     let open = format!("{rest} tw:bg-card-muted tw:text-soft-foreground");
     // The optional name, shared by every row: typed once, carried by
     // whichever template is picked.
     let mut name = use_signal(String::new);
-    let typed = name.read().trim().to_string();
-    let project_name = (!typed.is_empty()).then_some(typed);
+    let Some(offer) = offer else {
+        return rsx! {};
+    };
+    let templates = template_choices(&offer);
 
     rsx! {
         DetailPopover {
@@ -89,11 +91,12 @@ pub fn NewProjectMenu(
                         oninput: move |event| name.set(event.value()),
                     }
                     div { class: "tw:grid tw:gap-0.5",
-                        for template in TEMPLATES {
+                        for template in templates {
                             TemplateRow {
-                                key: "{template:?}",
+                                key: "{template.value}",
+                                offer: offer.clone(),
                                 template,
-                                name: project_name.clone(),
+                                name: name.read().clone(),
                                 busy,
                                 on_action,
                             }
@@ -105,9 +108,22 @@ pub fn NewProjectMenu(
     }
 }
 
-/// One template row: title over a dim one-liner, dispatching the create
-/// and closing the menu (a pick is a completed gesture, the add-node
-/// picker's rule).
+/// The offer's `template` choices, in the order core offers them.
+fn template_choices(offer: &UiOffer) -> Vec<OfferChoice> {
+    offer
+        .params()
+        .iter()
+        .find(|param| param.name == NEW_PROJECT_TEMPLATE_PARAM)
+        .and_then(|param| match &param.kind {
+            OfferParamKind::Choice { options, .. } => Some(options.clone()),
+            _ => None,
+        })
+        .unwrap_or_default()
+}
+
+/// One template row: title over a dim one-liner, pressing `project/new`
+/// with this template and the typed name, and closing the menu (a pick is
+/// a completed gesture, the add-node picker's rule).
 ///
 /// Bespoke rather than `ActionButton { variant: MenuItem }` only because
 /// the row is two lines — the classes and the dispatch shape are the
@@ -115,36 +131,45 @@ pub fn NewProjectMenu(
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn TemplateRow(
-    template: ProjectTemplate,
-    /// The menu's optional name, already trimmed and `None` when blank.
+    offer: UiOffer,
+    template: OfferChoice,
+    /// The menu's optional name, as typed (core trims it; blank is none).
     #[props(default)]
-    name: Option<String>,
+    name: String,
     #[props(default = false)] busy: bool,
     on_action: EventHandler<UiAction>,
 ) -> Element {
-    let action = home_action(HomeOp::CreateProject { template, name });
-    let summary = action.meta().summary.clone();
+    let args = OfferArgs::new()
+        .with(NEW_PROJECT_TEMPLATE_PARAM, &template.value)
+        .with(NEW_PROJECT_NAME_PARAM, name);
+    let press = offer.press(&args);
+    let summary = match &press {
+        Ok(action) => action.meta().summary.clone(),
+        Err(refused) => refused.to_string(),
+    };
     let close = try_consume_context::<PopoverCloseHandle>();
 
     rsx! {
         button {
             class: template_row_class(),
             r#type: "button",
-            disabled: busy,
+            disabled: busy || press.is_err(),
             title: "{summary}",
             onclick: move |event| {
                 event.stop_propagation();
-                on_action.call(action.clone());
+                if let Ok(action) = &press {
+                    on_action.call(action.clone());
+                }
                 if let Some(mut close) = close {
                     close.close();
                 }
             },
             span { class: "tw:grid tw:min-w-0 tw:gap-px",
                 span { class: "tw:text-sm tw:leading-tight tw:text-strong-foreground",
-                    "{template.label()}"
+                    "{template.label}"
                 }
                 span { class: "tw:text-[11px] tw:leading-tight tw:text-dim-foreground",
-                    "{template.description()}"
+                    "{template.detail.clone().unwrap_or_default()}"
                 }
             }
         }

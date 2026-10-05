@@ -97,6 +97,10 @@ export const OUTCOMES = {
   4: "reset",
   5: "breakpoint",
   6: "wall-timeout",
+  // The guest put itself to sleep (a switch-mode power button with its switch
+  // off and the cable out). The wake is not modelled, so a tab board stays
+  // here until the page reloads.
+  7: "deep-sleep",
 };
 
 const encoder = new TextEncoder();

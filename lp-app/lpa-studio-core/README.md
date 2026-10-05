@@ -287,10 +287,14 @@ stateless views that dispatch ops and render DTOs. The model (recorded in
   feeds `DirtySummary { persisted, failed }` (`project/dirty_summary.rs`),
   aggregated slot → node → project during the DTO build: node headers,
   child entries, sidebar tree items, and `ProjectEditorView.dirty` all carry
-  it, and the project header's contextual Save/Revert actions surface as
-  controller-produced `UiPaneAction`s on `ProjectEditorView.header_actions`;
-  dirty node headers likewise carry the subtree batch revert
-  (`NodeRevertOp`) on `UiNodeView.header_actions` / `UiNodeChild.header_actions`.
+  it, and the project header's contextual Save/Revert actions, and every
+  dirty node header's subtree batch revert (`NodeRevertOp`) and Remove,
+  publish as `UiOffer`s into `UiStudioView.offers` (the offer tree,
+  `core/offer/`), addressed by stable path (`project/save`,
+  `project/demo.module/orbit.shader/revert`) — see
+  `docs/adr/2026-10-01-offer-tree-and-consequence-levels.md`. A card asks
+  the tree for its own node's verbs with `verbs_of(its_path)`; there is no
+  longer a `header_actions` DTO field to read instead.
   Each hierarchy DTO also projects status + dirty into its one chrome
   `UiAffordance` (`project/ui_affordance.rs`, priority merge
   Error > Unsaved > Debug > Busy > Info) — the glyph/tone every detail
@@ -468,6 +472,33 @@ always meant Desktop, and one spelling on disk is enough. Projects created
 in this library declare Desktop at creation (D32); imports and forks keep
 whatever they arrived with.
 
+### Device verbs are offers, and some take values
+
+Every verb a device card, the add slot or a pending link draws is a
+`UiOffer` in the tree at `devices/<board ref>/<verb>`
+(`devices/device_offers.rs`, `pending_link_offers.rs`,
+`add_device_offers.rs`, `new_sim_offer.rs`). The ref is a `BoardRef`
+(`devices/board_ref.rs`): `mac-<12 hex>` for a board known by its silicon
+MAC, `sim-…` and `emu-…` for made boards by their generated MAC, and
+`new-<n>` for a link that has not said who it is yet. The card, the add
+slot, the agent and the palette all read the same offers.
+
+A verb that needs a value declares typed `params` (`core/offer/`:
+`OfferParam` of kind `Choice`, `Text` or `Toggle`) and holds an
+`OfferBinder` that turns the values into the op. `UiOffer::press(&args)`
+is the one place values are checked: an unknown name, a value that is not
+an enabled option, text over its limit, or a missing required value is
+refused with an `OfferArgError` that names the choices. Flash and Update
+take `board` (from the chip's candidates, with an `all_boards` toggle that
+widens the list through `OfferChoice::only_with`). Push takes `source`.
+Rename takes `name`, Autoconnect takes `enabled`, and New sim takes `board`
+and `backing`. A level can depend on the board. Flashing a blank chip is
+Routine and flashing over firmware is Lasting. A push over a project the
+library has no copy of is Lasting, and Routine otherwise. Bluetooth reach
+is a core fact (`devices/bluetooth_reach.rs`), so `devices/connect-ble`
+is published disabled with its reason. See
+`docs/adr/2026-10-02-board-ids-and-typed-offer-parameters.md`.
+
 ## Device Management UX
 
 Blank-device provisioning and recovery are modeled as Device actions backed by
@@ -558,3 +589,12 @@ cargo check -p lpa-studio-core
 cargo test -p lpa-studio-core
 cargo check -p lpa-studio-core --target wasm32-unknown-unknown --features browser-worker,browser-serial-esp32
 ```
+
+Tests press offers by path, the way a click and the app agent do:
+`OfferPressTestApi` (`src/app/studio/offer_press_test_api.rs`) gives every
+bench — a `StudioController`, an actor through `actor_clicks`, the device
+bench, the agent eval studio — `press(path, args)`, `press_lasting` (a
+Lasting verb's second click; a plain `press` on one panics naming it),
+`offered`, `not_offered` and `offer_reason`. A test that builds the op itself
+never notices when the UI stops offering the verb, so `just lint-core-test-ops`
+ratchets the sites that still do, per file (`scripts/core-test-ops-ratchet.txt`).

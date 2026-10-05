@@ -1,5 +1,5 @@
 {
-  "lpManifestCore": 1,
+  "lpManifestCore": 2,
   "package": "fw-esp32s3",
   "target": {
     "family": "esp32",
@@ -22,5 +22,5 @@
   "limits": {
     "flashAppBytes": 6291456
   },
-  "wireProto": 33
+  "wireProto": 36
 }

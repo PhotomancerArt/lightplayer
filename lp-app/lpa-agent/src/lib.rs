@@ -14,9 +14,13 @@
 //!   trait is deliberately small so a future in-web local model can
 //!   implement it.
 //! - [`session`]: the agentic loop ([`AgentSession`]) — model turn → tool
-//!   execution via the injected [`AgentHost`] → repeat — plus the transcript
+//!   execution via the injected [`Toolset`] → repeat — plus the transcript
 //!   and UI-facing [`AgentEvent`]s.
-//! - [`tool`]: the single `iterate` tool, dispatching into `lps-probe`.
+//! - [`toolset`]: the seam between the loop and what an agent can do —
+//!   [`ShaderToolset`] (the shader agent, over an [`AgentHost`]) and the
+//!   app agent's toolset in [`tool::app`].
+//! - [`tool`]: the shader tools (`iterate`, `upsert_param`,
+//!   `declare_space`, dispatching into `lps-probe`) and the app tools.
 //! - [`prompt`]: system prompt assembly from [`ShaderContext`] + the builtin
 //!   reference generated from `lps-builtins`.
 //!
@@ -27,8 +31,9 @@ pub mod prompt;
 pub mod provider;
 pub mod session;
 pub mod tool;
+pub mod toolset;
 
-pub use prompt::build_system_prompt;
+pub use prompt::{build_app_system_prompt, build_system_prompt};
 pub use provider::anthropic::{AnthropicConfig, AnthropicProvider};
 pub use provider::openai_compat::{OpenAiCompatConfig, OpenAiCompatProvider};
 pub use provider::{
@@ -37,6 +42,11 @@ pub use provider::{
     TurnEvent, TurnRequest, list_anthropic_models, list_openai_compat_models,
 };
 pub use session::{AgentError, AgentEvent, AgentSession, AgentTranscript, MAX_TURNS_PER_RUN};
+pub use tool::app::{
+    ACT_TOOL_NAME, ActArgValue, ActInput, ActOutcome, AppAgentHost, AppToolset,
+    EDIT_PROJECT_TOOL_NAME, EditProjectInput, EditStatus, ProjectEdit, ProjectEditsOutcome,
+    READ_TOOL_NAME, ReadInput, ReadWhat,
+};
 pub use tool::{
     AgentHost, BindingInfo, DECLARE_SPACE_TOOL_NAME, DeclaredSpace, ENGINE_VERDICT_BUDGET_MS,
     EngineStatusKind, EngineVerdict, FixtureSummary, HostError, HostFuture, ITERATE_TOOL_NAME,
@@ -44,3 +54,4 @@ pub use tool::{
     UPSERT_PARAM_TOOL_NAME, declare_space_tool_def, entry_point, iterate_tool_def,
     run_declare_space, run_iterate, run_upsert_param, upsert_param_tool_def,
 };
+pub use toolset::{ShaderToolset, ToolOutcome, Toolset, wrap_turn_state};

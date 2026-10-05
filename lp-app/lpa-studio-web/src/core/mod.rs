@@ -14,6 +14,7 @@ pub(crate) mod log_list_stories;
 pub mod metric_grid;
 #[cfg(feature = "stories")]
 pub(crate) mod metric_grid_stories;
+pub mod offer;
 pub mod progress_bar;
 #[cfg(feature = "stories")]
 pub(crate) mod progress_bar_stories;
@@ -28,7 +29,6 @@ pub mod terminal_output;
 pub(crate) mod terminal_output_stories;
 pub mod view;
 
-pub(crate) use action::confirmation_confirmed;
 pub use action::{
     ActionButton, ActionButtonVariant, ActionStrip, ArmedConfirmButton, inline_link_row_class,
     menu_item_action_class, menu_item_destructive_action_class, outline_action_class,
@@ -37,6 +37,10 @@ pub use action::{
 pub use issue_view::IssueView;
 pub use log_list::LogList;
 pub use metric_grid::MetricGrid;
+pub use offer::{
+    OfferParamsForm, OfferPressButton, OffersProvider, resolved_args, use_device_verbs,
+    use_offer_at, use_offers, use_provide_offers, use_verbs_of, verb_named, visible_options,
+};
 pub use progress_bar::ProgressBar;
 pub use rich_detail::RichDetailSection;
 pub use status_chip::StatusChip;

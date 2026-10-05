@@ -27,6 +27,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::board_key::BoardKey;
 use crate::device::Device;
 use crate::event::{Action, Command, Event, Input};
 use crate::evidence::{Classification, Evidence};
@@ -36,6 +37,12 @@ use crate::link::{LinkCommand, LinkId, LinkInfo};
 use crate::record::DeviceRecord;
 use crate::time::{Millis, TimerAllocator, TimerId};
 
+/// Ten minutes: [`RosterConfig::flash_consent_ms`]'s default (and a journal
+/// recorded before the knob existed decodes with it).
+fn default_flash_consent_ms() -> u64 {
+    600_000
+}
+
 /// Every knob the model needs, supplied by the app. Deliberately no
 /// constants baked into the fold: the wire proto comes from `lpc-wire`, and
 /// the budgets are product decisions the app owns.
@@ -44,6 +51,11 @@ pub struct RosterConfig {
     /// The wire proto this build speaks. The app MUST set this from
     /// `lpc_wire::WIRE_PROTO_VERSION`; this crate hardcodes no proto number.
     pub expected_proto: u32,
+    /// This build's own app version, parsed — what a board's hello version
+    /// is compared against to say "older than Studio" ([`crate::FirmwareAge`]).
+    /// The app sets it from its `LP_APP_VERSION`; the default (`Unknown`)
+    /// claims nothing about any board.
+    pub expected_version: crate::AppVersion,
     pub open_baud: u32,
     /// Budget from "port open" to a verdict. Mirrors `lpa-link`'s
     /// `DEFAULT_READY_DEADLINE`: boot can take seconds.
@@ -70,6 +82,13 @@ pub struct RosterConfig {
     /// How long each rung of the post-flash reconnect ladder waits for the
     /// boot hello before escalating (reopen → Normal → BothThenDrop → fail).
     pub flash_rung_ms: u64,
+    /// How long the Flash activity waits for the user's yes to move (or
+    /// restore) a board's files (the C6 repartition's consent dialog).
+    /// Generous: it covers reading the dialog and downloading the backup.
+    /// The board sits parked and untouched meanwhile; supervision is held
+    /// off for exactly this long.
+    #[serde(default = "default_flash_consent_ms")]
+    pub flash_consent_ms: u64,
     /// The retry/ask cadence inside a rung: reopen a closed port (session
     /// adoption absorbs a re-enumerated one) or re-ask a quiet open one.
     pub flash_reopen_retry_ms: u64,
@@ -117,6 +136,7 @@ impl Default for RosterConfig {
     fn default() -> Self {
         Self {
             expected_proto: 1,
+            expected_version: crate::AppVersion::Unknown,
             open_baud: 921_600,
             identify_deadline_ms: 5_000,
             hello_request_interval_ms: 1_000,
@@ -126,6 +146,7 @@ impl Default for RosterConfig {
             flash_deadline_ms: 240_000,
             flash_cancel_grace_ms: 180_000,
             flash_rung_ms: 8_000,
+            flash_consent_ms: default_flash_consent_ms(),
             flash_reopen_retry_ms: 1_000,
             stamp_deadline_ms: 45_000,
             push_deadline_ms: 180_000,
@@ -220,11 +241,41 @@ impl Roster {
     /// Rehydrate persisted records at startup: each becomes a detached
     /// device, so a granted port can be re-matched to a device the user
     /// already named.
-    pub fn load_records(&mut self, records: impl IntoIterator<Item = DeviceRecord>) {
-        for record in records {
+    ///
+    /// **One id, one entry.** Every input reaches a device BY ITS ID, so two
+    /// entries sharing one would split a board in two: the hello merges into
+    /// one, every later frame and every rename lands on the other. A
+    /// persisted id is only a hint — each page mints its own from 1, so two
+    /// tabs, or a record that loads after a link has already minted the same
+    /// number, can leave two rows on disk wearing it. A record whose id is
+    /// already held (by a device, a pending link, or an earlier record of
+    /// this batch) is loaded under a freshly minted one; the next persist
+    /// writes the new id back. Returns the id each record was loaded under,
+    /// in order.
+    pub fn load_records(
+        &mut self,
+        records: impl IntoIterator<Item = DeviceRecord>,
+    ) -> Vec<DeviceId> {
+        let records: Vec<DeviceRecord> = records.into_iter().collect();
+        // Raise the mint past every persisted id FIRST, so a re-keyed record
+        // can never take a number a later record of this batch still wears.
+        for record in &records {
             self.state.next_device_id = self.state.next_device_id.max(record.device.0);
+        }
+        let mut loaded = Vec::with_capacity(records.len());
+        for mut record in records {
+            if self.id_is_held(record.device) {
+                record.device = self.state.mint_device_id();
+            }
+            loaded.push(record.device);
             self.devices.push(Device::from_record(record));
         }
+        loaded
+    }
+
+    /// Whether a device or a pending link already answers to `id`.
+    fn id_is_held(&self, id: DeviceId) -> bool {
+        self.index_of(id).is_some() || self.pending.iter().any(|entry| entry.device_id() == id)
     }
 
     pub fn config(&self) -> &RosterConfig {
@@ -245,6 +296,29 @@ impl Roster {
 
     pub fn pending(&self) -> &[PendingLink] {
         &self.pending
+    }
+
+    /// The identity chain of a device or a pending link, or `None` for an
+    /// id the roster does not hold.
+    pub fn identity(&self, id: DeviceId) -> Option<&IdentityChain> {
+        match self.device(id) {
+            Some(device) => Some(&device.identity),
+            None => self
+                .pending
+                .iter()
+                .find(|pending| pending.device_id() == id)
+                .map(PendingLink::identity),
+        }
+    }
+
+    /// The board id of a device or a pending link: its MAC, once something
+    /// has read one (a hello, or the flash preflight's efuse read). `None`
+    /// for an id the roster does not hold, and for one that has not said
+    /// who it is yet — a fresh port before its hello, a blank chip before
+    /// the preflight — which is the provisional case an offer path names
+    /// `devices/new-<n>`.
+    pub fn board_key(&self, id: DeviceId) -> Option<BoardKey> {
+        self.identity(id)?.mac.as_ref().and_then(BoardKey::from_mac)
     }
 
     /// What the effects layer told us about a link that is still attached.
@@ -379,6 +453,12 @@ impl Roster {
             Event::TimerFired { timer } => self.dispatch_timer(now, *timer, input),
             Event::ActivityMarker { device, .. } | Event::IdentityObserved { device, .. } => {
                 self.dispatch_to_device(now, *device, input)
+            }
+            // A chooser's answer is roster news: a picked device already
+            // arrived as its `LinkAttached`.
+            Event::GrantAnswered { .. } => {
+                self.state.journal.record_input(now, Scope::Roster, input);
+                Vec::new()
             }
         }
     }
@@ -1394,6 +1474,28 @@ mod tests {
     /// and then over Bluetooth — both links up at once, which the firmware
     /// allows (DD12) — is ONE device, identified by the hello's base MAC. The
     /// Bluetooth arrival is a pending link until its hello, then merges.
+    /// A chooser closed with nothing picked is journaled for the app to
+    /// read, and changes nothing else: no device, no pending link, no
+    /// command.
+    #[test]
+    fn a_dismissed_chooser_is_journaled_and_changes_nothing() {
+        let mut roster = Roster::new(RosterConfig::default());
+        assert_eq!(
+            roster.handle(Millis(0), Input::Action(Action::AddFromUsb)),
+            vec![Command::RequestUsbGrant]
+        );
+        let answer = Input::Event(Event::GrantAnswered {
+            link: LinkId(1),
+            answer: crate::GrantAnswer::Dismissed,
+        });
+        assert!(roster.handle(Millis(1), answer.clone()).is_empty());
+        assert!(roster.devices().is_empty());
+        assert!(roster.pending().is_empty());
+        assert!(roster.journal().entries_for(Scope::Roster).any(|entry| {
+            entry.record == crate::journal::JournalRecord::Input((&answer).into())
+        }));
+    }
+
     #[test]
     fn a_board_heard_over_usb_and_bluetooth_at_once_is_one_device() {
         let mut roster = Roster::new(RosterConfig::default());
@@ -1437,6 +1539,31 @@ mod tests {
         );
     }
 
+    /// A board's id is its MAC once something has read one, and nothing
+    /// before that: a pending link that has not said hello has no key, and
+    /// the key it gets is the one the device keeps after it is adopted.
+    #[test]
+    fn a_board_key_is_the_mac_once_one_is_known() {
+        let mut roster = Roster::new(RosterConfig::default());
+        let facts = roster_proto(&roster);
+        roster.handle(Millis(0), attach(LinkId(1), "usb-1"));
+        let pending = roster.pending()[0].device_id();
+        assert_eq!(roster.board_key(pending), None, "no hello, no key yet");
+
+        roster.handle(Millis(10), opened(LinkId(1), "usb-1"));
+        roster.handle(
+            Millis(20),
+            hello_mac(LinkId(1), &facts, "A0:F2:62:87:B4:8C"),
+        );
+        let device = roster.devices()[0].id;
+        assert_eq!(
+            roster.board_key(device).map(|key| key.to_string()),
+            Some("a0f26287b48c".to_string()),
+            "any spelling the hello used, one canonical key"
+        );
+        assert_eq!(roster.board_key(DeviceId(999)), None, "not on the roster");
+    }
+
     /// A Bluetooth link still identifying has no reset lines either: its
     /// pending card carries the same reason a bound Bluetooth card does, in
     /// every stage before the hello — attached, opened, and a settled verdict
@@ -1467,6 +1594,114 @@ mod tests {
             blocked(&roster, LinkId(1)).is_over_bluetooth(),
             "opened, still identifying"
         );
+    }
+
+    /// Two saved records that share a `DeviceId` on disk (ids are minted
+    /// per page, so another tab — or a record that loaded after a link had
+    /// already minted its number — can write the same one twice) must load
+    /// as two entries with two ids. Sharing one, every input addressed to
+    /// the id reached whichever entry came first: the board's hello merged
+    /// into its own record, and every frame after it landed on the OTHER
+    /// record as an `IdentityConflict`, and a rename aimed at the board
+    /// renamed its neighbour (docs/defects/
+    /// 2026-10-02-saved-records-sharing-a-device-id-misroute-the-board.md).
+    #[test]
+    fn records_sharing_an_id_load_apart_and_the_board_keeps_its_own_frames() {
+        for fast in [false, true] {
+            let mut roster = Roster::new(RosterConfig::default());
+            let facts = roster_proto(&roster);
+            roster.load_records(vec![
+                DeviceRecord {
+                    name: Some("Porch sign".to_string()),
+                    ..DeviceRecord::new(DeviceId(1), mac_chain("02:00:00:00:00:01"))
+                },
+                DeviceRecord::new(DeviceId(1), mac_chain(DESK_MAC)),
+            ]);
+
+            roster.handle(Millis(0), attach(LinkId(1), "usb-2"));
+            if !fast {
+                roster.handle(Millis(10), opened(LinkId(1), "usb-2"));
+            }
+            // The boot hello, then the board's next frames — a second hello
+            // (an identify's own ask) and a heartbeat-borne identity.
+            for at in [20, 30, 40] {
+                roster.handle(Millis(at), hello_mac(LinkId(1), &facts, DESK_MAC));
+            }
+
+            let conflicts: Vec<String> = roster
+                .journal()
+                .notes()
+                .filter(|(_, note)| matches!(note, JournalNote::IdentityConflict { .. }))
+                .map(|(_, note)| format!("{note:?}"))
+                .collect();
+            assert!(conflicts.is_empty(), "fast hello {fast}: {conflicts:?}");
+            assert!(roster.pending().is_empty());
+            assert_eq!(roster.devices().len(), 2, "merged into its record, no twin");
+            let board = roster
+                .devices()
+                .iter()
+                .find(|device| device.identity.mac == Some(MacAddress(DESK_MAC.to_string())))
+                .expect("the saved board");
+            assert_eq!(board.link(), Some(LinkId(1)), "the link is the board's");
+            let board_id = board.id;
+
+            roster.handle(
+                Millis(50),
+                Input::Action(Action::SetName {
+                    device: board_id,
+                    name: "Desk C6".to_string(),
+                }),
+            );
+            let titles: Vec<String> = roster.devices().iter().map(Device::title).collect();
+            assert!(titles.contains(&"Desk C6".to_string()), "{titles:?}");
+            assert!(
+                titles.contains(&"Porch sign".to_string()),
+                "a rename aimed at the board never lands on its neighbour: {titles:?}"
+            );
+            let ids: Vec<DeviceId> = roster.devices().iter().map(|device| device.id).collect();
+            assert_ne!(ids[0], ids[1], "one id, one entry (fast hello: {fast})");
+        }
+    }
+
+    /// Where the shared ids come from: a record that loads AFTER a link has
+    /// minted the same number (the library hydrate is asynchronous). The
+    /// loaded record has to take a fresh id, or a different board on that
+    /// link is promoted under the record's id and both are persisted with it.
+    #[test]
+    fn a_record_loaded_after_a_link_minted_its_id_takes_a_fresh_one() {
+        let mut roster = Roster::new(RosterConfig::default());
+        let facts = roster_proto(&roster);
+        roster.handle(Millis(0), attach(LinkId(1), "usb-1"));
+        let minted = roster.pending()[0].device_id();
+
+        roster.load_records(vec![DeviceRecord::new(minted, mac_chain(DESK_MAC))]);
+        roster.handle(Millis(10), opened(LinkId(1), "usb-1"));
+        roster.handle(
+            Millis(20),
+            hello_mac(LinkId(1), &facts, "02:00:00:00:00:01"),
+        );
+        roster.handle(Millis(30), attach(LinkId(2), "usb-2"));
+
+        let mut ids: Vec<DeviceId> = roster.devices().iter().map(|device| device.id).collect();
+        ids.extend(roster.pending().iter().map(PendingLink::device_id));
+        let mut unique = ids.clone();
+        unique.sort();
+        unique.dedup();
+        assert_eq!(ids.len(), 3, "two boards and a fresh link: {ids:?}");
+        assert_eq!(
+            unique.len(),
+            ids.len(),
+            "every entry has its own id: {ids:?}"
+        );
+    }
+
+    const DESK_MAC: &str = "10:bd:a3:b0:8e:30";
+
+    fn mac_chain(mac: &str) -> IdentityChain {
+        IdentityChain {
+            mac: Some(MacAddress(mac.to_string())),
+            ..Default::default()
+        }
     }
 
     fn roster_proto(roster: &Roster) -> HelloFacts {

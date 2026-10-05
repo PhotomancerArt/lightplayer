@@ -28,15 +28,21 @@ use lpa_studio_core::{
     DeviceView, OutcomeView, PendingLinkView, RosterView,
 };
 
+use crate::app::home::ExplorePage;
 use crate::app::home::card_thumb::CardThumb;
+use crate::app::home::device_offer_story_fixtures::StoryDevicesPage;
+use crate::app::home::device_offer_story_fixtures::{
+    StoryDeviceCard, StoryPendingCard, add_slot_tree,
+};
 use crate::app::home::device_pick_popover::{
     BoardPickMode, BoardPickPopover, ChipSource, ProjectPickPopover,
 };
-use crate::app::home::device_roster_card::{DeviceRosterCard, PendingLinkCard};
 use crate::app::home::device_terminal::DeviceTerminal;
 use crate::app::home::gallery_preview::ThumbPreviewBadge;
+use crate::app::home::home_offer_story_fixtures::StoryProjectsPage;
 use crate::app::home::target_pick_popover::TargetPickPopover;
-use crate::app::home::{DevicesPage, ExplorePage, ProjectsPage};
+use crate::core::OffersProvider;
+use lpa_studio_core::{BluetoothReach, OfferArgs, PUSH_SOURCE_PARAM, UiOffer};
 
 /// A fixed "now" so relative times in baselines never drift.
 const STORY_NOW: f64 = 1_800_000_000.0;
@@ -477,7 +483,7 @@ fn devices_page_story(remembered_open: bool) -> Element {
     };
     rsx! {
         section { class: "tw:p-4",
-            DevicesPage { home, remembered_open, on_action: |_| {} }
+            StoryDevicesPage { home, remembered_open, on_action: |_| {} }
         }
     }
 }
@@ -491,7 +497,9 @@ fn devices_target_pick_open() -> Element {
         // under them. The panel floats in the top layer, so a section that
         // merely fits the trigger clips exactly the half this story is for.
         section { class: "tw:grid tw:min-h-[720px] tw:w-[360px] tw:place-items-center tw:p-4",
-            TargetPickPopover { initially_open: true, on_action: |_| {} }
+            OffersProvider { offers: add_slot_tree(true, BluetoothReach::Ready),
+                TargetPickPopover { initially_open: true, on_action: |_| {} }
+            }
         }
     }
 }
@@ -510,7 +518,7 @@ fn devices_card_sim_powered_off() -> Element {
     };
     rsx! {
         section { class: "tw:p-4",
-            DevicesPage { home, remembered_open: true, on_action: |_| {} }
+            StoryDevicesPage { home, remembered_open: true, on_action: |_| {} }
         }
     }
 }
@@ -531,6 +539,8 @@ fn powered_off_sim_fixture() -> DeviceRosterView {
         access: Default::default(),
         transport_available: true,
         usb_available: true,
+        layout: Default::default(),
+        backup_download: None,
         feeds: Default::default(),
         runtime_bands: [(id, UiRuntimeBand::sim("seeed/xiao-esp32-c6", Some("cpu")))]
             .into_iter()
@@ -574,7 +584,7 @@ fn devices_page_remembered_last_frame() -> Element {
     };
     rsx! {
         section { class: "tw:p-4",
-            DevicesPage { home, remembered_open: true, on_action: |_| {} }
+            StoryDevicesPage { home, remembered_open: true, on_action: |_| {} }
         }
     }
 }
@@ -592,7 +602,7 @@ fn devices_card_states() -> Element {
                         p { class: "tw:m-0 tw:text-[0.68rem] tw:font-bold tw:uppercase tw:tracking-wide tw:text-subtle-foreground",
                             "{label}"
                         }
-                        DeviceRosterCard {
+                        StoryDeviceCard {
                             card,
                             open_uid,
                             // The real gallery lists, so the empty face
@@ -645,7 +655,7 @@ fn devices_card_live_feed() -> Element {
                         p { class: "tw:m-0 tw:text-[0.68rem] tw:font-bold tw:uppercase tw:tracking-wide tw:text-subtle-foreground",
                             "{label}"
                         }
-                        DeviceRosterCard {
+                        StoryDeviceCard {
                             card: card.clone(),
                             open_uid: open_uid.clone(),
                             feed: Some(feed),
@@ -677,14 +687,14 @@ fn devices_card_pending() -> Element {
                         p { class: "tw:m-0 tw:text-[0.68rem] tw:font-bold tw:uppercase tw:tracking-wide tw:text-subtle-foreground",
                             "{label}"
                         }
-                        PendingLinkCard { pending, on_action: |_| {} }
+                        StoryPendingCard { pending, on_action: |_| {} }
                     }
                 }
                 div { key: "settled", class: "tw:grid tw:gap-2",
                     p { class: "tw:m-0 tw:text-[0.68rem] tw:font-bold tw:uppercase tw:tracking-wide tw:text-subtle-foreground",
                         "settled neighbour · {settled_label}"
                     }
-                    DeviceRosterCard {
+                    StoryDeviceCard {
                         card: settled,
                         open_uid: settled_open,
                         projects: packages(),
@@ -732,10 +742,261 @@ fn devices_card_not_responding() -> Element {
     rsx! {
         section { class: "tw:p-4",
             div { class: "tw:w-[400px]",
-                DeviceRosterCard {
+                StoryDeviceCard {
                     card: not_responding_card_fixture(),
                     projects: packages(),
                     examples: examples(),
+                    on_action: |_| {},
+                }
+            }
+        }
+    }
+}
+
+#[story(
+    description = "An update that moves a board's files to the new layout (the C6 repartition), in its four faces, all drawn from core's own copy (`device_layout_view`). Top left: the question while the update waits — Studio has already stored a backup in this browser, so Continue is live, and it acts on ONE press: the sheet is the question, so Continue does not arm a second time (G1 walk 2026-10-03; it keeps its Lasting tint, and the app agent still hands it to the user). Download backup is always there, Cancel leaves the board untouched. Behind the sheet the card says \"Waiting for your answer…\", not \"Flashing firmware…\". Top right: the same question when this browser could NOT keep the backup and the board will be nearly full afterwards — Continue stays disabled until the backup is downloaded. Bottom left: the refusal when the files do not fit; nothing was changed, and the files can still be downloaded. Bottom right: a board that came back holding its files after an interrupted update — the firmware line says they are waiting and the Update verb reads Finish update. The sheets are pinned in their boxes for capture; on the page they rise over it, so asking never changes the card's height."
+)]
+fn devices_card_layout_change() -> Element {
+    use lpa_studio_core::app::devices::device_layout_step::LayoutStaging;
+    use lpa_studio_core::{
+        DeviceBoardFs, DeviceFirmwareFace, DeviceFlashLayoutView, DeviceLayoutVerdict,
+        DeviceWireVersion, device_layout_view,
+    };
+
+    let base = DeviceView {
+        title: "Porch C6".to_string(),
+        detected_chip: Some("esp32c6".to_string()),
+        board_id: Some("seeed/xiao-esp32-c6".to_string()),
+        firmware_face: DeviceFirmwareFace::LightPlayer {
+            firmware: Some("fw-esp32c6 abc1234".to_string()),
+            wire: DeviceWireVersion::Match,
+            age: lpa_studio_core::DeviceFirmwareAge::Unknown,
+        },
+        ..roster_fixture().roster.devices.remove(0)
+    };
+    let waiting = lpa_studio_core::DeviceFlashStep::WaitingForAnswer.label();
+    let asking = |verdict: DeviceLayoutVerdict| DeviceView {
+        status: DeviceStatus::Busy,
+        state_label: waiting.to_string(),
+        activity: Some(DeviceActivityView {
+            kind: DeviceActivityKind::Flash,
+            label: waiting.to_string(),
+            percent: None,
+            cancellable: true,
+            cancel_requested: false,
+            layout: Some(DeviceFlashLayoutView {
+                verdict,
+                awaiting_consent: true,
+            }),
+        }),
+        escapes: vec![
+            DeviceEscape::Cancel,
+            DeviceEscape::Disconnect,
+            DeviceEscape::Forget,
+        ],
+        ..base.clone()
+    };
+    let stored = asking(DeviceLayoutVerdict::Migrate {
+        files: 9,
+        bytes: 48_128,
+        free_blocks: 150,
+        tight: false,
+        backup_stored: true,
+        device_uid: Some("dev000000daqf6dvvqz".to_string()),
+    });
+    let unstored = asking(DeviceLayoutVerdict::Migrate {
+        files: 31,
+        bytes: 551_936,
+        free_blocks: 24,
+        tight: true,
+        backup_stored: false,
+        device_uid: Some("dev000000daqf6dvvqz".to_string()),
+    });
+    let refused_verdict = DeviceLayoutVerdict::Refused {
+        files: 40,
+        blocks_needed: Some(170),
+        blocks_total: 176,
+        blocks_reserved: 16,
+        block_bytes: 4096,
+    };
+    let refused = DeviceView {
+        last_outcome: Some(OutcomeView {
+            summary: "the board's files don't fit the new firmware — nothing was changed"
+                .to_string(),
+            ok: false,
+        }),
+        ..base.clone()
+    };
+    let refused_staging = LayoutStaging {
+        verdict: refused_verdict,
+        plan: None,
+        archive: None,
+        restoring: None,
+        downloaded: false,
+    };
+    let held = DeviceView {
+        loaded_project: DeviceLoadedProject::Empty,
+        can_remove_project: false,
+        ..base.clone()
+    };
+    let cell = |card: DeviceView, fs: DeviceBoardFs, staged: Option<&LayoutStaging>| {
+        // The verbs are offers; the shell would provide the view's tree, so
+        // the story provides the one core publishes for this card — its
+        // device verbs, and the layout verbs under the same prefix.
+        let mut offers = crate::app::home::device_offer_story_fixtures::card_tree(
+            &card,
+            lpa_studio_core::DeviceFace::Wire,
+            false,
+            &[],
+            &[],
+        );
+        let prefix = offers
+            .device_prefix(card.id)
+            .cloned()
+            .expect("the card's verbs are placed");
+        let layout = device_layout_view(&card, prefix, fs, true, staged, None, &mut offers);
+        rsx! {
+            div { class: "tw:grid tw:content-start tw:gap-2",
+                crate::core::OffersProvider { offers,
+                    crate::app::home::device_roster_card::DeviceRosterCard {
+                        card,
+                        projects: vec![],
+                        examples: vec![],
+                        layout,
+                        layout_sheet_inline: true,
+                        on_action: |_| {},
+                    }
+                }
+            }
+        }
+    };
+    rsx! {
+        section { class: "tw:p-4",
+            div { class: "tw:grid tw:grid-cols-[repeat(auto-fill,minmax(300px,400px))] tw:items-start tw:gap-4",
+                {cell(stored, DeviceBoardFs::Mounted, None)}
+                {cell(unstored, DeviceBoardFs::Mounted, None)}
+                {cell(refused, DeviceBoardFs::Mounted, Some(&refused_staging))}
+                {cell(held, DeviceBoardFs::LegacyHeld, None)}
+            }
+        }
+    }
+}
+
+#[story(
+    description = "An update's steps, as the card names them (G1 walk 2026-10-03, Yona: \"the 'Flashing firmware…' label isn't really right for the first phase\"). Left to right, top to bottom, in the order an update that moves a board's files runs: Reading the board… (its layout, and its files when they must move — nothing is written yet), Waiting for your answer… (the question is up; no stale percent from the read), Flashing firmware…, Moving files…, Checking the files… (the read-back, and the board's own boot proving they mounted). The words are the device model's own (`FlashStep`), and the card's status label reads the same words. A flash that moves no files reads the board, then says Flashing firmware… to the end, as before."
+)]
+fn devices_card_update_steps() -> Element {
+    use lpa_studio_core::DeviceFlashStep;
+
+    let running = DeviceView {
+        title: "Porch C6".to_string(),
+        detected_chip: Some("esp32c6".to_string()),
+        board_id: Some("seeed/xiao-esp32-c6".to_string()),
+        firmware_face: lpa_studio_core::DeviceFirmwareFace::LightPlayer {
+            firmware: Some("fw-esp32c6 abc1234".to_string()),
+            wire: lpa_studio_core::DeviceWireVersion::Match,
+            age: lpa_studio_core::DeviceFirmwareAge::Unknown,
+        },
+        terminal: vec![
+            story_line(DeviceTerminalKind::Studio, "Flashing firmware"),
+            story_line(DeviceTerminalKind::Studio, "Reading the board's files"),
+        ],
+        ..roster_fixture().roster.devices.remove(0)
+    };
+    let at = |step: DeviceFlashStep, percent: Option<u8>| DeviceView {
+        status: DeviceStatus::Busy,
+        state_label: step.label().to_string(),
+        activity: Some(DeviceActivityView {
+            kind: DeviceActivityKind::Flash,
+            label: step.label().to_string(),
+            percent,
+            cancellable: true,
+            cancel_requested: false,
+            layout: None,
+        }),
+        can_remove_project: false,
+        escapes: vec![
+            DeviceEscape::Cancel,
+            DeviceEscape::Disconnect,
+            DeviceEscape::Forget,
+        ],
+        ..running.clone()
+    };
+    let steps = [
+        at(DeviceFlashStep::ReadingBoard, Some(40)),
+        at(DeviceFlashStep::WaitingForAnswer, None),
+        at(DeviceFlashStep::FlashingFirmware, Some(35)),
+        at(DeviceFlashStep::MovingFiles, Some(70)),
+        at(DeviceFlashStep::CheckingFiles, Some(100)),
+    ];
+    rsx! {
+        section { class: "tw:p-4",
+            div { class: "tw:grid tw:grid-cols-[repeat(auto-fill,minmax(300px,400px))] tw:items-start tw:gap-4",
+                for card in steps {
+                    StoryDeviceCard {
+                        card,
+                        projects: vec![],
+                        examples: vec![],
+                        on_action: |_| {},
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[story(
+    description = "An older LightPlayer board — the hello of a board on a wire this Studio cannot read (every fielded C6 at wire 32, in a wire-33 Studio) — in a fresh browser, attached mid-stream so no boot banner named its chip. LEFT: its hello named the board Studio stamped on it (`hardware.boardId`, the one other field read off an older hello), so the card knows the board — and through it the chip — and offers Update firmware for it in one click, with no board pick (G1 walk 2026-10-03, Yona: \"it really shouldn't say 8 boards fit … ideally we'd know what board it is\"). Its identity row reads \"older LightPlayer\", not the old contradictory \"no firmware\". RIGHT: the same board when nothing names it (never stamped, nothing remembered) — the one case left for the pick, over every board."
+)]
+fn devices_card_older_firmware() -> Element {
+    let older = DeviceView {
+        title: "Spare C6".to_string(),
+        status: DeviceStatus::NeedsAttention,
+        state_label: "Older LightPlayer firmware".to_string(),
+        detected_chip: None,
+        board_id: Some("seeed/xiao-esp32-c6".to_string()),
+        identity_label: Some("10:bd:a3:b0:8e:30".to_string()),
+        firmware_face: lpa_studio_core::DeviceFirmwareFace::OlderLightPlayer { proto: Some(32) },
+        remembered_firmware: None,
+        loaded_project: DeviceLoadedProject::Unknown,
+        can_remove_project: false,
+        last_outcome: None,
+        activity: None,
+        escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
+        terminal: vec![
+            story_line(DeviceTerminalKind::Board, "Opened the port"),
+            story_line(
+                DeviceTerminalKind::Wire,
+                "hello · proto 32 · seeed/xiao-esp32-c6 · another wire: only its version and \
+                 board were read",
+            ),
+        ],
+        ..roster_fixture().roster.devices.remove(0)
+    };
+    let unnamed = DeviceView {
+        board_id: None,
+        terminal: vec![
+            story_line(DeviceTerminalKind::Board, "Opened the port"),
+            story_line(
+                DeviceTerminalKind::Wire,
+                "hello · proto 32 · ? · another wire: only its version and board were read",
+            ),
+        ],
+        ..older.clone()
+    };
+    rsx! {
+        section { class: "tw:p-4",
+            div { class: "tw:grid tw:grid-cols-[repeat(2,400px)] tw:items-start tw:gap-4",
+                StoryDeviceCard {
+                    card: older,
+                    projects: vec![],
+                    examples: vec![],
+                    on_action: |_| {},
+                }
+                StoryDeviceCard {
+                    card: unnamed,
+                    projects: vec![],
+                    examples: vec![],
                     on_action: |_| {},
                 }
             }
@@ -751,20 +1012,20 @@ fn devices_card_armed() -> Element {
     rsx! {
         section { class: "tw:p-4",
             div { class: "tw:grid tw:grid-cols-[repeat(3,340px)] tw:items-start tw:gap-3",
-                DeviceRosterCard {
+                StoryDeviceCard {
                     card: card.clone(),
                     projects: vec![],
                     examples: vec![],
                     on_action: |_| {},
                 }
-                DeviceRosterCard {
+                StoryDeviceCard {
                     card: card.clone(),
                     projects: vec![],
                     examples: vec![],
                     armed_preview: true,
                     on_action: |_| {},
                 }
-                DeviceRosterCard {
+                StoryDeviceCard {
                     card,
                     projects: vec![],
                     examples: vec![],
@@ -784,17 +1045,47 @@ fn devices_page_degraded_card() -> Element {
     let degraded = degraded_card_fixture();
     rsx! {
         div { class: "tw:grid tw:max-w-xl tw:grid-cols-2 tw:gap-3 tw:p-4",
-            DeviceRosterCard {
+            StoryDeviceCard {
                 card: healthy,
                 projects: vec![],
                 examples: vec![],
                 on_action: |_| {},
             }
-            DeviceRosterCard {
+            StoryDeviceCard {
                 card: degraded,
                 projects: vec![],
                 examples: vec![],
                 on_action: |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    label = "Agent light — a device card's verb",
+    description = "The agent light (agentic-UI M8) on a device card. The assistant pressed this board's Remove (`devices/<board>/remove-project`) — or handed it to you on a card — so that chip in the PROJECT zone's verb row wears the assistant's orchid ring (spinning live, still here), and the same chip on the docked lens card would too: every control that draws an offer is keyed by the offer's path. LEFT: at rest. RIGHT: lit. The card's size, its zones and every other verb stay exactly where they were."
+)]
+fn devices_card_agent_lit() -> Element {
+    let card = roster_fixture().roster.devices.remove(0);
+    let lit = crate::app::agent::story_activity([(
+        story_board_prefix(card.id).child("remove-project"),
+        lpa_studio_core::AgentActivityKind::Pressed,
+    )]);
+    rsx! {
+        div { class: "tw:grid tw:max-w-xl tw:grid-cols-2 tw:gap-3 tw:p-4",
+            StoryDeviceCard {
+                card: card.clone(),
+                projects: vec![],
+                examples: vec![],
+                on_action: |_| {},
+            }
+            crate::app::agent::AgentActivityProvider { activity: lit,
+                StoryDeviceCard {
+                    card,
+                    projects: vec![],
+                    examples: vec![],
+                    on_action: |_| {},
+                }
             }
         }
     }
@@ -828,6 +1119,8 @@ fn roster_fixture() -> DeviceRosterView {
         access: Default::default(),
         transport_available: true,
         usb_available: true,
+        layout: Default::default(),
+        backup_download: None,
         feeds: Default::default(),
         runtime_bands: Default::default(),
         // The running card has earned a registry row, so it has an editor
@@ -881,6 +1174,7 @@ fn roster_fixture() -> DeviceRosterView {
                     firmware_face: lpa_studio_core::DeviceFirmwareFace::LightPlayer {
                         firmware: Some("fw-esp32v3 abc1234".to_string()),
                         wire: lpa_studio_core::DeviceWireVersion::Match,
+                        age: lpa_studio_core::DeviceFirmwareAge::Unknown,
                     },
                     remembered_firmware: None,
                     degraded: None,
@@ -944,6 +1238,7 @@ fn roster_fixture() -> DeviceRosterView {
                     firmware_face: lpa_studio_core::DeviceFirmwareFace::LightPlayer {
                         firmware: Some("fw-esp32c6 abc1234".to_string()),
                         wire: lpa_studio_core::DeviceWireVersion::Match,
+                        age: lpa_studio_core::DeviceFirmwareAge::Unknown,
                     },
                     remembered_firmware: None,
                     degraded: None,
@@ -959,6 +1254,7 @@ fn roster_fixture() -> DeviceRosterView {
                         percent: Some(40),
                         cancellable: true,
                         cancel_requested: false,
+                        layout: None,
                     }),
                     last_outcome: None,
                     // Mid-activity: the bar is in the state zone above and
@@ -1039,6 +1335,7 @@ fn roster_fixture() -> DeviceRosterView {
                     firmware_face: lpa_studio_core::DeviceFirmwareFace::LightPlayer {
                         firmware: Some("fw-esp32c6 abc1234".to_string()),
                         wire: lpa_studio_core::DeviceWireVersion::Match,
+                        age: lpa_studio_core::DeviceFirmwareAge::Unknown,
                     },
                     remembered_firmware: None,
                     degraded: None,
@@ -1160,6 +1457,8 @@ fn roster_page_fixture() -> DeviceRosterView {
         access: Default::default(),
         transport_available: true,
         usb_available: true,
+        layout: Default::default(),
+        backup_download: None,
         feeds: Default::default(),
         runtime_bands: Default::default(),
         open_addresses: full.open_addresses,
@@ -1191,7 +1490,7 @@ fn devices_card_firmware_faces() -> Element {
                         p { class: "tw:m-0 tw:text-[0.68rem] tw:font-bold tw:uppercase tw:tracking-wide tw:text-subtle-foreground",
                             "{label}"
                         }
-                        DeviceRosterCard {
+                        StoryDeviceCard {
                             card,
                             open_uid,
                             projects: packages(),
@@ -1233,6 +1532,7 @@ fn firmware_face_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
                 board: 19,
                 studio: 20,
             },
+            age: lpa_studio_core::DeviceFirmwareAge::Unknown,
         },
         degraded: Some("Recovery red: /studio.show/s disabled after repeated crashes".to_string()),
         engine_fps: None,
@@ -1302,6 +1602,7 @@ fn firmware_face_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
                 board: 21,
                 studio: 20,
             },
+            age: lpa_studio_core::DeviceFirmwareAge::Unknown,
         },
         terminal: vec![
             story_line(
@@ -1537,7 +1838,7 @@ fn devices_card_sim_faces() -> Element {
                         p { class: "tw:m-0 tw:text-[0.68rem] tw:font-bold tw:uppercase tw:tracking-wide tw:text-subtle-foreground",
                             "{label}"
                         }
-                        DeviceRosterCard {
+                        StoryDeviceCard {
                             card,
                             runtime,
                             feed,
@@ -1574,7 +1875,7 @@ fn devices_card_emu_band() -> Element {
                         p { class: "tw:m-0 tw:text-[0.68rem] tw:font-bold tw:uppercase tw:tracking-wide tw:text-subtle-foreground",
                             "{label}"
                         }
-                        DeviceRosterCard {
+                        StoryDeviceCard {
                             card: sim_card_view(31, "XIAO ESP32-C6 (emu)", "seeed/xiao-esp32-c6"),
                             runtime: Some(UiRuntimeBand::emu("seeed/xiao-esp32-c6", dilation)),
                             feed: None,
@@ -1591,7 +1892,7 @@ fn devices_card_emu_band() -> Element {
                     p { class: "tw:m-0 tw:text-[0.68rem] tw:font-bold tw:uppercase tw:tracking-wide tw:text-subtle-foreground",
                         "For comparison · the sim's band"
                     }
-                    DeviceRosterCard {
+                    StoryDeviceCard {
                         card: sim_card_view(32, "XIAO ESP32-C6 (sim)", "seeed/xiao-esp32-c6"),
                         runtime: Some(UiRuntimeBand::sim("seeed/xiao-esp32-c6", Some("cpu"))),
                         feed: None,
@@ -1625,7 +1926,7 @@ fn devices_card_emu_needs_firmware() -> Element {
     rsx! {
         section { class: "tw:p-4",
             div { class: "tw:grid tw:w-[400px] tw:gap-2",
-                DeviceRosterCard {
+                StoryDeviceCard {
                     card,
                     runtime: Some(UiRuntimeBand::emu("seeed/xiao-esp32-c6", None)),
                     feed: None,
@@ -1652,6 +1953,7 @@ fn card_state_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
             percent: Some(62),
             cancellable: true,
             cancel_requested: false,
+            layout: None,
         }),
         can_remove_project: false,
         escapes: vec![
@@ -1672,6 +1974,7 @@ fn card_state_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
             percent: None,
             cancellable: true,
             cancel_requested: false,
+            layout: None,
         }),
         can_remove_project: false,
         escapes: vec![
@@ -1759,8 +2062,8 @@ fn GalleryPages(
 ) -> Element {
     rsx! {
         div { class: "tw:grid tw:gap-10",
-            DevicesPage { home: home.clone(), on_action }
-            ProjectsPage { home: home.clone(), now_secs, on_action }
+            StoryDevicesPage { home: home.clone(), on_action }
+            StoryProjectsPage { home: home.clone(), now_secs, on_action }
             ExplorePage { home: Some(home), on_action }
         }
     }
@@ -1929,6 +2232,23 @@ fn pick_popover_card() -> DeviceView {
     card
 }
 
+/// The empty face's `push` offer over the pick stories' library.
+fn pick_popover_push() -> UiOffer {
+    lpa_studio_core::push_device_offer(
+        &pick_popover_card(),
+        story_board_prefix(pick_popover_card().id),
+        &pick_popover_library(),
+        &pick_popover_examples(),
+        false,
+    )
+    .expect("an empty LightPlayer takes a project")
+}
+
+/// Where a story board's verbs live (the ref is never drawn).
+fn story_board_prefix(device: DeviceId) -> lpa_studio_core::OfferPath {
+    lpa_studio_core::OfferPath::board(&lpa_studio_core::BoardRef::New(device.0 as u32))
+}
+
 /// Forty saved projects: the library size the inline picker could not hold.
 fn pick_popover_library() -> Vec<UiPackageCard> {
     let names = [
@@ -2000,11 +2320,13 @@ fn device_pick_popover_new_tab() -> Element {
         section { class: "tw:min-h-[520px] tw:w-[420px] tw:p-4",
             div { class: "tw:flex tw:h-[30px] tw:min-w-0 tw:items-center tw:gap-1.5 tw:overflow-hidden tw:whitespace-nowrap",
                 ProjectPickPopover {
+                    offer: pick_popover_push(),
                     card: pick_popover_card(),
                     projects: pick_popover_library(),
                     examples: pick_popover_examples(),
                     initially_open: true,
-                    initial_pick: Some("new:seeed/xiao-esp32-c6".to_string()),
+                    initial_args: OfferArgs::new()
+                        .with(PUSH_SOURCE_PARAM, "new:seeed/xiao-esp32-c6"),
                     on_action: |_| {},
                 }
             }
@@ -2020,7 +2342,7 @@ fn devices_card_menu_open() -> Element {
     rsx! {
         section { class: "tw:min-h-[560px] tw:p-4",
             div { class: "tw:w-[400px]",
-                DeviceRosterCard {
+                StoryDeviceCard {
                     card,
                     open_uid: Some("dev000000daqf6dvvqz".to_string()),
                     projects: packages(),
@@ -2051,7 +2373,7 @@ fn devices_card_menu_link_counters() -> Element {
     rsx! {
         section { class: "tw:min-h-[640px] tw:p-4",
             div { class: "tw:w-[400px]",
-                DeviceRosterCard {
+                StoryDeviceCard {
                     card,
                     open_uid: Some("dev000000daqf6dvvqz".to_string()),
                     projects: packages(),
@@ -2072,6 +2394,7 @@ fn device_pick_popover_open() -> Element {
         section { class: "tw:min-h-[520px] tw:w-[420px] tw:p-4",
             div { class: "tw:flex tw:h-[30px] tw:min-w-0 tw:items-center tw:gap-1.5 tw:overflow-hidden tw:whitespace-nowrap",
                 ProjectPickPopover {
+                    offer: pick_popover_push(),
                     card: pick_popover_card(),
                     projects: pick_popover_library(),
                     examples: pick_popover_examples(),
@@ -2097,13 +2420,35 @@ fn device_update_pick_open() -> Element {
     board_pick_story(BoardPickMode::Verb, ("esp32", ChipSource::BootBanner))
 }
 
-/// One 420px column with the board pick popover mounted open.
+/// One 420px column with the board pick popover mounted open: Row is a
+/// blank chip's `flash` (a pending link the boot banner named), Verb the
+/// bench classic's `update-firmware` with its board unknown.
 fn board_pick_story(mode: BoardPickMode, chip: (&str, ChipSource)) -> Element {
+    let offer = match mode {
+        BoardPickMode::Row => {
+            let blank = PendingLinkView {
+                device: DeviceId(3),
+                firmware_face: lpa_studio_core::DeviceFirmwareFace::Blank,
+                detected_chip: Some(chip.0.to_string()),
+                ..roster_fixture().roster.pending[1].clone()
+            };
+            lpa_studio_core::flash_pending_offer(&blank, story_board_prefix(DeviceId(3)))
+                .expect("a blank chip flashes")
+        }
+        BoardPickMode::Verb => {
+            let (_, older_unknown, _) = firmware_face_fixtures()
+                .into_iter()
+                .find(|(label, _, _)| *label == "Older, board unknown")
+                .expect("the bench classic");
+            lpa_studio_core::update_firmware_offer(&older_unknown, story_board_prefix(DeviceId(3)))
+                .expect("a running LightPlayer updates")
+        }
+    };
     rsx! {
         section { class: "tw:min-h-[420px] tw:w-[420px] tw:p-4",
             div { class: "tw:flex tw:h-[30px] tw:min-w-0 tw:items-center tw:gap-1.5 tw:overflow-hidden tw:whitespace-nowrap",
                 BoardPickPopover {
-                    device: DeviceId(3),
+                    offer,
                     chip: Some((chip.0.to_string(), chip.1)),
                     mode,
                     initially_open: true,

@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, MutexGuard};
 
 use super::host_esp32_flash;
+use super::host_esp32_layout;
 use crate::provider::endpoint::{LinkEndpointId, LinkEndpointStatus};
 use crate::provider::session::LinkSessionId;
 use crate::providers::{LinkProviderDescriptor, LinkProviderKind};
@@ -270,6 +271,17 @@ impl HostSerialEsp32Provider {
         Ok(())
     }
 
+    /// The package manifest to write for `build_id`, or a configuration
+    /// error naming the missing option.
+    fn manifest_path(&self, build_id: Option<&str>) -> Result<String, LinkError> {
+        self.options.manifest_path_for(build_id).ok_or_else(|| {
+            LinkError::other(
+                "no firmware manifest configured for the host serial ESP32 provider \
+                 (set HostSerialEsp32Options::firmware_manifest_path)",
+            )
+        })
+    }
+
     /// Shared body of `manage`/`manage_with_events`.
     ///
     /// The espflash operations are synchronous serial I/O and block the
@@ -286,19 +298,26 @@ impl HostSerialEsp32Provider {
         let port_name = self.session_manage_port(session_id, &request)?;
         self.release_transport_if_open(session_id).await?;
         match request {
-            LinkManagementRequest::FlashFirmware { ref build_id } => {
-                let manifest_path = self
-                    .options
-                    .manifest_path_for(build_id.as_deref())
-                    .ok_or_else(|| {
-                        LinkError::other(
-                            "no firmware manifest configured for the host serial ESP32 provider \
-                             (set HostSerialEsp32Options::firmware_manifest_path)",
-                        )
-                    })?;
-                let result = host_esp32_flash::flash_firmware(&port_name, &manifest_path, &events)?;
+            LinkManagementRequest::FlashFirmware {
+                ref build_id,
+                ref plan,
+            } => {
+                let manifest_path = self.manifest_path(build_id.as_deref())?;
+                let result = match plan {
+                    None => host_esp32_flash::flash_firmware(&port_name, &manifest_path, &events)?,
+                    Some(plan) => {
+                        host_esp32_layout::execute_plan(&port_name, &manifest_path, plan, &events)?
+                    }
+                };
                 self.extend_session_logs(session_id, &result.logs)?;
                 Ok(LinkManagementResult::FlashFirmware(result))
+            }
+            LinkManagementRequest::InspectLayout { ref build_id } => {
+                let manifest_path = self.manifest_path(build_id.as_deref())?;
+                let result =
+                    host_esp32_layout::inspect_layout(&port_name, &manifest_path, &events)?;
+                self.extend_session_logs(session_id, &result.logs)?;
+                Ok(LinkManagementResult::InspectLayout(result))
             }
             LinkManagementRequest::EraseDeviceFlash => {
                 let result = host_esp32_flash::erase_device_flash(&port_name, &events)?;

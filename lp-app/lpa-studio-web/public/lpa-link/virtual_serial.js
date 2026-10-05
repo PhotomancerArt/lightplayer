@@ -64,9 +64,17 @@
 // THE SHIM TRANSLATES NOTHING. `setSignals` writes DTR/RTS onto the control
 // channel and stops there. The reset dances are decoded by the emulator from
 // the RTS falling edge and whether DTR was ever high; this file never
-// pattern-matches a dance and never sends a verb of its own.
+// pattern-matches a dance and never sends a verb of its own in answer to a
+// Studio call. The one exception is not a translation: a page that asks for
+// `holds` gets a bench switch on a pad (`pin`), sent around the PAGE's cable
+// verbs and after a reboot — see "The page's switches".
 
 import { nativeBacking } from "./emulator_port.js";
+import { MacTtyModel } from "./mac_tty_model.js";
+
+/// How often, at most, a page behind the Mac serial model reads (see
+/// `_attachMacStreams`): a page busy for a frame now and then.
+const MAC_PAGE_READ_EVERY_MS = 16;
 
 const VENDOR_ID = 0x303a;
 const PRODUCT_ID = 0x1001;
@@ -94,9 +102,22 @@ let hadOwnProperty = false;
 /// (M3). With one, `requestPort()` asks it and the page starts with NO grants,
 /// which is what a fresh Chrome profile looks like. Without one, every board
 /// is granted at load and `requestPort()` resolves to the first match.
-export async function createBus(baseUrl, { boards = null, backing = null, picker = null } = {}) {
+/// `holds` — `{ <pad>: <level> }`, levels a BENCH DRIVER holds on every
+/// board's pads from outside the chip (see "The page's switches" below). The
+/// dev page passes `{ 0: true }`, a power-button switch on D0 held on; the
+/// conformance suite passes nothing, and then the bus sends no verb of its
+/// own, ever.
+/// `hostTty` — `"mac"` puts a model of the Mac's serial path between each
+/// board and the page (`mac_tty_model.js`): `0xFF`-heavy bytes the page reads
+/// late are dropped where a Mac drops them. Null (the default) is a lossless
+/// pipe. `index.html` turns it on for a page running on a Mac.
+export async function createBus(
+  baseUrl,
+  { boards = null, backing = null, picker = null, holds = null, hostTty = null } = {},
+) {
   const source = backing ?? nativeBacking(baseUrl);
-  const bus = new VirtualSerial(source, picker);
+  const bus = new VirtualSerial(source, picker, holds);
+  bus.hostTty = hostTty;
   await bus.load(boards);
   return bus;
 }
@@ -150,8 +171,17 @@ export function bus() {
   return installed;
 }
 
+/// Guest time a changed switch is given before the cable comes out:
+/// comfortably past a button's 30 ms debounce plus a slow frame's tick, so
+/// the firmware has READ the switch by the time it hears the host go.
+const HOLD_SETTLE_US = 500_000;
+/// Wall-clock patience for that settle. A hidden tab runs the guest forty
+/// times slower (measured, `emulator_tab.js`), so this is the line between
+/// "slow" and "stuck", and past it the cable comes out anyway, with a warning.
+const HOLD_SETTLE_DEADLINE_MS = 15_000;
+
 class VirtualSerial extends EventTarget {
-  constructor(backing, picker = null) {
+  constructor(backing, picker = null, holds = null) {
     super();
     this.backing = backing;
     // The in-page chooser, or null. See `createBus`.
@@ -165,6 +195,18 @@ class VirtualSerial extends EventTarget {
     // pairs dead generations to replacements IN ORDER, so a bus that shuffled
     // its ports when a board rebooted would cross two boards' sessions.
     this.boardIds = [];
+    // The page's switches: what the bench holds on each board's pads, per
+    // board, and the guest time (µs) the last `pin` landed at. See
+    // "The page's switches" below.
+    this.defaultHolds = Object.entries(holds ?? {}).map(([pad, level]) => [
+      Number(pad),
+      Boolean(level),
+    ]);
+    this.holds = new Map();
+    this.holdAt = new Map();
+    this.holdErrors = new Map();
+    // `"mac"` or null; see `createBus`.
+    this.hostTty = null;
   }
 
   async load(only) {
@@ -194,8 +236,16 @@ class VirtualSerial extends EventTarget {
         this.granted.add(port);
       }
       // The board went back to power-on. The port SURVIVES (see the header):
-      // all this does is let the page's own chrome re-read it.
-      emulator.on("reboot", () => this.noteState(this.newestPortFor(id)));
+      // all this does is let the page's own chrome re-read it — and put the
+      // page's switches back, which a restart drops (see below).
+      emulator.on("reboot", () => {
+        this.noteState(this.newestPortFor(id));
+        this.applyHolds(id).catch(() => {});
+      });
+      if (this.defaultHolds.length > 0) {
+        this.holds.set(id, new Map(this.defaultHolds));
+        await this.applyHolds(id).catch(() => {});
+      }
     }
   }
 
@@ -381,6 +431,8 @@ class VirtualSerial extends EventTarget {
       granted: this.granted.has(port),
       open: port.opened,
       attached: !port.dead,
+      holds: [...(this.holds.get(port.boardId) ?? [])].map(([pad, level]) => ({ pad, level })),
+      holdError: this.holdErrors.get(port.boardId) ?? null,
     };
   }
 
@@ -416,6 +468,7 @@ class VirtualSerial extends EventTarget {
   /// `web_app.rs:1908-1913`).
   async detach(boardId) {
     const port = this.requireLivePort(boardId);
+    await this.settleHolds(boardId);
     await port.emulator.detach();
     port.unplug("The emulated board was detached.");
     this.dispatchEvent(new CustomEvent("disconnect", { detail: { port } }));
@@ -431,6 +484,7 @@ class VirtualSerial extends EventTarget {
       throw new Error(`no emulated board \`${boardId}\` on this bus`);
     }
     await previous.emulator.attach();
+    await this.applyHolds(boardId).catch(() => {});
     if (!previous.dead) {
       // Already plugged in: the verb is idempotent and the edge still fires,
       // because a page that pressed the button asked for a re-derivation.
@@ -440,6 +494,117 @@ class VirtualSerial extends EventTarget {
     const fresh = this.adopt(previous);
     this.dispatchEvent(new CustomEvent("connect", { detail: { port: fresh } }));
     return fresh;
+  }
+
+  // --- the page's switches -----------------------------------------------
+  //
+  // A pad held from OUTSIDE the chip: the switch a power-button project reads
+  // on D0 (`button:local:D0`, `mode: "switch"`). The firmware's rule is that
+  // a switch reading "off" keeps the board awake only while a USB host is
+  // attached (`power_button_node.rs`), and an emulated pad nobody drives
+  // reads low — so before this, the banner's `detach` powered every such
+  // board off, and the emulator has no deep-sleep wake to bring it back.
+  //
+  // This is a bench driver, not a translation: `pin <pad> <0|1>` is the
+  // emulator's own control verb (`lp-emu-esp32c6/src/control.rs`), and it is
+  // sent only for boards the page asked to hold (`createBus({ holds })`), at
+  // load, on the page's switch, around the page's own cable verbs and after a
+  // reboot. Never on Studio's open, close or signals.
+  //
+  // WHY AFTER A REBOOT: a restart puts the whole pin fabric back to its
+  // power-on snapshot, outside drives included, so a held pad reads low again
+  // after every reset and power cycle until the hold is re-sent.
+
+  /// What the bench holds on `boardId`'s pads: `[{ pad, level }]`.
+  holdsFor(boardId) {
+    return [...(this.holds.get(boardId) ?? [])].map(([pad, level]) => ({ pad, level }));
+  }
+
+  /// Flip a switch: hold `level` on `pad` from now on, across reboots.
+  async hold(boardId, pad, level) {
+    let holds = this.holds.get(boardId);
+    if (!holds) {
+      holds = new Map();
+      this.holds.set(boardId, holds);
+    }
+    holds.set(Number(pad), Boolean(level));
+    try {
+      await this.drive(boardId, Number(pad), Boolean(level));
+    } finally {
+      this.noteState(this.newestPortFor(boardId));
+    }
+  }
+
+  /// Send every hold for `boardId` again. Idempotent on the machine: a pad
+  /// already held at a level ignores the same level.
+  async applyHolds(boardId) {
+    for (const [pad, level] of this.holds.get(boardId) ?? []) {
+      await this.drive(boardId, pad, level);
+    }
+  }
+
+  async drive(boardId, pad, level) {
+    const emulator = this.newestPortFor(boardId)?.emulator;
+    if (!emulator) {
+      return;
+    }
+    try {
+      const reply = await emulator.command(`pin ${pad} ${level ? 1 : 0}`);
+      const us = /(?:^|\s)us=(\d+)/.exec(reply);
+      if (us) {
+        this.holdAt.set(boardId, Number(us[1]));
+      }
+      if (this.holdErrors.delete(boardId)) {
+        this.noteState(this.newestPortFor(boardId));
+      }
+    } catch (error) {
+      // A board whose emulator has no `pin` verb, or one that is stopped:
+      // the banner says so on the switch rather than pretending it is held.
+      this.holdErrors.set(boardId, String(error?.message ?? error));
+      this.noteState(this.newestPortFor(boardId));
+      console.warn(`[emu] ${boardId}: could not hold gpio${pad}:`, error);
+      throw error;
+    }
+  }
+
+  /// Before the cable comes out: every hold must be on the pad AND have been
+  /// there long enough for the firmware to have read it. A reboot nobody
+  /// observed (no control reply since) drops the holds silently, and a switch
+  /// re-sent a moment before the host goes is still inside the firmware's
+  /// debounce — it would hear "switch off, no host" and power off. So: read
+  /// the pads, re-send what is missing, and give the guest HOLD_SETTLE_US of
+  /// its own time when anything changed recently.
+  async settleHolds(boardId) {
+    const holds = this.holds.get(boardId);
+    const emulator = this.newestPortFor(boardId)?.emulator;
+    if (!holds?.size || !emulator) {
+      return;
+    }
+    try {
+      const report = await emulator.pins();
+      let since = this.holdAt.get(boardId) ?? -Infinity;
+      for (const [pad, level] of holds) {
+        const row = report.pins.find((r) => r.pad === `gpio${pad}`);
+        if (row?.drv !== (level ? "1" : "0")) {
+          await this.drive(boardId, pad, level);
+          since = this.holdAt.get(boardId) ?? report.us;
+        }
+      }
+      // A high-water above "now" is from before a restart.
+      since = Math.min(since, report.us);
+      const target = since + HOLD_SETTLE_US;
+      const deadline = Date.now() + HOLD_SETTLE_DEADLINE_MS;
+      for (let now = report.us; now < target; ) {
+        if (Date.now() > deadline) {
+          console.warn(`[emu] ${boardId}: the switch had no time to settle; detaching anyway`);
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 25));
+        now = (await emulator.state()).us;
+      }
+    } catch (error) {
+      console.warn(`[emu] ${boardId}: could not settle the switch before detaching:`, error);
+    }
   }
 
   requireLivePort(boardId) {
@@ -609,6 +774,10 @@ class VirtualSerialPort {
   }
 
   _attachStreams() {
+    if (this.bus.hostTty === "mac") {
+      this._attachMacStreams();
+      return;
+    }
     const port = this;
     this._readable = new ReadableStream({
       start(controller) {
@@ -628,6 +797,85 @@ class VirtualSerialPort {
         port._releaseByteListeners();
       },
     });
+    this._writable = new WritableStream({
+      write(chunk) {
+        port.emulator.write(chunk);
+      },
+    });
+  }
+
+  // The same streams with a Mac's serial path in the middle
+  // (`mac_tty_model.js`). The readable is PULLED, at most a pipe's worth per
+  // read, the way Chromium hands the page what its 255-byte pipe holds: bytes
+  // that arrive between two reads queue in the model's tty, and the ones a
+  // Mac would drop are dropped, and counted on the port (`ttyDropped`).
+  _attachMacStreams() {
+    const port = this;
+    const tty = new MacTtyModel();
+    this.tty = tty;
+    const readEveryMs = MAC_PAGE_READ_EVERY_MS;
+    let waiting = null;
+    let lastRead = -Infinity;
+    let timer = null;
+    // A page that reads late: at most one read per `readEveryMs`. An
+    // emulated board delivers slower than silicon, so a page that read
+    // the instant bytes landed would never fall behind the way a busy page
+    // on a Mac does — and never see what a Mac drops.
+    const deliver = () => {
+      if (!waiting) return;
+      const now = globalThis.performance?.now?.() ?? Date.now();
+      const early = lastRead + readEveryMs - now;
+      if (early > 0) {
+        timer ??= setTimeout(() => {
+          timer = null;
+          deliver();
+        }, early);
+        return;
+      }
+      const bytes = tty.read();
+      if (bytes.length === 0) return;
+      lastRead = now;
+      const resolve = waiting;
+      waiting = null;
+      resolve(bytes);
+    };
+    this._readable = new ReadableStream(
+      {
+        start(controller) {
+          port._streamController = controller;
+          port._unsubscribe = port.emulator.onBytes((bytes) => {
+            const before = tty.dropped;
+            tty.arrive(bytes);
+            if (tty.dropped !== before) {
+              port.ttyDropped = tty.dropped;
+              console.warn(`[emu] ${port.boardId}: the Mac serial model dropped ${tty.dropped - before} B (${tty.dropped} B so far)`);
+            }
+            deliver();
+          });
+          port._offBytesError = port.emulator.on("byteserror", (detail) => {
+            port._errorStream(detail?.reason ?? "The device has been lost.");
+          });
+        },
+        pull(controller) {
+          return new Promise((resolve) => {
+            waiting = (bytes) => {
+              try {
+                controller.enqueue(bytes);
+              } catch {
+                // the consumer cancelled between frames
+              }
+              resolve();
+            };
+            deliver();
+          });
+        },
+        cancel() {
+          waiting = null;
+          port._releaseByteListeners();
+        },
+      },
+      { highWaterMark: 0 },
+    );
     this._writable = new WritableStream({
       write(chunk) {
         port.emulator.write(chunk);

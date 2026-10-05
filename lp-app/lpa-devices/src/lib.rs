@@ -41,10 +41,13 @@
 //! - `README.md` and `docs/adr/2026-08-25-event-fold-device-model.md`.
 
 pub mod activity;
+pub mod app_version;
+pub mod board_key;
 pub mod bootloader;
 pub mod device;
 pub mod event;
 pub mod evidence;
+pub mod firmware_age;
 pub mod identity;
 pub mod intent;
 pub mod journal;
@@ -57,13 +60,21 @@ pub mod time;
 pub mod view;
 pub mod wire;
 
-pub use activity::{ActivityCell, ActivityKind, ActivityOutcome, CancelPhase, PushActivity};
+pub use activity::{
+    ActivityCell, ActivityKind, ActivityOutcome, CancelPhase, FlashLayoutView, FlashStep,
+    LayoutVerdict, PushActivity,
+};
+pub use app_version::{AppVersion, DevCommit};
+pub use board_key::{BoardKey, BoardKeyError};
 pub use device::{Device, DeviceStatus};
-pub use event::{Action, ActivityMarker, Command, EffectId, EffectRequest, Event, Input};
+pub use event::{
+    Action, ActivityMarker, Command, EffectId, EffectRequest, Event, GrantAnswer, Input,
+};
 pub use evidence::{
     Classification, Evidence, Freshness, IncompatibleReason, Liveness, Presence, TerminalKind,
     TerminalLine, WireVersion,
 };
+pub use firmware_age::FirmwareAge;
 pub use identity::{DeviceId, DeviceUid, EndpointKey, IdentityChain, MacAddress, PeerIdentity};
 pub use intent::{ConnectionIntent, Intent};
 pub use journal::{Journal, JournalEntry, JournalNote, Scope};

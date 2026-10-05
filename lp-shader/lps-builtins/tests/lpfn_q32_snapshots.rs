@@ -1,4 +1,5 @@
 //! Golden snapshots for selected `__lp_lpfn_*_q32` entry points (raw fixed-point I/O).
+#![allow(clippy::approx_constant, reason = "golden input values")]
 
 mod util;
 

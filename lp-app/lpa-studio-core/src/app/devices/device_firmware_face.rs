@@ -9,35 +9,51 @@
 //! a running board one wire version behind Studio). A match here is
 //! exhaustive, so the next variant is a compile error, not a silent blank.
 
-use lpa_devices::WireVersion;
 use lpa_devices::view::FirmwareFace;
+use lpa_devices::{FirmwareAge, WireVersion};
 
 /// The FIRMWARE zone's info line on a device card: the firmware label
-/// joined to the board it was built for (the header's already-resolved
-/// display name, so the two name the board identically), with the
-/// wire-version awareness when there is any; or the verdict that asks for
-/// a flash, in the words of THAT verdict.
+/// (which leads with the version) joined to the board it was built for (the
+/// header's already-resolved display name, so the two name the board
+/// identically), with how it stands against this Studio when that is known;
+/// or the verdict that asks for a flash, in the words of THAT verdict.
+///
+/// "Older than Studio" follows the VERSION ([`FirmwareAge`]). The wire proto
+/// speaks only when no version can be compared (a board or a Studio that
+/// reports none), as it did before boards said their version.
 ///
 /// User words, not wire words: "older than Studio", never "proto 19"
 /// (the terminal carries the numbers).
 pub fn device_firmware_line(face: &FirmwareFace, board: Option<&str>) -> String {
     match face {
         FirmwareFace::Unknown => "No firmware reported yet".to_string(),
-        FirmwareFace::LightPlayer { firmware, wire } => {
+        FirmwareFace::LightPlayer {
+            firmware,
+            wire,
+            age,
+        } => {
             let parts: Vec<&str> = firmware.as_deref().into_iter().chain(board).collect();
             let mut line = if parts.is_empty() {
                 "No firmware reported yet".to_string()
             } else {
                 parts.join(" · ")
             };
-            match wire {
-                WireVersion::Match => {}
-                WireVersion::BoardOlder { .. } => {
-                    line.push_str(" — older than Studio, update recommended");
+            let standing = match (age, wire) {
+                (FirmwareAge::Older, _)
+                | (FirmwareAge::Unknown, WireVersion::BoardOlder { .. }) => {
+                    Some(" — older than Studio, update recommended")
                 }
-                WireVersion::BoardNewer { .. } => {
-                    line.push_str(" — newer than Studio");
+                (FirmwareAge::Different, _) => {
+                    Some(" — not this Studio's build, update recommended")
                 }
+                (FirmwareAge::Newer, _)
+                | (FirmwareAge::Unknown, WireVersion::BoardNewer { .. }) => {
+                    Some(" — newer than Studio")
+                }
+                (FirmwareAge::Current, _) | (FirmwareAge::Unknown, WireVersion::Match) => None,
+            };
+            if let Some(standing) = standing {
+                line.push_str(standing);
             }
             line
         }
@@ -93,7 +109,67 @@ mod tests {
         FirmwareFace::LightPlayer {
             firmware: firmware.map(str::to_string),
             wire,
+            age: FirmwareAge::Unknown,
         }
+    }
+
+    fn aged(firmware: &str, age: FirmwareAge) -> FirmwareFace {
+        FirmwareFace::LightPlayer {
+            firmware: Some(firmware.to_string()),
+            wire: WireVersion::Match,
+            age,
+        }
+    }
+
+    /// "Out of date" follows the VERSION: an older release reads older than
+    /// Studio and recommends the update, a newer one says so and recommends
+    /// nothing, the same build says nothing.
+    #[test]
+    fn older_than_studio_follows_the_version() {
+        let board = Some("XIAO ESP32-C6");
+        assert_eq!(
+            device_firmware_line(
+                &aged("fw-esp32c6 2026.10.02-3 · abc1234def01", FirmwareAge::Older),
+                board
+            ),
+            "fw-esp32c6 2026.10.02-3 · abc1234def01 · XIAO ESP32-C6 — older than Studio, \
+             update recommended"
+        );
+        assert_eq!(
+            device_firmware_line(&aged("fw-esp32c6 2026.10.04-1", FirmwareAge::Newer), None),
+            "fw-esp32c6 2026.10.04-1 — newer than Studio"
+        );
+        assert_eq!(
+            device_firmware_line(&aged("fw-esp32c6 2026.10.03-1", FirmwareAge::Current), None),
+            "fw-esp32c6 2026.10.03-1"
+        );
+        assert_eq!(
+            device_firmware_line(&aged("fw-esp32c6 626a1b851", FirmwareAge::Different), None),
+            "fw-esp32c6 626a1b851 — not this Studio's build, update recommended"
+        );
+    }
+
+    /// The version outranks the wire proto: a board on an older proto whose
+    /// version is this Studio's own is not called older, and a board on the
+    /// same proto with an older version is.
+    #[test]
+    fn the_version_outranks_the_wire_proto() {
+        let current_on_old_wire = FirmwareFace::LightPlayer {
+            firmware: Some("fw-esp32c6 2026.10.03-1".to_string()),
+            wire: WireVersion::BoardOlder {
+                board: 33,
+                studio: 34,
+            },
+            age: FirmwareAge::Current,
+        };
+        assert_eq!(
+            device_firmware_line(&current_on_old_wire, None),
+            "fw-esp32c6 2026.10.03-1"
+        );
+        assert!(
+            device_firmware_line(&aged("fw-esp32c6 2026.10.01-1", FirmwareAge::Older), None)
+                .contains("older than Studio")
+        );
     }
 
     /// The bench case: an older board names its firmware AND says it is

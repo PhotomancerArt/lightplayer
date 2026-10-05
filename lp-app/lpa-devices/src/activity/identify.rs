@@ -27,6 +27,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::event::{Action, Command, Event, Input};
 use crate::evidence::{Classification, IncompatibleReason, WireVersion};
+use crate::firmware_age::FirmwareAge;
 use crate::link::{LinkCommand, LinkEvent};
 use crate::time::Millis;
 use crate::wire::ClientFrame;
@@ -121,15 +122,26 @@ impl IdentifyActivity {
             // A LightPlayer on ANOTHER wire version is still the happy
             // verdict; the outcome line says so in passing, and the fold
             // has already journaled the numbers.
+            // The version leads; the wire proto speaks only when neither
+            // side's version can be read.
             Classification::LightPlayer { hello } => ActivityOutcome::Succeeded {
-                summary: match ctx.evidence.wire_version() {
-                    Some(WireVersion::BoardOlder { .. }) => {
+                summary: match (
+                    ctx.evidence.firmware_age().unwrap_or_default(),
+                    ctx.evidence.wire_version(),
+                ) {
+                    (FirmwareAge::Older, _)
+                    | (FirmwareAge::Unknown, Some(WireVersion::BoardOlder { .. })) => {
                         format!("{} (older firmware than Studio)", hello.label())
                     }
-                    Some(WireVersion::BoardNewer { .. }) => {
+                    (FirmwareAge::Newer, _)
+                    | (FirmwareAge::Unknown, Some(WireVersion::BoardNewer { .. })) => {
                         format!("{} (newer firmware than Studio)", hello.label())
                     }
-                    Some(WireVersion::Match) | None => hello.label(),
+                    (FirmwareAge::Different, _) => {
+                        format!("{} (not this Studio's build)", hello.label())
+                    }
+                    (FirmwareAge::Current, _)
+                    | (FirmwareAge::Unknown, Some(WireVersion::Match) | None) => hello.label(),
                 },
             },
             Classification::Incompatible {
@@ -232,7 +244,8 @@ impl IdentifyActivity {
             | Event::LinkDetached { .. }
             | Event::LinkBorrow { .. }
             | Event::ActivityMarker { .. }
-            | Event::IdentityObserved { .. } => ActivityStep::nothing(),
+            | Event::IdentityObserved { .. }
+            | Event::GrantAnswered { .. } => ActivityStep::nothing(),
         }
     }
 

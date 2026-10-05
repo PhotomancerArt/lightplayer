@@ -4,14 +4,21 @@ mod clipboard;
 pub mod cloud;
 pub mod core;
 mod dev_url_flags;
+#[cfg(target_arch = "wasm32")]
+mod device_backup_store_opfs;
 mod device_events_io;
 mod device_hint;
+#[cfg(target_arch = "wasm32")]
+mod engine_cache_opfs;
 pub mod exploration;
+#[cfg(target_arch = "wasm32")]
+mod firmware_fetch_web;
 #[cfg(target_arch = "wasm32")]
 mod library_host_opfs;
 mod local_model_probe;
 mod local_store;
 mod openrouter_oauth;
+mod place_report;
 mod record_lines;
 mod record_sink;
 mod route_recording;

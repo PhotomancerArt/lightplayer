@@ -24,11 +24,16 @@ pub use lpc_history::{ContentHash, SyncRelation};
 pub use self::core::issue::UiIssue;
 pub use self::core::view::progress_state::ProgressState;
 pub use app::agent::{
+    AGENT_ACTIVITY_KEPT, AGENT_ACTIVITY_LIT_SECS, AgentActivity, AgentActivityEntry,
+    AgentActivityKind, UiAgentActivity, UiAgentLit, UiAgentPlace, UiAgentReveal,
+};
+pub use app::agent::{
     AgentController, AgentCostRates, AgentEditRecord, AgentFeedback, AgentModelsFetchFuture,
     AgentOp, AgentProviderConfig, AgentRunContext, AgentSessionKey, AgentTaskFuture,
-    AgentTimerFactory, AgentTimerFuture, AgentViewContext, MAX_EDIT_RECORDS, UiAgentAvailability,
-    UiAgentDebugDump, UiAgentHistoryEntry, UiAgentModelView, UiAgentStatus, UiAgentToolRow,
-    UiAgentTurn, UiAgentUsage, UiAgentView, instant_agent_timer,
+    AgentTimerFactory, AgentTimerFuture, AgentViewContext, MAX_EDIT_RECORDS, UiAgentActPress,
+    UiAgentAvailability, UiAgentCard, UiAgentCardState, UiAgentDebugDump, UiAgentEditBatch,
+    UiAgentEditLine, UiAgentEditOutcome, UiAgentHistoryEntry, UiAgentModelView, UiAgentStatus,
+    UiAgentToolRow, UiAgentTurn, UiAgentUsage, UiAgentView, UiAppAgentView, instant_agent_timer,
 };
 pub use app::bus::{
     UiBusChannelPreview, UiBusChannelView, UiBusSiteOrigin, UiBusSiteView, UiBusView,
@@ -42,46 +47,65 @@ pub use app::devices::BrowserSerialTransport;
 #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
 pub use app::devices::BrowserSimLinkSource;
 pub use app::devices::{
-    BLE_ENDPOINT_PREFIX, Backing, BleDeviceTransport, BleLinkSource, CompletedPush,
-    CompositeDeviceTransport, DEVICE_FEED_PARK_AFTER_FAILURES, DEVICE_FRAME_SNAPSHOT_INTERVAL_SECS,
-    DeviceCardFeedView, DeviceEffectCall, DeviceEffectFacts, DeviceEffectProgress, DeviceEffects,
-    DeviceFace, DeviceFeedOp, DeviceFrameFeed, DeviceFrameFeeds, DeviceIdentityFirmware,
-    DeviceIdentityLine, DevicePushOp, DeviceRoster, DeviceRosterView, DeviceTaskFuture,
+    AUTOCONNECT_ENABLED_PARAM, BLE_ENDPOINT_PREFIX, Backing, BleDeviceTransport, BleLinkSource,
+    BluetoothReach, BoardRef, BoardRefError, CompletedPush, CompositeDeviceTransport,
+    DEVICE_FEED_PARK_AFTER_FAILURES, DEVICE_FRAME_SNAPSHOT_INTERVAL_SECS, DeviceCardFeedView,
+    DeviceEffectCall, DeviceEffectFacts, DeviceEffectProgress, DeviceEffects, DeviceFace,
+    DeviceFeedOp, DeviceFrameFeed, DeviceFrameFeeds, DeviceIdentityFirmware, DeviceIdentityLine,
+    DeviceOfferFacts, DevicePushOp, DeviceRoster, DeviceRosterView, DeviceTaskFuture,
     DeviceTimerFuture, DeviceTransport, DeviceTransportFuture, DevicesOp, EMU_TRANSPORT,
-    EmuBacking, EmuDeviceTransport, EmuLinkSource, EmuRuntimeControl, EmuSession, FeedLiveness,
-    FirmwareVerb, FlashBoardChoice, FlashOffer, GrantedLink, JournalLine, LensLineTap,
-    LensTapEvent, NewSimRecord, PushOffer, PushPayload, PushSource, PushSourceChoice,
-    PushSourceGroup, RESET_NEEDS_USB, RememberedView, RosterSplit, RuntimeKind, SIM_TRANSPORT,
-    SimBacking, SimCreateOp, SimDeviceTransport, SimLinkSource, SimRecord, SimRuntimeControl,
-    SimSession, SimTier, StagedPush, TargetChoice, TargetGroup, TargetOffer, TargetScope,
-    UiRuntimeBand, backing_for, ble_endpoint, ble_link_info, blocked_erase_action,
-    delete_sim_record, device_card_feed_view, device_card_feed_views, device_chip,
-    device_escape_action, device_escape_action_for, device_firmware_line,
-    device_id_from_ble_endpoint, device_identity_line, device_status_kind, emu_endpoint,
-    emu_link_info, emu_offered_for, feed_liveness, firmware_face_preview_sentence, firmware_verb,
-    first_bundled_example_id, flash_offer, flash_offer_for, mint_sim_identity, new_sim_record,
-    pending_escape_action, pending_firmware_line, pending_identity_rows, push_offer,
-    read_sim_record, reflash_choice, sim_device_name, sim_endpoint, sim_link_info, split_roster,
-    target_offer, transport_label_for_endpoint, uid_from_emu_endpoint, uid_from_sim_endpoint,
-    write_sim_record,
+    EmuBacking, EmuDeviceTransport, EmuLinkSource, EmuRuntimeControl, EmuSession,
+    FLASH_ALL_BOARDS_PARAM, FLASH_BOARD_PARAM, FLASH_NAME_PARAM, FeedLiveness, FirmwareVerb,
+    FlashBoardChoice, FlashOffer, GrantedLink, JournalLine, LensLineTap, LensTapEvent,
+    NEW_SIM_BACKING_PARAM, NEW_SIM_BOARD_PARAM, NewSimRecord, PUSH_NAME_BOARD_PARAM,
+    PUSH_NAME_PARAM, PUSH_SOURCE_PARAM, ProvisionalBoardNumbers, PushOffer, PushOver, PushPayload,
+    PushSource, PushSourceChoice, PushSourceGroup, RENAME_NAME_PARAM, RESET_NEEDS_USB,
+    RememberedView, RosterSplit, RuntimeKind, SIM_TRANSPORT, SimBacking, SimCreateOp,
+    SimDeviceTransport, SimLinkSource, SimRecord, SimRuntimeControl, SimSession, SimTier,
+    StagedPush, TargetChoice, TargetGroup, TargetOffer, TargetScope, USB_NEEDS_WEB_SERIAL,
+    UiRuntimeBand, add_device_offers, backing_for, ble_endpoint, ble_link_info,
+    blocked_erase_action, delete_sim_record, device_card_feed_view, device_card_feed_views,
+    device_chip, device_escape_action, device_escape_action_for, device_firmware_line,
+    device_id_from_ble_endpoint, device_identity_line, device_offers, device_status_kind,
+    emu_endpoint, emu_link_info, emu_offered_for, escape_verb, feed_liveness,
+    firmware_face_preview_sentence, firmware_verb, first_bundled_example_id, flash_consequence,
+    flash_device_offer, flash_offer, flash_offer_for, flash_pending_offer, mint_sim_identity,
+    new_sim_offer, new_sim_record, pending_escape_action, pending_firmware_line,
+    pending_identity_rows, pending_link_offers, push_device_offer, push_offer, read_sim_record,
+    reflash_choice, sim_device_name, sim_endpoint, sim_link_info, split_roster, target_offer,
+    transport_label_for_endpoint, uid_from_emu_endpoint, uid_from_sim_endpoint,
+    update_firmware_offer, write_sim_record,
 };
+pub use app::devices::{
+    BackupDownload, BackupEntry, BackupIndex, BackupStatus, BackupStoreError, DeviceBackupOp,
+    DeviceBackupStore, MemoryBackupStore, UiDeviceLayout, UiLayoutPanel, check_store_contract,
+    device_layout_view,
+};
+pub use app::devices::{DeviceFirmwareSources, StudioFirmwareStore};
 pub use app::devices::{LINK_COUNTERS_CAPTION, LinkTrouble, UiLinkCounterRow, link_counter_rows};
 pub use app::docs_host::DocsSimHost;
 pub use app::studio::PlayViewOp;
+pub use app::studio::{UiPage, UiPanel, UiPlace, UiProjectView, UiSessionSection};
+/// A board's MAC, as the roster records it.
+pub use lpa_devices::identity::MacAddress;
 // The project's declared hardware (D41): the web shell's Hardware row and
 // the gallery card's "for <board>" badge both read it.
 pub use app::access::{
     AccessAdded, AccessCommand, AccessPersist, AccessTier, AccountKeys, BrowserKey,
-    DEFAULT_KDF_ITERATIONS, DeviceAccessChange, PLAY_ONLY_SENTENCE, SecretKind, UiAccessEntry,
-    UiAccessPanel, UiDeviceAccess, UiLoginPrompt, UiUnlockOffer, not_permitted_sentence, tier_word,
+    DEFAULT_KDF_ITERATIONS, DeviceAccessChange, DroppedKey, MAX_SECRETS_PER_FILE, OpenTo,
+    PLAY_ONLY_SENTENCE, SecretKind, UiAccessPanel, UiDeviceAccess, UiKeyGroup, UiLoginPrompt,
+    UiPasswordLine, UiUnlockOffer, dropped_sentence, not_permitted_sentence, open_summary,
+    tier_word,
 };
 pub use app::frame_feed::{
     CLOSE_INSPECTION_SAMPLE_FORMAT, CardFeedApply, CardFeedState, PREVIEW_SAMPLE_FORMAT,
 };
 pub use app::home::{
     DEFAULT_STRIP_PIXELS, GenerateProjectError, GeneratedProject, HOME_NODE_ID, HomeOp,
-    ProjectTemplate, UiExampleCard, UiExampleGroup, UiHomeView, UiOpenMismatch, UiPackageCard,
-    UiRunningProject, ZipBytes, example_groups, generate_board_project, template_project_files,
+    NEW_PROJECT_NAME_PARAM, NEW_PROJECT_TEMPLATE_PARAM, OPEN_PROJECT_PARAM, ProjectTemplate,
+    UiExampleCard, UiExampleGroup, UiHomeView, UiOpenMismatch, UiPackageCard, UiRunningProject,
+    ZipBytes, example_groups, generate_board_project, home_offers, new_project_offer,
+    open_project_offer, template_project_files,
 };
 pub use app::library::{DESKTOP_BOARD_ID, ProjectTarget};
 pub use app::node::{
@@ -119,31 +143,45 @@ pub use app::preview_host::{
     PreviewSource, PreviewTier, is_teardown_abort_reason,
 };
 pub use app::project::{
-    AgentEngineStatus, AssetContentFetchOp, AssetEditOp, DirtySummary, EDIT_JOURNAL_CAP,
-    EDITOR_META_PATH, EditorMetaFetchOp, EditorMetaFixture, EditorMetaOp, EditorMetaSet,
-    EditorMetaVerb, FROZEN_PREVIEW_PHASE, HISTORY_ROW_CAP, IMPORT_BUILTIN_SECTION,
-    IMPORT_LIBRARY_SECTION, ImportSource, LoadedProjectChoice, MAX_ASSET_BODY_BYTES,
-    ModuleExportOp, ModuleHeroProduct, NodeCardDrawer, NodeCardUiState, NodeClearDebugOp,
-    NodeController, NodeControllerState, NodeCopyOp, NodeCreateOp, NodeImportOp, NodePasteOp,
-    NodeRemoveOp, NodeRevertOp, NodeUiOp, PanelAutoSaveOp, PanelClearOp, PanelWriteOp,
-    PatchPulseLamps, PatchPulseLanguage, PatchPulseOp, PatchPulseSpace, PatchPulseSubject,
-    PatchVerbFixture, PatchVerbKind, PatchVerbOp, PatchVerbSubject, PatchVerbWindow,
-    PendingAssetEdit, PendingEdit, PendingEditOp, PendingEditPhase, PlaylistActivateOp,
-    ProjectAssetContentRun, ProjectConnectResult, ProjectController, ProjectEditRun,
-    ProjectEditorOp, ProjectEditorTarget, ProjectEditorView, ProjectInventorySummary,
-    ProjectNodeAddress, ProjectNodeStatusTone, ProjectNodeStatusView, ProjectNodeTarget,
-    ProjectNodeTreeItem, ProjectNodeTreeView, ProjectOp, ProjectProductSubscriptionIntent,
-    ProjectRefreshOutcome, ProjectRuntimeSummary, ProjectSlotAddress, ProjectSlotRoot,
-    ProjectSnapshot, ProjectState, ProjectSync, ProjectSyncPhase, ProjectSyncRun,
-    ProjectSyncSummary, SlotController, SlotControllerState, SlotEditOp, SlotKind, UiAddNodeMenu,
+    ADD_NODE_KIND_PARAM, ADD_NODE_VERB, ARRANGE_GROUP, ARRANGE_REDO_VERB, ARRANGE_ROTATION_PARAM,
+    ARRANGE_SCALE_PARAM, ARRANGE_SET_VERB, ARRANGE_UNDO_VERB, ARRANGE_X_PARAM, ARRANGE_Y_PARAM,
+    ASK_AGENT_REQUEST_PARAM, ASK_AGENT_VERB, AgentEngineStatus, AssetContentFetchOp, AssetEditOp,
+    CLEAR_DEBUG_VERB, COPY_NODE_VERB, DirtySummary, EDIT_JOURNAL_CAP, EDITOR_META_PATH,
+    EditorMetaFetchOp, EditorMetaFixture, EditorMetaOp, EditorMetaSet, EditorMetaVerb,
+    FROZEN_PREVIEW_PHASE, HISTORY_ROW_CAP, IMPORT_BUILTIN_SECTION, IMPORT_LIBRARY_SECTION,
+    IMPORT_PATTERN_PARAM, IMPORT_PATTERN_VERB, ImportSource, LoadedProjectChoice,
+    MAX_ASSET_BODY_BYTES, ModuleExportOp, ModuleHeroProduct, NodeCardDrawer, NodeCardUiState,
+    NodeClearDebugOp, NodeController, NodeControllerState, NodeCopyOp, NodeCreateOp, NodeImportOp,
+    NodePasteOp, NodeRemoveOp, NodeRevertOp, NodeUiOp, PASTE_NODE_CLIPBOARD_PARAM, PASTE_NODE_VERB,
+    PATCH_ASSIGN_VERB, PATCH_CLEAR_VERB, PATCH_DELTA_PARAM, PATCH_FLOW_AUTO, PATCH_FLOW_MANUAL,
+    PATCH_FLOW_PARAM, PATCH_GROUP, PATCH_LAMP_PARAM, PATCH_LAMPS_PARAM, PATCH_OUTPUT_PARAM,
+    PATCH_PORT_PARAM, PATCH_RE_ANCHOR_VERB, PATCH_REDO_VERB, PATCH_REVERSE_VERB, PATCH_ROTATE_VERB,
+    PATCH_SET_FLOW_VERB, PATCH_SHIFT_PORT_VERB, PATCH_START_PARAM, PATCH_STEPS_PARAM,
+    PATCH_SUBJECT_PARAM, PATCH_SWAP_PORTS_VERB, PATCH_UNDO_VERB, PATCH_UNMAP_ALL_VERB,
+    PATCH_WHOLE_FIXTURE, PATCH_WITH_PARAM, PLAYLIST_CYCLE_VERB, PLAYLIST_CYCLING_PARAM,
+    PLAYLIST_ENTRY_PARAM, PLAYLIST_NEXT_VERB, PLAYLIST_PLAY_VERB, PLAYLIST_PREV_VERB,
+    PLAYLIST_SKIP_VERB, PLAYLIST_SKIPPED_PARAM, PLAYLIST_STEP_LONGER_VERB,
+    PLAYLIST_STEP_SHORTER_VERB, PanelAutoSaveOp, PanelClearOp, PanelWriteOp, PatchPulseLamps,
+    PatchPulseLanguage, PatchPulseOp, PatchPulseSpace, PatchPulseSubject, PatchVerbFixture,
+    PatchVerbKind, PatchVerbOp, PatchVerbSubject, PatchVerbWindow, PendingAssetEdit, PendingEdit,
+    PendingEditOp, PendingEditPhase, PlaylistActivateOp, ProjectAssetContentRun,
+    ProjectConnectResult, ProjectController, ProjectEditRun, ProjectEditorOp, ProjectEditorTarget,
+    ProjectEditorView, ProjectInventorySummary, ProjectNodeAddress, ProjectNodeStatusTone,
+    ProjectNodeStatusView, ProjectNodeTarget, ProjectNodeTreeItem, ProjectNodeTreeView, ProjectOp,
+    ProjectProductSubscriptionIntent, ProjectRefreshOutcome, ProjectRuntimeSummary,
+    ProjectSlotAddress, ProjectSlotRoot, ProjectSnapshot, ProjectState, ProjectSync,
+    ProjectSyncPhase, ProjectSyncRun, ProjectSyncSummary, REVERT_EDIT_PARAM, REVERT_EDIT_VERB,
+    SAVE_COPY_VERB, SlotController, SlotControllerState, SlotEditOp, SlotKind, UiAddNodeMenu,
     UiAddNodeMenuEntry, UiAffordance, UiArrangeFootprint, UiArrangeMeta, UiArrangeTransform,
     UiAssetContent, UiAssetContentBody, UiAttachTarget, UiEditJournalEntry, UiEditJournalEvent,
     UiEditorMode, UiHistoryKind, UiImportablePattern, UiNodeRemovePreflight, UiPatchChasePreview,
     UiPatchInstance, UiPatchSurface, UiPatchSurfaceFixture, UiPatchSurfaceModule,
     UiPatchSurfaceOutput, UiPatchTarget, UiPendingEdit, UiPendingEditKind, UiPendingEditPhase,
     UiPreviewSpaces, UiProductSpaceRequest, UiProjectHistory, UiProjectHistoryEntry,
-    UiProjectManifest, UiSelection, UiShaderError, UiTimebaseRead, chase_preview,
-    editor_meta_artifact, preview_phase, visual_probe_request,
+    UiProjectManifest, UiSelection, UiShaderError, UiTimebaseRead, arrange_batch,
+    arrange_history_path, chase_preview, editor_meta_artifact, is_header_verb, patch_history_path,
+    preview_phase, publish_arrange_offers, publish_patch_verb_offers, revert_edit_offer,
+    visual_probe_request,
 };
 pub use app::rich_object::{
     RichChip, RichLine, RichObjectView, RichRollup, RichSection, RichWeight,
@@ -182,14 +220,19 @@ pub use app::studio::{
 };
 pub use core::log::{DeviceEventKind, DeviceEventRecorder};
 pub use core::notice::UiNotices;
+pub use core::offer::{
+    OfferArgError, OfferArgs, OfferBinder, OfferChoice, OfferNearness, OfferParam, OfferParamKind,
+    OfferPath, OfferPathError, OfferPress, UiOffer, UiOfferFocus, UiOfferTree,
+};
 pub use core::view::activity_view::UiActivityStep;
 pub use core::view::activity_view::UiActivityStepState;
 pub use core::{
-    ActionClass, ActionConfirmation, ActionEnablement, ActionMeta, ActionPriority, Controller,
-    ControllerContext, ControllerId, ControllerOp, DEVICE_CARD_FEED_CLASS,
-    PASSIVE_REFRESH_DEADLINE, PROJECT_ACTION_DEADLINE, PROJECT_EDITOR_ACTION_DEADLINE,
-    PROJECT_LOAD_DEADLINE, UiAction, UiActions, UiActivityView, UiMetric, UiPaneAction, UiPaneView,
-    UiProgress, UiStatus, UiStudioView, UiTerminalLine, UiViewContent, UxNodePath,
+    ActionClass, ActionConfirmation, ActionConsequence, ActionEnablement, ActionMeta,
+    ActionPriority, Controller, ControllerContext, ControllerId, ControllerOp,
+    DEVICE_CARD_FEED_CLASS, PASSIVE_REFRESH_DEADLINE, PROJECT_ACTION_DEADLINE,
+    PROJECT_EDITOR_ACTION_DEADLINE, PROJECT_LOAD_DEADLINE, UiAction, UiActions, UiActivityView,
+    UiMetric, UiPaneView, UiProgress, UiStatus, UiStudioView, UiTerminalLine, UiViewContent,
+    UxNodePath,
 };
 /// The device model's own vocabulary, re-exported so the web crate renders
 /// and dispatches it without a second dependency edge. The model is the ONE
@@ -199,12 +242,22 @@ pub use lpa_devices::view::{
     FirmwareFace as DeviceFirmwareFace, LoadedProject as DeviceLoadedProject, OutcomeView,
     PendingLinkView, RosterView,
 };
+pub use lpa_devices::wire::BoardFs as DeviceBoardFs;
 pub use lpa_devices::{
-    Action as DeviceAction, ActivityKind as DeviceActivityKind, DeviceId, DeviceStatus,
-    EndpointKey as DeviceEndpointKey, Event as DeviceEvent, Input as DeviceInput,
+    Action as DeviceAction, ActivityKind as DeviceActivityKind, AppVersion as DeviceAppVersion,
+    DeviceId, DeviceStatus, EndpointKey as DeviceEndpointKey, Event as DeviceEvent,
+    FirmwareAge as DeviceFirmwareAge, FlashLayoutView as DeviceFlashLayoutView,
+    FlashStep as DeviceFlashStep, Input as DeviceInput, LayoutVerdict as DeviceLayoutVerdict,
     LinkCounterFacts as DeviceLinkCounters, LinkId as DeviceLinkId, LinkInfo as DeviceLinkInfo,
     Millis as DeviceMillis, RosterConfig as DeviceRosterConfig, TerminalKind as DeviceTerminalKind,
     TerminalLine as DeviceTerminalLine, WireVersion as DeviceWireVersion,
 };
 
 pub const STUDIO_DEMO_PROJECT_ID: &str = "catalog/fyeah-sign";
+
+/// This Studio's own app version: `2026.10.03-1` for a tagged release, the
+/// dev form `<short-sha>[-dirty-<HHMMSS>PT]` otherwise, stamped at build time
+/// by the one helper every versioned build uses (`tools/lp-app-version`).
+/// A board's hello version is compared against it to say "older than
+/// Studio" ([`DeviceFirmwareAge`]).
+pub const STUDIO_VERSION: &str = env!("LP_APP_VERSION");

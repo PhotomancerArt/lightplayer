@@ -643,6 +643,7 @@ mod tests {
                 build: lpc_wire::BuildFacts {
                     features: vec![],
                     package: "fw-esp32v3".to_string(),
+                    version: "unknown".into(),
                     commit: "unknown".to_string(),
                     dirty: false,
                     profile: "release-esp32".to_string(),

@@ -1,18 +1,18 @@
 {
   "measured": {
-    "freeBytes": 204712,
-    "usedBytes": 96824,
+    "freeBytes": 211708,
+    "usedBytes": 89828,
     "totalBytes": 301536,
-    "largestFreeBlock": 184932,
-    "stackHighWater": 12884,
+    "largestFreeBlock": 181561,
+    "stackHighWater": 13048,
     "stackTop": 1082582544,
     "stackHighWaterBand": [
-      12300,
-      13400
+      12500,
+      13600
     ]
   },
-  "recorded": "2026-09-30",
-  "commit": "e96230bf1",
+  "recorded": "2026-10-03",
+  "commit": "ed7e68ddb",
   "comment": "What the FIRMWARE costs, not what a project costs: the shipped image (esp32c6,server,radio \u2014 the bytes a board is flashed with) booted whole on lp-emu:esp32c6:t1 and read from the allocator figures its own first heartbeat reports. `measured` is this tree, and is the ratchet; `silicon_reference` is a committed silicon capture and is NEVER gated \u2014 it is printed every run so the gap between the two cannot widen unseen. Regenerate `measured` with `just heap-budget-baseline-chips`; see docs/heap-budget-gate.md, \"The second source\".",
   "image": "esp32c6,server,radio",
   "configuration": "lp-emu:esp32c6:t1",

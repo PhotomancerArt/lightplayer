@@ -26,8 +26,9 @@ use lpc_wire::{
 };
 use lpfs::LpFsMemory;
 
+use crate::app::studio::offer_press_test_api::{OfferPressTestApi, actor_clicks};
 use crate::{
-    ControllerId, ProjectController, ProjectOp, SlotEditOp, StudioActor, StudioCommand,
+    ControllerId, OfferArgs, ProjectController, ProjectOp, SlotEditOp, StudioActor, StudioCommand,
     StudioController, StudioServerClient, UiAction, UiConfigSlot, UiConfigSlotBody,
     UiNodeDirtyState, UiNodeSection, UiNodeTabBody, UiNodeView, UiSlotEditorHint, UiStudioView,
     UiViewContent,
@@ -153,8 +154,7 @@ fn simulator_session_edit_save_and_revert_end_to_end() {
 
     // Save: the persisted color-order edit commits to fixture.json; the
     // debug rate override stays pending (live), clock.json untouched.
-    handle.tx.send(project_action(ProjectOp::SaveOverlay));
-    drive(actor.run_one_batch_for_test());
+    actor_clicks(&mut actor, &handle.tx).press("project/save", OfferArgs::new());
     // Pull a refresh so the synced view reflects the committed def.
     handle.tx.send(project_action(ProjectOp::RefreshProject));
     drive(actor.run_one_batch_for_test());
@@ -189,13 +189,22 @@ fn simulator_session_edit_save_and_revert_end_to_end() {
         "with the persisted edit written the project reads clean — the surviving debug override is not dirty"
     );
 
-    // Revert all: the overlay clears, every slot returns to Clean, and the
-    // *gated* refresh (since = last known revision) delivers the reverted
-    // def values directly — no reconnect/full resync. Reverting advances the
-    // effective def revisions monotonically (studio editing ADR follow-up
-    // (e)), so the delta read includes the reverted roots.
-    handle.tx.send(project_action(ProjectOp::RevertAllEdits));
-    drive(actor.run_one_batch_for_test());
+    // Clear the debug override: the overlay clears, every slot returns to
+    // Clean, and the *gated* refresh (since = last known revision) delivers
+    // the reverted def values directly — no reconnect/full resync. Clearing
+    // advances the effective def revisions monotonically (studio editing
+    // ADR follow-up (e)), so the delta read includes the reverted roots.
+    //
+    // Revert to saved is offered only while persisted edits are pending,
+    // and with the save written the project reads clean: what is left is
+    // the debug override, whose verb is `project/clear-debug` (the "Debug
+    // active" chip) — the one way out the UI offers here (M6e).
+    let mut clicks = actor_clicks(&mut actor, &handle.tx);
+    clicks.not_offered("project/revert");
+    clicks.press(
+        format!("project/{}", crate::CLEAR_DEBUG_VERB),
+        crate::OfferArgs::new(),
+    );
     handle.tx.send(project_action(ProjectOp::RefreshProject));
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("revert emits a snapshot");
@@ -1027,8 +1036,7 @@ fn save_after_home_open_pulls_the_edit_into_the_library() {
     ));
     drive(actor.run_one_batch_for_test());
     let _ = view.try_recv().expect("edit emits a snapshot");
-    handle.tx.send(project_action(ProjectOp::SaveOverlay));
-    drive(actor.run_one_batch_for_test());
+    actor_clicks(&mut actor, &handle.tx).press("project/save", OfferArgs::new());
     let _ = view.try_recv().expect("save emits a snapshot");
 
     // the runtime committed the edit… (an open deploys into the dir the
@@ -1799,8 +1807,7 @@ fn special_editor_values_round_trip_save_and_revert() {
     assert_eq!(editor_dirty(&snapshot), (2, 0));
 
     // Save: both persisted edits materialize into fixture.json.
-    handle.tx.send(project_action(ProjectOp::SaveOverlay));
-    drive(actor.run_one_batch_for_test());
+    actor_clicks(&mut actor, &handle.tx).press("project/save", OfferArgs::new());
     handle.tx.send(project_action(ProjectOp::RefreshProject));
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("save + refresh emit a snapshot");
@@ -1835,8 +1842,7 @@ fn special_editor_values_round_trip_save_and_revert() {
         },
     ));
     drive(actor.run_one_batch_for_test());
-    handle.tx.send(project_action(ProjectOp::RevertAllEdits));
-    drive(actor.run_one_batch_for_test());
+    actor_clicks(&mut actor, &handle.tx).press_lasting("project/revert", OfferArgs::new());
     handle.tx.send(project_action(ProjectOp::RefreshProject));
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("revert emits a snapshot");
@@ -1923,8 +1929,7 @@ fn power_option_gains_the_editor_and_round_trips_save() {
         },
     ));
     drive(actor.run_one_batch_for_test());
-    handle.tx.send(project_action(ProjectOp::SaveOverlay));
-    drive(actor.run_one_batch_for_test());
+    actor_clicks(&mut actor, &handle.tx).press("project/save", OfferArgs::new());
     handle.tx.send(project_action(ProjectOp::RefreshProject));
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("save + refresh emit a snapshot");
@@ -2010,8 +2015,7 @@ fn shader_asset_editor_fetch_apply_save_and_revert_end_to_end() {
     );
 
     // Save: the .glsl on disk gains the applied source and dirty clears.
-    handle.tx.send(project_action(ProjectOp::SaveOverlay));
-    drive(actor.run_one_batch_for_test());
+    actor_clicks(&mut actor, &handle.tx).press("project/save", OfferArgs::new());
     handle.tx.send(project_action(ProjectOp::RefreshProject));
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("save + refresh emit a snapshot");
@@ -2070,7 +2074,7 @@ fn shader_asset_editor_fetch_apply_save_and_revert_end_to_end() {
 /// The header's dirty state and the shader editor's own "Unsaved" word read
 /// the SAME published snapshot — the editor's persistence word comes from
 /// `UiAssetContent::dirty` and the header control's pencil/count/Save come
-/// from `ProjectEditorView::dirty` + `header_actions`, both built in one
+/// from `ProjectEditorView::dirty` + the `project/*` offers, both built in one
 /// `view()` pass. This locks the pair together across the window where they
 /// could plausibly drift: the verdict-chase refresh ticks an accepted apply
 /// arms, each of which re-reads the project (and, when the revision moved,
@@ -2109,11 +2113,24 @@ fn an_applied_shader_body_keeps_the_header_dirty_across_the_refresh_ticks() {
     let mut snapshot = view.try_recv().expect("apply emits a snapshot");
     assert_eq!(editor_dirty(&snapshot), (1, 0), "right after the apply");
     // What the header dispatches is the project-level save, not a second
-    // asset-only verb: the control renders `header_actions` as-is.
-    let editor = project_editor(&snapshot);
-    assert_eq!(editor.header_actions.len(), 2);
+    // asset-only verb: the control renders the `project/*` header verbs
+    // as-is (the add-node picker's, also at `project/`, have their own
+    // control).
     assert_eq!(
-        editor.header_actions[0].action.op_as::<ProjectOp>(),
+        snapshot
+            .offers
+            .verbs_of(&crate::OfferPath::project())
+            .filter(|offer| offer.path.last().is_some_and(crate::is_header_verb))
+            .count(),
+        2
+    );
+    assert_eq!(
+        snapshot
+            .offers
+            .get(&crate::OfferPath::project().child("save"))
+            .expect("project/save")
+            .action
+            .op_as::<ProjectOp>(),
         Some(&ProjectOp::SaveOverlay)
     );
 
@@ -2131,7 +2148,11 @@ fn an_applied_shader_body_keeps_the_header_dirty_across_the_refresh_ticks() {
             "the applied body still counts after refresh tick {tick}"
         );
         assert_eq!(
-            project_editor(&snapshot).header_actions.len(),
+            snapshot
+                .offers
+                .verbs_of(&crate::OfferPath::project())
+                .filter(|offer| offer.path.last().is_some_and(crate::is_header_verb))
+                .count(),
             2,
             "the header keeps Save/Revert across refresh tick {tick}"
         );

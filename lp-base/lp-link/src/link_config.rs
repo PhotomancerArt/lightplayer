@@ -14,6 +14,11 @@ pub const CH_LOG: u8 = 2;
 /// The presets' `max_message`: the wire's 16 KiB frame budget plus 1 KiB.
 pub const MAX_MESSAGE: usize = 17 * 1024;
 
+/// Bytes a secure link's sealing adds to every frame after the handshake:
+/// a 4-byte counter and a 16-byte Poly1305 tag (`header ‖ ctr ‖ ciphertext ‖
+/// tag ‖ crc`). See [`LinkConfig::secured`].
+pub const SEAL_OVERHEAD: usize = 4 + 16;
+
 /// How frames meet the transport.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Framing {
@@ -173,34 +178,21 @@ impl LinkConfig {
         }
     }
 
-    /// BLE NUS: a 15–30 ms connection interval, one frame per notification or
-    /// write.
+    /// BLE NUS: a 15–30 ms connection interval, one frame per notification
+    /// or write (4 header + payload + 4 CRC), never an ATT long write. A
+    /// secure BLE link uses `ble().secured()`, which keeps a sealed frame
+    /// inside one notification too.
     ///
-    /// This preset is shared by every consumer of `ble()` — the C6 board,
-    /// but also this crate's own generic reliability-property fuzzer
-    /// (`delivery_properties.rs`, `link_scenarios.rs`'s `random()`), the
-    /// comms-lab soak (`lab_over_sim.rs`'s BLE case), and the no-steady-
-    /// state-allocation guarantee (`no_steady_state_alloc.rs`'s BLE case),
-    /// which run every `Transport` variant through the plain `Link::send()`
-    /// path with messages up to 16 KiB (well past what a board sends
-    /// through it — real replies go via `send_external`) and, for the
-    /// alloc test, repeatedly at steady state. That is why `send_budget`,
-    /// `max_message` and `keep_reassembly` stay at `usb()`'s values here
-    /// (`..Self::usb()`): a `keep_reassembly` below `max_message` reallocates
-    /// the reassembly buffer on every large message past warm-up instead of
-    /// keeping it — exactly what `no_steady_state_alloc` forbids — and a
-    /// `send_budget` below ~16 KiB makes the comms-lab's default soak size
-    /// `TooBig`. Both were verified by running them, not guessed. USB's own
-    /// preset has the identical shape: `usb()` stays generous, and the
-    /// board-specific narrowing (`send_budget` 2,560 B, `keep_reassembly`
-    /// 1 KiB, replies via `send_external`) lives in firmware only
-    /// (`UsbLinkShared::config()`,
-    /// `lp-fw/fw-esp32-common/src/usb_link/usb_link_shared.rs`). A BLE
-    /// firmware config doing the same is P3's job, not this preset's — see
-    /// this phase's Implementation Result for the two-radio-slot RAM figure
-    /// measured against that board-shaped config, and for the contradiction
-    /// this raised against the phase brief's original plan to narrow
-    /// `send_budget`/`keep_reassembly` directly here.
+    /// The board cuts `max_payload` further per connection, to what its
+    /// negotiated ATT MTU holds (`min(180, ATT_MTU − 11)`: 174 B on iOS),
+    /// and its buffers the way it cuts `usb()`'s
+    /// (`fw-esp32-common`'s `radio_link_config`). This preset keeps
+    /// `send_budget`, `max_message` and `keep_reassembly` at `usb()`'s
+    /// generous values because this crate's own property, soak and
+    /// no-steady-state-allocation tests run every transport through plain
+    /// `Link::send()` with messages up to 16 KiB: a smaller `send_budget`
+    /// makes those `TooBig`, and a `keep_reassembly` below `max_message`
+    /// reallocates on every large message.
     pub fn ble() -> Self {
         LinkConfig {
             framing: Framing::Datagram,
@@ -319,6 +311,19 @@ impl LinkConfig {
         }
     }
 
+    /// The same config for a secure link on a transport with a hard frame
+    /// size (a BLE notification): `max_payload` keeps meaning *plaintext*,
+    /// and a sealed frame is [`SEAL_OVERHEAD`] bytes longer, so this takes
+    /// the overhead off the payload to keep each frame inside one
+    /// transport packet. A secure BLE link uses `LinkConfig::ble().secured()`.
+    /// Stream and WebSocket links need not: their frames have no hard ceiling.
+    pub fn secured(self) -> Self {
+        LinkConfig {
+            max_payload: self.max_payload.saturating_sub(SEAL_OVERHEAD as u16).max(1),
+            ..self
+        }
+    }
+
     pub fn is_reliable(&self, channel: u8) -> bool {
         channel < 8 && self.reliable_channels & (1 << channel) != 0
     }
@@ -359,6 +364,22 @@ mod tests {
             assert_eq!(cfg.validate(), Ok(()), "{name}");
             assert_eq!(cfg.max_message, MAX_MESSAGE, "{name}");
         }
+    }
+
+    /// A secured BLE frame (header, counter, payload, tag, CRC) is exactly
+    /// as long as a plain one, so it fits one notification wherever a plain
+    /// one does: 188 B, inside a 244-byte notification (ATT MTU 247).
+    #[test]
+    fn a_secured_ble_frame_still_fits_one_notification() {
+        let plain = LinkConfig::ble();
+        let secure = LinkConfig::ble().secured();
+        let wire = |cfg: &LinkConfig, overhead: usize| {
+            4 + cfg.max_payload as usize + overhead + cfg.crc.len()
+        };
+        assert_eq!(wire(&plain, 0), 188);
+        assert_eq!(wire(&secure, SEAL_OVERHEAD), wire(&plain, 0));
+        assert!(wire(&plain, 0) <= 244);
+        assert_eq!(secure.validate(), Ok(()));
     }
 
     /// Tools read a UART link with the USB sniffer (`LinkSniffer::usb`), so

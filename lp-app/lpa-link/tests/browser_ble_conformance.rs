@@ -16,6 +16,7 @@
 //! | the GATT subset the provider calls is the polyfill's whole surface | [`a_picked_device_is_connected_present_and_wears_a_ble_endpoint`] |
 //! | lp-link comes up over the GATT subset; one frame per notification | [`a_link_comes_up_and_the_hello_arrives_one_frame_per_notification`] |
 //! | one frame per write, never a long write; a request arrives whole | [`a_request_goes_out_one_frame_per_write`] |
+//! | each frame is its own buffer (Bluefy writes a view's whole buffer) | [`a_large_request_survives_a_browser_that_writes_a_views_whole_buffer`] |
 //! | a drop is a departure, then a reconnect with no gesture | [`a_drop_is_a_departure_and_the_session_reconnects_by_itself`] |
 //! | a drop the page never heard is found by the visibility re-check | [`a_drop_the_page_never_heard_is_found_on_the_recheck`] |
 //! | a drop tears the radio link down, so the reconnect is a fresh link | [`a_phantom_drop_is_torn_down_and_the_reconnect_is_a_fresh_link`] |
@@ -80,6 +81,9 @@ extern "C" {
 
     #[wasm_bindgen(js_name = blePhantomDrop)]
     fn js_ble_phantom_drop(board_id: &str) -> Promise;
+
+    #[wasm_bindgen(js_name = bleWholeBufferWrites)]
+    fn js_ble_whole_buffer_writes(on: bool) -> Promise;
 
     #[wasm_bindgen(js_name = bleHangNextConnect)]
     fn js_ble_hang_next_connect(board_id: &str) -> Promise;
@@ -195,6 +199,45 @@ async fn a_request_goes_out_one_frame_per_write() {
         "a write of {} B is more than one frame: {after:?}",
         after.largest_write
     );
+
+    polyfill_off().await;
+}
+
+/// Bluefy, 2026-10-02: pinning a palette (a > 512 B request) dropped the
+/// link every time. Bluefy writes a typed-array view's whole underlying
+/// buffer, so a write cut as a view carried far more than its own bytes; the
+/// board refused it as a long write and the page tore the link down. A frame
+/// from Rust is a view onto wasm memory, so every write must be a buffer of
+/// its own: under the same quirk, a request of many frames arrives whole,
+/// every write is one frame, and the link stays up.
+#[wasm_bindgen_test]
+async fn a_large_request_survives_a_browser_that_writes_a_views_whole_buffer() {
+    polyfill_over(&["c6-a"]).await;
+    JsFuture::from(js_ble_whole_buffer_writes(true))
+        .await
+        .unwrap();
+    let device = pick().await;
+    let wire = BleWire::new(device.session);
+    let mut bench = LinkBench::new("c6-a");
+    bench
+        .exchange_until(&wire, |reads| hello_count(reads) >= 1)
+        .await;
+    let before = stats("c6-a").await;
+
+    let json = big_request(42, 2_000);
+    wire.send_client_json(&json).expect("the link takes it");
+    bench.exchange_until(&wire, |_| bench_saw_request(42)).await;
+
+    let seen = BOARD.with(|board| board.borrow().requests.clone());
+    assert_eq!(seen, vec![(42, json.clone())], "the board read it whole");
+    let after = stats("c6-a").await;
+    assert!(
+        after.largest_write <= MAX_FRAME_BYTES,
+        "a write of {} B is more than one frame: {after:?}",
+        after.largest_write
+    );
+    assert_eq!(after.link_closes, before.link_closes, "the link stayed up");
+    assert!(wire.is_link_up());
 
     polyfill_off().await;
 }
@@ -725,6 +768,7 @@ fn hello() -> lpc_wire::WireServerMessage {
             build: BuildFacts {
                 features: vec![],
                 package: "fw-esp32c6".to_string(),
+                version: "unknown".into(),
                 commit: "unknown".to_string(),
                 dirty: false,
                 profile: "release-esp32".to_string(),

@@ -3,8 +3,8 @@
 use core::any::Any;
 
 use crate::{
-    ActionClass, ActionMeta, ActionPriority, ControllerOp, PROJECT_ACTION_DEADLINE,
-    PROJECT_LOAD_DEADLINE,
+    ActionClass, ActionConfirmation, ActionMeta, ActionPriority, ControllerOp,
+    PROJECT_ACTION_DEADLINE, PROJECT_LOAD_DEADLINE,
 };
 
 /// The node id home-gallery actions target. The gallery has no controller
@@ -44,6 +44,26 @@ pub enum ProjectTemplate {
 }
 
 impl ProjectTemplate {
+    /// Every template, in the order the New menu (and `project/new`'s
+    /// `template` choice) offers them: blank first — it is what `New` has
+    /// always meant — then the two library scaffolds.
+    pub const ALL: [Self; 3] = [Self::Blank, Self::Pattern1d, Self::Pattern2d];
+
+    /// The value `project/new`'s `template` choice carries for this
+    /// template.
+    pub fn tag(self) -> &'static str {
+        match self {
+            Self::Blank => "blank",
+            Self::Pattern1d => "pattern-1d",
+            Self::Pattern2d => "pattern-2d",
+        }
+    }
+
+    /// The template a [`Self::tag`] names.
+    pub fn from_tag(tag: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|template| template.tag() == tag)
+    }
+
     /// Menu row title.
     pub fn label(self) -> &'static str {
         match self {
@@ -322,7 +342,13 @@ impl ControllerOp for HomeOp {
                 ActionPriority::Tertiary,
             )
             .with_icon("remove")
-            .destructive(),
+            // The card names the project in its own copy; this is the
+            // copy any other surface (and the app agent's card) reads.
+            .lasting(ActionConfirmation::new(
+                "Delete project",
+                "Delete this project and its history from your library?",
+                "Delete",
+            )),
             Self::ImportZip { .. } => ActionMeta::new(
                 "Import zip",
                 "Install a project from a zip archive.",

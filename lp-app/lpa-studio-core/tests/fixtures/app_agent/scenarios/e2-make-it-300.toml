@@ -1,0 +1,37 @@
+# S3 (was E2) "make it 300 LEDs": the agent as an editor. Start from S1's
+# golden, change the strip to 300 LEDs and nothing else of substance.
+id = "S3"
+name = "e2-make-it-300"
+summary = "S1's project → the same project on 300 LEDs, nothing else changed"
+persona = "sean"
+tags = ["edit", "minimal-change"]
+golden = "sean-300-d6"
+
+[start]
+project = { golden = "sean-250-d6" }
+board = { known = "seeed/xiao-esp32-c6" }
+context = "A Seeed XIAO ESP32-C6 is connected over USB. Its board is known: Seeed XIAO ESP32-C6 (board id seeed/xiao-esp32-c6). The open project is the user's saved LED setup."
+
+[user]
+say = "make it 300 LEDs"
+
+[budget]
+turns = 12
+usd = 0.40
+
+[[check]]
+kind = "output_on"
+pin = "D6"
+[[check]]
+kind = "strip_of"
+leds = 300
+# Only the strip's size: no rebuilt playlist, no moved pin, no new board.
+[[check]]
+kind = "minimal_diff"
+allow = ["strip_size"]
+[[check]]
+kind = "graph_wired"
+[[check]]
+kind = "all_nodes_ok"
+[[check]]
+kind = "saved"

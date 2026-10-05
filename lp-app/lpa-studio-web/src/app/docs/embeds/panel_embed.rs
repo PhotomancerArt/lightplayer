@@ -98,8 +98,11 @@ pub(crate) fn PanelEmbed(
             EmbedProblem { message: "`panel` resolved to no sims at all.".to_string() }
         };
     };
-    // Display state is the PRIMARY sim's: one panel, one set of values.
+    // Display state is the PRIMARY sim's: one panel, one set of values —
+    // and its verbs (a playlist's Pattern instrument presses the sim's own
+    // playlist offers), in place of the page's offer tree.
     let panel = root_panel(&primary.view.read());
+    let offers = primary.view.read().offers.clone();
 
     let dispatch_sims = sims;
     let on_action = EventHandler::new(move |action: UiAction| {
@@ -118,7 +121,9 @@ pub(crate) fn PanelEmbed(
     // back" already reaches every named sim, and it only exists while
     // there is something to put back.
     rsx! {
-        DocsPanelSurface { panel, mode, on_action }
+        crate::core::OffersProvider { offers,
+            DocsPanelSurface { panel, mode, on_action }
+        }
     }
 }
 

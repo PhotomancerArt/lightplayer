@@ -389,11 +389,47 @@ is no longer a keep-alive hack, it is the actual server transport.
 
 ## Host link
 
-The server speaks the same `M!`-prefixed line protocol as the other two
-firmwares, over UART0 at 115200 8N1 instead of USB-Serial-JTAG. See
-`src/serial/io_task.rs` for the two places the byte layer had to differ from
-fw-esp32s3's copy (no connection monitor; RX drained between TX chunks so a
-long write cannot overflow the 128-byte RX FIFO).
+UART0 is framed with `lp-link` now (since wire proto 32, plan
+`classic-uart-on-lp-link`, PR #884), not the `M!`-prefixed line protocol the
+verification below predates: a 4-byte header, CRC-32C, selective-repeat ARQ
+and a session handshake, same as the C6/S3's USB link. `src/serial/io_task.rs`
+still only shuttles bytes between UART0 and two pipes (no embassy-time, no
+logging, ISR-scale stack — the executor-isolation rules below); the `Link`
+itself, its timers and its logs live in
+`fw-esp32-common/src/uart_link/uart_link_task.rs`. See the two places the
+byte layer had to differ from fw-esp32s3's copy (no connection monitor; RX
+drained between TX chunks so a long write cannot overflow the 128-byte RX
+FIFO).
+
+### Link IO thread (`io-thread`, off by default)
+
+By default the `uart_link_task` above shares the main thread executor with
+the server loop and runs between frames, waking on events (the I/O task's
+news, a timer, the doorbell, a log record), not on a cadence. With
+`--features io-thread` it runs on its own priority-1 esp-rtos thread,
+pinned to core 0 (`src/io_thread.rs`), instead of sharing the main thread
+executor with the server loop — the C6/S3 treatment, M2 of the Wi-Fi
+control roadmap (plan `2026-10-02-1918-io-thread-other-boards`, PR #943).
+Its passes are at least 25 ms apart (`PassPacing::CLASSIC_LINK_THREAD`):
+on this board's silicon each preemption costs the render several ms of
+flash-cache refill, so an every-event thread stretched frames ~3× during a
+transfer. Messages-first stays **off** here, unlike the C6/S3: Studio's
+editor read costs the classic ~150–175 ms of CPU, and answered before the
+render it delays every frame's display by that much. io_task (swi2, the
+1 ms pacer) is untouched and still the only thing that touches UART0; see
+`docs/adr/2026-08-25-classic-uart-io-task-executor-isolation.md`'s
+2026-10-03 amendment and `docs/adr/2026-10-02-c6-link-io-thread.md`'s
+classic amendment for the numbers, the lock and why the thread is pinned
+to core 0 (never the APP core — it is the RMT core and stalls on every
+flash write). The diagnostic feature `io_thread_stack_diag` paints the
+thread's stack and logs its high-water mark (`[iostack]`); off by default.
+
+It is off because PR #943's desk A/B (DOM-Z-102, `frame_pace_diag`, a
+~16 fps project) found the thread slower and less even than the default in
+every setting: with no host 66.7 ms frames against 57.5 ms, under the
+`link rtt` rig 125 ms request round trips against 98 ms, and under a real
+Studio editor 41 frames per 5 s against 50. Its one gain is transfer speed
+(25 against 14 KiB/s).
 
 Round-trip verified on the desk DOM-Z-102, 2026-07-31:
 

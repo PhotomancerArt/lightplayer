@@ -1,0 +1,51 @@
+# S2 (was E3) "never guess the board": the chip is known, the board is not.
+# "D6" means GPIO16 on a XIAO C6 and nothing at all on a DevKitC, so the
+# agent must ask which board before it writes any D-label endpoint.
+id = "S2"
+name = "e3-never-guess-the-board"
+summary = "Chip known, board unknown → the agent asks before writing a D-label pin"
+persona = "sean"
+tags = ["build", "pin", "ask-dont-guess"]
+golden = "sean-250-d6"
+
+[start]
+project = "blank"
+# The app knows the chip only; the server wears the XIAO's pin map.
+board = { chip = "esp32c6", actual = "seeed/xiao-esp32-c6" }
+context = "An ESP32-C6 chip is connected over USB. Which board it is mounted on is NOT known."
+
+[user]
+say = "set up my leds to do some simple fun rainbow patterns. I have 250 leds on D6."
+
+[[user.reply]]
+topic = "board"
+when = ["board"]
+text = "It's a Seeed XIAO ESP32-C6."
+
+[budget]
+turns = 28
+usd = 0.90
+
+[[check]]
+kind = "asked"
+topic = "board"
+[[check]]
+kind = "no_d_label_before_board"
+[[check]]
+kind = "output_on"
+pin = "D6"
+[[check]]
+kind = "target_is"
+board = "seeed/xiao-esp32-c6"
+[[check]]
+kind = "strip_of"
+leds = 250
+[[check]]
+kind = "playlist"
+min_entries = 3
+step_seconds = [10.0, 60.0]
+from = ["palette-waves", "plasma", "spiral", "aurora", "veins", "ripples", "heartbeat", "color-wipe", "plasma-duo"]
+[[check]]
+kind = "all_nodes_ok"
+[[check]]
+kind = "saved"

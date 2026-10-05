@@ -1,0 +1,39 @@
+# S12 "Make this one slower, and show me where": "this one" is the pattern
+# selected in the editor; its speed knob goes down, the others stay, and
+# Studio points at the control it used.
+id = "S12"
+name = "s12-viatrix-slower-show-me"
+summary = "Selected pattern → slower via its own knob, others untouched, Studio points at the control"
+persona = "viatrix"
+tags = ["tune", "place", "teach"]
+status = "pending"
+waits_for = "M8"
+note = "Needs the selection in the readout (M7), pattern knobs as offers (M6) and pointing at a control (M8). The speed-knob check lands with M6; today only the shape of the change is checked."
+
+[start]
+project = { golden = "viatrix-120-d6" }
+board = { known = "seeed/xiao-esp32-c6" }
+selection = "playlist/entry_1"
+
+[user]
+say = "can you make this one go slower? and show me where I'd do that myself next time"
+otherwise = "I don't know, what do you think?"
+
+[budget]
+turns = 12
+usd = 0.30
+
+# Seeing the selection, it does not ask "which one?".
+[[check]]
+kind = "max_questions"
+n = 0
+[[check]]
+kind = "entries_kept"
+patterns = ["plasma", "ripples"]
+[[check]]
+kind = "minimal_diff"
+allow = ["modules"]
+[[check]]
+kind = "all_nodes_ok"
+[[check]]
+kind = "saved"

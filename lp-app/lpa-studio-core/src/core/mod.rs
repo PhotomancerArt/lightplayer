@@ -10,6 +10,7 @@ pub mod issue;
 pub mod log;
 pub mod metric;
 pub mod notice;
+pub mod offer;
 pub mod progress;
 pub mod status;
 pub mod terminal_line;
@@ -18,12 +19,16 @@ pub mod view;
 
 pub use crate::app::studio::ui_studio_view::UiStudioView;
 pub use crate::controller::{
-    ActionClass, ActionConfirmation, ActionEnablement, ActionMeta, ActionPriority, Controller,
-    ControllerContext, ControllerId, ControllerOp, DEVICE_CARD_FEED_CLASS,
-    PASSIVE_REFRESH_DEADLINE, PROJECT_ACTION_DEADLINE, PROJECT_EDITOR_ACTION_DEADLINE,
-    PROJECT_LOAD_DEADLINE, UiAction, UiActions, UiPaneAction, UxNodePath,
+    ActionClass, ActionConfirmation, ActionConsequence, ActionEnablement, ActionMeta,
+    ActionPriority, Controller, ControllerContext, ControllerId, ControllerOp,
+    DEVICE_CARD_FEED_CLASS, PASSIVE_REFRESH_DEADLINE, PROJECT_ACTION_DEADLINE,
+    PROJECT_EDITOR_ACTION_DEADLINE, PROJECT_LOAD_DEADLINE, UiAction, UiActions, UxNodePath,
 };
 pub use metric::UiMetric;
+pub use offer::{
+    OfferArgError, OfferArgs, OfferBinder, OfferChoice, OfferParam, OfferParamKind, OfferPath,
+    OfferPathError, OfferPress, UiOffer, UiOfferTree,
+};
 pub use progress::UiProgress;
 pub use status::UiStatus;
 pub use status::UiStatusKind;

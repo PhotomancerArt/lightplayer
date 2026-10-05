@@ -36,7 +36,9 @@ use std::collections::{BTreeMap, VecDeque};
 use std::rc::{Rc, Weak};
 
 use lpa_devices::activity::{ActivityKind, ActivityOutcome};
-use lpa_devices::event::{ActivityMarker, Command, EffectId, EffectRequest, Event, Input};
+use lpa_devices::event::{
+    ActivityMarker, Command, EffectId, EffectRequest, Event, GrantAnswer, Input,
+};
 use lpa_devices::identity::{DeviceId, EndpointKey, MacAddress, PeerIdentity};
 use lpa_devices::link::{Link, LinkCommand, LinkId, LinkInfo};
 use lpa_devices::record::DeviceRecord;
@@ -176,6 +178,11 @@ struct LinkSlot {
     inbox: ConversationInbox,
     /// The link's session resets, for those conversations (D9).
     resets: LinkResets,
+    /// Adopted by [`DeviceEffects::settle`] before its own `LinkAttached`
+    /// folded. The model cannot route a link it has not heard of yet, so
+    /// until that fold [`DeviceEffects::retain_links`] must not read its
+    /// absence from the roster as a release.
+    awaiting_attach: bool,
 }
 
 /// A link that arrived from a spawned future, waiting to join the routing map.
@@ -210,6 +217,17 @@ pub struct DeviceEffects {
     /// [`Self::arrivals`] exists.
     completed_pushes: Rc<RefCell<Vec<CompletedPush>>>,
     next_link: u64,
+    /// The C6 repartition's layout step: the backup store, what each
+    /// device's inspection staged, the store's index as last read, and
+    /// the wall clock archives are stamped with.
+    layout: super::device_layout_effect::LayoutEffects,
+    /// Where an engine comes from without a board: the engine cache and the
+    /// firmware store (OTA M5; read by the update flow, M4/M7).
+    firmware: super::device_firmware_sources::DeviceFirmwareSources,
+    /// The link id the latest chooser request will attach as: its
+    /// [`Event::GrantAnswered`] carries it, so a caller that opened a
+    /// chooser can tell which answer is its own.
+    last_grant_request: Option<LinkId>,
 }
 
 impl Default for DeviceEffects {
@@ -231,7 +249,60 @@ impl DeviceEffects {
             staged_pushes: BTreeMap::new(),
             completed_pushes: Rc::new(RefCell::new(Vec::new())),
             next_link: 0,
+            layout: super::device_layout_effect::LayoutEffects::default(),
+            firmware: super::device_firmware_sources::DeviceFirmwareSources::default(),
+            last_grant_request: None,
         }
+    }
+
+    /// The layout step's state (the C6 repartition): backup store, staged
+    /// plans, the cached backup index.
+    pub fn layout(&self) -> &super::device_layout_effect::LayoutEffects {
+        &self.layout
+    }
+
+    /// The engine cache and the firmware store.
+    pub fn firmware(&self) -> &super::device_firmware_sources::DeviceFirmwareSources {
+        &self.firmware
+    }
+
+    /// Install the engine cache or the store (the shell does, at start).
+    pub fn firmware_mut(&mut self) -> &mut super::device_firmware_sources::DeviceFirmwareSources {
+        &mut self.firmware
+    }
+
+    /// Install the backup store a layout migration writes to before it
+    /// writes the board (OPFS in the browser). Without one, every migration
+    /// asks the user to download the backup first.
+    pub fn set_backup_store(
+        &mut self,
+        store: Rc<dyn super::device_backup_store::DeviceBackupStore>,
+    ) {
+        self.layout.set_store(store);
+        if let Some(spawn) = self.spawn.clone() {
+            spawn(self.layout.refresh_index_task());
+        }
+    }
+
+    /// Hand the user `device`'s backup as a file (the card's "Download
+    /// backup"): fetched off the fold path, then carried out on the view.
+    pub fn request_backup_download(
+        &mut self,
+        device: DeviceId,
+        base_mac: Option<String>,
+        label: Option<String>,
+    ) {
+        let Some(spawn) = self.spawn.clone() else {
+            log::warn!("a backup download was asked for before the spawner was installed");
+            return;
+        };
+        spawn(self.layout.download_task(device, base_mac, label));
+    }
+
+    /// Install the wall clock (epoch seconds) backup archives are stamped
+    /// with. Core reads no clocks; the controller's own is injected.
+    pub fn set_clock(&mut self, clock: Rc<dyn Fn() -> f64>) {
+        self.layout.set_clock(clock);
     }
 
     /// Stage what a [`Action::Push`](lpa_devices::Action::Push) gesture will
@@ -274,6 +345,12 @@ impl DeviceEffects {
     /// on, so a lens pull and a device timer cannot drift onto two clocks.
     pub fn timer_factory(&self) -> Option<Rc<RefCell<dyn FnMut(Duration) -> DeviceTimerFuture>>> {
         self.timer.clone()
+    }
+
+    /// The link id the latest chooser request will answer for (see
+    /// [`Event::GrantAnswered`]); `None` until one was opened.
+    pub fn last_grant_request(&self) -> Option<LinkId> {
+        self.last_grant_request
     }
 
     /// Whether the seams a real device needs are all installed.
@@ -465,8 +542,17 @@ impl DeviceEffects {
                     borrowed: arrival.borrowed,
                     inbox: arrival.inbox,
                     resets: arrival.resets,
+                    awaiting_attach: true,
                 },
             );
+        }
+    }
+
+    /// The model has folded `link`'s own `LinkAttached`: from here on its
+    /// roster is the authority on whether the link stays routed.
+    pub(crate) fn attach_folded(&mut self, link: LinkId) {
+        if let Some(slot) = self.links.get_mut(&link) {
+            slot.awaiting_attach = false;
         }
     }
 
@@ -596,7 +682,23 @@ impl DeviceEffects {
                     payload.content_hash.clone(),
                 )
             });
-        let call = match resolve_effect_call(effect, payload) {
+        // The layout step's two hooks (C6 repartition): an inspection's
+        // verdict is staged and reported before its end marker; a stamp
+        // after a VERIFIED carried write completes the backup that covered
+        // it.
+        let inspect_restore = match &effect {
+            EffectRequest::InspectLayout { restore_backup, .. } => Some(*restore_backup),
+            _ => None,
+        };
+        let layout_verified = matches!(
+            &effect,
+            EffectRequest::WriteBoardManifest {
+                layout_verified: true,
+                ..
+            }
+        );
+        let layout = self.layout.clone();
+        let call = match resolve_effect_call(effect, payload, || layout.plan_for_flash(device)) {
             Ok(call) => call,
             Err(message) => {
                 sink(effect_ended(
@@ -625,7 +727,23 @@ impl DeviceEffects {
         sink(Input::Event(Event::LinkBorrow { link, held: true }));
         let writes = Rc::clone(&self.completed_pushes);
         spawn(Box::pin(async move {
-            let result = transport.run_effect(info, call, progress).await;
+            let mut result = transport.run_effect(info, call, progress).await;
+            if let (Some(restore), Ok(facts)) = (inspect_restore, &result) {
+                match layout
+                    .after_inspection(device, facts.inspection.clone(), restore)
+                    .await
+                {
+                    Ok(verdict) => sink(Input::Event(Event::ActivityMarker {
+                        device,
+                        effect: Some(effect_id),
+                        marker: ActivityMarker::LayoutVerdict { verdict },
+                    })),
+                    Err(message) => result = Err(message),
+                }
+            }
+            if layout_verified {
+                layout.complete_task(device).await;
+            }
             // Give the wire back BEFORE the end marker folds: the reducer's
             // very next command may be the ladder's reopen, and a pump still
             // paused would eat the boot hello. Guarded, because this effect
@@ -723,18 +841,28 @@ impl DeviceEffects {
             return;
         };
         let link = self.mint_link_id();
+        self.last_grant_request = Some(link);
         let register = self.registrar();
         spawn(Box::pin(async move {
             let picked = match chooser {
                 GrantChooser::Usb => transport.request_grant().await,
                 GrantChooser::Bluetooth => transport.request_ble_grant().await,
             };
-            match picked {
-                // The chooser was dismissed: no port, no news, no error.
-                Ok(None) => {}
-                Ok(Some(granted)) => register(link, granted, sink),
-                Err(error) => log::warn!("device grant request failed: {error}"),
-            }
+            // Whatever the chooser said is news: a dismissed one is the
+            // only answer no other event carries, and a press that opened
+            // it (an agent card) waits on exactly this.
+            let answer = match picked {
+                Ok(None) => GrantAnswer::Dismissed,
+                Ok(Some(granted)) => {
+                    register(link, granted, Rc::clone(&sink));
+                    GrantAnswer::Picked
+                }
+                Err(error) => {
+                    log::warn!("device grant request failed: {error}");
+                    GrantAnswer::Failed { error }
+                }
+            };
+            sink(Input::Event(Event::GrantAnswered { link, answer }));
         }));
     }
 
@@ -770,10 +898,18 @@ impl DeviceEffects {
         ) else {
             return;
         };
+        // An arrival that has not settled yet holds its port too: a second
+        // connect edge before the next fold would otherwise attach it again.
         let held: Vec<EndpointKey> = self
             .links
             .values()
             .map(|slot| slot.info.endpoint.clone())
+            .chain(
+                self.arrivals
+                    .borrow()
+                    .iter()
+                    .map(|arrival| arrival.info.endpoint.clone()),
+            )
             .collect();
         let register = self.registrar();
         let ids: Vec<LinkId> = (0..MAX_SWEEP_LINKS).map(|_| self.mint_link_id()).collect();
@@ -870,8 +1006,16 @@ impl DeviceEffects {
     /// Run after every fold against the roster's own link map: the model is
     /// the authority on what is routed, so a link it has let go stops being
     /// pumped rather than lingering as a second opinion.
+    ///
+    /// A link whose `LinkAttached` has not folded yet is not the model's to
+    /// let go: [`Self::settle`] adopts every arrival before whatever input
+    /// happens to fold next, and that input may be queued AHEAD of the
+    /// link's own attach (a stale timer fire). Evicting it then dropped the
+    /// model's `Open` a fold later and left a replugged board identifying
+    /// forever.
     pub fn retain_links(&mut self, keep: impl Fn(LinkId) -> bool) {
-        self.links.retain(|link, _| keep(*link));
+        self.links
+            .retain(|link, slot| slot.awaiting_attach || keep(*link));
     }
 
     fn drop_endpoint(&mut self, endpoint: &EndpointKey) {
@@ -1059,9 +1203,9 @@ fn effect_ended(
 /// Which activity a coarse effect belongs to.
 fn effect_kind(effect: &EffectRequest) -> ActivityKind {
     match effect {
-        EffectRequest::Flash { .. } | EffectRequest::WriteBoardManifest { .. } => {
-            ActivityKind::Flash
-        }
+        EffectRequest::Flash { .. }
+        | EffectRequest::WriteBoardManifest { .. }
+        | EffectRequest::InspectLayout { .. } => ActivityKind::Flash,
         EffectRequest::Push => ActivityKind::Push,
         EffectRequest::Erase => ActivityKind::Erase,
         EffectRequest::RemoveProject => ActivityKind::RemoveProject,
@@ -1076,10 +1220,24 @@ fn effect_kind(effect: &EffectRequest) -> ActivityKind {
 fn resolve_effect_call(
     effect: EffectRequest,
     payload: Option<StagedPush>,
+    staged_plan: impl FnOnce() -> Result<lpa_link::FlashPlan, String>,
 ) -> Result<DeviceEffectCall, String> {
     match effect {
-        EffectRequest::Flash { build_id, .. } => Ok(DeviceEffectCall::FlashFirmware { build_id }),
-        EffectRequest::WriteBoardManifest { board_id } => {
+        // A carried flash runs the plan its inspection staged, confirmed —
+        // or nothing at all.
+        EffectRequest::Flash {
+            build_id, carry, ..
+        } => Ok(DeviceEffectCall::FlashFirmware {
+            build_id,
+            plan: match carry {
+                true => Some(staged_plan()?),
+                false => None,
+            },
+        }),
+        EffectRequest::InspectLayout { build_id, .. } => {
+            Ok(DeviceEffectCall::InspectLayout { build_id })
+        }
+        EffectRequest::WriteBoardManifest { board_id, .. } => {
             let manifest_json = lpa_boards::runtime_manifest_json(&board_id)
                 .ok_or_else(|| format!("board {board_id} has no checked-in runtime manifest"))?;
             Ok(DeviceEffectCall::WriteHardwareManifest {
@@ -1168,7 +1326,8 @@ mod tests {
             fallback_storage_id: "studio".to_string(),
         });
 
-        let call = resolve_effect_call(EffectRequest::Push, Some(staged)).expect("resolved");
+        let call =
+            resolve_effect_call(EffectRequest::Push, Some(staged), no_plan).expect("resolved");
 
         assert_eq!(
             call,
@@ -1186,7 +1345,8 @@ mod tests {
     fn a_preparation_failure_becomes_the_effects_own_message() {
         let staged = Err("this board has no catalog entry".to_string());
 
-        let error = resolve_effect_call(EffectRequest::Push, Some(staged)).expect_err("refused");
+        let error =
+            resolve_effect_call(EffectRequest::Push, Some(staged), no_plan).expect_err("refused");
 
         assert_eq!(error, "this board has no catalog entry");
     }
@@ -1195,7 +1355,7 @@ mod tests {
     /// honest rather than silent if it ever is not.
     #[test]
     fn a_push_with_nothing_staged_refuses_out_loud() {
-        let error = resolve_effect_call(EffectRequest::Push, None).expect_err("refused");
+        let error = resolve_effect_call(EffectRequest::Push, None, no_plan).expect_err("refused");
 
         assert!(error.contains("nothing was prepared"), "{error}");
     }
@@ -1203,17 +1363,74 @@ mod tests {
     /// Each effect belongs to the activity that asked for it — the kind the
     /// end marker wears, and the one the fold brackets against.
     #[test]
+    fn a_carried_flash_runs_only_a_confirmed_staged_plan() {
+        let call = resolve_effect_call(
+            EffectRequest::Flash {
+                build_id: "esp32c6-4mb".to_string(),
+                board_id: "seeed-xiao-esp32c6".to_string(),
+                carry: true,
+            },
+            None,
+            || {
+                Ok(lpa_link::FlashPlan {
+                    backup_confirmed: true,
+                    ..Default::default()
+                })
+            },
+        )
+        .expect("resolved");
+        assert!(matches!(
+            call,
+            DeviceEffectCall::FlashFirmware { plan: Some(ref plan), .. } if plan.backup_confirmed
+        ));
+        let refused = resolve_effect_call(
+            EffectRequest::Flash {
+                build_id: "esp32c6-4mb".to_string(),
+                board_id: "seeed-xiao-esp32c6".to_string(),
+                carry: true,
+            },
+            None,
+            no_plan,
+        );
+        assert!(refused.is_err(), "no confirmed plan, nothing written");
+        assert!(matches!(
+            resolve_effect_call(
+                EffectRequest::InspectLayout {
+                    build_id: "esp32c6-4mb".to_string(),
+                    restore_backup: false,
+                },
+                None,
+                no_plan,
+            ),
+            Ok(DeviceEffectCall::InspectLayout { .. })
+        ));
+        assert_eq!(
+            effect_kind(&EffectRequest::InspectLayout {
+                build_id: "esp32c6-4mb".to_string(),
+                restore_backup: false,
+            }),
+            ActivityKind::Flash
+        );
+    }
+
+    fn no_plan() -> Result<lpa_link::FlashPlan, String> {
+        Err("nothing staged".to_string())
+    }
+
+    #[test]
     fn effects_name_the_activity_they_belong_to() {
         assert_eq!(
             effect_kind(&EffectRequest::Flash {
                 build_id: "esp32c6-4mb".to_string(),
                 board_id: "seeed-xiao-esp32c6".to_string(),
+                carry: false,
             }),
             ActivityKind::Flash
         );
         assert_eq!(
             effect_kind(&EffectRequest::WriteBoardManifest {
                 board_id: "seeed-xiao-esp32c6".to_string(),
+                layout_verified: false,
             }),
             ActivityKind::Flash,
             "the manifest stamp is the flash's second half, not its own flow"
@@ -1338,6 +1555,7 @@ mod tests {
                 borrowed: Rc::new(Cell::new(None)),
                 inbox: Rc::new(RefCell::new(VecDeque::new())),
                 resets: Rc::new(Cell::new(0)),
+                awaiting_attach: false,
             },
         );
         (effects, inputs, taps)
@@ -1472,6 +1690,7 @@ mod tests {
             EffectRequest::Flash {
                 build_id: "esp32c6-4mb".to_string(),
                 board_id: "seeed-xiao-esp32c6".to_string(),
+                carry: false,
             },
         );
 

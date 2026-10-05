@@ -10,9 +10,9 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    ControllerId, DirtySummary, ProjectController, ProjectNodeAddress, ProjectOp,
-    ProjectSlotAddress, ProjectSlotRoot, ProjectSyncPhase, SlotEditOp, SlotPath, UiAction,
-    UiChromeSessionControl, UiChromeSessionStatus, UiHistoryKind, UiPaneAction, UiPendingEdit,
+    ControllerId, DirtySummary, OfferPath, ProjectController, ProjectNodeAddress, ProjectOp,
+    ProjectSlotAddress, ProjectSlotRoot, ProjectSyncPhase, SlotPath, UiAction,
+    UiChromeSessionControl, UiChromeSessionStatus, UiHistoryKind, UiOffer, UiPendingEdit,
     UiPendingEditKind, UiPendingEditPhase, UiProjectHistory, UiProjectHistoryEntry, UiStatus,
 };
 use lpa_studio_web_story_macros::story;
@@ -248,10 +248,11 @@ pub(crate) fn control_history_popover_open() -> Element {
     description = "The changes panel, mounted directly, on a project whose projection knows its next version: the receipt says \"Save banks v13\" — the same number the History segment's newest row will wear after the save. The two segments read one ledger from opposite ends, which is why they sit next door to each other."
 )]
 pub(crate) fn control_changes_panel_dirty() -> Element {
+    let changes = dirty_content_with_history().changes();
+    let offers = crate::app::story_fixtures::revert_edit_offers(&changes.pending_edits);
     changes_panel_frame(rsx! {
-        SessionChangesPanel {
-            changes: dirty_content_with_history().changes(),
-            on_action: EventHandler::new(|_| {}),
+        crate::core::OffersProvider { offers,
+            SessionChangesPanel { changes, on_action: EventHandler::new(|_| {}) }
         }
     })
 }
@@ -432,6 +433,25 @@ fn frame(width: u32, section: SiteSection, chip: BuildChip, menu_open: bool) -> 
     }
 }
 
+#[story(
+    label = "Agent light — Save in the header",
+    description = "The agent light (agentic-UI M8) on the header's Save: the assistant just pressed `project/save`, so the Save beside the CHANGES segment wears the assistant's own light — a 2px orchid gradient ring spinning around it over an orchid glow, with a brief orchid wash at the press. Orchid means the assistant and nothing else in Studio (error is pale red, bound is violet). It is a moment, not a state: live it rises, holds and fades over four seconds (core's clock puts it out); with reduced motion, and in this capture, it is the still ring. It never takes focus and never scrolls — watching the assistant work shows where Save lives without moving anything under your hands. TOP: at rest. BOTTOM: lit."
+)]
+pub(crate) fn agent_lit_save() -> Element {
+    let lit = crate::app::agent::story_activity([(
+        OfferPath::project().child("save"),
+        lpa_studio_core::AgentActivityKind::Pressed,
+    )]);
+    rsx! {
+        div { class: "tw:grid tw:gap-3",
+            {control_row(1000, sim_control(Some("ESP32-C6")), Some(control_content(3, 0, UiStatus::good("Ready"))), None)}
+            crate::app::agent::AgentActivityProvider { activity: lit,
+                {control_row(1000, sim_control(Some("ESP32-C6")), Some(control_content(3, 0, UiStatus::good("Ready"))), None)}
+            }
+        }
+    }
+}
+
 /// One control frame: `SectionSession` (studio mode) at a fixed width, so
 /// the folds trigger off the FRAME rather than the story viewport — the
 /// same technique `frame`/`chip_frame` used for the retired session strip
@@ -460,21 +480,35 @@ fn control_row_as(
     relationship: ProjectRelationship,
     initially_open: Option<ControlSegment>,
 ) -> Element {
+    // The device segment's Rename is the device's `rename` offer: the
+    // tree the app provides, built for the story's session.
+    let mut offers = crate::app::home::device_offer_story_fixtures::session_device_tree(
+        session.device,
+        &session.name,
+    );
+    // Each change-list row's revert presses `project/revert-edit`.
+    if let Some(project) = &project {
+        offers.append(crate::app::story_fixtures::revert_edit_offers(
+            &project.changes().pending_edits,
+        ));
+    }
     rsx! {
         div {
             class: "tw:border tw:border-dashed tw:border-border-muted tw:px-4 tw:pt-3",
             style: "max-width: {width}px;",
-            SiteChrome {
-                section: SiteSection::Session,
-                session_control: Some(ChromeSessionControl {
-                    session,
-                    project,
-                    relationship,
-                    project_popover: ProjectPopoverInputs::default(),
-                    on_action: EventHandler::new(|_| {}),
-                    initially_open,
-                }),
-                VersionChipPreview { chip: branch_chip() }
+            crate::core::OffersProvider { offers,
+                SiteChrome {
+                    section: SiteSection::Session,
+                    session_control: Some(ChromeSessionControl {
+                        session,
+                        project,
+                        relationship,
+                        project_popover: ProjectPopoverInputs::default(),
+                        on_action: EventHandler::new(|_| {}),
+                        initially_open,
+                    }),
+                    VersionChipPreview { chip: branch_chip() }
+                }
             }
         }
     }
@@ -521,16 +555,15 @@ fn hardware_empty_control() -> UiChromeSessionControl {
 }
 
 /// The control stories' project content: the shared editor fixture with the
-/// dirty counts and the matching header actions stamped — the SAME gate the
-/// controller's `project_header_actions` applies (persisted > 0, never
+/// dirty counts and the matching `project/*` offers — the SAME gate the
+/// controller's `publish_project_offers` applies (persisted > 0, never
 /// failed alone), so a failed-only row here renders exactly the header's
 /// real blind spot
 /// (`docs/debt/failed-only-asset-edit-header-blindness.md`).
 fn control_content(persisted: usize, failed: usize, status: UiStatus) -> ProjectDetailContent {
     let mut editor = project_editor_fixture(ProjectSyncPhase::Ready);
     editor.dirty = DirtySummary { persisted, failed };
-    editor.header_actions = save_revert_actions(persisted);
-    ProjectDetailContent::new(&editor, status)
+    ProjectDetailContent::new(&editor, status, save_revert_offers(persisted))
 }
 
 /// The dirty-list-open story's content: two persisted edits, both listed
@@ -543,12 +576,11 @@ fn dirty_content() -> ProjectDetailContent {
         persisted: 2,
         failed: 0,
     };
-    editor.header_actions = save_revert_actions(2);
     editor.pending_edits = vec![
         pending_edit("Orbit shader", "brightness", "0.82"),
         pending_edit("Sunrise palette", "entries[dusk]", "#ff7a3d"),
     ];
-    ProjectDetailContent::new(&editor, UiStatus::good("Ready"))
+    ProjectDetailContent::new(&editor, UiStatus::good("Ready"), save_revert_offers(2))
 }
 
 /// A fixed clock for the history rows, so relative times never drift
@@ -563,13 +595,12 @@ fn dirty_content_with_history() -> ProjectDetailContent {
         persisted: 2,
         failed: 0,
     };
-    editor.header_actions = save_revert_actions(2);
     editor.pending_edits = vec![
         pending_edit("Orbit shader", "brightness", "0.82"),
         pending_edit("Sunrise palette", "entries[dusk]", "#ff7a3d"),
     ];
     editor.history = history();
-    ProjectDetailContent::new(&editor, UiStatus::good("Ready"))
+    ProjectDetailContent::new(&editor, UiStatus::good("Ready"), save_revert_offers(2))
 }
 
 /// A representative log: a fork origin, saves, a push, and a join —
@@ -624,16 +655,22 @@ fn changes_panel_frame(children: Element) -> Element {
     }
 }
 
-/// Save / Revert-to-saved, exactly as the controller's `project_header_actions`
-/// mints them — present only while persisted edits are pending, never for a
-/// failed-only project (the header blindness this control inherited).
-fn save_revert_actions(persisted: usize) -> Vec<UiPaneAction> {
+/// Save / Revert-to-saved, exactly as the controller's
+/// `publish_project_offers` publishes them — present only while persisted
+/// edits are pending, never for a failed-only project (the header blindness
+/// this control inherited).
+fn save_revert_offers(persisted: usize) -> Vec<UiOffer> {
     if persisted == 0 {
         return Vec::new();
     }
     vec![
-        UiPaneAction::new("save", project_action(ProjectOp::SaveOverlay)),
-        UiPaneAction::new(
+        UiOffer::new(
+            OfferPath::project().child("save"),
+            "save",
+            project_action(ProjectOp::SaveOverlay),
+        ),
+        UiOffer::new(
+            OfferPath::project().child("revert"),
             "revert",
             project_action(ProjectOp::RevertAllEdits).with_label("Revert to saved"),
         ),
@@ -658,15 +695,12 @@ fn pending_edit(node_label: &str, path: &str, value_display: &str) -> UiPendingE
         },
         old_value: None,
         phase: UiPendingEditPhase::Persisted,
-        revert: Some(UiAction::from_op(
-            ControllerId::new(ProjectController::NODE_ID),
-            SlotEditOp::Revert { address },
-        )),
+        key: Some(format!("{}:def:{}", address.node, address.path)),
     }
 }
 
 /// An action dispatched to the project controller itself — the same helper
-/// `ProjectController::project_header_actions` uses internally.
+/// `ProjectController`'s `publish_project_offers` uses internally.
 fn project_action(op: ProjectOp) -> UiAction {
     UiAction::from_op(ControllerId::new(ProjectController::NODE_ID), op)
 }

@@ -9,20 +9,25 @@
 //! - a per-pattern on/off, where off means "skip it in the cycle";
 //! - next and previous.
 //!
-//! Names only; thumbnails are vision Q1. Every gesture arrives here as a
-//! ready [`UiAction`] the derivation built
-//! (`app/project/node/pattern_picker_derivation.rs`), so the widget renders
-//! and dispatches and decides nothing: a tap is a `PlaylistActivateOp`, the
-//! cycle and the on/off switches are whole-value panel writes on the
-//! playlist's `playlist.cycle` / `playlist.skip` channels, and next/prev are
-//! activates of a key the derivation already chose (plan PD7 — no wire
-//! command for them).
+//! Names only; thumbnails are vision Q1. Every gesture is one of the
+//! playlist's offers, published under [`UiPatternPicker::verbs`]
+//! (`app/project/node/playlist_offers.rs`): `play` and `skip` with an
+//! `entry`, `cycle` with its toggle, `step-shorter`/`step-longer`, and
+//! `prev`/`next`. The widget presses them and decides nothing: a tap is a
+//! `PlaylistActivateOp`, the cycle and the on/off switches are whole-value
+//! panel writes on the playlist's `playlist.cycle` / `playlist.skip`
+//! channels, and next/prev are activates of a key core already chose (plan
+//! PD7 — no wire command for them). A verb core does not publish (no step
+//! left on the ladder, no other entry to go to) draws inert.
 
-use crate::{UiAction, UiPanelTarget};
+use crate::{OfferPath, UiPanelTarget};
 
-/// Everything the Pattern instrument shows and every gesture it can make.
+/// Everything the Pattern instrument shows; its gestures are the
+/// playlist's offers under [`Self::verbs`].
 #[derive(Clone, Debug, PartialEq)]
 pub struct UiPatternPicker {
+    /// `project/<playlist>`: where the playlist's verbs live.
+    pub verbs: OfferPath,
     /// The set, in authored (key) order.
     pub entries: Vec<UiPatternPickerEntry>,
     /// The entry playing now (`PlaylistState.active_entry`), `None` before
@@ -34,22 +39,11 @@ pub struct UiPatternPicker {
     /// (`UiPanelControl::shown_palette`).
     pub cycle: lpc_model::PlaylistCycle,
     /// Where a cycle write lands, and whether the panel holds it now.
-    /// `None` when the playlist's cycle is not on a channel (the gestures
-    /// are then absent too).
+    /// `None` when the playlist's cycle is not on a channel (the cycle's
+    /// verbs are then absent too).
     pub cycle_target: Option<UiPanelTarget>,
     /// Where an on/off write lands, and whether the panel holds it now.
     pub skip_target: Option<UiPanelTarget>,
-    /// Turn the cycle on (a cycle at the remembered step) or off (hold).
-    pub cycle_toggle: Option<UiAction>,
-    /// A shorter step, while cycling and not at the shortest step.
-    pub step_shorter: Option<UiAction>,
-    /// A longer step, while cycling and not at the longest step.
-    pub step_longer: Option<UiAction>,
-    /// Play the previous enabled entry (wrapping), `None` when there is no
-    /// other enabled entry to go to.
-    pub prev: Option<UiAction>,
-    /// Play the next enabled entry (wrapping).
-    pub next: Option<UiAction>,
 }
 
 impl UiPatternPicker {
@@ -86,12 +80,6 @@ pub struct UiPatternPickerEntry {
     /// apart from [`Self::state`] because the playing entry (or a failed
     /// one) still has a switch position of its own.
     pub enabled: bool,
-    /// Tap to play: `PlaylistActivateOp`. `None` for the entry already
-    /// playing. A skipped entry can still be tapped; a failed one is tried
-    /// again.
-    pub play: Option<UiAction>,
-    /// Flip on/off: a whole-list panel write on the skip channel.
-    pub toggle: Option<UiAction>,
 }
 
 /// What one entry is doing, in the precedence the instrument shows it:
@@ -115,6 +103,7 @@ mod tests {
 
     fn picker(cycle: lpc_model::PlaylistCycle, states: &[UiPatternEntryState]) -> UiPatternPicker {
         UiPatternPicker {
+            verbs: OfferPath::project(),
             entries: states
                 .iter()
                 .enumerate()
@@ -123,19 +112,12 @@ mod tests {
                     name: format!("p{index}"),
                     state: *state,
                     enabled: *state != UiPatternEntryState::Skipped,
-                    play: None,
-                    toggle: None,
                 })
                 .collect(),
             active: None,
             cycle,
             cycle_target: None,
             skip_target: None,
-            cycle_toggle: None,
-            step_shorter: None,
-            step_longer: None,
-            prev: None,
-            next: None,
         }
     }
 

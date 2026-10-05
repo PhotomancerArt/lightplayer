@@ -74,8 +74,12 @@ impl WasmLpvmInstance {
         let globals_size = sigs.globals_size();
 
         // Per-instance vmctx allocation, mirroring `NativeJitModule::instantiate`.
-        // The bump region is pre-grown, zero-filled, and never reused, but zero
-        // explicitly anyway so a future allocator change cannot leak state in.
+        // The block comes from the shared runtime's reusing allocator
+        // (`shared_runtime::HostHeap`, #953) and is freed on `Drop` below, so
+        // it IS reused across instances once this one goes away. Both the
+        // cursor-bump and free-list-reuse paths already hand back zeroed
+        // bytes, but zero explicitly anyway so a future allocator change
+        // cannot leak state in.
         let align = 16usize;
         let total_size = sigs.vmctx_buffer_size();
         let vmctx_buf = super::shared_runtime::WasmtimeLpvmMemory::new(Arc::clone(&module.runtime))
@@ -315,6 +319,38 @@ impl WasmLpvmInstance {
             func,
         });
         Ok(func_ret)
+    }
+}
+
+/// Return this instance's vmctx block to the shared host heap
+/// (`shared_runtime::HostHeap`, #953's reusing allocator) so a long-lived
+/// host engine (Studio's in-process engine, `lp-cli serve`) does not grow
+/// its bump cursor by one block per shader compile/instantiate.
+///
+/// Nothing reads `vmctx_base` once this instance is gone: it is only ever
+/// used by `&self`/`&mut self` methods above, passed as WASM param 0 for the
+/// lifetime of a single call (read live from the call params in
+/// `native_builtin_dispatch`, never cached), or placed on this instance's
+/// own `wasmtime::Func` caches (`render_texture_cache`/`render_samples_cache`),
+/// which drop with it. No engine- or module-level table holds a vmctx
+/// pointer — contrast `rt_browser::instance`, whose `vmctx_buf: Vec<u128>`
+/// is this instance's own heap allocation and so already frees itself via
+/// `Vec`'s own `Drop` with no shared allocator involved.
+impl Drop for WasmLpvmInstance {
+    fn drop(&mut self) {
+        let align = 16usize;
+        let total_size = self.signatures.vmctx_buffer_size().max(align);
+        let native = {
+            let mut guard = self.runtime.lock();
+            let mem = guard.memory;
+            let store = &mut guard.store;
+            let base_ptr = mem.data_mut(store).as_mut_ptr();
+            // SAFETY: `vmctx_base` was handed out by this same heap in `new`
+            // and is still within the pre-grown, never-relocated memory.
+            unsafe { base_ptr.add(self.vmctx_base) }
+        };
+        let buffer = LpvmBuffer::new(native, self.vmctx_base as u64, total_size, align);
+        super::shared_runtime::WasmtimeLpvmMemory::new(Arc::clone(&self.runtime)).free(buffer);
     }
 }
 
@@ -853,7 +889,7 @@ mod tests {
         let (ir, meta) = render_frame_module(None);
         let engine = WasmLpvmEngine::new(WasmOptions::default()).expect("engine");
         let module = engine.compile(&ir, &meta).expect("compile");
-        let mut inst = module.instantiate().expect("instantiate");
+        let inst = module.instantiate().expect("instantiate");
         let out = engine.memory().alloc(4 * 4, 4).expect("alloc rgba8 out");
         let out_ptr = i32::try_from(out.guest_base()).expect("out ptr fits i32");
 
@@ -906,7 +942,7 @@ mod tests {
         let (ir, meta) = render_frame_module(Some(k as i32 * Q_ONE));
         let engine = WasmLpvmEngine::new(WasmOptions::default()).expect("engine");
         let module = engine.compile(&ir, &meta).expect("compile");
-        let mut inst = module.instantiate().expect("instantiate");
+        let inst = module.instantiate().expect("instantiate");
         let out = engine.memory().alloc(4 * 4, 4).expect("alloc rgba8 out");
         let out_ptr = i32::try_from(out.guest_base()).expect("out ptr fits i32");
 
@@ -989,6 +1025,47 @@ mod tests {
         let mut bytes = vec![0u8; 4 * 2 * 8];
         unsafe { tex.read(0, &mut bytes).expect("read texture") };
         bytes
+    }
+
+    /// A leaked vmctx would walk the shared heap's bump cursor forward by
+    /// one block per instantiate; freeing it on `Drop` (`WasmLpvmInstance`'s
+    /// `impl Drop`, mirroring #953's reusing allocator for `LpvmBuffer`)
+    /// returns the cursor to exactly where it started every cycle. A 1-byte
+    /// probe allocation lands wherever the cursor currently sits and, freed
+    /// immediately with nothing allocated above it, returns the cursor
+    /// there too — so its guest address reads the cursor through the public
+    /// `LpvmMemory` API alone, with no private heap field to reach into.
+    #[test]
+    fn vmctx_is_freed_on_drop_heap_cursor_stays_flat_across_cycles() {
+        const CYCLES: usize = 64;
+
+        let (ir, meta) = spin_and_ok_module();
+        let engine = WasmLpvmEngine::new(WasmOptions::default()).expect("engine");
+        let module = engine.compile(&ir, &meta).expect("compile");
+
+        let probe = engine.memory().alloc(1, 1).expect("baseline probe alloc");
+        let baseline = probe.guest_base();
+        engine.memory().free(probe);
+
+        for i in 0..CYCLES {
+            let inst = module
+                .instantiate()
+                .unwrap_or_else(|e| panic!("instantiate #{i}: {e}"));
+            drop(inst);
+        }
+
+        let probe = engine
+            .memory()
+            .alloc(1, 1)
+            .expect("probe alloc after cycles");
+        let after = probe.guest_base();
+        engine.memory().free(probe);
+
+        assert_eq!(
+            after, baseline,
+            "heap cursor must be flat after {CYCLES} instantiate/drop cycles — a leaked vmctx \
+             would move it forward by one block per cycle"
+        );
     }
 
     /// `spin`: void fn looping forever; `ok`: () -> 42.

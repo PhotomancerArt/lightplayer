@@ -1,6 +1,6 @@
 //! Each Bluetooth session's lp-link end, and the loop that services it.
 //!
-//! Since `WIRE_PROTO_VERSION` 33 a board's Bluetooth links run lp-link on
+//! Since `WIRE_PROTO_VERSION` 36 a board's Bluetooth links run lp-link on
 //! [`LinkConfig::ble`]'s datagrams (plan
 //! `lp2025/2026-09-28-1445-ble-on-lp-link`, P4). This is Web Serial's
 //! per-port loop (`browser_serial_esp32/browser_serial.rs`), repeated for a

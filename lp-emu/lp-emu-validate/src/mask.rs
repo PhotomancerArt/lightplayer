@@ -273,6 +273,22 @@ pub static HELLO_BUILD_PROVENANCE: MaskRule = MaskRule::new(
     r#""commit":"N","dirty":N"#,
 );
 
+/// The hello frame's build version: `"version":"2026.10.03-1"` (proto 35 on).
+///
+/// Provenance of the same kind as [`HELLO_BUILD_PROVENANCE`] — which tree
+/// the image was built from, and whether it was tagged or dirty — never a
+/// claim about the chip. A hello from before proto 35 has no such field and
+/// passes through untouched.
+pub static HELLO_BUILD_VERSION: MaskRule = MaskRule::new(
+    "hello-build-version",
+    "the hello's build version (a release tag or the dev form of the commit); \
+     like the commit, it says which tree the image came from, not what the \
+     chip did",
+    FieldClass::Structural,
+    r#""version":"[^"]*""#,
+    r#""version":"N""#,
+);
+
 /// The chip identity a wire frame carries: `baseMac`, `chipRevision`, `eui64`.
 ///
 /// These come from the eFuse block, and the sidecar carries them as `mac` and
@@ -383,6 +399,7 @@ pub static BOOT_IDLE: MaskSet = MaskSet {
                   field; the heap and stack figures are left comparable",
     rules: &[
         &ANSI,
+        &HELLO_BUILD_VERSION,
         &HELLO_BUILD_PROVENANCE,
         &WIRE_IDENTITY,
         &HEARTBEAT_TIMING,
@@ -490,6 +507,7 @@ pub static RENDER_LOOP: MaskSet = MaskSet {
                   field; the heap figures are left comparable",
     rules: &[
         &ANSI,
+        &HELLO_BUILD_VERSION,
         &HELLO_BUILD_PROVENANCE,
         &WIRE_IDENTITY,
         &HEARTBEAT_TIMING,
@@ -686,6 +704,23 @@ mod tests {
             + r#""baseMac":"a0:f2:62:87:b4:8c","chipRevision":"0.2","eui64":"a0:f2:62:87:b4:8c:00:00"}}}}"#;
         let masked = BOOT_IDLE.apply(&hello);
         assert!(masked.contains(r#""commit":"N","dirty":N"#), "{masked}");
+
+        // Proto 35's hello names its version beside the commit; the mask
+        // hides it the same way, and a dev build and a release mask alike.
+        let versioned = |version: &str| {
+            BOOT_IDLE.apply(&format!(
+                r#"M!{{"id":0,"msg":{{"hello":{{"proto":35,"build":{{"features":[],"package":"fw-esp32c6","version":"{version}","commit":"d6cfaa2051ae","dirty":true,"profile":"release-esp32"}}}}}}}}"#
+            ))
+        };
+        assert_eq!(
+            versioned("2026.10.03-1"),
+            versioned("d6cfaa205-dirty-101500PT")
+        );
+        assert!(
+            versioned("2026.10.03-1").contains(r#""version":"N","commit":"N","dirty":N"#),
+            "{}",
+            versioned("2026.10.03-1")
+        );
         assert!(masked.contains(r#""baseMac":"N""#), "{masked}");
         assert!(masked.contains(r#""chipRevision":"N""#), "{masked}");
         assert!(masked.contains(r#""eui64":"N""#), "{masked}");

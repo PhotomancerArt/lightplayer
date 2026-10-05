@@ -14,8 +14,8 @@
 use dioxus::prelude::*;
 use lpa_studio_core::core::status::UiStatusKind;
 use lpa_studio_core::{
-    ModuleExportOp, NodeCopyOp, ProjectController, ProjectNodeAddress, UiAction, UiModuleExport,
-    UiModuleFace, UiNodeHeader, UiPendingEdit,
+    COPY_NODE_VERB, ModuleExportOp, OfferPath, ProjectController, ProjectNodeAddress, UiAction,
+    UiModuleExport, UiModuleFace, UiNodeHeader, UiPendingEdit,
 };
 
 use crate::app::affordance::affordance_trigger_style;
@@ -24,7 +24,7 @@ use crate::app::project::pending_edit_section::{
     PendingEditBucket, PendingEditList, bucket_section_tint, entries_in,
 };
 use crate::base::{DetailPopover, DetailSection, DetailSectionTint, StudioIcon, StudioIconName};
-use crate::core::inline_link_row_class;
+use crate::core::{inline_link_row_class, use_verbs_of, verb_named};
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -53,10 +53,12 @@ pub(crate) fn NodeDetailPopover(
         .collect();
     let unsaved_entries = entries_in(&own_edits, PendingEditBucket::Persisted);
     let failed_entries = entries_in(&own_edits, PendingEditBucket::Failed);
-    // The header path is the node address the copy op needs; a header
-    // whose path does not parse (never in production) simply offers no
-    // share row rather than dispatching a malformed op.
+    // The header path is the node address its verbs live under; the share
+    // row presses the node's `copy` offer from the tree. A header whose path
+    // does not parse (never in production) simply offers no share row.
     let copy_target = ProjectNodeAddress::parse(&header.path).ok();
+    let verbs = use_verbs_of(copy_target.as_ref().map(OfferPath::project_node))();
+    let copy = verb_named(&verbs, COPY_NODE_VERB);
     let provenance = module.as_ref().and_then(|face| face.provenance.clone());
     let export = module.as_ref().and_then(|face| face.export.clone());
     let forward = EventHandler::new(move |action: UiAction| {
@@ -131,7 +133,7 @@ pub(crate) fn NodeDetailPopover(
             // Sharing: copy this node (def + assets) as an `lp.node`
             // envelope. Needs the node's address to read its files, so a
             // header without a parseable path renders no share section.
-            if let Some(node) = copy_target {
+            if copy_target.is_some() {
                 DetailSection { title: "Share",
                     button {
                         class: inline_link_row_class(false),
@@ -139,10 +141,9 @@ pub(crate) fn NodeDetailPopover(
                         title: "Copy this node and its assets to the clipboard.",
                         onclick: move |event| {
                             event.stop_propagation();
-                            forward.call(UiAction::from_op(
-                                ProjectController::NODE_ID,
-                                NodeCopyOp { node: node.clone() },
-                            ));
+                            if let Some(copy) = copy.as_ref() {
+                                forward.call(copy.action.clone());
+                            }
                         },
                         span { class: "tw:inline-flex tw:h-[15px] tw:w-[15px] tw:flex-none tw:items-center tw:justify-center", aria_hidden: "true",
                             StudioIcon { name: StudioIconName::Copy, size: 14 }

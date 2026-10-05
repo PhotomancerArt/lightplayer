@@ -16,8 +16,11 @@
 //!   tone, selection outline, and state chips. Consumers map their domain state
 //!   (`UiStatusKind`, `DirtySummary`, …) onto it; the pane imports no node,
 //!   project, or device types.
-//! - `actions` — contextual [`UiPaneAction`]s rendered as icon buttons that
-//!   dispatch the wrapped action through the usual `on_action` conduit.
+//! - `actions` — contextual [`UiOffer`]s (a surface's verbs, read from the
+//!   view's offer tree) rendered as icon buttons that dispatch the wrapped
+//!   action through the usual `on_action` conduit. Each
+//!   wears its consequence exactly as `ActionButton` does: Undoable and
+//!   Lasting take the error tint, and Lasting arms on the first click.
 //! - `trailing` — free-form header extras between the actions and the detail
 //!   popup (node tabs, the legacy upper-right select control, …).
 //! - `detail` — detail-popup slot at the header's right edge (a
@@ -29,10 +32,11 @@
 //! domain knowledge stays with the consumers.
 
 use dioxus::prelude::*;
-use lpa_studio_core::{UiAction, UiPaneAction};
+use lpa_studio_core::{UiAction, UiOffer};
 
+use crate::app::agent::AgentMark;
 use crate::base::{StudioIcon, StudioIconName, action_icon_name};
-use crate::core::confirmation_confirmed;
+use crate::core::action::armed_confirm_button::use_armed_confirm;
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -57,9 +61,14 @@ pub fn StudioPane(
     /// Neutral chrome: header tone, selection outline, state chips.
     #[props(default)]
     chrome: PaneChrome,
-    /// Contextual header actions rendered as icon buttons.
+    /// Contextual header verbs rendered as icon buttons.
     #[props(default)]
-    actions: Vec<UiPaneAction>,
+    actions: Vec<UiOffer>,
+    /// Story-only: mount every arming (Lasting) header action already
+    /// ARMED, so captures can show the armed dress. Real surfaces never set
+    /// this.
+    #[props(default)]
+    armed_preview: bool,
     /// Action dispatch conduit for the actions slot.
     #[props(default)]
     on_action: Option<EventHandler<UiAction>>,
@@ -138,8 +147,16 @@ pub fn StudioPane(
                     }
                 }
                 div { class: "tw:flex tw:h-full tw:items-stretch",
-                    for action in actions {
-                        PaneActionButton { action, on_action }
+                    // Each verb wears the agent light when the assistant
+                    // pressed it (M8), keyed by its own path.
+                    for offer in actions {
+                        AgentMark { key: "{offer.path}", path: offer.path.clone(),
+                            PaneActionButton {
+                                offer,
+                                on_action,
+                                armed_preview,
+                            }
+                        }
                     }
                     if let Some(trailing) = trailing {
                         {trailing}
@@ -253,37 +270,65 @@ fn PaneCollapseButton(collapse: PaneCollapse) -> Element {
 }
 
 /// One contextual action icon button in the header's actions slot.
+///
+/// It wears the action's consequence the way [`crate::core::ActionButton`]
+/// does (D7, Q7): Undoable and Lasting take the error tint, and Lasting arms
+/// on the first click and acts on the second, through the same
+/// [`use_armed_confirm`] machine. An icon has no label to swap, so arming
+/// changes its dress (`.ux-armed-chip` / `.ux-armed`: the error fill, the
+/// knock, the drain) and lays the copy's verb beside it as a question pill
+/// that overlays the header ("Revert?"), never its width; while armed, its
+/// `title` and accessible name are the copy's message.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn PaneActionButton(
-    action: UiPaneAction,
+    offer: UiOffer,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
+    #[props(default)] armed_preview: bool,
 ) -> Element {
-    let enabled = action.is_enabled();
-    let icon = action_icon_name(Some(action.icon.as_str())).unwrap_or(StudioIconName::Info);
-    let label = action.label().to_string();
-    let title = if action.summary().is_empty() {
+    let enabled = offer.is_enabled();
+    let icon = action_icon_name(Some(offer.icon.as_str())).unwrap_or(StudioIconName::Info);
+    let label = offer.label().to_string();
+    let title = if offer.summary().is_empty() {
         label.clone()
     } else {
-        action.summary().to_string()
+        offer.summary().to_string()
     };
-    let class = pane_action_button_class(action.is_primary(), enabled);
-    let confirmation = action.action.meta().confirmation.clone();
-    let dispatch = action.action.clone();
+    let consequence = offer.consequence().clone();
+    let arms = consequence.arms();
+    let base =
+        pane_action_button_class(offer.is_primary(), enabled, consequence.wears_error_tint());
+    let mut confirm = use_armed_confirm(armed_preview && arms);
+    let armed = arms && confirm.is_armed();
+    let class = pane_action_armed_class(base, arms, armed);
+    let (shown_title, shown_label) = match consequence.copy() {
+        Some(copy) if armed => (copy.message.clone(), copy.message.clone()),
+        _ => (title, label),
+    };
+    // The armed icon asks in words: the copy's verb as a short question,
+    // in a pill that overlays leftward from the icon (G2). It is absolute,
+    // so the button keeps its width and no neighbour moves.
+    let ask = consequence
+        .copy()
+        .filter(|_| armed)
+        .map(|copy| armed_question(&copy.confirm_label));
+    let dispatch = offer.action.clone();
 
     rsx! {
         button {
             class,
             r#type: "button",
             disabled: !enabled,
-            aria_label: "{label}",
-            title: "{title}",
+            aria_label: "{shown_label}",
+            title: "{shown_title}",
+            onblur: move |_| {
+                if arms {
+                    confirm.disarm();
+                }
+            },
             onclick: move |event| {
                 event.stop_propagation();
-                // The shared confirm path (`ActionButton`'s): an action whose
-                // meta carries a confirmation (e.g. delete node with its
-                // composed pre-flight warning) asks before dispatch.
-                if confirmation_confirmed(confirmation.as_ref())
+                if (!arms || confirm.tap())
                     && let Some(handler) = on_action
                 {
                     handler.call(dispatch.clone());
@@ -293,7 +338,41 @@ fn PaneActionButton(
                 name: icon,
                 size: 15,
             }
+            // Part of the button: pressing the question answers it. Hidden
+            // from AT — the armed accessible name is the copy's message.
+            if let Some(ask) = ask {
+                span { class: ARMED_ASK_CLASS, aria_hidden: "true", "{ask}" }
+            }
         }
+    }
+}
+
+/// The armed header icon's question pill: the error chip's dress, anchored
+/// to the button's left edge and laid over the header to its left (above
+/// the title band and any neighbour icon), so arming never reflows the
+/// header. `ux-armed-ask` (style.css) fades it in, unless reduced motion.
+const ARMED_ASK_CLASS: &str = "ux-armed-ask tw:pointer-events-auto tw:absolute tw:right-full tw:top-1/2 tw:z-10 tw:mr-1.5 tw:-translate-y-1/2 tw:whitespace-nowrap tw:rounded-pill tw:border tw:border-status-error-border tw:bg-status-error-bg tw:px-2 tw:py-1 tw:text-xs tw:font-bold tw:leading-none tw:text-status-error-foreground tw:shadow-[0_0_0_3px_var(--studio-color-surface-subtle)]";
+
+/// An armed icon's question from its copy's confirm verb: "revert" reads
+/// "Revert?". Kept as a plain function so it is testable without mounting.
+fn armed_question(confirm_label: &str) -> String {
+    let verb = confirm_label.trim().trim_end_matches('?');
+    let mut chars = verb.chars();
+    let mut question: String = match chars.next() {
+        Some(first) => first.to_uppercase().chain(chars).collect(),
+        None => String::new(),
+    };
+    question.push('?');
+    question
+}
+
+/// A header icon's classes with its arming dress: an arming button always
+/// hosts `ux-armed-chip` (the drain track), and arming adds `ux-armed`.
+fn pane_action_armed_class(base: &'static str, arms: bool, armed: bool) -> String {
+    match (arms, armed) {
+        (false, _) => base.to_string(),
+        (true, false) => format!("{base} ux-armed-chip"),
+        (true, true) => format!("{base} ux-armed-chip ux-armed"),
     }
 }
 
@@ -395,10 +474,17 @@ fn pane_chip_class(tone: PaneTone) -> &'static str {
 /// The header action-slot icon-button classes, exported so a trigger that is
 /// not a plain dispatch button (the add-node picker's popover trigger) can
 /// sit in the header and read identically to its `PaneActionButton` siblings.
-fn pane_action_button_class(primary: bool, enabled: bool) -> &'static str {
+fn pane_action_button_class(primary: bool, enabled: bool, tinted: bool) -> &'static str {
     match (primary, enabled) {
         (_, false) => {
             "tw:inline-flex tw:h-full tw:min-h-[46px] tw:w-[34px] tw:items-center tw:justify-center tw:border-0 tw:border-l tw:border-border-muted tw:bg-transparent tw:p-0 tw:text-dim-foreground tw:opacity-50 tw:cursor-not-allowed"
+        }
+        // The consequence's error tint (Undoable, Lasting), whatever the
+        // priority: the icon in the error tone ON the error wash, at rest —
+        // the icon colour alone read as a plain one beside its neighbours
+        // (gate G1). Hover fills the wash to full strength.
+        (_, true) if tinted => {
+            "tw:inline-flex tw:h-full tw:min-h-[46px] tw:w-[34px] tw:items-center tw:justify-center tw:border-0 tw:border-l tw:border-border-muted tw:bg-status-error-bg/60 tw:p-0 tw:text-status-error-foreground tw:hover:bg-status-error-bg"
         }
         (true, true) => {
             "tw:inline-flex tw:h-full tw:min-h-[46px] tw:w-[34px] tw:items-center tw:justify-center tw:border-0 tw:border-l tw:border-border-muted tw:bg-transparent tw:p-0 tw:text-strong-foreground tw:hover:bg-card-subtle/60"
@@ -406,5 +492,55 @@ fn pane_action_button_class(primary: bool, enabled: bool) -> &'static str {
         (false, true) => {
             "tw:inline-flex tw:h-full tw:min-h-[46px] tw:w-[34px] tw:items-center tw:justify-center tw:border-0 tw:border-l tw:border-border-muted tw:bg-transparent tw:p-0 tw:text-subtle-foreground tw:hover:bg-card-subtle/60 tw:hover:text-strong-foreground"
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_header_icon_wears_the_consequence_tint_at_any_priority() {
+        // One look per level (D7, Q7): the tint follows the consequence, not
+        // the priority, and a disabled icon stays dimmed either way.
+        for primary in [true, false] {
+            let tinted = pane_action_button_class(primary, true, true);
+            assert!(tinted.contains("text-status-error-foreground"), "{tinted}");
+            let plain = pane_action_button_class(primary, true, false);
+            assert!(!plain.contains("status-error"), "{plain}");
+            let disabled = pane_action_button_class(primary, false, true);
+            assert!(disabled.contains("tw:opacity-50"), "{disabled}");
+        }
+    }
+
+    #[test]
+    fn an_arming_header_icon_changes_its_dress_not_its_width() {
+        let base = pane_action_button_class(false, true, true);
+        assert_eq!(pane_action_armed_class(base, false, false), base);
+        let rest = pane_action_armed_class(base, true, false);
+        assert!(rest.ends_with("ux-armed-chip"), "{rest}");
+        let armed = pane_action_armed_class(base, true, true);
+        assert!(armed.ends_with("ux-armed-chip ux-armed"), "{armed}");
+        for class in [&rest, &armed] {
+            assert!(class.contains("tw:w-[34px]"), "{class}");
+        }
+    }
+
+    #[test]
+    fn a_tinted_header_icon_wears_the_error_wash_at_rest() {
+        let tinted = pane_action_button_class(false, true, true);
+        assert!(tinted.contains("tw:bg-status-error-bg/60"), "{tinted}");
+        let plain = pane_action_button_class(false, true, false);
+        assert!(plain.contains("tw:bg-transparent"), "{plain}");
+    }
+
+    #[test]
+    fn an_armed_header_icon_asks_its_verb_as_a_question() {
+        assert_eq!(armed_question("revert"), "Revert?");
+        assert_eq!(armed_question("Delete"), "Delete?");
+        assert_eq!(armed_question(" forget? "), "Forget?");
+        // The pill overlays; it never takes layout room in the header.
+        assert!(ARMED_ASK_CLASS.contains("tw:absolute"));
+        assert!(ARMED_ASK_CLASS.contains("tw:right-full"));
     }
 }

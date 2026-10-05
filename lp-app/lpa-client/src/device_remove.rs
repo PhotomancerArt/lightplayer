@@ -87,9 +87,16 @@ pub struct RemoveReport {
 /// Step 2 is not optional either. Deleting the files under a running project
 /// is how a board ends up executing half of something.
 ///
-/// `fallback_storage_id` is used only when the board reports nothing loaded,
-/// which is the race between the card offering the verb and the effect
-/// running. Nothing is created; a delete of an absent dir is a no-op.
+/// `fallback_storage_id` is used only when the board reports nothing loaded
+/// AND boots no saved folder (`/lightplayer.json`) — a freshly flashed
+/// board, which has no dir to remove. A board that boots dark (it refused
+/// its saved folder) has that folder removed instead, the same lookup the
+/// push conversation uses: the race this falls back for is only the one
+/// between the card offering the verb and the effect running. Nothing is
+/// created; a delete of an absent dir is a no-op.
+///
+/// Once the dir is gone, `/lightplayer.json`'s `startup_project` is cleared
+/// if it names that dir (best-effort; see [`forget_startup_project`]).
 pub async fn remove_project<Io: ClientIo>(
     client: &mut LpClient<Io>,
     fallback_storage_id: &str,
@@ -102,19 +109,56 @@ pub async fn remove_project<Io: ClientIo>(
         .first()
         .and_then(|project| crate::device_push::storage_id_of(project.path.as_str()));
     let was_loaded = reported.is_some();
-    let storage_id = reported.unwrap_or_else(|| fallback_storage_id.to_string());
+    let storage_id = match &reported {
+        Some(reported) => reported.clone(),
+        None => match crate::device_push::saved_startup_project(client).await {
+            Some(saved) => saved,
+            None => fallback_storage_id.to_string(),
+        },
+    };
 
     progress("Stopping the project".to_string(), Some(40));
     client.stop_all_projects().await?;
 
     progress(format!("Deleting {storage_id}"), Some(70));
     client.delete_project_dir(&storage_id).await?;
+    forget_startup_project(client, &storage_id).await;
 
     progress("Done".to_string(), Some(100));
     Ok(RemoveReport {
         storage_id,
         was_loaded,
     })
+}
+
+/// Clear `/lightplayer.json`'s `startup_project` when it names the dir just
+/// deleted, so the board stops naming a folder it no longer holds.
+///
+/// This does not change what the next boot loads: firmware treats a
+/// `startup_project` naming a missing folder exactly like none at all and
+/// falls back to the lexical-first project under `/projects/`
+/// (`fw-esp32-common/src/boot.rs`). It is tidy-up, so it is best-effort — a
+/// board with no config, one naming another folder, or a refused write is
+/// left as it is, and the removal still stands.
+async fn forget_startup_project<Io: ClientIo>(client: &mut LpClient<Io>, storage_id: &str) {
+    use lpc_model::AsLpPathBuf;
+    use lpc_model::server::server_config::ServerConfig;
+
+    let path = ServerConfig::PATH.as_path_buf();
+    let Ok(read) = client.fs_read(path.as_path()).await else {
+        return;
+    };
+    let Ok(mut config) = lpc_wire::json::from_slice::<ServerConfig>(&read.value) else {
+        return;
+    };
+    if config.startup_project.as_deref() != Some(storage_id) {
+        return;
+    }
+    config.startup_project = None;
+    let Ok(json) = lpc_wire::json::to_string(&config) else {
+        return;
+    };
+    let _ = client.fs_write(path.as_path(), json.into_bytes()).await;
 }
 
 #[cfg(test)]
@@ -133,6 +177,8 @@ mod tests {
             loaded_response(1, Some("/projects/zook-dome")),
             WireServerMessage::new(2, WireServerMsgBody::StopAllProjects),
             delete_dir_response(3, None),
+            saved_startup_config_response(4, "zook-dome"),
+            write_response(5),
         ]);
         let mut client = LpClient::new(io);
         let mut noted: Vec<String> = Vec::new();
@@ -145,6 +191,11 @@ mod tests {
         assert_eq!(report.storage_id, "zook-dome");
         assert!(report.was_loaded);
         let sent = client.into_io().sent;
+        assert_eq!(
+            config_written(&sent).as_deref(),
+            Some(r#"{"startup_project":null}"#),
+            "the boot pointer stops naming the deleted dir: {sent:?}"
+        );
         assert!(
             matches!(sent[1].msg, lpc_wire::ClientRequest::StopAllProjects),
             "the project stops before its files go: {:?}",
@@ -158,14 +209,18 @@ mod tests {
     }
 
     /// The race between the card offering the verb and the effect running:
-    /// the board now reports nothing. The fallback slot is cleared, and the
-    /// report says the board was not actually running it.
+    /// the board now reports nothing AND has no saved folder of its own (a
+    /// freshly flashed board, with no `/lightplayer.json` to read). The
+    /// fallback slot is cleared, and the report says the board was not
+    /// actually running it.
     #[tokio::test]
     async fn a_board_reporting_nothing_falls_back_without_claiming_it_was_loaded() {
         let io = ScriptedIo::new([
             loaded_response(1, None),
-            WireServerMessage::new(2, WireServerMsgBody::StopAllProjects),
-            delete_dir_response(3, None),
+            no_saved_startup_response(2),
+            WireServerMessage::new(3, WireServerMsgBody::StopAllProjects),
+            delete_dir_response(4, None),
+            no_saved_startup_response(5),
         ]);
         let mut client = LpClient::new(io);
         let mut progress = |_label: String, _percent: Option<u8>| {};
@@ -176,6 +231,63 @@ mod tests {
 
         assert_eq!(report.storage_id, "demo");
         assert!(!report.was_loaded);
+    }
+
+    /// A board that reports nothing loaded but boots a saved folder it
+    /// refused (dark) has THAT folder removed — never the fallback slot,
+    /// which would leave the saved folder (and the board's retry-at-boot
+    /// loop) untouched.
+    #[tokio::test]
+    async fn a_dark_board_falls_back_to_its_saved_startup_project_not_the_fallback_slot() {
+        let io = ScriptedIo::new([
+            loaded_response(1, None),
+            saved_startup_config_response(2, "porch"),
+            projects_dir_listing_response(3, &["porch"]),
+            WireServerMessage::new(4, WireServerMsgBody::StopAllProjects),
+            delete_dir_response(5, None),
+            saved_startup_config_response(6, "porch"),
+            write_response(7),
+        ]);
+        let mut client = LpClient::new(io);
+        let mut progress = |_label: String, _percent: Option<u8>| {};
+
+        let report = remove_project(&mut client, "demo", &mut progress)
+            .await
+            .expect("removed");
+
+        assert_eq!(report.storage_id, "porch");
+        assert!(
+            !report.was_loaded,
+            "the board was not actually running it — it was dark"
+        );
+        let sent = client.into_io().sent;
+        assert_eq!(
+            config_written(&sent).as_deref(),
+            Some(r#"{"startup_project":null}"#),
+            "{sent:?}"
+        );
+    }
+
+    /// A boot pointer naming some OTHER folder is not the removal's to
+    /// touch: the board boots that one next, as it did before.
+    #[tokio::test]
+    async fn a_removal_leaves_a_boot_pointer_naming_another_folder() {
+        let io = ScriptedIo::new([
+            loaded_response(1, Some("/projects/zook-dome")),
+            WireServerMessage::new(2, WireServerMsgBody::StopAllProjects),
+            delete_dir_response(3, None),
+            saved_startup_config_response(4, "porch"),
+        ]);
+        let mut client = LpClient::new(io);
+        let mut progress = |_label: String, _percent: Option<u8>| {};
+
+        remove_project(&mut client, "demo", &mut progress)
+            .await
+            .expect("removed");
+
+        let sent = client.into_io().sent;
+        assert_eq!(sent.len(), 4, "read, but never written: {sent:?}");
+        assert_eq!(config_written(&sent), None);
     }
 
     /// A board still formatting its flash refuses the first asks and then
@@ -230,6 +342,80 @@ mod tests {
             WireServerMsgBody::Filesystem(lpc_wire::FsResponse::DeleteDir {
                 path: "/projects/zook-dome".as_path_buf(),
                 error,
+            }),
+        )
+    }
+
+    /// The answer `saved_startup_project`'s first ask (`fs_read
+    /// /lightplayer.json`) gets from a board with no saved folder of its
+    /// own — nothing further is asked, so the lookup falls through.
+    fn no_saved_startup_response(id: u64) -> WireServerMessage {
+        use lpc_model::AsLpPathBuf;
+        WireServerMessage::new(
+            id,
+            WireServerMsgBody::Filesystem(lpc_wire::FsResponse::Read {
+                path: lpc_model::server::server_config::ServerConfig::PATH.as_path_buf(),
+                data: None,
+                error: None,
+            }),
+        )
+    }
+
+    /// The answer `saved_startup_project`'s first ask gets from a board
+    /// whose `/lightplayer.json` names `dir`: the lookup then asks
+    /// `fs_list_dir("/projects")` to confirm `dir` is actually on the board
+    /// (see [`projects_dir_listing_response`]).
+    fn saved_startup_config_response(id: u64, dir: &str) -> WireServerMessage {
+        use lpc_model::AsLpPathBuf;
+        let json = format!(r#"{{"startup_project":"{dir}"}}"#);
+        WireServerMessage::new(
+            id,
+            WireServerMsgBody::Filesystem(lpc_wire::FsResponse::Read {
+                path: lpc_model::server::server_config::ServerConfig::PATH.as_path_buf(),
+                data: Some(json.into_bytes()),
+                error: None,
+            }),
+        )
+    }
+
+    /// The board's answer to the config write that clears the boot pointer.
+    fn write_response(id: u64) -> WireServerMessage {
+        use lpc_model::AsLpPathBuf;
+        WireServerMessage::new(
+            id,
+            WireServerMsgBody::Filesystem(lpc_wire::FsResponse::Write {
+                path: lpc_model::server::server_config::ServerConfig::PATH.as_path_buf(),
+                error: None,
+            }),
+        )
+    }
+
+    /// What, if anything, the conversation wrote to `/lightplayer.json`.
+    fn config_written(sent: &[lpc_wire::ClientMessage]) -> Option<String> {
+        sent.iter().find_map(|message| match &message.msg {
+            lpc_wire::ClientRequest::Filesystem(lpc_wire::FsRequest::Write { path, data })
+                if path.as_str() == lpc_model::server::server_config::ServerConfig::PATH =>
+            {
+                Some(String::from_utf8_lossy(data).into_owned())
+            }
+            _ => None,
+        })
+    }
+
+    /// The `/projects` listing `saved_startup_project` checks the saved
+    /// folder's name against, once `/lightplayer.json` has named one.
+    fn projects_dir_listing_response(id: u64, dirs: &[&str]) -> WireServerMessage {
+        use lpc_model::AsLpPathBuf;
+        let entries = dirs
+            .iter()
+            .map(|dir| format!("/projects/{dir}").as_path_buf())
+            .collect();
+        WireServerMessage::new(
+            id,
+            WireServerMsgBody::Filesystem(lpc_wire::FsResponse::ListDir {
+                path: "/projects".as_path_buf(),
+                entries,
+                error: None,
             }),
         )
     }

@@ -2,7 +2,7 @@
 //! link to a LightPlayer board (M5 of the BLE remote-control plan).
 //!
 //! Studio reaches a board over BLE exactly as it reaches one over USB — the
-//! same wire messages over the same lp-link (since `WIRE_PROTO_VERSION` 33),
+//! same wire messages over the same lp-link (since `WIRE_PROTO_VERSION` 36),
 //! the same device fold, the same identity merge by
 //! base MAC — with one difference the card has to be honest about: there is
 //! no reset line and no ROM downloader on the far side of a GATT service, so
@@ -179,6 +179,7 @@ mod tests {
         for call in [
             DeviceEffectCall::FlashFirmware {
                 build_id: "esp32c6-xiao".to_string(),
+                plan: None,
             },
             DeviceEffectCall::EraseFlash,
         ] {
@@ -194,7 +195,8 @@ mod tests {
     }
 
     /// A manifest write is the real conversation over the link: ready
-    /// first, then the chunked write — the serial arm's order.
+    /// first, then the journaled stamp (the staged copy, the live file, the
+    /// staged copy deleted) — the serial arm's order.
     #[test]
     fn a_manifest_write_runs_the_conversation_over_the_link() {
         let source = Rc::new(DoubleSource::default());
@@ -214,7 +216,9 @@ mod tests {
             [
                 "io QkxFLWlk tap".to_string(),
                 "listLoadedProjects".to_string(),
-                "write /hardware.json {\"id\":\"x\"}".to_string()
+                "write /hardware.json.next {\"id\":\"x\"}".to_string(),
+                "write /hardware.json {\"id\":\"x\"}".to_string(),
+                "delete /hardware.json.next".to_string()
             ]
         );
     }
@@ -337,6 +341,10 @@ mod tests {
                 ClientRequest::Filesystem(FsRequest::Write { path, data }) => (
                     format!("write {} {}", path.as_str(), String::from_utf8_lossy(&data)),
                     ServerMsgBody::Filesystem(FsResponse::Write { path, error: None }),
+                ),
+                ClientRequest::Filesystem(FsRequest::DeleteFile { path }) => (
+                    format!("delete {}", path.as_str()),
+                    ServerMsgBody::Filesystem(FsResponse::DeleteFile { path, error: None }),
                 ),
                 other => (format!("{other:?}"), ServerMsgBody::UnloadProject),
             };

@@ -46,7 +46,54 @@ fn flash_esp32_elf(
         .with_context(|| format!("read firmware ELF {}", elf_path.display()))?;
     let partition_table = root.join(PARTITION_TABLE);
 
+    // The layout preflight (the C6 repartition, MQ7): a table that differs
+    // from the board's, in either direction, would strand or destroy the
+    // board's files. The demo erases its filesystem anyway — there the
+    // board's OWN region goes too, so no old filesystem is left for the new
+    // firmware to hold; a check run refuses.
+    let image_table = lpa_link::PartitionTable::from_csv(
+        &std::fs::read_to_string(&partition_table)
+            .with_context(|| format!("read {}", partition_table.display()))?,
+    )
+    .map_err(|error| anyhow::anyhow!("{}: {error}", partition_table.display()))?;
+    let (_, device_table) = lpa_link::providers::host_serial_esp32::read_partition_table(
+        port,
+        &lpa_link::LinkManagementEventSink::noop(),
+    )
+    .map_err(|error| anyhow::anyhow!("layout preflight: {error}"))?;
+    let preflight = lpa_link::layout_migration::preflight(&device_table, &image_table);
+    let device_lpfs = lpa_link::PartitionTable::parse(&device_table)
+        .ok()
+        .as_ref()
+        .and_then(lpa_link::LinkFlashRegion::lpfs_in);
+    if let lpa_link::layout_migration::LayoutPreflight::Differs { from, to } = &preflight
+        && !erase_lpfs
+    {
+        bail!(
+            "layout preflight: the board holds the {from}; this image writes the {to}. \
+             Flashing would strand the board's files. Move them first (`lp-cli hardware lpfs \
+             migrate --port {port} --merged <image>`) or, on a test board, erase them \
+             (`lp-cli hardware lpfs preflight --port {port} --table {} --discard-lpfs`).",
+            partition_table.display()
+        );
+    }
+
     let mut flasher = connect(port, after)?;
+
+    if erase_lpfs
+        && !preflight.allows_plain_flash()
+        && let Some(region) = device_lpfs
+    {
+        if verbose {
+            println!(
+                "erasing the board's own lpfs @ 0x{:x} (0x{:x} bytes): its layout differs",
+                region.offset, region.length
+            );
+        }
+        flasher
+            .erase_region(region.offset, region.length)
+            .context("erase the board's lpfs partition")?;
+    }
 
     if erase_lpfs {
         let table = parse_partition_table(&partition_table)

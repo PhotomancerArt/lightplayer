@@ -1,8 +1,8 @@
 ---
-status: carried
+status: retired
 since: 2026-07-30
 logged: 2026-07-30
-area: lp-fw/fw-esp32c6 (fw-esp32s3 is already clean)
+area: lp-fw/fw-esp32c6 (all three chips now read their table)
 related:
   [
     "../../lp-fw/fw-esp32c6/src/flash_storage.rs",
@@ -67,6 +67,18 @@ is confined to the CSV.
   hazard was recognized during the port and the S3 got a runtime lookup instead
   of the copied constants. Recording it because the near miss was one careless
   copy away from silent corruption of a running image.
+- **2026-10-01** — **Paid.** The C6 repartition (plan
+  `lp2025/2026-10-01-1843-c6-repartition`, P01) is exactly the "C6's
+  partition table changes" trigger above, so the port came first:
+  `fw-esp32c6/src/flash_storage.rs` now uses `LpfsPartition::locate()` (table
+  read into a heap buffer, freed after boot) and boots on memory FS with a loud
+  `[ERROR]` when the table has no `lpfs` row. Cost: +2,480 B of image
+  (2,960,400 → 2,962,880 B; the table parser and its MD5 check). The C6
+  emulator's direct load now stages a partition table at `0x8000`
+  (`lp-emu-esp32c6/src/flash.rs`), so direct-load runs still mount flash;
+  those constants are a **board model's** facts, held equal to
+  `partitions.csv` by `lp-cli/tests/c6_partition_table_parity.rs` (espflash's
+  own encoder as the oracle), not a firmware transcription.
 
 **Exit criteria** — `fw-esp32c6/src/flash_storage.rs` derives the `lpfs`
 offset and length from the flashed partition table, and no firmware crate

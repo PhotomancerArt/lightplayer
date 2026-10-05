@@ -45,6 +45,7 @@ pub extern "C" fn __lp_lpfn_srandom3_q32(x: i32, y: i32, z: i32, seed: u32) -> i
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::manual_range_contains, reason = "golden-table range")]
     #[cfg(test)]
     extern crate std;
     use super::*;

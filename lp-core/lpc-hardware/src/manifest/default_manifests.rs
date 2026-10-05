@@ -195,6 +195,51 @@ mod tests {
         }
     }
 
+    /// D4 and D5 are GPIO22 and GPIO23 (Seeed's pin list: D4 = GPIO22/SDA,
+    /// D5 = GPIO23/SCL). The 2026-05 calibration recorded them `not-found`
+    /// only because the profile it searched listed GPIO0-21, so neither pin
+    /// was ever a candidate — and a project could not put LEDs on D5.
+    /// See `docs/defects/2026-10-03-xiao-c6-d4-d5-unmapped.md`.
+    #[test]
+    fn default_esp32c6_manifest_resolves_d4_and_d5_to_gpio22_and_gpio23() {
+        use alloc::rc::Rc;
+
+        let file = HardwareManifestFile::read_json(XIAO_ESP32_C6_JSON)
+            .expect("checked-in seeed/xiao-esp32-c6 board manifest must parse");
+        for (label, gpio) in [("D4", "/gpio/22"), ("D5", "/gpio/23")] {
+            let entry = file
+                .board_label
+                .iter()
+                .find(|entry| entry.label == label)
+                .unwrap_or_else(|| panic!("{label} must be listed"));
+            assert_eq!(entry.status, Some(HardwareBoardLabelStatus::Assigned));
+            assert_eq!(entry.gpio.as_deref(), Some(gpio), "{label}");
+        }
+
+        let system = HardwareSystem::with_virtual_drivers(Rc::new(HwRegistry::new(
+            default_esp32c6_hardware_manifest(),
+        )));
+        let endpoints = system.ws281x_endpoints();
+        for (spec, gpio) in [("ws281x:local:D4", 22), ("ws281x:local:D5", 23)] {
+            let endpoint = endpoints
+                .iter()
+                .find(|endpoint| endpoint.spec().as_str() == spec)
+                .unwrap_or_else(|| panic!("{spec} must be an endpoint"));
+            assert_eq!(endpoint.address(), &HwAddress::gpio(gpio), "{spec}");
+            assert!(
+                endpoint.is_available(),
+                "{spec} must be claimable: {:?}",
+                endpoint.status()
+            );
+        }
+        system
+            .open_ws281x_by_spec(
+                &HwEndpointSpec::from_static("ws281x:local:D5"),
+                crate::Ws281xConfig::new(3),
+            )
+            .expect("an LED output on D5 opens");
+    }
+
     #[test]
     fn default_esp32s3_manifest_loads_checked_in_board_profile() {
         let manifest = default_esp32s3_hardware_manifest();

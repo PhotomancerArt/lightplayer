@@ -20,15 +20,15 @@ use crate::app::studio::refresh_cadence::{VERDICT_CHASE_INTERVAL, VERDICT_CHASE_
 use crate::core::notice::UiNotices;
 use crate::{
     AssetEditOp, Controller, ControllerId, DirtySummary, LoadedProjectChoice, MAX_ASSET_BODY_BYTES,
-    NodeCardUiState, NodeUiOp, PanelAutoSaveOp, PanelClearOp, PanelWriteOp, PendingAssetEdit,
-    PendingEdit, PendingEditOp, PendingEditPhase, PlaylistActivateOp, ProgressState,
-    ProjectConnectResult, ProjectEditorOp, ProjectEditorTarget, ProjectEditorView,
+    NodeCardUiState, NodeUiOp, OfferPath, PanelAutoSaveOp, PanelClearOp, PanelWriteOp,
+    PendingAssetEdit, PendingEdit, PendingEditOp, PendingEditPhase, PlaylistActivateOp,
+    ProgressState, ProjectConnectResult, ProjectEditorOp, ProjectEditorTarget, ProjectEditorView,
     ProjectInventorySummary, ProjectNodeAddress, ProjectNodeStatusTone, ProjectNodeTreeItem,
     ProjectNodeTreeView, ProjectOp, ProjectSlotAddress, ProjectSlotRoot, ProjectSnapshot,
     ProjectState, ProjectSync, ProjectSyncPhase, ProjectSyncRun, ProjectSyncSummary, SlotEditOp,
     StudioOverlayMutation, StudioProjectRead, StudioProjectReadOutcome, StudioServerClient,
     UiAction, UiAssetContent, UiAssetContentBody, UiAssetEditor, UiError, UiIssue, UiLogDraft,
-    UiLogLevel, UiLogOrigin, UiMetric, UiNodeTabBody, UiNodeView, UiNotice, UiPaneAction,
+    UiLogLevel, UiLogOrigin, UiMetric, UiNodeTabBody, UiNodeView, UiNotice, UiOffer, UiOfferTree,
     UiPaneView, UiPendingEdit, UiPendingEditKind, UiPendingEditPhase, UiProductRef, UiResult,
     UiShaderError, UiShaderUniform, UiSlotAsset, UiStatus, UiViewContent, UxUpdateSink,
 };
@@ -48,7 +48,10 @@ use lpc_wire::{
 };
 
 use super::node::node_naming::{file_stem, node_kind_slug, sanitize_node_name, unique_node_name};
-use super::node::{UiAttachTarget, UiNodeRemovePreflight, add_node_menu, gate_add_node_menu};
+use super::node::{
+    UiAttachTarget, UiNodeRemovePreflight, add_node_menu, gate_add_node_menu,
+    publish_add_node_offers,
+};
 use super::{
     NodeController, ProjectProductSubscriptionIntent, SlotController, SlotKind, node::root_slot_key,
 };
@@ -1148,7 +1151,7 @@ impl ProjectController {
     }
 
     /// Find the node controller currently carrying a runtime node id.
-    fn node_by_runtime_id(&self, id: lpc_model::NodeId) -> Option<&NodeController> {
+    pub(super) fn node_by_runtime_id(&self, id: lpc_model::NodeId) -> Option<&NodeController> {
         fn walk(node: &NodeController, id: lpc_model::NodeId) -> Option<&NodeController> {
             if node.target().node_id == id {
                 return Some(node);
@@ -1191,8 +1194,39 @@ impl ProjectController {
         &self.root_nodes
     }
 
+    /// The patch surface's single selection, when exactly one thing is
+    /// selected.
+    pub(crate) fn patch_selection_single(&self) -> Option<&crate::UiPatchTarget> {
+        self.patch_selection.single()
+    }
+
+    /// The slot shape registry the project's defs are read through (the
+    /// app agent maps its JSON values through it).
+    pub(crate) fn slot_shape_registry(&self) -> &lpc_model::SlotShapeRegistry {
+        &self.slot_shapes
+    }
+
+    /// The def artifact behind `node`, when the inventory knows it.
+    pub(crate) fn def_artifact_for(&self, node: &NodeController) -> Option<ArtifactLocation> {
+        self.def_artifacts.get(&node.target().node_id).cloned()
+    }
+
+    /// The artifact `source` names, resolved against `node`'s def file —
+    /// the same resolution the server applies to a def's asset references.
+    pub(crate) fn node_asset_artifact(
+        &self,
+        node: &NodeController,
+        source: &str,
+    ) -> Option<ArtifactLocation> {
+        self.resolve_node_asset_artifact(node, source)
+    }
+
     /// Project root node controllers into node-pane DTOs in project tree order.
+    ///
+    /// The cards' verbs are published into a tree this entry point drops;
+    /// [`Self::editor_view`] is the build that keeps them.
     pub fn ui_nodes(&self) -> Vec<UiNodeView> {
+        let mut offers = UiOfferTree::new();
         let always_live = self.always_live_products();
         let product_preview =
             |product: &UiProductRef| self.sync.as_ref()?.product_preview(product).cloned();
@@ -1213,6 +1247,7 @@ impl ProjectController {
                     &remove_action,
                     &always_live,
                     &subscribes,
+                    &mut offers,
                 )
             })
             .collect()
@@ -1650,6 +1685,62 @@ impl ProjectController {
         ))
     }
 
+    /// Send `edits` on `node`'s def as ONE `MutationCmdBatch` — the app
+    /// agent's `set`, which a JSON value can expand into several leaf edits
+    /// that are only valid together (a binding entry and its endpoint).
+    /// Acks fold exactly like any slot edit's; the result is the joined
+    /// rejection text when any command was refused.
+    pub(crate) async fn apply_def_edit_batch(
+        &mut self,
+        server: &mut StudioServerClient,
+        node: &ProjectNodeAddress,
+        edits: Vec<lpc_model::SlotEdit>,
+    ) -> Result<(ProjectEditRun, Option<String>), UiError> {
+        let handle_id = self.ready_handle_id()?;
+        let def_artifact = {
+            let controller = self.node(node).ok_or_else(|| {
+                UiError::UnsupportedAction(format!("{node} is not in the synced project"))
+            })?;
+            self.def_artifacts
+                .get(&controller.target().node_id)
+                .cloned()
+                .ok_or_else(|| UiError::Project(format!("no def artifact is known for {node}")))?
+        };
+        let batch = MutationCmdBatch::new(
+            edits
+                .into_iter()
+                .map(|edit| MutationCmd {
+                    id: self.allocate_mutation_cmd_id(),
+                    mutation: MutationOp::PutSlotEdit {
+                        artifact: def_artifact.clone(),
+                        edit,
+                    },
+                })
+                .collect(),
+        );
+        let mutation = server
+            .project_overlay_mutate(handle_id, batch.clone())
+            .await?;
+        let rejections = self.apply_mutation_acks(&batch, &mutation, &[]);
+        let rejection = (!rejections.is_empty()).then(|| {
+            rejections
+                .iter()
+                .map(rejection_text)
+                .collect::<Vec<_>>()
+                .join("; ")
+        });
+        if rejection.is_none() {
+            self.verdict_chase_ticks = VERDICT_CHASE_TICKS;
+        }
+        Ok((
+            ProjectEditRun {
+                notices: rejection_notices(&rejections),
+                logs: mutation.logs,
+            },
+            rejection,
+        ))
+    }
+
     /// Every fixture node with a known def artifact, as `(label, def
     /// artifact)` — the agent's led-point gather parses those defs.
     pub(crate) fn agent_fixture_defs(&self) -> Vec<(String, ArtifactLocation)> {
@@ -1739,8 +1830,18 @@ impl ProjectController {
     /// unmapped ones — every asset row carries a revert, which needs only the
     /// artifact ([`AssetEditOp::Revert`]).
     pub fn pending_edits(&self) -> Vec<UiPendingEdit> {
+        self.pending_edit_rows()
+            .into_iter()
+            .map(|(edit, _)| edit)
+            .collect()
+    }
+
+    /// [`Self::pending_edits`], each with the action that reverts it — what
+    /// `project/revert-edit` binds its `edit` choice to
+    /// ([`publish_revert_edit_offer`]). Stale entries carry none.
+    fn pending_edit_rows(&self) -> Vec<(UiPendingEdit, Option<UiAction>)> {
         let join = self.slot_edit_join();
-        let mut edits: Vec<UiPendingEdit> = join
+        let mut edits: Vec<(UiPendingEdit, Option<UiAction>)> = join
             .entries()
             .into_iter()
             // D7: a Debug override carries no dirty weight, so it belongs in
@@ -1753,7 +1854,11 @@ impl ProjectController {
                 self.ui_pending_edit(&entry, old_value)
             })
             .collect();
-        edits.extend(self.stale_pending_edits());
+        edits.extend(
+            self.stale_pending_edits()
+                .into_iter()
+                .map(|edit| (edit, None)),
+        );
         edits.extend(
             join.asset_entries()
                 .into_iter()
@@ -1768,7 +1873,10 @@ impl ProjectController {
     /// (`ClearArtifact`). Like slot entries, the phase derives from the
     /// entry's own [`DirtySummary`] classification, so list and counts
     /// cannot drift.
-    fn ui_pending_asset_edit(&self, entry: &AssetEditEntry<'_>) -> UiPendingEdit {
+    fn ui_pending_asset_edit(
+        &self,
+        entry: &AssetEditEntry<'_>,
+    ) -> (UiPendingEdit, Option<UiAction>) {
         let node_label = entry
             .node
             .and_then(|address| self.node(address))
@@ -1789,7 +1897,7 @@ impl ProjectController {
         } else {
             UiPendingEditPhase::Persisted
         };
-        UiPendingEdit {
+        let edit = UiPendingEdit {
             node_label,
             // Asset artifacts are not def artifacts, so they reverse-map to
             // no node; the row lists at the project level (no node popover
@@ -1803,13 +1911,15 @@ impl ProjectController {
             // Whole-file replace: no meaningful saved-value display.
             old_value: None,
             phase,
-            revert: Some(UiAction::from_op(
-                ControllerId::new(Self::NODE_ID),
-                AssetEditOp::Revert {
-                    artifact: entry.artifact.clone(),
-                },
-            )),
-        }
+            key: Some(format!("file:{}", entry.artifact.file_path().as_str())),
+        };
+        let revert = UiAction::from_op(
+            ControllerId::new(Self::NODE_ID),
+            AssetEditOp::Revert {
+                artifact: entry.artifact.clone(),
+            },
+        );
+        (edit, Some(revert))
     }
 
     /// Project one join entry into its change-list DTO. The phase derives
@@ -1824,7 +1934,7 @@ impl ProjectController {
         &self,
         entry: &SlotEditEntry<'_>,
         old_value: Option<String>,
-    ) -> UiPendingEdit {
+    ) -> (UiPendingEdit, Option<UiAction>) {
         let mut node_label = self
             .node(&entry.address.node)
             .map(|node| node.label().to_string())
@@ -1865,20 +1975,27 @@ impl ProjectController {
         } else {
             UiPendingEditPhase::Persisted
         };
-        UiPendingEdit {
+        let edit = UiPendingEdit {
             node_label,
             node_path: entry.address.node.to_string(),
             slot_path_display: slot_path_display(entry.address),
             kind,
             old_value,
             phase,
-            revert: Some(UiAction::from_op(
-                ControllerId::new(Self::NODE_ID),
-                SlotEditOp::Revert {
-                    address: entry.address.clone(),
-                },
+            key: Some(format!(
+                "{}:{}:{}",
+                entry.address.node,
+                entry.address.root.name(),
+                entry.address.path
             )),
-        }
+        };
+        let revert = UiAction::from_op(
+            ControllerId::new(Self::NODE_ID),
+            SlotEditOp::Revert {
+                address: entry.address.clone(),
+            },
+        );
+        (edit, Some(revert))
     }
 
     /// Change-list entries for overlay edits whose artifact does not
@@ -1922,7 +2039,7 @@ impl ProjectController {
                 kind: acked_edit_kind(op),
                 old_value: sync.base_value_at(artifact, path).map(str::to_string),
                 phase: UiPendingEditPhase::Persisted,
-                revert: None,
+                key: None,
             })
             .collect()
     }
@@ -2343,12 +2460,16 @@ impl ProjectController {
         }
     }
 
-    pub fn view(&self, server_connected: bool) -> UiPaneView {
+    /// The project pane. Its verbs that live in the offer tree (the
+    /// project header's and every node card's) are published into `offers`
+    /// while the editor view builds; a project that is not open publishes
+    /// none.
+    pub fn view(&self, server_connected: bool, offers: &mut UiOfferTree) -> UiPaneView {
         UiPaneView::new(
             Self::NODE_ID,
             "Project",
             project_status(&self.state, self.sync.as_ref()),
-            self.body(),
+            self.body(offers),
             self.actions(server_connected),
         )
     }
@@ -2368,11 +2489,16 @@ impl ProjectController {
     /// keeps walking the controllers (root included) rather than summing
     /// the card headers, so root-slot edits (a project rename) still count
     /// exactly once.
+    ///
+    /// The project header's verbs (`project/save`, `project/revert`) and
+    /// every node card's (`project/<node tree path>/<verb>`) are published
+    /// into `offers`, in that order, rather than carried on the DTO.
     pub fn editor_view(
         &self,
         project_id: &str,
         handle_id: u32,
         inventory: &ProjectInventorySummary,
+        offers: &mut UiOfferTree,
     ) -> ProjectEditorView {
         let summary = self.sync_summary().unwrap_or_default();
         let always_live = self.always_live_products();
@@ -2384,6 +2510,44 @@ impl ProjectController {
         let edits = self.slot_edit_join();
         let extra_config = |node: NodeId| self.binding_derived_config_slots(node);
         let subscribes = |node: &NodeController| self.node_subscribes_products(node);
+        // Node dirty covers slot + node-mapped asset edits across the subtree;
+        // asset edits whose artifact maps to no node (a shader's `.glsl`) are
+        // added on top so they still count toward Save (see `dirty_summary`).
+        // Computed before the cards so the project header's verbs publish
+        // ahead of theirs.
+        let dirty = self
+            .root_nodes
+            .iter()
+            .map(|node| node.dirty_summary(&edits))
+            .sum::<DirtySummary>()
+            + edits.unmapped_asset_dirty_summary();
+        // The project root's picker (and its offers, `project/add-node` and
+        // its siblings) is built up front so its verbs publish beside the
+        // project's own, ahead of the cards'.
+        let mut root_add_node_menu = add_node_menu(&UiAttachTarget::ProjectRoot);
+        // The import source (P5) is attached before the device gate, so a
+        // board with no module runtime disables the vendoring rows too
+        // rather than offering a create it cannot run.
+        crate::app::project::node::set_import_source(
+            &mut root_add_node_menu,
+            &self.import_patterns,
+            self.active_library_uid().as_deref(),
+        );
+        gate_add_node_menu(
+            &mut root_add_node_menu,
+            self.lens_device_features.as_deref(),
+        );
+        publish_project_offers(offers, &dirty, edits.debug_override_count());
+        // The changes list's per-row revert, and the transient session's
+        // "Save a copy" (M6e), beside the project's own verbs.
+        let pending_rows = self.pending_edit_rows();
+        publish_revert_edit_offer(offers, &pending_rows);
+        let pending_edits: Vec<UiPendingEdit> =
+            pending_rows.into_iter().map(|(edit, _)| edit).collect();
+        if self.active_is_transient() {
+            publish_save_copy_offer(offers);
+        }
+        publish_add_node_offers(offers, &root_add_node_menu);
         let mut nodes = self
             .root_nodes
             .iter()
@@ -2396,6 +2560,7 @@ impl ProjectController {
                     &remove_action,
                     &always_live,
                     &subscribes,
+                    offers,
                 )
             })
             .collect::<Vec<_>>();
@@ -2407,8 +2572,10 @@ impl ProjectController {
             // The lens device's gate lands here, on every menu at once —
             // node views are built deep in `NodeController` where the
             // session is not visible, so one pass at the top keeps a
-            // playlist's picker honest with the project pane's.
-            self.gate_add_node_menus(node);
+            // playlist's picker honest with the project pane's. Each gated
+            // menu's offers publish in the same pass (after the cards'
+            // verbs), so an offer's options match its picker's rows.
+            self.gate_and_offer_add_node_menus(node, offers);
             self.stamp_selection_streaming(node);
         }
         // The root card IS the project (GV fix 4): its header carries the
@@ -2440,32 +2607,32 @@ impl ProjectController {
         // onto the faces (bays + fixture rows) plus each fixture's own
         // map2d body — built here so the two can never disagree.
         let surface = self.build_patch_surface(&nodes);
+        // The surface's verbs (M6b) publish off the surface they write
+        // through, so a subject or a port is an option exactly when the
+        // surface lists it; the history's only while it has a step.
+        if let Some(surface) = &surface {
+            super::patch_verb_offers::publish_patch_verb_offers(
+                offers,
+                surface,
+                self.patch_selection.single(),
+                !self.patch_undo.is_empty(),
+                !self.patch_redo.is_empty(),
+            );
+            // The arrange canvas's commits (M6e), off the same surface.
+            super::arrange_offers::publish_arrange_offers(
+                offers,
+                surface,
+                !self.arrange_undo.is_empty(),
+                !self.arrange_redo.is_empty(),
+            );
+        }
+        // Every playlist's live verbs (M6e), off the facts its Pattern
+        // instrument derives from.
+        self.publish_playlist_offers(&nodes, offers);
         // Module faces derive LAST: a module's panel aggregates the panel
         // targets its finished subtree carries, so every card below it must
         // already be built (and card-UI-overlaid) before it can be read.
         self.apply_module_faces(&mut nodes);
-        let mut root_add_node_menu = add_node_menu(&UiAttachTarget::ProjectRoot);
-        // The import source (P5) is attached before the device gate, so a
-        // board with no module runtime disables the vendoring rows too
-        // rather than offering a create it cannot run.
-        crate::app::project::node::set_import_source(
-            &mut root_add_node_menu,
-            &self.import_patterns,
-            self.active_library_uid().as_deref(),
-        );
-        gate_add_node_menu(
-            &mut root_add_node_menu,
-            self.lens_device_features.as_deref(),
-        );
-        // Node dirty covers slot + node-mapped asset edits across the subtree;
-        // asset edits whose artifact maps to no node (a shader's `.glsl`) are
-        // added on top so they still count toward Save (see `dirty_summary`).
-        let dirty = self
-            .root_nodes
-            .iter()
-            .map(|node| node.dirty_summary(&edits))
-            .sum::<DirtySummary>()
-            + edits.unmapped_asset_dirty_summary();
         let root_slots = self
             .root_nodes
             .first()
@@ -2486,8 +2653,7 @@ impl ProjectController {
         .with_library_identity(self.active_library_uid().zip(self.active_library_slug()))
         .with_dirty(dirty)
         .with_debug_overrides(edits.debug_override_count())
-        .with_pending_edits(self.pending_edits())
-        .with_header_actions(project_header_actions(&dirty))
+        .with_pending_edits(pending_edits)
         .with_add_node_menu(root_add_node_menu)
         .with_edits_in_flight(self.edits_in_flight())
         .with_patch_surface(surface, self.patch_selection.clone())
@@ -2629,6 +2795,14 @@ impl ProjectController {
     pub fn mark_project_sync_failed(&mut self, message: impl Into<String>) {
         if let Some(sync) = &mut self.sync {
             sync.fail(message.into());
+        }
+    }
+
+    /// Withdraw a sync failure the link caused, not the project (the pull
+    /// in flight when the editor's link went away).
+    pub fn withdraw_project_sync_failure(&mut self) {
+        if let Some(sync) = &mut self.sync {
+            sync.withdraw_failure();
         }
     }
 
@@ -3309,15 +3483,20 @@ impl ProjectController {
     /// checked-out files are already there — and replaces the runtime's
     /// loaded project with that content.
     ///
-    /// No lock is taken (the open already holds it), and no format
-    /// migration runs: a tracking copy must not be diverged from its own
-    /// history by a local rewrite, so content this build cannot load
-    /// surfaces as the open error it is.
+    /// No lock is taken (the open already holds it). The same open
+    /// pre-flight runs here too (`migrate_package_on_open`): a head that
+    /// moved past this build's format must be refused with the classified
+    /// "newer LightPlayer" reason rather than handed to the runtime as a
+    /// parser failure, and a head still behind the current format is
+    /// migrated and saved in place exactly as an open would — a tracking
+    /// copy only diverges from its own history when a LOCAL rewrite does
+    /// that, and the migrator's write is recorded as its own history event
+    /// (the undo path), not a silent local edit.
     pub(crate) async fn reload_active_from_library(
         &mut self,
         server: &mut StudioServerClient,
     ) -> Result<Vec<UiLogDraft>, UiError> {
-        let (uid, slug, package_fs, history_fs, transient) = {
+        let (uid, slug, package_fs, history_fs, transient, now) = {
             let context = self.library.as_ref().ok_or_else(no_library_error)?;
             let active = context.active.as_ref().ok_or_else(|| {
                 UiError::MissingSession("no active library project to reload".to_string())
@@ -3328,11 +3507,17 @@ impl ProjectController {
                 std::rc::Rc::clone(&active.handle.package_fs),
                 std::rc::Rc::clone(&active.handle.history_fs),
                 active.transient.clone(),
+                (context.now_secs)(),
             )
         };
-        let handle = crate::app::library::PackageHandle::load(uid, slug, package_fs, history_fs)
-            .map_err(library_ui_error)?;
+        let mut handle =
+            crate::app::library::PackageHandle::load(uid, slug, package_fs, history_fs)
+                .map_err(library_ui_error)?;
         let title = handle.slug.clone();
+        // Pre-flight (same as `open_opened_package`'s, P3): BEFORE anything
+        // reads the package for the push, so a refused or upgraded head
+        // never reaches `open_library_project`'s hash check.
+        self.migrate_package_on_open(&mut handle, now)?;
         let files = handle.read_all_files().map_err(library_ui_error)?;
         let expected_hash = handle.content_hash().map_err(library_ui_error)?.to_string();
         let loaded = server
@@ -3367,11 +3552,22 @@ impl ProjectController {
     ) -> Result<(), UiError> {
         use crate::app::library::{PackageHealth, classify_package, health_for};
 
-        let class = {
+        // The strict manifest read is the gallery card's "Damaged project
+        // file" check, and the runtime's loader parses `project.json` the
+        // same way (`ProjectManifest::read_json`): a current-format
+        // manifest it refuses must stop here, before the push clears what
+        // the runtime is running. `health_for` ignores the defect for any
+        // other class, so an upgradable manifest still migrates.
+        let (class, manifest_defect) = {
             let package_fs = handle.package_fs.borrow();
-            classify_package(&*package_fs)
+            (
+                classify_package(&*package_fs),
+                crate::app::library::package_manifest::read_manifest(&*package_fs)
+                    .err()
+                    .map(|error| error.to_string()),
+            )
         };
-        match health_for(&class, None) {
+        match health_for(&class, manifest_defect.as_deref()) {
             PackageHealth::Ready => return Ok(()),
             PackageHealth::UpgradesOnOpen { .. } => {}
             PackageHealth::Blocked { headline, remedy } => {
@@ -3824,6 +4020,14 @@ impl ProjectController {
                 self.apply_node_ui_op(op);
                 Ok(UiNotices::new())
             }
+            // The `ask-agent` hand-off: the tree row's focus (the card
+            // reveals itself), then the agent section open with the draft.
+            ProjectEditorOp::AskAgent { node, draft } => {
+                self.focus_editor_target(&target);
+                self.active_editor_target = Some(target);
+                self.apply_node_ui_op(NodeUiOp::OpenAgent { node, draft });
+                Ok(UiNotices::new())
+            }
             // The patch surface's one shared selection — local and
             // synchronous like the card ops.
             ProjectEditorOp::PatchSelect { selection } => {
@@ -3849,6 +4053,12 @@ impl ProjectController {
             .apply(&op);
     }
 
+    /// The card UI view-state saved for the node at `address` (its
+    /// address path), when the card has been touched.
+    pub(super) fn node_card_ui_state(&self, address: &str) -> Option<&NodeCardUiState> {
+        self.node_card_ui.get(address)
+    }
+
     /// Overlay the saved card UI view-state onto a built node DTO and its
     /// nested children (keyed by address: `header.path` for panes,
     /// `detail` for children) — the same pattern as the device roster's
@@ -3861,7 +4071,8 @@ impl ProjectController {
     }
 
     /// Apply the lens device's capability gate to a node view's add-node
-    /// picker. Node views are built inside [`NodeController`], which cannot
+    /// picker, and publish each menu's offers. Node views are built inside
+    /// [`NodeController`], which cannot
     /// see the session; the gate therefore lands here, at the one place
     /// that knows the lens, so a playlist's "+" agrees with the project
     /// pane's.
@@ -3869,11 +4080,12 @@ impl ProjectController {
     /// The walk descends the nested-card tree: after the flat-root reversal
     /// a playlist is always a [`crate::UiNodeChild`] under the root card, so
     /// an un-recursed gate would leave every playlist picker ungated.
-    fn gate_add_node_menus(&self, node: &mut UiNodeView) {
+    fn gate_and_offer_add_node_menus(&self, node: &mut UiNodeView, offers: &mut UiOfferTree) {
         if let Some(menu) = node.add_node_menu.as_mut() {
             gate_add_node_menu(menu, self.lens_device_features.as_deref());
+            publish_add_node_offers(offers, menu);
         }
-        self.gate_child_add_node_menus(&mut node.children);
+        self.gate_and_offer_child_add_node_menus(&mut node.children, offers);
     }
 
     /// Tell every card, nested ones included, whether selecting it is what
@@ -3894,12 +4106,17 @@ impl ProjectController {
         !matches!(self.lens_transport, Some(crate::LinkTransport::Sim))
     }
 
-    fn gate_child_add_node_menus(&self, children: &mut [crate::UiNodeChild]) {
+    fn gate_and_offer_child_add_node_menus(
+        &self,
+        children: &mut [crate::UiNodeChild],
+        offers: &mut UiOfferTree,
+    ) {
         for child in children {
             if let Some(menu) = child.add_node_menu.as_mut() {
                 gate_add_node_menu(menu, self.lens_device_features.as_deref());
+                publish_add_node_offers(offers, menu);
             }
-            self.gate_child_add_node_menus(&mut child.children);
+            self.gate_and_offer_child_add_node_menus(&mut child.children, offers);
         }
     }
 
@@ -5216,78 +5433,12 @@ impl ProjectController {
         card: &crate::UiNodeChild,
         face: &crate::UiPlaylistFace,
     ) -> Option<crate::UiPanelGroup> {
-        use lpc_model::FromLpValue;
+        use super::node::pattern_picker_derivation::derive_pattern_picker;
 
-        use super::node::pattern_picker_derivation::{
-            PatternPickerEntryFacts, PatternPickerFacts, derive_pattern_picker,
-        };
-
-        if face.entries.is_empty() {
-            return None;
-        }
         let address = ProjectNodeAddress::parse(&card.detail).ok()?;
-        let node = self.node(&address)?;
-        let playlist = node.target().node_id;
-        let cycle_target =
-            self.playlist_channel_target(graph, playlist, lpc_model::PLAYLIST_CYCLE_CHANNEL);
-        let skip_target =
-            self.playlist_channel_target(graph, playlist, lpc_model::PLAYLIST_SKIP_CHANNEL);
-
-        // Live before authored, the swatch's rule — but "live" only when a
-        // writer actually holds the channel (or a write is on its way): an
-        // unwritten channel's reading is not a statement about the cycle.
-        let authored_cycle = def_slot_value(node, &["cycle", "some"])
-            .and_then(|value| lpc_model::PlaylistCycle::from_lp_value(value).ok());
-        let cycle = cycle_target
-            .as_ref()
-            .and_then(|target| self.written_channel_value(graph, target))
-            .and_then(|value| lpc_model::PlaylistCycle::from_lp_value(value).ok())
-            .or(authored_cycle)
-            .unwrap_or_default();
-        let skip = skip_target
-            .as_ref()
-            .and_then(|target| self.written_channel_value(graph, target))
-            .and_then(|value| Vec::<u32>::from_lp_value(value).ok())
-            .or_else(|| {
-                def_slot_value(node, &["skip", "some"])
-                    .and_then(|value| Vec::<u32>::from_lp_value(value).ok())
-            })
-            .unwrap_or_default();
-        // The device keeps each entry's failure to itself (plan PD10); its
-        // one outward sign is the playlist's warning, read with the parser
-        // paired to the engine's formatter (director ruling 1).
-        let failed = match (node.status().tone, node.status().detail.as_deref()) {
-            (crate::ProjectNodeStatusTone::Warning, Some(detail)) => {
-                lpc_model::parse_playlist_failed_entries(detail)
-            }
-            _ => Vec::new(),
-        };
-        let default_fade = match def_slot_value(node, &["default_fade"]) {
-            Some(lpc_model::LpValue::F32(seconds)) => Some(*seconds),
-            _ => None,
-        };
-
-        let picker = derive_pattern_picker(PatternPickerFacts {
-            playlist: address,
-            entries: face
-                .entries
-                .iter()
-                .map(|entry| PatternPickerEntryFacts {
-                    key: entry.key,
-                    // The entry's authored `name` is a node name
-                    // (`noise_soft`); it reads the way its card does.
-                    name: super::node::human_node_label(&entry.name),
-                })
-                .collect(),
-            active: face.active,
-            cycle,
-            authored_cycle,
-            default_fade,
-            skip,
-            failed,
-            cycle_target: cycle_target.clone(),
-            skip_target,
-        });
+        let facts = self.pattern_picker_facts(Some(graph), address, face)?;
+        let cycle_target = facts.cycle_target.clone();
+        let picker = derive_pattern_picker(facts);
         let (mut state, mut source) = match cycle_target.as_ref() {
             Some(target) => self.panel_control_state(graph, target.scope, target),
             None => (crate::UiPanelControlState::ReadDefault, None),
@@ -5334,6 +5485,115 @@ impl ProjectController {
                 },
             ]),
         )
+    }
+
+    /// Everything one playlist's Pattern instrument and its live verbs
+    /// derive from ([`super::node::pattern_picker_derivation`],
+    /// [`super::node::playlist_offers`]): the set as its face lists it, the
+    /// playing key, the cycle and skip values (live before authored), the
+    /// failed keys, and the two channels' write targets.
+    ///
+    /// `None` for a playlist with no entries or a node no controller backs.
+    fn pattern_picker_facts(
+        &self,
+        graph: Option<&lpc_wire::WireBindingGraph>,
+        address: ProjectNodeAddress,
+        face: &crate::UiPlaylistFace,
+    ) -> Option<super::node::pattern_picker_derivation::PatternPickerFacts> {
+        use lpc_model::FromLpValue;
+
+        use super::node::pattern_picker_derivation::{PatternPickerEntryFacts, PatternPickerFacts};
+
+        if face.entries.is_empty() {
+            return None;
+        }
+        let node = self.node(&address)?;
+        let playlist = node.target().node_id;
+        // No binding graph yet (an early read): no channel targets, so only
+        // the plays and steps, which need none.
+        let target = |channel: &str| {
+            graph.and_then(|graph| self.playlist_channel_target(graph, playlist, channel))
+        };
+        let cycle_target = target(lpc_model::PLAYLIST_CYCLE_CHANNEL);
+        let skip_target = target(lpc_model::PLAYLIST_SKIP_CHANNEL);
+        let written = |target: &crate::UiPanelTarget| {
+            graph.and_then(|graph| self.written_channel_value(graph, target))
+        };
+
+        // Live before authored, the swatch's rule — but "live" only when a
+        // writer actually holds the channel (or a write is on its way): an
+        // unwritten channel's reading is not a statement about the cycle.
+        let authored_cycle = def_slot_value(node, &["cycle", "some"])
+            .and_then(|value| lpc_model::PlaylistCycle::from_lp_value(value).ok());
+        let cycle = cycle_target
+            .as_ref()
+            .and_then(written)
+            .and_then(|value| lpc_model::PlaylistCycle::from_lp_value(value).ok())
+            .or(authored_cycle)
+            .unwrap_or_default();
+        let skip = skip_target
+            .as_ref()
+            .and_then(written)
+            .and_then(|value| Vec::<u32>::from_lp_value(value).ok())
+            .or_else(|| {
+                def_slot_value(node, &["skip", "some"])
+                    .and_then(|value| Vec::<u32>::from_lp_value(value).ok())
+            })
+            .unwrap_or_default();
+        // The device keeps each entry's failure to itself (plan PD10); its
+        // one outward sign is the playlist's warning, read with the parser
+        // paired to the engine's formatter (director ruling 1).
+        let failed = match (node.status().tone, node.status().detail.as_deref()) {
+            (crate::ProjectNodeStatusTone::Warning, Some(detail)) => {
+                lpc_model::parse_playlist_failed_entries(detail)
+            }
+            _ => Vec::new(),
+        };
+        let default_fade = match def_slot_value(node, &["default_fade"]) {
+            Some(lpc_model::LpValue::F32(seconds)) => Some(*seconds),
+            _ => None,
+        };
+        Some(PatternPickerFacts {
+            playlist: address,
+            entries: face
+                .entries
+                .iter()
+                .map(|entry| PatternPickerEntryFacts {
+                    key: entry.key,
+                    // The entry's authored `name` is a node name
+                    // (`noise_soft`); it reads the way its card does.
+                    name: super::node::human_node_label(&entry.name),
+                })
+                .collect(),
+            active: face.active,
+            cycle,
+            authored_cycle,
+            default_fade,
+            skip,
+            failed,
+            cycle_target,
+            skip_target,
+        })
+    }
+
+    /// Publish every playlist's live verbs (`project/<playlist>/play`, …;
+    /// [`super::node::playlist_offers`]) off the same facts its Pattern
+    /// instrument derives from, once per playlist card with a face.
+    fn publish_playlist_offers(&self, nodes: &[UiNodeView], offers: &mut UiOfferTree) {
+        let graph = self.binding_graph();
+        walk_faces_ref(nodes, &mut |path, face| {
+            let crate::UiNodeFace::Playlist(face) = face else {
+                return;
+            };
+            let Ok(address) = ProjectNodeAddress::parse(path) else {
+                return;
+            };
+            if let Some(facts) = self.pattern_picker_facts(graph, address, face) {
+                for offer in super::node::playlist_offers(&facts) {
+                    offers.publish(offer);
+                }
+            }
+        });
     }
 
     /// The write target of one of a playlist's own consumed channels
@@ -5529,7 +5789,7 @@ impl ProjectController {
         }
     }
 
-    fn body(&self) -> UiViewContent {
+    fn body(&self, offers: &mut UiOfferTree) -> UiViewContent {
         match &self.state {
             ProjectState::NotLoaded
                 if self.running_project_status == RunningProjectStatus::NoneKnown =>
@@ -5556,7 +5816,7 @@ impl ProjectController {
             } => {
                 if self.sync.is_some() {
                     UiViewContent::ProjectEditor(Box::new(
-                        self.editor_view(project_id, *handle_id, inventory),
+                        self.editor_view(project_id, *handle_id, inventory, offers),
                     ))
                 } else {
                     ready_project_metrics(project_id, *handle_id, inventory)
@@ -5628,7 +5888,7 @@ impl ProjectController {
         item
     }
 
-    fn is_focused_node(&self, node: &NodeController) -> bool {
+    pub(super) fn is_focused_node(&self, node: &NodeController) -> bool {
         if node.state().focused {
             return true;
         }
@@ -5747,6 +6007,20 @@ impl ProjectController {
         for child in node.children() {
             self.collect_subscribed_products(child, products);
         }
+    }
+
+    /// Focus the card of the node whose offers live at `prefix`
+    /// (`project/demo.module/fixture.fixture`), the way a tree-row click
+    /// does — the user's Show on an app-chat row. `false` when no node
+    /// lives there.
+    pub(crate) fn focus_node_at_prefix(&mut self, prefix: &crate::OfferPath) -> bool {
+        let Some(node) = self.node_at_prefix(prefix) else {
+            return false;
+        };
+        let target = ProjectEditorTarget::addressed_node(node.target().clone());
+        self.focus_editor_target(&target);
+        self.active_editor_target = Some(target);
+        true
     }
 
     fn focus_editor_target(&mut self, target: &ProjectEditorTarget) {
@@ -7076,6 +7350,7 @@ impl ProjectController {
         server: &mut StudioServerClient,
         source: &crate::ImportSource,
         export: &str,
+        attach: &UiAttachTarget,
     ) -> Result<ProjectEditRun, UiError> {
         use crate::app::project::node::import_pattern::{
             VendoredExport, collect_export_folder, source_manifest, stamp_module_provenance,
@@ -7126,16 +7401,14 @@ impl ProjectController {
             &self.slot_shapes,
         )?;
 
+        // The folder is always vendored under `modules/<key>/`; `attach`
+        // decides only whose slot refs it — the project root's `nodes`, or
+        // a playlist's next free entry.
         let key = self.unique_node_name_from(&key_stem);
-        let (site, parent, expected_name) =
-            match self.resolve_attach_site(&UiAttachTarget::ProjectRoot, &key)? {
-                Some(resolved) => resolved,
-                None => {
-                    return Ok(ProjectEditRun::notice(attach_unavailable_notice(
-                        &UiAttachTarget::ProjectRoot,
-                    )));
-                }
-            };
+        let (site, parent, expected_name) = match self.resolve_attach_site(attach, &key)? {
+            Some(resolved) => resolved,
+            None => return Ok(ProjectEditRun::notice(attach_unavailable_notice(attach))),
+        };
 
         let request = WireCreateNodeRequest::new(
             lpc_model::LpPathBuf::from(VendoredExport::def_path(&key).as_str()),
@@ -7599,9 +7872,9 @@ impl ProjectController {
     }
 
     /// The delete-node header action for `address`: the
-    /// [`crate::NodeRemoveOp`] wearing an [`crate::ActionConfirmation`]
-    /// composed from the removal pre-flight (`HomeOp::DeletePackage`
-    /// pattern). `None` when the node's attachment site cannot be resolved
+    /// [`crate::NodeRemoveOp`] (Undoable: one click, no question) whose
+    /// summary says what the removal does, composed from the removal
+    /// pre-flight. `None` when the node's attachment site cannot be resolved
     /// (no delete affordance is offered).
     pub fn node_remove_action(&self, address: &ProjectNodeAddress) -> Option<UiAction> {
         // The ROOT is never deletable. Since the flat-root reversal it
@@ -7622,7 +7895,8 @@ impl ProjectController {
                     node: address.clone(),
                 },
             )
-            .with_confirmation(preflight.confirmation()),
+            .with_summary(preflight.summary())
+            .with_consequence(preflight.consequence()),
         )
     }
 
@@ -9746,25 +10020,66 @@ fn slot_path_display(address: &ProjectSlotAddress) -> String {
     }
 }
 
-/// Contextual project-header actions (D4/D5): Save and Revert-to-saved as
-/// controller-produced [`UiPaneAction`] data while persisted edits are
-/// pending. Adding nodes does NOT ride the header: the add affordance is the
-/// node tree's "Add node…" row and the workspace's add button, both fed by
+/// Publish the project's own verbs: the header's (D4/D5) `project/save` and
+/// `project/revert` ("Revert to saved"), while persisted edits are pending,
+/// and `project/clear-debug` while a debug override is active.
+/// Adding nodes does NOT ride the header: the add affordance is the node
+/// tree's "Add node…" row and the workspace's add button, both fed by
 /// [`ProjectEditorView::add_node_menu`] (review round, 2026-07-27 — put
-/// buttons where people look for them; the title-bar "+" was dropped).
-fn project_header_actions(dirty: &DirtySummary) -> Vec<UiPaneAction> {
-    let mut actions = Vec::new();
+/// buttons where people look for them; the title-bar "+" was dropped). Its
+/// verbs (`project/add-node` and siblings) are published beside these by
+/// [`publish_add_node_offers`], and a header never draws them
+/// ([`crate::is_header_verb`]).
+fn publish_project_offers(offers: &mut UiOfferTree, dirty: &DirtySummary, debug_overrides: usize) {
     if dirty.persisted > 0 {
-        actions.push(UiPaneAction::new(
+        offers.publish(UiOffer::new(
+            OfferPath::project().child("save"),
             "save",
             project_action(ProjectOp::SaveOverlay),
         ));
-        actions.push(UiPaneAction::new(
+        offers.publish(UiOffer::new(
+            OfferPath::project().child("revert"),
             "revert",
             project_action(ProjectOp::RevertAllEdits).with_label("Revert to saved"),
         ));
     }
-    actions
+    // Debug overrides are not dirty (D7): they never reach Save, and only
+    // this verb (the "Debug active" chip) clears them all. Routine — a
+    // debug override is a live poke the project never saved.
+    if debug_overrides > 0 {
+        offers.publish(UiOffer::new(
+            OfferPath::project().child(crate::CLEAR_DEBUG_VERB),
+            "clear",
+            project_action(ProjectOp::ClearDebugEdits).with_label("Clear all debug overrides"),
+        ));
+    }
+}
+
+/// Publish `project/revert-edit` over the changes list's revertible rows
+/// ([`super::revert_edit_offer`]).
+fn publish_revert_edit_offer(offers: &mut UiOfferTree, rows: &[(UiPendingEdit, Option<UiAction>)]) {
+    let revertible: Vec<(UiPendingEdit, UiAction)> = rows
+        .iter()
+        .filter_map(|(edit, revert)| Some((edit.clone(), revert.clone()?)))
+        .collect();
+    if let Some(offer) = super::revert_edit_offer(&revertible) {
+        offers.publish(offer);
+    }
+}
+
+/// `project/save-copy`: keep the open transient session (a built-in
+/// example, or a project opened only to look at) as a project of your own.
+/// The explicit save IS the fork (`fork_transient_at_save`): it runs even
+/// on a clean overlay, so a pristine example is kept with no edit first.
+/// Routine: nothing is lost, a project is gained.
+fn publish_save_copy_offer(offers: &mut UiOfferTree) {
+    offers.publish(UiOffer::new(
+        OfferPath::project().child(crate::SAVE_COPY_VERB),
+        "save",
+        project_action(ProjectOp::SaveOverlay)
+            .with_label("Save a copy")
+            .with_summary("Keep this project as your own, in your library."),
+    ));
 }
 
 /// An action dispatched to the project controller itself.
@@ -10876,6 +11191,109 @@ mod tests {
         assert_eq!(issue.detail, None);
     }
 
+    /// A current-format `project.json` the strict reader refuses: the
+    /// gallery card already calls it "Damaged project file" and offers no
+    /// Open, but an address (`/p/<slug>-<uid>`) still reaches the open. The
+    /// pre-flight must give the card's verdict BEFORE the push — not clear
+    /// the runtime's running project and come back with the loader's
+    /// parser complaint.
+    #[test]
+    fn a_damaged_current_format_manifest_is_refused_before_anything_is_sent() {
+        use crate::app::studio::studio_edit_e2e_tests::{
+            InProcessServerIo, device_e2e_server, drive, edit_e2e_files,
+        };
+        use lpc_model::AsLpPath;
+
+        // The runtime is running a project in the storage dir the open
+        // replaces.
+        let runtime_dir = format!(
+            "/projects/{}",
+            crate::app::project::demo_project::DEMO_PROJECT_STORAGE_ID
+        );
+        let mut server = device_e2e_server();
+        for (name, body) in edit_e2e_files() {
+            server
+                .base_fs_mut()
+                .write_file(
+                    format!("{runtime_dir}/{name}").as_str().as_path(),
+                    body.as_bytes(),
+                )
+                .unwrap();
+        }
+        server
+            .load_project(runtime_dir.as_str().as_path())
+            .expect("the runtime's own project loads");
+        let server = Rc::new(RefCell::new(server));
+        let sent = Rc::new(RefCell::new(Vec::new()));
+        let mut client = StudioServerClient::from_io_for_test(
+            "in-process",
+            Box::new(InProcessServerIo {
+                server: Rc::clone(&server),
+                inbox: Rc::new(RefCell::new(std::collections::VecDeque::new())),
+                sent: Rc::clone(&sent),
+            }),
+        );
+
+        // A healthy library package, damaged after install the way a hand
+        // edit or a newer writer would: still format 11, one key too many.
+        let files: Vec<(&str, &[u8])> = edit_e2e_files()
+            .iter()
+            .map(|(name, body)| (*name, body.as_bytes()))
+            .collect();
+        let (store, summary) = package_for_open(&files);
+        let damaged = format!(
+            r#"{{"format":{},"uid":"{}","surprise":true}}"#,
+            lpc_model::PROJECT_FORMAT_VERSION,
+            summary.uid
+        );
+        store
+            .open(summary.uid)
+            .unwrap()
+            .package_fs
+            .borrow()
+            .write_file("/project.json".as_path(), damaged.as_bytes())
+            .unwrap();
+        let card = store
+            .list()
+            .unwrap()
+            .into_iter()
+            .find(|card| card.uid == summary.uid)
+            .expect("the card stays on screen");
+        assert_eq!(
+            card.health.blocked().map(|(headline, _)| headline),
+            Some("Damaged project file"),
+            "the gallery's verdict"
+        );
+
+        let (mut project, _host) = ready_with_library(&store);
+        let error = drive(project.open_library_package(&mut client, &summary.uid.to_string()))
+            .expect_err("a manifest the loader refuses does not open");
+        project.fail(error.to_string());
+
+        let ProjectState::Failed { issue } = &project.state else {
+            panic!("expected the failed state, got {:?}", project.state);
+        };
+        assert!(
+            issue.message.contains("Damaged project file"),
+            "the card's words, not a parser string: {}",
+            issue.message
+        );
+        assert!(
+            sent.borrow().is_empty(),
+            "nothing reached the runtime: {:?}",
+            sent.borrow()
+        );
+        assert_eq!(
+            server
+                .borrow()
+                .project_manager()
+                .list_loaded_projects()
+                .len(),
+            1,
+            "the runtime's running project was not cleared"
+        );
+    }
+
     /// GV fix 4: the project title (pane AND root card) comes from the
     /// container manifest, not from the runtime tree's root label.
     ///
@@ -11409,7 +11827,7 @@ mod tests {
         project.mark_ready("studio-demo", 7, inventory.clone());
         project.apply_project_view(&tree_view()).unwrap();
 
-        let view = project.editor_view("studio-demo", 7, &inventory);
+        let view = project.editor_view("studio-demo", 7, &inventory, &mut UiOfferTree::new());
 
         assert_eq!(view.project_id, "studio-demo");
         // The pane title carries the project name (the root node's label),
@@ -11447,7 +11865,7 @@ mod tests {
         let inventory = ProjectInventorySummary::default();
         project.mark_ready("studio-demo", 7, inventory.clone());
 
-        let view = project.editor_view("studio-demo", 7, &inventory);
+        let view = project.editor_view("studio-demo", 7, &inventory, &mut UiOfferTree::new());
 
         assert_eq!(view.project_name, "studio-demo");
     }
@@ -11495,7 +11913,7 @@ mod tests {
             },
         );
 
-        let view = project.editor_view("studio-demo", 7, &inventory);
+        let view = project.editor_view("studio-demo", 7, &inventory, &mut UiOfferTree::new());
         let cards = root_children(&view);
         assert_eq!(
             cards[1].card_ui,
@@ -11539,7 +11957,7 @@ mod tests {
                 collapsed: true,
             },
         );
-        let collapsed = project.editor_view("studio-demo", 7, &inventory);
+        let collapsed = project.editor_view("studio-demo", 7, &inventory, &mut UiOfferTree::new());
         assert!(root_children(&collapsed)[1].card_ui.agent_collapsed);
         assert_eq!(
             root_children(&collapsed)[1].card_ui.composer_draft,
@@ -11553,7 +11971,7 @@ mod tests {
                 collapsed: false,
             },
         );
-        let expanded = project.editor_view("studio-demo", 7, &inventory);
+        let expanded = project.editor_view("studio-demo", 7, &inventory, &mut UiOfferTree::new());
         assert!(!root_children(&expanded)[1].card_ui.agent_collapsed);
         assert_eq!(
             root_children(&expanded)[1].card_ui.composer_draft,
@@ -11580,7 +11998,7 @@ mod tests {
         project.mark_ready("studio-demo", 8, inventory.clone());
         project.apply_project_view(&tree_view()).unwrap();
 
-        let view = project.editor_view("studio-demo", 8, &inventory);
+        let view = project.editor_view("studio-demo", 8, &inventory, &mut UiOfferTree::new());
         assert_eq!(
             root_children(&view)[1].card_ui,
             NodeCardUiState::default(),
@@ -12786,7 +13204,12 @@ mod tests {
             .unwrap()
             .set_binding_graph_for_test(control_out_graph(scope, None));
 
-        let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+        let editor = project.editor_view(
+            "loaded-project",
+            7,
+            &ProjectInventorySummary::default(),
+            &mut UiOfferTree::new(),
+        );
         let Some(crate::UiNodeFace::Module(face)) = editor.nodes[0].face.clone() else {
             panic!("the root module card wears a module face");
         };
@@ -12825,7 +13248,12 @@ mod tests {
             .unwrap()
             .set_binding_graph_for_test(control_out_graph(scope, Some(visual)));
 
-        let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+        let editor = project.editor_view(
+            "loaded-project",
+            7,
+            &ProjectInventorySummary::default(),
+            &mut UiOfferTree::new(),
+        );
         let Some(crate::UiNodeFace::Module(face)) = editor.nodes[0].face.clone() else {
             panic!("the root module card wears a module face");
         };
@@ -12873,7 +13301,12 @@ mod tests {
             .unwrap()
             .set_binding_graph_for_test((graph, values));
 
-        let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+        let editor = project.editor_view(
+            "loaded-project",
+            7,
+            &ProjectInventorySummary::default(),
+            &mut UiOfferTree::new(),
+        );
         let Some(crate::UiNodeFace::Module(face)) = editor.nodes[0].face.clone() else {
             panic!("the root module card wears a module face");
         };
@@ -12977,8 +13410,12 @@ mod tests {
             .unwrap();
 
         let child_hero = |project: &ProjectController| {
-            let editor =
-                project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+            let editor = project.editor_view(
+                "loaded-project",
+                7,
+                &ProjectInventorySummary::default(),
+                &mut UiOfferTree::new(),
+            );
             let child = editor.nodes[0].children[0].clone();
             let Some(crate::UiNodeFace::Module(face)) = child.face else {
                 panic!("the inner module card wears a module face");
@@ -14492,8 +14929,12 @@ mod tests {
         clear_node_focus(&mut project.root_nodes);
 
         let visual = |project: &ProjectController| {
-            let editor =
-                project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+            let editor = project.editor_view(
+                "loaded-project",
+                7,
+                &ProjectInventorySummary::default(),
+                &mut UiOfferTree::new(),
+            );
             let card = editor.nodes[0].clone();
             let product = section_products(node_sections(&card))
                 .iter()
@@ -14519,7 +14960,12 @@ mod tests {
         assert_eq!(product.tracking, UiProductTrackingState::Tracking);
         assert_eq!(product.show_live, None, "already live: nothing to offer");
 
-        let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+        let editor = project.editor_view(
+            "loaded-project",
+            7,
+            &ProjectInventorySummary::default(),
+            &mut UiOfferTree::new(),
+        );
         assert!(
             editor.tree.roots[0].streaming_live,
             "the sidebar row agrees with the card"
@@ -14529,7 +14975,12 @@ mod tests {
         let (card, _) = visual(&project);
         assert!(!card.selection_streams);
         assert!(!card.streaming_live, "sim streams everything; no Live chip");
-        let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+        let editor = project.editor_view(
+            "loaded-project",
+            7,
+            &ProjectInventorySummary::default(),
+            &mut UiOfferTree::new(),
+        );
         assert!(!editor.tree.roots[0].streaming_live);
     }
 
@@ -15986,7 +16437,19 @@ mod tests {
             .expect("NodeRemoved row listed");
         assert_eq!(removed.node_label, "Clock");
         assert_eq!(removed.slot_path_display, "nodes[clock]");
-        assert!(removed.revert.is_some(), "the row offers a revert");
+        let mut offers = UiOfferTree::new();
+        let _ = project.editor_view(
+            "loaded-project",
+            7,
+            &ProjectInventorySummary::default(),
+            &mut offers,
+        );
+        assert!(
+            revert_edit_press(&offers, removed)
+                .op_as::<crate::SlotEditOp>()
+                .is_some(),
+            "the row offers a revert"
+        );
         assert!(
             edits.iter().any(|edit| {
                 matches!(&edit.kind, crate::UiPendingEditKind::AssetBody { detail } if detail == "deleted")
@@ -16138,13 +16601,26 @@ mod tests {
     }
 
     #[test]
-    fn header_actions_offer_add_always_and_delete_on_removable_nodes() {
+    fn header_offers_add_always_and_delete_on_removable_nodes() {
         let (project, _client, _sent) = authoring_project_with_scripted_client(Vec::new());
 
-        let view = project.editor_view("demo", 7, &ProjectInventorySummary::default());
-        // Clean project: no header actions — adding rides the tree row and
-        // the workspace button, both fed by the picker data on the view.
-        assert!(view.header_actions.is_empty());
+        let mut offers = UiOfferTree::new();
+        let view = project.editor_view("demo", 7, &ProjectInventorySummary::default(), &mut offers);
+        // Clean project: no project-header verbs — adding rides the tree row
+        // and the workspace button, both fed by the picker data on the view.
+        assert_eq!(header_verbs(&offers, &OfferPath::project()).count(), 0);
+        // …though its picker's verbs are in the tree, at `project/…`, for
+        // the picker and the agent to press.
+        for verb in ["add-node", "import-pattern", "paste-node"] {
+            assert!(
+                offers.get(&OfferPath::project().child(verb)).is_some(),
+                "project/{verb}"
+            );
+        }
+        assert!(
+            offers.get(&offer_path("project/clear-debug")).is_none(),
+            "no debug override, no clear"
+        );
         let menu = view
             .add_node_menu
             .as_ref()
@@ -16155,19 +16631,30 @@ mod tests {
             "every instantiable kind, Module included"
         );
 
-        // Root children carry the ungated delete action with confirmation.
-        let clock = root_children(&view)
-            .iter()
-            .find(|child| child.detail == "/demo.module/clock.clock")
-            .expect("clock card");
-        let delete = clock
-            .header_actions
-            .iter()
-            .find(|action| action.icon == "remove")
-            .expect("delete action present on a clean node");
+        // Root children carry the ungated, undoable delete action, its
+        // summary composed from the pre-flight.
         assert!(
-            delete.action.meta().confirmation.is_some(),
-            "delete carries composed confirmation copy"
+            root_children(&view)
+                .iter()
+                .any(|child| child.detail == "/demo.module/clock.clock"),
+            "clock card"
+        );
+        let delete = offers
+            .get(&offer_path("project/demo.module/clock.clock/remove"))
+            .expect("delete offer present on a clean node");
+        assert_eq!(delete.icon, "remove");
+        assert_eq!(
+            delete.action.meta().consequence,
+            crate::ActionConsequence::Undoable,
+            "delete is undoable: one click, no question"
+        );
+        assert!(
+            delete
+                .action
+                .meta()
+                .summary
+                .contains("revert from the save panel"),
+            "delete carries the composed pre-flight as its summary"
         );
         assert!(
             delete.action.op_as::<crate::NodeRemoveOp>().is_some(),
@@ -16178,12 +16665,105 @@ mod tests {
         // card is not an affordance, and the root has no attachment site to
         // be removed from.
         assert!(
-            !view.nodes[0]
-                .header_actions
-                .iter()
-                .any(|action| action.icon == "remove"),
+            offers
+                .get(&offer_path("project/demo.module/remove"))
+                .is_none(),
             "the restored root card offers no Delete"
         );
+    }
+
+    #[test]
+    fn every_node_at_any_depth_publishes_its_verbs_by_tree_path() {
+        let (mut project, _client, _sent) = authoring_project_with_scripted_client(Vec::new());
+        let paths = |project: &ProjectController| {
+            let mut offers = UiOfferTree::new();
+            project.editor_view("demo", 7, &ProjectInventorySummary::default(), &mut offers);
+            offers
+                .iter()
+                .map(|offer| offer.path.to_string())
+                .collect::<Vec<_>>()
+        };
+
+        // Clean: no revert anywhere, Remove on every removable card below
+        // the root (the playlist's entry has no resolvable site in this
+        // fixture, so it offers none), Copy on every card, and each
+        // picker's verbs — the root's beside the project's own, ahead of
+        // the cards; a playlist's after them, once its menu is gated (it
+        // imports nothing, so it has no import-pattern).
+        assert_eq!(
+            paths(&project),
+            [
+                "project/add-node",
+                "project/import-pattern",
+                "project/paste-node",
+                "project/demo.module/copy",
+                "project/demo.module/group.playlist/remove",
+                "project/demo.module/group.playlist/copy",
+                "project/demo.module/group.playlist/leaf.shader/copy",
+                "project/demo.module/clock.clock/remove",
+                "project/demo.module/clock.clock/copy",
+                "project/demo.module/group.playlist/add-node",
+                "project/demo.module/group.playlist/paste-node",
+            ]
+        );
+
+        // A pending edit on the nested clock and one on the playlist's
+        // entry, two levels down: each dirty subtree offers its revert, the
+        // project header offers Save and Revert first, and the order is the
+        // tree's (a node's own verbs before its children's). The changes
+        // list's per-row revert follows the header's (M6e).
+        for node in [
+            "/demo.module/clock.clock",
+            "/demo.module/group.playlist/leaf.shader",
+        ] {
+            project.insert_pending_edit_for_test(
+                crate::ProjectSlotAddress::new(
+                    node_address(node),
+                    ProjectSlotRoot::def(),
+                    SlotPath::parse("rate").unwrap(),
+                ),
+                PendingEdit::pending(LpValue::F32(2.0)),
+            );
+        }
+        assert_eq!(
+            paths(&project),
+            [
+                "project/save",
+                "project/revert",
+                "project/revert-edit",
+                "project/add-node",
+                "project/import-pattern",
+                "project/paste-node",
+                "project/demo.module/revert",
+                "project/demo.module/copy",
+                "project/demo.module/group.playlist/revert",
+                "project/demo.module/group.playlist/remove",
+                "project/demo.module/group.playlist/copy",
+                "project/demo.module/group.playlist/leaf.shader/revert",
+                "project/demo.module/group.playlist/leaf.shader/copy",
+                "project/demo.module/clock.clock/revert",
+                "project/demo.module/clock.clock/remove",
+                "project/demo.module/clock.clock/copy",
+                "project/demo.module/group.playlist/add-node",
+                "project/demo.module/group.playlist/paste-node",
+            ]
+        );
+    }
+
+    fn offer_path(text: &str) -> OfferPath {
+        OfferPath::parse(text).expect("offer path")
+    }
+
+    /// The verbs a header at `prefix` draws as its own buttons: the tree's
+    /// verbs there, less those another control presses
+    /// ([`crate::is_header_verb`]).
+    fn header_verbs<'a>(
+        offers: &'a UiOfferTree,
+        prefix: &OfferPath,
+    ) -> impl Iterator<Item = &'a UiOffer> + 'a {
+        offers
+            .verbs_of(prefix)
+            .filter(|offer| offer.path.last().is_some_and(crate::is_header_verb))
     }
 
     fn config_slot<'a>(nodes: &'a [crate::UiNodeView], label: &str) -> &'a crate::UiConfigSlot {
@@ -16913,11 +17493,23 @@ mod tests {
     }
 
     #[test]
-    fn dirty_node_header_offers_the_batch_revert_pane_action() {
+    fn dirty_node_header_offers_the_batch_revert() {
         let (mut project, _client, _sent) = structural_project_with_scripted_client(Vec::new());
-        assert!(
-            project.ui_nodes()[0].header_actions.is_empty(),
-            "a clean node header offers no actions"
+        let node = OfferPath::project_node(&node_address("/demo.module/orbit.shader"));
+        let offers = |project: &ProjectController| {
+            let mut offers = UiOfferTree::new();
+            project.editor_view(
+                "loaded-project",
+                7,
+                &ProjectInventorySummary::default(),
+                &mut offers,
+            );
+            offers
+        };
+        assert_eq!(
+            header_verbs(&offers(&project), &node).count(),
+            0,
+            "a clean node header offers no verbs"
         );
 
         project.sync_mut().unwrap().apply_acked_edits(
@@ -16934,9 +17526,13 @@ mod tests {
             Revision::new(3),
         );
 
-        let nodes = project.ui_nodes();
-        let actions = &nodes[0].header_actions;
+        let offers = offers(&project);
+        let actions = header_verbs(&offers, &node).collect::<Vec<_>>();
         assert_eq!(actions.len(), 1);
+        assert_eq!(
+            actions[0].path.to_string(),
+            "project/demo.module/orbit.shader/revert"
+        );
         assert_eq!(
             actions[0].icon, "revert",
             "same icon token as the project header"
@@ -17399,7 +17995,12 @@ mod tests {
             expected,
             "the rowless removal counts exactly once"
         );
-        let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+        let editor = project.editor_view(
+            "loaded-project",
+            7,
+            &ProjectInventorySummary::default(),
+            &mut UiOfferTree::new(),
+        );
         assert_eq!(
             editor.dirty, expected,
             "root-own edits count without a child card"
@@ -17550,6 +18151,17 @@ mod tests {
 
     // --- Save-panel change list (P5) -----------------------------------------
 
+    /// The action a row's revert dispatches: `project/revert-edit` pressed
+    /// with the row's key, the way the row's button presses it.
+    fn revert_edit_press(offers: &UiOfferTree, edit: &crate::UiPendingEdit) -> UiAction {
+        let key = edit.key.clone().expect("the row has a key to revert by");
+        offers
+            .get(&OfferPath::project().child(crate::REVERT_EDIT_VERB))
+            .expect("`project/revert-edit` is offered while an edit is pending")
+            .press(&crate::OfferArgs::new().with(crate::REVERT_EDIT_PARAM, key))
+            .expect("the row's key is one of the choice's options")
+    }
+
     fn pending_edits_by_phase(edits: &[crate::UiPendingEdit]) -> DirtySummary {
         edits
             .iter()
@@ -17619,7 +18231,13 @@ mod tests {
             },
         );
 
-        let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+        let mut offers = UiOfferTree::new();
+        let editor = project.editor_view(
+            "loaded-project",
+            7,
+            &ProjectInventorySummary::default(),
+            &mut offers,
+        );
 
         assert_eq!(
             editor.dirty,
@@ -17660,17 +18278,21 @@ mod tests {
             }
         );
         // Every entry is node-labeled, carries the node's stable address
-        // string (the node detail popup filters on it), and carries a revert
-        // at its address.
+        // string (the node detail popup filters on it), and is revertible
+        // at its address through `project/revert-edit`.
         let node_path = structural_address("entries[a]").node.to_string();
         for edit in &editor.pending_edits {
             assert_eq!(edit.node_label, "Orbit");
             assert_eq!(edit.node_path, node_path);
-            let revert = edit.revert.as_ref().expect("mapped entries carry revert");
+            let revert = revert_edit_press(&offers, edit);
             assert!(revert.is_for_node(ProjectController::NODE_ID));
+            assert!(
+                revert.meta().consequence == crate::ActionConsequence::Undoable,
+                "one edit's revert is Undoable, like a node's"
+            );
         }
         assert_eq!(
-            editor.pending_edits[0].revert.as_ref().unwrap().op_as(),
+            revert_edit_press(&offers, &editor.pending_edits[0]).op_as(),
             Some(&crate::SlotEditOp::Revert {
                 address: structural_address("entries[a]")
             })
@@ -17715,7 +18337,12 @@ mod tests {
             Revision::new(3),
         );
 
-        let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+        let editor = project.editor_view(
+            "loaded-project",
+            7,
+            &ProjectInventorySummary::default(),
+            &mut UiOfferTree::new(),
+        );
 
         assert_eq!(
             editor.dirty,
@@ -17768,7 +18395,12 @@ mod tests {
             Revision::new(3),
         );
 
-        let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+        let editor = project.editor_view(
+            "loaded-project",
+            7,
+            &ProjectInventorySummary::default(),
+            &mut UiOfferTree::new(),
+        );
 
         assert!(
             editor.dirty.is_clean(),
@@ -17786,7 +18418,7 @@ mod tests {
             }
         );
         assert_eq!(stale.phase, crate::UiPendingEditPhase::Persisted);
-        assert!(stale.revert.is_none());
+        assert!(stale.key.is_none(), "nothing to revert a stale entry by");
     }
 
     /// S4: the stale-entry path classifies by role like every other entry.
@@ -17836,7 +18468,12 @@ mod tests {
         install_mixed_policy_slots(&mut unmounted, 1, Revision::new(2));
         project.apply_project_view(&unmounted).unwrap();
 
-        let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+        let editor = project.editor_view(
+            "loaded-project",
+            7,
+            &ProjectInventorySummary::default(),
+            &mut UiOfferTree::new(),
+        );
         let listed: Vec<&str> = editor
             .pending_edits
             .iter()
@@ -17880,7 +18517,12 @@ mod tests {
             Revision::new(3),
         );
 
-        let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+        let editor = project.editor_view(
+            "loaded-project",
+            7,
+            &ProjectInventorySummary::default(),
+            &mut UiOfferTree::new(),
+        );
         assert_eq!(editor.pending_edits.len(), 1);
         assert_eq!(
             editor.pending_edits[0].phase,
@@ -18134,10 +18776,16 @@ mod tests {
             failed: 0,
         };
         assert_eq!(project.dirty_summary(), expected);
-        let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+        let mut offers = UiOfferTree::new();
+        let editor = project.editor_view(
+            "loaded-project",
+            7,
+            &ProjectInventorySummary::default(),
+            &mut offers,
+        );
         assert_eq!(editor.dirty, expected);
         assert_eq!(
-            editor.header_actions.len(),
+            header_verbs(&offers, &OfferPath::project()).count(),
             2,
             "a pending asset body enables Save/Revert"
         );
@@ -18156,7 +18804,12 @@ mod tests {
             failed: 0,
         };
         assert_eq!(project.dirty_summary(), expected);
-        let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+        let editor = project.editor_view(
+            "loaded-project",
+            7,
+            &ProjectInventorySummary::default(),
+            &mut UiOfferTree::new(),
+        );
         // The fixture's single node is the project root (flat-root hoists it
         // out of `nodes`/`tree` into `root_slots`), so its dirty surfaces
         // through the project total and the pending-edit row rather than a
@@ -18302,7 +18955,13 @@ mod tests {
         let (mut project, _client, _sent) = editable_project_with_scripted_client(Vec::new());
         seed_acked_asset_body(&mut project, glsl_artifact(), &vec![b'x'; 3277]);
 
-        let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+        let mut offers = UiOfferTree::new();
+        let editor = project.editor_view(
+            "loaded-project",
+            7,
+            &ProjectInventorySummary::default(),
+            &mut offers,
+        );
 
         assert_eq!(editor.pending_edits.len(), 1);
         let row = &editor.pending_edits[0];
@@ -18318,7 +18977,7 @@ mod tests {
             }
         );
         assert_eq!(row.phase, UiPendingEditPhase::Persisted);
-        let revert = row.revert.as_ref().expect("asset rows carry revert");
+        let revert = revert_edit_press(&offers, row);
         assert!(revert.is_for_node(ProjectController::NODE_ID));
         assert_eq!(
             revert.op_as::<crate::AssetEditOp>(),
@@ -18655,7 +19314,12 @@ mod tests {
             "sibling branch stays clean"
         );
 
-        let editor = project.editor_view("demo", 1, &ProjectInventorySummary::default());
+        let editor = project.editor_view(
+            "demo",
+            1,
+            &ProjectInventorySummary::default(),
+            &mut UiOfferTree::new(),
+        );
         // The root is the tree's one top row again, so the bubbling chain
         // is one level longer: root → group → leaf.
         let root = &editor.tree.roots[0];
@@ -18697,7 +19361,13 @@ mod tests {
         };
         assert_eq!(project.dirty_summary(), expected);
 
-        let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+        let mut offers = UiOfferTree::new();
+        let editor = project.editor_view(
+            "loaded-project",
+            7,
+            &ProjectInventorySummary::default(),
+            &mut offers,
+        );
         assert_eq!(editor.dirty, expected);
         assert!(!editor.dirty.is_clean(), "failed edits need attention");
         // The childless root is the one workspace card; its failed row
@@ -18714,10 +19384,8 @@ mod tests {
         assert_eq!(editor.tree.roots.len(), 1);
         assert_eq!(editor.tree.roots[0].dirty, expected);
         assert_eq!(
-            editor
-                .header_actions
-                .iter()
-                .map(|action| action.icon.as_str())
+            header_verbs(&offers, &OfferPath::project())
+                .map(|offer| offer.icon.as_str())
                 .collect::<Vec<_>>(),
             Vec::<&str>::new(),
             "failed edits alone do not surface Save/Revert"
@@ -18725,11 +19393,17 @@ mod tests {
     }
 
     #[test]
-    fn clean_tree_yields_clean_summaries_and_no_header_actions() {
+    fn clean_tree_yields_clean_summaries_and_no_header_offers() {
         let (project, _client, _sent) = editable_project_with_scripted_client(Vec::new());
 
         assert!(project.dirty_summary().is_clean());
-        let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+        let mut offers = UiOfferTree::new();
+        let editor = project.editor_view(
+            "loaded-project",
+            7,
+            &ProjectInventorySummary::default(),
+            &mut offers,
+        );
         assert!(editor.dirty.is_clean());
         // The childless root is the one workspace card; its rows ride
         // `root_slots` (clean here).
@@ -18745,22 +19419,31 @@ mod tests {
         // A childless root is still exactly one tree row.
         assert_eq!(editor.tree.roots.len(), 1);
         assert!(editor.tree.roots[0].children.is_empty());
-        // No header actions on a clean project (adding rides the node list).
-        assert!(editor.header_actions.is_empty());
+        // No project-header verbs on a clean project (adding rides the node
+        // list).
+        assert_eq!(header_verbs(&offers, &OfferPath::project()).count(), 0);
     }
 
     #[test]
-    fn header_actions_present_iff_persisted_dirty() {
+    fn header_offers_present_iff_persisted_dirty() {
         let (mut project, _client, _sent) = editable_project_with_scripted_client(Vec::new());
         project.insert_pending_edit_for_test(
             brightness_address(),
             PendingEdit::pending(LpValue::F32(0.9)),
         );
 
-        let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+        let mut offers = UiOfferTree::new();
+        project.editor_view(
+            "loaded-project",
+            7,
+            &ProjectInventorySummary::default(),
+            &mut offers,
+        );
 
-        assert_eq!(editor.header_actions.len(), 2, "save + revert");
-        let save = &editor.header_actions[0];
+        let header = header_verbs(&offers, &OfferPath::project()).collect::<Vec<_>>();
+        assert_eq!(header.len(), 2, "save + revert");
+        let save = header[0];
+        assert_eq!(save.path.to_string(), "project/save");
         assert_eq!(save.icon, "save");
         assert_eq!(save.label(), "Save");
         assert!(save.is_primary());
@@ -18770,7 +19453,8 @@ mod tests {
             Some(&ProjectOp::SaveOverlay)
         );
         assert!(save.action.is_for_node(ProjectController::NODE_ID));
-        let revert = &editor.header_actions[1];
+        let revert = header[1];
+        assert_eq!(revert.path.to_string(), "project/revert");
         assert_eq!(revert.icon, "revert");
         assert_eq!(revert.label(), "Revert to saved");
         assert!(!revert.is_primary());
@@ -18779,15 +19463,19 @@ mod tests {
             Some(&ProjectOp::RevertAllEdits)
         );
         assert!(revert.action.is_for_node(ProjectController::NODE_ID));
+        assert!(
+            revert.consequence().arms(),
+            "Revert to saved is Lasting: it arms before it acts"
+        );
         assert_eq!(
-            editor.header_actions.len(),
+            header.len(),
             2,
             "no standing add action rides the header (adding lives in the tree/workspace)"
         );
     }
 
     #[test]
-    fn debug_only_dirty_is_clean_and_shows_no_header_actions() {
+    fn debug_only_dirty_is_clean_and_shows_no_header_offers() {
         let (mut project, _client, _sent) = editable_project_with_scripted_client(Vec::new());
         // An ACKED debug override (nothing in flight, so the only thing that
         // could announce is the dirty projection).
@@ -18808,7 +19496,13 @@ mod tests {
             Revision::new(3),
         );
 
-        let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+        let mut offers = UiOfferTree::new();
+        let editor = project.editor_view(
+            "loaded-project",
+            7,
+            &ProjectInventorySummary::default(),
+            &mut offers,
+        );
 
         // D7: the summary never learns about the debug override, so the
         // project header stays untinted and offers no Save/Revert.
@@ -18820,13 +19514,20 @@ mod tests {
             "a debug-only project does not tint its header"
         );
         assert_eq!(
-            editor
-                .header_actions
-                .iter()
-                .map(|action| action.icon.as_str())
+            header_verbs(&offers, &OfferPath::project())
+                .map(|offer| offer.icon.as_str())
                 .collect::<Vec<_>>(),
             Vec::<&str>::new(),
             "debug overrides do not surface Save/Revert"
+        );
+        // …but the "Debug active" chip's verb is on offer, Routine.
+        let clear = offers
+            .get(&offer_path("project/clear-debug"))
+            .expect("clear-debug while an override is active");
+        assert!(clear.consequence().is_routine());
+        assert_eq!(
+            clear.action.op_as::<ProjectOp>(),
+            Some(&ProjectOp::ClearDebugEdits)
         );
     }
 
@@ -18845,7 +19546,12 @@ mod tests {
         project
             .insert_pending_edit_for_test(rate_address(), PendingEdit::pending(LpValue::F32(2.0)));
 
-        let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+        let editor = project.editor_view(
+            "loaded-project",
+            7,
+            &ProjectInventorySummary::default(),
+            &mut UiOfferTree::new(),
+        );
 
         // Only the persisted brightness edit counts; the debug rate override
         // is absent from every aggregation (D7).

@@ -578,15 +578,20 @@ pub fn format_mac(mac: &[u8; 6]) -> String {
         .join(":")
 }
 
-/// The desk board's MAC with `index` added to the last octet.
+/// A locally administered MAC for board `index`: `02:4c:50:00:<index>`.
 ///
 /// The default identity for board `n` of an unconfigured serve, so that two
-/// boards are two boards even when nobody spelled a MAC. `mac=` on a
-/// `--board` overrides it.
+/// boards are two boards even when nobody spelled a MAC. It is never the desk
+/// board's real MAC: Studio keys a board by its MAC (`devices/mac-…`), and an
+/// emulated board wearing the desk C6's identity would be the same entry as
+/// the real one in a browser that has seen both (Yona, M3 gate, 2026-10-02).
+/// The `02` first octet is the IEEE locally-administered bit, which vendor
+/// hardware never sets, so no real board can collide. `mac=` on a `--board`
+/// overrides it (e.g. `mac=a0:f2:62:87:b4:8c` to stand in for the desk board).
 pub fn default_mac(index: usize) -> [u8; 6] {
-    let mut mac = EfuseIdentity::default().mac;
-    mac[5] = mac[5].wrapping_add(u8::try_from(index % 256).expect("modulo 256"));
-    mac
+    let index = u16::try_from(index % 0x1_0000).expect("modulo 2^16");
+    let [hi, lo] = index.to_be_bytes();
+    [0x02, 0x4c, 0x50, 0x00, hi, lo]
 }
 
 #[cfg(test)]
@@ -597,9 +602,15 @@ mod tests {
     fn every_board_gets_its_own_identity() {
         let a = default_mac(0);
         let b = default_mac(1);
-        assert_eq!(a, EfuseIdentity::default().mac, "board 0 is the desk board");
         assert_ne!(a, b, "two boards are two identities");
-        assert_eq!(a[..5], b[..5], "only the last octet moves");
+        assert_ne!(
+            a,
+            EfuseIdentity::default().mac,
+            "never the desk board's MAC"
+        );
+        for mac in [a, b] {
+            assert_eq!(mac[0] & 0x03, 0x02, "locally administered unicast");
+        }
     }
 
     #[test]

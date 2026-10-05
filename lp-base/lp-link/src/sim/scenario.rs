@@ -12,7 +12,7 @@ use crate::sim::pipe::{Faults, Pipe, PipeModel, PipeStats};
 use crate::sim::sim_rng::SimRng;
 use crate::sim::transport::Transport;
 use crate::sim::workload::{Send, Workload, WorkloadState};
-use crate::{Arq, Link, LinkConfig, LinkCounters, LinkState, Micros};
+use crate::{Arq, LinkConfig, LinkCounters, LinkState, Micros};
 
 /// A run that takes more steps than this is livelocked.
 const MAX_STEPS: u64 = 50_000_000;
@@ -33,6 +33,9 @@ pub struct Scenario {
     /// Both pipes lose everything in `[start, end)`: a cable pulled.
     pub outage: Option<(Micros, Micros)>,
     pub seed: u64,
+    /// Both links secure: the host the initiator, the board the responder.
+    #[cfg(feature = "secure")]
+    pub secure: Option<crate::sim::secure_sim::SecureSim>,
 }
 
 impl Scenario {
@@ -57,6 +60,8 @@ impl Scenario {
             board_reboots: Vec::new(),
             outage: None,
             seed,
+            #[cfg(feature = "secure")]
+            secure: None,
         }
     }
 
@@ -133,8 +138,34 @@ impl Report {
 /// Run `sc` with reliability variant `A`.
 pub fn run<A: Arq>(sc: &Scenario) -> Report {
     let mut rng = SimRng::new(sc.seed);
-    let mut host = Endpoint::<A>::new(sc.host_cfg.clone(), rng.u32());
-    let mut board = Endpoint::<A>::new(sc.board_cfg.clone(), rng.u32());
+    #[cfg(not(feature = "secure"))]
+    let (mut host, mut board) = (
+        Endpoint::<A>::new(sc.host_cfg.clone(), rng.u32()),
+        Endpoint::<A>::new(sc.board_cfg.clone(), rng.u32()),
+    );
+    #[cfg(feature = "secure")]
+    let (mut host, mut board) = match &sc.secure {
+        None => (
+            Endpoint::<A>::new(sc.host_cfg.clone(), rng.u32()),
+            Endpoint::<A>::new(sc.board_cfg.clone(), rng.u32()),
+        ),
+        Some(s) => {
+            use crate::sim::secure_sim::SecureEdge;
+            crate::sim::sim_entropy::seed(sc.seed);
+            (
+                Endpoint::<A>::new_secure(
+                    sc.host_cfg.clone(),
+                    rng.u32(),
+                    SecureEdge::new(s.clone(), false),
+                ),
+                Endpoint::<A>::new_secure(
+                    sc.board_cfg.clone(),
+                    rng.u32(),
+                    SecureEdge::new(s.clone(), true),
+                ),
+            )
+        }
+    };
     let mut up = Pipe::new(sc.pipe.clone(), sc.faults_up.clone(), rng.fork());
     let mut down = Pipe::new(sc.pipe.clone(), sc.faults_down.clone(), rng.fork());
     let mut wl_host = WorkloadState::new(&sc.workload, false, rng.fork());
@@ -220,7 +251,7 @@ pub fn run<A: Arq>(sc: &Scenario) -> Report {
     let mut violations = check_up.violations.clone();
     violations.extend(check_down.violations.iter().cloned());
     for (name, e) in [("host", &host), ("board", &board)] {
-        let bound = Link::<A>::ram_bound(&e.cfg);
+        let bound = e.ram_bound();
         if e.peak_ram > bound {
             violations.push(format!(
                 "ram: the {name} link held {} bytes, past its bound of {bound}",

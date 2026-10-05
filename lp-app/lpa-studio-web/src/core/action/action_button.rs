@@ -1,11 +1,11 @@
 use dioxus::prelude::*;
-use lpa_studio_core::{ActionEnablement, ActionPriority, UiAction};
+use lpa_studio_core::{ActionConsequence, ActionEnablement, ActionPriority, UiAction};
 
 use super::armed_confirm_button::use_armed_confirm;
 use crate::base::{StudioIcon, action_icon_name};
 
 /// How an action renders in its surrounding context. One action model
-/// (label / icon / priority / destructive / confirmation from
+/// (label / icon / priority / consequence from
 /// [`ActionMeta`](lpa_studio_core::ActionMeta)), several visual homes.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum ActionButtonVariant {
@@ -33,15 +33,35 @@ pub fn ActionButton(
     /// deterministically. Real surfaces never set this.
     #[props(default)]
     armed_preview: bool,
+    /// The disabled reason is said once elsewhere on the row (a row of
+    /// verbs disabled for one cause), so this button does not repeat it.
+    #[props(default)]
+    reason_said_elsewhere: bool,
+    /// The surface this button sits in IS the question its press answers:
+    /// a sheet whose title and body ask, in core's words, what a Lasting
+    /// press would otherwise ask on its own button (the layout sheet's
+    /// Continue — G1 walk, 2026-10-03, Yona: "they already committed to it
+    /// once"). The press acts at once instead of arming. Nothing else
+    /// moves: the button keeps its level's tint, and the level itself is
+    /// untouched, so the app agent still hands the offer to the user
+    /// (`ActionMeta::needs_user`) and every other place that draws it — the
+    /// palette, a chat card — still arms it.
+    #[props(default)]
+    asked_by_surface: bool,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let action_to_run = action.clone();
     let meta = action.meta().clone();
     let disabled = running || !meta.enablement.is_enabled();
-    let class = action_class(variant, meta.priority, meta.destructive);
-    let disabled_reason = disabled_reason(&meta.enablement).map(ToString::to_string);
+    // One look per consequence level, in every variant (D7, Q7): Routine is
+    // plain, Undoable wears the error tint, Lasting wears it and arms.
+    let class = action_class(variant, meta.priority, meta.consequence.wears_error_tint());
+    let disabled_reason = disabled_reason(&meta.enablement)
+        .filter(|_| !reason_said_elsewhere)
+        .map(ToString::to_string);
     let icon = action_icon_name(meta.icon.as_deref());
-    let confirmation = meta.confirmation.clone();
+    let arms = arms_on_press(&meta.consequence, asked_by_surface);
+    let copy = meta.consequence.copy().cloned();
     let label = meta.label;
     let summary = meta.summary;
     let icon_px = match variant {
@@ -51,32 +71,22 @@ pub fn ActionButton(
         | ActionButtonVariant::MenuItem => 14,
     };
 
-    // The two-click confirmation: the first click ARMS the button (the
-    // button itself asks, wearing "Confirm ⟨verb⟩" — the 2K+ reading from
-    // the devices-treatments spike gate), the second click dispatches.
-    // Arming stands down on blur or after a short window — the native
-    // dialog stays for confirmations not marked inline. The armed dress
-    // (reserved width, ramp, knock, quiet drain) lives in `.ux-armed-chip`/
-    // `.ux-armed` (style.css); the owning card marks itself via
+    // The two-click arm of a Lasting action: the first click ARMS the
+    // button (the button itself asks, wearing "Confirm ⟨verb⟩" — the 2K+
+    // reading from the devices-treatments spike gate), the second click
+    // dispatches. Arming stands down on blur or after a short window.
+    // There is no dialog at any level. The armed dress (reserved width,
+    // ramp, knock, quiet drain) lives in `.ux-armed-chip`/`.ux-armed`
+    // (style.css); the owning card marks itself via
     // `.ux-armed-scope:has(.ux-armed)`, so no armed state leaves this
     // component.
-    let inline_confirm = confirmation.as_ref().is_some_and(|c| c.inline);
     let mut confirm = use_armed_confirm(armed_preview);
     let armed = confirm.is_armed();
-    let armed_title = confirmation
-        .as_ref()
-        .map(|c| c.message.clone())
-        .unwrap_or_default();
-    let (rest_label, armed_label) = confirm_chip_labels(
-        &label,
-        confirmation.as_ref().map(|c| c.confirm_label.as_str()),
-    );
-    let shown_title = if inline_confirm && armed {
-        armed_title
-    } else {
-        summary
-    };
-    let shown_class = if inline_confirm {
+    let armed_title = copy.as_ref().map(|c| c.message.clone()).unwrap_or_default();
+    let (rest_label, armed_label) =
+        confirm_chip_labels(&label, copy.as_ref().map(|c| c.confirm_label.as_str()));
+    let shown_title = if arms && armed { armed_title } else { summary };
+    let shown_class = if arms {
         confirm_chip_class(class, armed)
     } else {
         class.to_string()
@@ -90,16 +100,12 @@ pub fn ActionButton(
                 disabled,
                 title: "{shown_title}",
                 onblur: move |_| {
-                    if inline_confirm {
+                    if arms {
                         confirm.disarm();
                     }
                 },
                 onclick: move |_| {
-                    if inline_confirm {
-                        if confirm.tap() {
-                            on_action.call(action_to_run.clone());
-                        }
-                    } else if confirmation_confirmed(confirmation.as_ref()) {
+                    if !arms || confirm.tap() {
                         on_action.call(action_to_run.clone());
                     }
                 },
@@ -116,7 +122,7 @@ pub fn ActionButton(
                 // wide as its armed reading and arming cannot move it or
                 // its neighbours. The armed label is hidden from AT — the
                 // armed `title` carries the confirmation message.
-                if inline_confirm {
+                if arms {
                     span { class: "ux-armed-labels",
                         span { class: "ux-armed-label-rest", "{rest_label}" }
                         span { class: "ux-armed-label-armed", aria_hidden: "true", "{armed_label}" }
@@ -134,11 +140,19 @@ pub fn ActionButton(
     }
 }
 
-/// The two labels an inline-confirm chip renders AT THE SAME TIME: the
+/// Whether a press arms rather than acts: a Lasting action arms on its own
+/// button, unless the surface around it has already asked (see
+/// `ActionButton`'s `asked_by_surface`). Kept as a plain function so the
+/// rule is testable without mounting.
+fn arms_on_press(consequence: &ActionConsequence, asked_by_surface: bool) -> bool {
+    consequence.arms() && !asked_by_surface
+}
+
+/// The two labels an arming chip renders AT THE SAME TIME: the
 /// resting verb and the armed "Confirm ⟨verb⟩" reading. Both sit in one
 /// grid cell (`.ux-armed-labels`), so the chip reserves the armed width
 /// and arming never reflows the row — the RESERVE ruling from the
-/// device-card-v2 spike (§2, gate 2026-09-02). Without a confirmation the
+/// device-card-v2 spike (§2, gate 2026-09-02). Without a Lasting copy the
 /// armed label is the resting one, and nothing renders it.
 ///
 /// Kept as a plain function so the pair is testable without mounting.
@@ -150,7 +164,7 @@ fn confirm_chip_labels(label: &str, confirm_verb: Option<&str>) -> (String, Stri
     (label.to_string(), armed)
 }
 
-/// The inline-confirm chip's classes for its current armed state. The base
+/// The arming chip's classes for its current armed state. The base
 /// chip always wears `ux-armed-chip` (reserve mechanics + quiet drain
 /// host); arming adds `ux-armed` (error tint, knock, drain running). Kept
 /// as a plain function so the composition is testable without mounting.
@@ -162,34 +176,30 @@ fn confirm_chip_class(base: &'static str, armed: bool) -> String {
     }
 }
 
-/// Run an action's optional [`ActionConfirmation`](lpa_studio_core::ActionConfirmation)
-/// through the native confirm dialog. Shared by every generic action
-/// renderer ([`ActionButton`], the pane header's action buttons) so
-/// confirmation semantics never fork per surface.
-pub(crate) fn confirmation_confirmed(
-    confirmation: Option<&lpa_studio_core::ActionConfirmation>,
-) -> bool {
-    let Some(confirmation) = confirmation else {
-        return true;
-    };
-    let message = format!("{}\n\n{}", confirmation.title, confirmation.message);
-    web_sys::window()
-        .and_then(|window| window.confirm_with_message(&message).ok())
-        .unwrap_or(false)
-}
-
+/// The classes for `variant`; `tinted` is the consequence's error tint
+/// (Undoable and Lasting), which every variant wears.
 fn action_class(
     variant: ActionButtonVariant,
     priority: ActionPriority,
-    destructive: bool,
+    tinted: bool,
 ) -> &'static str {
     match variant {
+        ActionButtonVariant::Solid if tinted => SOLID_TINTED_CLASS,
         ActionButtonVariant::Solid => solid_class(priority),
-        ActionButtonVariant::Quiet => quiet_class(destructive),
-        ActionButtonVariant::Outline => outline_action_class(destructive),
-        ActionButtonVariant::MenuItem => menu_item_class(destructive),
+        ActionButtonVariant::Quiet => quiet_class(tinted),
+        ActionButtonVariant::Outline => outline_action_class(tinted),
+        ActionButtonVariant::MenuItem => menu_item_class(tinted),
     }
 }
+
+/// The solid tier wearing the error tint, whatever its priority: the same
+/// geometry as every tier, the error border and text, and no ring — a status
+/// tone refuses the spectrum (see [`outline_action_class`]).
+const SOLID_TINTED_CLASS: &str = concat!(
+    "tw:inline-flex tw:min-h-9 tw:max-w-full tw:items-center tw:justify-center tw:gap-2 tw:rounded-sm tw:border tw:px-3 tw:text-sm tw:font-bold tw:leading-none tw:break-words tw:disabled:cursor-not-allowed tw:disabled:opacity-60",
+    " tw:border-status-error-border tw:bg-transparent tw:text-status-error-foreground tw:hover:bg-status-error-bg",
+    " ux-focus-ring ux-press-flare"
+);
 
 fn solid_class(priority: ActionPriority) -> &'static str {
     match priority {
@@ -331,13 +341,34 @@ mod tests {
         ActionPriority::Tertiary,
     ];
 
+    /// A Lasting press arms on its own button — and acts at once inside the
+    /// surface that already asked (the layout sheet's Continue, G1 walk
+    /// 2026-10-03). Nothing that does not arm starts arming.
+    #[test]
+    fn a_lasting_press_arms_unless_its_surface_already_asked() {
+        let lasting = ActionConsequence::Lasting(lpa_studio_core::ActionConfirmation::new(
+            "Rewrite this board now?",
+            "It goes.",
+            "continue",
+        ));
+        assert!(arms_on_press(&lasting, false));
+        assert!(!arms_on_press(&lasting, true));
+        for level in [ActionConsequence::Routine, ActionConsequence::Undoable] {
+            assert!(!arms_on_press(&level, false));
+            assert!(!arms_on_press(&level, true));
+        }
+    }
+
     #[test]
     fn every_solid_tier_keeps_the_same_geometry() {
         // The interaction light is pseudo-elements and outlines only: a
         // tier swap must never resize a button, so the geometry tokens are
-        // identical across tiers.
-        for priority in PRIORITIES {
-            let class = solid_class(priority);
+        // identical across tiers, the tinted one included.
+        for class in PRIORITIES
+            .map(solid_class)
+            .into_iter()
+            .chain([SOLID_TINTED_CLASS])
+        {
             for token in [
                 "tw:min-h-9",
                 "tw:rounded-sm",
@@ -362,12 +393,32 @@ mod tests {
         assert!(solid_class(ActionPriority::Secondary).contains("ux-ir-ring"));
         for class in [
             solid_class(ActionPriority::Tertiary),
+            SOLID_TINTED_CLASS,
             quiet_class(false),
             quiet_class(true),
             menu_item_class(false),
             menu_item_class(true),
         ] {
             assert!(!class.contains("ux-ir-ring"), "{class}");
+        }
+    }
+
+    #[test]
+    fn every_variant_wears_the_error_tint_for_a_consequence() {
+        // One look per level, whichever variant draws it (D7, Q7): Undoable
+        // and Lasting wear the error tint in every home, Routine never does.
+        for variant in [
+            ActionButtonVariant::Solid,
+            ActionButtonVariant::Quiet,
+            ActionButtonVariant::Outline,
+            ActionButtonVariant::MenuItem,
+        ] {
+            for priority in PRIORITIES {
+                let tinted = action_class(variant, priority, true);
+                assert!(tinted.contains("status-error"), "{variant:?}: {tinted}");
+                let plain = action_class(variant, priority, false);
+                assert!(!plain.contains("status-error"), "{variant:?}: {plain}");
+            }
         }
     }
 
@@ -401,7 +452,7 @@ mod tests {
         assert_eq!(rest, "Factory reset");
         assert_eq!(armed, "Confirm Erase everything");
 
-        // No confirmation: nothing renders the pair, and the armed label
+        // No Lasting copy: nothing renders the pair, and the armed label
         // must not invent a verb.
         let (rest, armed) = confirm_chip_labels("Disconnect", None);
         assert_eq!(rest, "Disconnect");
@@ -410,7 +461,7 @@ mod tests {
 
     #[test]
     fn the_armed_chip_composes_the_armed_dress_over_its_base() {
-        // 2K+ (devices-treatments gate): the inline-confirm chip always
+        // 2K+ (devices-treatments gate): the arming chip always
         // hosts the reserve/drain mechanics; arming adds the tint/knock
         // class. The spectrum ring never reaches a destructive chip.
         let idle = confirm_chip_class(quiet_class(true), false);

@@ -15,12 +15,13 @@ use std::rc::Rc;
 use lpc_model::{AsLpPath, NodeKind};
 use lpfs::LpFsMemory;
 
+use crate::app::studio::offer_press_test_api::{OfferPressTestApi, actor_clicks};
 use crate::app::studio::studio_edit_e2e_tests::{
     InProcessServerIo, drive, edit_e2e_files, edit_e2e_server, project_action, workspace_cards,
 };
 use crate::{
-    ControllerId, NodeCopyOp, NodeCreateOp, NodePasteOp, NodeRemoveOp, ProjectController,
-    ProjectNodeAddress, ProjectOp, StudioActor, StudioCommand, StudioController,
+    ControllerId, NodeCopyOp, NodeCreateOp, NodePasteOp, NodeRemoveOp, OfferArgs,
+    ProjectController, ProjectNodeAddress, ProjectOp, StudioActor, StudioCommand, StudioController,
     StudioServerClient, UiAction, UiAttachTarget, UiPendingEditKind, UiStudioView, UiViewContent,
 };
 
@@ -265,12 +266,12 @@ fn create_into_playlist_adds_entry_and_child() {
     drive(actor.run_one_batch_for_test());
     let _ = view.try_recv().expect("connect emits a snapshot");
 
-    // A fresh playlist at the project root…
-    handle.tx.send(create_action(
-        NodeKind::Playlist,
-        UiAttachTarget::ProjectRoot,
-    ));
-    drive(actor.run_one_batch_for_test());
+    // A fresh playlist at the project root, through the root picker's
+    // offer…
+    actor_clicks(&mut actor, &handle.tx).press(
+        "project/add-node",
+        OfferArgs::new().with(crate::ADD_NODE_KIND_PARAM, "playlist"),
+    );
     let snapshot = view.try_recv().expect("playlist create emits a snapshot");
     let playlist_id = child_card_paths(&snapshot)
         .into_iter()
@@ -299,10 +300,16 @@ fn create_into_playlist_adds_entry_and_child() {
         .find(|entry| entry.kind == NodeKind::Shader)
         .expect("shader entry offered");
 
-    // Create into the playlist by dispatching the picker entry's own action
-    // (pane grammar: the controller-produced action is the whole gesture).
-    handle.tx.send(StudioCommand::Action(entry.action.clone()));
-    drive(actor.run_one_batch_for_test());
+    // Create into the playlist by pressing the playlist's own `add-node`
+    // offer with the row's value, as the picker row does.
+    let playlist_add = crate::OfferPath::project_node(
+        &ProjectNodeAddress::parse(&playlist_id).expect("card path is a node address"),
+    )
+    .child(crate::ADD_NODE_VERB);
+    actor_clicks(&mut actor, &handle.tx).press(
+        &playlist_add,
+        OfferArgs::new().with(crate::ADD_NODE_KIND_PARAM, &entry.value),
+    );
     let snapshot = view.try_recv().expect("entry create emits a snapshot");
 
     // The playlist def gained `entries[1]` (entries are 1-based so the first
@@ -344,13 +351,8 @@ fn create_into_playlist_adds_entry_and_child() {
         .into_iter()
         .find(|card| card.header.path.contains("entry_1"))
         .expect("entry child card present");
-    let delete = entry_child
-        .header_actions
-        .iter()
-        .find(|action| action.icon == "remove")
-        .expect("entry child offers the delete action")
-        .action
-        .clone();
+    let delete = node_verb(&snapshot, &entry_child.header.path, "remove")
+        .expect("entry child offers the delete action");
     handle.tx.send(StudioCommand::Action(delete));
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("entry remove emits a snapshot");
@@ -386,9 +388,13 @@ fn create_into_playlist_adds_entry_and_child() {
         .entries
         .iter()
         .find(|entry| entry.kind == NodeKind::Fluid)
-        .expect("fluid entry offered");
-    handle.tx.send(StudioCommand::Action(entry.action.clone()));
-    drive(actor.run_one_batch_for_test());
+        .expect("fluid entry offered")
+        .value
+        .clone();
+    actor_clicks(&mut actor, &handle.tx).press(
+        &playlist_add,
+        OfferArgs::new().with(crate::ADD_NODE_KIND_PARAM, &entry),
+    );
     let snapshot = view.try_recv().expect("re-add emits a snapshot");
     let playlist_def = read_file(&server, "playlist.json");
     assert!(
@@ -425,21 +431,22 @@ fn remove_stages_rows_revert_restores_and_save_deletes_on_disk() {
         .find(|path| path.ends_with("/clock.clock"))
         .expect("clock card");
 
-    // The clock card offers the ungated delete action with confirmation.
-    let delete = card_at(&snapshot, &clock_id)
-        .header_actions
-        .iter()
-        .find(|action| action.icon == "remove")
-        .expect("delete header action")
-        .action
-        .clone();
-    assert!(delete.meta().confirmation.is_some());
+    // The clock card offers the ungated, undoable delete action.
+    assert_eq!(card_at(&snapshot, &clock_id).header.path, clock_id);
+    let delete = node_verb(&snapshot, &clock_id, "remove").expect("delete header offer");
+    assert_eq!(
+        delete.meta().consequence,
+        crate::ActionConsequence::Undoable
+    );
     assert!(delete.op_as::<NodeRemoveOp>().is_some());
 
     // Remove: the node leaves the tree, the save panel lists the NodeRemoved
     // row plus the staged file deletion, and nothing is deleted on disk yet.
-    handle.tx.send(StudioCommand::Action(delete.clone()));
-    drive(actor.run_one_batch_for_test());
+    let remove = crate::OfferPath::project_node(
+        &ProjectNodeAddress::parse(&clock_id).expect("card path is a node address"),
+    )
+    .child("remove");
+    actor_clicks(&mut actor, &handle.tx).press(&remove, OfferArgs::new());
     let snapshot = view.try_recv().expect("remove emits a snapshot");
     let editor = project_editor(&snapshot);
     assert!(
@@ -475,10 +482,13 @@ fn remove_stages_rows_revert_restores_and_save_deletes_on_disk() {
         "staged removal deletes nothing before save"
     );
 
-    // Revert from the row: the node comes back whole.
-    let revert = removed_row.revert.clone().expect("row revert offered");
-    handle.tx.send(StudioCommand::Action(revert));
-    drive(actor.run_one_batch_for_test());
+    // Revert from the row: the node comes back whole. The row's button
+    // presses `project/revert-edit` with its own key.
+    let key = removed_row.key.clone().expect("row revert offered");
+    actor_clicks(&mut actor, &handle.tx).press(
+        format!("project/{}", crate::REVERT_EDIT_VERB),
+        OfferArgs::new().with(crate::REVERT_EDIT_PARAM, key),
+    );
     handle.tx.send(project_action(ProjectOp::RefreshProject));
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("revert + refresh emit a snapshot");
@@ -494,11 +504,9 @@ fn remove_stages_rows_revert_restores_and_save_deletes_on_disk() {
     );
 
     // Remove again and SAVE: the deletion materializes on disk.
-    handle.tx.send(StudioCommand::Action(delete));
-    drive(actor.run_one_batch_for_test());
+    actor_clicks(&mut actor, &handle.tx).press(&remove, OfferArgs::new());
     let _ = view.try_recv().expect("second remove emits a snapshot");
-    handle.tx.send(project_action(ProjectOp::SaveOverlay));
-    drive(actor.run_one_batch_for_test());
+    actor_clicks(&mut actor, &handle.tx).press("project/save", OfferArgs::new());
     let snapshot = view.try_recv().expect("save emits a snapshot");
     assert!(
         !file_exists(&server, "clock.json"),
@@ -842,13 +850,8 @@ fn replace_probe_remove_then_paste_at_the_same_key() {
     let envelope = clipboard.borrow().clone().expect("copied");
 
     // Stage the removal of the node we are "replacing".
-    handle.tx.send(StudioCommand::Action(UiAction::from_op(
-        ControllerId::new(ProjectController::NODE_ID),
-        NodeRemoveOp {
-            node: ProjectNodeAddress::parse("/edit_e2e.show/clock.clock").expect("address"),
-        },
-    )));
-    drive(actor.run_one_batch_for_test());
+    actor_clicks(&mut actor, &handle.tx)
+        .press("project/edit_e2e.show/clock.clock/remove", OfferArgs::new());
     let snapshot = view.try_recv().expect("remove emits a snapshot");
     let staged = project_editor(&snapshot).dirty.persisted;
     assert!(staged > 0, "the removal staged in the overlay");
@@ -962,6 +965,15 @@ fn card_at(view: &UiStudioView, path: &str) -> crate::UiNodeView {
         .into_iter()
         .find(|card| card.header.path == path)
         .unwrap_or_else(|| panic!("workspace carries a card at {path}"))
+}
+
+/// The verb a node card at tree path `node` offers, read from the view's
+/// offer tree (`project/<node>/<verb>`), the way the card renders it.
+fn node_verb(view: &UiStudioView, node: &str, verb: &str) -> Option<UiAction> {
+    let address = ProjectNodeAddress::parse(node).expect("card path is a node address");
+    view.offers
+        .get(&crate::OfferPath::project_node(&address).child(verb))
+        .map(|offer| offer.action.clone())
 }
 
 fn project_editor(view: &UiStudioView) -> &crate::ProjectEditorView {

@@ -18,7 +18,8 @@ use lpc_model::{LpPath, LpPathBuf};
 use lpc_shared::output::OutputProvider;
 use lpc_shared::time::TimeProvider;
 use lpc_shared::transport::{
-    Incoming, Link, LinkId, ProjectReadStreamSink, ServerTransport, transport_error_is_signalable,
+    Incoming, Link, LinkId, ProjectReadStreamSink, SecureLinkEvent, ServerTransport,
+    transport_error_is_signalable,
 };
 use lpc_wire::{ClientRequest, WireServerMessage};
 
@@ -161,6 +162,9 @@ pub struct LpServer {
     /// The ProjectRead memory gate's floors, per chip (see [`ReadGate`]).
     /// Unset (hosts/browser) = reads are never refused.
     read_gate: Option<ReadGate>,
+    /// Answer a tick's requests before rendering its frame (see
+    /// [`Self::set_messages_first`]). Off = render first, then answer.
+    messages_first: bool,
     /// Optional embedder reset action backing `ClientRequest::Reboot`.
     /// Unset (hosts/browser) = the request is refused, not acked.
     reboot_hook: Option<RebootHook>,
@@ -334,6 +338,11 @@ impl LpServer {
             base_mac: None,
             chip_revision: None,
             eui64: None,
+            // How the filesystem came up: only the embedder knows (it
+            // mounted it), so it lands through `set_fs_boot_state`. A server
+            // that never says serves what it was handed as RAM — the honest
+            // default for every test and in-memory embedder.
+            fs: lpc_wire::FsBootState::Memory,
         };
         let features = server_features(&hardware, graphics.backend_name());
         Self {
@@ -346,6 +355,7 @@ impl LpServer {
             memory_stats,
             read_headroom_probe: None,
             read_gate: None,
+            messages_first: false,
             reboot_hook: None,
             #[cfg(feature = "node-power-button")]
             power: None,
@@ -358,6 +368,7 @@ impl LpServer {
                 build: lpc_wire::BuildFacts {
                     features,
                     package: "unknown".to_string(),
+                    version: "unknown".into(),
                     commit: "unknown".to_string(),
                     dirty: false,
                     profile: "unknown".to_string(),
@@ -388,6 +399,7 @@ impl LpServer {
         let lpc_wire::HelloIdentity {
             proto,
             package,
+            version,
             commit,
             dirty,
             profile,
@@ -402,6 +414,7 @@ impl LpServer {
             proto
         };
         self.hello.build.package = package;
+        self.hello.build.version = version;
         self.hello.build.commit = commit;
         self.hello.build.dirty = dirty;
         self.hello.build.profile = profile;
@@ -434,6 +447,16 @@ impl LpServer {
     /// so a running board had no road to newer firmware but Factory reset).
     pub fn set_board_id(&mut self, board_id: Option<alloc::string::String>) {
         self.hello.hardware.board_id = board_id;
+    }
+
+    /// Stamp how the filesystem the server was handed came up at boot —
+    /// mounted, formatted fresh, RAM-only, or a pre-repartition filesystem
+    /// held for migration ([`lpc_wire::FsBootState`]). Only the embedder
+    /// mounted it, so only the embedder can say; a server that never calls
+    /// this reports `Memory`. Call at construction, beside
+    /// [`Self::set_hardware_identity`].
+    pub fn set_fs_boot_state(&mut self, fs: lpc_wire::FsBootState) {
+        self.hello.hardware.fs = fs;
     }
 
     pub fn set_hardware_identity(&mut self, identity: lpc_wire::HardwareIdentity) {
@@ -687,7 +710,9 @@ impl LpServer {
                     delta_ms
                 );
                 // One project's failure never stops the others; clients
-                // see it when they sync or query project state.
+                // see it through the nodes' statuses when they sync — an
+                // output the board refuses wears it on the Output node
+                // (`EngineServices::output_open_failure`).
                 //
                 // A tick error is normally PERSISTENT (it re-fails every
                 // frame until the project or the tier changes), so the
@@ -790,7 +815,10 @@ impl LpServer {
         incoming: Vec<Incoming>,
         transport: &mut T,
     ) -> Result<usize, ServerError> {
-        self.advance_frame(delta_ms)?;
+        let messages_first = self.messages_first;
+        if !messages_first {
+            self.advance_frame(delta_ms)?;
+        }
         // The access clock is the frames' own: the embedder's uptime,
         // supplied at the edge one delta at a time. No clock is read here.
         self.access.advance_clock(delta_ms);
@@ -800,6 +828,9 @@ impl LpServer {
         for closed in transport.take_closed_links() {
             self.access.close_link(closed);
         }
+        // Then secure links' handshakes: a link that came up this tick
+        // holds its key's tier before its first request is gated.
+        self.handle_secure_link_events(transport);
 
         let mut response_count = 0usize;
         for message in incoming {
@@ -1077,10 +1108,49 @@ impl LpServer {
             }
         }
 
+        if messages_first {
+            // The replies are queued; let a link task sharing this executor
+            // put them on the wire before the frame holds the thread.
+            if response_count > 0 {
+                YieldOnce::default().await;
+            }
+            self.advance_frame(delta_ms)?;
+        }
+
         Ok(response_count)
     }
 
     /// Get a reference to the base filesystem
+    /// Answer secure links' handshake events (see
+    /// [`ServerTransport::take_secure_events`]). A transport with no secure
+    /// links reports none.
+    #[inline(never)]
+    fn handle_secure_link_events<T: ServerTransport>(&mut self, transport: &mut T) {
+        for (link, event) in transport.take_secure_events() {
+            match event {
+                SecureLinkEvent::KeyLookup { salt } => {
+                    let loaded: Vec<_> = self
+                        .project_manager
+                        .list_loaded_projects()
+                        .into_iter()
+                        .map(|loaded| loaded.path)
+                        .collect();
+                    let answer = self.access.key_lookup(
+                        link,
+                        &salt,
+                        &*self.base_fs,
+                        loaded.iter().map(|path| path.as_str()),
+                    );
+                    transport.answer_key_lookup(link, answer);
+                }
+                SecureLinkEvent::WrongKey { .. } => self.access.key_wrong(link),
+                SecureLinkEvent::Authenticated { candidate, .. } => {
+                    self.access.key_authenticated(link, candidate);
+                }
+            }
+        }
+    }
+
     pub fn base_fs(&self) -> &dyn LpFs {
         &*self.base_fs
     }
@@ -1123,6 +1193,26 @@ impl LpServer {
     /// Unset = reads are never refused.
     pub fn set_read_gate(&mut self, gate: Option<ReadGate>) {
         self.read_gate = gate;
+    }
+
+    /// Choose the order [`Self::tick_and_send`] works in. Default off.
+    ///
+    /// Off (the default): the tick renders its frame first, then answers the
+    /// requests that arrived with it. A request's effect first shows in the
+    /// **next** tick's frame, and its reply waits behind the render.
+    ///
+    /// On: the tick answers its requests first, yields once (a
+    /// runtime-neutral yield, and only when a reply was sent) so a link task
+    /// can put the replies on the wire, then renders. A request's effect is
+    /// visible in the **same** tick's frame (write, then render), and replies
+    /// are queued before the render starts instead of after it. The access
+    /// clock advances before the requests in both orders.
+    ///
+    /// An embedder turns this on when its link IO runs where the render
+    /// cannot hold it up (the ESP32-C6's link thread); with link IO on the
+    /// same thread as the render, answering first moves no reply sooner.
+    pub fn set_messages_first(&mut self, on: bool) {
+        self.messages_first = on;
     }
 
     /// Install the embedder's power-off capability (see [`PowerPlatform`]).
@@ -1435,6 +1525,29 @@ fn graphics_feature(backend_name: &str) -> Option<lpc_model::LpFeature> {
     LpFeature::ALL.iter().copied().find(|feature| {
         label_prefix(*feature).is_some_and(|prefix| backend_name.starts_with(prefix))
     })
+}
+
+/// Pending once (waking itself), then ready: a yield any executor can drive.
+#[derive(Default)]
+struct YieldOnce {
+    yielded: bool,
+}
+
+impl core::future::Future for YieldOnce {
+    type Output = ();
+
+    fn poll(
+        mut self: core::pin::Pin<&mut Self>,
+        cx: &mut core::task::Context<'_>,
+    ) -> core::task::Poll<()> {
+        if self.yielded {
+            core::task::Poll::Ready(())
+        } else {
+            self.yielded = true;
+            cx.waker().wake_by_ref();
+            core::task::Poll::Pending
+        }
+    }
 }
 
 #[cfg(test)]

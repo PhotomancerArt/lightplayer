@@ -118,19 +118,55 @@ impl SynBody {
         b
     }
 
+    /// Read a SYN body's 12-byte prefix, ignoring every byte after it.
+    ///
+    /// **This is the link's growth path, and a plain receiver relies on it.**
+    /// A SYN body is at least [`SYN_LEN`] bytes; only the first 12 are the
+    /// plain handshake, and of the flags byte (byte 8) a plain receiver reads
+    /// only [`SYN_ESTABLISHED`]. Every other flag bit, and every byte past
+    /// the 12th, is reserved for an extension a plain receiver ignores — the
+    /// way `secure` arrived ([`SYN_SECURE`] plus the Noise message after the
+    /// prefix). A new link feature is added the same way: a flag bit and an
+    /// extension the old end can ignore, so a fielded board (whose link is
+    /// frozen once it updates over the air) still comes up for a newer host.
+    /// What a plain link *sends* stays exactly 12 bytes with every other bit
+    /// zero (`tests/plain_bytes_golden.rs`). A body shorter than 12 bytes is
+    /// not a SYN.
+    ///
+    /// A plain receiver therefore reads a SYN with [`SYN_SECURE`] set as a
+    /// plain one too (in a build without the `secure` feature, which cannot
+    /// read the rest): the peer that asked for secure is the one that decides
+    /// whether a plain answer is acceptable. A `secure`-feature build checks
+    /// the secure SYN first (`Link::on_secure_aware_syn`), unchanged.
     pub fn parse(body: &[u8]) -> Option<SynBody> {
-        if body.len() != SYN_LEN {
-            return None;
-        }
+        let head = body.get(..SYN_LEN)?;
         Some(SynBody {
-            nonce: u32::from_le_bytes([body[0], body[1], body[2], body[3]]),
-            your: u32::from_le_bytes([body[4], body[5], body[6], body[7]]),
-            established: body[8] & 1 != 0,
-            max_payload: u16::from_le_bytes([body[9], body[10]]),
-            rx_window: body[11],
+            nonce: u32::from_le_bytes([head[0], head[1], head[2], head[3]]),
+            your: u32::from_le_bytes([head[4], head[5], head[6], head[7]]),
+            established: head[8] & SYN_ESTABLISHED != 0,
+            max_payload: u16::from_le_bytes([head[9], head[10]]),
+            rx_window: head[11],
         })
     }
+
+    /// [`parse`](Self::parse) and the whole flags byte, for readers that need
+    /// more of it than `established` (the secure SYN, the sniffer).
+    pub fn parse_prefix(body: &[u8]) -> Option<(SynBody, u8)> {
+        Some((SynBody::parse(body)?, *body.get(8)?))
+    }
 }
+
+/// SYN flags (byte 8 of the body), bit 0: the sender considers the link up.
+/// The only flag a plain receiver reads; every other bit belongs to an
+/// extension (see [`SynBody::parse`]).
+pub const SYN_ESTABLISHED: u8 = 0x01;
+/// SYN flags, bit 1: the sender runs a secure link (feature `secure`). Bits
+/// 2–3 then name the Noise content after the 12 bytes; a plain link sends
+/// this bit, and those, as zero.
+pub const SYN_SECURE: u8 = 0x02;
+
+#[cfg(feature = "secure")]
+pub mod secure_syn;
 
 /// Build `header ‖ body ‖ crc` into `raw`: the whole frame on a datagram
 /// transport. `key` keys the checksum (0 for SYN).

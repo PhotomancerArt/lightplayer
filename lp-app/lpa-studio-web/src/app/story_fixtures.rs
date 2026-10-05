@@ -18,6 +18,7 @@ use lpa_studio_core::{
     UiRuntimeBand, UiSlotAsset, UiSlotSourceState, UiSlotValue, UiStatus, UiStudioView,
     UiViewContent,
 };
+use lpa_studio_core::{OfferPath, ProjectOp, UiOffer, UiOfferTree};
 
 /// Timestamp shared by every story log fixture, so stories stay
 /// deterministic. P2 renders the timestamp column; until then it is unused by
@@ -60,6 +61,7 @@ fn sim_lens_device_view() -> lpa_studio_core::DeviceView {
         firmware_face: lpa_studio_core::DeviceFirmwareFace::LightPlayer {
             firmware: Some("fw-browser 0000000".to_string()),
             wire: lpa_studio_core::DeviceWireVersion::Match,
+            age: lpa_studio_core::DeviceFirmwareAge::Unknown,
         },
         remembered_firmware: Some("fw-browser 0000000".to_string()),
         degraded: None,
@@ -90,6 +92,13 @@ pub(crate) fn shell_story(
     // the global console UI retired (M7′ P2); the entries still ride the
     // view so fixtures stay honest about what the controller carries
     view.console.entries.extend(story_logs);
+    // `StudioShell` always re-publishes the offer context from
+    // `view.offers` (never an ancestor's), so a lens card's Device panel
+    // needs its verbs folded in here — the same tree core would build —
+    // or it draws with none (devices-as-offers).
+    if let Some(card) = &view.lens_card {
+        view.offers = crate::app::home::device_offer_story_fixtures::lens_card_offer_tree(card);
+    }
     rsx! {
         // Body only: the site chrome above it is `web_app`'s, and has its
         // own stories (`site_chrome_stories`).
@@ -600,7 +609,66 @@ pub(crate) fn project_view(state: ProjectState, server_connected: bool) -> UiPan
     if no_running_project {
         project.mark_no_running_project();
     }
-    project.view(server_connected)
+    // A story controller never syncs, so it publishes no offers.
+    project.view(server_connected, &mut UiOfferTree::new())
+}
+
+/// The project header's Save / Revert-to-saved offers, exactly as the
+/// project controller publishes them while persisted edits are pending.
+pub(crate) fn project_save_revert_offers() -> UiOfferTree {
+    let project_action =
+        |op: ProjectOp| UiAction::from_op(ControllerId::new(ProjectController::NODE_ID), op);
+    let mut offers = UiOfferTree::new();
+    offers.publish(UiOffer::new(
+        OfferPath::project().child("save"),
+        "save",
+        project_action(ProjectOp::SaveOverlay),
+    ));
+    offers.publish(UiOffer::new(
+        OfferPath::project().child("revert"),
+        "revert",
+        project_action(ProjectOp::RevertAllEdits).with_label("Revert to saved"),
+    ));
+    offers
+}
+
+/// `project/revert-edit` over `edits`, as core publishes it beside the
+/// changes list: each row's revert button presses it with the row's key.
+/// The story actions revert the row's slot (or, for a file row, its file).
+pub(crate) fn revert_edit_offers(edits: &[lpa_studio_core::UiPendingEdit]) -> UiOfferTree {
+    use lpa_studio_core::{
+        ArtifactLocation, AssetEditOp, ProjectNodeAddress, ProjectSlotAddress, ProjectSlotRoot,
+        SlotEditOp, SlotPath,
+    };
+    let revert = |edit: &lpa_studio_core::UiPendingEdit| {
+        let controller = ControllerId::new(ProjectController::NODE_ID);
+        let slot = ProjectNodeAddress::parse(&edit.node_path)
+            .ok()
+            .zip(SlotPath::parse(&edit.slot_path_display).ok());
+        match slot {
+            Some((node, path)) if !edit.slot_path_display.starts_with('/') => UiAction::from_op(
+                controller,
+                SlotEditOp::Revert {
+                    address: ProjectSlotAddress::new(node, ProjectSlotRoot::def(), path),
+                },
+            ),
+            _ => UiAction::from_op(
+                controller,
+                AssetEditOp::Revert {
+                    artifact: ArtifactLocation::file(edit.slot_path_display.as_str()),
+                },
+            ),
+        }
+    };
+    let rows: Vec<_> = edits
+        .iter()
+        .map(|edit| (edit.clone(), revert(edit)))
+        .collect();
+    let mut offers = UiOfferTree::new();
+    if let Some(offer) = lpa_studio_core::revert_edit_offer(&rows) {
+        offers.publish(offer);
+    }
+    offers
 }
 
 pub(crate) fn project_ready_state() -> ProjectState {

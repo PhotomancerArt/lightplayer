@@ -97,6 +97,11 @@ pub enum IncompatibleReason {
     NoHello,
     /// A hello arrived with a wire proto other than [`WIRE_PROTO_VERSION`].
     ProtoMismatch { hello: ServerHello },
+    /// A hello arrived from another wire that this build cannot decode (a
+    /// breaking change to the hello itself — wire 34 made `hardware.fs`
+    /// required): only its `proto` was read (`lpc_wire::hello_proto`). It
+    /// is still a LightPlayer that said hello, never pre-hello firmware.
+    HelloOnOtherWire { proto: u32 },
 }
 
 impl IncompatibleReason {
@@ -118,6 +123,15 @@ impl IncompatibleReason {
                 "device firmware speaks wire protocol {} but this build speaks {}; reflash the \
                  firmware to a compatible build",
                 hello.proto, WIRE_PROTO_VERSION
+            ),
+            Self::HelloOnOtherWire { proto } if *proto < WIRE_PROTO_VERSION => format!(
+                "the board runs older LightPlayer firmware (wire {proto}; this build speaks wire \
+                 {WIRE_PROTO_VERSION}) — update its firmware (Studio's Update firmware), then \
+                 try again"
+            ),
+            Self::HelloOnOtherWire { proto } => format!(
+                "the board runs newer LightPlayer firmware (wire {proto}; this build speaks wire \
+                 {WIRE_PROTO_VERSION}) — update this tool, then try again"
             ),
         }
     }

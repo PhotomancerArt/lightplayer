@@ -270,13 +270,24 @@ an emulated classic (`lp-cli emu serve` and the tab backing hold C6s only),
 so the classic's Studio path is proven by the Web Serial conformance
 suite's board double, not the firmware.
 
-## Amendment 2026-09-30: implemented on BLE (M3, PR #880)
+## Amendment 2026-10-01: security is a link feature
+
+lp-link gained an optional **`secure`** feature (plan
+`lp2025/2026-10-01-1843-secure-link`, M4 of the Wi-Fi control roadmap):
+Noise NNpsk0 merged into this ADR's SYN handshake, then every frame sealed
+with the header as associated data. A plain link (every link that ships
+today: USB, the classic's UART, BLE's `M!` path) is byte-identical and, built
+without the feature, compiles to the same code. Decision, wire layout, costs
+and limits: `docs/adr/2026-10-01-network-link-security.md`.
+
+## Amendment 2026-10-05: implemented on BLE (M3, PR #880)
 
 Milestone M3 (plan `lp2025/2026-09-28-1445-ble-on-lp-link`) moved the C6's
-Bluetooth links onto `lp-link`, on `LinkConfig::ble()`'s Datagram framing
+Bluetooth links onto `lp-link` (plain, not `secure`), on `LinkConfig::ble()`'s Datagram framing
 (one frame per GATT write or notification). It was built beside M5 and
-merged after it, so it took `WIRE_PROTO_VERSION` 32 → **33**; 31, held for
-it above, was never carried by a `main` build. After it, `fw-emu` is the
+merged after it and after 33–35 (access, the filesystem, the build version),
+so it took `WIRE_PROTO_VERSION` 35 → **36**; 31, held for it above, was never
+carried by a `main` build. After it, `fw-emu` is the
 only `M!` board link. With both in, the `M!` line decoder and loss counters
 `fw-esp32-common` kept for BLE and the classic (`transport.rs`,
 `serial/link_counters.rs`) had no caller and were deleted, and the classic's

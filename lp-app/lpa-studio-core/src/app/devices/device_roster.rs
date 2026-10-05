@@ -16,8 +16,8 @@
 //! it hands back are the one asynchronous step, and they are performed by the
 //! controller AFTER the fold — never inside it (invariant I7).
 
-use lpa_devices::event::{Command, Input};
-use lpa_devices::identity::DeviceId;
+use lpa_devices::event::{Command, Event, Input};
+use lpa_devices::identity::{DeviceId, IdentityChain};
 use lpa_devices::journal::Scope;
 use lpa_devices::link::LinkId;
 use lpa_devices::record::DeviceRecord;
@@ -79,6 +79,13 @@ pub struct DeviceRosterView {
     /// and the device access panel where this link may write the store.
     pub access:
         std::collections::BTreeMap<lpa_devices::DeviceId, crate::app::access::UiDeviceAccess>,
+    /// Each device's layout facts (the C6 repartition): the question before
+    /// its files move, the refusal, a board holding its files, a backup to
+    /// put back. Absent = nothing to say.
+    pub layout: std::collections::BTreeMap<lpa_devices::DeviceId, super::UiDeviceLayout>,
+    /// The latest backup the user asked to download; the shell downloads
+    /// when its `seq` advances.
+    pub backup_download: Option<super::device_layout_effect::BackupDownload>,
 }
 
 impl Default for DeviceRosterView {
@@ -94,6 +101,8 @@ impl Default for DeviceRosterView {
             feeds: std::collections::BTreeMap::new(),
             runtime_bands: std::collections::BTreeMap::new(),
             access: std::collections::BTreeMap::new(),
+            layout: std::collections::BTreeMap::new(),
+            backup_download: None,
         }
     }
 }
@@ -181,19 +190,7 @@ pub struct DeviceRoster {
     /// Which registry row each device's record lives in, by the model's
     /// handle. See [`Self::remember_key`].
     keys: std::collections::BTreeMap<u64, String>,
-    /// Ids handed to registry rows that predate the model (`device_id`
-    /// absent). Counted down from a high base so it can never collide with
-    /// the roster's own minting, which starts at 1.
-    next_legacy_id: u64,
 }
-
-/// Where legacy registry rows' device ids start.
-///
-/// The roster mints from 1 upward and `load_records` raises its counter to
-/// the highest id it loads — so a legacy row taking an id from up here would
-/// push every future mint above it. Counting DOWN keeps both ranges apart
-/// without either side knowing about the other.
-const LEGACY_ID_BASE: u64 = u64::MAX / 2;
 
 impl DeviceRoster {
     /// A roster with the app's config.
@@ -209,7 +206,6 @@ impl DeviceRoster {
             effects: DeviceEffects::new(),
             keys: std::collections::BTreeMap::new(),
             mirrored_through: 0,
-            next_legacy_id: LEGACY_ID_BASE,
         }
     }
 
@@ -259,34 +255,82 @@ impl DeviceRoster {
     /// tab's transaction, a device row this roster just wrote), and loading a
     /// row the roster already holds would put a second card on screen for one
     /// board — the exact failure the rebuild exists to end. Rows already
-    /// represented, by the model's handle or by uid, are skipped.
+    /// represented — by their registry key, or by the model's handle when
+    /// the identities agree — are skipped.
+    ///
+    /// A row's `device_id` is a hint, not an identity: each page mints ids
+    /// from 1, so two rows can wear the same one. The model re-keys such a
+    /// row on load (`Roster::load_records`), and the key map follows the id
+    /// it was ACTUALLY loaded under.
+    ///
+    /// A row that predates the model (`device_id` absent) takes the next id
+    /// above every id this batch carries and every id the roster holds. Never
+    /// a reserved high range: `Roster::load_records` raises its mint past the
+    /// highest id it loads, so one id from up there dragged every later
+    /// device's id up with it — and onto disk (the 2026-10-03 legacy-id
+    /// ticket). Above the batch, no persisted row is re-keyed to make room;
+    /// above the held ids, no live device is collided with.
     pub fn load_records(&mut self, rows: &[RegisteredDevice]) {
         let mut records: Vec<DeviceRecord> = Vec::new();
+        let mut keys: Vec<String> = Vec::new();
+        let mut next_legacy_id = self.highest_id_in_view(rows).saturating_add(1);
         for row in rows {
             if self.is_already_known(row) {
                 continue;
             }
-            let fallback = self.next_legacy_id;
-            self.next_legacy_id = self.next_legacy_id.saturating_add(1);
-            let record = super::device_records::record_from_registry_row(row, fallback);
-            self.keys.insert(record.device.0, row.uid.clone());
-            records.push(record);
+            let fallback = next_legacy_id;
+            if row.device_id.is_none() {
+                next_legacy_id = next_legacy_id.saturating_add(1);
+            }
+            records.push(super::device_records::record_from_registry_row(
+                row, fallback,
+            ));
+            keys.push(row.uid.clone());
         }
         if records.is_empty() {
             return;
         }
-        self.roster.load_records(records);
+        let loaded = self.roster.load_records(records);
+        for (device, key) in loaded.into_iter().zip(keys) {
+            self.keys.insert(device.0, key);
+        }
+    }
+
+    /// The highest device id among `rows` and everything the roster holds
+    /// (devices and pending links); 0 when there is none.
+    fn highest_id_in_view(&self, rows: &[RegisteredDevice]) -> u64 {
+        let persisted = rows.iter().filter_map(|row| row.device_id);
+        let devices = self.roster.devices().iter().map(|device| device.id.0);
+        let pending = self
+            .roster
+            .pending()
+            .iter()
+            .map(|entry| entry.device_id().0);
+        persisted.chain(devices).chain(pending).max().unwrap_or(0)
     }
 
     /// Whether the roster already has an entry for this row.
+    ///
+    /// By KEY first: the device this roster loaded the row into or last
+    /// persisted to it, or a device whose own identity keys to the row (a
+    /// MAC-keyed row included — a uid-only comparison missed every board
+    /// Studio flashes, which have no provisioned uid). By the model's handle
+    /// only when the device wearing it does not contradict the row's
+    /// identity: two boards whose rows share an id are two boards, and
+    /// skipping the second hid its card and handed its frames and renames
+    /// to the first (docs/defects/
+    /// 2026-10-02-saved-records-sharing-a-device-id-misroute-the-board.md).
     fn is_already_known(&self, row: &RegisteredDevice) -> bool {
+        let row_identity = super::device_records::record_from_registry_row(row, 0).identity;
         self.roster.devices().iter().any(|device| {
+            if self.keys.get(&device.id.0) == Some(&row.uid)
+                || super::device_records::registry_key(&device.identity).as_deref()
+                    == Some(row.uid.as_str())
+            {
+                return true;
+            }
             row.device_id == Some(device.id.0)
-                || device
-                    .identity
-                    .uid
-                    .as_ref()
-                    .is_some_and(|uid| uid.0 == row.uid)
+                && !identities_contradict(&device.identity, &row_identity)
         })
     }
 
@@ -313,9 +357,18 @@ impl DeviceRoster {
         // Links that arrived from a spawned grant/sweep join the routing map
         // first, so the `LinkAttached` queued behind them is routable.
         self.effects.settle();
+        let attached = match &input {
+            Input::Event(Event::LinkAttached { link, .. }) => Some(*link),
+            _ => None,
+        };
         let commands = self.roster.handle(now, input);
         self.note_dropped_links(&commands);
         self.effects.apply(commands);
+        // Only once a link's own attach has folded may the roster's silence
+        // about it mean "let go" (see `DeviceEffects::retain_links`).
+        if let Some(link) = attached {
+            self.effects.attach_folded(link);
+        }
         // The model is the authority on what is routed; anything it let go
         // stops being pumped.
         let roster = &self.roster;
@@ -354,7 +407,79 @@ impl DeviceRoster {
             feeds: std::collections::BTreeMap::new(),
             runtime_bands: std::collections::BTreeMap::new(),
             access: std::collections::BTreeMap::new(),
+            // The verbs land in a scratch tree here; the studio view
+            // publishes them for real (`publish_layout_offers`).
+            layout: self.layout_views(now, &mut crate::UiOfferTree::new(), None),
+            backup_download: self.effects.layout().download(),
         }
+    }
+
+    /// Publish every device card's layout verbs (`devices/<board>/…`: the
+    /// question's Continue and Cancel, Download backup, Restore files,
+    /// Finish update) into the view's offer tree — the same verbs, from the
+    /// same decision, that [`Self::view`]'s layout facts name by path.
+    /// `prefixes` is where the controller placed each device's verbs
+    /// (`devices/<board>`), so these land beside the rest of its card's.
+    pub fn publish_layout_offers(
+        &self,
+        now: Millis,
+        offers: &mut crate::UiOfferTree,
+        prefixes: &std::collections::BTreeMap<lpa_devices::DeviceId, crate::OfferPath>,
+    ) {
+        self.layout_views(now, offers, Some(prefixes));
+    }
+
+    /// The card's layout facts (C6 repartition) for every device with
+    /// something to say: the question, the refusal, a board holding its
+    /// files, a backup waiting to go back. Their verbs go into `offers`,
+    /// under the device's prefix from `prefixes` when the controller placed
+    /// one, else under its own [`crate::BoardRef`].
+    fn layout_views(
+        &self,
+        now: Millis,
+        offers: &mut crate::UiOfferTree,
+        prefixes: Option<&std::collections::BTreeMap<lpa_devices::DeviceId, crate::OfferPath>>,
+    ) -> std::collections::BTreeMap<lpa_devices::DeviceId, super::UiDeviceLayout> {
+        let layout = self.effects.layout();
+        self.roster
+            .devices()
+            .iter()
+            .filter_map(|device| {
+                let view = lpa_devices::view::device_view(device, now);
+                let hello = device.evidence.classification.hello();
+                let fs = hello.map(|hello| hello.fs).unwrap_or_default();
+                let has_uid = hello.is_some_and(|hello| hello.identity.uid.is_some());
+                let staged = layout.staged(device.id);
+                let pending = device
+                    .identity
+                    .mac
+                    .as_ref()
+                    .and_then(|mac| layout.pending_for(&mac.0));
+                let offers_at = prefixes
+                    .and_then(|prefixes| prefixes.get(&device.id))
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        // No placement handed in: a board in a layout flow
+                        // has said its MAC (the inspection probes it), so
+                        // its ref is the controller's too. One that has not
+                        // is `new-1` here, a prefix only this read uses.
+                        crate::OfferPath::board(
+                            &crate::BoardRef::known(&device.identity)
+                                .unwrap_or(crate::BoardRef::New(1)),
+                        )
+                    });
+                super::device_layout_view::device_layout_view(
+                    &view,
+                    offers_at,
+                    fs,
+                    has_uid,
+                    staged.as_ref(),
+                    pending.as_ref(),
+                    offers,
+                )
+                .map(|ui| (device.id, ui))
+            })
+            .collect()
     }
 
     /// A `Close` for a link the model is releasing is the last thing that link
@@ -394,6 +519,15 @@ fn scope_label(scope: Scope) -> String {
         Scope::Device(device) => format!("device:{}", device.0),
         Scope::PendingLink(LinkId(link)) => format!("pending-link:{link}"),
     }
+}
+
+/// Whether two chains name different boards: a uid or a MAC both hold and
+/// disagree on. Absence is not disagreement — a row written before the board
+/// was provisioned has no uid, and that is the same board.
+fn identities_contradict(left: &IdentityChain, right: &IdentityChain) -> bool {
+    let uids_differ = matches!((&left.uid, &right.uid), (Some(a), Some(b)) if a != b);
+    let macs_differ = matches!((&left.mac, &right.mac), (Some(a), Some(b)) if a != b);
+    uids_differ || macs_differ
 }
 
 #[cfg(test)]
@@ -458,11 +592,12 @@ mod tests {
         );
     }
 
-    /// Legacy rows (no `device_id`) get ids from a range the roster's own
-    /// minting never reaches, so a hello that creates a device cannot collide
-    /// with a rehydrated one.
+    /// Legacy rows (no `device_id`) take small ids, and so does every device
+    /// minted after them: a reserved high range for legacy rows dragged the
+    /// roster's mint up with it, and every later id landed — and was
+    /// persisted — near `u64::MAX / 2`.
     #[test]
-    fn legacy_rows_take_ids_the_roster_will_never_mint() {
+    fn a_roster_loaded_with_legacy_rows_mints_small_ids() {
         let mut roster = DeviceRoster::new(RosterConfig::default());
         roster.load_records(&[
             RegisteredDevice {
@@ -474,15 +609,120 @@ mod tests {
                 ..RegisteredDevice::default()
             },
         ]);
+        roster.handle(
+            Millis(0),
+            Input::Event(Event::LinkAttached {
+                link: LinkId(1),
+                info: info("usb-1"),
+            }),
+        );
 
-        let ids: Vec<u64> = roster
+        let loaded: Vec<u64> = roster
             .roster()
             .devices()
             .iter()
             .map(|device| device.id.0)
             .collect();
+        let minted: Vec<u64> = roster
+            .roster()
+            .pending()
+            .iter()
+            .map(|entry| entry.device_id().0)
+            .collect();
+        assert_eq!(loaded, vec![1, 2]);
+        assert_eq!(minted, vec![3], "a new port's id follows the legacy rows");
+        assert_eq!(roster.key_for(DeviceId(1)), Some("dev0000000000000001"));
+        assert_eq!(roster.key_for(DeviceId(2)), Some("dev0000000000000002"));
+    }
 
-        assert_eq!(ids, vec![LEGACY_ID_BASE, LEGACY_ID_BASE + 1]);
+    /// A legacy row takes an id above every persisted one in its batch, so a
+    /// persisted row later in the batch keeps the id it was saved with
+    /// rather than being re-keyed out of its way.
+    #[test]
+    fn a_legacy_row_never_displaces_a_persisted_id() {
+        let mut roster = DeviceRoster::new(RosterConfig::default());
+        roster.load_records(&[
+            RegisteredDevice {
+                uid: "dev0000000000000001".to_string(),
+                ..RegisteredDevice::default()
+            },
+            RegisteredDevice {
+                uid: "dev0000000000000002".to_string(),
+                device_id: Some(1),
+                ..RegisteredDevice::default()
+            },
+        ]);
+
+        assert_eq!(roster.key_for(DeviceId(1)), Some("dev0000000000000002"));
+        assert_eq!(roster.key_for(DeviceId(2)), Some("dev0000000000000001"));
+    }
+
+    /// A record already saved with an id from the old legacy range still
+    /// loads under that id and still resolves both ways — and loads once.
+    #[test]
+    fn a_record_saved_with_a_huge_id_still_loads_and_resolves() {
+        const SAVED: u64 = u64::MAX / 2 + 1;
+        let rows = [
+            RegisteredDevice {
+                uid: "dev0000000000000001".to_string(),
+                name: "Porch sign".to_string(),
+                device_id: Some(SAVED),
+                ..RegisteredDevice::default()
+            },
+            RegisteredDevice {
+                uid: "dev0000000000000002".to_string(),
+                ..RegisteredDevice::default()
+            },
+        ];
+        let mut roster = DeviceRoster::new(RosterConfig::default());
+        roster.load_records(&rows);
+        roster.load_records(&rows);
+
+        assert_eq!(roster.roster().devices().len(), 2, "loaded once");
+        assert_eq!(roster.key_for(DeviceId(SAVED)), Some("dev0000000000000001"));
+        let device = roster
+            .device_for_key("dev0000000000000001")
+            .expect("the saved row resolves by its key");
+        assert_eq!(device.id, DeviceId(SAVED));
+        assert_eq!(
+            device
+                .record
+                .as_ref()
+                .and_then(|record| record.name.as_deref()),
+            Some("Porch sign")
+        );
+        assert!(
+            roster.key_for(DeviceId(SAVED + 1)).is_some(),
+            "the legacy row sits beside it without colliding"
+        );
+    }
+
+    /// Two boards whose rows wear the same model handle are two cards with
+    /// two ids, each keyed to its own row — and re-hydrating (every library
+    /// settle does) adds nothing.
+    #[test]
+    fn rows_sharing_a_handle_load_as_two_boards_and_stay_loaded_once() {
+        let row = |mac: &str| RegisteredDevice {
+            uid: format!("mac:{mac}"),
+            hardware_id: Some(format!("efuse:{mac}")),
+            device_id: Some(1),
+            ..RegisteredDevice::default()
+        };
+        let rows = [row("02:00:00:00:00:01"), row("10:bd:a3:b0:8e:30")];
+        let mut roster = DeviceRoster::new(RosterConfig::default());
+        roster.load_records(&rows);
+        roster.load_records(&rows);
+
+        let ids: Vec<DeviceId> = roster
+            .roster()
+            .devices()
+            .iter()
+            .map(|device| device.id)
+            .collect();
+        assert_eq!(ids.len(), 2, "one card per board, loaded once: {ids:?}");
+        assert_ne!(ids[0], ids[1]);
+        assert_eq!(roster.key_for(ids[0]), Some("mac:02:00:00:00:00:01"));
+        assert_eq!(roster.key_for(ids[1]), Some("mac:10:bd:a3:b0:8e:30"));
     }
 
     #[test]
@@ -614,6 +854,8 @@ mod tests {
                 },
             )]),
             runtime_bands: std::collections::BTreeMap::new(),
+            layout: std::collections::BTreeMap::new(),
+            backup_download: None,
         };
 
         let split = split_roster(&view);
@@ -657,6 +899,8 @@ mod tests {
             open_addresses: Default::default(),
             feeds: std::collections::BTreeMap::new(),
             runtime_bands: std::collections::BTreeMap::new(),
+            layout: std::collections::BTreeMap::new(),
+            backup_download: None,
         };
 
         let split = split_roster(&view);

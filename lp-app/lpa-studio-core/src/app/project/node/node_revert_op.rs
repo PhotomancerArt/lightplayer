@@ -30,6 +30,7 @@ impl ControllerOp for NodeRevertOp {
             "Discard every pending edit under this node.",
             ActionPriority::Secondary,
         )
+        .undoable()
     }
 
     fn action_class(&self) -> ActionClass {

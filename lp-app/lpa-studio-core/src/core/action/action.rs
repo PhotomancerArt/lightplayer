@@ -1,19 +1,24 @@
 use crate::{
     ActionClass, ActionConfirmation, ActionMeta, ActionPriority, ControllerId, ControllerOp,
-    UiError,
+    OfferPress, UiError,
 };
 
 /// A user-invokable controller operation with render metadata.
 ///
 /// `UiAction` is the bridge between controller state and UI controls. The
 /// operation remains typed behind `ControllerOp`, while `ActionMeta` carries the
-/// label, summary, icon, priority, enablement, and confirmation data that a
+/// label, summary, icon, priority, enablement, and consequence that a
 /// component needs to render the button.
+///
+/// An action an offer's press returned also carries where it was pressed
+/// from ([`Self::offer_press`]). That is provenance, never identity:
+/// equality compares the controller, the operation and the metadata only.
 #[derive(Clone, Debug)]
 pub struct UiAction {
     node_id: ControllerId,
     op: Box<dyn ControllerOp>,
     meta: ActionMeta,
+    offer_press: Option<Box<OfferPress>>,
 }
 
 impl PartialEq for UiAction {
@@ -35,6 +40,7 @@ impl UiAction {
             node_id: node_id.into(),
             op: Box::new(op),
             meta,
+            offer_press: None,
         }
     }
 
@@ -43,9 +49,29 @@ impl UiAction {
         &self.node_id
     }
 
+    /// Whether `other` does the same thing — same controller, same
+    /// operation — whatever its label or enablement says. How a press of
+    /// an action is recognized as the press of a card that carries it.
+    pub fn same_op(&self, other: &Self) -> bool {
+        self.node_id == other.node_id && self.op.eq_op(other.op.as_ref())
+    }
+
     /// Return the render metadata for this action.
     pub fn meta(&self) -> &ActionMeta {
         &self.meta
+    }
+
+    /// The offer this action was pressed from, and the values the press
+    /// carried, when [`crate::UiOffer::press`] made it.
+    pub fn offer_press(&self) -> Option<&OfferPress> {
+        self.offer_press.as_deref()
+    }
+
+    /// Record that a press of the offer at `press.path` made this action
+    /// (see [`Self::offer_press`]).
+    pub(crate) fn pressed_from(mut self, press: OfferPress) -> Self {
+        self.offer_press = Some(Box::new(press));
+        self
     }
 
     /// Format the operation alone (not the render metadata) with `Debug` —
@@ -138,9 +164,30 @@ impl UiAction {
         self
     }
 
-    /// Require confirmation before the action is dispatched.
-    pub fn with_confirmation(mut self, confirmation: ActionConfirmation) -> Self {
-        self.meta = self.meta.with_confirmation(confirmation);
+    /// Set the level outright (see [`ActionMeta::with_consequence`]).
+    pub fn with_consequence(mut self, consequence: crate::ActionConsequence) -> Self {
+        self.meta = self.meta.with_consequence(consequence);
+        self
+    }
+
+    /// It removes something the user can still get back in Studio (see
+    /// [`crate::ActionConsequence::Undoable`]).
+    pub fn undoable(mut self) -> Self {
+        self.meta = self.meta.undoable();
+        self
+    }
+
+    /// It is gone for good; `copy` says what is lost (see
+    /// [`crate::ActionConsequence::Lasting`]).
+    pub fn lasting(mut self, copy: ActionConfirmation) -> Self {
+        self.meta = self.meta.lasting(copy);
+        self
+    }
+
+    /// The browser only allows it from a real click (the meta's
+    /// `needs_user_activation` field).
+    pub fn needs_user_activation(mut self) -> Self {
+        self.meta = self.meta.needs_user_activation();
         self
     }
 

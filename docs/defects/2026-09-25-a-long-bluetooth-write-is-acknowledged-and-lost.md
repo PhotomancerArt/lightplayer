@@ -50,7 +50,7 @@ reassembled, and the ATT MTU is 247 rather than 251. The phone run does not
 say which one it needed. The likely reading is that Bluefy's larger writes
 were going out as long writes and vanishing, even though the board had
 logged the phone's ATT MTU as 251, which a 244 B write fits. Why iOS would
-choose a long write there is not known.
+choose a long write there is not known. (Answered 2026-10-02: Bluefy sends a typed-array view's whole buffer, and Studio cut its chunks as views — `docs/defects/2026-10-02-bluefy-writes-a-views-whole-buffer.md`.)
 
 Seen once, not explained: on that confirmation the phone's first connect said
 "no response" and the retry worked. At the time the agent's lab page (Mac

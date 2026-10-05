@@ -1,0 +1,71 @@
+{
+  "kind": "Shader",
+  "source": "shader.glsl",
+  "render_order": 0,
+  "coords": "pattern",
+  "bindings": {
+    "output": {
+      "target": "bus:visual.out"
+    },
+    "detail": {
+      "source": "bus:detail"
+    },
+    "angle": {
+      "source": "bus:angle"
+    },
+    "palette": {
+      "source": "bus:palette"
+    }
+  },
+  "consumed": {
+    "detail": {
+      "kind": "value",
+      "value": "f32",
+      "default": 1,
+      "min": 0.25,
+      "max": 4,
+      "label": "Detail",
+      "description": "Sharpness of the wipe's edge: 1 is about a lamp and a half soft; 2 is twice as crisp"
+    },
+    "angle": {
+      "kind": "value",
+      "value": "f32",
+      "default": 0,
+      "min": 0,
+      "max": 360,
+      "label": "Angle",
+      "description": "Direction the colours wipe in, in degrees; 0 is along the long side"
+    },
+    "wipePhase": {
+      "kind": "phasor",
+      "value": "f32",
+      "phasor": {
+        "period_seconds": 30.0,
+        "waveform": "ramp",
+        "phase_offset": 0.0
+      },
+      "default": 0,
+      "label": "Wipes",
+      "description": "Position in the five-colour wipe cycle (0-1)"
+    },
+    "palette": {
+      "kind": "palette",
+      "value": "sampler2D",
+      "label": "Palette",
+      "description": "Five evenly spaced samples of this ramp are the wipe colours",
+      "gradient": {
+        "kind": "static",
+        "step_seconds": 0.0,
+        "fade_seconds": 0.0,
+        "pinned": -1,
+        "set": [
+          {
+            "space": "oklab",
+            "method": "linear",
+            "stops": "(0.6,0.19,0.05) (0.72,0.07,0.14) (0.68,-0.12,0.04) (0.58,-0.06,-0.13) (0.54,0.13,-0.16) (0.6,0.19,0.05)"
+          }
+        ]
+      }
+    }
+  }
+}

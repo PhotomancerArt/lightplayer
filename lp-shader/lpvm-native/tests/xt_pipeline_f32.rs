@@ -1266,9 +1266,8 @@ fn unarmed_float_code_faults_with_a_coprocessor_trap() {
             t.cause
         ),
         RunOutcome::Ok(v) => panic!(
-            "unarmed FP executed instead of faulting (returned {:#010x}) — \
-             the CPENABLE gate is not doing its job",
-            v
+            "unarmed FP executed instead of faulting (returned {v:#010x}) — \
+             the CPENABLE gate is not doing its job"
         ),
     }
 }

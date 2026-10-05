@@ -6,10 +6,10 @@ use dioxus::prelude::*;
 use lpa_studio_core::app::project::format_lp_value;
 use lpa_studio_core::app::project::node::{add_node_menu, gate_add_node_menu, set_import_source};
 use lpa_studio_core::{
-    ControllerId, DirtySummary, LpFeature, ProjectController, ProjectNodeAddress,
-    ProjectNodeStatusTone, ProjectNodeStatusView, ProjectOp, ProjectSlotAddress, ProjectSlotRoot,
-    ProjectSyncPhase, SlotEditOp, SlotPath, UiAction, UiAttachTarget, UiImportablePattern,
-    UiPaneAction, UiPendingEdit, UiPendingEditKind, UiPendingEditPhase, UiStatus,
+    DirtySummary, LpFeature, ProjectNodeAddress, ProjectNodeStatusTone, ProjectNodeStatusView,
+    ProjectSlotAddress, ProjectSlotRoot, ProjectSyncPhase, SlotPath, UiAttachTarget,
+    UiImportablePattern, UiOfferTree, UiPendingEdit, UiPendingEditKind, UiPendingEditPhase,
+    UiStatus,
 };
 use lpa_studio_web_story_macros::story;
 use lpc_model::{GradientConfig, ToLpValue};
@@ -17,7 +17,10 @@ use lpc_model::{GradientConfig, ToLpValue};
 use crate::app::home::target_pick_popover::HardwarePickPopover;
 use crate::app::node::node_story_fixtures::{palette_cycle, sunset_gradient};
 use crate::app::project::{ProjectPane, ProjectSettingsSection};
-use crate::app::story_fixtures::project_editor_fixture;
+use crate::app::story_fixtures::{
+    project_editor_fixture, project_save_revert_offers, revert_edit_offers,
+};
+use crate::core::OffersProvider;
 
 #[story(
     description = "Clean project: the project name as title, 'Project' kind label, no chips, no header actions (adding lives in the node list's dashed 'Add node…' row), quiet 'i' detail trigger (the status word lives in the popup); the node tree is the whole pane body — no 'Node tree' heading and no Refresh/Disconnect strip (P6 sidebar tidy)."
@@ -450,7 +453,6 @@ pub(crate) fn empty_project() -> Element {
     let mut view = project_editor_fixture(ProjectSyncPhase::Ready);
     view.tree.roots = Vec::new();
     view.nodes = Vec::new();
-    view.header_actions = Vec::new();
     view.add_node_menu = Some(add_node_menu(&UiAttachTarget::ProjectRoot));
 
     rsx! {
@@ -510,42 +512,32 @@ fn StoryPane(
     view.debug_overrides = debug_overrides;
     view.edits_in_flight = edits_in_flight;
     view.pending_edits = pending_edits;
-    view.header_actions = if actions {
-        header_actions()
+    // The header's Save / Revert are the view's `project/*` offers, which
+    // the shell would provide; the story provides them itself.
+    let mut offers = if actions {
+        project_save_revert_offers()
     } else {
-        Vec::new()
+        UiOfferTree::new()
     };
+    // Each change-list row's revert presses `project/revert-edit`.
+    offers.append(revert_edit_offers(&view.pending_edits));
     // Mirror the controller (review round): no header add action — the
     // picker data rides the view and renders as the tree's add row.
     view.add_node_menu = Some(add_node_menu(&UiAttachTarget::ProjectRoot));
 
     rsx! {
         div { class: "tw:max-w-[320px]",
-            ProjectPane {
-                view,
-                status: UiStatus::good("Ready"),
-                on_action: move |_| {},
-                initially_open,
-                add_picker_initially_open: add_picker_open,
+            OffersProvider { offers,
+                ProjectPane {
+                    view,
+                    status: UiStatus::good("Ready"),
+                    on_action: move |_| {},
+                    initially_open,
+                    add_picker_initially_open: add_picker_open,
+                }
             }
         }
     }
-}
-
-/// The same Save / Revert-to-saved pair the project controller produces while
-/// persisted edits are pending.
-fn header_actions() -> Vec<UiPaneAction> {
-    vec![
-        UiPaneAction::new("save", project_action(ProjectOp::SaveOverlay)),
-        UiPaneAction::new(
-            "revert",
-            project_action(ProjectOp::RevertAllEdits).with_label("Revert to saved"),
-        ),
-    ]
-}
-
-fn project_action(op: ProjectOp) -> UiAction {
-    UiAction::from_op(ControllerId::new(ProjectController::NODE_ID), op)
 }
 
 /// One change-list entry with the same per-entry revert action the project
@@ -569,10 +561,7 @@ fn pending_edit(
         kind,
         old_value: None,
         phase,
-        revert: Some(UiAction::from_op(
-            ControllerId::new(ProjectController::NODE_ID),
-            SlotEditOp::Revert { address },
-        )),
+        key: Some(format!("{}:def:{}", address.node, address.path)),
     }
 }
 
@@ -588,8 +577,10 @@ fn file_deletion_edit(node_label: &str, file_path: &str) -> UiPendingEdit {
         },
         UiPendingEditPhase::Persisted,
     );
-    // File rows carry the artifact path where slot rows carry the slot path.
+    // File rows carry the artifact path where slot rows carry the slot path,
+    // and are reverted by it.
     edit.slot_path_display = file_path.to_string();
+    edit.key = Some(format!("file:{file_path}"));
     edit
 }
 

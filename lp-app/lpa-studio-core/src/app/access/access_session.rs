@@ -131,11 +131,13 @@ pub enum AccessStep {
         added_at: u64,
     },
     /// Change the device's access list (the panel, or Undo). `bluetooth` is
-    /// the switch it sets, if any.
+    /// the switch it sets, if any; `keep` the salts never dropped to make
+    /// room (this browser's own keys).
     Change {
         ops: Vec<AccessOp>,
         added_at: u64,
         bluetooth: Option<bool>,
+        keep: Vec<[u8; SALT_BYTES]>,
     },
 }
 
@@ -360,6 +362,21 @@ impl AccessSession {
             self.auto_spent = true;
             self.prompt = Some(PromptReason::NoPasswordKnown);
         }
+        // A grant answers a sheet raised while the link was locked (a
+        // reconnect, a dropped link, or the board opening): a stale
+        // "no password" or "refused" prompt does not survive it. It does
+        // NOT answer "this needs edit" — `logged_in`'s rule for the same
+        // outcome — or a login the user asked for, so those stay up.
+        if matches!(self.phase, AccessPhase::Granted { .. })
+            && matches!(
+                self.prompt,
+                Some(PromptReason::NoPasswordKnown) | Some(PromptReason::Refused { .. })
+            )
+        {
+            self.prompt = None;
+            self.last_refusal = None;
+            self.challenge = None;
+        }
     }
 
     /// A login conversation ended.
@@ -372,7 +389,12 @@ impl AccessSession {
     ) {
         use super::login_attempt::LoginAttemptOutcome as Outcome;
         self.busy = false;
-        if !was_typed {
+        // Only an automatic try that did not unlock is spent. One that did
+        // is what unlocks every later window too: a silent reconnect is a
+        // new link holding nothing, and the board drops it at its unlock
+        // deadline unless it is unlocked again — which Web Bluetooth answers
+        // with another reconnect, forever.
+        if !was_typed && !matches!(outcome, Outcome::Granted { .. }) {
             self.auto_spent = true;
         }
         let same_window = self.window == Some(window);
@@ -550,6 +572,51 @@ mod tests {
         );
         assert_eq!(session.prompt, None);
         assert_eq!(session.next_step(Millis(40), &held, &[]), None);
+    }
+
+    /// Bluefy, 2026-10-02: a silent reconnect after a held key had unlocked
+    /// the board came up locked and stayed locked, so the board dropped it
+    /// at its unlock deadline, Web Bluetooth reconnected, and the loop never
+    /// ended — one native "disconnected" alert per lap. A key that unlocked
+    /// the board is not a spent guess: every new window is unlocked with it
+    /// again, silently.
+    #[test]
+    fn a_reconnect_after_an_automatic_unlock_is_unlocked_again() {
+        let mut session = AccessSession::default();
+        let held = [held_key()];
+        let first = window(1, 10);
+        session.observe(Some(first));
+        session.started(&AccessStep::Check(first));
+        session.checked(first, true, None, true);
+        let step = session.next_step(Millis(11), &held, &[]).unwrap();
+        session.started(&step);
+        session.logged_in(first, &granted_edit(), false, Millis(20));
+
+        for (link, at) in [(2, 5_000), (3, 9_000)] {
+            session.observe(None);
+            let next = window(link, at);
+            session.observe(Some(next));
+            let step = session.next_step(Millis(at), &held, &[]).unwrap();
+            assert_eq!(step, AccessStep::Check(next));
+            session.started(&step);
+            session.checked(next, true, None, true);
+            assert_eq!(session.prompt, None, "no sheet on a silent reconnect");
+            let step = session.next_step(Millis(at + 1), &held, &[]).unwrap();
+            assert_eq!(
+                step,
+                AccessStep::Login {
+                    window: next,
+                    held: held.to_vec(),
+                    passwords: Vec::new(),
+                    typed: None,
+                    challenge: None,
+                },
+                "window {link} is unlocked with the key that unlocked the last"
+            );
+            session.started(&step);
+            session.logged_in(next, &granted_edit(), false, Millis(at + 20));
+            assert!(matches!(session.phase, AccessPhase::Granted { .. }));
+        }
     }
 
     #[test]
@@ -808,6 +875,77 @@ mod tests {
         );
     }
 
+    /// Bluefy, 2026-10-02: a sheet raised while the board was locked
+    /// survived the board being switched to "anyone nearby can play", a
+    /// disconnect/reconnect, and the next hello — so an open board that
+    /// grants Play still showed the "no password" sheet. `checked` set
+    /// `phase = Granted` but never cleared `prompt`/`last_refusal`/
+    /// `challenge`; `logged_in`'s Granted arm already does.
+    #[test]
+    fn a_board_that_opens_while_the_sheet_is_up_closes_it_on_the_next_hello() {
+        let mut session = AccessSession::default();
+        let w1 = window(1, 10);
+        session.observe(Some(w1));
+        session.started(&AccessStep::Check(w1));
+        session.checked(w1, true, None, true);
+        let step = session.next_step(Millis(11), &[held_key()], &[]).unwrap();
+        session.started(&step);
+        let challenge = lpc_access::Challenge {
+            nonce: [9; 32],
+            offers: Vec::new(),
+        };
+        session.logged_in(
+            w1,
+            &LoginAttemptOutcome::NothingMatched {
+                challenge: challenge.clone(),
+            },
+            false,
+            Millis(100),
+        );
+        assert_eq!(session.prompt, Some(PromptReason::NoPasswordKnown));
+
+        // The link drops; the board is opened; the next hello grants Play
+        // with no login at all.
+        session.observe(None);
+        let w2 = window(2, 5_000);
+        session.observe(Some(w2));
+        session.started(&AccessStep::Check(w2));
+        session.checked(w2, true, Some(Tier::Play), false);
+        assert_eq!(session.prompt, None, "the board opened; the sheet closes");
+        assert_eq!(
+            session.phase,
+            AccessPhase::Granted {
+                tier: Tier::Play,
+                label: None
+            }
+        );
+    }
+
+    /// The kept case: a play grant does not answer "this needs edit", so a
+    /// `NeedsEdit` prompt survives a play grant from `checked` too, exactly
+    /// as it already does from `logged_in`.
+    #[test]
+    fn a_needs_edit_prompt_survives_a_play_grant_from_checked() {
+        let mut session = AccessSession::default();
+        let w = window(1, 10);
+        session.observe(Some(w));
+        session.started(&AccessStep::Check(w));
+        session.checked(w, true, Some(Tier::Play), false);
+        session.needs_edit();
+        assert_eq!(session.prompt, Some(PromptReason::NeedsEdit));
+
+        session.observe(None);
+        let w2 = window(2, 5_000);
+        session.observe(Some(w2));
+        session.started(&AccessStep::Check(w2));
+        session.checked(w2, true, Some(Tier::Play), false);
+        assert_eq!(
+            session.prompt,
+            Some(PromptReason::NeedsEdit),
+            "a play grant does not answer 'this needs edit'"
+        );
+    }
+
     #[test]
     fn a_trusted_link_needs_nothing() {
         let mut session = AccessSession::default();
@@ -829,6 +967,14 @@ mod tests {
         LoginWindow {
             link: LinkId(link),
             hello_at: Millis(at),
+        }
+    }
+
+    fn granted_edit() -> LoginAttemptOutcome {
+        LoginAttemptOutcome::Granted {
+            tier: Tier::Edit,
+            label: "Yona's MacBook".to_string(),
+            password_index: None,
         }
     }
 

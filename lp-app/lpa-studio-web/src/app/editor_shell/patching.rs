@@ -23,8 +23,9 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    NodeId, PatchPulseOp, PatchPulseSubject, PatchVerbKind, PatchVerbWindow, ProjectController,
-    ProjectEditorOp, ProjectEditorView, UiAction, UiPatchSurface, UiPatchTarget,
+    NodeId, OfferArgs, PATCH_REDO_VERB, PATCH_REVERSE_VERB, PATCH_ROTATE_VERB, PATCH_STEPS_PARAM,
+    PATCH_UNDO_VERB, PatchPulseOp, PatchPulseSubject, ProjectController, ProjectEditorOp,
+    ProjectEditorView, UiAction, UiOfferTree, UiPatchSurface, UiPatchTarget,
 };
 
 use super::arrange::{PackSlots, ProjectCanvasHost, refresh_pack_slots};
@@ -32,13 +33,18 @@ use super::toolbar::{StatusKind, ToolbarGroup, ToolbarItem, ToolbarStrip};
 use super::{mapping_assets, prefetch_editor_meta};
 use crate::app::patch::patch_panel::PatchPanel;
 use crate::app::patch::verb_ui::{
-    dispatch_assign, dispatch_verb, next_free_segment, port_window, resize_segment,
-    selection_stride, shift_segment, target_is_unmapped,
+    next_free_segment, press_assign, press_history, press_subject_verb, resize_segment,
+    shift_segment, target_is_unmapped,
 };
 use crate::app::workbench::panels::prefetch_bodies;
+use crate::core::use_offers;
 
 /// Which patch verb is ARMED, if any — the generalized swap arm (R3's
 /// selection model v3: linking is explicit, plain clicks never write).
+///
+/// The arm is a web gesture; what completes it is a press of core's offer
+/// (`…/patch/assign`, `…/patch/swap-ports`) with BOTH picks as args — the
+/// one the arm holds and the one the second click names.
 ///
 /// `Assign` carries NO payload on purpose: both ends resolve at COMPLETION
 /// from the current selection plus the thing clicked. The selection moves
@@ -49,8 +55,9 @@ use crate::app::workbench::panels::prefetch_bodies;
 pub(crate) enum ArmedVerb {
     /// The next counterpart click links the selection to what it hits.
     Assign,
-    /// The next port click swaps that port with this armed window.
-    Swap(PatchVerbWindow),
+    /// The next port click swaps it with this armed port: the output's
+    /// node and the port's key.
+    Swap { output: NodeId, port: u32 },
 }
 
 impl ArmedVerb {
@@ -61,7 +68,9 @@ impl ArmedVerb {
             Self::Assign => {
                 "Assign armed — click the counterpart (an object, or a port / free segment) to link it (Esc cancels)"
             }
-            Self::Swap(_) => "Swap armed — click the other port in the Outputs panel (Esc cancels)",
+            Self::Swap { .. } => {
+                "Swap armed — click the other port in the Outputs panel (Esc cancels)"
+            }
         }
     }
 }
@@ -301,6 +310,8 @@ pub fn PatchingShellCenter(
         mut segment_size,
         summon_outputs: _,
     } = use_context::<PatchingUi>();
+    // Core's offer tree: every key and button below presses a patch offer.
+    let offers = use_offers();
     // The pulse's echo guard: dispatch only when the mapped subject
     // actually changes (sweep-with-clear lives in the controller; this
     // just keeps renders from re-sending the same subject).
@@ -374,15 +385,24 @@ pub fn PatchingShellCenter(
                     }
                 }
                 PatchKeyAction::Reverse => {
-                    dispatch_verb(&on_action, &surface, &selection, PatchVerbKind::Reverse);
-                }
-                PatchKeyAction::Rotate { steps } => {
-                    let stride = selection_stride(&surface, &selection);
-                    dispatch_verb(
+                    press_subject_verb(
                         &on_action,
+                        &offers.peek(),
                         &surface,
                         &selection,
-                        PatchVerbKind::Rotate { steps, stride },
+                        PATCH_REVERSE_VERB,
+                        OfferArgs::new(),
+                    );
+                }
+                // The stride is the offer's: core steps by the object's own.
+                PatchKeyAction::Rotate { steps } => {
+                    press_subject_verb(
+                        &on_action,
+                        &offers.peek(),
+                        &surface,
+                        &selection,
+                        PATCH_ROTATE_VERB,
+                        OfferArgs::new().with(PATCH_STEPS_PARAM, steps.to_string()),
                     );
                 }
                 PatchKeyAction::ArmAssign => arm_assign(&surface, &selection, &mut armed),
@@ -414,10 +434,10 @@ pub fn PatchingShellCenter(
                     }
                 }
                 PatchKeyAction::Undo => {
-                    dispatch_verb(&on_action, &surface, &selection, PatchVerbKind::Undo);
+                    press_history(&on_action, &offers.peek(), PATCH_UNDO_VERB);
                 }
                 PatchKeyAction::Redo => {
-                    dispatch_verb(&on_action, &surface, &selection, PatchVerbKind::Redo);
+                    press_history(&on_action, &offers.peek(), PATCH_REDO_VERB);
                 }
             }
         });
@@ -425,12 +445,14 @@ pub fn PatchingShellCenter(
     let armed_verb = armed.read().clone();
     let groups = patch_toolbar(&surface);
     let on_item = {
-        let surface = surface.clone();
-        let single = selection.single().cloned();
         let on_action = on_action;
         move |id: &'static str| match id {
-            "patch-undo" => dispatch_verb(&on_action, &surface, &single, PatchVerbKind::Undo),
-            "patch-redo" => dispatch_verb(&on_action, &surface, &single, PatchVerbKind::Redo),
+            "patch-undo" => {
+                press_history(&on_action, &offers.peek(), PATCH_UNDO_VERB);
+            }
+            "patch-redo" => {
+                press_history(&on_action, &offers.peek(), PATCH_REDO_VERB);
+            }
             _ => {}
         }
     };
@@ -489,10 +511,15 @@ pub(crate) fn arm_swap(
         return;
     }
     if let Some(UiPatchTarget::Port { node, port }) = selection
-        && let Some(output) = surface.outputs.iter().find(|output| output.node == *node)
-        && let Some(window) = port_window(output, *port)
+        && surface
+            .outputs
+            .iter()
+            .any(|output| output.node == *node && output.bay.ports.iter().any(|p| p.key == *port))
     {
-        armed.set(Some(ArmedVerb::Swap(window)));
+        armed.set(Some(ArmedVerb::Swap {
+            output: *node,
+            port: *port,
+        }));
     }
 }
 
@@ -616,6 +643,7 @@ pub(crate) fn assign_subject_target(
 /// without one this was just a plain click.
 pub(crate) fn complete_assign_on_object(
     on_action: &EventHandler<UiAction>,
+    offers: &UiOfferTree,
     surface: &UiPatchSurface,
     selection: &Option<UiPatchTarget>,
     ui: Option<PatchingUi>,
@@ -643,7 +671,7 @@ pub(crate) fn complete_assign_on_object(
         return;
     };
     let subject = assign_subject_target(surface, target);
-    if dispatch_assign(on_action, surface, &subject, output, *start) {
+    if press_assign(on_action, offers, surface, &subject, output, *start) {
         // The nudged size was fine-tuning for the segment this write just
         // spent; the next one sizes itself off the next object again.
         let mut segment_size = ui.segment_size;
@@ -990,11 +1018,10 @@ mod tests {
     fn the_banner_names_the_armed_verb() {
         assert!(ArmedVerb::Assign.banner().starts_with("Assign armed"));
         assert!(
-            ArmedVerb::Swap(PatchVerbWindow {
-                output_name: None,
-                start: 0,
-                lamps: 30,
-            })
+            ArmedVerb::Swap {
+                output: NodeId::new(10),
+                port: 0,
+            }
             .banner()
             .starts_with("Swap armed")
         );

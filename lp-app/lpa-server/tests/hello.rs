@@ -79,7 +79,7 @@ fn server_with_injected_hello() -> (
     );
 
     server.set_hello_identity(
-        HelloIdentity::new("hello-test", "abc123456789", true, "debug")
+        HelloIdentity::new("hello-test", "2026.10.03-1", "abc123456789", true, "debug")
             // A boot-time hint only: dispatch re-reads the root identity file.
             .with_device_uid(Some("dev0000000000000001".to_string())),
     );
@@ -90,6 +90,7 @@ fn server_with_injected_hello() -> (
         "an embedder that never said it can pack does not name a pack format"
     );
     assert_eq!(hello.build.package, "hello-test");
+    assert_eq!(hello.build.version, "2026.10.03-1");
     assert_eq!(hello.build.commit, "abc123456789");
     assert!(hello.build.dirty);
     assert_eq!(hello.build.profile, "debug");

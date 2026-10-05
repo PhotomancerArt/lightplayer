@@ -6,11 +6,11 @@ use lpc_wire::{NodeRuntimeStatus, WireEntryState};
 
 use crate::app::project::slot::SlotEditJoin;
 use crate::{
-    ControllerId, DirtySummary, NodeRevertOp, ProjectController, ProjectEditorOp,
-    ProjectEditorTarget, ProjectNodeAddress, ProjectNodeStatusTone, ProjectNodeStatusView,
-    ProjectNodeTarget, ProjectSlotAddress, ProjectSlotRoot, SlotController, UiAction,
-    UiAssetEditor, UiConfigSlot, UiConfigSlotBody, UiNodeChild, UiNodeFace, UiNodeHeader,
-    UiNodeSection, UiNodeTab, UiNodeView, UiPaneAction, UiProductPreview, UiProductRef,
+    ControllerId, DirtySummary, NodeCopyOp, NodeRevertOp, OfferPath, ProjectController,
+    ProjectEditorOp, ProjectEditorTarget, ProjectNodeAddress, ProjectNodeStatusTone,
+    ProjectNodeStatusView, ProjectNodeTarget, ProjectSlotAddress, ProjectSlotRoot, SlotController,
+    UiAction, UiAssetEditor, UiConfigSlot, UiConfigSlotBody, UiNodeChild, UiNodeFace, UiNodeHeader,
+    UiNodeSection, UiNodeTab, UiNodeView, UiOffer, UiOfferTree, UiProductPreview, UiProductRef,
     UiProductTrackingState, UiSlotAsset, UiStatus,
 };
 
@@ -170,6 +170,8 @@ impl NodeController {
             &[],
             // No project context: focus is the whole Default-intent policy.
             &|node| node.state().focused,
+            // No project context, no offers to read: the tree is dropped.
+            &mut UiOfferTree::new(),
         )
     }
 
@@ -189,7 +191,12 @@ impl NodeController {
     /// `remove_action` resolves a node address into its delete-node header
     /// action (confirmation pre-composed from the removal pre-flight); it
     /// closes over project state exactly like `asset_editor`, and `None`
-    /// keeps the header without a delete affordance (unresolvable site).
+    /// keeps the card without a delete affordance (unresolvable site).
+    ///
+    /// The card's verbs are not on the DTO: this node's and every
+    /// descendant's are published into `offers` at
+    /// `project/<node tree path>/<verb>`, in tree pre-order (a node's own
+    /// verbs before its children's), and the card asks the tree for them.
     pub(in crate::app::project) fn ui_node_with_product_previews(
         &self,
         product_preview: &impl Fn(&UiProductRef) -> Option<UiProductPreview>,
@@ -199,7 +206,11 @@ impl NodeController {
         remove_action: &impl Fn(&ProjectNodeAddress) -> Option<UiAction>,
         always_live: &[UiProductRef],
         subscribes: &impl Fn(&NodeController) -> bool,
+        offers: &mut UiOfferTree,
     ) -> UiNodeView {
+        // The children's verbs are collected on the side and published
+        // after this node's own, which need the subtree's dirty summary.
+        let mut child_offers = UiOfferTree::new();
         let mut children = self.ui_children_with_product_previews(
             product_preview,
             edits,
@@ -208,6 +219,7 @@ impl NodeController {
             remove_action,
             always_live,
             subscribes,
+            &mut child_offers,
         );
         // Dirty aggregates over the FULL child list, before any face-driven
         // suppression: a playlist face hides non-active child cards, but
@@ -260,13 +272,16 @@ impl NodeController {
         // whose face failed to derive keeps its rows reachable. Ordering
         // is the whole trick: filtering earlier would starve the lift.
         retire_face_claimed_debug_rows(&mut sections, face.as_ref());
+        publish_node_offers(
+            offers,
+            &self.address,
+            &dirty,
+            remove_action(&self.address),
+            ask_agent_offer(self, face.as_ref()),
+        );
+        offers.append(child_offers);
         let mut view = UiNodeView::new(header, vec![UiNodeTab::main(sections)])
             .with_node_id(self.address.to_string())
-            .with_header_actions(node_header_actions(
-                &self.address,
-                &dirty,
-                remove_action(&self.address),
-            ))
             .with_children(children);
         view.focused = self.state.focused;
         view.action = Some(node_focus_action(self));
@@ -311,7 +326,6 @@ impl NodeController {
     ) -> Option<UiNodeFace> {
         super::node_face_builder::kind_face(
             self.node_ty()?,
-            self.address(),
             sections,
             children,
             self.error_detail(),
@@ -657,6 +671,7 @@ impl NodeController {
         remove_action: &impl Fn(&ProjectNodeAddress) -> Option<UiAction>,
         always_live: &[UiProductRef],
         subscribes: &impl Fn(&NodeController) -> bool,
+        offers: &mut UiOfferTree,
     ) -> Vec<UiNodeChild> {
         self.children
             .iter()
@@ -678,6 +693,7 @@ impl NodeController {
                     subscribes,
                 );
                 child.embed_asset_editors(&mut view.sections, asset_editor);
+                let mut nested_offers = UiOfferTree::new();
                 view.children = child.ui_children_with_product_previews(
                     product_preview,
                     edits,
@@ -686,6 +702,7 @@ impl NodeController {
                     remove_action,
                     always_live,
                     subscribes,
+                    &mut nested_offers,
                 );
                 // Dirty rolls up the FULL nested-child list before the face
                 // derivation may suppress non-active playlist children —
@@ -708,8 +725,14 @@ impl NodeController {
                 // Same retirement as the top-level build path: the face
                 // claims its Debug rows only after it has read them.
                 retire_face_claimed_debug_rows(&mut view.sections, view.face.as_ref());
-                view.header_actions =
-                    node_header_actions(&child.address, &view.dirty, remove_action(&child.address));
+                publish_node_offers(
+                    offers,
+                    &child.address,
+                    &view.dirty,
+                    remove_action(&child.address),
+                    ask_agent_offer(child, view.face.as_ref()),
+                );
+                offers.append(nested_offers);
                 // A container child keeps its picker: since the flat-root
                 // reversal a playlist card is always nested, so its "+
                 // entry" chip only exists if it rides the child DTO.
@@ -887,21 +910,31 @@ fn retire_face_claimed_debug_rows(
     });
 }
 
-/// Contextual node-header actions (pane grammar actions slot, M3 UX gate
-/// feedback): the subtree batch revert ([`NodeRevertOp`]) with the same
-/// "revert" icon token as the project header's Revert-to-saved, present only
-/// while the header's subtree [`DirtySummary`] announces pending edits, plus
-/// the UNGATED delete-node action when the caller resolved one (its
-/// confirmation copy rides the action's `ActionMeta`, like
-/// `HomeOp::DeletePackage`).
-fn node_header_actions(
+/// Publish one node card's verbs (the pane grammar's actions slot, M3 UX
+/// gate feedback) at `project/<node tree path>/<verb>`:
+///
+/// - `revert`: the subtree batch revert ([`NodeRevertOp`]), with the same
+///   "revert" icon token as the project header's Revert to saved, only
+///   while the subtree [`DirtySummary`] announces pending edits;
+/// - `remove`: the UNGATED delete-node action, when the caller resolved
+///   one (its consequence and summary ride its `ActionMeta`);
+/// - `ask-agent`: the hand-off to a GLSL shader's own agent
+///   ([`ask_agent_offer`]), on shader cards only;
+/// - `copy`: put the node (its saved def and assets) on the clipboard as an
+///   `lp.node` envelope ([`NodeCopyOp`]), on every card. The detail popup's
+///   "Copy JSON" row presses it, so a header never draws it
+///   ([`crate::is_header_verb`]).
+fn publish_node_offers(
+    offers: &mut UiOfferTree,
     node: &ProjectNodeAddress,
     dirty: &DirtySummary,
     remove: Option<UiAction>,
-) -> Vec<UiPaneAction> {
-    let mut actions = Vec::new();
+    ask_agent: Option<UiOffer>,
+) {
+    let at = OfferPath::project_node(node);
     if !dirty.is_clean() {
-        actions.push(UiPaneAction::new(
+        offers.publish(UiOffer::new(
+            at.clone().child("revert"),
             "revert",
             UiAction::from_op(
                 ControllerId::new(ProjectController::NODE_ID),
@@ -910,9 +943,84 @@ fn node_header_actions(
         ));
     }
     if let Some(remove) = remove {
-        actions.push(UiPaneAction::new("remove", remove));
+        offers.publish(UiOffer::new(at.child("remove"), "remove", remove));
     }
-    actions
+    if let Some(ask_agent) = ask_agent {
+        offers.publish(ask_agent);
+    }
+    offers.publish(UiOffer::new(
+        OfferPath::project_node(node).child(COPY_NODE_VERB),
+        "copy",
+        UiAction::from_op(
+            ControllerId::new(ProjectController::NODE_ID),
+            NodeCopyOp { node: node.clone() },
+        ),
+    ));
+}
+
+/// The verb segment of copying a node to the clipboard.
+pub const COPY_NODE_VERB: &str = "copy";
+
+/// The verb segment of the hand-off to a shader's own agent.
+pub const ASK_AGENT_VERB: &str = "ask-agent";
+
+/// The `request` parameter of [`ASK_AGENT_VERB`]: the draft put in the
+/// shader agent's composer.
+pub const ASK_AGENT_REQUEST_PARAM: &str = "request";
+
+/// `project/<node>/ask-agent`: the hand-off from the app chat (or anyone)
+/// to one shader's own agent. Pressing it focuses the card, opens its agent
+/// section and puts `request` in the composer — it never sends, so the
+/// user reads the request and presses Send. Routine: nothing is lost, so
+/// the app agent presses it freely when asked to change shader code.
+///
+/// Only a shader card whose code is GLSL has an agent; every other node
+/// has no such verb.
+fn ask_agent_offer(node: &NodeController, face: Option<&UiNodeFace>) -> Option<UiOffer> {
+    let Some(UiNodeFace::Shader(shader)) = face else {
+        return None;
+    };
+    if shader.code_drawer.as_ref()?.kind != crate::UiAssetEditorKind::Glsl {
+        return None;
+    }
+    let target = ProjectEditorTarget::addressed_node(node.target().clone()).node_id();
+    let address = node.address().to_string();
+    let label = node.label().to_string();
+    let action = move |draft: Option<String>| {
+        UiAction::from_op(
+            target.clone(),
+            ProjectEditorOp::AskAgent {
+                node: address.clone(),
+                draft,
+            },
+        )
+        .with_label(format!("Ask {label}'s shader agent"))
+        .with_summary(format!(
+            "Open {label}'s shader agent with the request typed in; you press Send."
+        ))
+    };
+    let unbound = action(None);
+    let params = vec![
+        crate::OfferParam::text(
+            ASK_AGENT_REQUEST_PARAM,
+            "request",
+            "what to change in this shader, in the user's words",
+        )
+        .optional(),
+    ];
+    Some(UiOffer::with_params(
+        OfferPath::project_node(node.address()).child(ASK_AGENT_VERB),
+        "agent",
+        params,
+        crate::OfferBinder::new(move |args| {
+            Ok(action(
+                args.text(ASK_AGENT_REQUEST_PARAM)
+                    .filter(|text| !text.is_empty())
+                    .map(str::to_string),
+            ))
+        }),
+        unbound,
+    ))
 }
 
 fn node_focus_action(node: &NodeController) -> UiAction {

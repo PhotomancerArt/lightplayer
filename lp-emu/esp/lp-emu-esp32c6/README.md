@@ -218,12 +218,19 @@ board:
   and programs the page table for them. It is **not** an `esptool` image
   layout; a ROM-up boot reads a real merged image through the real bootloader
   and gets the real offsets, and `tests/rom_up_boot.rs` checks that the two
-  agree.
+  agree. It also writes the C6's **partition table** at `0x8000`
+  (`flash::c6_partition_table_bytes`, MD5 row and all) when the chip holds
+  none, because the firmware reads `lpfs`'s offset and length from that table
+  at boot; a chip that already holds one keeps it. The table is staged, not
+  validated against the app. `lp-cli/tests/c6_partition_table_parity.rs`
+  compiles `lp-fw/fw-esp32c6/partitions.csv` with espflash's encoder and
+  asserts the two are byte-equal (the fence keeps this crate from reading
+  the product's file).
 - **`seed_rom_flash_chip`** writes the chip size into
   `rom_spiflash_legacy_data->chip_size`, in place of the bootloader's
   `esp_rom_spiflash_config_param`. The ROM's own default chip is **2 MiB**
   (`rom_default_spiflash_legacy_data` at `0x4087_fa08`), `SPI_read_data`
-  refuses any read past `chip_size`, and `lpfs` starts at `0x0031_0000` —
+  refuses any read past `chip_size`, and `lpfs` starts at `0x0035_0000` —
   so without this every filesystem read returns error 1 for a reason that has
   nothing to do with the filesystem.
 
@@ -537,6 +544,21 @@ behaviour. Filed at
 `docs/defects/2026-09-09-the-esptool-stub-reads-i2c0-a-block-the-c6-boot-set-does-not-map.md`.
 `--no-stub` is the path that works, and is what the recipe and the gate use.
 
+### Reading it back, and the C6 repartition's migration
+
+The download console is READ as well as written now (2026-10, the C6
+repartition): `lp-cli/tests/emu_layout_migration.rs` drives the real
+`lp-cli hardware lpfs save|migrate|preflight` through espflash's stub over a
+pty and checks the chip file byte for byte (`just test-emu-layout-migration`),
+and `just walk-migration-emu <scenario>` drives real Studio's Update firmware
+— esptool-js reads the board's layout, the migration writes it — against an
+`emu serve` board seeded from a "fielded" chip (this tree's firmware on the
+pre-2026-10 table). Both run non-strict: the stub reads one unmapped block.
+A `power-cycle` on the control channel samples the board's strapping pins,
+not the last reset's strap, so a cable pulled after a download dance comes
+back booting from flash. The record is
+`docs/reports/2026-10-02-c6-migration-emulator-walk.md`.
+
 ## Flash, and the cache window
 
 The chip is a `flash::FlashImage`: read, program (an `&=`, because a NOR cell
@@ -635,7 +657,7 @@ milestone owns.
 | `ASSIST_DEBUG` | `0x600C_2000` | accept | `cpu0.debug_mode` pinned 0 (no debugger: watchpoints arm, `wfi` runs). `cpu0.rcd_pdebugpc` (+0x48) is where the ROM reads the `Saved PC:` it prints — and it prints nothing when the register is 0, which is why a power-on boot has no such line. A **watchdog** reboot leaves the hart's PC there; a `chip_rst` one does not, deliberately (`ResetCause::records_saved_pc`), and a power cycle never does. The block stays `Domain::Hp` and the reset path pokes the PC back **after** the restore: the value is produced by the reset event, not carried across it by a block, and giving the block an LP domain would carry its fifty other registers along as a side effect |
 | `GPIO` | `0x6009_1000` | modelled (M5 P2) | a routing **view** over the bus's signal fabric: `func_out_sel_cfg[n]` routes pad `n` to `out_sel` (128 = follow `GPIO_OUT[n]`, `inv_sel` inverts, `oen_sel` recorded and reported as `oe=`, never gated on), `out`/`out_w1ts`/`out_w1tc` are the output bitmap a `GPIO_OUT` pad follows, `enable`/`w1ts`/`w1tc` the OE bitmap. The `w1ts`/`w1tc` registers fold into `out`/`enable` and read back 0 (write-only in the PAC). Since M2 P1 it is a **two-way** view: `in_` is each pad's resolved fabric level for the pads whose input enable is set, `pin[n].int_type` is decoded (0 disable / 1 posedge / 2 negedge / 3 any edge / 4 low level / 5 high level, the PAC's own numbering), `status` is the sticky latch with `status_w1ts`/`status_w1tc` over it (write-only, read back 0), `pcpu_int` is `status` gated by `pin[n]` bit 13 (`int_ena` bit 0), and source **30** is held high as a LEVEL while any `pcpu_int` bit is pending. `pcpu_nmi_int` and source 31 are **not** raised (esp-hal never sets `int_ena` bit 14 on this chip); `in1`/`status1`/`pcpu_int1` read 0 — the C6 has 31 pads. Per-register grades (the file header's table; `--strict-grade`): the registers above plus `strap` and `func*_out_sel_cfg` *documented*, everything else *modeled*, nothing *measured* until M2 P2's transcript. Everything else is still a `RegFile`. A pad is **observed once the guest writes its routing**: seeding 31 routes from the `0x80` reset value would give a boot that drives nothing 31 pads to decode. See "The pin" |
 | `IO_MUX` | `0x6009_0000` | modelled (M2 P1) | the P5 accept block, all 31 pads at reset `0x0800`, plus one seam: `gpio[n].fun_ie` (bit 9) is pushed into the signal fabric as the pad's **input enable**, which is what `GPIO.in_` reads back. Everything else in the word — `fun_wpu`/`fun_wpd` (the *value* of a pull is not modelled), `fun_drv`, `filter_en`, the `slp_*` bits and `mcu_sel` — is accept-and-remember |
-| `PMU`, `LP_AON`, `LP_APM`, `LP_APM0`, `HP_APM`, `MODEM_SYSCON`, `MODEM_LPCON`, `APB_SARADC`, `HP_SYS`, `TEE`, `LP_TEE`, `LP_IO`, `LP_TIMER`, `EXTMEM`, `LP_ANA` | — | accept | written by `esp_hal::init` (`LP_ANA` by the second-stage bootloader instead), read back as written; `LP_AON.store1` carries the calibration value. Eight of them declare **`Domain::Lp`** and so survive a reset: `PMU`, `LP_AON`, `LP_APM`, `LP_APM0`, `LP_TEE`, `LP_IO`, `LP_TIMER`, `LP_ANA` — see "A reset is not a power cycle" |
+| `PMU`, `LP_AON`, `LP_APM`, `LP_APM0`, `HP_APM`, `MODEM_SYSCON`, `MODEM_LPCON`, `APB_SARADC`, `HP_SYS`, `TEE`, `LP_TEE`, `LP_IO`, `LP_TIMER`, `EXTMEM`, `LP_ANA` | — | accept | written by `esp_hal::init` (`LP_ANA` by the second-stage bootloader instead), read back as written; `LP_AON.store1` carries the calibration value, and `LP_AON.sys_cfg` bit 31 (`hpsys_sw_reset`, the ROM's `software_reset`) resets the chip at once as `rst:0x3 (LP_SW_HPSYS)` (`periph/lp_aon.rs`). Eight of them declare **`Domain::Lp`** and so survive a reset: `PMU`, `LP_AON`, `LP_APM`, `LP_APM0`, `LP_TEE`, `LP_IO`, `LP_TIMER`, `LP_ANA` — see "A reset is not a power cycle" |
 | `UART0`, `UART1` | `0x6000_0000/1000` | modelled | 128-byte FIFOs; the shifter drains **at the configured baud in emulated time** (PCR clock line × `clkdiv`; reset `clkdiv = 347 + 3/16` = 115,200 from XTAL, *modeled* "as the ROM boot leaves it"); `rxfifo_full`/`txfifo_empty` as levels (`>`/`<` the `conf1` thresholds, per the TRM), `rxfifo_tout` in bit-times, `tx_done`, `rxfifo_ovf`, `reg_update` pulse; `at_cmd_char_det` never fires (stated, not modelled); sources 43/44. See "UART0 and the outside" |
 | `USB_DEVICE` | `0x6000_F000` | measured on its data path (M6) | the host's side in three states (`--usb-host absent\|attached\|attached-idle`, the transitions for P3's control channel): **absent** — `sof` never, `free` = 0 for ever after the first `wr_done`, nothing arrives; **attached, port closed** — `int_raw.sof` every 1 ms (*documented*), `fram_num` counts, a committed IN packet is held until the port opens; **attached, draining** — the packet reaches the `usb-sj` stream 100 µs after `wr_done` (*modeled*), `free` returns, `serial_in_empty` and `in_token_rec_in_ep1` rise; host bytes land as ≤ 64 B OUT packets, one resident at a time (*modeled*), `avail` + `serial_out_recv_pkt` + `out_ep1_st.wr_addr/rec_data_cnt`. The DTR/RTS dance → `chip_rst` bit 0 + `MachineRequest::Reset { strap }`. Per-register grades (the file header's table; `--strict-grade`): `ep1`, `ep1_conf` and the four `int_*` registers *measured* — four committed transcripts cover them, and the bits they cover are named there — `fram_num` and `conf0` *documented*, the twenty listed below *modeled*. The PCR reset of the block is **not** modelled (stated). Source 48 |
 | `SPI1` | `0x6000_3000` | modelled | **the legacy flash controller**, against a `flash::FlashImage`: `flash_rdid` (esp-storage's own size probe), the `usr` engine (command/address/dummy/data phases from `user`/`user1`/`user2`/`addr`/`w0..w15`), the dedicated `flash_read`/`pp`/`se`/`be`/`ce`/`wren`/`wrdi`/`rdsr`/`wrsr` bits, and a real status register (WIP always clear, WEL set by `wren` and consumed by a program or erase). Every trigger self-clears and `mst_st` reads idle, which is what `Wait_SPI_Idle` waits for. **Every PAC reset value is carried**, `user = 0x8000_0000` above all: the mask ROM's read path never sets `usr_command` because reset already did |
@@ -1339,10 +1361,12 @@ latency constant was chosen from. `sig_len` and `is_group` *are* derived from
 the frame. Four zero bytes stand where the FCS would be; the air carries no
 FCS and none is computed.
 
-**The ring ends; it does not wrap.** The blob posts ten descriptors and the
-tenth's `next` is NULL. A guest that has stopped draining fills all ten, and
-this guest does **not** re-post them — after ten deliveries every descriptor
-is still the guest's. So the eleventh frame and every one after it is
+**The ring ends; it does not wrap.** The blob posts one descriptor per
+static RX buffer the firmware asked for — esp-radio's default is ten, and the
+product image has asked for four since 2026-10-01 — and the last one's `next`
+is NULL. A guest that has stopped draining fills them all, and this guest
+does **not** re-post them — after a ring's worth of deliveries every
+descriptor is still the guest's. So the next frame and every one after it is
 **dropped, counted and logged once**: `air_frames_delivered` and
 `air_frames_undelivered` on the machine say how many of each, and the first
 drop writes one line.

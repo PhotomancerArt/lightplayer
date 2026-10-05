@@ -6,10 +6,14 @@
 
 pub mod account;
 pub(crate) mod affordance;
+/// The agent chats' shared parts and the app chat's window.
+pub(crate) mod agent;
 #[cfg(feature = "stories")]
 pub(crate) mod board_diagram_stories;
 #[cfg(feature = "stories")]
 pub(crate) mod board_editor_stories;
+/// The ⌘K command palette over the view's offer tree.
+pub mod command_palette;
 #[cfg(feature = "stories")]
 pub(crate) mod design_language_stories;
 pub mod docs;

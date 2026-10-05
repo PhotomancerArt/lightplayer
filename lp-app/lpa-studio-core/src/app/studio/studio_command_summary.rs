@@ -32,7 +32,9 @@ pub fn summarize_command(command: &StudioCommand) -> Option<(String, String)> {
     let summary = match command {
         StudioCommand::RefreshTick => return None,
         StudioCommand::Device(lpa_devices::Input::Event(_)) => return None,
-        StudioCommand::Agent(AgentFeedback::Event { .. }) => return None,
+        StudioCommand::Agent(AgentFeedback::Event { .. } | AgentFeedback::AppEvent { .. }) => {
+            return None;
+        }
         StudioCommand::Action(action) => (
             format!("Action/{}", action_name(action)),
             bounded_debug(action_op_debug(action)),
@@ -64,6 +66,10 @@ pub fn summarize_command(command: &StudioCommand) -> Option<(String, String)> {
         StudioCommand::PageVisibility { visible } => {
             ("PageVisibility".to_string(), format!("visible={visible}"))
         }
+        StudioCommand::BluetoothReach(reach) => {
+            ("BluetoothReach".to_string(), format!("{reach:?}"))
+        }
+        StudioCommand::Place(place) => ("Place".to_string(), bounded_debug(place)),
         StudioCommand::LibraryChanged => ("LibraryChanged".to_string(), String::new()),
         StudioCommand::Shutdown => ("Shutdown".to_string(), String::new()),
     };

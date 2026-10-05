@@ -166,6 +166,14 @@ once, deliberately, with the then-current numbers. Spending it now to absorb
 ordinary feature growth would leave nothing for the change that actually needs
 it, and would silently reduce the space users have for content.
 
+> **Amendment, 2026-10-02 — the reserve is spent.** The Wi-Fi roadmap's
+> decision D1 redrew the map once, as this decision asked: `factory`
+> `0x340000` (3.25 MB), `lpfs` `0xB0000` at `0x350000` (704 KB). Headroom
+> 441,776 B (image 2,966,096 B; it was 183,216 B against 3 MB just before).
+> Every fielded board's files are carried across by a layout migration; see
+> `2026-10-02-c6-repartition-and-layout-migration.md`. There is no further
+> lpfs lever: shrinking it again needs a migration of its own.
+
 ### 5. Overflow is a pre-merge failure, not a post-merge one
 
 Pre-merge CI builds the firmware image, computes headroom against the
@@ -255,6 +263,10 @@ Append; do not editorialize old entries.
 - If WiFi ships: decide TLS vs. LAN-only HTTP early, since it is the
   difference between a ~60 KB and a ~180 KB claim on the budget, and
   re-check the RAM budget before the flash budget.
+  **2026-10-01:** the ESP-NOW radio now asks for lean Wi-Fi driver buffers.
+  That costs 0 B of flash and saves 10,320 B of radio heap
+  (`2026-09-02-esp32c6-ram-split.md`, Amendment 2026-10-01). A station that
+  joins a network should re-check those counts before it ships.
 - Streaming/staged firmware update design, if WiFi delivery is wanted (A/B OTA
   is off the table in 4 MB).
 - Revisit `-Zfmt-debug=none` if on-device debugging becomes painful; the

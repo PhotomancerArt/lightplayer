@@ -132,6 +132,17 @@ pub enum Action {
         /// adopts it).
         #[serde(default)]
         name: Option<String>,
+        /// The card's "Restore files": put the stored backup
+        /// still pending for this board back on it, even though the board
+        /// mounts a (freshly formatted) filesystem of its own — the C6
+        /// repartition's resume rule. `false` is an ordinary update.
+        #[serde(default)]
+        restore_backup: bool,
+    },
+    /// Continue a Flash activity that is waiting on the user's yes to move
+    /// (or restore) the board's files — the layout-migration consent.
+    ConfirmFlashLayout {
+        device: DeviceId,
     },
     /// Reset the board's hardware (DTR/RTS pulse — `ResetKind::Normal`) and
     /// identify what boots. The direct-control verb for a board wedged in a
@@ -202,6 +213,7 @@ impl Action {
             | Self::Identify { device }
             | Self::Push { device }
             | Self::Flash { device, .. }
+            | Self::ConfirmFlashLayout { device }
             | Self::Erase { device }
             | Self::RemoveProject { device }
             | Self::ResetBoard { device }
@@ -277,6 +289,27 @@ pub enum Event {
         device: DeviceId,
         identity: crate::identity::PeerIdentity,
     },
+    /// The platform chooser a [`Command::RequestUsbGrant`] or
+    /// [`Command::RequestBleGrant`] opened has answered. `link` is the id
+    /// the grant attaches as when a device was picked (its
+    /// [`Self::LinkAttached`] arrives first). Journal news only: it moves
+    /// no evidence, but it is the one way the app learns a chooser was
+    /// closed with nothing picked — which no other event says.
+    GrantAnswered {
+        link: LinkId,
+        answer: GrantAnswer,
+    },
+}
+
+/// What the user did with a platform chooser.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub enum GrantAnswer {
+    /// A device was picked; it attached as the event's link.
+    Picked,
+    /// The chooser was closed with nothing picked.
+    Dismissed,
+    /// The platform refused or failed the request.
+    Failed { error: String },
 }
 
 /// The bracket-and-progress vocabulary of an activity's lifetime. The device
@@ -296,6 +329,12 @@ pub enum ActivityMarker {
     Ended {
         kind: ActivityKind,
         outcome: ActivityOutcome,
+    },
+    /// The layout inspection's answer (C6 repartition), reported by the
+    /// effects layer just before the inspect effect's `Ended`. A summary
+    /// only: the plan and the board's files stay with the effects layer.
+    LayoutVerdict {
+        verdict: crate::activity::LayoutVerdict,
     },
 }
 
@@ -370,12 +409,41 @@ pub struct EffectId(pub u64);
 pub enum EffectRequest {
     /// Write a firmware image with esptool. The chip guard and the pre-write
     /// base-MAC read live in the platform layer and are load-bearing.
-    Flash { build_id: String, board_id: String },
+    ///
+    /// `carry`: write the plan the layout inspection staged with the
+    /// effects layer (a migration or a restore) instead of the firmware
+    /// alone. The model never holds the plan — the same rule as [`Self::Push`].
+    Flash {
+        build_id: String,
+        board_id: String,
+        #[serde(default)]
+        carry: bool,
+    },
+    /// Read the board's partition table (and, when its files must move, its
+    /// filesystem) in the bootloader, classify it against the package
+    /// `build_id` writes, and stage the plan — the C6 repartition's layout
+    /// step, run before every Flash. Leaves the chip in ROM download; the
+    /// effects layer reports an `ActivityMarker::LayoutVerdict` and then
+    /// `Ended`. `restore_backup` asks for a pending stored backup to be put
+    /// back even onto a board that mounts files of its own.
+    InspectLayout {
+        build_id: String,
+        #[serde(default)]
+        restore_backup: bool,
+    },
     /// Write the chosen board's runtime manifest to the device's
     /// `/hardware.json` over the app protocol (effective next boot — the old
     /// provision's D4 ruling). Emitted by the Flash activity once the
     /// post-flash hello proves the app protocol is up.
-    WriteBoardManifest { board_id: String },
+    ///
+    /// `layout_verified`: this flash carried the board's files and the
+    /// post-flash hello proved they mounted with the board's own identity —
+    /// the effects layer marks the stored backup completed before writing.
+    WriteBoardManifest {
+        board_id: String,
+        #[serde(default)]
+        layout_verified: bool,
+    },
     /// Run the `lpa-client` push conversation over the borrowed wire: find
     /// the storage dir the board actually runs from, replace it, load it,
     /// and verify the package hash.
@@ -418,7 +486,9 @@ mod tests {
                 build_id: "esp32c6-4mb".to_string(),
                 park_first: false,
                 name: None,
+                restore_backup: false,
             },
+            Action::ConfirmFlashLayout { device },
             Action::SetName {
                 device,
                 name: "n".to_string(),

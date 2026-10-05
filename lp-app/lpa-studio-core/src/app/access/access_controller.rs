@@ -19,11 +19,14 @@
 //!
 //! - **Bluetooth unlock** (untrusted link): by salt with the held keys, else
 //!   remembered passwords, else the Unlock sheet (`access_session.rs`).
-//! - **USB sync** (trusted link, once per connection): read the list, add the
-//!   held keys it is missing, remove retired account keys, and raise
+//! - **USB sync** (trusted link, once per connection): read the list, remove
+//!   retired account keys, add the held keys it is missing (dropping the
+//!   oldest other browser key when the device is full), and raise
 //!   [`AccessAdded`] for the toast when anything was added (plan D6). A
-//!   Bluetooth link unlocked at edit only reads the list.
-//! - **Changes** from the access panel, and Undo.
+//!   Bluetooth link unlocked at edit only reads the list. A sync that fails
+//!   says why in the panel.
+//! - **Changes** from the access panel (Play and Author,
+//!   a key group's trash can, Bluetooth), and Undo.
 
 use core::time::Duration;
 use std::cell::RefCell;
@@ -34,7 +37,7 @@ use lpa_devices::identity::DeviceId;
 use lpa_devices::link::LinkId;
 use lpa_devices::time::Millis;
 use lpa_devices::{Device, Roster};
-use lpc_access::{SALT_BYTES, SecretKind, Tier};
+use lpc_access::{MAX_SECRETS_PER_FILE, SALT_BYTES, Tier};
 
 use super::access_added::AccessAdded;
 use super::access_command::AccessCommand;
@@ -42,14 +45,16 @@ use super::access_session::{AccessPhase, AccessSession, AccessStep, LoginWindow,
 use super::account_keys::AccountKeys;
 use super::browser_key::{BrowserKey, FALLBACK_BROWSER_NAME};
 use super::device_access_ops::{AccessOp, run_access_ops, sync_access};
-use super::device_access_record::{DeviceAccessChange, DeviceAccessRecords, check_new_password};
-use super::key_holder::{HeldKey, InstallableKey, held_keys};
+use super::device_access_record::{DeviceAccessChange, DeviceAccessRecords, SetHere};
+use super::key_groups::key_groups;
+use super::key_holder::{HeldKey, held_keys};
 use super::login_attempt::{LoginAttemptOutcome, try_login};
-use super::login_key_cache::{DEFAULT_KDF_ITERATIONS, LoginKeyCache};
+use super::login_key_cache::LoginKeyCache;
 use super::remembered_passwords::RememberedPasswords;
+use super::two_passwords::{device_password_salts, password_lines, plan_password};
 use super::ui_access_view::{
-    UiAccessEntry, UiAccessPanel, UiDeviceAccess, UiLoginPrompt, UiUnlockOffer, access_line,
-    prompt_sentence,
+    UiAccessPanel, UiDeviceAccess, UiLoginPrompt, UiPasswordLine, UiUnlockOffer, access_line,
+    dropped_sentence, prompt_sentence,
 };
 use crate::app::devices::device_effects::{DeviceEffects, DeviceTaskFuture, DeviceTimerFuture};
 
@@ -81,6 +86,15 @@ enum WriteStatus {
     Failed(String),
 }
 
+/// What a change in flight will leave behind once the device takes it.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct PendingChange {
+    /// A password this browser is setting, to show again.
+    pub(crate) set: Option<SetHere>,
+    /// What to say once it lands.
+    pub(crate) notice: Option<String>,
+}
+
 /// See the module doc.
 pub struct AccessController {
     sessions: BTreeMap<DeviceId, AccessSession>,
@@ -90,6 +104,10 @@ pub struct AccessController {
     browser: Option<BrowserKey>,
     account: Option<AccountKeys>,
     writes: BTreeMap<DeviceId, WriteStatus>,
+    /// The change in flight on each device, for when it lands.
+    pending: BTreeMap<DeviceId, PendingChange>,
+    /// What each device's last change did on its own, for the panel.
+    notices: BTreeMap<DeviceId, String>,
     /// Devices a restart was asked of, with the hello window at the time: a
     /// newer hello is the restart having happened.
     restarts: BTreeMap<DeviceId, Option<Millis>>,
@@ -126,6 +144,8 @@ impl AccessController {
             browser: None,
             account: None,
             writes: BTreeMap::new(),
+            pending: BTreeMap::new(),
+            notices: BTreeMap::new(),
             restarts: BTreeMap::new(),
             synced: BTreeMap::new(),
             undo: BTreeMap::new(),
@@ -525,8 +545,24 @@ impl AccessController {
                         .device(device)
                         .and_then(|found| record_key(&found.identity))
                     {
-                        self.records.record(&key, synced.listing, now_secs);
+                        self.records.record(&key, synced.listing, now_secs, None);
                         self.persist_devices();
+                    }
+                    // A refused add (a full device nothing can make room on)
+                    // is said in the panel, under the list the board did
+                    // answer; a sync that went through clears what an
+                    // earlier one said.
+                    match &synced.refused {
+                        Some(why) => {
+                            if !matches!(self.writes.get(&device), Some(WriteStatus::Writing)) {
+                                self.writes.insert(device, WriteStatus::Failed(why.clone()));
+                            }
+                        }
+                        None => {
+                            if matches!(self.writes.get(&device), Some(WriteStatus::Failed(_))) {
+                                self.writes.remove(&device);
+                            }
+                        }
                     }
                     if !synced.added.is_empty() {
                         self.undo
@@ -535,14 +571,18 @@ impl AccessController {
                         self.added = Some(AccessAdded {
                             device,
                             names: synced.added.into_iter().map(|a| a.label).collect(),
+                            dropped: synced.dropped,
                             generation: self.added_generation,
                         });
                     }
                 }
                 Err(error) => {
-                    // Silent by design (an older firmware, a full device):
-                    // the panel still shows what it last knew.
-                    log::warn!("access: reading or adding to {device:?}'s list failed: {error}");
+                    // The list itself was not read (an older firmware, a
+                    // lost link). The panel says why and still shows what
+                    // it last knew. (A full device is not this: its list
+                    // arrives with the refusal, above.)
+                    log::warn!("access: reading {device:?}'s list failed: {error}");
+                    self.writes.insert(device, WriteStatus::Failed(error));
                 }
             },
             AccessCommand::Changed {
@@ -550,11 +590,21 @@ impl AccessController {
                 result,
                 bluetooth,
             } => match result {
-                Ok(listing) => {
+                Ok(changed) => {
                     self.writes.remove(&device);
+                    let pending = self.pending.remove(&device).unwrap_or_default();
+                    let notice = [pending.notice, dropped_sentence(&changed.dropped)]
+                        .into_iter()
+                        .flatten()
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    if !notice.is_empty() {
+                        self.notices.insert(device, notice);
+                    }
                     let found = roster.device(device);
                     if let Some(key) = found.and_then(|found| record_key(&found.identity)) {
-                        self.records.record(&key, listing, now_secs);
+                        self.records
+                            .record(&key, changed.listing, now_secs, pending.set);
                         self.persist_devices();
                     }
                     // Bluetooth applies at boot: over USB, Studio restarts
@@ -564,6 +614,7 @@ impl AccessController {
                     }
                 }
                 Err(error) => {
+                    self.pending.remove(&device);
                     self.writes.insert(device, WriteStatus::Failed(error));
                 }
             },
@@ -600,26 +651,31 @@ impl AccessController {
             ops: salts.into_iter().map(AccessOp::Remove).collect(),
             added_at: epoch_secs(now_secs),
             bluetooth: None,
+            keep: self.held_salts(),
         })
     }
 
-    /// The step a panel change runs, or why it cannot.
+    /// Salts never dropped to make room: every key this browser holds.
+    fn held_salts(&self) -> Vec<[u8; SALT_BYTES]> {
+        self.held().iter().map(HeldKey::salt).collect()
+    }
+
+    /// The step a panel change runs and what it leaves behind, or why it
+    /// cannot run. `listing` is the device's last answer (a Play or Author
+    /// change is planned against it).
     pub(crate) fn change_step(
         &self,
         change: DeviceAccessChange,
+        listing: Option<&super::AccessListing>,
         over_bluetooth: bool,
         now_secs: f64,
         random: AccessRandom<'_>,
-    ) -> Result<AccessStep, String> {
+    ) -> Result<(AccessStep, PendingChange), String> {
+        let mut pending = PendingChange::default();
         let (ops, bluetooth) = match change {
-            DeviceAccessChange::Remove { salt } => (vec![AccessOp::Remove(salt)], None),
-            DeviceAccessChange::SetOpen(open) => (
-                vec![AccessOp::Switches {
-                    ble_enabled: None,
-                    open: Some(open),
-                }],
-                None,
-            ),
+            DeviceAccessChange::Remove { salts } => {
+                (salts.into_iter().map(AccessOp::Remove).collect(), None)
+            }
             DeviceAccessChange::SetBluetooth(false) if over_bluetooth => {
                 return Err(
                     "Bluetooth can only be turned off by USB — it is the link you are on."
@@ -633,30 +689,30 @@ impl AccessController {
                 }],
                 Some(on),
             ),
-            DeviceAccessChange::AddPassword {
-                label,
-                tier,
-                password,
-            } => {
-                check_new_password(&label, &password)?;
-                (
-                    vec![AccessOp::Add(InstallableKey {
-                        label: label.trim().to_string(),
-                        kind: SecretKind::Password,
-                        tier,
-                        salt: random(),
-                        iterations: DEFAULT_KDF_ITERATIONS,
-                        material: password.into_bytes(),
-                    })],
-                    None,
-                )
+            DeviceAccessChange::SetPassword { tier, password } => {
+                let listing = listing
+                    .ok_or_else(|| "the device has not listed its access yet".to_string())?;
+                let plan = plan_password(
+                    listing,
+                    tier,
+                    password.as_deref(),
+                    random(),
+                    self.account.as_ref(),
+                )?;
+                pending.set = plan.set.map(|(salt, password)| SetHere { salt, password });
+                pending.notice = plan.notice.map(str::to_string);
+                (plan.ops, None)
             }
         };
-        Ok(AccessStep::Change {
-            ops,
-            added_at: epoch_secs(now_secs),
-            bluetooth,
-        })
+        Ok((
+            AccessStep::Change {
+                ops,
+                added_at: epoch_secs(now_secs),
+                bluetooth,
+                keep: self.held_salts(),
+            },
+            pending,
+        ))
     }
 
     fn start_change(
@@ -668,9 +724,20 @@ impl AccessController {
         now_secs: f64,
         random: AccessRandom<'_>,
     ) {
-        let over_bluetooth = roster.device(device).is_some_and(is_bluetooth);
-        match self.change_step(change, over_bluetooth, now_secs, random) {
-            Ok(step) => self.start_step(device, step, roster, effects),
+        let found = roster.device(device);
+        let over_bluetooth = found.is_some_and(is_bluetooth);
+        let listing = found
+            .and_then(|found| record_key(&found.identity))
+            .and_then(|key| self.records.get(&key))
+            .map(|record| record.listing.clone());
+        self.notices.remove(&device);
+        match self.change_step(change, listing.as_ref(), over_bluetooth, now_secs, random) {
+            Ok((step, pending)) => {
+                self.start_step(device, step, roster, effects);
+                if self.writes.get(&device) == Some(&WriteStatus::Writing) {
+                    self.pending.insert(device, pending);
+                }
+            }
             Err(error) => {
                 self.writes.insert(device, WriteStatus::Failed(error));
             }
@@ -777,15 +844,22 @@ impl AccessController {
     pub fn device_view(&self, device: &Device) -> Option<UiDeviceAccess> {
         let over_bluetooth = is_bluetooth(device);
         let session = self.sessions.get(&device.id);
+        let open = record_key(&device.identity)
+            .and_then(|key| self.records.get(&key))
+            .map(|record| record.listing.open);
         let line = over_bluetooth
             .then(|| session.map_or(AccessPhase::Unknown, |s| s.phase.clone()))
             .and_then(|phase| {
-                device
-                    .evidence
-                    .presence
-                    .is_open()
-                    .then(|| access_line(&phase))
-                    .flatten()
+                if !device.evidence.presence.is_open() {
+                    return None;
+                }
+                // Granted with no name, on a board open at edit: say why.
+                if matches!(phase, AccessPhase::Granted { label: None, .. })
+                    && open == Some(lpc_access::OpenTo::Edit)
+                {
+                    return Some("Open — no password".to_string());
+                }
+                access_line(&phase)
             });
         let unlock = session.and_then(|session| match &session.phase {
             AccessPhase::Locked => Some(UiUnlockOffer::Locked),
@@ -821,6 +895,11 @@ impl AccessController {
         if !evidence.presence.is_open() || !evidence.classification.is_light_player() {
             return None;
         }
+        // A held board's list waits with its files (see `holds_its_files`):
+        // it has none to show, and none may be started in RAM.
+        if holds_its_files(device) {
+            return None;
+        }
         let over_bluetooth = endpoint.is_bluetooth();
         if over_bluetooth && self.granted_tier(device.id) != Some(Tier::Edit) {
             return None;
@@ -832,42 +911,41 @@ impl AccessController {
             Some(WriteStatus::Failed(error)) => (false, Some(error.clone())),
             None => (false, None),
         };
-        let entries: Vec<UiAccessEntry> = record
+        let account = self.account.as_ref();
+        let (play, author) = record
+            .map_or((UiPasswordLine::NotSet, UiPasswordLine::NotSet), |record| {
+                password_lines(record, account)
+            });
+        let keys = record
             .map(|record| {
-                record
-                    .listing
-                    .entries
-                    .iter()
-                    .map(|entry| UiAccessEntry {
-                        label: entry.label.clone(),
-                        kind: entry.kind,
-                        tier: entry.tier,
-                        salt_id: entry.salt,
-                        is_this_browser: self
-                            .browser
-                            .as_ref()
-                            .is_some_and(|key| key.salt == entry.salt),
-                        is_account: self
-                            .account
-                            .as_ref()
-                            .is_some_and(|account| account.owns_salt(&entry.salt)),
-                        added_at: entry.added_at,
-                    })
-                    .collect()
+                let listing = &record.listing;
+                let passwords: Vec<_> = [Tier::Play, Tier::Edit]
+                    .into_iter()
+                    .flat_map(|tier| device_password_salts(listing, tier, account))
+                    .collect();
+                key_groups(
+                    listing,
+                    &passwords,
+                    self.browser.as_ref().map(|key| key.salt),
+                    account,
+                )
             })
             .unwrap_or_default();
-        let open = record.is_some_and(|record| record.listing.open);
         Some(UiAccessPanel {
             device: device.id,
-            count: entries.len() + usize::from(open),
-            entries,
+            open: record.map_or(lpc_access::OpenTo::Nobody, |record| record.listing.open),
+            play,
+            author,
+            keys,
+            used: record.map_or(0, |record| record.listing.entries.len()),
+            capacity: MAX_SECRETS_PER_FILE,
             ble_enabled: record.map(|record| record.listing.ble_enabled),
-            open,
             restart_pending: record.is_some_and(|record| record.restart_pending),
             can_restart: !over_bluetooth,
             over_bluetooth,
             writing,
             error,
+            notice: self.notices.get(&device.id).cloned(),
         })
     }
 
@@ -935,6 +1013,23 @@ fn syncs_over_usb(device: &Device) -> bool {
             .0
             .starts_with(crate::app::devices::sim_record::SIM_ENDPOINT_PREFIX)
         && device.evidence.classification.is_light_player()
+        && !holds_its_files(device)
+}
+
+/// A board holding its files for the C6 layout change (its hello's `fs` is
+/// `legacy_held`): it runs on a RAM filesystem, and its real device store —
+/// keys, switches — waits in the old region with every other file until
+/// Finish update moves it. Studio neither reads nor writes access there: an
+/// add would land in a store that exists only until the next reboot, and a
+/// list read from it is not the board's (G1 rehearsal, 2026-10-03: "Who has
+/// access 1" on a board whose own list held 16). The firmware keeps
+/// Bluetooth off on such a board for the same reason.
+fn holds_its_files(device: &Device) -> bool {
+    device
+        .evidence
+        .classification
+        .hello()
+        .is_some_and(|hello| hello.fs == lpa_devices::wire::BoardFs::LegacyHeld)
 }
 
 /// The device's current connection window, when its link is open and has
@@ -1010,9 +1105,10 @@ pub(crate) async fn run_step<Io: lpa_client::ClientIo>(
             ops,
             added_at,
             bluetooth,
+            keep,
         } => AccessCommand::Changed {
             device,
-            result: run_access_ops(client, &ops, added_at).await,
+            result: run_access_ops(client, &ops, added_at, &keep).await,
             bluetooth,
         },
     }
@@ -1021,11 +1117,14 @@ pub(crate) async fn run_step<Io: lpa_client::ClientIo>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::access::DroppedKey;
     use crate::app::access::PromptReason;
     use crate::app::access::account_keys::tests::account;
+    use crate::app::access::key_holder::InstallableKey;
+    use crate::app::access::login_key_cache::DEFAULT_KDF_ITERATIONS;
     use crate::app::access::test_board::{FakeBoard, FakeBoardIo, block_on};
     use lpa_client::LpClient;
-    use lpc_access::SecretEntry;
+    use lpc_access::{OpenTo, SecretEntry, SecretKind};
     use std::cell::Cell;
 
     /// The whole Bluetooth unlock with this browser's key: check, ONE
@@ -1047,6 +1146,56 @@ mod tests {
         assert_eq!(board.answers(), 1);
         assert_eq!(board.failures(), 0);
         assert_eq!(board.granted(), Some(Tier::Edit));
+    }
+
+    /// Bluefy, 2026-10-02: every silent reconnect after the first unlock
+    /// came up locked, the board dropped it at its unlock deadline, and the
+    /// phone showed a native "disconnected" alert per lap. Each new link is
+    /// unlocked with the browser's key again — one answer, no sheet.
+    #[test]
+    fn every_silent_reconnect_is_unlocked_again_with_the_browser_key() {
+        let access = controller();
+        let browser = access.browser_key().unwrap().installable();
+        let board = FakeBoard::with_entries(vec![browser.entry(1)]);
+        let mut session = unlock(&access, &board, &[]);
+        let held = access.held();
+        for link in 2..=4 {
+            board.drop_link();
+            session.observe(None);
+            session.observe(Some(window(link)));
+            let mut client = board.client();
+            let step = session.next_step(Millis(5), &held, &[]).unwrap();
+            assert_eq!(step, AccessStep::Check(window(link)));
+            session.started(&step);
+            let checked = block_on(run_step(
+                &mut client,
+                DeviceId(1),
+                step,
+                &access.keys(),
+                instant_timer(),
+            ));
+            let AccessCommand::Checked {
+                result: Ok((required, granted)),
+                ..
+            } = checked
+            else {
+                panic!("{checked:?}")
+            };
+            assert_eq!(
+                (required, granted),
+                (true, None),
+                "a new link holds nothing"
+            );
+            session.checked(window(link), required, granted, true);
+            let step = session
+                .next_step(Millis(6), &held, &[])
+                .expect("the new link is unlocked, not left to time out");
+            run_login_on(&access, &mut client, &mut session, step, Millis(7));
+            assert_eq!(board.granted(), Some(Tier::Edit), "link {link}");
+            assert_eq!(session.prompt, None, "link {link}: no sheet");
+        }
+        assert_eq!(board.answers(), 4, "one answer per link");
+        assert_eq!(board.failures(), 0);
     }
 
     #[test]
@@ -1332,43 +1481,152 @@ mod tests {
         let random = counter();
         assert!(
             access
-                .change_step(DeviceAccessChange::SetBluetooth(false), true, 1.0, &random)
+                .change_step(
+                    DeviceAccessChange::SetBluetooth(false),
+                    None,
+                    true,
+                    1.0,
+                    &random
+                )
                 .unwrap_err()
                 .contains("USB")
         );
         assert!(
             access
-                .change_step(DeviceAccessChange::SetBluetooth(false), false, 1.0, &random)
+                .change_step(
+                    DeviceAccessChange::SetBluetooth(false),
+                    None,
+                    false,
+                    1.0,
+                    &random
+                )
                 .is_ok()
         );
     }
 
+    /// The Play line's Password: the old play password goes, the typed one
+    /// comes at a fresh salt, and the board stops letting anyone play.
     #[test]
-    fn a_panel_password_is_added_as_a_password_entry_with_a_fresh_salt() {
+    fn a_play_password_replaces_the_old_one_and_closes_the_board() {
         let access = controller();
+        let board = FakeBoard::open(&[("friends", Tier::Play, "old")], OpenTo::Play);
+        let listing = list(&board);
         let random = counter_from(50);
-        let step = access
+        let (step, pending) = access
             .change_step(
-                DeviceAccessChange::AddPassword {
-                    label: " friends ".to_string(),
+                DeviceAccessChange::SetPassword {
                     tier: Tier::Play,
-                    password: "pw".to_string(),
+                    password: Some("camp-glow-17".to_string()),
                 },
+                Some(&listing),
                 false,
                 5.0,
                 &random,
             )
             .unwrap();
-        let AccessStep::Change { ops, .. } = &step else {
-            panic!()
-        };
-        let [AccessOp::Add(key)] = ops.as_slice() else {
-            panic!("{ops:?}")
-        };
-        assert_eq!(key.label, "friends");
-        assert_eq!(key.kind, SecretKind::Password);
-        assert_eq!(key.salt, [51; 16]);
-        assert_eq!(key.iterations, DEFAULT_KDF_ITERATIONS);
+        assert_eq!(
+            pending.set,
+            Some(SetHere {
+                salt: [51; 16],
+                password: "camp-glow-17".to_string()
+            })
+        );
+        let mut access = access;
+        run_change(&mut access, &board, DeviceId(1), step);
+        let store = board.store();
+        assert_eq!(store.open, OpenTo::Nobody);
+        assert_eq!(board_labels(&board), ["Play password"]);
+        assert_eq!(store.secrets[0].salt, [51; 16]);
+        assert_eq!(store.secrets[0].kind, SecretKind::Password);
+        assert_eq!(store.secrets[0].iterations, DEFAULT_KDF_ITERATIONS);
+        // The new password unlocks for play over Bluetooth.
+        let session = unlock(&access, &board, &["camp-glow-17"]);
+        assert!(matches!(
+            session.phase,
+            AccessPhase::Granted {
+                tier: Tier::Play,
+                ..
+            }
+        ));
+    }
+
+    /// Author to Anyone: the board opens at edit and both passwords go, and
+    /// the panel says Play followed.
+    #[test]
+    fn author_anyone_opens_the_board_and_says_play_followed() {
+        let access = controller();
+        let board = FakeBoard::locked(&[
+            ("Play password", Tier::Play, "a"),
+            ("Author password", Tier::Edit, "b"),
+        ]);
+        let listing = list(&board);
+        let (step, pending) = access
+            .change_step(
+                DeviceAccessChange::SetPassword {
+                    tier: Tier::Edit,
+                    password: None,
+                },
+                Some(&listing),
+                false,
+                5.0,
+                &counter(),
+            )
+            .unwrap();
+        assert_eq!(
+            pending.notice.as_deref(),
+            Some(super::super::two_passwords::PLAY_FOLLOWS_NOTICE)
+        );
+        let mut access = access;
+        run_change(&mut access, &board, DeviceId(1), step);
+        assert_eq!(board.store().open, OpenTo::Edit);
+        assert!(board.store().secrets.is_empty());
+        assert_eq!(board.granted(), Some(Tier::Edit), "anyone nearby authors");
+    }
+
+    /// The desk board's bug: every dev-server origin is its own browser, so
+    /// sixteen fill the board. The seventeenth plug-in drops the oldest and
+    /// says so, where it used to fail with only a log line.
+    #[test]
+    fn the_seventeenth_origin_drops_the_oldest_browser_and_says_so() {
+        let board = FakeBoard::fresh();
+        for origin in 0..17u8 {
+            let mut access = AccessController::new();
+            access.ensure_browser_key(&counter_from(origin * 2), "Brave on Mac");
+            sync(
+                &mut access,
+                &board,
+                DeviceId(1),
+                u64::from(origin),
+                1_000.0 + f64::from(origin),
+            );
+            let added = access.access_added().expect("each origin adds its own key");
+            assert_eq!(added.names, ["Brave on Mac"]);
+            if origin < 16 {
+                assert!(added.dropped.is_empty(), "origin {origin}");
+            } else {
+                assert_eq!(
+                    added.dropped,
+                    [DroppedKey {
+                        label: "Brave on Mac".to_string(),
+                        added_at: Some(1_000),
+                    }]
+                );
+            }
+        }
+        let store = board.store();
+        assert_eq!(store.secrets.len(), MAX_SECRETS_PER_FILE);
+        assert!(
+            store
+                .secrets
+                .iter()
+                .all(|entry| entry.added_at != Some(1_000))
+        );
+        assert!(
+            store
+                .secrets
+                .iter()
+                .any(|entry| entry.added_at == Some(1_016))
+        );
     }
 
     /// The walk's finding: a restart can stamp a uid on a board first seen
@@ -1399,11 +1657,16 @@ mod tests {
     /// sentence, never "failed".
     #[test]
     fn a_play_unlock_is_refused_a_change_by_name() {
-        let board = FakeBoard::open(&[]);
+        let board = FakeBoard::open(&[], OpenTo::Play);
         let mut client = board.client();
-        let error = block_on(run_access_ops(&mut client, &[AccessOp::Remove([0; 16])], 1))
-            .expect_err("play cannot change the list");
-        assert!(error.contains("edit device password"), "{error}");
+        let error = block_on(run_access_ops(
+            &mut client,
+            &[AccessOp::Remove([0; 16])],
+            1,
+            &[],
+        ))
+        .expect_err("play cannot change the list");
+        assert!(error.contains("author device password"), "{error}");
     }
 
     // --- helpers ----------------------------------------------------------
@@ -1541,6 +1804,14 @@ mod tests {
             panic!("{done:?}")
         };
         session.logged_in(window, &outcome, typed.is_some(), now);
+    }
+
+    /// The board's list, read over USB.
+    fn list(board: &FakeBoard) -> super::super::AccessListing {
+        let mut usb = board.usb();
+        block_on(run_access_ops(&mut usb, &[], 0, &[]))
+            .unwrap()
+            .listing
     }
 
     /// One USB connect's sync, applied back.

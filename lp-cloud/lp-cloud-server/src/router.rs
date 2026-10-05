@@ -12,6 +12,7 @@
 //! | `GET /auth/google/callback` | auth | the `state` cookie is the credential |
 //! | `POST /auth/logout` | auth | the session cookie, if there is one |
 //! | `GET /auth/dev` | auth | localhost + `LP_CLOUD_DEV_AUTH` (else 404) |
+//! | `GET\|HEAD\|OPTIONS /firmware/{target}/{release}/{file}` | firmware | none — public, verified by hash, any origin |
 //! | `GET /healthz` | ops | none |
 //! | everything else | page | none — file, else the SPA document |
 
@@ -23,6 +24,7 @@ use crate::api::api_route;
 use crate::app_state::AppState;
 use crate::auth::{dev_auth, google_auth, guest_auth};
 use crate::content::{blob_route, tree_route};
+use crate::firmware::firmware_route;
 use crate::page::page_route;
 
 /// The largest upload the content plane accepts.
@@ -54,6 +56,12 @@ pub fn build_router(state: AppState) -> Router {
         .route("/auth/guest", post(guest_auth::post_guest_auth))
         .route("/auth/logout", post(google_auth::post_logout))
         .route("/auth/dev", get(dev_auth::get_dev_auth))
+        // Three segments after `/firmware/`; the Studio bundle's own
+        // `/firmware/<target>/manifest.json` has two and stays the fallback's.
+        .route(
+            "/firmware/{target}/{release}/{file}",
+            get(firmware_route::get_firmware).options(firmware_route::options_firmware),
+        )
         .route("/healthz", get(page_route::get_healthz))
         .fallback(get(page_route::get_page_or_asset))
         .layer(DefaultBodyLimit::max(MAX_UPLOAD_BYTES))

@@ -1,10 +1,12 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    DirtySummary, ExportSeverity, NodeCardDrawer, NodeUiOp, UiAction, UiConfigSlot,
-    UiNodeDirtyState, UiNodeSection, UiNodeTabBody, UiNodeView, UiPendingEdit, UiSlotRecord,
+    DirtySummary, ExportSeverity, NodeCardDrawer, NodeUiOp, OfferPath, ProjectNodeAddress,
+    UiAction, UiConfigSlot, UiNodeDirtyState, UiNodeSection, UiNodeTabBody, UiNodeView,
+    UiPendingEdit, UiSlotRecord,
 };
 
 use crate::app::affordance::affordance_pane_tone;
+use crate::app::agent::{AgentEditedChip, AgentMark};
 use crate::app::layout::{PaneCollapse, RichObjectPane};
 use crate::app::node::face::{face_space_badge, node_ui_action, space_badge_title};
 use crate::app::node::slot_edit_actions::node_clear_debug_action;
@@ -15,6 +17,7 @@ use crate::app::node::{
 use crate::base::{
     HelpLink, Platform, StudioIcon, StudioIconName, node_kind_icon, use_reveal_on_focus,
 };
+use crate::core::use_verbs_of;
 
 /// Which surface treatment a dirty node pane wears — the D7 tint experiment,
 /// story-selectable pending the user's P5 pick.
@@ -53,6 +56,14 @@ pub fn NodePane(
 ) -> Element {
     let mut active_tab = use_signal(|| 0_usize);
     let mut collapsed = use_signal(|| view.collapsed);
+    // The card's header verbs (subtree Revert, Remove) are the view's
+    // offers at `project/<node tree path>`, read from the offer tree, not
+    // off the DTO. The header path is the node's address on root and
+    // nested cards alike.
+    let node_prefix = ProjectNodeAddress::parse(&view.header.path)
+        .ok()
+        .map(|address| OfferPath::project_node(&address));
+    let verbs = use_verbs_of(node_prefix.clone());
     let active_index = active_tab().min(view.tabs.len().saturating_sub(1));
     let active_body = view.tabs.get(active_index).map(|tab| tab.body.clone());
     let dirty = view.header.dirty;
@@ -89,7 +100,9 @@ pub fn NodePane(
     let kind_label = view.header.kind.clone();
     let focus_action = view.action.clone();
     let issues = view.issues.clone();
-    let header_actions = view.header_actions.clone();
+    // Only the verbs the header draws: Copy and a playlist picker's verbs
+    // sit at this prefix too, pressed from their own controls.
+    let header_actions = crate::app::project::project_pane::header_verbs(verbs());
     // Face + drawers replace the generic tab/section body when the
     // controller supplies a kind-specific face (shader/fixture/playlist
     // today); every other kind keeps the classic sections fallback.
@@ -133,140 +146,147 @@ pub fn NodePane(
     rsx! {
         div { class: "tw:grid tw:min-w-0 tw:gap-3", onmounted: reveal,
             div { class: surface_class,
-                RichObjectPane {
-                    collapse: PaneCollapse {
-                        collapsed: collapsed(),
-                        expand_label: "Expand node".to_string(),
-                        collapse_label: "Collapse node".to_string(),
-                        on_toggle: EventHandler::new(move |()| collapsed.set(!collapsed())),
-                    },
-                    primary: rsx! {
-                        if let Some(action) = select_action {
-                            NodeSelectButton {
-                                action,
-                                focused,
-                                selection_streams,
-                                kind: select_kind,
+                // The agent light (M8): the card lights when the assistant
+                // edited this node.
+                AgentMark { path: node_prefix.clone(),
+                    RichObjectPane {
+                        collapse: PaneCollapse {
+                            collapsed: collapsed(),
+                            expand_label: "Expand node".to_string(),
+                            collapse_label: "Collapse node".to_string(),
+                            on_toggle: EventHandler::new(move |()| collapsed.set(!collapsed())),
+                        },
+                        primary: rsx! {
+                            if let Some(action) = select_action {
+                                NodeSelectButton {
+                                    action,
+                                    focused,
+                                    selection_streams,
+                                    kind: select_kind,
+                                    on_action,
+                                }
+                            }
+                        },
+                        title,
+                        title_action: focus_action.clone(),
+                        tone,
+                        selected: focused,
+                        actions: header_actions,
+                        on_action,
+                        trailing: rsx! {
+                            // "Changed by the assistant": a tab on the
+                            // card's top edge, out of the header's flow.
+                            AgentEditedChip { path: node_prefix.clone() }
+                            if streaming_live {
+                                NodeLiveChip {}
+                            }
+                            NodeDebugMarker { count: debug_overrides }
+                            if let Some(worst) = export_chip {
+                                span {
+                                    class: export_chip_class(worst),
+                                    title: export_chip_title(worst),
+                                    "export"
+                                }
+                            }
+                            if let Some(badge) = space_badge {
+                                span {
+                                    class: SPACE_BADGE_CLASS,
+                                    title: space_badge_title(),
+                                    "{badge}"
+                                }
+                            }
+                            if !kind_label.is_empty() {
+                                span { class: "tw:self-center tw:whitespace-nowrap tw:pl-2 tw:pr-1 tw:text-[11px] tw:font-bold tw:lowercase tw:tracking-wide tw:text-dim-foreground",
+                                    "{kind_label}"
+                                }
+                            }
+                            // The "?" on shader nodes: where a browsing user
+                            // first meets the concept, the docs answer is one
+                            // click away (help-link flywheel).
+                            if kind_label.eq_ignore_ascii_case("shader") {
+                                HelpLink {
+                                    href: crate::app::docs::docs_links::what_is_a_shader::HREF,
+                                    title: "What's a shader?",
+                                    class: "tw:self-center".to_string(),
+                                }
+                            }
+                            // No runtime here, no tabs: every tab is a view
+                            // onto state this build does not have.
+                            if !unsupported && tabs.len() > 1 {
+                                NodeTabs {
+                                    tabs: tabs.clone(),
+                                    active_index,
+                                    on_select: move |index| active_tab.set(index),
+                                }
+                            }
+                        },
+                        detail: rsx! {
+                            NodeDetailPopover {
+                                header,
+                                pending_edits: pending_edits.clone(),
+                                module: module_face.clone(),
                                 on_action,
                             }
-                        }
-                    },
-                    title,
-                    title_action: focus_action.clone(),
-                    tone,
-                    selected: focused,
-                    actions: header_actions,
-                    on_action,
-                    trailing: rsx! {
-                        if streaming_live {
-                            NodeLiveChip {}
-                        }
-                        NodeDebugMarker { count: debug_overrides }
-                        if let Some(worst) = export_chip {
-                            span {
-                                class: export_chip_class(worst),
-                                title: export_chip_title(worst),
-                                "export"
-                            }
-                        }
-                        if let Some(badge) = space_badge {
-                            span {
-                                class: SPACE_BADGE_CLASS,
-                                title: space_badge_title(),
-                                "{badge}"
-                            }
-                        }
-                        if !kind_label.is_empty() {
-                            span { class: "tw:self-center tw:whitespace-nowrap tw:pl-2 tw:pr-1 tw:text-[11px] tw:font-bold tw:lowercase tw:tracking-wide tw:text-dim-foreground",
-                                "{kind_label}"
-                            }
-                        }
-                        // The "?" on shader nodes: where a browsing user
-                        // first meets the concept, the docs answer is one
-                        // click away (help-link flywheel).
-                        if kind_label.eq_ignore_ascii_case("shader") {
-                            HelpLink {
-                                href: crate::app::docs::docs_links::what_is_a_shader::HREF,
-                                title: "What's a shader?",
-                                class: "tw:self-center".to_string(),
-                            }
-                        }
-                        // No runtime here, no tabs: every tab is a view
-                        // onto state this build does not have.
-                        if !unsupported && tabs.len() > 1 {
-                            NodeTabs {
-                                tabs: tabs.clone(),
-                                active_index,
-                                on_select: move |index| active_tab.set(index),
-                            }
-                        }
-                    },
-                    detail: rsx! {
-                        NodeDetailPopover {
-                            header,
-                            pending_edits: pending_edits.clone(),
-                            module: module_face.clone(),
-                            on_action,
-                        }
-                    },
-                    body: rsx! {
-                        if unsupported {
-                            NodeUnsupportedBody { kind: unsupported_kind.clone() }
-                        } else {
-                            if !issues.is_empty() {
-                                ul { class: "tw:m-0 tw:grid tw:list-none tw:gap-1 tw:rounded-sm tw:border tw:border-status-error-border tw:bg-status-error-bg tw:p-3",
-                                    for issue in issues.clone() {
-                                        li { class: "tw:text-sm tw:text-status-error-foreground", "{issue}" }
+                        },
+                        body: rsx! {
+                            if unsupported {
+                                NodeUnsupportedBody { kind: unsupported_kind.clone() }
+                            } else {
+                                if !issues.is_empty() {
+                                    ul { class: "tw:m-0 tw:grid tw:list-none tw:gap-1 tw:rounded-sm tw:border tw:border-status-error-border tw:bg-status-error-bg tw:p-3",
+                                        for issue in issues.clone() {
+                                            li { class: "tw:text-sm tw:text-status-error-foreground", "{issue}" }
+                                        }
+                                    }
+                                }
+                                if let Some(face) = face.clone() {
+                                    NodeFaceBody {
+                                        face,
+                                        node: face_node.clone(),
+                                        card_ui: face_card_ui.clone(),
+                                        sections: face_sections.clone(),
+                                        detail_open_control: face_detail_open_control.clone(),
+                                        platform: face_platform,
+                                        add_node_menu: add_node_menu.clone(),
+                                        pending_edits: pending_edits.clone(),
+                                        dirty_tint,
+                                        module_panel,
+                                        on_action,
+                                    }
+                                } else {
+                                    match active_body {
+                                        Some(UiNodeTabBody::Sections(sections)) => rsx! {
+                                            div { class: "tw:-mx-4 tw:-mb-4 tw:grid tw:min-w-0",
+                                                for (index, section) in sections.into_iter().enumerate() {
+                                                    NodeSection {
+                                                        section,
+                                                        first: index == 0,
+                                                        focus_action: focus_action.clone(),
+                                                        node: section_node.clone(),
+                                                        debug_open,
+                                                        on_action,
+                                                        pending_edits: pending_edits.clone(),
+                                                        dirty_tint,
+                                                    }
+                                                }
+                                            }
+                                        },
+                                        Some(UiNodeTabBody::Text { title, body }) => rsx! {
+                                            section { class: "tw:grid tw:min-w-0 tw:gap-2",
+                                                h4 { class: "tw:m-0 tw:text-xs tw:font-bold tw:uppercase tw:text-heading", "{title}" }
+                                                pre { class: "tw:m-0 tw:max-h-80 tw:overflow-auto tw:rounded-sm tw:border tw:border-border-subtle tw:bg-page tw:p-3 tw:text-xs tw:leading-normal tw:text-muted-foreground",
+                                                    code { "{body}" }
+                                                }
+                                            }
+                                        },
+                                        None => rsx! {
+                                            p { class: "tw:m-0 tw:text-sm tw:text-subtle-foreground", "No node tabs are available." }
+                                        },
                                     }
                                 }
                             }
-                            if let Some(face) = face.clone() {
-                                NodeFaceBody {
-                                    face,
-                                    node: face_node.clone(),
-                                    card_ui: face_card_ui.clone(),
-                                    sections: face_sections.clone(),
-                                    detail_open_control: face_detail_open_control.clone(),
-                                    platform: face_platform,
-                                    add_node_menu: add_node_menu.clone(),
-                                    pending_edits: pending_edits.clone(),
-                                    dirty_tint,
-                                    module_panel,
-                                    on_action,
-                                }
-                            } else {
-                                match active_body {
-                                    Some(UiNodeTabBody::Sections(sections)) => rsx! {
-                                        div { class: "tw:-mx-4 tw:-mb-4 tw:grid tw:min-w-0",
-                                            for (index, section) in sections.into_iter().enumerate() {
-                                                NodeSection {
-                                                    section,
-                                                    first: index == 0,
-                                                    focus_action: focus_action.clone(),
-                                                    node: section_node.clone(),
-                                                    debug_open,
-                                                    on_action,
-                                                    pending_edits: pending_edits.clone(),
-                                                    dirty_tint,
-                                                }
-                                            }
-                                        }
-                                    },
-                                    Some(UiNodeTabBody::Text { title, body }) => rsx! {
-                                        section { class: "tw:grid tw:min-w-0 tw:gap-2",
-                                            h4 { class: "tw:m-0 tw:text-xs tw:font-bold tw:uppercase tw:text-heading", "{title}" }
-                                            pre { class: "tw:m-0 tw:max-h-80 tw:overflow-auto tw:rounded-sm tw:border tw:border-border-subtle tw:bg-page tw:p-3 tw:text-xs tw:leading-normal tw:text-muted-foreground",
-                                                code { "{body}" }
-                                            }
-                                        }
-                                    },
-                                    None => rsx! {
-                                        p { class: "tw:m-0 tw:text-sm tw:text-subtle-foreground", "No node tabs are available." }
-                                    },
-                                }
-                            }
-                        }
-                    },
+                        },
+                    }
                 }
             }
             // Children always render OUTSIDE the pane as sibling cards —

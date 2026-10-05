@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::task::{Context, Poll, Wake, Waker};
 use std::time::{Duration, Instant};
 
-use fw_host::{HostRuntime, create_memory_server_with};
+use fw_host::{HostRuntime, create_memory_server_on_board};
 use lpc_model::AsLpPath;
 use lpc_wire::lp_link::sniffer::{Direction, LinkSniffer, SniffEvent};
 use lpc_wire::lp_link::{CH_PROTO, Micros};
@@ -77,6 +77,8 @@ impl FakeEsp32Device {
                 premature_input_bytes: 0,
                 premature_input: Vec::new(),
                 failure: FakeFailurePlan::none(),
+                plan_interrupt: None,
+                parked_from: None,
                 dtr_high_seen: false,
                 last_rts: None,
                 reboot_requests: Arc::new(AtomicUsize::new(0)),
@@ -178,17 +180,21 @@ impl FakeEsp32Device {
     /// The base MAC is NOT fresh: it is burned into efuse, so it survives
     /// every flash and erase this fake can script. The new firmware
     /// reports the same one the board always had, and speaks the board's
-    /// own link (its `link_config`).
+    /// own link (its `link_config`). It heartbeats at the script's
+    /// `flashed_heartbeat_interval`, if one is set.
     pub fn fake_flash(&self, image_identity: &str) {
         let mut core = self.lock();
         let base_mac = core.efuse_mac.clone();
         let link_config = core.board_link.clone();
+        let heartbeat_interval = core.script.flashed_heartbeat_interval;
         core.script.boot = FakeBootState::LightPlayer(FakeLightPlayerState {
             provenance: fake_provenance(image_identity),
             base_mac,
             link_config,
+            heartbeat_interval,
             ..FakeLightPlayerState::new()
         });
+        core.parked_from = None;
         core.reset_current();
     }
 
@@ -197,6 +203,7 @@ impl FakeEsp32Device {
     pub fn fake_erase(&self) {
         let mut core = self.lock();
         core.script.boot = FakeBootState::BlankFlash;
+        core.parked_from = None;
         core.reset_current();
     }
 
@@ -232,15 +239,41 @@ impl FakeEsp32Device {
         }
     }
 
-    /// The scripted LightPlayer state, when the device is in that boot
-    /// state. Backs the fake raw-filesystem read: the image it returns holds
-    /// the same files the fake server serves, so a backup taken through the
-    /// fake contains what the device actually "has".
-    pub(crate) fn light_player_state(&self) -> Option<FakeLightPlayerState> {
-        match &self.lock().script.boot {
-            FakeBootState::LightPlayer(state) => Some(state.clone()),
-            _ => None,
-        }
+    /// Replace the boot state (a flash the fake executed changed what the
+    /// board boots) and reboot into it.
+    pub(crate) fn replace_boot(&self, boot: FakeBootState) {
+        let mut core = self.lock();
+        core.script.boot = boot;
+        core.parked_from = None;
+        core.reset_current();
+    }
+
+    /// The board's efuse MAC and link configuration — what survives any
+    /// flash.
+    pub(crate) fn board_constants(&self) -> (Option<String>, lpc_wire::lp_link::LinkConfig) {
+        let core = self.lock();
+        (core.efuse_mac.clone(), core.board_link.clone())
+    }
+
+    /// What the board's flash holds: the current boot state — or, while the
+    /// ROM downloader runs (a parked board), the state it was parked from.
+    /// Entering download mode does not erase flash.
+    pub(crate) fn flash_state(&self) -> FakeBootState {
+        let core = self.lock();
+        core.parked_from
+            .clone()
+            .unwrap_or_else(|| core.script.boot.clone())
+    }
+
+    /// Make the NEXT plan this board executes stop after `steps` steps, as a
+    /// pulled cable would (consumed once). The board then boots whatever
+    /// that partial write left on its flash.
+    pub fn interrupt_next_plan_after(&self, steps: usize) {
+        self.lock().plan_interrupt = Some(steps);
+    }
+
+    pub(crate) fn take_plan_interrupt(&self) -> Option<usize> {
+        self.lock().plan_interrupt.take()
     }
 
     /// Consume the scripted one-shot manage failure, if any.
@@ -319,6 +352,12 @@ pub(crate) struct FakeDeviceCore {
     /// [`FakeEsp32Device::premature_input`]. Fresh every boot.
     premature_sniffer: LinkSniffer,
     failure: FakeFailurePlan,
+    /// [`FakeEsp32Device::interrupt_next_plan_after`]: steps the next plan
+    /// gets through before the "cable" is pulled.
+    plan_interrupt: Option<usize>,
+    /// The boot state a download-mode dance parked: what the flash still
+    /// holds while the ROM downloader runs (layout operations read it).
+    parked_from: Option<FakeBootState>,
     dtr_high_seen: bool,
     last_rts: Option<bool>,
     /// Reboots the server's reset hook has asked for, cumulative. Shared
@@ -404,7 +443,7 @@ impl FakeDeviceCore {
                 *last_emit = Some(Instant::now());
                 let mut lines: Vec<String> = Vec::new();
                 if first {
-                    lines.push("ESP-ROM:esp32c6-20220919".to_string());
+                    lines.extend(self.script.rom_banner.iter().cloned());
                 }
                 lines.push("invalid header: 0xffffffff".to_string());
                 for line in lines {
@@ -416,12 +455,13 @@ impl FakeDeviceCore {
                     && !*announced
                 {
                     *announced = true;
-                    for line in [
-                        "ESP-ROM:esp32c6-20220919",
-                        "boot:0x16 (DOWNLOAD(USB/UART0/SDIO_REI_FEO))",
-                        "waiting for download",
-                    ] {
-                        self.push_line(line);
+                    let mut lines = self.script.rom_banner.clone();
+                    lines.extend([
+                        "boot:0x16 (DOWNLOAD(USB/UART0/SDIO_REI_FEO))".to_string(),
+                        "waiting for download".to_string(),
+                    ]);
+                    for line in lines {
+                        self.push_line(&line);
                     }
                 }
             }
@@ -430,11 +470,10 @@ impl FakeDeviceCore {
                     && !*announced
                 {
                     *announced = true;
-                    for line in [
-                        "ESP-ROM:esp32c6-20220919",
-                        "Hello from Seeed Studio XIAO ESP32-C6",
-                    ] {
-                        self.push_line(line);
+                    let mut lines = self.script.rom_banner.clone();
+                    lines.extend(self.script.foreign_banner.iter().cloned());
+                    for line in lines {
+                        self.push_line(&line);
                     }
                 }
             }
@@ -463,7 +502,9 @@ impl FakeDeviceCore {
     /// Emit the boot banner (including the real M2-shaped server-start
     /// line) and start the real host server over a seeded memory fs.
     fn finish_light_player_boot(&mut self, lp: &FakeLightPlayerState) {
-        self.push_line("ESP-ROM:esp32c6-20220919");
+        for line in self.script.rom_banner.clone() {
+            self.push_line(&line);
+        }
         self.push_line("[INIT] LightPlayer fake device booting");
         self.push_line(&format!(
             "[INIT] fw-esp32 initialized, starting server loop... proto={} commit={} dirty={}",
@@ -473,21 +514,40 @@ impl FakeDeviceCore {
         ));
 
         let files = lp.project_files.clone();
+        let root_files = lp.root_files.clone();
+        let fs_boot_state = lp.fs_boot_state;
         let load_at_boot = lp.load_project_at_boot;
         let project_dir = lp.project_dir.clone();
         let identity = lp.identity.clone();
         let base_mac = lp.base_mac.clone();
         let packs = lp.packs;
+        let board_manifest = self.script.board_manifest.clone();
         let reboot_requests = Arc::clone(&self.reboot_requests);
+        // The stamped uid the hello names: the scripted identity, or — for a
+        // board rebuilt from a flash image — the one its own
+        // `/.lp/device.json` holds, as firmware reads it at boot.
+        let device_uid = identity
+            .as_ref()
+            .map(|identity| identity.uid.clone())
+            .or_else(|| uid_in_root_files(&root_files));
+        // The board the hello names, from a stamped `/hardware.json`, as
+        // firmware loads its manifest (the firmware's built-in default
+        // board is not modelled: no stamped manifest, no board id).
+        let board_id = board_in_root_files(&root_files);
         let hello_identity = lp
             .provenance
             .clone()
             .with_proto(lp.proto_override.unwrap_or(lpc_wire::WIRE_PROTO_VERSION))
-            .with_device_uid(identity.as_ref().map(|identity| identity.uid.clone()));
+            .with_device_uid(device_uid);
         let start = HostRuntime::start_with_server(move || {
             let fs = LpFsMemory::new();
             for (relative, bytes) in &files {
                 let path = format!("{project_dir}/{relative}");
+                if let Err(error) = fs.write_file(path.as_path(), bytes) {
+                    eprintln!("[fake-device] failed to seed {path}: {error}");
+                }
+            }
+            for (path, bytes) in &root_files {
                 if let Err(error) = fs.write_file(path.as_path(), bytes) {
                     eprintln!("[fake-device] failed to seed {path}: {error}");
                 }
@@ -503,7 +563,12 @@ impl FakeDeviceCore {
                     eprintln!("[fake-device] failed to stamp identity: {error}");
                 }
             }
-            let mut server = create_memory_server_with(fs, hello_identity);
+            let mut server =
+                create_memory_server_on_board(fs, hello_identity, board_manifest.as_deref());
+            server.set_fs_boot_state(fs_boot_state);
+            if board_id.is_some() {
+                server.set_board_id(board_id);
+            }
             // What the ESP firmwares do: the hello names this build's
             // dictionary and an opt-in naming it is answered `packed`.
             server.set_packed_encoding_supported(packs);
@@ -539,10 +604,10 @@ impl FakeDeviceCore {
                 // boot's own. The server sends its unsolicited id-0 hello
                 // first; it is kept and said first on every link session.
                 self.boots = self.boots.wrapping_add(1);
-                self.link = Some(FakeBoardLink::new(
-                    lp.link_config.clone(),
-                    boot_nonce(self.boots),
-                ));
+                self.link = Some(
+                    FakeBoardLink::new(lp.link_config.clone(), boot_nonce(self.boots))
+                        .with_hello_json(lp.hello_json_override.clone()),
+                );
             }
             Err(error) => {
                 self.push_line(&format!("[fake-device] server start failed: {error}"));
@@ -995,9 +1060,18 @@ impl FakeDeviceCore {
             if falling {
                 if self.dtr_high_seen {
                     self.dtr_high_seen = false;
-                    self.script.boot = FakeBootState::RomDownloadMode;
+                    let was =
+                        core::mem::replace(&mut self.script.boot, FakeBootState::RomDownloadMode);
+                    if !matches!(was, FakeBootState::RomDownloadMode) {
+                        self.parked_from = Some(was);
+                    }
                     self.reset_current();
                 } else {
+                    // A hard reset leaves the ROM downloader and boots what
+                    // the flash holds.
+                    if let Some(was) = self.parked_from.take() {
+                        self.script.boot = was;
+                    }
                     self.reset_current();
                 }
             }
@@ -1033,6 +1107,23 @@ fn boot_nonce(boot: u32) -> u32 {
     static DEVICES: AtomicUsize = AtomicUsize::new(0);
     let device = DEVICES.fetch_add(1, Ordering::Relaxed) as u32;
     boot.wrapping_mul(0x9E37_79B1) ^ device.wrapping_mul(0x85EB_CA77) ^ 0x5EED_0001
+}
+
+/// The `uid` of a `/.lp/device.json` among `files`, read the way firmware
+/// reads its stamp at boot.
+fn uid_in_root_files(files: &[(String, Vec<u8>)]) -> Option<String> {
+    let (_, bytes) = files
+        .iter()
+        .find(|(path, _)| path == fw_host::DEVICE_IDENTITY_PATH)?;
+    let value: serde_json::Value = serde_json::from_slice(bytes).ok()?;
+    value.get("uid")?.as_str().map(str::to_string)
+}
+
+/// The board id a stamped `/hardware.json` names (its `id`).
+fn board_in_root_files(files: &[(String, Vec<u8>)]) -> Option<String> {
+    let (_, bytes) = files.iter().find(|(path, _)| path == "/hardware.json")?;
+    let value: serde_json::Value = serde_json::from_slice(bytes).ok()?;
+    value.get("id")?.as_str().map(str::to_string)
 }
 
 fn is_hello(frame: &lpc_wire::WireServerMessage) -> bool {

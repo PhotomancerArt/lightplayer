@@ -46,7 +46,7 @@ fw_esp32v3_elf := "target/" + xt_v3_target + "/release-esp32v3/fw-esp32v3"
 v3_flash_size := "4mb"
 
 # The C6's 4 MB flash, matching lp-fw/fw-esp32c6/partitions.csv
-# (0x310000 + 0xF0000 = 0x400000) and the runner in
+# (0x350000 + 0xB0000 = 0x400000) and the runner in
 # lp-fw/fw-esp32c6/.cargo/config.toml, which cannot read this var — same
 # reasoning as s3_flash_size above. CANONICAL SOURCE:
 # lp-fw/builds/esp32c6-4mb.json (`flashSizeMb`).
@@ -248,6 +248,14 @@ lpa-fs-opfs-test: install-wasm32-target
     fi
     CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER="$PWD/scripts/browser-test-harness.sh" \
         cargo test -p lpa-fs-opfs --target wasm32-unknown-unknown
+
+# The Web Serial JS layer's node tests (`lp-app/lpa-link/tests/js/*.test.mjs`):
+# no browser, no board. Today: the Mac serial-path model `virtual_serial.js`
+# puts between emulated boards and a page on a Mac, and the flash read that
+# survives it (G1-F2, docs/defects/2026-10-02-studio-reading-a-boards-files-stalls-on-a-mac.md).
+# Seconds. CI runs it in `validate-browser`; `just test` runs it locally.
+lpa-link-js-test:
+    node --test lp-app/lpa-link/tests/js/*.test.mjs
 
 # The Web Serial JS layer in a real Chrome — the harness
 # `docs/debt/web-serial-js-untestable.md` has been asking for since
@@ -781,8 +789,11 @@ studio-firmware-package-served:
 # Nothing in `just check` compiles wasm32, and the browser edge builds
 # `lpa-cloud-client` WITHOUT its default `in-process` feature — a combination
 # no other recipe exercises. Seconds, not the minutes a dx build costs.
+# `lpa-firmware-store` rides along: the engine cache seam and the firmware
+# store client Studio's browser edge implements (OTA M5).
 check-wasm-cloud: install-wasm32-target
     cargo check -p lpa-cloud-client --no-default-features --target {{ wasm32_target }}
+    cargo check -p lpa-firmware-store --target {{ wasm32_target }}
 
 studio-web-build: install-wasm32-target studio-firmware-package-served
     #!/usr/bin/env bash
@@ -1027,6 +1038,15 @@ clippy-fw-esp32s3:
     # close, for the same reason.
     echo "clippy: --features frame-dump"
     cargo clippy --release --features frame-dump -- --no-deps -D warnings
+    # The link thread's two other shapes (`src/io_thread.rs`): the desk-only
+    # stack diagnostic, and the app WITHOUT the thread (the link task back on
+    # the main executor, no messages-first). Both are cfg'd out of the
+    # defaults, so nothing else here compiles them.
+    echo "clippy: --features io_thread_stack_diag"
+    cargo clippy --release --features io_thread_stack_diag -- --no-deps -D warnings
+    echo "clippy: io-thread OFF"
+    cargo clippy --release --no-default-features \
+        --features esp32s3,server,float-f32,json-pack -- --no-deps -D warnings
     # Every harness, individually. Harness code is cfg'd out of the app build,
     # so linting only the default features would leave it completely uncovered
     # — which is exactly how 13 fw-esp32 harnesses rotted uncompiled in this
@@ -1129,6 +1149,17 @@ clippy-fw-esp32v3:
     # server stack compiles with it.
     echo "clippy: --features bench_render_loop"
     cargo clippy --profile release-esp32v3 --features bench_render_loop -- --no-deps -D warnings
+    # `frame_pace_diag` is additive too: the `[pace]` frame-timing lines PR
+    # #943's desk A/B and the editor-read defect were measured with.
+    echo "clippy: --features frame_pace_diag"
+    cargo clippy --profile release-esp32v3 --features frame_pace_diag -- --no-deps -D warnings
+    # The opt-in link thread (`src/io_thread.rs`, off by default on this
+    # board) and its desk-only stack diagnostic (which turns it on). Neither
+    # is in the defaults, so nothing else here compiles them.
+    echo "clippy: --features io-thread"
+    cargo clippy --profile release-esp32v3 --features io-thread -- --no-deps -D warnings
+    echo "clippy: --features io_thread_stack_diag"
+    cargo clippy --profile release-esp32v3 --features io_thread_stack_diag -- --no-deps -D warnings
     # Every harness, individually — the same loop fw-esp32s3 carries, and for
     # the same reason: a `test_*` feature sets `fw_harness`, which cfg's the
     # whole app path out, so linting the defaults leaves harness code completely
@@ -1472,7 +1503,7 @@ flash-fw-esp32s3 port="" features="" monitor="monitor": (build-fw-esp32s3 featur
 # `303a:1001` and both come up as `/dev/cu.usbmodem14332xx`. Resolve by MAC
 # first (`scripts/emu/board-port.py A0:F2:62:87:B4:8C`) and pass the port
 # explicitly rather than letting espflash pick.
-flash-fw-esp32c6 port="" features="" monitor="monitor": (build-fw-esp32c6 features)
+flash-fw-esp32c6 port="" features="" monitor="monitor" migrate="" discard="": (build-fw-esp32c6 features)
     #!/usr/bin/env bash
     set -euo pipefail
     args=(--chip esp32c6 --partition-table lp-fw/fw-esp32c6/partitions.csv --flash-size {{ c6_flash_size }} --after hard-reset)
@@ -1481,8 +1512,31 @@ flash-fw-esp32c6 port="" features="" monitor="monitor": (build-fw-esp32c6 featur
       no-monitor) ;;
       *) echo "monitor must be 'monitor' or 'no-monitor', not '{{ monitor }}'" >&2; exit 2 ;;
     esac
-    if [[ -n "{{ port }}" ]]; then
-      args+=(--port "{{ port }}")
+    # The layout preflight (C6 repartition, docs/adr/2026-10-02-c6-repartition-and-layout-migration.md):
+    # a board whose partition table differs from this image's — either way;
+    # a downgrade formats over a migrated board's files — is refused unless
+    # migrate=1 (move the files, writing this image) or discard=1 (erase them,
+    # test boards). It needs the port, so resolve it the way every recipe does.
+    port="{{ port }}"
+    if [[ -z "$port" ]]; then
+      port="$(cargo run -q -p lp-cli -- fwcheck port --chip esp32c6)"
+    fi
+    args+=(--port "$port")
+    preflight=(--port "$port" --table lp-fw/fw-esp32c6/partitions.csv)
+    [[ -n "{{ discard }}" ]] && preflight+=(--discard-lpfs)
+    [[ -n "{{ migrate }}" ]] && preflight+=(--migrate)
+    set +e
+    cargo run -q -p lp-cli -- hardware lpfs preflight "${preflight[@]}"
+    verdict=$?
+    set -e
+    if [[ $verdict -eq 4 ]]; then
+      merged="target/riscv32imac-unknown-none-elf/{{ fw_esp32c6_profile }}/fw-esp32c6-merged-for-migrate.bin"
+      espflash save-image --chip esp32c6 --merge --partition-table lp-fw/fw-esp32c6/partitions.csv \
+        --flash-size {{ c6_flash_size }} {{ fw_esp32c6_elf }} "$merged"
+      cargo run -q -p lp-cli -- hardware lpfs migrate --port "$port" --merged "$merged" --yes
+      exit 0
+    elif [[ $verdict -ne 0 ]]; then
+      exit $verdict
     fi
     espflash flash "${args[@]}" {{ fw_esp32c6_elf }}
 
@@ -2013,10 +2067,10 @@ fw-esp32c6-size-check margin="65536": install-rv32-target
     #!/usr/bin/env bash
     set -euo pipefail
     (cd lp-fw/fw-esp32c6 && cargo build --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} --features esp32c6,server)
-    # Keep `partition` in sync with the `factory` app partition in
-    # lp-fw/fw-esp32c6/partitions.csv.
-    just _fw-size-check esp32c6 esp32c6 {{ c6_flash_size }} {{ fw_esp32c6_elf }} 3145728 {{ margin }} \
-        "See docs/adr/2026-07-28-esp32c6-flash-budget.md."
+    # The partition is read from the `factory` row of the table the chip is
+    # flashed with, so the budget cannot drift from the layout again.
+    just _fw-size-check esp32c6 esp32c6 {{ c6_flash_size }} {{ fw_esp32c6_elf }} lp-fw/fw-esp32c6/partitions.csv {{ margin }} \
+        "See docs/adr/2026-07-28-esp32c6-flash-budget.md and docs/adr/2026-10-02-c6-repartition-and-layout-migration.md."
     just fw-esp32c6-rodata-layout-check
 
 # The image just linked must carry `build.rs`'s MERGED rodata layout, not
@@ -2101,9 +2155,9 @@ fw-manifest-check-emu: build-fw-emu
 fw-esp32s3-size-check margin="65536": build-fw-esp32s3
     #!/usr/bin/env bash
     set -euo pipefail
-    # Keep `partition` in sync with the `factory` app partition in
-    # lp-fw/fw-esp32s3/partitions.csv (0x600000).
-    just _fw-size-check esp32s3 esp32s3 {{ s3_flash_size }} {{ fw_esp32s3_elf }} 6291456 {{ margin }} \
+    # The partition is read from the `factory` row of
+    # lp-fw/fw-esp32s3/partitions.csv.
+    just _fw-size-check esp32s3 esp32s3 {{ s3_flash_size }} {{ fw_esp32s3_elf }} lp-fw/fw-esp32s3/partitions.csv {{ margin }} \
         "See lp-fw/fw-esp32s3/README.md 'Partitions'."
 
 # Fail when the esp32v3 (classic ESP32) app image gets too close to its 3 MB
@@ -2117,9 +2171,9 @@ fw-esp32s3-size-check margin="65536": build-fw-esp32s3
 fw-esp32v3-size-check margin="65536": build-fw-esp32v3
     #!/usr/bin/env bash
     set -euo pipefail
-    # Keep `partition` in sync with the `factory` app partition in
-    # lp-fw/fw-esp32v3/partitions.csv (0x300000).
-    just _fw-size-check esp32v3 esp32 {{ v3_flash_size }} {{ fw_esp32v3_elf }} 3145728 {{ margin }} \
+    # The partition is read from the `factory` row of
+    # lp-fw/fw-esp32v3/partitions.csv.
+    just _fw-size-check esp32v3 esp32 {{ v3_flash_size }} {{ fw_esp32v3_elf }} lp-fw/fw-esp32v3/partitions.csv {{ margin }} \
         "See lp-fw/fw-esp32v3/README.md 'Partitions'."
 
 # Shared tail of the per-chip size checks: measure the flashable image and
@@ -2129,13 +2183,21 @@ fw-esp32v3-size-check margin="65536": build-fw-esp32v3
 #
 # Callers build the ELF first; the build differs per chip (target, profile,
 # features, toolchain) but the measurement does not.
-_fw-size-check name chip flash_size elf partition margin doc:
+_fw-size-check name chip flash_size elf csv margin doc:
     #!/usr/bin/env bash
     set -euo pipefail
     if ! command -v espflash >/dev/null 2>&1; then
         echo "espflash not found. Install it before running the firmware size check."
         exit 1
     fi
+    # The app partition: the `factory` row of the table this chip is flashed
+    # with (a literal here drifted from the CSV once already).
+    factory="$(awk -F, '$1=="factory"{gsub(/[ \t]/,"",$5); print $5}' {{ csv }})"
+    if [ -z "${factory}" ]; then
+        echo "::error::no factory row in {{ csv }}"
+        exit 1
+    fi
+    partition=$(( factory ))
     # No --partition-table here on purpose: espflash errors out when the image
     # overruns the real table, and we want to report *how far* over it is.
     #
@@ -2152,10 +2214,22 @@ _fw-size-check name chip flash_size elf partition margin doc:
     trap 'rm -f "${img}"' EXIT
     espflash save-image --chip {{ chip }} --flash-size {{ flash_size }} {{ elf }} "${img}" >/dev/null
     size="$(wc -c < "${img}" | tr -d ' ')"
-    headroom=$(( {{ partition }} - size ))
-    echo "fw-{{ name }} image ${size} B / {{ partition }} B — headroom ${headroom} B (margin {{ margin }} B)"
+    headroom=$(( partition - size ))
+    echo "fw-{{ name }} image ${size} B / ${partition} B — headroom ${headroom} B (margin {{ margin }} B)"
     if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
-        echo "{{ name }} image \`${size}\` B of \`{{ partition }}\` B — headroom \`${headroom}\` B" >> "$GITHUB_STEP_SUMMARY"
+        echo "{{ name }} image \`${size}\` B of \`${partition}\` B — headroom \`${headroom}\` B" >> "$GITHUB_STEP_SUMMARY"
+    fi
+    # The C6's pre-repartition lpfs began at 0x310000 (frozen at
+    # lp-app/lpa-link/testdata/partitions-esp32c6-legacy-v1.csv). Once the app
+    # image crosses it, a migration must retire the old filesystem BEFORE the
+    # firmware is written (plan MQ6/MQ9) — informational, never a failure.
+    if [ "{{ name }}" = "esp32c6" ]; then
+        overlap=$(( 0x300000 - size ))
+        if [ "${overlap}" -ge 0 ]; then
+            echo "legacy overlap: ${overlap} B before the image reaches the old lpfs at 0x310000"
+        else
+            echo "legacy overlap: crossed — the image runs $(( -overlap )) B into the old lpfs at 0x310000"
+        fi
     fi
     if [ "${headroom}" -lt "{{ margin }}" ]; then
         echo "::error::{{ name }} image headroom ${headroom} B is under the {{ margin }} B margin. {{ doc }}"
@@ -2456,6 +2530,14 @@ fmt-check:
 # compile it for its real target.
 clippy-host:
     cargo clippy --workspace --exclude lps-builtins-emu-app --exclude fw-esp32c6 --exclude fw-esp32s3 --exclude fw-esp32v3 --exclude fw-emu --exclude lp-riscv-emu-guest-test-app --exclude lp-riscv-emu-guest --exclude lp-xt-fp-harness --exclude lp-gfx-wgpu --exclude fw-browser --exclude naga-wasm-poc -- --no-deps -D warnings
+    # fw-esp32-common's usb_link/uart_link modules are behind non-default
+    # features (`clippy-host`'s `--workspace` only lints its defaults), the
+    # same gap `test-rust-core` closes above for the tests.
+    cargo clippy -p fw-esp32-common --features usb-link,server --all-targets -- --no-deps -D warnings
+    cargo clippy -p fw-esp32-common --features uart-link,server --all-targets -- --no-deps -D warnings
+    # lpa-update's `pack` feature (the one packer of OTA encoding 1, std +
+    # flate2/zlib-rs) is off by default for the same reason.
+    cargo clippy -p lpa-update --features pack --all-targets -- --no-deps -D warnings
 
 # `lp-emu-esp32c6` with the `jit` feature on — the native translated build.
 #
@@ -2673,7 +2755,7 @@ test: build-rv32-builtins build-xt-builtins build-xt-fixtures _test-parallel
 
 [parallel]
 [private]
-_test-parallel: test-rust test-filetests test-emu-lab
+_test-parallel: test-rust test-filetests test-emu-lab lpa-link-js-test
 
 test-rust-core:
     cargo test
@@ -2683,18 +2765,39 @@ test-rust-core:
     # lp-link's simulator and delivery property need its `sim` feature; the
     # comms lab's halves over the simulator need `lab` too.
     cargo test -p lp-link --features sim,lab
+    # ...and again with the secure channel: the snow oracle, the RFC vectors,
+    # and the simulator, fuzzer and allocation tests' secure cases.
+    cargo test -p lp-link --features sim,lab,secure
+    # lpc-wire's secure-initiator port (feature `secure-link`).
+    cargo test -p lpc-wire --features secure-link,ser-write-json
+    # fw-esp32-common's usb_link module (the C6/S3 host link) sits behind the
+    # non-default `usb-link` feature, and needs `server` for the transport's
+    # `lpc_wire` dependency. Plain `cargo test` above never turns it on, so
+    # these tests (and the classic's uart_link pair below) never ran in CI
+    # until this line (docs: lp2025/_auto/2026-10-01-fw-common-link-tests-never-run).
+    # Both runs turn on `server`, so they also run that crate's `lp_fs`
+    # legacy guard and the boot loader's interrupted-stamp test
+    # (`hardware::manifest_loader`).
+    cargo test -p fw-esp32-common --features usb-link,server
+    # ...and the classic's UART0 host link (feature `uart-link`), same reason.
+    cargo test -p fw-esp32-common --features uart-link,server
+    # lpa-update's packer (feature `pack`: std + flate2/zlib-rs) and the host x
+    # board simulation's encoding-1 cases. Its own invocation, so flate2's
+    # zlib-rs backend never unifies into espflash's in the workspace run.
+    cargo test -p lpa-update --features pack
 
 # lp-link (the link-layer prototype, plan lp2025/2026-09-26-1720-reliable-device-link):
 # the delivery property at soak depth, 5,000 fault schedules per ARQ variant
 # (release, ~3 min). CI runs 500 per variant inside `test-rust-core`.
 link-soak cases="5000":
-    PROPTEST_CASES={{cases}} cargo test -p lp-link --features sim --release --test delivery_properties
+    PROPTEST_CASES={{cases}} cargo test -p lp-link --features sim,secure --release --test delivery_properties
 
 # lp-link's decoder fuzzing at depth: arbitrary bytes, datagrams and crafted
-# frames against a live link, `cases` per framing (release, ~12 s at 20,000).
+# frames against a live link, `cases` per framing (release, ~12 s at 20,000),
+# plain and secure (the secure cases add replays, forged SYNs and msg1 floods).
 # CI runs 256 per framing inside `test-rust-core`.
 link-fuzz cases="20000":
-    PROPTEST_CASES={{cases}} cargo test -p lp-link --release --test decoder_fuzz
+    PROPTEST_CASES={{cases}} cargo test -p lp-link --features sim,secure --release --test decoder_fuzz
 
 # lp-link's tables: compare | sweep | crc | codec | logs | ram | all. The link
 # rows are simulated; `codec` (and the top of `crc`) is host CPU throughput.
@@ -2709,11 +2812,22 @@ link-size:
 # lp-link builds for the board (riscv32, no_std) and the page (wasm32) with
 # the features those builds turn on, and lints clean with every feature on
 # (`clippy-host` sees only its default features, so the simulator, the lab and
-# the tests behind them were unlinted). Part of `check-lint`.
+# the tests behind them were unlinted). Part of `check-lint`. The `secure`
+# lines prove the secure channel builds no_std for both, and the last line
+# that no RNG crate (`getrandom`) reaches either graph: entropy is injected.
 check-lp-link-targets: install-rv32-target install-wasm32-target
     cargo check -p lp-link --target {{ rv32_target }} --features log,lab
     cargo check -p lp-link --target {{ wasm32_target }} --features log,lab
+    cargo check -p lp-link --target {{ rv32_target }} --features log,lab,secure
+    cargo check -p lp-link --target {{ wasm32_target }} --features log,lab,secure
+    cargo check -p lpc-wire --target {{ wasm32_target }} --features secure-link
     cargo clippy -p lp-link --features sim,lab,log --all-targets -- --no-deps -D warnings
+    cargo clippy -p lp-link --features sim,lab,log,secure --all-targets -- --no-deps -D warnings
+    for t in {{ rv32_target }} {{ wasm32_target }}; do \
+        if cargo tree -p lp-link --features log,lab,secure -e normal,features --target $t | grep -E 'getrandom|precomputed-tables'; then \
+            echo "lp-link/secure pulls an RNG or curve25519's precomputed tables on $t" >&2; exit 1; \
+        fi; \
+    done
 
 # The comms lab on the emulated C6 (plan reliable-device-link, M3): lp-link in
 # the `test_comms_lab` image against `lp-cli link lab`'s host half, with the
@@ -2908,7 +3022,7 @@ test-glsl-filetests:
 # Warm ~1s, cold ~47s locally; it runs beside clippy, the Lint job's long
 # pole. See docs/debt/wasm-cloud-check-not-in-just-check.md.
 [parallel]
-check-lint: fmt-check clippy check-wasm-cloud check-lp-link-targets check-lpc-engine-gates check-studio-core-minimal lint-serde-content lint-browser-test-harness lint-classic-capture lint-pcb-export lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-nested-patches lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities lint-red-main-needs lint-tag-next-version
+check-lint: fmt-check clippy check-wasm-cloud check-lp-link-targets check-lpc-engine-gates check-studio-core-minimal lint-serde-content lint-browser-test-harness lint-classic-capture lint-pcb-export lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-nested-patches lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities lint-red-main-needs lint-tag-next-version lint-web-actions lint-core-action-fields lint-core-test-ops
 
 [parallel]
 check: check-lint schema-check fw-manifest-check-emu
@@ -2969,6 +3083,26 @@ lint-vec-corpus:
 # Every `tw:` utility in the Studio markup must generate a CSS rule.
 lint-tw-utilities:
     python3 scripts/check-tw-utilities.py
+
+# The web-built actions ratchet: every verb the user can press is meant to be
+# built in core and published on the view (the app agent must see it). The
+# web layer may only build FEWER actions than recorded per file; `--bless`
+# locks a drop in. docs/adr/2026-10-01-agentic-control-offers-in-core.md.
+lint-web-actions *args:
+    python3 scripts/check-web-actions.py {{ args }}
+
+# The core action-fields ratchet: action-carrying pub fields on Studio core
+# view types may only go down — a verb belongs in the offer tree, at a path
+# (docs/adr/2026-10-01-agentic-control-offers-in-core.md). `--bless` records a drop.
+lint-core-action-fields *args:
+    python3 scripts/check-core-action-fields.py {{ args }}
+
+# The core test-ops ratchet: Studio core tests that build a user-verb action
+# directly (instead of pressing its offer by path through
+# `offer_press_test_api.rs`) may only go down per file
+# (docs/adr/2026-10-01-agentic-control-offers-in-core.md). `--bless` records a drop.
+lint-core-test-ops *args:
+    python3 scripts/check-core-test-ops.py {{ args }}
 
 # Guard against schemars reaching the RV32 firmware graphs (schema generation is host-only; see script).
 lint-schemars-fw:
@@ -3074,6 +3208,16 @@ test-emu-c6-boot:
     cargo test -p lp-emu-validate --test band_contract
     just test-emu-serve
 
+# The C6 repartition's host path on the emulated C6 (plan
+# lp2025/2026-10-01-1843-c6-repartition, P08): `lp-cli hardware lpfs` reading,
+# migrating, refusing and preflighting a "fielded board" built from this
+# tree's image on the pre-2026-10 table, through espflash's stub over a pty.
+# ~16 minutes of wall clock (a migration is ~180 s emulated), so it is NOT in
+# `test-emu-c6-cli` and no CI job runs it yet — run it when the layout
+# migration or the host flasher changes.
+test-emu-layout-migration:
+    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_layout_migration -- --include-ignored --nocapture --test-threads=1
+
 # lp-cli's emulator-backed tests. Both resolve the ELF through
 # `lp_emu_esp32c6::test_support` under `LP_EMU_BUILD_FW=1` — a plain
 # `cargo build`, not a reference image, so no espflash and no git history.
@@ -3086,6 +3230,45 @@ test-emu-c6-cli:
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_usb_link_gates -- --include-ignored --nocapture
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test link_capture -- --include-ignored --nocapture
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_frag_reads -- --include-ignored --nocapture
+    cargo test -p lpa-studio-core --lib app_agent_eval_tests::the_
+    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test app_agent_emu_decode -- --include-ignored --nocapture the_
+
+# App-agent evals, live leg (plan lp2025/2026-10-01-0126-app-agent-harness):
+# a model works the scenario in its seat (stage A: a headless Studio, or the
+# device bench with a fake board; the checks judge what it left), then the
+# tree it left runs on an emulated C6 with the frames on the scenario's pad
+# decoded (stage B). Costs real money: OPENROUTER_API_KEY or
+# ~/.lightplayer/settings.json `agent.openrouter_api_key`. Never CI.
+#
+#   just app-agent-eval e1 --model <openrouter slug>
+#   just app-agent-eval S18 --model <slug> --repeat 3
+#   just app-agent-eval all --model <slug> --tag device --max-usd 1
+#   just app-agent-eval all --dry-run --include-pending   # what would run; no model, no key
+#
+# The deterministic legs (goldens, negatives, scripted seats) are `cargo
+# test -p lpa-studio-core app_agent` and `test-emu-c6-cli`. See
+# lp-app/lpa-studio-core/tests/fixtures/app_agent/README.md.
+app-agent-eval scenario="all" *args:
+    scripts/app-agent/eval.sh {{ scenario }} {{ args }}
+
+# The agent activity corpus (plan …/m-agent-activity-corpus): every active
+# scenario, live, at GLM-5.3 by default, capped at $2 of reported spend
+# (`--max-usd`), then corpus.md — per scenario, tag and persona, and the
+# diff against the last run with the same model. Never CI.
+#
+#   just app-agent-corpus
+#   just app-agent-corpus --max-usd 1 --tag device
+#   just app-agent-corpus --only S4,S7 --include-pending --model <slug>
+#   just app-agent-corpus --dry-run
+#
+# Live agent corpus run, capped at --max-usd (default $2), with corpus.md.
+app-agent-corpus *args:
+    scripts/app-agent/corpus.sh {{ args }}
+
+# `--scenarios S1,S5,S18` picks scenarios other than the default S1–S3.
+# Every bake-off candidate × S1–S3 (E1–E3) × 3 runs, one table (plan P07).
+app-agent-bakeoff *args:
+    scripts/app-agent/bakeoff.sh {{ args }}
 
 # lp-cli's classic-emulator conversation tests: the shipped `fw-esp32v3` on
 # its UART0 lp-link (plan `classic-uart-on-lp-link`, P3/P5) — hello and an
@@ -4271,8 +4454,21 @@ device-scenario *args:
 #
 # Diff a produced trace against the silicon fixture for the same scenario with
 #   node scripts/emu/trace-diff.mjs <silicon>.jsonl <emulated>.emu.jsonl
+#
+# `--serve-release` runs it with no dev server: the walk serves the release
+# bundle (`just studio-web-story-build`) and the packaged firmware itself.
 walk-no-board *args:
     node scripts/emu/walk-no-board.mjs {{ args }}
+
+# The C6 repartition's migration walk (P08): real Studio, headless, updating
+# an emulated C6 that is a fielded board (current firmware, pre-2026-10
+# table, files at 0x310000). One scenario per run — W1 W2 W3 W4 W5 W9 W7a
+# W7b W12 (W12: the board a Worker in the page, `?emu=tab`), see the script
+# header. Serves the RELEASE bundle itself (no dev
+# server); needs `just studio-web-story-build`,
+# `just studio-firmware-package-served` and `cargo build -p lp-cli`. Not CI.
+walk-migration-emu *args:
+    node scripts/emu/walk-migration-emu.mjs {{ args }}
 
 # The Bluetooth twin (M5 of the BLE remote-control plan): add over Bluetooth
 # → identify → push → Play → idle → knob, over `?ble=emu` against an emulated
@@ -4281,6 +4477,14 @@ walk-no-board *args:
 # Proves the transport, the UI and Play — not access enforcement.
 walk-ble-emu *args:
     node scripts/emu/walk-ble-emu.mjs {{ args }}
+
+# The dropped-link walk: an emulated C6 over `?emu=` USB, the cable pulled
+# and re-seated under the editor and under Play — the page must stay put
+# behind "Reconnecting…" and resume the same session (defect
+# 2026-10-02-a-dropped-link-sends-the-editor-to-devices). Needs a Studio on
+# this worktree's port; never a CI job.
+walk-drop-emu *args:
+    node scripts/emu/walk-drop-emu.mjs {{ args }}
 
 # The hardware-validation system: payloads, configurations, transcripts,
 # replay. `just validate list` with no other args; `replay <transcript>

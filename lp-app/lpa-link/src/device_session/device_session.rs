@@ -542,9 +542,10 @@ impl DeviceShared {
     /// into the pending queue.
     pub(crate) fn pump_console_lines(&self) {
         for line in self.take_observed_lines() {
-            if let Some(_frame_json) = line.strip_prefix("M!") {
+            if let Some(frame_json) = line.strip_prefix("M!") {
+                self.note_hello_on_other_wire(frame_json);
                 #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
-                self.queue_browser_frame(_frame_json);
+                self.queue_browser_frame(frame_json);
                 continue;
             }
             self.classifier.borrow_mut().observe_line(line.as_str());
@@ -555,6 +556,35 @@ impl DeviceShared {
         }
         #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
         self.surface_browser_errors();
+    }
+
+    /// A hello from another wire that this build cannot decode — the
+    /// transport drops it as a message that did not parse, so the hello
+    /// gate never sees it, and the deadline would call a board that said
+    /// hello "pre-hello firmware" (G1 rehearsal, 2026-10-03: `lp-cli upload`
+    /// against a wire-32 C6). Read its `proto` alone
+    /// ([`lpc_wire::hello_proto`], the same one-field read the Studio fold
+    /// uses) and settle on [`IncompatibleReason::HelloOnOtherWire`].
+    ///
+    /// Only while `Booting`, only for a frame the full decode rejects (a
+    /// hello that decodes reaches the gate, `ProtoMismatch` included), and
+    /// never for a hello claiming THIS wire: that one is an anomaly, not a
+    /// version.
+    fn note_hello_on_other_wire(&self, frame_json: &str) {
+        if !matches!(self.state(), DeviceState::Booting) {
+            return;
+        }
+        let Some(proto) = lpc_wire::hello_proto(frame_json) else {
+            return;
+        };
+        if proto == lpc_wire::WIRE_PROTO_VERSION
+            || lpc_wire::json::from_str::<WireServerMessage>(frame_json).is_ok()
+        {
+            return;
+        }
+        self.set_state(DeviceState::Incompatible {
+            reason: IncompatibleReason::HelloOnOtherWire { proto },
+        });
     }
 
     /// Deadline expiry while still `Booting`: a started-but-silent server is

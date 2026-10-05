@@ -102,11 +102,34 @@ timeouts, anywhere in the sweep. Every image stalls outright from
 the endpoint as early as ~7 µs after a few drains; the minimum then marks the
 start of an intermittent band, not the stall, and whether an image shows that
 band depends on its build (the local and CI builds of #880's gated image
-differ). So the test now climbs a ladder of lags, 1.25–3× the later soonest
-touch, and requires the stall on at least one rung; the defect reads as fixed
-only when no rung shows it.
+differ). #880 made the test climb a ladder of lags, 1.25–3× the later soonest
+touch, requiring the stall on at least one rung. When #880 merged main
+(2026-10-05) it took main's fix for the same cause instead — the lag chosen
+from the *typical* wake, not the soonest (the 2026-10-01 entry below) — and
+dropped its ladder: one rule for one cause.
 
 **Lesson.** Moving the writer onto a different task moved WHEN the gate's
 check lands relative to the drain, and that ordering was the whole reason the
 gate was safe under the hypothesis. A gate that clears an edge it then waits
 on is only race-free if the condition it re-checks moves with the edge.
+
+**2026-10-01 — the regression test's lag stopped covering the wake (still
+open).** On PR #894 (the secure link) `emu_usb_free_lag.rs` reported this
+defect "looks fixed": the ungated image answered 40 of 40 under the lag, with
+2 write timeouts that the link's resends recovered. It was not fixed. The test
+chose the lag from the run's *soonest* drain-to-`ep1_conf`/`ep1` span, and
+that statistic belongs to whichever single drain happened to land while the
+CPU was already running: per-drain traces (`lp-emu:esp32c6:t1`, images built
+on a desk from 3ecb85468 and from #894's head) show the idle wake unchanged —
+the ungated image's check 1,503 cycles (9,393 ns) after a drain, the gated
+one's 1,528 (9,550 ns), on ~97 of 98 drains in both trees — while #894's
+images add one or two drains that find the CPU awake and wake in 769–1,317
+cycles. The run's soonest became one of those (6,418 ns on CI, 4,806 ns on the
+desk, for one commit), the lag landed at ~8 µs, below the wake almost every
+drain takes, and so almost every wake escaped the lag. The test now chooses the
+lag from the median, over the 40 requests, of each request's soonest wake; on
+both trees, and on CI's own shipped image for #894, that is 9,718 / 9,550 ns,
+the lag is 10,718 ns, and both images show this defect's full signature again:
+0 of 40 answered, 9 write timeouts, 9 damaged, 26 resent. The firmware change
+did not move the USB path; it moved the phase of the guest's other work against
+the host's drain cadence, which any change to the image can.

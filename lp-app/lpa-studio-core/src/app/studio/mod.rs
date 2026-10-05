@@ -1,9 +1,15 @@
 pub mod console_command;
+pub mod lens_hold;
 pub mod lens_reconnect;
+/// Tests press offers by path (`press`, `press_lasting`, `offered`, …), on
+/// every bench: the offer tree's third consumer, after the web and the agent.
+#[cfg(test)]
+pub(crate) mod offer_press_test_api;
 /// Studio-level decoration of output-node faces: board identity (device
 /// registry) and the incoming lamp extent (the upstream node's produced
 /// control product) — the facts the project walk cannot see.
 mod output_face_decoration;
+pub mod place;
 pub mod play_view_op;
 pub mod refresh_cadence;
 pub mod studio_actor;
@@ -19,13 +25,13 @@ pub mod studio_controller;
 /// tests). See the module doc for why nothing here fakes at the model's own
 /// vocabulary.
 #[cfg(test)]
-mod studio_device_e2e_tests;
+pub(crate) mod studio_device_e2e_tests;
 /// End-to-end edit-flow tests against an in-process `lpa-server` (host-only
 /// dev-dependency; never part of the wasm lib build).
 #[cfg(test)]
 mod studio_docs_e2e_tests;
 #[cfg(test)]
-mod studio_edit_e2e_tests;
+pub(crate) mod studio_edit_e2e_tests;
 /// End-to-end export designation tests (module authoring unit, P3): the
 /// folder-sub-module fixture, the popup row, the root rail, and the
 /// library/runtime manifest mirror.
@@ -74,6 +80,7 @@ pub use crate::core::log::{
 pub use crate::core::notice::UiNotices;
 pub use crate::core::notice::{UiNotice, UiNoticeLevel};
 pub use console_command::ConsoleCommand;
+pub use place::{UiPage, UiPanel, UiPlace, UiProjectView, UiSessionSection};
 pub use play_view_op::PlayViewOp;
 pub use refresh_cadence::{
     BLE_PLAY_IDLE_REFRESH_INTERVAL, DEVICE_CARD_FEED_INTERVAL, DEVICE_HEARTBEAT_INTERVAL,

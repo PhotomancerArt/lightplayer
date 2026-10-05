@@ -1,0 +1,34 @@
+[package]
+name = "lpa-update"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "The host side of an over-the-air update (protocol v1): serving, the read-back backup, the login client, the decision, the update driver, and (feature pack) the one packer of encoding 1"
+
+# Sans-IO, no_std + alloc (Studio's wasm and lp-cli share it). Never a
+# dependency on `lpc-firmware-release` or `lpa-firmware-store` here: the
+# engine sources are effects the edge resolves, and the edge to
+# `lpc-firmware-release` is Part B's (B-P02).
+[dependencies]
+lp-crc32 = { path = "../../lp-base/lp-crc32" }
+# M1's version comparison (FirmwareAge), reused rather than written twice.
+lpa-devices = { path = "../lpa-devices" }
+lpc-access = { path = "../../lp-core/lpc-access" }
+lpc-update = { path = "../../lp-core/lpc-update" }
+sha2 = { workspace = true }
+# `pack` only: the one packer of encoding 1 (std). The compressor is a
+# dependency (zlib-rs, pure Rust, Zlib licence), never copied source;
+# lp-deflate, the board's own decoder, proves every chunk it emits.
+flate2 = { version = "1.1.9", default-features = false, features = ["zlib-rs"], optional = true }
+lp-deflate = { path = "../../lp-base/lp-deflate", optional = true }
+
+[features]
+pack = ["dep:flate2", "dep:lp-deflate"]
+
+[dev-dependencies]
+lpc-update = { path = "../../lp-core/lpc-update", features = ["test-support"] }
+
+[lints]
+workspace = true

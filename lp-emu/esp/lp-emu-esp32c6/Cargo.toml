@@ -26,6 +26,11 @@ env_logger = { workspace = true }
 # demangling every symbol and matching the path. MIT/Apache-2.0, already in
 # the tree through the workspace's dependencies.
 rustc-demangle = "0.1"
+# The MD5 row of the partition table a direct load stages
+# (`flash::c6_partition_table_bytes`): the firmware's bootloader crate
+# verifies it. MIT/Apache-2.0 (RustCrypto), already in the tree through
+# espflash and lpa-link.
+md5 = { package = "md-5", version = "0.10" }
 # The strip decoder's wire timing and byte order (`--strip-timing`,
 # `--strip-order`), and `PulseItem::decode` in `tests/rmt_chase.rs`. The same
 # crate the firmware encodes with, so the emulator's idea of a bit cannot

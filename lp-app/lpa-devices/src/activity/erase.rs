@@ -242,6 +242,7 @@ impl ActivityReducer for EraseActivity {
                     _ => ActivityStep::nothing(),
                 },
                 Event::IdentityObserved { .. }
+                | Event::GrantAnswered { .. }
                 | Event::LinkAttached { .. }
                 | Event::LinkDetached { .. }
                 // The wire borrow is the fold's business (it pauses

@@ -15,15 +15,16 @@
 //! and is logged — damage only ever takes access away.
 //!
 //! The device store itself: a **missing** store is
-//! [`DeviceAccessFile::fresh`] (Bluetooth on, locked, no keys), and a
-//! **damaged** one is [`DeviceAccessFile::locked`] (Bluetooth off).
+//! [`DeviceAccessFile::fresh`] (Bluetooth on, open to anyone nearby, no
+//! keys), and a **damaged** one is [`DeviceAccessFile::locked`] (Bluetooth
+//! off, open to nobody).
 
 extern crate alloc;
 
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
-use lpc_access::{DeviceAccessFile, ProjectAccessFile, SALT_BYTES, SecretEntry};
+use lpc_access::{DeviceAccessFile, OpenTo, ProjectAccessFile, SALT_BYTES, SecretEntry};
 use lpc_model::{AsLpPath, LpPathBuf};
 use lpc_wire::server::{AccessEntryInfo, ServerMsgBody};
 use lpfs::LpFs;
@@ -58,6 +59,30 @@ pub fn read_device_store(fs: &dyn LpFs) -> DeviceAccessFile {
             DeviceAccessFile::locked()
         }
     }
+}
+
+/// The device store as a board's boot decides Bluetooth from it: what
+/// [`read_device_store`] reads, except on a board **holding its files** for
+/// the C6 layout change (`fs: legacy_held`), which is
+/// [`DeviceAccessFile::locked`] — Bluetooth off.
+///
+/// Such a board runs on a RAM filesystem, so its store reads as missing —
+/// `fresh()`, Bluetooth on — while its real store waits in the old region
+/// with every other file. That real store may say Bluetooth off, or be
+/// damaged (locked), and the held board must not be more open than its own
+/// list. So it is treated like a store that cannot be read: damage, and an
+/// unreachable store, only ever take access away. USB, a trusted link,
+/// still holds edit, as on every board. Finish update moves the real store
+/// back, and the next boot reads it.
+pub fn device_store_at_boot(
+    fs: &dyn LpFs,
+    fs_boot_state: lpc_wire::FsBootState,
+) -> DeviceAccessFile {
+    if fs_boot_state == lpc_wire::FsBootState::LegacyHeld {
+        log::info!("access: files held for the layout change; the device store waits with them");
+        return DeviceAccessFile::locked();
+    }
+    read_device_store(fs)
 }
 
 /// Write the device store, always at the current version.
@@ -102,14 +127,14 @@ pub fn access_remove(fs: &dyn LpFs, salt: &[u8; SALT_BYTES]) -> ServerMsgBody {
     write_and_list(fs, &store)
 }
 
-/// `AccessSetSwitches`: set whichever switches are given and answer the
+/// `AccessSetSwitches`: set whichever settings are given and answer the
 /// list. `ble_enabled` applies at the next boot; the list reports the
-/// stored value.
+/// stored value. `open` applies at once.
 #[inline(never)]
 pub fn access_set_switches(
     fs: &dyn LpFs,
     ble_enabled: Option<bool>,
-    open: Option<bool>,
+    open: Option<OpenTo>,
 ) -> ServerMsgBody {
     let mut store = read_device_store(fs);
     if let Some(ble_enabled) = ble_enabled {
@@ -179,12 +204,43 @@ mod tests {
     use lpfs::LpFsMemory;
 
     #[test]
-    fn a_missing_store_is_fresh_with_bluetooth_on() {
+    fn a_missing_store_is_fresh_open_and_with_bluetooth_on() {
         let fs = LpFsMemory::new();
         let store = read_device_store(&fs);
         assert_eq!(store, DeviceAccessFile::fresh());
         assert!(store.ble_enabled);
-        assert!(!store.open);
+        assert_eq!(store.open, OpenTo::Edit);
+    }
+
+    /// G1 rehearsal (2026-10-03): the spare C6, held for the layout change
+    /// with a 16-entry store in its old region, booted on a RAM filesystem,
+    /// read that as "no store" and advertised Bluetooth (`LP-8e30`). A held
+    /// board boots locked: Bluetooth off until Finish update moves its real
+    /// store back.
+    #[test]
+    fn a_held_board_boots_locked_with_bluetooth_off() {
+        // The held board's RAM filesystem: no store on it.
+        let fs = LpFsMemory::new();
+        assert!(
+            read_device_store(&fs).ble_enabled,
+            "the premise: read as missing, it would be fresh with Bluetooth on"
+        );
+        let store = device_store_at_boot(&fs, lpc_wire::FsBootState::LegacyHeld);
+        assert_eq!(store, DeviceAccessFile::locked());
+        assert!(!store.ble_enabled);
+        assert_eq!(store.open, OpenTo::Nobody);
+        assert!(store.secrets.is_empty());
+        // Every other boot reads the store as before.
+        for fs_state in [
+            lpc_wire::FsBootState::Mounted,
+            lpc_wire::FsBootState::Formatted,
+            lpc_wire::FsBootState::Memory,
+        ] {
+            assert_eq!(
+                device_store_at_boot(&fs, fs_state),
+                DeviceAccessFile::fresh()
+            );
+        }
     }
 
     #[test]
@@ -198,6 +254,7 @@ mod tests {
         let store = read_device_store(&fs);
         assert_eq!(store, DeviceAccessFile::locked());
         assert!(!store.ble_enabled);
+        assert_eq!(store.open, OpenTo::Nobody);
     }
 
     #[test]

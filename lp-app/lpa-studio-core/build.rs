@@ -39,6 +39,9 @@ use std::path::{Path, PathBuf};
 const BUCKET_ORDER: &[&str] = &["projects", "patterns", "templates"];
 
 fn main() {
+    // Studio's own app version (`LP_APP_VERSION`), from the one helper every
+    // versioned build uses: what a board's hello is compared against.
+    lp_app_version::emit();
     let manifest_dir =
         PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR"));

@@ -44,9 +44,13 @@
 //! real ROM and the real bootloader, and every line below is a place the two
 //! paths can disagree:
 //!
-//! 1. **The partition table is never read or validated.** No
-//!    `esp_app_desc` check, no image-hash check, no secure-boot or
-//!    flash-encryption path. A corrupt image boots here and does not there.
+//! 1. **The partition table is staged, never read or validated by a
+//!    bootloader.** [`stage_image_in_flash`] writes the C6's compiled table
+//!    (`flash::c6_partition_table_bytes`) at `0x8000` when the chip has none,
+//!    because the firmware reads `lpfs` from it; nothing on this path checks
+//!    it against the app. No `esp_app_desc` check, no image-hash check, no
+//!    secure-boot or flash-encryption path. A corrupt image boots here and
+//!    does not there.
 //! 2. **The MMU page table is programmed by the loader, not by a
 //!    bootloader** ([`stage_image_in_flash`], M4). The bytes go into the
 //!    flash chip at `factory + (vaddr - 0x4200_0000)` and the table maps
@@ -186,6 +190,19 @@ pub enum ResetCause {
     /// `0x15` — the serial bridge asserted `chip_rst`. What espflash's
     /// `--after hard-reset` and M6's `reset` control command do.
     UsbUartHpSys,
+    /// `0x3` — the guest's own software reset of the HP system: a store
+    /// with `LP_AON.sys_cfg.hpsys_sw_reset` (bit 31) set, which is the mask
+    /// ROM's `software_reset` and so esp-hal's `software_reset()`.
+    ///
+    /// The evidence for the code, two sources that agree: the ROM's own
+    /// name table above (index 3 is `LP_SW_HPSYS`), and esp-hal 1.1.1's
+    /// `SocResetReason::CoreSw = 0x03` for this chip
+    /// (`rtc_cntl/rtc/esp32c6.rs`, "Software resets the digital core"),
+    /// which the firmware's `reset_cause_map` reads as `SoftwareReset`.
+    /// The ESP32-C6 TRM's reset-source table was not at hand when this was
+    /// modelled (2026-10-04), so the TRM is not cited; if it ever disagrees,
+    /// the ROM table is what a board's banner prints.
+    LpSwHpSys,
 }
 
 impl ResetCause {
@@ -203,6 +220,7 @@ impl ResetCause {
             ResetCause::LpWdtSys => 0x10,
             ResetCause::Tg1WdtCpu => 0x11,
             ResetCause::UsbUartHpSys => 0x15,
+            ResetCause::LpSwHpSys => 0x3,
         }
     }
 
@@ -218,6 +236,7 @@ impl ResetCause {
             ResetCause::LpWdtHpSys => "LP_WDT_HPSYS",
             ResetCause::LpWdtCpu => "LP_WDT_CPU",
             ResetCause::UsbUartHpSys => "USB_UART_HPSYS",
+            ResetCause::LpSwHpSys => "LP_SW_HPSYS",
         }
     }
 
@@ -236,6 +255,7 @@ impl ResetCause {
             // domains, which is why the machine answers it with
             // `power_cycle()` rather than `reboot()`.
             ResetSource::PowerOn => ResetCause::PowerOn,
+            ResetSource::Software => ResetCause::LpSwHpSys,
             ResetSource::Watchdog {
                 watchdog: Watchdog::Mwdt(0),
                 scope: ResetScope::Cpu,
@@ -314,6 +334,7 @@ impl ResetCause {
             ResetCause::LpWdtHpSys => "lp-wdt-hpsys",
             ResetCause::LpWdtCpu => "lp-wdt-cpu",
             ResetCause::UsbUartHpSys => "usb-uart",
+            ResetCause::LpSwHpSys => "lp-sw-hpsys",
         }
     }
 }
@@ -478,6 +499,9 @@ pub struct FlashStaging {
     pub bytes: u32,
     /// The chip size written into `rom_spiflash_legacy_data`.
     pub chip_size: u32,
+    /// Whether [`crate::flash::c6_partition_table_bytes`] was staged at
+    /// `0x8000` (false when the chip already held a table).
+    pub table_staged: bool,
 }
 
 /// Put the flash-resident half of an image into the flash chip and program
@@ -490,7 +514,7 @@ pub struct FlashStaging {
 /// the RAM region behind the window and left the MMU empty
 /// (`the module docs, item 2`). That works right up until something asks the
 /// flash *chip* a question, and this milestone's firmware does: littlefs
-/// mounts `lpfs` at `0x0031_0000` through the mask ROM's
+/// mounts `lpfs` at `0x0035_0000` through the mask ROM's
 /// `esp_rom_spiflash_read`, which reads the same part the app's `.text`
 /// lives in. So the chip has to hold the app too, or the two halves of the
 /// address space would be describing different boards.
@@ -559,6 +583,21 @@ pub fn stage_image_in_flash(
         }
     }
 
+    // The partition table a flasher would have written beside the app. The
+    // firmware reads `lpfs` from it at boot (`fw-esp32c6/src/flash_storage.rs`);
+    // without one a direct-load run would quietly fall to memory FS. A chip
+    // that already holds a table (a `--flash` file that was really flashed)
+    // keeps its own — that is the layout being tested.
+    {
+        let mut chip = flash.lock().unwrap();
+        if !crate::flash::holds_partition_table(chip.bytes()) {
+            let table = crate::flash::c6_partition_table_bytes();
+            if chip.stage(crate::flash::PARTITION_TABLE_OFFSET, &table) {
+                staging.table_staged = true;
+            }
+        }
+    }
+
     touched.sort_unstable();
     let mut mmu = mmu.lock().unwrap();
     for page in touched {
@@ -589,7 +628,7 @@ pub fn stage_image_in_flash(
 /// bltu  a5, a4, +0xae      ; → return 1
 /// ```
 ///
-/// and `lpfs` starts at `0x0031_0000`, which is past 2 MiB. On silicon the
+/// and `lpfs` starts at `0x0035_0000`, which is past 2 MiB. On silicon the
 /// bootloader calls `esp_rom_spiflash_config_param` with the size from the
 /// image header's flash-size field; here the loader writes the same word,
 /// derived from the image the machine was actually given. Without it every

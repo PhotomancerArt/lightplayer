@@ -29,7 +29,19 @@ pub const MANIFEST_BLOB_BEGIN: &str = "\u{1}LP-FW-MANIFEST-BEGIN-v1\u{2}";
 pub const MANIFEST_BLOB_END: &str = "\u{3}LP-FW-MANIFEST-END-v1\u{4}";
 
 /// JSON shape version of the manifest core payload.
-pub const MANIFEST_CORE_VERSION: u32 = 1;
+///
+/// - 2: `version`, the build's app version (`LP_APP_VERSION`, what
+///   `scripts/print-app-version.sh` prints), after `package`.
+/// - 1: the first shape.
+pub const MANIFEST_CORE_VERSION: u32 = 2;
+
+/// The bytes an embedded `version` value may take. The value is stored in a
+/// slot of exactly this size (space-padded) wherever a firmware image holds
+/// it, so a release, a dev or a dirty build differ in the slot's CONTENT and
+/// never in any size or address after it — the pinned firmware figures (heap,
+/// stack, boot text, cycle counts) cannot start depending on how a build was
+/// stamped. The longest real form, `<12-hex sha>-dirty-<HHMMSS>PT`, is 27.
+pub const VERSION_SLOT_BYTES: usize = 40;
 
 // --- Const assembly ---------------------------------------------------------------------------
 
@@ -85,6 +97,56 @@ pub const fn u32_json(value: u32) -> [u8; 10] {
         }
     }
     out
+}
+
+/// A version in its fixed-size slot: the version's bytes, then spaces up to
+/// [`VERSION_SLOT_BYTES`]. Refuses (at compile time, in const use) a version
+/// that is too long or that holds a byte a JSON string or the padding could
+/// not carry — a space, a quote, a backslash or a control byte.
+pub const fn version_slot(version: &str) -> [u8; VERSION_SLOT_BYTES] {
+    let bytes = version.as_bytes();
+    assert!(
+        !bytes.is_empty() && bytes.len() <= VERSION_SLOT_BYTES,
+        "version_slot: a version is 1..=VERSION_SLOT_BYTES bytes"
+    );
+    let mut out = [b' '; VERSION_SLOT_BYTES];
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        assert!(
+            b > b' ' && b != b'"' && b != b'\\' && b < 0x7f,
+            "version_slot: a version is printable ASCII with no space, quote or backslash"
+        );
+        out[i] = b;
+        i += 1;
+    }
+    out
+}
+
+/// A version slot as a fixed-width JSON string: `"`, the version, `"`, then
+/// spaces (JSON whitespace) — the same size whatever the version.
+pub const fn version_json(version: &str) -> [u8; VERSION_SLOT_BYTES + 2] {
+    let slot = version_slot(version);
+    let mut out = [b' '; VERSION_SLOT_BYTES + 2];
+    out[0] = b'"';
+    let mut i = 0;
+    while i < VERSION_SLOT_BYTES && slot[i] != b' ' {
+        out[i + 1] = slot[i];
+        i += 1;
+    }
+    out[i + 1] = b'"';
+    out
+}
+
+/// The version held in a slot (its bytes up to the first space). Scanned at
+/// run time on purpose: a length baked in as an immediate could change an
+/// instruction's encoding, and with it every address after it.
+pub fn version_from_slot(slot: &[u8; VERSION_SLOT_BYTES]) -> &str {
+    let len = slot
+        .iter()
+        .position(|b| *b == b' ')
+        .unwrap_or(VERSION_SLOT_BYTES);
+    core::str::from_utf8(&slot[..len]).expect("a version slot is ASCII")
 }
 
 /// `"true"` / `"false"` for JSON booleans in const assembly.
@@ -195,6 +257,7 @@ macro_rules! lp_embed_manifest_core {
         chip: $chip:expr,
         cargo_target: $cargo_target:expr,
         profile: $profile:expr,
+        version: $version:expr,
         commit: $commit:expr,
         dirty: $dirty:expr,
         wire_proto: $wire_proto:expr,
@@ -220,6 +283,20 @@ macro_rules! lp_embed_manifest_core {
             // SAFETY: digits and spaces only.
             const WIRE_PROTO: &str =
                 unsafe { ::core::str::from_utf8_unchecked(&WIRE_PROTO_BUF) };
+            // The version in its fixed-width slot (see
+            // `VERSION_SLOT_BYTES`): the blob is the same size whatever the
+            // build was stamped with.
+            const VERSION_JSON_BUF: [u8; $crate::manifest::VERSION_SLOT_BYTES + 2] =
+                $crate::manifest::version_json($version);
+            // SAFETY: `version_json` writes printable ASCII only.
+            const VERSION_JSON: &str =
+                unsafe { ::core::str::from_utf8_unchecked(&VERSION_JSON_BUF) };
+
+            /// The version alone, in the same fixed-width slot, for the
+            /// runtime (the hello reads it through `manifest_version`).
+            pub(super) static VERSION_SLOT: [u8; $crate::manifest::VERSION_SLOT_BYTES] =
+                $crate::manifest::version_slot($version);
+
             const CORE_VERSION_BUF: [u8; 10] =
                 $crate::manifest::u32_json($crate::manifest::MANIFEST_CORE_VERSION);
             // SAFETY: digits and spaces only.
@@ -229,7 +306,8 @@ macro_rules! lp_embed_manifest_core {
             const JSON: &str = $crate::lp_const_concat!(
                 "{\"lpManifestCore\":", CORE_VERSION,
                 ",\"package\":\"", $package,
-                "\",\"profile\":\"", $profile,
+                "\",\"version\":", VERSION_JSON,
+                ",\"profile\":\"", $profile,
                 "\",\"commit\":\"", $commit,
                 "\",\"dirty\":", $crate::manifest::bool_json($dirty),
                 ",\"target\":{\"family\":\"", $family,
@@ -272,6 +350,17 @@ macro_rules! lp_embed_manifest_core {
             ::core::str::from_utf8(&__lp_manifest_core::BLOB_BYTES[begin..end])
                 .expect("manifest blob is compile-time UTF-8")
         }
+
+        /// This build's app version, as the manifest core states it — what
+        /// the wire hello reports. Read from a fixed-width slot, so the
+        /// image's layout does not depend on the version's length.
+        #[allow(
+            dead_code,
+            reason = "an embedder that sets no hello identity has no reader"
+        )]
+        pub fn manifest_version() -> &'static str {
+            $crate::manifest::version_from_slot(&__lp_manifest_core::VERSION_SLOT)
+        }
     };
 }
 
@@ -286,6 +375,10 @@ pub struct ManifestCore {
     pub lp_manifest_core: u32,
     /// Cargo package that produced the build (e.g. `fw-esp32c6`).
     pub package: alloc::string::String,
+    /// The build's app version (`2026.10.03-1`, or the dev form
+    /// `<short-sha>[-dirty-<HHMMSS>PT]`); `unknown` where the embedder has
+    /// no VCS facts.
+    pub version: alloc::string::String,
     /// Cargo profile (e.g. `release-esp32`).
     pub profile: alloc::string::String,
     /// Source commit; `unknown` where the embedder has no VCS facts.
@@ -348,6 +441,7 @@ mod tests {
             chip: "testchip",
             cargo_target: "riscv32imac-unknown-none-elf",
             profile: "release-test",
+            version: "2026.10.03-1",
             commit: "abc1234",
             dirty: false,
             wire_proto: 4,
@@ -367,6 +461,7 @@ mod tests {
             chip: "testchip",
             cargo_target: "riscv32imac-unknown-none-elf",
             profile: "debug",
+            version: "0123abcde-dirty-120000PT",
             commit: "unknown",
             dirty: true,
             wire_proto: 4,
@@ -383,6 +478,8 @@ mod tests {
         let core: ManifestCore = serde_json::from_str(json).unwrap();
         assert_eq!(core.lp_manifest_core, MANIFEST_CORE_VERSION);
         assert_eq!(core.package, "fw-fake");
+        assert_eq!(core.version, "2026.10.03-1");
+        assert_eq!(fake_firmware::manifest_version(), "2026.10.03-1");
         assert_eq!(core.profile, "release-test");
         assert_eq!(core.commit, "abc1234");
         assert!(!core.dirty);
@@ -404,6 +501,11 @@ mod tests {
         let core: ManifestCore = serde_json::from_str(json).unwrap();
         assert!(core.features.is_empty());
         assert!(core.dirty);
+        assert_eq!(core.version, "0123abcde-dirty-120000PT");
+        assert_eq!(
+            empty_features_firmware::manifest_version(),
+            "0123abcde-dirty-120000PT"
+        );
         assert_eq!(core.limits.flash_app_bytes, Some(3 * 1024 * 1024));
         assert_eq!(core.limits.flash_total_bytes, None);
     }
@@ -443,6 +545,39 @@ mod tests {
         assert_eq!(&u32_json(0), b"0         ");
         assert_eq!(&u32_json(42), b"42        ");
         assert_eq!(&u32_json(u32::MAX), b"4294967295");
+    }
+
+    /// A version's slot is the same size whatever the version, and the JSON
+    /// form of it is a string followed by whitespace.
+    #[test]
+    fn a_version_takes_the_same_bytes_however_long_it_is() {
+        let release = version_json("2026.10.03-1");
+        let dirty = version_json("0123456789ab-dirty-235959PT");
+        assert_eq!(release.len(), dirty.len());
+        assert!(release.starts_with(b"\"2026.10.03-1\" "));
+        assert!(dirty.starts_with(b"\"0123456789ab-dirty-235959PT\" "));
+        assert_eq!(
+            version_from_slot(&version_slot("2026.10.03-1")),
+            "2026.10.03-1"
+        );
+        let full = "v".repeat(VERSION_SLOT_BYTES);
+        assert_eq!(version_from_slot(&version_slot(&full)), full);
+        assert_eq!(
+            serde_json::from_slice::<alloc::string::String>(&release).unwrap(),
+            "2026.10.03-1"
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "version_slot")]
+    fn a_version_too_long_for_its_slot_is_refused() {
+        version_slot(&"v".repeat(VERSION_SLOT_BYTES + 1));
+    }
+
+    #[test]
+    #[should_panic(expected = "version_slot")]
+    fn a_version_with_a_quote_is_refused() {
+        version_slot("2026\"x");
     }
 
     /// The feature-fragment match stays total over the registry and agrees

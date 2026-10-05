@@ -52,6 +52,7 @@ fn agent_fixture(status: UiAgentStatus, turns: Vec<UiAgentTurn>) -> UiAgentView 
 fn done_tool_row() -> UiAgentToolRow {
     UiAgentToolRow {
         id: "tu_1".to_string(),
+        tool: "iterate".to_string(),
         note: Some("slow the rings down".to_string()),
         phase: None,
         done: true,
@@ -62,6 +63,10 @@ fn done_tool_row() -> UiAgentToolRow {
         warnings: 0,
         error: None,
         detail: "{\n  \"note\": \"slow the rings down\",\n  \"probes\": 2,\n  \"shader_ok\": true,\n  \"staged\": true,\n  \"warnings\": 0\n}".to_string(),
+        edits: None,
+        headline: None,
+        act: None,
+        place: None,
     }
 }
 

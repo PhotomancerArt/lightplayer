@@ -158,11 +158,13 @@ async function maybeRunBrowserSmoke() {
     console.log("Chrome not found; skipped browser DOM smoke.");
     return;
   }
+  const startedAt = Date.now();
   const result = spawnSync(
     chrome,
     ["--headless=new", "--disable-gpu", "--virtual-time-budget=8000", "--dump-dom", baseUrl],
     { encoding: "utf8", timeout: 20_000 },
   );
+  const elapsedMs = Date.now() - startedAt;
   if (result.status !== 0) {
     const message = result.stderr || result.stdout || `Chrome exited with ${result.status}`;
     if (browserMode === "required") {
@@ -172,8 +174,32 @@ async function maybeRunBrowserSmoke() {
     return;
   }
   if (!result.stdout.includes("<html") && !result.stdout.includes("<!DOCTYPE html")) {
-    throw new Error("browser DOM smoke did not return an HTML document");
+    throw new Error(describeBrowserSmokeMismatch(result, elapsedMs));
   }
+}
+
+// The thrown message is the only record a CI run leaves of what Chrome
+// actually returned, so it carries enough of stdout/stderr to diagnose the
+// next occurrence without a re-run: see
+// docs/debt/story-capture-pipeline.md for the sibling --dump-dom hang this
+// mirrors.
+function describeBrowserSmokeMismatch(result, elapsedMs) {
+  const stdout = result.stdout ?? "";
+  const stderr = result.stderr ?? "";
+  const stdoutPreview = oneLine(stdout.slice(0, 200));
+  const stderrTail = oneLine(stderr.split("\n").slice(-20).join("\n"));
+  return [
+    "browser DOM smoke did not return an HTML document",
+    `stdout: ${stdout.length} chars, starts with: "${stdoutPreview}"`,
+    `stderr (last 20 lines): "${stderrTail || "(empty)"}"`,
+    `status=${result.status} signal=${result.signal} error.code=${result.error?.code ?? "(none)"} elapsedMs=${elapsedMs}`,
+  ].join("; ");
+}
+
+// Collapse to one line so a multi-line stdout/stderr tail can't break the
+// log format the message is embedded in.
+function oneLine(text) {
+  return text.replace(/\s+/g, " ").trim();
 }
 
 async function waitForServer(url) {
