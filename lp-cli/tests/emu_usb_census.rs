@@ -217,10 +217,8 @@ fn hosted(chip: &PathBuf, elf: &PathBuf, profile: bool, drive: Drive) -> Window 
                 dir.display(),
                 (deployed - t) as f64 / 1e6
             );
-            let left = end.saturating_sub(host.board.machine.micros());
-            if left > 0 {
-                host.run_until(end, None).expect("the window's tail");
-            }
+            // The window is the deploy itself: after it the project loads
+            // and renders, which is not the link's cost.
         }
     }
     let cpu = host.board.cpu_in_machine - cpu0;
@@ -354,13 +352,16 @@ fn report(title: &str, base: &Window, runs: &[&Window]) {
         );
     }
     for w in runs {
-        let delta = w.cpu.as_secs_f64() - base.cpu.as_secs_f64();
+        // Per emulated second, so windows of different lengths compare.
+        let rate = |x: &Window| x.cpu.as_secs_f64() / (x.emulated_us as f64 / 1e6);
+        let delta = rate(w) - rate(base);
         println!(
-            "  counterfactual: {} vs {}: +{:.3} s = {:.1} % of the attached run's emulator time",
+            "  counterfactual: {} vs {}: {:+.3} s per emulated s = {:.1} % of the attached run's \
+             emulator time",
             w.name,
             base.name,
             delta,
-            100.0 * delta / w.cpu.as_secs_f64()
+            100.0 * delta / rate(w)
         );
         if w.symbols.is_empty() {
             continue;

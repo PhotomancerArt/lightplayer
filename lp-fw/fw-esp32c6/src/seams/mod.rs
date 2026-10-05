@@ -11,4 +11,5 @@ mod seam_table;
 pub mod wake_probe;
 mod ws281x_wait_step;
 
+#[cfg_attr(fw_harness, allow(unused_imports, reason = "harnesses do not use the app LED path"))]
 pub use ws281x_wait_step::ws281x_wait_step;
