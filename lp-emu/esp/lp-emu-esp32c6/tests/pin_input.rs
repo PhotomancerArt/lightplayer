@@ -267,14 +267,13 @@ fn a_pad_an_outside_driver_holds_survives_a_reboot_and_a_power_cycle() {
         .expect("the machine builds");
     assert!(matches!(run_for(&mut m, 100), Outcome::Deadline { .. }));
 
-    let driven_gpio5 = |m: &Esp32C6Machine| {
-        m.pads()
-            .iter()
-            .find(|p| p.pad == 5)
-            .expect("gpio5")
-            .driven
-    };
-    assert_eq!(driven_gpio5(&m), Some(true), "the script is holding gpio5 high");
+    let driven_gpio5 =
+        |m: &Esp32C6Machine| m.pads().iter().find(|p| p.pad == 5).expect("gpio5").driven;
+    assert_eq!(
+        driven_gpio5(&m),
+        Some(true),
+        "the script is holding gpio5 high"
+    );
 
     assert!(
         m.reboot(Strap::App, ResetCause::UsbUartHpSys),
