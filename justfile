@@ -789,8 +789,11 @@ studio-firmware-package-served:
 # Nothing in `just check` compiles wasm32, and the browser edge builds
 # `lpa-cloud-client` WITHOUT its default `in-process` feature — a combination
 # no other recipe exercises. Seconds, not the minutes a dx build costs.
+# `lpa-firmware-store` rides along: the engine cache seam and the firmware
+# store client Studio's browser edge implements (OTA M5).
 check-wasm-cloud: install-wasm32-target
     cargo check -p lpa-cloud-client --no-default-features --target {{ wasm32_target }}
+    cargo check -p lpa-firmware-store --target {{ wasm32_target }}
 
 studio-web-build: install-wasm32-target studio-firmware-package-served
     #!/usr/bin/env bash

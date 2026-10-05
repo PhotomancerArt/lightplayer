@@ -1,0 +1,61 @@
+{
+  "format": 1,
+  "target": "esp32c6-4mb",
+  "chip": "esp32c6",
+  "version": "2026.10.05-3",
+  "commit": "103285d5d05e0c2223260f7a3ccf69eb32cf40cc",
+  "wireProto": 36,
+  "requires": {
+    "layout": 1,
+    "loader": 1
+  },
+  "core": {
+    "file": "core.bin",
+    "length": 10000,
+    "sha256": "afcaf555aee5c135e517134dc8f7024ca3539b907e28502c33e3bd8a142b48a3"
+  },
+  "engine": {
+    "file": "engine.bin",
+    "length": 13000,
+    "sha256": "fa98ef084bff159fa62756425d6d470f0bf5f3fd3fbd79d614deac19c58160ae"
+  },
+  "encodings": [
+    {
+      "id": 1,
+      "codec": "deflate-raw",
+      "chunkBytes": 4096,
+      "windowBytes": 32768,
+      "core": {
+        "file": "core.z",
+        "length": 6081,
+        "sha256": "66267cbdd163af0633f694af5bab17d2f60e5844fb2ed50511cd42fb8e0ed090",
+        "chunks": [
+          2511,
+          2390,
+          1180
+        ]
+      },
+      "engine": {
+        "file": "engine.z",
+        "length": 6390,
+        "sha256": "466c7856d38580f73b246294970bd31e3f5e7e9649a97f2b00e30ceabd6e70a7",
+        "chunks": [
+          0,
+          3120,
+          2804,
+          466
+        ]
+      }
+    }
+  ],
+  "package": {
+    "file": "package.json",
+    "length": 2345,
+    "sha256": "defb320734cdb7c8398941beb19acb26327d746bb3abc90c98d4a107dcfa85b3",
+    "image": {
+      "file": "fw-esp32c6-merged.bin",
+      "length": 4194304,
+      "sha256": "b5a918a8dc07e69658d24227b3033c1f8094274e34b93d3bf1908c3c4dcf9b63"
+    }
+  }
+}

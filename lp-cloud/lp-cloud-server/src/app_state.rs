@@ -1,5 +1,5 @@
 //! What every handler shares: the service, the blob plane, the static site,
-//! and the configuration.
+//! the firmware plane, and the configuration.
 
 use std::sync::{Arc, Mutex};
 
@@ -10,6 +10,9 @@ use lpc_cloud_api::Actor;
 use lpc_history::ContentHash;
 
 use crate::config::{BlobBackend, MetaBackend, ServerConfig};
+use crate::firmware::firmware_plane::FirmwarePlane;
+use crate::firmware::firmware_upstream::FirmwareUpstream;
+use crate::firmware::github_release_upstream::GithubReleaseUpstream;
 use crate::page::static_site::StaticSite;
 use crate::ports::{AnyBlobStore, AnyMetaStore, SecureMint, SystemClock};
 
@@ -56,6 +59,7 @@ impl ServiceCore {
 pub struct AppState {
     core: Arc<Mutex<ServiceCore>>,
     site: Arc<StaticSite>,
+    firmware: Arc<FirmwarePlane>,
     config: Arc<ServerConfig>,
 }
 
@@ -101,6 +105,7 @@ impl AppState {
         site: StaticSite,
     ) -> Self {
         let login_providers = config.login_providers();
+        let upstream = GithubReleaseUpstream::new(&config.firmware_upstream);
         Self {
             core: Arc::new(Mutex::new(ServiceCore {
                 service: CloudService::new(meta, SystemClock, SecureMint)
@@ -108,8 +113,17 @@ impl AppState {
                 blobs,
             })),
             site: Arc::new(site),
+            firmware: Arc::new(FirmwarePlane::new(Arc::new(upstream))),
             config: Arc::new(config),
         }
+    }
+
+    /// The same state with the firmware plane fetching through `upstream`
+    /// instead of `LP_CLOUD_FIRMWARE_UPSTREAM` — the route tests' in-process
+    /// stub. Starts with an empty manifest cache.
+    pub fn with_firmware_upstream(mut self, upstream: Arc<dyn FirmwareUpstream>) -> Self {
+        self.firmware = Arc::new(FirmwarePlane::new(upstream));
+        self
     }
 
     /// Run `work` against the service and the blob plane, off the async
@@ -162,6 +176,11 @@ impl AppState {
     /// The static app artifact.
     pub fn site(&self) -> &StaticSite {
         &self.site
+    }
+
+    /// The `/firmware/` lookup: its upstream and its manifest cache.
+    pub fn firmware(&self) -> &FirmwarePlane {
+        &self.firmware
     }
 
     /// The process configuration.

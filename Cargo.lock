@@ -5762,6 +5762,7 @@ dependencies = [
  "lpa-upgrade",
  "lpc-access",
  "lpc-engine",
+ "lpc-firmware-release",
  "lpc-hardware",
  "lpc-mapping",
  "lpc-model",
@@ -5813,6 +5814,7 @@ dependencies = [
  "lp-cloud-store-mem",
  "lp-cloud-store-sqlite",
  "lpc-cloud-api",
+ "lpc-firmware-release",
  "lpc-history",
  "lpfs",
  "reqwest",
@@ -6324,6 +6326,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "lpa-firmware-store"
+version = "40.0.0"
+dependencies = [
+ "log",
+ "lpc-firmware-release",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "lpa-fs-opfs"
 version = "40.0.0"
 dependencies = [
@@ -6432,11 +6444,13 @@ dependencies = [
  "lpa-boards",
  "lpa-client",
  "lpa-devices",
+ "lpa-firmware-store",
  "lpa-link",
  "lpa-server",
  "lpa-upgrade",
  "lpc-access",
  "lpc-engine",
+ "lpc-firmware-release",
  "lpc-hardware",
  "lpc-history",
  "lpc-mapping",
@@ -6476,6 +6490,7 @@ dependencies = [
  "lpa-boards",
  "lpa-client",
  "lpa-cloud-client",
+ "lpa-firmware-store",
  "lpa-fs-opfs",
  "lpa-link",
  "lpa-mapping-editor",
@@ -6483,6 +6498,7 @@ dependencies = [
  "lpa-studio-core",
  "lpa-studio-web-story-macros",
  "lpc-cloud-api",
+ "lpc-firmware-release",
  "lpc-history",
  "lpc-mapping",
  "lpc-model",
@@ -6588,6 +6604,16 @@ dependencies = [
  "serde",
  "serde_json",
  "spin",
+]
+
+[[package]]
+name = "lpc-firmware-release"
+version = "40.0.0"
+dependencies = [
+ "schemars",
+ "serde",
+ "serde_json",
+ "sha2",
 ]
 
 [[package]]

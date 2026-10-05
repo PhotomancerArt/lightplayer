@@ -81,6 +81,7 @@ pub use app::devices::{
     DeviceBackupStore, MemoryBackupStore, UiDeviceLayout, UiLayoutPanel, check_store_contract,
     device_layout_view,
 };
+pub use app::devices::{DeviceFirmwareSources, StudioFirmwareStore};
 pub use app::devices::{LINK_COUNTERS_CAPTION, LinkTrouble, UiLinkCounterRow, link_counter_rows};
 pub use app::docs_host::DocsSimHost;
 pub use app::studio::PlayViewOp;

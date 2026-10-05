@@ -30,6 +30,9 @@ logic.
   services and exposes Studio controllers, views, node states, typed actions,
   logs, and project summaries to UI shells.
 - `lpa-studio-web` — static Dioxus browser shell for the first Studio UI slice.
+- `lpa-firmware-store` — Studio's engine cache seam (index, LRU + held
+  eviction, `MemoryEngineCache`) and the firmware store client over an
+  injected fetch port; sans-IO, host + wasm.
 - `web-demo` — browser demo and tooling for the shader pipeline.
 
 ## Boundary
