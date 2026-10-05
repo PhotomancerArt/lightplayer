@@ -351,6 +351,12 @@ OPTIONS:
     --break-at <symbol>     stop when the symbol is entered; print a0..a7, sp
                             and the backtrace; exits 5
     --hooks                 list the ROM hook table and exit
+    --seams <spec>          engage emulator seams: `none` (default) or atoms
+                            `<seam>=<impl>` joined by `+` (`led=fast`). A seam
+                            asked for that cannot engage is a hard error. The
+                            run's label becomes `<grade>+led=fast`. SPIKE
+                            (plan lp2025/2026-10-05-1026-emulator-seams M0)
+    --seams-info <image>    print a flash image's seam table and exit
     --map                   print the memory map and exit
     -h, --help              this
 
@@ -454,6 +460,17 @@ struct Args {
     probes: Vec<(u64, String)>,
     break_at: Vec<String>,
     hooks: bool,
+    /// `--seams led=fast` (default `none`).
+    seams: lp_emu_esp_common::seam::SeamRequest,
+    /// `--seams-info <image>`: print an image's seam table and exit.
+    seams_info: Option<std::path::PathBuf>,
+    /// SPIKE `--seam-probe <modes>`: the wake probe's injection schedule.
+    seam_probe: Option<String>,
+    /// SPIKE `--irq-audit`: print the interrupt lines in use at the end.
+    irq_audit: bool,
+    /// SPIKE `--blockprof-dump <file>`: every block start's entries and
+    /// retired instructions, with its symbol (implies `--blockprof`).
+    blockprof_dump: Option<std::path::PathBuf>,
     map: bool,
     dump_frames: FrameSink,
     pin_log: PinLogSink,
@@ -464,6 +481,13 @@ struct Args {
 
 fn run() -> Result<ExitCode, String> {
     let args = parse(std::env::args().skip(1).collect())?;
+
+    if let Some(path) = &args.seams_info {
+        let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        println!("{}", lp_emu_esp_common::seam::scan(&bytes));
+        println!("emulator seam abi {:016x}", lp_seam_abi());
+        return Ok(ExitCode::SUCCESS);
+    }
 
     if args.map {
         print_map();
@@ -510,6 +534,8 @@ fn run() -> Result<ExitCode, String> {
     if let Some(word) = args.lpperi_clk_en {
         builder = builder.lp_peri_clk_en(word);
     }
+    builder = builder.seams(args.seams.clone());
+    builder = builder.seam_probe(args.seam_probe.clone());
     if let Some(faults) = args.usb_faults.clone() {
         builder = builder.usb_faults(faults);
     }
@@ -683,6 +709,11 @@ fn run() -> Result<ExitCode, String> {
 
     let mut machine = builder.build().map_err(|e| e.to_string())?;
 
+    // Every engaged seam announces itself before the run (plan Q4).
+    for line in machine.seams().engaged_lines() {
+        eprintln!("{line}");
+    }
+
     if args.hooks {
         print_hooks(&machine);
         return Ok(ExitCode::SUCCESS);
@@ -714,6 +745,25 @@ fn run() -> Result<ExitCode, String> {
     machine.flush_frames();
     machine.flush_trap_log();
     report(&mut machine, &outcome);
+    if let Some(probe) = &machine.seams().probe {
+        for line in probe.report() {
+            eprintln!("{line}");
+        }
+    }
+    if args.irq_audit {
+        for line in machine.interrupt_audit() {
+            eprintln!("{line}");
+        }
+    }
+    if let Some(path) = &args.blockprof_dump
+        && let Some(rows) = machine.blockprof_rows()
+    {
+        let text: String = rows
+            .iter()
+            .map(|(pc, entries, retired, sym)| format!("{pc:#010x} {entries} {retired} {sym}\n"))
+            .collect();
+        std::fs::write(path, text).map_err(|e| format!("{}: {e}", path.display()))?;
+    }
     Ok(ExitCode::from(outcome.exit_code() as u8))
 }
 
@@ -955,6 +1005,16 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             "--probe" => args.probes.push(parse_probe(&value("--probe")?)?),
             "--break-at" => args.break_at.push(value("--break-at")?),
             "--hooks" => args.hooks = true,
+            "--seams" => {
+                args.seams = lp_emu_esp_common::seam::SeamRequest::parse(&value("--seams")?)?
+            }
+            "--seams-info" => args.seams_info = Some(value("--seams-info")?.into()),
+            "--seam-probe" => args.seam_probe = Some(value("--seam-probe")?),
+            "--irq-audit" => args.irq_audit = true,
+            "--blockprof-dump" => {
+                args.blockprof_dump = Some(value("--blockprof-dump")?.into());
+                args.blockprof = true;
+            }
             "--map" => args.map = true,
             other => return Err(format!("unknown flag `{other}`\n\n{USAGE}")),
         }
@@ -1282,8 +1342,24 @@ fn report(machine: &mut Esp32C6Machine, outcome: &Outcome) {
         cycles,
         machine.micros(),
         machine.instructions(),
-        machine.time_grade().configuration()
+        machine.configuration_label()
     );
+    if machine.seams().engaged() {
+        let s = machine.seams();
+        eprintln!(
+            "seams: {} ({}): seam_calls {} ({} parked, {} events slept through), \
+             seam_arms {} ({} re-arms), armed now {}",
+            s.request,
+            machine.configuration_label(),
+            s.calls,
+            s.parks,
+            s.park_events,
+            s.arms_planted,
+            s.rearms,
+            s.arms.iter().filter(|a| a.armed).count()
+        );
+        eprintln!("seams: planted at cycles {:?}", s.plant_cycles);
+    }
     eprintln!(
         "unmapped: {} reads, {} writes, {} distinct sites; {} idle skips (wfi)",
         machine.bus.unmapped_reads(),
@@ -1779,4 +1855,8 @@ mod tests {
         assert!(parse(vec!["--nope".into()]).is_err());
         assert!(parse(vec!["--elf".into()]).is_err(), "--elf needs a value");
     }
+}
+
+fn lp_seam_abi() -> u64 {
+    lp_seam::SEAM_ABI_ID
 }

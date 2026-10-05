@@ -38,6 +38,9 @@ md5 = { package = "md-5", version = "0.10" }
 # (`scripts/check-emu-fence.sh`); no `mock` — the emulator is the cycle-time
 # model of the same peripheral.
 lp-ws281x = { path = "../../../lp-fw/lp-ws281x", default-features = false }
+# Emulator seams: the declarations and identity the firmware's table names.
+# MIT, outside the fence (no allowlist entry needed).
+lp-seam = { path = "../../../lp-base/lp-seam" }
 
 # The translator, and with it whichever host runs what it emits.
 # OPTIONAL and off by default, deliberately (JD9, JD18): `wasmtime` needs

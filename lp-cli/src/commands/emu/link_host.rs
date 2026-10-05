@@ -94,6 +94,11 @@ fn finish_lines(
 pub struct C6Board {
     pub machine: lp_emu_esp32c6::machine::Esp32C6Machine,
     queue: QueueHandle,
+    /// Thread CPU time spent inside the machine's `run_until`, when
+    /// [`C6Board::time_cpu`] asked for it (emulator seams M0's USB census:
+    /// the emulator's share, not the in-process host's).
+    pub cpu_in_machine: std::time::Duration,
+    time_cpu: bool,
 }
 
 impl C6Board {
@@ -101,8 +106,31 @@ impl C6Board {
         let Some(queue) = machine.usb_sj_host_handle() else {
             bail!("the machine was built without `usb_sj_queue_source()`: nothing to host");
         };
-        Ok(Self { machine, queue })
+        Ok(Self {
+            machine,
+            queue,
+            cpu_in_machine: std::time::Duration::ZERO,
+            time_cpu: false,
+        })
     }
+
+    /// Account the thread CPU time spent inside the machine (spike, M0).
+    #[allow(dead_code, reason = "spike: only the USB census test asks for it")]
+    pub fn time_cpu(mut self, on: bool) -> Self {
+        self.time_cpu = on;
+        self
+    }
+}
+
+/// This thread's CPU time so far.
+pub fn thread_cpu() -> std::time::Duration {
+    let mut ts = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    // SAFETY: `ts` is a valid out-pointer for the call.
+    unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut ts) };
+    std::time::Duration::new(ts.tv_sec as u64, ts.tv_nsec as u32)
 }
 
 impl EmuUsbBoard for C6Board {
@@ -112,7 +140,12 @@ impl EmuUsbBoard for C6Board {
             stop_cycle: Some(self.machine.cycles() + us * lp_emu_esp32c6::memmap::CYCLES_PER_US),
             ..Default::default()
         };
-        match self.machine.run_until(&stop) {
+        let t0 = self.time_cpu.then(thread_cpu);
+        let outcome = self.machine.run_until(&stop);
+        if let Some(t0) = t0 {
+            self.cpu_in_machine += thread_cpu().saturating_sub(t0);
+        }
+        match outcome {
             Outcome::Deadline { .. } => Ok(()),
             other => Err(super::handler::describe(&other)),
         }

@@ -1,0 +1,15 @@
+[package]
+name = "lp-seam"
+version = "0.1.0"
+# Explicit (not workspace-inherited): this crate is MIT, like everything under
+# `lp-emu/`, so the emulator may depend on it with no fence allowlist entry
+# (`lp-ws281x` is the precedent). Values otherwise match [workspace.package].
+edition = "2021"
+license = "MIT"
+rust-version = "1.86"
+description = "Emulator seams: the descriptor table and seam declarations shared by LightPlayer firmware and its emulator. no_std, no dependencies."
+
+[dependencies]
+
+[lints]
+workspace = true
