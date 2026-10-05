@@ -1149,6 +1149,17 @@ clippy-fw-esp32v3:
     # server stack compiles with it.
     echo "clippy: --features bench_render_loop"
     cargo clippy --profile release-esp32v3 --features bench_render_loop -- --no-deps -D warnings
+    # `frame_pace_diag` is additive too: the `[pace]` frame-timing lines PR
+    # #943's desk A/B and the editor-read defect were measured with.
+    echo "clippy: --features frame_pace_diag"
+    cargo clippy --profile release-esp32v3 --features frame_pace_diag -- --no-deps -D warnings
+    # The opt-in link thread (`src/io_thread.rs`, off by default on this
+    # board) and its desk-only stack diagnostic (which turns it on). Neither
+    # is in the defaults, so nothing else here compiles them.
+    echo "clippy: --features io-thread"
+    cargo clippy --profile release-esp32v3 --features io-thread -- --no-deps -D warnings
+    echo "clippy: --features io_thread_stack_diag"
+    cargo clippy --profile release-esp32v3 --features io_thread_stack_diag -- --no-deps -D warnings
     # Every harness, individually — the same loop fw-esp32s3 carries, and for
     # the same reason: a `test_*` feature sets `fw_harness`, which cfg's the
     # whole app path out, so linting the defaults leaves harness code completely

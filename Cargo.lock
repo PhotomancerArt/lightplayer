@@ -4266,6 +4266,7 @@ dependencies = [
  "esp-hal",
  "esp-println",
  "esp-radio",
+ "esp-radio-rtos-driver",
  "esp-rtos",
  "esp-storage",
  "fw-checks",
