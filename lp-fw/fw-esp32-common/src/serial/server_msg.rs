@@ -367,12 +367,7 @@ pub fn server_message_detail(msg: &lpc_wire::WireServerMessage) -> String {
             status.networks.len(),
             status.station.kind()
         ),
-        lpc_wire::server::ServerMsgBody::NetworkScan(scan) => match scan {
-            lpc_wire::server::NetworkScan::Unsupported => String::from("NetworkScan unsupported"),
-            lpc_wire::server::NetworkScan::Heard(heard) => {
-                format!("NetworkScan heard={}", heard.len())
-            }
-        },
+        lpc_wire::server::ServerMsgBody::NetworkScan(_) => String::from("NetworkScan"),
     }
 }
 

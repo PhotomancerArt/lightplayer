@@ -136,13 +136,17 @@ impl NetworkFile {
         Ok(file)
     }
 
-    /// Serialize to the file's bytes, always at [`Self::VERSION`].
+    /// Serialize to the file's bytes, always at [`Self::VERSION`] — through
+    /// a borrowed view with the same fields in the same order, so the list
+    /// is not copied to stamp the version.
     pub fn to_json(&self) -> Result<String, NetworkFileError> {
-        let current = Self {
+        serde_json::to_string(&CurrentNetworkFile {
             version: Self::VERSION,
-            ..self.clone()
-        };
-        serde_json::to_string(&current).map_err(malformed)
+            wifi: self.wifi,
+            cloud_relay: self.cloud_relay,
+            networks: &self.networks,
+        })
+        .map_err(malformed)
     }
 
     /// Every network meets the rules, there are at most
@@ -171,6 +175,18 @@ impl Default for NetworkFile {
     fn default() -> Self {
         Self::none()
     }
+}
+
+/// What [`NetworkFile::to_json`] writes: the file's own fields, by
+/// reference, with the version stamped. Same names, same order as
+/// [`NetworkFile`] (the byte-for-byte round-trip test pins it).
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CurrentNetworkFile<'a> {
+    version: u32,
+    wifi: bool,
+    cloud_relay: bool,
+    networks: &'a [WifiNetwork],
 }
 
 /// A switch that is on unless the file turns it off.

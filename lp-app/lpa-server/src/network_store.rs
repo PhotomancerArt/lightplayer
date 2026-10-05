@@ -40,27 +40,41 @@ pub const HELD_BOARD_REFUSAL: &str =
 /// Missing is decided by `file_exists`, as the device store's is.
 pub fn read_network_file(fs: &dyn LpFs) -> NetworkFile {
     let path = NetworkFile::PATH.as_path();
-    let read = match fs.file_exists(path) {
-        Ok(false) => return NetworkFile::none(),
-        Ok(true) => fs
-            .read_file(path)
-            .map_err(|error| format!("{error}"))
-            .and_then(|bytes| NetworkFile::from_json(&bytes).map_err(|error| format!("{error}"))),
-        Err(error) => Err(format!("{error}")),
-    };
-    // Neither error spells out the file's bytes: an fs error names the
-    // path, and `NetworkFileError` names a position or a rule.
-    read.unwrap_or_else(|error| {
-        log::warn!("network: network file unreadable, treating as no network: {error}");
-        NetworkFile::none()
-    })
+    match fs.file_exists(path) {
+        Ok(false) => NetworkFile::none(),
+        Ok(true) => match fs.read_file(path) {
+            Ok(bytes) => NetworkFile::from_json(&bytes).unwrap_or_else(|error| unreadable(&error)),
+            Err(error) => unreadable(&error),
+        },
+        Err(error) => unreadable(&error),
+    }
 }
 
-/// Write the network file, always at the current version.
+/// The one place an unreadable network file is logged. Neither error
+/// spells out the file's bytes: an fs error names the path, and
+/// `NetworkFileError` names a position or a rule.
+#[inline(never)]
+fn unreadable(error: &dyn core::fmt::Display) -> NetworkFile {
+    log::warn!("network: network file unreadable, treating as no network: {error}");
+    NetworkFile::none()
+}
+
+/// Write the network file, always at the current version. `Err` is the
+/// failure in words (the fs's own message, or the serializer's position),
+/// never the file's bytes.
 pub fn write_network_file(fs: &dyn LpFs, file: &NetworkFile) -> Result<(), String> {
-    let json = file.to_json().map_err(|error| format!("{error}"))?;
-    fs.write_file(NetworkFile::PATH.as_path(), json.as_bytes())
-        .map_err(|error| format!("{error}"))
+    match file.to_json() {
+        Ok(json) => fs
+            .write_file(NetworkFile::PATH.as_path(), json.as_bytes())
+            .map_err(|error| write_failed(&error)),
+        Err(error) => Err(write_failed(&error)),
+    }
+}
+
+/// The one place a failed write is put in words.
+#[inline(never)]
+fn write_failed(error: &dyn core::fmt::Display) -> String {
+    format!("cannot save the network settings: {error}")
 }
 
 /// `NetworkStatus`: the two switches, every saved network without its
@@ -90,17 +104,18 @@ pub fn network_add(
     password: WifiPassword,
     hidden: Option<bool>,
 ) -> ServerMsgBody {
-    let current = read_network_file(fs);
-    let mut next = current.clone();
-    let hidden = hidden.unwrap_or_else(|| next.network(&ssid).is_some_and(|saved| saved.hidden));
-    if let Err(rule) = next.add(WifiNetwork {
+    let mut file = read_network_file(fs);
+    let hidden = hidden.unwrap_or_else(|| file.network(&ssid).is_some_and(|saved| saved.hidden));
+    if let Err(rule) = file.add(WifiNetwork {
         ssid,
         password: password.into_inner(),
         hidden,
     }) {
-        return error(&format!("cannot save the network: {rule}"));
+        return ServerMsgBody::Error {
+            error: format!("cannot save the network: {rule}"),
+        };
     }
-    write_if_changed(fs, &current, &next, station)
+    save_and_answer(fs, &file, true, station)
 }
 
 /// `NetworkForget`: drop the saved network named `ssid` (name and
@@ -108,13 +123,13 @@ pub fn network_add(
 /// not an error, and writes nothing.
 #[inline(never)]
 pub fn network_forget(fs: &dyn LpFs, station: StationState, ssid: &str) -> ServerMsgBody {
-    let current = read_network_file(fs);
-    let mut next = current.clone();
-    next.forget(ssid);
-    write_if_changed(fs, &current, &next, station)
+    let mut file = read_network_file(fs);
+    let forgot = file.forget(ssid);
+    save_and_answer(fs, &file, forgot, station)
 }
 
 /// `NetworkSet`: change whichever switch is given and answer the status.
+/// A switch already where it is asked to be writes nothing.
 #[inline(never)]
 pub fn network_set(
     fs: &dyn LpFs,
@@ -122,42 +137,32 @@ pub fn network_set(
     wifi: Option<bool>,
     cloud_relay: Option<bool>,
 ) -> ServerMsgBody {
-    let current = read_network_file(fs);
-    let mut next = current.clone();
-    if let Some(wifi) = wifi {
-        next.wifi = wifi;
-    }
-    if let Some(cloud_relay) = cloud_relay {
-        next.cloud_relay = cloud_relay;
-    }
-    write_if_changed(fs, &current, &next, station)
+    let mut file = read_network_file(fs);
+    let changed = wifi.is_some_and(|on| on != file.wifi)
+        || cloud_relay.is_some_and(|on| on != file.cloud_relay);
+    file.wifi = wifi.unwrap_or(file.wifi);
+    file.cloud_relay = cloud_relay.unwrap_or(file.cloud_relay);
+    save_and_answer(fs, &file, changed, station)
 }
 
-/// Write `next` when it differs from `current`, then answer its status. A
-/// failed write answers an error (the fs's own message, which holds no
-/// password).
-fn write_if_changed(
+/// Write `file` when `changed`, then answer its status. A failed write
+/// answers an error (the fs's own message, which holds no password).
+fn save_and_answer(
     fs: &dyn LpFs,
-    current: &NetworkFile,
-    next: &NetworkFile,
+    file: &NetworkFile,
+    changed: bool,
     station: StationState,
 ) -> ServerMsgBody {
-    if next != current {
-        if let Err(message) = write_network_file(fs, next) {
-            return error(&format!("cannot save the network settings: {message}"));
+    if changed {
+        if let Err(message) = write_network_file(fs, file) {
+            return ServerMsgBody::Error { error: message };
         }
     }
-    status_body(next, station)
+    status_body(file, station)
 }
 
 fn status_body(file: &NetworkFile, station: StationState) -> ServerMsgBody {
     ServerMsgBody::NetworkStatus(NetworkStatus::of(file, station))
-}
-
-fn error(message: &str) -> ServerMsgBody {
-    ServerMsgBody::Error {
-        error: String::from(message),
-    }
 }
 
 #[cfg(test)]

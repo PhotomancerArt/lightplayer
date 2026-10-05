@@ -963,35 +963,7 @@ impl LpServer {
                 | ClientRequest::NetworkAdd { .. }
                 | ClientRequest::NetworkForget { .. }
                 | ClientRequest::NetworkSet { .. } => {
-                    let fs = &*self.base_fs;
-                    let station = self.station_state();
-                    let held = self.hello.hardware.fs == lpc_wire::FsBootState::LegacyHeld;
-                    let body = match client_msg.msg {
-                        ClientRequest::NetworkAdd { .. }
-                        | ClientRequest::NetworkForget { .. }
-                        | ClientRequest::NetworkSet { .. }
-                            if held =>
-                        {
-                            lpc_wire::server::ServerMsgBody::Error {
-                                error: alloc::string::String::from(
-                                    network_store::HELD_BOARD_REFUSAL,
-                                ),
-                            }
-                        }
-                        ClientRequest::NetworkAdd {
-                            ssid,
-                            password,
-                            hidden,
-                        } => network_store::network_add(fs, station, ssid, password, hidden),
-                        ClientRequest::NetworkForget { ssid } => {
-                            network_store::network_forget(fs, station, &ssid)
-                        }
-                        ClientRequest::NetworkSet { wifi, cloud_relay } => {
-                            network_store::network_set(fs, station, wifi, cloud_relay)
-                        }
-                        ClientRequest::NetworkScan => network_store::network_scan(self.scan()),
-                        _ => network_store::network_status(fs, station),
-                    };
+                    let body = self.network_answer(client_msg.msg);
                     transport
                         .send(link.id, WireServerMessage::new(msg_id, body))
                         .await
@@ -1259,6 +1231,39 @@ impl LpServer {
     /// [`lpc_wire::StationState::Unsupported`] (no M5 image installs one).
     pub fn set_station_probe(&mut self, probe: Option<StationProbe>) {
         self.station_probe = probe;
+    }
+
+    /// The answer to one network request (the caller has matched it and the
+    /// gate has passed it at edit). Out of line, so the transport-generic
+    /// `tick_and_send` carries one call for all five.
+    #[inline(never)]
+    fn network_answer(&self, request: ClientRequest) -> lpc_wire::server::ServerMsgBody {
+        let fs = &*self.base_fs;
+        let held = self.hello.hardware.fs == lpc_wire::FsBootState::LegacyHeld;
+        match request {
+            ClientRequest::NetworkAdd { .. }
+            | ClientRequest::NetworkForget { .. }
+            | ClientRequest::NetworkSet { .. }
+                if held =>
+            {
+                lpc_wire::server::ServerMsgBody::Error {
+                    error: alloc::string::String::from(network_store::HELD_BOARD_REFUSAL),
+                }
+            }
+            ClientRequest::NetworkAdd {
+                ssid,
+                password,
+                hidden,
+            } => network_store::network_add(fs, self.station_state(), ssid, password, hidden),
+            ClientRequest::NetworkForget { ssid } => {
+                network_store::network_forget(fs, self.station_state(), &ssid)
+            }
+            ClientRequest::NetworkSet { wifi, cloud_relay } => {
+                network_store::network_set(fs, self.station_state(), wifi, cloud_relay)
+            }
+            ClientRequest::NetworkScan => network_store::network_scan(self.scan()),
+            _ => network_store::network_status(fs, self.station_state()),
+        }
     }
 
     /// What the station is doing, from the probe (`unsupported` without one).
