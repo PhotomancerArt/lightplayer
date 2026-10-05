@@ -1,7 +1,7 @@
 ---
 status: fixed
 found: 2026-10-05      # how: hardware-walk — PR #971's P10 silicon smoke, bench C6 A0:F2:62:87:B4:8C
-fixed: this change
+fixed: b56bcd144
 area: tools/lp-fw-split app_image + lp-cli firmware package + lpa-link host_serial_esp32 (host flasher)
 class: silent-drop
 related:
@@ -68,8 +68,11 @@ failing image's own sizes; it fails with the padding removed),
 `an_engine_that_fills_the_region_still_fits_padded`, `image_end::tests::*`;
 `lp-cli` `firmware::package::tests::every_packaged_image_ends_on_a_sector`;
 `lpa-link` `host_esp32_flash::tests::a_short_write_is_refused_by_its_md5`.
-The MD5 check itself talks to a real stub and has no host test; P10's
-re-run exercises it on silicon.
+The MD5 check itself talks to a real stub and has no host test. P10's
+re-run proved it on silicon both ways: rewriting `76959e7a4`'s image to the
+bench C6 failed with `the flash does not hold what was written at 0x0
+(+3102206 B): its MD5 is e112b01e…, the image's is 9e63163f…`, and the
+padded `b56bcd144` image verified (`MD5 4b75e2c5…`).
 
 **Lesson** — "the flasher writes these bytes" was an assumption no gate
 held. The same image written by two flashers was two different flashes, and
