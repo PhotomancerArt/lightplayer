@@ -4185,6 +4185,7 @@ dependencies = [
  "lp-link",
  "lp-perf",
  "lp-recovery",
+ "lp-seam",
  "lp-shader",
  "lp-ws281x",
  "lpa-server",
@@ -6160,6 +6161,10 @@ dependencies = [
  "lp-emu-core",
  "lp-riscv-emu",
 ]
+
+[[package]]
+name = "lp-seam"
+version = "0.1.0"
 
 [[package]]
 name = "lp-shader"

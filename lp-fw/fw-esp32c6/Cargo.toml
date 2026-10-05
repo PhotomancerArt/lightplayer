@@ -338,6 +338,11 @@ fixture-no-hello = ["lpa-server/fixture-no-hello", "fw-core/fixture-no-hello"]
 # Since the link runs lp-link that loss is resent and counted, not seen.
 # Not `test_*`: that prefix selects a harness entrypoint instead of the app.
 fixture-no-in-endpoint-gate = []
+# SPIKE ONLY (plan lp2025/2026-10-05-1026-emulator-seams, M0 candidate L0;
+# never merges): the LED wait executes `wfi` instead of calling the seam, so
+# the emulator's existing idle skip does the work with no seam at all. A
+# silicon behaviour change (the RMT refill deadline), so a desk item.
+spike_l0_wfi_wait = []
 
 [dependencies]
 lp-collection = { workspace = true, features = ["serde"] }
@@ -393,6 +398,9 @@ embassy-net = { version = "0.9.1", default-features = false, features = ["proto-
 # delay with the service path in flash: the cold-cache miss chain on the first
 # refill of every frame was the whole margin. See `output/rmt/c6_rmt.rs`.
 lp-ws281x = { path = "../lp-ws281x", default-features = false, features = ["isr-in-ram"] }
+# Emulator seams (plan lp2025/2026-10-05-1026-emulator-seams, M0 spike): the
+# descriptor table layout and the seam declarations. MIT, no_std, no deps.
+lp-seam = { path = "../../lp-base/lp-seam" }
 lps-builtins = { path = "../../lp-shader/lps-builtins", default-features = false, optional = true }
 lp-shader = { path = "../../lp-shader/lp-shader", default-features = false, optional = true }
 lpvm-native = { path = "../../lp-shader/lpvm-native", default-features = false, features = [

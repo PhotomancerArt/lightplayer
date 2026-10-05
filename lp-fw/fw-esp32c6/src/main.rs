@@ -122,6 +122,7 @@ mod recovery;
 #[cfg(all(feature = "diag_secure_link", not(fw_harness)))]
 mod secure_link_probe;
 mod serial;
+mod seams;
 #[cfg(not(fw_harness))]
 mod stack_probe;
 #[cfg(all(any(feature = "stress_s2", feature = "stress_s3"), not(fw_harness)))]
