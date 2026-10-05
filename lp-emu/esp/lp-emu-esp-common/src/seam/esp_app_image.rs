@@ -88,7 +88,10 @@ mod tests {
             flash[at + 4..at + 8].copy_from_slice(&len.to_le_bytes());
             at += 8 + len as usize;
         }
-        assert_eq!(app_partition_containing(&flash, 0x12345), Some((0x10000, 0x20000)));
+        assert_eq!(
+            app_partition_containing(&flash, 0x12345),
+            Some((0x10000, 0x20000))
+        );
         assert_eq!(app_partition_containing(&flash, 0x5000), None);
         assert_eq!(
             flash_offset_of(&flash, 0x10000, 0x4200_0030),

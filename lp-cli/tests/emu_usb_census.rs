@@ -67,13 +67,21 @@ fn usb_census() {
         let absent = absent(&empty, &elf, profile);
         let quiet = hosted(&empty, &elf, profile, Drive::Quiet);
         let polled = hosted(&empty, &elf, profile, Drive::ListEvery150ms);
-        report("C1 idle board (no project), host attached", &absent, &[&quiet, &polled]);
+        report(
+            "C1 idle board (no project), host attached",
+            &absent,
+            &[&quiet, &polled],
+        );
     }
     if only.contains("c2") {
         let absent = absent(&basic, &elf, profile);
         let quiet = hosted(&basic, &elf, profile, Drive::Quiet);
         let lens = hosted(&basic, &elf, profile, Drive::Lens);
-        report("C2 render-basic rendering, host attached", &absent, &[&quiet, &lens]);
+        report(
+            "C2 render-basic rendering, host attached",
+            &absent,
+            &[&quiet, &lens],
+        );
     }
     if only.contains("c3") {
         let quiet = hosted(&empty, &elf, profile, Drive::Quiet);
@@ -138,7 +146,9 @@ fn hosted(chip: &PathBuf, elf: &PathBuf, profile: bool, drive: Drive) -> Window 
         .usb_sj_queue_source()
         .build()
         .expect("a machine");
-    let board = C6Board::new(machine).expect("a hosted board").time_cpu(true);
+    let board = C6Board::new(machine)
+        .expect("a hosted board")
+        .time_cpu(true);
     let mut host = EmuLinkHost::new(board, NONCE, true);
     host.wait_for_line("\"hello\":{", MARK_US)
         .expect("the boot")
@@ -149,7 +159,13 @@ fn hosted(chip: &PathBuf, elf: &PathBuf, profile: bool, drive: Drive) -> Window 
             let mut client = LpClient::new(&mut host).with_request_ids_from(1_000);
             block_on(client.project_list_loaded()).expect("the loaded projects")
         };
-        handle = Some(loaded.value.first().expect("the startup project loaded").handle);
+        handle = Some(
+            loaded
+                .value
+                .first()
+                .expect("the startup project loaded")
+                .handle,
+        );
     }
     // The staged first sync belongs to the boot, not the window.
     if let Some(handle) = handle {
@@ -330,7 +346,11 @@ fn report(title: &str, base: &Window, runs: &[&Window]) {
             w.instructions,
             w.frames,
             w.idle_skips,
-            if w.note.is_empty() { String::new() } else { format!("  ({})", w.note) }
+            if w.note.is_empty() {
+                String::new()
+            } else {
+                format!("  ({})", w.note)
+            }
         );
     }
     for w in runs {
@@ -362,7 +382,12 @@ fn report(title: &str, base: &Window, runs: &[&Window]) {
         let mut extra: Vec<(&String, i64)> = w
             .symbols
             .iter()
-            .map(|(s, n)| (s, *n as i64 - base.symbols.get(s).copied().unwrap_or(0) as i64))
+            .map(|(s, n)| {
+                (
+                    s,
+                    *n as i64 - base.symbols.get(s).copied().unwrap_or(0) as i64,
+                )
+            })
             .filter(|(_, d)| *d > 0)
             .collect();
         extra.sort_by(|a, b| b.1.cmp(&a.1));

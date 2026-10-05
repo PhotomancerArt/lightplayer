@@ -115,6 +115,7 @@ impl C6Board {
     }
 
     /// Account the thread CPU time spent inside the machine (spike, M0).
+    #[allow(dead_code, reason = "spike: only the USB census test asks for it")]
     pub fn time_cpu(mut self, on: bool) -> Self {
         self.time_cpu = on;
         self

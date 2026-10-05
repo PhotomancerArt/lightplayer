@@ -28,4 +28,23 @@ impl crate::machine::Esp32C6Machine {
         out.sort_unstable_by(|a, b| b.1.cmp(&a.1));
         Some(out)
     }
+
+    /// Every block start: `(pc, entries, retired, symbol+offset)`, by pc.
+    pub fn blockprof_rows(&self) -> Option<Vec<(u32, u64, u64, String)>> {
+        let prof = self.harts[0].blockprof()?;
+        let mut rows: Vec<(u32, u64, u64, String)> = prof
+            .iter()
+            .map(|(pc, entries, retired)| {
+                let sym = self
+                    .app()
+                    .and_then(|a| a.symbol_at(pc))
+                    .or_else(|| self.rom().symbol_at(pc))
+                    .map(|s| format!("{:#}", rustc_demangle::demangle(&s.name)))
+                    .unwrap_or_default();
+                (pc, entries, retired, sym)
+            })
+            .collect();
+        rows.sort_unstable_by_key(|r| r.0);
+        Some(rows)
+    }
 }

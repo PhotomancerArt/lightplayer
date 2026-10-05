@@ -50,8 +50,15 @@ fn the_per_call_price_of_a_hooked_function() {
 fn a_hooked_call_returns_to_the_caller_every_time() {
     let mut m = machine(true, true, false);
     let out = m.run_until(&StopCondition::after_micros(1_000_000));
-    assert!(matches!(out, Outcome::Breakpoint { pc: DONE, .. }), "{out:?}");
-    assert_eq!(m.hook_calls(), CALLS as u64 + 1, "every call, plus the stop");
+    assert!(
+        matches!(out, Outcome::Breakpoint { pc: DONE, .. }),
+        "{out:?}"
+    );
+    assert_eq!(
+        m.hook_calls(),
+        CALLS as u64 + 1,
+        "every call, plus the stop"
+    );
     assert_eq!(m.harts[0].regs()[9], 0, "the loop ran to the end");
 }
 
@@ -60,7 +67,10 @@ fn run(cache: bool, hook: bool, compressed: bool) -> f64 {
     let t = Instant::now();
     let out = m.run_until(&StopCondition::after_micros(10_000_000));
     let secs = t.elapsed().as_secs_f64();
-    assert!(matches!(out, Outcome::Breakpoint { pc: DONE, .. }), "{out:?}");
+    assert!(
+        matches!(out, Outcome::Breakpoint { pc: DONE, .. }),
+        "{out:?}"
+    );
     secs
 }
 
@@ -91,18 +101,24 @@ fn machine(cache: bool, hook: bool, compressed: bool) -> Esp32C6Machine {
         place(&mut m, FUNC, &[jalr(0, 1, 0)]);
     }
     place(&mut m, DONE, &[0x0010_0073]);
+    let mut hooks = std::mem::take(m.hooks_mut());
     if hook {
-        m.hooks_mut().install_at(&mut m.bus, FUNC, "func", |_| HookResult::Ret).ok();
+        hooks
+            .install_at(&mut m.bus, FUNC, "func", |_| HookResult::Ret)
+            .unwrap();
         if compressed {
             // What the seam arming plants on a compressed entry: `c.ebreak`
             // over the first half only.
             m.bus.load_image(FUNC, &0x9002u16.to_le_bytes()).unwrap();
-            m.bus.load_image(FUNC + 2, &0x0141u16.to_le_bytes()).unwrap();
+            m.bus
+                .load_image(FUNC + 2, &0x0141u16.to_le_bytes())
+                .unwrap();
         }
     }
-    m.hooks_mut()
+    hooks
         .install_at(&mut m.bus, DONE, "done", |_| HookResult::Stop)
         .unwrap();
+    *m.hooks_mut() = hooks;
     m.harts[0].set_pc(CODE);
     m
 }

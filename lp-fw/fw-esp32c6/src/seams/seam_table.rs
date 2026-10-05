@@ -8,7 +8,10 @@
 use lp_seam::table::SeamEntry;
 use lp_seam::table::{Addr, SeamTable};
 
-#[cfg(all(not(feature = "spike_l0_wfi_wait"), not(feature = "spike_seam_wake_probe")))]
+#[cfg(all(
+    not(feature = "spike_l0_wfi_wait"),
+    not(feature = "spike_seam_wake_probe")
+))]
 const ENTRIES: usize = 1;
 #[cfg(all(not(feature = "spike_l0_wfi_wait"), feature = "spike_seam_wake_probe"))]
 const ENTRIES: usize = 3;

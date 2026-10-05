@@ -468,6 +468,9 @@ struct Args {
     seam_probe: Option<String>,
     /// SPIKE `--irq-audit`: print the interrupt lines in use at the end.
     irq_audit: bool,
+    /// SPIKE `--blockprof-dump <file>`: every block start's entries and
+    /// retired instructions, with its symbol (implies `--blockprof`).
+    blockprof_dump: Option<std::path::PathBuf>,
     map: bool,
     dump_frames: FrameSink,
     pin_log: PinLogSink,
@@ -752,6 +755,15 @@ fn run() -> Result<ExitCode, String> {
             eprintln!("{line}");
         }
     }
+    if let Some(path) = &args.blockprof_dump
+        && let Some(rows) = machine.blockprof_rows()
+    {
+        let text: String = rows
+            .iter()
+            .map(|(pc, entries, retired, sym)| format!("{pc:#010x} {entries} {retired} {sym}\n"))
+            .collect();
+        std::fs::write(path, text).map_err(|e| format!("{}: {e}", path.display()))?;
+    }
     Ok(ExitCode::from(outcome.exit_code() as u8))
 }
 
@@ -993,10 +1005,16 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             "--probe" => args.probes.push(parse_probe(&value("--probe")?)?),
             "--break-at" => args.break_at.push(value("--break-at")?),
             "--hooks" => args.hooks = true,
-            "--seams" => args.seams = lp_emu_esp_common::seam::SeamRequest::parse(&value("--seams")?)?,
+            "--seams" => {
+                args.seams = lp_emu_esp_common::seam::SeamRequest::parse(&value("--seams")?)?
+            }
             "--seams-info" => args.seams_info = Some(value("--seams-info")?.into()),
             "--seam-probe" => args.seam_probe = Some(value("--seam-probe")?),
             "--irq-audit" => args.irq_audit = true,
+            "--blockprof-dump" => {
+                args.blockprof_dump = Some(value("--blockprof-dump")?.into());
+                args.blockprof = true;
+            }
             "--map" => args.map = true,
             other => return Err(format!("unknown flag `{other}`\n\n{USAGE}")),
         }

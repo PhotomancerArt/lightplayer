@@ -41,7 +41,10 @@ pub enum ScanOutcome {
     NoTable,
     /// A table built from different seam declarations. Nothing past its
     /// identity is read (the layout after it is the identity's to define).
-    Mismatch { offset: u32, abi: u64 },
+    Mismatch {
+        offset: u32,
+        abi: u64,
+    },
     Found(ScannedTable),
     /// More than one readable table: refuse to guess.
     Ambiguous(Vec<u32>),
@@ -105,7 +108,9 @@ impl fmt::Display for ScanOutcome {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let ours = lp_seam::SEAM_ABI_ID;
         match self {
-            ScanOutcome::NoTable => write!(f, "no seam table in the image (emulator abi {ours:016x})"),
+            ScanOutcome::NoTable => {
+                write!(f, "no seam table in the image (emulator abi {ours:016x})")
+            }
             ScanOutcome::Mismatch { offset, abi } => write!(
                 f,
                 "seam table at flash {offset:#x} has abi {abi:016x}, this emulator has \
@@ -136,7 +141,11 @@ impl fmt::Display for ScanOutcome {
                 Ok(())
             }
             ScanOutcome::Ambiguous(at) => {
-                write!(f, "{} seam tables in the image, at {at:x?}: refusing to guess", at.len())
+                write!(
+                    f,
+                    "{} seam tables in the image, at {at:x?}: refusing to guess",
+                    at.len()
+                )
             }
         }
     }
@@ -176,7 +185,10 @@ mod tests {
     #[test]
     fn a_table_from_other_declarations_is_a_mismatch() {
         let outcome = scan(&image_with(lp_seam::SEAM_ABI_ID.wrapping_add(1)));
-        assert!(matches!(outcome, ScanOutcome::Mismatch { offset: 0x4000, .. }));
+        assert!(matches!(
+            outcome,
+            ScanOutcome::Mismatch { offset: 0x4000, .. }
+        ));
     }
 
     #[test]

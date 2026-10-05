@@ -393,17 +393,20 @@ impl ProbeDriver {
 
     /// The end-of-run summary.
     pub fn report(&self) -> Vec<String> {
-        let mut out = vec![format!(
-            "probe: injections began at cycle {:?} (1 ms after the guest's engaged query)",
-            self.start_at
-        ), format!(
-            "probe: raises {}, takes {} ({} empty), events taken {}, left in queue {}",
-            self.raises,
-            self.takes,
-            self.empty_takes,
-            self.taken,
-            self.left()
-        )];
+        let mut out = vec![
+            format!(
+                "probe: injections began at cycle {:?} (1 ms after the guest's engaged query)",
+                self.start_at
+            ),
+            format!(
+                "probe: raises {}, takes {} ({} empty), events taken {}, left in queue {}",
+                self.raises,
+                self.takes,
+                self.empty_takes,
+                self.taken,
+                self.left()
+            ),
+        ];
         let mut all: Vec<f64> = Vec::new();
         for (mode, injected, lat) in &self.per_mode {
             let mut l = lat.clone();
@@ -553,7 +556,12 @@ impl crate::machine::Esp32C6Machine {
                 {
                     p.start_at = Some(now + MS);
                 }
-                let engaged = self.seams.request.engaged.iter().any(|i| u32::from(i.decl_id) == a0);
+                let engaged = self
+                    .seams
+                    .request
+                    .engaged
+                    .iter()
+                    .any(|i| u32::from(i.decl_id) == a0);
                 u32::from(engaged)
             }
             Answer::ProbeTake => self.probe_take(a0 as usize, a1, a2),
@@ -617,7 +625,9 @@ impl crate::machine::Esp32C6Machine {
         {
             let us = (now - at) as f64 / memmap::CYCLES_PER_US as f64;
             probe.isr_latency.push(us);
-            probe.worst.push((at, us, std::mem::take(&mut probe.raised_ctx)));
+            probe
+                .worst
+                .push((at, us, std::mem::take(&mut probe.raised_ctx)));
             probe.worst.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
             probe.worst.truncate(8);
             probe.raised_at = None;
@@ -746,7 +756,11 @@ impl crate::machine::Esp32C6Machine {
                 "irq line {line:2}: {} priority {}  <- {}",
                 if enabled { "enabled " } else { "disabled" },
                 m.priority(line),
-                if sources.is_empty() { "-".to_string() } else { sources.join(" ") }
+                if sources.is_empty() {
+                    "-".to_string()
+                } else {
+                    sources.join(" ")
+                }
             ));
         }
         out

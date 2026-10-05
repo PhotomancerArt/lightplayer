@@ -2090,7 +2090,7 @@ impl Esp32C6Builder {
             flash_handle.lock().unwrap().bytes(),
             seam_probe.as_deref(),
         )
-            .map_err(BuildError::Io)?;
+        .map_err(BuildError::Io)?;
         let mut seam_state = seam_state;
         seam_state.waiting_for_app = seam_state.engaged() && boot_mode == BootMode::RomUp;
 
