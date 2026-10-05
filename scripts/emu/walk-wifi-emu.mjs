@@ -6,13 +6,16 @@
 // firmware image — over the `?emu=` USB shim (`usb`) or the `?ble=emu`
 // Bluetooth polyfill (`ble`):
 //
-//     connect → open the card's Wi‑Fi row (the board answers "not set")
-//       → type a made-up network and password → Save → the board's status
-//       says it is saved and this firmware does not join yet
+//     connect → open the card's Wi‑Fi row (nothing saved: it opens on
+//       "Add a network by name") → type a made-up network and password →
+//       Save → back on the list, the new row says "Saved · this firmware
+//       can't connect…" → Done → "+ Connect to a network" → a second
+//       network → Save
 //       → the board's own flash holds the network file
-//       → reload the page, connect again → the network reads back from the
-//         board (Studio never stores it)
-//       → Cloud relay off (on by default) → Forget (two clicks) → "Not set."
+//       → reload the page, connect again → both networks read back from the
+//         board (Studio never stores a password)
+//       → Cloud relay off (on by default) → open the first network's page →
+//         Forget (two clicks) → only the second is left
 //
 // ⚠️ WHAT THIS PROVES: the transport, the UI and the board's store. NOT
 // access: the emulated firmware sees its trusted link on both lanes (the
@@ -41,6 +44,8 @@ const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../.
 const BOARD = "c6-a";
 const SSID = "lp-walk-net";
 const PASSWORD = "correct-horse-42";
+const SECOND_SSID = "lp-back-office";
+const SECOND_PASSWORD = "staple-battery-7";
 const WIFI = "Wi‑Fi";
 const STUDIO_LOAD_MS = 420_000;
 const STEP_MS = 180_000;
@@ -71,6 +76,26 @@ function typeInto(selector, text) {
     el.dispatchEvent(new Event('input', { bubbles: true }));
     return true;
   })()`;
+}
+
+/// Type a network's name and password on the connect page.
+async function typeNetworkWith(driver, ssid, password) {
+  if (!(await driver.evaluate(typeInto('input[placeholder="Network name"]', ssid)))) {
+    throw new Error("no network name field");
+  }
+  if (!(await driver.evaluate(typeInto('input[type="password"]', password)))) {
+    throw new Error("no password field (type=password)");
+  }
+}
+
+/// Press Save once it is pressable (drawn disabled while a read is in
+/// flight; opening the popover asks the board again).
+async function saveWith(driver) {
+  await driver.waitFor(
+    `[...${PANEL}.querySelectorAll('button')].some((b) => !b.disabled && (b.innerText || '').trim() === 'Save')`,
+    { timeoutMs: STEP_MS, what: "Save to be pressable" },
+  );
+  await driver.click("Save", { scope: PANEL });
 }
 
 async function main() {
@@ -150,6 +175,8 @@ async function main() {
     });
     return "added and identified";
   };
+  const typeNetwork = (ssid, password) => typeNetworkWith(driver, ssid, password);
+  const save = () => saveWith(driver);
   const openWifi = async () => {
     await driver.waitFor(`Boolean(${WIFI_ROW})`, { timeoutMs: STEP_MS, what: "the Wi‑Fi row" });
     await driver.evaluate(`${WIFI_ROW}.click()`);
@@ -180,79 +207,83 @@ async function main() {
 
     await step("connect", `connect the emulated board over ${lane === "usb" ? "the USB shim" : "?ble=emu"}`, connect);
 
-    await step("open", "open the Wi‑Fi row: the board answers no network, and this firmware cannot join", async () => {
+    await step("open", "open the Wi‑Fi row: nothing saved, so it opens on adding a network by name", async () => {
       await openWifi();
-      await driver.waitFor(`${PANEL_TEXT}.includes('Not set.')`, {
+      await driver.waitFor(`${PANEL_TEXT}.includes('Not set up.') && ${PANEL_TEXT}.includes("can't list networks")`, {
         timeoutMs: STEP_MS,
-        what: "the board's status (Not set.)",
+        what: "the connect page (Not set up., type the name)",
       });
-      return "Not set.";
+      return "Not set up. — Add a network by name";
     });
 
     await step("typed", "type the network and its password (drawn as dots)", async () => {
-      if (!(await driver.evaluate(typeInto('input[placeholder="network name"]', SSID)))) {
-        throw new Error("no network name field");
-      }
-      if (!(await driver.evaluate(typeInto('input[type="password"]', PASSWORD)))) {
-        throw new Error("no password field (type=password)");
-      }
+      await typeNetwork(SSID, PASSWORD);
       return "the password field is a password input";
     });
 
-    await step("saved", "Save: the board's answer says saved, and that this firmware does not join yet", async () => {
-      // Drawn disabled while a read is in flight (opening the panel asks
-      // the board again); the press waits for it.
-      await driver.waitFor(
-        `[...${PANEL}.querySelectorAll('button')].some((b) => !b.disabled && (b.innerText || '').trim() === 'Save')`,
-        { timeoutMs: STEP_MS, what: "Save to be pressable" },
-      );
-      await driver.click("Save", { scope: PANEL });
-      await driver.waitFor(`${PANEL_TEXT}.includes("Saved. This firmware doesn’t join")
-                            || ${PANEL_TEXT}.includes("Saved. This firmware doesn't join")`, {
+    await step("saved", "Save: back on the list, the new row says it is saved and this firmware can't connect yet", async () => {
+      await save();
+      await driver.waitFor(`${PANEL_TEXT}.includes(${JSON.stringify(SSID)}) && ${PANEL_TEXT}.includes("this firmware can't connect to Wi‑Fi yet. It will after an update.")`, {
         timeoutMs: STEP_MS,
-        what: "the board's status (Saved…)",
+        what: "the new row's test (Saved · this firmware can't connect…)",
       });
       const leak = await noPasswordOnThePage();
       if (leak) throw new Error(`the password is on the page: ${leak}`);
+      await driver.click("Done", { scope: PANEL });
       return `saved; the password is nowhere on the page`;
+    });
+
+    await step("second", "+ Connect to a network → a second network → Save: both are listed", async () => {
+      await driver.click("Connect to a network", { scope: PANEL });
+      await driver.waitFor(`${PANEL_TEXT}.includes('Add a network by name')`, {
+        timeoutMs: STEP_MS,
+        what: "the connect page",
+      });
+      await typeNetwork(SECOND_SSID, SECOND_PASSWORD);
+      await save();
+      await driver.waitFor(`${PANEL_TEXT}.includes(${JSON.stringify(SSID)}) && ${PANEL_TEXT}.includes(${JSON.stringify(SECOND_SSID)})`, {
+        timeoutMs: STEP_MS,
+        what: "both networks on the list",
+      });
+      await driver.click("Done", { scope: PANEL });
+      return `${SSID}, ${SECOND_SSID}`;
     });
 
     await step("chip", "the board's own flash holds the network file (the door writes the chip back)", async () => {
       const chip = path.join(stateDir, `${BOARD}.flash.bin`);
       const deadline = Date.now() + 30_000;
       for (;;) {
-        if (existsSync(chip) && readFileSync(chip).includes(Buffer.from(`"ssid":"${SSID}"`))) {
-          return `${path.basename(chip)} holds "ssid":"${SSID}"`;
+        if (
+          existsSync(chip) &&
+          readFileSync(chip).includes(Buffer.from(`"ssid":"${SSID}"`)) &&
+          readFileSync(chip).includes(Buffer.from(`"ssid":"${SECOND_SSID}"`))
+        ) {
+          return `${path.basename(chip)} holds both networks`;
         }
-        if (Date.now() > deadline) throw new Error(`${chip} never held the network file`);
+        if (Date.now() > deadline) throw new Error(`${chip} never held both networks`);
         await new Promise((resolve) => setTimeout(resolve, 1_000));
       }
     });
 
-    await step("reloaded", "reload the page and connect again: the network reads back from the board", async () => {
+    await step("reloaded", "reload the page and connect again: both networks read back from the board", async () => {
       await load();
       const how = await connect();
-      await driver.waitFor(`(${WIFI_ROW}?.innerText || '').includes(${JSON.stringify(SSID)})`, {
+      await driver.waitFor(`(${WIFI_ROW}?.innerText || '').includes('2 saved')`, {
         timeoutMs: STEP_MS,
-        what: "the Wi‑Fi row to name the network",
+        what: "the Wi‑Fi row to say 2 saved",
       });
       await openWifi();
-      await driver.waitFor(`${PANEL_TEXT}.includes('Saved. This firmware')`, {
+      await driver.waitFor(`${PANEL_TEXT}.includes("this firmware can't connect to Wi‑Fi yet") && ${PANEL_TEXT}.includes(${JSON.stringify(SECOND_SSID)})`, {
         timeoutMs: STEP_MS,
-        what: "the board's status after the reload",
+        what: "the list after the reload",
       });
-      const placeholder = await driver.evaluate(`${PANEL}.querySelector('input[type="password"]')?.placeholder`);
-      if (placeholder !== "unchanged") throw new Error(`the password field says ${placeholder}, not "unchanged"`);
-      return `${how}; the row names ${SSID}; the password field says "unchanged"`;
+      return `${how}; the row says 2 saved; both listed`;
     });
 
     await step("relay-off", "turn the cloud relay off (it is on by default): the board's answer says so", async () => {
       const relay = `${PANEL}.querySelector('button[role="switch"][aria-label="Cloud relay"]')`;
       const before = await driver.evaluate(`${relay}?.getAttribute('aria-checked')`);
       if (before !== "true") throw new Error(`the Cloud relay switch starts ${before}, not on`);
-      if (!(await driver.evaluate(`${PANEL_TEXT}.includes('Relay on (default)')`))) {
-        throw new Error("the panel does not say the relay is on by default");
-      }
       // Drawn locked while a read is in flight (opening the panel asks the
       // board again); a click on a locked switch does nothing.
       await driver.waitFor(`${relay} && !${relay}.disabled`, {
@@ -260,14 +291,19 @@ async function main() {
         what: "the Cloud relay switch to be pressable",
       });
       await driver.evaluate(`${relay}.click()`);
-      await driver.waitFor(`${PANEL_TEXT}.includes('Relay off — local network only') && ${relay}?.getAttribute('aria-checked') === 'false'`, {
+      await driver.waitFor(`${relay}?.getAttribute('aria-checked') === 'false' && !${relay}.disabled`, {
         timeoutMs: STEP_MS,
         what: "the board's status (relay off)",
       });
-      return "Relay on (default) → Relay off — local network only";
+      return "Cloud relay on → off";
     });
 
-    await step("forget", "Forget (Lasting: arm, then confirm): the board forgets the network, the relay stays off", async () => {
+    await step("forget", "the first network's page → Forget (Lasting: arm, then confirm): only the second is left", async () => {
+      await driver.click(SSID, { scope: PANEL });
+      await driver.waitFor(`${PANEL_TEXT}.includes("Password: saved on the board. It can't be shown.")`, {
+        timeoutMs: STEP_MS,
+        what: "the network's page",
+      });
       await driver.click("Forget", { scope: PANEL });
       // Armed (red, the 4 s window): the second click inside it acts.
       await driver.waitFor(`Boolean(${PANEL}.querySelector('.ux-armed'))`, {
@@ -275,18 +311,22 @@ async function main() {
         what: "Forget to arm",
       });
       await driver.click("Forget", { scope: PANEL });
-      await driver.waitFor(`${PANEL_TEXT}.includes('Not set.') && ${PANEL_TEXT}.includes('Relay off — local network only')`, {
+      await driver.waitFor(`!${PANEL_TEXT}.includes(${JSON.stringify(SSID)}) && ${PANEL_TEXT}.includes(${JSON.stringify(SECOND_SSID)})`, {
         timeoutMs: STEP_MS,
-        what: "the board's status (Not set., relay still off)",
+        what: "the list without the first network",
       });
-      return "Not set.; the relay stays off";
+      const relayOff = await driver.evaluate(
+        `${PANEL}.querySelector('button[role="switch"][aria-label="Cloud relay"]')?.getAttribute('aria-checked') === 'false'`,
+      );
+      if (!relayOff) throw new Error("the cloud relay came back on");
+      return `${SECOND_SSID} left; the relay stays off`;
     });
   } catch (error) {
     fatal = error;
   }
 
   const consoleErrors = driver.consoleLines().filter((l) => l.startsWith("[error]") || l.startsWith("[exception]"));
-  const leaked = driver.consoleLines().filter((l) => l.includes(PASSWORD));
+  const leaked = driver.consoleLines().filter((l) => l.includes(PASSWORD) || l.includes(SECOND_PASSWORD));
   report.consoleErrors = consoleErrors;
   report.passwordInConsole = leaked.length;
   writeFileSync(path.join(out, "walk-wifi-emu.json"), JSON.stringify(report, null, 2));
@@ -312,7 +352,7 @@ async function main() {
     console.error(`\nThe walk's steps passed, but the page console printed the password ${leaked.length} time(s).`);
     process.exit(1);
   }
-  console.log(`\n✓ the Wi‑Fi walk (${lane}) finished: set → saved on the chip → read back after a reload → cloud relay off → forget, with no board.`);
+  console.log(`\n✓ the Wi‑Fi walk (${lane}) finished: two networks added → saved on the chip → read back after a reload → cloud relay off → one forgotten, with no board.`);
 }
 
 await main();

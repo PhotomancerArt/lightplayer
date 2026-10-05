@@ -103,6 +103,27 @@ pub mod row {
     pub const SAVED: &str = "Saved";
 }
 
+/// The popover's own labels: its pages, buttons and fields.
+pub mod label {
+    pub const WIFI: &str = "Wi‑Fi";
+    pub const CONNECT_TO_A_NETWORK: &str = "Connect to a network";
+    pub const ADD_BY_NAME: &str = "Add a network by name";
+    pub const NEARBY: &str = "Nearby";
+    pub const REFRESH: &str = "refresh";
+    pub const OTHER_NETWORK: &str = "Other network…";
+    pub const OTHER_NETWORK_SUB: &str = "hidden, or not in range";
+    pub const OTHER_NETWORK_TITLE: &str = "Other network";
+    pub const CHANGE_PASSWORD: &str = "Change password";
+    pub const NETWORK_FIELD: &str = "Network";
+    pub const PASSWORD_FIELD: &str = "Password";
+    pub const DONE: &str = "Done";
+    /// The wrong-password test row's forget.
+    pub const REMOVE: &str = "Remove";
+    pub const WRITING: &str = "Writing to the device…";
+    /// A heard network with no password.
+    pub const OPEN: &str = "open";
+}
+
 /// What a saved network's page says about it.
 pub mod page {
     pub const SAVED_UNSUPPORTED: &str = "Saved. This firmware can't connect yet.";

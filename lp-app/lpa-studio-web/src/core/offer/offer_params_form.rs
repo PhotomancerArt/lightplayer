@@ -148,7 +148,7 @@ pub fn OfferParamsForm(
 /// spell-checked (a spell checker may send the text off the page).
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn SecretField(
+pub(crate) fn SecretField(
     label: String,
     placeholder: String,
     value: String,

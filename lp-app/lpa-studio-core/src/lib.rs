@@ -111,7 +111,8 @@ pub use app::network::{
     NEEDS_AUTHOR, NetworkChange, NetworkCommand, NetworkOp, PasswordChange, READING, UiDeviceWifi,
     UiWifiNetworkRow, UiWifiTest, UiWifiTestResult, UiWifiTestStepLine, WIFI_ENABLED_PARAM,
     WIFI_FORGET_SEGMENT, WIFI_HIDDEN_PARAM, WIFI_NETWORK_PARAM, WIFI_PASSWORD_PARAM, WifiStepState,
-    WifiTestNext, WifiTestOutcome, WifiTestProgress, WifiTestStep, WifiTone,
+    WifiTestNext, WifiTestOutcome, WifiTestProgress, WifiTestStep, WifiTone, signal_bars,
+    signal_word,
 };
 pub use app::node::{
     UiAssetEditor, UiAssetEditorKind, UiBindingAuthoring, UiBindingAuthoringDirection,

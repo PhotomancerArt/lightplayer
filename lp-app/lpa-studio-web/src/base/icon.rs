@@ -1,13 +1,13 @@
 use dioxus::prelude::*;
 use dioxus_icons::lucide::{
     Activity, ArrowUpRight, Asterisk, Bluetooth, Bot, Boxes, ChartLine, Check, ChevronDown,
-    ChevronRight, CircleAlert, CircleCheck, CircleDot, CircleMinus, CircleQuestionMark, Clock,
-    Copy, Cpu, Download, Droplet, Ellipsis, Eraser, Eye, Flag, FlaskConical, Folder, Funnel, Hash,
-    History, Image, Info, KeyRound, Laptop, Lightbulb, Link, Link2, Link2Off, ListMusic, Locate,
-    LocateFixed, Lock, LockOpen, Maximize2, Minimize2, MonitorPlay, MousePointerClick, Pencil, Pin,
-    Play, Plus, Power, Radio, RadioTower, RefreshCw, Route, Save, Settings, Smartphone, Sparkles,
-    SquareArrowRight, SquareTerminal, Trash2, TriangleAlert, Undo2, Upload, Usb, Users, Waypoints,
-    Wifi, X, Zap,
+    ChevronLeft, ChevronRight, CircleAlert, CircleCheck, CircleDot, CircleMinus,
+    CircleQuestionMark, Clock, Copy, Cpu, Download, Droplet, Ellipsis, Eraser, Eye, Flag,
+    FlaskConical, Folder, Funnel, Hash, History, Image, Info, KeyRound, Laptop, Lightbulb, Link,
+    Link2, Link2Off, ListMusic, Locate, LocateFixed, Lock, LockOpen, Maximize2, Minimize2,
+    MonitorPlay, MousePointerClick, Pencil, Pin, Play, Plus, Power, Radio, RadioTower, RefreshCw,
+    Route, Save, Settings, Smartphone, Sparkles, SquareArrowRight, SquareTerminal, Trash2,
+    TriangleAlert, Undo2, Upload, Usb, Users, Waypoints, Wifi, X, Zap,
 };
 
 #[component]
@@ -18,6 +18,8 @@ pub fn StudioIcon(name: StudioIconName, size: u32) -> Element {
         StudioIconName::Usb => rsx! { Usb { size } },
         StudioIconName::Bluetooth => rsx! { Bluetooth { size } },
         StudioIconName::Wifi => rsx! { Wifi { size } },
+        StudioIconName::Back => rsx! { ChevronLeft { size } },
+        StudioIconName::Refresh => rsx! { RefreshCw { size } },
         StudioIconName::Simulator => rsx! { MonitorPlay { size } },
         StudioIconName::Test => rsx! { FlaskConical { size } },
         StudioIconName::StatusRunning => rsx! { Play { size } },
@@ -136,6 +138,10 @@ pub enum StudioIconName {
     Bluetooth,
     /// Wi‑Fi: the device card's Wi‑Fi row and its verbs.
     Wifi,
+    /// Back one page in a paged popover (the Wi‑Fi popover's pages).
+    Back,
+    /// Ask again (the Wi‑Fi connect page's scan).
+    Refresh,
     /// The sim runtime's card glyph — where a device card shows its
     /// transport, a sim card shows this instead (D36).
     Simulator,

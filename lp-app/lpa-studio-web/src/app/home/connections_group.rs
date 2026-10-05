@@ -6,7 +6,7 @@
 //! | USB | "connected" / "not connected" |
 //! | Bluetooth | the icon, "Bluetooth", a switch — nothing else |
 //! | Access · open › | opens the access panel (author links only) |
-//! | Wi‑Fi · <network> › | opens the Wi‑Fi panel ([`super::wifi_panel`]): the board's network, set over this link |
+//! | Wi‑Fi · <network> › | opens the Wi‑Fi popover ([`super::wifi_panel`]): the board's saved networks, set over this link |
 //!
 //! Bluetooth is on by default, so most people never touch the switch. The
 //! board reads it once, at boot: flipped over USB, Studio restarts the
@@ -16,18 +16,19 @@
 //!
 //! The Wi‑Fi row shows on every LightPlayer board a link reaches (core's
 //! [`UiDeviceWifi`]); its verbs are offers at `devices/<board>/wifi/…`,
-//! published only while the link holds author — below that the panel says
-//! what it needs. Opening the panel asks the board again.
+//! published only while the link holds author — below that the popover
+//! says what it needs. Opening it asks the board again (and what it hears,
+//! on a board that can scan).
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
     AccessCommand, DeviceAccessChange, DeviceId, NetworkCommand, OpenTo, UiAction, UiDeviceAccess,
-    UiDeviceWifi, UiOffer, open_summary,
+    UiDeviceWifi, UiOffer, WifiTone, open_summary,
 };
 
 use super::access_fields::Switch;
 use super::device_access_panel::DeviceAccessPanel;
-use super::wifi_panel::WifiPanel;
+use super::wifi_panel::{SignalBars, WifiPanel};
 use crate::base::{DetailPopover, PopoverPlacement, StudioIcon, StudioIconName};
 use crate::core::offer::use_offers;
 
@@ -72,17 +73,19 @@ pub(crate) fn ConnectionsGroup(
         let tree = tree.read();
         tree.device_prefix(device)
             .map(|prefix| {
-                tree.verbs_of(&prefix.clone().child("wifi"))
+                tree.own_verbs_of(&prefix.clone().child("wifi"))
                     .cloned()
                     .collect()
             })
             .unwrap_or_default()
     });
-    // Opening the Wi‑Fi panel asks the board again (plan Q7).
+    // Opening the Wi‑Fi popover asks the board again (plan Q7), and what it
+    // hears (core asks nothing of a board that cannot scan).
     let wifi_open_signal = use_signal(|| wifi_open);
     use_effect(move || {
         if wifi_open_signal() {
             on_network.call(NetworkCommand::Refresh { device });
+            on_network.call(NetworkCommand::Scan { device });
         }
     });
     let over_bluetooth = access.over_bluetooth;
@@ -168,7 +171,10 @@ pub(crate) fn ConnectionsGroup(
                             StudioIcon { name: StudioIconName::Wifi, size: 15 }
                         }
                         span { class: "tw:min-w-0 tw:flex-1 tw:text-left", "Wi‑Fi" }
-                        span { class: VALUE_CLASS,
+                        span { class: wifi_value_class(wifi.row_tone()),
+                            if let Some(rssi) = wifi.row_rssi() {
+                                SignalBars { rssi: Some(rssi), in_use: true }
+                            }
                             span { class: "tw:max-w-36 tw:truncate", "{wifi.row_value()}" }
                             StudioIcon { name: StudioIconName::Collapsed, size: 14 }
                         }
@@ -177,6 +183,7 @@ pub(crate) fn ConnectionsGroup(
                         wifi,
                         offers: wifi_offers,
                         on_action,
+                        on_network,
                         args_preview: wifi_args_preview,
                         forget_armed_preview: wifi_forget_armed_preview,
                     }
@@ -235,6 +242,18 @@ const ROW_CLASS: &str = "tw:flex tw:min-h-11 tw:min-w-0 tw:items-center tw:gap-2
 /// The Who row is the popover's trigger: a full-width button that reads as
 /// a row.
 const WHO_ROW_CLASS: &str = "tw:flex tw:min-h-11 tw:w-full tw:min-w-0 tw:cursor-pointer tw:appearance-none tw:items-center tw:gap-2.5 tw:border-0 tw:border-t tw:border-solid tw:border-border-muted tw:bg-transparent tw:px-3 tw:py-2 tw:text-[13.5px] tw:font-semibold tw:text-strong-foreground tw:hover:bg-white/5 ux-focus-ring";
+
+/// The Wi‑Fi row's value, in its tone: plain, the strong text of a
+/// connected network, or amber for a refused password.
+fn wifi_value_class(tone: WifiTone) -> &'static str {
+    match tone {
+        WifiTone::Plain => VALUE_CLASS,
+        WifiTone::Good => {
+            "tw:inline-flex tw:flex-none tw:items-center tw:gap-1.5 tw:text-xs tw:font-semibold tw:text-strong-foreground"
+        }
+        WifiTone::Warn => OPEN_VALUE_CLASS,
+    }
+}
 
 const VALUE_CLASS: &str = "tw:inline-flex tw:flex-none tw:items-center tw:gap-1.5 tw:text-xs tw:font-semibold tw:text-subtle-foreground";
 
