@@ -3102,6 +3102,9 @@ impl StudioController {
                 | crate::LinkTransport::Ble => crate::DeviceFace::Wire,
             },
             key: format!("device:{}", attachment.uid),
+            link: crate::UiLinkKind::of_endpoint(
+                device.and_then(|device| device.identity.endpoint.as_ref()),
+            ),
             device: Some(attachment.device),
             // The roster's LIVE title, so a rename made from this very
             // panel shows up in the segment at once; the attach-time
@@ -6170,9 +6173,11 @@ impl StudioController {
         if let Some(device) = self.devices.roster().device(facts.device)
             && !self.access.link_is_granted(device)
         {
-            return Err(UiError::MissingSession(
-                "this device is still unlocking over Bluetooth".to_string(),
-            ));
+            let over = crate::UiLinkKind::of_endpoint(device.identity.endpoint.as_ref());
+            return Err(UiError::MissingSession(format!(
+                "this device is still unlocking over {}",
+                over.label()
+            )));
         }
         Ok(crate::DeviceLensAttachment {
             device: facts.device,

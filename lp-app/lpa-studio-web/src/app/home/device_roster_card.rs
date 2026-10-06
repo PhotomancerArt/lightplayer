@@ -128,7 +128,7 @@ use dioxus::prelude::*;
 use lpa_studio_core::{
     DeviceActivityView, DeviceCardFeedView, DeviceEscape, DeviceFeedOp, DeviceId,
     DeviceLoadedProject, DeviceStatus, DeviceView, FeedLiveness, OfferArgs, PendingLinkView,
-    RENAME_NAME_PARAM, UiAction, UiDeviceUpdate, UiExampleCard, UiOffer, UiPackageCard,
+    RENAME_NAME_PARAM, UiAction, UiDeviceUpdate, UiExampleCard, UiLinkKind, UiOffer, UiPackageCard,
     UiRuntimeBand, UiStatus, UiStatusKind, UiUnlockOffer, UpdateLight, UpdateRowKind,
     check_backup_file, device_firmware_line, device_identity_line, device_restore_from_file_action,
     device_status_kind, escape_verb, firmware_face_preview_sentence, pending_firmware_line,
@@ -253,6 +253,14 @@ pub(crate) fn DeviceRosterCard(
     // with the reason under them ("Firmware updates need USB") — never
     // hidden, so the question is answered where it is asked (M5 S6).
     let firmware_blocked = card.firmware_blocked.is_some();
+    // How the board is reached, for the words that depend on it: a LAN
+    // board is network-blocked for firmware like a Bluetooth one, but its
+    // feed runs, so it never wears Bluetooth's sentence.
+    let over = match (lan.is_some(), card.is_over_bluetooth()) {
+        (true, _) => UiLinkKind::Wifi,
+        (false, true) => UiLinkKind::Bluetooth,
+        (false, false) => UiLinkKind::Usb,
+    };
     // Update draws as one chip when it is one click, or when it is refused
     // for the link (Bluetooth: drawn disabled, reason under it). With
     // nothing to pick and nothing to press — this Studio serves no build
@@ -499,7 +507,7 @@ pub(crate) fn DeviceRosterCard(
                     // sits top-right INSIDE the frame, so the picture
                     // arriving moves nothing: the frame's height is fixed.
                     div { class: "ux-armed-dim tw:grid tw:min-w-0",
-                        {preview_slot(&card, feed.as_ref(), locked, update_story.as_ref())}
+                        {preview_slot(&card, feed.as_ref(), locked, update_story.as_ref(), over)}
                     }
                     div { class: line_and_bar_class(),
                         div { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-2",
@@ -1509,7 +1517,7 @@ const LOCKED_PREVIEW_SENTENCE: &str = "Locked — Unlock it to see what it runs.
 /// The preview slot's sentence while there is no feed (AC10): why there is
 /// no picture, in this state, in plain words — never a fake picture and
 /// never an empty box.
-fn preview_sentence(card: &DeviceView) -> String {
+fn preview_sentence(card: &DeviceView, over: UiLinkKind) -> String {
     if card.activity.is_none()
         && let Some(sentence) = firmware_face_preview_sentence(&card.firmware_face)
     {
@@ -1524,7 +1532,8 @@ fn preview_sentence(card: &DeviceView) -> String {
     }
     // The card's live picture is not streamed over Bluetooth (M5: that air
     // time is the board's ESP-NOW's too), so "coming" would be a promise.
-    if card.is_over_bluetooth() {
+    // Over USB and Wi‑Fi the feed runs, and the picture is on its way.
+    if over == UiLinkKind::Bluetooth {
         return "No live picture over Bluetooth — Open in editor to see and control it."
             .to_string();
     }
@@ -1757,6 +1766,7 @@ fn preview_slot(
     feed: Option<&DeviceCardFeedView>,
     locked: bool,
     update: Option<&UiDeviceUpdate>,
+    over: UiLinkKind,
 ) -> Element {
     if let Some((light, sentence)) =
         update.and_then(|update| update.light.map(|light| (light, update.sentence.clone())))
@@ -1793,7 +1803,7 @@ fn preview_slot(
     let sentence = if locked && card.activity.is_none() {
         Some(LOCKED_PREVIEW_SENTENCE.to_string())
     } else {
-        preview_slot_sentence(card, feed)
+        preview_slot_sentence(card, feed, over)
     };
     rsx! {
         div { class: "{frame_class}",
@@ -1896,12 +1906,16 @@ fn feed_pill(
 }
 
 /// The sentence in the slot, when the picture is not the whole story.
-fn preview_slot_sentence(card: &DeviceView, feed: Option<&DeviceCardFeedView>) -> Option<String> {
+fn preview_slot_sentence(
+    card: &DeviceView,
+    feed: Option<&DeviceCardFeedView>,
+    over: UiLinkKind,
+) -> Option<String> {
     if card.activity.is_some() {
-        return Some(preview_sentence(card));
+        return Some(preview_sentence(card, over));
     }
     let Some(feed) = feed else {
-        return Some(preview_sentence(card));
+        return Some(preview_sentence(card, over));
     };
     match &feed.frame {
         Some(frame) if frame.display_layout.is_some() => None,
@@ -1920,7 +1934,7 @@ fn preview_slot_sentence(card: &DeviceView, feed: Option<&DeviceCardFeedView>) -
             // no last frame yet to dim, but "the live feed is coming" would
             // still be a promise the editor is actively blocking.
             FeedLiveness::Lens => "Picture paused while the editor is open.".to_string(),
-            _ => preview_sentence(card),
+            _ => preview_sentence(card, over),
         }),
     }
 }
@@ -2128,6 +2142,15 @@ fn confirm(_message: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A test card's link: Bluetooth when the card says so, else USB.
+    fn card_link(card: &DeviceView) -> UiLinkKind {
+        if card.is_over_bluetooth() {
+            UiLinkKind::Bluetooth
+        } else {
+            UiLinkKind::Usb
+        }
+    }
     use lpa_studio_core::UiStatusKind;
     // Reset over Bluetooth is drawn disabled in every card state: core's
     // `device_offers` and `pending_link_offers` tests own that now (the card
@@ -2557,15 +2580,27 @@ mod tests {
     fn the_slot_sentence_yields_to_the_picture() {
         let card = card_fixture();
         assert_eq!(
-            preview_slot_sentence(&card, Some(&feed_fixture(FeedLiveness::Live, true))),
+            preview_slot_sentence(
+                &card,
+                Some(&feed_fixture(FeedLiveness::Live, true)),
+                card_link(&card)
+            ),
             None
         );
         assert!(
-            preview_slot_sentence(&card, Some(&feed_fixture(FeedLiveness::Live, false)))
-                .is_some_and(|s| s.contains("too large to preview")),
+            preview_slot_sentence(
+                &card,
+                Some(&feed_fixture(FeedLiveness::Live, false)),
+                card_link(&card)
+            )
+            .is_some_and(|s| s.contains("too large to preview")),
         );
         assert_eq!(
-            preview_slot_sentence(&card, Some(&feed_fixture(FeedLiveness::Waiting, true))),
+            preview_slot_sentence(
+                &card,
+                Some(&feed_fixture(FeedLiveness::Waiting, true)),
+                card_link(&card)
+            ),
             Some("Waiting for the first frame…".to_string())
         );
         // Editor lens, no frame pulled yet (the feed never pulls under the
@@ -2578,12 +2613,12 @@ mod tests {
             engine_fps: None,
         };
         assert_eq!(
-            preview_slot_sentence(&card, Some(&lens_no_frame)),
+            preview_slot_sentence(&card, Some(&lens_no_frame), card_link(&card)),
             Some("Picture paused while the editor is open.".to_string())
         );
         assert_eq!(
-            preview_slot_sentence(&card, None),
-            Some(preview_sentence(&card))
+            preview_slot_sentence(&card, None, card_link(&card)),
+            Some(preview_sentence(&card, card_link(&card)))
         );
 
         let mut busy = card_fixture();
@@ -2597,8 +2632,12 @@ mod tests {
             update: None,
         });
         assert_eq!(
-            preview_slot_sentence(&busy, Some(&feed_fixture(FeedLiveness::Live, true))),
-            Some(preview_sentence(&busy))
+            preview_slot_sentence(
+                &busy,
+                Some(&feed_fixture(FeedLiveness::Live, true)),
+                card_link(&busy)
+            ),
+            Some(preview_sentence(&busy, card_link(&busy)))
         );
         assert_eq!(
             feed_frame_class(&busy, Some(&feed_fixture(FeedLiveness::Offline, true))),
@@ -2625,13 +2664,13 @@ mod tests {
     fn every_state_has_an_honest_preview_sentence() {
         let mut card = card_fixture();
         assert_eq!(
-            preview_sentence(&card),
+            preview_sentence(&card, card_link(&card)),
             "No picture yet — the live feed is coming."
         );
 
         card.loaded_project = DeviceLoadedProject::Empty;
         assert_eq!(
-            preview_sentence(&card),
+            preview_sentence(&card, card_link(&card)),
             "Nothing loaded — no picture until something runs."
         );
 
@@ -2639,13 +2678,13 @@ mod tests {
             label: "porch-sign".to_string(),
         };
         assert_eq!(
-            preview_sentence(&card),
+            preview_sentence(&card, card_link(&card)),
             "No picture yet — the live feed is coming."
         );
 
         card.firmware_face = lpa_studio_core::DeviceFirmwareFace::Blank;
         assert_eq!(
-            preview_sentence(&card),
+            preview_sentence(&card, card_link(&card)),
             "Nothing running — a blank chip has no picture."
         );
 
@@ -2661,9 +2700,24 @@ mod tests {
             update: None,
         });
         assert_eq!(
-            preview_sentence(&card),
+            preview_sentence(&card, card_link(&card)),
             "Flashing firmware… the picture returns when the board does."
         );
+    }
+
+    /// A network board is blocked for firmware on Bluetooth and the LAN
+    /// alike, but only Bluetooth goes without a picture: over Wi‑Fi the
+    /// feed runs, and the sentence is a USB board's (PR C's walk found the
+    /// Bluetooth one on a Wi‑Fi card).
+    #[test]
+    fn a_wifi_card_waits_for_its_picture_and_never_names_bluetooth() {
+        let mut card = card_fixture();
+        card.firmware_blocked = Some(lpa_studio_core::FIRMWARE_NEEDS_USB.to_string());
+        assert_eq!(
+            preview_sentence(&card, UiLinkKind::Wifi),
+            "No picture yet — the live feed is coming."
+        );
+        assert!(preview_sentence(&card, UiLinkKind::Bluetooth).contains("over Bluetooth"));
     }
 
     fn update_words(kind: UpdateRowKind, light: Option<UpdateLight>) -> UiDeviceUpdate {

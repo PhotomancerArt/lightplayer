@@ -56,10 +56,15 @@ impl EndpointKey {
         self.0.starts_with(BLE_ENDPOINT_PREFIX)
     }
 
+    /// Whether this endpoint is a secure link over the LAN (`lan:`).
+    pub fn is_lan(&self) -> bool {
+        self.0.starts_with(LAN_ENDPOINT_PREFIX)
+    }
+
     /// Whether this endpoint is a network link — Bluetooth or the LAN — over
     /// which firmware cannot be written (no reset lines, no ROM downloader).
     pub fn is_network(&self) -> bool {
-        self.is_bluetooth() || self.0.starts_with(LAN_ENDPOINT_PREFIX)
+        self.is_bluetooth() || self.is_lan()
     }
 }
 

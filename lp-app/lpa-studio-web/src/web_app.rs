@@ -2551,6 +2551,7 @@ mod tests {
             status: UiChromeSessionStatus::Run,
             stat_line: None,
             update: None,
+            link: lpa_studio_core::UiLinkKind::Usb,
         }
     }
 
