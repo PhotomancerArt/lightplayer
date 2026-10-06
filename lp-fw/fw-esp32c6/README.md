@@ -84,6 +84,27 @@ D9/GPIO20, and D8/GPIO19. Only the first two can be RMT channels; D8 is spare
 for a future SPI-class output — **not an RMT resource**, since the chip has
 no third TX channel.
 
+## Emulator seams
+
+The image carries an emulator seam table, `LP_SEAM_TABLE` (`src/seams/`,
+instantiated with `fw_esp32_common::seam_table!`), and one seam: the LED
+wait step, `lp_seam_ws281x_wait_step`, called from `write`'s spin closure in
+`src/output/rmt/esp32c6_rmt_ws281x_driver.rs` before the frame-timeout
+check. On silicon it costs one call, one no-op hint (`addi zero, zero, 1`)
+and one return per spin iteration — the spin only ever waits, so it changes
+how often the loop polls, not what it waits for — and the table is 88 B of
+flash `.rodata` nobody reads. **No RAM, no IRAM.** Under an emulator that
+engaged `led=fast` (only Studio's Devices-page emulated boards), the call
+returns and the hart parks until an interrupt; everywhere else it is the
+same instruction stream as silicon.
+
+In the split image the table is a core root, so it and the seam function
+land in the core (`lp-fw-split build` prints both placements). The
+`test_seam_abi` harness adds two TEST ONLY seams to prove the generated call
+shims keep their arguments and result through this profile's LTO. The ABI
+and its rules are `lp-base/lp-seam/README.md`; why seams exist is
+`docs/adr/2026-10-05-emulator-seams.md`.
+
 ## Common Commands
 
 Run on a connected ESP32-C6:

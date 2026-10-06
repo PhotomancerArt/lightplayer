@@ -185,6 +185,84 @@ Note the base — `0x600B_0410` is **LP_CLKRST** (`0x600B_0400`), not LP_AON,
 which is at `0x600B_1000`. The generated register-name table is what caught
 that.
 
+### Emulator seams: a separate list, engaged only when asked
+
+The hook table above stays empty. **Emulator seams** are a named exception
+to it (ADR `docs/adr/2026-10-05-emulator-seams.md`): functions the shipped
+firmware itself declares in a seam table (`lp-base/lp-seam`), which the
+machine answers only when a run asks. They are their own list
+(`src/seams/`), with their own counters (`seam_calls`, `seam_arms` in the
+snapshot), and **with none asked for nothing runs**: no scan, no patch, one
+`bool` a slice.
+
+- **Arming goes through the live cache MMU.** A site's flash bytes are found
+  by translating its address through the mapping the running firmware set up
+  (the split image moves code between flash offsets, and after an update two
+  cores sit in flash), never by reading image headers. The table carries its
+  own address; the **live** table is the one whose own address translates to
+  the flash offset it was scanned at, and two live tables is an error. A site
+  is planted only when the window holds exactly the flash bytes at that
+  offset and they carry the seam's hint; the patch goes into the cache
+  window, never the flash chip, and is planted again after any refill.
+- **They wait for the app.** The IDF bootloader reads the app through the
+  window to verify it, so nothing is armed until the hart first executes from
+  the window (the mask ROM, the bootloader and the split image's loader run
+  from ROM and RAM). On a direct load that is at build.
+- **They re-resolve on every chip start**: build, reboot and power cycle —
+  so a board created blank and then flashed and reset (Studio's Update
+  firmware) engages, and one updated to a new image drops the old arms.
+- **The flags**: `--seams <atoms|none>` is strict (a seam that cannot engage
+  is a hard error, exit 64), `--seams-prefer <atoms>` is soft (engage what
+  the image allows, else one `SEAM none engaged: <why>` line), and
+  `--seams-info <image>` prints an image's tables and exits. Atoms are
+  `<seam>=<impl>` joined by `+`; every chip start prints
+  `SEAM led=fast engaged (performance, abi …, lp_seam_ws281x_wait_step@…)`,
+  `--trace` adds a `SEAM led=fast wait-step` line per call, and the run's
+  label becomes `lp-emu:esp32c6:t2+led=fast`. `lp-cli emu run` takes the
+  same three flags and `emu serve` the board options `seams=` and
+  `seams_prefer=` (none by default; `GET /boards` names each board's label
+  and lines). The tab module (`tab_abi`, `emu_abi=2`) takes the config keys
+  `seams=` and `seams_prefer=`, and `emu_seams_info` answers one line of JSON
+  — `{"label","engaged","lines","none_why"}` — after `emu_create` and after
+  every restart.
+- **Implementations**: `led=fast` (the LED wait, below). `test=echo` and
+  `test=take` exist only under the dev feature `test-seams`, which the seam
+  tests turn on and no shipped command line does.
+
+**The wake, endpoints and many boards.** An engaged capability seam gets an
+**endpoint** on the machine, addressed `<board>/<seam>`
+(`Esp32C6Machine::seam_endpoint_mut`): a bounded inbound queue a host fills,
+and an outbound queue a **medium** carries to other machines' endpoints. When
+the live table names a pending word, the machine raises the **wake** — bits
+set in that word, then `FROM_CPU_INTR3` raised through `INTPRI` as another
+CPU would; the guest's handler clears the line, then swaps the word to zero.
+The pacer keeps G0's rule (b): never two raises outstanding, a minimum
+spacing, a bounded queue that refuses and counts, a cap per take (512 B by
+default — below a full Ethernet frame, so a frame-carrying seam sets its own
+`PacerConfig`; `take` joins whole events, `take_one` keeps one event's
+boundary). Rule (a) —
+what a wake wakes runs on the firmware's IO thread — is the firmware's, and
+ships with the Bluetooth seam, as does the firmware's handler; until then the
+wake is proven against a synthetic guest (`tests/seam_wake_*.rs`). Its
+latency figures are **emulated** and never quoted as silicon. The lockstep
+runner (`Lockstep::with_medium`) is the deterministic multi-board driver:
+`tests/seam_two_boards.rs` replays byte-identically.
+
+**`led=fast`, the LED performance seam.** It answers the firmware's
+`lp_seam_ws281x_wait_step` — the render thread's spin between two polls of
+the RMT driver's completion flag — with "return, then park until an
+interrupt the hart would wake for" (`wfi`'s own wake condition), moving guest
+time event to event through the same idle skip `wfi` uses. What it skips is
+the spin's instructions and nothing else: the RMT model, its refill and done
+interrupts, the pads and the strip decoder all run, so the wire time is
+billed by emulated time passing and the frames, the frame count and the heap
+are the seam-off run's (`lp-cli/tests/emu_seam_led.rs` checks all three on
+the shipped split image). Two listed differences: **frame timestamps drift**
+by about 0.13 µs a frame (the park ends at the interrupt, not where the spin
+would have noticed the flag), and **the RMT refill-latency figure reads better
+than silicon** — never quote it from a `led=fast` run. On only for Studio's
+Devices-page boards; never a transcript (`validate record` refuses it).
+
 ## Direct load
 
 `loader.rs` reproduces what the ROM and the ESP-IDF second-stage bootloader

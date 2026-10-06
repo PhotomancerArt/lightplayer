@@ -185,6 +185,8 @@ fn transcript(capture: &str, grade: &str) -> Transcript {
         machine: None,
         baud: None,
         quantum: None,
+        seams: Default::default(),
+        seam_abi: None,
         trust: Default::default(),
     };
     Transcript::from_parts(header, capture).expect("the capture parses as a transcript")

@@ -38,6 +38,9 @@ md5 = { package = "md-5", version = "0.10" }
 # (`scripts/check-emu-fence.sh`); no `mock` — the emulator is the cycle-time
 # model of the same peripheral.
 lp-ws281x = { path = "../../../lp-fw/lp-ws281x", default-features = false }
+# Emulator seams (`src/seams/`): the declarations, identity and hint a seam
+# function carries. MIT, outside the fence, admitted with no allowlist entry.
+lp-seam = { path = "../../../lp-base/lp-seam" }
 
 # The translator, and with it whichever host runs what it emits.
 # OPTIONAL and off by default, deliberately (JD9, JD18): `wasmtime` needs
@@ -80,6 +83,11 @@ path = "../../lp-emu-jit"
 # way — and `--jit` is a no-op alias for the default (M7 P7). Natively it is
 # what brings `wasmtime` in, and so what `--jit` needs.
 jit = ["dep:lp-emu-jit"]
+# The TEST ONLY seam implementations (`test=echo`, `test=take`; ADR
+# docs/adr/2026-10-05-emulator-seams.md). Dev-only and off by default: the
+# seam tests turn it on (`cargo test --features test-seams`), no shipped
+# command line ever does.
+test-seams = ["lp-emu-esp-common/test-seams"]
 
 [dev-dependencies]
 test-log = { workspace = true }

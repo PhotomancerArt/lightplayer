@@ -254,6 +254,33 @@ An emulated configuration also carries the identity it has no eFuse to read
 configuration is still the chip: those are facts about the board being
 imitated, not part of the name.
 
+### Composite names: a configuration with an emulator seam
+
+An emulator seam (ADR `docs/adr/2026-10-05-emulator-seams.md`) changes what a
+run may claim, so a run with one has its own name: the base configuration
+plus one atom per engaged seam, sorted — `lp-emu:esp32c6:t2+led=fast`.
+`ValidateConfig::configuration` resolves it: the first piece must be a
+`[[configuration]]`, every other piece must match a `[[seam]]` overlay
+(`name`, `implementation`, `kind`, `description`, and `[[seam.trust]]`
+entries), and an unknown atom is refused with the known ones listed. A name
+with no `+` behaves exactly as before.
+
+The overlays **compose**: base first, then each atom's overlay in label order.
+An overlay entry **replaces** the base's entry for its class; `grade =
+"absent"` marks a class the implementation does not produce at all, which
+`--strict` refuses like any grade below `measured`. Nobody writes one table
+per combination. `led=fast`'s overlay replaces only `timing` — `pin` stays the
+base's, because the LED seam keeps the pads.
+
+**Performance seams never make transcripts**: `validate record` and
+`validate run` refuse a composite with a performance atom and name the base
+to use instead. A capability seam's composite may record (none exists yet);
+its sidecar then carries `"seams": {"<seam>": "<impl>"}` and `"seam_abi"`,
+and **only** then — every seam-free sidecar is byte-identical to what it was
+before seams existed. Tools read those structured fields, never the label.
+`lp-cli`'s parity test checks every overlay names an implementation the
+emulator has, of the same kind.
+
 ## Transcript
 
 Committed, verbatim, under:

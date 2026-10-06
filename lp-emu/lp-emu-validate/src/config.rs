@@ -10,6 +10,8 @@
 //! directory; `ValidateConfig::load` reads an override path when a caller wants
 //! one.
 
+use std::borrow::Cow;
+
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
@@ -24,6 +26,52 @@ pub struct ValidateConfig {
     pub sets: Vec<PayloadSet>,
     #[serde(default, rename = "configuration")]
     pub configurations: Vec<ConfigurationEntry>,
+    /// Emulator seam overlays (ADR docs/adr/2026-10-05-emulator-seams.md):
+    /// what one seam implementation changes about a configuration's trust.
+    /// `lp-emu:esp32c6:t2+led=fast` is the base configuration with each
+    /// atom's overlay laid over it, in label order — nobody writes one table
+    /// per combination.
+    #[serde(default, rename = "seam")]
+    pub seams: Vec<SeamOverlay>,
+}
+
+/// What a seam's kind means here: a performance seam never makes a
+/// transcript; a capability seam may.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SeamKind {
+    Performance,
+    Capability,
+}
+
+/// One `[[seam]]` overlay: a seam implementation's own trust entries.
+#[derive(Clone, Debug, Deserialize)]
+pub struct SeamOverlay {
+    /// The label's seam name (`led`).
+    pub name: String,
+    /// The implementation (`fast`).
+    pub implementation: String,
+    pub kind: SeamKind,
+    pub description: String,
+    /// Entries that replace the base's for their class (`grade = "absent"`
+    /// marks a class this implementation does not produce at all).
+    #[serde(default)]
+    pub trust: TrustTable,
+}
+
+impl SeamOverlay {
+    /// `led=fast`.
+    pub fn atom(&self) -> String {
+        format!("{}={}", self.name, self.implementation)
+    }
+}
+
+/// One engaged seam in a composed configuration.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SeamAtom {
+    pub seam: String,
+    pub implementation: String,
+    pub kind: SeamKind,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -74,11 +122,35 @@ pub struct ConfigurationEntry {
     pub records_pins: bool,
     #[serde(default)]
     pub trust: TrustTable,
+    /// The seams composed onto this entry (`…+led=fast`), in label order.
+    /// Empty for every entry `validate.toml` names directly; `name` stays the
+    /// base configuration's, and [`label`](Self::label) is the composite.
+    #[serde(skip)]
+    pub seams: Vec<SeamAtom>,
 }
 
 impl ConfigurationEntry {
     pub fn parsed(&self) -> Result<Configuration> {
         Configuration::parse(&self.name)
+    }
+
+    /// The configuration label: the base name plus one `+<seam>=<impl>` per
+    /// composed seam. Exactly `name` with none.
+    pub fn label(&self) -> String {
+        let mut out = self.name.clone();
+        for s in &self.seams {
+            out.push('+');
+            out.push_str(&s.seam);
+            out.push('=');
+            out.push_str(&s.implementation);
+        }
+        out
+    }
+
+    /// The first composed performance seam, if any: such a configuration
+    /// never makes a transcript.
+    pub fn performance_seam(&self) -> Option<&SeamAtom> {
+        self.seams.iter().find(|s| s.kind == SeamKind::Performance)
     }
 
     /// The identity to hand a driver.
@@ -122,6 +194,18 @@ impl ValidateConfig {
         for c in &self.configurations {
             c.parsed()
                 .with_context(|| format!("in configuration `{}`", c.name))?;
+        }
+        let mut atoms: Vec<String> = self.seams.iter().map(SeamOverlay::atom).collect();
+        atoms.sort_unstable();
+        let before = atoms.len();
+        atoms.dedup();
+        if atoms.len() != before {
+            bail!("duplicate [[seam]] overlay in validate.toml");
+        }
+        for o in &self.seams {
+            if o.description.trim().is_empty() {
+                bail!("[[seam]] `{}` says nothing about what it changes", o.atom());
+            }
         }
         let mut names: Vec<&str> = self.sets.iter().map(|s| s.name.as_str()).collect();
         names.sort_unstable();
@@ -181,18 +265,55 @@ impl ValidateConfig {
             .collect()
     }
 
-    pub fn configuration(&self, name: &str) -> Result<&ConfigurationEntry> {
-        match self.configurations.iter().find(|c| c.name == name) {
-            Some(c) => Ok(c),
+    /// The configuration `name` names: an entry of the table, or a composite
+    /// `<base>+<seam>=<impl>…` — the base entry with each atom's `[[seam]]`
+    /// overlay laid over its trust, in label order. A name with no `+` is
+    /// exactly the table's entry, as it always was.
+    pub fn configuration(&self, name: &str) -> Result<Cow<'_, ConfigurationEntry>> {
+        let mut parts = name.split('+');
+        let base_name = parts.next().unwrap_or_default();
+        let base = match self.configurations.iter().find(|c| c.name == base_name) {
+            Some(c) => c,
             None => bail!(
-                "unknown configuration `{name}` (known: {})",
+                "unknown configuration `{base_name}` (known: {})",
                 self.configurations
                     .iter()
                     .map(|c| c.name.as_str())
                     .collect::<Vec<_>>()
                     .join(", ")
             ),
+        };
+        let atoms: Vec<&str> = parts.collect();
+        if atoms.is_empty() {
+            return Ok(Cow::Borrowed(base));
         }
+        let mut composed = base.clone();
+        for atom in atoms {
+            let overlay = self
+                .seams
+                .iter()
+                .find(|o| o.atom() == atom)
+                .with_context(|| {
+                    format!(
+                        "`{name}`: no [[seam]] overlay `{atom}` (known: {})",
+                        self.seams
+                            .iter()
+                            .map(SeamOverlay::atom)
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
+                })?;
+            if composed.seams.iter().any(|s| s.seam == overlay.name) {
+                bail!("`{name}`: seam `{}` named twice", overlay.name);
+            }
+            composed.trust = composed.trust.overlaid(&overlay.trust);
+            composed.seams.push(SeamAtom {
+                seam: overlay.name.clone(),
+                implementation: overlay.implementation.clone(),
+                kind: overlay.kind,
+            });
+        }
+        Ok(Cow::Owned(composed))
     }
 }
 
@@ -326,5 +447,104 @@ chip = "esp32c6"
         )
         .unwrap_err();
         assert!(format!("{err:#}").contains("qemu"));
+    }
+
+    #[test]
+    fn a_composite_name_is_the_base_with_its_overlay_and_a_plain_name_is_unchanged() {
+        let cfg = ValidateConfig::embedded();
+        let base = cfg.configuration("lp-emu:esp32c6:t2").unwrap();
+        assert!(
+            matches!(base, Cow::Borrowed(_)),
+            "a plain name is the entry itself"
+        );
+        assert!(base.seams.is_empty());
+        assert_eq!(base.label(), "lp-emu:esp32c6:t2");
+
+        let led = cfg.configuration("lp-emu:esp32c6:t2+led=fast").unwrap();
+        assert_eq!(led.name, "lp-emu:esp32c6:t2", "the base keeps its name");
+        assert_eq!(led.label(), "lp-emu:esp32c6:t2+led=fast");
+        assert_eq!(led.seams.len(), 1);
+        assert_eq!(led.performance_seam().unwrap().seam, "led");
+        // The overlay replaces timing's reason and leaves every other class,
+        // pin included (L1 keeps the pads), as the base had it.
+        assert!(
+            led.trust
+                .because(FieldClass::Timing)
+                .unwrap()
+                .contains("refill-latency"),
+            "{:?}",
+            led.trust.because(FieldClass::Timing)
+        );
+        for class in FieldClass::ALL.iter().filter(|c| **c != FieldClass::Timing) {
+            assert_eq!(led.trust.grade(*class), base.trust.grade(*class), "{class}");
+            assert_eq!(
+                led.trust.because(*class),
+                base.trust.because(*class),
+                "{class}"
+            );
+        }
+        assert_eq!(led.parsed().unwrap().name(), "lp-emu:esp32c6:t2");
+    }
+
+    #[test]
+    fn an_unknown_or_doubled_atom_is_refused_by_name() {
+        let cfg = ValidateConfig::embedded();
+        let err = format!(
+            "{:#}",
+            cfg.configuration("lp-emu:esp32c6:t2+led=slow").unwrap_err()
+        );
+        assert!(err.contains("no [[seam]] overlay `led=slow`"), "{err}");
+        assert!(
+            err.contains("led=fast"),
+            "the refusal lists the known ones: {err}"
+        );
+        let err = format!(
+            "{:#}",
+            cfg.configuration("lp-emu:esp32c6:t2+led=fast+led=fast")
+                .unwrap_err()
+        );
+        assert!(err.contains("named twice"), "{err}");
+        assert!(cfg.configuration("nope+led=fast").is_err());
+    }
+
+    #[test]
+    fn an_overlay_may_mark_a_class_absent_and_strict_reads_it_as_below_measured() {
+        let cfg = ValidateConfig::parse(
+            r#"
+[[configuration]]
+name = "lp-emu:esp32c6:t1"
+description = "x"
+chip = "esp32c6"
+
+[[configuration.trust]]
+class = "usb-serial-jtag"
+grade = "measured"
+because = "a base grade the overlay below takes away"
+
+[[seam]]
+name = "usb"
+implementation = "fast"
+kind = "performance"
+description = "a test overlay that answers the link in place of the model"
+
+[[seam.trust]]
+class = "usb-serial-jtag"
+grade = "absent"
+because = "the seam answers the link, so the model never produces this class"
+"#,
+        )
+        .unwrap();
+        let composed = cfg.configuration("lp-emu:esp32c6:t1+usb=fast").unwrap();
+        let grade = composed.trust.grade(FieldClass::UsbSerialJtag);
+        assert_eq!(grade, Grade::Absent);
+        assert!(grade < Grade::Measured, "--strict refuses it");
+        assert_eq!(
+            cfg.configuration("lp-emu:esp32c6:t1")
+                .unwrap()
+                .trust
+                .grade(FieldClass::UsbSerialJtag),
+            Grade::Measured,
+            "the base is untouched"
+        );
     }
 }

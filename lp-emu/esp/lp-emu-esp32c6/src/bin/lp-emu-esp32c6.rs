@@ -359,6 +359,17 @@ OPTIONS:
     --break-at <symbol>     stop when the symbol is entered; print a0..a7, sp
                             and the backtrace; exits 5
     --hooks                 list the ROM hook table and exit
+    --seams <atoms|none>    engage emulator seams, STRICT: atoms
+                            `<seam>=<impl>` joined by `+` (`led=fast`), or
+                            `none`. A seam that cannot engage on this image is
+                            a hard error (exits 64). The run's label becomes
+                            `<grade>+led=fast`, and each chip start prints
+                            `SEAM <atom> engaged (…)`. ADR
+                            docs/adr/2026-10-05-emulator-seams.md
+    --seams-prefer <atoms>  the same, SOFT: engage what the image allows,
+                            else print `SEAM none engaged: <why>` and run on
+                            with none (what Studio's boards ask)
+    --seams-info <image>    print a flash image's seam tables and exit
     --map                   print the memory map and exit
     -h, --help              this
 
@@ -368,6 +379,7 @@ EXIT CODES:
     3  a strict-bus violation
     4  the wall-clock safety net fired
     5  a --break-at symbol was reached
+    64 a usage error, a build error, or a --seams seam that cannot engage
 ";
 
 fn main() -> ExitCode {
@@ -466,6 +478,10 @@ struct Args {
     probes: Vec<(u64, String)>,
     break_at: Vec<String>,
     hooks: bool,
+    /// `--seams` / `--seams-prefer`, folded into one request at parse time.
+    seams: lp_emu_esp_common::seam::SeamRequest,
+    /// `--seams-info <image>`.
+    seams_info: Option<PathBuf>,
     map: bool,
     dump_frames: FrameSink,
     pin_log: PinLogSink,
@@ -476,6 +492,12 @@ struct Args {
 
 fn run() -> Result<ExitCode, String> {
     let args = parse(std::env::args().skip(1).collect())?;
+
+    if let Some(path) = &args.seams_info {
+        let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        println!("{}", lp_emu_esp32c6::seams::seams_info(&bytes));
+        return Ok(ExitCode::SUCCESS);
+    }
 
     if args.map {
         print_map();
@@ -509,7 +531,8 @@ fn run() -> Result<ExitCode, String> {
         .pin_log(args.pin_log.clone())
         .trap_log(args.trap_log.clone())
         .tx_log(args.tx_log.clone())
-        .strip(args.strip.order, args.strip.timing);
+        .strip(args.strip.order, args.strip.timing)
+        .seams(args.seams.clone());
 
     // `--jit` only ever turns translation ON. The builder's own default is
     // `TRANSLATED_BY_DEFAULT` — a core in the wasm build, the interpreter
@@ -698,6 +721,9 @@ fn run() -> Result<ExitCode, String> {
     }
 
     let mut machine = builder.build().map_err(|e| e.to_string())?;
+    // Every engaged seam announces itself at every chip start; the build is
+    // the first (a ROM-up boot's comes once the app runs, inside the run).
+    print_seam_lines(&mut machine);
 
     if args.hooks {
         print_hooks(&machine);
@@ -725,6 +751,7 @@ fn run() -> Result<ExitCode, String> {
     };
 
     let outcome = machine.run_until(&stop);
+    print_seam_lines(&mut machine);
     // The run is over: a frame still open on a pad is reported as
     // incomplete rather than silently dropped.
     machine.flush_frames();
@@ -976,6 +1003,27 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             "--probe" => args.probes.push(parse_probe(&value("--probe")?)?),
             "--break-at" => args.break_at.push(value("--break-at")?),
             "--hooks" => args.hooks = true,
+            "--seams" => {
+                args.seams = args
+                    .seams
+                    .clone()
+                    .with(
+                        &value("--seams")?,
+                        lp_emu_esp_common::seam::Strength::Strict,
+                    )
+                    .map_err(|e| format!("--seams: {e}"))?;
+            }
+            "--seams-prefer" => {
+                args.seams = args
+                    .seams
+                    .clone()
+                    .with(
+                        &value("--seams-prefer")?,
+                        lp_emu_esp_common::seam::Strength::Soft,
+                    )
+                    .map_err(|e| format!("--seams-prefer: {e}"))?;
+            }
+            "--seams-info" => args.seams_info = Some(value("--seams-info")?.into()),
             "--map" => args.map = true,
             other => return Err(format!("unknown flag `{other}`\n\n{USAGE}")),
         }
@@ -1296,6 +1344,13 @@ fn report_refill_lag(machine: &Esp32C6Machine) {
     }
 }
 
+/// A chip start's `SEAM …` lines, as they come.
+fn print_seam_lines(machine: &mut Esp32C6Machine) {
+    for line in machine.take_seam_lines() {
+        eprintln!("{line}");
+    }
+}
+
 fn report(machine: &mut Esp32C6Machine, outcome: &Outcome) {
     let cycles = machine.cycles();
     eprintln!(
@@ -1303,8 +1358,26 @@ fn report(machine: &mut Esp32C6Machine, outcome: &Outcome) {
         cycles,
         machine.micros(),
         machine.instructions(),
-        machine.time_grade().configuration()
+        machine.configuration_label()
     );
+    if machine.seams().engaged() {
+        let s = machine.seams();
+        eprintln!(
+            "seams {} ({}): seam_calls {} ({} parked, {} events slept through), seam_arms {} \
+             ({} re-arms), {} chip start(s)",
+            s.request,
+            machine.configuration_label(),
+            s.calls,
+            s.parks,
+            s.park_events,
+            s.arms_planted,
+            s.rearms,
+            s.starts
+        );
+        for line in machine.seam_wake_lines() {
+            eprintln!("{line}");
+        }
+    }
     eprintln!(
         "unmapped: {} reads, {} writes, {} distinct sites; {} idle skips (wfi)",
         machine.bus.unmapped_reads(),
@@ -1564,6 +1637,10 @@ fn report(machine: &mut Esp32C6Machine, outcome: &Outcome) {
         Outcome::WallTimeout { .. } => {
             eprintln!("WALL TIMEOUT — the host-clock safety net, not a guest event")
         }
+        Outcome::Seam { cycle, why } => eprintln!(
+            "SEAM ERROR at cycle {cycle} ({} us): {why}",
+            cycle / memmap::CYCLES_PER_US
+        ),
         Outcome::DeepSleep { cycle, wake } => eprintln!(
             "DEEP SLEEP at cycle {cycle} ({} us) — guest entered deep sleep ({wake}); the wake \
              itself is not modelled",

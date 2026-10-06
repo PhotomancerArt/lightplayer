@@ -9,6 +9,7 @@
 //! | `?wire-capture=1` | tee every raw byte the Web Serial read pump hands to Rust into a 16 MiB in-memory buffer; `lpWireCapture()` in the console downloads it as `wire-capture-<unix-ms>.bin` (`lpa_link::device_link::wire_capture`) |
 //! | `?device-log=<level>` | once per link, after the board's hello and the packed-reply opt-in, ask it for `trace`/`debug`/`info`/`warn`/`error` logging (`SetLogLevel`) |
 //! | `?firmware-store=<origin>` | the firmware store Studio fetches engines from, instead of `https://lightplayer.app` — **loopback and private-LAN origins only** (the `?record=` sink rule, `record_sink::check_sink`), so a link someone else wrote cannot point Studio at another store's "latest"; a refused origin keeps the default and says so once in the console |
+//! | `?seams=<atoms\|none>` | what a **Devices-page** emulated board asks the emulator for, instead of the end-user default `led=fast` (`lpa_link::providers::emulator_tab_seams`); `none` is today's seam-free machine, for an A/B on one build. Never reaches `?emu=tab` / `?emu=ws://…` boards, which ask for nothing |
 //!
 //! Validated the way `?record=` is (`device_events_io.rs`): a query is
 //! user input, a value that does not parse reads as no flag, and the page
@@ -37,6 +38,9 @@ pub struct DevUrlFlags {
     pub device_log: Option<LogLevel>,
     /// `?firmware-store=<origin>`, judged.
     pub firmware_store: Option<FirmwareStoreFlag>,
+    /// `?seams=<atoms|none>`, normalized (`led=fast`, `led=fast+x=y`,
+    /// `none`).
+    pub seams: Option<String>,
     /// Flags present but unreadable, for the console.
     pub ignored: Vec<String>,
 }
@@ -72,6 +76,10 @@ impl DevUrlFlags {
                 },
                 "device-log" => match parse_log_level(value.trim()) {
                     Some(level) => flags.device_log = Some(level),
+                    None => flags.ignored.push(pair.to_string()),
+                },
+                "seams" => match parse_seams(value) {
+                    Some(seams) => flags.seams = Some(seams),
                     None => flags.ignored.push(pair.to_string()),
                 },
                 "firmware-store" if !value.trim().is_empty() => {
@@ -139,6 +147,29 @@ pub fn judge_firmware_store(raw: &str) -> FirmwareStoreFlag {
 }
 
 /// `%XX` escapes decoded (a query value is percent-encoded).
+/// A `?seams=` value, normalized: `none`, or `name=impl` atoms joined by `+`
+/// (a raw `+` in a query can arrive as a space, so either joins). Lowercase
+/// letters, digits and `_` only — the emulator owns which atoms exist and
+/// says so on the board if one does not; this only refuses what cannot be
+/// one.
+fn parse_seams(raw: &str) -> Option<String> {
+    let value = percent_decode(raw).trim().replace(' ', "+");
+    if value == "none" {
+        return Some(value);
+    }
+    let word = |w: &str| {
+        !w.is_empty()
+            && w.bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+    };
+    let atoms: Vec<&str> = value.split('+').collect();
+    let valid = atoms.iter().all(|atom| {
+        atom.split_once('=')
+            .is_some_and(|(name, imp)| word(name) && word(imp))
+    });
+    (valid && !atoms.is_empty()).then_some(value)
+}
+
 fn percent_decode(value: &str) -> String {
     let bytes = value.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
@@ -227,6 +258,10 @@ pub fn install() {
         lpa_link::device_link::wire_reader::set_device_log_level(Some(level));
         log::info!("dev flag: each board is asked for {level:?} logging once it is ready");
     }
+    if let Some(seams) = flags.seams {
+        log::info!("dev flag: Devices-page emulated boards ask for seams `{seams}` (?seams=)");
+        lpa_link::providers::emulator_tab_seams::set_end_user_seams_override(Some(seams));
+    }
     match flags.firmware_store {
         Some(FirmwareStoreFlag::Accepted(origin)) => {
             log::info!("dev flag: firmware store at {origin} (?firmware-store=)");
@@ -292,6 +327,41 @@ mod tests {
 
         let flags = DevUrlFlags::parse("wire=packed");
         assert_eq!(flags.wire, Some(WireChoice::Packed));
+    }
+
+    #[test]
+    fn the_seams_flag_parses_and_refuses_what_cannot_be_an_atom() {
+        assert_eq!(
+            DevUrlFlags::parse("?seams=none").seams.as_deref(),
+            Some("none")
+        );
+        assert_eq!(
+            DevUrlFlags::parse("?emu=tab&seams=led=fast")
+                .seams
+                .as_deref(),
+            Some("led=fast")
+        );
+        assert_eq!(
+            DevUrlFlags::parse("seams=led%3Dfast%2Btest%3Decho")
+                .seams
+                .as_deref(),
+            Some("led=fast+test=echo")
+        );
+        assert_eq!(
+            DevUrlFlags::parse("seams=led=fast test=echo")
+                .seams
+                .as_deref(),
+            Some("led=fast+test=echo"),
+            "a raw `+` that arrived as a space"
+        );
+        let flags = DevUrlFlags::parse("seams=led&seams=LED=Fast");
+        assert_eq!(flags.seams, None);
+        assert_eq!(flags.ignored, ["seams=led", "seams=LED=Fast"]);
+        assert_eq!(
+            DevUrlFlags::parse("emu=tab").seams,
+            None,
+            "no flag, no override"
+        );
     }
 
     #[test]
