@@ -236,12 +236,17 @@ chip_facts() {
         # symbol table, and `chip_measure` boots the loader over the merged
         # chip. The name is `lp_emu_esp32c6::test_support::split_image`'s.
         CHIP_ELF_ENV="LP_EMU_C6_SPLIT_ESP32C6_SERVER_RADIO"
-        # Emulated microseconds. The C6's heartbeat is on a 5 s tick; 6.5 s
+        # Emulated microseconds. The C6's heartbeat is on a 5 s tick; 8.5 s
         # reaches the first one with room and stops well before the second, so
         # the figures are always the SAME sample (M6 P4's finding: keying on
         # "a heartbeat" rather than on the 5 s tick let last-writes pick
-        # whichever one a capture ended on).
-        CHIP_TIMEOUT="6500ms"
+        # whichever one a capture ended on). It was 6.5 s until the OTA
+        # plan's Part B: every run here is the FIRST boot of a freshly
+        # flashed split image, so the engine guard (DD34) hashes the mapped
+        # engine (~1.1 s emulated, t1), and every boot hashes the core for
+        # the hello's manifest (~0.8 s, DM24), both before the server loop
+        # starts its tick — which pushed the first heartbeat past 6.5 s.
+        CHIP_TIMEOUT="8500ms"
         CHIP_CONFIG="lp-emu:esp32c6:t1"
         ;;
     esp32v3)

@@ -1290,6 +1290,7 @@ async fn split_boot(mut core: CoreBoot) {
         }
         Err(why) => {
             let CoreBoot {
+                spawner,
                 usb_link,
                 watchdog,
                 rmt_peripheral,
@@ -1301,20 +1302,33 @@ async fn split_boot(mut core: CoreBoot) {
                 .read_file(lpc_update::STATUS_LIGHT_PATH.as_path())
                 .ok();
             let light = ota::StatusLight::new(record.as_deref(), rmt_peripheral);
-            ota::core_only(ota::CoreOnly {
-                usb_link,
-                watchdog,
-                state,
-                why,
-                identity,
-                access,
-                usb_trust,
-                entropy: fill_random,
-                light,
-            })
-            .await;
+            // Its own task, like the engine's server loop: awaited here, the
+            // core-only future (its session and window) would be built in
+            // the main task's poll frame, and the engine path — which runs
+            // nested in that frame — would start that much deeper.
+            spawner.spawn(
+                core_only_task(ota::CoreOnly {
+                    usb_link,
+                    watchdog,
+                    state,
+                    why,
+                    identity,
+                    access,
+                    usb_trust,
+                    entropy: fill_random,
+                    light,
+                })
+                .unwrap(),
+            );
         }
     }
+}
+
+/// Core-only, as a task of its own (see `split_boot`).
+#[cfg(all(lp_split, not(fw_harness)))]
+#[embassy_executor::task]
+async fn core_only_task(ctx: ota::CoreOnly) {
+    ota::core_only(ctx).await
 }
 
 /// The image's identity, as the update session reports it: every field from

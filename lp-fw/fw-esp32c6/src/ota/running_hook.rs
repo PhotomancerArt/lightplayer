@@ -12,9 +12,10 @@
 //!   core-only — at once, since the engine's first sector is gone;
 //! - an unknown message → `N`/`U`.
 //!
-//! The session is built on the first message, not at boot: its facts carry
-//! the core's SHA-256, which is computed on first need (DM24). It lives in a
-//! core static, touched only from the server loop's task.
+//! The session is built once at install, before the engine starts, for the
+//! hello's manifest (its facts carry the core's SHA-256, DM24, computed
+//! then), and dropped again; a host's first message builds it for good. It
+//! lives in a core static, touched only from the server loop's task.
 
 use core::cell::RefCell;
 
@@ -41,6 +42,10 @@ struct Setup {
 struct Running {
     setup: Setup,
     edge: Option<UpdateEdge>,
+    /// The manifest at install. With no session nothing it says can
+    /// change: the engine never runs on a trial core, and only a session
+    /// starts a transfer.
+    at_install: lpc_update::BoardManifest,
 }
 
 /// The hook's state. One task only: the server loop's (the transport calls
@@ -62,53 +67,86 @@ pub fn install(
     access: AccessFacts,
     usb_trust: LinkTrust,
 ) {
+    clear_stale_progress(&state);
+    let setup = Setup {
+        usb_link,
+        state,
+        identity,
+        engine_len,
+        access,
+        usb_trust,
+    };
+    // Built here, before the engine starts, rather than in the server
+    // loop's first hello (which would stall the loop for the core's hash,
+    // ~0.8 s emulated); dropped at once, so its buffers cost the engine's
+    // heap nothing until a host arrives — the manifest kept is ~200 B.
+    let at_install = new_edge(&setup)
+        .session
+        .manifest(super::update_edge::now_ms());
     *RUNNING.0.borrow_mut() = Some(Running {
-        setup: Setup {
-            usb_link,
-            state,
-            identity,
-            engine_len,
-            access,
-            usb_trust,
-        },
+        setup,
         edge: None,
+        at_install,
     });
     fw_esp32_common::usb_link::set_update_hook(hook);
 }
 
 /// The board manifest the hello carries (`ServerHello::firmware`, wire
-/// proto 37): the same session's view a host's `Q` gets, built on first
-/// need. `None` only while the hook is not installed (or is busy, which a
-/// hello built between two of its passes never sees).
+/// proto 37): the live session's view a host's `Q` gets, or, before any
+/// host spoke, the one taken at install. `None` only while the hook is not
+/// installed (or is busy, which a hello built between two of its passes
+/// never sees).
 pub fn manifest() -> Option<lpc_update::BoardManifest> {
-    let mut running = RUNNING.0.try_borrow_mut().ok()?;
-    let running = running.as_mut()?;
-    let edge = edge_of(running);
-    Some(edge.session.manifest(super::update_edge::now_ms()))
+    let running = RUNNING.0.try_borrow().ok()?;
+    let running = running.as_ref()?;
+    Some(match &running.edge {
+        Some(edge) => edge.session.manifest(super::update_edge::now_ms()),
+        None => running.at_install.clone(),
+    })
+}
+
+/// DM13: a progress record beside a valid engine is stale (a cut between
+/// the running engine's pending record and its header erase): the valid
+/// engine wins, and the record goes before the engine starts.
+fn clear_stale_progress(state: &BootState) {
+    let at = lp_bootctl::PROGRESS_RECORD_SECTOR;
+    let mut flash = super::split_flash::SplitFlash::take();
+    let mut magic = [0u8; 4];
+    if !flash.read(at, &mut magic) || magic == [0xff; 4] {
+        return;
+    }
+    if let (true, Some(layout)) = (state.trusted(), state.layout) {
+        flash.protect(state.core_extent(), layout.region_end);
+        if flash.erase(at) {
+            log::info!("[OTA] cleared a stale progress record beside a valid engine");
+        }
+    }
 }
 
 fn edge_of(running: &mut Running) -> &mut UpdateEdge {
-    running.edge.get_or_insert_with(|| {
-        let s = &running.setup;
-        let facts = board_facts(
-            &s.state,
-            &s.identity,
-            SessionMode::EngineRunning,
-            EngineStatus::Valid,
-            Some(s.engine_len),
-        );
-        let config = SessionConfig {
-            takes_encoding_1: false,
-            // The engine's channel 3 takes no login: its server's (channel
-            // 1) holds the link's tier.
-            entropy: None,
-            owner_quiet_ms: OWNER_QUIET_MS,
-        };
-        let access = s.access.clone();
-        let mut edge = UpdateEdge::new(SplitUpdateTarget::new(&s.state), facts, access, config);
-        edge.link_up(s.usb_trust);
-        edge
-    })
+    let setup = &running.setup;
+    running.edge.get_or_insert_with(|| new_edge(setup))
+}
+
+fn new_edge(s: &Setup) -> UpdateEdge {
+    let facts = board_facts(
+        &s.state,
+        &s.identity,
+        SessionMode::EngineRunning,
+        EngineStatus::Valid,
+        Some(s.engine_len),
+    );
+    let config = SessionConfig {
+        takes_encoding_1: false,
+        // The engine's channel 3 takes no login: its server's (channel
+        // 1) holds the link's tier.
+        entropy: None,
+        owner_quiet_ms: OWNER_QUIET_MS,
+    };
+    let access = s.access.clone();
+    let mut edge = UpdateEdge::new(SplitUpdateTarget::new(&s.state), facts, access, config);
+    edge.link_up(s.usb_trust);
+    edge
 }
 
 /// `Some(message)`: one channel-3 message; `None`: a pass, to flush.
