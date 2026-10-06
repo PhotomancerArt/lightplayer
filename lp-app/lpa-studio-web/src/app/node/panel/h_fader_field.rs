@@ -9,6 +9,11 @@
 //! the violet bound family when the backing slot is bound, amber when a
 //! panel writer holds the channel. Dispatches `SlotEditOp::SetValue` with
 //! `oninput` semantics (the actor coalesces the drag flood per address).
+//!
+//! The thumb and fill follow the hand, not the snapshot, through a
+//! [`GestureHold`](super::gesture_hold::GestureHold): the native input is
+//! controlled, so a snapshot still echoing an earlier write of the drag used
+//! to be written back into it — the thumb jumped back, then "took".
 
 use dioxus::prelude::*;
 use lpa_studio_core::{ProjectSlotAddress, UiAction, UiPanelTarget, UiSlotFieldState};
@@ -18,6 +23,7 @@ use crate::app::node::slot_edit_actions::panel_or_slot_action;
 use crate::app::node::slot_fields::field_wiring;
 
 use super::PanelEmit;
+use super::gesture_hold::use_gesture_hold;
 use super::knob_field::{knob_fraction, knob_snap};
 
 #[component]
@@ -65,7 +71,11 @@ pub fn HFaderField(
     // The gesture surface tracks the CURRENT reading — grabbing the thumb
     // of a live control must start from what the fill shows, not snap back
     // to the authored default underneath (GV2 bug, same as the knob).
-    let base = live_value.unwrap_or(value);
+    let reported = live_value.unwrap_or(value);
+    // …and while the hand's own writes are still on their way back, the
+    // value under the hand (see `gesture_hold`).
+    let mut hold = use_gesture_hold(reported);
+    let base = hold.shown(reported);
     // The fill rides the step grid the native input's thumb already snaps
     // to, so a stepped fader never shows fill and thumb in different places.
     let frac = if rate_log_detents {
@@ -126,6 +136,9 @@ pub fn HFaderField(
                     value: "{input_value}",
                     disabled,
                     title: "{invalid_title}",
+                    onpointerdown: move |_| hold.press(),
+                    onpointerup: move |_| hold.release(reported),
+                    onpointercancel: move |_| hold.release(reported),
                     oninput: move |event| {
                         let Ok(raw) = event.value().parse::<f32>() else {
                             return;
@@ -136,6 +149,7 @@ pub fn HFaderField(
                             raw
                         };
                         if let Some((address, handler)) = wired.clone() {
+                            hold.write(emit.sent_value(next));
                             handler
                                 .call(panel_or_slot_action(&panel_target, address, emit.lp_value(next)));
                         }
@@ -155,6 +169,7 @@ pub fn HFaderField(
                             _ => return,
                         };
                         event.prevent_default();
+                        hold.write(emit.sent_value(next));
                         handler
                             .call(panel_or_slot_action(&key_target, address, emit.lp_value(next)));
                     },
@@ -163,6 +178,7 @@ pub fn HFaderField(
                             return;
                         }
                         if let Some((address, handler)) = dbl_wired.clone() {
+                            hold.write(emit.sent_value(1.0));
                             handler
                                 .call(panel_or_slot_action(&dbl_target, address, emit.lp_value(1.0)));
                         }

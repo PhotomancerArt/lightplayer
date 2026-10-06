@@ -505,6 +505,7 @@ impl DeviceRoster {
                     has_uid,
                     staged.as_ref(),
                     pending.as_ref(),
+                    device.identity.mac.as_ref().map(|mac| mac.0.as_str()),
                     offers,
                 )
                 .map(|ui| (device.id, ui))

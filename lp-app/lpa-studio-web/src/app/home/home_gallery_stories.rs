@@ -858,7 +858,7 @@ fn devices_card_layout_change() -> Element {
             .device_prefix(card.id)
             .cloned()
             .expect("the card's verbs are placed");
-        let layout = device_layout_view(&card, prefix, fs, true, staged, None, &mut offers);
+        let layout = device_layout_view(&card, prefix, fs, true, staged, None, None, &mut offers);
         rsx! {
             div { class: "tw:grid tw:content-start tw:gap-2",
                 crate::core::OffersProvider { offers,
@@ -881,6 +881,109 @@ fn devices_card_layout_change() -> Element {
                 {cell(unstored, DeviceBoardFs::Mounted, None)}
                 {cell(refused, DeviceBoardFs::Mounted, Some(&refused_staging))}
                 {cell(held, DeviceBoardFs::LegacyHeld, None)}
+            }
+        }
+    }
+}
+
+/// A board needing its files back, with no pending backup of its own
+/// (Decision 11, plan P01): "Restore from a backup file…" is the only
+/// verb — picking a file opens the OS file dialog directly (never a
+/// generic `UiAction` dispatch; see `device_backup_import`'s module doc),
+/// so there is nothing more for this card to draw until a file is chosen.
+fn restore_from_file_menu_cell() -> Element {
+    use lpa_studio_core::{
+        DeviceBoardFs, DeviceFirmwareFace, DeviceWireVersion, device_layout_view,
+    };
+
+    let card = DeviceView {
+        title: "LP-8e30".to_string(),
+        detected_chip: Some("esp32c6".to_string()),
+        board_id: Some("seeed/xiao-esp32-c6".to_string()),
+        firmware_face: DeviceFirmwareFace::LightPlayer {
+            firmware: Some("fw-esp32c6 abc1234".to_string()),
+            wire: DeviceWireVersion::Match,
+            age: lpa_studio_core::DeviceFirmwareAge::Unknown,
+        },
+        loaded_project: DeviceLoadedProject::Empty,
+        can_remove_project: false,
+        ..roster_fixture().roster.devices.remove(0)
+    };
+    let mut offers = crate::app::home::device_offer_story_fixtures::card_tree(
+        &card,
+        lpa_studio_core::DeviceFace::Wire,
+        false,
+        &[],
+        &[],
+    );
+    let prefix = offers
+        .device_prefix(card.id)
+        .cloned()
+        .expect("the card's verbs are placed");
+    let layout = device_layout_view(
+        &card,
+        prefix,
+        DeviceBoardFs::Formatted,
+        false,
+        None,
+        None,
+        Some("60:55:f9:0a:0b:0c"),
+        &mut offers,
+    );
+    rsx! {
+        div { class: "tw:grid tw:content-start tw:gap-2",
+            crate::core::OffersProvider { offers,
+                crate::app::home::device_roster_card::DeviceRosterCard {
+                    card,
+                    projects: vec![],
+                    examples: vec![],
+                    layout,
+                    layout_sheet_inline: true,
+                    on_action: |_| {},
+                }
+            }
+        }
+    }
+}
+
+#[story(
+    description = "The gap Decision 11 of the repartition ADR closes: a board needing its files back, with no pending backup in THIS browser — a different machine, cleared storage, or an interrupted migration whose only surviving copy is the file it offered as a download. \"Restore from a backup file…\" is the one verb (no Restore files, no Download backup: there is nothing stored here). Pressing it opens the OS file picker directly — a file dialog cannot be a `UiAction`, the same reasoning as the project library's own zip Import — so there is no sheet to capture here; the next two stories show the words it leads to."
+)]
+fn devices_card_restore_from_file_menu() -> Element {
+    rsx! {
+        section { class: "tw:p-4",
+            div { class: "tw:w-[400px]", {restore_from_file_menu_cell()} }
+        }
+    }
+}
+
+#[story(
+    description = "The one question a backup naming a DIFFERENT board ever asks (ease over ceremony: it never stacks a second confirmation on top). It is a native confirm — `check_backup_file`'s own words, asked by the web shell before anything is dispatched; `device_backup_import::tests::a_different_board_names_both_in_one_question` pins this exact sentence. Saying yes puts the file into the store as THIS board's pending backup and the ordinary Restore files flow (its own sheet) takes it from there — no second restore path."
+)]
+fn devices_card_restore_from_file_mismatch() -> Element {
+    rsx! {
+        section { class: "tw:p-4",
+            div { class: "tw:grid tw:w-[400px] tw:gap-2",
+                {restore_from_file_menu_cell()}
+                p { class: "tw:m-0 tw:rounded-md tw:border tw:border-status-warning-border tw:bg-status-warning-bg tw:px-2.5 tw:py-2 tw:text-sm tw:leading-snug tw:text-status-warning-foreground",
+                    "Picking a backup from a different board asks: \"This backup is from LP-8e30, not LP-0b0c. Restore it onto this board anyway?\""
+                }
+            }
+        }
+    }
+}
+
+#[story(
+    description = "A file that is not a LightPlayer backup is refused in words, never a raw code — `check_backup_file`'s own refusal, surfaced as a native alert before anything is dispatched. `device_backup_import::tests::a_bad_archive_is_refused_in_words_not_a_code` and `backup_archive.rs`'s own tests pin the three shapes: no manifest.json at all, a format version this build does not read (v1 or v3), and an entry that would escape the device's filesystem."
+)]
+fn devices_card_restore_from_file_refused() -> Element {
+    rsx! {
+        section { class: "tw:p-4",
+            div { class: "tw:grid tw:w-[400px] tw:gap-2",
+                {restore_from_file_menu_cell()}
+                p { class: "tw:m-0 tw:rounded-md tw:border tw:border-status-warning-border tw:bg-status-warning-bg tw:px-2.5 tw:py-2 tw:text-sm tw:leading-snug tw:text-status-warning-foreground",
+                    "A file this Studio cannot use says so plainly: \"not a LightPlayer backup: no manifest.json\", or \"backup format 1 is not one this build reads (it reads 2)\"."
+                }
             }
         }
     }
