@@ -27,6 +27,10 @@ use super::boot_state::BootState;
 use super::update_edge::{EdgeEffect, UpdateEdge, state_word};
 use super::update_target_impl::SplitUpdateTarget;
 
+/// How long a committed piece's last log lines get to reach the link before
+/// the reset is asked for.
+const LOG_GRACE: embassy_time::Duration = embassy_time::Duration::from_millis(100);
+
 /// Why the core is not entering an engine.
 #[derive(Clone, Copy, Debug)]
 pub enum CoreOnlyReason {
@@ -91,19 +95,24 @@ pub async fn core_only(ctx: CoreOnly) -> ! {
 
     let facts = board_facts(&state, &identity, SessionMode::CoreOnly, engine, engine_len);
     let config = SessionConfig {
-        takes_encoding_1: false,
+        // Encoding 1: a `Z` chunk decodes with lp-deflate on this task, in a
+        // 32 KiB + 4 KiB window allocated at the first `Z` (DM18: core-only
+        // has the stack and the heap, the engine not running).
+        takes_encoding_1: true,
         entropy: Some(entropy),
         owner_quiet_ms: OWNER_QUIET_MS,
     };
     let mut edge = UpdateEdge::new(SplitUpdateTarget::new(&state), facts, access, config);
     let mut shown = edge.state();
     log::info!("[OTA] core-only: {}", state_word(shown));
+    log::info!("[OTA] core-only heap free {} B", esp_alloc::HEAP.free());
     // A host whose link came up before this loop started: its `Up` may
     // already be gone, so the link's state says it.
     if usb_link.is_established() {
         edge.link_up(usb_trust);
     }
 
+    let mut reset_at: Option<embassy_time::Instant> = None;
     loop {
         watchdog.feed(embassy_time::Instant::now().as_millis());
         let mut touched = false;
@@ -124,11 +133,25 @@ pub async fn core_only(ctx: CoreOnly) -> ! {
             match effect {
                 EdgeEffect::ConfirmTrial => state.confirm(edge.target.flash()),
                 EdgeEffect::Reset => {
-                    // The link task resets once the host has everything
-                    // (or after its drain limit).
-                    fw_esp32_common::usb_link::when_drained(super::reset_now);
+                    // What the piece cost: the main stack's high-water mark
+                    // (inflate's frames included, DM18) and the heap left
+                    // with the `Z` window still held.
+                    crate::stack_probe::log_if_grown("core-only");
+                    log::info!(
+                        "[OTA] core-only heap free {} B at commit ({} chunks arrived as Z)",
+                        esp_alloc::HEAP.free(),
+                        edge.encoded_chunks()
+                    );
+                    reset_at = Some(embassy_time::Instant::now() + LOG_GRACE);
                 }
             }
+        }
+        // The log lines above ride the link's best-effort log channel: give
+        // them a moment to reach it, then the link task resets once the
+        // host has everything (or after its drain limit).
+        if reset_at.is_some_and(|at| embassy_time::Instant::now() >= at) {
+            reset_at = None;
+            fw_esp32_common::usb_link::when_drained(super::reset_now);
         }
         if touched {
             let now = edge.state();

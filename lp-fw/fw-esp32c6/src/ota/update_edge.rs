@@ -45,6 +45,9 @@ pub struct UpdateEdge {
     last: Option<TransferProgress>,
     /// The last message was answered `N`.
     refused_last: bool,
+    /// `Z` chunks received (the board's own count; a re-requested chunk
+    /// counts each time).
+    encoded: u32,
 }
 
 /// Milliseconds since boot: the session's clock.
@@ -86,6 +89,7 @@ impl UpdateEdge {
             outbox: UpdateOutbox::new(),
             last,
             refused_last: false,
+            encoded: 0,
         }
     }
 
@@ -102,8 +106,16 @@ impl UpdateEdge {
         self.session.link_down(now_ms(), USB_LINK);
     }
 
+    /// `Z` chunks this session received.
+    pub fn encoded_chunks(&self) -> u32 {
+        self.encoded
+    }
+
     /// One channel-3 message from the USB host.
     pub fn on_message(&mut self, bytes: &[u8]) {
+        if bytes.first() == Some(&b'Z') {
+            self.encoded += 1;
+        }
         self.session
             .on_message(&mut self.target, now_ms(), USB_LINK, bytes);
         self.refused_last = self.session_refused();
