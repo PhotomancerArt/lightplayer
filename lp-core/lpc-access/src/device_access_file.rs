@@ -25,6 +25,15 @@ use crate::secret_entry::{SALT_BYTES, SecretEntry, SecretEntryV1, read_version, 
 /// reads as [`Self::locked`] instead (BLE off, open to nobody; the caller
 /// logs the error): damage only ever takes access away.
 ///
+/// **Two readers since over-the-air updates.** The engine (the server)
+/// reads and writes the whole file; the split image's **core** reads
+/// `secrets` and `open` for its update session's login and access (doors
+/// #14). After an update or a rollback, a core may read a file a newer or
+/// older engine wrote, so changes to `secrets` and `open` stay **additive**
+/// — a core that cannot read the file reads it as [`Self::locked`] — and no
+/// firmware migrates the file on an unconfirmed trial boot
+/// (`lpa_server::access_store::may_migrate_device_store`).
+///
 /// Version 3 (this shape) made `open` an [`OpenTo`]. A version-2 file still
 /// reads — `open: true` is play, `false` is nobody, so an existing board
 /// keeps exactly the access it had — and so does a version-1 file (its

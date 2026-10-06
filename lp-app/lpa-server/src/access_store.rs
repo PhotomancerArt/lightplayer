@@ -85,6 +85,33 @@ pub fn device_store_at_boot(
     read_device_store(fs)
 }
 
+/// How this boot stands, for whether it may rewrite the device store on
+/// its own (OTA plan, doors #14).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BootStanding {
+    /// A build that has run before on this board: a plain image, a split
+    /// image's flashed or proven core, or a trial a link has confirmed.
+    Confirmed,
+    /// A new core on trial that no link has confirmed yet: it may yet roll
+    /// back to the core before it.
+    UnconfirmedTrial,
+}
+
+/// Whether a boot may rewrite `/.lp/access.json` **on its own** — a
+/// migration to a newer shape, or defaults written on read. Never on an
+/// unconfirmed trial: since over-the-air updates, an older core reads the
+/// same file after a rollback (it reads `secrets` and `open`, nothing
+/// else), and a file it cannot read is `locked()`. A person's own edit
+/// (`AccessAdd` and the rest) is not a migration and is not gated here.
+///
+/// Today no firmware migrates the file — `read_device_store` converts an
+/// older shape in memory and never writes — and a split image's engine
+/// never runs on an unconfirmed trial (the trial confirms before it fetches
+/// its engine). This is the gate a future migration must call.
+pub fn may_migrate_device_store(standing: BootStanding) -> bool {
+    standing == BootStanding::Confirmed
+}
+
 /// Write the device store, always at the current version.
 pub fn write_device_store(fs: &dyn LpFs, store: &DeviceAccessFile) -> Result<(), String> {
     let json = store.to_json().map_err(|error| format!("{error}"))?;
