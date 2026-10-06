@@ -30,7 +30,7 @@ pub(crate) struct StoreMiss {
 
 /// The facts of a released build, by its `ota-manifest.json`; `None` when a
 /// hash is not hex.
-pub(crate) fn facts_from_ota_manifest(manifest: &OtaManifest) -> Option<HostBuildFacts> {
+pub fn facts_from_ota_manifest(manifest: &OtaManifest) -> Option<HostBuildFacts> {
     let piece = |sha: &str, len: u64| -> Option<HostPieceFacts> {
         Some(HostPieceFacts {
             sha256: lpc_update::sha256_from_hex(sha)?,

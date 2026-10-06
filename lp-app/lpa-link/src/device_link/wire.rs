@@ -70,8 +70,10 @@ pub fn link_info(endpoint: &LinkEndpoint, usb_vid_pid: Option<(u16, u16)>) -> Li
         endpoint: EndpointKey(endpoint.id.as_str().to_string()),
         usb: usb_vid_pid.map(|(vendor, product)| UsbIds { vendor, product }),
         serial_number: None,
-        // No transport here speaks lp-link's channel 3 yet (M7 P7).
-        carries_update_channel: false,
+        // A Web Serial port is an lp-link (USB or a classic's UART), and its
+        // link port carries channel 3 (M7 P7). Whether the BOARD speaks it
+        // is its own announcement (DS9), never this flag.
+        carries_update_channel: true,
     }
 }
 
@@ -240,9 +242,13 @@ pub fn hello_facts(hello: &ServerHello) -> HelloFacts {
             lpc_wire::FsBootState::Memory => BoardFs::Memory,
             lpc_wire::FsBootState::LegacyHeld => BoardFs::LegacyHeld,
         },
-        // The hello carries no board manifest until update protocol Part B
-        // (B-P06); this adapter fills it then.
-        update: None,
+        // The board manifest a split image's hello carries (update protocol
+        // Part B, wire proto 38): proof the board speaks channel 3, and its
+        // update facts, mirrored as `M`'s are (DS2).
+        update: hello
+            .firmware
+            .as_ref()
+            .map(crate::device_link::update_facts_mirror::update_facts_from_manifest),
     }
 }
 
@@ -707,6 +713,51 @@ mod tests {
             label("2026.10.03-1", "unknown", false),
             "fw-esp32c6 2026.10.03-1"
         );
+    }
+
+    /// A split image's hello carries its board manifest (Part B, proto 38):
+    /// it reaches the model as the hello's update facts; a single image's
+    /// hello carries none.
+    #[test]
+    fn the_hellos_board_manifest_is_its_update_facts() {
+        let mut hello = hello_with_version("2026.10.06-1");
+        assert_eq!(hello_facts(&hello).update, None);
+        let manifest = lpc_update::BoardManifest {
+            proto: 1,
+            target: "esp32c6-4mb".to_string(),
+            chip: "esp32c6".to_string(),
+            version: "2026.10.06-1".to_string(),
+            build_id: "2026.10.06-1+abc123456789".to_string(),
+            wire_proto: WIRE_PROTO_VERSION,
+            core_sha256: "11".repeat(32),
+            core_len: 1_214_800,
+            engine_sha256: "22".repeat(32),
+            engine_len: Some(1_828_914),
+            layout: 1,
+            loader: 1,
+            region_len: 3_375_104,
+            state: lpc_update::BoardState::Running,
+            refused_build: None,
+            transfer: None,
+        };
+        hello.firmware = Some(manifest.clone());
+        let update = hello_facts(&hello).update.expect("update facts");
+        assert_eq!(update.state, lpa_devices::UpdateBoardState::Running);
+        assert_eq!(update.version.as_deref(), Some("2026.10.06-1"));
+        assert_eq!(
+            lpc_update::BoardManifest::from_json(update.manifest_json.as_bytes()).unwrap(),
+            manifest
+        );
+    }
+
+    #[test]
+    fn a_web_serial_port_carries_the_update_channel() {
+        let endpoint = LinkEndpoint::new(
+            "serial:1",
+            crate::LinkProviderKind::BrowserSerialEsp32,
+            "board",
+        );
+        assert!(link_info(&endpoint, None).carries_update_channel);
     }
 
     fn hello_with_version(version: &'static str) -> ServerHello {

@@ -20,6 +20,13 @@ pub const LINK_STALLED_NOTE: &str = "link: stalled — the board has gone quiet;
 /// The note for a stall's trailing edge.
 pub const LINK_ANSWERING_NOTE: &str = "link: the board is answering again";
 
+/// The note for an update message refused because the board has not
+/// announced lp-link's update channel this session (DS9): sending it anyway
+/// would stall the link on a frame a board without the channel never
+/// acknowledges.
+pub const UPDATE_NOT_ANNOUNCED_NOTE: &str =
+    "link: update message not sent — the board has not announced the update channel";
+
 /// A link-state note, by kind.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LinkNote {

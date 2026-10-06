@@ -216,6 +216,25 @@ impl BrowserSerialEsp32Provider {
         browser_serial::send_client_json(port_id, json)
     }
 
+    /// Send one channel-3 (update) message on the port's lp-link.
+    /// `Ok(false)`: the board has not announced the channel this session,
+    /// so nothing was sent (DS9).
+    pub fn send_update(
+        &self,
+        session_id: &LinkSessionId,
+        message: &[u8],
+    ) -> Result<bool, LinkError> {
+        let port_id = self.session_port_id(session_id)?;
+        browser_serial::send_update(port_id, message)
+    }
+
+    /// The board's channel-3 (update) messages since the last take; the
+    /// model's link pump alone drains them.
+    pub fn take_updates(&self, session_id: &LinkSessionId) -> Result<Vec<Vec<u8>>, LinkError> {
+        let port_id = self.session_port_id(session_id)?;
+        Ok(browser_serial::take_updates(port_id))
+    }
+
     pub fn take_lines(&self, session_id: &LinkSessionId) -> Result<Vec<String>, LinkError> {
         let port_id = self.session_port_id(session_id)?;
         Ok(browser_serial::take_lines(port_id))

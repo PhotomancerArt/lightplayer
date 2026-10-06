@@ -22,6 +22,15 @@
 //! "between legs". The driver's `Done` ends the leg with an
 //! `UpdateOutcome` first, which ends the activity.
 //!
+//! **A board's reset need not close the port.** Over a transport that does
+//! not re-enumerate (the emulator's door, a classic's UART) the board's
+//! restart is an lp-link *session* reset on a port that stays open: the pump
+//! reports it ([`UpdateHost::on_link_reset`]), the driver goes down there
+//! and then — the old session's words are lost — and comes back up when the
+//! board speaks on the new session: its `M` (core-only sends one unasked) or
+//! a hello that announces channel 3 ([`UpdateHost::on_hello`]; a running
+//! engine sends no `M` unasked). The leg itself carries on.
+//!
 //! **The driver goes when the activity goes** — on its own `Done`, on an
 //! abandon, and on [`UpdateHost::reconcile`] finding the device no longer
 //! running an Update (an activity that ends with no link attached raises no
@@ -207,6 +216,14 @@ impl UpdateHost {
         self.state.borrow_mut().own = source;
     }
 
+    /// This Studio's own build's facts, as its source says them now: a
+    /// source may learn them after it is installed (the bundle's, which
+    /// fetches its manifests), so the controller asks again after folds.
+    pub(crate) fn own_facts(&self) -> Option<lpa_update::HostBuildFacts> {
+        let own = self.state.borrow().own.clone();
+        own.and_then(|own| own.facts())
+    }
+
     /// The credentials the controller holds for a core-side login: this
     /// browser's and the account's keys. Replaced wholesale; never logged.
     pub(crate) fn set_credentials(&self, credentials: Vec<Credential>) {
@@ -239,6 +256,25 @@ impl UpdateHost {
     /// One channel-3 message from `link` (the pump's route, DS1).
     pub(crate) fn on_board(&self, link: LinkId, bytes: &[u8]) {
         self.state.borrow_mut().on_board(link, bytes);
+    }
+
+    /// `link`'s lp-link session reset while its port stayed open: the board
+    /// restarted (an update's own reset, on a transport that does not
+    /// re-enumerate) or the link gave up on a frame. Whatever the driver
+    /// had in flight on the old session is lost: it goes down now, and up
+    /// again when the board speaks on the new session ([`Self::on_hello`],
+    /// or its first channel-3 message).
+    pub(crate) fn on_link_reset(&self, link: LinkId) {
+        self.state.borrow_mut().on_link_reset(link);
+    }
+
+    /// A hello on `link`: when it `announced` channel 3 (a split image's
+    /// hello carries `firmware`), a driver waiting out a session reset
+    /// there comes back up — a running engine says no `M` unasked.
+    pub(crate) fn on_hello(&self, link: LinkId, announced: bool) {
+        if announced {
+            self.state.borrow_mut().session_back(link);
+        }
     }
 
     /// The model abandoned the effect `effect_id` (a cancel while backing
@@ -353,6 +389,9 @@ struct UpdateRun {
     backup_sha: Option<[u8; 32]>,
     /// A read-back ran (what a kept engine came from).
     read_back: bool,
+    /// The leg's lp-link session reset (the port stayed open); the driver
+    /// is down until the board speaks on the new session.
+    session_reset: bool,
 }
 
 enum RunPhase {
@@ -446,6 +485,7 @@ impl HostState {
                     narration: UpdateNarration::default(),
                     backup_sha: None,
                     read_back: false,
+                    session_reset: false,
                 },
             );
             spawn_ticks(&seams, self.me.clone(), device, generation);
@@ -455,6 +495,7 @@ impl HostState {
         };
         run.last_effect = start.effect_id;
         run.link = start.link;
+        run.session_reset = false;
         run.facts = start.facts.facts.clone();
         let replaced = run.leg.replace(Leg {
             link: start.link,
@@ -489,6 +530,7 @@ impl HostState {
     /// The leg's link is gone: down for the driver, `Interrupted` for the
     /// activity.
     fn leg_lost(&mut self, device: DeviceId, reason: &str) {
+        log::info!("update: {device:?}'s leg ended: {reason}");
         let Some(seams) = self.seams.clone() else {
             return;
         };
@@ -531,7 +573,12 @@ impl HostState {
                 Some(found) => (found.activity_kind(), Some(&found.evidence)),
                 None => match roster.pending().iter().find(|p| p.device_id() == device) {
                     Some(pending) => (pending.activity_kind(), Some(pending.evidence())),
-                    None => (None, None),
+                    None => {
+                        if self.follow_merge(roster, device) {
+                            continue;
+                        }
+                        (None, None)
+                    }
                 },
             };
             if kind != Some(ActivityKind::Update) {
@@ -540,6 +587,7 @@ impl HostState {
                 let engine = evidence
                     .and_then(|e| e.update_facts())
                     .and_then(board_engine_sha);
+                log::info!("update: {device:?}'s run dropped: its activity is now {kind:?}");
                 self.drop_run(device, Some((engine, false)));
                 continue;
             }
@@ -557,6 +605,41 @@ impl HostState {
                 self.leg_lost(device, "the board's link closed");
             }
         }
+    }
+
+    /// `device` is gone from the roster because it was merged into another
+    /// entry — an anonymous card kept with "Set up this device" whose hello
+    /// then names a board Studio remembers (E13 on a known board, found in
+    /// the emulator walk). The roster moved the running Update, effect stamps
+    /// and all, to the surviving entry (and routes markers still addressed
+    /// to the old id there, `Roster::merged_into`); the run follows it
+    /// instead of being dropped, which left the card on "Finishing the
+    /// update…" with nothing driving it. Answers whether it moved.
+    fn follow_merge(&mut self, roster: &Roster, device: DeviceId) -> bool {
+        let Some(into) = roster.merged_into(device).filter(|into| {
+            roster
+                .device(*into)
+                .is_some_and(|d| d.activity_kind() == Some(ActivityKind::Update))
+        }) else {
+            return false;
+        };
+        if self.runs.contains_key(&into) {
+            return false;
+        }
+        let Some(run) = self.runs.remove(&device) else {
+            return false;
+        };
+        let generation = run.generation;
+        self.runs.insert(into, run);
+        if let Some(pin) = self.pins.remove(&device) {
+            self.pins.insert(into, pin);
+        }
+        log::info!("update: {device:?} was merged into {into:?}; its update follows");
+        // The run's ticks were keyed by the old id: tick the new one.
+        if let Some(seams) = self.seams.clone() {
+            spawn_ticks(&seams, self.me.clone(), into, generation);
+        }
+        true
     }
 
     /// Forget `device`'s run. `block`: remember a miss (the board's engine,
@@ -820,7 +903,10 @@ impl HostState {
                     ActivityMarker::UpdateStage { stage, done, total },
                 );
             }
-            DriverEffect::Decided(decision) => self.decided(device, decision),
+            DriverEffect::Decided(decision) => {
+                log::info!("update: {device:?} decided {decision:?}");
+                self.decided(device, decision)
+            }
             DriverEffect::Done(finish) => {
                 if matches!(
                     finish,
@@ -1150,21 +1236,93 @@ impl HostState {
 
     // ---- Routing (DS1) ---------------------------------------------------------------
 
-    fn on_board(&mut self, link: LinkId, bytes: &[u8]) {
+    /// The device whose leg runs on `link`.
+    fn leg_on(&self, link: LinkId) -> Option<DeviceId> {
+        self.runs
+            .iter()
+            .find(|(_, run)| run.leg.as_ref().is_some_and(|leg| leg.link == link))
+            .map(|(device, _)| *device)
+    }
+
+    /// See [`UpdateHost::on_link_reset`].
+    fn on_link_reset(&mut self, link: LinkId) {
         let Some(seams) = self.seams.clone() else {
             return;
         };
-        let device = self
-            .runs
-            .iter()
-            .find(|(_, run)| run.leg.as_ref().is_some_and(|leg| leg.link == link))
-            .map(|(device, _)| *device);
-        let Some(device) = device else {
-            // No leg on this link (a board's own `M` on link-up, a watched
-            // board's answer): its facts reach the fold decoded.
+        let Some(device) = self.leg_on(link) else {
+            return;
+        };
+        let Some(run) = self.runs.get_mut(&device) else {
+            return;
+        };
+        let RunPhase::Driving(driver) = &mut run.phase else {
             return;
         };
         let now = seams.now_ms();
+        log::info!("update: {device:?}'s link session reset; the driver waits for the board");
+        driver.link_down(now);
+        // Whatever the driver says on a session that is gone goes nowhere.
+        for effect in driver.take_effects() {
+            log::debug!(
+                "update: a {} after the session reset (dropped)",
+                DriverEffectName(&effect)
+            );
+        }
+        run.session_reset = true;
+        let effect = run.last_effect;
+        if let Some(line) = run.narration.link_down(now) {
+            seams.say(device, effect, line);
+        }
+    }
+
+    /// The board spoke on the new session of `link`: a driver down since a
+    /// session reset comes back up, and the reconnect is narrated.
+    fn session_back(&mut self, link: LinkId) {
+        let Some(seams) = self.seams.clone() else {
+            return;
+        };
+        let Some(device) = self.leg_on(link) else {
+            return;
+        };
+        let Some(run) = self.runs.get_mut(&device) else {
+            return;
+        };
+        if !core::mem::replace(&mut run.session_reset, false) {
+            return;
+        }
+        log::info!("update: {device:?}'s board is back on a new link session");
+        let now = seams.now_ms();
+        let effect = run.last_effect;
+        if let Some(line) = run.narration.link_up(now) {
+            seams.say(device, effect, line);
+        }
+        if let RunPhase::Driving(driver) = &mut run.phase {
+            driver.link_up(now);
+            self.process(device);
+        }
+    }
+
+    fn on_board(&mut self, link: LinkId, bytes: &[u8]) {
+        // The board's first word on a new session ends a reset's gap.
+        self.session_back(link);
+        let Some(seams) = self.seams.clone() else {
+            return;
+        };
+        let Some(device) = self.leg_on(link) else {
+            // No leg on this link (a board's own `M` on link-up, a watched
+            // board's answer): its facts reach the fold decoded.
+            if !self.runs.is_empty() {
+                log::info!(
+                    "update: a {} on {link:?}, where no update leg runs",
+                    lpc_wire_type(bytes)
+                );
+            }
+            return;
+        };
+        let now = seams.now_ms();
+        if bytes.first() == Some(&b'M') {
+            log::debug!("update: an M for {device:?}");
+        }
         match self.runs.get_mut(&device).map(|run| &mut run.phase) {
             Some(RunPhase::Driving(driver)) => {
                 driver.on_board(now, bytes, &self.credentials);
@@ -1229,6 +1387,7 @@ impl HostState {
         let Some(mut run) = self.runs.remove(&device) else {
             return;
         };
+        log::info!("update: {device:?} ended: {outcome:?}");
         let effect_id = run
             .leg
             .as_ref()
@@ -1411,5 +1570,14 @@ impl core::fmt::Display for DriverEffectName<'_> {
             DriverEffect::Done(_) => "done",
         };
         f.write_str(name)
+    }
+}
+
+/// A channel-3 message's type, for a log line.
+fn lpc_wire_type(bytes: &[u8]) -> String {
+    match bytes.first() {
+        Some(ty) if ty.is_ascii_graphic() => char::from(*ty).to_string(),
+        Some(ty) => format!("{ty:#04x}"),
+        None => "empty message".to_string(),
     }
 }

@@ -1293,6 +1293,16 @@ fn spawn_pump(
                     && lpa_link::device_link::port_read_map::is_link_reset_note(note)
                 {
                     resets.set(resets.get() + 1);
+                    // An update on this link loses its session too.
+                    update.on_link_reset(link);
+                }
+                // A split image's hello on a new session is what brings an
+                // update's driver back after a reset (a running engine sends
+                // no `M` unasked).
+                if let lpa_devices::link::LinkEvent::Frame(frame) = &event
+                    && let lpa_devices::wire::ServerFrameBody::Hello(hello) = &frame.body
+                {
+                    update.on_hello(link, hello.update.is_some());
                 }
                 // The browser controller's own death notices ("The device
                 // has been lost", "Serial port disconnected") are a

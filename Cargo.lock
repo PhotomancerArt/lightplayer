@@ -6473,6 +6473,7 @@ dependencies = [
  "lpa-devices",
  "lpc-access",
  "lpc-model",
+ "lpc-update",
  "lpc-wire",
  "lpfs",
  "md-5",

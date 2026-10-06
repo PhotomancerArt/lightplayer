@@ -60,6 +60,7 @@ pub mod browser_sim_source;
 /// built with the provider that owns the port.
 #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
 pub mod browser_transport;
+pub mod bundled_own_build;
 pub mod composite_transport;
 pub mod device_affordance;
 pub mod device_backup_import;
@@ -134,6 +135,7 @@ pub use browser_lan_source::BrowserLanSource;
 pub use browser_sim_source::BrowserSimLinkSource;
 #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
 pub use browser_transport::BrowserSerialTransport;
+pub use bundled_own_build::{BundledOwnBuild, BundledOwnBuildSource, OWN_BUILD_MISMATCH};
 pub use composite_transport::CompositeDeviceTransport;
 pub use device_affordance::{
     device_escape_action, device_escape_action_for, device_status_kind, pending_escape_action,

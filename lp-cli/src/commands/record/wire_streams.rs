@@ -188,6 +188,10 @@ fn link_item(item: SniffedWire) -> Option<WireItem> {
         SniffedWire::Gap { skipped, .. } => {
             WireItem::Link(format!("{skipped} frame(s) missing from the recording"))
         }
+        SniffedWire::Update { ty, len, .. } => WireItem::Link(format!(
+            "update message {}: {len} B (lp-link channel 3)",
+            lpc_wire::update_message_type(ty)
+        )),
         SniffedWire::Sealed { chan, len, .. } => WireItem::Link(format!(
             "sealed frame: {len} B on channel {chan} (a secure link; no key to read it)"
         )),
@@ -203,6 +207,7 @@ fn item_direction(item: &SniffedWire) -> Direction {
         | SniffedWire::Session { dir, .. }
         | SniffedWire::Damaged { dir }
         | SniffedWire::Gap { dir, .. }
+        | SniffedWire::Update { dir, .. }
         | SniffedWire::Sealed { dir, .. } => *dir,
     }
 }

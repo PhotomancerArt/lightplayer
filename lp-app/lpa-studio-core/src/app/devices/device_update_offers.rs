@@ -12,6 +12,8 @@
 //! | A version Studio can't get | `install-firmware` | `Install Y` (the same offer) | Routine; Lasting when the choice is older |
 //! | Backing up | `cancel` | the activity's own Cancel ([`super::device_offers`]) | Routine |
 //! | Needs USB once, over USB | `update-firmware` | today's USB flash | Lasting |
+//! | This Studio's build can't go over the air, over USB (standing `Nothing`, route `Flash`) | `update-firmware` | today's USB flash | Lasting |
+//! | This Studio's build can't go over the air, over Bluetooth (`NoWirelessBuild`) | — | nothing; the line says why | — |
 //! | everything else | — | nothing: Studio does it, or there is nothing to do | — |
 //!
 //! Heal and finish are never offers (DS4): the controller starts them. A
@@ -66,15 +68,35 @@ impl UpdateOfferFacts {
     /// air when its manifest says it can update over its link and that link
     /// `carries_update_channel`. The one reading the controller and the
     /// stories share.
+    ///
+    /// The build half of the route is this Studio's own build: it has
+    /// facts only when it is update-capable (`device_update_route`'s module
+    /// docs). A board that could update over Bluetooth while this Studio's
+    /// build cannot reads [`UpdateStanding::NoWirelessBuild`].
     pub fn read(inputs: &UpdateStandingInputs<'_>, carries_update_channel: bool) -> Self {
         let can_update_over_link = inputs
             .facts
             .and_then(|facts| lpa_update::BoardView::from_json(facts.manifest_json.as_bytes()))
             .is_some_and(|board| board.can_update_over_link());
-        Self {
-            standing: update_standing(inputs),
-            route: update_route(can_update_over_link, inputs.link, carries_update_channel),
+        let route = update_route(
+            can_update_over_link,
+            inputs.own.is_some(),
+            inputs.link,
+            carries_update_channel,
+        );
+        let mut standing = update_standing(inputs);
+        if route == UpdateRoute::NoWirelessBuild
+            && standing == UpdateStanding::Nothing
+            && let Some(version) = inputs.facts.and_then(|facts| facts.version.clone())
+        {
+            standing = UpdateStanding::NoWirelessBuild {
+                board: UpdateVersion {
+                    version,
+                    build_id: inputs.facts.and_then(|facts| facts.build_id.clone()),
+                },
+            };
         }
+        Self { standing, route }
     }
 }
 
@@ -99,10 +121,21 @@ pub fn update_offers(
             set.keep_flash = *link == UpdateLink::Usb;
             return set;
         }
+        // This Studio's build cannot go over the air, and over Bluetooth
+        // there is no flash either: nothing to install, the line says why.
+        UpdateStanding::NoWirelessBuild { .. } => {
+            set.keep_flash = false;
+            return set;
+        }
         _ => {}
     }
-    if facts.route == UpdateRoute::Flash {
-        return set;
+    match facts.route {
+        UpdateRoute::Flash => return set,
+        UpdateRoute::NoWirelessBuild => {
+            set.keep_flash = false;
+            return set;
+        }
+        UpdateRoute::OverTheAir => {}
     }
     set.keep_flash = false;
     let linked = view.escapes.contains(&Escape::Disconnect);
@@ -308,6 +341,54 @@ mod tests {
             Action::Update { intent, .. } => intent.clone(),
             other => panic!("{other:?}"),
         }
+    }
+
+    /// The director's note on P8, read end to end: a board that can update
+    /// over the air, and this Studio with or without an update-capable build
+    /// of its own, over USB and over Bluetooth.
+    #[test]
+    fn the_route_reads_the_board_and_this_studios_build() {
+        use super::super::device_update_standing::tests::{board_x, facts_of, inputs, studio_y};
+        let view = ready_view();
+        let facts = facts_of(&board_x());
+        let y = studio_y();
+
+        // Both can, over USB: Update, over the air.
+        let read = UpdateOfferFacts::read(&inputs(&view, Some(&facts), Some(&y)), true);
+        assert_eq!(read.route, UpdateRoute::OverTheAir);
+        assert!(matches!(read.standing, UpdateStanding::Available { .. }));
+        assert_eq!(
+            set_of(&view, &read),
+            (vec![("update-firmware".to_string(), false)], false, true)
+        );
+
+        // A single-image Studio over USB: today's card, today's flash.
+        let read = UpdateOfferFacts::read(&inputs(&view, Some(&facts), None), true);
+        assert_eq!(read.route, UpdateRoute::Flash);
+        assert_eq!(read.standing, UpdateStanding::Nothing);
+        assert_eq!(set_of(&view, &read), (vec![], true, true));
+
+        // The same over Bluetooth: nothing to install, and the line says why.
+        let mut ble = inputs(&view, Some(&facts), None);
+        ble.link = UpdateLink::Bluetooth;
+        let read = UpdateOfferFacts::read(&ble, true);
+        assert_eq!(read.route, UpdateRoute::NoWirelessBuild);
+        assert!(
+            matches!(&read.standing, UpdateStanding::NoWirelessBuild { board } if board.version == "2026.10.03-1"),
+            "{:?}",
+            read.standing
+        );
+        assert_eq!(set_of(&view, &read), (vec![], false, true));
+        let words = crate::update_words(&read.standing).expect("words");
+        assert_eq!(words.line, "Can't update over Bluetooth from this Studio");
+
+        // Both can over Bluetooth: over the air there too.
+        let mut ble = inputs(&view, Some(&facts), Some(&y));
+        ble.link = UpdateLink::Bluetooth;
+        assert_eq!(
+            UpdateOfferFacts::read(&ble, true).route,
+            UpdateRoute::OverTheAir
+        );
     }
 
     #[test]

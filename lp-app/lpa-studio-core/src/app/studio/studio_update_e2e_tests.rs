@@ -1,11 +1,12 @@
 //! End-to-end update host tests: Studio's own controller, its real effects
 //! layer and update host, driving `lpc-update`'s model board.
 //!
-//! The transport double ([`RigLink`]) is what P7's channel-3 adapter will
-//! be: `LinkCommand::SendUpdate` goes into a [`BoardRig`]; every message the
+//! The transport double ([`RigLink`]) stands where the channel-3 adapter
+//! (`lpa-link`'s `device_link`, M7 P7) stands on a real port:
+//! `LinkCommand::SendUpdate` goes into a [`BoardRig`]; every message the
 //! rig sends comes back as `LinkEvent::Update`, and each `M` is also decoded
-//! into `LinkEvent::UpdateFacts` ([`update_facts_from_manifest`], the one
-//! place that conversion lives until the adapter carries it). A board
+//! into `LinkEvent::UpdateFacts` by the adapter's own mirror
+//! ([`update_facts_from_manifest_json`]). A board
 //! running its engine says hello on channel 1 (its MAC, so it gets a card)
 //! and sends heartbeats; a core-only board says nothing there. The rig's
 //! resets and power cuts close the link, and Studio's own reopen rung opens
@@ -25,14 +26,12 @@ use std::rc::Rc;
 use lpa_devices::identity::{EndpointKey, MacAddress, PeerIdentity};
 use lpa_devices::link::{Link, LinkCommand, LinkEvent, LinkInfo, UsbIds};
 use lpa_devices::wire::{BoardFs, ClientFrameBody, HelloFacts, ServerFrame};
-use lpa_devices::{
-    TerminalKind, UpdateBoardState, UpdateFacts, UpdateOutcomeFacts, UpdatePieceKind,
-    UpdateTransferFacts,
-};
+use lpa_devices::{TerminalKind, UpdateOutcomeFacts};
 use lpa_firmware_store::{
     EngineCache, EngineCacheEntry, EngineSource, FetchError, FirmwareFetch, FirmwareStore,
     LocalBoxFuture, MemoryEngineCache,
 };
+use lpa_link::device_link::update_facts_mirror::update_facts_from_manifest_json;
 use lpa_update::decide::{SourceEffect, SourceResult};
 use lpa_update::{DriverConfig, DriverEffect, HostBuild, HostIdentity, UpdateDriver, UpdateIntent};
 use lpc_access::{OpenTo, SecretEntry, Tier};
@@ -42,7 +41,7 @@ use lpc_firmware_release::{
 use lpc_update::board::{AccessFacts, LinkId as RigLinkId, LinkTrust, SessionConfig, SessionMode};
 use lpc_update::code_table::CHUNK;
 use lpc_update::testing::{BoardRig, BootFault, FakeBoard, ModelBuild};
-use lpc_update::{BoardManifest, BoardMessage, BoardState, PieceKind};
+use lpc_update::{BoardMessage, PieceKind};
 
 use crate::app::studio::offer_press_test_api::OfferPressTestApi;
 use crate::{
@@ -97,6 +96,29 @@ fn update_x_to_y_with_the_backup_cached_reads_nothing_back_and_pins_it_until_y()
     assert!(!bench.said("backing up current firmware from the board"));
     assert!(bench.said_starting("board reset · reconnected in "));
     assert!(bench.said_starting("core 25 KB in "));
+    assert!(matches!(
+        bench.standing(device),
+        UpdateStanding::UpToDate { .. }
+    ));
+}
+
+/// The board's resets keep the port open (the link's session resets, as
+/// over the emulator's door): the update host drops what was in flight on
+/// the old session, comes back up when the board speaks on the new one —
+/// its `M` in core-only, its hello when its engine runs — and the update
+/// ends on Y with no click.
+#[test]
+fn an_update_whose_resets_keep_the_port_open_ends_on_y() {
+    let mut bench = Bench::new(Board::running_x(), Some(y()));
+    bench.board_mut().resets_keep_port = true;
+    let device = bench.connect_device();
+    bench.press_update(device);
+
+    bench.run_until_update_ends(device);
+    bench.assert_runs(&y());
+    assert_eq!(bench.outcome(device), Some(UpdateOutcomeFacts::UpToDate));
+    assert!(bench.said("backing up current firmware from the board"));
+    assert!(bench.said_starting("board reset · reconnected in "));
     assert!(matches!(
         bench.standing(device),
         UpdateStanding::UpToDate { .. }
@@ -176,6 +198,17 @@ fn an_engineless_board_is_restored_on_connect_from_the_cache_with_no_click_or_lo
     bench.cache_engine(&x());
     bench.grant();
 
+    // While it runs, the board's pending card says what it is doing (the
+    // spike's E1), not "identifying" (found in the emulator walk).
+    bench.run_until("the pending card to say it is restoring", |bench| {
+        bench
+            .controller
+            .device_roster_view()
+            .roster
+            .pending
+            .iter()
+            .any(|pending| pending.state_label.starts_with("Restoring firmware…"))
+    });
     bench.run_until("the board to run X again", |bench| {
         bench.board().rig.mode() == Some(SessionMode::EngineRunning)
     });
@@ -211,6 +244,121 @@ fn an_engineless_board_whose_engine_is_nowhere_ends_on_e13_and_does_not_loop() {
     assert_eq!(
         bench.any_outcome(),
         Some(UpdateOutcomeFacts::MissingEngine { offline: true })
+    );
+}
+
+/// E13 with a build of this Studio's own (the walk's `cant-get`): the
+/// engine-less board's restore misses, once, on its pending link (a
+/// core-only board says no hello). Kept ("Set up this device"), its card
+/// reads the row — "Needs X, which Studio can't get" — and offers this
+/// Studio's build, which ends on Y. The identify that keeping it runs must
+/// not wipe how the restore ended: the card would read "Restoring…" with
+/// nothing to press (found in the emulator walk).
+#[test]
+fn an_engineless_board_whose_engine_is_nowhere_offers_this_studios_build_once_kept() {
+    for resets_keep_port in [false, true] {
+        engineless_board_kept_then_installed(resets_keep_port);
+    }
+}
+
+fn engineless_board_kept_then_installed(resets_keep_port: bool) {
+    let mut bench = Bench::new(Board::engineless_x(), Some(y()));
+    bench.board_mut().resets_keep_port = resets_keep_port;
+    bench.grant();
+    bench.run_until("the restore to miss", |bench| {
+        matches!(
+            bench.any_outcome(),
+            Some(UpdateOutcomeFacts::MissingEngine { .. })
+        )
+    });
+    bench.steps(4_000);
+    assert_eq!(bench.update_starts, 1, "one restore, no loop");
+
+    let link = bench.controller.devices_for_test().roster().pending()[0].link;
+    bench
+        .controller
+        .fold_device_input(DeviceInput::Action(lpa_devices::Action::AdoptLink { link }));
+    let device = bench.controller.devices_for_test().roster().devices()[0].id;
+    bench.run_until("the kept card to read E13, its identify done", |bench| {
+        matches!(
+            bench.standing(device),
+            UpdateStanding::CantGetVersion { .. }
+        ) && bench
+            .controller
+            .devices_for_test()
+            .roster()
+            .device(device)
+            .is_some_and(|d| d.activity_kind().is_none())
+    });
+    assert_eq!(bench.update_starts, 1, "still no loop");
+    bench.press(device, "install-firmware", OfferArgs::new());
+    bench.run_until("the install to end on Y", |bench| {
+        bench.any_outcome() == Some(UpdateOutcomeFacts::UpToDate)
+    });
+    bench.assert_runs(&y());
+}
+
+/// E13 on a board Studio already knows (found in the emulator walk): it
+/// lost its engine and comes back through a port Studio has never seen, so
+/// it is a pending link (a core-only board says no hello). Kept anonymously
+/// and given this Studio's build, its hello at the end names the remembered
+/// board, and the roster merges the two cards — moving the running update to
+/// the remembered one. The update follows it and ends there, on Y.
+#[test]
+fn an_install_on_a_kept_card_that_merges_into_a_remembered_board_ends_on_y() {
+    let mut bench = Bench::new(Board::engineless_x(), Some(y()));
+    bench.board_mut().resets_keep_port = true;
+    bench
+        .controller
+        .devices_mut_for_test()
+        .load_records(&[crate::app::places::RegisteredDevice {
+            uid: "dev0000000000000042".to_string(),
+            name: "Porch sign".to_string(),
+            hardware_id: Some("efuse:60:55:f9:0a:0b:01".to_string()),
+            ..crate::app::places::RegisteredDevice::default()
+        }]);
+    let known = bench.controller.devices_for_test().roster().devices()[0].id;
+    bench.grant();
+    bench.run_until("the restore to miss on the pending link", |bench| {
+        matches!(
+            bench.any_outcome(),
+            Some(UpdateOutcomeFacts::MissingEngine { .. })
+        )
+    });
+    let link = bench.controller.devices_for_test().roster().pending()[0].link;
+    bench
+        .controller
+        .fold_device_input(DeviceInput::Action(lpa_devices::Action::AdoptLink { link }));
+    let kept = bench
+        .controller
+        .devices_for_test()
+        .roster()
+        .devices()
+        .iter()
+        .find(|d| d.id != known)
+        .map(|d| d.id)
+        .expect("the kept card");
+    bench.run_until("the kept card to read E13, its identify done", |bench| {
+        matches!(bench.standing(kept), UpdateStanding::CantGetVersion { .. })
+            && bench
+                .controller
+                .devices_for_test()
+                .roster()
+                .device(kept)
+                .is_some_and(|d| d.activity_kind().is_none())
+    });
+    bench.press(kept, "install-firmware", OfferArgs::new());
+    bench.run_until("the install to end on Y", |bench| {
+        bench.any_outcome() == Some(UpdateOutcomeFacts::UpToDate)
+    });
+    bench.assert_runs(&y());
+    let roster = bench.controller.devices_for_test().roster();
+    assert!(roster.device(kept).is_none(), "the kept card merged away");
+    assert!(
+        roster
+            .device(known)
+            .is_some_and(|d| d.activity_kind().is_none()),
+        "the remembered card is done updating"
     );
 }
 
@@ -523,6 +671,15 @@ struct Board {
     /// The board speaks channel 3 (`false`: pre-update firmware — no `M`,
     /// no manifest in its hello).
     announces: bool,
+    /// The board's resets keep the port open, as an lp-link transport that
+    /// does not re-enumerate sees them (the emulator's door, a classic's
+    /// UART): the link's SESSION resets — a link-reset note, then the new
+    /// session's words — and nothing closes.
+    resets_keep_port: bool,
+    /// The port's endpoint: a replug through another port (or another
+    /// Web Serial grant) is another endpoint, and the roster cannot route
+    /// it to a card by endpoint alone.
+    endpoint: String,
 }
 
 impl Board {
@@ -545,6 +702,8 @@ impl Board {
             unplug_after_core_requests: None,
             core_requests: 0,
             unplugged: false,
+            resets_keep_port: false,
+            endpoint: "serial:model-board".to_string(),
             announces: true,
         }
     }
@@ -560,10 +719,10 @@ impl Board {
         board
     }
 
-    fn info() -> LinkInfo {
+    fn info(&self) -> LinkInfo {
         LinkInfo {
             label: "model board".to_string(),
-            endpoint: EndpointKey("serial:model-board".to_string()),
+            endpoint: EndpointKey(self.endpoint.clone()),
             usb: Some(UsbIds {
                 vendor: 0x303a,
                 product: 0x1001,
@@ -614,7 +773,7 @@ impl Board {
         self.next_rig_link += 1;
         self.open = Some(link);
         self.events
-            .push_back(LinkEvent::Opened { info: Self::info() });
+            .push_back(LinkEvent::Opened { info: self.info() });
         let now = self.now_ms();
         let outs = self.rig.link_up(now, link, self.trust);
         self.push_outgoing(outs.into_iter().map(|o| o.bytes));
@@ -668,7 +827,7 @@ impl Board {
                 )
                 .into_iter()
                 .find_map(|o| match BoardMessage::decode(&o.bytes) {
-                    Ok(BoardMessage::Manifest(json)) => update_facts_from_manifest(json),
+                    Ok(BoardMessage::Manifest(json)) => update_facts_from_manifest_json(json),
                     _ => None,
                 })
         });
@@ -692,7 +851,7 @@ impl Board {
         }
         for bytes in outs {
             if let Ok(BoardMessage::Manifest(json)) = BoardMessage::decode(&bytes)
-                && let Some(facts) = update_facts_from_manifest(json)
+                && let Some(facts) = update_facts_from_manifest_json(json)
             {
                 self.events.push_back(LinkEvent::UpdateFacts(facts));
             }
@@ -725,12 +884,44 @@ impl Board {
             return;
         }
         if self.rig.reset_pending {
+            if self.resets_keep_port {
+                return self.session_reset();
+            }
             self.close("board reset");
             match self.rig.reboot() {
                 Ok(()) => {}
                 Err(BootFault::PowerCut) => self.power_cut(),
                 Err(e) => panic!("boots after a reset: {e:?}"),
             }
+        }
+    }
+
+    /// A reset on a port that stays open: the old session's words are
+    /// lost, the link says it reset, and the rebooted board speaks on a new
+    /// session (its `M` in core-only, its hello when its engine runs).
+    fn session_reset(&mut self) {
+        let Some(old) = self.open.take() else {
+            return;
+        };
+        let now = self.now_ms();
+        self.rig.link_down(now, old);
+        match self.rig.reboot() {
+            Ok(()) => {}
+            Err(e) => panic!("boots after a reset: {e:?}"),
+        }
+        self.events.push_back(LinkEvent::WireNote(
+            lpa_link::device_link::port_read_map::link_reset_note(
+                lpc_wire::lp_link::ResetReason::PeerRestarted,
+            ),
+        ));
+        let link = RigLinkId(self.next_rig_link);
+        self.next_rig_link += 1;
+        self.open = Some(link);
+        let now = self.now_ms();
+        let outs = self.rig.link_up(now, link, self.trust);
+        self.push_outgoing(outs.into_iter().map(|o| o.bytes));
+        if self.engine_running() {
+            self.hello(0);
         }
     }
 
@@ -788,37 +979,6 @@ impl Link for RigLink {
     }
 }
 
-/// What P7's channel-3 adapter will do with an `M`: the model's mirror of
-/// the board manifest, its JSON carried verbatim.
-pub(crate) fn update_facts_from_manifest(json: &[u8]) -> Option<UpdateFacts> {
-    let m = BoardManifest::from_json(json).ok()?;
-    Some(UpdateFacts {
-        state: match m.state {
-            BoardState::Running => UpdateBoardState::Running,
-            BoardState::NeedsEngine => UpdateBoardState::NeedsEngine,
-            BoardState::EngineCrashing => UpdateBoardState::EngineCrashing,
-            BoardState::Updating => UpdateBoardState::Updating,
-            BoardState::OnTrial => UpdateBoardState::OnTrial,
-            BoardState::Unknown => UpdateBoardState::Unknown,
-        },
-        version: Some(m.version.clone()),
-        target: Some(m.target.clone()),
-        build_id: Some(m.build_id.clone()),
-        transfer: m.transfer.map(|t| UpdateTransferFacts {
-            kind: match t.kind {
-                PieceKind::Core => UpdatePieceKind::Core,
-                PieceKind::Engine => UpdatePieceKind::Engine,
-            },
-            done: t.done,
-            total: t.total,
-            busy: t.busy,
-            build_hash: t.build_hash,
-        }),
-        refused_build: m.refused_build,
-        manifest_json: String::from_utf8_lossy(json).into_owned(),
-    })
-}
-
 /// The one board, granted when the test says.
 struct RigTransport {
     board: Rc<RefCell<Board>>,
@@ -827,11 +987,12 @@ struct RigTransport {
 
 impl RigTransport {
     fn link(&self) -> GrantedLink {
+        let info = self.board.borrow().info();
         GrantedLink {
-            info: Board::info(),
+            info: info.clone(),
             link: Box::new(RigLink {
                 board: Rc::clone(&self.board),
-                info: Board::info(),
+                info,
             }),
         }
     }

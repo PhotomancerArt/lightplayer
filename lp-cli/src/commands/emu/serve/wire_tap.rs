@@ -157,9 +157,12 @@ fn annotate(out: &mut impl Write, unix_us: u128, item: &SniffedWire) -> std::io:
         ),
         // Sealed frames carry nothing a tap can decode; their bytes are in
         // the chunk records as they went.
-        SniffedWire::Console { .. } | SniffedWire::Session { .. } | SniffedWire::Sealed { .. } => {
-            Ok(())
-        }
+        // Update-channel messages are not wire messages (no JSON to size);
+        // their bytes are in the chunk records as they went.
+        SniffedWire::Console { .. }
+        | SniffedWire::Session { .. }
+        | SniffedWire::Sealed { .. }
+        | SniffedWire::Update { .. } => Ok(()),
     }
 }
 

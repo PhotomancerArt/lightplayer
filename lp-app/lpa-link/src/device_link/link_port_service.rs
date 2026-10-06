@@ -27,6 +27,18 @@
 //! - **notes** ([`take_notes`](LinkPortService::take_notes)): the link's own
 //!   story for the device journal (up, stalled, the opt-in's outcome), which
 //!   only the pump reads.
+//! - **updates** ([`take_updates`](LinkPortService::take_updates)): the
+//!   board's channel-3 messages (the over-the-air update protocol, M7 P7),
+//!   which only the pump reads, so a borrowed conversation never eats one.
+//!   The queue is this session's: a link reset drops what an old session
+//!   said.
+//!
+//! **Channel 3 only to a board that announced it** (DS9):
+//! [`send_update`](LinkPortService::send_update) queues nothing until this
+//! session's hello carried `firmware` or the board sent an update message
+//! itself. A board without the channel would never acknowledge a reliable
+//! frame there and the link would stall; a message refused this way is a
+//! note, never a stalled link.
 //!
 //! A write that cannot be queued (the link's send budget is full, or the
 //! message is larger than a link message may be) is an error the sender sees,
@@ -36,9 +48,11 @@ use std::collections::VecDeque;
 
 use lpc_wire::lp_link::{LinkConfig, LinkState, Micros};
 use lpc_wire::server::api::LogLevel;
-use lpc_wire::{ClientMessage, LinkCounters, WireLinkPort};
+use lpc_wire::{ClientMessage, LinkCounters, ServerMsgBody, WireLinkPort};
 
-use crate::device_link::link_note::{LINK_ANSWERING_NOTE, LINK_STALLED_NOTE};
+use crate::device_link::link_note::{
+    LINK_ANSWERING_NOTE, LINK_STALLED_NOTE, UPDATE_NOT_ANNOUNCED_NOTE,
+};
 use crate::device_link::port_read_map::{MappedRead, map_port_read};
 use crate::device_link::wire_reader::WireRead;
 
@@ -75,6 +89,10 @@ pub struct LinkPortService {
     port: WireLinkPort,
     reads: VecDeque<WireRead>,
     notes: Vec<String>,
+    /// This session's channel-3 messages from the board, for the pump.
+    updates: VecDeque<Vec<u8>>,
+    /// The board announced channel 3 this session (DS9).
+    announced: bool,
     /// Whether the last look found the link stalled, so each edge is noted
     /// once.
     stalled: bool,
@@ -99,6 +117,8 @@ impl LinkPortService {
             port: WireLinkPort::new(config, nonce, want_packed).with_device_log_level(device_log),
             reads: VecDeque::new(),
             notes: Vec::new(),
+            updates: VecDeque::new(),
+            announced: false,
             stalled: false,
         }
     }
@@ -125,6 +145,8 @@ impl LinkPortService {
                 .with_device_log_level(device_log),
             reads: VecDeque::new(),
             notes: Vec::new(),
+            updates: VecDeque::new(),
+            announced: false,
             stalled: false,
         }
     }
@@ -237,6 +259,33 @@ impl LinkPortService {
             .map_err(|error| format!("the link would not take the request: {error:?}"))
     }
 
+    /// Queue one channel-3 (update) message. The caller transmits after.
+    ///
+    /// Before the board announced the channel this session (DS9, see the
+    /// module docs) nothing is queued: the message is dropped with a note
+    /// and `Ok(false)` says so. `Ok(true)`: queued.
+    pub fn send_update(&mut self, message: &[u8]) -> Result<bool, String> {
+        if !self.announced {
+            self.notes.push(UPDATE_NOT_ANNOUNCED_NOTE.to_string());
+            return Ok(false);
+        }
+        self.port
+            .send_update(message)
+            .map(|()| true)
+            .map_err(|error| format!("the link would not take the update message: {error:?}"))
+    }
+
+    /// The board's channel-3 messages since the last take, this session's
+    /// only, in order. Only the model's link pump drains them.
+    pub fn take_updates(&mut self) -> Vec<Vec<u8>> {
+        self.updates.drain(..).collect()
+    }
+
+    /// Whether the board announced the update channel this session.
+    pub fn update_channel_announced(&self) -> bool {
+        self.announced
+    }
+
     /// How long until the link next needs [`Self::transmit`] for a timer,
     /// at most `cap` (new bytes and new sends need one too, and the edge
     /// polls the page for bytes on the same tick).
@@ -277,8 +326,8 @@ impl LinkPortService {
         self.port.link().config()
     }
 
-    /// Sort what the port has read onto the two queues, and note a stall's
-    /// edges.
+    /// Sort what the port has read onto the queues
+    /// ([`Self::collect_reads`]), and note a stall's edges.
     fn collect(&mut self, now: Micros) {
         self.collect_reads();
         let stalled = self.port.is_stalled(now);
@@ -295,21 +344,54 @@ impl LinkPortService {
         }
     }
 
-    /// Sort what the port has read onto the two queues.
+    /// Sort what the port has read onto the queues, and track the update
+    /// session: every read first, because a link event (`Up`, `Reset`) clears
+    /// the port's own update queue, so the update messages polled after are
+    /// this session's, and a reset drops ours too. Every path that drains the
+    /// port comes through here (a secure port's handshake events included),
+    /// so the tracking holds on every link, the LAN link's too.
     fn collect_reads(&mut self) {
         while let Some(read) = self.port.poll_read() {
+            if matches!(read, lpc_wire::PortRead::Up { .. }) {
+                self.forget_session();
+            }
             match map_port_read(read) {
-                MappedRead::Read(read) => self.reads.push_back(read),
+                MappedRead::Read(read) => {
+                    match &read {
+                        WireRead::LinkReset(_) => self.forget_session(),
+                        WireRead::Frame(frame) => {
+                            if let Ok(message) = &frame.message
+                                && let ServerMsgBody::Hello(hello) = &message.msg
+                            {
+                                self.announced |= hello.firmware.is_some();
+                            }
+                        }
+                        _ => {}
+                    }
+                    self.reads.push_back(read);
+                }
                 MappedRead::Note(note) => self.notes.push(note),
             }
         }
+        while let Some(update) = self.port.poll_update() {
+            self.announced = true;
+            self.updates.push_back(update);
+        }
+    }
+
+    /// A session ended or began: what the board said on channel 3, and
+    /// whether it announced it, belonged to the old one.
+    fn forget_session(&mut self) {
+        self.updates.clear();
+        self.announced = false;
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lpc_wire::lp_link::{CH_PROTO, Link, LinkConfig, LinkEvent, SelectiveRepeat};
+    use lpc_update::BoardManifest;
+    use lpc_wire::lp_link::{CH_PROTO, CH_UPDATE, Link, LinkConfig, LinkEvent, SelectiveRepeat};
     use lpc_wire::server::hello::{BuildFacts, HardwareFacts, ServerHello};
     use lpc_wire::{
         ClientRequest, PACK_FORMAT_VERSION, ServerMsgBody, WIRE_PROTO_VERSION, WireServerMessage,
@@ -533,6 +615,149 @@ mod tests {
         );
     }
 
+    // ---- The update channel (M7 P7, DS9) -------------------------------
+
+    /// A pre-update board (its hello carries no `firmware`) never hears
+    /// channel 3: the message is refused with a note, and the link stays up
+    /// and answering — no frame waits for an acknowledgement that would
+    /// never come.
+    #[test]
+    fn nothing_goes_out_on_channel_3_to_a_board_that_did_not_announce_it() {
+        let mut bench = Bench::new();
+        bench.run(40);
+        bench.host.take_reads();
+        bench.host.take_notes();
+        assert!(!bench.host.update_channel_announced());
+
+        assert_eq!(bench.host.send_update(b"Q\x01"), Ok(false));
+        bench.run(40);
+        assert!(bench.board.updates.is_empty());
+        let notes = bench.host.take_notes();
+        assert!(
+            notes.iter().any(|note| note == UPDATE_NOT_ANNOUNCED_NOTE),
+            "{notes:?}"
+        );
+
+        // The link is not stalled behind it: a request still goes through.
+        let json = lpc_wire::json::to_string(&ClientMessage {
+            id: 5,
+            msg: ClientRequest::StopAllProjects,
+        })
+        .unwrap();
+        bench.host.send_client_json(&json).expect("queued");
+        bench.run(40);
+        assert_eq!(bench.board.requests, [5]);
+        assert_eq!(bench.host.counters().resends, 0);
+    }
+
+    /// A split image's hello announces the channel: a message goes out on
+    /// channel 3, and the board's answer comes back on the update queue —
+    /// never among the reads a borrowed conversation drains.
+    #[test]
+    fn a_hello_with_firmware_announces_the_channel_and_updates_flow_both_ways() {
+        let mut bench = Bench::with_board(BoardDouble::split(0xB0A2_0001, false));
+        bench.run(40);
+        assert!(bench.host.update_channel_announced());
+        assert!(
+            bench.host.take_updates().is_empty(),
+            "a running board sends no M unasked"
+        );
+        bench.host.take_reads();
+
+        assert_eq!(bench.host.send_update(b"Q\x01"), Ok(true));
+        bench.run(40);
+        assert_eq!(bench.board.updates, vec![b"Q\x01".to_vec()]);
+        let updates = bench.host.take_updates();
+        assert!(
+            matches!(updates.as_slice(), [m] if m[0] == b'M'),
+            "{updates:?}"
+        );
+        assert!(bench.host.take_reads().is_empty());
+    }
+
+    /// A core-only board says no hello: its own `M` on link-up is the
+    /// announcement.
+    #[test]
+    fn a_core_only_boards_manifest_announces_the_channel() {
+        let mut bench = Bench::with_board(BoardDouble::split(0xB0A2_0001, true));
+        bench.run(40);
+        assert!(bench.host.update_channel_announced());
+        let updates = bench.host.take_updates();
+        assert!(
+            matches!(updates.as_slice(), [m] if m[0] == b'M'),
+            "{updates:?}"
+        );
+        assert_eq!(bench.host.send_update(b"Q\x01"), Ok(true));
+    }
+
+    /// A board that restarts as a pre-update image (a USB flash of a single
+    /// image, say) is not announced on the new session, and nothing the old
+    /// session said survives the reset.
+    #[test]
+    fn a_reset_forgets_the_announcement_and_the_old_sessions_messages() {
+        let mut bench = Bench::with_board(BoardDouble::split(0xB0A2_0001, true));
+        bench.run(40);
+        assert!(bench.host.update_channel_announced());
+
+        bench.board = BoardDouble::new(0xB0A2_0002);
+        bench.run(60);
+        assert!(!bench.host.update_channel_announced());
+        assert!(bench.host.take_updates().is_empty());
+        assert_eq!(bench.host.send_update(b"Q\x01"), Ok(false));
+    }
+
+    /// The LAN link (a secure port on `ws()` datagrams) keeps the update
+    /// session like every other link: a split image's hello announces
+    /// channel 3, a message goes out and the board's answer comes back on
+    /// the update queue (OTA over Wi-Fi rides this), even though the port is
+    /// also drained by the secure handshake's own event poll.
+    #[cfg(feature = "secure-link")]
+    #[test]
+    fn a_lan_link_announces_the_update_channel_and_updates_flow_both_ways() {
+        let mut bench = SecureBench::new(BoardDouble::secure_split(0xB0A2_0001));
+        bench.run(200);
+        assert!(bench.host.is_up());
+        assert!(bench.host.update_channel_announced());
+        bench.host.take_reads();
+
+        assert_eq!(bench.host.send_update(b"Q\x01"), Ok(true));
+        bench.run(200);
+        assert_eq!(bench.board.updates, vec![b"Q\x01".to_vec()]);
+        let updates = bench.host.take_updates();
+        assert!(
+            matches!(updates.as_slice(), [m] if m[0] == b'M'),
+            "{updates:?}"
+        );
+        assert!(bench.host.take_reads().is_empty());
+    }
+
+    /// A LAN link that rekeys (a password typed for a locked board) starts a
+    /// new session: the old one's announcement and messages are forgotten,
+    /// and the new session's hello announces again.
+    #[cfg(feature = "secure-link")]
+    #[test]
+    fn a_lan_rekey_forgets_the_old_sessions_update_state() {
+        let mut bench = SecureBench::new(BoardDouble::secure_split(0xB0A2_0001));
+        bench.run(200);
+        assert!(bench.host.update_channel_announced());
+
+        // The board's next session says no `firmware`: a pre-update image.
+        bench.board.manifest = None;
+        bench.host.rekey(
+            bench.now,
+            &crate::providers::network_link::LinkKey::ANONYMOUS,
+        );
+        assert!(
+            !bench.host.update_channel_announced(),
+            "the rekey's reset forgets at once"
+        );
+        bench.run(200);
+        assert!(bench.host.is_up());
+        assert!(!bench.host.update_channel_announced());
+        assert!(bench.host.take_updates().is_empty());
+        assert_eq!(bench.host.send_update(b"Q\x01"), Ok(false));
+    }
+
     #[test]
     fn the_wake_is_capped() {
         let bench = Bench::new();
@@ -715,9 +940,13 @@ mod tests {
 
     impl Bench {
         fn new() -> Self {
+            Self::with_board(BoardDouble::new(0xB0A2_0001))
+        }
+
+        fn with_board(board: BoardDouble) -> Self {
             Self {
                 host: LinkPortService::new(LinkConfig::usb(), 0xAAAA_0001, false, None),
-                board: BoardDouble::new(0xB0A2_0001),
+                board,
                 now: 0,
             }
         }
@@ -804,6 +1033,70 @@ mod tests {
         }
     }
 
+    /// The LAN link: a secure initiator on `ws()` datagrams (one frame per
+    /// WebSocket message) against a secure responder, the way the C6's LAN
+    /// endpoint builds its slot, a millisecond at a time. The host polls its
+    /// handshake events every step, as the WebSocket provider does.
+    #[cfg(feature = "secure-link")]
+    struct SecureBench {
+        host: LinkPortService,
+        board: BoardDouble,
+        now: Micros,
+    }
+
+    #[cfg(feature = "secure-link")]
+    impl SecureBench {
+        fn new(board: BoardDouble) -> Self {
+            Self {
+                host: LinkPortService::new_secure(
+                    LinkConfig::ws(),
+                    0xAAAA_0003,
+                    false,
+                    None,
+                    &crate::providers::network_link::LinkKey::ANONYMOUS,
+                    test_entropy,
+                ),
+                board,
+                now: 0,
+            }
+        }
+
+        fn run(&mut self, steps: u32) {
+            for _ in 0..steps {
+                let now = self.now;
+                let mut sent = Vec::new();
+                self.host.transmit(now, |frame| sent.push(frame.to_vec()));
+                for frame in sent {
+                    self.board.link.on_datagram(now, &frame);
+                }
+                self.board.answer_key_lookups();
+                self.board.serve();
+                let mut out = Vec::new();
+                while let Some(frame) = self.board.link.poll_transmit(now) {
+                    out.push(frame.to_vec());
+                }
+                for frame in out {
+                    self.host.on_datagram(now, &frame);
+                }
+                while self.host.poll_secure_event().is_some() {}
+                self.now += 1_000;
+            }
+        }
+    }
+
+    #[cfg(feature = "secure-link")]
+    fn test_entropy(buf: &mut [u8]) {
+        thread_local! {
+            static NEXT: std::cell::Cell<u8> = const { std::cell::Cell::new(1) };
+        }
+        NEXT.with(|next| {
+            for byte in buf.iter_mut() {
+                *byte = next.get();
+                next.set(next.get().wrapping_add(1));
+            }
+        });
+    }
+
     /// A request carrying `bytes` of file data: many frames' worth.
     fn big_write(id: u64, bytes: usize) -> String {
         lpc_wire::json::to_string(&ClientMessage {
@@ -820,6 +1113,14 @@ mod tests {
     struct BoardDouble {
         link: Link<SelectiveRepeat>,
         requests: Vec<u64>,
+        /// What the board says about its firmware: `None` is a pre-update
+        /// board (no channel 3); `Some` a split image, whose hello carries
+        /// it unless [`Self::core_only`].
+        manifest: Option<BoardManifest>,
+        /// Core-only: no hello, an `M` on every link-up instead.
+        core_only: bool,
+        /// Channel-3 messages the board heard.
+        updates: Vec<Vec<u8>>,
     }
 
     impl BoardDouble {
@@ -831,13 +1132,71 @@ mod tests {
             Self {
                 link: Link::new(config, nonce),
                 requests: Vec::new(),
+                manifest: None,
+                core_only: false,
+                updates: Vec::new(),
+            }
+        }
+
+        /// A split image that speaks channel 3.
+        fn split(nonce: u32, core_only: bool) -> Self {
+            Self {
+                manifest: Some(board_manifest()),
+                core_only,
+                ..Self::new(nonce)
+            }
+        }
+
+        /// A split image's LAN slot: a secure responder on `ws()` that
+        /// admits the anonymous key ([`Self::answer_key_lookups`]).
+        #[cfg(feature = "secure-link")]
+        fn secure_split(nonce: u32) -> Self {
+            use lpc_wire::lp_link::secure_channel::SecureRole;
+            Self {
+                link: Link::new_secure(
+                    LinkConfig::ws(),
+                    nonce,
+                    SecureRole::Responder,
+                    test_entropy,
+                ),
+                manifest: Some(board_manifest()),
+                ..Self::new(nonce)
+            }
+        }
+
+        /// Answer a secure handshake's key lookups: the anonymous key only.
+        #[cfg(feature = "secure-link")]
+        fn answer_key_lookups(&mut self) {
+            use lpc_wire::lp_link::secure_channel::{Psk, RefusalReason, SecureEvent};
+            while let Some(event) = self.link.poll_secure_event() {
+                if let SecureEvent::KeyLookup { key_id } = event {
+                    if key_id.is_anonymous() {
+                        self.link.provide_keys(key_id, &[Psk::ANONYMOUS]);
+                    } else {
+                        self.link.refuse(key_id, RefusalReason::UnknownKey, 0);
+                    }
+                }
             }
         }
 
         fn serve(&mut self) {
             while let Some(event) = self.link.recv() {
                 match event {
-                    LinkEvent::Up { .. } => self.send(&hello()),
+                    LinkEvent::Up { .. } if self.core_only => self.send_manifest(),
+                    LinkEvent::Up { .. } => {
+                        let mut message = hello();
+                        if let ServerMsgBody::Hello(hello) = &mut message.msg {
+                            hello.firmware = self.manifest.clone();
+                        }
+                        self.send(&message);
+                    }
+                    LinkEvent::Message {
+                        channel: CH_UPDATE,
+                        data,
+                    } => {
+                        self.updates.push(data);
+                        self.send_manifest();
+                    }
                     LinkEvent::Message {
                         channel: CH_PROTO,
                         data,
@@ -858,6 +1217,37 @@ mod tests {
             let mut payload = Vec::new();
             lpc_wire::encode_server_payload(message, None, &mut payload);
             self.link.send(CH_PROTO, &payload).expect("board send");
+        }
+
+        /// `M`: the board's manifest on channel 3.
+        fn send_manifest(&mut self) {
+            let Some(manifest) = &self.manifest else {
+                return;
+            };
+            let mut m = vec![b'M'];
+            m.extend_from_slice(&manifest.to_json());
+            self.link.send(CH_UPDATE, &m).expect("board send");
+        }
+    }
+
+    fn board_manifest() -> BoardManifest {
+        BoardManifest {
+            proto: 1,
+            target: "esp32c6-4mb".to_string(),
+            chip: "esp32c6".to_string(),
+            version: "2026.10.06-1".to_string(),
+            build_id: "2026.10.06-1+abc123456789".to_string(),
+            wire_proto: WIRE_PROTO_VERSION,
+            core_sha256: "11".repeat(32),
+            core_len: 4096,
+            engine_sha256: "22".repeat(32),
+            engine_len: Some(8192),
+            layout: 1,
+            loader: 1,
+            region_len: 65_536,
+            state: lpc_update::BoardState::Running,
+            refused_build: None,
+            transfer: None,
         }
     }
 
