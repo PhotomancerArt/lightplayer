@@ -71,6 +71,7 @@ mod boot_state;
 mod core_only;
 mod engine_guard;
 mod engine_window;
+mod hw_sha;
 mod running_hook;
 mod split_flash;
 mod status_light;
