@@ -24,6 +24,7 @@ pub mod station_board;
 pub mod station_control;
 pub mod station_policy;
 pub mod station_settings;
+pub mod ws;
 
 pub use join_choice::{JoinChoice, choose};
 pub use net_frame_device::{NetFrameDevice, Unplugged};
