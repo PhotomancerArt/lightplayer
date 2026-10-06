@@ -756,7 +756,7 @@ mod tests {
     use alloc::vec;
     use lp_link::{LinkConfig, SelectiveRepeat};
     use lpc_shared::transport::LinkTrust;
-    #[cfg(feature = "json-pack")]
+    #[cfg(any(feature = "json-pack", feature = "wifi"))]
     use lpc_wire::WireEncoding;
 
     extern crate std;
