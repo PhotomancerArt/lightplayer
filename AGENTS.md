@@ -1337,6 +1337,23 @@ Run it under `--strict-bus` while bringing anything up: an access nothing
 claims is then a fault with a pc and a symbol, instead of a zero the guest
 believes.
 
+## Radio frame-rate budget
+
+Any radio-side feature (Wi‑Fi now; relay, MQTT, time sync, and update
+checks later) has a frame-rate cost ceiling, not a target: ≤ 10 % fps cost
+(median) when joined but not connected to Studio, ≤ 50 % when connected and
+editing — see `docs/adr/2026-10-06-radio-frame-rate-budget.md` for the full
+table, the measurement method (silicon only; emulated time is never a gate
+here either), and the first data point. Hiccups are bounded as a
+**percentile over a window, not a maximum** (p99 frame time ≤ 100 ms over a
+1–5 minute idle run, ≤ 1 s over an editing session) — a radio's slow frames
+are probabilistic and an occasional multi-second hang is expected, not a
+defect; the one hard line is a watchdog reset, board reset, or dropped
+link, which is always a bug. **These are ceilings, not targets**: a
+measurement inside the budget is done, don't keep tuning it, a single slow
+frame is never by itself a reason to block a change, and effort goes to
+whatever is outside the budget.
+
 ## Validation Commands
 
 These commands must pass for any change touching the shader pipeline:
