@@ -24,9 +24,9 @@ use core::panic::PanicInfo;
 #[cfg(feature = "server")]
 lpc_model::lp_embed_manifest_core! {
     package: env!("CARGO_PKG_NAME"),
-    target: env!("LP_FW_TARGET"),
+    target: crate::MANIFEST_TARGET,
     chip_family: "esp32",
-    chip: "esp32c6",
+    chip: crate::MANIFEST_CHIP,
     cargo_target: "riscv32imac-unknown-none-elf",
     profile: env!("LP_BUILD_PROFILE"),
     version: env!("LP_APP_VERSION"),
@@ -44,6 +44,14 @@ lpc_model::lp_embed_manifest_core! {
     ],
     limits_json: concat!("{\"flashAppBytes\":", env!("LP_FLASH_APP_BYTES"), "}"),
 }
+
+/// The manifest core's `target` and `platform.chip`, named once: the
+/// embedded blob and the board manifest an update reports (`ota/`) read the
+/// same constants, so the two can never say different things.
+#[cfg(feature = "server")]
+const MANIFEST_TARGET: &str = env!("LP_FW_TARGET");
+#[cfg(feature = "server")]
+const MANIFEST_CHIP: &str = "esp32c6";
 
 /// Abort-tier panic handler: stage a breadcrumb into the RTC ledger, commit
 /// it, report on serial, reset. See `recovery::panic_path` for why the ledger
@@ -1224,24 +1232,79 @@ async fn split_boot(mut core: CoreBoot) {
     } else {
         find_engine(&state).map_err(|e| ota::CoreOnlyReason::NoEngine(e.describe()))
     };
+    // The engine guard (DD34): the first boot after a USB flash hashes the
+    // engine once against the digest slot before entering it.
+    let engine = match engine {
+        Ok((entry, len)) if !state.confirmed() => {
+            match ota::engine_guard(&mut state, len, &engine_digest()) {
+                Ok(()) => Ok((entry, len)),
+                Err(why) => Err(ota::CoreOnlyReason::NoEngine(why)),
+            }
+        }
+        other => other,
+    };
     let incomplete = lp_recovery::snapshot()
         .map(|s| s.consecutive_incomplete_boots)
         .unwrap_or(0);
     let engine = match engine {
-        Ok(_) if incomplete >= ota::INCOMPLETE_BOOTS_TO_CORE_ONLY => {
-            Err(ota::CoreOnlyReason::EngineKeepsCrashing(incomplete))
+        Ok((_, engine_len)) if incomplete >= ota::INCOMPLETE_BOOTS_TO_CORE_ONLY => {
+            Err(ota::CoreOnlyReason::EngineKeepsCrashing {
+                boots: incomplete,
+                engine_len,
+            })
         }
         other => other,
     };
     log_boot_state(&state, &engine);
+    // What the update session needs, in both modes: the image's identity,
+    // the device store's `secrets` and `open` (the core reads only those,
+    // and never writes the file), and how far the USB link is trusted.
+    let identity = core_identity();
+    let access = lpc_update::board::AccessFacts::from_file(
+        &lpa_server::access_store::device_store_at_boot(core.base_fs.as_ref(), core.fs_boot_state),
+    );
+    let usb_trust = if cfg!(feature = "fixture-usb-untrusted") {
+        log::warn!("[OTA] fixture-usb-untrusted: the USB link is NOT trusted (a test image)");
+        lpc_update::board::LinkTrust::Untrusted
+    } else {
+        lpc_update::board::LinkTrust::Trusted
+    };
     match engine {
-        Ok((entry, _)) => entry(core),
+        Ok((entry, len)) => {
+            ota::install_running_hook(core.usb_link, state, identity, len, access, usb_trust);
+            entry(core)
+        }
         Err(why) => {
             let CoreBoot {
                 usb_link, watchdog, ..
             } = core;
-            ota::core_only(usb_link, watchdog, state, why).await;
+            ota::core_only(ota::CoreOnly {
+                usb_link,
+                watchdog,
+                state,
+                why,
+                identity,
+                access,
+                usb_trust,
+                entropy: fill_random,
+            })
+            .await;
         }
+    }
+}
+
+/// The image's identity, as the update session reports it: every field from
+/// the build itself (the build id static, the patched digest slot, the
+/// manifest core's words).
+#[cfg(all(lp_split, not(fw_harness)))]
+fn core_identity() -> ota::CoreIdentity {
+    ota::CoreIdentity {
+        build_id: BUILD_ID,
+        digest: engine_digest(),
+        target: crate::MANIFEST_TARGET,
+        chip: crate::MANIFEST_CHIP,
+        version: env!("LP_APP_VERSION"),
+        wire_proto: lpc_wire::WIRE_PROTO_VERSION,
     }
 }
 
@@ -1262,8 +1325,8 @@ fn log_boot_state(
         Ok((_, len)) => alloc::format!("engine {len} B"),
         Err(ota::CoreOnlyReason::OnTrial) => "engine not started (trial)".into(),
         Err(ota::CoreOnlyReason::NoEngine(why)) => alloc::format!("no engine: {why}"),
-        Err(ota::CoreOnlyReason::EngineKeepsCrashing(n)) => {
-            alloc::format!("engine keeps crashing ({n} incomplete boots)")
+        Err(ota::CoreOnlyReason::EngineKeepsCrashing { boots, .. }) => {
+            alloc::format!("engine keeps crashing ({boots} incomplete boots)")
         }
     };
     log::info!(
