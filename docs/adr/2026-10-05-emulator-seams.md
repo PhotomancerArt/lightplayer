@@ -164,7 +164,7 @@ media (a virtual LAN, a Bluetooth air) arrive with their seams.
 
 Firmware never hand-writes a seam function or its call. `lp-seam`'s
 `seam_fn!` generates both: the seam function is `#[inline(never)]
-extern "C"`, exported, and starts with a unique non-`pure` hint
+extern "C"`, exported, and holds a unique non-`pure` hint
 (`addi zero, zero, <id>`) so it cannot be deleted or folded; the call shim
 reaches it only from an `asm!` `call` with the arguments bound to `a0..a7`
 and `clobber_abi("C")`, so LTO cannot drop the argument set-up or fold the
@@ -180,14 +180,57 @@ boundary; code that goes round it is code the emulator cannot answer.
 
 - One firmware still runs everywhere. On silicon the LED seam is one call,
   one no-op hint and one return per spin iteration.
-- A seam-off emulator run is today's machine: no scan, no patch, no
-  per-slice check, no moved figure.
+- A seam-off emulator run is today's machine: no scan, no patch, one
+  boolean test a slice, no moved figure.
 - End users get a lighter emulated board; nobody else does, so no test,
   walk or validate run measures a seamed machine by accident.
 - Every new seam is an ABI change (a new identity). Old images lose their
   seams until updated, and say so.
 - A performance seam's numbers carry their label everywhere they go, and
   cannot become a transcript.
+
+## Evidence (planning `lp2025/2026-10-05-1709-seams-foundation-led`, PR #987)
+
+**What the firmware pays** (`just fw-esp32c6-size-check`, main against the
+branch): core +80 B, engine +8 B, room left −8 B (358,056 → 358,048 B).
+`.rodata` +64 B, `.text` +20 B, `.engine_text` +8 B; `.data`, `.bss`,
+`.rwtext` and `.trap` unchanged, so **0 B of RAM and 0 B of IRAM**. In the
+release image `LP_SEAM_TABLE` is 0x58 B of core rodata (0x42000b28),
+`lp_seam_ws281x_wait_step` is 0x14 B of core text (0x42065b80) carrying its
+hint `addi zero,zero,1`, and its one call site is inside
+`Esp32C6RmtWs281xOutput::write`'s spin loop. The `test_seam_abi` harness
+prints `echo=7` seam-off and `echo=1587544071` (0x5ea00007) seam-on, so the
+arguments and the result survive LTO (§9).
+
+**Honesty** (`lp-cli/tests/emu_seam_led.rs`, in `just test-emu-c6-cli`):
+`render-basic` on the shipped image, seam off and `led=fast`, renders 869
+frames each, **byte-identical frames and identical heap**, over 56,469 seam
+calls. `seam_off_is_today` holds the seam-off machine to today's, and no chip
+figure moved.
+
+**The split image** (`seam_split_rom_up`, `seam_two_tables`,
+`seam_restart_rescans`): ROM-up from the reset vector through the real IDF
+bootloader and the RAM-only loader, the seam waits for the app, arms only
+once the hart runs from the flash window, against a live table whose own
+address is below the engine window (0x4240_0000) and whose flash offset is
+past the core offset the loader prints (`[LOADER] core @`). The bootloader's
+checksum of the app passes, which is the K2 lesson held. Two identity-matching
+tables arm the live one; a restart rescans.
+
+**What it buys — provisional.** The end-user row (the tab module, ROM-up,
+the split image with `render-basic` in lpfs, USB attached, t2, 5,500 ms
+emulated; `lp-emu:esp32c6:t2` against `lp-emu:esp32c6:t2+led=fast`, lp-emu
+`b77b5a4a0`), best of 3, user seconds: **node/V8 13.85 → 12.03 (−13.1 %)**,
+**bun/JSC 15.03 → 10.52 (−30.0 %)**, UART identical on every leg. **These
+were taken at load average 30–85 and are provisional**: they sit either side
+of the spike's −22.4 % / −21.0 %, and will be retaken in a quiet window (and
+on the phone) before they are quoted as the seam's effect.
+`docs/emulator-perf-ledger.md` §3 carries the row.
+
+**Studio** (G1, passed 2026-10-05): a Devices-page board journals `emu: LED
+fast mode on (led=fast)` once per start; `?seams=none` journals `emu: LED fast
+mode off (?seams=none)` and runs today's machine; `?emu=tab` and
+`?emu=ws://…` boards journal nothing about seams (`just walk-no-board --tab`).
 
 ## Alternatives Considered
 
@@ -207,5 +250,10 @@ boundary; code that goes round it is code the emulator cannot answer.
 - The Bluetooth link seam, with the firmware wake handler and rule (a)'s API.
 - The network seam, inside Wi-Fi M6.
 - Xtensa seams (roadmap M7): a windowed-ABI return.
-- Evidence (device cost, honesty test, end-user bench row, split-image
-  arming facts) is filled in when the plan closes.
+- Retake the end-user bench row in a quiet window and on the phone; the
+  numbers above are provisional.
+- **Later idea, not planned:** the seam's state is a journal line, not on the
+  device card. Yona at G1: "no one will care. later we may want to add
+  additional info about the emulator in some detail popup or similar, where
+  we can point it out." If such a popup is built, it is where the seam
+  belongs.
