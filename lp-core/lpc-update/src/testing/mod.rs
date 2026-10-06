@@ -15,6 +15,8 @@ pub mod model_build;
 pub mod nor_flash;
 
 pub use board_rig::BoardRig;
-pub use fake_board::{BootFault, FakeBoard, MODEL_PROGRESS, MODEL_REGION_START, RunningCore};
+pub use fake_board::{
+    BootFault, FakeBoard, MODEL_BLOCK, MODEL_PROGRESS, MODEL_REGION_START, RunningCore,
+};
 pub use model_build::ModelBuild;
 pub use nor_flash::NorFlash;

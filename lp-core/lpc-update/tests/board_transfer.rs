@@ -6,7 +6,9 @@ mod support;
 
 use lpc_update::board::{AccessFacts, LinkId, LinkTrust, SessionConfig, SessionMode};
 use lpc_update::code_table::CHUNK;
-use lpc_update::testing::{BootFault, FakeBoard, MODEL_PROGRESS, MODEL_REGION_START, ModelBuild};
+use lpc_update::testing::{
+    BootFault, FakeBoard, MODEL_BLOCK, MODEL_PROGRESS, MODEL_REGION_START, ModelBuild,
+};
 use lpc_update::transfer_record::{RecordRead, RecordStage, TransferRecord};
 use lpc_update::{BoardState, Mismatch, PieceKind, Refusal, build_id_field};
 
@@ -162,10 +164,12 @@ fn the_copy_stream_helper_decodes_from_the_dictionary_only() {
 
 // ---- Power cuts ---------------------------------------------------------------
 
-/// How many flash operations a full X → Y update takes.
-fn ops_of_a_full_update(z: ZMode) -> u64 {
+/// How many flash operations a full X → Y update takes, on a board whose
+/// block erase is `block` (`None`: sectors only).
+fn ops_of_a_full_update(z: ZMode, block: Option<u32>) -> u64 {
     let (x, y) = x_and_y();
     let mut rig = rig(vec![x, y.clone()], 0);
+    rig.board.block = block;
     let start = rig.board.flash.ops();
     let mut host = Host::new(y);
     host.z = z;
@@ -175,12 +179,13 @@ fn ops_of_a_full_update(z: ZMode) -> u64 {
 
 /// Cut the power after every flash operation of a full update (clean, then
 /// torn), boot again from the frozen flash, and drive to the end.
-fn cut_after_every_operation(z: ZMode, tear: bool) -> (u64, u32) {
-    let total = ops_of_a_full_update(z);
+fn cut_after_every_operation(z: ZMode, tear: bool, block: Option<u32>) -> (u64, u32) {
+    let total = ops_of_a_full_update(z, block);
     let mut resumed_mid_piece = 0;
     for k in 0..total {
         let (x, y) = x_and_y();
         let mut rig = rig(vec![x, y.clone()], 0);
+        rig.board.block = block;
         rig.board.flash.tear(tear);
         rig.board.flash.cut_after(k);
         let mut host = Host::new(y.clone());
@@ -247,28 +252,87 @@ fn marked_chunks(board: &FakeBoard) -> Option<(PieceKind, u32, u32)> {
     }
 }
 
+/// Both boards: one that erases blocks ahead, one that erases sector by
+/// sector.
+const BLOCKS: [Option<u32>; 2] = [Some(MODEL_BLOCK), None];
+
 #[test]
 fn a_cut_after_every_flash_operation_converges_raw() {
-    let (ops, resumed) = cut_after_every_operation(ZMode::Raw, false);
-    println!("raw: {ops} flash operations cut one by one; {resumed} cuts resumed mid-piece");
-    assert!(ops > 40, "{ops} operations");
-    assert!(resumed > 10, "{resumed} cuts resumed mid-piece");
+    for block in BLOCKS {
+        let (ops, resumed) = cut_after_every_operation(ZMode::Raw, false, block);
+        println!(
+            "raw, block {block:?}: {ops} flash operations cut one by one; {resumed} cuts resumed mid-piece"
+        );
+        assert!(ops > 30, "{ops} operations");
+        assert!(resumed > 10, "{resumed} cuts resumed mid-piece");
+    }
 }
 
 #[test]
 fn a_torn_cut_after_every_flash_operation_converges_raw() {
-    let (ops, resumed) = cut_after_every_operation(ZMode::Raw, true);
-    println!("raw, torn: {ops} flash operations cut one by one; {resumed} cuts resumed mid-piece");
+    for block in BLOCKS {
+        let (ops, resumed) = cut_after_every_operation(ZMode::Raw, true, block);
+        println!(
+            "raw, torn, block {block:?}: {ops} flash operations cut one by one; {resumed} cuts resumed mid-piece"
+        );
+    }
 }
 
 #[test]
 fn a_cut_after_every_flash_operation_converges_with_encoding_1() {
-    for tear in [false, true] {
-        let (ops, resumed) = cut_after_every_operation(ZMode::NoDictionary, tear);
-        println!(
-            "Z, torn {tear}: {ops} flash operations cut one by one; {resumed} cuts resumed mid-piece"
+    for block in BLOCKS {
+        for tear in [false, true] {
+            let (ops, resumed) = cut_after_every_operation(ZMode::NoDictionary, tear, block);
+            println!(
+                "Z, torn {tear}, block {block:?}: {ops} flash operations cut one by one; {resumed} cuts resumed mid-piece"
+            );
+            assert!(resumed > 10);
+        }
+    }
+}
+
+#[test]
+fn whole_blocks_are_erased_ahead_and_save_operations() {
+    // A block erase replaces its sectors' erases: fewer operations for the
+    // same update, and every chunk still asked for exactly once.
+    let with_blocks = ops_of_a_full_update(ZMode::Raw, Some(MODEL_BLOCK));
+    let by_sector = ops_of_a_full_update(ZMode::Raw, None);
+    assert!(
+        with_blocks + 3 <= by_sector,
+        "blocks {with_blocks} ops, sectors {by_sector} ops"
+    );
+}
+
+#[test]
+fn a_block_erase_never_reaches_past_the_piece() {
+    // Everything outside the pieces Y wrote is as it was: the running core
+    // and the bytes past each piece's last sector were never block-erased.
+    let (x, y) = x_and_y();
+    let mut rig = rig(vec![x, y.clone()], 0);
+    let before = rig.board.flash.bytes().to_vec();
+    let mut host = Host::new(y.clone());
+    drive(&mut rig, &mut host, USB, T, &mut 0);
+    assert_eq!(rig.board.running_build(), Some(&y));
+    let after = rig.board.flash.bytes();
+    let running = rig.board.running.expect("booted");
+    let core = running.core_off..running.core_off + (running.core_len).div_ceil(CHUNK) * CHUNK;
+    // The model's placement: the engine fills what the core leaves.
+    let engine_at = if running.core_off == MODEL_REGION_START {
+        core.end
+    } else {
+        MODEL_REGION_START
+    };
+    let engine = engine_at..engine_at + (y.engine.len() as u32).div_ceil(CHUNK) * CHUNK;
+    for at in (MODEL_REGION_START..rig.board.region_end).step_by(CHUNK as usize) {
+        if core.contains(&at) || engine.contains(&at) {
+            continue;
+        }
+        let s = at as usize..(at + CHUNK) as usize;
+        assert_eq!(
+            &after[s.clone()],
+            &before[s],
+            "sector {at:#x} outside Y's pieces changed"
         );
-        assert!(resumed > 10);
     }
 }
 

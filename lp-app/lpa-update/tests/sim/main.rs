@@ -480,7 +480,8 @@ fn a_second_host_takes_over_after_fifteen_seconds_of_quiet() {
     let (h1, h2) = (lpc_update::board::LinkId(1), lpc_update::board::LinkId(2));
     rig.link_up(0, h1, LinkTrust::Untrusted);
     rig.link_up(0, h2, LinkTrust::Untrusted);
-    let mut serve = lpa_update::ServeSession::new(ServeConfig::USB);
+    // One chunk per request, so four rounds leave host 1 mid-transfer.
+    let mut serve = lpa_update::ServeSession::new(ServeConfig { ahead: 1 });
     let mut to_board = vec![host.offer().encode()];
     for _ in 0..4 {
         let mut next = Vec::new();
