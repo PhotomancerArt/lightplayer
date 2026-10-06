@@ -93,6 +93,54 @@ fn starved_heap_refuses_the_load_and_stays_alive() {
     );
 }
 
+/// Never dark (G1 desk walk): a refused switch runs the project that was
+/// running before, whether the load itself unloaded it or a StopAllProjects
+/// just before it did (what an upload sends), and the error says so.
+#[test]
+fn a_refused_switch_leaves_the_previous_project_running() {
+    let (mut server, project_path) = server_with_clock_project("load-refusal-restore");
+    server
+        .load_project(project_path.as_path())
+        .expect("the first project loads");
+
+    for stop_first in [false, true] {
+        let mut requests = Vec::new();
+        if stop_first {
+            requests.push(Incoming::primary(ClientMessage {
+                id: 60,
+                msg: ClientRequest::StopAllProjects,
+            }));
+        }
+        requests.push(Incoming::primary(ClientMessage {
+            id: 61,
+            msg: ClientRequest::LoadProject {
+                path: String::from(project_path.as_str()),
+            },
+        }));
+        server.set_read_headroom_probe(Some(|| Some(PROJECT_LOAD_MIN_HEADROOM_BYTES - 1)));
+        let mut transport = VecTransport::default();
+        block_on(server.tick_and_send(16, requests, &mut transport)).expect("tick");
+        let refusal = transport
+            .sent
+            .iter()
+            .find(|frame| frame.id == 61)
+            .expect("the load is answered");
+        let WireServerMsgBody::Error { error } = &refusal.msg else {
+            panic!("expected an Error body, got {:?}", refusal.msg);
+        };
+        assert!(
+            error.contains("load refused") && error.contains("is running again"),
+            "stop first: {stop_first}: {error}"
+        );
+        assert_eq!(
+            server.project_manager().list_loaded_projects().len(),
+            1,
+            "stop first: {stop_first}: the previous project runs again"
+        );
+        server.set_read_headroom_probe(None);
+    }
+}
+
 #[test]
 fn starved_heap_refuses_the_host_call_path_too() {
     // Boot-time startup loads use `LpServer::load_project` directly; the
