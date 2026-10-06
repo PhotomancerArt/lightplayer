@@ -3380,16 +3380,14 @@ test-emu-c6-ota scenarios="" filter="": install-rv32-target
 # plain `cargo build`, not a reference image, so no espflash and no git
 # history.
 #
-# CI runs only the two release halves below, in two jobs (2026-10-06: the
-# one job that ran all of it had grown to 25 minutes and was cut at its
-# budget). The first two lines are NOT in CI here because `Validate (x64)`'s
-# workspace `cargo test` already runs them (neither is `#[ignore]`d) on every
-# PR this job's filter fires for — and here each was a whole extra build
-# tree (a dev `-p lp-cli` test build, ~4 min; a dev `-p lpa-studio-core`
-# one, ~1.5 min), for under a second of tests.
+# CI runs only the two halves below, in two jobs (2026-10-06: the one job
+# that ran all of it had grown to 25 minutes and was cut at its budget). The
+# parity line is NOT in CI here because `Validate (x64)`'s workspace `cargo
+# test` already runs it (nothing in it is `#[ignore]`d) on every PR this
+# job's filter fires for — and here it was a whole extra dev `-p lp-cli` test
+# build, ~4 min, for under a second of tests.
 test-emu-c6-cli: test-emu-c6-cli-link test-emu-c6-cli-boards
     cargo test -p lp-cli --test validate_registry_parity --test validate_link_host_parity
-    cargo test -p lpa-studio-core --lib app_agent_eval_tests::the_
 
 # The link half: the shipped image's USB lp-link, its pinned figures
 # (`emu_usb_link_gates`), the Wi-Fi settings over it and `link capture`. CI's
@@ -3408,8 +3406,13 @@ test-emu-c6-cli-link: install-rv32-target
 # the split image's boot, and stage B of the app-agent evals (the Sean
 # goldens decoded off the pad). CI's `Emulator C6 lp-cli (x64)` job runs it.
 # No pinned figures here, so that job has no figure-patch step.
+#
+# Stage A's `the_` tests run first even though `Validate (x64)` runs them
+# too: their scripted replays WRITE the project trees stage B decodes
+# (`target/app-agent-evals/scripted/`), so stage B fails without them.
 test-emu-c6-cli-boards: install-rv32-target
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --no-fail-fast --test emu_frag_reads --test emu_split_boot -- --include-ignored --nocapture
+    cargo test -p lpa-studio-core --lib app_agent_eval_tests::the_
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test app_agent_emu_decode -- --include-ignored --nocapture the_
 
 # The link half's test binaries, named once: the recipe above runs them and

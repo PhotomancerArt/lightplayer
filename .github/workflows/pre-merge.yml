@@ -2330,11 +2330,10 @@ jobs:
   # Split again 2026-10-06, when this job had grown to ~25 min of lp-cli tests
   # plus the ratchet and was cancelled at its 30-minute budget with every test
   # passing (runs 37469170395, 37473996154). The whole-board tests moved to
-  # `emu-c6-cli` below; the two dev-profile builds the recipe also ran (~4 min
-  # of `-p lp-cli` parity tests, ~1.5 min of `-p lpa-studio-core` stage-A
-  # evals) left CI altogether, because `Validate (x64)` runs both already; and
-  # each half is now ONE cargo invocation, so its fat-LTO test binaries link
-  # side by side (see the justfile's `test-emu-c6-cli-link`).
+  # `emu-c6-cli` below; the dev `-p lp-cli` build the recipe also ran (~4 min,
+  # for two parity tests) left CI altogether, because `Validate (x64)` runs
+  # them already; and each half is now ONE cargo invocation, so its fat-LTO
+  # test binaries link side by side (see the justfile's `test-emu-c6-cli-link`).
   #
   # Cheaper setup than emu-c6 on purpose: a depth-1 checkout (nothing here
   # builds a reference image, so no historical commits are needed) and no
