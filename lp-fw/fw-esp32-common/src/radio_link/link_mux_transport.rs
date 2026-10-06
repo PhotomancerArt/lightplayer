@@ -28,10 +28,14 @@
 //!    [`SMALL_REPLY_BYTES`] is copied into its radio link's own send ring
 //!    instead, and holds nothing.
 //! 2. **A slow radio link cannot stall the device for long.** The wait for a
-//!    radio link to let go of the frame buffer is bounded
-//!    ([`RADIO_WRITE_DEADLINE_MS`]); past it the link is closed with a
-//!    logged reason (its link dropped at once, so it reads the buffer no
-//!    more) and the server loop moves on.
+//!    radio link to let go of the frame buffer is bounded — by its own
+//!    deadline ([`RADIO_WRITE_DEADLINE_MS`] on Bluetooth,
+//!    [`LAN_WRITE_DEADLINE_MS`] on the LAN) and by what is left of the
+//!    tick's own budget ([`TICK_WAIT_LIMIT_MS`], measured from the last
+//!    upkeep, so a tick that already compiled a shader cannot then wait out
+//!    a whole deadline and trip the watchdog); past it the link is closed
+//!    with a logged reason (its link dropped at once, so it reads the
+//!    buffer no more) and the server loop moves on.
 //! 3. **A radio link's hello waits for its lp-link session.** The radio side
 //!    announces a link when the central enables notifications (it could
 //!    receive nothing before); its lp-link handshake runs after that, as
@@ -97,6 +101,20 @@ use crate::serial::server_payload::{decode_client_payload, serialize_server_payl
 /// measured (a MacBook, spike Run C) took notifications at 5–12 KB/s, so the
 /// worst honest reply needs ~3.3 s; the bound is set above that, not at it.
 pub const RADIO_WRITE_DEADLINE_MS: u32 = 5_000;
+
+/// The same bound for a LAN link. A LAN peer drains a whole 16 KiB reply in
+/// milliseconds, so one that has not let go of the buffer in a second has
+/// stopped reading (a backgrounded tab, a stalled Wi-Fi), and every second
+/// of waiting is a second the board does not render.
+pub const LAN_WRITE_DEADLINE_MS: u32 = 1_000;
+
+/// The most one server tick may spend waiting for radio links to let go of
+/// the frame buffer, counted from the tick's start (the last upkeep) and
+/// including whatever the tick did first — a project load, a shader
+/// compile. Below the 8 s watchdog with room for the rest of the tick: a
+/// load followed by a stalled peer's 5 s wait reset the emulated C6 in a
+/// loop (PR C's walk, 12 watchdog resets).
+pub const TICK_WAIT_LIMIT_MS: u32 = 5_000;
 
 /// How long an untrusted radio link may stay open without logging in (PQ6).
 pub const LOGIN_DEADLINE_MS: u64 = 10_000;
@@ -173,6 +191,9 @@ pub struct LinkMuxTransport<U, D> {
     #[cfg(feature = "wifi")]
     secure: Vec<(LinkId, SecureLinkEvent)>,
     upkeep_hook: Option<fn(&LpServer, u64)>,
+    /// Until when the current server tick may wait on radio links: the last
+    /// upkeep (the end of the previous tick) plus [`TICK_WAIT_LIMIT_MS`].
+    tick_wait_until: Micros,
 }
 
 impl<U: ServerTransport + FrameBufHolder, D: DelayNs> LinkMuxTransport<U, D> {
@@ -196,6 +217,7 @@ impl<U: ServerTransport + FrameBufHolder, D: DelayNs> LinkMuxTransport<U, D> {
             #[cfg(feature = "wifi")]
             secure: Vec::with_capacity(LINK_SLOTS),
             upkeep_hook: None,
+            tick_wait_until: tick_wait_until(),
         }
     }
 
@@ -420,8 +442,9 @@ impl<U: ServerTransport + FrameBufHolder, D: DelayNs> LinkMuxTransport<U, D> {
     }
 
     /// Wait until no radio link reads the frame buffer (rule 1): each one
-    /// with a long reply in flight gets [`RADIO_WRITE_DEADLINE_MS`] to finish
-    /// cutting it into frames, and is closed past that.
+    /// with a long reply in flight gets its deadline ([`write_deadline_ms`])
+    /// to finish cutting it into frames, cut short by what is left of the
+    /// tick's [`TICK_WAIT_LIMIT_MS`], and is closed past that.
     async fn release_radio_holders(&mut self) {
         let port = self.port;
         for index in 0..LINK_SLOTS {
@@ -429,23 +452,26 @@ impl<U: ServerTransport + FrameBufHolder, D: DelayNs> LinkMuxTransport<U, D> {
             if !slot.external_in_flight() {
                 continue;
             }
-            let outcome = select(
-                wait_for_release(slot),
-                self.delay.delay_ms(RADIO_WRITE_DEADLINE_MS),
-            )
-            .await;
-            if let Either::Second(()) = outcome {
-                let Some((id, held)) = slot.with_any_link(|id, link| (id, link.buffered_bytes()))
-                else {
-                    continue;
-                };
-                log::error!(
-                    "radio link {id}: a reply still not out of the frame buffer after \
-                     {RADIO_WRITE_DEADLINE_MS} ms ({held} B held) — closing"
+            let left_ms = (self.tick_wait_until.saturating_sub(now_us()) / 1_000) as u32;
+            let wait_ms = write_deadline_ms(index).min(left_ms);
+            let released = wait_ms > 0
+                && matches!(
+                    select(wait_for_release(slot), self.delay.delay_ms(wait_ms)).await,
+                    Either::First(())
                 );
-                slot.drop_link(id);
-                self.close_radio(id, "reply deadline");
+            if released || !slot.external_in_flight() {
+                continue;
             }
+            let Some((id, held)) = slot.with_any_link(|id, link| (id, link.buffered_bytes()))
+            else {
+                continue;
+            };
+            log::error!(
+                "radio link {id}: a reply still not out of the frame buffer after {wait_ms} ms \
+                 ({held} B held; {left_ms} ms of the tick's wait budget left) — closing"
+            );
+            slot.drop_link(id);
+            self.close_radio(id, "reply deadline");
         }
     }
 
@@ -617,6 +643,23 @@ fn answer_lookup(
     }
 }
 
+/// The end of a tick's wait budget, for a tick starting now.
+fn tick_wait_until() -> Micros {
+    now_us() + u64::from(TICK_WAIT_LIMIT_MS) * 1_000
+}
+
+/// How long the link in slot `index` may hold the frame buffer: Bluetooth's
+/// air is slow ([`RADIO_WRITE_DEADLINE_MS`]), the LAN's is not
+/// ([`LAN_WRITE_DEADLINE_MS`]).
+fn write_deadline_ms(index: usize) -> u32 {
+    #[cfg(feature = "wifi")]
+    if index >= RADIO_LINK_SLOTS {
+        return LAN_WRITE_DEADLINE_MS;
+    }
+    let _ = index;
+    RADIO_WRITE_DEADLINE_MS
+}
+
 /// Resolves once `slot`'s link no longer reads the frame buffer, waking the
 /// radio side to keep cutting frames meanwhile.
 async fn wait_for_release(slot: &RadioLinkSlot) {
@@ -736,6 +779,8 @@ impl<U: ServerTransport + FrameBufHolder + LinkUpkeep, D: DelayNs> LinkUpkeep
     }
 
     fn upkeep(&mut self, server: &LpServer, now_ms: u64) {
+        // The end of a tick: the next one's wait budget starts here.
+        self.tick_wait_until = tick_wait_until();
         self.primary.upkeep(server, now_ms);
         self.expire_unauthenticated(
             now_ms,
@@ -752,6 +797,7 @@ impl<U: ServerTransport + FrameBufHolder + LinkUpkeep, D: DelayNs> LinkUpkeep
 mod tests {
     use super::*;
     use alloc::boxed::Box;
+    use alloc::rc::Rc;
     use alloc::string::ToString;
     use alloc::vec;
     use lp_link::{LinkConfig, SelectiveRepeat};
@@ -884,6 +930,57 @@ mod tests {
         assert_eq!(port.slot(1).take_close_request(), Some("reply deadline"));
         // Frames still addressed to it are skipped, not errors.
         assert!(block(mux.send(link, error_reply(33, 10))).is_ok());
+    }
+
+    /// A tick that has already spent its wait budget (a project load, a
+    /// compile) does not wait on a stalled link at all: the link is closed
+    /// at once and the tick goes on, so a load and a stalled peer can never
+    /// add up past the watchdog (PR C's walk: 12 resets).
+    #[test]
+    fn a_tick_past_its_wait_budget_closes_a_stalled_link_without_waiting() {
+        let _turn = frame_buf_turn();
+        let port = leak_port();
+        let usb = Usb {
+            port: Some(port),
+            ..Usb::default()
+        };
+        let waited = Rc::new(core::cell::Cell::new(0u64));
+        let mut mux = LinkMuxTransport::new(usb, port, CountingDelay(Rc::clone(&waited)));
+        let mut central = Central::new(0x3333_5555, 247);
+        let link = open_session(port, &mut mux, &mut central, 1, 247);
+        block(mux.send(link, error_reply(41, 9_000))).unwrap();
+        assert!(port.slot(1).external_in_flight());
+        // The tick began long enough ago that its budget is spent.
+        mux.tick_wait_until = now_us();
+        block(mux.send(LinkId::PRIMARY, error_reply(42, 10))).unwrap();
+        assert_eq!(waited.get(), 0, "no wait at all");
+        assert_eq!(mux.take_closed_links(), vec![link]);
+        assert_eq!(port.slot(1).take_close_request(), Some("reply deadline"));
+    }
+
+    /// A stalled peer's wait is its link's deadline, never more: a whole
+    /// Bluetooth deadline, a LAN link's second.
+    #[test]
+    fn a_stalled_links_wait_is_its_own_deadline() {
+        let _turn = frame_buf_turn();
+        let port = leak_port();
+        let usb = Usb {
+            port: Some(port),
+            ..Usb::default()
+        };
+        let waited = Rc::new(core::cell::Cell::new(0u64));
+        let mut mux = LinkMuxTransport::new(usb, port, CountingDelay(Rc::clone(&waited)));
+        let mut central = Central::new(0x3333_6666, 247);
+        let link = open_session(port, &mut mux, &mut central, 1, 247);
+        block(mux.send(link, error_reply(43, 9_000))).unwrap();
+        // A fresh tick with budget to spare: the link's deadline decides.
+        mux.tick_wait_until = now_us() + 10_000_000;
+        block(mux.send(LinkId::PRIMARY, error_reply(44, 10))).unwrap();
+        assert_eq!(waited.get(), u64::from(RADIO_WRITE_DEADLINE_MS) * 1_000_000);
+        assert_eq!(mux.take_closed_links(), vec![link]);
+        assert_eq!(write_deadline_ms(0), RADIO_WRITE_DEADLINE_MS);
+        #[cfg(feature = "wifi")]
+        assert_eq!(write_deadline_ms(RADIO_LINK_SLOTS), LAN_WRITE_DEADLINE_MS);
     }
 
     /// Packing exists only with `json-pack`; without it every reply is JSON.
@@ -1425,6 +1522,14 @@ mod tests {
     impl DelayNs for NeverDelay {
         async fn delay_ns(&mut self, _ns: u32) {
             core::future::pending::<()>().await;
+        }
+    }
+
+    /// A deadline that elapses at once, counting the nanoseconds asked for.
+    struct CountingDelay(Rc<core::cell::Cell<u64>>);
+    impl DelayNs for CountingDelay {
+        async fn delay_ns(&mut self, ns: u32) {
+            self.0.set(self.0.get() + u64::from(ns));
         }
     }
 
