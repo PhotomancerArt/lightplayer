@@ -154,6 +154,14 @@ browser-ble = [
     "lpa-link/browser-ble",
     "dep:wasm-bindgen-futures",
 ]
+# A board on the LAN (Wi-Fi M6 P07): the platform half
+# (`app/devices/browser_lan_source.rs`) over `lpa-link`'s `browser_websocket`
+# provider, reached by `?lan=`. wasm-only; the transport it plugs into
+# (`lan_transport.rs`) and the keys its links present
+# (`access/network_link_keys.rs`) are host-tested.
+browser-websocket = [
+    "lpa-link/browser-websocket",
+]
 # The update story's real inputs (`app/devices/device_update_fixtures.rs`):
 # a board manifest, this Studio's build facts and the device view, for the
 # web's stories to read through the same standing, words and offers the

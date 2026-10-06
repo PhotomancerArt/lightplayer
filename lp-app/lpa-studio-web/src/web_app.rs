@@ -429,6 +429,18 @@ pub fn App() -> Element {
             controller.set_ble_transport(Rc::new(lpa_studio_core::BleDeviceTransport::new(
                 Rc::new(lpa_studio_core::BrowserBleSource::new()),
             )));
+            // Boards on the LAN (`?lan=`, Wi-Fi M6 P07): only when the flag
+            // names one — there is no UI to add one yet (M8). Each link is a
+            // secure lp-link presenting this browser's access keys, the same
+            // the access controller unlocks a Bluetooth board with.
+            let lan = crate::dev_url_flags::lan_addresses();
+            if !lan.is_empty() {
+                let keys = Rc::new(controller.network_link_keys())
+                    as Rc<dyn lpa_link::providers::network_link::LinkKeys>;
+                controller.set_lan_transport(Rc::new(lpa_studio_core::LanDeviceTransport::new(
+                    Rc::new(lpa_studio_core::BrowserLanSource::new(&lan, keys)),
+                )));
+            }
         }
         let (actor, handle) = StudioActor::new(controller, make_pull_timer);
         let mut view_rx = handle.view;
@@ -1070,6 +1082,7 @@ pub fn App() -> Element {
                 // page lifetime (forget).
                 install_serial_hotplug(&startup_bridge.tx);
                 install_ble_hotplug(&startup_bridge.tx);
+                install_lan_hotplug(&startup_bridge.tx);
             }
             #[cfg(not(target_arch = "wasm32"))]
             let _ = &startup_bridge;
@@ -2329,6 +2342,33 @@ fn install_ble_hotplug(tx: &CommandSender) {
         disconnect_tx.send(StudioCommand::DeviceHotplug(DeviceHotplug::Disconnected));
     }) as Box<dyn FnMut()>);
     let installed = lpa_link::providers::browser_ble::install_ble_events(
+        on_connect.as_ref().unchecked_ref(),
+        on_disconnect.as_ref().unchecked_ref(),
+    );
+    if installed {
+        on_connect.forget();
+        on_disconnect.forget();
+    }
+}
+
+/// The LAN presence edges (`?lan=`, Wi-Fi M6 P07): a board's socket opening
+/// is a `connect`, one dropping a `disconnect` — the same two re-derivation
+/// triggers as Bluetooth's.
+#[cfg(target_arch = "wasm32")]
+fn install_lan_hotplug(tx: &CommandSender) {
+    use lpa_studio_core::app::studio::studio_command::DeviceHotplug;
+    use wasm_bindgen::JsCast;
+    use wasm_bindgen::prelude::Closure;
+
+    let connect_tx = tx.clone();
+    let on_connect = Closure::wrap(Box::new(move || {
+        connect_tx.send(StudioCommand::DeviceHotplug(DeviceHotplug::Connected));
+    }) as Box<dyn FnMut()>);
+    let disconnect_tx = tx.clone();
+    let on_disconnect = Closure::wrap(Box::new(move || {
+        disconnect_tx.send(StudioCommand::DeviceHotplug(DeviceHotplug::Disconnected));
+    }) as Box<dyn FnMut()>);
+    let installed = lpa_link::providers::browser_websocket::install_websocket_events(
         on_connect.as_ref().unchecked_ref(),
         on_disconnect.as_ref().unchecked_ref(),
     );

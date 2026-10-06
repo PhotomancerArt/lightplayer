@@ -129,6 +129,9 @@ pub fn DevicesPage(
                                 access: devices.access.get(&card.id).cloned(),
                                 // Its Wi‑Fi row (Wi‑Fi roadmap M5).
                                 wifi: devices.wifi.get(&card.id).cloned(),
+                                // How a board on the LAN is reached
+                                // (`?lan=`, Wi-Fi M6 P07).
+                                lan: devices.lan_links.get(&card.id).cloned(),
                                 // Its files across a layout change (the
                                 // C6 repartition): question, refusal, a
                                 // held board, a backup to put back.
@@ -672,6 +675,7 @@ mod tests {
         DeviceRosterView {
             access: Default::default(),
             wifi: Default::default(),
+            lan_links: Default::default(),
             updates: Default::default(),
             roster,
             transport_available,

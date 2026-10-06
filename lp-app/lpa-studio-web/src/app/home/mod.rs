@@ -70,6 +70,8 @@ pub(crate) mod thumb_poster;
 pub(crate) mod unlock_link;
 pub(crate) mod unlock_page;
 pub(crate) mod unlock_sheet;
+#[cfg(feature = "stories")]
+pub(crate) mod wifi_link_stories;
 pub(crate) mod wifi_panel;
 #[cfg(feature = "stories")]
 pub(crate) mod wifi_stories;

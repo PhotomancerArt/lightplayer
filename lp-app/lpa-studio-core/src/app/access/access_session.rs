@@ -27,6 +27,13 @@
 //! never prompted until an edit is refused (`NotPermitted { needs: Edit }`),
 //! which opens the sheet with "This needs an edit password".
 //!
+//! A board on the LAN (Wi-Fi M6 P07) runs the same machine over a KEYED
+//! link, where the handshake's key is the login: the steps are the same, but
+//! a login ends in keys for the link (`keyed_login.rs`) rather than an
+//! answer, and the board's next hello — on the session the link rekeys onto
+//! — is that login's outcome ([`AccessSession::checked`] after
+//! [`LoginAttemptOutcome::Rekeyed`](super::login_attempt::LoginAttemptOutcome::Rekeyed)).
+//!
 //! Everything here is a pure function of what the controller tells it; the
 //! conversations themselves run in `access_controller.rs`.
 
@@ -121,6 +128,19 @@ pub enum AccessStep {
         typed: Option<TypedPassword>,
         challenge: Option<Challenge>,
     },
+    /// [`Self::Login`] on a KEYED link (a board on the LAN at `address`):
+    /// the same inputs, ending in keys handed to `link_keys` instead of an
+    /// answer (`keyed_login.rs`). The controller makes one from a `Login`
+    /// for a LAN device; the session itself only ever plans `Login`.
+    KeyedLogin {
+        window: LoginWindow,
+        address: String,
+        held: Vec<HeldKey>,
+        passwords: Vec<String>,
+        typed: Option<TypedPassword>,
+        challenge: Option<Challenge>,
+        link_keys: super::network_link_keys::NetworkLinkKeys,
+    },
     /// Read the device's access list, and install the `held` keys it is
     /// missing and remove the `stale` salts (a USB connect; no keys for a
     /// Bluetooth link at edit, which only lists).
@@ -161,6 +181,9 @@ pub struct AccessSession {
     /// A challenge this device's board issued and nothing answered yet
     /// (nothing held matched): the window, the challenge, and when.
     challenge: Option<(LoginWindow, Challenge, Millis)>,
+    /// A keyed login handed its link new keys: the next window's hello is
+    /// its outcome.
+    rekeyed: bool,
 }
 
 impl Default for AccessSession {
@@ -176,6 +199,7 @@ impl Default for AccessSession {
             busy: false,
             retry_at: None,
             challenge: None,
+            rekeyed: false,
         }
     }
 }
@@ -292,6 +316,12 @@ impl AccessSession {
                 passwords,
                 typed,
                 ..
+            }
+            | AccessStep::KeyedLogin {
+                held,
+                passwords,
+                typed,
+                ..
             } => {
                 self.busy = true;
                 // An open challenge is answered by this login, or dropped.
@@ -345,6 +375,29 @@ impl AccessSession {
             },
             (true, None) => AccessPhase::Locked,
         };
+        if std::mem::take(&mut self.rekeyed) {
+            // This hello is the keyed login's outcome: the link moved onto
+            // the keys it found, and the board granted what they hold.
+            match &self.phase {
+                AccessPhase::Granted { tier, .. } => {
+                    let answered = *tier == Tier::Edit
+                        || !matches!(self.prompt, Some(PromptReason::NeedsEdit));
+                    if answered {
+                        self.prompt = None;
+                        self.last_refusal = None;
+                    } else {
+                        self.prompt = Some(PromptReason::Refused { retry_after_ms: 0 });
+                    }
+                }
+                _ => {
+                    let refused = PromptReason::Refused { retry_after_ms: 0 };
+                    self.last_refusal = Some(refused.clone());
+                    self.prompt = Some(refused);
+                }
+            }
+            self.challenge = None;
+            return;
+        }
         if matches!(self.phase, AccessPhase::Locked)
             && self.auto_spent
             && self.typed.is_none()
@@ -460,6 +513,20 @@ impl AccessSession {
                     self.phase = AccessPhase::Unreachable;
                 }
                 self.prompt = None;
+            }
+            Outcome::Rekeyed => {
+                // No answer was sent: the link is moving onto the keys, and
+                // its next hello says what they granted (`checked`). The
+                // sheet reads "Unlocking…" until then.
+                if was_typed {
+                    self.typed = None;
+                }
+                self.rekeyed = true;
+                self.retry_at = None;
+                if same_window {
+                    self.phase_window = Some(window);
+                    self.phase = AccessPhase::LoggingIn;
+                }
             }
             Outcome::Failed(_) => {
                 // The link failed under the conversation: keep a typed

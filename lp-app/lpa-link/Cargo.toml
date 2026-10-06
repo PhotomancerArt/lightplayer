@@ -79,6 +79,8 @@ serde_json = { workspace = true }
 # The recipe is `just lpa-link-browser-test`; CI runs it in `validate-browser`.
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 js-sys = "0.3"
+# The LAN suite's board double grants tiers in its hello.
+lpc-access = { path = "../../lp-core/lpc-access" }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 wasm-bindgen-test = "0.3"
@@ -111,6 +113,22 @@ browser-ble = [
     "dep:wasm-bindgen",
     "dep:wasm-bindgen-futures",
 ]
+# A board on the LAN (Wi-Fi M6 P07): the same wire on lp-link, one frame per
+# binary WebSocket message to `ws://<board>/link`, on a SECURE link (Noise
+# NNpsk0, keyed with Studio's access keys). `secure-link` for the secure
+# `LinkPortService`; no `web-sys` WebSocket features: the JS module owns the
+# socket, exactly as `browser_ble.js` owns the GATT connection.
+browser-websocket = [
+    "secure-link",
+    "device-session",
+    "dep:js-sys",
+    "dep:wasm-bindgen",
+    "dep:wasm-bindgen-futures",
+]
+# A secure lp-link initiator under `LinkPortService` (`new_secure`, the
+# handshake's events, `retry_with`): lpc-wire's `secure-link`, which brings
+# lp-link's Noise channel. Implied by `browser-websocket`.
+secure-link = ["device-link", "lpc-wire/secure-link"]
 # `lpa-devices`' transport contract (`Link`), implemented over this crate's
 # transports (`device_link`). The model defines the trait, `lpa-link` adapts
 # to it, and `device_link::wire` is the ONE place the two frame vocabularies

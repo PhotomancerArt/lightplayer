@@ -192,6 +192,11 @@ pub(crate) fn DeviceRosterCard(
     /// at the app view; `None` for a board the link shows no row for.
     #[props(default)]
     wifi: Option<lpa_studio_core::UiDeviceWifi>,
+    /// The board is reached on the LAN (`?lan=`, Wi-Fi M6 P07): the info
+    /// line leads with "Wi-Fi · <address>". Functional, not designed (M8).
+    /// `None` for every other link.
+    #[props(default)]
+    lan: Option<lpa_studio_core::UiLanLink>,
     /// Stories only: mount "Who has access" open.
     #[props(default)]
     access_panel_open: bool,
@@ -382,12 +387,11 @@ pub(crate) fn DeviceRosterCard(
                 cancel: offered(panel.cancel.as_ref()),
                 continue_action: offered(panel.continue_action.as_ref()),
             });
-    let device_line = match access.as_ref().and_then(|access| access.line.as_deref()) {
-        // Over Bluetooth the login leads: it is what decides what the
-        // card can do, and at 375 px the freshness is what truncates.
-        Some(login) => format!("{login} · {}", device_line_text(&card, busy_zone)),
-        None => device_line_text(&card, busy_zone),
-    };
+    let device_line = info_line(
+        lan.as_ref(),
+        access.as_ref().and_then(|access| access.line.as_deref()),
+        &device_line_text(&card, busy_zone),
+    );
     let on_access = super::access_ui_context::access_handler();
     let on_network = super::access_ui_context::network_handler();
     let unlock = access.as_ref().and_then(|access| access.unlock);
@@ -781,8 +785,10 @@ pub(crate) fn DeviceRosterCard(
             footer { class: device_zone_class(),
                 // Connections (spike §1): USB, the Bluetooth switch, and
                 // "Access" where this link may see it. Only a board
-                // Studio talks to as LightPlayer has one.
-                if let Some(access) = access.clone().filter(|_| linked) {
+                // Studio talks to as LightPlayer has one — and not yet one
+                // reached on the LAN: its USB and Bluetooth rows would
+                // describe links it is not on (the network card is M8's).
+                if let Some(access) = access.clone().filter(|_| linked && lan.is_none()) {
                     super::connections_group::ConnectionsGroup {
                         device,
                         access,
@@ -1421,6 +1427,19 @@ fn firmware_line_text(
 /// Honest staleness rather than a stuck spinner is the model's own wording
 /// ("last heard 3 s ago" / "quiet — last heard 12 s ago"); the evidence
 /// detail stands in for a board that has not been heard from at all yet.
+/// The info line: how a network board is reached ("Wi-Fi · 10.0.0.5"), then
+/// the login over an untrusted link — it decides what the card can do — then
+/// freshness and detail, which truncate first at 375 px.
+fn info_line(lan: Option<&lpa_studio_core::UiLanLink>, login: Option<&str>, rest: &str) -> String {
+    let reach = lan.map(lpa_studio_core::UiLanLink::line);
+    [reach.as_deref(), login, Some(rest)]
+        .into_iter()
+        .flatten()
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(" · ")
+}
+
 fn device_line_text(card: &DeviceView, busy_zone: Option<ZoneKind>) -> String {
     if busy_zone == Some(ZoneKind::Device)
         && let Some(activity) = &card.activity
@@ -2247,6 +2266,20 @@ mod tests {
             firmware_line_text(&card, None, Some(ZoneKind::Project)),
             "Blank flash — needs firmware"
         );
+    }
+
+    /// A board on the LAN says how it is reached before anything else on
+    /// its info line; every other board's line is unchanged.
+    #[test]
+    fn a_wifi_board_leads_its_info_line_with_how_it_is_reached() {
+        let lan = lpa_studio_core::lan_link_for_endpoint("lan:ws://10.0.0.5/link");
+        assert_eq!(
+            info_line(lan.as_ref(), Some("Unlocked by Yona's MacBook"), "ready"),
+            "Wi-Fi · 10.0.0.5 · Unlocked by Yona's MacBook · ready"
+        );
+        assert_eq!(info_line(lan.as_ref(), None, ""), "Wi-Fi · 10.0.0.5");
+        assert_eq!(info_line(None, Some("Locked"), "ready"), "Locked · ready");
+        assert_eq!(info_line(None, None, "ready"), "ready");
     }
 
     /// The DEVICE line: honest staleness, the evidence detail while nothing

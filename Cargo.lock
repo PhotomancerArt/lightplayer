@@ -6392,6 +6392,7 @@ dependencies = [
  "lp-bootctl",
  "lpa-client",
  "lpa-devices",
+ "lpc-access",
  "lpc-model",
  "lpc-wire",
  "lpfs",
