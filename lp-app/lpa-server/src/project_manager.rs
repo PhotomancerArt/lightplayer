@@ -45,11 +45,19 @@ pub struct ProjectManager {
     /// in builds with the power-button runtime (see `LpServer::power`).
     #[cfg(feature = "node-power-button")]
     power_service: Option<Rc<dyn PowerService>>,
-    /// What the last unload that stopped anything stopped, until a load
-    /// succeeds: what a refused or failed load restores, so a refusal
-    /// never leaves the board dark (`take_stopped`).
-    stopped: Vec<LpPathBuf>,
+    /// The path of what the last unload that stopped anything stopped
+    /// (the first project, if several), until a load succeeds: what a
+    /// refused or failed load restores, so a refusal never leaves the board
+    /// dark (`take_stopped`). Empty: nothing owed. Its buffer is reserved at
+    /// construction and only ever copied into: remembering must not allocate
+    /// while a project is live, or the record lands above the project and
+    /// splits the space the project frees (the 2026-09-24 class: it cost the
+    /// emulated C6 its 64 KiB load block).
+    stopped: String,
 }
+
+/// Bytes reserved for the stopped project's path (`ProjectManager::stopped`).
+const STOPPED_PATH_RESERVE: usize = 128;
 
 impl ProjectManager {
     /// Create a new project manager
@@ -66,7 +74,7 @@ impl ProjectManager {
             latent_read_back: None,
             #[cfg(feature = "node-power-button")]
             power_service: None,
-            stopped: Vec::new(),
+            stopped: String::with_capacity(STOPPED_PATH_RESERVE),
         }
     }
 
@@ -248,12 +256,14 @@ impl ProjectManager {
     /// Output channels and other resources are freed before removal.
     /// Note: next_handle_id is not reset - handles continue incrementing.
     pub fn unload_all_projects(&mut self) -> Result<(), ServerError> {
-        if !self.projects.is_empty() {
-            self.stopped = self
-                .projects
-                .values()
-                .map(|project| project.path().to_path_buf())
-                .collect();
+        if let Some(project) = self.projects.values().next() {
+            let path = project.path().as_str();
+            self.stopped.clear();
+            // A path longer than the reserve is not remembered (it would
+            // grow the buffer here, above the live project).
+            if path.len() <= self.stopped.capacity() {
+                self.stopped.push_str(path);
+            }
         }
         for project in self.projects.values_mut() {
             project.flush_panel_state();
@@ -264,15 +274,21 @@ impl ProjectManager {
         Ok(())
     }
 
-    /// The projects the last unload stopped, taken: what to run again when
-    /// the load that followed it was refused or failed.
-    pub fn take_stopped(&mut self) -> Vec<LpPathBuf> {
-        core::mem::take(&mut self.stopped)
+    /// The project the last unload stopped, taken: what to run again when
+    /// the load that followed it was refused or failed. Built when it is
+    /// taken (no project is live then), and the reserve is kept.
+    pub fn take_stopped(&mut self) -> Option<LpPathBuf> {
+        if self.stopped.is_empty() {
+            return None;
+        }
+        let path = LpPathBuf::from(self.stopped.as_str());
+        self.stopped.clear();
+        Some(path)
     }
 
     /// A load succeeded: nothing stopped is owed a restore any more.
     pub fn forget_stopped(&mut self) {
-        self.stopped = Vec::new();
+        self.stopped.clear();
     }
 
     /// With no project loaded, give the tables' memory back instead of

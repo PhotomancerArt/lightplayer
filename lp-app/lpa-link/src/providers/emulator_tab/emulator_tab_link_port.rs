@@ -91,6 +91,34 @@ pub fn take_reads(port: EmulatorTabPort) -> Option<Vec<WireRead>> {
     })
 }
 
+/// Queue one channel-3 (update) message and write what the link has to send
+/// now. `Ok(false)`: the board has not announced the update channel this
+/// session, so nothing was queued (DS9; the link notes it).
+pub fn send_update(port: EmulatorTabPort, message: &[u8]) -> Result<bool, String> {
+    let queued = LINKS
+        .with(|links| {
+            links
+                .borrow_mut()
+                .get_mut(&port.id())
+                .map(|board| board.service.send_update(message))
+        })
+        .unwrap_or_else(|| Err("the emulated board's port is not open".to_string()))?;
+    service(port);
+    Ok(queued)
+}
+
+/// The board's channel-3 (update) messages since the last take: the model's
+/// link alone drains them.
+pub fn take_updates(port: EmulatorTabPort) -> Vec<Vec<u8>> {
+    LINKS.with(|links| {
+        links
+            .borrow_mut()
+            .get_mut(&port.id())
+            .map(|board| board.service.take_updates())
+            .unwrap_or_default()
+    })
+}
+
 /// What the board's link said about itself since the last take.
 pub fn take_notes(port: EmulatorTabPort) -> Vec<String> {
     LINKS.with(|links| {

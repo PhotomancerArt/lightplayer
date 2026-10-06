@@ -133,6 +133,32 @@ everyday firmware work, and the hello of a board running one carries no
 `firmware` block (a host reads it as "connect over USB to update"). Both
 kinds stay supported.
 
+**The local Studio packages a single image by default.** `lp-cli firmware
+package <id> --single-image` (and `firmware build … --single-image`) builds a
+split def as one linked image, with no update files; the dev Studio recipes
+(`just studio-dev`, `studio-dev-emu`, `studio-web-dev-build`, and
+`studio-firmware-package-*` called bare) pass it, because a local firmware
+change should not cost the split image's second link pass. Measured warm on
+an M2 Max (2026-10-06, one source file touched, the rest cached): **single
+image 23 s, split image 50 s** (pass 1 link 23 s + pass 2 link 25 s, then the
+packer). To test updates, ask for the split image: `LP_FW_IMAGE=split just
+studio-dev` (or `just studio-firmware-package-served split`). The release
+bundle (`just studio-web-build`, which every deploy runs) is **always** split,
+and the Pages artifact refuses to stage without the update files.
+
+**What the Studio bundle carries** (OTA M7, DS10): for a split package,
+`firmware/<id>/ota/` holds its `ota-manifest.json`, `core.z` and `engine.z`
+— never `core.bin`/`engine.bin`, which Studio slices out of the merged image
+by the package manifest's `split` offsets. For the C6 that is about 1.8 MB
+(`core.z` 741,552 + `engine.z` 1,084,808 + the manifest 13,255 bytes at
+`e6775ad53`), fetched only when an update runs.
+`scripts/studio-copy-firmware.sh` copies them, and refuses update files that
+describe another package (`ota-manifest.json`'s `package` entry must hash the
+copied `manifest.json`). Studio believes it holds an update-capable build only
+when that check passes **and** the image's manifest core says `"ota":
+{"layout": 1}` — otherwise it has no build of its own, offers no over-the-air
+update, and over USB keeps today's flash.
+
 `lp-cli firmware release-assets --out <dir> [--targets <id,…>] [--allow-dev]`
 stages those packages under release asset names (`<target>.<file>`), verifying
 every file and compressing nothing; `lp-cli firmware release-check <dir>`

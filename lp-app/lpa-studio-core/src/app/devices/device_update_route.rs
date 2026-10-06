@@ -3,10 +3,28 @@
 //! USB flash.
 //!
 //! Over the air on **every** link, USB included, when the board can update
-//! over its link and the link carries lp-link's update channel: one path,
-//! and the safer one. Everything else keeps the flash. That was a question
-//! for the product owner (QY1); the answer is the one switch below, and a
-//! "no" turns only the USB case back to the flash.
+//! over its link, the link carries lp-link's update channel, **and this
+//! Studio holds an update-capable build** of what it would install: one
+//! path, and the safer one. That was a question for the product owner
+//! (QY1); the answer is the one switch below, and a "no" turns only the USB
+//! case back to the flash. N12 settled it: USB stays over the air.
+//!
+//! **The build is half the route** (the director's note on P8): a local or
+//! dev Studio can carry a build with no update files — a single image, the
+//! fast local build — and then no over-the-air install is possible, whatever
+//! the board can do. Such a Studio has no own-build facts at all: the web's
+//! own-build source yields them only for a package whose
+//! `ota-manifest.json` and manifest core's `ota` field check out.
+//!
+//! | board can | build can | link | route |
+//! |---|---|---|---|
+//! | yes | yes | carries channel 3 | [`UpdateRoute::OverTheAir`] |
+//! | yes | no | USB | [`UpdateRoute::Flash`] (today's flash, Lasting) |
+//! | yes | no | Bluetooth, carries channel 3 | [`UpdateRoute::NoWirelessBuild`]: no install offer, a plain line why |
+//! | no, or the link carries no channel 3 | — | any | [`UpdateRoute::Flash`] |
+//!
+//! A restore or a finish needs none of this: it puts back the board's own
+//! build, from the engine cache or the store, with no click.
 
 /// QY1: over a USB cable, a board that can update over the air does.
 pub const USB_UPDATES_OVER_THE_AIR: bool = true;
@@ -37,19 +55,26 @@ pub enum UpdateRoute {
     /// link that cannot carry it.
     #[default]
     Flash,
+    /// Over Bluetooth, a board that could update there, but this Studio's
+    /// build cannot be installed over the air: no install offer, and the
+    /// card says why.
+    NoWirelessBuild,
 }
 
-/// The route for a board that `can_update_over_link` (its manifest names a
-/// split layout and a chip this Studio knows) reached over `link`, which
-/// `carries_update_channel` or not.
+/// The route for a board that `board_can` update over its link (its
+/// manifest names a split layout and a chip this Studio knows), when this
+/// Studio `build_can` install an update-capable build over the air,
+/// reached over `link`, which `carries_update_channel` or not.
 pub fn update_route(
-    can_update_over_link: bool,
+    board_can: bool,
+    build_can: bool,
     link: UpdateLink,
     carries_update_channel: bool,
 ) -> UpdateRoute {
     route_with(
         USB_UPDATES_OVER_THE_AIR,
-        can_update_over_link,
+        board_can,
+        build_can,
         link,
         carries_update_channel,
     )
@@ -59,7 +84,8 @@ pub fn update_route(
 /// tested.
 fn route_with(
     usb_over_the_air: bool,
-    can_update_over_link: bool,
+    board_can: bool,
+    build_can: bool,
     link: UpdateLink,
     carries_update_channel: bool,
 ) -> UpdateRoute {
@@ -67,10 +93,13 @@ fn route_with(
         UpdateLink::Usb => usb_over_the_air,
         UpdateLink::Bluetooth => true,
     };
-    if can_update_over_link && carries_update_channel && link_allows {
-        UpdateRoute::OverTheAir
-    } else {
-        UpdateRoute::Flash
+    if !(board_can && carries_update_channel && link_allows) {
+        return UpdateRoute::Flash;
+    }
+    match (build_can, link) {
+        (true, _) => UpdateRoute::OverTheAir,
+        (false, UpdateLink::Usb) => UpdateRoute::Flash,
+        (false, UpdateLink::Bluetooth) => UpdateRoute::NoWirelessBuild,
     }
 }
 
@@ -78,34 +107,68 @@ fn route_with(
 mod tests {
     use super::*;
 
+    /// Board × build capability × link, one test each (the director's note
+    /// on P8). Over USB, both able: over the air.
     #[test]
-    fn over_usb_a_board_that_can_goes_over_the_air() {
+    fn over_usb_a_board_and_a_build_that_can_go_over_the_air() {
         assert_eq!(
-            update_route(true, UpdateLink::Usb, true),
+            update_route(true, true, UpdateLink::Usb, true),
             UpdateRoute::OverTheAir
         );
     }
 
     #[test]
-    fn over_bluetooth_a_board_that_can_goes_over_the_air() {
+    fn over_bluetooth_a_board_and_a_build_that_can_go_over_the_air() {
         assert_eq!(
-            update_route(true, UpdateLink::Bluetooth, true),
+            update_route(true, true, UpdateLink::Bluetooth, true),
             UpdateRoute::OverTheAir
         );
     }
 
-    /// A sim (or any link without lp-link's update channel) never does.
+    /// A single-image (or OTA-less) Studio build: over USB the board keeps
+    /// today's flash.
+    #[test]
+    fn over_usb_a_build_that_cannot_keeps_the_flash() {
+        assert_eq!(
+            update_route(true, false, UpdateLink::Usb, true),
+            UpdateRoute::Flash
+        );
+    }
+
+    /// The same over Bluetooth: no install at all, and the card says why.
+    #[test]
+    fn over_bluetooth_a_build_that_cannot_offers_no_install() {
+        assert_eq!(
+            update_route(true, false, UpdateLink::Bluetooth, true),
+            UpdateRoute::NoWirelessBuild
+        );
+    }
+
+    /// A sim (or any link without lp-link's update channel) never does,
+    /// whatever the build.
     #[test]
     fn a_link_without_the_update_channel_keeps_the_flash() {
         for link in [UpdateLink::Usb, UpdateLink::Bluetooth] {
-            assert_eq!(update_route(true, link, false), UpdateRoute::Flash);
+            for build_can in [true, false] {
+                assert_eq!(
+                    update_route(true, build_can, link, false),
+                    UpdateRoute::Flash
+                );
+            }
         }
     }
 
+    /// A pre-update board (a single image, no channel 3), whatever the
+    /// build.
     #[test]
     fn a_board_that_cannot_update_over_its_link_keeps_the_flash() {
         for link in [UpdateLink::Usb, UpdateLink::Bluetooth] {
-            assert_eq!(update_route(false, link, true), UpdateRoute::Flash);
+            for build_can in [true, false] {
+                assert_eq!(
+                    update_route(false, build_can, link, true),
+                    UpdateRoute::Flash
+                );
+            }
         }
     }
 
@@ -113,11 +176,11 @@ mod tests {
     #[test]
     fn the_no_answer_turns_only_usb_back_to_the_flash() {
         assert_eq!(
-            route_with(false, true, UpdateLink::Usb, true),
+            route_with(false, true, true, UpdateLink::Usb, true),
             UpdateRoute::Flash
         );
         assert_eq!(
-            route_with(false, true, UpdateLink::Bluetooth, true),
+            route_with(false, true, true, UpdateLink::Bluetooth, true),
             UpdateRoute::OverTheAir
         );
     }

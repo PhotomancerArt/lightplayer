@@ -157,17 +157,18 @@ impl UpdateNarration {
     }
 
     /// The leg's link went down. A line only for a drop mid-piece (a reset
-    /// after a whole piece is the board doing its job).
+    /// after a whole piece is the board doing its job, and so is one before
+    /// a piece moved a byte — the board's reset after its last commit
+    /// reports the next stage at 0% first).
     pub fn link_down(&mut self, now_ms: u64) -> Option<String> {
         for piece in [&mut self.backup, &mut self.core, &mut self.engine] {
             piece.close_leg();
         }
         // A request names the offset it wants: the last one of a piece is
         // within a chunk of its end.
-        let interrupted = self
-            .last_progress
-            .take()
-            .filter(|(done, total)| u64::from(*done) + u64::from(CHUNK) < u64::from(*total));
+        let interrupted = self.last_progress.take().filter(|(done, total)| {
+            *done > 0 && u64::from(*done) + u64::from(CHUNK) < u64::from(*total)
+        });
         self.down = Some((now_ms, interrupted.is_some()));
         let (done, total) = interrupted?;
         Some(format!(
@@ -313,6 +314,20 @@ mod tests {
         assert_eq!(
             n.rates().as_deref(),
             Some("backup 1 822 KB in 81 s (22 KB/s) · core 1 160 KB in 52 s (22 KB/s)")
+        );
+    }
+
+    /// A reset before a piece moved a byte is the board's own: its last
+    /// commit's reset reports the next stage at 0% first (seen in the
+    /// emulator walk), and that is no drop.
+    #[test]
+    fn a_reset_at_zero_percent_is_the_boards_not_a_drop() {
+        let mut n = UpdateNarration::default();
+        n.progress(1_000, UpdateStageFacts::Finishing, 0, 1_822_000);
+        assert_eq!(n.link_down(1_500), None);
+        assert_eq!(
+            n.link_up(4_500).as_deref(),
+            Some("board reset · reconnected in 3.0 s")
         );
     }
 }

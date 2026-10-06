@@ -272,6 +272,27 @@ pub fn send_client_json(id: u32, json: &str) -> Result<(), LinkError> {
     Ok(())
 }
 
+/// Queue one channel-3 (update) message on the port's link and write what
+/// the link has to send now. `Ok(false)`: the board has not announced the
+/// update channel this session, so nothing was queued (DS9; the link notes
+/// it). Errors like [`send_client_json`]'s.
+pub fn send_update(id: u32, message: &[u8]) -> Result<bool, LinkError> {
+    if matches!(service(id), Serviced::Gone | Serviced::Closed) {
+        return Err(LinkError::other("Serial port is not open."));
+    }
+    let queued = PORTS
+        .with(|ports| {
+            ports
+                .borrow_mut()
+                .get_mut(&id)
+                .map(|port| port.service.send_update(message))
+        })
+        .unwrap_or_else(|| Err("Serial port is not open.".to_string()))
+        .map_err(LinkError::other)?;
+    service(id);
+    Ok(queued)
+}
+
 #[wasm_bindgen]
 extern "C" {
     #[wasm_bindgen(js_namespace = console, js_name = warn)]
@@ -486,6 +507,19 @@ pub fn take_reads(id: u32) -> Vec<WireRead> {
             .borrow_mut()
             .get_mut(&id)
             .map(|port| port.service.take_reads())
+            .unwrap_or_default()
+    })
+}
+
+/// The board's channel-3 (update) messages since the last take, this link
+/// session's only. Drained by the model's link pump alone: a conversation
+/// borrowing the wire never sees them.
+pub fn take_updates(id: u32) -> Vec<Vec<u8>> {
+    PORTS.with(|ports| {
+        ports
+            .borrow_mut()
+            .get_mut(&id)
+            .map(|port| port.service.take_updates())
             .unwrap_or_default()
     })
 }
