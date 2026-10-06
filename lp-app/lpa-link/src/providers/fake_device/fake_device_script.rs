@@ -337,6 +337,17 @@ pub struct FakeDeviceScript {
     /// fails on silicon. `None` keeps the permissive outputs every other
     /// script relies on.
     pub board_manifest: Option<String>,
+    /// The board's Wi‑Fi station as its server reports it: the state a
+    /// status read names and what a scan answers (the firmware's station
+    /// probes). `None`: no station, `unsupported`, as every host server.
+    pub wifi_station: Option<FakeWifiStation>,
+}
+
+/// A scripted Wi‑Fi station: plain functions, as the firmware's probes are.
+#[derive(Clone, Copy)]
+pub struct FakeWifiStation {
+    pub state: fn() -> lpc_wire::StationState,
+    pub scan: fn() -> lpc_wire::NetworkScan,
 }
 
 impl FakeDeviceScript {
@@ -349,7 +360,15 @@ impl FakeDeviceScript {
             rom_banner: vec![C6_ROM_BANNER.to_string()],
             foreign_banner: vec![XIAO_FACTORY_DEMO_LINE.to_string()],
             board_manifest: None,
+            wifi_station: None,
         }
+    }
+
+    /// A board with a Wi‑Fi station: its status names `state`, and a scan
+    /// answers `scan`.
+    pub fn with_wifi_station(mut self, station: FakeWifiStation) -> Self {
+        self.wifi_station = Some(station);
+        self
     }
 
     /// The ROM banner a classic ESP32 prints (its fixed build date), in

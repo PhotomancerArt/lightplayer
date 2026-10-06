@@ -17,7 +17,11 @@
 //! connect page asks ([`NetworkCommand::Scan`]), and never on a board whose
 //! station is `unsupported`. A board answers a scan from what its radio
 //! last heard; when that is stale it says `scanning` and listens, and the
-//! controller asks again after [`ASK_AGAIN`]. While a just-added network's
+//! controller asks again after [`ASK_AGAIN`]. A scan asked while the
+//! status read (or a change) is still out, or before the first read, is
+//! owed and goes out once that answer lands: the connect page asks once,
+//! when it opens, which is usually just as its board's first read leaves.
+//! While a just-added network's
 //! test is under way it re-reads the status every [`ASK_AGAIN`] too, so the
 //! test advances live (Looking for → Checking the password → Getting an
 //! address); it stops once the test is done or dismissed.
@@ -105,6 +109,9 @@ struct DeviceNetwork {
     /// The board said `scanning`: a scan is asked again after
     /// [`ASK_AGAIN`] (the connect page keeps saying it is looking).
     scan_again: bool,
+    /// A scan was asked while a read or a change was out (or before the
+    /// first status): it goes out when that answer lands.
+    scan_owed: bool,
     /// A status read is asked again after [`ASK_AGAIN`] (a test runs).
     read_again: bool,
     /// The network an add in flight is saving.
@@ -244,21 +251,8 @@ impl NetworkController {
                 let Some(found) = roster.device(device) else {
                     return;
                 };
-                let Some((window, WifiReach::Edit)) = reach(found, granted(device)) else {
-                    return;
-                };
-                let state = self.devices.entry(device).or_default();
-                state.scan_again = false;
-                let can_scan = state
-                    .status
-                    .as_ref()
-                    .is_some_and(|status| status.station != StationState::Unsupported);
-                if !can_scan || state.scanning || state.reading || state.writing {
-                    return;
-                }
-                if self.dispatch(device, window.link, NetworkStep::Scan, effects) {
-                    self.devices.entry(device).or_default().scanning = true;
-                }
+                let reach = reach(found, granted(device));
+                self.scan(device, reach, effects);
             }
             NetworkCommand::DismissTest { device } => {
                 if let Some(state) = self.devices.get_mut(&device) {
@@ -321,6 +315,7 @@ impl NetworkController {
                         // The row says it needs author instead of an error.
                         state.needs_author = true;
                         state.error = None;
+                        state.scan_owed = false;
                     }
                     Err(NetworkRefusal::Said(error)) => {
                         // A refused change keeps the status the board last
@@ -328,7 +323,50 @@ impl NetworkController {
                         state.error = Some(error);
                     }
                 }
+                // The scan asked while this was out goes now.
+                let state = self.devices.entry(device).or_default();
+                if std::mem::take(&mut state.scan_owed)
+                    && let Some(found) = roster.device(device)
+                {
+                    let reach = reach(found, granted(device));
+                    self.scan(device, reach, effects);
+                }
             }
+        }
+    }
+
+    /// Ask `device` what its radio heard, on the link `reach` names, when it
+    /// can scan now; owe the scan when a read or a change is out (or the
+    /// first status has not come back), so its answer sends it.
+    fn scan(
+        &mut self,
+        device: DeviceId,
+        reach: Option<(LoginWindow, WifiReach)>,
+        effects: &DeviceEffects,
+    ) {
+        let Some((window, WifiReach::Edit)) = reach else {
+            return;
+        };
+        let state = self.devices.entry(device).or_default();
+        state.scan_again = false;
+        if state.scanning {
+            return;
+        }
+        if state.reading || state.writing || state.status.is_none() {
+            // Not now, and not never: the answer in flight (or the first
+            // read) decides whether this board can scan.
+            state.scan_owed = true;
+            return;
+        }
+        let can_scan = state
+            .status
+            .as_ref()
+            .is_some_and(|status| status.station != StationState::Unsupported);
+        if !can_scan {
+            return;
+        }
+        if self.dispatch(device, window.link, NetworkStep::Scan, effects) {
+            self.devices.entry(device).or_default().scanning = true;
         }
     }
 
