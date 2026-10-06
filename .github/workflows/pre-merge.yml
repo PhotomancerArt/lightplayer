@@ -2348,11 +2348,12 @@ jobs:
   heap-budget-chips:
     name: Heap budget (esp32c6 chip)
     runs-on: ubuntu-24.04
-    # Expected ~13 min after the 2026-10-06 split: ~1 min setup, ~6 min
-    # release lp-cli test tree (sccache floor), ~1 min firmware, ~3.5 min
-    # link tests, ~1.5 min ratchet. 30 is ~2-3x that; re-measure before
-    # tightening (and before raising it: growth here wants another split).
-    timeout-minutes: 30
+    # Measured 9.7 and 10.4 min on PR #997 (2026-10-06, the split): ~0.6 min
+    # setup, 8.1 min link half (6 of it the release lp-cli test tree, the
+    # sccache floor, plus the firmware), 1.6 min ratchet. 25 is ~2.4x the
+    # max; re-measure before tightening, and before raising it — growth here
+    # wants another split, not a bigger number.
+    timeout-minutes: 25
     needs: detect-changes
     if: needs.detect-changes.outputs.emu_c6 == 'true'
     env:
@@ -2489,10 +2490,11 @@ jobs:
   emu-c6-cli:
     name: Emulator C6 lp-cli (x64)
     runs-on: ubuntu-24.04
-    # Expected ~13 min: ~1 min setup, ~6 min release lp-cli test tree,
-    # ~1 min firmware, ~5 min of tests (emu_split_boot's split build
-    # included). 30 is ~2-3x that; re-measure before tightening.
-    timeout-minutes: 30
+    # Measured 14.7 min on PR #997 (2026-10-06): ~0.9 min setup, 5.9 min
+    # release lp-cli test tree, 3.5 min frag reads + split boot (firmware and
+    # split build included), 3.2 min stage A's dev `-p lpa-studio-core`
+    # build, 1.1 min stage B. 35 is ~2.4x; re-measure before tightening.
+    timeout-minutes: 35
     needs: detect-changes
     if: needs.detect-changes.outputs.emu_c6 == 'true'
     env:
