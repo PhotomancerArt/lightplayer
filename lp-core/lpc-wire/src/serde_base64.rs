@@ -25,16 +25,67 @@ where
 }
 
 /// Deserialize a base64 string to `Vec<u8>`.
+///
+/// Decoded straight from the text the deserializer holds, never through a
+/// `String` copy of it: a JSON request with an 8 KB blob is ~11 KB of base64,
+/// and a board decoding it had to find a second block of that size before
+/// the decoded bytes' own (PR B: it reset an emulated C6).
 pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
 where
     D: Deserializer<'de>,
 {
-    use base64::Engine;
-    use serde::Deserialize;
-    let s = String::deserialize(deserializer)?;
-    base64::engine::general_purpose::STANDARD
-        .decode(s)
-        .map_err(serde::de::Error::custom)
+    deserializer.deserialize_str(Base64Visitor { smart: false })
+}
+
+/// Decodes the string it is handed (borrowed when the deserializer can lend
+/// it, as `serde_json::from_str` does for a string with no escapes), with no
+/// copy of the text.
+struct Base64Visitor {
+    /// [`deserialize_smart`]'s rule: text that is not base64 of non-UTF-8
+    /// bytes is the bytes of the text itself.
+    smart: bool,
+}
+
+impl<'de> serde::de::Visitor<'de> for Base64Visitor {
+    type Value = Vec<u8>;
+
+    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("a base64 string")
+    }
+
+    fn visit_str<E: serde::de::Error>(self, s: &str) -> Result<Vec<u8>, E> {
+        use base64::Engine;
+        let decoded = base64::engine::general_purpose::STANDARD.decode(s);
+        if !self.smart {
+            return decoded.map_err(E::custom);
+        }
+        if let Ok(decoded_bytes) = decoded {
+            match core::str::from_utf8(&decoded_bytes) {
+                Err(_) => return Ok(decoded_bytes),
+                Ok(decoded_text) if decoded_text == s => return Ok(decoded_bytes),
+                Ok(_) => {}
+            }
+        }
+        Ok(s.as_bytes().to_vec())
+    }
+
+    fn visit_string<E: serde::de::Error>(self, s: String) -> Result<Vec<u8>, E> {
+        if self.smart {
+            use base64::Engine;
+            // An owned string the deserializer had to build anyway: keep it
+            // as the bytes when it is not a base64 blob.
+            match base64::engine::general_purpose::STANDARD.decode(&s) {
+                Ok(decoded_bytes) => match core::str::from_utf8(&decoded_bytes) {
+                    Err(_) => Ok(decoded_bytes),
+                    Ok(decoded_text) if decoded_text == s => Ok(decoded_bytes),
+                    Ok(_) => Ok(s.into_bytes()),
+                },
+                Err(_) => Ok(s.into_bytes()),
+            }
+        } else {
+            self.visit_str(&s)
+        }
+    }
 }
 
 /// Serialize `Option<Vec<u8>>` as base64 (`None` → JSON null).
@@ -76,27 +127,14 @@ where
     }
 }
 
-/// Deserialize smart string: plain UTF-8 or base64 binary (see original `lpc-model` logic).
+/// Deserialize smart string: plain UTF-8 or base64 binary (see original
+/// `lpc-model` logic). Decoded without a copy of the text, as
+/// [`deserialize`] is.
 pub fn deserialize_smart<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
 where
     D: Deserializer<'de>,
 {
-    use base64::Engine;
-    use serde::Deserialize;
-    let s = String::deserialize(deserializer)?;
-
-    if let Ok(decoded_bytes) = base64::engine::general_purpose::STANDARD.decode(&s) {
-        if core::str::from_utf8(&decoded_bytes).is_err() {
-            return Ok(decoded_bytes);
-        }
-        if let Ok(decoded_text) = core::str::from_utf8(&decoded_bytes) {
-            if decoded_text == s {
-                return Ok(decoded_bytes);
-            }
-        }
-    }
-
-    Ok(s.into_bytes())
+    deserializer.deserialize_str(Base64Visitor { smart: true })
 }
 
 /// Smart serialize `Option<Vec<u8>>`.
