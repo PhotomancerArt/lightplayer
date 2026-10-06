@@ -400,6 +400,29 @@ impl DeviceEffects {
         spawn(self.layout.download_task(device, base_mac, label));
     }
 
+    /// Restore `device` from a backup ZIP a user just picked (plan P01,
+    /// Decision 11): checked here, SYNCHRONOUSLY, so a bad file is refused
+    /// in words through the normal dispatch error rather than a
+    /// fire-and-forget log line; then spawned to put it into the store as
+    /// the board's pending backup and refresh the index. The one question a
+    /// backup naming a different board asks is the web shell's, BEFORE this
+    /// is called (`check_backup_file`) — this does not re-ask.
+    pub fn request_restore_from_file(
+        &mut self,
+        device: DeviceId,
+        base_mac: Option<String>,
+        bytes: Vec<u8>,
+    ) -> Result<(), String> {
+        let manifest = lpa_link::layout_migration::device_backup_archive::read_archive(&bytes)
+            .map(|(manifest, _tree)| manifest)
+            .map_err(|error| error.to_string())?;
+        let Some(spawn) = self.spawn.clone() else {
+            return Err("Studio is not ready yet — try again.".to_string());
+        };
+        spawn(self.layout.import_task(device, base_mac, manifest, bytes));
+        Ok(())
+    }
+
     /// Install the wall clock (epoch seconds) backup archives are stamped
     /// with. Core reads no clocks; the controller's own is injected.
     pub fn set_clock(&mut self, clock: Rc<dyn Fn() -> f64>) {
@@ -1921,5 +1944,95 @@ mod tests {
         effects.settle();
 
         assert!(effects.take_writes().is_empty());
+    }
+
+    /// A v1 or v3 backup is refused BEFORE anything is spawned, by the
+    /// archive's own words — never a raw code (plan P01's validation list).
+    #[test]
+    fn a_restore_from_file_refuses_a_foreign_format_version_without_spawning() {
+        use lpa_link::layout_migration::device_backup_archive::{
+            BackupManifest, BackupPurpose, write_archive,
+        };
+        use lpa_link::layout_migration::lpfs_tree::LpfsTree;
+
+        let mut effects = DeviceEffects::new();
+        let spawned = Rc::new(Cell::new(false));
+        let flag = Rc::clone(&spawned);
+        effects.set_spawner(move |_task| flag.set(true));
+
+        let tree = LpfsTree::from_files([("/hardware.json".to_string(), b"{}".to_vec())]);
+        let manifest = BackupManifest {
+            format_version: 1,
+            captured_at_epoch_seconds: 1.0,
+            device_uid: None,
+            chip: None,
+            base_mac: None,
+            partition_offset: 0,
+            partition_length: 1,
+            target_partition_offset: None,
+            target_partition_length: None,
+            block_size: 4096,
+            file_count: tree.file_count(),
+            total_bytes: tree.total_bytes(),
+            purpose: BackupPurpose::Backup,
+        };
+        let bytes = write_archive(&tree, &manifest).unwrap();
+
+        let error = effects
+            .request_restore_from_file(DeviceId(1), None, bytes)
+            .expect_err("a v1 archive is refused");
+        assert!(error.contains('1'), "{error}");
+        assert!(!spawned.get(), "a refused archive is never stored");
+    }
+
+    /// An unsafe or unreadable file is refused in words, same as above —
+    /// never a panic, never a code.
+    #[test]
+    fn a_restore_from_file_refuses_a_file_that_is_not_an_archive() {
+        let mut effects = DeviceEffects::new();
+        effects.set_spawner(|_task| {});
+        let error = effects
+            .request_restore_from_file(DeviceId(1), None, b"not a zip".to_vec())
+            .expect_err("not a zip archive at all");
+        assert!(!error.is_empty());
+    }
+
+    /// A valid file that checks out is handed to the spawner to be stored —
+    /// the one-question gate (a mismatched board) is the web shell's,
+    /// BEFORE this is ever called; this never re-asks.
+    #[test]
+    fn a_restore_from_file_that_checks_out_is_spawned_for_storage() {
+        use lpa_link::layout_migration::device_backup_archive::{
+            BACKUP_FORMAT_VERSION, BackupManifest, BackupPurpose, write_archive,
+        };
+        use lpa_link::layout_migration::lpfs_tree::LpfsTree;
+
+        let mut effects = DeviceEffects::new();
+        let spawned = Rc::new(Cell::new(false));
+        let flag = Rc::clone(&spawned);
+        effects.set_spawner(move |_task| flag.set(true));
+
+        let tree = LpfsTree::from_files([("/hardware.json".to_string(), b"{}".to_vec())]);
+        let manifest = BackupManifest {
+            format_version: BACKUP_FORMAT_VERSION,
+            captured_at_epoch_seconds: 1.0,
+            device_uid: None,
+            chip: Some("esp32c6".to_string()),
+            base_mac: Some("10:bd:a3:b0:8e:30".to_string()),
+            partition_offset: 0,
+            partition_length: 1,
+            target_partition_offset: None,
+            target_partition_length: None,
+            block_size: 4096,
+            file_count: tree.file_count(),
+            total_bytes: tree.total_bytes(),
+            purpose: BackupPurpose::Backup,
+        };
+        let bytes = write_archive(&tree, &manifest).unwrap();
+
+        effects
+            .request_restore_from_file(DeviceId(1), Some("60:55:f9:0a:0b:0c".to_string()), bytes)
+            .expect("a valid archive is accepted");
+        assert!(spawned.get(), "a good archive is handed off to be stored");
     }
 }

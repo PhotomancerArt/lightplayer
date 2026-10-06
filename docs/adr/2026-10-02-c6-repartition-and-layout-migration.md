@@ -71,7 +71,13 @@ copying blocks, and today's firmware formats any partition it cannot mount.
     flashed onto a migrated board would format its files.
 11. **The image may grow past `0x300000` only after Studio can import a
     backup ZIP** (owed): until then the size check prints how far the image is
-    from the old filesystem (`legacy overlap: … B`), informational.
+    from the old filesystem (`legacy overlap: … B`), informational. **Met by
+    PR A of `lp2025/2026-10-05-1903-wifi-link-c6` (P01) on 2026-10-05**:
+    a device card can now open any backup ZIP Studio ever wrote — including
+    one this browser never stored itself — and restore it, which is what an
+    interrupted migration past this line needs. The size check's
+    legacy-overlap line stays informational: it is a distance to watch, not
+    a gate.
 
 ## Consequences
 

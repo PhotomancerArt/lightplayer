@@ -79,9 +79,10 @@ pub use app::devices::{
     update_firmware_offer, write_sim_record,
 };
 pub use app::devices::{
-    BackupDownload, BackupEntry, BackupIndex, BackupStatus, BackupStoreError, DeviceBackupOp,
-    DeviceBackupStore, MemoryBackupStore, UiDeviceLayout, UiLayoutPanel, check_store_contract,
-    device_layout_view,
+    BackupDownload, BackupEntry, BackupFileBytes, BackupIndex, BackupStatus, BackupStoreError,
+    DeviceBackupOp, DeviceBackupStore, DeviceRestoreFromFileDataOp, DeviceRestoreFromFileOp,
+    MemoryBackupStore, UiDeviceLayout, UiLayoutPanel, check_backup_file, check_store_contract,
+    device_layout_view, device_restore_from_file_action,
 };
 pub use app::devices::{DeviceFirmwareSources, StudioFirmwareStore};
 pub use app::devices::{
