@@ -242,7 +242,9 @@ reading of `secrets` and `open`.
 code vs image as ADR 1 labels them): core 1,161,408 → 1,214,304 B
 (+52,896 B code), engine 1,837,462 → 1,829,376 B, `app.bin` 3,051,520 →
 3,108,864 B (+57,344 B image); steady headroom 357,994 → 300,544 B; update
-headroom 1,015,808 → 884,736 B. A core install's room is the region minus
+headroom 1,015,808 → 884,736 B (main at `1f0354758` against this branch
+before it merged #880; after that merge: core 1,214,800 B, engine
+1,828,914 B, steady headroom 301,006 B). A core install's room is the region minus
 the running core (2,161,808 B in scenario U10's `N`/`S`), so the binding
 number is the steady headroom against the 64 KB floor. Boot: the
 core's hash (~1.2 s on silicon) every boot before the engine starts, plus
