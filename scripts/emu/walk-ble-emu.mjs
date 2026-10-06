@@ -10,7 +10,8 @@
 //     add over Bluetooth → identify (flash disabled, with its reason)
 //       → clear + push a project over Bluetooth → the editor (authoring,
 //       counted for comparison) → Play → idle → turn a knob
-//       → the radio drops → Bluefy's phantom drop
+//       → the board goes away and comes back → the radio blips
+//       → Bluefy's phantom drop
 //
 // and it states the one number M5 owes: the bytes per second an idle,
 // connected Studio in Play mode puts on a `ble:` link, both directions,
@@ -28,11 +29,15 @@
 // deliberate duration is the idle window, and it is a counting window, not a
 // claim about how long anything took.
 //
-// THE TWO DROPS (defect 2026-10-02-a-dropped-link-sends-the-editor-to-devices):
-// a Bluetooth link that drops under Play must keep the page on Play with a
-// quiet "Reconnecting…" strip, and the same session must take a knob turn
-// once the link is back. `drop` is the radio going (the event fires);
-// `phantom` is Bluefy's (`gatt.connected` false, no event, the board's side
+// THE THREE DROPS (defects 2026-10-02-a-dropped-link-sends-the-editor-to-devices
+// and 2026-10-06-a-bluetooth-reconnect-reads-the-old-links-loss): a Bluetooth
+// link that drops under Play must keep the page on Play with a quiet
+// "Reconnecting…" strip, and the same session must take a knob turn once
+// the link is back. `drop` is the board going away for seconds and coming
+// back restarted (the desk check's power cut: the cable is the emulated
+// board's power); `blip` is the radio dropping and the page reconnecting at
+// once (the event fires; nothing is done to the board); `phantom` is Bluefy's
+// (`gatt.connected` false, no event, the board's side
 // still up) seen the way iOS shows it — when the page is shown again.
 
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -100,17 +105,24 @@ async function main() {
   const door = await startDoor({
     root: ROOT,
     id: "walk-ble",
-    boards: [`${BOARD}={fw}`],
+    // The packaged whole chip, booted ROM-up from a writable copy: the split
+    // image's engine lives in flash, so the ELF alone boots core-only.
+    boards: [`${BOARD}={merged},kind=rom-up`],
     stateDir: path.join(out, "state"),
     consoleDir: path.join(out, "console"),
     logFile: path.join(out, "serve.log"),
     fresh: true,
   });
+  // `WALK_RECORD_SINK=<an lp-cli record serve sink>` records the session
+  // (docs/recording-a-studio-session.md); with none, nothing is recorded.
+  const recordSink = process.env.WALK_RECORD_SINK ?? null;
   const url =
-    studioUrlFor({ studioPort: port, doorAddr: door.addr, sinkUrl: "http://127.0.0.1:9/none" }).replace(
-      /&record=[^&]*/,
-      "",
-    ) + "&ble=emu";
+    (recordSink
+      ? studioUrlFor({ studioPort: port, doorAddr: door.addr, sinkUrl: recordSink })
+      : studioUrlFor({ studioPort: port, doorAddr: door.addr, sinkUrl: "http://127.0.0.1:9/none" }).replace(
+          /&record=[^&]*/,
+          "",
+        )) + "&ble=emu";
 
   console.log("\nTHE BLUETOOTH WALK WITH NO BOARD");
   console.log(`  emulated board   ${BOARD} (packaged fw-esp32c6), door http://${door.addr}/boards`);
@@ -312,30 +324,54 @@ async function main() {
       )}`;
     };
     /// One drop under Play: never leave `/play`, say Reconnecting, come
-    /// back to a working knob on the same page.
-    const dropUnderPlay = async (name, describe, cause) => {
+    /// back to a working knob on the same page. `cause` drops the link;
+    /// `back` (when the board was held away) brings it back after the strip
+    /// has settled. A drop with no `back` reconnects on its own at once, so
+    /// the strip may come and go before it ever settles: what it must not do
+    /// is leave Play, and the knob must work after.
+    const dropUnderPlay = async (name, describe, cause, back = null) => {
       await step(`${name}-held`, `${describe}: the page stays on Play and says Reconnecting`, async () => {
         const opens = (await stats()).linkOpens;
         const route = await driver.evaluate("location.pathname + location.search");
-        await driver.evaluate(cause);
-        await driver.waitFor(`Boolean(document.querySelector('[data-reconnecting="true"]'))`, {
-          timeoutMs: STEP_DEADLINE_MS,
-          what: "the Reconnecting strip",
-        });
-        // Settled, not mid-fade: the curtain has faded all the way in.
-        await driver.waitFor(
-          `getComputedStyle(document.querySelector('[data-reconnecting="true"]')).opacity === '1'`,
-          { timeoutMs: STEP_DEADLINE_MS, what: "the curtain to finish fading in" },
-        );
+        // Whether the strip showed at all, however briefly.
+        await driver.evaluate(`(() => {
+          window.__lpWalkStripSeen = Boolean(document.querySelector('[data-reconnecting="true"]'));
+          window.__lpWalkStripObserver?.disconnect();
+          window.__lpWalkStripObserver = new MutationObserver(() => {
+            if (document.querySelector('[data-reconnecting="true"]')) window.__lpWalkStripSeen = true;
+          });
+          window.__lpWalkStripObserver.observe(document.body, {
+            subtree: true, childList: true, attributes: true, attributeFilter: ['data-reconnecting'],
+          });
+        })()`);
+        await driver.evaluate(cause, { awaitPromise: true });
+        if (back) {
+          await driver.waitFor(`Boolean(document.querySelector('[data-reconnecting="true"]'))`, {
+            timeoutMs: STEP_DEADLINE_MS,
+            what: "the Reconnecting strip",
+          });
+          // Settled, not mid-fade: the curtain has faded all the way in.
+          await driver.waitFor(
+            `getComputedStyle(document.querySelector('[data-reconnecting="true"]')).opacity === '1'`,
+            { timeoutMs: STEP_DEADLINE_MS, what: "the curtain to finish fading in" },
+          );
+        } else {
+          await driver.waitFor(`window.__lpWalkStripSeen === true`, {
+            timeoutMs: 2_000,
+            what: "the Reconnecting strip, however briefly",
+          }).catch(() => {});
+        }
         const now = await driver.evaluate("location.pathname + location.search");
         if (now !== route) throw new Error(`the route moved: ${route} → ${now}`);
         if (!(await driver.evaluate(`Boolean(document.querySelector('#main [role="slider"]'))`))) {
           throw new Error("the Play panel went away");
         }
-        report[name] = { route, opensBefore: opens };
-        return `still at ${now}`;
+        const seen = await driver.evaluate("window.__lpWalkStripSeen === true");
+        report[name] = { route, opensBefore: opens, stripSeen: seen };
+        return `still at ${now}${back ? "" : `; strip ${seen ? "seen" : "not seen (the link was back first)"}`}`;
       });
-      await step(`${name}-back`, "the link comes back on its own; the strip goes and the same Play takes a knob turn", async () => {
+      await step(`${name}-back`, "the link comes back; the strip goes and the same Play takes a knob turn", async () => {
+        if (back) await driver.evaluate(back, { awaitPromise: true });
         await driver.waitFor(`!document.querySelector('[data-reconnecting="true"]')`, {
           timeoutMs: STEP_DEADLINE_MS,
           what: "the strip to go (the board back)",
@@ -343,6 +379,12 @@ async function main() {
         await driver.waitFor(
           `[...document.querySelectorAll('[data-reconnecting]')].every((c) => getComputedStyle(c).visibility === 'hidden')`,
           { timeoutMs: STEP_DEADLINE_MS, what: "the curtain to finish fading out" },
+        );
+        // Back on a new link, not merely a strip that went: a link the
+        // board opened after the drop.
+        await driver.waitFor(
+          `window.__lpEmuBluetooth.stats(${JSON.stringify(BOARD)}).linkOpens > ${report[name].opensBefore}`,
+          { timeoutMs: STEP_DEADLINE_MS, what: "a new link to the board" },
         );
         const now = await driver.evaluate("location.pathname + location.search");
         if (now !== report[name].route) throw new Error(`the route moved: ${report[name].route} → ${now}`);
@@ -398,9 +440,22 @@ async function main() {
       return JSON.stringify(report.knob);
     });
 
+    // The desk check's drop (2026-10-05): the board goes away for seconds
+    // — out of range, a power cut, a reboot — and its radio link with it.
+    // The emulated board is USB-powered, so the cable out is the power cut
+    // too: it restarts when it comes back, and its new link holds nothing
+    // the old one had.
     await dropUnderPlay(
       "drop",
-      "the radio drops the link",
+      "the board goes away (out of range, or its power cut) for a few seconds",
+      `window.__lpEmuSerial.bus.detach(${JSON.stringify(BOARD)}).then(() => "away")`,
+      `window.__lpEmuSerial.bus.attach(${JSON.stringify(BOARD)}).then(() => "back")`,
+    );
+    // A blip: the radio drops the link and the page's reconnect lands it
+    // again within a second (what Bluefy measured).
+    await dropUnderPlay(
+      "blip",
+      "the radio drops the link and it reconnects at once",
       `window.__lpEmuBluetooth.devices.get(${JSON.stringify(BOARD)}).gatt.drop("the walk dropped the radio link")`,
     );
     await dropUnderPlay(
@@ -419,6 +474,10 @@ async function main() {
   const panics = consoleErrors.filter((l) => l.includes("panicked at"));
   report.consoleErrors = consoleErrors;
   writeFileSync(path.join(out, "walk-ble-emu.json"), JSON.stringify(report, null, 2));
+  // The page's whole console, beside the board's: a failed step's story is
+  // usually in Studio's own lines (what it held, what it sent, what it
+  // gave up on), and the report keeps only the errors.
+  writeFileSync(path.join(out, "page-console.log"), driver.consoleLines().join("\n") + "\n");
 
   console.log("\n=== the Bluetooth walk, step by step");
   for (const s of report.steps) console.log(`  ${s.ok ? "✓" : "✗"} ${s.name.padEnd(9)} ${path.basename(s.shot)}`);
@@ -442,6 +501,7 @@ async function main() {
     for (const line of consoleErrors.slice(-8)) console.log(`    ${line.slice(0, 300)}`);
   }
   console.log(`\n  report → ${path.join(out, "walk-ble-emu.json")}`);
+  console.log(`  page console → ${path.join(out, "page-console.log")}`);
 
   await driver.close();
   await stopDoor(door);
@@ -454,7 +514,7 @@ async function main() {
     console.error(`\nThe walk's steps passed, but the page panicked ${panics.length} time(s).`);
     process.exit(1);
   }
-  console.log("\n✓ the Bluetooth walk finished: add → identify → push → Play → idle → knob → two drops ridden out on Play, with no board.");
+  console.log("\n✓ the Bluetooth walk finished: add → identify → push → Play → idle → knob → three drops ridden out on Play, with no board.");
 }
 
 await main();
