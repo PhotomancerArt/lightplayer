@@ -205,9 +205,16 @@ on 11 of 22 warm resets with Bluetooth on, and 0 of 20 with it off
    update, or with Bluetooth switched off. A host RTS reset never runs that
    code, which is why placement is the fix and this is the second half.
 
-The size comes from the boot: with Bluetooth up on `lp-emu:esp32c6:t1`, the
-radio's high-water is 35,660 B (`[radio-heap]`, a heartbeat line like
-`[stack]`). Each of the two Bluetooth links adds up to ~3.5 KB.
+The size comes from the boot. With Bluetooth up, the radio's high-water is
+35,660 B on `lp-emu:esp32c6:t1` and 35,648 B on silicon (the bench C6,
+advertising, no central connected). The `[radio-heap]` heartbeat line
+reports it, the same way `[stack]` reports the stack. Each of the two
+Bluetooth links adds up to ~3.5 KB.
+
+Verified on silicon on 2026-10-06, with Bluetooth on and the project
+running. The fix crashed on 0 of 44 warm resets: 22 on a monolithic build,
+22 on the shipped split image, half of each RTS. Unfixed main crashed on 5
+of 12 in the same sitting.
 
 | `lp-emu:esp32c6:t1`, first heartbeat, shipped split image | before | after |
 |---|---|---|
