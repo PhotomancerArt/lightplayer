@@ -45,6 +45,12 @@ Stacked PRs feel it first, because they carry several features' tests at once.
   #986's OTA tests, #989's Wi-Fi settings tests, and #993's two LAN cells (moved
   out to `test-emu-serve`). The budget went to 45 as headroom; the split is chip
   task_acfe5e83.
+- 2026-10-06 — paid down for this job by #997 (`claude/split-heap-budget-chips`,
+  merged the same day): `test-emu-c6-cli` is now three recipes
+  (`-link`, `-boards`, `-agent`) across two jobs, measured 7.8–10.4 min, with
+  a 35-minute budget and the comment "growth here wants another split, not a
+  bigger number". #993's 45-minute stopgap was dropped in its merge of main.
+  The condition (device tests piling into one-job recipes) stays carried.
 
 **Exit criteria** — each emulator job's budget sits at 2–3× its measured max
 with room to spare, and adding a device test names the job it lands in and that
