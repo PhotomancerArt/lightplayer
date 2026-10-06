@@ -106,7 +106,7 @@ mod tests {
     #[test]
     fn a_wire_32_hello_does_not_decode_at_this_wire_version_but_names_its_proto() {
         assert_eq!(
-            WIRE_PROTO_VERSION, 36,
+            WIRE_PROTO_VERSION, 37,
             "re-read this test when the version moves"
         );
         assert!(
@@ -142,7 +142,7 @@ mod tests {
     #[test]
     fn a_wire_34_hello_lacks_only_the_version() {
         assert_eq!(
-            WIRE_PROTO_VERSION, 36,
+            WIRE_PROTO_VERSION, 37,
             "re-read this test when the version moves"
         );
         let wire_34 = HELLO_PROTO_32

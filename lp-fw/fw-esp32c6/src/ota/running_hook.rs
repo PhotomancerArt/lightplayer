@@ -76,6 +76,17 @@ pub fn install(
     fw_esp32_common::usb_link::set_update_hook(hook);
 }
 
+/// The board manifest the hello carries (`ServerHello::firmware`, wire
+/// proto 37): the same session's view a host's `Q` gets, built on first
+/// need. `None` only while the hook is not installed (or is busy, which a
+/// hello built between two of its passes never sees).
+pub fn manifest() -> Option<lpc_update::BoardManifest> {
+    let mut running = RUNNING.0.try_borrow_mut().ok()?;
+    let running = running.as_mut()?;
+    let edge = edge_of(running);
+    Some(edge.session.manifest(super::update_edge::now_ms()))
+}
+
 fn edge_of(running: &mut Running) -> &mut UpdateEdge {
     running.edge.get_or_insert_with(|| {
         let s = &running.setup;

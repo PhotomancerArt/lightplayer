@@ -1797,6 +1797,7 @@ fn hello(board: Board) -> lpc_wire::WireServerMessage {
             device_uid: None,
             pack_format: lpc_wire::PACK_FORMAT_VERSION,
             auth: lpc_wire::HelloAuth::TRUSTED,
+            firmware: None,
         }),
     )
 }

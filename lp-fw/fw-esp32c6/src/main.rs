@@ -43,6 +43,13 @@ lpc_model::lp_embed_manifest_core! {
         ),
     ],
     limits_json: concat!("{\"flashAppBytes\":", env!("LP_FLASH_APP_BYTES"), "}"),
+    // The split image takes over-the-air updates in layout 1; a plain
+    // (single-image) build says nothing — only USB updates it.
+    ota_layout: if cfg!(lp_split) {
+        lpc_update::code_table::LAYOUT_1
+    } else {
+        0
+    },
 }
 
 /// The manifest core's `target` and `platform.chip`, named once: the
@@ -887,6 +894,10 @@ fn lp_engine_entry(core: CoreBoot) {
         hardware_registry.manifest().board_id(),
     )));
     server.set_reboot_hook(Some(Rc::new(reboot_now)));
+    // A split image's hello carries its board manifest (wire proto 37): the
+    // core's update session says it, as it answers `Q` on channel 3.
+    #[cfg(lp_split)]
+    server.set_firmware_manifest(Some(ota::running_manifest));
     // JSON Pack: answer a host's opt-in with what this image's transport
     // can write (`fw-esp32-common/json-pack`).
     server.set_packed_encoding_supported(

@@ -71,7 +71,7 @@ pub use boot_state::BootState;
 pub use core_only::{CoreOnly, CoreOnlyReason, core_only};
 pub use engine_guard::engine_guard;
 pub use engine_window::{ENGINE_VADDR, map_engine, page_size};
-pub use running_hook::install as install_running_hook;
+pub use running_hook::{install as install_running_hook, manifest as running_manifest};
 
 use split_flash::SplitFlash;
 

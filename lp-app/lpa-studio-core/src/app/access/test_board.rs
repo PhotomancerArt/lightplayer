@@ -238,6 +238,7 @@ impl FakeBoardIo {
                     required: !self.trusted,
                     granted: held,
                 },
+                firmware: None,
             }),
             ClientRequest::LoginBegin => {
                 state.nonce = state.nonce.wrapping_add(1);
