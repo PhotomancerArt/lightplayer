@@ -3353,6 +3353,7 @@ test-emu-c6-cli:
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_usb_link_gates -- --include-ignored --nocapture
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_wifi_settings -- --include-ignored --nocapture
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_lan_link -- --include-ignored --nocapture
+    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_lan_lockstep -- --include-ignored --nocapture
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test link_capture -- --include-ignored --nocapture
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_frag_reads -- --include-ignored --nocapture
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_split_boot -- --include-ignored --nocapture
