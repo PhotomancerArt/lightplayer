@@ -2,12 +2,13 @@
 //! session descriptor it hands back.
 //!
 //! The JS owns the `BluetoothDevice`, the GATT connection, the write queue
-//! and the reconnect loop (see its header for the four rules and the G1
+//! and the reconnect loop (see its header for the five rules and the G1
 //! measurements behind them). What crosses into Rust is a session id — a
 //! `u32`, because a `JsValue` cannot live in anything `Send` — plus plain
-//! strings and bytes.
+//! strings, and lp-link frames: one per notification on the way in
+//! ([`take_frames`]), one per GATT write on the way out ([`write_frame`]).
 
-use js_sys::{Array, Function, Promise, Reflect};
+use js_sys::{Array, Function, Promise, Reflect, Uint8Array};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 
@@ -49,10 +50,13 @@ extern "C" {
     fn js_forget(id: u32) -> Promise;
 
     #[wasm_bindgen(js_name = write, catch)]
-    fn js_write(id: u32, bytes: &[u8]) -> Result<bool, JsValue>;
+    fn js_write(id: u32, frame: &[u8]) -> Result<bool, JsValue>;
 
-    #[wasm_bindgen(js_name = takeBytes, catch)]
-    fn js_take_bytes(id: u32) -> Result<Vec<u8>, JsValue>;
+    #[wasm_bindgen(js_name = takeFrames, catch)]
+    fn js_take_frames(id: u32) -> Result<JsValue, JsValue>;
+
+    #[wasm_bindgen(js_name = onActivity, catch)]
+    fn js_on_activity(id: u32, callback: &Closure<dyn FnMut()>) -> Result<Function, JsValue>;
 
     #[wasm_bindgen(js_name = takeErrors, catch)]
     fn js_take_errors(id: u32) -> Result<Array, JsValue>;
@@ -183,20 +187,62 @@ pub(crate) async fn disconnect(session: u32) {
     let _ = JsFuture::from(js_disconnect(session)).await;
 }
 
-pub(crate) fn write(session: u32, bytes: &[u8]) -> Result<bool, String> {
-    let queued = js_write(session, bytes).map_err(|error| error_message(&error))?;
+/// Queue one lp-link frame as one GATT write. `Ok(false)`: the link was not
+/// up, and the frame never left (the session's error says why).
+pub(crate) fn write_frame(session: u32, frame: &[u8]) -> Result<bool, String> {
+    let queued = js_write(session, frame).map_err(|error| error_message(&error))?;
     // Only what the link took: a link that is down answers `false` and the
-    // bytes never left.
+    // frame never left.
     if queued {
-        tap_wire(WireTapDir::Tx, "ble", session, bytes);
+        tap_wire(WireTapDir::Tx, "ble", session, frame);
     }
     Ok(queued)
 }
 
-pub(crate) fn take_bytes(session: u32) -> Result<Vec<u8>, String> {
-    let bytes = js_take_bytes(session).map_err(|error| error_message(&error))?;
-    tap_wire(WireTapDir::Rx, "ble", session, &bytes);
-    Ok(bytes)
+/// What [`take_frames`] found in a session.
+pub(crate) struct TakenFrames {
+    /// The JS connection generation the frames belong to: it moves with
+    /// every connect, drop and close, and a new one is a new lp-link session.
+    pub generation: u32,
+    /// Connected and subscribed: frames may be written now.
+    pub connected: bool,
+    /// Every notification since the last take, one frame each, in order.
+    pub frames: Vec<Vec<u8>>,
+    /// Frames still queued on the JS write chain.
+    pub writes_pending: u32,
+}
+
+/// Every frame the board notified since the last take. `Err` for a session
+/// the page no longer has (forgotten).
+pub(crate) fn take_frames(session: u32) -> Result<TakenFrames, String> {
+    let value = js_take_frames(session).map_err(|error| error_message(&error))?;
+    let frames: Vec<Vec<u8>> = Reflect::get(&value, &JsValue::from_str("frames"))
+        .ok()
+        .map(|frames| {
+            Array::from(&frames)
+                .iter()
+                .map(|frame| Uint8Array::new(&frame).to_vec())
+                .collect()
+        })
+        .unwrap_or_default();
+    for frame in &frames {
+        tap_wire(WireTapDir::Rx, "ble", session, frame);
+    }
+    Ok(TakenFrames {
+        generation: number_field(&value, "generation").unwrap_or(0.0) as u32,
+        connected: bool_field(&value, "connected").unwrap_or(false),
+        frames,
+        writes_pending: number_field(&value, "writesPending").unwrap_or(0.0) as u32,
+    })
+}
+
+/// Subscribe `callback` to the session's activity (a notification, a
+/// finished write, the link up or down). Answers the unsubscribe function.
+pub(crate) fn on_activity(
+    session: u32,
+    callback: &Closure<dyn FnMut()>,
+) -> Result<Function, String> {
+    js_on_activity(session, callback).map_err(|error| error_message(&error))
 }
 
 pub(crate) fn take_errors(session: u32) -> Result<Vec<String>, String> {
@@ -222,6 +268,12 @@ fn string_field(value: &JsValue, name: &str) -> Option<String> {
     Reflect::get(value, &JsValue::from_str(name))
         .ok()
         .and_then(|field| field.as_string())
+}
+
+fn number_field(value: &JsValue, name: &str) -> Option<f64> {
+    Reflect::get(value, &JsValue::from_str(name))
+        .ok()
+        .and_then(|field| field.as_f64())
 }
 
 fn bool_field(value: &JsValue, name: &str) -> Option<bool> {

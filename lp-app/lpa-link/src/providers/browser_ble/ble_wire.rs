@@ -1,41 +1,31 @@
-//! One Bluetooth session's byte stream, shared by everything that reads it.
+//! A handle on one Bluetooth session's wire, shared by everything that
+//! drains it.
 //!
 //! The link (`device_link::browser_ble`) and a conversation that borrows the
-//! wire (`BleClientIo`: a push, the editor lens) both drain the same JS
-//! buffer — never at once, because the effects layer pauses the link's pump
-//! for the length of a borrow. The ONE [`WireStream`] lives here, beside
-//! the buffer, so a line or a packed frame that straddles the hand-over is
-//! still re-joined whole instead of being cut in two between two splitters.
-//! This link never asks the board to pack (no `SetEncoding`), but the
-//! stream reads a packed frame anyway and hands it on as its `M!{json}` line.
+//! wire (`BleClientIo`: a push, the editor lens) both drain the same
+//! session's lp-link end — never at once, because the effects layer pauses
+//! the link's pump for the length of a borrow. That end lives in
+//! `ble_link_port.rs`, one per session and not one per handle, so any number
+//! of handles on a session share one link: a message is read once, whole,
+//! by whichever drainer holds the wire, and nothing is cut between two
+//! readers. Creating a handle starts servicing the session.
 
-use std::cell::RefCell;
+use super::{ble_link_port, browser_ble};
+use crate::device_link::wire_reader::WireRead;
 
-use lpc_wire::{WireChunk, WireStream};
-
-use super::browser_ble;
-
-/// A session's stream. Cheap to share (`Rc`); holds no JS value.
+/// A session's wire. Cheap: holds only the session id, so it can be shared
+/// (`Rc`) or made again for the same session.
+#[derive(Debug)]
 pub struct BleWire {
     session: u32,
-    stream: RefCell<WireStream>,
-}
-
-impl std::fmt::Debug for BleWire {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("BleWire")
-            .field("session", &self.session)
-            .field("pending_bytes", &self.stream.borrow().pending_bytes())
-            .finish()
-    }
 }
 
 impl BleWire {
+    /// A handle on `session`'s wire. Its link is serviced from now on (the
+    /// board's hello waits, read, for the first drain).
     pub fn new(session: u32) -> Self {
-        Self {
-            session,
-            stream: RefCell::new(WireStream::new()),
-        }
+        ble_link_port::attach(session);
+        Self { session }
     }
 
     /// The JS session id.
@@ -58,31 +48,22 @@ impl BleWire {
         browser_ble::disconnect(self.session).await;
     }
 
-    /// Queue bytes for the board. `Err` for an unknown session; a link that
-    /// is not up answers `Ok(false)` and says why through [`Self::take_errors`].
-    pub fn write(&self, bytes: &[u8]) -> Result<bool, String> {
-        browser_ble::write(self.session, bytes)
+    /// Queue one request — its JSON, no `M!`, no newline — as one lp-link
+    /// message. `Err` when the link is not connected or will not take it.
+    pub fn send_client_json(&self, json: &str) -> Result<(), String> {
+        ble_link_port::send_client_json(self.session, json)
     }
 
-    /// Every whole line the board has sent since the last call.
-    pub fn take_lines(&self) -> Result<Vec<String>, String> {
-        let bytes = browser_ble::take_bytes(self.session)?;
-        if bytes.is_empty() {
-            return Ok(Vec::new());
-        }
-        let mut lines = Vec::new();
-        for chunk in self.stream.borrow_mut().push_collect(&bytes) {
-            match chunk {
-                WireChunk::Line(line) => lines.push(line),
-                WireChunk::Frame(frame) => lines.push(frame.to_line()),
-                // This link never asks for packed replies, so a frame that
-                // fails to decode (or names a table this reader never
-                // learned) is line noise, not a message: drop it, as a
-                // garbled JSON line is dropped when it fails to parse.
-                WireChunk::Error(_) | WireChunk::Desync(_) => {}
-            }
-        }
-        Ok(lines)
+    /// Everything the board said since the last drain, in order: wire
+    /// messages (decoded once, JSON or packed) and link resets.
+    pub fn take_reads(&self) -> Vec<WireRead> {
+        ble_link_port::take_reads(self.session)
+    }
+
+    /// What the link said about itself since the last ask (up, a stall, the
+    /// packed opt-in's outcome), for the device journal.
+    pub fn take_notes(&self) -> Vec<String> {
+        ble_link_port::take_notes(self.session)
     }
 
     /// Every error the session recorded since the last call.
@@ -90,10 +71,9 @@ impl BleWire {
         browser_ble::take_errors(self.session)
     }
 
-    /// Drop a partial line: a new connection is not the rest of the old
-    /// one's last line.
-    pub fn clear_partial(&self) {
-        self.stream.borrow_mut().clear();
+    /// Whether the session's lp-link is up (its handshake is done).
+    pub fn is_link_up(&self) -> bool {
+        ble_link_port::is_up(self.session)
     }
 }
 

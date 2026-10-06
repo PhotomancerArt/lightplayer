@@ -73,6 +73,8 @@ mod agent_device_journey_tests;
 /// The app chat seated on this bench (E4's seat, and the corpus's device
 /// seat).
 pub(crate) mod agent_device_seat;
+/// A Bluetooth link that drops under the editor and comes back.
+mod ble_drop_tests;
 /// Wi‑Fi settings over the bench's USB link (Wi‑Fi roadmap M5).
 mod wifi_device_tests;
 
@@ -990,6 +992,10 @@ impl DeviceBench {
             }
         }
         drive(self.controller.settle_device_records());
+        // The actor's turn ends with the steps parked for the editor lens
+        // (it holds that board's wire): a login, a Wi‑Fi read.
+        drive(self.controller.run_access_lens_step());
+        drive(self.controller.run_network_lens_step());
     }
 
     fn run_until(&mut self, tasks: &TaskPool, what: &str, ready: impl Fn(&Self) -> bool) {

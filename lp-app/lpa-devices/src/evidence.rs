@@ -2014,7 +2014,7 @@ mod tests {
         newer.fold(Millis(0), &opened(), &mut identity, &config);
         newer.fold(
             Millis(10),
-            &frame(ServerFrame::hello_on_other_wire(0, 35, None)),
+            &frame(ServerFrame::hello_on_other_wire(0, 38, None)),
             &mut identity,
             &config,
         );
@@ -2026,8 +2026,8 @@ mod tests {
         assert_eq!(
             newer.wire_version(),
             Some(WireVersion::BoardNewer {
-                board: 35,
-                studio: 34
+                board: 38,
+                studio: 37
             })
         );
 
@@ -2055,7 +2055,7 @@ mod tests {
     fn a_hello_from_another_wire_names_its_board() {
         let config = studio_config();
         let board = || Some("seeed/xiao-esp32-c6".to_string());
-        for proto in [32, 33, 35] {
+        for proto in [32, 33, 35, 36] {
             let mut evidence = Evidence::default();
             let mut identity = IdentityChain::default();
             evidence.fold(Millis(0), &opened(), &mut identity, &config);
@@ -2124,8 +2124,8 @@ mod tests {
     fn a_boot_marker_older_than_studio_is_older_light_player_firmware() {
         const MARKER_30: &str = "[INIT] fw-esp32 initialized, starting server loop... \
                                  proto=30 commit=4caa5b658157 dirty=false";
-        const MARKER_34: &str = "[INIT] fw-esp32 initialized, starting server loop... \
-                                 proto=34 commit=4caa5b658157 dirty=false";
+        const MARKER_37: &str = "[INIT] fw-esp32 initialized, starting server loop... \
+                                 proto=37 commit=4caa5b658157 dirty=false";
         let config = studio_config();
 
         let mut older = Evidence::default();
@@ -2140,7 +2140,7 @@ mod tests {
         let mut current = Evidence::default();
         let mut identity = IdentityChain::default();
         current.fold(Millis(0), &opened(), &mut identity, &config);
-        current.fold(Millis(10), &line(MARKER_34), &mut identity, &config);
+        current.fold(Millis(10), &line(MARKER_37), &mut identity, &config);
         assert_eq!(current.classification, Classification::Unknown);
     }
 
@@ -2420,11 +2420,11 @@ mod tests {
         assert!(!evidence.carries_update_channel());
     }
 
-    /// Studio's own roster config: this build's wire proto (34, the hello's
-    /// `fs` boot state), not the model's placeholder default.
+    /// Studio's own roster config: this build's wire proto (37, Bluetooth
+    /// moves onto lp-link), not the model's placeholder default.
     fn studio_config() -> RosterConfig {
         RosterConfig {
-            expected_proto: 34,
+            expected_proto: 37,
             ..RosterConfig::default()
         }
     }

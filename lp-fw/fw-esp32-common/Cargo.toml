@@ -74,6 +74,10 @@ json-pack = ["server"]
 # The server transport over it (`usb_link::usb_link_transport`) also needs
 # `server`.
 usb-link = ["dep:lp-link", "dep:critical-section"]
+# The radio links on lp-link (`radio_link`'s mux and port, plan
+# `ble-on-lp-link`): one `Link` per open connection, Datagram framing. The
+# C6's `ble` feature turns it on; the S3 and the classic have no radio link.
+radio-link = ["server", "dep:lp-link"]
 # The classic's UART0 host link on lp-link (`uart_link`, `log_ring_logger`;
 # plan `classic-uart-on-lp-link`): the classic (v3) turns it on. The server
 # transport over it (`uart_link::uart_link_transport`) also needs `server`.

@@ -1,48 +1,62 @@
 //! The seam between a radio stack (the chip crate's BLE task) and the link
-//! mux ([`super::LinkMuxTransport`]): channels, and the rules for using them.
+//! mux ([`super::LinkMuxTransport`]): one lp-link [`Link`] per open radio
+//! link, and the rules for sharing it.
 //!
 //! This crate may not hold a radio stack (no esp-*, no BLE host — see the
-//! seam rules in `Cargo.toml`), so the two halves meet here, on plain
-//! embassy-sync channels:
+//! seam rules in `Cargo.toml`), so the two halves meet here:
 //!
 //! - **Links.** The radio side mints a [`LinkId`] per connection
 //!   ([`RadioLinkPort::mint_link`]: monotonic, never reused, never
-//!   [`LinkId::PRIMARY`]) and announces it with [`RadioLinkEvent::Opened`]
-//!   once it can deliver the link's replies, and [`RadioLinkEvent::Closed`]
-//!   when it is gone. Every radio link is [`LinkTrust::Untrusted`].
-//! - **Incoming.** Complete `M!` lines, tagged with their link
-//!   ([`RadioLinkPort::deliver_line`]).
-//! - **Outgoing, one frame in flight overall.** The mux serializes a frame
-//!   into the shared static frame buffer (`serial::server_msg`) — the same
-//!   buffer USB uses — and hands the radio side a [`RadioWriteRequest`] on
-//!   the link's *slot*. The radio side reads the frame only through
-//!   [`RadioLinkPort::copy_frame`], which copies synchronously and only while
-//!   the mux's lease on that generation is live, so a mux that gave up
-//!   waiting (and revoked the lease) can reuse the buffer at once without a
-//!   late reader ever seeing the next frame's bytes.
+//!   [`LinkId::PRIMARY`]). Once it can deliver frames to the central (the
+//!   central enabled notifications), it opens the connection's lp-link session
+//!   on its slot ([`RadioLinkSlot::open`], sized to the connection's ATT MTU)
+//!   and announces it with [`RadioLinkEvent::Opened`]; when the connection is
+//!   gone it closes the slot ([`RadioLinkSlot::close`], which frees the link)
+//!   and announces [`RadioLinkEvent::Closed`]. Every radio link is
+//!   [`LinkTrust::Untrusted`].
+//! - **Frames.** One lp-link frame is one ATT operation (Datagram framing):
+//!   each write the central makes to RX goes to [`RadioLinkSlot::on_datagram`]
+//!   whole, and each frame [`RadioLinkSlot::poll_frame`] hands out is one
+//!   notification. The radio side runs the link's timers
+//!   ([`RadioLinkSlot::poll_timeout`]) and wakes on the mux's doorbell.
+//! - **Messages.** The mux takes whole wire messages off the link and queues
+//!   replies onto it (`with_link`, crate-internal). A long reply stays in the
+//!   shared static frame buffer (`serial::server_msg`) as an lp-link
+//!   *external* message and the link cuts its frames from there, so while a
+//!   slot's link has one in flight ([`RadioLinkSlot::external_in_flight`]) no
+//!   one may serialize into that buffer; the radio side signals when it
+//!   stops ([`RadioLinkSlot::released`]).
 //! - **Close.** The mux asks the radio side to drop a link (the login
-//!   deadline, a write that did not finish) with
+//!   deadline, a reply the central did not take in time) with
 //!   [`RadioLinkSlot::request_close`]; the radio side disconnects and reports
 //!   [`RadioLinkEvent::Closed`] as for any other disconnect.
 //!
-//! Everything runs on the one thread executor, so "synchronously" above means
-//! "with no `.await` in between", which is what the lease relies on.
+//! Everything runs on the one thread executor, so a plain [`RefCell`] is the
+//! lock, exactly as on the USB link (`usb_link::UsbLinkShared`): every borrow
+//! is taken inside a synchronous call and dropped before any `.await`. A
+//! critical-section mutex would mask interrupts for every frame's checksum,
+//! and the RMT refill (the LEDs) cannot wait. That is why the port is leaked
+//! on the heap ([`RadioLinkPort::leak`]) rather than a `static`: a `RefCell`
+//! is not `Sync`.
 
-use alloc::string::String;
+use alloc::boxed::Box;
+use core::cell::RefCell;
 use core::sync::atomic::{AtomicU32, Ordering};
 
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
 use embassy_sync::signal::Signal;
+use lp_link::{Link as LpLink, Micros, SelectiveRepeat};
 use lpc_shared::transport::{Link, LinkId, LinkTrust};
-use lpc_wire::TransportError;
+
+use super::radio_link_config::{MtuTooSmall, radio_link_config};
 
 /// How many radio links can be open at once. The BLE task accepts at most
 /// this many connections (DD12: two allowed, nothing gates on the second).
+/// The GATT server's connection table, the host's resources and the
+/// connection-task pool all follow this one constant.
 pub const RADIO_LINK_SLOTS: usize = 2;
 
-/// Incoming `M!` lines waiting for the server loop, across all radio links.
-const INCOMING_DEPTH: usize = 8;
 /// Opened/closed notices. Two per slot outstanding is the worst case the
 /// radio side can produce before the server loop drains them.
 const EVENT_DEPTH: usize = 2 * RADIO_LINK_SLOTS + 2;
@@ -50,90 +64,198 @@ const EVENT_DEPTH: usize = 2 * RADIO_LINK_SLOTS + 2;
 /// A radio link's lifecycle, as the radio side reports it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RadioLinkEvent {
-    /// `link` can now carry frames both ways; its writes arrive on `slot`.
+    /// `link` has an lp-link session on `slot` (not yet up: its handshake is
+    /// ordinary traffic from here on).
     Opened { link: LinkId, slot: usize },
     /// `link` is gone (disconnected, or closed at the mux's request).
     Closed { link: LinkId },
 }
 
-/// One frame for one radio link: `len` bytes of the shared frame buffer,
-/// leased under `generation`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct RadioWriteRequest {
-    pub link: LinkId,
-    pub generation: u32,
-    pub len: usize,
-}
-
 /// Why the mux closed a link: a fixed phrase for the log line.
 pub type CloseReason = &'static str;
 
-/// The per-link half of the port: where that link's frames and close
-/// requests arrive.
+/// The link a slot holds, and which connection it belongs to.
+struct SlotLink {
+    id: LinkId,
+    link: LpLink<SelectiveRepeat>,
+}
+
+/// One connection slot: its link, and the signals both halves wait on.
 pub struct RadioLinkSlot {
-    write_request: Channel<CriticalSectionRawMutex, RadioWriteRequest, 1>,
+    /// Boxed: an idle slot costs a pointer, not a whole `Link` struct (the
+    /// port is on the heap of every BLE image, connected or not).
+    link: RefCell<Option<Box<SlotLink>>>,
+    /// Mux → radio side: something was queued; transmit now rather than at
+    /// the link's next timer.
+    doorbell: Signal<CriticalSectionRawMutex, ()>,
+    /// Radio side → mux: this slot's link is no longer reading the frame
+    /// buffer (possibly stale: the mux checks again).
+    released: Signal<CriticalSectionRawMutex, ()>,
     close_request: Signal<CriticalSectionRawMutex, CloseReason>,
 }
 
 impl RadioLinkSlot {
     const fn new() -> Self {
         Self {
-            write_request: Channel::new(),
+            link: RefCell::new(None),
+            doorbell: Signal::new(),
+            released: Signal::new(),
             close_request: Signal::new(),
         }
     }
 
-    /// Radio side: forget anything a previous link on this slot left behind.
-    /// Call before announcing a new link on it.
+    // ---- radio side ----
+
+    /// Forget anything a previous link on this slot left behind. Call before
+    /// a new connection uses the slot.
     pub fn reset(&self) {
-        self.write_request.clear();
+        *self.link.borrow_mut() = None;
+        self.doorbell.reset();
         self.close_request.reset();
+        self.released.signal(());
     }
 
-    /// Radio side: the next frame to send on this slot's link.
-    pub async fn next_write(&self) -> RadioWriteRequest {
-        self.write_request.receive().await
+    /// Start `id`'s lp-link session on this slot, sized to the connection's
+    /// ATT MTU, under `nonce` (random per connection: it is how the host
+    /// learns this is a new session). `Err`: the MTU cannot carry a frame,
+    /// and the caller disconnects (see [`MtuTooSmall`]).
+    pub fn open(&self, id: LinkId, att_mtu: u16, nonce: u32) -> Result<u16, MtuTooSmall> {
+        let cfg = radio_link_config(att_mtu)?;
+        let max_payload = cfg.max_payload;
+        *self.link.borrow_mut() = Some(Box::new(SlotLink {
+            id,
+            link: LpLink::new(cfg, nonce),
+        }));
+        Ok(max_payload)
     }
 
-    /// Radio side: resolves when the mux wants this slot's link dropped.
+    /// The connection is gone: free its link (its RAM goes back to the heap
+    /// now) and wake a mux waiting for the frame buffer.
+    pub fn close(&self) {
+        *self.link.borrow_mut() = None;
+        self.released.signal(());
+    }
+
+    /// One write the central made to RX: one whole lp-link frame. Ignored
+    /// while the slot holds no link.
+    pub fn on_datagram(&self, now: Micros, frame: &[u8]) {
+        if let Some(slot) = self.link.borrow_mut().as_mut() {
+            slot.link.on_datagram(now, frame);
+        }
+    }
+
+    /// The next frame to notify, handed to `take` (copy it out: the borrow
+    /// ends when `take` returns); `None` when the link has nothing to send
+    /// now. A long reply's fragments are read from the frame buffer here.
+    pub fn poll_frame<R>(&self, now: Micros, take: impl FnOnce(&[u8]) -> R) -> Option<R> {
+        let mut guard = self.link.borrow_mut();
+        let slot = guard.as_mut()?;
+        let taken = slot
+            .link
+            .poll_transmit_with(now, &mut read_frame_buf)
+            .map(take);
+        if !slot.link.external_in_flight() {
+            self.released.signal(());
+        }
+        taken
+    }
+
+    /// When the link next needs [`Self::poll_frame`] for a timer (retransmit,
+    /// delayed ACK, keepalive, SYN), or `None` with no link.
+    pub fn poll_timeout(&self) -> Option<Micros> {
+        self.link.borrow().as_ref()?.link.poll_timeout()
+    }
+
+    /// The heap the slot's link holds right now (`Link::ram_bytes`), or `None`
+    /// with no link.
+    pub fn ram_bytes(&self) -> Option<usize> {
+        Some(self.link.borrow().as_ref()?.link.ram_bytes())
+    }
+
+    /// Resolves when the mux queued something for this slot's link.
+    pub async fn doorbell(&self) {
+        self.doorbell.wait().await;
+    }
+
+    /// Resolves when the mux wants this slot's link dropped.
     pub async fn close_requested(&self) -> CloseReason {
         self.close_request.wait().await
     }
 
-    /// Mux side: ask the radio side to drop this slot's link.
+    // ---- mux side ----
+
+    /// Ask the radio side to drop this slot's link.
     pub fn request_close(&self, reason: CloseReason) {
         self.close_request.signal(reason);
+    }
+
+    /// Whatever link this slot holds is still reading a reply out of the
+    /// frame buffer: nothing may serialize into it yet.
+    pub fn external_in_flight(&self) -> bool {
+        self.link
+            .borrow()
+            .as_ref()
+            .is_some_and(|slot| slot.link.external_in_flight())
+    }
+
+    /// Run `f` on `id`'s link; `None` when the slot holds no link or another
+    /// connection's. Never call it from inside another, and never hold what
+    /// `f` returns across an `.await` (see the module docs).
+    pub(crate) fn with_link<R>(
+        &self,
+        id: LinkId,
+        f: impl FnOnce(&mut LpLink<SelectiveRepeat>) -> R,
+    ) -> Option<R> {
+        let mut guard = self.link.borrow_mut();
+        let slot = guard.as_mut().filter(|slot| slot.id == id)?;
+        Some(f(&mut slot.link))
+    }
+
+    /// Run `f` on whatever link the slot holds.
+    pub(crate) fn with_any_link<R>(
+        &self,
+        f: impl FnOnce(LinkId, &mut LpLink<SelectiveRepeat>) -> R,
+    ) -> Option<R> {
+        let mut guard = self.link.borrow_mut();
+        let slot = guard.as_mut()?;
+        Some(f(slot.id, &mut slot.link))
+    }
+
+    /// Drop `id`'s link from the slot now (the mux closed it): it stops
+    /// reading the frame buffer and frees its RAM before the radio side has
+    /// even disconnected.
+    pub(crate) fn drop_link(&self, id: LinkId) {
+        let mut guard = self.link.borrow_mut();
+        if guard.as_ref().is_some_and(|slot| slot.id == id) {
+            *guard = None;
+        }
+        drop(guard);
+        self.released.signal(());
+    }
+
+    /// Wake the radio side to transmit what was just queued.
+    pub(crate) fn ring(&self) {
+        self.doorbell.signal(());
+    }
+
+    /// Resolves when the radio side may have stopped reading the frame buffer
+    /// (check [`Self::external_in_flight`] again).
+    pub(crate) async fn released(&self) {
+        self.released.wait().await;
     }
 
     #[cfg(test)]
     pub(crate) fn take_close_request(&self) -> Option<CloseReason> {
         self.close_request.try_take()
     }
-
-    #[cfg(test)]
-    pub(crate) fn has_pending_write(&self) -> bool {
-        !self.write_request.is_empty()
-    }
 }
 
-/// Both halves' shared state. The firmware uses [`RADIO_LINK_PORT`]; tests
-/// build their own.
+/// Both halves' shared state. The firmware leaks one ([`RadioLinkPort::leak`]).
 pub struct RadioLinkPort {
     slots: [RadioLinkSlot; RADIO_LINK_SLOTS],
-    write_result: Channel<CriticalSectionRawMutex, (u32, Result<(), TransportError>), 1>,
-    incoming: Channel<CriticalSectionRawMutex, (LinkId, String), INCOMING_DEPTH>,
     events: Channel<CriticalSectionRawMutex, RadioLinkEvent, EVENT_DEPTH>,
-    /// `LEASED | (generation & GENERATION_MASK)` while a radio write owns the
-    /// frame buffer, 0 when none does.
-    frame_lease: AtomicU32,
     next_link: AtomicU32,
 }
-
-const LEASED: u32 = 0x8000_0000;
-const GENERATION_MASK: u32 = !LEASED;
-
-/// The firmware's one port.
-pub static RADIO_LINK_PORT: RadioLinkPort = RadioLinkPort::new();
 
 impl Default for RadioLinkPort {
     fn default() -> Self {
@@ -145,14 +267,17 @@ impl RadioLinkPort {
     #[must_use]
     pub const fn new() -> Self {
         Self {
-            slots: [RadioLinkSlot::new(), RadioLinkSlot::new()],
-            write_result: Channel::new(),
-            incoming: Channel::new(),
+            slots: [const { RadioLinkSlot::new() }; RADIO_LINK_SLOTS],
             events: Channel::new(),
-            frame_lease: AtomicU32::new(0),
             // 0 is `LinkId::PRIMARY` (the USB cable).
             next_link: AtomicU32::new(1),
         }
+    }
+
+    /// The firmware's one port, for the radio side and the mux to share.
+    #[must_use]
+    pub fn leak() -> &'static Self {
+        Box::leak(Box::new(Self::new()))
     }
 
     /// A fresh id for a new radio connection: monotonic, never reused.
@@ -169,7 +294,7 @@ impl RadioLinkPort {
         }
     }
 
-    /// Slot `index`'s channels.
+    /// Slot `index`.
     ///
     /// # Panics
     /// If `index >= RADIO_LINK_SLOTS`.
@@ -178,93 +303,26 @@ impl RadioLinkPort {
         &self.slots[index]
     }
 
+    /// Every slot, in index order.
+    pub fn slots(&self) -> impl Iterator<Item = &RadioLinkSlot> {
+        self.slots.iter()
+    }
+
     /// Radio side: announce a link event. Waits if the server loop is
     /// behind (it drains events every frame).
     pub async fn announce(&self, event: RadioLinkEvent) {
         self.events.send(event).await;
     }
 
-    /// Radio side: hand one complete `M!` line from `link` to the server
-    /// loop. `false`: the queue was full and the line was dropped — the
-    /// caller logs it (the USB link drops the same way, for the same
-    /// reason: the server loop is not keeping up).
-    pub fn deliver_line(&self, link: LinkId, line: String) -> bool {
-        self.incoming.try_send((link, line)).is_ok()
-    }
-
-    /// Radio side: copy `dst.len()` bytes of `request`'s frame, starting at
-    /// `offset`, into `dst`. `false` (and `dst` untouched) when the mux no
-    /// longer holds the frame for this request — it timed out and moved on —
-    /// or the span is out of range.
-    pub fn copy_frame(&self, request: &RadioWriteRequest, offset: usize, dst: &mut [u8]) -> bool {
-        if self.frame_lease.load(Ordering::Acquire) != lease_word(request.generation) {
-            return false;
-        }
-        let Some(end) = offset.checked_add(dst.len()) else {
-            return false;
-        };
-        if end > request.len {
-            return false;
-        }
-        let frame = crate::serial::server_msg::frame_bytes(request.len);
-        dst.copy_from_slice(&frame[offset..end]);
-        true
-    }
-
-    /// Radio side: report how `request` went. Never waits: at most one
-    /// request is outstanding, so anything already in the result channel is
-    /// a stale answer the mux stopped waiting for, and is replaced.
-    pub fn finish_write(&self, request: &RadioWriteRequest, result: Result<(), TransportError>) {
-        self.write_result.clear();
-        let _ = self.write_result.try_send((request.generation, result));
-    }
-
-    // ---- mux side (crate-internal) ----
-
     pub(crate) fn try_event(&self) -> Option<RadioLinkEvent> {
         self.events.try_receive().ok()
     }
-
-    pub(crate) fn try_line(&self) -> Option<(LinkId, String)> {
-        self.incoming.try_receive().ok()
-    }
-
-    pub(crate) fn lease_frame(&self, generation: u32) {
-        self.frame_lease
-            .store(lease_word(generation), Ordering::Release);
-    }
-
-    pub(crate) fn revoke_frame(&self) {
-        self.frame_lease.store(0, Ordering::Release);
-    }
-
-    /// Queue `request` on `slot`, discarding a request a previous, abandoned
-    /// write left there (its lease is already revoked).
-    pub(crate) fn submit_write(&self, slot: usize, request: RadioWriteRequest) {
-        let channel = &self.slots[slot].write_request;
-        channel.clear();
-        let _ = channel.try_send(request);
-    }
-
-    /// Take back `slot`'s request if the radio side never picked it up.
-    pub(crate) fn withdraw_write(&self, slot: usize) {
-        self.slots[slot].write_request.clear();
-    }
-
-    /// The result for `generation`, discarding stale ones.
-    pub(crate) async fn write_result(&self, generation: u32) -> Result<(), TransportError> {
-        loop {
-            let (got, result) = self.write_result.receive().await;
-            if got == generation {
-                return result;
-            }
-            log::warn!(
-                "radio link: discarding stale write result generation={got} (awaiting {generation})"
-            );
-        }
-    }
 }
 
-fn lease_word(generation: u32) -> u32 {
-    LEASED | (generation & GENERATION_MASK)
+/// Where a radio link reads an external message's bytes: the static frame
+/// buffer the mux serialized the reply into, which it keeps unchanged while
+/// the link has the message in flight.
+fn read_frame_buf(offset: usize, out: &mut [u8]) {
+    let bytes = crate::serial::server_msg::frame_bytes(offset + out.len());
+    out.copy_from_slice(&bytes[offset..]);
 }

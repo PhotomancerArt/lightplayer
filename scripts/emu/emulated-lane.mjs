@@ -49,6 +49,15 @@ import { StudioDriver } from "./studio-driver.mjs";
 /// serves. `{fw}` in a spec's board line substitutes to this.
 export const PACKAGED_C6_ELF = "target/riscv32imac-unknown-none-elf/release-esp32/fw-esp32c6";
 
+/// The same build as the whole chip `studio-firmware-package-served` packs:
+/// bootloader, table and the SPLIT image (loader, core, engine). Since the
+/// C6 ships split (#971) the ELF above, direct-loaded over a blank chip,
+/// boots its core only ("engine does not fit"): its engine lives in flash.
+/// `{merged}` in a board line substitutes to this; spell it
+/// `<id>={merged},kind=rom-up` for a writable chip seeded with it, booted
+/// from the reset vector the way a flashed board is.
+export const PACKAGED_C6_MERGED = "target/studio-web-assets/firmware/esp32c6-4mb/fw-esp32c6-merged.bin";
+
 /// How long a wedged step may hang before the run is failed. NEVER an
 /// assertion: nothing in this milestone concludes anything from elapsed time,
 /// and an agent-driven tab is throttled to ~1 Hz anyway.
@@ -72,7 +81,9 @@ export async function startDoor({ root, id, boards, stateDir, consoleDir, logFil
     throw new Error(`no ${binary} — run \`cargo build -p lp-cli\` first`);
   }
   const args = ["emu", "serve"];
-  for (const board of boards) args.push("--board", board.replaceAll("{fw}", PACKAGED_C6_ELF));
+  for (const board of boards) {
+    args.push("--board", board.replaceAll("{fw}", PACKAGED_C6_ELF).replaceAll("{merged}", PACKAGED_C6_MERGED));
+  }
   args.push("--listen", "127.0.0.1:0", "--state-dir", stateDir, "--console-dir", consoleDir);
   // TRUNCATED, not appended. The listen address is read back out of this
   // file, and an appended log still holds the PREVIOUS run's address — which

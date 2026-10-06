@@ -40,7 +40,10 @@ all read this one file.
   app version, a required field. The recorded board predates the field, so
   it is given the value an embedder with no version reports rather than a
   version it never said.
-- **Wire shapes:** proto 35. Every line re-parses into the wire types and
+- **Wire shapes:** proto 35; 36 (Wi-Fi settings) only added messages,
+  and 37 (Bluetooth onto lp-link) moved no message shape, so nothing in
+  the sample changed for either. Every line
+  re-parses into the wire types and
   re-serializes byte for byte (`lpc-wire`'s
   `recorded_traffic_reserializes_byte_for_byte`).
 - **Cut with:** since proto 30 the tap holds lp-link frames, so it is first
