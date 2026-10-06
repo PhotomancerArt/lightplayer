@@ -203,6 +203,29 @@ pub fn load_build_def(repo_root: &Path, id: &str) -> Result<BuildDef> {
         })
 }
 
+/// The build defs the Studio site ships (`lp-fw/builds/served.json`'s
+/// `builds`, format 1), in file order: the targets a release carries.
+pub fn load_served_targets(repo_root: &Path) -> Result<Vec<String>> {
+    #[derive(Deserialize)]
+    struct Served {
+        format: u32,
+        builds: Vec<String>,
+    }
+    let path = repo_root.join(BUILDS_DIR).join("served.json");
+    let text =
+        std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+    let served: Served =
+        serde_json::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
+    if served.format != 1 {
+        bail!(
+            "{} has format {}, this lp-cli reads only 1",
+            path.display(),
+            served.format
+        );
+    }
+    Ok(served.builds)
+}
+
 /// Repository root, found by walking up from the current directory (same
 /// heuristic as the hardware manifest store and schema generator).
 pub fn find_repo_root() -> Result<PathBuf> {
@@ -368,6 +391,17 @@ mod tests {
                 def.id
             );
             def.crate_dir(&repo_root).unwrap();
+        }
+    }
+
+    /// Every served target is a checked-in build def.
+    #[test]
+    fn served_targets_are_build_defs() {
+        let repo_root = find_repo_root().unwrap();
+        let served = load_served_targets(&repo_root).unwrap();
+        assert!(served.iter().any(|t| t == "esp32c6-4mb"), "{served:?}");
+        for target in served {
+            load_build_def(&repo_root, &target).unwrap();
         }
     }
 }

@@ -107,6 +107,20 @@ schemaVersion 2; a split def adds the manifest's `split` block and writes its
 parts to `target/firmware-parts/<id>/`). `served.json` decides which of those directories reach the
 Studio site / Pages artifact.
 
+For a split def, `package` also writes the **OTA files** into the parts
+directory (never the Studio bundle): `ota-manifest.json` (format 1,
+`schemas/ota-manifest.schema.json`, `lpc-firmware-release`) and `core.z` /
+`engine.z` (encoding 1, compressed by `lpa-update`'s one packer). Identity is
+read from the image's manifest core; the full commit is resolved from the
+checkout, and a release version whose commit is `unknown` refuses (a dev
+build skips its OTA files with one warning).
+
+`lp-cli firmware release-assets --out <dir> [--targets <id,…>] [--allow-dev]`
+stages those packages under release asset names (`<target>.<file>`), verifying
+every file and compressing nothing; `lp-cli firmware release-check <dir>`
+re-verifies a staged (or downloaded) release from its files alone, including
+every compressed chunk. Neither uploads anything.
+
 ## Consumers
 
 These files are also read app-side, embedded by `lpa-boards`
