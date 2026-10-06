@@ -22,6 +22,15 @@
 //! "between legs". The driver's `Done` ends the leg with an
 //! `UpdateOutcome` first, which ends the activity.
 //!
+//! **A board's reset need not close the port.** Over a transport that does
+//! not re-enumerate (the emulator's door, a classic's UART) the board's
+//! restart is an lp-link *session* reset on a port that stays open: the pump
+//! reports it ([`UpdateHost::on_link_reset`]), the driver goes down there
+//! and then — the old session's words are lost — and comes back up when the
+//! board speaks on the new session: its `M` (core-only sends one unasked) or
+//! a hello that announces channel 3 ([`UpdateHost::on_hello`]; a running
+//! engine sends no `M` unasked). The leg itself carries on.
+//!
 //! **The driver goes when the activity goes** — on its own `Done`, on an
 //! abandon, and on [`UpdateHost::reconcile`] finding the device no longer
 //! running an Update (an activity that ends with no link attached raises no
@@ -249,6 +258,25 @@ impl UpdateHost {
         self.state.borrow_mut().on_board(link, bytes);
     }
 
+    /// `link`'s lp-link session reset while its port stayed open: the board
+    /// restarted (an update's own reset, on a transport that does not
+    /// re-enumerate) or the link gave up on a frame. Whatever the driver
+    /// had in flight on the old session is lost: it goes down now, and up
+    /// again when the board speaks on the new session ([`Self::on_hello`],
+    /// or its first channel-3 message).
+    pub(crate) fn on_link_reset(&self, link: LinkId) {
+        self.state.borrow_mut().on_link_reset(link);
+    }
+
+    /// A hello on `link`: when it `announced` channel 3 (a split image's
+    /// hello carries `firmware`), a driver waiting out a session reset
+    /// there comes back up — a running engine says no `M` unasked.
+    pub(crate) fn on_hello(&self, link: LinkId, announced: bool) {
+        if announced {
+            self.state.borrow_mut().session_back(link);
+        }
+    }
+
     /// The model abandoned the effect `effect_id` (a cancel while backing
     /// up): the run it belonged to goes.
     pub(crate) fn abandon(&self, effect_id: EffectId) {
@@ -361,6 +389,9 @@ struct UpdateRun {
     backup_sha: Option<[u8; 32]>,
     /// A read-back ran (what a kept engine came from).
     read_back: bool,
+    /// The leg's lp-link session reset (the port stayed open); the driver
+    /// is down until the board speaks on the new session.
+    session_reset: bool,
 }
 
 enum RunPhase {
@@ -454,6 +485,7 @@ impl HostState {
                     narration: UpdateNarration::default(),
                     backup_sha: None,
                     read_back: false,
+                    session_reset: false,
                 },
             );
             spawn_ticks(&seams, self.me.clone(), device, generation);
@@ -463,6 +495,7 @@ impl HostState {
         };
         run.last_effect = start.effect_id;
         run.link = start.link;
+        run.session_reset = false;
         run.facts = start.facts.facts.clone();
         let replaced = run.leg.replace(Leg {
             link: start.link,
@@ -1158,16 +1191,77 @@ impl HostState {
 
     // ---- Routing (DS1) ---------------------------------------------------------------
 
-    fn on_board(&mut self, link: LinkId, bytes: &[u8]) {
+    /// The device whose leg runs on `link`.
+    fn leg_on(&self, link: LinkId) -> Option<DeviceId> {
+        self.runs
+            .iter()
+            .find(|(_, run)| run.leg.as_ref().is_some_and(|leg| leg.link == link))
+            .map(|(device, _)| *device)
+    }
+
+    /// See [`UpdateHost::on_link_reset`].
+    fn on_link_reset(&mut self, link: LinkId) {
         let Some(seams) = self.seams.clone() else {
             return;
         };
-        let device = self
-            .runs
-            .iter()
-            .find(|(_, run)| run.leg.as_ref().is_some_and(|leg| leg.link == link))
-            .map(|(device, _)| *device);
-        let Some(device) = device else {
+        let Some(device) = self.leg_on(link) else {
+            return;
+        };
+        let Some(run) = self.runs.get_mut(&device) else {
+            return;
+        };
+        let RunPhase::Driving(driver) = &mut run.phase else {
+            return;
+        };
+        let now = seams.now_ms();
+        driver.link_down(now);
+        // Whatever the driver says on a session that is gone goes nowhere.
+        for effect in driver.take_effects() {
+            log::debug!(
+                "update: a {} after the session reset (dropped)",
+                DriverEffectName(&effect)
+            );
+        }
+        run.session_reset = true;
+        let effect = run.last_effect;
+        if let Some(line) = run.narration.link_down(now) {
+            seams.say(device, effect, line);
+        }
+    }
+
+    /// The board spoke on the new session of `link`: a driver down since a
+    /// session reset comes back up, and the reconnect is narrated.
+    fn session_back(&mut self, link: LinkId) {
+        let Some(seams) = self.seams.clone() else {
+            return;
+        };
+        let Some(device) = self.leg_on(link) else {
+            return;
+        };
+        let Some(run) = self.runs.get_mut(&device) else {
+            return;
+        };
+        if !core::mem::replace(&mut run.session_reset, false) {
+            return;
+        }
+        let now = seams.now_ms();
+        let effect = run.last_effect;
+        if let Some(line) = run.narration.link_up(now) {
+            seams.say(device, effect, line);
+        }
+        if let RunPhase::Driving(driver) = &mut run.phase {
+            driver.link_up(now);
+            self.process(device);
+        }
+    }
+
+    fn on_board(&mut self, link: LinkId, bytes: &[u8]) {
+        // The board's first word on a new session ends a reset's gap.
+        self.session_back(link);
+        let Some(seams) = self.seams.clone() else {
+            return;
+        };
+        let Some(device) = self.leg_on(link) else {
             // No leg on this link (a board's own `M` on link-up, a watched
             // board's answer): its facts reach the fold decoded.
             return;

@@ -102,6 +102,29 @@ fn update_x_to_y_with_the_backup_cached_reads_nothing_back_and_pins_it_until_y()
     ));
 }
 
+/// The board's resets keep the port open (the link's session resets, as
+/// over the emulator's door): the update host drops what was in flight on
+/// the old session, comes back up when the board speaks on the new one —
+/// its `M` in core-only, its hello when its engine runs — and the update
+/// ends on Y with no click.
+#[test]
+fn an_update_whose_resets_keep_the_port_open_ends_on_y() {
+    let mut bench = Bench::new(Board::running_x(), Some(y()));
+    bench.board_mut().resets_keep_port = true;
+    let device = bench.connect_device();
+    bench.press_update(device);
+
+    bench.run_until_update_ends(device);
+    bench.assert_runs(&y());
+    assert_eq!(bench.outcome(device), Some(UpdateOutcomeFacts::UpToDate));
+    assert!(bench.said("backing up current firmware from the board"));
+    assert!(bench.said_starting("board reset · reconnected in "));
+    assert!(matches!(
+        bench.standing(device),
+        UpdateStanding::UpToDate { .. }
+    ));
+}
+
 /// Update X → Y with an empty cache and no store: the backup is read back
 /// from the board, kept and pinned, and let go on Y.
 #[test]
@@ -522,6 +545,11 @@ struct Board {
     /// The board speaks channel 3 (`false`: pre-update firmware — no `M`,
     /// no manifest in its hello).
     announces: bool,
+    /// The board's resets keep the port open, as an lp-link transport that
+    /// does not re-enumerate sees them (the emulator's door, a classic's
+    /// UART): the link's SESSION resets — a link-reset note, then the new
+    /// session's words — and nothing closes.
+    resets_keep_port: bool,
 }
 
 impl Board {
@@ -544,6 +572,7 @@ impl Board {
             unplug_after_core_requests: None,
             core_requests: 0,
             unplugged: false,
+            resets_keep_port: false,
             announces: true,
         }
     }
@@ -724,12 +753,44 @@ impl Board {
             return;
         }
         if self.rig.reset_pending {
+            if self.resets_keep_port {
+                return self.session_reset();
+            }
             self.close("board reset");
             match self.rig.reboot() {
                 Ok(()) => {}
                 Err(BootFault::PowerCut) => self.power_cut(),
                 Err(e) => panic!("boots after a reset: {e:?}"),
             }
+        }
+    }
+
+    /// A reset on a port that stays open: the old session's words are
+    /// lost, the link says it reset, and the rebooted board speaks on a new
+    /// session (its `M` in core-only, its hello when its engine runs).
+    fn session_reset(&mut self) {
+        let Some(old) = self.open.take() else {
+            return;
+        };
+        let now = self.now_ms();
+        self.rig.link_down(now, old);
+        match self.rig.reboot() {
+            Ok(()) => {}
+            Err(e) => panic!("boots after a reset: {e:?}"),
+        }
+        self.events.push_back(LinkEvent::WireNote(
+            lpa_link::device_link::port_read_map::link_reset_note(
+                lpc_wire::lp_link::ResetReason::PeerRestarted,
+            ),
+        ));
+        let link = RigLinkId(self.next_rig_link);
+        self.next_rig_link += 1;
+        self.open = Some(link);
+        let now = self.now_ms();
+        let outs = self.rig.link_up(now, link, self.trust);
+        self.push_outgoing(outs.into_iter().map(|o| o.bytes));
+        if self.engine_running() {
+            self.hello(0);
         }
     }
 
