@@ -464,7 +464,7 @@ studio-web-copy-sidecars profile out_dir include_firmware="false":
                 echo "  run: just studio-firmware-package-served" >&2
                 exit 1
             fi
-            # The package, and a split package's update files into `ota/`
+            # The package, and a split package's update files beside it
             # (OTA M7, DS10) — see the script's header.
             scripts/studio-copy-firmware.sh "${build_id}" "{{ studio_assets_dir }}/firmware" \
                 "{{ out_dir }}/firmware" target/firmware-parts
@@ -715,7 +715,7 @@ studio-dev: install-wasm32-target (studio-firmware-package-served studio_fw_imag
         # fresh hash pair and the script sweeps the stale one it replaces.
         scripts/sync-engine-sidecar.sh "${sidecar_dir}" "${public_dir}/pkg"
         for build_id in "${served_builds[@]}"; do
-            # The package, and a split package's update files (`ota/`).
+            # The package, and a split package's update files beside it.
             scripts/studio-copy-firmware.sh "${build_id}" "{{ studio_assets_dir }}/firmware" \
                 "${public_dir}/firmware" target/firmware-parts
         done

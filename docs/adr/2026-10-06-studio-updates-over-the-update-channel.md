@@ -134,9 +134,13 @@ deploy bundles are always split.
 
 ### 6. This Studio's own build ships beside its merged image (DS5, DS10)
 
-The bundle adds the split package's `ota/ota-manifest.json`, `core.z` and
-`engine.z` beside `manifest.json` and the merged image (C6: ~1.84 MB more,
-fetched only when an update runs). `core.bin` and `engine.bin` are not
+The bundle adds the split package's `ota-manifest.json`, `core.z` and
+`engine.z` beside `manifest.json` and the merged image, in the same
+`firmware/<target>/` directory (C6: ~1.84 MB more, fetched only when an
+update runs). *(Amended 2026-10-06: they first shipped one level down, in
+`firmware/<target>/ota/`, where lightplayer.app's firmware lookup —
+`/firmware/<target>/<release>/<file>` — answered before the bundle; see
+`docs/defects/2026-10-06-the-bundles-ota-files-are-shadowed-by-the-firmware-lookup.md`.)* `core.bin` and `engine.bin` are not
 shipped: Studio slices them out of the merged image by the package
 manifest's `split` offsets, and checks every piece against
 `ota-manifest.json` (the package hash, the core's layout, the image)

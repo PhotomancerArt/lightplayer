@@ -124,10 +124,10 @@ async function main() {
   const trail = path.join(out, "card-trail.log");
 
   // This Studio's firmware, staged the way the release bundle is (Y's update
-  // files under ota/).
+  // files beside its manifest.json).
   const stagedY = path.join(out, "firmware-y");
   stageFirmware(stagedY, PACKAGES, PARTS);
-  const y = JSON.parse(readFileSync(path.join(stagedY, "esp32c6-4mb/ota/ota-manifest.json"), "utf8"));
+  const y = JSON.parse(readFileSync(path.join(stagedY, "esp32c6-4mb/ota-manifest.json"), "utf8"));
   const x = JSON.parse(readFileSync(path.join(X, "ota/ota-manifest.json"), "utf8"));
   const xSplit = JSON.parse(readFileSync(path.join(X, "split.json"), "utf8"));
   // X as a fielded board: its first boot done (`lpfs` formatted and

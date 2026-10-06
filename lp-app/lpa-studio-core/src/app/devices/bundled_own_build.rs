@@ -3,24 +3,31 @@
 //!
 //! For each served build the bundle holds `firmware/<target>/manifest.json`
 //! (the package manifest) and the merged image it names; a split target
-//! also holds `firmware/<target>/ota/`: the package's `ota-manifest.json`,
-//! `core.z` and `engine.z`. Never `core.bin` / `engine.bin`: those are
+//! also holds, beside them, the package's `ota-manifest.json`, `core.z` and
+//! `engine.z`. Never `core.bin` / `engine.bin`: those are
 //! **sliced out of the merged image** by the package manifest's `split`
 //! offsets, as the split image's design planned (M2's D13), so the bundle
 //! grows by the compressed files only.
 //!
+//! Beside, never in a subdirectory: on lightplayer.app every
+//! `/firmware/<target>/<release>/<file>` path is lp-cloud-server's firmware
+//! lookup, which answers before the static bundle is consulted, so the
+//! bundle stays two segments deep under `firmware/`
+//! (`docs/defects/2026-10-06-the-bundles-ota-files-are-shadowed-by-the-firmware-lookup.md`).
+//!
 //! **Update-capable, checked twice, before a fact is believed.** A Studio
 //! build carries an update-capable firmware build only when
 //!
-//! - its `ota/ota-manifest.json` parses, and names this very package —
+//! - its `ota-manifest.json` parses, and names this very package —
 //!   the package manifest's bytes hash to the manifest's `package` entry
-//!   (so a stale `ota/` beside a newer single-image package is refused),
+//!   (so stale update files beside a newer single-image package are
+//!   refused),
 //!   and the merged image it names is the package's; and
 //! - the image's own manifest core says so: its `ota.layout` is the one
 //!   the update files require (update protocol Part B, DD29).
 //!
-//! Anything else — a single-image package (the fast local build), no `ota/`
-//! directory, a mismatch — is **no build of its own**: [`facts`] stays
+//! Anything else — a single-image package (the fast local build), no
+//! `ota-manifest.json`, a mismatch — is **no build of its own**: [`facts`] stays
 //! `None`, no board is offered an over-the-air update, and over USB the card
 //! keeps today's flash (`device_update_route`). A restore still works.
 //!
@@ -54,8 +61,9 @@ pub const OWN_BUILD_MISMATCH: &str = "this Studio's firmware files don't match";
 /// The package manifest's name in the bundle, beside the merged image.
 const PACKAGE_MANIFEST: &str = "manifest.json";
 
-/// Where a target's update files sit, under its firmware directory.
-const OTA_DIR: &str = "ota";
+/// The update files' manifest, beside the package manifest (two segments
+/// under `firmware/`, out of the firmware lookup's three).
+const OTA_MANIFEST: &str = "ota-manifest.json";
 
 /// One served build's update-capable package, by what its two manifests
 /// say: everything [`Self::build`] needs to turn fetched bytes into a
@@ -152,7 +160,8 @@ impl BundledOwnBuild {
         &self.image.file
     }
 
-    /// The compressed files encoding 1 lists, under `ota/` (none: raw only).
+    /// The compressed files encoding 1 lists, beside the package manifest
+    /// (none: raw only).
     pub fn encoded_files(&self) -> Vec<String> {
         self.ota
             .encoding1()
@@ -281,7 +290,7 @@ impl<F: FirmwareFetch + 'static> OwnBuildSource for BundledOwnBuildSource<F> {
             let image = fetch_file(&state.fetch, &format!("{dir}/{}", build.image_file())).await?;
             let mut encoded = Vec::new();
             for file in build.encoded_files() {
-                let bytes = fetch_file(&state.fetch, &format!("{dir}/{OTA_DIR}/{file}")).await?;
+                let bytes = fetch_file(&state.fetch, &format!("{dir}/{file}")).await?;
                 encoded.push((file, bytes));
             }
             build.build(&image, &encoded)
@@ -295,11 +304,7 @@ async fn read_target<F: FirmwareFetch>(
     target: &str,
 ) -> Result<BundledOwnBuild, String> {
     let dir = format!("{}/{target}", state.base);
-    let ota = match state
-        .fetch
-        .get(&format!("{dir}/{OTA_DIR}/ota-manifest.json"))
-        .await
-    {
+    let ota = match state.fetch.get(&format!("{dir}/{OTA_MANIFEST}")).await {
         Ok(Some(bytes)) => bytes,
         Ok(None) => return Err("no update files in this Studio (a single image)".to_string()),
         Err(e) => return Err(format!("ota-manifest.json: {e:?}")),
@@ -375,11 +380,14 @@ mod tests {
         );
     }
 
-    /// The fast local build: one image, no `ota/` — no build of its own.
+    /// The fast local build: one image, no update files — no build of its
+    /// own.
     #[test]
     fn a_single_image_studio_has_no_build_of_its_own() {
         let mut bundle = Bundle::split();
-        bundle.files.retain(|path, _| !path.contains("/ota/"));
+        for file in ["ota-manifest.json", "core.z", "engine.z"] {
+            bundle.files.remove(&format!("fw/esp32c6-4mb/{file}"));
+        }
         let source = bundle.source();
         let why = block_on(source.read_facts()).unwrap_err();
         assert!(why.contains("single image"), "{why}");
@@ -387,7 +395,7 @@ mod tests {
         assert!(block_on(source.load()).is_err());
     }
 
-    /// A stale `ota/` beside a newer package (a single image packaged over
+    /// Stale update files beside a newer package (a single image packaged over
     /// a split one, say) names another package: refused.
     #[test]
     fn update_files_for_another_package_are_refused() {
@@ -415,7 +423,7 @@ mod tests {
         let mut bundle = Bundle::split();
         let source = bundle.source();
         block_on(source.read_facts()).expect("read");
-        bundle.files.get_mut("fw/esp32c6-4mb/ota/engine.z").unwrap()[0] ^= 0xFF;
+        bundle.files.get_mut("fw/esp32c6-4mb/engine.z").unwrap()[0] ^= 0xFF;
         let source = BundledOwnBuildSource {
             state: Rc::new(SourceState {
                 fetch: MemoryFetch(bundle.files.clone()),
@@ -504,11 +512,11 @@ mod tests {
             files.insert("fw/esp32c6-4mb/manifest.json".to_string(), package);
             files.insert("fw/esp32c6-4mb/fw-esp32c6-merged.bin".to_string(), image);
             files.insert(
-                "fw/esp32c6-4mb/ota/ota-manifest.json".to_string(),
+                "fw/esp32c6-4mb/ota-manifest.json".to_string(),
                 ota.to_json_bytes(),
             );
-            files.insert("fw/esp32c6-4mb/ota/core.z".to_string(), core_z);
-            files.insert("fw/esp32c6-4mb/ota/engine.z".to_string(), engine_z);
+            files.insert("fw/esp32c6-4mb/core.z".to_string(), core_z);
+            files.insert("fw/esp32c6-4mb/engine.z".to_string(), engine_z);
             Self { files }
         }
 
