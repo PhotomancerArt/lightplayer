@@ -282,6 +282,48 @@ async fn a_drop_is_a_departure_and_the_session_reconnects_by_itself() {
     polyfill_off().await;
 }
 
+/// The 2026-10-05 desk check (a board restarted under the editor) and
+/// `walk-ble-emu`'s `drop-back`: the departure sweep detached the dropped
+/// link before its pump read the drop, so `bluetooth link lost` waited in
+/// the session — and the link the reconnect attached read it on open and
+/// closed at once. With the session present again no edge came, nothing
+/// re-attached the board, and the editor's hold ran out over a board that
+/// was connected and saying hello. A link opened on the reconnect hears its
+/// own connection, not the last one's end.
+#[wasm_bindgen_test]
+async fn a_link_opened_on_the_reconnect_does_not_read_the_old_links_loss() {
+    polyfill_over(&["c6-a"]).await;
+    let edges = edges();
+    let device = pick().await;
+    let link = open_link(&device).await;
+    let connects = edges.0.get();
+
+    // The drop, and the departure sweep detaching the link before its pump
+    // ever ran again: the loss is never drained by the link it ended.
+    JsFuture::from(js_ble_out_of_range("c6-a")).await.unwrap();
+    drop(link);
+    JsFuture::from(js_ble_back_in_range("c6-a")).await.unwrap();
+    for _ in 0..300 {
+        if edges.0.get() > connects {
+            break;
+        }
+        tick(20).await;
+    }
+    assert_eq!(edges.0.get(), connects + 1, "reconnected by itself");
+
+    // The connect edge's sweep attaches a NEW link on the same session.
+    let mut link = open_link(&device).await;
+    let lost = wait_for_up_to(&mut link, 50, |event| {
+        matches!(event, LinkEvent::Error(error) if error.starts_with("bluetooth link lost"))
+            || matches!(event, LinkEvent::Closed { .. })
+    })
+    .await;
+    assert_eq!(lost, None, "the new link read the old link's loss");
+    assert!(link.is_open(), "the new link stays open");
+
+    polyfill_off().await;
+}
+
 #[wasm_bindgen_test]
 async fn a_drop_the_page_never_heard_is_found_on_the_recheck() {
     polyfill_over(&["c6-a"]).await;

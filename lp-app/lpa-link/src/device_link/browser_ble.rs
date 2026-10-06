@@ -25,10 +25,20 @@
 //!   disconnect is also the lp-link session's end, on both sides at once —
 //!   Bluetooth's link reset — so the reconnect is a new session with a new
 //!   hello.
+//! - **A link hears only its own loss.** The session's errors outlive a
+//!   link: when the presence edge's departure sweep detaches a link before
+//!   its pump drained the drop, the `bluetooth link lost` waits in the
+//!   session for whoever drains next — which is the NEXT link, opened on the
+//!   reconnect. Read there it closed a healthy new link at once, and with
+//!   the session present no edge came again, so nothing re-attached the
+//!   board: the editor's hold ran out over a board that was connected and
+//!   saying hello (defect
+//!   `2026-10-06-a-bluetooth-reconnect-reads-the-old-links-loss`). So `Open`
+//!   discards a loss recorded before it.
 //!
 //! # The wire is lp-link, as over Web Serial
 //!
-//! Since `WIRE_PROTO_VERSION` 33 each connection is an lp-link on
+//! Since `WIRE_PROTO_VERSION` 37 each connection is an lp-link on
 //! `LinkConfig::ble()`'s datagrams, serviced by the provider
 //! (`providers/browser_ble/ble_link_port.rs`, the same `LinkPortService`
 //! Web Serial runs per port). A request is one link message
@@ -187,7 +197,16 @@ impl BleLinkInner {
         }
         // What the board said since the connect waits, read, in the
         // session's link (its hello among them); an earlier connection's
-        // reads went with that connection's link.
+        // reads went with that connection's link — and so does its loss.
+        // A `bluetooth link lost` still queued here was an earlier link's
+        // (a departure sweep detached it before it drained the error); read
+        // now, it would close this link the moment it opened. Any other
+        // error is still said.
+        if let Ok(errors) = self.wire.take_errors() {
+            for error in errors.into_iter().filter(|error| !is_link_lost(error)) {
+                self.push(LinkEvent::Error(error));
+            }
+        }
         self.open.set(true);
         self.push(LinkEvent::Opened {
             info: self.info.clone(),
