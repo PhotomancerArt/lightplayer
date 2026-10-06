@@ -3287,6 +3287,10 @@ test-emu-c6: test-emu-c6-boot test-emu-c6-cli
 # sources are not this checkout's (docs/ci-images.md). Unset, it is a no-op.
 test-emu-c6-boot:
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-emu-esp32c6 --no-fail-fast -- --include-ignored --nocapture
+    # The emulator seam gates (docs/adr/2026-10-05-emulator-seams.md): the
+    # synthetic-guest tests and the `test_seam_abi` harness image need the
+    # dev-only `test-seams` implementations, which no shipped binary has.
+    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-emu-esp32c6 --features test-seams --test 'seam_*' -- --include-ignored --nocapture
     cargo test -p lp-emu-validate --test m3_replays
     cargo test -p lp-emu-validate --test m4_replays
     cargo test -p lp-emu-validate --test m5_replays
@@ -3394,6 +3398,7 @@ test-emu-c6-cli:
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test link_capture -- --include-ignored --nocapture
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_frag_reads -- --include-ignored --nocapture
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_split_boot -- --include-ignored --nocapture
+    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_seam_led -- --include-ignored --nocapture
     cargo test -p lpa-studio-core --lib app_agent_eval_tests::the_
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test app_agent_emu_decode -- --include-ignored --nocapture the_
 

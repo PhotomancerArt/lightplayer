@@ -115,6 +115,15 @@ impl FwImage {
         default_features: true,
     };
 
+    /// The emulator seam ABI harness (`fw-esp32c6`'s `test_seam_abi`): the
+    /// shipped seam table plus the two TEST ONLY seams, called through their
+    /// generated shims under the real `release-esp32` build
+    /// (`tests/seam_abi_harness.rs`).
+    pub const TEST_SEAM_ABI: FwImage = FwImage {
+        features: &["esp32c6", "test_seam_abi"],
+        default_features: true,
+    };
+
     /// The P5 gate image: `--no-default-features --features
     /// esp32c6,server,memory_fs`. `memory_fs` is the firmware's own "no
     /// flash" switch: without it the image reads the boot-control sector

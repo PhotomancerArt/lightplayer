@@ -559,6 +559,51 @@ fn the_embedded_validate_table_is_coherent() {
     }
 }
 
+/// Every `[[seam]]` overlay names a seam implementation the emulator has, of
+/// the same kind, and every one of its trust entries says why. The runner
+/// (inside the MIT fence) and the emulator's registry
+/// (`lp_emu_esp_common::seam::seam_impl`) are two halves only `lp-cli` sees,
+/// so the agreement is checked here.
+#[test]
+fn every_seam_overlay_is_an_implementation_the_emulator_has() {
+    use lp_emu_esp_common::seam::seam_impl;
+    use lp_emu_validate::config::SeamKind;
+    let cfg = ValidateConfig::embedded();
+    assert!(!cfg.seams.is_empty(), "led=fast's overlay is in the table");
+    for overlay in &cfg.seams {
+        let imp = seam_impl::find(&overlay.name, &overlay.implementation).unwrap_or_else(|| {
+            panic!(
+                "[[seam]] `{}` names no implementation the emulator has ({})",
+                overlay.atom(),
+                seam_impl::known_atoms()
+            )
+        });
+        let kind = match overlay.kind {
+            SeamKind::Performance => "performance",
+            SeamKind::Capability => "capability",
+        };
+        assert_eq!(
+            kind,
+            imp.kind.as_str(),
+            "{}: the overlay's kind is the seam's",
+            overlay.atom()
+        );
+        for class in FieldClass::ALL {
+            if let Some(why) = overlay.trust.because(*class) {
+                assert!(
+                    why.len() > 20,
+                    "{} / {class}: `{why}` is not a reason",
+                    overlay.atom()
+                );
+            }
+        }
+        // A composite name resolves, and keeps the base's identity.
+        let label = format!("lp-emu:esp32c6:t2+{}", overlay.atom());
+        let composed = cfg.configuration(&label).unwrap();
+        assert_eq!(composed.label(), label);
+    }
+}
+
 /// Every trust entry states a reason. A grade without a `because` is a guess
 /// with a table around it.
 #[test]

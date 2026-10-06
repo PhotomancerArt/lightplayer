@@ -70,7 +70,7 @@ const ENOENT = 44;
 const ENOTSUP = 58;
 
 /** The ABI revision this file speaks. Must equal `emu_abi_version()`. */
-export const EMU_ABI = 1;
+export const EMU_ABI = 2;
 
 /**
  * The negative returns, mirrored from `lp_emu_esp32c6::tab_abi::AbiError`.
@@ -101,6 +101,9 @@ export const OUTCOMES = {
   // off and the cable out). The wake is not modelled, so a tab board stays
   // here until the page reloads.
   7: "deep-sleep",
+  // A strict emulator seam request (`seams=`) cannot engage on this image.
+  // Studio's boards ask softly (`seams_prefer=`), so a page never sees it.
+  8: "seam",
 };
 
 const encoder = new TextEncoder();
@@ -401,6 +404,14 @@ export function bindEmu(instance) {
     flashDirty: () => check("emu_flash_dirty", e.emu_flash_dirty()) === 1,
     flashMarkSaved: () => check("emu_flash_mark_saved", e.emu_flash_mark_saved()),
     flashHasImage: () => check("emu_flash_has_image", e.emu_flash_has_image()) === 1,
+
+    /** This chip start's emulator seams: `{label, engaged, lines, none_why}`. */
+    seamsInfo: () =>
+      JSON.parse(
+        decoder.decode(
+          withOut(replyCap, "emu_seams_info", (ptr, cap) => e.emu_seams_info(ptr, cap)),
+        ),
+      ),
   };
 }
 

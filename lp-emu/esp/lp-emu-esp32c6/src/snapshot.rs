@@ -24,7 +24,7 @@
 //! | `sched` | the live event queue, with the sequence numbers that break ties |
 //! | `matrix` | the interrupt matrix's configuration (nothing, until P5) |
 //! | `rng` | the seeded PRNG's position |
-//! | `hook_calls`, `uart0`, `usb_sj` | observables a test compares |
+//! | `hook_calls`, `seam_calls`, `seam_arms`, `uart0`, `usb_sj` | observables a test compares |
 //! | `pins` | the pads' WS281x decoders and their frames — a decoder caught mid-bit is state, and the routing it decodes rides `scalars` with the rest of the bus |
 //!
 //! Watchpoints are **not** here: they live on the bus but they are derived
@@ -48,6 +48,11 @@ pub struct Snapshot {
     pub matrix: Vec<u8>,
     pub rng: u64,
     pub hook_calls: u64,
+    /// Emulator seam calls answered, and patches planted (first arms and
+    /// re-arms) — observables, like `hook_calls`. Both zero on a seam-off
+    /// run.
+    pub seam_calls: u64,
+    pub seam_arms: u64,
     pub uart0: Vec<u8>,
     /// What a USB host received — same rule as `uart0`: a restored run must
     /// not still hold bytes from a future it no longer has.

@@ -64,6 +64,7 @@ impl Registry {
             .boards
             .iter()
             .map(|b| {
+                let seams = b.seams.lock().expect("seam report poisoned").clone();
                 serde_json::json!({
                     "id": b.id,
                     "mac": format_mac(&b.mac),
@@ -85,6 +86,14 @@ impl Registry {
                     // are different things to this chip, and a page that
                     // offers both should be able to see which one it got.
                     "power_cycles": b.power_cycles.load(Ordering::SeqCst),
+                    // The run's configuration label (`…+led=fast` with an
+                    // emulator seam engaged) and this chip start's `SEAM`
+                    // lines, so a page can say what it is running.
+                    "configuration": seams.label,
+                    "seams": seams.lines,
+                    // Its seam endpoints, `<board>/<seam>` — what a medium
+                    // would join. Empty until a capability seam engages.
+                    "endpoints": b.endpoints(),
                 })
             })
             .collect();

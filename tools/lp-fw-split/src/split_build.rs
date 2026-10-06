@@ -62,6 +62,8 @@ pub struct Piece {
 pub const BUILD_ID_SYMBOL: &str = "LP_BUILD_ID";
 /// The core's engine digest slot.
 pub const ENGINE_DIGEST_SYMBOL: &str = "LP_ENGINE_DIGEST";
+/// The emulator seam descriptor table (`fw_esp32_common::seam_table!`).
+pub const SEAM_TABLE_SYMBOL: &str = "LP_SEAM_TABLE";
 /// The layout `lp_bootctl::SplitLayout` describes.
 pub const LAYOUT: u32 = 1;
 
@@ -109,8 +111,17 @@ pub fn build(opts: &BuildOptions) -> Result<SplitReport> {
         target: opts.target.as_deref(),
     };
     let p1 = pass_link::link_firmware(&repo, &out, "p1", &pass1_x, &identity)?;
+    let p1_elf = fs::read(&p1.elf)?;
+    // The shipped image carries the emulator seam table, and it is a core
+    // root: refuse a build that lost it rather than ship an image whose
+    // seams no emulator can find.
+    if elf_symbol::find_opt(&p1_elf, SEAM_TABLE_SYMBOL)?.is_none() {
+        bail!(
+            "pass 1 linked no `{SEAM_TABLE_SYMBOL}`: the shipped image must carry the seam table"
+        );
+    }
     let graph = SectionGraph::load(&p1.elf, &p1.map)?;
-    let split = Split::compute(&graph, &core_roots(&graph, &fs::read(&p1.elf)?)?);
+    let split = Split::compute(&graph, &core_roots(&graph, &p1_elf)?);
     let rules = EngineRules::from_split(&graph, &split);
     let engine_x = out.join("engine.x");
     fs::write(&engine_x, rules.script())?;
@@ -133,6 +144,8 @@ pub fn build(opts: &BuildOptions) -> Result<SplitReport> {
             verification.core_in_engine.join(", ")
         );
     }
+    let seams = seam_table_placement(&fs::read(&p2.elf)?)?;
+    eprintln!("{seams}");
 
     eprintln!("==> loader");
     let loader_elf_built = pass_link::build_loader(&repo)?;
@@ -250,17 +263,68 @@ pub fn verify(elf: &Path, map: &Path) -> Result<Verification> {
 }
 
 /// Nodes that are core whatever reaches them: the digest slot and the
-/// build id the packager reads and patches by name.
+/// build id the packager reads and patches by name, and — when the image
+/// has one — the emulator seam table, so it and the seam functions it names
+/// land in the core whatever the engine does (dev and harness images may
+/// lack it; [`build`] refuses a shipped image that does).
 pub fn core_roots(graph: &SectionGraph, elf: &[u8]) -> Result<Vec<usize>> {
-    let mut roots = Vec::new();
-    for name in [ENGINE_DIGEST_SYMBOL, BUILD_ID_SYMBOL] {
-        let sym = elf_symbol::find(elf, name)?;
-        let node = graph
-            .node_at(i64::from(sym.vaddr))
-            .with_context(|| format!("`{name}` is in no input section of the map"))?;
-        roots.push(node);
+    let required = [ENGINE_DIGEST_SYMBOL, BUILD_ID_SYMBOL]
+        .map(|name| elf_symbol::find(elf, name).map(|s| (name, s.vaddr)));
+    let mut named = Vec::new();
+    for r in required {
+        named.push(r?);
     }
-    Ok(roots)
+    if let Some(table) = elf_symbol::find_opt(elf, SEAM_TABLE_SYMBOL)? {
+        named.push((SEAM_TABLE_SYMBOL, table.vaddr));
+    }
+    roots_at(graph, &named)
+}
+
+/// The input sections holding each named address.
+fn roots_at(graph: &SectionGraph, named: &[(&str, u32)]) -> Result<Vec<usize>> {
+    named
+        .iter()
+        .map(|&(name, vaddr)| {
+            graph
+                .node_at(i64::from(vaddr))
+                .with_context(|| format!("`{name}` is in no input section of the map"))
+        })
+        .collect()
+}
+
+/// Where the seam table and every seam function it names were placed: all
+/// of it must be in the core (below the engine region), or the build fails.
+pub fn seam_table_placement(elf: &[u8]) -> Result<String> {
+    let table = elf_symbol::find(elf, SEAM_TABLE_SYMBOL)?;
+    let lines = seam_sites_in_core(table.vaddr, table.get(elf))?;
+    Ok(lines.join("\n"))
+}
+
+/// The table at `vaddr` and its entries, one line each; an error names the
+/// first one at or above [`ENGINE_BASE`].
+fn seam_sites_in_core(vaddr: u32, bytes: &[u8]) -> Result<Vec<String>> {
+    let view = match lp_seam::table::read(bytes, 0) {
+        Ok(lp_seam::table::Read::Match(view)) => view,
+        Ok(lp_seam::table::Read::Mismatch { abi }) => {
+            bail!("`{SEAM_TABLE_SYMBOL}` has abi {abi:016x}, not this tree's")
+        }
+        Err(e) => bail!("`{SEAM_TABLE_SYMBOL}` is not a seam table: {e:?}"),
+    };
+    let core = |what: &str, at: u32| -> Result<String> {
+        if at >= ENGINE_BASE {
+            bail!("{what} @{at:#010x} is in the engine region: the seam table must be a core root");
+        }
+        Ok(format!("    {what} @{at:#010x} (core)"))
+    };
+    let mut lines = vec![core(&format!("seam table {SEAM_TABLE_SYMBOL}"), vaddr)?];
+    for e in view.entries() {
+        let name = lp_seam::SeamDecl::by_id(e.id).map_or("?", |d| d.symbol);
+        lines.push(core(name, e.function)?);
+        if e.engaged != 0 {
+            lines.push(core(&format!("{name} engaged byte"), e.engaged)?);
+        }
+    }
+    Ok(lines)
 }
 
 /// The core's copy of the build id.
@@ -285,4 +349,62 @@ pub fn factory_extent(partitions: &Path) -> Result<(u32, u32)> {
         .find("factory")
         .with_context(|| format!("no `factory` partition in {}", partitions.display()))?;
     Ok((factory.offset(), factory.size()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::section_graph::Node;
+
+    #[test]
+    fn the_seam_table_is_a_root_beside_the_digest_and_the_build_id() {
+        let node = |vma| Node {
+            vma,
+            size: 0x100,
+            out: ".rodata".into(),
+            desc: format!("/x/a.o:(.rodata.{vma:x})"),
+        };
+        let graph = SectionGraph::build(
+            vec![node(0x4200_0000), node(0x4200_1000), node(0x4200_2000)],
+            &[],
+            0x4200_0000,
+        );
+        let roots = roots_at(
+            &graph,
+            &[
+                (ENGINE_DIGEST_SYMBOL, 0x4200_0010),
+                (BUILD_ID_SYMBOL, 0x4200_1010),
+                (SEAM_TABLE_SYMBOL, 0x4200_2040),
+            ],
+        )
+        .unwrap();
+        assert_eq!(roots, [0, 1, 2]);
+        let err = roots_at(&graph, &[(SEAM_TABLE_SYMBOL, 0x4300_0000)]).unwrap_err();
+        assert!(err.to_string().contains(SEAM_TABLE_SYMBOL), "{err}");
+    }
+
+    #[test]
+    fn a_seam_site_in_the_engine_region_fails_the_build() {
+        let core_fn = 0x4210_0000u32;
+        let ok = seam_sites_in_core(0x4201_0000, &table(core_fn)).unwrap();
+        assert_eq!(ok.len(), 2);
+        assert!(ok[1].contains("lp_seam_ws281x_wait_step"), "{ok:?}");
+        let err = seam_sites_in_core(0x4201_0000, &table(ENGINE_BASE + 0x40)).unwrap_err();
+        assert!(err.to_string().contains("engine region"), "{err}");
+        let err = seam_sites_in_core(ENGINE_BASE, &table(core_fn)).unwrap_err();
+        assert!(err.to_string().contains("seam table"), "{err}");
+    }
+
+    /// A one-entry table naming `function` for the LED wait seam.
+    fn table(function: u32) -> Vec<u8> {
+        use lp_seam::table::*;
+        let mut b = vec![0u8; OFFSET_ENTRIES + ENTRY_LEN];
+        b[..16].copy_from_slice(&MAGIC);
+        b[OFFSET_ABI..OFFSET_ABI + 8].copy_from_slice(&lp_seam::SEAM_ABI_ID.to_le_bytes());
+        b[OFFSET_COUNT..OFFSET_COUNT + 4].copy_from_slice(&1u32.to_le_bytes());
+        let e = OFFSET_ENTRIES;
+        b[e..e + 2].copy_from_slice(&lp_seam::ws281x_wait_step::ID.to_le_bytes());
+        b[e + 4..e + 8].copy_from_slice(&function.to_le_bytes());
+        b
+    }
 }

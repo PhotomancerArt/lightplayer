@@ -24,6 +24,23 @@ impl SymbolBytes {
     }
 }
 
+/// The defined, file-backed symbol `name`, or `None` when the ELF has no
+/// symbol of that name at all (a symbol that exists but is not file-backed
+/// is still an error).
+pub fn find_opt(elf: &[u8], name: &str) -> Result<Option<SymbolBytes>> {
+    let header = object::elf::FileHeader32::<Endianness>::parse(elf)?;
+    let endian = header.endian()?;
+    let sections = header.sections(endian, elf)?;
+    let symbols = sections.symbols(endian, elf, object::elf::SHT_SYMTAB)?;
+    let present = symbols
+        .iter()
+        .any(|s| s.name(endian, symbols.strings()).ok() == Some(name.as_bytes()));
+    if !present {
+        return Ok(None);
+    }
+    find(elf, name).map(Some)
+}
+
 /// The defined, file-backed symbol `name`.
 pub fn find(elf: &[u8], name: &str) -> Result<SymbolBytes> {
     let header = object::elf::FileHeader32::<Endianness>::parse(elf)?;

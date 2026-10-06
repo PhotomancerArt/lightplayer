@@ -363,6 +363,7 @@ runtime.
 | `lpc-access`     | Access core: secrets, tiers, HMAC login, backoff, the device network file and the write-only predicate (sans-IO) | yes |
 | `lp-server`      | Project management, client connections | yes              |
 | `lp-json-pack`   | JSON Pack: a compact binary form of JSON that decodes back to byte-identical JSON text (`lp-base/`, generic; names coded against an injected seed and a per-connection learned table) | yes |
+| `lp-seam`        | The emulator-seam ABI: the one declaration of every seam, its identity (`SEAM_ABI_ID`), the descriptor table layout, and the macros that generate a seam function and its call (`lp-base/`, MIT). See "Emulator seams" below | yes |
 | `lp-link`        | Sans-IO link layer under the device wire: framing, CRC-32C, channels, selective-repeat ARQ, session handshake (`lp-base/`, generic; one crate on both ends). Runs the product's USB, classic-UART0 and BLE links (board, host, Studio, tools); only fw-emu is still the pre-lp-link `M!` framing. Optional `secure` feature: Noise NNpsk0 inside the SYN + sealed frames, the key match as the login (`LinkTrust::Keyed`), off on every product link until the Wi-Fi milestones | yes |
 | `lpa-devices`    | Device model: event fold, no IO, no UI | no (host + wasm) |
 | `lpc-update`     | OTA update protocol v1 (channel 3): codec, board manifest, progress record, and the board's sans-IO update session | yes |
@@ -791,6 +792,14 @@ replies stay JSON — <why>`), and a packed link whose learned table lost step
 says so once (`wire: packed reply dropped …`, then `wire: back in step …`). See
 `docs/adr/2026-09-09-studio-device-stack-over-a-virtual-serial-port.md`.
 
+An emulated board added on the **Devices page** asks the emulator for the
+LED performance seam (`led=fast`, softly: an image too old for it boots
+seam-free and says why), and says what came of it in one journal line per
+start (`emu: LED fast mode on (led=fast)`, or why it is off). `?seams=none`
+turns that off for an A/B on one build, and `?seams=<atoms>` replaces it.
+None of it reaches `?emu=tab` or `?emu=ws://…` boards, or any walk: those
+run today's machine. See `docs/adr/2026-10-05-emulator-seams.md`.
+
 Two more exist for a hardware sitting, where Web Serial's exclusive hold on the
 port means nothing else can read what the board sends:
 `?wire-capture=1` tees every raw byte chunk the Web Serial read pump hands to
@@ -1159,6 +1168,44 @@ scripts/emu/v3-oracle.sh --name-a jit --name-b interp \
     <out-dir> <slug> <window>                   # the classic's identity pair: translated against interpreted
 cargo run -p lp-cli -- validate run emu-m3 --config lp-emu:esp32c6:t1 --dry-run
 ```
+
+#### Emulator seams: the named places the emulator may answer
+
+The shipped firmware declares a few functions (`lp-base/lp-seam`, MIT,
+`no_std`) that the emulator may answer instead of running, **only when a run
+asks**. The ROM hook table stays empty; seams are their own exception, with
+their own rules: `docs/adr/2026-10-05-emulator-seams.md`.
+
+- **Two kinds.** A *capability* seam stands in for hardware the emulator
+  cannot model (none ships yet; Bluetooth and the network are next). A
+  *performance* seam skips work the emulator models faithfully but slowly,
+  and still bills its time: `led=fast` (the WS281x wait) keeps frames, fps
+  and heap identical. **Performance seams are on only for the emulated boards
+  a user adds on Studio's Devices page** — never `?emu=` (ws or tab), `emu
+  serve`'s defaults, the walks, CI or `lp-cli validate` (which refuses them).
+- **Seam off is today's machine.** With nothing asked for, nothing scans,
+  nothing is patched, and no figure moves.
+- **Flags.** `lp-cli emu run --seams <atoms>` (strict: a seam that cannot
+  engage is an error), `--seams-prefer <atoms>` (soft: engage what the image
+  allows, else one `SEAM none engaged: <why>` line), `--seams-info <image>`
+  (what an image declares). `emu serve` board options `seams=` /
+  `seams_prefer=`. Studio's `?seams=<atoms|none>` replaces the Devices-page
+  choice. Atoms are `<seam>=<impl>` joined by `+`.
+- **The label says so.** An engaged run's configuration is the base name plus
+  its atoms (`lp-emu:esp32c6:t2+led=fast`), every chip start prints `SEAM …`
+  lines, and a number taken seamed carries that label.
+- **No cross-build compatibility.** Firmware and emulator engage only on an
+  exact `SEAM_ABI_ID` match; an image built from other seam declarations runs
+  seam-free and says why. Adding or changing a seam is an ABI change.
+- **The wake** is one pending word and `FROM_CPU_INTR3`: what it wakes runs
+  on the firmware's IO thread, and the emulator paces it. Seams resolve on
+  every chip start, arm through the live MMU, and a split image may hold two
+  tables (the live one wins).
+
+The READMEs: `lp-base/lp-seam/README.md` (the ABI),
+`lp-emu/esp/lp-emu-esp32c6/README.md` ("Emulator seams"),
+`lp-fw/fw-esp32c6/README.md` (the table and its cost on silicon),
+`lp-emu/lp-emu-validate/README.md` ("Composite names").
 
 #### The perf lab: the phone joins once, the director queues the presses
 

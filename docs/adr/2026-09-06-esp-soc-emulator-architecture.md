@@ -162,6 +162,11 @@ SRAM, without which `pp_rom_version` is NULL and the radio blob faults inside
 An empty hook table is the honest position. Every hook is a place the model
 stops being the chip.
 
+*(2026-10-05)* The hook table is still empty. **Emulator seams** are a
+separate, named exception — functions the shipped firmware declares, answered
+only when a run asks — with their own list and rules:
+`2026-10-05-emulator-seams.md`.
+
 ### Direct load now, ROM-up at M7
 
 `loader.rs` reproduces what the ROM and the ESP-IDF second-stage bootloader

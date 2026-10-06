@@ -54,9 +54,9 @@ set -euo pipefail
 repo="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$repo"
 
-# emu_abi=1 — keep in step with `tab_abi::ABI_VERSION` and `EMU_ABI` in
+# emu_abi=2 — keep in step with `tab_abi::ABI_VERSION` and `EMU_ABI` in
 # emulator_worker.js.
-EMU_ABI=1
+EMU_ABI=2
 
 exports=(
     # version and errors
@@ -88,6 +88,7 @@ exports=(
     emu_flash_dirty
     emu_flash_mark_saved
     emu_flash_has_image
+    emu_seams_info
 )
 
 # Verified but NOT link-arg'd: these come out of the link on their own, and

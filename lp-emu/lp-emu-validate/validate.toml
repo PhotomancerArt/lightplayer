@@ -450,6 +450,28 @@ class = "wire"
 grade = "modeled"
 because = "the same UART0 model as t1: the bytes are the guest's, a live socket's arrival times are the host's"
 
+[[seam]]
+# Emulator seam overlays (ADR docs/adr/2026-10-05-emulator-seams.md): what one
+# seam implementation changes about a configuration's trust. A composite name,
+# `lp-emu:esp32c6:t2+led=fast`, is the base configuration with each atom's
+# overlay laid over it in label order: an overlay entry REPLACES the base's
+# entry for its class, and `grade = "absent"` marks a class the implementation
+# does not produce at all (`--strict` refuses it). A performance seam never
+# makes a transcript — `validate record` and `validate run` refuse one — so an
+# overlay like this one is for reading a label and grading a claim, never for
+# recording.
+name = "led"
+implementation = "fast"
+kind = "performance"
+description = "The LED performance seam (L1): the render thread's spin between two polls of the WS281x RMT driver's completion flag is answered with 'return, then park until an interrupt the hart would wake for'. What still runs is everything else: the RMT model, its refill and done interrupts, the pads and the strip decoder, so the frames, the frame count and the heap are seam-off's (lp-cli/tests/emu_seam_led.rs). On only for Studio's Devices-page boards."
+
+# `pin` stays the base's: L1 keeps the pads, so nothing about a pin claim
+# changes. Only `timing` moves.
+[[seam.trust]]
+class = "timing"
+grade = "modeled"
+because = "the render thread's spin is parked until an interrupt; the RMT model bills the wire time. Frame timestamps drift about 0.13 us a frame against seam off, and the RMT refill-latency figure reads better than silicon: never quote it from this configuration"
+
 [[configuration]]
 name = "lp-emu:esp32c6:t3"
 description = "The same machine at time grade 3: the class costs the cycle-probe kernels measured on silicon, plus what an access's address costs — the flash cache's 32-byte fills and the APB's wait states. The first grade in which two instructions with the same opcode cost different amounts. Memory is identical to t1 and t2 by construction; the interleaving is not."

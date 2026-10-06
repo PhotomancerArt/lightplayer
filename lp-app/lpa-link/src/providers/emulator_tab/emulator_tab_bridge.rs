@@ -16,6 +16,7 @@ use wasm_bindgen_futures::JsFuture;
 
 use crate::LinkError;
 use crate::device_link::wire_tap::{WireTapDir, tap_wire};
+use crate::providers::emulator_tab_seams::{EmuSeamsInfo, resolve_seams};
 
 #[wasm_bindgen(module = "/src/providers/emulator_tab/emulator_tab_bridge.js")]
 extern "C" {
@@ -45,6 +46,9 @@ extern "C" {
 
     #[wasm_bindgen(js_name = emuDilation, catch)]
     fn js_dilation(id: u32) -> Result<Option<f64>, JsValue>;
+
+    #[wasm_bindgen(js_name = emuSeamsInfo, catch)]
+    fn js_seams_info(id: u32) -> Result<JsValue, JsValue>;
 
     #[wasm_bindgen(js_name = resetEmuPort)]
     fn js_reset(id: u32) -> Promise;
@@ -90,6 +94,10 @@ pub struct EmulatorTabOptions {
     pub manifest_url: Option<String>,
     /// Where the image is persisted. `None` means "under the uid".
     pub persist_key: Option<String>,
+    /// The emulator seams this board asks for, softly (`led=fast`, `none`),
+    /// or `None` for the end-user choice (`emulator_tab_seams::end_user_seams`
+    /// — `led=fast` unless the page carried `?seams=`).
+    pub seams: Option<String>,
 }
 
 /// One emulated board in this tab.
@@ -132,6 +140,10 @@ impl EmulatorTabPort {
                 Some(key) => JsValue::from_str(key),
                 None => JsValue::from_str(&options.uid),
             },
+        );
+        set(
+            "seams",
+            JsValue::from_str(&resolve_seams(options.seams.as_deref())),
         );
         let id = js_open_emu_port(&describe).map_err(js_error)?;
         Ok(Self { id })
@@ -189,6 +201,30 @@ impl EmulatorTabPort {
     /// How fast the board runs against wall time, as the worker last said.
     pub fn dilation(&self) -> Option<f64> {
         js_dilation(self.id).ok().flatten()
+    }
+
+    /// The worker's last word on this board's emulator seams, or `None`
+    /// before its first stats tick.
+    pub fn seams_info(&self) -> Option<EmuSeamsInfo> {
+        let value = js_seams_info(self.id).ok()?;
+        if value.is_null() || value.is_undefined() {
+            return None;
+        }
+        let get = |key: &str| js_sys::Reflect::get(&value, &JsValue::from_str(key)).ok();
+        let engaged = get("engaged")
+            .map(|list| {
+                js_sys::Array::from(&list)
+                    .iter()
+                    .filter_map(|atom| atom.as_string())
+                    .collect()
+            })
+            .unwrap_or_default();
+        Some(EmuSeamsInfo {
+            asked: get("asked").and_then(|v| v.as_string()).unwrap_or_default(),
+            reboots: get("reboots").and_then(|v| v.as_f64()).unwrap_or(0.0) as u64,
+            engaged,
+            none_why: get("none_why").and_then(|v| v.as_string()),
+        })
     }
 
     /// Reset the chip (not a replug).

@@ -451,6 +451,7 @@ async function create(message) {
     flash: emu.flashHasImage() ? "loaded" : "blank",
     source,
     abi: EMU_ABI,
+    seams: emu.seamsInfo(),
     // What `host.attach` proved in THIS engine, before the board existed: the
     // module's function table grew and a funcref in a slot answered a
     // `call_indirect` by index. A board reports it once; `stats` reports what
@@ -721,6 +722,11 @@ function maybeReport(wallAt) {
     micros: Number(emu.micros()),
     reboots: Number(emu.reboots()),
     dilation: dilation(),
+    // This chip start's emulator seams (`emu_seams_info`): the configuration
+    // label, what engaged, the `SEAM` lines and why nothing did. A ROM-up
+    // board's resolve once its app runs, so this is read every report rather
+    // than once after create; the page notes a change.
+    seams: emu.seamsInfo(),
     flash: emu.flashHasImage() ? "loaded" : "blank",
     state: stopped === null ? "running" : (OUTCOMES[stopped] ?? "stopped"),
     ...translation(),

@@ -18,6 +18,11 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Grade {
+    /// The configuration does not produce this class at all — an emulator
+    /// seam that answers in place of the hardware a class is about. Only a
+    /// `[[seam]]` overlay states it; `--strict` refuses it like any grade
+    /// below `Measured`.
+    Absent,
     /// A model produced it. Nobody has checked it against the thing it models.
     Modeled,
     /// A datasheet, TRM, or vendor document says so, and the implementation
@@ -32,6 +37,7 @@ pub enum Grade {
 impl Grade {
     pub const fn slug(self) -> &'static str {
         match self {
+            Self::Absent => "absent",
             Self::Modeled => "modeled",
             Self::Documented => "documented",
             Self::Measured => "measured",
@@ -40,6 +46,7 @@ impl Grade {
 
     pub fn parse(s: &str) -> Option<Self> {
         match s {
+            "absent" => Some(Self::Absent),
             "modeled" => Some(Self::Modeled),
             "documented" => Some(Self::Documented),
             "measured" => Some(Self::Measured),
@@ -129,11 +136,17 @@ mod tests {
     fn grades_order_worst_to_best() {
         assert!(Grade::Measured > Grade::Documented);
         assert!(Grade::Documented > Grade::Modeled);
+        assert!(Grade::Modeled > Grade::Absent);
     }
 
     #[test]
     fn grade_slugs_round_trip() {
-        for g in [Grade::Modeled, Grade::Documented, Grade::Measured] {
+        for g in [
+            Grade::Absent,
+            Grade::Modeled,
+            Grade::Documented,
+            Grade::Measured,
+        ] {
             assert_eq!(Grade::parse(g.slug()), Some(g));
         }
     }
