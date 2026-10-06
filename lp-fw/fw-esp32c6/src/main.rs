@@ -781,7 +781,9 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
             let host = fw_esp32_common::net::mdns::mdns_host(net::net_thread::base_mac());
             let seed = (u64::from(esp_hal::rng::Rng::new().random()) << 32)
                 | u64::from(esp_hal::rng::Rng::new().random());
-            net::net_thread::start(controller, station, host, seed, lan_port);
+            // A board that will join allocates its socket buffers now.
+            let will_join = file.wifi && !file.networks.is_empty();
+            net::net_thread::start(controller, station, host, seed, lan_port, will_join);
         }
     }
     #[cfg(all(

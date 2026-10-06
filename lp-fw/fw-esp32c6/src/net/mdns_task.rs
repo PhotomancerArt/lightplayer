@@ -9,8 +9,9 @@
 //! when the address changes. A query from a port other than 5353 is a
 //! legacy one-shot resolver and gets a unicast answer with its id and
 //! question echoed (RFC 6762 §6.7); one with the QU bit set gets a unicast
-//! answer too. Buffers are allocated once, at the first address; nothing
-//! per query. No probing or conflict resolution (plan: future work).
+//! answer too. Buffers are allocated once: at boot on a board with a
+//! network saved, else at the first address (the LAN endpoint's rule);
+//! nothing per query. No probing or conflict resolution (plan: future work).
 
 use alloc::boxed::Box;
 use alloc::string::String;
@@ -34,19 +35,61 @@ const RX_BYTES: usize = 768;
 /// Our answers are a handful of short records.
 const TX_BYTES: usize = 512;
 
+/// The responder's buffers: its socket's rings and one query and one
+/// answer.
+pub struct MdnsBuffers {
+    rx_meta: &'static mut [PacketMetadata; 4],
+    tx_meta: &'static mut [PacketMetadata; 4],
+    rx_buf: &'static mut [u8],
+    tx_buf: &'static mut [u8],
+    packet: &'static mut [u8],
+    out: &'static mut [u8],
+}
+
+impl MdnsBuffers {
+    pub fn leak() -> Self {
+        let leak =
+            |len: usize| -> &'static mut [u8] { Box::leak(vec![0u8; len].into_boxed_slice()) };
+        Self {
+            rx_meta: Box::leak(Box::new([PacketMetadata::EMPTY; 4])),
+            tx_meta: Box::leak(Box::new([PacketMetadata::EMPTY; 4])),
+            rx_buf: leak(RX_BYTES),
+            tx_buf: leak(TX_BYTES),
+            packet: leak(RX_BYTES),
+            out: leak(TX_BYTES),
+        }
+    }
+}
+
 /// The task. `label` is `lp-xxxx`; `mac` the base MAC (its TXT record).
+/// `buffers` are the boot-time ones, if the board booted with a network.
 #[embassy_executor::task]
-pub async fn mdns_task(stack: Stack<'static>, label: String, mac: [u8; 6]) {
-    // Nothing is allocated until the station first has an address: a board
-    // that never joins pays nothing for its name.
+pub async fn mdns_task(
+    stack: Stack<'static>,
+    label: String,
+    mac: [u8; 6],
+    buffers: Option<MdnsBuffers>,
+) {
     let mut address = super::net_address::watch();
-    let mut first = Some(super::net_address::wait_up(&mut address).await);
-    let rx_meta = Box::leak(Box::new([PacketMetadata::EMPTY; 4]));
-    let tx_meta = Box::leak(Box::new([PacketMetadata::EMPTY; 4]));
-    let rx_buf = Box::leak(vec![0u8; RX_BYTES].into_boxed_slice());
-    let tx_buf = Box::leak(vec![0u8; TX_BYTES].into_boxed_slice());
-    let packet = Box::leak(vec![0u8; RX_BYTES].into_boxed_slice());
-    let out = Box::leak(vec![0u8; TX_BYTES].into_boxed_slice());
+    let mut first = None;
+    // Without boot-time buffers nothing is allocated until the station
+    // first has an address: a board that never joins pays nothing for its
+    // name.
+    let buffers = match buffers {
+        Some(buffers) => buffers,
+        None => {
+            first = Some(super::net_address::wait_up(&mut address).await);
+            MdnsBuffers::leak()
+        }
+    };
+    let MdnsBuffers {
+        rx_meta,
+        tx_meta,
+        rx_buf,
+        tx_buf,
+        packet,
+        out,
+    } = buffers;
     let mut socket = UdpSocket::new(stack, rx_meta, rx_buf, tx_meta, tx_buf);
     if socket.bind(PORT).is_err() {
         log::warn!("[mdns] could not bind port {PORT}: no .local name");

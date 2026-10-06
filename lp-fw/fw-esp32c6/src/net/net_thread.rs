@@ -17,8 +17,11 @@
 //!   `net_thread_stack_diag` paints it and logs its high-water as
 //!   `[netstack]`; P08 sets the figure from that measurement.
 //! - **Memory.** embassy-net's `StackResources` and every socket buffer come
-//!   off the heap once, here, at bring-up — never per connection, never in
-//!   `.bss` (static RAM comes out of the main stack on this chip).
+//!   off the heap once — never per connection, never in `.bss` (static RAM
+//!   comes out of the main stack on this chip). A board that boots with a
+//!   network saved allocates the socket buffers in [`start`], on the boot
+//!   path, low in the heap ([`NetBuffers`]); one that saves its first
+//!   network later allocates them at its first address.
 
 use alloc::boxed::Box;
 use alloc::string::String;
@@ -27,10 +30,12 @@ use core::ffi::c_void;
 use embassy_net::{Config, Runner, Stack, StackResources};
 use esp_radio::wifi::{Interface, WifiController};
 use fw_esp32_common::net::NetFrameDevice;
-use fw_esp32_common::radio_link::SharedPort;
+use fw_esp32_common::radio_link::{LAN_LINK_SLOTS, SharedPort};
 
 use super::esp_frame_device::{C6FrameDevice, CountedStation};
 use super::esp_station::EspStation;
+use super::lan_endpoint_task::{LanBuffers, RefuseBuffers};
+use super::mdns_task::MdnsBuffers;
 
 /// The thread's stack, bytes.
 pub const STACK_BYTES: usize = 8 * 1024;
@@ -40,6 +45,24 @@ pub const PRIORITY: u32 = 1;
 /// refuses a third (P04), mDNS (P05), and one spare.
 pub const SOCKET_SLOTS: usize = 6;
 
+/// Every socket buffer the services on the stack keep, allocated at once.
+pub struct NetBuffers {
+    lan: [LanBuffers; LAN_LINK_SLOTS],
+    refuse: RefuseBuffers,
+    mdns: MdnsBuffers,
+}
+
+impl NetBuffers {
+    /// Allocate them all now.
+    pub fn leak() -> Self {
+        Self {
+            lan: core::array::from_fn(|_| LanBuffers::leak()),
+            refuse: RefuseBuffers::leak(),
+            mdns: MdnsBuffers::leak(),
+        }
+    }
+}
+
 /// What the thread takes ownership of.
 struct Args {
     controller: WifiController<'static>,
@@ -47,6 +70,7 @@ struct Args {
     host: String,
     seed: u64,
     port: SharedPort,
+    buffers: Option<NetBuffers>,
 }
 
 // SAFETY: `Args` is moved to the new thread exactly once, through
@@ -57,20 +81,24 @@ unsafe impl Send for Args {}
 
 /// Start `lp-net` with the radio's controller and station interface. `host`
 /// is the board's LAN name; `seed` seeds the IP stack's port and sequence
-/// randomness.
+/// randomness. `will_join`: the board boots with Wi-Fi on and a network
+/// saved, so its socket buffers are allocated now.
 pub fn start(
     controller: WifiController<'static>,
     station: Interface<'static>,
     host: String,
     seed: u64,
     port: SharedPort,
+    will_join: bool,
 ) {
+    let buffers = will_join.then(NetBuffers::leak);
     let args = Box::into_raw(Box::new(Args {
         controller,
         station,
         host,
         seed,
         port,
+        buffers,
     }));
     esp_println::println!("[INIT] net thread: stack {STACK_BYTES} B, priority {PRIORITY}");
     // SAFETY: `args` is a leaked `Box<Args>` handed to the new thread, which
@@ -99,6 +127,7 @@ extern "C" fn entry(param: *mut c_void) {
         host,
         seed,
         port,
+        buffers,
     } = *args;
     // No IPv4 config until the station associates: DHCP starts on link-up.
     let resources = Box::leak(Box::new(StackResources::<SOCKET_SLOTS>::new()));
@@ -110,7 +139,7 @@ extern "C" fn entry(param: *mut c_void) {
         spawner.spawn(
             super::station_task::station_task(EspStation::new(controller), stack, host).unwrap(),
         );
-        spawn_services(spawner, stack, port);
+        spawn_services(spawner, stack, port, buffers);
     })
 }
 
@@ -126,14 +155,24 @@ pub fn base_mac() -> [u8; 6] {
 
 /// The services on the stack: the LAN endpoint (one task per LAN slot, and
 /// the one that turns a third connection away) and the mDNS responder.
-fn spawn_services(spawner: embassy_executor::Spawner, stack: Stack<'static>, port: SharedPort) {
-    for lan in 0..fw_esp32_common::radio_link::LAN_LINK_SLOTS {
-        spawner.spawn(super::lan_endpoint_task::lan_link_task(stack, port, lan).unwrap());
+fn spawn_services(
+    spawner: embassy_executor::Spawner,
+    stack: Stack<'static>,
+    port: SharedPort,
+    buffers: Option<NetBuffers>,
+) {
+    let (lan, refuse, mdns) = match buffers {
+        Some(NetBuffers { lan, refuse, mdns }) => (lan.map(Some), Some(refuse), Some(mdns)),
+        None => (core::array::from_fn(|_| None), None, None),
+    };
+    for (index, buffers) in lan.into_iter().enumerate() {
+        spawner
+            .spawn(super::lan_endpoint_task::lan_link_task(stack, port, index, buffers).unwrap());
     }
-    spawner.spawn(super::lan_endpoint_task::refuse_task(stack).unwrap());
+    spawner.spawn(super::lan_endpoint_task::refuse_task(stack, refuse).unwrap());
     let mac = base_mac();
     let label = fw_esp32_common::net::mdns::mdns_label(mac);
-    spawner.spawn(super::mdns_task::mdns_task(stack, label, mac).unwrap());
+    spawner.spawn(super::mdns_task::mdns_task(stack, label, mac, mdns).unwrap());
 }
 
 /// The lock the radio-link port takes around every borrow once the LAN's
