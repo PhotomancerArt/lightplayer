@@ -42,6 +42,31 @@ fn wifi_row_on_the_card() -> Element {
     }
 }
 
+#[story(
+    description = "The Wi‑Fi popover open over its own card row, on a page with no room for it above or below (a long Nearby list): the panel slides back across the \"Wi‑Fi · set up ›\" row it opened from, and nothing of that row shows through the network list. Yona's G1 walk found the row's top-layer copy drawn between two network names; the popover now skips the copy whenever the panel overlaps the row, not only when it covers all of it (a full-width row is wider than the panel)."
+)]
+fn wifi_popover_open_over_its_card_row() -> Element {
+    let mut wifi = board(StationState::NotConnected, Vec::new());
+    let mut heard = home();
+    heard.extend((1..=10).map(|n| heard_network(&format!("Neighbour {n:02}"), -80 - n, true)));
+    wifi.heard = Some(heard);
+    let offers = offers(&wifi);
+    rsx! {
+        div { class: CARD_FRAME,
+            crate::app::home::connections_group::ConnectionsGroup {
+                device: DeviceId(7),
+                access: usb_access(Some(true), false),
+                on_access: |_| {},
+                wifi: Some(wifi),
+                on_action: |_| {},
+                on_network: |_| {},
+                wifi_open: true,
+                wifi_offers_preview: Some(offers),
+            }
+        }
+    }
+}
+
 // --- 2 · Page 1, Networks -----------------------------------------------------
 
 #[story(
