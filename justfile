@@ -3262,9 +3262,10 @@ lint-tag-next-version:
 # Two halves, because CI runs them in two jobs. The `-p lp-cli` half is a
 # second full test-tree build (features unify differently from
 # `-p lp-emu-esp32c6`; 6m07s on a CI runner, 2026-09-08), so CI runs it in
-# `Heap budget (esp32c6 chip)` beside the chip ratchet, which needs the same
-# build, and `Emulator C6 (x64)` keeps the emulator's own suite. Locally,
-# `just test-emu-c6` is still the whole thing.
+# two jobs of its own — its link half in `Heap budget (esp32c6 chip)` beside
+# the chip ratchet, which needs the same build, its boards half in `Emulator
+# C6 lp-cli (x64)` — and `Emulator C6 (x64)` keeps the emulator's own suite.
+# Locally, `just test-emu-c6` is still the whole thing.
 test-emu-c6: test-emu-c6-boot test-emu-c6-cli
 
 # The emulator's own suite: boot tests against built fw-esp32c6 ELFs, then the
@@ -3384,23 +3385,58 @@ test-emu-c6-ota scenarios="" filter="": install-rv32-target
     fi
     LP_OTA_IMAGES="$(cd "$out" && pwd)" cargo test -p lp-cli --release --test emu_ota -- --include-ignored --nocapture --test-threads=1 {{ filter }}
 
-# lp-cli's emulator-backed tests. Both resolve the ELF through
-# `lp_emu_esp32c6::test_support` under `LP_EMU_BUILD_FW=1` — a plain
-# `cargo build`, not a reference image, so no espflash and no git history.
-# CI's `Heap budget (esp32c6 chip)` job runs this half.
-test-emu-c6-cli:
+# lp-cli's emulator-backed tests, whole: what a desk runs. They resolve the
+# ELF through `lp_emu_esp32c6::test_support` under `LP_EMU_BUILD_FW=1` — a
+# plain `cargo build`, not a reference image, so no espflash and no git
+# history.
+#
+# CI runs only the three parts below, in two jobs (2026-10-06: the one job
+# that ran all of it had grown to 25 minutes and was cut at its budget). The
+# parity line is NOT in CI here because `Validate (x64)`'s workspace `cargo
+# test` already runs it (nothing in it is `#[ignore]`d) on every PR this
+# job's filter fires for — and here it was a whole extra dev `-p lp-cli` test
+# build, ~4 min, for under a second of tests.
+test-emu-c6-cli: test-emu-c6-cli-link test-emu-c6-cli-boards test-emu-c6-cli-agent
     cargo test -p lp-cli --test validate_registry_parity --test validate_link_host_parity
-    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_usb_link_pack -- --include-ignored --nocapture
-    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_usb_free_lag -- --include-ignored --nocapture
-    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_usb_link -- --include-ignored --nocapture
-    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_usb_link_gates -- --include-ignored --nocapture
-    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_wifi_settings -- --include-ignored --nocapture
-    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test link_capture -- --include-ignored --nocapture
-    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_frag_reads -- --include-ignored --nocapture
-    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_split_boot -- --include-ignored --nocapture
-    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_seam_led -- --include-ignored --nocapture
+
+# The link half: the shipped image's USB lp-link, its pinned figures
+# (`emu_usb_link_gates`), the Wi-Fi settings over it and `link capture`. CI's
+# `Heap budget (esp32c6 chip)` job runs it beside the chip ratchet, whose
+# `cargo run --release -p lp-cli` reuses the lp-cli this build makes — and
+# whose figure-patch step re-runs these same binaries as a bless.
+#
+# One cargo invocation, not one per file: the release profile is fat LTO with
+# one codegen unit, so each test binary is a 20–45 s single-threaded link, and
+# one invocation links them side by side instead of one after another.
+# `--no-fail-fast` so a red run names every failure, not the first.
+test-emu-c6-cli-link: install-rv32-target
+    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --no-fail-fast {{ C6_CLI_LINK_TESTS }} -- --include-ignored --nocapture
+
+# The boards half: whole boards over the link — the fragmented-heap reads,
+# the split image's boot and the LED seam on the split image. CI's `Emulator
+# C6 lp-cli (x64)` job runs it. No pinned figures here, so that job has no
+# figure-patch step.
+test-emu-c6-cli-boards: install-rv32-target
+    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --no-fail-fast --test emu_frag_reads --test emu_split_boot --test emu_seam_led -- --include-ignored --nocapture
+
+# The app-agent evals' deterministic legs: stage A's `the_` tests, then stage
+# B (`app_agent_emu_decode`, the Sean goldens and stage A's replays decoded
+# off the pad). Stage A runs here even though `Validate (x64)` runs it too:
+# its scripted replays WRITE the project trees stage B decodes
+# (`target/app-agent-evals/scripted/`), so stage B fails without them. CI
+# runs this in `Heap budget (esp32c6 chip)`, after the link half, whose
+# release lp-cli build stage B reuses.
+test-emu-c6-cli-agent: install-rv32-target
     cargo test -p lpa-studio-core --lib app_agent_eval_tests::the_
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test app_agent_emu_decode -- --include-ignored --nocapture the_
+
+# The link half's test binaries, named once: the recipe above runs them and
+# CI's figure-patch step re-runs them as a bless (`just c6-cli-link-tests`
+# prints them), so a binary added here is blessed too.
+C6_CLI_LINK_TESTS := "--test emu_usb_link_pack --test emu_usb_free_lag --test emu_usb_link --test emu_usb_link_gates --test emu_wifi_settings --test link_capture"
+
+c6-cli-link-tests:
+    @echo {{ C6_CLI_LINK_TESTS }}
 
 # App-agent evals, live leg (plan lp2025/2026-10-01-0126-app-agent-harness):
 # a model works the scenario in its seat (stage A: a headless Studio, or the
