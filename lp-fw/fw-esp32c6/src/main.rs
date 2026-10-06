@@ -998,6 +998,10 @@ fn lp_engine_entry(core: CoreBoot) {
     // Login challenges draw from the chip's hardware RNG; the server itself
     // never draws randomness (sans-IO).
     server.set_entropy_source(Some(fill_random));
+    // Every link's access state reserved now, the USB link's and each radio
+    // slot's, so a link's first sight grows nothing above its own memory.
+    #[cfg(feature = "ble")]
+    server.reserve_links(1 + fw_esp32_common::radio_link::LINK_SLOTS);
     // A PowerButton node deep-sleeps the chip through this (EXT1 wake).
     server.set_power_platform(Some(Rc::new(
         crate::hardware::power::Esp32C6PowerPlatform::new(Rc::clone(&hardware_system)),
