@@ -6,6 +6,8 @@ area: fw-esp32c6 / fw-esp32s3 / fw-esp32v3 `recovery::panic_path::largest_free_b
 class: rounded-measurement-at-threshold
 related:
   - lp2025/2026-10-05-1903-wifi-link-c6 (PR B, #989; PR C's emulated walk)
+  - docs/defects/2026-10-06-a-lan-link-strands-the-heap-below-the-load-floor.md
+  - docs/defects/2026-09-24-ble-enabled-c6-refuses-a-project-switch-after-the-heap-cut.md
 ---
 # The largest-block probe reads a 64 KiB hole as 65,535 B
 
@@ -41,3 +43,10 @@ as the threshold, or rounded *towards* the threshold's side. A "close
 enough" estimate is close enough only for reports. Here the rounding was
 16 B and the margin that mattered was 1 B, because a hardware region and
 the software floor are the same power of two.
+
+The rounding also wrote a wrong fact into the register: the 2026-09-24
+entry concluded that the 64 KiB region "can never pass the gate", from
+this probe's 65,534 B. Exact, it reads 65,536 B and the region takes the
+load: PR C's head with only this fix passed the load gate with the main
+region's tail at about 64.6 KB, which only that region could have
+satisfied.
