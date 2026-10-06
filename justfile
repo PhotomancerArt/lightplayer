@@ -945,6 +945,16 @@ cloud-serve:
     LP_CLOUD_DEV_AUTH=1 \
         cargo run -p lp-cloud-server
 
+# The firmware store's whole lookup, locally and hermetically (OTA M5, D20):
+# a C6 release staged at the synthetic version 2099.01.01-1 (or the given
+# release-version staging directory) served GitHub-shaped by python3, behind
+# a local lp-cloud-server's `/firmware/` route, checked with curl — bytes,
+# headers, `latest`, the cache, 404s that never reach upstream, a tampered
+# upstream file. Not CI: it builds the C6 firmware. Ports from
+# scripts/dev-port.sh. The live check is the merged release's (yona-ship).
+firmware-store-smoke staging="":
+    scripts/release/firmware-store-smoke.sh {{ staging }}
+
 # ============================================================================
 # Schema artifacts (schemas/) - generated from the model shape catalog
 # ============================================================================

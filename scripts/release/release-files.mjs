@@ -14,6 +14,10 @@
 //       scripts/studio-copy-firmware.sh and Studio's BundledOwnBuild enforce
 //   release-files.mjs sha256 <file>
 //       print the file's SHA-256
+//   release-files.mjs files <ota-manifest.json>
+//       print "<file>\t<sha256>" for every file the manifest names, then
+//       "version\t<version>" and "commit\t<commit>"
+//       (scripts/release/firmware-store-smoke.sh)
 //
 // Any mismatch exits 1 with one line naming it.
 
@@ -21,6 +25,20 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
+
+// Every { file, sha256 } a manifest lists, by file name.
+function namedFiles(manifest) {
+  const files = {};
+  (function walk(value) {
+    if (value && typeof value === "object") {
+      if (typeof value.file === "string" && typeof value.sha256 === "string") {
+        files[value.file] = value;
+      }
+      for (const key of Object.keys(value)) walk(value[key]);
+    }
+  })(manifest);
+  return files;
+}
 
 function fail(message) {
   console.error(message);
@@ -61,16 +79,7 @@ switch (command) {
     const [dir, target] = args;
     const read = (file) => readFileSync(`${dir}/${target}.${file}`);
     const ota = JSON.parse(read("ota-manifest.json"));
-    // Every { file, length, sha256 } the manifest lists, by file name.
-    const files = {};
-    (function walk(value) {
-      if (value && typeof value === "object") {
-        if (typeof value.file === "string" && typeof value.sha256 === "string") {
-          files[value.file] = value;
-        }
-        for (const key of Object.keys(value)) walk(value[key]);
-      }
-    })(ota);
+    const files = namedFiles(ota);
     const pkg = read("package.json");
     if (!ota.package || ota.package.sha256 !== sha256(pkg) || ota.package.length !== pkg.length) {
       fail(`${target}.ota-manifest.json describes another package than ${target}.package.json`);
@@ -88,6 +97,15 @@ switch (command) {
     process.stdout.write(sha256(readFileSync(args[0])));
     break;
   }
+  case "files": {
+    const ota = JSON.parse(readFileSync(args[0], "utf8"));
+    for (const [file, entry] of Object.entries(namedFiles(ota))) {
+      console.log(`${file}\t${entry.sha256}`);
+    }
+    console.log(`version\t${ota.version}`);
+    console.log(`commit\t${ota.commit}`);
+    break;
+  }
   default:
-    fail(`usage: release-files.mjs package|image|ota|sha256 …`);
+    fail(`usage: release-files.mjs package|image|ota|sha256|files …`);
 }
