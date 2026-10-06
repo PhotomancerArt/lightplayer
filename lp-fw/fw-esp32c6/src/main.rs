@@ -345,8 +345,10 @@ const READ_GATE: lpa_server::ReadGate = lpa_server::ReadGate {
 
 #[cfg(not(fw_harness))]
 fn read_headroom_probe() -> Option<u32> {
+    // At once when no project is loaded (the load gate's probe, after a
+    // stop), else every few seconds.
     #[cfg(feature = "heap_map_diag")]
-    heap_map::log_periodic("probe");
+    heap_map::log_if_stopped_or_periodic("probe", 140_000);
     Some(recovery::panic_path::largest_free_block().min(u32::MAX as usize) as u32)
 }
 

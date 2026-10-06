@@ -29,6 +29,14 @@ use core::sync::atomic::{AtomicU32, Ordering};
 
 /// Holes smaller than this are not reported (they are counted as live).
 const MIN_HOLE: usize = 32;
+/// Holes smaller than this are not printed (they still bound what is live).
+const PRINT_HOLE: usize = 256;
+/// Live spans this large or larger are not printed: a project's or boot's
+/// own memory. The small spans between holes are the splitters.
+const PRINT_LIVE_BELOW: usize = 8 * 1024;
+/// The log target: short, because every line rides a 4 KB log ring and a
+/// map is a burst (long module paths made the ring drop half of one).
+const TARGET: &str = "hm";
 /// At most this many holes per map.
 const MAX_HOLES: usize = 48;
 /// Minimum spacing between two periodic maps.
@@ -47,7 +55,21 @@ pub fn log_periodic(tag: &str) {
     log(tag);
 }
 
-/// Log the map now, tagged `tag`.
+/// Log a map now if the heap looks like no project is loaded (`free` above
+/// `min_free`), else at most every [`PERIOD_MS`]: the load gate's probe runs
+/// right after a project stops, often within a period of the last read's.
+pub fn log_if_stopped_or_periodic(tag: &str, min_free: usize) {
+    if esp_alloc::HEAP.free() > min_free {
+        let now = embassy_time::Instant::now().as_millis() as u32;
+        LAST_MAP_MS.store(now.max(1), Ordering::Relaxed);
+        log(tag);
+    } else {
+        log_periodic(tag);
+    }
+}
+
+/// Log the map now, tagged `tag`. Holes under [`PRINT_HOLE`] and live spans
+/// of [`PRINT_LIVE_BELOW`] or more are left out of the print.
 pub fn log(tag: &str) {
     let mut holes = [(0usize, 0usize); MAX_HOLES];
     let n = critical_section::with(|_| take_holes(&mut holes));
@@ -56,31 +78,37 @@ pub fn log(tag: &str) {
 
     let regions = crate::board::esp32c6::init::heap_regions();
     log::info!(
+        target: TARGET,
         "[heapmap] {tag}: used {} free {} holes {n} (>= {MIN_HOLE} B)",
         esp_alloc::HEAP.used(),
         esp_alloc::HEAP.free()
     );
     for (ri, (start, size)) in regions.iter().enumerate() {
         let end = start + size;
-        log::info!("[heapmap] {tag}: region {ri} 0x{start:08x}..0x{end:08x} ({size} B)");
+        log::info!(target: TARGET, "[heapmap] {tag}: region {ri} 0x{start:08x}..0x{end:08x} ({size} B)");
         let mut cursor = *start;
         for (addr, len) in holes.iter().filter(|(a, _)| *a >= *start && *a < end) {
-            if *addr > cursor {
+            if *addr > cursor && addr - cursor < PRINT_LIVE_BELOW {
                 log::info!(
+                    target: TARGET,
                     "[heapmap] {tag}:   live 0x{cursor:08x}..0x{addr:08x} {} B (+{})",
                     addr - cursor,
                     cursor - start
                 );
             }
-            log::info!(
-                "[heapmap] {tag}:   HOLE 0x{addr:08x}..0x{:08x} {len} B (+{})",
-                addr + len,
-                addr - start
-            );
+            if *len >= PRINT_HOLE {
+                log::info!(
+                    target: TARGET,
+                    "[heapmap] {tag}:   HOLE 0x{addr:08x}..0x{:08x} {len} B (+{})",
+                    addr + len,
+                    addr - start
+                );
+            }
             cursor = addr + len;
         }
-        if cursor < end {
+        if cursor < end && end - cursor < PRINT_LIVE_BELOW {
             log::info!(
+                target: TARGET,
                 "[heapmap] {tag}:   live 0x{cursor:08x}..0x{end:08x} {} B (+{})",
                 end - cursor,
                 cursor - start
@@ -209,7 +237,7 @@ mod track {
             OVERFLOW.store(0, Ordering::Relaxed);
             ARMED.store(true, Ordering::Relaxed);
         });
-        log::info!("[heaptrack] armed: {why}");
+        log::info!(target: super::TARGET, "[heaptrack] armed: {why}");
     }
 
     pub fn pause(on: bool) {
@@ -274,6 +302,7 @@ mod track {
         }
         let live = critical_section::with(|cs| table(cs).iter().filter(|e| e.addr != 0).count());
         log::info!(
+            target: super::TARGET,
             "[heaptrack] {tag}: {live} live since armed, overflow {}",
             OVERFLOW.load(Ordering::Relaxed)
         );
@@ -287,6 +316,7 @@ mod track {
             }
             let f = e.frames;
             log::info!(
+                target: super::TARGET,
                 "[heaptrack] {tag}: 0x{:08x} {} B frames {:08x} {:08x} {:08x} {:08x} {:08x} {:08x} {:08x} {:08x}",
                 e.addr,
                 e.size,
