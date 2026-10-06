@@ -202,7 +202,12 @@ fn a_link_past_the_boards_slots_is_told_to_try_again_later() {
             link.close().await;
         }
     });
-    assert_eq!(harness.stats().refused, 1);
+    // Refused on the first try and on every retry while the slot stays
+    // taken (`lan_link::retry_while_busy`).
+    assert_eq!(
+        harness.stats().refused,
+        1 + lpa_client::transport_lan::BUSY_RETRIES as usize
+    );
     assert_no_early_requests(&harness);
 }
 
