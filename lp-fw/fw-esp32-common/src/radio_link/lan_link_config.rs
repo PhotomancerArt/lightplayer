@@ -16,9 +16,11 @@
 //!   (plan deviation, recorded in the PR: no-ARQ was ~8 KB of code).
 //! - **Payload 1 KB** (the preset's): one WebSocket message, well inside
 //!   one TCP segment pair; a project upload's 5.5 KB chunk is six frames.
-//! - **Windows 4**: 4 KB in flight each way covers a LAN round trip at the
-//!   board's frame rate, and the send ring is allocated for the link's life
-//!   (the preset's 16 would be 16 KB per link).
+//! - **Windows 2**: 2 KB in flight each way. TCP already keeps the pipe
+//!   full and never loses a frame, so the window only has to cover the
+//!   board's own turnaround, and the send ring is allocated for the link's
+//!   life (the preset's 16 would be 16 KB per link; 4, the first cut,
+//!   raised the link's RAM bound by 6.2 KB).
 //! - **Budgets: the radio links'.** A long reply stays in the shared frame
 //!   buffer as an external message (never a second 16 KiB copy per link);
 //!   the receive side is lazy, capped at one largest request.
@@ -33,7 +35,7 @@ use lp_link::LinkConfig;
 use super::radio_link_config::{RADIO_MAX_MESSAGE, SMALL_REPLY_BYTES};
 
 /// The board's frames in flight each way.
-const LAN_WINDOW: u8 = 4;
+const LAN_WINDOW: u8 = 2;
 /// Messages the send ring may hold queued (small replies only).
 const SEND_QUEUE: usize = 4;
 /// A reassembly buffer above this is released once its request is
