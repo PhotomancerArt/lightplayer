@@ -13,6 +13,15 @@
 //!   until the station associates, and loses it when the link goes. An
 //!   embassy-net DHCP client started before link-up backs off, which is
 //!   where the experiments' 10–12 s came from.
+//! - **DHCP retries every second** ([`dhcp_config`]), not smoltcp's 10 s.
+//!   The first DISCOVER goes out the moment the station associates, often
+//!   before the access point has finished the WPA handshake, and is lost;
+//!   smoltcp's default sent the next one 10 s later, which is exactly the
+//!   policy's [`ADDRESS_TIMEOUT_MS`], so the first join after every boot
+//!   failed and the board got its address on the rejoin ~22 s after boot
+//!   (silicon, the G1 desk numbers: `connecting … frames in 267 out 1`).
+//!
+//! [`ADDRESS_TIMEOUT_MS`]: fw_esp32_common::net::station_policy::ADDRESS_TIMEOUT_MS
 //! - **A client's scan** (the server's probe answered `scanning`) runs when
 //!   no attempt is under way, and records what was heard for the next ask.
 //!   It is the one scan a board with nothing saved ever makes, and only on
@@ -162,7 +171,7 @@ async fn run(
                         "[wifi] associated with {ssid} in {} ms",
                         started.elapsed().as_millis()
                     );
-                    stack.set_config_v4(ConfigV4::Dhcp(DhcpConfig::default()));
+                    stack.set_config_v4(ConfigV4::Dhcp(dhcp_config()));
                     alloc::vec![StationEvent::Associated]
                 }
                 ConnectOutcome::AuthFailed => alloc::vec![StationEvent::AuthFailed],
@@ -193,6 +202,16 @@ async fn scan(control: &mut EspStation) -> Vec<lpc_wire::HeardNetwork> {
         }
         None => Vec::new(),
     }
+}
+
+/// The DHCP client's timing: DISCOVER (and the first REQUEST) retried every
+/// second, so a first DISCOVER lost to the access point's WPA handshake costs
+/// a second, not the address timeout (module doc).
+fn dhcp_config() -> DhcpConfig {
+    let mut config = DhcpConfig::default();
+    config.retry_config.discover_timeout = smoltcp::time::Duration::from_secs(1);
+    config.retry_config.initial_request_timeout = smoltcp::time::Duration::from_secs(1);
+    config
 }
 
 /// Sleep until `at`, or forever with no deadline.
