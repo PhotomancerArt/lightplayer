@@ -12,7 +12,8 @@ use lpa_client::{ClientError, HostSpecifier, LpClient};
 use lpc_access::NetworkFileError;
 use lpc_wire::WifiPassword;
 use lpc_wire::server::{
-    LastAttempt, NetworkScan, NetworkStatus, SavedNetworkInfo, StationFailure, StationState,
+    ConnectStep, LastAttempt, NetworkScan, NetworkStatus, SavedNetworkInfo, StationFailure,
+    StationState,
 };
 
 use crate::client::cli_connect::{cli_connect, stderr_device_events};
@@ -21,6 +22,10 @@ use super::args::{AddArgs, WifiCli, WifiCommand};
 
 /// The environment variable a password may come from.
 pub const PASSWORD_ENV: &str = "LP_WIFI_PASSWORD";
+
+/// How many times `scan` asks again while the board says `scanning` (its
+/// radio is listening; a scan takes about two seconds), one second apart.
+const SCAN_ASKS: u32 = 6;
 
 pub fn handle_wifi(cli: WifiCli) -> Result<()> {
     // Device connections are single-actor (`!Send`), as in `upload`.
@@ -107,11 +112,17 @@ async fn run(host: &str, json: bool, op: Op) -> Result<()> {
 async fn request<Io: lpa_client::ClientIo>(client: &mut LpClient<Io>, op: Op) -> Result<Reply> {
     let status = match op {
         Op::Scan => {
-            return client
-                .network_scan()
-                .await
-                .map(|outcome| Reply::Scan(outcome.value))
-                .map_err(worded);
+            // A board answers from what its radio last heard; a stale list
+            // answers `scanning` while it listens. Ask again a few times.
+            let mut scan = client.network_scan().await.map_err(worded)?.value;
+            for _ in 1..SCAN_ASKS {
+                if scan != NetworkScan::Scanning {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                scan = client.network_scan().await.map_err(worded)?.value;
+            }
+            return Ok(Reply::Scan(scan));
         }
         Op::Status => client.network_status().await,
         Op::Add {
@@ -189,6 +200,11 @@ pub fn scan_lines(scan: &NetworkScan) -> Vec<String> {
         NetworkScan::Unsupported => {
             vec![String::from("scan: this firmware can't scan for Wi-Fi yet")]
         }
+        NetworkScan::Scanning => {
+            vec![String::from(
+                "scan: the board is still listening; ask again",
+            )]
+        }
         NetworkScan::Heard(heard) if heard.is_empty() => {
             vec![String::from("scan: no networks heard")]
         }
@@ -231,9 +247,21 @@ fn station_words(station: &StationState) -> String {
         StationState::Unsupported => String::from("this firmware can't connect to Wi-Fi yet"),
         StationState::Off => String::from("off"),
         StationState::NotConnected => String::from("not connected"),
-        StationState::Connecting { ssid } => format!("connecting to {ssid}"),
-        StationState::Connected { ssid, ip, rssi } => {
-            format!("connected to {ssid} · {ip} · {rssi} dBm")
+        StationState::Connecting { ssid, step } => format!(
+            "connecting to {ssid}: {}",
+            match step {
+                ConnectStep::Looking => "looking for it",
+                ConnectStep::CheckingPassword => "checking the password",
+                ConnectStep::GettingAddress => "getting an address",
+            }
+        ),
+        StationState::Connected {
+            ssid,
+            ip,
+            rssi,
+            host,
+        } => {
+            format!("connected to {ssid} · {ip} ({host}) · {rssi} dBm")
         }
         StationState::Failed { ssid, reason } => format!(
             "couldn't connect to {ssid}: {}",
@@ -313,16 +341,25 @@ mod tests {
             (
                 StationState::Connecting {
                     ssid: String::from("lp-walk-net"),
+                    step: ConnectStep::Looking,
                 },
-                "connecting to lp-walk-net",
+                "connecting to lp-walk-net: looking for it",
+            ),
+            (
+                StationState::Connecting {
+                    ssid: String::from("lp-walk-net"),
+                    step: ConnectStep::GettingAddress,
+                },
+                "connecting to lp-walk-net: getting an address",
             ),
             (
                 StationState::Connected {
                     ssid: String::from("lp-walk-net"),
                     ip: String::from("10.0.0.7"),
                     rssi: -48,
+                    host: "lp-8e30.local".to_string(),
                 },
-                "connected to lp-walk-net · 10.0.0.7 · -48 dBm",
+                "connected to lp-walk-net · 10.0.0.7 (lp-8e30.local) · -48 dBm",
             ),
             (
                 StationState::Failed {
@@ -343,6 +380,10 @@ mod tests {
         assert_eq!(
             scan_lines(&NetworkScan::Unsupported),
             ["scan: this firmware can't scan for Wi-Fi yet"]
+        );
+        assert_eq!(
+            scan_lines(&NetworkScan::Scanning),
+            ["scan: the board is still listening; ask again"]
         );
         assert_eq!(
             scan_lines(&NetworkScan::Heard(vec![HeardNetwork {

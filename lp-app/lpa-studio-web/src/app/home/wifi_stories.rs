@@ -85,6 +85,7 @@ fn wifi_test_running_in_its_row() -> Element {
         board(
             StationState::Connecting {
                 ssid: "Starlink Apt".to_string(),
+                step: lpc_wire::ConnectStep::CheckingPassword,
             },
             vec![saved("Starlink Home", None), saved("Starlink Apt", None)],
         ),
@@ -98,6 +99,20 @@ fn wifi_test_running_in_its_row() -> Element {
 }
 
 #[story(
+    description = "The in-row test advancing live from the board's own step (wire 38): \"Looking for Starlink Apt\" and \"Checking the password\" done, \"Getting an address\" now. No relay step: no board reports it yet."
+)]
+fn wifi_test_getting_an_address() -> Element {
+    let wifi = board(
+        StationState::Connecting {
+            ssid: "Starlink Apt".to_string(),
+            step: lpc_wire::ConnectStep::GettingAddress,
+        },
+        vec![saved("Starlink Home", None), saved("Starlink Apt", None)],
+    );
+    panel(testing(wifi, "Starlink Apt"), None, None)
+}
+
+#[story(
     description = "The in-row test, connected: every step ticked, \"Getting an address · 10.0.0.23\", then \"Connected · good signal · 10.0.0.23\" with Done."
 )]
 fn wifi_test_connected() -> Element {
@@ -106,6 +121,7 @@ fn wifi_test_connected() -> Element {
             ssid: "Starlink Apt".to_string(),
             ip: "10.0.0.23".to_string(),
             rssi: -57,
+            host: "lp-8e30.local".to_string(),
         },
         vec![
             saved("Starlink Home", None),
@@ -159,6 +175,7 @@ fn wifi_test_no_internet() -> Element {
                 ssid: "Ritual Coffee Guest".to_string(),
                 ip: "10.20.4.118".to_string(),
                 rssi: -58,
+                host: "lp-8e30.local".to_string(),
             },
             vec![saved("Ritual Coffee Guest", Some(LastAttempt::Connected))],
         ),
@@ -231,6 +248,18 @@ fn wifi_connect_page() -> Element {
         vec![saved("Starlink Home", None)],
     );
     wifi.heard = Some(home());
+    panel(wifi, Some(WifiPage::Connect), None)
+}
+
+#[story(
+    description = "The connect page while the board's radio listens (it answered the scan \"scanning\"; Studio asks again each second): \"Looking for networks…\" under Nearby, pulsing, and Other network… below."
+)]
+fn wifi_connect_page_scanning() -> Element {
+    let mut wifi = board(
+        StationState::NotConnected,
+        vec![saved("Starlink Home", None)],
+    );
+    wifi.scanning = true;
     panel(wifi, Some(WifiPage::Connect), None)
 }
 
@@ -405,6 +434,7 @@ fn connected_truck() -> UiDeviceWifi {
             ssid: "Starlink Truck".to_string(),
             ip: "192.168.1.17".to_string(),
             rssi: -41,
+            host: "lp-8e30.local".to_string(),
         },
         vec![
             saved("Starlink Home", Some(LastAttempt::NotFound)),
@@ -426,9 +456,9 @@ fn testing(mut wifi: UiDeviceWifi, ssid: &str) -> UiDeviceWifi {
     wifi
 }
 
-/// `wifi` with `test` under way. A board reports only `connecting` while it
-/// tries (the steps inside it are M6's), so a story that shows a later
-/// step, or the relay step (M7), hands the panel the test it draws.
+/// `wifi` with `test` under way. A board reports its step (wire 38) but not
+/// the relay step (M7), so a story that shows the relay step hands the
+/// panel the test it draws.
 fn with_test(wifi: UiDeviceWifi, test: UiWifiTest) -> (UiDeviceWifi, UiWifiTest) {
     (testing(wifi, &test.ssid), test)
 }

@@ -30,7 +30,8 @@ use lpc_model::{AsLpPath, AsLpPathBuf, FsVersion};
 use lpc_shared::output::MemoryOutputProvider;
 use lpc_shared::transport::{Incoming, Link, LinkId, LinkTrust, ServerTransport};
 use lpc_wire::server::{
-    FsRequest, FsResponse, HeardNetwork, NetworkScan, NetworkStatus, SavedNetworkInfo, StationState,
+    FsRequest, FsResponse, HeardNetwork, LastAttempt, NetworkScan, NetworkStatus, SavedNetworkInfo,
+    StationState,
 };
 use lpc_wire::{
     ClientMessage, ClientRequest, FsBootState, TransportError, WifiPassword, WireServerMessage,
@@ -272,6 +273,7 @@ fn the_station_probe_is_reported_verbatim() {
             ssid: String::from(SSID),
             ip: String::from("192.168.1.40"),
             rssi: -61,
+            host: String::from("lp-8e30.local"),
         }
     }
     let mut rig = Rig::new();
@@ -281,6 +283,53 @@ fn the_station_probe_is_reported_verbatim() {
     assert_eq!(rig.add(USB, SSID, PASSWORD).station, connected());
     rig.server.set_station_probe(None);
     assert_eq!(rig.status(USB).station, StationState::Unsupported);
+}
+
+/// The station's last attempt at each saved network comes from its probe,
+/// by name; without one `last` stays absent.
+#[test]
+fn each_networks_last_attempt_comes_from_the_probe() {
+    fn last(ssid: &str) -> Option<LastAttempt> {
+        (ssid == SSID).then_some(LastAttempt::WrongPassword)
+    }
+    let mut rig = Rig::new();
+    rig.add(USB, SSID, PASSWORD);
+    rig.add(USB, SECOND_SSID, SECOND_PASSWORD);
+    assert!(rig.status(USB).networks.iter().all(|n| n.last.is_none()));
+    rig.server.set_last_attempt_probe(Some(last));
+    let status = rig.status(USB);
+    assert_eq!(
+        status.network(SSID).unwrap().last,
+        Some(LastAttempt::WrongPassword)
+    );
+    assert_eq!(status.network(SECOND_SSID).unwrap().last, None);
+}
+
+/// Every change the board answers with a status tells the station to read
+/// the file again; a read, a scan and a refused change do not.
+#[test]
+fn a_change_tells_the_station_and_a_read_does_not() {
+    use core::sync::atomic::{AtomicU32, Ordering};
+    static TOLD: AtomicU32 = AtomicU32::new(0);
+    fn notice() {
+        TOLD.fetch_add(1, Ordering::Relaxed);
+    }
+    let mut rig = Rig::new();
+    rig.server.set_network_changed(Some(notice));
+    rig.status(USB);
+    rig.request(USB, ClientRequest::NetworkScan);
+    assert_eq!(TOLD.load(Ordering::Relaxed), 0, "reads tell nothing");
+    rig.add(USB, SSID, PASSWORD);
+    assert_eq!(TOLD.load(Ordering::Relaxed), 1);
+    rig.request(USB, switches(Some(false), None));
+    rig.request(USB, forget(SSID));
+    assert_eq!(TOLD.load(Ordering::Relaxed), 3);
+    rig.error(USB, add(SSID, "short"));
+    assert_eq!(
+        TOLD.load(Ordering::Relaxed),
+        3,
+        "a refused change tells nothing"
+    );
 }
 
 /// No M5 image scans: the answer says so, never an empty list. A probe's

@@ -54,6 +54,19 @@ pub type StationProbe = fn() -> lpc_wire::StationState;
 /// would claim the radio listened.
 pub type ScanProbe = fn() -> lpc_wire::NetworkScan;
 
+/// Embedder-supplied probe for how the station's last attempt at one saved
+/// network went (by name), reported as each network's `last` in every
+/// [`lpc_wire::server::NetworkStatus`]. The station keeps these in RAM,
+/// never in the network file. Unset = no attempt recorded (`last` absent).
+pub type LastAttemptProbe = fn(&str) -> Option<lpc_wire::LastAttempt>;
+
+/// Embedder-supplied "the network settings changed" notice, called after a
+/// `NetworkAdd`, `NetworkForget` or `NetworkSet` is answered with a status
+/// (not an error), so the station re-reads `/.lp/network.json`. The station
+/// works out what changed itself (a just-added network, or a changed
+/// password, is tried at once). Unset on hosts.
+pub type NetworkChanged = fn();
+
 /// Embedder-supplied "restart this device now" action, backing
 /// [`lpc_wire::ClientRequest::Reboot`].
 ///
@@ -178,6 +191,10 @@ pub struct LpServer {
     station_probe: Option<StationProbe>,
     /// Optional Wi-Fi scan probe. Unset = `unsupported`.
     scan_probe: Option<ScanProbe>,
+    /// Optional per-network last-attempt probe. Unset = `last` absent.
+    last_attempt_probe: Option<LastAttemptProbe>,
+    /// Optional settings-changed notice for the station. Unset = nothing.
+    network_changed: Option<NetworkChanged>,
     /// The ProjectRead memory gate's floors, per chip (see [`ReadGate`]).
     /// Unset (hosts/browser) = reads are never refused.
     read_gate: Option<ReadGate>,
@@ -375,6 +392,8 @@ impl LpServer {
             read_headroom_probe: None,
             station_probe: None,
             scan_probe: None,
+            last_attempt_probe: None,
+            network_changed: None,
             read_gate: None,
             messages_first: false,
             reboot_hook: None,
@@ -1238,6 +1257,31 @@ impl LpServer {
     /// `tick_and_send` carries one call for all five.
     #[inline(never)]
     fn network_answer(&self, request: ClientRequest) -> lpc_wire::server::ServerMsgBody {
+        let changes = matches!(
+            request,
+            ClientRequest::NetworkAdd { .. }
+                | ClientRequest::NetworkForget { .. }
+                | ClientRequest::NetworkSet { .. }
+        );
+        let mut body = self.network_body(request);
+        if let lpc_wire::server::ServerMsgBody::NetworkStatus(status) = &mut body {
+            if let Some(probe) = self.last_attempt_probe {
+                for network in &mut status.networks {
+                    network.last = probe(&network.ssid);
+                }
+            }
+            if changes {
+                if let Some(notice) = self.network_changed {
+                    notice();
+                }
+            }
+        }
+        body
+    }
+
+    /// The network request's answer before the station's own facts (each
+    /// network's `last`) are filled in.
+    fn network_body(&self, request: ClientRequest) -> lpc_wire::server::ServerMsgBody {
         let fs = &*self.base_fs;
         let held = self.hello.hardware.fs == lpc_wire::FsBootState::LegacyHeld;
         match request {
@@ -1276,6 +1320,18 @@ impl LpServer {
     /// [`lpc_wire::NetworkScan::Unsupported`] (no M5 image installs one).
     pub fn set_scan_probe(&mut self, probe: Option<ScanProbe>) {
         self.scan_probe = probe;
+    }
+
+    /// Install the per-network last-attempt probe each saved network's
+    /// `last` is read from. Unset = `last` absent on every network.
+    pub fn set_last_attempt_probe(&mut self, probe: Option<LastAttemptProbe>) {
+        self.last_attempt_probe = probe;
+    }
+
+    /// Install the notice called after a network change is answered with a
+    /// status. Unset = nothing is told.
+    pub fn set_network_changed(&mut self, notice: Option<NetworkChanged>) {
+        self.network_changed = notice;
     }
 
     /// What the radio hears, from the probe (`unsupported` without one).

@@ -37,6 +37,16 @@ use crate::server::hello_auth::HelloAuth;
 ///
 /// # History
 ///
+/// - 38: the Wi-Fi link on the C6 (plan `lp2025/2026-10-05-1903-wifi-link-c6`,
+///   Wi-Fi roadmap M6) — three changes to M5's station shapes, so Studio's
+///   in-row test can advance live: `StationState::Connecting` gains the
+///   required `step` (`looking | checkingPassword | gettingAddress`,
+///   `ConnectStep`); `NetworkScan` gains `scanning` (the radio is listening
+///   now, ask again shortly — an empty `heard` list keeps meaning "heard
+///   nothing"); `StationState::Connected` gains the required `host`, the
+///   board's mDNS name `lp-xxxx.local`. 37 is Bluetooth on lp-link (#880),
+///   unmerged when this was cut; whichever merges second takes the next free
+///   number. `PACK_FORMAT_VERSION` is unchanged.
 /// - 36: Wi-Fi settings on the device (plan
 ///   `lp2025/2026-10-04-0808-wifi-settings`, Wi-Fi roadmap M5) — five
 ///   edit-tier requests: `ClientRequest::NetworkStatus`, `NetworkScan`,
@@ -369,7 +379,7 @@ use crate::server::hello_auth::HelloAuth;
 /// as `None` on new Studio and a new firmware's extra fields are ignored
 /// by old Studio. Bumping for those would mark every board running
 /// current firmware Incompatible in exchange for nothing.
-pub const WIRE_PROTO_VERSION: u32 = 36;
+pub const WIRE_PROTO_VERSION: u32 = 38;
 
 /// Unsolicited/boot-time server identity, version, and capability report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -728,7 +738,7 @@ mod tests {
     #[test]
     fn the_proto_version_is_pinned_to_its_history() {
         assert_eq!(
-            WIRE_PROTO_VERSION, 36,
+            WIRE_PROTO_VERSION, 38,
             "if you meant to bump, add the History entry in this file's \
              doc comment and update this pin"
         );
