@@ -166,20 +166,6 @@ fn lan_transport_reaches_an_emulated_board_through_its_forward() {
         }),
     })
     .expect("`lp-cli wifi status lan:…` answers");
-    // KNOWN PR B FINDING (#989, handed over 2026-10-06): with a secure LAN
-    // link open the board's heap is too short for a deploy's read gate
-    // (`read refused: board memory busy (free ~47 KB, largest ~14 KB; needs
-    // 40960 B free and a 16384 B block)`): one LAN session costs ~25 KB and
-    // each first link strands ~1 KB mid-heap. Until #989's fix lands, the
-    // upload runs only when asked for (`LP_EMU_LAN_UPLOAD=1`); remove this
-    // gate in the change that merges the fix.
-    if std::env::var_os("LP_EMU_LAN_UPLOAD").is_none() {
-        eprintln!(
-            "emu_lan_link: hello and status over {lan}; the upload is SKIPPED (known PR B \
-             heap finding; LP_EMU_LAN_UPLOAD=1 runs it)"
-        );
-        return;
-    }
     handle_upload(UploadArgs {
         dir: workspace_dir().join("projects/test/basic"),
         host: lan.clone(),
