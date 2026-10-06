@@ -462,18 +462,71 @@ fn handle_load_project(
     // Gated AFTER the unload on purpose: the probe must read the heap the
     // load would actually run in, and refusing before freeing the outgoing
     // project would reject loads that fit.
-    check_load_headroom(read_headroom_probe)?;
-    log_memory(memory_stats, "load_project before");
-    let handle = project_manager.load_project(
-        path,
-        base_fs,
-        output_provider.clone(),
-        memory_stats.copied(),
-        time_provider,
-        button_service,
-        radio_service,
-        graphics,
-    )?;
+    let loaded = check_load_headroom(read_headroom_probe).and_then(|()| {
+        log_memory(memory_stats, "load_project before");
+        project_manager.load_project(
+            path,
+            base_fs,
+            output_provider.clone(),
+            memory_stats.copied(),
+            time_provider.clone(),
+            button_service.clone(),
+            radio_service.clone(),
+            graphics.clone(),
+        )
+    });
+    let handle = match loaded {
+        Ok(handle) => {
+            project_manager.forget_stopped();
+            handle
+        }
+        Err(error) => {
+            // Never leave the board dark: a refused or failed load runs
+            // what was running before (this unload's, or a StopAllProjects
+            // just before it, as an upload sends), without the headroom
+            // gate — it ran in this heap moments ago. On main too: the
+            // G1 desk walk found a refused switch left the LEDs dark until
+            // a reboot.
+            let mut restored = Vec::new();
+            if project_manager.list_loaded_projects().is_empty() {
+                for stopped in project_manager.take_stopped() {
+                    match project_manager.load_project(
+                        stopped.as_path(),
+                        base_fs,
+                        output_provider.clone(),
+                        memory_stats.copied(),
+                        time_provider.clone(),
+                        button_service.clone(),
+                        radio_service.clone(),
+                        graphics.clone(),
+                    ) {
+                        Ok(_) => restored.push(stopped),
+                        Err(restore_error) => log::warn!(
+                            "load_project: could not restore {}: {restore_error}",
+                            stopped.as_str()
+                        ),
+                    }
+                }
+            }
+            if restored.is_empty() {
+                return Err(error);
+            }
+            let names: Vec<&str> = restored.iter().map(|path| path.as_str()).collect();
+            log::warn!(
+                "load_project: {} refused; {} running again",
+                path.as_str(),
+                names.join(", ")
+            );
+            let words = match error {
+                ServerError::Core(words) => words,
+                other => format!("{other}"),
+            };
+            return Err(ServerError::Core(format!(
+                "{words} — the previous project ({}) is running again",
+                names.join(", ")
+            )));
+        }
+    };
     // The clamp and the display-layout budget are device/link state: every
     // engine wears them, including one born from a wire-load. Skipping this
     // left wire-loaded projects on the fail-safe SERIAL budget, so an
