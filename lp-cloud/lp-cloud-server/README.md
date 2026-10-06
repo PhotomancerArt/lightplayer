@@ -63,7 +63,12 @@ curl -sI "$BASE/firmware/esp32c6-4mb/abc1234/ota-manifest.json"    # 404, no ups
 ```
 
 The Studio bundle's own `/firmware/<target>/manifest.json` (two segments)
-stays the static fallback's. Tests: `tests/firmware_plane.rs`.
+stays the static fallback's. Tests: `tests/firmware_plane.rs`. End to end,
+locally: `just firmware-store-smoke` stages real C6 release assets, serves
+them GitHub-shaped from a static server and runs this route against them
+(`scripts/release/firmware-store-smoke.sh`). The assets themselves are
+attached to every release by `.github/workflows/release-firmware.yml`
+(`docs/adr/2026-10-06-firmware-distribution.md`).
 
 ## Running it
 
