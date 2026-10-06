@@ -82,6 +82,14 @@ pub struct RunArgs {
     #[arg(long, group = "image")]
     pub merged: Option<PathBuf>,
 
+    /// Boot from the reset vector out of THIS flash file — a whole merged
+    /// image to start with — and write the chip's flash back to it when
+    /// the run ends. So a run that ends early (`--timeout`, `--exit-on`,
+    /// `--ota-cut-after`) is a power cut, and the next run boots what the
+    /// flash held at that moment. The over-the-air scenarios' chip.
+    #[arg(long = "rom-up-flash", group = "image")]
+    pub rom_up_flash: Option<PathBuf>,
+
     /// With `--elf`: a whole merged flash image the chip ALREADY holds — what
     /// a flasher wrote — and the ELF direct-loaded over it. Nothing is
     /// written into the chip (a copy; never written back): the ELF's
@@ -223,6 +231,10 @@ pub struct RunArgs {
     /// answer to the one before (after any `--upload`).
     #[arg(long, requires = "host_link")]
     pub request: Vec<String>,
+
+    /// With `--host-link`: an over-the-air update on the link's channel 3.
+    #[command(flatten)]
+    pub ota: crate::commands::ota_host::OtaArgs,
 
     #[arg(long = "time-grade", value_enum, default_value_t = Grade::T1)]
     pub time_grade: Grade,

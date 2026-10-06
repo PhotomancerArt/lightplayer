@@ -724,6 +724,7 @@ mod tests {
             device_uid: None,
             pack_format: lpc_wire::PACK_FORMAT_VERSION,
             auth: lpc_wire::HelloAuth::TRUSTED,
+            firmware: None,
         }
     }
 
@@ -746,6 +747,7 @@ mod tests {
             device_uid: Some(uid.to_string()),
             pack_format: lpc_wire::PACK_FORMAT_VERSION,
             auth: lpc_wire::HelloAuth::TRUSTED,
+            firmware: None,
         };
         lpc_wire::json::to_string(&WireServerMessage::new(7, ServerMsgBody::Hello(hello)))
             .expect("encode")

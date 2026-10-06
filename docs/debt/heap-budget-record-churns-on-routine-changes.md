@@ -182,6 +182,15 @@ long-lived branch conflict on this file whenever main re-baselined too.
   wire 38 moved `hello.proto` and the S3/classic stack figures. Taken from
   CI's patch (`just apply-ci-figures 989`), no local bless.
 
+- 2026-10-06 — **a merge took the record twice in one PR** (OTA update
+  protocol Part B): the C6 record conflicted with #880's re-bless of the same
+  chip (both at wire proto 37), so main's was taken and the C6 re-blessed again
+  at proto 38 — `bless-chips esp32c6` in five 10-minute steps, again. The same
+  PR also found that the C6 gate's 6.5 s window is a boot-time assumption:
+  a first boot that hashes the engine and the core (~1.9 s emulated) reached
+  its first heartbeat past it, which the gate reported as "no first
+  heartbeat", not as a timing change (window now 8.5 s, with the reason).
+
 **Exit criteria** — a PR whose only memory effect is a few bytes of statics
 passes the gate without touching the record, and two PRs that each
 legitimately re-baseline different chips/projects do not conflict. Likely

@@ -50,7 +50,7 @@
 //!
 //! Bytes after 44 are never read by the loader.
 
-use crate::crc32::crc32;
+use lp_crc32::crc32;
 
 /// `"LPBR"`, little-endian.
 pub const RECORD_MAGIC: u32 = u32::from_le_bytes(*b"LPBR");

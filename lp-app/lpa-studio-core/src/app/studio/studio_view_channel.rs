@@ -130,6 +130,20 @@ impl CommandReceiver {
         self.inner.borrow().items.iter().any(predicate)
     }
 
+    /// Take every queued command `predicate` picks, in queue order, leaving
+    /// the rest queued in theirs. The actor uses it to fold what a link said
+    /// during a pull (its device inputs) before judging the pull, instead of
+    /// a batch later.
+    pub fn take_matching(&self, predicate: impl Fn(&StudioCommand) -> bool) -> Vec<StudioCommand> {
+        let mut inner = self.inner.borrow_mut();
+        let (taken, kept): (VecDeque<_>, VecDeque<_>) = inner
+            .items
+            .drain(..)
+            .partition(|command| predicate(command));
+        inner.items = kept;
+        taken.into()
+    }
+
     /// Install the send observer (the session recorder's command feed).
     /// Every sender, including clones made earlier, reports through it.
     pub fn set_send_observer(&self, observer: impl Fn(&StudioCommand) + 'static) {
@@ -337,6 +351,31 @@ mod tests {
         assert_eq!(batch.len(), 2);
         assert!(batch[0].is_refresh_tick());
         assert!(matches!(batch[1], StudioCommand::Shutdown));
+    }
+
+    #[test]
+    fn take_matching_takes_in_order_and_leaves_the_rest_in_theirs() {
+        let (tx, mut rx) = command_channel();
+        tx.send(StudioCommand::RefreshTick);
+        tx.send(StudioCommand::LibraryChanged);
+        tx.send(StudioCommand::Shutdown);
+        tx.send(StudioCommand::LibraryChanged);
+
+        let taken = rx.take_matching(|command| {
+            matches!(
+                command,
+                StudioCommand::LibraryChanged | StudioCommand::Shutdown
+            )
+        });
+        assert_eq!(taken.len(), 3);
+        assert!(matches!(taken[0], StudioCommand::LibraryChanged));
+        assert!(matches!(taken[1], StudioCommand::Shutdown));
+
+        let rest = crate::app::studio::studio_actor::poll_now(rx.recv_coalesced())
+            .expect("ready")
+            .expect("open");
+        assert_eq!(rest.len(), 1);
+        assert!(rest[0].is_refresh_tick());
     }
 
     #[test]

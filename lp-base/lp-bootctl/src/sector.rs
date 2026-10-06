@@ -2,7 +2,7 @@
 
 use crate::boot_control::{BootControl, DecodeOutcome};
 use crate::boot_flags::BootFlags;
-use crate::crc32::crc32;
+use lp_crc32::crc32;
 
 /// Flash offset of the `bootctl` partition. Identical on every supported
 /// board, so host writers and firmware readers agree without consulting a

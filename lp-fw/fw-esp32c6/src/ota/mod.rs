@@ -6,7 +6,7 @@
 //! `lp_bootctl::SplitLayout`:
 //!
 //! ```text
-//! 0x10000 loader · 0x15000 (reserved) · 0x16000/0x17000 boot records · 0x18000.. core, then engine
+//! 0x10000 loader · 0x15000 update progress · 0x16000/0x17000 boot records · 0x18000.. core, then engine
 //! ```
 //!
 //! # The boot sequence
@@ -23,11 +23,31 @@
 //! 4. `split_boot` marks a trial **started** (from here a power cycle never
 //!    counts against it).
 //! 5. The core reads the engine header behind [`ENGINE_VADDR`]: a committed
-//!    header of this build that fits is mapped by its own length and
-//!    entered. Otherwise — or when the engine keeps crashing, or this core is
-//!    on trial — the core runs **core-only** ([`core_only`]): link up,
-//!    watchdog fed, nothing else; a trial **confirms** there once its link
-//!    comes up.
+//!    header of this build that fits is mapped by its own length. On a boot
+//!    whose record has no `confirmed` mark (the first after a USB flash) the
+//!    **engine guard** ([`engine_guard`], DD34) hashes it once against the
+//!    digest slot. Then it is entered, with the **running hook** installed
+//!    ([`running_hook`]): the engine's USB transport hands channel 3 — the
+//!    over-the-air update protocol — to the core's update session. Otherwise
+//!    — no engine, a guard mismatch, an engine that keeps crashing, or a
+//!    core on trial — the core runs **core-only** ([`core_only`]): it serves
+//!    the update protocol itself, confirms a trial once its link comes up,
+//!    takes a core or its engine, and heals.
+//!
+//! The update session is `lpc-update`'s `BoardSession`; [`update_edge`] is
+//! where the firmware drives it, over [`update_target_impl`]'s
+//! `UpdateTarget` (the fenced flash, layout 1, `lp-bootctl`'s formats).
+//! Core-only runs as its own embassy task, as the engine's server loop
+//! does. The protocol and its compatibility rules are
+//! `docs/adr/2026-10-06-ota-update-protocol.md`.
+//!
+//! # The update light
+//!
+//! The engine records the first WS281x strip it opens in
+//! `/.lp/status-light.json` (`crate::output::status_light_note`), and
+//! core-only lights the first few LEDs of it from RMT RAM alone
+//! ([`StatusLight`]): dark yellow while updating, dark red while it needs an
+//! engine, off otherwise. Its log line says which colour it drove.
 //!
 //! The emulator scenarios for these rules are `just test-emu-c6-split-boot`
 //! (`lp-cli/tests/emu_split_scenarios.rs`): run them when you touch
@@ -46,14 +66,25 @@
 //! - **Trust the boot state only when it matches MMU entry 0**, every read
 //!   succeeded and the flashed table gave a layout ([`BootState`]).
 
+mod board_identity;
 mod boot_state;
 mod core_only;
+mod engine_guard;
 mod engine_window;
+mod running_hook;
 mod split_flash;
+mod status_light;
+mod update_edge;
+mod update_outbox;
+mod update_target_impl;
 
+pub use board_identity::CoreIdentity;
 pub use boot_state::BootState;
-pub use core_only::{CoreOnlyReason, core_only};
+pub use core_only::{CoreOnly, CoreOnlyReason, core_only};
+pub use engine_guard::engine_guard;
 pub use engine_window::{ENGINE_VADDR, map_engine, page_size};
+pub use running_hook::{install as install_running_hook, manifest as running_manifest};
+pub use status_light::StatusLight;
 
 use split_flash::SplitFlash;
 
@@ -61,6 +92,12 @@ use split_flash::SplitFlash;
 /// recovery ledger's safe mode (2) already skipped the project; two more
 /// failures with no project loaded say the engine itself is broken.
 pub const INCOMPLETE_BOOTS_TO_CORE_ONLY: u32 = 4;
+
+/// The chip reset an update ends with (`esp_hal`'s software reset, which
+/// the loader reads as warm).
+pub fn reset_now() -> ! {
+    esp_hal::system::software_reset()
+}
 
 /// This boot's reset, as the loader classified it.
 pub fn reset_kind() -> lp_bootctl::ResetKind {

@@ -6,6 +6,9 @@
 //! - [`host_build`]: a build the host holds, from parts;
 //! - [`host_build_facts`]: what a build is without its bytes — all
 //!   [`decide()`] reads, so a card decides without loading the build;
+//! - [`host_build_from_ota_manifest`]: a build from a release's
+//!   `ota-manifest.json` and its files (encoding 1 picked by id);
+//! - [`identity`]: whether a board reports exactly its release's identity;
 //! - [`serve`]: answering a board's requests, with send-ahead and `Z`;
 //! - [`backup`]: reading the board's running engine back;
 //! - [`login`]: answering a core's login challenge;
@@ -18,9 +21,9 @@
 //!
 //! Sans-IO, `no_std` + `alloc` (except under `pack`): no clock (time is a
 //! caller's `now_ms`), no IO, no executor. It emits decisions, stages and
-//! effects, never UI actions or copy (DM31). It never depends on the
-//! firmware-distribution plan's crates: engine sources are effects the edge
-//! resolves.
+//! effects, never UI actions or copy (DM31). Of the firmware-distribution
+//! plan's crates it reads only `lpc-firmware-release` (the manifest format);
+//! engine sources are effects the edge resolves.
 
 #![no_std]
 
@@ -35,7 +38,9 @@ pub mod drive;
 pub mod encoded_piece;
 pub mod host_build;
 pub mod host_build_facts;
+pub mod host_build_from_ota_manifest;
 pub mod host_refusal;
+pub mod identity;
 pub mod login;
 #[cfg(feature = "pack")]
 pub mod pack;
@@ -52,5 +57,6 @@ pub use encoded_piece::{EncodedPiece, EncodedPieceError};
 pub use host_build::{HostBuild, HostBuildError, HostIdentity, HostPiece};
 pub use host_build_facts::{HostBuildFacts, HostPieceFacts};
 pub use host_refusal::HostRefusal;
+pub use identity::{IdentityMismatch, board_matches_release};
 pub use login::{Credential, LoginClient, LoginEvent};
 pub use serve::{ServeConfig, ServeCounters, ServeEvent, ServeOutput, ServeSession};

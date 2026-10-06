@@ -37,7 +37,7 @@ use crate::server::hello_auth::HelloAuth;
 ///
 /// # History
 ///
-/// - 38: the Wi-Fi link on the C6 (plan `lp2025/2026-10-05-1903-wifi-link-c6`,
+/// - 39: the Wi-Fi link on the C6 (plan `lp2025/2026-10-05-1903-wifi-link-c6`,
 ///   Wi-Fi roadmap M6) — three changes to M5's station shapes, so Studio's
 ///   in-row test can advance live: `StationState::Connecting` gains the
 ///   required `step` (`looking | checkingPassword | gettingAddress`,
@@ -45,9 +45,19 @@ use crate::server::hello_auth::HelloAuth;
 ///   now, ask again shortly — an empty `heard` list keeps meaning "heard
 ///   nothing"); `StationState::Connected` gains the required `host`, the
 ///   board's mDNS name `lp-xxxx.local`. Built beside 37 (Bluetooth on
-///   lp-link, #880, merged first), so it takes the next number; #986 (the
-///   OTA update protocol) wants it too, and whichever merges second
-///   re-bumps. `PACK_FORMAT_VERSION` is unchanged.
+///   lp-link, #880) and 38 (#986, the board manifest in the hello), both
+///   merged first, so it takes 39. `PACK_FORMAT_VERSION` is unchanged.
+/// - 38: the hello carries the board manifest (plan
+///   `lp2025/2026-10-04-0757-ota-update-protocol`, Part B, P06):
+///   `ServerHello.firmware`, an optional `lpc_update::BoardManifest` (the
+///   same type and JSON as `M` on the over-the-air update channel, lp-link
+///   channel 3), sent by a split C6 image and `None` everywhere else. The
+///   field itself is additive (`#[serde(default)]`); the bump marks the
+///   first wire that speaks of over-the-air updates, as the plan (AB9) and
+///   the roadmap's N3 ("reported in the hello at the update protocol's wire
+///   bump") call for. Channel 3 is not the JSON wire and is not versioned
+///   by this number (ADR 2). `PACK_FORMAT_VERSION` is unchanged (the
+///   learned dictionary needs nothing for a new field).
 /// - 37: BLE (the C6's radio links) moves onto lp-link too (plan
 ///   `lp2025/2026-09-28-1445-ble-on-lp-link`; `docs/adr/2026-09-24-ble-transport.md`).
 ///   Follows 32 (the classic's UART): the two cut-overs were built side by
@@ -395,7 +405,7 @@ use crate::server::hello_auth::HelloAuth;
 /// as `None` on new Studio and a new firmware's extra fields are ignored
 /// by old Studio. Bumping for those would mark every board running
 /// current firmware Incompatible in exchange for nothing.
-pub const WIRE_PROTO_VERSION: u32 = 38;
+pub const WIRE_PROTO_VERSION: u32 = 39;
 
 /// Unsolicited/boot-time server identity, version, and capability report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -427,6 +437,16 @@ pub struct ServerHello {
     /// the same device answers a USB client and an unauthenticated radio
     /// client differently. See [`HelloAuth`].
     pub auth: HelloAuth,
+    /// The board manifest — what an over-the-air update needs to know of
+    /// this board: its target, build, hashes and lengths, layout, loader and
+    /// state (`lpc_update::BoardManifest`, the same type and JSON as `M` on
+    /// channel 3). Only a split C6 image sends it; a single image (any other
+    /// chip, a plain local build) and a host send `None`, which a host reads
+    /// as "needs USB to update" (E9). A **convenience**: channel 3's `M` is
+    /// authoritative, and a host that cannot decode this hello still asks
+    /// `Q` there (DM9).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub firmware: Option<lpc_update::BoardManifest>,
 }
 
 /// Build facts of the firmware/server binary answering the hello: its
@@ -650,6 +670,7 @@ mod tests {
             device_uid: Some("dev0000000000000001".to_string()),
             pack_format: lp_json_pack::PACK_FORMAT_VERSION,
             auth: HelloAuth::TRUSTED,
+            firmware: None,
         };
         let json = crate::json::to_string(&hello).unwrap();
         assert!(json.contains(&alloc::format!("\"proto\":{WIRE_PROTO_VERSION}")));
@@ -664,6 +685,65 @@ mod tests {
         );
         let back: ServerHello = crate::json::from_str(&json).unwrap();
         assert_eq!(back, hello);
+    }
+
+    /// A split image's hello carries its board manifest, the same JSON as
+    /// `M`; a hello without the key (every single image) reads as `None`.
+    #[test]
+    fn the_hello_carries_the_board_manifest_or_says_nothing() {
+        let manifest = lpc_update::BoardManifest {
+            proto: 1,
+            target: "esp32c6-4mb".to_string(),
+            chip: "esp32c6".to_string(),
+            version: "2026.10.05-3".to_string(),
+            build_id: "2026.10.05-3+abc123456789".to_string(),
+            wire_proto: WIRE_PROTO_VERSION,
+            core_sha256: "a".repeat(64),
+            core_len: 1_160_000,
+            engine_sha256: "b".repeat(64),
+            engine_len: Some(1_830_000),
+            layout: 1,
+            loader: 1,
+            region_len: 3_375_104,
+            state: lpc_update::BoardState::Running,
+            refused_build: None,
+            transfer: None,
+        };
+        let hello = ServerHello {
+            proto: WIRE_PROTO_VERSION,
+            build: BuildFacts {
+                features: vec![],
+                package: "fw-esp32c6".to_string(),
+                version: "2026.10.05-3".into(),
+                commit: "abc123456789".to_string(),
+                dirty: false,
+                profile: "release-esp32".to_string(),
+            },
+            hardware: HardwareFacts::default(),
+            device_uid: None,
+            pack_format: 0,
+            auth: HelloAuth::TRUSTED,
+            firmware: Some(manifest.clone()),
+        };
+        let json = crate::json::to_string(&hello).unwrap();
+        assert!(
+            json.contains("\"firmware\":{\"proto\":1,\"target\":\"esp32c6-4mb\""),
+            "{json}"
+        );
+        let back: ServerHello = crate::json::from_str(&json).unwrap();
+        assert_eq!(back.firmware, Some(manifest));
+
+        let without = ServerHello {
+            firmware: None,
+            ..hello
+        };
+        let json = crate::json::to_string(&without).unwrap();
+        assert!(
+            !json.contains("firmware"),
+            "a single image's hello is unchanged: {json}"
+        );
+        let back: ServerHello = crate::json::from_str(&json).unwrap();
+        assert_eq!(back.firmware, None);
     }
 
     /// An empty feature list and an absent board id survive the round trip
@@ -693,6 +773,7 @@ mod tests {
                 required: true,
                 granted: None,
             },
+            firmware: None,
         };
         let json = crate::json::to_string(&hello).unwrap();
         let back: ServerHello = crate::json::from_str(&json).unwrap();
@@ -726,6 +807,7 @@ mod tests {
                 required: true,
                 granted: None,
             },
+            firmware: None,
         };
         let frame = ServerMessage::new(0, ServerMsgBody::Hello(hello.clone()));
         let json = crate::json::to_string(&frame).unwrap();
@@ -754,7 +836,7 @@ mod tests {
     #[test]
     fn the_proto_version_is_pinned_to_its_history() {
         assert_eq!(
-            WIRE_PROTO_VERSION, 38,
+            WIRE_PROTO_VERSION, 39,
             "if you meant to bump, add the History entry in this file's \
              doc comment and update this pin"
         );

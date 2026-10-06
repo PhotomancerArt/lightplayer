@@ -115,6 +115,24 @@ read from the image's manifest core; the full commit is resolved from the
 checkout, and a release version whose commit is `unknown` refuses (a dev
 build skips its OTA files with one warning).
 
+`lp-cli emu run --host-link --ota-offer <dir>` and `lp-cli link capture
+<port> --ota-offer <dir>` offer the build in such a parts directory over a
+board's update channel: they read its `ota-manifest.json` and the files it
+names (`lpa_update::HostBuild::from_ota_manifest`), never the package's
+`split` block. A release staging directory (files named `<target>.<file>`)
+works too.
+
+**Which builds take over-the-air updates.** Every image says so in its
+manifest core: a split C6 image carries `"ota": {"layout": 1}` (the update
+layout it supports, `lpc-update`'s code table); a single image carries no
+`ota` key and only USB updates it. A def with `"split": true` packages the
+split image. **A plain local build stays a single image**: `cargo build` in
+`lp-fw/fw-esp32c6`, `just build-fw-esp32c6` and `just flash-fw-esp32c6` link
+one image (no loader, no boot records, no `ota`), the faster build for
+everyday firmware work, and the hello of a board running one carries no
+`firmware` block (a host reads it as "connect over USB to update"). Both
+kinds stay supported.
+
 `lp-cli firmware release-assets --out <dir> [--targets <id,…>] [--allow-dev]`
 stages those packages under release asset names (`<target>.<file>`), verifying
 every file and compressing nothing; `lp-cli firmware release-check <dir>`

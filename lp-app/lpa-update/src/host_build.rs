@@ -1,10 +1,11 @@
 //! A build the host holds and can serve: its identity, `core.bin`,
 //! `engine.bin`, and optionally each piece in encoding 1.
 //!
-//! [`HostBuild::from_parts`] builds one from parts. Part B adds
-//! `from_ota_manifest`, which reads the firmware-distribution plan's
-//! `ota-manifest.json` and its files and picks the encoding by `id` alone;
-//! nothing here reads the split image's package `split` block.
+//! [`HostBuild::from_parts`] builds one from parts;
+//! [`HostBuild::from_ota_manifest`](crate::host_build_from_ota_manifest)
+//! reads the firmware-distribution plan's `ota-manifest.json` and its files
+//! and picks the encoding by `id` alone. Nothing here reads the split
+//! image's package `split` block.
 //!
 //! The decision never needs the bytes: [`HostBuild::facts`] is what it reads
 //! ([`crate::host_build_facts`]).
@@ -98,6 +99,10 @@ pub enum HostBuildError {
     BadManifest,
     /// The engine does not hash to what the board's core needs.
     EngineMismatch,
+    /// A file the release's manifest names could not be read.
+    MissingFile(String),
+    /// A file is not what the release's manifest says (length or SHA-256).
+    FileCheck(String),
 }
 
 /// A build the host can offer and serve.

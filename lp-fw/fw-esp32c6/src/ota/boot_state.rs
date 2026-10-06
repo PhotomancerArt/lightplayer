@@ -213,6 +213,29 @@ impl BootState {
         }
     }
 
+    /// This boot's record carries its `confirmed` mark: a trial that proved
+    /// itself, or a flashed record the engine guard has passed once
+    /// ([`super::engine_guard`]).
+    pub fn confirmed(&self) -> bool {
+        self.choice.is_some_and(|c| c.slot.marks.confirmed)
+    }
+
+    /// The engine guard passed on a record that is not a trial (the first
+    /// boot after a USB flash): mark it confirmed, so later boots skip the
+    /// guard. The loader reads `confirmed` only on trials, so this changes
+    /// no boot choice.
+    pub fn confirm_checked(&mut self, flash: &mut SplitFlash) {
+        if !self.trusted() {
+            return;
+        }
+        if let Some(c) = self.choice.as_mut()
+            && !c.slot.marks.confirmed
+            && flash.program_word(BOOT_RECORD_SECTORS[c.sector] + CONFIRMED_MARK_OFFSET, 0)
+        {
+            c.slot.marks.confirmed = true;
+        }
+    }
+
     /// How this boot came to run this core, for the boot line.
     pub fn standing(&self) -> &'static str {
         match self.choice {

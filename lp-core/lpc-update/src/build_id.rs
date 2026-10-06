@@ -6,12 +6,13 @@
 //!
 //! The **build hash** is the 32-bit name the boot record and the progress
 //! record give a build: CRC-32 (IEEE, [`lp_crc32`]) of the build id's
-//! **text**, without the zero padding. **It must equal the split image's
-//! `lp_bootctl::boot_record::build_hash` rule**, which is defined the same
-//! way; hosts recompute it to read `refusedBuild`. This is a forever rule.
+//! **text**, without the zero padding: the split image's
+//! [`lp_bootctl::build_hash`], which this calls. Hosts recompute it to read
+//! `refusedBuild`. This is a forever rule.
 
-/// Bytes in the build id field.
-pub const BUILD_ID_LEN: usize = 64;
+/// Bytes in the build id field: the engine header's
+/// [`lp_bootctl::engine_header::ENGINE_BUILD_ID_LEN`].
+pub const BUILD_ID_LEN: usize = lp_bootctl::engine_header::ENGINE_BUILD_ID_LEN;
 
 /// The build id's text inside its zero-padded field: everything before the
 /// first zero byte.
@@ -33,10 +34,11 @@ pub fn build_id_field(text: &[u8]) -> Option<[u8; BUILD_ID_LEN]> {
     Some(field)
 }
 
-/// The build hash of a build id's text: `lp_crc32::crc32(text)`.
+/// The build hash of a build id's text: the boot record's rule,
+/// [`lp_bootctl::build_hash`] (`lp_crc32::crc32(text)`).
 #[must_use]
 pub fn build_hash(text: &[u8]) -> u32 {
-    lp_crc32::crc32(text)
+    lp_bootctl::build_hash(text)
 }
 
 /// The build hash of a zero-padded build id field.
@@ -56,6 +58,11 @@ mod tests {
         assert_eq!(build_id_text(&field), text);
         assert_eq!(build_hash_of_field(&field), lp_crc32::crc32(text));
         assert_ne!(build_hash_of_field(&field), lp_crc32::crc32(&field));
+    }
+
+    #[test]
+    fn the_field_is_64_bytes() {
+        assert_eq!(BUILD_ID_LEN, 64);
     }
 
     #[test]

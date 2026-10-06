@@ -87,6 +87,10 @@ pub type NetworkChanged = fn(&lpc_access::NetworkFile);
 /// record the request.
 pub type RebootHook = Rc<dyn Fn()>;
 
+/// The embedder's board manifest for the hello (see
+/// [`LpServer::set_firmware_manifest`]).
+pub type FirmwareManifestFn = fn() -> Option<lpc_update::BoardManifest>;
+
 /// The classic's ProjectRead floor: the largest free block a read needs to
 /// *begin*, installed there as [`ReadGate::largest_block_only`]. The C6 and
 /// S3 install two-number [`ReadGate`]s instead (see [`crate::read_gate`] for
@@ -207,6 +211,10 @@ pub struct LpServer {
     /// Optional embedder reset action backing `ClientRequest::Reboot`.
     /// Unset (hosts/browser) = the request is refused, not acked.
     reboot_hook: Option<RebootHook>,
+    /// The board manifest the hello carries (`ServerHello::firmware`): a
+    /// split C6 image's, asked for each hello because its `state` and
+    /// transfer can change. `None`: a single image (every other embedder).
+    firmware_manifest: Option<FirmwareManifestFn>,
     /// Power-off queue shared with every project's engine, when the embedder
     /// installed a [`PowerPlatform`]. Unset = power buttons report no service.
     ///
@@ -400,6 +408,7 @@ impl LpServer {
             read_gate: None,
             messages_first: false,
             reboot_hook: None,
+            firmware_manifest: None,
             #[cfg(feature = "node-power-button")]
             power: None,
             time_provider,
@@ -424,6 +433,7 @@ impl LpServer {
                 // The held hello is the trusted view; a hello sent on a
                 // particular link is recomputed for that link.
                 auth: lpc_wire::HelloAuth::TRUSTED,
+                firmware: None,
             },
             tick_failures: HashMap::new(),
             access: AccessState::new(),
@@ -555,6 +565,7 @@ impl LpServer {
     pub fn hello_for_link(&self, link: Link) -> lpc_wire::ServerHello {
         let mut hello = self.hello.clone();
         hello.auth = self.access.hello_auth(link, &*self.base_fs);
+        hello.firmware = self.firmware_manifest.and_then(|manifest| manifest());
         hello
     }
 
@@ -1389,6 +1400,14 @@ impl LpServer {
     /// `ClientRequest::Reboot` is refused with an error instead of acked.
     pub fn set_reboot_hook(&mut self, reboot: Option<RebootHook>) {
         self.reboot_hook = reboot;
+    }
+
+    /// Where the hello's board manifest comes from (`ServerHello::firmware`,
+    /// the over-the-air update protocol's `BoardManifest`): the split C6
+    /// image's core provides it, and is asked for every hello. Unset (every
+    /// other embedder), the hello says `None` — a board only USB updates.
+    pub fn set_firmware_manifest(&mut self, manifest: Option<FirmwareManifestFn>) {
+        self.firmware_manifest = manifest;
     }
 
     /// Declare that this embedder's transport writes JSON Pack frames on a

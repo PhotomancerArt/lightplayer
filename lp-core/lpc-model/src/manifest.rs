@@ -262,6 +262,12 @@ macro_rules! lp_const_concat {
     }};
 }
 
+/// A manifest core's `ota_layout` (an update layout code, `0` for none) as
+/// the number the JSON carries.
+pub const fn ota_layout(layout: u16) -> u32 {
+    layout as u32
+}
+
 /// Copy a `&str`'s bytes into a fixed-size array. `N` must equal `s.len()`.
 pub const fn str_bytes<const N: usize>(s: &str) -> [u8; N] {
     let bytes = s.as_bytes();
@@ -302,6 +308,7 @@ macro_rules! lp_embed_manifest_core {
         wire_proto: $wire_proto:expr,
         features: [$($feature_fragment:expr),* $(,)?],
         limits_json: $limits_json:expr,
+        ota_layout: $ota_layout:expr,
     ) => {
         #[doc(hidden)]
         mod __lp_manifest_core {
@@ -342,6 +349,18 @@ macro_rules! lp_embed_manifest_core {
             pub(super) static VERSION_SLOT: [u8; $crate::manifest::VERSION_SLOT_BYTES] =
                 $crate::manifest::version_slot($version);
 
+            // The over-the-air update layout this image supports (`0`: a
+            // single image, which takes no update over a link — the key is
+            // left out).
+            const OTA_LAYOUT: u32 = $crate::manifest::ota_layout($ota_layout);
+            const OTA_LAYOUT_BUF: [u8; 10] = $crate::manifest::u32_json(OTA_LAYOUT);
+            // SAFETY: digits and spaces only.
+            const OTA_LAYOUT_JSON: &str =
+                unsafe { ::core::str::from_utf8_unchecked(&OTA_LAYOUT_BUF) };
+            const OTA_SOME: &str =
+                $crate::lp_const_concat!(",\"ota\":{\"layout\":", OTA_LAYOUT_JSON, "}");
+            const OTA_JSON: &str = if OTA_LAYOUT == 0 { "" } else { OTA_SOME };
+
             const CORE_VERSION_BUF: [u8; 10] =
                 $crate::manifest::u32_json($crate::manifest::MANIFEST_CORE_VERSION);
             // SAFETY: digits and spaces only.
@@ -362,6 +381,7 @@ macro_rules! lp_embed_manifest_core {
                 "\"},\"features\":[", FEATURES,
                 "],\"limits\":", $limits_json,
                 ",\"wireProto\":", WIRE_PROTO,
+                OTA_JSON,
                 "}",
             );
 
@@ -444,6 +464,22 @@ pub struct ManifestCore {
     pub limits: ManifestLimits,
     /// `lpc_wire::WIRE_PROTO_VERSION` the build speaks.
     pub wire_proto: u32,
+    /// Whether this build can update over a link, and how: the update
+    /// layout it supports (`lpc-update`'s code table: `1` = the split
+    /// image's layout 1). Absent on a single-image build — a plain local
+    /// build, or any chip but the C6 — which only USB can update. Additive:
+    /// a reader that does not know it ignores it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ota: Option<ManifestOta>,
+}
+
+/// The manifest core's `ota` block: what an over-the-air update needs of
+/// this build's layout.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ManifestOta {
+    /// The update layout (`lpc-update`'s code table).
+    pub layout: u16,
 }
 
 /// Platform identity block of the manifest core (`platform`).
@@ -503,6 +539,7 @@ mod tests {
                 crate::manifest::feature_fragment(true, crate::LpFeature::GfxLpvm),
             ],
             limits_json: "{}",
+            ota_layout: 1,
         }
     }
 
@@ -520,6 +557,7 @@ mod tests {
             wire_proto: 4,
             features: [],
             limits_json: "{\"flashAppBytes\":3145728}",
+            ota_layout: 0,
         }
     }
 
@@ -546,6 +584,7 @@ mod tests {
         );
         assert_eq!(core.limits, ManifestLimits::default());
         assert_eq!(core.wire_proto, 4);
+        assert_eq!(core.ota, Some(ManifestOta { layout: 1 }));
     }
 
     /// Empty feature list and populated limits both survive assembly.
@@ -563,6 +602,8 @@ mod tests {
         );
         assert_eq!(core.limits.flash_app_bytes, Some(3 * 1024 * 1024));
         assert_eq!(core.limits.flash_total_bytes, None);
+        assert_eq!(core.ota, None, "a single image says nothing of updates");
+        assert!(!json.contains("\"ota\""));
     }
 
     /// Extraction finds the delimited payload in surrounding artifact bytes,

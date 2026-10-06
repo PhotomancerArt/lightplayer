@@ -52,7 +52,7 @@ lpc-firmware-release = { path = "../lp-core/lpc-firmware-release", features = ["
 # and the code table `ota-manifest.json`'s `requires` and `encodings[].id`
 # use. lp-cli never compresses firmware itself.
 lpa-update = { path = "../lp-app/lpa-update", features = ["pack"] }
-lpc-update = { path = "../lp-core/lpc-update" }
+lpc-update = { path = "../lp-core/lpc-update", features = ["schema-gen"] }
 # `firmware release-check` validates every `ota-manifest.json` against the
 # checked-in schema, embedded so the binary checks without a checkout. Also
 # the corpus conformance test's validator (tests/schema_conformance.rs).

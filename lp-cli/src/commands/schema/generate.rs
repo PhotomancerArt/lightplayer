@@ -30,6 +30,9 @@
 //! - `ota-manifest.schema.json` — the OTA release manifest
 //!   ([`lpc_firmware_release::OtaManifest`], `<target>.ota-manifest.json` on
 //!   a release) via `schemars`.
+//! - `status-light.schema.json` — the update light's record
+//!   ([`lpc_update::StatusLightRecord`], root `/.lp/status-light.json` on a
+//!   device) via `schemars`.
 //! - `shapes/<shape-name>.json` — the serialized [`SlotShape`] for each
 //!   registered static shape (the source-of-truth dump a future format
 //!   upgrader consumes), plus `shapes/_index.json` mapping registry shape
@@ -120,6 +123,10 @@ fn generate_outputs() -> Result<BTreeMap<String, String>> {
     outputs.insert(
         String::from("ota-manifest.schema.json"),
         render_schema(ota_manifest_schema()?, "ota-manifest.schema.json")?,
+    );
+    outputs.insert(
+        String::from("status-light.schema.json"),
+        render_schema(status_light_schema()?, "status-light.schema.json")?,
     );
 
     let mut index = Map::new();
@@ -343,6 +350,13 @@ fn device_network_schema() -> Result<Value> {
 fn ota_manifest_schema() -> Result<Value> {
     let schema = schemars::schema_for!(lpc_firmware_release::OtaManifest);
     serde_json::to_value(&schema).context("serializing ota manifest schema")
+}
+
+/// Schema for the update light's record, root `/.lp/status-light.json`.
+/// Plain serde; its own soft format (`format: 1`), device-only.
+fn status_light_schema() -> Result<Value> {
+    let schema = schemars::schema_for!(lpc_update::StatusLightRecord);
+    serde_json::to_value(&schema).context("serializing status light schema")
 }
 
 /// File stem for a shape dump: the registry name with Rust path separators

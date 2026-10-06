@@ -10,7 +10,6 @@
 //! button (name + info glyph — the detail trigger, opening the SAME
 //! popover as the backing slot row) and the value + unit readout.
 
-mod gesture_hold;
 mod h_fader_field;
 mod knob_field;
 pub mod palette_catalog;

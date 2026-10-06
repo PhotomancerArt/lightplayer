@@ -71,6 +71,17 @@ use super::transfer_owner::owner_live;
 use super::update_target::{BoardFacts, EngineStatus, SessionMode, UpdateTarget};
 use super::update_window::UpdateWindow;
 
+/// A transfer as [`BoardSession::transfer_progress`] reports it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TransferProgress {
+    pub kind: PieceKind,
+    /// The flash address of the piece's first byte.
+    pub dest: u32,
+    /// Bytes written and read back.
+    pub done: u32,
+    pub total: u32,
+}
+
 /// The board's update session. See the module docs.
 pub struct BoardSession {
     pub(super) facts: BoardFacts,
@@ -261,6 +272,12 @@ impl BoardSession {
         core::mem::take(&mut self.outbox)
     }
 
+    /// Messages queued and not yet taken, oldest first.
+    #[must_use]
+    pub fn peek_outgoing(&self) -> &[Outgoing] {
+        &self.outbox
+    }
+
     /// Effects to perform, in order.
     pub fn take_effects(&mut self) -> Vec<Effect> {
         core::mem::take(&mut self.effects)
@@ -282,6 +299,18 @@ impl BoardSession {
     #[must_use]
     pub fn halted(&self) -> bool {
         self.halted
+    }
+
+    /// The transfer pending or running, for the firmware's log lines and
+    /// light: its piece, where it goes, and how far it got.
+    #[must_use]
+    pub fn transfer_progress(&self) -> Option<TransferProgress> {
+        self.transfer.as_ref().map(|t| TransferProgress {
+            kind: t.kind(),
+            dest: t.record.dest,
+            done: t.done_bytes(),
+            total: t.record.len,
+        })
     }
 
     // ---- The offer -----------------------------------------------------------

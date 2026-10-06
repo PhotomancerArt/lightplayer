@@ -22,6 +22,7 @@ mod face;
 pub(crate) mod face_story_fixtures;
 #[cfg(feature = "stories")]
 pub(crate) mod fixture_face_stories;
+pub(crate) mod gesture_hold;
 #[cfg(feature = "stories")]
 pub(crate) mod h_fader_field_stories;
 #[cfg(feature = "stories")]

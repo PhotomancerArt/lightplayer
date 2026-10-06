@@ -53,6 +53,7 @@ async fn run_hosted_async<B: EmuUsbBoard>(
     let mut host = EmuLinkHost::new(board, nonce, !args.json_replies)
         .queue_messages(false)
         .wall_timeout(Duration::from_secs(args.wall_timeout_secs));
+    host.ota = crate::commands::ota_host::OtaHost::from_args(&args.ota)?;
     if let Some(path) = &args.console {
         let file = std::fs::File::create(path)
             .with_context(|| format!("creating the console transcript {}", path.display()))?;
@@ -73,9 +74,14 @@ async fn run_hosted_async<B: EmuUsbBoard>(
         .is_some_and(|needle| host.console().iter().any(|line| line.contains(needle)));
     if matched {
         ended = Some("stopped on --exit-on".to_string());
+    } else if host.ota_cut {
+        ended = Some("cut the power (--ota-cut-after)".to_string());
     } else if failures.is_empty() && host.board.micros() < micros {
         match host.run_until(micros, args.exit_on.as_deref()) {
             Ok(true) => ended = Some("stopped on --exit-on".to_string()),
+            Ok(false) if host.ota_cut => {
+                ended = Some("cut the power (--ota-cut-after)".to_string());
+            }
             Ok(false) => {}
             Err(error) => {
                 ended = Some(format!("{error:#}"));
@@ -100,6 +106,9 @@ async fn run_hosted_async<B: EmuUsbBoard>(
     );
     for line in report {
         eprintln!("emu: {line}");
+    }
+    if let Some(ota) = &host.ota {
+        eprintln!("emu: ota — {}", ota.summary());
     }
     eprintln!(
         "emu: host link — {}; {} link error(s)",
