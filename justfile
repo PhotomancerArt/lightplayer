@@ -2601,6 +2601,9 @@ clippy-host:
     # lpa-update's `pack` feature (the one packer of OTA encoding 1, std +
     # flate2/zlib-rs) is off by default for the same reason.
     cargo clippy -p lpa-update --features pack --all-targets -- --no-deps -D warnings
+    # lp-cli's `desk-images` feature (Studio's board drawing rendered server-
+    # side for the desk's board bench) is off by default for the same reason.
+    cargo clippy -p lp-cli --features desk-images --lib --tests -- --no-deps -D warnings
 
 # `lp-emu-esp32c6` with the `jit` feature on — the native translated build.
 #
@@ -2862,6 +2865,9 @@ test-rust-core:
     # board simulation's encoding-1 cases. Its own invocation, so flate2's
     # zlib-rs backend never unifies into espflash's in the workspace run.
     cargo test -p lpa-update --features pack
+    # `hardware desk-images` reads Studio's style.css between marker comments;
+    # these tests fail if the markers move or a board stops exporting.
+    cargo test -p lp-cli --features desk-images --lib desk_images
 
 # lp-link (the link-layer prototype, plan lp2025/2026-09-26-1720-reliable-device-link):
 # the delivery property at soak depth, 5,000 fault schedules per ARQ variant
@@ -4358,6 +4364,12 @@ watch-pr *args:
 # ============================================================================
 # Hardware discovery
 # ============================================================================
+
+# Draw the desk's boards for the board bench's page (github.com/PhotomancerArt/
+# lp-board-bench): each registered board's LightPlayer drawing and an art
+# board's piece, into ~/.photomancer/desk/images. Needs `board`.
+desk-images *args:
+    cargo run -q -p lp-cli --features desk-images -- hardware desk-images {{ args }}
 
 # List attached serial hardware (passive; never hangs). Identify chips with
 # `just hardware-list --probe` (resets idle boards; per-port timeout), filter

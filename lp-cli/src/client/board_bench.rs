@@ -30,10 +30,15 @@ const EXIT_ART: i32 = 4;
 pub struct BenchBoard {
     pub slug: Option<String>,
     pub mark: Option<String>,
+    pub mac: Option<String>,
     pub role: Option<String>,
     pub chip: Option<String>,
     pub port: Option<String>,
     pub lease: Option<BenchLease>,
+    /// A LightPlayer board id: what `hardware desk-images` draws.
+    pub lp_board: Option<String>,
+    /// A LightPlayer project: the piece `hardware desk-images` draws.
+    pub lp_project: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

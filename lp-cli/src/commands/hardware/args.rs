@@ -22,6 +22,24 @@ pub enum HardwareSubcommand {
     /// A board's filesystem (`lpfs`) across partition layouts: measure it,
     /// back it up, move it to the new layout, put a backup back.
     Lpfs(LpfsArgs),
+    /// Draw the desk's boards for the board bench's page: each registered
+    /// board's LightPlayer drawing, and an art board's piece. Needs `board`
+    /// and a build with `--features desk-images` (`just desk-images`).
+    DeskImages(DeskImagesArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct DeskImagesArgs {
+    /// Where the pictures go: the bench's `images/` under this directory.
+    /// Defaults to $BOARD_HOME, else ~/.photomancer/desk.
+    #[arg(long)]
+    pub home: Option<PathBuf>,
+    /// Only this board (its slug).
+    #[arg(long)]
+    pub only: Option<String>,
+    /// How far into an art piece's project its picture is taken, in seconds.
+    #[arg(long, default_value_t = 2.0)]
+    pub time: f32,
 }
 
 #[derive(Debug, Args)]

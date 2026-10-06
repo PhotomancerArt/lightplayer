@@ -3972,7 +3972,11 @@ label:has(> input:not(:disabled)) {
    carry literal values tuned against the dark surfaces in the approved
    spike (spikes/hardware-boards, rev 5). Geometry never lives here: every
    size the design language derives from `u` is computed in
-   lpa-boards/src/geometry.rs and arrives inline. */
+   lpa-boards/src/geometry.rs and arrives inline.
+
+   `lp-cli hardware desk-images` reads this block (header to end marker) and
+   the :root tokens out of this file to draw boards as standalone SVG, so
+   both markers stay where they are. */
 
 .lpb-diagram {
     display: block;
@@ -4171,6 +4175,8 @@ label:has(> input:not(:disabled)) {
 .lpb-anat-solid {
     stroke-dasharray: none;
 }
+
+/* ---- end of board diagrams ---------------------------------------------- */
 
 /* ---- boards catalog page (#/boards, lpa-boards BoardsCatalogPage) ------ */
 
