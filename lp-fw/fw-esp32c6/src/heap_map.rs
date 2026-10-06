@@ -1,5 +1,9 @@
 //! Diagnostic: the heap's free holes and live spans, by address.
 //!
+//! Printed through `log`, so it rides the link's log channel to whatever
+//! host is connected (`lp-cli upload` prints it as `[serial]` lines); raw
+//! `esp_println` text does not reach a host on an lp-link USB port.
+//!
 //! Feature `heap_map_diag`; **never shipped**. Written for the defect
 //! `2026-09-24-ble-enabled-c6-refuses-a-project-switch-after-the-heap-cut`:
 //! the load gate refuses on the largest free block, and which live
@@ -50,24 +54,24 @@ pub fn log(tag: &str) {
     holes.sort_unstable_by_key(|(addr, _)| *addr);
 
     let regions = crate::board::esp32c6::init::heap_regions();
-    esp_println::println!(
+    log::info!(
         "[heapmap] {tag}: used {} free {} holes {n} (>= {MIN_HOLE} B)",
         esp_alloc::HEAP.used(),
         esp_alloc::HEAP.free()
     );
     for (ri, (start, size)) in regions.iter().enumerate() {
         let end = start + size;
-        esp_println::println!("[heapmap] {tag}: region {ri} 0x{start:08x}..0x{end:08x} ({size} B)");
+        log::info!("[heapmap] {tag}: region {ri} 0x{start:08x}..0x{end:08x} ({size} B)");
         let mut cursor = *start;
         for (addr, len) in holes.iter().filter(|(a, _)| *a >= *start && *a < end) {
             if *addr > cursor {
-                esp_println::println!(
+                log::info!(
                     "[heapmap] {tag}:   live 0x{cursor:08x}..0x{addr:08x} {} B (+{})",
                     addr - cursor,
                     cursor - start
                 );
             }
-            esp_println::println!(
+            log::info!(
                 "[heapmap] {tag}:   HOLE 0x{addr:08x}..0x{:08x} {len} B (+{})",
                 addr + len,
                 addr - start
@@ -75,7 +79,7 @@ pub fn log(tag: &str) {
             cursor = addr + len;
         }
         if cursor < end {
-            esp_println::println!(
+            log::info!(
                 "[heapmap] {tag}:   live 0x{cursor:08x}..0x{end:08x} {} B (+{})",
                 end - cursor,
                 cursor - start
@@ -252,7 +256,7 @@ mod track {
     /// project stops), never the thousands a running project holds.
     pub fn log_live(tag: &str) {
         let live = critical_section::with(|cs| table(cs).iter().filter(|e| e.addr != 0).count());
-        esp_println::println!(
+        log::info!(
             "[heaptrack] {tag}: {live} live from 0x{:08x}, overflow {}",
             FROM.load(Ordering::Relaxed),
             OVERFLOW.load(Ordering::Relaxed)
@@ -266,7 +270,7 @@ mod track {
                 continue;
             }
             let f = e.frames;
-            esp_println::println!(
+            log::info!(
                 "[heaptrack] {tag}: 0x{:08x} {} B frames {:08x} {:08x} {:08x} {:08x} {:08x} {:08x} {:08x} {:08x}",
                 e.addr,
                 e.size,
