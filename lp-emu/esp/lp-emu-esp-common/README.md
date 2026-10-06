@@ -487,10 +487,30 @@ table, not a chip number — `EM_XTENSA` says LX6/LX7 no more than `EM_RISCV`
 says C6 — and nothing else about the parse is machine-dependent. A `PT_LOAD`
 is a `PT_LOAD`.
 
+### `seam::net` — the virtual LAN (Wi-Fi plan P11)
+
+The medium under the network seam (`net=lan`): a small home network that
+several emulated boards join. `VirtualLan` is a `SeamMedium` holding one
+Ethernet segment (unicast by learned MAC; broadcast, multicast and unknown
+unicast flooded to every port but the sender; one stated latency per frame),
+the networks a board can hear (`VirtualAccessPoint`: a name, a password or
+none, a configured signal, hidden or not), a gateway that answers ARP and
+hands out deterministic DHCP leases, a host TCP port forwarded to each
+board's port 80 (`LanPortForward`), and `LanProbe`, a host-side participant
+tests use to ask the boards their `.local` names and open TCP connections.
+
+It never pretends to be a radio (no airtime, fading, retransmission or
+coexistence), holds no clock rate (`LanConfig::new` takes the chip's cycles
+per microsecond), and runs in guest cycles; only a forward's host side is
+wall-clock, like the USB door. The gateway's and the probe's TCP/IP stacks
+are `smoltcp` (0BSD). Test networks live in `testdata/virtual_lan.toml` and
+are test values only.
+
 ## Tests
 
 ```bash
 cargo test -p lp-emu-core -p lp-emu-esp-common
+cargo test -p lp-emu-esp-common seam::net   # the virtual LAN alone
 ```
 
 `tests/elf_image.rs` reads a real rv32 firmware ELF **if one is already on
