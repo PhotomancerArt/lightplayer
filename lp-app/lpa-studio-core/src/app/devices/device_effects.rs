@@ -1339,6 +1339,13 @@ fn port_is_gone(message: &str) -> bool {
         // the device again through the hotplug edge; until then this link is
         // gone, not merely closed.
         || message.contains("bluetooth link lost")
+        // The LAN link's (`browser_websocket.js`): the socket dropped. Its
+        // session redials on its own, often before any departure sweep
+        // looks, so only the pump can say the old link is gone; left
+        // attached-but-closed, the redialled session found its endpoint
+        // still attached and the card stayed "Attached — not listening"
+        // (PR C's emulated walk, `lan_drop_tests`).
+        || message.contains("wi-fi link lost")
 }
 
 /// Which platform chooser a grant request pops.
