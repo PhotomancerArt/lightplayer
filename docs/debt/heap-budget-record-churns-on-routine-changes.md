@@ -212,6 +212,11 @@ long-lived branch conflict on this file whenever main re-baselined too.
   +32 B of the network seam's two boxes on a board that never joins. A gate at
   0 % margin over a figure that varies with the host is this entry's shape
   again; a band, as `stackHighWater` already has, is the paydown.
+- 2026-10-06 — the same, once more after #989's main merge (`ec48b7afc`):
+  #989's record (102,956 B used) is its own tree's, without the network
+  seam's two boxes (+32 B on a board that never joins); #993's merged tree
+  measured 102,980 then 103,012 on two CI boots (run 37530685444), so the
+  record again takes the worst boot (103,012 / 198,524 / 119,384).
 
 - 2026-10-06 — **a merge's "take theirs" dropped a branch's own figures**
   (Wi-Fi PR B, #989): merging main after #986, the C6 record conflicted and
