@@ -170,6 +170,64 @@ flash budget ADR's radio day). A station carrying a WebSocket might want
 deeper RX buffers than ESP-NOW does. The bench measured no loss of
 throughput at these counts, but that was with frame-bound traffic.
 
+## Amendment (2026-10-05): the radio's C heap moves out of `dram2_seg`
+
+The Placement amendment above put the radio blobs' C heap in `dram2_seg`
+first. That was wrong, and the reason sits in this ADR's own Context:
+`dram2_seg` is free only "once the app runs". After any reset, the
+second-stage bootloader loads its code into that range again and runs its
+stack there. Both bootloaders we ship load into 0x4086B910..0x40876F20,
+and their stack sits at the top of `dram2_seg`; the crash's SP was
+0x4087E1D0. A warm reset resets only the HP system: the host's RTS
+(`rst:0x15`) or a requested reboot (`rst:0x3`). The Bluetooth controller
+lives in the modem, so it keeps running, and its DMA wrote into the
+bootloader's image-hash check. On silicon that was an illegal instruction
+on 11 of 22 warm resets with Bluetooth on, and 0 of 20 with it off
+(`docs/defects/2026-10-05-a-requested-reboot-crashed-the-c6-bootloader.md`).
+
+**Decision:** `dram2_seg` holds nothing that a radio can DMA into.
+
+1. **The radio gets its own region: 49,152 B (48 KiB) of `.bss` in main
+   RAM**, `HEAP_RADIO`, carved from the main heap region (236,000 →
+   186,848 B). It ends at 0x408268E0 in this image, far below the lowest
+   bootloader load address. The C heap asks for it first, by capability
+   tag. When it is full, a block falls back to the main region, and **never**
+   to `dram2_seg`.
+2. **`dram2_seg` carries no capability tag**, so only a request that asks for
+   no capability can land there. Only Rust's global allocator asks for
+   none; esp-radio's own `InternalMemory` asks for `Internal` and so cannot
+   land there. Rust's allocator tries the regions in this order: main,
+   `dram2_seg`, then the radio region as the last resort.
+3. **Every reset the firmware makes holds the modem's blocks in reset
+   first** (`MODEM_SYSCON.MODEM_RST_CONF`, `board::esp32c6::restart`). That
+   stops the radio's DMA at the source on resets the firmware makes itself.
+   This matters when the next boot lays RAM out differently: after an
+   update, or with Bluetooth switched off. A host RTS reset never runs that
+   code, which is why placement is the fix and this is the second half.
+
+The size comes from the boot: with Bluetooth up on `lp-emu:esp32c6:t1`, the
+radio's high-water is 35,660 B (`[radio-heap]`, a heartbeat line like
+`[stack]`). Each of the two Bluetooth links adds up to ~3.5 KB.
+
+| `lp-emu:esp32c6:t1`, first heartbeat, shipped split image | before | after |
+|---|---|---|
+| heap total / used / free | 301,536 / 89,828 / 211,708 B | unchanged |
+| largest free block | 181,600 B | 132,458 B |
+| radio region high-water | (in `dram2_seg`) | 35,660 B of 49,152 B |
+| main stack | 56,200 B | 56,184 B |
+
+**What it costs:** contiguity, not bytes. The main region is 48 KiB
+smaller, so the largest block a single Rust allocation can get falls by
+the same amount. In exchange, all of `dram2_seg`'s 64 KiB is Rust's. Before,
+the radio held ~35 KB of it on every board with Bluetooth on. The load
+gate's 64 KiB block is still the main region's to give.
+
+**Revisit:** the main stack is the one tenant of RAM that neither needs to
+survive a reset nor is ever a DMA target. Moving it into `dram2_seg` (an
+override of esp-hal's `stack.x`, as `build.rs` already overrides
+`rodata.x`) would let the main heap region absorb the 56 KB it frees,
+contiguous with the rest, and win the largest block back with interest.
+
 ## Alternatives Considered
 
 - **Grow the stack by shrinking the heap alone (no dram2).** Loses
