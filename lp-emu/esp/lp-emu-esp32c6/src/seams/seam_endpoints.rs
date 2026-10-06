@@ -3,7 +3,9 @@
 //!
 //! Made when a chip start engages a capability seam, one per seam, in
 //! engaged order; a guest names one by its index and owns bit `1 << index`
-//! of the wake pending word. A host reaches them through
+//! of the wake pending word — except the network endpoint, whose two bits
+//! (frames 0, station events 1) are the network seam's ABI. A host reaches
+//! them through
 //! [`Esp32C6Machine::seam_endpoint_mut`] (to queue inbound events) and a
 //! medium through [`Esp32C6Machine::seam_endpoints_mut`]. Nothing here is
 //! static: two machines in one process each hold their own.
@@ -76,7 +78,13 @@ impl Esp32C6Machine {
             .filter(|i| i.kind == SeamKind::Capability)
         {
             let index = self.seams.endpoints.len();
-            let bit = 1u32 << index.min(31);
+            // The network seam's bits are the ABI's (`lp-base/lp-seam`'s
+            // README): frames on bit 0, station events on bit 1. Every other
+            // endpoint's is `1 << index`.
+            let bit = match imp.answer {
+                SeamAnswer::Net => super::net_seam::NET_FRAMES_BIT,
+                _ => 1u32 << index.min(31),
+            };
             let id = EndpointId {
                 board,
                 seam: imp.label,

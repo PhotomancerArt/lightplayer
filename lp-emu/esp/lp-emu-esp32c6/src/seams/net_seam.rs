@@ -34,9 +34,11 @@
 //!
 //! # The wake
 //!
-//! The endpoint's wake bit is raised (through the pacer: one outstanding, the
-//! spacing) when the endpoint holds a frame **or** the station holds an event
-//! ([`super::seam_wake`]).
+//! Raised through the pacer (one outstanding, the spacing) when the endpoint
+//! holds a frame — bit [`NET_FRAMES_BIT`] of the pending word — **or** the
+//! station holds an event — bit [`NET_EVENTS_BIT`] ([`super::seam_wake`]).
+//! The two bits are the network seam's ABI (`lp-base/lp-seam`'s README); the
+//! firmware's handler wakes both of its waiters on any bit.
 
 use lp_emu_core::sched::Cycles;
 use lp_emu_esp_common::seam::net::{
@@ -47,6 +49,12 @@ use lp_seam::net as abi;
 
 use crate::machine::Esp32C6Machine;
 use crate::memmap;
+
+/// The pending word's bit for "a frame is waiting" (`net_take_frame`).
+pub const NET_FRAMES_BIT: u32 = 1 << 0;
+/// The pending word's bit for "a station event is waiting"
+/// (`net_event_take`).
+pub const NET_EVENTS_BIT: u32 = 1 << 1;
 
 impl Esp32C6Machine {
     /// The LAN this board's network seam answers from, once it has one.

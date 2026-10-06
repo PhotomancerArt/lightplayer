@@ -24,13 +24,14 @@ fn an_event_and_then_a_frame_each_raise_the_wake_until_the_guest_takes_them() {
     let lan = SharedLan::new(fixture_lan(), LanDriver::SelfDriven);
     let probe = lan.with(|l| l.add_probe());
     let mut m = board(&lan, false);
-    let bit = 1u32; // the network endpoint is the only one: index 0
+    // The network seam's two bits (lp-seam's README): frames 0, events 1.
+    let (frames, events) = (1u32, 2u32);
 
     assert_eq!(connect(&mut m, b"home", HOME_PASSWORD), 1);
     run_for(&mut m, 5 * MS);
     assert_eq!(woken(&mut m), 0, "nothing yet: the join lands at 10 ms");
     run_for(&mut m, 6 * MS);
-    assert_eq!(woken(&mut m), bit, "the station's event raised it");
+    assert_eq!(woken(&mut m), events, "the station's event raised it");
     assert_eq!(m.peek_word(PENDING), Some(0), "and the handler swapped it");
     // The guest drains its events. While one waits the wake is raised again
     // each spacing; once none is left, nothing more is.
@@ -47,7 +48,7 @@ fn an_event_and_then_a_frame_each_raise_the_wake_until_the_guest_takes_them() {
     // A frame for the board: the probe asks the segment a name.
     lan.with(|l| l.probe_mut(probe).query("lp-test.local", TYPE_A));
     run_for(&mut m, MS);
-    assert_eq!(woken(&mut m), bit, "the frame raised it");
+    assert_eq!(woken(&mut m), frames, "the frame raised it");
     let mut frames = 0;
     while call(&mut m, &lp_seam::net_take_frame::DECL, [BUF, 1514, 0, 0]) != 0 {
         frames += 1;
@@ -77,7 +78,11 @@ fn a_guest_asleep_in_wfi_is_woken_when_its_join_lands_not_after() {
     assert!(lan.connect(me, m.cycles(), b"home", HOME_PASSWORD));
     let join = m.cycles() + 10 * MS;
     run_for(&mut m, 10 * MS + MS / 2);
-    assert_eq!(woken(&mut m), 1, "woken by the join, within the run");
+    assert_eq!(
+        woken(&mut m),
+        2,
+        "woken by the join (the events bit), within the run"
+    );
     assert!(lan.link_up(me));
     assert!(m.cycles() >= join, "{} < {join}", m.cycles());
     assert!(m.harts[0].is_wfi(), "and back asleep");
@@ -97,7 +102,7 @@ fn a_runner_lan_raises_the_wake_from_the_runners_boundary() {
     assert!(lan.connect(me, 0, b"home", HOME_PASSWORD));
     pair.run_until(12 * MS, &StopCondition::default());
     let m = pair.machine_mut(ParticipantId(1)).unwrap();
-    assert_eq!(m.peek_word(WOKEN), Some(1), "board 1 heard its join");
+    assert_eq!(m.peek_word(WOKEN), Some(2), "board 1 heard its join");
     let other = pair.machine_mut(ParticipantId(0)).unwrap();
     assert_eq!(other.peek_word(WOKEN), Some(0), "board 0 asked for nothing");
 }
