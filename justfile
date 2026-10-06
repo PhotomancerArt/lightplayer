@@ -799,17 +799,25 @@ studio-firmware-package-served image=studio_fw_image:
     #!/usr/bin/env bash
     set -euo pipefail
     while read -r build_id; do
-        case "${build_id}" in
-            esp32c6-*) just studio-firmware-package-esp32c6 "{{ image }}" ;;
-            esp32s3-*) just studio-firmware-package-esp32s3 ;;
-            esp32v3-*) just studio-firmware-package-esp32v3 ;;
-            *)
-                echo "served.json lists ${build_id}, which has no packaging recipe" >&2
-                echo "  add studio-firmware-package-<chip> next to its siblings" >&2
-                exit 1
-                ;;
-        esac
+        just studio-firmware-package-target "${build_id}" "{{ image }}"
     done < <(just studio-served-builds)
+
+# Package one served target by its id (`esp32c6-4mb`): the chip's recipe
+# above. `image` is the C6's (`single` or `split`); the release
+# (`scripts/release/release-firmware.sh`) always asks for `split`.
+studio-firmware-package-target target image=studio_fw_image:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "{{ target }}" in
+        esp32c6-*) just studio-firmware-package-esp32c6 "{{ image }}" ;;
+        esp32s3-*) just studio-firmware-package-esp32s3 ;;
+        esp32v3-*) just studio-firmware-package-esp32v3 ;;
+        *)
+            echo "{{ target }} has no packaging recipe" >&2
+            echo "  add studio-firmware-package-<chip> next to its siblings" >&2
+            exit 1
+            ;;
+    esac
 
 # Cheap wasm-compile gate for the cloud client path (full gate: studio-web-build).
 #
