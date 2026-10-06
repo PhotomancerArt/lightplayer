@@ -17,14 +17,16 @@
 //   W4  c6-b's card while c6-a stays connected → both links stay up
 //   W5  the LAN probe asks for `_lightplayer._tcp` → both boards answer,
 //       each with its own name and MAC
-//   W6  a network with a wrong password on c6-b → "Wrong password"; the
-//       board goes back to the good network
+//   W6  a network with a wrong password on c6-b, from Studio over c6-b's
+//       USB door (a LAN card has no Wi‑Fi row yet, below) → "Wrong
+//       password"; the board goes back to the good network
 //   W7  a name no access point has → "Not in range"
 //   W8  a project with a Radio node on c6-a → the node says why it is off
 //       (fw-esp32-common's `RADIO_OFF_FOR_WIFI`); the rest runs
 //   W9  reset c6-a with the gateway's next-lease option on → a different
 //       address; Studio's link comes back through the same forward
-//   W10 `lp-cli link rtt lan:<fwd a>` → request p50/p90 in FRAMES
+//   W10 `lp-cli link rtt lan:<fwd a>` → request p50/p90 in FRAMES (run
+//       before W9, so the board it measures has not just been reset)
 //
 // THE BOARD'S WORDS DECIDE EVERY STEP (AGENTS.md: "wait for the board's
 // words, not Studio's"). Three sources, none of which the page can satisfy:
@@ -216,11 +218,32 @@ export function forwardOf(entry) {
 }
 
 /// Studio on the walk's own bundle, reaching both boards over the LAN and
-/// streaming its device events to the sink. No `?emu=`: nothing in the page
-/// touches a USB door, so the walk's own tools can hold them.
+/// streaming its device events to the sink. No `?emu=`: nothing in this
+/// page touches a USB door or a control channel, so the walk's own tools
+/// can hold them (W9's `renumber`/`reset` need the control channel, and the
+/// shim holds every board's while its page is open).
 export function studioUrlForLan({ studioPort, forwards, sinkUrl, route = "/devices" }) {
   const query = new URLSearchParams();
   query.set("lan", forwards.map((forward) => `ws://${forward}/link`).join(","));
+  query.set("record", sinkUrl);
+  return `http://localhost:${studioPort}${route}?${query.toString()}`;
+}
+
+/// The second page W6 and W7 use: Studio over the door's USB shim
+/// (`?emu=`), in its own browser.
+///
+/// As built (P07), a board reached on the LAN wears no Connections group,
+/// so its card has no Wi‑Fi row (`device_roster_card.rs`: "the network card
+/// is M8's"); the Wi‑Fi panel and its in-row test are reachable over USB
+/// alone. The plan allows either ("Studio, over USB or LAN"). A separate
+/// browser rather than `?emu=` on the LAN page: the shim opens every
+/// board's control channel while its page is up (its banner's detach /
+/// attach / power), which would lock W9 out of `renumber` and `reset`; and
+/// the LAN page keeps its own view of c6-b, whose LAN link drops while the
+/// board tries the new networks.
+export function studioUrlForUsb({ studioPort, doorAddr, sinkUrl, route = "/devices" }) {
+  const query = new URLSearchParams();
+  query.set("emu", `ws://${doorAddr}`);
   query.set("record", sinkUrl);
   return `http://localhost:${studioPort}${route}?${query.toString()}`;
 }
@@ -310,12 +333,15 @@ const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 /// One board's decoded console, as `lp-cli link capture` writes it a line
 /// at a time. Waits read the file; the board writing it is the event.
 ///
-/// ASSUMES: with the network seam answering (P10), the firmware still logs
-/// the lines this walk keys on, from code above the frame device:
+/// As built (seen on the first run): with the network seam answering (P10)
+/// the firmware logs the lines this walk keys on from code above the frame
+/// device, so the seam and the radio print the same words:
 /// `[wifi] trying <ssid>` and `[wifi] address a.b.c.d`
-/// (`fw-esp32c6/src/net/station_task.rs`), `[lan] link N … secure session
-/// opening` and `[lan] link N: closed (…)` (`lan_endpoint_task.rs`), and
-/// `Project loaded` (the server, as walk-no-board reads it).
+/// (`fw-esp32c6/src/net/station_task.rs`), `[lan] link <id> from <peer>:
+/// secure session opening (…)` and `[lan] link <id>: closed (…)`
+/// (`lan_endpoint_task.rs`; the id is a `LinkId`'s Display, `link1`, not a
+/// bare number), and `Project loaded: <name>` (`lpa-server`'s
+/// `project_manager.rs`, as walk-no-board reads it).
 class BoardConsole {
   constructor(board, file) {
     this.board = board;
@@ -393,6 +419,20 @@ async function holdConsole({ doorAddr, board, file }) {
     stderr = (stderr + chunk).slice(-4000);
   });
   return { board, bridge, child, stderr: () => stderr, console: new BoardConsole(board, file) };
+}
+
+/// Let go of a board's USB link: stop its capture and its bridge, and wait
+/// for the capture to exit so the door is free for the next client.
+async function releaseConsole(hold) {
+  if (hold.released) return;
+  hold.released = true;
+  const exited = new Promise((resolve) => {
+    if (hold.child.exitCode !== null) resolve();
+    else hold.child.once("exit", resolve);
+  });
+  hold.child.kill("SIGINT");
+  await Promise.race([exited, delay(15_000)]);
+  await new Promise((resolve) => hold.bridge.server.close(() => resolve()));
 }
 
 /// A door control line (`/board/<id>/control`), and its one reply line.
@@ -480,9 +520,9 @@ function escapeRegExp(text) {
 
 const cardText = (forward) => `(${cardOf(forward)}?.innerText || '')`;
 
-/// The card's Wi‑Fi row: its button whose text starts "Wi‑Fi".
-const wifiRowIn = (forward) =>
-  `[...(${cardOf(forward)}?.querySelectorAll('button') ?? [])].find((b) => (b.innerText || '').trim().startsWith(${JSON.stringify(WORDS.wifiRow)}))`;
+/// The one Wi‑Fi row on the page, a button whose text starts "Wi‑Fi": the
+/// USB card's (a LAN card has none, as built).
+const WIFI_ROW_ANYWHERE = `[...(document.querySelector('#main')?.querySelectorAll('button') ?? [])].find((b) => (b.innerText || '').trim().startsWith(${JSON.stringify(WORDS.wifiRow)}))`;
 
 /// Type `text` into the panel's input `selector`, the way a keyboard does
 /// for Dioxus (`input` events carry the value).
@@ -530,9 +570,25 @@ class Page {
     return this.driver.evaluate(`(() => { const m = ${cardText(forward)}.match(/[0-9a-f]{2}(:[0-9a-f]{2}){5}/i); return m ? m[0].toLowerCase() : null; })()`);
   }
 
-  async openWifi(forward) {
-    await this.driver.waitFor(`Boolean(${wifiRowIn(forward)})`, { timeoutMs: STEP_MS, what: `the Wi‑Fi row in the card at ${forward}` });
-    await this.driver.evaluate(`${wifiRowIn(forward)}.click()`);
+  /// Open the Wi‑Fi panel's first page from `row` (an expression for the
+  /// row's button). The row toggles the popover, so a panel still open (on
+  /// a sub-page, or after an Escape it ignored) is closed first: clicking
+  /// the row on an open panel would close it.
+  async openWifi(row = WIFI_ROW_ANYWHERE, where = "the USB card") {
+    await this.driver.waitFor(`Boolean(${row})`, { timeoutMs: STEP_MS, what: `the Wi‑Fi row in ${where}` });
+    if (await this.driver.evaluate(`Boolean(${PANEL})`)) {
+      if (await this.driver.evaluate(`${PANEL_TEXT}.includes(${JSON.stringify(WORDS.cloudRelay)})`)) return;
+      await this.closePanel();
+      const closed = await this.driver
+        .waitFor(`!${PANEL}`, { timeoutMs: 5_000, what: "the panel to close" })
+        .then(() => true)
+        .catch(() => false);
+      if (!closed) {
+        await this.driver.evaluate(`${row}.click()`);
+        await this.driver.waitFor(`!${PANEL}`, { timeoutMs: 10_000, what: "the panel to close on its row" });
+      }
+    }
+    await this.driver.evaluate(`${row}.click()`);
     await this.driver.waitFor(`${PANEL_TEXT}.includes(${JSON.stringify(WORDS.cloudRelay)})`, { timeoutMs: STEP_MS, what: "the Wi‑Fi panel" });
     await this.driver
       .waitFor(`getComputedStyle(${PANEL}).opacity === '1'`, { timeoutMs: 10_000, what: "the panel to finish fading in" })
@@ -627,19 +683,20 @@ async function main() {
       fixture: fixturePath,
       door: { boards: spec.boards, extraArgs: spec.extraArgs },
       studio: studioUrlForLan({ studioPort: "<walk port>", forwards: ["127.0.0.1:<fwd a>", "127.0.0.1:<fwd b>"], sinkUrl: "http://127.0.0.1:<sink>/ingest" }),
+      usbPage: studioUrlForUsb({ studioPort: "<walk port>", doorAddr: "<door>", sinkUrl: "http://127.0.0.1:<sink>/ingest" }),
       steps: [
         `W1 lp-cli wifi add serial:ws://<door>/board/<id>/bytes ${NET.ssid} --password-stdin --json   (each board)`,
         "W1 lp-cli wifi status serial:ws://<door>/board/<id>/bytes --json   until connected",
         "   lp-cli link capture tcp://127.0.0.1:<bridge to /bytes> --console console/<id>.link.log   (held to the end)",
         "W2 Studio ?lan=… → two Wi‑Fi cards; each console: [lan] link … secure session opening",
         `W3 push ${WALK_PROJECT} to ${A} over the LAN; console: Project loaded, frames advance; edit a knob`,
-        `W4 ${B}'s card and Wi‑Fi row; no [lan] link … closed on either console`,
+        `W4 ${B}'s card Ready with its own MAC; no [lan] link … closed on either console; ${B} answers over its forward`,
         `W5 GET /lans/${LAN}/browse?service=_lightplayer._tcp.local → both MACs`,
-        `W6 ${B}: ${GUEST.ssid} with a wrong password → last wrongPassword, back on ${NET.ssid}`,
+        `W6 release ${B}'s capture; Studio via USB → ${B}; ${GUEST.ssid} with a wrong password → last wrongPassword, back on ${NET.ssid}`,
         `W7 ${B}: ${NOWHERE.ssid} → last notFound`,
         `W8 lp-cli upload ${RADIO_PROJECT} lan:<fwd a> → the Radio node's words; frames advance`,
+        `W10 lp-cli link rtt lan:<fwd a> --count ${RTT_COUNT} --json rtt-lan.json → p50/p90 frames   (before W9)`,
         `W9 control ${A}: renumber, reset → a different address; Studio back through <fwd a>`,
-        `W10 lp-cli link rtt lan:<fwd a> --count ${RTT_COUNT} --json rtt-lan.json → p50/p90 frames`,
       ],
       prerequisites: needs,
       chrome,
@@ -690,8 +747,13 @@ async function main() {
   const fwd = Object.fromEntries(BOARDS.map((id) => [id, forwardOf(entry(id))]));
   const lan = (id) => `lan:${fwd[id]}`;
   const mac = Object.fromEntries(BOARDS.map((id) => [id, String(entry(id).mac).toLowerCase()]));
-  const configuration = entry(A).configuration ?? "unknown";
+  // Read again after W1: at the door's first answer the boards have not
+  // booted far enough to engage a seam, so the label is still the bare
+  // grade (`lp-emu:esp32c6:t1`); once the firmware engages the network
+  // seam the door says `…+net=lan`.
+  let configuration = entry(A).configuration ?? "unknown";
   const url = studioUrlForLan({ studioPort: port, forwards: BOARDS.map((id) => fwd[id]), sinkUrl });
+  const usbUrl = studioUrlForUsb({ studioPort: port, doorAddr: door.addr, sinkUrl });
 
   console.log("\nTHE EMULATED WI‑FI WALK (lan)");
   console.log(`  boards       ${BOARDS.map((id) => `${id} ${mac[id]} → ${lan(id)}`).join(" · ")}`);
@@ -712,25 +774,36 @@ async function main() {
   const consoles = () => Object.fromEntries(Object.entries(holds).map(([id, hold]) => [id, hold.console]));
   let driver = null;
   let page = null;
+  /// W6/W7's page (Studio over USB), while it is open; their shots are its.
+  let usbDriver = null;
 
   /// One W-step: run it, screenshot it, keep what each console and the sink
   /// gained while it ran.
-  const step = async (id, describe, body) => {
+  ///
+  /// A failed step is recorded and the walk goes on to the next one, so one
+  /// product failure does not hide what the later steps would have shown.
+  /// `fatal` steps (W1, W2: everything after them needs the boards joined
+  /// and the page holding both links) stop the walk instead. `seen` is what
+  /// a step's body learned on its way, kept in the summary whether or not
+  /// the step got to the end (a failed W3 still says the board loaded).
+  const step = async (id, describe, body, { fatal = false } = {}) => {
     console.log(`— ${id}: ${describe}`);
     const recordsBefore = sink.records.length;
     const marks = Object.fromEntries(Object.entries(consoles()).map(([board, c]) => [board, c.mark()]));
     let error = null;
     let note = null;
+    const seen = {};
     try {
-      note = await body(marks);
+      note = await body(marks, seen);
     } catch (failure) {
       error = failure;
     }
     const shot = path.join(shots, `wifi-lan-${report.steps.length + 1}-${id}.png`);
     let shotTaken = null;
-    if (driver) {
+    const shotFrom = usbDriver ?? driver;
+    if (shotFrom) {
       try {
-        await driver.screenshot(shot);
+        await shotFrom.screenshot(shot);
         shotTaken = shot;
       } catch {
         // the page may be gone
@@ -741,22 +814,41 @@ async function main() {
     );
     const records = sink.records.slice(recordsBefore);
     console.log(`  ${error ? "✗ " + error.message.split("\n")[0] : "✓"}${note ? `  ${typeof note === "string" ? note : JSON.stringify(note)}` : ""}`);
-    report.steps.push({ id, describe, ok: !error, error: error?.message ?? null, note, shot: shotTaken, consoleLines, records });
-    if (error) throw error;
+    report.steps.push({ id, describe, ok: !error, error: error?.message ?? null, note, seen, shot: shotTaken, consoleLines, records });
+    if (error && fatal) throw error;
     return note;
   };
 
   const joined = {};
+  /// W6/W7's page, set up in W6.
+  const usbTab = { driver: null, page: null };
   let fatal = null;
   try {
     await step("W1", "over each board's USB door, add the fixture's network: each board joins", async () => {
-      // ASSUMES: lp-cli's `serial:ws://<door>/board/<id>/bytes` transport
-      // opens the door's port without resetting the board (the door's bytes
-      // socket has no control lines; on a desk board the serial readiness
-      // reset restarts the station, `desk-walk-wifi-c6.md`).
+      // As built: lp-cli's `serial:ws://<door>/board/<id>/bytes` transport
+      // opens the door's port without resetting the board. The bytes socket
+      // has no control lines (`lpa-client/src/stream/ws_stream.rs`:
+      // `set_signals` is a no-op and the provider skips the reset-on-open
+      // for `ws://`, as for `tcp://`); the emulator's DTR/RTS are on the
+      // separate `/control` socket. On a desk board the serial readiness
+      // reset restarts the station (`desk-walk-wifi-c6.md`); here it does
+      // not, so the `wifi add` below is tried while the board stays up.
+      //
+      // The boards are still booting ROM-up when this runs: since the OTA
+      // merge (wire 39) a C6 checks its engine's digest before it answers a
+      // hello (`[OTA] engine guard: … matches its digest (1111 ms)`), and
+      // lp-cli's readiness gives up on a board that has not said hello yet
+      // ("device did not become ready: timed out waiting for the device
+      // hello"). The board saying hello IS the readiness, so a refusal of
+      // that one kind is asked again, a few times; anything else fails.
       for (const id of BOARDS) {
-        const added = await lpCli(["wifi", "add", usb(id), NET.ssid, "--password-stdin", "--json"], { stdin: NET.password });
-        if (added.code !== 0) throw new Error(`wifi add on ${id} → exit ${added.code}: ${added.stderr.trim()}`);
+        let added = null;
+        for (let attempt = 1; attempt <= 4; attempt += 1) {
+          added = await lpCli(["wifi", "add", usb(id), NET.ssid, "--password-stdin", "--json"], { stdin: NET.password });
+          if (added.code === 0 || !added.stderr.includes("did not become ready")) break;
+          console.log(`  (${id} had not said hello yet, attempt ${attempt}: asking again)`);
+        }
+        if (added.code !== 0) throw new Error(`wifi add on ${id} → exit ${added.code}: ${added.stderr.trim().split("\n").slice(-3).join(" | ")}`);
       }
       for (const id of BOARDS) {
         const status = await awaitStatus(usb(id), (s) => stationOf(s).kind === "connected" || stationOf(s).kind === "failed", {
@@ -779,8 +871,11 @@ async function main() {
         await holds[id].console.waitFor("[link] up (session", { what: "its USB link up for the capture" });
       }
       report.joined = joined;
-      return BOARDS.map((id) => `${id} ${joined[id].ip} (${joined[id].host})`).join(" · ");
-    });
+      const now = await boardRegistry(door.addr);
+      configuration = now.find((b) => b.id === A)?.configuration ?? configuration;
+      report.configuration = configuration;
+      return `${BOARDS.map((id) => `${id} ${joined[id].ip} (${joined[id].host})`).join(" · ")} · ${configuration}`;
+    }, { fatal: true });
 
     driver = await StudioDriver.launch({ width: 1100, height: 900 });
     // Yona reads screenshots at 2× (memory: screenshots-for-yona-2x-zoom).
@@ -797,25 +892,25 @@ async function main() {
       for (const id of BOARDS) {
         // The board's words first: its console shows the secure session
         // opening on a LAN link.
-        const line = await holds[id].console.waitFor(/\[lan\] link \d+.*secure session opening/, {
+        const line = await holds[id].console.waitFor(/\[lan\] link \S+ .*secure session opening/, {
           from: marks[id] ?? 0,
           what: "a LAN link's secure session opening",
         });
         // Then the page, which only says where to look: the card at this
         // board's forward, Ready, showing THIS board's MAC (its hello's).
-        // ASSUMES: a Wi‑Fi board's card says "Ready" and shows the MAC its
-        // hello carried, as a USB board's does (P07 built the card
-        // "functionally": a transport line, the usual states).
+        // As built (seen on the first run): a Wi‑Fi board's card says
+        // "Ready" and shows the MAC its hello carried, as a USB board's
+        // does, with "Wi-Fi · 127.0.0.1:<forward>" leading its info line.
         await page.cardSays(fwd[id], "Ready");
         const shown = await page.cardMac(fwd[id]);
         if (shown !== mac[id]) throw new Error(`the card at ${fwd[id]} shows ${shown}, not ${id}'s ${mac[id]}`);
         seen.push(`${id}: ${line.trim()}`);
       }
       return seen.join(" · ");
-    });
+    }, { fatal: true });
     const lanMarks = Object.fromEntries(BOARDS.map((id) => [id, holds[id].console.mark()]));
 
-    await step("W3", `push ${WALK_PROJECT} to ${A} over the LAN, open it, edit a value`, async (marks) => {
+    await step("W3", `push ${WALK_PROJECT} to ${A} over the LAN, open it, edit a value`, async (marks, seen) => {
       const card = cardText(fwd[A]);
       const face = await driver.waitFor(
         `(() => { const t = ${card}; return t.includes('Remove project') ? 'running' : t.includes('to choose from') ? 'empty' : false; })()`,
@@ -832,9 +927,11 @@ async function main() {
       await page.clickInCard(fwd[A], "Put it on the board");
       // The board's words: the load on its console, then its frame counter
       // moving on the heartbeats after it.
-      await holds[A].console.waitFor("Project loaded", { from: marks[A], what: "`Project loaded`" });
+      seen.loadLine = (await holds[A].console.waitFor("Project loaded", { from: marks[A], what: "`Project loaded`" })).trim();
       const counts = await holds[A].console.framesAdvance({ from: marks[A] });
       const loaded = holds[A].console.loadedProjects(marks[A]);
+      seen.frameCounts = counts;
+      seen.loaded = loaded;
       await page.clickInCard(fwd[A], "Open in editor");
       await driver.waitFor(`!${MAIN_TEXT}.includes('Connecting project') && Boolean(document.querySelector('#main [role="slider"]'))`, {
         timeoutMs: STEP_MS,
@@ -846,28 +943,27 @@ async function main() {
 
     await step("W4", `${B}'s card while ${A} stays connected: both links stay up`, async () => {
       const how = await page.toDevices(url);
-      await page.cardSays(fwd[A], "Ready");
-      await page.cardSays(fwd[B], "Ready");
-      await page.openWifi(fwd[B]);
-      // The board's own address, read back over its own link.
-      await driver.waitFor(`${PANEL_TEXT}.includes(${JSON.stringify(joined[B].ip)})`, {
-        timeoutMs: STEP_MS,
-        what: `${B}'s panel to show its address ${joined[B].ip}`,
-      });
-      await page.closePanel();
+      // Both cards Ready, each showing ITS board's MAC: the hello each link
+      // carried (the page only says where to look; the MAC is the board's).
+      for (const id of BOARDS) {
+        await page.cardSays(fwd[id], "Ready");
+        const shown = await page.cardMac(fwd[id]);
+        if (shown !== mac[id]) throw new Error(`the card at ${fwd[id]} shows ${shown}, not ${id}'s ${mac[id]}`);
+      }
       // Since W2 opened them, neither board has closed a LAN link. Read
       // BEFORE the walk's own LAN client below, whose link closes when it is
       // done.
       if (how === "in-app") {
         for (const id of BOARDS) {
-          const closed = holds[id].console.since(lanMarks[id]).split("\n").filter((l) => /\[lan\] link \d+: closed/.test(l));
+          const closed = holds[id].console.since(lanMarks[id]).split("\n").filter((l) => /\[lan\] link \S+: closed/.test(l));
           if (closed.length) throw new Error(`${id} closed a LAN link: ${closed[0]}`);
         }
       }
-      // c6-b answers on a second LAN link, beside Studio's.
+      // c6-b answers on a second LAN link, beside Studio's: its own status,
+      // at its own W1 address.
       const status = await wifiStatus(lan(B));
       if (stationOf(status).ip !== joined[B].ip) throw new Error(`${B} answered over its forward as ${JSON.stringify(status.station)}`);
-      return `back on Devices ${how}; ${B} answered at ${joined[B].ip}; no LAN link closed${how === "in-app" ? "" : " (not checked: the page reloaded)"}`;
+      return `back on Devices ${how}; both cards Ready with their own MACs; ${B} answered at ${joined[B].ip}; no LAN link closed${how === "in-app" ? "" : " (not checked: the page reloaded)"}`;
     });
 
     await step("W5", "the LAN probe asks for _lightplayer._tcp: both boards answer, each with its own name and MAC", async () => {
@@ -885,20 +981,54 @@ async function main() {
       return { instances, macs: found };
     });
 
-    await step("W6", `${B}: add ${GUEST.ssid} with a wrong password: "Wrong password", and the board stays on ${NET.ssid}`, async (marks) => {
-      await page.openWifi(fwd[B]);
-      await page.panelClick(WORDS.connectToANetwork);
-      // The board heard it: its scan answer is what lists it.
-      await driver.waitFor(`${PANEL_TEXT}.includes(${JSON.stringify(GUEST.ssid)})`, {
-        timeoutMs: STEP_MS,
-        what: `${GUEST.ssid} in the board's scan`,
+    await step("W6", `${B}: add ${GUEST.ssid} with a wrong password from Studio over USB: "Wrong password", and the board stays on ${NET.ssid}`, async (_marks, seen) => {
+      // The Wi‑Fi panel is on a USB card only (see studioUrlForLan), so
+      // the walk hands c6-b's USB door from its capture to the page: the
+      // console capture ends here and c6-b's evidence from now on is its
+      // status answers over its LAN forward.
+      await releaseConsole(holds[B]);
+      usbDriver = await StudioDriver.launch({ width: 1100, height: 900 });
+      await usbDriver.cdp.send(
+        "Emulation.setDeviceMetricsOverride",
+        { width: 1100, height: 900, deviceScaleFactor: 2, mobile: false },
+        usbDriver.sessionId,
+      );
+      const usbPage = new Page(usbDriver);
+      usbTab.driver = usbDriver;
+      usbTab.page = usbPage;
+      await usbPage.load(usbUrl);
+      // The shim's banner covers the cards' lower rows in a shot.
+      await usbDriver.click("hide").catch(() => null);
+      await usbDriver.clickWhenReady("via USB", { timeoutMs: STEP_MS });
+      await usbDriver.pickBoard(B, { timeoutMs: STEP_MS });
+      // Studio's readiness may reset the board on open (the shim carries
+      // DTR/RTS to the door); either way the board's answer over its
+      // forward says when it is back on the good network.
+      await awaitStatus(lan(B), (s) => stationOf(s).kind === "connected" && stationOf(s).ssid === NET.ssid, {
+        what: `connected to ${NET.ssid} after Studio opened its USB door`,
       });
-      await driver.click(GUEST.ssid, { scope: PANEL });
-      if (!(await driver.evaluate(typeInto('input[type="password"]', GUEST.wrong)))) throw new Error("no password field");
-      await page.panelClick(WORDS.connect, { exact: true });
-      // The board's words: it tried, the network refused the password, and
-      // it is back on the good one.
-      await holds[B].console.waitFor(`[wifi] trying ${GUEST.ssid}`, { from: marks[B], what: `trying ${GUEST.ssid}` });
+      await usbTab.page.openWifi();
+      await usbTab.page.panelClick(WORDS.connectToANetwork);
+      // The board heard it: its scan answer is what lists it. The first
+      // run found the list empty for good: Studio sent no `wifi.scan` at
+      // all (two `Network/Scan` commands, both while the panel's own
+      // `wifi.status` read was in flight, which `network_controller.rs`
+      // drops without asking again), while `lp-cli wifi scan` over the
+      // board's forward heard both networks. A person would press the
+      // panel's own "refresh"; the walk does too, once, and says so.
+      let scanNeededRefresh = false;
+      const listed = `${PANEL_TEXT}.includes(${JSON.stringify(GUEST.ssid)})`;
+      await usbTab.driver.waitFor(listed, { timeoutMs: 30_000, what: `${GUEST.ssid} in the board's scan` }).catch(async () => {
+        scanNeededRefresh = true;
+        seen.scanNeededRefresh = true;
+        await usbTab.page.panelClick("refresh");
+        await usbTab.driver.waitFor(listed, { timeoutMs: STEP_MS, what: `${GUEST.ssid} in the board's scan after refresh` });
+      });
+      await usbTab.driver.click(GUEST.ssid, { scope: PANEL });
+      if (!(await usbTab.driver.evaluate(typeInto('input[type="password"]', GUEST.wrong)))) throw new Error("no password field");
+      await usbTab.page.panelClick(WORDS.connect, { exact: true });
+      // The board's words: the network refused the password, and it is
+      // back on the good one (its status over its forward).
       const status = await awaitStatus(
         lan(B),
         (s) => lastAttempt(s, GUEST.ssid) === "wrongPassword" && stationOf(s).kind === "connected" && stationOf(s).ssid === NET.ssid,
@@ -906,18 +1036,19 @@ async function main() {
       );
       // Now look at the page: the row (the test, or the saved row after a
       // reconnect) says Wrong password.
-      await driver
+      await usbTab.driver
         .waitFor(`${PANEL_TEXT}.includes(${JSON.stringify(WORDS.wrongPassword)})`, { timeoutMs: 30_000, what: "Wrong password" })
         .catch(async () => {
-          await page.openWifi(fwd[B]);
-          await driver.waitFor(`${PANEL_TEXT}.includes(${JSON.stringify(WORDS.wrongPassword)})`, {
+          await usbTab.page.openWifi();
+          await usbTab.driver.waitFor(`${PANEL_TEXT}.includes(${JSON.stringify(WORDS.wrongPassword)})`, {
             timeoutMs: STEP_MS,
             what: "Wrong password after reopening the panel",
           });
         });
-      const crossed = await page.checkingPasswordCrossed();
+      const crossed = await usbTab.page.checkingPasswordCrossed();
       if (crossed === false) throw new Error(`"${WORDS.checkingPassword}" is shown but not crossed`);
       return {
+        scanNeededRefresh,
         station: status.station,
         last: lastAttempt(status, GUEST.ssid),
         inRowTest: crossed === true ? "Checking the password crossed" : "the in-row test was not on the panel (the link dropped while the board tried)",
@@ -925,33 +1056,40 @@ async function main() {
     });
 
     await step("W7", `${B}: add ${NOWHERE.ssid}, which no access point has: "Not in range"`, async () => {
-      await page.closePanel();
-      await page.openWifi(fwd[B]);
-      await page.panelClick(WORDS.connectToANetwork);
-      await page.panelClick(WORDS.otherNetwork);
-      if (!(await driver.evaluate(typeInto('input[placeholder="Network name"]', NOWHERE.ssid)))) throw new Error("no network name field");
-      if (!(await driver.evaluate(typeInto('input[type="password"]', NOWHERE.password)))) throw new Error("no password field");
-      await page.panelClick(WORDS.connect, { exact: true });
+      await usbTab.page.closePanel();
+      await usbTab.page.openWifi();
+      await usbTab.page.panelClick(WORDS.connectToANetwork);
+      await usbTab.page.panelClick(WORDS.otherNetwork);
+      if (!(await usbTab.driver.evaluate(typeInto('input[placeholder="Network name"]', NOWHERE.ssid)))) throw new Error("no network name field");
+      if (!(await usbTab.driver.evaluate(typeInto('input[type="password"]', NOWHERE.password)))) throw new Error("no password field");
+      await usbTab.page.panelClick(WORDS.connect, { exact: true });
       const status = await awaitStatus(
         lan(B),
         (s) => lastAttempt(s, NOWHERE.ssid) === "notFound" && stationOf(s).kind === "connected" && stationOf(s).ssid === NET.ssid,
         { what: `${NOWHERE.ssid} last=notFound and connected to ${NET.ssid}` },
       );
-      await driver
+      await usbTab.driver
         .waitFor(`${PANEL_TEXT}.includes(${JSON.stringify(WORDS.notInRange)})`, { timeoutMs: 30_000, what: "Not in range" })
         .catch(async () => {
-          await page.openWifi(fwd[B]);
-          await driver.waitFor(`${PANEL_TEXT}.includes(${JSON.stringify(WORDS.notInRange)})`, {
+          await usbTab.page.openWifi();
+          await usbTab.driver.waitFor(`${PANEL_TEXT}.includes(${JSON.stringify(WORDS.notInRange)})`, {
             timeoutMs: STEP_MS,
             what: "Not in range after reopening the panel",
           });
         });
-      await page.closePanel();
+      await usbTab.page.closePanel();
       return { station: status.station, last: lastAttempt(status, NOWHERE.ssid) };
     });
+    // W9 needs c6-a's control channel, which the USB page's shim holds.
+    if (usbDriver) {
+      const shim = usbDriver;
+      usbDriver = null;
+      await shim.close().catch(() => null);
+    }
 
-    await step("W8", `a project with a Radio node on ${A}: the node says why the Radio is off, and the rest runs`, async (marks) => {
+    await step("W8", `a project with a Radio node on ${A}: the node says why the Radio is off, and the rest runs`, async (marks, seen) => {
       const upload = await lpCli(["upload", RADIO_PROJECT, lan(A)], { timeoutMs: STEP_MS });
+      seen.upload = { code: upload.code, stderrTail: upload.stderr.trim().split("\n").slice(-6) };
       if (upload.code !== 0) throw new Error(`upload ${RADIO_PROJECT} ${lan(A)} → exit ${upload.code}: ${upload.stderr.trim().split("\n").slice(-4).join(" | ")}`);
       await holds[A].console.waitFor("Project loaded", { from: marks[A], what: "`Project loaded`" });
       const counts = await holds[A].console.framesAdvance({ from: marks[A] });
@@ -983,35 +1121,16 @@ async function main() {
       return { loaded, frameCounts: counts, radioMessage: { onConsole, onPage } };
     });
 
-    await step("W9", `reset ${A} from the control port with the next-lease option on: a new address, Studio back through the same forward`, async (marks) => {
-      const old = joined[A].ip;
-      const renumbered = await control(door.addr, A, "renumber");
-      const reset = await control(door.addr, A, "reset");
-      const addressLine = await holds[A].console.waitFor(/\[wifi\] address \d+\.\d+\.\d+\.\d+/, {
-        from: marks[A],
-        timeoutMs: JOIN_MS,
-        what: "a new address",
-      });
-      const ip = addressLine.match(/(\d+\.\d+\.\d+\.\d+)/)[1];
-      if (ip === old) throw new Error(`${A} came back on ${old}, the old address`);
-      // Studio's link back through the same forward. Waited for BEFORE the
-      // walk's own LAN client below dials: until then Studio is the only
-      // thing dialling this board, so the line is its link.
-      const lanLine = await holds[A].console.waitFor(/\[lan\] link \d+.*secure session opening/, {
-        from: marks[A] + holds[A].console.since(marks[A]).indexOf(addressLine),
-        what: "Studio's LAN link opening again after the new address",
-      });
-      const status = await awaitStatus(lan(A), (s) => stationOf(s).kind === "connected" && stationOf(s).ip === ip, {
-        what: `connected at ${ip}, through the same forward`,
-      });
-      await page.toDevices(url);
-      await page.cardSays(fwd[A], "Ready");
-      joined[A] = { ...joined[A], ip, before: old };
-      return { renumbered, reset, before: old, after: ip, station: status.station, relinked: lanLine.trim() };
-    });
-
+    // W10 runs BEFORE W9, out of the plan's order: W9 resets c6-a onto a
+    // new lease, and W10 measures the link of a board that has not just
+    // been reset (the first full run lost W10 to what W9 left behind, the
+    // forward no longer reaching the board). The step ids keep the plan's
+    // numbering.
     await step("W10", `lp-cli link rtt ${lan(A)}: request p50 and p90 in frames`, async () => {
       const json = path.join(out, "rtt-lan.json");
+      // A previous run's report would read as this run's.
+      rmSync(json, { force: true });
+      rmSync(path.join(out, "rtt-lan.console.log"), { force: true });
       const run = await lpCli(
         [
           "link", "rtt", lan(A),
@@ -1047,10 +1166,38 @@ async function main() {
         wallFrames ? `p50 ${wallFrames.p50} / p90 ${wallFrames.p90} frames drawn per wall second` : "no wall frame rate"
       } — ${configuration}, lp-emu ${commit}`;
     });
+    await step("W9", `reset ${A} from the control port with the next-lease option on: a new address, Studio back through the same forward`, async (marks) => {
+      const old = joined[A].ip;
+      const renumbered = await control(door.addr, A, "renumber");
+      const reset = await control(door.addr, A, "reset");
+      const addressLine = await holds[A].console.waitFor(/\[wifi\] address \d+\.\d+\.\d+\.\d+/, {
+        from: marks[A],
+        timeoutMs: JOIN_MS,
+        what: "a new address",
+      });
+      const ip = addressLine.match(/(\d+\.\d+\.\d+\.\d+)/)[1];
+      if (ip === old) throw new Error(`${A} came back on ${old}, the old address`);
+      // Studio's link back through the same forward. Waited for BEFORE the
+      // walk's own LAN client below dials: until then Studio is the only
+      // thing dialling this board, so the line is its link.
+      const lanLine = await holds[A].console.waitFor(/\[lan\] link \S+ .*secure session opening/, {
+        from: marks[A] + holds[A].console.since(marks[A]).indexOf(addressLine),
+        what: "Studio's LAN link opening again after the new address",
+      });
+      const status = await awaitStatus(lan(A), (s) => stationOf(s).kind === "connected" && stationOf(s).ip === ip, {
+        what: `connected at ${ip}, through the same forward`,
+      });
+      await page.toDevices(url);
+      await page.cardSays(fwd[A], "Ready");
+      joined[A] = { ...joined[A], ip, before: old };
+      return { renumbered, reset, before: old, after: ip, station: status.station, relinked: lanLine.trim() };
+    });
+
   } catch (error) {
     fatal = error;
   }
 
+  if (usbDriver) await usbDriver.close().catch(() => null);
   const lines = driver ? driver.consoleLines() : [];
   const pageErrors = lines.filter((l) => l.startsWith("[error]") || l.startsWith("[exception]"));
   const panics = pageErrors.filter((l) => l.includes("panicked at"));
@@ -1076,10 +1223,7 @@ async function main() {
 
   if (!options.keepOpen) {
     if (driver) await driver.close();
-    for (const hold of Object.values(holds)) {
-      hold.child.kill("SIGINT");
-      hold.bridge.server.close();
-    }
+    for (const hold of Object.values(holds)) await releaseConsole(hold);
     await stopDoor(door);
     sink.server.close();
     server.close();
@@ -1089,6 +1233,12 @@ async function main() {
 
   if (fatal) {
     console.error(`\nThe emulated Wi‑Fi walk did not finish: ${fatal.message}`);
+    process.exit(1);
+  }
+  const failed = report.steps.filter((s) => !s.ok);
+  if (failed.length) {
+    console.error(`\nThe emulated Wi‑Fi walk ran to the end, but ${failed.map((s) => s.id).join(", ")} failed:`);
+    for (const s of failed) console.error(`  ${s.id}: ${s.error.split("\n")[0]}`);
     process.exit(1);
   }
   if (panics.length || leaked.length) {
