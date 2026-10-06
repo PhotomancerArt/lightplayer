@@ -62,23 +62,44 @@ pub fn init_board() -> (
         ));
     }
     // The 40 KB the main region gave up comes back with interest from
-    // `dram2_seg`: the 64 KB the ESP-IDF second-stage bootloader used as
-    // its loader segment (0x4086E610..0x4087E610) and never touches again
-    // once the app runs — esp-hal's `#[ram(reclaimed)]` exists for exactly
-    // this. A second `esp_alloc` region: `HEAP.free()`/`used()` sum both,
+    // `dram2_seg`: the 64 KB (0x4086E610..0x4087E610) the ESP-IDF
+    // second-stage bootloader loads its code and data into, and runs its
+    // stack in — esp-hal's `#[ram(reclaimed)]` exists for exactly this. A
+    // second `esp_alloc` region: `HEAP.free()`/`used()` sum all three,
     // allocations fill the main region first. Heap total 301,536 B
     // (325,536 B before the 2026-09-24 cut).
     //
-    // Both regions are `esp_alloc::heap_allocator!` spelled out, so the arrays
-    // have names: [`heap_regions`] reports where each one is.
+    // That segment is the bootloader's again the moment the HP system
+    // resets, while the radio does not reset with it: a warm reset (the
+    // host's RTS or a requested reboot) leaves the Bluetooth controller
+    // running, and its DMA wrote two words into the bootloader's code
+    // (docs/defects/2026-10-05-a-requested-reboot-crashed-the-c6-bootloader.md).
+    // So nothing the radio can DMA into may live here: the segment carries
+    // NO capability tag, so only capability-free requests (Rust's global
+    // allocator) can land in it, and the radio blobs' C heap has its own
+    // region in main RAM, `HEAP_RADIO`, below.
+    //
+    // All three regions are `esp_alloc::heap_allocator!` spelled out, so the
+    // arrays have names: [`heap_regions`] reports where each one is.
     // SAFETY: as above.
     unsafe {
         esp_alloc::HEAP.add_region(esp_alloc::HeapRegion::new(
             core::ptr::addr_of_mut!(HEAP_DRAM2).cast::<u8>(),
             HEAP_DRAM2_SIZE,
-            // Tagged so the C heap (the radio blobs) can ask for it first:
-            // see `c_heap`.
-            crate::c_heap::RECLAIMED,
+            crate::c_heap::BOOTLOADER_RECLAIMED,
+        ));
+    }
+    // The radio's own region, carved out of main RAM (`.bss`, far below the
+    // lowest address any second-stage bootloader we ship loads into,
+    // 0x4086B910). Registered last, so Rust reaches it only once the main
+    // region and `dram2_seg` are both full; the C heap asks for it first by
+    // its tag (see `c_heap`).
+    // SAFETY: as above.
+    unsafe {
+        esp_alloc::HEAP.add_region(esp_alloc::HeapRegion::new(
+            core::ptr::addr_of_mut!(HEAP_RADIO).cast::<u8>(),
+            HEAP_RADIO_SIZE,
+            crate::c_heap::RADIO,
         ));
     }
 
@@ -109,8 +130,17 @@ pub fn init_board() -> (
     )
 }
 
-/// The main heap region's size (see the RAM-split note in [`init_board`]).
-const HEAP_MAIN_SIZE: usize = 236_000;
+/// The main heap region's size (see the RAM-split note in [`init_board`]):
+/// the 236,000 B main RAM gives the heap, less the radio's region.
+const HEAP_MAIN_SIZE: usize = 236_000 - HEAP_RADIO_SIZE;
+/// The radio blobs' C heap (`c_heap`), in main RAM where no bootloader
+/// loads. Sized from silicon: 44,584 B of radio allocations with Bluetooth
+/// up (2026-09-24), less the 10,320 B the lean ESP-NOW buffers gave back
+/// (2026-10-01), is ~34.3 KB at no connections; each of the two links adds
+/// up to ~3.5 KB. 48 KiB holds that with ~7 KB to spare, and the
+/// `[radio-heap]` heartbeat line reports the real high-water. A request
+/// that does not fit still succeeds, in the main region.
+pub const HEAP_RADIO_SIZE: usize = 49_152;
 /// The reclaimed bootloader segment's size.
 #[cfg(not(feature = "heap_track_diag"))]
 const HEAP_DRAM2_SIZE: usize = 65_536;
@@ -122,18 +152,25 @@ const HEAP_DRAM2_SIZE: usize = 16_384;
 #[repr(C, align(8))]
 struct HeapArena<const N: usize>(core::mem::MaybeUninit<[u8; N]>);
 static mut HEAP_MAIN: HeapArena<HEAP_MAIN_SIZE> = HeapArena(core::mem::MaybeUninit::uninit());
+static mut HEAP_RADIO: HeapArena<HEAP_RADIO_SIZE> = HeapArena(core::mem::MaybeUninit::uninit());
 #[esp_hal::ram(reclaimed)]
 static mut HEAP_DRAM2: core::mem::MaybeUninit<[u8; HEAP_DRAM2_SIZE]> =
     core::mem::MaybeUninit::uninit();
 
-/// The heap's two regions as `(start address, size)`, main first — the
-/// order the allocator tries them in.
+/// The heap's three regions as `(start address, size)` — main, `dram2_seg`,
+/// radio: the order Rust's allocator tries them in.
 #[allow(dead_code, reason = "read only by the heap diagnostics")]
-pub fn heap_regions() -> [(usize, usize); 2] {
+pub fn heap_regions() -> [(usize, usize); 3] {
     [
         (core::ptr::addr_of!(HEAP_MAIN) as usize, HEAP_MAIN_SIZE),
         (core::ptr::addr_of!(HEAP_DRAM2) as usize, HEAP_DRAM2_SIZE),
+        radio_region(),
     ]
+}
+
+/// The radio's region as `(start address, size)`.
+pub fn radio_region() -> (usize, usize) {
+    (core::ptr::addr_of!(HEAP_RADIO) as usize, HEAP_RADIO_SIZE)
 }
 
 #[cfg(all(feature = "ble", feature = "server", not(fw_harness)))]

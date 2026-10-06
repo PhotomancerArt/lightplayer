@@ -18,6 +18,7 @@ pub mod constants;
 ))]
 pub mod cycle_counter;
 pub mod init;
+pub mod restart;
 // The product boot's only, like the quirks.
 #[cfg(not(fw_harness))]
 pub mod status_led;

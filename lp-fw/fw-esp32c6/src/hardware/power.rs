@@ -108,7 +108,7 @@ fn sleep_now() -> ! {
     else {
         // Unreachable: the request is stored before the sleep is handed
         // over. A reset is the safe way out.
-        esp_hal::system::software_reset()
+        crate::board::esp32c6::restart::restart()
     };
     {
         // The RTC and super watchdogs live in the LP domain and keep counting
