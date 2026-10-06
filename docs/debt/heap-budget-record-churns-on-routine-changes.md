@@ -190,6 +190,15 @@ long-lived branch conflict on this file whenever main re-baselined too.
   a first boot that hashes the engine and the core (~1.9 s emulated) reached
   its first heartbeat past it, which the gate reported as "no first
   heartbeat", not as a timing change (window now 8.5 s, with the reason).
+- 2026-10-06 — **a stacked PR takes its bases' moves as well as its own**
+  (Wi-Fi in the emulator, PR #993, stacked on #987 and #989): merging #989's
+  main merge (wire 39, #986's OTA) moved `hello.proto` 38 → 39 and the
+  S3/classic stack figures (−40 B / −48 B), and the C6 record moved by #989's
+  network stack (90,208 → 101,608 B used) — none of it #993's own. #993's
+  own move is the record's `configuration` (`lp-emu:esp32c6:t1+net=lan`: the
+  network seam engages on every emulated run); with nothing joined the seam
+  costs +32 B of heap, measured against `--seams none`. Taken from CI's patch
+  (`just apply-ci-figures 993`); #989 will take the same base moves again.
 
 **Exit criteria** — a PR whose only memory effect is a few bytes of statics
 passes the gate without touching the record, and two PRs that each
