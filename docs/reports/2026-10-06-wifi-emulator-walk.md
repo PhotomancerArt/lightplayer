@@ -6,8 +6,34 @@ PR C) · **Command** `just walk-wifi-emu lan` · **Script**
 (and the two-board lockstep cell, `lp-cli/tests/emu_lan_lockstep.rs`) · **Silicon twin**
 G1, `desk-walk-wifi-c6.md` in the plan directory
 
-> **STATUS: RUN AT THE SHIPPING TREE, NOT PASSED: 7/10 (run 9) and 6/10
-> (run 10).** The tree is `df4ca2831`: PR B's heap fix, one LAN slot,
+> **STATUS: PASSED, 10/10, TWICE (runs 11 and 12).** The tree is
+> `52a3e6549`, with every prerequisite rebuilt there: firmware
+> `fw-esp32c6 52a3e6549`, lp-cli, and the Studio release bundle.
+> lp-emu is `52a3e6549`, the commit that ships the LAN host pace as the
+> default (a board with a host attached through its forward is held to
+> wall time), and the walk ran under that default. The label is
+> `lp-emu:esp32c6:t1+net=lan`.
+> - **W3** opened `Peach (1D)` in the editor and turned its knob.
+> - **W8** loaded `button-sign`: the board said why the Radio node is off,
+>   and the rest of the project rendered.
+> - **W10** timed requests with that project rendering: p50 6.747 / p90
+>   7.908 frames (run 11), and p50 4.735 / p90 5.958 frames (run 12), at
+>   ≈92 emulated fps.
+> - **No reply deadline and no watchdog reset in either run.** Finding 6
+>   is fixed by the pace.
+> - **Finding 7 showed once:** in run 12, W8's page reload opened a link
+>   that carried no frames. W8 still passed on the board's words, because
+>   the page half is recorded, not gated. Section 9 has the detail.
+> - **Load average:** 61 / 74 / 60 (1, 5, 15 min) at run 11's start;
+>   13.6 / 18.1 / 34.0 at run 12's start and 10.3 / 12.6 / 23.2 at its
+>   end.
+> - `just walk-no-board --serve-release`: 6/6 at the same tree (section 10).
+>
+> The history below is kept. Runs 9 and 10 are the shipping tree before the
+> pace.
+>
+> **EARLIER STATUS (df4ca2831, before the pace): NOT PASSED, 7/10 (run 9)
+> and 6/10 (run 10).** The tree is `df4ca2831`: PR B's heap fix, one LAN slot,
 > lp-emu `201dc56a1`, no host pacing. Every step ran in both runs.
 > W1, W2, W5, W6 and W7 pass in both. W3 passes in run 9 and W4 in run 10.
 > The steps that fail do so for three reasons, all named in section 9.
@@ -51,9 +77,9 @@ anything from the middle.
 | The boards' consoles | each board's USB link held by `lp-cli link capture` through a TCP bridge to the door's `/bytes` (the decoded console: log records ride the link). It is let go and taken back when the walk asks a board over USB (W4, W9), and the console continues in `console/<id>.link.2.log`. c6-b's is handed to the W6/W7 page and ends there |
 | One LAN link per board | since #989 a C6 holds **one** LAN link (`LAN_LINK_SLOTS` = 1). A second dial is closed with WebSocket 1013, logged as `[lan] every LAN link is in use: a new one was told to try again later`. So the walk never dials a board's forward while the Studio page holds that board: status reads go over USB (W4, W9), and the LAN tools (W6/W7's status reads, W8's upload, W10's `link rtt`) run with the LAN page at `about:blank`, each console showing its link closed |
 | Configuration | `lp-emu:esp32c6:t1+net=lan` (the door's `/boards` once the seam engaged; its first answer, before boot, says the bare `lp-emu:esp32c6:t1`) |
-| `lp-emu` commit | runs 6, 9, 10: `201dc56a1` (W9's forward fix; `lp-emu/` unchanged since). Runs 7, 8: `201dc56a1+dirty`, the host-pacing patch that was held back (section 9, finding 6; diff fingerprints `da41d0f52ced` and `89fbfe2eef72`). Run 4: `ae167ccf0`; run 5: `a84308c4b`; run 2: `fbad240d0` |
-| Firmware commit | runs 6–10: `fw-esp32c6 f3feec073-dirty-061842PT` (wire proto 39, #989's heap fix and one LAN slot; "dirty" is this walk's script only). HEAD then moved to `8e188d18f`, a main merge that touches `fw-esp32c6/src/ota/` (#994's hw SHA and engine window); no run here used that image. Runs 4/5: `ae167ccf0-dirty`; run 2: `d65641584-dirty` (proto 38) |
-| Studio build | the release bundle built at `f3feec073`, with #989's latest Studio fixes (the scan owed after a status read, the LAN redial read as a departure, "Wi-Fi" in the card and header) |
+| `lp-emu` commit | runs 11, 12: `52a3e6549` (the LAN host pace, default for a LAN host; no `--pace`, so no `@pace=` in the label). Runs 6, 9, 10: `201dc56a1` (W9's forward fix; `lp-emu/` unchanged since). Runs 7, 8: `201dc56a1+dirty`, the host-pacing patch that was held back (section 9, finding 6; diff fingerprints `da41d0f52ced` and `89fbfe2eef72`). Run 4: `ae167ccf0`; run 5: `a84308c4b`; run 2: `fbad240d0` |
+| Firmware commit | runs 11, 12: `fw-esp32c6 52a3e6549` (clean; includes #994's OTA changes from main). HEAD later moved to `154648174`, docs and a test comment only. Runs 6–10: `fw-esp32c6 f3feec073-dirty-061842PT` (wire proto 39, #989's heap fix and one LAN slot; "dirty" is this walk's script only). HEAD then moved to `8e188d18f`, a main merge that touches `fw-esp32c6/src/ota/` (#994's hw SHA and engine window); no run here used that image. Runs 4/5: `ae167ccf0-dirty`; run 2: `d65641584-dirty` (proto 38) |
+| Studio build | runs 11, 12: the release bundle built at `52a3e6549`. Runs 6–10: the bundle built at `f3feec073`, with #989's latest Studio fixes (the scan owed after a status read, the LAN redial read as a departure, "Wi-Fi" in the card and header) |
 
 Runs, all in `target/walk-wifi-emu/` (not committed):
 
@@ -69,7 +95,9 @@ Runs, all in `target/walk-wifi-emu/` (not committed):
 | 7 | the same + the held-back pacing patch (`201dc56a1+dirty`) | `lan-run7-wip/` | **8/10**: W3 and W4 pass. W8 is the board's right answer that lp-cli exits 1 on (walk fixed); W10's idle window was too short (walk fixed) |
 | 8 | the same + the pacing patch, later revision | `lan-run8-wip/` | **10/10** with the fixed script. Not the shipping emulator |
 | 9 | `df4ca2831` (the pacing reverted), lp-emu `201dc56a1` | `lan-run9/` | **7/10**, the run quoted below. W4 (finding 6), W8 (finding 1) and W9 (finding 7) fail |
-| 10 | the same | `lan-run10/` | **6/10** at load average 73. W3 (finding 1); W8's page half (finding 7) on top of a board-side pass; W9 and W10 on the walk's wall-clock deadlines on a slow box |
+| 11 | `52a3e6549` (pace shipped), everything rebuilt there | `lan-run11/` | **10/10**, at load average 61 at the start. Finding 7 not seen |
+| 12 | the same | `lan-run12/` | **10/10**, at load average 13.6 at the start. Finding 7 seen once, in W8's page half, which is recorded and not gated |
+| 10 | `df4ca2831` | `lan-run10/` | **6/10** at load average 73. W3 (finding 1); W8's page half (finding 7) on top of a board-side pass; W9 and W10 on the walk's wall-clock deadlines on a slow box |
 
 ## 2. The rule every step follows
 
@@ -86,7 +114,27 @@ board's evidence.
 
 ## 3. What each step showed
 
-### 3.1 At the shipping tree: runs 9 and 10 (`df4ca2831`, no pacing), and run 8 (with the held-back pacing patch)
+### 3.0 With the pace shipped: runs 11 and 12 (`52a3e6549`), the passing reference
+
+`lp-emu:esp32c6:t1+net=lan`, lp-emu `52a3e6549`, the final script. Shots
+are in `target/walk-wifi-emu/lan-run11/shots/` and `…/lan-run12/shots/`.
+Neither run had a reply deadline, a watchdog reset, a read refusal or a
+load refusal on c6-a.
+
+| ID | Board's words (the gate) | Run 11 | Run 12 |
+|---|---|---|---|
+| W1 | each status `connected`, an address, `lp-xxxx.local`, the two different | c6-a `192.168.4.100` (`lp-0000.local`), c6-b `192.168.4.101` (`lp-0001.local`) | the same |
+| W2 | each console `[lan] link <id> … secure session opening`; each card `Ready` with its own MAC | both `[lan] link link1 from 192.168.4.1:49152: secure session opening (1024 B frames)` | the same |
+| W3 | `Project loaded`; frames advance; the knob's new value comes back from the board | `Project loaded: studio`; frames 9,419 → 10,435; knob `0.35 → 1`. Largest block 29,072 B with Studio's link open (the read floor is 16,384 B); 2 resends on that link | `Project loaded: studio`; frames 9,426 → 10,407; knob `0.35 → 1` |
+| W4 | no link closed since W2; a second LAN dial turned away; c6-b over USB at its W1 address | lp-cli `the board's LAN links are all in use; try again later`; c6-b `[lan] every LAN link is in use: a new one was told to try again later`; c6-b over USB `connected` `192.168.4.101`; no link closed | the same |
+| W5 | two instances, each board's `mac=` | `lp-0001`, `lp-0000`, `mac=024c50000000` / `…01` | the same |
+| W6 | page off: each console `link1: closed (the WebSocket closed)`; c6-b `last: wrongPassword`, back `connected` | `last: wrongPassword`, `connected` `lp-walk-net` `192.168.4.101`; "Checking the password" crossed; no refresh needed | the same |
+| W7 | `last: notFound`, still `connected` | `last: notFound`; "Not in range" | the same |
+| W8 | `Project loaded: button-sign`; frames advance; the Radio node is the only fault; the Radio message from the board | `Project loaded: button-sign`; frames 11,601 → 12,061; only fault `/button_sign.show/radio.control_radio`. lp-cli's deploy reply: "…is unavailable: Radio is off while this board uses Wi-Fi. Turn Wi-Fi off for this board to use Radio." The upload link had 0 resends. The page relinked (`link3`, traffic both ways) | `Project loaded: button-sign`; frames 11,014 → 11,474; the same fault and message. The page half hit finding 7 (`link3: frames in 0 out 34 … 262 · handshakes 0`; the card wait timed out), recorded not gated |
+| W10 | page off; `link rtt lan:<fwd a>` 40/40 in frames, `link_resets` 0 | p50 **6.747** / p90 **7.908** frames at 91.9 fps, `button-sign` rendering | p50 **4.735** / p90 **5.958** frames at 91.7 fps, the same |
+| W9 | `renumber` + `reset` → a new address; Studio's link back through the same forward with traffic; USB status at the new address; the card | `.100` → `[wifi] address 192.168.4.103`; `[lan] link link1 from 192.168.4.1:49157: secure session opening`; `radio link link1: session 0 up`; USB `connected` `192.168.4.103`; card `Ready` | the same, `.103`, card `Ready` |
+
+### 3.1 At the shipping tree before the pace: runs 9 and 10 (`df4ca2831`, no pacing), and run 8 (with the held-back pacing patch)
 
 `lp-emu:esp32c6:t1+net=lan`. Run 9 is the reference, with run 10 and run 8
 beside it. Shots are in `target/walk-wifi-emu/lan-run9/shots/`, `…/lan-run10/shots/`
@@ -121,9 +169,24 @@ finding 5 did not show.
 
 | Run | Configuration, `lp-emu` | Rendering | p50 | p90 | Frame rate used | Same, frames per wall second (p50 / p90) |
 |---|---|---|---|---|---|---|
+| **11** | `lp-emu:esp32c6:t1+net=lan`, `52a3e6549` (pace default), via `lan:127.0.0.1:62108` | `button-sign` (Radio node faulted, rest running) | **6.747** | **7.908** | `idle_fps` 91.9 (emulated) | 1.817 / 2.130 at 24.8 per wall second |
+| **12** | the same, `52a3e6549` | `button-sign` | **4.735** | **5.958** | `idle_fps` 91.7 | 1.220 / 1.535 at 23.6 per wall second |
 | 9 | `lp-emu:esp32c6:t1+net=lan`, `201dc56a1`, via `lan:127.0.0.1:63251` | nothing (W8's load refused) | **2.229** | **3.324** | `idle_fps` 941.1 (emulated) | 7.638 / 11.387 at 3,224 per wall second |
 | 8 | `lp-emu:esp32c6:t1+net=lan`, `201dc56a1+dirty` (held-back pacing), via `lan:127.0.0.1:62247` | `button-sign` (Radio node faulted, rest running) | **5.149** | **6.364** | `idle_fps` 92.5 (emulated) | 1.377 / 1.701 at 24.7 per wall second |
 | 6 | `lp-emu:esp32c6:t1+net=lan`, `201dc56a1` | nothing (the studio project had stopped) | 2.394 | 3.560 | 941.1 | 8.813 / 13.105 |
+
+**The project-bearing figure is runs 11 and 12.** The two differ by about
+2 frames at p50 from one run to the next, so quote them as a pair, not to
+the decimal.
+- Run 11 in full: n 40, min 3.871, p10 4.795, p99 8.878, mean 6.634
+  frames; wall p50 73.4 ms, p90 86.0 ms.
+- Run 12 in full: min 3.234, p10 3.800, p99 6.717, mean 4.853 frames;
+  wall p50 51.6 ms.
+
+Under the pace, the board runs a little slower than the wall (≈92
+emulated fps against ≈24 frames per wall second while being timed), so
+the "per wall second" column is the smaller reading. Neither is a silicon
+number or a gate.
 
 Run 9 in full: n 40, min 2.081, p10 2.135, p99 15.313, max 15.313 frames;
 in wall time, p50 2.37 ms and p90 3.53 ms. A project-bearing figure at the
@@ -233,7 +296,10 @@ absent, and a pass here says nothing about it:
   tied to a wall-clock host's (finding 6), so any board timer that waits
   on the host, such as a reply deadline, a resend timer or the watchdog
   during such a wait, runs fast against it. A LAN figure in milliseconds,
-  or a timeout seen here, is not a silicon one.
+  or a timeout seen here, is not a silicon one. Since `52a3e6549`, a board
+  with a host on its LAN forward is held to wall time by default, so it is
+  never ahead of the host (an idle board runs at ≈0.66×). That is a model
+  of the timing, not a measurement of it.
 - **The Wi‑Fi driver's heap and timing.** With the seam answering, the
   esp-radio blob's join allocations never happen (plan A7), so `HEAP_RADIO`,
   the driver's stack and its timing are not exercised. G1's N6–N8 are the
@@ -264,7 +330,7 @@ something in section 6 is expected and says so.
 |---|---|---|---|---|
 | Made-up network → `notFound` (pre-check) | W7: `last: notFound`, still connected to `lp-walk-net` | `failed notFound`, `last: notFound`, within one scan | same outcome (`notFound`); the emulated board, already joined, stayed on its network, which the pre-check (nothing joined) could not show | |
 | N1 association → address | not comparable: emulated time, no association | _(G1)_ | n/a | |
-| N2 request p50 / p90 over Wi‑Fi (frames) | W10 run 9 (shipping tree): 2.229 / 3.324 frames at board fps, nothing loaded. Run 8 (pacing, not shipped): 5.149 / 6.364 frames at 92.5 fps with `button-sign` rendering | _(G1)_ | _(after G1; compare in frames of the same project)_ | |
+| N2 request p50 / p90 over Wi‑Fi (frames) | W10 runs 11 and 12 (`52a3e6549`, pace default): 6.747 / 7.908 and 4.735 / 5.958 frames at ≈92 fps, `button-sign` rendering. Earlier: run 9, 2.229 / 3.324 with nothing loaded | _(G1)_ | _(after G1; compare in frames of the same project)_ | |
 | N4 fps joined idle | 927.7 emulated fps with nothing loaded; ≈144–151 with `Peach (1D)` (W3's heartbeats) | _(G1)_ | _(G1)_ | |
 | N12 `.local` in Chrome | not covered (section 6) | _(G1)_ | n/a | |
 | Wrong password → `wrongPassword`, back on the good network | W6: `last: wrongPassword`, back `connected`; in-row test crossed at "Checking the password" | _(G1 W2)_ | _(G1)_ | |
@@ -350,11 +416,20 @@ From run 6 on (#989: one LAN link per board):
 
 ## 9. Product findings, with the board's evidence
 
-Status at the shipping tree (`df4ca2831`, runs 6–10) leads each item. The
-history stays below it.
+Each item leads with its status with the pace shipped (`52a3e6549`, runs
+11 and 12), then its status at `df4ca2831` (runs 6–10). The history stays
+below that.
 
-1. **The read/load gate refuses while a LAN link is open (PR B's).
-   NARROWED BY #989, STILL OPEN.** #989's fix
+1. **The read/load gate refuses while a LAN link is open (PR B's). Not
+   seen in runs 11 and 12.**
+   - **W3 read:** passed both times, with a 29,072 B largest block while
+     Studio's link was open (run 11).
+   - **W8 load:** passed both times, with 65,528 B largest after the stop.
+   - **Still a firmware question:** in run 10 the same read came 1,048 B
+     short, so the margin depends on allocation order. Two clean runs do
+     not close it. Firmware (PR B).
+
+   At `df4ca2831`: NARROWED BY #989, STILL OPEN. #989's fix
    (`docs/defects/2026-10-06-a-lan-link-strands-the-heap-below-the-load-floor.md`)
    moved the figures but did not clear the floor with a project loaded:
    - **Run 10, W3**, `Peach (1D)` loaded with Studio's one LAN link open,
@@ -428,7 +503,13 @@ history stays below it.
    W9 re-run, before W9), and on c6-a after W9. Outside PR C; not diagnosed.
 
 6. **Studio's editor over the LAN sends an emulated board into a watchdog
-   reset loop. NEW, OPEN.** The cause is the emulator's open fidelity
+   reset loop. FIXED by the pace (`52a3e6549`).** Runs 11 and 12 had no
+   `reply still not out of the frame buffer`, no `reply deadline` close and
+   no `rst:0x10`. The worst LAN link carried 2 resends (W3's), and the
+   upload link carried 0. The firmware half is still PR B's to weigh: a
+   tick that blocks up to 5 s on an undrained LAN reply, two of which
+   reset the board. The pace removes the emulator's way of reaching it,
+   not the design. At `df4ca2831`: NEW, OPEN. The cause is the emulator's open fidelity
    defect (`2026-10-06-an-emulated-boards-clock-outran-its-lan-host.md`),
    which is more than wasted frames here.
    - **What the board says.** Right after `Project loaded: studio`, with the
@@ -456,7 +537,15 @@ history stays below it.
      drained, and two in a row reset the board. A real host that stops
      reading, such as a throttled background tab, could do the same.
 7. **A Studio page reloaded just after another LAN client let go opens a
-   link that never carries a frame. NEW, OPEN, side not yet known.**
+   link that never carries a frame. STILL SEEN WITH THE PACE, OPEN, side
+   not yet known.** Run 12, W8: the reload came right after the upload's
+   `link2` closed. c6-a logged `link3 … secure session opening`, then
+   `frames in 0 out 34 · handshakes 0`, rising to `out 262`, and the card
+   never came back. Every other reload in runs 11 and 12 relinked
+   normally: W8 in run 11, and W9 in both. So it is 1 of 4
+   reloads-after-hand-over with the pace and 2 of 2 without it, and the
+   pace is not its cause. W8 passed anyway: its page half is recorded, not
+   gated. At `df4ca2831`: NEW, OPEN.
    - **Run 9, W9.** The reload came right after W10's `link rtt` closed
      `link3`. c6-a logged `[lan] link link4 from 192.168.4.1:49160: secure
      session opening`, so the WebSocket upgrade went through. Its counters
@@ -487,11 +576,25 @@ history stays below it.
      message is not.
    - lp-cli calls a project that runs degraded "failed to run" and exits
      1. The board is rendering, at ≈88–92 emulated fps in runs 7 and 8.
-   - The playlist fault in the second item was seen in run 8 only.
+   - The playlist fault in the second item was seen in runs 8 and 11
+     (during W10), not in run 12.
 
 ## 10. `just walk-no-board`, unchanged by the LAN
 
-Not re-run at `df4ca2831` by this pass. Last run with `--serve-release`
+**Re-run at `52a3e6549`** (`just walk-no-board --serve-release`, the
+bundle and packaged firmware built there, load average about 10): **6/6
+pass**.
+- flash: 1,228 records
+- connect
+- identify
+- upload: 323 records
+- detach
+- reattach: 38 records
+
+The door's registry at the end: `c6-a flash=loaded boot=rom-up reboots=5
+state=running`. Directory `target/walk-no-board/`.
+
+Earlier: last run with `--serve-release`
 (the release bundle and packaged firmware above, no dev server started), at
 `ae167ccf0`: **6/6 pass** — flash → connect →
 identify → upload (`Project loaded`; "project sent to studio — the board is
