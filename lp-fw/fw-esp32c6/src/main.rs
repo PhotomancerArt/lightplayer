@@ -400,6 +400,10 @@ struct CoreBoot {
         ))
     ))]
     radio_driver: Esp32EspNowRadioDriver,
+    /// The radio links' shared slots: the BLE task (started by the core)
+    /// opens a connection's link there, and the engine's link mux serves it.
+    #[cfg(feature = "ble")]
+    radio_port: &'static fw_esp32_common::radio_link::RadioLinkPort,
     #[cfg(feature = "ble")]
     ble_started: bool,
     watchdog: recovery::watchdog::WatchdogFeeder,
@@ -727,6 +731,8 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
         ))]
         radio_driver,
         #[cfg(feature = "ble")]
+        radio_port,
+        #[cfg(feature = "ble")]
         ble_started,
         watchdog,
         boot_guard,
@@ -765,6 +771,8 @@ fn lp_engine_entry(core: CoreBoot) {
             ))
         ))]
         radio_driver,
+        #[cfg(feature = "ble")]
+        radio_port,
         #[cfg(feature = "ble")]
         ble_started,
         watchdog,
