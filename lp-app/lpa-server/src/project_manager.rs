@@ -368,9 +368,16 @@ impl ProjectManager {
     /// Returns project names that exist on disk but may not be loaded.
     /// Requires a filesystem to query.
     pub fn list_available_projects(&self, fs: &dyn LpFs) -> Result<Vec<String>, ServerError> {
-        // List entries in the base directory
+        // List entries in the base directory. The base is relative
+        // (`projects`), and a device's flash filesystem takes absolute paths
+        // only: it answered `Invalid path: Path must be absolute: projects`
+        // (G1 desk walk). The memory filesystem the host tests use is lenient.
+        let dir = LpPathBuf::from(format!(
+            "/{}",
+            self.projects_base_dir.as_str().trim_start_matches('/')
+        ));
         let entries = fs
-            .list_dir(self.projects_base_dir.as_path(), false)
+            .list_dir(dir.as_path(), false)
             .map_err(|e| {
                 ServerError::Filesystem(format!("Failed to read projects directory: {e}"))
             })?;
