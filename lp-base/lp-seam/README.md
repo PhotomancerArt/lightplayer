@@ -127,9 +127,10 @@ silicon: one load, one branch.
 One pending word (the table's `pending`) and one line, `FROM_CPU_INTR3` at
 priority 1 (`wake.rs`). The host sets bits, then raises; the guest's handler
 clears the line, then swaps the word to zero. Whatever a seam wakes runs on
-the firmware's IO thread, and the emulator paces what it raises. No shipped
-image carries a handler yet (`pending = 0`); it lands with the Bluetooth
-seam.
+the firmware's IO thread, and the emulator paces what it raises. The C6
+image carries the handler since the network seam (`pending` names a RAM
+word; bit 0 = frames, bit 1 = station events, any bit wakes both of
+`lp-net`'s waiters), bound only when that seam is engaged.
 
 ## Licence and the fence
 

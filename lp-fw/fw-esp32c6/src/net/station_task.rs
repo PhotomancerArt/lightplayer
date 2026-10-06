@@ -1,8 +1,8 @@
 //! The station task: the join policy driven over the radio, on `lp-net`.
 //!
 //! [`StationPolicy`] (sans-IO, `fw-esp32-common`) decides; this task does
-//! what it asks with [`EspStation`] and the IP stack, and feeds back what
-//! happened. It takes the network file from the board
+//! what it asks with [`C6Station`] (the radio's station, or the network
+//! seam's) and the IP stack, and feeds back what happened. It takes the network file from the board
 //! ([`super::station_probes::STATION_BOARD`]) and publishes the policy there
 //! after every step, for the server's probes.
 //!
@@ -17,8 +17,9 @@
 //!   no attempt is under way, and records what was heard for the next ask.
 //!   It is the one scan a board with nothing saved ever makes, and only on
 //!   request; afterwards the radio goes back to ESP-NOW's channel.
-//! - Every radio call is bounded ([`EspStation`]'s limits), so an emulated
-//!   board, whose radio never finishes a scan, still answers. A scan that
+//! - Every radio call is bounded (`EspStation`'s limits, which the seam's
+//!   station keeps), so an emulated board whose radio never finishes a scan
+//!   still answers. A scan that
 //!   got no answer is not recorded: the scan probe keeps saying `scanning`
 //!   rather than claim the radio heard nothing.
 
@@ -35,7 +36,7 @@ use fw_esp32_common::net::{
 use lpc_access::NetworkFile;
 use lpc_wire::{ConnectStep, StationState};
 
-use super::esp_station::EspStation;
+use super::c6_station::C6Station;
 use super::station_probes::STATION_BOARD;
 
 /// How often a joined station reads its signal.
@@ -43,7 +44,7 @@ const SIGNAL_EVERY: Duration = Duration::from_secs(10);
 
 /// The task. `host` is the board's LAN name (`lp-xxxx.local`).
 #[embassy_executor::task]
-pub async fn station_task(mut control: EspStation, stack: Stack<'static>, host: String) {
+pub async fn station_task(mut control: C6Station, stack: Stack<'static>, host: String) {
     let mut policy = StationPolicy::new(host);
     let mut file = NetworkFile::none();
     let mut queue: VecDeque<StationAction> = VecDeque::new();
@@ -140,7 +141,7 @@ pub async fn station_task(mut control: EspStation, stack: Stack<'static>, host: 
 
 /// Run one action; what happened, for the policy.
 async fn run(
-    control: &mut EspStation,
+    control: &mut C6Station,
     stack: Stack<'static>,
     file: &NetworkFile,
     policy: &StationPolicy,
@@ -185,7 +186,7 @@ async fn run(
 /// Scan, and record what was heard for the scan probe. No answer is
 /// recorded as nothing (the probe keeps saying `scanning`); the policy hears
 /// an empty list and carries on.
-async fn scan(control: &mut EspStation) -> Vec<lpc_wire::HeardNetwork> {
+async fn scan(control: &mut C6Station) -> Vec<lpc_wire::HeardNetwork> {
     match control.scan().await {
         Some(heard) => {
             STATION_BOARD.record_scan(now_ms(), heard.clone());
