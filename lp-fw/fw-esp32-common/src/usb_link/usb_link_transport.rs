@@ -111,6 +111,19 @@ impl UsbLinkTransport {
             };
             match event {
                 LinkEvent::Message { channel, data } if channel == lp_link::CH_PROTO => {
+                    // A request the heap cannot decode is refused in words,
+                    // never decoded into a reset.
+                    if let Some((reply, reason)) =
+                        crate::serial::server_payload::request_refusal(&data)
+                    {
+                        drop(data);
+                        log::warn!("[usb_link] {reason}");
+                        self.shared.with_link(|link| {
+                            let _ = link.send(lp_link::CH_PROTO, &reply);
+                        });
+                        self.shared.ring();
+                        continue;
+                    }
                     let msg = parse_request(&data);
                     // The request's bytes go before the inbox can grow: a
                     // growth while they are still on the heap lands above

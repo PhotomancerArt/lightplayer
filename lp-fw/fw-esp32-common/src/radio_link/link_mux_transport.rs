@@ -92,7 +92,9 @@ use super::radio_link_port::{LINK_SLOTS, RadioLinkEvent, RadioLinkPort, RadioLin
 use crate::link_upkeep::LinkUpkeep;
 use crate::serial::packed_link::PackedLink;
 use crate::serial::server_msg::frame_bytes;
-use crate::serial::server_payload::{decode_client_payload, serialize_server_payload};
+use crate::serial::server_payload::{
+    decode_client_payload, request_refusal, serialize_server_payload,
+};
 
 /// How long a radio link has to finish taking a long reply out of the frame
 /// buffer once someone else needs the buffer, before it is closed.
@@ -336,6 +338,17 @@ impl<U: ServerTransport + FrameBufHolder, D: DelayNs> LinkMuxTransport<U, D> {
                 };
                 match event {
                     LinkEvent::Message { channel, data } if channel == CH_PROTO => {
+                        // A request the heap cannot decode is refused in
+                        // words, never decoded into a reset.
+                        if let Some((reply, reason)) = request_refusal(&data) {
+                            drop(data);
+                            log::warn!("radio link {}: {reason}", radio.id);
+                            slot.with_link(radio.id, |link| {
+                                let _ = link.send(CH_PROTO, &reply);
+                            });
+                            slot.ring();
+                            continue;
+                        }
                         let decoded = decode_client_payload(&data);
                         match decoded {
                             Ok(msg) => {
