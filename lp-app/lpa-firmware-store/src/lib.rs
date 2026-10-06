@@ -12,6 +12,9 @@
 //!   everything fetched, over an injected [`FirmwareFetch`].
 //! - [`fetch_engine_from_store`]: an engine for a board's target and build
 //!   id, checked against the hash the board reported.
+//! - [`keep_installed_engine`]: the engine a USB install just wrote, sliced
+//!   out of the package's merged image ([`InstalledPackage`]) and kept as
+//!   `installed`.
 //!
 //! Sans-IO: no executor, no clock (time is the caller's f64 epoch seconds),
 //! no HTTP client. Ordering the sources (cache → store → read-back) is the
@@ -24,6 +27,8 @@ mod engine_cache_index;
 mod fetch_engine_from_store;
 mod firmware_fetch;
 mod firmware_store;
+mod installed_engine;
+mod keep_installed_engine;
 mod memory_engine_cache;
 #[cfg(test)]
 mod test_block_on;
@@ -40,4 +45,6 @@ pub use engine_cache_index::{
 pub use fetch_engine_from_store::fetch_engine_from_store;
 pub use firmware_fetch::{FetchError, FirmwareFetch};
 pub use firmware_store::{DEFAULT_FIRMWARE_STORE_ORIGIN, FirmwareStore, StoreError};
+pub use installed_engine::{InstalledPackage, engine_from_merged_image};
+pub use keep_installed_engine::{KeptEngine, keep_installed_engine};
 pub use memory_engine_cache::MemoryEngineCache;

@@ -391,7 +391,7 @@ pub fn App() -> Element {
             // engine Studio installs, fetches or reads back is kept in OPFS
             // `firmware-cache/`, and released ones are fetched from the
             // firmware store (lightplayer.app, or `?firmware-store=`'s
-            // loopback/LAN origin). Nothing reads them until the update flow.
+            // loopback/LAN origin).
             controller
                 .set_engine_cache(Rc::new(crate::engine_cache_opfs::OpfsEngineCache::default()));
             controller.set_firmware_store(Rc::new(lpa_firmware_store::FirmwareStore::new(
@@ -399,6 +399,14 @@ pub fn App() -> Element {
                 Rc::new(crate::firmware_fetch_web::WebFirmwareFetch)
                     as Rc<dyn lpa_firmware_store::FirmwareFetch>,
             )));
+            // Where the flasher reads its packages (the bundle's own
+            // `firmware/`): after a USB install of a split package, Studio
+            // reads it back from here and keeps its engine (OTA M5, D19).
+            controller.set_firmware_bundle(
+                Rc::new(crate::firmware_fetch_web::WebFirmwareFetch)
+                    as Rc<dyn lpa_firmware_store::FirmwareFetch>,
+                lpa_link::providers::browser_serial_esp32_options::DEFAULT_FIRMWARE_BASE_PATH,
+            );
             // This Studio's own firmware build (OTA M7, DS10): what a board
             // is offered to update to, read from the bundle's own
             // `firmware/<target>/` (the same relative base the flasher
