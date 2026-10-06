@@ -4,9 +4,11 @@
 //! `on_action` conduit are present, input dispatches `SlotEditOp::SetValue`.
 //! Sliders (and other rich controls) dispatch with `oninput` semantics;
 //! text/number inputs dispatch with `onchange` semantics (blur/enter, not
-//! per keystroke — roadmap D5). Fields render the DTO value only — the edit
-//! buffer and overlay mirror already shadow the synced value, so no field
-//! keeps local value state.
+//! per keystroke — roadmap D5). Fields render the DTO value — the edit
+//! buffer and overlay mirror already shadow the synced value — with one
+//! exception: a continuous gesture (the slider, the XY pad) shows the value
+//! under the hand until the DTO reports it, because the DTO lags the drag
+//! by however many writes the actor has not run yet ([`GestureHold`]).
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
@@ -15,6 +17,7 @@ use lpa_studio_core::{
 };
 use wasm_bindgen::JsCast;
 
+use crate::app::node::gesture_hold::{GestureHold, use_gesture_hold};
 use crate::app::node::slot_edit_actions::slot_set_value_action;
 use crate::app::node::{SlotRawInputPopover, SlotUnitSuffix, VectorSlotField};
 
@@ -266,6 +269,10 @@ pub fn SliderSlotField(
     let disabled = wired.is_none();
     let step = step.map_or_else(|| "any".to_string(), |step| step.to_string());
     let invalid_title = state.invalid.clone().unwrap_or_default();
+    // The slider is a controlled input: rendering the DTO straight into it
+    // wrote a value the drag had already left back under the thumb.
+    let mut hold = use_gesture_hold(value);
+    let shown = hold.shown(value);
 
     rsx! {
         span {
@@ -277,17 +284,21 @@ pub fn SliderSlotField(
                 min: "{min}",
                 max: "{max}",
                 step: "{step}",
-                value: "{value}",
+                value: "{shown}",
                 disabled,
+                onpointerdown: move |_| hold.press(),
+                onpointerup: move |_| hold.release(value),
+                onpointercancel: move |_| hold.release(value),
                 oninput: move |event| {
                     if let (Some((address, handler)), Ok(next)) =
                         (wired.clone(), event.value().parse::<f32>())
                     {
+                        hold.write(next);
                         handler.call(slot_set_value_action(address, LpValue::F32(next)));
                     }
                 },
             }
-            span { class: "tw:min-w-10 tw:text-right tw:font-mono", "{format_float(value)}" }
+            span { class: "tw:min-w-10 tw:text-right tw:font-mono", "{format_float(shown)}" }
             SlotUnitSuffix { unit: unit.clone(), reserve: true }
             if let Some((address, handler)) = raw_input {
                 SlotRawInputPopover { initially_open: raw_initially_open,
@@ -377,8 +388,11 @@ pub fn XySlotField(
     #[props(default = false)]
     raw_initially_open: bool,
 ) -> Element {
-    let x = value[0].clamp(0.0, 1.0) * 100.0;
-    let y = (1.0 - value[1].clamp(0.0, 1.0)) * 100.0;
+    // The dot and readouts follow the hand until the DTO reports it.
+    let mut hold: GestureHold<[f32; 2]> = use_gesture_hold(value);
+    let shown = hold.shown(value);
+    let x = shown[0].clamp(0.0, 1.0) * 100.0;
+    let y = (1.0 - shown[1].clamp(0.0, 1.0)) * 100.0;
     let point_style = format!("left: {x:.1}%; top: {y:.1}%;");
     let pad_class = xy_pad_class(&state);
     let wired = field_wiring(&state, &address, on_action);
@@ -386,6 +400,10 @@ pub fn XySlotField(
     let down_wiring = wired.clone();
     let move_wiring = wired.clone();
     let mut dragging = use_signal(|| false);
+    let mut stop_drag = move || {
+        dragging.set(false);
+        hold.release(value);
+    };
 
     rsx! {
         span { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-2",
@@ -399,8 +417,11 @@ pub fn XySlotField(
                     };
                     capture_field_pointer(&event);
                     dragging.set(true);
+                    hold.press();
                     let point = event.data().element_coordinates();
-                    handler.call(slot_set_value_action(address, xy_pad_value(point.x, point.y)));
+                    let next = xy_pad_point(point.x, point.y);
+                    hold.write(next);
+                    handler.call(slot_set_value_action(address, LpValue::Vec2(next)));
                 },
                 onpointermove: move |event| {
                     if !dragging() {
@@ -408,24 +429,26 @@ pub fn XySlotField(
                     }
                     if event.data().held_buttons().is_empty() {
                         // Missed release (no pointer capture): stop the drag.
-                        dragging.set(false);
+                        stop_drag();
                         return;
                     }
                     let Some((address, handler)) = move_wiring.clone() else {
                         return;
                     };
                     let point = event.data().element_coordinates();
-                    handler.call(slot_set_value_action(address, xy_pad_value(point.x, point.y)));
+                    let next = xy_pad_point(point.x, point.y);
+                    hold.write(next);
+                    handler.call(slot_set_value_action(address, LpValue::Vec2(next)));
                 },
-                onpointerup: move |_| dragging.set(false),
-                onpointercancel: move |_| dragging.set(false),
+                onpointerup: move |_| stop_drag(),
+                onpointercancel: move |_| stop_drag(),
                 span { class: "tw:pointer-events-none tw:absolute tw:left-1/2 tw:top-0 tw:h-full tw:w-px tw:bg-border-muted" }
                 span { class: "tw:pointer-events-none tw:absolute tw:left-0 tw:top-1/2 tw:h-px tw:w-full tw:bg-border-muted" }
                 span { class: "tw:pointer-events-none tw:absolute tw:h-2 tw:w-2 tw:-translate-x-1/2 tw:-translate-y-1/2 tw:rounded-full tw:border tw:border-background tw:bg-selection-border", style: "{point_style}" }
             }
             span { class: "{numeric_field_class(&state)} tw:flex-col tw:items-stretch tw:justify-center tw:gap-0.5 tw:self-center",
-                XyPadReadout { label: "x", value: value[0] }
-                XyPadReadout { label: "y", value: value[1] }
+                XyPadReadout { label: "x", value: shown[0] }
+                XyPadReadout { label: "y", value: shown[1] }
             }
             if let Some((address, handler)) = raw_input {
                 SlotRawInputPopover { initially_open: raw_initially_open,
@@ -479,10 +502,10 @@ const XY_PAD_SIZE_PX: f64 = 56.0;
 /// Compose the WHOLE `Vec2` value for a pad-relative pointer position:
 /// x maps left→right onto 0..=1, y maps bottom→top (screen y is inverted),
 /// both clamped so drags past the pad edge pin to the domain boundary.
-pub(crate) fn xy_pad_value(x: f64, y: f64) -> LpValue {
+pub(crate) fn xy_pad_point(x: f64, y: f64) -> [f32; 2] {
     let fx = (x / XY_PAD_SIZE_PX).clamp(0.0, 1.0) as f32;
     let fy = (1.0 - y / XY_PAD_SIZE_PX).clamp(0.0, 1.0) as f32;
-    LpValue::Vec2([fx, fy])
+    [fx, fy]
 }
 
 /// Route subsequent pointer events to the gesture surface for the duration
@@ -614,7 +637,7 @@ pub(crate) fn format_float(value: f32) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        format_xy_readout, parse_f32_input, parse_i32_input, parse_u32_input, xy_pad_value,
+        format_xy_readout, parse_f32_input, parse_i32_input, parse_u32_input, xy_pad_point,
     };
     use lpa_studio_core::LpValue;
 
@@ -661,15 +684,15 @@ mod tests {
     #[test]
     fn xy_pad_composes_whole_vec2_with_inverted_y() {
         // Pad center → (0.5, 0.5); top-left corner → (0, 1) in value space.
-        assert_eq!(xy_pad_value(28.0, 28.0), LpValue::Vec2([0.5, 0.5]));
-        assert_eq!(xy_pad_value(0.0, 0.0), LpValue::Vec2([0.0, 1.0]));
-        assert_eq!(xy_pad_value(56.0, 56.0), LpValue::Vec2([1.0, 0.0]));
+        assert_eq!(xy_pad_point(28.0, 28.0), [0.5, 0.5]);
+        assert_eq!(xy_pad_point(0.0, 0.0), [0.0, 1.0]);
+        assert_eq!(xy_pad_point(56.0, 56.0), [1.0, 0.0]);
     }
 
     #[test]
     fn xy_pad_clamps_out_of_pad_drags_to_the_domain_edge() {
         // Captured-pointer drags past the pad edge pin to 0..=1.
-        assert_eq!(xy_pad_value(-20.0, 80.0), LpValue::Vec2([0.0, 0.0]));
-        assert_eq!(xy_pad_value(90.0, -14.0), LpValue::Vec2([1.0, 1.0]));
+        assert_eq!(xy_pad_point(-20.0, 80.0), [0.0, 0.0]);
+        assert_eq!(xy_pad_point(90.0, -14.0), [1.0, 1.0]);
     }
 }

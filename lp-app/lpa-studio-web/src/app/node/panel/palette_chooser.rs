@@ -28,6 +28,7 @@ use dioxus::prelude::*;
 use lpa_studio_core::{ProjectSlotAddress, UiAction, UiPanelTarget};
 use lpc_model::{Gradient, GradientConfig, MAX_CYCLE_SET};
 
+use crate::app::node::gesture_hold::use_gesture_hold;
 use crate::base::{GradientStripCanvas, PopoverCloseHandle, StudioIcon, StudioIconName};
 
 use super::palette_catalog::{
@@ -296,7 +297,12 @@ fn CycleTabBody(
     let pinned = pinned_member(&config);
     let full = members.len() >= MAX_CYCLE_SET as usize;
     let groups = group_choices(&choices);
-    let step_seconds = cycle_step_seconds(&config);
+    let reported_step = cycle_step_seconds(&config);
+    // The Step slider is a controlled input whose writes come back as a new
+    // config: hold the hand's value until one reports it, or a config still
+    // carrying an earlier step pulls the thumb back (`gesture_hold`).
+    let mut step_hold = use_gesture_hold(reported_step);
+    let step_seconds = step_hold.shown(reported_step);
     let fade_seconds = cycle_fade_seconds(&config);
 
     rsx! {
@@ -351,10 +357,14 @@ fn CycleTabBody(
                 step: "0.5",
                 value: "{step_seconds}",
                 title: "Seconds each palette holds — drag to 0 to hold the current one",
+                onpointerdown: move |_| step_hold.press(),
+                onpointerup: move |_| step_hold.release(reported_step),
+                onpointercancel: move |_| step_hold.release(reported_step),
                 oninput: {
                     let config = config.clone();
                     move |event: FormEvent| {
                         if let Ok(next) = event.value().parse::<f32>() {
+                            step_hold.write(next);
                             on_change.call(with_step_seconds(&config, next));
                         }
                     }
