@@ -404,6 +404,10 @@ struct CoreBoot {
         ))
     ))]
     radio_driver: Esp32EspNowRadioDriver,
+    /// The radio links' shared slots: the BLE task (started by the core)
+    /// opens a connection's link there, and the engine's link mux serves it.
+    #[cfg(feature = "ble")]
+    radio_port: &'static fw_esp32_common::radio_link::RadioLinkPort,
     #[cfg(feature = "ble")]
     ble_started: bool,
     watchdog: recovery::watchdog::WatchdogFeeder,
@@ -669,6 +673,11 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
     // Wi-Fi/ESP-NOW bring-up above (the order M2's Run G proved), after the
     // board quirks (the token), before the server exists. A board whose
     // store says off never touches the BLE controller.
+    // The radio links' shared slots: the BLE task opens a connection's link
+    // there and the link mux (below) serves it. On the heap, not `.bss`: its
+    // slots hold `RefCell`s (one thread executor), which a `static` cannot.
+    #[cfg(feature = "ble")]
+    let radio_port = fw_esp32_common::radio_link::RadioLinkPort::leak();
     #[cfg(feature = "ble")]
     let ble_started = {
         let store = lpa_server::access_store::device_store_at_boot(base_fs.as_ref(), fs_boot_state);
@@ -679,7 +688,7 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
         match (store.ble_enabled, board::esp32c6::init::take_bt()) {
             (true, Some(bt)) => {
                 log::info!("[ble] enabled (device store, or none: on by default) — starting");
-                ble::start(spawner, bt, quirks_applied);
+                ble::start(spawner, bt, radio_port, quirks_applied);
                 true
             }
             (true, None) => {
@@ -726,6 +735,8 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
         ))]
         radio_driver,
         #[cfg(feature = "ble")]
+        radio_port,
+        #[cfg(feature = "ble")]
         ble_started,
         watchdog,
         boot_guard,
@@ -764,6 +775,8 @@ fn lp_engine_entry(core: CoreBoot) {
             ))
         ))]
         radio_driver,
+        #[cfg(feature = "ble")]
+        radio_port,
         #[cfg(feature = "ble")]
         ble_started,
         watchdog,
@@ -954,7 +967,7 @@ fn lp_engine_entry(core: CoreBoot) {
     let transport = {
         let mux = fw_esp32_common::radio_link::LinkMuxTransport::new(
             transport,
-            &fw_esp32_common::radio_link::RADIO_LINK_PORT,
+            radio_port,
             embassy_time::Delay,
         );
         if ble_started {

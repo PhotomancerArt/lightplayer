@@ -67,9 +67,13 @@ pub mod link_nonce;
 pub mod fake;
 
 /// The page's clock, nonce and wake loop for the browser link ports (Web
-/// Serial and the tab-hosted board).
+/// Serial, the tab-hosted board, and each Web Bluetooth connection).
 #[cfg(all(
-    any(feature = "browser-serial-esp32", feature = "emulator-tab"),
+    any(
+        feature = "browser-serial-esp32",
+        feature = "emulator-tab",
+        feature = "browser-ble"
+    ),
     target_arch = "wasm32"
 ))]
 pub mod link_port_edge;

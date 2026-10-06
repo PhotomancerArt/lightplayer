@@ -4,11 +4,12 @@
 //! `spikes/ble-lab` and every generic BLE terminal (nRF Connect, Bluefy's
 //! samples) talk to the product unchanged:
 //!
-//! - `6E400002-…` RX: the host writes `M!{json}\n` bytes here, in chunks of at
-//!   most one ATT value (write or write-without-response), or as a long write
-//!   (Prepare … Execute), which `ble_connection` re-assembles;
-//! - `6E400003-…` TX: the board notifies framed server lines back, chunked to
-//!   the connection's MTU.
+//! - `6E400002-…` RX: the host writes lp-link frames here, one frame per
+//!   write (with or without response), each at most one ATT value — the
+//!   link's frames are sized to the connection's MTU, so no write is ever a
+//!   long write (`ble_connection` refuses one);
+//! - `6E400003-…` TX: the board notifies its lp-link frames back, one frame
+//!   per notification.
 
 // `#[gatt_server]` names `embassy_sync::…` by relative path and means
 // trouble-host's 0.7, not the firmware's 0.8; a module-scope `use` shadows
@@ -33,7 +34,7 @@ pub const NUS_SERVICE_UUID_LE: [u8; 16] = [
     0x9e, 0xca, 0xdc, 0x24, 0x0e, 0xe5, 0xa9, 0xe0, 0x93, 0xf3, 0xa3, 0xb5, 0x01, 0x00, 0x40, 0x6e,
 ];
 
-#[gatt_server(connections_max = 2)]
+#[gatt_server(connections_max = fw_esp32_common::radio_link::RADIO_LINK_SLOTS)]
 pub struct NusServer {
     pub uart: UartService,
 }
@@ -49,9 +50,6 @@ pub struct UartService {
     #[characteristic(uuid = "6e400003-b5a3-f393-e0a9-e50e24dcca9e", notify)]
     pub tx: Vec<u8, NUS_VALUE_MAX>,
 }
-
-// The server's connection table must match the link mux's slot count.
-const _: () = assert!(fw_esp32_common::radio_link::RADIO_LINK_SLOTS == 2);
 
 /// Has the central on `conn` enabled notifications on TX? Until it has, a
 /// notification is silently skipped by the host stack, so no frame may be

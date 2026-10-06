@@ -539,7 +539,18 @@ impl FakeDeviceCore {
             .clone()
             .with_proto(lp.proto_override.unwrap_or(lpc_wire::WIRE_PROTO_VERSION))
             .with_device_uid(device_uid);
-        let start = HostRuntime::start_with_server(move || {
+        // A radio link is untrusted: the server gates it on a login, and
+        // a login needs the server's entropy (firmware's is the RNG).
+        let untrusted = lp.untrusted_link;
+        let link = if untrusted {
+            fw_host::Link {
+                id: fw_host::LinkId::new(1),
+                trust: fw_host::LinkTrust::Untrusted,
+            }
+        } else {
+            fw_host::Link::PRIMARY
+        };
+        let start = HostRuntime::start_with_server_on(link, move || {
             let fs = LpFsMemory::new();
             for (relative, bytes) in &files {
                 let path = format!("{project_dir}/{relative}");
@@ -566,6 +577,9 @@ impl FakeDeviceCore {
             let mut server =
                 create_memory_server_on_board(fs, hello_identity, board_manifest.as_deref());
             server.set_fs_boot_state(fs_boot_state);
+            if untrusted {
+                server.set_entropy_source(Some(fake_entropy));
+            }
             if board_id.is_some() {
                 server.set_board_id(board_id);
             }
@@ -1107,6 +1121,20 @@ fn boot_nonce(boot: u32) -> u32 {
     static DEVICES: AtomicUsize = AtomicUsize::new(0);
     let device = DEVICES.fetch_add(1, Ordering::Relaxed) as u32;
     boot.wrapping_mul(0x9E37_79B1) ^ device.wrapping_mul(0x85EB_CA77) ^ 0x5EED_0001
+}
+
+/// The fake's login entropy: a counter-driven xorshift, so every challenge
+/// differs (a reused nonce is a replayable login) and no test is at the
+/// mercy of a clock. Not random, and never on a board.
+fn fake_entropy(out: &mut [u8]) {
+    static STATE: AtomicUsize = AtomicUsize::new(0x2545_F491);
+    for byte in out {
+        let mut x = STATE.fetch_add(0x9E37_79B9, Ordering::Relaxed) as u32;
+        x ^= x << 13;
+        x ^= x >> 17;
+        x ^= x << 5;
+        *byte = x as u8;
+    }
 }
 
 /// The `uid` of a `/.lp/device.json` among `files`, read the way firmware

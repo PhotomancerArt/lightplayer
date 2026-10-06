@@ -9,6 +9,9 @@ pub use host_runtime_error::HostRuntimeError;
 // The root identity-file convention, for embedders that seed the server fs
 // (lpa-link's fake device stamps it so the hello carries the scripted uid).
 pub use lpa_server::DEVICE_IDENTITY_PATH;
+// The link a runtime's client reaches the server as
+// (`HostRuntime::start_with_server_on`).
+pub use lpc_shared::transport::{Link, LinkId, LinkTrust};
 
 // The build's self-description, embedded as a scannable blob (extracted by
 // `lp-cli firmware show` and reported on ServerHello in M4). Target triple
