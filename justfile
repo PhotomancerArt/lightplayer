@@ -3196,7 +3196,7 @@ test-glsl-filetests:
 # Warm ~1s, cold ~47s locally; it runs beside clippy, the Lint job's long
 # pole. See docs/debt/wasm-cloud-check-not-in-just-check.md.
 [parallel]
-check-lint: fmt-check clippy check-wasm-cloud check-lp-link-targets check-lpc-engine-gates check-studio-core-minimal lint-serde-content lint-browser-test-harness lint-classic-capture lint-pcb-export lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-nested-patches lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities lint-red-main-needs lint-tag-next-version lint-web-actions lint-core-action-fields lint-core-test-ops
+check-lint: fmt-check clippy check-wasm-cloud check-lp-link-targets check-lpc-engine-gates check-studio-core-minimal lint-serde-content lint-browser-test-harness lint-classic-capture lint-pcb-export lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-nested-patches lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities lint-red-main-needs lint-tag-next-version lint-release-version-cmp lint-web-actions lint-core-action-fields lint-core-test-ops
 
 [parallel]
 check: check-lint schema-check fw-manifest-check-emu
@@ -3312,6 +3312,12 @@ lint-red-main-needs:
 # own commit, a tagged commit is a no-op, and a lost tag race retries.
 lint-tag-next-version:
     ./scripts/tag-next-version-test.sh
+
+# The order release-firmware.sh marks GitHub's Latest by (`YYYY.MM.DD-N`,
+# numerically, dev versions refused): `-9` before `-10`, dates before
+# counters. Offline, ~0.1 s.
+lint-release-version-cmp:
+    ./scripts/release/test-version-cmp.sh
 
 # The ESP32-C6 machine's boot tests, which need firmware ELFs, plus the M3
 # replays of the committed transcripts.
