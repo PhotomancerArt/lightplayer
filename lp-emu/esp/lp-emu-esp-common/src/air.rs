@@ -56,7 +56,7 @@ use lp_emu_core::sched::Cycles;
 /// Not an address. The medium never looks inside a frame, so it has no idea
 /// what the sender calls itself on the wire; this is only "the first machine"
 /// and "the second machine".
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ParticipantId(pub usize);
 
 impl ParticipantId {

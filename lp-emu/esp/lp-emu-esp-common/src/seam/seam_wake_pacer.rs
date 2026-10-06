@@ -106,6 +106,19 @@ impl WakePacer {
         Tick::Raise
     }
 
+    /// The earliest cycle a raise may go, or `None` while one is waiting for
+    /// the guest (only the guest's swap can free the line). A run loop bounds
+    /// an idle skip by it, so a held raise is not held past its spacing.
+    pub fn earliest_raise(&self) -> Option<Cycles> {
+        if self.outstanding_since.is_some() {
+            return None;
+        }
+        Some(
+            self.last_raise
+                .map_or(0, |at| at.saturating_add(self.config.min_spacing)),
+        )
+    }
+
     /// A raise is waiting for the guest.
     pub fn outstanding(&self) -> bool {
         self.outstanding_since.is_some()
@@ -163,6 +176,16 @@ mod tests {
         assert_eq!(p.tick(999, true, true), Tick::Wait);
         assert_eq!(p.tick(1_000, true, true), Tick::Raise);
         assert!(p.held() >= 2);
+    }
+
+    #[test]
+    fn the_earliest_raise_is_the_spacing_after_the_last_and_none_while_outstanding() {
+        let mut p = pacer(1_000);
+        assert_eq!(p.earliest_raise(), Some(0));
+        p.tick(10, true, true);
+        assert_eq!(p.earliest_raise(), None, "outstanding");
+        p.tick(20, true, false);
+        assert_eq!(p.earliest_raise(), Some(1_010));
     }
 
     #[test]

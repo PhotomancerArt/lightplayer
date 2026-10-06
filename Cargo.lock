@@ -5939,6 +5939,7 @@ dependencies = [
  "lp-emu-jit",
  "lp-emu-validate",
  "lp-riscv-emu",
+ "lp-seam",
  "lp-ws281x",
  "md-5",
  "rustc-demangle",

@@ -461,6 +461,7 @@ pub(super) fn describe(outcome: &Outcome) -> String {
         Outcome::DeepSleep { wake, .. } => {
             format!("guest entered deep sleep ({wake})")
         }
+        Outcome::Seam { why, .. } => format!("a --seams seam cannot engage: {why}"),
     }
 }
 

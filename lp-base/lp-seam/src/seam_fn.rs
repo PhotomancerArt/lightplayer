@@ -99,12 +99,12 @@ macro_rules! seam_fn {
 macro_rules! __seam_fn_common {
     ($name:ident => ($($arg:ident : $ty:ty),*) -> $ret:ty $body:block) => {
         /// This seam's declaration.
-        #[allow(dead_code)]
+        #[allow(dead_code, reason = "not every seam module names its own declaration")]
         pub const DECL: $crate::SeamDecl = $crate::$name::DECL;
 
         /// What the seam does on silicon (and on a host build, directly).
         #[inline(always)]
-        #[allow(clippy::unused_unit)]
+        #[allow(clippy::unused_unit, reason = "a seam with no result is declared `-> ()`")]
         fn silicon($($arg: $ty),*) -> $ret $body
 
         /// The seam function the emulator patches and answers.
@@ -136,7 +136,7 @@ macro_rules! __seam_fn_common {
         /// The call shim (not riscv32): the silicon body, directly.
         #[cfg(not(target_arch = "riscv32"))]
         #[inline(always)]
-        #[allow(clippy::unused_unit)]
+        #[allow(clippy::unused_unit, reason = "a seam with no result is declared `-> ()`")]
         pub fn call($($arg: $ty),*) -> $ret {
             silicon($($arg),*)
         }

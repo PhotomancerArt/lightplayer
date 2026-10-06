@@ -36,12 +36,27 @@ pub async fn run_seam_abi(_spawner: embassy_executor::Spawner) -> ! {
                 break;
             }
             let got = &buf[..n.min(buf.len())];
-            esp_println::println!("[SEAM-ABI] take {n} B: {got:02x?}");
+            esp_println::println!("[SEAM-ABI] take {n} B: {}", Hex(got));
         }
     }
     esp_println::println!("[SEAM-ABI] done");
 
     loop {
         embassy_time::Timer::after(embassy_time::Duration::from_secs(1)).await;
+    }
+}
+
+/// Bytes as lowercase hex pairs, space-separated.
+struct Hex<'a>(&'a [u8]);
+
+impl core::fmt::Display for Hex<'_> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        for (i, b) in self.0.iter().enumerate() {
+            if i > 0 {
+                f.write_str(" ")?;
+            }
+            write!(f, "{b:02x}")?;
+        }
+        Ok(())
     }
 }

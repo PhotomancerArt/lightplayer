@@ -124,6 +124,9 @@ pub mod outcome_code {
     /// The guest wrote itself to sleep (`Outcome::DeepSleep`); the wake
     /// itself is not modelled.
     pub const DEEP_SLEEP: i32 = 7;
+    /// A strict seam request cannot engage (`Outcome::Seam`). A tab asks
+    /// softly (`seams_prefer=`), so a Studio board never sees it.
+    pub const SEAM: i32 = 8;
 }
 
 pub fn code_for(outcome: &Outcome) -> i32 {
@@ -136,6 +139,7 @@ pub fn code_for(outcome: &Outcome) -> i32 {
         Outcome::Breakpoint { .. } => outcome_code::BREAKPOINT,
         Outcome::WallTimeout { .. } => outcome_code::WALL_TIMEOUT,
         Outcome::DeepSleep { .. } => outcome_code::DEEP_SLEEP,
+        Outcome::Seam { .. } => outcome_code::SEAM,
     }
 }
 
