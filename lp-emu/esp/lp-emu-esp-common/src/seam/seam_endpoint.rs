@@ -116,6 +116,21 @@ impl SeamEndpoint {
         out
     }
 
+    /// One whole event, the oldest, if it fits `min(cap, take_cap)`: for a
+    /// seam whose guest takes one message per call (a network frame), where
+    /// [`Self::take`]'s concatenation would lose the boundary. `None` when
+    /// nothing is queued or the oldest does not fit (it stays queued).
+    pub fn take_one(&mut self, cap: usize) -> Option<Vec<u8>> {
+        let cap = cap.min(self.config.take_cap);
+        if self.inbound.front()?.bytes.len() > cap {
+            return None;
+        }
+        let event = self.inbound.pop_front()?;
+        self.taken_events += 1;
+        self.taken_bytes += event.bytes.len() as u64;
+        Some(event.bytes)
+    }
+
     /// Something the guest gave, for a medium to carry.
     pub fn push_outbound(&mut self, event: EndpointEvent) {
         self.outbound.push_back(event);
@@ -201,6 +216,22 @@ mod tests {
         assert_eq!(e.taken_events(), 4);
         assert_eq!(e.taken_bytes(), 12);
         assert_eq!(e.push_inbound(event(9, &[0; 9])), Err(Refused::TooLarge));
+    }
+
+    #[test]
+    fn take_one_keeps_each_events_boundary() {
+        let mut e = endpoint(PacerConfig {
+            take_cap: 8,
+            ..PacerConfig::default()
+        });
+        e.push_inbound(event(1, &[1, 1])).unwrap();
+        e.push_inbound(event(2, &[2, 2, 2])).unwrap();
+        assert_eq!(e.take_one(64), Some(vec![1, 1]), "one event, not two");
+        assert_eq!(e.take_one(2), None, "too small a buffer: it stays queued");
+        assert_eq!(e.inbound_len(), 1);
+        assert_eq!(e.take_one(64), Some(vec![2, 2, 2]));
+        assert_eq!(e.take_one(64), None);
+        assert_eq!((e.taken_events(), e.taken_bytes()), (2, 5));
     }
 
     #[test]
