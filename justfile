@@ -802,9 +802,9 @@ studio-firmware-package-served image=studio_fw_image:
         just studio-firmware-package-target "${build_id}" "{{ image }}"
     done < <(just studio-served-builds)
 
-# Package one served target by its id (`esp32c6-4mb`): the chip's recipe
-# above. `image` is the C6's (`single` or `split`); the release
+# `image` is the C6's (`single` or `split`); the release
 # (`scripts/release/release-firmware.sh`) always asks for `split`.
+# Package one served target by its id (`esp32c6-4mb`) with its chip's recipe.
 studio-firmware-package-target target image=studio_fw_image:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -832,8 +832,11 @@ check-wasm-cloud: install-wasm32-target
 
 # The release bundle — every deploy builds through here — is always the
 # split image with its update files: a Studio that cannot update boards over
-# the air must never ship.
-studio-web-build: install-wasm32-target (studio-firmware-package-served "split")
+# the air must never ship. Its firmware comes from `studio-web-firmware`
+# (below), AFTER dx: a deploy's wasm build then overlaps the release's
+# firmware build instead of waiting on it, and nothing dx builds reads the
+# firmware directory.
+studio-web-build: install-wasm32-target
     #!/usr/bin/env bash
     set -euo pipefail
     just studio-fw-browser-sidecar release
@@ -841,8 +844,48 @@ studio-web-build: install-wasm32-target (studio-firmware-package-served "split")
     echo "Building lpa-studio-web with dx for wasm32 release (stories bundled for the in-app design library)..."
     rm -rf target/dx/lpa-studio-web/release/web/public
     dx build --web -p lpa-studio-web --features stories --release --debug-symbols false
+    just studio-web-firmware
     just studio-web-copy-sidecars release target/dx/lpa-studio-web/release/web/public true
     echo "Artifacts: target/dx/lpa-studio-web/release/web/public/ (index.html, assets/, pkg/, firmware/)"
+
+# Where the release bundle's firmware comes from, by LP_STUDIO_FIRMWARE:
+#
+#   unset or `build`     build it here: `studio-firmware-package-served split`
+#                        (local builds, `studio-web`, the walks)
+#   `release:<version>`  take release v<version>'s own firmware, verified
+#                        (scripts/release/fetch-release-firmware.sh) — the
+#                        deploys, so the bundle flashes exactly the bytes the
+#                        firmware store serves (one build). With
+#                        LP_STUDIO_FIRMWARE_WAIT_SHA set, wait for that
+#                        commit's "Release firmware" run first.
+#
+# Either way it fills target/studio-web-assets/firmware/<target>/ and a split
+# target's update files in target/firmware-parts/<target>/, which
+# `studio-web-copy-sidecars` copies into the bundle.
+# Fill the release bundle's firmware: built here, or a release's (LP_STUDIO_FIRMWARE).
+studio-web-firmware:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    source="${LP_STUDIO_FIRMWARE:-build}"
+    case "${source}" in
+        build)
+            echo "Studio firmware: built here"
+            just studio-firmware-package-served split
+            ;;
+        release:*)
+            version="${source#release:}"
+            echo "Studio firmware: release v${version}"
+            args=("${version}")
+            if [[ -n "${LP_STUDIO_FIRMWARE_WAIT_SHA:-}" ]]; then
+                args+=(--wait-for-sha "${LP_STUDIO_FIRMWARE_WAIT_SHA}")
+            fi
+            scripts/release/fetch-release-firmware.sh "${args[@]}"
+            ;;
+        *)
+            echo "LP_STUDIO_FIRMWARE must be build or release:<version>, not ${source}" >&2
+            exit 1
+            ;;
+    esac
 
 # Build a clean GitHub Pages artifact for Studio.
 studio-web-deploy-dir channel="local" out_dir="target/pages/studio" domain="":

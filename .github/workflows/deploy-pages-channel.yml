@@ -82,6 +82,38 @@ jobs:
           echo "APP_VERSION=${version}" >> "$GITHUB_ENV"
           echo "Deploying app version: ${version}"
 
+      # One build, as deploy-cloud.yml: a TAGGED ref whose release carries
+      # its firmware takes that firmware (`LP_STUDIO_FIRMWARE=release:<v>`,
+      # read by `just studio-web-firmware`; no wait — a beta deploys an
+      # existing release). Anything else builds its own: an untagged ref is
+      # a dev version, which the firmware store never holds, so its own
+      # build is the correct one. The toolchain steps below run only on the
+      # build path.
+      - name: Choose the firmware source
+        if: inputs.channel == 'beta'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          source=build
+          if tagged="$(scripts/print-app-version.sh --require-tag 2>/dev/null)"; then
+            assets="$(gh release view "v${tagged}" --json assets \
+              --jq '.assets[] | select(.state == "uploaded") | .name' 2>/dev/null || true)"
+            source="release:${tagged}"
+            while read -r target; do
+              if ! grep -qxF "${target}.package.json" <<<"${assets}"; then
+                echo "release v${tagged} carries no ${target} package"
+                source=build
+              fi
+            done < <(node -e 'console.log(JSON.parse(require("fs").readFileSync("lp-fw/builds/served.json","utf8")).builds.join("\n"))')
+          else
+            echo "untagged ref: a dev version, never in the firmware store"
+          fi
+          echo "Studio firmware source: ${source}"
+          if [[ "${source}" != build ]]; then
+            echo "LP_STUDIO_FIRMWARE=${source}" >> "$GITHUB_ENV"
+          fi
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -91,6 +123,7 @@ jobs:
       - name: Install Rust targets
         run: |
           rustup target add wasm32-unknown-unknown
+          # The C6 firmware's target; only the build path below uses it.
           rustup target add ${{ env.RISC_V_TARGET }}
           # wasm32-wasip1 is the ESP32-C6 emulator module Studio now ships
           # as a sidecar (`just studio-emu-sidecar`, called by
@@ -104,9 +137,10 @@ jobs:
       # as the retired deploy-studio-pages.yml did (production is fly.io now,
       # via deploy-cloud.yml — read the comment there). Beta-only,
       # matching the studio build step below: the demo channel ships no
-      # firmware.
+      # firmware. And only when the firmware is built here, not taken from
+      # the ref's release (the step above).
       - name: Install Xtensa Rust toolchain
-        if: inputs.channel == 'beta'
+        if: inputs.channel == 'beta' && env.LP_STUDIO_FIRMWARE == ''
         # Referenced as owner/repo/path@main, NOT `./`. This workflow's file
         # comes from the default branch, but its checkout is an arbitrary
         # older ref (workflow_run.head_sha / inputs.ref) — so a `./` local
@@ -153,11 +187,14 @@ jobs:
         run: cargo binstall --no-confirm --locked wasm-bindgen-cli@0.2.114 dioxus-cli@0.7.9
 
       - name: Install espflash (prebuilt)
-        if: inputs.channel == 'beta'
+        if: inputs.channel == 'beta' && env.LP_STUDIO_FIRMWARE == ''
         run: cargo binstall --no-confirm --locked espflash@3.3.0
 
+      # LP_STUDIO_FIRMWARE (set above, or not) picks the bundle's firmware.
       - name: Build beta artifact
         if: inputs.channel == 'beta'
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: just studio-web-deploy-dir beta target/pages/channel beta.lightplayer.app
 
       - name: Smoke-check beta artifact
