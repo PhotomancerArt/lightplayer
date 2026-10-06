@@ -2343,7 +2343,12 @@ jobs:
     # Expected ~15 min: ~1 min setup, ~6 min lp-cli test tree (sccache floor),
     # ~8 min ratchet (release lp-cli + firmware + the profile captures). 30 is
     # a fully cold run with headroom; re-measure before tightening.
-    timeout-minutes: 30
+    # 2026-10-06 (PR #993, stacked on #987 + #989 over #986): with the seams
+    # foundation's emu_seam_led (a split build), OTA and the Wi-Fi tests the
+    # job measured 25 min of test-emu-c6-cli plus ~8 min of ratchet and was
+    # cancelled at 30 with every test passing (runs 37469170395,
+    # 37473996154). 45 is headroom while the job is split, not the fix.
+    timeout-minutes: 45
     needs: detect-changes
     if: needs.detect-changes.outputs.emu_c6 == 'true'
     env:
