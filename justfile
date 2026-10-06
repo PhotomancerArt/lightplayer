@@ -62,6 +62,17 @@ studio_assets_dir := "target/studio-web-assets"
 # prints it; the recipes that package and copy firmware iterate it.
 served_builds_json := "lp-fw/builds/served.json"
 
+# Which C6 image a LOCAL dev Studio packages (`studio-dev`, `studio-dev-emu`,
+# `studio-web-dev-build`, `studio-firmware-package-*` called bare): `single`
+# (the default) links one image — the fast local build, a board running it
+# updates over USB only — and `split` builds the product's split image with
+# its update files, which Studio needs to update a board over the air. Ask
+# for it when testing updates: `LP_FW_IMAGE=split just studio-dev`. The
+# release bundle (`studio-web-build`, every deploy) is ALWAYS split.
+# Measured warm on an M2 Max, 2026-10-06: single 23 s, split 50 s (two link
+# passes, 23 s + 25 s). See lp-fw/builds/README.md.
+studio_fw_image := env("LP_FW_IMAGE", "single")
+
 # Default recipe - show available commands
 default:
     @just --list
@@ -453,13 +464,14 @@ studio-web-copy-sidecars profile out_dir include_firmware="false":
                 echo "  run: just studio-firmware-package-served" >&2
                 exit 1
             fi
-            mkdir -p "{{ out_dir }}/firmware/${build_id}"
-            cp "${firmware_dir}/manifest.json" "{{ out_dir }}/firmware/${build_id}/manifest.json"
-            cp "${firmware_dir}"/*.bin "{{ out_dir }}/firmware/${build_id}/"
+            # The package, and a split package's update files into `ota/`
+            # (OTA M7, DS10) — see the script's header.
+            scripts/studio-copy-firmware.sh "${build_id}" "{{ studio_assets_dir }}/firmware" \
+                "{{ out_dir }}/firmware" target/firmware-parts
         done < <(just studio-served-builds)
     fi
 
-studio-web-dev-build: install-wasm32-target studio-firmware-package-served
+studio-web-dev-build: install-wasm32-target (studio-firmware-package-served studio_fw_image)
     #!/usr/bin/env bash
     set -euo pipefail
     just studio-fw-browser-sidecar debug
@@ -590,7 +602,8 @@ studio-dev-bench:
 #
 # The boards boot the SAME image Studio serves for flashing: this depends on
 # `studio-firmware-package-served`, whose `esp32c6-4mb` build leaves its ELF
-# at target/riscv32imac-unknown-none-elf/release-esp32/fw-esp32c6. Pass a
+# at target/riscv32imac-unknown-none-elf/release-esp32/fw-esp32c6 (a single
+# image unless `LP_FW_IMAGE=split`; see `studio_fw_image`). Pass a
 # different image as the argument to boot c6-a from that instead.
 #
 # The blank boards keep whatever is flashed into them under
@@ -607,7 +620,7 @@ studio-dev-bench:
 # polyfilled `navigator.serial` grants itself (plan two, notes §8). Those
 # exist for HARDWARE walks (`just studio-dev-bench`, `just serial-grant`) and
 # wiring them in here would be reintroducing a constraint the shim removes.
-studio-dev-emu IMAGE="": install-wasm32-target studio-firmware-package-served
+studio-dev-emu IMAGE="": install-wasm32-target (studio-firmware-package-served studio_fw_image)
     #!/usr/bin/env bash
     set -euo pipefail
     image="{{ IMAGE }}"
@@ -673,7 +686,7 @@ studio-dev-emu IMAGE="": install-wasm32-target studio-firmware-package-served
 wire-tap-stat tap *args:
     python3 scripts/wire-tap/tapstat.py {{ tap }} {{ args }}
 
-studio-dev: install-wasm32-target studio-firmware-package-served
+studio-dev: install-wasm32-target (studio-firmware-package-served studio_fw_image)
     #!/usr/bin/env bash
     set -euo pipefail
     just studio-fw-browser-sidecar debug
@@ -702,10 +715,9 @@ studio-dev: install-wasm32-target studio-firmware-package-served
         # fresh hash pair and the script sweeps the stale one it replaces.
         scripts/sync-engine-sidecar.sh "${sidecar_dir}" "${public_dir}/pkg"
         for build_id in "${served_builds[@]}"; do
-            firmware_dir="{{ studio_assets_dir }}/firmware/${build_id}"
-            mkdir -p "${public_dir}/firmware/${build_id}"
-            cp "${firmware_dir}/manifest.json" "${public_dir}/firmware/${build_id}/manifest.json"
-            cp "${firmware_dir}"/*.bin "${public_dir}/firmware/${build_id}/"
+            # The package, and a split package's update files (`ota/`).
+            scripts/studio-copy-firmware.sh "${build_id}" "{{ studio_assets_dir }}/firmware" \
+                "${public_dir}/firmware" target/firmware-parts
         done
         # Host settings layer (P4): machine-level settings become the app's
         # dev-settings.json (fetched at boot; 404 => no host layer). Edits
@@ -738,8 +750,22 @@ studio-served-builds:
 # (lp-fw/builds/<id>.json) and EXTRACTS the manifest core from the image it
 # just built — there is no hand-written feature list or wireProto `sed` any
 # more. Output: target/studio-web-assets/firmware/<id>/.
-studio-firmware-package-esp32c6: install-rv32-target
-    cargo run -p lp-cli -- firmware package esp32c6-4mb
+#
+# The C6: `image=single` (the default, `studio_fw_image`) is the fast local
+# build, one linked image (`--single-image`); `image=split` is the product's
+# split image and its update files in target/firmware-parts/esp32c6-4mb/ —
+# what a Studio needs to update a board over the air.
+studio-firmware-package-esp32c6 image=studio_fw_image: install-rv32-target
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "{{ image }}" in
+        single) cargo run -p lp-cli -- firmware package esp32c6-4mb --single-image ;;
+        split) cargo run -p lp-cli -- firmware package esp32c6-4mb ;;
+        *)
+            echo "studio-firmware-package-esp32c6: image must be single or split, not {{ image }}" >&2
+            exit 1
+            ;;
+    esac
 
 # The S3 sibling. lp-cli runs cargo in the crate dir so `rust-toolchain.toml`
 # selects Espressif's fork, but the fork's GNU binutils must already be on
@@ -768,12 +794,13 @@ studio-firmware-package-esp32v3:
 # that quietly omitted an image would offer that board in the provisioning
 # picker and 404 at flash time, and the hardware walk runs against
 # `studio-dev`. Missing Xtensa toolchain? `_xt-gcc-dir` says how to fix it.
-studio-firmware-package-served:
+# `image` is the C6's (`single` or `split`, above).
+studio-firmware-package-served image=studio_fw_image:
     #!/usr/bin/env bash
     set -euo pipefail
     while read -r build_id; do
         case "${build_id}" in
-            esp32c6-*) just studio-firmware-package-esp32c6 ;;
+            esp32c6-*) just studio-firmware-package-esp32c6 "{{ image }}" ;;
             esp32s3-*) just studio-firmware-package-esp32s3 ;;
             esp32v3-*) just studio-firmware-package-esp32v3 ;;
             *)
@@ -795,7 +822,10 @@ check-wasm-cloud: install-wasm32-target
     cargo check -p lpa-cloud-client --no-default-features --target {{ wasm32_target }}
     cargo check -p lpa-firmware-store --target {{ wasm32_target }}
 
-studio-web-build: install-wasm32-target studio-firmware-package-served
+# The release bundle — every deploy builds through here — is always the
+# split image with its update files: a Studio that cannot update boards over
+# the air must never ship.
+studio-web-build: install-wasm32-target (studio-firmware-package-served "split")
     #!/usr/bin/env bash
     set -euo pipefail
     just studio-fw-browser-sidecar release

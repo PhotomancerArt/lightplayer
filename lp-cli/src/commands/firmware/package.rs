@@ -31,7 +31,12 @@ pub const DEFAULT_OUT_ROOT: &str = "target/studio-web-assets/firmware";
 
 pub fn handle_package(args: PackageArgs) -> Result<()> {
     let repo_root = find_repo_root()?;
-    let def = load_build_def(&repo_root, &args.id)?;
+    let mut def = load_build_def(&repo_root, &args.id)?;
+    if args.single_image {
+        // The fast local build: one linked image, no OTA files (see
+        // `PackageArgs::single_image`).
+        def.split = false;
+    }
 
     if !args.no_build {
         build_firmware(&repo_root, &def)?;

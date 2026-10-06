@@ -54,6 +54,13 @@ pub struct ListArgs {
 pub struct BuildArgs {
     /// Build definition id (see `lp-cli firmware list`).
     pub id: String,
+
+    /// Build a split def (`"split": true`) as ONE linked image instead:
+    /// one link pass, no loader, no boot records, no OTA files — a board
+    /// running it updates over USB only. The fast local build
+    /// (`lp-fw/builds/README.md`); releases and deploys never pass it.
+    #[arg(long)]
+    pub single_image: bool,
 }
 
 #[derive(Debug, Args)]
@@ -69,6 +76,13 @@ pub struct PackageArgs {
     /// Package an already-built ELF instead of running cargo first.
     #[arg(long)]
     pub no_build: bool,
+
+    /// Build a split def (`"split": true`) as ONE linked image instead:
+    /// one link pass, no loader, no boot records, no OTA files — a board
+    /// running it updates over USB only. The fast local build
+    /// (`lp-fw/builds/README.md`); releases and deploys never pass it.
+    #[arg(long)]
+    pub single_image: bool,
 }
 
 #[derive(Debug, Args)]
