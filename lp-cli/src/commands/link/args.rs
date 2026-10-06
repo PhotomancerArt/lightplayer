@@ -45,8 +45,18 @@ pub enum LinkSubcommand {
     /// silicon half of `lp-cli validate`'s link host; the emulated half is
     /// `lp-cli emu run --host-link`, and both write the same lines.
     ///
-    /// Targets: a serial device, or `tcp://host:port` (an emulated board's
-    /// link, `lp-cli emu run --link`).
+    /// Targets: a serial device, `tcp://host:port` (an emulated board's
+    /// link, `lp-cli emu run --link`), or `blepipe:<port>` — a board's
+    /// Bluetooth link, through `spikes/ble-lab/pipe.html`, a browser page
+    /// that holds the GATT connection and moves frames to and from
+    /// `ws://127.0.0.1:<port>` (each connection a new link; window 16,
+    /// `--ota-ahead` 4; with `--ota-password`, a running engine is logged
+    /// in to first). The runbook is `spikes/ble-lab/README.md`, "Updates
+    /// over Bluetooth":
+    ///
+    ///   lp-cli link capture blepipe:5599 --console ble.txt --seconds 900 \
+    ///       --ota-offer target/ota-ble/y/ota --ota-password '…' \
+    ///       --exit-on '[host-ota] done:'
     ///
     /// `--request` sends a client request once the board has said hello:
     /// the desk's way to ask a board something with nothing else on its
@@ -167,7 +177,7 @@ pub struct RttArgs {
 
 #[derive(Debug, Args)]
 pub struct CaptureArgs {
-    /// A serial device, or `tcp://host:port`.
+    /// A serial device, `tcp://host:port`, or `blepipe:<port>`.
     pub target: String,
 
     /// Write the console here, a line at a time.
@@ -199,7 +209,8 @@ pub struct CaptureArgs {
 
     /// An over-the-air update on the link's channel 3. The port is reopened
     /// when it drops: a board's USB goes away on every reset an update
-    /// makes, and each reopen is a new link session.
+    /// makes, and each reopen is a new link session (on `blepipe:`, each
+    /// Bluetooth connection the page makes is).
     #[command(flatten)]
     pub ota: crate::commands::ota_host::OtaArgs,
 }

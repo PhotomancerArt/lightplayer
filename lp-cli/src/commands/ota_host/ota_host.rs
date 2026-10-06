@@ -2,7 +2,8 @@
 //! effects resolved the way `lp-cli` can.
 //!
 //! The caller owns the link (an emulated board's `WireLinkPort` in
-//! `emu run --host-link`, a serial port's in `link capture`) and tells this
+//! `emu run --host-link`, a serial port's or a Bluetooth pipe's in
+//! `link capture`) and tells this
 //! what happened on it: the link came up or went down, a channel-3 message
 //! arrived, time passed. This answers with channel-3 messages to send
 //! ([`OtaHost::next_outgoing`]) and console lines to print, each prefixed
@@ -56,15 +57,23 @@ pub struct OtaHost {
 }
 
 impl OtaHost {
-    /// The host `args` describes, or `None` without `--ota-offer`.
+    /// The host `args` describes, or `None` without `--ota-offer`, serving
+    /// one chunk per request unless `--ota-ahead` says otherwise (USB,
+    /// serial and tcp: [`ServeConfig::USB`]).
     pub fn from_args(args: &OtaArgs) -> Result<Option<Self>> {
+        Self::from_args_over(args, ServeConfig::USB)
+    }
+
+    /// [`Self::from_args`] on a link whose own serving default is `serve`
+    /// ([`ServeConfig::BLE`] on a Bluetooth pipe); `--ota-ahead` still wins.
+    pub fn from_args_over(args: &OtaArgs, serve: ServeConfig) -> Result<Option<Self>> {
         let Some(dir) = &args.ota_offer else {
             return Ok(None);
         };
         let (release, build) = load_offer(dir, args.ota_no_z)?;
         let config = DriverConfig {
             serve: ServeConfig {
-                ahead: args.ota_ahead.unwrap_or(ServeConfig::USB.ahead).max(1),
+                ahead: args.ota_ahead.unwrap_or(serve.ahead).max(1),
             },
             // An offer on the command line is the press: install it. With
             // `--ota-heal-only` nothing is pressed, and an offered update
