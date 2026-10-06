@@ -376,11 +376,9 @@ impl ProjectManager {
             "/{}",
             self.projects_base_dir.as_str().trim_start_matches('/')
         ));
-        let entries = fs
-            .list_dir(dir.as_path(), false)
-            .map_err(|e| {
-                ServerError::Filesystem(format!("Failed to read projects directory: {e}"))
-            })?;
+        let entries = fs.list_dir(dir.as_path(), false).map_err(|e| {
+            ServerError::Filesystem(format!("Failed to read projects directory: {e}"))
+        })?;
 
         let mut projects = Vec::new();
         for entry in entries {
