@@ -1,4 +1,12 @@
 //! ESP-NOW-backed radio hardware driver.
+//!
+//! The radio's bring-up is [`crate::hardware::radio_hub`]'s: this driver
+//! takes the ESP-NOW interface from it. With the station in the image
+//! (feature `wifi`) the Radio node rule holds here: while the board is set
+//! to use Wi-Fi the endpoint reports unavailable, and an open device answers
+//! every send and drain with the same words
+//! (`fw_esp32_common::net::radio_rule`), so the node shows why and the rest
+//! of the project runs.
 
 extern crate alloc;
 
@@ -11,8 +19,8 @@ use alloc::vec::Vec;
 use core::cell::RefCell;
 use lp_collection::{VecMap, VecSet};
 
-use crate::hardware::espnow_controller_config::espnow_controller_config;
 use esp_hal::efuse::{InterfaceMacAddress, interface_mac_address};
+#[cfg(fw_harness)]
 use esp_hal::peripherals::WIFI;
 use esp_radio::esp_now::{
     BROADCAST_ADDRESS, EspNow, EspNowError, EspNowManager, EspNowReceiver, EspNowSender,
@@ -36,8 +44,9 @@ const SEEN_RING_LEN: usize = 32;
 pub struct Esp32EspNowRadioDriver {
     registry: Rc<HwRegistry>,
     // Keep the controller alive: dropping it deinitializes Wi-Fi/ESP-NOW and
-    // invalidates the `'static` interface handed to the open device.
-    _controller: WifiController<'static>,
+    // invalidates the `'static` interface handed to the open device. `None`
+    // when the station owns it (feature `wifi`).
+    _controller: Option<WifiController<'static>>,
     // The single ESP-NOW interface, taken (and `split` into sender/receiver) the
     // first time the endpoint is opened. The hardware registry lease enforces
     // exclusive access; this only exists because `split` consumes the interface.
@@ -48,6 +57,9 @@ pub struct Esp32EspNowRadioDriver {
 }
 
 impl Esp32EspNowRadioDriver {
+    /// The driver with a radio of its own (the ESP-NOW harnesses): it
+    /// brings the radio up and keeps the controller.
+    #[cfg(fw_harness)]
     pub fn new(
         registry: Rc<HwRegistry>,
         wifi: WIFI<'static>,
@@ -55,21 +67,30 @@ impl Esp32EspNowRadioDriver {
         Self::with_channel(registry, wifi, DEFAULT_ESPNOW_CHANNEL)
     }
 
+    #[cfg(fw_harness)]
     pub fn with_channel(
         registry: Rc<HwRegistry>,
         wifi: WIFI<'static>,
         default_channel: u8,
     ) -> Result<Self, HardwareEndpointError> {
         validate_channel(default_channel)?;
-        let (controller, interfaces) = esp_radio::wifi::new(wifi, espnow_controller_config())
-            .map_err(|error| HardwareEndpointError::Other {
-                message: format!("ESP-NOW Wi-Fi init failed: {error:?}"),
-            })?;
+        let parts = crate::hardware::radio_hub::bring_up(wifi)?;
+        Self::from_parts(registry, parts.esp_now, Some(parts.controller), default_channel)
+    }
 
+    /// The driver over an ESP-NOW interface [`crate::hardware::radio_hub`]
+    /// brought up. `controller` is kept alive here when no station owns it.
+    pub fn from_parts(
+        registry: Rc<HwRegistry>,
+        esp_now: EspNow<'static>,
+        controller: Option<WifiController<'static>>,
+        default_channel: u8,
+    ) -> Result<Self, HardwareEndpointError> {
+        validate_channel(default_channel)?;
         Ok(Self {
             registry,
             _controller: controller,
-            esp_now: RefCell::new(Some(interfaces.esp_now)),
+            esp_now: RefCell::new(Some(esp_now)),
             address: HwAddress::radio(0),
             device_id: station_device_id(),
             default_channel,
@@ -89,7 +110,11 @@ impl Esp32EspNowRadioDriver {
     }
 
     fn endpoint_status(&self) -> HwEndpointStatus {
-        self.registry.endpoint_status_for(&self.address)
+        let status = self.registry.endpoint_status_for(&self.address);
+        #[cfg(feature = "wifi")]
+        let status =
+            fw_esp32_common::net::radio_rule::radio_endpoint_status(crate::net::uses_wifi(), status);
+        status
     }
 }
 
@@ -306,6 +331,7 @@ impl RadioDevice for Esp32EspNowRadioDevice {
         kind: RadioMessageKind,
         payload: &[u8],
     ) -> Result<(), HardwareEndpointError> {
+        radio_rule_holds()?;
         let event_id = self.next_event_id();
         let message = RadioMessage::new(self.device_id, event_id, channel, kind, payload).map_err(
             |error| HardwareEndpointError::UnsupportedConfig {
@@ -326,6 +352,7 @@ impl RadioDevice for Esp32EspNowRadioDevice {
         channel: RadioChannelId,
         out: &mut Vec<RadioMessage>,
     ) -> Result<RadioDrainReport, HardwareEndpointError> {
+        radio_rule_holds()?;
         self.pull_received();
         let Some(queue) = self.queues.get_mut(&channel) else {
             return Ok(RadioDrainReport::empty());
@@ -431,6 +458,19 @@ impl SeenRing {
         self.next = (self.next + 1) % SEEN_RING_LEN;
         true
     }
+}
+
+/// `Err` with the rule's words while the board is set to use Wi-Fi: the
+/// open device keeps its interface (it opens once per boot), so the Radio
+/// comes back the moment Wi-Fi is turned off.
+fn radio_rule_holds() -> Result<(), HardwareEndpointError> {
+    #[cfg(feature = "wifi")]
+    if crate::net::uses_wifi() {
+        return Err(fw_esp32_common::net::radio_rule::radio_off_error(
+            HwEndpointId::for_driver_spec(DRIVER_ID, &endpoint_spec()),
+        ));
+    }
+    Ok(())
 }
 
 fn station_device_id() -> RadioDeviceId {

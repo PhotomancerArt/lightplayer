@@ -15,9 +15,12 @@
 //! answer is held to.
 
 pub mod join_choice;
+pub mod mdns;
 pub mod net_frame_device;
+pub mod radio_rule;
 pub mod scan_cache;
 pub mod station_backoff;
+pub mod station_board;
 pub mod station_control;
 pub mod station_policy;
 pub mod station_settings;
@@ -26,6 +29,7 @@ pub use join_choice::{JoinChoice, choose};
 pub use net_frame_device::{NetFrameDevice, Unplugged};
 pub use scan_cache::ScanCache;
 pub use station_backoff::StationBackoff;
+pub use station_board::StationBoard;
 pub use station_control::{ConnectOutcome, StationControl};
 pub use station_policy::{StationAction, StationEvent, StationPolicy};
 pub use station_settings::{SavedNetwork, StationSettings, secret_tag};

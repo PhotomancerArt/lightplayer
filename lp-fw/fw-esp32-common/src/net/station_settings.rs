@@ -29,6 +29,24 @@ pub struct SavedNetwork {
 }
 
 impl StationSettings {
+    /// What the policy may know of `file`: everything but the passwords,
+    /// each replaced by its [`secret_tag`].
+    #[must_use]
+    pub fn from_file(file: &lpc_access::NetworkFile) -> Self {
+        Self {
+            wifi: file.wifi,
+            networks: file
+                .networks
+                .iter()
+                .map(|network| SavedNetwork {
+                    ssid: network.ssid.clone(),
+                    hidden: network.hidden,
+                    secret_tag: secret_tag(&network.password),
+                })
+                .collect(),
+        }
+    }
+
     /// "Set to use Wi-Fi" (plan Q2): the switch is on **and** at least one
     /// network is saved. While it holds the Radio node is off, so the
     /// station may scan and hop channels; with nothing saved the station

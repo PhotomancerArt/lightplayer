@@ -4138,12 +4138,16 @@ dependencies = [
  "lp-recovery",
  "lpa-client",
  "lpa-server",
+ "lpc-access",
  "lpc-hardware",
  "lpc-model",
  "lpc-shared",
  "lpc-wire",
  "lpfs",
  "ser-write-json",
+ "sha1",
+ "simple-dns",
+ "tungstenite 0.28.0",
 ]
 
 [[package]]
@@ -4189,6 +4193,7 @@ dependencies = [
  "lp-shader",
  "lp-ws281x",
  "lpa-server",
+ "lpc-access",
  "lpc-hardware",
  "lpc-model",
  "lpc-shared",
@@ -9787,6 +9792,15 @@ name = "simdutf8"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
+
+[[package]]
+name = "simple-dns"
+version = "0.9.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dee851d0e5e7af3721faea1843e8015e820a234f81fda3dea9247e15bac9a86a"
+dependencies = [
+ "bitflags 2.11.0",
+]
 
 [[package]]
 name = "siphasher"

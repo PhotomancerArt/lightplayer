@@ -33,7 +33,9 @@ pub enum ConnectOutcome {
 /// What an implementation must do to be equivalent to the radio:
 ///
 /// - [`Self::scan`] listens on 2.4 GHz and answers every network heard with
-///   a name (hidden ones omitted), any order, about two seconds later;
+///   a name (hidden ones omitted), any order, about two seconds later — or
+///   `None` when the radio gave no answer, never an empty list in its place
+///   (an empty list says the radio listened and heard nothing);
 /// - [`Self::connect`] associates with `ssid` using `password` (empty for
 ///   an open network) and resolves once the attempt is decided; on
 ///   [`ConnectOutcome::Associated`] the frame device's link goes up;
@@ -44,7 +46,7 @@ pub enum ConnectOutcome {
 /// - [`Self::rssi`] is the associated network's signal in dBm.
 pub trait StationControl {
     /// Listen for networks.
-    fn scan(&mut self) -> impl Future<Output = Vec<HeardNetwork>>;
+    fn scan(&mut self) -> impl Future<Output = Option<Vec<HeardNetwork>>>;
 
     /// Try to join `ssid`.
     fn connect(&mut self, ssid: &str, password: &str) -> impl Future<Output = ConnectOutcome>;

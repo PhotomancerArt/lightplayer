@@ -62,10 +62,13 @@ pub type LastAttemptProbe = fn(&str) -> Option<lpc_wire::LastAttempt>;
 
 /// Embedder-supplied "the network settings changed" notice, called after a
 /// `NetworkAdd`, `NetworkForget` or `NetworkSet` is answered with a status
-/// (not an error), so the station re-reads `/.lp/network.json`. The station
-/// works out what changed itself (a just-added network, or a changed
-/// password, is tried at once). Unset on hosts.
-pub type NetworkChanged = fn();
+/// (not an error), with the network file as it now stands. The server reads
+/// it off its own filesystem, on its own thread, so a station on another
+/// thread never touches the filesystem; it works out what changed itself
+/// (a just-added network, or a changed password, is tried at once). The
+/// file holds the passwords: the embedder keeps it in RAM for the station
+/// and never logs it. Unset on hosts.
+pub type NetworkChanged = fn(&lpc_access::NetworkFile);
 
 /// Embedder-supplied "restart this device now" action, backing
 /// [`lpc_wire::ClientRequest::Reboot`].
@@ -1272,7 +1275,7 @@ impl LpServer {
             }
             if changes {
                 if let Some(notice) = self.network_changed {
-                    notice();
+                    notice(&network_store::read_network_file(&*self.base_fs));
                 }
             }
         }

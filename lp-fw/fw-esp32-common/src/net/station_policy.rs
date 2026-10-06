@@ -191,6 +191,12 @@ impl StationPolicy {
             .map(|(_, last)| *last)
     }
 
+    /// Every saved network's last attempt since start, by name.
+    #[must_use]
+    pub fn attempts(&self) -> &[(String, LastAttempt)] {
+        &self.last
+    }
+
     /// When the policy next needs a [`StationEvent::Tick`]; `None` while it
     /// only waits on the radio or the settings.
     #[must_use]

@@ -305,14 +305,16 @@ fn each_networks_last_attempt_comes_from_the_probe() {
     assert_eq!(status.network(SECOND_SSID).unwrap().last, None);
 }
 
-/// Every change the board answers with a status tells the station to read
-/// the file again; a read, a scan and a refused change do not.
+/// Every change the board answers with a status hands the station the file
+/// as it now stands; a read, a scan and a refused change do not.
 #[test]
 fn a_change_tells_the_station_and_a_read_does_not() {
     use core::sync::atomic::{AtomicU32, Ordering};
     static TOLD: AtomicU32 = AtomicU32::new(0);
-    fn notice() {
+    static SAVED: AtomicU32 = AtomicU32::new(0);
+    fn notice(file: &NetworkFile) {
         TOLD.fetch_add(1, Ordering::Relaxed);
+        SAVED.store(file.networks.len() as u32, Ordering::Relaxed);
     }
     let mut rig = Rig::new();
     rig.server.set_network_changed(Some(notice));
@@ -321,6 +323,7 @@ fn a_change_tells_the_station_and_a_read_does_not() {
     assert_eq!(TOLD.load(Ordering::Relaxed), 0, "reads tell nothing");
     rig.add(USB, SSID, PASSWORD);
     assert_eq!(TOLD.load(Ordering::Relaxed), 1);
+    assert_eq!(SAVED.load(Ordering::Relaxed), 1, "the file as written");
     rig.request(USB, switches(Some(false), None));
     rig.request(USB, forget(SSID));
     assert_eq!(TOLD.load(Ordering::Relaxed), 3);
