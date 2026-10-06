@@ -12,7 +12,8 @@
 //! - `detail` is the `Debug` rendering cut at [`COMMAND_DETAIL_LIMIT`]
 //!   characters (the formatter stops writing there, so a large payload is
 //!   never rendered in full just to be thrown away), and EMPTY for the
-//!   commands that can carry a secret (settings, access);
+//!   commands that can carry a secret (settings, access) or concern one
+//!   (network);
 //! - the chatty inputs that already have their own record are skipped:
 //!   refresh ticks (a timer, not an action), device link events (mirrored
 //!   one for one by the device journal), and streamed agent events.
@@ -56,6 +57,13 @@ pub fn summarize_command(command: &StudioCommand) -> Option<(String, String)> {
         ),
         StudioCommand::Access(access) => (
             format!("Access/{}", variant_of(&bounded_debug(access))),
+            String::new(),
+        ),
+        // No network command carries a password, but its name is all a
+        // timeline needs, and it keeps the rule simple: device secrets'
+        // commands say only what they are.
+        StudioCommand::Network(network) => (
+            format!("Network/{}", variant_of(&bounded_debug(network))),
             String::new(),
         ),
         StudioCommand::Agent(feedback) => (

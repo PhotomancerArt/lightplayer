@@ -75,6 +75,32 @@
 //!    revision come from [`EfuseIdentity`], defaulting to the desk board.
 //! 7. **The reset cause is asserted as POWERON.** Nothing consulted a PMU
 //!    register to decide it.
+//!
+//! # A direct load over a chip that already holds its image
+//!
+//! [`StageMode::Verify`] (`Esp32C6Builder::flash_holds_image`, `lp-cli emu
+//! run --elf <app> --over <merged image>`) is the same direct load with one
+//! difference: the flash chip was given a **whole merged image** — what a
+//! flasher wrote — and nothing is written into it. The app's flash-resident
+//! sections are *compared* with the bytes already there at `factory +
+//! (vaddr - 0x4200_0000)` ([`FlashStaging::mismatched_bytes`] counts any
+//! that differ; section by section, because an ESP image packs a segment's
+//! sections apart and fills the gap with its own headers), the cache MMU is programmed for their pages exactly as
+//! [`StageMode::Write`] would, and the mask ROM's own window segment is not
+//! staged at all (a ROM-up boot has none either). The partition table is
+//! the image's own; none is staged.
+//!
+//! It exists for an app that is itself a loader — it reads flash, maps more
+//! of it and copies code into RAM before jumping — so it lands in the state
+//! the second-stage bootloader leaves and then does the rest as guest code,
+//! the way it does after a ROM-up boot. The cache MMU's page size is the
+//! bootloader's choice too, so the caller states it
+//! (`Esp32C6Builder::mmu_page_len`; the chip resets to 64 KiB). Unlike the
+//! ROM-up path's ROM and bootloader, that loader is the caller's own code,
+//! so the block cache and the translated core stay on and it is held to the
+//! `fence.i` contract like any app (`--strict-bus` reports whether it kept
+//! it). Items 1–7 above apply unchanged, except that item 1's table is the
+//! image's.
 
 use lp_emu_esp_common::{ElfImage, ResetScope, ResetSource, SocBus, Watchdog};
 use lp_riscv_emu::mach::{MachineHart, csr};
@@ -190,6 +216,19 @@ pub enum ResetCause {
     /// `0x15` — the serial bridge asserted `chip_rst`. What espflash's
     /// `--after hard-reset` and M6's `reset` control command do.
     UsbUartHpSys,
+    /// `0x3` — the guest's own software reset of the HP system: a store
+    /// with `LP_AON.sys_cfg.hpsys_sw_reset` (bit 31) set, which is the mask
+    /// ROM's `software_reset` and so esp-hal's `software_reset()`.
+    ///
+    /// The evidence for the code, two sources that agree: the ROM's own
+    /// name table above (index 3 is `LP_SW_HPSYS`), and esp-hal 1.1.1's
+    /// `SocResetReason::CoreSw = 0x03` for this chip
+    /// (`rtc_cntl/rtc/esp32c6.rs`, "Software resets the digital core"),
+    /// which the firmware's `reset_cause_map` reads as `SoftwareReset`.
+    /// The ESP32-C6 TRM's reset-source table was not at hand when this was
+    /// modelled (2026-10-04), so the TRM is not cited; if it ever disagrees,
+    /// the ROM table is what a board's banner prints.
+    LpSwHpSys,
 }
 
 impl ResetCause {
@@ -207,6 +246,7 @@ impl ResetCause {
             ResetCause::LpWdtSys => 0x10,
             ResetCause::Tg1WdtCpu => 0x11,
             ResetCause::UsbUartHpSys => 0x15,
+            ResetCause::LpSwHpSys => 0x3,
         }
     }
 
@@ -222,6 +262,7 @@ impl ResetCause {
             ResetCause::LpWdtHpSys => "LP_WDT_HPSYS",
             ResetCause::LpWdtCpu => "LP_WDT_CPU",
             ResetCause::UsbUartHpSys => "USB_UART_HPSYS",
+            ResetCause::LpSwHpSys => "LP_SW_HPSYS",
         }
     }
 
@@ -240,6 +281,7 @@ impl ResetCause {
             // domains, which is why the machine answers it with
             // `power_cycle()` rather than `reboot()`.
             ResetSource::PowerOn => ResetCause::PowerOn,
+            ResetSource::Software => ResetCause::LpSwHpSys,
             ResetSource::Watchdog {
                 watchdog: Watchdog::Mwdt(0),
                 scope: ResetScope::Cpu,
@@ -318,6 +360,7 @@ impl ResetCause {
             ResetCause::LpWdtHpSys => "lp-wdt-hpsys",
             ResetCause::LpWdtCpu => "lp-wdt-cpu",
             ResetCause::UsbUartHpSys => "usb-uart",
+            ResetCause::LpSwHpSys => "lp-sw-hpsys",
         }
     }
 }
@@ -473,6 +516,18 @@ pub struct StagedPage {
     pub paddr: u32,
 }
 
+/// Whether a direct load writes the app's flash-resident bytes into the chip,
+/// or checks that the chip already holds them. See the module docs.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum StageMode {
+    /// Write them, and a partition table when the chip has none — what a
+    /// flasher would have done (M4).
+    #[default]
+    Write,
+    /// The chip holds a whole flashed image: write nothing, compare.
+    Verify,
+}
+
 /// What the direct load put into flash.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct FlashStaging {
@@ -485,6 +540,11 @@ pub struct FlashStaging {
     /// Whether [`crate::flash::c6_partition_table_bytes`] was staged at
     /// `0x8000` (false when the chip already held a table).
     pub table_staged: bool,
+    /// Under [`StageMode::Verify`]: bytes of the app's flash-resident
+    /// sections the chip did NOT already hold. Zero is the claim that the
+    /// flashed image and the ELF agree; always zero under
+    /// [`StageMode::Write`].
+    pub mismatched_bytes: u32,
 }
 
 /// Put the flash-resident half of an image into the flash chip and program
@@ -525,6 +585,7 @@ pub fn stage_image_in_flash(
     flash: &FlashHandle,
     mmu: &CacheHandle,
     images: &[&ElfImage],
+    mode: StageMode,
 ) -> FlashStaging {
     let page_len = mmu.lock().unwrap().page_len();
     let mut staging = FlashStaging::default();
@@ -543,16 +604,35 @@ pub fn stage_image_in_flash(
             }
             let paddr = FACTORY_OFFSET + offset;
             let mut chip = flash.lock().unwrap();
-            if !seg.data.is_empty() && chip.stage(paddr, &seg.data) {
-                staging.bytes += seg.data.len() as u32;
-            }
             // The `memsz - filesz` tail is zeroed in the window, so it must
             // be zeroed in flash too — erased flash is `0xff`, and a `.bss`
             // that read as ones would not be a `.bss`.
             let tail = seg.memsz.saturating_sub(seg.data.len() as u32);
-            if tail > 0 {
-                let zeros = vec![0u8; tail as usize];
-                chip.stage(paddr + seg.data.len() as u32, &zeros);
+            match mode {
+                StageMode::Write => {
+                    if !seg.data.is_empty() && chip.stage(paddr, &seg.data) {
+                        staging.bytes += seg.data.len() as u32;
+                    }
+                    if tail > 0 {
+                        let zeros = vec![0u8; tail as usize];
+                        chip.stage(paddr + seg.data.len() as u32, &zeros);
+                    }
+                }
+                StageMode::Verify => {
+                    // Section by section: the segment may span a gap that
+                    // the image tool filled with something else.
+                    for &(at, len) in &image.allocated {
+                        let start = at.max(seg.vaddr);
+                        let end = (at + len).min(seg.vaddr + seg.data.len() as u32);
+                        if start >= end {
+                            continue;
+                        }
+                        let from = (start - seg.vaddr) as usize;
+                        let bytes = &seg.data[from..from + (end - start) as usize];
+                        staging.mismatched_bytes +=
+                            mismatches(chip.bytes(), paddr + from as u32, bytes);
+                    }
+                }
             }
             drop(chip);
 
@@ -571,7 +651,7 @@ pub fn stage_image_in_flash(
     // without one a direct-load run would quietly fall to memory FS. A chip
     // that already holds a table (a `--flash` file that was really flashed)
     // keeps its own — that is the layout being tested.
-    {
+    if mode == StageMode::Write {
         let mut chip = flash.lock().unwrap();
         if !crate::flash::holds_partition_table(chip.bytes()) {
             let table = crate::flash::c6_partition_table_bytes();
@@ -594,6 +674,16 @@ pub fn stage_image_in_flash(
     }
     staging.chip_size = flash.lock().unwrap().len();
     staging
+}
+
+/// How many of `expected`'s bytes the chip does not hold at `at` (a byte
+/// past the chip's end counts as a mismatch).
+fn mismatches(chip: &[u8], at: u32, expected: &[u8]) -> u32 {
+    expected
+        .iter()
+        .enumerate()
+        .filter(|(i, b)| chip.get(at as usize + i) != Some(b))
+        .count() as u32
 }
 
 /// Tell the mask ROM how big the flash chip is, the way the second-stage
@@ -745,6 +835,14 @@ mod tests {
 
         let d = EfuseIdentity::default();
         assert_eq!((d.mac, d.wafer_major, d.wafer_minor), (DESK_MAC, 0, 2));
+    }
+
+    #[test]
+    fn a_verify_counts_the_bytes_the_chip_does_not_hold() {
+        let chip = [1u8, 2, 3, 4];
+        assert_eq!(mismatches(&chip, 1, &[2, 3]), 0);
+        assert_eq!(mismatches(&chip, 1, &[2, 9]), 1);
+        assert_eq!(mismatches(&chip, 3, &[4, 5, 6]), 2, "past the end counts");
     }
 
     #[test]

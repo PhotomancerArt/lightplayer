@@ -35,7 +35,7 @@ use crate::Micros;
 use crate::cobs;
 use crate::crc::CrcKind;
 use crate::deframer::{Deframed, Deframer, IdleFlush};
-use crate::frame::{self, FrameKind, HEADER_LEN, Header, SYN_LEN, SYN_SECURE, SynBody};
+use crate::frame::{self, FrameKind, HEADER_LEN, Header, SYN_SECURE, SynBody};
 
 /// The largest frame payload the sniffer accepts (every preset is below it).
 const MAX_PAYLOAD: usize = 2048;
@@ -258,11 +258,10 @@ impl LinkSniffer {
                 on(SniffEvent::Damaged { dir });
                 return false;
             };
+            // A plain SYN longer than 12 bytes is read by its prefix, as a
+            // plain link reads it (`SynBody::parse`): the rest is an
+            // extension the sniffer, like the link, does not know.
             let secure = flags & SYN_SECURE != 0;
-            if !secure && raw.len() != HEADER_LEN + SYN_LEN + self.crc.len() {
-                on(SniffEvent::Damaged { dir });
-                return false;
-            }
             self.on_syn(dir, syn, secure, on);
             return true;
         }

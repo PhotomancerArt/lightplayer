@@ -81,6 +81,8 @@ fn sim_lens_device_view() -> lpa_studio_core::DeviceView {
             lpa_studio_core::DeviceEscape::Disconnect,
             lpa_studio_core::DeviceEscape::Forget,
         ],
+        update_blocked: None,
+        last_update_outcome: None,
     }
 }
 

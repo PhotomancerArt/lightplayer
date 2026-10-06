@@ -1,7 +1,10 @@
-# S15 "Studio says there's an update. Do it.": the update replaces what is
-# on the board, so it comes as a card Jordan clicks — never the agent's own
-# press, never "type yes". Afterwards the board runs the new firmware and
-# his project again.
+# S15 "Studio says there's an update. Do it.": the bench's board cannot
+# update over the air (it speaks no update channel), so its update is the
+# USB flash, which replaces what is on the board — it comes as a card Jordan
+# clicks, never the agent's own press, never "type yes". (A board that
+# updates over the air is offered a plain, Routine Update instead, which the
+# agent presses itself; only an older version stays a card.) Afterwards the
+# board runs the new firmware and his project again.
 id = "S15"
 name = "s15-jordan-update-firmware"
 summary = "Older firmware → update as a card he clicks, then the new firmware running his project"

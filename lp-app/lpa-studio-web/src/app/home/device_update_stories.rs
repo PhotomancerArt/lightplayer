@@ -1,0 +1,313 @@
+//! Firmware-update stories (the update-states spike, direction C): the
+//! device card in every row of the update table, the editor's device
+//! popover in its four words, and the editor's curtain while the board
+//! updates.
+//!
+//! Every board here is built from core's own update fixtures
+//! ([`UpdateFixture`]): a board manifest as the board reports it, this
+//! Studio's build facts, the card with its Update activity — read through
+//! the same standing, words and offers the controller uses. So a card says
+//! and offers exactly what core decides for that row, and a story cannot
+//! drift from it. The sample board is the spike's: on `2026.10.03-1`, with
+//! this Studio carrying `2026.10.05-2`.
+//!
+//! What to look at, row by row: the firmware line (core's words, the
+//! board's version set in mono) and its bar (lit while an update runs —
+//! quieter when another device runs it); the header chip (the update's
+//! word while it owns the board) and the second identity row (the version
+//! leading, its commit dim); the verb row (only what core offers); and,
+//! where the show has stopped, the picture slot showing the board's own
+//! light with the whole sentence.
+
+use dioxus::prelude::*;
+use lpa_studio_core::{
+    DeviceCardFeedView, DeviceEscape, DeviceFace, DeviceId, DeviceLoadedProject, DeviceStatus,
+    DeviceView, FIRMWARE_NEEDS_USB, FeedLiveness, UiChromeSessionControl, UiChromeSessionStatus,
+    UiDeviceAccess, UiLensReconnecting, UiUnlockOffer, UpdateFixture, UpdateFixtureRow,
+};
+use lpa_studio_web_story_macros::story;
+
+use crate::app::home::device_offer_story_fixtures::{StoryDeviceCard, session_device_tree};
+use crate::app::home::home_gallery_stories::live_card_lamp_frame;
+use crate::app::layout::LinkReconnectingStrip;
+use crate::app::layout::session_control::SessionDevicePanel;
+use crate::core::OffersProvider;
+
+// --- The device card, one row of the table each ---------------------------
+
+#[story(
+    description = "Up to date (information): the firmware line reads \"2026.10.05-2 · up to date\", the header's second row leads with the version and its commit dim, the chip stays Ready, and the only firmware verb is Factory reset."
+)]
+fn device_card_update_up_to_date() -> Element {
+    update_card(UpdateFixtureRow::UpToDate, Link::Usb)
+}
+
+#[story(
+    description = "Update available (information with an offer, not a needs-you): \"2026.10.03-1 → 2026.10.05-2 available\", one plain Update (Routine: one click, no arm), Factory reset at the end. The show keeps running."
+)]
+fn device_card_update_available() -> Element {
+    update_card(UpdateFixtureRow::Available, Link::Usb)
+}
+
+#[story(
+    description = "Update available on a dev-build board: the line names both builds (\"dev 5eb70a7 · Studio has 2026.10.05-2\"), because a dev build has no order against a release, and the offer reads \"Install 2026.10.05-2\" instead of Update."
+)]
+fn device_card_update_available_dev_board() -> Element {
+    update_card(UpdateFixtureRow::AvailableDevBoard, Link::Usb)
+}
+
+#[story(
+    description = "Backing up (progress): the current firmware is read back before a byte is written. The firmware bar is lit at 18%, the chip says Backing up, and Cancel is offered — nothing on the board has changed yet."
+)]
+fn device_card_update_backing_up() -> Element {
+    update_card(UpdateFixtureRow::BackingUp, Link::Usb)
+}
+
+#[story(
+    description = "Updating over USB (progress, the show stopped): the firmware bar lit at 40%, the chip Updating, no verbs (no Cancel once writing starts), and the picture slot shows what the board's own lights show — solid dark yellow — with the whole sentence: \"…Keep the board powered.\""
+)]
+fn device_card_update_updating_usb() -> Element {
+    update_card(UpdateFixtureRow::Updating, Link::Usb)
+}
+
+#[story(
+    description = "Updating over Bluetooth: the same row, its line and sentence naming the link (\"Updating over Bluetooth… 40%\")."
+)]
+fn device_card_update_updating_bluetooth() -> Element {
+    update_card(UpdateFixtureRow::Updating, Link::Bluetooth)
+}
+
+#[story(
+    description = "Finishing an interrupted update (progress, started by Studio on connect with no click): \"Finishing the update… 70%\", the dark-yellow slot saying it was interrupted and this Studio is completing it."
+)]
+fn device_card_update_finishing() -> Element {
+    update_card(UpdateFixtureRow::Finishing, Link::Bluetooth)
+}
+
+#[story(
+    description = "Restoring missing firmware (progress, no click): \"Restoring firmware… 35%\", the chip Restoring firmware, the dark-yellow slot: part of it was missing and this Studio had a copy."
+)]
+fn device_card_update_restoring() -> Element {
+    update_card(UpdateFixtureRow::Restoring, Link::Usb)
+}
+
+#[story(
+    description = "Another device is updating it (progress, someone else's): the bar at 40% in the quieter fill, no verbs, and the dark-yellow slot saying this Studio finishes it if it stops."
+)]
+fn device_card_update_another_device() -> Element {
+    update_card(UpdateFixtureRow::AnotherDevice, Link::Bluetooth)
+}
+
+#[story(
+    description = "Needs one update over USB, plugged in by USB (needs you): the line in the attention tone, and today's USB flash as the way (Update firmware, Lasting: it arms on the first click)."
+)]
+fn device_card_update_needs_usb_once_usb() -> Element {
+    update_card(UpdateFixtureRow::NeedsUsbOnce, Link::Usb)
+}
+
+#[story(
+    description = "Needs one update over USB, reached over Bluetooth: the same line, and nothing to press here — the line says what to do (its hover: update it over USB once, and after that it updates without a cable)."
+)]
+fn device_card_update_needs_usb_once_bluetooth() -> Element {
+    update_card(UpdateFixtureRow::NeedsUsbOnce, Link::Bluetooth)
+}
+
+#[story(
+    description = "Keeps crashing (needs you, the show stopped): the line in the attention tone, the chip Needs firmware, the picture slot dark red with the whole sentence, and two repairs: Reinstall and Other version… (one press when this Studio can get one other version; a pick when it can get more). Factory reset is withdrawn: installing is the repair."
+)]
+fn device_card_update_keeps_crashing() -> Element {
+    update_card(UpdateFixtureRow::KeepsCrashing, Link::Usb)
+}
+
+#[story(
+    description = "Needs a version this Studio can't get (needs you, the show stopped): \"Needs 2026.09.28-4, which Studio can't get\", the dark-red slot saying to connect to the internet or install this Studio's version, and Install 2026.10.05-2 (the install offer with this Studio's version preselected). Factory reset withdrawn."
+)]
+fn device_card_update_cant_get_version() -> Element {
+    update_card(UpdateFixtureRow::CantGetVersion, Link::Usb)
+}
+
+#[story(
+    description = "Rolled back (information): \"Back on 2026.10.03-1 · the update didn't start\". Nothing is offered — the board refuses that build from now on — and the show runs on the old version."
+)]
+fn device_card_update_rolled_back() -> Element {
+    update_card(UpdateFixtureRow::RolledBack, Link::Usb)
+}
+
+#[story(
+    description = "Newer than this Studio (information): \"2026.10.07-4 · newer than this Studio\"; its hover says to reload Studio to catch up. No downgrade is offered."
+)]
+fn device_card_update_newer() -> Element {
+    update_card(UpdateFixtureRow::Newer, Link::Usb)
+}
+
+#[story(
+    description = "Play access only, over Bluetooth: the update is available and said so, but nothing is offered — installing needs the author password, and the device zone's \"Enter a password\" is the way to it."
+)]
+fn device_card_update_play_only() -> Element {
+    update_card(UpdateFixtureRow::PlayOnly, Link::Bluetooth)
+}
+
+// --- The editor's device popover ------------------------------------------
+
+#[story(
+    description = "The editor's device popover on a board that is up to date: the popover's own run word (\"running\") stands, and the stat line states the version: \"esp32c6 · 2026.10.05-2 · <mac>\"."
+)]
+fn device_popover_update_running() -> Element {
+    update_popover(UpdateFixtureRow::UpToDate, UiChromeSessionStatus::Run)
+}
+
+#[story(
+    description = "The device popover with an update on offer: \"running · update available\" in the live tone, and \"esp32c6 · 2026.10.03-1 → 2026.10.05-2 · <mac>\"."
+)]
+fn device_popover_update_available() -> Element {
+    update_popover(UpdateFixtureRow::Available, UiChromeSessionStatus::Run)
+}
+
+#[story(
+    description = "The device popover while the board updates: \"Updating · 40%\" in the working tone."
+)]
+fn device_popover_update_updating() -> Element {
+    update_popover(UpdateFixtureRow::Updating, UiChromeSessionStatus::Run)
+}
+
+#[story(
+    description = "The device popover on a board whose firmware keeps crashing: \"Needs firmware\" in the attention tone, and \"esp32c6 · 2026.10.03-1 keeps crashing · <mac>\"."
+)]
+fn device_popover_update_needs_firmware() -> Element {
+    update_popover(
+        UpdateFixtureRow::KeepsCrashing,
+        UiChromeSessionStatus::Attention,
+    )
+}
+
+// --- The editor's curtain -------------------------------------------------
+
+#[story(
+    description = "The editor's Reconnecting card while its board updates over Bluetooth: the board's link drops and comes back as it resets into the new firmware, and that is the update, not a lost connection — so the card's detail is the update's own line, core's words."
+)]
+fn device_curtain_update_updating() -> Element {
+    let fixture = UpdateFixture::new(UpdateFixtureRow::Updating, porch_lights(Link::Bluetooth));
+    let line = fixture.words().map(|words| words.line).unwrap_or_default();
+    rsx! {
+        section { class: "tw:grid tw:w-[760px] tw:gap-3 tw:p-4",
+            LinkReconnectingStrip { reconnecting: UiLensReconnecting::updating(&line) }
+        }
+    }
+}
+
+// --- Helpers --------------------------------------------------------------
+
+/// The frame the device-card stories use.
+const CARD_FRAME: &str = "tw:grid tw:max-w-[420px] tw:p-3";
+
+/// The link a story's board is reached over.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Link {
+    Usb,
+    Bluetooth,
+}
+
+/// The sample board in `row`, over `link`: its words and its offers both
+/// read by core from the fixture's facts.
+fn update_card(row: UpdateFixtureRow, link: Link) -> Element {
+    let fixture = UpdateFixture::new(row, porch_lights(link));
+    let update = fixture.words();
+    let update_facts = fixture.offer_facts();
+    // A USB board streams its picture to the card; over Bluetooth there is
+    // none (the slot says so).
+    let feed = (link == Link::Usb).then(|| DeviceCardFeedView {
+        frame: Some(live_card_lamp_frame()),
+        frame_age_secs: Some(0.2),
+        engine_fps: Some(43),
+        liveness: FeedLiveness::Live,
+    });
+    // Only the play row tells its access: unlocked with friends, for play.
+    let access = (row == UpdateFixtureRow::PlayOnly).then(|| UiDeviceAccess {
+        over_bluetooth: true,
+        line: Some("Unlocked with friends · play".to_string()),
+        unlock: Some(UiUnlockOffer::PlayOnly),
+        panel: None,
+    });
+    rsx! {
+        div { class: CARD_FRAME,
+            StoryDeviceCard {
+                card: fixture.view.clone(),
+                projects: Vec::new(),
+                examples: Vec::new(),
+                open_uid: Some("dev000000daqf6dvvqz".to_string()),
+                feed,
+                access,
+                update,
+                update_facts,
+                on_action: |_| {},
+            }
+        }
+    }
+}
+
+/// The editor's device popover on the sample board in `row`, over USB.
+fn update_popover(row: UpdateFixtureRow, status: UiChromeSessionStatus) -> Element {
+    let fixture = UpdateFixture::new(row, porch_lights(Link::Usb));
+    let session = UiChromeSessionControl {
+        face: DeviceFace::Wire,
+        key: "device:dev000000daqf6dvvqz".to_string(),
+        device: Some(fixture.view.id),
+        name: fixture.view.title.clone(),
+        board: None,
+        status,
+        stat_line: Some("43 fps".to_string()),
+        update: fixture.session_words(),
+    };
+    let offers = session_device_tree(session.device, &session.name);
+    rsx! {
+        div { class: "tw:p-4",
+            div { class: POPOVER_FRAME,
+                OffersProvider { offers,
+                    SessionDevicePanel { session }
+                }
+            }
+        }
+    }
+}
+
+/// The popover's panel box (the header popover primitive owns it in the
+/// app; a story mounting the panel supplies one).
+const POPOVER_FRAME: &str = "tw:grid tw:w-[min(320px,calc(100vw-24px))] tw:min-w-0 tw:rounded-md tw:border tw:border-border-strong tw:bg-card-subtle tw:text-sm tw:text-muted-foreground tw:shadow-lg";
+
+/// The spike's sample board: Porch lights, a XIAO ESP32-C6 running a
+/// project, on a USB cable or reached over Bluetooth.
+fn porch_lights(link: Link) -> DeviceView {
+    DeviceView {
+        id: DeviceId(7),
+        title: "Porch lights".to_string(),
+        status: DeviceStatus::Ready,
+        state_label: "Ready".to_string(),
+        detail: Some("LightPlayer · seeed/xiao-esp32-c6".to_string()),
+        freshness_label: Some("last heard 1 s ago".to_string()),
+        identity_label: Some("60:55:f9:0a:0b:0c".to_string()),
+        detected_chip: Some("esp32c6".to_string()),
+        board_id: Some("seeed/xiao-esp32-c6".to_string()),
+        firmware_face: lpa_studio_core::DeviceFirmwareFace::LightPlayer {
+            firmware: Some("fw-esp32c6 a41c9e2".to_string()),
+            wire: lpa_studio_core::DeviceWireVersion::Match,
+            age: lpa_studio_core::DeviceFirmwareAge::Unknown,
+        },
+        remembered_firmware: None,
+        degraded: None,
+        engine_fps: Some(43),
+        link_counters: None,
+        loaded_project: DeviceLoadedProject::Running {
+            label: "aurora-drift".to_string(),
+        },
+        can_receive_project: true,
+        can_remove_project: true,
+        activity: None,
+        last_outcome: None,
+        terminal: Vec::new(),
+        terminal_dropped: 0,
+        firmware_blocked: (link == Link::Bluetooth).then(|| FIRMWARE_NEEDS_USB.to_string()),
+        escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
+        update_blocked: None,
+        last_update_outcome: None,
+    }
+}

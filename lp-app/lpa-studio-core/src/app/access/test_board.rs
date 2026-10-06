@@ -7,7 +7,9 @@
 //! it can never refuse anything; this is where login is exercised against a
 //! board that can (plan D19). It answers exactly the requests the access flow
 //! sends — `Hello` (with this link's `auth`), `LoginBegin`/`LoginAnswer`, the
-//! four access requests, and a filesystem write — and refuses anything else
+//! four access requests, the three network requests (the REAL `lpa-server`
+//! network store, with a station knob, [`FakeBoard::set_station`]), and a
+//! filesystem write — and refuses anything else
 //! below edit with `NotPermitted`, the way `lpa-server`'s classifier does.
 //! [`FakeBoard::usb`] is a trusted link to the same board, the way USB is.
 
@@ -17,9 +19,9 @@ use std::collections::VecDeque;
 use std::rc::Rc;
 
 use lpa_client::{ClientIo, LpClient};
-use lpa_server::access_store;
+use lpa_server::{access_store, network_store};
 use lpc_access::{BeginOutcome, DeviceAccessFile, LoginState, OpenTo, SecretEntry, Tier};
-use lpc_wire::server::{FsRequest, FsResponse};
+use lpc_wire::server::{FsRequest, FsResponse, LastAttempt, NetworkScan, StationState};
 use lpc_wire::{
     ClientMessage, ClientRequest, TransportError, WireServerMessage, WireServerMsgBody,
 };
@@ -45,6 +47,13 @@ struct BoardState {
     nonce: u8,
     /// Login answers the board has heard.
     answers: u32,
+    /// What the board's station reports in every network status.
+    station: StationState,
+    /// What its radio hears, the answer to a scan.
+    scan: NetworkScan,
+    /// The station's last attempt at each saved network (RAM only, as on a
+    /// board).
+    last: Vec<(String, LastAttempt)>,
 }
 
 /// One fake board; [`Self::client`] is an untrusted (Bluetooth) link to it
@@ -65,6 +74,9 @@ impl FakeBoard {
                 granted: None,
                 nonce: 1,
                 answers: 0,
+                station: StationState::Unsupported,
+                scan: NetworkScan::Unsupported,
+                last: Vec::new(),
             })),
         }
     }
@@ -130,6 +142,31 @@ impl FakeBoard {
     fn write_store(&self, store: &DeviceAccessFile) {
         access_store::write_device_store(&self.state.borrow().fs, store)
             .expect("the fake board's fs takes the store");
+    }
+
+    /// The network file as the board reads it.
+    pub fn network(&self) -> lpc_access::NetworkFile {
+        network_store::read_network_file(&self.state.borrow().fs)
+    }
+
+    /// What the board's station reports from now on (every M5 image says
+    /// `unsupported`; M6's states are reachable here).
+    pub fn set_station(&self, station: StationState) {
+        self.state.borrow_mut().station = station;
+    }
+
+    /// What the board's radio hears from now on (every M5 image answers
+    /// `unsupported`).
+    pub fn set_scan(&self, scan: NetworkScan) {
+        self.state.borrow_mut().scan = scan;
+    }
+
+    /// The station's last attempt at `ssid`, reported in every status from
+    /// now on.
+    pub fn set_last(&self, ssid: &str, last: LastAttempt) {
+        let mut state = self.state.borrow_mut();
+        state.last.retain(|(saved, _)| saved != ssid);
+        state.last.push((ssid.to_string(), last));
     }
 
     /// Wrong answers already on the board's count (to reach its backoff).
@@ -246,6 +283,44 @@ impl FakeBoardIo {
                     }
                     _ => unreachable!("matched above"),
                 }
+            }
+            request @ (ClientRequest::NetworkStatus
+            | ClientRequest::NetworkScan
+            | ClientRequest::NetworkAdd { .. }
+            | ClientRequest::NetworkForget { .. }
+            | ClientRequest::NetworkSet { .. }) => {
+                if held != Some(Tier::Edit) {
+                    return WireServerMsgBody::NotPermitted { needs: Tier::Edit };
+                }
+                let station = state.station.clone();
+                let mut body = match request {
+                    ClientRequest::NetworkStatus => {
+                        network_store::network_status(&state.fs, station)
+                    }
+                    ClientRequest::NetworkScan => network_store::network_scan(state.scan.clone()),
+                    ClientRequest::NetworkAdd {
+                        ssid,
+                        password,
+                        hidden,
+                    } => network_store::network_add(&state.fs, station, ssid, password, hidden),
+                    ClientRequest::NetworkForget { ssid } => {
+                        network_store::network_forget(&state.fs, station, &ssid)
+                    }
+                    ClientRequest::NetworkSet { wifi, cloud_relay } => {
+                        network_store::network_set(&state.fs, station, wifi, cloud_relay)
+                    }
+                    _ => unreachable!("matched above"),
+                };
+                if let WireServerMsgBody::NetworkStatus(status) = &mut body {
+                    for network in &mut status.networks {
+                        network.last = state
+                            .last
+                            .iter()
+                            .find(|(ssid, _)| *ssid == network.ssid)
+                            .map(|(_, last)| *last);
+                    }
+                }
+                body
             }
             ClientRequest::Filesystem(FsRequest::Write { path, data }) => {
                 if held != Some(Tier::Edit) {

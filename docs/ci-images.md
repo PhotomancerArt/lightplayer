@@ -28,7 +28,7 @@ Unset `LP_CI_IMAGES` and every recipe builds its own images exactly as before.
 
 | job | artifact | what |
 |---|---|---|
-| `Emulator C6 (x64)` | `ci-images-esp32c6` | every tree image the suite built (`tree/<SLUG>/fw-esp32c6`: shipped, no-radio, memfs, the RMT harnesses) and every pinned reference image it booted (`emu-ref/<commit>-<slug>/`: ELF, `merged.bin`, `SHA256SUMS`, `PROVENANCE`) |
+| `Emulator C6 (x64)` | `ci-images-esp32c6` | every tree image the suite built (`tree/<SLUG>/fw-esp32c6`: shipped, no-radio, memfs, the RMT harnesses; `tree/ESP32C6_SERVER_RADIO_SPLIT/`: the shipped split image) and every pinned reference image it booted (`emu-ref/<commit>-<slug>/`: ELF, `merged.bin`, `SHA256SUMS`, `PROVENANCE`) |
 | `Emulator ESP32v3 (x64)` | `ci-images-esp32v3` | the shipped, `rmt-chase` and `frame-dump` ELFs, the merged chip, and the pinned `75486b114` reference ELF + merged chip + its partition table |
 | `Emulator ESP32-S3 (x64)` | `ci-images-esp32s3` | the shipped ELF and the merged 8 MiB chip |
 
@@ -120,11 +120,14 @@ never a firmware source path, so it cannot trip the refusal.
 
 `lp_emu_esp32c6::test_support` reads `LP_EMU_C6_IMAGE_DIR` (set for you by
 `scripts/ci/ci-images.py with esp32c6`): `tree/<SLUG>/fw-esp32c6` for a
-feature-set image, `emu-ref/<commit>-<slug>/{fw-esp32c6,merged.bin}` for a
-reference image. With it set, nothing is built and a missing image **panics**
-rather than skipping — a skip there would be a green run against nothing. The
-explicit per-image variables (`LP_EMU_C6_ELF_<SLUG>`, `LP_EMU_C6_REF_<SLUG>`)
-still win.
+feature-set image, `tree/<SLUG>_SPLIT/{merged.bin,loader.elf,p2.elf,split.json}`
+for a split image (the C6 product image `lp-fw-split` lays out; the shipped
+set's is `tree/ESP32C6_SERVER_RADIO_SPLIT/`), and
+`emu-ref/<commit>-<slug>/{fw-esp32c6,merged.bin}` for a reference image. With
+it set, nothing is built and a missing image **panics** rather than skipping —
+a skip there would be a green run against nothing. The explicit per-image
+variables (`LP_EMU_C6_ELF_<SLUG>`, `LP_EMU_C6_SPLIT_<SLUG>` naming a split
+directory, `LP_EMU_C6_REF_<SLUG>`) still win.
 
 ## Pieces
 

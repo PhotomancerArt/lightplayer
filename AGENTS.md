@@ -84,7 +84,10 @@ just fw-esp32c6-size-check
 ```
 
 This prints the image size and headroom, and pre-merge CI fails any PR that
-drops headroom below 64 KB.
+drops headroom below 64 KB. Since 2026-10-04 it builds the **split image**
+(loader, boot records, core, engine — what the C6 ships) and gates its
+smallest steady-or-update headroom; the four numbers are defined in the
+budget ADR's amendment.
 
 If the binary exceeds available flash:
 
@@ -280,9 +283,11 @@ the app through the same view model and presses the same actions. See
 
 - The wire's "no compatibility" freedom stops at anything **persisted**:
   project.json / package files, the cloud store, stamped device
-  identity, and the two access files (`<project>/.lp/access.json` at
-  `version: 2`, root `/.lp/access.json` at `version: 3` — each its own format with a schema in
-  `schemas/`, outside `PROJECT_FORMAT_VERSION`). Real user data already exists at the current
+  identity, the two access files (`<project>/.lp/access.json` at
+  `version: 2`, root `/.lp/access.json` at `version: 3`) and the device
+  network file (root `/.lp/network.json` at `version: 1`, write-only like
+  the access files) — each its own format with a schema in
+  `schemas/`, outside `PROJECT_FORMAT_VERSION`. Real user data already exists at the current
   `PROJECT_FORMAT_VERSION`, and it does not redeploy in lockstep.
 - **A change to persisted bytes IS a format bump, even when no field is
   added or removed.** The 2026-08-07 uid-format change re-rendered a
@@ -339,12 +344,16 @@ runtime.
 | `lpvm-native`    | LPIR → custom RV32 machine code        | yes              |
 | `lpvm-cranelift` | LPIR → Cranelift → machine code        | yes              |
 | `lp-engine`      | Shader runtime, node graph             | yes              |
-| `lpc-access`     | Access core: secrets, tiers, HMAC login, backoff (sans-IO) | yes |
+| `lpc-access`     | Access core: secrets, tiers, HMAC login, backoff, the device network file and the write-only predicate (sans-IO) | yes |
 | `lp-server`      | Project management, client connections | yes              |
 | `lp-json-pack`   | JSON Pack: a compact binary form of JSON that decodes back to byte-identical JSON text (`lp-base/`, generic; names coded against an injected seed and a per-connection learned table) | yes |
 | `lp-link`        | Sans-IO link layer under the device wire: framing, CRC-32C, channels, selective-repeat ARQ, session handshake (`lp-base/`, generic; one crate on both ends). Runs the product's USB link and the classic's UART0 link (board, host, Studio, tools); BLE/fw-emu are still the pre-lp-link `M!` framing. Optional `secure` feature: Noise NNpsk0 inside the SYN + sealed frames, the key match as the login (`LinkTrust::Keyed`), off on every product link until the Wi-Fi milestones | yes |
 | `lpa-devices`    | Device model: event fold, no IO, no UI | no (host + wasm) |
+| `lpc-update`     | OTA update protocol v1 (channel 3): codec, board manifest, progress record, and the board's sans-IO update session | yes |
+| `lpa-update`     | OTA host side: serving, backup, login client, decision, update driver; feature `pack` = the one packer of encoding 1 | no (host + wasm) |
 | `fw-esp32c6`       | ESP32 firmware                         | yes (bare metal) |
+| `fw-esp32c6-loader` | The C6 split image's RAM-only loader: boots the core a boot record names (standalone crate, own workspace) | yes (bare metal) |
+| `lp-fw-split`    | Host tool: the C6's two-pass split link, its verifier and layout (`tools/`; `docs/adr/2026-10-04-c6-split-link-firmware-loader-and-boot-records.md`) | no (host) |
 | `fw-emu`         | RISC-V emulator firmware (CI)          | yes (bare metal) |
 | `lp-riscv-emu`   | RV32 emulator (host) — in `lp-emu/`    | yes (+std feat)  |
 | `lp-xt-emu`      | Xtensa emulator + machine-mode hart (host) — in `lp-emu/` | yes (+std feat)  |
@@ -693,6 +702,16 @@ the shim, the backing URL and each board, with `detach` / `attach` buttons that
 are the cable. You need **no** WebSerial grant, no `just serial-grant`, no
 bench port and no Chromium policy profile: a polyfilled `navigator.serial`
 grants itself.
+
+Each board's banner row also carries a **D0 power** toggle, **on** by default:
+the switch a switch-mode `PowerButton` reads (`button:local:D0`, e.g. the
+PLAYFUL choker). An emulated pad nobody drives reads low, which that firmware
+takes as "switch off", and with the switch off a `detach` powers the board off
+(`ext1 wake: gpio0 high` deep sleep, state `stopped`) with no wake modelled, so
+nothing short of restarting `emu serve` brings it back. The switch is the
+control verb `pin 0 0|1`; the page re-sends it after every reboot (a restart
+drops outside drives), and `detach` waits for the firmware to have read it.
+Flip it **off** to test the power-off itself. It works the same on `?emu=tab`.
 
 The door admits **one client per board** (a second gets 409), so one Studio tab
 per `emu serve`, and use `?on=` (a different, orthogonal flag) if you want a

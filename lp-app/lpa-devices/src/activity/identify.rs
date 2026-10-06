@@ -152,6 +152,13 @@ impl IdentifyActivity {
             Classification::OlderLightPlayer { .. } => ActivityOutcome::Succeeded {
                 summary: "older LightPlayer firmware, from before this Studio's link".to_string(),
             },
+            Classification::CoreOnly { version, state } => ActivityOutcome::Succeeded {
+                summary: format!(
+                    "LightPlayer {} running its core only ({})",
+                    version.as_deref().unwrap_or("(version unknown)"),
+                    state.describe()
+                ),
+            },
             Classification::Blank => ActivityOutcome::Succeeded {
                 summary: "blank or erased flash".to_string(),
             },
@@ -291,14 +298,25 @@ impl IdentifyActivity {
                 }
                 _ => ActivityStep::nothing(),
             },
+            // A core-only board's manifest is its whole answer, the way a
+            // hello is a running board's: it will send no hello to wait
+            // for. The port stays open — its engine comes back over it.
+            LinkEvent::UpdateFacts(_)
+                if !self.winding_down
+                    && matches!(ctx.evidence.classification, Classification::CoreOnly { .. }) =>
+            {
+                self.settle(self.settle_at, ctx)
+            }
             // Boot lines (pre-verdict), errors and reset outcomes are
             // diagnosis: the fold has already recorded them and the
-            // deadline decides.
+            // deadline decides. Update bytes are the update driver's.
             LinkEvent::Line(_)
             | LinkEvent::Error(_)
             | LinkEvent::ResetOutcome { .. }
             | LinkEvent::Passthrough { .. }
-            | LinkEvent::WireNote(_) => ActivityStep::nothing(),
+            | LinkEvent::WireNote(_)
+            | LinkEvent::Update(_)
+            | LinkEvent::UpdateFacts(_) => ActivityStep::nothing(),
         }
     }
 }

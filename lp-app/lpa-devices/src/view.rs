@@ -26,6 +26,7 @@ use crate::identity::DeviceId;
 use crate::link::LinkId;
 use crate::roster::{PendingLink, Roster};
 use crate::time::{Millis, describe_age_ms};
+use crate::update_facts::UpdateBoardState;
 use crate::wire::{ProjectFaultFacts, RecoveryFacts, RecoveryLevelFacts, RecoveryPathFacts};
 
 /// Everything the device surface needs to draw itself.
@@ -109,6 +110,13 @@ pub struct DeviceView {
     pub activity: Option<ActivityView>,
     /// Survives disconnect; cleared when a new activity supersedes it.
     pub last_outcome: Option<OutcomeView>,
+    /// How the last update ended, typed (survives and clears like
+    /// [`Self::last_outcome`]): what the card's words for an update that
+    /// stopped — needs USB once, the board did not come back — are made of
+    /// once the activity is gone. A running update's is
+    /// [`ActivityView::update`]'s.
+    #[serde(default)]
+    pub last_update_outcome: Option<crate::activity::UpdateOutcomeFacts>,
     /// The card's terminal panel: what the board said, what the wire
     /// carried and what Studio did to it, oldest first. Serial lines,
     /// decoded wire frames and activity narration interleaved, because that
@@ -128,6 +136,14 @@ pub struct DeviceView {
     /// update this?" is answered where it is asked.
     #[serde(default)]
     pub firmware_blocked: Option<String>,
+    /// Why an over-the-air update cannot run from here, when it cannot:
+    /// [`FIRMWARE_NEEDS_USB`]'s sentence unless the current link carries
+    /// lp-link's update channel. [`Self::firmware_blocked`] keeps its meaning
+    /// for the USB-only verbs (flash, factory reset, reset); this one is the
+    /// update's alone. Whether the board announced the channel is a
+    /// separate fact ([`crate::Evidence::announced_update_channel`]).
+    #[serde(default)]
+    pub update_blocked: Option<String>,
     /// Never empty (invariant I3).
     pub escapes: Vec<Escape>,
 }
@@ -150,6 +166,11 @@ pub struct ActivityView {
     /// and whether the card must ask before the board's files move.
     #[serde(default)]
     pub layout: Option<crate::activity::FlashLayoutView>,
+    /// An Update's stage, progress, outcome and whether it is waiting for
+    /// the board between legs — typed, so the card's words never parse
+    /// [`Self::label`].
+    #[serde(default)]
+    pub update: Option<crate::activity::UpdateActivityView>,
 }
 
 /// What a board is running, as the card is allowed to state it.
@@ -256,9 +277,12 @@ pub fn device_view(device: &Device, now: Millis) -> DeviceView {
         kind: cell.kind,
         label: cell.label(),
         percent: cell.percent(),
-        cancellable: !cell.is_cancel_requested(),
+        // An Update past backing up refuses a cancel: no Cancel once
+        // writing starts.
+        cancellable: cell.accepts_cancel() && !cell.is_cancel_requested(),
         cancel_requested: matches!(cell.cancel, CancelPhase::CancelRequested { .. }),
         layout: cell.flash_layout(),
+        update: cell.update_view(),
     });
 
     let mut escapes = Vec::new();
@@ -356,6 +380,7 @@ pub fn device_view(device: &Device, now: Millis) -> DeviceView {
             && device.activity.is_none(),
         activity,
         last_outcome: device.evidence.last_outcome.as_ref().map(outcome_view),
+        last_update_outcome: device.evidence.last_update_outcome,
         terminal: device.evidence.recent_output().cloned().collect(),
         terminal_dropped: device.evidence.terminal_dropped(),
         firmware_blocked: device
@@ -364,6 +389,8 @@ pub fn device_view(device: &Device, now: Millis) -> DeviceView {
             .as_ref()
             .filter(|endpoint| endpoint.is_bluetooth())
             .map(|_| FIRMWARE_NEEDS_USB.to_string()),
+        update_blocked: (!device.evidence.carries_update_channel())
+            .then(|| FIRMWARE_NEEDS_USB.to_string()),
         escapes,
     }
 }
@@ -392,6 +419,14 @@ pub enum FirmwareFace {
         firmware: Option<String>,
         wire: WireVersion,
         age: FirmwareAge,
+    },
+    /// A LightPlayer running only its core (it spoke channel 3, no hello):
+    /// waiting for its engine, engine crashing, a new core on trial. Never
+    /// a Flash face — its engine comes back over the air. `version` is the
+    /// board manifest's; `state` is what the board says it is doing.
+    CoreOnly {
+        version: Option<String>,
+        state: UpdateBoardState,
     },
     /// Speaks the framing, never said hello (pre-hello firmware).
     NoHello,
@@ -424,7 +459,8 @@ impl FirmwareFace {
     ///
     /// A LightPlayer on another wire version does NOT want a flash forced
     /// on it (ruled 2026-09-04): it keeps the running board's re-flash
-    /// verb, which is an offer, and its firmware line says "older".
+    /// verb, which is an offer, and its firmware line says "older". Nor does
+    /// a core-only board: its engine comes back over the air.
     pub fn wants_flash(&self) -> bool {
         matches!(
             self,
@@ -493,6 +529,10 @@ fn firmware_face(evidence: &Evidence) -> FirmwareFace {
             firmware: hello.firmware.clone(),
             wire: evidence.wire_version().unwrap_or(WireVersion::Match),
             age: evidence.firmware_age().unwrap_or_default(),
+        },
+        Classification::CoreOnly { version, state } => FirmwareFace::CoreOnly {
+            version: version.clone(),
+            state: *state,
         },
         Classification::Incompatible {
             reason: IncompatibleReason::NoHello,
@@ -630,13 +670,27 @@ pub fn pending_link_view(entry: &PendingLink, now: Millis) -> PendingLinkView {
         // still running — and `Quiet`'s "Not responding" implies the board
         // spoke before it fell silent, which is not what happened here.
         // `last_outcome` is how identify's settled Failed becomes visible.
+        //
+        // That one Failed outcome covers two different physical events, and
+        // `presence` is what tells them apart: a refused `open()` never
+        // raises `LinkEvent::Opened`, so presence sits at `Present`
+        // (attached, port not open) all the way to the deadline — `errors`
+        // climbed instead (`evidence.rs`'s `fold_link_event`). A port that
+        // opened fine and then said nothing reaches `Present`'s `Open`
+        // first. Ticket 2026-10-02-studio-reopens-held-serial-port: the
+        // open-refused case is a held port — another app, or another
+        // Studio tab — not a silent board.
         Some(Classification::Unknown | Classification::Quiet { .. })
             if matches!(
                 entry.evidence().last_outcome,
                 Some(ActivityOutcome::Failed { .. })
             ) =>
         {
-            "New device found — no response (is another app using this port?)".to_string()
+            if entry.evidence().presence.is_open() {
+                "New device found — no response (is another app using this port?)".to_string()
+            } else {
+                "New device found — in use by another app or another Studio tab".to_string()
+            }
         }
         Some(classification) => format!(
             "New device found — {}",
@@ -707,6 +761,9 @@ fn classification_label(classification: &Classification) -> String {
     match classification {
         Classification::Unknown => "Identifying…".to_string(),
         Classification::LightPlayer { hello } => format!("LightPlayer · {}", hello.label()),
+        Classification::CoreOnly { state, .. } => {
+            format!("LightPlayer core only — {}", state.describe())
+        }
         Classification::Incompatible {
             reason: IncompatibleReason::NoHello,
         } => "No LightPlayer hello — pre-hello firmware".to_string(),
@@ -847,15 +904,109 @@ mod tests {
         }
     }
 
-    /// Ticket 2026-09-27-busy-port-blocks-identify: a port that never opens
-    /// (another app holds it) hears nothing at all, so identify still
-    /// settles Failed at its deadline with the classification cascade's
-    /// `Quiet` fallback — whose ordinary "Not responding" label implies the
-    /// board spoke and then fell silent, which is not what happened. Before
-    /// the deadline the card must still say "identifying…"; once identify
-    /// has given up, it must say so plainly instead.
+    /// A board running only its core says no hello, only its manifest on
+    /// channel 3. Pending or adopted, it wears the core-only face — a
+    /// LightPlayer — and is never offered a Flash, not even once identify
+    /// has long settled.
     #[test]
-    fn a_pending_link_whose_identify_gave_up_says_so_instead_of_identifying_forever() {
+    fn a_core_only_board_projects_core_only_and_never_a_flash_face() {
+        use crate::replay::{Replay, Step};
+        use crate::roster::RosterConfig;
+
+        let mut replay = Replay::new(RosterConfig::default());
+        replay.step(Millis(0), Step::attach_with_update_channel(1, "usb-1"));
+        replay.step(Millis(10), Step::opened(1));
+        replay.step(
+            Millis(20),
+            Step::UpdateFacts {
+                link: 1,
+                state: UpdateBoardState::NeedsEngine,
+                version: Some("2026.10.05-1".to_string()),
+            },
+        );
+
+        let core_only = FirmwareFace::CoreOnly {
+            version: Some("2026.10.05-1".to_string()),
+            state: UpdateBoardState::NeedsEngine,
+        };
+        let view = replay.view();
+        let pending = view.pending.first().expect("a pending link");
+        assert_eq!(pending.firmware_face, core_only, "identify settled on it");
+        assert!(!pending.needs_firmware());
+
+        replay.step(Millis(30), Step::Adopt { link: 1 });
+        replay.advance_to(Millis(60_000));
+        let view = replay.view();
+        let card = view.devices.first().expect("the adopted device");
+        assert_eq!(card.firmware_face, core_only);
+        assert!(!card.needs_firmware());
+        assert_eq!(card.update_blocked, None, "this link carries channel 3");
+    }
+
+    /// A running board whose hello carries its manifest is a LightPlayer,
+    /// as it always was.
+    #[test]
+    fn a_hello_with_a_manifest_keeps_the_light_player_face() {
+        use crate::replay::{Replay, Step};
+        use crate::roster::RosterConfig;
+
+        let mut replay = Replay::new(RosterConfig::default());
+        replay.step(Millis(0), Step::attach_with_update_channel(1, "usb-1"));
+        replay.step(Millis(10), Step::opened(1));
+        replay.step(
+            Millis(20),
+            Step::hello(1)
+                .uid("dev_abc")
+                .with_update(UpdateBoardState::Running),
+        );
+
+        let view = replay.view();
+        let card = view.devices.first().expect("an identified device");
+        assert!(matches!(
+            card.firmware_face,
+            FirmwareFace::LightPlayer { .. }
+        ));
+        assert!(!card.needs_firmware());
+    }
+
+    /// The over-the-air update is blocked exactly when the link does not
+    /// carry channel 3; the USB-only verbs' reason is untouched by it.
+    #[test]
+    fn the_update_is_blocked_unless_the_link_carries_channel_three() {
+        use crate::replay::{Replay, Step};
+        use crate::roster::RosterConfig;
+
+        for (attach, blocked) in [
+            (Step::attach_with_update_channel(1, "usb-1"), None),
+            (
+                Step::attach(1, "usb-1"),
+                Some(FIRMWARE_NEEDS_USB.to_string()),
+            ),
+        ] {
+            let mut replay = Replay::new(RosterConfig::default());
+            replay.step(Millis(0), attach);
+            replay.step(Millis(10), Step::opened(1));
+            replay.step(Millis(20), Step::hello(1).uid("dev_abc"));
+
+            let view = replay.view();
+            let card = view.devices.first().expect("an identified device");
+            assert_eq!(card.update_blocked, blocked);
+            assert_eq!(card.firmware_blocked, None, "a USB link blocks no flash");
+        }
+    }
+
+    /// Ticket 2026-09-27-busy-port-blocks-identify, wording updated by
+    /// 2026-10-02-studio-reopens-held-serial-port: a port that never opens
+    /// (another app or another Studio tab holds it) hears nothing at all,
+    /// so identify still settles Failed at its deadline with the
+    /// classification cascade's `Quiet` fallback — whose ordinary "Not
+    /// responding" label implies the board spoke and then fell silent,
+    /// which is not what happened. Before the deadline the card must still
+    /// say "identifying…"; once identify has given up on a port that never
+    /// finished opening (`presence` never reached `Open`), it must name the
+    /// hold instead of guessing at silence.
+    #[test]
+    fn a_pending_link_whose_open_was_refused_says_so_instead_of_identifying_forever() {
         use crate::replay::{Expect, Replay, Script, Step};
         use crate::roster::RosterConfig;
 
@@ -875,14 +1026,48 @@ mod tests {
                         .pending_state("New device found — identifying…"),
                 )
                 // identify_deadline_ms defaults to 5_000; past it identify has
-                // settled Failed with no verdict ever reached.
+                // settled Failed with no verdict ever reached, and the port
+                // never got past `Error` to `Opened` — presence stayed
+                // `Present`, never `Open`.
+                .at(5_010, Step::Advance)
+                .expect(Expect::new().pending(1).pending_state(
+                    "New device found — in use by another app or another Studio tab",
+                ));
+
+        Replay::new(RosterConfig::default())
+            .run(&script.into_fixture("a busy port's identify gives up"))
+            .expect("scenario");
+    }
+
+    /// The other half of the same Failed outcome: a port that DID open
+    /// (`presence` reached `Open`) and then said nothing at all before
+    /// identify's deadline is a genuinely quiet board, not a held port, so
+    /// it keeps the original "no response" wording rather than the
+    /// refused-open one above.
+    #[test]
+    fn a_pending_link_that_opened_but_stayed_silent_still_blames_no_response() {
+        use crate::replay::{Expect, Replay, Script, Step};
+        use crate::roster::RosterConfig;
+
+        let script =
+            Script::new()
+                .at(0, Step::attach(1, "usb-1"))
+                .at(5, Step::opened(1))
+                .expect(
+                    Expect::new()
+                        .pending(1)
+                        .pending_state("New device found — identifying…"),
+                )
+                // identify_deadline_ms defaults to 5_000 from the open; past it
+                // identify has settled Failed having heard nothing at all over
+                // an open port.
                 .at(5_010, Step::Advance)
                 .expect(Expect::new().pending(1).pending_state(
                     "New device found — no response (is another app using this port?)",
                 ));
 
         Replay::new(RosterConfig::default())
-            .run(&script.into_fixture("a busy port's identify gives up"))
+            .run(&script.into_fixture("an opened port's identify gives up"))
             .expect("scenario");
     }
 }

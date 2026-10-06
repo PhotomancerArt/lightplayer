@@ -1,0 +1,64 @@
+{
+  "$defs": {
+    "WifiNetwork": {
+      "additionalProperties": false,
+      "description": "One saved Wi-Fi network, an entry of [`crate::NetworkFile::networks`].\n\n`Debug` is written by hand and **never prints the password** — logs on\nthe server and the firmware format with `{:?}`.",
+      "properties": {
+        "hidden": {
+          "description": "The network does not broadcast its name: the station asks for it\nby name. Omitted when false.",
+          "type": "boolean"
+        },
+        "password": {
+          "description": "`\"\"` for an open network; else 8–63 printable ASCII characters, or a\nraw key of exactly 64 hex digits. Never leaves the board.",
+          "type": "string"
+        },
+        "ssid": {
+          "description": "The network name: 1–32 bytes of UTF-8.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ssid",
+        "password"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://lightplayer.dev/schemas/device-network.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "The device's network settings, at root `/.lp/network.json` — a sibling\nof the device store (`/.lp/access.json`) with its own `version`.\n\n```json\n{\"version\":1,\"wifi\":true,\"cloudRelay\":true,\n \"networks\":[{\"ssid\":\"lp-walk-net\",\"password\":\"…\"},{\"ssid\":\"back-office\",\"password\":\"…\",\"hidden\":true}]}\n```\n\n- `wifi` — the board's one Wi-Fi switch. On by default, so a missing\n  field reads as on.\n- `cloudRelay` — lets lightplayer.app reach this board through the\n  cloud relay. On by default, so a missing field reads as on.\n- `networks` — the saved networks ([`WifiNetwork`]), in the order they\n  were added, at most [`Self::MAX_NETWORKS`], no two with one name.\n  Adding a name that is already saved changes its password in place\n  ([`Self::add`]). Which one the station joins is the station's call\n  (M6): the strongest saved network it hears, skipping one whose\n  password was refused — there is no priority order.\n\n**Write-only on every link.** The passwords are secrets: no link at any\ntier reads this file ([`crate::is_write_only_file_path`]); the server\nreads it through its own filesystem and answers a status that carries\neach network's name and whether it has a password, never the password.\n`Debug` never prints one either.\n\nA missing file is [`Self::none`] (no network, Wi-Fi and the relay on). A\nfile that fails to parse reads as no network too (the caller logs it)\nand is not rewritten until the next change.\n\n**Format bumps.** A serde change to this type or to [`WifiNetwork`] is a\nformat change, even one that adds or removes no field: bump\n[`Self::VERSION`], keep a private reader for every older version that\nconverts on read (as [`crate::DeviceAccessFile`] keeps v1 and v2), pin\nthe old bytes as a `const` in a test, and regenerate\n`schemas/device-network.schema.json`. The device reads old versions and\nwrites the current one; `lpa-upgrade` (projects) is not involved, and\nthe file is outside `PROJECT_FORMAT_VERSION`.",
+  "properties": {
+    "cloudRelay": {
+      "default": true,
+      "description": "Lets lightplayer.app reach this board through the cloud relay. On by\ndefault: a missing field reads as on.",
+      "type": "boolean"
+    },
+    "networks": {
+      "default": [],
+      "description": "The saved networks, in the order they were added (at most 8, no two\nwith one name).",
+      "items": {
+        "$ref": "#/$defs/WifiNetwork"
+      },
+      "maxItems": 8,
+      "type": "array"
+    },
+    "version": {
+      "description": "Format version; always [`NetworkFile::VERSION`] when written.",
+      "format": "uint32",
+      "maximum": 1,
+      "minimum": 1,
+      "type": "integer"
+    },
+    "wifi": {
+      "default": true,
+      "description": "The board's Wi-Fi switch. On by default: a missing field reads as on.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "version"
+  ],
+  "title": "NetworkFile",
+  "type": "object"
+}

@@ -266,6 +266,7 @@ mod tests {
             endpoint: lpa_devices::identity::EndpointKey(endpoint.to_string()),
             usb: None,
             serial_number: None,
+            carries_update_channel: false,
         };
         GrantedLink {
             link: Box::new(SilentLink(info.clone())),

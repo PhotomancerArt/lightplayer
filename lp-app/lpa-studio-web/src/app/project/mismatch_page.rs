@@ -126,6 +126,7 @@ pub fn MismatchPage(
                             open_uid: Some(mismatch.device_key.clone()),
                             feed: home.as_ref().and_then(|home| home.devices.feeds.get(&card.id).cloned()),
                             runtime: home.as_ref().and_then(|home| home.devices.runtime_bands.get(&card.id).cloned()),
+                            update: home.as_ref().and_then(|home| home.devices.updates.get(&card.id).cloned()),
                             card,
                             projects: home.as_ref().map(|home| home.projects.clone()).unwrap_or_default(),
                             examples: home.as_ref().map(|home| home.examples.clone()).unwrap_or_default(),

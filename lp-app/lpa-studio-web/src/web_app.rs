@@ -387,6 +387,18 @@ pub fn App() -> Element {
             controller.set_device_backup_store(Rc::new(
                 crate::device_backup_store_opfs::OpfsDeviceBackupStore,
             ));
+            // Where an engine comes from without a board (OTA M5): every
+            // engine Studio installs, fetches or reads back is kept in OPFS
+            // `firmware-cache/`, and released ones are fetched from the
+            // firmware store (lightplayer.app, or `?firmware-store=`'s
+            // loopback/LAN origin). Nothing reads them until the update flow.
+            controller
+                .set_engine_cache(Rc::new(crate::engine_cache_opfs::OpfsEngineCache::default()));
+            controller.set_firmware_store(Rc::new(lpa_firmware_store::FirmwareStore::new(
+                crate::dev_url_flags::firmware_store_origin(),
+                Rc::new(crate::firmware_fetch_web::WebFirmwareFetch)
+                    as Rc<dyn lpa_firmware_store::FirmwareFetch>,
+            )));
             let provider = Rc::new(lpa_studio_core::BrowserSerialEsp32Provider::with_options(
                 Default::default(),
             ));
@@ -1234,9 +1246,16 @@ pub fn App() -> Element {
             access_bridge.tx.send(StudioCommand::Access(command));
         })
     });
+    let network_bridge = bridge.clone();
+    let on_network_command = use_hook(move || {
+        Callback::new(move |command| {
+            network_bridge.tx.send(StudioCommand::Network(command));
+        })
+    });
     let mut device_settings = use_signal(lpa_studio_core::UiDeviceSettingsView::default);
     use_context_provider(|| crate::app::home::access_ui_context::AccessUi {
         on_access: on_access_command,
+        on_network: on_network_command,
         device_settings,
     });
     // The account's device key and passwords, from the cloud into core
@@ -2491,6 +2510,7 @@ mod tests {
             board: Some("Desktop".to_string()),
             status: UiChromeSessionStatus::Run,
             stat_line: None,
+            update: None,
         }
     }
 

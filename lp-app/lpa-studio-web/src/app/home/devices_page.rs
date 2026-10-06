@@ -127,10 +127,17 @@ pub fn DevicesPage(
                                 runtime: devices.runtime_bands.get(&card.id).cloned(),
                                 // Its login line and access panel (BLE M6).
                                 access: devices.access.get(&card.id).cloned(),
+                                // Its Wi‑Fi row (Wi‑Fi roadmap M5).
+                                wifi: devices.wifi.get(&card.id).cloned(),
                                 // Its files across a layout change (the
                                 // C6 repartition): question, refusal, a
                                 // held board, a backup to put back.
                                 layout: devices.layout.get(&card.id).cloned(),
+                                // Its firmware-update words (direction C):
+                                // the line and bar, chip and version, and
+                                // the picture slot's light; absent = no
+                                // update story, today's card.
+                                update: devices.updates.get(&card.id).cloned(),
                                 card,
                                 // The empty face's picker reads the SAME two
                                 // lists the gallery does — there is no
@@ -664,6 +671,8 @@ mod tests {
     fn view(roster: RosterView, transport_available: bool) -> DeviceRosterView {
         DeviceRosterView {
             access: Default::default(),
+            wifi: Default::default(),
+            updates: Default::default(),
             roster,
             transport_available,
             usb_available: transport_available,
@@ -1107,6 +1116,8 @@ mod tests {
             terminal_dropped: 0,
             firmware_blocked: None,
             escapes: vec![DeviceEscape::Forget],
+            update_blocked: None,
+            last_update_outcome: None,
         }
     }
 
@@ -1118,6 +1129,7 @@ mod tests {
                 endpoint: lpa_studio_core::DeviceEndpointKey("usb-1".to_string()),
                 usb: None,
                 serial_number: None,
+                carries_update_channel: false,
             },
         }
     }

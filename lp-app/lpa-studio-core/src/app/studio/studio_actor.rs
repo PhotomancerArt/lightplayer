@@ -331,6 +331,9 @@ where
         for command in plan.access {
             self.controller.apply_access_command(command);
         }
+        for command in plan.network {
+            self.controller.apply_network_command(command);
+        }
         for feedback in plan.agent {
             self.controller.apply_agent_feedback(feedback);
         }
@@ -353,6 +356,8 @@ where
         // A login step parked because the editor lens holds that board.s
         // wire runs through the lens.s own client (BLE M6).
         self.controller.run_access_lens_step().await;
+        // The same for a Wi‑Fi step.
+        self.controller.run_network_lens_step().await;
         if plan.tick {
             // One tick command fans into the lens-bound project pull plus
             // the slow per-session status heartbeats. Heartbeats issue no
@@ -673,6 +678,7 @@ struct CommandPlan {
     /// (each is a distinct gesture or layer arrival; never coalesced).
     settings: Vec<crate::SettingsCommand>,
     access: Vec<crate::app::access::AccessCommand>,
+    network: Vec<crate::app::network::NetworkCommand>,
     /// Agent run feedback, applied synchronously in queue order (event
     /// order is the transcript order; never coalesced).
     agent: Vec<crate::AgentFeedback>,
@@ -705,6 +711,7 @@ impl CommandPlan {
         let mut console = Vec::new();
         let mut settings = Vec::new();
         let mut access = Vec::new();
+        let mut network = Vec::new();
         let mut agent = Vec::new();
         let mut actions = Vec::new();
         let mut tick = false;
@@ -743,6 +750,7 @@ impl CommandPlan {
                 StudioCommand::Console(command) => console.push(command),
                 StudioCommand::Settings(command) => settings.push(command),
                 StudioCommand::Access(command) => access.push(command),
+                StudioCommand::Network(command) => network.push(command),
                 StudioCommand::Agent(feedback) => agent.push(feedback),
                 // Coalesce: many queued ticks collapse to one pull.
                 StudioCommand::RefreshTick => tick = true,
@@ -754,6 +762,7 @@ impl CommandPlan {
             console,
             settings,
             access,
+            network,
             agent,
             actions,
             tick,

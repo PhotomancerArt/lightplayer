@@ -60,6 +60,10 @@ SOURCE_PATHS = (
     "lp-xt",
     "lp-app/lpa-server",
     "third_party",
+    # The version every image stamps, and the pipeline that links and lays
+    # out the C6's split image (the product's).
+    "tools/lp-app-version",
+    "tools/lp-fw-split",
     "Cargo.toml",
     "Cargo.lock",
     "rust-toolchain.toml",
@@ -69,7 +73,8 @@ SOURCE_PATHS = (
 # (`scripts/heap-budget-check.sh`, `chip_facts`), pointed at the same file the
 # boot suite reads, so `heap-budget-check-chips*` / `bless-chips` compose.
 HEAP_ALIAS = {
-    "esp32c6": ("LP_EMU_C6_ELF_ESP32C6_SERVER_RADIO", "tree/ESP32C6_SERVER_RADIO/fw-esp32c6"),
+    # The C6's is the split image's directory (the shipped bytes since M2).
+    "esp32c6": ("LP_EMU_C6_SPLIT_ESP32C6_SERVER_RADIO", "tree/ESP32C6_SERVER_RADIO_SPLIT"),
     "esp32v3": ("LP_EMU_V3_ELF_ESP32_SERVER_FLOAT_F32", "@LP_EMU_ESP32V3_ELF"),
     "esp32s3": ("LP_EMU_ESP32S3_ELF", "@LP_EMU_ESP32S3_ELF"),
 }
@@ -207,6 +212,21 @@ def pack(chip: str, out: Path) -> None:
             by_slug[m.group(1)] = elf
         for slug, elf in sorted(by_slug.items()):
             add(elf, f"tree/{slug}/fw-esp32c6", "tree", slug=slug, profile="release-esp32")
+        # Split images: `test_support::split_image`'s keyed directories,
+        # `target/lp-emu-c6/<SLUG>_SPLIT-<key>/` — the four files a boot test
+        # reads, `lp-fw-split`'s output for that feature set.
+        split_files = ("merged.bin", "loader.elf", "p2.elf", "split.json")
+        by_split: dict[str, Path] = {}
+        for merged in sorted((target / "lp-emu-c6").glob("*_SPLIT-*/merged.bin")):
+            m = re.match(r"^(.+_SPLIT)-([0-9a-f]{16})$", merged.parent.name)
+            if not m:
+                continue
+            if m.group(1) in by_split:
+                die(f"two source keys for {m.group(1)} under target/lp-emu-c6: refusing to guess")
+            by_split[m.group(1)] = merged.parent
+        for slug, d in sorted(by_split.items()):
+            for f in split_files:
+                add(d / f, f"tree/{slug}/{f}", "tree", slug=slug, profile="release-esp32")
         for ref in sorted((target / "emu-ref").glob("*")):
             if ref.name.startswith("wt-") or not (ref / "fw-esp32c6").is_file():
                 continue

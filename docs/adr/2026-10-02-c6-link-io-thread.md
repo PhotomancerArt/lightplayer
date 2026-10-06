@@ -1,6 +1,7 @@
 # ADR: The C6's link IO runs on its own thread, and requests are answered before the render
 
-- **Status:** Accepted (amended 2026-10-03 — the S3; see the end)
+- **Status:** Accepted (amended 2026-10-03 — the S3, and the classic, whose
+  link thread measured worse on silicon and is opt-in; roadmap M2; see the end)
 - **Date:** 2026-10-02
 - **Deciders:** Photomancer (Yona; feel gate passed 2026-10-02)
 - **Plan:** `lp2025/2026-10-01-1756-c6-link-io-thread` (PR #891), milestone M1
@@ -194,16 +195,14 @@ separately.
   −3,384 B, largest block −3,389 B); figures re-blessed.
 - **At the time this ADR was accepted, the S3, the classic, the host and
   browser servers kept their threading and their order**: they injected no
-  lock and left messages-first off. One shared change reached the **S3**
-  immediately: the event-driven idle wake lives in `fw-esp32-common`'s USB
-  link loop, which the S3 runs too, so its link task also slept until a
-  timer, input or the doorbell (250 ms backstop) instead of waking every
-  10 ms. On one executor that only removed idle passes from the render's
-  gaps; the watchdog's I/O-alive flag was still ticked every pass (at least
-  every 250 ms, far inside its silence limit). **The S3 now has its own
-  thread too — see the amendment below.** The classic's UART link task
-  remains its own loop; porting it to the classic's `InterruptExecutor`
-  io_task, and the S31, is the rest of roadmap M2.
+  lock and left messages-first off. One shared change reaches every board
+  that runs `fw-esp32-common`'s UART or USB link loop: the event-driven idle
+  wake, so a link task sleeps until a timer, input or the doorbell (250 ms
+  backstop) instead of waking on a fixed cadence. **The S3 and the classic
+  each got their own link thread under roadmap M2** — see the S3's amendment
+  and `## Amended 2026-10-03 — the classic (M2)` below. The host and browser
+  servers keep their threading and their order; the S3's second core and
+  the S31 are roadmap M2 follow-ups.
 - **`io-thread` depends on `radio`** (esp-rtos's `esp-radio` feature). A C6
   build without radio falls back to the shared executor, render first.
 
@@ -370,3 +369,151 @@ nothing, cross-core, costs a scheduler critical section per take/give;
 valid because no `with_link` caller is an ISR. (2) Mask only the
 scheduler's own interrupt lines rather than the whole P1 level — cheaper,
 chip-specific. M2 did not need to wait on this choice.
+
+## Amended 2026-10-03 — the classic (M2)
+
+Plan `lp2025/2026-10-02-1918-io-thread-other-boards` (PR #943, milestone M2
+of the Wi-Fi control roadmap) gave the classic ESP32 ("v3") the same
+treatment, in two steps.
+
+### Step 1 — messages-first alone, measured and left off
+
+This ADR's sentence — "messages-first is not turned on for a board whose
+link IO still shares the render's thread" — does not read across to the
+classic unchanged, because the classic is the one board where it already
+did not apply literally: io_task (swi2, `docs/adr/2026-08-25-classic-uart-io-task-executor-isolation.md`)
+drains UART0's bytes every 1 ms regardless of the render, off the render's
+thread, before any link thread exists. P2 turned `set_messages_first(true)`
+on with no `Link` thread and measured it on `five-wire` (80 LEDs, ~2.3 ms
+frames, `lp-emu:esp32v3:t1` at `ab8345d38`): flat — request p50/p90
+unchanged at 2.26/2.69 frames, idle fps within 0.05 %. Per this ADR's own
+≥ ~0.3-frame bar it was **left off** at step 1.
+
+**The refined rule**: what has to leave the render's thread for
+messages-first to pay is the **`Link`'s own scheduling** — its ACK/resend
+bookkeeping and frame queuing — not merely the byte shuttle underneath it.
+On `five-wire` the link round trip itself (4.25 ms, ≈ 1.8 frames) exceeds
+one frame, so no reordering inside a single tick can show in the request
+number regardless of where the bytes move; the classic's `Link` task was
+still cooperatively scheduled on the render's own thread executor, same as
+the C6 before its thread. Step 2 (below) is the case that actually tests
+the pairing, on a frame-bound project.
+
+### Step 2 — the `Link` on its own core-0 thread
+
+`fw-esp32v3/src/io_thread.rs` (feature `io-thread`; default on as first
+built, **off by default since the silicon A/B below**): the
+unchanged `uart_link_task` (`fw-esp32-common/src/uart_link/`) now runs on a
+priority-1 esp-rtos thread, **`pin_to_core: Some(0)`**, a 3 KB stack, its
+own `esp_rtos::embassy::Executor`, under `RawPriorityLimitedMutex` at
+`Priority1` injected through `UartLinkShared::leak_locked` (the same
+`LinkLock` hook the C6 and S3 use). **Messages-first goes on with it**,
+never alone, matching the C6/S3 rule exactly. io_task (swi2, the 1 ms
+pacer, `SendUart`, the pipes) is untouched and still the only thing that
+touches UART0; the `Link` is still never polled from io_task's executor
+(DD20 of the executor-isolation ADR holds — see that ADR's own amendment).
+
+`io-thread = ["server", "esp-rtos/esp-radio", "esp-rtos/esp-alloc",
+"dep:esp-radio-rtos-driver"]` — the same pair `radio_ram_probe` already
+sets; no radio stack is linked. **SWI1 is never raised for this thread**:
+both the main task and the link thread are pinned to core 0, so esp-rtos's
+`run_scheduler`/`trigger_scheduler` only ever raise SWI0 (core 0's own
+yield, or a request *to* core 0); core 1 never runs the esp-rtos scheduler
+and so never claims the wire pusher's doorbell (SWI1,
+`output/rmt/wire_pusher.rs`) on esp-rtos's behalf — read off esp-rtos 0.3.0,
+not yet exercised on silicon.
+
+### Numbers (`lp-emu:esp32v3:t1`, lp-emu `ab8345d38`, `lp-cli link rtt`, `--seed 7`)
+
+`five-wire` is P1/P2's 80-LED project (~2.3 ms frames, link-RTT-bound).
+`five-wire-x32` is a frame-bound scratch variant (same 80 LEDs, the shader
+body run 32× per LED, ~12.9 ms frames) the director asked for once
+`five-wire` could not move: not committed (see PR #943's body for how to
+reproduce it).
+
+| project | build | idle fps | request p50 (frames) | request p90 (frames) | link RTT p50 ms | transfers KiB/s (↓/↑) |
+|---|---|---:|---:|---:|---:|---:|
+| five-wire | main | 430.04 | 2.26 | 2.69 | 4.25 | 81.9 / 81.6 |
+| five-wire | P2 (messages-first, no thread) | 430.18 | 2.26 | 2.69 | 4.25 | 81.9 / 81.4 |
+| five-wire | **P4 (thread + messages-first)** | 429.84 (−0.05 %) | **1.83** | **2.26** | **3.50** | 82.2 / 82.3 |
+| five-wire | P4, messages-first off | 429.87 | 2.26 | 2.69 | 3.75 | 81.6 / 81.9 |
+| five-wire-x32 | main | 77.28 | 1.68 | 2.09 | 10.50 | 59.1 / 58.8 |
+| five-wire-x32 | **P4 (thread + messages-first)** | 77.27 (−0.01 %) | **0.79** | **1.18** | **3.75** | **82.3 / 78.2** |
+| five-wire-x32 | P4, messages-first off | 77.27 | 1.70 | 2.11 | 3.75 | 74.3 / 72.2 |
+
+The frame-bound project is the one that decides it: the thread alone moves
+link RTT and transfers but leaves request latency unchanged (1.70 frames,
+same as main); thread + messages-first together bring it to 0.79/1.18
+frames — the C6's "neither half alone" finding, confirmed on the classic.
+`five-wire` improves (2.26 → 1.83) but cannot reach the ~0.8-frame bar: its
+frame (2.3 ms) is shorter than the UART round trip itself.
+
+### Heap, stack, and other proofs (emulated)
+
+- **Heap** (the ~5 KB stop line, OQ2): free 217,592 → 214,136 B
+  (**−3,456 B**), largest free 102,353 → 98,898 B (−3,455 B) at the shipped
+  3 KB stack — under the line (the silicon A/B below turned the thread off
+  by default on other grounds).
+- **Stack** (`io_thread_stack_diag`): high-water 1,660 B at both 4 KB and
+  3 KB, 1,692 B under the `--uart-faults` soak — 55 % of 3 KB.
+- **Log drops** (the open log-ring defect, five-wire load,
+  `emu_v3_link_gates`): main 25, P2 14, P4 **0** — see that defect's updated
+  status.
+- **Fault soak** (`emu_uart_link`, three specs): green, 0 app errors, 0
+  resets, fewer board resends and duplicates than main.
+- **Resend floor**: left at 200 ms. Link RTT under combined load (P4) p99
+  15.0 ms, well under the floor, but the emulator does not model the host
+  side (the CH340, macOS's USB-serial latency, Web Serial) that the floor
+  also covers — **measure silicon link-RTT p99 at the desk walk** before
+  moving `uart_board_link_config`'s `MIN_RTO_US`.
+- **Silicon: at the desk walk** (`desk-classic.md`, batched with #884's
+  owed classic lp-link walk) — not yet run.
+
+Update the earlier "The host and browser servers keep their threading…"
+Consequences bullet above: it now points here for the classic's own thread.
+
+### Silicon (2026-10-03): the thread goes off by default, and messages-first stays off
+
+The desk A/B the emulator could not do (DOM-Z-102, agent-run, a ~16 fps
+project; `frame_pace_diag` timestamps every frame as it reaches the RMT
+driver; every row on one merged base, origin/main `626a1b851`). Frame
+interval p50/p90 and judder p90 in ms; "slow frames" are those longer than
+1.5× the median.
+
+| arrangement | no host: frames · judder | `link rtt`: idle · transfers p90 · requests p90 · request RTT p50 · transfers | real Studio editor, per 5 s: frames · slow frames · judder |
+|---|---|---|---|
+| main executor, render-first (main) | 61.0/61.1 · 0.2 | 61.1 · ~66 · ~65.6 · 105 ms · 13.5 KiB/s | 47 · 13 at ~222 ms · ~3.5 |
+| **main executor, event-driven wake (P2; the default now)** | **57.5/57.7 · 0.5** | **57.6 · ~62 · ~61.9 · 98 ms · 14 KiB/s** | **50 · 14 at ~209 ms · ~3.3** |
+| thread, every event, messages-first (as first built; older base) | — | 58.0 · 194 · 71.0 · 46 ms · 56–68 KiB/s | 39 · 15 at ~240 ms · **181** |
+| thread, ≥ 25 ms between passes, messages-first | — | 69.0 · ~94 · ~83.7 · 60 ms · 28–31 KiB/s | 34 · 13 at ~270 ms · **195** |
+| thread, ≥ 25 ms between passes, render-first | 66.7/68.9 · 2.5 | 66.7 · ~93 · ~77.5 · 125 ms · 25 KiB/s | 41 · 11–12 at ~258 ms · ~6–8 |
+
+What the emulator could not see, and why the rows fall this way:
+
+- **A preemption costs the classic's render ~4–5 ms**, several times the
+  link pass itself (~0.5–0.9 ms on silicon, 13 µs emulated): on an idle
+  board, frames a keepalive pass landed in rendered ~4.8 ms slower than the
+  frames it missed. The render's code and data come through the flash cache,
+  and a pass displaces them. An event-driven thread woke for every piece of
+  I/O-task news — 300–450 passes a second during a transfer — and stretched
+  frames to ~190 ms. Holding passes ≥ 25 ms apart
+  (`PassPacing::CLASSIC_LINK_THREAD`) bounds that, but the thread still
+  preempts on keepalives, SYNs and the backstop: −9 % frame rate with no
+  host at all.
+- **Messages-first is a judder source on this board.** Studio's editor
+  read costs the classic ~140–175 ms of CPU
+  (`docs/defects/2026-10-03-studios-editor-read-costs-the-classic-a-frame-and-a-half-of-cpu.md`).
+  Answered before the render, that lands between the moment a frame takes
+  its clock and the moment it reaches the LEDs: judder ~180–195 ms. Answered
+  after, the next frame is merely late and motion stays true. The C6/S3 rule
+  ("the thread and messages-first go together") holds only where the host's
+  requests are cheap next to a frame.
+- **Without messages-first the thread buys no latency** (request RTT 125 ms
+  against the default's 98 ms) — only transfer speed — and costs frames in
+  every setting. So the classic ships **without** the thread: `io-thread` is
+  an opt-in feature (with its 25 ms pacing and render-first), kept for the day
+  the host's requests are cheap enough here for messages-first to pay. The
+  event-driven wake (P2) is the default and is the best row in all three
+  settings.
+- The Studio editor still hitches on every arrangement; that is the read's
+  cost, not the link's, and it is its own defect.

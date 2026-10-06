@@ -106,6 +106,7 @@ extern crate alloc;
 #[cfg(feature = "server")]
 lpc_model::lp_embed_manifest_core! {
     package: env!("CARGO_PKG_NAME"),
+    target: env!("LP_FW_TARGET"),
     chip_family: "esp32",
     chip: "esp32",
     cargo_target: "xtensa-esp32-none-elf",
@@ -167,6 +168,20 @@ mod tests;
 mod board;
 #[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
 mod flash_storage;
+#[cfg(all(
+    feature = "io-thread",
+    feature = "server",
+    not(feature = "radio_ram_probe"),
+    not(fw_harness)
+))]
+mod io_thread;
+#[cfg(all(
+    feature = "io_thread_stack_diag",
+    feature = "server",
+    not(feature = "radio_ram_probe"),
+    not(fw_harness)
+))]
+mod io_thread_stack_diag;
 #[cfg_attr(
     fw_harness,
     allow(
@@ -197,6 +212,13 @@ mod serial;
 #[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
 mod stack_probe;
 
+#[cfg(all(
+    feature = "server",
+    not(feature = "io-thread"),
+    not(feature = "radio_ram_probe"),
+    not(fw_harness)
+))]
+use serial::uart_link_task;
 #[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
 use {
     alloc::{boxed::Box, rc::Rc, sync::Arc},
@@ -214,7 +236,7 @@ use {
     lpfs::LpFsMemory,
     lpfs::lp_path::AsLpPath,
     output::{Esp32OutputProvider, Esp32V3RmtWs281xDriver},
-    serial::{io_task, uart_link_task},
+    serial::io_task,
 };
 
 // The unbounded loop is the product's entry point; the benchmark image calls
@@ -501,6 +523,10 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 /// reached only the printed `[MEM]` line.
 #[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
 fn heartbeat_memory_stats() -> Option<lpc_wire::server::MemoryStats> {
+    // The link thread's stack high-water, at the heartbeat's cadence, when it
+    // grows (`io_thread_stack_diag` only; a product image has no such line).
+    #[cfg(feature = "io_thread_stack_diag")]
+    io_thread_stack_diag::log_if_grown();
     let free = esp_alloc::HEAP.free().min(u32::MAX as usize) as u32;
     let used = esp_alloc::HEAP.used().min(u32::MAX as usize) as u32;
     Some(lpc_wire::server::MemoryStats {
@@ -856,8 +882,10 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     esp_println::println!("[INIT] runtime started");
 
     // The host link runs lp-link (plan `classic-uart-on-lp-link`): the link
-    // task below owns it on this (thread) executor, and io_task only moves
-    // its bytes. The session nonce is random per boot, so a host learns the
+    // task below owns it — on its own thread with `io-thread`, on this
+    // (thread) executor without — and io_task only moves its bytes. With the
+    // thread, the link is shared across two threads and takes the thread's
+    // lock (`io_thread::link_lock`). The session nonce is random per boot, so a host learns the
     // board restarted. The `esp_println!` lines before and around this are
     // raw text outside frames, which a host sees as text; nothing of the
     // link goes out before io_task's first tick, and no host can have a
@@ -867,10 +895,14 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     // (ruling DD28): with no radio feeding the RNG, nobody has shown its word
     // differs after a software reset, and a repeated nonce would hide a
     // Reboot from a host that stayed attached.
-    let uart_link = UartLinkShared::leak(fw_esp32_common::uart_link::session_nonce(
+    let nonce = fw_esp32_common::uart_link::session_nonce(
         esp_hal::rng::Rng::new().random(),
         serial::link_boot_count::next_boot_count(),
-    ));
+    );
+    #[cfg(feature = "io-thread")]
+    let uart_link = UartLinkShared::leak_locked(nonce, io_thread::link_lock);
+    #[cfg(not(feature = "io-thread"))]
+    let uart_link = UartLinkShared::leak(nonce);
 
     match uart0 {
         Ok(uart) => {
@@ -916,10 +948,32 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
             esp_println::println!(
                 "[INIT] I/O task spawned (uart0 921600 8N1, swi2 executor prio2, timg0t1 pacer 1ms)"
             );
-            // The link itself, on THIS executor, beside the server transport
-            // that shares it — never on io_task's (ruling DD20).
-            spawner.spawn(uart_link_task(uart_link).unwrap());
-            esp_println::println!("[INIT] UART link task spawned (lp-link, thread executor)");
+            // The link itself — never on io_task's executor (ruling DD20).
+            // With `io-thread`, on a priority-1 thread of its own pinned to
+            // core 0, created here, this early, because its stack comes off
+            // the heap's largest block before the engine has carved it up.
+            #[cfg(feature = "io-thread")]
+            {
+                // Nothing else rides the main executor here; the link has its own.
+                let _ = spawner;
+                io_thread::start(uart_link);
+                esp_println::println!(
+                    "[INIT] UART link task started (lp-link, io thread: prio 1, core 0)"
+                );
+            }
+            // Without it, on THIS executor, beside the server transport that
+            // shares it.
+            #[cfg(not(feature = "io-thread"))]
+            {
+                spawner.spawn(
+                    uart_link_task(
+                        uart_link,
+                        fw_esp32_common::uart_link::PassPacing::EVERY_EVENT,
+                    )
+                    .unwrap(),
+                );
+                esp_println::println!("[INIT] UART link task spawned (lp-link, thread executor)");
+            }
         }
         Err(error) => {
             // The board keeps booting: `esp_println` writes UART0's FIFO
@@ -1107,6 +1161,15 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
         None,
         graphics,
     );
+    // Render first, answer after — even with the link on its own thread,
+    // unlike the C6 and S3. On this board a request can cost far more CPU
+    // than a frame: Studio's editor read takes ~150-175 ms of the classic's
+    // render-sized tick. Answered before the render, every such read delays
+    // the frame's display against the clock it was rendered at (~190 ms
+    // judder p90 under a real Studio editor on the DOM-Z-102, PR #943's desk
+    // A/B); answered after, it only makes the next frame late, and motion
+    // stays true. Messages-first is the server's default-off order, so
+    // nothing is set here.
     // Identity only — capabilities (build.features, hardware facts) are
     // computed inside the constructor from the engine's gates and the
     // services just injected — never restated here.
@@ -1230,9 +1293,10 @@ fn mount_filesystem(
 
 #[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
 #[esp_rtos::main]
-// The server loop runs as this main task itself; the thread executor's
-// spawner starts the link task beside it (io_task lives on the swi2
-// interrupt executor).
+// The server loop runs as this main task itself. The link task runs on its
+// own priority-1 thread (`io_thread`), or — without `io-thread` — the thread
+// executor's spawner starts it beside the server loop. io_task lives on the
+// swi2 interrupt executor either way.
 async fn main(spawner: embassy_executor::Spawner) {
     let app = boot_firmware(spawner);
 

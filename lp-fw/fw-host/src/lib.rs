@@ -15,6 +15,7 @@ pub use lpa_server::DEVICE_IDENTITY_PATH;
 // and profile come from build.rs; no VCS facts in this build.
 lpc_model::lp_embed_manifest_core! {
     package: env!("CARGO_PKG_NAME"),
+    target: "unknown",
     chip_family: "host",
     chip: "native",
     cargo_target: env!("LP_CARGO_TARGET"),

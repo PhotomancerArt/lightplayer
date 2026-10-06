@@ -118,18 +118,48 @@ impl UiOffer {
     ///   [`OfferArgError::Unavailable`] with its reason.
     ///
     /// The action carries where it was pressed from — this offer's path and
-    /// `args` as handed over ([`UiAction::offer_press`]).
+    /// `args` as handed over ([`UiAction::offer_press`]), with every secret
+    /// parameter's value replaced by [`crate::SECRET_MARKER`]: the binder
+    /// saw the real value, the stamp (what the app agent hears) never does.
     pub fn press(&self, args: &OfferArgs) -> Result<UiAction, OfferArgError> {
         let action = self.press_unchecked(args)?;
         match &action.meta().enablement {
             ActionEnablement::Enabled => Ok(action.pressed_from(OfferPress {
                 path: self.path.clone(),
-                args: args.clone(),
+                args: self.stamped_args(args),
             })),
             ActionEnablement::Disabled { reason } => Err(OfferArgError::Unavailable {
                 reason: reason.clone(),
             }),
         }
+    }
+
+    /// Whether any parameter is a secret: only the user presses such an
+    /// offer — the app agent hands it over as a card, and never fills the
+    /// secret.
+    pub fn takes_a_secret(&self) -> bool {
+        self.params.iter().any(OfferParam::is_secret)
+    }
+
+    /// The names of the secret parameters.
+    pub fn secret_params(&self) -> impl Iterator<Item = &str> {
+        self.params
+            .iter()
+            .filter(|param| param.is_secret())
+            .map(|param| param.name.as_str())
+    }
+
+    /// `args` as a press's stamp carries them: each secret's non-empty
+    /// value (spaces count: a password may hold them) replaced by
+    /// [`crate::SECRET_MARKER`].
+    fn stamped_args(&self, args: &OfferArgs) -> OfferArgs {
+        let mut stamped = args.clone();
+        for name in self.secret_params() {
+            if args.get(name).is_some_and(|value| !value.is_empty()) {
+                stamped.insert(name, crate::SECRET_MARKER);
+            }
+        }
+        stamped
     }
 
     /// [`Self::press`] without the final enablement check.
@@ -409,6 +439,54 @@ mod tests {
             offer.action,
             "provenance is not identity"
         );
+    }
+
+    /// The binder sees the secret; the stamp — what the agent hears — and
+    /// the pressed action's `Debug` never do.
+    #[test]
+    fn a_press_stamps_a_secret_as_the_marker() {
+        let seen = std::rc::Rc::new(std::cell::RefCell::new(String::new()));
+        let saw = std::rc::Rc::clone(&seen);
+        let offer = UiOffer::with_params(
+            OfferPath::project().child("set-password"),
+            "save",
+            vec![
+                OfferParam::text("network", "network", "network name"),
+                OfferParam::text("password", "password", "none")
+                    .optional()
+                    .secret(),
+            ],
+            OfferBinder::new(move |args: &OfferArgs| {
+                *saw.borrow_mut() = args.text("password").unwrap_or_default().to_string();
+                Ok(save_offer().action)
+            }),
+            save_offer().action,
+        );
+        assert!(offer.takes_a_secret());
+        assert_eq!(offer.secret_params().collect::<Vec<_>>(), ["password"]);
+
+        let pressed = offer
+            .press(
+                &OfferArgs::new()
+                    .with("network", "lp-walk-net")
+                    .with("password", "correct-horse-42"),
+            )
+            .unwrap();
+        assert_eq!(*seen.borrow(), "correct-horse-42", "the binder saw it");
+        let stamp = pressed.offer_press().unwrap();
+        assert_eq!(stamp.args.get("password"), Some(crate::SECRET_MARKER));
+        assert_eq!(stamp.args.get("network"), Some("lp-walk-net"));
+        assert!(!format!("{pressed:?}").contains("correct-horse-42"));
+
+        let blank = offer
+            .press(&OfferArgs::new().with("network", "x").with("password", ""))
+            .unwrap();
+        assert_eq!(
+            blank.offer_press().unwrap().args.get("password"),
+            Some(""),
+            "a blank field holds no secret to hide"
+        );
+        assert!(!save_offer().takes_a_secret());
     }
 
     #[test]

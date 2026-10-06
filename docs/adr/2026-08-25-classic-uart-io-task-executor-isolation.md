@@ -1,6 +1,6 @@
 # Classic ESP32: io_task executor isolation — interrupt executor + hardware pacer + byte shuttling
 
-- Status: accepted (amended 2026-09-29 — the host link above io_task is lp-link now; amended 2026-10-02 — esp-rtos thread creation is reachable after all; see the end)
+- Status: accepted (amended 2026-09-29 — the host link above io_task is lp-link now; amended 2026-10-02 — esp-rtos thread creation is reachable after all; amended 2026-10-03 — the `Link` itself moves to a core-0 esp-rtos thread; see the end)
 - Date: 2026-08-25
 - Plan: `lp2025/2026-08-24-1823-uart-io-task-starvation` (PR #448)
 - Fixes: `docs/debt/shared-uart-io-task-starvation.md`
@@ -293,3 +293,74 @@ board-porting milestone (`lp2025/2026-10-01-1832-wifi-control`, M2), to be
 answered with its own measurements — the classic needs `esp-rtos/esp-radio`
 for `task_create`, and its io_task's 1 ms byte service is a constraint a
 thread would have to keep.
+
+## Amended 2026-10-03 — the link on a core-0 thread (M2)
+
+M2 answered the question the 2026-10-02 amendment left open. Plan
+`lp2025/2026-10-02-1918-io-thread-other-boards` (PR #943) moves the
+classic's `Link` off the thread executor it shared with the server loop
+(the 2026-09-29 arrangement) onto its own priority-1 `esp_rtos::embassy::Executor`,
+thread-pinned to core 0 (`fw-esp32v3/src/io_thread.rs`, feature
+`io-thread`) — the C6/S3 shape, not a new one. **On silicon it measured
+worse than the main-executor arrangement in every setting, so it ships
+opt-in, off by default** (the C6 link-thread ADR's classic amendment,
+"Silicon (2026-10-03)": a preemption costs this chip's render ~4–5 ms of
+flash-cache refill, and messages-first, the thread's whole latency win,
+turns Studio's costly reads into judder here). Everything below describes
+the thread when it is built.
+
+**What does not change, and why this ADR still governs it**: io_task stays
+exactly as this ADR specifies — the swi2 `InterruptExecutor` at Priority2,
+its only clock the 1 ms TIMG0-timer1 pacer, byte-shuttle only, `SendUart`
+and `into_async()` thread-side. **DD20 still holds**: the `Link` is never
+polled from io_task's executor, on an interrupt executor or otherwise — it
+moved from the main thread executor to a *second* thread, not onto io_task.
+The two meet only where the 2026-09-29 amendment already described: the RX
+and TX pipes, and the doorbell `Signal`.
+
+**Why core 0, always, and never unpinned**: the APP core (core 1) is fully
+owned by the RMT refill ISR and the wire pusher
+(`output/rmt/wire_pusher.rs`), whose frame doorbell is software interrupt 1
+— finding 3 above, the reason io_task itself sits on swi2 and not swi1. In
+esp-rtos's `multi_core` build, switching out an **unpinned** task raises the
+software interrupt that schedules the *other* core
+(`esp-rtos-0.3.0/src/scheduler.rs`, `run_scheduler`); an unpinned link
+thread could raise SWI1 and collide with the wire pusher's doorbell exactly
+as finding 3 describes for an unpinned executor. Pinning both the main task
+(already true, `esp_rtos::start`'s `allocate_main_task`) and the link
+thread to core 0 means esp-rtos never needs to schedule core 1 and so never
+raises SWI1 on its own account — read off esp-rtos 0.3.0's scheduler, not
+yet exercised on silicon. The APP core itself was ruled out as a home for
+the link thread for the same reason this ADR's "Second core" alternative
+was always off the table: it is the RMT core, and `with_app_core_stalled`
+hardware-stalls it around every flash write, which would freeze the link
+mid-upload.
+
+**The lock**: `UartLinkShared` gains the C6/S3's `LinkLock` hook
+(`leak_locked`, re-exporting `crate::link_lock`); the classic injects
+`RawPriorityLimitedMutex` at `Priority1`. The `RefCell` that was the only
+guard under the 2026-09-29 arrangement stays, now as the overlap detector:
+anything the lock let through would panic rather than alias a `&mut`. The
+short-closure rule (`uart_link_shared.rs`) is new text this amendment adds:
+a `with_link` closure masks, for as long as it runs, esp-rtos's
+context-switch interrupt and timer tick, io_task's 1 ms pacer and UART0's
+interrupt — all Priority1 on core 0 — but never io_task's own executor
+(Priority2), the RMT refill ISR, or the wire-pusher doorbell (core 1; masks
+are per core). The bound is the 128 B RX FIFO filling in ~1.4 ms while the
+pacer is held off; every closure today is microseconds against that.
+
+**Messages-first ships with the thread, never alone** — see
+`docs/adr/2026-10-02-c6-link-io-thread.md`'s own 2026-10-03 amendment for
+why: the classic measured messages-first alone (no thread) and found it
+flat, refining that ADR's pairing rule rather than contradicting it.
+
+**OQ9 (folding UART service itself into this thread, retiring swi2 and the
+pacer) is explicitly not this change** — a later question, after a silicon
+walk, per the M2 plan.
+
+Measured (`lp-emu:esp32v3:t1`, `ab8345d38`): heap −3,456 B free / −3,455 B
+largest (under the ~5 KB stop line this plan set); stack high-water
+1,660–1,692 B of a 3 KB stack (≤ 55 %); 0 app errors across the
+`--uart-faults` soak; log-ring drops under the five-wire load fell from 25
+(main) to 0. Full numbers are in the C6 ADR's classic amendment, above.
+Silicon is pending the desk walk (`desk-classic.md`).

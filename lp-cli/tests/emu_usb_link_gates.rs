@@ -63,11 +63,14 @@ const CONSOLE_IN_ORDER: &[(&str, Option<&str>)] = &[
     ("[INIT] Initializing board...", None),
     ("[INIT] io thread: stack 3072 B, priority 1", None),
     ("[link] up (session 0)", None),
+    // The radios come up in the core's half of the boot (`core_boot`), the
+    // LED driver in the engine's (`lp_engine_entry`) — the split boot's
+    // order, which the monolithic image keeps (OTA M2, P01).
+    ("ESP-NOW radio ready", None),
     (
         "Esp32C6RmtWs281xDriver: 2 WS281x channels for 2 declared",
         None,
     ),
-    ("ESP-NOW radio ready", None),
     ("starting server loop... proto=", None),
     (
         "M!{\"id\":0,\"msg\":{\"hello\":{\"proto\":",

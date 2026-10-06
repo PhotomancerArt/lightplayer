@@ -52,11 +52,41 @@ fn a_project_loaded_with_the_sidecar_as_a_source_is_refused_without_the_bytes() 
         .load_project(PROJECT.as_path())
         .expect_err("the shader's source cannot be read");
     let error = format!("{error:?}");
-    assert!(
-        error.contains("access files are not readable by a project"),
-        "{error}"
-    );
+    assert!(error.contains("are not readable by a project"), "{error}");
     assert!(!error.contains(CANARY), "{error}");
+}
+
+/// The same door for the network file: a project naming `.lp/network.json`
+/// as a source is refused at load, and nothing quotes the bytes.
+#[test]
+fn a_project_loaded_with_a_network_file_as_a_source_is_refused_without_the_bytes() {
+    let mut server = server_with_project(".lp/network.json");
+    let error = server
+        .load_project(PROJECT.as_path())
+        .expect_err("the shader's source cannot be read");
+    let error = format!("{error:?}");
+    assert!(error.contains("are not readable by a project"), "{error}");
+    assert!(!error.contains(CANARY), "{error}");
+}
+
+/// And the device's own network file, reached out of the project's
+/// directory: whatever refuses it, no byte comes out.
+#[test]
+fn a_project_reaching_for_the_devices_network_file_reads_nothing() {
+    let mut server = server_with_project("../../.lp/network.json");
+    match server.load_project(PROJECT.as_path()) {
+        Err(error) => {
+            let error = format!("{error:?}");
+            assert!(!error.contains(CANARY), "{error}");
+        }
+        Ok(handle) => {
+            for _ in 0..4 {
+                server.advance_frame(16).expect("advance frame");
+            }
+            let replies = replies(&mut server, handle);
+            assert!(!replies.contains(CANARY), "{replies}");
+        }
+    }
 }
 
 /// The control: the same bytes under a name that is NOT an access file ARE
@@ -102,7 +132,7 @@ fn a_shader_retargeted_at_the_sidecar_reads_nothing() {
         "a byte of the access file reached a reply:\n{replies}"
     );
     assert!(
-        replies.contains("access files are not readable by a project"),
+        replies.contains("are not readable by a project"),
         "the asset reports why it did not load:\n{replies}"
     );
 }
@@ -177,12 +207,28 @@ fn server_with_project(source: &str) -> LpServer {
         3,
     )]);
     let sidecar = sidecar.to_json().expect("sidecar json");
-    for path in [".lp/access.json", ".lp/not-access.json"] {
+    for path in [".lp/access.json", ".lp/network.json", ".lp/not-access.json"] {
         server
             .base_fs_mut()
             .write_file(project.join(path).as_path(), sidecar.as_bytes())
             .expect("write sidecar");
     }
+    // The device's own network file, its password the canary too.
+    let network = lpc_access::NetworkFile {
+        networks: vec![lpc_access::WifiNetwork {
+            ssid: String::from("lp-walk-net"),
+            password: String::from(CANARY),
+            hidden: false,
+        }],
+        ..lpc_access::NetworkFile::none()
+    };
+    server
+        .base_fs_mut()
+        .write_file(
+            lpc_access::NetworkFile::PATH.as_path(),
+            network.to_json().expect("network json").as_bytes(),
+        )
+        .expect("write network file");
     server
 }
 

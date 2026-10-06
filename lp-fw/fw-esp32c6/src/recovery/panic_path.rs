@@ -140,7 +140,7 @@ pub fn stage_and_reset(info: &core::panic::PanicInfo) -> ! {
         // Re-entered while handling a panic. Do the absolute minimum — no
         // formatting of caller-controlled values, no ledger write — and go.
         esp_println::println!("\n[PANIC] recursive panic in the panic path; resetting now");
-        esp_hal::system::software_reset()
+        crate::board::esp32c6::restart::restart()
     }
 
     // Mask interrupts before anything else. If the panic came from inside an
@@ -184,7 +184,7 @@ pub fn stage_and_reset(info: &core::panic::PanicInfo) -> ! {
 
     esp_println::println!("[RECOVERY] resetting");
     lp_recovery::finalize_crash_and_reset();
-    esp_hal::system::software_reset()
+    crate::board::esp32c6::restart::restart()
 }
 
 /// The `#[alloc_error_handler]` path: record the heap state, then reset.
@@ -207,7 +207,7 @@ pub fn stage_oom_and_reset(layout: core::alloc::Layout) -> ! {
         // the first failure. Nothing here allocates except the probes below,
         // which return their memory immediately; say so rather than looping.
         esp_println::println!("\n[OOM] recursive allocation failure while reporting; resetting");
-        esp_hal::system::software_reset()
+        crate::board::esp32c6::restart::restart()
     }
 
     esp_hal::riscv::interrupt::disable();
@@ -310,7 +310,7 @@ pub fn stage_oom_and_reset(layout: core::alloc::Layout) -> ! {
 
     esp_println::println!("[RECOVERY] resetting");
     lp_recovery::finalize_crash_and_reset();
-    esp_hal::system::software_reset()
+    crate::board::esp32c6::restart::restart()
 }
 
 /// Print captured PCs — or say plainly why there are none.

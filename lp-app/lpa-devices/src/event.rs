@@ -14,7 +14,9 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::activity::{ActivityKind, ActivityOutcome};
+use crate::activity::{
+    ActivityKind, ActivityOutcome, UpdateIntentFacts, UpdateOutcomeFacts, UpdateStageFacts,
+};
 use crate::identity::DeviceId;
 use crate::link::{LinkCommand, LinkEvent, LinkId, LinkInfo};
 use crate::record::DeviceRecord;
@@ -192,6 +194,19 @@ pub enum Action {
     RemoveProject {
         device: DeviceId,
     },
+    /// Update this board's firmware over its own link (an over-the-air
+    /// update, run in legs across the board's resets — see
+    /// [`UpdateActivity`](crate::activity::UpdateActivity)).
+    ///
+    /// `Auto` is what the controller spawns with no click when a board
+    /// waits for its engine or holds this Studio's transfer (heal and
+    /// finish are not offers); the other intents are the person's. Refused
+    /// under any other activity; an update aimed at a board already
+    /// updating is a no-op (no second activity, no error).
+    Update {
+        device: DeviceId,
+        intent: UpdateIntentFacts,
+    },
     SetName {
         device: DeviceId,
         name: String,
@@ -216,6 +231,7 @@ impl Action {
             | Self::ConfirmFlashLayout { device }
             | Self::Erase { device }
             | Self::RemoveProject { device }
+            | Self::Update { device, .. }
             | Self::ResetBoard { device }
             | Self::ClearFaults { device }
             | Self::SetName { device, .. }
@@ -336,6 +352,19 @@ pub enum ActivityMarker {
     LayoutVerdict {
         verdict: crate::activity::LayoutVerdict,
     },
+    /// An update leg's progress (the driver's stage, or `Waiting` while
+    /// another device holds the transfer): the card's stage and percent.
+    UpdateStage {
+        stage: UpdateStageFacts,
+        done: u32,
+        total: u32,
+    },
+    /// How the update driver finished, reported just before the leg's
+    /// `Ended`. A leg that ends with no outcome ended with its link (the
+    /// board reset, or the link dropped). The device also raises this
+    /// itself, unstamped, for an ending only the model sees (the board
+    /// never came back).
+    UpdateOutcome(UpdateOutcomeFacts),
 }
 
 /// Something the effects layer must do. The model emits these and forgets
@@ -464,6 +493,20 @@ pub enum EffectRequest {
     /// dir gets deleted is not the model's to name. The board's own report
     /// is the only honest answer, and it is read inside the conversation.
     RemoveProject,
+    /// One leg of an over-the-air update, run over the device's OPEN link —
+    /// not a borrowed wire: update traffic is routed beside channel 1
+    /// ([`LinkEvent::Update`](crate::LinkEvent::Update) in,
+    /// [`LinkCommand::SendUpdate`](crate::LinkCommand::SendUpdate) out), so
+    /// nothing pauses the link. The effects layer holds the update driver
+    /// across legs and drops it when the activity ends.
+    ///
+    /// Progress arrives as [`ActivityMarker::UpdateStage`]. The leg ends
+    /// with [`ActivityMarker::Ended`]: after an
+    /// [`ActivityMarker::UpdateOutcome`] when the driver finished; with
+    /// [`ActivityOutcome::Interrupted`] and no outcome when the link went
+    /// down under it (the board reset); with any other outcome and none
+    /// typed when the leg could not run at all.
+    Update { intent: UpdateIntentFacts },
 }
 
 #[cfg(test)]
@@ -489,6 +532,10 @@ mod tests {
                 restore_backup: false,
             },
             Action::ConfirmFlashLayout { device },
+            Action::Update {
+                device,
+                intent: UpdateIntentFacts::Auto,
+            },
             Action::SetName {
                 device,
                 name: "n".to_string(),

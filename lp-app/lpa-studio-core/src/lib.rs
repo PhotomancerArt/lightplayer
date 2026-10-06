@@ -46,6 +46,8 @@ pub use app::devices::BrowserEmuLinkSource;
 pub use app::devices::BrowserSerialTransport;
 #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
 pub use app::devices::BrowserSimLinkSource;
+#[cfg(any(test, feature = "story-fixtures"))]
+pub use app::devices::device_update_fixtures::{UpdateFixture, UpdateFixtureRow};
 pub use app::devices::{
     AUTOCONNECT_ENABLED_PARAM, BLE_ENDPOINT_PREFIX, Backing, BleDeviceTransport, BleLinkSource,
     BluetoothReach, BoardRef, BoardRefError, CompletedPush, CompositeDeviceTransport,
@@ -81,7 +83,16 @@ pub use app::devices::{
     DeviceBackupStore, MemoryBackupStore, UiDeviceLayout, UiLayoutPanel, check_store_contract,
     device_layout_view,
 };
+pub use app::devices::{DeviceFirmwareSources, StudioFirmwareStore};
+pub use app::devices::{
+    INSTALL_VERSION_PARAM, StoreLatest, USB_UPDATES_OVER_THE_AIR, UiDeviceUpdate, UiSessionUpdate,
+    UpdateBuildFacts, UpdateLight, UpdateLink, UpdateOfferFacts, UpdateOffers, UpdateProgress,
+    UpdateRoute, UpdateRowKind, UpdateRunTone, UpdateRunWord, UpdateStanding, UpdateStandingInputs,
+    UpdateVersion, UpdateVersionDisplay, update_offers, update_route, update_session_words,
+    update_standing, update_words, wants_auto_start,
+};
 pub use app::devices::{LINK_COUNTERS_CAPTION, LinkTrouble, UiLinkCounterRow, link_counter_rows};
+pub use app::devices::{MemoryOwnBuildSource, OwnBuildSource, UpdateHost};
 pub use app::docs_host::DocsSimHost;
 pub use app::studio::PlayViewOp;
 pub use app::studio::{UiPage, UiPanel, UiPlace, UiProjectView, UiSessionSection};
@@ -107,6 +118,13 @@ pub use app::home::{
     open_project_offer, template_project_files,
 };
 pub use app::library::{DESKTOP_BOARD_ID, ProjectTarget};
+pub use app::network::{
+    NEEDS_AUTHOR, NetworkChange, NetworkCommand, NetworkOp, PasswordChange, READING, UiDeviceWifi,
+    UiWifiNetworkRow, UiWifiTest, UiWifiTestResult, UiWifiTestStepLine, WIFI_ENABLED_PARAM,
+    WIFI_FORGET_SEGMENT, WIFI_HIDDEN_PARAM, WIFI_NETWORK_PARAM, WIFI_PASSWORD_PARAM, WifiStepState,
+    WifiTestNext, WifiTestOutcome, WifiTestProgress, WifiTestStep, WifiTone, signal_bars,
+    signal_word,
+};
 pub use app::node::{
     UiAssetEditor, UiAssetEditorKind, UiBindingAuthoring, UiBindingAuthoringDirection,
     UiBindingEndpoint, UiCellProjection, UiChannelChoice, UiClockFace, UiClockTransport,
@@ -221,7 +239,7 @@ pub use core::log::{DeviceEventKind, DeviceEventRecorder};
 pub use core::notice::UiNotices;
 pub use core::offer::{
     OfferArgError, OfferArgs, OfferBinder, OfferChoice, OfferNearness, OfferParam, OfferParamKind,
-    OfferPath, OfferPathError, OfferPress, UiOffer, UiOfferFocus, UiOfferTree,
+    OfferPath, OfferPathError, OfferPress, SECRET_MARKER, UiOffer, UiOfferFocus, UiOfferTree,
 };
 pub use core::view::activity_view::UiActivityStep;
 pub use core::view::activity_view::UiActivityStepState;
@@ -250,6 +268,11 @@ pub use lpa_devices::{
     LinkCounterFacts as DeviceLinkCounters, LinkId as DeviceLinkId, LinkInfo as DeviceLinkInfo,
     Millis as DeviceMillis, RosterConfig as DeviceRosterConfig, TerminalKind as DeviceTerminalKind,
     TerminalLine as DeviceTerminalLine, WireVersion as DeviceWireVersion,
+};
+/// What a board reports about its saved networks, its station and what it
+/// hears.
+pub use lpc_wire::server::{
+    HeardNetwork, LastAttempt, NetworkStatus, SavedNetworkInfo, StationFailure, StationState,
 };
 
 pub const STUDIO_DEMO_PROJECT_ID: &str = "catalog/fyeah-sign";

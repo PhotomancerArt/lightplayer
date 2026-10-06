@@ -35,6 +35,19 @@ lpa-link = { path = "../lpa-link", features = ["device-session", "device-link", 
 # lists, and opening an older-but-supported one migrates it in place.
 lpa-upgrade = { path = "../lpa-upgrade" }
 lpc-history = { path = "../../lp-core/lpc-history", default-features = false }
+# The engine cache seam and the firmware store client (OTA M5): installed
+# by the shell, read by the update flow (M4/M7). Sans-IO, wasm-safe.
+lpa-firmware-store = { path = "../lpa-firmware-store" }
+# A released build's `ota-manifest.json` (M7's update host reads the store's
+# builds: their facts for "Other version…", their files to install).
+# no_std + serde; already in the graph through lpa-firmware-store.
+lpc-firmware-release = { path = "../../lp-core/lpc-firmware-release" }
+# The over-the-air update's host side (M7): `decide()` on this Studio's
+# build facts reads a board's standing for the card's words and offers
+# (`app/devices/device_update_standing.rs`); `lpc-update` parses the board
+# manifest the device model carries verbatim. Both no_std + alloc.
+lpa-update = { path = "../lpa-update" }
+lpc-update = { path = "../../lp-core/lpc-update" }
 # Which package files are access files (they never leave the library in an
 # export or a share envelope; a device push does carry them).
 lpc-access = { path = "../../lp-core/lpc-access" }
@@ -95,6 +108,8 @@ futures-util = "0.3"
 lpc-shared = { path = "../../lp-core/lpc-shared", features = ["std"] }
 lpc-mapping = { path = "../../lp-core/lpc-mapping" }
 jsonschema = { version = "0.46", default-features = false }
+# The update host's end-to-end tests drive a model board (`BoardRig`).
+lpc-update = { path = "../../lp-core/lpc-update", features = ["test-support"] }
 lpfs = { path = "../../lp-base/lpfs", features = ["std"] }  # std for host tests
 # App-agent evals (`app/agent/evals`): the in-process server wears the
 # XIAO C6's real pin map, and scenarios are TOML fixtures.
@@ -139,6 +154,11 @@ browser-ble = [
     "lpa-link/browser-ble",
     "dep:wasm-bindgen-futures",
 ]
+# The update story's real inputs (`app/devices/device_update_fixtures.rs`):
+# a board manifest, this Studio's build facts and the device view, for the
+# web's stories to read through the same standing, words and offers the
+# controller does. Stories only; never in an app build.
+story-fixtures = []
 
 [lints]
 workspace = true

@@ -9,11 +9,13 @@
 //!
 //! # One mechanism, three questions
 //!
-//! There are three kinds of artefact here — a plain feature-set ELF
-//! ([`fw_esp32c6_image`]), a pinned reference ELF ([`reference_image`]) and
-//! the merged flash image beside it ([`merged_image`]) — and they used to
-//! carry three copies of the same careful sequence. They now share one:
-//! [`resolve`]. It answers three questions and nothing else does.
+//! There are four kinds of artefact here — a plain feature-set ELF
+//! ([`fw_esp32c6_image`]), a pinned reference ELF ([`reference_image`]), the
+//! merged flash image beside it ([`merged_image`]), and a **split image**
+//! directory ([`split_image`]: the ESP32-C6 product image as `lp-fw-split`
+//! lays it out) — and they used to carry copies of the same careful
+//! sequence. They now share one: [`resolve`]. It answers three questions and
+//! nothing else does.
 //!
 //! **Which file?** In order:
 //!
@@ -37,8 +39,9 @@
 //! **`LP_EMU_C6_IMAGE_DIR`** replaces rungs 2 and 3 with a directory of
 //! images someone else built — CI's own, fetched by `just fetch-ci-images`
 //! (`docs/ci-images.md`): `<dir>/tree/<SLUG>/fw-esp32c6` for a feature-set
-//! ELF, `<dir>/emu-ref/<commit>-<slug>/{fw-esp32c6,merged.bin}` for a
-//! reference image. With it set nothing is ever built, and an image the
+//! ELF, `<dir>/tree/<SLUG>_SPLIT/{merged.bin,loader.elf,p2.elf,split.json}`
+//! for a split image, `<dir>/emu-ref/<commit>-<slug>/{fw-esp32c6,merged.bin}`
+//! for a reference image. With it set nothing is ever built, and an image the
 //! directory does not hold **panics** rather than skipping: a test that
 //! skipped there would be a green run against nothing. The explicit
 //! per-image variables in rung 1 still win.
@@ -258,6 +261,10 @@ const SOURCE_PATHS: &[&str] = &[
     "lp-base",
     "lp-shader",
     "lp-gfx",
+    // The version every build stamps, and the split pipeline that links and
+    // lays out a split image.
+    "tools/lp-app-version",
+    "tools/lp-fw-split",
     "Cargo.toml",
     "Cargo.lock",
 ];
@@ -474,6 +481,167 @@ fn cargo_build_fw(root: &Path, image: &FwImage) -> Result<(), String> {
         conventional.display()
     );
     Ok(())
+}
+
+/// A split image: the directory `lp-fw-split build` writes for one feature
+/// set. Only the four files a boot test reads are part of the artefact.
+///
+/// The emulator knows nothing of the layout inside (the MIT fence): a test
+/// boots [`merged`](Self::merged) from the reset vector, or direct-loads
+/// [`loader_elf`](Self::loader_elf) over it
+/// (`Esp32C6Builder::flash_holds_image`), and reads symbols from
+/// [`p2_elf`](Self::p2_elf).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SplitImage {
+    pub dir: PathBuf,
+}
+
+impl SplitImage {
+    /// The files that make the artefact, relative to [`Self::dir`].
+    pub const FILES: [&'static str; 4] = ["merged.bin", "loader.elf", "p2.elf", "split.json"];
+
+    /// The whole chip, padded to the part: what a flasher would have written.
+    pub fn merged(&self) -> PathBuf {
+        self.dir.join("merged.bin")
+    }
+
+    /// The RAM-only loader the bootloader starts.
+    pub fn loader_elf(&self) -> PathBuf {
+        self.dir.join("loader.elf")
+    }
+
+    /// The second link pass: the core's and the engine's symbols.
+    pub fn p2_elf(&self) -> PathBuf {
+        self.dir.join("p2.elf")
+    }
+
+    /// The build's own report.
+    pub fn split_json(&self) -> PathBuf {
+        self.dir.join("split.json")
+    }
+}
+
+/// The slug a split image of `image` is filed under: the feature set's, plus
+/// `_SPLIT`, so it can never collide with the plain image of the same set.
+pub fn split_slug(image: &FwImage) -> String {
+    format!("{}_SPLIT", image.slug())
+}
+
+/// The split image of `image`'s feature set, or `Err` with a reason.
+///
+/// The same three rungs as [`fw_esp32c6_image`], for a directory:
+///
+/// 1. `LP_EMU_C6_SPLIT_<SLUG>` names an already-built directory (it must
+///    hold [`SplitImage::FILES`]);
+/// 2. `target/lp-emu-c6/<SLUG>_SPLIT-<SOURCE>/`, keyed to the source tree;
+/// 3. with `LP_EMU_BUILD_FW=1`, built by running `lp-fw-split` as a
+///    **process** (`cargo run -p lp-fw-split --release -- build`) — a build
+///    step like `cargo build`, never a Cargo dependency of this crate.
+///
+/// `LP_EMU_C6_IMAGE_DIR` replaces 2 and 3 with `tree/<SLUG>_SPLIT/`. Only a
+/// default-features image can be split (the pipeline keeps the defaults on).
+/// The shipped set is built as the target `esp32c6-4mb`, so its manifest core
+/// says what the packaged image's does.
+pub fn split_image(image: &FwImage) -> Result<SplitImage, String> {
+    assert!(
+        image.default_features,
+        "lp-fw-split builds with fw-esp32c6's defaults on; {} turns them off",
+        image.slug()
+    );
+    let slug = split_slug(image);
+    let var = format!("LP_EMU_C6_SPLIT_{}", image.slug());
+    let what = format!("the split image for `{}`", image.slug());
+    if let Ok(dir) = std::env::var(&var) {
+        return complete_split_dir(PathBuf::from(dir), &var);
+    }
+    if let Some(dir) = ci_image_dir() {
+        let rel = Path::new("tree").join(&slug);
+        for file in SplitImage::FILES {
+            from_ci_image_dir(&dir, &rel.join(file), &what);
+        }
+        return Ok(SplitImage { dir: dir.join(rel) });
+    }
+    let root = workspace_root().ok_or("could not find the workspace root")?;
+    let key = source_key(&root).ok_or(
+        "no source key for this tree: a split image is only ever used from its keyed directory",
+    )?;
+    let dir = root
+        .join("target")
+        .join("lp-emu-c6")
+        .join(format!("{slug}-{key}"));
+    // The directory is published by one rename, so `merged.bin` being there
+    // means the other three are too.
+    let merged = resolve(
+        &what,
+        &[],
+        &dir.join("merged.bin"),
+        "`just test-emu-c6`",
+        || build_split(&root, image, &dir),
+    )?;
+    Ok(SplitImage {
+        dir: merged
+            .parent()
+            .expect("merged.bin has a parent")
+            .to_path_buf(),
+    })
+}
+
+/// A split directory named by a variable: it was asked for, so a missing
+/// file is an error rather than a fall-through.
+fn complete_split_dir(dir: PathBuf, var: &str) -> Result<SplitImage, String> {
+    for file in SplitImage::FILES {
+        if !dir.join(file).is_file() {
+            return Err(format!(
+                "{var} points at {}, which holds no {file}",
+                dir.display()
+            ));
+        }
+    }
+    Ok(SplitImage { dir })
+}
+
+/// `lp-fw-split build` for one feature set into a scratch directory, then
+/// the four files published into `dir` by one rename. Panics on a failed
+/// build: `LP_EMU_BUILD_FW=1` asked for this image.
+fn build_split(root: &Path, image: &FwImage, dir: &Path) -> Result<(), String> {
+    let scratch = dir.with_extension("partial");
+    let _ = std::fs::remove_dir_all(&scratch);
+    let mut cmd = Command::new("cargo");
+    cmd.current_dir(root)
+        .args([
+            "run",
+            "-q",
+            "-p",
+            "lp-fw-split",
+            "--release",
+            "--",
+            "build",
+            "--out",
+        ])
+        .arg(&scratch)
+        .arg("--features")
+        .arg(image.features.join(","));
+    if *image == FwImage::SHIPPED {
+        cmd.args(["--target", "esp32c6-4mb"]);
+    }
+    let status = cmd
+        .status()
+        .unwrap_or_else(|e| panic!("running lp-fw-split: {e}"));
+    assert!(
+        status.success(),
+        "lp-fw-split build failed: {status} — LP_EMU_BUILD_FW=1 asked for this image, so a \
+         failed build is a failed test, not a skip"
+    );
+    let publish = dir.with_extension("publish");
+    let _ = std::fs::remove_dir_all(&publish);
+    std::fs::create_dir_all(&publish)
+        .map_err(|e| format!("creating {}: {e}", publish.display()))?;
+    for file in SplitImage::FILES {
+        std::fs::copy(scratch.join(file), publish.join(file))
+            .map_err(|e| format!("copying {file} out of {}: {e}", scratch.display()))?;
+    }
+    let _ = std::fs::remove_dir_all(&scratch);
+    std::fs::rename(&publish, dir).map_err(|e| format!("publishing {}: {e}", dir.display()))
 }
 
 /// Print the reason a boot test is skipping, in one recognisable shape.

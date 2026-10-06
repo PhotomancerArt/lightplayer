@@ -1,4 +1,5 @@
-//! The project runtime's filesystem, with the access files taken out of it.
+//! The project runtime's filesystem, with the write-only files (the access
+//! files and the network file) taken out of it.
 //!
 //! The fs *wire* path already refuses an access file's bytes on every link
 //! (`handlers::handle_fs_request`, `file_sync`). That leaves every other
@@ -11,7 +12,7 @@
 //!
 //! So a loaded project never sees one. [`AccessGuardedFs`] wraps the
 //! project's chrooted view and answers a read of any path
-//! [`lpc_access::is_access_file_path`] holds for with an error — the
+//! [`lpc_access::is_write_only_file_path`] holds for with an error — the
 //! resource fails to load and says so, and nothing downstream ever has the
 //! bytes to leak. Everything else passes straight through, writes and
 //! deletes included (edit may write an access file; nobody reads one).
@@ -29,7 +30,8 @@ use core::cell::RefCell;
 
 use lpfs::{FsError, FsEvent, FsVersion, LpFs, LpPath, LpPathBuf};
 
-/// A project filesystem that refuses to read access files.
+/// A project filesystem that refuses to read write-only files: access files
+/// and the network file.
 pub struct AccessGuardedFs {
     inner: Rc<RefCell<dyn LpFs>>,
 }
@@ -50,9 +52,9 @@ impl AccessGuardedFs {
 
 impl LpFs for AccessGuardedFs {
     fn read_file(&self, path: &LpPath) -> Result<Vec<u8>, FsError> {
-        if lpc_access::is_access_file_path(path.as_str()) {
+        if lpc_access::is_write_only_file_path(path.as_str()) {
             return Err(FsError::Filesystem(format!(
-                "{}: access files are not readable by a project",
+                "{}: write-only files (access files, the network file) are not readable by a project",
                 path.as_str()
             )));
         }

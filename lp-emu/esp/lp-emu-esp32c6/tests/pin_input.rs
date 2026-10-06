@@ -15,7 +15,9 @@
 
 use std::path::PathBuf;
 
+use lp_emu_esp_common::Strap;
 use lp_emu_esp_common::pins::PadId;
+use lp_emu_esp32c6::loader::ResetCause;
 use lp_emu_esp32c6::machine::{
     AppSource, Esp32C6Builder, Esp32C6Machine, Outcome, PinLogSink, StopCondition, TimeGrade,
 };
@@ -240,4 +242,58 @@ fn g1_7_a_wire_onto_a_spoken_for_pad_is_refused_at_the_flag() {
     }
     assert_eq!(parse_wire("18:19").unwrap(), (PadId(18), PadId(19)));
     assert!(parse_wire("19:18").is_err(), "gpio18 is the TX side only");
+}
+
+/// The defect this test is named for:
+/// `docs/defects/2026-10-04-emu-restart-drops-pad-drives.md`. A pad a
+/// `--pin-script` line is driving from outside the chip is wired to the
+/// board, not the chip, so it must still read driven after **both**
+/// `reboot()` and `power_cycle()` — on silicon neither resets outside
+/// wiring, only the chip's own registers.
+#[test]
+fn a_pad_an_outside_driver_holds_survives_a_reboot_and_a_power_cycle() {
+    let log = scratch("restart-survives.pinlog");
+    // `reboot_on_reset(true)` is what makes `reboot()`/`power_cycle()` take:
+    // the power-on snapshot they restore from is only built when a run asks
+    // for it (it is a whole copy of guest memory), so the shared `machine()`
+    // helper — built for the no-reset pin/wire gates — does not ask for it.
+    let mut m = Esp32C6Builder::new()
+        .app(AppSource::None)
+        .time_grade(TimeGrade::T1)
+        .pin_log(PinLogSink::File(log))
+        .reboot_on_reset(true)
+        .pin_script(parse_pin_script("0 pin 5 1\n").expect("a valid script"))
+        .build()
+        .expect("the machine builds");
+    assert!(matches!(run_for(&mut m, 100), Outcome::Deadline { .. }));
+
+    let driven_gpio5 =
+        |m: &Esp32C6Machine| m.pads().iter().find(|p| p.pad == 5).expect("gpio5").driven;
+    assert_eq!(
+        driven_gpio5(&m),
+        Some(true),
+        "the script is holding gpio5 high"
+    );
+
+    assert!(
+        m.reboot(Strap::App, ResetCause::UsbUartHpSys),
+        "a reboot was armed"
+    );
+    assert_eq!(
+        driven_gpio5(&m),
+        Some(true),
+        "a reboot does not touch what is wired to the pad from outside the chip"
+    );
+    assert_eq!(
+        m.pads().iter().find(|p| p.pad == 5).expect("gpio5").route,
+        None,
+        "the chip's own routing came back from the power-on snapshot"
+    );
+
+    assert!(m.power_cycle(Strap::App), "the supply comes back");
+    assert_eq!(
+        driven_gpio5(&m),
+        Some(true),
+        "a power cycle does not touch it either"
+    );
 }

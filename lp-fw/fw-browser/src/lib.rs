@@ -36,6 +36,7 @@ mod tests;
 // `tools/lp-app-version`) and no commit facts.
 lpc_model::lp_embed_manifest_core! {
     package: env!("CARGO_PKG_NAME"),
+    target: "unknown",
     chip_family: "browser",
     chip: "wasm32",
     cargo_target: "wasm32-unknown-unknown",

@@ -208,6 +208,14 @@ impl PendingLink {
         self.provisional.is_busy()
     }
 
+    /// The activity the provisional entry runs, if any: identification, or
+    /// an update that started on the link before it was adopted (a
+    /// core-only board's no-click restore). The effects layer asks it to
+    /// know when an update it drives has ended.
+    pub fn activity_kind(&self) -> Option<crate::activity::ActivityKind> {
+        self.provisional.activity_kind()
+    }
+
     /// The verdict, once identification has settled.
     pub fn verdict(&self) -> Option<&Classification> {
         if self.provisional.is_busy() || !self.provisional.evidence.is_settled() {
@@ -482,9 +490,14 @@ impl Roster {
                 }
             },
             Event::TimerFired { timer } => self.dispatch_timer(now, *timer, input),
-            Event::ActivityMarker { device, .. } | Event::IdentityObserved { device, .. } => {
-                self.dispatch_to_device(now, *device, input)
-            }
+            // A pending link's provisional entry runs an activity too (an
+            // update that restores a core-only board before it says who it
+            // is): its effect's markers reach it there.
+            Event::ActivityMarker { device, .. } => match self.holder_of(*device) {
+                Some(Holder::Pending(index)) => self.dispatch_to_pending(now, index, input),
+                _ => self.dispatch_to_device(now, *device, input),
+            },
+            Event::IdentityObserved { device, .. } => self.dispatch_to_device(now, *device, input),
             // A chooser's answer is roster news: a picked device already
             // arrived as its `LinkAttached`.
             Event::GrantAnswered { .. } => {
@@ -538,8 +551,9 @@ impl Roster {
             let Self { devices, state, .. } = self;
             let device = &mut devices[index];
             // `fold_only` deliberately skips eviction, so the dead
-            // generation's activity is evicted here — its ground is gone.
-            let mut commands = device.evict(now, EvictionReason::LinkLost, &mut state.ctx());
+            // generation's activity is evicted here — its ground is gone —
+            // unless it outlives its link (an update across a reset).
+            let mut commands = device.lose_link(now, &mut state.ctx());
             commands.extend(device.fold_only(
                 now,
                 &Event::LinkDetached { link: old },
@@ -576,10 +590,7 @@ impl Roster {
             let Self { pending, state, .. } = self;
             let entry = &mut pending[index];
             // Same eviction note as the device branch above.
-            let mut commands =
-                entry
-                    .provisional
-                    .evict(now, EvictionReason::LinkLost, &mut state.ctx());
+            let mut commands = entry.provisional.lose_link(now, &mut state.ctx());
             commands.extend(entry.provisional.fold_only(
                 now,
                 &Event::LinkDetached { link: old },
@@ -671,7 +682,15 @@ impl Roster {
             }
             Some(Owner::Pending(index)) => {
                 let mut commands = self.dispatch_to_pending(now, index, input);
-                let pending = self.pending.remove(index);
+                let mut pending = self.pending.remove(index);
+                // The entry goes with its link. An activity that outlives a
+                // link (an update) would otherwise leave with it unbracketed:
+                // a pending link has no card to come back to, so it ends here.
+                commands.extend(pending.provisional.evict(
+                    now,
+                    EvictionReason::LinkLost,
+                    &mut self.state.ctx(),
+                ));
                 self.state.journal.note(
                     now,
                     Scope::Roster,
@@ -1109,6 +1128,84 @@ mod tests {
                 ..
             }
         )));
+    }
+
+    /// A core-only board says no hello, so its link stays pending; the
+    /// update that restores it runs on the pending entry, and that leg's
+    /// markers must reach it there — else the update never ends.
+    #[test]
+    fn an_update_on_a_pending_link_hears_its_legs_markers() {
+        use crate::activity::{
+            ActivityKind, ActivityOutcome, UpdateIntentFacts, UpdateOutcomeFacts,
+        };
+        use crate::event::{ActivityMarker, EffectRequest};
+        use crate::update_facts::{UpdateBoardState, UpdateFacts};
+
+        let mut roster = Roster::new(RosterConfig::default());
+        roster.handle(Millis(0), attach(LinkId(1), "usb-1"));
+        roster.handle(Millis(10), opened(LinkId(1), "usb-1"));
+        roster.handle(
+            Millis(20),
+            Input::link(
+                LinkId(1),
+                LinkEvent::UpdateFacts(UpdateFacts {
+                    state: UpdateBoardState::NeedsEngine,
+                    ..UpdateFacts::default()
+                }),
+            ),
+        );
+        let device = roster.pending()[0].device_id();
+        assert_eq!(roster.pending()[0].activity_kind(), None, "identified");
+
+        let commands = roster.handle(
+            Millis(30),
+            Input::Action(Action::Update {
+                device,
+                intent: UpdateIntentFacts::Auto,
+            }),
+        );
+        let effect = commands
+            .iter()
+            .find_map(|command| match command {
+                Command::RunEffect {
+                    effect_id,
+                    effect: EffectRequest::Update { .. },
+                    ..
+                } => Some(*effect_id),
+                _ => None,
+            })
+            .expect("the first leg runs");
+        assert_eq!(
+            roster.pending()[0].activity_kind(),
+            Some(ActivityKind::Update)
+        );
+
+        let marker = |marker| {
+            Input::Event(Event::ActivityMarker {
+                device,
+                effect: Some(effect),
+                marker,
+            })
+        };
+        roster.handle(
+            Millis(40),
+            marker(ActivityMarker::UpdateOutcome(UpdateOutcomeFacts::UpToDate)),
+        );
+        roster.handle(
+            Millis(41),
+            marker(ActivityMarker::Ended {
+                kind: ActivityKind::Update,
+                outcome: ActivityOutcome::Succeeded {
+                    summary: "restored".to_string(),
+                },
+            }),
+        );
+        let pending = &roster.pending()[0];
+        assert_eq!(pending.activity_kind(), None, "the update ended");
+        assert_eq!(
+            pending.evidence().last_update_outcome,
+            Some(UpdateOutcomeFacts::UpToDate)
+        );
     }
 
     #[test]
@@ -1849,6 +1946,7 @@ mod tests {
             endpoint: EndpointKey(endpoint.to_string()),
             usb: None,
             serial_number: None,
+            carries_update_channel: false,
         }
     }
 }

@@ -52,6 +52,6 @@ impl RecoveryBackend for Esp32RecoveryBackend {
     }
 
     fn request_reset(&mut self) {
-        esp_hal::system::software_reset()
+        crate::board::esp32c6::restart::restart()
     }
 }

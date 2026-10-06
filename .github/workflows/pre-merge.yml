@@ -76,7 +76,8 @@ env:
 #                   ├─ emu-c6            (the C6 SoC emulator's own suite)
 #                   ├─ emu-esp32v3       (the classic ESP32 machine's gate: boot suite + heap)
 #                   ├─ emu-esp32v3-ref   (…its other half: replays + reference image + jit cell)
-#                   └─ heap-budget-chips (chip heap ratchet + lp-cli emu tests)
+#                   ├─ heap-budget-chips (chip heap ratchet + lp-cli emu tests)
+#                   └─ emu-c6-layout-migration (the C6 repartition's migration, narrowly gated)
 #   (the figure jobs)  ─ figures-comment   (PRs: ONE sticky comment naming the
 #                                           figures that moved, and the patch
 #                                           that accepts them — see below)
@@ -181,6 +182,9 @@ jobs:
       emu_esp32s3: ${{ github.event_name != 'pull_request' && 'true' || steps.some.outputs.emu_esp32s3 }}
       emu_ref_recipe: ${{ github.event_name != 'pull_request' && 'true' || steps.some.outputs.emu_ref_recipe }}
       emu_esp32v3_fw: ${{ github.event_name != 'pull_request' && 'true' || steps.some.outputs.emu_esp32v3_fw }}
+      # The 35-minute layout-migration job runs only on PRs that touch its
+      # paths; main pushes skip it (Yona, 2026-10-05).
+      c6_layout: ${{ steps.some.outputs.c6_layout }}
     steps:
       # Default quantifier ("some"): a filter is true when ANY changed file
       # matches one of its globs. Each list is the *dependency closure* of what
@@ -335,6 +339,10 @@ jobs:
               - 'lp-riscv/**'
               - 'lp-emu/**'
               - 'third_party/**'
+              # The split pipeline that links, verifies and lays out the
+              # C6's shipped image, and the version/target it stamps.
+              - 'tools/lp-fw-split/**'
+              - 'tools/lp-app-version/**'
               - 'Cargo.toml'
               - 'Cargo.lock'
               - 'rust-toolchain.toml'
@@ -360,6 +368,13 @@ jobs:
             emu_c6:
               - 'lp-emu/**'
               - 'lp-fw/fw-esp32c6/**'
+              # The split image (the C6's shipped one) the boot gates and
+              # the heap ratchet run: its loader, the boot-record formats
+              # the loader and the core share, and the pipeline that links
+              # and lays it out.
+              - 'lp-fw/fw-esp32c6-loader/**'
+              - 'lp-base/lp-bootctl/**'
+              - 'tools/lp-fw-split/**'
               # The server loop and wire code both chips' firmware share.
               # Neither `emu_c6` nor `emu_esp32v3` covered it before, which
               # meant a change here — including to the boot path both
@@ -531,6 +546,46 @@ jobs:
               - 'justfile'
               - '.github/workflows/pre-merge.yml'
               - '.github/actions/**'
+            # c6_layout gates `emu-c6-layout-migration` (`just
+            # test-emu-layout-migration`): the old→new C6 partition migration
+            # (#896, docs/adr/2026-10-02-c6-repartition-and-layout-migration.md)
+            # proved end to end on the emulated C6. ~29 minutes of test alone
+            # on this runner (16 on an M2 Max), ~35 for the job, so it is
+            # deliberately the NARROWEST filter here: the table, the
+            # C6's flash layout, the board's legacy guard and filesystem boot,
+            # the host side of the migration (`lpa-link`'s layout_migration
+            # and partition/flash planning, the host flasher, `lp-cli hardware
+            # lpfs`), the emulated flash and the merged-image recipe it boots,
+            # and the test itself. Measured against main's first-parent
+            # history for 2026-09-04..2026-10-04: 13 of 431 merges touched
+            # one of these.
+            #
+            # Deliberately NOT here, each a filter miss main catches (pushes
+            # to main force every gate on): `lp-fw/fw-esp32c6/src/main.rs`
+            # (it holds the guard's call site, and 22 merges a month touch
+            # it), the emulator's loader (8 a month), and — unlike every
+            # filter above — `justfile` and this workflow file, which 109
+            # and 37 merges a month touch; `emu_ref_recipe` leaves the
+            # workflow out for the same reason.
+            c6_layout:
+              - 'lp-fw/fw-esp32c6/partitions.csv'
+              - 'lp-fw/fw-esp32c6/.cargo/config.toml'
+              - 'lp-fw/builds/esp32c6-4mb.json'
+              - 'lp-fw/fw-esp32c6/src/flash_storage.rs'
+              - 'lp-fw/fw-esp32c6/src/legacy_layout.rs'
+              - 'lp-fw/fw-esp32-common/src/lp_fs.rs'
+              - 'lp-fw/fw-esp32-common/src/hardware/manifest_loader.rs'
+              - 'lp-core/lpc-wire/src/server/fs_boot_state.rs'
+              - 'lp-app/lpa-link/src/layout_migration/**'
+              - 'lp-app/lpa-link/testdata/partitions-esp32c6-legacy-v1.csv'
+              - 'lp-app/lpa-link/src/provider/partition_table.rs'
+              - 'lp-app/lpa-link/src/provider/flash_plan.rs'
+              - 'lp-app/lpa-link/src/provider/flash_region.rs'
+              - 'lp-app/lpa-link/src/providers/host_serial_esp32/**'
+              - 'lp-cli/src/commands/hardware/lpfs/**'
+              - 'lp-cli/tests/emu_layout_migration.rs'
+              - 'lp-emu/esp/lp-emu-esp32c6/src/flash.rs'
+              - 'scripts/emu/build-merged-image.sh'
 
       # `core` is the negative gate for lint + validate-x64: with
       # predicate-quantifier: every, a changed file counts only if it matches
@@ -1223,7 +1278,10 @@ jobs:
       - name: Install espflash (prebuilt)
         run: cargo binstall --no-confirm --locked espflash@3.3.0
 
-      - name: Check esp32c6 image size
+      # The SPLIT image (the product's): two link passes, the verifier (any
+      # core node in the engine region fails the job), and the split
+      # headrooms gated against the 64 KB floor — all in the step summary.
+      - name: Check esp32c6 split image (verifier + headroom)
         run: cd lp2025 && just fw-esp32c6-size-check
 
       # The image just built must describe itself correctly: extract the
@@ -2405,6 +2463,110 @@ jobs:
             { echo '#### sccache'; echo '```'; sccache --show-stats; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           fi
 
+  # The C6 repartition's migration, end to end on the emulated C6 (`just
+  # test-emu-layout-migration`, `lp-cli/tests/emu_layout_migration.rs`): a
+  # "fielded board" on the pre-2026-10 table, read, migrated, refused and
+  # preflighted by the real `lp-cli hardware lpfs` commands through espflash's
+  # stub over a pty. Until this job nothing in CI ran it — it is ~16 minutes
+  # of wall clock on an M2 Max (a migration is ~180 s emulated), too long for
+  # `heap-budget-chips`, whose `-p lp-cli --release` tree it otherwise shares
+  # (and so shares main's sccache objects with).
+  #
+  # Its own job rather than a step of `heap-budget-chips` so it runs beside
+  # that job instead of after it. Path-gated on `c6_layout`, the narrowest
+  # filter in detect-changes (see its comment); main pushes skip this job,
+  # and a filter miss shows up only on a PR.
+  #
+  # espflash 3.3.0 for `build-merged-image.sh` (the same prebuilt, pinned
+  # call as `emu-c6`); no history needed, so a depth-1 checkout.
+  emu-c6-layout-migration:
+    name: C6 layout migration (x64)
+    runs-on: ubuntu-24.04
+    # Measured 34m40s on the PR that added it (#970, 2026-10-04): 33 s setup,
+    # 5m23s release lp-cli test tree, 1m17s fw-esp32c6, 28m40s for the four
+    # scenarios (W10's migration alone ~13 min) — 1.8x the M2 Max's 16 min.
+    # 60 is headroom for a cold cache; re-measure before tightening.
+    timeout-minutes: 60
+    needs: detect-changes
+    if: needs.detect-changes.outputs.c6_layout == 'true'
+    env:
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "false"
+      CARGO_PROFILE_TEST_DEBUG: "false"
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: sccache
+    steps:
+      - name: Install system deps (libudev for serialport)
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/*chrome* /etc/apt/sources.list.d/*google*
+          sudo apt-get update || echo "apt-get update reported errors; continuing — the install below is the real gate"
+          sudo apt-get install -y libudev-dev
+
+      - name: Checkout lp2025
+        uses: actions/checkout@v4
+        with:
+          path: lp2025
+
+      - name: Checkout lp-regalloc2
+        uses: actions/checkout@v4
+        with:
+          repository: PhotomancerArt/lp-regalloc2
+          path: lp-regalloc2
+
+      # Toolchain is pinned in lp2025/rust-toolchain.toml; keep this in sync.
+      # rust-src is required: fw-esp32c6 builds core/alloc from source
+      # (build-std) for its release-esp32 profile, same as firmware-size.
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: nightly-2026-04-27
+          components: rust-src
+
+      - name: Install RISC-V target
+        run: rustup target add ${{ env.RISC_V_TARGET }}
+
+      - name: Run sccache
+        uses: mozilla/sccache-action@v0.0.10
+        with:
+          version: v0.18.0
+
+      # The repo's one registry entry, read-only (see the lint job).
+      - name: Restore cargo registry
+        uses: ./lp2025/.github/actions/cargo-registry
+
+      - name: Install just
+        uses: extractions/setup-just@v3
+
+      # Prebuilt and pinned, exactly as emu-c6 does it: `build-merged-image.sh`
+      # refuses any espflash but 3.3.0 (its bundled bootloader is the image's).
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@v1.21.1
+
+      - name: Install espflash (prebuilt — the merged image's bootloader)
+        run: cargo binstall --no-confirm --locked espflash@3.3.0
+
+      # The test RETURNS (passes) with "emu_layout_migration: skipped — …" when
+      # it cannot get a firmware image, which is the right thing at a desk and
+      # a silent green here. LP_EMU_BUILD_FW=1 (set by the recipe) means it
+      # builds one, so a skip is a broken build and fails this step.
+      - name: Layout migration on the emulated C6
+        shell: bash
+        run: |
+          cd lp2025
+          just test-emu-layout-migration 2>&1 | tee "$RUNNER_TEMP/layout-migration.log"
+          if grep -q 'emu_layout_migration: skipped' "$RUNNER_TEMP/layout-migration.log"; then
+            echo "::error::emu_layout_migration skipped a scenario: no fw-esp32c6 image, though LP_EMU_BUILD_FW=1 asked for one"
+            exit 1
+          fi
+
+      - name: sccache stats
+        if: always()
+        shell: bash
+        run: |
+          if command -v sccache >/dev/null; then
+            { echo '#### sccache'; echo '```'; sccache --show-stats; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
   # The main validate job runs on x64. It was ARM from 2026-06 (x64 was
   # disabled over x86_64 host-JIT failures in `lpvm-cranelift`; that JIT was
   # removed 2026-07-11), and a 2026-07 side-by-side comparison run showed x64
@@ -2490,6 +2652,7 @@ jobs:
       # from building the bin, this must fail loudly rather than fall back
       # to the slow path unnoticed.
       - name: Validate
+        id: validate
         env:
           SHADER: ${{ needs.detect-changes.outputs.shader }}
           STUDIO: ${{ needs.detect-changes.outputs.studio }}
@@ -2513,6 +2676,31 @@ jobs:
         id: figures_heap
         shell: bash
         run: cd lp2025 && just heap-budget-check 2>&1 | tee "$RUNNER_TEMP/figures-heap.log"
+
+      # The crash-recovery suite (`lp-fw/fw-tests/tests/recovery_emu.rs`):
+      # panic → breadcrumb → catch boundary → blame ledger, hangs as the
+      # watchdog, the boot crash loop, all on fw-emu. Its eight tests are
+      # `#[ignore]`d so a desk `cargo test` stays quick, which meant nothing
+      # ran them, and the fuel test sat red for about two months unseen
+      # (fixed in #950).
+      #
+      # The test BINARY is the one the workspace `cargo test` above already
+      # built: no `-p` here, so the features unify over the same package set.
+      # `just test-recovery-emu` (the desk spelling, `cargo test -p fw-tests
+      # …`) resolves features over fw-tests alone and rebuilt 232 host crates
+      # on an M2 Max (3m44s) — the sccache floor this file's header warns
+      # about. The fw-emu IMAGE is NOT shared with scene_render_emu's: the
+      # suite builds it with `-Z build-std=core,alloc` (`with_build_std`),
+      # a second cross-target build of fw-emu. Measured on #970: 1m27s for
+      # the step, ~85 s of it that image (sccache read-only on a PR), the
+      # test binary 0.49 s (nothing compiled), the eight tests ~1 s.
+      #
+      # It runs even when the heap ratchet failed, so a red figure does not
+      # hide a recovery regression; it needs the Validate step's build.
+      - name: Crash-recovery suite (fw-emu)
+        if: ${{ !cancelled() && steps.validate.outcome == 'success' }}
+        timeout-minutes: 20
+        run: cd lp2025 && cargo test --test recovery_emu -- --include-ignored
 
       # A moved engine figure hands back its patch — see `emu-c6`'s step of
       # the same name. The re-baseline profiles with the same LP_CLI binary.
@@ -3241,6 +3429,7 @@ jobs:
       - emu-esp32v3-ref
       - emu-esp32s3
       - heap-budget-chips
+      - emu-c6-layout-migration
       - validate-x64
       - validate-gfx
       - validate-browser

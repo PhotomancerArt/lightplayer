@@ -1086,6 +1086,12 @@ pub struct Esp32C6Builder {
     /// Perform a reset request instead of reporting it. See
     /// [`Esp32C6Builder::reboot_on_reset`].
     reboot_on_reset: bool,
+    /// The flash chip already holds a whole flashed image: a direct load
+    /// writes nothing into it. See [`Esp32C6Builder::flash_holds_image`].
+    flash_holds_image: bool,
+    /// The cache MMU page size a direct load starts with. See
+    /// [`Esp32C6Builder::mmu_page_len`].
+    mmu_page_len: Option<u32>,
     /// Let the hart pre-decode blocks. See
     /// [`Esp32C6Builder::block_cache`].
     block_cache: bool,
@@ -1195,6 +1201,8 @@ impl Esp32C6Builder {
             reset_cause: ResetCause::default(),
             strap: Strap::App,
             reboot_on_reset: false,
+            flash_holds_image: false,
+            mmu_page_len: None,
             block_cache: true,
             translate: true,
             jit_report: false,
@@ -1314,6 +1322,43 @@ impl Esp32C6Builder {
     /// every byte from before the reset — a reboot is not a new process.
     pub fn reboot_on_reset(mut self, reboot: bool) -> Self {
         self.reboot_on_reset = reboot;
+        self
+    }
+
+    /// The flash chip ([`Esp32C6Builder::flash`]) already holds a whole
+    /// flashed image — a bootloader, a partition table and an app — and a
+    /// direct load must not write into it.
+    ///
+    /// The app ELF is still placed and started at its entry in the state the
+    /// second-stage bootloader leaves, but its flash-resident segments are
+    /// **compared** with the chip rather than staged
+    /// ([`loader::StageMode::Verify`]; the count is
+    /// [`loader::FlashStaging::mismatched_bytes`]), and no partition table or
+    /// ROM window segment is staged. For an app that is itself a loader: it
+    /// maps and copies the rest of the image as guest code. Unlike
+    /// [`BootMode::RomUp`]'s ROM and bootloader, that code is the caller's
+    /// own, so the block cache and the translated core stay as asked and it
+    /// is held to the same `fence.i` contract as any app — `--strict-bus`
+    /// reports whether it kept it, and `block_cache(false)` /
+    /// `translate(false)` are the identity oracle. Off by default; it means
+    /// nothing under [`BootMode::RomUp`], which never stages.
+    pub fn flash_holds_image(mut self, holds: bool) -> Self {
+        self.flash_holds_image = holds;
+        self
+    }
+
+    /// The cache MMU page size a direct load leaves programmed — the
+    /// second-stage bootloader's choice, which a direct load stands in for.
+    ///
+    /// The chip resets to 64 KiB pages and that is the default. A bootloader
+    /// may choose smaller ones (espflash 3.3.0's bundled ESP-IDF bootloader
+    /// picks 32 KiB on a 4 MB C6, measured on the ROM-up path, which runs it),
+    /// and an app that reads the page size back — a loader that maps flash
+    /// itself — then needs the direct load to have chosen the same. One of
+    /// 64, 32, 16 or 8 KiB; anything else is refused at build. Means nothing
+    /// under [`BootMode::RomUp`], where the real bootloader chooses.
+    pub fn mmu_page_len(mut self, len: u32) -> Self {
+        self.mmu_page_len = Some(len);
         self
     }
 
@@ -1777,6 +1822,8 @@ impl Esp32C6Builder {
             reset_cause,
             strap,
             reboot_on_reset,
+            flash_holds_image,
+            mmu_page_len,
             block_cache,
             translate,
             jit_report,
@@ -2037,6 +2084,34 @@ impl Esp32C6Builder {
         // flash over SPI1, the bootloader reads the partition table and the
         // app, programs the MMU, and jumps. An `app` given here is a symbol
         // table and a cross-check reference, never a load.
+        if let Some(len) = mmu_page_len
+            && boot_mode == BootMode::Direct
+        {
+            let mode = match len {
+                0x1_0000 => 0,
+                0x8000 => 1,
+                0x4000 => 2,
+                0x2000 => 3,
+                _ => {
+                    return Err(BuildError::Io(format!(
+                        "an MMU page of {len:#x} bytes: the C6's are 64, 32, 16 or 8 KiB"
+                    )));
+                }
+            };
+            let seeded = bus
+                .peripheral_index("SPI0")
+                .and_then(|i| {
+                    bus.with_peripheral::<crate::periph::spi0::Spi0, _>(i, |spi0, _| {
+                        spi0.seed_page_mode(mode)
+                    })
+                })
+                .is_some();
+            if !seeded {
+                return Err(BuildError::Io(
+                    "an MMU page size was asked for and this machine has no SPI0 block".to_string(),
+                ));
+            }
+        }
         if let Some(app) = &app_image
             && boot_mode == BootMode::Direct
         {
@@ -2046,8 +2121,24 @@ impl Esp32C6Builder {
             // What the second-stage bootloader would have done: the
             // flash-resident half of the image into the chip, the cache MMU
             // programmed for it, and the ROM told how big the part is.
-            staging =
-                loader::stage_image_in_flash(&flash_handle, &cache_handle, &[&rom_image, app]);
+            staging = if flash_holds_image {
+                // The chip holds what a flasher wrote; the ROM's own window
+                // segment is not part of that image (a ROM-up boot never
+                // stages it either).
+                loader::stage_image_in_flash(
+                    &flash_handle,
+                    &cache_handle,
+                    &[app],
+                    loader::StageMode::Verify,
+                )
+            } else {
+                loader::stage_image_in_flash(
+                    &flash_handle,
+                    &cache_handle,
+                    &[&rom_image, app],
+                    loader::StageMode::Write,
+                )
+            };
             loader::seed_rom_flash_chip(&mut bus, staging.chip_size);
             // Everything the loader staged was already placed into the
             // window by `rom::load` / `load_app`; filling now proves the
@@ -2169,6 +2260,10 @@ impl Esp32C6Builder {
         bus.set_time(0);
         bus.start_peripherals();
 
+        // Guest code we do not own copies code into RAM and jumps into it,
+        // with no `fence.i` for the cache or the translator to see: the mask
+        // ROM and the IDF bootloader on a ROM-up boot. See the two below.
+        let guest_loads_code = boot_mode == BootMode::RomUp;
         let mut hart = MachineHart::new(0);
         loader::reset_hart(&mut hart, &mut bus, entry);
         hart.set_cycle_model(time_grade.cycle_model());
@@ -2177,7 +2272,7 @@ impl Esp32C6Builder {
         // hp-sram and jump into them with ordinary stores. Neither will ever
         // emit the `fence.i` the cache's invalidation rests on, and we own
         // neither, so the cache is off there.
-        hart.set_block_cache(block_cache && boot_mode != BootMode::RomUp);
+        hart.set_block_cache(block_cache && !guest_loads_code);
         // The transcript surface, when a run asked for it: the hart writes
         // one line per trap it takes, whichever core is running (D5/PD1).
         hart.set_trap_log(!matches!(trap_log, TrapLogSink::Off));
@@ -2373,7 +2468,7 @@ impl Esp32C6Builder {
         // is only entered from the cached loop — but a core that is built
         // and never entered is a compile nobody asked for and a live path
         // one refactor away.
-        if jit && machine.translate && boot_mode != BootMode::RomUp {
+        if jit && machine.translate && !guest_loads_code {
             let blocks = jit_blocks.unwrap_or(if jit_escape_all {
                 DEFAULT_JIT_ESCAPE_BLOCKS
             } else {
@@ -2403,7 +2498,7 @@ impl Esp32C6Builder {
         // stop set, and it is taken on a run with no core at all — so the walk
         // happens here, where a `--jit` run's boot event would have been.
         #[cfg(any(feature = "jit", target_family = "wasm"))]
-        if !jit && blockprof && boot_mode != BootMode::RomUp && Esp32C6Machine::split_census_on() {
+        if !jit && blockprof && !guest_loads_code && Esp32C6Machine::split_census_on() {
             // Not `jit_entry`: that field is what arms the *real* second
             // translation event, and a census run has no core to rebuild.
             machine.jit_seed_scope = jit_seed_scope;

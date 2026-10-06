@@ -1,7 +1,8 @@
 {
-  "lpManifestCore": 2,
+  "lpManifestCore": 3,
   "package": "fw-esp32c6",
-  "target": {
+  "target": "esp32c6-4mb",
+  "platform": {
     "family": "esp32",
     "chip": "esp32c6",
     "cargoTarget": "riscv32imac-unknown-none-elf"
@@ -23,5 +24,5 @@
   "limits": {
     "flashAppBytes": 3407872
   },
-  "wireProto": 35
+  "wireProto": 36
 }

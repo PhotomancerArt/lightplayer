@@ -447,6 +447,12 @@
                     console.info(`[emu] host serial path: ${hostTty === "mac" ? "a Mac's (drops late 0xFF bytes)" : "lossless"}`);
                     const options = {
                         picker: chrome.createPicker({ backingUrl: label }),
+                        // D0 held ON on every board: the switch a
+                        // switch-mode power button reads (the PLAYFUL
+                        // choker's `button:local:D0`). Undriven it reads
+                        // "off", and the banner's `detach` then powered the
+                        // board off. The banner flips it per board.
+                        holds: { 0: true },
                         hostTty,
                     };
                     if (isTab) {

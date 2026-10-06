@@ -44,6 +44,19 @@ lpc-hardware = { path = "../lp-core/lpc-hardware", features = ["schema-gen"] }
 lpa-boards = { path = "../lp-app/lpa-boards", features = ["schema-gen"] }
 # The two persisted access files (project sidecar, device store).
 lpc-access = { path = "../lp-core/lpc-access", features = ["schema-gen"] }
+# `ota-manifest.json`, the OTA release manifest: its schema (`schema gen`),
+# and `firmware package` / `release-assets` / `release-check`, which write,
+# stage and re-verify it.
+lpc-firmware-release = { path = "../lp-core/lpc-firmware-release", features = ["schema-gen"] }
+# `firmware package` of a split def: the one packer of encoding 1 (`pack`),
+# and the code table `ota-manifest.json`'s `requires` and `encodings[].id`
+# use. lp-cli never compresses firmware itself.
+lpa-update = { path = "../lp-app/lpa-update", features = ["pack"] }
+lpc-update = { path = "../lp-core/lpc-update" }
+# `firmware release-check` validates every `ota-manifest.json` against the
+# checked-in schema, embedded so the binary checks without a checkout. Also
+# the corpus conformance test's validator (tests/schema_conformance.rs).
+jsonschema = { version = "0.46", default-features = false }
 # `firmware package`: the bootloader-range guard checks the merged image
 # against the device model's hung-bootloader table.
 lpa-devices = { path = "../lp-app/lpa-devices" }
@@ -72,6 +85,10 @@ dialoguer = "0.11"
 chrono = "0.4"
 # `firmware package` hashes the merged image for the distribution manifest.
 sha2 = { workspace = true }
+# `firmware build|package` of a split def (the ESP32-C6): the split pipeline
+# as a library, and the boot formats it lays out.
+lp-fw-split = { path = "../tools/lp-fw-split" }
+lp-bootctl = { path = "../lp-base/lp-bootctl" }
 # Both halves of the validation system, so the registry-parity test can see
 # them at once: fw-checks is the payload crate (AGPL, outside the lp-emu MIT
 # fence) and lp-emu-validate is the host side, which deliberately mirrors its
@@ -120,9 +137,6 @@ pollster = "0.3"
 
 [dev-dependencies]
 tempfile = "3"
-# Corpus conformance test (tests/schema_conformance.rs); same pinning as
-# lpc-model's schema_gen dev-dep.
-jsonschema = { version = "0.46", default-features = false }
 lpa-server = { path = "../lp-app/lpa-server" }
 lpc-hardware = { path = "../lp-core/lpc-hardware" }
 lpc-shared = { path = "../lp-core/lpc-shared" }

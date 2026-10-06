@@ -67,6 +67,7 @@ pub mod device_card_feed_view;
 pub mod device_effects;
 pub mod device_feed_op;
 pub mod device_firmware_face;
+pub mod device_firmware_sources;
 pub mod device_flash;
 pub mod device_flash_offer;
 pub mod device_frame_feed;
@@ -82,10 +83,19 @@ pub mod device_push_offer;
 pub mod device_records;
 pub mod device_roster;
 pub mod device_transport;
+/// The update story's inputs, built for tests and for the web's stories.
+#[cfg(any(test, feature = "story-fixtures"))]
+pub mod device_update_fixtures;
+pub mod device_update_offers;
+pub mod device_update_route;
+pub mod device_update_standing;
+pub mod device_update_version;
+pub mod device_update_words;
 pub mod devices_op;
 pub mod emu_transport;
 pub mod link_health;
 pub mod new_sim_offer;
+pub mod own_build_source;
 pub mod pending_link_offers;
 pub mod provisional_board_numbers;
 pub mod runtime_backing;
@@ -95,6 +105,12 @@ pub mod sim_create_op;
 pub mod sim_record;
 pub mod sim_transport;
 pub mod target_offer;
+pub(crate) mod update_auto_start;
+pub mod update_build_facts;
+pub(crate) mod update_driver_mirror;
+pub mod update_host;
+pub(crate) mod update_narration;
+pub(crate) mod update_store_builds;
 pub mod wire_conversation;
 
 pub use add_device_offers::{USB_NEEDS_WEB_SERIAL, add_device_offers};
@@ -130,6 +146,7 @@ pub use device_feed_op::DeviceFeedOp;
 pub use device_firmware_face::{
     device_firmware_line, firmware_face_preview_sentence, pending_firmware_line,
 };
+pub use device_firmware_sources::{DeviceFirmwareSources, StudioFirmwareStore};
 pub use device_flash::{
     FirmwareVerb, FlashBoardChoice, FlashOffer, RESET_NEEDS_USB, blocked_erase_action,
     derive_flash_name, firmware_verb, flash_offer, flash_offer_for, reflash_choice,
@@ -169,12 +186,25 @@ pub use device_transport::{
     DeviceEffectCall, DeviceEffectFacts, DeviceEffectProgress, DeviceTransport,
     DeviceTransportFuture, GrantedLink, LensLineTap, LensTapEvent,
 };
+pub use device_update_offers::{
+    INSTALL_VERSION_PARAM, UpdateOfferFacts, UpdateOffers, update_offers,
+};
+pub use device_update_route::{USB_UPDATES_OVER_THE_AIR, UpdateLink, UpdateRoute, update_route};
+pub use device_update_standing::{
+    UpdateStanding, UpdateStandingInputs, update_standing, wants_auto_start,
+};
+pub use device_update_version::{UpdateVersion, UpdateVersionDisplay};
+pub use device_update_words::{
+    UiDeviceUpdate, UiSessionUpdate, UpdateLight, UpdateProgress, UpdateRowKind, UpdateRunTone,
+    UpdateRunWord, update_session_words, update_words,
+};
 pub use devices_op::{DeviceFace, DevicesOp};
 pub use emu_transport::{
     EmuBacking, EmuDeviceTransport, EmuLinkSource, EmuRuntimeControl, EmuSession,
 };
 pub use link_health::{LinkHealth, LinkHealthMap, LinkTrouble};
 pub use new_sim_offer::{NEW_SIM_BACKING_PARAM, NEW_SIM_BOARD_PARAM, new_sim_offer};
+pub use own_build_source::{MemoryOwnBuildSource, OwnBuildSource};
 pub use pending_link_offers::pending_link_offers;
 pub use provisional_board_numbers::ProvisionalBoardNumbers;
 pub use runtime_backing::{Backing, EMULATED_TARGETS, backing_for, emu_offered_for};
@@ -191,3 +221,5 @@ pub use sim_transport::{
     SimBacking, SimDeviceTransport, SimLinkSource, SimRuntimeControl, SimSession, SimTier,
 };
 pub use target_offer::{TargetChoice, TargetGroup, TargetOffer, TargetScope, target_offer};
+pub use update_build_facts::{StoreLatest, UpdateBuildFacts};
+pub use update_host::UpdateHost;
