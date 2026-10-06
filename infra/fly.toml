@@ -74,7 +74,16 @@ primary_region = "sjc"  # Seattle (sea) was retired for new fly orgs; San Jose i
 
 [http_service]
   internal_port = 2812
-  force_https = true
+  # OFF on purpose, and the app redirects instead. Boards reach the cloud
+  # relay at ws://lightplayer.app/relay/device over plain HTTP (an ESP32-C6
+  # cannot afford TLS: +79 KB flash, ~29 KB heap a connection), and this
+  # switch is all-or-nothing. lp-cloud-server's https_redirect middleware
+  # answers every other plain-HTTP request (fly sets X-Forwarded-Proto: http)
+  # with the same 301 to https this switch used to send; its route-walk test
+  # (lp-cloud-server/tests/https_redirect.rs) and the post-deploy smoke in
+  # .github/workflows/deploy-cloud.yml hold it. ADR:
+  # docs/adr/2026-10-06-cloud-relay.md.
+  force_https = false
 
   # Machines never stop. A stopped machine means a cold start on the first
   # share-link unfurl — a Discord crawler does not wait — and it means

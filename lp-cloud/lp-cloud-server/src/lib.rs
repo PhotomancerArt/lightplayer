@@ -59,6 +59,7 @@ pub mod auth;
 pub mod config;
 pub mod content;
 pub mod firmware;
+pub mod https_redirect;
 pub mod page;
 pub mod ports;
 pub mod relay;

@@ -18,6 +18,9 @@
 //! | `GET /relay/board/{id}` | relay | WebSocket; a session (account or guest) — see `relay::route_admission` |
 //! | `GET /healthz` | ops | none |
 //! | everything else | page | none — file, else the SPA document |
+//!
+//! Every route but `/relay/device` answers a plain-HTTP request (fly's
+//! `X-Forwarded-Proto: http`) with a 301 to https: [`crate::https_redirect`].
 
 use axum::Router;
 use axum::extract::DefaultBodyLimit;
@@ -74,6 +77,11 @@ pub fn build_router(state: AppState) -> Router {
         .route("/healthz", get(page_route::get_healthz))
         .fallback(get(page_route::get_page_or_asset))
         .layer(DefaultBodyLimit::max(MAX_UPLOAD_BYTES))
+        // http → https for everything but the relay's device leg; inside the
+        // log, so a redirect is logged like any other answer.
+        .layer(axum::middleware::from_fn(
+            crate::https_redirect::https_redirect,
+        ))
         .layer(axum::middleware::from_fn(crate::request_log::log_request))
         .with_state(state)
 }
