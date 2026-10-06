@@ -14,6 +14,8 @@
 //! - [`radio_link_port`]: the slots the radio side and the mux share — each
 //!   open connection's `Link`, and the signals both halves wait on (feature
 //!   `radio-link`);
+//! - [`lan_link_config`]: one LAN link's lp-link configuration, the `ws()`
+//!   preset cut to the board (feature `wifi`);
 //! - [`link_mux_transport`]: USB plus the radio links as one server
 //!   transport: whole wire messages on each link's proto channel, the hello
 //!   per session, the login deadline (feature `radio-link`);
@@ -25,6 +27,8 @@
 #[cfg(feature = "server")]
 pub mod frame_buf_holder;
 pub mod hci_connection_ledger;
+#[cfg(feature = "wifi")]
+pub mod lan_link_config;
 #[cfg(feature = "radio-link")]
 pub mod link_mux_transport;
 #[cfg(feature = "radio-link")]
@@ -42,5 +46,6 @@ pub use link_mux_transport::{
 pub use radio_link_config::{MtuTooSmall, radio_link_config, radio_max_payload};
 #[cfg(feature = "radio-link")]
 pub use radio_link_port::{
-    CloseReason, RADIO_LINK_SLOTS, RadioLinkEvent, RadioLinkPort, RadioLinkSlot,
+    CloseReason, LAN_LINK_SLOTS, LINK_SLOTS, PortLock, RADIO_LINK_SLOTS, RadioLinkEvent,
+    RadioLinkPort, RadioLinkSlot, SharedPort,
 };

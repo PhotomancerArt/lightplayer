@@ -228,14 +228,17 @@ pub fn PopoverButton(
     let content_style = panel_content_style(t);
     let (grad_stop_near, grad_stop_far) = gradient_stops(current_position.side);
     let trigger_visual_style = open_trigger_style(trigger_rect());
-    // Viewport-clamped case: the panel slid back across its own trigger and
-    // covers it entirely. The top-layer trigger copy is skipped then — the
-    // panel is on top, and painting the copy over the panel's rows would
-    // interleave two surfaces' text.
+    // Viewport-clamped case: the panel slid back across its own trigger. The
+    // top-layer trigger copy is skipped then — the panel is on top, and
+    // painting the copy over the panel's rows would interleave two
+    // surfaces' text. ANY overlap past the welded seam counts, not only a
+    // panel that covers the whole trigger: a full-width card row is wider
+    // than the panel, so it is never covered, and its copy drew over the
+    // Wi-Fi popover's network list (Yona's G1 walk, 2026-10-06).
     let trigger_covered = attached
         && trigger_rect().is_some_and(|anchor| {
             let panel = panel_size().unwrap_or_else(SizeSnapshot::fallback);
-            panel_covers_trigger(anchor, panel, current_position)
+            panel_overlaps_trigger(anchor, panel, current_position)
         });
     let layer_layout_class = if layer_keeps_layout {
         "ux-popover-open-trigger-boxed"
@@ -1413,24 +1416,25 @@ fn trigger_placeholder_style(attached: bool, anchored: bool, rect: Option<RectSn
     }
 }
 
-/// The settled panel rect fully covers the trigger's visible (inflated)
-/// footprint. Only the viewport-clamped case can get here: an unclamped
-/// panel starts at the trigger's seam edge, which always leaves the trigger
-/// body outside the panel.
-fn panel_covers_trigger(
+/// The settled panel rect overlaps the trigger's body: more than the
+/// welded seam (the panel's border overlapping the trigger's edge by
+/// [`POPOVER_BORDER_WIDTH_PX`]). Only the viewport-clamped case can get
+/// here: an unclamped panel starts at the trigger's seam edge, which leaves
+/// the trigger body outside the panel.
+fn panel_overlaps_trigger(
     anchor: RectSnapshot,
     panel: SizeSnapshot,
     position: PopoverPosition,
 ) -> bool {
-    // Half-pixel slack: a welded panel edge lands EXACTLY on the inflated
-    // trigger edge (`snap_to_trigger_edges` welds it), so strict comparisons
-    // would flip coverage on sub-pixel measurement noise.
+    // Half-pixel slack over the seam: a welded edge lands EXACTLY on it, so
+    // a strict comparison would flip on sub-pixel measurement noise.
     const SLACK_PX: f64 = 0.5;
-    let visible = anchor.inflate(TRIGGER_INFLATE_PX);
-    position.left <= visible.x + SLACK_PX
-        && position.top <= visible.y + SLACK_PX
-        && position.left + panel.width >= visible.x + visible.width - SLACK_PX
-        && position.top + panel.height >= visible.y + visible.height - SLACK_PX
+    let seam = POPOVER_BORDER_WIDTH_PX + SLACK_PX;
+    let across =
+        (position.left + panel.width).min(anchor.x + anchor.width) - position.left.max(anchor.x);
+    let down =
+        (position.top + panel.height).min(anchor.y + anchor.height) - position.top.max(anchor.y);
+    across > seam && down > seam
 }
 
 /// Fixed-position style for the top-layer trigger visual.
@@ -2300,7 +2304,7 @@ mod tests {
     }
 
     #[test]
-    fn covered_trigger_is_detected_only_when_fully_inside_the_panel() {
+    fn a_trigger_the_panel_overlaps_is_detected_and_a_welded_one_is_not() {
         // The measured add-node-picker clamp case: trigger raw rect
         // (137.9, 311)–(250.2, 336); panel (134.9, 281)–(454.9, 748). The
         // panel's left edge welds EXACTLY onto the inflated trigger edge
@@ -2321,14 +2325,28 @@ mod tests {
             visible: true,
             side: PopoverSide::Below,
         };
-        assert!(panel_covers_trigger(trigger, panel, clamped));
-        // A panel whose left edge sits a few px INSIDE the trigger footprint
-        // leaves trigger showing — not covered.
+        assert!(panel_overlaps_trigger(trigger, panel, clamped));
+        // A panel that covers only part of the trigger still overlaps it: a
+        // full-width card row is wider than the panel (the Wi-Fi popover's
+        // "Wi-Fi · set up" row, which drew over its network list).
         let offset = PopoverPosition {
             left: 140.0,
             ..clamped
         };
-        assert!(!panel_covers_trigger(trigger, panel, offset));
+        assert!(panel_overlaps_trigger(trigger, panel, offset));
+        let wide_row = RectSnapshot {
+            x: 20.0,
+            y: 600.0,
+            width: 400.0,
+            height: 30.0,
+        };
+        let over_the_row = PopoverPosition {
+            left: 100.0,
+            top: 300.0,
+            visible: true,
+            side: PopoverSide::Above,
+        };
+        assert!(panel_overlaps_trigger(wide_row, panel, over_the_row));
         // The ordinary welded panel below the trigger never covers it.
         let welded = PopoverPosition {
             left: 134.9,
@@ -2336,7 +2354,15 @@ mod tests {
             visible: true,
             side: PopoverSide::Below,
         };
-        assert!(!panel_covers_trigger(trigger, panel, welded));
+        assert!(!panel_overlaps_trigger(trigger, panel, welded));
+        // ...nor does the welded panel above it.
+        let welded_above = PopoverPosition {
+            left: 134.9,
+            top: trigger.y - panel.height + POPOVER_BORDER_WIDTH_PX,
+            visible: true,
+            side: PopoverSide::Above,
+        };
+        assert!(!panel_overlaps_trigger(trigger, panel, welded_above));
     }
 
     #[test]

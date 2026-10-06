@@ -40,8 +40,10 @@ pub mod device_access_ops;
 pub mod device_access_record;
 pub mod key_groups;
 pub mod key_holder;
+pub mod keyed_login;
 pub mod login_attempt;
 pub mod login_key_cache;
+pub mod network_link_keys;
 pub mod remembered_passwords;
 pub mod two_passwords;
 pub mod ui_access_view;
@@ -63,8 +65,10 @@ pub use device_access_record::{
     DeviceAccessChange, DeviceAccessRecord, DeviceAccessRecords, SetHere,
 };
 pub use key_holder::{HeldKey, KeyHolder};
+pub use keyed_login::try_keyed_login;
 pub use login_attempt::{LoginAttemptOutcome, try_login};
 pub use login_key_cache::{DEFAULT_KDF_ITERATIONS, LoginKeyCache};
+pub use network_link_keys::{NetworkLinkKeys, link_key};
 pub use remembered_passwords::{MAX_REMEMBERED_PASSWORDS, RememberedPasswords};
 pub use ui_access_view::{
     PLAY_ONLY_SENTENCE, UiAccessPanel, UiDeviceAccess, UiKeyGroup, UiLoginPrompt, UiPasswordLine,

@@ -5,7 +5,9 @@
 //! Written for the C6's link thread (plan
 //! `lp2025/2026-10-01-1756-c6-link-io-thread`, after the spike
 //! `lp2025/2026-10-01-1200-io-thread-spike`); it measures any board that
-//! speaks lp-link on a serial port.
+//! speaks lp-link on a serial port, or on the LAN (`lan:<host>[:port]`, its
+//! secure link inside a WebSocket — the same report, so a LAN run compares
+//! with a USB one in frames).
 //!
 //! The run, after the hello (and on `emu:` a deploy of the project, which
 //! loads it):
@@ -44,11 +46,13 @@
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
+use lpa_client::HostSpecifier;
+use lpa_client::transport_lan::{LanLink, LanOptions, LanSocket, LanTarget, tier_words};
 use lpc_wire::server::FsRequest;
-use lpc_wire::{ClientMessage, ClientRequest, PortRead, WireLinkPort};
+use lpc_wire::{ClientMessage, ClientRequest, PortRead, WireEncoding, WireLinkPort};
 use serde_json::{Value, json};
 
 use super::args::RttArgs;
@@ -75,6 +79,7 @@ pub fn rtt(args: &RttArgs) -> Result<()> {
     check_chip_on_target(&args.target, elf.is_some(), args.chip)?;
     let mut session = match elf {
         Some(elf) => open_emu(args, Path::new(elf))?,
+        None if args.target.starts_with("lan:") => open_lan(args)?,
         None => open_serial(args)?,
     };
     let mut rng = XorShift(args.seed.max(1));
@@ -114,7 +119,14 @@ pub fn rtt(args: &RttArgs) -> Result<()> {
         .collect();
     let request_link_rtts = rtt_ms(&session.link_rtt[request_mark..request_end]);
     let link_rtts = rtt_ms(&session.link_rtt[rtt_mark..]);
+    // The same round trips in frames of the idle render: the column a LAN
+    // run and a USB run compare in (their frame rates differ by project).
+    let request_rtt_frames = in_frames(&request_rtts, idle_fps);
     eprintln!("link rtt: request RTT ms {}", stats(&request_rtts));
+    eprintln!(
+        "link rtt: request RTT frames {}",
+        stats(&request_rtt_frames)
+    );
     eprintln!(
         "link rtt: link RTT (request phase) ms {}",
         stats(&request_link_rtts)
@@ -160,9 +172,11 @@ pub fn rtt(args: &RttArgs) -> Result<()> {
         "label": args.label,
         "target": args.target,
         "time": if args.target.starts_with("emu:") { "emulated" } else { "wall" },
+        "link": link_kind(&args.target),
         "idle_fps": idle_fps,
         "requests": requests,
         "request_rtt_ms": stats(&request_rtts),
+        "request_rtt_frames": stats(&request_rtt_frames),
         "link_rtt_ms": stats(&link_rtts),
         "link_rtt_request_phase_ms": stats(&request_link_rtts),
         "link_rtt_samples": session.link_rtt[rtt_mark..]
@@ -284,13 +298,24 @@ fn transfers(session: &mut Session, args: &RttArgs) -> Result<Transfers> {
     })
 }
 
-/// The byte pipe under the link: the emulated C6, or a serial port.
+/// The pipe under the link: the emulated C6 or a serial port (bytes), or a
+/// board on the LAN (one frame per WebSocket message).
 trait Pipe {
     /// Move time on: one slice of the emulated board; nothing on a port
     /// (its read waits ~1 ms).
     fn advance(&mut self) -> Result<()>;
     fn now_us(&self) -> u64;
     fn take(&mut self) -> Result<Vec<u8>>;
+    /// Hand what arrived to `link` at `now`: bytes by default, as `take`
+    /// reads them; a datagram pipe overrides it.
+    fn feed(&mut self, now: u64, link: &mut WireLinkPort) -> Result<()> {
+        let bytes = self.take()?;
+        if !bytes.is_empty() {
+            link.on_bytes(now, &bytes);
+        }
+        Ok(())
+    }
+    /// Write one frame the link handed out.
     fn write(&mut self, bytes: &[u8]) -> Result<()>;
     /// End-of-run figures only an emulator has.
     fn report(&mut self) -> Value {
@@ -379,10 +404,7 @@ impl Session {
     fn step(&mut self) -> Result<()> {
         self.pipe.advance()?;
         let now = self.pipe.now_us();
-        let bytes = self.pipe.take()?;
-        if !bytes.is_empty() {
-            self.link.on_bytes(now, &bytes);
-        }
+        self.pipe.feed(now, &mut self.link)?;
         self.flush(now)?;
         while let Some(read) = self.link.poll_read() {
             for line in console_lines(&read) {
@@ -531,6 +553,40 @@ impl Pipe for SerialPipe {
     }
 }
 
+/// A board on the LAN: wall-clock time (the link's own clock, from the
+/// moment its WebSocket connected), one lp-link frame per message.
+struct LanPipe {
+    socket: LanSocket,
+    t0: Instant,
+}
+
+impl Pipe for LanPipe {
+    fn advance(&mut self) -> Result<()> {
+        Ok(())
+    }
+
+    fn now_us(&self) -> u64 {
+        self.t0.elapsed().as_micros() as u64
+    }
+
+    fn take(&mut self) -> Result<Vec<u8>> {
+        bail!("a LAN link carries frames, not bytes")
+    }
+
+    fn feed(&mut self, _now: u64, link: &mut WireLinkPort) -> Result<()> {
+        let mut next = self.socket.recv(Duration::from_millis(1))?;
+        while let Some(frame) = next {
+            link.on_datagram(self.now_us(), &frame);
+            next = self.socket.recv(Duration::ZERO)?;
+        }
+        Ok(())
+    }
+
+    fn write(&mut self, frame: &[u8]) -> Result<()> {
+        Ok(self.socket.send(frame)?)
+    }
+}
+
 /// An emulated board in this process: emulated time. Generic over which
 /// chip (`B: EmuUsbBoard`); the end-of-run report is chip-specific
 /// ([`ChipReport`], `rtt_emu_boards.rs` — the three machines' RMT models
@@ -648,6 +704,59 @@ fn open_serial(args: &RttArgs) -> Result<Session> {
     // The packed-reply opt-in's answer, as a product host waits for it.
     session.idle(500_000)?;
     Ok(session)
+}
+
+/// Open a `lan:` target: its secure link up (a locked board's password from
+/// `--password-stdin` or `LP_PASSWORD`) and its hello read, board time from
+/// its heartbeats, as on a serial device.
+fn open_lan(args: &RttArgs) -> Result<Session> {
+    let spec = HostSpecifier::parse(&args.target)?;
+    let target = LanTarget::from_specifier(&spec)
+        .with_context(|| format!("{} is not a lan: address", args.target))?;
+    let options = LanOptions {
+        password: args.board_password.resolve(&spec)?,
+        want_packed: lpa_client::requested_wire_encoding() == WireEncoding::Packed,
+    };
+    let opened = LanLink::open(&target, &options)?;
+    eprintln!(
+        "link rtt: {target} up at the {} tier",
+        tier_words(opened.granted)
+    );
+    let (socket, port, t0) = opened.link.into_parts();
+    let mut session = Session::new(
+        Box::new(LanPipe { socket, t0 }),
+        port,
+        args.console.as_deref(),
+    )?;
+    session.board_time_from_heartbeats = true;
+    let now = session.pipe.now_us();
+    for read in &opened.early {
+        for line in console_lines(read) {
+            session.note_line(now, line)?;
+        }
+    }
+    // The packed-reply opt-in's answer, as on a serial device.
+    session.idle(500_000)?;
+    Ok(session)
+}
+
+/// Which link a target measures, for the report.
+fn link_kind(target: &str) -> &'static str {
+    if target.starts_with("emu:") {
+        "emulated-usb"
+    } else if target.starts_with("lan:") {
+        "lan"
+    } else {
+        "serial"
+    }
+}
+
+/// Round trips `ms` in frames of a render at `fps` (none without a rate).
+fn in_frames(ms: &[f64], fps: Option<f64>) -> Vec<f64> {
+    match fps {
+        Some(fps) if fps > 0.0 => ms.iter().map(|ms| ms * fps / 1000.0).collect(),
+        _ => Vec::new(),
+    }
 }
 
 /// Open the `emu:` target: build the chip's machine, bring its host link up,
@@ -852,6 +961,14 @@ mod tests {
     }
 
     #[test]
+    fn round_trips_in_frames_are_ms_over_the_frame_time() {
+        assert_eq!(in_frames(&[50.0, 100.0], Some(20.0)), vec![1.0, 2.0]);
+        assert!(in_frames(&[50.0], None).is_empty());
+        assert_eq!(link_kind("lan:10.0.0.7"), "lan");
+        assert_eq!(link_kind("/dev/cu.usbmodem1101"), "serial");
+    }
+
+    #[test]
     fn window_fps_is_frames_over_uptime_between_the_first_and_last_beat() {
         let beats = [
             json!({ "frame_count": 100, "uptime_ms": 5_000 }),
@@ -910,6 +1027,7 @@ mod tests {
     fn project_dir_prefers_an_explicit_project_over_the_chip_default() {
         let args = RttArgs {
             target: "emu:fw".to_string(),
+            board_password: Default::default(),
             chip: Some(EmuChip::Esp32S3),
             json: None,
             console: None,

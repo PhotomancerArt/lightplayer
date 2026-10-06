@@ -175,6 +175,12 @@ long-lived branch conflict on this file whenever main re-baselined too.
   record was re-baselined (the three `bless-chips esp32c6` steps run one at a
   time; ≈10 min). The same bless caught `hello.proto` 30 → 31, which the
   proto bump earlier on the branch had moved without re-recording.
+- 2026-10-06 — Wi-Fi link on the C6 (PR #989, P03–P06): a real move, not
+  churn — the `lp-net` thread's 8 KB stack, embassy-net's resources and the
+  station took the C6's boot heap from 90,024 to 104,064 B used and its
+  largest block from 132,233 to 118,152 B (nothing saved, never joins);
+  wire 38 moved `hello.proto` and the S3/classic stack figures. Taken from
+  CI's patch (`just apply-ci-figures 989`), no local bless.
 
 - 2026-10-06 — **a merge took the record twice in one PR** (OTA update
   protocol Part B): the C6 record conflicted with #880's re-bless of the same
@@ -184,6 +190,18 @@ long-lived branch conflict on this file whenever main re-baselined too.
   a first boot that hashes the engine and the core (~1.9 s emulated) reached
   its first heartbeat past it, which the gate reported as "no first
   heartbeat", not as a timing change (window now 8.5 s, with the reason).
+
+- 2026-10-06 — **a merge's "take theirs" dropped a branch's own figures**
+  (Wi-Fi PR B, #989): merging main after #986, the C6 record conflicted and
+  main's was taken, which was main's 90,208 B used without PR B's station.
+  The next full run (the memory-gate push) then reported "usedBytes grew
+  102,820 > 90,208", which reads as the new change costing 12.6 KB when it
+  had saved 1.2 KB against PR B's own 104,064. The memory-gate change also
+  moved the S3's and the classic's stack by 40-48 B (the exact probe) and the
+  C6 emulator's `hello.proto` (wire 39, missed at the bump). Taken from CI's
+  patch (`just apply-ci-figures 989`). Workaround: after taking main's record
+  in a merge, re-bless or apply CI's patch in the merge's own push, before
+  another change lands on top of it.
 
 **Exit criteria** — a PR whose only memory effect is a few bytes of statics
 passes the gate without touching the record, and two PRs that each

@@ -257,6 +257,7 @@ fn update_popover(row: UpdateFixtureRow, status: UiChromeSessionStatus) -> Eleme
         status,
         stat_line: Some("43 fps".to_string()),
         update: fixture.session_words(),
+        link: lpa_studio_core::UiLinkKind::Usb,
     };
     let offers = session_device_tree(session.device, &session.name);
     rsx! {

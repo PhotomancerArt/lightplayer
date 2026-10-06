@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand};
 
+use crate::client::board_password::BoardPasswordArgs;
 use crate::commands::emu::args::EmuChip;
 
 #[derive(Debug, Parser)]
@@ -45,8 +46,10 @@ pub enum LinkSubcommand {
     /// silicon half of `lp-cli validate`'s link host; the emulated half is
     /// `lp-cli emu run --host-link`, and both write the same lines.
     ///
-    /// Targets: a serial device, or `tcp://host:port` (an emulated board's
-    /// link, `lp-cli emu run --link`).
+    /// Targets: a serial device, `tcp://host:port` (an emulated board's
+    /// link, `lp-cli emu run --link`), or `lan:<host>[:port]` (a board on the
+    /// network: its secure link, a locked board's password from
+    /// `--password-stdin` or `LP_PASSWORD`).
     ///
     /// `--request` sends a client request once the board has said hello:
     /// the desk's way to ask a board something with nothing else on its
@@ -69,7 +72,8 @@ pub enum LinkSubcommand {
     /// after a random pause, from a fixed board time) → tail. A summary on
     /// stderr; `--json` holds every sample.
     ///
-    /// Targets: a serial device (wall-clock time; the board renders whatever
+    /// Targets: a serial device or `lan:<host>[:port]` (a board on the
+    /// network, its link secure; wall-clock time; the board renders whatever
     /// project it loads at boot), or `emu:<ELF>` (one chip's machine in this
     /// process, EMULATED time, with `--project` deployed first; the report
     /// adds the WS281x frames decoded off the pads). `--chip` picks the
@@ -85,6 +89,8 @@ pub enum LinkSubcommand {
     ///
     ///   lp-cli link rtt /dev/cu.usbmodem2101 --json silicon.json
     ///
+    ///   LP_PASSWORD=… lp-cli link rtt lan:lp-3f2a.local --json lan.json
+    ///
     ///   lp-cli link rtt emu:target/riscv32imac-unknown-none-elf/release-esp32/fw-esp32c6 \
     ///       --requests-at-s 40 --json emu.json --console emu.console.txt
     ///
@@ -99,8 +105,11 @@ pub enum LinkSubcommand {
 
 #[derive(Debug, Args)]
 pub struct RttArgs {
-    /// A serial device, or `emu:<ELF>`.
+    /// A serial device, `lan:<host>[:port]` (a board on the network), or
+    /// `emu:<ELF>`.
     pub target: String,
+    #[command(flatten)]
+    pub board_password: BoardPasswordArgs,
     /// `emu:` only: which chip's machine to host. A serial target is real
     /// hardware and refuses this.
     #[arg(long, value_enum)]
@@ -167,8 +176,11 @@ pub struct RttArgs {
 
 #[derive(Debug, Args)]
 pub struct CaptureArgs {
-    /// A serial device, or `tcp://host:port`.
+    /// A serial device, `tcp://host:port`, or `lan:<host>[:port]` (a board on
+    /// the network).
     pub target: String,
+    #[command(flatten)]
+    pub board_password: BoardPasswordArgs,
 
     /// Write the console here, a line at a time.
     #[arg(long)]

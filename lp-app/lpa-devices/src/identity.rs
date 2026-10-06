@@ -45,10 +45,26 @@ pub struct EndpointKey(pub String);
 /// prefix; `sim:`/`emu:` are studio-core's and the model never reads them.
 pub const BLE_ENDPOINT_PREFIX: &str = "ble:";
 
+/// The endpoint scheme a board reached over the LAN is at (Studio's
+/// `?lan=`, Wi-Fi roadmap M6): `lan:<ws url>`. Like Bluetooth, there are no
+/// reset lines and no ROM downloader on the far side of it.
+pub const LAN_ENDPOINT_PREFIX: &str = "lan:";
+
 impl EndpointKey {
     /// Whether this endpoint is a Bluetooth link (see [`BLE_ENDPOINT_PREFIX`]).
     pub fn is_bluetooth(&self) -> bool {
         self.0.starts_with(BLE_ENDPOINT_PREFIX)
+    }
+
+    /// Whether this endpoint is a secure link over the LAN (`lan:`).
+    pub fn is_lan(&self) -> bool {
+        self.0.starts_with(LAN_ENDPOINT_PREFIX)
+    }
+
+    /// Whether this endpoint is a network link — Bluetooth or the LAN — over
+    /// which firmware cannot be written (no reset lines, no ROM downloader).
+    pub fn is_network(&self) -> bool {
+        self.is_bluetooth() || self.is_lan()
     }
 }
 
@@ -245,6 +261,14 @@ impl IdentityChain {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bluetooth_and_lan_endpoints_are_network_links_and_a_port_is_not() {
+        assert!(EndpointKey("ble:QkxFLWlk".into()).is_network());
+        assert!(EndpointKey("lan:ws://192.168.1.40/link".into()).is_network());
+        assert!(!EndpointKey("lan:ws://192.168.1.40/link".into()).is_bluetooth());
+        assert!(!EndpointKey("usb-1".into()).is_network());
+    }
 
     #[test]
     fn learning_a_uid_promotes_once_and_then_stays_quiet() {

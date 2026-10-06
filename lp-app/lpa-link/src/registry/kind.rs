@@ -48,6 +48,11 @@ pub enum LinkProviderKind {
     /// is no reset line and no ROM downloader on the far side of a GATT
     /// link, so it can never flash.
     BrowserBle,
+    /// Browser WebSocket provider: a board on the LAN (`ws://<board>/link`),
+    /// the same wire messages on a SECURE lp-link, one frame per binary
+    /// message. Control only, like Bluetooth: no reset line and no ROM
+    /// downloader on the far side of a socket.
+    BrowserWebsocket,
 }
 
 impl LinkProviderKind {
@@ -76,6 +81,7 @@ impl LinkProviderKind {
             Self::BrowserSerialEsp32 => "Browser serial ESP32",
             Self::EmulatorTab => "Emulated board in this tab",
             Self::BrowserBle => "Browser Bluetooth",
+            Self::BrowserWebsocket => "Browser WebSocket",
         }
     }
 
@@ -87,9 +93,9 @@ impl LinkProviderKind {
     /// the test double for serial hardware, so it wears the serial label and
     /// fixtures render like production. An emulated board is an **emu**: it
     /// runs the target's own firmware image rather than the desktop one, so
-    /// calling it a sim would claim the wrong thing about what it is. Future
-    /// device classes (websocket, network) name themselves here, which is
-    /// why the answer stays optional.
+    /// calling it a sim would claim the wrong thing about what it is. A board
+    /// on the LAN is reached over **Wi-Fi**. Future device classes name
+    /// themselves here, which is why the answer stays optional.
     pub fn transport_label(self) -> Option<&'static str> {
         match self {
             Self::HostSerialEsp32 | Self::BrowserSerialEsp32 | Self::Fake => Some("USB"),
@@ -97,6 +103,7 @@ impl LinkProviderKind {
             Self::EmulatorTab => Some("emu"),
             Self::HostProcess => Some("host"),
             Self::BrowserBle => Some("Bluetooth"),
+            Self::BrowserWebsocket => Some("Wi-Fi"),
         }
     }
 
@@ -123,7 +130,7 @@ impl LinkProviderKind {
             // needs the chip's reset lines or its ROM downloader does not
             // exist here: no `Reset`, `FlashFirmware`, `EraseDeviceFlash`,
             // `WriteBootControl`, or raw-filesystem access (M5 S1).
-            Self::BrowserBle => LinkCapabilities::default()
+            Self::BrowserBle | Self::BrowserWebsocket => LinkCapabilities::default()
                 .with(LinkOperation::ReadLogs)
                 .with(LinkOperation::ReadDiagnostics),
         }

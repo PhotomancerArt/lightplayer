@@ -41,6 +41,10 @@ enum RunEvidence {
     /// A node (e.g. a shader) reported a definitive failure. Terminal: do
     /// not keep polling.
     Error(String),
+    /// The board refused the status read itself for want of memory ("read
+    /// refused: board memory busy …"): it says nothing about the project,
+    /// so keep polling, and say so if the wait runs out.
+    Busy(String),
 }
 
 /// Poll the same connection until there is evidence the project behind
@@ -57,10 +61,18 @@ pub async fn wait_for_project_running<Io: ClientIo>(
     timeout: Duration,
 ) -> Result<()> {
     let deadline = tokio::time::Instant::now() + timeout;
+    let mut busy: Option<String> = None;
     loop {
         let now = tokio::time::Instant::now();
         if now >= deadline {
-            anyhow::bail!(timeout_message(timeout));
+            match busy {
+                Some(busy) => anyhow::bail!(
+                    "deploy was acked; the board was too busy to say whether it runs within \
+                     {:.1}s (its last answer: {busy})",
+                    timeout.as_secs_f64()
+                ),
+                None => anyhow::bail!(timeout_message(timeout)),
+            }
         }
 
         let read = tokio::time::timeout_at(
@@ -86,6 +98,7 @@ pub async fn wait_for_project_running<Io: ClientIo>(
                     "deploy was acked, but the deployed project failed to run: {message}"
                 );
             }
+            RunEvidence::Busy(message) => busy = Some(message),
             RunEvidence::Pending => {}
         }
 
@@ -112,6 +125,11 @@ fn evaluate_run_evidence(events: &[ProjectReadEvent]) -> RunEvidence {
     let mut rendered = false;
     for event in events {
         match event {
+            // A read the board refused for memory is about the read, not
+            // the project (`lpa-server` read gate).
+            ProjectReadEvent::Error { message } if message.contains("board memory busy") => {
+                return RunEvidence::Busy(message.clone());
+            }
             ProjectReadEvent::Error { message } => return RunEvidence::Error(message.clone()),
             ProjectReadEvent::Query {
                 event: ProjectReadQueryEvent::Runtime(runtime),
@@ -244,6 +262,19 @@ mod tests {
             evaluate_run_evidence(&events),
             RunEvidence::Error("shader compile: bad glsl".into())
         );
+    }
+
+    /// The status read refused for memory is not the project failing: the
+    /// wait keeps polling (PR C's walk: lp-cli said "failed to run").
+    #[test]
+    fn a_read_refused_for_memory_is_busy_not_a_failure() {
+        let message = "read refused: board memory busy (free 47388 B, largest block 14076 B; \
+                       needs 40960 B free and a 16384 B block); retry shortly"
+            .to_string();
+        let events = vec![ProjectReadEvent::Error {
+            message: message.clone(),
+        }];
+        assert_eq!(evaluate_run_evidence(&events), RunEvidence::Busy(message));
     }
 
     #[test]

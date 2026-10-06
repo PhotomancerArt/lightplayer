@@ -25,6 +25,10 @@ fn channel_three_is_reliable_on_every_board_preset() {
         ("usb", LinkConfig::usb()),
         ("uart", LinkConfig::uart()),
         ("ble", LinkConfig::ble()),
+        // The LAN link (Wi-Fi roadmap M6): hosts use `ws()` itself, and the
+        // board's `lan_link_config()` is cut from it (fw-esp32-common pins
+        // that its cut keeps channel 3).
+        ("ws", LinkConfig::ws()),
     ] {
         assert!(cfg.is_reliable(CH_UPDATE), "{name}() carries channel 3");
     }

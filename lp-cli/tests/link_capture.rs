@@ -50,6 +50,7 @@ fn a_capture_over_the_boards_socket_reaches_the_boot_idle_sentinel() {
     let console = dir.path().join("boot-idle.cap");
     capture(&CaptureArgs {
         target: format!("tcp://{addr}"),
+        board_password: Default::default(),
         console: console.clone(),
         exit_on: Some("[stack] heartbeat: high-water".into()),
         seconds: 300,
@@ -116,6 +117,7 @@ fn a_reboot_request_restarts_the_board_and_the_next_request_goes_to_the_new_sess
     let second_answer = format!("M!{{\"id\":{},", REQUEST_ID_BASE + 1);
     capture(&CaptureArgs {
         target: format!("tcp://{addr}"),
+        board_password: Default::default(),
         console: console.clone(),
         exit_on: Some(second_answer.clone()),
         seconds: 300,

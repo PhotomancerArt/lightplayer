@@ -8,6 +8,7 @@
 //! | `?wire=json` / `?wire=packed` | whether this page asks boards to pack their replies (the default is packed, everywhere), so JSON and packed can be measured on one build |
 //! | `?wire-capture=1` | tee every raw byte the Web Serial read pump hands to Rust into a 16 MiB in-memory buffer; `lpWireCapture()` in the console downloads it as `wire-capture-<unix-ms>.bin` (`lpa_link::device_link::wire_capture`) |
 //! | `?device-log=<level>` | once per link, after the board's hello and the packed-reply opt-in, ask it for `trace`/`debug`/`info`/`warn`/`error` logging (`SetLogLevel`) |
+//! | `?lan=<url>[,<url>…]` | reach each named board on the LAN (`ws://<board>/link`, or just its host) over a secure lp-link, as a Wi-Fi device on the Devices page — no UI adds one yet (Wi-Fi M6 P07; parsed by `lpa_studio_core::parse_lan_flag`) |
 //! | `?firmware-store=<origin>` | the firmware store Studio fetches engines from, instead of `https://lightplayer.app` — **loopback and private-LAN origins only** (the `?record=` sink rule, `record_sink::check_sink`), so a link someone else wrote cannot point Studio at another store's "latest"; a refused origin keeps the default and says so once in the console |
 //!
 //! Validated the way `?record=` is (`device_events_io.rs`): a query is
@@ -37,6 +38,8 @@ pub struct DevUrlFlags {
     pub device_log: Option<LogLevel>,
     /// `?firmware-store=<origin>`, judged.
     pub firmware_store: Option<FirmwareStoreFlag>,
+    /// `?lan=<url>[,<url>…]`: the boards' sockets, normalised.
+    pub lan: Vec<String>,
     /// Flags present but unreadable, for the console.
     pub ignored: Vec<String>,
 }
@@ -76,6 +79,17 @@ impl DevUrlFlags {
                 },
                 "firmware-store" if !value.trim().is_empty() => {
                     flags.firmware_store = Some(judge_firmware_store(value.trim()));
+                }
+                "lan" => {
+                    let lan = lpa_studio_core::parse_lan_flag(value);
+                    for (refused, why) in lan.refused {
+                        flags.ignored.push(format!("lan={refused} ({why})"));
+                    }
+                    for address in lan.addresses {
+                        if !flags.lan.contains(&address) {
+                            flags.lan.push(address);
+                        }
+                    }
                 }
                 _ => {}
             }
@@ -177,6 +191,22 @@ pub fn firmware_store_origin() -> String {
 thread_local! {
     static FIRMWARE_STORE_ORIGIN: std::cell::RefCell<Option<String>> =
         const { std::cell::RefCell::new(None) };
+    static LAN_ADDRESSES: std::cell::RefCell<Vec<String>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// The boards `?lan=` named, as the sockets Studio dials. Read once by
+/// [`install`]; empty without the flag, and the shell installs no LAN
+/// transport then.
+#[cfg_attr(
+    not(target_arch = "wasm32"),
+    allow(
+        dead_code,
+        reason = "read by the wasm install; host builds only run the unit tests"
+    )
+)]
+pub fn lan_addresses() -> Vec<String> {
+    LAN_ADDRESSES.with(|addresses| addresses.borrow().clone())
 }
 
 /// A `?device-log=` value, case-insensitive.
@@ -226,6 +256,13 @@ pub fn install() {
     if let Some(level) = flags.device_log {
         lpa_link::device_link::wire_reader::set_device_log_level(Some(level));
         log::info!("dev flag: each board is asked for {level:?} logging once it is ready");
+    }
+    if !flags.lan.is_empty() {
+        log::info!(
+            "dev flag: reaching {} over Wi-Fi (?lan=)",
+            flags.lan.join(", ")
+        );
+        LAN_ADDRESSES.with(|slot| *slot.borrow_mut() = flags.lan.clone());
     }
     match flags.firmware_store {
         Some(FirmwareStoreFlag::Accepted(origin)) => {
@@ -305,6 +342,21 @@ mod tests {
         assert!(!flags.wire_capture);
         assert_eq!(flags.device_log, None);
         assert_eq!(flags.ignored, ["wire-capture=yes", "device-log=loud"]);
+    }
+
+    #[test]
+    fn the_lan_flag_names_each_board_and_refuses_what_is_not_one() {
+        let flags = DevUrlFlags::parse(
+            "?emu=tab&lan=ws%3A%2F%2F10.0.0.5%2Flink,lp-b48c.local,http://x/&wire=json",
+        );
+        assert_eq!(flags.lan, ["ws://10.0.0.5/link", "ws://lp-b48c.local/link"]);
+        assert_eq!(flags.wire, Some(WireChoice::Json));
+        assert_eq!(flags.ignored.len(), 1, "{:?}", flags.ignored);
+        assert!(
+            flags.ignored[0].starts_with("lan=http://x/"),
+            "{:?}",
+            flags.ignored
+        );
     }
 
     #[test]

@@ -520,7 +520,8 @@ mod tests {
                     crate::server::StationState::Connected {
                         ssid: String::from("lp-walk-net"),
                         ip: String::from("10.0.0.7"),
-                        rssi: -48
+                        rssi: -48,
+                        host: String::from("lp-8e30.local")
                     }
                 );
             }
@@ -633,6 +634,7 @@ mod tests {
                     ssid: String::from("lp-walk-net"),
                     ip: String::from("10.0.0.7"),
                     rssi: -48,
+                    host: String::from("lp-8e30.local"),
                 },
             }),
         ]

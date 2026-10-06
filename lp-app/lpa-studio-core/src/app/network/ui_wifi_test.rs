@@ -10,8 +10,8 @@
 //! |---|---|
 //! | `unsupported` | Saved · this firmware can't connect… |
 //! | `off` | Saved · Wi‑Fi is off… |
-//! | `connecting { ssid }` | running, at Looking for |
-//! | `connected { ssid, ip, rssi }` | Connected · <signal> signal · <ip> |
+//! | `connecting { ssid, step }` | running, at the step (Looking for, Checking the password, Getting an address) |
+//! | `connected { ssid, ip, rssi, host }` | Connected · <signal> signal · <ip> |
 //! | `failed { ssid, wrongPassword }` / `last: wrongPassword` | Wrong password |
 //! | `failed { ssid, notFound }` / `last: notFound` | Not in range |
 //! | `failed { ssid, noAddress }` / `last: noAddress` | No address |
@@ -19,7 +19,7 @@
 //! "Connected, no internet" is the relay step failing, which needs M7's
 //! relay field; it is built here for the stories and for M7.
 
-use lpc_wire::server::{LastAttempt, NetworkStatus, StationFailure, StationState};
+use lpc_wire::server::{ConnectStep, LastAttempt, NetworkStatus, StationFailure, StationState};
 
 use super::wifi_words::test as words;
 
@@ -123,8 +123,12 @@ impl UiWifiTest {
             StationState::Failed { ssid: on, reason } if on == ssid => {
                 WifiTestProgress::Done(failure_outcome(*reason))
             }
-            StationState::Connecting { ssid: on } if on == ssid => {
-                WifiTestProgress::Running(WifiTestStep::Looking)
+            StationState::Connecting { ssid: on, step } if on == ssid => {
+                WifiTestProgress::Running(match step {
+                    ConnectStep::Looking => WifiTestStep::Looking,
+                    ConnectStep::CheckingPassword => WifiTestStep::CheckingPassword,
+                    ConnectStep::GettingAddress => WifiTestStep::GettingAddress,
+                })
             }
             _ => match last {
                 Some(LastAttempt::WrongPassword) => {
@@ -296,6 +300,7 @@ mod tests {
             &status(
                 StationState::Connecting {
                     ssid: SSID.to_string(),
+                    step: ConnectStep::Looking,
                 },
                 None,
             ),
@@ -304,6 +309,25 @@ mod tests {
         assert_eq!(looking.steps()[0].label, "Looking for lp-walk-net");
         assert_eq!(looking.result(), None);
 
+        // The board's own step moves the test along live.
+        for (step, expected) in [
+            (ConnectStep::CheckingPassword, [Done, Now, Todo]),
+            (ConnectStep::GettingAddress, [Done, Done, Now]),
+        ] {
+            let running = UiWifiTest::of(
+                SSID,
+                &status(
+                    StationState::Connecting {
+                        ssid: SSID.to_string(),
+                        step,
+                    },
+                    None,
+                ),
+            );
+            assert_eq!(states(&running), expected);
+            assert_eq!(running.result(), None);
+        }
+
         let connected = UiWifiTest::of(
             SSID,
             &status(
@@ -311,6 +335,7 @@ mod tests {
                     ssid: SSID.to_string(),
                     ip: "192.168.1.42".to_string(),
                     rssi: -48,
+                    host: "lp-8e30.local".to_string(),
                 },
                 Some(LastAttempt::Connected),
             ),

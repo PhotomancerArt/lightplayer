@@ -7,8 +7,10 @@
 //! client calls `lp-cli wifi` makes (`network_status`, `network_scan`,
 //! `network_add`, `network_forget`). One claim, end to end:
 //!
-//! - a fresh board has no network, says its firmware cannot connect, and
-//!   answers a scan as unsupported;
+//! - a fresh board has no network, says its station is not connected, and
+//!   answers a scan with `scanning` (the emulator has no air: its radio
+//!   never finishes a scan, and the board says so rather than claim it
+//!   heard nothing);
 //! - two networks added over USB read back as their names and "password
 //!   set", never a password;
 //! - they survive a reset (the board reboots, its flash kept), so they are
@@ -74,9 +76,9 @@ fn wifi_networks_added_over_usb_survive_a_reset_and_stay_write_only() {
         assert!(status.networks.is_empty());
         assert!(status.wifi, "Wi-Fi is on by default");
         assert!(status.cloud_relay, "the relay is on by default");
-        assert_eq!(status.station, StationState::Unsupported);
+        assert_eq!(status.station, StationState::NotConnected);
         let scan = block_on(client.network_scan()).expect("scan").value;
-        assert_eq!(scan, NetworkScan::Unsupported, "no fake list");
+        assert_eq!(scan, NetworkScan::Scanning, "no fake list");
 
         // Add two networks over the trusted USB link.
         block_on(client.network_add(String::from(SSID), WifiPassword::new(PASSWORD), None))
@@ -89,7 +91,14 @@ fn wifi_networks_added_over_usb_survive_a_reset_and_stay_write_only() {
         .expect("add a second")
         .value;
         assert_eq!(status.networks, saved());
-        assert_eq!(status.station, StationState::Unsupported);
+        assert!(
+            matches!(
+                status.station,
+                StationState::NotConnected | StationState::Connecting { .. }
+            ),
+            "{:?}",
+            status.station
+        );
 
         // Reset the board; its flash is kept.
         let ack = block_on(client.send_request(ClientRequest::Reboot)).expect("the reboot ack");

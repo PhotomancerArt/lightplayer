@@ -42,6 +42,34 @@ use crate::device_link::link_note::{LINK_ANSWERING_NOTE, LINK_STALLED_NOTE};
 use crate::device_link::port_read_map::{MappedRead, map_port_read};
 use crate::device_link::wire_reader::WireRead;
 
+/// What a secure port's handshake said beyond `Up`.
+#[cfg(feature = "secure-link")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SecureLinkEvent {
+    /// The board refused the key presented: answer with
+    /// [`LinkPortService::retry_with`] (the key walk says which).
+    Refused(crate::providers::network_link::KeyRefusal),
+    /// The board runs a plain link: a secure port never comes up on it (there
+    /// is no downgrade).
+    PeerNotSecure,
+}
+
+/// A [`LinkKey`](crate::providers::network_link::LinkKey) as lp-link's own
+/// key id and PSK.
+#[cfg(feature = "secure-link")]
+fn secure_key(
+    key: &crate::providers::network_link::LinkKey,
+) -> (
+    lpc_wire::lp_link::secure_channel::KeyId,
+    lpc_wire::lp_link::secure_channel::Psk,
+) {
+    use lpc_wire::lp_link::secure_channel::{KeyId, Psk};
+    if key.is_anonymous() {
+        return (KeyId::ANONYMOUS, Psk::ANONYMOUS);
+    }
+    (KeyId(key.key_id), Psk::new(key.psk))
+}
+
 /// A browser port's lp-link end. See the module docs.
 pub struct LinkPortService {
     port: WireLinkPort,
@@ -73,6 +101,78 @@ impl LinkPortService {
             notes: Vec::new(),
             stalled: false,
         }
+    }
+
+    /// A port whose link is a SECURE lp-link initiator (feature
+    /// `secure-link`): the LAN link to a board on Wi-Fi, on
+    /// [`LinkConfig::ws`]'s datagrams. It presents `key` (an access entry's
+    /// salt and `link_psk(K)`, or the anonymous key) inside its SYN, and the
+    /// board grants that entry's tier — its hello says which. `entropy`
+    /// fills a buffer with fresh random bytes (32 per handshake). What the
+    /// handshake says beyond `Up` is [`Self::poll_secure_event`]'s.
+    #[cfg(feature = "secure-link")]
+    pub fn new_secure(
+        config: LinkConfig,
+        nonce: u32,
+        want_packed: bool,
+        device_log: Option<LogLevel>,
+        key: &crate::providers::network_link::LinkKey,
+        entropy: fn(&mut [u8]),
+    ) -> Self {
+        let (key_id, psk) = secure_key(key);
+        Self {
+            port: WireLinkPort::new_secure(config, nonce, want_packed, key_id, psk, entropy)
+                .with_device_log_level(device_log),
+            reads: VecDeque::new(),
+            notes: Vec::new(),
+            stalled: false,
+        }
+    }
+
+    /// The next thing a secure port's handshake said beyond `Up` (a refusal,
+    /// a peer that runs a plain link), in this crate's words. Each also
+    /// reached the journal as one note.
+    #[cfg(feature = "secure-link")]
+    pub fn poll_secure_event(&mut self) -> Option<SecureLinkEvent> {
+        use crate::providers::network_link::KeyRefusal;
+        use lpc_wire::lp_link::secure_channel::{RefusalReason, SecureEvent};
+        loop {
+            let event = self.port.poll_secure_event()?;
+            self.collect_reads();
+            return Some(match event {
+                SecureEvent::Refused {
+                    reason,
+                    retry_after_ms,
+                } => SecureLinkEvent::Refused(match reason {
+                    RefusalReason::UnknownKey => KeyRefusal::UnknownKey,
+                    RefusalReason::WrongKey => KeyRefusal::WrongKey,
+                    RefusalReason::Backoff => KeyRefusal::Backoff { retry_after_ms },
+                    RefusalReason::Busy => KeyRefusal::Busy,
+                }),
+                SecureEvent::PeerNotSecure => SecureLinkEvent::PeerNotSecure,
+                // Responder events never reach an initiator.
+                SecureEvent::KeyLookup { .. } | SecureEvent::WrongKey { .. } => continue,
+            });
+        }
+    }
+
+    /// A secure port, after a refusal: present `key` instead. The handshake
+    /// starts again at once (the caller transmits after).
+    #[cfg(feature = "secure-link")]
+    pub fn retry_with(&mut self, key: &crate::providers::network_link::LinkKey) {
+        let (key_id, psk) = secure_key(key);
+        self.port.retry_with(key_id, psk);
+    }
+
+    /// A secure port that is UP on a key it would rather replace (a key that
+    /// arrived while it was up — a password typed for a locked board): end
+    /// this session and start a new one presenting `key`. The drainer reads
+    /// the end as a link reset, then the new session's hello.
+    #[cfg(feature = "secure-link")]
+    pub fn rekey(&mut self, now: Micros, key: &crate::providers::network_link::LinkKey) {
+        self.port.restart(now);
+        self.retry_with(key);
+        self.collect(now);
     }
 
     /// Bytes the page read from the port at `now`, in any split.
@@ -180,12 +280,7 @@ impl LinkPortService {
     /// Sort what the port has read onto the two queues, and note a stall's
     /// edges.
     fn collect(&mut self, now: Micros) {
-        while let Some(read) = self.port.poll_read() {
-            match map_port_read(read) {
-                MappedRead::Read(read) => self.reads.push_back(read),
-                MappedRead::Note(note) => self.notes.push(note),
-            }
-        }
+        self.collect_reads();
         let stalled = self.port.is_stalled(now);
         if stalled != self.stalled {
             self.stalled = stalled;
@@ -197,6 +292,16 @@ impl LinkPortService {
                 }
                 .to_string(),
             );
+        }
+    }
+
+    /// Sort what the port has read onto the two queues.
+    fn collect_reads(&mut self) {
+        while let Some(read) = self.port.poll_read() {
+            match map_port_read(read) {
+                MappedRead::Read(read) => self.reads.push_back(read),
+                MappedRead::Note(note) => self.notes.push(note),
+            }
         }
     }
 }

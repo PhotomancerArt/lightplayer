@@ -51,8 +51,11 @@ enum Cli {
     Upload {
         /// Project directory
         dir: std::path::PathBuf,
-        /// Host to upload to (e.g. serial:auto, ws://localhost:2812/)
+        /// Host to upload to (e.g. serial:auto, lan:192.168.1.40,
+        /// lan:lp-3f2a.local, ws://localhost:2812/)
         host: String,
+        #[command(flatten)]
+        password: client::board_password::BoardPasswordArgs,
         /// Skip waiting for evidence the deployed project is running;
         /// disconnect the instant the deploy is acked (pre-P5 behaviour).
         #[arg(long)]
@@ -142,11 +145,13 @@ fn main() -> Result<()> {
         Cli::Upload {
             dir,
             host,
+            password,
             no_wait,
             wait_timeout,
         } => upload::handle_upload(upload::UploadArgs {
             dir,
             host,
+            password,
             no_wait,
             wait_timeout_secs: wait_timeout,
         }),

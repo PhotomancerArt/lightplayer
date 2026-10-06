@@ -293,6 +293,9 @@ fn connect_page(
             }
         }
         div { class: "tw:grid tw:min-w-0",
+            if scanning && nearby.is_empty() {
+                p { class: "tw:px-3 tw:py-2 tw:text-[12px] tw:text-dim-foreground tw:animate-pulse", "{label::LOOKING_FOR_NETWORKS}" }
+            }
             for heard in nearby {
                 HeardRowButton {
                     key: "{heard.ssid}",
