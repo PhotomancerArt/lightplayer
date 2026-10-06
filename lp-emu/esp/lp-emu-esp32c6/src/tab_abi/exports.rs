@@ -641,6 +641,31 @@ pub extern "C" fn emu_flash_mark_saved() -> i32 {
     0
 }
 
+/// This chip start's emulator seams as one line of JSON
+/// ([`super::seams_info_json`]): the configuration label, the engaged atoms,
+/// the `SEAM` lines and why nothing engaged. Valid after [`emu_create`] and
+/// after every restart.
+///
+/// # Safety
+///
+/// `out_ptr`/`out_cap` must name a writable range in this module's memory.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn emu_seams_info(out_ptr: i32, out_cap: i32) -> i32 {
+    // SAFETY: the caller's contract.
+    let Some(out) = (unsafe { bytes_out(out_ptr, out_cap) }) else {
+        return AbiError::BadBuffer.code();
+    };
+    // SAFETY: see `Slot::get`.
+    let Some(host) = (unsafe { host() }).as_ref() else {
+        return AbiError::NoMachine.code();
+    };
+    let json = super::seams_info_json(&host.machine);
+    if json.len() > out.len() {
+        return AbiError::BufferTooSmall.code();
+    }
+    copy_out(json.as_bytes(), out)
+}
+
 /// `1` when the reset vector holds something the ROM would boot — the
 /// `flash` word's `blank` / `loaded` answer.
 #[unsafe(no_mangle)]

@@ -12,7 +12,7 @@
 //
 // What it asserts, and why each one is worth a line:
 //
-//   1. the module speaks `emu_abi=1`, and `_start` is never called
+//   1. the module speaks `emu_abi=2`, and `_start` is never called
 //   2. a blank rom-up board on the download strap boots the REAL mask ROM:
 //      `ESP-ROM:esp32c6` and `waiting for download` on UART0. That single
 //      transcript covers the ABI, the shim's `clock_time_get`, the flash

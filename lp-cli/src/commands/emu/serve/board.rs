@@ -89,6 +89,9 @@ pub struct BoardSpec {
     pub image: Option<PathBuf>,
     pub kind: BoardKind,
     pub mac: [u8; 6],
+    /// The emulator seams this board asks for (`seams=` / `seams_prefer=`);
+    /// the capability defaults — empty today — unless the spec says.
+    pub seams: lp_emu_esp_common::seam::SeamRequest,
     /// The persistent flash file, `None` for a merged board (which carries
     /// the whole chip already) and for a serve with no `--state-dir`.
     pub flash: Option<PathBuf>,
@@ -136,8 +139,36 @@ pub struct Board {
     /// learned the reset domains, and a door client that can ask for both
     /// wants to see which one it got.
     pub power_cycles: Arc<AtomicU64>,
+    /// The board's configuration label and this chip start's `SEAM` lines,
+    /// kept current by the board thread (`GET /boards`).
+    pub seams: Arc<std::sync::Mutex<SeamReport>>,
     shutdown: Arc<AtomicBool>,
     thread: std::sync::Mutex<Option<std::thread::JoinHandle<()>>>,
+}
+
+/// What a board says about its emulator seams.
+#[derive(Clone, Debug, Default)]
+pub struct SeamReport {
+    /// `lp-emu:esp32c6:t1`, or `…+led=fast` with a seam engaged.
+    pub label: String,
+    /// This chip start's `SEAM … engaged` / `SEAM none engaged: …` lines.
+    pub lines: Vec<String>,
+    /// Its seam endpoints, `<board>/<seam>` — what a medium would join.
+    pub endpoints: Vec<String>,
+}
+
+impl SeamReport {
+    fn of(machine: &lp_emu_esp32c6::machine::Esp32C6Machine) -> Self {
+        Self {
+            label: machine.configuration_label(),
+            lines: machine.seams().lines.clone(),
+            endpoints: machine
+                .seam_endpoints()
+                .iter()
+                .map(|e| e.id.to_string())
+                .collect(),
+        }
+    }
 }
 
 /// The knobs a whole `serve` shares across its boards.
@@ -179,6 +210,7 @@ impl Board {
         let reboots = Arc::new(AtomicU64::new(0));
         let power_cycles = Arc::new(AtomicU64::new(0));
         let has_image = Arc::new(AtomicBool::new(at_start));
+        let seams = Arc::new(std::sync::Mutex::new(SeamReport::default()));
         let (tx, rx) = std::sync::mpsc::channel::<Result<(SocketAddr, SocketAddr)>>();
 
         let id = spec.id.clone();
@@ -191,6 +223,7 @@ impl Board {
             let reboots = Arc::clone(&reboots);
             let power_cycles = Arc::clone(&power_cycles);
             let has_image = Arc::clone(&has_image);
+            let seams = Arc::clone(&seams);
             std::thread::Builder::new()
                 .name(format!("emu-board-{id}"))
                 .spawn(move || {
@@ -204,6 +237,7 @@ impl Board {
                         reboots,
                         power_cycles,
                         has_image,
+                        seams,
                     });
                 })
                 .context("spawning the board thread")?
@@ -227,9 +261,19 @@ impl Board {
             stopped,
             reboots,
             power_cycles,
+            seams,
             shutdown,
             thread: std::sync::Mutex::new(Some(thread)),
         })
+    }
+
+    /// The board's seam endpoints (`<board>/<seam>`), for a medium to join.
+    pub fn endpoints(&self) -> Vec<String> {
+        self.seams
+            .lock()
+            .expect("seam report poisoned")
+            .endpoints
+            .clone()
     }
 
     /// `blank` / `loaded` / `merged`, as of right now.
@@ -284,6 +328,7 @@ struct RunBoard {
     reboots: Arc<AtomicU64>,
     power_cycles: Arc<AtomicU64>,
     has_image: Arc<AtomicBool>,
+    seams: Arc<std::sync::Mutex<SeamReport>>,
 }
 
 fn run_board(this: RunBoard) {
@@ -297,6 +342,7 @@ fn run_board(this: RunBoard) {
         reboots,
         power_cycles,
         has_image,
+        seams,
     } = this;
     let mut machine = match build(&spec, &options) {
         Ok(m) => m,
@@ -336,9 +382,11 @@ fn run_board(this: RunBoard) {
         wall_timeout: Some(SLICE),
         probes: Vec::new(),
     };
+    report_seams(&mut machine, &spec.id, &seams);
     let mut last_flush = Instant::now();
     while !shutdown.load(Ordering::SeqCst) {
         let outcome = machine.run_until(&stop);
+        report_seams(&mut machine, &spec.id, &seams);
         reboots.store(machine.reboots(), Ordering::SeqCst);
         power_cycles.store(machine.power_cycles(), Ordering::SeqCst);
         if let Some(air) = &options.air {
@@ -368,6 +416,24 @@ fn run_board(this: RunBoard) {
     }
     flush(&mut machine, &spec, &has_image);
     machine.flush_frames();
+}
+
+/// A chip start's `SEAM` lines, printed as they come and published for
+/// `GET /boards`. One `Vec::is_empty` a slice when nothing changed.
+fn report_seams(
+    machine: &mut lp_emu_esp32c6::machine::Esp32C6Machine,
+    id: &str,
+    report: &std::sync::Mutex<SeamReport>,
+) {
+    let lines = machine.take_seam_lines();
+    let mut report = report.lock().expect("seam report poisoned");
+    if lines.is_empty() && !report.label.is_empty() {
+        return;
+    }
+    for line in &lines {
+        eprintln!("emu serve: board `{id}`: {line}");
+    }
+    *report = SeamReport::of(machine);
 }
 
 /// Where the machine writes its flash part before it is moved into place.
@@ -510,7 +576,8 @@ fn build(
         // to pick one, so N boards never collide and never race another
         // process for a number.
         .usb_sj(UsbSjSink::Tcp("127.0.0.1:0".to_string()))
-        .control("127.0.0.1:0");
+        .control("127.0.0.1:0")
+        .seams(spec.seams.clone());
 
     // The LP domain's power-on gate word, if the serve induced one. Before
     // the snapshot, so `power-cycle` on the control channel hands the same
@@ -617,5 +684,39 @@ mod tests {
     fn a_mac_reads_back_the_way_it_is_written() {
         let mac = EfuseIdentity::parse_mac("a0:f2:62:87:b4:8c").expect("six octets");
         assert_eq!(format_mac(&mac), "a0:f2:62:87:b4:8c");
+    }
+
+    /// A soft request on an image with no seam table (a blank chip, or any
+    /// image from before seams) boots and says why, never an error.
+    #[test]
+    fn a_soft_seam_on_a_board_without_a_table_boots_and_says_why() {
+        let spec = BoardSpec {
+            id: "c6-a".into(),
+            image: None,
+            kind: BoardKind::RomUp,
+            mac: default_mac(0),
+            seams: lp_emu_esp_common::seam::SeamRequest::prefer("led=fast").unwrap(),
+            flash: None,
+            console: None,
+        };
+        let options = BoardOptions {
+            grade: TimeGrade::T1,
+            strict_bus: false,
+            usb_host: UsbHost::Attached { draining: false },
+            air: None,
+            air_seat: 0,
+            lpperi_clk_en: None,
+        };
+        let mut machine = build(&spec, &options).expect("the board builds");
+        let report = SeamReport::of(&machine);
+        assert_eq!(report.label, "lp-emu:esp32c6:t1", "nothing engaged");
+        assert_eq!(report.lines.len(), 1);
+        assert!(
+            report.lines[0].starts_with("SEAM none engaged: no seam table"),
+            "{:?}",
+            report.lines
+        );
+        assert!(report.endpoints.is_empty());
+        assert_eq!(machine.take_seam_lines(), report.lines);
     }
 }

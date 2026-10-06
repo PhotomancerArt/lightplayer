@@ -156,7 +156,9 @@ fn run(split: &SplitImage, chip: &[u8], seams: SeamRequest) -> Run {
         .filter(|f| f.reset_cycles.is_some())
         .cloned()
         .collect();
-    let seam_lines = m.take_seam_lines();
+    // This chip start's announcements (the hosted board has already printed
+    // them as they came).
+    let seam_lines = m.seams().lines.clone();
     let seam_calls = m.seams().calls;
     let label = m.configuration_label();
     let console = host.console().to_vec();

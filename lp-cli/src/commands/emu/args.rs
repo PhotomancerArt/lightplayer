@@ -339,6 +339,25 @@ pub struct RunArgs {
     /// channel does not clear it either: the value IS the power-on value.
     #[arg(long = "lpperi-clk-en", value_name = "HEX", value_parser = parse_hex_u32)]
     pub lpperi_clk_en: Option<u32>,
+
+    /// Engage emulator seams, STRICT: atoms `<seam>=<impl>` joined by `+`
+    /// (`led=fast`), or `none`. A seam this image cannot engage ends the run
+    /// with an error. Every chip start prints `SEAM <atom> engaged (…)` and
+    /// the run's label becomes `<grade>+led=fast`. A performance seam
+    /// (`led=fast`) is never for testing: see
+    /// docs/adr/2026-10-05-emulator-seams.md.
+    #[arg(long)]
+    pub seams: Option<String>,
+
+    /// The same, SOFT: engage what the image allows, else print one `SEAM
+    /// none engaged: <why>` line and run on with none — what Studio's
+    /// Devices-page boards ask.
+    #[arg(long = "seams-prefer")]
+    pub seams_prefer: Option<String>,
+
+    /// Print a flash image's (or a merged image's) seam tables and exit.
+    #[arg(long = "seams-info", value_name = "IMAGE")]
+    pub seams_info: Option<PathBuf>,
 }
 
 /// The USB host's state at power-on, for `run` and for every board `serve`
@@ -387,7 +406,7 @@ pub struct ServeArgs {
     pub chip: EmuChip,
 
     /// A board:
-    /// `<id>=<image>[,mac=<aa:bb:cc:dd:ee:ff>][,kind=elf|merged|rom-up]`.
+    /// `<id>=<image>[,mac=<aa:bb:cc:dd:ee:ff>][,kind=elf|merged|rom-up][,seams=<atoms|none>][,seams_prefer=<atoms>]`.
     /// Repeatable, and the whole point — `s9-two-boards` is about two
     /// identities, so every board gets its own MAC (the desk board's with
     /// the last octet stepped, unless `mac=` says otherwise) and its own
@@ -409,6 +428,14 @@ pub struct ServeArgs {
     ///   time; `blank` means a chip with nothing on it, which reaches the
     ///   mask ROM's download console by itself. (A file actually named
     ///   `blank` is still reachable as `./blank`.)
+    ///
+    /// `seams=` (strict) and `seams_prefer=` (soft) engage emulator seams on
+    /// that board, spelled as `run --seams` spells them (`seams=led=fast`).
+    /// **None by default**, beyond the capability seams (none exist yet):
+    /// `studio-dev-emu` and every walk serve seam-free boards, and a
+    /// performance seam is never for testing (ADR
+    /// docs/adr/2026-10-05-emulator-seams.md). `GET /boards` names each
+    /// board's configuration label and its `SEAM` lines.
     #[arg(long = "board", value_name = "ID=IMAGE[,OPTS]")]
     pub board: Vec<String>,
 

@@ -53,7 +53,14 @@ fn the_outcome_codes_are_the_numbers_the_worker_mirrors() {
         "unreachable through this ABI, and numbered anyway so a seventh \
          outcome cannot silently take a taken number"
     );
-    assert_eq!(ABI_VERSION, 1);
+    assert_eq!(
+        code_for(&Outcome::Seam {
+            cycle: 7,
+            why: "no table".into()
+        }),
+        8
+    );
+    assert_eq!(ABI_VERSION, 2);
 }
 
 #[test]
@@ -221,4 +228,86 @@ fn an_image_longer_than_the_chip_is_refused_by_the_builder() {
         Err(e) => e.to_string(),
     };
     assert!(err.contains("larger than the 4096-byte chip"), "{err}");
+}
+
+/// `seams=` is strict and `seams_prefer=` soft; the atom keeps its own `=`.
+#[test]
+fn the_seam_keys_parse_into_a_request() {
+    use lp_emu_esp_common::seam::Strength;
+    let cfg = Config::parse("seams_prefer=led=fast\n").unwrap();
+    let wanted = cfg.seams.wanted();
+    assert_eq!(wanted.len(), 1);
+    assert_eq!(wanted[0].0.atom(), "led=fast");
+    assert_eq!(wanted[0].1, Strength::Soft);
+    let cfg = Config::parse("seams=led=fast").unwrap();
+    assert_eq!(cfg.seams.wanted()[0].1, Strength::Strict);
+    assert!(Config::parse("seams=none").unwrap().seams.is_empty());
+    assert!(
+        Config::parse("").unwrap().seams.is_empty(),
+        "seam-free by default"
+    );
+    let err = refusal("seams_prefer=led=slow");
+    assert!(err.contains("line 1: seams_prefer:"), "{err}");
+}
+
+/// A blank board with a soft request says why nothing engaged, once.
+#[test]
+fn a_blank_chip_reports_no_seam_and_why() {
+    let cfg = Config::parse("seams_prefer=led=fast\ngrade=t2").unwrap();
+    let machine = cfg
+        .builder(FlashBacking::Bytes(Vec::new()), AppSource::None)
+        .build()
+        .expect("a blank rom-up board builds");
+    let json = seams_info_json(&machine);
+    assert!(
+        json.starts_with("{\"label\":\"lp-emu:esp32c6:t2\",\"engaged\":[],"),
+        "{json}"
+    );
+    assert!(
+        json.contains("\"lines\":[\"SEAM none engaged: no seam table"),
+        "{json}"
+    );
+    assert!(json.contains("\"none_why\":\"no seam table"), "{json}");
+    let off = Config::parse("")
+        .unwrap()
+        .builder(FlashBacking::Bytes(Vec::new()), AppSource::None)
+        .build()
+        .unwrap();
+    assert_eq!(
+        seams_info_json(&off),
+        "{\"label\":\"lp-emu:esp32c6:t1\",\"engaged\":[],\"lines\":[],\"none_why\":null}"
+    );
+}
+
+/// What Studio's Update firmware does to a board created blank: the shipped
+/// image written into its flash, then a reset. The soft request that found no
+/// table at creation engages once the new image's app runs.
+#[test]
+#[ignore = "needs a split fw-esp32c6 build; `just test-emu-c6`"]
+fn a_flashed_and_reset_board_reports_led_fast_engaged() {
+    let split = match crate::test_support::split_image(&crate::test_support::FwImage::SHIPPED) {
+        Ok(split) => split,
+        Err(reason) => {
+            crate::test_support::skip_notice("a_flashed_and_reset_board", &reason);
+            return;
+        }
+    };
+    let cfg = Config::parse("seams_prefer=led=fast\nusb_host=attached").unwrap();
+    let mut machine = cfg
+        .builder(FlashBacking::Bytes(Vec::new()), AppSource::None)
+        .build()
+        .expect("a blank board");
+    assert!(seams_info_json(&machine).contains("\"engaged\":[]"));
+    let merged = std::fs::read(split.merged()).unwrap();
+    assert!(machine.flash().lock().unwrap().stage(0, &merged));
+    assert!(machine.power_cycle(Strap::App));
+    machine.run_until(&crate::machine::StopCondition::after_micros(2_000_000));
+    let json = seams_info_json(&machine);
+    assert!(json.contains("\"engaged\":[\"led=fast\"]"), "{json}");
+    assert!(json.contains("+led=fast"), "{json}");
+    assert!(
+        json.contains("SEAM led=fast engaged (performance"),
+        "{json}"
+    );
+    assert!(json.ends_with("\"none_why\":null}"), "{json}");
 }

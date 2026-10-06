@@ -130,6 +130,15 @@ fn run(args: RunArgs) -> Result<()> {
             bail!("{flag} is the classic's (--chip esp32v3): its host link is UART0");
         }
     }
+    if let Some(path) = &args.seams_info {
+        let bytes = std::fs::read(path).with_context(|| format!("reading {}", path.display()))?;
+        println!("{}", lp_emu_esp32c6::seams::seams_info(&bytes));
+        return Ok(());
+    }
+    let seams = seam_request(args.seams.as_deref(), args.seams_prefer.as_deref())?;
+    if args.chip != EmuChip::Esp32C6 && !seams.is_empty() {
+        bail!("--seams / --seams-prefer are the C6's (Xtensa seams are the roadmap's M7)");
+    }
     if args.chip == EmuChip::Esp32S3 {
         return super::run_s3::run_s3(&args, parse_duration_us(&args.timeout)?);
     }
@@ -153,7 +162,8 @@ fn run(args: RunArgs) -> Result<()> {
             UsbSjDrain::Manual
         } else {
             UsbSjDrain::Auto
-        });
+        })
+        .seams(seams);
 
     let image = match (args.elf.as_deref(), args.merged.as_deref()) {
         (Some(elf), None) => Image::Elf(elf),
@@ -297,13 +307,14 @@ fn run(args: RunArgs) -> Result<()> {
             );
         }
         builder = builder.usb_sj_queue_source();
-        let machine = builder
+        let mut machine = builder
             .build()
             .map_err(|e| anyhow::anyhow!("building the machine: {e}"))?;
+        print_seam_lines(&mut machine);
         let boot = format!(
             "esp32c6 {} boot, grade {}",
             machine.boot_mode().as_str(),
-            grade.configuration()
+            machine.configuration_label()
         );
         let board = super::link_host::C6Board::new(machine)?;
         return super::run_hosted::run_hosted(board, boot, &args, micros);
@@ -312,6 +323,7 @@ fn run(args: RunArgs) -> Result<()> {
     let mut machine = builder
         .build()
         .map_err(|e| anyhow::anyhow!("building the machine: {e}"))?;
+    print_seam_lines(&mut machine);
 
     let link = match args.link_kind {
         LinkKind::Usb => "usb-serial-jtag",
@@ -322,13 +334,13 @@ fn run(args: RunArgs) -> Result<()> {
             "emu: esp32c6 {} boot, grade {}, {link} on {addr} — connect with `lp-cli upload \
              <project> serial:tcp://{addr}`",
             machine.boot_mode().as_str(),
-            grade.configuration(),
+            machine.configuration_label(),
         ),
         None => eprintln!(
             "emu: esp32c6 {} boot, grade {}, no socket (console in memory; pass --link \
              <addr> to serve the {link} link)",
             machine.boot_mode().as_str(),
-            grade.configuration(),
+            machine.configuration_label(),
         ),
     }
     if let Some(over) = &args.over {
@@ -353,6 +365,7 @@ fn run(args: RunArgs) -> Result<()> {
         probes: Vec::new(),
     };
     let outcome = machine.run_until(&stop);
+    print_seam_lines(&mut machine);
     // A frame still open on a pad is reported as incomplete rather than
     // silently dropped.
     machine.flush_frames();
@@ -378,11 +391,12 @@ fn run(args: RunArgs) -> Result<()> {
     }
 
     eprintln!(
-        "emu: {} — {} us emulated, {} instructions, {} bytes on the console",
+        "emu: {} — {} us emulated, {} instructions, {} bytes on the console ({})",
         describe(&outcome),
         machine.micros(),
         machine.instructions(),
         console.len(),
+        machine.configuration_label(),
     );
     // Unmapped accesses, always, even on a clean run. An address no
     // peripheral claims reads as zero and the guest believes it — a run that
@@ -442,6 +456,35 @@ fn console_bytes(machine: &Esp32C6Machine, kind: LinkKind) -> Vec<u8> {
     match kind {
         LinkKind::Usb => machine.usb_sj().bytes().to_vec(),
         LinkKind::Uart0 => machine.uart0().bytes().to_vec(),
+    }
+}
+
+/// `--seams` (strict) and `--seams-prefer` (soft), folded into one request.
+/// Neither given is the capability defaults — empty today, so nothing scans.
+/// Shared with `serve`'s `seams=` / `seams_prefer=` board options.
+pub(super) fn seam_request(
+    strict: Option<&str>,
+    prefer: Option<&str>,
+) -> Result<lp_emu_esp_common::seam::SeamRequest> {
+    use lp_emu_esp_common::seam::{SeamRequest, Strength};
+    let mut request = SeamRequest::default();
+    if let Some(text) = strict {
+        request = request
+            .with(text, Strength::Strict)
+            .map_err(|e| anyhow::anyhow!("--seams: {e}"))?;
+    }
+    if let Some(text) = prefer {
+        request = request
+            .with(text, Strength::Soft)
+            .map_err(|e| anyhow::anyhow!("--seams-prefer: {e}"))?;
+    }
+    Ok(request)
+}
+
+/// A chip start's `SEAM …` lines, as the machine produced them.
+pub(super) fn print_seam_lines(machine: &mut Esp32C6Machine) {
+    for line in machine.take_seam_lines() {
+        eprintln!("emu: {line}");
     }
 }
 

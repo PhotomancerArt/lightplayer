@@ -112,7 +112,11 @@ impl EmuUsbBoard for C6Board {
             stop_cycle: Some(self.machine.cycles() + us * lp_emu_esp32c6::memmap::CYCLES_PER_US),
             ..Default::default()
         };
-        match self.machine.run_until(&stop) {
+        let outcome = self.machine.run_until(&stop);
+        // A chip start's `SEAM …` lines, as they come (a ROM-up boot's arrive
+        // once the app runs, inside the run).
+        super::handler::print_seam_lines(&mut self.machine);
+        match outcome {
             Outcome::Deadline { .. } => Ok(()),
             other => Err(super::handler::describe(&other)),
         }

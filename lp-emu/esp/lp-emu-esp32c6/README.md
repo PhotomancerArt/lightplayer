@@ -218,7 +218,13 @@ snapshot), and **with none asked for nothing runs**: no scan, no patch, one
   `<seam>=<impl>` joined by `+`; every chip start prints
   `SEAM led=fast engaged (performance, abi …, lp_seam_ws281x_wait_step@…)`,
   `--trace` adds a `SEAM led=fast wait-step` line per call, and the run's
-  label becomes `lp-emu:esp32c6:t2+led=fast`.
+  label becomes `lp-emu:esp32c6:t2+led=fast`. `lp-cli emu run` takes the
+  same three flags and `emu serve` the board options `seams=` and
+  `seams_prefer=` (none by default; `GET /boards` names each board's label
+  and lines). The tab module (`tab_abi`, `emu_abi=2`) takes the config keys
+  `seams=` and `seams_prefer=`, and `emu_seams_info` answers one line of JSON
+  — `{"label","engaged","lines","none_why"}` — after `emu_create` and after
+  every restart.
 - **Implementations**: `led=fast` (the LED wait, below). `test=echo` and
   `test=take` exist only under the dev feature `test-seams`, which the seam
   tests turn on and no shipped command line does.
