@@ -25,10 +25,18 @@
 //! worth growing it. Either way a busy link says [`UpdateSend::Later`] and
 //! the caller keeps the answer.
 
-use core::sync::atomic::{AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 
 /// The hook the engine's transport hands channel 3 to (`0`: none).
 static UPDATE_HOOK: AtomicUsize = AtomicUsize::new(0);
+
+/// When the hook last got a channel-3 message (milliseconds since boot,
+/// wrapping; `0`: never).
+static LAST_MESSAGE_MS: AtomicU32 = AtomicU32::new(0);
+
+/// How recent a channel-3 message must be for the update channel to count as
+/// streaming (a host pulling a read-back, one `G` after another).
+const STREAMING_WITHIN_MS: u32 = 15;
 
 /// The largest channel-3 message queued in the send ring; anything larger
 /// goes as an external message out of the frame buffer.
@@ -62,9 +70,26 @@ pub fn set_update_hook(hook: fn(Option<&[u8]>)) {
 pub(crate) fn dispatch_update(message: Option<&[u8]>) {
     let raw = UPDATE_HOOK.load(Ordering::Acquire);
     if raw != 0 {
+        if message.is_some() {
+            LAST_MESSAGE_MS.store(now_ms().max(1), Ordering::Relaxed);
+        }
         // SAFETY: only `set_update_hook` stores here, and it stores a
         // `fn(Option<&[u8]>)`.
         let hook: fn(Option<&[u8]>) = unsafe { core::mem::transmute(raw) };
         hook(message);
     }
+}
+
+/// Whether a host is streaming over channel 3 right now: a message reached
+/// the hook within the last few milliseconds. The transport then keeps
+/// pumping the link for a while before the server loop renders its next
+/// frame (`UsbLinkTransport::stream_update`), so a read-back moves several
+/// sectors per frame instead of one.
+pub(crate) fn streaming() -> bool {
+    let last = LAST_MESSAGE_MS.load(Ordering::Relaxed);
+    last != 0 && now_ms().wrapping_sub(last) <= STREAMING_WITHIN_MS
+}
+
+fn now_ms() -> u32 {
+    embassy_time::Instant::now().as_millis() as u32
 }
