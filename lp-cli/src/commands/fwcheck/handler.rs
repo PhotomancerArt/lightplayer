@@ -16,6 +16,7 @@ use lpc_model::DEFAULT_SERIAL_BAUD_RATE;
 use lpfs::{LpFs, LpFsStd};
 use tokio::time::sleep;
 
+use crate::client::board_bench;
 use crate::commands::dev::{collect_project_deploy_files, validation};
 
 use super::args::{FwcheckCli, FwcheckCommand, FwcheckDemoArgs, FwcheckRunArgs, FwcheckTargetArg};
@@ -52,10 +53,16 @@ pub fn handle_fwcheck(cli: FwcheckCli) -> Result<()> {
             Ok(())
         }
         FwcheckCommand::Port(args) => {
-            println!(
-                "{}",
-                port::resolve_esp32_port(args.port.as_deref(), args.chip.as_deref())?
-            );
+            let holder = args.lease_for.as_deref().map(board_bench::holder_of);
+            let resolved = match args.mac.as_deref() {
+                Some(mac) => port::resolve_by_mac(mac, holder)?,
+                None => port::resolve_checked(args.port.as_deref(), args.chip.as_deref(), holder)?,
+            };
+            if args.lease {
+                let lease_for = args.lease_for.as_deref().unwrap_or_default();
+                board_bench::take(&resolved, lease_for, args.minutes)?;
+            }
+            println!("{resolved}");
             Ok(())
         }
         FwcheckCommand::Run(args) => run_check(args),

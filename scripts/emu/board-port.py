@@ -15,6 +15,10 @@ exists so a bench with two identical boards on it never has to.
     A0:F2:62:86:7E:44  loc=0x143320  /dev/cu.usbmodem1433201
     A0:F2:62:87:49:A0  loc=0x143330  /dev/cu.usbmodem1433301
 
+`lp-cli fwcheck port --mac <MAC>` is the same passive lookup through the one
+resolver, and it also asks the desk's board bench (`board`) whether someone
+else holds the board — prefer it before flashing or resetting anything.
+
 Exit 0 with the port on stdout, 1 with a reason on stderr. `--list` prints
 every Espressif native-USB board on the bus and exits 0.
 
