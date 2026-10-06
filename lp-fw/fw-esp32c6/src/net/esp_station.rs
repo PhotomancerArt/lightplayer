@@ -52,7 +52,12 @@ impl EspStation {
 impl StationControl for EspStation {
     async fn scan(&mut self) -> Option<Vec<HeardNetwork>> {
         let config = ScanConfig::default();
-        match select(self.controller.scan_async(&config), Timer::after(SCAN_LIMIT)).await {
+        match select(
+            self.controller.scan_async(&config),
+            Timer::after(SCAN_LIMIT),
+        )
+        .await
+        {
             Either::First(Ok(found)) => Some(
                 found
                     .into_iter()
@@ -131,7 +136,11 @@ impl StationControl for EspStation {
         if !self.controller.is_connected() {
             return;
         }
-        let _ = select(self.controller.disconnect_async(), Timer::after(DISCONNECT_LIMIT)).await;
+        let _ = select(
+            self.controller.disconnect_async(),
+            Timer::after(DISCONNECT_LIMIT),
+        )
+        .await;
     }
 
     async fn wait_link_lost(&mut self) {

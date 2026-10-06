@@ -101,7 +101,9 @@ pub async fn station_task(mut control: EspStation, stack: Stack<'static>, host: 
             async {
                 if getting_address {
                     stack.wait_config_up().await;
-                    stack.config_v4().map(|config| config.address.address().octets())
+                    stack
+                        .config_v4()
+                        .map(|config| config.address.address().octets())
                 } else {
                     core::future::pending().await
                 }
@@ -121,13 +123,7 @@ pub async fn station_task(mut control: EspStation, stack: Stack<'static>, host: 
                 queue.extend(policy.handle(now_ms(), StationEvent::LinkLost));
             }
             Either4::Fourth(Some(ip)) => {
-                log::info!(
-                    "[wifi] address {}.{}.{}.{}",
-                    ip[0],
-                    ip[1],
-                    ip[2],
-                    ip[3]
-                );
+                log::info!("[wifi] address {}.{}.{}.{}", ip[0], ip[1], ip[2], ip[3]);
                 queue.extend(policy.handle(now_ms(), StationEvent::AddressAcquired(ip)));
             }
             Either4::Fourth(None) => {}

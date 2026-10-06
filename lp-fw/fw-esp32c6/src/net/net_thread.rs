@@ -119,8 +119,13 @@ pub fn base_mac() -> [u8; 6] {
     bytes
 }
 
-/// The services on the stack (P04's LAN endpoint, P05's mDNS).
-fn spawn_services(_spawner: embassy_executor::Spawner, _stack: Stack<'static>) {}
+/// The services on the stack: P05's mDNS responder (and P04's LAN
+/// endpoint).
+fn spawn_services(spawner: embassy_executor::Spawner, stack: Stack<'static>) {
+    let mac = base_mac();
+    let label = fw_esp32_common::net::mdns::mdns_label(mac);
+    spawner.spawn(super::mdns_task::mdns_task(stack, label, mac).unwrap());
+}
 
 #[embassy_executor::task]
 async fn net_runner(mut runner: Runner<'static, C6FrameDevice>) -> ! {
