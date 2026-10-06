@@ -18,7 +18,21 @@ infrastructure.
 
 The pieces outside this directory: `.github/workflows/deploy-cloud.yml`
 (builds the web artifact, then deploys) and
-`docs/runbooks/godaddy-dns-cutover.md` (the DNS switch, by hand, once).
+`docs/runbooks/godaddy-dns-cutover.md` (the DNS switch, by hand, once). The
+web artifact's firmware is not built by the deploy: it is the release's own,
+attached by `.github/workflows/release-firmware.yml`, and the deploy waits
+for that run and downloads it (`LP_STUDIO_FIRMWARE=release:<version>`;
+`docs/adr/2026-10-06-firmware-distribution.md`). A hand deploy builds its own
+firmware unless it sets that variable.
+
+**Outbound dependencies.** Besides Google (OAuth) and Tigris (blobs,
+litestream), the service reads **github.com release downloads**: the
+`/firmware/<target>/<release>/<file>` lookup proxies the release assets of
+`LP_CLOUD_FIRMWARE_UPSTREAM` (default
+`https://github.com/PhotomancerArt/lightplayer/releases`; a static server in
+`just firmware-store-smoke`). Every firmware file it has served is kept in the
+blob bucket by SHA-256 (also readable at `/b/<sha256>`), so each is fetched
+from GitHub once.
 
 ## Bootstrap order
 

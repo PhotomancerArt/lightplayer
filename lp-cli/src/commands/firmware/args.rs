@@ -116,4 +116,9 @@ pub struct ReleaseCheckArgs {
     /// `<target>.package.json` in the directory).
     #[arg(long, value_delimiter = ',')]
     pub targets: Option<Vec<String>>,
+
+    /// The version every target must carry: the release's (its tag without
+    /// the `v`). Without it, the targets must still agree on one.
+    #[arg(long)]
+    pub version: Option<String>,
 }

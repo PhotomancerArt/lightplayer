@@ -21,8 +21,8 @@ use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Redirect};
 use axum::routing::get;
 use edge_harness::{
-    BUNDLE_FIRMWARE_MANIFEST_BODY, BUNDLE_FIRMWARE_MANIFEST_PATH, TestServer, body_bytes,
-    body_text, header_value,
+    BUNDLE_FIRMWARE_MANIFEST_BODY, BUNDLE_FIRMWARE_MANIFEST_PATH, BUNDLE_UPDATE_FILES, TestServer,
+    body_bytes, body_text, header_value,
 };
 use lp_cloud_server::firmware::firmware_upstream::{
     FirmwareUpstream, UpstreamAsset, UpstreamError, UpstreamFuture,
@@ -459,6 +459,43 @@ async fn the_bundles_own_firmware_files_are_still_static() {
     let response = server.get(BUNDLE_FIRMWARE_MANIFEST_PATH).await;
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(body_text(response).await, BUNDLE_FIRMWARE_MANIFEST_BODY);
+    assert!(upstream.calls().is_empty());
+}
+
+/// 11. The bundle's own update files (`ota-manifest.json`, `core.z`,
+///     `engine.z`) sit beside its package manifest, two segments deep, and
+///     the static bundle answers them — not the lookup. One level further
+///     down (`<target>/ota/…`, where they first shipped) is the lookup's,
+///     and `ota` is a reserved word there: a 404 that never reaches the
+///     bundle (`docs/defects/2026-10-06-the-bundles-ota-files-are-shadowed-
+///     by-the-firmware-lookup.md`).
+#[tokio::test]
+async fn the_bundles_update_files_beside_its_manifest_are_static() {
+    let (server, upstream) = Release::new().serve();
+    for (path, body) in BUNDLE_UPDATE_FILES {
+        let response = server.get(path).await;
+        assert_eq!(response.status(), StatusCode::OK, "{path}");
+        assert!(
+            response
+                .headers()
+                .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+                .is_none(),
+            "{path}: not a firmware answer"
+        );
+        assert_eq!(body_text(response).await, body, "{path}");
+    }
+    assert!(upstream.calls().is_empty());
+
+    let response = server
+        .get(&format!("/firmware/{TARGET}/ota/ota-manifest.json"))
+        .await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert_eq!(
+        header_value(&response, header::ACCESS_CONTROL_ALLOW_ORIGIN),
+        Some("*"),
+        "the lookup's answer, not the bundle's"
+    );
+    assert_eq!(body_text(response).await, "reserved for a future channel\n");
     assert!(upstream.calls().is_empty());
 }
 

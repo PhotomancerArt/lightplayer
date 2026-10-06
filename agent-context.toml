@@ -15,9 +15,13 @@ planning_root_env = "PHOTOMANCER_PLANNING_ROOT"
 
 # How this repo deploys, read by yona-ship after merge.
 [ship]
-# Deploys ride CI: merging to main runs "Main push" (tag + release), and a
-# green run triggers "Deploy Cloud Service" (fly.io, lightplayer.app). There
-# is no local deploy command — after merging, watch both runs.
+# Deploys ride CI: merging to main runs "Main push" (tag + release, not
+# marked Latest), and a green run triggers "Release firmware" (builds every
+# served firmware package once, attaches it to the release, marks Latest)
+# and "Deploy Cloud Service" (fly.io, lightplayer.app), which waits for that
+# sha's "Release firmware" run and ships the release's firmware in the
+# Studio bundle — a release whose firmware fails does not deploy. There is
+# no local deploy command — after merging, watch all three runs.
 deploy_via_ci = true
 # /healthz reports the deployed build sha (LP_CLOUD_BUILD_SHA); once the
 # deploy run is green, `build` must equal the merge commit sha.

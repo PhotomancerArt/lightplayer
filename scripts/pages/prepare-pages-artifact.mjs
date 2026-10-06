@@ -60,10 +60,12 @@ const configs = {
       "lpa-link/browser_esp32_device_controller.js",
       "firmware/esp32c6-4mb/manifest.json",
       // This Studio's own build for over-the-air updates (OTA M7, DS10): a
-      // deployed Studio that could not update a board must never ship.
-      "firmware/esp32c6-4mb/ota/ota-manifest.json",
-      "firmware/esp32c6-4mb/ota/core.z",
-      "firmware/esp32c6-4mb/ota/engine.z",
+      // deployed Studio that could not update a board must never ship. Two
+      // segments under `firmware/`, beside `manifest.json`: lightplayer.app's
+      // firmware lookup owns every three-segment `/firmware/` path.
+      "firmware/esp32c6-4mb/ota-manifest.json",
+      "firmware/esp32c6-4mb/core.z",
+      "firmware/esp32c6-4mb/engine.z",
       // The committed CodeMirror bundle (the code editor hard-fails without
       // it — index.html loads it with a plain <script> tag, so it is
       // invisible to dx's asset graph and must ride the entries list above).

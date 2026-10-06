@@ -318,6 +318,15 @@ the app through the same view model and presses the same actions. See
   the access files) — each its own format with a schema in
   `schemas/`, outside `PROJECT_FORMAT_VERSION`. Real user data already exists at the current
   `PROJECT_FORMAT_VERSION`, and it does not redeploy in lockstep.
+- **Released firmware is persisted too.** Every main merge's GitHub release
+  carries `<target>.ota-manifest.json` (`format: 1`,
+  `schemas/ota-manifest.schema.json`, `lpc-firmware-release`) and the
+  published `<target>.package.json`, and Studios in the field read them
+  through `lightplayer.app/firmware/<target>/<release>/<file>` for years.
+  Readers ignore unknown fields; an additive field stays format 1; anything
+  an old reader would misread bumps `format`, written beside the old one.
+  `package.json` is additive-only. Release assets are immutable. See
+  `docs/adr/2026-10-06-firmware-distribution.md`.
 - **A change to persisted bytes IS a format bump, even when no field is
   added or removed.** The 2026-08-07 uid-format change re-rendered a
   *string* (`prj_…` base-62 → `prj…` base-32) with zero structural change,
@@ -380,6 +389,8 @@ runtime.
 | `lp-seam`        | The emulator-seam ABI: the one declaration of every seam, its identity (`SEAM_ABI_ID`), the descriptor table layout, and the macros that generate a seam function and its call (`lp-base/`, MIT). See "Emulator seams" below | yes |
 | `lp-link`        | Sans-IO link layer under the device wire: framing, CRC-32C, channels, selective-repeat ARQ, session handshake (`lp-base/`, generic; one crate on both ends). Runs the product's USB, classic-UART0 and BLE links (board, host, Studio, tools); only fw-emu is still the pre-lp-link `M!` framing. Optional `secure` feature: Noise NNpsk0 inside the SYN + sealed frames, the key match as the login (`LinkTrust::Keyed`), off on every product link until the Wi-Fi milestones | yes |
 | `lpa-devices`    | Device model: event fold, no IO, no UI | no (host + wasm) |
+| `lpc-firmware-release` | Released firmware's formats: `ota-manifest.json` format 1, `<target>.<file>` asset names, the `/firmware/<target>/<release>/<file>` grammar (reserved words), verification. Producer lp-cli, consumers lp-cloud-server and Studio. Depends on no update-protocol crate; `lpa-update` depends on it | yes |
+| `lpa-firmware-store` | Studio's engine cache seam (index, LRU 64 MiB + `held`), the firmware store client over an injected fetch, the USB-install keep (`keep_installed_engine`) — sans-IO. Never depends on `lpa-update`/`lpc-update`, nor they on it: the update host emits cache/store effects the edge answers with this crate | no (host + wasm) |
 | `lpc-update`     | OTA update protocol v1 (channel 3): codec, board manifest, progress record, and the board's sans-IO update session | yes |
 | `lpa-update`     | OTA host side: serving, backup, login client, decision, update driver; feature `pack` = the one packer of encoding 1 | no (host + wasm) |
 | `fw-esp32c6`       | ESP32 firmware                         | yes (bare metal) |
@@ -629,11 +640,20 @@ A plan that ends at a review gate keeps its PR in draft. Title it
 `Plan: lp2025/<planning-dir>` so PRs correlate to the planning workspace.
 
 The pipeline does not end at the PR. `yona-ship` takes the green PR through
-merge and deploy: merging to `main` runs "Main push" (tag + release), and a
-green run triggers "Deploy Cloud Service" to fly.io. Ship watches both runs
-and verifies the deployed build at `https://lightplayer.app/healthz` — its
-`build` field must equal the merge sha. Deploy configuration lives in
-`agent-context.toml` under `[ship]`.
+merge and deploy: merging to `main` runs "Main push" (tag + release, not
+marked Latest), and a green run triggers both **"Release firmware"**
+(`release-firmware.yml`: builds every served firmware package once, checks
+it, attaches it to the release, marks Latest) and "Deploy Cloud Service" to
+fly.io, which builds the wasm and then **waits for that sha's "Release
+firmware" run** and ships the release's firmware in the Studio bundle (one
+build; a release whose firmware fails does not deploy). Ship watches the
+runs and verifies the deployed build at `https://lightplayer.app/healthz` —
+its `build` field must equal the merge sha. Deploy configuration lives in
+`agent-context.toml` under `[ship]`; the release procedure is
+`scripts/release/release-firmware.sh` (`--dry-run` is the pre-merge
+`release-dry-run` job), and `just firmware-store-smoke` proves the
+`/firmware/` lookup locally. See
+`docs/adr/2026-10-06-firmware-distribution.md`.
 
 This applies to every session, not just delegated ones. See
 `docs/process/review-gates.md`.
@@ -811,6 +831,11 @@ read every 16 ms), which bounds the backup at ~12 KB/s;
 (`just studio-dev`) builds a **single image** by default and so offers no
 over-the-air install — `LP_FW_IMAGE=split just studio-dev` for one that
 does.
+
+`?firmware-store=<origin>` points Studio's firmware store at another origin
+than `https://lightplayer.app` (a local `just cloud-serve`, say); it accepts
+loopback and private-LAN origins only, so a crafted link cannot aim Studio at
+someone else's `latest`.
 
 Two more dev-only flags tune the device wire for a measurement (read once at
 page load by `lpa-studio-web/src/dev_url_flags.rs`; no UI, no persistence):
