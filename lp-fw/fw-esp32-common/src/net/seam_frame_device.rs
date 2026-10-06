@@ -10,7 +10,10 @@
 //! - **one take per receive**: [`Driver::receive`] calls `net_take_frame`
 //!   once, and a take of 0 (nothing waiting) is no token; the IP stack asks
 //!   again until one is, and the next frame's wake brings it back;
-//! - the link is `net_link`, read on every [`Driver::link_state`];
+//! - the link is `net_link`, read on every [`Driver::link_state`], and the
+//!   read that finds it newly up wakes the stack: embassy-net reads the link
+//!   after a poll's transmits, so the transmit refused while it was down
+//!   must be retried;
 //! - `transmit` grants a token only while the link is up, and the token hands
 //!   its frame to `net_give_frame` (a refusal drops it, as a radio would).
 //!
@@ -101,11 +104,20 @@ impl Driver for SeamFrameDevice {
     fn link_state(&mut self, cx: &mut Context) -> LinkState {
         NET_FRAMES.register(cx.waker());
         let state = &mut *self.0;
+        let was_up = state.up;
         state.up = net_link::call() != 0;
         if state.up {
             state
                 .buffers
                 .get_or_insert_with(|| vec![0u8; 2 * MAX_FRAME_LEN].into_boxed_slice());
+            if !was_up {
+                // embassy-net reads the link AFTER the poll's transmits, and
+                // a poll whose transmit was refused (the link was still down
+                // here) arms no timer: it waits for the driver to say it can
+                // send. The link going up is that moment, so say it, or the
+                // stack's first frame (DHCP's discover) waits forever.
+                cx.waker().wake_by_ref();
+            }
             LinkState::Up
         } else {
             LinkState::Down
