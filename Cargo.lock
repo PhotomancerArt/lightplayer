@@ -4135,6 +4135,7 @@ dependencies = [
  "lp-json-pack",
  "lp-link",
  "lp-recovery",
+ "lp-seam",
  "lpa-client",
  "lpa-server",
  "lpc-hardware",
@@ -5912,6 +5913,7 @@ version = "40.0.0"
 dependencies = [
  "log",
  "lp-emu-core",
+ "lp-seam",
  "lp-ws281x",
  "object 0.37.3",
  "test-log",
@@ -6007,6 +6009,7 @@ dependencies = [
  "espflash",
  "lp-app-version",
  "lp-bootctl",
+ "lp-seam",
  "object 0.37.3",
  "rustc-demangle",
  "serde",

@@ -517,6 +517,11 @@ impl Ws281xOutput for Esp32C6RmtWs281xOutput {
         let started = Instant::now();
         let mut timed_out = false;
         let result = DRIVER.send_blocking(self.channel, data, || {
+            // The LED performance seam (docs/adr/2026-10-05-emulator-seams.md):
+            // on silicon one call, one no-op hint and one return; under an
+            // emulator that engaged `led=fast`, a park until the next
+            // interrupt. The timeout check below runs either way.
+            fw_esp32_common::seams::ws281x_wait_step::call();
             if !timed_out && started.elapsed() > FRAME_TIMEOUT {
                 timed_out = true;
                 DRIVER.abort(self.channel);

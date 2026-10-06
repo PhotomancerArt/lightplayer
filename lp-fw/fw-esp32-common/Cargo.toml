@@ -63,6 +63,12 @@ lpfs = { path = "../../lp-base/lpfs", default-features = false, optional = true 
 # two would make the impl invisible to `lpc_wire::ser_write_json_to`.
 ser-write-json = { version = "0.3", optional = true, default-features = false, features = ["alloc"] }
 
+# Emulator seams (`src/seams/`; ADR docs/adr/2026-10-05-emulator-seams.md):
+# the seam ABI, MIT, no_std, no deps. RISC-V only — the seam functions are RV32
+# assembly — so the Xtensa firmwares that build this crate do not even see it.
+[target.'cfg(target_arch = "riscv32")'.dependencies]
+lp-seam = { path = "../../lp-base/lp-seam" }
+
 [features]
 default = []
 # JSON Pack (plan `lp-json-pack`): write replies as packed frames on a link

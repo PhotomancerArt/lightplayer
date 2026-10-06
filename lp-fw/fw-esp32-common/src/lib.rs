@@ -20,6 +20,8 @@ pub mod link_lock;
 pub mod log_ring_logger;
 pub mod logger;
 pub mod output;
+#[cfg(target_arch = "riscv32")]
+pub mod seams;
 pub mod serial;
 pub mod time;
 

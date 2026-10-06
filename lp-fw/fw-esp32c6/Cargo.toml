@@ -249,6 +249,13 @@ test_shader_compile_incremental = ["dep:fw-checks", "dep:lp-shader", "dep:lpvm-n
 # and must not carry an f32 backend it never enters. Enabling it here and nowhere
 # else is what keeps `just fw-esp32c6-size-check` measuring an unchanged image.
 test_f32_softfloat = ["dep:lpvm-native", "dep:lpvm", "dep:lps-glsl", "dep:lpir", "dep:lps-shared", "lps-builtins", "lpc-shared", "lpvm-native/float-f32", "lps-builtins/float-f32"]
+# The emulator seam ABI under the real release build (plan
+# lp2025/2026-10-05-1709-seams-foundation-led, FD10): this image's seam table
+# carries the two TEST ONLY seams (`src/seams/test_*.rs`) beside the LED wait,
+# and the entrypoint calls them (`src/tests/test_seam_abi.rs`). It exists so
+# the emulator's test can prove a value seam's arguments and result survive
+# LTO + `opt-level = "z"`. Never shipped.
+test_seam_abi = []
 test_espnow = ["radio"]  # ESP-NOW broadcast/receive smoke test with simulated 1Hz button events
 # The `espnow-broadcast` payload's harness (M4 P3): the two-board air, recorded.
 # `test_espnow`'s facts behind a payload a transcript can replay — the schedule,

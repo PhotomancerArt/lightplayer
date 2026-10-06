@@ -122,6 +122,7 @@ mod ota;
 ))]
 mod output;
 mod recovery;
+mod seams;
 #[cfg(all(feature = "diag_secure_link", not(fw_harness)))]
 mod secure_link_probe;
 mod serial;
@@ -227,6 +228,8 @@ mod tests {
     pub mod test_msafluid;
     #[cfg(feature = "test_rmt")]
     pub mod test_rmt;
+    #[cfg(feature = "test_seam_abi")]
+    pub mod test_seam_abi;
     #[cfg(feature = "test_usb")]
     pub mod test_usb;
     #[cfg(feature = "test_uart_bridge")]
@@ -1179,6 +1182,12 @@ async fn main(spawner: embassy_executor::Spawner) {
     {
         use tests::f32_softfloat::run_f32_softfloat_test;
         run_f32_softfloat_test(spawner).await;
+    }
+
+    #[cfg(feature = "test_seam_abi")]
+    {
+        use tests::test_seam_abi::run_seam_abi;
+        run_seam_abi(spawner).await;
     }
 
     #[cfg(not(fw_harness))]
