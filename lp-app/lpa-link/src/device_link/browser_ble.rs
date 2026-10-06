@@ -59,6 +59,7 @@ pub fn ble_link_info(device: &BleDevice) -> LinkInfo {
         endpoint: EndpointKey(format!("{BLE_ENDPOINT_PREFIX}{}", device.device_id)),
         usb: None,
         serial_number: None,
+        carries_update_channel: false,
     }
 }
 
@@ -166,6 +167,10 @@ impl BleLinkInner {
                     "not a request, and the link carries no raw text to the board: {line:?}"
                 ))),
             },
+            // Bluetooth runs lp-link now but opens no channel 3 yet (the
+            // update plan's M7 P12 adds it), and its `LinkInfo` says so: the
+            // model never asks. Dropped.
+            LinkCommand::SendUpdate(_) => {}
         }
     }
 

@@ -111,6 +111,46 @@ fn every_request_against_every_link_state() {
     }
 }
 
+/// The same gate holds the network file (the Wi-Fi password): the trusted
+/// link reads none of its spellings either, and a refused read carries no
+/// byte of it.
+#[test]
+fn a_read_of_the_network_file_is_refused_on_the_trusted_link_too() {
+    let mut rig = Rig::for_state(LinkState::Trusted);
+    rig.request(
+        USB,
+        ClientRequest::NetworkAdd {
+            ssid: String::from("lp-walk-net"),
+            password: lpc_wire::WifiPassword::new("correct-horse-42"),
+            hidden: None,
+        },
+    );
+    for path in [
+        "/.lp/network.json",
+        ".lp/network.json",
+        "/.lp/../.lp/network.json",
+        "//.lp//network.json/",
+        "/.LP/Network.JSON",
+        "/projects/../.lp/network.json",
+    ] {
+        let reply = rig.request(
+            USB,
+            ClientRequest::Filesystem(FsRequest::Read {
+                path: path.as_path_buf(),
+            }),
+        );
+        let json = lpc_wire::json::to_string(&reply).unwrap();
+        assert!(!json.contains("correct-horse-42"), "{path}: {json}");
+        match reply {
+            WireServerMsgBody::Filesystem(FsResponse::Read { data, error, .. }) => {
+                assert_eq!(data, None, "{path}: bytes left the device");
+                assert!(error.is_some(), "{path}");
+            }
+            other => panic!("{path}: {other:?}"),
+        }
+    }
+}
+
 /// The fs gate is not a tier: the trusted USB link — edit, the recovery
 /// path — is refused an access file's bytes exactly like everyone else.
 #[test]
@@ -586,6 +626,39 @@ fn table_rows() -> Vec<Row> {
             ClientRequest::AccessSetSwitches {
                 ble_enabled: None,
                 open: None,
+            },
+            Required::Edit,
+        ),
+        // Wi-Fi settings: edit only, on every link that holds it. The add
+        // row saves the network a later row would see and changes nothing
+        // else; forget runs after it, so the table leaves no network saved.
+        row(
+            "networkStatus",
+            ClientRequest::NetworkStatus,
+            Required::Edit,
+        ),
+        row("networkScan", ClientRequest::NetworkScan, Required::Edit),
+        row(
+            "networkAdd",
+            ClientRequest::NetworkAdd {
+                ssid: String::from("lp-walk-net"),
+                password: lpc_wire::WifiPassword::new("correct-horse-42"),
+                hidden: None,
+            },
+            Required::Edit,
+        ),
+        row(
+            "networkForget",
+            ClientRequest::NetworkForget {
+                ssid: String::from("lp-walk-net"),
+            },
+            Required::Edit,
+        ),
+        row(
+            "networkSet",
+            ClientRequest::NetworkSet {
+                wifi: None,
+                cloud_relay: None,
             },
             Required::Edit,
         ),
@@ -1135,6 +1208,8 @@ fn body_name(body: &WireServerMsgBody) -> &'static str {
         WireServerMsgBody::LoginChallenge { .. } => "LoginChallenge",
         WireServerMsgBody::LoginResult(_) => "LoginResult",
         WireServerMsgBody::AccessList { .. } => "AccessList",
+        WireServerMsgBody::NetworkStatus(_) => "NetworkStatus",
+        WireServerMsgBody::NetworkScan(_) => "NetworkScan",
         _ => "Other",
     }
 }

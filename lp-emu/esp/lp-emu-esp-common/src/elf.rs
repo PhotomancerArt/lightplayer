@@ -116,6 +116,12 @@ pub struct ElfImage {
     pub segments: Vec<LoadSegment>,
     /// See [`InitSection`]. In section order.
     pub init_sections: Vec<InitSection>,
+    /// `(address, len)` of every `SHF_ALLOC` section whose bytes are in the
+    /// file (not `NOBITS`), in section order. A `PT_LOAD` can span the gap
+    /// between two of them, and an image tool that packs sections (an ESP
+    /// image's segments) puts other bytes in that gap — so "does this flash
+    /// hold the ELF's bytes" is asked of these ranges, not of the segment.
+    pub allocated: Vec<(u32, u32)>,
     /// Sorted by address, so `symbol_at` is a binary search.
     symbols: Vec<Symbol>,
 }
@@ -153,6 +159,21 @@ impl ElfImage {
                 execute: flags & object::elf::PF_X != 0,
                 data: data.to_vec(),
             });
+        }
+
+        let mut allocated = Vec::new();
+        for section in file.sections() {
+            let SectionFlags::Elf { sh_flags } = section.flags() else {
+                continue;
+            };
+            let alloc = sh_flags & u64::from(object::elf::SHF_ALLOC) != 0;
+            if alloc
+                && section.size() > 0
+                && section.kind() != SectionKind::UninitializedData
+                && section.kind() != SectionKind::UninitializedTls
+            {
+                allocated.push((section.address() as u32, section.size() as u32));
+            }
         }
 
         let mut init_sections = Vec::new();
@@ -219,6 +240,7 @@ impl ElfImage {
             entry: header.e_entry(endian),
             segments,
             init_sections,
+            allocated,
             symbols,
         })
     }
@@ -373,6 +395,7 @@ mod tests {
             entry: 0,
             segments: Vec::new(),
             init_sections: Vec::new(),
+            allocated: Vec::new(),
             symbols: alloc::vec![
                 Symbol {
                     name: "uart_tx_one_char".to_string(),

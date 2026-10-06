@@ -158,21 +158,27 @@ impl<Io: SerialIo> ServerTransport for SerialTransport<Io> {
                 return Ok(None);
             };
 
-            // Parse JSON
+            // Parse JSON. A line that may carry a Wi-Fi password
+            // (`networkAdd`) is never echoed into a log, only its length.
+            let shown = if lpc_wire::may_carry_secret(json_str) {
+                "<withheld: may carry a Wi-Fi password>"
+            } else {
+                json_str
+            };
             match json::from_str::<ClientMessage>(json_str) {
                 Ok(msg) => {
                     log::debug!(
                         "SerialTransport: Received message id={} ({} bytes): {}",
                         msg.id,
                         message_bytes.len(),
-                        json_str
+                        shown
                     );
                     Ok(Some(Incoming::primary(msg)))
                 }
                 Err(e) => {
                     // Parse error - ignore with warning (as specified)
                     log::warn!(
-                        "SerialTransport: Failed to parse JSON message: {e} | json: {json_str}"
+                        "SerialTransport: Failed to parse JSON message: {e} | json: {shown}"
                     );
                     Ok(None)
                 }
@@ -181,7 +187,14 @@ impl<Io: SerialIo> ServerTransport for SerialTransport<Io> {
             // No complete message yet
             // Log buffer contents (first 100 bytes as hex, first 50 bytes as string if valid UTF-8)
             let preview_len = self.read_buffer.len().min(100);
-            let hex_preview = if preview_len > 0 {
+            // A partial line that may carry a Wi-Fi password is withheld
+            // from both previews, hex included.
+            let withheld = lpc_wire::may_carry_secret(&alloc::string::String::from_utf8_lossy(
+                &self.read_buffer,
+            ));
+            let hex_preview = if withheld {
+                alloc::string::String::from("<withheld>")
+            } else if preview_len > 0 {
                 self.read_buffer[..preview_len]
                     .iter()
                     .take(50) // Limit hex output to first 50 bytes
@@ -192,7 +205,9 @@ impl<Io: SerialIo> ServerTransport for SerialTransport<Io> {
                 alloc::string::String::from("(empty)")
             };
 
-            let string_preview = if preview_len > 0 {
+            let string_preview = if withheld {
+                alloc::string::String::from("<withheld: may carry a Wi-Fi password>")
+            } else if preview_len > 0 {
                 match core::str::from_utf8(&self.read_buffer[..preview_len.min(50)]) {
                     Ok(s) => {
                         // Convert &str to String in no_std, escape control chars
@@ -489,5 +504,71 @@ mod tests {
             .unwrap();
         assert!(received.is_some());
         assert_eq!(received.unwrap().id, 1);
+    }
+
+    /// A line carrying a Wi-Fi password never reaches a log, at any level:
+    /// not the parsed line (debug), not a line that failed to parse (warn),
+    /// not a partial line's previews (trace, string and hex).
+    #[test]
+    fn a_wifi_password_never_reaches_a_log() {
+        extern crate std;
+        use std::string::String;
+        use std::sync::Mutex;
+
+        static CAPTURED: Mutex<Vec<String>> = Mutex::new(Vec::new());
+        struct Capture;
+        impl log::Log for Capture {
+            fn enabled(&self, _: &log::Metadata) -> bool {
+                true
+            }
+            fn log(&self, record: &log::Record) {
+                CAPTURED
+                    .lock()
+                    .unwrap()
+                    .push(alloc::format!("{}", record.args()));
+            }
+            fn flush(&self) {}
+        }
+        static LOGGER: Capture = Capture;
+        let _ = log::set_logger(&LOGGER);
+        log::set_max_level(log::LevelFilter::Trace);
+
+        const PASSWORD: &str = "correct-horse-42";
+        let set = ClientMessage {
+            id: 7,
+            msg: ClientRequest::NetworkAdd {
+                ssid: String::from("a"),
+                password: lpc_wire::WifiPassword::new(PASSWORD),
+                hidden: None,
+            },
+        };
+        let line = json::to_serial_line(&set).unwrap();
+        let mock_io = MockSerialIo::new();
+        let mut transport = SerialTransport::new(mock_io);
+
+        // A partial line first (trace previews), then the rest (debug).
+        let (head, tail) = line.as_bytes().split_at(line.len() - 4);
+        transport.io.push_read(head);
+        assert!(pollster::block_on(transport.receive()).unwrap().is_none());
+        transport.io.push_read(tail);
+        assert!(pollster::block_on(transport.receive()).unwrap().is_some());
+        // A line that does not parse (warn).
+        let broken = line.replace("\"id\":7", "\"id\":\"x\"");
+        transport.io.push_read(broken.as_bytes());
+        assert!(pollster::block_on(transport.receive()).unwrap().is_none());
+
+        let captured = CAPTURED.lock().unwrap();
+        assert!(
+            captured.iter().any(|line| line.contains("withheld")),
+            "the transport logged nothing to check: {captured:?}"
+        );
+        let hex: String = PASSWORD
+            .bytes()
+            .map(|b| alloc::format!("{b:02x} "))
+            .collect();
+        for logged in captured.iter() {
+            assert!(!logged.contains(PASSWORD), "{logged}");
+            assert!(!logged.contains(hex.trim_end()), "{logged}");
+        }
     }
 }

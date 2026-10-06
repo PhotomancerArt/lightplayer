@@ -90,6 +90,21 @@ pub fn OfferParamsForm(
                                 }
                             }
                         }
+                        // A secret (a Wi‑Fi password): a password field
+                        // that never autofills a saved login, with a
+                        // show/hide toggle. Never echoed anywhere else.
+                        OfferParamKind::Text { placeholder, secret: true, .. } => {
+                            let value = current.get(&name).unwrap_or_default().to_string();
+                            rsx! {
+                                SecretField {
+                                    key: "{name}",
+                                    label: param.label.clone(),
+                                    placeholder: placeholder.clone(),
+                                    value,
+                                    on_input: move |text: String| args.write().insert(name.clone(), text),
+                                }
+                            }
+                        }
                         OfferParamKind::Text { placeholder, max_len, .. } => {
                             let value = current.get(&name).unwrap_or_default().to_string();
                             rsx! {
@@ -128,6 +143,49 @@ pub fn OfferParamsForm(
     }
 }
 
+/// A secret text parameter's field: `type="password"` (or text while the
+/// user holds it shown), never autofilled from a saved login, never
+/// spell-checked (a spell checker may send the text off the page).
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+pub(crate) fn SecretField(
+    label: String,
+    placeholder: String,
+    value: String,
+    on_input: EventHandler<String>,
+) -> Element {
+    let mut shown = use_signal(|| false);
+    let (kind, toggle) = if shown() {
+        ("text", "Hide")
+    } else {
+        ("password", "Show")
+    };
+    rsx! {
+        label { class: FIELD_CLASS,
+            span { class: LABEL_CLASS, "{label}" }
+            span { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-1.5",
+                input {
+                    class: "{INPUT_CLASS} tw:flex-1",
+                    r#type: kind,
+                    autocomplete: "new-password",
+                    spellcheck: "false",
+                    autocapitalize: "off",
+                    placeholder: "{placeholder}",
+                    value: "{value}",
+                    oninput: move |event| on_input.call(event.value()),
+                }
+                button {
+                    class: SECRET_TOGGLE_CLASS,
+                    r#type: "button",
+                    aria_pressed: "{shown()}",
+                    onclick: move |_| shown.toggle(),
+                    "{toggle}"
+                }
+            }
+        }
+    }
+}
+
 /// The offer's press with `args`: an [`ActionButton`] wearing the bound
 /// action (so a Lasting binding arms on the button itself, and a Routine one
 /// is one click), or — when the values do not bind yet — the offer's own
@@ -142,11 +200,22 @@ pub fn OfferPressButton(
     /// Stories only: start armed.
     #[props(default)]
     armed_preview: bool,
+    /// Don't print why the press is refused under the button (the form
+    /// already shows what is missing, e.g. an empty field).
+    #[props(default)]
+    hide_refusal: bool,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let action = pressed_or_refused(&offer, &args);
     rsx! {
-        ActionButton { action, running: false, variant, armed_preview, on_action }
+        ActionButton {
+            action,
+            running: false,
+            variant,
+            armed_preview,
+            reason_said_elsewhere: hide_refusal,
+            on_action,
+        }
     }
 }
 
@@ -236,6 +305,8 @@ const LABEL_CLASS: &str =
 const FIELD_CLASS: &str = "tw:grid tw:min-w-0 tw:gap-1";
 
 const INPUT_CLASS: &str = "tw:min-w-0 tw:appearance-none tw:rounded-xs tw:border tw:border-border tw:bg-card tw:px-2 tw:py-1 tw:text-[11.5px] tw:text-strong-foreground";
+
+const SECRET_TOGGLE_CLASS: &str = "tw:flex-none tw:cursor-pointer tw:rounded-xs tw:border tw:border-border tw:bg-transparent tw:px-1.5 tw:py-1 tw:text-[10.5px] tw:font-semibold tw:text-subtle-foreground tw:hover:bg-white/5";
 
 const TOGGLE_CLASS: &str =
     "tw:flex tw:cursor-pointer tw:items-center tw:gap-1.5 tw:text-[11px] tw:text-muted-foreground";

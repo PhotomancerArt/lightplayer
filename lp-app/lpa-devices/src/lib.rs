@@ -57,12 +57,14 @@ pub mod record;
 pub mod replay;
 pub mod roster;
 pub mod time;
+pub mod update_facts;
 pub mod view;
 pub mod wire;
 
 pub use activity::{
     ActivityCell, ActivityKind, ActivityOutcome, CancelPhase, FlashLayoutView, FlashStep,
-    LayoutVerdict, PushActivity,
+    LayoutVerdict, PushActivity, UpdateActivity, UpdateActivityView, UpdateIntentFacts,
+    UpdateOutcomeFacts, UpdateStageFacts,
 };
 pub use app_version::{AppVersion, DevCommit};
 pub use board_key::{BoardKey, BoardKeyError};
@@ -83,6 +85,7 @@ pub use link_counter_facts::LinkCounterFacts;
 pub use record::DeviceRecord;
 pub use roster::{PendingLink, Roster, RosterConfig};
 pub use time::{Millis, TimerId};
+pub use update_facts::{UpdateBoardState, UpdateFacts, UpdatePieceKind, UpdateTransferFacts};
 pub use view::{DeviceView, Escape, FirmwareFace, LoadedProject, RosterView};
 pub use wire::{
     ClientFrame, ClientFrameBody, HelloFacts, LoadedProjectFacts, ProjectFaultFacts, RecoveryFacts,

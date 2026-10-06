@@ -98,6 +98,11 @@ pub struct UiChromeSessionControl {
     /// `None` while nothing is known — a session that has published no
     /// frame has nothing honest to say here.
     pub stat_line: Option<String>,
+    /// The board's firmware-update words for the popover (the update-states
+    /// spike, §4): a run word that replaces the three-dot one while an
+    /// update is on offer, running or needed, and the version stat line
+    /// (`<chip> · X → Y · <mac>`). `None` = no update story to tell.
+    pub update: Option<crate::UiSessionUpdate>,
 }
 
 #[derive(Clone, Debug, PartialEq)]

@@ -10,7 +10,7 @@
 //! exhaustive, so the next variant is a compile error, not a silent blank.
 
 use lpa_devices::view::FirmwareFace;
-use lpa_devices::{FirmwareAge, WireVersion};
+use lpa_devices::{FirmwareAge, UpdateBoardState, WireVersion};
 
 /// The FIRMWARE zone's info line on a device card: the firmware label
 /// (which leads with the version) joined to the board it was built for (the
@@ -57,6 +57,11 @@ pub fn device_firmware_line(face: &FirmwareFace, board: Option<&str>) -> String 
             }
             line
         }
+        // A board running only its core, in the words of the update
+        // standing's rows for what it is doing. When this Studio can tell
+        // its update story (its own build is known), the card reads the
+        // standing's words instead (`device_update_words`).
+        FirmwareFace::CoreOnly { version, state } => core_only_line(version.as_deref(), *state),
         FirmwareFace::NoHello => "Pre-hello firmware — needs firmware".to_string(),
         FirmwareFace::OlderLightPlayer { .. } => {
             "Older LightPlayer firmware — flash to update; the project stays".to_string()
@@ -70,6 +75,21 @@ pub fn device_firmware_line(face: &FirmwareFace, board: Option<&str>) -> String 
             "Unrecognized firmware — replace with LightPlayer firmware".to_string()
         }
         FirmwareFace::Silent => "No response — try flashing firmware".to_string(),
+    }
+}
+
+/// A core-only board's line: its firmware keeps crashing, it is mid-update,
+/// or it waits for its firmware.
+fn core_only_line(version: Option<&str>, state: UpdateBoardState) -> String {
+    let version = version.unwrap_or("LightPlayer");
+    match state {
+        UpdateBoardState::EngineCrashing => format!("{version} keeps crashing"),
+        UpdateBoardState::Updating | UpdateBoardState::OnTrial => {
+            "Finishing the update…".to_string()
+        }
+        UpdateBoardState::NeedsEngine | UpdateBoardState::Running | UpdateBoardState::Unknown => {
+            format!("{version} · waiting for its firmware")
+        }
     }
 }
 
@@ -89,6 +109,12 @@ pub fn pending_firmware_line(face: &FirmwareFace) -> String {
 pub fn firmware_face_preview_sentence(face: &FirmwareFace) -> Option<String> {
     let sentence = match face {
         FirmwareFace::Unknown | FirmwareFace::LightPlayer { .. } => return None,
+        // The update-states spike's sentences for a stopped show.
+        FirmwareFace::CoreOnly {
+            state: UpdateBoardState::Updating | UpdateBoardState::OnTrial,
+            ..
+        } => "Updating… the picture returns when the board does.",
+        FirmwareFace::CoreOnly { .. } => "Not running — the board is waiting for its firmware.",
         FirmwareFace::NoHello => "No picture — this firmware is too old to say what it runs.",
         FirmwareFace::OlderLightPlayer { .. } => {
             "No picture — this LightPlayer firmware is too old for this Studio."
@@ -283,6 +309,37 @@ mod tests {
         assert_eq!(
             firmware_face_preview_sentence(&face).as_deref(),
             Some("No picture — this LightPlayer firmware is too old for this Studio.")
+        );
+    }
+
+    /// A board running only its core never reads as a flash face: it says
+    /// what it is doing, in the update standing's words.
+    #[test]
+    fn a_core_only_board_says_what_it_is_doing() {
+        let face = |state| FirmwareFace::CoreOnly {
+            version: Some("2026.10.05-2".to_string()),
+            state,
+        };
+        assert!(!face(UpdateBoardState::NeedsEngine).wants_flash());
+        assert_eq!(
+            device_firmware_line(&face(UpdateBoardState::EngineCrashing), None),
+            "2026.10.05-2 keeps crashing"
+        );
+        assert_eq!(
+            device_firmware_line(&face(UpdateBoardState::NeedsEngine), None),
+            "2026.10.05-2 · waiting for its firmware"
+        );
+        assert_eq!(
+            device_firmware_line(&face(UpdateBoardState::OnTrial), None),
+            "Finishing the update…"
+        );
+        assert_eq!(
+            firmware_face_preview_sentence(&face(UpdateBoardState::NeedsEngine)).as_deref(),
+            Some("Not running — the board is waiting for its firmware.")
+        );
+        assert_eq!(
+            firmware_face_preview_sentence(&face(UpdateBoardState::Updating)).as_deref(),
+            Some("Updating… the picture returns when the board does.")
         );
     }
 

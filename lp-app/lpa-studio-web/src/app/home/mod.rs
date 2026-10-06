@@ -24,6 +24,8 @@ pub(crate) mod device_offer_story_fixtures;
 pub(crate) mod device_pick_popover;
 pub(crate) mod device_roster_card;
 pub(crate) mod device_terminal;
+#[cfg(feature = "stories")]
+pub(crate) mod device_update_stories;
 pub mod devices_page;
 pub(crate) mod example_card;
 pub mod explore_page;
@@ -68,6 +70,9 @@ pub(crate) mod thumb_poster;
 pub(crate) mod unlock_link;
 pub(crate) mod unlock_page;
 pub(crate) mod unlock_sheet;
+pub(crate) mod wifi_panel;
+#[cfg(feature = "stories")]
+pub(crate) mod wifi_stories;
 
 pub use devices_page::DevicesPage;
 pub use explore_page::ExplorePage;

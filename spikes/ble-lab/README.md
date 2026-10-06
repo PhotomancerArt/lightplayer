@@ -49,7 +49,7 @@ accepts any `LP-…` name or any board advertising NUS. It starts BLE only when
 its device store says so, so provision the board over USB first.
 
 > **This page's wire mode predates lp-link and does not talk to current
-> firmware.** Since wire proto 36 (PR #880,
+> firmware.** Since wire proto 37 (PR #880,
 > `lp2025/2026-09-28-1445-ble-on-lp-link`) every GATT write and
 > notification is exactly one lp-link Datagram frame (4-byte header, the
 > JSON/packed payload, 4-byte CRC-32C), the board's link opens at the
@@ -227,9 +227,9 @@ host tests, the conformance suite and `?ble=emu` all stop short of it
    are emulated: shape, not a silicon claim.
 2. **Put the branch's firmware on the board.** Open the same dev server's
    Studio, connect the board over USB, and take **Update firmware** (the
-   image the dev server packaged from the branch: hello `proto 36`). Or from
-   a terminal: `just flash-fw-esp32c6 <port by MAC>`. A board on proto 36
-   no longer talks to lightplayer.app's Studio (proto 35, Bluetooth on `M!`
+   image the dev server packaged from the branch: hello `proto 37`). Or from
+   a terminal: `just flash-fw-esp32c6 <port by MAC>`. A board on proto 37
+   no longer talks to lightplayer.app's Studio (proto 36, Bluetooth on `M!`
    lines) until that deploy catches up, so flash the release image back
    afterwards if the board must work with production.
 3. **Unplug USB and connect over Bluetooth**: Devices → add → Bluetooth →

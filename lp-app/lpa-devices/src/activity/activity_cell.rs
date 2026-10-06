@@ -17,6 +17,9 @@ use super::flash::FlashActivity;
 use super::identify::IdentifyActivity;
 use super::push::PushActivity;
 use super::remove_project::RemoveProjectActivity;
+use super::update::UpdateActivity;
+use super::update_activity_view::UpdateActivityView;
+use super::update_outcome_facts::UpdateOutcomeFacts;
 
 /// Which flow an activity is running. One per device at a time (invariant
 /// I5): a gesture on a busy device gets a visible "busy with X — cancel it?",
@@ -28,6 +31,8 @@ pub enum ActivityKind {
     Push,
     Erase,
     RemoveProject,
+    /// An over-the-air update, run in legs across the board's resets.
+    Update,
 }
 
 impl ActivityKind {
@@ -39,6 +44,7 @@ impl ActivityKind {
             Self::Push => "Sending the project",
             Self::Erase => "Erasing the flash",
             Self::RemoveProject => "Removing the project",
+            Self::Update => "Updating firmware",
         }
     }
 
@@ -64,6 +70,9 @@ impl ActivityKind {
             // the dir is being deleted, and stopping halfway would leave a
             // board loading half a project.
             Self::RemoveProject => config.push_cancel_grace_ms,
+            // An update's cancel is never held: it is accepted only while
+            // nothing on the board has changed, and then it ends at once.
+            Self::Update => config.cancel_grace_ms,
         }
     }
 }
@@ -220,7 +229,8 @@ impl ActivityCell {
     }
 
     /// The card's label for what this activity is doing now: a Flash names
-    /// its step ([`super::FlashStep`]); every other activity its kind.
+    /// its step ([`super::FlashStep`]), an Update its stage; every other
+    /// activity its kind.
     pub fn label(&self) -> String {
         match &self.reducer {
             Reducer::Flash(flash) => flash
@@ -231,6 +241,7 @@ impl ActivityCell {
                 )
                 .label()
                 .to_string(),
+            Reducer::Update(update) => update.label().to_string(),
             _ => format!("{}…", self.kind.label()),
         }
     }
@@ -241,6 +252,8 @@ impl ActivityCell {
     pub fn percent(&self) -> Option<u8> {
         let waiting = match &self.reducer {
             Reducer::Flash(flash) => flash.step(None) == super::FlashStep::WaitingForAnswer,
+            // An update's percent is its stage's, kept across a gap.
+            Reducer::Update(update) => return update.percent(),
             _ => false,
         };
         match waiting {
@@ -255,6 +268,42 @@ impl ActivityCell {
             Reducer::Flash(flash) => flash.layout_view(),
             _ => None,
         }
+    }
+
+    /// An Update activity's stage, progress and outcome, for the card's
+    /// words.
+    pub fn update_view(&self) -> Option<UpdateActivityView> {
+        match &self.reducer {
+            Reducer::Update(update) => Some(update.view()),
+            _ => None,
+        }
+    }
+
+    /// How an Update activity ended, once it has (the driver's word, or the
+    /// model's own when the board never came back).
+    pub(crate) fn update_outcome(&self) -> Option<UpdateOutcomeFacts> {
+        match &self.reducer {
+            Reducer::Update(update) => update.outcome(),
+            _ => None,
+        }
+    }
+
+    /// Whether a cancel would be accepted right now. Every activity takes
+    /// one (and may hold it through a write it cannot abort) — except an
+    /// Update past backing up, which refuses: once writing starts there is
+    /// no Cancel.
+    pub fn accepts_cancel(&self) -> bool {
+        match &self.reducer {
+            Reducer::Update(update) => update.cancellable(),
+            _ => true,
+        }
+    }
+
+    /// Whether this activity outlives its link. Only an Update does: its
+    /// board resets (and a native-USB port re-enumerates) as part of the
+    /// work, so a vanished link is a gap to wait out, not ground lost.
+    pub(crate) fn survives_link_loss(&self) -> bool {
+        matches!(self.reducer, Reducer::Update(_))
     }
 
     /// The instant a reducer waiting on the user is bounded by — what
@@ -311,6 +360,7 @@ pub(crate) enum Reducer {
     Push(PushActivity),
     Erase(EraseActivity),
     RemoveProject(RemoveProjectActivity),
+    Update(UpdateActivity),
 }
 
 impl ActivityReducer for Reducer {
@@ -321,6 +371,7 @@ impl ActivityReducer for Reducer {
             Self::Push(reducer) => reducer.kind(),
             Self::Erase(reducer) => reducer.kind(),
             Self::RemoveProject(reducer) => reducer.kind(),
+            Self::Update(reducer) => reducer.kind(),
         }
     }
 
@@ -331,6 +382,7 @@ impl ActivityReducer for Reducer {
             Self::Push(reducer) => reducer.handle(now, input, ctx),
             Self::Erase(reducer) => reducer.handle(now, input, ctx),
             Self::RemoveProject(reducer) => reducer.handle(now, input, ctx),
+            Self::Update(reducer) => reducer.handle(now, input, ctx),
         }
     }
 
@@ -341,6 +393,7 @@ impl ActivityReducer for Reducer {
             Self::Push(reducer) => reducer.next_deadline(),
             Self::Erase(reducer) => reducer.next_deadline(),
             Self::RemoveProject(reducer) => reducer.next_deadline(),
+            Self::Update(reducer) => reducer.next_deadline(),
         }
     }
 }

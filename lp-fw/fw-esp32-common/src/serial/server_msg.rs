@@ -364,6 +364,10 @@ pub fn server_message_detail(msg: &lpc_wire::WireServerMessage) -> String {
         lpc_wire::server::ServerMsgBody::AccessList { entries, .. } => {
             format!("AccessList entries={}", entries.len())
         }
+        // Never an SSID or anything else from the file: the name is enough
+        // (and keeps the C6 under M5's size line).
+        lpc_wire::server::ServerMsgBody::NetworkStatus(_) => String::from("NetworkStatus"),
+        lpc_wire::server::ServerMsgBody::NetworkScan(_) => String::from("NetworkScan"),
     }
 }
 

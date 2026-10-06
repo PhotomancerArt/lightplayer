@@ -2,7 +2,7 @@
 //! link to a LightPlayer board (M5 of the BLE remote-control plan).
 //!
 //! Studio reaches a board over BLE exactly as it reaches one over USB — the
-//! same wire messages over the same lp-link (since `WIRE_PROTO_VERSION` 36),
+//! same wire messages over the same lp-link (since `WIRE_PROTO_VERSION` 37),
 //! the same device fold, the same identity merge by
 //! base MAC — with one difference the card has to be honest about: there is
 //! no reset line and no ROM downloader on the far side of a GATT service, so

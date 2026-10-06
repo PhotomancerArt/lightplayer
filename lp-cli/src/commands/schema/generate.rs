@@ -25,6 +25,8 @@
 //! - `device-access.schema.json` — the device access store
 //!   ([`lpc_access::DeviceAccessFile`], root `/.lp/access.json`) via
 //!   `schemars`.
+//! - `device-network.schema.json` — the device network file
+//!   ([`lpc_access::NetworkFile`], root `/.lp/network.json`) via `schemars`.
 //! - `ota-manifest.schema.json` — the OTA release manifest
 //!   ([`lpc_firmware_release::OtaManifest`], `<target>.ota-manifest.json` on
 //!   a release) via `schemars`.
@@ -110,6 +112,10 @@ fn generate_outputs() -> Result<BTreeMap<String, String>> {
     outputs.insert(
         String::from("device-access.schema.json"),
         render_schema(device_access_schema()?, "device-access.schema.json")?,
+    );
+    outputs.insert(
+        String::from("device-network.schema.json"),
+        render_schema(device_network_schema()?, "device-network.schema.json")?,
     );
     outputs.insert(
         String::from("ota-manifest.schema.json"),
@@ -321,6 +327,14 @@ fn project_access_schema() -> Result<Value> {
 fn device_access_schema() -> Result<Value> {
     let schema = schemars::schema_for!(lpc_access::DeviceAccessFile);
     serde_json::to_value(&schema).context("serializing device access schema")
+}
+
+/// Schema for the device network file, root `/.lp/network.json`. Plain
+/// serde; its own persisted format (`version: 1`), write-only over every
+/// link.
+fn device_network_schema() -> Result<Value> {
+    let schema = schemars::schema_for!(lpc_access::NetworkFile);
+    serde_json::to_value(&schema).context("serializing device network schema")
 }
 
 /// Schema for `ota-manifest.json`, the OTA release manifest. Plain serde; its

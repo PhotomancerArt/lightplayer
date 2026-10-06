@@ -379,6 +379,18 @@ impl StudioServerClient {
             .await
     }
 
+    /// Run one Wi‑Fi step on this session's wire — the lens's, when the
+    /// lens holds the board's wire and a shared-link conversation could not
+    /// be answered.
+    pub async fn run_network_step(
+        &mut self,
+        device: lpa_devices::identity::DeviceId,
+        step: crate::app::network::NetworkStep,
+    ) -> crate::app::network::NetworkCommand {
+        crate::app::network::device_network_ops::run_network_step(&mut self.client, device, step)
+            .await
+    }
+
     /// Write one file through the server filesystem (`FsRequest::Write`),
     /// addressed from the fs ROOT — device-scoped files that live outside
     /// every project storage dir (identity stamping: `/.lp/device.json`).

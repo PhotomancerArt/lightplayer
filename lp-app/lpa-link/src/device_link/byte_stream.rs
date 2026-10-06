@@ -477,6 +477,9 @@ impl<S: DeviceByteStream> Link for ByteStreamLink<S> {
                     core.push_event(LinkEvent::Error(error));
                 }
             }
+            // This transport has no channel 3 yet (M7 P7 adds it), and its
+            // `LinkInfo` says so, so the model never asks; dropped.
+            LinkCommand::SendUpdate(_) => {}
         }
     }
 
@@ -779,6 +782,7 @@ mod tests {
                 endpoint: EndpointKey("board-double".to_string()),
                 usb: None,
                 serial_number: None,
+                carries_update_channel: false,
             },
             board.clone(),
         )

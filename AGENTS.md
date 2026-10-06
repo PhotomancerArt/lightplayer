@@ -84,7 +84,10 @@ just fw-esp32c6-size-check
 ```
 
 This prints the image size and headroom, and pre-merge CI fails any PR that
-drops headroom below 64 KB.
+drops headroom below 64 KB. Since 2026-10-04 it builds the **split image**
+(loader, boot records, core, engine — what the C6 ships) and gates its
+smallest steady-or-update headroom; the four numbers are defined in the
+budget ADR's amendment.
 
 If the binary exceeds available flash:
 
@@ -245,7 +248,7 @@ the app through the same view model and presses the same actions. See
 - **USB, the classic's UART and BLE are `lp-link` now, not `M!`.** The C6/S3
   silicon and their emulators, the classic ESP32's UART0 (DOM-Z-102 and its
   emulator, since wire proto 32), the C6's Bluetooth links (since wire proto
-  36), Studio's Web Serial, emulator-tab and Web Bluetooth providers, and
+  37), Studio's Web Serial, emulator-tab and Web Bluetooth providers, and
   `lp-cli`'s native serial/`serial:tcp`/`serial:ws` all frame the wire with
   `lp-link` (`lp-base/lp-link`) instead. The preset follows the transport. On
   a serial port it follows the port's USB vendor on both hosts — Espressif's
@@ -287,9 +290,11 @@ the app through the same view model and presses the same actions. See
 
 - The wire's "no compatibility" freedom stops at anything **persisted**:
   project.json / package files, the cloud store, stamped device
-  identity, and the two access files (`<project>/.lp/access.json` at
-  `version: 2`, root `/.lp/access.json` at `version: 3` — each its own format with a schema in
-  `schemas/`, outside `PROJECT_FORMAT_VERSION`). Real user data already exists at the current
+  identity, the two access files (`<project>/.lp/access.json` at
+  `version: 2`, root `/.lp/access.json` at `version: 3`) and the device
+  network file (root `/.lp/network.json` at `version: 1`, write-only like
+  the access files) — each its own format with a schema in
+  `schemas/`, outside `PROJECT_FORMAT_VERSION`. Real user data already exists at the current
   `PROJECT_FORMAT_VERSION`, and it does not redeploy in lockstep.
 - **A change to persisted bytes IS a format bump, even when no field is
   added or removed.** The 2026-08-07 uid-format change re-rendered a
@@ -346,7 +351,7 @@ runtime.
 | `lpvm-native`    | LPIR → custom RV32 machine code        | yes              |
 | `lpvm-cranelift` | LPIR → Cranelift → machine code        | yes              |
 | `lp-engine`      | Shader runtime, node graph             | yes              |
-| `lpc-access`     | Access core: secrets, tiers, HMAC login, backoff (sans-IO) | yes |
+| `lpc-access`     | Access core: secrets, tiers, HMAC login, backoff, the device network file and the write-only predicate (sans-IO) | yes |
 | `lp-server`      | Project management, client connections | yes              |
 | `lp-json-pack`   | JSON Pack: a compact binary form of JSON that decodes back to byte-identical JSON text (`lp-base/`, generic; names coded against an injected seed and a per-connection learned table) | yes |
 | `lp-link`        | Sans-IO link layer under the device wire: framing, CRC-32C, channels, selective-repeat ARQ, session handshake (`lp-base/`, generic; one crate on both ends). Runs the product's USB, classic-UART0 and BLE links (board, host, Studio, tools); only fw-emu is still the pre-lp-link `M!` framing. Optional `secure` feature: Noise NNpsk0 inside the SYN + sealed frames, the key match as the login (`LinkTrust::Keyed`), off on every product link until the Wi-Fi milestones | yes |
@@ -354,6 +359,8 @@ runtime.
 | `lpc-update`     | OTA update protocol v1 (channel 3): codec, board manifest, progress record, and the board's sans-IO update session | yes |
 | `lpa-update`     | OTA host side: serving, backup, login client, decision, update driver; feature `pack` = the one packer of encoding 1 | no (host + wasm) |
 | `fw-esp32c6`       | ESP32 firmware                         | yes (bare metal) |
+| `fw-esp32c6-loader` | The C6 split image's RAM-only loader: boots the core a boot record names (standalone crate, own workspace) | yes (bare metal) |
+| `lp-fw-split`    | Host tool: the C6's two-pass split link, its verifier and layout (`tools/`; `docs/adr/2026-10-04-c6-split-link-firmware-loader-and-boot-records.md`) | no (host) |
 | `fw-emu`         | RISC-V emulator firmware (CI)          | yes (bare metal) |
 | `lp-riscv-emu`   | RV32 emulator (host) — in `lp-emu/`    | yes (+std feat)  |
 | `lp-xt-emu`      | Xtensa emulator + machine-mode hart (host) — in `lp-emu/` | yes (+std feat)  |
@@ -665,7 +672,7 @@ does not model. The full reasoning, in Yona's words, is
   starts the BLE controller and advertises, but no central ever answers, so
   nothing connects. A BLE claim comes from host tests (the access gate:
   `lpa-server/tests/access_gate.rs`), `?ble=emu` for Studio's transport and
-  UI (below), plus a desk walk. Since wire proto 36 the walk is Studio
+  UI (below), plus a desk walk. Since wire proto 37 the walk is Studio
   itself over Bluetooth, and `spikes/ble-lab`'s README is its runbook; that
   page's own `M!` wire mode predates lp-link and no longer talks to a board
   (the README says what does). An agent can answer a Web Bluetooth chooser

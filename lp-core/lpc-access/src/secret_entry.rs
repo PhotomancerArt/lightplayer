@@ -161,13 +161,19 @@ pub(crate) fn validate_secrets(secrets: &[SecretEntry]) -> Result<(), crate::Acc
 /// carry fields this build refuses, and the honest error for it is "wrong
 /// version", not "malformed".
 pub(crate) fn read_version(bytes: &[u8]) -> Result<u32, crate::AccessFileError> {
+    read_version_field(bytes)
+        .map_err(|error| crate::AccessFileError::Malformed(alloc::format!("{error}")))
+}
+
+/// The `version` probe itself, shared by every persisted file in this crate
+/// (the access files and the network file), so a device links one parse of
+/// it rather than one per file type.
+pub(crate) fn read_version_field(bytes: &[u8]) -> Result<u32, serde_json::Error> {
     #[derive(Deserialize)]
     struct VersionProbe {
         version: u32,
     }
-    serde_json::from_slice::<VersionProbe>(bytes)
-        .map(|probe| probe.version)
-        .map_err(|error| crate::AccessFileError::Malformed(alloc::format!("{error}")))
+    serde_json::from_slice::<VersionProbe>(bytes).map(|probe| probe.version)
 }
 
 #[cfg(test)]

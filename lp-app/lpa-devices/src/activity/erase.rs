@@ -121,13 +121,13 @@ impl EraseActivity {
             }
             // A hello after an erase means the wipe did not take (or the
             // wrong board answered). Say what happened, never pretend.
-            Classification::LightPlayer { .. } | Classification::Incompatible { .. } => {
-                Some(ActivityOutcome::Failed {
-                    message: "the board still answers with firmware after the erase — \
+            Classification::LightPlayer { .. }
+            | Classification::CoreOnly { .. }
+            | Classification::Incompatible { .. } => Some(ActivityOutcome::Failed {
+                message: "the board still answers with firmware after the erase — \
                               the wipe did not take"
-                        .to_string(),
-                })
-            }
+                    .to_string(),
+            }),
             _ => None,
         }
     }

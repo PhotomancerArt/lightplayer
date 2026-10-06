@@ -364,6 +364,82 @@ where
         }
     }
 
+    /// The board's network settings: the two switches, every saved network
+    /// without its password, and what the station is doing. Edit tier.
+    pub async fn network_status(
+        &mut self,
+    ) -> ClientResult<ClientOutcome<lpc_wire::server::NetworkStatus>> {
+        self.network_request(ClientRequest::NetworkStatus, "wifi.status")
+            .await
+    }
+
+    /// What the board's radio hears — `unsupported` on an image with no
+    /// station. Edit tier.
+    pub async fn network_scan(
+        &mut self,
+    ) -> ClientResult<ClientOutcome<lpc_wire::server::NetworkScan>> {
+        let response = self.send_request(ClientRequest::NetworkScan).await?;
+        let events = response.events;
+        match response.value.msg {
+            WireServerMsgBody::NetworkScan(scan) => Ok(ClientOutcome::new(scan, events)),
+            other => Err(ClientError::unexpected_response("wifi.scan", other)),
+        }
+    }
+
+    /// Save a network (`password` `""` for an open one): a saved name takes
+    /// the new password in place; a ninth network is refused. The board
+    /// validates and answers the status as it now stands, or a
+    /// [`ClientError::Server`] sentence that never quotes the password.
+    pub async fn network_add(
+        &mut self,
+        ssid: String,
+        password: lpc_wire::WifiPassword,
+        hidden: Option<bool>,
+    ) -> ClientResult<ClientOutcome<lpc_wire::server::NetworkStatus>> {
+        self.network_request(
+            ClientRequest::NetworkAdd {
+                ssid,
+                password,
+                hidden,
+            },
+            "wifi.add",
+        )
+        .await
+    }
+
+    /// Forget the saved network named `ssid` (name and password).
+    pub async fn network_forget(
+        &mut self,
+        ssid: String,
+    ) -> ClientResult<ClientOutcome<lpc_wire::server::NetworkStatus>> {
+        self.network_request(ClientRequest::NetworkForget { ssid }, "wifi.forget")
+            .await
+    }
+
+    /// Set the board's Wi-Fi switch, its cloud relay switch, or both; `None`
+    /// leaves one as it is.
+    pub async fn network_set(
+        &mut self,
+        wifi: Option<bool>,
+        cloud_relay: Option<bool>,
+    ) -> ClientResult<ClientOutcome<lpc_wire::server::NetworkStatus>> {
+        self.network_request(ClientRequest::NetworkSet { wifi, cloud_relay }, "wifi.set")
+            .await
+    }
+
+    async fn network_request(
+        &mut self,
+        request: ClientRequest,
+        label: &'static str,
+    ) -> ClientResult<ClientOutcome<lpc_wire::server::NetworkStatus>> {
+        let response = self.send_request(request).await?;
+        let events = response.events;
+        match response.value.msg {
+            WireServerMsgBody::NetworkStatus(status) => Ok(ClientOutcome::new(status, events)),
+            other => Err(ClientError::unexpected_response(label, other)),
+        }
+    }
+
     pub async fn fs_read(&mut self, path: &LpPath) -> ClientResult<ClientOutcome<Vec<u8>>> {
         let response = self
             .send_request(ClientRequest::Filesystem(FsRequest::Read {

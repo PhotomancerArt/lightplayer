@@ -1,6 +1,7 @@
 //! Firmware manifest core: compile-time embedding and host-side reading.
 //!
 //! The manifest core is the build's self-description — package, target,
+//! platform,
 //! [`crate::LpFeature`] list, wire proto, provenance — assembled **at compile
 //! time** from `cfg!`/`env!` facts into a magic-delimited JSON blob that
 //! lives in a `#[used]` static inside every firmware artifact. Tooling
@@ -30,10 +31,19 @@ pub const MANIFEST_BLOB_END: &str = "\u{3}LP-FW-MANIFEST-END-v1\u{4}";
 
 /// JSON shape version of the manifest core payload.
 ///
+/// - 3: `target`, the opaque name of the line of builds this build belongs
+///   to (a `lp-fw/builds/` id such as `esp32c6-4mb`, or `unknown` when no
+///   build def built it), after `version`; the object that used to be called
+///   `target` (`family`, `chip`, `cargoTarget`) is now `platform`.
 /// - 2: `version`, the build's app version (`LP_APP_VERSION`, what
 ///   `scripts/print-app-version.sh` prints), after `package`.
 /// - 1: the first shape.
-pub const MANIFEST_CORE_VERSION: u32 = 2;
+pub const MANIFEST_CORE_VERSION: u32 = 3;
+
+/// The bytes an embedded `target` value may take: a target is
+/// `[a-z0-9][a-z0-9-]{0,63}`. Stored in a fixed-width slot for the reason
+/// [`VERSION_SLOT_BYTES`] gives.
+pub const TARGET_SLOT_BYTES: usize = 64;
 
 /// The bytes an embedded `version` value may take. The value is stored in a
 /// slot of exactly this size (space-padded) wherever a firmware image holds
@@ -104,18 +114,37 @@ pub const fn u32_json(value: u32) -> [u8; 10] {
 /// that is too long or that holds a byte a JSON string or the padding could
 /// not carry — a space, a quote, a backslash or a control byte.
 pub const fn version_slot(version: &str) -> [u8; VERSION_SLOT_BYTES] {
-    let bytes = version.as_bytes();
+    text_slot::<VERSION_SLOT_BYTES>(version)
+}
+
+/// A version slot as a fixed-width JSON string: `"`, the version, `"`, then
+/// spaces (JSON whitespace) — the same size whatever the version.
+pub const fn version_json(version: &str) -> [u8; VERSION_SLOT_BYTES + 2] {
+    text_json::<{ VERSION_SLOT_BYTES + 2 }>(version)
+}
+
+/// A target name as a fixed-width JSON string, like [`version_json`].
+pub const fn target_json(target: &str) -> [u8; TARGET_SLOT_BYTES + 2] {
+    text_json::<{ TARGET_SLOT_BYTES + 2 }>(target)
+}
+
+/// `text`'s bytes, then spaces up to `N`. Refuses (at compile time, in
+/// const use) text that is empty or too long, or that holds a byte a JSON
+/// string or the padding could not carry — a space, a quote, a backslash or
+/// a control byte.
+pub const fn text_slot<const N: usize>(text: &str) -> [u8; N] {
+    let bytes = text.as_bytes();
     assert!(
-        !bytes.is_empty() && bytes.len() <= VERSION_SLOT_BYTES,
-        "version_slot: a version is 1..=VERSION_SLOT_BYTES bytes"
+        !bytes.is_empty() && bytes.len() <= N,
+        "version_slot: a slot holds 1..=N bytes"
     );
-    let mut out = [b' '; VERSION_SLOT_BYTES];
+    let mut out = [b' '; N];
     let mut i = 0;
     while i < bytes.len() {
         let b = bytes[i];
         assert!(
             b > b' ' && b != b'"' && b != b'\\' && b < 0x7f,
-            "version_slot: a version is printable ASCII with no space, quote or backslash"
+            "version_slot: a slot holds printable ASCII with no space, quote or backslash"
         );
         out[i] = b;
         i += 1;
@@ -123,15 +152,24 @@ pub const fn version_slot(version: &str) -> [u8; VERSION_SLOT_BYTES] {
     out
 }
 
-/// A version slot as a fixed-width JSON string: `"`, the version, `"`, then
-/// spaces (JSON whitespace) — the same size whatever the version.
-pub const fn version_json(version: &str) -> [u8; VERSION_SLOT_BYTES + 2] {
-    let slot = version_slot(version);
-    let mut out = [b' '; VERSION_SLOT_BYTES + 2];
+/// `text` as a JSON string padded with JSON whitespace to `M` bytes (`M` is
+/// the slot's size plus the two quotes).
+pub const fn text_json<const M: usize>(text: &str) -> [u8; M] {
+    let bytes = text.as_bytes();
+    assert!(
+        !bytes.is_empty() && bytes.len() + 2 <= M,
+        "version_slot: a slot holds 1..=N bytes"
+    );
+    let mut out = [b' '; M];
     out[0] = b'"';
     let mut i = 0;
-    while i < VERSION_SLOT_BYTES && slot[i] != b' ' {
-        out[i + 1] = slot[i];
+    while i < bytes.len() {
+        let b = bytes[i];
+        assert!(
+            b > b' ' && b != b'"' && b != b'\\' && b < 0x7f,
+            "version_slot: a slot holds printable ASCII with no space, quote or backslash"
+        );
+        out[i + 1] = b;
         i += 1;
     }
     out[i + 1] = b'"';
@@ -253,6 +291,7 @@ pub const fn str_bytes<const N: usize>(s: &str) -> [u8; N] {
 macro_rules! lp_embed_manifest_core {
     (
         package: $package:expr,
+        target: $target:expr,
         chip_family: $family:expr,
         chip: $chip:expr,
         cargo_target: $cargo_target:expr,
@@ -291,6 +330,12 @@ macro_rules! lp_embed_manifest_core {
             // SAFETY: `version_json` writes printable ASCII only.
             const VERSION_JSON: &str =
                 unsafe { ::core::str::from_utf8_unchecked(&VERSION_JSON_BUF) };
+            // The target name, in its fixed-width slot for the same reason.
+            const TARGET_JSON_BUF: [u8; $crate::manifest::TARGET_SLOT_BYTES + 2] =
+                $crate::manifest::target_json($target);
+            // SAFETY: `target_json` writes printable ASCII only.
+            const TARGET_JSON: &str =
+                unsafe { ::core::str::from_utf8_unchecked(&TARGET_JSON_BUF) };
 
             /// The version alone, in the same fixed-width slot, for the
             /// runtime (the hello reads it through `manifest_version`).
@@ -307,10 +352,11 @@ macro_rules! lp_embed_manifest_core {
                 "{\"lpManifestCore\":", CORE_VERSION,
                 ",\"package\":\"", $package,
                 "\",\"version\":", VERSION_JSON,
+                ",\"target\":", TARGET_JSON,
                 ",\"profile\":\"", $profile,
                 "\",\"commit\":\"", $commit,
                 "\",\"dirty\":", $crate::manifest::bool_json($dirty),
-                ",\"target\":{\"family\":\"", $family,
+                ",\"platform\":{\"family\":\"", $family,
                 "\",\"chip\":\"", $chip,
                 "\",\"cargoTarget\":\"", $cargo_target,
                 "\"},\"features\":[", FEATURES,
@@ -379,14 +425,19 @@ pub struct ManifestCore {
     /// `<short-sha>[-dirty-<HHMMSS>PT]`); `unknown` where the embedder has
     /// no VCS facts.
     pub version: alloc::string::String,
+    /// The line of builds this build belongs to: a `lp-fw/builds/` id such
+    /// as `esp32c6-4mb`, or `unknown` when no build def built it. An opaque
+    /// name — never parsed for a chip or a flash size (those are
+    /// [`ManifestPlatform`]'s and the build def's).
+    pub target: alloc::string::String,
     /// Cargo profile (e.g. `release-esp32`).
     pub profile: alloc::string::String,
     /// Source commit; `unknown` where the embedder has no VCS facts.
     pub commit: alloc::string::String,
     /// Whether the source tree was dirty at build time.
     pub dirty: bool,
-    /// Target identity.
-    pub target: ManifestTarget,
+    /// Platform identity: what the build runs on.
+    pub platform: ManifestPlatform,
     /// Enabled product features.
     pub features: alloc::vec::Vec<LpFeature>,
     /// By-construction numeric facts; empty object when unknown.
@@ -395,10 +446,10 @@ pub struct ManifestCore {
     pub wire_proto: u32,
 }
 
-/// Target identity block of the manifest core.
+/// Platform identity block of the manifest core (`platform`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ManifestTarget {
+pub struct ManifestPlatform {
     /// Chip family / platform (e.g. `esp32`, `browser`, `host`).
     pub family: alloc::string::String,
     /// Concrete chip or platform detail (e.g. `esp32c6`, `wasm32`).
@@ -437,6 +488,7 @@ mod tests {
     mod fake_firmware {
         lp_embed_manifest_core! {
             package: "fw-fake",
+            target: "fake-4mb",
             chip_family: "test",
             chip: "testchip",
             cargo_target: "riscv32imac-unknown-none-elf",
@@ -457,6 +509,7 @@ mod tests {
     mod empty_features_firmware {
         lp_embed_manifest_core! {
             package: "fw-empty",
+            target: "unknown",
             chip_family: "test",
             chip: "testchip",
             cargo_target: "riscv32imac-unknown-none-elf",
@@ -483,9 +536,10 @@ mod tests {
         assert_eq!(core.profile, "release-test");
         assert_eq!(core.commit, "abc1234");
         assert!(!core.dirty);
-        assert_eq!(core.target.family, "test");
-        assert_eq!(core.target.chip, "testchip");
-        assert_eq!(core.target.cargo_target, "riscv32imac-unknown-none-elf");
+        assert_eq!(core.target, "fake-4mb");
+        assert_eq!(core.platform.family, "test");
+        assert_eq!(core.platform.chip, "testchip");
+        assert_eq!(core.platform.cargo_target, "riscv32imac-unknown-none-elf");
         assert_eq!(
             core.features,
             vec![LpFeature::NodeShader, LpFeature::GfxLpvm]
@@ -502,6 +556,7 @@ mod tests {
         assert!(core.features.is_empty());
         assert!(core.dirty);
         assert_eq!(core.version, "0123abcde-dirty-120000PT");
+        assert_eq!(core.target, "unknown");
         assert_eq!(
             empty_features_firmware::manifest_version(),
             "0123abcde-dirty-120000PT"
@@ -566,6 +621,25 @@ mod tests {
             serde_json::from_slice::<alloc::string::String>(&release).unwrap(),
             "2026.10.03-1"
         );
+    }
+
+    /// A target's JSON is the same size whatever the target.
+    #[test]
+    fn a_target_takes_the_same_bytes_however_long_it_is() {
+        let short = target_json("esp32c6-4mb");
+        let unknown = target_json("unknown");
+        assert_eq!(short.len(), unknown.len());
+        assert_eq!(short.len(), TARGET_SLOT_BYTES + 2);
+        assert_eq!(
+            serde_json::from_slice::<alloc::string::String>(&short).unwrap(),
+            "esp32c6-4mb"
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "version_slot")]
+    fn a_target_too_long_for_its_slot_is_refused() {
+        target_json(&"t".repeat(TARGET_SLOT_BYTES + 1));
     }
 
     #[test]

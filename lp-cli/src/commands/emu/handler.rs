@@ -82,20 +82,7 @@ pub(super) fn apply_image(
                      ROM, --elf --flash for a direct load with a flash part that persists."
                 );
             }
-            let len = std::fs::metadata(merged)
-                .with_context(|| format!("reading {}", merged.display()))?
-                .len();
-            let len = u32::try_from(len)
-                .ok()
-                .filter(|n| n.is_power_of_two())
-                .with_context(|| {
-                    format!(
-                        "{} is {len} bytes, which is not a whole flash part. A merged image is the \
-                     WHOLE chip padded to its size — `espflash save-image --merge`, or \
-                     scripts/emu/build-merged-image.sh.",
-                        merged.display()
-                    )
-                })?;
+            let len = whole_part_len(merged)?;
             builder = builder
                 .boot_mode(BootMode::RomUp)
                 .flash(FlashBacking::Copy(merged.to_path_buf()))
@@ -113,6 +100,24 @@ pub(super) fn apply_image(
         }
     }
     Ok(builder)
+}
+
+/// A merged image's length, which must be a whole flash part.
+fn whole_part_len(merged: &Path) -> Result<u32> {
+    let len = std::fs::metadata(merged)
+        .with_context(|| format!("reading {}", merged.display()))?
+        .len();
+    u32::try_from(len)
+        .ok()
+        .filter(|n| n.is_power_of_two())
+        .with_context(|| {
+            format!(
+                "{} is {len} bytes, which is not a whole flash part. A merged image is the \
+                 WHOLE chip padded to its size — `espflash save-image --merge`, or \
+                 scripts/emu/build-merged-image.sh.",
+                merged.display()
+            )
+        })
 }
 
 fn run(args: RunArgs) -> Result<()> {
@@ -160,6 +165,25 @@ fn run(args: RunArgs) -> Result<()> {
         ),
     };
     builder = apply_image(builder, image, args.flash.as_deref())?;
+    if let Some(text) = &args.mmu_page {
+        let len = match text.to_ascii_lowercase().as_str() {
+            "64k" => 0x1_0000,
+            "32k" => 0x8000,
+            "16k" => 0x4000,
+            "8k" => 0x2000,
+            _ => bail!("--mmu-page `{text}`: one of 64k, 32k, 16k, 8k"),
+        };
+        builder = builder.mmu_page_len(len);
+    }
+    // `--over`: the chip holds a whole flashed image and the `--elf` is
+    // direct-loaded over it, writing nothing (clap ties it to `--elf`).
+    if let Some(over) = args.over.as_deref() {
+        check_file(over, "--over")?;
+        builder = builder
+            .flash(FlashBacking::Copy(over.to_path_buf()))
+            .flash_len(whole_part_len(over)?)
+            .flash_holds_image(true);
+    }
 
     // The eFuse identity. `run` serves one board, so the default — the desk
     // board's MAC — is the right one; `serve` gives every board its own,
@@ -306,6 +330,16 @@ fn run(args: RunArgs) -> Result<()> {
             machine.boot_mode().as_str(),
             grade.configuration(),
         ),
+    }
+    if let Some(over) = &args.over {
+        let staging = machine.flash_staging();
+        eprintln!(
+            "emu: direct load over {} (nothing written): {} page(s) mapped, {} byte(s) of the \
+             ELF's flash segments not in the image",
+            over.display(),
+            staging.pages.len(),
+            staging.mismatched_bytes
+        );
     }
     eprintln!(
         "emu: running for {micros} us of EMULATED time (wall-clock net: {} s)",

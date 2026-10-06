@@ -6,6 +6,7 @@ pub mod docs_host;
 pub mod frame_feed;
 pub mod home;
 pub mod library;
+pub mod network;
 pub mod node;
 pub mod open_priority;
 pub mod open_progress;

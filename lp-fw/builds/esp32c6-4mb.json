@@ -8,6 +8,7 @@
   "cargoFeatures": ["esp32c6", "server"],
   "flashSizeMb": 4,
   "partitionsCsv": "lp-fw/fw-esp32c6/partitions.csv",
+  "split": true,
   "chip": {
     "family": "esp32",
     "name": "esp32c6"

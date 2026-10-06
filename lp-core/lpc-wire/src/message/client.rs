@@ -135,6 +135,49 @@ pub enum ClientRequest {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         open: Option<lpc_access::OpenTo>,
     },
+    /// The device's network settings: answered with
+    /// [`crate::server::ServerMsgBody::NetworkStatus`] — the two switches,
+    /// every saved network without its password, and what the station is
+    /// doing. Edit tier.
+    NetworkStatus,
+    /// What the board's radio hears (2.4 GHz only; hidden networks are
+    /// omitted): answered with [`crate::server::ServerMsgBody::NetworkScan`],
+    /// which is `unsupported` on every image whose station is (M5). Edit
+    /// tier.
+    NetworkScan,
+    /// Save a network: a new name goes last (at most eight are kept — a
+    /// ninth is refused with an error); a name already saved keeps its place
+    /// and takes this password, which is how a password is changed.
+    /// `password` is `""` for an open network. `hidden` (the network does
+    /// not broadcast its name) is left as saved when absent, `false` for a
+    /// new one. The board checks the 802.11 / WPA2 rules and answers an
+    /// error, writing nothing, when they fail. `password` is write-only: no
+    /// reply carries it, and its `Debug` never prints it
+    /// ([`crate::message::WifiPassword`]). Answered with the status as it
+    /// now stands. Edit tier.
+    NetworkAdd {
+        ssid: String,
+        password: crate::message::WifiPassword,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        hidden: Option<bool>,
+    },
+    /// Forget the saved network named `ssid` (its name and password).
+    /// Forgetting one that is not saved is not an error. Answered with the
+    /// status. Edit tier.
+    NetworkForget {
+        ssid: String,
+    },
+    /// Set either or both switches; an absent one is left as it is. `wifi`
+    /// is the board's one Wi-Fi switch; `cloudRelay` lets lightplayer.app
+    /// reach the board through the cloud relay. Answered with the status.
+    /// Edit tier.
+    #[serde(rename_all = "camelCase")]
+    NetworkSet {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        wifi: Option<bool>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cloud_relay: Option<bool>,
+    },
 }
 
 #[cfg(test)]
@@ -366,6 +409,77 @@ mod tests {
             ClientRequest::AccessSetSwitches {
                 ble_enabled: None,
                 open: Some(lpc_access::OpenTo::Edit)
+            }
+        ));
+    }
+
+    /// Network requests: bare unit spellings for status and scan, the
+    /// added network's fields (an absent `hidden` omitted), and the password
+    /// as a bare string that `Debug` never prints.
+    #[test]
+    fn test_network_requests() {
+        assert_eq!(
+            crate::json::to_string(&ClientRequest::NetworkStatus).unwrap(),
+            r#""networkStatus""#
+        );
+        assert_eq!(
+            crate::json::to_string(&ClientRequest::NetworkScan).unwrap(),
+            r#""networkScan""#
+        );
+        assert_eq!(
+            crate::json::to_string(&ClientRequest::NetworkForget {
+                ssid: String::from("lp-walk-net")
+            })
+            .unwrap(),
+            r#"{"networkForget":{"ssid":"lp-walk-net"}}"#
+        );
+
+        let add = ClientRequest::NetworkAdd {
+            ssid: String::from("lp-walk-net"),
+            password: crate::message::WifiPassword::new("correct-horse-42"),
+            hidden: None,
+        };
+        let json = crate::json::to_string(&add).unwrap();
+        assert_eq!(
+            json,
+            r#"{"networkAdd":{"ssid":"lp-walk-net","password":"correct-horse-42"}}"#
+        );
+        let shown = alloc::format!("{add:?} {add:#?}");
+        assert!(!shown.contains("correct-horse-42"), "{shown}");
+        match crate::json::from_str::<ClientRequest>(&json).unwrap() {
+            ClientRequest::NetworkAdd {
+                ssid,
+                password,
+                hidden: None,
+            } => {
+                assert_eq!(ssid, "lp-walk-net");
+                assert_eq!(password.expose(), "correct-horse-42");
+            }
+            other => panic!("wrong request type: {other:?}"),
+        }
+        let hidden = ClientRequest::NetworkAdd {
+            ssid: String::from("lp-back-office"),
+            password: crate::message::WifiPassword::new(""),
+            hidden: Some(true),
+        };
+        assert_eq!(
+            crate::json::to_string(&hidden).unwrap(),
+            r#"{"networkAdd":{"ssid":"lp-back-office","password":"","hidden":true}}"#
+        );
+
+        let switches = ClientRequest::NetworkSet {
+            wifi: Some(false),
+            cloud_relay: Some(false),
+        };
+        assert_eq!(
+            crate::json::to_string(&switches).unwrap(),
+            r#"{"networkSet":{"wifi":false,"cloudRelay":false}}"#
+        );
+        assert!(matches!(
+            crate::json::from_str::<ClientRequest>(r#"{"networkSet":{}}"#).unwrap(),
+            ClientRequest::NetworkSet {
+                wifi: None,
+                cloud_relay: None
             }
         ));
     }

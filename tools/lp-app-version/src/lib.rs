@@ -92,6 +92,30 @@ pub fn resolve(manifest_dir: &Path) -> String {
         .unwrap_or_else(|| UNKNOWN.to_string())
 }
 
+/// The rustc environment variable [`emit_target`] sets: the **target** the
+/// build was built as.
+pub const TARGET_ENV: &str = "LP_FW_TARGET";
+
+/// Learn which **target** this firmware build is — the `lp-fw/builds/` id a
+/// build def names (`esp32c6-4mb`), handed in as `LP_FW_TARGET` by whatever
+/// built it from that def (`lp-cli firmware build`, `tools/lp-fw-split`, the
+/// just recipes for the shipped image) — set `LP_FW_TARGET` for the crate
+/// being compiled, and rerun when it changes. A plain `cargo build`, with no
+/// build def behind it, is [`UNKNOWN`], the way an unresolvable version is.
+///
+/// A target is an opaque name: nothing reads a chip or a flash size out of
+/// it (see `lp-fw/builds/README.md`).
+pub fn emit_target() -> String {
+    println!("cargo:rerun-if-env-changed={TARGET_ENV}");
+    let target = std::env::var(TARGET_ENV)
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| UNKNOWN.to_string());
+    println!("cargo:rustc-env={TARGET_ENV}={target}");
+    target
+}
+
 /// `<root>/scripts/print-app-version.sh`, for the nearest ancestor of
 /// `start` that has one.
 fn find_script(start: &Path) -> Option<PathBuf> {

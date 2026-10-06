@@ -170,6 +170,8 @@ pub fn ble_link_info(device_id: &str, name: &str) -> LinkInfo {
         endpoint: ble_endpoint(device_id),
         usb: None,
         serial_number: None,
+        // Bluetooth is still `M!` lines, no channels (M7 P12 adds it).
+        carries_update_channel: false,
     }
 }
 
@@ -210,6 +212,7 @@ pub fn sim_link_info(uid: &str, display_name: &str) -> LinkInfo {
         endpoint: sim_endpoint(uid),
         usb: None,
         serial_number: None,
+        carries_update_channel: false,
     }
 }
 
@@ -224,6 +227,8 @@ pub fn emu_link_info(uid: &str, display_name: &str) -> LinkInfo {
         endpoint: emu_endpoint(uid),
         usb: None,
         serial_number: None,
+        // Its lp-link carries no update channel yet (M7 P7 adds it).
+        carries_update_channel: false,
     }
 }
 

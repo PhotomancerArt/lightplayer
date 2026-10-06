@@ -1,0 +1,36 @@
+[package]
+name = "lp-fw-split"
+description = "Builds the ESP32-C6 split image: one link split by reachability into a core and an engine, with the loader and the boot records"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "lp_fw_split"
+path = "src/lib.rs"
+
+[[bin]]
+name = "lp-fw-split"
+path = "src/main.rs"
+
+[dependencies]
+# The boot-record format and the layout: one definition, shared with the
+# loader and the core. Never re-typed here.
+lp-bootctl = { path = "../../lp-base/lp-bootctl" }
+# The version a build reports, resolved once and handed to both link passes.
+lp-app-version = { path = "../lp-app-version" }
+# The ESP application image, bundled bootloader and partition table: the
+# pinned 3.3 library lp-cli already uses, without its CLI.
+espflash = { version = "3.3", default-features = false }
+object = { version = "0.37", default-features = false, features = ["read_core", "elf", "std"] }
+rustc-demangle = "0.1"
+sha2 = { workspace = true, features = ["std"] }
+serde = { workspace = true, features = ["derive", "std"] }
+serde_json = { workspace = true, features = ["std"] }
+anyhow = { workspace = true, features = ["std"] }
+clap = { version = "4", features = ["derive"] }
+
+[lints]
+workspace = true

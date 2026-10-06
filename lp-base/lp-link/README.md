@@ -11,7 +11,7 @@ and the emulator tools run the same crate.
 > UART0** (the DOM-Z-102's CH340 link, its emulator, Studio's Web Serial and
 > `lp-cli`'s native serial behind a USB-UART bridge — wire proto 32) **and on
 > BLE** (the C6's radio links, `fw-esp32-common`'s `radio_link/`, and
-> Studio's Web Bluetooth provider — wire proto 36). It was built and measured
+> Studio's Web Bluetooth provider — wire proto 37). It was built and measured
 > in the investigation `lp2025/2026-09-26-1720-reliable-device-link`, proven
 > on a C6 in the `test_comms_lab` firmware, cut over on USB in
 > `lp2025/2026-09-27-0215-lp-link-usb-cutover`, on the classic's UART in

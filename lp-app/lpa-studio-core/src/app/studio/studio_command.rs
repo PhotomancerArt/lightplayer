@@ -48,6 +48,9 @@ pub enum StudioCommand {
     /// A Bluetooth access gesture or a finished login conversation (BLE
     /// M6). Applied synchronously by the actor, in queue order.
     Access(crate::app::access::AccessCommand),
+    /// A Wi‑Fi popover refresh or a finished network conversation. Applied
+    /// synchronously by the actor, in queue order, like `Access`.
+    Network(crate::app::network::NetworkCommand),
     /// Progress from a spawned agent run (streamed events, run end). Applied
     /// synchronously by the actor in queue order, like `Console` — each
     /// message mutates the agent session mirror and marks the view dirty.

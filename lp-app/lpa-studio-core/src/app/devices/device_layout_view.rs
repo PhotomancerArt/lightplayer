@@ -516,6 +516,7 @@ mod tests {
                 },
                 awaiting_consent: true,
             }),
+            update: None,
         });
         let mut offers = UiOfferTree::new();
         device_layout_view(
@@ -650,6 +651,8 @@ mod tests {
             terminal_dropped: 0,
             firmware_blocked: None,
             escapes: vec![Escape::Disconnect, Escape::Forget],
+            update_blocked: None,
+            last_update_outcome: None,
         }
     }
 }

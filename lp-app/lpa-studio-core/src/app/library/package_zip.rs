@@ -56,12 +56,13 @@ pub fn export_package(handle: &PackageHandle) -> Result<Vec<u8>, LibraryError> {
 }
 
 /// Whether a package file may leave the library in an export (zip, or the
-/// share envelope). Everything may, except an access sidecar: a zip or a
-/// pasted envelope gets shared, and the keys inside `/.lp/access.json` are
-/// login-equivalent. A device push is not an export — it carries the file,
+/// share envelope). Everything may, except a write-only file: an access
+/// sidecar (a zip or a pasted envelope gets shared, and the keys inside
+/// `/.lp/access.json` are login-equivalent) or a `.lp/network.json` (a
+/// Wi-Fi password). A device push is not an export — it carries the file,
 /// which is how "secrets travel on deploy".
 pub fn is_shareable(relative_path: &str) -> bool {
-    !lpc_access::is_access_file_path(relative_path)
+    !lpc_access::is_write_only_file_path(relative_path)
 }
 
 /// What an import produced.

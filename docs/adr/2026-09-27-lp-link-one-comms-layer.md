@@ -285,8 +285,8 @@ and limits: `docs/adr/2026-10-01-network-link-security.md`.
 Milestone M3 (plan `lp2025/2026-09-28-1445-ble-on-lp-link`) moved the C6's
 Bluetooth links onto `lp-link` (plain, not `secure`), on `LinkConfig::ble()`'s Datagram framing
 (one frame per GATT write or notification). It was built beside M5 and
-merged after it and after 33–35 (access, the filesystem, the build version),
-so it took `WIRE_PROTO_VERSION` 35 → **36**; 31, held for it above, was never
+merged after it and after 33–36 (access, the filesystem, the build version,
+Wi-Fi settings), so it took `WIRE_PROTO_VERSION` 36 → **37**; 31, held for it above, was never
 carried by a `main` build. After it, `fw-emu` is the
 only `M!` board link. With both in, the `M!` line decoder and loss counters
 `fw-esp32-common` kept for BLE and the classic (`transport.rs`,

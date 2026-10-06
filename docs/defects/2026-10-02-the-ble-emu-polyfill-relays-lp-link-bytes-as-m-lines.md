@@ -36,7 +36,7 @@ Nothing gated it: the walk is not a CI job, and the conformance suite
 (`lpa-link/tests/browser_ble_conformance.rs`) runs the polyfill against
 scripted bytes, not against a board.
 
-**Fix** — PR #880 (Bluetooth on lp-link, wire proto 36) removes the
+**Fix** — PR #880 (Bluetooth on lp-link, wire proto 37) removes the
 mismatch from both ends at once, by the second shape below rather than a
 BLE channel in the emulator:
 
@@ -78,3 +78,12 @@ Considered and not taken: a BLE byte channel of the emulated board's own
 only as faithful as the assumption that both endpoints frame the same way.
 When one side's framing changes, every relay that joined it to something
 else has to be found and checked in the same change.
+
+**Incidents**
+
+- 2026-10-04 — hit again by the Wi‑Fi settings walk (Wi‑Fi roadmap M5,
+  `just walk-wifi-emu ble`): pairs over the polyfill, then sits at
+  **Identifying** ("No response — try flashing firmware"), so the `?ble=emu`
+  half of M5's walk could not run. The USB half (`just walk-wifi-emu usb`)
+  passed; the Wi‑Fi controls over a Bluetooth link at author are covered by
+  `lpa-studio-core`'s reach tests only, not by a walk, until this is fixed.

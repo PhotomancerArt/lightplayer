@@ -302,6 +302,10 @@ pub fn firmware_verb(view: &DeviceView) -> Option<FirmwareVerb> {
             }
         }
         FirmwareFace::Unknown => None,
+        // A core-only board's verbs are its update standing's over-the-air
+        // offers (`device_update_offers`): its firmware comes back over its
+        // own link, never by a flash.
+        FirmwareFace::CoreOnly { .. } => None,
         // `wants_flash` covered every other face; the arm keeps the match
         // exhaustive so a new face is a compile error here.
         FirmwareFace::NoHello
@@ -595,6 +599,8 @@ mod tests {
             terminal_dropped: 0,
             firmware_blocked: None,
             escapes: vec![Escape::Disconnect, Escape::Forget],
+            update_blocked: None,
+            last_update_outcome: None,
         };
 
         assert_eq!(
@@ -646,6 +652,8 @@ mod tests {
             terminal_dropped: 0,
             firmware_blocked: None,
             escapes: vec![Escape::Disconnect, Escape::Forget],
+            update_blocked: None,
+            last_update_outcome: None,
         }
     }
 
@@ -876,6 +884,7 @@ mod tests {
                 cancellable: true,
                 cancel_requested: false,
                 layout: None,
+                update: None,
             }),
             ..base.clone()
         };

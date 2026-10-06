@@ -73,6 +73,8 @@ mod agent_device_journey_tests;
 /// The app chat seated on this bench (E4's seat, and the corpus's device
 /// seat).
 pub(crate) mod agent_device_seat;
+/// Wi‑Fi settings over the bench's USB link (Wi‑Fi roadmap M5).
+mod wifi_device_tests;
 
 // ---------------------------------------------------------------------
 // The transport
@@ -976,8 +978,14 @@ impl DeviceBench {
         }
         while self.access_rx.peek_any(|_| true) {
             for command in drive(self.access_rx.recv_coalesced()).unwrap_or_default() {
-                if let crate::StudioCommand::Access(command) = command {
-                    self.controller.apply_access_command(command);
+                match command {
+                    crate::StudioCommand::Access(command) => {
+                        self.controller.apply_access_command(command);
+                    }
+                    crate::StudioCommand::Network(command) => {
+                        self.controller.apply_network_command(command);
+                    }
+                    _ => {}
                 }
             }
         }

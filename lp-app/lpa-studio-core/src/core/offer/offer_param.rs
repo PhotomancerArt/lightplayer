@@ -41,6 +41,11 @@ pub enum OfferParamKind {
         max_len: Option<usize>,
         /// Whether the press may leave it out.
         optional: bool,
+        /// A secret (a Wi‑Fi password): drawn as a password field, never
+        /// echoed. A press's stamp carries [`crate::SECRET_MARKER`] in its
+        /// place ([`crate::UiOffer::press`]), and the app agent never fills
+        /// one — an offer that takes a secret is always the user's card.
+        secret: bool,
     },
     /// On or off.
     Toggle {
@@ -99,6 +104,7 @@ impl OfferParam {
                 placeholder: placeholder.into(),
                 max_len: None,
                 optional: false,
+                secret: false,
             },
         }
     }
@@ -118,6 +124,20 @@ impl OfferParam {
             *optional = true;
         }
         self
+    }
+
+    /// Text that is a secret (the `secret` field of [`OfferParamKind::Text`]). No
+    /// effect on other kinds.
+    pub fn secret(mut self) -> Self {
+        if let OfferParamKind::Text { secret, .. } = &mut self.kind {
+            *secret = true;
+        }
+        self
+    }
+
+    /// Whether this is secret text.
+    pub fn is_secret(&self) -> bool {
+        matches!(self.kind, OfferParamKind::Text { secret: true, .. })
     }
 
     /// Text of at most `limit` characters. No effect on other kinds.
@@ -287,6 +307,22 @@ mod tests {
         let name = name.optional();
         assert!(!name.is_required());
         assert_eq!(name.check(""), Ok(()), "an optional field may be blank");
+    }
+
+    #[test]
+    fn only_text_can_be_secret() {
+        let password = OfferParam::text("password", "password", "unchanged")
+            .optional()
+            .secret();
+        assert!(password.is_secret());
+        assert!(!password.is_required());
+        assert!(!OfferParam::text("name", "name", "").is_secret());
+        assert!(
+            !OfferParam::toggle("enabled", "on", true)
+                .secret()
+                .is_secret(),
+            "no effect on a toggle"
+        );
     }
 
     #[test]

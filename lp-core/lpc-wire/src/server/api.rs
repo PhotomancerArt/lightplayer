@@ -188,6 +188,17 @@ pub enum ServerMsgBody {
         open: lpc_access::OpenTo,
         entries: Vec<crate::server::AccessEntryInfo>,
     },
+    /// The device's network settings and what its station is doing: the
+    /// two switches, every saved network without its password, and the
+    /// station state. The answer to [`crate::ClientRequest::NetworkStatus`]
+    /// and to each network change (`NetworkAdd`, `NetworkForget`,
+    /// `NetworkSet`), which reply with the status as it now stands. Edit
+    /// tier only.
+    NetworkStatus(crate::server::NetworkStatus),
+    /// What the board's radio hears, or `unsupported` (every image with no
+    /// station). The answer to [`crate::ClientRequest::NetworkScan`]. Edit
+    /// tier only.
+    NetworkScan(crate::server::NetworkScan),
 }
 
 /// Log severity carried by [`ServerMsgBody::Log`] frames and
@@ -468,6 +479,73 @@ mod tests {
         );
     }
 
+    /// The network status and scan the board sends, through the device
+    /// serializer.
+    #[cfg(feature = "ser-write-json")]
+    #[test]
+    fn network_bodies_encode_identically_through_the_device_serializer() {
+        for body in network_status_samples()
+            .into_iter()
+            .chain(network_scan_samples())
+        {
+            let mut out = alloc::vec::Vec::new();
+            ser_write_json::ser::to_writer(&mut out, &body).unwrap();
+            assert_eq!(
+                core::str::from_utf8(&out).unwrap(),
+                crate::json::to_string(&body).unwrap()
+            );
+        }
+    }
+
+    /// The network status: camelCase, each saved network without a
+    /// password, `hidden` and `last` omitted when unset.
+    #[test]
+    fn network_status_round_trips() {
+        let [saved, none, connected] = network_status_samples();
+        let json = crate::json::to_string(&saved).unwrap();
+        assert_eq!(
+            json,
+            r#"{"networkStatus":{"wifi":true,"cloudRelay":true,"networks":[{"ssid":"lp-walk-net","hasPassword":true},{"ssid":"lp-back-office","hasPassword":false,"hidden":true,"last":"wrongPassword"}],"station":"unsupported"}}"#
+        );
+        assert!(!json.contains("password\":"), "{json}");
+        assert_eq!(
+            crate::json::to_string(&none).unwrap(),
+            r#"{"networkStatus":{"wifi":false,"cloudRelay":false,"networks":[],"station":"off"}}"#
+        );
+        let json = crate::json::to_string(&connected).unwrap();
+        match crate::json::from_str::<ServerMsgBody>(&json).unwrap() {
+            ServerMsgBody::NetworkStatus(status) => {
+                assert_eq!(
+                    status.station,
+                    crate::server::StationState::Connected {
+                        ssid: String::from("lp-walk-net"),
+                        ip: String::from("10.0.0.7"),
+                        rssi: -48
+                    }
+                );
+            }
+            other => panic!("expected a network status, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn network_scan_round_trips() {
+        let [unsupported, heard] = network_scan_samples();
+        assert_eq!(
+            crate::json::to_string(&unsupported).unwrap(),
+            r#"{"networkScan":"unsupported"}"#
+        );
+        let json = crate::json::to_string(&heard).unwrap();
+        assert_eq!(
+            json,
+            r#"{"networkScan":{"heard":[{"ssid":"lp-walk-net","rssi":-48,"secure":true},{"ssid":"lp-cafe","rssi":-77,"secure":false}]}}"#
+        );
+        assert!(matches!(
+            crate::json::from_str::<ServerMsgBody>(&json).unwrap(),
+            ServerMsgBody::NetworkScan(crate::server::NetworkScan::Heard(networks)) if networks.len() == 2
+        ));
+    }
+
     /// Who has access: camelCase switches, one entry per secret, no key.
     #[test]
     fn access_list_round_trips_without_a_key() {
@@ -518,6 +596,65 @@ mod tests {
         let json = crate::json::to_string(&ServerMsgBody::SetLogLevel).unwrap();
         let deserialized: ServerMsgBody = crate::json::from_str(&json).unwrap();
         assert!(matches!(deserialized, ServerMsgBody::SetLogLevel));
+    }
+
+    fn network_status_samples() -> [ServerMsgBody; 3] {
+        use crate::server::{LastAttempt, NetworkStatus, SavedNetworkInfo, StationState};
+        let walk = SavedNetworkInfo {
+            ssid: String::from("lp-walk-net"),
+            has_password: true,
+            hidden: false,
+            last: None,
+        };
+        let back_office = SavedNetworkInfo {
+            ssid: String::from("lp-back-office"),
+            has_password: false,
+            hidden: true,
+            last: Some(LastAttempt::WrongPassword),
+        };
+        [
+            ServerMsgBody::NetworkStatus(NetworkStatus {
+                wifi: true,
+                cloud_relay: true,
+                networks: alloc::vec![walk.clone(), back_office],
+                station: StationState::Unsupported,
+            }),
+            ServerMsgBody::NetworkStatus(NetworkStatus {
+                wifi: false,
+                cloud_relay: false,
+                networks: alloc::vec![],
+                station: StationState::Off,
+            }),
+            ServerMsgBody::NetworkStatus(NetworkStatus {
+                wifi: true,
+                cloud_relay: true,
+                networks: alloc::vec![walk],
+                station: StationState::Connected {
+                    ssid: String::from("lp-walk-net"),
+                    ip: String::from("10.0.0.7"),
+                    rssi: -48,
+                },
+            }),
+        ]
+    }
+
+    fn network_scan_samples() -> [ServerMsgBody; 2] {
+        use crate::server::{HeardNetwork, NetworkScan};
+        [
+            ServerMsgBody::NetworkScan(NetworkScan::Unsupported),
+            ServerMsgBody::NetworkScan(NetworkScan::Heard(alloc::vec![
+                HeardNetwork {
+                    ssid: String::from("lp-walk-net"),
+                    rssi: -48,
+                    secure: true,
+                },
+                HeardNetwork {
+                    ssid: String::from("lp-cafe"),
+                    rssi: -77,
+                    secure: false,
+                },
+            ])),
+        ]
     }
 
     fn access_list_sample() -> ServerMsgBody {

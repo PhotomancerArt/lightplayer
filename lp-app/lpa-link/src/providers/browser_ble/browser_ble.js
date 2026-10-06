@@ -1,7 +1,7 @@
 // Studio's Web Bluetooth link: lp-link over a Nordic UART (NUS) GATT
 // service, owned here the way `browser_serial.js` owns a Web Serial port.
 //
-// Since `WIRE_PROTO_VERSION` 36 a board's Bluetooth links run lp-link, as
+// Since `WIRE_PROTO_VERSION` 37 a board's Bluetooth links run lp-link, as
 // its USB link does (plan `lp2025/2026-09-28-1445-ble-on-lp-link`): the
 // DATAGRAM framing, where one GATT value is one whole frame (a 4-byte
 // header, up to one payload, a 4-byte CRC-32C). This file does not read

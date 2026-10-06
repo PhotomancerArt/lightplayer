@@ -54,5 +54,6 @@ pub fn fake_link_info(endpoint: &str) -> LinkInfo {
             product: 0x1001,
         }),
         serial_number: None,
+        carries_update_channel: false,
     }
 }
