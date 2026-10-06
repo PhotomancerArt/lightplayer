@@ -85,7 +85,7 @@ pub(crate) fn dispatch_update(message: Option<&[u8]>) {
 /// pumping the link for a while before the server loop renders its next
 /// frame (`UsbLinkTransport::stream_update`), so a read-back moves several
 /// sectors per frame instead of one.
-pub(crate) fn streaming() -> bool {
+pub fn streaming() -> bool {
     let last = LAST_MESSAGE_MS.load(Ordering::Relaxed);
     last != 0 && now_ms().wrapping_sub(last) <= STREAMING_WITHIN_MS
 }
