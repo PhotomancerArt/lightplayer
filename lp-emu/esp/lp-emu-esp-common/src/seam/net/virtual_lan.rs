@@ -270,6 +270,32 @@ impl VirtualLan {
         }
     }
 
+    /// The board attached as `from` is now `to` (a runner renumbered its
+    /// machines): its station, and the segment's memory of where its MAC is,
+    /// move with it. Nothing happens when `to` is already attached.
+    pub fn rename_station(&mut self, from: EndpointId, to: EndpointId) {
+        if from == to || self.station(to).is_some() {
+            return;
+        }
+        if let Some(s) = self.station_mut(from) {
+            s.endpoint = to;
+        }
+        for port in self.learned.values_mut() {
+            if *port == LanPort::Board(from) {
+                *port = LanPort::Board(to);
+            }
+        }
+    }
+
+    /// The board restarted: its station forgets its link, its pending join
+    /// or scan and its untaken events ([`LanStation::reset`]). It stays
+    /// attached, with its MAC and its lease.
+    pub fn reset_station(&mut self, board: EndpointId) {
+        if let Some(s) = self.station_mut(board) {
+            s.reset();
+        }
+    }
+
     pub fn link_up(&self, board: EndpointId) -> bool {
         self.station(board).is_some_and(|s| s.link_up())
     }

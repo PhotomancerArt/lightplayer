@@ -169,7 +169,10 @@ pub struct Config {
     strap: Strap,
     reset_cause: ResetCause,
     /// Emulator seams (`seams=` strict, `seams_prefer=` soft). The capability
-    /// defaults — empty today — unless asked: a tab board is today's machine.
+    /// defaults unless asked: `net=lan`, softly. A tab board is given no LAN,
+    /// so an image that carries the network seam engages it on an **empty**
+    /// LAN of its own (plan A8): a scan hears nothing and any network a user
+    /// adds is honestly "not in range". There is no socket in the page.
     seams: lp_emu_esp_common::seam::SeamRequest,
 }
 

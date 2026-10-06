@@ -24,6 +24,7 @@ impl Esp32C6Machine {
         if self.seams.request.is_empty() {
             return Ok(());
         }
+        self.net_on_chip_start();
         self.seams.starts += 1;
         self.seams.scans += 1;
         let scan = seam::scan(self.flash().lock().unwrap().bytes());

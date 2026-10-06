@@ -5,8 +5,10 @@
 //! carries their frames ([`virtual_lan`]), a router on it that answers ARP
 //! and hands out addresses over DHCP ([`lan_gateway`],
 //! [`lan_dhcp_server`]), a host TCP port forwarded to each board
-//! ([`lan_port_forward`]), and a host-side participant tests use to ask the
-//! boards things ([`lan_probe`]).
+//! ([`lan_port_forward`]), a host-side participant tests use to ask the
+//! boards things ([`lan_probe`]), and the handle every board's machine, the
+//! host and a runner share one LAN through, with who drives it on whose clock
+//! ([`shared_lan`]).
 //!
 //! It knows Ethernet frames and a few protocols, not LightPlayer: nothing
 //! here reads the firmware's link, its server or its names. MIT, inside the
@@ -27,6 +29,7 @@ pub mod lan_port_forward;
 pub mod lan_probe;
 pub mod lan_stack;
 pub mod lan_station;
+pub mod shared_lan;
 pub mod virtual_access_point;
 pub mod virtual_lan;
 
@@ -39,5 +42,6 @@ pub use lan_gateway::LanGateway;
 pub use lan_port_forward::{ForwardCounters, LanPortForward};
 pub use lan_probe::{LanProbe, ProbeConn, ProbeId};
 pub use lan_station::{LanStation, StationEvent};
+pub use shared_lan::{LanDriver, NET_SEAM, SharedLan, net_endpoint};
 pub use virtual_access_point::{JoinOutcome, ScanRecord, VirtualAccessPoint};
 pub use virtual_lan::{FrameRecord, LanConfig, LanCounters, LanPort, VirtualLan, net_pacer_config};

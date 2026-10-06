@@ -506,6 +506,16 @@ wall-clock, like the USB door. The gateway's and the probe's TCP/IP stacks
 are `smoltcp` (0BSD). Test networks live in `testdata/virtual_lan.toml` and
 are test values only.
 
+`SharedLan` (P12) is the handle boards, hosts and runners share one LAN
+through (`Arc<Mutex<…>>`, `Send + Sync`), with who drives it on whose clock:
+`LanDriver::Runner` (the lockstep runner's boundaries: deterministic, CI),
+`SelfDriven` (one board's machine, on its guest clock: `emu run`, the tab) or
+`WallClock` (every board's machine on its own thread, the host's clock:
+`emu serve`, not deterministic). `net=lan` is a capability default, so every
+emulated C6 whose image carries the seam engages it, on the LAN its host
+gave it or on an empty one of its own. A wasm build binds no port forward:
+the tab's page has no sockets.
+
 ## Tests
 
 ```bash

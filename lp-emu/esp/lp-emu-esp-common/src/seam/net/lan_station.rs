@@ -91,6 +91,17 @@ impl LanStation {
             .retain(|(_, p)| !matches!(p, Pending::Join(..)));
     }
 
+    /// The board restarted (a reboot, a power cycle): its radio forgets
+    /// everything — the link, a join or scan in progress, the events it had
+    /// not taken and the last scan's results — with no event. Its MAC, and
+    /// so its lease, stay.
+    pub fn reset(&mut self) {
+        self.link = None;
+        self.pending.clear();
+        self.events.clear();
+        self.scan.clear();
+    }
+
     /// Start a scan that finishes at `due`. One already running keeps its
     /// time.
     pub fn scan_start(&mut self, due: Cycles) {

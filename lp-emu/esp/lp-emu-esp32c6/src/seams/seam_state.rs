@@ -6,6 +6,7 @@
 
 use lp_emu_core::sched::Cycles;
 use lp_emu_esp_common::ParticipantId;
+use lp_emu_esp_common::seam::net::SharedLan;
 use lp_emu_esp_common::seam::{
     ArmSite, Engaged, PacerConfig, ScanResult, SeamEndpoint, SeamImpl, SeamRequest, SiteKind,
     WakePacer,
@@ -100,6 +101,17 @@ pub struct SeamState {
     pub pacer: WakePacer,
     /// The pacing knobs new endpoints and the pacer are made with.
     pub pacer_config: PacerConfig,
+    /// The virtual LAN this board's network seam answers from: the one a
+    /// host gave ([`crate::machine::Esp32C6Builder::lan`]), or the empty
+    /// private one made the first time `net=lan` engaged. Kept across chip
+    /// starts, so a restarted board is the same board on the same LAN.
+    pub lan: Option<SharedLan>,
+    /// This chip start's `<board>/net` endpoint, by index, once `net=lan`
+    /// engaged.
+    pub net_endpoint: Option<usize>,
+    /// The machine drives its LAN itself at the top of its slices (a
+    /// self-driven or wall-clock LAN, not a runner's).
+    pub net_pumps: bool,
 }
 
 impl SeamState {
@@ -149,6 +161,8 @@ impl SeamState {
         self.lines.clear();
         self.none_why = None;
         self.endpoints.clear();
+        self.net_endpoint = None;
+        self.net_pumps = false;
         self.wake_stats.clear();
         self.pending = 0;
         self.pacer = WakePacer::new(self.pacer_config);

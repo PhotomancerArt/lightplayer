@@ -66,7 +66,17 @@ struct ForwardConn {
 impl LanPortForward {
     /// Listen on `host` (port 0 for one the OS picks) and forward to the
     /// board with `board_mac`, at `board_port`.
+    ///
+    /// A wasm build (the Studio tab's module) has no host sockets — the page
+    /// has none to give, and no forward is ever asked of it — so there this
+    /// is refused, and the module links no socket call it would need.
     pub fn bind(host: SocketAddr, board_mac: [u8; 6], board_port: u16) -> io::Result<Self> {
+        if cfg!(target_family = "wasm") {
+            return Err(io::Error::new(
+                ErrorKind::Unsupported,
+                "a LAN port forward needs host sockets, and a wasm build has none",
+            ));
+        }
         let listener = TcpListener::bind(host)?;
         listener.set_nonblocking(true)?;
         let local = listener.local_addr()?;
@@ -121,7 +131,7 @@ impl LanPortForward {
             };
             let Some(ip) = board_ip else {
                 self.counters.refused += 1;
-                let _ = host.shutdown(Shutdown::Both);
+                shut(&host, Shutdown::Both);
                 continue;
             };
             if host.set_nonblocking(true).is_err() {
@@ -146,7 +156,7 @@ impl LanPortForward {
                 .is_err()
             {
                 self.counters.refused += 1;
-                let _ = host.shutdown(Shutdown::Both);
+                shut(&host, Shutdown::Both);
                 continue;
             }
             let handle = stack.sockets.add(socket);
@@ -222,14 +232,29 @@ impl ForwardConn {
         let board_done =
             !socket.may_recv() && !socket.can_recv() && socket.state() != tcp::State::SynSent;
         if board_done && self.to_host.is_empty() && !self.host_shut {
-            let _ = self.host.shutdown(Shutdown::Write);
+            shut(&self.host, Shutdown::Write);
             self.host_shut = true;
         }
         let finished = matches!(socket.state(), tcp::State::Closed | tcp::State::TimeWait);
         if finished && self.to_host.is_empty() {
-            let _ = self.host.shutdown(Shutdown::Both);
+            shut(&self.host, Shutdown::Both);
             self.dead = true;
         }
+    }
+}
+
+/// Close one direction of a host connection. On a wasm build no forward is
+/// ever bound ([`LanPortForward::bind`]), so this is never reached there, and
+/// it calls nothing: the tab's WASI shim answers no `sock_shutdown`, and a
+/// module that imported it would not instantiate.
+fn shut(stream: &TcpStream, how: Shutdown) {
+    #[cfg(not(target_family = "wasm"))]
+    {
+        let _ = stream.shutdown(how);
+    }
+    #[cfg(target_family = "wasm")]
+    {
+        let _ = (stream, how);
     }
 }
 
