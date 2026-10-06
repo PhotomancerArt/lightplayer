@@ -232,8 +232,7 @@ pub async fn run_server_loop<T: ServerTransport + LinkUpkeep>(
                 let frames_done = frame_count.saturating_sub(fps_tracker.last_log_frame());
                 let fps = (frames_done as u64 * 1000) / elapsed_ms;
                 log::info!(
-                    "[perf] frame={} fps={} elapsed={}ms recv={}ms tick={}ms send={}ms total={}ms responses={} \
-                     frames {}",
+                    "[perf] frame={} fps={} elapsed={}ms recv={}ms tick={}ms send={}ms total={}ms responses={}",
                     frame_count,
                     fps,
                     elapsed_ms,
@@ -242,8 +241,10 @@ pub async fn run_server_loop<T: ServerTransport + LinkUpkeep>(
                     send_ms,
                     total_ms,
                     response_count,
-                    frame_times,
                 );
+                // A line of its own: beside the [perf] line it ran past a log
+                // record's 200 B and lost its hiccup counts.
+                log::info!("[perf] frames {frame_times}");
                 frame_times.reset();
                 fps_tracker.record_log(frame_count, current_time);
             }
@@ -581,8 +582,7 @@ pub async fn run_server_loop_bounded<T: ServerTransport + LinkUpkeep>(
                 let frames_done = frame_count.saturating_sub(fps_tracker.last_log_frame());
                 let fps = (frames_done as u64 * 1000) / elapsed_ms;
                 log::info!(
-                    "[perf] frame={} fps={} elapsed={}ms recv={}ms tick={}ms send={}ms total={}ms responses={} \
-                     frames {}",
+                    "[perf] frame={} fps={} elapsed={}ms recv={}ms tick={}ms send={}ms total={}ms responses={}",
                     frame_count,
                     fps,
                     elapsed_ms,
@@ -591,8 +591,10 @@ pub async fn run_server_loop_bounded<T: ServerTransport + LinkUpkeep>(
                     send_ms,
                     total_ms,
                     response_count,
-                    frame_times,
                 );
+                // A line of its own: beside the [perf] line it ran past a log
+                // record's 200 B and lost its hiccup counts.
+                log::info!("[perf] frames {frame_times}");
                 frame_times.reset();
                 fps_tracker.record_log(frame_count, current_time);
             }
