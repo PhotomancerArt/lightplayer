@@ -151,8 +151,11 @@ struct RadioLink {
     /// Server-loop time the link was first seen by the upkeep, which starts
     /// its login deadline.
     opened_at_ms: Option<u64>,
-    /// It held a tier once; the deadline no longer applies.
+    /// It held a tier once; the login deadline no longer applies.
     cleared: bool,
+    /// Its lp-link session has come `Up` at least once. A link that never
+    /// does is closed at the login deadline whatever tier it would hold.
+    ever_up: bool,
     /// The lp-link session the mux last saw come `Up`, whose hello has gone
     /// out (or is owed): replies are coded for it and for no other.
     session: Option<u32>,
@@ -244,11 +247,23 @@ impl<U: ServerTransport + FrameBufHolder, D: DelayNs> LinkMuxTransport<U, D> {
         login_pending: impl Fn(Link) -> bool,
     ) {
         let mut expired = Vec::new();
+        let mut never_up = Vec::new();
         for link in &mut self.radio {
+            let opened_at = *link.opened_at_ms.get_or_insert(now_ms);
+            let late = now_ms.saturating_sub(opened_at) >= LOGIN_DEADLINE_MS;
+            // A link whose session never came up holds a slot and speaks
+            // nothing: on an open board it "holds a tier" from its first
+            // frame, so the login deadline never applied, and with one LAN
+            // slot a peer that opened a socket and went quiet (a page torn
+            // down mid-reload) kept the next client out (PR C's walk:
+            // `frames in 0 out 534 · handshakes 0`).
+            if !link.ever_up && late {
+                never_up.push(link.id);
+                continue;
+            }
             if link.cleared {
                 continue;
             }
-            let opened_at = *link.opened_at_ms.get_or_insert(now_ms);
             let wire_link = link.wire;
             if has_tier(wire_link) {
                 link.cleared = true;
@@ -264,6 +279,13 @@ impl<U: ServerTransport + FrameBufHolder, D: DelayNs> LinkMuxTransport<U, D> {
                 LOGIN_DEADLINE_MS / 1000
             );
             self.close_radio(id, "no login within the deadline");
+        }
+        for id in never_up {
+            log::warn!(
+                "radio link {id}: its session never came up in {} s — closing",
+                LOGIN_DEADLINE_MS / 1000
+            );
+            self.close_radio(id, "no session within the deadline");
         }
     }
 
@@ -299,6 +321,7 @@ impl<U: ServerTransport + FrameBufHolder, D: DelayNs> LinkMuxTransport<U, D> {
                         pending_key: None,
                         opened_at_ms: None,
                         cleared: false,
+                        ever_up: false,
                         session: None,
                         hello_owed: false,
                         packed: PackedLink::new(),
@@ -401,6 +424,7 @@ impl<U: ServerTransport + FrameBufHolder, D: DelayNs> LinkMuxTransport<U, D> {
                         }
                         radio.packed.back_to_json();
                         radio.session = Some(generation);
+                        radio.ever_up = true;
                         radio.hello_owed = true;
                         log::info!("radio link {}: session {generation} up", radio.id);
                     }
@@ -1212,9 +1236,12 @@ mod tests {
 
     #[test]
     fn an_unauthenticated_link_is_closed_after_the_deadline() {
+        let _turn = frame_buf_turn();
         let port = leak_port();
         let mut mux = LinkMuxTransport::new(Usb::default(), port, NeverDelay);
-        let link = open_link(port, &mut mux, 0, 247);
+        // A login runs over a session that is up.
+        let mut central = Central::new(0x1357_2468, 247);
+        let link = open_session(port, &mut mux, &mut central, 0, 247);
         mux.expire_unauthenticated(1_000, |_| false, |_| false);
         mux.expire_unauthenticated(1_000 + LOGIN_DEADLINE_MS - 1, |_| false, |_| false);
         assert!(mux.take_closed_links().is_empty());
@@ -1232,20 +1259,47 @@ mod tests {
 
     #[test]
     fn a_link_that_logs_in_is_never_expired() {
+        let _turn = frame_buf_turn();
         let port = leak_port();
         let mut mux = LinkMuxTransport::new(Usb::default(), port, NeverDelay);
-        let _link = open_link(port, &mut mux, 0, 247);
+        let mut central = Central::new(0x2468_1357, 247);
+        let _link = open_session(port, &mut mux, &mut central, 0, 247);
         mux.expire_unauthenticated(0, |_| false, |_| false);
         mux.expire_unauthenticated(5_000, |_| true, |_| false);
         mux.expire_unauthenticated(60_000, |_| false, |_| false);
         assert!(mux.take_closed_links().is_empty());
     }
 
+    /// A link whose session never comes up is closed at the deadline even
+    /// on an open board, where it would hold a tier from the start: it
+    /// speaks nothing and only holds the slot.
     #[test]
-    fn an_outstanding_login_holds_the_deadline_until_it_ends() {
+    fn a_link_whose_session_never_comes_up_is_closed_even_on_an_open_board() {
         let port = leak_port();
         let mut mux = LinkMuxTransport::new(Usb::default(), port, NeverDelay);
         let link = open_link(port, &mut mux, 0, 247);
+        mux.expire_unauthenticated(0, |_| true, |_| false);
+        mux.expire_unauthenticated(LOGIN_DEADLINE_MS - 1, |_| true, |_| false);
+        assert!(
+            mux.take_closed_links().is_empty(),
+            "not before the deadline"
+        );
+        mux.expire_unauthenticated(LOGIN_DEADLINE_MS, |_| true, |_| false);
+        assert_eq!(mux.take_closed_links(), vec![link]);
+        assert_eq!(
+            port.slot(0).take_close_request(),
+            Some("no session within the deadline")
+        );
+    }
+
+    #[test]
+    fn an_outstanding_login_holds_the_deadline_until_it_ends() {
+        let _turn = frame_buf_turn();
+        let port = leak_port();
+        let mut mux = LinkMuxTransport::new(Usb::default(), port, NeverDelay);
+        // A login runs over a session that is up.
+        let mut central = Central::new(0x1357_2468, 247);
+        let link = open_session(port, &mut mux, &mut central, 0, 247);
         mux.expire_unauthenticated(1_000, |_| false, |_| false);
         // LoginBegin at 9 s; the person is still typing at 10 s and at 38 s.
         mux.expire_unauthenticated(1_000 + LOGIN_DEADLINE_MS, |_| false, |_| true);
