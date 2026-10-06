@@ -148,7 +148,6 @@ fn largest_fit() -> usize {
     fits
 }
 
-
 /// Arm allocation tracking (`heap_track_diag`) from now on: forget what was
 /// recorded and record every heap allocation made after this call, in the
 /// main region and `dram2_seg`, while it lives. A no-op without the feature.
