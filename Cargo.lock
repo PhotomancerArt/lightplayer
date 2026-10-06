@@ -4269,6 +4269,7 @@ dependencies = [
  "lpvm-native",
  "serde",
  "sha2",
+ "smoltcp",
  "static_cell",
  "trouble-host",
 ]

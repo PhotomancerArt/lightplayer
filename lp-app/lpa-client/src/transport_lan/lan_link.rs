@@ -90,13 +90,16 @@ pub struct LanLink {
 impl LanLink {
     /// Connect to `target` and come up with the right key (module docs).
     pub fn open(target: &LanTarget, options: &LanOptions) -> Result<LanSession, LanError> {
-        let mut link = Self::connect(
-            target,
-            KeyId::ANONYMOUS,
-            Psk::ANONYMOUS,
-            options.want_packed,
-        )?;
-        let (hello, mut early) = link.come_up(&mut std::iter::empty())?;
+        let (mut link, (hello, mut early)) = retry_while_busy(|| {
+            let mut link = Self::connect(
+                target,
+                KeyId::ANONYMOUS,
+                Psk::ANONYMOUS,
+                options.want_packed,
+            )?;
+            let up = link.come_up(&mut std::iter::empty())?;
+            Ok((link, up))
+        })?;
         let anyone = hello.auth.granted;
         let password = match &options.password {
             // Nothing more a password could give.
@@ -123,16 +126,22 @@ impl LanLink {
             other => return Err(LanError::Login(reply_words(&other))),
         };
         link.close();
-        let mut keys = password_keys(password, &offers).into_iter();
-        let Some((key_id, psk)) = keys.next() else {
-            return Err(LanError::NoPasswordEntry);
-        };
-        let mut link = Self::connect(target, key_id, psk, options.want_packed)?;
-        let (_, mut early) = link.come_up(&mut keys).map_err(|error| match error {
-            LanError::Refused(RefusalReason::WrongKey | RefusalReason::UnknownKey) => {
-                LanError::WrongPassword
-            }
-            other => other,
+        // The keyed link follows the closed one at once, often before the
+        // board has seen the close: a one-slot board answers "try again
+        // later" for that moment (`retry_while_busy`).
+        let (mut link, (_, mut early)) = retry_while_busy(|| {
+            let mut keys = password_keys(password, &offers).into_iter();
+            let Some((key_id, psk)) = keys.next() else {
+                return Err(LanError::NoPasswordEntry);
+            };
+            let mut link = Self::connect(target, key_id, psk, options.want_packed)?;
+            let up = link.come_up(&mut keys).map_err(|error| match error {
+                LanError::Refused(RefusalReason::WrongKey | RefusalReason::UnknownKey) => {
+                    LanError::WrongPassword
+                }
+                other => other,
+            })?;
+            Ok((link, up))
         })?;
         let hello = match link.request(HELLO_ID, ClientRequest::Hello, &mut early)? {
             ServerMsgBody::Hello(hello) => hello,
@@ -362,5 +371,29 @@ fn send_error_words(error: SendError) -> &'static str {
         SendError::Full => "the link's send budget is full",
         SendError::TooBig => "the request is larger than the link carries",
         SendError::BadChannel => "the link has no such channel",
+    }
+}
+
+/// How many times a connection the board answers "try again later" is
+/// tried again, and the pause before each. A board with one LAN slot
+/// (the C6) frees it only once it has seen the last link close, which a
+/// host that closes one link and opens the next at once (a password's
+/// keyed link, back-to-back commands) can beat by a few milliseconds; a
+/// board whose slot is really in use still says so after ~2 s.
+pub const BUSY_RETRIES: u32 = 8;
+const BUSY_RETRY_PAUSE: Duration = Duration::from_millis(250);
+
+/// Run `attempt`, trying again while the board says every LAN link is in
+/// use.
+fn retry_while_busy<T>(mut attempt: impl FnMut() -> Result<T, LanError>) -> Result<T, LanError> {
+    let mut tries = 0;
+    loop {
+        match attempt() {
+            Err(LanError::Busy { .. }) if tries < BUSY_RETRIES => {
+                tries += 1;
+                std::thread::sleep(BUSY_RETRY_PAUSE);
+            }
+            other => return other,
+        }
     }
 }

@@ -13,6 +13,15 @@
 //!   until the station associates, and loses it when the link goes. An
 //!   embassy-net DHCP client started before link-up backs off, which is
 //!   where the experiments' 10–12 s came from.
+//! - **DHCP retries every second** ([`dhcp_config`]), not smoltcp's 10 s.
+//!   The first DISCOVER goes out the moment the station associates, often
+//!   before the access point has finished the WPA handshake, and is lost;
+//!   smoltcp's default sent the next one 10 s later, which is exactly the
+//!   policy's [`ADDRESS_TIMEOUT_MS`], so the first join after every boot
+//!   failed and the board got its address on the rejoin ~22 s after boot
+//!   (silicon, the G1 desk numbers: `connecting … frames in 267 out 1`).
+//!
+//! [`ADDRESS_TIMEOUT_MS`]: fw_esp32_common::net::station_policy::ADDRESS_TIMEOUT_MS
 //! - **A client's scan** (the server's probe answered `scanning`) runs when
 //!   no attempt is under way, and records what was heard for the next ask.
 //!   It is the one scan a board with nothing saved ever makes, and only on
@@ -42,12 +51,22 @@ use super::station_probes::STATION_BOARD;
 /// How often a joined station reads its signal.
 const SIGNAL_EVERY: Duration = Duration::from_secs(10);
 
+/// How long an associated station waits for an address before it starts
+/// the DHCP client again from scratch (and says so, with the link's state
+/// and frame counts). The silicon desk numbers found first joins that sent
+/// 0–1 frames and never got an address, and a Wi-Fi off/on that sent none
+/// at all until a reboot; restarting the client is cheap, and the log line
+/// is what tells the next desk sitting which half is stuck.
+const DHCP_RESTART_AFTER: Duration = Duration::from_secs(3);
+
 /// The task. `host` is the board's LAN name (`lp-xxxx.local`).
 #[embassy_executor::task]
 pub async fn station_task(mut control: C6Station, stack: Stack<'static>, host: String) {
     let mut policy = StationPolicy::new(host);
     let mut file = NetworkFile::none();
     let mut queue: VecDeque<StationAction> = VecDeque::new();
+    // When the DHCP client is next restarted, while an address is awaited.
+    let mut dhcp_restart_at: Option<Instant> = None;
     loop {
         if let Some(new) = STATION_BOARD.take_settings() {
             let was_using = policy.uses_wifi();
@@ -90,6 +109,12 @@ pub async fn station_task(mut control: C6Station, stack: Stack<'static>, host: S
             let signal = Instant::now() + SIGNAL_EVERY;
             wake = Some(wake.map_or(signal, |at| at.min(signal)));
         }
+        if getting_address {
+            let restart = *dhcp_restart_at.get_or_insert(Instant::now() + DHCP_RESTART_AFTER);
+            wake = Some(wake.map_or(restart, |at| at.min(restart)));
+        } else {
+            dhcp_restart_at = None;
+        }
         let event = select4(
             STATION_BOARD.wait(),
             // No deadline is no timer at all.
@@ -115,6 +140,21 @@ pub async fn station_task(mut control: C6Station, stack: Stack<'static>, host: S
         .await;
         match event {
             Either4::First(()) => {}
+            Either4::Second(())
+                if getting_address && dhcp_restart_at.is_some_and(|at| Instant::now() >= at) =>
+            {
+                let (frames_in, frames_out) = super::esp_frame_device::frame_counts();
+                log::warn!(
+                    "[wifi] associated, no address after {} s: restarting DHCP (link {}, \
+                     frames in {frames_in} out {frames_out})",
+                    DHCP_RESTART_AFTER.as_secs(),
+                    if stack.is_link_up() { "up" } else { "down" }
+                );
+                stack.set_config_v4(ConfigV4::None);
+                stack.set_config_v4(ConfigV4::Dhcp(dhcp_config()));
+                dhcp_restart_at = Some(Instant::now() + DHCP_RESTART_AFTER);
+                queue.extend(policy.handle(now_ms(), StationEvent::Tick));
+            }
             Either4::Second(()) => {
                 // Only a joined station has a signal to read: asking while
                 // searching makes esp-radio log an error every tick (silicon,
@@ -163,7 +203,7 @@ async fn run(
                         "[wifi] associated with {ssid} in {} ms",
                         started.elapsed().as_millis()
                     );
-                    stack.set_config_v4(ConfigV4::Dhcp(DhcpConfig::default()));
+                    stack.set_config_v4(ConfigV4::Dhcp(dhcp_config()));
                     alloc::vec![StationEvent::Associated]
                 }
                 ConnectOutcome::AuthFailed => alloc::vec![StationEvent::AuthFailed],
@@ -194,6 +234,16 @@ async fn scan(control: &mut C6Station) -> Vec<lpc_wire::HeardNetwork> {
         }
         None => Vec::new(),
     }
+}
+
+/// The DHCP client's timing: DISCOVER (and the first REQUEST) retried every
+/// second, so a first DISCOVER lost to the access point's WPA handshake costs
+/// a second, not the address timeout (module doc).
+fn dhcp_config() -> DhcpConfig {
+    let mut config = DhcpConfig::default();
+    config.retry_config.discover_timeout = smoltcp::time::Duration::from_secs(1);
+    config.retry_config.initial_request_timeout = smoltcp::time::Duration::from_secs(1);
+    config
 }
 
 /// Sleep until `at`, or forever with no deadline.

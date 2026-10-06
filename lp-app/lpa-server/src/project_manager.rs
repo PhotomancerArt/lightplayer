@@ -45,6 +45,10 @@ pub struct ProjectManager {
     /// in builds with the power-button runtime (see `LpServer::power`).
     #[cfg(feature = "node-power-button")]
     power_service: Option<Rc<dyn PowerService>>,
+    /// What the last unload that stopped anything stopped, until a load
+    /// succeeds: what a refused or failed load restores, so a refusal
+    /// never leaves the board dark (`take_stopped`).
+    stopped: Vec<LpPathBuf>,
 }
 
 impl ProjectManager {
@@ -62,6 +66,7 @@ impl ProjectManager {
             latent_read_back: None,
             #[cfg(feature = "node-power-button")]
             power_service: None,
+            stopped: Vec::new(),
         }
     }
 
@@ -243,6 +248,13 @@ impl ProjectManager {
     /// Output channels and other resources are freed before removal.
     /// Note: next_handle_id is not reset - handles continue incrementing.
     pub fn unload_all_projects(&mut self) -> Result<(), ServerError> {
+        if !self.projects.is_empty() {
+            self.stopped = self
+                .projects
+                .values()
+                .map(|project| project.path().to_path_buf())
+                .collect();
+        }
         for project in self.projects.values_mut() {
             project.flush_panel_state();
         }
@@ -250,6 +262,17 @@ impl ProjectManager {
         self.name_to_handle.clear();
         self.release_tables_if_empty();
         Ok(())
+    }
+
+    /// The projects the last unload stopped, taken: what to run again when
+    /// the load that followed it was refused or failed.
+    pub fn take_stopped(&mut self) -> Vec<LpPathBuf> {
+        core::mem::take(&mut self.stopped)
+    }
+
+    /// A load succeeded: nothing stopped is owed a restore any more.
+    pub fn forget_stopped(&mut self) {
+        self.stopped = Vec::new();
     }
 
     /// With no project loaded, give the tables' memory back instead of
@@ -345,9 +368,16 @@ impl ProjectManager {
     /// Returns project names that exist on disk but may not be loaded.
     /// Requires a filesystem to query.
     pub fn list_available_projects(&self, fs: &dyn LpFs) -> Result<Vec<String>, ServerError> {
-        // List entries in the base directory
+        // List entries in the base directory. The base is relative
+        // (`projects`), and a device's flash filesystem takes absolute paths
+        // only: it answered `Invalid path: Path must be absolute: projects`
+        // (G1 desk walk). The memory filesystem the host tests use is lenient.
+        let dir = LpPathBuf::from(format!(
+            "/{}",
+            self.projects_base_dir.as_str().trim_start_matches('/')
+        ));
         let entries = fs
-            .list_dir(self.projects_base_dir.as_path(), false)
+            .list_dir(dir.as_path(), false)
             .map_err(|e| {
                 ServerError::Filesystem(format!("Failed to read projects directory: {e}"))
             })?;

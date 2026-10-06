@@ -24,8 +24,13 @@
 //! - **Budgets: the radio links'.** A long reply stays in the shared frame
 //!   buffer as an external message (never a second 16 KiB copy per link);
 //!   the receive side is lazy, capped at one largest request.
-//! - **Timers: the preset's** (300 ms first RTO, 1 s keepalive). With a
-//!   reliable transport they only matter if the peer goes quiet.
+//! - **Timers: the preset's** (300 ms first RTO, a 200 ms floor, 1 s
+//!   keepalive). With a reliable transport they only matter if the peer
+//!   goes quiet; the floor keeps a busy board from resending what TCP is
+//!   still carrying.
+//! - **ACKs: every second frame** (`ack_every` 2, never above the window),
+//!   so an ACK never waits out `ack_delay` for a frame the window cannot
+//!   send.
 //!
 //! Secure is required: the slot opens it with `Link::new_secure` as the
 //! Noise responder (`RadioLinkSlot::open_lan`).
@@ -47,6 +52,9 @@ pub fn lan_link_config() -> LinkConfig {
     let mut cfg = LinkConfig::ws();
     cfg.tx_window = LAN_WINDOW;
     cfg.rx_window = LAN_WINDOW;
+    // An ACK is due by count before `ack_delay` only if the window can
+    // reach the count.
+    cfg.ack_every = cfg.ack_every.min(LAN_WINDOW);
     cfg.max_message = RADIO_MAX_MESSAGE;
     // Plus the inbox's 64 B queueing charge (`LinkConfig::validate`).
     cfg.rx_budget = RADIO_MAX_MESSAGE + 64;
@@ -90,6 +98,15 @@ mod tests {
         let cfg = lan_link_config();
         assert!(cfg.is_reliable(lp_link::CH_UPDATE));
         assert_eq!(cfg.reliable_channels, LinkConfig::ws().reliable_channels);
+    }
+
+    /// Tuned for TCP: an ACK is due within the window, and the RTO floor
+    /// is the USB link's, not UDP's.
+    #[test]
+    fn acks_fit_the_window_and_the_rto_floor_is_usbs() {
+        let cfg = lan_link_config();
+        assert!(cfg.ack_every <= cfg.rx_window, "{cfg:?}");
+        assert!(cfg.min_rto >= 200_000, "{cfg:?}");
     }
 
     #[test]

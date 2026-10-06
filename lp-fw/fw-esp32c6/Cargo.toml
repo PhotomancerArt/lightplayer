@@ -80,6 +80,7 @@ wifi = [
     "fw-esp32-common/wifi",
     "dep:esp-radio-rtos-driver",
     "dep:embassy-net",
+    "dep:smoltcp",
 ]
 # `lp-net`'s stack high-water, painted at thread start and logged as
 # `[netstack]` at the heartbeat — OFF by default, never shipped (the same
@@ -436,6 +437,10 @@ lp-link = { path = "../../lp-base/lp-link", default-features = false, features =
 # The network on `lp-net` (`wifi`): IPv4, DHCP, TCP (the LAN endpoint), UDP
 # and multicast (mDNS). DNS is off.
 embassy-net = { version = "0.9.1", default-features = false, features = ["proto-ipv4", "medium-ethernet", "dhcpv4", "udp", "tcp", "multicast"], optional = true }
+# embassy-net's own smoltcp (the same crate, no second copy), named only for
+# the DHCP client's retry timing (`net::station_task::dhcp_config`), which
+# embassy-net takes but does not re-export.
+smoltcp = { version = "0.13.1", default-features = false, optional = true }
 # The portable WS281x driver core. `default-features = false` drops its host
 # `mock` backend (and the `alloc` it needs) — firmware brings its own `RmtHw`.
 # `isr-in-ram`: the refill path lives in `.rwtext` (IRAM). Single-core, so not

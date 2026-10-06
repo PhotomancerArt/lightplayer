@@ -40,7 +40,7 @@ pub use board_password::BoardPassword;
 pub use lan_entropy::os_entropy;
 pub use lan_error::{LOCKED_WORDS, LanError, reason_words};
 pub use lan_keys::password_keys;
-pub use lan_link::{LAN_SETUP_BUDGET, LanLink, LanOptions, LanSession, tier_words};
+pub use lan_link::{BUSY_RETRIES, LAN_SETUP_BUDGET, LanLink, LanOptions, LanSession, tier_words};
 pub use lan_socket::LanSocket;
 pub use lan_target::{LAN_DEFAULT_PORT, LAN_LINK_PATH, LanTarget};
 

@@ -946,6 +946,14 @@ fn lp_engine_entry(core: CoreBoot) {
         graphics,
     );
     server.set_read_headroom_probe(Some(read_headroom_probe));
+    // A request the heap cannot decode is refused in words before it is
+    // decoded (`server_payload::request_refusal`), on every link.
+    fw_esp32_common::serial::server_payload::set_request_headroom_probe(|| {
+        Some((
+            esp_alloc::HEAP.free(),
+            recovery::panic_path::largest_free_block(),
+        ))
+    });
     server.set_read_gate(Some(READ_GATE));
     // The station's probes and its settings hook (`wifi`): the server reads
     // what the station publishes, and hands it the network file after every

@@ -277,11 +277,23 @@ impl LinkConfig {
     /// (`fw-esp32-common`'s `lan_link_config`, Wi-Fi roadmap M6) is cut from
     /// this preset, so it carries the update channel reliably, as `usb()`,
     /// `uart()` and `ble()` do: a Wi-Fi update rides channel 3 (OTA M8).
+    ///
+    /// Tuned for a transport that never loses a frame (PR B's emulated LAN
+    /// walk, which measured the resends):
+    ///
+    /// - **`min_rto` 200 ms**, the C6's USB floor, not UDP's 20 ms. A resend
+    ///   on TCP is never a recovery, only a duplicate of a frame still on
+    ///   its way; a floor the board's own turnaround reaches (a frame waits
+    ///   behind a shader compile) made them by the dozen.
+    /// - **`ack_every` 2.** The board's window is 2 frames, so UDP's 4 was
+    ///   never reached and every ACK waited out `ack_delay`.
     pub fn ws() -> Self {
         LinkConfig {
             max_payload: 1024,
             reorder_threshold: 1,
             reliable_channels: (1 << CH_CONTROL) | (1 << CH_PROTO) | (1 << CH_UPDATE),
+            ack_every: 2,
+            min_rto: 200_000,
             ..Self::udp()
         }
     }
