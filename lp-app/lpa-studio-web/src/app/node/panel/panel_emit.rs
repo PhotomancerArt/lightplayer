@@ -79,6 +79,17 @@ impl PanelEmit {
         }
     }
 
+    /// The gesture's `f32` as [`Self::lp_value`] will carry it — rounded
+    /// for the integer families — so a widget holding what it sent
+    /// (`gesture_hold`) recognises the echo when it comes back.
+    pub fn sent_value(self, value: f32) -> f32 {
+        match self {
+            Self::F32 | Self::PhasorPeriod { .. } => value,
+            Self::U32 => value.round().max(0.0),
+            Self::I32 => value.round(),
+        }
+    }
+
     /// Type a gesture's `f32` into the slot's value family.
     pub fn lp_value(self, value: f32) -> LpValue {
         match self {
