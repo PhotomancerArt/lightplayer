@@ -39,7 +39,12 @@ pub fn parse_wire_line(msg_line: &str) -> Option<ClientMessage> {
         Err(e) => {
             // A radio line is arbitrary UTF-8: cut the preview on a char
             // boundary, never mid-character.
-            let mut preview_len = json_str.len().min(48);
+            // A line that may carry a Wi-Fi password gets no preview at all.
+            let mut preview_len = if lpc_wire::may_carry_secret(json_str) {
+                0
+            } else {
+                json_str.len().min(48)
+            };
             while !json_str.is_char_boundary(preview_len) {
                 preview_len -= 1;
             }

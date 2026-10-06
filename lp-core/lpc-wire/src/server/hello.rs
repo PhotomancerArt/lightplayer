@@ -37,6 +37,27 @@ use crate::server::hello_auth::HelloAuth;
 ///
 /// # History
 ///
+/// - 36: Wi-Fi settings on the device (plan
+///   `lp2025/2026-10-04-0808-wifi-settings`, Wi-Fi roadmap M5) — five
+///   edit-tier requests: `ClientRequest::NetworkStatus`, `NetworkScan`,
+///   `NetworkAdd { ssid, password, hidden? }` (a write-only password; a
+///   saved name added again changes its password; at most eight networks),
+///   `NetworkForget { ssid }` and `NetworkSet { wifi?, cloudRelay? }` (the
+///   two switches). Each but the scan is answered with the new
+///   `ServerMsgBody::NetworkStatus` (the switches, every saved network
+///   without its password, with an optional RAM-only `last` attempt, and a
+///   `StationState` — `unsupported | off | notConnected | connecting |
+///   connected | failed`, the last four naming their network — that every
+///   M5 image reports as `unsupported`); the scan with the new
+///   `ServerMsgBody::NetworkScan` (`unsupported` on every M5 image, else
+///   what the radio heard). The board keeps them in `/.lp/network.json`,
+///   write-only on every link. New enum variants both ways: an old board
+///   cannot decode the requests and an old client cannot decode the
+///   replies. The plan named 35; the OTA versions work (M1) took it first,
+///   so this is 36. The PR's first shape (one saved network, a per-network
+///   switch) never merged, so its reshape to a list stays 36.
+///   `PACK_FORMAT_VERSION` is unchanged (the learned dictionary needs
+///   nothing for new variants).
 /// - 35: the hello says which VERSION the build is — `BuildFacts` gains the
 ///   required `version` (`2026.10.03-1` for a tagged release, the dev form
 ///   `<short-sha>[-dirty-<HHMMSS>PT]` otherwise, `unknown` from an embedder
@@ -348,7 +369,7 @@ use crate::server::hello_auth::HelloAuth;
 /// as `None` on new Studio and a new firmware's extra fields are ignored
 /// by old Studio. Bumping for those would mark every board running
 /// current firmware Incompatible in exchange for nothing.
-pub const WIRE_PROTO_VERSION: u32 = 35;
+pub const WIRE_PROTO_VERSION: u32 = 36;
 
 /// Unsolicited/boot-time server identity, version, and capability report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -707,7 +728,7 @@ mod tests {
     #[test]
     fn the_proto_version_is_pinned_to_its_history() {
         assert_eq!(
-            WIRE_PROTO_VERSION, 35,
+            WIRE_PROTO_VERSION, 36,
             "if you meant to bump, add the History entry in this file's \
              doc comment and update this pin"
         );

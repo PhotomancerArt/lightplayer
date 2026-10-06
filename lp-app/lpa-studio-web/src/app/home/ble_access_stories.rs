@@ -927,7 +927,7 @@ fn panel(
     }
 }
 
-fn usb_access(ble_enabled: Option<bool>, restart_pending: bool) -> UiDeviceAccess {
+pub(crate) fn usb_access(ble_enabled: Option<bool>, restart_pending: bool) -> UiDeviceAccess {
     let mut panel = panel(
         OpenTo::Edit,
         UiPasswordLine::FollowsAuthor,
@@ -958,7 +958,7 @@ fn account_info(play: Option<&str>, edit: Option<&str>) -> AccountAccessInfo {
 }
 
 /// The catalog choker, running, on a USB cable.
-fn usb_card() -> DeviceView {
+pub(crate) fn usb_card() -> DeviceView {
     DeviceView {
         firmware_blocked: None,
         ..ble_card()

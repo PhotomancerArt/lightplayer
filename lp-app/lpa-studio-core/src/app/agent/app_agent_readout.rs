@@ -135,7 +135,9 @@ pub fn offer_lines(offer: &UiOffer) -> String {
         }
         (ActionEnablement::Enabled, _) => {}
     }
-    if meta.needs_user() {
+    // An offer that takes a secret is always the user's card, whatever its
+    // level: the agent never fills a password.
+    if meta.needs_user() || offer.takes_a_secret() {
         text.push_str(" [needs the user's click]");
     } else if meta.consequence == ActionConsequence::Undoable {
         text.push_str(" [undoable]");
@@ -268,6 +270,11 @@ fn param_text_with(param: &OfferParam, limit: Option<usize>) -> String {
                 let _ = write!(text, " [default {preselect}]");
             }
             text
+        }
+        // A secret is the user's to type: the agent is told so, never what
+        // it may hold, and `act` refuses any value for it.
+        OfferParamKind::Text { secret: true, .. } => {
+            format!("{} (secret — the user types it)", param.name)
         }
         OfferParamKind::Text {
             max_len, optional, ..
@@ -744,6 +751,9 @@ mod tests {
                 OfferParam::text("name", "name", "blank").optional(),
                 OfferParam::text("note", "note", "").max_len(8),
                 OfferParam::toggle("loud", "loud", false),
+                OfferParam::text("password", "password", "unchanged")
+                    .optional()
+                    .secret(),
             ],
             OfferBinder::new(move |_: &OfferArgs| Ok(bound.clone())),
             save,
@@ -758,9 +768,14 @@ mod tests {
             text.contains(
                 "  takes board: one of xiao (XIAO ESP32-C6), devkit (ESP32-C6 DevKit; not now: \
                  no build) [default xiao]; name: optional text; note: text, at most 8 \
-                 characters; loud: true or false [now false]\n"
+                 characters; loud: true or false [now false]; password (secret — the user \
+                 types it)\n"
             ),
             "{text}"
+        );
+        assert!(
+            text.contains("flash: Save [choose a note in args] [needs the user's click]\n"),
+            "an offer that takes a secret is the user's card: {text}"
         );
     }
 

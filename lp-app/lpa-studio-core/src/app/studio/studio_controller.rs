@@ -300,6 +300,8 @@ pub struct StudioController {
     /// Access over Bluetooth (BLE M6): login on connect, remembered
     /// passwords, and the device-store writes.
     access: crate::app::access::AccessController,
+    /// Each board's Wi‑Fi status and the Wi‑Fi offers' changes.
+    network: crate::app::network::NetworkController,
 }
 
 /// Which device an open lands on — the model half of the URL's `?on=`
@@ -488,6 +490,7 @@ impl StudioController {
             on_copy_text: None,
             agent: crate::AgentController::new(),
             access: crate::app::access::AccessController::new(),
+            network: crate::app::network::NetworkController::new(),
         }
     }
 
@@ -1042,13 +1045,15 @@ impl StudioController {
     /// Install the platform task spawner for device IO (`spawn_local` on
     /// wasm). Install before the actor takes ownership.
     pub fn set_device_spawner(&mut self, spawner: impl Fn(crate::DeviceTaskFuture) + 'static) {
-        // One spawner, two users: the effects layer and the access
-        // controller's login conversations run on the same device IO seam.
+        // One spawner, three users: the effects layer, the access
+        // controller's login conversations and the network controller's
+        // Wi‑Fi conversations run on the same device IO seam.
         let spawner: Rc<dyn Fn(crate::DeviceTaskFuture)> = Rc::new(spawner);
         let shared = Rc::clone(&spawner);
         self.devices
             .effects_mut()
             .set_spawner(move |future| shared(future));
+        self.network.set_spawner(Rc::clone(&spawner));
         self.access.set_spawner(spawner);
     }
 
@@ -1066,6 +1071,8 @@ impl StudioController {
         &mut self,
         tx: crate::app::studio::studio_view_channel::CommandSender,
     ) {
+        // Wi‑Fi conversations report back on the same queue.
+        self.network.set_command_sender(tx.clone());
         self.access.set_command_sender(tx);
     }
 
@@ -1129,6 +1136,49 @@ impl StudioController {
             now_secs,
             &*random,
         );
+        // The Wi‑Fi read rides the same moments (plan Q7: once per
+        // connection, after the access sync).
+        self.drive_device_network();
+    }
+
+    /// Read the Wi‑Fi status of every board whose link holds edit and has
+    /// not been asked on this connection (plan Q7). Runs after the access
+    /// drive, so a Bluetooth link's tier is the one access just settled.
+    pub(crate) fn drive_device_network(&mut self) {
+        let access = &self.access;
+        self.network
+            .drive(self.devices.roster(), self.devices.effects(), |device| {
+                access.granted_tier(device)
+            });
+    }
+
+    /// Apply one network command (the Wi‑Fi popover's refresh, a finished
+    /// conversation).
+    pub fn apply_network_command(&mut self, command: crate::app::network::NetworkCommand) {
+        let access = &self.access;
+        self.network.apply(
+            command,
+            self.devices.roster(),
+            self.devices.effects(),
+            |device| access.granted_tier(device),
+        );
+        self.mark_dirty();
+    }
+
+    /// Run a Wi‑Fi step the network controller parked because the editor
+    /// lens holds that board's wire, through the lens's own client.
+    pub async fn run_network_lens_step(&mut self) {
+        let Some((device, step)) = self.network.take_lens_step() else {
+            return;
+        };
+        let result = match self.pool.attached_session_mut() {
+            Some(session) => match session.client_mut() {
+                Ok(client) => client.run_network_step(device, step).await,
+                Err(_) => return,
+            },
+            None => return,
+        };
+        self.apply_network_command(result);
     }
 
     /// Run a login step the access controller parked because the editor
@@ -1714,6 +1764,17 @@ impl StudioController {
                 self.access
                     .device_view(device)
                     .map(|access| (device.id, access))
+            })
+            .collect();
+        view.wifi = self
+            .devices
+            .roster()
+            .devices()
+            .iter()
+            .filter_map(|device| {
+                self.network
+                    .device_view(device, self.access.granted_tier(device.id))
+                    .map(|wifi| (device.id, wifi))
             })
             .collect();
         let updates = view
@@ -2837,6 +2898,12 @@ impl StudioController {
             for offer in crate::device_offers(view, &facts) {
                 offers.publish(offer);
             }
+            // The Wi‑Fi verbs, under the same prefix (`<board>/wifi/…`).
+            if let Some(wifi) = roster.wifi.get(&view.id) {
+                for offer in crate::app::network::wifi_offers(&facts.prefix, wifi) {
+                    offers.publish(offer);
+                }
+            }
             offers.place_device(view.id, facts.prefix);
         }
         // The layout verbs (C6 repartition) under the same prefixes.
@@ -3531,6 +3598,20 @@ impl StudioController {
         if node_id.as_str() == crate::DevicesOp::NODE_ID {
             let op = action.into_op::<crate::DevicesOp>()?;
             return self.execute_devices_op(op).await;
+        }
+        if node_id.as_str() == crate::NetworkOp::NODE_ID {
+            let op = action.into_op::<crate::NetworkOp>()?;
+            let access = &self.access;
+            return self
+                .network
+                .start_change(
+                    op,
+                    self.devices.roster(),
+                    self.devices.effects(),
+                    |device| access.granted_tier(device),
+                )
+                .map(|()| UiNotices::new())
+                .map_err(UiError::Link);
         }
         if node_id.as_str() == crate::DevicePushOp::NODE_ID {
             let op = action.into_op::<crate::DevicePushOp>()?;
@@ -7202,6 +7283,21 @@ impl StudioController {
                 offers: Some(fresh.render()),
             };
         };
+        // The agent never handles a secret (a Wi‑Fi password): a value for
+        // one is refused before anything binds, and an offer that takes one
+        // is handed to the user as a card with the secret left for them.
+        if let Some(secret) = offer
+            .secret_params()
+            .find(|secret| input.args.contains_key(*secret))
+        {
+            return ActOutcome::Refused {
+                reason: format!(
+                    "`{secret}` is a secret: the agent never handles passwords; leave it out \
+                     and the user types it on the card"
+                ),
+                offers: None,
+            };
+        }
         let mut args = crate::OfferArgs::new();
         for (name, value) in &input.args {
             args.insert(name.clone(), value.as_text());
@@ -7219,7 +7315,7 @@ impl StudioController {
         // control away (Save, Remove).
         let place = self.agent_place_phrase(&offer.path);
         let label = offer.label().to_string();
-        if action.meta().needs_user() {
+        if action.meta().needs_user() || offer.takes_a_secret() {
             let card =
                 self.agent
                     .app_session_mut()

@@ -15,4 +15,5 @@ pub mod shader_debug;
 pub mod shader_lpir;
 pub mod upload;
 pub mod validate;
+pub mod wifi;
 pub mod wire;

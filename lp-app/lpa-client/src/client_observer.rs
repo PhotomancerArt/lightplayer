@@ -221,6 +221,11 @@ pub fn request_kind(request: &ClientRequest) -> &'static str {
         ClientRequest::AccessAdd { .. } => "access.add",
         ClientRequest::AccessRemove { .. } => "access.remove",
         ClientRequest::AccessSetSwitches { .. } => "access.set-switches",
+        ClientRequest::NetworkStatus => "wifi.status",
+        ClientRequest::NetworkScan => "wifi.scan",
+        ClientRequest::NetworkAdd { .. } => "wifi.add",
+        ClientRequest::NetworkForget { .. } => "wifi.forget",
+        ClientRequest::NetworkSet { .. } => "wifi.set",
     }
 }
 
