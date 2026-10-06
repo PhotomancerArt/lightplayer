@@ -16,6 +16,11 @@
 //! and cannot read packed replies until the next session: each is reported
 //! [`SniffedWire::Unreadable`], never guessed.
 //!
+//! The over-the-air update channel (lp-link channel 3, `lpc-update`'s
+//! protocol) is not the JSON wire: each of its messages is reported
+//! [`SniffedWire::Update`] by its type letter and length, so a capture of an
+//! update reads as one line per protocol message, never as noise.
+//!
 //! A secure link's frames are sealed and a capture holds no key: each data
 //! or log frame is reported [`SniffedWire::Sealed`] (its channel and length),
 //! never decoded. Sealed ACKs carry nothing to report and are skipped.
@@ -26,7 +31,7 @@ use alloc::string::{String, ToString};
 use lp_json_pack::{LearnStore, LearnedTable};
 use lp_link::frame::FrameKind;
 use lp_link::sniffer::{Direction, LinkSniffer, SniffEvent};
-use lp_link::{CH_LOG, CH_PROTO, Micros};
+use lp_link::{CH_LOG, CH_PROTO, CH_UPDATE, Micros};
 
 use crate::console_line::{TextLines, log_record_lines};
 use crate::link_payload::{ServerPayload, decode_server_payload};
@@ -60,6 +65,15 @@ pub enum SniffedWire {
     /// Frames the capture never saw, even resent (a gap in the capture, not
     /// in the link).
     Gap { dir: Direction, skipped: u8 },
+    /// One update-channel message (lp-link channel 3): `ty` is its type
+    /// letter (`Q` `M` `O` `R` `D` `Z` `G` `N` `L`, `lpc-update`'s
+    /// code table), `len` the whole message's bytes.
+    Update {
+        dir: Direction,
+        ty: u8,
+        len: usize,
+        verified: bool,
+    },
     /// A data or log frame of a secure link: sealed, so only its channel and
     /// length are known (`len`: the sealed body, counter and tag included).
     Sealed {
@@ -67,6 +81,16 @@ pub enum SniffedWire {
         chan: u8,
         len: usize,
     },
+}
+
+/// An update-channel message's type, as a tool line names it: its letter
+/// (`M`, `D`, …) when printable, else `0x..`.
+pub fn update_message_type(ty: u8) -> String {
+    if ty.is_ascii_graphic() {
+        char::from(ty).to_string()
+    } else {
+        alloc::format!("{ty:#04x}")
+    }
 }
 
 /// A captured device link, read as wire traffic. See the module docs.
@@ -205,6 +229,17 @@ fn read_event(
                 reason: error.to_string(),
             }));
         }
+        SniffEvent::Message {
+            dir,
+            channel: CH_UPDATE,
+            data,
+            verified,
+        } => on(SniffedWire::Update {
+            dir,
+            ty: data.first().copied().unwrap_or(0),
+            len: data.len(),
+            verified,
+        }),
         // Other channels are unused on a device link.
         SniffEvent::Message { .. } => {}
     }
@@ -266,6 +301,40 @@ mod tests {
             !reads
                 .iter()
                 .any(|r| matches!(r, SniffedWire::Unreadable { .. }))
+        );
+    }
+
+    /// An update's messages (channel 3) read as one item each, by type
+    /// letter and length, in both directions.
+    #[test]
+    fn update_channel_messages_read_as_their_type_and_length() {
+        let mut run = Pair::new();
+        run.settle();
+        run.host.send(CH_UPDATE, b"Q\x01").unwrap();
+        run.board.send(CH_UPDATE, b"M{\"proto\":1}").unwrap();
+        run.settle();
+        let updates: Vec<(Direction, u8, usize)> = run
+            .sniff()
+            .into_iter()
+            .filter_map(|r| match r {
+                SniffedWire::Update {
+                    dir,
+                    ty,
+                    len,
+                    verified,
+                } => {
+                    assert!(verified);
+                    Some((dir, ty, len))
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            updates,
+            vec![
+                (Direction::BoardToHost, b'M', 12),
+                (Direction::HostToBoard, b'Q', 2)
+            ]
         );
     }
 

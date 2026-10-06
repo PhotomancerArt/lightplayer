@@ -779,6 +779,25 @@ Each drop is a `[emu] … the Mac serial model dropped N B` console warning;
 `walk-migration-emu` writes the page console and the count (`macTtyDrops`)
 beside its verdict.
 
+**`just walk-ota-emu`** walks Studio's over-the-air updates (lp-link channel
+3, `docs/adr/2026-10-06-studio-updates-over-the-update-channel.md`) on
+emulated C6s over `?emu=`, in headless Chrome, serving the release bundle
+itself: X → Y with one press (backup, update, finish, project kept), the
+cable cut mid-core and mid-engine then finished with no click, an
+engine-less board restored on connect, the same with no copy anywhere ("which
+Studio can't get" → Install), and a pre-update board (no over-the-air offer,
+today's flash). `--tab` runs three of them against `?emu=tab`. Every check
+waits for the board's own `[OTA]`/`[LOADER]` words as well as the card's.
+It proves Studio's update host, routing and card against the real board
+session; it does **not** prove Chromium's serial backend across the
+update's resets, nor silicon timing. **Its rates are the shim's, not a
+Mac's:** on a Mac the page runs the shim's Mac tty model (255 B a read, a
+read every 16 ms), which bounds the backup at ~12 KB/s;
+`WALK_EMU_TTY=none` measures without it. A local Studio
+(`just studio-dev`) builds a **single image** by default and so offers no
+over-the-air install — `LP_FW_IMAGE=split just studio-dev` for one that
+does.
+
 Two more dev-only flags tune the device wire for a measurement (read once at
 page load by `lpa-studio-web/src/dev_url_flags.rs`; no UI, no persistence):
 `?lens-pause-ms=N` sets the editor lens's pause between device reads
@@ -1336,6 +1355,23 @@ Three rules before you use a number from it:
 Run it under `--strict-bus` while bringing anything up: an access nothing
 claims is then a fault with a pc and a symbol, instead of a zero the guest
 believes.
+
+## Radio frame-rate budget
+
+Any radio-side feature (Wi‑Fi now; relay, MQTT, time sync, and update
+checks later) has a frame-rate cost ceiling, not a target: ≤ 10 % fps cost
+(median) when joined but not connected to Studio, ≤ 50 % when connected and
+editing — see `docs/adr/2026-10-06-radio-frame-rate-budget.md` for the full
+table, the measurement method (silicon only; emulated time is never a gate
+here either), and the first data point. Hiccups are bounded as a
+**percentile over a window, not a maximum** (p99 frame time ≤ 100 ms over a
+1–5 minute idle run, ≤ 1 s over an editing session) — a radio's slow frames
+are probabilistic and an occasional multi-second hang is expected, not a
+defect; the one hard line is a watchdog reset, board reset, or dropped
+link, which is always a bug. **These are ceilings, not targets**: a
+measurement inside the budget is done, don't keep tuning it, a single slow
+frame is never by itself a reason to block a change, and effort goes to
+whatever is outside the budget.
 
 ## Validation Commands
 

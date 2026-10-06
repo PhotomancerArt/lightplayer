@@ -62,6 +62,17 @@ studio_assets_dir := "target/studio-web-assets"
 # prints it; the recipes that package and copy firmware iterate it.
 served_builds_json := "lp-fw/builds/served.json"
 
+# Which C6 image a LOCAL dev Studio packages (`studio-dev`, `studio-dev-emu`,
+# `studio-web-dev-build`, `studio-firmware-package-*` called bare): `single`
+# (the default) links one image — the fast local build, a board running it
+# updates over USB only — and `split` builds the product's split image with
+# its update files, which Studio needs to update a board over the air. Ask
+# for it when testing updates: `LP_FW_IMAGE=split just studio-dev`. The
+# release bundle (`studio-web-build`, every deploy) is ALWAYS split.
+# Measured warm on an M2 Max, 2026-10-06: single 23 s, split 50 s (two link
+# passes, 23 s + 25 s). See lp-fw/builds/README.md.
+studio_fw_image := env("LP_FW_IMAGE", "single")
+
 # Default recipe - show available commands
 default:
     @just --list
@@ -456,13 +467,14 @@ studio-web-copy-sidecars profile out_dir include_firmware="false":
                 echo "  run: just studio-firmware-package-served" >&2
                 exit 1
             fi
-            mkdir -p "{{ out_dir }}/firmware/${build_id}"
-            cp "${firmware_dir}/manifest.json" "{{ out_dir }}/firmware/${build_id}/manifest.json"
-            cp "${firmware_dir}"/*.bin "{{ out_dir }}/firmware/${build_id}/"
+            # The package, and a split package's update files into `ota/`
+            # (OTA M7, DS10) — see the script's header.
+            scripts/studio-copy-firmware.sh "${build_id}" "{{ studio_assets_dir }}/firmware" \
+                "{{ out_dir }}/firmware" target/firmware-parts
         done < <(just studio-served-builds)
     fi
 
-studio-web-dev-build: install-wasm32-target studio-firmware-package-served
+studio-web-dev-build: install-wasm32-target (studio-firmware-package-served studio_fw_image)
     #!/usr/bin/env bash
     set -euo pipefail
     just studio-fw-browser-sidecar debug
@@ -593,7 +605,8 @@ studio-dev-bench:
 #
 # The boards boot the SAME image Studio serves for flashing: this depends on
 # `studio-firmware-package-served`, whose `esp32c6-4mb` build leaves its ELF
-# at target/riscv32imac-unknown-none-elf/release-esp32/fw-esp32c6. Pass a
+# at target/riscv32imac-unknown-none-elf/release-esp32/fw-esp32c6 (a single
+# image unless `LP_FW_IMAGE=split`; see `studio_fw_image`). Pass a
 # different image as the argument to boot c6-a from that instead.
 #
 # The blank boards keep whatever is flashed into them under
@@ -610,7 +623,7 @@ studio-dev-bench:
 # polyfilled `navigator.serial` grants itself (plan two, notes §8). Those
 # exist for HARDWARE walks (`just studio-dev-bench`, `just serial-grant`) and
 # wiring them in here would be reintroducing a constraint the shim removes.
-studio-dev-emu IMAGE="": install-wasm32-target studio-firmware-package-served
+studio-dev-emu IMAGE="": install-wasm32-target (studio-firmware-package-served studio_fw_image)
     #!/usr/bin/env bash
     set -euo pipefail
     image="{{ IMAGE }}"
@@ -676,7 +689,7 @@ studio-dev-emu IMAGE="": install-wasm32-target studio-firmware-package-served
 wire-tap-stat tap *args:
     python3 scripts/wire-tap/tapstat.py {{ tap }} {{ args }}
 
-studio-dev: install-wasm32-target studio-firmware-package-served
+studio-dev: install-wasm32-target (studio-firmware-package-served studio_fw_image)
     #!/usr/bin/env bash
     set -euo pipefail
     just studio-fw-browser-sidecar debug
@@ -705,10 +718,9 @@ studio-dev: install-wasm32-target studio-firmware-package-served
         # fresh hash pair and the script sweeps the stale one it replaces.
         scripts/sync-engine-sidecar.sh "${sidecar_dir}" "${public_dir}/pkg"
         for build_id in "${served_builds[@]}"; do
-            firmware_dir="{{ studio_assets_dir }}/firmware/${build_id}"
-            mkdir -p "${public_dir}/firmware/${build_id}"
-            cp "${firmware_dir}/manifest.json" "${public_dir}/firmware/${build_id}/manifest.json"
-            cp "${firmware_dir}"/*.bin "${public_dir}/firmware/${build_id}/"
+            # The package, and a split package's update files (`ota/`).
+            scripts/studio-copy-firmware.sh "${build_id}" "{{ studio_assets_dir }}/firmware" \
+                "${public_dir}/firmware" target/firmware-parts
         done
         # Host settings layer (P4): machine-level settings become the app's
         # dev-settings.json (fetched at boot; 404 => no host layer). Edits
@@ -741,8 +753,22 @@ studio-served-builds:
 # (lp-fw/builds/<id>.json) and EXTRACTS the manifest core from the image it
 # just built — there is no hand-written feature list or wireProto `sed` any
 # more. Output: target/studio-web-assets/firmware/<id>/.
-studio-firmware-package-esp32c6: install-rv32-target
-    cargo run -p lp-cli -- firmware package esp32c6-4mb
+#
+# The C6: `image=single` (the default, `studio_fw_image`) is the fast local
+# build, one linked image (`--single-image`); `image=split` is the product's
+# split image and its update files in target/firmware-parts/esp32c6-4mb/ —
+# what a Studio needs to update a board over the air.
+studio-firmware-package-esp32c6 image=studio_fw_image: install-rv32-target
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "{{ image }}" in
+        single) cargo run -p lp-cli -- firmware package esp32c6-4mb --single-image ;;
+        split) cargo run -p lp-cli -- firmware package esp32c6-4mb ;;
+        *)
+            echo "studio-firmware-package-esp32c6: image must be single or split, not {{ image }}" >&2
+            exit 1
+            ;;
+    esac
 
 # The S3 sibling. lp-cli runs cargo in the crate dir so `rust-toolchain.toml`
 # selects Espressif's fork, but the fork's GNU binutils must already be on
@@ -771,12 +797,13 @@ studio-firmware-package-esp32v3:
 # that quietly omitted an image would offer that board in the provisioning
 # picker and 404 at flash time, and the hardware walk runs against
 # `studio-dev`. Missing Xtensa toolchain? `_xt-gcc-dir` says how to fix it.
-studio-firmware-package-served:
+# `image` is the C6's (`single` or `split`, above).
+studio-firmware-package-served image=studio_fw_image:
     #!/usr/bin/env bash
     set -euo pipefail
     while read -r build_id; do
         case "${build_id}" in
-            esp32c6-*) just studio-firmware-package-esp32c6 ;;
+            esp32c6-*) just studio-firmware-package-esp32c6 "{{ image }}" ;;
             esp32s3-*) just studio-firmware-package-esp32s3 ;;
             esp32v3-*) just studio-firmware-package-esp32v3 ;;
             *)
@@ -798,7 +825,10 @@ check-wasm-cloud: install-wasm32-target
     cargo check -p lpa-cloud-client --no-default-features --target {{ wasm32_target }}
     cargo check -p lpa-firmware-store --target {{ wasm32_target }}
 
-studio-web-build: install-wasm32-target studio-firmware-package-served
+# The release bundle — every deploy builds through here — is always the
+# split image with its update files: a Studio that cannot update boards over
+# the air must never ship.
+studio-web-build: install-wasm32-target (studio-firmware-package-served "split")
     #!/usr/bin/env bash
     set -euo pipefail
     just studio-fw-browser-sidecar release
@@ -3265,9 +3295,10 @@ lint-tag-next-version:
 # Two halves, because CI runs them in two jobs. The `-p lp-cli` half is a
 # second full test-tree build (features unify differently from
 # `-p lp-emu-esp32c6`; 6m07s on a CI runner, 2026-09-08), so CI runs it in
-# `Heap budget (esp32c6 chip)` beside the chip ratchet, which needs the same
-# build, and `Emulator C6 (x64)` keeps the emulator's own suite. Locally,
-# `just test-emu-c6` is still the whole thing.
+# two jobs of its own — its link half in `Heap budget (esp32c6 chip)` beside
+# the chip ratchet, which needs the same build, its boards half in `Emulator
+# C6 lp-cli (x64)` — and `Emulator C6 (x64)` keeps the emulator's own suite.
+# Locally, `just test-emu-c6` is still the whole thing.
 test-emu-c6: test-emu-c6-boot test-emu-c6-cli
 
 # The emulator's own suite: boot tests against built fw-esp32c6 ELFs, then the
@@ -3387,23 +3418,58 @@ test-emu-c6-ota scenarios="" filter="": install-rv32-target
     fi
     LP_OTA_IMAGES="$(cd "$out" && pwd)" cargo test -p lp-cli --release --test emu_ota -- --include-ignored --nocapture --test-threads=1 {{ filter }}
 
-# lp-cli's emulator-backed tests. Both resolve the ELF through
-# `lp_emu_esp32c6::test_support` under `LP_EMU_BUILD_FW=1` — a plain
-# `cargo build`, not a reference image, so no espflash and no git history.
-# CI's `Heap budget (esp32c6 chip)` job runs this half.
-test-emu-c6-cli:
+# lp-cli's emulator-backed tests, whole: what a desk runs. They resolve the
+# ELF through `lp_emu_esp32c6::test_support` under `LP_EMU_BUILD_FW=1` — a
+# plain `cargo build`, not a reference image, so no espflash and no git
+# history.
+#
+# CI runs only the three parts below, in two jobs (2026-10-06: the one job
+# that ran all of it had grown to 25 minutes and was cut at its budget). The
+# parity line is NOT in CI here because `Validate (x64)`'s workspace `cargo
+# test` already runs it (nothing in it is `#[ignore]`d) on every PR this
+# job's filter fires for — and here it was a whole extra dev `-p lp-cli` test
+# build, ~4 min, for under a second of tests.
+test-emu-c6-cli: test-emu-c6-cli-link test-emu-c6-cli-boards test-emu-c6-cli-agent
     cargo test -p lp-cli --test validate_registry_parity --test validate_link_host_parity
-    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_usb_link_pack -- --include-ignored --nocapture
-    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_usb_free_lag -- --include-ignored --nocapture
-    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_usb_link -- --include-ignored --nocapture
-    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_usb_link_gates -- --include-ignored --nocapture
-    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_wifi_settings -- --include-ignored --nocapture
-    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test link_capture -- --include-ignored --nocapture
-    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_frag_reads -- --include-ignored --nocapture
-    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_split_boot -- --include-ignored --nocapture
-    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_seam_led -- --include-ignored --nocapture
+
+# The link half: the shipped image's USB lp-link, its pinned figures
+# (`emu_usb_link_gates`), the Wi-Fi settings over it and `link capture`. CI's
+# `Heap budget (esp32c6 chip)` job runs it beside the chip ratchet, whose
+# `cargo run --release -p lp-cli` reuses the lp-cli this build makes — and
+# whose figure-patch step re-runs these same binaries as a bless.
+#
+# One cargo invocation, not one per file: the release profile is fat LTO with
+# one codegen unit, so each test binary is a 20–45 s single-threaded link, and
+# one invocation links them side by side instead of one after another.
+# `--no-fail-fast` so a red run names every failure, not the first.
+test-emu-c6-cli-link: install-rv32-target
+    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --no-fail-fast {{ C6_CLI_LINK_TESTS }} -- --include-ignored --nocapture
+
+# The boards half: whole boards over the link — the fragmented-heap reads,
+# the split image's boot and the LED seam on the split image. CI's `Emulator
+# C6 lp-cli (x64)` job runs it. No pinned figures here, so that job has no
+# figure-patch step.
+test-emu-c6-cli-boards: install-rv32-target
+    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --no-fail-fast --test emu_frag_reads --test emu_split_boot --test emu_seam_led -- --include-ignored --nocapture
+
+# The app-agent evals' deterministic legs: stage A's `the_` tests, then stage
+# B (`app_agent_emu_decode`, the Sean goldens and stage A's replays decoded
+# off the pad). Stage A runs here even though `Validate (x64)` runs it too:
+# its scripted replays WRITE the project trees stage B decodes
+# (`target/app-agent-evals/scripted/`), so stage B fails without them. CI
+# runs this in `Heap budget (esp32c6 chip)`, after the link half, whose
+# release lp-cli build stage B reuses.
+test-emu-c6-cli-agent: install-rv32-target
     cargo test -p lpa-studio-core --lib app_agent_eval_tests::the_
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test app_agent_emu_decode -- --include-ignored --nocapture the_
+
+# The link half's test binaries, named once: the recipe above runs them and
+# CI's figure-patch step re-runs them as a bless (`just c6-cli-link-tests`
+# prints them), so a binary added here is blessed too.
+C6_CLI_LINK_TESTS := "--test emu_usb_link_pack --test emu_usb_free_lag --test emu_usb_link --test emu_usb_link_gates --test emu_wifi_settings --test link_capture"
+
+c6-cli-link-tests:
+    @echo {{ C6_CLI_LINK_TESTS }}
 
 # App-agent evals, live leg (plan lp2025/2026-10-01-0126-app-agent-harness):
 # a model works the scenario in its seat (stage A: a headless Studio, or the
@@ -4673,6 +4739,35 @@ walk-wifi-emu lane:
 # this worktree's port; never a CI job.
 walk-drop-emu *args:
     node scripts/emu/walk-drop-emu.mjs {{ args }}
+
+# The over-the-air update walk (OTA M7 P9): real Studio, headless, updating
+# emulated C6 boards over `?emu=` USB — X → Y with a backup, a cable cut
+# mid-core and mid-engine finished with no click, an engine-less board
+# restored on connect, "Needs X, which Studio can't get" → Install Y, and a
+# pre-update single image left on today's USB flash. `--tab` walks update,
+# cut-core and engine-less with the board a Worker in the page (`?emu=tab`);
+# `--steps a,b` picks steps; `--fresh` starts from a browser that has never
+# seen a board. Builds what is missing first: X (`scripts/ota/build-image.sh`,
+# app version a0a0a0a0), the pre-update single image, this Studio's own split
+# package Y and the release bundle (`studio-web-story-build`, which bundles
+# Y's update files). Serves the bundle itself (no dev server). Proves the
+# transport, the card and the board's own words — not Bluetooth, and not
+# Chromium's USB stack (the desk check does that). Minutes per step; not CI.
+walk-ota-emu *args: install-rv32-target
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cargo build -q -p lp-cli
+    images=target/walk-ota-emu/images
+    if [[ ! -f "${images}/x/merged.bin" ]]; then
+        scripts/ota/build-image.sh "${images}/x" a0a0a0a0
+    fi
+    if [[ ! -f "${images}/mono/package/manifest.json" ]]; then
+        ./target/debug/lp-cli firmware package esp32c6-4mb --single-image --out "${images}/mono/package"
+    fi
+    # Y last: build-image.sh writes the parts directory the bundle copies.
+    just studio-firmware-package-esp32c6 split
+    just studio-web-story-build
+    node scripts/emu/walk-ota-emu.mjs {{ args }}
 
 # The hardware-validation system: payloads, configurations, transcripts,
 # replay. `just validate list` with no other args; `replay <transcript>

@@ -617,7 +617,9 @@ each needs a cross-target firmware build (the script builds it under
 `LP_EMU_BUILD_FW=1`), and the C6's needs a release `lp-cli` on top. The C6's
 arm was a step of the emulator job until 2026-09-08, when that job
 outgrew its budget and the ratchet moved to a job of its own — one that also
-runs lp-cli's two emulator-backed tests, which share its `-p lp-cli` build
-(`just test-emu-c6-cli`). In `Validate (x64)` the same code
+runs lp-cli's emulator-backed link tests, which share its `-p lp-cli` build
+(`just test-emu-c6-cli-link`). Since 2026-10-06 the whole-board half of those
+tests (`just test-emu-c6-cli-boards`) is its own job, `Emulator C6 lp-cli
+(x64)`, after the combined job outgrew its budget the same way. In `Validate (x64)` the same code
 prints a named SKIP rather than starting a firmware build, and the projects
 half still gates. See "The second source" above.

@@ -149,6 +149,12 @@ pub enum UpdateStanding {
         board: UpdateVersion,
         to: UpdateVersion,
     },
+    /// Over Bluetooth, the board could update, but this Studio's build
+    /// cannot be installed over the air (a single image, or a build with no
+    /// update files): nothing to install from here. Read by
+    /// [`super::UpdateOfferFacts::read`] off the route, never by
+    /// [`update_standing`].
+    NoWirelessBuild { board: UpdateVersion },
 }
 
 impl UpdateStanding {
@@ -168,7 +174,8 @@ impl UpdateStanding {
             | Self::CantGetVersion { board, .. }
             | Self::RolledBack { board, .. }
             | Self::Newer { board, .. }
-            | Self::PlayOnly { board, .. } => Some(board),
+            | Self::PlayOnly { board, .. }
+            | Self::NoWirelessBuild { board } => Some(board),
         }
     }
 

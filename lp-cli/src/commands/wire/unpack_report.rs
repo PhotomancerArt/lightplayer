@@ -26,6 +26,8 @@ pub struct UnpackReport {
     sessions: usize,
     /// Frames of a secure link (sealed; no key to read them).
     sealed: usize,
+    /// Update-channel messages (lp-link channel 3).
+    updates: usize,
     /// Whether this report is of an lp-link capture (decides the total's
     /// words).
     link: bool,
@@ -46,6 +48,7 @@ impl UnpackReport {
             unverified: 0,
             sessions: 0,
             sealed: 0,
+            updates: 0,
             link: false,
         }
     }
@@ -161,6 +164,17 @@ impl UnpackReport {
                     let _ = writeln!(log, "sealed {} channel {chan} {len}", dir_word(*dir));
                 }
             }
+            SniffedWire::Update { dir, ty, len, .. } => {
+                self.updates += 1;
+                if self.sizes {
+                    let _ = writeln!(
+                        log,
+                        "update {} {} {len}",
+                        dir_word(*dir),
+                        lpc_wire::update_message_type(*ty)
+                    );
+                }
+            }
             SniffedWire::Console { .. } => {}
         }
     }
@@ -210,7 +224,7 @@ impl UnpackReport {
             writeln!(
                 log,
                 "total messages {} packed {} payload {} json {} unreadable {} damaged {} gaps {} \
-                 sessions {}",
+                 sessions {} updates {}",
                 self.frames,
                 self.packed,
                 self.wire_bytes,
@@ -218,7 +232,8 @@ impl UnpackReport {
                 self.unreadable,
                 self.damaged,
                 self.gaps,
-                self.sessions
+                self.sessions,
+                self.updates
             )
         } else {
             writeln!(

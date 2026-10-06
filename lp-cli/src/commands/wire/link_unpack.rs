@@ -62,6 +62,10 @@ pub fn rendered(item: &SniffedWire) -> String {
         SniffedWire::Unreadable { len, reason, .. } => {
             format!("<unreadable message: {len} bytes, {reason}>\n")
         }
+        SniffedWire::Update { ty, len, .. } => format!(
+            "<update message {}: {len} bytes>\n",
+            lpc_wire::update_message_type(*ty)
+        ),
         SniffedWire::Sealed { chan, len, .. } => {
             format!("<sealed frame: {len} bytes on channel {chan}, a secure link>\n")
         }
@@ -75,6 +79,26 @@ pub fn rendered(item: &SniffedWire) -> String {
 mod tests {
     use super::*;
     use crate::commands::wire::test_capture::{capture, log_reply};
+
+    /// An over-the-air update's messages (lp-link channel 3) read as one line
+    /// each, by type letter and length — never as undecodable noise.
+    #[test]
+    fn an_update_channel_message_is_one_line_naming_its_type() {
+        let item = SniffedWire::Update {
+            dir: Direction::BoardToHost,
+            ty: b'M',
+            len: 412,
+            verified: true,
+        };
+        assert_eq!(rendered(&item), "<update message M: 412 bytes>\n");
+        let odd = SniffedWire::Update {
+            dir: Direction::HostToBoard,
+            ty: 0x07,
+            len: 3,
+            verified: true,
+        };
+        assert_eq!(rendered(&odd), "<update message 0x07: 3 bytes>\n");
+    }
 
     #[test]
     fn a_board_capture_reads_as_its_console_lines_and_messages() {

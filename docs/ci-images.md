@@ -137,6 +137,6 @@ directory, `LP_EMU_C6_REF_<SLUG>`) still win.
 - `.github/workflows/pre-merge.yml` — the `Pack CI images` / `Upload CI images`
   steps in `emu-c6`, `emu-esp32v3`, `emu-esp32s3`.
 - `justfile` — `fetch-ci-images`, `ci-images-status`, and the `LP_CI_IMAGES`
-  branches in `test-emu-{c6,esp32v3,esp32s3}-boot`, `test-emu-c6-cli`,
+  branches in `test-emu-{c6,esp32v3,esp32s3}-boot`, `test-emu-c6-cli-{link,boards}`,
   `test-emu-serve`, `heap-budget-{check,baseline}-chips*`,
   `test-emu-esp32v3-reference` and `test-emu-xt-jit-image`.

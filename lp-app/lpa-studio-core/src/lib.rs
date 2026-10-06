@@ -87,6 +87,10 @@ pub use app::devices::{
     MemoryBackupStore, UiDeviceLayout, UiLayoutPanel, check_backup_file, check_store_contract,
     device_layout_view, device_restore_from_file_action,
 };
+pub use app::devices::{
+    BundledOwnBuild, BundledOwnBuildSource, MemoryOwnBuildSource, OWN_BUILD_MISMATCH,
+    OwnBuildSource, UpdateHost,
+};
 pub use app::devices::{DeviceFirmwareSources, StudioFirmwareStore};
 pub use app::devices::{
     INSTALL_VERSION_PARAM, StoreLatest, USB_UPDATES_OVER_THE_AIR, UiDeviceUpdate, UiSessionUpdate,
@@ -96,7 +100,6 @@ pub use app::devices::{
     update_standing, update_words, wants_auto_start,
 };
 pub use app::devices::{LINK_COUNTERS_CAPTION, LinkTrouble, UiLinkCounterRow, link_counter_rows};
-pub use app::devices::{MemoryOwnBuildSource, OwnBuildSource, UpdateHost};
 pub use app::docs_host::DocsSimHost;
 pub use app::studio::PlayViewOp;
 pub use app::studio::{UiPage, UiPanel, UiPlace, UiProjectView, UiSessionSection};

@@ -36,6 +36,7 @@ use lpa_devices::link::{Link, LinkCommand, LinkEvent, LinkInfo, ResetKind};
 use wasm_bindgen_futures::spawn_local;
 
 use crate::device_link::demux::demux_read;
+use crate::device_link::update_facts_mirror::update_events;
 use crate::device_link::wire::client_message;
 use crate::provider::endpoint::LinkEndpointId;
 use crate::provider::session::LinkSessionId;
@@ -166,9 +167,22 @@ impl BrowserLinkInner {
                     "not a request, and the link carries no raw text to the board: {line:?}"
                 ))),
             },
-            // This transport has no channel 3 yet (M7 P7 adds it), and its
-            // `LinkInfo` says so: the model never asks. Dropped.
-            LinkCommand::SendUpdate(_) => {}
+            // One channel-3 message (M7 P7). The port's link refuses it, with
+            // a note, until the board announced the channel (DS9).
+            LinkCommand::SendUpdate(bytes) => self.send_update(&bytes),
+        }
+    }
+
+    /// Queue one update message on the port's link (written by the port's
+    /// loop).
+    fn send_update(&self, bytes: &[u8]) {
+        let Some(session) = self.session.borrow().clone() else {
+            return self.push(LinkEvent::Error(
+                "update write on a link that is not open".to_string(),
+            ));
+        };
+        if let Err(error) = self.provider.send_update(&session, bytes) {
+            self.fail("update write", &error);
         }
     }
 
@@ -313,6 +327,15 @@ impl BrowserLinkInner {
         if let Ok(reads) = self.provider.take_reads(&session) {
             for read in reads {
                 self.push(demux_read(read));
+            }
+        }
+        // Channel 3, after the reads: a session's update messages follow
+        // its link-up, and only this pump drains them (DS1).
+        if let Ok(updates) = self.provider.take_updates(&session) {
+            for update in updates {
+                for event in update_events(update) {
+                    self.push(event);
+                }
             }
         }
         // After the reads: a note (the board's answer to the opt-in, say) is
