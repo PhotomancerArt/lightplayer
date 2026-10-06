@@ -10,6 +10,14 @@ use lpc_wire::server::SampleStats;
 /// Default minimum samples before using mean for avg (avoids cold-start dilution).
 const DEFAULT_MIN_SAMPLES_FOR_AVG: usize = 3;
 
+/// Samples room is made for up front. A firmware's collector lives for the
+/// board's whole life and samples once a heartbeat into a window about one
+/// heartbeat long, so it holds one or two: reserving them when it is made
+/// (at boot) and pruning in place means it never allocates while a project
+/// runs. A buffer made then would sit above the project's memory and split
+/// what a project switch needs (silicon N7, 2026-10-06).
+const RESERVED_SAMPLES: usize = 4;
+
 /// Collects timestamped samples and computes stats over a sliding time window.
 ///
 /// Uses incremental sums (sum, sum_sq) so compute_stats does minimal float work.
@@ -27,7 +35,7 @@ impl WindowedStatsCollector {
     /// Create a new collector.
     pub fn new() -> Self {
         Self {
-            samples: Vec::new(),
+            samples: Vec::with_capacity(RESERVED_SAMPLES),
             sum: 0.0,
             sum_sq: 0.0,
             min_samples_for_avg: DEFAULT_MIN_SAMPLES_FOR_AVG,
@@ -37,7 +45,7 @@ impl WindowedStatsCollector {
     /// Create with custom min_samples_for_avg.
     pub fn with_min_samples_for_avg(min_samples: usize) -> Self {
         Self {
-            samples: Vec::new(),
+            samples: Vec::with_capacity(RESERVED_SAMPLES),
             sum: 0.0,
             sum_sq: 0.0,
             min_samples_for_avg: min_samples,
@@ -51,18 +59,18 @@ impl WindowedStatsCollector {
         self.samples.push((timestamp_ms, value));
     }
 
-    /// Remove samples older than cutoff_ms (retain timestamp >= cutoff_ms).
+    /// Remove samples older than cutoff_ms (retain timestamp >= cutoff_ms),
+    /// in place: the buffer is kept (see [`RESERVED_SAMPLES`]).
     pub fn prune_older_than(&mut self, cutoff_ms: u64) {
-        let mut retained = Vec::new();
-        for (ts, v) in core::mem::take(&mut self.samples) {
-            if ts >= cutoff_ms {
-                retained.push((ts, v));
-            } else {
-                self.sum -= v;
-                self.sum_sq -= v * v;
+        let (sum, sum_sq) = (&mut self.sum, &mut self.sum_sq);
+        self.samples.retain(|&(ts, v)| {
+            let keep = ts >= cutoff_ms;
+            if !keep {
+                *sum -= v;
+                *sum_sq -= v * v;
             }
-        }
-        self.samples = retained;
+            keep
+        });
     }
 
     /// Compute stats. Uses cached sum/sum_sq; only iterates for min/max (n <= 5).
