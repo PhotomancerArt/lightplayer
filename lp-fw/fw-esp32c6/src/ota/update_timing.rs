@@ -9,8 +9,8 @@
 //!
 //! `[OTA] timing <what>: <n> msgs in <wall> ms, session <s> ms, waiting <w>
 //! ms, longest <l> ms`, then `[OTA] timing <what> ms/ops: erase <ms>/<n>
-//! block <ms>/<n> program <ms>/<n> read <ms>/<n> other <ms>` (other: inside
-//! the session but not in flash — inflate, the piece's SHA-256).
+//! block <ms>/<n> program <ms>/<n> read <ms>/<n> hash <ms> other <ms>` (other:
+//! inside the session but not in flash or the hash — inflate, mostly).
 
 /// Microseconds since boot.
 pub fn now_us() -> u64 {
@@ -28,11 +28,13 @@ pub struct FlashTiming {
     pub programs: u32,
     pub read_us: u64,
     pub reads: u32,
+    /// The piece's SHA-256 on the accelerator, its reads included.
+    pub hash_us: u64,
 }
 
 impl FlashTiming {
     fn total_us(&self) -> u64 {
-        self.erase_us + self.block_us + self.program_us + self.read_us
+        self.erase_us + self.block_us + self.program_us + self.read_us + self.hash_us
     }
 }
 
@@ -81,7 +83,7 @@ impl MessageTiming {
             ms(self.longest_us),
         );
         log::info!(
-            "[OTA] timing {what} ms/ops: erase {}/{} block {}/{} program {}/{} read {}/{} other {}",
+            "[OTA] timing {what} ms/ops: erase {}/{} block {}/{} program {}/{} read {}/{} hash {} other {}",
             ms(flash.erase_us),
             flash.erases,
             ms(flash.block_us),
@@ -90,6 +92,7 @@ impl MessageTiming {
             flash.programs,
             ms(flash.read_us),
             flash.reads,
+            ms(flash.hash_us),
             ms(self.session_us.saturating_sub(flash.total_us())),
         );
     }

@@ -9,7 +9,9 @@ use crate::code_table::CHUNK;
 use super::update_target::{FlashFault, UpdateTarget};
 
 /// SHA-256 of `head` (if any, held in RAM) followed by the flash bytes
-/// `[from, to)`, read through `buf` a sector at a time.
+/// `[from, to)`: the target's own when it has one
+/// ([`UpdateTarget::sha256_flash`]), else read through `buf` a sector at a
+/// time and hashed here.
 pub(crate) fn hash_flash<T: UpdateTarget>(
     target: &mut T,
     head: Option<&[u8]>,
@@ -17,6 +19,9 @@ pub(crate) fn hash_flash<T: UpdateTarget>(
     to: u32,
     buf: &mut [u8],
 ) -> Result<[u8; 32], FlashFault> {
+    if let Some(hashed) = target.sha256_flash(head, from, to) {
+        return hashed;
+    }
     let mut sha = Sha256::new();
     if let Some(head) = head {
         sha.update(head);

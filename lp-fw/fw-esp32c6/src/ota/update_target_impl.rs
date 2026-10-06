@@ -16,6 +16,7 @@ use lp_bootctl::{BOOT_RECORD_SECTORS, BootRecord, SplitLayout};
 use lpc_update::board::{FlashFault, UpdateTarget};
 
 use super::boot_state::BootState;
+use super::hw_sha::BootSha256;
 use super::split_flash::{BLOCK, SECTOR, SplitFlash};
 use super::update_timing::{FlashTiming, now_us};
 
@@ -97,6 +98,35 @@ impl UpdateTarget for SplitUpdateTarget {
         self.timing.block_us += now_us() - t0;
         self.timing.blocks += 1;
         ok(done)
+    }
+
+    /// On the SHA accelerator ([`BootSha256`]), from flash a sector at a
+    /// time: the software hash over the ROM's reads cost ~1.3 s for the core
+    /// and ~1.9 s for the engine on the bench C6.
+    fn sha256_flash(
+        &mut self,
+        head: Option<&[u8]>,
+        from: u32,
+        to: u32,
+    ) -> Option<Result<[u8; 32], FlashFault>> {
+        let t0 = now_us();
+        let mut sha = BootSha256::new();
+        if let Some(head) = head {
+            sha.update(head);
+        }
+        let mut buf = alloc::vec![0u8; SECTOR as usize];
+        let mut at = from;
+        while at < to {
+            let n = (to - at).min(SECTOR) as usize;
+            if !self.flash.read(at, &mut buf[..n]) {
+                return Some(Err(FlashFault));
+            }
+            sha.update(&buf[..n]);
+            at += n as u32;
+        }
+        let digest = sha.finalize();
+        self.timing.hash_us += now_us() - t0;
+        Some(Ok(digest))
     }
 
     fn program(&mut self, addr: u32, bytes: &[u8]) -> Result<(), FlashFault> {
