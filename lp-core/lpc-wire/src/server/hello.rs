@@ -45,8 +45,9 @@ use crate::server::hello_auth::HelloAuth;
 ///   now, ask again shortly — an empty `heard` list keeps meaning "heard
 ///   nothing"); `StationState::Connected` gains the required `host`, the
 ///   board's mDNS name `lp-xxxx.local`. Built beside 37 (Bluetooth on
-///   lp-link, #880) and stacked on it, so it takes the next number.
-///   `PACK_FORMAT_VERSION` is unchanged.
+///   lp-link, #880, merged first), so it takes the next number; #986 (the
+///   OTA update protocol) wants it too, and whichever merges second
+///   re-bumps. `PACK_FORMAT_VERSION` is unchanged.
 /// - 37: BLE (the C6's radio links) moves onto lp-link too (plan
 ///   `lp2025/2026-09-28-1445-ble-on-lp-link`; `docs/adr/2026-09-24-ble-transport.md`).
 ///   Follows 32 (the classic's UART): the two cut-overs were built side by
