@@ -6,7 +6,8 @@
 use core::cell::Cell;
 
 use super::boot_state::BootState;
-use super::hw_sha::BootSha256;
+use super::engine_window::ScratchWindow;
+use super::hw_sha::{self, BootSha256};
 use super::split_flash::SplitFlash;
 use critical_section::Mutex;
 use lp_bootctl::REGION_START;
@@ -43,33 +44,41 @@ pub fn core_sha256(state: &BootState) -> [u8; 32] {
         return sha;
     }
     let started = embassy_time::Instant::now();
+    // Through the cache when a scratch window is free (on silicon about four
+    // times faster than the ROM's 64-byte SPI1 reads), else through the ROM.
+    let (sha, via) = match ScratchWindow::map(state.core_off, state.core_len) {
+        Some(window) => (hw_sha::sha256(window.bytes()), "cache"),
+        None => match sha_via_rom_reads(state) {
+            Some(sha) => (sha, "rom reads"),
+            None => return [0; 32],
+        },
+    };
+    log::info!(
+        "[OTA] core sha in {} ms ({} B, {via})",
+        started.elapsed().as_millis(),
+        state.core_len,
+    );
+    critical_section::with(|cs| CORE_SHA.borrow(cs).set(Some(sha)));
+    sha
+}
+
+/// The fallback: the core through the ROM's flash reads, 4 KiB at a time.
+fn sha_via_rom_reads(state: &BootState) -> Option<[u8; 32]> {
     let mut flash = SplitFlash::take();
     let mut hasher = BootSha256::new();
     let mut buf = alloc::vec![0u8; 4096];
     let end = state.core_off + state.core_len;
     let mut at = state.core_off;
-    // The flash reads' share of the time, apart from the hashing's.
-    let mut reading = embassy_time::Duration::from_ticks(0);
     while at < end {
         let n = (end - at).min(buf.len() as u32) as usize;
-        let read_started = embassy_time::Instant::now();
         if !flash.read(at, &mut buf[..n]) {
             log::error!("[OTA] core sha: a flash read failed at {at:#x}");
-            return [0; 32];
+            return None;
         }
-        reading += read_started.elapsed();
         hasher.update(&buf[..n]);
         at += n as u32;
     }
-    let sha = hasher.finalize();
-    log::info!(
-        "[OTA] core sha in {} ms ({} B; reading {} ms)",
-        started.elapsed().as_millis(),
-        state.core_len,
-        reading.as_millis()
-    );
-    critical_section::with(|cs| CORE_SHA.borrow(cs).set(Some(sha)));
-    sha
+    Some(hasher.finalize())
 }
 
 /// The session's facts for this boot.
