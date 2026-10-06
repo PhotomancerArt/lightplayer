@@ -60,6 +60,7 @@ pub mod browser_sim_source;
 pub mod browser_transport;
 pub mod composite_transport;
 pub mod device_affordance;
+pub mod device_backup_import;
 pub mod device_backup_op;
 pub mod device_backup_store;
 pub mod device_by_base_mac;
@@ -128,6 +129,10 @@ pub use browser_transport::BrowserSerialTransport;
 pub use composite_transport::CompositeDeviceTransport;
 pub use device_affordance::{
     device_escape_action, device_escape_action_for, device_status_kind, pending_escape_action,
+};
+pub use device_backup_import::{
+    BackupFileBytes, DeviceRestoreFromFileDataOp, DeviceRestoreFromFileOp, check_backup_file,
+    device_restore_from_file_action,
 };
 pub use device_backup_op::DeviceBackupOp;
 pub use device_backup_store::{
