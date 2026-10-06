@@ -3,16 +3,16 @@
 **Date** 2026-10-06 · **Plan** `lp2025/2026-10-05-1903-wifi-link-c6` (P13,
 PR C) · **Command** `just walk-wifi-emu lan` · **Script**
 `scripts/emu/walk-wifi-emu-lan.mjs` · **CI cell** `lp-cli/tests/emu_lan_link.rs`
-(and P12's two-board lockstep test in `lp-emu-esp32c6`) · **Silicon twin**
+(and the two-board lockstep cell, `lp-cli/tests/emu_lan_lockstep.rs`) · **Silicon twin**
 G1, `desk-walk-wifi-c6.md` in the plan directory
 
 > **STATUS: RUN, NOT PASSED.** Six of ten steps pass on the board's own
 > words (W1, W2, W4, W5, W6, W7); W3 and W8 are **blocked by a known
 > PR B finding** (the board's read/load gate refuses while a LAN link is
-> open); W9 fails on a product symptom not yet explained, in both runs at
-> the current tree (after the reset onto a new lease, nothing reaches the
-> board through its forward); W10 passes when it runs before W9 (run 5:
-> p50 2.365 / p90 3.682 frames). The walk is to be run again, whole, once
+> open); W9's board-side gates pass after an emulator fix (the forward kept
+> a moved board's old connection; section 9, finding 2) and it fails only on
+> Studio's card not returning to "Ready" after a relink (finding 5); W10
+> passes (run 5: p50 2.365 / p90 3.682 frames; the W9 re-run 2.412 / 3.555). The walk is to be run again, whole, once
 > PR B's heap fix is merged in (section 9).
 
 Read **What the emulator does not cover** (section 6) before quoting
@@ -238,22 +238,22 @@ something in section 6 is expected and says so.
    25 s with `Peach (1D)` loaded and Studio's LAN link open. Diagnosed by
    the director as PR B's: one open secure LAN link costs ≈25 KB of main
    heap and each first link strands ≈1 KB mid-heap. Not patched here.
-2. **After `renumber` + `reset`, nothing reaches c6-a through its forward
-   (open).** The board rejoined at a new address (`.100` → `.103`, the door's
-   `/boards` agrees) and served its first frame, but logged no `[lan]` line
-   again: Studio never relinked, and `lp-cli link rtt` over the same forward
-   did not finish in 900 s. Run 5 the same (`.100` → `.103`, then no
-   `[lan]` line; heartbeats after it 61,092 B free / 38,196 B largest). Not
-   reproduced in isolation: one board on the
-   same fixture (scratch `repro-renumber.mjs`), `renumber` + `reset`, then
-   `wifi status` over the same forward answered at the new address — with
-   nothing else on the forward, with a WebSocket held on it across the
-   reset, and with `peach-1d` loaded over USB first. What the walk had that
-   the repro did not: a second board on the LAN, Studio's established secure
-   session (not a bare socket) at the reset, the console capture holding the
-   USB link through the reset, and a board coming back with a startup
-   project auto-loaded (61,092 B free / 38,196 B largest in its heartbeats
-   after the reset). The heap state makes finding 1 a suspect, unproven.
+2. **After `renumber` + `reset`, nothing reached c6-a through its forward
+   — the emulator's, fixed.** The board rejoined at `.103` but logged no
+   `[lan]` line again; Studio never relinked; `link rtt` over the forward did
+   not finish. Cause: the virtual LAN's gateway (smoltcp 0.13.1) rate-limits
+   ARP once a second for the **whole stack**; Studio's connection through the
+   forward still had unacknowledged data at the reset and stayed open to the
+   old address, so once its neighbour entry expired it asked ARP for `.100`
+   every second and starved every new connection's ARP for `.103`. Fixed in
+   `lan_port_forward.rs` (a connection closes when the lease it was opened
+   under moves; forward sockets time out after 60 s with data outstanding);
+   defect `docs/defects/2026-10-06-the-virtual-lans-forward-kept-a-moved-boards-old-connection.md`.
+   Re-run (`target/walk-wifi-emu/pr993-w9/`, `a84308c4b`+the fix): the
+   board-side W9 gates pass — c6-a at `.103`, Studio's link back through the
+   same forward (`[lan] link link1 from 192.168.4.1:49155: secure session
+   opening`, session up, traffic both ways), `wifi status` over the same
+   forward on link2. W9 then fails only on Studio's card, finding 5.
 3. **Studio's Wi‑Fi panel can open with an empty Nearby list for good
    (Studio, intermittent).** Run 2: "Connect to a network" showed only
    "Other network…"; the records show two `Network/Scan` commands and **no
@@ -266,6 +266,12 @@ something in section 6 is expected and says so.
 4. **A LAN card's preview says "No live picture over Bluetooth"** (Studio,
    copy): the W3/W9 shots, a board reached over Wi‑Fi. The transport chip in
    the editor's header shows the USB glyph for it too.
+
+5. **A LAN card does not return to "Ready" after its link closed and
+   Studio redialled** (Studio, `lpa-devices/src/device.rs`): the card reads
+   "Attached — not listening · quiet" while the board holds a live session
+   from that page. Seen on c6-b after W6 closed its LAN link (runs 5 and the
+   W9 re-run, before W9), and on c6-a after W9. Outside PR C; not diagnosed.
 
 Re-run when PR B's heap fix is in: the whole walk (`just walk-wifi-emu lan`),
 which re-runs W3 and W8, gives W10 a project-bearing figure, and shows

@@ -506,6 +506,15 @@ wall-clock, like the USB door. The gateway's and the probe's TCP/IP stacks
 are `smoltcp` (0BSD). Test networks live in `testdata/virtual_lan.toml` and
 are test values only.
 
+A forward's connection follows the address it was opened to: when the
+board's lease moves or goes, the forward closes it (host side too), and one
+whose board stops answering with data waiting is reset after
+`CONNECTION_TIMEOUT` (60 s of LAN time). Both matter more than they look:
+smoltcp rate-limits ARP to **one request a second for the whole stack**, so
+a gateway connection asking for a dead address would hold every other
+connection off its ARP — the moved board's new address and every other
+board's forward (the emulated Wi-Fi walk's W9).
+
 `SharedLan` (P12) is the handle boards, hosts and runners share one LAN
 through (`Arc<Mutex<…>>`, `Send + Sync`), with who drives it on whose clock:
 `LanDriver::Runner` (the lockstep runner's boundaries: deterministic, CI),
