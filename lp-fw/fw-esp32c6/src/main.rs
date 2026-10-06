@@ -278,6 +278,7 @@ static HEARTBEAT_STACK_LINES_DUE: core::sync::atomic::AtomicBool =
 fn log_heartbeat_stack_lines() {
     if HEARTBEAT_STACK_LINES_DUE.swap(false, core::sync::atomic::Ordering::Relaxed) {
         stack_probe::log_if_grown("heartbeat");
+        c_heap::log_if_grown("heartbeat");
         #[cfg(feature = "io_thread_stack_diag")]
         io_thread_stack_diag::log_if_grown();
     }
@@ -346,7 +347,7 @@ fn reboot_now() {
 /// The reboot itself, run by the link task once the answer is out.
 #[cfg(not(fw_harness))]
 fn reset_now() -> ! {
-    esp_hal::system::software_reset()
+    crate::board::esp32c6::restart::restart()
 }
 
 #[cfg(not(fw_harness))]

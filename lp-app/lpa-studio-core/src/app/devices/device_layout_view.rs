@@ -14,6 +14,7 @@
 use lpa_devices::wire::BoardFs;
 use lpa_devices::{Action, DeviceId, DeviceView, LayoutVerdict};
 
+use super::device_backup_import::DeviceRestoreFromFileOp;
 use super::device_backup_op::DeviceBackupOp;
 use super::device_backup_store::BackupEntry;
 use super::device_flash::{FirmwareVerb, firmware_verb};
@@ -31,6 +32,9 @@ pub const DOWNLOAD_BACKUP: &str = "download-backup";
 pub const RESTORE_FILES: &str = "restore-files";
 /// `devices/<board>/finish-update`: move a held board's waiting files.
 pub const FINISH_UPDATE: &str = "finish-update";
+/// `devices/<board>/restore-from-file`: import an outside backup ZIP (one
+/// this browser never stored itself) and restore it (plan P01).
+pub const RESTORE_FROM_FILE: &str = "restore-from-file";
 
 /// The card's layout facts for one device.
 #[derive(Clone, Debug, PartialEq)]
@@ -52,6 +56,14 @@ pub struct UiDeviceLayout {
     /// Download the backup this card is about (always offered beside a
     /// restore).
     pub download: Option<OfferPath>,
+    /// "Restore from a backup file…" — opens a picker for a ZIP this
+    /// browser never stored itself (Decision 11). Offered beside
+    /// [`Self::restore`] whenever one exists, and ALSO when it does not:
+    /// the board needs its files back but this browser has no copy of them.
+    pub restore_from_file: Option<OfferPath>,
+    /// This board's own base MAC, if known yet — so the one question a
+    /// mismatched backup asks can name both boards.
+    pub current_base_mac: Option<String>,
 }
 
 /// The question (or the refusal), as the card draws it.
@@ -76,7 +88,9 @@ pub struct UiLayoutPanel {
 /// verbs are placed); `fs` is the board's last hello's
 /// filesystem state and `has_uid` whether that hello named a stamped
 /// identity; `pending` the stored backup still marked pending for its base
-/// MAC; `staged` what its last inspection staged.
+/// MAC; `staged` what its last inspection staged; `current_base_mac` the
+/// board's own base MAC, if known (the one question a mismatched backup-
+/// file import asks names it).
 pub fn device_layout_view(
     view: &DeviceView,
     offers_at: OfferPath,
@@ -84,6 +98,7 @@ pub fn device_layout_view(
     has_uid: bool,
     staged: Option<&LayoutStaging>,
     pending: Option<&BackupEntry>,
+    current_base_mac: Option<&str>,
     offers: &mut UiOfferTree,
 ) -> Option<UiDeviceLayout> {
     let device = view.id;
@@ -99,6 +114,8 @@ pub fn device_layout_view(
         restore: None,
         finish_update: None,
         download: None,
+        restore_from_file: None,
+        current_base_mac: current_base_mac.map(str::to_string),
     };
 
     // The question, while a Flash waits on it.
@@ -179,20 +196,28 @@ pub fn device_layout_view(
         }
         return Some(layout);
     }
-    // A board that came back without its files while a backup of them is
-    // still pending (an interrupted update): offer them back. "Without its
-    // files" is the boot that formatted — or ANY later boot of that empty
-    // filesystem, which mounts fine but names no identity (the walk's W7b:
-    // a reboot between the interruption and the user's return must not
-    // hide the way back).
-    if let Some(entry) = pending
-        && (fs == BoardFs::Formatted || (fs == BoardFs::Mounted && !has_uid))
-    {
-        layout.line = Some(format!(
-            "This board's files from {} are in a backup in this browser.",
-            date(entry.captured_at_epoch_seconds)
-        ));
-        if let Some(FirmwareVerb::Update(choice)) = firmware_verb(view) {
+    // A board that came back without its files: "without its files" is the
+    // boot that formatted — or ANY later boot of that empty filesystem,
+    // which mounts fine but names no identity (the walk's W7b: a reboot
+    // between the interruption and the user's return must not hide the way
+    // back). A backup still pending in THIS browser offers Restore files
+    // straight away; one is never required — "Restore from a backup file…"
+    // (Decision 11) reads any backup ZIP Studio ever wrote, including one
+    // this browser lost or never held (a different machine, cleared
+    // storage, an interrupted migration whose only copy is the download).
+    if fs == BoardFs::Formatted || (fs == BoardFs::Mounted && !has_uid) {
+        layout.line = Some(match pending {
+            Some(entry) => format!(
+                "This board's files from {} are in a backup in this browser.",
+                date(entry.captured_at_epoch_seconds)
+            ),
+            None => {
+                "This board needs its files back — restore them from a backup file.".to_string()
+            }
+        });
+        if let Some(entry) = pending
+            && let Some(FirmwareVerb::Update(choice)) = firmware_verb(view)
+        {
             layout.restore = Some(publish(
                 RESTORE_FILES,
                 "upload",
@@ -224,11 +249,23 @@ pub fn device_layout_view(
                 )),
             ));
         }
-        layout.download = Some(publish(
-            DOWNLOAD_BACKUP,
-            "download",
-            DeviceBackupOp::action_for(device),
+        // Offered beside Restore files when one exists, and in its place
+        // when it does not (Decision 11, plan P01): the file itself is not
+        // a fillable offer parameter, so pressing this for real opens a
+        // file picker (the web shell intercepts the click) rather than
+        // dispatching the plain op published here.
+        layout.restore_from_file = Some(publish(
+            RESTORE_FROM_FILE,
+            "upload",
+            DeviceRestoreFromFileOp::action_for(device),
         ));
+        if pending.is_some() {
+            layout.download = Some(publish(
+                DOWNLOAD_BACKUP,
+                "download",
+                DeviceBackupOp::action_for(device),
+            ));
+        }
         return Some(layout);
     }
     None
@@ -394,6 +431,7 @@ mod tests {
             true,
             Some(&staging),
             None,
+            None,
             &mut UiOfferTree::new(),
         )
         .expect("the refusal");
@@ -437,6 +475,7 @@ mod tests {
                 has_uid,
                 None,
                 Some(&entry),
+                None,
                 &mut UiOfferTree::new(),
             )
             .is_some_and(|layout| layout.restore.is_some())
@@ -455,13 +494,44 @@ mod tests {
                 &view,
                 prefix(),
                 BoardFs::Mounted,
-                false,
+                true,
+                None,
                 None,
                 None,
                 &mut UiOfferTree::new()
             )
             .is_none(),
-            "no backup, nothing to offer"
+            "the board has its own files and identity back — nothing to offer"
+        );
+    }
+
+    /// Decision 11 (plan P01): a board that needs its files back offers
+    /// "Restore from a backup file…" even when THIS browser holds no
+    /// pending backup of its own — the gap an interrupted migration can
+    /// leave when its only surviving copy is the download.
+    #[test]
+    fn restore_from_file_is_offered_with_no_pending_backup_at_all() {
+        let view = running_c6();
+        let layout = device_layout_view(
+            &view,
+            prefix(),
+            BoardFs::Formatted,
+            false,
+            None,
+            None,
+            Some("60:55:f9:0a:0b:0c"),
+            &mut UiOfferTree::new(),
+        )
+        .expect("a board needing its files back always has something to offer");
+        assert!(layout.restore.is_none(), "no pending backup to restore");
+        assert!(layout.download.is_none(), "nothing stored here to download");
+        assert!(
+            layout.restore_from_file.is_some(),
+            "a file picker is still offered"
+        );
+        assert_eq!(
+            layout.current_base_mac.as_deref(),
+            Some("60:55:f9:0a:0b:0c")
         );
     }
 
@@ -526,6 +596,7 @@ mod tests {
             true,
             None,
             None,
+            None,
             &mut offers,
         )
         .expect("the question");
@@ -547,6 +618,7 @@ mod tests {
             prefix(),
             BoardFs::LegacyHeld,
             true,
+            None,
             None,
             None,
             &mut offers,
@@ -575,6 +647,7 @@ mod tests {
             false,
             None,
             Some(&entry),
+            None,
             &mut offers,
         )
         .expect("the restore line");
@@ -599,6 +672,7 @@ mod tests {
             prefix(),
             BoardFs::LegacyHeld,
             true,
+            None,
             None,
             None,
             &mut UiOfferTree::new(),

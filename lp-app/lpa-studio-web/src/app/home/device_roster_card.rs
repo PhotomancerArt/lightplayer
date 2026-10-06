@@ -126,12 +126,13 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    DeviceActivityView, DeviceCardFeedView, DeviceEscape, DeviceFeedOp, DeviceLoadedProject,
-    DeviceStatus, DeviceView, FeedLiveness, OfferArgs, PendingLinkView, RENAME_NAME_PARAM,
-    UiAction, UiDeviceUpdate, UiExampleCard, UiOffer, UiPackageCard, UiRuntimeBand, UiStatus,
-    UiStatusKind, UiUnlockOffer, UpdateLight, UpdateRowKind, device_firmware_line,
-    device_identity_line, device_status_kind, escape_verb, firmware_face_preview_sentence,
-    pending_firmware_line, pending_identity_rows,
+    DeviceActivityView, DeviceCardFeedView, DeviceEscape, DeviceFeedOp, DeviceId,
+    DeviceLoadedProject, DeviceStatus, DeviceView, FeedLiveness, OfferArgs, PendingLinkView,
+    RENAME_NAME_PARAM, UiAction, UiDeviceUpdate, UiExampleCard, UiOffer, UiPackageCard,
+    UiRuntimeBand, UiStatus, UiStatusKind, UiUnlockOffer, UpdateLight, UpdateRowKind,
+    check_backup_file, device_firmware_line, device_identity_line, device_restore_from_file_action,
+    device_status_kind, escape_verb, firmware_face_preview_sentence, pending_firmware_line,
+    pending_identity_rows,
 };
 
 use super::device_pick_popover::{
@@ -374,6 +375,19 @@ pub(crate) fn DeviceRosterCard(
     );
     let restore_files = offered(layout.as_ref().and_then(|layout| layout.restore.as_ref()));
     let backup_download = offered(layout.as_ref().and_then(|layout| layout.download.as_ref()));
+    // "Restore from a backup file…" (Decision 11, plan P01): offered
+    // whenever `restore_files` is — and also in its place when this
+    // browser holds no pending backup of its own. Pressing it for real
+    // opens a file picker, which the published offer cannot do on its own
+    // (see `device_backup_import`'s module doc), so this card never hands
+    // its `UiAction` straight to `ActionButton`.
+    let restore_from_file = layout
+        .as_ref()
+        .and_then(|layout| layout.restore_from_file.as_ref())
+        .is_some();
+    let current_base_mac = layout
+        .as_ref()
+        .and_then(|layout| layout.current_base_mac.clone());
     let sheet_verbs =
         layout_sheet
             .as_ref()
@@ -634,15 +648,23 @@ pub(crate) fn DeviceRosterCard(
                             variant: ActionButtonVariant::Quiet,
                             on_action,
                         }
-                    } else if let Some(action) = restore_files.filter(|_| !firmware_blocked) {
-                        // A board that came back without its files while
-                        // a backup of them waits in this browser.
-                        ActionButton {
-                            key: "{\"restore-files\"}",
-                            action,
-                            running: false,
-                            variant: ActionButtonVariant::Quiet,
-                            on_action,
+                    } else if (restore_files.is_some() || restore_from_file) && !firmware_blocked {
+                        // A board that came back without its files: when a
+                        // backup of them waits in this browser, Restore
+                        // files puts it straight back; "Restore from a
+                        // backup file…" is offered beside it, and ALONE
+                        // when this browser holds no backup of its own
+                        // (Decision 11, plan P01) — the gap an interrupted
+                        // migration can leave when its only copy is the
+                        // download.
+                        if let Some(action) = restore_files {
+                            ActionButton {
+                                key: "{\"restore-files\"}",
+                                action,
+                                running: false,
+                                variant: ActionButtonVariant::Quiet,
+                                on_action,
+                            }
                         }
                         if let Some(action) = backup_download {
                             ActionButton {
@@ -650,6 +672,13 @@ pub(crate) fn DeviceRosterCard(
                                 action,
                                 running: false,
                                 variant: ActionButtonVariant::Quiet,
+                                on_action,
+                            }
+                        }
+                        if restore_from_file {
+                            RestoreFromFileButton {
+                                device,
+                                current_base_mac: current_base_mac.clone(),
                                 on_action,
                             }
                         }
@@ -1946,10 +1975,141 @@ fn runtime_band_class() -> &'static str {
      tw:leading-6 tw:text-status-bound-foreground"
 }
 
+/// "Restore from a backup file…" (Decision 11, plan P01): a plain button
+/// wearing the same quiet chip as every other verb, paired with a hidden
+/// file input — a file dialog cannot be a [`UiAction`], the same reasoning
+/// as the project library's own zip Import
+/// (`crate::app::home::projects_page`). Core's own offer at this card's
+/// `restore-from-file` path exists only so the app agent can SEE this is
+/// possible (`needs_user_activation`); pressing it for real never reaches
+/// that op — picking a file reads its bytes and dispatches
+/// [`device_restore_from_file_action`]'s action directly.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn RestoreFromFileButton(
+    device: DeviceId,
+    current_base_mac: Option<String>,
+    on_action: EventHandler<UiAction>,
+) -> Element {
+    let input_id = format!("restore-from-file-{}", device.0);
+    let picked = restore_from_file_handler(device, current_base_mac, on_action);
+    rsx! {
+        button {
+            class: quiet_action_class(),
+            r#type: "button",
+            title: "Pick a backup .zip from your computer and replace this board's files with it.",
+            onclick: {
+                let input_id = input_id.clone();
+                move |_| open_restore_from_file_picker(&input_id)
+            },
+            span { class: "tw:inline-flex tw:h-[15px] tw:w-[15px] tw:items-center tw:justify-center", aria_hidden: "true",
+                StudioIcon { name: StudioIconName::Upload, size: 14 }
+            }
+            span { "Restore from a backup file…" }
+        }
+        input {
+            class: "tw:hidden",
+            id: "{input_id}",
+            r#type: "file",
+            accept: ".zip",
+            onchange: move |event| picked(event.files()),
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn open_restore_from_file_picker(input_id: &str) {
+    use wasm_bindgen::JsCast;
+    if let Some(input) = web_sys::window()
+        .and_then(|window| window.document())
+        .and_then(|document| document.get_element_by_id(input_id))
+        .and_then(|element| element.dyn_into::<web_sys::HtmlElement>().ok())
+    {
+        input.click();
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn open_restore_from_file_picker(_input_id: &str) {}
+
+/// Read the picked `.zip`, ask the one question a mismatched backup ever
+/// asks (a native confirm — the same `window.confirm` idiom
+/// `unsaved_gate.rs` uses for a quick sanity check ahead of a destructive
+/// action), and dispatch the real import. A refused archive is said in
+/// words, never a raw code, through a native alert: this click never goes
+/// near `on_action`'s generic dispatch until the file has already checked
+/// out.
+fn restore_from_file_handler(
+    device: DeviceId,
+    current_base_mac: Option<String>,
+    on_action: EventHandler<UiAction>,
+) -> impl Fn(Vec<dioxus::html::FileData>) + Clone + 'static {
+    move |files: Vec<dioxus::html::FileData>| {
+        let current_base_mac = current_base_mac.clone();
+        spawn(async move {
+            let Some(file) = files.into_iter().next() else {
+                return;
+            };
+            let name = file.name();
+            if !name.to_lowercase().ends_with(".zip") {
+                say(&format!("{name} is not a backup .zip"));
+                return;
+            }
+            let bytes = match file.read_bytes().await {
+                Ok(bytes) => bytes.to_vec(),
+                Err(error) => {
+                    log::warn!("restore from file: could not read {name}: {error}");
+                    say(&format!("{name} could not be read"));
+                    return;
+                }
+            };
+            match check_backup_file(&bytes, current_base_mac.as_deref()) {
+                Err(message) => say(&message),
+                Ok(Some(mismatch)) => {
+                    if !confirm(&format!("{mismatch} Restore it onto this board anyway?")) {
+                        return;
+                    }
+                    on_action.call(device_restore_from_file_action(device, name, bytes));
+                }
+                Ok(None) => {
+                    on_action.call(device_restore_from_file_action(device, name, bytes));
+                }
+            }
+        });
+    }
+}
+
+/// One native dialog, in words — never a raw code (plan P01). Host builds
+/// (and any context without a `window`) just log it.
+#[cfg(target_arch = "wasm32")]
+fn say(message: &str) {
+    let _ = web_sys::window().and_then(|window| window.alert_with_message(message).ok());
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn say(message: &str) {
+    log::warn!("{message}");
+}
+
+/// The one question a mismatched backup ever asks (ease over ceremony: no
+/// second confirmation stacks on top of it). Host builds proceed — the gate
+/// is a browser affordance, same reasoning as `confirm_discarding_unsaved`.
+#[cfg(target_arch = "wasm32")]
+fn confirm(message: &str) -> bool {
+    web_sys::window()
+        .and_then(|window| window.confirm_with_message(message).ok())
+        .unwrap_or(true)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn confirm(_message: &str) -> bool {
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lpa_studio_core::{DeviceId, UiStatusKind};
+    use lpa_studio_core::UiStatusKind;
     // Reset over Bluetooth is drawn disabled in every card state: core's
     // `device_offers` and `pending_link_offers` tests own that now (the card
     // draws the offer it is given).
