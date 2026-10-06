@@ -22,6 +22,26 @@
 //                         it for `LP_EMU_JIT_MMIO_CENSUS=1`, which is the only
 //                         way to reach an environment-gated diagnostic inside
 //                         a wasm row. The page never sets one.
+//   --file <slug>=<path>  repeatable; an image from outside the staged
+//                         manifest, run as row `<slug>`. A `.bin` is a whole
+//                         flash chip (a merged image, optionally with a
+//                         filesystem built by `lp-cli hardware lpfs fixture`)
+//                         booted ROM-up through the real bootloader — the way
+//                         a Studio tab boots a board; anything else is an ELF,
+//                         direct-loaded.
+//   --variant <name>=<args>
+//                         repeatable; run every row once per variant, with
+//                         `<args>` (space-separated) added to the emulator's
+//                         argv: `--variant off=` `--variant fast='--seams
+//                         led=fast'`. Variants interleave within each
+//                         repetition, so an A/B is taken under one load.
+//   --repeat <N>          run every (row, variant) N times, interleaved; quote
+//                         the best (default 1).
+//
+// Every row also reports `user s`: this process's user CPU over the run
+// (`process.cpuUsage`). On a ROM-up row the translator is off (DD19) and user
+// CPU is the emulator's; on a translated row it includes the engine's own
+// background compile threads, which is why the ladder quotes wall time there.
 //
 // JD19: every generated-code A/B is measured in BOTH engines before it reaches
 // a conclusion, and `bun` is JavaScriptCore — the phone's family — while `node`
@@ -40,7 +60,12 @@ function parseArgs(argv) {
   const o = {
     stage: 'target/emu-bench-web', images: [], grades: [], modes: [], fnBlocks: [],
     timeout: '5500ms', wallTimeout: 600, exitOn: false, json: null, tail: false,
-    extraArgs: [], env: {}, dump: null,
+    extraArgs: [], env: {}, dump: null, files: [], variants: [], repeat: 1,
+  };
+  const pair = (flag, kv) => {
+    const at = kv.indexOf('=');
+    if (at < 1) throw new Error(flag + ' wants <name>=<value>, got ' + kv);
+    return [kv.slice(0, at), kv.slice(at + 1)];
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -57,6 +82,9 @@ function parseArgs(argv) {
     else if (a === '--tail') o.tail = true;
     else if (a === '--arg') o.extraArgs.push(next());
     else if (a === '--dump') o.dump = next();
+    else if (a === '--file') { const [slug, path] = pair(a, next()); o.files.push([slug, path]); o.images.push(slug); }
+    else if (a === '--variant') { const [name, args] = pair(a, next()); o.variants.push([name, args.split(' ').filter(Boolean)]); }
+    else if (a === '--repeat') o.repeat = Number(next());
     else if (a === '--env') { const kv = next(); const i2 = kv.indexOf('='); if (i2 < 0) throw new Error('--env wants NAME=value, got ' + kv); o.env[kv.slice(0, i2)] = kv.slice(i2 + 1); }
     else if (a === '-h' || a === '--help') { console.log(readFileSync(new URL(import.meta.url)).toString().split('\n').filter((l) => l.startsWith('//')).join('\n')); process.exit(0); }
     else throw new Error('unknown option ' + a);
@@ -79,6 +107,14 @@ function engineName() {
 const o = parseArgs(process.argv.slice(2));
 const manifest = JSON.parse(readFileSync(join(o.stage, 'manifest.json'), 'utf8'));
 const bySlug = Object.fromEntries(manifest.images.map((i) => [i.slug, i]));
+// `--file` images: named in the module's sandbox by their kind, which is what
+// `argsFor` reads to choose `--merged` (ROM-up) over `--elf`.
+const fileBytes = {};
+for (const [slug, path] of o.files) {
+  bySlug[slug] = { slug, elf: slug + (path.endsWith('.bin') ? '.bin' : '.elf') };
+  fileBytes[slug] = new Uint8Array(readFileSync(path));
+}
+if (!o.variants.length) o.variants = [['-', []]];
 
 const wasmBytes = readFileSync(join(o.stage, 'emu.wasm'));
 const t0 = performance.now();
@@ -95,8 +131,8 @@ console.log('');
 // number without one is not comparable to any other wall-clock number. Rows
 // taken in ONE invocation are comparable to each other whatever the load;
 // rows from two invocations are not, unless the loads match.
-const head = ['image', 'grade', 'mode', 'fn', 'wall s', 'ns/instr', 'real time', 'cover %', 'stay', 'esc %', 'load', 'uart sha256', 'trap sha256'];
-const w = [16, 5, 6, 5, 9, 9, 10, 8, 8, 7, 6, 18, 18];
+const head = ['image', 'variant', 'grade', 'mode', 'fn', 'wall s', 'user s', 'ns/instr', 'real time', 'cover %', 'stay', 'esc %', 'load', 'uart sha256', 'trap sha256'];
+const w = [16, 8, 5, 6, 5, 9, 9, 9, 10, 8, 8, 7, 6, 18, 18];
 const row = (cells) => cells.map((c, i) => String(c).padStart(i === 0 ? -w[i] : w[i]).slice(0, Math.max(w[i], String(c).length))).join(' ');
 console.log(head.map((h, i) => (i === 0 ? h.padEnd(w[i]) : h.padStart(w[i]))).join(' '));
 console.log(head.map((_, i) => '-'.repeat(w[i])).join(' '));
@@ -105,45 +141,69 @@ const rows = [];
 for (const slug of o.images) {
   const image = bySlug[slug];
   if (!image) throw new Error('no image ' + slug + ' in ' + o.stage + '/manifest.json');
-  const elfBytes = new Uint8Array(readFileSync(join(o.stage, image.elf)));
+  const elfBytes = fileBytes[slug] ?? new Uint8Array(readFileSync(join(o.stage, image.elf)));
   for (const grade of o.grades) {
     for (const mode of o.modes) {
       for (const fnBlocks of mode === 'jit' ? o.fnBlocks : [null]) {
-        const r = await runOnce({
-          compiled, image, elfBytes, grade, mode, fnBlocks,
-          timeout: o.timeout, wallTimeout: o.wallTimeout, exitOn: o.exitOn,
-          extraArgs: o.extraArgs, env: o.env, keepText: !!o.dump,
-        });
-        if (o.dump) {
-          mkdirSync(o.dump, { recursive: true });
-          const p2 = join(o.dump, `${slug}-${grade}-${mode}-${fnBlocks ?? 'x'}.log`);
-          writeFileSync(p2, r.fullText ?? '');
-          delete r.fullText;
-          console.log('  -> ' + p2);
+        for (let rep = 0; rep < o.repeat; rep++) {
+          for (const [variant, vargs] of o.variants) {
+            const cpu0 = process.cpuUsage();
+            const r = await runOnce({
+              compiled, image, elfBytes, grade, mode, fnBlocks,
+              timeout: o.timeout, wallTimeout: o.wallTimeout, exitOn: o.exitOn,
+              extraArgs: [...o.extraArgs, ...vargs], env: o.env, keepText: !!o.dump,
+            });
+            r.userS = process.cpuUsage(cpu0).user / 1e6;
+            r.variant = variant;
+            r.rep = rep;
+            if (o.dump) {
+              mkdirSync(o.dump, { recursive: true });
+              const p2 = join(o.dump, `${slug}-${variant}-${grade}-${mode}-${fnBlocks ?? 'x'}-${rep}.log`);
+              writeFileSync(p2, r.fullText ?? '');
+              delete r.fullText;
+              console.log('  -> ' + p2);
+            }
+            r.engine = engineName();
+            r.loadavg = loadavg()[0];
+            rows.push(r);
+            console.log([
+              slug.padEnd(w[0]),
+              variant.padStart(w[1]),
+              grade.padStart(w[2]),
+              mode.padStart(w[3]),
+              String(fnBlocks ?? '-').padStart(w[4]),
+              (r.wallMs / 1000).toFixed(2).padStart(w[5]),
+              r.userS.toFixed(2).padStart(w[6]),
+              (r.nsPerInstr ? r.nsPerInstr.toFixed(2) : '-').padStart(w[7]),
+              (r.realtime ? r.realtime.toFixed(3) + 'x' : '-').padStart(w[8]),
+              (r.coverage !== undefined ? r.coverage.toFixed(2) : '-').padStart(w[9]),
+              (r.meanStay ? r.meanStay.toFixed(1) : '-').padStart(w[10]),
+              (r.escapeRate !== undefined ? (100 * r.escapeRate).toFixed(3) : '-').padStart(w[11]),
+              r.loadavg.toFixed(1).padStart(w[12]),
+              (r.uartSha256 || '-').slice(0, 16).padStart(w[13]),
+              (r.trapSha256 || '-').slice(0, 16).padStart(w[14]),
+            ].join(' '));
+            if (r.selftestError) console.log('  !! table selftest: ' + r.selftestError);
+            if (r.trap) console.log('  !! trap: ' + r.trap.split('\n')[0]);
+            if (o.tail) console.log(r.tail.split('\n').map((l) => '  | ' + l).join('\n'));
+          }
         }
-        r.engine = engineName();
-        r.loadavg = loadavg()[0];
-        rows.push(r);
-        console.log([
-          slug.padEnd(w[0]),
-          grade.padStart(w[1]),
-          mode.padStart(w[2]),
-          String(fnBlocks ?? '-').padStart(w[3]),
-          (r.wallMs / 1000).toFixed(2).padStart(w[4]),
-          (r.nsPerInstr ? r.nsPerInstr.toFixed(2) : '-').padStart(w[5]),
-          (r.realtime ? r.realtime.toFixed(3) + 'x' : '-').padStart(w[6]),
-          (r.coverage !== undefined ? r.coverage.toFixed(2) : '-').padStart(w[7]),
-          (r.meanStay ? r.meanStay.toFixed(1) : '-').padStart(w[8]),
-          (r.escapeRate !== undefined ? (100 * r.escapeRate).toFixed(3) : '-').padStart(w[9]),
-          r.loadavg.toFixed(1).padStart(w[10]),
-          (r.uartSha256 || '-').slice(0, 16).padStart(w[11]),
-          (r.trapSha256 || '-').slice(0, 16).padStart(w[12]),
-        ].join(' '));
-        if (r.selftestError) console.log('  !! table selftest: ' + r.selftestError);
-        if (r.trap) console.log('  !! trap: ' + r.trap.split('\n')[0]);
-        if (o.tail) console.log(r.tail.split('\n').map((l) => '  | ' + l).join('\n'));
       }
     }
+  }
+}
+
+// Best of N per (row, variant), when anything repeated or varied.
+if (o.repeat > 1 || o.variants.length > 1) {
+  const best = new Map();
+  for (const r of rows) {
+    const key = [r.image?.slug ?? r.slug, r.variant, r.grade, r.mode, r.fnBlocks ?? '-'].join(' ');
+    const b = best.get(key);
+    if (!b || r.wallMs < b.wallMs) best.set(key, r);
+  }
+  console.log('\nbest of ' + o.repeat + ' (wall s / user s):');
+  for (const [key, r] of best) {
+    console.log('  ' + key.padEnd(44) + (r.wallMs / 1000).toFixed(2).padStart(8) + r.userS.toFixed(2).padStart(8));
   }
 }
 

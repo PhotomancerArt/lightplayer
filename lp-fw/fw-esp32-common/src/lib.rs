@@ -24,6 +24,8 @@ pub mod logger;
 #[cfg(feature = "wifi")]
 pub mod net;
 pub mod output;
+#[cfg(target_arch = "riscv32")]
+pub mod seams;
 pub mod serial;
 pub mod time;
 

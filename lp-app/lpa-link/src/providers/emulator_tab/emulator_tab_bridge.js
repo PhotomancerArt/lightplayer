@@ -201,7 +201,7 @@ function drain(e) {
  * is the only honest moment (see `resolveUrls`). The module's JS host is
  * never pinned: it is always the page's, read from the same manifest.
  */
-export function openEmuPort({ uid, mac, moduleUrl, manifestUrl, persistKey }) {
+export function openEmuPort({ uid, mac, moduleUrl, manifestUrl, persistKey, seams }) {
   const id = nextId++;
   const board = {
     id: uid,
@@ -213,11 +213,7 @@ export function openEmuPort({ uid, mac, moduleUrl, manifestUrl, persistKey }) {
     // Absolute from here on: the worker resolves the image against this base
     // (see `packageUrl`).
     manifestUrl: packageUrl(manifestUrl),
-    // The board's own config text, the CLI's words. `usb_host=attached` is
-    // the cable in with the port open from power-on — a board whose port
-    // started closed comes back from every reset with nothing draining
-    // (`emulator_tab.js`'s TAB_BOARD says why at length).
-    cfg: ["boot=rom-up", "strap=app", "usb_host=attached", `mac=${mac}`, ""].join("\n"),
+    cfg: emuBoardCfg({ mac, seams }),
   };
   const e = {
     uid,
@@ -230,6 +226,11 @@ export function openEmuPort({ uid, mac, moduleUrl, manifestUrl, persistKey }) {
     attached: true,
     open: false,
     dilation: null,
+    // What this board asked for (`led=fast`, `none`) and the worker's last
+    // word on it, for `emuSeamsInfo`.
+    seamsAsked: seams ?? "none",
+    seams: null,
+    reboots: 0,
     queue: Promise.resolve(),
   };
   ports.set(id, e);
@@ -245,6 +246,8 @@ export function openEmuPort({ uid, mac, moduleUrl, manifestUrl, persistKey }) {
     port.onBytes((bytes) => e.chunks.push(bytes));
     port.onStats((stats) => {
       e.dilation = stats?.dilation ?? e.dilation;
+      e.seams = stats?.seams ?? e.seams;
+      e.reboots = stats?.reboots ?? e.reboots;
     });
     e.port = port;
     return port;
@@ -338,6 +341,44 @@ export function isEmuStarting(id) {
  */
 export function emuDilation(id) {
   return entry(id).dilation;
+}
+
+/**
+ * This board's emulator seams as the worker last reported them, with what it
+ * asked for and how many times it has restarted — `{asked, reboots, engaged,
+ * none_why}`, or `null` before the first stats tick. The link turns it into
+ * one journal line per chip start (`emulator_tab_seams.rs`).
+ */
+export function emuSeamsInfo(id) {
+  const e = entry(id);
+  if (!e.seams) return null;
+  return {
+    asked: e.seamsAsked,
+    reboots: e.reboots,
+    engaged: Array.isArray(e.seams.engaged) ? e.seams.engaged : [],
+    none_why: e.seams.none_why ?? null,
+  };
+}
+
+/**
+ * A Devices-page board's config text, the CLI's words.
+ *
+ * `usb_host=attached` is the cable in with the port open from power-on — a
+ * board whose port started closed comes back from every reset with nothing
+ * draining (`emulator_tab.js`'s TAB_BOARD says why at length).
+ *
+ * `seams` is what the board asks the emulator for (`emulator_tab_seams.rs`
+ * decides it: `led=fast` for an end user, or `?seams=`). Asked SOFTLY —
+ * `seams_prefer=` — because a saved board can hold firmware older than this
+ * Studio, and a soft request there boots seam-free and says why instead of
+ * refusing to boot. `none` (or nothing) asks for nothing: today's machine.
+ */
+export function emuBoardCfg({ mac, seams }) {
+  const lines = ["boot=rom-up", "strap=app", "usb_host=attached", `mac=${mac}`];
+  const atoms = (seams ?? "").trim();
+  if (atoms && atoms !== "none") lines.push(`seams_prefer=${atoms}`);
+  lines.push("");
+  return lines.join("\n");
 }
 
 /** Reset the chip. Not a replug: the cable and the port stay as they are. */

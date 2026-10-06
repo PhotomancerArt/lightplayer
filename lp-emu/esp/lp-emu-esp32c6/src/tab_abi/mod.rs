@@ -62,8 +62,11 @@ use crate::flash::FlashBacking;
 use crate::loader::{EfuseIdentity, ResetCause};
 use crate::machine::{AppSource, BootMode, Esp32C6Builder, Outcome, TimeGrade, Uart0Sink, UsbHost};
 
-/// The ABI revision. Mirrored by `emulator_worker.js`'s `EMU_ABI`.
-pub const ABI_VERSION: i32 = 1;
+/// The ABI revision. Mirrored by `emulator_wasi.js`'s `EMU_ABI`.
+///
+/// 2: the `seams=` / `seams_prefer=` config keys, [`emu_seams_info`] and the
+/// `SEAM` outcome (docs/adr/2026-10-05-emulator-seams.md).
+pub const ABI_VERSION: i32 = 2;
 
 /// Every control reply this protocol produces fits here — `pins` with all
 /// thirty-one pads is the longest, at a few hundred bytes. The host keeps
@@ -124,6 +127,9 @@ pub mod outcome_code {
     /// The guest wrote itself to sleep (`Outcome::DeepSleep`); the wake
     /// itself is not modelled.
     pub const DEEP_SLEEP: i32 = 7;
+    /// A strict seam request cannot engage (`Outcome::Seam`). A tab asks
+    /// softly (`seams_prefer=`), so a Studio board never sees it.
+    pub const SEAM: i32 = 8;
 }
 
 pub fn code_for(outcome: &Outcome) -> i32 {
@@ -136,6 +142,7 @@ pub fn code_for(outcome: &Outcome) -> i32 {
         Outcome::Breakpoint { .. } => outcome_code::BREAKPOINT,
         Outcome::WallTimeout { .. } => outcome_code::WALL_TIMEOUT,
         Outcome::DeepSleep { .. } => outcome_code::DEEP_SLEEP,
+        Outcome::Seam { .. } => outcome_code::SEAM,
     }
 }
 
@@ -161,6 +168,9 @@ pub struct Config {
     usb_host: UsbHost,
     strap: Strap,
     reset_cause: ResetCause,
+    /// Emulator seams (`seams=` strict, `seams_prefer=` soft). The capability
+    /// defaults — empty today — unless asked: a tab board is today's machine.
+    seams: lp_emu_esp_common::seam::SeamRequest,
 }
 
 impl Default for Config {
@@ -180,6 +190,7 @@ impl Default for Config {
             usb_host: UsbHost::Absent,
             strap: Strap::App,
             reset_cause: ResetCause::PowerOn,
+            seams: lp_emu_esp_common::seam::SeamRequest::default(),
         }
     }
 }
@@ -246,10 +257,24 @@ impl Config {
                     cfg.reset_cause = ResetCause::parse(value)
                         .ok_or_else(|| bad("a reset cause (poweron, usb-uart-hpsys)"))?;
                 }
+                // `seams=led=fast` splits on the FIRST `=`, so the atom keeps
+                // its own. Strict refuses an image it cannot engage on;
+                // `seams_prefer=` engages what the image allows and says why
+                // not otherwise — what a Studio board asks.
+                "seams" | "seams_prefer" => {
+                    let strength = if key == "seams" {
+                        lp_emu_esp_common::seam::Strength::Strict
+                    } else {
+                        lp_emu_esp_common::seam::Strength::Soft
+                    };
+                    cfg.seams = std::mem::take(&mut cfg.seams)
+                        .with(value, strength)
+                        .map_err(|e| format!("line {}: {key}: {e}", n + 1))?;
+                }
                 other => {
                     return Err(format!(
                         "line {}: no config key `{other}` (mac, boot, grade, flash_len, strict, \
-                         reboot_on_reset, usb_host, strap, reset_cause)",
+                         reboot_on_reset, usb_host, strap, reset_cause, seams, seams_prefer)",
                         n + 1
                     ));
                 }
@@ -270,6 +295,7 @@ impl Config {
             .strap(self.strap)
             .reset_cause(self.reset_cause)
             .usb_host(self.usb_host)
+            .seams(self.seams.clone())
             // Both logs are collected in memory and drained by the host; the
             // module has no stdout worth writing to.
             .uart0(Uart0Sink::Memory)
@@ -282,6 +308,46 @@ impl Config {
         }
         builder
     }
+}
+
+/// What [`emu_seams_info`] answers: this chip start's emulator seams, as one
+/// line of JSON —
+/// `{"label":"lp-emu:esp32c6:t2+led=fast","engaged":["led=fast"],"lines":[…],"none_why":null}`.
+/// `none_why` is the reason a soft request engaged nothing, or `null`.
+/// Valid after `emu_create` and after every restart; a ROM-up board's seams
+/// resolve once its app runs, so until then `engaged` is empty and so is
+/// `lines`.
+pub fn seams_info_json(machine: &crate::machine::Esp32C6Machine) -> String {
+    let s = machine.seams();
+    let list = |items: &mut dyn Iterator<Item = String>| {
+        items.map(|i| json_string(&i)).collect::<Vec<_>>().join(",")
+    };
+    format!(
+        "{{\"label\":{},\"engaged\":[{}],\"lines\":[{}],\"none_why\":{}}}",
+        json_string(&machine.configuration_label()),
+        list(&mut s.engaged_impls().iter().map(|i| i.atom())),
+        list(&mut s.lines.iter().cloned()),
+        s.none_why
+            .as_deref()
+            .map_or_else(|| "null".to_string(), json_string)
+    )
+}
+
+/// A JSON string literal: the quote, the backslash and control bytes escaped.
+fn json_string(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() + 2);
+    out.push('"');
+    for c in text.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
 }
 
 pub fn parse_flag(value: &str) -> Option<bool> {

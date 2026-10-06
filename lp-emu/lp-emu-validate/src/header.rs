@@ -199,6 +199,19 @@ pub struct TranscriptHeader {
     /// unchanged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub quantum: Option<u32>,
+    /// **The emulator seams this capture ran with**, `{"<seam>": "<impl>"}`
+    /// (ADR docs/adr/2026-10-05-emulator-seams.md). Tools read this, never
+    /// the label.
+    ///
+    /// Additive and written **only when a seam was engaged**, so every
+    /// existing sidecar and every seam-free record stays byte-identical. A
+    /// performance seam never gets here: `validate record` refuses one.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub seams: BTreeMap<String, String>,
+    /// The seam identity those seams engaged under (`SEAM_ABI_ID`, sixteen
+    /// hex digits); present exactly when `seams` is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seam_abi: Option<String>,
     /// What this configuration is trusted for, per field class.
     #[serde(default)]
     pub trust: TrustTable,
@@ -444,6 +457,8 @@ mod tests {
             machine: None,
             baud: None,
             quantum: None,
+            seams: Default::default(),
+            seam_abi: None,
             trust: TrustTable::default(),
         }
     }
@@ -677,5 +692,44 @@ mod tests {
         };
         let err = h.agrees_with_inband(&ib).unwrap_err().to_string();
         assert!(err.contains("firmware_features"), "{err}");
+    }
+
+    /// A sidecar with no seam serialises to exactly the bytes committed before
+    /// the `seams` / `seam_abi` fields existed — the golden is a committed
+    /// sidecar, read and written back, never edited.
+    #[test]
+    fn a_seam_free_sidecar_is_byte_identical_to_a_committed_one() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(
+            "../transcripts/esp32c6/rmt-chase/lp-emu-esp32c6-t1-2026-09-07-c0d62e360.txt.meta.json",
+        );
+        let committed = std::fs::read_to_string(&path).unwrap();
+        let h: TranscriptHeader = serde_json::from_str(&committed).unwrap();
+        assert!(h.seams.is_empty() && h.seam_abi.is_none());
+        let written = h.to_json().unwrap();
+        assert_eq!(written.trim_end(), committed.trim_end());
+        assert!(
+            !written.contains("seam"),
+            "no seam field on a seam-free sidecar"
+        );
+    }
+
+    /// With a seam engaged both fields appear, structured — tools read them,
+    /// never the label.
+    #[test]
+    fn an_engaged_seam_is_a_structured_field() {
+        let mut h = header();
+        h.seams.insert("net".into(), "lan".into());
+        h.seam_abi = Some("0123456789abcdef".into());
+        let json = h.to_json().unwrap();
+        assert!(
+            json.contains("\"seams\": {\n    \"net\": \"lan\"\n  }"),
+            "{json}"
+        );
+        assert!(
+            json.contains("\"seam_abi\": \"0123456789abcdef\""),
+            "{json}"
+        );
+        let back: TranscriptHeader = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.seams.get("net").map(String::as_str), Some("lan"));
     }
 }

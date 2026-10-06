@@ -21,6 +21,9 @@ path = "src/main.rs"
 lp-bootctl = { path = "../../lp-base/lp-bootctl" }
 # The version a build reports, resolved once and handed to both link passes.
 lp-app-version = { path = "../lp-app-version" }
+# The emulator seam table's layout: the build checks the table and every
+# seam function it names landed in the core (FD1 of the seams plan).
+lp-seam = { path = "../../lp-base/lp-seam" }
 # The ESP application image, bundled bootloader and partition table: the
 # pinned 3.3 library lp-cli already uses, without its CLI.
 espflash = { version = "3.3", default-features = false }

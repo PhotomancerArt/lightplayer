@@ -158,6 +158,9 @@ impl EmuLinkSource for BrowserEmuLinkSource {
             manifest_url,
             // The uid keys the image, so a Forget by uid finds it (D15).
             persist_key: Some(session.uid.clone()),
+            // The end-user choice: `led=fast`, asked softly, unless the page
+            // carried `?seams=` (`emulator_tab_seams.rs`).
+            seams: None,
         })
         .map_err(|error| error.to_string())?;
         // The link and the control share the port — and the board's one

@@ -123,6 +123,18 @@ mod std_impl {
         lock_exclusive(&lock_file)
             .map_err(|e| std::format!("Failed to acquire build lock: {e}"))?;
 
+        // Re-check under the lock: another thread of this process may have
+        // built and cached it while this one waited. Rebuilding here would
+        // re-copy over a file that thread's caller may be reading right now.
+        {
+            let cache = get_cache().lock().unwrap();
+            if let Some(Some(path)) = cache.get(&cache_key) {
+                if path.exists() {
+                    return Ok(path.clone());
+                }
+            }
+        }
+
         // Do not skip the build when a cached copy exists: the cache key does not include
         // dependency sources, so a stale binary would otherwise mask fixes in lp-engine / lpa-server.
 
@@ -141,7 +153,14 @@ mod std_impl {
 
         std::fs::create_dir_all(&cache_dir)
             .map_err(|e| std::format!("Failed to create cache dir: {e}"))?;
-        std::fs::copy(&cargo_output, &cached_path)
+        // Copy beside the cache path, then rename over it: a reader in another
+        // process (or one that got the path before this rebuild) sees the old
+        // file or the new one whole, never one `fs::copy` has just truncated —
+        // which is how `recovery_emu` once read "Invalid ELF section header".
+        let staging = cache_dir.join(std::format!("{cache_key}.{}.tmp", std::process::id()));
+        std::fs::copy(&cargo_output, &staging)
+            .map_err(|e| std::format!("Failed to cache binary: {e}"))?;
+        std::fs::rename(&staging, &cached_path)
             .map_err(|e| std::format!("Failed to cache binary: {e}"))?;
 
         // Update in-process cache
