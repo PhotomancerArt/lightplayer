@@ -8,14 +8,15 @@
 //! It is what would have caught the split image's dropped-tail defect
 //! (`docs/defects/2026-10-05-the-host-flasher-dropped-the-split-images-last-bytes.md`):
 //! a committed header over an engine whose last bytes never reached flash.
+//! It hashes on the SHA accelerator ([`super::hw_sha`]).
+//!
 //! An engine an update installs is hashed before it is committed (DM11), and
 //! its trial confirms on its link, so the guard does not run again after an
 //! over-the-air update.
 
-use sha2::{Digest, Sha256};
-
 use super::ENGINE_VADDR;
 use super::boot_state::BootState;
+use super::hw_sha;
 use super::split_flash::SplitFlash;
 
 /// Hash the mapped engine (`len` bytes behind [`ENGINE_VADDR`]) against
@@ -29,7 +30,7 @@ pub fn engine_guard(
     // SAFETY: `find_engine` mapped exactly `len` bytes of committed engine
     // behind the window; flash reads through the cache.
     let engine = unsafe { core::slice::from_raw_parts(ENGINE_VADDR as *const u8, len as usize) };
-    let sha: [u8; 32] = Sha256::digest(engine).into();
+    let sha = hw_sha::sha256(engine);
     let ms = started.elapsed().as_millis();
     if &sha != digest {
         log::error!(

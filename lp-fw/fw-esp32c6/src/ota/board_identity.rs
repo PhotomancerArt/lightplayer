@@ -1,19 +1,18 @@
 //! What the core says about itself to the update session: the facts of
 //! `lpc_update`'s `BoardFacts`, every one read from the image or the boot
 //! state — never re-typed — and the core's own SHA-256 (DM24, the core hash
-//! rule), computed once and cached.
+//! rule), computed once and cached — on the SHA accelerator ([`super::hw_sha`]).
 
 use core::cell::Cell;
 
+use super::boot_state::BootState;
+use super::hw_sha::BootSha256;
+use super::split_flash::SplitFlash;
 use critical_section::Mutex;
 use lp_bootctl::REGION_START;
 use lpc_update::board::{BoardFacts, EngineStatus, SessionMode};
 use lpc_update::build_id::BUILD_ID_LEN;
 use lpc_update::code_table::{LAYOUT_1, chip_code};
-use sha2::{Digest, Sha256};
-
-use super::boot_state::BootState;
-use super::split_flash::SplitFlash;
 
 /// The image's own identity, as `main.rs` holds it: the build id static and
 /// the digest slot the split tool patches, and the manifest core's words.
@@ -45,24 +44,29 @@ pub fn core_sha256(state: &BootState) -> [u8; 32] {
     }
     let started = embassy_time::Instant::now();
     let mut flash = SplitFlash::take();
-    let mut hasher = Sha256::new();
+    let mut hasher = BootSha256::new();
     let mut buf = alloc::vec![0u8; 4096];
     let end = state.core_off + state.core_len;
     let mut at = state.core_off;
+    // The flash reads' share of the time, apart from the hashing's.
+    let mut reading = embassy_time::Duration::from_ticks(0);
     while at < end {
         let n = (end - at).min(buf.len() as u32) as usize;
+        let read_started = embassy_time::Instant::now();
         if !flash.read(at, &mut buf[..n]) {
             log::error!("[OTA] core sha: a flash read failed at {at:#x}");
             return [0; 32];
         }
+        reading += read_started.elapsed();
         hasher.update(&buf[..n]);
         at += n as u32;
     }
-    let sha: [u8; 32] = hasher.finalize().into();
+    let sha = hasher.finalize();
     log::info!(
-        "[OTA] core sha in {} ms ({} B)",
+        "[OTA] core sha in {} ms ({} B; reading {} ms)",
         started.elapsed().as_millis(),
-        state.core_len
+        state.core_len,
+        reading.as_millis()
     );
     critical_section::with(|cs| CORE_SHA.borrow(cs).set(Some(sha)));
     sha
