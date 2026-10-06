@@ -1344,8 +1344,33 @@ async fn split_boot(mut core: CoreBoot) {
                 base_fs,
                 #[cfg(feature = "ble")]
                 radio_port,
+                #[cfg(all(
+                    feature = "radio",
+                    not(any(
+                        feature = "stress_s2",
+                        feature = "stress_s3",
+                        feature = "desk_espnow_meter"
+                    ))
+                ))]
+                radio_driver,
                 ..
             } = core;
+            // The ESP-NOW driver owns the Wi-Fi controller, and dropping it
+            // deinitializes Wi-Fi — which, with the radios in coexistence,
+            // took Bluetooth off the air too: core-only logged "advertising"
+            // and no central ever saw it (the fixture C6, 2026-10-06, the
+            // OTA M7 pre-walk). Core-only serves radio links now, so it
+            // keeps the driver for good; it never returns (every committed
+            // piece ends in a reset), so leaking it is holding it.
+            #[cfg(all(
+                feature = "radio",
+                not(any(
+                    feature = "stress_s2",
+                    feature = "stress_s3",
+                    feature = "desk_espnow_meter"
+                ))
+            ))]
+            core::mem::forget(radio_driver);
             // The update light: the strip the engine recorded, if any.
             let record = base_fs
                 .read_file(lpc_update::STATUS_LIGHT_PATH.as_path())
