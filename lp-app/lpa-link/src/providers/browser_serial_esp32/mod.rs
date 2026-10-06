@@ -60,7 +60,8 @@ pub use browser_serial::{BrowserSerialPortHandle, granted_ports, install_serial_
 /// real link and loop rather than a copy.
 pub mod web_serial_link {
     pub use super::browser_serial::{
-        link_config, open, release, send_client_json, take_errors, take_reads, take_wire_notes,
+        link_config, open, release, send_client_json, send_update, take_errors, take_reads,
+        take_updates, take_wire_notes,
     };
 }
 pub use port_client_io::LensTapLine;

@@ -1,11 +1,12 @@
 //! End-to-end update host tests: Studio's own controller, its real effects
 //! layer and update host, driving `lpc-update`'s model board.
 //!
-//! The transport double ([`RigLink`]) is what P7's channel-3 adapter will
-//! be: `LinkCommand::SendUpdate` goes into a [`BoardRig`]; every message the
+//! The transport double ([`RigLink`]) stands where the channel-3 adapter
+//! (`lpa-link`'s `device_link`, M7 P7) stands on a real port:
+//! `LinkCommand::SendUpdate` goes into a [`BoardRig`]; every message the
 //! rig sends comes back as `LinkEvent::Update`, and each `M` is also decoded
-//! into `LinkEvent::UpdateFacts` ([`update_facts_from_manifest`], the one
-//! place that conversion lives until the adapter carries it). A board
+//! into `LinkEvent::UpdateFacts` by the adapter's own mirror
+//! ([`update_facts_from_manifest_json`]). A board
 //! running its engine says hello on channel 1 (its MAC, so it gets a card)
 //! and sends heartbeats; a core-only board says nothing there. The rig's
 //! resets and power cuts close the link, and Studio's own reopen rung opens
@@ -25,14 +26,12 @@ use std::rc::Rc;
 use lpa_devices::identity::{EndpointKey, MacAddress, PeerIdentity};
 use lpa_devices::link::{Link, LinkCommand, LinkEvent, LinkInfo, UsbIds};
 use lpa_devices::wire::{BoardFs, ClientFrameBody, HelloFacts, ServerFrame};
-use lpa_devices::{
-    TerminalKind, UpdateBoardState, UpdateFacts, UpdateOutcomeFacts, UpdatePieceKind,
-    UpdateTransferFacts,
-};
+use lpa_devices::{TerminalKind, UpdateOutcomeFacts};
 use lpa_firmware_store::{
     EngineCache, EngineCacheEntry, EngineSource, FetchError, FirmwareFetch, FirmwareStore,
     LocalBoxFuture, MemoryEngineCache,
 };
+use lpa_link::device_link::update_facts_mirror::update_facts_from_manifest_json;
 use lpa_update::decide::{SourceEffect, SourceResult};
 use lpa_update::{DriverConfig, DriverEffect, HostBuild, HostIdentity, UpdateDriver, UpdateIntent};
 use lpc_access::{OpenTo, SecretEntry, Tier};
@@ -42,7 +41,7 @@ use lpc_firmware_release::{
 use lpc_update::board::{AccessFacts, LinkId as RigLinkId, LinkTrust, SessionConfig, SessionMode};
 use lpc_update::code_table::CHUNK;
 use lpc_update::testing::{BoardRig, BootFault, FakeBoard, ModelBuild};
-use lpc_update::{BoardManifest, BoardMessage, BoardState, PieceKind};
+use lpc_update::{BoardMessage, PieceKind};
 
 use crate::app::studio::offer_press_test_api::OfferPressTestApi;
 use crate::{
@@ -668,7 +667,7 @@ impl Board {
                 )
                 .into_iter()
                 .find_map(|o| match BoardMessage::decode(&o.bytes) {
-                    Ok(BoardMessage::Manifest(json)) => update_facts_from_manifest(json),
+                    Ok(BoardMessage::Manifest(json)) => update_facts_from_manifest_json(json),
                     _ => None,
                 })
         });
@@ -692,7 +691,7 @@ impl Board {
         }
         for bytes in outs {
             if let Ok(BoardMessage::Manifest(json)) = BoardMessage::decode(&bytes)
-                && let Some(facts) = update_facts_from_manifest(json)
+                && let Some(facts) = update_facts_from_manifest_json(json)
             {
                 self.events.push_back(LinkEvent::UpdateFacts(facts));
             }
@@ -786,37 +785,6 @@ impl Link for RigLink {
         }
         board.events.pop_front()
     }
-}
-
-/// What P7's channel-3 adapter will do with an `M`: the model's mirror of
-/// the board manifest, its JSON carried verbatim.
-pub(crate) fn update_facts_from_manifest(json: &[u8]) -> Option<UpdateFacts> {
-    let m = BoardManifest::from_json(json).ok()?;
-    Some(UpdateFacts {
-        state: match m.state {
-            BoardState::Running => UpdateBoardState::Running,
-            BoardState::NeedsEngine => UpdateBoardState::NeedsEngine,
-            BoardState::EngineCrashing => UpdateBoardState::EngineCrashing,
-            BoardState::Updating => UpdateBoardState::Updating,
-            BoardState::OnTrial => UpdateBoardState::OnTrial,
-            BoardState::Unknown => UpdateBoardState::Unknown,
-        },
-        version: Some(m.version.clone()),
-        target: Some(m.target.clone()),
-        build_id: Some(m.build_id.clone()),
-        transfer: m.transfer.map(|t| UpdateTransferFacts {
-            kind: match t.kind {
-                PieceKind::Core => UpdatePieceKind::Core,
-                PieceKind::Engine => UpdatePieceKind::Engine,
-            },
-            done: t.done,
-            total: t.total,
-            busy: t.busy,
-            build_hash: t.build_hash,
-        }),
-        refused_build: m.refused_build,
-        manifest_json: String::from_utf8_lossy(json).into_owned(),
-    })
 }
 
 /// The one board, granted when the test says.

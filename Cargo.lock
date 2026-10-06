@@ -6390,6 +6390,7 @@ dependencies = [
  "lpa-client",
  "lpa-devices",
  "lpc-model",
+ "lpc-update",
  "lpc-wire",
  "lpfs",
  "md-5",
