@@ -22,10 +22,23 @@
 //! unmarked chunk (it is written again) or a marked one that really was
 //! written.
 //!
+//! **Erasing ahead in blocks:** when the target has a block erase
+//! ([`UpdateTarget::block_size`]) and a chunk starts a block that lies wholly
+//! inside the piece with none of its chunks written, the whole block is
+//! erased at once, and its chunks are then programmed without a sector
+//! erase each. What is known erased lives in RAM only
+//! ([`Transfer::erased`]): a cut, a resume, a fault or a read-back mismatch
+//! forgets it, and the next chunk erases again (its sector, or its block
+//! when it starts one). The order inside a chunk is otherwise unchanged, so
+//! the rule above still holds: an unmarked chunk is written again, from an
+//! erase.
+//!
 //! **Send-ahead:** a `D`/`Z` for any chunk but the one waited for, or from a
 //! link that does not own the transfer, is ignored. **`Z`** is decoded
 //! through [`UpdateWindow`]; a `Z` that does not decode to exactly the
 //! chunk is asked for again with the flag clear (raw).
+
+use core::ops::Range;
 
 use crate::chunk::{ChunkEncoding, ChunkRef};
 use crate::code_table::CHUNK;
@@ -93,6 +106,7 @@ impl BoardSession {
         t.raw_next = false;
         t.retries = 0;
         t.sector0 = None;
+        t.erased = None;
         let (kind, dest, at) = (t.kind(), t.record.dest, t.record.resume_at(&t.marks));
         // Before any chunk: nothing may look like a valid engine while bytes
         // under it change (both are no-ops on a resume that already did it).
@@ -179,7 +193,10 @@ impl BoardSession {
                 }
                 break 'outcome ChunkOutcome::HeldHeader;
             }
-            match write_and_verify(target, &mut self.sector_buf, dest + chunk.off, bytes) {
+            let Some(t) = &mut self.transfer else {
+                break 'outcome ChunkOutcome::Fault;
+            };
+            match write_chunk(target, t, &mut self.sector_buf, idx, bytes) {
                 Err(FlashFault) => ChunkOutcome::Fault,
                 Ok(false) => ChunkOutcome::Mismatch,
                 Ok(true) => ChunkOutcome::Written,
@@ -197,6 +214,7 @@ impl BoardSession {
             ChunkOutcome::Mismatch => {
                 self.window = None;
                 let give_up = self.transfer.as_mut().is_some_and(|t| {
+                    t.erased = None;
                     t.retries += 1;
                     t.raw_next = true;
                     t.retries >= MAX_CHUNK_RETRIES
@@ -333,10 +351,77 @@ impl BoardSession {
         if let Some(t) = &mut self.transfer {
             t.waiting = None;
             t.sector0 = None;
+            t.erased = None;
         }
         self.window = None;
         self.push_effect(Effect::FlashFault);
     }
+}
+
+/// Write chunk `idx` of `t`'s piece: into flash erased ahead when this boot
+/// erased its sector already, else after erasing its block (when it starts
+/// one the piece wholly holds, none of it written) or its sector. Then read
+/// back and compare. `Ok(false)`: the flash did not take it.
+fn write_chunk<T: UpdateTarget>(
+    target: &mut T,
+    t: &mut Transfer,
+    buf: &mut [u8],
+    idx: u32,
+    bytes: &[u8],
+) -> Result<bool, FlashFault> {
+    let addr = t.record.dest + idx * CHUNK;
+    if !t.erased.as_ref().is_some_and(|e| e.contains(&addr)) {
+        t.erased = None;
+        if let Some(block) = block_ahead(target, t, idx) {
+            target.erase_block(block.start)?;
+            t.erased = Some(block);
+        }
+    }
+    match &mut t.erased {
+        Some(erased) if erased.contains(&addr) => {
+            // From here this sector is programmed: no longer erased.
+            erased.start = addr + CHUNK;
+            program_and_verify(target, buf, addr, bytes)
+        }
+        _ => write_and_verify(target, buf, addr, bytes),
+    }
+}
+
+/// The block chunk `idx` starts, when the target erases blocks and the
+/// piece wholly holds it with none of its chunks written (the engine's
+/// header, written last, is never in one: blocks start at the chunk being
+/// written, and the header is never written in sequence).
+fn block_ahead<T: UpdateTarget>(target: &T, t: &Transfer, idx: u32) -> Option<Range<u32>> {
+    let block = target.block_size()?;
+    if block <= CHUNK || !block.is_power_of_two() {
+        return None;
+    }
+    let addr = t.record.dest + idx * CHUNK;
+    if addr % block != 0 {
+        return None;
+    }
+    let end = addr.checked_add(block)?;
+    // The piece's sectors: its last chunk's whole sector is erased anyway.
+    if end > t.record.dest + t.record.chunks() * CHUNK {
+        return None;
+    }
+    let header = |c: u32| t.kind() == PieceKind::Engine && c == 0;
+    let untouched = (idx..idx + block / CHUNK).all(|c| !t.marks.is_written(c) && !header(c));
+    untouched.then_some(addr..end)
+}
+
+/// Program `bytes` into erased flash at `addr`, read them back through
+/// `buf` and compare. `Ok(false)`: the flash did not take them.
+fn program_and_verify<T: UpdateTarget>(
+    target: &mut T,
+    buf: &mut [u8],
+    addr: u32,
+    bytes: &[u8],
+) -> Result<bool, FlashFault> {
+    target.program(addr, bytes)?;
+    let back = &mut buf[..bytes.len()];
+    target.read(addr, back)?;
+    Ok(back == bytes)
 }
 
 /// Erase the sector at `addr`, program `bytes`, read them back through
@@ -348,8 +433,5 @@ pub(super) fn write_and_verify<T: UpdateTarget>(
     bytes: &[u8],
 ) -> Result<bool, FlashFault> {
     target.erase_sector(addr)?;
-    target.program(addr, bytes)?;
-    let back = &mut buf[..bytes.len()];
-    target.read(addr, back)?;
-    Ok(back == bytes)
+    program_and_verify(target, buf, addr, bytes)
 }

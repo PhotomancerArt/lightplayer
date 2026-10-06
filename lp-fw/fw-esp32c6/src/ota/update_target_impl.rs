@@ -16,7 +16,7 @@ use lp_bootctl::{BOOT_RECORD_SECTORS, BootRecord, SplitLayout};
 use lpc_update::board::{FlashFault, UpdateTarget};
 
 use super::boot_state::BootState;
-use super::split_flash::{SECTOR, SplitFlash};
+use super::split_flash::{BLOCK, SECTOR, SplitFlash};
 use super::update_timing::{FlashTiming, now_us};
 
 /// The split image's side of an update.
@@ -84,6 +84,18 @@ impl UpdateTarget for SplitUpdateTarget {
         let done = self.flash.erase(addr);
         self.timing.erase_us += now_us() - t0;
         self.timing.erases += 1;
+        ok(done)
+    }
+
+    fn block_size(&self) -> Option<u32> {
+        Some(BLOCK)
+    }
+
+    fn erase_block(&mut self, addr: u32) -> Result<(), FlashFault> {
+        let t0 = now_us();
+        let done = self.flash.erase_block(addr);
+        self.timing.block_us += now_us() - t0;
+        self.timing.blocks += 1;
         ok(done)
     }
 

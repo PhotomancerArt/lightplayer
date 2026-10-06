@@ -7,9 +7,10 @@
 //! the time the board waited on the link. Clocks are this edge's, never
 //! the session's (sans-IO).
 //!
-//! `[OTA] timing <what>: <n> msgs in <wall> ms · session <s> ms (erase <e> ms
-//! ×<n> + block <b> ms ×<n>, program <p> ms, read <r> ms, other <o> ms) ·
-//! waiting <w> ms · longest <l> ms`
+//! `[OTA] timing <what>: <n> msgs in <wall> ms, session <s> ms, waiting <w>
+//! ms, longest <l> ms`, then `[OTA] timing <what> ms/ops: erase <ms>/<n>
+//! block <ms>/<n> program <ms>/<n> read <ms>/<n> other <ms>` (other: inside
+//! the session but not in flash — inflate, the piece's SHA-256).
 
 /// Microseconds since boot.
 pub fn now_us() -> u64 {
@@ -70,11 +71,17 @@ impl MessageTiming {
             _ => 0,
         };
         let ms = |us: u64| us / 1000;
+        // Two short lines: the link's log channel cuts a long one.
         log::info!(
-            "[OTA] timing {what}: {} msgs in {} ms · session {} ms (erase {} ms ×{} + block {} ms ×{}, program {} ms ×{}, read {} ms ×{}, other {} ms) · waiting {} ms · longest {} ms",
+            "[OTA] timing {what}: {} msgs in {} ms, session {} ms, waiting {} ms, longest {} ms",
             self.messages,
             ms(wall),
             ms(self.session_us),
+            ms(self.waiting_us),
+            ms(self.longest_us),
+        );
+        log::info!(
+            "[OTA] timing {what} ms/ops: erase {}/{} block {}/{} program {}/{} read {}/{} other {}",
             ms(flash.erase_us),
             flash.erases,
             ms(flash.block_us),
@@ -84,8 +91,6 @@ impl MessageTiming {
             ms(flash.read_us),
             flash.reads,
             ms(self.session_us.saturating_sub(flash.total_us())),
-            ms(self.waiting_us),
-            ms(self.longest_us),
         );
     }
 }

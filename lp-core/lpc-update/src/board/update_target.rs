@@ -28,6 +28,20 @@ pub struct FlashFault;
 pub trait UpdateTarget {
     /// Erase the 4 KiB sector at `addr` to `0xFF`.
     fn erase_sector(&mut self, addr: u32) -> Result<(), FlashFault>;
+    /// The size of the target's block erase, if it has one: a power of two,
+    /// a multiple of [`CHUNK`](crate::code_table::CHUNK). A NOR part erases
+    /// a 64 KiB block in a fraction of what sixteen sector erases take, so
+    /// the session erases a piece's whole blocks ahead of their chunks.
+    /// `None` (the default): sector by sector.
+    fn block_size(&self) -> Option<u32> {
+        None
+    }
+    /// Erase the [`block_size`](Self::block_size) block at `addr` (aligned to
+    /// it) to `0xFF`. Asked only when `block_size` is `Some`.
+    fn erase_block(&mut self, addr: u32) -> Result<(), FlashFault> {
+        let _ = addr;
+        Err(FlashFault)
+    }
     /// Program `bytes` at `addr` (NOR: bits only go 1 → 0).
     fn program(&mut self, addr: u32, bytes: &[u8]) -> Result<(), FlashFault>;
     /// Read `buf.len()` bytes at `addr`.
