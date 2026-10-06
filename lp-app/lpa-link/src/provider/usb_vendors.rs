@@ -22,6 +22,10 @@
 //! on Espressif's native USB. It is the browser's copy of the native host's
 //! rule (`lpa_client::transport_serial::link_config_for_port`).
 
+// lpc-wire is optional (`device-link`); every caller of the preset rule is
+// a provider that implies it. `test`: the unit test below reaches it through
+// the dev-dependency, so a featureless `cargo test -p lpa-link` builds.
+#[cfg(any(feature = "device-link", test))]
 use lpc_wire::lp_link::LinkConfig;
 
 /// Vendor ids the chooser filter offers and the granted-ports sweep accepts.
@@ -58,6 +62,7 @@ pub fn is_esp32_serial_candidate(usb_vid_pid: Option<(u16, u16)>) -> bool {
 /// The same rule as the native host's `link_config_for_port`, which keys off
 /// the same vendor id; the two must agree, or one board would get a
 /// different preset depending on which host opened it.
+#[cfg(any(feature = "device-link", test))]
 pub fn link_config_for_usb_vendor(usb_vendor_id: Option<u16>) -> LinkConfig {
     match usb_vendor_id {
         Some(vendor) if vendor != ESPRESSIF_NATIVE_USB_VENDOR_ID => LinkConfig::uart(),

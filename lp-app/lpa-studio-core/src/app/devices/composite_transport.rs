@@ -1,4 +1,4 @@
-//! Three transports behind the one [`DeviceTransport`] the effects layer
+//! Every transport behind the one [`DeviceTransport`] the effects layer
 //! holds.
 //!
 //! [`DeviceEffects`](super::DeviceEffects) has exactly one transport per
@@ -8,10 +8,11 @@
 //! the only thing it honestly can — the link's own endpoint.
 //!
 //! ```text
-//!   discover_granted  ──► serial ∪ sim ∪ emu ∪ ble   (every half, every sweep)
-//!   request_grant     ──► serial                     (a chooser is a port chooser)
-//!   request_ble_grant ──► ble                        (the Bluetooth chooser)
-//!   run_effect        ──► endpoint "sim:…" ? sim : "emu:…" ? emu : "ble:…" ? ble : serial
+//!   discover_granted  ──► serial ∪ sim ∪ emu ∪ ble ∪ lan   (every half, every sweep)
+//!   request_grant     ──► serial                           (a chooser is a port chooser)
+//!   request_ble_grant ──► ble                              (the Bluetooth chooser)
+//!   run_effect        ──► endpoint "sim:…" ? sim : "emu:…" ? emu : "ble:…" ? ble
+//!                                   : "lan:…" ? lan : serial
 //!   revoke_grant      ──► same rule
 //!   lens_client_io    ──► same rule
 //! ```
@@ -50,6 +51,7 @@ use super::device_transport::{
 use super::sim_record::{
     device_id_from_ble_endpoint, uid_from_emu_endpoint, uid_from_sim_endpoint,
 };
+use lpa_link::providers::network_link::url_from_lan_endpoint;
 
 /// Serial, sim and emu, behind one trait.
 pub struct CompositeDeviceTransport {
@@ -62,6 +64,9 @@ pub struct CompositeDeviceTransport {
     /// installs it even on a browser WITHOUT Web Bluetooth, so the Add verb
     /// can explain why (Brave's flag, Safari → Bluefy) rather than vanish.
     ble: Option<Rc<dyn DeviceTransport>>,
+    /// `None` where this build (or this page) reaches no board on the LAN:
+    /// the `browser-websocket` provider, installed when `?lan=` names one.
+    lan: Option<Rc<dyn DeviceTransport>>,
 }
 
 impl CompositeDeviceTransport {
@@ -72,6 +77,7 @@ impl CompositeDeviceTransport {
             sim,
             emu: None,
             ble: None,
+            lan: None,
         }
     }
 
@@ -87,6 +93,13 @@ impl CompositeDeviceTransport {
     /// [`Self::with_emu`]: it depends on what this build ships.
     pub fn with_ble(mut self, ble: Rc<dyn DeviceTransport>) -> Self {
         self.ble = Some(ble);
+        self
+    }
+
+    /// Add the LAN half (`browser-websocket`, Wi-Fi M6 P07). Separate for the
+    /// same reason: it depends on what this page was asked to reach.
+    pub fn with_lan(mut self, lan: Rc<dyn DeviceTransport>) -> Self {
+        self.lan = Some(lan);
         self
     }
 
@@ -112,6 +125,13 @@ impl CompositeDeviceTransport {
                 .clone()
                 .ok_or_else(|| "this build cannot reach Bluetooth devices".to_string());
         }
+        // The same for a `lan:` endpoint: its "port name" is a socket URL.
+        if url_from_lan_endpoint(&info.endpoint.0).is_some() {
+            return self
+                .lan
+                .clone()
+                .ok_or_else(|| "this page reaches no board on Wi-Fi".to_string());
+        }
         self.serial
             .clone()
             .ok_or_else(|| "this build cannot talk to USB devices".to_string())
@@ -120,20 +140,31 @@ impl CompositeDeviceTransport {
 
 impl DeviceTransport for CompositeDeviceTransport {
     fn label(&self) -> &'static str {
-        match (
-            self.serial.is_some(),
-            self.emu.is_some(),
-            self.ble.is_some(),
-        ) {
-            (true, true, true) => "browser Web Serial + sim + emu + Bluetooth",
-            (true, true, false) => "browser Web Serial + sim + emu",
-            (true, false, true) => "browser Web Serial + sim + Bluetooth",
-            (true, false, false) => "browser Web Serial + sim",
-            (false, true, true) => "sim + emu + Bluetooth",
-            (false, true, false) => "sim + emu",
-            (false, false, true) => "sim + Bluetooth",
-            (false, false, false) => "sim only",
-        }
+        // Indexed by which optional halves are installed: serial, emu,
+        // Bluetooth, Wi-Fi (one bit each, in that order).
+        const LABELS: [&str; 16] = [
+            "sim only",
+            "sim + Wi-Fi",
+            "sim + Bluetooth",
+            "sim + Bluetooth + Wi-Fi",
+            "sim + emu",
+            "sim + emu + Wi-Fi",
+            "sim + emu + Bluetooth",
+            "sim + emu + Bluetooth + Wi-Fi",
+            "browser Web Serial + sim",
+            "browser Web Serial + sim + Wi-Fi",
+            "browser Web Serial + sim + Bluetooth",
+            "browser Web Serial + sim + Bluetooth + Wi-Fi",
+            "browser Web Serial + sim + emu",
+            "browser Web Serial + sim + emu + Wi-Fi",
+            "browser Web Serial + sim + emu + Bluetooth",
+            "browser Web Serial + sim + emu + Bluetooth + Wi-Fi",
+        ];
+        let index = usize::from(self.serial.is_some()) << 3
+            | usize::from(self.emu.is_some()) << 2
+            | usize::from(self.ble.is_some()) << 1
+            | usize::from(self.lan.is_some());
+        LABELS[index]
     }
 
     fn discover_granted(&self) -> DeviceTransportFuture<Result<Vec<GrantedLink>, String>> {
@@ -141,6 +172,7 @@ impl DeviceTransport for CompositeDeviceTransport {
         let sim = Rc::clone(&self.sim);
         let emu = self.emu.clone();
         let ble = self.ble.clone();
+        let lan = self.lan.clone();
         Box::pin(async move {
             // A serial discovery that FAILED says nothing about which boards
             // exist, and the departure sweep detaches on the answer — so the
@@ -158,6 +190,9 @@ impl DeviceTransport for CompositeDeviceTransport {
             }
             if let Some(ble) = &ble {
                 granted.extend(ble.discover_granted().await?);
+            }
+            if let Some(lan) = &lan {
+                granted.extend(lan.discover_granted().await?);
             }
             Ok(granted)
         })
@@ -492,6 +527,75 @@ mod tests {
         };
         assert!(chooser.contains("Bluetooth"), "{chooser}");
         assert!(calls.borrow().is_empty(), "nothing else was asked");
+    }
+
+    /// The Wi-Fi half (`?lan=`): its sweep joins the union and a `lan:`
+    /// endpoint — effect, lens and revoke — routes to it and only it. No
+    /// chooser reaches it.
+    #[test]
+    fn a_lan_half_joins_discovery_and_owns_the_lan_prefix() {
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        let lan_endpoint = "lan:ws://10.0.0.5/link";
+        let transport = composite(&calls, true)
+            .with_ble(Rc::new(SpyTransport::new("ble", &calls, &[])))
+            .with_lan(Rc::new(SpyTransport::new("lan", &calls, &[lan_endpoint])));
+
+        let granted = block_on(transport.discover_granted()).expect("every half answered");
+        let endpoints: Vec<String> = granted
+            .iter()
+            .map(|grant| grant.info.endpoint.0.clone())
+            .collect();
+        assert_eq!(endpoints, ["usb-1", "sim:dev1", lan_endpoint]);
+        assert_eq!(
+            transport.label(),
+            "browser Web Serial + sim + Bluetooth + Wi-Fi"
+        );
+
+        calls.borrow_mut().clear();
+        block_on(transport.run_effect(
+            link_at(lan_endpoint).info,
+            DeviceEffectCall::EraseFlash,
+            Rc::new(|_, _| {}),
+        ))
+        .expect("the lan half answered");
+        let _ = transport.lens_client_io(link_at(lan_endpoint).info, Rc::new(|_| {}));
+        block_on(transport.revoke_grant(link_at(lan_endpoint).info)).unwrap();
+        block_on(transport.request_grant()).unwrap();
+        block_on(transport.request_ble_grant()).unwrap();
+
+        assert_eq!(
+            calls.borrow().as_slice(),
+            [
+                "lan:effect",
+                "lan:lens",
+                "lan:revoke",
+                "serial:request_grant",
+                "ble:request_ble_grant"
+            ]
+        );
+    }
+
+    /// A page that reaches no board on Wi-Fi refuses a `lan:` endpoint by
+    /// name: serial would try to open a port named after a socket URL.
+    #[test]
+    fn a_lan_endpoint_with_no_lan_half_is_refused_by_name() {
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        let transport = composite(&calls, true);
+
+        let refused = block_on(transport.run_effect(
+            link_at("lan:ws://10.0.0.5/link").info,
+            DeviceEffectCall::EraseFlash,
+            Rc::new(|_, _| {}),
+        ))
+        .expect_err("there is no lan half");
+        assert!(refused.contains("Wi-Fi"), "{refused}");
+        assert!(calls.borrow().is_empty(), "nothing else was asked");
+        assert_eq!(
+            composite(&calls, false)
+                .with_lan(Rc::new(SpyTransport::new("lan", &calls, &[])))
+                .label(),
+            "sim + Wi-Fi"
+        );
     }
 
     /// A build with no emulator refuses an `emu:` endpoint BY NAME. Routing

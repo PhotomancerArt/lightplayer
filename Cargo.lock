@@ -4163,6 +4163,7 @@ dependencies = [
  "async-trait",
  "critical-section",
  "embassy-futures",
+ "embassy-net-driver",
  "embassy-sync 0.8.0",
  "embassy-time",
  "embedded-hal-async",
@@ -4172,18 +4173,23 @@ dependencies = [
  "littlefs-rust",
  "log",
  "lp-collection 1.0.0",
+ "lp-gfx",
  "lp-json-pack",
  "lp-link",
  "lp-recovery",
  "lp-seam",
  "lpa-client",
  "lpa-server",
+ "lpc-access",
  "lpc-hardware",
  "lpc-model",
  "lpc-shared",
  "lpc-wire",
  "lpfs",
  "ser-write-json",
+ "sha1",
+ "simple-dns",
+ "tungstenite 0.28.0",
 ]
 
 [[package]]
@@ -4229,6 +4235,7 @@ dependencies = [
  "lp-shader",
  "lp-ws281x",
  "lpa-server",
+ "lpc-access",
  "lpc-hardware",
  "lpc-model",
  "lpc-shared",
@@ -5775,6 +5782,7 @@ dependencies = [
  "espflash",
  "futures-util",
  "fw-checks",
+ "fw-esp32-common",
  "jsonschema",
  "libc",
  "log",
@@ -6353,6 +6361,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "futures-util",
+ "getrandom 0.3.4",
  "hashbrown 0.15.5",
  "libc",
  "log",
@@ -6434,6 +6443,7 @@ dependencies = [
  "lp-bootctl",
  "lpa-client",
  "lpa-devices",
+ "lpc-access",
  "lpc-model",
  "lpc-wire",
  "lpfs",
@@ -9837,6 +9847,15 @@ name = "simdutf8"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
+
+[[package]]
+name = "simple-dns"
+version = "0.9.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dee851d0e5e7af3721faea1843e8015e820a234f81fda3dea9247e15bac9a86a"
+dependencies = [
+ "bitflags 2.11.0",
+]
 
 [[package]]
 name = "siphasher"

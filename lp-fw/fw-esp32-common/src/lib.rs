@@ -19,6 +19,8 @@ pub mod link_lock;
 #[cfg(any(feature = "usb-link", feature = "uart-link"))]
 pub mod log_ring_logger;
 pub mod logger;
+#[cfg(feature = "wifi")]
+pub mod net;
 pub mod output;
 #[cfg(target_arch = "riscv32")]
 pub mod seams;

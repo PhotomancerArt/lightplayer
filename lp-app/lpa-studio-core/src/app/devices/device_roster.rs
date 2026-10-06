@@ -83,6 +83,9 @@ pub struct DeviceRosterView {
     /// board's network status, read on a link that holds edit. Absent = no
     /// row (a sim, a held board, a Bluetooth link nothing unlocked).
     pub wifi: std::collections::BTreeMap<lpa_devices::DeviceId, crate::app::network::UiDeviceWifi>,
+    /// Each board reached on the LAN right now (`?lan=`, Wi-Fi M6 P07): the
+    /// card's "Wi-Fi · <address>" line. Absent = not a LAN link.
+    pub lan_links: std::collections::BTreeMap<lpa_devices::DeviceId, super::UiLanLink>,
     /// Each device's firmware-update words (the update-states spike,
     /// direction C): the firmware zone's line and bar, the picture slot's
     /// sentence and light, the header chip and version. Joined by the
@@ -113,6 +116,7 @@ impl Default for DeviceRosterView {
             runtime_bands: std::collections::BTreeMap::new(),
             access: std::collections::BTreeMap::new(),
             wifi: std::collections::BTreeMap::new(),
+            lan_links: std::collections::BTreeMap::new(),
             updates: std::collections::BTreeMap::new(),
             layout: std::collections::BTreeMap::new(),
             backup_download: None,
@@ -426,6 +430,12 @@ impl DeviceRoster {
             runtime_bands: std::collections::BTreeMap::new(),
             access: std::collections::BTreeMap::new(),
             wifi: std::collections::BTreeMap::new(),
+            lan_links: self
+                .roster
+                .devices()
+                .iter()
+                .filter_map(|device| super::lan_link_view(device).map(|line| (device.id, line)))
+                .collect(),
             updates: std::collections::BTreeMap::new(),
             // The verbs land in a scratch tree here; the studio view
             // publishes them for real (`publish_layout_offers`).
@@ -859,6 +869,7 @@ mod tests {
         let view = DeviceRosterView {
             access: Default::default(),
             wifi: Default::default(),
+            lan_links: Default::default(),
             updates: Default::default(),
             roster: RosterView {
                 devices: vec![
@@ -919,6 +930,7 @@ mod tests {
         let view = DeviceRosterView {
             access: Default::default(),
             wifi: Default::default(),
+            lan_links: Default::default(),
             updates: Default::default(),
             roster: RosterView {
                 devices: vec![ready_view(1, "A"), ready_view(2, "B"), ready_view(3, "C")],

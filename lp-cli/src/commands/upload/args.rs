@@ -1,8 +1,13 @@
 use std::path::PathBuf;
 
+use crate::client::board_password::BoardPasswordArgs;
+
 pub struct UploadArgs {
     pub dir: PathBuf,
     pub host: String,
+    /// Where a locked `lan:` board's password comes from (`--password-stdin`
+    /// or `LP_PASSWORD`; never argv).
+    pub password: BoardPasswordArgs,
     /// Skip waiting for evidence the deployed project is running; restores
     /// the pre-P5 fire-and-forget behaviour (disconnect the instant the
     /// deploy is acked).

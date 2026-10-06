@@ -12,7 +12,7 @@ use anyhow::{Context, Result};
 use lpa_client::LpClient;
 use lpfs::LpFsStd;
 
-use crate::client::cli_connect::{cli_connect, stderr_device_events};
+use crate::client::cli_connect::{cli_connect_with_password, stderr_device_events};
 use crate::commands::dev::{collect_project_deploy_files, validation};
 use lpa_client::HostSpecifier;
 
@@ -59,14 +59,16 @@ async fn handle_upload_async(args: UploadArgs) -> Result<()> {
 
     let host_spec = HostSpecifier::parse(&args.host).with_context(|| {
         format!(
-            "Failed to parse host specifier: {}. Examples: serial:auto, ws://localhost:2812/",
+            "Failed to parse host specifier: {}. Examples: serial:auto, lan:192.168.1.40, \
+             ws://localhost:2812/",
             args.host
         )
     })?;
 
-    let host_spec_str = format!("{host_spec:?}");
+    let host_spec_str = host_spec.to_string();
+    let password = args.password.resolve(&host_spec)?;
 
-    let connection = cli_connect(host_spec, stderr_device_events(false))
+    let connection = cli_connect_with_password(host_spec, password, stderr_device_events(false))
         .await
         .context("Failed to connect to server")?;
     let mut client = LpClient::new(connection.client_io());

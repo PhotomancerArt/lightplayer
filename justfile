@@ -284,16 +284,19 @@ lpa-link-browser-test: install-wasm32-target
         echo "wasm-bindgen-test-runner not found. Install: cargo install wasm-bindgen-cli --version 0.2.114"
         exit 1
     fi
-    # Two suites, one runner: Web Serial over `?emu=`'s polyfill, and (M5)
-    # Web Bluetooth over `?ble=emu`'s, both against the scripted door. The
-    # Bluetooth suite spends a real 10 s proving a hung GATT connect is
-    # bounded, against the runner's default 20 s for a whole suite, so the
-    # budget is raised rather than the bound faked.
+    # Three suites, one runner: Web Serial over `?emu=`'s polyfill, and (M5)
+    # Web Bluetooth over `?ble=emu`'s, both against the scripted door; and
+    # (Wi-Fi M6 P07) the LAN provider against a secure lp-link board double
+    # behind a `WebSocket` double. The Bluetooth suite spends a real 10 s
+    # proving a hung GATT connect is bounded, against the runner's default
+    # 20 s for a whole suite, so the budget is raised rather than the bound
+    # faked.
     WASM_BINDGEN_TEST_TIMEOUT="${WASM_BINDGEN_TEST_TIMEOUT:-60}" \
     CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER="$PWD/scripts/wasm-serial-test-runner.sh" \
         cargo test -p lpa-link --target wasm32-unknown-unknown \
-            --features browser-serial-esp32,browser-ble \
-            --test browser_serial_conformance --test browser_ble_conformance
+            --features browser-serial-esp32,browser-ble,browser-websocket \
+            --test browser_serial_conformance --test browser_ble_conformance \
+            --test browser_websocket_conformance
 
 # The SAME assertions against boards hosted IN THE TAB — one Worker per
 # board, each holding the emulator's own wasm, and no server anywhere

@@ -175,6 +175,12 @@ long-lived branch conflict on this file whenever main re-baselined too.
   record was re-baselined (the three `bless-chips esp32c6` steps run one at a
   time; ≈10 min). The same bless caught `hello.proto` 30 → 31, which the
   proto bump earlier on the branch had moved without re-recording.
+- 2026-10-06 — Wi-Fi link on the C6 (PR #989, P03–P06): a real move, not
+  churn — the `lp-net` thread's 8 KB stack, embassy-net's resources and the
+  station took the C6's boot heap from 90,024 to 104,064 B used and its
+  largest block from 132,233 to 118,152 B (nothing saved, never joins);
+  wire 38 moved `hello.proto` and the S3/classic stack figures. Taken from
+  CI's patch (`just apply-ci-figures 989`), no local bless.
 
 **Exit criteria** — a PR whose only memory effect is a few bytes of statics
 passes the gate without touching the record, and two PRs that each

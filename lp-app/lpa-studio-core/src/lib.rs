@@ -42,6 +42,8 @@ pub use app::bus::{
 pub use app::devices::BrowserBleSource;
 #[cfg(all(feature = "emulator-tab", target_arch = "wasm32"))]
 pub use app::devices::BrowserEmuLinkSource;
+#[cfg(all(feature = "browser-websocket", target_arch = "wasm32"))]
+pub use app::devices::BrowserLanSource;
 #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
 pub use app::devices::BrowserSerialTransport;
 #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
@@ -58,23 +60,24 @@ pub use app::devices::{
     DeviceTimerFuture, DeviceTransport, DeviceTransportFuture, DevicesOp, EMU_TRANSPORT,
     EmuBacking, EmuDeviceTransport, EmuLinkSource, EmuRuntimeControl, EmuSession,
     FLASH_ALL_BOARDS_PARAM, FLASH_BOARD_PARAM, FLASH_NAME_PARAM, FeedLiveness, FirmwareVerb,
-    FlashBoardChoice, FlashOffer, GrantedLink, JournalLine, LensLineTap, LensTapEvent,
-    NEW_SIM_BACKING_PARAM, NEW_SIM_BOARD_PARAM, NewSimRecord, PUSH_NAME_BOARD_PARAM,
-    PUSH_NAME_PARAM, PUSH_SOURCE_PARAM, ProvisionalBoardNumbers, PushOffer, PushOver, PushPayload,
-    PushSource, PushSourceChoice, PushSourceGroup, RENAME_NAME_PARAM, RESET_NEEDS_USB,
-    RememberedView, RosterSplit, RuntimeKind, SIM_TRANSPORT, SimBacking, SimCreateOp,
-    SimDeviceTransport, SimLinkSource, SimRecord, SimRuntimeControl, SimSession, SimTier,
-    StagedPush, TargetChoice, TargetGroup, TargetOffer, TargetScope, USB_NEEDS_WEB_SERIAL,
-    UiRuntimeBand, add_device_offers, backing_for, ble_endpoint, ble_link_info,
-    blocked_erase_action, delete_sim_record, device_card_feed_view, device_card_feed_views,
-    device_chip, device_escape_action, device_escape_action_for, device_firmware_line,
-    device_id_from_ble_endpoint, device_identity_line, device_offers, device_status_kind,
-    emu_endpoint, emu_link_info, emu_offered_for, escape_verb, feed_liveness,
+    FlashBoardChoice, FlashOffer, GrantedLink, JournalLine, LAN_LINK_PATH, LanDeviceTransport,
+    LanFlag, LanLinkSource, LensLineTap, LensTapEvent, NEW_SIM_BACKING_PARAM, NEW_SIM_BOARD_PARAM,
+    NewSimRecord, PUSH_NAME_BOARD_PARAM, PUSH_NAME_PARAM, PUSH_SOURCE_PARAM,
+    ProvisionalBoardNumbers, PushOffer, PushOver, PushPayload, PushSource, PushSourceChoice,
+    PushSourceGroup, RENAME_NAME_PARAM, RESET_NEEDS_USB, RememberedView, RosterSplit, RuntimeKind,
+    SIM_TRANSPORT, SimBacking, SimCreateOp, SimDeviceTransport, SimLinkSource, SimRecord,
+    SimRuntimeControl, SimSession, SimTier, StagedPush, TargetChoice, TargetGroup, TargetOffer,
+    TargetScope, USB_NEEDS_WEB_SERIAL, UiLanLink, UiRuntimeBand, add_device_offers, backing_for,
+    ble_endpoint, ble_link_info, blocked_erase_action, delete_sim_record, device_card_feed_view,
+    device_card_feed_views, device_chip, device_escape_action, device_escape_action_for,
+    device_firmware_line, device_id_from_ble_endpoint, device_identity_line, device_offers,
+    device_status_kind, emu_endpoint, emu_link_info, emu_offered_for, escape_verb, feed_liveness,
     firmware_face_preview_sentence, firmware_verb, first_bundled_example_id, flash_consequence,
-    flash_device_offer, flash_offer, flash_offer_for, flash_pending_offer, mint_sim_identity,
-    new_sim_offer, new_sim_record, pending_escape_action, pending_firmware_line,
-    pending_identity_rows, pending_link_offers, push_device_offer, push_offer, read_sim_record,
-    reflash_choice, sim_device_name, sim_endpoint, sim_link_info, split_roster, target_offer,
+    flash_device_offer, flash_offer, flash_offer_for, flash_pending_offer, lan_link_for_endpoint,
+    lan_link_view, mint_sim_identity, new_sim_offer, new_sim_record, normalize_lan_address,
+    parse_lan_flag, pending_escape_action, pending_firmware_line, pending_identity_rows,
+    pending_link_offers, push_device_offer, push_offer, read_sim_record, reflash_choice,
+    sim_device_name, sim_endpoint, sim_link_info, split_roster, target_offer,
     transport_label_for_endpoint, uid_from_emu_endpoint, uid_from_sim_endpoint,
     update_firmware_offer, write_sim_record,
 };
@@ -103,10 +106,10 @@ pub use lpa_devices::identity::MacAddress;
 // the gallery card's "for <board>" badge both read it.
 pub use app::access::{
     AccessAdded, AccessCommand, AccessPersist, AccessTier, AccountKeys, BrowserKey,
-    DEFAULT_KDF_ITERATIONS, DeviceAccessChange, DroppedKey, MAX_SECRETS_PER_FILE, OpenTo,
-    PLAY_ONLY_SENTENCE, SecretKind, UiAccessPanel, UiDeviceAccess, UiKeyGroup, UiLoginPrompt,
-    UiPasswordLine, UiUnlockOffer, dropped_sentence, not_permitted_sentence, open_summary,
-    tier_word,
+    DEFAULT_KDF_ITERATIONS, DeviceAccessChange, DroppedKey, MAX_SECRETS_PER_FILE, NetworkLinkKeys,
+    OpenTo, PLAY_ONLY_SENTENCE, SecretKind, UiAccessPanel, UiDeviceAccess, UiKeyGroup,
+    UiLoginPrompt, UiPasswordLine, UiUnlockOffer, dropped_sentence, not_permitted_sentence,
+    open_summary, tier_word,
 };
 pub use app::frame_feed::{
     CLOSE_INSPECTION_SAMPLE_FORMAT, CardFeedApply, CardFeedState, PREVIEW_SAMPLE_FORMAT,

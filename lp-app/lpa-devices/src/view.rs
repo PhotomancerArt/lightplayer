@@ -128,7 +128,7 @@ pub struct DeviceView {
     pub terminal_dropped: u32,
     /// Why this board's firmware cannot be written from here, when it
     /// cannot: today exactly one reason, [`FIRMWARE_NEEDS_USB`], for a board
-    /// reached over Bluetooth. `None` = nothing about the LINK stands in the
+    /// reached over Bluetooth or the LAN. `None` = nothing about the LINK stands in the
     /// way (whether a verb is offered is still the firmware face's call).
     ///
     /// A reason and not a bool on purpose: the card draws the verb DISABLED
@@ -387,7 +387,7 @@ pub fn device_view(device: &Device, now: Millis) -> DeviceView {
             .identity
             .endpoint
             .as_ref()
-            .filter(|endpoint| endpoint.is_bluetooth())
+            .filter(|endpoint| endpoint.is_network())
             .map(|_| FIRMWARE_NEEDS_USB.to_string()),
         update_blocked: (!device.evidence.carries_update_channel())
             .then(|| FIRMWARE_NEEDS_USB.to_string()),
