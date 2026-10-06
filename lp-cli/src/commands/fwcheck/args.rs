@@ -82,7 +82,24 @@ pub struct FwcheckPortArgs {
     pub port: Option<String>,
     /// With several boards attached, probe candidates and pick the one that
     /// identifies as this chip (e.g. esp32c6, esp32s3). Falls back to the
-    /// LP_CHIP environment variable. Probing reboots idle boards.
+    /// LP_CHIP environment variable. Probing reboots idle boards (never one
+    /// someone else holds on the desk's board bench).
     #[arg(long)]
     pub chip: Option<String>,
+    /// Select the board by MAC instead (its USB serial number on Espressif
+    /// native USB). Passive: opens and resets nothing.
+    #[arg(long, conflicts_with_all = ["port", "chip"])]
+    pub mac: Option<String>,
+    /// Lease the board on the desk's board bench before printing its port
+    /// (`board take`; needs `board` installed). Refused if someone else
+    /// holds it.
+    #[arg(long, requires = "lease_for")]
+    pub lease: bool,
+    /// Who is leasing and why, `"<who>: <why>"`. Also who the bench check
+    /// runs as.
+    #[arg(long = "for", id = "lease_for", value_name = "WHO: WHY")]
+    pub lease_for: Option<String>,
+    /// Lease length in minutes (the bench's default is 30).
+    #[arg(long, requires = "lease")]
+    pub minutes: Option<u32>,
 }
