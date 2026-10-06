@@ -351,11 +351,16 @@ impl UpdateDriver {
                 });
                 self.serve_message(which, bytes);
             }
-            Ok(BoardMessage::Refusal(_)) => {
-                if let Phase::Offered(which) | Phase::LoggingIn(which) = self.phase {
+            Ok(BoardMessage::Refusal(r)) => match self.phase {
+                Phase::Offered(which) | Phase::LoggingIn(which) => {
                     self.serve_message(which, bytes);
                 }
-            }
+                // The read-back was refused: a running engine's `G` needs
+                // play on an untrusted link, which its server's login
+                // (channel 1) holds; anything else ends the backup.
+                Phase::BackingUp => self.on_backup_refused(HostRefusal::from(r)),
+                _ => {}
+            },
             // Unknown board messages are ignored: hosts are the newer side.
             _ => {}
         }
@@ -580,6 +585,17 @@ impl UpdateDriver {
                 )));
             }
             other => self.finish(Finish::Stopped(StopReason::Refused(other))),
+        }
+    }
+
+    fn on_backup_refused(&mut self, r: HostRefusal) {
+        self.backup = None;
+        self.source = None;
+        match r {
+            HostRefusal::NeedsLogin if self.board.state() == Some(BoardState::Running) => {
+                self.finish(Finish::Stopped(StopReason::NeedsEngineLogin));
+            }
+            _ => self.finish(Finish::Stopped(StopReason::BackupFailed)),
         }
     }
 
