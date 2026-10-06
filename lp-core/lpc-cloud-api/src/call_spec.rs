@@ -17,13 +17,14 @@
 
 use crate::account_access_info::AccountAccessInfo;
 use crate::ack::Ack;
+use crate::board_presence::BoardList;
 use crate::login_options::LoginOptionsInfo;
 use crate::me_info::MeInfo;
 use crate::request::{
     AddMember, ArchiveProject, CloudRequest, GetAccountAccess, GetEvents, GetHeads, GetMe,
-    GetProject, HaveBlobs, ListMyProjects, ListSessions, LoginOptions, PublishProject, PushCommit,
-    RemoveMember, ResetAccountKey, RestoreProject, RevokeSession, SetAccess, SetAccountPassword,
-    UpdateMe, WhoAmI,
+    GetProject, HaveBlobs, ListBoards, ListMyProjects, ListSessions, LoginOptions, PublishProject,
+    PushCommit, RemoveMember, ResetAccountKey, RestoreProject, RevokeSession, SetAccess,
+    SetAccountPassword, UpdateMe, WhoAmI,
 };
 use crate::response::{
     CloudResponse, Events, Heads, MissingBlobs, ProjectInfo, ProjectList, PushResult, UserInfo,
@@ -275,6 +276,17 @@ impl CloudCallSpec for ResetAccountKey {
     fn extract(response: CloudResponse) -> Option<AccountAccessInfo> {
         match response {
             CloudResponse::AccountAccessInfo(info) => Some(info),
+            _ => None,
+        }
+    }
+}
+
+impl CloudCallSpec for ListBoards {
+    type Response = BoardList;
+
+    fn extract(response: CloudResponse) -> Option<BoardList> {
+        match response {
+            CloudResponse::BoardList(list) => Some(list),
             _ => None,
         }
     }

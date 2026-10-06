@@ -37,7 +37,9 @@ extern crate std;
 
 pub mod lan_address;
 pub mod refuse_reason;
+pub mod relay_board_id;
 pub mod relay_client;
+pub mod relay_close_code;
 pub mod relay_frame;
 pub mod relay_hello;
 pub mod relay_limits;
@@ -47,9 +49,11 @@ pub mod route_close_reason;
 
 pub use lan_address::LanAddress;
 pub use refuse_reason::RefuseReason;
+pub use relay_board_id::{BadRelayBoardId, RelayBoardId};
 pub use relay_client::{
     RelayAccount, RelayAction, RelayClient, RelayClientConfig, RelayEvent, RelayState,
 };
+pub use relay_close_code::RelayCloseCode;
 pub use relay_frame::{ROUTE_FRAME_OVERHEAD, RelayFrame, RelayFrameError, encode_route_frame};
 pub use relay_hello::RelayHello;
 pub use relay_limits::{

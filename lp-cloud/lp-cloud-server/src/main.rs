@@ -42,16 +42,32 @@ async fn main() -> ExitCode {
     };
     log::info!("lp-cloud-server listening on http://{address}/ (base url {base_url})");
 
-    if let Err(error) = axum::serve(listener, build_router(state))
-        .with_graceful_shutdown(shutdown_signal())
+    // Connect info: the relay's client address when there is no fly proxy
+    // in front (local runs). Behind fly it reads `Fly-Client-IP` instead.
+    let relay = std::sync::Arc::clone(state.relay());
+    let app = build_router(state).into_make_service_with_connect_info::<SocketAddr>();
+    let going_away = std::sync::Arc::clone(&relay);
+    let draining = async move {
+        shutdown_signal().await;
+        // The relay's sockets are upgraded connections, which the graceful
+        // drain does not wait for: close them "going away" first, so every
+        // board takes its short (2–15 s) backoff onto the next machine.
+        going_away.going_away();
+    };
+    if let Err(error) = axum::serve(listener, app)
+        .with_graceful_shutdown(draining)
         .await
     {
         log::error!("server stopped: {error}");
         return ExitCode::FAILURE;
     }
+    relay.drained(RELAY_DRAIN).await;
     log::info!("shut down cleanly");
     ExitCode::SUCCESS
 }
+
+/// How long shutdown waits for the relay's legs to send their close frames.
+const RELAY_DRAIN: std::time::Duration = std::time::Duration::from_secs(3);
 
 /// Resolve when the platform asks us to stop.
 ///

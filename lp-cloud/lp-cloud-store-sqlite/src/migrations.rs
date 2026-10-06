@@ -49,6 +49,10 @@ const MIGRATIONS: &[Migration] = &[
         name: "0005_account_access",
         sql: include_str!("../migrations/0005_account_access.sql"),
     },
+    Migration {
+        name: "0006_account_access_key_salt_index",
+        sql: include_str!("../migrations/0006_account_access_key_salt_index.sql"),
+    },
 ];
 
 /// Bring a database up to the current schema and report the version it
@@ -308,6 +312,69 @@ mod tests {
         );
     }
 
+    /// The upgrade path 0006 exists for: a database at 0005 already holding
+    /// account-access rows (the shape production has today) gains the
+    /// key-salt index, every row survives byte for byte, and a lookup by
+    /// salt is answered from the index — the current salt finds its
+    /// account, a retired one finds nothing.
+    #[test]
+    fn migrating_from_0005_to_0006_indexes_key_salts_and_keeps_every_row() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        assert_eq!(apply(&mut conn, &MIGRATIONS[..5]).unwrap(), 5);
+        for (uid, n) in [("usra", 1u8), ("usrb", 2u8)] {
+            conn.execute(
+                "INSERT INTO users (uid, google_sub, email, display_name, created_at)\n\
+                 VALUES (?1, ?1, ?1, 'X', 1.0)",
+                [uid],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO account_access (user_uid, key_secret, key_salt, play_password_salt,\n\
+                     edit_password_salt, play_password, edit_password, previous_key_salts, updated_at)\n\
+                 VALUES (?1, ?2, ?3, ?4, ?5, NULL, 'crew', ?6, 3.5)",
+                rusqlite::params![
+                    uid,
+                    vec![n; 32],
+                    vec![n; 16],
+                    vec![n + 10; 16],
+                    vec![n + 20; 16],
+                    [vec![n + 30; 16], vec![n + 40; 16]].concat(),
+                ],
+            )
+            .unwrap();
+        }
+        assert!(!index_exists(&conn, "account_access_key_salt"));
+        let before = dump_account_access(&conn);
+
+        assert_eq!(run_migrations(&mut conn).unwrap(), latest_version());
+
+        assert!(index_exists(&conn, "account_access_key_salt"));
+        assert_eq!(dump_account_access(&conn), before, "every row survives");
+        let lookup = |salt: Vec<u8>| -> Option<String> {
+            conn.query_row(
+                "SELECT user_uid FROM account_access WHERE key_salt = ?1",
+                [salt],
+                |row| row.get(0),
+            )
+            .ok()
+        };
+        assert_eq!(lookup(vec![2; 16]).as_deref(), Some("usrb"));
+        assert_eq!(
+            lookup(vec![1 + 30; 16]),
+            None,
+            "a retired salt is not indexed"
+        );
+        let plan: String = conn
+            .query_row(
+                "EXPLAIN QUERY PLAN SELECT user_uid FROM account_access WHERE key_salt = x'01'",
+                [],
+                |row| row.get(3),
+            )
+            .unwrap();
+        assert!(plan.contains("account_access_key_salt"), "{plan}");
+    }
+
     #[test]
     fn running_an_already_migrated_database_is_a_no_op() {
         let mut conn = Connection::open_in_memory().unwrap();
@@ -373,6 +440,33 @@ mod tests {
         assert_eq!(apply(&mut conn, &[first, second]).unwrap(), 2);
         assert!(table_exists(&conn, "first"));
         assert!(table_exists(&conn, "second"));
+    }
+
+    fn index_exists(conn: &Connection, index: &str) -> bool {
+        conn.query_row(
+            "SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = ?1",
+            [index],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap()
+            > 0
+    }
+
+    /// Every account-access row, every column, in key order.
+    fn dump_account_access(conn: &Connection) -> Vec<Vec<rusqlite::types::Value>> {
+        let mut statement = conn
+            .prepare("SELECT * FROM account_access ORDER BY user_uid")
+            .unwrap();
+        let columns = statement.column_count();
+        statement
+            .query_map([], |row| {
+                (0..columns)
+                    .map(|i| row.get::<_, rusqlite::types::Value>(i))
+                    .collect()
+            })
+            .unwrap()
+            .map(Result::unwrap)
+            .collect()
     }
 
     fn table_exists(conn: &Connection, table: &str) -> bool {

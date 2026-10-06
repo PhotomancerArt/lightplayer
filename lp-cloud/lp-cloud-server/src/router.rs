@@ -10,9 +10,12 @@
 //! | `GET /p/{*share}` | page | none; OG tags only when link-visible |
 //! | `GET /auth/google` | auth | none — starts the OAuth round trip |
 //! | `GET /auth/google/callback` | auth | the `state` cookie is the credential |
+//! | `POST /auth/guest` | auth | none — mints a guest session unless one is live |
 //! | `POST /auth/logout` | auth | the session cookie, if there is one |
 //! | `GET /auth/dev` | auth | localhost + `LP_CLOUD_DEV_AUTH` (else 404) |
 //! | `GET\|HEAD\|OPTIONS /firmware/{target}/{release}/{file}` | firmware | none — public, verified by hash, any origin |
+//! | `GET /relay/device` | relay | WebSocket; the board proves its accounts in-band. Plain HTTP allowed |
+//! | `GET /relay/board/{id}` | relay | WebSocket; a session (account or guest) — see `relay::route_admission` |
 //! | `GET /healthz` | ops | none |
 //! | everything else | page | none — file, else the SPA document |
 
@@ -26,6 +29,7 @@ use crate::auth::{dev_auth, google_auth, guest_auth};
 use crate::content::{blob_route, tree_route};
 use crate::firmware::firmware_route;
 use crate::page::page_route;
+use crate::relay::{browser_leg, device_leg};
 
 /// The largest upload the content plane accepts.
 ///
@@ -62,6 +66,11 @@ pub fn build_router(state: AppState) -> Router {
             "/firmware/{target}/{release}/{file}",
             get(firmware_route::get_firmware).options(firmware_route::options_firmware),
         )
+        .route(
+            lpc_relay::RELAY_DEVICE_PATH,
+            get(device_leg::get_device_leg),
+        )
+        .route("/relay/board/{id}", get(browser_leg::get_browser_leg))
         .route("/healthz", get(page_route::get_healthz))
         .fallback(get(page_route::get_page_or_asset))
         .layer(DefaultBodyLimit::max(MAX_UPLOAD_BYTES))

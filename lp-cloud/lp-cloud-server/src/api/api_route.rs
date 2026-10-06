@@ -21,20 +21,31 @@
 //!
 //! [`TransportError`]: https://docs.rs/lpa-cloud-client
 
+use std::net::IpAddr;
+
 use axum::Json;
 use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use lp_cloud_domain::{Caller, session_token_hash};
-use lpc_cloud_api::{CLOUD_API_VERSION, CloudCall, CloudReply, check_version};
+use lpc_cloud_api::{
+    BoardList, CLOUD_API_VERSION, CloudCall, CloudError, CloudReply, CloudRequest, CloudResponse,
+    check_version,
+};
 use serde::Deserialize;
 
 use crate::app_state::AppState;
 use crate::auth::session_cookie::session_token;
+use crate::relay::client_address::ClientAddress;
 
 /// Answer one [`CloudCall`].
-pub async fn post_api(State(state): State<AppState>, headers: HeaderMap, body: Bytes) -> Response {
+pub async fn post_api(
+    State(state): State<AppState>,
+    ClientAddress(ip): ClientAddress,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
     // The version is read out of the envelope *before* the request is
     // decoded, and it has to be: an older client's request payload is
     // exactly the thing this build cannot parse, so decoding first would
@@ -60,6 +71,13 @@ pub async fn post_api(State(state): State<AppState>, headers: HeaderMap, body: B
     };
 
     let token = session_token(&headers);
+    if call.request == CloudRequest::ListBoards {
+        return Json(CloudReply {
+            version: CLOUD_API_VERSION,
+            result: list_boards(&state, token, ip).await,
+        })
+        .into_response();
+    }
     let result = state
         .with_service(move |core| {
             let actor = core.actor_for(token.as_deref());
@@ -77,6 +95,26 @@ pub async fn post_api(State(state): State<AppState>, headers: HeaderMap, body: B
         result,
     })
     .into_response()
+}
+
+/// `ListBoards`: presence is the relay's, in this process's memory, so it is
+/// answered here rather than by the domain — which still decides who is
+/// asking ([`board_list_viewer`](lp_cloud_domain::CloudService::board_list_viewer)).
+async fn list_boards(
+    state: &AppState,
+    token: Option<Vec<u8>>,
+    ip: Option<IpAddr>,
+) -> Result<CloudResponse, CloudError> {
+    let viewer = state
+        .with_service(move |core| {
+            let actor = core.actor_for(token.as_deref());
+            core.service.board_list_viewer(actor)
+        })
+        .await?;
+    let boards = viewer
+        .map(|user| state.relay().boards_for(user, ip))
+        .unwrap_or_default();
+    Ok(BoardList { boards }.into())
 }
 
 /// Just the envelope's version, for the pre-decode above. Every other field
