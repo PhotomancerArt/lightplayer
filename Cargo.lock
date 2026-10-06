@@ -5994,6 +5994,7 @@ name = "lp-emu-validate"
 version = "40.0.0"
 dependencies = [
  "anyhow",
+ "lp-seam",
  "regex",
  "serde",
  "serde_json",
