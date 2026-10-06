@@ -80,28 +80,13 @@ fn a_bluetooth_board_that_restarts_under_the_editor_resumes_it() {
 /// answered, which a link that never logged in is not.
 #[test]
 fn a_locked_bluetooth_board_that_restarts_under_the_editor_logs_in_again_and_resumes() {
-    let store = lpc_access::DeviceAccessFile {
-        version: lpc_access::DeviceAccessFile::VERSION,
-        secrets: vec![lpc_access::SecretEntry::from_password(
-            "bench password",
-            lpc_access::Tier::Edit,
-            BENCH_PASSWORD.as_bytes(),
-            [7; lpc_access::SALT_BYTES],
-            16,
-        )],
-        ble_enabled: true,
-        open: lpc_access::OpenTo::Nobody,
-    };
     let device = FakeEsp32Device::new(FakeDeviceScript::new(FakeBootState::LightPlayer(
         bluetooth_board("dev000000bledrop02")
             // Running at boot, so the restart brings it back running too.
             .with_project_files(bundled_example_files())
             .with_loaded_project()
             .with_untrusted_link()
-            .with_root_files(vec![(
-                lpc_access::DeviceAccessFile::PATH.to_string(),
-                store.to_json().expect("the store serializes").into_bytes(),
-            )]),
+            .with_root_files(vec![locked_store_file()]),
     )));
     let (mut bench, tasks, present) = bench_over_bluetooth(&device, |bench| {
         let mut remembered =
@@ -154,12 +139,81 @@ fn a_locked_bluetooth_board_that_restarts_under_the_editor_logs_in_again_and_res
     }
 }
 
+/// The silicon re-check's walk-2 (2026-10-06): the FIRST unlock of a
+/// locked board is a typed password (remembered), because nothing this
+/// browser held was on the board — its automatic try came up empty and was
+/// spent. The board then restarts under the editor. The password Studio
+/// just remembered must unlock the new link by itself: no sheet, and no
+/// link the board drops at its 10 s deadline.
+#[test]
+fn a_password_typed_once_unlocks_the_restarted_board_by_itself() {
+    let device = FakeEsp32Device::new(FakeDeviceScript::new(FakeBootState::LightPlayer(
+        bluetooth_board("dev000000bledrop03")
+            .with_project_files(bundled_example_files())
+            .with_loaded_project()
+            .with_untrusted_link()
+            .with_root_files(vec![locked_store_file()]),
+    )));
+    let (mut bench, tasks, present) = bench_over_bluetooth(&device, |_| {});
+    bench.run_until(&tasks, "the unlock sheet", |bench| {
+        bench.controller.view().login_prompt.is_some()
+    });
+    let card = bench.view().devices[0].id;
+    bench
+        .controller
+        .apply_access_command(crate::AccessCommand::SubmitPassword {
+            device: card,
+            password: BENCH_PASSWORD.to_string(),
+            remember: true,
+        });
+    open_running_lens(&mut bench, &tasks, "Unlocked by bench password", false);
+    let session = bench.lens_session_id();
+
+    restart_off_the_air(&mut bench, &tasks, &device, &present);
+    back_on_the_air(&mut bench, &device, &present);
+    wait_for_the_resume(&mut bench, &tasks);
+
+    assert_eq!(bench.lens_session_id(), session, "the same session resumed");
+    assert!(
+        bench.controller.view().login_prompt.is_none(),
+        "no sheet: the remembered password unlocked the new link"
+    );
+    match bench.tick() {
+        Some(crate::ProjectRefreshOutcome::Synced(sync)) => {
+            assert!(sync.synced, "the restarted board answers the editor's pull");
+        }
+        Some(_) => panic!("the resumed lens should pull and be answered"),
+        None => panic!("the resumed lens had nothing to pull"),
+    }
+}
+
 // ---------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------
 
 /// A password the bench's locked board holds and Studio remembers.
 const BENCH_PASSWORD: &str = "bench-password-1";
+
+/// A device store holding one edit password, [`BENCH_PASSWORD`], with
+/// nobody let in without it: a locked board.
+fn locked_store_file() -> (String, Vec<u8>) {
+    let store = lpc_access::DeviceAccessFile {
+        version: lpc_access::DeviceAccessFile::VERSION,
+        secrets: vec![lpc_access::SecretEntry::from_password(
+            "bench password",
+            lpc_access::Tier::Edit,
+            BENCH_PASSWORD.as_bytes(),
+            [7; lpc_access::SALT_BYTES],
+            16,
+        )],
+        ble_enabled: true,
+        open: lpc_access::OpenTo::Nobody,
+    };
+    (
+        lpc_access::DeviceAccessFile::PATH.to_string(),
+        store.to_json().expect("the store serializes").into_bytes(),
+    )
+}
 
 /// The bundled example's files, as a board holds them.
 fn bundled_example_files() -> Vec<(String, Vec<u8>)> {
