@@ -75,7 +75,12 @@ impl Esp32EspNowRadioDriver {
     ) -> Result<Self, HardwareEndpointError> {
         validate_channel(default_channel)?;
         let parts = crate::hardware::radio_hub::bring_up(wifi)?;
-        Self::from_parts(registry, parts.esp_now, Some(parts.controller), default_channel)
+        Self::from_parts(
+            registry,
+            parts.esp_now,
+            Some(parts.controller),
+            default_channel,
+        )
     }
 
     /// The driver over an ESP-NOW interface [`crate::hardware::radio_hub`]
@@ -112,8 +117,10 @@ impl Esp32EspNowRadioDriver {
     fn endpoint_status(&self) -> HwEndpointStatus {
         let status = self.registry.endpoint_status_for(&self.address);
         #[cfg(feature = "wifi")]
-        let status =
-            fw_esp32_common::net::radio_rule::radio_endpoint_status(crate::net::uses_wifi(), status);
+        let status = fw_esp32_common::net::radio_rule::radio_endpoint_status(
+            crate::net::uses_wifi(),
+            status,
+        );
         status
     }
 }

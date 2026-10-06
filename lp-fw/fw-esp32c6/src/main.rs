@@ -122,11 +122,6 @@ mod io_thread_stack_diag;
     not(fw_harness)
 ))]
 mod net;
-#[cfg(all(
-    any(feature = "io_thread_stack_diag", feature = "net_thread_stack_diag"),
-    not(fw_harness)
-))]
-mod thread_stack_diag;
 #[cfg(all(lp_split, not(fw_harness)))]
 mod ota;
 #[cfg(any(
@@ -147,6 +142,11 @@ mod serial;
 mod stack_probe;
 #[cfg(all(any(feature = "stress_s2", feature = "stress_s3"), not(fw_harness)))]
 mod stress;
+#[cfg(all(
+    any(feature = "io_thread_stack_diag", feature = "net_thread_stack_diag"),
+    not(fw_harness)
+))]
+mod thread_stack_diag;
 #[cfg(not(fw_harness))]
 use fw_esp32_common::server_loop;
 #[cfg(not(fw_harness))]
@@ -665,7 +665,8 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
         // The radio's one bring-up (`hardware::radio_hub`): ESP-NOW's
         // interface to its driver; the controller and the station interface
         // to the station (`wifi`), or back to the driver to keep alive.
-        let parts = hardware::radio_hub::bring_up(wifi).expect("Failed to initialize ESP-NOW radio");
+        let parts =
+            hardware::radio_hub::bring_up(wifi).expect("Failed to initialize ESP-NOW radio");
         #[cfg(feature = "wifi")]
         let (kept, net_radio) = (None, Some((parts.controller, parts.station)));
         #[cfg(not(feature = "wifi"))]
