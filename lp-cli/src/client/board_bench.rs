@@ -30,14 +30,18 @@ const EXIT_ART: i32 = 4;
 pub struct BenchBoard {
     pub slug: Option<String>,
     pub mark: Option<String>,
+    /// What `hardware desk-images` names its picture files by.
+    #[cfg(feature = "desk-images")]
     pub mac: Option<String>,
     pub role: Option<String>,
     pub chip: Option<String>,
     pub port: Option<String>,
     pub lease: Option<BenchLease>,
     /// A LightPlayer board id: what `hardware desk-images` draws.
+    #[cfg(feature = "desk-images")]
     pub lp_board: Option<String>,
     /// A LightPlayer project: the piece `hardware desk-images` draws.
+    #[cfg(feature = "desk-images")]
     pub lp_project: Option<String>,
 }
 
