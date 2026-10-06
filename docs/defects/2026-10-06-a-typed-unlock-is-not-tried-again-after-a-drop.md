@@ -65,8 +65,10 @@ answered pull). It failed before the fix with the card at "Needs a device
 password" and the editor closed. Unit:
 `a_reconnect_after_a_typed_unlock_tries_the_remembered_password`
 and `a_typed_password_answers_the_links_challenge_across_a_re_hello`
-(`access_session.rs`). Silicon: walk-3 of 2026-10-06 (remembered-first) and
-the re-run after the fix (see the plan's desk-check record).
+(`access_session.rs`). Silicon, 2026-10-06: walk-3 (remembered first) and
+walk-6 (typed first, both fixes: three drops ridden out, four grants, no
+link dropped at the deadline); the record is the plan's
+`data/desk-check-2026-10-06/README.md`.
 
 **Lesson** — a "don't retry" latch needs an explicit re-arm on success. A
 latch that only a page load clears turns one empty try into a permanent

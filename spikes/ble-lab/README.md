@@ -223,8 +223,14 @@ host tests, the conformance suite and `?ble=emu` all stop short of it
    just walk-ble-emu
    ```
 
-   All steps should pass, including `drop` and `phantom`. Its idle numbers
-   are emulated: shape, not a silicon claim.
+   All 14 steps should pass, including the three drops under Play: `drop`
+   (the board away for seconds; the cable is the emulated board's power, so
+   it restarts), `blip` (the radio drops and the page reconnects at once)
+   and `phantom` (Bluefy's). Its idle numbers are emulated: shape, not a
+   silicon claim. The board boots the packaged whole chip
+   (`{merged},kind=rom-up`; the split image's ELF alone boots core-only).
+   `WALK_RECORD_SINK=<an lp-cli record serve sink>` records the session,
+   and the page's console lands in `target/walk-ble-emu/page-console.log`.
 2. **Put the branch's firmware on the board.** Open the same dev server's
    Studio, connect the board over USB, and take **Update firmware** (the
    image the dev server packaged from the branch: hello `proto 37`). Or from
@@ -234,16 +240,37 @@ host tests, the conformance suite and `?ble=emu` all stop short of it
    afterwards if the board must work with production.
 3. **Unplug USB and connect over Bluetooth**: Devices → add → Bluetooth →
    `LP-…`. Log in if the board is locked (an open board needs nothing).
-   Expect the card to identify in a few seconds.
+   Expect the card to identify in a few seconds. Lock the board for at
+   least one pass (a password, Play and Author set to Password): the
+   resume after a drop has to log in again on the new link, and that is
+   what the 2026-10-05 desk check found broken. Type the password the
+   first time (with "Remember" ticked), on a browser this board holds no
+   key for: that is the path the second fix is for.
+   **Mac Chrome: a page reload does not bring the board back by itself.**
+   `navigator.bluetooth.getDevices()` answers nothing without Chrome's
+   "Web Bluetooth new permissions backend" flag, so after a reload connect
+   it again with the chooser (Bluefy restores it). And Chrome's Web
+   Bluetooth on macOS can wedge after a few board restarts (the chooser
+   stops offering the board, or a `connect()` hangs): quit Chrome and
+   reopen it.
 4. **Edit**: open the project in the editor, change a slot and a shader
    line, and push. **Play**: turn knobs, switch patterns. Then leave it in
    Play, idle, for 15–20 minutes.
 5. **Read the link counters** in the device card's developer view:
    `damaged` should stay at 0, `resets` at 0 apart from drops you caused,
-   `resends` low and explained (a busy radio). A drop shows the
-   "Reconnecting…" curtain and the page resumes on the new link without
-   leaving the editor or Play.
-6. **Phone (optional, closest to a user)**: the same from Bluefy on iOS,
+   `resends` low and explained (a busy radio).
+6. **Drop it under Play, three ways**: pull the board's power for two
+   seconds, ask it to reboot (USB `lp-cli link capture <port> --request
+   reboot`, or Studio's restart), and walk it out of range. Each time the
+   page must stay on Play behind "Reconnecting…", come back on its own
+   (the 2026-10-06 silicon re-check: 7–13 s after a power cut, ~8 s after a
+   reboot), with the card "Unlocked by …" again and no unlock sheet, and
+   the next knob turn must land. On the board's console, no
+   `no login within 10 s — closing` after a drop. If the page goes to
+   Devices instead, that is a finding: note the time, keep the board's
+   console and, if you can, record the session (`?record=`,
+   docs/recording-a-studio-session.md).
+7. **Phone (optional, closest to a user)**: the same from Bluefy on iOS,
    over `tailscale serve --bg --https=8443 http://127.0.0.1:<studio port>`.
    iOS negotiates ATT MTU 185, so frames carry 174 B of payload instead of
    180: the board's log line at each connect (`ATT MTU …, frames … B + 8`) says
