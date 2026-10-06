@@ -15,7 +15,7 @@ Why seams exist and what they may claim is the ADR
 | Kind | For | On |
 |---|---|---|
 | `Performance` | hardware the emulator models faithfully but slowly (the LED output) | only on Studio's Devices-page emulated boards; never in testing, never in `validate record` |
-| `Capability` | hardware the emulator cannot model (Wi-Fi, Bluetooth) | every emulated run, once one exists |
+| `Capability` | hardware the emulator cannot model (Wi-Fi shipped, Bluetooth next) | every emulated run, once one exists |
 
 | Shape | How the firmware is built around it |
 |---|---|
@@ -131,6 +131,36 @@ the firmware's IO thread, and the emulator paces what it raises. The C6
 image carries the handler since the network seam (`pending` names a RAM
 word; bit 0 = frames, bit 1 = station events, any bit wakes both of
 `lp-net`'s waiters), bound only when that seam is engaged.
+
+## The network seam (`net=lan`)
+
+The first `Capability`/`Switch` seam to ship (2026-10-06, PR #993). Nine
+calls, declared together and numbered in `src/net.rs`, switch the firmware's
+network bring-up between the real radio (silicon, `net_mac`'s engaged byte
+reads 0) and a seam-backed station and frame device (an emulated board that
+engaged `net=lan`, the byte reads 1):
+
+| Call | Arguments → result |
+|---|---|
+| `net_mac` | out pointer → the station MAC (6 B); also carries the engaged byte |
+| `net_take_frame` | buffer, capacity → length (0 = none waiting) |
+| `net_give_frame` | buffer, length → accepted (0/1) |
+| `net_link` | → link up or down |
+| `net_scan_start` | → started |
+| `net_scan_take` | buffer, capacity → records written (name length, name, signal, secure) |
+| `net_connect` | name pointer+length, password pointer+length → started |
+| `net_disconnect` | → done |
+| `net_event_take` | → the next station event (none / associated / authFailed / notFound / linkLost / scanDone) |
+
+Pull-only, like every seam: the emulator answers with only what the call
+asked for and writes only the buffer it handed over — `net_connect`'s
+password goes nowhere but the emulator's own join decision. `net.rs` carries
+the numbers both sides read: `MAC_LEN` (6), `MAX_FRAME_LEN` (1514, an
+Ethernet II frame with a 1500 B payload and no FCS), `MAX_SSID_LEN` (32),
+`MAX_PASSWORD_LEN` (64), the `EVENT_*` codes and `scan_record_len`. What this
+hands over (everything at and below the frame device) and what stays real
+above it (`embassy-net`, the link, the server) is
+`docs/adr/2026-10-05-emulator-seams.md` §11.
 
 ## Licence and the fence
 

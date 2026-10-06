@@ -270,12 +270,15 @@ The pacer keeps G0's rule (b): never two raises outstanding, a minimum
 spacing, a bounded queue that refuses and counts, a cap per take (512 B by
 default — below a full Ethernet frame, so a frame-carrying seam sets its own
 `PacerConfig`; `take` joins whole events, `take_one` keeps one event's
-boundary). Rule (a) —
-what a wake wakes runs on the firmware's IO thread — is the firmware's, and
-ships with the Bluetooth seam, as does the firmware's handler; until then the
-wake is proven against a synthetic guest (`tests/seam_wake_*.rs`). Its
-latency figures are **emulated** and never quoted as silicon. The lockstep
-runner (`Lockstep::with_medium`) is the deterministic multi-board driver:
+boundary). Rule (a) — what a wake wakes runs on the firmware's IO thread —
+is the firmware's, and **ships with the network seam** (`net=lan`'s pending
+word, bit 0 frames / bit 1 events; `FROM_CPU_INTR3` at priority 1, bound only
+when the seam is engaged; its two consumers are the tasks `lp-net` runs:
+embassy-net's runner and the station task). No Bluetooth seam had shipped it
+first, so it was built here instead of waited on; the Bluetooth seam reuses
+the same handler and adds its own consumer. Its latency figures are
+**emulated** and never quoted as silicon. The lockstep runner
+(`Lockstep::with_medium`) is the deterministic multi-board driver:
 `tests/seam_two_boards.rs` replays byte-identically.
 
 **`led=fast`, the LED performance seam.** It answers the firmware's
