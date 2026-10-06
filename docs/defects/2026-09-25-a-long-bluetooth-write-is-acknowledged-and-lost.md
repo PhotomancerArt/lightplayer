@@ -147,3 +147,22 @@ proto-26 image) with no answer, so Studio waited on it. Studio also talked to
 a proto-26 board from a proto-27 page without clearly saying "this board needs
 a firmware update". Both are wire-skew UX, recorded here for the wire-skew
 plan to own. They are not fixed in this change.
+
+## Closed 2026-09-29 — the bug class is gone, not just patched
+
+`lp2025/2026-09-28-1445-ble-on-lp-link` (D3/D7,
+`docs/adr/2026-09-24-ble-transport.md`'s 2026-09-29 Amendment) deletes the
+ATT long-write path this defect is about,
+rather than keeping it correct. `prepared_write.rs` is gone from
+`fw-esp32-common::radio_link`, `browser_ble.js`'s 180-byte write chunker is
+gone (every write is now exactly one lp-link frame, sized at or under one
+ATT value by construction — `min(180, ATT_MTU − 11)` — so no write can ever
+need to span more than one), and the board now actively refuses an incoming
+Prepare Write on RX with `REQUEST_NOT_SUPPORTED` instead of accepting one.
+So this is not "the reassembly path stayed correct" (root cause 1) or "the
+packet pool stayed sized right" (root cause 2) being re-verified — there is
+no reassembly path and no long-write PDU on the wire left to get either one
+wrong. Root cause 3 (Studio's drop never touching the radio) is unrelated to
+long writes and was fixed independently in #834 and is unaffected by this
+closure. This entry stays as the historical record of what shipped broken
+and why; nothing further needs to watch this mechanism.

@@ -98,9 +98,11 @@ fully out.
 
 `just walk-ble-emu` gained the Bluetooth twin under Play: `drop` (the radio
 drops) and `phantom` (Bluefy's phantom drop, found when the page is shown
-again). Those steps cannot run yet, because `?ble=emu` stopped identifying
-boards at the lp-link USB cut-over
-(`2026-10-02-the-ble-emu-polyfill-relays-lp-link-bytes-as-m-lines.md`).
+again). Those steps could not run while `?ble=emu` failed to identify
+boards after the lp-link USB cut-over
+(`2026-10-02-the-ble-emu-polyfill-relays-lp-link-bytes-as-m-lines.md`, fixed
+by #880); on #880's merged tree they are the desk-walk runbook's first step,
+not yet run.
 
 **Lesson** — on a wireless or hot-pluggable transport, "the link went away"
 is routine. It is not the end of what the user was doing. Keep the session

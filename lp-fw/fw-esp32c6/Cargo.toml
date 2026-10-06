@@ -52,6 +52,7 @@ ble = [
     "dep:static_cell",
     "dep:embassy-sync-07",
     "dep:embedded-io-07",
+    "fw-esp32-common/radio-link",
 ]
 naga = ["lpa-server/naga"]
 # The USB link task on a preemptive esp-rtos thread of its own (priority 1,

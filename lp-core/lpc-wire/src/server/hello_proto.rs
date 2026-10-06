@@ -135,8 +135,8 @@ mod tests {
     }
 
     /// Main's wire 34 (`hardware.fs`, the C6 repartition) still lacks the
-    /// build's `version`, which wire 35 requires (36 left the hello as it
-    /// was): such a hello does not
+    /// build's `version`, which wire 35 requires (36 and 37 left the hello
+    /// as it was): such a hello does not
     /// decode, and names its proto and board all the same. The same hello
     /// with a version decodes — the one field is the whole difference.
     #[test]

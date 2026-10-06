@@ -580,10 +580,13 @@
 
           With `?ble=emu` beside `?emu=<ws://host:port | tab>`, `navigator.bluetooth`
           in this page is a polyfill (`/lpa-link/virtual_bluetooth.js`) whose NUS
-          service pipes bytes to the SAME emulated boards the `?emu=` bus holds,
-          and Studio's Bluetooth stack — `browser_ble.js`, the Rust link and
-          transport, the device card, Play mode — runs against it unchanged.
-          It implements exactly the GATT subset `browser_ble.js` calls.
+          service reaches the SAME emulated boards the `?emu=` bus holds, and
+          Studio's Bluetooth code — `browser_ble.js`, the Rust link, its lp-link
+          end and transport, the device card, Play mode — runs against it
+          unchanged. It implements exactly the GATT subset `browser_ble.js`
+          calls. The link underneath is the board's USB lp-link, not its radio
+          link: the polyfill translates Studio's one-frame-per-write datagrams
+          to and from the board's stream framing (its header says how).
 
           ⚠️ What it proves: the transport, the UI and Play mode. NOT access
           enforcement — the emulated firmware sees its USB link, which it trusts,

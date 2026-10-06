@@ -2855,6 +2855,9 @@ test-rust-core:
     cargo test -p fw-esp32-common --features usb-link,server
     # ...and the classic's UART0 host link (feature `uart-link`), same reason.
     cargo test -p fw-esp32-common --features uart-link,server
+    # ...and the C6's Bluetooth links (feature `radio-link`, the mux and the
+    # radio slots), with `json-pack` so the packed-session test runs too.
+    cargo test -p fw-esp32-common --features radio-link,json-pack
     # lpa-update's packer (feature `pack`: std + flate2/zlib-rs) and the host x
     # board simulation's encoding-1 cases. Its own invocation, so flate2's
     # zlib-rs backend never unifies into espflash's in the workspace run.

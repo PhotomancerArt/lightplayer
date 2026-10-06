@@ -1,38 +1,44 @@
 //! One BLE connection, served as one radio link for its whole life.
 //!
 //! The connection gets a fresh [`LinkId`] at connect, but the link *opens* —
-//! is announced to the mux, gets its hello, may carry requests — only once
-//! the central has enabled notifications on TX. Before that, nothing the
-//! board sent would arrive (the host stack skips notifications to an
-//! unsubscribed central without saying so), so nothing is accepted either.
+//! gets its lp-link session, is announced to the mux — only once the central
+//! has enabled notifications on TX. Before that, nothing the board sent would
+//! arrive (the host stack skips notifications to an unsubscribed central
+//! without saying so), so nothing is accepted either. At that moment the
+//! board reads the connection's negotiated ATT MTU and sizes the session's
+//! frames to one ATT value (`fw_esp32_common::radio_link::radio_link_config`);
+//! a connection whose MTU cannot carry even a handshake frame is refused and
+//! disconnected. The session's handshake then runs as ordinary traffic, and
+//! the mux owes the link its hello when that session comes up — not at
+//! subscribe.
 //!
 //! One task, one `select` loop, four things it waits on:
 //!
-//! - **GATT events:** RX writes are re-joined into `M!` lines and handed to
-//!   the server loop; a CCCD write opens (or, turned off, closes) the link;
-//!   parameter requests from the central are accepted.
-//! - **Frames from the mux** for this slot, sent as notifications
-//!   (`notify_queue`), the result reported back.
-//! - **Close requests from the mux** (login deadline, a write that missed its
-//!   deadline): disconnect, logged with the reason.
-//! - **Timers:** the connection-parameter request shortly after connect, its
+//! - **GATT events:** each write to RX is one whole lp-link frame, fed to the
+//!   link; a CCCD write opens (or, turned off, closes) the link; parameter
+//!   requests from the central are accepted. A long write (Prepare …
+//!   Execute) is refused: no frame ever needs one.
+//! - **The mux's doorbell** for this slot: something was queued, transmit.
+//! - **Close requests from the mux** (login deadline, a reply the central did
+//!   not take in time): disconnect, logged with the reason.
+//! - **Timers:** the link's own (resend, delayed ACK, keepalive, handshake),
+//!   the connection-parameter request shortly after connect and its
 //!   read-back, and the subscribe deadline — a central that never enables
 //!   notifications is disconnected after the same 10 s a link gets to log in.
+//!
+//! Each turn of the loop starts by notifying whatever frames the link has
+//! ready (`notify_queue`).
 
-use alloc::vec::Vec;
 use embassy_futures::select::{Either4, select4};
 use embassy_time::{Duration, Instant, Timer};
-use fw_esp32_common::radio_link::line_joiner::LineJoiner;
-use fw_esp32_common::radio_link::prepared_write::{PrepareRefused, PreparedWrite};
-use fw_esp32_common::radio_link::{
-    LOGIN_DEADLINE_MS, RADIO_LINE_CAP, RADIO_LINK_PORT, RadioLinkEvent,
-};
+use fw_esp32_common::radio_link::{LOGIN_DEADLINE_MS, RadioLinkEvent, RadioLinkPort, now_us};
+use lpc_shared::transport::LinkId;
 use trouble_host::att::{AttClient, AttReq};
 use trouble_host::prelude::*;
 
 use super::ble_task::BleStack;
 use super::conn_params;
-use super::notify_queue;
+use super::notify_queue::{self, NotifyFailed};
 use super::nus_service::{NusServer, tx_subscribed};
 
 /// When, after connect, to ask for the preferred parameters: after the
@@ -42,14 +48,14 @@ const PARAMS_REQUEST_AFTER: Duration = Duration::from_millis(1_000);
 /// When, after the request, to read back what was granted.
 const PARAMS_READBACK_AFTER: Duration = Duration::from_millis(3_000);
 
-/// Serve `conn` on `slot` until it disconnects.
+/// Serve `conn` on `slot` of `port` until it disconnects.
 pub async fn serve(
     conn: GattConnection<'static, 'static, DefaultPacketPool>,
     slot: usize,
+    port: &'static RadioLinkPort,
     server: &'static NusServer<'static>,
     stack: &'static BleStack,
 ) {
-    let port = &RADIO_LINK_PORT;
     let slot_port = port.slot(slot);
     slot_port.reset();
     let link = port.mint_link();
@@ -60,10 +66,10 @@ pub async fn serve(
     );
     conn_params::log_granted(link, &conn, "at connect");
 
-    let mut joiner = LineJoiner::new(RADIO_LINE_CAP);
-    let mut prepared = PreparedWrite::new();
     let mut opened = false;
     let mut closing = false;
+    // The link had more frames ready than one pass sends.
+    let mut more = false;
     let mut params_request_at = Some(connected_at + PARAMS_REQUEST_AFTER);
     let mut params_readback_at: Option<Instant> = None;
     let subscribe_deadline = connected_at + Duration::from_millis(LOGIN_DEADLINE_MS);
@@ -75,10 +81,30 @@ pub async fn serve(
     let mut idle_params = false;
 
     let reason = loop {
+        if opened && !closing {
+            match notify_queue::send_frames(slot_port, server, &conn).await {
+                Ok(again) => more = again,
+                Err(failed) => {
+                    more = false;
+                    if matches!(failed, NotifyFailed::Refused) {
+                        log::warn!(
+                            "[ble] {link}: notification refused by the host — disconnecting"
+                        );
+                    }
+                    closing = true;
+                    conn.raw().disconnect();
+                }
+            }
+        }
+        let link_timer = (opened && !closing)
+            .then(|| slot_port.poll_timeout())
+            .flatten()
+            .map(|at| Instant::from_micros(if more { 0 } else { at }));
         let next_timer = [
             params_request_at,
             params_readback_at,
             (!opened && !closing).then_some(subscribe_deadline),
+            link_timer,
         ]
         .into_iter();
         // Run K only; the shipped build's connection future carries none of it.
@@ -91,19 +117,35 @@ pub async fn serve(
                 None => core::future::pending::<()>().await,
             }
         };
-        let writing = opened;
-        let write = async move {
-            if writing {
-                slot_port.next_write().await
-            } else {
-                core::future::pending().await
-            }
-        };
 
-        match select4(conn.next(), write, slot_port.close_requested(), timer).await {
+        match select4(
+            conn.next(),
+            slot_port.doorbell(),
+            slot_port.close_requested(),
+            timer,
+        )
+        .await
+        {
             Either4::First(GattConnectionEvent::Disconnected { reason }) => break reason,
             Either4::First(GattConnectionEvent::Gatt { event }) => {
-                let (rx_bytes, refuse) = rx_write(&event, server, &mut prepared, link);
+                let (wrote, refuse) = rx_write(&event, server, link);
+                if wrote {
+                    #[cfg(feature = "desk_ble_params")]
+                    {
+                        last_rx = Instant::now();
+                    }
+                    if let GattEvent::Write(w) = &event {
+                        if opened {
+                            slot_port.on_datagram(now_us(), w.data());
+                        } else {
+                            log::debug!(
+                                "[ble] {link}: {} B written before notifications were \
+                                 enabled — dropped",
+                                w.data().len()
+                            );
+                        }
+                    }
+                }
                 let reply = match refuse {
                     Some(code) => event.reject(code),
                     None => event.accept(),
@@ -113,43 +155,24 @@ pub async fn serve(
                     Err(_) => log::warn!("[ble] {link}: GATT reply failed"),
                 }
                 #[cfg(feature = "desk_ble_params")]
-                if rx_bytes.is_some() {
-                    last_rx = Instant::now();
-                    if idle_params {
-                        idle_params = false;
-                        let (i, l, t) = conn_params::desk::active();
-                        log::info!("[ble-exp] {link}: write after idle — asking for active params");
-                        conn_params::request(link, &conn, stack, i, l, t).await;
-                        params_readback_at = Some(Instant::now() + PARAMS_READBACK_AFTER);
-                    }
-                }
-                if let Some(bytes) = rx_bytes {
-                    let report = joiner.push(&bytes, |line| {
-                        if !opened {
-                            log::warn!(
-                                "[ble] {link}: {} B line before notifications were enabled — dropped",
-                                line.len()
-                            );
-                        } else if !port.deliver_line(link, line) {
-                            log::warn!("[ble] {link}: incoming queue full, dropping an M! line");
-                        }
-                    });
-                    if report.dropped_any() {
-                        log::warn!(
-                            "[ble] {link}: dropped {} over-long and {} non-UTF-8 lines",
-                            report.overflowed_lines,
-                            report.invalid_utf8_lines
-                        );
-                    }
+                if wrote && idle_params {
+                    idle_params = false;
+                    let (i, l, t) = conn_params::desk::active();
+                    log::info!("[ble-exp] {link}: write after idle — asking for active params");
+                    conn_params::request(link, &conn, stack, i, l, t).await;
+                    params_readback_at = Some(Instant::now() + PARAMS_READBACK_AFTER);
                 }
                 // A CCCD write (or any write) may have changed the
                 // subscription; the table is the truth.
                 let subscribed = tx_subscribed(server, conn.raw());
-                if subscribed && !opened {
-                    opened = true;
-                    log::info!("[ble] {link}: notifications on — link open");
-                    port.announce(RadioLinkEvent::Opened { link, slot }).await;
-                } else if !subscribed && opened {
+                if subscribed && !opened && !closing {
+                    if open_link(port, slot, link, &conn).await {
+                        opened = true;
+                    } else {
+                        closing = true;
+                        conn.raw().disconnect();
+                    }
+                } else if !subscribed && opened && !closing {
                     log::warn!("[ble] {link}: notifications turned off — disconnecting");
                     closing = true;
                     conn.raw().disconnect();
@@ -171,10 +194,8 @@ pub async fn serve(
             }) => {
                 log::debug!("[ble] {link}: data length tx={max_tx_octets} rx={max_rx_octets}");
             }
-            Either4::Second(request) => {
-                let result = notify_queue::send_frame(port, &request, server, &conn).await;
-                port.finish_write(&request, result);
-            }
+            // The mux queued something: the next turn transmits it.
+            Either4::Second(()) => {}
             Either4::Third(reason) => {
                 log::warn!("[ble] {link}: closing at the server's request ({reason})");
                 closing = true;
@@ -205,7 +226,7 @@ pub async fn serve(
                         conn_params::request(link, &conn, stack, i, l, t).await;
                         params_readback_at = Some(Instant::now() + PARAMS_READBACK_AFTER);
                     }
-                } else if !opened && now >= subscribe_deadline {
+                } else if !opened && !closing && now >= subscribe_deadline {
                     log::warn!(
                         "[ble] {link}: notifications not enabled within {} s — disconnecting",
                         LOGIN_DEADLINE_MS / 1000
@@ -213,10 +234,13 @@ pub async fn serve(
                     closing = true;
                     conn.raw().disconnect();
                 }
+                // Otherwise the link's own timer: the next turn transmits.
             }
         }
     };
 
+    // The link's RAM goes back to the heap here, whatever closed it.
+    slot_port.close();
     if opened {
         port.announce(RadioLinkEvent::Closed { link }).await;
     }
@@ -230,57 +254,72 @@ pub async fn serve(
     );
 }
 
-/// What a GATT event writes to RX, and the ATT error to refuse it with.
+/// The central enabled notifications: start the connection's lp-link session
+/// at its negotiated ATT MTU and announce the link. `false`: the MTU cannot
+/// carry a frame and the caller disconnects.
+async fn open_link(
+    port: &'static RadioLinkPort,
+    slot: usize,
+    link: LinkId,
+    conn: &GattConnection<'_, '_, DefaultPacketPool>,
+) -> bool {
+    let att_mtu = conn.raw().att_mtu();
+    // Random per connection: it is how the central learns this is a new
+    // session (the RNG is the one the login challenges draw from).
+    let nonce = esp_hal::rng::Rng::new().random();
+    match port.slot(slot).open(link, att_mtu, nonce) {
+        Ok(max_payload) => {
+            log::info!(
+                "[ble] {link}: notifications on — link open (ATT MTU {att_mtu}, frames \
+                 {max_payload} B + 8, link RAM {} B, heap used {} B)",
+                port.slot(slot).ram_bytes().unwrap_or(0),
+                esp_alloc::HEAP.used()
+            );
+            port.announce(RadioLinkEvent::Opened { link, slot }).await;
+            true
+        }
+        Err(_) => {
+            // D5 (plan `ble-on-lp-link`): below the Bluetooth minimum not
+            // even the handshake frame fits one ATT value. Refused rather
+            // than opened on a link that can never carry a frame.
+            log::error!(
+                "[ble] {link}: ATT MTU {att_mtu} cannot carry an lp-link frame — disconnecting"
+            );
+            false
+        }
+    }
+}
+
+/// Whether a GATT event wrote RX, and the ATT error to refuse it with.
 ///
-/// A plain write (with or without response) carries its bytes. A long write
-/// arrives as `Prepare Write`s, queued in `prepared`, and one `Execute Write`
-/// that hands the whole value over; trouble-host reports both as "other"
-/// events and would otherwise answer them with success and drop the bytes
-/// (docs/defects/2026-09-25-a-long-bluetooth-write-is-acknowledged-and-lost.md).
-/// A segment the queue refuses is refused to the central with the matching
-/// ATT error, so the page's write fails loudly instead of vanishing.
+/// Every frame fits one ATT value, so a plain write (with or without
+/// response) is the only write a central makes. A long write (`Prepare
+/// Write` … `Execute Write`), which trouble-host reports as an "other" event
+/// and would otherwise answer with success while dropping the bytes
+/// (docs/defects/2026-09-25-a-long-bluetooth-write-is-acknowledged-and-lost.md),
+/// is refused at its first segment, so a central that tries one fails loudly
+/// instead of losing it.
 fn rx_write(
     event: &GattEvent<'_, '_, DefaultPacketPool>,
     server: &NusServer<'_>,
-    prepared: &mut PreparedWrite,
-    link: lpc_shared::transport::LinkId,
-) -> (Option<Vec<u8>>, Option<AttErrorCode>) {
+    link: LinkId,
+) -> (bool, Option<AttErrorCode>) {
     let rx_handle = server.uart.rx.handle;
     match event {
-        GattEvent::Write(w) if w.handle() == rx_handle => (Some(w.data().to_vec()), None),
+        GattEvent::Write(w) if w.handle() == rx_handle => (true, None),
         GattEvent::Other(other) => match other.payload().incoming() {
-            AttClient::Request(AttReq::PrepareWrite {
-                handle,
-                offset,
-                value,
-            }) if handle == rx_handle => match prepared.prepare(offset, value) {
-                Ok(()) => (None, None),
-                Err(refused) => {
-                    log::warn!(
-                        "[ble] {link}: long write refused at offset {offset} ({} B queued): {}",
-                        prepared.queued(),
-                        match refused {
-                            PrepareRefused::InvalidOffset => "offset out of order",
-                            PrepareRefused::QueueFull => "longer than 512 B",
-                        }
-                    );
-                    let code = match refused {
-                        PrepareRefused::InvalidOffset => AttErrorCode::INVALID_OFFSET,
-                        PrepareRefused::QueueFull => AttErrorCode::PREPARE_QUEUE_FULL,
-                    };
-                    (None, Some(code))
-                }
-            },
-            AttClient::Request(AttReq::ExecuteWrite { flags }) => {
-                let value = prepared.execute(flags);
-                if let Some(value) = &value {
-                    log::debug!("[ble] {link}: long write of {} B executed", value.len());
-                }
-                (value, None)
+            AttClient::Request(AttReq::PrepareWrite { handle, offset, .. })
+                if handle == rx_handle =>
+            {
+                log::warn!(
+                    "[ble] {link}: long write refused at offset {offset}: every frame is one \
+                     ATT value"
+                );
+                (false, Some(AttErrorCode::REQUEST_NOT_SUPPORTED))
             }
-            _ => (None, None),
+            _ => (false, None),
         },
-        _ => (None, None),
+        _ => (false, None),
     }
 }
 

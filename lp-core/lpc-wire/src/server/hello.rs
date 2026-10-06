@@ -44,9 +44,24 @@ use crate::server::hello_auth::HelloAuth;
 ///   `ConnectStep`); `NetworkScan` gains `scanning` (the radio is listening
 ///   now, ask again shortly — an empty `heard` list keeps meaning "heard
 ///   nothing"); `StationState::Connected` gains the required `host`, the
-///   board's mDNS name `lp-xxxx.local`. 37 is Bluetooth on lp-link (#880),
-///   unmerged when this was cut; whichever merges second takes the next free
-///   number. `PACK_FORMAT_VERSION` is unchanged.
+///   board's mDNS name `lp-xxxx.local`. Built beside 37 (Bluetooth on
+///   lp-link, #880) and stacked on it, so it takes the next number.
+///   `PACK_FORMAT_VERSION` is unchanged.
+/// - 37: BLE (the C6's radio links) moves onto lp-link too (plan
+///   `lp2025/2026-09-28-1445-ble-on-lp-link`; `docs/adr/2026-09-24-ble-transport.md`).
+///   Follows 32 (the classic's UART): the two cut-overs were built side by
+///   side, the classic merged first, and this one sat open while 33–36
+///   (access, the filesystem, the build version, Wi-Fi settings) landed, so
+///   it takes 37.
+///   Every radio link — up to `RADIO_LINK_SLOTS` (2) at once — carries lp-link's
+///   Datagram framing (one frame per BLE notification or write, no COBS, CRC-32C,
+///   a nonce handshake) with a 180-byte `max_payload`, instead of `M!{json}\n`
+///   lines over the ATT long-write (Prepare…Execute) path. The payload-tag
+///   convention (`{`/`L`), the packed opt-in, and the heartbeat's `link` object
+///   (`LinkCounters`) are unchanged in spirit — they just ride the radio link the
+///   same way they already ride USB — so an old peer misreads only the framing,
+///   not a new message shape; the bump marks that framing change. Only
+///   `fw-emu` keeps `M!` lines now. `PACK_FORMAT_VERSION` is unchanged.
 /// - 36: Wi-Fi settings on the device (plan
 ///   `lp2025/2026-10-04-0808-wifi-settings`, Wi-Fi roadmap M5) — five
 ///   edit-tier requests: `ClientRequest::NetworkStatus`, `NetworkScan`,
@@ -105,10 +120,10 @@ use crate::server::hello_auth::HelloAuth;
 ///   proto-channel message, the hello after every link `Up`, the learned
 ///   table and packed opt-in reset with the link, logs on the log channel,
 ///   and the heartbeat's `link` object as lp-link's counters. An `M!` host
-///   cannot read a classic running this, nor the reverse. 31 is the
-///   Bluetooth cut-over's (`claude/ble-on-lp-link`, PR #880), sequenced
-///   before this one by the director; BLE and fw-emu keep `M!` lines here.
-///   `PACK_FORMAT_VERSION` is unchanged.
+///   cannot read a classic running this, nor the reverse. 31 was reserved
+///   for the Bluetooth cut-over (PR #880), which merged after this one and
+///   took 37 instead; no `main` build ever carried 31. BLE and fw-emu keep
+///   `M!` lines here. `PACK_FORMAT_VERSION` is unchanged.
 /// - 30: the USB device link moves onto lp-link (plan
 ///   `lp2025/2026-09-27-0215-lp-link-usb-cutover`;
 ///   `docs/adr/2026-09-27-lp-link-one-comms-layer.md`). On USB-Serial-JTAG
