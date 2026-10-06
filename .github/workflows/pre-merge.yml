@@ -76,7 +76,7 @@ env:
 #                   ├─ emu-c6            (the C6 SoC emulator's own suite)
 #                   ├─ emu-esp32v3       (the classic ESP32 machine's gate: boot suite + heap)
 #                   ├─ emu-esp32v3-ref   (…its other half: replays + reference image + jit cell)
-#                   ├─ heap-budget-chips (chip heap ratchet + lp-cli link tests)
+#                   ├─ heap-budget-chips (chip heap ratchet + lp-cli link tests + agent evals)
 #                   ├─ emu-c6-cli        (lp-cli whole-board emu tests)
 #                   └─ emu-c6-layout-migration (the C6 repartition's migration, narrowly gated)
 #   (the figure jobs)  ─ figures-comment   (PRs: ONE sticky comment naming the
@@ -2316,8 +2316,9 @@ jobs:
           fi
 
   # The heap-budget record's chip half (`just heap-budget-check-chips`,
-  # docs/heap-budget-gate.md "The second source") and the LINK half of
-  # lp-cli's emulator-backed tests (`just test-emu-c6-cli-link`). Both were
+  # docs/heap-budget-gate.md "The second source"), the LINK half of lp-cli's
+  # emulator-backed tests (`just test-emu-c6-cli-link`) and the app-agent
+  # evals' stage A and B (`just test-emu-c6-cli-agent`). The first two were
   # steps of `emu-c6` until 2026-09-08. That job had been cut at its 20-minute
   # budget on every run since #599 (PR #613 raised it to 35 as a stopgap), and
   # its step timings on main run 34308562027 said why: 478 s for the ratchet
@@ -2348,12 +2349,14 @@ jobs:
   heap-budget-chips:
     name: Heap budget (esp32c6 chip)
     runs-on: ubuntu-24.04
-    # Measured 9.7 and 10.4 min on PR #997 (2026-10-06, the split): ~0.6 min
-    # setup, 8.1 min link half (6 of it the release lp-cli test tree, the
-    # sccache floor, plus the firmware), 1.6 min ratchet. 25 is ~2.4x the
-    # max; re-measure before tightening, and before raising it — growth here
-    # wants another split, not a bigger number.
-    timeout-minutes: 25
+    # Measured on PR #997 (2026-10-06, the split): 7.8-10.4 min for the link
+    # half (~6 of it the release lp-cli test tree, the sccache floor, plus
+    # the firmware) and the ratchet (~1.6); the agent evals add ~1.2 min of
+    # stage B plus stage A's dev `-p lpa-studio-core` build, 3.2-5.5 min
+    # depending on sccache — so ~15 min at most. 35 is ~2.3x; re-measure
+    # before tightening, and before raising it — growth here wants another
+    # split, not a bigger number.
+    timeout-minutes: 35
     needs: detect-changes
     if: needs.detect-changes.outputs.emu_c6 == 'true'
     env:
@@ -2408,10 +2411,15 @@ jobs:
       # `hello.proto` / `heartbeat.total_bytes` figures are read by
       # `lp-cli/tests/emu_usb_link_gates.rs` (a link host is a product
       # crate, so those gates left the emulator's own suite).
-      - name: Emulator-backed lp-cli tests — the link half
+      # Then the app-agent evals' stage A and B (`test-emu-c6-cli-agent`):
+      # stage B reuses the release lp-cli build the link half just made, and
+      # this job had the room — moved here from `emu-c6-cli` to balance the
+      # two. A failure there names no pinned figure, so the bless below
+      # classifies it "not a figure move", as it should.
+      - name: Emulator-backed lp-cli tests — the link half and the agent evals
         id: cli_tests
         shell: bash
-        run: cd lp2025 && just test-emu-c6-cli-link 2>&1 | tee "$RUNNER_TEMP/figures-cli.log"
+        run: cd lp2025 && just test-emu-c6-cli-link test-emu-c6-cli-agent 2>&1 | tee "$RUNNER_TEMP/figures-cli.log"
 
       # The shipped image booted whole, read from the allocator figures its
       # own first heartbeat reports. It lives in this job and not in the
@@ -2478,8 +2486,8 @@ jobs:
 
   # The BOARDS half of lp-cli's emulator-backed tests (`just
   # test-emu-c6-cli-boards`): the fragmented-heap reads, the split image's
-  # boot (a two-pass split build of its own) and stage B of the app-agent
-  # evals. Split out of `heap-budget-chips` 2026-10-06 (see that job) so
+  # boot and the LED seam on it (a two-pass split build, shared by the
+  # two). Split out of `heap-budget-chips` 2026-10-06 (see that job) so
   # neither job carries the other's growth. It pays its own release `-p
   # lp-cli` test-tree build (~6 min, the sccache floor) for that; the two
   # jobs run side by side, so the wall clock a PR waits on went down.
@@ -2490,11 +2498,11 @@ jobs:
   emu-c6-cli:
     name: Emulator C6 lp-cli (x64)
     runs-on: ubuntu-24.04
-    # Measured 14.7 min on PR #997 (2026-10-06): ~0.9 min setup, 5.9 min
-    # release lp-cli test tree, 3.5 min frag reads + split boot (firmware and
-    # split build included), 3.2 min stage A's dev `-p lpa-studio-core`
-    # build, 1.1 min stage B. 35 is ~2.4x; re-measure before tightening.
-    timeout-minutes: 35
+    # Measured on PR #997 (2026-10-06): ~1 min setup, ~6 min release lp-cli
+    # test tree, ~1 min firmware, ~4.3 min frag reads + LED seam + split boot
+    # (the split build included) — ~12 min. 30 is ~2.5x; re-measure before
+    # tightening.
+    timeout-minutes: 30
     needs: detect-changes
     if: needs.detect-changes.outputs.emu_c6 == 'true'
     env:
