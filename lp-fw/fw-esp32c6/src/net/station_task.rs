@@ -115,7 +115,10 @@ pub async fn station_task(mut control: EspStation, stack: Stack<'static>, host: 
         match event {
             Either4::First(()) => {}
             Either4::Second(()) => {
-                if let Some(rssi) = control.rssi().filter(|_| connected) {
+                // Only a joined station has a signal to read: asking while
+                // searching makes esp-radio log an error every tick (silicon,
+                // 2026-10-06).
+                if connected && let Some(rssi) = control.rssi() {
                     policy.handle(now_ms(), StationEvent::Signal(rssi));
                 }
                 queue.extend(policy.handle(now_ms(), StationEvent::Tick));
