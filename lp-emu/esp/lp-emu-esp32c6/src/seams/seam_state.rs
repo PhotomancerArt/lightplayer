@@ -6,7 +6,7 @@
 
 use lp_emu_core::sched::Cycles;
 use lp_emu_esp_common::ParticipantId;
-use lp_emu_esp_common::seam::net::SharedLan;
+use lp_emu_esp_common::seam::net::{Pace, SharedLan};
 use lp_emu_esp_common::seam::{
     ArmSite, Engaged, PacerConfig, ScanResult, SeamEndpoint, SeamImpl, SeamRequest, SiteKind,
     WakePacer,
@@ -112,6 +112,10 @@ pub struct SeamState {
     /// The machine drives its LAN itself at the top of its slices (a
     /// self-driven or wall-clock LAN, not a runner's).
     pub net_pumps: bool,
+    /// The run's pace (`lp_emu_esp_common::seam::net::lan_pace`), set on its
+    /// LAN when the network seam engages; `None` is the unset pace. Kept
+    /// across chip starts, and in the label when set.
+    pub pace: Option<Pace>,
 }
 
 impl SeamState {
@@ -140,12 +144,16 @@ impl SeamState {
             .find(|s| s.is_code() && s.site.vaddr == pc && (s.armed || s.ever_armed))
     }
 
-    /// `base` plus the engaged atoms; exactly `base` with none engaged.
+    /// `base` plus the engaged atoms, then the pace when one was set
+    /// (`…+net=lan@pace=realtime`); exactly `base` with none engaged and no
+    /// pace set.
     pub fn label(&self, base: &str) -> String {
-        match &self.engaged {
+        let mut label = match &self.engaged {
             Some(e) => e.label(base),
             None => base.to_string(),
-        }
+        };
+        label.push_str(&Pace::label_suffix(self.pace));
+        label
     }
 
     /// Forget the last chip start's resolution, keeping the request and the

@@ -234,6 +234,16 @@ snapshot), and **with none asked for nothing runs**: no scan, no patch, one
   sites, engaged-byte@…)`, label `…+net=lan`); an older image, or one with no
   table, prints `SEAM none engaged: …` and runs with no network. Only
   `--seams none` (or `net=real`) scans nothing.
+- **A run's pace** (`Esp32C6Builder::pace`; `lp-cli emu run --pace`, `emu
+  serve`'s `pace=`) is set on the board's LAN when `net=lan` engages:
+  `realtime` holds the guest clock to wall time for the whole run, `max`
+  never does, and unset (the default) holds it only while a host is
+  connected through a LAN forward. `realtime` needs the network seam on a
+  LAN the board drives itself: with no `net=lan` asked for, or on a
+  runner's LAN, the build fails, and a chip start where the seam does not
+  engage (an older image) ends the run with exit 64; a blank ROM-up chip,
+  which runs nothing until it is flashed, is let be until then. A set pace
+  follows the seam atoms in the label: `lp-emu:esp32c6:t1+net=lan@pace=realtime`.
 
 **The network seam (`net=lan`, `src/seams/net_seam.rs`).** One atom arms all
 nine `lp_seam::net` calls and `net_mac`'s engaged byte. The board is

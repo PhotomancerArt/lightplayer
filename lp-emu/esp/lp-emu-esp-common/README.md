@@ -525,6 +525,32 @@ emulated C6 whose image carries the seam engages it, on the LAN its host
 gave it or on an empty one of its own. A wasm build binds no port forward:
 the tab's page has no sockets.
 
+**A run's pace** (`Pace`, `HostPace`). A board can be held to the host's
+clock at its LAN pump: it pumps at least every millisecond of its guest time
+(`HOST_PACE_STEP_US`) and waits there when it has run ahead (at most 50 ms a
+wait, outside the LAN's lock). A board slower than the host is never hurried,
+and a sleep's overshoot is not made up, so a held idle board runs at about
+two thirds of wall speed. Which boards are held is each board's pace, set by
+its host (`SharedLan::set_pace`; `lp-cli emu run --pace`, `emu serve`'s
+`pace=`):
+
+- **unset** (the default, and every existing run): held while a host is
+  connected through any of the LAN's forwards, otherwise as fast as it goes.
+  Unpaced, an idle board's clock ran about 8× the host's, so a host's 1–2 ms
+  round trip was 10–17 ms on the board's clock and its lp-link resend timer
+  and tail probe fired on frames the host had not yet had time to acknowledge
+  (74–95 resent per upload, nothing lost;
+  `docs/defects/2026-10-06-an-emulated-boards-clock-outran-its-lan-host.md`);
+- **`realtime`**: held for the whole run, host or no host (1×, for watching a
+  pattern). It needs the network seam engaged on a self-driven or wall-clock
+  LAN, so a runner's LAN refuses it and the C6 refuses it with no `net=lan`;
+- **`max`**: never held, even with a host connected.
+
+A set pace is in the run's label after its seam atoms,
+`lp-emu:esp32c6:t1+net=lan@pace=realtime` (`Pace::label_suffix`), never as a
+`+` atom: a pace is not a seam. An unset one adds nothing. A runner's LAN,
+and so the lockstep runner and CI, never waits.
+
 ## Tests
 
 ```bash

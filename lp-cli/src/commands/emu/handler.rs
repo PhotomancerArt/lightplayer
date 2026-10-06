@@ -143,6 +143,9 @@ fn run(args: RunArgs) -> Result<()> {
     if args.chip != EmuChip::Esp32C6 && (args.lan.is_some() || args.seam_trace.is_some()) {
         bail!("--lan and --seam-trace are the C6's: Xtensa seams are the roadmap's M7");
     }
+    if args.chip != EmuChip::Esp32C6 && args.pace.is_some() {
+        bail!("--pace is the C6's: a pace is held at its network seam's LAN pump");
+    }
     if args.chip != EmuChip::Esp32C6 && (args.seams.is_some() || args.seams_prefer.is_some()) {
         bail!("--seams / --seams-prefer are the C6's (Xtensa seams are the roadmap's M7)");
     }
@@ -186,6 +189,11 @@ fn run(args: RunArgs) -> Result<()> {
             UsbSjDrain::Auto
         })
         .seams(seams);
+    // `--pace`: left out, the board is held to wall time only while a host
+    // is connected through its `--lan` forward.
+    if let Some(pace) = args.pace {
+        builder = builder.pace(pace.pace());
+    }
 
     if args.ota.ota_offer.is_some() && !args.host_link {
         bail!("--ota-offer drives the update over the link this process hosts: add --host-link");
@@ -718,6 +726,17 @@ mod tests {
             String::from_utf8(sink.out).unwrap(),
             "cyc=1 pc=0x1 SEAM net=lan link\ncyc=3 SEAM net=lan event associated\n"
         );
+    }
+
+    #[test]
+    fn a_pace_is_the_c6s_alone() {
+        for chip in ["esp32s3", "esp32v3"] {
+            let args = Cli::try_parse_from(["run", "--elf", "fw", "--chip", chip, "--pace", "max"])
+                .expect("parses")
+                .run;
+            let err = run(args).unwrap_err();
+            assert!(format!("{err:#}").contains("--pace is the C6's"), "{err:#}");
+        }
     }
 
     #[test]

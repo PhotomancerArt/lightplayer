@@ -303,6 +303,20 @@ before seams existed. `validate replay --against <configuration>` matches a
 committed capture by its label, so `…:t1` and `…:t1+net=lan` never find each
 other's transcripts.
 
+**A run's pace is not a seam.** An emulated C6 run whose pace was set
+explicitly (`lp-cli emu run --pace realtime|max`, `emu serve`'s `pace=`)
+carries it after the seam atoms, `lp-emu:esp32c6:t1+net=lan@pace=realtime`;
+an unset pace adds nothing, so no existing label moves.
+`ValidateConfig::configuration` takes the `@pace=<mode>` off before it splits
+the atoms on `+` (a `+pace=…` is an unknown seam, and anything after the `@`
+but `pace=realtime` or `pace=max` is refused), and the pace moves no grade.
+`validate record` and `run` refuse both: `realtime` holds the board to wall
+time, so what it records depends on the host's clock and a transcript must
+be a function of the image; `max` is what every validate run already is (its
+driver binds no LAN forward), and a transcript carries no pace. Each refusal
+names the label to use instead. `lp-cli` tests that the emulator's spelling
+(`Pace::label_suffix`) reads back here.
+
 ## Transcript
 
 Committed, verbatim, under:

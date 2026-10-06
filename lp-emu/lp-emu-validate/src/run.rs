@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 
-use crate::config::ValidateConfig;
+use crate::config::{LabelPace, ValidateConfig};
 use crate::configuration::{Availability, Configuration, ConfigurationKind};
 use crate::driver::{LinkHost, RunRequest, default_out_dir, driver_for};
 use crate::grade::FieldClass;
@@ -349,6 +349,32 @@ fn refuse_unrunnable_seams(entry: &crate::config::ConfigurationEntry, verb: &str
     Ok(())
 }
 
+/// **A paced run never makes a transcript.** `realtime` holds the board to
+/// wall time, so what it records depends on the host's clock, and a
+/// transcript must be a function of the image. `max` is what every
+/// `validate` run already is (its driver binds no LAN forward, so nothing
+/// ever paces it), and a transcript's header carries no pace, so it would
+/// file under a label it does not say: drop the `@pace=` instead.
+fn refuse_a_pace(entry: &crate::config::ConfigurationEntry, verb: &str) -> Result<()> {
+    match entry.pace {
+        None => Ok(()),
+        Some(LabelPace::Realtime) => bail!(
+            "cannot {verb} on `{}`: pace realtime holds the board to wall time, so what it \
+             records depends on the host's clock, and a transcript must be a function of the \
+             image — {verb} on `{}`",
+            entry.label(),
+            entry.seam_label()
+        ),
+        Some(LabelPace::Max) => bail!(
+            "cannot {verb} on `{}`: `validate` never paces a run (its driver binds no LAN \
+             forward), so every run is already `max`, and a transcript carries no pace — \
+             {verb} on `{}`",
+            entry.label(),
+            entry.seam_label()
+        ),
+    }
+}
+
 /// `validate run <set> --config <name>` — plan, then (unless dry) execute.
 pub fn run_set(
     cfg: &ValidateConfig,
@@ -360,6 +386,7 @@ pub fn run_set(
 ) -> Result<String> {
     let entry = cfg.configuration(configuration)?;
     refuse_unrunnable_seams(&entry, "run")?;
+    refuse_a_pace(&entry, "run")?;
     let config = entry.parsed()?;
     check_link_override(opts, &config)?;
     let payloads = cfg.payloads_in(set)?;
@@ -570,6 +597,7 @@ pub fn record_set(
     } = *provenance;
     let entry = cfg.configuration(configuration)?;
     refuse_unrunnable_seams(&entry, "record")?;
+    refuse_a_pace(&entry, "record")?;
     let config = entry.parsed()?;
     check_link_override(opts, &config)?;
     let payloads = cfg.payloads_in(set)?;
@@ -1069,6 +1097,67 @@ mod tests {
             err.contains("performance seams never make transcripts"),
             "{err}"
         );
+    }
+
+    /// A paced run never makes a transcript: `realtime` because what it
+    /// records depends on the host's clock, `max` because every validate run
+    /// already is one and a transcript carries no pace.
+    #[test]
+    fn a_paced_run_never_records_or_runs() {
+        let cfg = ValidateConfig::embedded();
+        let provenance = RecordProvenance {
+            date: "2026-10-06",
+            firmware_commit: "733d6886a",
+            firmware_dirty: None,
+            machine: None,
+        };
+        let record = |name: &str| {
+            format!(
+                "{:#}",
+                record_set(
+                    &cfg,
+                    "boot-idle",
+                    name,
+                    &RunOptions::default(),
+                    Path::new("/repo"),
+                    &provenance,
+                    true,
+                )
+                .unwrap_err()
+            )
+        };
+        let run = |name: &str| {
+            format!(
+                "{:#}",
+                run_set(
+                    &cfg,
+                    "boot-idle",
+                    name,
+                    &RunOptions::default(),
+                    Path::new("/repo"),
+                    true,
+                )
+                .unwrap_err()
+            )
+        };
+        let err = record("lp-emu:esp32c6:t1+net=lan@pace=realtime");
+        assert!(
+            err.contains("a transcript must be a function of the image"),
+            "{err}"
+        );
+        assert!(
+            err.contains("record on `lp-emu:esp32c6:t1+net=lan`"),
+            "{err}"
+        );
+        let err = run("lp-emu:esp32c6:t1+net=lan@pace=realtime");
+        assert!(err.contains("wall time"), "{err}");
+        for err in [
+            record("lp-emu:esp32c6:t1@pace=max"),
+            run("lp-emu:esp32c6:t1@pace=max"),
+        ] {
+            assert!(err.contains("never paces a run"), "{err}");
+            assert!(err.contains("on `lp-emu:esp32c6:t1`"), "{err}");
+        }
     }
 
     /// A capability seam records: the plan asks the machine for exactly the

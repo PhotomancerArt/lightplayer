@@ -664,11 +664,21 @@ A **socket** is not, and cannot be. A client's command is applied at
 whichever slice boundary the poll landed on, which depends on the host's
 clock; the reply says which cycle that was, so a session is at least
 *auditable*. That is exactly the line between `--pin-script` and the `pin`
-verb, and the two never blur. Wall clock still never enters the machine — it
-changes when a run notices the outside, never how fast the run goes. Gates
-use the scripted form; the socket form has one test
-(`tests/usb_socket.rs`) whose job is to prove the plumbing, with wall
-timeouts as its safety net.
+verb, and the two never blur. Wall clock never enters what the machine
+computes — it changes when a run notices the outside — and it changes how
+fast a run goes in exactly one place, the **pace** of a board on a virtual
+LAN (`lp-emu-esp-common`'s `seam::net::lan_pace`): a board held to the
+host's clock waits at its LAN pump when its guest clock has run ahead. Left
+unset that happens only while a host is connected through a LAN forward
+(`docs/defects/2026-10-06-an-emulated-boards-clock-outran-its-lan-host.md`);
+`--pace realtime` holds the board at 1× for the whole run and `--pace max`
+never does, and a set pace is in the run's label (`…@pace=realtime`). A wait
+only sleeps the host thread, so on its own it moves no guest cycle; what it
+moves is where a socket's bytes land in guest time, which is the point of it
+and is wall-clock dependent. So `validate` never records a paced run, and the
+lockstep runner's LAN never waits. Gates use the scripted form; the
+socket form has one test (`tests/usb_socket.rs`) whose job is to prove the
+plumbing, with wall timeouts as its safety net.
 
 ### What plan two's shim maps onto this
 

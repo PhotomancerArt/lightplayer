@@ -1,11 +1,13 @@
 ---
-status: open
+status: fixed
 found: 2026-10-06      # how: e2e (PR B's emulated LAN uploads, lp-emu:esp32c6:t1+net=lan)
+fixed: this change
 area: lp-emu/esp/lp-emu-esp-common seam/net (shared_lan.rs); the USB door
 class: fidelity
 related:
   - docs/defects/2026-10-06-a-lan-link-strands-the-heap-below-the-load-floor.md
   - docs/defects/2026-10-06-the-virtual-lans-forward-kept-a-moved-boards-old-connection.md
+  - docs/defects/2026-10-06-the-io-task-goes-silent-for-2-s-under-paced-lan-traffic.md
   - lp2025/2026-10-05-1903-wifi-link-c6 (PR C, #993)
 ---
 # An emulated board's clock outran its LAN host, and its link resent frames TCP had already delivered
@@ -32,34 +34,60 @@ had the time to acknowledge. The same race showed on the USB door (a TCP
 client over `serial:tcp://`): 54 resends per upload there, hidden mostly by the
 C6 board's 200 ms USB resend floor.
 
-**Proposed fix (built and measured, NOT shipped in #993)** — the patch is kept
-as `data/pr993-lan-host-pace.patch` in the plan directory
-(`lp2025/2026-10-05-1903-wifi-link-c6`). It is held back because it changes an
-emulator invariant (`lp-emu/esp/README.md` §Determinism: the host's clock
-never sets the pace of an emulated run) and costs an idle hosted board ~⅓ of
-its speed, which is a decision for the emulator's owner, not a fix to slip
-into PR C; and because a variant that made up the sleep overshoot surfaced an
-unexplained `[RECOVERY] io task silent > 2000 ms` (below). It is **not**
-only wasted frames: in the emulated Wi-Fi walk (`just walk-wifi-emu lan`,
-runs 6 and 9 at the shipping tree, unpaced) a board running a project with
-Studio's LAN link open logged `radio link link1: a reply still not out of the
-frame buffer after 5000 ms (2048 B held) — closing` with `tick=5040ms` on every
-redial and reset itself (`rst:0x10 (LP_WDT_SYS)`, 3 and 12 times), because 5 s
-of its clock passed while the host had been given well under 1 s to drain the
-reply. With the patch (runs 7, 8) none of that happened and the walk passed
-10/10. So leaving this open costs the walk false failures. What the patch does: a
-host on the LAN sets its pace (`lan_host_pace.rs`, `shared_lan.rs`):
-while a host is connected through any forward, a self-driven or wall-clock LAN
-bounds each board's next pump to one millisecond of its guest time
-(`HOST_PACE_STEP_US`, so an idle skip cannot leap past what the host could have
-said) and makes a board whose clock has run ahead of the host's wait at its
-pump. A board behind the host is never hurried and owes no sprint; with no host
-connected nothing waits, and a runner-driven LAN is untouched. The wait is
-outside the LAN's lock, and a wasm build (which binds no forward) imports no
-sleep.
+It was **not** only wasted frames: in the emulated Wi-Fi walk (`just
+walk-wifi-emu lan`, runs 6 and 9 at the shipping tree, unpaced) a board
+running a project with Studio's LAN link open logged `radio link link1: a
+reply still not out of the frame buffer after 5000 ms (2048 B held) —
+closing` with `tick=5040ms` on every redial and reset itself (`rst:0x10
+(LP_WDT_SYS)`, 3 and 12 times), because 5 s of its clock passed while the
+host had been given well under 1 s to drain the reply. With the host pace
+(runs 7, 8) none of that happened and the walk passed 10/10.
 
-Emulated (`lp-emu:esp32c6:t1+net=lan`, lp-emu at `f3feec073` plus the patch),
-four uploads of `projects/test/basic` to one fresh board, then `lp-cli link rtt`:
+The pace was first built as a patch and held back from #993
+(`data/pr993-lan-host-pace.patch` in `lp2025/2026-10-05-1903-wifi-link-c6`),
+because it changed an emulator invariant (`lp-emu/esp/README.md`
+§Determinism then said the host's clock never sets the pace of a run) and
+costs an idle hosted board ~⅓ of its speed: the emulator owner's decision.
+
+**Fix — an explicit pace, whose default is the host's** (Yona's decision,
+2026-10-06: clock advance is controlled; 1× for patterns and anything a
+person or wall-clock peer talks to, as fast as possible for unit tests, and
+that is an option). A run has a **pace** (`lp_emu_esp_common::seam::net::Pace`,
+`lan_pace.rs`), set by its host: `lp-cli emu run --pace realtime|max`, `emu
+serve --pace …` for every board and `pace=realtime|max` per `--board`
+(beside `lan=`, `seams=`).
+
+- **Unset** (the flag left out — every existing run, CI, the lockstep runner,
+  the tab, every test): the patch held back in #993, unchanged. While a host
+  is connected through any of a self-driven or wall-clock LAN's port
+  forwards, each board's next pump is bounded to 1 ms of its guest time
+  (`HOST_PACE_STEP_US`, so an idle skip cannot leap past what the host could
+  have said) and a board whose clock has run ahead of the host's waits at its
+  pump (`HostPace`, `lan_host_pace.rs`; outside the LAN's lock, at most 50 ms
+  a wait). A board behind the host is never hurried and owes no sprint, and a
+  sleep's overshoot is not made up. With no host connected nothing waits.
+- **`realtime`**: the same hold for the whole run, host or no host (1×).
+  It is held at the board's LAN pump, so it needs the network seam engaged on
+  a LAN the board drives itself: the C6 refuses it at build with no `net=lan`
+  asked for (`--seams none`) or on a runner's LAN, and a chip start where the
+  seam does not engage (an older image) ends the run (exit 64); a blank ROM-up
+  chip runs nothing to pace until it is flashed and is let be until then.
+- **`max`**: never paced, even with a host connected.
+
+A set pace is in the configuration label after the seam atoms,
+`lp-emu:esp32c6:t1+net=lan@pace=realtime` (`…@pace=max`); an unset one adds
+nothing, so every existing label stands. `lp-emu-validate` reads the suffix
+(never as a `+` seam atom) and refuses to `record` or `run` a paced
+configuration: `realtime` is wall-clock dependent, and a transcript must be a
+function of the image. The catch-up variant (below) is **not** shipped.
+
+The USB door's clock has the same shape and is paced only when the board is
+also on a LAN that holds it (`realtime`, or a LAN host attached): a
+`--seams none` run has no pace to set.
+
+Measured with the held-back patch, which is the shipped unset pace
+(`lp-emu:esp32c6:t1+net=lan`, lp-emu at `f3feec073` plus the patch), four
+uploads of `projects/test/basic` to one fresh board, then `lp-cli link rtt`:
 
 | | before | after |
 |---|---:|---:|
@@ -78,25 +106,37 @@ link — which a real host's delayed ACK (40 ms and up) would make worse, not
 better. That is the firmware's and the LAN preset's to decide, not the
 emulator's: the gateway keeps modelling a host that delays its ACKs.
 
-**Coverage the patch carries** — `lan_host_pace::tests` (the pace's rule against host
-time it is handed: ahead waits the difference, behind is not hurried, a long
-skip waits at most the cap, a restart or a release starts again) and
-`shared_lan::tests::a_connected_host_paces_the_lan_until_it_leaves` (a host
-connected through a forward engages the pace and bounds the next pump; once it
-has gone, neither). The resend counts themselves are not gated: the forward is
-a host socket, and an emulated test never gates on the host's clock.
+**Coverage** — `lan_host_pace::tests` (the pace's rule against host time it
+is handed: ahead waits the difference, behind is not hurried, a long skip
+waits at most the cap, a restart or a release starts again);
+`shared_lan::tests`: `a_connected_host_paces_the_lan_until_it_leaves` (unset:
+a host connected through a forward engages the pace and bounds the next pump;
+once it has gone, neither), `a_max_pace_never_waits_even_with_a_host_connected`,
+`a_realtime_pace_holds_the_board_with_no_host`,
+`a_runners_lan_refuses_a_realtime_pace`; `lp-emu-esp32c6`'s
+`tests/seam_net_pace.rs` (the pace reaches the LAN and the label, an unset one
+neither; `realtime` refused with no network seam, on a runner's LAN, and at a
+chip start the seam does not engage); `lp-emu-validate`'s
+`a_pace_follows_the_atoms_and_is_never_a_seam` and
+`a_paced_run_never_records_or_runs`; `lp-cli`'s argument tests for both hosts
+and the board option, and the label's parity across the fence. The resend
+counts themselves are not gated: the forward is a host socket, and an
+emulated test never gates on the host's clock.
 
 **Lesson** — an emulated board and a wall-clock peer are on two clocks, and an
 idle board's clock runs many times faster than the peer's. Every timer that
 measures a round trip to the peer (a resend timer, a probe, a keepalive's
 stall) is then wrong by that factor, silently. The USB door has the same shape
-and is not paced yet.
+and is paced only through the LAN.
 
 **Also seen while measuring, not understood** — pacing that made up each
 sleep's overshoot (up to 10 ms of catch-up) ran the board at 1.00× but, in 3 of
 3 runs, logged `[RECOVERY] io task silent > 2000 ms` and one ~3 s request; the
 no-catch-up patch showed neither in 2 of 2. A latent stall under a different
-traffic timing, on the firmware or the emulator side.
+traffic timing, on the firmware or the emulator side, filed open as
+`2026-10-06-the-io-task-goes-silent-for-2-s-under-paced-lan-traffic.md`; the
+shipped pace is the no-catch-up one, so `realtime` runs at about two thirds of
+wall speed when idle rather than exactly 1×.
 
 **Firmware/preset proposals** (PR B's to decide, sent to it): Nagle off on the
 LAN endpoint's socket (`lan_endpoint_task.rs`, each frame is one whole

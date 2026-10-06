@@ -63,7 +63,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result, bail};
 use lp_emu_esp32c6::loader::EfuseIdentity;
 
-use super::args::{EmuChip, ServeArgs};
+use super::args::{EmuChip, PaceArg, ServeArgs};
 use board::{Board, BoardKind, BoardOptions, BoardSpec, default_mac, format_mac};
 use door::Registry;
 use served_lan::{LanSeat, ServedLan, is_path_segment, parse_lans};
@@ -94,13 +94,19 @@ pub fn serve(args: ServeArgs) -> Result<()> {
             .with_context(|| format!("--console-dir: creating {}", dir.display()))?;
     }
 
-    let specs = parse_boards(
+    let mut specs = parse_boards(
         &args.board,
         args.state_dir.as_deref(),
         args.console_dir.as_deref(),
     )?;
     let lans = parse_lans(&args.lan)?;
     check_lans(&specs, &lans)?;
+    // `--pace` is every board's, unless its own `pace=` says otherwise.
+    if let Some(pace) = args.pace {
+        for spec in &mut specs {
+            spec.pace.get_or_insert(pace.pace());
+        }
+    }
 
     let air = match &args.air {
         Some(addr) => {
@@ -236,7 +242,7 @@ fn check_lans(specs: &[BoardSpec], lans: &[ServedLan]) -> Result<()> {
     Ok(())
 }
 
-/// `--board <id>=<image>[,mac=<aa:bb:…>][,kind=elf|merged|rom-up][,lan=<name>]`.
+/// `--board <id>=<image>[,mac=<aa:bb:…>][,kind=elf|merged|rom-up][,lan=<name>][,pace=realtime|max]`.
 fn parse_boards(
     specs: &[String],
     state_dir: Option<&Path>,
@@ -290,6 +296,7 @@ fn parse_board(
     let mut seams_strict: Option<String> = None;
     let mut seams_prefer: Option<String> = None;
     let mut lan: Option<String> = None;
+    let mut pace: Option<lp_emu_esp_common::seam::net::Pace> = None;
     for option in parts {
         let option = option.trim();
         if option.is_empty() {
@@ -306,10 +313,17 @@ fn parse_board(
             Some(("seams", value)) => seams_strict = Some(value.to_string()),
             Some(("seams_prefer", value)) => seams_prefer = Some(value.to_string()),
             Some(("lan", value)) if is_path_segment(value) => lan = Some(value.to_string()),
+            Some(("pace", value)) => {
+                pace = Some(
+                    PaceArg::parse(value)
+                        .map_err(|e| anyhow::anyhow!("--board `{text}`: pace=: {e}"))?
+                        .pace(),
+                );
+            }
             _ => bail!(
                 "--board `{text}`: `{option}` is not a board option — mac=<aa:bb:cc:dd:ee:ff>, \
-                 kind=elf|merged|rom-up, seams=<atoms|none>, seams_prefer=<atoms> or \
-                 lan=<name>"
+                 kind=elf|merged|rom-up, seams=<atoms|none>, seams_prefer=<atoms>, \
+                 lan=<name> or pace=realtime|max"
             ),
         }
     }
@@ -361,6 +375,7 @@ fn parse_board(
         mac,
         seams,
         lan,
+        pace,
         flash,
         console: console_dir.map(|dir| dir.join(format!("{id}.console.log"))),
     })
@@ -437,6 +452,19 @@ mod tests {
         assert!(parse_board("c6-a=fw,lan=ho/me", 0, None, None).is_err());
         let err = check_lans(&[on], &[]).unwrap_err();
         assert!(format!("{err:#}").contains("--lan home="), "{err:#}");
+    }
+
+    #[test]
+    fn a_board_may_set_its_pace_and_leaves_it_unset_by_default() {
+        use lp_emu_esp_common::seam::net::Pace;
+        assert_eq!(parse_board("c6-a=fw", 0, None, None).unwrap().pace, None);
+        let real = parse_board("c6-a=fw,lan=home,pace=realtime", 0, None, None).expect("parses");
+        assert_eq!(real.pace, Some(Pace::Realtime));
+        assert_eq!(real.lan.as_deref(), Some("home"), "beside lan=");
+        let max = parse_board("c6-a=fw,pace=max,seams=none", 0, None, None).expect("parses");
+        assert_eq!(max.pace, Some(Pace::Max));
+        let err = parse_board("c6-a=fw,pace=fast", 0, None, None).unwrap_err();
+        assert!(format!("{err:#}").contains("realtime or max"), "{err:#}");
     }
 
     #[test]

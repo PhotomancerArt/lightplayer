@@ -42,7 +42,7 @@
 
 use lp_emu_core::sched::Cycles;
 use lp_emu_esp_common::seam::net::{
-    LanConfig, LanDriver, SharedLan, StationEvent, VirtualLan, net_endpoint,
+    LanConfig, LanDriver, Pace, SharedLan, StationEvent, VirtualLan, net_endpoint,
 };
 use lp_emu_esp_common::seam::{EndpointEvent, EndpointId};
 use lp_seam::net as abi;
@@ -90,6 +90,9 @@ impl Esp32C6Machine {
             self.seams
                 .announce(format!("SEAM net=lan: board {id} is not on its LAN: {why}"));
         }
+        if let Err(why) = lan.set_pace(id, self.seams.pace) {
+            self.seams.strict_error = Some(why);
+        }
         self.seams.net_endpoint = Some(index);
         self.seams.net_pumps = lan.driver() != LanDriver::Runner;
     }
@@ -121,7 +124,23 @@ impl Esp32C6Machine {
         if self.seams.endpoints[i].has_outbound() {
             return Some(now);
         }
-        lan.deadline(now)
+        lan.deadline(self.seams.endpoints[i].id, now)
+    }
+
+    /// A chip start's seams are settled: a `realtime` pace with no network
+    /// seam engaged has nothing to hold the board with, so the run ends
+    /// rather than going on unpaced under a label that says `realtime`.
+    pub(crate) fn net_check_pace(&mut self, why_not_engaged: Option<&str>) {
+        if self.seams.pace != Some(Pace::Realtime)
+            || self.seams.net_endpoint.is_some()
+            || self.seams.strict_error.is_some()
+        {
+            return;
+        }
+        let why = why_not_engaged.unwrap_or("this image does not engage the network seam");
+        self.seams.strict_error = Some(realtime_needs_a_lan(&format!(
+            "the network seam did not engage this chip start ({why})"
+        )));
     }
 
     /// Whether endpoint `index` is the network endpoint and its station has
@@ -265,4 +284,14 @@ fn event_word(code: u32) -> &'static str {
         abi::EVENT_SCAN_DONE => StationEvent::ScanDone.word(),
         _ => "none",
     }
+}
+
+/// Why a `realtime` pace cannot hold this run: the pace is held at the
+/// board's LAN pump, and `why` says why there is no LAN to pump.
+pub fn realtime_needs_a_lan(why: &str) -> String {
+    format!(
+        "pace realtime holds the board to wall time through its LAN (the network seam, \
+         `net=lan`), and {why}: drop the pace, or run an image that engages `net=lan` \
+         (not `--seams none`)"
+    )
 }

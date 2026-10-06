@@ -101,6 +101,9 @@ pub struct BoardSpec {
     /// The served LAN this board is on (`lan=<name>`), or `None`: an engaged
     /// network seam then answers from an empty LAN of the board's own.
     pub lan: Option<String>,
+    /// This board's pace (`pace=`, else `--pace`), or `None`: unset, held to
+    /// wall time only while a host is connected through its LAN forward.
+    pub pace: Option<lp_emu_esp_common::seam::net::Pace>,
     /// The persistent flash file, `None` for a merged board (which carries
     /// the whole chip already) and for a serve with no `--state-dir`.
     pub flash: Option<PathBuf>,
@@ -627,6 +630,9 @@ fn build(
         .usb_sj(UsbSjSink::Tcp("127.0.0.1:0".to_string()))
         .control("127.0.0.1:0")
         .seams(spec.seams.clone());
+    if let Some(pace) = spec.pace {
+        builder = builder.pace(pace);
+    }
     // On a served LAN, as participant `seat`: attached at build with its
     // eFuse MAC when the network seam is wanted.
     if let Some(seat) = &options.lan {
@@ -753,6 +759,7 @@ mod tests {
             mac: default_mac(0),
             seams: lp_emu_esp_common::seam::SeamRequest::prefer("led=fast").unwrap(),
             lan: None,
+            pace: None,
             flash: None,
             console: None,
         };

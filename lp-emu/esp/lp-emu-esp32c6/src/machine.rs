@@ -1203,6 +1203,8 @@ pub struct Esp32C6Builder {
         lp_emu_esp_common::seam::net::SharedLan,
         lp_emu_esp_common::ParticipantId,
     )>,
+    /// The run's pace ([`Esp32C6Builder::pace`]); `None` is the unset pace.
+    pace: Option<lp_emu_esp_common::seam::net::Pace>,
 }
 
 impl Default for Esp32C6Builder {
@@ -1275,6 +1277,7 @@ impl Esp32C6Builder {
             seams: lp_emu_esp_common::seam::SeamRequest::default(),
             seam_pacing: lp_emu_esp_common::seam::PacerConfig::default(),
             lan: None,
+            pace: None,
         }
     }
 
@@ -1793,6 +1796,20 @@ impl Esp32C6Builder {
         self
     }
 
+    /// The run's pace (`lp_emu_esp_common::seam::net::lan_pace`): `realtime`
+    /// holds the board's guest clock to wall time for the whole run, `max`
+    /// never does; unset (the default) holds it only while a host is
+    /// connected through one of its LAN's forwards. Applied at the board's
+    /// LAN pump, so `realtime` needs the network seam engaged on a LAN its
+    /// boards drive themselves: a run that does not ask for `net=lan`, or
+    /// whose LAN is a runner's, fails to build, and a chip start where the
+    /// seam does not engage ends the run ([`Outcome::Seam`]). A set pace is
+    /// in the configuration label (`…@pace=realtime`).
+    pub fn pace(mut self, pace: lp_emu_esp_common::seam::net::Pace) -> Self {
+        self.pace = Some(pace);
+        self
+    }
+
     /// The wake's pacing knobs (`lp_emu_esp_common::seam::PacerConfig`).
     pub fn seam_pacing(mut self, pacing: lp_emu_esp_common::seam::PacerConfig) -> Self {
         self.seam_pacing = pacing;
@@ -1939,6 +1956,7 @@ impl Esp32C6Builder {
             seams,
             seam_pacing,
             lan,
+            pace,
         } = self;
 
         let rom_image = match rom {
@@ -2483,6 +2501,7 @@ impl Esp32C6Builder {
                 pacer_config: seam_pacing,
                 board: lan.as_ref().map(|(_, b)| *b).unwrap_or_default(),
                 lan: lan.as_ref().map(|(l, _)| l.clone()),
+                pace,
                 ..crate::seams::SeamState::new(seams)
             },
             stop_at: None,
@@ -2530,17 +2549,29 @@ impl Esp32C6Builder {
         // A board a host put on a LAN is attached now, before the guest
         // boots, when it wants the network seam: its lease is reserved and a
         // host can forward to it at once.
+        let wants_net = machine
+            .seams
+            .request
+            .wanted()
+            .iter()
+            .any(|(i, _)| i.answer == lp_emu_esp_common::seam::SeamAnswer::Net);
         if let Some((lan, board)) = &lan
-            && machine
-                .seams
-                .request
-                .wanted()
-                .iter()
-                .any(|(i, _)| i.answer == lp_emu_esp_common::seam::SeamAnswer::Net)
+            && wants_net
         {
             let id = lp_emu_esp_common::seam::net::net_endpoint(*board);
             lan.attach(id, machine.efuse().mac)
                 .map_err(|why| BuildError::Seam(format!("net=lan: {why}")))?;
+            lan.set_pace(id, pace).map_err(BuildError::Seam)?;
+        }
+        // A `realtime` pace is held at the LAN pump: with no network seam
+        // asked for there is no LAN to hold it, and the run would go unpaced
+        // under a label that says otherwise.
+        if pace == Some(lp_emu_esp_common::seam::net::Pace::Realtime) && !wants_net {
+            return Err(BuildError::Seam(
+                crate::seams::net_seam::realtime_needs_a_lan(
+                    "this run does not ask for the network seam (`net=lan`)",
+                ),
+            ));
         }
         machine.seams_on_chip_start().map_err(BuildError::Seam)?;
         machine.seams_start_if_app_running();
