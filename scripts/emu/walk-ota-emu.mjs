@@ -79,6 +79,12 @@ const UPDATE_MS = Number(process.env.WALK_UPDATE_MS ?? 1_200_000);
 const LOAD_MS = 420_000;
 /// How long the cable stays out once Studio has seen it go.
 const DETACHED_MS = Number(process.env.WALK_DETACHED_MS ?? 3_000);
+/// The shim's host serial path (`?emu-tty=`): unset, a page on a Mac runs the
+/// Mac tty model (`mac_tty_model.js`), which hands the page at most 255 B a
+/// read and reads at most every 16 ms — the bound on every board→host rate
+/// this walk measures there (an update's backup: ~12 KB/s). `none` for a
+/// lossless pipe, to measure what the model costs.
+const EMU_TTY = process.env.WALK_EMU_TTY ?? null;
 
 const MAIN_TEXT = `(document.querySelector('#main')?.innerText || '')`;
 
@@ -189,6 +195,7 @@ async function main() {
   console.log(`  X (the boards)  ${x.version}+${x.commit.slice(0, 12)}`);
   console.log(`  Y (this Studio) ${y.version}+${y.commit.slice(0, 12)}`);
   console.log(`  Studio          http://127.0.0.1:${studioPort}/ (the release bundle, served by this walk)`);
+  console.log(`  host tty        ${EMU_TTY ?? "the page's default (a Mac's model on a Mac)"}`);
   console.log(`  steps           ${STEPS.join(", ")}${TAB ? " (?emu=tab)" : ""}\n`);
 
   const report = {
@@ -196,6 +203,7 @@ async function main() {
     lpEmu,
     configuration: "lp-emu:esp32c6:t1",
     backing: TAB ? "tab" : "door",
+    emuTty: EMU_TTY,
     x: `${x.version}+${x.commit.slice(0, 12)}`,
     y: `${y.version}+${y.commit.slice(0, 12)}`,
     steps: [],
@@ -215,7 +223,8 @@ async function main() {
 
   const pageUrl = (doorAddr) =>
     `http://localhost:${studioPort}/devices?emu=${doorAddr ? encodeURIComponent(`ws://${doorAddr}`) : "tab"}` +
-    `&firmware-store=${encodeURIComponent(storeOrigin)}`;
+    `&firmware-store=${encodeURIComponent(storeOrigin)}` +
+    (EMU_TTY ? `&emu-tty=${EMU_TTY}` : "");
 
   /// What the board said: before any host opened its port (the door keeps
   /// that as `<id>.console-untaken.log`), then on the port. The door writes
