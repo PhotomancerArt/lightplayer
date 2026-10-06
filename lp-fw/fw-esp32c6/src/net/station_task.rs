@@ -6,6 +6,9 @@
 //! ([`super::station_probes::STATION_BOARD`]) and publishes the policy there
 //! after every step, for the server's probes.
 //!
+//! - **The one waiter on the stack's config.** The services learn the
+//!   address from [`super::net_address`], not from the stack (its single
+//!   waker slot made several waiters spin).
 //! - **DHCP starts on link-up** (plan MD9): the stack has no IPv4 config
 //!   until the station associates, and loses it when the link goes. An
 //!   embassy-net DHCP client started before link-up backs off, which is
@@ -81,16 +84,15 @@ pub async fn station_task(mut control: EspStation, stack: Stack<'static>, host: 
                 ..
             }
         );
-        let mut wake = policy
-            .next_wake()
-            .map(Instant::from_millis)
-            .unwrap_or(Instant::MAX);
+        let mut wake = policy.next_wake().map(Instant::from_millis);
         if connected {
-            wake = wake.min(Instant::now() + SIGNAL_EVERY);
+            let signal = Instant::now() + SIGNAL_EVERY;
+            wake = Some(wake.map_or(signal, |at| at.min(signal)));
         }
         let event = select4(
             STATION_BOARD.wait(),
-            Timer::at(wake),
+            // No deadline is no timer at all.
+            sleep_until(wake),
             async {
                 if connected {
                     control.wait_link_lost().await;
@@ -120,10 +122,12 @@ pub async fn station_task(mut control: EspStation, stack: Stack<'static>, host: 
             }
             Either4::Third(()) => {
                 stack.set_config_v4(ConfigV4::None);
+                super::net_address::publish(None);
                 queue.extend(policy.handle(now_ms(), StationEvent::LinkLost));
             }
             Either4::Fourth(Some(ip)) => {
                 log::info!("[wifi] address {}.{}.{}.{}", ip[0], ip[1], ip[2], ip[3]);
+                super::net_address::publish(Some(ip));
                 queue.extend(policy.handle(now_ms(), StationEvent::AddressAcquired(ip)));
             }
             Either4::Fourth(None) => {}
@@ -146,6 +150,7 @@ async fn run(
                 return alloc::vec![StationEvent::LinkLost];
             };
             stack.set_config_v4(ConfigV4::None);
+            super::net_address::publish(None);
             log::info!("[wifi] trying {ssid}");
             let started = Instant::now();
             match control.connect(&ssid, &network.password).await {
@@ -165,6 +170,7 @@ async fn run(
         StationAction::Disconnect => {
             control.disconnect().await;
             stack.set_config_v4(ConfigV4::None);
+            super::net_address::publish(None);
             if !policy.uses_wifi() {
                 control.restore_espnow_channel();
             }
@@ -183,6 +189,14 @@ async fn scan(control: &mut EspStation) -> Vec<lpc_wire::HeardNetwork> {
             heard
         }
         None => Vec::new(),
+    }
+}
+
+/// Sleep until `at`, or forever with no deadline.
+pub async fn sleep_until(at: Option<Instant>) {
+    match at {
+        Some(at) => Timer::at(at).await,
+        None => core::future::pending().await,
     }
 }
 

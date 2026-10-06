@@ -28,6 +28,7 @@ use alloc::boxed::Box;
 use alloc::vec;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
+use super::net_address;
 use embassy_futures::select::{Either4, select4};
 use embassy_net::Stack;
 use embassy_net::tcp::TcpSocket;
@@ -83,11 +84,12 @@ impl LanBuffers {
 /// One LAN slot's task: `lan` is its index among the LAN slots.
 #[embassy_executor::task(pool_size = LAN_LINK_SLOTS)]
 pub async fn lan_link_task(stack: Stack<'static>, port: SharedPort, lan: usize) {
-    stack.wait_config_up().await;
+    let mut address = net_address::watch();
+    net_address::wait_up(&mut address).await;
     let buffers = LanBuffers::leak();
     let index = RADIO_LINK_SLOTS + lan;
     loop {
-        stack.wait_config_up().await;
+        net_address::wait_up(&mut address).await;
         let mut socket = TcpSocket::new(stack, &mut *buffers.tcp_rx, &mut *buffers.tcp_tx);
         socket.set_timeout(Some(IDLE_TIMEOUT));
         if socket.accept(LINK_PORT).await.is_err() {
@@ -183,7 +185,8 @@ async fn serve(
 /// ("try again later"). Its socket listens only while both are busy.
 #[embassy_executor::task]
 pub async fn refuse_task(stack: Stack<'static>) {
-    stack.wait_config_up().await;
+    let mut address = net_address::watch();
+    net_address::wait_up(&mut address).await;
     let tcp_rx = Box::leak(vec![0u8; 512].into_boxed_slice());
     let tcp_tx = Box::leak(vec![0u8; 256].into_boxed_slice());
     let ws_rx = Box::leak(vec![0u8; 1024 + RX_OVERHEAD].into_boxed_slice());

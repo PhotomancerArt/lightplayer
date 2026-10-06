@@ -86,6 +86,11 @@ wifi = [
 # `[netstack]` at the heartbeat — OFF by default, never shipped (the same
 # private-record scan as `io_thread_stack_diag`).
 net_thread_stack_diag = ["wifi"]
+# Where the radio's DMA buffers are, with the station joined (plan P08, the
+# desk walk's W10): every live radio C block by address, and the Rust heap's
+# map, flagging anything in `dram2_seg` — the bootloader's load region.
+# OFF by default, never shipped, never built by CI (`src/radio_dma_diag.rs`).
+radio_dma_diag = ["wifi", "heap_map_diag"]
 # NOTE: the former `ws281x_2blocks` feature is gone: the RMT block plan is now
 # computed at driver init from the board manifest's declared WS281x channel
 # count (1 declared channel = the whole 192-word RMT RAM, 2 = one 48-word

@@ -14,6 +14,8 @@
 //! the boundary can tell. Each item's doc is the contract an emulator
 //! answer is held to.
 
+#[cfg(feature = "host-lan-harness")]
+pub mod host_lan_harness;
 pub mod join_choice;
 pub mod mdns;
 pub mod net_frame_device;

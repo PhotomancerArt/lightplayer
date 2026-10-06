@@ -64,7 +64,9 @@ schemars = { workspace = true }
 lpc-shared = { path = "../lp-core/lpc-shared" }
 lpfs = { path = "../lp-base/lpfs", features = ["std"] }
 lpc-view = { path = "../lp-core/lpc-view" }
-lpa-client = { path = "../lp-app/lpa-client", features = ["ws", "serial", "emu"] }
+# `lan`: a board on the LAN (`lan:<host>[:port]`, a secure lp-link inside a
+# WebSocket; Wi-Fi plan P06).
+lpa-client = { path = "../lp-app/lpa-client", features = ["ws", "serial", "emu", "lan"] }
 lp-emu-core = { path = "../lp-emu/lp-emu-core", features = ["std"] }
 lp-riscv-emu = { path = "../lp-emu/lp-riscv-emu", features = ["std"] }
 lp-perf = { path = "../lp-base/lp-perf", default-features = false }
@@ -75,7 +77,8 @@ serialport = "4.8"
 # Serial does, which serialport does not expose.
 libc = "0.2"
 # `link lab`: the comms lab's host half and the link it drives.
-lp-link = { path = "../lp-base/lp-link", features = ["std", "lab"] }
+# `secure`: `link rtt|capture lan:` run a secure link (every LAN link is one).
+lp-link = { path = "../lp-base/lp-link", features = ["std", "lab", "secure"] }
 # fwcheck flashes locally built check ELFs in-process (M5: no espflash
 # subprocess). Library-only: the `cli` feature and its dep tree stay out.
 espflash = { version = "3.3", default-features = false, features = [
@@ -156,6 +159,10 @@ lp-ws281x = { path = "../lp-fw/lp-ws281x", default-features = false }
 # (tests/c6_partition_table_parity.rs): espflash's own CSV parser and binary
 # encoder, already in the tree through espflash.
 esp-idf-part = "0.5"
+# A board's LAN path on the host (tests/lan_link.rs): the board's own
+# WebSocket server, link port and mux in front of a real lpa-server.
+# `json-pack` so the board answers a packed opt-in as a C6 does.
+fw-esp32-common = { path = "../lp-fw/fw-esp32-common", features = ["host-lan-harness", "json-pack"] }
 
 [features]
 default = ["serial"]

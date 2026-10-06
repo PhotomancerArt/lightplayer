@@ -126,6 +126,8 @@ mod ota;
     feature = "test_fluid_demo",
 ))]
 mod output;
+#[cfg(all(feature = "radio_dma_diag", lp_net))]
+mod radio_dma_diag;
 mod recovery;
 #[cfg(all(feature = "diag_secure_link", not(fw_harness)))]
 mod secure_link_probe;

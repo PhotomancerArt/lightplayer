@@ -12,6 +12,7 @@
 use std::rc::Rc;
 
 use anyhow::{Context, Result};
+use lpa_client::transport_lan::{BoardPassword, LanOptions, LanTarget, connect_lan_transport};
 use lpa_client::{ClientIo, TokioClientIo, WebSocketClientTransport};
 use lpa_link::providers::host_serial_esp32::{
     HostSerialEsp32Options, HostSerialEsp32Provider, label_for_port,
@@ -20,8 +21,10 @@ use lpa_link::{
     DeviceEvent, DeviceEventSink, DeviceLineOrigin, DeviceSession, DeviceState, DeviceTimers,
     LinkConnector,
 };
+use lpc_wire::WireEncoding;
 
 use crate::client::HostSpecifier;
+use crate::client::board_password::board_password_from_env;
 use crate::client::client_connect::client_connect;
 use crate::client::serial_port::detect_serial_port;
 
@@ -29,6 +32,12 @@ use crate::client::serial_port::detect_serial_port;
 pub enum CliConnection {
     /// Hardware device behind a [`DeviceSession`] (owns the session).
     Device(DeviceSession),
+    /// A board on the LAN (`lan:`): its secure session's transport, and the
+    /// hello that session holds its tier by.
+    Lan {
+        io: TokioClientIo,
+        hello: Box<lpc_wire::ServerHello>,
+    },
     /// Non-device host: a plain shared transport.
     Transport(TokioClientIo),
 }
@@ -39,6 +48,7 @@ impl CliConnection {
     pub fn hello(&self) -> Option<lpc_wire::ServerHello> {
         match self {
             Self::Device(session) => session.hello(),
+            Self::Lan { hello, .. } => Some((**hello).clone()),
             Self::Transport(_) => None,
         }
     }
@@ -47,7 +57,7 @@ impl CliConnection {
     pub fn client_io(&self) -> Box<dyn ClientIo> {
         match self {
             Self::Device(session) => session.client_io(),
-            Self::Transport(io) => Box::new(io.clone()),
+            Self::Lan { io, .. } | Self::Transport(io) => Box::new(io.clone()),
         }
     }
 
@@ -56,7 +66,7 @@ impl CliConnection {
             Self::Device(session) => {
                 let _ = session.close().await;
             }
-            Self::Transport(io) => {
+            Self::Lan { io, .. } | Self::Transport(io) => {
                 let transport = io.shared_transport();
                 let mut transport = transport.lock().await;
                 let _ = lpa_client::ClientTransport::close(&mut **transport).await;
@@ -72,11 +82,39 @@ impl CliConnection {
 /// fresh boot rather than assuming whatever state the device was in.
 /// `on_event` observes the session feed (console lines, state transitions);
 /// pass [`DeviceEventSink::noop`]-like behavior by ignoring events.
+///
+/// A `lan:` board takes its password, if it needs one, from `LP_PASSWORD`
+/// here; [`cli_connect_with_password`] takes one from the caller.
 pub async fn cli_connect(
     spec: HostSpecifier,
     on_event: impl Fn(DeviceEvent) + 'static,
 ) -> Result<CliConnection> {
+    cli_connect_with_password(spec, board_password_from_env(), on_event).await
+}
+
+/// [`cli_connect`], with the password a locked `lan:` board needs (from
+/// `--password-stdin` or `LP_PASSWORD`; see
+/// [`crate::client::board_password`]). Any other host ignores it.
+pub async fn cli_connect_with_password(
+    spec: HostSpecifier,
+    password: Option<BoardPassword>,
+    on_event: impl Fn(DeviceEvent) + 'static,
+) -> Result<CliConnection> {
     match spec {
+        HostSpecifier::Lan { host, port } => {
+            let target = LanTarget::new(host, port);
+            let options = LanOptions {
+                password,
+                want_packed: lpa_client::requested_wire_encoding() == WireEncoding::Packed,
+            };
+            // A LanError is kept as the error itself (not just its words),
+            // so a caller can tell a locked board apart.
+            let (transport, hello) = connect_lan_transport(target, options).await?;
+            Ok(CliConnection::Lan {
+                io: TokioClientIo::new(Box::new(transport)),
+                hello: Box::new(hello),
+            })
+        }
         HostSpecifier::Serial { port, baud_rate } => {
             let config = detect_serial_port(port.as_deref(), baud_rate)
                 .context("Failed to detect serial port")?;

@@ -22,10 +22,14 @@ pub fn log_line() {
             ip,
             rssi,
             host,
-        } => log::info!(
-            "[wifi] connected to {ssid} · {rssi} dBm · {ip} ({host}) · frames in {frames_in} out \
-             {frames_out} · rx drops not counted"
-        ),
+        } => {
+            log::info!(
+                "[wifi] connected to {ssid} · {rssi} dBm · {ip} ({host}) · frames in {frames_in} \
+                 out {frames_out} · rx drops not counted"
+            );
+            #[cfg(feature = "radio_dma_diag")]
+            crate::radio_dma_diag::log("joined");
+        }
         state => log::info!(
             "[wifi] {} {} · frames in {frames_in} out {frames_out}",
             state.kind(),

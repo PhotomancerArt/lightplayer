@@ -76,6 +76,22 @@ pub fn client_connect(spec: HostSpecifier) -> Result<Box<dyn ClientTransport>> {
                 .map_err(|e| anyhow::anyhow!("Failed to connect to {url}: {e}"))?;
             Ok(Box::new(transport))
         }
+        HostSpecifier::Lan { host, port } => {
+            // A board on the LAN; a locked one's password from LP_PASSWORD
+            // (`cli_connect_with_password` takes one from `--password-stdin`).
+            let options = lpa_client::transport_lan::LanOptions {
+                password: crate::client::board_password::board_password_from_env(),
+                want_packed: lpa_client::requested_wire_encoding()
+                    == lpc_wire::WireEncoding::Packed,
+            };
+            let target = lpa_client::transport_lan::LanTarget::new(host, port);
+            let rt = tokio::runtime::Runtime::new()
+                .map_err(|e| anyhow::anyhow!("Failed to create tokio runtime: {e}"))?;
+            let (transport, _hello) = rt.block_on(
+                lpa_client::transport_lan::connect_lan_transport(target, options),
+            )?;
+            Ok(Box::new(transport))
+        }
         #[cfg(feature = "serial")]
         HostSpecifier::Serial { port, baud_rate } => {
             // Detect/select serial port

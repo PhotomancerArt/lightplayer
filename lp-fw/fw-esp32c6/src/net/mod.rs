@@ -6,6 +6,7 @@ pub mod esp_frame_device;
 pub mod esp_station;
 pub mod lan_endpoint_task;
 pub mod mdns_task;
+pub mod net_address;
 pub mod net_heartbeat;
 pub mod net_thread;
 #[cfg(feature = "net_thread_stack_diag")]

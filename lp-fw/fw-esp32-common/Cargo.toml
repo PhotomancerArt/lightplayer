@@ -68,6 +68,9 @@ lpfs = { path = "../../lp-base/lpfs", default-features = false, optional = true 
 # version/features as the bin crates so all three resolve to one instance —
 # two would make the impl invisible to `lpc_wire::ser_write_json_to`.
 ser-write-json = { version = "0.3", optional = true, default-features = false, features = ["alloc"] }
+# `net::host_lan_harness` only (feature `host-lan-harness`): the no-shader
+# graphics backend a harness board runs when its test passes none.
+lp-gfx = { path = "../../lp-gfx/lp-gfx", optional = true, features = ["null-backend"] }
 
 [features]
 default = []
@@ -104,6 +107,18 @@ wifi = [
     "dep:lpc-access",
     "dep:embassy-net-driver",
     "dep:critical-section",
+]
+# A board's LAN path on the host, for tests (`net::host_lan_harness`; Wi-Fi
+# plan P06): the WebSocket server over a std TCP listener, the radio-link
+# port and mux, and a real lpa-server on a memory filesystem, on std threads.
+# TEST-ONLY: no firmware's line may name it. std (the embassy-time std
+# driver, critical-section's std impl) comes in with it and only with it.
+host-lan-harness = [
+    "wifi",
+    "embassy-time/std",
+    "embassy-time/generic-queue-8",
+    "critical-section/std",
+    "dep:lp-gfx",
 ]
 server = ["dep:littlefs-rust", "dep:lp-json-pack", "dep:lp-recovery", "dep:lpa-server", "dep:lpc-model", "dep:lpc-wire", "dep:lpfs", "dep:ser-write-json"]
 

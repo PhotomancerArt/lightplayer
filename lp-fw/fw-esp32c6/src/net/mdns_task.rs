@@ -19,7 +19,7 @@ use alloc::vec;
 use embassy_futures::select::{Either3, select3};
 use embassy_net::udp::{PacketMetadata, UdpSocket};
 use embassy_net::{IpAddress, IpEndpoint, Ipv4Address, Stack};
-use embassy_time::{Instant, Timer};
+use embassy_time::Instant;
 use fw_esp32_common::net::mdns::{
     MdnsAnnounce, MdnsIdentity, MdnsQuery, build_answer, parse_query,
 };
@@ -59,12 +59,9 @@ pub async fn mdns_task(stack: Stack<'static>, label: String, mac: [u8; 6]) {
         port: LINK_PORT,
         ipv4: [0; 4],
     };
+    let mut address = super::net_address::watch();
     loop {
-        stack.wait_config_up().await;
-        let Some(config) = stack.config_v4() else {
-            continue;
-        };
-        identity.ipv4 = config.address.address().octets();
+        identity.ipv4 = super::net_address::wait_up(&mut address).await;
         if stack.join_multicast_group(IpAddress::Ipv4(GROUP)).is_err() {
             log::warn!("[mdns] could not join 224.0.0.251");
         }
@@ -79,14 +76,11 @@ pub async fn mdns_task(stack: Stack<'static>, label: String, mac: [u8; 6]) {
         let mut announce = MdnsAnnounce::new();
         announce.address_acquired(now_ms());
         loop {
-            let next = announce
-                .next_at(now_ms())
-                .map(Instant::from_millis)
-                .unwrap_or(Instant::MAX);
+            let next = announce.next_at(now_ms()).map(Instant::from_millis);
             match select3(
                 socket.recv_from(packet),
-                Timer::at(next),
-                stack.wait_config_down(),
+                super::station_task::sleep_until(next),
+                super::net_address::wait_down(&mut address),
             )
             .await
             {

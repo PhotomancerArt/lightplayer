@@ -684,6 +684,16 @@ impl<U: ServerTransport + FrameBufHolder + LinkUpkeep, D: DelayNs> LinkUpkeep
         self.drain_events();
         self.pump_radio();
         for radio in &mut self.radio {
+            // A keyed link's hello waits for its grant: the server takes the
+            // handshake's `Authenticated` in its next tick, and a hello built
+            // before that would say the link holds nothing (found by the
+            // host LAN harness, P06).
+            #[cfg(feature = "wifi")]
+            if self.secure.iter().any(|(id, event)| {
+                *id == radio.id && matches!(event, SecureLinkEvent::Authenticated { .. })
+            }) {
+                continue;
+            }
             if core::mem::take(&mut radio.hello_owed) {
                 opened.push(radio.wire);
             }
