@@ -223,10 +223,14 @@ host tests, the conformance suite and `?ble=emu` all stop short of it
    just walk-ble-emu
    ```
 
-   All 14 steps should pass, including the three drops under Play: `drop`
+   All 18 steps should pass, including the four drops under Play: `drop`
    (the board away for seconds; the cable is the emulated board's power, so
-   it restarts), `blip` (the radio drops and the page reconnects at once)
-   and `phantom` (Bluefy's). Its idle numbers are emulated: shape, not a
+   it restarts), `blip` (the radio drops and the page reconnects at once),
+   `phantom` (Bluefy's) and `range` (out of range with the radio link still
+   up and quiet; the curtain rises when Play's once-a-minute read times
+   out). `range-editor` takes the same quiet drop under the editor first,
+   where a sync failure's text would be drawn. No drop may show a request's
+   raw timeout. Its idle numbers are emulated: shape, not a
    silicon claim. The board boots the packaged whole chip
    (`{merged},kind=rom-up`; the split image's ELF alone boots core-only).
    `WALK_RECORD_SINK=<an lp-cli record serve sink>` records the session,

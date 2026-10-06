@@ -540,6 +540,21 @@ where
             Ok(Some(ProjectRefreshOutcome::NotDue)) | Ok(Some(ProjectRefreshOutcome::Cancelled))
         );
 
+        // A pull the board did not answer is judged on what its link said
+        // WHILE it waited. The lens's tap queued those words (a stall, a
+        // reset) behind this batch, so without this the failure would show
+        // first and the "Reconnecting…" curtain a batch later — the red
+        // flash of a Bluetooth board walked out of range (defect
+        // 2026-10-06-a-board-out-of-range-flashes-a-transport-error).
+        let unanswered = match &outcome {
+            Ok(Some(ProjectRefreshOutcome::Synced(sync))) => !sync.synced && !sync.board_answered,
+            Ok(Some(ProjectRefreshOutcome::TimedOut)) | Err(_) => true,
+            Ok(_) => false,
+        };
+        if unanswered {
+            self.fold_device_inputs_heard_during_the_pull().await;
+        }
+
         match outcome {
             Ok(Some(ProjectRefreshOutcome::Synced(sync))) => {
                 if sync.synced {
@@ -577,6 +592,30 @@ where
             self.controller.note_passive_refresh_completed();
         }
         preempted
+    }
+
+    /// Fold the device inputs (and hotplug edges) queued since this batch
+    /// began, in their order, ahead of the rest of the queue — the same
+    /// precedence `process_batch` gives them over a batch's actions. The
+    /// fold is synchronous (invariant I7); the registry writes it asked for
+    /// are settled here, as a batch settles its own.
+    async fn fold_device_inputs_heard_during_the_pull(&mut self) {
+        let heard = self.commands.take_matching(|command| {
+            matches!(
+                command,
+                StudioCommand::Device(_) | StudioCommand::DeviceHotplug(_)
+            )
+        });
+        if heard.is_empty() {
+            return;
+        }
+        for step in CommandPlan::from_batch(heard).device {
+            match step {
+                DeviceStep::Input(input) => self.controller.fold_device_input(input),
+                DeviceStep::Hotplug(edge) => self.controller.note_device_hotplug(edge),
+            }
+        }
+        self.controller.settle_device_records().await;
     }
 
     /// Run the due card frame feeds under the same preempt watch
