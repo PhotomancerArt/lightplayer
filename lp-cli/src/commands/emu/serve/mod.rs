@@ -220,6 +220,8 @@ fn parse_board(
 
     let mut mac = default_mac(index);
     let mut kind = BoardKind::Elf;
+    let mut seams_strict: Option<String> = None;
+    let mut seams_prefer: Option<String> = None;
     for option in parts {
         let option = option.trim();
         if option.is_empty() {
@@ -233,9 +235,11 @@ fn parse_board(
             Some(("kind", "elf")) => kind = BoardKind::Elf,
             Some(("kind", "merged")) => kind = BoardKind::Merged,
             Some(("kind", "rom-up")) => kind = BoardKind::RomUp,
+            Some(("seams", value)) => seams_strict = Some(value.to_string()),
+            Some(("seams_prefer", value)) => seams_prefer = Some(value.to_string()),
             _ => bail!(
-                "--board `{text}`: `{option}` is not a board option — mac=<aa:bb:cc:dd:ee:ff> or \
-                 kind=elf|merged|rom-up"
+                "--board `{text}`: `{option}` is not a board option — mac=<aa:bb:cc:dd:ee:ff>, \
+                 kind=elf|merged|rom-up, seams=<atoms|none> or seams_prefer=<atoms>"
             ),
         }
     }
@@ -277,11 +281,15 @@ fn parse_board(
         );
     }
 
+    let seams = super::handler::seam_request(seams_strict.as_deref(), seams_prefer.as_deref())
+        .with_context(|| format!("--board `{text}`"))?;
+
     Ok(BoardSpec {
         id: id.to_string(),
         image,
         kind,
         mac,
+        seams,
         flash,
         console: console_dir.map(|dir| dir.join(format!("{id}.console.log"))),
     })
@@ -304,6 +312,28 @@ mod tests {
         assert_eq!(specs[0].flash, Some(dir.join("c6-a.flash.bin")));
         assert_eq!(specs[1].flash, Some(dir.join("c6-b.flash.bin")));
         assert_ne!(specs[0].mac, specs[1].mac, "two boards, two identities");
+    }
+
+    #[test]
+    fn a_board_asks_for_no_seam_unless_spelled_and_the_atom_keeps_its_equals() {
+        use lp_emu_esp_common::seam::Strength;
+        let plain = parse_board("c6-a=fw", 0, None, None).expect("parses");
+        assert!(plain.seams.is_empty(), "seam-free by default (PD4)");
+        let soft = parse_board("c6-a=fw,seams_prefer=led=fast", 0, None, None).expect("parses");
+        let wanted = soft.seams.wanted();
+        assert_eq!(wanted[0].0.atom(), "led=fast");
+        assert_eq!(wanted[0].1, Strength::Soft);
+        let strict =
+            parse_board("c6-a=fw,kind=rom-up,seams=led=fast", 0, None, None).expect("parses");
+        assert_eq!(strict.seams.wanted()[0].1, Strength::Strict);
+        assert!(
+            parse_board("c6-a=fw,seams=none", 0, None, None)
+                .unwrap()
+                .seams
+                .is_empty()
+        );
+        let err = parse_board("c6-a=fw,seams=led=slow", 0, None, None).unwrap_err();
+        assert!(format!("{err:#}").contains("led=fast"), "{err:#}");
     }
 
     #[test]

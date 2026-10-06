@@ -160,6 +160,7 @@ class TabHub {
         this.row.flash = message.flash;
         this.row.state = "running";
         this.row.jitSeam = message.jitSeam === true;
+        this.row.seams = message.seams ?? null;
         resolveReady(this.row);
         return;
 
@@ -176,6 +177,10 @@ class TabHub {
         // dilation that moved is a different question depending on it.
         this.row.translationEvents = message.translationEvents ?? 0;
         this.row.translationLastMs = message.translationLastMs ?? null;
+        // The board's emulator seams this chip start (`emu_seams_info`):
+        // `{label, engaged, lines, none_why}`. Seam-free on every board this
+        // file creates itself — TAB_BOARD asks for none.
+        this.row.seams = message.seams ?? null;
         for (const listener of this.statsListeners) listener(message);
         return;
 

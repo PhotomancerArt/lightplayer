@@ -73,9 +73,20 @@
 //! See [`Lockstep::stagger`]. Two identical guests started in the same cycle
 //! wedge in the same cycle, and the wedge is
 //! `docs/debt/emu-c6-radio-tx-never-completes.md`, not this runner.
+//!
+//! # Emulator seam media ride the same quantum
+//!
+//! An emulator seam's endpoints (`lp_emu_esp_common::seam`) are joined by a
+//! [`SeamMedium`], and [`Lockstep::with_medium`] puts one beside the air: at
+//! each quantum boundary, after the air, the medium moves what is due between
+//! every machine's endpoints. That makes this runner the **deterministic
+//! multi-board driver** for seams too. Each machine is named on the medium by
+//! its index (`<board>/<seam>`). A medium is additive: a pair with none runs
+//! exactly as before, and the air is untouched by one.
 
 use lp_emu_core::sched::Cycles;
 use lp_emu_esp_common::air::{Air, ParticipantId, PerfectAir};
+use lp_emu_esp_common::seam::{SeamEndpoint, SeamMedium};
 
 use crate::machine::{Esp32C6Machine, MAX_SLICE_CYCLES, Outcome, StopCondition};
 use crate::memmap;
@@ -228,6 +239,8 @@ pub struct Lockstep {
     /// `Some(outcome)` once a machine has stopped participating.
     ended: Vec<Option<Outcome>>,
     sent: Vec<u64>,
+    /// What joins the machines' seam endpoints, if a caller gave one.
+    medium: Option<Box<dyn SeamMedium>>,
 }
 
 impl Lockstep {
@@ -279,6 +292,7 @@ impl Lockstep {
             .ok_or(LockstepError::QuantumExceedsLatency { quantum, latency })?;
         for (i, m) in machines.iter_mut().enumerate() {
             m.arm_air(ParticipantId(i));
+            m.set_seam_board(ParticipantId(i));
         }
         let n = machines.len();
         Ok(Self {
@@ -289,7 +303,17 @@ impl Lockstep {
             offsets: vec![0; n],
             ended: vec![None; n],
             sent: vec![0; n],
+            medium: None,
         })
+    }
+
+    /// Join the machines' emulator seam endpoints with `medium`, delivered at
+    /// every quantum boundary after the air. The medium sees each machine's
+    /// own clock: use it with no [`stagger`](Self::stagger) (the endpoints'
+    /// events are stamped on their producer's clock, which the stagger moves).
+    pub fn with_medium(mut self, medium: Box<dyn SeamMedium>) -> Self {
+        self.medium = Some(medium);
+        self
     }
 
     /// Move each machine's power-on `offsets[i]` guest cycles into the pair's
@@ -423,6 +447,17 @@ impl Lockstep {
                 for frame in self.air.take_due(ParticipantId(i), next) {
                     self.machines[i].offer_air_frame(&frame);
                 }
+            }
+
+            // 4. The seam medium, when there is one: every machine's
+            //    endpoints, in index order, at the same boundary.
+            if let Some(medium) = self.medium.as_mut() {
+                let mut endpoints: Vec<&mut SeamEndpoint> = self
+                    .machines
+                    .iter_mut()
+                    .flat_map(|m| m.seam_endpoints_mut().iter_mut())
+                    .collect();
+                medium.deliver(next, &mut endpoints);
             }
 
             self.now = next;

@@ -4158,6 +4158,7 @@ dependencies = [
  "lp-json-pack",
  "lp-link",
  "lp-recovery",
+ "lp-seam",
  "lpa-client",
  "lpa-server",
  "lpc-access",
@@ -5964,6 +5965,7 @@ version = "40.0.0"
 dependencies = [
  "log",
  "lp-emu-core",
+ "lp-seam",
  "lp-ws281x",
  "object 0.37.3",
  "test-log",
@@ -5989,6 +5991,7 @@ dependencies = [
  "lp-emu-jit",
  "lp-emu-validate",
  "lp-riscv-emu",
+ "lp-seam",
  "lp-ws281x",
  "md-5",
  "rustc-demangle",
@@ -6043,6 +6046,7 @@ name = "lp-emu-validate"
 version = "40.0.0"
 dependencies = [
  "anyhow",
+ "lp-seam",
  "regex",
  "serde",
  "serde_json",
@@ -6059,6 +6063,7 @@ dependencies = [
  "espflash",
  "lp-app-version",
  "lp-bootctl",
+ "lp-seam",
  "object 0.37.3",
  "rustc-demangle",
  "serde",
@@ -6232,6 +6237,10 @@ dependencies = [
  "lp-emu-core",
  "lp-riscv-emu",
 ]
+
+[[package]]
+name = "lp-seam"
+version = "40.0.0"
 
 [[package]]
 name = "lp-shader"

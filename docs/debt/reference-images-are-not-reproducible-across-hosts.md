@@ -79,6 +79,17 @@ it wrong is a red CI run on a correct change.
   classic) runs on PRs only when the recipe, `rust-toolchain.toml` or the
   classic's firmware changes, and always on main. A within-host
   reproducibility break from anything else is now caught post-merge.
+- 2026-10-06 (#987, emulator seams P10) — a **memory-class** figure moved
+  between hosts, which this entry says does not happen. `just test-emu-c6` on
+  the desk built the pinned `d6cfaa205-esp32c6+server+radio` reference image
+  itself (sha256 `cde3680c…`, CI's is `fadf7653…`), and `emu_serve_walk`'s
+  exact heap gate read `220468 B free / 105068 B used` against the pinned
+  `220532 B free / 105004 B used`, 64 B apart. The same test, the same
+  emulator, against CI's image (`just fetch-ci-images 987 esp32c6`,
+  `LP_CI_IMAGES=…`) passes. Workaround that held: run the C6 suite against
+  CI's images rather than desk-built reference images. Not investigated
+  further — where a host-built image spends 64 B more heap is the open
+  question.
 
 **Exit criteria** — one build environment for the reference images: a pinned
 container (`Dockerfile.ci`, or a pinned image in the gated `emu-c6` job) that

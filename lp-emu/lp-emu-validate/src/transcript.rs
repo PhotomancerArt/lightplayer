@@ -320,6 +320,8 @@ mod tests {
             machine: None,
             baud: None,
             quantum: None,
+            seams: Default::default(),
+            seam_abi: None,
             trust: Default::default(),
         }
     }

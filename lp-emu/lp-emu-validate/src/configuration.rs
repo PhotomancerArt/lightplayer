@@ -344,6 +344,21 @@ impl TrustTable {
             .map(|e| e.because.as_str())
     }
 
+    /// This table with `overlay`'s entries laid over it: an overlay entry
+    /// **replaces** the base's entry for its class, and a class the base does
+    /// not grade gains the overlay's. How a `[[seam]]` overlay composes onto a
+    /// configuration (`lp-emu:esp32c6:t2+led=fast`).
+    pub fn overlaid(&self, overlay: &TrustTable) -> TrustTable {
+        let mut entries = self.entries.clone();
+        for o in &overlay.entries {
+            match entries.iter_mut().find(|e| e.class == o.class) {
+                Some(e) => *e = o.clone(),
+                None => entries.push(o.clone()),
+            }
+        }
+        TrustTable { entries }
+    }
+
     /// The band this configuration states for a class, if it states one.
     ///
     /// `None` is the answer for every configuration that predates the field,
