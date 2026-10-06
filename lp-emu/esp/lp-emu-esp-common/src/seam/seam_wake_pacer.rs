@@ -26,7 +26,10 @@ pub struct PacerConfig {
     pub min_spacing: Cycles,
     /// Events an endpoint holds before it refuses.
     pub queue_bound: usize,
-    /// The most bytes one take returns.
+    /// The most bytes one take returns — and so the largest event an
+    /// endpoint accepts. The default (512) is **below a full Ethernet frame
+    /// (1514 B)**: a seam that carries frames sets its own config rather than
+    /// relying on the default.
     pub take_cap: usize,
 }
 

@@ -13,7 +13,11 @@
 //! The queue bound and the take cap are the wake pacer's rules
 //! ([`super::PacerConfig`]): an endpoint **refuses** (and counts) an event
 //! past its bound rather than grow, and one take returns at most `take_cap`
-//! bytes, whole events only.
+//! bytes, whole events only: [`SeamEndpoint::take`] joins whole events up to
+//! the cap (a byte stream), [`SeamEndpoint::take_one`] hands over the oldest
+//! alone (a message, such as a network frame). The default `take_cap` (512)
+//! is below a full Ethernet frame (1514 B), so a frame-carrying seam sets its
+//! own [`super::PacerConfig`].
 
 use std::collections::VecDeque;
 use std::fmt;
@@ -232,6 +236,19 @@ mod tests {
         assert_eq!(e.take_one(64), Some(vec![2, 2, 2]));
         assert_eq!(e.take_one(64), None);
         assert_eq!((e.taken_events(), e.taken_bytes()), (2, 5));
+    }
+
+    #[test]
+    fn the_default_take_cap_is_below_a_full_ethernet_frame() {
+        let mut e = endpoint(PacerConfig::default());
+        assert_eq!(PacerConfig::default().take_cap, 512);
+        assert_eq!(
+            e.push_inbound(event(1, &[0; 1514])),
+            Err(Refused::TooLarge),
+            "a frame-carrying seam needs its own PacerConfig"
+        );
+        e.push_inbound(event(2, &[7; 512])).unwrap();
+        assert_eq!(e.take_one(2048).map(|b| b.len()), Some(512));
     }
 
     #[test]
