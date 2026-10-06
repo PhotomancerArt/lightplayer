@@ -6733,6 +6733,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "lpc-relay"
+version = "40.0.0"
+dependencies = [
+ "hmac",
+ "lpc-access",
+ "sha2",
+]
+
+[[package]]
 name = "lpc-shared"
 version = "40.0.0"
 dependencies = [
