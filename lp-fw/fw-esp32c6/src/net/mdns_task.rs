@@ -9,7 +9,7 @@
 //! when the address changes. A query from a port other than 5353 is a
 //! legacy one-shot resolver and gets a unicast answer with its id and
 //! question echoed (RFC 6762 §6.7); one with the QU bit set gets a unicast
-//! answer too. Buffers are allocated once, when the task starts; nothing
+//! answer too. Buffers are allocated once, at the first address; nothing
 //! per query. No probing or conflict resolution (plan: future work).
 
 use alloc::boxed::Box;
@@ -37,6 +37,10 @@ const TX_BYTES: usize = 512;
 /// The task. `label` is `lp-xxxx`; `mac` the base MAC (its TXT record).
 #[embassy_executor::task]
 pub async fn mdns_task(stack: Stack<'static>, label: String, mac: [u8; 6]) {
+    // Nothing is allocated until the station first has an address: a board
+    // that never joins pays nothing for its name.
+    let mut address = super::net_address::watch();
+    let mut first = Some(super::net_address::wait_up(&mut address).await);
     let rx_meta = Box::leak(Box::new([PacketMetadata::EMPTY; 4]));
     let tx_meta = Box::leak(Box::new([PacketMetadata::EMPTY; 4]));
     let rx_buf = Box::leak(vec![0u8; RX_BYTES].into_boxed_slice());
@@ -59,9 +63,11 @@ pub async fn mdns_task(stack: Stack<'static>, label: String, mac: [u8; 6]) {
         port: LINK_PORT,
         ipv4: [0; 4],
     };
-    let mut address = super::net_address::watch();
     loop {
-        identity.ipv4 = super::net_address::wait_up(&mut address).await;
+        identity.ipv4 = match first.take() {
+            Some(ip) => ip,
+            None => super::net_address::wait_up(&mut address).await,
+        };
         if stack.join_multicast_group(IpAddress::Ipv4(GROUP)).is_err() {
             log::warn!("[mdns] could not join 224.0.0.251");
         }
