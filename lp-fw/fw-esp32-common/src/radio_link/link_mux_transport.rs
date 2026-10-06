@@ -82,6 +82,8 @@ use lpc_wire::{LinkCounterTally, TransportError, WireServerMessage};
 
 use super::frame_buf_holder::FrameBufHolder;
 use super::radio_link_config::SMALL_REPLY_BYTES;
+#[cfg(feature = "wifi")]
+use super::radio_link_port::RADIO_LINK_SLOTS;
 use super::radio_link_port::{LINK_SLOTS, RadioLinkEvent, RadioLinkPort, RadioLinkSlot};
 use crate::link_upkeep::LinkUpkeep;
 use crate::serial::packed_link::PackedLink;
@@ -98,6 +100,23 @@ pub const RADIO_WRITE_DEADLINE_MS: u32 = 5_000;
 
 /// How long an untrusted radio link may stay open without logging in (PQ6).
 pub const LOGIN_DEADLINE_MS: u64 = 10_000;
+
+/// Client messages the inbox holds without growing: two per link, a
+/// request and the next one queued behind it. The server takes one per
+/// tick, so more is a burst, and the inbox grows for it as it always has.
+const INBOX_RESERVE: usize = 2 * LINK_SLOTS;
+
+/// A LAN link's opt-in answer is always `json`: its replies are never
+/// packed. A learned table is 6.9 KB per link, held for the link's life,
+/// and a LAN link has the bandwidth packing exists to save (a Wi-Fi link
+/// moves a JSON project read in a few frames). Hosts take a `json` answer
+/// as any board's decline and keep reading JSON.
+#[cfg(feature = "wifi")]
+fn stay_json(answer: &mut ServerMsgBody) {
+    if let ServerMsgBody::SetEncoding { encoding } = answer {
+        *encoding = lpc_wire::WireEncoding::Json;
+    }
+}
 
 /// One open radio link, as the mux tracks it.
 struct RadioLink {
@@ -160,16 +179,22 @@ impl<U: ServerTransport + FrameBufHolder, D: DelayNs> LinkMuxTransport<U, D> {
     /// Wrap `primary` (the USB transport) and serve the radio links that
     /// `port` announces. `delay` bounds a radio link's hold on the frame
     /// buffer.
+    ///
+    /// Every list the mux keeps per link is reserved here, at its most
+    /// links ([`LINK_SLOTS`]), so none of them grows when a link opens: a
+    /// growth then would land above whatever the link allocated and outlive
+    /// it, splitting the hole the link leaves when it closes
+    /// (`docs/defects/2026-10-06-a-lan-link-strands-the-heap-below-the-load-floor.md`).
     pub fn new(primary: U, port: &'static RadioLinkPort, delay: D) -> Self {
         Self {
             primary,
             port,
             delay,
-            radio: Vec::new(),
-            inbox: VecDeque::new(),
-            closed: Vec::new(),
+            radio: Vec::with_capacity(LINK_SLOTS),
+            inbox: VecDeque::with_capacity(INBOX_RESERVE),
+            closed: Vec::with_capacity(LINK_SLOTS),
             #[cfg(feature = "wifi")]
-            secure: Vec::new(),
+            secure: Vec::with_capacity(LINK_SLOTS),
             upkeep_hook: None,
         }
     }
@@ -456,6 +481,10 @@ impl<U: ServerTransport + FrameBufHolder, D: DelayNs> LinkMuxTransport<U, D> {
         // An opt-in answer `packed` needs a table first; the answer itself is
         // always JSON (`table_for`), and the switch it announces applies to
         // every reply after it, until the session ends — as on USB.
+        #[cfg(feature = "wifi")]
+        if radio.slot >= RADIO_LINK_SLOTS {
+            stay_json(&mut msg.msg);
+        }
         radio.packed.prepare_answer(&mut msg.msg);
         let switch_to = match msg.msg {
             ServerMsgBody::SetEncoding { encoding } => Some(encoding),
@@ -649,7 +678,12 @@ impl<U: ServerTransport + FrameBufHolder, D: DelayNs> ServerTransport for LinkMu
     fn take_secure_events(&mut self) -> Vec<(LinkId, SecureLinkEvent)> {
         self.drain_events();
         self.pump_radio();
-        core::mem::take(&mut self.secure)
+        // Drained, not taken: the list keeps its reserve (`new`).
+        if self.secure.is_empty() {
+            Vec::new()
+        } else {
+            self.secure.drain(..).collect()
+        }
     }
 
     #[cfg(feature = "wifi")]
@@ -722,7 +756,7 @@ mod tests {
     use alloc::vec;
     use lp_link::{LinkConfig, SelectiveRepeat};
     use lpc_shared::transport::LinkTrust;
-    #[cfg(feature = "json-pack")]
+    #[cfg(any(feature = "json-pack", feature = "wifi"))]
     use lpc_wire::WireEncoding;
 
     extern crate std;
@@ -1047,6 +1081,23 @@ mod tests {
             released.0 + released.1 <= at_rest.0 + at_rest.1 + 512,
             "the upload's reassembly buffer is given back"
         );
+    }
+
+    /// A LAN link never packs: its opt-in is answered `json`, so no learned
+    /// table is allocated for it.
+    #[cfg(feature = "wifi")]
+    #[test]
+    fn a_lan_links_packed_opt_in_is_answered_json() {
+        let mut answer = ServerMsgBody::SetEncoding {
+            encoding: WireEncoding::Packed,
+        };
+        stay_json(&mut answer);
+        assert!(matches!(
+            answer,
+            ServerMsgBody::SetEncoding {
+                encoding: WireEncoding::Json
+            }
+        ));
     }
 
     #[test]

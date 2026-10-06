@@ -7,8 +7,8 @@
 //! What it proves: the secure link comes up and the board says hello on
 //! it; an open board answers at its open tier; a locked board refuses a
 //! client with no password in words, takes the right one and refuses a
-//! wrong one; `wifi` and `upload` work over the link; a third concurrent
-//! link is told WebSocket close 1013; and the server never takes a request
+//! wrong one; `wifi` and `upload` work over the link; a link past the
+//! board's slots is told WebSocket close 1013; and the server never takes a request
 //! off a link whose secure session is not up — not from a secure client, and
 //! not from a plain one that never gets a session at all.
 //!
@@ -175,13 +175,19 @@ fn an_upload_over_the_link_loads_and_runs_the_project() {
 }
 
 #[test]
-fn a_third_concurrent_link_is_told_to_try_again_later() {
+fn a_link_past_the_boards_slots_is_told_to_try_again_later() {
     let harness = start(HarnessAccess::open(OpenTo::Edit), None);
     run(async {
-        let first = connect(&harness, None).await.expect("first");
-        let second = connect(&harness, None).await.expect("second");
+        let mut open = Vec::new();
+        for n in 0..fw_esp32_common::radio_link::LAN_LINK_SLOTS {
+            open.push(
+                connect(&harness, None)
+                    .await
+                    .unwrap_or_else(|e| panic!("link {n}: {e}")),
+            );
+        }
         let error = match connect(&harness, None).await {
-            Ok(_) => panic!("a third link got a slot"),
+            Ok(_) => panic!("a link past the board's slots got one"),
             Err(error) => error,
         };
         assert!(
@@ -192,8 +198,9 @@ fn a_third_concurrent_link_is_told_to_try_again_later() {
             "{error}"
         );
         assert!(error.to_string().contains("try again later"), "{error}");
-        first.close().await;
-        second.close().await;
+        for link in open {
+            link.close().await;
+        }
     });
     assert_eq!(harness.stats().refused, 1);
     assert_no_early_requests(&harness);

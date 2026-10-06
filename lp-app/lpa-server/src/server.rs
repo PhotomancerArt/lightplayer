@@ -592,6 +592,17 @@ impl LpServer {
         self.access.set_entropy_source(source);
     }
 
+    /// Reserve the per-link access state for `links` links at once (the
+    /// embedder's most: every transport's links, the primary included).
+    /// An embedder whose heap is placed by first fit calls it at boot: a
+    /// list that grows when a link opens lands above the link's own memory
+    /// and outlives it, splitting the hole the link leaves
+    /// (`docs/defects/2026-10-06-a-lan-link-strands-the-heap-below-the-load-floor.md`).
+    /// Hosts need not call it.
+    pub fn reserve_links(&mut self, links: usize) {
+        self.access.reserve_links(links);
+    }
+
     /// One heartbeat per link in `links`, each built for the link it goes to.
     ///
     /// A link that holds a tier sees the whole status. A link that holds

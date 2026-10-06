@@ -6,7 +6,7 @@
 //! `Opened`; then carry frames — every frame the link has, one binary message
 //! each, then wait for the first of a message, the mux's doorbell, the link's
 //! next timer, or the mux's close request — until either side ends it; then
-//! close the slot and announce `Closed`. A connection that finds both LAN
+//! close the slot and announce `Closed`. A connection that finds every LAN
 //! slots busy is upgraded and told close 1013.
 
 extern crate std;
@@ -73,7 +73,7 @@ pub(super) fn serve_connection(
     counters.link_closed();
 }
 
-/// Answer a connection that finds both LAN slots busy: upgrade it, then
+/// Answer a connection that finds every LAN slot busy: upgrade it, then
 /// WebSocket close 1013 ("try again later").
 pub(super) fn refuse_connection(stream: TcpStream, counters: &HarnessCounters) {
     let Ok(stream) = StdTcpByteStream::new(stream) else {
@@ -82,7 +82,7 @@ pub(super) fn refuse_connection(stream: TcpStream, counters: &HarnessCounters) {
     let mut ws_rx = vec![0u8; 1024 + RX_OVERHEAD];
     block_on(async {
         if let Ok(ws) = WsConnection::accept(stream, &mut ws_rx).await {
-            log::warn!("[lan] both LAN links are in use: a third was told to try again later");
+            log::warn!("[lan] every LAN link is in use: a new one was told to try again later");
             counters.refused();
             ws.close(TRY_AGAIN_LATER).await;
         }

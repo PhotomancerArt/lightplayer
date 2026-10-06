@@ -1,7 +1,7 @@
 //! The LAN endpoint on `lp-net`: secure lp-link links at `ws://<board>/link`
 //! (plan P04, MD10–MD12).
 //!
-//! One task per LAN slot ([`LAN_LINK_SLOTS`], two: plan A2), each holding
+//! One task per LAN slot ([`LAN_LINK_SLOTS`]: one on the C6), each holding
 //! one listening TCP socket on port 80. A connection is upgraded to a
 //! WebSocket (`fw_esp32_common::net::ws`, over the [`ByteStream`] a TLS
 //! wrapper can later replace), then gets its own secure lp-link session on
@@ -10,12 +10,15 @@
 //! one lp-link frame. The mux on the main thread carries it like a Bluetooth
 //! link (`radio_link::link_mux_transport`), under the port's lock.
 //!
-//! - **A third connection** while both slots are busy reaches the
+//! - **One connection too many** while every slot is busy reaches the
 //!   [`refuse_task`]'s socket and gets WebSocket close 1013 ("try again
 //!   later") and a log line.
-//! - **Memory.** Each slot's TCP and WebSocket buffers come from one
-//!   allocation made the first time the station has an address — never per
-//!   connection, and never on a board that does not join (the 2026-09-24
+//! - **Memory.** Each slot's TCP and WebSocket buffers are allocated once,
+//!   never per connection. A board that boots with a network saved gets
+//!   them at boot (`net_thread::start`'s [`super::net_thread::NetBuffers`]),
+//!   low in the heap, before anything a link or a project leaves behind; a
+//!   board that saves its first network later gets them at its first
+//!   address, and one that never joins never pays (the 2026-09-24
 //!   fragmentation class). The lp-link session itself is allocated per
 //!   connection (`Link::new_secure`), as Bluetooth's is.
 //! - **No plain link, ever.** Nothing reaches the server before the Noise
@@ -61,7 +64,7 @@ static BUSY_CHANGED: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 
 /// One slot's buffers, allocated once (on the heap directly: a 5 KB value
 /// built on `lp-net`'s stack first would be most of it).
-struct LanBuffers {
+pub struct LanBuffers {
     tcp_rx: &'static mut [u8],
     tcp_tx: &'static mut [u8],
     ws_rx: &'static mut [u8],
@@ -69,7 +72,7 @@ struct LanBuffers {
 }
 
 impl LanBuffers {
-    fn leak() -> Self {
+    pub fn leak() -> Self {
         let leak =
             |len: usize| -> &'static mut [u8] { Box::leak(vec![0u8; len].into_boxed_slice()) };
         Self {
@@ -83,10 +86,20 @@ impl LanBuffers {
 
 /// One LAN slot's task: `lan` is its index among the LAN slots.
 #[embassy_executor::task(pool_size = LAN_LINK_SLOTS)]
-pub async fn lan_link_task(stack: Stack<'static>, port: SharedPort, lan: usize) {
+pub async fn lan_link_task(
+    stack: Stack<'static>,
+    port: SharedPort,
+    lan: usize,
+    buffers: Option<LanBuffers>,
+) {
     let mut address = net_address::watch();
-    net_address::wait_up(&mut address).await;
-    let buffers = LanBuffers::leak();
+    let buffers = match buffers {
+        Some(buffers) => buffers,
+        None => {
+            net_address::wait_up(&mut address).await;
+            LanBuffers::leak()
+        }
+    };
     let index = RADIO_LINK_SLOTS + lan;
     loop {
         net_address::wait_up(&mut address).await;
@@ -181,15 +194,41 @@ async fn serve(
     }
 }
 
-/// Answer a connection that finds both LAN slots busy: WebSocket close 1013
-/// ("try again later"). Its socket listens only while both are busy.
+/// The refuser's buffers: enough to read an upgrade request and close.
+pub struct RefuseBuffers {
+    tcp_rx: &'static mut [u8],
+    tcp_tx: &'static mut [u8],
+    ws_rx: &'static mut [u8],
+}
+
+impl RefuseBuffers {
+    pub fn leak() -> Self {
+        let leak =
+            |len: usize| -> &'static mut [u8] { Box::leak(vec![0u8; len].into_boxed_slice()) };
+        Self {
+            tcp_rx: leak(512),
+            tcp_tx: leak(256),
+            ws_rx: leak(1024 + RX_OVERHEAD),
+        }
+    }
+}
+
+/// Answer a connection that finds every LAN slot busy: WebSocket close 1013
+/// ("try again later"). Its socket listens only while all are busy.
 #[embassy_executor::task]
-pub async fn refuse_task(stack: Stack<'static>) {
-    let mut address = net_address::watch();
-    net_address::wait_up(&mut address).await;
-    let tcp_rx = Box::leak(vec![0u8; 512].into_boxed_slice());
-    let tcp_tx = Box::leak(vec![0u8; 256].into_boxed_slice());
-    let ws_rx = Box::leak(vec![0u8; 1024 + RX_OVERHEAD].into_boxed_slice());
+pub async fn refuse_task(stack: Stack<'static>, buffers: Option<RefuseBuffers>) {
+    let RefuseBuffers {
+        tcp_rx,
+        tcp_tx,
+        ws_rx,
+    } = match buffers {
+        Some(buffers) => buffers,
+        None => {
+            let mut address = net_address::watch();
+            net_address::wait_up(&mut address).await;
+            RefuseBuffers::leak()
+        }
+    };
     loop {
         while BUSY.load(Ordering::Acquire) < LAN_LINK_SLOTS {
             BUSY_CHANGED.wait().await;
@@ -200,7 +239,7 @@ pub async fn refuse_task(stack: Stack<'static>) {
             continue;
         }
         if let Ok(ws) = WsConnection::accept(TcpStream(socket), &mut *ws_rx).await {
-            log::warn!("[lan] both LAN links are in use: a third was told to try again later");
+            log::warn!("[lan] every LAN link is in use: a new one was told to try again later");
             ws.close(TRY_AGAIN_LATER).await;
         }
     }

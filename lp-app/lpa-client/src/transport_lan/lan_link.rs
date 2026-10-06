@@ -318,8 +318,8 @@ impl LanLink {
         )))
     }
 
-    /// A socket error during setup: close 1013 is the board saying both its
-    /// LAN links are taken.
+    /// A socket error during setup: close 1013 is the board saying every
+    /// LAN link it has is taken.
     fn busy_or(&self, error: LanError) -> LanError {
         match error {
             LanError::Closed { code: Some(1013) } => LanError::Busy {

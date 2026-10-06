@@ -145,6 +145,30 @@ pub(crate) fn control_states() -> Element {
 }
 
 #[story(
+    label = "Device segment — USB, Bluetooth, Wi‑Fi",
+    description = "The device segment's kind glyph names how the board is reached: the USB mark over a cable, the Bluetooth mark over Bluetooth, the Wi‑Fi mark over a LAN link (`?lan=`). Before PR B's fix every board wore the USB mark, so a Wi‑Fi board in the editor looked like the cable board beside it."
+)]
+pub(crate) fn control_link_glyphs() -> Element {
+    rsx! {
+        div { class: "tw:grid tw:gap-2",
+            for (label, link) in [
+                ("USB", lpa_studio_core::UiLinkKind::Usb),
+                ("Bluetooth", lpa_studio_core::UiLinkKind::Bluetooth),
+                ("Wi\u{2011}Fi", lpa_studio_core::UiLinkKind::Wifi),
+            ]
+            {
+                div { class: "tw:grid tw:gap-1",
+                    span { class: "tw:text-[10px] tw:font-semibold tw:uppercase tw:tracking-wide tw:text-dim-foreground",
+                        "{label}"
+                    }
+                    {control_row(1000, UiChromeSessionControl { link, ..hardware_control() }, Some(control_content(0, 0, UiStatus::good("Ready"))), None)}
+                }
+            }
+        }
+    }
+}
+
+#[story(
     label = "Faces — all five relationships, clean and dirty",
     description = "The project segment's face for every state the derivation can produce, clean over dirty. Example is the pristine transient view (the accent \"example\" pill it replaces is gone — the face is neutral by D12, and it is the one thing in the bar that says whose document this is); Private is a library project the service has not answered a roster for; Shared is the same project once it has (D12 keeps it neutral — no status-blue for published); Member and Viewing are somebody else's document, with and without write. Dirty adds the amber count on the CHANGES segment and the Save sibling; the project segment does not change in either direction, because ownership and dirtiness are different questions."
 )]
@@ -526,6 +550,7 @@ fn sim_control(board: Option<&str>) -> UiChromeSessionControl {
         status: UiChromeSessionStatus::Run,
         stat_line: board.map(|_| "60 fps · 217 lamps".to_string()),
         update: None,
+        link: lpa_studio_core::UiLinkKind::Usb,
     }
 }
 
@@ -542,6 +567,7 @@ fn hardware_control() -> UiChromeSessionControl {
         status: UiChromeSessionStatus::Run,
         stat_line: Some("43 fps".to_string()),
         update: None,
+        link: lpa_studio_core::UiLinkKind::Usb,
     }
 }
 

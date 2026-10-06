@@ -111,6 +111,7 @@ pub mod sim_create_op;
 pub mod sim_record;
 pub mod sim_transport;
 pub mod target_offer;
+pub mod ui_link_kind;
 pub(crate) mod update_auto_start;
 pub mod update_build_facts;
 pub(crate) mod update_driver_mirror;
@@ -236,5 +237,6 @@ pub use sim_transport::{
     SimBacking, SimDeviceTransport, SimLinkSource, SimRuntimeControl, SimSession, SimTier,
 };
 pub use target_offer::{TargetChoice, TargetGroup, TargetOffer, TargetScope, target_offer};
+pub use ui_link_kind::UiLinkKind;
 pub use update_build_facts::{StoreLatest, UpdateBuildFacts};
 pub use update_host::UpdateHost;

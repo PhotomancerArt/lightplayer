@@ -23,7 +23,7 @@ pub struct HarnessCounters {
 /// A snapshot of [`HarnessCounters`].
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct HarnessStats {
-    /// Connections told WebSocket close 1013 (both LAN slots busy).
+    /// Connections told WebSocket close 1013 (every LAN slot busy).
     pub refused: usize,
     /// WebSocket upgrades that got a LAN slot and a secure lp-link session.
     pub links_opened: usize,
