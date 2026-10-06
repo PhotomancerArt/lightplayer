@@ -14,6 +14,7 @@
 //! - [`dictionary_rule`]: what encoding 1 means;
 //! - [`transfer_record`]: the progress record v1 and its foreign-record rule;
 //! - [`hash_rules`]: the two hash rules;
+//! - [`status_light_record`]: the update light's record (`/.lp/status-light.json`);
 //! - [`build_id`]: the build id field and the build hash;
 //! - [`board`]: the board's update session;
 //! - `testing` (feature `test-support`): a NOR model, a model board and a rig
@@ -48,6 +49,7 @@ pub mod read_back_request;
 pub mod refusal;
 pub mod request;
 pub mod sha256_hex;
+pub mod status_light_record;
 pub mod transfer_record;
 mod wire_reader;
 
@@ -67,6 +69,7 @@ pub use read_back_request::ReadBackRequest;
 pub use refusal::{Mismatch, Refusal};
 pub use request::Request;
 pub use sha256_hex::{sha256_from_hex, sha256_to_hex};
+pub use status_light_record::{STATUS_LIGHT_PATH, StatusLightRecord, light_for};
 pub use transfer_record::{
     MarkSet, OwnFacts, RecordClass, RecordRead, RecordStage, TransferRecord,
 };

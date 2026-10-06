@@ -11,7 +11,9 @@
 //! `plain_bytes_golden.rs`, unchanged.
 
 use lp_link::frame::{self, FrameKind, Header};
-use lp_link::{CH_PROTO, Framing, Link, LinkConfig, LinkEvent, LinkState, Micros, SelectiveRepeat};
+use lp_link::{
+    CH_PROTO, CH_UPDATE, Framing, Link, LinkConfig, LinkEvent, LinkState, Micros, SelectiveRepeat,
+};
 
 #[test]
 fn a_plain_link_comes_up_when_its_peer_sends_a_longer_syn() {
@@ -43,6 +45,20 @@ fn a_plain_link_comes_up_when_its_peer_sets_unknown_flag_bits() {
 fn a_plain_only_build_reads_a_secure_flagged_syn_as_plain() {
     let (a, b) = exchange(LinkConfig::ws(), &[0x77; 64], lp_link::frame::SYN_SECURE);
     assert_up_and_clean(&a, &b, "SYN_SECURE with an extension, plain-only build");
+}
+
+/// The update channel (3) is what a fielded core is reached over: a future
+/// host whose SYN carries an extension must still move update messages.
+#[test]
+fn the_update_channel_works_when_the_peer_sends_a_longer_syn() {
+    for cfg in [LinkConfig::ble(), LinkConfig::udp()] {
+        let mut cfg = cfg;
+        cfg.reliable_channels |= 1 << CH_UPDATE;
+        let (a, b) = exchange_on(cfg, &[0xc3, 0x3c, 0x5a, 0xa5], 0, CH_UPDATE);
+        assert_up_and_clean(&a, &b, "a 4-byte SYN extension, channel 3");
+        assert_eq!(a.channels, vec![CH_UPDATE]);
+        assert_eq!(b.channels, vec![CH_UPDATE]);
+    }
 }
 
 #[test]
@@ -81,11 +97,18 @@ struct End {
     link: Link<SelectiveRepeat>,
     sent: Vec<String>,
     got: Vec<Vec<u8>>,
+    /// The channel each received message came on.
+    channels: Vec<u8>,
 }
 
 /// Run a plain pair to establishment and one message each way. Every SYN
 /// `b` sends reaches `a` with `ext` appended and `flags` OR-ed into byte 8.
 fn exchange(cfg: LinkConfig, ext: &[u8], flags: u8) -> (End, End) {
+    exchange_on(cfg, ext, flags, CH_PROTO)
+}
+
+/// [`exchange`], the two messages on `channel`.
+fn exchange_on(cfg: LinkConfig, ext: &[u8], flags: u8, channel: u8) -> (End, End) {
     assert_eq!(
         cfg.framing,
         Framing::Datagram,
@@ -95,11 +118,13 @@ fn exchange(cfg: LinkConfig, ext: &[u8], flags: u8) -> (End, End) {
         link: Link::new(cfg.clone(), 0x1111_1111),
         sent: Vec::new(),
         got: Vec::new(),
+        channels: Vec::new(),
     };
     let mut b = End {
         link: Link::new(cfg.clone(), 0x2222_2222),
         sent: Vec::new(),
         got: Vec::new(),
+        channels: Vec::new(),
     };
     let mut now: Micros = 0;
     let mut sent_messages = false;
@@ -124,8 +149,9 @@ fn exchange(cfg: LinkConfig, ext: &[u8], flags: u8) -> (End, End) {
         }
         for end in [&mut a, &mut b] {
             while let Some(ev) = end.link.recv() {
-                if let LinkEvent::Message { data, .. } = ev {
+                if let LinkEvent::Message { channel, data } = ev {
                     end.got.push(data);
+                    end.channels.push(channel);
                 }
             }
         }
@@ -133,8 +159,8 @@ fn exchange(cfg: LinkConfig, ext: &[u8], flags: u8) -> (End, End) {
             && a.link.state() == LinkState::Established
             && b.link.state() == LinkState::Established
         {
-            a.link.send(CH_PROTO, b"from a").unwrap();
-            b.link.send(CH_PROTO, b"from b").unwrap();
+            a.link.send(channel, b"from a").unwrap();
+            b.link.send(channel, b"from b").unwrap();
             sent_messages = true;
         }
         if !a.got.is_empty() && !b.got.is_empty() {

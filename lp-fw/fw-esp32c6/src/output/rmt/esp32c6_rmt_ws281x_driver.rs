@@ -464,6 +464,8 @@ impl Ws281xDriver for Esp32C6RmtWs281xDriver {
         );
         #[cfg(feature = "frame-dump")]
         frame_dump::log_open(endpoint_id, config.byte_count());
+        #[cfg(lp_split)]
+        crate::output::status_light_note::note_open(gpio, config.byte_count() / 3);
 
         Ok(Box::new(Esp32C6RmtWs281xOutput {
             registry: Rc::clone(&self.registry),

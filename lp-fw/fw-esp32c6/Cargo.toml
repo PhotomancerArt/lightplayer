@@ -355,6 +355,14 @@ fixture-no-in-endpoint-gate = []
 # plain (unsplit) build. Not `test_*`, for the reason above.
 fixture-trial-dies = []
 fixture-trial-hangs = []
+# Emulator FIXTURE, never shipped and never in a build def or `served.json`:
+# the USB link is NOT trusted by the split image's update session, in
+# core-only and in the running engine's channel-3 hook alike, so the
+# emulator (which has only USB) can prove "a core install is refused
+# without edit, and accepted after a core-side login" on the real image
+# (OTA plan DM21; `just test-emu-c6-ota`, U8/U9). Inert in a plain build.
+# Not `test_*`, for the reason above.
+fixture-usb-untrusted = []
 
 [dependencies]
 lp-collection = { workspace = true, features = ["serde"] }
@@ -460,6 +468,11 @@ lpc-wire = { path = "../../lp-core/lpc-wire", default-features = false, optional
 lp-perf = { path = "../../lp-base/lp-perf", default-features = false }
 lp-recovery = { path = "../../lp-base/lp-recovery", default-features = false }
 lp-bootctl = { path = "../../lp-base/lp-bootctl", default-features = false }
+# The over-the-air update session (protocol v1) the split image's core runs,
+# in core-only and as the running engine's channel-3 hook (`src/ota/`).
+lpc-update = { path = "../../lp-core/lpc-update" }
+lpc-access = { path = "../../lp-core/lpc-access" }
+sha2 = { workspace = true }
 serde = { workspace = true, default-features = false, features = ["alloc", "derive"] }
 hashbrown = { workspace = true }
 

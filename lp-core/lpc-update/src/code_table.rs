@@ -35,16 +35,15 @@ pub const CHIP_ESP32C6: u16 = 1;
 /// An install needs the offer's layout **equal** to the board's.
 pub const LAYOUT_1: u16 = 1;
 
-/// Layout 1's room for the loader. **Must equal the split image's
-/// `lp_bootctl::split_layout::LOADER_MAX_LEN` (`0x5000`).** Duplicated here
-/// until the split image merges, because this crate may not depend on its
-/// unmerged API; Part B replaces it with a reference.
-pub const LAYOUT_1_LOADER_MAX_LEN: u32 = 0x5000;
+/// Layout 1's room for the loader: the split image's
+/// [`lp_bootctl::LOADER_MAX_LEN`] (`0x5000`), referenced, never copied.
+pub const LAYOUT_1_LOADER_MAX_LEN: u32 = lp_bootctl::LOADER_MAX_LEN;
 
-/// Layout 1's progress-record sector, from `factory`'s start. **Must equal
-/// the split image's `PROGRESS_RECORD_SECTOR - LOADER_OFFSET`
-/// (`0x1_5000 - 0x1_0000`).** Duplicated until the split image merges.
-pub const LAYOUT_1_PROGRESS_OFFSET: u32 = 0x5000;
+/// Layout 1's progress-record sector, from `factory`'s start: the split
+/// image's [`lp_bootctl::PROGRESS_RECORD_SECTOR`] less its
+/// [`lp_bootctl::LOADER_OFFSET`] (`0x1_5000 - 0x1_0000`).
+pub const LAYOUT_1_PROGRESS_OFFSET: u32 =
+    lp_bootctl::PROGRESS_RECORD_SECTOR - lp_bootctl::LOADER_OFFSET;
 
 /// Loader version 0: the loader carries no version word (only the draft and
 /// spike loaders that preceded the split image).

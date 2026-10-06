@@ -254,8 +254,20 @@ pub fn read_relocations(data: &[u8]) -> Result<Relocations> {
                 continue;
             }
             let sym = symbols.symbol(object::SymbolIndex(rela.r_sym(endian) as usize))?;
-            let target = i64::from(sym.st_value(endian)) + i64::from(rela.r_addend(endian));
-            list.push((u64::from(rela.r_offset(endian)), target));
+            let at = u64::from(rela.r_offset(endian));
+            let value = i64::from(sym.st_value(endian));
+            let addend = i64::from(rela.r_addend(endian));
+            list.push((at, value + addend));
+            // A symbol's own section is a target too, whatever the addend:
+            // codegen may address a table as `sym - k` and index from `k`
+            // up, and `S + A` then lands in whichever section the link put
+            // before it — a different one in each pass. Missing that edge
+            // placed a table the core reads into the engine region
+            // (docs/defects/2026-10-05-the-split-tool-missed-a-negative-addend-reference.md).
+            // A section symbol's value is its section's start, not a target.
+            if addend != 0 && sym.st_type() != object::elf::STT_SECTION {
+                list.push((at, value));
+            }
         }
     }
     Ok(Relocations {
@@ -348,5 +360,23 @@ mod tests {
         assert_eq!(g.unresolved, 2);
         assert_eq!(g.node_at(0x10f), Some(0));
         assert_eq!(g.node_at(0x110), None);
+    }
+
+    #[test]
+    fn a_negative_addend_reaches_the_symbols_own_section_as_read_gives_it() {
+        // `read_relocations` gives a `sym - 0xc` reference as two targets:
+        // where `S + A` lands (the section before) and `S` itself.
+        let node = |vma, size| Node {
+            vma,
+            size,
+            out: ".rodata".into(),
+            desc: format!("/x/a.o:(s{vma:x})"),
+        };
+        let g = SectionGraph::build(
+            vec![node(0x100, 0x10), node(0x200, 0x10), node(0x300, 0x10)],
+            &[(0x104, 0x300 - 0xc), (0x104, 0x300)],
+            0x100,
+        );
+        assert!(g.edges[&0].contains(&2), "the table itself is reached");
     }
 }

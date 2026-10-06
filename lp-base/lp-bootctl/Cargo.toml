@@ -8,6 +8,8 @@ rust-version.workspace = true
 description = "Boot-control sector: a flash-persisted instruction to the firmware's next boot"
 
 [dependencies]
+# The one CRC-32 of the boot and update records (one-way-doors §10).
+lp-crc32 = { path = "../lp-crc32" }
 
 [lints]
 workspace = true

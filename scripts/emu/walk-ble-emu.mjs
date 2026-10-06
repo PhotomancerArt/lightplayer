@@ -9,9 +9,10 @@
 //
 //     add over Bluetooth → identify (flash disabled, with its reason)
 //       → clear + push a project over Bluetooth → the editor (authoring,
-//       counted for comparison) → Play → idle → turn a knob
+//       counted for comparison) → out of range under the editor
+//       → Play → idle → turn a knob
 //       → the board goes away and comes back → the radio blips
-//       → Bluefy's phantom drop
+//       → Bluefy's phantom drop → out of range, the link up and quiet
 //
 // and it states the one number M5 owes: the bytes per second an idle,
 // connected Studio in Play mode puts on a `ble:` link, both directions,
@@ -29,8 +30,9 @@
 // deliberate duration is the idle window, and it is a counting window, not a
 // claim about how long anything took.
 //
-// THE THREE DROPS (defects 2026-10-02-a-dropped-link-sends-the-editor-to-devices
-// and 2026-10-06-a-bluetooth-reconnect-reads-the-old-links-loss): a Bluetooth
+// THE FOUR DROPS (defects 2026-10-02-a-dropped-link-sends-the-editor-to-devices,
+// 2026-10-06-a-bluetooth-reconnect-reads-the-old-links-loss and
+// 2026-10-06-a-board-out-of-range-flashes-a-transport-error): a Bluetooth
 // link that drops under Play must keep the page on Play with a quiet
 // "Reconnecting…" strip, and the same session must take a knob turn once
 // the link is back. `drop` is the board going away for seconds and coming
@@ -38,7 +40,12 @@
 // board's power); `blip` is the radio dropping and the page reconnecting at
 // once (the event fires; nothing is done to the board); `phantom` is Bluefy's
 // (`gatt.connected` false, no event, the board's side
-// still up) seen the way iOS shows it — when the page is shown again.
+// still up) seen the way iOS shows it — when the page is shown again;
+// `range` is the board out of range with the radio link still up and
+// nothing getting through (`quiet`), where a request's raw timeout must
+// never reach the page — every drop checks that. `range-editor` is the same
+// quiet drop taken under the editor before Play, where a sync failure's
+// text is drawn (Play draws none), so it is the one that fails if it does.
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -282,24 +289,6 @@ async function main() {
       return JSON.stringify(report.editorIdle);
     });
 
-    await step("play", "switch the editor to Play", async () => {
-      await driver.evaluate(`document.querySelector('a[title^="Play mode"]').click()`);
-      await driver.waitFor(`location.pathname.endsWith('/play')`, {
-        timeoutMs: STEP_DEADLINE_MS,
-        what: "the Play route",
-      });
-      await driver.waitFor(`Boolean(document.querySelector('#main [role="slider"]'))`, {
-        timeoutMs: STEP_DEADLINE_MS,
-        what: "the Play panel's knobs",
-      });
-      return `at ${await driver.evaluate("location.pathname + location.search")}`;
-    });
-
-    await step("idle", `Play, untouched, for ${IDLE_WINDOW_MS / 1000} s — what goes over the air`, async () => {
-      report.idle = await measure(IDLE_WINDOW_MS);
-      return JSON.stringify(report.idle);
-    });
-
     const turnKnob = async () => {
       const s0 = await stats();
       const before = await driver.evaluate(
@@ -329,19 +318,32 @@ async function main() {
     /// has settled. A drop with no `back` reconnects on its own at once, so
     /// the strip may come and go before it ever settles: what it must not do
     /// is leave Play, and the knob must work after.
-    const dropUnderPlay = async (name, describe, cause, back = null) => {
-      await step(`${name}-held`, `${describe}: the page stays on Play and says Reconnecting`, async () => {
+    /// `newLink: false` for a drop the board's side of the link rides out
+    /// (the quiet one): the board is back on the SAME port, not a new one.
+    /// `page` names the surface it happens under ("the editor" for the one
+    /// drop taken there).
+    const dropUnderPlay = async (name, describe, cause, back = null, { newLink = true, page = "Play" } = {}) => {
+      await step(`${name}-held`, `${describe}: the page stays on ${page} and says Reconnecting`, async () => {
         const opens = (await stats()).linkOpens;
         const route = await driver.evaluate("location.pathname + location.search");
-        // Whether the strip showed at all, however briefly.
+        // Whether the strip showed at all, however briefly — and whether a
+        // request's raw timeout ever reached the page instead (defect
+        // 2026-10-06-a-board-out-of-range-flashes-a-transport-error).
         await driver.evaluate(`(() => {
           window.__lpWalkStripSeen = Boolean(document.querySelector('[data-reconnecting="true"]'));
+          window.__lpWalkTimeoutShown = null;
           window.__lpWalkStripObserver?.disconnect();
           window.__lpWalkStripObserver = new MutationObserver(() => {
             if (document.querySelector('[data-reconnecting="true"]')) window.__lpWalkStripSeen = true;
+            const text = document.body.textContent;
+            const at = text.indexOf('did not respond');
+            if (at >= 0 && window.__lpWalkTimeoutShown === null) {
+              window.__lpWalkTimeoutShown = text.slice(Math.max(0, at - 80), at + 60);
+            }
           });
           window.__lpWalkStripObserver.observe(document.body, {
-            subtree: true, childList: true, attributes: true, attributeFilter: ['data-reconnecting'],
+            subtree: true, childList: true, characterData: true, attributes: true,
+            attributeFilter: ['data-reconnecting'],
           });
         })()`);
         await driver.evaluate(cause, { awaitPromise: true });
@@ -364,13 +366,15 @@ async function main() {
         const now = await driver.evaluate("location.pathname + location.search");
         if (now !== route) throw new Error(`the route moved: ${route} → ${now}`);
         if (!(await driver.evaluate(`Boolean(document.querySelector('#main [role="slider"]'))`))) {
-          throw new Error("the Play panel went away");
+          throw new Error(`the ${page} panel went away`);
         }
         const seen = await driver.evaluate("window.__lpWalkStripSeen === true");
+        const timeout = await driver.evaluate("window.__lpWalkTimeoutShown");
+        if (timeout) throw new Error(`a request's timeout reached the page: …${timeout}…`);
         report[name] = { route, opensBefore: opens, stripSeen: seen };
         return `still at ${now}${back ? "" : `; strip ${seen ? "seen" : "not seen (the link was back first)"}`}`;
       });
-      await step(`${name}-back`, "the link comes back; the strip goes and the same Play takes a knob turn", async () => {
+      await step(`${name}-back`, `the link comes back; the strip goes and the same ${page} takes a knob turn`, async () => {
         if (back) await driver.evaluate(back, { awaitPromise: true });
         await driver.waitFor(`!document.querySelector('[data-reconnecting="true"]')`, {
           timeoutMs: STEP_DEADLINE_MS,
@@ -382,10 +386,15 @@ async function main() {
         );
         // Back on a new link, not merely a strip that went: a link the
         // board opened after the drop.
-        await driver.waitFor(
-          `window.__lpEmuBluetooth.stats(${JSON.stringify(BOARD)}).linkOpens > ${report[name].opensBefore}`,
-          { timeoutMs: STEP_DEADLINE_MS, what: "a new link to the board" },
-        );
+        if (newLink) {
+          await driver.waitFor(
+            `window.__lpEmuBluetooth.stats(${JSON.stringify(BOARD)}).linkOpens > ${report[name].opensBefore}`,
+            { timeoutMs: STEP_DEADLINE_MS, what: "a new link to the board" },
+          );
+        }
+        // The board came back without its timeouts ever reaching the page.
+        const timeout = await driver.evaluate("window.__lpWalkTimeoutShown");
+        if (timeout) throw new Error(`a request's timeout reached the page: …${timeout}…`);
         const now = await driver.evaluate("location.pathname + location.search");
         if (now !== report[name].route) throw new Error(`the route moved: ${report[name].route} → ${now}`);
         const opens = (await stats()).linkOpens - report[name].opensBefore;
@@ -394,6 +403,37 @@ async function main() {
         return `${opens} new link open(s); knob ${knob}`;
       });
     };
+
+    // The quiet drop under the editor first: it pulls every 150 ms, so a
+    // pull is in flight when the board goes quiet and times out 5 s later,
+    // and the editor's tree is where a sync failure's text is drawn — so a
+    // request's raw timeout reaching the page shows here (red without the
+    // fix for 2026-10-06-a-board-out-of-range-flashes-a-transport-error).
+    await dropUnderPlay(
+      "range-editor",
+      "out of range under the editor; the radio link stays up and goes quiet",
+      `window.__lpEmuBluetooth.quiet(${JSON.stringify(BOARD)}, true)`,
+      `window.__lpEmuBluetooth.quiet(${JSON.stringify(BOARD)}, false)`,
+      { newLink: false, page: "the editor" },
+    );
+
+    await step("play", "switch the editor to Play", async () => {
+      await driver.evaluate(`document.querySelector('a[title^="Play mode"]').click()`);
+      await driver.waitFor(`location.pathname.endsWith('/play')`, {
+        timeoutMs: STEP_DEADLINE_MS,
+        what: "the Play route",
+      });
+      await driver.waitFor(`Boolean(document.querySelector('#main [role="slider"]'))`, {
+        timeoutMs: STEP_DEADLINE_MS,
+        what: "the Play panel's knobs",
+      });
+      return `at ${await driver.evaluate("location.pathname + location.search")}`;
+    });
+
+    await step("idle", `Play, untouched, for ${IDLE_WINDOW_MS / 1000} s — what goes over the air`, async () => {
+      report.idle = await measure(IDLE_WINDOW_MS);
+      return JSON.stringify(report.idle);
+    });
 
     await step("knob", "turn the first knob to its end; the board takes it and says so", async () => {
       const s0 = await stats();
@@ -464,6 +504,19 @@ async function main() {
       `(() => { window.__lpEmuBluetooth.phantomDrop(${JSON.stringify(BOARD)});
                 document.dispatchEvent(new Event('visibilitychange')); })()`,
     );
+    // The quiet drop (the 2026-10-06 desk walk of #880): out of range, the
+    // radio link stays up and nothing gets through. Play reads once a
+    // minute, so the curtain rises when that read times out — and the
+    // timeout itself must never show (defect
+    // 2026-10-06-a-board-out-of-range-flashes-a-transport-error). Back in
+    // range, the same port carries on: no new link is owed.
+    await dropUnderPlay(
+      "range",
+      "the board walks out of range; the radio link stays up and goes quiet",
+      `window.__lpEmuBluetooth.quiet(${JSON.stringify(BOARD)}, true)`,
+      `window.__lpEmuBluetooth.quiet(${JSON.stringify(BOARD)}, false)`,
+      { newLink: false },
+    );
   } catch (error) {
     fatal = error;
   }
@@ -514,7 +567,7 @@ async function main() {
     console.error(`\nThe walk's steps passed, but the page panicked ${panics.length} time(s).`);
     process.exit(1);
   }
-  console.log("\n✓ the Bluetooth walk finished: add → identify → push → Play → idle → knob → three drops ridden out on Play, with no board.");
+  console.log("\n✓ the Bluetooth walk finished: add → identify → push → Play → idle → knob → a quiet drop under the editor and four on Play ridden out, with no board.");
 }
 
 await main();

@@ -151,3 +151,12 @@ comparison is unchanged.)
   DIAGNOSIS-ONLY (`BootLineClassifier` — see
   `docs/adr/2026-07-15-device-session-model.md`). The CLI's `fwcheck`
   grep remains until the CLI adopts `DeviceSession` (device-link M5).
+
+## Amendment (2026-10-06): channel 3 is not this number's
+
+Wire proto 38 adds `ServerHello.firmware`: a split C6's board manifest
+(`lpc_update::BoardManifest`), `None` everywhere else. The over-the-air
+update protocol itself rides lp-link **channel 3**, and is not versioned by
+`WIRE_PROTO_VERSION`: it has its own `proto` byte and changes only by adding,
+and a host that cannot read a board's hello still sends `Q` on channel 3.
+See `docs/adr/2026-10-06-ota-update-protocol.md`.

@@ -3,6 +3,11 @@
 //! and the same board comes back on a NEW link a few seconds later. The
 //! editor must hold behind "Reconnecting…" and resume on the new link —
 //! the 2026-10-05 desk check found it closing after 45 s instead.
+//!
+//! The third drop is the quiet one: the board walks out of range, and the
+//! radio link stays "connected" while nothing comes back over it. The
+//! first pull to time out there must raise the same curtain, never a red
+//! transport error (the 2026-10-06 desk walk of #880).
 
 use super::*;
 
@@ -15,6 +20,23 @@ const BLE_DEVICE_ID: &str = "QkxFLWRyb3A";
 struct DroppableBleBoard {
     device: FakeEsp32Device,
     present: Rc<Cell<bool>>,
+    /// What the radio carries right now (see [`Air`]).
+    air: Rc<Cell<Air>>,
+}
+
+/// What the radio between Studio and the board carries.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Air {
+    /// Every request is answered.
+    Clear,
+    /// The board is out of range: the GATT link has not dropped yet, but
+    /// nothing comes back over it. The page's lp-link notices first (its
+    /// stall time, 3.5 s on Bluetooth, is under a request's 5 s budget) and
+    /// says so on the tap; then the request in flight times out.
+    OutOfRange,
+    /// The link is healthy (the board's link layer still answers) but the
+    /// board's server never replies to this request: a real error.
+    Unanswered,
 }
 
 impl crate::BleLinkSource for DroppableBleBoard {
@@ -45,10 +67,56 @@ impl crate::BleLinkSource for DroppableBleBoard {
         tap: Option<LensLineTap>,
     ) -> Result<Box<dyn lpa_client::ClientIo>, String> {
         let io = FakeDeviceIo::new(&self.device);
-        Ok(Box::new(match tap {
+        let inner = match tap.clone() {
             Some(tap) => io.with_tap(tap),
             None => io,
+        };
+        Ok(Box::new(AirIo {
+            inner,
+            air: Rc::clone(&self.air),
+            tap,
         }))
+    }
+}
+
+/// The board's conversation, through whatever [`Air`] is between.
+struct AirIo {
+    inner: FakeDeviceIo,
+    air: Rc<Cell<Air>>,
+    tap: Option<LensLineTap>,
+}
+
+/// The Bluetooth io's own words for a request nobody answered
+/// (`ble_client_io.rs`).
+const BLE_TIMEOUT: &str = "the device did not respond over Bluetooth within 5.0s";
+
+#[async_trait::async_trait(?Send)]
+impl lpa_client::ClientIo for AirIo {
+    async fn send(&mut self, msg: lpc_wire::ClientMessage) -> Result<(), lpc_wire::TransportError> {
+        match self.air.get() {
+            Air::Clear => self.inner.send(msg).await,
+            // Queued on the page's link, written into the air.
+            Air::OutOfRange | Air::Unanswered => Ok(()),
+        }
+    }
+
+    async fn receive(&mut self) -> Result<lpc_wire::WireServerMessage, lpc_wire::TransportError> {
+        match self.air.get() {
+            Air::Clear => self.inner.receive().await,
+            Air::OutOfRange => {
+                if let Some(tap) = &self.tap {
+                    tap(LensTapEvent::Note(
+                        lpa_link::device_link::link_note::LINK_STALLED_NOTE.to_string(),
+                    ));
+                }
+                Err(lpc_wire::TransportError::Other(BLE_TIMEOUT.to_string()))
+            }
+            Air::Unanswered => Err(lpc_wire::TransportError::Other(BLE_TIMEOUT.to_string())),
+        }
+    }
+
+    async fn close(&mut self) -> Result<(), lpc_wire::TransportError> {
+        self.inner.close().await
     }
 }
 
@@ -187,9 +255,130 @@ fn a_password_typed_once_unlocks_the_restarted_board_by_itself() {
     }
 }
 
+/// The 2026-10-06 desk walk of #880: walked out of range under Play, the
+/// board's radio link went quiet without dropping, and the first pull to
+/// time out flashed a red "Transport error … did not respond within 5.0s"
+/// before the "Reconnecting…" curtain took over. Through the actor, in the
+/// order it happens: a pull is in flight, the link goes quiet (its stall
+/// note reaches the lens's tap), the pull times out — and the one view the
+/// batch emits shows the curtain, with no error on the project.
+#[test]
+fn a_bluetooth_board_out_of_range_shows_reconnecting_not_a_transport_error() {
+    let (mut bench, air) = lens_over_bluetooth_air("dev000000blequiet1");
+    let (mut actor, mut handle) = actor_from(&mut bench);
+
+    air.set(Air::OutOfRange);
+    let view = pull_through_the_actor(&mut actor, &mut handle, &bench.clock);
+
+    let curtain = view
+        .lens_reconnecting
+        .clone()
+        .expect("the first timeout on a quiet link raises the curtain");
+    assert_eq!(curtain.headline, "Reconnecting…");
+    assert!(
+        curtain.detail.contains("stopped responding"),
+        "{}",
+        curtain.detail
+    );
+    assert_eq!(sync_issue(&view), None, "no transport error on the project");
+
+    // The next pull on the still-quiet link is no error either.
+    let view = pull_through_the_actor(&mut actor, &mut handle, &bench.clock);
+    assert!(view.lens_reconnecting.is_some());
+    assert_eq!(sync_issue(&view), None);
+}
+
+/// The guard on the fix above: a request the board's server never answers,
+/// on a link that is still answering underneath, is a real error, and it
+/// still shows — no curtain papers over it.
+#[test]
+fn a_request_unanswered_on_a_healthy_bluetooth_link_still_shows_its_error() {
+    let (mut bench, air) = lens_over_bluetooth_air("dev000000blequiet2");
+    let (mut actor, mut handle) = actor_from(&mut bench);
+
+    air.set(Air::Unanswered);
+    let view = pull_through_the_actor(&mut actor, &mut handle, &bench.clock);
+
+    assert!(
+        view.lens_reconnecting.is_none(),
+        "a healthy link: no curtain"
+    );
+    let issue = sync_issue(&view).expect("the error shows");
+    assert!(issue.contains(BLE_TIMEOUT), "{issue}");
+}
+
 // ---------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------
+
+/// A board running the bundled example over Bluetooth, the editor open on
+/// it, and the [`Air`] between them in the test's hand.
+fn lens_over_bluetooth_air(uid: &str) -> (DeviceBench, Rc<Cell<Air>>) {
+    let device = FakeEsp32Device::new(FakeDeviceScript::new(FakeBootState::LightPlayer(
+        bluetooth_board(uid),
+    )));
+    let air = Rc::new(Cell::new(Air::Clear));
+    let (mut bench, tasks, _present) = bench_over_bluetooth_in(&device, |_| {}, Rc::clone(&air));
+    open_running_lens(&mut bench, &tasks, "Unlocked", true);
+    (bench, air)
+}
+
+/// Hand the bench's controller to a real [`crate::StudioActor`], the way
+/// the web shell runs it. Every device input from here on — the open
+/// lens's tap among them — lands on the actor's command queue, behind
+/// whatever batch is running, exactly as in the page.
+fn actor_from(
+    bench: &mut DeviceBench,
+) -> (
+    crate::StudioActor<impl FnMut(Duration) -> Sleep + Clone + 'static>,
+    crate::StudioHandle,
+) {
+    let clock = Rc::clone(&bench.clock);
+    let controller = std::mem::replace(&mut bench.controller, StudioController::new(|| 0.0));
+    let (actor, handle) = crate::StudioActor::new_with_options(
+        controller,
+        move |delay: Duration| Sleep {
+            clock: Rc::clone(&clock),
+            due: clock.get() + delay.as_secs_f64(),
+        },
+        crate::StudioActorOptions { drain_logs: false },
+    );
+    *bench.device_inputs_to.borrow_mut() = Some(handle.tx.clone());
+    (actor, handle)
+}
+
+/// Let the lens's next pull come due, send one tick, run the actor's batch
+/// and return the view it emitted.
+fn pull_through_the_actor<M, T>(
+    actor: &mut crate::StudioActor<M>,
+    handle: &mut crate::StudioHandle,
+    clock: &Rc<Cell<f64>>,
+) -> crate::UiStudioView
+where
+    M: FnMut(Duration) -> T + Clone + 'static,
+    T: Future<Output = ()> + 'static,
+{
+    let gap = actor
+        .controller_mut_for_test()
+        .lens_refresh_gap_for_test()
+        .expect("the editor is open on the board");
+    clock.set(clock.get() + gap.as_secs_f64() + 1.0);
+    handle.tx.send(crate::StudioCommand::RefreshTick);
+    drive(actor.run_one_batch_for_test());
+    handle.view.try_recv().expect("the batch emits a view")
+}
+
+/// The project's sync issue, as the page shows it.
+fn sync_issue(view: &crate::UiStudioView) -> Option<String> {
+    view.panes.iter().find_map(|pane| match &pane.body {
+        crate::UiViewContent::ProjectEditor(editor) => editor
+            .sync
+            .issue
+            .as_ref()
+            .map(|issue| issue.message.clone()),
+        _ => None,
+    })
+}
 
 /// A password the bench's locked board holds and Studio remembers.
 const BENCH_PASSWORD: &str = "bench-password-1";
@@ -249,6 +438,15 @@ fn bench_over_bluetooth(
     device: &FakeEsp32Device,
     memory: impl FnOnce(&mut DeviceBench),
 ) -> (DeviceBench, TaskPool, Rc<Cell<bool>>) {
+    bench_over_bluetooth_in(device, memory, Rc::new(Cell::new(Air::Clear)))
+}
+
+/// [`bench_over_bluetooth`], with the test holding the [`Air`].
+fn bench_over_bluetooth_in(
+    device: &FakeEsp32Device,
+    memory: impl FnOnce(&mut DeviceBench),
+    air: Rc<Cell<Air>>,
+) -> (DeviceBench, TaskPool, Rc<Cell<bool>>) {
     // No USB grant: the serial half is installed, and never sees the board.
     let (mut bench, tasks) = DeviceBench::build(device, "usb-unused", false, false);
     memory(&mut bench);
@@ -270,6 +468,7 @@ fn bench_over_bluetooth(
             DroppableBleBoard {
                 device: device.clone(),
                 present: Rc::clone(&present),
+                air,
             },
         ))));
     (bench, tasks, present)

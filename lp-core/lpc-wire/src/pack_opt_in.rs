@@ -401,6 +401,7 @@ mod tests {
             device_uid: None,
             pack_format,
             auth: crate::HelloAuth::TRUSTED,
+            firmware: None,
         };
         WireServerMessage::new(0, ServerMsgBody::Hello(hello))
     }

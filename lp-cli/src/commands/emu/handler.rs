@@ -139,6 +139,11 @@ fn run(args: RunArgs) -> Result<()> {
     if args.chip != EmuChip::Esp32C6 && !seams.is_empty() {
         bail!("--seams / --seams-prefer are the C6's (Xtensa seams are the roadmap's M7)");
     }
+    if args.chip != EmuChip::Esp32C6
+        && (args.ota.ota_offer.is_some() || args.rom_up_flash.is_some())
+    {
+        bail!("--ota-offer and --rom-up-flash are the C6's: only its image is split");
+    }
     if args.chip == EmuChip::Esp32S3 {
         return super::run_s3::run_s3(&args, parse_duration_us(&args.timeout)?);
     }
@@ -165,16 +170,30 @@ fn run(args: RunArgs) -> Result<()> {
         })
         .seams(seams);
 
-    let image = match (args.elf.as_deref(), args.merged.as_deref()) {
-        (Some(elf), None) => Image::Elf(elf),
-        (None, Some(merged)) => Image::Merged(merged),
-        (Some(_), Some(_)) => unreachable!("clap's `image` group allows only one"),
-        (None, None) => bail!(
-            "nothing to run: pass --elf <fw-esp32c6> for a direct load, or --merged \
-             <chip.bin> to boot from the reset vector through the real ROM"
-        ),
-    };
-    builder = apply_image(builder, image, args.flash.as_deref())?;
+    if args.ota.ota_offer.is_some() && !args.host_link {
+        bail!("--ota-offer drives the update over the link this process hosts: add --host-link");
+    }
+    if let Some(chip) = args.rom_up_flash.as_deref() {
+        // `--rom-up-flash`: the reset vector out of a writable flash file,
+        // written back at the end (a power cut, when the run ends early).
+        check_file(chip, "--rom-up-flash")?;
+        if args.flash.is_some() {
+            bail!("--rom-up-flash is the chip's flash already; drop --flash");
+        }
+        builder = apply_image(builder, Image::RomUp, Some(chip))?.flash_len(whole_part_len(chip)?);
+    } else {
+        let image = match (args.elf.as_deref(), args.merged.as_deref()) {
+            (Some(elf), None) => Image::Elf(elf),
+            (None, Some(merged)) => Image::Merged(merged),
+            (Some(_), Some(_)) => unreachable!("clap's `image` group allows only one"),
+            (None, None) => bail!(
+                "nothing to run: pass --elf <fw-esp32c6> for a direct load, --merged \
+                 <chip.bin> to boot from the reset vector through the real ROM, or \
+                 --rom-up-flash <chip.bin> for the same boot over a chip that keeps its writes"
+            ),
+        };
+        builder = apply_image(builder, image, args.flash.as_deref())?;
+    }
     if let Some(text) = &args.mmu_page {
         let len = match text.to_ascii_lowercase().as_str() {
             "64k" => 0x1_0000,

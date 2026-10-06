@@ -32,6 +32,8 @@ use lpc_wire::{
     ClientMessage, LinkCounters, PortRead, TransportError, WireLinkPort, WireServerMessage,
 };
 
+use crate::commands::ota_host::OtaHost;
+
 /// Emulated microseconds per slice: the host services its link between
 /// slices, so this bounds its reaction time (the comms lab's own figure).
 pub const SLICE_US: u64 = 250;
@@ -344,6 +346,12 @@ pub struct EmuLinkHost<B: EmuUsbBoard> {
     /// How long a `receive` waits for an answer, in emulated seconds.
     pub answer_budget_s: f64,
     wall_deadline: Option<Instant>,
+    /// An over-the-air update this host drives on the link's channel 3
+    /// (`--ota-offer`).
+    pub ota: Option<OtaHost>,
+    /// `--ota-cut-after`'s request was answered: the run is to end here, as
+    /// a power cut (the flash written back).
+    pub ota_cut: bool,
 }
 
 impl<B: EmuUsbBoard> EmuLinkHost<B> {
@@ -367,6 +375,8 @@ impl<B: EmuUsbBoard> EmuLinkHost<B> {
             notes: Vec::new(),
             answer_budget_s: 60.0,
             wall_deadline: None,
+            ota: None,
+            ota_cut: false,
         }
     }
 
@@ -465,19 +475,64 @@ impl<B: EmuUsbBoard> EmuLinkHost<B> {
                     }
                     Err(_) => self.link_errors += 1,
                 },
-                PortRead::Log(_) | PortRead::Up { .. } => {}
-                PortRead::Reset { .. } => self.link_errors += 1,
+                PortRead::Log(_) => {}
+                PortRead::Up { .. } => {
+                    if let Some(ota) = self.ota.as_mut() {
+                        ota.link_up(now / 1_000);
+                    }
+                }
+                PortRead::Reset { .. } => {
+                    self.link_errors += 1;
+                    if let Some(ota) = self.ota.as_mut() {
+                        ota.link_down(now / 1_000);
+                    }
+                }
                 PortRead::Note(note) => self.notes.push(note),
             }
         }
+        self.service_ota(now);
         Ok(())
+    }
+
+    /// The update on channel 3: the board's messages in, the host's out,
+    /// and the host's lines onto the console.
+    fn service_ota(&mut self, now: u64) {
+        let Some(ota) = self.ota.as_mut() else {
+            return;
+        };
+        while let Some(message) = self.port.poll_update() {
+            ota.on_board(now / 1_000, &message);
+        }
+        ota.tick(now / 1_000);
+        while let Some(message) = ota.next_outgoing() {
+            match self.port.send_update(message) {
+                Ok(()) => ota.sent(),
+                // The send ring is full: it drains as frames go out.
+                Err(lpc_wire::lp_link::SendError::Full) => break,
+                Err(_) => {
+                    ota.sent();
+                    self.link_errors += 1;
+                }
+            }
+        }
+        let cut = ota.cut_due();
+        let lines = ota.take_lines();
+        // Push what was queued out now: a cut ends the run at this slice.
+        while let Some(frame) = self.port.poll_transmit(now) {
+            let frame = frame.to_vec();
+            self.board.push_usb_input(&frame);
+        }
+        for line in lines {
+            self.line(line);
+        }
+        self.ota_cut |= cut;
     }
 
     /// Step until the board has lived `until_us` emulated microseconds since
     /// power-on, or a new console line contains `exit_on`. `Ok(true)` is the
     /// match.
     pub fn run_until(&mut self, until_us: u64, exit_on: Option<&str>) -> Result<bool> {
-        while self.board.micros() < until_us {
+        while self.board.micros() < until_us && !self.ota_cut {
             let seen = self.console.len();
             self.step()?;
             if let Some(needle) = exit_on
@@ -499,7 +554,7 @@ impl<B: EmuUsbBoard> EmuLinkHost<B> {
             return Ok(Some(line.clone()));
         }
         let until = self.board.micros() + budget_us;
-        while self.board.micros() < until {
+        while self.board.micros() < until && !self.ota_cut {
             seen = seen.max(self.console.len());
             self.step()?;
             if let Some(line) = self.console[seen..].iter().find(|l| l.contains(needle)) {

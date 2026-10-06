@@ -285,6 +285,15 @@ the app through the same view model and presses the same actions. See
   `lp-base/lp-link/tests/plain_bytes_golden.rs`; a mismatch there is a wire
   change too, never a golden to re-capture. See
   `docs/adr/2026-10-01-network-link-security.md`.
+- **The exception: lp-link itself and channel 3 (over-the-air updates)
+  stay compatible once cores are fielded** (QY1, answered yes). A fielded
+  core can only be reached over them, so `plain_bytes_golden.rs` and
+  `update_channel_golden.rs` (both `lp-base/lp-link/tests/`) and
+  `lpc-update`'s `tests/v1_golden.hex` are **never-break** pins. A new
+  link feature is a SYN flag plus an extension an old end ignores; channel
+  3's messages change only by adding (unknown types answered `N`/`U`).
+  The JSON wire on channel 1 keeps the freedom above. See
+  `docs/adr/2026-10-06-ota-update-protocol.md`.
 
 ## Persisted-format compatibility (the wire rule does NOT apply here)
 

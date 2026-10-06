@@ -400,6 +400,7 @@ pub fn TapeTransport(
 
     let mounted_driver = driver.clone();
     let scrub_down_wired = scrub_wired.clone();
+    let scrub_down_driver = driver.clone();
     let scrub_move_wired = scrub_wired.clone();
     let scrub_up_wired = scrub_wired.clone();
     let scrub_move_driver = driver.clone();
@@ -429,8 +430,11 @@ pub fn TapeTransport(
                             return;
                         }
                         capture_field_pointer(&event);
-                        scrub_drag
-                            .set(Some((event.data().client_coordinates().x, staged_scrub)));
+                        // A re-grab while the last release still settles
+                        // starts from where the tape shows, not from the
+                        // staged value it has not caught up with.
+                        let from = scrub_down_driver.scrub_preview().unwrap_or(staged_scrub);
+                        scrub_drag.set(Some((event.data().client_coordinates().x, from)));
                     },
                     onpointermove: move |event| {
                         let mut last_sent = scrub_last_sent;
@@ -457,17 +461,22 @@ pub fn TapeTransport(
                         gesture.send(LpValue::F32(next));
                     },
                     onpointerup: move |_| {
+                        let was_dragging = scrub_drag().is_some();
                         scrub_drag.set(None);
                         // Flush the final position: the throttle may have
                         // swallowed the last few moves, and the release
-                        // must land exactly.
+                        // must land exactly. The driver keeps painting it
+                        // until an echo reports it back.
+                        if !was_dragging {
+                            return;
+                        }
                         if let (Some(next), Some(gesture)) = (
                             scrub_up_driver.scrub_preview(),
                             scrub_up_wired.clone(),
                         ) {
                             gesture.send(LpValue::F32(next));
                         }
-                        scrub_up_driver.set_scrub_drag(None);
+                        scrub_up_driver.release_scrub_drag();
                     },
                     onpointercancel: move |_| {
                         scrub_drag.set(None);

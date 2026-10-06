@@ -42,7 +42,7 @@ pub fn assemble(
 ) -> Result<AppImage> {
     if loader.len() as u32 > LOADER_MAX_LEN {
         bail!(
-            "loader is {} B; the boot records start {LOADER_MAX_LEN} B in",
+            "loader is {} B; the progress record starts {LOADER_MAX_LEN} B in",
             loader.len()
         );
     }

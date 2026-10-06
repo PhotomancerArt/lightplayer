@@ -12,3 +12,10 @@ dependencies = [
 [[package]]
 name = "lp-bootctl"
 version = "1.0.0"
+dependencies = [
+ "lp-crc32",
+]
+
+[[package]]
+name = "lp-crc32"
+version = "40.0.0"

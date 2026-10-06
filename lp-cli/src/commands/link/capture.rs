@@ -12,6 +12,11 @@
 //!
 //! `--request` ([`super::capture_requests`]) makes it the desk's way to ask a
 //! board something — a `reboot` above all — with nothing else on the port.
+//!
+//! `--ota-offer` ([`crate::commands::ota_host`]) drives an over-the-air update
+//! on the link's channel 3 with `lpa-update`'s driver. The board resets
+//! three times in an update and its USB port goes away each time, so with
+//! it a lost port is waited for and reopened rather than the end of the run.
 
 use std::io::Write;
 use std::time::{Duration, Instant};
@@ -23,12 +28,17 @@ use super::args::CaptureArgs;
 use super::capture_requests::CaptureRequests;
 use super::lab_port::{LabPort, TermiosMode};
 use crate::commands::emu::link_host::{console_lines, describe_link_counters, fresh_nonce};
+use crate::commands::ota_host::OtaHost;
 
 /// Host the link on `args.target` and write the console until the marker or
 /// the deadline.
 pub fn capture(args: &CaptureArgs) -> Result<()> {
     let mut requests = CaptureRequests::parse(&args.request)?;
-    let mut port = LabPort::open(&args.target, TermiosMode::Raw)?;
+    if args.ota.ota_cut_after.is_some() {
+        bail!("--ota-cut-after is `emu run`'s: on a board, cut the power with the hub");
+    }
+    let mut ota = OtaHost::from_args(&args.ota)?;
+    let mut port = Some(LabPort::open(&args.target, TermiosMode::Raw)?);
     // A CH340-bridged classic takes the UART preset, a C6 or S3 the USB one:
     // the vendor id the product's own serial host reads (a socket is `usb()`).
     let config = lpa_client::transport_serial::link_config_for_port(&args.target);
@@ -50,21 +60,57 @@ pub fn capture(args: &CaptureArgs) -> Result<()> {
     );
     'run: while clock.elapsed() < deadline {
         let now = clock.elapsed().as_micros() as u64;
-        let n = port
-            .read(&mut buf)
-            .with_context(|| format!("reading {}", args.target))?;
+        // A board that resets drops its USB port: with an update running,
+        // wait for it to come back instead of ending the capture.
+        let Some(p) = port.as_mut() else {
+            std::thread::sleep(Duration::from_millis(100));
+            if let Ok(p) = LabPort::open(&args.target, TermiosMode::Raw) {
+                eprintln!(
+                    "link capture: port back at {:.3} s",
+                    clock.elapsed().as_secs_f64()
+                );
+                port = Some(p);
+            }
+            continue;
+        };
+        let n = match p.read(&mut buf) {
+            Ok(n) => n,
+            Err(error) if ota.is_some() => {
+                eprintln!(
+                    "link capture: port lost ({error}) at {:.3} s",
+                    clock.elapsed().as_secs_f64()
+                );
+                port = None;
+                continue;
+            }
+            Err(error) => return Err(error).with_context(|| format!("reading {}", args.target)),
+        };
         if n > 0 {
             link.on_bytes(now, &buf[..n]);
         }
+        let mut lost = false;
         while let Some(frame) = link.poll_transmit(now) {
             let frame = frame.to_vec();
-            port.write_all(&frame)
-                .with_context(|| format!("writing {}", args.target))?;
+            if let Err(error) = p.write_all(&frame) {
+                if ota.is_none() {
+                    return Err(error).with_context(|| format!("writing {}", args.target));
+                }
+                lost = true;
+                break;
+            }
         }
+        if lost {
+            port = None;
+            continue;
+        }
+        let now_ms = now / 1_000;
         while let Some(read) = link.poll_read() {
             match &read {
                 PortRead::Up { generation } => {
                     requests.on_session_change();
+                    if let Some(ota) = ota.as_mut() {
+                        ota.link_up(now_ms);
+                    }
                     eprintln!(
                         "link capture: up (session {generation}) at {:.3} s, board nonce {}",
                         clock.elapsed().as_secs_f64(),
@@ -75,6 +121,9 @@ pub fn capture(args: &CaptureArgs) -> Result<()> {
                 }
                 PortRead::Reset { reason } => {
                     requests.on_session_change();
+                    if let Some(ota) = ota.as_mut() {
+                        ota.link_down(now_ms);
+                    }
                     eprintln!(
                         "link capture: reset ({reason:?}) at {:.3} s",
                         clock.elapsed().as_secs_f64()
@@ -84,6 +133,33 @@ pub fn capture(args: &CaptureArgs) -> Result<()> {
             }
             for line in console_lines(&read) {
                 requests.on_line(&line);
+                writeln!(console, "{line}")?;
+                lines += 1;
+                if args
+                    .exit_on
+                    .as_deref()
+                    .is_some_and(|needle| line.contains(needle))
+                {
+                    matched = true;
+                    break 'run;
+                }
+            }
+        }
+        if let Some(ota) = ota.as_mut() {
+            while let Some(message) = link.poll_update() {
+                ota.on_board(now_ms, &message);
+            }
+            ota.tick(now_ms);
+            while let Some(message) = ota.next_outgoing() {
+                match link.send_update(message) {
+                    Ok(()) => ota.sent(),
+                    // The send ring is full: it drains as frames go out.
+                    Err(lp_link::SendError::Full) => break,
+                    Err(error) => bail!("the link refused an update message: {error:?}"),
+                }
+            }
+            for line in ota.take_lines() {
+                eprintln!("link capture: {line}");
                 writeln!(console, "{line}")?;
                 lines += 1;
                 if args
@@ -126,6 +202,9 @@ pub fn capture(args: &CaptureArgs) -> Result<()> {
     );
     if let Some(summary) = requests.describe() {
         eprintln!("link capture: {summary}");
+    }
+    if let Some(ota) = &ota {
+        eprintln!("link capture: ota — {}", ota.summary());
     }
     if let Some(why) = requests.unfinished() {
         bail!("{why}");

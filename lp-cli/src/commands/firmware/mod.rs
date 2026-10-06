@@ -6,7 +6,7 @@ pub mod distribution_manifest;
 pub mod list;
 mod ota_files;
 #[cfg(test)]
-mod ota_fixture;
+pub(crate) mod ota_fixture;
 pub mod package;
 mod release_assets;
 mod release_check;
