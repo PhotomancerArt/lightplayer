@@ -489,7 +489,7 @@ fn handle_load_project(
             // a reboot.
             let mut restored = Vec::new();
             if project_manager.list_loaded_projects().is_empty() {
-                for stopped in project_manager.take_stopped() {
+                if let Some(stopped) = project_manager.take_stopped() {
                     match project_manager.load_project(
                         stopped.as_path(),
                         base_fs,
