@@ -12,7 +12,9 @@
 //! (an emulated C6, a board over BLE), the longer the window.
 //!
 //! [`GestureHold`] is the widget-local fix, the same posture the knob's
-//! drag preview already took: while a gesture is live, and after it ends
+//! drag preview already took (the fader, the knob, the slot slider, the XY
+//! pad and the palette cycle's Step slider all use it; the clock tape's scrub
+//! does the same thing inside its paint driver, with [`caught_up`]): while a gesture is live, and after it ends
 //! until the view reports the value the hand wrote, the control shows the
 //! held value instead of the snapshot. Display only — every write still goes
 //! through the control's normal dispatch, and probe truth wins again the
@@ -34,20 +36,53 @@ pub(crate) const GESTURE_HOLD_MS: u32 = 3_000;
 /// arrives as 0.71; half a quantum plus float slack covers that.
 const CAUGHT_UP_TOLERANCE: f32 = 0.006;
 
+/// A value a gesture can hold: one number, or the XY pad's pair.
+pub(crate) trait HeldValue: Copy + PartialEq + 'static {
+    /// Whether `reported` is this value come back (see [`caught_up`]).
+    fn caught_up(self, reported: Self) -> bool;
+}
+
+impl HeldValue for f32 {
+    fn caught_up(self, reported: Self) -> bool {
+        caught_up(self, reported)
+    }
+}
+
+impl HeldValue for [f32; 2] {
+    fn caught_up(self, reported: Self) -> bool {
+        caught_up(self[0], reported[0]) && caught_up(self[1], reported[1])
+    }
+}
+
+/// Whether a reported number is the held one come back, within the live
+/// readings' quantum.
+pub(crate) fn caught_up(held: f32, reported: f32) -> bool {
+    (held - reported).abs() <= CAUGHT_UP_TOLERANCE
+}
+
 /// One control's held gesture value.
-#[derive(Clone, Copy)]
-pub(crate) struct GestureHold {
-    held: Signal<Option<f32>>,
+pub(crate) struct GestureHold<T: HeldValue = f32> {
+    held: Signal<Option<T>>,
     /// A pointer is down on the control: the hold stays even when a
     /// snapshot happens to agree, because the next one may not.
     pressing: Signal<bool>,
     generation: Signal<u64>,
 }
 
-impl GestureHold {
+// Manual: a derive would demand `T: Clone`/`Copy` of the signals' bound,
+// which the trait already carries.
+impl<T: HeldValue> Clone for GestureHold<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T: HeldValue> Copy for GestureHold<T> {}
+
+impl<T: HeldValue> GestureHold<T> {
     /// What the control shows: the held value while it is still ahead of
     /// `reported` (the snapshot's value), else `reported`.
-    pub(crate) fn shown(&self, reported: f32) -> f32 {
+    pub(crate) fn shown(&self, reported: T) -> T {
         held_or_reported((self.held)(), (self.pressing)(), reported)
     }
 
@@ -58,12 +93,12 @@ impl GestureHold {
 
     /// The value this gesture holds, read live (an event handler can run
     /// before the render that the last [`Self::write`] scheduled).
-    pub(crate) fn held(&self) -> Option<f32> {
+    pub(crate) fn held(&self) -> Option<T> {
         *self.held.peek()
     }
 
     /// The gesture wrote `value`: hold it, and restart the fallback window.
-    pub(crate) fn write(&mut self, value: f32) {
+    pub(crate) fn write(&mut self, value: T) {
         self.held.set(Some(value));
         self.arm_expiry();
     }
@@ -71,7 +106,7 @@ impl GestureHold {
     /// The pointer came up (or was cancelled). The held value stays until
     /// the view catches up or the fallback window ends — unless `reported`
     /// already has: then nothing is left to bridge.
-    pub(crate) fn release(&mut self, reported: f32) {
+    pub(crate) fn release(&mut self, reported: T) {
         if releases(*self.held.peek(), false, reported) {
             self.clear();
             return;
@@ -104,8 +139,8 @@ impl GestureHold {
 /// gives the control; when it catches up with the held value after the
 /// pointer is up, the hold lets go, so a later change from anywhere else
 /// shows through at once.
-pub(crate) fn use_gesture_hold(reported: f32) -> GestureHold {
-    let held = use_signal(|| None::<f32>);
+pub(crate) fn use_gesture_hold<T: HeldValue>(reported: T) -> GestureHold<T> {
+    let held = use_signal(|| None::<T>);
     let pressing = use_signal(|| false);
     let generation = use_signal(|| 0_u64);
     let mut hold = GestureHold {
@@ -122,21 +157,17 @@ pub(crate) fn use_gesture_hold(reported: f32) -> GestureHold {
 }
 
 /// The pure rule behind [`GestureHold::shown`].
-fn held_or_reported(held: Option<f32>, pressing: bool, reported: f32) -> f32 {
+fn held_or_reported<T: HeldValue>(held: Option<T>, pressing: bool, reported: T) -> T {
     match held {
-        Some(held) if pressing || !caught_up(held, reported) => held,
+        Some(held) if pressing || !held.caught_up(reported) => held,
         _ => reported,
     }
 }
 
 /// Whether the hold should let go: the pointer is up and the view now
 /// reports the held value.
-fn releases(held: Option<f32>, pressing: bool, reported: f32) -> bool {
-    held.is_some_and(|held| !pressing && caught_up(held, reported))
-}
-
-fn caught_up(held: f32, reported: f32) -> bool {
-    (held - reported).abs() <= CAUGHT_UP_TOLERANCE
+fn releases<T: HeldValue>(held: Option<T>, pressing: bool, reported: T) -> bool {
+    held.is_some_and(|held| !pressing && held.caught_up(reported))
 }
 
 #[cfg(test)]
@@ -167,8 +198,18 @@ mod tests {
     }
 
     #[test]
+    fn a_pair_is_caught_up_only_when_both_halves_are() {
+        // The XY pad: one axis back, the other still in flight.
+        assert_eq!(
+            held_or_reported(Some([0.4, 0.8]), false, [0.4, 0.5]),
+            [0.4, 0.8]
+        );
+        assert!(releases(Some([0.4, 0.8]), false, [0.401, 0.799]));
+    }
+
+    #[test]
     fn with_nothing_held_the_snapshot_shows() {
-        assert_eq!(held_or_reported(None, false, 0.3), 0.3);
-        assert!(!releases(None, false, 0.3));
+        assert_eq!(held_or_reported(None, false, 0.3_f32), 0.3);
+        assert!(!releases(None, false, 0.3_f32));
     }
 }

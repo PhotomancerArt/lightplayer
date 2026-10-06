@@ -25,6 +25,6 @@ pub mod update_window;
 
 pub use access_rule::{AccessFacts, CORE_INSTALL_FOLLOWS_OPEN_TO, Operation, may};
 pub use board_link::{LinkId, LinkTrust};
-pub use board_session::BoardSession;
+pub use board_session::{BoardSession, TransferProgress};
 pub use session_output::{Effect, OWNER_QUIET_MS, Outgoing, SessionConfig};
 pub use update_target::{BoardFacts, EngineStatus, FlashFault, SessionMode, UpdateTarget};

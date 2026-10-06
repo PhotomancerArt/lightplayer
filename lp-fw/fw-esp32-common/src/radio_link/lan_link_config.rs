@@ -79,6 +79,17 @@ mod tests {
         assert!(board < preset, "board {board} B vs preset {preset} B");
     }
 
+    /// The update channel is reliable on the board's cut, as on the host's
+    /// `ws()` (lp-link's `update_channel_golden.rs`): both ends agree on
+    /// the mask, and a Wi-Fi update (OTA M8) can ride channel 3. Nothing
+    /// serves channel 3 on a LAN link yet; the mux ignores it.
+    #[test]
+    fn the_update_channel_is_reliable_on_the_boards_cut() {
+        let cfg = lan_link_config();
+        assert!(cfg.is_reliable(lp_link::CH_UPDATE));
+        assert_eq!(cfg.reliable_channels, LinkConfig::ws().reliable_channels);
+    }
+
     #[test]
     fn a_frame_fits_the_endpoints_buffers() {
         let cfg = lan_link_config();

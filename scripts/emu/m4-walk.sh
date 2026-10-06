@@ -5,6 +5,7 @@
 #   scripts/emu/m4-walk.sh --chip esp32s3      # `just walk-esp32s3-emu`
 #   scripts/emu/m4-walk.sh --keep              # leave the artefacts behind
 #   scripts/emu/m4-walk.sh --monolith          # the C6's unsplit dev image
+#   scripts/emu/m4-walk.sh --after-update      # the C6 split, walked after an OTA update
 #
 # TWO chips, one script (M6 P10). Both have a native USB-Serial-JTAG link, the
 # same generation of RMT, and a board whose `D10` pad is the one
@@ -101,13 +102,15 @@ PROJECT="${PROJECT:-projects/test/shader-oracle}"
 CHIP="${LP_WALK_CHIP:-esp32c6}"
 keep=0
 monolith=0
+after_update=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --monolith) monolith=1; shift ;;
+        --after-update) after_update=1; shift ;;
         --chip) CHIP="${2:?--chip needs a value: esp32c6 or esp32s3}"; shift 2 ;;
         --chip=*) CHIP="${1#*=}"; shift ;;
         --keep) keep=1; shift ;;
-        -h|--help) sed -n '2,6p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '2,7p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "unknown option: $1" >&2; exit 2 ;;
     esac
 done
@@ -204,6 +207,16 @@ esp32c6)
             --target riscv32imac-unknown-none-elf --profile release-esp32 \
             --features esp32c6,frame-dump )
         built="$REPO/target/riscv32imac-unknown-none-elf/release-esp32/fw-esp32c6"
+    elif [[ "$after_update" == 1 ]]; then
+        # Two builds of this tree, the walk's features, two versions, each
+        # packaged with its OTA files: X is flashed, Y arrives over the
+        # air (OTA plan Part B, P09 — "the walk passes afterwards"). The
+        # readout check and the symbol table are Y's, the image that runs.
+        echo "==> building X and Y: the fw-esp32c6 SPLIT image (esp32c6,server,radio + frame-dump), twice"
+        scripts/ota/build-image.sh "$OUT/x" "${LP_WALK_X_VERSION:-a0a0a0a0}" esp32c6,frame-dump
+        scripts/ota/build-image.sh "$OUT/y" "${LP_WALK_Y_VERSION:-b1b1b1b1}" esp32c6,frame-dump
+        split_dir="$REPO/target/fw-split/esp32c6-4mb"
+        built="$split_dir/p2.elf"
     else
         # The defaults (server, radio) stay on, as on the monolith's line.
         echo "==> building the fw-esp32c6 SPLIT image (esp32c6,server,radio + frame-dump)"
@@ -254,6 +267,14 @@ if [[ -n "$split_dir" ]]; then
     # artefacts are its own.
     cp "$split_dir/merged.bin" "$OUT/merged.bin"
     cp "$split_dir/loader.elf" "$OUT/loader.elf"
+    if [[ "$after_update" == 1 ]]; then
+        # The chip starts as X, as flashed; Y is what the update brings.
+        cp "$OUT/x/merged.bin" "$OUT/merged.bin"
+    fi
+fi
+if [[ "$after_update" == 1 && ( "$CHIP" != esp32c6 || -z "$split_dir" || "$BOOT" != rom-up ) ]]; then
+    echo "--after-update is the C6 split image's, booted rom-up" >&2
+    exit 2
 fi
 case "$BOOT" in
     rom-up)
@@ -298,6 +319,28 @@ esac
 echo "==> building lp-cli (release — the emulator's own interpreter loop)"
 cargo build --quiet --release -p lp-cli
 cli="$REPO/target/release/lp-cli"
+
+if [[ "$after_update" == 1 ]]; then
+    # The update itself, on a flash FILE the walk then boots: the run below
+    # boots what this one left (`--rom-up-flash` writes the chip back).
+    cp "$OUT/merged.bin" "$OUT/updated.flash"
+    echo
+    echo "===== THE UPDATE ====="
+    echo "==> lp-cli emu run: X as flashed, Y offered over the update channel"
+    "$cli" emu run --rom-up-flash "$OUT/updated.flash" --host-link --reboot-on-reset \
+        --ota-offer "$OUT/y/ota" --exit-on "[host-ota] done" \
+        --timeout 300s --wall-timeout "$WALL" --console "$OUT/update.console.txt" \
+        >"$OUT/update.stdout" 2>"$OUT/update.stderr" || true
+    grep -a "^emu: ota" "$OUT/update.stderr" || true
+    if ! grep -qa "^emu: ota.*ended UpToDate" "$OUT/update.stderr"; then
+        echo "FAIL: the update did not end with Y running (UpToDate)." >&2
+        tail -20 "$OUT/update.stderr" >&2
+        exit 1
+    fi
+    y_build="$(jq -r '.buildId' "$OUT/y/split.json")"
+    echo "update: OK — the chip now holds $y_build"
+    boot_args=(--rom-up-flash "$OUT/updated.flash")
+fi
 
 # ---------------------------------------------------- the machine, listening
 cleanup() {

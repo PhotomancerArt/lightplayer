@@ -87,6 +87,8 @@ lpc_model::lp_embed_manifest_core! {
         ),
     ],
     limits_json: concat!("{\"flashAppBytes\":", env!("LP_FLASH_APP_BYTES"), "}"),
+    // A single image: no update over a link.
+    ota_layout: 0,
 }
 
 mod board;

@@ -247,6 +247,16 @@ class VirtualBluetooth extends EventTarget {
     if (gatt) gatt.connected = false;
   }
 
+  /// The board walks out of range with the radio link still up (the desk
+  /// walk of #880): no GATT drop, no event, `gatt.connected` stays true, and
+  /// nothing gets through — the page's writes go into the air and the
+  /// board's frames are never notified — until `quiet(boardId, false)`.
+  /// Both ends' lp-links notice on their own (a stall, then their retries);
+  /// nothing is done to either.
+  quiet(boardId, on = true) {
+    this.deviceFor(boardId).gatt.quiet = Boolean(on);
+  }
+
   /// The next `connect()` for this board never settles (Chrome, Run B).
   hangNextConnect(boardId) {
     this.deviceFor(boardId).gatt.hangNext = true;
@@ -290,6 +300,8 @@ class VirtualGattServer {
     this.emulator = null;
     this.service = new VirtualNusService(this);
     this.hangNext = false;
+    // Out of range with the link up (`VirtualBluetooth.quiet`).
+    this.quiet = false;
     this.offBytes = null;
     this.offError = null;
     this.unauthTimer = null;
@@ -482,7 +494,10 @@ class VirtualRxCharacteristic {
         `a ${frame.length}-byte write is an ATT long write, which the board refuses`,
       );
     }
-    gatt.writeFrame(frame);
+    // Out of range, the write still goes on the air; nothing hears it.
+    if (!gatt.quiet) {
+      gatt.writeFrame(frame);
+    }
     gatt.stats.writes += 1;
     gatt.stats.written += frame.length;
     gatt.stats.largestWrite = Math.max(gatt.stats.largestWrite, frame.length);
@@ -511,7 +526,8 @@ class VirtualTxCharacteristic extends EventTarget {
   /// 180 B of payload here (the smaller SYN wins), so every one fits an ATT
   /// value.
   deliver(frame) {
-    if (!this.notifying) {
+    // Out of range, the board's frame never reaches the page.
+    if (!this.notifying || this.gatt.quiet) {
       return;
     }
     const data = toBytes(frame).slice();

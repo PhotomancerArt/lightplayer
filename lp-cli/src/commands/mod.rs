@@ -5,6 +5,7 @@ pub mod firmware;
 pub mod fwcheck;
 pub mod hardware;
 pub mod link;
+pub mod ota_host;
 pub mod pattern;
 pub mod profile;
 pub mod project;

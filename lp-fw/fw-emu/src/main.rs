@@ -54,6 +54,8 @@ lpc_model::lp_embed_manifest_core! {
         lpc_model::manifest::feature_fragment(true, lpc_model::LpFeature::GfxLpvm),
     ],
     limits_json: "{}",
+    // A single image: no update over a link.
+    ota_layout: 0,
 }
 
 /// Main entry point for firmware emulator

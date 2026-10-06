@@ -12,6 +12,9 @@
 //! twin — state their result as "192 of 192 bytes" instead of "it lit up".
 
 pub mod rmt;
+// A split image only: its core lights the strip the engine records.
+#[cfg(all(lp_split, not(fw_harness), feature = "lpc-hardware"))]
+pub mod status_light_note;
 
 #[cfg(not(fw_harness))]
 pub use fw_esp32_common::output::provider::Esp32OutputProvider;

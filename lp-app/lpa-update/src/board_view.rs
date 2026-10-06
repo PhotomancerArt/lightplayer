@@ -47,6 +47,15 @@ impl BoardView {
         }
     }
 
+    /// From a hello's `firmware` block (wire proto 38): the same manifest
+    /// as `M`, or [`Self::absent`] when the hello has none (a single image,
+    /// E9). A convenience: channel 3's `M` stays authoritative (DM9), and a
+    /// driver always asks `Q` on its link.
+    #[must_use]
+    pub fn from_hello_firmware(firmware: Option<BoardManifest>) -> Self {
+        firmware.map_or_else(Self::absent, Self::from_manifest)
+    }
+
     /// Whether this board can take an update over a link: a split layout
     /// this host knows and a chip in the code table.
     #[must_use]
@@ -108,5 +117,16 @@ impl BoardView {
     #[must_use]
     pub fn refused_build(&self) -> Option<u32> {
         self.manifest.as_ref()?.refused_build
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_hello_without_firmware_is_a_board_that_said_nothing() {
+        assert_eq!(BoardView::from_hello_firmware(None), BoardView::absent());
+        assert!(!BoardView::from_hello_firmware(None).can_update_over_link());
     }
 }

@@ -250,6 +250,7 @@ fn link_capture_hosts_a_lan_link_and_writes_its_console() {
         seconds: 20,
         json_replies: true,
         request: Vec::new(),
+        ota: Default::default(),
     })
     .expect("the capture reached a heartbeat");
     let text = std::fs::read_to_string(&console).unwrap();

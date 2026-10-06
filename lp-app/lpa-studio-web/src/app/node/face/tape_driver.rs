@@ -36,6 +36,7 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen::closure::Closure;
 
 use super::tape_transport::{format_clock, tape_px_per_sec, tape_tick_pair};
+use crate::app::node::gesture_hold::{GESTURE_HOLD_MS, caught_up};
 
 /// The last transport block that landed, and when — the extrapolation
 /// anchor (the DTO is the change fingerprint).
@@ -64,6 +65,13 @@ struct DriverInner {
     /// `t + (preview − staged)` so the strip follows the pointer exactly
     /// while the throttled write stream catches up through the DTO.
     scrub_preview: Cell<Option<f32>>,
+    /// Set while a RELEASED scrub settles: the preview outlives the drag
+    /// until an echo reports it (or this `performance.now()` deadline
+    /// passes), because the first echoes after the release still carry
+    /// positions the finger left — re-anchoring on one painted the tape
+    /// back there, then forward again ("jumps back before taking"; the
+    /// `gesture_hold` rule, applied to the paint).
+    settle_until_ms: Cell<Option<f64>>,
     /// Last digits string written, so the `textContent` write only happens
     /// when the display actually changes (once a second at rest).
     last_digits: RefCell<String>,
@@ -129,6 +137,7 @@ impl TapeTransportDriver {
             frozen: Cell::new(None),
             dragging: Cell::new(false),
             scrub_preview: Cell::new(None),
+            settle_until_ms: Cell::new(None),
             last_digits: RefCell::new(String::new()),
             last_offlive: RefCell::new(String::new()),
             resize: RefCell::new(None),
@@ -205,6 +214,17 @@ impl TapeTransportDriver {
             inner.schedule();
             return;
         }
+        // A settling release keeps its preview until an echo reports it.
+        // The re-anchor below still happens — rate and run/pause changes
+        // must land — and `paint` keeps correcting the stale scrub by the
+        // preview's delta against whatever block is anchored.
+        if inner
+            .scrub_preview
+            .get()
+            .is_some_and(|preview| caught_up(preview, transport.scrub_offset_seconds))
+        {
+            inner.end_settle();
+        }
         let changed = {
             let mut anchor = inner.anchor.borrow_mut();
             match anchor.as_ref() {
@@ -271,10 +291,30 @@ impl TapeTransportDriver {
         }
         inner.dragging.set(preview.is_some());
         inner.scrub_preview.set(preview);
+        inner.settle_until_ms.set(None);
         inner.paint(inner.performance.now());
     }
 
-    /// The scrub value under the finger, when a drag is live.
+    /// The finger came up: the drag ends, but its last position keeps
+    /// painting until an echo reports it or [`GESTURE_HOLD_MS`] passes (see
+    /// `DriverInner::settle_until_ms`). Pair with flushing that position.
+    pub(crate) fn release_scrub_drag(&self) {
+        let Some(inner) = &self.inner else {
+            return;
+        };
+        let now = inner.performance.now();
+        inner.dragging.set(false);
+        inner.settle_until_ms.set(
+            inner
+                .scrub_preview
+                .get()
+                .map(|_| now + f64::from(GESTURE_HOLD_MS)),
+        );
+        inner.paint(now);
+    }
+
+    /// The scrub value under the finger, while a drag is live or its
+    /// release is settling.
     pub(crate) fn scrub_preview(&self) -> Option<f32> {
         self.inner
             .as_ref()
@@ -303,6 +343,13 @@ const RULER_BAND_PX: f64 = 26.0;
 const RULER_LABEL_PX: f64 = 32.0;
 
 impl DriverInner {
+    /// A settling release is over: drop its preview.
+    fn end_settle(&self) {
+        if self.settle_until_ms.take().is_some() {
+            self.scrub_preview.set(None);
+        }
+    }
+
     /// Schedule the next frame while an anchor is live; quietly stops the
     /// loop when a paint has discovered it lives inside the story page's
     /// capture box (the flag comes from the paints themselves — a
@@ -328,6 +375,15 @@ impl DriverInner {
     /// Quietly does nothing when no anchor has landed or the canvas is not
     /// in the DOM yet — the mount hook and the next frame both retry.
     fn paint(&self, now_ms: f64) {
+        if self
+            .settle_until_ms
+            .get()
+            .is_some_and(|until| now_ms > until)
+        {
+            // No echo ever reported the release (a refused or clamped
+            // write): probe truth shows through.
+            self.end_settle();
+        }
         let Some(anchored_at_ms) = self.anchor.borrow().as_ref().map(|a| a.anchored_at_ms) else {
             return;
         };
