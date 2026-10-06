@@ -21,7 +21,9 @@
 //! Automatic tries are spent once per device, not once per connect: a board
 //! that refused them will refuse them again, and burning its backoff on
 //! every silent reconnect would lock out the password the user is about to
-//! type. A user gesture (a typed password, "Unlock") re-arms it.
+//! type. A user gesture (a typed password, "Unlock") re-arms it, and so
+//! does any grant: what unlocked the board once (a held key, or a typed
+//! password now remembered) is what the next window reaches for.
 //!
 //! An **open** device grants play with no login; it is connected at play and
 //! never prompted until an edit is refused (`NotPermitted { needs: Edit }`),
@@ -403,6 +405,16 @@ impl AccessSession {
                 if was_typed {
                     self.typed = None;
                 }
+                // A grant re-arms the automatic tries, whatever unlocked it.
+                // The first unlock of a board this browser holds no key for
+                // is a typed password (the automatic try came up empty and
+                // was spent); the password is remembered now, and the NEXT
+                // window — a board that restarted, a dropped link — must
+                // reach for it by itself. Left spent, every later window
+                // showed the sheet and the board dropped each link at its
+                // 10 s deadline (defect
+                // 2026-10-06-a-typed-unlock-is-not-tried-again-after-a-drop).
+                self.auto_spent = false;
                 if same_window {
                     self.phase_window = Some(window);
                     self.phase = AccessPhase::Granted {
@@ -572,6 +584,65 @@ mod tests {
         );
         assert_eq!(session.prompt, None);
         assert_eq!(session.next_step(Millis(40), &held, &[]), None);
+    }
+
+    /// PR #880's silicon re-check (2026-10-06): the first unlock of a board
+    /// this browser holds no key for is a typed password, after the
+    /// automatic try came up empty and was spent. The password is
+    /// remembered, and the next window (the board restarted) must be
+    /// unlocked with it by itself, not left to the sheet while the board
+    /// drops the link at its deadline.
+    #[test]
+    fn a_reconnect_after_a_typed_unlock_tries_the_remembered_password() {
+        let mut session = AccessSession::default();
+        let held = [held_key()];
+        let first = window(1, 10);
+        session.observe(Some(first));
+        session.started(&AccessStep::Check(first));
+        session.checked(first, true, None, true);
+        let step = session.next_step(Millis(20), &held, &[]).unwrap();
+        session.started(&step);
+        session.logged_in(
+            first,
+            &LoginAttemptOutcome::NothingMatched {
+                challenge: Challenge {
+                    nonce: [2; 32],
+                    offers: Vec::new(),
+                },
+            },
+            false,
+            Millis(30),
+        );
+        assert!(session.auto_spent, "the empty automatic try is spent");
+        session.type_password(TypedPassword {
+            password: "lab".to_string(),
+            remember: true,
+        });
+        let step = session.next_step(Millis(40), &held, &[]).unwrap();
+        session.started(&step);
+        session.logged_in(first, &granted_edit(), true, Millis(50));
+        assert!(!session.auto_spent, "a grant re-arms the automatic tries");
+
+        // The board restarts: the link goes, a new one says hello.
+        session.observe(None);
+        let second = window(2, 900);
+        session.observe(Some(second));
+        let step = session.next_step(Millis(900), &held, &["lab"]).unwrap();
+        assert_eq!(step, AccessStep::Check(second));
+        session.started(&step);
+        session.checked(second, true, None, true);
+        assert_eq!(session.prompt, None, "no sheet");
+        assert_eq!(
+            session.next_step(Millis(910), &held, &["lab"]),
+            Some(AccessStep::Login {
+                window: second,
+                held: held.to_vec(),
+                passwords: vec!["lab".to_string()],
+                typed: None,
+                challenge: None,
+            }),
+            "the remembered password is tried on the new link"
+        );
     }
 
     /// Bluefy, 2026-10-02: a silent reconnect after a held key had unlocked
