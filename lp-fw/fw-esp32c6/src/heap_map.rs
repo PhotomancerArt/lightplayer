@@ -17,11 +17,12 @@
 //! recorded holes, inside each region's bounds, is live (or a hole smaller
 //! than [`MIN_HOLE`]).
 //!
-//! With `heap_track_diag` as well, every main-region allocation at or above
-//! offset `LP_HEAP_TRACK_FROM` (build time) is remembered with its
-//! frame-pointer backtrace while it is live, and the map prints the live ones
-//! once they are few (after a project stops) — `addr2line` on the ELF names
-//! the allocator.
+//! With `heap_track_diag` as well, every allocation in the main region or
+//! `dram2_seg` made after [`arm_tracking`] (the station arms it when it
+//! joins) is remembered with its frame-pointer backtrace while it is live,
+//! and the map prints the live ones once they are few (after a project
+//! stops) — `addr2line` on the ELF names the allocator. The table lives in
+//! LP SRAM, so the heap's layout is the shipped image's.
 
 use core::alloc::Layout;
 use core::sync::atomic::{AtomicU32, Ordering};
@@ -147,17 +148,29 @@ fn largest_fit() -> usize {
     fits
 }
 
-/// Allocation tracking over the upper part of the main region
-/// (`heap_track_diag`): every allocation at or above main-region offset
-/// `LP_HEAP_TRACK_FROM` (decimal; default 90,000) is remembered with its
-/// backtrace while it lives. The table sits in the reclaimed bootloader
-/// segment (this build gives the heap only 16 KiB of it), so it costs the
-/// main stack nothing.
+
+/// Arm allocation tracking (`heap_track_diag`) from now on: forget what was
+/// recorded and record every heap allocation made after this call, in the
+/// main region and `dram2_seg`, while it lives. A no-op without the feature.
+/// The station calls it when it joins, so what the network allocates while a
+/// project runs (and what outlives the project) is what the table holds.
+pub fn arm_tracking(why: &str) {
+    #[cfg(feature = "heap_track_diag")]
+    track::arm(why);
+    #[cfg(not(feature = "heap_track_diag"))]
+    let _ = why;
+}
+
+/// Allocation tracking (`heap_track_diag`): once [`arm_tracking`] has run,
+/// every allocation in the main region or `dram2_seg` is remembered with its
+/// backtrace while it lives. The table sits in LP SRAM (`rtc_fast`), which the
+/// firmware barely uses, so the build's heap layout is the shipped one: the
+/// regions keep their sizes and their addresses.
 #[cfg(feature = "heap_track_diag")]
 mod track {
-    use core::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
+    use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
-    const SLOTS: usize = 1_200;
+    const SLOTS: usize = 300;
     const FRAMES: usize = 8;
     /// Frames to skip: the hook itself and `EspHeap::alloc_caps`.
     const SKIP: usize = 2;
@@ -169,36 +182,46 @@ mod track {
         frames: [u32; FRAMES],
     }
 
-    #[esp_hal::ram(reclaimed)]
-    static mut TABLE: core::mem::MaybeUninit<[Entry; SLOTS]> = core::mem::MaybeUninit::uninit();
-    static READY: AtomicBool = AtomicBool::new(false);
+    const EMPTY: Entry = Entry {
+        addr: 0,
+        size: 0,
+        frames: [0; FRAMES],
+    };
+
+    #[esp_hal::ram(unstable(rtc_fast))]
+    static mut TABLE: [Entry; SLOTS] = [EMPTY; SLOTS];
+    static ARMED: AtomicBool = AtomicBool::new(false);
     static PAUSED: AtomicBool = AtomicBool::new(false);
     static OVERFLOW: AtomicU32 = AtomicU32::new(0);
-    static FROM: AtomicUsize = AtomicUsize::new(0);
 
     fn table(_cs: critical_section::CriticalSection<'_>) -> &'static mut [Entry; SLOTS] {
         // SAFETY: only ever reached inside a critical section (the token), so
-        // there is one borrow at a time; zeroed on first use (reclaimed RAM
-        // is not initialised).
-        unsafe {
-            let t = &mut *core::ptr::addr_of_mut!(TABLE);
-            if !READY.load(Ordering::Relaxed) {
-                core::ptr::write_bytes(t.as_mut_ptr(), 0, 1);
-                READY.store(true, Ordering::Relaxed);
-                let off = option_env!("LP_HEAP_TRACK_FROM")
-                    .and_then(|s| s.parse::<usize>().ok())
-                    .unwrap_or(90_000);
-                FROM.store(
-                    crate::board::esp32c6::init::heap_regions()[0].0 + off,
-                    Ordering::Relaxed,
-                );
+        // there is one borrow at a time.
+        unsafe { &mut *core::ptr::addr_of_mut!(TABLE) }
+    }
+
+    pub fn arm(why: &str) {
+        critical_section::with(|cs| {
+            // Slot by slot: a whole-array assignment would build its 12 KB
+            // on the caller's stack (the net thread has 8 KB).
+            for slot in table(cs).iter_mut() {
+                *slot = EMPTY;
             }
-            t.assume_init_mut()
-        }
+            OVERFLOW.store(0, Ordering::Relaxed);
+            ARMED.store(true, Ordering::Relaxed);
+        });
+        log::info!("[heaptrack] armed: {why}");
     }
 
     pub fn pause(on: bool) {
         PAUSED.store(on, Ordering::Relaxed);
+    }
+
+    fn tracked(ptr: usize) -> bool {
+        let regions = crate::board::esp32c6::init::heap_regions();
+        regions[..2]
+            .iter()
+            .any(|(start, size)| ptr >= *start && ptr < start + size)
     }
 
     #[unsafe(no_mangle)]
@@ -208,60 +231,54 @@ mod track {
         ptr: usize,
         size: usize,
     ) {
-        if PAUSED.load(Ordering::Relaxed) || ptr == 0 {
+        if !ARMED.load(Ordering::Relaxed) || PAUSED.load(Ordering::Relaxed) || ptr == 0 {
             return;
         }
-        let main = crate::board::esp32c6::init::heap_regions()[0];
-        if ptr >= main.0 + main.1 {
+        if !tracked(ptr) {
             return;
         }
         let mut raw = [0u32; FRAMES + SKIP];
         lpc_shared::backtrace::capture_frames(&mut raw);
         let mut frames = [0u32; FRAMES];
         frames.copy_from_slice(&raw[SKIP..]);
-        critical_section::with(|cs| {
-            let t = table(cs);
-            if ptr < FROM.load(Ordering::Relaxed) {
-                return;
+        critical_section::with(|cs| match table(cs).iter_mut().find(|e| e.addr == 0) {
+            Some(slot) => {
+                *slot = Entry {
+                    addr: ptr as u32,
+                    size: size as u32,
+                    frames,
+                }
             }
-            match t.iter_mut().find(|e| e.addr == 0) {
-                Some(slot) => {
-                    *slot = Entry {
-                        addr: ptr as u32,
-                        size: size as u32,
-                        frames,
-                    }
-                }
-                None => {
-                    OVERFLOW.fetch_add(1, Ordering::Relaxed);
-                }
+            None => {
+                OVERFLOW.fetch_add(1, Ordering::Relaxed);
             }
         });
     }
 
     #[unsafe(no_mangle)]
     fn _esp_alloc_dealloc(_heap: &esp_alloc::EspHeap, ptr: usize, _size: usize) {
-        if ptr == 0 || !READY.load(Ordering::Relaxed) || ptr < FROM.load(Ordering::Relaxed) {
+        if ptr == 0 || !ARMED.load(Ordering::Relaxed) {
             return;
         }
         critical_section::with(|cs| {
-            let t = table(cs);
-            if let Some(slot) = t.iter_mut().find(|e| e.addr == ptr as u32) {
+            if let Some(slot) = table(cs).iter_mut().find(|e| e.addr == ptr as u32) {
                 slot.addr = 0;
             }
         });
     }
 
     /// Print the live tracked allocations — only when there are few (after a
-    /// project stops), never the thousands a running project holds.
+    /// project stops), never the hundreds a running project holds.
     pub fn log_live(tag: &str) {
+        if !ARMED.load(Ordering::Relaxed) {
+            return;
+        }
         let live = critical_section::with(|cs| table(cs).iter().filter(|e| e.addr != 0).count());
         log::info!(
-            "[heaptrack] {tag}: {live} live from 0x{:08x}, overflow {}",
-            FROM.load(Ordering::Relaxed),
+            "[heaptrack] {tag}: {live} live since armed, overflow {}",
             OVERFLOW.load(Ordering::Relaxed)
         );
-        if live > 64 {
+        if live > 96 {
             return;
         }
         for i in 0..SLOTS {
