@@ -8,10 +8,12 @@ rust-version.workspace = true
 description = "The host side of an over-the-air update (protocol v1): serving, the read-back backup, the login client, the decision, the update driver, and (feature pack) the one packer of encoding 1"
 
 # Sans-IO, no_std + alloc (Studio's wasm and lp-cli share it). Never a
-# dependency on `lpc-firmware-release` or `lpa-firmware-store` here: the
-# engine sources are effects the edge resolves, and the edge to
-# `lpc-firmware-release` is Part B's (B-P02).
+# dependency on `lpa-firmware-store`: the engine sources are effects the
+# edge resolves. `lpc-firmware-release` is the one edge between the two OTA
+# plans' crates (B-P02): `HostBuild::from_ota_manifest` and the identity
+# comparison read a release's `ota-manifest.json`.
 [dependencies]
+lpc-firmware-release = { path = "../../lp-core/lpc-firmware-release" }
 lp-crc32 = { path = "../../lp-base/lp-crc32" }
 # M1's version comparison (FirmwareAge), reused rather than written twice.
 lpa-devices = { path = "../lpa-devices" }
@@ -29,6 +31,7 @@ pack = ["dep:flate2", "dep:lp-deflate"]
 
 [dev-dependencies]
 lpc-update = { path = "../../lp-core/lpc-update", features = ["test-support"] }
+serde_json = { workspace = true }
 
 [lints]
 workspace = true

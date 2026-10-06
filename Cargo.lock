@@ -4188,9 +4188,11 @@ dependencies = [
  "lp-shader",
  "lp-ws281x",
  "lpa-server",
+ "lpc-access",
  "lpc-hardware",
  "lpc-model",
  "lpc-shared",
+ "lpc-update",
  "lpc-wire",
  "lpfs",
  "lpir",
@@ -4201,6 +4203,7 @@ dependencies = [
  "lpvm",
  "lpvm-native",
  "serde",
+ "sha2",
  "static_cell",
  "trouble-host",
 ]
@@ -5716,6 +5719,9 @@ version = "40.0.0"
 [[package]]
 name = "lp-bootctl"
 version = "1.0.0"
+dependencies = [
+ "lp-crc32",
+]
 
 [[package]]
 name = "lp-cli"
@@ -6442,6 +6448,7 @@ dependencies = [
  "lpc-model",
  "lpc-registry",
  "lpc-shared",
+ "lpc-update",
  "lpc-view",
  "lpc-wire",
  "lpfs",
@@ -6558,7 +6565,9 @@ dependencies = [
  "lp-deflate",
  "lpa-devices",
  "lpc-access",
+ "lpc-firmware-release",
  "lpc-update",
+ "serde_json",
  "sha2",
 ]
 
@@ -6738,11 +6747,13 @@ dependencies = [
 name = "lpc-update"
 version = "40.0.0"
 dependencies = [
+ "lp-bootctl",
  "lp-crc32",
  "lp-deflate",
  "lpc-access",
  "lpc-update",
  "miniz_oxide",
+ "schemars",
  "serde",
  "serde_json",
  "sha2",
@@ -6768,6 +6779,7 @@ dependencies = [
  "lp-link",
  "lpc-access",
  "lpc-model",
+ "lpc-update",
  "ryu-js",
  "schemars",
  "ser-write-json",

@@ -10,7 +10,8 @@
 //!   bounds below.
 //! - **Writes are fenced.** Nothing is written unless it lies in the region
 //!   and outside the running core's own extent, or is one of the two
-//!   boot-record sectors — and nothing at all until [`protect`] has been told
+//!   boot-record sectors or the update's progress-record sector — and
+//!   nothing at all until [`protect`] has been told
 //!   where the running core is and where the region ends (the end the
 //!   flashed partition table gives). The same bad read above computed the
 //!   engine's room as starting on top of the running core; the fence turns
@@ -18,9 +19,16 @@
 //!
 //! [`protect`]: SplitFlash::protect
 
-use lp_bootctl::{BOOT_RECORD_SECTORS, Extent, REGION_START};
+use lp_bootctl::{BOOT_RECORD_SECTORS, Extent, PROGRESS_RECORD_SECTOR, REGION_START};
 
-const SECTOR: u32 = 4096;
+pub const SECTOR: u32 = 4096;
+
+/// The bytes the ROM moves per call: a word-aligned local buffer, small
+/// enough for the stack and never across a 256-byte program page.
+const PIECE: usize = 64;
+
+#[repr(C, align(4))]
+struct Piece([u8; PIECE]);
 
 /// The SPI flash, for the boot bookkeeping only.
 pub struct SplitFlash {
@@ -44,28 +52,71 @@ impl SplitFlash {
         self.fence = Some((core, region_end));
     }
 
-    /// Read `out.len()` bytes at `at` (both multiples of 4).
+    /// Read `out.len()` bytes at `at`, any alignment.
     pub fn read(&mut self, at: u32, out: &mut [u8]) -> bool {
-        #[repr(C, align(4))]
-        struct Chunk([u8; 64]);
-        let mut chunk = Chunk([0; 64]);
+        let mut chunk = Piece([0; PIECE]);
         let mut done = 0;
         while done < out.len() {
-            let n = (out.len() - done).min(64);
-            let len = (n + 3) & !3;
-            // SAFETY: the ROM read into a local word-aligned buffer.
+            let addr = at + done as u32;
+            let base = addr & !3;
+            let skip = (addr - base) as usize;
+            let n = (out.len() - done).min(PIECE - skip);
+            let len = (skip + n + 3) & !3;
+            // SAFETY: the ROM read, word-aligned, into a local word-aligned
+            // buffer.
             let ok = unsafe {
-                esp_storage::ll::spiflash_read(
-                    at + done as u32,
-                    chunk.0.as_mut_ptr().cast(),
-                    len as u32,
-                )
+                esp_storage::ll::spiflash_read(base, chunk.0.as_mut_ptr().cast(), len as u32)
             }
             .is_ok();
             if !ok {
                 return false;
             }
-            out[done..done + n].copy_from_slice(&chunk.0[..n]);
+            out[done..done + n].copy_from_slice(&chunk.0[skip..skip + n]);
+            done += n;
+        }
+        true
+    }
+
+    /// Erase the 4 KiB sector at `at` (sector-aligned), if the fence allows.
+    pub fn erase(&mut self, at: u32) -> bool {
+        if at % SECTOR != 0 || !self.allowed(at, SECTOR) {
+            log::error!("[OTA] refused: erase {at:#x}");
+            return false;
+        }
+        // SAFETY: one sector the fence allows.
+        self.unlock() && unsafe { esp_storage::ll::spiflash_erase_sector(at / SECTOR) }.is_ok()
+    }
+
+    /// Program `bytes` at `at`, any alignment: NOR only clears bits, so the
+    /// word-aligned span around them is written with `0xFF` where nothing is
+    /// to change.
+    pub fn program(&mut self, at: u32, bytes: &[u8]) -> bool {
+        if !self.allowed(at, bytes.len() as u32) {
+            log::error!("[OTA] refused: program {at:#x} +{}", bytes.len());
+            return false;
+        }
+        if !self.unlock() {
+            return false;
+        }
+        let mut chunk = Piece([0xff; PIECE]);
+        let mut done = 0;
+        while done < bytes.len() {
+            let addr = at + done as u32;
+            let base = addr & !3;
+            let skip = (addr - base) as usize;
+            let n = (bytes.len() - done).min(PIECE - skip);
+            let len = (skip + n + 3) & !3;
+            chunk.0.fill(0xff);
+            chunk.0[skip..skip + n].copy_from_slice(&bytes[done..done + n]);
+            // SAFETY: a span the fence allows (its padding is 0xFF, which
+            // programs nothing), from a local word-aligned buffer.
+            let ok = unsafe {
+                esp_storage::ll::spiflash_write(base, chunk.0.as_ptr().cast(), len as u32)
+            }
+            .is_ok();
+            if !ok {
+                return false;
+            }
             done += n;
         }
         true
@@ -77,6 +128,7 @@ impl SplitFlash {
         };
         if BOOT_RECORD_SECTORS
             .iter()
+            .chain(core::iter::once(&PROGRESS_RECORD_SECTOR))
             .any(|s| at >= *s && at + len <= s + SECTOR)
         {
             return true;

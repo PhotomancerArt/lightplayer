@@ -24,6 +24,9 @@ base64 = { workspace = true }
 # Tiers and the login payloads (offers, MACs, outcomes) ride the wire as-is.
 lpc-access = { path = "../lpc-access" }
 lpc-model = { path = "../lpc-model", default-features = false }
+# The board manifest the hello carries (`ServerHello::firmware`): the
+# over-the-air update protocol's type, one definition for `M` and the hello.
+lpc-update = { path = "../lpc-update" }
 # The packed encoding's codec. `alloc` for the host reader's boxed learned
 # table (`WireStream`); nothing in it allocates on the encode path the device
 # uses.

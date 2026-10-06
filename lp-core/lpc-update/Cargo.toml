@@ -11,14 +11,21 @@ description = "Over-the-air update protocol v1: the channel-3 codec, the board m
 # firmware-distribution plan's crates): the dependency graph of the OTA plans
 # runs the other way (`lpa-update -> lpc-firmware-release`, added later).
 [dependencies]
+# The split image's formats and layout 1's offsets: the one definition of
+# each, referenced here rather than copied.
+lp-bootctl = { path = "../../lp-base/lp-bootctl" }
 lp-crc32 = { path = "../../lp-base/lp-crc32" }
 lp-deflate = { path = "../../lp-base/lp-deflate" }
 lpc-access = { path = "../lpc-access" }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
+# `schema-gen` only (lp-cli schema gen): never in a firmware graph.
+schemars = { workspace = true, optional = true }
 
 [features]
+# JSON Schema derives for the update light's record (`schemas/status-light.schema.json`).
+schema-gen = ["dep:schemars"]
 # A NOR flash model with power cuts, a model board and a rig: for this
 # crate's tests and lpa-update's host x board simulation. Never in firmware.
 test-support = []

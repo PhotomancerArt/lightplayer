@@ -975,6 +975,7 @@ mod tests {
                 device_uid: None,
                 pack_format: 0,
                 auth: lpc_wire::HelloAuth::TRUSTED,
+                firmware: None,
             }),
         )
     }

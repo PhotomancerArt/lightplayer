@@ -3334,6 +3334,46 @@ test-emu-c6-split-boot scenarios="": install-rv32-target
     fi
     LP_SPLIT_SCENARIOS="$(cd "$out" && pwd)" cargo test -p lp-cli --release --test emu_split_scenarios -- --include-ignored --nocapture --test-threads=1
 
+# Over-the-air updates on an emulated C6, scenario by scenario (OTA plan
+# lp2025/2026-10-04-0757-ota-update-protocol, Part B, P08;
+# `lp-cli/tests/emu_ota.rs`). Each scenario boots the packaged split image
+# from the reset vector over a flash it keeps writing, hosts its USB link in
+# process with lp-cli's update host (`lpa-update`'s driver) on channel 3,
+# and reads the board's own words, its flash and its pad:
+#
+#   U1 X->Y raw · U2 X->Y with Z · U3/U4 power cuts by request count across
+#   both pieces (raw / Z): every cut converges, the first boot after it is
+#   reachable, a mid-piece cut resumes · U5 a pending update and a host
+#   holding only X's engine: heal, cancel · U6 an engine-less board heals
+#   from the cache, no login · U8 a core install needs edit: refused, then a
+#   core-side login (`fixture-usb-untrusted`) · U9 an untrusted heal needs
+#   none · U10/U11/U18 refusals before any erase (too big, chip, layout,
+#   loader, a must-understand flag, an unknown message) · U12 a build that
+#   dies on trial rolls back, heals, and is refused from then on · U13 the
+#   read-back equals engine.bin · U14 a host gone mid-core, resumed by the
+#   next · U15 a corrupted raw chunk fails its piece, sent again · U16 the
+#   update light (dark yellow / dark red) off the pad · U17 the board's `M`
+#   equals its package's ota-manifest.json. U7 is a named skip.
+#
+# NOT in CI (DM26): four packaged split builds (X, Y, Y with
+# `fixture-trial-dies`, X with `fixture-usb-untrusted`; ~2 min each on an
+# M2 Max) and ~20 min of scenarios (the cut sweeps recover in
+# `LP_OTA_THREADS` threads, default 6). Run it when you touch `lpc-update`,
+# `lpa-update`, `fw-esp32c6/src/ota/`, channel 3 or `lp-bootctl`.
+# `scenarios=<dir>` reuses images already built there; `filter=u03` runs one.
+test-emu-c6-ota scenarios="" filter="": install-rv32-target
+    #!/usr/bin/env bash
+    set -euo pipefail
+    out="{{ scenarios }}"
+    if [[ -z "$out" ]]; then
+        out=target/ota-scenarios
+        scripts/ota/build-image.sh "$out/x" a0a0a0a0
+        scripts/ota/build-image.sh "$out/y" b1b1b1b1
+        scripts/ota/build-image.sh "$out/y-dies" b1b1b1b1 esp32c6,server,fixture-trial-dies
+        scripts/ota/build-image.sh "$out/x-untrusted" a0a0a0a0 esp32c6,server,fixture-usb-untrusted
+    fi
+    LP_OTA_IMAGES="$(cd "$out" && pwd)" cargo test -p lp-cli --release --test emu_ota -- --include-ignored --nocapture --test-threads=1 {{ filter }}
+
 # lp-cli's emulator-backed tests. Both resolve the ELF through
 # `lp_emu_esp32c6::test_support` under `LP_EMU_BUILD_FW=1` — a plain
 # `cargo build`, not a reference image, so no espflash and no git history.
