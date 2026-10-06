@@ -17,6 +17,7 @@ use lpc_update::board::{FlashFault, UpdateTarget};
 
 use super::boot_state::BootState;
 use super::split_flash::{SECTOR, SplitFlash};
+use super::update_timing::{FlashTiming, now_us};
 
 /// The split image's side of an update.
 pub struct SplitUpdateTarget {
@@ -30,6 +31,8 @@ pub struct SplitUpdateTarget {
     record_seq: u32,
     /// Where this core's engine header is.
     engine_start: u32,
+    /// What the session's flash calls cost (the `[OTA] timing` line).
+    pub timing: FlashTiming,
 }
 
 impl SplitUpdateTarget {
@@ -61,6 +64,7 @@ impl SplitUpdateTarget {
             record_sector,
             record_seq,
             engine_start: state.engine_room().start,
+            timing: FlashTiming::default(),
         }
     }
 
@@ -76,15 +80,27 @@ fn ok(done: bool) -> Result<(), FlashFault> {
 
 impl UpdateTarget for SplitUpdateTarget {
     fn erase_sector(&mut self, addr: u32) -> Result<(), FlashFault> {
-        ok(self.flash.erase(addr))
+        let t0 = now_us();
+        let done = self.flash.erase(addr);
+        self.timing.erase_us += now_us() - t0;
+        self.timing.erases += 1;
+        ok(done)
     }
 
     fn program(&mut self, addr: u32, bytes: &[u8]) -> Result<(), FlashFault> {
-        ok(self.flash.program(addr, bytes))
+        let t0 = now_us();
+        let done = self.flash.program(addr, bytes);
+        self.timing.program_us += now_us() - t0;
+        self.timing.programs += 1;
+        ok(done)
     }
 
     fn read(&mut self, addr: u32, buf: &mut [u8]) -> Result<(), FlashFault> {
-        ok(self.flash.read(addr, buf))
+        let t0 = now_us();
+        let done = self.flash.read(addr, buf);
+        self.timing.read_us += now_us() - t0;
+        self.timing.reads += 1;
+        ok(done)
     }
 
     fn core_dest(&self, core_len: u32) -> Option<u32> {
