@@ -112,7 +112,8 @@ facts shaped the design:
    manifest, whose `package` entry must hash that package manifest. They land
    where `lp-cli firmware package` would have written them, so the bundle
    step (`scripts/studio-copy-firmware.sh`, which puts the update files in the
-   bundle's `firmware/<target>/ota/` for Studio's own-build updates) is
+   bundle's `firmware/<target>/`, beside `manifest.json`, for Studio's
+   own-build updates — two segments deep, out of the lookup's way) is
    unchanged. The deploy no longer installs the RISC-V target, the Xtensa
    toolchain or espflash. The beta channel takes a tagged ref's release
    firmware when that release carries it and builds its own otherwise (an

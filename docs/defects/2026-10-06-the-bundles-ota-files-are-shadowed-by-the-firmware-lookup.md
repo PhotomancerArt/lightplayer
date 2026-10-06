@@ -1,7 +1,8 @@
 ---
-status: open
+status: fixed
 found: 2026-10-06      # how: report (reading the router while writing PR-3's post-merge checklist)
-area: lp-cloud-server router.rs × firmware_route.rs; the Studio bundle's firmware/<target>/ota/ (scripts/studio-copy-firmware.sh, lpa-studio-core bundled_own_build.rs)
+fixed: this change
+area: lp-cloud-server router.rs × firmware_route.rs; the Studio bundle's update files, once in firmware/<target>/ota/ (scripts/studio-copy-firmware.sh, lpa-studio-core bundled_own_build.rs)
 class: stand-in-divergence
 related:
   - docs/adr/2026-10-06-firmware-distribution.md (the lookup grammar, reserved words)
@@ -43,15 +44,29 @@ Pages artifact's own smoke (`static-site-smoke.mjs`) serves the bundle with
 a plain static server, which has no such route, so nothing that runs before
 a deploy sees the collision.
 
-**Fix** — none yet; a decision for the OTA roadmap's director. Candidates:
-move the bundle's update files out of the third segment (for example beside
-`manifest.json`, or under a prefix the lookup does not own), or let the
-router fall through to the static bundle for a reserved word — which would
-make `ota` unavailable as a channel name.
+**Fix** — The bundle's update files moved up one level, beside the
+package manifest and the merged image the route never matches:
+`firmware/<target>/ota-manifest.json`, `firmware/<target>/core.z`,
+`firmware/<target>/engine.z`. The lookup's contract is unchanged — every
+`/firmware/<target>/<release>/<file>` path is still its own, and `ota`
+stays a reserved word rather than a fall-through to the bundle (the OTA
+roadmap director's call). Every producer and consumer moved together:
+`scripts/studio-copy-firmware.sh` copies them beside `manifest.json` (and
+removes an `ota/` left in a dev bundle), the Pages artifact's required
+files name the new paths, `BundledOwnBuildSource` reads
+`<base>/<target>/ota-manifest.json` and the `.z` files beside it, and
+`walk-ota-emu.mjs` reads the staged manifest there. The builds README and
+the Studio-updates ADR (§6, amended) say where they live.
 
-**Regression coverage** — none yet: the fix should add a router test that
-serves a static bundle with `firmware/<target>/ota/…` beside the firmware
-plane.
+**Regression coverage** — `lp-cloud-server`'s
+`tests/firmware_plane.rs::the_bundles_update_files_beside_its_manifest_are_static`:
+the real router, a static bundle holding the three files beside its
+`manifest.json`, and the firmware plane wired to a stub upstream. Each
+two-segment path is the bundle's bytes with no firmware headers and no
+upstream call, and `/firmware/esp32c6-4mb/ota/ota-manifest.json` is the
+lookup's `reserved for a future channel` 404. `lpa-studio-core`'s
+`bundled_own_build` tests serve the bundle only at the two-segment paths,
+so a reader that looked one level down would find no build of its own.
 
 **Lesson** — A URL prefix shared by a route and a static tree needs one
 owner per depth, and a test against the real router — a stand-in static

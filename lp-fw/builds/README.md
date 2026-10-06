@@ -151,8 +151,9 @@ bundle (`just studio-web-build`, which every deploy runs) is **always** split,
 and the Pages artifact refuses to stage without the update files.
 
 **What the Studio bundle carries** (OTA M7, DS10): for a split package,
-`firmware/<id>/ota/` holds its `ota-manifest.json`, `core.z` and `engine.z`
-— never `core.bin`/`engine.bin`, which Studio slices out of the merged image
+`firmware/<id>/` also holds its `ota-manifest.json`, `core.z` and `engine.z`,
+beside `manifest.json` (two segments under `firmware/`: lightplayer.app's
+firmware lookup owns every three-segment `/firmware/` path) — never `core.bin`/`engine.bin`, which Studio slices out of the merged image
 by the package manifest's `split` offsets. For the C6 that is about 1.8 MB
 (`core.z` 741,552 + `engine.z` 1,084,808 + the manifest 13,255 bytes at
 `e6775ad53`), fetched only when an update runs.
