@@ -237,7 +237,10 @@ the live table names a pending word, the machine raises the **wake** — bits
 set in that word, then `FROM_CPU_INTR3` raised through `INTPRI` as another
 CPU would; the guest's handler clears the line, then swaps the word to zero.
 The pacer keeps G0's rule (b): never two raises outstanding, a minimum
-spacing, a bounded queue that refuses and counts, a cap per take. Rule (a) —
+spacing, a bounded queue that refuses and counts, a cap per take (512 B by
+default — below a full Ethernet frame, so a frame-carrying seam sets its own
+`PacerConfig`; `take` joins whole events, `take_one` keeps one event's
+boundary). Rule (a) —
 what a wake wakes runs on the firmware's IO thread — is the firmware's, and
 ships with the Bluetooth seam, as does the firmware's handler; until then the
 wake is proven against a synthetic guest (`tests/seam_wake_*.rs`). Its

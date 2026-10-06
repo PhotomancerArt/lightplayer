@@ -93,6 +93,11 @@ which is why the grade is `modeled` and not higher.
    a constraint on the method, not a description of what happened to be
    convenient.
 
+*(2026-10-05)* Emulator seams are a named exception to this policy, kept as
+close to it as they can be (an answer announces itself, nothing runs unasked,
+grades move only by a composed overlay and a performance seam never makes a
+transcript): `2026-10-05-emulator-seams.md` §1.
+
 ## What would have to be true for this to change
 
 **A silicon capture of the completion mechanism.** Two boards on a bench
