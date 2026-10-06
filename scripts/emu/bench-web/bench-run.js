@@ -107,9 +107,13 @@ export function gateRowsPlan(manifest) {
 /// the same session — which is the whole point of having the interpreter row
 /// selectable from the page rather than taken from another run on another day.
 export function argsFor(o) {
+  // A `.bin` image is a whole flash chip (a merged image, optionally with a
+  // filesystem): booted ROM-up through the real bootloader, the way a Studio
+  // tab boots a board (bench-cli.mjs `--file`).
+  const boot = o.image.elf.endsWith('.bin') ? '--merged' : '--elf';
   const args = [
     'lp-emu-esp32c6',
-    '--elf', '/w/' + o.image.elf,
+    boot, '/w/' + o.image.elf,
     '--timeout', o.timeout,
     '--wall-timeout', String(o.wallTimeout ?? 600),
     '--uart0', 'file:/w/' + o.image.slug + '.uart',

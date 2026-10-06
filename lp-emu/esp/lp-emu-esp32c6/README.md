@@ -239,6 +239,21 @@ latency figures are **emulated** and never quoted as silicon. The lockstep
 runner (`Lockstep::with_medium`) is the deterministic multi-board driver:
 `tests/seam_two_boards.rs` replays byte-identically.
 
+**`led=fast`, the LED performance seam.** It answers the firmware's
+`lp_seam_ws281x_wait_step` — the render thread's spin between two polls of
+the RMT driver's completion flag — with "return, then park until an
+interrupt the hart would wake for" (`wfi`'s own wake condition), moving guest
+time event to event through the same idle skip `wfi` uses. What it skips is
+the spin's instructions and nothing else: the RMT model, its refill and done
+interrupts, the pads and the strip decoder all run, so the wire time is
+billed by emulated time passing and the frames, the frame count and the heap
+are the seam-off run's (`lp-cli/tests/emu_seam_led.rs` checks all three on
+the shipped split image). Two listed differences: **frame timestamps drift**
+by about 0.13 µs a frame (the park ends at the interrupt, not where the spin
+would have noticed the flag), and **the RMT refill-latency figure reads better
+than silicon** — never quote it from a `led=fast` run. On only for Studio's
+Devices-page boards; never a transcript (`validate record` refuses it).
+
 ## Direct load
 
 `loader.rs` reproduces what the ROM and the ESP-IDF second-stage bootloader
