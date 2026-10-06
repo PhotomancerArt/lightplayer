@@ -263,6 +263,11 @@ genuinely fits none of these, and define it here in one line.
 - **`absence-from-incomplete-search`** — a search over a candidate set
   that never contained the answer reports "not found", and the result is
   recorded as a fact about the thing searched for, not about the search.
+- **`rounded-measurement-at-threshold`** — a measurement precise enough
+  for a report is compared against a threshold it is not precise enough
+  for, and it was rounded to the threshold's wrong side, so a value exactly
+  at the threshold fails it. The tell is a refusal that misses by less than
+  the measurement's own granularity (65,535 B against a 65,536 B floor).
 
 ## Index
 
@@ -373,6 +378,7 @@ a fifth still lands somewhere the new `Fault` status and pattern don't reach.
 
 | Class | Date | Entry | Status | Area |
 | --- | --- | --- | --- | --- |
+| rounded-measurement-at-threshold | 2026-10-06 | [the-largest-block-probe-reads-a-64-kib-hole-as-65535](2026-10-06-the-largest-block-probe-reads-a-64-kib-hole-as-65535.md) | fixed (this change) | fw-esp32c6/s3/v3 `largest_free_block` × lpa-server `check_load_headroom`: the bisection stopped within 16 B and returned the lower edge, so the C6's 64 KiB second heap region read as 65,535 B and a board whose largest hole was exactly the project-load floor was refused (`load refused: heap headroom too low (largest free block 65535 B < 65536 B)`, PR C's emulated Wi-Fi walk). Exact now (`fw_esp32_common::largest_block::largest_fitting`); fixes main too |
 | stale-measurement | 2026-10-06 | [a-board-out-of-range-flashes-a-transport-error](2026-10-06-a-board-out-of-range-flashes-a-transport-error.md) | fixed (this change) | lpa-studio-core `StudioActor::run_refresh_tick` × the lens tap × plan D13's reconnect rule: a Bluetooth board walked out of range under Play goes quiet without a GATT drop, and the editor's pull timed out (`Transport error: the device did not respond over Bluetooth within 5.0s`) on link health that did not yet include the stall note its own tap had heard, which waited behind the batch. The batch showed the red sync failure, and the next one showed the curtain (PR #880's desk walk). The actor now folds what the link said during an unanswered pull before judging it, and a pull failure while the link is reconnecting is withdrawn like a held lens's |
 | state-conflation | 2026-10-06 | [a-typed-unlock-is-not-tried-again-after-a-drop](2026-10-06-a-typed-unlock-is-not-tried-again-after-a-drop.md) | fixed (this change) | lpa-studio-core `AccessSession`: `auto_spent` (set when an automatic try does not unlock) was cleared by nothing but a page load, so a board first unlocked by a typed, remembered password (the held keys matched nothing) never had that password tried again: after a power cut the sheet rose, the board dropped each new link at its 10 s deadline and the editor's hold ran out (PR #880's silicon re-check, walk-2). A grant now re-arms the automatic tries. Same path (walk-5): the challenge held for the sheet was keyed by window, so a second hello on the same link made the typed password begin again, which the board refused while its challenge lived, spending the password; the challenge is the link's now |
 | lifecycle-ownership | 2026-10-05 | [a-bluetooth-reconnect-reads-the-old-links-loss](2026-10-06-a-bluetooth-reconnect-reads-the-old-links-loss.md) | fixed (this change) | lpa-link `BrowserBleLink` × `browser_ble.js`'s session error queue × the departure sweep: the sweep detached a dropped Bluetooth link before its pump read `bluetooth link lost`, so the loss waited in the session and the link the reconnect attached read it on open and closed at once. No edge came again, so a board that was connected and saying hello had no model link: no login, the board's 10 s drop, the editor's 45 s hold ran out to `/devices` (PR #880's desk check, a locked C6 after a power cut and a reboot; `walk-ble-emu` `drop-back`). `Open` now discards a loss recorded before it |

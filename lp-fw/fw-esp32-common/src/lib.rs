@@ -14,6 +14,7 @@ extern crate alloc;
 #[cfg(feature = "frame-pace-diag")]
 pub mod frame_pace_diag;
 pub mod jit_fns;
+pub mod largest_block;
 #[cfg(any(feature = "usb-link", feature = "uart-link"))]
 pub mod link_lock;
 #[cfg(any(feature = "usb-link", feature = "uart-link"))]
