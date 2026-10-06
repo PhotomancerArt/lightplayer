@@ -115,7 +115,10 @@ pub fn handle_client_message(
             ServerMessagePayload::Hello(hello)
         }
         lpc_wire::ClientRequest::Filesystem(fs_request) => {
-            ServerMessagePayload::Filesystem(handle_fs_request(base_fs, fs_request)?)
+            match fs_read_refusal(&*base_fs, &fs_request, read_headroom_probe) {
+                Some(response) => ServerMessagePayload::Filesystem(response),
+                None => ServerMessagePayload::Filesystem(handle_fs_request(base_fs, fs_request)?),
+            }
         }
         lpc_wire::ClientRequest::LoadProject { path } => handle_load_project(
             project_manager,
@@ -292,6 +295,44 @@ fn handle_project_command(
 /// — on every link, at every tier.
 pub const WRITE_ONLY_FILE_REFUSED: &str =
     "write-only file: no link at any tier reads .lp/access.json or .lp/network.json";
+
+/// Bytes past a file's own size a read needs in one block: its `Vec`'s
+/// slack and the reply's other fields. The reply's base64 is written into the
+/// static frame buffer, not the heap.
+const FS_READ_SLACK_BYTES: u64 = 512;
+
+/// A file read the heap cannot hold, refused before the file is read: its
+/// `FsResponse::Read` with the reason ("board memory busy"), the read gate's
+/// posture — refusal, not reset. A whole-file read is one contiguous
+/// allocation of the file's size, and on a board with a project loaded and
+/// a radio link open that is often more than the largest free block (a
+/// 10,240 B read reset the silicon C6, PR B's desk walk). `None`: the read
+/// may go ahead (or it is not a read, or nothing probes the heap).
+fn fs_read_refusal(
+    fs: &dyn LpFs,
+    request: &FsRequest,
+    probe: Option<ReadHeadroomProbe>,
+) -> Option<FsResponse> {
+    let FsRequest::Read { path } = request else {
+        return None;
+    };
+    let largest = u64::from(probe.and_then(|probe| probe())?);
+    let size = fs.file_size(path.as_path()).ok()?;
+    let needs = size + FS_READ_SLACK_BYTES;
+    if largest >= needs {
+        return None;
+    }
+    let error = format!(
+        "read refused: board memory busy (largest block {largest} B; a {size} B file needs \
+         {needs} B); retry shortly"
+    );
+    log::warn!("fs gate: {} — {error}", path.as_str());
+    Some(FsResponse::Read {
+        path: path.clone(),
+        data: None,
+        error: Some(error),
+    })
+}
 
 /// Handle a filesystem request
 ///
@@ -646,6 +687,37 @@ mod tests {
                 other => panic!("{path}: {other:?}"),
             }
         }
+    }
+
+    /// A file read the heap cannot hold in one block is refused with the
+    /// read gate's words before the file is read; one that fits is not.
+    #[test]
+    fn a_read_bigger_than_the_largest_block_is_refused_not_attempted() {
+        use lpc_model::{AsLpPath, AsLpPathBuf};
+        let fs = lpfs::LpFsMemory::new();
+        fs.write_file("/data.bin".as_path(), &[7u8; 10_240])
+            .unwrap();
+        let read = FsRequest::Read {
+            path: "/data.bin".as_path_buf(),
+        };
+        let tight: ReadHeadroomProbe = || Some(10_000);
+        match fs_read_refusal(&fs, &read, Some(tight)) {
+            Some(FsResponse::Read { data, error, .. }) => {
+                assert_eq!(data, None);
+                assert!(
+                    error
+                        .unwrap()
+                        .starts_with("read refused: board memory busy")
+                );
+            }
+            other => panic!("{other:?}"),
+        }
+        let roomy: ReadHeadroomProbe = || Some(40_000);
+        assert!(fs_read_refusal(&fs, &read, Some(roomy)).is_none());
+        assert!(
+            fs_read_refusal(&fs, &read, None).is_none(),
+            "no probe, no gate"
+        );
     }
 
     /// Writes and deletes pass the fs gate (the tier check decides them),
