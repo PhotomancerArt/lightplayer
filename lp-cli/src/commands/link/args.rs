@@ -196,6 +196,12 @@ pub struct CaptureArgs {
     /// never answered, or a `reboot` never restarts the board.
     #[arg(long)]
     pub request: Vec<String>,
+
+    /// An over-the-air update on the link's channel 3. The port is reopened
+    /// when it drops: a board's USB goes away on every reset an update
+    /// makes, and each reopen is a new link session.
+    #[command(flatten)]
+    pub ota: crate::commands::ota_host::OtaArgs,
 }
 
 #[derive(Debug, Args)]

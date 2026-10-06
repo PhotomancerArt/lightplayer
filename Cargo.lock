@@ -6561,7 +6561,9 @@ dependencies = [
  "lp-deflate",
  "lpa-devices",
  "lpc-access",
+ "lpc-firmware-release",
  "lpc-update",
+ "serde_json",
  "sha2",
 ]
 
