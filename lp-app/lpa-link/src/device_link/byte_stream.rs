@@ -30,7 +30,10 @@
 //! board's reads out, undecoded by the model. There is never a second reader
 //! of the bytes — two would each tear the frame that straddles the handover
 //! — and the borrower leaves the transport's own events (`Opened`,
-//! `Closed`, reset outcomes) queued for the model.
+//! `Closed`, reset outcomes) queued for the model, and the board's
+//! channel-3 update messages with them (M7 P7: `LinkCommand::SendUpdate`
+//! out, `LinkEvent::Update` in, never to a board that has not announced the
+//! channel — see [`LinkPortService`]).
 //!
 //! # Why this can be synchronous
 //!
@@ -62,6 +65,7 @@ use lpc_wire::{ClientMessage, LinkCounters};
 use crate::device_link::demux::demux_read;
 use crate::device_link::link_nonce::fresh_link_nonce;
 use crate::device_link::link_port_service::LinkPortService;
+use crate::device_link::update_facts_mirror::update_events;
 use crate::device_link::wire::client_message;
 use crate::device_link::wire_reader::WireRead;
 use crate::stream::{ByteStreamError, DeviceByteStream};
@@ -272,6 +276,20 @@ impl<S: DeviceByteStream> LinkCore<S> {
         });
     }
 
+    /// Queue one channel-3 (update) message and write what it produced.
+    /// Before the board announced the channel nothing is queued (DS9; the
+    /// link's note says so).
+    fn send_update(&mut self, bytes: &[u8]) -> Result<(), String> {
+        let Some(service) = self.service.as_mut() else {
+            return Err("update write on a link that is not open".to_string());
+        };
+        service.send_update(bytes)?;
+        self.write_frames();
+        // A refusal's note goes to the model now, not on the next read.
+        self.drain_service();
+        Ok(())
+    }
+
     /// Queue one request (bare JSON) on the link and write what it produced.
     fn send_json(&mut self, json: &str) -> Result<(), String> {
         let Some(service) = self.service.as_mut() else {
@@ -408,10 +426,19 @@ impl<S: DeviceByteStream> LinkCore<S> {
             return;
         };
         // Reads first: a note (the opt-in's outcome, say) is made while
-        // reading, and belongs after what it was read beside.
+        // reading, and belongs after what it was read beside. Channel 3 after
+        // the reads (a session's update messages follow its link-up), as the
+        // model's events: a borrower's `take_reads` leaves them queued.
         let reads = service.take_reads();
+        let updates = service.take_updates();
         let notes = service.take_notes();
         self.queue.extend(reads.into_iter().map(Queued::Read));
+        self.queue.extend(
+            updates
+                .into_iter()
+                .flat_map(update_events)
+                .map(Queued::Event),
+        );
         self.queue.extend(
             notes
                 .into_iter()
@@ -477,9 +504,12 @@ impl<S: DeviceByteStream> Link for ByteStreamLink<S> {
                     core.push_event(LinkEvent::Error(error));
                 }
             }
-            // This transport has no channel 3 yet (M7 P7 adds it), and its
-            // `LinkInfo` says so, so the model never asks; dropped.
-            LinkCommand::SendUpdate(_) => {}
+            // One channel-3 message (M7 P7).
+            LinkCommand::SendUpdate(bytes) => {
+                if let Err(error) = core.send_update(&bytes) {
+                    core.push_event(LinkEvent::Error(error));
+                }
+            }
         }
     }
 
@@ -512,7 +542,7 @@ mod tests {
     use super::*;
     use lpa_devices::identity::EndpointKey;
     use lpa_devices::wire::{ClientFrame, ServerFrameBody};
-    use lpc_wire::lp_link::{CH_PROTO, LinkConfig, SelectiveRepeat};
+    use lpc_wire::lp_link::{CH_PROTO, CH_UPDATE, LinkConfig, SelectiveRepeat};
     use lpc_wire::{ClientMessage, ServerMsgBody, WireServerMessage};
 
     /// A closed link is silent: nothing is read before the model opens the
@@ -771,6 +801,66 @@ mod tests {
         assert_eq!(board.0.lock().unwrap().reopens, vec![921_600]);
     }
 
+    /// A core-only board announces channel 3 with its `M` on link-up: the
+    /// model hears the facts first, then the bytes, and a `SendUpdate`
+    /// reaches the board on channel 3 — while a borrower's `take_reads`
+    /// never sees an update message.
+    #[test]
+    fn channel_3_flows_both_ways_and_past_a_borrower() {
+        let (mut link, board) = link_and_board();
+        let board = board.speaking_channel_3();
+        link.submit(LinkCommand::Open { baud: 921_600 });
+        let port = link.port_handle();
+        for _ in 0..50 {
+            board.tick_ms();
+            assert!(
+                port.take_reads()
+                    .unwrap()
+                    .iter()
+                    .all(|read| !matches!(read, WireRead::Frame(_)))
+            );
+        }
+        let events = run(&mut link, &board, 10);
+        let facts_at = events
+            .iter()
+            .position(|event| matches!(event, LinkEvent::UpdateFacts(facts) if facts.version.as_deref() == Some("2026.10.06-1")))
+            .unwrap_or_else(|| panic!("no update facts: {events:?}"));
+        assert!(
+            matches!(&events[facts_at + 1], LinkEvent::Update(bytes) if bytes[0] == b'M'),
+            "{events:?}"
+        );
+
+        link.submit(LinkCommand::SendUpdate(b"Q\x01".to_vec()));
+        let events = run(&mut link, &board, 20);
+        assert_eq!(board.updates(), vec![b"Q\x01".to_vec()]);
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, LinkEvent::Update(_))),
+            "{events:?}"
+        );
+    }
+
+    /// DS9: a board that never announced channel 3 hears nothing there; the
+    /// model gets a note instead, and the link keeps answering.
+    #[test]
+    fn a_send_update_to_a_board_that_did_not_announce_it_is_a_note() {
+        let (mut link, board) = open_and_up();
+        link.submit(LinkCommand::SendUpdate(b"Q\x01".to_vec()));
+        let events = run(&mut link, &board, 20);
+        assert!(board.updates().is_empty());
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                LinkEvent::WireNote(note) if note == crate::device_link::link_note::UPDATE_NOT_ANNOUNCED_NOTE
+            )),
+            "{events:?}"
+        );
+        link.submit(LinkCommand::SendFrame(ClientFrame::hello(3)));
+        run(&mut link, &board, 20);
+        assert_eq!(board.request_ids(), vec![3]);
+    }
+
     /// A link on a board double, with one clock for both ends that
     /// [`run`] advances by hand.
     fn link_and_board() -> (ByteStreamLink<BoardStream>, BoardStream) {
@@ -831,6 +921,11 @@ mod tests {
         signals: Vec<(Option<bool>, Option<bool>)>,
         reopens: Vec<u32>,
         closed: bool,
+        /// A core-only board's `M` payload: said on channel 3 at every
+        /// link-up and as the answer to every channel-3 message.
+        manifest: Option<Vec<u8>>,
+        /// Channel-3 messages the board heard.
+        updates: Vec<Vec<u8>>,
     }
 
     impl BoardStream {
@@ -844,7 +939,21 @@ mod tests {
                 signals: Vec::new(),
                 reopens: Vec::new(),
                 closed: false,
+                manifest: None,
+                updates: Vec::new(),
             })))
+        }
+
+        /// Make it a core-only board that speaks channel 3.
+        fn speaking_channel_3(self) -> Self {
+            let mut m = vec![b'M'];
+            m.extend_from_slice(br#"{"proto":1,"target":"esp32c6-4mb","chip":"esp32c6","version":"2026.10.06-1","buildId":"2026.10.06-1+abc123456789","wireProto":38,"coreSha256":"11","coreLen":1,"engineSha256":"22","engineLen":null,"layout":1,"loader":1,"regionLen":2,"state":"needs-engine"}"#);
+            self.0.lock().unwrap().manifest = Some(m);
+            self
+        }
+
+        fn updates(&self) -> Vec<Vec<u8>> {
+            self.0.lock().unwrap().updates.clone()
         }
 
         fn say(&self, text: &str) {
@@ -894,7 +1003,10 @@ mod tests {
             use lpc_wire::lp_link::LinkEvent as Ev;
             while let Some(event) = self.link.recv() {
                 match event {
-                    Ev::Up { .. } => self.send(&hello()),
+                    Ev::Up { .. } => match self.manifest.clone() {
+                        Some(m) => self.link.send(CH_UPDATE, &m).unwrap(),
+                        None => self.send(&hello()),
+                    },
                     Ev::Message {
                         channel: CH_PROTO,
                         data,
@@ -904,6 +1016,15 @@ mod tests {
                             WireServerMessage::new(request.id, ServerMsgBody::UnloadProject);
                         self.requests.push(request);
                         self.send(&answer);
+                    }
+                    Ev::Message {
+                        channel: CH_UPDATE,
+                        data,
+                    } => {
+                        self.updates.push(data);
+                        if let Some(m) = self.manifest.clone() {
+                            self.link.send(CH_UPDATE, &m).unwrap();
+                        }
                     }
                     _ => {}
                 }

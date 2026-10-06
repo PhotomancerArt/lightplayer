@@ -79,6 +79,7 @@ fn item_direction(item: &lpc_wire::SniffedWire) -> Option<Direction> {
         | S::Session { dir, .. }
         | S::Damaged { dir }
         | S::Gap { dir, .. }
+        | S::Update { dir, .. }
         | S::Sealed { dir, .. } => Some(*dir),
     }
 }

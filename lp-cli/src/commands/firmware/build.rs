@@ -11,7 +11,10 @@ use super::build_def::{BuildDef, find_repo_root, load_build_def};
 
 pub fn handle_build(args: BuildArgs) -> Result<()> {
     let repo_root = find_repo_root()?;
-    let def = load_build_def(&repo_root, &args.id)?;
+    let mut def = load_build_def(&repo_root, &args.id)?;
+    if args.single_image {
+        def.split = false;
+    }
     build_firmware(&repo_root, &def)?;
     if def.split {
         println!("built {}", def.split_dir(&repo_root).display());

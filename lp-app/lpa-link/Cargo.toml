@@ -27,6 +27,11 @@ lpa-client = { path = "../lpa-client", optional = true, default-features = false
 lpa-devices = { path = "../lpa-devices", optional = true }
 lpc-model = { path = "../../lp-core/lpc-model", optional = true }
 lpc-wire = { path = "../../lp-core/lpc-wire", optional = true }
+# The over-the-air update protocol's board vocabulary: `device_link` decodes a
+# board manifest (`M` on lp-link channel 3, and the hello's `firmware`) into
+# the device model's mirror (M7 P7, DS2). `no_std` + alloc, and `lpc-wire`
+# already links it, so a wasm build pays nothing new.
+lpc-update = { path = "../../lp-core/lpc-update", optional = true }
 # The fake device's raw-filesystem read returns a REAL littlefs image (see
 # `providers/fake_device/fake_filesystem_image.rs`) — a fake that answered
 # with arbitrary bytes would hide the only failure that matters.
@@ -118,7 +123,7 @@ browser-ble = [
 # (`browser-serial-esp32`, `fake-device`) so a build that can open a device
 # can also drive the model — including plain `cargo test`, which unifies
 # `fake-device` in.
-device-link = ["dep:lpa-devices", "dep:lpc-wire"]
+device-link = ["dep:lpa-devices", "dep:lpc-update", "dep:lpc-wire"]
 # The worker envelope speaks the wire's published-frame vocabulary
 # (`OutputFrameEntry`, `RevisionGateRead`) so the preview host and the
 # device card feed read output frames through one set of types.

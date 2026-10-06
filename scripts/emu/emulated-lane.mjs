@@ -50,9 +50,10 @@ import { StudioDriver } from "./studio-driver.mjs";
 export const PACKAGED_C6_ELF = "target/riscv32imac-unknown-none-elf/release-esp32/fw-esp32c6";
 
 /// The same build as the whole chip `studio-firmware-package-served` packs:
-/// bootloader, table and the SPLIT image (loader, core, engine). Since the
-/// C6 ships split (#971) the ELF above, direct-loaded over a blank chip,
-/// boots its core only ("engine does not fit"): its engine lives in flash.
+/// bootloader, table and the image. Locally that is a single image by
+/// default (`LP_FW_IMAGE=split` for the product's split one, whose ELF
+/// above, direct-loaded over a blank chip, boots its core only — "engine
+/// does not fit": its engine lives in flash).
 /// `{merged}` in a board line substitutes to this; spell it
 /// `<id>={merged},kind=rom-up` for a writable chip seeded with it, booted
 /// from the reset vector the way a flashed board is.

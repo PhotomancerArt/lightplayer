@@ -170,7 +170,7 @@ pub fn ble_link_info(device_id: &str, name: &str) -> LinkInfo {
         endpoint: ble_endpoint(device_id),
         usb: None,
         serial_number: None,
-        // Bluetooth is still `M!` lines, no channels (M7 P12 adds it).
+        // Bluetooth's link carries channel 3 only from M7 P12 (the next PR).
         carries_update_channel: false,
     }
 }
@@ -227,8 +227,9 @@ pub fn emu_link_info(uid: &str, display_name: &str) -> LinkInfo {
         endpoint: emu_endpoint(uid),
         usb: None,
         serial_number: None,
-        // Its lp-link carries no update channel yet (M7 P7 adds it).
-        carries_update_channel: false,
+        // Its lp-link carries the update channel (M7 P7); whether the board
+        // speaks it is the board's own announcement (DS9).
+        carries_update_channel: true,
     }
 }
 

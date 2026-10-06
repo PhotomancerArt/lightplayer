@@ -2,11 +2,13 @@
 //! DS10): its facts at once (tiny — what every card's update standing is
 //! read against), its bytes only when an update runs.
 //!
-//! The web's implementation reads the bundle's `ota-manifest.json` at start
-//! and fetches `core.z` / `engine.z` (and slices the raw pieces out of the
-//! merged image) on [`OwnBuildSource::load`] — P8's. Until a shell installs
-//! one, Studio has no build of its own: no board is offered an update, and
-//! a board waiting for its engine is still restored from the engine cache or
+//! The served Studio's is
+//! [`super::bundled_own_build::BundledOwnBuildSource`] (P8): it reads the
+//! bundle's `ota-manifest.json` at start and fetches `core.z` / `engine.z`
+//! (and slices the raw pieces out of the merged image) on
+//! [`OwnBuildSource::load`]. Until a shell installs one, Studio has no build
+//! of its own: no board is offered an update, and a board waiting for its
+//! engine is still restored from the engine cache or
 //! the firmware store (a heal's build is the board's own,
 //! `HostBuild::for_heal`). [`MemoryOwnBuildSource`] serves tests and sims.
 //!
@@ -23,8 +25,10 @@ use crate::app::library::LocalBoxFuture;
 
 /// Where this Studio's own build comes from.
 pub trait OwnBuildSource {
-    /// The build's facts (identity, hashes, lengths), read once at start;
-    /// `None` when this Studio carries no build of its own.
+    /// The build's facts (identity, hashes, lengths); `None` when this
+    /// Studio carries no build of its own, or has not read it yet. The
+    /// controller asks again after every device fold, so a source may learn
+    /// them after it is installed.
     fn facts(&self) -> Option<HostBuildFacts>;
 
     /// The build's bytes, loaded now. Called only when an update runs.

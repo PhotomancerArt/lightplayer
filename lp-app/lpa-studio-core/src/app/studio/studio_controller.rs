@@ -1298,6 +1298,12 @@ impl StudioController {
         if latest.as_ref() != self.update_build_facts.store_latest() {
             self.update_build_facts_mut().set_store_latest(latest);
         }
+        // This Studio's own build may arrive after its source was installed
+        // (the bundle's reads its manifests asynchronously).
+        let own_now = host.own_facts();
+        if own_now.as_ref() != self.update_build_facts.own() {
+            self.update_build_facts_mut().set_own(own_now);
+        }
         let now = self.device_now();
         let own = self.update_build_facts.own().cloned();
         let store_latest = self.update_build_facts.store_latest().cloned();
@@ -8919,6 +8925,11 @@ impl StudioController {
 
     pub(crate) fn devices_for_test(&self) -> &crate::DeviceRoster {
         &self.devices
+    }
+
+    #[cfg(test)]
+    pub(crate) fn devices_mut_for_test(&mut self) -> &mut crate::DeviceRoster {
+        &mut self.devices
     }
 
     /// The access controller, for e2e rows that install this browser's key

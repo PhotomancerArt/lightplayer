@@ -659,7 +659,19 @@ fn recovery_line(recovery: &RecoveryFacts) -> String {
 
 /// Project one pending link.
 pub fn pending_link_view(entry: &PendingLink, now: Millis) -> PendingLinkView {
+    // A no-click restore (or finish) running on the link before it is
+    // adopted — a core-only board says no hello, so it stays pending — is
+    // what the board is doing, and what its card says (the update-states
+    // spike's E1: "Restoring firmware…"), not "identifying".
+    let updating = entry.update_progress().map(|(stage, percent)| {
+        let words = stage.map_or("Updating firmware…", |stage| stage.label());
+        match percent {
+            Some(percent) => format!("{words} {percent}%"),
+            None => words.to_string(),
+        }
+    });
     let state_label = match entry.verdict() {
+        _ if updating.is_some() => updating.clone().unwrap_or_default(),
         None => "New device found — identifying…".to_string(),
         // Identify settled having heard nothing at all — the window's
         // classify() cascade bottoms out at `Unknown` (forced, if presence

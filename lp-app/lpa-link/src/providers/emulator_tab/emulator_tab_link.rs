@@ -2,8 +2,9 @@
 //!
 //! The board runs the shipped `fw-esp32c6` image, whose USB link is an
 //! lp-link, so this link does what the Web Serial one does: it opens and
-//! closes the board's byte channel, queues requests on the board's lp-link
-//! end (`emulator_tab_link_port`) and demuxes what that end decoded. The
+//! closes the board's byte channel, queues requests (and channel-3 update
+//! messages, M7 P7) on the board's lp-link end (`emulator_tab_link_port`)
+//! and demuxes what that end decoded. The
 //! bytes themselves are the link port's loop's business, not this type's.
 //!
 //! Commands are synchronous here — the bridge queues every verb on the
@@ -32,9 +33,10 @@ use lpa_devices::link::{Link, LinkCommand, LinkEvent, LinkInfo, ResetKind};
 
 use super::emulator_tab_bridge::EmulatorTabPort;
 use super::emulator_tab_link_port::{
-    close_link, open_link, send_client_json, take_notes, take_reads,
+    close_link, open_link, send_client_json, send_update, take_notes, take_reads, take_updates,
 };
 use crate::device_link::demux::demux_read;
+use crate::device_link::update_facts_mirror::update_events;
 use crate::device_link::wire::client_message;
 use crate::providers::emulator_tab_seams::SeamNoteTracker;
 
@@ -147,6 +149,11 @@ impl EmulatorTabLink {
         for read in reads {
             self.events.push_back(demux_read(read));
         }
+        // Channel 3 after the reads: a session's update messages follow its
+        // link-up, and only this link drains them (DS1).
+        for update in take_updates(self.port) {
+            self.events.extend(update_events(update));
+        }
         for note in take_notes(self.port) {
             self.events.push_back(LinkEvent::WireNote(note));
         }
@@ -185,9 +192,17 @@ impl Link for EmulatorTabLink {
                     "not a request, and the link carries no raw text to the board: {line:?}"
                 ))),
             },
-            // This transport has no channel 3 yet (M7 P7 adds it), and its
-            // `LinkInfo` says so: the model never asks. Dropped.
-            LinkCommand::SendUpdate(_) => {}
+            // One channel-3 message (M7 P7); refused with a note until the
+            // board announced the channel (DS9).
+            LinkCommand::SendUpdate(bytes) => {
+                if !self.open {
+                    self.events.push_back(LinkEvent::Error(
+                        "update write on a link that is not open".to_string(),
+                    ));
+                } else if let Err(error) = send_update(self.port, &bytes) {
+                    self.events.push_back(LinkEvent::Error(error));
+                }
+            }
         }
     }
 

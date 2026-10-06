@@ -216,6 +216,17 @@ impl PendingLink {
         self.provisional.activity_kind()
     }
 
+    /// The provisional entry's running Update, as its card would show it:
+    /// the stage and percent. A core-only board's no-click restore runs on
+    /// the link before it is adopted, and the pending card says so.
+    pub fn update_progress(
+        &self,
+    ) -> Option<(Option<crate::activity::UpdateStageFacts>, Option<u8>)> {
+        let cell = self.provisional.activity.as_ref()?;
+        let update = cell.update_view()?;
+        Some((update.stage, cell.percent()))
+    }
+
     /// The verdict, once identification has settled.
     pub fn verdict(&self) -> Option<&Classification> {
         if self.provisional.is_busy() || !self.provisional.evidence.is_settled() {
@@ -239,6 +250,12 @@ pub struct Roster {
     pending: Vec<PendingLink>,
     links: BTreeMap<LinkId, LinkInfo>,
     routes: BTreeMap<LinkId, DeviceId>,
+    /// Entries merged into another (`from → into`): an effect's markers can
+    /// be in flight, addressed to the merged-away id, when the hello that
+    /// merges two cards is folded — an update's last ones are exactly that.
+    /// They follow the merge, as a link's route does.
+    #[serde(default)]
+    merged: BTreeMap<DeviceId, DeviceId>,
 }
 
 impl Roster {
@@ -255,7 +272,18 @@ impl Roster {
             pending: Vec::new(),
             links: BTreeMap::new(),
             routes: BTreeMap::new(),
+            merged: BTreeMap::new(),
         }
+    }
+
+    /// The entry `device` was merged into, if it was (following a chain of
+    /// merges to the surviving entry).
+    pub fn merged_into(&self, device: DeviceId) -> Option<DeviceId> {
+        let mut at = *self.merged.get(&device)?;
+        while let Some(next) = self.merged.get(&at) {
+            at = *next;
+        }
+        Some(at)
     }
 
     /// Rehydrate persisted records at startup: each becomes a detached
@@ -495,7 +523,13 @@ impl Roster {
             // is): its effect's markers reach it there.
             Event::ActivityMarker { device, .. } => match self.holder_of(*device) {
                 Some(Holder::Pending(index)) => self.dispatch_to_pending(now, index, input),
-                _ => self.dispatch_to_device(now, *device, input),
+                Some(Holder::Device) => self.dispatch_to_device(now, *device, input),
+                // Merged away while its effect still spoke: the marker goes
+                // where the running activity went.
+                None => match self.merged_into(*device) {
+                    Some(into) => self.dispatch_to_device(now, into, input),
+                    None => self.dispatch_to_device(now, *device, input),
+                },
             },
             Event::IdentityObserved { device, .. } => self.dispatch_to_device(now, *device, input),
             // A chooser's answer is roster news: a picked device already
@@ -944,6 +978,7 @@ impl Roster {
                 into_index
             };
             let into_id = self.devices[into_index].id;
+            self.merged.insert(from.id, into_id);
             self.state.journal.note(
                 now,
                 Scope::Roster,

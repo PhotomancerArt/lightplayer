@@ -779,6 +779,25 @@ Each drop is a `[emu] … the Mac serial model dropped N B` console warning;
 `walk-migration-emu` writes the page console and the count (`macTtyDrops`)
 beside its verdict.
 
+**`just walk-ota-emu`** walks Studio's over-the-air updates (lp-link channel
+3, `docs/adr/2026-10-06-studio-updates-over-the-update-channel.md`) on
+emulated C6s over `?emu=`, in headless Chrome, serving the release bundle
+itself: X → Y with one press (backup, update, finish, project kept), the
+cable cut mid-core and mid-engine then finished with no click, an
+engine-less board restored on connect, the same with no copy anywhere ("which
+Studio can't get" → Install), and a pre-update board (no over-the-air offer,
+today's flash). `--tab` runs three of them against `?emu=tab`. Every check
+waits for the board's own `[OTA]`/`[LOADER]` words as well as the card's.
+It proves Studio's update host, routing and card against the real board
+session; it does **not** prove Chromium's serial backend across the
+update's resets, nor silicon timing. **Its rates are the shim's, not a
+Mac's:** on a Mac the page runs the shim's Mac tty model (255 B a read, a
+read every 16 ms), which bounds the backup at ~12 KB/s;
+`WALK_EMU_TTY=none` measures without it. A local Studio
+(`just studio-dev`) builds a **single image** by default and so offers no
+over-the-air install — `LP_FW_IMAGE=split just studio-dev` for one that
+does.
+
 Two more dev-only flags tune the device wire for a measurement (read once at
 page load by `lpa-studio-web/src/dev_url_flags.rs`; no UI, no persistence):
 `?lens-pause-ms=N` sets the editor lens's pause between device reads

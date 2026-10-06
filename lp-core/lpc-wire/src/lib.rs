@@ -133,7 +133,7 @@ pub use transport_error::TransportError;
 pub use tree::{WireChildKind, WireEntryState, WireSlotIndex, WireTreeDelta};
 pub use wire_encoding::{FRAME_KIND_LEARNED, FRAME_KIND_RESYNC, RESYNC_SEQUENCE, WireEncoding};
 pub use wire_link_port::{DEVICE_LOG_LEVEL_REQUEST_ID, PortRead, WireLinkPort};
-pub use wire_link_sniffer::{SniffedWire, WireLinkSniffer};
+pub use wire_link_sniffer::{SniffedWire, WireLinkSniffer, update_message_type};
 pub use wire_stream::{
     DesyncedFrame, UnpackEvent, UnpackedFrame, WIRE_STREAM_MAX_FRAME, WireChunk, WireForm,
     WireFrame, WireStream, WireUnpacker,
