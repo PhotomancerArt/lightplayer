@@ -713,6 +713,10 @@ struct DeviceBench {
     /// since this test binary installs no `log::Logger` and the skip's own
     /// `log::debug!`/`log::warn!` calls are unreachable no-ops here.
     record_push_attempts: Rc<Cell<usize>>,
+    /// Set when the bench's controller is handed to a real actor: device
+    /// inputs (from sinks captured before the hand-over too, like an open
+    /// lens's tap) go onto that actor's queue instead of [`Self::inbox`].
+    device_inputs_to: Rc<RefCell<Option<crate::app::studio::studio_view_channel::CommandSender>>>,
 }
 
 /// The bench presses offers on its controller, dispatching in place.
@@ -918,9 +922,16 @@ impl DeviceBench {
                 }) as crate::DeviceTimerFuture
             }
         });
+        let device_inputs_to: Rc<
+            RefCell<Option<crate::app::studio::studio_view_channel::CommandSender>>,
+        > = Rc::default();
         controller.set_device_input_sink({
             let inbox = Rc::clone(&inbox);
-            move |input| inbox.borrow_mut().push_back(input)
+            let to = Rc::clone(&device_inputs_to);
+            move |input| match to.borrow().as_ref() {
+                Some(actor) => actor.send(crate::StudioCommand::Device(input)),
+                None => inbox.borrow_mut().push_back(input),
+            }
         });
         let (access_tx, access_rx) = crate::app::studio::studio_view_channel::command_channel();
         controller.set_access_command_sender(access_tx);
@@ -965,6 +976,7 @@ impl DeviceBench {
             started: std::time::Instant::now(),
             access_rx,
             record_push_attempts,
+            device_inputs_to,
         };
         (bench, tasks)
     }

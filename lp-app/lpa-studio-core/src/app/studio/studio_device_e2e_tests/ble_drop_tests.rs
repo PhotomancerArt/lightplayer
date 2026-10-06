@@ -264,8 +264,8 @@ fn a_password_typed_once_unlocks_the_restarted_board_by_itself() {
 /// batch emits shows the curtain, with no error on the project.
 #[test]
 fn a_bluetooth_board_out_of_range_shows_reconnecting_not_a_transport_error() {
-    let (mut bench, air, uid) = board_over_bluetooth_air("dev000000blequiet1");
-    let (mut actor, mut handle) = actor_with_lens_on(&mut bench, &uid);
+    let (mut bench, air) = lens_over_bluetooth_air("dev000000blequiet1");
+    let (mut actor, mut handle) = actor_from(&mut bench);
 
     air.set(Air::OutOfRange);
     let view = pull_through_the_actor(&mut actor, &mut handle, &bench.clock);
@@ -293,8 +293,8 @@ fn a_bluetooth_board_out_of_range_shows_reconnecting_not_a_transport_error() {
 /// still shows — no curtain papers over it.
 #[test]
 fn a_request_unanswered_on_a_healthy_bluetooth_link_still_shows_its_error() {
-    let (mut bench, air, uid) = board_over_bluetooth_air("dev000000blequiet2");
-    let (mut actor, mut handle) = actor_with_lens_on(&mut bench, &uid);
+    let (mut bench, air) = lens_over_bluetooth_air("dev000000blequiet2");
+    let (mut actor, mut handle) = actor_from(&mut bench);
 
     air.set(Air::Unanswered);
     let view = pull_through_the_actor(&mut actor, &mut handle, &bench.clock);
@@ -311,32 +311,31 @@ fn a_request_unanswered_on_a_healthy_bluetooth_link_still_shows_its_error() {
 // Helpers
 // ---------------------------------------------------------------------
 
-/// A board running the bundled example over Bluetooth, ready to open, and
-/// the [`Air`] between them in the test's hand. Returns the board's uid.
-fn board_over_bluetooth_air(uid: &str) -> (DeviceBench, Rc<Cell<Air>>, String) {
+/// A board running the bundled example over Bluetooth, the editor open on
+/// it, and the [`Air`] between them in the test's hand.
+fn lens_over_bluetooth_air(uid: &str) -> (DeviceBench, Rc<Cell<Air>>) {
     let device = FakeEsp32Device::new(FakeDeviceScript::new(FakeBootState::LightPlayer(
         bluetooth_board(uid),
     )));
     let air = Rc::new(Cell::new(Air::Clear));
     let (mut bench, tasks, _present) = bench_over_bluetooth_in(&device, |_| {}, Rc::clone(&air));
-    let uid = board_ready_to_open(&mut bench, &tasks, "Unlocked", true);
-    (bench, air, uid)
+    open_running_lens(&mut bench, &tasks, "Unlocked", true);
+    (bench, air)
 }
 
 /// Hand the bench's controller to a real [`crate::StudioActor`], the way
-/// the web shell runs it, and open the editor on `uid` through it — so the
-/// lens's tap feeds the actor's command queue, landing behind whatever
-/// batch is running, exactly as in the page.
-fn actor_with_lens_on(
+/// the web shell runs it. Every device input from here on — the open
+/// lens's tap among them — lands on the actor's command queue, behind
+/// whatever batch is running, exactly as in the page.
+fn actor_from(
     bench: &mut DeviceBench,
-    uid: &str,
 ) -> (
     crate::StudioActor<impl FnMut(Duration) -> Sleep + Clone + 'static>,
     crate::StudioHandle,
 ) {
     let clock = Rc::clone(&bench.clock);
     let controller = std::mem::replace(&mut bench.controller, StudioController::new(|| 0.0));
-    let (mut actor, handle) = crate::StudioActor::new_with_options(
+    let (actor, handle) = crate::StudioActor::new_with_options(
         controller,
         move |delay: Duration| Sleep {
             clock: Rc::clone(&clock),
@@ -344,23 +343,7 @@ fn actor_with_lens_on(
         },
         crate::StudioActorOptions { drain_logs: false },
     );
-    handle
-        .tx
-        .send(crate::StudioCommand::Action(UiAction::from_op(
-            crate::RuntimeOp::NODE_ID,
-            crate::RuntimeOp::OpenDeviceLens {
-                uid: uid.to_string(),
-            },
-        )));
-    drive(actor.run_one_batch_for_test());
-    assert!(
-        actor
-            .controller_mut_for_test()
-            .runtime_pool_for_test()
-            .lens_session()
-            .is_some(),
-        "the editor opens over Bluetooth"
-    );
+    *bench.device_inputs_to.borrow_mut() = Some(handle.tx.clone());
     (actor, handle)
 }
 
@@ -495,17 +478,6 @@ fn bench_over_bluetooth_in(
 /// the bundled example over Bluetooth when `push` (else the board already
 /// runs it) and open it in the editor.
 fn open_running_lens(bench: &mut DeviceBench, tasks: &TaskPool, access_line: &str, push: bool) {
-    let uid = board_ready_to_open(bench, tasks, access_line, push);
-    bench.open_lens(&uid).expect("opens over Bluetooth");
-}
-
-/// [`open_running_lens`] up to the open: returns the board's registry uid.
-fn board_ready_to_open(
-    bench: &mut DeviceBench,
-    tasks: &TaskPool,
-    access_line: &str,
-    push: bool,
-) -> String {
     bench.run_until(tasks, "the board to identify over Bluetooth", |bench| {
         bench
             .view()
@@ -526,7 +498,8 @@ fn board_ready_to_open(
                 .is_some_and(|card| card.activity.is_none() && card.last_outcome.is_some())
         });
     }
-    bench.registry()[0].uid.clone()
+    let uid = bench.registry()[0].uid.clone();
+    bench.open_lens(&uid).expect("opens over Bluetooth");
 }
 
 /// The board restarts and its radio link goes with it: the old link's
