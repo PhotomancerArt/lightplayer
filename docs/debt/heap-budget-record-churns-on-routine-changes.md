@@ -225,6 +225,22 @@ long-lived branch conflict on this file whenever main re-baselined too.
   in a merge, re-bless or apply CI's patch in the merge's own push, before
   another change lands on top of it.
 
+- 2026-10-06 — **CI's own C6 figure patch measures a dirty build** (Wi-Fi
+  PR B, #989, run 37512040622): the ratchet failed at 102,948 B used, the
+  `Figure moves` step re-baselined and re-ran, and the re-run read 102,980 B
+  and failed again as `not-a-figure-move`. Writing the record dirties the
+  tree, so the re-run's firmware is rebuilt with the app version
+  `<sha>-dirty-<HHMMSS>PT` (`tools/lp-app-version`) instead of `<sha>`, and the
+  longer string costs 32 B of heap. The patch CI offers for the C6 is
+  therefore always 32 B above a clean build (that is why PR B's earlier
+  applied patch, 102,852, read "improved 102,820" on the next clean run), and
+  it can never pass its own re-check. The short sha's length also differs by
+  machine (a local clone printed 9 characters against CI's figure 8 B lower).
+  Workaround: re-baseline the C6 locally on a committed, clean tree
+  (`just heap-budget-baseline-chips esp32c6`) rather than taking CI's C6
+  patch. Paydown: pin `APP_VERSION` (as the deploy workflows already do) for
+  the ratchet's builds, or rebuild the re-check from the pre-write tree.
+
 **Exit criteria** — a PR whose only memory effect is a few bytes of statics
 passes the gate without touching the record, and two PRs that each
 legitimately re-baseline different chips/projects do not conflict. Likely

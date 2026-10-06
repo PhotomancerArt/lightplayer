@@ -88,18 +88,20 @@ impl FrameTimeStats {
 }
 
 impl core::fmt::Display for FrameTimeStats {
-    /// `p50≤16ms p99≤100ms max=187ms(recv=0 tick=186 send=1 resp=1) >100ms=2 >1s=0`
+    /// `p50≤16ms p99≤100ms max=187ms(recv=0 tick=186 send=1 resp=1) >100ms=2 >1s=0`.
+    /// Written straight into the formatter: nothing allocates (the heap
+    /// ratchet reads the first heartbeat, right after a `[perf]` line).
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        let bound = |p| match self.percentile_ms(p) {
-            Some(ms) => alloc::format!("≤{ms}ms"),
-            None => alloc::string::String::from(">2s"),
-        };
+        for (label, percent) in [("p50", 50), ("p99", 99)] {
+            match self.percentile_ms(percent) {
+                Some(ms) => write!(f, "{label}≤{ms}ms ")?,
+                None => write!(f, "{label}>2s ")?,
+            }
+        }
         let max = self.max;
         write!(
             f,
-            "p50{} p99{} max={}ms(recv={} tick={} send={} resp={}) >{HICCUP_IDLE_MS}ms={} >1s={}",
-            bound(50),
-            bound(99),
+            "max={}ms(recv={} tick={} send={} resp={}) >{HICCUP_IDLE_MS}ms={} >1s={}",
             max.total_ms,
             max.recv_ms,
             max.tick_ms,
