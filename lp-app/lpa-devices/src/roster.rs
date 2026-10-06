@@ -216,6 +216,17 @@ impl PendingLink {
         self.provisional.activity_kind()
     }
 
+    /// The provisional entry's running Update, as its card would show it:
+    /// the stage and percent. A core-only board's no-click restore runs on
+    /// the link before it is adopted, and the pending card says so.
+    pub fn update_progress(
+        &self,
+    ) -> Option<(Option<crate::activity::UpdateStageFacts>, Option<u8>)> {
+        let cell = self.provisional.activity.as_ref()?;
+        let update = cell.update_view()?;
+        Some((update.stage, cell.percent()))
+    }
+
     /// The verdict, once identification has settled.
     pub fn verdict(&self) -> Option<&Classification> {
         if self.provisional.is_busy() || !self.provisional.evidence.is_settled() {

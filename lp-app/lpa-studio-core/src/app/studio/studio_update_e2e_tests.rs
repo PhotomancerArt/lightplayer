@@ -198,6 +198,17 @@ fn an_engineless_board_is_restored_on_connect_from_the_cache_with_no_click_or_lo
     bench.cache_engine(&x());
     bench.grant();
 
+    // While it runs, the board's pending card says what it is doing (the
+    // spike's E1), not "identifying" (found in the emulator walk).
+    bench.run_until("the pending card to say it is restoring", |bench| {
+        bench
+            .controller
+            .device_roster_view()
+            .roster
+            .pending
+            .iter()
+            .any(|pending| pending.state_label.starts_with("Restoring firmware…"))
+    });
     bench.run_until("the board to run X again", |bench| {
         bench.board().rig.mode() == Some(SessionMode::EngineRunning)
     });
