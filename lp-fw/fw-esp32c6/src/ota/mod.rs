@@ -37,6 +37,17 @@
 //! The update session is `lpc-update`'s `BoardSession`; [`update_edge`] is
 //! where the firmware drives it, over [`update_target_impl`]'s
 //! `UpdateTarget` (the fenced flash, layout 1, `lp-bootctl`'s formats).
+//! Core-only runs as its own embassy task, as the engine's server loop
+//! does. The protocol and its compatibility rules are
+//! `docs/adr/2026-10-06-ota-update-protocol.md`.
+//!
+//! # The update light
+//!
+//! The engine records the first WS281x strip it opens in
+//! `/.lp/status-light.json` (`crate::output::status_light_note`), and
+//! core-only lights the first few LEDs of it from RMT RAM alone
+//! ([`StatusLight`]): dark yellow while updating, dark red while it needs an
+//! engine, off otherwise. Its log line says which colour it drove.
 //!
 //! The emulator scenarios for these rules are `just test-emu-c6-split-boot`
 //! (`lp-cli/tests/emu_split_scenarios.rs`): run them when you touch
