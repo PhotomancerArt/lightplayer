@@ -269,3 +269,35 @@ first boot reachable and none needing USB; a heal from the host's cache in
 - **The update on channel 1 (the JSON wire):** that wire changes freely
   with every build; a fielded core must be reachable by a Studio it has
   never met.
+
+## Amendment (2026-10-06): the boot hashes run on the SHA accelerator
+
+The core's own hash (§5, every boot) and the engine guard (DD34, the first
+boot after a USB flash) no longer run `sha2` in software. Both feed the C6's
+SHA block (esp-hal's `Sha`; `fw-esp32c6/src/ota/hw_sha.rs`). The core reads
+itself through the cache: it maps its own extent into the MMU entries just
+below the engine window, checks they are unused first, and unmaps them after
+(`ScratchWindow` in `ota/engine_window.rs`). The ROM's 64-byte SPI1 reads
+stay as the fallback. With the accelerator alone, the reads were 392 of the
+515 ms the hash still took on silicon.
+
+| | before | after |
+|---|---:|---:|
+| core hash, silicon | 1,243 ms | 157 ms |
+| engine guard, silicon | 1,387 ms | 235 ms |
+| power-on boot → first hello, silicon (host clock) | 1,501 ms | 712 ms |
+| first boot after a flash → first hello, silicon (host clock) | 2,797 ms | 564 ms |
+| normal boot → first hello, `lp-emu:esp32c6:t1` / `t3` | 1,031.5 / 1,249.2 ms | 270.3 / 430.1 ms |
+| first boot after a flash → first hello, `t1` / `t3` | 2,143.0 / 2,635.3 ms | 351.8 / 684.9 ms |
+
+The silicon figures are from the XIAO C6 bench board `A0:F2:62:87:B4:8C`,
+2026-10-06. The emulated figures are from lp-emu at `208ce933f`. A power-on
+hello is now bounded by USB enumeration and the host opening the link, not
+by the firmware. `t3`, which charges the cache's line fills, lands within 7%
+of silicon on both hashes (165 and 252 ms).
+
+The hash rules, the hello and `M`, and every on-flash format are unchanged:
+`coreSha256` is still SHA-256 of `core.bin`, and the emulator's boot and OTA
+gates check that. The cost is +2,112 B of core (1,214,800 → 1,216,912 B).
+Steady headroom went from 301,006 to 301,240 B, because the engine shrank by
+234 B. The "`sha2` at `opt-level = 3`" alternative (§5) is moot.

@@ -6,7 +6,9 @@
 //! second each on silicon: 1,241 ms for the 1.2 MB core and 1,380 ms for the
 //! 1.8 MB engine (#986's B-P11). The accelerator compresses a 64-byte block
 //! in a few dozen cycles, so what is left is feeding it — the CPU's sixteen
-//! word writes per block, and the reads that bring the bytes in.
+//! word writes per block, and the reads that bring the bytes in. On the
+//! bench C6 (2026-10-06) the core takes 157 ms (read through the cache,
+//! [`super::engine_window::ScratchWindow`]) and the engine guard 235 ms.
 //!
 //! The peripheral is stolen rather than threaded through `core_boot`:
 //! nothing else in this image drives it (the radios' crypto and the access
