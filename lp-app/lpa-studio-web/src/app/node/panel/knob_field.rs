@@ -37,6 +37,7 @@ use crate::app::node::slot_edit_actions::panel_or_slot_action;
 use crate::app::node::slot_fields::{capture_field_pointer, field_wiring};
 
 use super::PanelEmit;
+use super::gesture_hold::use_gesture_hold;
 
 /// Vertical drag distance (CSS px) that sweeps the knob across its whole
 /// range — small enough for one comfortable wrist motion, large enough for
@@ -95,17 +96,21 @@ pub fn KnobField(
     // the channel has one, the authored value otherwise. Anchoring drags
     // and key steps at the raw authored `value` made the first touch of a
     // live control snap it back to the authored default (GV2 bug).
-    let base = live_value.unwrap_or(value);
+    let reported = live_value.unwrap_or(value);
+    // Gesture-local echo: while a drag is live — and after it, until the
+    // snapshot reports what the hand wrote — the knob renders the value
+    // under the hand, not the last snapshot. Display truth catches up
+    // through the panel-write echo, but the geometry must never wait for it
+    // (G2: the knob read "stuck" while its writes landed), and a snapshot
+    // still echoing an earlier write must never pull it back after the
+    // release (see `gesture_hold`).
+    let mut hold = use_gesture_hold(reported);
+    let base = hold.shown(reported);
     // A stepped knob renders ON its grid: an integer knob points at 2, never
     // between 2 and 3, whichever off-grid value (a stale authored default, a
     // continuous bus reading) is behind it. Gestures still start from the raw
     // `value` so repeated arrow presses never stall on a rounding boundary.
-    // Drag-local echo: while a drag is live the knob renders the value under
-    // the hand, not the last snapshot — display truth catches up through the
-    // panel-write echo, but the geometry must never wait for it (G2: the
-    // knob read "stuck" while its writes landed).
-    let preview = use_signal(|| None::<f32>);
-    let shown = knob_snap(preview().unwrap_or(base), min, step);
+    let shown = knob_snap(base, min, step);
     let frac = if invert {
         phasor_knob_fraction(shown, min, max)
     } else {
@@ -132,6 +137,9 @@ pub fn KnobField(
     let key_target = panel_target;
     // Drag anchor: pointer y and value at pointerdown; None while idle.
     let mut drag = use_signal(|| None::<(f64, f32)>);
+    // Whether this drag has moved: a press alone writes nothing, so its
+    // release must not flush (it would engage a panel channel on a click).
+    let mut moved = use_signal(|| false);
     // Last dispatch timestamp (ms) for the drag throttle.
     let last_sent = use_signal(|| 0.0_f64);
 
@@ -161,6 +169,7 @@ pub fn KnobField(
                     return;
                 };
                 event.prevent_default();
+                hold.write(emit.sent_value(next));
                 handler.call(panel_or_slot_action(&key_target, address, emit.lp_value(next)));
             },
             onpointerdown: move |event| {
@@ -168,10 +177,11 @@ pub fn KnobField(
                     return;
                 }
                 capture_field_pointer(&event);
+                hold.press();
+                moved.set(false);
                 drag.set(Some((event.data().client_coordinates().y, base)));
             },
             onpointermove: move |event| {
-                let mut preview = preview;
                 let mut last_sent = last_sent;
                 let Some((anchor_y, anchor_value)) = drag() else {
                     return;
@@ -179,7 +189,7 @@ pub fn KnobField(
                 if event.data().held_buttons().is_empty() {
                     // Missed release (no pointer capture): stop the drag.
                     drag.set(None);
-                    preview.set(None);
+                    hold.clear();
                     return;
                 }
                 let Some((address, handler)) = move_wiring.clone() else {
@@ -193,7 +203,8 @@ pub fn KnobField(
                 } else {
                     knob_drag_value(anchor_value, rise, min, max, step)
                 };
-                preview.set(Some(next));
+                hold.write(emit.sent_value(next));
+                moved.set(true);
                 // Throttled dispatch (G2: an unthrottled flood kept the app
                 // in a verdict-chase probe loop for the whole drag). The
                 // knob geometry above follows every move; the write stream
@@ -206,19 +217,21 @@ pub fn KnobField(
                 handler.call(panel_or_slot_action(&move_target, address, emit.lp_value(next)));
             },
             onpointerup: move |_| {
-                let mut preview = preview;
-                drag.set(None);
                 // Flush the final position: the throttle may have swallowed
                 // the last few moves, and the release must land exactly.
-                if let (Some(next), Some((address, handler))) = (preview(), up_wiring.clone()) {
+                // The hold keeps showing it until the snapshot catches up.
+                if drag().is_some()
+                    && moved()
+                    && let (Some(next), Some((address, handler))) = (hold.held(), up_wiring.clone())
+                {
                     handler.call(panel_or_slot_action(&up_target, address, emit.lp_value(next)));
                 }
-                preview.set(None);
+                drag.set(None);
+                hold.release(reported);
             },
             onpointercancel: move |_| {
-                let mut preview = preview;
                 drag.set(None);
-                preview.set(None);
+                hold.clear();
             },
             svg {
                 class: "tw:block",
