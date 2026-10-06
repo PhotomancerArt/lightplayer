@@ -207,6 +207,14 @@ impl UpdateHost {
         self.state.borrow_mut().own = source;
     }
 
+    /// This Studio's own build's facts, as its source says them now: a
+    /// source may learn them after it is installed (the bundle's, which
+    /// fetches its manifests), so the controller asks again after folds.
+    pub(crate) fn own_facts(&self) -> Option<lpa_update::HostBuildFacts> {
+        let own = self.state.borrow().own.clone();
+        own.and_then(|own| own.facts())
+    }
+
     /// The credentials the controller holds for a core-side login: this
     /// browser's and the account's keys. Replaced wholesale; never logged.
     pub(crate) fn set_credentials(&self, credentials: Vec<Credential>) {

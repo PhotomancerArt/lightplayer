@@ -399,6 +399,28 @@ pub fn App() -> Element {
                 Rc::new(crate::firmware_fetch_web::WebFirmwareFetch)
                     as Rc<dyn lpa_firmware_store::FirmwareFetch>,
             )));
+            // This Studio's own firmware build (OTA M7, DS10): what a board
+            // is offered to update to, read from the bundle's own
+            // `firmware/<target>/` (the same relative base the flasher
+            // fetches the merged image from). Its facts load in the
+            // background; a single-image Studio (the fast local build) has
+            // none, and its cards keep today's USB flash.
+            let own_build = lpa_studio_core::BundledOwnBuildSource::new(
+                crate::firmware_fetch_web::WebFirmwareFetch,
+                lpa_link::providers::browser_serial_esp32_options::DEFAULT_FIRMWARE_BASE_PATH,
+                lpa_boards::served_build_ids().to_vec(),
+            );
+            controller.set_own_build_source(Rc::new(own_build.clone()));
+            wasm_bindgen_futures::spawn_local(async move {
+                match own_build.read_facts().await {
+                    Ok(facts) => log::info!(
+                        "this Studio's own firmware build: {} ({}), update-capable",
+                        facts.identity.build_id,
+                        facts.identity.target
+                    ),
+                    Err(why) => log::info!("this Studio carries no update-capable build: {why}"),
+                }
+            });
             let provider = Rc::new(lpa_studio_core::BrowserSerialEsp32Provider::with_options(
                 Default::default(),
             ));
