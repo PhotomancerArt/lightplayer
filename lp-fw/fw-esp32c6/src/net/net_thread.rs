@@ -41,8 +41,9 @@ use super::mdns_task::MdnsBuffers;
 pub const STACK_BYTES: usize = 8 * 1024;
 /// The thread's priority: the link thread's.
 pub const PRIORITY: u32 = 1;
-/// embassy-net's socket slots: DHCP, two LAN links and the listener that
-/// refuses a third (P04), mDNS (P05), and one spare.
+/// embassy-net's socket slots: DHCP, the LAN links and the listener that
+/// refuses one more (P04), mDNS (P05), and spares (sized for the plan's
+/// two LAN links; one is spare now).
 pub const SOCKET_SLOTS: usize = 6;
 
 /// Every socket buffer the services on the stack keep, allocated at once.

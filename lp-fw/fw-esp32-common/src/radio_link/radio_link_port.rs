@@ -8,8 +8,8 @@
 //!
 //! - **Slots.** The first [`RADIO_LINK_SLOTS`] slots are Bluetooth's, the
 //!   next [`LAN_LINK_SLOTS`] the LAN's (feature `wifi`; plan
-//!   `lp2025/2026-10-05-1903-wifi-link-c6`, A2: at most two LAN links,
-//!   separate from Bluetooth's two). A Bluetooth link is
+//!   `lp2025/2026-10-05-1903-wifi-link-c6`: one LAN link, separate from
+//!   Bluetooth's two). A Bluetooth link is
 //!   [`LinkTrust::Untrusted`]; a LAN link is a secure lp-link responder,
 //!   [`LinkTrust::Keyed`] — its handshake's key decides its tier
 //!   ([`RadioLinkSlot::trust`]).
@@ -77,10 +77,19 @@ use super::radio_link_config::{MtuTooSmall, radio_link_config};
 /// the connection-task pool all follow this one constant.
 pub const RADIO_LINK_SLOTS: usize = 2;
 
-/// How many LAN links can be open at once (plan A2: Studio plus lp-cli),
-/// separate from Bluetooth's. Zero without feature `wifi`.
+/// How many LAN links can be open at once, separate from Bluetooth's. Zero
+/// without feature `wifi`.
+///
+/// One, not the plan's two (A2: Studio plus lp-cli). An open secure LAN
+/// link holds about 14 KB (its session and its connection), and on the
+/// emulated C6 two open while a project loads either refused the
+/// post-deploy read (free 47,692 B, largest block 14,724 B) or, at the
+/// first cut's window of 4, ran the shader compile out of memory and reset
+/// the board. One slot and its boot buffers left the same upload passing
+/// every time, with 67,216 B free and an 18,148 B block while the link
+/// stayed open (PR B's memory gate; `lp-emu:esp32c6:t1+net=lan`).
 #[cfg(feature = "wifi")]
-pub const LAN_LINK_SLOTS: usize = 2;
+pub const LAN_LINK_SLOTS: usize = 1;
 /// How many LAN links can be open at once. Zero without feature `wifi`.
 #[cfg(not(feature = "wifi"))]
 pub const LAN_LINK_SLOTS: usize = 0;

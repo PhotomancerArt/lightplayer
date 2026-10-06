@@ -1,7 +1,7 @@
 //! The LAN endpoint on `lp-net`: secure lp-link links at `ws://<board>/link`
 //! (plan P04, MD10–MD12).
 //!
-//! One task per LAN slot ([`LAN_LINK_SLOTS`], two: plan A2), each holding
+//! One task per LAN slot ([`LAN_LINK_SLOTS`]: one on the C6), each holding
 //! one listening TCP socket on port 80. A connection is upgraded to a
 //! WebSocket (`fw_esp32_common::net::ws`, over the [`ByteStream`] a TLS
 //! wrapper can later replace), then gets its own secure lp-link session on
@@ -10,7 +10,7 @@
 //! one lp-link frame. The mux on the main thread carries it like a Bluetooth
 //! link (`radio_link::link_mux_transport`), under the port's lock.
 //!
-//! - **A third connection** while both slots are busy reaches the
+//! - **One connection too many** while every slot is busy reaches the
 //!   [`refuse_task`]'s socket and gets WebSocket close 1013 ("try again
 //!   later") and a log line.
 //! - **Memory.** Each slot's TCP and WebSocket buffers are allocated once,
@@ -239,7 +239,7 @@ pub async fn refuse_task(stack: Stack<'static>, buffers: Option<RefuseBuffers>) 
             continue;
         }
         if let Ok(ws) = WsConnection::accept(TcpStream(socket), &mut *ws_rx).await {
-            log::warn!("[lan] both LAN links are in use: a third was told to try again later");
+            log::warn!("[lan] every LAN link is in use: a new one was told to try again later");
             ws.close(TRY_AGAIN_LATER).await;
         }
     }

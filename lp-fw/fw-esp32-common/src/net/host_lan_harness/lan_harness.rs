@@ -260,10 +260,10 @@ mod tests {
     use crate::net::host_lan_harness::harness_entropy::harness_entropy;
 
     /// The harness end to end with a bare client: a secure lp-link on the
-    /// anonymous key gets the open board's hello at its tier, and with both
-    /// LAN slots taken a third connection is told 1013.
+    /// anonymous key gets the open board's hello at its tier, and with every
+    /// LAN slot taken one more connection is told 1013.
     #[test]
-    fn an_open_board_says_hello_on_a_secure_link_and_a_third_link_is_told_later() {
+    fn an_open_board_says_hello_on_a_secure_link_and_one_more_is_told_later() {
         let harness = LanHarness::start(LanHarnessOptions {
             access: HarnessAccess::open(OpenTo::Edit),
             graphics: None,
@@ -288,11 +288,15 @@ mod tests {
         };
         assert_eq!(hello.auth.granted, Some(Tier::Edit));
 
-        let _second = connect(&url);
-        let mut third = connect(&url);
-        set_read_timeout(&mut third, Duration::from_secs(5));
+        // The rest of the slots, then one more.
+        let _rest: Vec<_> = (1..LAN_LINK_SLOTS).map(|_| connect(&url)).collect();
+        let mut extra = connect(&url);
+        set_read_timeout(&mut extra, Duration::from_secs(5));
         let close = loop {
-            match third.read().expect("the board answers the third") {
+            match extra
+                .read()
+                .expect("the board answers the extra connection")
+            {
                 Message::Close(frame) => break frame.map(|f| u16::from(f.code)),
                 _ => {}
             }
@@ -300,7 +304,7 @@ mod tests {
         assert_eq!(close, Some(1013), "try again later");
         let stats = harness.stats();
         assert_eq!(stats.refused, 1);
-        assert_eq!(stats.links_opened, 2);
+        assert_eq!(stats.links_opened, LAN_LINK_SLOTS);
         assert_eq!(stats.early_requests, 0);
         harness.stop();
     }

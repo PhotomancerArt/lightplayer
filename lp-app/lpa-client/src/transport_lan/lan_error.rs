@@ -51,7 +51,7 @@ impl fmt::Display for LanError {
             Self::Connect { target, detail } => write!(f, "could not reach {target}: {detail}"),
             Self::Busy { target } => write!(
                 f,
-                "{target}: both of the board's LAN links are in use; try again later"
+                "{target}: the board's LAN links are all in use; try again later"
             ),
             Self::Closed { code: Some(code) } => {
                 write!(f, "the board closed the link (WebSocket close {code})")
