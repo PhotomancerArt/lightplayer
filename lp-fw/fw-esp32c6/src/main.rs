@@ -898,6 +898,9 @@ fn lp_engine_entry(core: CoreBoot) {
     // core's update session says it, as it answers `Q` on channel 3.
     #[cfg(lp_split)]
     server.set_firmware_manifest(Some(ota::running_manifest));
+    // ...and records the strip its update light may drive.
+    #[cfg(lp_split)]
+    server_loop::set_frame_hook(output::status_light_note::persist);
     // JSON Pack: answer a host's opt-in with what this image's transport
     // can write (`fw-esp32-common/json-pack`).
     server.set_packed_encoding_supported(
@@ -1287,8 +1290,17 @@ async fn split_boot(mut core: CoreBoot) {
         }
         Err(why) => {
             let CoreBoot {
-                usb_link, watchdog, ..
+                usb_link,
+                watchdog,
+                rmt_peripheral,
+                base_fs,
+                ..
             } = core;
+            // The update light: the strip the engine recorded, if any.
+            let record = base_fs
+                .read_file(lpc_update::STATUS_LIGHT_PATH.as_path())
+                .ok();
+            let light = ota::StatusLight::new(record.as_deref(), rmt_peripheral);
             ota::core_only(ota::CoreOnly {
                 usb_link,
                 watchdog,
@@ -1298,6 +1310,7 @@ async fn split_boot(mut core: CoreBoot) {
                 access,
                 usb_trust,
                 entropy: fill_random,
+                light,
             })
             .await;
         }

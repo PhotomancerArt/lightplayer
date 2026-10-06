@@ -62,6 +62,7 @@ mod engine_guard;
 mod engine_window;
 mod running_hook;
 mod split_flash;
+mod status_light;
 mod update_edge;
 mod update_outbox;
 mod update_target_impl;
@@ -72,6 +73,7 @@ pub use core_only::{CoreOnly, CoreOnlyReason, core_only};
 pub use engine_guard::engine_guard;
 pub use engine_window::{ENGINE_VADDR, map_engine, page_size};
 pub use running_hook::{install as install_running_hook, manifest as running_manifest};
+pub use status_light::StatusLight;
 
 use split_flash::SplitFlash;
 

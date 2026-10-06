@@ -6753,6 +6753,7 @@ dependencies = [
  "lpc-access",
  "lpc-update",
  "miniz_oxide",
+ "schemars",
  "serde",
  "serde_json",
  "sha2",

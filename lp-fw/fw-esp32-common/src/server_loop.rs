@@ -33,6 +33,28 @@ use lpc_shared::transport::ServerTransport;
 use crate::link_upkeep::LinkUpkeep;
 use crate::time::Esp32TimeProvider;
 
+/// The chip's per-frame hook (`0`: none): see [`set_frame_hook`].
+static FRAME_HOOK: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
+
+/// A chip's own per-frame upkeep that needs the server — once per loop
+/// pass, after the link upkeep. The C6's split image keeps its update
+/// light's record here (`/.lp/status-light.json`, written through the
+/// server's filesystem when a project's first WS281x output opens). Keep it
+/// cheap: it runs every frame.
+pub fn set_frame_hook(hook: fn(&LpServer)) {
+    FRAME_HOOK.store(hook as usize, core::sync::atomic::Ordering::Release);
+}
+
+fn run_frame_hook(server: &LpServer) {
+    let raw = FRAME_HOOK.load(core::sync::atomic::Ordering::Acquire);
+    if raw != 0 {
+        // SAFETY: only `set_frame_hook` stores here, and it stores a
+        // `fn(&LpServer)`.
+        let hook: fn(&LpServer) = unsafe { core::mem::transmute(raw) };
+        hook(server);
+    }
+}
+
 /// Performance logging interval.
 const PERF_LOG_INTERVAL_MS: u64 = 5000;
 
@@ -253,6 +275,7 @@ pub async fn run_server_loop<T: ServerTransport + LinkUpkeep>(
         // Link policy that needs the server and the clock (the radio links'
         // login deadline).
         transport.upkeep(&server, current_time);
+        run_frame_hook(&server);
 
         feed_watchdog(current_time);
 
@@ -579,6 +602,7 @@ pub async fn run_server_loop_bounded<T: ServerTransport + LinkUpkeep>(
         // Link policy that needs the server and the clock (the radio links'
         // login deadline).
         transport.upkeep(&server, current_time);
+        run_frame_hook(&server);
 
         feed_watchdog(current_time);
 

@@ -24,6 +24,7 @@ use lpc_wire::lp_link::{CH_UPDATE, LinkEvent};
 
 use super::board_identity::{CoreIdentity, board_facts};
 use super::boot_state::BootState;
+use super::status_light::StatusLight;
 use super::update_edge::{EdgeEffect, UpdateEdge, state_word};
 use super::update_target_impl::SplitUpdateTarget;
 
@@ -56,6 +57,8 @@ pub struct CoreOnly {
     pub usb_trust: LinkTrust,
     /// The chip's RNG, for login nonces.
     pub entropy: fn(&mut [u8]),
+    /// The update light, when the engine left a record this core can light.
+    pub light: Option<StatusLight>,
 }
 
 /// The core-only loop. Never returns: every committed piece ends in a reset.
@@ -69,6 +72,7 @@ pub async fn core_only(ctx: CoreOnly) -> ! {
         access,
         usb_trust,
         entropy,
+        mut light,
     } = ctx;
     let (engine, engine_len) = match why {
         CoreOnlyReason::OnTrial => {
@@ -105,6 +109,9 @@ pub async fn core_only(ctx: CoreOnly) -> ! {
     let mut edge = UpdateEdge::new(SplitUpdateTarget::new(&state), facts, access, config);
     let mut shown = edge.state();
     log::info!("[OTA] core-only: {}", state_word(shown));
+    if let Some(light) = light.as_mut() {
+        light.show(shown);
+    }
     log::info!("[OTA] core-only heap free {} B", esp_alloc::HEAP.free());
     // A host whose link came up before this loop started: its `Up` may
     // already be gone, so the link's state says it.
@@ -158,6 +165,9 @@ pub async fn core_only(ctx: CoreOnly) -> ! {
             if now != shown {
                 shown = now;
                 log::info!("[OTA] core-only: {}", state_word(now));
+                if let Some(light) = light.as_mut() {
+                    light.show(now);
+                }
             }
         }
         embassy_time::Timer::after(embassy_time::Duration::from_millis(1)).await;
