@@ -82,6 +82,8 @@ use lpc_wire::{LinkCounterTally, TransportError, WireServerMessage};
 
 use super::frame_buf_holder::FrameBufHolder;
 use super::radio_link_config::SMALL_REPLY_BYTES;
+#[cfg(feature = "wifi")]
+use super::radio_link_port::RADIO_LINK_SLOTS;
 use super::radio_link_port::{LINK_SLOTS, RadioLinkEvent, RadioLinkPort, RadioLinkSlot};
 use crate::link_upkeep::LinkUpkeep;
 use crate::serial::packed_link::PackedLink;
@@ -103,6 +105,18 @@ pub const LOGIN_DEADLINE_MS: u64 = 10_000;
 /// request and the next one queued behind it. The server takes one per
 /// tick, so more is a burst, and the inbox grows for it as it always has.
 const INBOX_RESERVE: usize = 2 * LINK_SLOTS;
+
+/// A LAN link's opt-in answer is always `json`: its replies are never
+/// packed. A learned table is 6.9 KB per link, held for the link's life,
+/// and a LAN link has the bandwidth packing exists to save (a Wi-Fi link
+/// moves a JSON project read in a few frames). Hosts take a `json` answer
+/// as any board's decline and keep reading JSON.
+#[cfg(feature = "wifi")]
+fn stay_json(answer: &mut ServerMsgBody) {
+    if let ServerMsgBody::SetEncoding { encoding } = answer {
+        *encoding = lpc_wire::WireEncoding::Json;
+    }
+}
 
 /// One open radio link, as the mux tracks it.
 struct RadioLink {
@@ -467,6 +481,10 @@ impl<U: ServerTransport + FrameBufHolder, D: DelayNs> LinkMuxTransport<U, D> {
         // An opt-in answer `packed` needs a table first; the answer itself is
         // always JSON (`table_for`), and the switch it announces applies to
         // every reply after it, until the session ends — as on USB.
+        #[cfg(feature = "wifi")]
+        if radio.slot >= RADIO_LINK_SLOTS {
+            stay_json(&mut msg.msg);
+        }
         radio.packed.prepare_answer(&mut msg.msg);
         let switch_to = match msg.msg {
             ServerMsgBody::SetEncoding { encoding } => Some(encoding),
@@ -1063,6 +1081,23 @@ mod tests {
             released.0 + released.1 <= at_rest.0 + at_rest.1 + 512,
             "the upload's reassembly buffer is given back"
         );
+    }
+
+    /// A LAN link never packs: its opt-in is answered `json`, so no learned
+    /// table is allocated for it.
+    #[cfg(feature = "wifi")]
+    #[test]
+    fn a_lan_links_packed_opt_in_is_answered_json() {
+        let mut answer = ServerMsgBody::SetEncoding {
+            encoding: WireEncoding::Packed,
+        };
+        stay_json(&mut answer);
+        assert!(matches!(
+            answer,
+            ServerMsgBody::SetEncoding {
+                encoding: WireEncoding::Json
+            }
+        ));
     }
 
     #[test]
