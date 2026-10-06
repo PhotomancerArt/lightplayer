@@ -116,7 +116,7 @@ impl Esp32EspNowRadioDriver {
 
     fn endpoint_status(&self) -> HwEndpointStatus {
         let status = self.registry.endpoint_status_for(&self.address);
-        #[cfg(feature = "wifi")]
+        #[cfg(lp_net)]
         let status = fw_esp32_common::net::radio_rule::radio_endpoint_status(
             crate::net::uses_wifi(),
             status,
@@ -471,7 +471,7 @@ impl SeenRing {
 /// open device keeps its interface (it opens once per boot), so the Radio
 /// comes back the moment Wi-Fi is turned off.
 fn radio_rule_holds() -> Result<(), HardwareEndpointError> {
-    #[cfg(feature = "wifi")]
+    #[cfg(lp_net)]
     if crate::net::uses_wifi() {
         return Err(fw_esp32_common::net::radio_rule::radio_off_error(
             HwEndpointId::for_driver_spec(DRIVER_ID, &endpoint_spec()),

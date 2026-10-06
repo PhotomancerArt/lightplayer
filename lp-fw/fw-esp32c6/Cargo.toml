@@ -72,9 +72,10 @@ io_thread_stack_diag = ["io-thread"]
 # join policy over esp-radio's station, embassy-net with DHCP on link-up, the
 # Radio node rule, the server's station probes. On by default. A build
 # without it answers `unsupported`, as every image before M6 did. The thread
-# is created like `io-thread`'s, so it needs `radio` and the esp-rtos driver.
+# is created like `io-thread`'s (the esp-rtos driver), and its LAN links ride
+# the same radio-link mux as Bluetooth's, so it needs `ble`.
 wifi = [
-    "radio",
+    "ble",
     "server",
     "fw-esp32-common/wifi",
     "dep:esp-radio-rtos-driver",

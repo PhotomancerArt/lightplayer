@@ -95,7 +95,16 @@ frame-pace-diag = ["dep:critical-section"]
 # The Wi-Fi station, chip-free (`net`; Wi-Fi roadmap M6): the join policy,
 # the scan answer, and the boundary the chip's radio (and the emulator's
 # network seam) plug into. The C6 turns it on.
-wifi = ["dep:lpc-wire", "dep:lpc-access", "dep:embassy-net-driver", "dep:critical-section"]
+# It also brings the LAN's links into the radio-link mux, secure: every
+# network link runs lp-link's Noise handshake (plan P04, D2).
+wifi = [
+    "radio-link",
+    "lp-link/secure",
+    "dep:lpc-wire",
+    "dep:lpc-access",
+    "dep:embassy-net-driver",
+    "dep:critical-section",
+]
 server = ["dep:littlefs-rust", "dep:lp-json-pack", "dep:lp-recovery", "dep:lpa-server", "dep:lpc-model", "dep:lpc-wire", "dep:lpfs", "dep:ser-write-json"]
 
 [dev-dependencies]

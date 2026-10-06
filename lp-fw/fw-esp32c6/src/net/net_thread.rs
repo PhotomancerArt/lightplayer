@@ -27,6 +27,7 @@ use core::ffi::c_void;
 use embassy_net::{Config, Runner, Stack, StackResources};
 use esp_radio::wifi::{Interface, WifiController};
 use fw_esp32_common::net::NetFrameDevice;
+use fw_esp32_common::radio_link::SharedPort;
 
 use super::esp_frame_device::{C6FrameDevice, CountedStation};
 use super::esp_station::EspStation;
@@ -45,6 +46,7 @@ struct Args {
     station: Interface<'static>,
     host: String,
     seed: u64,
+    port: SharedPort,
 }
 
 // SAFETY: `Args` is moved to the new thread exactly once, through
@@ -61,12 +63,14 @@ pub fn start(
     station: Interface<'static>,
     host: String,
     seed: u64,
+    port: SharedPort,
 ) {
     let args = Box::into_raw(Box::new(Args {
         controller,
         station,
         host,
         seed,
+        port,
     }));
     esp_println::println!("[INIT] net thread: stack {STACK_BYTES} B, priority {PRIORITY}");
     // SAFETY: `args` is a leaked `Box<Args>` handed to the new thread, which
@@ -94,6 +98,7 @@ extern "C" fn entry(param: *mut c_void) {
         station,
         host,
         seed,
+        port,
     } = *args;
     // No IPv4 config until the station associates: DHCP starts on link-up.
     let resources = Box::leak(Box::new(StackResources::<SOCKET_SLOTS>::new()));
@@ -105,7 +110,7 @@ extern "C" fn entry(param: *mut c_void) {
         spawner.spawn(
             super::station_task::station_task(EspStation::new(controller), stack, host).unwrap(),
         );
-        spawn_services(spawner, stack);
+        spawn_services(spawner, stack, port);
     })
 }
 
@@ -119,13 +124,31 @@ pub fn base_mac() -> [u8; 6] {
     bytes
 }
 
-/// The services on the stack: P05's mDNS responder (and P04's LAN
-/// endpoint).
-fn spawn_services(spawner: embassy_executor::Spawner, stack: Stack<'static>) {
+/// The services on the stack: the LAN endpoint (one task per LAN slot, and
+/// the one that turns a third connection away) and the mDNS responder.
+fn spawn_services(spawner: embassy_executor::Spawner, stack: Stack<'static>, port: SharedPort) {
+    for lan in 0..fw_esp32_common::radio_link::LAN_LINK_SLOTS {
+        spawner.spawn(super::lan_endpoint_task::lan_link_task(stack, port, lan).unwrap());
+    }
+    spawner.spawn(super::lan_endpoint_task::refuse_task(stack).unwrap());
     let mac = base_mac();
     let label = fw_esp32_common::net::mdns::mdns_label(mac);
     spawner.spawn(super::mdns_task::mdns_task(stack, label, mac).unwrap());
 }
+
+/// The lock the radio-link port takes around every borrow once the LAN's
+/// links are served from this thread (`RadioLinkPort::leak_locked`): the
+/// link thread's lock family (`io_thread`), a priority-limited lock at
+/// priority 1, so no thread switch lands while either side holds a link and
+/// the RMT refill (top priority) is never held off. Plan A1: it stays this
+/// lock unless the desk walk measures a hold over 50 µs or Wi-Fi RX drops
+/// under it.
+pub fn port_lock(f: &mut dyn FnMut()) {
+    PORT_LOCK.lock(f);
+}
+
+static PORT_LOCK: esp_hal::sync::RawPriorityLimitedMutex =
+    esp_hal::sync::RawPriorityLimitedMutex::new(esp_hal::interrupt::Priority::Priority1);
 
 #[embassy_executor::task]
 async fn net_runner(mut runner: Runner<'static, C6FrameDevice>) -> ! {

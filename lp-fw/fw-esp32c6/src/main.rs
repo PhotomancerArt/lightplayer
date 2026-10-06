@@ -112,15 +112,7 @@ mod io_thread_stack_diag;
 // The Wi-Fi station and the network on `lp-net` (Wi-Fi roadmap M6). Its
 // radio comes from the radio hub, which stress and desk-meter builds give to
 // their load generators instead.
-#[cfg(all(
-    feature = "wifi",
-    not(any(
-        feature = "stress_s2",
-        feature = "stress_s3",
-        feature = "desk_espnow_meter"
-    )),
-    not(fw_harness)
-))]
+#[cfg(lp_net)]
 mod net;
 #[cfg(all(lp_split, not(fw_harness)))]
 mod ota;
@@ -298,14 +290,7 @@ fn log_heartbeat_stack_lines() {
         io_thread_stack_diag::log_if_grown();
         #[cfg(feature = "net_thread_stack_diag")]
         net::net_thread_stack_diag::log_if_grown();
-        #[cfg(all(
-            feature = "wifi",
-            not(any(
-                feature = "stress_s2",
-                feature = "stress_s3",
-                feature = "desk_espnow_meter"
-            ))
-        ))]
+        #[cfg(lp_net)]
         net::net_heartbeat::log_line();
     }
 }
@@ -667,9 +652,9 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
         // to the station (`wifi`), or back to the driver to keep alive.
         let parts =
             hardware::radio_hub::bring_up(wifi).expect("Failed to initialize ESP-NOW radio");
-        #[cfg(feature = "wifi")]
+        #[cfg(lp_net)]
         let (kept, net_radio) = (None, Some((parts.controller, parts.station)));
-        #[cfg(not(feature = "wifi"))]
+        #[cfg(not(lp_net))]
         let (kept, net_radio) = (Some(parts.controller), None::<()>);
         let radio_driver = Esp32EspNowRadioDriver::from_parts(
             Rc::clone(&hardware_registry),
@@ -715,8 +700,12 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
     // store says off never touches the BLE controller.
     // The radio links' shared slots: the BLE task opens a connection's link
     // there and the link mux (below) serves it. On the heap, not `.bss`: its
-    // slots hold `RefCell`s (one thread executor), which a `static` cannot.
-    #[cfg(feature = "ble")]
+    // slots hold `RefCell`s, which a `static` cannot. With the LAN's links
+    // (served from `lp-net`) every borrow is taken under the port's lock.
+    #[cfg(lp_net)]
+    let (radio_port, lan_port) =
+        fw_esp32_common::radio_link::RadioLinkPort::leak_locked(net::net_thread::port_lock);
+    #[cfg(all(feature = "ble", not(lp_net)))]
     let radio_port = fw_esp32_common::radio_link::RadioLinkPort::leak();
     #[cfg(feature = "ble")]
     let ble_started = {
@@ -762,14 +751,7 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
     // on the main thread, before any Radio node exists, so "set to use
     // Wi-Fi" holds from the first frame; the station never reads the file
     // itself (`net::station_probes`).
-    #[cfg(all(
-        feature = "wifi",
-        not(any(
-            feature = "stress_s2",
-            feature = "stress_s3",
-            feature = "desk_espnow_meter"
-        ))
-    ))]
+    #[cfg(lp_net)]
     {
         let file = lpa_server::network_store::read_network_file(base_fs.as_ref());
         net::station_probes::boot_settings(&file);
@@ -782,12 +764,12 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
             let host = fw_esp32_common::net::mdns::mdns_host(net::net_thread::base_mac());
             let seed = (u64::from(esp_hal::rng::Rng::new().random()) << 32)
                 | u64::from(esp_hal::rng::Rng::new().random());
-            net::net_thread::start(controller, station, host, seed);
+            net::net_thread::start(controller, station, host, seed, lan_port);
         }
     }
     #[cfg(all(
         feature = "radio",
-        not(feature = "wifi"),
+        not(lp_net),
         not(any(
             feature = "stress_s2",
             feature = "stress_s3",
@@ -946,14 +928,7 @@ fn lp_engine_entry(core: CoreBoot) {
     // The station's probes and its settings hook (`wifi`): the server reads
     // what the station publishes, and hands it the network file after every
     // change (`net::station_probes`).
-    #[cfg(all(
-        feature = "wifi",
-        not(any(
-            feature = "stress_s2",
-            feature = "stress_s3",
-            feature = "desk_espnow_meter"
-        ))
-    ))]
+    #[cfg(lp_net)]
     {
         server.set_station_probe(Some(net::station_probes::station_probe));
         server.set_scan_probe(Some(net::station_probes::scan_probe));

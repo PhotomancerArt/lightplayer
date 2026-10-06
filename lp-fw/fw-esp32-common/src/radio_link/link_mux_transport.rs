@@ -1,5 +1,6 @@
 //! The link mux: one [`ServerTransport`] over the USB cable and up to
-//! [`RADIO_LINK_SLOTS`] radio links.
+//! [`LINK_SLOTS`] radio links — Bluetooth's, and with feature `wifi` the
+//! LAN's.
 //!
 //! - **USB** is the primary transport it wraps ([`LinkId::PRIMARY`],
 //!   trusted), unchanged: everything addressed to the primary link goes
@@ -48,6 +49,16 @@
 //!    enforces: once the challenge expires or its answer is refused, the
 //!    ordinary deadline applies again, and a link already past it closes.
 //!
+//! **LAN links** (feature `wifi`) ride the same slots and the same rules,
+//! with three differences: they are secure lp-link responders, so they are
+//! [`LinkTrust::Keyed`] and their handshake asks the server for keys
+//! ([`ServerTransport::take_secure_events`] /
+//! [`ServerTransport::answer_key_lookup`]; the key that verifies decides the
+//! link's tier at `Up`); a keyed session that resets after coming up closes
+//! the link (a new session is a new server link, with a new grant, so the
+//! client reconnects); and they are served from another thread, under the
+//! port's lock (see `radio_link_port`).
+//!
 //! A radio send that fails does **not** return an error to the server. The
 //! server's `tick_and_send` stops answering the whole batch on the first
 //! transport error, and one dying radio link must not cost the USB cable its
@@ -64,12 +75,14 @@ use embedded_hal_async::delay::DelayNs;
 use lp_link::{CH_PROTO, LinkEvent, LinkState, Micros, ResetReason, SendError};
 use lpa_server::LpServer;
 use lpc_shared::transport::{Incoming, Link, LinkId, ServerTransport};
+#[cfg(feature = "wifi")]
+use lpc_shared::transport::{KeyAnswer, LinkTrust, SecureLinkEvent};
 use lpc_wire::server::ServerMsgBody;
 use lpc_wire::{LinkCounterTally, TransportError, WireServerMessage};
 
 use super::frame_buf_holder::FrameBufHolder;
 use super::radio_link_config::SMALL_REPLY_BYTES;
-use super::radio_link_port::{RADIO_LINK_SLOTS, RadioLinkEvent, RadioLinkPort, RadioLinkSlot};
+use super::radio_link_port::{LINK_SLOTS, RadioLinkEvent, RadioLinkPort, RadioLinkSlot};
 use crate::link_upkeep::LinkUpkeep;
 use crate::serial::packed_link::PackedLink;
 use crate::serial::server_msg::frame_bytes;
@@ -90,6 +103,12 @@ pub const LOGIN_DEADLINE_MS: u64 = 10_000;
 struct RadioLink {
     id: LinkId,
     slot: usize,
+    /// The link as the server sees it: untrusted (Bluetooth) or keyed (LAN).
+    wire: Link,
+    /// A keyed link's handshake asked for this key id; the server's answer
+    /// goes back to it.
+    #[cfg(feature = "wifi")]
+    pending_key: Option<lp_link::secure_channel::KeyId>,
     /// Server-loop time the link was first seen by the upkeep, which starts
     /// its login deadline.
     opened_at_ms: Option<u64>,
@@ -131,6 +150,9 @@ pub struct LinkMuxTransport<U, D> {
     inbox: VecDeque<Incoming>,
     /// Closed links the server has not been told about yet.
     closed: Vec<LinkId>,
+    /// Keyed links' handshake events the server has not taken yet.
+    #[cfg(feature = "wifi")]
+    secure: Vec<(LinkId, SecureLinkEvent)>,
     upkeep_hook: Option<fn(&LpServer, u64)>,
 }
 
@@ -146,6 +168,8 @@ impl<U: ServerTransport + FrameBufHolder, D: DelayNs> LinkMuxTransport<U, D> {
             radio: Vec::new(),
             inbox: VecDeque::new(),
             closed: Vec::new(),
+            #[cfg(feature = "wifi")]
+            secure: Vec::new(),
             upkeep_hook: None,
         }
     }
@@ -176,7 +200,7 @@ impl<U: ServerTransport + FrameBufHolder, D: DelayNs> LinkMuxTransport<U, D> {
                 continue;
             }
             let opened_at = *link.opened_at_ms.get_or_insert(now_ms);
-            let wire_link = RadioLinkPort::link(link.id);
+            let wire_link = link.wire;
             if has_tier(wire_link) {
                 link.cleared = true;
             } else if now_ms.saturating_sub(opened_at) >= LOGIN_DEADLINE_MS
@@ -208,11 +232,11 @@ impl<U: ServerTransport + FrameBufHolder, D: DelayNs> LinkMuxTransport<U, D> {
         while let Some(event) = self.port.try_event() {
             match event {
                 RadioLinkEvent::Opened { link, slot } => {
-                    if slot >= RADIO_LINK_SLOTS || self.radio.iter().any(|l| l.slot == slot) {
+                    if slot >= LINK_SLOTS || self.radio.iter().any(|l| l.slot == slot) {
                         // Cannot happen with a well-behaved radio side; if it
                         // does, refuse the newcomer rather than cross wires.
                         log::error!("radio link {link}: slot {slot} unusable — closing");
-                        if slot < RADIO_LINK_SLOTS {
+                        if slot < LINK_SLOTS {
                             self.port.slot(slot).request_close("slot already in use");
                         }
                         continue;
@@ -221,6 +245,9 @@ impl<U: ServerTransport + FrameBufHolder, D: DelayNs> LinkMuxTransport<U, D> {
                     self.radio.push(RadioLink {
                         id: link,
                         slot,
+                        wire: self.port.link_on(slot, link),
+                        #[cfg(feature = "wifi")]
+                        pending_key: None,
                         opened_at_ms: None,
                         cleared: false,
                         session: None,
@@ -248,8 +275,14 @@ impl<U: ServerTransport + FrameBufHolder, D: DelayNs> LinkMuxTransport<U, D> {
     fn pump_radio(&mut self) {
         let port = self.port;
         let now = now_us();
+        #[cfg(feature = "wifi")]
+        let mut reset_keyed: Vec<LinkId> = Vec::new();
         for radio in &mut self.radio {
             let slot = port.slot(radio.slot);
+            #[cfg(feature = "wifi")]
+            if radio.wire.trust == LinkTrust::Keyed {
+                take_secure_events(slot, radio, &mut self.secure);
+            }
             while !radio.hello_owed {
                 let Some(Some(event)) = slot.with_link(radio.id, |link| link.recv()) else {
                     break;
@@ -264,8 +297,7 @@ impl<U: ServerTransport + FrameBufHolder, D: DelayNs> LinkMuxTransport<U, D> {
                                 // them would pin their hole).
                                 drop(data);
                                 log::debug!("radio link {}: received id={}", radio.id, msg.id);
-                                self.inbox
-                                    .push_back(Incoming::on(RadioLinkPort::link(radio.id), msg));
+                                self.inbox.push_back(Incoming::on(radio.wire, msg));
                             }
                             Err(error) => {
                                 radio.tally.note_payload_error();
@@ -293,12 +325,30 @@ impl<U: ServerTransport + FrameBufHolder, D: DelayNs> LinkMuxTransport<U, D> {
                         log::debug!("radio link {}: {} B of text ignored", radio.id, text.len());
                     }
                     LinkEvent::Up { generation } => {
+                        // A keyed link's grant before its hello: the key the
+                        // handshake verified decides its tier.
+                        #[cfg(feature = "wifi")]
+                        if radio.wire.trust == LinkTrust::Keyed
+                            && let Some(Some(auth)) = slot.with_link(radio.id, |l| l.session_auth())
+                        {
+                            self.secure.push((
+                                radio.id,
+                                SecureLinkEvent::Authenticated {
+                                    salt: auth.key_id.0,
+                                    candidate: auth.candidate,
+                                },
+                            ));
+                        }
                         radio.packed.back_to_json();
                         radio.session = Some(generation);
                         radio.hello_owed = true;
                         log::info!("radio link {}: session {generation} up", radio.id);
                     }
                     LinkEvent::Reset { reason, generation } => {
+                        #[cfg(feature = "wifi")]
+                        if radio.wire.trust == LinkTrust::Keyed && radio.session.is_some() {
+                            reset_keyed.push(radio.id);
+                        }
                         radio.packed.back_to_json();
                         radio.session = None;
                         radio.tally.note_reset(reason);
@@ -321,6 +371,13 @@ impl<U: ServerTransport + FrameBufHolder, D: DelayNs> LinkMuxTransport<U, D> {
                 radio.tally.note_stalled(stalled);
             }
         }
+        #[cfg(feature = "wifi")]
+        for id in reset_keyed {
+            log::info!(
+                "radio link {id}: keyed session reset — closing (a new session is a new link)"
+            );
+            self.close_radio(id, "secure session reset");
+        }
     }
 
     /// Drop `id` from the mux, drop its link (it stops reading the frame
@@ -342,7 +399,7 @@ impl<U: ServerTransport + FrameBufHolder, D: DelayNs> LinkMuxTransport<U, D> {
     /// cutting it into frames, and is closed past that.
     async fn release_radio_holders(&mut self) {
         let port = self.port;
-        for index in 0..RADIO_LINK_SLOTS {
+        for index in 0..LINK_SLOTS {
             let slot = port.slot(index);
             if !slot.external_in_flight() {
                 continue;
@@ -485,6 +542,52 @@ fn queue_reply(
     }
 }
 
+/// Take a keyed link's handshake events into `out`: a key lookup for the
+/// server (its key id kept for the answer), or a wrong key to charge to the
+/// backoff. An initiator's events (`Refused`, `PeerNotSecure`) never reach a
+/// responder.
+#[cfg(feature = "wifi")]
+fn take_secure_events(
+    slot: &RadioLinkSlot,
+    radio: &mut RadioLink,
+    out: &mut Vec<(LinkId, SecureLinkEvent)>,
+) {
+    use lp_link::secure_channel::SecureEvent;
+    while let Some(Some(event)) = slot.with_link(radio.id, |l| l.poll_secure_event()) {
+        match event {
+            SecureEvent::KeyLookup { key_id } => {
+                radio.pending_key = Some(key_id);
+                out.push((radio.id, SecureLinkEvent::KeyLookup { salt: key_id.0 }));
+            }
+            SecureEvent::WrongKey { key_id } => {
+                out.push((radio.id, SecureLinkEvent::WrongKey { salt: key_id.0 }));
+            }
+            SecureEvent::Refused { .. } | SecureEvent::PeerNotSecure => {}
+        }
+    }
+}
+
+/// Hand the server's answer to a key lookup to the link: its candidate PSKs,
+/// or a refusal in the handshake's own words.
+#[cfg(feature = "wifi")]
+fn answer_lookup(
+    link: &mut lp_link::Link<lp_link::SelectiveRepeat>,
+    key_id: lp_link::secure_channel::KeyId,
+    answer: KeyAnswer,
+) {
+    use lp_link::secure_channel::{Psk, RefusalReason};
+    match answer {
+        KeyAnswer::Keys(psks) => {
+            let psks: Vec<Psk> = psks.into_iter().map(Psk::new).collect();
+            link.provide_keys(key_id, &psks);
+        }
+        KeyAnswer::Unknown => link.refuse(key_id, RefusalReason::UnknownKey, 0),
+        KeyAnswer::Backoff { retry_after_ms } => {
+            link.refuse(key_id, RefusalReason::Backoff, retry_after_ms);
+        }
+    }
+}
+
 /// Resolves once `slot`'s link no longer reads the frame buffer, waking the
 /// radio side to keep cutting frames meanwhile.
 async fn wait_for_release(slot: &RadioLinkSlot) {
@@ -532,7 +635,7 @@ impl<U: ServerTransport + FrameBufHolder, D: DelayNs> ServerTransport for LinkMu
 
     fn links(&self) -> Vec<Link> {
         let mut links = self.primary.links();
-        links.extend(self.radio.iter().map(|l| RadioLinkPort::link(l.id)));
+        links.extend(self.radio.iter().map(|l| l.wire));
         links
     }
 
@@ -540,6 +643,26 @@ impl<U: ServerTransport + FrameBufHolder, D: DelayNs> ServerTransport for LinkMu
         let mut closed = self.primary.take_closed_links();
         closed.append(&mut self.closed);
         closed
+    }
+
+    #[cfg(feature = "wifi")]
+    fn take_secure_events(&mut self) -> Vec<(LinkId, SecureLinkEvent)> {
+        self.drain_events();
+        self.pump_radio();
+        core::mem::take(&mut self.secure)
+    }
+
+    #[cfg(feature = "wifi")]
+    fn answer_key_lookup(&mut self, link: LinkId, answer: KeyAnswer) {
+        let Some(radio) = self.radio.iter_mut().find(|l| l.id == link) else {
+            return;
+        };
+        let Some(key_id) = radio.pending_key.take() else {
+            return;
+        };
+        let slot = self.port.slot(radio.slot);
+        slot.with_link(link, |l| answer_lookup(l, key_id, answer));
+        slot.ring();
     }
 
     async fn close(&mut self) -> Result<(), TransportError> {
@@ -562,7 +685,7 @@ impl<U: ServerTransport + FrameBufHolder + LinkUpkeep, D: DelayNs> LinkUpkeep
         self.pump_radio();
         for radio in &mut self.radio {
             if core::mem::take(&mut radio.hello_owed) {
-                opened.push(RadioLinkPort::link(radio.id));
+                opened.push(radio.wire);
             }
         }
         opened
