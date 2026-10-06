@@ -4684,6 +4684,35 @@ walk-wifi-emu lane:
 walk-drop-emu *args:
     node scripts/emu/walk-drop-emu.mjs {{ args }}
 
+# The over-the-air update walk (OTA M7 P9): real Studio, headless, updating
+# emulated C6 boards over `?emu=` USB — X → Y with a backup, a cable cut
+# mid-core and mid-engine finished with no click, an engine-less board
+# restored on connect, "Needs X, which Studio can't get" → Install Y, and a
+# pre-update single image left on today's USB flash. `--tab` walks update,
+# cut-core and engine-less with the board a Worker in the page (`?emu=tab`);
+# `--steps a,b` picks steps; `--fresh` starts from a browser that has never
+# seen a board. Builds what is missing first: X (`scripts/ota/build-image.sh`,
+# app version a0a0a0a0), the pre-update single image, this Studio's own split
+# package Y and the release bundle (`studio-web-story-build`, which bundles
+# Y's update files). Serves the bundle itself (no dev server). Proves the
+# transport, the card and the board's own words — not Bluetooth, and not
+# Chromium's USB stack (the desk check does that). Minutes per step; not CI.
+walk-ota-emu *args: install-rv32-target
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cargo build -q -p lp-cli
+    images=target/walk-ota-emu/images
+    if [[ ! -f "${images}/x/merged.bin" ]]; then
+        scripts/ota/build-image.sh "${images}/x" a0a0a0a0
+    fi
+    if [[ ! -f "${images}/mono/package/manifest.json" ]]; then
+        ./target/debug/lp-cli firmware package esp32c6-4mb --single-image --out "${images}/mono/package"
+    fi
+    # Y last: build-image.sh writes the parts directory the bundle copies.
+    just studio-firmware-package-esp32c6 split
+    just studio-web-story-build
+    node scripts/emu/walk-ota-emu.mjs {{ args }}
+
 # The hardware-validation system: payloads, configurations, transcripts,
 # replay. `just validate list` with no other args; `replay <transcript>
 # --against <transcript|configuration>`; `run <set> --config <name> --port …
