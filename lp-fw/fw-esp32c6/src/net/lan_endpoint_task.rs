@@ -46,9 +46,16 @@ use fw_esp32_common::radio_link::{
 
 /// The endpoint's port (plan Q6: 80, room for the device-served panel).
 pub const LINK_PORT: u16 = 80;
-/// TCP buffers per link, each way: two WebSocket frames.
+/// TCP buffers per link. Receive: two WebSocket frames. Send: a whole
+/// lp-link window (2 frames of `LAN_MAX_FRAME` plus their WebSocket
+/// headers) and room for the ACKs and a keepalive beside it, so the link
+/// never waits on its own socket for a window it may send.
 const TCP_RX: usize = 2 * 1024;
-const TCP_TX: usize = 2 * 1024;
+const TCP_TX: usize = 4 * 1024;
+/// A server frame's WebSocket header at the sizes a link sends (126..65535
+/// bytes: 4 B; shorter: 2 B).
+const WS_TX_HEADER: usize = 4;
+const _: () = assert!(2 * (LAN_MAX_FRAME + WS_TX_HEADER) + 256 <= TCP_TX);
 /// A peer that sends nothing for this long is gone (lp-link's own keepalive
 /// is 1 s, so a live peer never gets near it).
 const IDLE_TIMEOUT: Duration = Duration::from_secs(20);
@@ -105,6 +112,11 @@ pub async fn lan_link_task(
         net_address::wait_up(&mut address).await;
         let mut socket = TcpSocket::new(stack, &mut *buffers.tcp_rx, &mut *buffers.tcp_tx);
         socket.set_timeout(Some(IDLE_TIMEOUT));
+        // One write is one whole WebSocket message (one lp-link frame): send
+        // it now. With Nagle on, a short frame waited for the peer's delayed
+        // ACK of the one before (40 ms or more on a real host), which the
+        // emulated walk measured as resends and an editor would feel as lag.
+        socket.set_nagle_enabled(false);
         if socket.accept(LINK_PORT).await.is_err() {
             Timer::after(Duration::from_millis(100)).await;
             continue;
