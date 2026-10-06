@@ -8927,6 +8927,11 @@ impl StudioController {
         &self.devices
     }
 
+    #[cfg(test)]
+    pub(crate) fn devices_mut_for_test(&mut self) -> &mut crate::DeviceRoster {
+        &mut self.devices
+    }
+
     /// The access controller, for e2e rows that install this browser's key
     /// on a model board.
     pub(crate) fn access_for_test(&self) -> &crate::app::access::AccessController {

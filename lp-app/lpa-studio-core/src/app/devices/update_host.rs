@@ -530,6 +530,7 @@ impl HostState {
     /// The leg's link is gone: down for the driver, `Interrupted` for the
     /// activity.
     fn leg_lost(&mut self, device: DeviceId, reason: &str) {
+        log::info!("update: {device:?}'s leg ended: {reason}");
         let Some(seams) = self.seams.clone() else {
             return;
         };
@@ -572,7 +573,12 @@ impl HostState {
                 Some(found) => (found.activity_kind(), Some(&found.evidence)),
                 None => match roster.pending().iter().find(|p| p.device_id() == device) {
                     Some(pending) => (pending.activity_kind(), Some(pending.evidence())),
-                    None => (None, None),
+                    None => {
+                        if self.follow_merge(roster, device) {
+                            continue;
+                        }
+                        (None, None)
+                    }
                 },
             };
             if kind != Some(ActivityKind::Update) {
@@ -581,6 +587,7 @@ impl HostState {
                 let engine = evidence
                     .and_then(|e| e.update_facts())
                     .and_then(board_engine_sha);
+                log::info!("update: {device:?}'s run dropped: its activity is now {kind:?}");
                 self.drop_run(device, Some((engine, false)));
                 continue;
             }
@@ -598,6 +605,41 @@ impl HostState {
                 self.leg_lost(device, "the board's link closed");
             }
         }
+    }
+
+    /// `device` is gone from the roster because it was merged into another
+    /// entry — an anonymous card kept with "Set up this device" whose hello
+    /// then names a board Studio remembers (E13 on a known board, found in
+    /// the emulator walk). The roster moved the running Update, effect stamps
+    /// and all, to the surviving entry (and routes markers still addressed
+    /// to the old id there, `Roster::merged_into`); the run follows it
+    /// instead of being dropped, which left the card on "Finishing the
+    /// update…" with nothing driving it. Answers whether it moved.
+    fn follow_merge(&mut self, roster: &Roster, device: DeviceId) -> bool {
+        let Some(into) = roster.merged_into(device).filter(|into| {
+            roster
+                .device(*into)
+                .is_some_and(|d| d.activity_kind() == Some(ActivityKind::Update))
+        }) else {
+            return false;
+        };
+        if self.runs.contains_key(&into) {
+            return false;
+        }
+        let Some(run) = self.runs.remove(&device) else {
+            return false;
+        };
+        let generation = run.generation;
+        self.runs.insert(into, run);
+        if let Some(pin) = self.pins.remove(&device) {
+            self.pins.insert(into, pin);
+        }
+        log::info!("update: {device:?} was merged into {into:?}; its update follows");
+        // The run's ticks were keyed by the old id: tick the new one.
+        if let Some(seams) = self.seams.clone() {
+            spawn_ticks(&seams, self.me.clone(), into, generation);
+        }
+        true
     }
 
     /// Forget `device`'s run. `block`: remember a miss (the board's engine,
@@ -861,7 +903,10 @@ impl HostState {
                     ActivityMarker::UpdateStage { stage, done, total },
                 );
             }
-            DriverEffect::Decided(decision) => self.decided(device, decision),
+            DriverEffect::Decided(decision) => {
+                log::info!("update: {device:?} decided {decision:?}");
+                self.decided(device, decision)
+            }
             DriverEffect::Done(finish) => {
                 if matches!(
                     finish,
@@ -1214,6 +1259,7 @@ impl HostState {
             return;
         };
         let now = seams.now_ms();
+        log::info!("update: {device:?}'s link session reset; the driver waits for the board");
         driver.link_down(now);
         // Whatever the driver says on a session that is gone goes nowhere.
         for effect in driver.take_effects() {
@@ -1244,6 +1290,7 @@ impl HostState {
         if !core::mem::replace(&mut run.session_reset, false) {
             return;
         }
+        log::info!("update: {device:?}'s board is back on a new link session");
         let now = seams.now_ms();
         let effect = run.last_effect;
         if let Some(line) = run.narration.link_up(now) {
@@ -1264,9 +1311,18 @@ impl HostState {
         let Some(device) = self.leg_on(link) else {
             // No leg on this link (a board's own `M` on link-up, a watched
             // board's answer): its facts reach the fold decoded.
+            if !self.runs.is_empty() {
+                log::info!(
+                    "update: a {} on {link:?}, where no update leg runs",
+                    lpc_wire_type(bytes)
+                );
+            }
             return;
         };
         let now = seams.now_ms();
+        if bytes.first() == Some(&b'M') {
+            log::debug!("update: an M for {device:?}");
+        }
         match self.runs.get_mut(&device).map(|run| &mut run.phase) {
             Some(RunPhase::Driving(driver)) => {
                 driver.on_board(now, bytes, &self.credentials);
@@ -1331,6 +1387,7 @@ impl HostState {
         let Some(mut run) = self.runs.remove(&device) else {
             return;
         };
+        log::info!("update: {device:?} ended: {outcome:?}");
         let effect_id = run
             .leg
             .as_ref()
@@ -1513,5 +1570,14 @@ impl core::fmt::Display for DriverEffectName<'_> {
             DriverEffect::Done(_) => "done",
         };
         f.write_str(name)
+    }
+}
+
+/// A channel-3 message's type, for a log line.
+fn lpc_wire_type(bytes: &[u8]) -> String {
+    match bytes.first() {
+        Some(ty) if ty.is_ascii_graphic() => char::from(*ty).to_string(),
+        Some(ty) => format!("{ty:#04x}"),
+        None => "empty message".to_string(),
     }
 }
