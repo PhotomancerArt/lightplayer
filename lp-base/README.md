@@ -17,3 +17,4 @@ Inhabitants:
   region, recovery frame stack, blame ledger. See
   `docs/adr/2026-07-04-crash-recovery-model.md`.
 - `lp-crc32` — the one CRC-32 (IEEE) of the boot and update records, shared instead of copied.
+- `lp-seam` — the emulator seam ABI: declarations, identity, the firmware's descriptor table and the seam-function generators (MIT, no_std, no deps). See its README.
