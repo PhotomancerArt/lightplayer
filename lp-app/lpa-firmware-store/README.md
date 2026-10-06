@@ -40,6 +40,18 @@ in the store) or for a release the store lacks, and
 `Err(StoreError::EngineMismatch)` when the store has the build but not the
 engine the board reported.
 
+## The engine a USB install wrote
+
+`keep_installed_engine(fetch, cache, manifest_url, now)`: after a successful
+USB install, Studio reads the package back from where its flasher read it
+(the bundle's `firmware/<target>/manifest.json` and the merged image beside
+it), and for a split package `InstalledPackage` checks the image against the
+package, slices the engine out by the `split` block's flash offset, checks
+it against the block's SHA-256, and the engine is put as `installed`. A
+package with no `split` block keeps nothing. The caller runs it after the
+install's outcome is reported and only logs the answer
+(`firmware cache: kept engine <sha8> (installed, <buildId>)`, or a warn).
+
 ## What is not here
 
 Ordering the sources (cache → store → read-back) and read-back itself are
@@ -58,3 +70,5 @@ manifest format and the URL grammar are `lpc-firmware-release`'s.
 | `firmware_fetch.rs` | the `FirmwareFetch` port |
 | `firmware_store.rs` | `FirmwareStore`, `StoreError`, the default origin |
 | `fetch_engine_from_store.rs` | an engine for a board, verified |
+| `installed_engine.rs` | `InstalledPackage`, `engine_from_merged_image`: a split package's engine out of its merged image |
+| `keep_installed_engine.rs` | `keep_installed_engine`, `KeptEngine`: the USB install's keep |

@@ -6,8 +6,9 @@
 //!
 //! Per target: the package manifest as `<target>.package.json` (its bytes
 //! verbatim) and each image as `<target>.<image>`; for a split package also
-//! `<target>.ota-manifest.json` and every file it names. Nothing here
-//! uploads; the release workflow does (a later phase).
+//! `<target>.ota-manifest.json` and every file it names. Every staged
+//! target carries **one version** (roadmap N7: one build per release).
+//! Nothing here uploads; `scripts/release/release-firmware.sh` does.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -83,11 +84,32 @@ pub fn stage_release_assets(
     std::fs::create_dir_all(out).with_context(|| format!("creating {}", out.display()))?;
 
     let mut staged = BTreeMap::new();
+    let mut versions = BTreeMap::new();
     for target in targets {
-        stage_target(sources, target, out, allow_dev, &mut staged)
+        let version = stage_target(sources, target, out, allow_dev, &mut staged)
             .with_context(|| format!("staging {target}"))?;
+        versions.insert(target.clone(), version);
     }
+    one_version(&versions)?;
     Ok(staged)
+}
+
+/// A release is one build (roadmap N7): every target it carries has one
+/// version. `versions` maps each target to its package's version.
+pub fn one_version(versions: &BTreeMap<String, String>) -> Result<()> {
+    let distinct: std::collections::BTreeSet<&str> =
+        versions.values().map(String::as_str).collect();
+    ensure!(
+        distinct.len() <= 1,
+        "a release is one build, but its targets carry {} versions: {}",
+        distinct.len(),
+        versions
+            .iter()
+            .map(|(target, version)| format!("{target} {version}"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+    Ok(())
 }
 
 fn stage_target(
@@ -96,7 +118,7 @@ fn stage_target(
     out: &Path,
     allow_dev: bool,
     staged: &mut BTreeMap<String, u64>,
-) -> Result<()> {
+) -> Result<String> {
     let name = TargetName::parse(target).with_context(|| format!("`{target}` is not a target"))?;
     let package_dir = sources.packages_root.join(target);
     let read = |dir: &Path, file: &str| -> Result<Vec<u8>> {
@@ -144,7 +166,7 @@ fn stage_target(
     }
 
     if package.split.is_none() {
-        return Ok(());
+        return Ok(version.to_string());
     }
     let ota_dir = sources.parts_root.join(target);
     let ota_path = ota_dir.join(OTA_MANIFEST_FILE);
@@ -195,7 +217,7 @@ fn stage_target(
         "the OTA manifest's image `{}` is not one of the package's images",
         ota.package.image.file
     );
-    Ok(())
+    Ok(version.to_string())
 }
 
 /// A release stages release versions only; `allow_dev` (the pre-merge dry
@@ -316,6 +338,27 @@ mod tests {
         let error =
             stage_release_assets(&sources(&fx), &[TARGET.to_string()], &out, true).unwrap_err();
         assert!(error.to_string().contains("not empty"), "{error}");
+    }
+
+    /// Roadmap N7: one build per release. A target packaged at another
+    /// version (a stale package left from an earlier build) is refused.
+    #[test]
+    fn every_target_must_carry_one_version() {
+        let fx = Fixture::new("2026.10.05-3");
+        fx.write().unwrap().unwrap();
+        fx.add_plain_package("esp32s3-8mb", "esp32s3", "2026.10.05-2");
+        let error = stage_release_assets(
+            &sources(&fx),
+            &[TARGET.to_string(), "esp32s3-8mb".to_string()],
+            &fx.root.join("stage"),
+            false,
+        )
+        .unwrap_err();
+        let error = format!("{error:#}");
+        assert!(
+            error.contains("2 versions: esp32c6-4mb 2026.10.05-3, esp32s3-8mb 2026.10.05-2"),
+            "{error}"
+        );
     }
 
     #[test]
