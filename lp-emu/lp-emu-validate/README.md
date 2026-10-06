@@ -270,16 +270,38 @@ An overlay entry **replaces** the base's entry for its class; `grade =
 "absent"` marks a class the implementation does not produce at all, which
 `--strict` refuses like any grade below `measured`. Nobody writes one table
 per combination. `led=fast`'s overlay replaces only `timing` — `pin` stays the
-base's, because the LED seam keeps the pads.
+base's, because the LED seam keeps the pads. `net=lan`'s (the network
+capability seam, engaged by default on every emulated C6 run whose image
+carries it) moves no grade: the layers above the frame device are the
+shipped image's own, `memory` keeps the base's `modeled` with the one caveat
+it must carry (a heap figure off a JOINED board misses the Wi-Fi driver's own
+allocations), and `timing` is left alone so t3's band survives. What it
+cannot see — signal strength, airtime and throughput, coexistence with BLE and
+ESP-NOW, the driver's own heap and timing — has no field class in this table,
+so it is stated in the overlay's description rather than graded `absent`;
+the first payload to make a radio claim adds the class.
 
 **Performance seams never make transcripts**: `validate record` and
 `validate run` refuse a composite with a performance atom and name the base
-to use instead. A capability seam's composite may record (none exists yet);
-its sidecar then carries `"seams": {"<seam>": "<impl>"}` and `"seam_abi"`,
-and **only** then — every seam-free sidecar is byte-identical to what it was
-before seams existed. Tools read those structured fields, never the label.
+to use instead. A capability seam's composite (`…+net=lan`) records, on our
+own emulators only; its sidecar then carries `"seams": {"<seam>": "<impl>"}`
+and `"seam_abi"`, and **only** then — every seam-free sidecar is
+byte-identical to what it was before seams existed — and it files beside the
+seam-free capture (`lp-emu-esp32c6-t1+net=lan-<date>-<commit>.txt`), never on
+top of it. Tools read those structured fields, never the label.
 `lp-cli`'s parity test checks every overlay names an implementation the
 emulator has, of the same kind.
+
+**The configuration is the whole seam request.** An emulated C6 adds its
+capability defaults softly to any run that does not say otherwise, so a plan
+for `lp-emu:esp32c6:t1` on an image with the network seam would earn
+`…:t1+net=lan` under a sidecar that says `…:t1`. The C6 plan therefore always
+states `--seams`: the composite's atoms (strict, so an image without them
+fails rather than recording seam-free under the composite's label), or
+`none` for a plain name, which is exactly how every seam-free recipe ran
+before seams existed. `validate replay --against <configuration>` matches a
+committed capture by its label, so `…:t1` and `…:t1+net=lan` never find each
+other's transcripts.
 
 ## Transcript
 

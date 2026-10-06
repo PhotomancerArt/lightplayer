@@ -276,6 +276,18 @@ different deepest point (11,432 B here, 11,560 B on a runner). See
 `docs/debt/reference-images-are-not-reproducible-across-hosts.md`. The band is
 the measured spread with room; it is never widened to make a run pass.
 
+**The configuration is the run's label, read off the run.** The C6 engages
+its capability seam `net=lan` (docs/adr/2026-10-05-emulator-seams.md) on
+every boot of an image that carries it, so the gate prints the label the
+machine earned (`lp-emu:esp32c6:t1+net=lan`: the boot line's grade plus each
+`SEAM … engaged` announcement) and a re-baseline that moves a figure stamps
+it into the record's `configuration`. It is provenance, never a figure, and
+never gated: the first heartbeat comes before any network is joined, the
+firmware allocates nothing for the link until one is, and so the seam moves
+none of the numbers above. If engaging it ever does move one, that is the
+firmware allocating for a link that is not up, which is a finding, not a
+bless.
+
 ### The stack's size is derived, not recorded
 
 On all three chips esp-hal's `ld/sections/stack.x` opens `.stack` at

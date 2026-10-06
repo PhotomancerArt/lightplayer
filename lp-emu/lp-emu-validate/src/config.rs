@@ -283,7 +283,11 @@ impl ValidateConfig {
                     .join(", ")
             ),
         };
-        let atoms: Vec<&str> = parts.collect();
+        // Label order is sorted (the ADR's label rule), whatever order the
+        // caller typed: `…+net=lan+led=fast` and `…+led=fast+net=lan` are one
+        // configuration, composed the same way and labelled the same.
+        let mut atoms: Vec<&str> = parts.collect();
+        atoms.sort_unstable();
         if atoms.is_empty() {
             return Ok(Cow::Borrowed(base));
         }
@@ -484,6 +488,65 @@ chip = "esp32c6"
             );
         }
         assert_eq!(led.parsed().unwrap().name(), "lp-emu:esp32c6:t2");
+    }
+
+    /// `net=lan` composes onto every C6 grade as a capability seam, moves no
+    /// grade anywhere (the layers above the frame device are the base's), and
+    /// keeps t3's documented timing band — the label of nearly every emulated
+    /// C6 run must grade exactly what the seam-free run grades.
+    #[test]
+    fn net_lan_is_a_capability_overlay_that_moves_no_grade() {
+        let cfg = ValidateConfig::embedded();
+        for base_name in [
+            "lp-emu:esp32c6:t1",
+            "lp-emu:esp32c6:t2",
+            "lp-emu:esp32c6:t3",
+        ] {
+            let base = cfg.configuration(base_name).unwrap();
+            let label = format!("{base_name}+net=lan");
+            let net = cfg.configuration(&label).unwrap();
+            assert_eq!(net.label(), label);
+            assert_eq!(net.name, base_name, "the base keeps its name");
+            assert!(net.performance_seam().is_none(), "a capability seam");
+            assert_eq!(net.seams[0].kind, SeamKind::Capability);
+            assert_eq!(net.records_pins, base.records_pins);
+            for class in FieldClass::ALL {
+                assert_eq!(
+                    net.trust.grade(*class),
+                    base.trust.grade(*class),
+                    "{label}: {class}"
+                );
+                if *class != FieldClass::Memory {
+                    assert_eq!(
+                        net.trust.because(*class),
+                        base.trust.because(*class),
+                        "{label}: {class}'s reason is the base's"
+                    );
+                }
+            }
+            assert_eq!(
+                net.trust.band(FieldClass::Timing).map(|b| b.describe()),
+                base.trust.band(FieldClass::Timing).map(|b| b.describe()),
+                "{label}: the timing band survives"
+            );
+            assert!(
+                net.trust
+                    .because(FieldClass::Memory)
+                    .unwrap()
+                    .contains("join allocations never happen"),
+                "{label}: memory carries the driver caveat"
+            );
+        }
+        // Label order is sorted whatever order the caller typed.
+        let a = cfg
+            .configuration("lp-emu:esp32c6:t2+net=lan+led=fast")
+            .unwrap();
+        let b = cfg
+            .configuration("lp-emu:esp32c6:t2+led=fast+net=lan")
+            .unwrap();
+        assert_eq!(a.label(), "lp-emu:esp32c6:t2+led=fast+net=lan");
+        assert_eq!(a.label(), b.label());
+        assert_eq!(a.performance_seam().unwrap().seam, "led");
     }
 
     #[test]

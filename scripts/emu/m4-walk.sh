@@ -741,9 +741,24 @@ else
         exit 1
     fi
 
+    # Each leg's configuration label as its run earned it: the grade the
+    # boot line printed plus every seam a chip start announced engaged
+    # (`lp-emu:esp32c6:t1+net=lan` once the image carries the network seam —
+    # a capability default, ADR 2026-10-05-emulator-seams §5), sorted.
+    label_of() {
+        local base atom label
+        base="$(grep -ao 'grade lp-emu:[^ ,+]*' "$1" | head -1 | cut -d' ' -f2 || true)"
+        label="${base:-unknown}"
+        for atom in $(grep -ao 'SEAM [a-z0-9_-]*=[a-z0-9_-]* engaged' "$1" \
+            | cut -d' ' -f2 | LC_ALL=C sort -u || true); do
+            label="${label}+${atom}"
+        done
+        echo "$label"
+    }
     lp_emu_sha="$(git -C "$REPO" rev-parse --short=9 HEAD)"
-    printf "frame rate: t1 %.1f fps (n=%s) · t3 %.1f fps (n=%s) (configuration=lp-emu:esp32c6:t{1,3}, lp-emu %s)\n" \
-        "$t1_fps" "$t1_n" "$t3_fps" "$t3_n" "$lp_emu_sha"
+    printf "frame rate: t1 %.1f fps (n=%s) · t3 %.1f fps (n=%s) (configuration=%s and %s, lp-emu %s)\n" \
+        "$t1_fps" "$t1_n" "$t3_fps" "$t3_n" "$(label_of "$OUT/emu.stderr")" \
+        "$(label_of "$OUT/emu.t3.stderr")" "$lp_emu_sha"
     echo "  t3 charges the flash-cache line fill (cache.rs CacheCost, 338 cycles/fill) that t1"
     echo "  does not; this project has no preempting thread, so no preemption cost is expected"
     echo "  here — unlike the reference below, where one is the whole point."
