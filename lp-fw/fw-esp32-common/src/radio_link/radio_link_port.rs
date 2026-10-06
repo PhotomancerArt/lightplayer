@@ -5,12 +5,18 @@
 //! This crate may not hold a radio stack (no esp-*, no BLE host — see the
 //! seam rules in `Cargo.toml`), so the two halves meet here:
 //!
+//! - **Mode.** The boot decides once what its radio links are for
+//!   ([`RadioLinkPort::decide_mode`]: serving the wire, or taking an update
+//!   in core-only — [`super::radio_link_mode`]). No link opens before that
+//!   ([`OpenRefused::ModeUndecided`]); the radio side waits for it
+//!   ([`RadioLinkPort::wait_for_mode`]).
 //! - **Links.** The radio side mints a [`LinkId`] per connection
 //!   ([`RadioLinkPort::mint_link`]: monotonic, never reused, never
 //!   [`LinkId::PRIMARY`]). Once it can deliver frames to the central (the
 //!   central enabled notifications), it opens the connection's lp-link session
-//!   on its slot ([`RadioLinkSlot::open`], sized to the connection's ATT MTU)
-//!   and announces it with [`RadioLinkEvent::Opened`]; when the connection is
+//!   on its slot ([`RadioLinkPort::open`], sized to the connection's ATT MTU,
+//!   configured for the boot's mode) and announces it with
+//!   [`RadioLinkEvent::Opened`]; when the connection is
 //!   gone it closes the slot ([`RadioLinkSlot::close`], which frees the link)
 //!   and announces [`RadioLinkEvent::Closed`]. Every radio link is
 //!   [`LinkTrust::Untrusted`].
@@ -20,7 +26,10 @@
 //!   notification. The radio side runs the link's timers
 //!   ([`RadioLinkSlot::poll_timeout`]) and wakes on the mux's doorbell.
 //! - **Messages.** The mux takes whole wire messages off the link and queues
-//!   replies onto it (`with_link`, crate-internal). A long reply stays in the
+//!   replies onto it (`with_link`, crate-internal); core-only takes the
+//!   link's events itself ([`RadioLinkSlot::recv`]). Channel 3, the update
+//!   protocol, is answered through [`RadioLinkPort::send_update`] by either
+//!   (the running engine's update hook, or core-only). A long reply stays in the
 //!   shared static frame buffer (`serial::server_msg`) as an lp-link
 //!   *external* message and the link cuts its frames from there, so while a
 //!   slot's link has one in flight ([`RadioLinkSlot::external_in_flight`]) no
@@ -41,15 +50,19 @@
 
 use alloc::boxed::Box;
 use core::cell::RefCell;
-use core::sync::atomic::{AtomicU32, Ordering};
+use core::sync::atomic::{AtomicU8, AtomicU32, Ordering};
 
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
 use embassy_sync::signal::Signal;
-use lp_link::{Link as LpLink, Micros, SelectiveRepeat};
+use lp_link::{
+    CH_UPDATE, Link as LpLink, LinkEvent, LinkState, Micros, SelectiveRepeat, SendError,
+};
 use lpc_shared::transport::{Link, LinkId, LinkTrust};
 
-use super::radio_link_config::{MtuTooSmall, radio_link_config};
+use super::radio_link_config::{MtuTooSmall, SMALL_REPLY_BYTES, radio_link_config};
+use super::radio_link_mode::RadioLinkMode;
+use crate::update_send::UpdateSend;
 
 /// How many radio links can be open at once. The BLE task accepts at most
 /// this many connections (DD12: two allowed, nothing gates on the second).
@@ -73,6 +86,17 @@ pub enum RadioLinkEvent {
 
 /// Why the mux closed a link: a fixed phrase for the log line.
 pub type CloseReason = &'static str;
+
+/// Why a slot did not open a link.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OpenRefused {
+    /// The connection's ATT MTU cannot carry a frame: the caller disconnects.
+    MtuTooSmall(MtuTooSmall),
+    /// The boot has not decided what its radio links are for yet
+    /// ([`RadioLinkPort::decide_mode`]): wait for
+    /// [`RadioLinkPort::wait_for_mode`].
+    ModeUndecided,
+}
 
 /// The link a slot holds, and which connection it belongs to.
 struct SlotLink {
@@ -115,12 +139,16 @@ impl RadioLinkSlot {
         self.released.signal(());
     }
 
-    /// Start `id`'s lp-link session on this slot, sized to the connection's
-    /// ATT MTU, under `nonce` (random per connection: it is how the host
-    /// learns this is a new session). `Err`: the MTU cannot carry a frame,
-    /// and the caller disconnects (see [`MtuTooSmall`]).
-    pub fn open(&self, id: LinkId, att_mtu: u16, nonce: u32) -> Result<u16, MtuTooSmall> {
-        let cfg = radio_link_config(att_mtu)?;
+    /// Start `id`'s lp-link session on this slot in `mode` (the port's
+    /// [`RadioLinkPort::open`] is the way in: it supplies the boot's).
+    fn open_in(
+        &self,
+        mode: RadioLinkMode,
+        id: LinkId,
+        att_mtu: u16,
+        nonce: u32,
+    ) -> Result<u16, MtuTooSmall> {
+        let cfg = radio_link_config(att_mtu, mode)?;
         let max_payload = cfg.max_payload;
         *self.link.borrow_mut() = Some(Box::new(SlotLink {
             id,
@@ -182,7 +210,21 @@ impl RadioLinkSlot {
         self.close_request.wait().await
     }
 
-    // ---- mux side ----
+    // ---- mux and core-only side ----
+
+    /// The next event of `id`'s link (a message, its session coming up or
+    /// resetting); `None` when there is none, or the slot holds no link or
+    /// another connection's. Core-only reads its links here; while the
+    /// engine runs, the mux does.
+    pub fn recv(&self, id: LinkId) -> Option<LinkEvent> {
+        self.with_link(id, LpLink::recv).flatten()
+    }
+
+    /// The lp-link session `id`'s link is in, while the slot holds it (a
+    /// message queued for one session must never reach the next).
+    pub fn generation(&self, id: LinkId) -> Option<u32> {
+        self.with_link(id, |link| link.generation())
+    }
 
     /// Ask the radio side to drop this slot's link.
     pub fn request_close(&self, reason: CloseReason) {
@@ -255,6 +297,9 @@ pub struct RadioLinkPort {
     slots: [RadioLinkSlot; RADIO_LINK_SLOTS],
     events: Channel<CriticalSectionRawMutex, RadioLinkEvent, EVENT_DEPTH>,
     next_link: AtomicU32,
+    /// The boot's [`RadioLinkMode`] as [`RadioLinkMode::code`] (0: not yet
+    /// decided), set once by [`Self::decide_mode`].
+    mode: AtomicU8,
 }
 
 impl Default for RadioLinkPort {
@@ -271,6 +316,7 @@ impl RadioLinkPort {
             events: Channel::new(),
             // 0 is `LinkId::PRIMARY` (the USB cable).
             next_link: AtomicU32::new(1),
+            mode: AtomicU8::new(0),
         }
     }
 
@@ -308,14 +354,167 @@ impl RadioLinkPort {
         self.slots.iter()
     }
 
+    /// Decide what this boot's radio links are for. Once per boot, before
+    /// the radio side may open a link; a connection waiting for it
+    /// ([`Self::wait_for_mode`]) wakes. A second, different decision is a
+    /// boot bug and is ignored (the first stands: links already open were
+    /// configured for it).
+    pub fn decide_mode(&self, mode: RadioLinkMode) {
+        let first = self
+            .mode
+            .compare_exchange(0, mode.code(), Ordering::AcqRel, Ordering::Acquire);
+        if let Err(held) = first
+            && held != mode.code()
+        {
+            log::error!("radio links: mode already decided — {mode:?} ignored");
+            return;
+        }
+        // The waiter is the slot's connection, on the doorbell it otherwise
+        // waits on for transmits (it holds no link yet, so nothing else
+        // rings it; a ring it later finds stale costs one quiet turn).
+        for slot in &self.slots {
+            slot.ring();
+        }
+    }
+
+    /// The boot's mode for its radio links, if decided.
+    #[must_use]
+    pub fn mode(&self) -> Option<RadioLinkMode> {
+        RadioLinkMode::from_code(self.mode.load(Ordering::Acquire))
+    }
+
+    /// Radio side: the boot's mode, once decided. Slot `slot`'s connection
+    /// waits here before it opens its link, so no link is ever configured
+    /// for a mode nobody chose (see [`super::radio_link_mode`]).
+    pub async fn wait_for_mode(&self, slot: usize) -> RadioLinkMode {
+        loop {
+            if let Some(mode) = self.mode() {
+                return mode;
+            }
+            self.slots[slot].doorbell().await;
+        }
+    }
+
+    /// Radio side: start `id`'s lp-link session on slot `slot`, sized to the
+    /// connection's ATT MTU and configured for the boot's mode, under `nonce`
+    /// (random per connection: it is how the host learns this is a new
+    /// session). The largest payload on success. `Err`: the MTU cannot
+    /// carry a frame (the caller disconnects, see [`MtuTooSmall`]), or the
+    /// mode is not decided yet — wait for [`Self::wait_for_mode`] first:
+    /// nothing opens before it.
+    pub fn open(
+        &self,
+        slot: usize,
+        id: LinkId,
+        att_mtu: u16,
+        nonce: u32,
+    ) -> Result<u16, OpenRefused> {
+        let mode = self.mode().ok_or(OpenRefused::ModeUndecided)?;
+        self.slots[slot]
+            .open_in(mode, id, att_mtu, nonce)
+            .map_err(OpenRefused::MtuTooSmall)
+    }
+
     /// Radio side: announce a link event. Waits if the server loop is
     /// behind (it drains events every frame).
     pub async fn announce(&self, event: RadioLinkEvent) {
         self.events.send(event).await;
     }
 
-    pub(crate) fn try_event(&self) -> Option<RadioLinkEvent> {
+    /// The next link event, if any. One reader per boot: the mux while the
+    /// engine runs, core-only otherwise.
+    pub fn try_event(&self) -> Option<RadioLinkEvent> {
         self.events.try_receive().ok()
+    }
+
+    /// Some radio link is still reading a long message out of the static
+    /// frame buffer: nothing may serialize into it yet. The USB link answers
+    /// the same question for itself (`UsbLinkShared::frame_buf_in_use`).
+    #[must_use]
+    pub fn frame_buf_in_use(&self) -> bool {
+        self.slots.iter().any(RadioLinkSlot::external_in_flight)
+    }
+
+    /// The lp-link session `link` is in, while it is open.
+    #[must_use]
+    pub fn link_generation(&self, link: LinkId) -> Option<u32> {
+        self.slots.iter().find_map(|slot| slot.generation(link))
+    }
+
+    /// Queue one channel-3 message (the over-the-air update protocol) on
+    /// `link` and wake the radio side: in the link's send ring when it is at
+    /// most [`SMALL_REPLY_BYTES`] (`R`, `N`, `M`, a login step), else — a
+    /// read-back `D`, one 4 KiB chunk — as the link's external message out of
+    /// the static frame buffer, when no radio link holds it. **The USB
+    /// link's hold on that buffer is the caller's to check first**
+    /// (`UsbLinkShared::frame_buf_in_use`): this port cannot see it.
+    ///
+    /// Call from task context only, on the task that writes the frame
+    /// buffer: the server loop's (the mux, the engine's update hook) or
+    /// core-only's, which has no transport.
+    pub fn send_update(&self, link: LinkId, bytes: &[u8]) -> UpdateSend {
+        let Some(slot) = self.slots.iter().find(|s| s.generation(link).is_some()) else {
+            return UpdateSend::NoSession;
+        };
+        let ring = bytes.len() <= SMALL_REPLY_BYTES;
+        let room = slot
+            .with_link(link, |l| {
+                if l.state() != LinkState::Established {
+                    return Err(UpdateSend::NoSession);
+                }
+                if ring {
+                    return Ok(update_send_result(l.send(CH_UPDATE, bytes)));
+                }
+                if bytes.len() > l.config().max_message {
+                    return Err(UpdateSend::TooBig);
+                }
+                // Room in principle: the frame buffer decides (below).
+                Err(UpdateSend::Queued)
+            })
+            .unwrap_or(Err(UpdateSend::NoSession));
+        let sent = match room {
+            Ok(sent) => sent,
+            Err(UpdateSend::Queued) if self.frame_buf_in_use() => UpdateSend::Later,
+            Err(UpdateSend::Queued) => slot.send_update_external(link, bytes),
+            Err(other) => other,
+        };
+        if sent == UpdateSend::Queued {
+            slot.ring();
+        }
+        sent
+    }
+}
+
+impl RadioLinkSlot {
+    /// A large channel-3 message through the frame buffer, which no link
+    /// holds (see [`RadioLinkPort::send_update`]): copied in, then queued as
+    /// `id`'s external message.
+    fn send_update_external(&self, id: LinkId, bytes: &[u8]) -> UpdateSend {
+        // SAFETY: the frame buffer's writers all run on this task (see
+        // `RadioLinkPort::send_update`), and no link reads it: no radio slot
+        // has an external message in flight (checked by the caller), and the
+        // USB link's hold is the caller's to have checked.
+        let buf = unsafe { crate::serial::server_msg::frame_buf_mut() };
+        let Some(dst) = buf.get_mut(..bytes.len()) else {
+            return UpdateSend::TooBig;
+        };
+        dst.copy_from_slice(bytes);
+        self.with_link(id, |l| {
+            if l.state() != LinkState::Established {
+                return UpdateSend::NoSession;
+            }
+            update_send_result(l.send_external(CH_UPDATE, bytes.len()))
+        })
+        .unwrap_or(UpdateSend::NoSession)
+    }
+}
+
+/// A link's answer to one channel-3 send.
+fn update_send_result(result: Result<(), SendError>) -> UpdateSend {
+    match result {
+        Ok(()) => UpdateSend::Queued,
+        Err(SendError::Full) => UpdateSend::Later,
+        Err(SendError::TooBig | SendError::BadChannel) => UpdateSend::TooBig,
     }
 }
 

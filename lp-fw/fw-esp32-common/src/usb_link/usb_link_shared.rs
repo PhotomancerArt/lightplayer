@@ -191,8 +191,15 @@ impl UsbLinkShared {
     /// when it fits ([`RING_MAX`](super::usb_update_channel::RING_MAX)),
     /// else as the external message out of the static frame buffer, when no
     /// reply holds it. Call from task context only: the frame buffer's
-    /// writers (this, the server transport, the BLE mux) all run on the
-    /// server loop's task or in core-only, which has no transport.
+    /// writers (this, the server transport, the BLE mux, a radio link's
+    /// `RadioLinkPort::send_update`) all run on the server loop's task or in
+    /// core-only, which has no transport.
+    ///
+    /// It checks only **this** link's hold on the frame buffer. A caller
+    /// with radio links beside it checks theirs first
+    /// (`RadioLinkPort::frame_buf_in_use`; the C6's `ota::UpdateLinks`
+    /// does), or a large answer could overwrite a reply a radio link is
+    /// still reading.
     pub fn send_update(&self, bytes: &[u8]) -> UpdateSend {
         use super::usb_update_channel::RING_MAX;
         let ring = bytes.len() <= RING_MAX;

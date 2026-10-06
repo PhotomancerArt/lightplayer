@@ -26,20 +26,29 @@
 //!    header of this build that fits is mapped by its own length. On a boot
 //!    whose record has no `confirmed` mark (the first after a USB flash) the
 //!    **engine guard** ([`engine_guard`], DD34) hashes it once against the
-//!    digest slot. Then it is entered, with the **running hook** installed
-//!    ([`running_hook`]): the engine's USB transport hands channel 3 — the
-//!    over-the-air update protocol — to the core's update session. Otherwise
-//!    — no engine, a guard mismatch, an engine that keeps crashing, or a
-//!    core on trial — the core runs **core-only** ([`core_only`]): it serves
-//!    the update protocol itself, confirms a trial once its link comes up,
-//!    takes a core or its engine, and heals.
+//!    digest slot. Then it is entered, with the **running hooks** installed
+//!    ([`running_hook`]): the engine's USB transport, and its link mux for
+//!    each radio link (with the tier the link's login or key granted), hand
+//!    channel 3 — the over-the-air update protocol — to the core's update
+//!    session. Otherwise — no engine, a guard mismatch, an engine that keeps
+//!    crashing, or a core on trial — the core runs **core-only**
+//!    ([`core_only`]): it serves the update protocol itself on USB and on
+//!    every radio link, confirms a trial once any link comes up, takes a
+//!    core or its engine, and heals.
+//!
+//! Which of the two it is also decides the boot's **radio link mode**
+//! (`RadioLinkMode`), before the radio side may open any link: engine →
+//! `Serve`, core-only → `Update` (the wide receive window). `split_boot`
+//! decides it in the same synchronous run as the engine choice, so no link
+//! can open first, and a link that tries waits for it.
 //!
 //! The update session is `lpc-update`'s `BoardSession`; [`update_edge`] is
 //! where the firmware drives it, over [`update_target_impl`]'s
-//! `UpdateTarget` (the fenced flash, layout 1, `lp-bootctl`'s formats).
-//! Core-only runs as its own embassy task, as the engine's server loop
-//! does. The protocol and its compatibility rules are
-//! `docs/adr/2026-10-06-ota-update-protocol.md`.
+//! `UpdateTarget` (the fenced flash, layout 1, `lp-bootctl`'s formats), and
+//! answers on the link each message came from ([`update_links`], one
+//! [`update_outbox`] per link). Core-only runs as its own embassy task, as
+//! the engine's server loop does. The protocol and its compatibility rules
+//! are `docs/adr/2026-10-06-ota-update-protocol.md`.
 //!
 //! # The update light
 //!
@@ -76,6 +85,7 @@ mod running_hook;
 mod split_flash;
 mod status_light;
 mod update_edge;
+mod update_links;
 mod update_outbox;
 mod update_target_impl;
 
@@ -84,8 +94,11 @@ pub use boot_state::BootState;
 pub use core_only::{CoreOnly, CoreOnlyReason, core_only};
 pub use engine_guard::engine_guard;
 pub use engine_window::{ENGINE_VADDR, map_engine, page_size};
+#[cfg(feature = "ble")]
+pub use running_hook::radio_update_hook;
 pub use running_hook::{install as install_running_hook, manifest as running_manifest};
 pub use status_light::StatusLight;
+pub use update_links::UpdateLinks;
 
 use split_flash::SplitFlash;
 

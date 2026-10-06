@@ -693,6 +693,12 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
     // slots hold `RefCell`s (one thread executor), which a `static` cannot.
     #[cfg(feature = "ble")]
     let radio_port = fw_esp32_common::radio_link::RadioLinkPort::leak();
+    // What the radio links are for, decided before the BLE task may open
+    // one (a link's SYN carries its receive window). A plain image always
+    // serves them; a split image decides in `split_boot`, once it has chosen
+    // engine or core-only — no link opens until then.
+    #[cfg(all(feature = "ble", not(lp_split)))]
+    radio_port.decide_mode(fw_esp32_common::radio_link::RadioLinkMode::Serve);
     #[cfg(feature = "ble")]
     let ble_started = {
         let store = lpa_server::access_store::device_store_at_boot(base_fs.as_ref(), fs_boot_state);
@@ -984,7 +990,9 @@ fn lp_engine_entry(core: CoreBoot) {
     // server loop after the first successful frame.
     drop(boot_guard);
 
-    // USB plus the radio links. The advertised-name hook only when BLE runs.
+    // USB plus the radio links. The advertised-name hook only when BLE runs;
+    // on a split image, each radio link's channel 3 goes to the core's
+    // update session with the tier the link was granted.
     #[cfg(feature = "ble")]
     let transport = {
         let mux = fw_esp32_common::radio_link::LinkMuxTransport::new(
@@ -992,6 +1000,8 @@ fn lp_engine_entry(core: CoreBoot) {
             radio_port,
             embassy_time::Delay,
         );
+        #[cfg(lp_split)]
+        let mux = mux.with_update_hook(ota::radio_update_hook);
         if ble_started {
             mux.with_upkeep_hook(ble::refresh_advertised_name)
         } else {
@@ -1305,9 +1315,24 @@ async fn split_boot(mut core: CoreBoot) {
     } else {
         lpc_update::board::LinkTrust::Trusted
     };
+    // Where the update session answers: USB, and the radio links.
+    let links = ota::UpdateLinks {
+        usb: core.usb_link,
+        #[cfg(feature = "ble")]
+        radio: core.radio_port,
+    };
+    // The radio links' mode follows the choice, decided here — in the same
+    // synchronous run as `core_boot`, so before the BLE task has run at all,
+    // and a connection that subscribes waits for it (`wait_for_mode`):
+    // core-only's links advertise the wide receive window from their SYN.
+    #[cfg(feature = "ble")]
+    core.radio_port.decide_mode(match engine {
+        Ok(_) => fw_esp32_common::radio_link::RadioLinkMode::Serve,
+        Err(_) => fw_esp32_common::radio_link::RadioLinkMode::Update,
+    });
     match engine {
         Ok((entry, len)) => {
-            ota::install_running_hook(core.usb_link, state, identity, len, access, usb_trust);
+            ota::install_running_hook(links, state, identity, len, access, usb_trust);
             entry(core)
         }
         Err(why) => {
@@ -1317,6 +1342,8 @@ async fn split_boot(mut core: CoreBoot) {
                 watchdog,
                 rmt_peripheral,
                 base_fs,
+                #[cfg(feature = "ble")]
+                radio_port,
                 ..
             } = core;
             // The update light: the strip the engine recorded, if any.
@@ -1331,6 +1358,8 @@ async fn split_boot(mut core: CoreBoot) {
             spawner.spawn(
                 core_only_task(ota::CoreOnly {
                     usb_link,
+                    #[cfg(feature = "ble")]
+                    radio_port,
                     watchdog,
                     state,
                     why,

@@ -29,6 +29,12 @@ use lpc_shared::output::MemoryOutputProvider;
 use lpc_shared::transport::{
     Incoming, KeyAnswer, Link, LinkId, LinkTrust, SecureLinkEvent, ServerTransport,
 };
+use lpc_update::board::{
+    AccessFacts, LinkId as UpdateLinkId, LinkTrust as UpdateTrust, SessionConfig, SessionMode,
+};
+use lpc_update::code_table::{CHIP_ESP32C6, LAYOUT_1, LOADER_1, PROTO_V1};
+use lpc_update::testing::{BoardRig, FakeBoard, ModelBuild};
+use lpc_update::{BoardMessage, CHUNK, HostMessage, Offer, PieceKind, ReadBackRequest, Refusal};
 use lpc_wire::server::{FsRequest, FsResponse, SampleStats};
 use lpc_wire::{
     ClientMessage, ClientRequest, HelloAuth, ProjectReadRequest, TransportError,
@@ -479,6 +485,7 @@ fn open_grants_play_and_never_edit() {
 fn locking_the_device_over_usb_takes_open_play_away() {
     let mut rig = Rig::for_state(LinkState::UntrustedOpen);
     assert_eq!(rig.server.link_tier(BLE_A), Some(Tier::Play));
+    assert_eq!(rig.server.device_open(), OpenTo::Play);
     let locked = DeviceAccessFile {
         open: OpenTo::Nobody,
         ..rig.store.clone()
@@ -495,6 +502,10 @@ fn locking_the_device_over_usb_takes_open_play_away() {
         WireServerMsgBody::Filesystem(FsResponse::Write { error: None, .. })
     ));
     assert_eq!(rig.server.link_tier(BLE_A), None);
+    // What the firmware hands the board's update session with a radio
+    // link's channel-3 message: the lock, at once, not at the next boot.
+    assert_eq!(rig.server.device_open(), OpenTo::Nobody);
+    assert_eq!(rig.server.link_granted_tier(BLE_A), None);
 }
 
 /// A device open at edit (a new board's default, for now) lets anyone
@@ -529,6 +540,152 @@ fn open_at_edit_grants_edit_to_anyone_nearby() {
             rig.request(BLE_A, ClientRequest::StopAllProjects),
             WireServerMsgBody::StopAllProjects
         ));
+    }
+}
+
+// --- channel 3 over a radio link --------------------------------------------
+//
+// While the engine runs, the firmware's link mux hands a radio link's
+// channel-3 message (the over-the-air update protocol) to the core's board
+// session with `LpServer::link_granted_tier` — what a login or key granted,
+// never what `open` alone gives: the session adds `open` itself, by its one
+// rule (`lpc_update::board::may`), QY2's switch included. These tests join
+// the two halves the way the firmware does: this server's grant, then the
+// session (on lpc-update's model board) deciding `Q`, `G` and a core install.
+
+/// A host speaks channel 3 only to a board whose hello announced it (DS9):
+/// a radio link's hello carries the board manifest like USB's, whatever
+/// tier the link holds — it says nothing the manifest's `Q` would not.
+#[test]
+fn a_radio_links_hello_carries_the_board_manifest_at_any_tier() {
+    fn manifest() -> Option<lpc_update::BoardManifest> {
+        let board = FakeBoard::flashed_with(
+            vec![ModelBuild::synthetic("2026.10.05-1", 1, 4096, 4096)],
+            0,
+            40 * 4096,
+        );
+        let rig = BoardRig::new(
+            board,
+            AccessFacts::from_store(None),
+            SessionConfig::default(),
+        )
+        .expect("the model boots");
+        Some(rig.session.as_ref()?.manifest(0))
+    }
+    for state in LinkState::ALL {
+        let mut rig = Rig::for_state(state);
+        rig.server.set_firmware_manifest(Some(manifest));
+        assert_eq!(
+            rig.server.hello_for_link(state.link()).firmware,
+            manifest(),
+            "{state:?}"
+        );
+    }
+}
+
+/// The tier the mux passes is the grant alone: a login's, or a key's —
+/// never `open`'s, and never a trusted link's standing.
+#[test]
+fn the_tier_a_radio_links_update_session_gets_is_the_grant_alone() {
+    for state in LinkState::ALL {
+        let rig = Rig::for_state(state);
+        let want = match state {
+            LinkState::UntrustedPlay | LinkState::KeyedPlay => Some(Tier::Play),
+            LinkState::UntrustedEdit | LinkState::KeyedEdit => Some(Tier::Edit),
+            LinkState::Trusted
+            | LinkState::UntrustedNone
+            | LinkState::UntrustedOpen
+            | LinkState::KeyedAnonymousLocked
+            | LinkState::KeyedAnonymousOpen => None,
+        };
+        assert_eq!(
+            rig.server.link_granted_tier(state.link()),
+            want,
+            "{state:?}"
+        );
+    }
+    // `open` counts in the server's own tier, not in the grant.
+    let rig = Rig::for_state(LinkState::UntrustedOpen);
+    assert_eq!(rig.server.link_tier(BLE_A), Some(Tier::Play));
+    assert_eq!(rig.server.link_granted_tier(BLE_A), None);
+}
+
+/// Every link state, under both answers to QY2: `Q` is always answered,
+/// `G` needs play and another core needs edit — exactly the tier this
+/// server holds for the link, though the session was handed only the grant
+/// (it adds `open` from the same access file).
+#[test]
+fn a_radio_links_channel_three_answers_by_the_tier_the_server_holds() {
+    for follows in [true, false] {
+        for state in LinkState::ALL {
+            let rig = Rig::for_state(state);
+            let link = state.link();
+            let mut board = UpdateBoard::new(&rig, follows, state == LinkState::Trusted);
+            let granted = rig.server.link_granted_tier(link);
+            let held = rig.server.link_tier(link);
+            let label = format!("{state:?}, QY2 {follows}");
+
+            assert!(board.query(granted), "{label}: Q");
+            let read_back = board.read_back(granted);
+            if held.is_some() {
+                assert_eq!(read_back, Ok(()), "{label}: G");
+            } else {
+                assert_eq!(read_back, Err(Refusal::Access), "{label}: G");
+            }
+            let install = board.offer_another_core(granted);
+            if held == Some(Tier::Edit) {
+                assert_eq!(install, Ok(()), "{label}: O");
+            } else {
+                assert_eq!(install, Err(Refusal::Access), "{label}: O");
+            }
+        }
+    }
+}
+
+/// QY2, over a radio link: a board open at Author takes another core from
+/// anyone in range with no login when the switch says yes, and answers
+/// `N`/`A` when it says no — until a login at edit.
+#[test]
+fn an_open_at_author_board_takes_a_core_over_radio_only_as_qy2_says() {
+    for follows in [true, false] {
+        let mut rig = Rig::for_state(LinkState::UntrustedNone);
+        let reply = rig.request(
+            USB,
+            ClientRequest::AccessSetSwitches {
+                ble_enabled: None,
+                open: Some(OpenTo::Edit),
+            },
+        );
+        assert!(
+            matches!(
+                reply,
+                WireServerMsgBody::AccessList {
+                    open: OpenTo::Edit,
+                    ..
+                }
+            ),
+            "{reply:?}"
+        );
+        assert_eq!(rig.server.link_tier(BLE_A), Some(Tier::Edit));
+        assert_eq!(rig.server.link_granted_tier(BLE_A), None);
+
+        let mut board = UpdateBoard::new(&rig, follows, false);
+        let install = board.offer_another_core(None);
+        if follows {
+            assert_eq!(install, Ok(()), "yes: open at Author is enough");
+        } else {
+            assert_eq!(install, Err(Refusal::Access), "no: open is not enough");
+            // A play login does not reach edit for a core install either.
+            rig.login(BLE_A, PLAY_PASSWORD);
+            let granted = rig.server.link_granted_tier(BLE_A);
+            assert_eq!(granted, Some(Tier::Play));
+            assert_eq!(board.offer_another_core(granted), Err(Refusal::Access));
+            // An edit login does.
+            rig.login(BLE_A, EDIT_PASSWORD);
+            let granted = rig.server.link_granted_tier(BLE_A);
+            assert_eq!(granted, Some(Tier::Edit));
+            assert_eq!(board.offer_another_core(granted), Ok(()));
+        }
     }
 }
 
@@ -1118,6 +1275,114 @@ impl ServerTransport for LinkTransport {
 
     async fn close(&mut self) -> Result<(), TransportError> {
         Ok(())
+    }
+}
+
+/// The board's update session while the engine runs, on lpc-update's model
+/// board (a NOR model, not the split image's formats), driven for one link
+/// the way the firmware's running hook drives it: each message with the
+/// tier the server granted that link.
+struct UpdateBoard {
+    rig: BoardRig,
+    link: UpdateLinkId,
+    /// Another build, whose core an offer installs.
+    other: ModelBuild,
+}
+
+impl UpdateBoard {
+    /// The session over `server`'s device store — its `secrets` and `open`,
+    /// read as the core reads them at boot — with QY2 answered `follows`,
+    /// and one link up, trusted (USB) or not (a radio link).
+    fn new(server: &Rig, follows: bool, trusted: bool) -> Self {
+        let store = server
+            .server
+            .base_fs()
+            .read_file(DeviceAccessFile::PATH.as_path())
+            .ok();
+        let access = AccessFacts {
+            core_install_follows_open_to: follows,
+            ..AccessFacts::from_store(store.as_deref())
+        };
+        let x = ModelBuild::synthetic("2026.10.05-1", 1, 5 * 4096 + 300, 8 * 4096 + 77);
+        let y = ModelBuild::synthetic("2026.10.06-1", 2, 6 * 4096 + 11, 9 * 4096 + 1000);
+        let board = FakeBoard::flashed_with(vec![x, y.clone()], 0, 40 * 4096);
+        let mut rig =
+            BoardRig::new(board, access, SessionConfig::default()).expect("the model boots");
+        assert_eq!(rig.mode(), Some(SessionMode::EngineRunning));
+        let link = UpdateLinkId(BLE_A.id.raw());
+        let trust = if trusted {
+            UpdateTrust::Trusted
+        } else {
+            UpdateTrust::Untrusted
+        };
+        rig.link_up(0, link, trust);
+        Self {
+            rig,
+            link,
+            other: y,
+        }
+    }
+
+    /// `Q`: answered with the manifest.
+    fn query(&mut self, granted: Option<Tier>) -> bool {
+        let out = self.say(granted, &HostMessage::Query { proto: PROTO_V1 }.encode());
+        matches!(
+            out.first().map(|b| BoardMessage::decode(b)),
+            Some(Ok(BoardMessage::Manifest(_)))
+        )
+    }
+
+    /// `G` for the engine's first sector: data, or the refusal.
+    fn read_back(&mut self, granted: Option<Tier>) -> Result<(), Refusal> {
+        let g = HostMessage::ReadBack(ReadBackRequest {
+            kind: PieceKind::Engine,
+            off: 0,
+            len: CHUNK,
+        });
+        let out = self.say(granted, &g.encode());
+        match BoardMessage::decode(&out[0]) {
+            Ok(BoardMessage::Data(_)) => Ok(()),
+            Ok(BoardMessage::Refusal(r)) => Err(r),
+            other => panic!("not data or a refusal: {other:?}"),
+        }
+    }
+
+    /// An offer of the other build's core: taken (the running engine hands
+    /// over — the record, the header erased, a reset), or the refusal.
+    fn offer_another_core(&mut self, granted: Option<Tier>) -> Result<(), Refusal> {
+        let y = &self.other;
+        let offer = Offer {
+            proto: PROTO_V1,
+            flags: 0,
+            chip: CHIP_ESP32C6,
+            layout: LAYOUT_1,
+            min_loader: LOADER_1,
+            core_len: y.core.len() as u32,
+            engine_len: y.engine.len() as u32,
+            core_sha256: y.core_sha256(),
+            engine_sha256: y.engine_sha256(),
+            build_id: y.build_id_field(),
+        };
+        let out = self.say(granted, &HostMessage::Offer(offer).encode());
+        match out.first() {
+            None if self.rig.reset_pending => Ok(()),
+            Some(bytes) => match BoardMessage::decode(bytes) {
+                Ok(BoardMessage::Refusal(r)) => Err(r),
+                other => panic!("not a refusal: {other:?}"),
+            },
+            None => panic!("no answer and no reset"),
+        }
+    }
+
+    fn say(&mut self, granted: Option<Tier>, bytes: &[u8]) -> Vec<Vec<u8>> {
+        self.rig
+            .deliver(1, self.link, granted, bytes)
+            .into_iter()
+            .map(|o| {
+                assert_eq!(o.link, self.link);
+                o.bytes
+            })
+            .collect()
     }
 }
 

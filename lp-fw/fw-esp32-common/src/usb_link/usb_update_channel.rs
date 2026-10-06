@@ -34,22 +34,11 @@ static UPDATE_HOOK: AtomicUsize = AtomicUsize::new(0);
 /// goes as an external message out of the frame buffer.
 pub const RING_MAX: usize = 1024;
 
-/// What [`UsbLinkShared::send_update`] did with a message.
+/// What [`UsbLinkShared::send_update`] did with a message: the shared
+/// [`crate::update_send::UpdateSend`], which a radio link answers too.
 ///
 /// [`UsbLinkShared::send_update`]: super::UsbLinkShared::send_update
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum UpdateSend {
-    /// Queued on channel 3.
-    Queued,
-    /// The link has no room right now (the send ring is full, or a reply
-    /// holds the frame buffer): keep it and try again.
-    Later,
-    /// No host has the link up: the message belongs to no session.
-    NoSession,
-    /// Larger than this image can send (no frame buffer without `server`,
-    /// or past the link's largest message).
-    TooBig,
-}
+pub use crate::update_send::UpdateSend;
 
 /// Install the core's channel-3 hook for while the engine runs: `Some` with
 /// each message, `None` once per pass to flush what it holds.

@@ -133,6 +133,16 @@ impl AccessState {
         }
     }
 
+    /// The tier a login on `link`, or its secure link's key, granted —
+    /// without the device's `open` setting, which [`Self::tier`] adds (and a
+    /// trusted link's standing, which is no grant). What the board's update
+    /// session takes for a radio link while the engine runs: it applies
+    /// `open` itself, by its own rule.
+    #[must_use]
+    pub fn granted(&self, link: LinkId) -> Option<Tier> {
+        self.sessions.get(&link).and_then(|session| session.granted)
+    }
+
     /// The hello's access half, for `link`.
     #[inline(never)]
     pub fn hello_auth(&self, link: Link, fs: &dyn LpFs) -> HelloAuth {
@@ -307,7 +317,7 @@ impl AccessState {
         Some(self.key_lookups.swap_remove(at).1)
     }
 
-    fn device_open(&self, fs: &dyn LpFs) -> OpenTo {
+    pub(crate) fn device_open(&self, fs: &dyn LpFs) -> OpenTo {
         if let Some(open) = self.device_open.get() {
             return open;
         }

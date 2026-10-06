@@ -52,6 +52,10 @@ lp-recovery = { path = "../../lp-base/lp-recovery", default-features = false, op
 # `fw-esp32c6` already does, so its resolved feature set is unchanged.
 lpa-server = { path = "../../lp-app/lpa-server", default-features = false, optional = true }
 lpc-model = { path = "../../lp-core/lpc-model", default-features = false, optional = true }
+# The tier a radio link's channel-3 message carries to the core's update hook
+# (`radio_link::radio_update_channel`); already in every image through
+# `lpa-server`.
+lpc-access = { path = "../../lp-core/lpc-access", optional = true }
 lpc-wire = { path = "../../lp-core/lpc-wire", default-features = false, optional = true, features = ["ser-write-json"] }
 # The learned table a packed link keeps (`serial::packed_link`); `alloc` for
 # its zeroed, fallible heap allocation at opt-in.
@@ -83,7 +87,7 @@ usb-link = ["dep:lp-link", "dep:critical-section"]
 # The radio links on lp-link (`radio_link`'s mux and port, plan
 # `ble-on-lp-link`): one `Link` per open connection, Datagram framing. The
 # C6's `ble` feature turns it on; the S3 and the classic have no radio link.
-radio-link = ["server", "dep:lp-link"]
+radio-link = ["server", "dep:lp-link", "dep:lpc-access"]
 # The classic's UART0 host link on lp-link (`uart_link`, `log_ring_logger`;
 # plan `classic-uart-on-lp-link`): the classic (v3) turns it on. The server
 # transport over it (`uart_link::uart_link_transport`) also needs `server`.

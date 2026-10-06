@@ -4156,6 +4156,7 @@ dependencies = [
  "lp-seam",
  "lpa-client",
  "lpa-server",
+ "lpc-access",
  "lpc-hardware",
  "lpc-model",
  "lpc-shared",
