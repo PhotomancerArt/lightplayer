@@ -758,6 +758,14 @@ replies stay JSON — <why>`), and a packed link whose learned table lost step
 says so once (`wire: packed reply dropped …`, then `wire: back in step …`). See
 `docs/adr/2026-09-09-studio-device-stack-over-a-virtual-serial-port.md`.
 
+An emulated board added on the **Devices page** asks the emulator for the
+LED performance seam (`led=fast`, softly: an image too old for it boots
+seam-free and says why), and says what came of it in one journal line per
+start (`emu: LED fast mode on (led=fast)`, or why it is off). `?seams=none`
+turns that off for an A/B on one build, and `?seams=<atoms>` replaces it.
+None of it reaches `?emu=tab` or `?emu=ws://…` boards, or any walk: those
+run today's machine. See `docs/adr/2026-10-05-emulator-seams.md`.
+
 Two more exist for a hardware sitting, where Web Serial's exclusive hold on the
 port means nothing else can read what the board sends:
 `?wire-capture=1` tees every raw byte chunk the Web Serial read pump hands to

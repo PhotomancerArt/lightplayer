@@ -45,6 +45,11 @@ pub mod browser_worker_boot_wait;
 /// An ESP32-C6 emulated in this tab, over the page's own Worker backing.
 #[cfg(all(feature = "emulator-tab", target_arch = "wasm32"))]
 pub mod emulator_tab;
+// Which seams a Devices-page emulated board asks for, and its journal line.
+// Pure, declared outside the wasm32 gate so its tests run natively; the
+// bridge and the link only feed it the worker's report.
+#[path = "emulator_tab/emulator_tab_seams.rs"]
+pub mod emulator_tab_seams;
 pub mod fake;
 #[cfg(feature = "fake-device")]
 pub mod fake_device;
