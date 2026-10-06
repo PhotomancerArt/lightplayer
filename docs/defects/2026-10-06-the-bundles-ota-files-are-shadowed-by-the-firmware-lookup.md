@@ -5,7 +5,7 @@ fixed: this change
 area: lp-cloud-server router.rs × firmware_route.rs; the Studio bundle's update files, once in firmware/<target>/ota/ (scripts/studio-copy-firmware.sh, lpa-studio-core bundled_own_build.rs)
 class: stand-in-divergence
 related:
-  - docs/adr/2026-10-06-firmware-distribution.md (the lookup grammar, reserved words; lands with #1003)
+  - docs/adr/2026-10-06-firmware-distribution.md (the lookup grammar, reserved words)
   - docs/adr/2026-10-06-studio-updates-over-the-update-channel.md (DS10, the bundle's own build)
   - lp2025/2026-10-04-0757-ota-firmware-distribution (PR-3, #1003)
 ---

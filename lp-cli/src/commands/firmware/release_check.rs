@@ -11,9 +11,11 @@
 //! holding the engine's hash, the identity agreeing with the package's
 //! manifest core, and `requires` naming the code table's layout and loader.
 //! A file nobody accounts for is an error, and so is a dev version unless
-//! `--allow-dev`.
+//! `--allow-dev`. Every target carries one version (roadmap N7: one build
+//! per release), and with `--version` it must be that one — the release's
+//! tag, which is what the release workflow passes.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use anyhow::{Context, Result, bail, ensure};
@@ -31,7 +33,7 @@ use super::args::ReleaseCheckArgs;
 use super::build_def::{find_repo_root, load_served_targets};
 use super::distribution_manifest::DistributionManifest;
 use super::ota_files::{CoreIdentity, PACKAGE_JSON, requires_of};
-use super::release_assets::check_version;
+use super::release_assets::{check_version, one_version};
 use super::split_package::check_core_carries_engine_digest;
 
 /// `schemas/ota-manifest.schema.json`, as this binary was built with it.
@@ -47,7 +49,7 @@ pub fn handle_release_check(args: ReleaseCheckArgs) -> Result<()> {
             Err(_) => targets_in(&args.dir)?,
         },
     };
-    let checked = check_release_dir(&args.dir, &targets, args.allow_dev)?;
+    let checked = check_release_dir(&args.dir, &targets, args.allow_dev, args.version.as_deref())?;
     println!(
         "release-check: {} files in {} verified for {}",
         checked,
@@ -57,16 +59,34 @@ pub fn handle_release_check(args: ReleaseCheckArgs) -> Result<()> {
     Ok(())
 }
 
-/// Check `dir` for `targets`. Returns how many files were verified, or every
-/// problem found, one per line.
-pub fn check_release_dir(dir: &Path, targets: &[String], allow_dev: bool) -> Result<usize> {
+/// Check `dir` for `targets`, every one at one version — `version` when
+/// given. Returns how many files were verified, or every problem found, one
+/// per line.
+pub fn check_release_dir(
+    dir: &Path,
+    targets: &[String],
+    allow_dev: bool,
+    version: Option<&str>,
+) -> Result<usize> {
     ensure!(!targets.is_empty(), "no targets to check");
     let mut accounted = BTreeSet::new();
     let mut problems = Vec::new();
+    let mut versions = BTreeMap::new();
     for target in targets {
-        if let Err(e) = check_target(dir, target, allow_dev, &mut accounted) {
-            problems.push(format!("{target}: {e:#}"));
+        match check_target(dir, target, allow_dev, &mut accounted) {
+            Ok(found) => {
+                if let Some(expected) = version.filter(|expected| *expected != found) {
+                    problems.push(format!(
+                        "{target}: carries version {found}, not the release's {expected}"
+                    ));
+                }
+                versions.insert(target.clone(), found);
+            }
+            Err(e) => problems.push(format!("{target}: {e:#}")),
         }
+    }
+    if let Err(e) = one_version(&versions) {
+        problems.push(format!("{e:#}"));
     }
     for entry in std::fs::read_dir(dir).with_context(|| format!("reading {}", dir.display()))? {
         let name = entry?.file_name().to_string_lossy().into_owned();
@@ -105,16 +125,18 @@ pub fn schema_errors(value: &Value) -> Result<()> {
     }
 }
 
+/// Every check for one target; returns its version.
 fn check_target(
     dir: &Path,
     target: &str,
     allow_dev: bool,
     accounted: &mut BTreeSet<String>,
-) -> Result<()> {
+) -> Result<String> {
     let version = check_target_files(dir, target, accounted)?;
     // Last, so a dev version is one problem rather than one per file left
     // unaccounted.
-    check_version(&version, allow_dev)
+    check_version(&version, allow_dev)?;
+    Ok(version)
 }
 
 /// Every check but the version's; returns the version.
@@ -313,7 +335,7 @@ mod tests {
     fn refused(dir: &Path, targets: &[String], allow_dev: bool) -> String {
         format!(
             "{:#}",
-            check_release_dir(dir, targets, allow_dev).unwrap_err()
+            check_release_dir(dir, targets, allow_dev, None).unwrap_err()
         )
     }
 
@@ -326,7 +348,11 @@ mod tests {
     #[test]
     fn a_staged_release_passes() {
         let (_fx, out, targets) = staged("2026.10.05-3");
-        assert_eq!(check_release_dir(&out, &targets, false).unwrap(), 9);
+        assert_eq!(check_release_dir(&out, &targets, false, None).unwrap(), 9);
+        assert_eq!(
+            check_release_dir(&out, &targets, false, Some("2026.10.05-3")).unwrap(),
+            9
+        );
         assert_eq!(targets_in(&out).unwrap(), ["esp32c6-4mb", "esp32s3-8mb"]);
     }
 
@@ -454,7 +480,56 @@ mod tests {
             !error.contains("not accounted"),
             "one problem, not one per file: {error}"
         );
-        check_release_dir(&out, &targets, true).unwrap();
+        check_release_dir(&out, &targets, true, None).unwrap();
+    }
+
+    /// The release workflow passes the tag's version: a staging directory
+    /// built at another version is not this release's.
+    #[test]
+    fn the_release_version_must_be_every_targets() {
+        let (_fx, out, targets) = staged("2026.10.05-3");
+        let error = format!(
+            "{:#}",
+            check_release_dir(&out, &targets, false, Some("2026.10.05-4")).unwrap_err()
+        );
+        assert!(
+            error.contains(
+                "esp32c6-4mb: carries version 2026.10.05-3, not the release's 2026.10.05-4"
+            ),
+            "{error}"
+        );
+        assert!(
+            error.contains("esp32s3-8mb: carries version 2026.10.05-3"),
+            "{error}"
+        );
+    }
+
+    /// Roadmap N7: one build per release. A target whose package says
+    /// another version than its siblings is refused even when each target
+    /// is valid on its own.
+    #[test]
+    fn every_target_must_carry_one_version() {
+        let (fx, out, targets) = staged("2026.10.05-3");
+        fx.add_plain_package("esp32v3-4mb", "esp32", "2026.10.05-2");
+        let lone = fx.root.join("lone");
+        stage_release_assets(
+            &PackageSources {
+                packages_root: fx.packages_root(),
+                parts_root: fx.parts_root(),
+            },
+            &["esp32v3-4mb".to_string()],
+            &lone,
+            false,
+        )
+        .unwrap();
+        for entry in std::fs::read_dir(&lone).unwrap() {
+            let entry = entry.unwrap();
+            std::fs::copy(entry.path(), out.join(entry.file_name())).unwrap();
+        }
+        let mut all = targets.clone();
+        all.push("esp32v3-4mb".to_string());
+        let error = refused(&out, &all, false);
+        assert!(error.contains("its targets carry 2 versions"), "{error}");
     }
 
     #[test]

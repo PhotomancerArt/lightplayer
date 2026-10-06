@@ -3213,6 +3213,183 @@ fn a_flash_from_the_blank_pending_card_runs_to_ready_named_and_registered() {
     );
 }
 
+/// OTA M5, D19: a USB install of a split package keeps the engine it wrote.
+/// After the flash succeeds, Studio reads the package back from where the
+/// flasher read it (the bundle), slices the engine out of the merged image
+/// and puts it in the engine cache as `installed`.
+#[test]
+fn a_usb_install_of_a_split_package_keeps_its_engine() {
+    let device = blank_board();
+    let (mut bench, tasks) = DeviceBench::granted(&device, "usb-flash-keep");
+    let cache = lpa_firmware_store::MemoryEngineCache::new();
+    bench.controller.set_engine_cache(Rc::new(cache.clone()));
+    let choice = c6_board_choice();
+    let bundle = BundleFetch::serving_split_package(&choice.build_id);
+    bench.controller.set_firmware_bundle(
+        Rc::new(bundle.clone()) as Rc<dyn lpa_firmware_store::FirmwareFetch>,
+        "bundle/firmware/",
+    );
+
+    flash_the_blank_board_to_ready(&mut bench, &tasks, &choice);
+
+    let engine_sha = lpc_firmware_release::sha256_hex(&bundle.engine);
+    bench.run_until(&tasks, "the installed engine to be kept", |_| {
+        drive(lpa_firmware_store::EngineCache::has(&cache, &engine_sha))
+    });
+    let index = drive(lpa_firmware_store::EngineCache::index(&cache));
+    let [entry] = index.entries.as_slice() else {
+        panic!("one engine kept: {index:?}");
+    };
+    assert_eq!(entry.source, lpa_firmware_store::EngineSource::Installed);
+    assert_eq!(entry.target.as_deref(), Some(choice.build_id.as_str()));
+    assert_eq!(entry.build_id.as_deref(), Some(BundleFetch::BUILD_ID));
+    assert_eq!(
+        drive(lpa_firmware_store::EngineCache::get(
+            &cache,
+            &engine_sha,
+            2000.0
+        ))
+        .unwrap(),
+        bundle.engine
+    );
+    assert_eq!(
+        bundle.urls.borrow().as_slice(),
+        [
+            format!("bundle/firmware/{}/manifest.json", choice.build_id),
+            format!("bundle/firmware/{}/fw-esp32c6-merged.bin", choice.build_id),
+        ],
+        "the package is read back from where the flasher read it"
+    );
+}
+
+/// The same install with a bundle that cannot be read back: the flash still
+/// succeeds (keeping the engine never fails an install) and nothing is kept.
+#[test]
+fn an_install_whose_engine_cannot_be_kept_still_succeeds() {
+    let device = blank_board();
+    let (mut bench, tasks) = DeviceBench::granted(&device, "usb-flash-keep-fails");
+    let cache = lpa_firmware_store::MemoryEngineCache::new();
+    bench.controller.set_engine_cache(Rc::new(cache.clone()));
+    let choice = c6_board_choice();
+    let bundle = BundleFetch::serving_split_package(&choice.build_id);
+    bundle.offline.set(true);
+    bench.controller.set_firmware_bundle(
+        Rc::new(bundle.clone()) as Rc<dyn lpa_firmware_store::FirmwareFetch>,
+        "bundle/firmware",
+    );
+
+    flash_the_blank_board_to_ready(&mut bench, &tasks, &choice);
+
+    assert!(
+        !bundle.urls.borrow().is_empty(),
+        "the keep was tried (and failed)"
+    );
+    assert!(
+        drive(lpa_firmware_store::EngineCache::index(&cache))
+            .entries
+            .is_empty()
+    );
+}
+
+/// Flash the bench's blank board from its pending card and wait for Ready
+/// with a successful outcome.
+fn flash_the_blank_board_to_ready(
+    bench: &mut DeviceBench,
+    tasks: &TaskPool,
+    choice: &crate::FlashBoardChoice,
+) {
+    bench.run_until(tasks, "the blank verdict to settle", |bench| {
+        bench
+            .view()
+            .pending
+            .first()
+            .is_some_and(|pending| pending.needs_firmware())
+    });
+    let target = bench.view().pending[0].device;
+    bench.press_device(
+        target,
+        "flash",
+        OfferArgs::new().with("board", &choice.board_id),
+    );
+    bench.run_until(tasks, "the flashed board to land Ready", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.state_label == "Ready" && card.activity.is_none())
+    });
+    let card = &bench.view().devices[0];
+    assert!(
+        card.last_outcome
+            .as_ref()
+            .is_some_and(|outcome| outcome.ok && outcome.summary.contains("firmware installed")),
+        "{card:?}"
+    );
+}
+
+/// The bundle's `firmware/` as a fetch: one synthetic split package for a
+/// build id (its manifest and merged image), every URL asked recorded.
+#[derive(Clone)]
+struct BundleFetch {
+    files: Rc<RefCell<std::collections::BTreeMap<String, Vec<u8>>>>,
+    urls: Rc<RefCell<Vec<String>>>,
+    offline: Rc<Cell<bool>>,
+    engine: Vec<u8>,
+}
+
+impl BundleFetch {
+    const BUILD_ID: &'static str = "2026.10.06-1+2012f6a6aab2";
+
+    fn serving_split_package(build_id: &str) -> Self {
+        use lpc_firmware_release::sha256_hex;
+        let mut image = vec![0xffu8; 0x4000];
+        let engine: Vec<u8> = (0..0x1000u32).map(|i| (i * 31 + 5) as u8).collect();
+        image[0x3000..0x4000].copy_from_slice(&engine);
+        let manifest = serde_json::json!({
+            "schemaVersion": 2, "firmwareId": build_id,
+            "core": { "version": "2026.10.06-1", "target": build_id },
+            "images": [{ "path": "fw-esp32c6-merged.bin", "address": "0x0",
+                         "sizeBytes": image.len(), "sha256": sha256_hex(&image) }],
+            "split": { "layout": 1, "buildId": Self::BUILD_ID,
+                       "engine": { "offset": "0x3000", "sizeBytes": engine.len(),
+                                   "sha256": sha256_hex(&engine), "header": 1 } }
+        });
+        let files = std::collections::BTreeMap::from([
+            (
+                format!("bundle/firmware/{build_id}/manifest.json"),
+                serde_json::to_vec(&manifest).unwrap(),
+            ),
+            (
+                format!("bundle/firmware/{build_id}/fw-esp32c6-merged.bin"),
+                image,
+            ),
+        ]);
+        Self {
+            files: Rc::new(RefCell::new(files)),
+            urls: Rc::new(RefCell::new(Vec::new())),
+            offline: Rc::new(Cell::new(false)),
+            engine,
+        }
+    }
+}
+
+impl lpa_firmware_store::FirmwareFetch for BundleFetch {
+    fn get(
+        &self,
+        url: &str,
+    ) -> lpa_firmware_store::LocalBoxFuture<
+        '_,
+        Result<Option<Vec<u8>>, lpa_firmware_store::FetchError>,
+    > {
+        self.urls.borrow_mut().push(url.to_string());
+        let reply = match self.offline.get() {
+            true => Err(lpa_firmware_store::FetchError::Offline("test".into())),
+            false => Ok(self.files.borrow().get(url).cloned()),
+        };
+        Box::pin(core::future::ready(reply))
+    }
+}
+
 /// The same walk with a name typed into the board pick (the setup surface's
 /// optional field): the Flash carries it, the model records it as the user's
 /// name before the flash spawns, and the derived "<board> · <Mon D>" is
