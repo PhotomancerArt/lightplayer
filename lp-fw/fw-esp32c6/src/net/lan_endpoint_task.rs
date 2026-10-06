@@ -49,9 +49,11 @@ pub const LINK_PORT: u16 = 80;
 /// TCP buffers per link. Receive: two WebSocket frames. Send: a whole
 /// lp-link window (2 frames of `LAN_MAX_FRAME` plus their WebSocket
 /// headers) and room for the ACKs and a keepalive beside it, so the link
-/// never waits on its own socket for a window it may send.
+/// never waits on its own socket for a window it may send. No more: 4 KB
+/// took the post-deploy read below its 16 KiB block on the emulated C6
+/// (15,604 B), and this is held for the board's life.
 const TCP_RX: usize = 2 * 1024;
-const TCP_TX: usize = 4 * 1024;
+const TCP_TX: usize = 2560;
 /// A server frame's WebSocket header at the sizes a link sends (126..65535
 /// bytes: 4 B; shorter: 2 B).
 const WS_TX_HEADER: usize = 4;
