@@ -2244,6 +2244,14 @@ impl StudioController {
         let now = (self.now_secs)();
         let reconnect = self.lens_reconnect;
         let holding = reconnect.is_some_and(|reconnect| reconnect.holding(now));
+        if holding {
+            // The pull met a link that stopped answering (or restarted):
+            // that is the link's failure, not the project's, and the
+            // "Reconnecting…" curtain already says so. The timeout the pull
+            // marked on the project is withdrawn, the way a held lens's is.
+            self.project.withdraw_project_sync_failure();
+            self.mark_dirty();
+        }
         if streak >= LENS_DEAD_WIRE_FAILURES && !holding {
             let message = match reconnect {
                 Some(_) => format!(
@@ -2304,6 +2312,16 @@ impl StudioController {
                 self.mark_dirty();
             }
         }
+    }
+
+    /// Whether the lens's link is in trouble it is expected to come back
+    /// from, and still within the grace (plan D13) — stepped first, so it
+    /// answers on the evidence folded so far.
+    fn lens_link_reconnecting(&mut self) -> bool {
+        self.observe_lens_link();
+        let now = (self.now_secs)();
+        self.lens_reconnect
+            .is_some_and(|reconnect| reconnect.holding(now))
     }
 
     /// The "Reconnecting…" strip, while the lens's link is in trouble.
@@ -3567,9 +3585,10 @@ impl StudioController {
     }
 
     pub fn mark_passive_project_refresh_failed(&mut self, message: impl Into<String>) {
-        // A pull that failed because the link went away is not the
-        // project's failure: the strip says what happened.
-        if self.lens_hold.is_some() {
+        // A pull that failed because the link went away, or while it is
+        // reconnecting, is not the project's failure: the strip says what
+        // happened.
+        if self.lens_hold.is_some() || self.lens_link_reconnecting() {
             return;
         }
         self.project.mark_project_sync_failed(message);

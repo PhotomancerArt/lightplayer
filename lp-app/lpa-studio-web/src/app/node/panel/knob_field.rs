@@ -37,7 +37,7 @@ use crate::app::node::slot_edit_actions::panel_or_slot_action;
 use crate::app::node::slot_fields::{capture_field_pointer, field_wiring};
 
 use super::PanelEmit;
-use super::gesture_hold::use_gesture_hold;
+use crate::app::node::gesture_hold::use_gesture_hold;
 
 /// Vertical drag distance (CSS px) that sweeps the knob across its whole
 /// range — small enough for one comfortable wrist motion, large enough for

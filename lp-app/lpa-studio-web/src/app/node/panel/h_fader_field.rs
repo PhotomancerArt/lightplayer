@@ -11,7 +11,7 @@
 //! `oninput` semantics (the actor coalesces the drag flood per address).
 //!
 //! The thumb and fill follow the hand, not the snapshot, through a
-//! [`GestureHold`](super::gesture_hold::GestureHold): the native input is
+//! [`GestureHold`](crate::app::node::gesture_hold::GestureHold): the native input is
 //! controlled, so a snapshot still echoing an earlier write of the drag used
 //! to be written back into it — the thumb jumped back, then "took".
 
@@ -23,8 +23,8 @@ use crate::app::node::slot_edit_actions::panel_or_slot_action;
 use crate::app::node::slot_fields::field_wiring;
 
 use super::PanelEmit;
-use super::gesture_hold::use_gesture_hold;
 use super::knob_field::{knob_fraction, knob_snap};
+use crate::app::node::gesture_hold::use_gesture_hold;
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
