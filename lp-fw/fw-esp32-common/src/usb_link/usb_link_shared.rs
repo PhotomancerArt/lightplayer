@@ -304,6 +304,9 @@ mod tests {
     #[test]
     fn update_messages_go_by_ring_or_by_frame_buffer() {
         use lp_link::LinkEvent;
+        // The large answer goes out of the one static frame buffer, which the
+        // transports' tests also serialize into: take the turn.
+        let _turn = crate::serial::server_msg::frame_buf_turn();
         let shared = UsbLinkShared::leak(0x1111);
         assert_eq!(shared.send_update(b"R"), UpdateSend::NoSession);
         let mut host = Link::<SelectiveRepeat>::new(LinkConfig::usb(), 0x2222);
