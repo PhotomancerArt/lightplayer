@@ -43,8 +43,11 @@ use lpa_link::layout_migration::lpfs_tree::LpfsTree;
 
 /// One fixed host nonce, so a run is a function of the image.
 const NONCE: u32 = 0x5EA0_0001;
-/// The end-user row's window.
-const RUN_US: u64 = 5_500_000;
+/// The run's window: long enough for the first heartbeat. Since #986 a
+/// split image's first boot hashes its engine and core (~1.9 s emulated)
+/// before it serves, so the end-user row's 5.5 s window ended before any
+/// heartbeat (the heap gate's window moved to 8.5 s for the same reason).
+const RUN_US: u64 = 8_500_000;
 /// `ws281x:local:D10` on the XIAO C6.
 const PAD: u8 = 18;
 
