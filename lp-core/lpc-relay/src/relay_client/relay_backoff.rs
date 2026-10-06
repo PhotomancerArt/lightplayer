@@ -2,9 +2,10 @@
 //!
 //! - After a failure: 1 s, doubling to 60 s, each wait jittered ±50 %, so
 //!   a thousand boards that lost the same server do not come back in step.
-//! - After the hub closed with "going away" (a deploy): 2–15 s, jittered,
-//!   and the doubling starts over. The new server is up within seconds and
-//!   the reconnect storm spreads over the window.
+//! - After the hub closed with "going away" (a deploy): 2–12 s, jittered,
+//!   and the doubling starts over. The new server is up within seconds, the
+//!   reconnect storm spreads over the window, and with the registration's
+//!   own round trips every board is back within 15 s (the plan's AC5).
 //! - A registration starts the doubling over.
 //!
 //! The randomness is the caller's: a `u32` per wait, from the board's RNG.
@@ -16,7 +17,7 @@ pub const MAX_BACKOFF_MS: u64 = 60_000;
 /// The shortest wait after "going away".
 pub const GOING_AWAY_MIN_MS: u64 = 2_000;
 /// The longest wait after "going away".
-pub const GOING_AWAY_MAX_MS: u64 = 15_000;
+pub const GOING_AWAY_MAX_MS: u64 = 12_000;
 
 /// See the module doc.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -85,19 +86,19 @@ mod tests {
     }
 
     #[test]
-    fn going_away_waits_two_to_fifteen_seconds_and_starts_over() {
+    fn going_away_waits_two_to_twelve_seconds_and_starts_over() {
         let mut backoff = RelayBackoff::new();
         for _ in 0..5 {
             backoff.after_failure(0);
         }
-        for random in [0, 1, 13_000, 13_001, u32::MAX] {
+        for random in [0, 1, 10_000, 10_001, u32::MAX] {
             let wait = backoff.after_going_away(random);
             assert!(
                 (GOING_AWAY_MIN_MS..=GOING_AWAY_MAX_MS).contains(&wait),
                 "{wait}"
             );
         }
-        assert_eq!(backoff.after_going_away(13_000), GOING_AWAY_MAX_MS);
+        assert_eq!(backoff.after_going_away(10_000), GOING_AWAY_MAX_MS);
         assert_eq!(backoff, RelayBackoff::new());
     }
 }

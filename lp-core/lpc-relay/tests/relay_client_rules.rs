@@ -149,7 +149,7 @@ fn a_resolve_that_never_answers_times_out() {
 }
 
 #[test]
-fn going_away_waits_two_to_fifteen_seconds() {
+fn going_away_waits_two_to_twelve_seconds() {
     for entropy in [ZERO as fn(&mut [u8]), ONES] {
         let mut client = RelayClient::new(config(1), entropy);
         register(&mut client, 0);

@@ -114,8 +114,9 @@ lock (amendment to `2026-08-06-cloud-service-architecture.md`).
 
 One machine, so the hub's table of online boards (`RelayHub`, sans-IO, behind
 its own lock) is in memory. A deploy drops everyone: shutdown closes every leg
-`1001 going away` first, and a board told "going away" waits 2–15 s
-(jittered) instead of its failure backoff (1 s doubling to 60 s, ±50 %), so
+`1001 going away` first, and a board told "going away" waits 2–12 s
+(jittered — 12, not the plan's 15, so that with its registration's round
+trips every board is back within 15 s) instead of its failure backoff (1 s doubling to 60 s, ±50 %), so
 the reconnect storm spreads over the window. No table, no migration for
 presence. The store gains one index (migration 0006, on
 `account_access.key_salt`; not `UNIQUE`, so it cannot fail on existing data).
@@ -218,7 +219,7 @@ on the C6, the relay client in the core, buffers and the measured cost.
   compatibility promise. Every change to `lpc-relay`'s bytes bumps
   `RELAY_PROTO_VERSION`, and the hub keeps old versions listed while boards
   speak them.
-- Every deploy drops every board for 2–15 s.
+- Every deploy drops every board for 2–12 s, and every session on it.
 - A board reachable through the relay is reachable by anyone who learns its
   id and its password. That is the point (helping Sean set up his board), and
   why "Anyone" never applies there.

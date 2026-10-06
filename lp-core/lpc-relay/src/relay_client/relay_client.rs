@@ -17,7 +17,7 @@
 //!   challenge with one proof per account, and is registered. Each step has
 //!   a deadline; missing one is a failure.
 //! - **Failures back off** ([`RelayBackoff`]): 1 s doubling to 60 s, ±50 %.
-//!   A close with "going away" waits 2–15 s instead. Registering starts the
+//!   A close with "going away" waits 2–12 s instead. Registering starts the
 //!   doubling over. A failure before the leg opened says
 //!   [`RelayState::WaitingForInternet`]; a drop after it says
 //!   [`RelayState::Connecting`] while it waits to dial again.

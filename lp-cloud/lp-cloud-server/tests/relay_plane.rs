@@ -161,8 +161,62 @@ async fn going_away_sends_boards_to_the_short_backoff_and_ends_sessions() {
     board.wait_for(RelayState::Connecting).await;
     let wait = board.next_wake_in().await;
     assert!(
-        (Duration::from_millis(1_500)..=Duration::from_secs(15)).contains(&wait),
-        "the 2–15 s going-away backoff: {wait:?}"
+        (Duration::from_millis(1_500)..=Duration::from_secs(12)).contains(&wait),
+        "the 2–12 s going-away backoff: {wait:?}"
+    );
+}
+
+/// R5: a deploy's reconnect storm. After a deploy every board dials the new
+/// machine inside one jitter window; here fifty boards (five accounts of
+/// ten) dial at the same instant — the worst case, no jitter at all — and
+/// `/api` keeps answering in under a second while they register. Each
+/// registration touches the store once; nothing else on the relay's path
+/// does. (The jitter itself is `lpc-relay`'s, tested there; a going-away
+/// leg closes for good on this process, which is the one being replaced.)
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_reconnect_storm_of_fifty_boards_does_not_starve_the_api() {
+    let server = Server::start().await;
+    let mut accounts = Vec::new();
+    for n in 0..5 {
+        accounts.push(server.account(&format!("owner{n}")).await);
+    }
+    let storm = Instant::now();
+    let mut boards = Vec::new();
+    for n in 0..50u8 {
+        let account = &accounts[usize::from(n) % accounts.len()];
+        boards.push(FakeBoard::spawn_as(
+            server.port,
+            [0x02, 0, 0, 0, 0, n],
+            vec![account.relay_account()],
+        ));
+    }
+    let mut slowest = Duration::ZERO;
+    let mut calls = 0;
+    while server.state.relay().board_count() < 50 {
+        assert!(
+            storm.elapsed() < Duration::from_secs(20),
+            "only {} boards registered",
+            server.state.relay().board_count()
+        );
+        let asked = Instant::now();
+        server.list_boards(&accounts[0].cookie).await;
+        slowest = slowest.max(asked.elapsed());
+        calls += 1;
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    println!(
+        "relay storm: 50 boards registered in {} ms; slowest of {calls} /api calls meanwhile {} ms",
+        storm.elapsed().as_millis(),
+        slowest.as_millis()
+    );
+    assert!(calls > 0, "the storm finished before /api was asked");
+    assert!(slowest < Duration::from_secs(1), "{slowest:?}");
+    for board in &boards {
+        board.wait_for(RelayState::Connected).await;
+    }
+    assert_eq!(
+        server.list_boards(&accounts[0].cookie).await.boards.len(),
+        10
     );
 }
 
@@ -337,11 +391,15 @@ struct BoardShared {
 
 impl FakeBoard {
     fn spawn(port: u16, accounts: Vec<RelayAccount>) -> Self {
+        Self::spawn_as(port, MAC, accounts)
+    }
+
+    fn spawn_as(port: u16, mac: [u8; 6], accounts: Vec<RelayAccount>) -> Self {
         let shared = Arc::new(Mutex::new(BoardShared {
             state: RelayState::Off,
             next_wake_in: None,
         }));
-        tokio::spawn(drive_board(port, accounts, Arc::clone(&shared)));
+        tokio::spawn(drive_board(port, mac, accounts, Arc::clone(&shared)));
         Self { shared }
     }
 
@@ -369,14 +427,19 @@ impl FakeBoard {
     }
 }
 
-async fn drive_board(port: u16, accounts: Vec<RelayAccount>, shared: Arc<Mutex<BoardShared>>) {
+async fn drive_board(
+    port: u16,
+    mac: [u8; 6],
+    accounts: Vec<RelayAccount>,
+    shared: Arc<Mutex<BoardShared>>,
+) {
     let started = Instant::now();
     let now = || started.elapsed().as_millis() as u64;
     let mut client = RelayClient::new(
         RelayClientConfig {
             host: "127.0.0.1".into(),
             port,
-            board_mac: MAC,
+            board_mac: mac,
             label: "Lamp".into(),
             wire_proto: 39,
             max_routes: 1,

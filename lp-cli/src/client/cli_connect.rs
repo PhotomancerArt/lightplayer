@@ -13,6 +13,7 @@ use std::rc::Rc;
 
 use anyhow::{Context, Result};
 use lpa_client::transport_lan::{BoardPassword, LanOptions, LanTarget, connect_lan_transport};
+use lpa_client::transport_relay::RelayTarget;
 use lpa_client::{ClientIo, TokioClientIo, WebSocketClientTransport};
 use lpa_link::providers::host_serial_esp32::{
     HostSerialEsp32Options, HostSerialEsp32Provider, label_for_port,
@@ -26,6 +27,7 @@ use lpc_wire::WireEncoding;
 use crate::client::HostSpecifier;
 use crate::client::board_password::board_password_from_env;
 use crate::client::client_connect::client_connect;
+use crate::client::relay_session::{account_link_keys, cloud_session_from_env};
 use crate::client::serial_port::detect_serial_port;
 
 /// An open CLI connection; owns whatever keeps the link alive.
@@ -75,6 +77,34 @@ impl CliConnection {
     }
 }
 
+/// A board through the cloud relay (`relay:`): the same secure link as
+/// `lan:`, with `session` (the `lp_session` cookie's value, from
+/// `LP_CLOUD_SESSION` — never argv) presented to the relay, the signed-in
+/// account's key tried first, then `password` if one was given. A relayed
+/// link never gets the board's "Anyone" tier, so one of the two must open
+/// it.
+pub async fn connect_relay(
+    target: RelayTarget,
+    session: Option<String>,
+    password: Option<BoardPassword>,
+) -> Result<CliConnection> {
+    let held_keys = match &session {
+        Some(session) => account_link_keys(&target.origin, session).await?,
+        None => Vec::new(),
+    };
+    let options = LanOptions {
+        password,
+        want_packed: lpa_client::requested_wire_encoding() == WireEncoding::Packed,
+        held_keys,
+    };
+    let (transport, hello) =
+        connect_lan_transport(target.endpoint(session.as_deref()), options).await?;
+    Ok(CliConnection::Lan {
+        io: TokioClientIo::new(Box::new(transport)),
+        hello: Box::new(hello),
+    })
+}
+
 /// Connect `spec` and wait for readiness where the host is a device.
 ///
 /// Serial devices are reset on connect: readiness is granted only by the
@@ -106,14 +136,23 @@ pub async fn cli_connect_with_password(
             let options = LanOptions {
                 password,
                 want_packed: lpa_client::requested_wire_encoding() == WireEncoding::Packed,
+                held_keys: Vec::new(),
             };
             // A LanError is kept as the error itself (not just its words),
             // so a caller can tell a locked board apart.
-            let (transport, hello) = connect_lan_transport(target, options).await?;
+            let (transport, hello) = connect_lan_transport(target.endpoint(), options).await?;
             Ok(CliConnection::Lan {
                 io: TokioClientIo::new(Box::new(transport)),
                 hello: Box::new(hello),
             })
+        }
+        HostSpecifier::Relay { board, origin } => {
+            connect_relay(
+                RelayTarget::new(board, origin),
+                cloud_session_from_env(),
+                password,
+            )
+            .await
         }
         HostSpecifier::Serial { port, baud_rate } => {
             let config = detect_serial_port(port.as_deref(), baud_rate)

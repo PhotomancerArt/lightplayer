@@ -33,6 +33,8 @@ pub mod transport;
 pub mod transport_emu_serial;
 #[cfg(feature = "lan")]
 pub mod transport_lan;
+#[cfg(feature = "lan")]
+pub mod transport_relay;
 #[cfg(feature = "serial")]
 pub mod transport_serial;
 #[cfg(feature = "ws")]

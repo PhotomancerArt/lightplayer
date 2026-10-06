@@ -2,6 +2,8 @@
 
 use std::fmt;
 
+use super::link_endpoint::{LAN_BUSY_CLOSE, LinkEndpoint};
+
 pub use crate::specifier::LAN_DEFAULT_PORT;
 
 /// The one WebSocket route a board serves its link on.
@@ -34,6 +36,12 @@ impl LanTarget {
     /// The board's link endpoint: `ws://<host>:<port>/link`.
     pub fn url(&self) -> String {
         format!("ws://{}:{}{LAN_LINK_PATH}", self.host, self.port)
+    }
+
+    /// Where the link's socket goes, for [`super::LanLink::open`] and
+    /// [`super::LanSocket::connect`].
+    pub fn endpoint(&self) -> LinkEndpoint {
+        LinkEndpoint::new(self.url(), self.to_string(), &[LAN_BUSY_CLOSE])
     }
 }
 

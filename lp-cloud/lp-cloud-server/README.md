@@ -19,8 +19,17 @@ crate is sans-IO.
 | `POST /auth/logout` | auth | the session cookie, if there is one |
 | `GET /auth/dev` | auth | localhost + `LP_CLOUD_DEV_AUTH` (404 otherwise) |
 | `GET\|HEAD\|OPTIONS /firmware/{target}/{release}/{file}` | firmware | none — public, verified by hash, any origin |
+| `POST /auth/guest` | auth | none — mints a guest session unless one is live |
+| `GET /relay/device` | relay | WebSocket, **plain HTTP allowed**; the board proves its accounts in-band |
+| `GET /relay/board/{id}` | relay | WebSocket; a signed-in session (account or guest) — `src/relay/route_admission.rs` |
 | `GET /healthz` | ops | none |
 | anything else | page | a static file if it exists, else the SPA document |
+
+Every route but `/relay/device` answers a plain-HTTP request (fly's
+`X-Forwarded-Proto: http`) with a `301` to https (`src/https_redirect.rs`;
+fly's own `force_https` is off so boards can dial the relay without TLS).
+`tests/https_redirect.rs` walks every route and fails on a new one without a
+case.
 
 Blobs and trees are separate routes because they are addressed differently:
 a blob by SHA-256 of its bytes, a tree by `TreeManifest::package_hash()`.
@@ -64,6 +73,48 @@ curl -sI "$BASE/firmware/esp32c6-4mb/abc1234/ota-manifest.json"    # 404, no ups
 
 The Studio bundle's own `/firmware/<target>/manifest.json` (two segments)
 stays the static fallback's. Tests: `tests/firmware_plane.rs`.
+
+## The relay
+
+Boards on Wi-Fi reachable through lightplayer.app (`src/relay/`; decision
+record `docs/adr/2026-10-06-cloud-relay.md`). A board holds one plain
+WebSocket to `/relay/device` speaking `lpc-relay`'s framing: a hello naming
+the salts of the account keys it holds, a 32-byte challenge, one proof per
+salt (checked against `MetaStore::account_by_key_salt`, the one store call on
+the path), then `Registered`. Each browser session is its own WebSocket to
+`/relay/board/{id}` carrying bare lp-link frames, which the hub routes to the
+board and back without reading — the session is sealed end to end.
+
+- **Who may open a session** is one file, `src/relay/route_admission.rs`
+  (an interim rule behind `RouteAdmissionPolicy`, until the cloud has
+  per-board access settings): a signed-in session is required; an account
+  the board proved reaches it, and anyone else may too, to log in with the
+  board's own password (the board never grants its "Anyone" tier over the
+  relay). Visitors, and tries at ids that are not online, take a per-address
+  bucket (20, then one per 30 s).
+- **Refusals are close codes** after the upgrade (`lpc_relay::RelayCloseCode`):
+  `4401` sign in, `4404` board offline, `4410` board gone, `4420` slow down,
+  `4429` busy.
+- **Presence is memory** (`src/relay/relay_hub.rs`, sans-IO, behind its own
+  lock — never the store's). Shutdown closes every leg `1001 going away`, so
+  boards come back within their 2–12 s backoff. `ListBoards` answers the
+  account's online boards with `sameNetwork` (same public address, from
+  `Fly-Client-IP`; always true locally).
+
+A host board on a local relay, and a client through it:
+
+```sh
+just cloud-serve                                     # note the URL it prints
+curl -c /tmp/lp.jar "$BASE/auth/dev?email=you@example.com"
+export LP_CLOUD_SESSION=$(awk '/lp_session/ {print $7}' /tmp/lp.jar)
+lp-cli serve --memory --relay "$BASE"                # prints relay:<id>@$BASE
+lp-cli upload projects/test/basic "relay:<id>@$BASE" # in another terminal
+```
+
+Tests: `tests/relay_plane.rs` (a fake board and browsers over real
+sockets, including a 50-board registration storm against `/api`),
+`lp-cli/tests/relay_link.rs` (the whole path with a real server behind the
+board).
 
 ## Running it
 

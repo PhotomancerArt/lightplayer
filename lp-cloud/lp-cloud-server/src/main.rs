@@ -51,7 +51,7 @@ async fn main() -> ExitCode {
         shutdown_signal().await;
         // The relay's sockets are upgraded connections, which the graceful
         // drain does not wait for: close them "going away" first, so every
-        // board takes its short (2–15 s) backoff onto the next machine.
+        // board takes its short (2–12 s) backoff onto the next machine.
         going_away.going_away();
     };
     if let Err(error) = axum::serve(listener, app)
