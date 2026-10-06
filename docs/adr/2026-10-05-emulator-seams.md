@@ -1,6 +1,6 @@
 # ADR: Emulator seams — what a host answer may claim
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-10-06)
 - **Date:** 2026-10-05
 - **Deciders:** Photomancer
 - **Supersedes:** None
@@ -34,7 +34,7 @@ fps and heap, for 96 B of flash and no RAM. Yona accepted it at ~22 % (G0).
 This ADR records the exception that seams are, and the rules that keep it
 narrow. It is written before the code (planning
 `lp2025/2026-10-05-1709-seams-foundation-led`, P1) and finalised with the
-measured evidence when that plan closes.
+measured evidence when that plan closed (Accepted 2026-10-06, after G2).
 
 ## Decision
 
@@ -231,6 +231,18 @@ on the phone) before they are quoted as the seam's effect.
 fast mode on (led=fast)` once per start; `?seams=none` journals `emu: LED fast
 mode off (?seams=none)` and runs today's machine; `?emu=tab` and
 `?emu=ws://…` boards journal nothing about seams (`just walk-no-board --tab`).
+
+**Silicon** (G2, the desk check, passed 2026-10-06; silicon, not the
+emulator): the emulator walk and the hardware walks of main (`cc20d0f6d`) and
+of the seamed image (`bfa53d88e`) on a desk XIAO ESP32-C6 matched the host
+oracle byte for byte (crc `0x55772254`). On a second XIAO C6, the packaged
+split images ran 60 s each: **38 fps** median of the last five readings on
+main and **38 fps** with the seam, so the seam costs silicon nothing a frame
+counter can see. Both boards were restored byte for byte afterwards.
+
+**Accepted** 2026-10-06: Yona approved the ship after G2 ("happy for you to
+ship it and move on"). The end-user speed row above stays provisional until
+it is retaken.
 
 ## Alternatives Considered
 
