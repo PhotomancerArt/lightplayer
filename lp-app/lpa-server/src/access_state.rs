@@ -87,10 +87,13 @@ impl AccessState {
         }
     }
 
-    /// Note a link's message: its session exists from here on.
+    /// Note a link's message: its session exists from here on, with the
+    /// link's trust (the transport's word wins over a session a handshake
+    /// made first).
     pub fn see(&mut self, link: Link) {
         self.sessions
             .entry(link.id)
+            .and_modify(|session| session.trust = link.trust)
             .or_insert_with(|| LinkSession::new(link.trust));
     }
 
@@ -116,15 +119,25 @@ impl AccessState {
     }
 
     /// The tier `link` holds now. A trusted link never touches the fs.
+    ///
+    /// The trust is `link`'s — the transport's word, on every call — never
+    /// one remembered in the session: a secure handshake can complete (and
+    /// record its grant) before the link's first message says what kind of
+    /// link it is, and a relayed link must never be read as a nearby one.
     #[inline(never)]
     pub fn tier(&self, link: Link, fs: &dyn LpFs) -> Option<Tier> {
-        let session = self
+        let granted = self
             .sessions
             .get(&link.id)
-            .copied()
-            .unwrap_or_else(|| LinkSession::new(link.trust));
+            .and_then(|session| session.granted);
+        let session = LinkSession {
+            trust: link.trust,
+            granted,
+        };
         match session.trust {
             LinkTrust::Trusted => session.effective_tier(OpenTo::Nobody),
+            // `open` never applies over the relay: no store read.
+            LinkTrust::Relayed => session.effective_tier(OpenTo::Nobody),
             // A link already granted edit never reads the store.
             LinkTrust::Untrusted | LinkTrust::Keyed => match session.granted {
                 Some(Tier::Edit) => Some(Tier::Edit),
@@ -276,6 +289,9 @@ impl AccessState {
         let tier = self
             .take_key_lookup(link)
             .and_then(|tiers| tiers.get(usize::from(candidate)).copied().flatten());
+        // A secure link: keyed until its first message says whether it is
+        // relayed (`see`). Nothing reads this trust for the tier, which is
+        // always the link's own (`tier`).
         let session = self
             .sessions
             .entry(link)
@@ -292,13 +308,14 @@ impl AccessState {
         self.clock_ms
     }
 
-    /// Whether `link` is a keyed (secure network) link, as its session was
-    /// seen (`see`, or its handshake's grant): read from the session, so the
-    /// request loop passes the login paths a link id as it always has.
+    /// Whether `link` is a secure network link (keyed or relayed), as its
+    /// session was seen (`see`, or its handshake's grant): read from the
+    /// session, so the request loop passes the login paths a link id as it
+    /// always has.
     fn is_keyed(&self, link: LinkId) -> bool {
         self.sessions
             .get(&link)
-            .is_some_and(|session| session.trust == LinkTrust::Keyed)
+            .is_some_and(|session| session.trust.is_secure())
     }
 
     /// The candidate tiers of `link`'s pending key lookup, removed.
