@@ -199,6 +199,19 @@ long-lived branch conflict on this file whenever main re-baselined too.
   network seam engages on every emulated run); with nothing joined the seam
   costs +32 B of heap, measured against `--seams none`. Taken from CI's patch
   (`just apply-ci-figures 993`); #989 will take the same base moves again.
+- 2026-10-06 — **the C6 ratchet's first heartbeat moved 32 B between two
+  boots of one image** (PR #993 after merging main's #997/#1000/#1001 and
+  #989's latest, run 37514407160): the check measured 102,980 B used, CI's
+  bless re-ran it and measured 103,012, so the bless could not hold
+  ("not a figure move"); a desk run measured 102,988 twice. `net=lan`
+  engaged in every boot, so the spread is the host link's timing reaching the
+  first heartbeat (what the packed link has allocated by then), not the
+  seam. The record was set by hand to CI's worst-seen boot (103,012 used /
+  198,524 free / 119,360 largest), with the move's causes: +128 B of
+  server-boot from the bases (the engine records moved by the same 128) and
+  +32 B of the network seam's two boxes on a board that never joins. A gate at
+  0 % margin over a figure that varies with the host is this entry's shape
+  again; a band, as `stackHighWater` already has, is the paydown.
 
 - 2026-10-06 — **a merge's "take theirs" dropped a branch's own figures**
   (Wi-Fi PR B, #989): merging main after #986, the C6 record conflicted and
