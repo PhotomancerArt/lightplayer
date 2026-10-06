@@ -76,7 +76,8 @@ env:
 #                   ├─ emu-c6            (the C6 SoC emulator's own suite)
 #                   ├─ emu-esp32v3       (the classic ESP32 machine's gate: boot suite + heap)
 #                   ├─ emu-esp32v3-ref   (…its other half: replays + reference image + jit cell)
-#                   ├─ heap-budget-chips (chip heap ratchet + lp-cli emu tests)
+#                   ├─ heap-budget-chips (chip heap ratchet + lp-cli link tests)
+#                   ├─ emu-c6-cli        (lp-cli whole-board emu tests)
 #                   └─ emu-c6-layout-migration (the C6 repartition's migration, narrowly gated)
 #   (the figure jobs)  ─ figures-comment   (PRs: ONE sticky comment naming the
 #                                           figures that moved, and the patch
@@ -2315,17 +2316,25 @@ jobs:
           fi
 
   # The heap-budget record's chip half (`just heap-budget-check-chips`,
-  # docs/heap-budget-gate.md "The second source") and lp-cli's two
-  # emulator-backed tests (`just test-emu-c6-cli`). Both were steps of
-  # `emu-c6` until 2026-09-08. That job had been cut at its 20-minute budget
-  # on every run since #599 (PR #613 raised it to 35 as a stopgap), and its
-  # step timings on main run 34308562027 said why: 478 s for the ratchet and
-  # 367 s inside the suite for `cargo test -p lp-cli` — a second full
+  # docs/heap-budget-gate.md "The second source") and the LINK half of
+  # lp-cli's emulator-backed tests (`just test-emu-c6-cli-link`). Both were
+  # steps of `emu-c6` until 2026-09-08. That job had been cut at its 20-minute
+  # budget on every run since #599 (PR #613 raised it to 35 as a stopgap), and
+  # its step timings on main run 34308562027 said why: 478 s for the ratchet
+  # and 367 s inside the suite for `cargo test -p lp-cli` — a second full
   # test-tree build, because `-p lp-cli` unifies features differently from
-  # `-p lp-emu-esp32c6`. The ratchet needs that same lp-cli build (release,
-  # `heap-budget-check.sh` line ~206) plus a cross-target firmware build the
-  # script does itself under `LP_EMU_BUILD_FW=1`, so the two ride together
-  # here and the emulator job keeps only the emulator's own suite.
+  # `-p lp-emu-esp32c6`. The ratchet's `cargo run --release -p lp-cli` reuses
+  # the lp-cli that test build makes, so the two ride together here and the
+  # emulator job keeps only the emulator's own suite.
+  #
+  # Split again 2026-10-06, when this job had grown to ~25 min of lp-cli tests
+  # plus the ratchet and was cancelled at its 30-minute budget with every test
+  # passing (runs 37469170395, 37473996154). The whole-board tests moved to
+  # `emu-c6-cli` below; the two dev-profile builds the recipe also ran (~4 min
+  # of `-p lp-cli` parity tests, ~1.5 min of `-p lpa-studio-core` stage-A
+  # evals) left CI altogether, because `Validate (x64)` runs both already; and
+  # each half is now ONE cargo invocation, so its fat-LTO test binaries link
+  # side by side (see the justfile's `test-emu-c6-cli-link`).
   #
   # Cheaper setup than emu-c6 on purpose: a depth-1 checkout (nothing here
   # builds a reference image, so no historical commits are needed) and no
@@ -2340,9 +2349,10 @@ jobs:
   heap-budget-chips:
     name: Heap budget (esp32c6 chip)
     runs-on: ubuntu-24.04
-    # Expected ~15 min: ~1 min setup, ~6 min lp-cli test tree (sccache floor),
-    # ~8 min ratchet (release lp-cli + firmware + the profile captures). 30 is
-    # a fully cold run with headroom; re-measure before tightening.
+    # Expected ~13 min after the 2026-10-06 split: ~1 min setup, ~6 min
+    # release lp-cli test tree (sccache floor), ~1 min firmware, ~3.5 min
+    # link tests, ~1.5 min ratchet. 30 is ~2-3x that; re-measure before
+    # tightening (and before raising it: growth here wants another split).
     timeout-minutes: 30
     needs: detect-changes
     if: needs.detect-changes.outputs.emu_c6 == 'true'
@@ -2398,10 +2408,10 @@ jobs:
       # `hello.proto` / `heartbeat.total_bytes` figures are read by
       # `lp-cli/tests/emu_usb_link_gates.rs` (a link host is a product
       # crate, so those gates left the emulator's own suite).
-      - name: Emulator-backed lp-cli tests
+      - name: Emulator-backed lp-cli tests — the link half
         id: cli_tests
         shell: bash
-        run: cd lp2025 && just test-emu-c6-cli 2>&1 | tee "$RUNNER_TEMP/figures-cli.log"
+        run: cd lp2025 && just test-emu-c6-cli-link 2>&1 | tee "$RUNNER_TEMP/figures-cli.log"
 
       # The shipped image booted whole, read from the allocator figures its
       # own first heartbeat reports. It lives in this job and not in the
@@ -2421,7 +2431,10 @@ jobs:
         run: cd lp2025 && just heap-budget-check-chips-c6 2>&1 | tee "$RUNNER_TEMP/figures-heap.log"
 
       # A moved FIGURE hands back its patch — see `emu-c6`'s step of the same
-      # name. The re-baseline measures the image the ratchet just built.
+      # name. The re-baseline measures the image the ratchet just built. The
+      # bless re-runs the failed tests across ALL the link half's binaries
+      # (one invocation runs them all, `--no-fail-fast`), so a non-figure
+      # failure in a neighbouring binary still fails the bless.
       - name: Figure moves — bless what failed, diff the records
         id: figures_patch
         if: failure() && (steps.figures_heap.outcome == 'failure' || steps.cli_tests.outcome == 'failure')
@@ -2437,7 +2450,7 @@ jobs:
           if [ "$CLI_TESTS" = failure ]; then
             scripts/ci/figures-patch.py bless --name "C6 link gates (lp-cli)" \
               --log "$RUNNER_TEMP/figures-cli.log" \
-              --cargo-test "LP_EMU_BUILD_FW=1 cargo test -p lp-cli --release --test emu_usb_link_gates"
+              --cargo-test "LP_EMU_BUILD_FW=1 cargo test -p lp-cli --release $(just c6-cli-link-tests)"
           fi
           if [ "$HEAP" = failure ]; then
             scripts/ci/figures-patch.py bless --name "Heap budget ratchet (esp32c6)" \
@@ -2454,6 +2467,86 @@ jobs:
           name: figures-patch-heap-budget-chips
           path: ${{ runner.temp }}/figures-patch/
           retention-days: 14
+
+      - name: sccache stats
+        if: always()
+        shell: bash
+        run: |
+          if command -v sccache >/dev/null; then
+            { echo '#### sccache'; echo '```'; sccache --show-stats; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  # The BOARDS half of lp-cli's emulator-backed tests (`just
+  # test-emu-c6-cli-boards`): the fragmented-heap reads, the split image's
+  # boot (a two-pass split build of its own) and stage B of the app-agent
+  # evals. Split out of `heap-budget-chips` 2026-10-06 (see that job) so
+  # neither job carries the other's growth. It pays its own release `-p
+  # lp-cli` test-tree build (~6 min, the sccache floor) for that; the two
+  # jobs run side by side, so the wall clock a PR waits on went down.
+  #
+  # No pinned figures in these tests, so no figure-patch step and no place in
+  # `figures-comment`. Setup is heap-budget-chips' exactly. Path-gated on
+  # `emu_c6`.
+  emu-c6-cli:
+    name: Emulator C6 lp-cli (x64)
+    runs-on: ubuntu-24.04
+    # Expected ~13 min: ~1 min setup, ~6 min release lp-cli test tree,
+    # ~1 min firmware, ~5 min of tests (emu_split_boot's split build
+    # included). 30 is ~2-3x that; re-measure before tightening.
+    timeout-minutes: 30
+    needs: detect-changes
+    if: needs.detect-changes.outputs.emu_c6 == 'true'
+    env:
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "false"
+      CARGO_PROFILE_TEST_DEBUG: "false"
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: sccache
+    steps:
+      - name: Install system deps (libudev for serialport)
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/*chrome* /etc/apt/sources.list.d/*google*
+          sudo apt-get update || echo "apt-get update reported errors; continuing — the install below is the real gate"
+          sudo apt-get install -y libudev-dev
+
+      - name: Checkout lp2025
+        uses: actions/checkout@v4
+        with:
+          path: lp2025
+
+      - name: Checkout lp-regalloc2
+        uses: actions/checkout@v4
+        with:
+          repository: PhotomancerArt/lp-regalloc2
+          path: lp-regalloc2
+
+      # Toolchain is pinned in lp2025/rust-toolchain.toml; keep this in sync.
+      # rust-src is required: fw-esp32c6 builds core/alloc from source
+      # (build-std) for its release-esp32 profile, same as firmware-size.
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: nightly-2026-04-27
+          components: rust-src
+
+      - name: Install RISC-V target
+        run: rustup target add ${{ env.RISC_V_TARGET }}
+
+      - name: Run sccache
+        uses: mozilla/sccache-action@v0.0.10
+        with:
+          version: v0.18.0
+
+      # The repo's one registry entry, read-only (see the lint job).
+      - name: Restore cargo registry
+        uses: ./lp2025/.github/actions/cargo-registry
+
+      - name: Install just
+        uses: extractions/setup-just@v3
+
+      - name: Emulator-backed lp-cli tests — the boards half
+        shell: bash
+        run: cd lp2025 && just test-emu-c6-cli-boards
 
       - name: sccache stats
         if: always()
@@ -3429,6 +3522,7 @@ jobs:
       - emu-esp32v3-ref
       - emu-esp32s3
       - heap-budget-chips
+      - emu-c6-cli
       - emu-c6-layout-migration
       - validate-x64
       - validate-gfx
