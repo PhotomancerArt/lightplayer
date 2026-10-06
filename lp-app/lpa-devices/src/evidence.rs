@@ -644,7 +644,17 @@ impl Evidence {
             ActivityMarker::Started { kind } => {
                 // A new activity supersedes the previous outcome.
                 self.last_outcome = None;
-                self.last_update_outcome = None;
+                // How the last update ended stands until the firmware is
+                // touched again: an identify (a reconnect, or "Set up this
+                // device" on a core-only board) must not turn E13's "Needs
+                // X, which Studio can't get" back into a restore that the
+                // no-loop rule never starts (found in the emulator walk).
+                if matches!(
+                    kind,
+                    ActivityKind::Update | ActivityKind::Flash | ActivityKind::Erase
+                ) {
+                    self.last_update_outcome = None;
+                }
                 // No more "— … —" dressing: the Studio kind carries that
                 // the line is Studio's own narration.
                 self.push_output(TerminalKind::Studio, kind.label());

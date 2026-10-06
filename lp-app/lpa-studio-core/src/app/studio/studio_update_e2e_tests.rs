@@ -247,6 +247,50 @@ fn an_engineless_board_whose_engine_is_nowhere_ends_on_e13_and_does_not_loop() {
     );
 }
 
+/// E13 with a build of this Studio's own (the walk's `cant-get`): the
+/// engine-less board's restore misses, once, on its pending link (a
+/// core-only board says no hello). Kept ("Set up this device"), its card
+/// reads the row — "Needs X, which Studio can't get" — and offers this
+/// Studio's build, which ends on Y. The identify that keeping it runs must
+/// not wipe how the restore ended: the card would read "Restoring…" with
+/// nothing to press (found in the emulator walk).
+#[test]
+fn an_engineless_board_whose_engine_is_nowhere_offers_this_studios_build_once_kept() {
+    let mut bench = Bench::new(Board::engineless_x(), Some(y()));
+    bench.grant();
+    bench.run_until("the restore to miss", |bench| {
+        matches!(
+            bench.any_outcome(),
+            Some(UpdateOutcomeFacts::MissingEngine { .. })
+        )
+    });
+    bench.steps(4_000);
+    assert_eq!(bench.update_starts, 1, "one restore, no loop");
+
+    let link = bench.controller.devices_for_test().roster().pending()[0].link;
+    bench
+        .controller
+        .fold_device_input(DeviceInput::Action(lpa_devices::Action::AdoptLink { link }));
+    let device = bench.controller.devices_for_test().roster().devices()[0].id;
+    bench.run_until("the kept card to read E13, its identify done", |bench| {
+        matches!(
+            bench.standing(device),
+            UpdateStanding::CantGetVersion { .. }
+        ) && bench
+            .controller
+            .devices_for_test()
+            .roster()
+            .device(device)
+            .is_some_and(|d| d.activity_kind().is_none())
+    });
+    assert_eq!(bench.update_starts, 1, "still no loop");
+    bench.press(device, "install-firmware", OfferArgs::new());
+    bench.run_until("the install to end on Y", |bench| {
+        bench.any_outcome() == Some(UpdateOutcomeFacts::UpToDate)
+    });
+    bench.assert_runs(&y());
+}
+
 /// The firmware store answers for a released build: a board missing X's
 /// engine is restored from the store (the engine verified and kept in the
 /// cache), and the store's `latest` reaches the build facts.
