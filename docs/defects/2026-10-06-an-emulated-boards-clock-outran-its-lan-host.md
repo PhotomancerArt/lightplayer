@@ -39,9 +39,15 @@ emulator invariant (`lp-emu/esp/README.md` §Determinism: the host's clock
 never sets the pace of an emulated run) and costs an idle hosted board ~⅓ of
 its speed, which is a decision for the emulator's owner, not a fix to slip
 into PR C; and because a variant that made up the sleep overshoot surfaced an
-unexplained `[RECOVERY] io task silent > 2000 ms` (below). Nothing is lost
-today — the host drops the board's resends as duplicates — so the cost of
-leaving it open is wasted frames, not wrong behaviour. What the patch does: a
+unexplained `[RECOVERY] io task silent > 2000 ms` (below). It is **not**
+only wasted frames: in the emulated Wi-Fi walk (`just walk-wifi-emu lan`,
+runs 6 and 9 at the shipping tree, unpaced) a board running a project with
+Studio's LAN link open logged `radio link link1: a reply still not out of the
+frame buffer after 5000 ms (2048 B held) — closing` with `tick=5040ms` on every
+redial and reset itself (`rst:0x10 (LP_WDT_SYS)`, 3 and 12 times), because 5 s
+of its clock passed while the host had been given well under 1 s to drain the
+reply. With the patch (runs 7, 8) none of that happened and the walk passed
+10/10. So leaving this open costs the walk false failures. What the patch does: a
 host on the LAN sets its pace (`lan_host_pace.rs`, `shared_lan.rs`):
 while a host is connected through any forward, a self-driven or wall-clock LAN
 bounds each board's next pump to one millisecond of its guest time

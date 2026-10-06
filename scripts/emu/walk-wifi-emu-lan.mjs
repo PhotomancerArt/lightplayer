@@ -36,9 +36,23 @@
 //     which writes the DECODED console — log records ride the link, so the
 //     door's raw console file holds none of them;
 //   * the board's status answers: `lp-cli wifi status` over its USB door
-//     (W1, before the capture takes the port) or over its LAN forward (the
-//     board's second LAN link slot; Studio holds the first);
+//     (W1, before the capture takes the port; W4 and W9, the capture
+//     handing the port over and taking it back, `usbStatus`) or over its
+//     LAN forward while no Studio page holds that board's LAN link (W6,
+//     W7);
 //   * the LAN's own view: the door's `/boards` and its LAN probe.
+//
+// ONE LAN LINK PER BOARD (PR B, `fw-esp32c6`'s `LAN_LINK_SLOTS`, 1 on the
+// C6): a second LAN connection to a board whose link is open is closed
+// with "try again later" (WebSocket 1013; the board logs `[lan] every LAN
+// link is in use`). So nothing of the walk's own dials a board's forward
+// while the Studio page holds that board: W4 reads c6-b's status over its
+// USB door (and checks that a second LAN dial is turned away while
+// Studio's link stays up), and the steps whose tools dial the LAN (W6, W7's
+// status reads, W8's upload, W10's `link rtt`) run with the LAN page off
+// (`about:blank`, each board's console saying its link closed), Studio
+// coming back for what it shows (W8's Radio message, W9's relink). Two
+// boards, one link each, is the walk's shape throughout.
 //
 // Studio's words only say when to look. One exception, said where it is
 // used: W8's Radio message is a string only the firmware holds, so the page
@@ -291,6 +305,12 @@ async function wifiStatus(target) {
   return lastJson(stdout);
 }
 
+/// A second LAN dial turned away by a board whose one LAN link is in use:
+/// lp-cli's words for WebSocket 1013 (`lpa-client`'s `lan_error.rs`).
+export function refusedAsInUse(stderr) {
+  return /LAN links are all in use; try again later/.test(stderr);
+}
+
 /// `station` as `{ kind, ...fields }` (`"notConnected"` or `{ connected: {…} }`).
 export function stationOf(status) {
   const station = status?.station;
@@ -342,18 +362,38 @@ const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 /// (`lan_endpoint_task.rs`; the id is a `LinkId`'s Display, `link1`, not a
 /// bare number), and `Project loaded: <name>` (`lpa-server`'s
 /// `project_manager.rs`, as walk-no-board reads it).
+///
+/// A console is one file per capture: when the walk lets go of a board's USB
+/// link to ask it something over that door (`usbStatus`) and takes it back,
+/// the new capture writes a new file, and the text is all of them in order,
+/// so a mark taken before the hand-over still points at the same line.
 class BoardConsole {
   constructor(board, file) {
     this.board = board;
-    this.file = file;
+    this.files = [file];
+  }
+
+  get file() {
+    return this.files[this.files.length - 1];
+  }
+
+  /// The next capture's file: `<id>.link.<n>.log` beside the first.
+  nextFile() {
+    const next = this.files[0].replace(/\.link\.log$/, `.link.${this.files.length + 1}.log`);
+    this.files.push(next);
+    return next;
   }
 
   text() {
-    try {
-      return readFileSync(this.file, "utf8");
-    } catch {
-      return "";
-    }
+    return this.files
+      .map((file) => {
+        try {
+          return readFileSync(file, "utf8");
+        } catch {
+          return "";
+        }
+      })
+      .join("");
   }
 
   /// A position to read "since" from.
@@ -365,10 +405,15 @@ class BoardConsole {
     return this.text().slice(mark);
   }
 
-  /// The first line from `mark` on that `match` (a string or a RegExp)
-  /// finds.
+  /// The first line from `mark` on that `match` (a string, a RegExp or a
+  /// predicate) finds.
   async waitFor(match, { from = 0, timeoutMs = STEP_MS, what }) {
-    const test = typeof match === "string" ? (line) => line.includes(match) : (line) => match.test(line);
+    const test =
+      typeof match === "function"
+        ? match
+        : typeof match === "string"
+          ? (line) => line.includes(match)
+          : (line) => match.test(line);
     const deadline = Date.now() + timeoutMs;
     for (;;) {
       const hit = this.since(from).split("\n").find(test);
@@ -407,18 +452,22 @@ class BoardConsole {
 /// Hold a board's USB link for the rest of the walk and write its decoded
 /// console: a TCP bridge to the door's `/bytes`, and `lp-cli link capture`
 /// on it.
-async function holdConsole({ doorAddr, board, file }) {
+///
+/// `console` continues an earlier hold's console in a new file (`usbStatus`).
+async function holdConsole({ doorAddr, board, file, console: continued = null }) {
+  const boardConsole = continued ?? new BoardConsole(board, file);
+  const target = continued ? continued.nextFile() : file;
   const bridge = await bridgeDoorBytes({ doorAddr, board });
   const child = spawn(
     LP_CLI,
-    ["link", "capture", `tcp://127.0.0.1:${bridge.port}`, "--console", file, "--seconds", "14400", "--json-replies"],
+    ["link", "capture", `tcp://127.0.0.1:${bridge.port}`, "--console", target, "--seconds", "14400", "--json-replies"],
     { cwd: ROOT, stdio: ["ignore", "ignore", "pipe"] },
   );
   let stderr = "";
   child.stderr.on("data", (chunk) => {
     stderr = (stderr + chunk).slice(-4000);
   });
-  return { board, bridge, child, stderr: () => stderr, console: new BoardConsole(board, file) };
+  return { board, bridge, child, stderr: () => stderr, console: boardConsole };
 }
 
 /// Let go of a board's USB link: stop its capture and its bridge, and wait
@@ -565,6 +614,17 @@ class Page {
     });
   }
 
+  /// The first of `words` the card says (a card whose board runs a
+  /// degraded project, W8's Radio node, says "Degraded" where an idle one
+  /// says "Ready"; both mean the link is up and the board answered).
+  async cardSaysAny(forward, words, what) {
+    const found = await this.driver.waitFor(
+      `(() => { const t = ${cardText(forward)}; return ${JSON.stringify(words)}.find((w) => t.includes(w)) ?? false; })()`,
+      { timeoutMs: STEP_MS, what: what ?? `the card at ${forward} to say one of ${JSON.stringify(words)}` },
+    );
+    return found;
+  }
+
   /// The MAC the card shows: the board's own, from its hello.
   async cardMac(forward) {
     return this.driver.evaluate(`(() => { const m = ${cardText(forward)}.match(/[0-9a-f]{2}(:[0-9a-f]{2}){5}/i); return m ? m[0].toLowerCase() : null; })()`);
@@ -690,13 +750,13 @@ async function main() {
         "   lp-cli link capture tcp://127.0.0.1:<bridge to /bytes> --console console/<id>.link.log   (held to the end)",
         "W2 Studio ?lan=… → two Wi‑Fi cards; each console: [lan] link … secure session opening",
         `W3 push ${WALK_PROJECT} to ${A} over the LAN; console: Project loaded, frames advance; edit a knob`,
-        `W4 ${B}'s card Ready with its own MAC; no [lan] link … closed on either console; ${B} answers over its forward`,
+        `W4 ${B}'s card Ready with its own MAC; no [lan] link … closed on either console; a second LAN dial to ${B} turned away (one LAN link); ${B} answers over its USB door`,
         `W5 GET /lans/${LAN}/browse?service=_lightplayer._tcp.local → both MACs`,
-        `W6 release ${B}'s capture; Studio via USB → ${B}; ${GUEST.ssid} with a wrong password → last wrongPassword, back on ${NET.ssid}`,
+        `W6 LAN page off (about:blank; each console: link closed); release ${B}'s capture; Studio via USB → ${B}; ${GUEST.ssid} with a wrong password → last wrongPassword, back on ${NET.ssid} (status over ${B}'s forward)`,
         `W7 ${B}: ${NOWHERE.ssid} → last notFound`,
-        `W8 lp-cli upload ${RADIO_PROJECT} lan:<fwd a> → the Radio node's words; frames advance`,
-        `W10 lp-cli link rtt lan:<fwd a> --count ${RTT_COUNT} --json rtt-lan.json → p50/p90 frames   (before W9)`,
-        `W9 control ${A}: renumber, reset → a different address; Studio back through <fwd a>`,
+        `W8 lp-cli upload ${RADIO_PROJECT} lan:<fwd a> (page still off) → loaded, frames advance; LAN page back → the Radio node's words`,
+        `W10 LAN page off; lp-cli link rtt lan:<fwd a> --count ${RTT_COUNT} --json rtt-lan.json → p50/p90 frames   (before W9)`,
+        `W9 LAN page back; control ${A}: renumber, reset → a different address; Studio's link back through <fwd a> with traffic; status over USB at the new address`,
       ],
       prerequisites: needs,
       chrome,
@@ -776,6 +836,55 @@ async function main() {
   let page = null;
   /// W6/W7's page (Studio over USB), while it is open; their shots are its.
   let usbDriver = null;
+
+  /// The board's own status over its USB door, while its console capture
+  /// holds that door: the capture lets go, `lp-cli wifi status` asks, and a
+  /// new capture takes the door back (its console continues in a new file).
+  /// A board has one LAN link and Studio holds it, so this is how the walk
+  /// asks a board Studio is connected to.
+  const usbStatus = async (id, test = () => true, what = "its status") => {
+    await releaseConsole(holds[id]);
+    let status;
+    try {
+      status = await awaitStatus(usb(id), test, { what, timeoutMs: STEP_MS });
+    } finally {
+      const from = holds[id].console.mark();
+      holds[id] = await holdConsole({ doorAddr: door.addr, board: id, console: holds[id].console });
+      await holds[id].console.waitFor("[link] up (session", { from, what: "its USB link up for the capture again" });
+    }
+    return status;
+  };
+
+  /// Take the LAN page off both boards (`about:blank`), so the walk's own
+  /// LAN tools have each board's one LAN link; waits for every captured
+  /// board to say its link closed.
+  let lanPageOn = true;
+  const pageOff = async () => {
+    if (!lanPageOn) return "already off";
+    const marks = Object.fromEntries(Object.entries(consoles()).map(([board, c]) => [board, c.mark()]));
+    await driver.navigate("about:blank");
+    lanPageOn = false;
+    const closed = {};
+    for (const [board, c] of Object.entries(consoles())) {
+      if (holds[board].released) continue;
+      closed[board] = (await c.waitFor(/\[lan\] link \S+: closed/, { from: marks[board], what: "Studio's LAN link closed" })).trim();
+    }
+    return closed;
+  };
+
+  /// The LAN page back on both boards; waits for `board`'s console to say a
+  /// new secure session opened, then its card.
+  const pageOn = async (board) => {
+    const from = holds[board].console.mark();
+    await page.load(url);
+    lanPageOn = true;
+    const line = await holds[board].console.waitFor(/\[lan\] link \S+ .*secure session opening/, {
+      from,
+      what: "Studio's LAN link opening",
+    });
+    await page.cardSaysAny(fwd[board], ["Ready", "Degraded"]);
+    return line.trim();
+  };
 
   /// One W-step: run it, screenshot it, keep what each console and the sink
   /// gained while it ran.
@@ -941,7 +1050,7 @@ async function main() {
       return { loaded, frameCounts: counts, knob };
     });
 
-    await step("W4", `${B}'s card while ${A} stays connected: both links stay up`, async () => {
+    await step("W4", `${B}'s card while ${A} stays connected: both links stay up`, async (marks, seen) => {
       const how = await page.toDevices(url);
       // Both cards Ready, each showing ITS board's MAC: the hello each link
       // carried (the page only says where to look; the MAC is the board's).
@@ -950,20 +1059,33 @@ async function main() {
         const shown = await page.cardMac(fwd[id]);
         if (shown !== mac[id]) throw new Error(`the card at ${fwd[id]} shows ${shown}, not ${id}'s ${mac[id]}`);
       }
-      // Since W2 opened them, neither board has closed a LAN link. Read
-      // BEFORE the walk's own LAN client below, whose link closes when it is
-      // done.
-      if (how === "in-app") {
+      const noneClosed = () => {
+        if (how !== "in-app") return;
         for (const id of BOARDS) {
           const closed = holds[id].console.since(lanMarks[id]).split("\n").filter((l) => /\[lan\] link \S+: closed/.test(l));
           if (closed.length) throw new Error(`${id} closed a LAN link: ${closed[0]}`);
         }
+      };
+      // Since W2 opened them, neither board has closed a LAN link.
+      noneClosed();
+      // The board has ONE LAN link and Studio holds it: a second dial is
+      // turned away in the board's words, and Studio's link stays up.
+      const second = await lpCli(["wifi", "status", lan(B), "--json"], { timeoutMs: 120_000 });
+      seen.secondDial = { code: second.code, stderrTail: second.stderr.trim().split("\n").slice(-2) };
+      if (second.code === 0 || !refusedAsInUse(second.stderr)) {
+        throw new Error(`a second LAN dial to ${B} was not turned away as in use: exit ${second.code}: ${second.stderr.trim().split("\n").slice(-2).join(" | ")}`);
       }
-      // c6-b answers on a second LAN link, beside Studio's: its own status,
-      // at its own W1 address.
-      const status = await wifiStatus(lan(B));
-      if (stationOf(status).ip !== joined[B].ip) throw new Error(`${B} answered over its forward as ${JSON.stringify(status.station)}`);
-      return `back on Devices ${how}; both cards Ready with their own MACs; ${B} answered at ${joined[B].ip}; no LAN link closed${how === "in-app" ? "" : " (not checked: the page reloaded)"}`;
+      const turnedAway = (
+        await holds[B].console.waitFor("[lan] every LAN link is in use", { from: marks[B], what: "the second LAN dial turned away" })
+      ).trim();
+      seen.turnedAway = turnedAway;
+      // c6-b answers over its USB door: its own status, at its own W1
+      // address, its LAN link still Studio's.
+      const status = await usbStatus(B, (s) => stationOf(s).kind === "connected", "connected");
+      if (stationOf(status).ip !== joined[B].ip) throw new Error(`${B} answered over its USB door as ${JSON.stringify(status.station)}`);
+      noneClosed();
+      await page.cardSays(fwd[B], "Ready");
+      return `back on Devices ${how}; both cards Ready with their own MACs; a second LAN dial to ${B} turned away (${turnedAway.replace(/^.*\] /, "")}); ${B} answered over USB at ${joined[B].ip}; no LAN link closed${how === "in-app" ? "" : " (not checked: the page reloaded)"}`;
     });
 
     await step("W5", "the LAN probe asks for _lightplayer._tcp: both boards answer, each with its own name and MAC", async () => {
@@ -985,7 +1107,10 @@ async function main() {
       // The Wi‑Fi panel is on a USB card only (see studioUrlForLan), so
       // the walk hands c6-b's USB door from its capture to the page: the
       // console capture ends here and c6-b's evidence from now on is its
-      // status answers over its LAN forward.
+      // status answers over its LAN forward. Those need c6-b's one LAN
+      // link, so the LAN page lets go of both boards first (it comes back
+      // in W8), each board saying its link closed.
+      seen.pageOff = await pageOff();
       await releaseConsole(holds[B]);
       usbDriver = await StudioDriver.launch({ width: 1100, height: 900 });
       await usbDriver.cdp.send(
@@ -1088,37 +1213,63 @@ async function main() {
     }
 
     await step("W8", `a project with a Radio node on ${A}: the node says why the Radio is off, and the rest runs`, async (marks, seen) => {
+      // The LAN page is still off (W6): the upload has c6-a's one LAN link.
       const upload = await lpCli(["upload", RADIO_PROJECT, lan(A)], { timeoutMs: STEP_MS });
       seen.upload = { code: upload.code, stderrTail: upload.stderr.trim().split("\n").slice(-6) };
-      if (upload.code !== 0) throw new Error(`upload ${RADIO_PROJECT} ${lan(A)} → exit ${upload.code}: ${upload.stderr.trim().split("\n").slice(-4).join(" | ")}`);
-      await holds[A].console.waitFor("Project loaded", { from: marks[A], what: "`Project loaded`" });
-      const counts = await holds[A].console.framesAdvance({ from: marks[A] });
+      // As built (run 7): the board takes the project, runs it with its
+      // Radio node faulted, and lp-cli's deploy check reports that fault
+      // and exits 1 ("deploy was acked, but the deployed project failed to
+      // run: open control radio …: Radio is off while this board uses
+      // Wi-Fi. …"). The message is the board's (a string only the firmware
+      // holds), so that exit is W8's expected answer, not a failed upload;
+      // any other failure is.
+      const radioRefused = upload.code !== 0 && upload.stderr.includes("deploy was acked") && upload.stderr.includes(RADIO_OFF_FOR_WIFI);
+      seen.uploadSaidRadioOff = radioRefused;
+      if (upload.code !== 0 && !radioRefused) throw new Error(`upload ${RADIO_PROJECT} ${lan(A)} → exit ${upload.code}: ${upload.stderr.trim().split("\n").slice(-4).join(" | ")}`);
       const slug = path.basename(RADIO_PROJECT);
+      seen.loadLine = (await holds[A].console.waitFor(`Project loaded: ${slug}`, { from: marks[A], what: `\`Project loaded: ${slug}\`` })).trim();
+      const counts = await holds[A].console.framesAdvance({ from: marks[A] });
+      seen.frameCounts = counts;
       const loaded = holds[A].console.loadedProjects(marks[A]);
       if (!loaded?.includes(slug)) throw new Error(`${A}'s heartbeat lists ${loaded}, not ${slug}`);
+      // The rest runs: the frame counter moved, and the heartbeat's fault
+      // names the Radio node and nothing else.
+      const faulted = [...new Set([...holds[A].console.since(marks[A]).matchAll(/"nodes":\[\{"path":"([^"]+)"/g)].map((m) => m[1]))];
+      seen.faultedNodes = faulted;
+      if (faulted.some((node) => !/radio/i.test(node))) throw new Error(`${A}'s heartbeat faults more than the Radio node: ${JSON.stringify(faulted)}`);
       // The node's words: on the console if the firmware logs them, and on
       // the page wherever Studio draws the node (a string only the firmware
       // holds).
       // ASSUMES: the editor draws a node's unavailable reason as page text
       // somewhere on opening the project (the node card, or its status line).
       const onConsole = holds[A].console.since(marks[A]).includes(RADIO_OFF_FOR_WIFI);
-      await page.toDevices(url);
-      await page.clickInCard(fwd[A], "Open in editor");
+      // Studio back on the LAN, for the editor: c6-a's console says the
+      // page's link opened again. The page is where a person reads the
+      // message, but the board's words above already decide W8, so a page
+      // that does not come back is recorded (`seen.page`), not the step's
+      // failure.
       const radioOnPage = `(document.body.innerText || '').includes(${JSON.stringify(RADIO_OFF_FOR_WIFI)})`;
-      const onPage = await driver
-        .waitFor(radioOnPage, { timeoutMs: 60_000, what: "the Radio node's message" })
-        .then(() => true)
-        .catch(async () => {
-          // Not drawn until the node is chosen: choose it (the project's
-          // node is `radio.json`), and look again.
-          await driver.click("radio", { exact: true }).catch(() => null);
-          return driver
-            .waitFor(radioOnPage, { timeoutMs: STEP_MS, what: "the Radio node's message" })
-            .then(() => true)
-            .catch(() => false);
-        });
-      if (!onConsole && !onPage) throw new Error("the Radio node's message is neither on the board's console nor in the editor");
-      return { loaded, frameCounts: counts, radioMessage: { onConsole, onPage } };
+      const onPage = await (async () => {
+        seen.relinked = await pageOn(A);
+        await page.clickInCard(fwd[A], "Open in editor");
+        return driver
+          .waitFor(radioOnPage, { timeoutMs: 60_000, what: "the Radio node's message" })
+          .then(() => true)
+          .catch(async () => {
+            // Not drawn until the node is chosen: choose it (the project's
+            // node is `radio.json`), and look again.
+            await driver.click("radio", { exact: true }).catch(() => null);
+            return driver
+              .waitFor(radioOnPage, { timeoutMs: STEP_MS, what: "the Radio node's message" })
+              .then(() => true)
+              .catch(() => false);
+          });
+      })().catch((error) => {
+        seen.page = error.message.split("\n")[0];
+        return false;
+      });
+      if (!radioRefused && !onConsole && !onPage) throw new Error("the Radio node's message is not in the board's deploy reply, on its console, or in the editor");
+      return { loaded, frameCounts: counts, faultedNodes: faulted, radioMessage: { inDeployReply: radioRefused, onConsole, onPage } };
     });
 
     // W10 runs BEFORE W9, out of the plan's order: W9 resets c6-a onto a
@@ -1126,7 +1277,9 @@ async function main() {
     // been reset (the first full run lost W10 to what W9 left behind, the
     // forward no longer reaching the board). The step ids keep the plan's
     // numbering.
-    await step("W10", `lp-cli link rtt ${lan(A)}: request p50 and p90 in frames`, async () => {
+    await step("W10", `lp-cli link rtt ${lan(A)}: request p50 and p90 in frames`, async (marks, seen) => {
+      // `link rtt` needs c6-a's one LAN link: the page lets go first.
+      seen.pageOff = await pageOff();
       const json = path.join(out, "rtt-lan.json");
       // A previous run's report would read as this run's.
       rmSync(json, { force: true });
@@ -1137,11 +1290,23 @@ async function main() {
           "--json", json,
           "--console", path.join(out, "rtt-lan.console.log"),
           "--count", String(RTT_COUNT),
+          // The idle window is WALL seconds on a `lan:` target, and its
+          // frame rate needs two heartbeats (5 s of BOARD time apart). A
+          // board held to a connected host's pace and rendering a project
+          // runs slower than the wall (run 7: 5 s of board time in ≈17 s;
+          // run 10, on a box at load 73, 5 s in 76 s), so the default 20 s
+          // window caught one heartbeat and no rate.
+          "--idle-s", "180",
           "--label", `${configuration} lp-emu ${commit} via ${lan(A)}`,
         ],
         { timeoutMs: 900_000 },
       );
       if (run.code !== 0) throw new Error(`link rtt → exit ${run.code}: ${run.stderr.trim().split("\n").slice(-4).join(" | ")}`);
+      // What the board rendered while it was timed: the `loaded_projects`
+      // of the heartbeats its USB console carried DURING the run (W8's
+      // project, or `[]` if W8 did not load one). The rtt report's own
+      // heartbeats carry frame counts, not projects.
+      seen.loaded = holds[A].console.loadedProjects(marks[A]);
       const rtt = JSON.parse(readFileSync(json, "utf8"));
       const frames = rtt.request_rtt_frames ?? {};
       if (frames.n !== RTT_COUNT) throw new Error(`${frames.n ?? 0} of ${RTT_COUNT} requests timed in frames (idle fps ${rtt.idle_fps})`);
@@ -1161,12 +1326,16 @@ async function main() {
         if (seconds > 0) wallFps = (last.frame_count - first.frame_count) / seconds;
       }
       const wallFrames = wallFps === null ? null : quantiles((rtt.requests ?? []).map((r) => (r.rtt_us / 1e6) * wallFps));
-      report.rtt = { configuration, lpEmu: commit, frames, wallFrames, idleFps: rtt.idle_fps, wallFps };
-      return `request RTT p50 ${frames.p50} / p90 ${frames.p90} frames (board fps); ${
+      report.rtt = { configuration, lpEmu: commit, frames, wallFrames, idleFps: rtt.idle_fps, wallFps, loaded: seen.loaded };
+      return `request RTT p50 ${frames.p50} / p90 ${frames.p90} frames (board fps ${rtt.idle_fps}); ${
         wallFrames ? `p50 ${wallFrames.p50} / p90 ${wallFrames.p90} frames drawn per wall second` : "no wall frame rate"
-      } — ${configuration}, lp-emu ${commit}`;
+      } — rendering ${seen.loaded ?? "nothing"} — ${configuration}, lp-emu ${commit}`;
     });
-    await step("W9", `reset ${A} from the control port with the next-lease option on: a new address, Studio back through the same forward`, async (marks) => {
+    await step("W9", `reset ${A} from the control port with the next-lease option on: a new address, Studio back through the same forward`, async (_marks, seen) => {
+      // Studio back on the LAN first (W10 had it off), holding c6-a's link
+      // when the board goes away.
+      seen.linkedBefore = await pageOn(A);
+      const marks = Object.fromEntries(BOARDS.filter((id) => !holds[id].released).map((id) => [id, holds[id].console.mark()]));
       const old = joined[A].ip;
       const renumbered = await control(door.addr, A, "renumber");
       const reset = await control(door.addr, A, "reset");
@@ -1177,20 +1346,47 @@ async function main() {
       });
       const ip = addressLine.match(/(\d+\.\d+\.\d+\.\d+)/)[1];
       if (ip === old) throw new Error(`${A} came back on ${old}, the old address`);
-      // Studio's link back through the same forward. Waited for BEFORE the
-      // walk's own LAN client below dials: until then Studio is the only
-      // thing dialling this board, so the line is its link.
+      seen.address = addressLine.trim();
+      // Studio's link back through the same forward. Nothing else of the
+      // walk's dials this board's LAN, so the line is Studio's link.
+      const afterAddress = marks[A] + holds[A].console.since(marks[A]).indexOf(addressLine);
       const lanLine = await holds[A].console.waitFor(/\[lan\] link \S+ .*secure session opening/, {
-        from: marks[A] + holds[A].console.since(marks[A]).indexOf(addressLine),
+        from: afterAddress,
         what: "Studio's LAN link opening again after the new address",
       });
-      const status = await awaitStatus(lan(A), (s) => stationOf(s).kind === "connected" && stationOf(s).ip === ip, {
-        what: `connected at ${ip}, through the same forward`,
-      });
-      await page.toDevices(url);
-      await page.cardSays(fwd[A], "Ready");
+      seen.relinked = lanLine.trim();
+      // …and carrying traffic both ways, in the board's words: the link's
+      // lp-link session up (`radio link <id>: session N up`, which needs the
+      // host's half of the handshake), or its own counters with frames in
+      // and out (logged every other heartbeat, so later on a slow box).
+      const linkId = lanLine.match(/\[lan\] link (\S+) /)[1];
+      const afterRelink = afterAddress + holds[A].console.since(afterAddress).indexOf(lanLine);
+      const traffic = await holds[A].console.waitFor(
+        (line) => {
+          if (new RegExp(`radio link ${escapeRegExp(linkId)}: session \\d+ up`).test(line)) return true;
+          const m = line.match(new RegExp(`\\[lan\\] link ${escapeRegExp(linkId)}: frames in (\\d+) out (\\d+)`));
+          return Boolean(m) && Number(m[1]) > 0 && Number(m[2]) > 0;
+        },
+        { from: afterRelink, what: `traffic both ways on ${linkId}` },
+      );
+      seen.traffic = traffic.trim();
+      // The board's status at its new address, over its USB door (Studio
+      // holds its one LAN link).
+      const status = await usbStatus(A, (s) => stationOf(s).kind === "connected" && stationOf(s).ip === ip, `connected at ${ip}`);
+      seen.station = status.station;
       joined[A] = { ...joined[A], ip, before: old };
-      return { renumbered, reset, before: old, after: ip, station: status.station, relinked: lanLine.trim() };
+      // Last, the page: the card back on its link, "Ready" (or "Degraded"
+      // when W8's project runs with its Radio node off — the board's own
+      // fault, relayed). A card that stays on neither after a relink is
+      // Studio's finding 5 (PR B's), and does not hide the board's
+      // evidence above: the step passes on the board's words and says so.
+      await page.toDevices(url);
+      const face = await page.cardSaysAny(fwd[A], ["Ready", "Degraded"]).catch(() => null);
+      seen.cardFace = face;
+      const card = face
+        ? `card ${face}`
+        : `board-side pass, Studio finding 5: the card says ${JSON.stringify((await driver.evaluate(cardText(fwd[A]))).replace(/\s+/g, " ").slice(0, 160))}`;
+      return { renumbered, reset, before: old, after: ip, station: status.station, relinked: seen.relinked, traffic: seen.traffic, card };
     });
 
   } catch (error) {
