@@ -14,6 +14,10 @@
 //! 3. it has its own eFuse MAC and its own flash file, because a registry of
 //!    N boards that all answer with one identity is one board N times.
 //!
+//! A board whose spec says `lan=<name>` is built onto that served LAN
+//! ([`super::served_lan`]) and, once built, gets a forward: a loopback port
+//! carried to its LAN endpoint, published beside the two doors.
+//!
 //! The run loop is sliced by **wall** time rather than by a cycle deadline:
 //! a server has no deadline, and [`Esp32C6Machine::reboot`] restarts the
 //! guest's clock, so an absolute `stop_cycle` would mean something different
@@ -34,7 +38,9 @@ use lp_emu_esp32c6::machine::{
 };
 
 use super::air::AirTap;
+use super::served_lan::{BoardOnLan, LanSeat};
 use crate::commands::emu::handler::{Image, apply_image, describe};
+use crate::commands::emu::lan_fixture::forward_to_board;
 
 /// How long one `run_until` call is allowed to hold the thread before the
 /// loop gets a turn: the shutdown flag, the flash flush, the air drain. Short
@@ -90,8 +96,11 @@ pub struct BoardSpec {
     pub kind: BoardKind,
     pub mac: [u8; 6],
     /// The emulator seams this board asks for (`seams=` / `seams_prefer=`);
-    /// the capability defaults — empty today — unless the spec says.
+    /// the capability defaults (`net=lan`, softly) unless the spec says.
     pub seams: lp_emu_esp_common::seam::SeamRequest,
+    /// The served LAN this board is on (`lan=<name>`), or `None`: an engaged
+    /// network seam then answers from an empty LAN of the board's own.
+    pub lan: Option<String>,
     /// The persistent flash file, `None` for a merged board (which carries
     /// the whole chip already) and for a serve with no `--state-dir`.
     pub flash: Option<PathBuf>,
@@ -142,6 +151,8 @@ pub struct Board {
     /// The board's configuration label and this chip start's `SEAM` lines,
     /// kept current by the board thread (`GET /boards`).
     pub seams: Arc<std::sync::Mutex<SeamReport>>,
+    /// Its place on a served LAN and its forward, when its spec named one.
+    pub lan: Option<BoardOnLan>,
     shutdown: Arc<AtomicBool>,
     thread: std::sync::Mutex<Option<std::thread::JoinHandle<()>>>,
 }
@@ -185,6 +196,16 @@ pub struct BoardOptions {
     /// per-`--board`: the flag is a *fault injection*, and a serve that wants
     /// one wedged board and one clean one is a second serve.
     pub lpperi_clk_en: Option<u32>,
+    /// This board's seat on a served LAN (per board, unlike the rest).
+    pub lan: Option<LanSeat>,
+}
+
+/// What a board thread reports once its machine is built: the two doors it
+/// bound, and its forward when it is on a served LAN.
+struct Bound {
+    bytes: SocketAddr,
+    control: SocketAddr,
+    lan: Option<BoardOnLan>,
 }
 
 impl Board {
@@ -211,7 +232,7 @@ impl Board {
         let power_cycles = Arc::new(AtomicU64::new(0));
         let has_image = Arc::new(AtomicBool::new(at_start));
         let seams = Arc::new(std::sync::Mutex::new(SeamReport::default()));
-        let (tx, rx) = std::sync::mpsc::channel::<Result<(SocketAddr, SocketAddr)>>();
+        let (tx, rx) = std::sync::mpsc::channel::<Result<Bound>>();
 
         let id = spec.id.clone();
         let mac = spec.mac;
@@ -243,7 +264,11 @@ impl Board {
                 .context("spawning the board thread")?
         };
 
-        let (bytes_addr, control_addr) = rx
+        let Bound {
+            bytes: bytes_addr,
+            control: control_addr,
+            lan,
+        } = rx
             .recv()
             .map_err(|_| anyhow!("board `{id}` died before it bound its sockets"))??;
 
@@ -262,6 +287,7 @@ impl Board {
             reboots,
             power_cycles,
             seams,
+            lan,
             shutdown,
             thread: std::sync::Mutex::new(Some(thread)),
         })
@@ -321,7 +347,7 @@ impl Drop for Board {
 struct RunBoard {
     spec: BoardSpec,
     options: BoardOptions,
-    tx: std::sync::mpsc::Sender<Result<(SocketAddr, SocketAddr)>>,
+    tx: std::sync::mpsc::Sender<Result<Bound>>,
     shutdown: Arc<AtomicBool>,
     flush_now: Arc<AtomicBool>,
     stopped: Arc<AtomicBool>,
@@ -362,8 +388,31 @@ fn run_board(this: RunBoard) {
             spec.id
         )),
     };
-    let ok = addrs.is_ok();
-    let _ = tx.send(addrs);
+    // The LAN's door: the builder attached the board (its lease is
+    // reserved), so a loopback port can be carried to it before it boots.
+    let bound = addrs.and_then(|(bytes, control)| {
+        let lan = match &options.lan {
+            Some(seat) => {
+                let endpoint = machine.net_endpoint_id();
+                let forward = forward_to_board(&seat.lan, endpoint)
+                    .with_context(|| format!("board `{}`: lan={}", spec.id, seat.name))?;
+                Some(BoardOnLan {
+                    name: seat.name.clone(),
+                    lan: seat.lan.clone(),
+                    endpoint,
+                    forward,
+                })
+            }
+            None => None,
+        };
+        Ok(Bound {
+            bytes,
+            control,
+            lan,
+        })
+    });
+    let ok = bound.is_ok();
+    let _ = tx.send(bound);
     if !ok {
         return;
     }
@@ -578,6 +627,11 @@ fn build(
         .usb_sj(UsbSjSink::Tcp("127.0.0.1:0".to_string()))
         .control("127.0.0.1:0")
         .seams(spec.seams.clone());
+    // On a served LAN, as participant `seat`: attached at build with its
+    // eFuse MAC when the network seam is wanted.
+    if let Some(seat) = &options.lan {
+        builder = builder.lan(seat.lan.clone(), seat.participant);
+    }
 
     // The LP domain's power-on gate word, if the serve induced one. Before
     // the snapshot, so `power-cycle` on the control channel hands the same
@@ -687,7 +741,9 @@ mod tests {
     }
 
     /// A soft request on an image with no seam table (a blank chip, or any
-    /// image from before seams) boots and says why, never an error.
+    /// image from before seams) boots and says why, never an error. The
+    /// request is `led=fast` AND the capability defaults (`net=lan`), both
+    /// soft: one line covers the chip start, and nothing is engaged.
     #[test]
     fn a_soft_seam_on_a_board_without_a_table_boots_and_says_why() {
         let spec = BoardSpec {
@@ -696,6 +752,7 @@ mod tests {
             kind: BoardKind::RomUp,
             mac: default_mac(0),
             seams: lp_emu_esp_common::seam::SeamRequest::prefer("led=fast").unwrap(),
+            lan: None,
             flash: None,
             console: None,
         };
@@ -706,7 +763,13 @@ mod tests {
             air: None,
             air_seat: 0,
             lpperi_clk_en: None,
+            lan: None,
         };
+        assert_eq!(
+            spec.seams.wanted().len(),
+            2,
+            "led=fast and the default net=lan"
+        );
         let mut machine = build(&spec, &options).expect("the board builds");
         let report = SeamReport::of(&machine);
         assert_eq!(report.label, "lp-emu:esp32c6:t1", "nothing engaged");

@@ -358,6 +358,29 @@ pub struct RunArgs {
     /// Print a flash image's (or a merged image's) seam tables and exit.
     #[arg(long = "seams-info", value_name = "IMAGE")]
     pub seams_info: Option<PathBuf>,
+
+    /// Put the board on a virtual LAN with this fixture's networks in range
+    /// (`[[access_point]]` tables: `name`, `password` (absent: open),
+    /// `signal_dbm`, `hidden`; test values only — the format of
+    /// `lp-emu/esp/lp-emu-esp-common/testdata/virtual_lan.toml`), answered
+    /// through the network seam (`net=lan`, a capability default). The run
+    /// prints the board's forward, `lan:127.0.0.1:<port>`, a loopback port
+    /// carried to the board's LAN endpoint (`:80`) once it has joined:
+    /// `lp-cli … lan:127.0.0.1:<port>` reaches it as a board on a desk's
+    /// network. The board joins whatever network its own saved settings
+    /// name (`lp-cli wifi add` over the USB link).
+    ///
+    /// Without it the seam still engages and the board's LAN is empty:
+    /// nothing in range, nothing forwarded. The C6 only.
+    #[arg(long, value_name = "FIXTURE")]
+    pub lan: Option<PathBuf>,
+
+    /// Write the seams' trace here: one `cyc=… SEAM <atom> <call> …` line
+    /// per seam call the guest makes (and the network seam's events), the
+    /// lines `lp-emu-esp32c6 --trace` writes, with none of the bus's. For
+    /// "did the board ever hand the LAN a frame?". The C6 only.
+    #[arg(long = "seam-trace", value_name = "FILE")]
+    pub seam_trace: Option<PathBuf>,
 }
 
 /// The USB host's state at power-on, for `run` and for every board `serve`
@@ -431,13 +454,36 @@ pub struct ServeArgs {
     ///
     /// `seams=` (strict) and `seams_prefer=` (soft) engage emulator seams on
     /// that board, spelled as `run --seams` spells them (`seams=led=fast`).
-    /// **None by default**, beyond the capability seams (none exist yet):
-    /// `studio-dev-emu` and every walk serve seam-free boards, and a
-    /// performance seam is never for testing (ADR
-    /// docs/adr/2026-10-05-emulator-seams.md). `GET /boards` names each
+    /// By default a board asks for the **capability defaults** softly
+    /// (`net=lan`: engaged when the image carries the seam, one `SEAM none
+    /// engaged: …` line when it does not) and nothing else: a performance
+    /// seam is never for testing (ADR docs/adr/2026-10-05-emulator-seams.md),
+    /// and `seams=none` turns even the defaults off. `GET /boards` names each
     /// board's configuration label and its `SEAM` lines.
+    ///
+    /// `lan=<name>` puts the board on the LAN `--lan <name>=…` declared,
+    /// beside every other board naming it; without it an engaged board's LAN
+    /// is its own and empty. Boards on one LAN need distinct MACs (they get
+    /// them by default).
     #[arg(long = "board", value_name = "ID=IMAGE[,OPTS]")]
     pub board: Vec<String>,
+
+    /// A virtual LAN: `<name>=<fixture.toml>`, the fixture in `emu run
+    /// --lan`'s format (the networks in range; test values only).
+    /// Repeatable. Every board whose spec says `lan=<name>` shares it, each
+    /// with its own lease and its own forward, a loopback port carried to the
+    /// board's LAN endpoint that `GET /boards` lists as `forward`
+    /// (`lan:127.0.0.1:<port>`). The forward is a door of its own, beside the
+    /// board's USB door: the USB door still admits one client.
+    ///
+    /// A served LAN runs on the host's clock (its boards each keep their own
+    /// guest clock): **not deterministic**, never what a test asserts on.
+    /// `GET /lans/<name>/browse?service=_lightplayer._tcp.local` asks the
+    /// LAN's probe for a DNS-SD service and answers with what the boards
+    /// said; `renumber` on a board's control channel gives its next DHCP
+    /// lease a different address.
+    #[arg(long = "lan", value_name = "NAME=FIXTURE")]
+    pub lan: Vec<String>,
 
     /// Where the door listens. `127.0.0.1:0` takes an ephemeral port and
     /// prints it, which is what a test and a second server want.

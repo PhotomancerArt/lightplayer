@@ -5841,6 +5841,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-tungstenite",
+ "toml 0.8.23",
  "tungstenite 0.21.0",
  "unicode-width 0.2.2",
 ]

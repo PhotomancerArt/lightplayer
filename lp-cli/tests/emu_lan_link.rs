@@ -50,9 +50,10 @@ const PASSWORD: &str = "correct-horse-42";
 
 /// The virtual LAN the board joins: one access point, test values only.
 ///
-/// ASSUMES: `emu run --lan <fixture>` reads P11's fixture format
+/// `emu run --lan <fixture>` reads P11's fixture format
 /// (`lp-emu/esp/lp-emu-esp-common/testdata/virtual_lan.toml`: one
-/// `[[access_point]]` per network, `name`, `password`, `signal_dbm`).
+/// `[[access_point]]` per network, `name`, `password`, `signal_dbm`;
+/// `lp-cli/src/commands/emu/lan_fixture.rs`).
 const FIXTURE: &str = r#"# emu_lan_link.rs: made-up test values only.
 [[access_point]]
 name = "lp-walk-net"
@@ -176,8 +177,8 @@ fn lan_transport_reaches_an_emulated_board_through_its_forward() {
     eprintln!("emu_lan_link: hello, status and an upload over {lan}");
 }
 
-/// The forward's line is read whatever words surround it (P12 has not fixed
-/// them). This one needs no firmware.
+/// The forward's line is read whatever words surround it (the words are
+/// `emu run`'s to change). This one needs no firmware.
 #[test]
 fn the_forward_is_read_out_of_whatever_line_names_it() {
     assert_eq!(
@@ -209,9 +210,11 @@ struct EmulatedBoard {
 
 impl EmulatedBoard {
     fn start(elf: &Path, usb: &str, fixture: &Path) -> Self {
-        // ASSUMES: `emu run --lan <fixture.toml>` (P12 §3) puts the board on
-        // a virtual LAN with the fixture's access points and prints its
-        // forward as `lan:127.0.0.1:<port>`, on stdout or stderr.
+        // `emu run --lan <fixture.toml>` (P12 §3) puts the board on a
+        // virtual LAN with the fixture's access points and prints its
+        // forward on stderr, once, right after the machine is built:
+        // `emu: board on LAN <fixture> (…) · forward lan:127.0.0.1:<port> →
+        // board :80`.
         let mut child = Command::new(env!("CARGO_BIN_EXE_lp-cli"))
             .args(["emu", "run", "--elf"])
             .arg(elf)

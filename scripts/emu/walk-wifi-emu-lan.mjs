@@ -43,8 +43,10 @@
 // showing it IS the board's answer relayed.
 //
 // The interfaces this walk drives were written ahead of the code that
-// provides them (P12's hosts, built in parallel). Every such guess is a
-// `// ASSUMES:` comment; `grep -n ASSUMES` is the list to reconcile.
+// provides them (P12's hosts, built in parallel). The door's shapes (the
+// fixture, `--lan`/`lan=`, `/boards`' `forward`, `renumber`, the browse) are
+// reconciled with `lp-cli emu serve` as built and say "As built:"; every
+// guess still standing is a `// ASSUMES:` comment.
 //
 // NOT CI (P13 §1). Made-up test values only. Headless Chrome only. It serves
 // the release Studio bundle itself on this worktree's stable slot (no dev
@@ -90,10 +92,11 @@ const GUEST = { ssid: "lp-walk-guest", password: "staple-battery-7", wrong: "wro
 const NOWHERE = { ssid: "lp-walk-nowhere", password: "no-such-net-1" };
 
 /// The virtual LAN's access points.
-/// ASSUMES: `emu serve --lan <name>=<fixture>` reads P11's fixture format
-/// (`lp-emu/esp/lp-emu-esp-common/testdata/virtual_lan.toml`): one
-/// `[[access_point]]` per network, `name`, `password` (absent = open),
-/// `signal_dbm`, `hidden`.
+/// As built: `emu serve --lan <name>=<fixture>` reads P11's fixture format
+/// (`lp-emu/esp/lp-emu-esp-common/testdata/virtual_lan.toml`; parser
+/// `lp-cli/src/commands/emu/lan_fixture.rs`): one `[[access_point]]` per
+/// network, `name`, `password` (absent = open), `signal_dbm`, `hidden`; any
+/// other key is refused.
 const FIXTURE = `# walk-wifi-emu-lan.mjs: made-up test values only, never a real network.
 [[access_point]]
 name = "${NET.ssid}"
@@ -189,9 +192,10 @@ function prerequisites() {
 
 /// The `emu serve` boards and flags for this walk.
 ///
-/// ASSUMES (P12 §3; flag spelling TBD): a LAN is declared once with
-/// `--lan <name>=<fixture.toml>`, and a board joins it with `,lan=<name>`
-/// in its `--board` spec. Boards naming the same LAN share it.
+/// As built (P12 §3): a LAN is declared once with `--lan
+/// <name>=<fixture.toml>`, and a board joins it with `,lan=<name>` in its
+/// `--board` spec. Boards naming the same LAN share it; each board's MAC is
+/// its own by default (`02:4c:50:00:00:<seat>`).
 function doorSpec(fixturePath) {
   return {
     boards: BOARDS.map((id) => `${id}={merged},kind=rom-up,lan=${LAN}`),
@@ -201,17 +205,13 @@ function doorSpec(fixturePath) {
 
 /// A board's forward, `127.0.0.1:<port>`, out of its `/boards` entry.
 ///
-/// ASSUMES (P12 §3: "`/boards` lists each board's forward"): one of
-/// `forward`, `lan.forward`, `lan_forward` holds `lan:127.0.0.1:<port>` or
-/// `127.0.0.1:<port>`. Read loosely on purpose; the thrown message carries
-/// the entry so the real shape is one look away.
+/// As built: each `/boards` entry carries `lan` (the LAN's name),
+/// `forward` (`lan:127.0.0.1:<port>`) and `address` (the board's LAN
+/// address once DHCP bound one, else null), all null for a board on no
+/// served LAN. The thrown message carries the entry.
 export function forwardOf(entry) {
-  const candidates = [entry?.forward, entry?.lan?.forward, entry?.lan_forward, entry?.lan?.address];
-  for (const value of candidates) {
-    if (typeof value !== "string") continue;
-    const match = value.match(/(?:lan:)?(127\.0\.0\.1:\d+)/);
-    if (match) return match[1];
-  }
+  const match = typeof entry?.forward === "string" ? entry.forward.match(/^lan:(127\.0\.0\.1:\d+)$/) : null;
+  if (match) return match[1];
   throw new Error(`no LAN forward in the door's entry for ${entry?.id}: ${JSON.stringify(entry)}`);
 }
 
@@ -397,10 +397,11 @@ async function holdConsole({ doorAddr, board, file }) {
 
 /// A door control line (`/board/<id>/control`), and its one reply line.
 ///
-/// ASSUMES (the director's call; P11 built `VirtualLan::renumber_next_lease`
-/// and `DhcpServer::renumber_next`): the control channel takes `renumber`,
-/// "this board's next DHCP lease is a different address", and replies
-/// `ok renumber …` like every other verb.
+/// As built: the control channel takes `renumber`, "this board's next DHCP
+/// lease is a different address" (`VirtualLan::renumber_next_lease`), the
+/// one verb the door answers itself, in its place in the reply order:
+/// `ok renumber lan=<name> board=<id> …`, or `err renumber: …` for a board
+/// on no served LAN.
 async function control(doorAddr, board, line) {
   const ws = new WebSocket(`ws://${doorAddr}/board/${board}/control`);
   const reply = await new Promise((resolve, reject) => {
@@ -422,16 +423,19 @@ async function control(doorAddr, board, line) {
 
 /// The LAN probe's answer to a DNS-SD browse, as the door relays it.
 ///
-/// ASSUMES (P12 §3 does not name it): the door answers
-/// `GET /lans/<name>/browse?service=_lightplayer._tcp.local` with
-/// `{ "answers": [ … ] }`, each answer naming an instance and carrying the
-/// TXT record's `mac=<12 hex>` somewhere in it (the firmware's TXT,
+/// As built (`lp-cli/src/commands/emu/serve/lan_browse.rs`): the door
+/// answers `GET /lans/<name>/browse?service=_lightplayer._tcp.local[&wait_ms=N]`
+/// once every running board on the LAN has answered with its instance and
+/// TXT (or the wait, 10 s by default, is up) with
+/// `{ lan, service, waited_ms, instances: [{ instance, host, port, address,
+/// txt, mac }], answers: [{ name, type, ttl, data }] }`; `mac` is the TXT
+/// record's `mac=<12 hex>` (the firmware's TXT,
 /// `fw-esp32-common/src/net/mdns/mdns_answer.rs`). Read loosely: the walk
 /// looks for each board's MAC and a distinct instance name per board.
 async function probeBrowse(doorAddr) {
   const url = `http://${doorAddr}/lans/${LAN}/browse?service=${encodeURIComponent("_lightplayer._tcp.local")}`;
   const response = await fetch(url, { signal: AbortSignal.timeout(60_000) });
-  if (!response.ok) throw new Error(`GET ${url} → ${response.status} (the LAN probe's door endpoint is an ASSUMES)`);
+  if (!response.ok) throw new Error(`GET ${url} → ${response.status} (the door's LAN browse: is --lan ${LAN}=… declared?)`);
   return response.json();
 }
 

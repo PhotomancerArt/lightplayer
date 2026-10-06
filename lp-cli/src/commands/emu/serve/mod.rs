@@ -7,7 +7,8 @@
 //! ```text
 //! GET  /boards                 → the registry, as JSON
 //! WS   /board/<id>/bytes       → binary frames, both ways, bytes and nothing else
-//! WS   /board/<id>/control     → the control line protocol, verbatim
+//! WS   /board/<id>/control     → the control line protocol, verbatim (+ `renumber`)
+//! GET  /lans/<name>/browse     → a DNS-SD browse on a served LAN, as JSON
 //! ```
 //!
 //! — plus one flash file and one eFuse MAC per board, so `s9-two-boards` is
@@ -30,6 +31,19 @@
 //! reason the shim is glue. The cost is a loopback hop per byte, which is
 //! what a shim costs.
 //!
+//! **Virtual LANs** (Wi-Fi plan P12): `--lan <name>=<fixture.toml>` declares
+//! one, and every board whose spec says `lan=<name>` shares it, each with its
+//! own lease and its own **forward** — a loopback port carried to the board's
+//! LAN endpoint, listed in `GET /boards` as `forward`
+//! (`lan:127.0.0.1:<port>`). The forward is a separate door: the USB door
+//! still admits one client per board. See [`served_lan`].
+//!
+//! ```text
+//! lp-cli emu serve --lan home=lan.toml \
+//!                  --board c6-a=…/merged.bin,kind=rom-up,lan=home \
+//!                  --board c6-b=…/merged.bin,kind=rom-up,lan=home
+//! ```
+//!
 //! **Nothing here is deterministic and nothing here is a gate.** A socket's
 //! command lands at whichever slice boundary the poll fell on
 //! (`lp-emu/esp/README.md` §Determinism); the reply names the cycle so a
@@ -38,6 +52,8 @@
 mod air;
 mod board;
 mod door;
+mod lan_browse;
+mod served_lan;
 mod wire_tap;
 mod wire_tear;
 
@@ -50,6 +66,7 @@ use lp_emu_esp32c6::loader::EfuseIdentity;
 use super::args::{EmuChip, ServeArgs};
 use board::{Board, BoardKind, BoardOptions, BoardSpec, default_mac, format_mac};
 use door::Registry;
+use served_lan::{LanSeat, ServedLan, is_path_segment, parse_lans};
 
 pub fn serve(args: ServeArgs) -> Result<()> {
     // A bad fault spec is refused here, before any board starts.
@@ -82,6 +99,8 @@ pub fn serve(args: ServeArgs) -> Result<()> {
         args.state_dir.as_deref(),
         args.console_dir.as_deref(),
     )?;
+    let lans = parse_lans(&args.lan)?;
+    check_lans(&specs, &lans)?;
 
     let air = match &args.air {
         Some(addr) => {
@@ -97,7 +116,26 @@ pub fn serve(args: ServeArgs) -> Result<()> {
     };
 
     let mut boards = Vec::with_capacity(specs.len());
+    for lan in &lans {
+        eprintln!(
+            "emu serve: LAN `{}` from {} ({}) — on the host's clock, not deterministic",
+            lan.name,
+            lan.fixture.path.display(),
+            lan.fixture.describe(),
+        );
+    }
     for (seat, spec) in specs.into_iter().enumerate() {
+        let lan = spec.lan.as_deref().map(|name| {
+            let served = lans
+                .iter()
+                .find(|l| l.name == name)
+                .expect("check_lans named every LAN a board names");
+            LanSeat {
+                name: name.to_string(),
+                lan: served.lan.clone(),
+                participant: lp_emu_esp_common::ParticipantId(seat),
+            }
+        });
         let options = BoardOptions {
             grade: args.time_grade.time_grade(),
             strict_bus: args.strict_bus,
@@ -105,6 +143,7 @@ pub fn serve(args: ServeArgs) -> Result<()> {
             air: air.clone(),
             air_seat: seat,
             lpperi_clk_en: args.lpperi_clk_en,
+            lan,
         };
         let id = spec.id.clone();
         let flash = spec.flash.clone();
@@ -112,18 +151,23 @@ pub fn serve(args: ServeArgs) -> Result<()> {
         let board = Board::start(spec, options)?;
         eprintln!(
             "emu serve: board `{id}` mac {} boot {boot} flash {}{} — bytes /board/{id}/bytes, \
-             control /board/{id}/control",
+             control /board/{id}/control{}",
             format_mac(&board.mac),
             board.flash_state(),
             flash
                 .as_ref()
                 .map(|p| format!(" ({})", p.display()))
                 .unwrap_or_default(),
+            board
+                .lan
+                .as_ref()
+                .map(|l| format!(", LAN `{}` forward {}", l.name, l.forward_spec()))
+                .unwrap_or_default(),
         );
         boards.push(board);
     }
 
-    let registry = Arc::new(Registry { boards });
+    let registry = Arc::new(Registry { boards, lans });
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -165,7 +209,34 @@ pub fn serve(args: ServeArgs) -> Result<()> {
     Ok(())
 }
 
-/// `--board <id>=<image>[,mac=<aa:bb:…>][,kind=elf|merged|rom-up]`.
+/// Every LAN a board names is declared, and a LAN no board names says so.
+fn check_lans(specs: &[BoardSpec], lans: &[ServedLan]) -> Result<()> {
+    for spec in specs {
+        if let Some(name) = &spec.lan
+            && !lans.iter().any(|l| &l.name == name)
+        {
+            bail!(
+                "--board `{}`: lan={name}, but no `--lan {name}=<fixture.toml>` declares it",
+                spec.id
+            );
+        }
+    }
+    for lan in lans {
+        if !specs
+            .iter()
+            .any(|s| s.lan.as_deref() == Some(lan.name.as_str()))
+        {
+            eprintln!(
+                "emu serve: LAN `{}` has no boards (a board joins it with `,lan={}` in its \
+                 --board)",
+                lan.name, lan.name
+            );
+        }
+    }
+    Ok(())
+}
+
+/// `--board <id>=<image>[,mac=<aa:bb:…>][,kind=elf|merged|rom-up][,lan=<name>]`.
 fn parse_boards(
     specs: &[String],
     state_dir: Option<&Path>,
@@ -204,11 +275,7 @@ fn parse_board(
         format!("--board `{text}`: expected <id>=<image>, for example c6-a=target/…/fw-esp32c6")
     })?;
     let id = id.trim();
-    if id.is_empty()
-        || !id
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
-    {
+    if !is_path_segment(id) {
         bail!(
             "--board `{text}`: `{id}` is not a board id — letters, digits, `-` and `_`, because \
              the id is a path segment"
@@ -222,6 +289,7 @@ fn parse_board(
     let mut kind = BoardKind::Elf;
     let mut seams_strict: Option<String> = None;
     let mut seams_prefer: Option<String> = None;
+    let mut lan: Option<String> = None;
     for option in parts {
         let option = option.trim();
         if option.is_empty() {
@@ -237,9 +305,11 @@ fn parse_board(
             Some(("kind", "rom-up")) => kind = BoardKind::RomUp,
             Some(("seams", value)) => seams_strict = Some(value.to_string()),
             Some(("seams_prefer", value)) => seams_prefer = Some(value.to_string()),
+            Some(("lan", value)) if is_path_segment(value) => lan = Some(value.to_string()),
             _ => bail!(
                 "--board `{text}`: `{option}` is not a board option — mac=<aa:bb:cc:dd:ee:ff>, \
-                 kind=elf|merged|rom-up, seams=<atoms|none> or seams_prefer=<atoms>"
+                 kind=elf|merged|rom-up, seams=<atoms|none>, seams_prefer=<atoms> or \
+                 lan=<name>"
             ),
         }
     }
@@ -290,6 +360,7 @@ fn parse_board(
         kind,
         mac,
         seams,
+        lan,
         flash,
         console: console_dir.map(|dir| dir.join(format!("{id}.console.log"))),
     })
@@ -314,18 +385,39 @@ mod tests {
         assert_ne!(specs[0].mac, specs[1].mac, "two boards, two identities");
     }
 
+    /// A plain board asks for the capability defaults (`net=lan`) softly
+    /// and nothing else: no performance seam unless spelled, and `none`
+    /// turns even the defaults off. The atom keeps its `=`.
     #[test]
-    fn a_board_asks_for_no_seam_unless_spelled_and_the_atom_keeps_its_equals() {
+    fn a_board_asks_only_for_the_capability_defaults_unless_spelled() {
         use lp_emu_esp_common::seam::Strength;
+        let atoms = |spec: &BoardSpec| -> Vec<(String, Strength)> {
+            spec.seams
+                .wanted()
+                .iter()
+                .map(|(i, s)| (i.atom(), *s))
+                .collect()
+        };
         let plain = parse_board("c6-a=fw", 0, None, None).expect("parses");
-        assert!(plain.seams.is_empty(), "seam-free by default (PD4)");
+        assert_eq!(
+            atoms(&plain),
+            vec![("net=lan".to_string(), Strength::Soft)],
+            "the capability defaults, softly; no performance seam (PD4)"
+        );
         let soft = parse_board("c6-a=fw,seams_prefer=led=fast", 0, None, None).expect("parses");
-        let wanted = soft.seams.wanted();
-        assert_eq!(wanted[0].0.atom(), "led=fast");
-        assert_eq!(wanted[0].1, Strength::Soft);
+        assert_eq!(
+            atoms(&soft),
+            vec![
+                ("led=fast".to_string(), Strength::Soft),
+                ("net=lan".to_string(), Strength::Soft)
+            ]
+        );
         let strict =
             parse_board("c6-a=fw,kind=rom-up,seams=led=fast", 0, None, None).expect("parses");
-        assert_eq!(strict.seams.wanted()[0].1, Strength::Strict);
+        assert_eq!(
+            atoms(&strict)[0],
+            ("led=fast".to_string(), Strength::Strict)
+        );
         assert!(
             parse_board("c6-a=fw,seams=none", 0, None, None)
                 .unwrap()
@@ -334,6 +426,17 @@ mod tests {
         );
         let err = parse_board("c6-a=fw,seams=led=slow", 0, None, None).unwrap_err();
         assert!(format!("{err:#}").contains("led=fast"), "{err:#}");
+    }
+
+    #[test]
+    fn a_board_names_its_lan_and_the_lan_must_be_declared() {
+        let on = parse_board("c6-a=fw,kind=rom-up,lan=home", 0, None, None).expect("parses");
+        assert_eq!(on.lan.as_deref(), Some("home"));
+        assert_eq!(parse_board("c6-a=fw", 0, None, None).unwrap().lan, None);
+        assert!(parse_board("c6-a=fw,lan=", 0, None, None).is_err());
+        assert!(parse_board("c6-a=fw,lan=ho/me", 0, None, None).is_err());
+        let err = check_lans(&[on], &[]).unwrap_err();
+        assert!(format!("{err:#}").contains("--lan home="), "{err:#}");
     }
 
     #[test]
