@@ -1,6 +1,6 @@
 //! The LED performance seam is honest (A-2): `led=fast` against no seam, on
 //! the shipped **split** image booted ROM-up the way a Studio board boots,
-//! with a host on its USB link, at `t2`, for 5.5 s emulated.
+//! with a host on its USB link, at `t2`, for 8.5 s emulated.
 //!
 //! The project is `projects/test/shader-oracle`, placed in the image's lpfs
 //! (the board loads it at boot, no upload): its shader consumes **no clock**,
