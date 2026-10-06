@@ -987,6 +987,7 @@ just hardware-list                  # passive: never opens a port, cannot hang
 just hardware-list --probe          # identify chips (resets idle boards)
 just hardware-list --chip esp32s3   # only boards probing as that chip; --json to script
 cargo run -q -p lp-cli -- fwcheck port --chip esp32c6   # resolve exactly one port
+cargo run -q -p lp-cli -- fwcheck port --mac A0:F2:62:87:B4:8C   # one board, by MAC, passively
 ```
 
 Overrides, in precedence order: an explicit `--port`, then `ESPFLASH_PORT`,
@@ -1007,11 +1008,44 @@ Rules of the desk:
   individual boards; chip identity needs `--probe`.
 - With **two boards of the same chip** on the bus, "the C6" is not an answer
   and `fwcheck port --chip esp32c6` cannot become one. Name the board by MAC
-  and resolve it passively: `scripts/emu/board-port.py <MAC>` (or `--list`).
+  and resolve it passively: `fwcheck port --mac <MAC>` (or
+  `scripts/emu/board-port.py <MAC>` / `--list`).
   The rest of `scripts/emu/` is the bench-instrument kit — a reader that
   never touches DTR/RTS (`tty-capture.py`, because `stty` and `screen` assert
   it on open and that is the reset sequence), and the UART-bridge flash and
   wiring-check procedures. See `lp-emu/README.md`.
+
+### The desk's boards are shared: lease before you flash or power-cycle
+
+Several sessions use the same desk boards. The registry and short leases
+live in `board` ([PhotomancerArt/lp-board-bench](https://github.com/PhotomancerArt/lp-board-bench),
+installed at `~/.local/bin/board`; the desk's data in
+`~/.photomancer/desk/boards.toml`). Each board has a **slug** everyone says
+and a **mark** written on the chip in sharpie: `FC6 fixture-c6`.
+
+```bash
+board list                                         # every board, its port and hub, who holds it, who waits
+board take fixture-c6 --for "ota-director: power-cut soak"   # 30 min; prints the port
+BOARD_HOLDER=ota-director just flash-fw-esp32c6    # recipes check the lease as you
+board power-cycle fixture-c6 --as ota-director     # both VIA hub twins, lease-checked
+board drop fixture-c6 --as ota-director
+```
+
+- **Consult or lease before flashing, probing or power-cycling.** `fwcheck
+  port` — so every `just` firmware recipe — asks `board check` whichever way
+  the port was named (`--port`, `ESPFLASH_PORT`, discovery) and refuses a
+  board someone else holds, or an `art` board nobody took on purpose.
+  `fwcheck port --lease --for "<who>: <why>"` takes the lease as it resolves.
+  Probing skips held boards. Without `board` installed nothing changes.
+- **Say the mark and slug, identify by MAC + chip, never by a port label.**
+  Hub ports and `/dev` names move on replug; on 2026-10-05 a board lent as
+  "the C6 on port 1" was the S3. A registered chip that disagrees with a
+  probe prints `⚠️ MISMATCH` — stop and find out which board it is.
+- **Power only through `board power-*`.** It checks the lease and switches
+  both twins of a VIA hub (VBUS stays up with only one off). Never hand-run
+  `uhubctl` against a board you do not hold.
+- Leases are a courtesy lock between cooperating agents, not security; a
+  lease expires (30 min, `board renew`), and dies with its `--pid`.
 
 ## Hardware validation — one system, no board most days
 
