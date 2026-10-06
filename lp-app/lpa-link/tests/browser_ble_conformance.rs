@@ -14,9 +14,9 @@
 //! | rule | test |
 //! |---|---|
 //! | the GATT subset the provider calls is the polyfill's whole surface | [`a_picked_device_is_connected_present_and_wears_a_ble_endpoint`] |
-//! | lines re-join across notifications through the ONE `LineSplitter` | [`a_line_split_across_notifications_arrives_whole`] |
-//! | writes are chunked to ≤ 180 B and awaited, in order | [`a_long_line_goes_out_in_awaited_180_byte_writes`] |
-//! | each chunk is its own buffer (Bluefy writes a view's whole buffer) | [`a_long_line_survives_a_browser_that_writes_a_views_whole_buffer`] |
+//! | lp-link comes up over the GATT subset; one frame per notification | [`a_link_comes_up_and_the_hello_arrives_one_frame_per_notification`] |
+//! | one frame per write, never a long write; a request arrives whole | [`a_request_goes_out_one_frame_per_write`] |
+//! | each frame is its own buffer (Bluefy writes a view's whole buffer) | [`a_large_request_survives_a_browser_that_writes_a_views_whole_buffer`] |
 //! | a drop is a departure, then a reconnect with no gesture | [`a_drop_is_a_departure_and_the_session_reconnects_by_itself`] |
 //! | a drop the page never heard is found by the visibility re-check | [`a_drop_the_page_never_heard_is_found_on_the_recheck`] |
 //! | a drop tears the radio link down, so the reconnect is a fresh link | [`a_phantom_drop_is_torn_down_and_the_reconnect_is_a_fresh_link`] |
@@ -26,6 +26,13 @@
 //! | M4: an untrusted link that never logs in is closed in 10 s | [`an_untrusted_link_that_never_logs_in_is_dropped`] |
 //! | a borrowing conversation's io | [`the_conversation_io_round_trips_a_request`] |
 //! | availability, for the add slot's copy | [`availability_reads_the_browser_not_a_guess`] |
+//!
+//! The link tests (the two above and the conversation io) run a board-side
+//! `lp_link::Link` here in Rust, on `LinkConfig::usb()`'s STREAM framing —
+//! what the scripted door stands in for is the emulated board's USB link,
+//! and the polyfill translates Studio's datagrams to and from it (its header
+//! says how). So they prove Studio's datagram link end and the polyfill's
+//! translation, never a board's radio-link code.
 //!
 //! ⚠️ TRUST: the polyfill proves the transport, not access enforcement —
 //! the emulated firmware sees a trusted USB link (see the polyfill's header).
@@ -41,7 +48,11 @@ use std::rc::Rc;
 use js_sys::{Array, Promise};
 use lpa_devices::link::{Link, LinkCommand, LinkEvent, ResetKind};
 use lpa_link::device_link::browser_ble::{BrowserBleLink, ble_link_info};
+use lpa_link::device_link::wire_reader::WireRead;
 use lpa_link::providers::browser_ble::{self as ble, BleClientIo, BleDevice, BleTapLine, BleWire};
+use lpc_wire::lp_link::{
+    CH_PROTO, Link as BoardLink, LinkConfig, LinkEvent as BoardEvent, SelectiveRepeat,
+};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 use wasm_bindgen_test::*;
@@ -92,6 +103,12 @@ extern "C" {
     #[wasm_bindgen(js_name = deliverBytes)]
     fn js_deliver_bytes(board_id: &str, text: &str);
 
+    #[wasm_bindgen(js_name = takeReceivedRaw)]
+    fn js_take_received_raw(board_id: &str) -> js_sys::Uint8Array;
+
+    #[wasm_bindgen(js_name = deliverRawBytes)]
+    fn js_deliver_raw_bytes(board_id: &str, bytes: &[u8]);
+
     #[wasm_bindgen(js_name = tick)]
     fn js_tick(ms: u32) -> Promise;
 }
@@ -118,87 +135,109 @@ async fn a_picked_device_is_connected_present_and_wears_a_ble_endpoint() {
     polyfill_off().await;
 }
 
+/// lp-link comes up over the GATT subset — the board's SYNs as
+/// notifications, Studio's as writes — and the board's hello arrives as one
+/// whole message. Every notification the page heard was one frame, no more
+/// than one payload plus header and CRC.
 #[wasm_bindgen_test]
-async fn a_line_split_across_notifications_arrives_whole() {
+async fn a_link_comes_up_and_the_hello_arrives_one_frame_per_notification() {
     polyfill_over(&["c6-a"]).await;
     let device = pick().await;
-    let mut link = open_link(&device).await;
+    let wire = BleWire::new(device.session);
+    let mut bench = LinkBench::new("c6-a");
 
-    // 600 characters: three notifications at 244 B each on the way in.
-    let long = "x".repeat(600);
-    js_deliver_bytes("c6-a", &format!("{long}\n"));
+    let reads = bench
+        .exchange_until(&wire, |reads| hello_count(reads) >= 1)
+        .await;
 
-    let line = wait_for(
-        &mut link,
-        |event| matches!(event, LinkEvent::Line(line) if line.len() == 600),
-    )
-    .await;
-    assert_eq!(line, Some(LinkEvent::Line(long)));
+    assert_eq!(hello_count(&reads), 1, "{reads:?}");
+    assert!(wire.is_link_up(), "the handshake finished");
+    let seen = stats("c6-a").await;
+    assert!(seen.notifications >= 2, "SYN and hello at least: {seen:?}");
+    assert!(
+        seen.largest_notification <= MAX_FRAME_BYTES,
+        "a notification of {} B is more than one frame: {seen:?}",
+        seen.largest_notification
+    );
 
     polyfill_off().await;
 }
 
+/// A request larger than many frames goes out as one GATT write per frame —
+/// each at most one payload plus header and CRC, never an ATT long write —
+/// and the board's link reassembles it whole.
 #[wasm_bindgen_test]
-async fn a_long_line_goes_out_in_awaited_180_byte_writes() {
+async fn a_request_goes_out_one_frame_per_write() {
     polyfill_over(&["c6-a"]).await;
     let device = pick().await;
-    let mut link = open_link(&device).await;
+    let wire = BleWire::new(device.session);
+    let mut bench = LinkBench::new("c6-a");
+    bench
+        .exchange_until(&wire, |reads| hello_count(reads) >= 1)
+        .await;
     let before = stats("c6-a").await;
 
-    let long = format!("M!{}", "y".repeat(598));
-    link.submit(LinkCommand::SendLine(long.clone()));
-    for _ in 0..200 {
-        if js_received_bytes("c6-a").contains(&format!("{long}\n")) {
-            break;
-        }
-        tick(20).await;
-    }
+    let json = big_request(41, 2_000);
+    wire.send_client_json(&json).expect("the link takes it");
+    bench.exchange_until(&wire, |_| bench_saw_request(41)).await;
 
-    assert!(
-        js_received_bytes("c6-a").ends_with(&format!("{long}\n")),
-        "the board received the whole line, in order"
-    );
+    let seen = BOARD.with(|board| board.borrow().requests.clone());
+    assert_eq!(seen, vec![(41, json.clone())], "the board read it whole");
     let after = stats("c6-a").await;
-    // 601 bytes → 180 + 180 + 180 + 61.
-    assert_eq!(after.writes - before.writes, 4, "{before:?} → {after:?}");
-    assert_eq!(after.written - before.written, 601);
+    let writes = after.writes - before.writes;
+    assert!(
+        (after.written - before.written) as usize > json.len(),
+        "the request and its framing went out: {before:?} → {after:?}"
+    );
+    assert!(
+        writes as usize >= json.len() / 180,
+        "{} B in only {writes} writes: {before:?} → {after:?}",
+        json.len()
+    );
+    assert!(
+        after.largest_write <= MAX_FRAME_BYTES,
+        "a write of {} B is more than one frame: {after:?}",
+        after.largest_write
+    );
 
     polyfill_off().await;
 }
 
 /// Bluefy, 2026-10-02: pinning a palette (a > 512 B request) dropped the
 /// link every time. Bluefy writes a typed-array view's whole underlying
-/// buffer, so a chunk cut with `subarray()` carried the entire line; the
-/// board refused it as a long write past 512 B, and the page tore the link
-/// down. Every chunk must be a buffer of its own.
+/// buffer, so a write cut as a view carried far more than its own bytes; the
+/// board refused it as a long write and the page tore the link down. A frame
+/// from Rust is a view onto wasm memory, so every write must be a buffer of
+/// its own: under the same quirk, a request of many frames arrives whole,
+/// every write is one frame, and the link stays up.
 #[wasm_bindgen_test]
-async fn a_long_line_survives_a_browser_that_writes_a_views_whole_buffer() {
+async fn a_large_request_survives_a_browser_that_writes_a_views_whole_buffer() {
     polyfill_over(&["c6-a"]).await;
     JsFuture::from(js_ble_whole_buffer_writes(true))
         .await
         .unwrap();
     let device = pick().await;
-    let mut link = open_link(&device).await;
+    let wire = BleWire::new(device.session);
+    let mut bench = LinkBench::new("c6-a");
+    bench
+        .exchange_until(&wire, |reads| hello_count(reads) >= 1)
+        .await;
     let before = stats("c6-a").await;
 
-    let long = format!("M!{}", "p".repeat(698));
-    link.submit(LinkCommand::SendLine(long.clone()));
-    for _ in 0..200 {
-        if js_received_bytes("c6-a").contains(&format!("{long}\n")) {
-            break;
-        }
-        tick(20).await;
-    }
+    let json = big_request(42, 2_000);
+    wire.send_client_json(&json).expect("the link takes it");
+    bench.exchange_until(&wire, |_| bench_saw_request(42)).await;
 
-    assert!(
-        js_received_bytes("c6-a").ends_with(&format!("{long}\n")),
-        "the board received the line once, whole"
-    );
+    let seen = BOARD.with(|board| board.borrow().requests.clone());
+    assert_eq!(seen, vec![(42, json.clone())], "the board read it whole");
     let after = stats("c6-a").await;
-    // 701 bytes → 180 + 180 + 180 + 161, each its own buffer.
-    assert_eq!(after.writes - before.writes, 4, "{before:?} → {after:?}");
-    assert_eq!(after.written - before.written, 701);
+    assert!(
+        after.largest_write <= MAX_FRAME_BYTES,
+        "a write of {} B is more than one frame: {after:?}",
+        after.largest_write
+    );
     assert_eq!(after.link_closes, before.link_closes, "the link stayed up");
+    assert!(wire.is_link_up());
 
     polyfill_off().await;
 }
@@ -239,6 +278,48 @@ async fn a_drop_is_a_departure_and_the_session_reconnects_by_itself() {
         "one connect edge on the reconnect"
     );
     assert_eq!(ble::present_devices().len(), 1);
+
+    polyfill_off().await;
+}
+
+/// The 2026-10-05 desk check (a board restarted under the editor) and
+/// `walk-ble-emu`'s `drop-back`: the departure sweep detached the dropped
+/// link before its pump read the drop, so `bluetooth link lost` waited in
+/// the session — and the link the reconnect attached read it on open and
+/// closed at once. With the session present again no edge came, nothing
+/// re-attached the board, and the editor's hold ran out over a board that
+/// was connected and saying hello. A link opened on the reconnect hears its
+/// own connection, not the last one's end.
+#[wasm_bindgen_test]
+async fn a_link_opened_on_the_reconnect_does_not_read_the_old_links_loss() {
+    polyfill_over(&["c6-a"]).await;
+    let edges = edges();
+    let device = pick().await;
+    let link = open_link(&device).await;
+    let connects = edges.0.get();
+
+    // The drop, and the departure sweep detaching the link before its pump
+    // ever ran again: the loss is never drained by the link it ended.
+    JsFuture::from(js_ble_out_of_range("c6-a")).await.unwrap();
+    drop(link);
+    JsFuture::from(js_ble_back_in_range("c6-a")).await.unwrap();
+    for _ in 0..300 {
+        if edges.0.get() > connects {
+            break;
+        }
+        tick(20).await;
+    }
+    assert_eq!(edges.0.get(), connects + 1, "reconnected by itself");
+
+    // The connect edge's sweep attaches a NEW link on the same session.
+    let mut link = open_link(&device).await;
+    let lost = wait_for_up_to(&mut link, 50, |event| {
+        matches!(event, LinkEvent::Error(error) if error.starts_with("bluetooth link lost"))
+            || matches!(event, LinkEvent::Closed { .. })
+    })
+    .await;
+    assert_eq!(lost, None, "the new link read the old link's loss");
+    assert!(link.is_open(), "the new link stays open");
 
     polyfill_off().await;
 }
@@ -448,6 +529,11 @@ async fn the_conversation_io_round_trips_a_request() {
     polyfill_over(&["c6-a"]).await;
     let device = pick().await;
     let wire = Rc::new(BleWire::new(device.session));
+    let mut bench = LinkBench::new("c6-a");
+    // The hello is the model's; the io is built after it, as a borrow is.
+    bench
+        .exchange_until(&wire, |reads| hello_count(reads) >= 1)
+        .await;
     let tapped = Rc::new(Cell::new(0_u32));
     let tap_count = Rc::clone(&tapped);
     let mut io = BleClientIo::new(
@@ -458,8 +544,6 @@ async fn the_conversation_io_round_trips_a_request() {
             }
         })),
     );
-    // Drop the scripted greeting so the only line is the answer.
-    let _ = wire.take_lines();
 
     io.send(ClientMessage {
         id: 0x4000_0007,
@@ -467,30 +551,18 @@ async fn the_conversation_io_round_trips_a_request() {
     })
     .await
     .expect("sent");
-    for _ in 0..200 {
-        if js_received_bytes("c6-a").contains("listLoadedProjects") {
-            break;
-        }
-        tick(20).await;
-    }
-    assert!(js_received_bytes("c6-a").contains("\"listLoadedProjects\""));
-    let reply = WireServerMessage::new(
-        0x4000_0007,
-        lpc_wire::server::ServerMsgBody::ListLoadedProjects {
-            projects: Vec::new(),
-        },
-    );
-    js_deliver_bytes(
-        "c6-a",
-        &format!(
-            "M!{}\n",
-            lpc_wire::json::to_string(&reply).expect("encodes")
-        ),
-    );
+    // Until the board has read the request and the page's link has
+    // acknowledged the whole answer — which leaves it waiting, read, for the
+    // io, and nothing in this loop drains it.
+    bench
+        .run_until(|board| {
+            board.requests.iter().any(|(id, _)| *id == 0x4000_0007) && board.link.is_idle()
+        })
+        .await;
     let answer: WireServerMessage = io.receive().await.expect("answered");
 
     assert_eq!(answer.id, 0x4000_0007);
-    assert!(tapped.get() >= 1, "the tap carried the line to the fold");
+    assert!(tapped.get() >= 1, "the tap carried the message to the fold");
 
     polyfill_off().await;
 }
@@ -587,6 +659,191 @@ async fn tick(ms: u32) {
     let _ = JsFuture::from(js_tick(ms)).await;
 }
 
+/// The most one frame may be on the air: a 180 B payload (the smaller of
+/// the two ends' SYNs here, Studio's `ble()`) plus a 4-byte header and a
+/// 4-byte CRC.
+const MAX_FRAME_BYTES: u32 = 180 + 8;
+
+/// The page's link end (the production `ble_link_port` loop, reached
+/// through a [`BleWire`]) against [`BOARD`] at the other end of the
+/// polyfill and the scripted door.
+struct LinkBench {
+    board: String,
+    reads: Vec<WireRead>,
+}
+
+impl LinkBench {
+    fn new(board: &str) -> Self {
+        BOARD.with(|double| *double.borrow_mut() = BoardDouble::new(0xB0A2_0001));
+        Self {
+            board: board.to_string(),
+            reads: Vec::new(),
+        }
+    }
+
+    /// Run the board's end, draining the page's, until `done` holds for what
+    /// the page read (bounded by rounds, never by a clock), and hand back
+    /// everything read.
+    async fn exchange_until(
+        &mut self,
+        wire: &BleWire,
+        done: impl Fn(&[WireRead]) -> bool,
+    ) -> Vec<WireRead> {
+        for _ in 0..300 {
+            self.round();
+            tick(10).await;
+            self.reads.extend(wire.take_reads());
+            if done(&self.reads) {
+                break;
+            }
+        }
+        std::mem::take(&mut self.reads)
+    }
+
+    /// Run the board's end — and NOT drain the page's — until `done` holds
+    /// for the board.
+    async fn run_until(&mut self, done: impl Fn(&BoardDouble) -> bool) {
+        for _ in 0..300 {
+            self.round();
+            tick(10).await;
+            if BOARD.with(|board| done(&board.borrow())) {
+                break;
+            }
+        }
+    }
+
+    /// One turn of the board: read what the page wrote (stream-wrapped by the
+    /// polyfill), answer, and hand its frames to the door.
+    fn round(&self) {
+        let written = js_take_received_raw(&self.board).to_vec();
+        let out = BOARD.with(|board| {
+            let mut board = board.borrow_mut();
+            board.on_bytes(&written);
+            board.frames_now()
+        });
+        if !out.is_empty() {
+            js_deliver_raw_bytes(&self.board, &out);
+        }
+    }
+}
+
+thread_local! {
+    /// The board end of the current link test.
+    static BOARD: std::cell::RefCell<BoardDouble> =
+        std::cell::RefCell::new(BoardDouble::new(0xB0A2_0001));
+}
+
+/// Whether the board has read request `id`.
+fn bench_saw_request(id: u64) -> bool {
+    BOARD.with(|board| board.borrow().requests.iter().any(|(seen, _)| *seen == id))
+}
+
+/// The emulated board's USB end of the link, as the shipped firmware runs
+/// it: stream framing, the hello on every `Up`, JSON replies.
+struct BoardDouble {
+    link: BoardLink<SelectiveRepeat>,
+    /// Every request read, by id, as the JSON it arrived as.
+    requests: Vec<(u64, String)>,
+}
+
+impl BoardDouble {
+    fn new(nonce: u32) -> Self {
+        Self {
+            link: BoardLink::new(LinkConfig::usb(), nonce),
+            requests: Vec::new(),
+        }
+    }
+
+    fn now() -> u64 {
+        (js_sys::Date::now() * 1_000.0) as u64
+    }
+
+    fn on_bytes(&mut self, bytes: &[u8]) {
+        self.link.on_bytes(Self::now(), bytes);
+        while let Some(event) = self.link.recv() {
+            match event {
+                BoardEvent::Up { .. } => self.send(&hello()),
+                BoardEvent::Message {
+                    channel: CH_PROTO,
+                    data,
+                } => {
+                    let request = lpc_wire::decode_client_payload(&data).expect("a request");
+                    let json = String::from_utf8(data.clone()).expect("a JSON request");
+                    self.requests.push((request.id, json));
+                    self.send(&lpc_wire::WireServerMessage::new(
+                        request.id,
+                        lpc_wire::ServerMsgBody::ListLoadedProjects {
+                            projects: Vec::new(),
+                        },
+                    ));
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// A reply as a JSON payload (a `{`-tagged proto message).
+    fn send(&mut self, message: &lpc_wire::WireServerMessage) {
+        let json = lpc_wire::json::to_string(message).expect("json");
+        self.link
+            .send(CH_PROTO, json.as_bytes())
+            .expect("board send");
+    }
+
+    /// Every frame the board's link has to write now, as one chunk of stream.
+    fn frames_now(&mut self) -> Vec<u8> {
+        let now = Self::now();
+        let mut out = Vec::new();
+        while let Some(frame) = self.link.poll_transmit(now) {
+            out.extend_from_slice(frame);
+        }
+        out
+    }
+}
+
+fn hello() -> lpc_wire::WireServerMessage {
+    use lpc_wire::server::hello::{BuildFacts, HardwareFacts, ServerHello};
+    lpc_wire::WireServerMessage::new(
+        0,
+        lpc_wire::ServerMsgBody::Hello(ServerHello {
+            proto: lpc_wire::WIRE_PROTO_VERSION,
+            build: BuildFacts {
+                features: vec![],
+                package: "fw-esp32c6".to_string(),
+                version: "unknown".into(),
+                commit: "unknown".to_string(),
+                dirty: false,
+                profile: "release-esp32".to_string(),
+            },
+            hardware: HardwareFacts::default(),
+            device_uid: None,
+            // No pack format: the page's link stays JSON, so every read here
+            // is the board's plain JSON.
+            pack_format: 0,
+            auth: lpc_wire::HelloAuth::TRUSTED,
+        }),
+    )
+}
+
+fn hello_count(reads: &[WireRead]) -> usize {
+    reads
+        .iter()
+        .filter(|read| matches!(read, WireRead::Frame(frame) if frame.json.contains("\"hello\"")))
+        .count()
+}
+
+/// A request carrying `bytes` of file data: many frames' worth.
+fn big_request(id: u64, bytes: usize) -> String {
+    lpc_wire::json::to_string(&lpc_wire::ClientMessage {
+        id,
+        msg: lpc_wire::ClientRequest::Filesystem(lpc_wire::server::FsRequest::Write {
+            path: "/big.txt".into(),
+            data: vec![b'z'; bytes],
+        }),
+    })
+    .expect("json")
+}
+
 /// The presence edges, installed ONCE per page (the provider's rule) and
 /// counted for every test after.
 fn edges() -> (Rc<Cell<u32>>, Rc<Cell<u32>>) {
@@ -614,6 +871,9 @@ fn edges() -> (Rc<Cell<u32>>, Rc<Cell<u32>>) {
 struct Stats {
     written: u32,
     writes: u32,
+    largest_write: u32,
+    notifications: u32,
+    largest_notification: u32,
     connects: u32,
     /// The board's side of the link opening and closing.
     link_opens: u32,
@@ -636,6 +896,9 @@ async fn stats(board: &str) -> Stats {
     Stats {
         written: field("written"),
         writes: field("writes"),
+        largest_write: field("largestWrite"),
+        notifications: field("notifications"),
+        largest_notification: field("largestNotification"),
         connects: field("connects"),
         link_opens: field("linkOpens"),
         link_closes: field("linkCloses"),

@@ -236,7 +236,7 @@ impl UsbLinkTransport {
     }
 }
 
-/// The frame buffer is also the BLE mux's (one static, D3 until M3). Before
+/// The frame buffer is also every radio link's (one static). Before
 /// the mux serializes a radio frame into it, the USB link must be done
 /// reading it: wait for the reply it holds to be cut ([`FRAME_BUF_RELEASE_WAIT`]
 /// at most); past that — a host that stopped reading mid-reply — withdraw the
@@ -388,27 +388,8 @@ impl LinkUpkeep for UsbLinkTransport {
 /// One proto-channel message → the client message it carries, or `None`
 /// (logged and counted: over a checked link a bad message is a host bug, not
 /// line noise).
-///
-/// Out of line on purpose: the deserializer's frame stays its own, and never
-/// joins the server loop future's.
-#[inline(never)]
 fn parse_request(data: &[u8]) -> Option<ClientMessage> {
-    // `lpc_wire::decode_client_payload` reads the same bytes, but through
-    // `json::from_slice`: a second instantiation of the whole `ClientMessage`
-    // deserializer beside the `from_str` one the BLE links already link,
-    // measured at +102 KB on the C6 image. Same contract (bare JSON, first
-    // byte `{`), one deserializer.
-    let decoded = match (data.first(), core::str::from_utf8(data)) {
-        (Some(&lpc_wire::PAYLOAD_TAG_JSON), Ok(text)) => {
-            lpc_wire::json::from_str::<ClientMessage>(text).map_err(|e| {
-                lpc_wire::PayloadError::BadClientJson(alloc::string::ToString::to_string(&e))
-            })
-        }
-        (Some(&lpc_wire::PAYLOAD_TAG_JSON), Err(_)) => Err(lpc_wire::PayloadError::NotUtf8),
-        (Some(&tag), _) => Err(lpc_wire::PayloadError::UnknownTag(tag)),
-        (None, _) => Err(lpc_wire::PayloadError::Empty),
-    };
-    match decoded {
+    match crate::serial::server_payload::decode_client_payload(data) {
         Ok(msg) => {
             log::debug!("[usb_link] received message id={}", msg.id);
             Some(msg)

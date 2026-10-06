@@ -6,7 +6,10 @@
 //! checksum, resent when lost, on channels, with a lifecycle both ends share.
 //! [`WireLinkPort`] is what every host keeps **one of per port**, for the
 //! port's whole life (Studio's Web Serial provider and emulator tab, lp-cli's
-//! serial and emulated-board transports, the fake board's host side). It
+//! serial and emulated-board transports, the fake board's host side) — and,
+//! since `WIRE_PROTO_VERSION` 33, one per Web Bluetooth connection, on
+//! [`LinkConfig::ble`]'s datagrams ([`new`](WireLinkPort::new),
+//! [`on_datagram`](WireLinkPort::on_datagram)). It
 //! replaces the `M!`-era `WireStream` + `PackOptIn` pair for those links:
 //!
 //! - bytes from the port go in ([`on_bytes`](WireLinkPort::on_bytes)), frames
@@ -128,7 +131,12 @@ pub struct WireLinkPort {
 impl WireLinkPort {
     /// A port on a link tuned by `config`, the transport's preset
     /// ([`LinkConfig::usb`] for a USB-Serial-JTAG board, [`LinkConfig::uart`]
-    /// for a UART behind a USB-serial bridge). `nonce` must be random per
+    /// for a UART behind a USB-serial bridge, [`LinkConfig::ble`] for
+    /// Studio's Web Bluetooth link — datagram framing, one frame per GATT
+    /// write or notification, fed with [`on_datagram`](Self::on_datagram),
+    /// not [`on_bytes`](Self::on_bytes)). Everything above the link — the
+    /// hello, the opt-in, the reads — is the same whatever the transport.
+    /// `nonce` must be random per
     /// port open; `want_packed` asks boards to pack their replies (Studio's
     /// `?wire=json` and `LP_WIRE_ENCODING=json` say no).
     pub fn new(config: LinkConfig, nonce: u32, want_packed: bool) -> Self {
@@ -207,6 +215,16 @@ impl WireLinkPort {
     pub fn on_bytes(&mut self, now: Micros, bytes: &[u8]) {
         self.now = now;
         self.link.on_bytes(now, bytes);
+        self.note_stall(now);
+        self.pump_events();
+    }
+
+    /// One whole frame from a datagram transport at `now` (a Bluetooth
+    /// notification): the port's link must be a datagram one
+    /// ([`new`](Self::new) with [`LinkConfig::ble`]).
+    pub fn on_datagram(&mut self, now: Micros, frame: &[u8]) {
+        self.now = now;
+        self.link.on_datagram(now, frame);
         self.note_stall(now);
         self.pump_events();
     }

@@ -88,6 +88,10 @@ pub struct AsyncLocalServerTransport {
     server_rx: mpsc::UnboundedReceiver<ClientMessage>,
     /// Whether the transport is closed
     closed: bool,
+    /// The one link this transport is, and how far the server trusts it:
+    /// [`Link::PRIMARY`] (a USB cable) unless [`Self::on_link`] says
+    /// otherwise.
+    link: Link,
 }
 
 impl AsyncLocalServerTransport {
@@ -105,7 +109,17 @@ impl AsyncLocalServerTransport {
             server_tx: Some(server_tx),
             server_rx,
             closed: false,
+            link: Link::PRIMARY,
         }
+    }
+
+    /// The same transport as another link: what an untrusted radio link
+    /// reaches the server as, so a host double can stand for a locked board
+    /// over Bluetooth.
+    #[must_use]
+    pub fn on_link(mut self, link: Link) -> Self {
+        self.link = link;
+        self
     }
 }
 
@@ -127,7 +141,7 @@ impl ServerTransport for AsyncLocalServerTransport {
         }
 
         match self.server_rx.try_recv() {
-            Ok(msg) => Ok(Some(Incoming::primary(msg))),
+            Ok(msg) => Ok(Some(Incoming::on(self.link, msg))),
             Err(tokio::sync::mpsc::error::TryRecvError::Empty) => Ok(None),
             Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
                 self.closed = true;
@@ -143,13 +157,13 @@ impl ServerTransport for AsyncLocalServerTransport {
 
         let mut messages = Vec::new();
         while let Ok(msg) = self.server_rx.try_recv() {
-            messages.push(Incoming::primary(msg));
+            messages.push(Incoming::on(self.link, msg));
         }
         Ok(messages)
     }
 
     fn links(&self) -> Vec<Link> {
-        vec![Link::PRIMARY]
+        vec![self.link]
     }
 
     async fn close(&mut self) -> Result<(), TransportError> {

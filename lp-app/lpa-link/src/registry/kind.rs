@@ -42,8 +42,9 @@ pub enum LinkProviderKind {
     /// An ESP32-C6 emulated in this tab's own Worker, running the shipped
     /// firmware image over an emulated USB-Serial-JTAG link.
     EmulatorTab,
-    /// Browser Web Bluetooth provider: the same `M!{json}` line protocol,
-    /// carried over a Nordic UART (NUS) GATT service. Control only — there
+    /// Browser Web Bluetooth provider: the same wire messages on lp-link,
+    /// one frame per write or notification of a Nordic UART (NUS) GATT
+    /// service. Control only — there
     /// is no reset line and no ROM downloader on the far side of a GATT
     /// link, so it can never flash.
     BrowserBle,

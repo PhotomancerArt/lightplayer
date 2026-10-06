@@ -46,7 +46,36 @@ curl -s localhost:$P/log?n=40                      # page telemetry + server lif
 The product firmware carries the wire itself over the same NUS service, and
 advertises as `LP-<project>` (or `LP-<last 4 MAC hex>`), so **Join** now
 accepts any `LP-…` name or any board advertising NUS. It starts BLE only when
-its device store says so, so provision the board over USB first:
+its device store says so, so provision the board over USB first.
+
+> **This page's wire mode predates lp-link and does not talk to current
+> firmware.** Since wire proto 37 (PR #880,
+> `lp2025/2026-09-28-1445-ble-on-lp-link`) every GATT write and
+> notification is exactly one lp-link Datagram frame (4-byte header, the
+> JSON/packed payload, 4-byte CRC-32C), the board's link opens at the
+> subscribe and sends its hello after the handshake, and a Prepare Write on
+> RX is refused. `index.html`'s `wireWrite`/`onWireBytes` (join on newline,
+> write in raw 180-byte chunks), the `M!`-string builders in `lab.py`,
+> `m4-desk-check.py` and `nus-probe.py`, and `tapstat.py`'s classifier all
+> assume the old `M!` lines. The spike-image modes above (`echo`, `burst`,
+> `writes`, `idle`) are unaffected.
+>
+> Two tools speak the new link today:
+>
+> - **Studio itself** — the desk walk below. It is the product's own code
+>   (`lpa-link`'s `browser_ble.js` and `ble_link_port.rs`, pinned by
+>   `lpa-link/tests/browser_ble_conformance.rs`).
+> - **A frame pipe**: `spike/ota-ble`'s `pipe.html` (a page that only moves
+>   frames between Web Bluetooth and a WebSocket) with
+>   `lp-cli link capture blepipe:<port>` hosting the lp-link session in the
+>   terminal. It carried over-the-air updates to a C6 over this link on
+>   silicon during the OTA spike, and is being brought to product shape by
+>   the OTA plan (`lp2025/2026-10-04-0757-ota-update-protocol`, part C, P2).
+>   It is the tool for an unattended soak; the scripted battery below waits
+>   on it.
+
+The old wire mode's commands, kept for the record (they need the porting
+above before they work again):
 
 ```bash
 curl -s -X DELETE localhost:$P/serial                       # release the console
@@ -177,3 +206,76 @@ terminal. It can't run from an agent shell on macOS: TCC aborts a process
 whose responsible app doesn't declare `NSBluetoothAlwaysUsageDescription`
 (exit 134, no prompt). Run it from Terminal.app if you want the host-stack
 numbers.
+
+## The desk walk: Studio over Bluetooth on lp-link (PR #880's gate)
+
+What the walk answers: does Studio connect, edit and Play over Bluetooth on
+the new link, are the link counters sensible, and is there no drop beyond
+Bluefy's known phantom one. Nothing before this walk has proven the radio:
+host tests, the conformance suite and `?ble=emu` all stop short of it
+(`?ble=emu` rides the emulated board's USB link).
+
+1. **The emulated walk first, on this branch** (the rule is emulator first,
+   then hardware). With a Studio dev server running from the branch's
+   worktree (`just studio-dev`; its printed URL is the source of truth):
+
+   ```bash
+   just walk-ble-emu
+   ```
+
+   All 14 steps should pass, including the three drops under Play: `drop`
+   (the board away for seconds; the cable is the emulated board's power, so
+   it restarts), `blip` (the radio drops and the page reconnects at once)
+   and `phantom` (Bluefy's). Its idle numbers are emulated: shape, not a
+   silicon claim. The board boots the packaged whole chip
+   (`{merged},kind=rom-up`; the split image's ELF alone boots core-only).
+   `WALK_RECORD_SINK=<an lp-cli record serve sink>` records the session,
+   and the page's console lands in `target/walk-ble-emu/page-console.log`.
+2. **Put the branch's firmware on the board.** Open the same dev server's
+   Studio, connect the board over USB, and take **Update firmware** (the
+   image the dev server packaged from the branch: hello `proto 37`). Or from
+   a terminal: `just flash-fw-esp32c6 <port by MAC>`. A board on proto 37
+   no longer talks to lightplayer.app's Studio (proto 36, Bluetooth on `M!`
+   lines) until that deploy catches up, so flash the release image back
+   afterwards if the board must work with production.
+3. **Unplug USB and connect over Bluetooth**: Devices → add → Bluetooth →
+   `LP-…`. Log in if the board is locked (an open board needs nothing).
+   Expect the card to identify in a few seconds. Lock the board for at
+   least one pass (a password, Play and Author set to Password): the
+   resume after a drop has to log in again on the new link, and that is
+   what the 2026-10-05 desk check found broken. Type the password the
+   first time (with "Remember" ticked), on a browser this board holds no
+   key for: that is the path the second fix is for.
+   **Mac Chrome: a page reload does not bring the board back by itself.**
+   `navigator.bluetooth.getDevices()` answers nothing without Chrome's
+   "Web Bluetooth new permissions backend" flag, so after a reload connect
+   it again with the chooser (Bluefy restores it). And Chrome's Web
+   Bluetooth on macOS can wedge after a few board restarts (the chooser
+   stops offering the board, or a `connect()` hangs): quit Chrome and
+   reopen it.
+4. **Edit**: open the project in the editor, change a slot and a shader
+   line, and push. **Play**: turn knobs, switch patterns. Then leave it in
+   Play, idle, for 15–20 minutes.
+5. **Read the link counters** in the device card's developer view:
+   `damaged` should stay at 0, `resets` at 0 apart from drops you caused,
+   `resends` low and explained (a busy radio).
+6. **Drop it under Play, three ways**: pull the board's power for two
+   seconds, ask it to reboot (USB `lp-cli link capture <port> --request
+   reboot`, or Studio's restart), and walk it out of range. Each time the
+   page must stay on Play behind "Reconnecting…", come back on its own
+   (the 2026-10-06 silicon re-check: 7–13 s after a power cut, ~8 s after a
+   reboot), with the card "Unlocked by …" again and no unlock sheet, and
+   the next knob turn must land. On the board's console, no
+   `no login within 10 s — closing` after a drop. If the page goes to
+   Devices instead, that is a finding: note the time, keep the board's
+   console and, if you can, record the session (`?record=`,
+   docs/recording-a-studio-session.md).
+7. **Phone (optional, closest to a user)**: the same from Bluefy on iOS,
+   over `tailscale serve --bg --https=8443 http://127.0.0.1:<studio port>`.
+   iOS negotiates ATT MTU 185, so frames carry 174 B of payload instead of
+   180: the board's log line at each connect (`ATT MTU …, frames … B + 8`) says
+   which.
+
+The board's console (USB, if left plugged into a second cable, or
+`scripts/emu/tty-capture.py`) logs one line per Bluetooth link: the ATT MTU,
+the frame size, the link's RAM and the heap at open.

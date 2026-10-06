@@ -4,9 +4,10 @@
 //! The thinnest join, like `browser_emu_source.rs`: `lpa-link`'s
 //! `browser_ble` owns the devices, the bounded connect, the paced writes and
 //! the reconnect loop; `BrowserBleLink` turns a session into the model's
-//! link; `BleClientIo` is the borrowing conversation's io. What is left here
-//! is keeping ONE shared wire per session, so the link and a borrowing
-//! conversation drain the same `LineSplitter` (`ble_wire.rs` says why).
+//! link; `BleClientIo` is the borrowing conversation's io, and each session's
+//! lp-link end lives in `lpa-link` (`ble_link_port.rs`). What is left here
+//! is keeping one wire handle per session for the link and a borrowing
+//! conversation to share (`ble_wire.rs` says why).
 //!
 //! ⚠️ **wasm-only, so `just test` never sees it.** The transport it plugs
 //! into is host-covered through `ble_transport.rs`'s double; the JS below it
@@ -113,6 +114,9 @@ impl BleLinkSource for BrowserBleSource {
             Rc::new(move |line: BleTapLine| {
                 tap(match line {
                     BleTapLine::Line(line) => LensTapEvent::Line(line),
+                    // The link's own notes: a reset among them fails the
+                    // shared conversations, as over Web Serial (D9).
+                    BleTapLine::Note(note) => LensTapEvent::Note(note),
                     BleTapLine::PortError(error) => LensTapEvent::PortError(error),
                 })
             }) as Rc<dyn Fn(BleTapLine)>

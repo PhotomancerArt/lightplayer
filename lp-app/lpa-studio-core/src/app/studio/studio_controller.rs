@@ -3639,6 +3639,35 @@ impl StudioController {
                 .request_backup_download(op.device, base_mac, label);
             return Ok(UiNotices::new());
         }
+        // The published placeholder (plan P01): never dispatched by the web
+        // shell, which opens a file picker on the click instead — see
+        // `device_backup_import`'s module doc. Reached only by a test, or by
+        // an agent somehow bypassing `needs_user()`, so it just says why.
+        if node_id.as_str() == crate::DeviceRestoreFromFileOp::NODE_ID {
+            let _op = action.into_op::<crate::DeviceRestoreFromFileOp>()?;
+            return Err(UiError::UnsupportedAction(
+                "pick a backup file in the device card to restore from it".to_string(),
+            ));
+        }
+        if node_id.as_str() == crate::DeviceRestoreFromFileDataOp::NODE_ID {
+            let op = action.into_op::<crate::DeviceRestoreFromFileDataOp>()?;
+            let base_mac = self
+                .devices
+                .roster()
+                .device(op.device)
+                .and_then(|d| d.identity.mac.as_ref().map(|mac| mac.0.clone()));
+            let file_name = op.file_name.clone();
+            return match self
+                .devices
+                .effects_mut()
+                .request_restore_from_file(op.device, base_mac, op.bytes.0)
+            {
+                Ok(()) => Ok(UiNotices::new().with_notice(UiNotice::info(format!(
+                    "Restoring this board's files from {file_name}."
+                )))),
+                Err(message) => Err(UiError::UnsupportedAction(message)),
+            };
+        }
         if node_id.as_str() == crate::DeviceFeedOp::NODE_ID {
             let op = action.into_op::<crate::DeviceFeedOp>()?;
             self.set_device_feed_wanted(op.device, op.wanted);

@@ -92,7 +92,7 @@ pub fn install(
 }
 
 /// The board manifest the hello carries (`ServerHello::firmware`, wire
-/// proto 37): the live session's view a host's `Q` gets, or, before any
+/// proto 38): the live session's view a host's `Q` gets, or, before any
 /// host spoke, the one taken at install. `None` only while the hook is not
 /// installed (or is busy, which a hello built between two of its passes
 /// never sees).

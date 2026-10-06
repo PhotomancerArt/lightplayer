@@ -76,6 +76,38 @@ to be dropped as a stale partial, so the test holds damaged to at most the
 board's own count of abandoned writes. When the fix lands that assertion flips to "every reply answered, no
 write timeout" — the test says so where it asserts.
 
+**The stall has an onset band, not an edge** (2026-09-29, PR #880). The
+test used to run ONE lag, 1 µs past the later of the two images' soonest
+post-drain touches. On #880's CI image the gated image's soonest `ep1_conf`
+read came out at 7,062 ns (a local build of the same tree: 9,537 ns — the
+minimum moves with code layout), the lag landed at 8,062 ns, and there the
+ungated image lost the wake on 2 packets only: the link resent, all 40
+Hellos were answered, and the assertion read the defect as fixed. A sweep of
+0–20 µs in 250 ns steps (`lp-emu:esp32c6:t1`; each tree's images driven by
+that tree's own link host, lp-emu at main `ca0b3dbd9` and #880 `4f55d5eb2`;
+"soonest" is step 1's no-lag minimum, write / `ep1_conf` read):
+
+| image | soonest | no timeout up to | 40 of 40 answered, 1–2 write timeouts | 0 of 40, 9 write timeouts |
+|---|---:|---:|---:|---:|
+| main ungated, local build | 9,712 / 9,393 ns | 9,250 ns | — | 9,500–20,000 ns |
+| main gated, local build | 10,450 / 9,550 ns | 9,500 ns | — | 9,750–20,000 ns |
+| #880 ungated, local build | 7,000 / 6,675 ns | 6,500 ns | 6,750–9,250 ns | 9,500–20,000 ns |
+| #880 gated, local build | 10,431 / 9,537 ns | 9,500 ns | — | 9,750–20,000 ns |
+| #880 gated, CI's image | 10,431 / 7,062 ns | 7,000 ns | 7,250–9,500 ns | 9,750–20,000 ns |
+
+Nothing was written into the lag, and no damage exceeded the board's own
+timeouts, anywhere in the sweep. Every image stalls outright from
+9.5–9.75 µs, where main's images' soonest touches sit, which is why one lag
+1 µs past them always landed in the stall. On #880's tree some images touch
+the endpoint as early as ~7 µs after a few drains; the minimum then marks the
+start of an intermittent band, not the stall, and whether an image shows that
+band depends on its build (the local and CI builds of #880's gated image
+differ). #880 made the test climb a ladder of lags, 1.25–3× the later soonest
+touch, requiring the stall on at least one rung. When #880 merged main
+(2026-10-05) it took main's fix for the same cause instead — the lag chosen
+from the *typical* wake, not the soonest (the 2026-10-01 entry below) — and
+dropped its ladder: one rule for one cause.
+
 **Lesson.** Moving the writer onto a different task moved WHEN the gate's
 check lands relative to the drain, and that ordering was the whole reason the
 gate was safe under the hypothesis. A gate that clears an edge it then waits

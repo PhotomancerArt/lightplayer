@@ -47,7 +47,7 @@ impl BoardView {
         }
     }
 
-    /// From a hello's `firmware` block (wire proto 37): the same manifest
+    /// From a hello's `firmware` block (wire proto 38): the same manifest
     /// as `M`, or [`Self::absent`] when the hello has none (a single image,
     /// E9). A convenience: channel 3's `M` stays authoritative (DM9), and a
     /// driver always asks `Q` on its link.

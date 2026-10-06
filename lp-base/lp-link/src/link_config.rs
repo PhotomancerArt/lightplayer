@@ -187,16 +187,50 @@ impl LinkConfig {
         }
     }
 
-    /// BLE NUS: a 15–30 ms connection interval, 244-byte notifications, one
-    /// frame per notification (4 header + 236 payload + 4 CRC). A secure
-    /// BLE link uses `ble().secured()`, which keeps a sealed frame inside one
-    /// notification.
+    /// BLE NUS: a 15–30 ms connection interval, one frame per notification
+    /// or write (4 header + payload + 4 CRC), never an ATT long write. A
+    /// secure BLE link uses `ble().secured()`, which keeps a sealed frame
+    /// inside one notification too.
+    ///
+    /// The board cuts `max_payload` further per connection, to what its
+    /// negotiated ATT MTU holds (`min(180, ATT_MTU − 11)`: 174 B on iOS),
+    /// and its buffers the way it cuts `usb()`'s
+    /// (`fw-esp32-common`'s `radio_link_config`). This preset keeps
+    /// `send_budget`, `max_message` and `keep_reassembly` at `usb()`'s
+    /// generous values because this crate's own property, soak and
+    /// no-steady-state-allocation tests run every transport through plain
+    /// `Link::send()` with messages up to 16 KiB: a smaller `send_budget`
+    /// makes those `TooBig`, and a `keep_reassembly` below `max_message`
+    /// reallocates on every large message.
     pub fn ble() -> Self {
         LinkConfig {
             framing: Framing::Datagram,
-            max_payload: 236,
+            // 180 B, not the ATT MTU-derived 236: `browser_ble.js`'s write
+            // chunker has used 180 B since M2 (safely under every measured
+            // usable MTU — iOS 185→182, macOS/board 247→244) and at 180 B
+            // every lp-link frame (4 header + payload + 4 CRC = 188 B raw)
+            // fits inside one ATT write or notification, always. No frame is
+            // ever split across an ATT long write (Prepare…Execute), which
+            // retires `prepared_write.rs` entirely (D3/D7,
+            // `lp2025/2026-09-28-1445-ble-on-lp-link`). Director ruling R4
+            // (2026-09-28): keep 180 B.
+            max_payload: 180,
             tx_window: 8,
             rx_window: 8,
+            // `rx_budget` is NOT a preallocated buffer (see the field doc):
+            // it only bounds the inbox's worst case and `validate()`
+            // (`max_message + EVENT_COST <= rx_budget`). Shrunk from
+            // `usb()`'s 24 KiB to the tightest value that still holds one
+            // largest message plus its queueing charge — unlike
+            // `send_budget`/`keep_reassembly` above, nothing in this crate's
+            // own tests sends enough concurrent unread traffic to notice.
+            rx_budget: MAX_MESSAGE + crate::inbox::EVENT_COST,
+            // BLE log traffic is lower-priority and lower-volume than USB's
+            // (32 slots): eight `max_payload`-sized slots (one per tx-window
+            // frame) is enough buffering for the board's structured logs
+            // without holding a whole extra `max_payload × 32` allocation
+            // per radio link.
+            datagram_queue: 8,
             ack_delay: 15_000,
             ack_every: 4,
             initial_rto: 500_000,
@@ -346,7 +380,8 @@ mod tests {
     }
 
     /// A secured BLE frame (header, counter, payload, tag, CRC) is exactly
-    /// one 244-byte notification, as a plain one is.
+    /// as long as a plain one, so it fits one notification wherever a plain
+    /// one does: 188 B, inside a 244-byte notification (ATT MTU 247).
     #[test]
     fn a_secured_ble_frame_still_fits_one_notification() {
         let plain = LinkConfig::ble();
@@ -354,8 +389,9 @@ mod tests {
         let wire = |cfg: &LinkConfig, overhead: usize| {
             4 + cfg.max_payload as usize + overhead + cfg.crc.len()
         };
-        assert_eq!(wire(&plain, 0), 244);
-        assert_eq!(wire(&secure, SEAL_OVERHEAD), 244);
+        assert_eq!(wire(&plain, 0), 188);
+        assert_eq!(wire(&secure, SEAL_OVERHEAD), wire(&plain, 0));
+        assert!(wire(&plain, 0) <= 244);
         assert_eq!(secure.validate(), Ok(()));
     }
 

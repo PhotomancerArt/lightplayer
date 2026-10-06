@@ -14,7 +14,9 @@ use std::rc::Rc;
 
 use lpa_devices::LayoutVerdict;
 use lpa_devices::identity::DeviceId;
-use lpa_link::layout_migration::device_backup_archive::{backup_file_name, read_archive};
+use lpa_link::layout_migration::device_backup_archive::{
+    BackupManifest, BackupPurpose, backup_file_name, read_archive,
+};
 use lpa_link::{FlashPlan, LinkLayoutInspection, normalize_base_mac};
 
 use super::device_backup_store::{
@@ -271,10 +273,138 @@ impl LayoutEffects {
         self.inner.borrow().download.clone()
     }
 
+    /// Put a backup ZIP a user picked — one this browser never stored
+    /// itself — into the store as `device`'s pending backup, under
+    /// `base_mac` when the board's own MAC is known (plan P01, Decision
+    /// 11). The SAME pending slot a migration's own backup would occupy,
+    /// so the existing restore-files verb picks it up: no second restore
+    /// path. `manifest` has already been read and validated by the
+    /// dispatch handler (`DeviceEffects::request_restore_from_file`), so
+    /// this never refuses — only the store write can still fail, and that
+    /// failure is only ever logged, exactly like a migration's own backup
+    /// put (`after_inspection`, above).
+    pub(crate) fn import_task(
+        &self,
+        device: DeviceId,
+        base_mac: Option<String>,
+        manifest: BackupManifest,
+        bytes: Vec<u8>,
+    ) -> DeviceTaskFuture {
+        let this = self.clone();
+        Box::pin(async move {
+            let Some(store) = this.store() else {
+                log::warn!("backup file import for device {device:?}: no backup store installed");
+                return;
+            };
+            let mac = base_mac
+                .or_else(|| manifest.base_mac.clone())
+                .unwrap_or_else(|| "unknown".to_string());
+            let archive = format!(
+                "{}-{}",
+                mac.replace(':', ""),
+                backup_file_name(None, this.now()).trim_start_matches("lightplayer-backup-device-")
+            );
+            let entry = BackupEntry {
+                base_mac: mac,
+                archive,
+                captured_at_epoch_seconds: manifest.captured_at_epoch_seconds,
+                purpose: match manifest.purpose {
+                    BackupPurpose::Backup => "backup",
+                    BackupPurpose::LayoutMigration => "layout-migration",
+                }
+                .to_string(),
+                status: BackupStatus::Pending,
+                file_count: manifest.file_count,
+                total_bytes: manifest.total_bytes,
+            };
+            match store.put(entry, bytes).await {
+                Ok(()) => this.refresh_index().await,
+                Err(error) => {
+                    log::warn!("backup file import for device {device:?} not stored: {error}");
+                }
+            }
+        })
+    }
+
     /// Drop what was staged for a device whose activity ended without
     /// writing (refused, cancelled) or that was forgotten. The stored backup
     /// stays in the store.
     pub fn forget(&self, device: DeviceId) {
         self.inner.borrow_mut().staged.remove(&device);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::devices::device_backup_store::MemoryBackupStore;
+    use lpa_link::layout_migration::device_backup_archive::write_archive;
+    use lpa_link::layout_migration::lpfs_tree::LpfsTree;
+
+    fn block_on<F: Future>(future: F) -> F::Output {
+        use std::task::{Context, Poll, Waker};
+        let mut future = std::pin::pin!(future);
+        let mut cx = Context::from_waker(Waker::noop());
+        match future.as_mut().poll(&mut cx) {
+            Poll::Ready(value) => value,
+            Poll::Pending => panic!("an import task over a memory store is immediately ready"),
+        }
+    }
+
+    fn archive(base_mac: Option<&str>) -> (BackupManifest, Vec<u8>) {
+        let tree = LpfsTree::from_files([("/hardware.json".to_string(), b"{}".to_vec())]);
+        let manifest = BackupManifest {
+            format_version:
+                lpa_link::layout_migration::device_backup_archive::BACKUP_FORMAT_VERSION,
+            captured_at_epoch_seconds: 42.0,
+            device_uid: None,
+            chip: Some("esp32c6".to_string()),
+            base_mac: base_mac.map(str::to_string),
+            partition_offset: 0,
+            partition_length: 1,
+            target_partition_offset: None,
+            target_partition_length: None,
+            block_size: 4096,
+            file_count: tree.file_count(),
+            total_bytes: tree.total_bytes(),
+            purpose: BackupPurpose::Backup,
+        };
+        let bytes = write_archive(&tree, &manifest).unwrap();
+        (manifest, bytes)
+    }
+
+    /// A file a user picks is stored under the BOARD's own MAC (not
+    /// necessarily the archive's own, which a mismatch may override) and is
+    /// readable right back — the round trip plan P01's validation asks for.
+    #[test]
+    fn an_imported_file_is_stored_and_found_pending_for_the_boards_mac() {
+        let effects = LayoutEffects::default();
+        effects.set_store(Rc::new(MemoryBackupStore::new()));
+        effects.set_clock(Rc::new(|| 1_800_000_000.0));
+        let (manifest, bytes) = archive(Some("10:bd:a3:b0:8e:30"));
+        block_on(effects.import_task(
+            DeviceId(1),
+            Some("60:55:f9:0a:0b:0c".to_string()),
+            manifest,
+            bytes.clone(),
+        ));
+        let entry = effects
+            .pending_for("60:55:f9:0a:0b:0c")
+            .expect("stored under the board's own mac, not the archive's");
+        assert_eq!(entry.status, BackupStatus::Pending);
+        let store = effects.store().expect("installed above");
+        assert_eq!(block_on(store.get(&entry.archive)).unwrap(), bytes);
+    }
+
+    /// With no live MAC yet (a board that has never said hello), the
+    /// archive's own MAC is the fallback so the entry is still findable.
+    #[test]
+    fn an_imported_file_falls_back_to_the_archives_own_mac() {
+        let effects = LayoutEffects::default();
+        effects.set_store(Rc::new(MemoryBackupStore::new()));
+        effects.set_clock(Rc::new(|| 1.0));
+        let (manifest, bytes) = archive(Some("10:bd:a3:b0:8e:30"));
+        block_on(effects.import_task(DeviceId(1), None, manifest, bytes));
+        assert!(effects.pending_for("10:bd:a3:b0:8e:30").is_some());
     }
 }

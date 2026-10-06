@@ -20,8 +20,8 @@
 //! a hook the core installs while the engine's transport owns the link.
 //!
 //! The chip crate supplies the register facts ([`usb_link_task::UsbLinkChip`])
-//! and spawns the task; nothing here names esp-hal. The BLE links and the
-//! classic's UART keep their `M!` lines until their own milestones (D3).
+//! and spawns the task; nothing here names esp-hal. The BLE links run lp-link
+//! too (`crate::radio_link`); the classic's UART keeps its `M!` lines (D3).
 
 pub mod usb_link_counters;
 pub mod usb_link_shared;
