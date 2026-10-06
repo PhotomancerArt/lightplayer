@@ -139,6 +139,13 @@ pub enum HookResult {
     /// and the one a bring-up wants when the question is "who called this
     /// with what".
     Stop,
+    /// Return to the caller (`pc = ra`) **and park the hart exactly as if it
+    /// had executed `wfi`** there: when an enabled interrupt is already
+    /// pending the park ends at once, otherwise guest time moves event to
+    /// event until one is. The interrupt that ends the park is delivered with
+    /// `mepc = ra`, and the caller re-checks its own condition. The answer an
+    /// emulator seam's wait gives (`led=fast`), offered to hooks too.
+    ParkThenReturn,
 }
 
 /// A host stand-in for a ROM routine.

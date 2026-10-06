@@ -38,6 +38,7 @@ use super::emulator_tab_link_port::{
 use crate::device_link::demux::demux_read;
 use crate::device_link::update_facts_mirror::update_events;
 use crate::device_link::wire::client_message;
+use crate::providers::emulator_tab_seams::SeamNoteTracker;
 
 /// One link to a tab-hosted board. Attached but closed until the model sends
 /// `LinkCommand::Open`.
@@ -46,6 +47,8 @@ pub struct EmulatorTabLink {
     port: EmulatorTabPort,
     open: bool,
     events: VecDeque<LinkEvent>,
+    /// One journal line per chip start about the board's emulator seams.
+    seam_notes: SeamNoteTracker,
 }
 
 impl EmulatorTabLink {
@@ -55,6 +58,7 @@ impl EmulatorTabLink {
             port,
             open: false,
             events: VecDeque::new(),
+            seam_notes: SeamNoteTracker::default(),
         }
     }
 
@@ -152,6 +156,15 @@ impl EmulatorTabLink {
         }
         for note in take_notes(self.port) {
             self.events.push_back(LinkEvent::WireNote(note));
+        }
+        // What the board's emulator seams came to this chip start, once
+        // (`emulator_tab_seams.rs`): `emu: LED fast mode on`, or why not.
+        if let Some(line) = self
+            .port
+            .seams_info()
+            .and_then(|info| self.seam_notes.note(&info))
+        {
+            self.events.push_back(LinkEvent::WireNote(line));
         }
     }
 }

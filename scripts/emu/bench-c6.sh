@@ -4,6 +4,7 @@
 #   just bench-emu-c6                          # build, run, table, promote to prev/
 #   scripts/emu/bench-c6.sh --json out.json    # same, plus machine-readable
 #   scripts/emu/bench-c6.sh --bin <path> --no-promote --no-build
+#   scripts/emu/bench-c6.sh --seams led=fast   # every run with an emulator seam
 #
 # Runs the four pinned reference images (`scripts/emu/build-reference-image.sh`,
 # building them if they are missing, same env-var convention as
@@ -48,6 +49,13 @@
 #
 # Emulated microseconds never gate anything (AGENTS.md "The ESP32-C6
 # emulator"): transcripts decide, probes report.
+#
+# `--seams <atoms>` passes `--seams <atoms>` to every run (strict: an image
+# with no seam table, or one from other seam declarations, fails its row with
+# exit 64 rather than quietly measuring the seam-off machine). The four
+# pinned images predate the seam table, so point the `LP_EMU_C6_REF_*`
+# variables at images that carry it. A `led=fast` number is labelled
+# `…+led=fast` and is never a transcript (docs/adr/2026-10-05-emulator-seams.md).
 set -euo pipefail
 
 repo="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -60,6 +68,7 @@ json_out=""
 do_build=1
 do_promote=1
 runs=2
+seams_args=()
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -68,6 +77,7 @@ while [[ $# -gt 0 ]]; do
         --no-build) do_build=0; shift ;;
         --no-promote) do_promote=0; shift ;;
         --runs) runs="${2:?--runs needs a count}"; shift 2 ;;
+        --seams) seams_args=(--seams "${2:?--seams needs atoms}"); shift 2 ;;
         -h|--help) sed -n '2,32p' "$0"; exit 0 ;;
         *) echo "bench-c6: unknown option $1" >&2; exit 2 ;;
     esac
@@ -136,11 +146,11 @@ for spec in "${images[@]}"; do
             set +e
             if [[ -n "$exit_on" ]]; then
                 /usr/bin/time -p "$bin" --elf "$elf" --timeout "$timeout" \
-                    --wall-timeout 600 --exit-on "$exit_on" \
+                    --wall-timeout 600 --exit-on "$exit_on" ${seams_args[@]+"${seams_args[@]}"} \
                     --uart0 "file:$uart" --time-grade "$grade" >"$out" 2>&1
             else
                 /usr/bin/time -p "$bin" --elf "$elf" --timeout "$timeout" \
-                    --wall-timeout 600 \
+                    --wall-timeout 600 ${seams_args[@]+"${seams_args[@]}"} \
                     --uart0 "file:$uart" --time-grade "$grade" >"$out" 2>&1
             fi
             rc=$?

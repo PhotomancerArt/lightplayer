@@ -54,6 +54,7 @@ pub mod periph;
 pub mod pins;
 pub mod regfile;
 pub mod regnames;
+pub mod seam;
 pub mod strip;
 pub mod trace;
 

@@ -289,6 +289,24 @@ impl ImageOverrides {
     }
 }
 
+/// **Performance seams never make transcripts** (ADR
+/// docs/adr/2026-10-05-emulator-seams.md): a configuration composed with one
+/// is for reading and replay, never for `run` or `record`. A capability
+/// seam's composite is allowed (none exists yet).
+fn refuse_performance_seams(entry: &crate::config::ConfigurationEntry, verb: &str) -> Result<()> {
+    if let Some(seam) = entry.performance_seam() {
+        bail!(
+            "cannot {verb} on `{}`: `{}={}` is a performance seam, and performance seams never \
+             make transcripts — {verb} on `{}`",
+            entry.label(),
+            seam.seam,
+            seam.implementation,
+            entry.name
+        );
+    }
+    Ok(())
+}
+
 /// `validate run <set> --config <name>` — plan, then (unless dry) execute.
 pub fn run_set(
     cfg: &ValidateConfig,
@@ -299,6 +317,7 @@ pub fn run_set(
     dry_run: bool,
 ) -> Result<String> {
     let entry = cfg.configuration(configuration)?;
+    refuse_performance_seams(&entry, "run")?;
     let config = entry.parsed()?;
     check_link_override(opts, &config)?;
     let payloads = cfg.payloads_in(set)?;
@@ -318,7 +337,9 @@ pub fn run_set(
             driver.availability()
         );
         for payload in payloads {
-            let plan = driver.plan(&request(payload, entry, &config, opts, repo_root, &out_dir))?;
+            let plan = driver.plan(&request(
+                payload, &entry, &config, opts, repo_root, &out_dir,
+            ))?;
             s.push('\n');
             s.push_str(&plan.render());
         }
@@ -326,7 +347,7 @@ pub fn run_set(
     }
 
     for payload in payloads {
-        let req = request(payload, entry, &config, opts, repo_root, &out_dir);
+        let req = request(payload, &entry, &config, opts, repo_root, &out_dir);
         let plan = driver.plan(&req)?;
         s.push('\n');
         s.push_str(&plan.render());
@@ -506,6 +527,7 @@ pub fn record_set(
         ..
     } = *provenance;
     let entry = cfg.configuration(configuration)?;
+    refuse_performance_seams(&entry, "record")?;
     let config = entry.parsed()?;
     check_link_override(opts, &config)?;
     let payloads = cfg.payloads_in(set)?;
@@ -521,7 +543,7 @@ pub fn record_set(
     let mut s = String::new();
 
     for payload in payloads {
-        let req = request(payload, entry, &config, opts, repo_root, &out_dir);
+        let req = request(payload, &entry, &config, opts, repo_root, &out_dir);
         let plan = driver.plan(&req)?;
         let header = TranscriptHeader {
             schema: crate::header::HEADER_SCHEMA,
@@ -585,6 +607,15 @@ pub fn record_set(
                 ConfigurationKind::LpEmu => plan.chip.core_quantum,
                 _ => None,
             },
+            // The composed seams (a capability seam's; a performance seam was
+            // refused above), structured — and nothing at all without one, so
+            // a seam-free sidecar is byte-identical to before seams existed.
+            seams: entry
+                .seams
+                .iter()
+                .map(|s| (s.seam.clone(), s.implementation.clone()))
+                .collect(),
+            seam_abi: (!entry.seams.is_empty()).then(|| format!("{:016x}", lp_seam::SEAM_ABI_ID)),
             trust: entry.trust.clone(),
         };
         let mut header = header;
@@ -798,6 +829,8 @@ mod tests {
             machine: None,
             baud: None,
             quantum: None,
+            seams: Default::default(),
+            seam_abi: None,
             trust: Default::default(),
         };
         header.pins = Some(header.pins_file_name().unwrap());
@@ -944,6 +977,51 @@ mod tests {
             .unwrap_err()
         );
         assert!(err.contains("--port"), "{err}");
+    }
+
+    #[test]
+    fn a_performance_seam_never_records_or_runs() {
+        let cfg = ValidateConfig::embedded();
+        let provenance = RecordProvenance {
+            date: "2026-10-05",
+            firmware_commit: "d6cfaa2051ae",
+            firmware_dirty: None,
+            machine: None,
+        };
+        let err = format!(
+            "{:#}",
+            record_set(
+                &cfg,
+                "boot-idle",
+                "lp-emu:esp32c6:t2+led=fast",
+                &RunOptions::default(),
+                Path::new("/repo"),
+                &provenance,
+                true,
+            )
+            .unwrap_err()
+        );
+        assert!(
+            err.contains("performance seams never make transcripts"),
+            "{err}"
+        );
+        assert!(err.contains("record on `lp-emu:esp32c6:t2`"), "{err}");
+        let err = format!(
+            "{:#}",
+            run_set(
+                &cfg,
+                "boot-idle",
+                "lp-emu:esp32c6:t2+led=fast",
+                &RunOptions::default(),
+                Path::new("/repo"),
+                true,
+            )
+            .unwrap_err()
+        );
+        assert!(
+            err.contains("performance seams never make transcripts"),
+            "{err}"
+        );
     }
 
     #[test]

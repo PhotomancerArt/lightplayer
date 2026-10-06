@@ -27,6 +27,10 @@ object = { version = "0.37.3", default-features = false, features = [
 # (`scripts/check-emu-fence.sh`). No default features: `mock` is the host
 # transmitter simulation and nothing here needs it.
 lp-ws281x = { path = "../../../lp-fw/lp-ws281x", default-features = false }
+# Emulator seams (`src/seam/`): the declarations, identity and table layout
+# the firmware's seam table is written in. MIT, outside the fence, and the
+# fence admits an MIT crate with no allowlist entry.
+lp-seam = { path = "../../../lp-base/lp-seam" }
 
 [dev-dependencies]
 test-log = { workspace = true }
@@ -38,3 +42,7 @@ test-log = { workspace = true }
 [features]
 default = []
 bench = []
+# The TEST ONLY seam implementations (`test=echo`, `test=take`;
+# `src/seam/seam_impl.rs`). Dev-only: only the emulator crates' own tests turn
+# it on, never a shipped command line.
+test-seams = []

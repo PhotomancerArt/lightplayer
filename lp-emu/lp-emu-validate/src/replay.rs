@@ -782,13 +782,13 @@ pub fn replay(
     // means changing a band never asks anyone to re-record a transcript,
     // which matters: "never edit a transcript" and "a band is Yona's to
     // choose" would otherwise be in direct conflict.
-    fn band_of<'a>(t: &'a Transcript, cfg: &'a crate::config::ValidateConfig) -> Option<&'a Band> {
+    fn band_of(t: &Transcript, cfg: &crate::config::ValidateConfig) -> Option<Band> {
         cfg.configuration(&t.header.configuration)
             .ok()
-            .and_then(|c| c.trust.band(FieldClass::Timing))
-            .or_else(|| t.header.trust.band(FieldClass::Timing))
+            .and_then(|c| c.trust.band(FieldClass::Timing).cloned())
+            .or_else(|| t.header.trust.band(FieldClass::Timing).cloned())
     }
-    fn covers<'a>(b: Option<&'a Band>, payload: &str) -> Option<&'a Band> {
+    fn covers(b: Option<Band>, payload: &str) -> Option<Band> {
         b.filter(|b| b.covers(payload))
     }
     let (left_band, right_band) = (
@@ -801,17 +801,17 @@ pub fn replay(
         // the printed direction is kept and the left's band is enforced. No
         // configuration pair in the tree does this today.
         (Some(b), Some(_)) => Some(AppliedBand {
-            band: b.clone(),
+            band: b,
             stated_by: left.header.configuration.clone(),
             invert: false,
         }),
         (Some(b), None) => Some(AppliedBand {
-            band: b.clone(),
+            band: b,
             stated_by: left.header.configuration.clone(),
             invert: true,
         }),
         (None, Some(b)) => Some(AppliedBand {
-            band: b.clone(),
+            band: b,
             stated_by: right.header.configuration.clone(),
             invert: false,
         }),
