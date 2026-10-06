@@ -3,7 +3,7 @@
 //!
 //! ```text
 //! factory +0x0000  (0x10000)  loader image          (what the IDF bootloader boots)
-//! factory +0x5000  (0x15000)  reserved: an over-the-air update's progress record
+//! factory +0x5000  (0x15000)  an over-the-air update's progress record
 //! factory +0x6000  (0x16000)  boot record, sector 0
 //! factory +0x7000  (0x17000)  boot record, sector 1
 //! factory +0x8000  (0x18000)  ┐
@@ -39,10 +39,17 @@
 pub const LOADER_OFFSET: u32 = 0x1_0000;
 /// The loader image may not reach the progress-record sector.
 pub const LOADER_MAX_LEN: u32 = 0x5000;
-/// Reserved for an over-the-air update's progress record. Nothing in this
-/// layout's first version writes it; it is named so nothing else grows into
-/// it.
+/// An over-the-air update's progress record (`lpc-update`'s
+/// `transfer_record`, v1): written by the core's update session, read by
+/// the cores that follow it. Only its location is a forever format.
 pub const PROGRESS_RECORD_SECTOR: u32 = 0x1_5000;
+
+// The loader can never grow into the progress record, nor the record into
+// the boot records: checked when this crate builds, not only in its tests.
+const _: () = {
+    assert!(LOADER_OFFSET + LOADER_MAX_LEN <= PROGRESS_RECORD_SECTOR);
+    assert!(PROGRESS_RECORD_SECTOR + 0x1000 <= BOOT_RECORD_SECTORS[0]);
+};
 /// The two boot-record sectors.
 pub const BOOT_RECORD_SECTORS: [u32; 2] = [0x1_6000, 0x1_7000];
 /// The first byte of the region, and the low end's core offset.

@@ -13,7 +13,7 @@
 //!
 //! ```text
 //! 0x10000  loader                 carries its version word (loader_identity)
-//! 0x15000  reserved               an over-the-air update's progress record
+//! 0x15000  progress record        an over-the-air update's (lpc-update's transfer_record)
 //! 0x16000  boot record, sector 0  BootRecord + marks (boot_record)
 //! 0x17000  boot record, sector 1
 //! 0x18000  core                   an ESP image; carries the engine digest slot (engine_digest)
@@ -93,7 +93,6 @@ mod boot_choice;
 mod boot_control;
 mod boot_flags;
 mod boot_record;
-mod crc32;
 pub mod engine_digest;
 pub mod engine_header;
 pub mod loader_identity;

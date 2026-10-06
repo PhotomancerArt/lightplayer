@@ -5716,6 +5716,9 @@ version = "40.0.0"
 [[package]]
 name = "lp-bootctl"
 version = "1.0.0"
+dependencies = [
+ "lp-crc32",
+]
 
 [[package]]
 name = "lp-cli"
@@ -6738,6 +6741,7 @@ dependencies = [
 name = "lpc-update"
 version = "40.0.0"
 dependencies = [
+ "lp-bootctl",
  "lp-crc32",
  "lp-deflate",
  "lpc-access",

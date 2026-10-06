@@ -34,7 +34,9 @@ use core::cell::RefCell;
 
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
-use lp_link::{Link, LinkConfig, LinkState, SelectiveRepeat};
+use lp_link::{CH_UPDATE, Link, LinkConfig, LinkState, SelectiveRepeat, SendError};
+
+use super::usb_update_channel::UpdateSend;
 
 /// The largest message the board sends or takes: the static frame buffer's
 /// size, which bounds every reply it can serialize (the 16 KiB `ProjectRead`
@@ -184,6 +186,78 @@ impl UsbLinkShared {
         queued
     }
 
+    /// Queue one channel-3 message (the over-the-air update protocol, see
+    /// [`super::usb_update_channel`]) and wake the task: in the send ring
+    /// when it fits ([`RING_MAX`](super::usb_update_channel::RING_MAX)),
+    /// else as the external message out of the static frame buffer, when no
+    /// reply holds it. Call from task context only: the frame buffer's
+    /// writers (this, the server transport, the BLE mux) all run on the
+    /// server loop's task or in core-only, which has no transport.
+    pub fn send_update(&self, bytes: &[u8]) -> UpdateSend {
+        use super::usb_update_channel::RING_MAX;
+        let ring = bytes.len() <= RING_MAX;
+        let room = self.with_link(|link| {
+            if link.state() != LinkState::Established {
+                return Err(UpdateSend::NoSession);
+            }
+            if ring {
+                return Ok(match link.send(CH_UPDATE, bytes) {
+                    Ok(()) => UpdateSend::Queued,
+                    Err(SendError::Full) => UpdateSend::Later,
+                    Err(SendError::TooBig | SendError::BadChannel) => UpdateSend::TooBig,
+                });
+            }
+            if bytes.len() > link.config().max_message {
+                return Err(UpdateSend::TooBig);
+            }
+            Err(if link.external_in_flight() {
+                UpdateSend::Later
+            } else {
+                // Free: copied outside the lock (below).
+                UpdateSend::Queued
+            })
+        });
+        let sent = match room {
+            Ok(sent) => sent,
+            Err(UpdateSend::Queued) => self.send_update_external(bytes),
+            Err(other) => other,
+        };
+        if sent == UpdateSend::Queued {
+            self.ring();
+        }
+        sent
+    }
+
+    /// A large channel-3 message through the frame buffer, which nothing
+    /// holds: copied in (outside the lock, it is 4 KiB), then queued.
+    #[cfg(feature = "server")]
+    fn send_update_external(&self, bytes: &[u8]) -> UpdateSend {
+        // SAFETY: the frame buffer's writers all run on this task (see
+        // `send_update`), and the link is not reading it: no external
+        // message is in flight (checked above, and nothing on this task
+        // queued one since).
+        let buf = unsafe { crate::serial::server_msg::frame_buf_mut() };
+        let Some(dst) = buf.get_mut(..bytes.len()) else {
+            return UpdateSend::TooBig;
+        };
+        dst.copy_from_slice(bytes);
+        self.with_link(|link| {
+            if link.state() != LinkState::Established {
+                return UpdateSend::NoSession;
+            }
+            match link.send_external(CH_UPDATE, bytes.len()) {
+                Ok(()) => UpdateSend::Queued,
+                Err(SendError::Full) => UpdateSend::Later,
+                Err(SendError::TooBig | SendError::BadChannel) => UpdateSend::TooBig,
+            }
+        })
+    }
+
+    #[cfg(not(feature = "server"))]
+    fn send_update_external(&self, _bytes: &[u8]) -> UpdateSend {
+        UpdateSend::TooBig
+    }
+
     /// Something was queued: wake the link task to transmit it now rather
     /// than at its next timer.
     pub fn ring(&self) {
@@ -221,6 +295,56 @@ mod tests {
         let state = shared.with_link(|link| link.state());
         assert_eq!(state, LinkState::Connecting);
         assert_eq!(ENTERED.load(Ordering::Relaxed), 3);
+    }
+
+    /// Channel 3: a small answer goes through the send ring, a 4 KiB one as
+    /// the external message out of the frame buffer, and a second large one
+    /// waits while the first is still being read.
+    #[cfg(feature = "server")]
+    #[test]
+    fn update_messages_go_by_ring_or_by_frame_buffer() {
+        use lp_link::LinkEvent;
+        let shared = UsbLinkShared::leak(0x1111);
+        assert_eq!(shared.send_update(b"R"), UpdateSend::NoSession);
+        let mut host = Link::<SelectiveRepeat>::new(LinkConfig::usb(), 0x2222);
+        let pump = |host: &mut Link<SelectiveRepeat>, t: u64| {
+            for _ in 0..200 {
+                let mut moved = false;
+                if let Some(f) = shared.with_link(|l| {
+                    l.poll_transmit_with(t, &mut super::super::usb_link_task::external_source)
+                        .map(<[u8]>::to_vec)
+                }) {
+                    host.on_bytes(t, &f);
+                    moved = true;
+                }
+                if let Some(f) = host.poll_transmit(t).map(<[u8]>::to_vec) {
+                    shared.with_link(|l| l.on_bytes(t, &f));
+                    moved = true;
+                }
+                if !moved {
+                    break;
+                }
+            }
+        };
+        pump(&mut host, 0);
+        assert!(shared.is_established());
+        assert_eq!(shared.send_update(b"R\x45"), UpdateSend::Queued);
+        let big: alloc::vec::Vec<u8> = (0..4102u32).map(|i| i as u8).collect();
+        assert_eq!(shared.send_update(&big), UpdateSend::Queued);
+        assert!(shared.frame_buf_in_use());
+        assert_eq!(shared.send_update(&big), UpdateSend::Later);
+        let mut got = alloc::vec::Vec::new();
+        for t in 1..50u64 {
+            pump(&mut host, t * 1_000);
+            while let Some(ev) = host.recv() {
+                if let LinkEvent::Message { channel, data } = ev {
+                    assert_eq!(channel, CH_UPDATE);
+                    got.push(data);
+                }
+            }
+        }
+        assert_eq!(got, alloc::vec![b"R\x45".to_vec(), big]);
+        assert!(!shared.frame_buf_in_use());
     }
 
     /// The board's cut holds together, carries the largest reply, and costs

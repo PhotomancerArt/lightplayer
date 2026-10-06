@@ -49,12 +49,13 @@ use alloc::boxed::Box;
 use alloc::collections::VecDeque;
 use alloc::format;
 use alloc::string::{String, ToString};
+use alloc::vec::Vec;
 
 use crate::console_line::{TextLines, log_record_lines};
 use lp_json_pack::{LearnStore, LearnedTable, PACK_FORMAT_VERSION};
 use lp_link::{
-    CH_LOG, CH_PROTO, Link, LinkConfig, LinkEvent, LinkState, Micros, ResetReason, SelectiveRepeat,
-    SendError,
+    CH_LOG, CH_PROTO, CH_UPDATE, Link, LinkConfig, LinkEvent, LinkState, Micros, ResetReason,
+    SelectiveRepeat, SendError,
 };
 
 use crate::link_counter_tally::LinkCounterTally;
@@ -110,6 +111,11 @@ pub struct WireLinkPort {
     opt_in: OptIn,
     device_log_sent: bool,
     reads: VecDeque<PortRead>,
+    /// Update-channel (channel 3) messages of this session, apart from
+    /// `reads` so no consumer of [`PortRead`] has to know about them.
+    /// Cleared at every `Up` and `Reset`: a caller that handles the reads
+    /// first never feeds a new session an old one's message.
+    updates: VecDeque<Vec<u8>>,
     /// Raw text since the last newline.
     text: TextLines,
     tally: LinkCounterTally,
@@ -134,6 +140,7 @@ impl WireLinkPort {
             opt_in: OptIn::WaitingForHello,
             device_log_sent: false,
             reads: VecDeque::new(),
+            updates: VecDeque::new(),
             text: TextLines::new(),
             tally: LinkCounterTally::new(),
             now: 0,
@@ -231,6 +238,20 @@ impl WireLinkPort {
         self.link.send(CH_PROTO, json.as_bytes())
     }
 
+    /// The next update-channel message the board sent this session (the
+    /// over-the-air update protocol, `lpc-update`). Handle
+    /// [`poll_read`](Self::poll_read)'s `Up`/`Reset` first: a session's
+    /// update messages follow its `Up`.
+    pub fn poll_update(&mut self) -> Option<Vec<u8>> {
+        self.pump_events();
+        self.updates.pop_front()
+    }
+
+    /// Queue one update-channel message (channel 3, reliable).
+    pub fn send_update(&mut self, message: &[u8]) -> Result<(), SendError> {
+        self.link.send(CH_UPDATE, message)
+    }
+
     /// The next thing the board said, in order.
     pub fn poll_read(&mut self) -> Option<PortRead> {
         self.pump_events();
@@ -291,15 +312,18 @@ impl WireLinkPort {
             match event {
                 LinkEvent::Up { generation } => {
                     self.forget_session();
+                    self.updates.clear();
                     self.reads.push_back(PortRead::Up { generation });
                 }
                 LinkEvent::Reset { reason, .. } => {
                     self.forget_session();
+                    self.updates.clear();
                     self.reads.push_back(PortRead::Reset { reason });
                 }
                 LinkEvent::Message { channel, data } => match channel {
                     CH_PROTO => self.on_proto(&data),
                     CH_LOG => self.on_log(&data),
+                    CH_UPDATE => self.updates.push_back(data),
                     // Channel 0 and the rest are unused on a device link.
                     _ => {}
                 },
@@ -525,6 +549,37 @@ mod tests {
         let replies = messages(&reads);
         assert_eq!(replies.len(), 1);
         assert_eq!(replies[0].message.as_ref().unwrap().id, 7);
+    }
+
+    #[test]
+    fn update_messages_go_both_ways_on_their_own_queue() {
+        let mut t = Bench::new(false);
+        t.run(50);
+        t.reads();
+        t.port.send_update(b"Q\x01").unwrap();
+        t.run(50);
+        assert_eq!(t.board.updates, vec![b"Q\x01".to_vec()]);
+        // The double answers each one with `M` and the message echoed.
+        assert_eq!(t.port.poll_update(), Some(b"MQ\x01".to_vec()));
+        assert_eq!(t.port.poll_update(), None);
+        let reads = t.reads();
+        assert!(
+            messages(&reads).is_empty(),
+            "channel 3 is not a wire message: {reads:?}"
+        );
+    }
+
+    #[test]
+    fn a_new_session_drops_the_old_sessions_update_messages() {
+        let mut t = Bench::new(false);
+        t.run(50);
+        t.port.send_update(b"Q\x01").unwrap();
+        t.run(50);
+        // Unread when the board reboots: the next session never sees it.
+        t.board.reboot(0xBEEF_0002);
+        t.run(200);
+        assert!(t.reads().iter().any(|r| matches!(r, PortRead::Up { .. })));
+        assert_eq!(t.port.poll_update(), None);
     }
 
     #[test]
@@ -930,6 +985,8 @@ mod tests {
         asks: Vec<u64>,
         /// Ids of ordinary requests.
         requests: Vec<u64>,
+        /// Update-channel messages received.
+        updates: Vec<Vec<u8>>,
     }
 
     impl BoardDouble {
@@ -945,6 +1002,7 @@ mod tests {
                 pack_format: PACK_FORMAT_VERSION,
                 asks: Vec::new(),
                 requests: Vec::new(),
+                updates: Vec::new(),
             }
         }
 
@@ -973,6 +1031,15 @@ mod tests {
                     } => {
                         let request = crate::decode_client_payload(&data).unwrap();
                         self.on_request(request);
+                    }
+                    LinkEvent::Message {
+                        channel: CH_UPDATE,
+                        data,
+                    } => {
+                        let mut answer = b"M".to_vec();
+                        answer.extend_from_slice(&data);
+                        self.link.send(CH_UPDATE, &answer).unwrap();
+                        self.updates.push(data);
                     }
                     _ => {}
                 }

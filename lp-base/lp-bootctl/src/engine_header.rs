@@ -27,7 +27,7 @@
 //! commit program leaves a word that is not exactly [`ENGINE_COMMITTED`]:
 //! neither is ever valid, and a core never enters a half-written engine.
 
-use crate::crc32::crc32;
+use lp_crc32::crc32;
 
 /// `"LPEH"`, little-endian.
 pub const ENGINE_MAGIC: u32 = u32::from_le_bytes(*b"LPEH");

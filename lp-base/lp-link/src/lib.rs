@@ -65,7 +65,7 @@ pub use arq::{Arq, GoBackN, NoArq, SelectiveRepeat, StopAndWait};
 pub use crc::CrcKind;
 pub use link::{ExternalStarted, Link, LinkState, SendError};
 pub use link_config::{
-    CH_CONTROL, CH_LOG, CH_PROTO, Framing, LinkConfig, MAX_MESSAGE, SEAL_OVERHEAD,
+    CH_CONTROL, CH_LOG, CH_PROTO, CH_UPDATE, Framing, LinkConfig, MAX_MESSAGE, SEAL_OVERHEAD,
 };
 pub use link_counters::LinkCounters;
 pub use link_event::{LinkEvent, ResetReason};

@@ -10,6 +10,12 @@ pub const CH_CONTROL: u8 = 0;
 pub const CH_PROTO: u8 = 1;
 /// Channel 2: structured log lines. Best effort: dropped, not retried.
 pub const CH_LOG: u8 = 2;
+/// Channel 3: the over-the-air update protocol (`lpc-update`, protocol v1).
+/// Reliable in every preset a board carries it on (`usb()`, `uart()`,
+/// `ble()`). Once update-capable cores are fielded this channel, like the
+/// plain framing and handshake, changes only in ways an old board still
+/// understands (`tests/update_channel_golden.rs`).
+pub const CH_UPDATE: u8 = 3;
 
 /// The presets' `max_message`: the wire's 16 KiB frame budget plus 1 KiB.
 pub const MAX_MESSAGE: usize = 17 * 1024;
@@ -154,7 +160,10 @@ impl LinkConfig {
             keep_reassembly: MAX_MESSAGE,
             datagram_queue: 32,
             datagram_every: 4,
-            reliable_channels: (1 << CH_CONTROL) | (1 << CH_PROTO),
+            // Channel 3 (updates) is reliable too: `ble()` and `uart()`
+            // inherit this mask, and the send-ahead window of the update
+            // protocol assumes a reliable, ordered channel.
+            reliable_channels: (1 << CH_CONTROL) | (1 << CH_PROTO) | (1 << CH_UPDATE),
             ack_delay: 1_000,
             ack_every: 2,
             reorder_threshold: 1,
@@ -212,6 +221,10 @@ impl LinkConfig {
             tx_window: 16,
             rx_window: 16,
             rx_budget: 32 * 1024,
+            // No board carries the update channel on UDP or a WebSocket yet
+            // (Wi-Fi updates decide it): their mask stays what it was before
+            // channel 3 joined `usb()`'s.
+            reliable_channels: (1 << CH_CONTROL) | (1 << CH_PROTO),
             ack_delay: 5_000,
             ack_every: 4,
             reorder_threshold: 3,

@@ -107,7 +107,7 @@ impl UsbLinkTransport {
     fn pump_events(&mut self) {
         while !self.hello_owed {
             let Some(event) = self.shared.with_link(|link| link.recv()) else {
-                return;
+                break;
             };
             match event {
                 LinkEvent::Message { channel, data } if channel == lp_link::CH_PROTO => {
@@ -120,6 +120,10 @@ impl UsbLinkTransport {
                     if let Some(msg) = msg {
                         self.inbox.push_back(msg);
                     }
+                }
+                // The update protocol: the core's, through its hook.
+                LinkEvent::Message { channel, data } if channel == lp_link::CH_UPDATE => {
+                    super::usb_update_channel::dispatch_update(Some(&data));
                 }
                 LinkEvent::Message { channel, data } => {
                     log::debug!("[usb_link] {} B on channel {channel} ignored", data.len());
@@ -151,6 +155,8 @@ impl UsbLinkTransport {
                 }
             }
         }
+        // A pass over the link: the update hook sends what it could not yet.
+        super::usb_update_channel::dispatch_update(None);
     }
 
     /// Serialize `msg` into the frame buffer and queue it as an external
