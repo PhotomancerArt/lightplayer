@@ -13,7 +13,7 @@ use anyhow::{Result, bail};
 use lpc_engine::engine::LoadedProjectRuntime;
 use lpc_engine::{EngineServices, ProjectLoader};
 use lpc_model::TreePath;
-use lpfs::LpFsMemory;
+use lpfs::LpFs;
 
 /// Ticks run before recording starts, at the recording's own frame step.
 /// A first frame is special (extents establish, shaders compile, a compute
@@ -52,8 +52,10 @@ impl RecordedFrames {
 }
 
 /// Load `fs` as a project and record `seconds` at `fps` from its output.
+/// `fs` is a preview rig in memory, or a project directory on disk
+/// (`hardware desk-images` draws a real piece this way).
 pub fn record(
-    fs: &LpFsMemory,
+    fs: &dyn LpFs,
     root_name: &str,
     lamp_count: usize,
     seconds: f32,

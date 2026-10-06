@@ -6,6 +6,15 @@ metadata (`boards/<vendor>/<product>.display.json` sidecars, see
 component (`lpa-boards/src/diagram.rs`), whose geometry lives entirely in
 `lpa-boards/src/geometry.rs`. There are no hand-drawn board images.
 
+The same drawing also exports as a **standalone SVG file**:
+`lp-cli hardware desk-images` (feature `desk-images`, `just desk-images`)
+renders `BoardDiagram` server-side and inlines the `lpb-*` block and the
+`:root` tokens it reads out of `lpa-studio-web/src/style.css` between its
+marker comments, for the desk's board bench (`board`,
+github.com/PhotomancerArt/lp-board-bench). Keep those two markers where they
+are; `cargo test -p lp-cli --features desk-images --lib desk_images` fails if
+they move.
+
 Ported from the approved UX spike (`spikes/hardware-boards/DESIGN-LANGUAGE.md`
 rev 5, PR #222, two visual gates).
 
