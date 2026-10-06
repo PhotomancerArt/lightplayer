@@ -1,0 +1,1105 @@
+#!/usr/bin/env node
+// THE EMULATED WI‑FI WALK: Studio over the LAN, two boards on one LAN
+// (Wi‑Fi plan P13; `just walk-wifi-emu lan`).
+//
+// Two emulated ESP32-C6 boards, `c6-a` and `c6-b`, running the packaged
+// firmware ROM-up, on ONE virtual LAN (`lan=home`) whose access points come
+// from a fixture this walk writes. Real Studio, headless, reaches them over
+// that LAN through each board's port forward (`?lan=`), the way it would
+// reach a board on a desk's network:
+//
+//   W1  over each board's USB door, add the fixture's network
+//       → each board's status: connected, an address, its `.local` name
+//   W2  Studio with ?lan=<fwd a>,<fwd b> → two Wi‑Fi boards, each saying
+//       hello over its secure LAN link (the board's console: the handshake)
+//   W3  push a project to c6-a over the LAN, open it, edit a value
+//       → the board's console: the load; its frame counter advances
+//   W4  c6-b's card while c6-a stays connected → both links stay up
+//   W5  the LAN probe asks for `_lightplayer._tcp` → both boards answer,
+//       each with its own name and MAC
+//   W6  a network with a wrong password on c6-b → "Wrong password"; the
+//       board goes back to the good network
+//   W7  a name no access point has → "Not in range"
+//   W8  a project with a Radio node on c6-a → the node says why it is off
+//       (fw-esp32-common's `RADIO_OFF_FOR_WIFI`); the rest runs
+//   W9  reset c6-a with the gateway's next-lease option on → a different
+//       address; Studio's link comes back through the same forward
+//   W10 `lp-cli link rtt lan:<fwd a>` → request p50/p90 in FRAMES
+//
+// THE BOARD'S WORDS DECIDE EVERY STEP (AGENTS.md: "wait for the board's
+// words, not Studio's"). Three sources, none of which the page can satisfy:
+//
+//   * the board's console: each board's USB link held for the whole walk by
+//     `lp-cli link capture` (through a TCP bridge to the door's `/bytes`),
+//     which writes the DECODED console — log records ride the link, so the
+//     door's raw console file holds none of them;
+//   * the board's status answers: `lp-cli wifi status` over its USB door
+//     (W1, before the capture takes the port) or over its LAN forward (the
+//     board's second LAN link slot; Studio holds the first);
+//   * the LAN's own view: the door's `/boards` and its LAN probe.
+//
+// Studio's words only say when to look. One exception, said where it is
+// used: W8's Radio message is a string only the firmware holds, so the page
+// showing it IS the board's answer relayed.
+//
+// The interfaces this walk drives were written ahead of the code that
+// provides them (P12's hosts, built in parallel). Every such guess is a
+// `// ASSUMES:` comment; `grep -n ASSUMES` is the list to reconcile.
+//
+// NOT CI (P13 §1). Made-up test values only. Headless Chrome only. It serves
+// the release Studio bundle itself on this worktree's stable slot (no dev
+// server, nothing adopted) and runs as one foreground command. Needs:
+// `just studio-web-story-build`, `just studio-firmware-package-served`,
+// `cargo build -p lp-cli`, Chrome. `--dry-run` checks the arguments and the
+// prerequisites, writes the fixture and the plan, and starts nothing.
+//
+// Emulated numbers it prints name the board's configuration label and the
+// `lp-emu` commit. A wall-clock figure from a socket is never a gate.
+
+import { execFileSync, spawn } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import process from "node:process";
+
+import { findChrome, StudioDriver } from "./studio-driver.mjs";
+import {
+  PACKAGED_C6_MERGED,
+  RELEASE_BUNDLE,
+  SERVED_FIRMWARE,
+  boardRegistry,
+  bridgeDoorBytes,
+  serveStudioBundle,
+  startDoor,
+  startRecordSink,
+  stopDoor,
+  walkPort,
+} from "./emulated-lane.mjs";
+
+const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
+const LP_CLI = path.join(ROOT, "target/debug/lp-cli");
+
+const LAN = "home";
+const BOARDS = ["c6-a", "c6-b"];
+const [A, B] = BOARDS;
+
+/// TEST VALUES ONLY: committed, printed, and named in the emulator's output.
+const NET = { ssid: "lp-walk-net", password: "correct-horse-42", dbm: -50 };
+/// In range, secured; W6 adds it with the wrong password.
+const GUEST = { ssid: "lp-walk-guest", password: "staple-battery-7", wrong: "wrong-horse-0", dbm: -65 };
+/// No access point has it (W7).
+const NOWHERE = { ssid: "lp-walk-nowhere", password: "no-such-net-1" };
+
+/// The virtual LAN's access points.
+/// ASSUMES: `emu serve --lan <name>=<fixture>` reads P11's fixture format
+/// (`lp-emu/esp/lp-emu-esp-common/testdata/virtual_lan.toml`): one
+/// `[[access_point]]` per network, `name`, `password` (absent = open),
+/// `signal_dbm`, `hidden`.
+const FIXTURE = `# walk-wifi-emu-lan.mjs: made-up test values only, never a real network.
+[[access_point]]
+name = "${NET.ssid}"
+password = "${NET.password}"
+signal_dbm = ${NET.dbm}
+
+[[access_point]]
+name = "${GUEST.ssid}"
+password = "${GUEST.password}"
+signal_dbm = ${GUEST.dbm}
+`;
+
+/// W3's project, from Studio's gallery (walk-no-board's, for its measured
+/// reason: `fyeah-sign` overruns the emulated watchdog).
+const WALK_PROJECT = process.env.WALK_PROJECT ?? "Peach (1D)";
+/// W8's project: a Radio node (`radio:local:0`) beside a shader. Not
+/// `fyeah-sign` (the emulated graphics-stage defect, as above).
+const RADIO_PROJECT = process.env.WALK_RADIO_PROJECT ?? "projects/test/button-sign";
+/// fw-esp32-common `net::radio_rule::RADIO_OFF_FOR_WIFI`, verbatim (P03).
+/// Nothing in Studio holds this string: on the page it can only have come
+/// from the board.
+const RADIO_OFF_FOR_WIFI =
+  "Radio is off while this board uses Wi-Fi. Turn Wi-Fi off for this board to use Radio.";
+
+/// Studio's words (`lpa-studio-core/src/app/network/wifi_words.rs`). They
+/// say WHEN to look; the board's status says what happened.
+const WORDS = {
+  wifiRow: "Wi‑Fi", // U+2011, the card's Wi‑Fi row
+  wifiLine: "Wi-Fi · ", // U+002D, the card's LAN line (`UiLanLink::line`)
+  connectToANetwork: "Connect to a network",
+  otherNetwork: "Other network",
+  connect: "Connect",
+  checkingPassword: "Checking the password",
+  wrongPassword: "Wrong password",
+  notInRange: "Not in range",
+  cloudRelay: "Cloud relay",
+};
+
+const STUDIO_LOAD_MS = 420_000;
+/// Wedged-run deadlines, never measurements: emulated boards boot, scan,
+/// join and render at emulated speed on a shared box.
+const STEP_MS = 300_000;
+const JOIN_MS = 420_000;
+const STATUS_POLL_MS = 2_000;
+/// W10: requests timed. Enough for a p90 to mean something.
+const RTT_COUNT = 40;
+
+const MAIN_TEXT = `(document.querySelector('#main')?.innerText || '')`;
+const PANEL = `document.querySelector('[id^="ux-popover-panel"]')`;
+const PANEL_TEXT = `(${PANEL}?.innerText || '')`;
+
+// --- arguments -------------------------------------------------------------
+
+function usage() {
+  return (
+    "usage: node scripts/emu/walk-wifi-emu.mjs lan [--out <dir>] [--keep-open] [--dry-run]\n" +
+    "       node scripts/emu/walk-wifi-emu-lan.mjs [--out <dir>] [--keep-open] [--dry-run]"
+  );
+}
+
+export function parseArgs(argv) {
+  const rest = argv[0] === "lan" ? argv.slice(1) : argv;
+  const options = { out: path.join(ROOT, "target/walk-wifi-emu/lan"), keepOpen: false, dryRun: false };
+  for (let i = 0; i < rest.length; i += 1) {
+    const arg = rest[i];
+    if (arg === "--out") {
+      const value = rest[++i];
+      if (!value) throw new Error(`--out needs a directory\n${usage()}`);
+      options.out = path.resolve(value);
+    } else if (arg === "--keep-open") options.keepOpen = true;
+    else if (arg === "--dry-run") options.dryRun = true;
+    else if (arg === "--help" || arg === "-h") {
+      options.help = true;
+    } else {
+      throw new Error(`unknown argument ${JSON.stringify(arg)}\n${usage()}`);
+    }
+  }
+  return options;
+}
+
+// --- the walk's own plumbing ---------------------------------------------
+
+/// What this run needs on disk, and whether it is there.
+function prerequisites() {
+  return [
+    ["a debug lp-cli (cargo build -p lp-cli)", LP_CLI],
+    ["the release Studio bundle (just studio-web-story-build)", path.join(ROOT, RELEASE_BUNDLE)],
+    ["the packaged firmware (just studio-firmware-package-served)", path.join(ROOT, SERVED_FIRMWARE)],
+    ["the packaged merged C6 image (just studio-firmware-package-served)", path.join(ROOT, PACKAGED_C6_MERGED)],
+    ["the Radio project", path.join(ROOT, RADIO_PROJECT)],
+  ].map(([what, at]) => ({ what, at, present: existsSync(at) }));
+}
+
+/// The `emu serve` boards and flags for this walk.
+///
+/// ASSUMES (P12 §3; flag spelling TBD): a LAN is declared once with
+/// `--lan <name>=<fixture.toml>`, and a board joins it with `,lan=<name>`
+/// in its `--board` spec. Boards naming the same LAN share it.
+function doorSpec(fixturePath) {
+  return {
+    boards: BOARDS.map((id) => `${id}={merged},kind=rom-up,lan=${LAN}`),
+    extraArgs: ["--lan", `${LAN}=${fixturePath}`],
+  };
+}
+
+/// A board's forward, `127.0.0.1:<port>`, out of its `/boards` entry.
+///
+/// ASSUMES (P12 §3: "`/boards` lists each board's forward"): one of
+/// `forward`, `lan.forward`, `lan_forward` holds `lan:127.0.0.1:<port>` or
+/// `127.0.0.1:<port>`. Read loosely on purpose; the thrown message carries
+/// the entry so the real shape is one look away.
+export function forwardOf(entry) {
+  const candidates = [entry?.forward, entry?.lan?.forward, entry?.lan_forward, entry?.lan?.address];
+  for (const value of candidates) {
+    if (typeof value !== "string") continue;
+    const match = value.match(/(?:lan:)?(127\.0\.0\.1:\d+)/);
+    if (match) return match[1];
+  }
+  throw new Error(`no LAN forward in the door's entry for ${entry?.id}: ${JSON.stringify(entry)}`);
+}
+
+/// Studio on the walk's own bundle, reaching both boards over the LAN and
+/// streaming its device events to the sink. No `?emu=`: nothing in the page
+/// touches a USB door, so the walk's own tools can hold them.
+export function studioUrlForLan({ studioPort, forwards, sinkUrl, route = "/devices" }) {
+  const query = new URLSearchParams();
+  query.set("lan", forwards.map((forward) => `ws://${forward}/link`).join(","));
+  query.set("record", sinkUrl);
+  return `http://localhost:${studioPort}${route}?${query.toString()}`;
+}
+
+/// Run `lp-cli <args>`; a password goes in on stdin, never in argv.
+function lpCli(args, { stdin = null, timeoutMs = STEP_MS, env = {} } = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(LP_CLI, args, { cwd: ROOT, env: { ...process.env, ...env }, stdio: ["pipe", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    const timer = setTimeout(() => {
+      child.kill("SIGTERM");
+      reject(new Error(`lp-cli ${args.join(" ")} did not finish within ${timeoutMs / 1000} s:\n${stderr.slice(-2000)}`));
+    }, timeoutMs);
+    child.on("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.on("exit", (code) => {
+      clearTimeout(timer);
+      resolve({ code, stdout, stderr });
+    });
+    if (stdin !== null) child.stdin.write(`${stdin}\n`);
+    child.stdin.end();
+  });
+}
+
+/// The last JSON object `lp-cli … --json` printed.
+function lastJson(stdout) {
+  const lines = stdout.split("\n").filter((line) => line.trim().startsWith("{"));
+  if (!lines.length) throw new Error(`no JSON in:\n${stdout.slice(-1000)}`);
+  return JSON.parse(lines[lines.length - 1]);
+}
+
+/// The board's own status answer over `target`.
+async function wifiStatus(target) {
+  const { code, stdout, stderr } = await lpCli(["wifi", "status", target, "--json"], { timeoutMs: 120_000 });
+  if (code !== 0) throw new Error(`wifi status ${target} → exit ${code}: ${stderr.trim().split("\n").slice(-3).join(" | ")}`);
+  return lastJson(stdout);
+}
+
+/// `station` as `{ kind, ...fields }` (`"notConnected"` or `{ connected: {…} }`).
+export function stationOf(status) {
+  const station = status?.station;
+  if (typeof station === "string") return { kind: station };
+  if (station && typeof station === "object") {
+    const [kind] = Object.keys(station);
+    return { kind, ...station[kind] };
+  }
+  return { kind: "unknown" };
+}
+
+/// A saved network's `last` attempt, as the board reports it.
+function lastAttempt(status, ssid) {
+  return (status?.networks ?? []).find((network) => network.ssid === ssid)?.last ?? null;
+}
+
+/// Ask the board until `test(status)` holds. Failures to reach it are
+/// expected while it is off its network (W6, W7, W9) and are retried; the
+/// last one is said if the deadline passes.
+async function awaitStatus(target, test, { timeoutMs = JOIN_MS, what }) {
+  const deadline = Date.now() + timeoutMs;
+  let last = null;
+  for (;;) {
+    try {
+      const status = await wifiStatus(target);
+      last = status;
+      if (test(status)) return status;
+    } catch (error) {
+      last = error.message;
+    }
+    if (Date.now() > deadline) {
+      throw new Error(`the board never said ${what} over ${target}; last: ${typeof last === "string" ? last : JSON.stringify(last)}`);
+    }
+    await delay(STATUS_POLL_MS);
+  }
+}
+
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/// One board's decoded console, as `lp-cli link capture` writes it a line
+/// at a time. Waits read the file; the board writing it is the event.
+///
+/// ASSUMES: with the network seam answering (P10), the firmware still logs
+/// the lines this walk keys on, from code above the frame device:
+/// `[wifi] trying <ssid>` and `[wifi] address a.b.c.d`
+/// (`fw-esp32c6/src/net/station_task.rs`), `[lan] link N … secure session
+/// opening` and `[lan] link N: closed (…)` (`lan_endpoint_task.rs`), and
+/// `Project loaded` (the server, as walk-no-board reads it).
+class BoardConsole {
+  constructor(board, file) {
+    this.board = board;
+    this.file = file;
+  }
+
+  text() {
+    try {
+      return readFileSync(this.file, "utf8");
+    } catch {
+      return "";
+    }
+  }
+
+  /// A position to read "since" from.
+  mark() {
+    return this.text().length;
+  }
+
+  since(mark) {
+    return this.text().slice(mark);
+  }
+
+  /// The first line from `mark` on that `match` (a string or a RegExp)
+  /// finds.
+  async waitFor(match, { from = 0, timeoutMs = STEP_MS, what }) {
+    const test = typeof match === "string" ? (line) => line.includes(match) : (line) => match.test(line);
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      const hit = this.since(from).split("\n").find(test);
+      if (hit) return hit;
+      if (Date.now() > deadline) throw new Error(`${this.board}'s console never said ${what} (${this.file})`);
+      await delay(500);
+    }
+  }
+
+  /// The heartbeats' `frame_count`s from `mark` on.
+  frameCounts(from = 0) {
+    return [...this.since(from).matchAll(/"heartbeat":\{[^\n]*?"frame_count":(\d+)/g)].map((m) => Number(m[1]));
+  }
+
+  /// The last heartbeat's `loaded_projects` from `mark` on.
+  loadedProjects(from = 0) {
+    const all = [...this.since(from).matchAll(/"loaded_projects":(\[[^\]]*\])/g)];
+    return all.length ? all[all.length - 1][1] : null;
+  }
+
+  /// Wait for `count` more heartbeats from `mark` on, with a frame counter
+  /// that moved between the first and the last.
+  async framesAdvance({ from, count = 2, timeoutMs = STEP_MS }) {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      const counts = this.frameCounts(from);
+      if (counts.length >= count && counts[counts.length - 1] > counts[0]) return counts;
+      if (Date.now() > deadline) {
+        throw new Error(`${this.board}'s frame counter did not advance over ${count} heartbeats: ${JSON.stringify(counts)}`);
+      }
+      await delay(1_000);
+    }
+  }
+}
+
+/// Hold a board's USB link for the rest of the walk and write its decoded
+/// console: a TCP bridge to the door's `/bytes`, and `lp-cli link capture`
+/// on it.
+async function holdConsole({ doorAddr, board, file }) {
+  const bridge = await bridgeDoorBytes({ doorAddr, board });
+  const child = spawn(
+    LP_CLI,
+    ["link", "capture", `tcp://127.0.0.1:${bridge.port}`, "--console", file, "--seconds", "14400", "--json-replies"],
+    { cwd: ROOT, stdio: ["ignore", "ignore", "pipe"] },
+  );
+  let stderr = "";
+  child.stderr.on("data", (chunk) => {
+    stderr = (stderr + chunk).slice(-4000);
+  });
+  return { board, bridge, child, stderr: () => stderr, console: new BoardConsole(board, file) };
+}
+
+/// A door control line (`/board/<id>/control`), and its one reply line.
+///
+/// ASSUMES (the director's call; P11 built `VirtualLan::renumber_next_lease`
+/// and `DhcpServer::renumber_next`): the control channel takes `renumber`,
+/// "this board's next DHCP lease is a different address", and replies
+/// `ok renumber …` like every other verb.
+async function control(doorAddr, board, line) {
+  const ws = new WebSocket(`ws://${doorAddr}/board/${board}/control`);
+  const reply = await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`no reply to \`${line}\` on ${board}'s control channel`)), 30_000);
+    ws.addEventListener("open", () => ws.send(`${line}\n`));
+    ws.addEventListener("message", (event) => {
+      clearTimeout(timer);
+      resolve(String(event.data).trim());
+    });
+    ws.addEventListener("error", () => {
+      clearTimeout(timer);
+      reject(new Error(`${board}'s control channel refused the connection`));
+    });
+  });
+  ws.close();
+  if (!reply.startsWith("ok")) throw new Error(`\`${line}\` on ${board}: ${reply}`);
+  return reply;
+}
+
+/// The LAN probe's answer to a DNS-SD browse, as the door relays it.
+///
+/// ASSUMES (P12 §3 does not name it): the door answers
+/// `GET /lans/<name>/browse?service=_lightplayer._tcp.local` with
+/// `{ "answers": [ … ] }`, each answer naming an instance and carrying the
+/// TXT record's `mac=<12 hex>` somewhere in it (the firmware's TXT,
+/// `fw-esp32-common/src/net/mdns/mdns_answer.rs`). Read loosely: the walk
+/// looks for each board's MAC and a distinct instance name per board.
+async function probeBrowse(doorAddr) {
+  const url = `http://${doorAddr}/lans/${LAN}/browse?service=${encodeURIComponent("_lightplayer._tcp.local")}`;
+  const response = await fetch(url, { signal: AbortSignal.timeout(60_000) });
+  if (!response.ok) throw new Error(`GET ${url} → ${response.status} (the LAN probe's door endpoint is an ASSUMES)`);
+  return response.json();
+}
+
+/// The lp-emu commit numbers are quoted against (AGENTS.md: name it inline).
+function lpEmuCommit() {
+  try {
+    const sha = execFileSync("git", ["log", "-1", "--format=%h", "--", "lp-emu"], { cwd: ROOT, encoding: "utf8" }).trim();
+    const dirty = execFileSync("git", ["status", "--porcelain", "--", "lp-emu"], { cwd: ROOT, encoding: "utf8" }).trim();
+    return dirty ? `${sha}+dirty` : sha;
+  } catch {
+    return "unknown";
+  }
+}
+
+// --- the page ----------------------------------------------------------------
+
+/// The card of the Wi‑Fi board Studio reached at `forward`: the element
+/// holding its "Wi-Fi · <address>" line, widened until it is one card among
+/// several (or the whole list, when it is the only one). Recomputed on every
+/// use: Dioxus may replace the nodes between two looks.
+export function cardOf(forward) {
+  return `(() => {
+    const re = new RegExp(${JSON.stringify(escapeRegExp(`${WORDS.wifiLine}${forward}`))} + '(?!\\\\d)');
+    const main = document.querySelector('#main');
+    if (!main) return null;
+    const hits = [...main.querySelectorAll('*')].filter((el) => re.test(el.textContent || ''));
+    const leaf = hits.find((el) => ![...el.children].some((c) => re.test(c.textContent || '')));
+    if (!leaf) return null;
+    let el = leaf;
+    while (el.parentElement && el.parentElement !== main) {
+      const cards = [...el.parentElement.children].filter((c) => (c.textContent || '').includes(${JSON.stringify(WORDS.wifiLine)}));
+      if (cards.length > 1) return el;
+      el = el.parentElement;
+    }
+    return el;
+  })()`;
+}
+
+function escapeRegExp(text) {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+const cardText = (forward) => `(${cardOf(forward)}?.innerText || '')`;
+
+/// The card's Wi‑Fi row: its button whose text starts "Wi‑Fi".
+const wifiRowIn = (forward) =>
+  `[...(${cardOf(forward)}?.querySelectorAll('button') ?? [])].find((b) => (b.innerText || '').trim().startsWith(${JSON.stringify(WORDS.wifiRow)}))`;
+
+/// Type `text` into the panel's input `selector`, the way a keyboard does
+/// for Dioxus (`input` events carry the value).
+function typeInto(selector, text) {
+  return `(() => {
+    const el = ${PANEL}?.querySelector(${JSON.stringify(selector)});
+    if (!el) return false;
+    el.focus();
+    el.value = ${JSON.stringify(text)};
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    return true;
+  })()`;
+}
+
+class Page {
+  constructor(driver) {
+    this.driver = driver;
+  }
+
+  async load(url) {
+    await this.driver.navigate(url);
+    await this.driver.waitFor(`${MAIN_TEXT}.length > 0`, { timeoutMs: STUDIO_LOAD_MS, what: "Studio to finish loading" });
+  }
+
+  /// Wait for a control in `forward`'s card, then click it.
+  async clickInCard(forward, text, { exact = false } = {}) {
+    await this.driver.waitFor(
+      `(() => { const c = ${cardOf(forward)}; if (!c) return false;
+                return [...c.querySelectorAll('button, [role="button"], a')].some((el) => !el.disabled &&
+                  (el.textContent || '').replace(/\\s+/g, ' ').trim().toLowerCase().includes(${JSON.stringify(text.toLowerCase())})); })()`,
+      { timeoutMs: STEP_MS, what: `${JSON.stringify(text)} in the card at ${forward}` },
+    );
+    return this.driver.click(text, { scope: cardOf(forward), exact });
+  }
+
+  async cardSays(forward, words, what) {
+    return this.driver.waitFor(`${cardText(forward)}.includes(${JSON.stringify(words)})`, {
+      timeoutMs: STEP_MS,
+      what: what ?? `the card at ${forward} to say ${JSON.stringify(words)}`,
+    });
+  }
+
+  /// The MAC the card shows: the board's own, from its hello.
+  async cardMac(forward) {
+    return this.driver.evaluate(`(() => { const m = ${cardText(forward)}.match(/[0-9a-f]{2}(:[0-9a-f]{2}){5}/i); return m ? m[0].toLowerCase() : null; })()`);
+  }
+
+  async openWifi(forward) {
+    await this.driver.waitFor(`Boolean(${wifiRowIn(forward)})`, { timeoutMs: STEP_MS, what: `the Wi‑Fi row in the card at ${forward}` });
+    await this.driver.evaluate(`${wifiRowIn(forward)}.click()`);
+    await this.driver.waitFor(`${PANEL_TEXT}.includes(${JSON.stringify(WORDS.cloudRelay)})`, { timeoutMs: STEP_MS, what: "the Wi‑Fi panel" });
+    await this.driver
+      .waitFor(`getComputedStyle(${PANEL}).opacity === '1'`, { timeoutMs: 10_000, what: "the panel to finish fading in" })
+      .catch(() => null);
+  }
+
+  async closePanel() {
+    await this.driver.evaluate(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+  }
+
+  async panelClick(text, options = {}) {
+    await this.driver.waitFor(
+      `[...(${PANEL}?.querySelectorAll('button') ?? [])].some((b) => !b.disabled && (b.innerText || '').includes(${JSON.stringify(text)}))`,
+      { timeoutMs: STEP_MS, what: `${JSON.stringify(text)} in the Wi‑Fi panel` },
+    );
+    return this.driver.click(text, { scope: PANEL, ...options });
+  }
+
+  /// Whether the in-row test shows "Checking the password" crossed (drawn
+  /// in the error colour), on the panel as it is now.
+  async checkingPasswordCrossed() {
+    return this.driver.evaluate(`(() => {
+      const panel = ${PANEL}; if (!panel) return null;
+      const el = [...panel.querySelectorAll('*')].find((n) => n.childElementCount === 0 && (n.textContent || '').includes(${JSON.stringify(WORDS.checkingPassword)}));
+      if (!el) return null;
+      for (let n = el, i = 0; n && i < 4; n = n.parentElement, i += 1) {
+        if (/status-error/.test(String(n.className?.baseVal ?? n.className ?? ''))) return true;
+      }
+      return false;
+    })()`);
+  }
+
+  /// The first editor slider, moved to its other end; its value comes back
+  /// from the board's panel state, so the change is the board's echo.
+  async turnFirstKnob() {
+    const knob = `document.querySelector('#main [role="slider"]')`;
+    await this.driver.waitFor(`Boolean(${knob})`, { timeoutMs: STEP_MS, what: "the editor's first knob" });
+    const before = await this.driver.evaluate(`${knob}.getAttribute('aria-valuenow')`);
+    await this.driver.evaluate(`(() => {
+      const knob = ${knob};
+      knob.focus();
+      const key = Number(knob.getAttribute('aria-valuenow')) >= Number(knob.getAttribute('aria-valuemax')) ? 'Home' : 'End';
+      knob.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+    })()`);
+    await this.driver.waitFor(`${knob}.getAttribute('aria-valuenow') !== ${JSON.stringify(before)}`, {
+      timeoutMs: STEP_MS,
+      what: "the board's panel state to come back with the new value",
+    });
+    return `${before} → ${await this.driver.evaluate(`${knob}.getAttribute('aria-valuenow')`)}`;
+  }
+
+  /// Back to the Devices page without a reload (a reload would open new
+  /// LAN links and hide whether the old ones stayed up).
+  async toDevices(url) {
+    const clicked = await this.driver.evaluate(`(() => {
+      const a = [...document.querySelectorAll('a[href]')].find((l) => new URL(l.href, location.href).pathname === '/devices');
+      if (!a) return false; a.click(); return true; })()`);
+    if (!clicked) await this.load(url);
+    await this.driver.waitFor(`location.pathname === '/devices'`, { timeoutMs: STEP_MS, what: "the Devices page" });
+    return clicked ? "in-app" : "reloaded";
+  }
+}
+
+// --- the walk ------------------------------------------------------------------
+
+async function main() {
+  let options;
+  try {
+    options = parseArgs(process.argv.slice(2));
+  } catch (error) {
+    console.error(error.message);
+    process.exit(2);
+  }
+  if (options.help) {
+    console.log(usage());
+    return;
+  }
+  const out = options.out;
+  const shots = path.join(out, "shots");
+  const consoleDir = path.join(out, "console");
+  const stateDir = path.join(out, "state");
+  mkdirSync(out, { recursive: true });
+  const fixturePath = path.join(out, "virtual_lan.toml");
+  writeFileSync(fixturePath, FIXTURE);
+  const spec = doorSpec(fixturePath);
+  const needs = prerequisites();
+  const chrome = findChrome();
+
+  if (options.dryRun) {
+    const plan = {
+      out,
+      fixture: fixturePath,
+      door: { boards: spec.boards, extraArgs: spec.extraArgs },
+      studio: studioUrlForLan({ studioPort: "<walk port>", forwards: ["127.0.0.1:<fwd a>", "127.0.0.1:<fwd b>"], sinkUrl: "http://127.0.0.1:<sink>/ingest" }),
+      steps: [
+        `W1 lp-cli wifi add serial:ws://<door>/board/<id>/bytes ${NET.ssid} --password-stdin --json   (each board)`,
+        "W1 lp-cli wifi status serial:ws://<door>/board/<id>/bytes --json   until connected",
+        "   lp-cli link capture tcp://127.0.0.1:<bridge to /bytes> --console console/<id>.link.log   (held to the end)",
+        "W2 Studio ?lan=… → two Wi‑Fi cards; each console: [lan] link … secure session opening",
+        `W3 push ${WALK_PROJECT} to ${A} over the LAN; console: Project loaded, frames advance; edit a knob`,
+        `W4 ${B}'s card and Wi‑Fi row; no [lan] link … closed on either console`,
+        `W5 GET /lans/${LAN}/browse?service=_lightplayer._tcp.local → both MACs`,
+        `W6 ${B}: ${GUEST.ssid} with a wrong password → last wrongPassword, back on ${NET.ssid}`,
+        `W7 ${B}: ${NOWHERE.ssid} → last notFound`,
+        `W8 lp-cli upload ${RADIO_PROJECT} lan:<fwd a> → the Radio node's words; frames advance`,
+        `W9 control ${A}: renumber, reset → a different address; Studio back through <fwd a>`,
+        `W10 lp-cli link rtt lan:<fwd a> --count ${RTT_COUNT} --json rtt-lan.json → p50/p90 frames`,
+      ],
+      prerequisites: needs,
+      chrome,
+    };
+    writeFileSync(path.join(out, "walk-plan.json"), JSON.stringify(plan, null, 2));
+    console.log("THE EMULATED WI‑FI WALK (lan) — dry run: nothing started");
+    console.log(`  out        ${out}`);
+    console.log(`  fixture    ${fixturePath}`);
+    console.log(`  door       emu serve ${spec.boards.map((b) => `--board ${b}`).join(" ")} ${spec.extraArgs.join(" ")}`);
+    console.log(`  page       ${plan.studio}`);
+    for (const line of plan.steps) console.log(`  ${line}`);
+    for (const need of needs) console.log(`  ${need.present ? "✓" : "✗"} ${need.what}: ${need.at}`);
+    console.log(`  ${chrome ? "✓" : "✗"} Chrome: ${chrome ?? "none found (CHROME_BIN)"}`);
+    console.log(`  plan → ${path.join(out, "walk-plan.json")}`);
+    return;
+  }
+
+  const missing = needs.filter((need) => !need.present);
+  if (missing.length || !chrome) {
+    for (const need of missing) console.error(`missing ${need.what}: ${need.at}`);
+    if (!chrome) console.error("missing Chrome (set CHROME_BIN)");
+    process.exit(1);
+  }
+  rmSync(shots, { recursive: true, force: true });
+  mkdirSync(shots, { recursive: true });
+  mkdirSync(consoleDir, { recursive: true });
+
+  const commit = lpEmuCommit();
+  const port = walkPort(ROOT, "walk-wifi-emu-lan");
+  const server = await serveStudioBundle({ root: ROOT, port });
+  const sink = startRecordSink();
+  const sinkUrl = await sink.listen();
+  const door = await startDoor({
+    root: ROOT,
+    id: "walk-wifi-lan",
+    boards: spec.boards,
+    extraArgs: spec.extraArgs,
+    stateDir,
+    consoleDir,
+    logFile: path.join(out, "serve.log"),
+    fresh: true,
+  });
+  const usb = (id) => `serial:ws://${door.addr}/board/${id}/bytes`;
+
+  const registry = await boardRegistry(door.addr);
+  const entry = (id) => registry.find((b) => b.id === id);
+  for (const id of BOARDS) if (!entry(id)) throw new Error(`the door holds no board ${id}: ${JSON.stringify(registry)}`);
+  const fwd = Object.fromEntries(BOARDS.map((id) => [id, forwardOf(entry(id))]));
+  const lan = (id) => `lan:${fwd[id]}`;
+  const mac = Object.fromEntries(BOARDS.map((id) => [id, String(entry(id).mac).toLowerCase()]));
+  const configuration = entry(A).configuration ?? "unknown";
+  const url = studioUrlForLan({ studioPort: port, forwards: BOARDS.map((id) => fwd[id]), sinkUrl });
+
+  console.log("\nTHE EMULATED WI‑FI WALK (lan)");
+  console.log(`  boards       ${BOARDS.map((id) => `${id} ${mac[id]} → ${lan(id)}`).join(" · ")}`);
+  console.log(`  door         http://${door.addr}/boards   (pid ${door.pid})`);
+  console.log(`  LAN          ${LAN}: ${fixturePath}`);
+  console.log(`  config       ${configuration} · lp-emu ${commit}`);
+  console.log(`  the page     ${url}\n`);
+
+  const report = {
+    configuration,
+    lpEmu: commit,
+    door: door.addr,
+    url,
+    boards: Object.fromEntries(BOARDS.map((id) => [id, { mac: mac[id], forward: fwd[id] }])),
+    steps: [],
+  };
+  const holds = {};
+  const consoles = () => Object.fromEntries(Object.entries(holds).map(([id, hold]) => [id, hold.console]));
+  let driver = null;
+  let page = null;
+
+  /// One W-step: run it, screenshot it, keep what each console and the sink
+  /// gained while it ran.
+  const step = async (id, describe, body) => {
+    console.log(`— ${id}: ${describe}`);
+    const recordsBefore = sink.records.length;
+    const marks = Object.fromEntries(Object.entries(consoles()).map(([board, c]) => [board, c.mark()]));
+    let error = null;
+    let note = null;
+    try {
+      note = await body(marks);
+    } catch (failure) {
+      error = failure;
+    }
+    const shot = path.join(shots, `wifi-lan-${report.steps.length + 1}-${id}.png`);
+    let shotTaken = null;
+    if (driver) {
+      try {
+        await driver.screenshot(shot);
+        shotTaken = shot;
+      } catch {
+        // the page may be gone
+      }
+    }
+    const consoleLines = Object.fromEntries(
+      Object.entries(consoles()).map(([board, c]) => [board, c.since(marks[board] ?? 0).split("\n").filter(Boolean).length]),
+    );
+    const records = sink.records.slice(recordsBefore);
+    console.log(`  ${error ? "✗ " + error.message.split("\n")[0] : "✓"}${note ? `  ${typeof note === "string" ? note : JSON.stringify(note)}` : ""}`);
+    report.steps.push({ id, describe, ok: !error, error: error?.message ?? null, note, shot: shotTaken, consoleLines, records });
+    if (error) throw error;
+    return note;
+  };
+
+  const joined = {};
+  let fatal = null;
+  try {
+    await step("W1", "over each board's USB door, add the fixture's network: each board joins", async () => {
+      // ASSUMES: lp-cli's `serial:ws://<door>/board/<id>/bytes` transport
+      // opens the door's port without resetting the board (the door's bytes
+      // socket has no control lines; on a desk board the serial readiness
+      // reset restarts the station, `desk-walk-wifi-c6.md`).
+      for (const id of BOARDS) {
+        const added = await lpCli(["wifi", "add", usb(id), NET.ssid, "--password-stdin", "--json"], { stdin: NET.password });
+        if (added.code !== 0) throw new Error(`wifi add on ${id} → exit ${added.code}: ${added.stderr.trim()}`);
+      }
+      for (const id of BOARDS) {
+        const status = await awaitStatus(usb(id), (s) => stationOf(s).kind === "connected" || stationOf(s).kind === "failed", {
+          what: "connected (or failed)",
+        });
+        const station = stationOf(status);
+        if (station.kind !== "connected") throw new Error(`${id} did not join: ${JSON.stringify(status.station)}`);
+        if (station.ssid !== NET.ssid || !station.ip || !/^lp-[0-9a-f]{4}\.local$/.test(station.host ?? "")) {
+          throw new Error(`${id}'s connected status is incomplete: ${JSON.stringify(status.station)}`);
+        }
+        joined[id] = { ip: station.ip, host: station.host, rssi: station.rssi };
+      }
+      if (joined[A].ip === joined[B].ip) throw new Error(`both boards hold ${joined[A].ip}`);
+      if (joined[A].host === joined[B].host) throw new Error(`both boards are ${joined[A].host}`);
+      // From here on each board's USB link is held by its console capture.
+      for (const id of BOARDS) {
+        holds[id] = await holdConsole({ doorAddr: door.addr, board: id, file: path.join(consoleDir, `${id}.link.log`) });
+      }
+      for (const id of BOARDS) {
+        await holds[id].console.waitFor("[link] up (session", { what: "its USB link up for the capture" });
+      }
+      report.joined = joined;
+      return BOARDS.map((id) => `${id} ${joined[id].ip} (${joined[id].host})`).join(" · ");
+    });
+
+    driver = await StudioDriver.launch({ width: 1100, height: 900 });
+    // Yona reads screenshots at 2× (memory: screenshots-for-yona-2x-zoom).
+    await driver.cdp.send(
+      "Emulation.setDeviceMetricsOverride",
+      { width: 1100, height: 900, deviceScaleFactor: 2, mobile: false },
+      driver.sessionId,
+    );
+    page = new Page(driver);
+
+    await step("W2", "Studio with ?lan=: both boards appear as Wi‑Fi boards, each says hello over its secure LAN link", async (marks) => {
+      await page.load(url);
+      const seen = [];
+      for (const id of BOARDS) {
+        // The board's words first: its console shows the secure session
+        // opening on a LAN link.
+        const line = await holds[id].console.waitFor(/\[lan\] link \d+.*secure session opening/, {
+          from: marks[id] ?? 0,
+          what: "a LAN link's secure session opening",
+        });
+        // Then the page, which only says where to look: the card at this
+        // board's forward, Ready, showing THIS board's MAC (its hello's).
+        // ASSUMES: a Wi‑Fi board's card says "Ready" and shows the MAC its
+        // hello carried, as a USB board's does (P07 built the card
+        // "functionally": a transport line, the usual states).
+        await page.cardSays(fwd[id], "Ready");
+        const shown = await page.cardMac(fwd[id]);
+        if (shown !== mac[id]) throw new Error(`the card at ${fwd[id]} shows ${shown}, not ${id}'s ${mac[id]}`);
+        seen.push(`${id}: ${line.trim()}`);
+      }
+      return seen.join(" · ");
+    });
+    const lanMarks = Object.fromEntries(BOARDS.map((id) => [id, holds[id].console.mark()]));
+
+    await step("W3", `push ${WALK_PROJECT} to ${A} over the LAN, open it, edit a value`, async (marks) => {
+      const card = cardText(fwd[A]);
+      const face = await driver.waitFor(
+        `(() => { const t = ${card}; return t.includes('Remove project') ? 'running' : t.includes('to choose from') ? 'empty' : false; })()`,
+        { timeoutMs: STEP_MS, what: `${A}'s card to say what it runs` },
+      );
+      if (face === "running") {
+        await page.clickInCard(fwd[A], "Remove project");
+        await driver.click("Remove project", { scope: cardOf(fwd[A]) });
+        await driver.waitFor(`${card}.includes('to choose from')`, { timeoutMs: STEP_MS, what: `${A}'s empty face` });
+      }
+      await page.clickInCard(fwd[A], "to choose from");
+      await driver.waitFor(`Boolean(${PANEL})`, { timeoutMs: STEP_MS, what: "the project popover" });
+      await driver.click(WALK_PROJECT, { scope: PANEL });
+      await page.clickInCard(fwd[A], "Put it on the board");
+      // The board's words: the load on its console, then its frame counter
+      // moving on the heartbeats after it.
+      await holds[A].console.waitFor("Project loaded", { from: marks[A], what: "`Project loaded`" });
+      const counts = await holds[A].console.framesAdvance({ from: marks[A] });
+      const loaded = holds[A].console.loadedProjects(marks[A]);
+      await page.clickInCard(fwd[A], "Open in editor");
+      await driver.waitFor(`!${MAIN_TEXT}.includes('Connecting project') && Boolean(document.querySelector('#main [role="slider"]'))`, {
+        timeoutMs: STEP_MS,
+        what: "the project to open on the board",
+      });
+      const knob = await page.turnFirstKnob();
+      return { loaded, frameCounts: counts, knob };
+    });
+
+    await step("W4", `${B}'s card while ${A} stays connected: both links stay up`, async () => {
+      const how = await page.toDevices(url);
+      await page.cardSays(fwd[A], "Ready");
+      await page.cardSays(fwd[B], "Ready");
+      await page.openWifi(fwd[B]);
+      // The board's own address, read back over its own link.
+      await driver.waitFor(`${PANEL_TEXT}.includes(${JSON.stringify(joined[B].ip)})`, {
+        timeoutMs: STEP_MS,
+        what: `${B}'s panel to show its address ${joined[B].ip}`,
+      });
+      await page.closePanel();
+      // Since W2 opened them, neither board has closed a LAN link. Read
+      // BEFORE the walk's own LAN client below, whose link closes when it is
+      // done.
+      if (how === "in-app") {
+        for (const id of BOARDS) {
+          const closed = holds[id].console.since(lanMarks[id]).split("\n").filter((l) => /\[lan\] link \d+: closed/.test(l));
+          if (closed.length) throw new Error(`${id} closed a LAN link: ${closed[0]}`);
+        }
+      }
+      // c6-b answers on a second LAN link, beside Studio's.
+      const status = await wifiStatus(lan(B));
+      if (stationOf(status).ip !== joined[B].ip) throw new Error(`${B} answered over its forward as ${JSON.stringify(status.station)}`);
+      return `back on Devices ${how}; ${B} answered at ${joined[B].ip}; no LAN link closed${how === "in-app" ? "" : " (not checked: the page reloaded)"}`;
+    });
+
+    await step("W5", "the LAN probe asks for _lightplayer._tcp: both boards answer, each with its own name and MAC", async () => {
+      const answer = await probeBrowse(door.addr);
+      const text = JSON.stringify(answer);
+      const found = {};
+      for (const id of BOARDS) {
+        const hex = mac[id].replaceAll(":", "");
+        if (!text.toLowerCase().includes(`mac=${hex}`)) throw new Error(`no answer carries ${id}'s mac=${hex}: ${text.slice(0, 2000)}`);
+        found[id] = hex;
+      }
+      const instances = [...new Set([...text.matchAll(/([^"\\]+)\._lightplayer\._tcp\.local/g)].map((m) => m[1]))];
+      if (instances.length < 2) throw new Error(`fewer than two instance names: ${JSON.stringify(instances)}`);
+      report.probe = answer;
+      return { instances, macs: found };
+    });
+
+    await step("W6", `${B}: add ${GUEST.ssid} with a wrong password: "Wrong password", and the board stays on ${NET.ssid}`, async (marks) => {
+      await page.openWifi(fwd[B]);
+      await page.panelClick(WORDS.connectToANetwork);
+      // The board heard it: its scan answer is what lists it.
+      await driver.waitFor(`${PANEL_TEXT}.includes(${JSON.stringify(GUEST.ssid)})`, {
+        timeoutMs: STEP_MS,
+        what: `${GUEST.ssid} in the board's scan`,
+      });
+      await driver.click(GUEST.ssid, { scope: PANEL });
+      if (!(await driver.evaluate(typeInto('input[type="password"]', GUEST.wrong)))) throw new Error("no password field");
+      await page.panelClick(WORDS.connect, { exact: true });
+      // The board's words: it tried, the network refused the password, and
+      // it is back on the good one.
+      await holds[B].console.waitFor(`[wifi] trying ${GUEST.ssid}`, { from: marks[B], what: `trying ${GUEST.ssid}` });
+      const status = await awaitStatus(
+        lan(B),
+        (s) => lastAttempt(s, GUEST.ssid) === "wrongPassword" && stationOf(s).kind === "connected" && stationOf(s).ssid === NET.ssid,
+        { what: `${GUEST.ssid} last=wrongPassword and connected to ${NET.ssid}` },
+      );
+      // Now look at the page: the row (the test, or the saved row after a
+      // reconnect) says Wrong password.
+      await driver
+        .waitFor(`${PANEL_TEXT}.includes(${JSON.stringify(WORDS.wrongPassword)})`, { timeoutMs: 30_000, what: "Wrong password" })
+        .catch(async () => {
+          await page.openWifi(fwd[B]);
+          await driver.waitFor(`${PANEL_TEXT}.includes(${JSON.stringify(WORDS.wrongPassword)})`, {
+            timeoutMs: STEP_MS,
+            what: "Wrong password after reopening the panel",
+          });
+        });
+      const crossed = await page.checkingPasswordCrossed();
+      if (crossed === false) throw new Error(`"${WORDS.checkingPassword}" is shown but not crossed`);
+      return {
+        station: status.station,
+        last: lastAttempt(status, GUEST.ssid),
+        inRowTest: crossed === true ? "Checking the password crossed" : "the in-row test was not on the panel (the link dropped while the board tried)",
+      };
+    });
+
+    await step("W7", `${B}: add ${NOWHERE.ssid}, which no access point has: "Not in range"`, async () => {
+      await page.closePanel();
+      await page.openWifi(fwd[B]);
+      await page.panelClick(WORDS.connectToANetwork);
+      await page.panelClick(WORDS.otherNetwork);
+      if (!(await driver.evaluate(typeInto('input[placeholder="Network name"]', NOWHERE.ssid)))) throw new Error("no network name field");
+      if (!(await driver.evaluate(typeInto('input[type="password"]', NOWHERE.password)))) throw new Error("no password field");
+      await page.panelClick(WORDS.connect, { exact: true });
+      const status = await awaitStatus(
+        lan(B),
+        (s) => lastAttempt(s, NOWHERE.ssid) === "notFound" && stationOf(s).kind === "connected" && stationOf(s).ssid === NET.ssid,
+        { what: `${NOWHERE.ssid} last=notFound and connected to ${NET.ssid}` },
+      );
+      await driver
+        .waitFor(`${PANEL_TEXT}.includes(${JSON.stringify(WORDS.notInRange)})`, { timeoutMs: 30_000, what: "Not in range" })
+        .catch(async () => {
+          await page.openWifi(fwd[B]);
+          await driver.waitFor(`${PANEL_TEXT}.includes(${JSON.stringify(WORDS.notInRange)})`, {
+            timeoutMs: STEP_MS,
+            what: "Not in range after reopening the panel",
+          });
+        });
+      await page.closePanel();
+      return { station: status.station, last: lastAttempt(status, NOWHERE.ssid) };
+    });
+
+    await step("W8", `a project with a Radio node on ${A}: the node says why the Radio is off, and the rest runs`, async (marks) => {
+      const upload = await lpCli(["upload", RADIO_PROJECT, lan(A)], { timeoutMs: STEP_MS });
+      if (upload.code !== 0) throw new Error(`upload ${RADIO_PROJECT} ${lan(A)} → exit ${upload.code}: ${upload.stderr.trim().split("\n").slice(-4).join(" | ")}`);
+      await holds[A].console.waitFor("Project loaded", { from: marks[A], what: "`Project loaded`" });
+      const counts = await holds[A].console.framesAdvance({ from: marks[A] });
+      const slug = path.basename(RADIO_PROJECT);
+      const loaded = holds[A].console.loadedProjects(marks[A]);
+      if (!loaded?.includes(slug)) throw new Error(`${A}'s heartbeat lists ${loaded}, not ${slug}`);
+      // The node's words: on the console if the firmware logs them, and on
+      // the page wherever Studio draws the node (a string only the firmware
+      // holds).
+      // ASSUMES: the editor draws a node's unavailable reason as page text
+      // somewhere on opening the project (the node card, or its status line).
+      const onConsole = holds[A].console.since(marks[A]).includes(RADIO_OFF_FOR_WIFI);
+      await page.toDevices(url);
+      await page.clickInCard(fwd[A], "Open in editor");
+      const radioOnPage = `(document.body.innerText || '').includes(${JSON.stringify(RADIO_OFF_FOR_WIFI)})`;
+      const onPage = await driver
+        .waitFor(radioOnPage, { timeoutMs: 60_000, what: "the Radio node's message" })
+        .then(() => true)
+        .catch(async () => {
+          // Not drawn until the node is chosen: choose it (the project's
+          // node is `radio.json`), and look again.
+          await driver.click("radio", { exact: true }).catch(() => null);
+          return driver
+            .waitFor(radioOnPage, { timeoutMs: STEP_MS, what: "the Radio node's message" })
+            .then(() => true)
+            .catch(() => false);
+        });
+      if (!onConsole && !onPage) throw new Error("the Radio node's message is neither on the board's console nor in the editor");
+      return { loaded, frameCounts: counts, radioMessage: { onConsole, onPage } };
+    });
+
+    await step("W9", `reset ${A} from the control port with the next-lease option on: a new address, Studio back through the same forward`, async (marks) => {
+      const old = joined[A].ip;
+      const renumbered = await control(door.addr, A, "renumber");
+      const reset = await control(door.addr, A, "reset");
+      const addressLine = await holds[A].console.waitFor(/\[wifi\] address \d+\.\d+\.\d+\.\d+/, {
+        from: marks[A],
+        timeoutMs: JOIN_MS,
+        what: "a new address",
+      });
+      const ip = addressLine.match(/(\d+\.\d+\.\d+\.\d+)/)[1];
+      if (ip === old) throw new Error(`${A} came back on ${old}, the old address`);
+      // Studio's link back through the same forward. Waited for BEFORE the
+      // walk's own LAN client below dials: until then Studio is the only
+      // thing dialling this board, so the line is its link.
+      const lanLine = await holds[A].console.waitFor(/\[lan\] link \d+.*secure session opening/, {
+        from: marks[A] + holds[A].console.since(marks[A]).indexOf(addressLine),
+        what: "Studio's LAN link opening again after the new address",
+      });
+      const status = await awaitStatus(lan(A), (s) => stationOf(s).kind === "connected" && stationOf(s).ip === ip, {
+        what: `connected at ${ip}, through the same forward`,
+      });
+      await page.toDevices(url);
+      await page.cardSays(fwd[A], "Ready");
+      joined[A] = { ...joined[A], ip, before: old };
+      return { renumbered, reset, before: old, after: ip, station: status.station, relinked: lanLine.trim() };
+    });
+
+    await step("W10", `lp-cli link rtt ${lan(A)}: request p50 and p90 in frames`, async () => {
+      const json = path.join(out, "rtt-lan.json");
+      const run = await lpCli(
+        [
+          "link", "rtt", lan(A),
+          "--json", json,
+          "--console", path.join(out, "rtt-lan.console.log"),
+          "--count", String(RTT_COUNT),
+          "--label", `${configuration} lp-emu ${commit} via ${lan(A)}`,
+        ],
+        { timeoutMs: 900_000 },
+      );
+      if (run.code !== 0) throw new Error(`link rtt → exit ${run.code}: ${run.stderr.trim().split("\n").slice(-4).join(" | ")}`);
+      const rtt = JSON.parse(readFileSync(json, "utf8"));
+      const frames = rtt.request_rtt_frames ?? {};
+      if (frames.n !== RTT_COUNT) throw new Error(`${frames.n ?? 0} of ${RTT_COUNT} requests timed in frames (idle fps ${rtt.idle_fps})`);
+      if (rtt.link_resets !== 0) throw new Error(`${rtt.link_resets} link reset(s) during the run`);
+      // `request_rtt_frames` multiplies a WALL-clock round trip by the
+      // board's EMULATED frame rate (its heartbeats' uptime). The same
+      // round trips in frames the board drew per wall second, from the
+      // heartbeats' host arrival times, sit beside it: on an emulator that
+      // runs slower than silicon the two differ, and only the second is
+      // what a person at the page would count.
+      const beats = (rtt.heartbeats ?? []).filter((b) => Number.isFinite(b.at_us) && Number.isFinite(b.frame_count));
+      let wallFps = null;
+      if (beats.length >= 2) {
+        const first = beats[0];
+        const last = beats[beats.length - 1];
+        const seconds = (last.at_us - first.at_us) / 1e6;
+        if (seconds > 0) wallFps = (last.frame_count - first.frame_count) / seconds;
+      }
+      const wallFrames = wallFps === null ? null : quantiles((rtt.requests ?? []).map((r) => (r.rtt_us / 1e6) * wallFps));
+      report.rtt = { configuration, lpEmu: commit, frames, wallFrames, idleFps: rtt.idle_fps, wallFps };
+      return `request RTT p50 ${frames.p50} / p90 ${frames.p90} frames (board fps); ${
+        wallFrames ? `p50 ${wallFrames.p50} / p90 ${wallFrames.p90} frames drawn per wall second` : "no wall frame rate"
+      } — ${configuration}, lp-emu ${commit}`;
+    });
+  } catch (error) {
+    fatal = error;
+  }
+
+  const lines = driver ? driver.consoleLines() : [];
+  const pageErrors = lines.filter((l) => l.startsWith("[error]") || l.startsWith("[exception]"));
+  const panics = pageErrors.filter((l) => l.includes("panicked at"));
+  const leaked = lines.filter((l) => [NET.password, GUEST.password, GUEST.wrong, NOWHERE.password].some((pw) => l.includes(pw)));
+  report.pageErrors = pageErrors;
+  report.passwordInPageConsole = leaked.length;
+  report.registry = await boardRegistry(door.addr).catch(() => null);
+  writeFileSync(path.join(out, "walk.jsonl"), sink.raw.join("\n") + "\n");
+  writeFileSync(path.join(out, "walk-wifi-emu-lan.json"), JSON.stringify(report, null, 2));
+
+  console.log("\n=== the emulated Wi‑Fi walk (lan), step by step");
+  for (const s of report.steps) {
+    console.log(`  ${s.ok ? "✓" : "✗"} ${s.id.padEnd(4)} ${s.records.length} record(s)   ${s.shot ? path.basename(s.shot) : "(no shot)"}`);
+  }
+  if (pageErrors.length) {
+    console.log("\n  page console errors:");
+    for (const line of pageErrors.slice(-8)) console.log(`    ${line.slice(0, 300)}`);
+  }
+  console.log(`  a password in the page console: ${leaked.length} line(s)`);
+  console.log(`\n  summary → ${path.join(out, "walk-wifi-emu-lan.json")}`);
+  console.log(`  records → ${path.join(out, "walk.jsonl")}  (${sink.records.length})`);
+  console.log(`  consoles → ${consoleDir}`);
+
+  if (!options.keepOpen) {
+    if (driver) await driver.close();
+    for (const hold of Object.values(holds)) {
+      hold.child.kill("SIGINT");
+      hold.bridge.server.close();
+    }
+    await stopDoor(door);
+    sink.server.close();
+    server.close();
+  } else {
+    console.log(`\n  --keep-open: the door (pid ${door.pid}), the captures and the browser are still up.`);
+  }
+
+  if (fatal) {
+    console.error(`\nThe emulated Wi‑Fi walk did not finish: ${fatal.message}`);
+    process.exit(1);
+  }
+  if (panics.length || leaked.length) {
+    console.error(`\nEvery step passed, but the page panicked ${panics.length} time(s) and printed a password ${leaked.length} time(s).`);
+    process.exit(1);
+  }
+  console.log(`\n✓ the emulated Wi‑Fi walk finished W1–W10 (${configuration}, lp-emu ${commit}).`);
+}
+
+/// n, p50, p90 of `xs`, rounded to thousandths (the rtt report's own rule).
+function quantiles(xs) {
+  if (!xs.length) return { n: 0 };
+  const v = [...xs].sort((a, b) => a - b);
+  const q = (p) => Math.round(v[Math.round((v.length - 1) * p)] * 1000) / 1000;
+  return { n: v.length, p50: q(0.5), p90: q(0.9) };
+}
+
+await main();

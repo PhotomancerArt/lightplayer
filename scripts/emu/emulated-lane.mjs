@@ -38,6 +38,7 @@
 import { execFileSync, spawn } from "node:child_process";
 import { createReadStream, existsSync, mkdirSync, openSync, readFileSync, rmSync, statSync } from "node:fs";
 import { createServer } from "node:http";
+import { createServer as createNetServer } from "node:net";
 import path from "node:path";
 import process from "node:process";
 
@@ -67,7 +68,10 @@ const STEP_DEADLINE_MS = 90_000;
 
 /// Start an `lp-cli emu serve` holding this scenario's boards and return its
 /// address. Ephemeral port, printed and read — never computed.
-export async function startDoor({ root, id, boards, stateDir, consoleDir, logFile, fresh = true }) {
+///
+/// `extraArgs` go on the command line after the boards (the Wi‑Fi LAN walk's
+/// `--lan <name>=<fixture>`); every other caller passes none.
+export async function startDoor({ root, id, boards, stateDir, consoleDir, logFile, fresh = true, extraArgs = [] }) {
   if (fresh && existsSync(stateDir)) {
     // "Erase the entire flash" in the emulated lane. A blank board is a board
     // whose flash file does not exist, which is a fact about a directory
@@ -84,6 +88,7 @@ export async function startDoor({ root, id, boards, stateDir, consoleDir, logFil
   for (const board of boards) {
     args.push("--board", board.replaceAll("{fw}", PACKAGED_C6_ELF).replaceAll("{merged}", PACKAGED_C6_MERGED));
   }
+  args.push(...extraArgs);
   args.push("--listen", "127.0.0.1:0", "--state-dir", stateDir, "--console-dir", consoleDir);
   // TRUNCATED, not appended. The listen address is read back out of this
   // file, and an appended log still holds the PREVIOUS run's address — which
@@ -221,6 +226,102 @@ export async function boardRegistry(addr) {
   const response = await fetch(`http://${addr}/boards`, { signal: AbortSignal.timeout(5_000) });
   if (!response.ok) throw new Error(`GET /boards → ${response.status}`);
   return (await response.json()).boards;
+}
+
+/// A board's USB door as a plain TCP socket on 127.0.0.1:<ephemeral>, for
+/// the tools that speak `tcp://` and not the door's WebSocket (`lp-cli link
+/// capture tcp://…`, which hosts the link and writes the board's DECODED
+/// console: its log records ride the link, so a raw read holds none).
+///
+/// A TCP connect opens `/board/<id>/bytes` and a disconnect closes it, so
+/// the door's "a connect IS the port's open" rule carries through. Bytes
+/// both ways and nothing else; the door still admits one client per board.
+export function bridgeDoorBytes({ doorAddr, board }) {
+  const url = `ws://${doorAddr}/board/${board}/bytes`;
+  const server = createNetServer((socket) => {
+    const ws = new WebSocket(url);
+    ws.binaryType = "arraybuffer";
+    const pending = [];
+    ws.addEventListener("open", () => {
+      for (const chunk of pending.splice(0)) ws.send(chunk);
+    });
+    ws.addEventListener("message", (event) => {
+      socket.write(Buffer.from(event.data)); // an ArrayBuffer (binaryType), or a text frame
+    });
+    ws.addEventListener("close", () => socket.destroy());
+    ws.addEventListener("error", () => socket.destroy());
+    socket.on("data", (chunk) => {
+      if (ws.readyState === WebSocket.OPEN) ws.send(chunk);
+      else pending.push(chunk);
+    });
+    socket.on("close", () => ws.close());
+    socket.on("error", () => ws.close());
+  });
+  return new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => resolve({ server, port: server.address().port, url }));
+  });
+}
+
+/// The `?record=` sink: every device-event line Studio streams, in order, so
+/// each step can say which records IT produced (walk-no-board's sink, shared).
+/// `awaitRecord(test, timeoutMs, from, what)` resolves on the first record
+/// from index `from` on that passes `test` — the record arriving is the event.
+export function startRecordSink() {
+  const records = [];
+  const raw = [];
+  const waiters = [];
+  const offer = (record) => {
+    for (const waiter of [...waiters]) {
+      if (waiter.test(record)) {
+        waiters.splice(waiters.indexOf(waiter), 1);
+        waiter.resolve(record);
+      }
+    }
+  };
+  const server = createServer((request, response) => {
+    let body = "";
+    request.on("data", (chunk) => {
+      body += chunk;
+    });
+    request.on("end", () => {
+      for (const line of body.split("\n")) {
+        if (!line.trim()) continue;
+        raw.push(line);
+        try {
+          const record = JSON.parse(line);
+          records.push(record);
+          offer(record);
+        } catch {
+          // keep the raw line
+        }
+      }
+      response.writeHead(204, { "access-control-allow-origin": "*" });
+      response.end();
+    });
+  });
+  const awaitRecord = (test, timeoutMs, from = 0, what = "a record") =>
+    new Promise((resolve, reject) => {
+      const already = records.slice(from).find(test);
+      if (already) return resolve(already);
+      const waiter = { test, resolve };
+      waiters.push(waiter);
+      const timer = setTimeout(() => {
+        const index = waiters.indexOf(waiter);
+        if (index >= 0) waiters.splice(index, 1);
+        reject(new Error(`${what} never arrived`));
+      }, timeoutMs);
+      timer.unref?.();
+      waiter.resolve = (record) => {
+        clearTimeout(timer);
+        resolve(record);
+      };
+    });
+  const listen = () =>
+    new Promise((resolve) =>
+      server.listen(0, "127.0.0.1", () => resolve(`http://127.0.0.1:${server.address().port}/ingest`)),
+    );
+  return { server, records, raw, awaitRecord, listen };
 }
 
 // --- the steps ------------------------------------------------------------
