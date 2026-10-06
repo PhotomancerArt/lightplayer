@@ -147,6 +147,11 @@ pub struct FakeLightPlayerState {
     /// plan `classic-uart-on-lp-link`) takes `LinkConfig::uart()` or a cut of it
     /// ([`with_link_config`](Self::with_link_config)).
     pub link_config: lpc_wire::lp_link::LinkConfig,
+    /// The host reaches the board's server as an UNTRUSTED link (a radio
+    /// link, Bluetooth's): every request but hello and login waits on a
+    /// login against the device store (`/.lp/access.json` in
+    /// [`Self::root_files`]). `false` (a USB cable, trusted) by default.
+    pub untrusted_link: bool,
 }
 
 impl FakeLightPlayerState {
@@ -170,7 +175,15 @@ impl FakeLightPlayerState {
             fs_boot_state: lpc_wire::FsBootState::Mounted,
             flash: None,
             link_config: lpc_wire::lp_link::LinkConfig::usb(),
+            untrusted_link: false,
         }
+    }
+
+    /// The host reaches this board as an untrusted (radio) link: a locked
+    /// board over Bluetooth, gated on a login ([`Self::untrusted_link`]).
+    pub fn with_untrusted_link(mut self) -> Self {
+        self.untrusted_link = true;
+        self
     }
 
     /// Files at absolute device paths, seeded at the fs root.

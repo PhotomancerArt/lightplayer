@@ -11,6 +11,7 @@ use lpa_server::{ButtonService, LpGraphics, LpServer, RadioService};
 use lpc_hardware::{HardwareSystem, HwRegistry, default_esp32c6_hardware_manifest};
 use lpc_model::AsLpPath;
 use lpc_shared::output::MemoryOutputProvider;
+use lpc_shared::transport::Link;
 use lpfs::LpFsMemory;
 use tokio::sync::Mutex;
 
@@ -44,7 +45,18 @@ impl HostRuntime {
     pub fn start_with_server(
         make_server: impl FnOnce() -> LpServer + Send + 'static,
     ) -> Result<Self, HostRuntimeError> {
+        Self::start_with_server_on(Link::PRIMARY, make_server)
+    }
+
+    /// [`Self::start_with_server`] with the client reaching the server as
+    /// `link` — an untrusted one for a board reached over Bluetooth, whose
+    /// requests the server gates on a login.
+    pub fn start_with_server_on(
+        link: Link,
+        make_server: impl FnOnce() -> LpServer + Send + 'static,
+    ) -> Result<Self, HostRuntimeError> {
         let (client_transport, server_transport) = create_local_transport_pair();
+        let server_transport = server_transport.on_link(link);
         let client_transport: Arc<Mutex<Box<dyn ClientTransport>>> =
             Arc::new(Mutex::new(Box::new(client_transport)));
         let closed = Arc::new(AtomicBool::new(false));
