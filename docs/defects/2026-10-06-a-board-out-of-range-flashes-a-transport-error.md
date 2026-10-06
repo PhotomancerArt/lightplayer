@@ -80,6 +80,17 @@ shows the curtain and no sync issue; red without the fix) and
 `studio_view_channel::take_matching_takes_in_order_and_leaves_the_rest_in_theirs`
 covers the queue half.
 
+`just walk-ble-emu` models the quiet drop too: the `?ble=emu` polyfill's
+`quiet(board, on)` keeps the GATT link up while nothing gets through, and
+every drop now fails if a request's raw timeout reaches the page. Two steps
+use it. `range-editor` takes the drop under the editor, whose Tree dock draws
+a sync failure: without the fix it showed the red box
+`transport error: Transport error: the device did not respond over Bluetooth
+within 5.0s` under the curtain, and the step failed. `range` takes it under
+Play, where the curtain rises when Play's once-a-minute read times out. Play
+draws no sync failure text on the emulated walk, so that step passes either
+way. The walk is 18 steps now.
+
 **Lesson** — the lens's tap is the pump's stand-in while the editor holds the
 wire, but it is a deferred one: what it hears lands a batch later. Any verdict
 the actor draws from a conversation's outcome (failed, timed out, dead wire)
