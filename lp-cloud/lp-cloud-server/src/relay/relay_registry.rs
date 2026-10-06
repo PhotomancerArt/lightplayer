@@ -1,8 +1,10 @@
 //! The hub plus the legs' outboxes: what the socket tasks share.
 //!
 //! [`RelayHub`] is sans-IO; this is where its [`HubAction`]s become
-//! messages in the legs' bounded queues. One `std::sync::Mutex` guards the
-//! hub, the queues and the visitor limit together — never held across an
+//! messages in the legs' bounded queues, and where a browser's route is put
+//! to the access decision ([`RouteAdmissionPolicy`], which alone decides
+//! who may reach a board). One `std::sync::Mutex` guards the hub, the
+//! queues and the policy together — never held across an
 //! await, and **never the store lock**: the relay's hot path (every frame)
 //! touches nothing else. The only store calls on the relay's path are the
 //! account lookup at a board's registration and the session lookup when a
@@ -24,9 +26,10 @@ use lpc_history::PrefixedUid;
 use lpc_relay::{RefuseReason, RelayBoardId, RelayCloseCode, RelayFrame};
 use tokio::sync::{mpsc, watch};
 
-use super::relay_hub::{BoardRegistration, HubAction, LegId, RelayHub};
-use super::route_admission::{AdmittedRoute, admit_route};
-use super::visitor_rate_limit::VisitorRateLimit;
+use super::relay_hub::{BoardRegistration, HubAction, LegId, OpenRefusal, RelayHub};
+use super::route_admission::{
+    Admission, InterimRouteAdmission, RouteAdmissionPolicy, RouteRequest,
+};
 
 /// How many messages a leg's queue holds before the leg is dropped as
 /// overloaded. A lp-link window is two frames; this is generous.
@@ -52,7 +55,14 @@ pub struct RelayRegistry {
 struct Inner {
     hub: RelayHub,
     outboxes: HashMap<LegId, mpsc::Sender<LegCommand>>,
-    visitors: VisitorRateLimit,
+    admission: Box<dyn RouteAdmissionPolicy>,
+}
+
+/// A route that opened: its id on the board, and how it was admitted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AdmittedRoute {
+    pub route: u16,
+    pub admission: Admission,
 }
 
 /// One leg's identity and inbox, from [`RelayRegistry::open_leg`]. Dropping
@@ -86,13 +96,20 @@ impl Drop for LegHandle {
 }
 
 impl RelayRegistry {
+    /// A registry deciding admission by the interim rule.
     #[must_use]
     pub fn new() -> Arc<Self> {
+        Self::with_admission(Box::new(InterimRouteAdmission::new()))
+    }
+
+    /// A registry deciding admission by `admission`.
+    #[must_use]
+    pub fn with_admission(admission: Box<dyn RouteAdmissionPolicy>) -> Arc<Self> {
         Arc::new(Self {
             inner: Mutex::new(Inner {
                 hub: RelayHub::new(),
                 outboxes: HashMap::new(),
-                visitors: VisitorRateLimit::new(),
+                admission,
             }),
             next_leg: AtomicU64::new(1),
             live_legs: AtomicUsize::new(0),
@@ -142,8 +159,9 @@ impl RelayRegistry {
         inner.apply(actions);
     }
 
-    /// Admit and open a route for a browser leg (see
-    /// [`super::route_admission`]).
+    /// Put a browser's route to the access decision
+    /// ([`super::route_admission`]) and, if admitted, open it on the board
+    /// (the hub's route limit permitting).
     pub fn open_route(
         &self,
         leg: LegId,
@@ -153,11 +171,23 @@ impl RelayRegistry {
         board: RelayBoardId,
     ) -> Result<AdmittedRoute, RelayCloseCode> {
         let mut inner = self.lock();
-        let Inner { hub, visitors, .. } = &mut *inner;
-        let admitted = admit_route(hub, visitors, leg, user, ip, board, Instant::now())?;
+        let Inner { hub, admission, .. } = &mut *inner;
+        let admission = admission.admit(&RouteRequest {
+            user,
+            ip,
+            board_id: board,
+            board: hub.board(board),
+            now: Instant::now(),
+        })?;
+        let (route, actions) = hub
+            .open_route(leg, board)
+            .map_err(|refusal| match refusal {
+                OpenRefusal::Offline => RelayCloseCode::BoardOffline,
+                OpenRefusal::Busy => RelayCloseCode::Busy,
+            })?;
         inner.outboxes.insert(leg, outbox);
-        inner.apply(admitted.actions.clone());
-        Ok(admitted)
+        inner.apply(actions);
+        Ok(AdmittedRoute { route, admission })
     }
 
     /// A message from a browser leg.

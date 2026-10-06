@@ -214,8 +214,8 @@ impl RelayHub {
     }
 
     /// Open a route on board `id` for the browser leg `browser`: the route
-    /// id, and the `Open` for the board. Who may ask is
-    /// [`super::route_admission`]'s rule, decided before this.
+    /// id, and the `Open` for the board. Who may ask is not the hub's
+    /// business: [`super::route_admission`] decided it before this.
     pub fn open_route(
         &mut self,
         browser: LegId,

@@ -12,7 +12,9 @@
 //!
 //! The relay is a pipe. Every session is the same Noise-sealed lp-link a
 //! LAN connection is; the relay holds no key and reads no frame. Who may
-//! open a session is [`route_admission`]'s rule; what a session may *do* is
+//! open a session is [`route_admission`]'s decision (an interim rule behind
+//! one interface, until the cloud has per-board access settings); what a
+//! session may *do* is
 //! the board's, which sees a relay link as `LinkTrust::Relayed` (its
 //! "Anyone" setting never applies).
 //!
