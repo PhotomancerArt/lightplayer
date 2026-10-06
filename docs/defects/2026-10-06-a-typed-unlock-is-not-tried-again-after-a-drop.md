@@ -38,10 +38,23 @@ next window `checked()` saw Locked + spent and raised the sheet, and
 `next_step` only began a challenge for it. The remembered password that had
 just worked was never sent, and the board dropped each link at its deadline.
 
+**A second mechanism on the same path** (walk-5, a fresh profile). The
+held keys matched nothing and the board's challenge was held for the sheet,
+on the window it came from. Then the model's own identify hello (`hello`
+id 1, answered after the board's id-0 hello) folded on the same link, and
+a new hello time made a new window. The typed password looked for a held
+challenge on THAT window, found none, and began again. The board allows one
+outstanding challenge per device for 30 s, so it refused the begin
+(`loginResult.refused`), and the refusal spent the typed password. The sheet
+came back, and every later link was dropped at 10 s. The board's challenge
+belongs to its link, which a second hello does not change.
+
 **Fix** — a grant re-arms the automatic tries (`AccessSession::logged_in`,
 `Granted`), whatever unlocked the board. What unlocked it once (a held key,
 or a typed password now remembered) is what the next window reaches for.
-A refused password still spends them, as before.
+A refused password still spends them, as before. And the held
+challenge is the link's, not the window's: a typed password answers it
+across a re-hello, and none is begun over it.
 
 **Regression coverage** —
 `a_password_typed_once_unlocks_the_restarted_board_by_itself`
@@ -51,6 +64,7 @@ password, a restart under the editor, the resume with no sheet and an
 answered pull). It failed before the fix with the card at "Needs a device
 password" and the editor closed. Unit:
 `a_reconnect_after_a_typed_unlock_tries_the_remembered_password`
+and `a_typed_password_answers_the_links_challenge_across_a_re_hello`
 (`access_session.rs`). Silicon: walk-3 of 2026-10-06 (remembered-first) and
 the re-run after the fix (see the plan's desk-check record).
 
