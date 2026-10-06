@@ -142,6 +142,11 @@ lpvm-cranelift = { path = "../lp-shader/lpvm-cranelift", features = ["riscv32-ob
 unicode-width = "0.2"
 rustc-demangle = "0.1"
 pollster = "0.3"
+# `hardware desk-images` (feature `desk-images`, off by default): Studio's
+# BoardDiagram component rendered server-side to standalone SVG files for the
+# desk's board bench. Off so lp-cli's normal build never pulls a UI framework.
+dioxus = { version = "0.7", default-features = false, features = ["lib"], optional = true }
+dioxus-ssr = { version = "0.7", optional = true }
 
 [dev-dependencies]
 tempfile = "3"
@@ -168,10 +173,15 @@ esp-idf-part = "0.5"
 # WebSocket server, link port and mux in front of a real lpa-server.
 # `json-pack` so the board answers a packed opt-in as a C6 does.
 fw-esp32-common = { path = "../lp-fw/fw-esp32-common", features = ["host-lan-harness", "json-pack"] }
+# Well-formedness of the SVG files `hardware desk-images` writes.
+quick-xml = "0.39"
 
 [features]
 default = ["serial"]
 serial = []
+# `lp-cli hardware desk-images`: pictures for the desk's board bench
+# (github.com/PhotomancerArt/lp-board-bench). `just desk-images` builds it.
+desk-images = ["dep:dioxus", "dep:dioxus-ssr", "lpa-boards/diagram"]
 
 [lints]
 workspace = true

@@ -1420,9 +1420,9 @@ flash-fw-esp32v3 port="" features="" monitor="monitor": (build-fw-esp32v3 featur
       no-monitor) ;;
       *) echo "monitor must be 'monitor' or 'no-monitor', not '{{ monitor }}'" >&2; exit 2 ;;
     esac
-    if [[ -n "{{ port }}" ]]; then
-      args+=(--port "{{ port }}")
-    fi
+    # Through the one resolver, so the desk's board leases are asked (AGENTS.md).
+    resolved_port="$(cargo run -q -p lp-cli -- fwcheck port --port "{{ port }}" --chip esp32)"
+    args+=(--port "$resolved_port")
     espflash flash "${args[@]}" {{ fw_esp32v3_elf }}
 
 # Print the directory to prepend to PATH so the chip's xtensa-*-elf-gcc
@@ -1485,9 +1485,9 @@ flash-fw-esp32s3 port="" features="" monitor="monitor": (build-fw-esp32s3 featur
       no-monitor) ;;
       *) echo "monitor must be 'monitor' or 'no-monitor', not '{{ monitor }}'" >&2; exit 2 ;;
     esac
-    if [[ -n "{{ port }}" ]]; then
-      args+=(--port "{{ port }}")
-    fi
+    # Through the one resolver, so the desk's board leases are asked (AGENTS.md).
+    resolved_port="$(cargo run -q -p lp-cli -- fwcheck port --port "{{ port }}" --chip esp32s3)"
+    args+=(--port "$resolved_port")
     espflash flash "${args[@]}" {{ fw_esp32s3_elf }}
 
 # Flash fw-esp32c6 to a connected ESP32-C6 and open the serial monitor.
@@ -1572,9 +1572,9 @@ fwtest-xt-jit-esp32s3 port="":
     cd lp-fw/fw-esp32s3 && cargo build --profile release-esp32s3 --features test_xt_jit_corpus
     cd - >/dev/null
     args=(--chip esp32s3 --partition-table lp-fw/fw-esp32s3/partitions.csv --flash-size {{ s3_flash_size }} --monitor --after hard-reset)
-    if [[ -n "{{ port }}" ]]; then
-      args+=(--port "{{ port }}")
-    fi
+    # Through the one resolver, so the desk's board leases are asked (AGENTS.md).
+    resolved_port="$(cargo run -q -p lp-cli -- fwcheck port --port "{{ port }}" --chip esp32s3)"
+    args+=(--port "$resolved_port")
     espflash flash "${args[@]}" {{ fw_esp32s3_elf }}
 
 # Prove the Xtensa windowed backtrace walk on silicon (PASS/FAIL per check).
@@ -1601,9 +1601,9 @@ fwtest-backtrace-esp32s3 port="":
     cd lp-fw/fw-esp32s3 && cargo build --profile release-esp32s3 --features test_backtrace_oracle
     cd - >/dev/null
     args=(--chip esp32s3 --partition-table lp-fw/fw-esp32s3/partitions.csv --flash-size {{ s3_flash_size }} --monitor --after hard-reset)
-    if [[ -n "{{ port }}" ]]; then
-      args+=(--port "{{ port }}")
-    fi
+    # Through the one resolver, so the desk's board leases are asked (AGENTS.md).
+    resolved_port="$(cargo run -q -p lp-cli -- fwcheck port --port "{{ port }}" --chip esp32s3)"
+    args+=(--port "$resolved_port")
     espflash flash "${args[@]}" {{ fw_esp32s3_elf }}
 
 # Run the four-channel RMT loopback self-test on a connected ESP32-S3.
@@ -1645,9 +1645,9 @@ fwtest-loopback-esp32s3 port="":
     cd lp-fw/fw-esp32s3 && cargo build --profile release-esp32s3 --features test_loopback
     cd - >/dev/null
     args=(--chip esp32s3 --partition-table lp-fw/fw-esp32s3/partitions.csv --flash-size {{ s3_flash_size }} --monitor --after hard-reset)
-    if [[ -n "{{ port }}" ]]; then
-      args+=(--port "{{ port }}")
-    fi
+    # Through the one resolver, so the desk's board leases are asked (AGENTS.md).
+    resolved_port="$(cargo run -q -p lp-cli -- fwcheck port --port "{{ port }}" --chip esp32s3)"
+    args+=(--port "$resolved_port")
     espflash flash "${args[@]}" {{ fw_esp32s3_elf }}
 
 # Run the M6 FP conformance corpus on a connected ESP32-S3 and capture it.
@@ -1701,9 +1701,9 @@ fwtest-xt-fp-esp32s3 port="" family="" limit="0":
       LP_FP_MODE="$mode" LP_FP_FAMILY="$family" LP_FP_LIMIT="{{ limit }}" \
       cargo build --profile release-esp32s3 --features test_xt_fp_conformance)
     args=(--chip esp32s3 --partition-table lp-fw/fw-esp32s3/partitions.csv --flash-size {{ s3_flash_size }} --monitor --after hard-reset)
-    if [[ -n "{{ port }}" ]]; then
-      args+=(--port "{{ port }}")
-    fi
+    # Through the one resolver, so the desk's board leases are asked (AGENTS.md).
+    resolved_port="$(cargo run -q -p lp-cli -- fwcheck port --port "{{ port }}" --chip esp32s3)"
+    args+=(--port "$resolved_port")
     echo "capturing to $out"
     # `</dev/null` is load-bearing: `script` hands its child the terminal, and a
     # backgrounded espflash reading the same stdin as this shell eats keystrokes
@@ -1784,9 +1784,9 @@ fwtest-iexec-esp32v3 port="":
     (cd {{ fw_esp32v3_dir }} && \
       cargo build --profile release-esp32v3 --features test_interrupt_executor)
     args=(--chip esp32 --partition-table {{ fw_esp32v3_dir }}/partitions.csv --flash-size {{ v3_flash_size }} --monitor --monitor-baud 921600 --after hard-reset)
-    if [[ -n "{{ port }}" ]]; then
-      args+=(--port "{{ port }}")
-    fi
+    # Through the one resolver, so the desk's board leases are asked (AGENTS.md).
+    resolved_port="$(cargo run -q -p lp-cli -- fwcheck port --port "{{ port }}" --chip esp32)"
+    args+=(--port "$resolved_port")
     echo "capturing to $out"
     : > "$out"
     (
@@ -1820,9 +1820,9 @@ fwtest-sram0-esp32v3 port="":
     (cd {{ fw_esp32v3_dir }} && touch src/main.rs && \
       cargo build --profile release-esp32v3 --no-default-features --features esp32,test_sram0_exec)
     args=(--chip esp32 --partition-table {{ fw_esp32v3_dir }}/partitions.csv --flash-size {{ v3_flash_size }} --monitor --monitor-baud 921600 --after hard-reset)
-    if [[ -n "{{ port }}" ]]; then
-      args+=(--port "{{ port }}")
-    fi
+    # Through the one resolver, so the desk's board leases are asked (AGENTS.md).
+    resolved_port="$(cargo run -q -p lp-cli -- fwcheck port --port "{{ port }}" --chip esp32)"
+    args+=(--port "$resolved_port")
     echo "capturing to $out"
     : > "$out"
     # The SIGINT is scoped to THIS port when one was given: an unscoped
@@ -1879,9 +1879,9 @@ fwtest-appcore-rom-path-esp32v3 port="":
     (cd {{ fw_esp32v3_dir }} && touch src/main.rs && \
       cargo build --profile release-esp32v3 --features test_appcore_rom_path)
     args=(--chip esp32 --partition-table {{ fw_esp32v3_dir }}/partitions.csv --flash-size {{ v3_flash_size }} --monitor --monitor-baud 921600 --after hard-reset)
-    if [[ -n "{{ port }}" ]]; then
-      args+=(--port "{{ port }}")
-    fi
+    # Through the one resolver, so the desk's board leases are asked (AGENTS.md).
+    resolved_port="$(cargo run -q -p lp-cli -- fwcheck port --port "{{ port }}" --chip esp32)"
+    args+=(--port "$resolved_port")
     echo "capturing to $out"
     : > "$out"
     # Port-scoped SIGINT, the rule the two parallel classic lanes of
@@ -1943,9 +1943,9 @@ fwtest-rmt-esp32v3 port="":
     (cd {{ fw_esp32v3_dir }} && touch src/main.rs && \
       cargo build --profile release-esp32v3 --features esp32,test_rmt)
     args=(--chip esp32 --partition-table {{ fw_esp32v3_dir }}/partitions.csv --flash-size {{ v3_flash_size }} --monitor --monitor-baud 921600 --after hard-reset)
-    if [[ -n "{{ port }}" ]]; then
-      args+=(--port "{{ port }}")
-    fi
+    # Through the one resolver, so the desk's board leases are asked (AGENTS.md).
+    resolved_port="$(cargo run -q -p lp-cli -- fwcheck port --port "{{ port }}" --chip esp32)"
+    args+=(--port "$resolved_port")
     echo "capturing to $out"
     : > "$out"
     if [[ -n "{{ port }}" ]]; then
@@ -1987,9 +1987,9 @@ fwtest-xt-fp-esp32v3 port="" family="" limit="0":
       LP_FP_MODE="$mode" LP_FP_FAMILY="$family" LP_FP_LIMIT="{{ limit }}" \
       cargo build --profile release-esp32v3 --features test_xt_fp_conformance)
     args=(--chip esp32 --partition-table {{ fw_esp32v3_dir }}/partitions.csv --flash-size {{ v3_flash_size }} --monitor --monitor-baud 921600 --after hard-reset)
-    if [[ -n "{{ port }}" ]]; then
-      args+=(--port "{{ port }}")
-    fi
+    # Through the one resolver, so the desk's board leases are asked (AGENTS.md).
+    resolved_port="$(cargo run -q -p lp-cli -- fwcheck port --port "{{ port }}" --chip esp32)"
+    args+=(--port "$resolved_port")
     echo "capturing to $out"
     : > "$out"
     # The watcher, not the flasher, is what gets backgrounded. It waits for the
@@ -2064,9 +2064,9 @@ fwtest-button-esp32s3 port="":
     cd lp-fw/fw-esp32s3 && cargo build --profile release-esp32s3 --features test_button
     cd - >/dev/null
     args=(--chip esp32s3 --partition-table lp-fw/fw-esp32s3/partitions.csv --flash-size {{ s3_flash_size }} --monitor --after hard-reset)
-    if [[ -n "{{ port }}" ]]; then
-      args+=(--port "{{ port }}")
-    fi
+    # Through the one resolver, so the desk's board leases are asked (AGENTS.md).
+    resolved_port="$(cargo run -q -p lp-cli -- fwcheck port --port "{{ port }}" --chip esp32s3)"
+    args+=(--port "$resolved_port")
     espflash flash "${args[@]}" {{ fw_esp32s3_elf }}
 
 # Build the ESP32-C6 SPLIT image — the product image: the loader, the boot
@@ -2604,6 +2604,9 @@ clippy-host:
     # lpa-update's `pack` feature (the one packer of OTA encoding 1, std +
     # flate2/zlib-rs) is off by default for the same reason.
     cargo clippy -p lpa-update --features pack --all-targets -- --no-deps -D warnings
+    # lp-cli's `desk-images` feature (Studio's board drawing rendered server-
+    # side for the desk's board bench) is off by default for the same reason.
+    cargo clippy -p lp-cli --features desk-images --lib --tests -- --no-deps -D warnings
 
 # `lp-emu-esp32c6` with the `jit` feature on — the native translated build.
 #
@@ -2865,6 +2868,9 @@ test-rust-core:
     # board simulation's encoding-1 cases. Its own invocation, so flate2's
     # zlib-rs backend never unifies into espflash's in the workspace run.
     cargo test -p lpa-update --features pack
+    # `hardware desk-images` reads Studio's style.css between marker comments;
+    # these tests fail if the markers move or a board stops exporting.
+    cargo test -p lp-cli --features desk-images --lib desk_images
 
 # lp-link (the link-layer prototype, plan lp2025/2026-09-26-1720-reliable-device-link):
 # the delivery property at soak depth, 5,000 fault schedules per ARQ variant
@@ -4414,6 +4420,12 @@ watch-pr *args:
 # Hardware discovery
 # ============================================================================
 
+# Draw the desk's boards for the board bench's page (github.com/PhotomancerArt/
+# lp-board-bench): each registered board's LightPlayer drawing and an art
+# board's piece, into ~/.photomancer/desk/images. Needs `board`.
+desk-images *args:
+    cargo run -q -p lp-cli --features desk-images -- hardware desk-images {{ args }}
+
 # List attached serial hardware (passive; never hangs). Identify chips with
 # `just hardware-list --probe` (resets idle boards; per-port timeout), filter
 # with `--chip esp32s3`, script with `--json`.
@@ -4592,9 +4604,9 @@ fixture-fw variant port="":
     cd lp-fw/fw-esp32c6 && cargo build --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} --features esp32c6,server,"$feature"
     cd - >/dev/null
     args=(--chip esp32c6 --partition-table lp-fw/fw-esp32c6/partitions.csv --flash-size {{ c6_flash_size }} --after hard-reset)
-    if [[ -n "{{ port }}" ]]; then
-      args+=(--port "{{ port }}")
-    fi
+    # Through the one resolver, so the desk's board leases are asked (AGENTS.md).
+    resolved_port="$(cargo run -q -p lp-cli -- fwcheck port --port "{{ port }}" --chip esp32c6)"
+    args+=(--port "$resolved_port")
     espflash flash "${args[@]}" {{ fw_esp32c6_elf }}
 
 # Guided golden-trace capture runner (multi-device M8): status table with no
