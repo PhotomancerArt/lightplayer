@@ -39,11 +39,11 @@ pub struct DevUrlFlags {
     pub device_log: Option<LogLevel>,
     /// `?firmware-store=<origin>`, judged.
     pub firmware_store: Option<FirmwareStoreFlag>,
+    /// `?lan=<url>[,<url>…]`: the boards' sockets, normalised.
+    pub lan: Vec<String>,
     /// `?seams=<atoms|none>`, normalized (`led=fast`, `led=fast+x=y`,
     /// `none`).
     pub seams: Option<String>,
-    /// `?lan=<url>[,<url>…]`: the boards' sockets, normalised.
-    pub lan: Vec<String>,
     /// Flags present but unreadable, for the console.
     pub ignored: Vec<String>,
 }
@@ -288,16 +288,16 @@ pub fn install() {
         lpa_link::device_link::wire_reader::set_device_log_level(Some(level));
         log::info!("dev flag: each board is asked for {level:?} logging once it is ready");
     }
-    if let Some(seams) = flags.seams {
-        log::info!("dev flag: Devices-page emulated boards ask for seams `{seams}` (?seams=)");
-        lpa_link::providers::emulator_tab_seams::set_end_user_seams_override(Some(seams));
-    }
     if !flags.lan.is_empty() {
         log::info!(
             "dev flag: reaching {} over Wi-Fi (?lan=)",
             flags.lan.join(", ")
         );
         LAN_ADDRESSES.with(|slot| *slot.borrow_mut() = flags.lan.clone());
+    }
+    if let Some(seams) = flags.seams {
+        log::info!("dev flag: Devices-page emulated boards ask for seams `{seams}` (?seams=)");
+        lpa_link::providers::emulator_tab_seams::set_end_user_seams_override(Some(seams));
     }
     match flags.firmware_store {
         Some(FirmwareStoreFlag::Accepted(origin)) => {
