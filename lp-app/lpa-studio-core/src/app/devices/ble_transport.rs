@@ -6,12 +6,21 @@
 //! the same device fold, the same identity merge by
 //! base MAC — with one difference the card has to be honest about: there is
 //! no reset line and no ROM downloader on the far side of a GATT service, so
-//! **firmware cannot be written over it**. Flash and factory reset are
+//! **the USB flash cannot run over it**. Flash and factory reset are
 //! refused here by name, and the card says "Firmware updates need USB"
 //! (`DeviceView::firmware_blocked`) before anyone presses anything.
 //!
+//! **The over-the-air update is not one of those** (M7 P12). It is not an
+//! effect on a borrowed wire at all: it rides lp-link's update channel on
+//! the device's own link (`LinkCommand::SendUpdate` / `LinkEvent::Update`,
+//! DS1), which the Bluetooth link carries (`ble_link_info`'s
+//! `carries_update_channel`), so `DeviceView::update_blocked` is `None`
+//! here and the card offers Update when `update_route` says so. The update
+//! host serves it with `ServeConfig::BLE` (four chunks ahead, DS11).
+//!
 //! | effect | over Bluetooth |
 //! |---|---|
+//! | Update (over the air), heal, finish | the update channel on the link, not this transport (`update_host.rs`) |
 //! | Flash firmware, Factory reset | refused: "Firmware updates need USB" |
 //! | Write the board manifest, push / remove a project | the REAL `lpa-client` conversation (`wire_conversation.rs`), over the link |
 //!
@@ -192,6 +201,14 @@ mod tests {
             assert!(refused.starts_with(FIRMWARE_NEEDS_USB), "{refused}");
         }
         assert!(source.asked.borrow().is_empty(), "nothing touched the wire");
+    }
+
+    /// The over-the-air update is not refused: the Bluetooth link carries
+    /// lp-link's update channel, so a card reached over it is not
+    /// update-blocked (M7 P12). Flash and factory reset still are (above).
+    #[test]
+    fn the_bluetooth_link_carries_the_update_channel() {
+        assert!(ble_link_info("QkxFLWlk", "LP-b48c").carries_update_channel);
     }
 
     /// A manifest write is the real conversation over the link: ready

@@ -36,11 +36,34 @@
 // cycled, before Studio is asked to find it; its console is read off the
 // page's emulator as it goes.
 //
+// `--ble` (`just walk-ota-ble-emu`, M7 P12) walks update / cut-core /
+// phantom-core / engine-less with Studio reaching the same door boards over
+// `?ble=emu` — Studio's real Bluetooth stack (`browser_ble.js`, its lp-link
+// end and channel 3) against the `navigator.bluetooth` polyfill, which
+// translates its datagrams to the board's USB stream and models every reset
+// of the board as a GATT drop (the board's radio goes with its CPU). The card
+// must say "Bluetooth", and Studio's terminal must time every reconnect:
+//
+//   cut-core      the board goes out of range mid-core (the banner's
+//                 `detach`: the GATT connection drops and connects fail until
+//                 `attach`), comes back: the update finishes with no click
+//   phantom-core  Bluefy's phantom drop mid-core (`gatt.connected` false, no
+//                 event, found when the page is shown again): torn down,
+//                 reconnected, finished with no click
+//
+// ⚠️ TRUST: over `?ble=emu` the emulated board sees its trusted USB link, so
+// every request — the update's login included — is answered at the edit
+// tier: this proves the transport, the card and the reconnects, NOT access
+// (P10's host tests and the silicon walk do). And NO number it prints is a
+// Bluetooth number: the bytes go through the emulated board's USB link, with
+// no radio, no connection interval and no MTU — every rate and reconnect time
+// is labelled with the lp-emu commit and `?ble=emu`.
+//
 // NOT a CI job (minutes of emulated boards). It serves the release bundle
 // itself (no dev server): `just studio-web-story-build`, the images and a
 // debug lp-cli first — `just walk-ota-emu` builds what is missing.
 //
-//   node scripts/emu/walk-ota-emu.mjs [--fresh] [--tab] [--steps update,cut-core,...]
+//   node scripts/emu/walk-ota-emu.mjs [--fresh] [--tab | --ble] [--steps update,cut-core,...]
 //
 // The browser profile (target/walk-ota-emu/chrome-profile) outlives a run, so
 // `engine-less` finds the engine `update` backed up even when the steps run
@@ -59,16 +82,36 @@ import { serveStudioBundle, startDoor, stopDoor, walkPort } from "./emulated-lan
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
 const ARGS = process.argv.slice(2);
 const TAB = ARGS.includes("--tab");
+/// Studio reaches the door's boards over `?ble=emu` (M7 P12).
+const BLE = ARGS.includes("--ble");
 const STEPS_ARG = ARGS.includes("--steps") ? ARGS[ARGS.indexOf("--steps") + 1].split(",") : null;
-const ALL_STEPS = ["update", "cut-core", "cut-engine", "engine-less", "cant-get", "crashing", "needs-usb"];
+/// Every step, in the order their boards' MACs are numbered.
+const ALL_STEPS = ["update", "cut-core", "cut-engine", "engine-less", "cant-get", "crashing", "needs-usb", "phantom-core"];
+const DOOR_STEPS = ["update", "cut-core", "cut-engine", "engine-less", "cant-get", "crashing", "needs-usb"];
 const TAB_STEPS = ["update", "cut-core", "engine-less"];
-const STEPS = STEPS_ARG ?? (TAB ? TAB_STEPS : ALL_STEPS);
+const BLE_STEPS = ["update", "cut-core", "phantom-core", "engine-less"];
+const STEPS = STEPS_ARG ?? (TAB ? TAB_STEPS : BLE ? BLE_STEPS : DOOR_STEPS);
+/// The link the card must name.
+const LINK_WORD = BLE ? "Bluetooth" : "USB";
+if (TAB && BLE) {
+  console.error("walk-ota-emu: --ble walks the door's boards; it does not combine with --tab");
+  process.exit(2);
+}
+for (const name of STEPS) {
+  if (!BLE && name === "phantom-core") {
+    console.error("walk-ota-emu: phantom-core is a Bluetooth step (--ble)");
+    process.exit(2);
+  }
+}
 
 const IMAGES = path.join(ROOT, "target/walk-ota-emu/images");
 const X = path.join(IMAGES, "x");
 const MONO = path.join(IMAGES, "mono");
-const PARTS = path.join(ROOT, "target/firmware-parts");
-const PACKAGES = path.join(ROOT, "target/studio-web-assets/firmware");
+/// Y's update files and package. `WALK_Y_PARTS` / `WALK_Y_PACKAGES` point at
+/// a copy instead — for a worktree where something else rebuilds the shared
+/// `target/firmware-parts` while a walk runs.
+const PARTS = process.env.WALK_Y_PARTS ?? path.join(ROOT, "target/firmware-parts");
+const PACKAGES = process.env.WALK_Y_PACKAGES ?? path.join(ROOT, "target/studio-web-assets/firmware");
 const LP_CLI = path.join(ROOT, "target/debug/lp-cli");
 const PROJECT = process.env.WALK_PROJECT ?? "Peach (1D)";
 
@@ -94,7 +137,7 @@ const MAIN_TEXT = `(document.querySelector('#main')?.innerText || '')`;
 /// record: the first time each kind showed.
 const CARD_LINES = [
   ["backing up", /Backing up current firmware…[^\n]*/],
-  ["updating", /Updating over USB…[^\n]*/],
+  ["updating", /Updating over (USB|Bluetooth)…[^\n]*/],
   ["finishing", /Finishing the update…[^\n]*/],
   ["restoring", /Restoring firmware…[^\n]*/],
   ["up to date", /[^\n]*(up to date|same as this Studio)[^\n]*/],
@@ -118,7 +161,7 @@ async function main() {
   }
 
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const out = path.join(ROOT, "target/walk-ota-emu", `${TAB ? "tab-" : ""}${stamp}`);
+  const out = path.join(ROOT, "target/walk-ota-emu", `${TAB ? "tab-" : BLE ? "ble-" : ""}${stamp}`);
   const shots = path.join(out, "shots");
   mkdirSync(shots, { recursive: true });
   const trail = path.join(out, "card-trail.log");
@@ -190,19 +233,24 @@ async function main() {
   });
   const storeOrigin = `http://127.0.0.1:${store.address().port}`;
 
-  console.log("\nTHE OVER-THE-AIR UPDATE WALK WITH NO BOARD");
+  console.log(`\nTHE OVER-THE-AIR UPDATE WALK WITH NO BOARD${BLE ? " — OVER ?ble=emu" : ""}`);
+  if (BLE) {
+    console.log("  ⚠️  ?ble=emu proves the transport, the card and the reconnects — not access (the");
+    console.log("     emulated board answers at the edit tier), and no number here is a Bluetooth number.");
+  }
   console.log(`  this tree       ${head} (lp-emu ${lpEmu}, lp-emu:esp32c6:t1)`);
   console.log(`  X (the boards)  ${x.version}+${x.commit.slice(0, 12)}`);
   console.log(`  Y (this Studio) ${y.version}+${y.commit.slice(0, 12)}`);
   console.log(`  Studio          http://127.0.0.1:${studioPort}/ (the release bundle, served by this walk)`);
   console.log(`  host tty        ${EMU_TTY ?? "the page's default (a Mac's model on a Mac)"}`);
-  console.log(`  steps           ${STEPS.join(", ")}${TAB ? " (?emu=tab)" : ""}\n`);
+  console.log(`  steps           ${STEPS.join(", ")}${TAB ? " (?emu=tab)" : BLE ? " (?ble=emu)" : ""}\n`);
 
   const report = {
     tree: head,
     lpEmu,
     configuration: "lp-emu:esp32c6:t1",
     backing: TAB ? "tab" : "door",
+    link: BLE ? "?ble=emu (the polyfill over the door's USB link; not a radio)" : "?emu= (Web Serial over the door)",
     emuTty: EMU_TTY,
     x: `${x.version}+${x.commit.slice(0, 12)}`,
     y: `${y.version}+${y.commit.slice(0, 12)}`,
@@ -224,7 +272,8 @@ async function main() {
   const pageUrl = (doorAddr) =>
     `http://localhost:${studioPort}/devices?emu=${doorAddr ? encodeURIComponent(`ws://${doorAddr}`) : "tab"}` +
     `&firmware-store=${encodeURIComponent(storeOrigin)}` +
-    (EMU_TTY ? `&emu-tty=${EMU_TTY}` : "");
+    (EMU_TTY ? `&emu-tty=${EMU_TTY}` : "") +
+    (BLE ? "&ble=emu" : "");
 
   /// What the board said: before any host opened its port (the door keeps
   /// that as `<id>.console-untaken.log`), then on the port. The door writes
@@ -269,6 +318,12 @@ async function main() {
     }
     return seen;
   };
+  /// Studio's own terminal lines on the page now (they start with `▸`).
+  const terminalLines = async () =>
+    (await driver.evaluate("document.body.innerText"))
+      .split("\n")
+      .filter((line) => line.startsWith("▸ "))
+      .map((line) => line.slice(2));
   /// Watch the card until `done` holds, noting every update line it shows on
   /// the way (the order they first appeared in).
   const watchCard = async (done, what, timeoutMs = UPDATE_MS, onTick = null) => {
@@ -365,6 +420,7 @@ async function main() {
   const loadPage = async (doorAddr) => {
     await driver.navigate(pageUrl(doorAddr));
     await driver.awaitShim();
+    if (BLE) await driver.waitFor("Boolean(window.__lpEmuBluetooth)", { timeoutMs: LOAD_MS, what: "the Bluetooth polyfill" });
     await driver.waitFor(`${MAIN_TEXT}.length > 0`, { timeoutMs: LOAD_MS, what: "Studio to finish loading" });
   };
   /// The tab lane: write `chip` (a name in `chipFiles`) into the page's
@@ -392,8 +448,40 @@ async function main() {
     return bytes;
   };
   const connect = async (board) => {
-    await driver.clickWhenReady("via USB", { timeoutMs: STEP_MS });
+    await driver.clickWhenReady(BLE ? "via Bluetooth" : "via USB", { timeoutMs: STEP_MS });
     await driver.pickBoard(board, { timeoutMs: STEP_MS });
+  };
+  /// The polyfill's count of what happened on a board's air (`?ble=emu`):
+  /// connects, the board's side of the link opening, resets turned into
+  /// GATT drops.
+  const bleStats = (board) =>
+    BLE
+      ? driver.evaluate(`JSON.stringify(window.__lpEmuBluetooth?.stats(${JSON.stringify(board)}) ?? null)`).then(JSON.parse)
+      : Promise.resolve(null);
+  /// Studio's terminal lines that time a reconnect (P5's narration).
+  const reconnectLines = (terminal) => terminal.filter((line) => /reconnected in /.test(line));
+  /// Over Bluetooth every drop the board's link had — a reset or one of the
+  /// walk's own — must come back with its time on Studio's terminal.
+  /// `timed: false` where no terminal is drawn to time them in: a restore
+  /// runs on a core-only board's PENDING link (it says no hello), and a
+  /// pending card draws no terminal (docs/defects/
+  /// 2026-10-06-a-restore-on-a-pending-link-narrates-to-no-terminal.md).
+  const checkReconnects = (terminal, before, after, drops, { timed = true } = {}) => {
+    if (!BLE) return null;
+    const lines = reconnectLines(terminal);
+    const resets = (after?.resetDrops ?? 0) - (before?.resetDrops ?? 0);
+    const reconnects = resets + drops;
+    if (resets < 1) throw new Error(`the polyfill turned no board reset into a GATT drop (${JSON.stringify(after)})`);
+    if (timed && lines.length < reconnects) {
+      throw new Error(`${reconnects} reconnects (${resets} board resets, ${drops} drops) but the terminal timed ${lines.length}: ${JSON.stringify(lines)}`);
+    }
+    return { resets, drops, timed: lines };
+  };
+  /// The card's update line must name this lane's link.
+  const checkLinkWord = (order) => {
+    const updating = order.find((entry) => entry.kind === "updating");
+    if (!updating) throw new Error(`the card never said Updating over ${LINK_WORD}`);
+    if (!updating.line.includes(`over ${LINK_WORD}`)) throw new Error(`the card said "${updating.line}", not over ${LINK_WORD}`);
   };
   const pushProject = async () => {
     const face = await driver.waitFor(
@@ -462,17 +550,68 @@ async function main() {
     const label = await pressUpdate();
     let cutAt = null;
     let cutShot = null;
+    let lastAir = "";
+    let lastAirAt = 0;
     const order = await watchCard(upToDate, "up to date on Y", UPDATE_MS, async (lines) => {
+      // Over `?ble=emu`, the air as the polyfill counts it, beside the
+      // card's lines: connects, the board's side opening, reset drops.
+      if (BLE) {
+        const stats = await bleStats(board).catch(() => null);
+        const connected = await driver
+          .evaluate(`window.__lpEmuBluetooth?.describe(${JSON.stringify(board)})?.connected ?? null`)
+          .catch(() => null);
+        const air = JSON.stringify({
+          connected,
+          connects: stats?.connects,
+          linkOpens: stats?.linkOpens,
+          linkCloses: stats?.linkCloses,
+          resetDrops: stats?.resetDrops,
+        });
+        // The edges as they happen, and the traffic every few seconds.
+        if (air !== lastAir || Date.now() - lastAirAt > 5_000) {
+          lastAir = air;
+          lastAirAt = Date.now();
+          appendFileSync(
+            trail,
+            `air ${air} writes=${stats?.writes} notifications=${stats?.notifications} textDropped=${stats?.textDropped}\n`,
+          );
+        }
+      }
       if (!cut || cutAt) return;
       const words = boardWords(board).slice(from);
       const line = lines[cut.stage];
       const percent = Number(line?.match(/(\d+)%/)?.[1] ?? -1);
       if (cut.boardSays.test(words) && percent >= cut.atPercent) {
         cutAt = line;
+        if (cut.phantom) {
+          // Bluefy's phantom drop: the page is told nothing, the board's side
+          // stays up — until the page is shown again and re-checks.
+          await driver.evaluate(`(() => { window.__lpEmuBluetooth.phantomDrop(${JSON.stringify(board)});
+                                         document.dispatchEvent(new Event('visibilitychange')); })()`);
+          cutShot = await shot("phantom-drop");
+          writeFileSync(path.join(out, "phantom-drop-page.txt"), await driver.evaluate("document.body.innerText"));
+          cutAt = `${line} (phantom drop; the page re-checked at once)`;
+          return;
+        }
         await driver.detach(board);
         const back = Date.now();
-        cutShot = await shot("cable-out");
-        writeFileSync(path.join(out, "cable-out-page.txt"), await driver.evaluate("document.body.innerText"));
+        cutShot = await shot(BLE ? "out-of-range" : "cable-out");
+        writeFileSync(path.join(out, `${BLE ? "out-of-range" : "cable-out"}-page.txt`), await driver.evaluate("document.body.innerText"));
+        if (BLE) {
+          // Out of range: the GATT connection drops and every reconnect
+          // fails until the board is back. Studio's side is its reconnect
+          // loop (no Reconnect… button is owed on a link that comes back by
+          // itself); the walk waits for the radio to be down, then the same
+          // seconds a person walking back would take.
+          await driver.waitFor(`!window.__lpEmuBluetooth.describe(${JSON.stringify(board)}).connected`, {
+            timeoutMs: STEP_MS,
+            what: "the GATT connection to drop",
+          });
+          await new Promise((resolve) => setTimeout(resolve, DETACHED_MS));
+          await driver.attach(board);
+          cutAt = `${line} (out of range for ${Date.now() - back} ms)`;
+          return;
+        }
         // The cable stays out until Studio has seen it go — its own terminal
         // line — then goes back in, as a person re-seating it would.
         // (The card keeps the update's line and offers "Reconnect…" while
@@ -526,45 +665,68 @@ async function main() {
             await loadPage(null);
             await seedTab("x");
           }
-          await step("update", "X → Y with one press: back up, update over USB, finish; the project still runs", async () => {
+          await step("update", `X → Y with one press: back up, update over ${LINK_WORD}, finish; the project still runs`, async () => {
             await connect(board);
             const pushed = await pushProject();
+            const air0 = await bleStats(board);
             const ran = await runUpdate(board);
+            const air1 = await bleStats(board);
             const said = boardSaid(board, ran.from, OTA_WORDS);
             for (const need of ["core offer", "core on trial", "core confirmed", "engine offer", "engine committed"]) {
               if (!said[need]) throw new Error(`the board never said ${need}`);
             }
             if (!ran.order.some((entry) => entry.kind === "backing up")) throw new Error("the card never said Backing up current firmware");
-            if (!ran.order.some((entry) => entry.kind === "updating")) throw new Error("the card never said Updating over USB");
+            checkLinkWord(ran.order);
+            const reconnects = checkReconnects(await terminalLines(), air0, air1, 0);
             // E14: the project survived — the card still runs it.
             await driver.waitFor(`${MAIN_TEXT}.includes('Remove project')`, { timeoutMs: STEP_MS, what: "the board running its project on Y" });
             const cache = await engineCache();
             const backup = cache.some((entry) => entry.includes(x.engine.sha256));
             if (!backup) throw new Error(`the engine cache does not hold X's engine (${x.engine.sha256.slice(0, 12)}…): ${JSON.stringify(cache)}`);
-            return { summary: `${ran.label}; ${ran.order.map((e) => e.kind).join(" → ")}; project kept; X's engine cached`, pushed, card: ran.order, board: said, cache };
+            return {
+              summary: `${ran.label}; ${ran.order.map((e) => e.kind).join(" → ")}; project kept; X's engine cached${reconnects ? `; ${reconnects.resets} resets → ${reconnects.timed.length} reconnects timed` : ""}`,
+              pushed, card: ran.order, board: said, cache, air: air1, reconnects,
+            };
           });
           break;
         case "cut-core":
-        case "cut-engine": {
+        case "cut-engine":
+        case "phantom-core": {
           const engine = name === "cut-engine";
+          const phantom = name === "phantom-core";
           if (!TAB) await openDoor(name, [xBoard]);
           else {
             await loadPage(null);
             await seedTab("x");
           }
-          await step(name, `the cable comes out mid-${engine ? "engine" : "core"} and goes back in: the update finishes with no click`, async () => {
+          const describe = phantom
+            ? "Bluefy's phantom drop mid-core, found when the page is shown again: the update finishes with no click"
+            : BLE
+              ? `the board goes out of range mid-${engine ? "engine" : "core"} and comes back: the update finishes with no click`
+              : `the cable comes out mid-${engine ? "engine" : "core"} and goes back in: the update finishes with no click`;
+          await step(name, describe, async () => {
             await connect(board);
             await driver.waitFor(`${MAIN_TEXT}.includes('Ready')`, { timeoutMs: STEP_MS, what: "Ready on X" });
+            const air0 = await bleStats(board);
             const ran = await runUpdate(board, {
               cut: engine
                 ? { stage: "finishing", boardSays: /\[OTA\] offer \S+ → engine/, atPercent: 40 }
-                : { stage: "updating", boardSays: /\[OTA\] offer \S+ → core/, atPercent: 40 },
+                : { stage: "updating", boardSays: /\[OTA\] offer \S+ → core/, atPercent: 40, phantom },
             });
+            const air1 = await bleStats(board);
             if (!ran.cutAt) throw new Error("the walk never found the moment to cut");
             const said = boardSaid(board, ran.from, OTA_WORDS);
+            // A phantom drop closes the board's side of the link (the page
+            // tears it down), but the board keeps running: it resumes only if
+            // its transfer was cut short, which the walk's own drop is.
             if (!said.resumed) throw new Error("the board never said it resumed the transfer");
-            if (!ran.order.some((entry) => entry.kind === "finishing")) throw new Error("the card never said Finishing the update");
-            return { summary: `cut at ${ran.cutAt}; ${said.resumed}; up to date`, card: ran.order, board: said };
+            checkLinkWord(ran.order);
+            if (!BLE && !ran.order.some((entry) => entry.kind === "finishing")) throw new Error("the card never said Finishing the update");
+            const reconnects = checkReconnects(await terminalLines(), air0, air1, 1);
+            return {
+              summary: `cut at ${ran.cutAt}; ${said.resumed}; up to date${reconnects ? `; ${reconnects.resets} resets + 1 drop → ${reconnects.timed.length} reconnects timed` : ""}`,
+              card: ran.order, board: said, air: air1, reconnects,
+            };
           });
           break;
         }
@@ -590,12 +752,19 @@ async function main() {
               await waitBoard(board, /\[OTA\] offer \S+ → engine/, "the restore's engine offer");
               await shot("restoring");
               writeFileSync(path.join(out, "restoring-page.txt"), await driver.evaluate("document.body.innerText"));
+              const air0 = await bleStats(board);
               const order = await watchCard(`${MAIN_TEXT}.includes('Remove project') || /a0a0a0a0[^\\n]*available/.test(${MAIN_TEXT})`, "X running again");
+              const air1 = await bleStats(board);
               if (!order.some((entry) => entry.kind === "restoring")) throw new Error("the card never said Restoring firmware");
+              const reconnects = BLE ? checkReconnects(await terminalLines(), { resetDrops: 0 }, air1, 0, { timed: false }) : null;
+              if (BLE && air0 === null) throw new Error("the Bluetooth polyfill holds no connection to the board");
               const said = boardSaid(board, from, OTA_WORDS);
               const lights = boardWords(board).slice(from).match(OTA_WORDS[7][1]) ?? [];
               if (!said["engine committed"]) throw new Error("the board never committed the engine");
-              return { summary: `${order.map((e) => e.kind).join(" → ")}; lights: ${lights.map((l) => l.replace(/^.*\(/, "(")).join(" ")}`, card: order, board: said, lights };
+              return {
+                summary: `${order.map((e) => e.kind).join(" → ")}; lights: ${lights.map((l) => l.replace(/^.*\(/, "(")).join(" ")}${reconnects ? `; ${reconnects.resets} resets dropped and reconnected (a pending card draws no terminal to time them in)` : ""}`,
+                card: order, board: said, lights, air: air1, reconnects,
+              };
             });
           } else {
             await step(name, "the same board, the cache cleared and no store that has X: Studio says it can't get it; Install Y", async () => {
@@ -663,7 +832,7 @@ async function main() {
   for (const s of report.steps) {
     console.log(`  ${s.skipped ? "–" : s.ok ? "✓" : "✗"} ${s.name.padEnd(22)} ${s.skipped ?? s.summary ?? s.error ?? ""}`);
   }
-  console.log(`\n  lp-emu ${lpEmu} (lp-emu:esp32c6:t1); report → ${path.relative(ROOT, path.join(out, "walk-ota-emu.json"))}`);
+  console.log(`\n  lp-emu ${lpEmu} (lp-emu:esp32c6:t1${BLE ? ", over ?ble=emu: emulated times, not Bluetooth ones" : ""}); report → ${path.relative(ROOT, path.join(out, "walk-ota-emu.json"))}`);
 
   await driver.close();
   if (door) await stopDoor(door);

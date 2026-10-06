@@ -47,7 +47,7 @@ use crate::app::studio::offer_press_test_api::OfferPressTestApi;
 use crate::{
     DeviceEffectCall, DeviceEffectFacts, DeviceEffectProgress, DeviceId, DeviceInput,
     DeviceTaskFuture, DeviceTransport, DeviceTransportFuture, GrantedLink, LensLineTap,
-    MemoryOwnBuildSource, OfferArgs, StudioController, UpdateStanding,
+    MemoryOwnBuildSource, OfferArgs, StudioController, UpdateLink, UpdateStanding,
 };
 
 /// The model board's region (the sim's own size).
@@ -123,6 +123,49 @@ fn an_update_whose_resets_keep_the_port_open_ends_on_y() {
         bench.standing(device),
         UpdateStanding::UpToDate { .. }
     ));
+}
+
+/// Over Bluetooth (M7 P12): the same update over the link's update channel,
+/// with every one of the board's resets a GATT drop that the provider's own
+/// loop reconnects — the old link departs, and a new one is attached,
+/// closed. The activity never knocks on the dropped link (that would fight
+/// the loop), but it opens each new one; the card and the terminal say
+/// Bluetooth, and the terminal times each reconnect.
+#[test]
+fn an_update_over_bluetooth_comes_back_by_itself_across_each_reset_and_ends_on_y() {
+    let mut board = Board::running_x();
+    board.endpoint = "ble:QkxFLWlk".to_string();
+    board.reconnects_itself = true;
+    let mut bench = Bench::new(board, Some(y()));
+    bench.cache_engine(&x());
+    let device = bench.connect_device();
+    bench.press_update(device);
+
+    let mut over_bluetooth = false;
+    for _ in 0..MAX_STEPS {
+        bench.step();
+        over_bluetooth |= matches!(
+            bench.standing(device),
+            UpdateStanding::Updating {
+                link: UpdateLink::Bluetooth,
+                ..
+            }
+        );
+        if bench.outcome(device).is_some() {
+            break;
+        }
+    }
+    bench.run_until_update_ends(device);
+    bench.assert_runs(&y());
+    assert_eq!(bench.outcome(device), Some(UpdateOutcomeFacts::UpToDate));
+    assert!(over_bluetooth, "the card said Bluetooth");
+    assert!(bench.said("update 2026.10.05-1 → 2026.10.06-1 over Bluetooth"));
+    assert!(bench.said_starting("board reset · reconnected in "));
+    assert!(
+        bench.board().opens_asked >= 3,
+        "each of the three reconnected links was opened by the model: {}",
+        bench.board().opens_asked
+    );
 }
 
 /// Update X → Y with an empty cache and no store: the backup is read back
@@ -680,6 +723,17 @@ struct Board {
     /// Web Serial grant) is another endpoint, and the roster cannot route
     /// it to a card by endpoint alone.
     endpoint: String,
+    /// Every reset is a Bluetooth drop that the provider's reconnect loop
+    /// mends by itself (M7 P12): the board's link closes in the departure's
+    /// words, the device leaves the platform's present list (the departure
+    /// sweep detaches the link), and a moment later it is present again — a
+    /// NEW, closed link the sweep attaches, which the model has to open.
+    reconnects_itself: bool,
+    /// When a Bluetooth reset dropped the link (bench seconds), until the
+    /// bench has played the provider's departure and return.
+    dropped_at: Option<f64>,
+    /// `LinkCommand::Open`s Studio sent.
+    opens_asked: u32,
 }
 
 impl Board {
@@ -704,6 +758,9 @@ impl Board {
             unplugged: false,
             resets_keep_port: false,
             endpoint: "serial:model-board".to_string(),
+            reconnects_itself: false,
+            dropped_at: None,
+            opens_asked: 0,
             announces: true,
         }
     }
@@ -720,10 +777,11 @@ impl Board {
     }
 
     fn info(&self) -> LinkInfo {
+        let bluetooth = self.endpoint.starts_with("ble:");
         LinkInfo {
             label: "model board".to_string(),
             endpoint: EndpointKey(self.endpoint.clone()),
-            usb: Some(UsbIds {
+            usb: (!bluetooth).then_some(UsbIds {
                 vendor: 0x303a,
                 product: 0x1001,
             }),
@@ -887,11 +945,17 @@ impl Board {
             if self.resets_keep_port {
                 return self.session_reset();
             }
-            self.close("board reset");
+            self.close(match self.reconnects_itself {
+                true => "bluetooth link lost: the board or the radio ended the connection",
+                false => "board reset",
+            });
             match self.rig.reboot() {
                 Ok(()) => {}
                 Err(BootFault::PowerCut) => self.power_cut(),
                 Err(e) => panic!("boots after a reset: {e:?}"),
+            }
+            if self.reconnects_itself {
+                self.dropped_at = Some(self.clock.get());
             }
         }
     }
@@ -951,7 +1015,10 @@ impl Link for RigLink {
     fn submit(&mut self, command: LinkCommand) {
         let mut board = self.board.borrow_mut();
         match command {
-            LinkCommand::Open { .. } => board.open(),
+            LinkCommand::Open { .. } => {
+                board.opens_asked += 1;
+                board.open();
+            }
             LinkCommand::Close => board.close("closed"),
             LinkCommand::SendFrame(frame) => {
                 if board.open.is_some()
@@ -1517,6 +1584,7 @@ impl Bench {
     /// One turn: time passes, tasks run, everything they queued folds.
     fn step(&mut self) {
         self.clock.set(self.clock.get() + STEP_SECS);
+        self.play_bluetooth_reconnect();
         pump(&self.tasks);
         let queued: Vec<DeviceInput> = self.inbox.borrow_mut().drain(..).collect();
         for input in queued {
@@ -1531,6 +1599,28 @@ impl Bench {
         }
         block_on(self.controller.settle_device_records());
         self.collect_lines();
+    }
+
+    /// The Bluetooth provider around a board reset (`Board::reconnects_itself`):
+    /// at the drop, the device stops being present and the departure sweep
+    /// runs; a second later the reconnect loop has it back, and the connect
+    /// edge's sweep attaches a new link.
+    fn play_bluetooth_reconnect(&mut self) {
+        let Some(at) = self.board().dropped_at else {
+            return;
+        };
+        let now = self.clock.get();
+        if self.granted.get() {
+            self.granted.set(false);
+            self.controller.note_device_hotplug(
+                crate::app::studio::studio_command::DeviceHotplug::Disconnected,
+            );
+        } else if now >= at + 1.0 {
+            self.board_mut().dropped_at = None;
+            self.granted.set(true);
+            self.controller
+                .note_device_hotplug(crate::app::studio::studio_command::DeviceHotplug::Connected);
+        }
     }
 
     fn steps(&mut self, n: usize) {

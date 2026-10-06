@@ -26,6 +26,10 @@
 //! | M4: an untrusted link that never logs in is closed in 10 s | [`an_untrusted_link_that_never_logs_in_is_dropped`] |
 //! | a borrowing conversation's io | [`the_conversation_io_round_trips_a_request`] |
 //! | availability, for the add slot's copy | [`availability_reads_the_browser_not_a_guess`] |
+//! | channel 3 (the update) both ways, once the board announced it (M7 P12) | [`the_update_channel_flows_both_ways_once_the_board_announces_it`] |
+//! | nothing on channel 3 to a board that never announced it (DS9) | [`nothing_goes_out_on_channel_3_to_a_board_that_never_announced_it`] |
+//! | `?ble=emu`: a board's reset is a GATT drop, then a reconnect | [`a_board_reset_is_a_gatt_drop_and_the_session_reconnects_by_itself`] |
+//! | `?ble=emu`: a link restart with no reset stays one connection | [`a_link_restart_without_a_reset_stays_one_connection`] |
 //!
 //! The link tests (the two above and the conversation io) run a board-side
 //! `lp_link::Link` here in Rust, on `LinkConfig::usb()`'s STREAM framing —
@@ -48,10 +52,12 @@ use std::rc::Rc;
 use js_sys::{Array, Promise};
 use lpa_devices::link::{Link, LinkCommand, LinkEvent, ResetKind};
 use lpa_link::device_link::browser_ble::{BrowserBleLink, ble_link_info};
+use lpa_link::device_link::link_note::UPDATE_NOT_ANNOUNCED_NOTE;
 use lpa_link::device_link::wire_reader::WireRead;
 use lpa_link::providers::browser_ble::{self as ble, BleClientIo, BleDevice, BleTapLine, BleWire};
+use lpc_update::BoardManifest;
 use lpc_wire::lp_link::{
-    CH_PROTO, Link as BoardLink, LinkConfig, LinkEvent as BoardEvent, SelectiveRepeat,
+    CH_PROTO, CH_UPDATE, Link as BoardLink, LinkConfig, LinkEvent as BoardEvent, SelectiveRepeat,
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
@@ -109,6 +115,9 @@ extern "C" {
     #[wasm_bindgen(js_name = deliverRawBytes)]
     fn js_deliver_raw_bytes(board_id: &str, bytes: &[u8]);
 
+    #[wasm_bindgen(js_name = rebootBehindOurBack)]
+    fn js_reboot_behind_our_back(board_id: &str);
+
     #[wasm_bindgen(js_name = tick)]
     fn js_tick(ms: u32) -> Promise;
 }
@@ -131,6 +140,10 @@ async fn a_picked_device_is_connected_present_and_wears_a_ble_endpoint() {
     let info = ble_link_info(&device);
     assert_eq!(info.endpoint.0, format!("ble:{}", device.device_id));
     assert!(info.usb.is_none() && info.serial_number.is_none());
+    assert!(
+        info.carries_update_channel,
+        "a Bluetooth link carries lp-link's update channel (M7 P12)"
+    );
 
     polyfill_off().await;
 }
@@ -592,6 +605,186 @@ async fn availability_reads_the_browser_not_a_guess() {
 /// `browser_ble.js`'s session map is module scoped and outlives a test, so
 /// every session is forgotten between tests. Sixty-four is a bound, not a
 /// budget: ids are minted from 1 and this suite makes a handful.
+/// M7 P12: a board that announces the update channel (a core-only board's
+/// `M` on link-up) is heard on it — its manifest as `UpdateFacts`, then the
+/// bytes as `Update` — and what Studio sends on it reaches the board's
+/// channel 3, through the polyfill's framing like every other frame.
+#[wasm_bindgen_test]
+async fn the_update_channel_flows_both_ways_once_the_board_announces_it() {
+    polyfill_over(&["c6-a"]).await;
+    let device = pick().await;
+    let mut link = open_link(&device).await;
+    let mut bench = LinkBench::with_board("c6-a", BoardDouble::core_only(0xB0A2_0003));
+
+    let facts = bench
+        .drive_link_until(&mut link, |event| {
+            matches!(event, LinkEvent::UpdateFacts(_))
+        })
+        .await;
+    assert!(
+        matches!(&facts, Some(LinkEvent::UpdateFacts(f)) if f.version.as_deref() == Some("2026.10.06-1")),
+        "the board's manifest, mirrored: {facts:?}"
+    );
+    let update = bench
+        .drive_link_until(&mut link, |event| matches!(event, LinkEvent::Update(_)))
+        .await;
+    assert!(
+        matches!(&update, Some(LinkEvent::Update(bytes)) if bytes.first() == Some(&b'M')),
+        "the manifest's bytes, for the update host: {update:?}"
+    );
+
+    link.submit(LinkCommand::SendUpdate(b"Q\x01".to_vec()));
+    bench.run_until(|board| !board.updates.is_empty()).await;
+    assert_eq!(
+        BOARD.with(|board| board.borrow().updates.clone()),
+        vec![b"Q\x01".to_vec()],
+        "Studio's message reached the board's channel 3"
+    );
+
+    polyfill_off().await;
+}
+
+/// DS9 over Bluetooth: a board whose hello carries no `firmware` and that
+/// never sent an update message gets nothing on channel 3 — the link says
+/// why — so a pre-update board's link is never stalled on a frame it would
+/// never acknowledge.
+#[wasm_bindgen_test]
+async fn nothing_goes_out_on_channel_3_to_a_board_that_never_announced_it() {
+    polyfill_over(&["c6-a"]).await;
+    let device = pick().await;
+    let mut link = open_link(&device).await;
+    let bench = LinkBench::new("c6-a");
+    let hello = bench
+        .drive_link_until(&mut link, |event| matches!(event, LinkEvent::Frame(_)))
+        .await;
+    assert!(hello.is_some(), "the board's hello");
+
+    link.submit(LinkCommand::SendUpdate(b"Q\x01".to_vec()));
+    let note = bench
+        .drive_link_until(
+            &mut link,
+            |event| matches!(event, LinkEvent::WireNote(note) if note == UPDATE_NOT_ANNOUNCED_NOTE),
+        )
+        .await;
+    assert!(note.is_some(), "the link says why nothing went out");
+    for _ in 0..20 {
+        bench.round();
+        tick(10).await;
+    }
+    assert!(
+        BOARD.with(|board| board.borrow().updates.is_empty()),
+        "nothing reached the board's channel 3"
+    );
+
+    polyfill_off().await;
+}
+
+/// `?ble=emu` models a board's reset the way a real board's radio has it
+/// (M7 P12): the emulated board's USB link survives a reset, but a reset
+/// board drops its GATT connection. When the chip reboots under a live
+/// link (the scripted door's cycle count goes back to zero, and the board's
+/// fresh link sends its SYN), the polyfill drops the connection — a
+/// departure in the provider's words — and the held device reconnects with
+/// no gesture.
+#[wasm_bindgen_test]
+async fn a_board_reset_is_a_gatt_drop_and_the_session_reconnects_by_itself() {
+    polyfill_over(&["c6-a"]).await;
+    let edges = edges();
+    let device = pick().await;
+    let wire = BleWire::new(device.session);
+    let mut bench = LinkBench::new("c6-a");
+    let reads = bench
+        .exchange_until(&wire, |reads| hello_count(reads) >= 1)
+        .await;
+    assert_eq!(hello_count(&reads), 1, "{reads:?}");
+    let (connects, disconnects) = (edges.0.get(), edges.1.get());
+    let before = stats("c6-a").await;
+
+    // The chip reboots; its new link starts over with a new nonce.
+    js_reboot_behind_our_back("c6-a");
+    BOARD.with(|board| *board.borrow_mut() = BoardDouble::new(0xB0A2_0002));
+    for _ in 0..300 {
+        if edges.1.get() > disconnects && edges.0.get() > connects {
+            break;
+        }
+        // The board's side of the link closes with the drop: nothing more
+        // to hand it until the reconnect opens a new one.
+        if edges.1.get() == disconnects {
+            bench.round();
+        }
+        tick(10).await;
+    }
+
+    assert_eq!(
+        edges.1.get(),
+        disconnects + 1,
+        "one disconnect edge: the reset"
+    );
+    assert_eq!(
+        edges.0.get(),
+        connects + 1,
+        "one connect edge: the reconnect"
+    );
+    let seen = stats("c6-a").await;
+    assert_eq!(seen.reset_drops, 1, "{seen:?}");
+    assert!(
+        seen.connects > before.connects,
+        "the reconnect is a new connection: {seen:?}"
+    );
+    assert_eq!(
+        seen.link_closes, before.link_closes,
+        "the board's side stays open across its reset (it already started a new session): {seen:?}"
+    );
+    let errors = wire.take_errors().unwrap_or_default();
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.starts_with("bluetooth link lost")),
+        "the drop is said in the departure's words: {errors:?}"
+    );
+
+    polyfill_off().await;
+}
+
+/// …and only a reset is: the board's link restarting by itself (the chip
+/// still running) is a reset INSIDE one connection, which the page's link
+/// reads as one — no drop, the next hello on the same connection.
+#[wasm_bindgen_test]
+async fn a_link_restart_without_a_reset_stays_one_connection() {
+    polyfill_over(&["c6-a"]).await;
+    let edges = edges();
+    let device = pick().await;
+    let wire = BleWire::new(device.session);
+    let mut bench = LinkBench::new("c6-a");
+    bench
+        .exchange_until(&wire, |reads| hello_count(reads) >= 1)
+        .await;
+    let disconnects = edges.1.get();
+
+    BOARD.with(|board| *board.borrow_mut() = BoardDouble::new(0xB0A2_0004));
+    let reads = bench
+        .exchange_until(&wire, |reads| {
+            reads
+                .iter()
+                .any(|read| matches!(read, WireRead::LinkReset(_)))
+                && hello_count(reads) >= 1
+        })
+        .await;
+
+    assert!(
+        reads
+            .iter()
+            .any(|read| matches!(read, WireRead::LinkReset(_))),
+        "a reset inside the connection: {reads:?}"
+    );
+    assert_eq!(hello_count(&reads), 1, "the new session's hello: {reads:?}");
+    assert_eq!(edges.1.get(), disconnects, "no drop");
+    assert_eq!(stats("c6-a").await.reset_drops, 0);
+    assert!(wire.is_connected());
+
+    polyfill_off().await;
+}
+
 async fn forget_sessions() {
     for id in 1..=64 {
         let _ = ble::forget(id).await;
@@ -674,11 +867,36 @@ struct LinkBench {
 
 impl LinkBench {
     fn new(board: &str) -> Self {
-        BOARD.with(|double| *double.borrow_mut() = BoardDouble::new(0xB0A2_0001));
+        Self::with_board(board, BoardDouble::new(0xB0A2_0001))
+    }
+
+    /// A bench whose board end is `double`.
+    fn with_board(board: &str, double: BoardDouble) -> Self {
+        BOARD.with(|current| *current.borrow_mut() = double);
         Self {
             board: board.to_string(),
             reads: Vec::new(),
         }
+    }
+
+    /// Run the board's end while the model's LINK drains the page's (its
+    /// pump: reads, channel 3, notes), until an event matches; bounded by
+    /// rounds, never by a clock.
+    async fn drive_link_until(
+        &self,
+        link: &mut BrowserBleLink,
+        matches: impl Fn(&LinkEvent) -> bool,
+    ) -> Option<LinkEvent> {
+        for _ in 0..300 {
+            self.round();
+            tick(10).await;
+            while let Some(event) = link.poll_event() {
+                if matches(&event) {
+                    return Some(event);
+                }
+            }
+        }
+        None
     }
 
     /// Run the board's end, draining the page's, until `done` holds for what
@@ -744,6 +962,11 @@ struct BoardDouble {
     link: BoardLink<SelectiveRepeat>,
     /// Every request read, by id, as the JSON it arrived as.
     requests: Vec<(u64, String)>,
+    /// A core-only board's manifest, sent as `M` on channel 3 on every
+    /// `Up` (its announcement of the update channel; it says no hello).
+    manifest: Option<BoardManifest>,
+    /// Every channel-3 message read.
+    updates: Vec<Vec<u8>>,
 }
 
 impl BoardDouble {
@@ -751,6 +974,16 @@ impl BoardDouble {
         Self {
             link: BoardLink::new(LinkConfig::usb(), nonce),
             requests: Vec::new(),
+            manifest: None,
+            updates: Vec::new(),
+        }
+    }
+
+    /// A split image waiting for its engine: no hello, its `M` instead.
+    fn core_only(nonce: u32) -> Self {
+        Self {
+            manifest: Some(board_manifest()),
+            ..Self::new(nonce)
         }
     }
 
@@ -762,7 +995,18 @@ impl BoardDouble {
         self.link.on_bytes(Self::now(), bytes);
         while let Some(event) = self.link.recv() {
             match event {
-                BoardEvent::Up { .. } => self.send(&hello()),
+                BoardEvent::Up { .. } => match &self.manifest {
+                    Some(manifest) => {
+                        let mut m = vec![b'M'];
+                        m.extend_from_slice(&manifest.to_json());
+                        self.link.send(CH_UPDATE, &m).expect("board send");
+                    }
+                    None => self.send(&hello()),
+                },
+                BoardEvent::Message {
+                    channel: CH_UPDATE,
+                    data,
+                } => self.updates.push(data),
                 BoardEvent::Message {
                     channel: CH_PROTO,
                     data,
@@ -826,6 +1070,29 @@ fn hello() -> lpc_wire::WireServerMessage {
     )
 }
 
+/// A core-only board's manifest (the shape `link_port_service`'s own tests
+/// use).
+fn board_manifest() -> BoardManifest {
+    BoardManifest {
+        proto: 1,
+        target: "esp32c6-4mb".to_string(),
+        chip: "esp32c6".to_string(),
+        version: "2026.10.06-1".to_string(),
+        build_id: "2026.10.06-1+abc123456789".to_string(),
+        wire_proto: lpc_wire::WIRE_PROTO_VERSION,
+        core_sha256: "11".repeat(32),
+        core_len: 4096,
+        engine_sha256: "22".repeat(32),
+        engine_len: Some(8192),
+        layout: 1,
+        loader: 1,
+        region_len: 65_536,
+        state: lpc_update::BoardState::NeedsEngine,
+        refused_build: None,
+        transfer: None,
+    }
+}
+
 fn hello_count(reads: &[WireRead]) -> usize {
     reads
         .iter()
@@ -879,6 +1146,8 @@ struct Stats {
     /// The board's side of the link opening and closing.
     link_opens: u32,
     link_closes: u32,
+    /// Board resets the polyfill turned into GATT drops.
+    reset_drops: u32,
 }
 
 async fn stats(board: &str) -> Stats {
@@ -903,5 +1172,6 @@ async fn stats(board: &str) -> Stats {
         connects: field("connects"),
         link_opens: field("linkOpens"),
         link_closes: field("linkCloses"),
+        reset_drops: field("resetDrops"),
     }
 }

@@ -750,8 +750,24 @@ back into one frame per notification on the way out, byte-identical to
 `lp_link::frame::wrap_stream` on a 200-vector check. It models the
 firmware's link rules as far as the page can see them: the link opens when
 the central subscribes, each link gets its own hello, an unauthenticated
-link is dropped after 10 s, and Bluefy's phantom drop, where the page hears
-a disconnect while the radio link stays up. **Trust caveat: it proves the
+link is dropped after 10 s, Bluefy's phantom drop, where the page hears
+a disconnect while the radio link stays up, and **a board reset as a GATT
+drop**: the emulated board's USB link survives a reset, so when the chip
+reboots under a live connection (its `reboots` count in the board registry
+moved, checked on the board's next SYN) the polyfill drops the connection
+and the page reconnects, as a real board's radio going down with its CPU
+makes it (counted as `resetDrops` in `stats()`; the board's byte channel
+stays open, since the rebooted board starts its own new session); a link
+restart with no reboot stays one connection. The
+Bluetooth link carries lp-link's update channel (OTA M7 P12), so the card
+updates over it: **`just walk-ota-ble-emu`** walks `walk-ota-emu`'s update,
+a drop mid-core (out of range, and the phantom drop) finished with no
+click, and an engine-less board restored on connect, all over `?ble=emu`,
+asserting the card says "Bluetooth" and Studio's terminal times every
+reconnect (`just walk-ble-emu --serve-release` runs the control walk with
+no dev server). Its reconnect times are the page's retry and the emulated
+board's boot, never a radio's, and its rates go through the board's USB
+link: **no number from either walk is a Bluetooth number.** **Trust caveat: it proves the
 transport, the UI and Play, not access.** The emulated board sees its
 trusted USB link, so every request is answered at the edit tier, and it
 never runs the C6's BLE controller or trouble-host (a chained ACL packet
@@ -786,7 +802,8 @@ itself: X → Y with one press (backup, update, finish, project kept), the
 cable cut mid-core and mid-engine then finished with no click, an
 engine-less board restored on connect, the same with no copy anywhere ("which
 Studio can't get" → Install), and a pre-update board (no over-the-air offer,
-today's flash). `--tab` runs three of them against `?emu=tab`. Every check
+today's flash). `--tab` runs three of them against `?emu=tab`, and `--ble`
+(`just walk-ota-ble-emu`, above) four of them over `?ble=emu`. Every check
 waits for the board's own `[OTA]`/`[LOADER]` words as well as the card's.
 It proves Studio's update host, routing and card against the real board
 session; it does **not** prove Chromium's serial backend across the

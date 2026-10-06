@@ -31,6 +31,13 @@
 //!   not these). The reads wait here, the board's hello among them, until
 //!   the model's link or a borrowed conversation drains them.
 //!
+//! - **Channel 3 rides the same link** (the over-the-air update, M7 P12):
+//!   [`send_update`] and [`take_updates`] are Web Serial's, through the same
+//!   [`LinkPortService`], so the update channel is refused until the board
+//!   announced it on this connection (DS9) and a borrowed conversation never
+//!   eats an update message. This end keeps at most [`BLE_HOST_TX_WINDOW`]
+//!   frames in flight (DS11).
+//!
 //! **A GATT disconnect is Bluetooth's link reset.** Both ends lose the
 //! session together (the board drops its `Link` on disconnect), and the page
 //! hears it as `bluetooth link lost: …` (`browser_ble.js`), which fails what
@@ -135,11 +142,31 @@ impl Drop for WakeOnActivity {
     }
 }
 
-/// A link for a new connection: a fresh nonce, `ble()`'s datagrams, and the
-/// page's wire flags as they are now.
+/// Frames this end keeps in flight before an acknowledgement (M7 DS11): the
+/// OTA spike's best on the board (S5c, 2026-10-02, Mac Chrome via CDP). Above
+/// ~16 frames in flight the Mac's write path lost 20–36 % of them; 16 with
+/// four update chunks sent ahead (`lpa_update::ServeConfig::BLE`) was the
+/// fastest setting measured. The board advertises how many it takes in its
+/// SYN — 8 while its engine runs, 32 in core-only — and the link never sends
+/// more than the smaller of the two, so this is the ceiling, never more than
+/// 16. Every frame still goes out as one awaited write with at most
+/// [`WRITE_ROOM`] queued in the page; the rest wait in the link.
+pub const BLE_HOST_TX_WINDOW: u8 = 16;
+
+/// The host's Bluetooth preset: [`LinkConfig::ble`] with this end's
+/// transmit window at [`BLE_HOST_TX_WINDOW`].
+pub fn host_link_config() -> LinkConfig {
+    LinkConfig {
+        tx_window: BLE_HOST_TX_WINDOW,
+        ..LinkConfig::ble()
+    }
+}
+
+/// A link for a new connection: a fresh nonce, [`host_link_config`]'s
+/// datagrams, and the page's wire flags as they are now.
 fn fresh_service() -> LinkPortService {
     LinkPortService::new(
-        LinkConfig::ble(),
+        host_link_config(),
         random_nonce(),
         packed_replies_wanted(),
         device_log_level(),
@@ -185,6 +212,41 @@ pub(crate) fn send_client_json(session: u32, json: &str) -> Result<(), String> {
         .unwrap_or_else(|| Err("the bluetooth link is not connected".to_string()))?;
     service(session);
     Ok(())
+}
+
+/// Queue one channel-3 (update) message on the session's link and write
+/// what the link has to send now (M7 P12, the Web Serial port's twin).
+/// `Ok(false)`: the board has not announced the update channel on this
+/// connection, so nothing was queued (DS9; the link notes it). Errors like
+/// [`send_client_json`]'s.
+pub(crate) fn send_update(session: u32, message: &[u8]) -> Result<bool, String> {
+    if !matches!(service(session), Serviced::Up(_)) {
+        return Err("the bluetooth link is not connected".to_string());
+    }
+    let queued = SESSIONS
+        .with(|sessions| {
+            sessions
+                .borrow_mut()
+                .get_mut(&session)
+                .map(|served| served.service.send_update(message))
+        })
+        .unwrap_or_else(|| Err("the bluetooth link is not connected".to_string()))?;
+    service(session);
+    Ok(queued)
+}
+
+/// The board's channel-3 (update) messages since the last take, this
+/// connection's only (a new connection is a new link, and the old one's
+/// messages go with it). Drained by the model's link pump alone: a
+/// conversation borrowing the wire never sees them.
+pub(crate) fn take_updates(session: u32) -> Vec<Vec<u8>> {
+    SESSIONS.with(|sessions| {
+        sessions
+            .borrow_mut()
+            .get_mut(&session)
+            .map(|served| served.service.take_updates())
+            .unwrap_or_default()
+    })
 }
 
 /// Everything the session's link has read since the last drain, in order:

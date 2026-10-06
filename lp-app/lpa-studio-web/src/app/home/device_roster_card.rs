@@ -256,6 +256,16 @@ pub(crate) fn DeviceRosterCard(
         update.params().is_empty()
             && (firmware_blocked || update.action.meta().enablement.is_enabled())
     });
+    // Factory reset over Bluetooth is refused with the firmware verbs'
+    // reason, said once: beside a Flash or an Update drawn refused, when
+    // one is. The over-the-air update is not refused there (OTA M7 P12), so
+    // a board that is up to date, or offered one, has no refused verb to
+    // say it, and the reason goes under Factory reset itself.
+    let firmware_reason_drawn = firmware_blocked
+        && (flash.is_some()
+            || update
+                .as_ref()
+                .is_some_and(|update| !update.action.meta().enablement.is_enabled()));
     // A Bluetooth link nothing has unlocked yet: the board answers only its
     // hello and the unlock, so what it runs is unknown to the card (its
     // "nothing loaded" is a refused read, not the board's word), and the
@@ -774,14 +784,15 @@ pub(crate) fn DeviceRosterCard(
                         // blank chip. It asks nothing, so it needs no picker.
                         // Not offered on a board that already IS blank
                         // (erasing a blank flash does nothing). Blocked, its
-                        // reason is the firmware verb's, said once beside it.
+                        // reason is the firmware verb's, said once: beside
+                        // that verb when it is drawn refused, else here.
                         if let Some(erase) = verb("erase") {
                             AgentMark { key: "{\"factory-reset\"}", path: erase.path.clone(),
                                 ActionButton {
                                     action: erase.action,
                                     running: false,
                                     variant: ActionButtonVariant::Quiet,
-                                    reason_said_elsewhere: firmware_blocked,
+                                    reason_said_elsewhere: firmware_reason_drawn,
                                     on_action,
                                 }
                             }
