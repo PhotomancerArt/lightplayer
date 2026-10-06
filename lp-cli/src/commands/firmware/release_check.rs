@@ -111,6 +111,18 @@ fn check_target(
     allow_dev: bool,
     accounted: &mut BTreeSet<String>,
 ) -> Result<()> {
+    let version = check_target_files(dir, target, accounted)?;
+    // Last, so a dev version is one problem rather than one per file left
+    // unaccounted.
+    check_version(&version, allow_dev)
+}
+
+/// Every check but the version's; returns the version.
+fn check_target_files(
+    dir: &Path,
+    target: &str,
+    accounted: &mut BTreeSet<String>,
+) -> Result<String> {
     let name = TargetName::parse(target).with_context(|| format!("`{target}` is not a target"))?;
     let mut read = |file: &str| -> Result<Vec<u8>> {
         let asset = asset_name(&name, file);
@@ -128,7 +140,6 @@ fn check_target(
         package.firmware_id
     );
     let identity = CoreIdentity::read(&package)?;
-    check_version(&identity.version, allow_dev)?;
     let mut image = None;
     for entry in &package.images {
         let bytes = read(&entry.path)?;
@@ -145,7 +156,7 @@ fn check_target(
     }
 
     let Some(split) = &package.split else {
-        return Ok(());
+        return Ok(identity.version);
     };
     let [_] = package.images.as_slice() else {
         bail!("a split package flashes one merged image");
@@ -261,7 +272,7 @@ fn check_target(
             })?;
         }
     }
-    Ok(())
+    Ok(identity.version)
 }
 
 /// The targets a directory holds packages for (`<target>.package.json`).
@@ -439,6 +450,10 @@ mod tests {
         let (_fx, out, targets) = staged("abc1234-dirty-101500PT");
         let error = refused(&out, &targets, false);
         assert!(error.contains("dev version"), "{error}");
+        assert!(
+            !error.contains("not accounted"),
+            "one problem, not one per file: {error}"
+        );
         check_release_dir(&out, &targets, true).unwrap();
     }
 
