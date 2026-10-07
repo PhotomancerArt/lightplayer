@@ -321,13 +321,21 @@ the app through the same view model and presses the same actions. See
   `docs/adr/2026-10-01-network-link-security.md`.
 - **The exception: lp-link itself and channel 3 (over-the-air updates)
   stay compatible once cores are fielded** (QY1, answered yes). A fielded
-  core can only be reached over them, so `plain_bytes_golden.rs` and
-  `update_channel_golden.rs` (both `lp-base/lp-link/tests/`) and
-  `lpc-update`'s `tests/v1_golden.hex` are **never-break** pins. A new
+  core can only be reached over them, so `plain_bytes_golden.rs`,
+  `update_channel_golden.rs` and `secure_ws_bytes_golden.rs` (all
+  `lp-base/lp-link/tests/`) and `lpc-update`'s `tests/v1_golden.hex` are
+  **never-break** pins. The third is the **Wi‑Fi link**: once a core that
+  updates over Wi‑Fi is fielded, a board in a house is reachable only over
+  `ws://<board>/link` (port 80, one binary message per frame, close 1013
+  when busy — `fw-esp32-common/tests/lan_endpoint_contract.rs` names each
+  fact) with `ws()` and the secure handshake's bytes. A new
   link feature is a SYN flag plus an extension an old end ignores; channel
   3's messages change only by adding (unknown types answered `N`/`U`).
   The JSON wire on channel 1 keeps the freedom above. See
-  `docs/adr/2026-10-06-ota-update-protocol.md`.
+  `docs/adr/2026-10-06-ota-update-protocol.md`. Likewise the device
+  network file's **reader** (`NetworkFile::from_json`) ignores keys it does
+  not know, so a rolled-back core still joins with a file a newer firmware
+  grew (`docs/adr/2026-10-04-device-wifi-settings.md`, 2026-10-07 amendment).
 
 ## Persisted-format compatibility (the wire rule does NOT apply here)
 
