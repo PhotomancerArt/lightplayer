@@ -22,8 +22,10 @@
 //!    verdict on a challenge, an input, or a deadline. A close from the hub
 //!    with 1001 is "going away" (a deploy).
 //!
-//! The buffers are the caller's ([`RelayLegBuffers`]); nothing here
-//! allocates per connection beyond what the driver's frames do. The loop
+//! The buffers are the caller's ([`RelayLegBuffers`]), but for the route's
+//! outgoing frame, which exists only while a route holds the network slot:
+//! while the LAN serves the one session it is not needed (Wi-Fi relay plan,
+//! round 2: the memory fix, (b)). The loop
 //! returns [`RelayLegExit::Idle`] once the board may no longer dial (Wi-Fi
 //! lost, Cloud relay off, no account entry: RD8) and no leg is open, so the
 //! caller can give the buffers back and wait in [`wait_until_may_dial`]
@@ -35,8 +37,12 @@ use embassy_futures::select::{Either, Either3, select, select3};
 use lp_link::Micros;
 use lpc_relay::{RELAY_DEVICE_PATH, RelayEvent};
 
+use alloc::boxed::Box;
+
 use super::relay_driver::RelayDriver;
 use super::relay_driver_action::RelayDriverAction;
+use super::relay_route_link::{RelayRouteLink, RouteSlotState};
+use crate::net::try_zeroed_bytes;
 use crate::net::ws::{ByteStream, CloseCode, WsClosed, WsConnection, WsEvent};
 use crate::radio_link::{RadioLinkPort, SlotEdge};
 
@@ -104,8 +110,9 @@ pub struct RelayLegBuffers<'a> {
     /// takes (a route frame: 3 bytes and one network link frame) plus
     /// `ws::RX_OVERHEAD`; the upgrade request is also written from it.
     pub ws_rx: &'a mut [u8],
-    /// One outgoing route frame.
-    pub frame_tx: &'a mut [u8],
+    /// The size of one outgoing route frame: allocated while a route holds
+    /// the network slot, given back when none does.
+    pub frame_tx_len: usize,
 }
 
 /// Why [`run_relay_leg`] returned.
@@ -174,7 +181,7 @@ pub async fn run_relay_leg<I: RelayLegIo>(
         };
         log::info!("[relay] leg open to {host}");
         driver.handle(io.now_us(), RelayEvent::Connected);
-        match serve_leg(driver, io, port, index, &mut ws, bufs.frame_tx).await {
+        match serve_leg(driver, io, port, index, &mut ws, bufs.frame_tx_len).await {
             LegEnd::Ours => ws.close(CloseCode::NORMAL).await,
             LegEnd::Theirs(going_away) => {
                 log::info!(
@@ -272,9 +279,10 @@ async fn serve_leg<I: RelayLegIo, S: ByteStream>(
     port: &RadioLinkPort,
     index: usize,
     ws: &mut WsConnection<'_, S>,
-    frame_tx: &mut [u8],
+    frame_tx_len: usize,
 ) -> LegEnd {
     let slot = port.slot(index);
+    let mut frame_tx: Option<Box<[u8]>> = None;
     loop {
         if io.stopping() {
             return LegEnd::Stop;
@@ -298,11 +306,31 @@ async fn serve_leg<I: RelayLegIo, S: ByteStream>(
         if closing {
             return LegEnd::Ours;
         }
-        while let Some(len) = driver.route_frame(io.now_us(), frame_tx) {
-            if ws.send(&frame_tx[..len]).await.is_err() {
-                return LegEnd::Theirs(false);
+        // The route's frame buffer, only while a route holds the slot.
+        let holding = matches!(
+            driver.route(),
+            Some(RelayRouteLink {
+                state: RouteSlotState::Holding,
+                ..
+            })
+        );
+        if !holding {
+            frame_tx = None;
+        } else if frame_tx.is_none() {
+            frame_tx = try_zeroed_bytes(frame_tx_len);
+            if frame_tx.is_none() {
+                log::warn!("[relay] no room for a route's {frame_tx_len} B frame buffer");
+                driver.on_close_request(io.now_us(), "no room for its frames");
+                continue;
             }
-            driver.note_sent(len);
+        }
+        if let Some(frame_tx) = frame_tx.as_deref_mut() {
+            while let Some(len) = driver.route_frame(io.now_us(), frame_tx) {
+                if ws.send(&frame_tx[..len]).await.is_err() {
+                    return LegEnd::Theirs(false);
+                }
+                driver.note_sent(len);
+            }
         }
         if driver.has_actions() {
             continue;

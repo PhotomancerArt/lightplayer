@@ -24,8 +24,12 @@
 //!   low in the heap, before anything a link or a project leaves behind; a
 //!   board that saves its first network later gets them at its first
 //!   address, and one that never joins never pays (the 2026-09-24
-//!   fragmentation class). The lp-link session itself is allocated per
-//!   connection (`Link::new_secure`), as Bluetooth's is.
+//!   fragmentation class). The outgoing frame buffer is the exception: it
+//!   exists only while a connection is being served, so a relay route
+//!   holding the one session leaves the LAN holding none (Wi-Fi relay plan,
+//!   round 2: the memory fix, (b)); asked for fallibly, a heap with no room
+//!   for it turns the connection away with 1013. The lp-link session itself
+//!   is allocated per connection (`Link::new_secure`), as Bluetooth's is.
 //! - **No plain link, ever.** Nothing reaches the server before the Noise
 //!   handshake completes: the slot's link is secure from its first frame.
 //! - A closed WebSocket, a TCP reset, a refused handshake that the peer
@@ -45,6 +49,7 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
 use embassy_time::{Duration, Instant, Timer};
 use fw_esp32_common::net::network_challenge::{ChallengeOutcome, challenge_over_ws};
+use fw_esp32_common::net::try_zeroed_bytes;
 use fw_esp32_common::net::ws::{CloseCode, RX_OVERHEAD, WsConnection};
 use fw_esp32_common::radio_link::lan_link_config::LAN_MAX_FRAME;
 use fw_esp32_common::radio_link::{
@@ -83,12 +88,12 @@ static BUSY: AtomicUsize = AtomicUsize::new(0);
 static BUSY_CHANGED: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 
 /// One slot's buffers, allocated once (on the heap directly: a 5 KB value
-/// built on `lp-net`'s stack first would be most of it).
+/// built on `lp-net`'s stack first would be most of it). The outgoing frame
+/// is not among them: [`serve`]'s caller asks for it per connection.
 pub struct LanBuffers {
     tcp_rx: &'static mut [u8],
     tcp_tx: &'static mut [u8],
     ws_rx: &'static mut [u8],
-    frame_tx: &'static mut [u8],
 }
 
 impl LanBuffers {
@@ -99,7 +104,6 @@ impl LanBuffers {
             tcp_rx: leak(TCP_RX),
             tcp_tx: leak(TCP_TX),
             ws_rx: leak(LAN_MAX_FRAME + RX_OVERHEAD),
-            frame_tx: leak(LAN_MAX_FRAME),
         }
     }
 }
@@ -142,6 +146,14 @@ pub async fn lan_link_task(
                 log::info!("[lan] a request on port {LINK_PORT} was not a link upgrade");
                 continue;
             }
+        };
+        // The outgoing frame, for this connection only.
+        let Some(mut frame_tx) = try_zeroed_bytes(LAN_MAX_FRAME) else {
+            log::warn!(
+                "[lan] no room for a link's {LAN_MAX_FRAME} B frame buffer: try again later"
+            );
+            ws.close(TRY_AGAIN_LATER).await;
+            continue;
         };
         set_busy(1);
         let slot = port.slot(index);
@@ -191,7 +203,7 @@ pub async fn lan_link_task(
             slot: index,
         })
         .await;
-        let reason = serve(ws, port, index, id, &mut *buffers.frame_tx).await;
+        let reason = serve(ws, port, index, id, &mut frame_tx).await;
         log_counters(port, index, id);
         slot.close_link(id);
         port.announce(RadioLinkEvent::Closed { link: id }).await;

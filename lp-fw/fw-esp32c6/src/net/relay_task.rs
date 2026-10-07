@@ -18,7 +18,7 @@
 //!   image built with `LP_RELAY_HOST=<host>[:port]` dials that instead and
 //!   says so at boot (RD14).
 //! - **Memory.** The leg's TCP and WebSocket buffers ([`RelayBuffers`],
-//!   6,921 B) exist only while the board may dial — joined, Cloud relay on,
+//!   5,830 B) exist only while the board may dial — joined, Cloud relay on,
 //!   an account entry held (RD8) — and are given back when that stops being
 //!   true (Wi-Fi relay plan, round 2: Yona's 2026-10-07 ruling reversed
 //!   P8's boot-time allocation). A board with Cloud relay on but no account
@@ -27,12 +27,13 @@
 //!   emulated C6 with `projects/test/basic` loaded and a network session
 //!   open, under the read gate's 16,384 B. They are allocated fallibly: a
 //!   heap that cannot give them waits and tries again rather than
-//!   resetting the board.
+//!   resetting the board. The route's outgoing frame (1,091 B) exists only
+//!   while a route holds the network slot (`run_relay_leg`): while the LAN
+//!   serves the session, the relay holds none.
 
 use alloc::boxed::Box;
 use alloc::collections::VecDeque;
 use alloc::string::String;
-use alloc::vec::Vec;
 use core::cell::RefCell;
 
 use embassy_futures::select::{Either, select};
@@ -43,6 +44,7 @@ use embassy_time::{Duration, Instant, Timer};
 use fw_esp32_common::net::relay::{
     RelayDriver, RelayLegBuffers, RelayLegExit, RelayLegIo, run_relay_leg, wait_until_may_dial,
 };
+use fw_esp32_common::net::try_zeroed_bytes;
 use fw_esp32_common::net::ws::RX_OVERHEAD;
 use fw_esp32_common::radio_link::lan_link_config::LAN_MAX_FRAME;
 use fw_esp32_common::radio_link::{RADIO_LINK_SLOTS, SharedPort};
@@ -60,7 +62,8 @@ const TCP_TX: usize = 2560;
 /// The WebSocket's receive buffer: one route frame (3 bytes and one
 /// network-link frame), with room for a control frame between fragments.
 const WS_RX: usize = ROUTE_FRAME_OVERHEAD + LAN_MAX_FRAME + RX_OVERHEAD;
-/// One outgoing route frame.
+/// One outgoing route frame (allocated by the leg while a route holds the
+/// network slot).
 const FRAME_TX: usize = ROUTE_FRAME_OVERHEAD + LAN_MAX_FRAME;
 /// How long to wait before asking the heap again when it could not give
 /// the leg's buffers.
@@ -88,7 +91,6 @@ struct RelayBuffers {
     tcp_rx: Box<[u8]>,
     tcp_tx: Box<[u8]>,
     ws_rx: Box<[u8]>,
-    frame_tx: Box<[u8]>,
 }
 
 impl RelayBuffers {
@@ -96,23 +98,13 @@ impl RelayBuffers {
     /// taken goes back).
     fn try_new() -> Option<Self> {
         Some(Self {
-            tcp_rx: try_zeroed(TCP_RX)?,
-            tcp_tx: try_zeroed(TCP_TX)?,
-            ws_rx: try_zeroed(WS_RX)?,
-            frame_tx: try_zeroed(FRAME_TX)?,
+            tcp_rx: try_zeroed_bytes(TCP_RX)?,
+            tcp_tx: try_zeroed_bytes(TCP_TX)?,
+            ws_rx: try_zeroed_bytes(WS_RX)?,
         })
     }
 
-    const BYTES: usize = TCP_RX + TCP_TX + WS_RX + FRAME_TX;
-}
-
-/// `len` zeroed bytes on the heap, or `None` rather than an allocation
-/// failure (which resets the board).
-fn try_zeroed(len: usize) -> Option<Box<[u8]>> {
-    let mut bytes = Vec::new();
-    bytes.try_reserve_exact(len).ok()?;
-    bytes.resize(len, 0);
-    Some(bytes.into_boxed_slice())
+    const BYTES: usize = TCP_RX + TCP_TX + WS_RX;
 }
 
 /// The relay task: `config` is the board's fixed facts (MAC, name, wire
@@ -142,7 +134,7 @@ pub async fn relay_task(stack: Stack<'static>, port: SharedPort, config: RelayCl
             tcp_rx: &mut buffers.tcp_rx,
             tcp_tx: &mut buffers.tcp_tx,
             ws_rx: &mut buffers.ws_rx,
-            frame_tx: &mut buffers.frame_tx,
+            frame_tx_len: FRAME_TX,
         };
         let exit = run_relay_leg(&mut driver, &io, &port, index, &mut bufs).await;
         drop(buffers);

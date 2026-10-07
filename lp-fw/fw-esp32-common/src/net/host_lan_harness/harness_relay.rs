@@ -95,12 +95,11 @@ pub(super) fn run_relay(
     driver.handle(now, RelayEvent::Network { joined: true });
     let io = StdRelayIo { shared, stop };
     let mut ws_rx = vec![0u8; ROUTE_FRAME_OVERHEAD + LAN_MAX_FRAME + RX_OVERHEAD];
-    let mut frame_tx = vec![0u8; ROUTE_FRAME_OVERHEAD + LAN_MAX_FRAME];
     let mut bufs = RelayLegBuffers {
         tcp_rx: &mut [],
         tcp_tx: &mut [],
         ws_rx: &mut ws_rx,
-        frame_tx: &mut frame_tx,
+        frame_tx_len: ROUTE_FRAME_OVERHEAD + LAN_MAX_FRAME,
     };
     // The C6's loop, without giving the buffers back (they are the host's).
     while block_on(run_relay_leg(&mut driver, &io, &port, index, &mut bufs)) == RelayLegExit::Idle {
