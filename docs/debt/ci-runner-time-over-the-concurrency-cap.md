@@ -43,18 +43,20 @@ split), emu-esp32v3 68 h, emu-esp32s3 61 h, emu-c6 59 h. Runs cancelled by a
 newer push to the same PR were ~14 % of runner time (60 h of the first
 420 h measured).
 
-**Workarounds** — measure, don't guess. Per-job p50/p95/max from recent
-runs (sequential calls: a parallel loop trips GitHub's secondary rate
-limit):
-
-```bash
-gh run list --workflow pre-merge.yml -L 200 --json databaseId > runs.json
-for id in $(jq -r '.[].databaseId' runs.json); do
-  gh api "repos/PhotomancerArt/lightplayer/actions/runs/$id/jobs?per_page=100" > "jobs/$id.json"; sleep 0.7
-done
-# then: per job name, (completed_at - started_at) over conclusion == success;
-# queue wait is started_at - created_at.
-```
+**Workarounds** — measure, don't guess: `just ci-durations` (default: the
+last 200 pre-merge.yml runs; `--since <ISO date>` for a wider window).
+Per job name it reports n, p50/p95/max over successful runs, cancelled and
+failed counts, runner-hours, and the job's `timeout-minutes` (parsed out
+of pre-merge.yml's own text) with a verdict — `over` when p95 exceeds half
+the budget, `tight` when max exceeds 80 % of it. Overall: total
+runner-hours, the cancelled share, and queue wait (`started_at -
+created_at`) p50/p90/p99/max. It fetches sequentially with a short sleep
+— a parallel loop trips GitHub's secondary rate limit — and caches each
+run's job list under `target/ci-durations/`, keyed by run id, so a re-run
+is cheap. `.github/workflows/ci-durations.yml` runs it weekly
+(`--runs 300`) and goes red the moment a job is over or tight; the script
+itself is `scripts/ci/job-durations.py` (stdlib only, `--self-test` for an
+offline check, wired into `just lint-ci-durations` and `check-lint`).
 
 Inside a job, most of the time is one monolithic step, so read the log:
 `gh api repos/PhotomancerArt/lightplayer/actions/jobs/<job id>/logs`, then
@@ -70,14 +72,32 @@ look for cargo's `Finished … in` lines (build) and libtest's `test result:
   passing (runs 37469170395, 37473996154 on #993): ~25 min of
   `test-emu-c6-cli` plus the ratchet, after the seams, OTA and Wi-Fi tests
   stacked up. #993 raised it to 45 as a stopgap. #997 split it: the link
-  half stays beside the ratchet (measured 9.7 / 10.4 min), the boards half
-  is the new `emu-c6-cli` job (14.7 min). It also dropped a dev `-p lp-cli`
-  build of two parity tests that Validate (x64) already runs (~4 min), and
-  made each half one cargo invocation so its LTO links run side by side.
-  Measured and rejected: running these tests in the dev profile (emulator
-  crates are opt-level 3 there) — on an M2 Max `emu_usb_link_gates` ran
-  68 s in dev against 23 s in release, so the build saving goes back out in
-  run time.
+  half stays beside the ratchet, budget 35 (final measured: 13.8 min PR /
+  10.7 min main, with the link tests plus the app-agent evals); the boards
+  half is the new `emu-c6-cli` job, budget 30 (final measured: 10.8 min PR
+  / 10.1 min main, with the fragmented-heap reads plus the split boot and
+  LED seam). It also dropped a dev `-p lp-cli` build of two parity tests
+  that Validate (x64) already runs (~4 min), and made each half one cargo
+  invocation so its LTO links run side by side. Measured and rejected:
+  running these tests in the dev profile (emulator crates are opt-level 3
+  there) — on an M2 Max `emu_usb_link_gates` ran 68 s in dev against 23 s
+  in release, so the build saving goes back out in run time.
+- **2026-10-06** — `just ci-durations`'s first real report (M1 of
+  lp2025/2026-10-06-1945-ci-director), last 200 runs: 6 of 20 jobs `over`
+  (Emulator C6, Emulator ESP32-S3, Emulator ESP32v3, Heap budget
+  (esp32c6 chip), Validate (x64), Validate story baselines — see the PR
+  for the full table), 368.8 total runner-hours, 15.9% on cancelled jobs.
+  Spot-check against this entry's own 399-run numbers landed OUTSIDE the
+  one-minute tolerance for Validate (x64) (p50 25.2 vs. 20.3, p95 30.5 vs.
+  27.7 — both ~3-5 min higher) and just outside it for Lint (x64)'s p50
+  (10.8 vs. 9.7; its p95, 12.2 vs. 11.4, was within a minute). The 200-run
+  window is more recent and smaller than the 399-run one this entry's
+  numbers came from, and recency is exactly where #997-era growth shows
+  up — a narrower, newer window reading slower than a wider, older one is
+  consistent with the jobs still growing, not a script defect (hand
+  spot-check against the cached raw job records: Validate (x64)'s 93
+  successful durations in this window range 11.75-31.5 min). Left for the
+  director to weigh, not re-scoped or tuned toward the older number.
 
 **Exit criteria** — every job's p95 is under half its `timeout-minutes`;
 queue p90 for a pre-merge job is under 2 minutes; and adding a test to an
