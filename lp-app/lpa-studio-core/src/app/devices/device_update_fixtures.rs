@@ -46,8 +46,12 @@ pub enum UpdateFixtureRow {
     BackingUp,
     /// An update is writing Y (40%).
     Updating,
-    /// An interrupted update to Y is being finished (70%).
+    /// The last step of an update this Studio is running: the engine is
+    /// being installed (70%).
     Finishing,
+    /// An interrupted update to Y, found half-way on connect, is being
+    /// finished with no click (70%).
+    FinishingResumed,
     /// The board's missing firmware X is being put back (35%).
     Restoring,
     /// Another device holds the board's transfer (40%).
@@ -68,13 +72,14 @@ pub enum UpdateFixtureRow {
 
 impl UpdateFixtureRow {
     /// Every row, in the table's order.
-    pub const ALL: [Self; 14] = [
+    pub const ALL: [Self; 15] = [
         Self::UpToDate,
         Self::Available,
         Self::AvailableDevBoard,
         Self::BackingUp,
         Self::Updating,
         Self::Finishing,
+        Self::FinishingResumed,
         Self::Restoring,
         Self::AnotherDevice,
         Self::NeedsUsbOnce,
@@ -126,6 +131,16 @@ impl UpdateFixture {
             Row::Finishing => (
                 board_x(),
                 with_update_activity(view, Some(UpdateStageFacts::Finishing), Some(70)),
+                None,
+            ),
+            Row::FinishingResumed => (
+                board_x(),
+                with_update_intent(
+                    view,
+                    UpdateIntentFacts::Auto,
+                    Some(UpdateStageFacts::Finishing),
+                    Some(70),
+                ),
                 None,
             ),
             Row::Restoring => (
@@ -355,7 +370,22 @@ pub fn facts_of(m: &BoardManifest) -> UpdateFacts {
 /// one of its escapes while the stage allows it (backing up, or before the
 /// first stage).
 pub fn with_update_activity(
+    view: DeviceView,
+    stage: Option<UpdateStageFacts>,
+    percent: Option<u8>,
+) -> DeviceView {
+    let intent = UpdateIntentFacts::Install {
+        version: "2026.10.05-2".to_string(),
+        allow_downgrade: false,
+    };
+    with_update_intent(view, intent, stage, percent)
+}
+
+/// [`with_update_activity`] for an update started with `intent`: the
+/// no-click `Auto` is what a Studio runs when it finds a board half-way.
+pub fn with_update_intent(
     mut view: DeviceView,
+    intent: UpdateIntentFacts,
     stage: Option<UpdateStageFacts>,
     percent: Option<u8>,
 ) -> DeviceView {
@@ -368,10 +398,7 @@ pub fn with_update_activity(
         cancel_requested: false,
         layout: None,
         update: Some(UpdateActivityView {
-            intent: UpdateIntentFacts::Install {
-                version: "2026.10.05-2".to_string(),
-                allow_downgrade: false,
-            },
+            intent,
             stage,
             done: 0,
             total: 0,
@@ -423,7 +450,12 @@ mod tests {
                     }
                     Row::BackingUp => matches!(standing, UpdateStanding::BackingUp { .. }),
                     Row::Updating => matches!(standing, UpdateStanding::Updating { .. }),
-                    Row::Finishing => matches!(standing, UpdateStanding::Finishing { .. }),
+                    Row::Finishing => {
+                        matches!(standing, UpdateStanding::Finishing { resumed: false, .. })
+                    }
+                    Row::FinishingResumed => {
+                        matches!(standing, UpdateStanding::Finishing { resumed: true, .. })
+                    }
                     Row::Restoring => matches!(standing, UpdateStanding::Restoring { .. }),
                     Row::AnotherDevice => {
                         matches!(standing, UpdateStanding::AnotherDevice { .. })

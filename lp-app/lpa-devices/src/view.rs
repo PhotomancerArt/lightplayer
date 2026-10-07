@@ -137,7 +137,8 @@ pub struct DeviceView {
     #[serde(default)]
     pub firmware_blocked: Option<String>,
     /// Why an over-the-air update cannot run from here, when it cannot:
-    /// [`FIRMWARE_NEEDS_USB`]'s sentence unless the current link carries
+    /// [`FIRMWARE_NEEDS_USB`]'s sentence (or, over the LAN,
+    /// [`UPDATE_NOT_OVER_WIFI_YET`]'s) unless the current link carries
     /// lp-link's update channel. [`Self::firmware_blocked`] keeps its meaning
     /// for the USB-only verbs (flash, factory reset, reset); this one is the
     /// update's alone. Whether the board announced the channel is a
@@ -152,6 +153,14 @@ pub struct DeviceView {
 /// Bluetooth link has no reset lines and no ROM downloader behind it, so
 /// flash, update and factory reset all need the cable.
 pub const FIRMWARE_NEEDS_USB: &str = "Firmware updates need USB";
+
+/// The sentence a card says when a board is reached over the LAN (Wi‑Fi):
+/// that link carries no update channel yet, but a Bluetooth or USB one
+/// does. [`DeviceView::update_blocked`]'s reason there, where
+/// [`FIRMWARE_NEEDS_USB`] stays the reason for the USB-only verbs (flash,
+/// factory reset) and for a board whose firmware cannot update over the air.
+pub const UPDATE_NOT_OVER_WIFI_YET: &str =
+    "Updates over Wi‑Fi aren't ready yet — connect by Bluetooth or USB";
 
 /// The running activity, as the card shows it.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -389,10 +398,29 @@ pub fn device_view(device: &Device, now: Millis) -> DeviceView {
             .as_ref()
             .filter(|endpoint| endpoint.is_network())
             .map(|_| FIRMWARE_NEEDS_USB.to_string()),
-        update_blocked: (!device.evidence.carries_update_channel())
-            .then(|| FIRMWARE_NEEDS_USB.to_string()),
+        update_blocked: update_blocked(device),
         escapes,
     }
+}
+
+/// Why the over-the-air update cannot run on this link, or `None` when the
+/// link carries lp-link's update channel. A LAN link gets its own sentence:
+/// updates there are not built yet, but Bluetooth and USB both carry them,
+/// so "need USB" would send a person the wrong way.
+fn update_blocked(device: &Device) -> Option<String> {
+    if device.evidence.carries_update_channel() {
+        return None;
+    }
+    let over_lan = device
+        .identity
+        .endpoint
+        .as_ref()
+        .is_some_and(|endpoint| endpoint.is_lan());
+    Some(if over_lan {
+        UPDATE_NOT_OVER_WIFI_YET.to_string()
+    } else {
+        FIRMWARE_NEEDS_USB.to_string()
+    })
 }
 
 /// What is on the board's flash, as a face the card draws.
@@ -1012,6 +1040,43 @@ mod tests {
             let card = view.devices.first().expect("an identified device");
             assert_eq!(card.update_blocked, blocked);
             assert_eq!(card.firmware_blocked, None, "a USB link blocks no flash");
+        }
+    }
+
+    /// Over the LAN the update says it is not ready yet (Bluetooth and USB
+    /// both carry it), while flash and factory reset still say USB; a
+    /// Bluetooth link that carries channel 3 blocks no update.
+    #[test]
+    fn over_wifi_the_update_has_its_own_reason_and_the_usb_only_verbs_keep_theirs() {
+        use crate::replay::{Replay, Step};
+        use crate::roster::RosterConfig;
+
+        for (attach, update, firmware) in [
+            (
+                Step::attach(1, "lan:ws://192.168.1.20/link"),
+                Some(UPDATE_NOT_OVER_WIFI_YET.to_string()),
+                Some(FIRMWARE_NEEDS_USB.to_string()),
+            ),
+            (
+                Step::attach_with_update_channel(1, "ble:QkxFLWlk"),
+                None,
+                Some(FIRMWARE_NEEDS_USB.to_string()),
+            ),
+            (
+                Step::attach(1, "ble:QkxFLWlk"),
+                Some(FIRMWARE_NEEDS_USB.to_string()),
+                Some(FIRMWARE_NEEDS_USB.to_string()),
+            ),
+        ] {
+            let mut replay = Replay::new(RosterConfig::default());
+            replay.step(Millis(0), attach);
+            replay.step(Millis(10), Step::opened(1));
+            replay.step(Millis(20), Step::hello(1).uid("dev_abc"));
+
+            let view = replay.view();
+            let card = view.devices.first().expect("an identified device");
+            assert_eq!(card.update_blocked, update);
+            assert_eq!(card.firmware_blocked, firmware);
         }
     }
 

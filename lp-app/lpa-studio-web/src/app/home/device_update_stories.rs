@@ -78,10 +78,17 @@ fn device_card_update_updating_bluetooth() -> Element {
 }
 
 #[story(
-    description = "Finishing an interrupted update (progress, started by Studio on connect with no click): \"Finishing the update… 70%\", the dark-yellow slot saying it was interrupted and this Studio is completing it."
+    description = "The last step of an update this Studio is running (progress): \"Finishing the update… 70%\", the dark-yellow slot saying \"Installing the rest of the firmware… 70%. Keep the board powered.\" Not called interrupted: nothing was."
 )]
 fn device_card_update_finishing() -> Element {
     update_card(UpdateFixtureRow::Finishing, Link::Bluetooth)
+}
+
+#[story(
+    description = "Finishing an interrupted update this Studio found half-way on connect (progress, started with no click): \"Finishing the update… 70%\", the dark-yellow slot saying it was interrupted and this Studio is completing it."
+)]
+fn device_card_update_finishing_resumed() -> Element {
+    update_card(UpdateFixtureRow::FinishingResumed, Link::Bluetooth)
 }
 
 #[story(

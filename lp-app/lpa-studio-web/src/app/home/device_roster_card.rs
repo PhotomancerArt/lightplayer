@@ -126,7 +126,7 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    DeviceActivityView, DeviceCardFeedView, DeviceEscape, DeviceFeedOp, DeviceId,
+    ActionEnablement, DeviceActivityView, DeviceCardFeedView, DeviceEscape, DeviceFeedOp, DeviceId,
     DeviceLoadedProject, DeviceStatus, DeviceView, FeedLiveness, OfferArgs, PendingLinkView,
     RENAME_NAME_PARAM, UiAction, UiDeviceUpdate, UiExampleCard, UiLinkKind, UiOffer, UiPackageCard,
     UiRuntimeBand, UiStatus, UiStatusKind, UiUnlockOffer, UpdateLight, UpdateRowKind,
@@ -274,11 +274,18 @@ pub(crate) fn DeviceRosterCard(
     // one is. The over-the-air update is not refused there (OTA M7 P12), so
     // a board that is up to date, or offered one, has no refused verb to
     // say it, and the reason goes under Factory reset itself.
+    // Only when the Update says the same thing: over Wi‑Fi it says the
+    // update is not ready yet, and Factory reset still needs its own USB
+    // reason.
     let firmware_reason_drawn = firmware_blocked
         && (flash.is_some()
-            || update
-                .as_ref()
-                .is_some_and(|update| !update.action.meta().enablement.is_enabled()));
+            || update.as_ref().is_some_and(|update| {
+                matches!(
+                    update.action.meta().enablement,
+                    ActionEnablement::Disabled { ref reason }
+                        if Some(reason.as_str()) == card.firmware_blocked.as_deref()
+                )
+            }));
     // A Bluetooth link nothing has unlocked yet: the board answers only its
     // hello and the unlock, so what it runs is unknown to the card (its
     // "nothing loaded" is a refused read, not the board's word), and the
