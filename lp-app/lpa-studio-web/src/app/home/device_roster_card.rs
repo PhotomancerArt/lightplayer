@@ -148,7 +148,7 @@ use crate::base::{
 };
 use crate::core::{
     ActionButton, ActionButtonVariant, OfferParamsForm, OfferPressButton, StatusChip,
-    quiet_action_class, use_device_verbs, verb_named,
+    pressed_or_refused, quiet_action_class, use_device_verbs, verb_named,
 };
 
 /// One device card.
@@ -224,6 +224,10 @@ pub(crate) fn DeviceRosterCard(
     /// Open the header's ⋯ menu immediately (stories only).
     #[props(default = false)]
     menu_initially_open: bool,
+    /// Stories only: mount the install verb's version list open, with
+    /// these values picked (and armed, when asked).
+    #[props(default)]
+    install_picker_preview: Option<OfferPickerPreview>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let device = card.id;
@@ -824,7 +828,11 @@ pub(crate) fn DeviceRosterCard(
                                         on_action,
                                     }
                                 } else {
-                                    OfferChoicePopover { offer: install, on_action }
+                                    OfferChoicePopover {
+                                        offer: install,
+                                        preview: install_picker_preview.clone(),
+                                        on_action,
+                                    }
                                 }
                             }
                         }
@@ -1184,17 +1192,40 @@ fn UpdateLine(update: UiDeviceUpdate) -> Element {
     }
 }
 
+/// Stories only: an offer popover mounted open, with values already
+/// picked, and its press armed when `armed`.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct OfferPickerPreview {
+    pub args: OfferArgs,
+    pub armed: bool,
+}
+
 /// An offer with parameters drawn from a verb row (an install's `version`
 /// choice): the quiet chip, in the offer's own words, opens a panel that
 /// floats in the top layer — so asking cannot change the card's height —
 /// holding the offer's parameters ([`OfferParamsForm`]) and its press
 /// ([`OfferPressButton`], which arms a Lasting binding on itself). The
 /// board pick's grammar, with the generic form for the values.
+///
+/// When the picked value binds a Lasting action, its copy (core's title and
+/// sentence: what installing that version changes) is drawn above the
+/// press, so it is read before the two clicks rather than only on hover.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn OfferChoicePopover(offer: UiOffer, on_action: EventHandler<UiAction>) -> Element {
-    let args = use_signal(OfferArgs::new);
+fn OfferChoicePopover(
+    offer: UiOffer,
+    #[props(default)] preview: Option<OfferPickerPreview>,
+    on_action: EventHandler<UiAction>,
+) -> Element {
+    let initial = preview.as_ref().map(|p| p.args.clone()).unwrap_or_default();
+    let args = use_signal(move || initial);
     let current = args.read().clone();
+    let copy = pressed_or_refused(&offer, &current)
+        .meta()
+        .consequence
+        .copy()
+        .cloned();
+    let armed_preview = preview.as_ref().is_some_and(|p| p.armed);
     rsx! {
         PopoverButton {
             class: quiet_action_class().to_string(),
@@ -1208,13 +1239,21 @@ fn OfferChoicePopover(offer: UiOffer, on_action: EventHandler<UiAction>) -> Elem
             chrome_class: "ux-popover-chrome-neutral".to_string(),
             placement: PopoverPlacement::BottomStart,
             layer_keeps_layout: true,
+            initially_open: preview.is_some(),
             div { class: "tw:grid tw:min-w-0 tw:gap-2.5 tw:p-2.5",
                 OfferParamsForm { offer: offer.clone(), args }
+                if let Some(copy) = copy {
+                    div { class: OFFER_CHOICE_COPY_CLASS,
+                        p { class: "tw:m-0 tw:font-semibold tw:text-strong-foreground", "{copy.title}" }
+                        p { class: "tw:m-0", "{copy.message}" }
+                    }
+                }
                 div { class: "tw:flex tw:min-w-0 tw:justify-end",
                     OfferPressButton {
                         offer,
                         args: current,
                         variant: ActionButtonVariant::Outline,
+                        armed_preview,
                         on_action,
                     }
                 }
@@ -1223,8 +1262,11 @@ fn OfferChoicePopover(offer: UiOffer, on_action: EventHandler<UiAction>) -> Elem
     }
 }
 
-/// The parameter panel's box: narrow (a version list is short), in the
-/// popover's neutral chrome.
+/// What a Lasting pick changes, in core's words: wraps, never clips, at the
+/// panel's width.
+const OFFER_CHOICE_COPY_CLASS: &str = "tw:grid tw:min-w-0 tw:gap-1 tw:rounded-sm tw:border tw:border-status-warning-border tw:bg-status-warning-bg tw:p-2 tw:text-[11px] tw:leading-snug tw:text-muted-foreground tw:whitespace-normal tw:break-words";
+
+/// The parameter panel's box: narrow, in the popover's neutral chrome.
 const OFFER_CHOICE_POPUP_CLASS: &str = "tw:grid tw:w-[260px] tw:max-w-[calc(100vw-80px)] tw:min-w-0 tw:overflow-hidden tw:whitespace-normal tw:rounded-md tw:border tw:text-sm tw:text-muted-foreground";
 
 /// The roster's "new device found, identifying…" entry.

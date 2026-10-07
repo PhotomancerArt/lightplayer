@@ -6,7 +6,9 @@ pub mod offer_params_form;
 pub(crate) mod offer_params_form_stories;
 pub mod offers_context;
 
-pub use offer_params_form::{OfferParamsForm, OfferPressButton, resolved_args, visible_options};
+pub use offer_params_form::{
+    OfferParamsForm, OfferPressButton, pressed_or_refused, resolved_args, visible_options,
+};
 pub use offers_context::{
     OffersProvider, use_device_verbs, use_offer_at, use_offers, use_provide_offers, use_verbs_of,
     verb_named,

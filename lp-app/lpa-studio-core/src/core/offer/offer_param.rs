@@ -68,6 +68,9 @@ pub struct OfferChoice {
     pub label: String,
     /// One more line about it, when there is one.
     pub detail: Option<String>,
+    /// A caution about picking it (a version in an older language than
+    /// this Studio), drawn in the warning tone under the detail.
+    pub warning: Option<String>,
     /// Why it cannot be picked right now, when it cannot. Drawn disabled
     /// with this reason, never hidden.
     pub disabled: Option<String>,
@@ -239,6 +242,7 @@ impl OfferChoice {
             value: value.into(),
             label: label.into(),
             detail: None,
+            warning: None,
             disabled: None,
             only_with: None,
         }
@@ -247,6 +251,12 @@ impl OfferChoice {
     /// One more line about it.
     pub fn with_detail(mut self, detail: impl Into<String>) -> Self {
         self.detail = Some(detail.into());
+        self
+    }
+
+    /// With a caution about picking it.
+    pub fn with_warning(mut self, warning: impl Into<String>) -> Self {
+        self.warning = Some(warning.into());
         self
     }
 

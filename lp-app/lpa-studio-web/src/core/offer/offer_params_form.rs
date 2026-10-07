@@ -60,6 +60,10 @@ pub fn OfferParamsForm(
                             rsx! {
                                 fieldset { key: "{name}", class: FIELDSET_CLASS,
                                     legend { class: LABEL_CLASS, "{param.label}" }
+                                    if let Some(note) = param.note.clone() {
+                                        p { class: NOTE_CLASS, "{note}" }
+                                    }
+                                    div { class: OPTIONS_CLASS,
                                     for option in options {
                                         {
                                             let selected = picked.as_deref() == Some(option.value.as_str());
@@ -74,6 +78,19 @@ pub fn OfferParamsForm(
                                                     title: option.disabled.clone().unwrap_or_default(),
                                                     aria_pressed: "{selected}",
                                                     onclick: move |_| args.write().insert(name.clone(), value.clone()),
+                                                    // A pick made before the list was drawn (a long
+                                                    // list, scrolled) starts in view.
+                                                    onmounted: move |event: MountedEvent| async move {
+                                                        if selected {
+                                                            // After the panel's entrance has placed it: it
+                                                            // mounts, then moves into the top layer, and a
+                                                            // scroll before that lands nowhere (measured: an
+                                                            // immediate or 0 ms scroll left the pick out of
+                                                            // view).
+                                                            gloo_timers::future::TimeoutFuture::new(150).await;
+                                                            let _ = event.data().scroll_to_with_options(PICK_IN_VIEW).await;
+                                                        }
+                                                    },
                                                     if selected {
                                                         span { class: OPTION_CARD_CHECK_CLASS, aria_hidden: "true",
                                                             StudioIcon { name: StudioIconName::StepComplete, size: 10 }
@@ -83,9 +100,13 @@ pub fn OfferParamsForm(
                                                     if let Some(detail) = option.disabled.clone().or(option.detail.clone()) {
                                                         span { class: OPTION_DETAIL_CLASS, "{detail}" }
                                                     }
+                                                    if let Some(warning) = option.warning.clone().filter(|_| option.disabled.is_none()) {
+                                                        span { class: OPTION_WARNING_CLASS, "{warning}" }
+                                                    }
                                                 }
                                             }
                                         }
+                                    }
                                     }
                                 }
                             }
@@ -221,7 +242,7 @@ pub fn OfferPressButton(
 
 /// What a press with `args` dispatches, or the offer's verb disabled with
 /// why it would be refused.
-pub(crate) fn pressed_or_refused(offer: &UiOffer, args: &OfferArgs) -> UiAction {
+pub fn pressed_or_refused(offer: &UiOffer, args: &OfferArgs) -> UiAction {
     match offer.press(&resolved_args(offer, args)) {
         Ok(action) => action,
         Err(error) => offer.action.clone().disabled(error.to_string()),
@@ -297,7 +318,22 @@ pub(crate) fn toggle_value(offer: &UiOffer, args: &OfferArgs, name: &str) -> boo
     })
 }
 
-const FIELDSET_CLASS: &str = "tw:m-0 tw:grid tw:min-w-0 tw:grid-cols-[repeat(auto-fill,minmax(140px,1fr))] tw:gap-1.5 tw:border-0 tw:p-0";
+/// Scroll a pick into view only as far as needed, at once.
+const PICK_IN_VIEW: ScrollToOptions = ScrollToOptions {
+    behavior: ScrollBehavior::Instant,
+    vertical: ScrollLogicalPosition::Nearest,
+    horizontal: ScrollLogicalPosition::Nearest,
+};
+
+const FIELDSET_CLASS: &str = "tw:m-0 tw:grid tw:min-w-0 tw:border-0 tw:p-0";
+
+/// The options' grid: as many columns as fit, and a long list (a version
+/// list with "All versions" on) scrolls inside about six rows, so the
+/// controls under it stay in view.
+const OPTIONS_CLASS: &str = "tw:grid tw:max-h-[18rem] tw:min-w-0 tw:grid-cols-[repeat(auto-fill,minmax(140px,1fr))] tw:gap-1.5 tw:overflow-y-auto tw:overscroll-contain";
+
+/// A parameter's note: one quiet line under its label.
+const NOTE_CLASS: &str = "tw:m-0 tw:mb-1.5 tw:text-[10.5px] tw:text-dim-foreground";
 
 const LABEL_CLASS: &str =
     "tw:mb-1 tw:p-0 tw:text-[11px] tw:font-semibold tw:text-subtle-foreground";
@@ -314,6 +350,10 @@ const TOGGLE_CLASS: &str =
 const OPTION_TITLE_CLASS: &str = "tw:min-w-0 tw:truncate tw:text-xs tw:font-semibold";
 
 const OPTION_DETAIL_CLASS: &str = "tw:min-w-0 tw:truncate tw:text-[10.5px] tw:text-dim-foreground";
+
+/// An option's caution, in the muted warning tone.
+const OPTION_WARNING_CLASS: &str =
+    "tw:min-w-0 tw:truncate tw:text-[10.5px] tw:text-status-warning-foreground";
 
 /// One option row, in the option-card grammar the device pickers use:
 /// selected wears the static ring, the selection wash and the check badge.

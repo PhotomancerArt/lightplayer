@@ -364,11 +364,11 @@ fn choice_option(choice: &InstallChoice) -> OfferChoice {
     if let Some(date) = date_line(choice) {
         detail.push(date);
     }
-    if let Some(warning) = warning(choice) {
-        detail.push(warning.to_string());
-    }
     if !detail.is_empty() {
         option = option.with_detail(detail.join(" · "));
+    }
+    if let Some(warning) = warning(choice) {
+        option = option.with_warning(warning);
     }
     if choice.on_board {
         option = option.disabled("On this board now");
@@ -842,10 +842,12 @@ mod tests {
             Some("this Studio's build · Oct 5, 21:40 UTC")
         );
         assert_eq!(options[0].detail.as_deref(), Some("Oct 7, 16:28 UTC"));
+        assert_eq!(options[9].detail.as_deref(), Some("Oct 3, 23:05 UTC"));
         assert_eq!(
-            options[9].detail.as_deref(),
-            Some("Oct 3, 23:05 UTC · older language than Studio")
+            options[9].warning.as_deref(),
+            Some("older language than Studio")
         );
+        assert_eq!(options[0].warning, None);
 
         let widened: Vec<bool> = options.iter().map(|o| o.only_with.is_some()).collect();
         assert_eq!(widened.iter().filter(|w| **w).count(), 4, "{widened:?}");
@@ -960,8 +962,8 @@ mod tests {
         let (options, _) = choice_param(&other);
         let older = options.iter().find(|o| o.value == "2026.10.05-1").unwrap();
         assert_eq!(
-            older.detail.as_deref(),
-            Some("Oct 5, 17:03 UTC · needs a USB cable after, over Bluetooth")
+            older.warning.as_deref(),
+            Some("needs a USB cable after, over Bluetooth")
         );
 
         let usb = install_of(&fixture(UpdateFixtureRow::UpToDate));
