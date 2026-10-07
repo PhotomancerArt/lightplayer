@@ -308,6 +308,19 @@ mod tests {
         assert!(!record_from_registry_row(&row, 1).last_over_bluetooth);
     }
 
+    /// A board reached through lightplayer.app's relay is the same Wi-Fi
+    /// provider's: the column says "Wi-Fi", no new stored value.
+    #[test]
+    fn a_relay_board_is_remembered_as_wifi() {
+        let mut over_relay = record();
+        over_relay.identity.endpoint = Some(lpa_devices::identity::EndpointKey(
+            "relay:a0f26287b48c".to_string(),
+        ));
+        let row = registry_row_from_record(&over_relay).unwrap();
+        assert_eq!(row.transport, "Wi-Fi");
+        assert!(!record_from_registry_row(&row, 1).last_over_bluetooth);
+    }
+
     /// The column says how the device is reached, and the link is what
     /// knows: a `sim:` endpoint is a sim, a port is USB, and a remembered
     /// board that is not reached at all says nothing rather than guessing.

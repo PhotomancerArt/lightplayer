@@ -381,11 +381,11 @@ fn sync_issue(view: &crate::UiStudioView) -> Option<String> {
 }
 
 /// A password the bench's locked board holds and Studio remembers.
-const BENCH_PASSWORD: &str = "bench-password-1";
+pub(super) const BENCH_PASSWORD: &str = "bench-password-1";
 
 /// A device store holding one edit password, [`BENCH_PASSWORD`], with
 /// nobody let in without it: a locked board.
-fn locked_store_file() -> (String, Vec<u8>) {
+pub(super) fn locked_store_file() -> (String, Vec<u8>) {
     let store = lpc_access::DeviceAccessFile {
         version: lpc_access::DeviceAccessFile::VERSION,
         secrets: vec![lpc_access::SecretEntry::from_password(
