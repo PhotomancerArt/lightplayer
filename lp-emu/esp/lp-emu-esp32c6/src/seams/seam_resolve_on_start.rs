@@ -24,6 +24,7 @@ impl Esp32C6Machine {
         if self.seams.request.is_empty() {
             return Ok(());
         }
+        self.net_on_chip_start();
         self.seams.starts += 1;
         self.seams.scans += 1;
         let scan = seam::scan(self.flash().lock().unwrap().bytes());
@@ -33,6 +34,13 @@ impl Esp32C6Machine {
         // there is no app start to wait for on a blank chip.
         if let Some(why) = scan.why_none() {
             self.seams.announce(seam_announce::none_line(&why));
+            // A blank chip booting ROM-up runs no app to pace (the mask ROM's
+            // download console, until it is flashed); the restart after a
+            // flash is a chip start of its own and checks again.
+            let blank = self.boot_mode() != BootMode::Direct && !self.has_image_at_reset_vector();
+            if !blank {
+                self.net_check_pace(Some(&why));
+            }
             self.seams.none_why = Some(why);
             self.seams.scan = Some(scan);
             return Ok(());
@@ -83,6 +91,8 @@ impl Esp32C6Machine {
                 self.seams.strict_error = Some(why);
             }
         }
+        let none_why = self.seams.none_why.clone();
+        self.net_check_pace(none_why.as_deref());
         let lines = self.seams.lines.clone();
         if self.bus.trace.is_enabled() {
             for line in lines {
@@ -124,7 +134,9 @@ impl Esp32C6Machine {
     }
 
     /// The run's configuration name, with one `+<seam>=<impl>` atom per
-    /// engaged seam. Exactly the time grade's name when none is engaged.
+    /// engaged seam, then `@pace=<mode>` when the run's pace was set
+    /// ([`crate::machine::Esp32C6Builder::pace`]). Exactly the time grade's
+    /// name when none is engaged and no pace was set.
     pub fn configuration_label(&self) -> String {
         self.seams.label(self.time_grade().configuration())
     }

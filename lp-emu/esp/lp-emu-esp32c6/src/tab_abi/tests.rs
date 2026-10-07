@@ -236,15 +236,23 @@ fn the_seam_keys_parse_into_a_request() {
     use lp_emu_esp_common::seam::Strength;
     let cfg = Config::parse("seams_prefer=led=fast\n").unwrap();
     let wanted = cfg.seams.wanted();
-    assert_eq!(wanted.len(), 1);
+    assert_eq!(wanted.len(), 2, "led=fast, and the default net=lan");
     assert_eq!(wanted[0].0.atom(), "led=fast");
     assert_eq!(wanted[0].1, Strength::Soft);
     let cfg = Config::parse("seams=led=fast").unwrap();
     assert_eq!(cfg.seams.wanted()[0].1, Strength::Strict);
     assert!(Config::parse("seams=none").unwrap().seams.is_empty());
-    assert!(
-        Config::parse("").unwrap().seams.is_empty(),
-        "seam-free by default"
+    let default: Vec<(String, Strength)> = Config::parse("")
+        .unwrap()
+        .seams
+        .wanted()
+        .iter()
+        .map(|(i, s)| (i.atom(), *s))
+        .collect();
+    assert_eq!(
+        default,
+        [("net=lan".to_string(), Strength::Soft)],
+        "the network seam, softly, by default"
     );
     let err = refusal("seams_prefer=led=slow");
     assert!(err.contains("line 1: seams_prefer:"), "{err}");
@@ -268,7 +276,7 @@ fn a_blank_chip_reports_no_seam_and_why() {
         "{json}"
     );
     assert!(json.contains("\"none_why\":\"no seam table"), "{json}");
-    let off = Config::parse("")
+    let off = Config::parse("seams=none")
         .unwrap()
         .builder(FlashBacking::Bytes(Vec::new()), AppSource::None)
         .build()
@@ -277,6 +285,19 @@ fn a_blank_chip_reports_no_seam_and_why() {
         seams_info_json(&off),
         "{\"label\":\"lp-emu:esp32c6:t1\",\"engaged\":[],\"lines\":[],\"none_why\":null}"
     );
+    // A default board asks for the network seam softly: on a blank chip it
+    // says why nothing engaged, and has no LAN (and no socket) at all.
+    let default = Config::parse("")
+        .unwrap()
+        .builder(FlashBacking::Bytes(Vec::new()), AppSource::None)
+        .build()
+        .unwrap();
+    let json = seams_info_json(&default);
+    assert!(
+        json.contains("\"lines\":[\"SEAM none engaged: no seam table"),
+        "{json}"
+    );
+    assert!(default.lan().is_none());
 }
 
 /// What Studio's Update firmware does to a board created blank: the shipped
@@ -303,7 +324,9 @@ fn a_flashed_and_reset_board_reports_led_fast_engaged() {
     assert!(machine.power_cycle(Strap::App));
     machine.run_until(&crate::machine::StopCondition::after_micros(2_000_000));
     let json = seams_info_json(&machine);
-    assert!(json.contains("\"engaged\":[\"led=fast\"]"), "{json}");
+    // `led=fast` first; `net=lan` beside it once the image carries the
+    // network seam.
+    assert!(json.contains("\"engaged\":[\"led=fast\""), "{json}");
     assert!(json.contains("+led=fast"), "{json}");
     assert!(
         json.contains("SEAM led=fast engaged (performance"),

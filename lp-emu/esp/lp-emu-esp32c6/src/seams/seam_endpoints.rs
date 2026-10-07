@@ -3,13 +3,16 @@
 //!
 //! Made when a chip start engages a capability seam, one per seam, in
 //! engaged order; a guest names one by its index and owns bit `1 << index`
-//! of the wake pending word. A host reaches them through
+//! of the wake pending word — except the network endpoint, whose two bits
+//! (frames 0, station events 1) are the network seam's ABI. A host reaches
+//! them through
 //! [`Esp32C6Machine::seam_endpoint_mut`] (to queue inbound events) and a
 //! medium through [`Esp32C6Machine::seam_endpoints_mut`]. Nothing here is
 //! static: two machines in one process each hold their own.
 
 use lp_emu_esp_common::ParticipantId;
-use lp_emu_esp_common::seam::{EndpointId, Engaged, SeamEndpoint};
+use lp_emu_esp_common::seam::net::net_endpoint;
+use lp_emu_esp_common::seam::{EndpointId, Engaged, PacerConfig, SeamAnswer, SeamEndpoint};
 use lp_seam::SeamKind;
 
 use super::seam_wake_stats::WakeStats;
@@ -19,10 +22,19 @@ impl Esp32C6Machine {
     /// This machine's name on a seam medium. Set it before the run starts
     /// (endpoints made later carry it); the lockstep runner names each of its
     /// machines by its slot.
+    ///
+    /// A board already on a LAN moves there under its new name, keeping its
+    /// MAC, its lease and its forwards.
     pub fn set_seam_board(&mut self, board: ParticipantId) {
+        let old = self.seams.board;
         self.seams.board = board;
         for e in &mut self.seams.endpoints {
             e.id.board = board;
+        }
+        if old != board
+            && let Some(lan) = &self.seams.lan
+        {
+            lan.rename_board(net_endpoint(old), net_endpoint(board));
         }
     }
 
@@ -65,15 +77,33 @@ impl Esp32C6Machine {
             .iter()
             .filter(|i| i.kind == SeamKind::Capability)
         {
-            let bit = 1u32 << self.seams.endpoints.len().min(31);
+            let index = self.seams.endpoints.len();
+            // The network seam's bits are the ABI's (`lp-base/lp-seam`'s
+            // README): frames on bit 0, station events on bit 1. Every other
+            // endpoint's is `1 << index`.
+            let bit = match imp.answer {
+                SeamAnswer::Net => super::net_seam::NET_FRAMES_BIT,
+                _ => 1u32 << index.min(31),
+            };
             let id = EndpointId {
                 board,
                 seam: imp.label,
+            };
+            let config = match imp.answer {
+                // A frame-carrying endpoint takes one whole Ethernet frame.
+                SeamAnswer::Net => PacerConfig {
+                    take_cap: lp_seam::net::MAX_FRAME_LEN,
+                    ..config
+                },
+                _ => config,
             };
             self.seams
                 .endpoints
                 .push(SeamEndpoint::new(id, bit, config));
             self.seams.wake_stats.push(WakeStats::default());
+            if imp.answer == SeamAnswer::Net {
+                self.net_engage(index);
+            }
         }
         self.seams.pending = engaged.table.pending;
     }

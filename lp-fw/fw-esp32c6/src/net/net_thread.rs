@@ -5,9 +5,11 @@
 //! (`esp_radio_rtos_driver::task_create`), at [`PRIORITY`] — above the main
 //! task (0), below esp-radio's own threads — with its own
 //! [`esp_rtos::embassy::Executor`]. It runs embassy-net's runner over the
-//! station's frame device, the station task, and (P04/P05) the LAN endpoint
-//! and mDNS. G0 rule (a) of the seams foundation: whatever the network
-//! wakes runs here, never on the main or render executor.
+//! station's frame device (the radio's, or the network seam's on an emulated
+//! board that engaged it: `net_bringup`), the station task, and (P04/P05)
+//! the LAN endpoint and mDNS. G0 rule (a) of the seams foundation: whatever
+//! the network wakes runs here, never on the main or render executor (the
+//! network seam's wake handler wakes only tasks on this thread).
 //!
 //! - **In the core.** `core_boot` starts it, so a split image's core holds
 //!   the station, the IP stack and the endpoints; an engine-less core still
@@ -29,11 +31,9 @@ use core::ffi::c_void;
 
 use embassy_net::{Config, Runner, Stack, StackResources};
 use esp_radio::wifi::{Interface, WifiController};
-use fw_esp32_common::net::NetFrameDevice;
 use fw_esp32_common::radio_link::{LAN_LINK_SLOTS, SharedPort};
 
-use super::esp_frame_device::{C6FrameDevice, CountedStation};
-use super::esp_station::EspStation;
+use super::esp_frame_device::C6FrameDevice;
 use super::lan_endpoint_task::{LanBuffers, RefuseBuffers};
 use super::mdns_task::MdnsBuffers;
 
@@ -132,14 +132,14 @@ extern "C" fn entry(param: *mut c_void) {
     } = *args;
     // No IPv4 config until the station associates: DHCP starts on link-up.
     let resources = Box::leak(Box::new(StackResources::<SOCKET_SLOTS>::new()));
-    let device: C6FrameDevice = NetFrameDevice::Radio(CountedStation(station));
+    // The radio, or (an emulated board that engaged `net=lan`) the network
+    // seam: one read of its engaged byte (`net_bringup`).
+    let (device, control) = super::net_bringup::choose(controller, station);
     let (stack, runner) = embassy_net::new(device, Config::default(), resources, seed);
     let executor = Box::leak(Box::new(esp_rtos::embassy::Executor::new()));
     executor.run(move |spawner| {
         spawner.spawn(net_runner(runner).unwrap());
-        spawner.spawn(
-            super::station_task::station_task(EspStation::new(controller), stack, host).unwrap(),
-        );
+        spawner.spawn(super::station_task::station_task(control, stack, host).unwrap());
         spawn_services(spawner, stack, port, buffers);
     })
 }

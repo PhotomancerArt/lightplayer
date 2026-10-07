@@ -145,9 +145,22 @@ pub struct StudioController {
     /// The transport that reaches BLUETOOTH devices (M5), when this build
     /// has one. `dyn`-free for symmetry with the other two halves.
     ble_transport: Option<Rc<crate::BleDeviceTransport>>,
-    /// The transport that reaches boards on the LAN (`?lan=`, Wi-Fi M6 P07),
-    /// when this page was asked to reach one.
+    /// The transport that reaches boards on the LAN, in every browser with
+    /// a WebSocket (Wi-Fi M6 P07; no flag since M8).
     lan_transport: Option<Rc<crate::LanDeviceTransport>>,
+    /// Where each board Studio has met is on Wi‑Fi, by MAC: learned from
+    /// its status on any link, kept in this browser by the web edge
+    /// ([`Self::set_on_wifi_addresses`]), never in the registry.
+    wifi_addresses: crate::WifiAddressBook,
+    /// The web edge's sink for [`Self::wifi_addresses`]' stored form.
+    on_wifi_addresses: Option<Box<dyn Fn(&str)>>,
+    /// The connects over Wi‑Fi someone asked for, while they run and once
+    /// they fail.
+    wifi_connects: crate::WifiConnects,
+    /// Where a connect over Wi‑Fi runs (the device IO spawner) and where it
+    /// reports back (the actor's queue). `None` in a rig that wires neither.
+    wifi_spawner: Option<Rc<dyn Fn(crate::DeviceTaskFuture)>>,
+    wifi_tx: Option<crate::app::studio::studio_view_channel::CommandSender>,
     /// What the browser answered about Bluetooth, reported by the web layer
     /// (`StudioCommand::BluetoothReach`); `Checking` until it does.
     bluetooth_reach: crate::BluetoothReach,
@@ -452,6 +465,11 @@ impl StudioController {
             emu_transport: None,
             ble_transport: None,
             lan_transport: None,
+            wifi_addresses: crate::WifiAddressBook::new(),
+            on_wifi_addresses: None,
+            wifi_connects: crate::WifiConnects::default(),
+            wifi_spawner: None,
+            wifi_tx: None,
             bluetooth_reach: crate::BluetoothReach::Checking,
             update_build_facts: crate::UpdateBuildFacts::default(),
             driving_updates: false,
@@ -636,12 +654,184 @@ impl StudioController {
         self.install_device_transport();
     }
 
-    /// Install the transport that serves boards on the LAN (`?lan=`, Wi-Fi
-    /// M6 P07), beside the others. Its links present
-    /// [`Self::network_link_keys`].
+    /// Install the transport that serves boards on the LAN (Wi-Fi M6 P07),
+    /// beside the others: in every browser with a WebSocket. Its links
+    /// present [`Self::network_link_keys`]. With it installed, a board this
+    /// browser remembers an address for is offered "Connect over Wi‑Fi",
+    /// and the add slot takes an address.
     pub fn set_lan_transport(&mut self, transport: Rc<crate::LanDeviceTransport>) {
         self.lan_transport = Some(transport);
         self.install_device_transport();
+    }
+
+    /// The Wi‑Fi addresses this browser remembered for boards (the web
+    /// edge's `localStorage`, [`crate::WIFI_ADDRESSES_STORAGE_KEY`], read at
+    /// boot). Load before the actor takes ownership; an entry that does not
+    /// read is left out.
+    pub fn load_wifi_addresses(&mut self, json: &str) {
+        self.wifi_addresses = crate::WifiAddressBook::from_json(json);
+    }
+
+    /// Where the address book's stored form goes whenever it changes (the
+    /// web edge's `localStorage`). Install before the actor takes ownership.
+    pub fn set_on_wifi_addresses(&mut self, hook: impl Fn(&str) + 'static) {
+        self.on_wifi_addresses = Some(Box::new(hook));
+    }
+
+    /// Where each board Studio has met is on Wi‑Fi, as core holds it.
+    pub fn wifi_addresses(&self) -> &crate::WifiAddressBook {
+        &self.wifi_addresses
+    }
+
+    /// The book changed: hand its stored form to the web edge.
+    fn wifi_addresses_changed(&mut self) {
+        if let Some(hook) = &self.on_wifi_addresses {
+            hook(&self.wifi_addresses.to_json());
+        }
+        self.mark_dirty();
+    }
+
+    /// A finished status read that says the board is on Wi‑Fi teaches the
+    /// book where it is — whichever link it was read over.
+    fn learn_wifi_address(&mut self, command: &crate::app::network::NetworkCommand) {
+        let crate::app::network::NetworkCommand::Answered {
+            device,
+            result: Ok(status),
+            ..
+        } = command
+        else {
+            return;
+        };
+        let crate::StationState::Connected { ip, host, .. } = &status.station else {
+            return;
+        };
+        let Some(key) = self.board_key(*device) else {
+            return;
+        };
+        if self.wifi_addresses.learn(key, ip, host, (self.now_secs)()) {
+            self.wifi_addresses_changed();
+        }
+    }
+
+    /// The MAC a roster device answers to, once it has said.
+    fn board_key(&self, device: crate::DeviceId) -> Option<lpa_devices::BoardKey> {
+        self.devices
+            .roster()
+            .device(device)?
+            .identity
+            .mac
+            .as_ref()
+            .and_then(lpa_devices::BoardKey::from_mac)
+    }
+
+    /// Start the connect over Wi‑Fi `op` asks for: open the board's session
+    /// through the LAN transport, and hear how it went on the actor's queue
+    /// ([`Self::finish_wifi_connect`]). A card's connect presents the keys
+    /// typed for that board at its new address (they are the board's, by
+    /// MAC, not the address's).
+    fn start_wifi_connect(&mut self, op: crate::WifiConnectOp) -> UiResult {
+        let Some(transport) = self.lan_transport.clone() else {
+            return Err(UiError::UnsupportedAction(
+                crate::WIFI_NEEDS_WEBSOCKET.to_string(),
+            ));
+        };
+        let (target, url) = match op {
+            crate::WifiConnectOp::Board { device } => {
+                let Some(key) = self.board_key(device) else {
+                    return Err(UiError::UnsupportedAction(
+                        "this board has not said who it is yet".to_string(),
+                    ));
+                };
+                let Some(url) = self
+                    .wifi_addresses
+                    .get(&key)
+                    .and_then(crate::WifiAddress::url)
+                else {
+                    return Err(UiError::UnsupportedAction(
+                        "Studio doesn't know where this board is on Wi\u{2011}Fi yet: connect it \
+                         over USB once with its Wi\u{2011}Fi on"
+                            .to_string(),
+                    ));
+                };
+                self.access
+                    .network_link_keys()
+                    .alias(&url, &key.to_string());
+                (crate::WifiConnectTarget::Board(key), url)
+            }
+            crate::WifiConnectOp::Address { url } => (crate::WifiConnectTarget::Address, url),
+        };
+        if self.wifi_connects.connecting(target) {
+            return Ok(UiNotices::new());
+        }
+        let (Some(spawner), Some(tx)) = (self.wifi_spawner.clone(), self.wifi_tx.clone()) else {
+            return Err(UiError::UnsupportedAction(
+                "this page cannot open a connection".to_string(),
+            ));
+        };
+        let host = lpa_link::providers::network_link::lan_host(&url).to_string();
+        self.wifi_connects.start(target, &host);
+        self.mark_dirty();
+        let attempt = transport.connect(&url);
+        spawner(Box::pin(async move {
+            let result = attempt.await;
+            tx.send(crate::StudioCommand::Network(
+                crate::app::network::NetworkCommand::WifiConnected {
+                    target,
+                    host,
+                    result,
+                },
+            ));
+        }));
+        Ok(UiNotices::new())
+    }
+
+    /// A connect over Wi‑Fi ended. On success the board is present: the
+    /// sweep links it now, and its hello merges it with its card by MAC.
+    fn finish_wifi_connect(
+        &mut self,
+        target: crate::WifiConnectTarget,
+        host: &str,
+        result: Result<(), crate::WifiConnectFailure>,
+    ) {
+        if let Err(failure) = &result {
+            log::info!("wi-fi: {host}: {}", failure.words());
+        }
+        let connected = result.is_ok();
+        self.wifi_connects.finish(target, host, result);
+        if connected {
+            self.device_sweep_pending = true;
+            self.run_due_device_sweep();
+        }
+        self.mark_dirty();
+    }
+
+    /// Every LAN link whose board has said who it is: its address is an
+    /// alias of the board's MAC in the link keys, so what is typed for it
+    /// is the board's.
+    fn sync_lan_key_aliases(&mut self) {
+        let aliases: Vec<(String, String)> = self
+            .devices
+            .roster()
+            .devices()
+            .iter()
+            .filter_map(|device| {
+                let endpoint = device.identity.endpoint.as_ref()?;
+                let url = lpa_link::providers::network_link::url_from_lan_endpoint(&endpoint.0)?;
+                let key = device
+                    .identity
+                    .mac
+                    .as_ref()
+                    .and_then(lpa_devices::BoardKey::from_mac)?;
+                Some((url.to_string(), key.to_string()))
+            })
+            .collect();
+        if aliases.is_empty() {
+            return;
+        }
+        let keys = self.access.network_link_keys();
+        for (url, board) in aliases {
+            keys.alias(&url, &board);
+        }
     }
 
     /// The keys a secure network link presents: this browser's and the
@@ -1072,14 +1262,16 @@ impl StudioController {
     /// Install the platform task spawner for device IO (`spawn_local` on
     /// wasm). Install before the actor takes ownership.
     pub fn set_device_spawner(&mut self, spawner: impl Fn(crate::DeviceTaskFuture) + 'static) {
-        // One spawner, three users: the effects layer, the access
-        // controller's login conversations and the network controller's
-        // Wi‑Fi conversations run on the same device IO seam.
+        // One spawner, four users: the effects layer, the access
+        // controller's login conversations, the network controller's
+        // Wi‑Fi conversations and a connect over Wi‑Fi run on the same
+        // device IO seam.
         let spawner: Rc<dyn Fn(crate::DeviceTaskFuture)> = Rc::new(spawner);
         let shared = Rc::clone(&spawner);
         self.devices
             .effects_mut()
             .set_spawner(move |future| shared(future));
+        self.wifi_spawner = Some(Rc::clone(&spawner));
         self.network.set_spawner(Rc::clone(&spawner));
         self.access.set_spawner(spawner);
     }
@@ -1098,7 +1290,9 @@ impl StudioController {
         &mut self,
         tx: crate::app::studio::studio_view_channel::CommandSender,
     ) {
-        // Wi‑Fi conversations report back on the same queue.
+        // Wi‑Fi conversations, and a connect over Wi‑Fi, report back on the
+        // same queue.
+        self.wifi_tx = Some(tx.clone());
         self.network.set_command_sender(tx.clone());
         self.access.set_command_sender(tx);
     }
@@ -1172,6 +1366,7 @@ impl StudioController {
     /// not been asked on this connection (plan Q7). Runs after the access
     /// drive, so a Bluetooth link's tier is the one access just settled.
     pub(crate) fn drive_device_network(&mut self) {
+        self.sync_lan_key_aliases();
         let access = &self.access;
         self.network
             .drive(self.devices.roster(), self.devices.effects(), |device| {
@@ -1182,6 +1377,16 @@ impl StudioController {
     /// Apply one network command (the Wi‑Fi popover's refresh, a finished
     /// conversation).
     pub fn apply_network_command(&mut self, command: crate::app::network::NetworkCommand) {
+        if let crate::app::network::NetworkCommand::WifiConnected {
+            target,
+            host,
+            result,
+        } = command
+        {
+            self.finish_wifi_connect(target, &host, result);
+            return;
+        }
+        self.learn_wifi_address(&command);
         let access = &self.access;
         self.network.apply(
             command,
@@ -1846,6 +2051,20 @@ impl StudioController {
             })
             .collect();
         view.updates = updates;
+        view.wifi_connects = self
+            .devices
+            .roster()
+            .devices()
+            .iter()
+            .filter_map(|device| {
+                let key = self.board_key(device.id)?;
+                let connect = self
+                    .wifi_connects
+                    .view(crate::WifiConnectTarget::Board(key))?;
+                Some((device.id, connect))
+            })
+            .collect();
+        view.wifi_address_connect = self.wifi_connects.view(crate::WifiConnectTarget::Address);
         view
     }
 
@@ -2927,7 +3146,13 @@ impl StudioController {
     /// `connect`, Reset its `reset-board`, and the no-device USB path
     /// `devices/connect-usb`.
     fn publish_device_offers(&self, offers: &mut crate::UiOfferTree) {
-        for offer in crate::add_device_offers(self.usb_available(), self.bluetooth_reach) {
+        let wifi = crate::WifiAddressReach {
+            available: self.lan_transport.is_some(),
+            connecting: self
+                .wifi_connects
+                .connecting(crate::WifiConnectTarget::Address),
+        };
+        for offer in crate::add_device_offers(self.usb_available(), self.bluetooth_reach, wifi) {
             offers.publish(offer);
         }
         let roster = self.device_roster_view();
@@ -2975,6 +3200,9 @@ impl StudioController {
             for offer in crate::device_offers(view, &facts) {
                 offers.publish(offer);
             }
+            if let Some(offer) = self.connect_wifi_offer(view, &facts) {
+                offers.publish(offer);
+            }
             // The Wi‑Fi verbs, under the same prefix (`<board>/wifi/…`).
             if let Some(wifi) = roster.wifi.get(&view.id) {
                 for offer in crate::app::network::wifi_offers(&facts.prefix, wifi) {
@@ -2986,6 +3214,33 @@ impl StudioController {
         // The layout verbs (C6 repartition) under the same prefixes.
         self.devices
             .publish_layout_offers(self.device_now(), offers, &prefixes);
+    }
+
+    /// `devices/<board>/connect-wifi`: "Connect over Wi‑Fi" on the card of a
+    /// board this browser remembers a Wi‑Fi address for, while nothing
+    /// reaches it (it is offline — unplugged, or its last link went), on a
+    /// page that reaches the LAN. Not on a runtime (a sim or an in-tab emu
+    /// has no radio). Disabled while it is being reached.
+    fn connect_wifi_offer(
+        &self,
+        view: &crate::DeviceView,
+        facts: &crate::DeviceOfferFacts<'_>,
+    ) -> Option<crate::UiOffer> {
+        if self.lan_transport.is_none()
+            || facts.face != crate::DeviceFace::Wire
+            || view.status != crate::DeviceStatus::Offline
+        {
+            return None;
+        }
+        let key = self.board_key(view.id)?;
+        let address = self.wifi_addresses.get(&key)?;
+        Some(crate::connect_wifi_offer(
+            &facts.prefix,
+            view.id,
+            &address.ip,
+            self.wifi_connects
+                .connecting(crate::WifiConnectTarget::Board(key)),
+        ))
     }
 
     /// Whether what `device` runs is a project this library holds (Q4): its
@@ -3693,6 +3948,10 @@ impl StudioController {
                 )
                 .map(|()| UiNotices::new())
                 .map_err(UiError::Link);
+        }
+        if node_id.as_str() == crate::WifiConnectOp::NODE_ID {
+            let op = action.into_op::<crate::WifiConnectOp>()?;
+            return self.start_wifi_connect(op);
         }
         if node_id.as_str() == crate::DevicePushOp::NODE_ID {
             let op = action.into_op::<crate::DevicePushOp>()?;
@@ -5595,7 +5854,20 @@ impl StudioController {
         // from.
         let power_off = self.runtime_to_power_off(op.action());
         let forgetting = matches!(op.action(), crate::DeviceAction::Forget { .. });
+        // Forget takes the board's Wi‑Fi address with it (read before the
+        // fold, which takes the device and its MAC).
+        let forgotten_board = match op.action() {
+            crate::DeviceAction::Forget { device } => self.board_key(*device),
+            _ => None,
+        };
         self.fold_device_input(crate::DeviceInput::Action(op.action.clone()));
+        if let Some(key) = forgotten_board {
+            self.wifi_connects
+                .forget(crate::WifiConnectTarget::Board(key));
+            if self.wifi_addresses.forget(&key) {
+                self.wifi_addresses_changed();
+            }
+        }
         self.power_off_runtime(power_off.clone());
         // D15: an emu's 4 MiB flash image lives in a worker-owned OPFS
         // directory, not in the library store, so the catalog op's sidecar

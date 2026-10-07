@@ -184,10 +184,14 @@ jobs:
         uses: cargo-bins/cargo-binstall@v1.21.1
 
       - name: Install web build tools (prebuilt)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: cargo binstall --no-confirm --locked wasm-bindgen-cli@0.2.114 dioxus-cli@0.7.9
 
       - name: Install espflash (prebuilt)
         if: inputs.channel == 'beta' && env.LP_STUDIO_FIRMWARE == ''
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: cargo binstall --no-confirm --locked espflash@3.3.0
 
       # LP_STUDIO_FIRMWARE (set above, or not) picks the bundle's firmware.

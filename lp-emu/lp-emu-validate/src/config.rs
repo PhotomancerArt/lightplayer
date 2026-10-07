@@ -66,6 +66,40 @@ impl SeamOverlay {
     }
 }
 
+/// The label's marker for a run's pace, after its seam atoms:
+/// `lp-emu:esp32c6:t1+net=lan@pace=realtime`. The emulator writes it
+/// (`lp_emu_esp_common::seam::net::Pace::label_suffix`); `lp-cli` owns the
+/// test that the two spellings agree. Not a `+` atom: a pace is not a seam,
+/// and no overlay ever answers for one.
+pub const PACE_MARKER: &str = "@pace=";
+
+/// A run's pace, as a label names it (`@pace=<word>`). An unset pace names
+/// nothing, and is every transcript's.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LabelPace {
+    /// 1×: held to wall time for the whole run. Wall-clock dependent, so it
+    /// never makes a transcript.
+    Realtime,
+    /// As fast as possible, never paced.
+    Max,
+}
+
+impl LabelPace {
+    /// `realtime` / `max`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            LabelPace::Realtime => "realtime",
+            LabelPace::Max => "max",
+        }
+    }
+
+    fn parse(word: &str) -> Option<Self> {
+        [LabelPace::Realtime, LabelPace::Max]
+            .into_iter()
+            .find(|p| p.as_str() == word)
+    }
+}
+
 /// One engaged seam in a composed configuration.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SeamAtom {
@@ -127,6 +161,10 @@ pub struct ConfigurationEntry {
     /// base configuration's, and [`label`](Self::label) is the composite.
     #[serde(skip)]
     pub seams: Vec<SeamAtom>,
+    /// The run's pace when the name set one (`…@pace=max`); `None` for every
+    /// entry `validate.toml` names directly, and for every transcript.
+    #[serde(skip)]
+    pub pace: Option<LabelPace>,
 }
 
 impl ConfigurationEntry {
@@ -135,8 +173,19 @@ impl ConfigurationEntry {
     }
 
     /// The configuration label: the base name plus one `+<seam>=<impl>` per
-    /// composed seam. Exactly `name` with none.
+    /// composed seam, then `@pace=<mode>` when a pace was set. Exactly `name`
+    /// with neither.
     pub fn label(&self) -> String {
+        let mut out = self.seam_label();
+        if let Some(pace) = self.pace {
+            out.push_str(PACE_MARKER);
+            out.push_str(pace.as_str());
+        }
+        out
+    }
+
+    /// The label without its pace: the base name and its seam atoms.
+    pub fn seam_label(&self) -> String {
         let mut out = self.name.clone();
         for s in &self.seams {
             out.push('+');
@@ -266,11 +315,28 @@ impl ValidateConfig {
     }
 
     /// The configuration `name` names: an entry of the table, or a composite
-    /// `<base>+<seam>=<impl>…` — the base entry with each atom's `[[seam]]`
-    /// overlay laid over its trust, in label order. A name with no `+` is
-    /// exactly the table's entry, as it always was.
+    /// `<base>+<seam>=<impl>…[@pace=<mode>]` — the base entry with each
+    /// atom's `[[seam]]` overlay laid over its trust, in label order, and the
+    /// run's pace when one was set (it moves no grade). A name with no `+`
+    /// and no `@` is exactly the table's entry, as it always was.
     pub fn configuration(&self, name: &str) -> Result<Cow<'_, ConfigurationEntry>> {
-        let mut parts = name.split('+');
+        // The pace comes off first, so the seam atoms never see it.
+        let (seamed, pace) = match name.split_once('@') {
+            None => (name, None),
+            Some((seamed, modifier)) => {
+                let pace = modifier
+                    .strip_prefix(&PACE_MARKER[1..])
+                    .and_then(LabelPace::parse)
+                    .with_context(|| {
+                        format!(
+                            "`{name}`: `@{modifier}` is not a pace — `{PACE_MARKER}realtime` or \
+                             `{PACE_MARKER}max`, after the seam atoms"
+                        )
+                    })?;
+                (seamed, Some(pace))
+            }
+        };
+        let mut parts = seamed.split('+');
         let base_name = parts.next().unwrap_or_default();
         let base = match self.configurations.iter().find(|c| c.name == base_name) {
             Some(c) => c,
@@ -283,11 +349,16 @@ impl ValidateConfig {
                     .join(", ")
             ),
         };
-        let atoms: Vec<&str> = parts.collect();
-        if atoms.is_empty() {
+        // Label order is sorted (the ADR's label rule), whatever order the
+        // caller typed: `…+net=lan+led=fast` and `…+led=fast+net=lan` are one
+        // configuration, composed the same way and labelled the same.
+        let mut atoms: Vec<&str> = parts.collect();
+        atoms.sort_unstable();
+        if atoms.is_empty() && pace.is_none() {
             return Ok(Cow::Borrowed(base));
         }
         let mut composed = base.clone();
+        composed.pace = pace;
         for atom in atoms {
             let overlay = self
                 .seams
@@ -486,6 +557,65 @@ chip = "esp32c6"
         assert_eq!(led.parsed().unwrap().name(), "lp-emu:esp32c6:t2");
     }
 
+    /// `net=lan` composes onto every C6 grade as a capability seam, moves no
+    /// grade anywhere (the layers above the frame device are the base's), and
+    /// keeps t3's documented timing band — the label of nearly every emulated
+    /// C6 run must grade exactly what the seam-free run grades.
+    #[test]
+    fn net_lan_is_a_capability_overlay_that_moves_no_grade() {
+        let cfg = ValidateConfig::embedded();
+        for base_name in [
+            "lp-emu:esp32c6:t1",
+            "lp-emu:esp32c6:t2",
+            "lp-emu:esp32c6:t3",
+        ] {
+            let base = cfg.configuration(base_name).unwrap();
+            let label = format!("{base_name}+net=lan");
+            let net = cfg.configuration(&label).unwrap();
+            assert_eq!(net.label(), label);
+            assert_eq!(net.name, base_name, "the base keeps its name");
+            assert!(net.performance_seam().is_none(), "a capability seam");
+            assert_eq!(net.seams[0].kind, SeamKind::Capability);
+            assert_eq!(net.records_pins, base.records_pins);
+            for class in FieldClass::ALL {
+                assert_eq!(
+                    net.trust.grade(*class),
+                    base.trust.grade(*class),
+                    "{label}: {class}"
+                );
+                if *class != FieldClass::Memory {
+                    assert_eq!(
+                        net.trust.because(*class),
+                        base.trust.because(*class),
+                        "{label}: {class}'s reason is the base's"
+                    );
+                }
+            }
+            assert_eq!(
+                net.trust.band(FieldClass::Timing).map(|b| b.describe()),
+                base.trust.band(FieldClass::Timing).map(|b| b.describe()),
+                "{label}: the timing band survives"
+            );
+            assert!(
+                net.trust
+                    .because(FieldClass::Memory)
+                    .unwrap()
+                    .contains("join allocations never happen"),
+                "{label}: memory carries the driver caveat"
+            );
+        }
+        // Label order is sorted whatever order the caller typed.
+        let a = cfg
+            .configuration("lp-emu:esp32c6:t2+net=lan+led=fast")
+            .unwrap();
+        let b = cfg
+            .configuration("lp-emu:esp32c6:t2+led=fast+net=lan")
+            .unwrap();
+        assert_eq!(a.label(), "lp-emu:esp32c6:t2+led=fast+net=lan");
+        assert_eq!(a.label(), b.label());
+        assert_eq!(a.performance_seam().unwrap().seam, "led");
+    }
+
     #[test]
     fn an_unknown_or_doubled_atom_is_refused_by_name() {
         let cfg = ValidateConfig::embedded();
@@ -505,6 +635,46 @@ chip = "esp32c6"
         );
         assert!(err.contains("named twice"), "{err}");
         assert!(cfg.configuration("nope+led=fast").is_err());
+    }
+
+    /// A pace rides after the seam atoms, is never read as one, moves no
+    /// grade, and an unset pace leaves every label as it was.
+    #[test]
+    fn a_pace_follows_the_atoms_and_is_never_a_seam() {
+        let cfg = ValidateConfig::embedded();
+        let plain = cfg.configuration("lp-emu:esp32c6:t1+net=lan").unwrap();
+        assert_eq!(plain.pace, None);
+        for (word, pace) in [("realtime", LabelPace::Realtime), ("max", LabelPace::Max)] {
+            let label = format!("lp-emu:esp32c6:t1+net=lan@pace={word}");
+            let paced = cfg.configuration(&label).unwrap();
+            assert_eq!(paced.pace, Some(pace));
+            assert_eq!(paced.label(), label);
+            assert_eq!(paced.seam_label(), "lp-emu:esp32c6:t1+net=lan");
+            assert_eq!(paced.seams, plain.seams, "no seam atom for the pace");
+            for class in FieldClass::ALL {
+                assert_eq!(paced.trust.grade(*class), plain.trust.grade(*class));
+            }
+            // With no seam engaged, beside the bare base.
+            let bare = cfg
+                .configuration(&format!("lp-emu:esp32c6:t1@pace={word}"))
+                .unwrap();
+            assert_eq!(bare.label(), format!("lp-emu:esp32c6:t1@pace={word}"));
+            assert!(bare.seams.is_empty());
+        }
+        for bad in [
+            "lp-emu:esp32c6:t1@pace=fast",
+            "lp-emu:esp32c6:t1@speed=max",
+            "lp-emu:esp32c6:t1@pace=max+net=lan",
+        ] {
+            let err = format!("{:#}", cfg.configuration(bad).unwrap_err());
+            assert!(err.contains("is not a pace"), "{bad}: {err}");
+        }
+        // A pace is not a `+` atom: spelled as one, it is an unknown seam.
+        let err = format!(
+            "{:#}",
+            cfg.configuration("lp-emu:esp32c6:t1+pace=max").unwrap_err()
+        );
+        assert!(err.contains("no [[seam]] overlay `pace=max`"), "{err}");
     }
 
     #[test]

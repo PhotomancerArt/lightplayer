@@ -8,7 +8,7 @@
 //! | `?wire=json` / `?wire=packed` | whether this page asks boards to pack their replies (the default is packed, everywhere), so JSON and packed can be measured on one build |
 //! | `?wire-capture=1` | tee every raw byte the Web Serial read pump hands to Rust into a 16 MiB in-memory buffer; `lpWireCapture()` in the console downloads it as `wire-capture-<unix-ms>.bin` (`lpa_link::device_link::wire_capture`) |
 //! | `?device-log=<level>` | once per link, after the board's hello and the packed-reply opt-in, ask it for `trace`/`debug`/`info`/`warn`/`error` logging (`SetLogLevel`) |
-//! | `?lan=<url>[,<url>…]` | reach each named board on the LAN (`ws://<board>/link`, or just its host) over a secure lp-link, as a Wi-Fi device on the Devices page — no UI adds one yet (Wi-Fi M6 P07; parsed by `lpa_studio_core::parse_lan_flag`) |
+//! | `?lan=<url>[,<url>…]` | a dev shortcut: dial each named board on the LAN (`ws://<board>/link`, or just its host) at page load, over a secure lp-link, as a Wi-Fi device on the Devices page. Wi-Fi boards need no flag — a board Studio has met is offered "Connect over Wi‑Fi", and the add slot takes an address — this only saves the typing (Wi-Fi M6 P07, network transport P01; parsed by `lpa_studio_core::parse_lan_flag`) |
 //! | `?firmware-store=<origin>` | the firmware store Studio fetches engines from, instead of `https://lightplayer.app` — **loopback and private-LAN origins only** (the `?record=` sink rule, `record_sink::check_sink`), so a link someone else wrote cannot point Studio at another store's "latest"; a refused origin keeps the default and says so once in the console |
 //! | `?ble-writes=<with-response\|without-response>[:N]` | how every Bluetooth link this page makes writes its frames: data frames with or without response, at most `N` (1–32) in flight — replacing the browser's default (`without-response:16` on a desktop browser, `without-response:8` on iOS; `lpa_link::providers::browser_ble_write_policy`), so a central that loses too much can drop its cap or go back to #880's `with-response` without a build |
 //! | `?seams=<atoms\|none>` | what a **Devices-page** emulated board asks the emulator for, instead of the end-user default `led=fast` (`lpa_link::providers::emulator_tab_seams`); `none` is today's seam-free machine, for an A/B on one build. Never reaches `?emu=tab` / `?emu=ws://…` boards, which ask for nothing |
@@ -234,9 +234,9 @@ thread_local! {
         const { std::cell::RefCell::new(Vec::new()) };
 }
 
-/// The boards `?lan=` named, as the sockets Studio dials. Read once by
-/// [`install`]; empty without the flag, and the shell installs no LAN
-/// transport then.
+/// The boards `?lan=` named, as the sockets Studio dials at page load. Read
+/// once by [`install`]; empty without the flag (the LAN transport is
+/// installed either way: Wi‑Fi boards need no flag).
 #[cfg_attr(
     not(target_arch = "wasm32"),
     allow(

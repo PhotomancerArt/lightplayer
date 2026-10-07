@@ -9,10 +9,10 @@
 //! It also holds **the boundary the network seam plugs into** (plan MD4):
 //! [`StationControl`] (scan, connect, disconnect, link loss) and
 //! [`NetFrameDevice`] (the frame device under embassy-net). The C6 puts
-//! esp-radio behind both (`fw-esp32c6/src/net/`); the network seam (PR C)
-//! puts the emulator's virtual LAN behind them again, and nothing above
-//! the boundary can tell. Each item's doc is the contract an emulator
-//! answer is held to.
+//! esp-radio behind both (`fw-esp32c6/src/net/`); the network seam
+//! (`seam_station`, `seam_frame_device`) puts the emulator's virtual LAN
+//! behind them again, and nothing above the boundary can tell. Each item's
+//! doc is the contract an emulator answer is held to.
 
 #[cfg(feature = "host-lan-harness")]
 pub mod host_lan_harness;
@@ -21,6 +21,12 @@ pub mod mdns;
 pub mod net_frame_device;
 pub mod radio_rule;
 pub mod scan_cache;
+// The network seam's adapters (`net=lan`): RISC-V only, like the seam calls
+// they make, and in host unit tests (where every call answers as silicon).
+#[cfg(any(target_arch = "riscv32", test))]
+pub mod seam_frame_device;
+#[cfg(any(target_arch = "riscv32", test))]
+pub mod seam_station;
 pub mod station_backoff;
 pub mod station_board;
 pub mod station_control;
@@ -31,6 +37,10 @@ pub mod ws;
 pub use join_choice::{JoinChoice, choose};
 pub use net_frame_device::{NetFrameDevice, Unplugged};
 pub use scan_cache::ScanCache;
+#[cfg(any(target_arch = "riscv32", test))]
+pub use seam_frame_device::SeamFrameDevice;
+#[cfg(any(target_arch = "riscv32", test))]
+pub use seam_station::SeamStation;
 pub use station_backoff::StationBackoff;
 pub use station_board::StationBoard;
 pub use station_control::{ConnectOutcome, StationControl};

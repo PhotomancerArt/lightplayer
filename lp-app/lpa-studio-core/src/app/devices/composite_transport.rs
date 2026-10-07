@@ -65,7 +65,8 @@ pub struct CompositeDeviceTransport {
     /// can explain why (Brave's flag, Safari → Bluefy) rather than vanish.
     ble: Option<Rc<dyn DeviceTransport>>,
     /// `None` where this build (or this page) reaches no board on the LAN:
-    /// the `browser-websocket` provider, installed when `?lan=` names one.
+    /// the `browser-websocket` provider, installed in every browser with a
+    /// WebSocket.
     lan: Option<Rc<dyn DeviceTransport>>,
 }
 
@@ -529,7 +530,7 @@ mod tests {
         assert!(calls.borrow().is_empty(), "nothing else was asked");
     }
 
-    /// The Wi-Fi half (`?lan=`): its sweep joins the union and a `lan:`
+    /// The Wi-Fi half: its sweep joins the union and a `lan:`
     /// endpoint — effect, lens and revoke — routes to it and only it. No
     /// chooser reaches it.
     #[test]
