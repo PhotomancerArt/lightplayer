@@ -164,11 +164,23 @@ snapshot() {
         elif .conclusion == "CANCELLED" then "cancel"
         else "fail" end
       end;
+    def cname:
+      if .__typename == "StatusContext" then .context
+      else (.workflowName // "") + (if .workflowName then " / " else "" end) + .name end;
+    # A later run on the same head has a larger id (it sits in detailsUrl).
+    def runid: ((.detailsUrl // "") | [capture("/runs/(?<n>[0-9]+)")] | (.[0].n // "0") | tonumber);
+    # Latest run per check wins: a re-run (an edited event re-triggers CI on
+    # the same head and cancels the run before it) leaves the checks of the
+    # old run in the rollup, and a stale cancel must not count against a later
+    # green. StatusContexts have no run and pass through.
+    def latest:
+      [.[] | select(.__typename == "StatusContext")]
+      + ([.[] | select(.__typename != "StatusContext")] | group_by(cname) | map(max_by(runid)));
     "head\t\(.headRefOid)",
     "mergeable\t\(.mergeable)",
     "merge_state\t\(.mergeStateStatus)",
-    ((.statusCheckRollup // [])[]
-      | "check\t\(bucket)\t\(if .__typename == "StatusContext" then .context else ((.workflowName // "") + (if .workflowName then " / " else "" end) + .name) end)\t\(.detailsUrl // .targetUrl // "")")'
+    ((.statusCheckRollup // []) | latest | .[]
+      | "check\t\(bucket)\t\(cname)\t\(.detailsUrl // .targetUrl // "")")'
 }
 
 # Stop the moment the PR's head is not the pinned sha. Nothing read in the
