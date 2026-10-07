@@ -3283,9 +3283,12 @@ jobs:
       # 10-07), and carried its own copy of the registry. Now:
       #   - the first main run of a day misses its exact key and builds
       #     target/ from nothing, so what it saves holds no unit an older
-      #     lockfile left behind. A cold build costs ~3 min over a warm one
-      #     (2026-09-08's misses: fw-browser 2m45s against ~45 s, dx 5m36s
-      #     against 4m50s) — once a day, on main;
+      #     lockfile left behind. A cold build costs well under a minute
+      #     more than a warm one: 8m28s for the three builds on PR #1022's
+      #     first run (no entry under the new key yet) against 7m42s on the
+      #     06:27 main run of 10-07, warm off the old 1.75 GB entry
+      #     (fw-browser 1m51s against 54 s; dx 5m53s against 6m15s; tools
+      #     6 s by binstall) — once a day, on main;
       #   - before the save, `scripts/ci/prune-target-cache.py` drops what
       #     the next run rebuilds regardless: path packages (a fresh checkout
       #     re-stamps their sources), incremental state, final artifacts, dx's
@@ -3317,13 +3320,6 @@ jobs:
       - name: Report the restored target/
         if: steps.stories_cache.outputs.cache-matched-key != ''
         run: cd lp2025 && python3 scripts/ci/prune-target-cache.py --report target --drop dx --drop studio-web-assets
-
-      # TEMPORARY — this PR's measurement, removed before it goes ready:
-      # build from what a pruned entry holds, so the run shows what the next
-      # main entry costs to build from.
-      - name: "TEMPORARY: prune the restored target/ (measurement)"
-        if: github.event_name == 'pull_request' && steps.stories_cache.outputs.cache-matched-key != ''
-        run: cd lp2025 && python3 scripts/ci/prune-target-cache.py target --drop dx --drop studio-web-assets
 
       - name: Restore Chrome for Testing cache
         id: chrome_cache
@@ -3632,6 +3628,17 @@ jobs:
       # so an entry saved from a build that died halfway would be what every
       # later run that day restores. Story drift does not stop the save —
       # drift is a complete capture.
+      # On a PR, what main's save would hold after this build: the same
+      # table the prune step below prints on main, plus the tools. Deletes
+      # nothing — a PR saves no entry.
+      - name: Report what a save would hold (PRs)
+        if: >-
+          always() && github.ref != 'refs/heads/main' &&
+          steps.check_complete.outputs.complete == 'true'
+        run: |
+          du -sh ~/.cargo/bin
+          cd lp2025 && python3 scripts/ci/prune-target-cache.py --report target --drop dx --drop studio-web-assets
+
       - name: Prune target/ to what the next run can reuse (main only)
         id: stories_prune
         if: >-

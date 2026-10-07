@@ -102,10 +102,16 @@ restore main's entries; one entry per purpose.
     run, so ~50 MB a lockfile change, ~3 changes a day. It also still
     carried its own registry copy. Fixed: one entry per UTC day, main
     restores only that day's exact key (the day's first main run builds
-    from nothing — ~3 min dearer, measured on 09-08's misses — so nothing
-    old is carried forward), `scripts/ci/prune-target-cache.py` drops path
-    packages, incremental state, final artifacts and dx's bundle before the
-    save, and the registry comes from the shared entry.
+    from nothing, so nothing old is carried forward),
+    `scripts/ci/prune-target-cache.py` drops path packages, incremental
+    state, final artifacts and dx's bundle before the save, and the registry
+    comes from the shared entry. **What the whole `target/` cache buys is
+    small:** PR #1022's first run, with no entry under the new key, built
+    all three (fw-browser, the emulator sidecar, dx) cold in 8m28s, against
+    7m42s on the 06:27 main run warm off the old 1.75 GB entry; the tools
+    came by binstall in 6 s. If the pruned entry still costs more budget
+    than ~45 s a stories run is worth, the next lever is caching only
+    `~/.cargo/bin` (or nothing) here.
   - **`emu-esp32v3-ref` still had its own rust-cache entry.** Registry only
     (`cache-targets: false`), so the same crates as the shared entry, under
     a key hashing every Cargo.toml: a new ~496 MB generation per manifest
@@ -124,7 +130,9 @@ restore main's entries; one entry per purpose.
     run's ~190 lookups could only miss. Fixed: the script calls rustc
     directly (`RUSTC_WRAPPER=""`) when the commit it builds is HEAD; a
     pinned commit keeps a stable path and its wrapper. The job's in-tree
-    builds keep sccache.
+    builds keep sccache. Measured on PR #1022: each reference build took
+    1m46s without the wrapper against 2m47s with it (the 05:28 main run),
+    and the job's misses fell from 302–413 to 38.
 
 **Steady state after the 2026-09-25 change** (estimate; re-measure a week
 after it lands):
