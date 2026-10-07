@@ -43,9 +43,7 @@ use lpa_link::providers::fake_device::{
 
 use lpfs::AsLpPath;
 
-use crate::app::devices::device_layout_view::{
-    DOWNLOAD_BACKUP, RESTORE_FILES, RESTORE_FROM_FILE,
-};
+use crate::app::devices::device_layout_view::{DOWNLOAD_BACKUP, RESTORE_FILES, RESTORE_FROM_FILE};
 use crate::app::library::{
     CatalogOp, CatalogOutcome, LibraryHost, LibraryHostError, LibraryStore, LocalBoxFuture,
     MemoryLibraryHost, OpenedProject,
