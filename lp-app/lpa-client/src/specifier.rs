@@ -2,11 +2,16 @@
 //!
 //! Parses host specifiers to determine transport type and parameters.
 //! Supports websocket (`ws://`, `wss://`, lpc-wire to `lp-cli serve`), serial
-//! (`serial:`) and a board on the LAN (`lan:<host>[:port]`) formats.
+//! (`serial:`), a board on the LAN (`lan:<host>[:port]`) and a board through
+//! the cloud relay (`relay:<board>[@<origin>]`) formats.
 
 use anyhow::{Result, bail};
 use lpc_model::DEFAULT_SERIAL_BAUD_RATE;
+use lpc_relay::RelayBoardId;
 use std::fmt;
+
+/// The relay a `relay:` address names when it names none.
+pub const RELAY_DEFAULT_ORIGIN: &str = "https://lightplayer.app";
 
 /// A LAN board's link port when a `lan:` address names none (Wi-Fi plan Q6:
 /// 80, the port a device-served panel will share).
@@ -21,6 +26,10 @@ pub enum HostSpecifier {
     /// `ws://<host>:<port>/link`. `host` is an IPv4 address or a `.local`
     /// name, resolved by the OS resolver (mDNS on macOS).
     Lan { host: String, port: u16 },
+    /// A board through the cloud relay: the same secure lp-link, inside a
+    /// WebSocket to `<origin>/relay/board/<board>` (`wss://` for an
+    /// `https://` origin). `board` is its relay id (its MAC).
+    Relay { board: RelayBoardId, origin: String },
     /// Serial connection
     Serial {
         port: Option<String>,   // None = auto-detect
@@ -79,6 +88,12 @@ impl HostSpecifier {
             return Ok(HostSpecifier::Lan { host, port });
         }
 
+        // A board through the cloud relay
+        if let Some(rest) = s.strip_prefix("relay:") {
+            let (board, origin) = parse_relay_address(rest.trim())?;
+            return Ok(HostSpecifier::Relay { board, origin });
+        }
+
         // Check for serial specifier
         if s.starts_with("serial:") {
             let rest = s.strip_prefix("serial:").unwrap().trim();
@@ -106,13 +121,18 @@ impl HostSpecifier {
         }
 
         bail!(
-            "Invalid host specifier: '{s}'. Supported formats: ws://host:port/, wss://host:port/, serial:auto, serial:/dev/ttyUSB1, serial:/dev/cu.usbmodem2101?baud={DEFAULT_SERIAL_BAUD_RATE}, lan:192.168.1.40, lan:lp-3f2a.local[:port], local, emu"
+            "Invalid host specifier: '{s}'. Supported formats: ws://host:port/, wss://host:port/, serial:auto, serial:/dev/ttyUSB1, serial:/dev/cu.usbmodem2101?baud={DEFAULT_SERIAL_BAUD_RATE}, lan:192.168.1.40, lan:lp-3f2a.local[:port], relay:<board-id>[@<origin>], local, emu"
         )
     }
 
     /// Check if this is a LAN board specifier
     pub fn is_lan(&self) -> bool {
         matches!(self, HostSpecifier::Lan { .. })
+    }
+
+    /// Whether this is a board through the cloud relay.
+    pub fn is_relay(&self) -> bool {
+        matches!(self, HostSpecifier::Relay { .. })
     }
 
     /// Check if this is a websocket specifier
@@ -150,6 +170,23 @@ impl HostSpecifier {
             _ => DEFAULT_SERIAL_BAUD_RATE, // Default for non-serial (shouldn't be called)
         }
     }
+}
+
+/// The board a `relay:` address names: `<board-id>[@<origin>]`, the origin
+/// `https://lightplayer.app` when it names none.
+fn parse_relay_address(rest: &str) -> Result<(RelayBoardId, String)> {
+    const FORM: &str = "relay:<board-id>[@<origin>], e.g. relay:10bda3b08e30 or relay:10bda3b08e30@http://127.0.0.1:2812";
+    let (id, origin) = match rest.split_once('@') {
+        Some((id, origin)) => (id.trim(), origin.trim()),
+        None => (rest, RELAY_DEFAULT_ORIGIN),
+    };
+    let board = id
+        .parse::<RelayBoardId>()
+        .map_err(|error| anyhow::anyhow!("'relay:{rest}': {error}; {FORM}"))?;
+    if !(origin.starts_with("https://") || origin.starts_with("http://")) {
+        bail!("'relay:{rest}': the origin must be http:// or https://; {FORM}");
+    }
+    Ok((board, origin.trim_end_matches('/').to_string()))
 }
 
 /// The board a `lan:` address names: `<host>[:port]`, the port 80 when
@@ -210,6 +247,10 @@ impl fmt::Display for HostSpecifier {
                 write!(f, "lan:{host}")
             }
             HostSpecifier::Lan { host, port } => write!(f, "lan:{host}:{port}"),
+            HostSpecifier::Relay { board, origin } if origin == RELAY_DEFAULT_ORIGIN => {
+                write!(f, "relay:{board}")
+            }
+            HostSpecifier::Relay { board, origin } => write!(f, "relay:{board}@{origin}"),
             HostSpecifier::Serial {
                 port: None,
                 baud_rate: None,
@@ -519,6 +560,37 @@ mod tests {
         ] {
             let error = HostSpecifier::parse(bad).unwrap_err().to_string();
             assert!(error.contains("lan:"), "{bad}: {error}");
+        }
+    }
+
+    #[test]
+    fn a_relay_address_is_a_board_id_and_an_origin() {
+        let board = RelayBoardId([0x10, 0xbd, 0xa3, 0xb0, 0x8e, 0x30]);
+        assert_eq!(
+            HostSpecifier::parse("relay:10bda3b08e30").unwrap(),
+            HostSpecifier::Relay {
+                board,
+                origin: RELAY_DEFAULT_ORIGIN.to_string()
+            }
+        );
+        let dev = HostSpecifier::parse("relay:10:BD:A3:B0:8E:30@http://127.0.0.1:2812/").unwrap();
+        assert_eq!(
+            dev,
+            HostSpecifier::Relay {
+                board,
+                origin: "http://127.0.0.1:2812".to_string()
+            }
+        );
+        assert_eq!(dev.to_string(), "relay:10bda3b08e30@http://127.0.0.1:2812");
+        assert_eq!(
+            HostSpecifier::parse("relay:10bda3b08e30")
+                .unwrap()
+                .to_string(),
+            "relay:10bda3b08e30"
+        );
+        for bad in ["relay:", "relay:xyz", "relay:10bda3b08e30@ftp://x"] {
+            let error = HostSpecifier::parse(bad).unwrap_err().to_string();
+            assert!(error.contains("relay:"), "{bad}: {error}");
         }
     }
 

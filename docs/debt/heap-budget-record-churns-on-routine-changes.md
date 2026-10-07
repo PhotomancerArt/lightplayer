@@ -219,6 +219,22 @@ long-lived branch conflict on this file whenever main re-baselined too.
   patch. Paydown: pin `APP_VERSION` (as the deploy workflows already do) for
   the ratchet's builds, or rebuild the re-check from the pre-write tree.
 
+- 2026-10-06 — **the C6's largest free block moves with the build, not
+  only with the tree** (cloud relay PR A, #999, stacked on #989): CI's
+  clean ratchet build of the merge commit (version `63e0a98`, job
+  112523953992) read `largestFreeBlock` 119,424 against the record's
+  119,440, with `usedBytes` 102,948 ("improved"). PR A's only
+  firmware-linked change is a few lines of `lpa-server`'s access state (a
+  `LinkTrust::Relayed` arm), and #989's own clean CI build read 119,440. A
+  local clean bless of the same commit read 119,440 too, both with the
+  local 9-character sha and with `APP_VERSION` pinned to CI's 7 characters
+  (which did reproduce CI's `usedBytes`). So the 16 B is a layout effect
+  that only CI's build shows, and no local bless can record it. Workaround
+  taken: the record carries CI's clean figures (102,948 / 198,588 /
+  119,424), transcribed from that job's first, clean step, not its dirty
+  re-check. Paydown as above: pin `APP_VERSION` for the ratchet's builds,
+  and grade `largestFreeBlock` as a band.
+
 - 2026-10-07 — **the C6's `largestFreeBlock` differs between machines on
   one image** (Wi-Fi PR B, #989, run 37555989018). CI read 119,432 B. This
   Mac read 119,456 B on CI's own fetched image (`just fetch-ci-images`, so

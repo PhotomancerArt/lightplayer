@@ -22,8 +22,19 @@ const TARGET_FRAME_TIME_MS: u32 = 16;
 /// * `Ok(())` if the loop completes successfully
 /// * `Err` if there's an unrecoverable error
 pub async fn run_server_loop_async<T: ServerTransport>(
+    server: LpServer,
+    transport: T,
+) -> anyhow::Result<()> {
+    run_server_loop_with(server, transport, |_, _| {}).await
+}
+
+/// [`run_server_loop_async`], calling `after_tick` after every tick with the
+/// server and the transport — where a transport with secure links sends a
+/// session that came up its hello (`RelayHostTransport::send_hellos`).
+pub async fn run_server_loop_with<T: ServerTransport>(
     mut server: LpServer,
     mut transport: T,
+    mut after_tick: impl FnMut(&LpServer, &mut T),
 ) -> anyhow::Result<()> {
     let mut last_tick = Instant::now();
 
@@ -78,6 +89,7 @@ pub async fn run_server_loop_async<T: ServerTransport>(
             }
         }
 
+        after_tick(&server, &mut transport);
         last_tick = frame_start;
 
         // Sleep to maintain ~60 FPS

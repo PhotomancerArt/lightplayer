@@ -46,6 +46,7 @@ pub mod cloud_service;
 pub mod model;
 pub mod ports;
 pub mod push_validation;
+pub mod relay_accounts;
 
 pub use cloud_service::CloudService;
 pub use lpc_cloud_api::MemberRole;
@@ -64,3 +65,4 @@ pub use ports::clock::Clock;
 pub use ports::id_mint::IdMint;
 pub use ports::meta_store::MetaStore;
 pub use push_validation::{PushValidation, validate_push_events};
+pub use relay_accounts::{BoardAccounts, verify_board_accounts};

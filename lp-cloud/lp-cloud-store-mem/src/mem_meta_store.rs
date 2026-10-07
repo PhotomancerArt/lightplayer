@@ -100,6 +100,13 @@ impl MetaStore for MemMetaStore {
         self.account_access.get(&user).cloned()
     }
 
+    fn account_by_key_salt(&self, key_salt: &[u8; 16]) -> Option<AccountAccess> {
+        self.account_access
+            .values()
+            .find(|access| access.key_salt == *key_salt)
+            .cloned()
+    }
+
     // ---- sessions ----------------------------------------------------
 
     fn put_session(&mut self, session: SessionRecord) {

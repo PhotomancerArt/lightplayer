@@ -74,6 +74,8 @@ pub enum CloudRequest {
     SetAccountPassword(SetAccountPassword),
     /// See [`ResetAccountKey`].
     ResetAccountKey,
+    /// See [`ListBoards`].
+    ListBoards,
 }
 
 /// Who is the caller? Answered with [`crate::response::UserInfo`]; never
@@ -267,6 +269,14 @@ pub struct SetAccountPassword {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ResetAccountKey;
 
+/// The signed-in account's boards that are online at the relay: those that
+/// registered with a proof of this account's key. Answered with
+/// [`crate::board_presence::BoardList`]; a guest's list is empty (no board
+/// holds a guest's key), and an anonymous caller is
+/// [`crate::error::CloudError::NotAuthenticated`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ListBoards;
+
 impl From<WhoAmI> for CloudRequest {
     fn from(_: WhoAmI) -> Self {
         CloudRequest::WhoAmI
@@ -390,6 +400,12 @@ impl From<SetAccountPassword> for CloudRequest {
 impl From<ResetAccountKey> for CloudRequest {
     fn from(_: ResetAccountKey) -> Self {
         CloudRequest::ResetAccountKey
+    }
+}
+
+impl From<ListBoards> for CloudRequest {
+    fn from(_: ListBoards) -> Self {
+        CloudRequest::ListBoards
     }
 }
 
@@ -609,6 +625,14 @@ mod tests {
     }
 
     /// Pinned JSON literals for the vocabulary-v4 account-access calls.
+    #[test]
+    fn pinned_json_literal_list_boards() {
+        assert_eq!(
+            serde_json::to_string(&CloudRequest::ListBoards).unwrap(),
+            "\"listBoards\""
+        );
+    }
+
     #[test]
     fn pinned_json_literal_account_access_calls() {
         assert_eq!(
