@@ -15,7 +15,7 @@
 //!   link's encoder). The server's gate decides what an untrusted link may
 //!   do; this file only decides which bytes go where.
 //!
-//! Four rules live here because this is the edge that owns them:
+//! Five rules live here because this is the edge that owns them:
 //!
 //! 1. **One frame buffer, three holders.** Every reply is serialized into the
 //!    same static frame buffer (`serial::server_msg`) — the ADR's "no second
@@ -26,7 +26,8 @@
 //!    every other holder lets go: each radio link that still reads it, then
 //!    the USB link ([`FrameBufHolder`]). A reply of at most
 //!    [`SMALL_REPLY_BYTES`] is copied into its radio link's own send ring
-//!    instead, and holds nothing.
+//!    instead, and holds nothing. The core's update hook (rule 5) writes the
+//!    buffer too, for a read-back chunk, and only while no link holds it.
 //! 2. **A slow radio link cannot stall the device for long.** The wait for a
 //!    radio link to let go of the frame buffer is bounded — by its own
 //!    deadline ([`RADIO_WRITE_DEADLINE_MS`] on Bluetooth,
@@ -52,9 +53,23 @@
 //!    challenge's expiry (`lpc_access::CHALLENGE_TTL_MS`), which the server
 //!    enforces: once the challenge expires or its answer is refused, the
 //!    ordinary deadline applies again, and a link already past it closes.
+//! 5. **Channel 3 goes to the core with the link's granted tier.** A radio
+//!    link's update-protocol message (`lpc-update`) is queued as it is
+//!    taken and handed to the core's update hook
+//!    ([`LinkMuxTransport::with_update_hook`],
+//!    [`super::radio_update_channel`]) from the upkeep, which holds the
+//!    server: with the tier a login or key **granted** the link
+//!    (`LpServer::link_granted_tier`), never the device's `open` setting —
+//!    the board session adds that itself, so its one access rule decides.
+//!    The mux holds no copy of that rule. A closed link is passed on so the
+//!    session forgets it, its queued messages dropped; a session `Reset`
+//!    drops the ended session's. With no hook (a monolithic image, DM25)
+//!    channel 3 is ignored. Only a Bluetooth link's channel 3 goes to the
+//!    hook: a LAN link's is ignored until updates over Wi-Fi are their own
+//!    change.
 //!
 //! **Network links** (feature `wifi`: the LAN's, and the cloud relay's
-//! routes) ride the same slots and the same rules, with four differences:
+//! routes) ride the same slots and the same rules, with five differences:
 //! they are secure lp-link responders, so they are [`LinkTrust::Keyed`] (or
 //! [`LinkTrust::Relayed`] through the relay) and their handshake asks the
 //! server for keys ([`ServerTransport::take_secure_events`] /
@@ -62,12 +77,13 @@
 //! link's tier at `Up`); a secure session that resets after coming up
 //! closes the link (a new session is a new server link, with a new grant, so
 //! the client reconnects); they are served from another thread, under the
-//! port's lock (see `radio_link_port`); and the LAN and the relay share
-//! **one** network slot (Wi-Fi relay plan D2). A newcomer that finds it held
-//! is a *challenge* ([`RadioLinkEvent::Challenged`]): it takes the slot only
-//! with a handshake that verifies under the holder's own key, looked up
-//! through the server like any other, and anything else is told busy
-//! without a lookup (`parked_handshake` has the rule and why).
+//! port's lock (see `radio_link_port`); their channel 3 is not served (rule
+//! 5); and the LAN and the relay share **one** network slot (Wi-Fi relay
+//! plan D2). A newcomer that finds it held is a *challenge*
+//! ([`RadioLinkEvent::Challenged`]): it takes the slot only with a handshake
+//! that verifies under the holder's own key, looked up through the server
+//! like any other, and anything else is told busy without a lookup
+//! (`parked_handshake` has the rule and why).
 //!
 //! A radio send that fails does **not** return an error to the server. The
 //! server's `tick_and_send` stops answering the whole batch on the first
@@ -82,8 +98,9 @@ use alloc::vec::Vec;
 
 use embassy_futures::select::{Either, select};
 use embedded_hal_async::delay::DelayNs;
-use lp_link::{CH_PROTO, LinkEvent, LinkState, Micros, ResetReason, SendError};
+use lp_link::{CH_PROTO, CH_UPDATE, LinkEvent, LinkState, Micros, ResetReason, SendError};
 use lpa_server::LpServer;
+use lpc_access::{OpenTo, Tier};
 use lpc_shared::transport::{Incoming, Link, LinkId, ServerTransport};
 #[cfg(feature = "wifi")]
 use lpc_shared::transport::{KeyAnswer, LinkTrust, SecureLinkEvent};
@@ -94,9 +111,10 @@ use super::frame_buf_holder::FrameBufHolder;
 #[cfg(feature = "wifi")]
 use super::parked_handshake::Msg1;
 use super::radio_link_config::SMALL_REPLY_BYTES;
-#[cfg(feature = "wifi")]
-use super::radio_link_port::RADIO_LINK_SLOTS;
-use super::radio_link_port::{LINK_SLOTS, RadioLinkEvent, RadioLinkPort, RadioLinkSlot};
+use super::radio_link_port::{
+    LINK_SLOTS, RADIO_LINK_SLOTS, RadioLinkEvent, RadioLinkPort, RadioLinkSlot,
+};
+use super::radio_update_channel::{RadioUpdate, RadioUpdateHook};
 use crate::link_upkeep::LinkUpkeep;
 use crate::serial::packed_link::PackedLink;
 use crate::serial::server_msg::frame_bytes;
@@ -224,6 +242,13 @@ pub struct LinkMuxTransport<U, D> {
     /// Until when the current server tick may wait on radio links: the last
     /// upkeep (the end of the previous tick) plus [`TICK_WAIT_LIMIT_MS`].
     tick_wait_until: Micros,
+    /// The core's channel-3 hook (rule 5); `None`: channel 3 is ignored.
+    update_hook: Option<RadioUpdateHook>,
+    /// Channel-3 messages taken off the Bluetooth links, waiting for the
+    /// upkeep.
+    updates: VecDeque<(LinkId, Vec<u8>)>,
+    /// Closed links the update hook has not been told about yet.
+    updates_closed: Vec<LinkId>,
 }
 
 impl<U: ServerTransport + FrameBufHolder, D: DelayNs> LinkMuxTransport<U, D> {
@@ -250,6 +275,56 @@ impl<U: ServerTransport + FrameBufHolder, D: DelayNs> LinkMuxTransport<U, D> {
             challenge: None,
             upkeep_hook: None,
             tick_wait_until: tick_wait_until(),
+            update_hook: None,
+            updates: VecDeque::with_capacity(LINK_SLOTS),
+            updates_closed: Vec::with_capacity(LINK_SLOTS),
+        }
+    }
+
+    /// Hand each radio link's channel-3 messages to `hook` — the core's
+    /// update session — with the tier the link was granted (rule 5). A split
+    /// image's engine installs it; a monolithic one does not.
+    #[must_use]
+    pub fn with_update_hook(mut self, hook: RadioUpdateHook) -> Self {
+        self.update_hook = Some(hook);
+        self
+    }
+
+    /// Hand the queued channel-3 messages to the update hook, each with the
+    /// tier `granted` says its link holds by a login or a key
+    /// (`LpServer::link_granted_tier`) and the device's `open` setting as it
+    /// stands now (`LpServer::device_open`, asked only when a message
+    /// waits), after telling it which links closed; then one pass, to flush
+    /// what it holds. Driven from the upkeep, which holds the server.
+    pub fn dispatch_updates(
+        &mut self,
+        granted: impl Fn(Link) -> Option<Tier>,
+        open: impl FnOnce() -> OpenTo,
+    ) {
+        let Some(hook) = self.update_hook else {
+            return;
+        };
+        for link in self.updates_closed.drain(..) {
+            hook(RadioUpdate::Closed { link });
+        }
+        let open = (!self.updates.is_empty()).then(open);
+        while let Some((link, bytes)) = self.updates.pop_front() {
+            hook(RadioUpdate::Message {
+                link,
+                granted: granted(RadioLinkPort::link(link)),
+                open: open.unwrap_or(OpenTo::Nobody),
+                bytes: &bytes,
+            });
+        }
+        hook(RadioUpdate::Pass);
+    }
+
+    /// `link` is gone: its queued channel-3 messages go, and the update hook
+    /// is owed a closed notice.
+    fn forget_updates_of(&mut self, link: LinkId) {
+        self.updates.retain(|(l, _)| *l != link);
+        if self.update_hook.is_some() {
+            self.updates_closed.push(link);
         }
     }
 
@@ -359,6 +434,7 @@ impl<U: ServerTransport + FrameBufHolder, D: DelayNs> LinkMuxTransport<U, D> {
                     if let Some(at) = self.radio.iter().position(|l| l.id == link) {
                         let gone = self.radio.remove(at);
                         self.inbox.retain(|i| i.link != link);
+                        self.forget_updates_of(link);
                         self.closed.push(link);
                         log::info!("radio link {link}: closed");
                         // The holder left while a newcomer waited on its
@@ -538,6 +614,17 @@ impl<U: ServerTransport + FrameBufHolder, D: DelayNs> LinkMuxTransport<U, D> {
                             }
                         }
                     }
+                    LinkEvent::Message { channel, data }
+                        if channel == CH_UPDATE
+                            && self.update_hook.is_some()
+                            && radio.slot < RADIO_LINK_SLOTS =>
+                    {
+                        // For the core, with the link's tier, from the
+                        // upkeep (rule 5). Bluetooth links only: a LAN
+                        // link's channel 3 is not served yet, and falls to
+                        // the arm below like any other channel.
+                        self.updates.push_back((radio.id, data));
+                    }
                     LinkEvent::Message { channel, data } => {
                         log::debug!(
                             "radio link {}: {} B on channel {channel} ignored",
@@ -583,12 +670,21 @@ impl<U: ServerTransport + FrameBufHolder, D: DelayNs> LinkMuxTransport<U, D> {
                         // them itself, and a reply would reach the next one.
                         let id = radio.id;
                         self.inbox.retain(|i| i.link != id);
+                        self.updates.retain(|(l, _)| *l != id);
+                        // In words: a `{:?}` prints nothing on the C6
+                        // (`-Z fmt-debug=none`).
+                        let why = match reason {
+                            ResetReason::PeerRestarted => "peer restarted",
+                            ResetReason::Requested => "requested",
+                            ResetReason::RetryLimit => "retry limit",
+                            ResetReason::ProtocolError => "protocol error",
+                        };
                         match reason {
                             ResetReason::PeerRestarted | ResetReason::Requested => log::info!(
-                                "radio link {id}: session reset ({reason:?}); now {generation}"
+                                "radio link {id}: session reset ({why}); now {generation}"
                             ),
                             ResetReason::RetryLimit | ResetReason::ProtocolError => log::warn!(
-                                "radio link {id}: session reset ({reason:?}); now {generation}"
+                                "radio link {id}: session reset ({why}); now {generation}"
                             ),
                         }
                     }
@@ -615,6 +711,7 @@ impl<U: ServerTransport + FrameBufHolder, D: DelayNs> LinkMuxTransport<U, D> {
             let link = self.radio.remove(at);
             self.port.slot(link.slot).revoke(id, reason);
             self.inbox.retain(|i| i.link != id);
+            self.forget_updates_of(id);
             self.closed.push(id);
         }
     }
@@ -975,6 +1072,10 @@ impl<U: ServerTransport + FrameBufHolder + LinkUpkeep, D: DelayNs> LinkUpkeep
             |link| server.link_tier(link).is_some(),
             |link| server.login_pending(link),
         );
+        self.dispatch_updates(
+            |link| server.link_granted_tier(link),
+            || server.device_open(),
+        );
         if let Some(hook) = self.upkeep_hook {
             hook(server, now_ms);
         }
@@ -995,7 +1096,9 @@ mod tests {
 
     extern crate std;
 
+    use super::super::{OpenRefused, RadioLinkMode, UPDATE_RX_WINDOW};
     use crate::serial::server_msg::frame_buf_turn;
+    use crate::update_send::UpdateSend;
 
     /// The whole life of a radio link: announced at subscribe, its lp-link
     /// session comes up, its hello goes first, then requests and replies,
@@ -1355,7 +1458,7 @@ mod tests {
         assert!(block(mux.receive()).unwrap().is_none(), "counted, dropped");
         let released = (ram(0), ram(1));
 
-        let cfg = super::super::radio_link_config(247).unwrap();
+        let cfg = super::super::radio_link_config(247, RadioLinkMode::Serve).unwrap();
         let bound = lp_link::Link::<SelectiveRepeat>::ram_bound(&cfg);
         let pair = |(x, y): (usize, usize)| alloc::format!("{x} + {y} = {} B", x + y);
         std::println!(
@@ -1525,10 +1628,221 @@ mod tests {
         assert_eq!(mux.primary.sent, vec![9]);
     }
 
+    /// No link opens before the boot decides what its radio links are for:
+    /// the radio side waits for the decision, and a decision made is final.
+    #[test]
+    fn no_link_opens_before_the_mode_is_decided() {
+        let port: &'static RadioLinkPort = Box::leak(Box::new(RadioLinkPort::new()));
+        let link = port.mint_link();
+        assert_eq!(port.mode(), None);
+        assert_eq!(
+            port.open(0, link, 247, 1),
+            Err(OpenRefused::ModeUndecided),
+            "the SYN would carry a window nobody chose"
+        );
+        assert!(port.slot(0).poll_timeout().is_none(), "nothing opened");
+        let mut waiting = core::pin::pin!(port.wait_for_mode(0));
+        assert!(
+            embassy_futures::poll_once(waiting.as_mut()).is_pending(),
+            "a connection waits for the decision"
+        );
+
+        port.decide_mode(RadioLinkMode::Update);
+        assert_eq!(
+            embassy_futures::poll_once(waiting.as_mut()),
+            core::task::Poll::Ready(RadioLinkMode::Update),
+            "the decision wakes it"
+        );
+        assert_eq!(block(port.wait_for_mode(1)), RadioLinkMode::Update);
+        assert_eq!(port.open(0, link, 247, 1), Ok(180));
+
+        // A second decision cannot reconfigure what is already open.
+        port.decide_mode(RadioLinkMode::Serve);
+        assert_eq!(port.mode(), Some(RadioLinkMode::Update));
+    }
+
+    /// The SYN — a link's first frame — advertises the wide receive window
+    /// in update mode (core-only) and the preset's in serve mode.
+    #[test]
+    fn a_link_opened_in_update_mode_advertises_the_wide_window_in_its_syn() {
+        for (mode, window) in [
+            (RadioLinkMode::Update, UPDATE_RX_WINDOW),
+            (RadioLinkMode::Serve, LinkConfig::ble().rx_window),
+        ] {
+            let port = leak_port_in(mode);
+            port.open(0, port.mint_link(), 247, 7).unwrap();
+            let syn = port
+                .slot(0)
+                .poll_frame(0, <[u8]>::to_vec)
+                .expect("a SYN first");
+            let header = lp_link::frame::Header::parse(&syn).unwrap();
+            assert_eq!(header.kind, lp_link::frame::FrameKind::Syn);
+            let body = &syn[lp_link::frame::HEADER_LEN..syn.len() - 4];
+            let syn = lp_link::frame::SynBody::parse(body).unwrap();
+            assert_eq!(syn.rx_window, window, "{mode:?}");
+            assert_eq!(syn.max_payload, 180, "{mode:?}");
+        }
+        assert_eq!(UPDATE_RX_WINDOW, 32);
+    }
+
+    /// Rule 5: a radio link's channel-3 message goes to the core's update
+    /// hook from the upkeep, with the tier its login granted — not with the
+    /// wire's requests; a closed link is passed on and its queued messages
+    /// dropped; a pass follows every dispatch.
+    #[test]
+    fn channel_three_goes_to_the_update_hook_with_the_granted_tier() {
+        let _turn = frame_buf_turn();
+        let port = leak_port();
+        let mut mux =
+            LinkMuxTransport::new(Usb::default(), port, NeverDelay).with_update_hook(record_update);
+        let mut a = Central::new(0x0a0a_1111, 247);
+        let mut b = Central::new(0x0b0b_2222, 247);
+        let link_a = open_session(port, &mut mux, &mut a, 0, 247);
+        let link_b = open_session(port, &mut mux, &mut b, 1, 247);
+        take_updates();
+
+        a.link.send(CH_UPDATE, b"Q\x01").unwrap();
+        a.send_request(&hello_request(4));
+        b.link.send(CH_UPDATE, b"G\x01").unwrap();
+        a.pump(port.slot(0));
+        b.pump(port.slot(1));
+        let incoming = block(mux.receive()).unwrap().expect("the wire request");
+        assert_eq!((incoming.link, incoming.msg.id), (link_a, 4));
+        assert!(
+            block(mux.receive()).unwrap().is_none(),
+            "channel 3 is not a request"
+        );
+        assert!(take_updates().is_empty(), "nothing before the upkeep");
+
+        // The server granted A play by a login; B holds nothing. The
+        // device's `open` setting as it is now rides along, for the session
+        // to apply by its own rule (it was locked since boot, say).
+        mux.dispatch_updates(|l| (l.id == link_a).then_some(Tier::Play), || OpenTo::Play);
+        assert_eq!(
+            take_updates(),
+            vec![
+                Seen::Message(link_a, Some(Tier::Play), OpenTo::Play, b"Q\x01".to_vec()),
+                Seen::Message(link_b, None, OpenTo::Play, b"G\x01".to_vec()),
+                Seen::Pass,
+            ]
+        );
+        mux.dispatch_updates(|_| None, || OpenTo::Nobody);
+        assert_eq!(take_updates(), vec![Seen::Pass], "a pass every upkeep");
+
+        // B sends again and closes before the upkeep: the hook hears it
+        // closed, never its message.
+        b.link.send(CH_UPDATE, b"Q\x01").unwrap();
+        b.pump(port.slot(1));
+        assert!(block(mux.receive()).unwrap().is_none());
+        port.slot(1).close();
+        block(port.announce(RadioLinkEvent::Closed { link: link_b }));
+        assert!(block(mux.receive()).unwrap().is_none());
+        mux.dispatch_updates(|_| Some(Tier::Edit), || OpenTo::Nobody);
+        assert_eq!(take_updates(), vec![Seen::Closed(link_b), Seen::Pass]);
+
+        // A link the mux closes itself is passed on the same way.
+        mux.expire_unauthenticated(0, |_| false, |_| false);
+        mux.expire_unauthenticated(LOGIN_DEADLINE_MS, |_| false, |_| false);
+        mux.dispatch_updates(|_| None, || OpenTo::Nobody);
+        assert_eq!(take_updates(), vec![Seen::Closed(link_a), Seen::Pass]);
+    }
+
+    /// A monolithic image installs no hook: channel 3 is ignored, never
+    /// queued.
+    #[test]
+    fn without_an_update_hook_channel_three_is_ignored() {
+        let _turn = frame_buf_turn();
+        let port = leak_port();
+        let mut mux = LinkMuxTransport::new(Usb::default(), port, NeverDelay);
+        let mut central = Central::new(0x0c0c_3333, 247);
+        let _link = open_session(port, &mut mux, &mut central, 0, 247);
+        central.link.send(CH_UPDATE, b"Q\x01").unwrap();
+        central.pump(port.slot(0));
+        assert!(block(mux.receive()).unwrap().is_none());
+        assert!(mux.updates.is_empty());
+        mux.dispatch_updates(|_| None, || OpenTo::Nobody);
+    }
+
+    /// The hook's answers on a radio link: a small one through the link's
+    /// send ring, a 4 KiB read-back chunk as the external message out of the
+    /// frame buffer, and another large one waits while any link reads it.
+    #[test]
+    fn update_answers_go_by_ring_or_by_frame_buffer_on_a_radio_link() {
+        let _turn = frame_buf_turn();
+        let port = leak_port();
+        let mut mux = LinkMuxTransport::new(Usb::default(), port, NeverDelay);
+        let mut a = Central::new(0x0d0d_4444, 247);
+        let mut b = Central::new(0x0e0e_5555, 247);
+        let link_a = open_session(port, &mut mux, &mut a, 0, 247);
+        let link_b = open_session(port, &mut mux, &mut b, 1, 247);
+        let unknown = port.mint_link();
+        assert_eq!(port.send_update(unknown, b"M{}"), UpdateSend::NoSession);
+
+        let manifest = b"M{\"proto\":1,\"state\":\"running\"}";
+        assert_eq!(port.send_update(link_a, manifest), UpdateSend::Queued);
+        assert!(!port.frame_buf_in_use(), "a small answer holds nothing");
+        let chunk: Vec<u8> = (0..4102u32).map(|i| i as u8).collect();
+        assert_eq!(port.send_update(link_a, &chunk), UpdateSend::Queued);
+        assert!(port.frame_buf_in_use());
+        assert_eq!(
+            port.send_update(link_b, &chunk),
+            UpdateSend::Later,
+            "another link's large answer waits for the buffer"
+        );
+        assert_eq!(port.send_update(link_b, manifest), UpdateSend::Queued);
+        while port.frame_buf_in_use() {
+            a.pump(port.slot(0));
+        }
+        a.pump(port.slot(0));
+        b.pump(port.slot(1));
+        assert_eq!(a.next_update(), Some(manifest.to_vec()));
+        assert_eq!(a.next_update(), Some(chunk.clone()));
+        assert_eq!(b.next_update(), Some(manifest.to_vec()));
+        assert_eq!(port.send_update(link_b, &chunk), UpdateSend::Queued);
+    }
+
     // ---- helpers ----
 
+    /// A port whose boot decided [`RadioLinkMode::Serve`] (the engine runs).
     fn leak_port() -> &'static RadioLinkPort {
-        Box::leak(Box::new(RadioLinkPort::new()))
+        leak_port_in(RadioLinkMode::Serve)
+    }
+
+    fn leak_port_in(mode: RadioLinkMode) -> &'static RadioLinkPort {
+        let port: &'static RadioLinkPort = Box::leak(Box::new(RadioLinkPort::new()));
+        port.decide_mode(mode);
+        port
+    }
+
+    /// What the update hook was handed, owned.
+    #[derive(Debug, PartialEq, Eq)]
+    enum Seen {
+        Message(LinkId, Option<Tier>, OpenTo, Vec<u8>),
+        Closed(LinkId),
+        Pass,
+    }
+
+    std::thread_local! {
+        /// The hook is a plain `fn`, called on the test's own thread.
+        static SEEN: core::cell::RefCell<Vec<Seen>> = const { core::cell::RefCell::new(Vec::new()) };
+    }
+
+    fn record_update(call: RadioUpdate<'_>) {
+        let seen = match call {
+            RadioUpdate::Message {
+                link,
+                granted,
+                open,
+                bytes,
+            } => Seen::Message(link, granted, open, bytes.to_vec()),
+            RadioUpdate::Closed { link } => Seen::Closed(link),
+            RadioUpdate::Pass => Seen::Pass,
+        };
+        SEEN.with(|s| s.borrow_mut().push(seen));
+    }
+
+    fn take_updates() -> Vec<Seen> {
+        SEEN.with(|s| core::mem::take(&mut *s.borrow_mut()))
     }
 
     /// What the BLE task does when a central subscribes: open the slot's
@@ -1541,8 +1855,7 @@ mod tests {
     ) -> LinkId {
         let link = port.mint_link();
         port.slot(slot).reset();
-        port.slot(slot)
-            .open(link, att_mtu, 0x5eed_0000 + slot as u32)
+        port.open(slot, link, att_mtu, 0x5eed_0000 + slot as u32)
             .unwrap();
         block(port.announce(RadioLinkEvent::Opened { link, slot }));
         assert!(block(mux.receive()).unwrap().is_none());
@@ -1647,9 +1960,18 @@ mod tests {
         }
 
         fn next_proto(&mut self) -> Option<Vec<u8>> {
+            self.next_on(CH_PROTO)
+        }
+
+        fn next_update(&mut self) -> Option<Vec<u8>> {
+            self.next_on(CH_UPDATE)
+        }
+
+        /// The next message on `wanted`, dropping everything before it.
+        fn next_on(&mut self, wanted: u8) -> Option<Vec<u8>> {
             while let Some(event) = self.events.pop_front() {
                 if let LinkEvent::Message { channel, data } = event
-                    && channel == CH_PROTO
+                    && channel == wanted
                 {
                     return Some(data);
                 }

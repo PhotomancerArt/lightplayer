@@ -321,6 +321,11 @@ impl LinkPortService {
         self.port.counters()
     }
 
+    /// The link's smoothed round-trip time, as its retransmit timer uses it.
+    pub fn srtt(&self) -> Micros {
+        self.port.link().srtt()
+    }
+
     /// The preset this port's link was built with.
     pub fn config(&self) -> &LinkConfig {
         self.port.link().config()

@@ -12,7 +12,9 @@ use lpc_history::ContentHash;
 use crate::config::{BlobBackend, MetaBackend, ServerConfig};
 use crate::firmware::firmware_plane::FirmwarePlane;
 use crate::firmware::firmware_upstream::FirmwareUpstream;
+use crate::firmware::github_release_list_upstream::GithubReleaseListUpstream;
 use crate::firmware::github_release_upstream::GithubReleaseUpstream;
+use crate::firmware::release_list_upstream::ReleaseListUpstream;
 use crate::page::static_site::StaticSite;
 use crate::ports::{AnyBlobStore, AnyMetaStore, SecureMint, SystemClock};
 use crate::relay::RelayRegistry;
@@ -109,6 +111,10 @@ impl AppState {
     ) -> Self {
         let login_providers = config.login_providers();
         let upstream = GithubReleaseUpstream::new(&config.firmware_upstream);
+        let list_upstream = GithubReleaseListUpstream::new(
+            &config.firmware_releases_list,
+            config.github_token.clone(),
+        );
         Self {
             core: Arc::new(Mutex::new(ServiceCore {
                 service: CloudService::new(meta, SystemClock, SecureMint)
@@ -116,7 +122,10 @@ impl AppState {
                 blobs,
             })),
             site: Arc::new(site),
-            firmware: Arc::new(FirmwarePlane::new(Arc::new(upstream))),
+            firmware: Arc::new(FirmwarePlane::new(
+                Arc::new(upstream),
+                Arc::new(list_upstream),
+            )),
             relay: RelayRegistry::new(),
             config: Arc::new(config),
         }
@@ -124,9 +133,21 @@ impl AppState {
 
     /// The same state with the firmware plane fetching through `upstream`
     /// instead of `LP_CLOUD_FIRMWARE_UPSTREAM` — the route tests' in-process
-    /// stub. Starts with an empty manifest cache.
+    /// stub. Starts with empty caches; the releases list upstream is kept.
     pub fn with_firmware_upstream(mut self, upstream: Arc<dyn FirmwareUpstream>) -> Self {
-        self.firmware = Arc::new(FirmwarePlane::new(upstream));
+        self.firmware = Arc::new(FirmwarePlane::new(upstream, self.firmware.list_upstream()));
+        self
+    }
+
+    /// The same state with the release index's list fetched through
+    /// `list_upstream` instead of `LP_CLOUD_FIRMWARE_RELEASES_LIST` — the
+    /// route tests' in-process stub. Starts with empty caches; the file
+    /// upstream is kept.
+    pub fn with_release_list_upstream(
+        mut self,
+        list_upstream: Arc<dyn ReleaseListUpstream>,
+    ) -> Self {
+        self.firmware = Arc::new(FirmwarePlane::new(self.firmware.upstream(), list_upstream));
         self
     }
 

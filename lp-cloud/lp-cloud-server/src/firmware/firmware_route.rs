@@ -177,11 +177,11 @@ fn redirect(location: &str) -> Response {
     response
 }
 
-fn not_found(reason: &str) -> Response {
+pub(super) fn not_found(reason: &str) -> Response {
     text(StatusCode::NOT_FOUND, SHORT_CACHE_CONTROL, reason)
 }
 
-fn failed(failure: LookupFailure) -> Response {
+pub(super) fn failed(failure: LookupFailure) -> Response {
     match failure {
         LookupFailure::NotFound(reason) => not_found(reason),
         LookupFailure::Upstream(UpstreamError::TimedOut) => {
@@ -219,7 +219,7 @@ fn text(status: StatusCode, cache_control: &'static str, reason: &str) -> Respon
     response
 }
 
-fn common_headers(h: &mut HeaderMap) {
+pub(super) fn common_headers(h: &mut HeaderMap) {
     h.insert(
         header::ACCESS_CONTROL_ALLOW_ORIGIN,
         HeaderValue::from_static("*"),
@@ -251,7 +251,7 @@ fn content_type(file: &str) -> &'static str {
 
 /// Whether `If-None-Match` names this ETag (or `*`). Weak tags compare equal:
 /// the bytes behind an address never change.
-fn if_none_match(headers: &HeaderMap, sha256: &str) -> bool {
+pub(super) fn if_none_match(headers: &HeaderMap, sha256: &str) -> bool {
     let Some(value) = headers
         .get(header::IF_NONE_MATCH)
         .and_then(|v| v.to_str().ok())

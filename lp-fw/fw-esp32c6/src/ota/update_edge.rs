@@ -1,9 +1,10 @@
-//! The board's update session (`lpc_update::board::BoardSession`) on the USB
-//! link: the edge both core-only and the running engine's hook drive. It
-//! owns the session, the split image's [`SplitUpdateTarget`] and the
-//! channel-3 outbox, reads the clock for the session, and says what happened
-//! in one stable `[OTA]` line per state change (the emulator scenarios read
-//! them):
+//! The board's update session (`lpc_update::board::BoardSession`) on the
+//! host links — USB, and each radio link when the image has Bluetooth: the
+//! edge both core-only and the running engine's hooks drive. It owns the
+//! session, the split image's [`SplitUpdateTarget`] and one channel-3 outbox
+//! per link it answers ([`UpdateOutbox`], sent through [`UpdateLinks`]),
+//! reads the clock for the session, and says what happened in one stable
+//! `[OTA]` line per state change (the emulator scenarios read them):
 //!
 //! - `[OTA] offer <buildId> → <core|engine> @<dest>`
 //! - `[OTA] resuming <core|engine> at <bytes>`
@@ -13,19 +14,16 @@
 
 use alloc::vec::Vec;
 
-use fw_esp32_common::usb_link::UsbLinkShared;
 use lpc_update::board::{
     AccessFacts, BoardFacts, BoardSession, Effect, LinkId, LinkTrust, SessionConfig, SessionMode,
     TransferProgress,
 };
 use lpc_update::{BoardMessage, BoardState, HostMessage, PieceKind};
 
+use super::update_links::UpdateLinks;
 use super::update_outbox::UpdateOutbox;
 use super::update_target_impl::SplitUpdateTarget;
 use super::update_timing::{MessageTiming, now_us};
-
-/// The one USB link, as the session names it.
-pub const USB_LINK: LinkId = LinkId(0);
 
 /// What the firmware does after a pass.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -37,11 +35,13 @@ pub enum EdgeEffect {
     Reset,
 }
 
-/// The session, its flash and its outbox.
+/// The session, its flash and its outboxes.
 pub struct UpdateEdge {
     pub session: BoardSession,
     pub target: SplitUpdateTarget,
-    outbox: UpdateOutbox,
+    /// One per link the session has answered, while its link is open or it
+    /// still holds something.
+    outboxes: Vec<UpdateOutbox>,
     /// The last transfer the session ran, for the commit line.
     last: Option<TransferProgress>,
     /// The last message was answered `N`.
@@ -91,7 +91,7 @@ impl UpdateEdge {
         Self {
             session,
             target,
-            outbox: UpdateOutbox::new(),
+            outboxes: Vec::new(),
             last,
             refused_last: false,
             encoded: 0,
@@ -105,12 +105,18 @@ impl UpdateEdge {
         self.session.manifest(now_ms()).state
     }
 
-    pub fn link_up(&mut self, trust: LinkTrust) {
-        self.session.link_up(now_ms(), USB_LINK, trust);
+    /// `link`'s session came up, trusted as `trust` (USB: trusted; a radio
+    /// link: untrusted — a core-side login gives it a tier).
+    pub fn link_up(&mut self, link: LinkId, trust: LinkTrust) {
+        self.session.link_up(now_ms(), link, trust);
     }
 
-    pub fn link_down(&mut self) {
-        self.session.link_down(now_ms(), USB_LINK);
+    /// `link`'s session ended, or the link is gone: the session forgets it
+    /// (a login challenge it held, a transfer it owned may be taken over),
+    /// and so does its outbox.
+    pub fn link_down(&mut self, link: LinkId) {
+        self.session.link_down(now_ms(), link);
+        self.outboxes.retain(|o| o.link != link);
     }
 
     /// `Z` chunks this session received.
@@ -118,15 +124,37 @@ impl UpdateEdge {
         self.encoded
     }
 
-    /// One channel-3 message from the USB host.
-    pub fn on_message(&mut self, bytes: &[u8]) {
+    /// One channel-3 message from `link`, trusted as it came up (in
+    /// core-only the session's own login gives an untrusted link its tier).
+    pub fn on_message(&mut self, link: LinkId, bytes: &[u8]) {
         let first = bytes.first().copied();
         if first == Some(b'Z') {
             self.encoded += 1;
         }
         let start = now_us();
         self.session
-            .on_message(&mut self.target, now_ms(), USB_LINK, bytes);
+            .on_message(&mut self.target, now_ms(), link, bytes);
+        self.after_message(first, start, bytes);
+    }
+
+    /// One channel-3 message from a radio `link` while the engine runs, with
+    /// the tier a login or key granted it on the engine's server (never one
+    /// the device's `open` setting alone gave: the session adds that itself).
+    #[cfg(feature = "ble")]
+    pub fn on_message_with_tier(
+        &mut self,
+        link: LinkId,
+        granted: Option<lpc_access::Tier>,
+        bytes: &[u8],
+    ) {
+        let first = bytes.first().copied();
+        let start = now_us();
+        self.session
+            .on_message_with_tier(&mut self.target, now_ms(), link, granted, bytes);
+        self.after_message(first, start, bytes);
+    }
+
+    fn after_message(&mut self, first: Option<u8>, start: u64, bytes: &[u8]) {
         match first {
             Some(b'D' | b'Z') => self.chunks.note(start, now_us()),
             Some(b'G') => self.read_backs.note(start, now_us()),
@@ -136,15 +164,23 @@ impl UpdateEdge {
         self.note_offer(bytes);
     }
 
-    /// Send what the session queued and take its effects.
-    pub fn pump(&mut self, link: &UsbLinkShared) -> Vec<EdgeEffect> {
+    /// Send what the session queued, each answer on the link it is for, and
+    /// take its effects.
+    pub fn pump(&mut self, links: &UpdateLinks) -> Vec<EdgeEffect> {
         for out in self.session.take_outgoing() {
             if let Ok(BoardMessage::Refusal(r)) = BoardMessage::decode(&out.bytes) {
-                log::warn!("[OTA] refused {r:?}");
+                // In words, never `{:?}`: this image prints a Debug as
+                // nothing (`-Z fmt-debug=none`), which left the line empty.
+                log::warn!("[OTA] refused on link {}: {r}", out.link.0);
             }
-            self.outbox.push(link, out.bytes);
+            self.outbox_for(out.link).push(links, out.bytes);
         }
-        self.outbox.flush(link);
+        for outbox in &mut self.outboxes {
+            outbox.flush(links);
+        }
+        // A link that is gone, with nothing waiting for it, needs no outbox.
+        self.outboxes
+            .retain(|o| !o.is_empty() || links.generation(o.link).is_some());
         if let Some(now) = self.session.transfer_progress() {
             self.last = Some(now);
         }
@@ -162,6 +198,17 @@ impl UpdateEdge {
             }
         }
         effects
+    }
+
+    fn outbox_for(&mut self, link: LinkId) -> &mut UpdateOutbox {
+        let at = match self.outboxes.iter().position(|o| o.link == link) {
+            Some(at) => at,
+            None => {
+                self.outboxes.push(UpdateOutbox::new(link));
+                self.outboxes.len() - 1
+            }
+        };
+        &mut self.outboxes[at]
     }
 
     /// Whether the session's newest answer (not yet sent) is a refusal.

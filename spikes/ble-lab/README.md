@@ -65,14 +65,12 @@ its device store says so, so provision the board over USB first.
 > - **Studio itself** — the desk walk below. It is the product's own code
 >   (`lpa-link`'s `browser_ble.js` and `ble_link_port.rs`, pinned by
 >   `lpa-link/tests/browser_ble_conformance.rs`).
-> - **A frame pipe**: `spike/ota-ble`'s `pipe.html` (a page that only moves
->   frames between Web Bluetooth and a WebSocket) with
+> - **The frame pipe**: `pipe.html` here (served at `/pipe`; a page that
+>   only moves frames between Web Bluetooth and a WebSocket) with
 >   `lp-cli link capture blepipe:<port>` hosting the lp-link session in the
->   terminal. It carried over-the-air updates to a C6 over this link on
->   silicon during the OTA spike, and is being brought to product shape by
->   the OTA plan (`lp2025/2026-10-04-0757-ota-update-protocol`, part C, P2).
->   It is the tool for an unattended soak; the scripted battery below waits
->   on it.
+>   terminal. It is the tool for updates over Bluetooth and for an
+>   unattended soak ("Updates over Bluetooth" below); the scripted battery
+>   below waits on being ported to it.
 
 The old wire mode's commands, kept for the record (they need the porting
 above before they work again):
@@ -151,7 +149,10 @@ What was learned doing it (2026-09-24, Chrome 153, macOS):
 - **The chooser lists the name macOS has cached**, not the advertised one.
   The board advertised `LP-PLAYFUL Choker` while the chooser offered
   `LP-BLE-b48c` (the spike image's name), and later `LP-b48c`. Match with
-  `--prefix LP-`, not `--name`.
+  `--prefix LP-`, not `--name` — and with **two boards on the desk, by
+  `--id`** (2026-10-02: both desk boards answered `LP-PLAYFUL Choker…`).
+  `cdp-central.mjs list` prints every device the chooser offers with its
+  id, then cancels the chooser, so nothing connects to the wrong board.
 - **Close `chrome://bluetooth-internals` before joining.** While that tab
   was open, every chooser reported one empty device list and never updated;
   the first attempt after closing it found the board in 1.4 s. This is
@@ -162,6 +163,196 @@ What was learned doing it (2026-09-24, Chrome 153, macOS):
   expected, not measured.
 - `requestDevice` needs the gesture. The Join click runs through
   `Runtime.evaluate` with `userGesture: true`, and nothing else is required.
+
+## Updates over Bluetooth: `lp-cli link capture blepipe:`
+
+An over-the-air update of a C6 over its Bluetooth link, with no human: the
+terminal runs lp-link, the login and the update (`lpa-update`'s driver, the
+same one Studio runs), and `pipe.html` in a backgrounded Mac Chrome is the
+radio. The page only moves frames: one lp-link frame per GATT write and per
+notification, as Studio's own Bluetooth link does.
+
+**Say what a rate was measured with.** The central here is Mac Chrome over
+CDP, which is **not Bluefy on an iPhone**: a different Bluetooth stack, a
+different MTU (iOS 185 against macOS 247) and a different write path. Every
+rate names its central and the distance ("Mac Chrome via CDP, board 1 m
+away"); a phone's number comes only from a phone. The pipe also writes
+WITHOUT response (S5c's best: window 16, four chunks ahead, unpaced), where
+Studio writes every frame WITH response, so a pipe rate is not Studio's rate
+either. On the OTA spike's sitting (S5c, 2026-10-02, hub board) the same
+settings gave 5 to 34 KiB/s from one run to the next, with nothing in our
+code changing: quote the runs, not the best.
+
+What `lp-cli` does (`lp-cli/src/commands/link/blepipe_capture.rs`,
+`ble_pipe_host.rs`, `engine_login_gate.rs`):
+- **Every Bluetooth connection is a new link.** The board opens its end at
+  the subscribe and drops it with the connection, so the page's `up` starts
+  a fresh lp-link session under a new nonce, and `down` ends it. The update
+  driver sees the link go and a new one come, and asks `Q` again. That is
+  how the run carries on across the update's **three resets** (each is a
+  dropped connection; the page reconnects to the same device, no chooser).
+- **Host window 16, `--ota-ahead` 4** by default (S5c). The board's
+  core-only advertises a receive window of 32; nothing is tunable here
+  beyond `--ota-ahead`.
+- **Logins.** A running engine takes channel 3 only at the tier its server's
+  login holds for the link, so with `--ota-password` the capture logs in on
+  channel 1 first (the board's hello says an engine runs) and starts the
+  update on the verdict. Core-only says `M` unprompted when a link comes up;
+  there the update starts at once, and the core's own login (`L` on channel
+  3) is the driver's, with the same password, when the board answers
+  `N`/`A`. Without a password nothing logs in, which is the refusal check.
+
+### The offers
+
+X and Y are two split images of this tree, packaged with their OTA
+directories exactly as `just test-emu-c6-ota` builds its scenarios:
+
+```bash
+scripts/ota/build-image.sh target/ota-ble/x a0a0a0a0
+scripts/ota/build-image.sh target/ota-ble/y b1b1b1b1
+# each: merged.bin, package/ (the USB image), ota/ (what --ota-offer reads)
+```
+
+Put X on the board over USB first (`scripts/ota/hw-power-cut.py` does it
+the same way: `espflash write-bin --chip esp32c6 --port <port by MAC> 0x0
+target/ota-ble/x/package/*-merged.bin`), and back the board up before the
+sitting. Resolve the board by MAC (`scripts/emu/board-port.py <MAC>`), never
+the first port.
+
+### A run
+
+```bash
+python3 -u spikes/ble-lab/server.py            # serves the pipe at /pipe; prints LAB, its port
+PIPE=$(scripts/dev-port.sh ble-pipe)           # this worktree's port for the capture
+cargo build --release -p lp-cli
+
+# 1. The host. It waits for the page, and stops at the driver's last word.
+target/release/lp-cli link capture blepipe:$PIPE \
+    --console target/ota-ble/run1.txt --seconds 900 \
+    --ota-offer target/ota-ble/y/ota --ota-cache target/ota-ble/cache \
+    --ota-password '<the board password>' \
+    --exit-on '[host-ota] done:' 2> target/ota-ble/run1.err
+
+# 2. The central: Chrome in the BACKGROUND, a scratch profile, a debugging
+#    port of Chrome's own choosing (never a pinned one), read back from the
+#    profile.
+open -g -n -a "Google Chrome" --args --remote-debugging-port=0 \
+    --user-data-dir=<scratch>/chrome-ble --no-first-run --no-default-browser-check \
+    "http://localhost:$LAB/pipe?ws=ws://127.0.0.1:$PIPE"
+CDP=$(head -1 <scratch>/chrome-ble/DevToolsActivePort)
+C="node spikes/ble-lab/scripts/cdp-central.mjs --debug-port $CDP --page localhost:$LAB/pipe"
+$C list --timeout-ms 8000          # every board the chooser offers, with its id; picks nothing
+$C join --id '<the board id>'      # by id: two desk boards share a name prefix
+$C js 'pipe.S'                     # the page's counters: connects, drops, timeouts, writes
+```
+
+`--ota-no-z` sends every chunk raw (`D`); without it the offer's encoding 1
+(`Z`) goes wherever it is smaller. `?ack_every=N` on the page's URL sends
+every Nth frame as a write WITH response: an experiment knob, off by
+default (S5c measured it slower).
+
+**Reading it.** The console (`--console`) is the whole story in order:
+`[pipe] …` (the page: connects, timeouts, write failures), `[host-ble] …`
+(each connection up and down, the engine's login), `[host-ota] …` (the
+driver: the board's manifest, the decision, each stage, the end) and the
+board's own wire messages as `M!{…}`. The numbers:
+- `[host-ble] Bluetooth connection N down (…); 85.2 s up, 1234567 B served
+  (14.1 KiB/s); its link — … resent …` (console and stderr) — **the
+  connected rate**, per connection, with that connection's link counters;
+- at the end, on stderr: `connection N up at T s for D s: …` — each
+  connection, which puts **the reconnects and their times** in one list;
+- `update over Bluetooth: … B served (… KiB/s) while connected, N
+  reconnect(s)` — payload over time connected, S5c's measure;
+- `ota — … D n chunk(s) / B; Z n chunk(s) / B; …` — what went raw and
+  encoded. **The `Z` ratio** is (D bytes + Z bytes) over the core and engine
+  lengths the `[host-ota] offering …` line prints.
+
+Count **Chrome restarts** by hand; nothing else sees them.
+
+The board's own log lines (`[CORE] core @… build …`) never travel on a radio
+link: read them over USB with a second capture,
+`lp-cli link capture <port by MAC> --console usb.txt --seconds 900`. That
+capture is a link host too, and any link coming up confirms a trial core,
+so a run that must prove **Bluetooth** confirms the trial goes with no USB
+attached at all.
+
+### The refusal, then the login
+
+- **Refused:** the same capture with **no** `--ota-password`, on a board
+  whose access holds a password with Play and Author set to Password. A
+  running engine refuses the backup's read-back and the offer (`N`/`A`): the
+  run ends `[host-ota] done: Stopped(NeedsEngineLogin)` with nothing erased,
+  and X still running.
+- **Granted:** with `--ota-password` the console says `[host-ble] the
+  engine's login granted Edit`, then the update runs. After the first reset
+  the board is core-only and asks again (`N`/`A`); the driver logs in to
+  the core itself (`[host-ota] the board asks for a login`), and the run goes
+  on. A wrong password: the engine's login is refused (`[host-ble] the
+  engine's login was refused …`) and the run ends as with none; refused by
+  core-only, it ends `Stopped(LoginRefused)`.
+
+### When Mac Chrome wedges
+
+Chrome's Web Bluetooth on macOS can wedge after a few board restarts: the
+chooser stops offering the board, or a `connect()` hangs (the desk walk
+below, and S5c: 1–3 Chrome restarts in most runs; once the chooser cancelled
+itself for about ten minutes, then recovered). The page bounds every
+`connect()` at 12 s, disconnects and retries, which covers a hung connect.
+A chooser that offers nothing is not covered: quit **that** Chrome (the one
+with the scratch profile — `pkill -f 'user-data-dir=<scratch>/chrome-ble'`,
+never the desk's own Chrome), open it again the same way, and `join` again.
+The capture keeps running and takes the new page as the new connection.
+
+## Studio itself, with the Mac's Chrome as the central
+
+The same backgrounded Chrome and `cdp-central.mjs`, pointed at a Studio dev
+server on **this worktree's** port instead of the pipe. This is how an agent
+walks Studio's own Bluetooth path on a real board before a person does.
+Nothing is shimmed: no `?ble=emu`, no `?emu=`, so the page's
+`navigator.bluetooth` is Chrome's. (`?ble=emu` proxies the emulated board's
+USB stream: it proves Studio's UI, not the radio and not access.)
+
+```bash
+just studio-dev                     # prints Studio's URL: the source of truth, never a pinned port
+STUDIO=http://127.0.0.1:<the port it printed>
+open -g -n -a "Google Chrome" --args --remote-debugging-port=0 \
+    --user-data-dir=<scratch>/chrome-studio --no-first-run --no-default-browser-check "$STUDIO/"
+CDP=$(head -1 <scratch>/chrome-studio/DevToolsActivePort)
+C="node spikes/ble-lab/scripts/cdp-central.mjs --debug-port $CDP --page ${STUDIO#http://}"
+$C list --click-text "via Bluetooth" --timeout-ms 8000   # the ids, nothing picked
+$C join --id '<the board id>' --click-text "via Bluetooth"
+$C shot target/ota-ble/studio-1.png                      # the card, as the person would see it
+$C click "<a button's text>"                             # press what the card offers
+```
+
+- `--click-text` presses the first enabled control whose text has those
+  words. "via Bluetooth" is Studio's add-a-board choice; if it is not on
+  screen (boards already listed), open the Devices list first with `click`.
+- A **locked board** asks for its password on the card. Press the card's
+  password button with `click`, then type into the focused field with `js
+  "document.execCommand('insertText', false, '<password>')"`, which fires
+  the input events Studio listens to, and press its confirm button.
+- Read Studio's numbers from **Studio's own terminal line** for the update
+  (bytes, seconds, rate, reconnects and their times), not from the pipe's;
+  Studio writes every frame with response, the pipe does not.
+- **A reload loses the board in Mac Chrome**: `getDevices()` returns
+  nothing without Chrome's "Web Bluetooth new permissions backend", so after
+  a reload `join` again (Bluefy restores the board with no chooser). Adding
+  `--enable-features=WebBluetoothNewPermissionsBackend` to the launch line
+  may restore it; that is untested here.
+- **Mac Chrome is not Bluefy**, as above: a pre-walk in Mac Chrome is the
+  agent's evidence that the flow works on a real radio, not a phone's
+  number. The person's walk is on the phone.
+
+**A phone reaching a dev Studio:** Web Bluetooth needs a secure context, and
+the phone cannot reach `127.0.0.1`. Serve the dev server on the tailnet over
+HTTPS, on a port other than 443 (the perf lab holds 443 on the desk):
+
+```bash
+tailscale serve --bg --https=8443 http://127.0.0.1:<studio port>
+# phone (Bluefy): https://<desk>.<tailnet>.ts.net:8443/
+tailscale serve --https=8443 off              # when done: --bg is a setting, not a process
+```
 
 ## A phone (Bluefy on iOS): HTTPS over Tailscale
 

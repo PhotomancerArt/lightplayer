@@ -737,6 +737,12 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
         fw_esp32_common::radio_link::RadioLinkPort::leak_locked(net::net_thread::port_lock);
     #[cfg(all(feature = "ble", not(lp_net)))]
     let radio_port = fw_esp32_common::radio_link::RadioLinkPort::leak();
+    // What the radio links are for, decided before the BLE task may open
+    // one (a link's SYN carries its receive window). A plain image always
+    // serves them; a split image decides in `split_boot`, once it has chosen
+    // engine or core-only — no link opens until then.
+    #[cfg(all(feature = "ble", not(lp_split)))]
+    radio_port.decide_mode(fw_esp32_common::radio_link::RadioLinkMode::Serve);
     #[cfg(feature = "ble")]
     let ble_started = {
         let store = lpa_server::access_store::device_store_at_boot(base_fs.as_ref(), fs_boot_state);
@@ -1053,11 +1059,13 @@ fn lp_engine_entry(core: CoreBoot) {
     )));
     esp_println::println!("[INIT] LpServer created");
 
-    // USB plus the radio links. The advertised-name hook only when BLE runs.
-    // Built BEFORE the boot project loads: its per-link lists hold memory
-    // for the board's whole life, and allocated after the project they sat
-    // above it and split the space it frees (first fit; silicon N7,
-    // 2026-10-06).
+    // USB plus the radio links. The advertised-name hook only when BLE runs;
+    // on a split image, each Bluetooth link's channel 3 goes to the core's
+    // update session with the tier the link was granted (a LAN link's is not
+    // served). Built BEFORE the boot project loads: its per-link lists hold
+    // memory for the board's whole life, and allocated after the project
+    // they sat above it and split the space it frees (first fit; silicon
+    // N7, 2026-10-06).
     #[cfg(feature = "ble")]
     let transport = {
         let mux = fw_esp32_common::radio_link::LinkMuxTransport::new(
@@ -1065,6 +1073,8 @@ fn lp_engine_entry(core: CoreBoot) {
             radio_port,
             embassy_time::Delay,
         );
+        #[cfg(lp_split)]
+        let mux = mux.with_update_hook(ota::radio_update_hook);
         if ble_started {
             mux.with_upkeep_hook(ble::refresh_advertised_name)
         } else {
@@ -1431,9 +1441,24 @@ async fn split_boot(mut core: CoreBoot) {
     } else {
         lpc_update::board::LinkTrust::Trusted
     };
+    // Where the update session answers: USB, and the radio links.
+    let links = ota::UpdateLinks {
+        usb: core.usb_link,
+        #[cfg(feature = "ble")]
+        radio: core.radio_port,
+    };
+    // The radio links' mode follows the choice, decided here — in the same
+    // synchronous run as `core_boot`, so before the BLE task has run at all,
+    // and a connection that subscribes waits for it (`wait_for_mode`):
+    // core-only's links advertise the wide receive window from their SYN.
+    #[cfg(feature = "ble")]
+    core.radio_port.decide_mode(match engine {
+        Ok(_) => fw_esp32_common::radio_link::RadioLinkMode::Serve,
+        Err(_) => fw_esp32_common::radio_link::RadioLinkMode::Update,
+    });
     match engine {
         Ok((entry, len)) => {
-            ota::install_running_hook(core.usb_link, state, identity, len, access, usb_trust);
+            ota::install_running_hook(links, state, identity, len, access, usb_trust);
             entry(core)
         }
         Err(why) => {
@@ -1443,8 +1468,35 @@ async fn split_boot(mut core: CoreBoot) {
                 watchdog,
                 rmt_peripheral,
                 base_fs,
+                #[cfg(feature = "ble")]
+                radio_port,
+                #[cfg(all(
+                    feature = "radio",
+                    not(any(
+                        feature = "stress_s2",
+                        feature = "stress_s3",
+                        feature = "desk_espnow_meter"
+                    ))
+                ))]
+                radio_driver,
                 ..
             } = core;
+            // The ESP-NOW driver owns the Wi-Fi controller, and dropping it
+            // deinitializes Wi-Fi — which, with the radios in coexistence,
+            // took Bluetooth off the air too: core-only logged "advertising"
+            // and no central ever saw it (the fixture C6, 2026-10-06, the
+            // OTA M7 pre-walk). Core-only serves radio links now, so it
+            // keeps the driver for good; it never returns (every committed
+            // piece ends in a reset), so leaking it is holding it.
+            #[cfg(all(
+                feature = "radio",
+                not(any(
+                    feature = "stress_s2",
+                    feature = "stress_s3",
+                    feature = "desk_espnow_meter"
+                ))
+            ))]
+            core::mem::forget(radio_driver);
             // The update light: the strip the engine recorded, if any.
             let record = base_fs
                 .read_file(lpc_update::STATUS_LIGHT_PATH.as_path())
@@ -1457,6 +1509,8 @@ async fn split_boot(mut core: CoreBoot) {
             spawner.spawn(
                 core_only_task(ota::CoreOnly {
                     usb_link,
+                    #[cfg(feature = "ble")]
+                    radio_port,
                     watchdog,
                     state,
                     why,

@@ -45,6 +45,21 @@ const ROUTES: &[(&str, &str, &str)] = &[
     ("/auth/logout", "POST", "/auth/logout"),
     ("/auth/dev", "GET", "/auth/dev?email=a@example.com"),
     (
+        "/api/v1/firmware/{target}/releases",
+        "GET",
+        "/api/v1/firmware/esp32c6-4mb/releases?x=1",
+    ),
+    (
+        "/api/v1/firmware/{target}/releases",
+        "HEAD",
+        "/api/v1/firmware/esp32c6-4mb/releases",
+    ),
+    (
+        "/api/v1/firmware/{target}/releases",
+        "OPTIONS",
+        "/api/v1/firmware/esp32c6-4mb/releases",
+    ),
+    (
         "/firmware/{target}/{release}/{file}",
         "GET",
         "/firmware/esp32c6/latest/app.bin",

@@ -11,8 +11,8 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    DeviceEscape, DeviceStatus, DeviceView, FIRMWARE_NEEDS_USB, UiDeviceAccess,
-    lan_link_for_endpoint,
+    DeviceEscape, DeviceStatus, DeviceView, FIRMWARE_NEEDS_USB, UPDATE_NOT_OVER_WIFI_YET,
+    UiDeviceAccess, lan_link_for_endpoint,
 };
 use lpa_studio_web_story_macros::story;
 
@@ -74,6 +74,8 @@ fn wifi_card() -> DeviceView {
         // As the model has it: firmware is blocked on every network link
         // (no reset lines, no ROM downloader), Bluetooth and the LAN alike.
         firmware_blocked: Some(FIRMWARE_NEEDS_USB.to_string()),
+        // The LAN carries no update channel yet; Bluetooth and USB do.
+        update_blocked: Some(UPDATE_NOT_OVER_WIFI_YET.to_string()),
         ..usb_card()
     }
 }

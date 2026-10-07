@@ -569,6 +569,26 @@ impl LpServer {
         self.access.tier(link, &*self.base_fs)
     }
 
+    /// The tier a login on `link`, or its key, granted — never one the
+    /// device's `open` setting alone gives, which [`Self::link_tier`]
+    /// includes. The firmware passes this to the board's update session for
+    /// a radio link's channel-3 message (`lpc_update`'s
+    /// `BoardSession::on_message_with_tier`): the session adds `open` itself,
+    /// so its one access rule applies the same way while the engine runs as
+    /// in core-only.
+    pub fn link_granted_tier(&self, link: Link) -> Option<lpc_access::Tier> {
+        self.access.granted(link.id)
+    }
+
+    /// Who the device is open to now, without logging in (the device
+    /// store's `open`, cached until the store changes). The firmware passes
+    /// it with a radio link's channel-3 message, so the board's update
+    /// session, which read `open` at boot, follows a lock or an unlock made
+    /// since then.
+    pub fn device_open(&self) -> lpc_access::OpenTo {
+        self.access.device_open(&*self.base_fs)
+    }
+
     /// Whether `link`'s own `LoginBegin` challenge is outstanding (see
     /// `AccessState::login_pending`). A radio edge keeps an unauthenticated
     /// link open past its login deadline while this holds, so a person

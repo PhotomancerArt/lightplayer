@@ -171,7 +171,10 @@ Effects: `Send`, `NeedCredentials`, the engine-source effects,
 `Progress { stage, done, total }` with the stages `BackingUp`, `Updating`,
 `Restoring`, `Finishing`, the `Decided` decision, and `Done`. A running
 engine's `N`/`A` stops it with `NeedsEngineLogin` (that login is channel
-1's); a core-only board's starts the core-side login.
+1's) — at once on a link the board never answered, but after a drop it is a
+race with the caller's login on the new link, so a driver the board already
+answered keeps its backup and asks again (`Q`) every second for up to 30 s
+before it stops; a core-only board's starts the core-side login.
 
 ## The host × board simulation (`tests/sim/`)
 

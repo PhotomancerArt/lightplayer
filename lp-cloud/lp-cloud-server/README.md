@@ -19,6 +19,7 @@ crate is sans-IO.
 | `POST /auth/logout` | auth | the session cookie, if there is one |
 | `GET /auth/dev` | auth | localhost + `LP_CLOUD_DEV_AUTH` (404 otherwise) |
 | `GET\|HEAD\|OPTIONS /firmware/{target}/{release}/{file}` | firmware | none — public, verified by hash, any origin |
+| `GET\|HEAD\|OPTIONS /api/v1/firmware/{target}/releases` | firmware | none — the release index, format 1, any origin |
 | `POST /auth/guest` | auth | none — mints a guest session unless one is live |
 | `GET /relay/device` | relay | WebSocket, **plain HTTP allowed**; the board proves its accounts in-band |
 | `GET /relay/board/{id}` | relay | WebSocket; a signed-in session (account or guest) — `src/relay/route_admission.rs` |
@@ -71,10 +72,53 @@ curl -sI "$BASE/firmware/esp32c6-4mb/latest/ota-manifest.json"     # 302 → the
 curl -sI "$BASE/firmware/esp32c6-4mb/abc1234/ota-manifest.json"    # 404, no upstream call
 ```
 
+### The release index
+
+`/api/v1/firmware/{target}/releases` lists every release `{target}` can
+install,
+newest first by number (`2026.10.06-10` above `-9`): the release index,
+**format 1** (`lpc_firmware_release::ReleaseIndex`,
+`schemas/firmware-release-index.schema.json`) — `format`, `target`, and per
+release `version`, `commit`, `wireProto`, `requires` and an optional
+`publishedAt`. Studios in the field read it, so it is a public format:
+readers refuse another `format` and **ignore unknown fields**, at the top
+and in every entry, so the index grows without a new format. It is an API
+answer, not a file the store passes through, so it lives under the
+versioned `/api/v1/` (beside, and separate from, `POST /api`); a shape an
+old reader would misread goes to `/api/v2/…` beside it.
+
+- **Source:** the download host has no list, so the list is GitHub's REST
+  releases list (`LP_CLOUD_FIRMWARE_RELEASES_LIST`, default
+  `https://api.github.com/repos/PhotomancerArt/lightplayer/releases?per_page=100`:
+  one page, the newest 100). Drafts, prereleases and tags other than
+  `v<release version>` are skipped. It is held 5 min, then revalidated with
+  its ETag (a 304 does not count against GitHub's rate limit of 60 an hour
+  per IP unauthenticated). An optional `LP_CLOUD_GITHUB_TOKEN` (no scopes; a
+  fly secret, unset at first) is sent to that URL only, never to the
+  download host, and never logged. GitHub's `x-ratelimit-remaining` below 10
+  is logged at warn. `latest` is untouched: it still needs no API call.
+- **Completeness:** a release is a candidate when
+  `<target>.ota-manifest.json` is an uploaded asset, and is listed only when
+  every file its manifest names is uploaded too, so no listed version 404s
+  mid-upload. Its manifest comes through the lookup's own verified cache
+  (eight at once); one that fails verification drops only its entry.
+- **When GitHub fails:** the last good list is served for up to 24 h (one
+  warning per 5 min, upstream retried at most once a minute meanwhile);
+  with no good copy the answer is a 502 (504 on a timeout), `no-store`.
+- **Headers:** `application/json`, `public, max-age=60`, `ETag:
+  "<sha256>"` (`If-None-Match` answers 304), `Access-Control-Allow-Origin:
+  *`. A target outside the grammar, or one no installable release carries,
+  is a 404 with `max-age=60`.
+
+```sh
+curl -s "$BASE/api/v1/firmware/esp32c6-4mb/releases"               # the index
+```
+
 The Studio bundle's own `/firmware/<target>/manifest.json` (two segments)
 stays the static fallback's. Tests: `tests/firmware_plane.rs`. End to end,
 locally: `just firmware-store-smoke` stages real C6 release assets, serves
-them GitHub-shaped from a static server and runs this route against them
+them GitHub-shaped from a static server (with a releases list beside them)
+and runs both routes against them
 (`scripts/release/firmware-store-smoke.sh`). The assets themselves are
 attached to every release by `.github/workflows/release-firmware.yml`
 (`docs/adr/2026-10-06-firmware-distribution.md`).
