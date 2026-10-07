@@ -3,20 +3,25 @@ name: CI
 on:
   pull_request:
     branches: ["main", "feature/*"]
-    # `edited` is on top of the defaults (opened, synchronize, reopened) for one
-    # reason: **retargeting**. A stacked PR based on a `claude/*` branch matches
-    # no filter above, so it gets NO CI AT ALL — not pending, not red, simply no
-    # runs. When its base merges and it is retargeted to main, that is a base
-    # edit, and without `edited` here nothing re-triggers: the PR sits there
-    # looking clean, having never been validated once. That happened on #195 and
-    # was caught by a human reading the checks list, which is not a control.
+    # The defaults, written out so the absence of `edited` is visible. `edited`
+    # was here from #195 on, so that a stacked PR retargeted to main (a base
+    # edit) got CI. It is gone because it also fires on every PR title and body
+    # edit, and an edit starts a fresh run whose concurrency group cancels the
+    # run in flight: agents update PR bodies mid-CI, and #987 lost a full CI
+    # cycle to it.
     #
-    # Cost, accepted deliberately: `edited` also fires on title and body edits,
-    # so editing a PR description re-runs the suite. Wasteful, never wrong —
-    # and wrongness is the failure mode being fixed. If that cost ever bites,
-    # tighten by gating on `github.event.changes.base` rather than by dropping
-    # this, and check what skipped jobs do to required checks before you do.
-    types: [opened, synchronize, reopened, edited]
+    # What that costs: a stacked PR (base `claude/*`, which matches no filter
+    # above and so gets no CI at all) retargeted to main still gets NO CI until
+    # its next push. The PR sits there looking clean, never validated. That is
+    # the failure #195 was caught on, back on purpose, now with a workaround
+    # and a net: docs/debt/stacked-pr-retarget-gets-no-ci.md (push any commit,
+    # or close and reopen; scripts/watch-pr.sh exits 2 on a PR with no CI run).
+    #
+    # Why not keep `edited` and filter it with a job-level `if:` on
+    # `github.event.changes.base`: a body-edit run would still post its jobs as
+    # *skipped* checks, newer than the real run's, and a skipped check reads as
+    # passing — over an older red, that is a false green.
+    types: [opened, synchronize, reopened]
   push:
     branches: ["main"]
 
