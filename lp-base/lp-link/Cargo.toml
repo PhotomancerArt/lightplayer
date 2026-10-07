@@ -79,3 +79,7 @@ required-features = ["secure"]
 [[test]]
 name = "secure_handshake"
 required-features = ["secure", "sim"]
+
+[[test]]
+name = "secure_ws_bytes_golden"
+required-features = ["secure"]
