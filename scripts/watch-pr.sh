@@ -169,13 +169,17 @@ snapshot() {
       else (.workflowName // "") + (if .workflowName then " / " else "" end) + .name end;
     # A later run on the same head has a larger id (it sits in detailsUrl).
     def runid: ((.detailsUrl // "") | [capture("/runs/(?<n>[0-9]+)")] | (.[0].n // "0") | tonumber);
+    # A re-run ("Re-run all/failed jobs") is a new attempt inside the SAME run
+    # id, so it ties on runid; its jobs have larger job ids (/job/<id>).
+    def jobid: ((.detailsUrl // "") | [capture("/job/(?<n>[0-9]+)")] | (.[0].n // "0") | tonumber);
+    def order: [runid, jobid];
     # Latest run per check wins: a re-run (an edited event re-triggers CI on
     # the same head and cancels the run before it) leaves the checks of the
     # old run in the rollup, and a stale cancel must not count against a later
     # green. StatusContexts have no run and pass through.
     def latest:
       [.[] | select(.__typename == "StatusContext")]
-      + ([.[] | select(.__typename != "StatusContext")] | group_by(cname) | map(max_by(runid)));
+      + ([.[] | select(.__typename != "StatusContext")] | group_by(cname) | map(max_by(order)));
     "head\t\(.headRefOid)",
     "mergeable\t\(.mergeable)",
     "merge_state\t\(.mergeStateStatus)",
