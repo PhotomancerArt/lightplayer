@@ -61,6 +61,9 @@ extern "C" {
     #[wasm_bindgen(js_name = onActivity, catch)]
     fn js_on_activity(id: u32, callback: &Closure<dyn FnMut()>) -> Result<Function, JsValue>;
 
+    #[wasm_bindgen(js_name = logLine)]
+    fn js_log_line(id: u32, text: &str);
+
     #[wasm_bindgen(js_name = takeErrors, catch)]
     fn js_take_errors(id: u32) -> Result<Array, JsValue>;
 }
@@ -254,6 +257,11 @@ pub(crate) fn on_activity(
     callback: &Closure<dyn FnMut()>,
 ) -> Result<Function, String> {
     js_on_activity(session, callback).map_err(|error| error_message(&error))
+}
+
+/// Put one of the link's own lines on the page's console.
+pub(crate) fn log_line(session: u32, text: &str) {
+    js_log_line(session, text);
 }
 
 pub(crate) fn take_errors(session: u32) -> Result<Vec<String>, String> {

@@ -120,14 +120,22 @@ impl ServedSession {
 
     /// A new connection: a new lp-link session, under the policy as it is
     /// now. The old link's bulk traffic gets its last line first.
-    fn reconnected(&mut self, generation: u32, now: Micros) {
-        self.notes.extend(self.traffic.finish(&self.service, now));
+    fn reconnected(&mut self, session: u32, generation: u32, now: Micros) {
+        if let Some(line) = self.traffic.finish(&self.service, now) {
+            self.note(session, line);
+        }
         self.generation = generation;
         self.policy = ble_write_policy_for(&browser_ble::browser_kind());
         self.service = fresh_service(self.policy);
         self.reads.clear();
         self.traffic = TrafficLine::default();
-        self.notes.push(policy_note(self.policy));
+        self.note(session, policy_note(self.policy));
+    }
+
+    /// A line for the journal and the page's console.
+    fn note(&mut self, session: u32, line: String) {
+        browser_ble::log_line(session, &line);
+        self.notes.push(line);
     }
 
     /// Move what the link read onto the session's queues, keeping the reads
@@ -406,14 +414,16 @@ fn service(session: u32) -> Serviced {
     let now = now_micros();
     let (frames, wake, running) = SESSIONS.with(|sessions| {
         let mut sessions = sessions.borrow_mut();
-        let served = sessions
-            .entry(session)
-            .or_insert_with(|| ServedSession::new(taken.generation));
+        let served = sessions.entry(session).or_insert_with(|| {
+            let served = ServedSession::new(taken.generation);
+            browser_ble::log_line(session, &policy_note(served.policy));
+            served
+        });
         if served.generation != taken.generation {
             // A new connection: a new lp-link session. The old one's reads
             // and its link go with it (its loss was already said, as
             // `bluetooth link lost`, by the JS).
-            served.reconnected(taken.generation, now);
+            served.reconnected(session, taken.generation, now);
         }
         for frame in &taken.frames {
             served.service.on_datagram(now, frame);
@@ -428,8 +438,9 @@ fn service(session: u32) -> Serviced {
             served.service.transmit_up_to(now, room, |frame| {
                 out.push((frame.to_vec(), policy.with_response(frame, stalled)));
             });
-            let line = served.traffic.tick(&served.service, now);
-            served.notes.extend(line);
+            if let Some(line) = served.traffic.tick(&served.service, now) {
+                served.note(session, line);
+            }
         }
         served.collect();
         (

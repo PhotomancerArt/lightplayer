@@ -542,6 +542,12 @@ export function onActivity(id, callback) {
   return () => session.listeners.delete(callback);
 }
 
+/// One of the link's own lines (its write policy, a bulk-traffic rate) for
+/// the page's console, beside the journal: what a desk or phone walk reads.
+export function logLine(id, text) {
+  console.info(`[ble ${id}] ${text}`);
+}
+
 export function takeErrors(id) {
   const session = requireSession(id);
   const errors = session.errors;
