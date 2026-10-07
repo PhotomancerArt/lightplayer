@@ -100,17 +100,17 @@ pub fn check(port: &str, chip: Option<&str>, holder: Option<&str>) -> Result<()>
     }
 }
 
-/// Lease the board on `port` for `for_text` (`"<who>: <why>"`). Unlike
-/// [`check`], this needs `board`: asking for a lease and silently not getting
-/// one would be worse than failing.
-pub fn take(port: &str, for_text: &str, minutes: Option<u32>) -> Result<()> {
+/// Lease the board on `port` as `holder` (a whole session name, colons and
+/// all) for `why`. Unlike [`check`], this needs `board`: asking for a lease
+/// and silently not getting one would be worse than failing.
+pub fn take(port: &str, holder: &str, why: &str, minutes: Option<u32>) -> Result<()> {
     let Some(board) = board_binary() else {
         bail!(
             "--lease needs `board` (github.com/PhotomancerArt/lp-board-bench) on PATH, or BOARD_BIN"
         );
     };
     let mut command = Command::new(&board);
-    command.args(["take", port, "--for", for_text]);
+    command.args(["take", port, "--as", holder, "--for", why]);
     if let Some(minutes) = minutes {
         command.args(["--minutes", &minutes.to_string()]);
     }
@@ -147,11 +147,6 @@ pub fn list() -> Option<Vec<BenchBoard>> {
             None
         }
     }
-}
-
-/// The holder part of a `--for "<who>: <why>"` string — the bench's own rule.
-pub fn holder_of(for_text: &str) -> &str {
-    for_text.split(':').next().unwrap_or(for_text).trim()
 }
 
 /// `a0f2…`, `A0-F2-…`, `a0:f2:…` → `A0:F2:…`.
@@ -254,7 +249,7 @@ mod tests {
         let _env = EnvVar::set("BOARD_BIN", "/nonexistent/board");
         assert!(check("/dev/cu.usbmodem1", None, None).is_ok());
         assert!(list().is_none());
-        assert!(take("/dev/cu.usbmodem1", "me: test", None).is_err());
+        assert!(take("/dev/cu.usbmodem1", "me", "test", None).is_err());
     }
 
     #[test]
@@ -298,12 +293,20 @@ mod tests {
     }
 
     #[test]
-    fn the_holder_is_the_text_before_the_first_colon() {
+    fn take_passes_the_whole_session_name_as_the_holder() {
+        let _guard = ENV.lock().unwrap();
+        let stub = Stub::new(0, "FC6 fixture-c6: taken");
+        take(
+            "/dev/cu.usbmodem1",
+            "direct: wifi",
+            "PR B: re-check",
+            Some(20),
+        )
+        .unwrap();
         assert_eq!(
-            holder_of("ota-director: power-cut: round 2"),
-            "ota-director"
+            stub.args(),
+            "take /dev/cu.usbmodem1 --as direct: wifi --for PR B: re-check --minutes 20"
         );
-        assert_eq!(holder_of(" yona "), "yona");
     }
 
     /// A fake `board`: a shell script that records its arguments and exits
