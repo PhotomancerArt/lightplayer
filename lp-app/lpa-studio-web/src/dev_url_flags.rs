@@ -9,6 +9,7 @@
 //! | `?wire-capture=1` | tee every raw byte the Web Serial read pump hands to Rust into a 16 MiB in-memory buffer; `lpWireCapture()` in the console downloads it as `wire-capture-<unix-ms>.bin` (`lpa_link::device_link::wire_capture`) |
 //! | `?device-log=<level>` | once per link, after the board's hello and the packed-reply opt-in, ask it for `trace`/`debug`/`info`/`warn`/`error` logging (`SetLogLevel`) |
 //! | `?firmware-store=<origin>` | the firmware store Studio fetches engines from, instead of `https://lightplayer.app` — **loopback and private-LAN origins only** (the `?record=` sink rule, `record_sink::check_sink`), so a link someone else wrote cannot point Studio at another store's "latest"; a refused origin keeps the default and says so once in the console |
+//! | `?ble-writes=<with-response\|without-response>[:N]` | how every Bluetooth link this page makes writes its frames: data frames with or without response, at most `N` (1–32) in flight — replacing the browser's default (`without-response:16` on a desktop browser, `without-response:8` on iOS; `lpa_link::providers::browser_ble_write_policy`), so a central that loses too much can drop its cap or go back to #880's `with-response` without a build |
 //! | `?seams=<atoms\|none>` | what a **Devices-page** emulated board asks the emulator for, instead of the end-user default `led=fast` (`lpa_link::providers::emulator_tab_seams`); `none` is today's seam-free machine, for an A/B on one build. Never reaches `?emu=tab` / `?emu=ws://…` boards, which ask for nothing |
 //!
 //! Validated the way `?record=` is (`device_events_io.rs`): a query is
@@ -16,6 +17,7 @@
 //! says so once in the console. Both are documented beside `?emu=` in
 //! `AGENTS.md` ("Studio against an emulated board").
 
+use lpa_link::providers::browser_ble_write_policy::BleWritePolicy;
 use lpc_wire::server::api::LogLevel;
 
 /// The dev flags a query string carries.
@@ -41,6 +43,8 @@ pub struct DevUrlFlags {
     /// `?seams=<atoms|none>`, normalized (`led=fast`, `led=fast+x=y`,
     /// `none`).
     pub seams: Option<String>,
+    /// `?ble-writes=<kind>[:N]`.
+    pub ble_writes: Option<BleWritePolicy>,
     /// Flags present but unreadable, for the console.
     pub ignored: Vec<String>,
 }
@@ -76,6 +80,10 @@ impl DevUrlFlags {
                 },
                 "device-log" => match parse_log_level(value.trim()) {
                     Some(level) => flags.device_log = Some(level),
+                    None => flags.ignored.push(pair.to_string()),
+                },
+                "ble-writes" => match BleWritePolicy::parse(&percent_decode(value)) {
+                    Some(policy) => flags.ble_writes = Some(policy),
                     None => flags.ignored.push(pair.to_string()),
                 },
                 "seams" => match parse_seams(value) {
@@ -258,6 +266,13 @@ pub fn install() {
         lpa_link::device_link::wire_reader::set_device_log_level(Some(level));
         log::info!("dev flag: each board is asked for {level:?} logging once it is ready");
     }
+    if let Some(policy) = flags.ble_writes {
+        lpa_link::providers::browser_ble_write_policy::set_ble_write_policy_override(Some(policy));
+        log::info!(
+            "dev flag: every Bluetooth link writes {} (?ble-writes=)",
+            policy.describe()
+        );
+    }
     if let Some(seams) = flags.seams {
         log::info!("dev flag: Devices-page emulated boards ask for seams `{seams}` (?seams=)");
         lpa_link::providers::emulator_tab_seams::set_end_user_seams_override(Some(seams));
@@ -317,6 +332,17 @@ pub fn install() {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ble_writes_reads_a_kind_and_a_cap() {
+        let flags = DevUrlFlags::parse("?ble-writes=with-response");
+        assert_eq!(flags.ble_writes, Some(BleWritePolicy::WITH_RESPONSE));
+        let flags = DevUrlFlags::parse("ble-writes=without-response%3A4&emu=tab");
+        assert_eq!(flags.ble_writes.map(|p| p.in_flight), Some(4));
+        let flags = DevUrlFlags::parse("ble-writes=without-response:99");
+        assert_eq!(flags.ble_writes, None);
+        assert_eq!(flags.ignored, ["ble-writes=without-response:99"]);
+    }
 
     #[test]
     fn both_flags_parse_beside_other_query_keys() {

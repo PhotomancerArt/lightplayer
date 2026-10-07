@@ -25,6 +25,12 @@
 /// Web Bluetooth (NUS): the line protocol over GATT, control only.
 #[cfg(all(feature = "browser-ble", target_arch = "wasm32"))]
 pub mod browser_ble;
+// How each Web Bluetooth link writes its frames (with or without response,
+// how many in flight). Pure, declared outside the wasm32 gate so its tests
+// run in the native suite; `browser_ble::ble_link_port` asks it per frame.
+#[cfg(feature = "device-link")]
+#[path = "browser_ble/ble_write_policy.rs"]
+pub mod browser_ble_write_policy;
 #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
 pub mod browser_serial_esp32;
 // Where a packaged firmware build's manifest lives. Declared outside the

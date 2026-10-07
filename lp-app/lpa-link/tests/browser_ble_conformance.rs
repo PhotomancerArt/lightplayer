@@ -17,6 +17,8 @@
 //! | lp-link comes up over the GATT subset; one frame per notification | [`a_link_comes_up_and_the_hello_arrives_one_frame_per_notification`] |
 //! | one frame per write, never a long write; a request arrives whole | [`a_request_goes_out_one_frame_per_write`] |
 //! | each frame is its own buffer (Bluefy writes a view's whole buffer) | [`a_large_request_survives_a_browser_that_writes_a_views_whole_buffer`] |
+//! | data frames go without response, SYN/ACK with; a lost one is resent | [`data_frames_go_without_response_and_the_link_resends_what_is_lost`] |
+//! | `?ble-writes=with-response` writes every frame with response (#880) | [`the_with_response_policy_writes_every_frame_with_response`] |
 //! | a drop is a departure, then a reconnect with no gesture | [`a_drop_is_a_departure_and_the_session_reconnects_by_itself`] |
 //! | a drop the page never heard is found by the visibility re-check | [`a_drop_the_page_never_heard_is_found_on_the_recheck`] |
 //! | a drop tears the radio link down, so the reconnect is a fresh link | [`a_phantom_drop_is_torn_down_and_the_reconnect_is_a_fresh_link`] |
@@ -55,6 +57,9 @@ use lpa_link::device_link::browser_ble::{BrowserBleLink, ble_link_info};
 use lpa_link::device_link::link_note::UPDATE_NOT_ANNOUNCED_NOTE;
 use lpa_link::device_link::wire_reader::WireRead;
 use lpa_link::providers::browser_ble::{self as ble, BleClientIo, BleDevice, BleTapLine, BleWire};
+use lpa_link::providers::browser_ble_write_policy::{
+    BleWritePolicy, set_ble_write_policy_override,
+};
 use lpc_update::BoardManifest;
 use lpc_wire::lp_link::{
     CH_PROTO, CH_UPDATE, Link as BoardLink, LinkConfig, LinkEvent as BoardEvent, SelectiveRepeat,
@@ -90,6 +95,9 @@ extern "C" {
 
     #[wasm_bindgen(js_name = bleWholeBufferWrites)]
     fn js_ble_whole_buffer_writes(on: bool) -> Promise;
+
+    #[wasm_bindgen(js_name = bleDropUnackedEvery)]
+    fn js_ble_drop_unacked_every(n: u32) -> Promise;
 
     #[wasm_bindgen(js_name = bleHangNextConnect)]
     fn js_ble_hang_next_connect(board_id: &str) -> Promise;
@@ -252,6 +260,89 @@ async fn a_large_request_survives_a_browser_that_writes_a_views_whole_buffer() {
     assert_eq!(after.link_closes, before.link_closes, "the link stayed up");
     assert!(wire.is_link_up());
 
+    polyfill_off().await;
+}
+
+/// The OTA speed pass (2026-10-06): a desktop browser writes lp-link DATA
+/// frames without response, paced by the link's window, and every SYN and
+/// ACK-only frame with one. Mac Chrome resolves a write without response at
+/// once and macOS drops what overflows its queue; under the same loss (every
+/// third write without response lost) a request of many frames still
+/// arrives whole, because lp-link resends what the air lost, and the link
+/// stays up.
+#[wasm_bindgen_test]
+async fn data_frames_go_without_response_and_the_link_resends_what_is_lost() {
+    set_ble_write_policy_override(Some(BleWritePolicy::DESKTOP));
+    polyfill_over(&["c6-a"]).await;
+    let device = pick().await;
+    let wire = BleWire::new(device.session);
+    let mut bench = LinkBench::new("c6-a");
+    bench
+        .exchange_until(&wire, |reads| hello_count(reads) >= 1)
+        .await;
+    let up = stats("c6-a").await;
+    assert!(
+        up.writes > up.unacked_writes,
+        "the handshake's SYN and its ACKs asked for a response: {up:?}"
+    );
+    JsFuture::from(js_ble_drop_unacked_every(3)).await.unwrap();
+    let before = stats("c6-a").await;
+
+    let json = big_request(43, 2_000);
+    wire.send_client_json(&json).expect("the link takes it");
+    bench.exchange_until(&wire, |_| bench_saw_request(43)).await;
+
+    let seen = BOARD.with(|board| board.borrow().requests.clone());
+    assert_eq!(seen, vec![(43, json.clone())], "the board read it whole");
+    let after = stats("c6-a").await;
+    let unacked = after.unacked_writes - before.unacked_writes;
+    assert!(
+        unacked as usize >= json.len() / 180,
+        "the request's data frames went without response: {before:?} → {after:?}"
+    );
+    assert!(
+        after.unacked_dropped > before.unacked_dropped,
+        "some were lost on the way: {before:?} → {after:?}"
+    );
+    assert!(
+        unacked as usize > json.len().div_ceil(180),
+        "and sent again: {before:?} → {after:?}"
+    );
+    assert_eq!(after.link_closes, before.link_closes, "the link stayed up");
+    assert!(wire.is_link_up());
+
+    JsFuture::from(js_ble_drop_unacked_every(0)).await.unwrap();
+    set_ble_write_policy_override(None);
+    polyfill_off().await;
+}
+
+/// `?ble-writes=with-response` (a central that loses too much): every frame
+/// is written with response, #880's behaviour, on every link made after it.
+#[wasm_bindgen_test]
+async fn the_with_response_policy_writes_every_frame_with_response() {
+    set_ble_write_policy_override(Some(BleWritePolicy::WITH_RESPONSE));
+    polyfill_over(&["c6-a"]).await;
+    let device = pick().await;
+    let wire = BleWire::new(device.session);
+    let mut bench = LinkBench::new("c6-a");
+    bench
+        .exchange_until(&wire, |reads| hello_count(reads) >= 1)
+        .await;
+
+    let json = big_request(44, 2_000);
+    wire.send_client_json(&json).expect("the link takes it");
+    bench.exchange_until(&wire, |_| bench_saw_request(44)).await;
+
+    let seen = BOARD.with(|board| board.borrow().requests.clone());
+    assert_eq!(seen, vec![(44, json.clone())], "the board read it whole");
+    let after = stats("c6-a").await;
+    assert!(after.writes as usize >= json.len() / 180, "{after:?}");
+    assert_eq!(
+        after.unacked_writes, 0,
+        "every write asked for a response: {after:?}"
+    );
+
+    set_ble_write_policy_override(None);
     polyfill_off().await;
 }
 
@@ -1139,6 +1230,9 @@ fn edges() -> (Rc<Cell<u32>>, Rc<Cell<u32>>) {
 struct Stats {
     written: u32,
     writes: u32,
+    /// Of `writes`, those without response, and those the polyfill lost.
+    unacked_writes: u32,
+    unacked_dropped: u32,
     largest_write: u32,
     notifications: u32,
     largest_notification: u32,
@@ -1166,6 +1260,8 @@ async fn stats(board: &str) -> Stats {
     Stats {
         written: field("written"),
         writes: field("writes"),
+        unacked_writes: field("unackedWrites"),
+        unacked_dropped: field("unackedDropped"),
         largest_write: field("largestWrite"),
         notifications: field("notifications"),
         largest_notification: field("largestNotification"),

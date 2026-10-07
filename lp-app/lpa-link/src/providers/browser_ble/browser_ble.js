@@ -23,20 +23,27 @@
 //   device.{id, name, gatt, forget, addEventListener("gattserverdisconnected")}
 //   gatt.{connected, connect, disconnect}
 //   server.getPrimaryService(NUS) → service.getCharacteristic(RX | TX)
-//   rx.writeValueWithResponse(bytes)
+//   rx.writeValueWithResponse(bytes), rx.writeValueWithoutResponse(bytes)
 //   tx.{startNotifications, addEventListener("characteristicvaluechanged"), value}
 //
 // FIVE RULES, each with a measurement behind it (M2 desk sitting, spike
 // Runs B and F):
 //
-//  1. **Every write is awaited, and every write asks for a response.** One
-//     at a time, in order (`session.writeChain`): Web Bluetooth refuses a
-//     second GATT operation while one is in flight, and unpaced
-//     write-WITHOUT-response lost about two thirds of the bytes in Run B, so
-//     this file never issues one. `writesPending` tells the Rust side how
-//     many frames are queued here, so it hands over a frame only when there
-//     is room and keeps the rest in the link, where a resend is still a
-//     choice rather than a duplicate queued behind the original.
+//  1. **Every write is awaited, one at a time, in order**
+//     (`session.writeChain`): Web Bluetooth refuses a second GATT operation
+//     while one is in flight. WHICH kind of write each frame is, the Rust
+//     side decides per frame (`ble_write_policy.rs`): since the OTA speed
+//     pass (2026-10-06) a desktop browser writes lp-link DATA frames
+//     WITHOUT response and every SYN and ACK-only frame WITH one. Unpaced
+//     write-without-response lost about two thirds of the bytes in Run B
+//     (Chrome resolves it at once and macOS drops what overflows its queue),
+//     so it is never unpaced: the link's transmit window is the pace — at
+//     most that many frames are ever unacknowledged by the BOARD, and a
+//     frame the Mac dropped is one lp-link resends (OTA spike S5c: loss
+//     stays low up to ~16 in flight). `writesPending` tells the Rust side
+//     how many frames are queued here, so it hands over a frame only when
+//     there is room and keeps the rest in the link, where a resend is still
+//     a choice rather than a duplicate queued behind the original.
 //  2. **One frame is one write, and no write is an ATT long write.** A frame
 //     is at most the board's payload + 8 B, and the board sizes its payload
 //     so that fits one ATT value at the connection's MTU (174 B payload on
@@ -58,9 +65,12 @@
 //     2026-09-25: the board held the link for 20 minutes, until the tab
 //     closed). A reconnect then rides the OLD link, so the board never sees
 //     a new one and never starts the new session it owes a new link. Every
-//     drop therefore calls `gatt.disconnect()`, and so does a failed write:
-//     lp-link would resend a frame a write lost, but a write that fails on a
-//     link the page still calls up is how that phantom link shows itself.
+//     drop therefore calls `gatt.disconnect()`, and so does a failed write
+//     of either kind: lp-link would resend a frame a write lost, but a write
+//     that fails on a link the page still calls up is how that phantom link
+//     shows itself. A write without response may "succeed" into a dead
+//     link, so the Rust side sends every frame WITH response while its link
+//     hears nothing (stalled): the probe a phantom link fails.
 //     The reconnect is always a fresh connection, so a fresh lp-link session
 //     (each connection's `generation` is a new link on the Rust side).
 //
@@ -127,6 +137,12 @@ export async function availability() {
     }
   }
   return { supported: true, available, browser };
+}
+
+/// Which browser family this page runs in (`availability()`'s `browser`,
+/// synchronously): the Rust side picks each link's write policy from it.
+export function browserKind() {
+  return browserFamily();
 }
 
 function browserFamily() {
@@ -449,11 +465,12 @@ export async function forget(id) {
 // --- frames ----------------------------------------------------------------
 
 /// Queue ONE lp-link frame for the board: one GATT write, awaited in turn
-/// behind whatever is already queued (rules 1 and 2). Returns immediately;
-/// `false` when the link is not connected (the frame never left, which the
-/// link on the Rust side treats like any lost frame). A failure is reported
-/// through `takeErrors`.
-export function write(id, frame) {
+/// behind whatever is already queued (rules 1 and 2) — with response unless
+/// `withResponse` is `false` (the Rust side's per-frame choice, rule 1).
+/// Returns immediately; `false` when the link is not connected (the frame
+/// never left, which the link on the Rust side treats like any lost frame).
+/// A failure is reported through `takeErrors`.
+export function write(id, frame, withResponse = true) {
   const session = requireSession(id);
   if (session.state !== "connected" || !session.rx) {
     session.errors.push("write on a bluetooth link that is not connected");
@@ -471,7 +488,9 @@ export function write(id, frame) {
       if (session.generation !== generation) {
         return;
       }
-      if (typeof rx.writeValueWithResponse === "function") {
+      if (!withResponse && typeof rx.writeValueWithoutResponse === "function") {
+        await rx.writeValueWithoutResponse(data);
+      } else if (typeof rx.writeValueWithResponse === "function") {
         await rx.writeValueWithResponse(data);
       } else {
         await rx.writeValue(data);

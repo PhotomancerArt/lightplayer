@@ -33,8 +33,14 @@
 //   device.{id, name, gatt, forget, addEventListener("gattserverdisconnected")}
 //   gatt.{connected, connect, disconnect}
 //   server.getPrimaryService(NUS) → service.getCharacteristic(RX | TX)
-//   rx.writeValueWithResponse(bytes)
+//   rx.writeValueWithResponse(bytes), rx.writeValueWithoutResponse(bytes)
 //   tx.{startNotifications, addEventListener("characteristicvaluechanged"), value}
+//
+// A write WITHOUT response is delivered exactly as one with a response —
+// nothing is lost on this "air" unless a test asks (`dropUnackedEvery`,
+// the Mac's write queue overflowing, OTA spike S5c), so `?ble=emu` proves
+// which kind each frame is and that lp-link recovers a lost one, never a
+// rate.
 //
 // ONE PLUMBING, NOT TWO. The NUS characteristics reach the SAME
 // `EmulatorPort` the `navigator.serial` bus holds for each board (`emu serve`
@@ -190,6 +196,11 @@ class VirtualBluetooth extends EventTarget {
     // write. Off by default (a standard browser sends the view); the
     // conformance suite turns it on.
     this.wholeBufferWrites = false;
+    // Mac Chrome resolves a write WITHOUT response at once and macOS drops
+    // what overflows its queue (BLE M2 Run B; OTA spike S5c). `n > 0` drops
+    // every n-th write without response, silently, as that queue does; the
+    // conformance suite turns it on to prove lp-link resends what is lost.
+    this.dropUnackedEvery = 0;
     this.onCableOut = (event) => {
       const boardId = event?.detail?.port?.boardId;
       if (!boardId) return;
@@ -363,6 +374,10 @@ class VirtualGattServer {
     this.stats = {
       written: 0,
       writes: 0,
+      // Of `writes`, how many asked for no response, and how many of those
+      // `dropUnackedEvery` lost.
+      unackedWrites: 0,
+      unackedDropped: 0,
       largestWrite: 0,
       notified: 0,
       notifications: 0,
@@ -636,6 +651,16 @@ class VirtualRxCharacteristic {
   }
 
   async writeValueWithResponse(value) {
+    this.takeWrite(value, true);
+  }
+
+  /// Resolves at once, as Chrome's does: the page learns nothing about
+  /// whether the board got it.
+  async writeValueWithoutResponse(value) {
+    this.takeWrite(value, false);
+  }
+
+  takeWrite(value, withResponse) {
     const gatt = this.gatt;
     if (!gatt.connected || !gatt.emulator) {
       throw domError("NetworkError", "GATT Server is disconnected.");
@@ -654,8 +679,15 @@ class VirtualRxCharacteristic {
         `a ${frame.length}-byte write is an ATT long write, which the board refuses`,
       );
     }
+    let lost = false;
+    if (!withResponse) {
+      gatt.stats.unackedWrites += 1;
+      const every = gatt.device.bluetooth.dropUnackedEvery;
+      lost = every > 0 && gatt.stats.unackedWrites % every === 0;
+      if (lost) gatt.stats.unackedDropped += 1;
+    }
     // Out of range, the write still goes on the air; nothing hears it.
-    if (!gatt.quiet) {
+    if (!gatt.quiet && !lost) {
       gatt.writeFrame(frame);
     }
     gatt.stats.writes += 1;
