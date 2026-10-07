@@ -86,7 +86,7 @@ look for cargo's `Finished … in` lines (build) and libtest's `test result:
   lp2025/2026-10-06-1945-ci-director), last 200 runs: 6 of 20 jobs `over`
   (Emulator C6, Emulator ESP32-S3, Emulator ESP32v3, Heap budget
   (esp32c6 chip), Validate (x64), Validate story baselines — see PR #1010
-  for the full table), 370.0 total runner-hours, 16.0% on cancelled jobs.
+  for the full table), 370.4 total runner-hours, 15.9% on cancelled jobs.
   Spot-check against this entry's own 399-run numbers landed OUTSIDE the
   one-minute tolerance for Validate (x64) (p50 25.3 vs. 20.3, p95 30.5 vs.
   27.7 — both ~3-5 min higher, n=94) and just outside it for Lint (x64)'s
