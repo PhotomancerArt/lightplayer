@@ -24,6 +24,13 @@
 //! The clock is the controller's own injected `now_secs`, so the model's
 //! millis and the registry's seconds come from ONE clock — a bench where a
 //! deadline and a `last_seen` disagreed would prove nothing.
+//!
+//! The boards and the host ends of their links run on a second clock, the
+//! bench's [`BenchWire`], which only [`DeviceBench::step`] moves. The one
+//! thing on a bench that runs in real time is each fake's `LpServer` (a real
+//! server on a real thread); a step waits for it to answer what it was
+//! handed ([`FakeEsp32Device::settle_server`]) instead of sleeping, so no
+//! test waits on the wall clock and none depends on the machine's load.
 
 use core::cell::{Cell, RefCell};
 use core::future::Future;
@@ -32,6 +39,8 @@ use core::task::{Context, Poll};
 use core::time::Duration;
 use std::collections::VecDeque;
 use std::rc::Rc;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use lpa_devices::view::{Escape, RosterView};
 use lpa_link::device_link::fake::{fake_device_link, fake_link_info};
@@ -57,9 +66,10 @@ use crate::{
     SimLinkSource, SimRuntimeControl, SimSession, StudioController, UiAction, UiNotices,
 };
 
-/// Wall-clock ceiling on a `run_until`. Generous: the fake boots a real host
-/// server on a real thread. Hitting it means a hang, which is the failure this
-/// milestone exists to make impossible.
+/// Wall-clock ceiling on a `run_until`, and on one fake server's answer.
+/// Never waited on by a passing test: it is the hang guard, and hitting it
+/// means a hang, which is the failure this milestone exists to make
+/// impossible.
 const REAL_TIME_LIMIT: Duration = Duration::from_secs(15);
 
 /// How much the bench's fake clock advances per step.
@@ -68,6 +78,94 @@ const REAL_TIME_LIMIT: Duration = Duration::from_secs(15);
 /// steps, slow enough that a step still represents "a moment" rather than
 /// skipping past a window the model is watching.
 const STEP_MS: f64 = 0.005;
+
+// ---------------------------------------------------------------------
+// The wire's clock
+// ---------------------------------------------------------------------
+
+/// The time the bench's fake boards — and the host end of each of their
+/// links — run on: stepped by [`DeviceBench::step`] and nothing else.
+///
+/// A board's timers (its boot, its heartbeat, its lp-link's ACKs, resends
+/// and stall) used to run on the wall clock while the model ran on the
+/// bench's, so every step slept a millisecond to let the board's time pass,
+/// and a test's speed (and its timings) were the machine's. On the wire's
+/// clock a step is 5 ms on both.
+///
+/// It is not the controller's clock: a test that jumps the controller's
+/// clock (a reload an hour later) jumps the model's idea of time, and the
+/// wire — a board left plugged in — sees only the steps, as it always did.
+#[derive(Clone)]
+struct BenchWire {
+    now_us: Arc<AtomicU64>,
+    /// Every board on this clock, for [`Self::settle`].
+    boards: Rc<RefCell<Vec<FakeEsp32Device>>>,
+}
+
+thread_local! {
+    /// The wire of the bench this test is running: a test is one thread,
+    /// and its boards' links are made deep inside transports the bench
+    /// hands the controller ([`bench_link`]).
+    static BENCH_WIRE: RefCell<Option<BenchWire>> = const { RefCell::new(None) };
+}
+
+impl BenchWire {
+    fn new() -> Self {
+        Self {
+            // Any origin; not zero, so no timer reads "never".
+            now_us: Arc::new(AtomicU64::new(1_000_000)),
+            boards: Rc::default(),
+        }
+    }
+
+    /// The wire this test thread's bench runs on, if one is up.
+    fn current() -> Option<Self> {
+        BENCH_WIRE.with(|wire| wire.borrow().clone())
+    }
+
+    fn install(&self) {
+        BENCH_WIRE.with(|wire| *wire.borrow_mut() = Some(self.clone()));
+    }
+
+    /// Put `device` on this clock (once).
+    fn adopt(&self, device: &FakeEsp32Device) {
+        let mut boards = self.boards.borrow_mut();
+        if boards.iter().any(|board| board.is_same_board(device)) {
+            return;
+        }
+        let now_us = Arc::clone(&self.now_us);
+        device.set_clock(Arc::new(move || now_us.load(Ordering::SeqCst)));
+        boards.push(device.clone());
+    }
+
+    fn advance(&self, secs: f64) {
+        self.now_us
+            .fetch_add((secs * 1_000_000.0) as u64, Ordering::SeqCst);
+    }
+
+    /// Wait for every board's server to answer what it was handed — the
+    /// one real-time part of a board — so the clock never runs on past an
+    /// answer already being computed.
+    fn settle(&self) {
+        for board in self.boards.borrow().iter() {
+            assert!(
+                board.settle_server(REAL_TIME_LIMIT),
+                "a fake board's server did not answer within {REAL_TIME_LIMIT:?}"
+            );
+        }
+    }
+}
+
+/// [`fake_device_link`], with the board on the running bench's wire clock.
+fn bench_link(
+    info: lpa_devices::link::LinkInfo,
+    device: &FakeEsp32Device,
+) -> lpa_link::device_link::fake::FakeDeviceLink {
+    if let Some(wire) = BenchWire::current() {
+        wire.adopt(device);
+    }
+    fake_device_link(info, device)
+}
 
 /// E4: the app agent's device journey over this bench.
 mod agent_device_journey_tests;
@@ -166,7 +264,7 @@ impl ScriptedTransport {
     fn link(&self) -> GrantedLink {
         let info = fake_link_info(&self.endpoint);
         GrantedLink {
-            link: Box::new(fake_device_link(info.clone(), &self.device)),
+            link: Box::new(bench_link(info.clone(), &self.device)),
             info,
         }
     }
@@ -445,7 +543,7 @@ impl SimLinkSource for ScriptedSimSource {
         let info = crate::sim_link_info(&session.uid, &session.display_name);
         Ok(SimBacking {
             link: GrantedLink {
-                link: Box::new(fake_device_link(info.clone(), &self.device)),
+                link: Box::new(bench_link(info.clone(), &self.device)),
                 info,
             },
             control: Rc::new(ScriptedSimControl {
@@ -585,6 +683,14 @@ impl lpa_client::ClientIo for FakeDeviceIo {
                     "the fake device did not answer".to_string(),
                 ));
             }
+            // What the board's server is working on comes back first: the
+            // server is real, and this is the one place a conversation waits
+            // for it (its board's other timers are on the bench's wire).
+            self.device.settle_server(REAL_TIME_LIMIT);
+            self.drain();
+            if !self.pending.is_empty() {
+                continue;
+            }
             // Yield to the bench's task pump so the rest of the app keeps
             // turning while this conversation waits — the same shape the
             // browser io's `setTimeout` poll has.
@@ -611,13 +717,9 @@ impl Future for YieldOnce {
     fn poll(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<()> {
         match core::mem::replace(&mut self.yielded, true) {
             true => Poll::Ready(()),
-            false => {
-                // The bench re-polls every task each step; a real executor
-                // gets a wake from the waker the same way the `Sleep` above
-                // relies on.
-                std::thread::sleep(Duration::from_millis(1));
-                Poll::Pending
-            }
+            // The bench re-polls every task each step; a real executor gets
+            // a wake from the waker the same way the `Sleep` above relies on.
+            false => Poll::Pending,
         }
     }
 }
@@ -708,6 +810,8 @@ struct DeviceBench {
     sims: Option<Rc<SimDeviceTransport>>,
     sim_restarts: Rc<Cell<usize>>,
     started: std::time::Instant,
+    /// The clock the boards and their links run on.
+    wire: BenchWire,
     /// Where the access controller.s conversations report back (BLE M6):
     /// the actor.s queue, drained by [`Self::step`].
     access_rx: crate::app::studio::studio_view_channel::CommandReceiver,
@@ -854,7 +958,15 @@ impl DeviceBench {
     ) -> (Self, TaskPool) {
         let clock = Rc::new(Cell::new(1_000.0));
         let store = memory_store(Rc::clone(&clock));
-        Self::build_on(device, endpoint, granted, chooser_grants, clock, store)
+        Self::build_on(
+            device,
+            endpoint,
+            granted,
+            chooser_grants,
+            clock,
+            store,
+            BenchWire::new(),
+        )
     }
 
     /// A reload: a FRESH controller (empty roster, empty feeds) over the
@@ -865,7 +977,9 @@ impl DeviceBench {
     fn reloaded(previous: &Self, device: &FakeEsp32Device, endpoint: &str) -> (Self, TaskPool) {
         let clock = Rc::new(Cell::new(previous.clock.get()));
         let store = memory_store_sharing(&previous.store);
-        Self::build_on(device, endpoint, false, false, clock, store)
+        // The boards stayed plugged in: the wire's time carries on.
+        let wire = previous.wire.clone();
+        Self::build_on(device, endpoint, false, false, clock, store, wire)
     }
 
     fn build_on(
@@ -875,7 +989,9 @@ impl DeviceBench {
         chooser_grants: bool,
         clock: Rc<Cell<f64>>,
         store: LibraryStore,
+        wire: BenchWire,
     ) -> (Self, TaskPool) {
+        wire.install();
         let tasks: TaskPool = Rc::new(RefCell::new(Vec::new()));
         let inbox: Rc<RefCell<VecDeque<DeviceInput>>> = Rc::new(RefCell::new(VecDeque::new()));
         let granted = Rc::new(Cell::new(granted));
@@ -977,6 +1093,7 @@ impl DeviceBench {
             sims: None,
             sim_restarts: Rc::new(Cell::new(0)),
             started: std::time::Instant::now(),
+            wire,
             access_rx,
             record_push_attempts,
             device_inputs_to,
@@ -988,6 +1105,7 @@ impl DeviceBench {
     /// everything they queued, then settle whatever the folds asked to write.
     fn step(&mut self, tasks: &TaskPool) {
         self.clock.set(self.clock.get() + STEP_MS);
+        self.wire.advance(STEP_MS);
         pump(tasks);
         let queued: Vec<DeviceInput> = self.inbox.borrow_mut().drain(..).collect();
         for input in queued {
@@ -1011,6 +1129,8 @@ impl DeviceBench {
         // (it holds that board's wire): a login, a Wi‑Fi read.
         drive(self.controller.run_access_lens_step());
         drive(self.controller.run_network_lens_step());
+        // What this turn asked the boards is answered before time moves on.
+        self.wire.settle();
     }
 
     fn run_until(&mut self, tasks: &TaskPool, what: &str, ready: impl Fn(&Self) -> bool) {
@@ -1025,9 +1145,6 @@ impl DeviceBench {
                 "timed out waiting for {what}; roster now: {:?}",
                 self.view()
             );
-            // The fake's server runs on its own thread; there is genuinely
-            // nothing to do between polls.
-            std::thread::sleep(Duration::from_millis(1));
             let _ = self.started;
         }
     }
@@ -1394,7 +1511,6 @@ fn opening_the_lens_borrows_the_wire_and_the_card_keeps_folding() {
             "the tapped wire never reached the fold: {:?}",
             bench.view()
         );
-        std::thread::sleep(Duration::from_millis(1));
     }
     assert!(
         bench.view().devices[0].activity.is_none(),
@@ -1854,7 +1970,6 @@ fn an_open_asked_before_the_board_is_ready_attaches_once_it_says_hello() {
             "the held lens never attached: {:?}",
             bench.view()
         );
-        std::thread::sleep(Duration::from_millis(1));
     }
     assert_eq!(
         bench.controller.runtime_pool_for_test().lens().is_some(),
@@ -1893,7 +2008,6 @@ fn a_port_that_dies_under_the_lens_holds_the_editor_through_the_tap() {
             "the dead wire never reached the lens: {:?}",
             bench.view()
         );
-        std::thread::sleep(Duration::from_millis(1));
     }
     assert_eq!(bench.lens_session_id(), session, "held, not closed");
     assert!(bench.controller.view().home.is_none());
@@ -1936,7 +2050,6 @@ fn a_port_that_dies_under_the_lens_holds_the_editor_through_the_tap() {
             "the replugged board never resumed the editor: {:?}",
             bench.view()
         );
-        std::thread::sleep(Duration::from_millis(1));
     }
     assert_eq!(bench.lens_session_id(), session, "the same session resumed");
     assert!(bench.controller.view().lens_reconnecting.is_none());
@@ -2040,7 +2153,6 @@ fn a_link_reset_under_the_lens_keeps_the_editor_and_says_reconnecting() {
             std::time::Instant::now() < deadline,
             "the board's return never cleared the strip"
         );
-        std::thread::sleep(Duration::from_millis(1));
     }
     assert!(bench.lens_device_uid().is_some());
     let session = bench
@@ -2352,12 +2464,13 @@ fn feed_tick(bench: &mut DeviceBench, tasks: &TaskPool, step_ms: f64) -> bool {
                 break preempted;
             }
             clock.set(clock.get() + step_ms / 1_000.0);
+            bench.wire.advance(step_ms / 1_000.0);
             pump(tasks);
+            bench.wire.settle();
             assert!(
                 std::time::Instant::now() < deadline,
                 "a device feed pull did not complete"
             );
-            std::thread::sleep(Duration::from_millis(1));
         }
     };
     bench.step(tasks);
@@ -2851,7 +2964,6 @@ fn run_past_the_boot_hello(device: &FakeEsp32Device) {
             std::time::Instant::now() < deadline,
             "the fake never finished booting; saw: {seen}"
         );
-        std::thread::sleep(Duration::from_millis(2));
     }
 }
 
@@ -4035,7 +4147,6 @@ fn connecting_the_board_a_held_open_waits_on_lands_the_open() {
             open_stage(),
             bench.view()
         );
-        std::thread::sleep(Duration::from_millis(1));
     }
     assert_eq!(
         bench.controller.view().open_project_uid.as_deref(),
@@ -4168,7 +4279,6 @@ fn a_remembered_board_comes_back_to_its_record_and_is_named_once() {
     // the records — the loop on main needed nothing more than this.
     for _ in 0..200 {
         bench.step(&tasks);
-        std::thread::sleep(Duration::from_millis(1));
     }
 
     let journal = journal_lines(&bench);
@@ -4221,7 +4331,6 @@ fn a_single_remembered_board_comes_back_to_its_record() {
     });
     for _ in 0..50 {
         bench.step(&tasks);
-        std::thread::sleep(Duration::from_millis(1));
     }
     let journal = journal_lines(&bench);
     assert!(!journal.iter().any(|line| line.contains("IdentityConflict")));
@@ -4273,7 +4382,9 @@ fn bench_remembering(
     for row in rows {
         registry.upsert(row).expect("the row writes");
     }
-    let (mut bench, tasks) = DeviceBench::build_on(device, endpoint, true, true, clock, store);
+    let wire = BenchWire::new();
+    let (mut bench, tasks) =
+        DeviceBench::build_on(device, endpoint, true, true, clock, store, wire);
     bench.settle_library();
     (bench, tasks)
 }
@@ -4533,8 +4644,10 @@ fn reload_with_the_board_granted(
 ) -> (DeviceBench, TaskPool) {
     let clock = Rc::new(Cell::new(previous.clock.get()));
     let store = memory_store_sharing(&previous.store);
+    // The board stayed on the desk: the wire's time carries on.
+    let wire = previous.wire.clone();
     drop(previous);
-    let (mut page, tasks) = DeviceBench::build_on(device, endpoint, true, true, clock, store);
+    let (mut page, tasks) = DeviceBench::build_on(device, endpoint, true, true, clock, store, wire);
     page.settle_library();
     (page, tasks)
 }
@@ -4552,7 +4665,6 @@ fn land_the_open(page: &mut DeviceBench, tasks: &TaskPool) {
             crate::app::open_progress::open_stage(),
             page.view()
         );
-        std::thread::sleep(Duration::from_millis(1));
     }
 }
 
@@ -7098,14 +7210,12 @@ fn open_package_cold(bench: &mut DeviceBench, tasks: &TaskPool, uid: &str) {
             "timed out waiting for the open to land its lens; roster now: {:?}",
             bench.view()
         );
-        // Paced like `run_until`, and for the same reason: a step is 5 fake
-        // ms, and the sim this open just powered on boots a real host
-        // runtime on a real thread. Spinning steps as fast as the CPU allows
-        // would spend the fold's 5 s identify budget (~1000 steps) in a few
-        // real milliseconds and give that thread no chance to say hello —
-        // the open would then read a booting sim as one that never started
-        // and drop the hold, which is precisely what a loaded CI box saw.
-        std::thread::sleep(Duration::from_millis(1));
+        // No pacing needed: the sim this open just powered on boots a real
+        // host runtime on a real thread, and a step waits for that server's
+        // hello before the clock moves on (`BenchWire::settle`). A step
+        // that did not would spend the fold's 5 s identify budget (~1000
+        // steps) in a few real milliseconds and read a booting sim as one
+        // that never started — precisely what a loaded CI box once saw.
     }
 }
 
@@ -7314,7 +7424,6 @@ fn a_held_lens_on_a_sim_that_is_off_powers_it_on_and_lands() {
             "the held lens never woke its sim; roster now: {:?}",
             bench.view()
         );
-        std::thread::sleep(Duration::from_millis(1));
     }
     assert!(
         bench
@@ -7361,7 +7470,6 @@ fn a_failed_open_on_a_sim_names_the_sim_not_the_board() {
             "the held lens never woke its sim; roster now: {:?}",
             bench.view()
         );
-        std::thread::sleep(Duration::from_millis(1));
     }
     assert_eq!(bench.lens_device_uid().as_deref(), Some(uid.as_str()));
 
@@ -7455,7 +7563,6 @@ fn a_sim_that_never_says_hello_fails_the_open_instead_of_holding_it() {
             "the hold on a sim that never said hello was never released; roster now: {:?}",
             bench.view()
         );
-        std::thread::sleep(Duration::from_millis(1));
     }
 
     assert!(
@@ -7715,7 +7822,12 @@ fn a_board_seen_over_usb_and_over_bluetooth_is_one_registry_row() {
 
     // A Bluetooth link holds nothing until its hello says what it holds
     // (BLE M6): the lens waits for that. This board's link is trusted (the
-    // fake answers as a USB link would), so the check grants edit.
+    // fake answers as a USB link would), so the check grants edit, with no
+    // name to give — and once the board's access list is read too, the
+    // card says why: the fake is open at edit, as a fresh board is. (This
+    // waited for the bare "Unlocked" in between, which only a bench whose
+    // board answered late in real time ever caught: on the stepped clock
+    // the check and the list land together.)
     bench.run_until(&tasks, "the Bluetooth link's access to be read", |bench| {
         bench
             .controller
@@ -7723,7 +7835,7 @@ fn a_board_seen_over_usb_and_over_bluetooth_is_one_registry_row() {
             .access
             .get(&cards[0].id)
             .and_then(|access| access.line.as_deref())
-            == Some("Unlocked")
+            == Some("Open — no password")
     });
 
     // The editor over Bluetooth is authoring: the device cadence. Play is
@@ -7882,7 +7994,7 @@ impl crate::BleLinkSource for OneBleBoard {
     fn present(&self) -> Vec<GrantedLink> {
         let info = crate::ble_link_info(&self.device_id, "LP-b48c");
         vec![GrantedLink {
-            link: Box::new(fake_device_link(info.clone(), &self.device)),
+            link: Box::new(bench_link(info.clone(), &self.device)),
             info,
         }]
     }
@@ -8093,7 +8205,9 @@ fn pushing_a_current_format_library_project_shows_no_upgrade_notice() {
     );
 }
 
-/// Like [`drive`], but sleeps between polls for the fake device's thread.
+/// Like [`drive`], with no cap on polls: a conversation over the fake
+/// device's io, which waits for the board's server itself
+/// ([`FakeDeviceIo`]). The wall clock is only the hang guard.
 fn drive_real<F: Future>(future: F) -> F::Output {
     let waker = noop_waker();
     let mut cx = Context::from_waker(&waker);
@@ -8104,7 +8218,6 @@ fn drive_real<F: Future>(future: F) -> F::Output {
             return output;
         }
         assert!(std::time::Instant::now() < deadline, "timed out");
-        std::thread::sleep(Duration::from_millis(1));
     }
 }
 fn v10_corpus_files() -> Vec<(String, Vec<u8>)> {
@@ -8894,11 +9007,10 @@ fn a_held_board_gets_no_access_entries_and_shows_no_access_list() {
     });
     // Give the held link's window every chance to sync: before the fix the
     // sync's add landed well inside this (a second toast, a RAM-only list).
-    // The fake's server runs on its own thread, so real time passes too.
-    let until = std::time::Instant::now() + Duration::from_secs(3);
-    while std::time::Instant::now() < until {
+    // Three seconds on the bench's clocks; every step waits for the board's
+    // server to answer what it was asked, so nothing it says is missed.
+    for _ in 0..(3.0 / STEP_MS) as usize {
         bench.step(&tasks);
-        std::thread::sleep(Duration::from_millis(1));
     }
 
     let added_after = bench.controller.view().access_added.map(|a| a.generation);
