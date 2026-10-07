@@ -2232,9 +2232,14 @@ jobs:
           fi
 
   # The other half of the classic's gate — see `emu-esp32v3` above for the
-  # split. Same path gate, same toolchains, same cache key (the rust-cache
-  # entry is registry-only, `cache-targets: false`, so the two jobs can share
-  # it), and the same 35-minute budget, which this half sits far inside.
+  # split. Same path gate, same toolchains, the same read-only registry
+  # entry, and the same 35-minute budget, which this half sits far inside.
+  #
+  # Its reference image is built at HEAD, so `build-reference-image.sh`
+  # builds it with no compiler wrapper: the pinned worktree's path carries
+  # the commit, sccache hashes that path, and no later run could ever hit
+  # what it wrote (the script's comment, 2026-10-07). sccache still serves
+  # this job's in-tree builds — the lints' and `cargo test` steps' compiles.
   emu-esp32v3-ref:
     name: Emulator ESP32v3 reference (x64)
     runs-on: ubuntu-24.04
@@ -2287,16 +2292,18 @@ jobs:
 
       - name: Run sccache
         uses: mozilla/sccache-action@v0.0.10
-
-      - name: Cache cargo registry and build artifacts
-        uses: Swatinem/rust-cache@v2
         with:
-          workspaces: lp2025 -> target
-          cache-targets: false
-          cache-bin: false
-          shared-key: emu-esp32v3
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-          cache-on-failure: true
+          version: v0.18.0
+
+      # The repo's one registry entry, read-only (see the lint job). Until
+      # 2026-10-07 this job still had its own Swatinem/rust-cache entry
+      # (`v0-rust-emu-esp32v3-…`, `cache-targets: false`, so registry only):
+      # ~496 MB of the same crates that entry holds, re-saved on every
+      # manifest change reaching main — two generations, 1.04 GB, were live
+      # at once (docs/debt/actions-cache-budget.md). The sibling job had
+      # already moved; this one was missed.
+      - name: Restore cargo registry
+        uses: ./lp2025/.github/actions/cargo-registry
 
       - name: Install just
         uses: extractions/setup-just@v3
@@ -3420,24 +3427,62 @@ jobs:
         with:
           node-version: 22
 
-      # Deploy-workflow-style cache (registry + git + bins + target) rather
-      # than rust-cache: the cargo-installed tools live in ~/.cargo/bin and
-      # must be cached with a key that includes their pinned versions.
-      # Restore/save are split so saving happens only on main — same repo-wide
-      # cache-eviction rationale as the lint job's cache step.
-      - name: Restore cargo registry, tools, and build artifacts
+      # The registry is the repo's one shared entry, read-only (see the lint
+      # job); this job's own entry holds only what is particular to it.
+      - name: Restore cargo registry
+        uses: ./lp2025/.github/actions/cargo-registry
+
+      # The tools (~/.cargo/bin: the pinned dx, wasm-bindgen, oxipng) and
+      # target/, in one entry saved from main only — the same repo-wide
+      # budget as every other cache (docs/debt/actions-cache-budget.md). Not
+      # rust-cache: the tools must be keyed on their pinned versions.
+      #
+      # ONE ENTRY PER UTC DAY, and main restores only that day's exact key.
+      # Until 2026-10-07 the key was Cargo.lock's hash, and each save started
+      # from the previous lockfile's target/ and added to it — cargo never
+      # deletes a unit an old lockfile built — so the entry grew from 1.07 GB
+      # (09-08) to 1.75 GB (10-07), was re-saved whole on every lockfile
+      # change (~3 a day; two ~1.7 GB copies 22 min apart were live on
+      # 10-07), and carried its own copy of the registry. Now:
+      #   - the first main run of a day misses its exact key and builds
+      #     target/ from nothing, so what it saves holds no unit an older
+      #     lockfile left behind. A cold build costs well under a minute
+      #     more than a warm one: 8m28s for the three builds on PR #1022's
+      #     first run (no entry under the new key yet) against 7m42s on the
+      #     06:27 main run of 10-07, warm off the old 1.75 GB entry
+      #     (fw-browser 1m51s against 54 s; dx 5m53s against 6m15s; tools
+      #     6 s by binstall) — once a day, on main;
+      #   - before the save, `scripts/ci/prune-target-cache.py` drops what
+      #     the next run rebuilds regardless: path packages (a fresh checkout
+      #     re-stamps their sources), incremental state, final artifacts, dx's
+      #     bundle and the copied sidecars;
+      #   - PRs, and main's later runs that day, restore the newest entry; a
+      #     lockfile change after the day's save rebuilds only what it changed.
+      - name: Stories cache key
+        id: stories_key
+        shell: bash
+        env:
+          PREFIX: ${{ runner.os }}-${{ runner.arch }}-stories-target-wb${{ env.WASM_BINDGEN_VERSION }}-dx${{ env.DIOXUS_CLI_VERSION }}-ox${{ env.OXIPNG_VERSION }}-tc${{ hashFiles('lp2025/rust-toolchain.toml') }}-
+        run: |
+          echo "prefix=$PREFIX" >> "$GITHUB_OUTPUT"
+          echo "key=$PREFIX$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore tools and build artifacts
         id: stories_cache
         uses: actions/cache/restore@v4
         with:
           path: |
             ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
             lp2025/target/
-          key: ${{ runner.os }}-${{ runner.arch }}-stories-wb${{ env.WASM_BINDGEN_VERSION }}-dx${{ env.DIOXUS_CLI_VERSION }}-ox${{ env.OXIPNG_VERSION }}-cargo-${{ hashFiles('lp2025/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-${{ runner.arch }}-stories-wb${{ env.WASM_BINDGEN_VERSION }}-dx${{ env.DIOXUS_CLI_VERSION }}-ox${{ env.OXIPNG_VERSION }}-cargo-
+          key: ${{ steps.stories_key.outputs.key }}
+          restore-keys: ${{ github.ref != 'refs/heads/main' && steps.stories_key.outputs.prefix || '' }}
+
+      # What the restored entry holds, by profile dir, and what a prune would
+      # take out of it — the standing monitor for this entry's size (it goes
+      # in the step summary). Deletes nothing.
+      - name: Report the restored target/
+        if: steps.stories_cache.outputs.cache-matched-key != ''
+        run: cd lp2025 && python3 scripts/ci/prune-target-cache.py --report target --drop dx --drop studio-web-assets
 
       - name: Restore Chrome for Testing cache
         id: chrome_cache
@@ -3741,22 +3786,38 @@ jobs:
                "not story drift. See the crash summary above."
           exit 1
 
-      # Main-only saves (see the restore steps above). `always()` preserves
-      # the old actions/cache post-step behavior of saving even when a
-      # main-push drift failed the job — the build artifacts are still good.
-      - name: Save cargo registry, tools, and build artifacts (main only)
+      # Main-only saves (see the restore steps above), and only after a
+      # complete capture, which means the build finished: a day has one key,
+      # so an entry saved from a build that died halfway would be what every
+      # later run that day restores. Story drift does not stop the save —
+      # drift is a complete capture.
+      # On a PR, what main's save would hold after this build: the same
+      # table the prune step below prints on main, plus the tools. Deletes
+      # nothing — a PR saves no entry.
+      - name: Report what a save would hold (PRs)
+        if: >-
+          always() && github.ref != 'refs/heads/main' &&
+          steps.check_complete.outputs.complete == 'true'
+        run: |
+          du -sh ~/.cargo/bin
+          cd lp2025 && python3 scripts/ci/prune-target-cache.py --report target --drop dx --drop studio-web-assets
+
+      - name: Prune target/ to what the next run can reuse (main only)
+        id: stories_prune
         if: >-
           always() && github.ref == 'refs/heads/main' &&
-          steps.stories_cache.outputs.cache-hit != 'true'
+          steps.stories_cache.outputs.cache-hit != 'true' &&
+          steps.check_complete.outputs.complete == 'true'
+        run: cd lp2025 && python3 scripts/ci/prune-target-cache.py target --drop dx --drop studio-web-assets
+
+      - name: Save tools and build artifacts (main only)
+        if: always() && steps.stories_prune.outcome == 'success'
         uses: actions/cache/save@v4
         with:
           path: |
             ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
             lp2025/target/
-          key: ${{ steps.stories_cache.outputs.cache-primary-key }}
+          key: ${{ steps.stories_key.outputs.key }}
 
       - name: Save Chrome for Testing cache (main only)
         if: >-
