@@ -17,10 +17,15 @@
 //! - **Where.** `lightplayer.app:80`, always, on the product image; a desk
 //!   image built with `LP_RELAY_HOST=<host>[:port]` dials that instead and
 //!   says so at boot (RD14).
-//! - **Memory.** The leg's TCP and WebSocket buffers are allocated once:
-//!   at boot with the LAN's when the board will join with Cloud relay on
-//!   (`net_thread::NetBuffers`), else the first time the driver dials. A
-//!   board with Cloud relay off, or no account key, never pays for them.
+//! - **Memory.** The leg's TCP and WebSocket buffers (6,921 B) are
+//!   allocated once: at boot with the LAN's when the board will join with
+//!   Cloud relay on (`net_thread::NetBuffers`; whether it holds an account
+//!   key or not, so they sit low in the heap), else the first time the
+//!   driver dials. A board with Cloud relay off at boot does not pay for
+//!   them until it is switched on and dials. On the emulated C6 with
+//!   `projects/test/basic` loaded and a network session open they take the
+//!   largest free block from 19,556 B to 13,448 B — under the read gate's
+//!   16,384 B (Wi-Fi relay plan P9's measurement; A3, R1).
 
 use alloc::boxed::Box;
 use alloc::collections::VecDeque;
