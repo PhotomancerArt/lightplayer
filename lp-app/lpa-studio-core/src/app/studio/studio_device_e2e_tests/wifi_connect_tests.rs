@@ -294,6 +294,12 @@ fn a_board_never_seen_is_reached_by_its_address_and_remembered_by_its_mac() {
         bench.offered(&add).label(),
         "Connect a board on Wi\u{2011}Fi"
     );
+    // The app agent reads the same verb, with its one parameter.
+    let readout = bench.controller.app_agent_readout_for_test().render();
+    assert!(
+        readout.contains("devices/connect-wifi-address"),
+        "{readout}"
+    );
 
     // Not an address: refused by the offer, with its reason, before any
     // socket.
