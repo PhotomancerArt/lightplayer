@@ -303,6 +303,24 @@ if [[ -f "$elf" ]] && (( ! verify )); then
 fi
 
 full_commit="$(git -C "$repo" rev-parse "$commit")"
+
+# No compiler cache for a build of HEAD (2026-10-07). The worktree's path
+# carries the commit (`wt-<commit>-…`, below), and that path is in every
+# target compile's arguments (the `--remap-path-prefix` flags) and in each
+# path package's CARGO_MANIFEST_DIR — both of which sccache hashes. So no
+# compile of a HEAD build can be found again by a run at another HEAD: on
+# CI's classic reference job (`emu-esp32v3-ref`, which builds HEAD every run)
+# that was ~310 objects uploaded per main run that nothing ever read, out of
+# the repo's one 10 GB Actions cache, and ~380 lookups per PR run that could
+# only miss, against its read rate limit (docs/debt/actions-cache-budget.md).
+# A pinned commit keeps a stable path from run to run, so its builds keep
+# whatever wrapper the caller set. The bytes are the same either way — an
+# empty RUSTC_WRAPPER just makes cargo call rustc directly (it overrides a
+# configured `build.rustc-wrapper` too).
+if [[ "$full_commit" == "$(git -C "$repo" rev-parse HEAD)" ]]; then
+    export RUSTC_WRAPPER=""
+fi
+
 if [[ "$spike" != "none" ]]; then
     spike_parent="$(git -C "$repo" rev-parse "$spike^")"
     if [[ "$spike_parent" != "$full_commit" ]]; then

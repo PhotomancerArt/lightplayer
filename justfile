@@ -4853,7 +4853,8 @@ walk-ble-emu *args:
 # never Studio's. Needs `just studio-firmware-package-served` (the merged
 # image) instead; `just walk-wifi-emu lan --dry-run` checks the arguments and
 # prerequisites and starts nothing. Report:
-# docs/reports/2026-10-06-wifi-emulator-walk.md. Not CI.
+# docs/reports/2026-10-06-wifi-emulator-walk.md. Not CI. `--skip W10` leaves
+# out W10's `link rtt`, which alone outlives a 10-minute command cap.
 #
 # `relay` (Wi‑Fi relay plan P9, scripts/emu/walk-wifi-emu-relay.mjs) is
 # lp-cli-driven: it runs the `emu_relay_link` cell (one board dialing
@@ -4861,6 +4862,14 @@ walk-ble-emu *args:
 # its log, and checks each step against the board's own `[relay]` words
 # (target/walk-wifi-emu/relay/). Studio's relay walk is M8's. Not CI (the
 # cell is, in `test-emu-serve`).
+#
+# `studio-lan` (network-transport plan P04,
+# scripts/emu/walk-wifi-emu-studio-lan.mjs): the same two boards, Studio with
+# NO `?lan=` — remembered over USB, "Connect over Wi‑Fi" with no cable, a
+# board added by address, a second browser told the board is busy, a wrong
+# address said in words. Stand-in (DD193): the remembered lease is rewritten
+# to the board's loopback forward before it is dialled. Report:
+# docs/reports/2026-10-07-studio-lan-boards-emulator-walk.md. Not CI.
 walk-wifi-emu lane *args:
     node scripts/emu/walk-wifi-emu.mjs {{ lane }} {{ args }}
 

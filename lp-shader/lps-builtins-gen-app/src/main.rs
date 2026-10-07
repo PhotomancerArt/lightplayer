@@ -8,6 +8,7 @@ mod completions_codegen;
 mod discovery;
 mod lpfn;
 mod native_dispatch_codegen;
+mod write_if_changed;
 
 use discovery::discover_lpfn_functions;
 use lpfn::errors::Variant;
@@ -15,6 +16,7 @@ use lpfn::grouping::{group_by_signature, group_functions_by_name};
 use lpfn::process::process_lpfn_functions;
 use lpfn::types::Type;
 use lpfn::validate::{ParsedLpfnFunction, validate_lpfn_functions};
+use write_if_changed::write_if_changed;
 
 #[derive(Debug, Clone)]
 pub(crate) struct BuiltinInfo {
@@ -181,29 +183,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .join("native_builtin_dispatch.rs");
     native_dispatch_codegen::generate_native_wasmtime_dispatch(&native_dispatch_path, &builtins);
 
-    // Format generated files using cargo fmt
-    // Need actual workspace root for cargo fmt, not lps directory
-    let actual_workspace_root = workspace_root
-        .parent()
-        .ok_or("lps directory has no parent")?;
-    format_generated_files(
-        actual_workspace_root,
-        &[
-            &builtin_ids_path,
-            &lpir_builtin_abi_path,
-            &builtin_refs_path,
-            &builtin_refs_lps_path,
-            &jit_builtin_ptr_path,
-            &glsl_mod_rs_path,
-            &lpir_mod_rs_path,
-            &vm_mod_rs_path,
-            &glsl_map_path,
-            &completions_path,
-            &wasm_import_types_path,
-            &native_dispatch_path,
-        ],
-    );
-
+    // Every generated file above was formatted in memory and written only if
+    // its bytes changed (`write_if_changed`), so no `cargo fmt` pass is left to
+    // rewrite them and bump their mtimes.
     println!("Generated all builtin boilerplate files");
     Ok(())
 }
@@ -283,7 +265,7 @@ pub enum GlslParamKind {
 
     emit_mapping_tests(&mut out, builtins);
 
-    fs::write(path, out)?;
+    write_if_changed(path, &out)?;
     Ok(())
 }
 
@@ -1058,7 +1040,7 @@ pub(super) fn wasm_import_val_types(builtin: BuiltinId) -> (Vec<ValType>, Vec<Va
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).expect("create wasm import types parent dir");
     }
-    fs::write(path, output).expect("Failed to write builtin_wasm_import_types.rs");
+    write_if_changed(path, &output).expect("Failed to write builtin_wasm_import_types.rs");
 }
 
 fn generate_builtin_ids(path: &Path, builtins: &[BuiltinInfo]) {
@@ -1247,7 +1229,7 @@ pub enum BuiltinId {
     output.push_str("pub use glsl_builtin_mapping::vm_f32_builtin_id;\n");
     output.push_str("pub use glsl_builtin_mapping::vm_q32_builtin_id;\n");
 
-    fs::write(path, output).expect("Failed to write builtin-ids lib.rs");
+    write_if_changed(path, &output).expect("Failed to write builtin-ids lib.rs");
 }
 
 /// Split comma-separated list at nesting depth 0 (for simple `extern "C"` fn param lists).
@@ -1406,7 +1388,7 @@ fn generate_lpvm_cranelift_builtin_abi(path: &Path, builtins: &[BuiltinInfo]) {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).expect("create lpvm-cranelift generated parent dir");
     }
-    fs::write(path, output).expect("Failed to write generated_builtin_abi.rs");
+    write_if_changed(path, &output).expect("Failed to write generated_builtin_abi.rs");
 }
 
 fn generate_builtin_refs(path: &Path, builtins: &[BuiltinInfo], import_root: &str) {
@@ -1534,7 +1516,7 @@ fn generate_builtin_refs(path: &Path, builtins: &[BuiltinInfo], import_root: &st
     output.push_str("    }\n");
     output.push_str("}\n");
 
-    fs::write(path, output).expect("Failed to write builtin_refs.rs");
+    write_if_changed(path, &output).expect("Failed to write builtin_refs.rs");
 }
 
 /// `#[cfg(feature = "float-f32")]` for anything in the native-f32 family.
@@ -1622,7 +1604,7 @@ pub fn jit_builtin_code_ptr(builtin: BuiltinId) -> Option<*const u8> {
 "#,
     );
 
-    fs::write(path, output).expect("Failed to write jit_builtin_ptr.rs");
+    write_if_changed(path, &output).expect("Failed to write jit_builtin_ptr.rs");
 }
 
 fn generate_dir_mod_rs(path: &Path, builtins: &[BuiltinInfo], doc_line: &str) {
@@ -1650,32 +1632,5 @@ fn generate_dir_mod_rs(path: &Path, builtins: &[BuiltinInfo], doc_line: &str) {
         output.push_str(&format!("pub mod {};\n", name));
     }
 
-    fs::write(path, output).expect("Failed to write mod.rs");
-}
-
-fn format_generated_files(workspace_root: &Path, files: &[&Path]) {
-    use std::process::Command;
-
-    // Run cargo fmt on the generated files
-    let mut cmd = Command::new("cargo");
-    cmd.arg("fmt");
-    cmd.arg("--");
-
-    for file in files {
-        // Get relative path from workspace root
-        if let Ok(relative_path) = file.strip_prefix(workspace_root) {
-            cmd.arg(relative_path);
-        }
-    }
-
-    // Run from workspace root
-    let output = cmd
-        .current_dir(workspace_root)
-        .output()
-        .expect("Failed to run cargo fmt");
-
-    if !output.status.success() {
-        eprintln!("Warning: cargo fmt failed on generated files:");
-        eprintln!("{}", String::from_utf8_lossy(&output.stderr));
-    }
+    write_if_changed(path, &output).expect("Failed to write mod.rs");
 }

@@ -176,6 +176,9 @@ pub(crate) mod agent_device_seat;
 mod ble_drop_tests;
 /// A LAN link that closes and redials.
 mod lan_drop_tests;
+/// Reaching a board over Wi‑Fi without a flag: its remembered address, an
+/// address typed into the add slot.
+mod wifi_connect_tests;
 /// Wi‑Fi settings over the bench's USB link (Wi‑Fi roadmap M5).
 mod wifi_device_tests;
 

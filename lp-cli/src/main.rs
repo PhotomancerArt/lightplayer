@@ -10,8 +10,8 @@ mod messages;
 mod server;
 
 use commands::{
-    create, dev, emu, firmware, fwcheck, hardware, link, pattern, profile, project, record, schema,
-    serve, shader_debug, shader_lpir, upload, validate, wifi, wire,
+    create, dev, emu, firmware, fwcheck, hardware, lan, link, pattern, profile, project, record,
+    schema, serve, shader_debug, shader_lpir, upload, validate, wifi, wire,
 };
 
 #[derive(Parser)]
@@ -112,6 +112,8 @@ enum Cli {
     Record(record::RecordCli),
     /// Measure a board's host link: `link lab` against a `test_comms_lab` image.
     Link(link::LinkCli),
+    /// Boards on this network: `lan list` finds LightPlayer boards by mDNS and prints a `lan:<ip>` for each.
+    Lan(lan::LanCli),
     /// A board's Wi-Fi networks: `wifi status|scan|add|forget|set <host>` (a password never on argv).
     Wifi(wifi::WifiCli),
     /// Compile a GLSL file to LPIR text (stdout). Uses the same Naga → LPIR path as the JIT.
@@ -179,6 +181,7 @@ fn main() -> Result<()> {
         Cli::Wire(cli) => wire::handle_wire(cli),
         Cli::Record(cli) => record::handle_record(cli),
         Cli::Link(cli) => link::handle_link(cli),
+        Cli::Lan(cli) => lan::handle_lan(cli),
         Cli::Wifi(cli) => wifi::handle_wifi(cli),
         Cli::Profile(cli) => match cli.subcommand {
             Some(profile::ProfileSubcommand::Diff(args)) => profile::handle_profile_diff(args),

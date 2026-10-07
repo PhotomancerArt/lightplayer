@@ -159,6 +159,8 @@ jobs:
         uses: cargo-bins/cargo-binstall@v1.21.1
 
       - name: Install espflash (prebuilt)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: cargo binstall --no-confirm --locked espflash@3.3.0
 
       # Package every served target, stage, release-check (--version: every

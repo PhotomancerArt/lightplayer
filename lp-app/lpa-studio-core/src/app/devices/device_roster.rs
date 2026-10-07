@@ -83,9 +83,16 @@ pub struct DeviceRosterView {
     /// board's network status, read on a link that holds edit. Absent = no
     /// row (a sim, a held board, a Bluetooth link nothing unlocked).
     pub wifi: std::collections::BTreeMap<lpa_devices::DeviceId, crate::app::network::UiDeviceWifi>,
-    /// Each board reached on the LAN right now (`?lan=`, Wi-Fi M6 P07): the
+    /// Each board reached on the LAN right now (Wi-Fi M6 P07): the
     /// card's "Wi-Fi · <address>" line. Absent = not a LAN link.
     pub lan_links: std::collections::BTreeMap<lpa_devices::DeviceId, super::UiLanLink>,
+    /// Each remembered board's "Connect over Wi‑Fi" under way, or why it
+    /// failed (`devices/<board>/connect-wifi`). Joined by the controller,
+    /// which holds the connects; absent = nothing to say.
+    pub wifi_connects: std::collections::BTreeMap<lpa_devices::DeviceId, super::UiWifiConnect>,
+    /// The add slot's "Connect a board on Wi‑Fi" under way, or why it
+    /// failed (`devices/connect-wifi-address`).
+    pub wifi_address_connect: Option<super::UiWifiConnect>,
     /// Each device's firmware-update words (the update-states spike,
     /// direction C): the firmware zone's line and bar, the picture slot's
     /// sentence and light, the header chip and version. Joined by the
@@ -117,6 +124,8 @@ impl Default for DeviceRosterView {
             access: std::collections::BTreeMap::new(),
             wifi: std::collections::BTreeMap::new(),
             lan_links: std::collections::BTreeMap::new(),
+            wifi_connects: std::collections::BTreeMap::new(),
+            wifi_address_connect: None,
             updates: std::collections::BTreeMap::new(),
             layout: std::collections::BTreeMap::new(),
             backup_download: None,
@@ -164,6 +173,9 @@ pub struct RememberedView {
     /// (`device_frame_snapshot`) — always `FeedLiveness::Offline` here,
     /// dimmed, "last frame · <age>". `None` keeps the tile's sentence.
     pub feed: Option<super::DeviceCardFeedView>,
+    /// Its "Connect over Wi‑Fi" under way, or why it failed. The verb
+    /// itself is the device's offer (`connect-wifi`).
+    pub wifi_connect: Option<super::UiWifiConnect>,
 }
 
 /// Split a roster view into cards worth drawing and the quiet remembered
@@ -185,6 +197,7 @@ pub fn split_roster(roster: &DeviceRosterView) -> RosterSplit {
                     false => super::DeviceFace::Wire,
                 },
                 feed: roster.feeds.get(&device.id).cloned(),
+                wifi_connect: roster.wifi_connects.get(&device.id).cloned(),
             });
         } else {
             connected.push(device.clone());
@@ -436,6 +449,9 @@ impl DeviceRoster {
                 .iter()
                 .filter_map(|device| super::lan_link_view(device).map(|line| (device.id, line)))
                 .collect(),
+            // Joined by the controller, which holds the connects.
+            wifi_connects: std::collections::BTreeMap::new(),
+            wifi_address_connect: None,
             updates: std::collections::BTreeMap::new(),
             // The verbs land in a scratch tree here; the studio view
             // publishes them for real (`publish_layout_offers`).
@@ -870,6 +886,8 @@ mod tests {
             access: Default::default(),
             wifi: Default::default(),
             lan_links: Default::default(),
+            wifi_connects: Default::default(),
+            wifi_address_connect: None,
             updates: Default::default(),
             roster: RosterView {
                 devices: vec![
@@ -931,6 +949,8 @@ mod tests {
             access: Default::default(),
             wifi: Default::default(),
             lan_links: Default::default(),
+            wifi_connects: Default::default(),
+            wifi_address_connect: None,
             updates: Default::default(),
             roster: RosterView {
                 devices: vec![ready_view(1, "A"), ready_view(2, "B"), ready_view(3, "C")],

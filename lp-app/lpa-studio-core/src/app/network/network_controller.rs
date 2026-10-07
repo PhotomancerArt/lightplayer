@@ -254,6 +254,9 @@ impl NetworkController {
                 let reach = reach(found, granted(device));
                 self.scan(device, reach, effects);
             }
+            // Reaching a board over Wi‑Fi is the studio controller's
+            // (`StudioController::apply_network_command`), not a setting.
+            NetworkCommand::WifiConnected { .. } => {}
             NetworkCommand::DismissTest { device } => {
                 if let Some(state) = self.devices.get_mut(&device) {
                     state.testing = None;

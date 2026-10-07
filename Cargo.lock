@@ -5878,6 +5878,7 @@ dependencies = [
  "serde_json",
  "serialport",
  "sha2",
+ "simple-dns",
  "tempfile",
  "tokio",
  "tokio-tungstenite 0.21.0",

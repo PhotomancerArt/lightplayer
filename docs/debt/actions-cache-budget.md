@@ -78,6 +78,66 @@ restore main's entries; one entry per purpose.
     crates that PR changed and their dependents instead of hitting its own
     previous push's objects. First-push hit rates are unchanged — they were
     always main's objects — and now those objects survive.
+- **2026-10-07** — over budget again, twelve days after the change above:
+  10.36 GB at 06:16 UTC, and the oldest entry had been read **46 minutes**
+  earlier (07:20: 10.71 GB in 8,001 entries, oldest read 35 min earlier).
+  The exit criterion is ≥ 12 h. Evicted sccache objects become misses on
+  top of GitHub's per-repo read rate limit (1,500 downloads/min), which
+  sccache does not retry (mozilla/sccache#2821). Contents at 06:16:
+
+  | what | entries | size | why it was that big |
+  |---|---:|---:|---|
+  | sccache objects | many | 5.20 GB | main's working set |
+  | stories bundle | 2 | 3.45 GB | ~1.7 GB each, saved 22 min apart (two lockfile changes, #1009 and #989); 1.07 GB on 09-08 |
+  | emu-esp32v3 rust-cache | 2 | 1.04 GB | ~496 MB each, two manifest generations |
+  | cargo registry | 1 | 0.47 GB | the one shared entry |
+
+  Three writers, three causes:
+  - **The stories bundle grew without bound.** Keyed on Cargo.lock, each
+    save started from the previous lockfile's `target/` (restore-keys
+    fallback) and added to it; cargo never deletes a unit an old lockfile
+    built, and none of the path packages it stored (rebuilt by every fresh
+    checkout anyway) or the dev build's incremental state was ever useful
+    to the next run. Restored 1,700 MB, saved 1,752 MB on the 05:28 main
+    run, so ~50 MB a lockfile change, ~3 changes a day. It also still
+    carried its own registry copy. Fixed: one entry per UTC day, main
+    restores only that day's exact key (the day's first main run builds
+    from nothing, so nothing old is carried forward),
+    `scripts/ci/prune-target-cache.py` drops path packages, incremental
+    state, final artifacts and dx's bundle before the save, and the registry
+    comes from the shared entry. **What the whole `target/` cache buys is
+    small:** PR #1022's first run, with no entry under the new key, built
+    all three (fw-browser, the emulator sidecar, dx) cold in 8m28s, against
+    7m42s on the 06:27 main run warm off the old 1.75 GB entry; the tools
+    came by binstall in 6 s. What the new entry holds, from that cold
+    build (PR #1022's report step, uncompressed): `target/` 3,106 MiB, of
+    which the prune removes 827 MiB of path packages, 239 MiB of final
+    artifacts and 69 MiB of dx bundle and sidecars, keeping 1,971 MiB of
+    third-party units, plus 147 MiB of `~/.cargo/bin`. Its compressed size
+    is main's to report. If the pruned entry still costs more budget
+    than ~45 s a stories run is worth, the next lever is caching only
+    `~/.cargo/bin` (or nothing) here.
+  - **`emu-esp32v3-ref` still had its own rust-cache entry.** Registry only
+    (`cache-targets: false`), so the same crates as the shared entry, under
+    a key hashing every Cargo.toml: a new ~496 MB generation per manifest
+    change reaching main. Its sibling `emu-esp32v3` had moved to the shared
+    entry on 09-25; this job was missed. Fixed: it restores the shared
+    entry, and its `sccache-action` step gets the same `version:` pin as
+    every other.
+  - **The classic's reference image was sccache-cached at a per-commit
+    path.** `build-reference-image.sh` builds it in
+    `target/emu-ref/wt-<HEAD>-…` with `--remap-path-prefix=<that path>=…`
+    in the target rustflags, and sccache hashes the arguments and each path
+    package's `CARGO_MANIFEST_DIR`. The job builds HEAD (twice on main, with
+    `--verify`), so every Xtensa compile of it was a new key: the 06:27
+    main run had 302 misses and 286 writes that no later run could read
+    (on the 05:28 run, 413 misses, all of them write errors), and a PR
+    run's ~190 lookups could only miss. Fixed: the script calls rustc
+    directly (`RUSTC_WRAPPER=""`) when the commit it builds is HEAD; a
+    pinned commit keeps a stable path and its wrapper. The job's in-tree
+    builds keep sccache. Measured on PR #1022: each reference build took
+    1m46s without the wrapper against 2m47s with it (the 05:28 main run),
+    and the job's misses fell from 302–413 to 38.
 
 **Steady state after the 2026-09-25 change** (estimate; re-measure a week
 after it lands):

@@ -119,9 +119,17 @@ pub(crate) mod update_driver_mirror;
 pub mod update_host;
 pub(crate) mod update_narration;
 pub(crate) mod update_store_builds;
+pub mod wifi_address_book;
+pub mod wifi_connect_failure;
+pub mod wifi_connect_offer;
+pub mod wifi_connect_op;
+pub mod wifi_connects;
 pub mod wire_conversation;
 
-pub use add_device_offers::{USB_NEEDS_WEB_SERIAL, add_device_offers};
+pub use add_device_offers::{
+    USB_NEEDS_WEB_SERIAL, WIFI_ADDRESS_PARAM, WIFI_CONNECTING, WIFI_NEEDS_WEBSOCKET,
+    WifiAddressReach, add_device_offers,
+};
 pub use ble_transport::{BleDeviceTransport, BleLinkSource};
 pub use bluetooth_reach::BluetoothReach;
 pub use board_ref::{BoardRef, BoardRefError};
@@ -242,3 +250,8 @@ pub use target_offer::{TargetChoice, TargetGroup, TargetOffer, TargetScope, targ
 pub use ui_link_kind::UiLinkKind;
 pub use update_build_facts::{StoreLatest, UpdateBuildFacts};
 pub use update_host::UpdateHost;
+pub use wifi_address_book::{WIFI_ADDRESSES_STORAGE_KEY, WifiAddress, WifiAddressBook};
+pub use wifi_connect_failure::{WIFI_BLOCKED_WORDS, WIFI_BUSY_WORDS, WifiConnectFailure};
+pub use wifi_connect_offer::connect_wifi_offer;
+pub use wifi_connect_op::WifiConnectOp;
+pub use wifi_connects::{UiWifiConnect, WifiConnectTarget, WifiConnects};

@@ -3,20 +3,25 @@ name: CI
 on:
   pull_request:
     branches: ["main", "feature/*"]
-    # `edited` is on top of the defaults (opened, synchronize, reopened) for one
-    # reason: **retargeting**. A stacked PR based on a `claude/*` branch matches
-    # no filter above, so it gets NO CI AT ALL — not pending, not red, simply no
-    # runs. When its base merges and it is retargeted to main, that is a base
-    # edit, and without `edited` here nothing re-triggers: the PR sits there
-    # looking clean, having never been validated once. That happened on #195 and
-    # was caught by a human reading the checks list, which is not a control.
+    # The defaults, written out so the absence of `edited` is visible. `edited`
+    # was here from #195 on, so that a stacked PR retargeted to main (a base
+    # edit) got CI. It is gone because it also fires on every PR title and body
+    # edit, and an edit starts a fresh run whose concurrency group cancels the
+    # run in flight: agents update PR bodies mid-CI, and #987 lost a full CI
+    # cycle to it.
     #
-    # Cost, accepted deliberately: `edited` also fires on title and body edits,
-    # so editing a PR description re-runs the suite. Wasteful, never wrong —
-    # and wrongness is the failure mode being fixed. If that cost ever bites,
-    # tighten by gating on `github.event.changes.base` rather than by dropping
-    # this, and check what skipped jobs do to required checks before you do.
-    types: [opened, synchronize, reopened, edited]
+    # What that costs: a stacked PR (base `claude/*`, which matches no filter
+    # above and so gets no CI at all) retargeted to main still gets NO CI until
+    # its next push. The PR sits there looking clean, never validated. That is
+    # the failure #195 was caught on, back on purpose, now with a workaround
+    # and a net: docs/debt/stacked-pr-retarget-gets-no-ci.md (push any commit,
+    # or close and reopen; scripts/watch-pr.sh exits 2 on a PR with no CI run).
+    #
+    # Why not keep `edited` and filter it with a job-level `if:` on
+    # `github.event.changes.base`: a body-edit run would still post its jobs as
+    # *skipped* checks, newer than the real run's, and a skipped check reads as
+    # passing — over an older red, that is a false green.
+    types: [opened, synchronize, reopened]
   push:
     branches: ["main"]
 
@@ -882,6 +887,8 @@ jobs:
         uses: cargo-bins/cargo-binstall@v1.21.1
 
       - name: Install espflash (prebuilt)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: cargo binstall --no-confirm --locked espflash@3.3.0
 
       # Builds the crate and checks the image against its app partition (the
@@ -993,6 +1000,8 @@ jobs:
         uses: cargo-bins/cargo-binstall@v1.21.1
 
       - name: Install espflash (prebuilt)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: cargo binstall --no-confirm --locked espflash@3.3.0
 
       # Builds the crate and checks the image against its 3 MB app partition
@@ -1382,6 +1391,8 @@ jobs:
         uses: cargo-bins/cargo-binstall@v1.21.1
 
       - name: Install espflash (prebuilt)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: cargo binstall --no-confirm --locked espflash@3.3.0
 
       # The SPLIT image (the product's): two link passes, the verifier (any
@@ -1489,6 +1500,8 @@ jobs:
         uses: cargo-bins/cargo-binstall@v1.21.1
 
       - name: Install espflash (prebuilt)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: cargo binstall --no-confirm --locked espflash@3.3.0
 
       - name: Release dry run (package, stage, release-check)
@@ -1658,6 +1671,8 @@ jobs:
         uses: cargo-bins/cargo-binstall@v1.21.1
 
       - name: Install espflash (prebuilt — the merged image's bootloader)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: cargo binstall --no-confirm --locked espflash@3.3.0
 
       # **The pinned reference builds, cached as OUTPUTS** (2026-09-23). The
@@ -2114,6 +2129,8 @@ jobs:
       # second-stage bootloader whose log this job diffs against a silicon
       # capture: a different espflash is a different program in the image.
       - name: Install espflash (prebuilt — the merged image's bootloader)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: cargo binstall --no-confirm --locked espflash@3.3.0
 
       # Part 1 of `test-emu-esp32v3-gate`: the shipped, `rmt-chase` and
@@ -2232,9 +2249,14 @@ jobs:
           fi
 
   # The other half of the classic's gate — see `emu-esp32v3` above for the
-  # split. Same path gate, same toolchains, same cache key (the rust-cache
-  # entry is registry-only, `cache-targets: false`, so the two jobs can share
-  # it), and the same 35-minute budget, which this half sits far inside.
+  # split. Same path gate, same toolchains, the same read-only registry
+  # entry, and the same 35-minute budget, which this half sits far inside.
+  #
+  # Its reference image is built at HEAD, so `build-reference-image.sh`
+  # builds it with no compiler wrapper: the pinned worktree's path carries
+  # the commit, sccache hashes that path, and no later run could ever hit
+  # what it wrote (the script's comment, 2026-10-07). sccache still serves
+  # this job's in-tree builds — the lints' and `cargo test` steps' compiles.
   emu-esp32v3-ref:
     name: Emulator ESP32v3 reference (x64)
     runs-on: ubuntu-24.04
@@ -2287,16 +2309,18 @@ jobs:
 
       - name: Run sccache
         uses: mozilla/sccache-action@v0.0.10
-
-      - name: Cache cargo registry and build artifacts
-        uses: Swatinem/rust-cache@v2
         with:
-          workspaces: lp2025 -> target
-          cache-targets: false
-          cache-bin: false
-          shared-key: emu-esp32v3
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-          cache-on-failure: true
+          version: v0.18.0
+
+      # The repo's one registry entry, read-only (see the lint job). Until
+      # 2026-10-07 this job still had its own Swatinem/rust-cache entry
+      # (`v0-rust-emu-esp32v3-…`, `cache-targets: false`, so registry only):
+      # ~496 MB of the same crates that entry holds, re-saved on every
+      # manifest change reaching main — two generations, 1.04 GB, were live
+      # at once (docs/debt/actions-cache-budget.md). The sibling job had
+      # already moved; this one was missed.
+      - name: Restore cargo registry
+        uses: ./lp2025/.github/actions/cargo-registry
 
       - name: Install just
         uses: extractions/setup-just@v3
@@ -2475,6 +2499,8 @@ jobs:
       # bundles the second-stage bootloader the ROM-up tests boot through, so
       # a different espflash is a different program in the image.
       - name: Install espflash (prebuilt — the merged image's bootloader)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: cargo binstall --no-confirm --locked espflash@3.3.0
 
       - name: Emulator ESP32-S3 gate (both boot paths, the pads, the replays)
@@ -2930,6 +2956,8 @@ jobs:
         uses: cargo-bins/cargo-binstall@v1.21.1
 
       - name: Install espflash (prebuilt — the merged image's bootloader)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: cargo binstall --no-confirm --locked espflash@3.3.0
 
       # The test RETURNS (passes) with "emu_layout_migration: skipped — …" when
@@ -3286,6 +3314,8 @@ jobs:
         uses: cargo-bins/cargo-binstall@v1.21.1
 
       - name: Install wasm-bindgen-cli (prebuilt)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: command -v wasm-bindgen-test-runner >/dev/null || cargo binstall --no-confirm --locked wasm-bindgen-cli@0.2.114
 
       # The smoke check drives Chrome over a raw CDP WebSocket; pin node so
@@ -3420,24 +3450,62 @@ jobs:
         with:
           node-version: 22
 
-      # Deploy-workflow-style cache (registry + git + bins + target) rather
-      # than rust-cache: the cargo-installed tools live in ~/.cargo/bin and
-      # must be cached with a key that includes their pinned versions.
-      # Restore/save are split so saving happens only on main — same repo-wide
-      # cache-eviction rationale as the lint job's cache step.
-      - name: Restore cargo registry, tools, and build artifacts
+      # The registry is the repo's one shared entry, read-only (see the lint
+      # job); this job's own entry holds only what is particular to it.
+      - name: Restore cargo registry
+        uses: ./lp2025/.github/actions/cargo-registry
+
+      # The tools (~/.cargo/bin: the pinned dx, wasm-bindgen, oxipng) and
+      # target/, in one entry saved from main only — the same repo-wide
+      # budget as every other cache (docs/debt/actions-cache-budget.md). Not
+      # rust-cache: the tools must be keyed on their pinned versions.
+      #
+      # ONE ENTRY PER UTC DAY, and main restores only that day's exact key.
+      # Until 2026-10-07 the key was Cargo.lock's hash, and each save started
+      # from the previous lockfile's target/ and added to it — cargo never
+      # deletes a unit an old lockfile built — so the entry grew from 1.07 GB
+      # (09-08) to 1.75 GB (10-07), was re-saved whole on every lockfile
+      # change (~3 a day; two ~1.7 GB copies 22 min apart were live on
+      # 10-07), and carried its own copy of the registry. Now:
+      #   - the first main run of a day misses its exact key and builds
+      #     target/ from nothing, so what it saves holds no unit an older
+      #     lockfile left behind. A cold build costs well under a minute
+      #     more than a warm one: 8m28s for the three builds on PR #1022's
+      #     first run (no entry under the new key yet) against 7m42s on the
+      #     06:27 main run of 10-07, warm off the old 1.75 GB entry
+      #     (fw-browser 1m51s against 54 s; dx 5m53s against 6m15s; tools
+      #     6 s by binstall) — once a day, on main;
+      #   - before the save, `scripts/ci/prune-target-cache.py` drops what
+      #     the next run rebuilds regardless: path packages (a fresh checkout
+      #     re-stamps their sources), incremental state, final artifacts, dx's
+      #     bundle and the copied sidecars;
+      #   - PRs, and main's later runs that day, restore the newest entry; a
+      #     lockfile change after the day's save rebuilds only what it changed.
+      - name: Stories cache key
+        id: stories_key
+        shell: bash
+        env:
+          PREFIX: ${{ runner.os }}-${{ runner.arch }}-stories-target-wb${{ env.WASM_BINDGEN_VERSION }}-dx${{ env.DIOXUS_CLI_VERSION }}-ox${{ env.OXIPNG_VERSION }}-tc${{ hashFiles('lp2025/rust-toolchain.toml') }}-
+        run: |
+          echo "prefix=$PREFIX" >> "$GITHUB_OUTPUT"
+          echo "key=$PREFIX$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore tools and build artifacts
         id: stories_cache
         uses: actions/cache/restore@v4
         with:
           path: |
             ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
             lp2025/target/
-          key: ${{ runner.os }}-${{ runner.arch }}-stories-wb${{ env.WASM_BINDGEN_VERSION }}-dx${{ env.DIOXUS_CLI_VERSION }}-ox${{ env.OXIPNG_VERSION }}-cargo-${{ hashFiles('lp2025/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-${{ runner.arch }}-stories-wb${{ env.WASM_BINDGEN_VERSION }}-dx${{ env.DIOXUS_CLI_VERSION }}-ox${{ env.OXIPNG_VERSION }}-cargo-
+          key: ${{ steps.stories_key.outputs.key }}
+          restore-keys: ${{ github.ref != 'refs/heads/main' && steps.stories_key.outputs.prefix || '' }}
+
+      # What the restored entry holds, by profile dir, and what a prune would
+      # take out of it — the standing monitor for this entry's size (it goes
+      # in the step summary). Deletes nothing.
+      - name: Report the restored target/
+        if: steps.stories_cache.outputs.cache-matched-key != ''
+        run: cd lp2025 && python3 scripts/ci/prune-target-cache.py --report target --drop dx --drop studio-web-assets
 
       - name: Restore Chrome for Testing cache
         id: chrome_cache
@@ -3460,6 +3528,8 @@ jobs:
 
       - name: Install pinned tools (wasm-bindgen, dioxus-cli, oxipng)
         shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           wasm-bindgen --version 2>/dev/null | grep -qF "$WASM_BINDGEN_VERSION" \
             || cargo binstall --no-confirm --locked --force "wasm-bindgen-cli@$WASM_BINDGEN_VERSION"
@@ -3741,22 +3811,38 @@ jobs:
                "not story drift. See the crash summary above."
           exit 1
 
-      # Main-only saves (see the restore steps above). `always()` preserves
-      # the old actions/cache post-step behavior of saving even when a
-      # main-push drift failed the job — the build artifacts are still good.
-      - name: Save cargo registry, tools, and build artifacts (main only)
+      # Main-only saves (see the restore steps above), and only after a
+      # complete capture, which means the build finished: a day has one key,
+      # so an entry saved from a build that died halfway would be what every
+      # later run that day restores. Story drift does not stop the save —
+      # drift is a complete capture.
+      # On a PR, what main's save would hold after this build: the same
+      # table the prune step below prints on main, plus the tools. Deletes
+      # nothing — a PR saves no entry.
+      - name: Report what a save would hold (PRs)
+        if: >-
+          always() && github.ref != 'refs/heads/main' &&
+          steps.check_complete.outputs.complete == 'true'
+        run: |
+          du -sh ~/.cargo/bin
+          cd lp2025 && python3 scripts/ci/prune-target-cache.py --report target --drop dx --drop studio-web-assets
+
+      - name: Prune target/ to what the next run can reuse (main only)
+        id: stories_prune
         if: >-
           always() && github.ref == 'refs/heads/main' &&
-          steps.stories_cache.outputs.cache-hit != 'true'
+          steps.stories_cache.outputs.cache-hit != 'true' &&
+          steps.check_complete.outputs.complete == 'true'
+        run: cd lp2025 && python3 scripts/ci/prune-target-cache.py target --drop dx --drop studio-web-assets
+
+      - name: Save tools and build artifacts (main only)
+        if: always() && steps.stories_prune.outcome == 'success'
         uses: actions/cache/save@v4
         with:
           path: |
             ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
             lp2025/target/
-          key: ${{ steps.stories_cache.outputs.cache-primary-key }}
+          key: ${{ steps.stories_key.outputs.key }}
 
       - name: Save Chrome for Testing cache (main only)
         if: >-
