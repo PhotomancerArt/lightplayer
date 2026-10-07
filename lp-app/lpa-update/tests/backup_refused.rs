@@ -14,10 +14,12 @@
 //!   after `ENGINE_LOGIN_WAIT_MS`.
 
 use lpa_update::decide::{SourceEffect, SourceResult, StoreAnswer};
-use lpa_update::drive::update_driver::{ENGINE_LOGIN_RETRY_MS, ENGINE_LOGIN_WAIT_MS};
+use lpa_update::drive::update_driver::{
+    ENGINE_LOGIN_RETRY_MS, ENGINE_LOGIN_WAIT_MS, READ_BACK_STALE_MS,
+};
 use lpa_update::{
-    DriverConfig, DriverEffect, Finish, HostBuild, HostIdentity, ServeConfig, Stage, StopReason,
-    UpdateDriver, UpdateIntent,
+    BLE_READ_BACK_PIECE, DriverConfig, DriverEffect, Finish, HostBuild, HostIdentity, ServeConfig,
+    Stage, StopReason, UpdateDriver, UpdateIntent,
 };
 use lpc_update::hash_rules::engine_sha256;
 use lpc_update::{
@@ -68,10 +70,16 @@ fn a_backup_cut_by_a_drop_waits_for_the_engine_login_on_the_new_link_and_resumes
     let engine: Vec<u8> = (0..10 * CHUNK).map(|i| (i * 7 + i / 4096) as u8).collect();
     let board = board_x_with(&engine);
     let (mut driver, first) = driver_backing_up(&board);
-    // Two chunks in on the first link (four asked ahead).
-    assert_eq!(gets(&first), [0, CHUNK, 2 * CHUNK, 3 * CHUNK]);
-    driver.on_board(10, &d(&engine, 0), &[]);
-    driver.on_board(11, &d(&engine, CHUNK), &[]);
+    // Over Bluetooth the backup reads in pieces that fit the radio link's
+    // send ring, four chunks' worth outstanding.
+    let p = BLE_READ_BACK_PIECE;
+    let ahead = ServeConfig::BLE.read_back_ahead();
+    let pieces = (engine.len() as u32).div_ceil(p);
+    assert_eq!(ahead, 17);
+    assert_eq!(gets(&first), offsets(0, ahead, p));
+    // Two pieces in on the first link.
+    driver.on_board(10, &d(&engine, 0, p), &[]);
+    driver.on_board(11, &d(&engine, p, p), &[]);
     driver.take_effects();
 
     // The link drops; a new one comes up and the board answers `M` before
@@ -81,8 +89,8 @@ fn a_backup_cut_by_a_drop_waits_for_the_engine_login_on_the_new_link_and_resumes
     assert_eq!(queries(&driver.take_effects()), 1);
     driver.on_board(2_010, &manifest(&board), &[]);
     let resumed = gets(&driver.take_effects());
-    assert_eq!(resumed, [2 * CHUNK, 3 * CHUNK, 4 * CHUNK, 5 * CHUNK]);
-    for t in 0..4 {
+    assert_eq!(resumed, offsets(2, ahead, p));
+    for t in 0..u64::from(ahead) {
         driver.on_board(2_200 + t, &Refusal::Access.encode(), &[]);
     }
     assert!(
@@ -94,16 +102,16 @@ fn a_backup_cut_by_a_drop_waits_for_the_engine_login_on_the_new_link_and_resumes
     driver.tick(2_200 + ENGINE_LOGIN_RETRY_MS - 1);
     assert!(driver.take_effects().is_empty());
     // …then `Q` again; the login has landed now, so `M` resumes the backup
-    // from the first missing chunk.
+    // from the first missing piece.
     driver.tick(2_200 + ENGINE_LOGIN_RETRY_MS);
     assert_eq!(queries(&driver.take_effects()), 1);
     driver.on_board(3_300, &manifest(&board), &[]);
     let again = gets(&driver.take_effects());
-    assert_eq!(again, [2 * CHUNK, 3 * CHUNK, 4 * CHUNK, 5 * CHUNK]);
+    assert_eq!(again, offsets(2, ahead, p));
     let mut offered = false;
     let mut last_progress = 0;
-    for idx in 2..10 {
-        driver.on_board(3_400 + u64::from(idx), &d(&engine, idx * CHUNK), &[]);
+    for idx in 2..pieces {
+        driver.on_board(3_400 + u64::from(idx), &d(&engine, idx * p, p), &[]);
         for effect in driver.take_effects() {
             match effect {
                 DriverEffect::Progress {
@@ -119,9 +127,37 @@ fn a_backup_cut_by_a_drop_waits_for_the_engine_login_on_the_new_link_and_resumes
     }
     assert_eq!(
         last_progress,
-        9 * CHUNK,
-        "the backup counted up to its last chunk"
+        (pieces - 1) * p,
+        "the backup counted up to its last piece"
     );
+    assert!(offered, "the backup finished and the update was offered");
+}
+
+#[test]
+fn a_read_back_piece_lost_with_the_link_up_is_asked_again() {
+    let engine: Vec<u8> = (0..3 * CHUNK).map(|i| (i * 5) as u8).collect();
+    let board = board_x_with(&engine);
+    let (mut driver, first) = driver_backing_up(&board);
+    let p = BLE_READ_BACK_PIECE;
+    let pieces = (engine.len() as u32).div_ceil(p);
+    let asked = gets(&first);
+    assert_eq!(asked[0], 0);
+    // Piece 0's answer never comes; every other piece does.
+    for idx in 1..pieces {
+        driver.on_board(100, &d(&engine, idx * p, p), &[]);
+    }
+    driver.take_effects();
+    // Before the piece is stale nothing is asked again…
+    driver.tick(READ_BACK_STALE_MS - 1);
+    assert!(gets(&driver.take_effects()).is_empty());
+    // …then it is, and its answer finishes the backup.
+    driver.tick(READ_BACK_STALE_MS);
+    assert_eq!(gets(&driver.take_effects()), [0]);
+    driver.on_board(READ_BACK_STALE_MS + 10, &d(&engine, 0, p), &[]);
+    let offered = driver
+        .take_effects()
+        .iter()
+        .any(|e| matches!(e, DriverEffect::Send(bytes) if bytes.first() == Some(&b'O')));
     assert!(offered, "the backup finished and the update was offered");
 }
 
@@ -130,7 +166,7 @@ fn a_wait_for_the_engine_login_gives_up_and_stops_needs_engine_login() {
     let engine: Vec<u8> = (0..6 * CHUNK).map(|i| (i * 3) as u8).collect();
     let board = board_x_with(&engine);
     let (mut driver, _) = driver_backing_up(&board);
-    driver.on_board(10, &d(&engine, 0), &[]);
+    driver.on_board(10, &d(&engine, 0, BLE_READ_BACK_PIECE), &[]);
     driver.link_down(20);
     driver.link_up(1_000);
     driver.on_board(1_010, &manifest(&board), &[]);
@@ -226,8 +262,12 @@ fn ended(effects: &[DriverEffect]) -> Option<Finish> {
     })
 }
 
-fn d(engine: &[u8], off: u32) -> Vec<u8> {
-    let end = (off + CHUNK).min(engine.len() as u32) as usize;
+fn offsets(from: u32, n: u8, piece: u32) -> Vec<u32> {
+    (from..from + u32::from(n)).map(|i| i * piece).collect()
+}
+
+fn d(engine: &[u8], off: u32, piece: u32) -> Vec<u8> {
+    let end = (off + piece).min(engine.len() as u32) as usize;
     encode_chunk(
         ChunkEncoding::Raw,
         PieceKind::Engine,

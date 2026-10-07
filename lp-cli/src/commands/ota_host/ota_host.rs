@@ -74,6 +74,7 @@ impl OtaHost {
         let config = DriverConfig {
             serve: ServeConfig {
                 ahead: args.ota_ahead.unwrap_or(serve.ahead).max(1),
+                ..serve
             },
             // An offer on the command line is the press: install it. With
             // `--ota-heal-only` nothing is pressed, and an offered update

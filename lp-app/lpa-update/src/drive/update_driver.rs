@@ -68,6 +68,12 @@ use crate::serve::{ServeConfig, ServeCounters, ServeEvent, ServeSession};
 /// (`Q`), for the caller's login on the new link to land first.
 pub const ENGINE_LOGIN_RETRY_MS: u64 = 1_000;
 
+/// How long a read-back piece may stay unanswered before the backup asks
+/// for it again ([`BackupSession::reask_stale`]). Pieces normally come back
+/// in well under a second; a slow Bluetooth central at 2 KiB/s drains a
+/// backup's ~16 KiB outstanding in ~8 s.
+pub const READ_BACK_STALE_MS: u64 = 20_000;
+
 /// How long a driver the board already answered waits for a running
 /// engine's login on a new link before it stops `NeedsEngineLogin`. Studio
 /// unlocks a reconnected Bluetooth link in well under a second with a
@@ -341,6 +347,13 @@ impl UpdateDriver {
             self.send(encode_query(lpc_update::PROTO_V1));
             return;
         }
+        if self.phase == Phase::BackingUp
+            && let Some(backup) = &mut self.backup
+        {
+            backup.set_now(now_ms);
+            let again = backup.reask_stale(READ_BACK_STALE_MS);
+            self.send_all(again);
+        }
         if let (Some(at), Phase::LoggingIn(_)) = (self.login_retry_at, self.phase)
             && now_ms >= at
         {
@@ -464,6 +477,7 @@ impl UpdateDriver {
                 } else if let Some(b) = &mut self.backup {
                     // A read-back cut short by a dropped link: ask again
                     // for what is missing.
+                    b.set_now(self.now_ms);
                     let gs = b.resume();
                     self.phase = Phase::BackingUp;
                     self.send_all(gs);
@@ -500,7 +514,14 @@ impl UpdateDriver {
         };
         match step {
             SourceStep::Ask(SourceEffect::ReadBack { sha, len }) => {
-                let mut backup = BackupSession::new(sha, len, self.config.serve.ahead);
+                let serve = self.config.serve;
+                let mut backup = BackupSession::with_piece(
+                    sha,
+                    len,
+                    serve.read_back_ahead(),
+                    serve.read_back_piece,
+                );
+                backup.set_now(self.now_ms);
                 let gs = backup.start();
                 self.backup = Some(backup);
                 self.phase = Phase::BackingUp;
@@ -559,6 +580,7 @@ impl UpdateDriver {
         };
         self.engine_answered = true;
         self.engine_login_deadline = None;
+        backup.set_now(self.now_ms);
         match backup.on_board(bytes) {
             // A late `D` while waiting for the engine's login is kept; the
             // wait's `Q` asks for the rest.
