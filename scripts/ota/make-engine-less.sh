@@ -53,9 +53,10 @@ echo "make-engine-less: board $mac on $port"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
-# Both boot records, in one read; the chip stays in its bootloader for the
-# reads that follow.
-espflash read-flash --port "$port" --after no-reset 0x16000 0x2000 "$work/records.bin" >/dev/null
+# Both boot records, in one read. Each espflash call resets the chip into
+# its bootloader and back (chaining calls with `--before no-reset` timed out
+# uploading the stub on the fixture C6).
+espflash read-flash --port "$port" 0x16000 0x2000 "$work/records.bin" >/dev/null
 
 # The places an engine can start, from the cores the records name.
 candidates="$(python3 - "$work/records.bin" <<'PY'
@@ -78,7 +79,7 @@ PY
 
 found=()
 for at in $candidates; do
-    espflash read-flash --port "$port" --before no-reset --after no-reset "$at" 0x10 "$work/head.bin" >/dev/null
+    espflash read-flash --port "$port" "$at" 0x1000 "$work/head.bin" >/dev/null
     magic="$(head -c 4 "$work/head.bin")"
     if [[ "$magic" == "LPEH" ]]; then
         echo "make-engine-less: engine header at $at"
@@ -98,7 +99,7 @@ case "${#found[@]}" in
             echo "make-engine-less: --dry-run: would erase 0x1000 at ${found[0]}"
             espflash reset --port "$port" >/dev/null 2>&1 || true
         else
-            espflash erase-region --port "$port" --before no-reset "${found[0]}" 0x1000 >/dev/null
+            espflash erase-region --port "$port" "${found[0]}" 0x1000 >/dev/null
             echo "make-engine-less: erased the engine header sector at ${found[0]} (0x1000 B); chip reset — it boots core-only"
         fi
         ;;
