@@ -6,9 +6,9 @@
 //! the lookup answers one release at a time, so finding "the newest one
 //! before latest" means asking a list of releases. This reads GitHub's
 //! ([`ReleaseCatalog`], `release_catalog_source`). lightplayer.app's release
-//! index (`/firmware/<target>/releases`) lists a split target's installable
-//! releases and could stand in for it there; a target with no update files
-//! (the S3, the classic) has no index.
+//! index (`/api/v1/firmware/<target>/releases`) lists a split target's
+//! installable releases and could stand in for it there; a target with no
+//! update files (the S3, the classic) has no index.
 
 use anyhow::{Context, Result, bail};
 use lpc_firmware_release::ReleaseVersion;

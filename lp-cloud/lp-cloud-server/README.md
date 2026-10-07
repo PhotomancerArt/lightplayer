@@ -18,8 +18,8 @@ crate is sans-IO.
 | `GET /auth/google/callback` | auth | the `lp_oauth_state` cookie is the credential |
 | `POST /auth/logout` | auth | the session cookie, if there is one |
 | `GET /auth/dev` | auth | localhost + `LP_CLOUD_DEV_AUTH` (404 otherwise) |
-| `GET\|HEAD\|OPTIONS /firmware/{target}/releases` | firmware | none — the release index, format 1, any origin |
 | `GET\|HEAD\|OPTIONS /firmware/{target}/{release}/{file}` | firmware | none — public, verified by hash, any origin |
+| `GET\|HEAD\|OPTIONS /api/v1/firmware/{target}/releases` | firmware | none — the release index, format 1, any origin |
 | `POST /auth/guest` | auth | none — mints a guest session unless one is live |
 | `GET /relay/device` | relay | WebSocket, **plain HTTP allowed**; the board proves its accounts in-band |
 | `GET /relay/board/{id}` | relay | WebSocket; a signed-in session (account or guest) — `src/relay/route_admission.rs` |
@@ -74,13 +74,18 @@ curl -sI "$BASE/firmware/esp32c6-4mb/abc1234/ota-manifest.json"    # 404, no ups
 
 ### The release index
 
-`/firmware/{target}/releases` lists every release `{target}` can install,
+`/api/v1/firmware/{target}/releases` lists every release `{target}` can
+install,
 newest first by number (`2026.10.06-10` above `-9`): the release index,
 **format 1** (`lpc_firmware_release::ReleaseIndex`,
 `schemas/firmware-release-index.schema.json`) — `format`, `target`, and per
 release `version`, `commit`, `wireProto`, `requires` and an optional
 `publishedAt`. Studios in the field read it, so it is a public format:
-readers refuse another `format` and ignore unknown fields.
+readers refuse another `format` and **ignore unknown fields**, at the top
+and in every entry, so the index grows without a new format. It is an API
+answer, not a file the store passes through, so it lives under the
+versioned `/api/v1/` (beside, and separate from, `POST /api`); a shape an
+old reader would misread goes to `/api/v2/…` beside it.
 
 - **Source:** the download host has no list, so the list is GitHub's REST
   releases list (`LP_CLOUD_FIRMWARE_RELEASES_LIST`, default
@@ -106,14 +111,8 @@ readers refuse another `format` and ignore unknown fields.
   is a 404 with `max-age=60`.
 
 ```sh
-curl -s "$BASE/firmware/esp32c6-4mb/releases"                      # the index
+curl -s "$BASE/api/v1/firmware/esp32c6-4mb/releases"               # the index
 ```
-
-**The namespace under `/firmware/<target>/`:** a second segment with no dot
-is the server's (`releases`); the Studio bundle's files always carry an
-extension (`manifest.json`, `ota-manifest.json`, `core.z`, `engine.z`, the
-merged `.bin`) and stay the static fallback's. The three-segment lookup and
-its reserved words are unchanged.
 
 The Studio bundle's own `/firmware/<target>/manifest.json` (two segments)
 stays the static fallback's. Tests: `tests/firmware_plane.rs`. End to end,

@@ -344,8 +344,9 @@ the app through the same view model and presses the same actions. See
   `schemas/ota-manifest.schema.json`, `lpc-firmware-release`) and the
   published `<target>.package.json`, and Studios in the field read them
   through `lightplayer.app/firmware/<target>/<release>/<file>` for years —
-  and the release index `/firmware/<target>/releases` (format 1,
-  `schemas/firmware-release-index.schema.json`), which lists them.
+  and the release index `lightplayer.app/api/v1/firmware/<target>/releases`
+  (format 1, `schemas/firmware-release-index.schema.json`), which lists
+  them; a shape an old reader would misread goes to `/api/v2/…` beside it.
   Readers ignore unknown fields; an additive field stays format 1; anything
   an old reader would misread bumps `format`, written beside the old one.
   `package.json` is additive-only. Release assets are immutable. See

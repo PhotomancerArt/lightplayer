@@ -186,8 +186,8 @@ upload instead (the pre-merge `release-dry-run` job runs it for the C6 and
 keeps the staging directory as an artifact). lightplayer.app serves these
 assets at `/firmware/<target>/<release>/<file>`
 (`lp-cloud/lp-cloud-server/README.md`), and lists every release a target can
-install, newest first, at `/firmware/<target>/releases` (the release index,
-format 1, `schemas/firmware-release-index.schema.json`); `just
+install, newest first, at `/api/v1/firmware/<target>/releases` (the release
+index, format 1, `schemas/firmware-release-index.schema.json`); `just
 firmware-store-smoke` proves both locally.
 
 **Putting a published release on a board.**

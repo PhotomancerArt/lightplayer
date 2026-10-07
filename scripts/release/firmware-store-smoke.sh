@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # The firmware store's whole lookup, locally and hermetically: real staged
 # release assets → a static GitHub-shaped upstream → lp-cloud-server's
-# `/firmware/` route → curl. Plan D20: the pre-merge proof of the store; the
-# live proof is the merged release's (yona-ship).
+# `/firmware/` route and its release index → curl. Plan D20: the pre-merge
+# proof of the store; the live proof is the merged release's (yona-ship).
 #
 #   scripts/release/firmware-store-smoke.sh [<staging_dir>]
 #
@@ -31,8 +31,9 @@
 #   - a second engine.bin: no upstream request;
 #   - a dev version and a reserved word: 404, no upstream request;
 #   - the build id (`<version>+<commit[..12]>`): the version's bytes;
-#   - the release index `/firmware/<target>/releases`: 200, format 1, the
-#     staged version and commit listed, ACAO *, max-age=60, an ETag.
+#   - the release index `/api/v1/firmware/<target>/releases`: 200, format 1,
+#     the staged version and commit listed, ACAO *, max-age=60, an ETag;
+#   - `/firmware/<target>/releases` is not the index (no ACAO, no index body).
 #
 # Needs: python3, curl, node, cargo. Everything is torn down on exit.
 set -euo pipefail
@@ -248,7 +249,7 @@ else
 fi
 
 # 8. The release index lists the staged release.
-path="/firmware/${target}/releases"
+path="/api/v1/firmware/${target}/releases"
 status="$(get "${path}")"
 if [[ "${status}" == 200 ]] && node -e '
 const [file, target, version, commit] = process.argv.slice(1);
@@ -263,6 +264,19 @@ fi
 expect "  ACAO: $(header access-control-allow-origin)" test "$(header access-control-allow-origin)" = "*"
 expect "  Cache-Control: $(header cache-control)" grep -qi '^cache-control:.*max-age=60' "${work}/headers"
 expect "  ETag: $(header etag) = its sha256" test "$(header etag)" = "\"$(sha_of "${work}/body")\""
+
+# 9. The index is only under /api/v1/: the old two-segment spelling is the
+#    page fallback's, not a firmware answer.
+path="/firmware/${target}/releases"
+status="$(get "${path}")"
+if [[ -z "$(header access-control-allow-origin)" ]] && ! node -e '
+const body = require("node:fs").readFileSync(process.argv[1], "utf8");
+try { process.exit(JSON.parse(body).format === 1 ? 0 : 1); } catch { process.exit(1); }
+' "${work}/body"; then
+    ok "${path}: ${status}, not the index"
+else
+    bad "${path}: ${status} answered like the index"
+fi
 
 echo "== firmware-store-smoke: ${passed} passed, ${failed} failed ($(upstream_requests) upstream requests)"
 [[ "${failed}" -eq 0 ]]

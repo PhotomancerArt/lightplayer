@@ -271,16 +271,20 @@ Studio needs to list the versions a board can install, so it can install an
 older one (to test, or to roll back) as well as the newest. The lookup above
 answers one release at a time, so the store gains a list.
 
-**The route.** `GET|HEAD|OPTIONS https://lightplayer.app/firmware/<target>/releases`
-answers the release index of `<target>`. It shares the two-segment space
-under `/firmware/<target>/` with the Studio bundle's own files, by one rule:
-**a second segment with no dot is the server's; the bundle's files always
-carry an extension** (`manifest.json`, `*.bin`, `ota-manifest.json`,
-`core.z`, `engine.z`). `releases` is the first server name there. The
-three-segment lookup (decision 13) and its reserved words are unchanged. The
-rule is written on the grammar (`lpc-firmware-release`'s
-`release_index_path`), and a route test keeps the bundle's names on the page
-fallback.
+**The route.** `GET|HEAD|OPTIONS https://lightplayer.app/api/v1/firmware/<target>/releases`
+answers the release index of `<target>` (`lpc-firmware-release`'s
+`release_index_path`). It is an API answer the server computes, not a file
+the release store passes through, so it lives under the versioned API
+prefix, not under `/firmware/`: `/firmware/` stays "files the release store
+passes through" (the lookup, decision 13, and the Studio bundle's own
+files), and `/firmware/<target>/releases` is the page fallback's, as it was
+before the index. **The `v1` in the path is the escape hatch:** a later
+shape an old reader would misread is served at `/api/v2/…` beside it, and
+`/api/v1/…` keeps answering. The account API, `POST /api`, is a different,
+exact path and is unchanged. (The first draft put the index at
+`/firmware/<target>/releases`, sharing that two-segment space with the
+bundle's files by a "dotless segment is the server's" rule; Yona moved it
+at the ship gate, 2026-10-07, and the rule went with it.)
 
 **Format 1.** One JSON object:
 
@@ -307,8 +311,12 @@ backwards, and now orders by number). `version`, `commit`, `wireProto` and
 exactly as it spells them. There is no `buildId`: it is derived
 (`version+commit[..12]`), as in the manifest. `publishedAt` is optional and
 for display only. The compatibility rule is the manifest's: readers refuse
-another `format` and ignore unknown fields; an additive optional field keeps
-format 1; no value is ever re-spelled. The index is computed, never stored,
+another `format` and **ignore unknown fields, at the top and in every entry
+(its `requires` included)**, so the index can grow without breaking a
+Studio in the field; an additive optional field keeps format 1; no value is
+ever re-spelled. The schema says `additionalProperties: true`, and
+`release_index_golden.rs` and `schema_conformance.rs` pin a body carrying
+extra fields at every level. The index is computed, never stored,
 but Studios in the field read it, so it is held to the same rule as anything
 persisted. Schema: `schemas/firmware-release-index.schema.json`. Pin:
 `lp-core/lpc-firmware-release/tests/fixtures/release-index.v1.json`, never
