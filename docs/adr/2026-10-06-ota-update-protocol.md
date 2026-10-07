@@ -301,3 +301,34 @@ The hash rules, the hello and `M`, and every on-flash format are unchanged:
 gates check that. The cost is +2,112 B of core (1,214,800 → 1,216,912 B).
 Steady headroom went from 301,006 to 301,240 B, because the engine shrank by
 234 B. The "`sha2` at `opt-level = 3`" alternative (§5) is moot.
+
+## Amendment (2026-10-06, Part C — channel 3 over Bluetooth)
+
+Part C (folded into M7's PR-3) carries channel 3 over BLE. What it added,
+none of it a change to the protocol or to a format:
+
+- **BLE joins the frozen set.** A pinned channel-3 exchange over
+  `LinkConfig::ble()` (Datagram framing, one frame per write or
+  notification) sits beside the USB golden in
+  `lp-base/lp-link/tests/update_channel_golden.rs`, under the same "never
+  re-capture" rule. The line above ("not channel 3 yet") is superseded.
+- **Core-only serves every radio link**, each `Untrusted`, and opens them
+  with a receive window of 32 (the engine's radio links keep the preset's
+  8; the host sends at most 16 in flight). The window is decided once per
+  boot on the radio port before any link can open (`RadioLinkMode`), so
+  no link races the decision.
+- **While the engine runs**, the link mux passes a radio link's channel-3
+  message to the core's session with the tier a **login or key** granted
+  it on the engine's server (`LpServer::link_granted_tier`, never the
+  `open` setting) and with the device's `open` setting as it stands then
+  (`LpServer::device_open`): the session applies its one access rule, QY2
+  included, and starts again on a lock or unlock made since boot.
+- **Core-only keeps the Wi-Fi controller**: dropping it took Bluetooth off
+  the air (defect
+  `docs/defects/2026-10-06-core-only-drops-the-wifi-controller-and-bluetooth-goes-dark.md`).
+
+Proven by host tests (`fw-esp32-common` radio-link, `lpa-server`'s
+`access_gate.rs` under both QY2 positions) and on the fixture C6 over
+Bluetooth from Mac Chrome (refusal, X→Y with `Z`, a power cut that
+resumed, a heal with no login, five in a row, one with no USB host): the
+record is in `docs/reports/2026-10-06-ota-iphone-walk.md`.
