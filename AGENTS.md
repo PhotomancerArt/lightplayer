@@ -1087,7 +1087,7 @@ and a **mark** written on the chip in sharpie: `FC6 fixture-c6`.
 
 ```bash
 board list                                         # every board, its port and hub, who holds it, who waits
-board take fixture-c6 --for "ota-director: power-cut soak"   # 30 min; prints the port
+board take fixture-c6 --as ota-director --for "power-cut soak"   # 30 min; prints the port
 BOARD_HOLDER=ota-director just flash-fw-esp32c6    # recipes check the lease as you
 board power-cycle fixture-c6 --as ota-director     # both VIA hub twins, lease-checked
 board drop fixture-c6 --as ota-director
@@ -1108,6 +1108,12 @@ board drop fixture-c6 --as ota-director
   `uhubctl` against a board you do not hold.
 - Leases are a courtesy lock between cooperating agents, not security; a
   lease expires (30 min, `board renew`), and dies with its `--pid`.
+- `board take`/`board run` now refuse with no identity at all: pass `--as
+  <who>`, or set `$BOARD_HOLDER`. `--for` is only the reason.
+- To put a published release on a board rather than a local build, see
+  `lp-cli firmware install --release <version|previous|latest>` in
+  `lp-fw/builds/README.md` — it leases through this same `board` when
+  present.
 
 ## Hardware validation — one system, no board most days
 

@@ -31,6 +31,12 @@ pub enum FirmwareSubcommand {
     ReleaseAssets(ReleaseAssetsArgs),
     /// Re-verify a release staging directory from its files alone.
     ReleaseCheck(ReleaseCheckArgs),
+    /// Put a published release's firmware on a board over USB: resolve the
+    /// release, download and verify its package against lightplayer.app's
+    /// public lookup, lease the board (the desk's board bench, when
+    /// present), and write it with the same layout-aware flasher
+    /// `lp-cli hardware lpfs migrate` uses.
+    Install(InstallArgs),
 }
 
 #[derive(Debug, Args)]
@@ -121,4 +127,133 @@ pub struct ReleaseCheckArgs {
     /// the `v`). Without it, the targets must still agree on one.
     #[arg(long)]
     pub version: Option<String>,
+}
+
+#[derive(Debug, Args)]
+#[command(group(
+    clap::ArgGroup::new("board_select").args(["mac", "port"]).required(true)
+))]
+pub struct InstallArgs {
+    /// Which release to install: a version (`2026.10.05-3`), `latest`, or
+    /// `previous` (the newest published release older than latest that
+    /// carries firmware for the target).
+    #[arg(long)]
+    pub release: String,
+
+    /// Select the board by MAC (its USB serial number on Espressif native
+    /// USB). Passive: opens and resets nothing to find the port.
+    #[arg(long)]
+    pub mac: Option<String>,
+
+    /// Select the board by its serial port.
+    #[arg(long)]
+    pub port: Option<String>,
+
+    /// The firmware target (e.g. `esp32c6-4mb`). Defaults to the board's
+    /// own target, read from its hello, for a board already running a
+    /// split image; required for anything else (a blank board, a single
+    /// image, another chip's firmware).
+    #[arg(long)]
+    pub target: Option<String>,
+
+    /// Who is leasing the board on the desk's board bench, when one is
+    /// present (`board take --as <who>`). Falls back to `$BOARD_HOLDER`
+    /// when not given; `board` refuses a lease with neither.
+    #[arg(long = "as")]
+    pub holder: Option<String>,
+
+    /// Do not ask before writing.
+    #[arg(long)]
+    pub yes: bool,
+
+    /// Resolve, download and verify the release, print what would be
+    /// written, and stop — no board is touched.
+    #[arg(long)]
+    pub dry_run: bool,
+
+    /// Where the mandatory backup is stored, when the board's filesystem
+    /// must move to the package's layout (default
+    /// ~/.lightplayer/backups/<mac>/). Unused for the ordinary case where
+    /// the layout already matches.
+    #[arg(long)]
+    pub backup_dir: Option<PathBuf>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[derive(Parser)]
+    struct Cli {
+        #[command(flatten)]
+        install: InstallArgs,
+    }
+
+    fn parse(args: &[&str]) -> Result<InstallArgs, clap::Error> {
+        let mut full = vec!["x"];
+        full.extend_from_slice(args);
+        Cli::try_parse_from(full).map(|cli| cli.install)
+    }
+
+    #[test]
+    fn parses_with_a_port_and_defaults() {
+        let args = parse(&["--release", "latest", "--port", "/dev/cu.usbmodem1"]).unwrap();
+        assert_eq!(args.release, "latest");
+        assert_eq!(args.port.as_deref(), Some("/dev/cu.usbmodem1"));
+        assert_eq!(args.mac, None);
+        assert_eq!(args.target, None);
+        assert_eq!(args.holder, None);
+        assert!(!args.yes);
+        assert!(!args.dry_run);
+        assert_eq!(args.backup_dir, None);
+    }
+
+    #[test]
+    fn parses_every_flag() {
+        let args = parse(&[
+            "--release",
+            "2026.10.05-3",
+            "--mac",
+            "A0:F2:62:87:B4:8C",
+            "--target",
+            "esp32c6-4mb",
+            "--as",
+            "yona",
+            "--yes",
+            "--dry-run",
+            "--backup-dir",
+            "/tmp/backups",
+        ])
+        .unwrap();
+        assert_eq!(args.release, "2026.10.05-3");
+        assert_eq!(args.mac.as_deref(), Some("A0:F2:62:87:B4:8C"));
+        assert_eq!(args.target.as_deref(), Some("esp32c6-4mb"));
+        assert_eq!(args.holder.as_deref(), Some("yona"));
+        assert!(args.yes);
+        assert!(args.dry_run);
+        assert_eq!(args.backup_dir, Some(PathBuf::from("/tmp/backups")));
+    }
+
+    #[test]
+    fn release_is_required() {
+        assert!(parse(&["--port", "/dev/cu.usbmodem1"]).is_err());
+    }
+
+    #[test]
+    fn exactly_one_of_mac_or_port_is_required() {
+        assert!(parse(&["--release", "latest"]).is_err(), "neither given");
+        assert!(
+            parse(&[
+                "--release",
+                "latest",
+                "--mac",
+                "A0:F2:62:87:B4:8C",
+                "--port",
+                "/dev/cu.usbmodem1"
+            ])
+            .is_err(),
+            "both given"
+        );
+    }
 }

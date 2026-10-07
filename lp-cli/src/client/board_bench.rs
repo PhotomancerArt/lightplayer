@@ -100,17 +100,24 @@ pub fn check(port: &str, chip: Option<&str>, holder: Option<&str>) -> Result<()>
     }
 }
 
-/// Lease the board on `port` for `for_text` (`"<who>: <why>"`). Unlike
-/// [`check`], this needs `board`: asking for a lease and silently not getting
-/// one would be worse than failing.
-pub fn take(port: &str, for_text: &str, minutes: Option<u32>) -> Result<()> {
+/// Lease the board on `port` for `reason` (just the why — `board take` now
+/// takes identity separately, `--as <holder>`, else it falls back to
+/// `$BOARD_HOLDER` itself, same as [`check`]). Unlike `check`, this needs
+/// `board`: asking for a lease and silently not getting one would be worse
+/// than failing. `board take`/`run` also refuse outright with no identity
+/// at all (no `--as` and no `$BOARD_HOLDER`); that refusal surfaces here as
+/// an ordinary failed-lease error.
+pub fn take(port: &str, holder: Option<&str>, reason: &str, minutes: Option<u32>) -> Result<()> {
     let Some(board) = board_binary() else {
         bail!(
             "--lease needs `board` (github.com/PhotomancerArt/lp-board-bench) on PATH, or BOARD_BIN"
         );
     };
     let mut command = Command::new(&board);
-    command.args(["take", port, "--for", for_text]);
+    command.args(["take", port, "--for", reason]);
+    if let Some(holder) = holder {
+        command.args(["--as", holder]);
+    }
     if let Some(minutes) = minutes {
         command.args(["--minutes", &minutes.to_string()]);
     }
@@ -123,6 +130,39 @@ pub fn take(port: &str, for_text: &str, minutes: Option<u32>) -> Result<()> {
         Ok(())
     } else {
         bail!("could not lease {port}: {said}")
+    }
+}
+
+/// Whether a working `board` is on `PATH` (or named by `$BOARD_BIN`) at all
+/// — the courtesy check before leasing, which (unlike [`check`]) has no
+/// silent no-op: asking for a lease and not getting one must never look
+/// like holding one. `firmware install` leases only when this is true.
+pub fn available() -> bool {
+    board_binary().is_some()
+}
+
+/// Drop the lease [`take`] holds on `port`, best-effort: the bench's own
+/// leases expire on their own, so a caller may log and continue rather than
+/// fail its whole operation over this.
+pub fn drop_lease(port: &str, holder: Option<&str>) -> Result<()> {
+    let Some(board) = board_binary() else {
+        return Ok(());
+    };
+    let mut args: Vec<OsString> = vec!["drop".into(), port.into()];
+    if let Some(holder) = holder {
+        args.extend(["--as".into(), holder.into()]);
+    }
+    let output = Command::new(&board).args(&args).output()?;
+    let said = String::from_utf8_lossy(&output.stderr)
+        .trim_end()
+        .to_owned();
+    if output.status.success() {
+        if !said.is_empty() {
+            eprintln!("board: {said}");
+        }
+        Ok(())
+    } else {
+        bail!("could not drop the lease on {port}: {said}")
     }
 }
 
@@ -152,6 +192,17 @@ pub fn list() -> Option<Vec<BenchBoard>> {
 /// The holder part of a `--for "<who>: <why>"` string — the bench's own rule.
 pub fn holder_of(for_text: &str) -> &str {
     for_text.split(':').next().unwrap_or(for_text).trim()
+}
+
+/// The reason half of a `"<who>: <why>"` string — everything after the
+/// first colon, trimmed (the whole string when there is no colon at all).
+/// Paired with [`holder_of`]: a `--for "<who>: <why>"` flag still combines
+/// both, but [`take`] wants them apart (`--as <who> --for <why>`).
+pub fn reason_of(for_text: &str) -> &str {
+    for_text
+        .split_once(':')
+        .map_or(for_text, |(_, rest)| rest)
+        .trim()
 }
 
 /// `a0f2…`, `A0-F2-…`, `a0:f2:…` → `A0:F2:…`.
@@ -254,7 +305,33 @@ mod tests {
         let _env = EnvVar::set("BOARD_BIN", "/nonexistent/board");
         assert!(check("/dev/cu.usbmodem1", None, None).is_ok());
         assert!(list().is_none());
-        assert!(take("/dev/cu.usbmodem1", "me: test", None).is_err());
+        assert!(take("/dev/cu.usbmodem1", Some("me"), "test", None).is_err());
+        assert!(!available());
+        // Unlike a lease, dropping one is a no-op without a bench: nothing
+        // was held, so there is nothing to fail over.
+        assert!(drop_lease("/dev/cu.usbmodem1", None).is_ok());
+    }
+
+    #[test]
+    fn available_reflects_whether_board_runs() {
+        let _guard = ENV.lock().unwrap();
+        let _stub = Stub::new(0, "ok");
+        assert!(available());
+    }
+
+    #[test]
+    fn drop_lease_passes_the_holder_and_reports_the_benchs_failure() {
+        let _guard = ENV.lock().unwrap();
+        let stub = Stub::new(0, "FC6 fixture-c6 dropped");
+        drop_lease("/dev/cu.usbmodem1", Some("ota")).unwrap();
+        assert_eq!(stub.args(), "drop /dev/cu.usbmodem1 --as ota");
+        drop(stub);
+
+        let _failing = Stub::new(1, "fixture-c6 is not yours");
+        let error = drop_lease("/dev/cu.usbmodem1", None)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("fixture-c6 is not yours"), "{error}");
     }
 
     #[test]
@@ -304,6 +381,34 @@ mod tests {
             "ota-director"
         );
         assert_eq!(holder_of(" yona "), "yona");
+    }
+
+    #[test]
+    fn the_reason_is_everything_after_the_first_colon() {
+        assert_eq!(
+            reason_of("ota-director: power-cut: round 2"),
+            "power-cut: round 2"
+        );
+        assert_eq!(reason_of("yona"), "yona");
+    }
+
+    #[test]
+    fn take_passes_as_and_for_separately() {
+        let _guard = ENV.lock().unwrap();
+        let stub = Stub::new(0, "FC6 fixture-c6 leased to yona until 20:30 (30 min)");
+        take("/dev/cu.usbmodem1", Some("yona"), "testing", Some(15)).unwrap();
+        assert_eq!(
+            stub.args(),
+            "take /dev/cu.usbmodem1 --for testing --as yona --minutes 15"
+        );
+    }
+
+    #[test]
+    fn take_without_a_holder_lets_board_fall_back_to_board_holder() {
+        let _guard = ENV.lock().unwrap();
+        let stub = Stub::new(0, "ok");
+        take("/dev/cu.usbmodem1", None, "testing", None).unwrap();
+        assert_eq!(stub.args(), "take /dev/cu.usbmodem1 --for testing");
     }
 
     /// A fake `board`: a shell script that records its arguments and exits

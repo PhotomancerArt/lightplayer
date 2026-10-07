@@ -60,7 +60,8 @@ pub fn handle_fwcheck(cli: FwcheckCli) -> Result<()> {
             };
             if args.lease {
                 let lease_for = args.lease_for.as_deref().unwrap_or_default();
-                board_bench::take(&resolved, lease_for, args.minutes)?;
+                let reason = board_bench::reason_of(lease_for);
+                board_bench::take(&resolved, holder, reason, args.minutes)?;
             }
             println!("{resolved}");
             Ok(())

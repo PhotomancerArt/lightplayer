@@ -3,6 +3,7 @@ mod bootloader_guard;
 pub mod build;
 pub mod build_def;
 pub mod distribution_manifest;
+mod install;
 pub mod list;
 mod ota_files;
 #[cfg(test)]
@@ -25,5 +26,6 @@ pub fn handle_firmware(cli: FirmwareCli) -> anyhow::Result<()> {
             release_assets::handle_release_assets(args)
         }
         args::FirmwareSubcommand::ReleaseCheck(args) => release_check::handle_release_check(args),
+        args::FirmwareSubcommand::Install(args) => install::handle_install(args),
     }
 }
