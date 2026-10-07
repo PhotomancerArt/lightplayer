@@ -306,9 +306,10 @@ export async function wifiStatus(target) {
 }
 
 /// A second LAN dial turned away by a board whose one LAN link is in use:
-/// lp-cli's words for WebSocket 1013 (`lpa-client`'s `lan_error.rs`).
+/// lp-cli's words for WebSocket 1013 (`lpa-client`'s `lan_error.rs`; since
+/// #999 "busy with another connection — try again later").
 export function refusedAsInUse(stderr) {
-  return /LAN links are all in use; try again later/.test(stderr);
+  return /busy with another connection \u2014 try again later/.test(stderr);
 }
 
 /// `station` as `{ kind, ...fields }` (`"notConnected"` or `{ connected: {…} }`).

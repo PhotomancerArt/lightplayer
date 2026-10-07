@@ -24,13 +24,15 @@
 //       page's link to c6-a stays up
 //   S4  an address nothing answers at says so in plain words
 //
-// ⚠️ ONE SUBSTITUTION, said where it happens (S2): an emulated board's LAN
+// ⚠️ ONE STAND-IN (ruling DD193), said where it happens (S2): an emulated board's LAN
 // address (the virtual LAN's DHCP lease, e.g. 10.0.0.x) is not reachable
 // from the host — the door reaches each board through a loopback forward
 // (`127.0.0.1:<port>`). So after S1 proves Studio remembered the board's OWN
 // address, the walk rewrites that one entry's `ip` to the board's forward
-// before Studio reloads, and every claim after it is about the forward. On
-// a desk the remembered address is dialled as it is. Likewise S3 types each
+// before Studio reloads, and every claim after it is about the forward. So
+// the lane proves Studio remembered the board's OWN lease, then dials the
+// host forward in its place. On a desk the remembered address is dialled as
+// it is; making a lease dialable from the host is not this lane's to do. Likewise S3 types each
 // board's forward where a person would type its IP.
 //
 // THE BOARD'S WORDS DECIDE EVERY STEP: each board's console (its USB link
@@ -333,7 +335,7 @@ async function main() {
     const page = new Page(driver);
 
     await step("S2", `no cable: ${A}'s tile offers "${WORDS.connectOverWifi}"; pressed, it comes back over Wi‑Fi and an edit lands`, async (seen) => {
-      // The one substitution (see the header): the remembered entry's ip
+      // The stand-in (DD193, see the header): the remembered entry's ip
       // becomes the board's forward, so the host can dial it.
       await page.load(plainUrl);
       const rewritten = await driver.evaluate(`(() => {
