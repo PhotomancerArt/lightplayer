@@ -10,7 +10,8 @@
 // (`target/walk-wifi-emu/relay/walk.log`), and then reads the BOARD's own
 // console words for each step, never only the test's verdict:
 //
-//     R1 joined, no account key   → `[relay] now no account`
+//     R1 joined, no account key   → `[relay] state=no account` (the heartbeat's
+//                                   line: the boot state is not a move)
 //     R2 registered by itself     → `[relay] leg open to lightplayer.app`,
 //                                   `[relay] now connected`
 //     R3 a session through it     → `[relay] route N: … secure session opening`
@@ -37,7 +38,7 @@ const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../.
 const OUT = path.join(ROOT, "target/walk-wifi-emu/relay");
 
 const STEPS = [
-  ["R1", "joined, no account key", [/\[relay\] now no account/]],
+  ["R1", "joined, no account key", [/\[relay\] state=no account/]],
   ["R2", "registered by itself", [/\[relay\] leg open to lightplayer\.app/, /\[relay\] now connected/]],
   ["R3", "a session through the relay", [/\[relay\] route \d+: link \S+, secure session opening/]],
   ["R4", "the same key takes the session on the LAN", [/closed \(taken over by the same key\)/]],

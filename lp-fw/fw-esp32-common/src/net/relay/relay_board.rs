@@ -41,6 +41,9 @@ struct Inner {
     state: RelayState,
     counters: RelayCounters,
     routes: usize,
+    /// Whether the driver has published at all: its first state (at boot)
+    /// is not a move, and says nothing.
+    published: bool,
 }
 
 impl RelayBoard {
@@ -60,6 +63,7 @@ impl RelayBoard {
                     busy: 0,
                 },
                 routes: 0,
+                published: false,
             })),
             wake: Signal::new(),
         }
@@ -119,8 +123,10 @@ impl RelayBoard {
     }
 
     /// Publish the driver's state and counters, saying so in one line when
-    /// the state moved (the board's own words a walk waits on; the
-    /// heartbeat's `[relay]` line comes only every few seconds).
+    /// the state moved after boot (the board's own words a walk waits on;
+    /// the heartbeat's `[relay]` line comes only every few seconds). The
+    /// boot state is not a move: a board that never uses the relay prints
+    /// nothing new.
     pub fn publish(&self, driver: &RelayDriver) {
         let (state, counters, routes) = (
             driver.state(),
@@ -129,7 +135,8 @@ impl RelayBoard {
         );
         let moved = critical_section::with(|cs| {
             let mut inner = self.inner.borrow_ref_mut(cs);
-            let moved = inner.state != state;
+            let moved = inner.published && inner.state != state;
+            inner.published = true;
             inner.state = state;
             inner.counters = counters;
             inner.routes = routes;
