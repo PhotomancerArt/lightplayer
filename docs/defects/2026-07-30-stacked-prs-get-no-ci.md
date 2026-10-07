@@ -36,6 +36,8 @@ force `reopened`.
 
 ## Fix
 
+Superseded 2026-10-07 by #1030: `edited` was dropped (it cancelled CI on every body edit); see docs/debt/stacked-pr-retarget-gets-no-ci.md
+
 `types: [opened, synchronize, reopened, edited]`.
 
 Deliberate cost: `edited` also fires on title and body edits, so editing a
