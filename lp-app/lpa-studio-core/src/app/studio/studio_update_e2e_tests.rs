@@ -647,6 +647,40 @@ fn a_core_install_over_an_untrusted_link_without_a_known_key_is_refused() {
     assert!(bench.board().saw(b'L'), "a login was tried");
 }
 
+/// The same board, unlocked on this browser with a typed password Studio
+/// remembers (a Bluetooth unlock installs no key): the core-only half asks
+/// for its own login, and the remembered password answers it (the M7
+/// pre-walk on the fixture C6 stopped `LoginRefused` here).
+#[test]
+fn a_core_install_over_an_untrusted_link_logs_in_with_a_remembered_password() {
+    let mut board = Board::engineless_x();
+    board.trust = LinkTrust::Untrusted;
+    board.rig.access = locked_access(vec![SecretEntry::from_password(
+        "the desk",
+        Tier::Edit,
+        b"hunter2",
+        [4; 16],
+        16,
+    )]);
+    board.rig.reboot().expect("boots");
+    let mut bench = Bench::new(board, Some(y()));
+    bench
+        .controller
+        .apply_access_command(crate::app::access::AccessCommand::RememberPassword(
+            "hunter2".to_string(),
+        ));
+    bench.grant();
+    bench.run_until("the restore to miss", |bench| bench.any_outcome().is_some());
+    let device = bench.pending_device().expect("a pending link");
+
+    bench.install_on_pending(device, "2026.10.06-1");
+    bench.run_until("Y to run", |bench| {
+        bench.board().rig.mode() == Some(SessionMode::EngineRunning)
+    });
+    bench.assert_runs(&y());
+    assert!(bench.board().saw(b'L'), "logged in");
+}
+
 /// A power cut after flash operation k of the update, for every k of a
 /// clean run (stepped, to keep the suite quick): Studio brings the board
 /// to Y every time, with no click after the one Update.
