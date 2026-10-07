@@ -126,6 +126,28 @@ impl FakeEsp32Device {
         result.map_err(|error| LinkError::other(error.to_string()))
     }
 
+    /// Power-cycle the scripted board: boot again from what its flash holds
+    /// now, the way firmware would. A board that formatted after a pulled
+    /// cable boots its (empty) filesystem this time as `mounted` — the
+    /// later boot the migration walk's W7b covers. A board whose flash was
+    /// never written by a plan just replays its scripted boot.
+    pub fn fake_power_cycle(&self) {
+        let FakeBootState::LightPlayer(lp) = self.flash_state() else {
+            self.reset_runtime();
+            return;
+        };
+        let Some(flash) = lp.flash.as_ref() else {
+            self.reset_runtime();
+            return;
+        };
+        let (efuse_mac, link_config) = self.board_constants();
+        self.replace_boot(FakeBootState::LightPlayer(boot_from_flash(
+            flash.as_ref().clone(),
+            efuse_mac,
+            link_config,
+        )));
+    }
+
     /// Every file the scripted board holds right now (absolute paths), and
     /// the filesystem state its next hello reports — what a test asserts
     /// after a plan ran.
@@ -359,6 +381,20 @@ mod tests {
             panic!("a LightPlayer board");
         };
         assert_eq!(lp.fs_boot_state, lpc_wire::FsBootState::Formatted);
+    }
+
+    /// The boot after the one that formatted mounts that empty filesystem:
+    /// `mounted`, with no files and so no identity (the walk's W7b).
+    #[test]
+    fn a_power_cycle_after_the_format_mounts_the_empty_filesystem() {
+        let device = legacy_board();
+        let plan = plan_for(&device);
+        device.interrupt_next_plan_after(4);
+        assert!(device.fake_execute_plan(&plan).is_err());
+        device.fake_power_cycle();
+        let (files, fs) = device.fake_board_files();
+        assert_eq!(fs, Some(lpc_wire::FsBootState::Mounted));
+        assert!(files.is_empty(), "{files:?}");
     }
 
     #[test]
