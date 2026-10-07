@@ -8,17 +8,24 @@
 // account), driven by `lp-cli/tests/emu_relay_link.rs` — the same cell CI
 // runs in `test-emu-serve`. This lane runs it, keeps everything it printed
 // (`target/walk-wifi-emu/relay/walk.log`), and then reads the BOARD's own
-// console words for each step, never only the test's verdict:
+// words for each step, never only the test's verdict: its console, or its
+// own status answer over USB (`NetworkStatus.relay`, which the cell prints
+// as `the board answers (…): relay …`):
 //
-//     R1 joined, no account key   → `[relay] state=no account` (the heartbeat's
-//                                   line: the boot state is not a move)
+//     R1 joined, no account key   → answers `relay noAccount`
 //     R2 registered by itself     → `[relay] leg open to lightplayer.app`,
-//                                   `[relay] now connected`
+//                                   answers `relay connected`
 //     R3 a session through it     → `[relay] route N: … secure session opening`
 //     R4 the same key on the LAN  → `closed (taken over by the same key)`
 //     R5 someone else             → `the network link is in use — busy`
-//     R6 Cloud relay off / on     → `[relay] now off`, then `now connected` again
-//     R7 the account key reset    → `[relay] now refused: unknown account`
+//     R6 Cloud relay off / on     → answers `relay off`, then `relay connected`
+//     R7 the account key reset    → answers `relay refused: unknownAccount`
+//
+// The board's console has no line of its own for a relay state change (its
+// heartbeat's `[relay] state=…` comes every five emulated seconds, and the
+// last steps end before it prints); one was tried and cost a 32 KB flash
+// page (docs/reports/2026-10-07-wifi-relay-emulator-walk.md), so the walk
+// reads the status answers instead.
 //
 // and writes `summary.json` beside the log: the steps, the board's heap
 // readings and the round-trip lines, with the configuration
@@ -37,14 +44,15 @@ import process from "node:process";
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
 const OUT = path.join(ROOT, "target/walk-wifi-emu/relay");
 
+const ANSWERS = (what, relay) => new RegExp(`emu_relay_link: the board answers \\(${what}\\): relay ${relay}$`, "m");
 const STEPS = [
-  ["R1", "joined, no account key", [/\[relay\] state=no account/]],
-  ["R2", "registered by itself", [/\[relay\] leg open to lightplayer\.app/, /\[relay\] now connected/]],
+  ["R1", "joined, no account key", [ANSWERS("no account", "noAccount")]],
+  ["R2", "registered by itself", [/\[relay\] leg open to lightplayer\.app/, ANSWERS("relay connected after boot", "connected")]],
   ["R3", "a session through the relay", [/\[relay\] route \d+: link \S+, secure session opening/]],
   ["R4", "the same key takes the session on the LAN", [/closed \(taken over by the same key\)/]],
   ["R5", "another key is told busy", [/the network link is in use — busy/]],
-  ["R6", "Cloud relay off, then on", [/\[relay\] now off/]],
-  ["R7", "the account key reset: refused", [/\[relay\] now refused: unknown account/]],
+  ["R6", "Cloud relay off, then on", [ANSWERS("relay off", "off"), ANSWERS("relay connected again", "connected")]],
+  ["R7", "the account key reset: refused", [ANSWERS("refused", "refused: unknownAccount")]],
 ];
 
 function main() {
@@ -90,16 +98,9 @@ function main() {
     const missing = words.filter((re) => !re.test(log)).map(String);
     return { id, what, ok: missing.length === 0, missing };
   });
-  // R6's second half: connected again after the off (the board's words, in order).
-  const off = log.search(/\[relay\] now off/);
-  const r6 = steps.find((s) => s.id === "R6");
-  if (off >= 0 && !/\[relay\] now connected/.test(log.slice(off))) {
-    r6.ok = false;
-    r6.missing.push("[relay] now connected after now off");
-  }
   const measured = log
     .split("\n")
-    .filter((line) => line.startsWith("emu_relay_link:"))
+    .filter((line) => line.startsWith("emu_relay_link:") && !line.includes("the board answers"))
     .map((line) => line.slice("emu_relay_link: ".length));
   const passed = run.status === 0 && /test result: ok\. 1 passed/.test(log);
   writeFileSync(

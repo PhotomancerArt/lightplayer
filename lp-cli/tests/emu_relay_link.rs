@@ -100,7 +100,7 @@ fn an_emulated_c6_reaches_lightplayer_app_through_the_lans_uplink() {
         &usb_addr,
         &fixture,
         &flash,
-        Some("[relay] now connected"),
+        Some("[relay] state=connected"),
     );
     wait_listening(&usb_addr);
     let usb = format!("serial:tcp://{usb_addr}");
@@ -485,6 +485,13 @@ async fn wait_status(
             .expect("`wifi status` over USB")
             .value;
         if done(&status) {
+            // The board's own answer, for the walk to read
+            // (`scripts/emu/walk-wifi-emu-relay.mjs`).
+            let relay = match status.relay {
+                RelayState::Refused { reason } => format!("refused: {}", reason.code()),
+                other => String::from(other.kind()),
+            };
+            eprintln!("emu_relay_link: the board answers ({what}): relay {relay}");
             return status;
         }
         assert!(
