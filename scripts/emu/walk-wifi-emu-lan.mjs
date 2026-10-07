@@ -168,14 +168,14 @@ export const PANEL_TEXT = `(${PANEL}?.innerText || '')`;
 
 function usage() {
   return (
-    "usage: node scripts/emu/walk-wifi-emu.mjs lan [--out <dir>] [--keep-open] [--dry-run]\n" +
+    "usage: node scripts/emu/walk-wifi-emu.mjs lan [--out <dir>] [--keep-open] [--dry-run] [--skip W10,…]\n" +
     "       node scripts/emu/walk-wifi-emu-lan.mjs [--out <dir>] [--keep-open] [--dry-run]"
   );
 }
 
 export function parseArgs(argv) {
   const rest = argv[0] === "lan" ? argv.slice(1) : argv;
-  const options = { out: path.join(ROOT, "target/walk-wifi-emu/lan"), keepOpen: false, dryRun: false };
+  const options = { out: path.join(ROOT, "target/walk-wifi-emu/lan"), keepOpen: false, dryRun: false, skip: [] };
   for (let i = 0; i < rest.length; i += 1) {
     const arg = rest[i];
     if (arg === "--out") {
@@ -184,6 +184,14 @@ export function parseArgs(argv) {
       options.out = path.resolve(value);
     } else if (arg === "--keep-open") options.keepOpen = true;
     else if (arg === "--dry-run") options.dryRun = true;
+    // `--skip W10`: leave named steps out (W10's `link rtt` alone can run
+    // past a session's 10-minute command cap). A skipped step is reported
+    // as skipped, never as passed.
+    else if (arg === "--skip") {
+      const value = rest[++i];
+      if (!value) throw new Error(`--skip needs step ids (W10 or W3,W10)\n${usage()}`);
+      options.skip.push(...value.split(",").map((id) => id.trim().toUpperCase()).filter(Boolean));
+    }
     else if (arg === "--help" || arg === "-h") {
       options.help = true;
     } else {
@@ -897,6 +905,11 @@ async function main() {
   /// a step's body learned on its way, kept in the summary whether or not
   /// the step got to the end (a failed W3 still says the board loaded).
   const step = async (id, describe, body, { fatal = false } = {}) => {
+    if (options.skip.includes(id)) {
+      console.log(`— ${id}: ${describe}\n  – skipped (--skip)`);
+      report.steps.push({ id, describe, ok: true, skipped: true, error: null, note: null, seen: {}, shot: null, consoleLines: {}, records: [] });
+      return null;
+    }
     console.log(`— ${id}: ${describe}`);
     const recordsBefore = sink.records.length;
     const marks = Object.fromEntries(Object.entries(consoles()).map(([board, c]) => [board, c.mark()]));
@@ -1407,7 +1420,7 @@ async function main() {
 
   console.log("\n=== the emulated Wi‑Fi walk (lan), step by step");
   for (const s of report.steps) {
-    console.log(`  ${s.ok ? "✓" : "✗"} ${s.id.padEnd(4)} ${s.records.length} record(s)   ${s.shot ? path.basename(s.shot) : "(no shot)"}`);
+    console.log(`  ${s.skipped ? "–" : s.ok ? "✓" : "✗"} ${s.id.padEnd(4)} ${s.records.length} record(s)   ${s.shot ? path.basename(s.shot) : "(no shot)"}`);
   }
   if (pageErrors.length) {
     console.log("\n  page console errors:");
@@ -1442,7 +1455,10 @@ async function main() {
     console.error(`\nEvery step passed, but the page panicked ${panics.length} time(s) and printed a password ${leaked.length} time(s).`);
     process.exit(1);
   }
-  console.log(`\n✓ the emulated Wi‑Fi walk finished W1–W10 (${configuration}, lp-emu ${commit}).`);
+  const skipped = report.steps.filter((s) => s.skipped).map((s) => s.id);
+  console.log(
+    `\n✓ the emulated Wi‑Fi walk finished W1–W10${skipped.length ? ` except ${skipped.join(", ")} (skipped, NOT run)` : ""} (${configuration}, lp-emu ${commit}).`,
+  );
 }
 
 /// n, p50, p90 of `xs`, rounded to thousandths (the rtt report's own rule).
