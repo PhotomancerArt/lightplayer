@@ -143,6 +143,14 @@ pub struct ChipSpec {
     /// override it: this crate's plans never pass `--core-quantum` today, so
     /// the run this field describes is always the default one.
     pub core_quantum: Option<u32>,
+    /// Does this chip's machine answer emulator seams (`--seams`, ADR
+    /// docs/adr/2026-10-05-emulator-seams.md)? Only the C6's does. On it a
+    /// plan always states the run's seams, `none` included, so the label the
+    /// machine earns is exactly the configuration the plan was made for; on
+    /// a chip whose machine has no seams the flag does not exist, and a
+    /// composite configuration is refused rather than run seam-free under a
+    /// label that says otherwise.
+    pub takes_seams: bool,
 }
 
 /// Mirrors `CORE_QUANTUM_DEFAULT` in `lp-emu/esp/lp-emu-esp32v3/src/machine.rs`
@@ -172,6 +180,7 @@ pub const ESP32C6: ChipSpec = ChipSpec {
     time_grades: &["t1", "t2", "t3"],
     takes_reset_cause: true,
     core_quantum: None,
+    takes_seams: true,
 };
 
 /// The classic ESP32 (revision v3), the desk's `domraem/dom-z-102`.
@@ -194,6 +203,7 @@ pub const ESP32V3: ChipSpec = ChipSpec {
     time_grades: &["t1"],
     takes_reset_cause: false,
     core_quantum: Some(ESP32V3_CORE_QUANTUM_DEFAULT),
+    takes_seams: false,
 };
 
 /// Mirrors `CORE_QUANTUM_DEFAULT` in `lp-emu/esp/lp-emu-esp32s3/src/machine.rs`
@@ -262,6 +272,7 @@ pub const ESP32S3: ChipSpec = ChipSpec {
     // the same reason the classic's is: a parameter nobody wrote down is a
     // run nobody can reproduce.
     core_quantum: Some(ESP32S3_CORE_QUANTUM_DEFAULT),
+    takes_seams: false,
 };
 
 /// Every chip this runner drives, in the order they were taught to it.
@@ -363,6 +374,19 @@ pub struct RunRequest {
     /// See [`LinkHost`] and [`RunRequest::hosted`]. `None` is the raw port,
     /// which is what every committed transcript was captured through.
     pub link_host: Option<LinkHost>,
+    /// The emulator seams the configuration names, as `<seam>=<impl>` atoms
+    /// in label order (`["net=lan"]` for `lp-emu:esp32c6:t1+net=lan`), from
+    /// the composed `[[seam]]` overlays. Empty for a plain name.
+    ///
+    /// **The configuration is the whole seam request.** An emulated C6 adds
+    /// its capability defaults (`net=lan`) softly to any run that does not
+    /// say otherwise, which would make a run of `lp-emu:esp32c6:t1` on an
+    /// image with the network seam earn `…:t1+net=lan` under a sidecar that
+    /// says `…:t1`. So the plan passes these atoms strictly, or `--seams
+    /// none` when there are none: the label the machine prints is the label
+    /// the sidecar carries, and every seam-free recipe runs exactly as it ran
+    /// before seams existed.
+    pub seams: Vec<String>,
 }
 
 /// A host for the shipped image's link, supplied by the CALLER.
@@ -382,7 +406,7 @@ pub struct RunRequest {
 /// takes the machine's own flags (`--elf`, `--merged`, `--time-grade`,
 /// `--timeout`, `--wall-timeout`, `--strict-bus`, `--exit-on`, `--efuse-mac`,
 /// `--efuse-rev`, `--reset-cause`, `--strap`, `--usb-host`, `--usb-script`,
-/// `--wire`, `--pin-script`) with two spellings of its own: the capture is
+/// `--wire`, `--pin-script`, `--seams`) with two spellings of its own: the capture is
 /// `--console <path>` and the pin capture `--dump-frames <path>`, both bare
 /// paths. [`port`](Self::port) takes a positional port and `--console`,
 /// `--seconds`, `--exit-on`. lp-cli's parity test parses what this crate
@@ -1653,6 +1677,24 @@ impl ConfigurationDriver for LpEmuDriver {
         }
         emu.push("--time-grade".into());
         emu.push(grade.into());
+        // The seams, stated on every run of a machine that has any: the
+        // configuration's atoms strictly, or `none`, never the machine's
+        // capability defaults behind the label's back (`RunRequest::seams`).
+        if spec.takes_seams {
+            emu.push("--seams".into());
+            emu.push(if req.seams.is_empty() {
+                "none".into()
+            } else {
+                req.seams.join("+")
+            });
+        } else if !req.seams.is_empty() {
+            bail!(
+                "`{}` has no emulator seams; `{}` needs a machine that answers `{}`",
+                spec.emu_package,
+                req.configuration,
+                req.seams.join("+")
+            );
+        }
         if hosted.is_some() {
             // The host's decoded console IS the capture; there is no
             // "tried" stream, because the host drains everything it is
@@ -2326,6 +2368,7 @@ mod tests {
                 .map(|e| e.chip.clone())
                 .unwrap_or_else(|_| Configuration::parse(config).unwrap().detail),
             link_host: None,
+            seams: Vec::new(),
         }
     }
 

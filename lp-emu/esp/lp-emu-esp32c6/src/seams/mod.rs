@@ -42,7 +42,14 @@
 //! deterministic multi-board driver). When the live table names a pending
 //! word, the machine raises the **wake** ([`seam_wake`]) — one line,
 //! `FROM_CPU_INTR3`, paced by G0 rule (b). Every figure about it is emulated.
+//!
+//! # The network seam
+//!
+//! `net=lan` ([`net_seam`]) is the first capability seam that ships, and a
+//! default: every run whose image carries it engages it, and the board joins
+//! the virtual LAN a host gave it (or an empty one of its own).
 
+pub mod net_seam;
 pub mod seam_answer;
 pub mod seam_arming;
 pub mod seam_endpoints;

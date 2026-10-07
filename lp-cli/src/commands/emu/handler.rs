@@ -12,7 +12,11 @@ use lp_emu_esp32c6::machine::{
 use lp_emu_esp32c6::memmap;
 use lp_emu_esp32c6::pinscript::{PinScript, parse_pin_script, parse_wire};
 
+use lp_emu_esp_common::ParticipantId;
+use lp_emu_esp_common::seam::net::{LanDriver, SharedLan};
+
 use super::args::{EmuChip, EmuCli, EmuCommand, Grade, LinkKind, RunArgs, UsbHostArg};
+use super::lan_fixture::{BOARD_LAN_PORT, LanFixture, forward_spec, forward_to_board};
 
 pub fn handle_emu(cli: EmuCli) -> Result<()> {
     match cli.command {
@@ -136,7 +140,13 @@ fn run(args: RunArgs) -> Result<()> {
         return Ok(());
     }
     let seams = seam_request(args.seams.as_deref(), args.seams_prefer.as_deref())?;
-    if args.chip != EmuChip::Esp32C6 && !seams.is_empty() {
+    if args.chip != EmuChip::Esp32C6 && (args.lan.is_some() || args.seam_trace.is_some()) {
+        bail!("--lan and --seam-trace are the C6's: Xtensa seams are the roadmap's M7");
+    }
+    if args.chip != EmuChip::Esp32C6 && args.pace.is_some() {
+        bail!("--pace is the C6's: a pace is held at its network seam's LAN pump");
+    }
+    if args.chip != EmuChip::Esp32C6 && (args.seams.is_some() || args.seams_prefer.is_some()) {
         bail!("--seams / --seams-prefer are the C6's (Xtensa seams are the roadmap's M7)");
     }
     if args.chip != EmuChip::Esp32C6
@@ -154,6 +164,16 @@ fn run(args: RunArgs) -> Result<()> {
     let micros = parse_duration_us(&args.timeout)?;
     let grade = args.time_grade.time_grade();
 
+    // `--lan`: one board on a LAN of its own, driven on its own guest clock
+    // (deterministic: one board, one clock).
+    let lan = match args.lan.as_deref() {
+        Some(path) => {
+            let fixture = LanFixture::read(path)?;
+            Some((fixture.lan(LanDriver::SelfDriven), fixture))
+        }
+        None => None,
+    };
+
     let mut builder = Esp32C6Builder::new()
         .time_grade(grade)
         .strict(args.strict_bus)
@@ -169,6 +189,11 @@ fn run(args: RunArgs) -> Result<()> {
             UsbSjDrain::Auto
         })
         .seams(seams);
+    // `--pace`: left out, the board is held to wall time only while a host
+    // is connected through its `--lan` forward.
+    if let Some(pace) = args.pace {
+        builder = builder.pace(pace.pace());
+    }
 
     if args.ota.ota_offer.is_some() && !args.host_link {
         bail!("--ota-offer drives the update over the link this process hosts: add --host-link");
@@ -193,6 +218,21 @@ fn run(args: RunArgs) -> Result<()> {
             ),
         };
         builder = apply_image(builder, image, args.flash.as_deref())?;
+    }
+    if let Some((shared, _)) = &lan {
+        builder = builder.lan(shared.clone(), RUN_BOARD);
+    }
+    // The seams' own trace lines are notes, which pass any block filter: a
+    // filter naming no block keeps the bus's MMIO lines out, and the sink
+    // keeps only the `SEAM` notes of what is left (watchpoints and the like
+    // are notes too).
+    if let Some(path) = &args.seam_trace {
+        let file = std::fs::File::create(path)
+            .with_context(|| format!("--seam-trace: creating {}", path.display()))?;
+        builder = builder.trace(
+            Box::new(SeamLines::new(file)),
+            vec![SEAM_TRACE_ONLY.to_string()],
+        );
     }
     if let Some(text) = &args.mmu_page {
         let len = match text.to_ascii_lowercase().as_str() {
@@ -330,6 +370,7 @@ fn run(args: RunArgs) -> Result<()> {
             .build()
             .map_err(|e| anyhow::anyhow!("building the machine: {e}"))?;
         print_seam_lines(&mut machine);
+        announce_lan(&machine, lan.as_ref())?;
         let boot = format!(
             "esp32c6 {} boot, grade {}",
             machine.boot_mode().as_str(),
@@ -343,6 +384,7 @@ fn run(args: RunArgs) -> Result<()> {
         .build()
         .map_err(|e| anyhow::anyhow!("building the machine: {e}"))?;
     print_seam_lines(&mut machine);
+    announce_lan(&machine, lan.as_ref())?;
 
     let link = match args.link_kind {
         LinkKind::Usb => "usb-serial-jtag",
@@ -470,6 +512,66 @@ fn usb_host_at_power_on(args: &RunArgs) -> UsbHost {
     }
 }
 
+/// A trace block filter no peripheral is called: `--seam-trace` keeps the
+/// seams' note lines and none of the bus's.
+const SEAM_TRACE_ONLY: &str = "(seam notes only)";
+
+/// A trace sink that writes only the lines naming a seam (` SEAM `), each
+/// as soon as it is whole.
+struct SeamLines<W: std::io::Write> {
+    out: W,
+    line: Vec<u8>,
+}
+
+impl<W: std::io::Write> SeamLines<W> {
+    fn new(out: W) -> Self {
+        Self {
+            out,
+            line: Vec::new(),
+        }
+    }
+}
+
+impl<W: std::io::Write> std::io::Write for SeamLines<W> {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        for &b in bytes {
+            self.line.push(b);
+            if b == b'\n' {
+                if self.line.windows(6).any(|w| w == b" SEAM ") {
+                    self.out.write_all(&self.line)?;
+                }
+                self.line.clear();
+            }
+        }
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.out.flush()
+    }
+}
+
+/// `emu run`'s one board on its `--lan`: participant 0, endpoint `0/net`.
+const RUN_BOARD: ParticipantId = ParticipantId(0);
+
+/// `--lan`: forward a loopback port to the board's LAN endpoint and say
+/// where, as one line naming `lan:127.0.0.1:<port>` (what `lp-cli … lan:`
+/// connects to). Nothing without `--lan`: the seam's own lines say the rest.
+fn announce_lan(machine: &Esp32C6Machine, lan: Option<&(SharedLan, LanFixture)>) -> Result<()> {
+    let Some((shared, fixture)) = lan else {
+        return Ok(());
+    };
+    let at = forward_to_board(shared, machine.net_endpoint_id())
+        .with_context(|| format!("--lan {}", fixture.path.display()))?;
+    eprintln!(
+        "emu: board on LAN {} ({}) · forward {} → board :{BOARD_LAN_PORT}",
+        fixture.path.display(),
+        fixture.describe(),
+        forward_spec(at),
+    );
+    Ok(())
+}
+
 /// What the host saw, on whichever serial the link is.
 fn console_bytes(machine: &Esp32C6Machine, kind: LinkKind) -> Vec<u8> {
     match kind {
@@ -479,7 +581,8 @@ fn console_bytes(machine: &Esp32C6Machine, kind: LinkKind) -> Vec<u8> {
 }
 
 /// `--seams` (strict) and `--seams-prefer` (soft), folded into one request.
-/// Neither given is the capability defaults — empty today, so nothing scans.
+/// Neither given is the capability defaults (`net=lan`), softly; only
+/// `none` asks for nothing, and an empty request scans nothing.
 /// Shared with `serve`'s `seams=` / `seams_prefer=` board options.
 pub(super) fn seam_request(
     strict: Option<&str>,
@@ -609,6 +712,31 @@ mod tests {
             parsed.is_err(),
             "--monitor already says the host is attached"
         );
+    }
+
+    #[test]
+    fn the_seam_trace_keeps_only_the_seams_lines() {
+        use std::io::Write;
+        let mut sink = SeamLines::new(Vec::new());
+        sink.write_all(b"cyc=1 pc=0x1 SEAM net=lan link\ncyc=2 pc=0x2 WATCHPOINT slot=0\n")
+            .unwrap();
+        sink.write_all(b"cyc=3 SEAM net=lan ev").unwrap();
+        sink.write_all(b"ent associated\n").unwrap();
+        assert_eq!(
+            String::from_utf8(sink.out).unwrap(),
+            "cyc=1 pc=0x1 SEAM net=lan link\ncyc=3 SEAM net=lan event associated\n"
+        );
+    }
+
+    #[test]
+    fn a_pace_is_the_c6s_alone() {
+        for chip in ["esp32s3", "esp32v3"] {
+            let args = Cli::try_parse_from(["run", "--elf", "fw", "--chip", chip, "--pace", "max"])
+                .expect("parses")
+                .run;
+            let err = run(args).unwrap_err();
+            assert!(format!("{err:#}").contains("--pace is the C6's"), "{err:#}");
+        }
     }
 
     #[test]

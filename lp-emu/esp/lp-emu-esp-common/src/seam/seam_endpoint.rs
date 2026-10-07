@@ -145,6 +145,11 @@ impl SeamEndpoint {
         self.outbound.drain(..).collect()
     }
 
+    /// The guest gave something a medium has not yet drained.
+    pub fn has_outbound(&self) -> bool {
+        !self.outbound.is_empty()
+    }
+
     pub fn has_inbound(&self) -> bool {
         !self.inbound.is_empty()
     }

@@ -40,9 +40,13 @@ fn the_harness_prints_silicons_answers_with_the_seams_off() {
 #[test]
 #[ignore = "needs the test_seam_abi harness image; `just test-emu-c6`"]
 fn the_harness_prints_the_emulators_answers_with_the_seams_on() {
+    // `net=real`: the harness image carries the network seam too, and this
+    // test is about the value and take ABI alone. With the default `net=lan`
+    // beside them, the network's endpoint would take index 0 (atom order)
+    // and `test_take(0, …)` would name it instead of the test endpoint.
     let Some(mut m) = harness(
         "seams on",
-        SeamRequest::strict("test=echo+test=take").unwrap(),
+        SeamRequest::strict("test=echo+test=take+net=real").unwrap(),
     ) else {
         return;
     };

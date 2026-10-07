@@ -16,8 +16,9 @@
 //!
 //! The **capability defaults** ([`super::seam_impl::capability_defaults`])
 //! are added softly unless the request says `none`, or pins that seam to
-//! `real`. They are empty today, so a default request is empty, and an empty
-//! request scans nothing.
+//! `real` (`net=real`). Today they are `net=lan`, so a default request wants
+//! the network seam softly; only `none` (or every default pinned `real`) is
+//! an empty request, and an empty request scans nothing.
 
 use std::fmt;
 
@@ -101,7 +102,7 @@ impl SeamRequest {
                     seam_impl::known_atoms()
                 )
             })?;
-            if self.asked.iter().any(|(i, _)| i.decl_id == found.decl_id) {
+            if self.asked.iter().any(|(i, _)| i.overlaps(found)) {
                 return Err(format!("seam `{atom}` named twice"));
             }
             self.asked.push((found, strength));
@@ -117,7 +118,7 @@ impl SeamRequest {
         let mut out = self.asked.clone();
         if self.defaults {
             for d in seam_impl::capability_defaults() {
-                let named = out.iter().any(|(i, _)| i.decl_id == d.decl_id)
+                let named = out.iter().any(|(i, _)| i.overlaps(d))
                     || self.pinned_real.iter().any(|l| l == d.label);
                 if !named {
                     out.push((d, Strength::Soft));
@@ -180,31 +181,53 @@ mod tests {
     use super::*;
 
     #[test]
-    fn none_empty_and_real_engage_nothing_and_leave_the_label_alone() {
-        for text in ["", "none", "led=real", " none "] {
+    fn none_and_real_engage_nothing_and_leave_the_label_alone() {
+        for text in ["none", "net=real", " none ", "led=real+net=real"] {
             let r = SeamRequest::strict(text).unwrap();
             assert!(r.is_empty(), "{text}");
             assert_eq!(label("lp-emu:esp32c6:t2", &[]), "lp-emu:esp32c6:t2");
             assert_eq!(r.to_string(), "none");
         }
-        assert!(
-            SeamRequest::default().is_empty(),
-            "no capability default yet"
-        );
         assert!(SeamRequest::none().is_empty());
+    }
+
+    #[test]
+    fn a_default_request_wants_net_lan_softly_and_nothing_else() {
+        for text in ["", "led=real"] {
+            let r = SeamRequest::strict(text).unwrap();
+            let wanted: Vec<(String, Strength)> =
+                r.wanted().iter().map(|(i, s)| (i.atom(), *s)).collect();
+            assert_eq!(wanted, [("net=lan".to_string(), Strength::Soft)], "{text}");
+            assert!(!r.has_strict());
+            assert_eq!(r.to_string(), "prefer net=lan");
+        }
+        assert_eq!(SeamRequest::default(), SeamRequest::strict("").unwrap());
+        // Named, it takes the strength it was named at, not the default's.
+        let strict = SeamRequest::strict("net=lan").unwrap();
+        assert_eq!(strict.wanted().len(), 1);
+        assert!(strict.has_strict());
+        assert!(SeamRequest::strict("net=lan+net=lan").is_err());
     }
 
     #[test]
     fn led_fast_is_strict_or_soft_and_labelled_with_a_plus_atom() {
         let r = SeamRequest::strict("led=fast").unwrap();
-        assert_eq!(r.wanted().len(), 1);
+        assert_eq!(r.wanted().len(), 2, "led=fast, and the default net=lan");
+        assert_eq!(r.wanted()[0].0.atom(), "led=fast");
         assert_eq!(r.wanted()[0].1, Strength::Strict);
+        assert_eq!(r.wanted()[1].1, Strength::Soft);
         assert!(r.has_strict());
-        assert_eq!(r.to_string(), "led=fast");
+        assert_eq!(r.to_string(), "led=fast, prefer net=lan");
         let p = SeamRequest::prefer("led=fast").unwrap();
         assert_eq!(p.wanted()[0].1, Strength::Soft);
         assert!(!p.has_strict());
-        assert_eq!(p.to_string(), "prefer led=fast");
+        assert_eq!(p.to_string(), "prefer led=fast+net=lan");
+        assert_eq!(
+            SeamRequest::strict("led=fast+net=real")
+                .unwrap()
+                .to_string(),
+            "led=fast"
+        );
         let led = p.wanted()[0].0;
         assert_eq!(
             label("lp-emu:esp32c6:t2", &[led]),
@@ -256,11 +279,11 @@ mod tests {
     #[cfg(feature = "test-seams")]
     #[test]
     fn the_two_test_seams_share_a_label_but_not_a_seam() {
-        let r = SeamRequest::strict("test=take+test=echo").unwrap();
+        let r = SeamRequest::strict("test=take+test=echo+net=real").unwrap();
         let atoms: Vec<String> = r.wanted().iter().map(|(i, _)| i.atom()).collect();
         assert_eq!(atoms, ["test=echo", "test=take"]);
         assert!(
-            SeamRequest::strict("test=take").unwrap().wanted()[0]
+            SeamRequest::strict("test=take+net=real").unwrap().wanted()[0]
                 .0
                 .is_test()
         );
