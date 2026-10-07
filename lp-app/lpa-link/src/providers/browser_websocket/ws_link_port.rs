@@ -26,8 +26,10 @@
 //! - **Through the relay, held keys only.** A session whose socket is the
 //!   relay's browser leg walks [`KeyWalk::held_only`]: the page's keys and no
 //!   anonymous key. When none opens the board — or the page holds none — the
-//!   session is given up with [`RELAY_NO_HELD_KEY`] (heard as `relay link
-//!   lost: …`), and nothing is redialled.
+//!   walk waits [`RELAY_KEY_GRACE_MS`] for the page's keys to change (a page
+//!   still loading its account's key, a sign-in), and then the session is
+//!   given up with [`RELAY_NO_HELD_KEY`] (heard as `relay link lost: …`),
+//!   and nothing is redialled.
 //! - **Up is said.** Once a connection's secure link is up the page is told
 //!   (`markUp`), so a connect someone is waiting on through the relay
 //!   answers on the board's acceptance, not on the relay's first frame.
@@ -71,6 +73,13 @@ pub const PLAIN_LINK_NOTE: &str =
 /// `relay link lost: <this>`, and Studio says what to do about it.
 pub const RELAY_NO_HELD_KEY: &str = "no key this browser holds opens this board";
 
+/// How long a relay link whose held keys ran out (or were never there)
+/// waits for the page's keys to change before it is given up. A page dialled
+/// at load is still fetching its account's key; one signing in hands it
+/// over. Well inside a board's 10 s limit for a link that never
+/// authenticates.
+pub const RELAY_KEY_GRACE_MS: u32 = 5_000;
+
 thread_local! {
     /// One link per LAN session, shared by every drainer of it — the model's
     /// link and, while it holds the wire, a conversation.
@@ -94,6 +103,11 @@ struct ServedSession {
     wake: Option<WakeOnActivity>,
     /// The page was told this connection's link is up.
     said_up: bool,
+    /// This connection's link has sent a frame (a held-only walk with no
+    /// keys sends nothing).
+    transmitted: bool,
+    /// When a held-only walk was first seen with nothing left to present.
+    exhausted_at: Option<Micros>,
 }
 
 impl ServedSession {
@@ -111,6 +125,8 @@ impl ServedSession {
             running: Rc::default(),
             wake: None,
             said_up: false,
+            transmitted: false,
+            exhausted_at: None,
         }
     }
 
@@ -123,6 +139,8 @@ impl ServedSession {
         self.retry_at = None;
         self.reads.clear();
         self.said_up = false;
+        self.transmitted = false;
+        self.exhausted_at = None;
     }
 
     /// Answer what the handshake said: the next key, or a wait.
@@ -158,15 +176,29 @@ impl ServedSession {
     /// a link that holds anything but the new best key onto it.
     fn follow_keys(&mut self, now: Micros, keys: &dyn LinkKeys) {
         let generation = keys.generation(&self.address);
-        if generation == self.walk.generation() || self.walk.is_exhausted() {
+        if generation == self.walk.generation() {
             return;
         }
         let walk = walk_for(&self.address, keys);
         if walk.is_exhausted() {
             // A held-only walk the new keys leave empty: given up by
-            // `service`, like one that ran out.
+            // `service` once its grace has passed, like one that ran out.
             self.walk = walk;
             self.retry_at = None;
+            return;
+        }
+        if self.walk.is_exhausted() {
+            // Keys arrived for a held-only walk that had none left: walk
+            // them, on a fresh link if nothing was ever sent.
+            let best = walk.current().clone();
+            self.walk = walk;
+            self.retry_at = None;
+            self.exhausted_at = None;
+            if self.transmitted {
+                self.service.retry_with(&best);
+            } else {
+                self.service = fresh_service(&best);
+            }
             return;
         }
         let best = walk.current().clone();
@@ -203,11 +235,31 @@ impl ServedSession {
 
     fn wake_in(&self, now: Micros) -> Micros {
         let link = self.service.wake_in(now, SERVICE_TICK_CAP);
+        let link = match &self.exhausted_at {
+            Some(at) => link.min(grace_end(*at).saturating_sub(now)),
+            None => link,
+        };
         match &self.retry_at {
             Some((at, _)) => link.min(at.saturating_sub(now)),
             None => link,
         }
     }
+
+    /// Whether a held-only walk has had nothing to present for longer than
+    /// [`RELAY_KEY_GRACE_MS`] (marking when it first ran out).
+    fn out_of_keys(&mut self, now: Micros) -> bool {
+        if !self.walk.is_exhausted() {
+            self.exhausted_at = None;
+            return false;
+        }
+        let since = *self.exhausted_at.get_or_insert(now);
+        now >= grace_end(since)
+    }
+}
+
+/// When the grace for a walk that ran out of keys at `at` ends.
+fn grace_end(at: Micros) -> Micros {
+    at + Micros::from(RELAY_KEY_GRACE_MS) * 1_000
 }
 
 /// A subscription to the session's JS activity that services it.
@@ -372,13 +424,14 @@ fn service(session: u32) -> Serviced {
         }
         served.answer_handshake(now, &*keys);
         served.follow_keys(now, &*keys);
-        let gave_up = taken.connected && served.walk.is_exhausted();
+        let gave_up = taken.connected && served.out_of_keys(now);
         let mut out = Vec::new();
-        if taken.connected && !gave_up {
+        if taken.connected && !served.walk.is_exhausted() {
             served
                 .service
                 .transmit(now, |frame| out.push(frame.to_vec()));
         }
+        served.transmitted |= !out.is_empty();
         served.collect();
         let came_up = taken.connected && !served.said_up && served.service.is_up();
         served.said_up |= came_up;

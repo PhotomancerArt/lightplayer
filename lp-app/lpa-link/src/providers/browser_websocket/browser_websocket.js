@@ -80,6 +80,13 @@ export function installWebsocketEvents(onConnect, onDisconnect) {
   }
   presence.onConnect = onConnect;
   presence.onDisconnect = onDisconnect;
+  // A session opened at page load (`?lan=`, `?relay=`) can come up before
+  // the page installs these — a socket to a local server opens in
+  // milliseconds — and its edge was said to nobody. Say it again now, so
+  // the sweep that links it is not left waiting for the next edge.
+  if ([...sessions.values()].some((session) => session.present)) {
+    setTimeout(() => announce("connect"), 0);
+  }
   return true;
 }
 

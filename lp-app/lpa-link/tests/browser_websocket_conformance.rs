@@ -489,6 +489,46 @@ async fn a_relay_session_no_held_key_opens_is_given_up_in_words() {
     assert!(lan::forget(session.session).await);
 }
 
+/// A relay link that ran out of held keys waits a few seconds for the page's
+/// keys to change (the account's key still loading, a sign-in) and, when one
+/// arrives, presents it and comes up — on the same socket.
+#[wasm_bindgen_test]
+async fn a_relay_session_out_of_keys_comes_up_when_a_key_arrives() {
+    let url = "ws://127.0.0.1:2812/relay/board/a0f26287b404";
+    let keys = TestKeys::install(vec![key(0x51)]);
+    let bench = Bench::new(
+        url,
+        BoardDouble::secure(Opens::Edit, vec![(key(0xED), Tier::Edit)]),
+    );
+    let session = lan::open_relay_session(url, &[4404, 4429]).expect("a session");
+    let wire = WsWire::new(session.session);
+    let pump = bench.spawn_board_loop();
+    let up = spawn_until_up(session.session);
+    for _ in 0..200 {
+        if bench.board.borrow().keys_seen.len() >= 1 {
+            break;
+        }
+        tick(10).await;
+    }
+    // The account's key arrives after the browser's was refused.
+    keys.set(vec![key(0x51), key(0xED)]);
+    settled(&up)
+        .await
+        .expect("the key that arrived opened the board");
+    pump.set(false);
+    assert!(wire.is_link_up());
+    let seen = bench.board.borrow().keys_seen.clone();
+    assert_eq!(seen.first(), Some(&[0x51; KEY_ID_BYTES]), "{seen:?}");
+    assert_eq!(seen.last(), Some(&[0xED; KEY_ID_BYTES]), "{seen:?}");
+    assert!(
+        seen.iter()
+            .all(|id| *id == [0x51; KEY_ID_BYTES] || *id == [0xED; KEY_ID_BYTES]),
+        "only held keys, never the anonymous one: {seen:?}"
+    );
+    assert_eq!(js_sockets_opened(url), 1, "on the same socket");
+    assert!(lan::forget(session.session).await);
+}
+
 /// A relay refusal (its close code) ends the session in the relay's words
 /// and is not redialled — each redial would spend the page's tries at the
 /// relay; any other drop redials, as on the LAN.

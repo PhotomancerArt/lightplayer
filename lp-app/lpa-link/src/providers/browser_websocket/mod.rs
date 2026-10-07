@@ -56,5 +56,5 @@ pub use browser_websocket::{
 };
 pub use ws_client_io::{WsClientIo, WsTapLine};
 pub use ws_link_keys::set_link_keys;
-pub use ws_link_port::{PLAIN_LINK_NOTE, RELAY_NO_HELD_KEY};
+pub use ws_link_port::{PLAIN_LINK_NOTE, RELAY_KEY_GRACE_MS, RELAY_NO_HELD_KEY};
 pub use ws_wire::{WsWire, is_link_lost};

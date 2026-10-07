@@ -281,13 +281,12 @@ impl AccessController {
     ) {
         self.ensure_browser_key(random, FALLBACK_BROWSER_NAME);
         let held = self.held();
-        if roster
-            .devices()
-            .iter()
-            .any(|device| lan_address(device).is_some() || is_relayed(device))
-        {
-            self.refresh_network_keys(&held);
-        }
+        // Every pass, not only once a network board is in the roster: a link
+        // through the relay presents held keys only, so it cannot say hello
+        // (and join the roster) until the keys it needs are already handed
+        // over — the account's, loaded after the page. Unchanged keys move
+        // nothing (`NetworkLinkKeys::set_held`).
+        self.refresh_network_keys(&held);
         for device in roster.devices() {
             self.watch_restart(device);
             let Some(window) = login_window(device) else {
@@ -2068,6 +2067,37 @@ mod tests {
         assert_eq!(presented.len(), 1, "{presented:?}");
         assert_eq!(presented[0].key_id, entry.salt);
         assert_eq!(presented[0].psk, lpc_access::link_psk(&entry.k));
+    }
+
+    /// A link through the relay presents held keys only, so it can say
+    /// hello — and join the roster — only once they are handed over: every
+    /// drive hands them to the network links, with no network board in the
+    /// roster yet, the account's first for the relay.
+    #[test]
+    fn held_keys_reach_the_relay_before_any_network_board_is_known() {
+        use lpa_link::providers::network_link::LinkKeys as _;
+        const RELAY: &str = "wss://lightplayer.app/relay/board/a0f26287b48c";
+        let mut access = controller();
+        let empty = Roster::new(Default::default());
+        let effects = DeviceEffects::new();
+        access.drive(&empty, &effects, Millis(0), 1.0, &counter());
+        let browser = access.browser_key().unwrap().installable().salt;
+        let ids = |access: &AccessController| -> Vec<[u8; SALT_BYTES]> {
+            access
+                .network_link_keys()
+                .keys_for(RELAY)
+                .iter()
+                .map(|key| key.key_id)
+                .collect()
+        };
+        assert_eq!(ids(&access), vec![browser]);
+
+        // The account's key loads after the page: the next drive hands it
+        // over, ahead of the browser's.
+        access.account = Some(account(None));
+        access.drive(&empty, &effects, Millis(1), 2.0, &counter());
+        let account_salt = account(None).held_keys()[0].key.salt;
+        assert_eq!(ids(&access), vec![account_salt, browser]);
     }
 
     /// The board on the LAN the keyed-login tests address.
