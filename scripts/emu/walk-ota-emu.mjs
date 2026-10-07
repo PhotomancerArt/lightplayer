@@ -23,6 +23,11 @@
 //                (Part B's U7 skip, for the same reason) — said so in the report
 //   needs-usb    E9 · a pre-update board (today's single image): no update over
 //                the air, today's USB flash (Lasting) on the card
+//   store-backup R5 · a board on a PUBLISHED release (XR, `build-image.sh …
+//                2026.10.07-77` into images/x-release, not built by the
+//                recipe): with an empty cache the update takes the board's
+//                engine from the release store — the walk's store serves XR —
+//                and never reads it back. Not in the default steps
 //
 // Every assertion waits for the BOARD's words (its console, `[OTA]`,
 // `[LOADER]`, `[CORE]` lines) as well as the card's; a card line alone proves
@@ -91,7 +96,7 @@ const TAB = ARGS.includes("--tab");
 const BLE = ARGS.includes("--ble");
 const STEPS_ARG = ARGS.includes("--steps") ? ARGS[ARGS.indexOf("--steps") + 1].split(",") : null;
 /// Every step, in the order their boards' MACs are numbered.
-const ALL_STEPS = ["update", "cut-core", "cut-engine", "engine-less", "cant-get", "crashing", "needs-usb", "phantom-core", "cut-backup"];
+const ALL_STEPS = ["update", "cut-core", "cut-engine", "engine-less", "cant-get", "crashing", "needs-usb", "phantom-core", "cut-backup", "store-backup"];
 const DOOR_STEPS = ["update", "cut-core", "cut-engine", "engine-less", "cant-get", "crashing", "needs-usb"];
 const TAB_STEPS = ["update", "cut-core", "engine-less"];
 const BLE_STEPS = ["update", "cut-backup", "cut-core", "phantom-core", "engine-less"];
@@ -111,6 +116,11 @@ for (const name of STEPS) {
 
 const IMAGES = path.join(ROOT, "target/walk-ota-emu/images");
 const X = path.join(IMAGES, "x");
+/// X at a release version, for `store-backup` (built by hand, see the header).
+const XR = path.join(IMAGES, "x-release");
+const xr = existsSync(path.join(XR, "ota/ota-manifest.json"))
+  ? JSON.parse(readFileSync(path.join(XR, "ota/ota-manifest.json"), "utf8"))
+  : null;
 const MONO = path.join(IMAGES, "mono");
 /// Y's update files and package. `WALK_Y_PARTS` / `WALK_Y_PACKAGES` point at
 /// a copy instead — for a worktree where something else rebuilds the shared
@@ -195,6 +205,8 @@ async function main() {
     writeFileSync(xEngineLess, bytes);
   }
   const chipFiles = { x: xChip, "x-engine-less": xEngineLess };
+  const xrChip = path.join(chips, "x-release.bin");
+  if (xr && STEPS.includes("store-backup")) seedChip(path.join(XR, "merged.bin"), xrChip);
   const lpEmu = git(["log", "-1", "--format=%h", "--", "lp-emu"]);
   const head = git(["rev-parse", "--short=12", "HEAD"]);
 
@@ -228,9 +240,28 @@ async function main() {
   const bundle = await serveStudioBundle({ root: ROOT, port: walkPort(ROOT, "walk-ota-emu"), route });
   const studioPort = bundle.address().port;
   // A firmware store that holds nothing (every lookup 404s): X is a dev
-  // build no store would have, and the walk never touches the internet.
+  // build no store would have, and the walk never touches the internet. The
+  // one exception is XR, the release `store-backup` stands its board on:
+  // `/firmware/<target>/<release>[+<id>]/<file>` from images/x-release/ota.
+  const storeHits = [];
   const store = await new Promise((resolve) => {
-    const server = createServer((_, response) => {
+    const server = createServer((request, response) => {
+      const parts = decodeURIComponent(new URL(request.url, "http://store").pathname).split("/");
+      // ["", "firmware", target, release-or-build-id, file]
+      const release = parts[3]?.split("+")[0];
+      const file = parts[4];
+      if (xr && parts[1] === "firmware" && parts[2] === xr.target && release === xr.version && file && !file.includes("..")) {
+        const at = path.join(XR, "ota", file);
+        if (existsSync(at)) {
+          storeHits.push(file);
+          response.writeHead(200, {
+            "access-control-allow-origin": "*",
+            "content-type": file.endsWith(".json") ? "application/json" : "application/octet-stream",
+          });
+          response.end(readFileSync(at));
+          return;
+        }
+      }
       response.writeHead(404, { "access-control-allow-origin": "*" });
       response.end();
     });
@@ -717,6 +748,37 @@ async function main() {
             };
           });
           break;
+        case "store-backup": {
+          if (!xr) throw new Error(`store-backup needs XR: scripts/ota/build-image.sh ${path.relative(ROOT, XR)} 2026.10.07-77`);
+          await clearEngineCache();
+          await openDoor(name, [`${board}=${xrChip},kind=rom-up,${mac}`]);
+          await step(name, `a board on release ${xr.version}: its engine comes from the release store, never read back`, async () => {
+            await connect(board);
+            await driver.waitFor(`${MAIN_TEXT}.includes('Ready')`, { timeoutMs: STEP_MS, what: `Ready on ${xr.version}` });
+            const hitsBefore = storeHits.length;
+            const ran = await runUpdate(board);
+            await settle(board, ran.from);
+            const said = boardSaid(board, ran.from, OTA_WORDS);
+            for (const need of ["core offer", "core confirmed", "engine committed"]) {
+              if (!said[need]) throw new Error(`the board never said ${need}`);
+            }
+            const hits = storeHits.slice(hitsBefore);
+            if (!hits.includes("engine.bin")) throw new Error(`the store was never asked for XR's engine: ${JSON.stringify(hits)}`);
+            if (ran.order.some((entry) => entry.kind === "backing up")) {
+              throw new Error("the card said Backing up current firmware: the engine was read back, not fetched");
+            }
+            const cache = await engineCache();
+            if (!cache.some((entry) => entry.includes(xr.engine.sha256))) {
+              throw new Error(`the engine cache does not hold XR's engine: ${JSON.stringify(cache)}`);
+            }
+            const fetched = cache.some((entry) => entry.includes('"fetched"'));
+            return {
+              summary: `${ran.label}; ${ran.order.map((e) => e.kind).join(" → ")}; the store served ${hits.join(", ")}; no read-back; XR's engine cached${fetched ? " (source fetched)" : ""}`,
+              card: ran.order, board: said, storeHits: hits, cache,
+            };
+          });
+          break;
+        }
         case "cut-backup": {
           // An empty cache: the update must read X's engine back first.
           await clearEngineCache();
