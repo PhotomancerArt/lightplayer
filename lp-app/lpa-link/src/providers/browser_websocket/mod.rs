@@ -2,6 +2,16 @@
 //! SECURE lp-link (Wi-Fi M6 P07, the LAN half of the `browser-websocket`
 //! provider).
 //!
+//! The same provider reaches a board THROUGH lightplayer.app's relay (the
+//! network transport's P05): the relay's browser leg
+//! (`wss://<host>/relay/board/<mac>`, [`open_relay_session`]) carries the
+//! same frames, so the session, the link and the conversation below are the
+//! LAN's. Two things differ, both decided from the socket URL: the link
+//! presents only the keys the page holds — no anonymous key
+//! ([`KeyWalk::held_only`](crate::providers::network_link::KeyWalk::held_only))
+//! — and gives the session up when none opens the board; and the session's
+//! words start `relay …`.
+//!
 //! A C6 on Wi-Fi serves `ws://<board>/link` (and `lp-xxxx.local`); each
 //! binary message is one lp-link frame, and the board is a Noise NNpsk0
 //! responder. This provider follows the Web Bluetooth adapter's shape: the
@@ -41,10 +51,10 @@ mod ws_link_port;
 mod ws_wire;
 
 pub use browser_websocket::{
-    LanSession, connect_and_settle, forget, install_websocket_events, is_supported, open_session,
-    present_sessions,
+    LanSession, connect_and_settle, connect_until_up, forget, install_websocket_events,
+    is_supported, open_relay_session, open_session, present_sessions,
 };
 pub use ws_client_io::{WsClientIo, WsTapLine};
 pub use ws_link_keys::set_link_keys;
-pub use ws_link_port::PLAIN_LINK_NOTE;
+pub use ws_link_port::{PLAIN_LINK_NOTE, RELAY_KEY_GRACE_MS, RELAY_NO_HELD_KEY};
 pub use ws_wire::{WsWire, is_link_lost};

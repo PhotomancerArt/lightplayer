@@ -50,6 +50,12 @@ pub const BLE_ENDPOINT_PREFIX: &str = "ble:";
 /// reset lines and no ROM downloader on the far side of it.
 pub const LAN_ENDPOINT_PREFIX: &str = "lan:";
 
+/// The endpoint scheme a board reached THROUGH lightplayer.app's relay is at
+/// (Studio's network transport, `?relay=1`): `relay:<board mac, 12 hex>`.
+/// The same secure lp-link as `lan:`, carried by the cloud relay instead of
+/// the LAN — so, like it, no reset lines and no ROM downloader.
+pub const RELAY_ENDPOINT_PREFIX: &str = "relay:";
+
 impl EndpointKey {
     /// Whether this endpoint is a Bluetooth link (see [`BLE_ENDPOINT_PREFIX`]).
     pub fn is_bluetooth(&self) -> bool {
@@ -61,10 +67,17 @@ impl EndpointKey {
         self.0.starts_with(LAN_ENDPOINT_PREFIX)
     }
 
-    /// Whether this endpoint is a network link — Bluetooth or the LAN — over
-    /// which firmware cannot be written (no reset lines, no ROM downloader).
+    /// Whether this endpoint is a secure link through the cloud relay
+    /// (`relay:`).
+    pub fn is_relay(&self) -> bool {
+        self.0.starts_with(RELAY_ENDPOINT_PREFIX)
+    }
+
+    /// Whether this endpoint is a network link — Bluetooth, the LAN or the
+    /// relay — over which firmware cannot be written (no reset lines, no ROM
+    /// downloader).
     pub fn is_network(&self) -> bool {
-        self.is_bluetooth() || self.is_lan()
+        self.is_bluetooth() || self.is_lan() || self.is_relay()
     }
 }
 
@@ -268,6 +281,16 @@ mod tests {
         assert!(EndpointKey("lan:ws://192.168.1.40/link".into()).is_network());
         assert!(!EndpointKey("lan:ws://192.168.1.40/link".into()).is_bluetooth());
         assert!(!EndpointKey("usb-1".into()).is_network());
+    }
+
+    #[test]
+    fn a_relay_endpoint_is_a_network_link_and_not_a_lan_one() {
+        let relay = EndpointKey("relay:a0f26287b48c".into());
+        assert!(relay.is_relay());
+        assert!(relay.is_network());
+        assert!(!relay.is_lan());
+        assert!(!relay.is_bluetooth());
+        assert!(!EndpointKey("lan:ws://192.168.1.40/link".into()).is_relay());
     }
 
     #[test]

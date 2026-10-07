@@ -6590,6 +6590,7 @@ dependencies = [
  "lpc-mapping",
  "lpc-model",
  "lpc-registry",
+ "lpc-relay",
  "lpc-shared",
  "lpc-update",
  "lpc-view",
