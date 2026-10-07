@@ -77,6 +77,9 @@ lp-perf = { path = "../lp-base/lp-perf", default-features = false }
 lp-riscv-elf = { path = "../lp-riscv/lp-riscv-elf", features = ["std"] }
 lp-riscv-inst = { path = "../lp-riscv/lp-riscv-inst" }
 serialport = "4.8"
+# `lan list`: builds the DNS-SD question and reads boards' mDNS answers (MIT; already in
+# the lockfile as the firmware's mDNS test oracle).
+simple-dns = "0.9"
 # `link lab --termios chrome`: set the tty's flags the way Chromium's Web
 # Serial does, which serialport does not expose.
 libc = "0.2"
