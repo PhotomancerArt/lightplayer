@@ -224,7 +224,6 @@ pub struct EmuPipe {
     queue: QueueHandle,
     slice_us: u64,
     start: Micros,
-    grade: TimeGrade,
     wall: Instant,
 }
 
@@ -251,7 +250,6 @@ impl EmuPipe {
             queue,
             slice_us: emu.slice_us.max(10),
             start,
-            grade: emu.grade,
             wall: Instant::now(),
         })
     }
@@ -287,17 +285,15 @@ impl LabPipe for EmuPipe {
     }
 
     fn configuration(&self) -> String {
-        let grade = match self.grade {
-            TimeGrade::T1 => "t1",
-            TimeGrade::T2 => "t2",
-            _ => "t3",
-        };
         log::info!(
             "emulated {:.1} s in {:.1} s wall",
             self.seconds(),
             self.wall.elapsed().as_secs_f64()
         );
-        format!("lp-emu:esp32c6:{grade}@{}", emu_commit())
+        // The machine's own label: the grade plus every seam this run
+        // engaged (`lp-emu:esp32c6:t1+net=lan` once the image carries the
+        // network seam), never a name assembled beside it.
+        format!("{}@{}", self.m.configuration_label(), emu_commit())
     }
 
     fn faults(&mut self) -> Option<(FaultCounters, FaultCounters)> {

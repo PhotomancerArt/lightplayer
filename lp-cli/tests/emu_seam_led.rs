@@ -33,7 +33,7 @@ use lp_cli::commands::emu::link_host::{C6Board, EmuLinkHost};
 use lp_cli::commands::hardware::lpfs::fixture::build_chip;
 use lp_cli::commands::hardware::lpfs::lpfs_target::target_table;
 use lp_emu_esp_common::Strap;
-use lp_emu_esp_common::seam::SeamRequest;
+use lp_emu_esp_common::seam::{SeamRequest, Strength};
 use lp_emu_esp_common::strip::ws281x::Frame;
 use lp_emu_esp32c6::flash::FlashBacking;
 use lp_emu_esp32c6::loader::ResetCause;
@@ -62,8 +62,18 @@ fn led_fast_renders_the_same_frames_heap_and_fps_as_no_seam() {
         }
     };
     let chip = chip_with_project(&split);
+    // Both sides start from `none`, so the A/B is `led=fast` alone: a plain
+    // `--seams led=fast` also adds the capability defaults (`net=lan`)
+    // softly, which would make the "on" run differ from "off" by two seams
+    // and its label depend on whether the image carries the network seam.
     let off = run(&split, &chip, SeamRequest::none());
-    let on = run(&split, &chip, SeamRequest::strict("led=fast").unwrap());
+    let on = run(
+        &split,
+        &chip,
+        SeamRequest::none()
+            .with("led=fast", Strength::Strict)
+            .unwrap(),
+    );
 
     assert!(
         off.seam_lines.is_empty(),

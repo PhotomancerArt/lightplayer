@@ -9,7 +9,8 @@
 //! ([`seam_resolution`]), the host half of a capability seam
 //! ([`seam_endpoint`]), the wake's pacing ([`seam_wake_pacer`]), what joins
 //! endpoints of several machines ([`seam_medium`]) and the words every host
-//! prints ([`seam_announce`]).
+//! prints ([`seam_announce`]). The media that arrive with their seams live
+//! beside them: the virtual LAN under the network seam ([`net`]).
 //!
 //! It holds no register offset, no hart and no clock: arming, answering and
 //! raising are the chip machine's, which owns the hart, the cache window and
@@ -19,6 +20,7 @@
 //! **With no seam asked for, nothing here runs**: a machine whose request is
 //! empty never scans its flash.
 
+pub mod net;
 pub mod seam_announce;
 pub mod seam_endpoint;
 pub mod seam_impl;
