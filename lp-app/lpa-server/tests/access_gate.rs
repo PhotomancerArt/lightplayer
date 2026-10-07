@@ -724,7 +724,10 @@ fn the_tier_a_radio_links_update_session_gets_is_the_grant_alone() {
 #[test]
 fn a_radio_links_channel_three_answers_by_the_tier_the_server_holds() {
     for follows in [true, false] {
-        for state in LinkState::ALL.into_iter().filter(|s| s.carries_channel_three()) {
+        for state in LinkState::ALL
+            .into_iter()
+            .filter(|s| s.carries_channel_three())
+        {
             let rig = Rig::for_state(state);
             let link = state.link();
             let mut board = UpdateBoard::new(&rig, follows, state == LinkState::Trusted);
