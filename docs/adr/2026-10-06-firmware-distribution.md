@@ -264,3 +264,95 @@ facts shaped the design:
 - Single-flight in the proxy (two cold requests for one file fetch it twice).
 - A retention policy for release assets, only if GitHub objects.
 - Signatures, if pull mode ever lands.
+
+## Amendment (2026-10-07): the release index
+
+Studio needs to list the versions a board can install, so it can install an
+older one (to test, or to roll back) as well as the newest. The lookup above
+answers one release at a time, so the store gains a list.
+
+**The route.** `GET|HEAD|OPTIONS https://lightplayer.app/firmware/<target>/releases`
+answers the release index of `<target>`. It shares the two-segment space
+under `/firmware/<target>/` with the Studio bundle's own files, by one rule:
+**a second segment with no dot is the server's; the bundle's files always
+carry an extension** (`manifest.json`, `*.bin`, `ota-manifest.json`,
+`core.z`, `engine.z`). `releases` is the first server name there. The
+three-segment lookup (decision 13) and its reserved words are unchanged. The
+rule is written on the grammar (`lpc-firmware-release`'s
+`release_index_path`), and a route test keeps the bundle's names on the page
+fallback.
+
+**Format 1.** One JSON object:
+
+```json
+{
+  "format": 1,
+  "target": "esp32c6-4mb",
+  "releases": [
+    {
+      "version": "2026.10.06-19",
+      "commit": "736d72856d243fce519c9f461f369f59fcbf175a",
+      "wireProto": 39,
+      "requires": { "layout": 1, "loader": 1 },
+      "publishedAt": "2026-10-07T05:29:21Z"
+    }
+  ]
+}
+```
+
+Newest first, by the version's **number** (`2026.10.06-10` is newer than
+`-9`; `ReleaseVersion` used to order by its string, which got that
+backwards, and now orders by number). `version`, `commit`, `wireProto` and
+`requires` are copied from the release's `ota-manifest.json` and spelled
+exactly as it spells them. There is no `buildId`: it is derived
+(`version+commit[..12]`), as in the manifest. `publishedAt` is optional and
+for display only. The compatibility rule is the manifest's: readers refuse
+another `format` and ignore unknown fields; an additive optional field keeps
+format 1; no value is ever re-spelled. The index is computed, never stored,
+but Studios in the field read it, so it is held to the same rule as anything
+persisted. Schema: `schemas/firmware-release-index.schema.json`. Pin:
+`lp-core/lpc-firmware-release/tests/fixtures/release-index.v1.json`, never
+re-captured.
+
+**Completeness.** A release is listed only when every file its manifest
+names is an uploaded asset, so no listed version answers a 404 while its
+upload is still running. A manifest that fails verification leaves out only
+its own release. Releases before `2026.10.06-11` carry no assets at all and
+are not installable by any path, USB included, so they are never listed. A
+target with no update files (the S3, the classic) has no index (404).
+
+**The source, and a new outbound call.** The download host has no list, so
+the index is built from GitHub's REST releases list
+(`LP_CLOUD_FIRMWARE_RELEASES_LIST`, default
+`api.github.com/repos/PhotomancerArt/lightplayer/releases?per_page=100`):
+one page, the newest 100 releases (about five days at today's merge rate;
+older releases stay installable by exact version through the lookup, but
+are not listed). Drafts, prereleases and tags other than `v<version>` are
+skipped. The list is held **5 minutes**, then revalidated with its ETag, so
+an unchanged list costs a `304` that GitHub does not count against its
+unauthenticated limit of 60 an hour per IP. When GitHub fails, the last good
+list is served **for up to 24 hours** (retried at most once a minute
+meanwhile, one warning per 5 minutes); with no good copy the answer is a 502
+(504 on a timeout), `no-store`. An optional **`LP_CLOUD_GITHUB_TOKEN`** (no
+scopes; a fly secret, unset at first — set it if the logs show 403s or the
+low-rate-limit warning) is sent to the list URL only, never to the download
+host, and never logged. Answers carry `public, max-age=60`, `ETag:
+"<sha256>"` and `Access-Control-Allow-Origin: *`.
+
+This narrows the alternative rejected above ("an index the server keeps, or
+the API with a token, for `latest`") to what it said: `latest`. `latest`
+still resolves through `releases/latest/download/` with no API call and no
+token. A list has no other source, so `lightplayer.app` now has a third
+outbound dependency, `api.github.com`, used by this route alone.
+
+**Who may install an older build.** Whoever may install any build: the edit
+tier, which on an open board is anyone in range. The board has no
+anti-rollback and needs none for this: installing an older store release
+adds no capability beyond installing any core one built oneself. An older
+release may lack later fixes, access fixes included; on a locked board an
+attacker still needs the edit password. Studio's agent never presses a
+downgrade (it is a lasting action, the user's own button).
+
+**No wire change.** Nothing on the board changes: no wire protocol bump, no
+lp-link or channel 3 change. Channel 3's never-break rule is what makes a
+board on an older release updatable again.

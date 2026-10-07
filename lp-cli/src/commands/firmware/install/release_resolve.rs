@@ -3,10 +3,12 @@
 //! `latest` and an explicit version resolve for free when the package is
 //! fetched (its own manifest core names the version it is — see
 //! `package_fetch`). `previous` is the one case that needs a second source:
-//! lightplayer.app's lookup answers one release at a time and has no "list
-//! every release" route, so finding "the newest one before latest" means
-//! asking GitHub's releases list instead ([`ReleaseCatalog`],
-//! `release_catalog_source`).
+//! the lookup answers one release at a time, so finding "the newest one
+//! before latest" means asking a list of releases. This reads GitHub's
+//! ([`ReleaseCatalog`], `release_catalog_source`). lightplayer.app's release
+//! index (`/firmware/<target>/releases`) lists a split target's installable
+//! releases and could stand in for it there; a target with no update files
+//! (the S3, the classic) has no index.
 
 use anyhow::{Context, Result, bail};
 use lpc_firmware_release::ReleaseVersion;
