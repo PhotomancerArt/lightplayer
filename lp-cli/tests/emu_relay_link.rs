@@ -444,7 +444,7 @@ async fn request_rtt(client: &mut LpClient<impl lpa_client::ClientIo>) {
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
     ms.sort_by(f64::total_cmp);
-    let at =|p: usize| ms[(ms.len() * p / 100).min(ms.len() - 1)];
+    let at = |p: usize| ms[(ms.len() * p / 100).min(ms.len() - 1)];
     let (p50, p90) = (at(50), at(90));
     let frames = |rate: Option<f64>| match rate {
         Some(rate) if rate > 0.0 => format!(
