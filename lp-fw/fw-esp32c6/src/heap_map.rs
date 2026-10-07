@@ -240,6 +240,29 @@ mod track {
         log::info!(target: super::TARGET, "[heaptrack] armed: {why}");
     }
 
+    /// Every allocation this large or larger is logged as it happens, armed
+    /// or not, with its backtrace (`[bigalloc]`): a project load's few
+    /// contiguous asks are what decide whether it fits a fragmented heap.
+    const BIG_ALLOC_LOG: usize = 2048;
+
+    fn log_big(ptr: usize, size: usize) {
+        let mut raw = [0u32; FRAMES + SKIP];
+        lpc_shared::backtrace::capture_frames(&mut raw);
+        let f = &raw[SKIP..];
+        log::info!(
+            target: super::TARGET,
+            "[bigalloc] {size} B at 0x{ptr:08x} frames {:08x} {:08x} {:08x} {:08x} {:08x} {:08x} {:08x} {:08x}",
+            f[0],
+            f[1],
+            f[2],
+            f[3],
+            f[4],
+            f[5],
+            f[6],
+            f[7]
+        );
+    }
+
     pub fn pause(on: bool) {
         PAUSED.store(on, Ordering::Relaxed);
     }
@@ -258,7 +281,13 @@ mod track {
         ptr: usize,
         size: usize,
     ) {
-        if !ARMED.load(Ordering::Relaxed) || PAUSED.load(Ordering::Relaxed) || ptr == 0 {
+        if PAUSED.load(Ordering::Relaxed) {
+            return;
+        }
+        if size >= BIG_ALLOC_LOG {
+            log_big(ptr, size);
+        }
+        if !ARMED.load(Ordering::Relaxed) || ptr == 0 {
             return;
         }
         if !tracked(ptr) {
