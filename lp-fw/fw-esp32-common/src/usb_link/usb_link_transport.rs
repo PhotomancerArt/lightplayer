@@ -62,6 +62,13 @@ pub const FRAME_BUF_RELEASE_WAIT: Duration = Duration::from_secs(3);
 /// How often a waiting reply looks for room again.
 const SEND_ROOM_POLL: Duration = Duration::from_millis(2);
 
+/// The most one server-loop pass keeps pumping a streaming update channel
+/// (a host pulling a read-back) before it goes on to render. One read-back
+/// sector per pass held a USB backup to the frame rate (~45 ms a sector on
+/// the bench C6, 2026-10-06); this lets a pass move several and still
+/// renders between them.
+const UPDATE_STREAM_BUDGET: Duration = Duration::from_millis(40);
+
 /// Largest error notice for a dropped reply, serialized on the stack (it
 /// cannot use the frame buffer: the reply it is about may hold it).
 const NOTICE_BYTES: usize = 192;
@@ -157,6 +164,25 @@ impl UsbLinkTransport {
         }
         // A pass over the link: the update hook sends what it could not yet.
         super::usb_update_channel::dispatch_update(None);
+    }
+
+    /// While a host streams over the update channel (a read-back), keep
+    /// pumping the link — its messages to the hook, the hook's held answers
+    /// out — for up to [`UPDATE_STREAM_BUDGET`], then let the loop render.
+    /// Costs one atomic load when nothing streams.
+    async fn stream_update(&mut self) {
+        if !super::usb_update_channel::streaming() {
+            return;
+        }
+        let started = Instant::now();
+        while super::usb_update_channel::streaming()
+            && !self.hello_owed
+            && started.elapsed() < UPDATE_STREAM_BUDGET
+        {
+            self.shared.ring();
+            Timer::after(Duration::from_millis(1)).await;
+            self.pump_events();
+        }
     }
 
     /// Serialize `msg` into the frame buffer and queue it as an external
@@ -354,12 +380,14 @@ impl ServerTransport for UsbLinkTransport {
 
     async fn receive(&mut self) -> Result<Option<Incoming>, TransportError> {
         self.pump_events();
+        self.stream_update().await;
         // One link, and it is the USB cable: trusted.
         Ok(self.inbox.pop_front().map(Incoming::primary))
     }
 
     async fn receive_all(&mut self) -> Result<Vec<Incoming>, TransportError> {
         self.pump_events();
+        self.stream_update().await;
         Ok(self.inbox.drain(..).map(Incoming::primary).collect())
     }
 

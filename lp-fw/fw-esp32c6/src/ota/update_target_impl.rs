@@ -16,7 +16,9 @@ use lp_bootctl::{BOOT_RECORD_SECTORS, BootRecord, SplitLayout};
 use lpc_update::board::{FlashFault, UpdateTarget};
 
 use super::boot_state::BootState;
-use super::split_flash::{SECTOR, SplitFlash};
+use super::hw_sha::BootSha256;
+use super::split_flash::{BLOCK, SECTOR, SplitFlash};
+use super::update_timing::{FlashTiming, now_us};
 
 /// The split image's side of an update.
 pub struct SplitUpdateTarget {
@@ -30,6 +32,8 @@ pub struct SplitUpdateTarget {
     record_seq: u32,
     /// Where this core's engine header is.
     engine_start: u32,
+    /// What the session's flash calls cost (the `[OTA] timing` line).
+    pub timing: FlashTiming,
 }
 
 impl SplitUpdateTarget {
@@ -61,6 +65,7 @@ impl SplitUpdateTarget {
             record_sector,
             record_seq,
             engine_start: state.engine_room().start,
+            timing: FlashTiming::default(),
         }
     }
 
@@ -76,15 +81,68 @@ fn ok(done: bool) -> Result<(), FlashFault> {
 
 impl UpdateTarget for SplitUpdateTarget {
     fn erase_sector(&mut self, addr: u32) -> Result<(), FlashFault> {
-        ok(self.flash.erase(addr))
+        let t0 = now_us();
+        let done = self.flash.erase(addr);
+        self.timing.erase_us += now_us() - t0;
+        self.timing.erases += 1;
+        ok(done)
+    }
+
+    fn block_size(&self) -> Option<u32> {
+        Some(BLOCK)
+    }
+
+    fn erase_block(&mut self, addr: u32) -> Result<(), FlashFault> {
+        let t0 = now_us();
+        let done = self.flash.erase_block(addr);
+        self.timing.block_us += now_us() - t0;
+        self.timing.blocks += 1;
+        ok(done)
+    }
+
+    /// On the SHA accelerator ([`BootSha256`]), from flash a sector at a
+    /// time: the software hash over the ROM's reads cost ~1.3 s for the core
+    /// and ~1.9 s for the engine on the bench C6.
+    fn sha256_flash(
+        &mut self,
+        head: Option<&[u8]>,
+        from: u32,
+        to: u32,
+    ) -> Option<Result<[u8; 32], FlashFault>> {
+        let t0 = now_us();
+        let mut sha = BootSha256::new();
+        if let Some(head) = head {
+            sha.update(head);
+        }
+        let mut buf = alloc::vec![0u8; SECTOR as usize];
+        let mut at = from;
+        while at < to {
+            let n = (to - at).min(SECTOR) as usize;
+            if !self.flash.read(at, &mut buf[..n]) {
+                return Some(Err(FlashFault));
+            }
+            sha.update(&buf[..n]);
+            at += n as u32;
+        }
+        let digest = sha.finalize();
+        self.timing.hash_us += now_us() - t0;
+        Some(Ok(digest))
     }
 
     fn program(&mut self, addr: u32, bytes: &[u8]) -> Result<(), FlashFault> {
-        ok(self.flash.program(addr, bytes))
+        let t0 = now_us();
+        let done = self.flash.program(addr, bytes);
+        self.timing.program_us += now_us() - t0;
+        self.timing.programs += 1;
+        ok(done)
     }
 
     fn read(&mut self, addr: u32, buf: &mut [u8]) -> Result<(), FlashFault> {
-        ok(self.flash.read(addr, buf))
+        let t0 = now_us();
+        let done = self.flash.read(addr, buf);
+        self.timing.read_us += now_us() - t0;
+        self.timing.reads += 1;
+        ok(done)
     }
 
     fn core_dest(&self, core_len: u32) -> Option<u32> {

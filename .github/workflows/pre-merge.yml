@@ -183,6 +183,7 @@ jobs:
       emu_esp32s3: ${{ github.event_name != 'pull_request' && 'true' || steps.some.outputs.emu_esp32s3 }}
       emu_ref_recipe: ${{ github.event_name != 'pull_request' && 'true' || steps.some.outputs.emu_ref_recipe }}
       emu_esp32v3_fw: ${{ github.event_name != 'pull_request' && 'true' || steps.some.outputs.emu_esp32v3_fw }}
+      release: ${{ github.event_name != 'pull_request' && 'true' || steps.some.outputs.release }}
       # The 35-minute layout-migration job runs only on PRs that touch its
       # paths; main pushes skip it (Yona, 2026-10-05).
       c6_layout: ${{ steps.some.outputs.c6_layout }}
@@ -568,6 +569,38 @@ jobs:
             # filter above — `justfile` and this workflow file, which 109
             # and 37 merges a month touch; `emu_ref_recipe` leaves the
             # workflow out for the same reason.
+            # release gates `release-dry-run`: the C6's release assets built,
+            # staged and proven exactly as release-firmware.yml does on every
+            # main merge. The closure of what decides those bytes and their
+            # proof: the firmware tree and the split pipeline that links it,
+            # the boot-record and compression crates the image and its `.z`
+            # files share (lp-bootctl, lp-deflate, lp-crc32), the
+            # ota-manifest.json format crate, the dictionary rule and code
+            # table (lpc-update) and the one packer (lpa-update), the
+            # manifest core the image embeds (lpc-model), the lp-cli
+            # commands that package, stage and check, the release scripts
+            # and the schema. Not lp-core/** or lp-base/** at large: the
+            # `firmware` filter's size job already builds the image on those,
+            # and a byte moved there that broke release-check would be red on
+            # main's next run (pushes force every gate on).
+            release:
+              - 'lp-fw/**'
+              - 'lp-base/lp-bootctl/**'
+              - 'lp-base/lp-deflate/**'
+              - 'lp-base/lp-crc32/**'
+              - 'lp-core/lpc-firmware-release/**'
+              - 'lp-core/lpc-update/**'
+              - 'lp-app/lpa-update/**'
+              - 'lp-core/lpc-model/**'
+              - 'lp-cli/src/commands/firmware/**'
+              - 'tools/**'
+              - 'scripts/release/**'
+              - 'schemas/ota-manifest.schema.json'
+              - '.github/workflows/release-firmware.yml'
+              - '.github/workflows/pre-merge.yml'
+              - 'Cargo.lock'
+              - 'justfile'
+              - 'rust-toolchain.toml'
             c6_layout:
               - 'lp-fw/fw-esp32c6/partitions.csv'
               - 'lp-fw/fw-esp32c6/.cargo/config.toml'
@@ -1289,6 +1322,106 @@ jobs:
       # embedded manifest core and diff against the checked-in expectation.
       - name: Check esp32c6 embedded manifest
         run: cd lp2025 && just fw-manifest-check-esp32c6
+
+      - name: sccache stats
+        if: always()
+        shell: bash
+        run: |
+          if command -v sccache >/dev/null; then
+            { echo '#### sccache'; echo '```'; sccache --show-stats; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  # The release's C6 firmware, dry run: package the split build, stage it
+  # under the release's asset names, and prove it with `release-check` —
+  # scripts/release/release-firmware.sh, the script release-firmware.yml runs
+  # on every main merge, with `--dry-run` (the upload and Latest commands are
+  # printed, never run: a PR creates no release) and `--allow-dev` (a PR's
+  # version is a sha). The staging directory is uploaded as an artifact, the
+  # evidence a ship report shows. C6 only (plan D21): the Xtensa packages are
+  # built by every deploy and their release path differs only in the package
+  # step. Same toolchain, sccache env and checkout path as `firmware-size`.
+  release-dry-run:
+    name: Release dry run (esp32c6)
+    runs-on: ubuntu-24.04
+    # New job; sized from firmware-size (p95 2.9 min, max 4.4), which builds
+    # the same split image, plus lp-cli's dev build and the packer. Generous
+    # for a cold sccache; re-measure before tightening.
+    timeout-minutes: 30
+    needs: detect-changes
+    if: needs.detect-changes.outputs.release == 'true'
+    env:
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "false"
+      CARGO_PROFILE_TEST_DEBUG: "false"
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: sccache
+    steps:
+      - name: Install system deps (libudev for espflash)
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/*chrome* /etc/apt/sources.list.d/*google*
+          sudo apt-get update || echo "apt-get update reported errors; continuing — the install below is the real gate"
+          sudo apt-get install -y libudev-dev pkg-config
+
+      # The default (shallow) checkout is enough: the package step resolves
+      # the image's short commit to its full sha, and that commit is HEAD.
+      - name: Checkout lp2025
+        uses: actions/checkout@v4
+        with:
+          path: lp2025
+
+      # Before any build writes into the tree (print-app-version.sh reads
+      # `git status`): a PR's version is its sha, a dev version.
+      - name: Resolve app version
+        run: |
+          set -euo pipefail
+          version="$(cd lp2025 && scripts/print-app-version.sh)"
+          echo "APP_VERSION=${version}" >> "$GITHUB_ENV"
+          echo "Dry-run app version: ${version}"
+
+      # Toolchain is pinned in lp2025/lp-fw/fw-esp32c6/rust-toolchain.toml; keep
+      # this in sync. rust-src is required: the firmware builds core/alloc from
+      # source (build-std) to apply optimize_for_size.
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: nightly-2026-04-27
+          components: rust-src
+
+      - name: Install RISC-V target
+        run: rustup target add ${{ env.RISC_V_TARGET }}
+
+      - name: Run sccache
+        uses: mozilla/sccache-action@v0.0.10
+        with:
+          version: v0.18.0
+
+      # The repo's one registry entry, read-only (see the lint job).
+      - name: Restore cargo registry
+        uses: ./lp2025/.github/actions/cargo-registry
+
+      - name: Install just
+        uses: extractions/setup-just@v3
+
+      # Prebuilt, pinned to match the deploy and release workflows.
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@v1.21.1
+
+      - name: Install espflash (prebuilt)
+        run: cargo binstall --no-confirm --locked espflash@3.3.0
+
+      - name: Release dry run (package, stage, release-check)
+        run: |
+          cd lp2025
+          scripts/release/release-firmware.sh "${APP_VERSION}" --dry-run --allow-dev \
+            --targets esp32c6-4mb --staging target/release-assets/dry-run
+
+      - name: Upload the staged release assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-dry-run-${{ github.event.pull_request.head.sha || github.sha }}
+          path: lp2025/target/release-assets/dry-run/
+          retention-days: 7
+          if-no-files-found: error
 
       - name: sccache stats
         if: always()
@@ -3526,6 +3659,7 @@ jobs:
       - firmware-esp32v3
       - validate-xtensa
       - firmware-size
+      - release-dry-run
       - emu-c6
       - emu-esp32v3
       - emu-esp32v3-ref

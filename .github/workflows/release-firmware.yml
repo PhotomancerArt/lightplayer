@@ -1,0 +1,178 @@
+name: Release firmware
+
+# Every release's firmware, built ONCE and attached to the release as
+# assets: for every served target its package (`<target>.package.json` +
+# `<target>.<image>`), and for a split target (the C6) its update files too
+# (`<target>.ota-manifest.json`, `.core.bin`, `.engine.bin`, `.core.z`,
+# `.engine.z`). lightplayer.app's `/firmware/<target>/<release>/<file>`
+# serves them, and deploy-cloud.yml takes the Studio bundle's firmware from
+# them (one build: the engine a bundle flashes is one the store can serve).
+# The whole procedure is scripts/release/release-firmware.sh; this file only
+# sets up the toolchains and runs it.
+#
+# It rides a green "Main push" (which tagged the commit and created its
+# release, NOT marked Latest): the release exists before anything here runs,
+# and the script marks Latest only once the firmware is attached.
+on:
+  workflow_run:
+    workflows: ["Main push"]
+    types: [completed]
+  # Attach (or re-attach) an existing release's firmware by hand. Safe to
+  # repeat: an identical asset is skipped and a different one fails.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag (vYYYY.MM.DD-N) to (re)attach
+        required: true
+
+# The run's title names the commit (or tag) it builds, so deploy-cloud.yml
+# can find THIS run for its sha whatever head_sha GitHub records for a
+# workflow_run-triggered run.
+run-name: >-
+  Release firmware ${{ github.event_name == 'workflow_dispatch' && inputs.tag ||
+  github.event.workflow_run.head_sha }}
+
+# NO concurrency group, deliberately. A group holds at most ONE pending run
+# and a newer one evicts it (GitHub's pending-run eviction — the deploy
+# cancels seen in this repo), which would leave a release without firmware
+# under a burst of merges. Runs for different tags never touch the same
+# assets; two runs for one tag are made safe by the immutable upload (skip
+# identical, fail on different), and Latest is computed from what is
+# uploaded, so concurrent runs converge on it (see the script's
+# `mark_latest`).
+
+permissions:
+  contents: write
+
+env:
+  RUST_BACKTRACE: 1
+  RISC_V_TARGET: riscv32imac-unknown-none-elf
+  RUSTUP_PERMIT_COPY_RENAME: 1
+  # The same compile-reuse shape as deploy-cloud.yml and pre-merge.yml
+  # (read deploy-cloud.yml's comment): sccache with the GHA backend,
+  # CARGO_INCREMENTAL=0, and the two profile vars sccache hashes, so this
+  # job's objects are the ones CI writes.
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: "false"
+  CARGO_PROFILE_TEST_DEBUG: "false"
+  SCCACHE_GHA_ENABLED: "true"
+  RUSTC_WRAPPER: sccache
+
+jobs:
+  release:
+    name: Build, check and attach the release's firmware
+    # A GREEN "Main push" on main (as deploy-cloud.yml's gate), or a dispatch.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main')
+    runs-on: ubuntu-latest
+    # Three firmware packages (~2 min warm, measured in deploy-cloud on
+    # 2026-10-04) plus the C6's split link and lp-cli; generous for a cold
+    # sccache.
+    timeout-minutes: 60
+    # lp2025/, the path pre-merge.yml and deploy-cloud.yml check out into:
+    # sccache hashes the compile's working directory.
+    defaults:
+      run:
+        working-directory: lp2025
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          path: lp2025
+          # The commit "Main push" tagged (a dispatch: the tag asked for).
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.event.workflow_run.head_sha }}
+          # Full history AND tags. The tag is the version below; and the
+          # package step resolves the image's 12-hex commit to its full sha
+          # (`git rev-parse <short>^{commit}`) for ota-manifest.json, so the
+          # commit must be in this clone — it is HEAD.
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Install system deps
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/*chrome* /etc/apt/sources.list.d/*google*
+          sudo apt-get update || echo "apt-get update reported errors; continuing — the install below is the real gate"
+          sudo apt-get install -y libudev-dev pkg-config
+
+      # BEFORE any build step: `print-app-version.sh` reads `git status`, and
+      # the build writes generated files into the checkout (deploy-cloud.yml
+      # has the history). `--require-tag`: a release is never a sha.
+      - name: Resolve app version
+        # The input through env, never interpolated into the script.
+        env:
+          DISPATCH_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          version="$(scripts/print-app-version.sh --require-tag)"
+          if [[ -n "${DISPATCH_TAG}" && "v${version}" != "${DISPATCH_TAG}" ]]; then
+            echo "the checkout of ${DISPATCH_TAG} reads as version ${version}" >&2
+            exit 1
+          fi
+          echo "APP_VERSION=${version}" >> "$GITHUB_ENV"
+          echo "Releasing firmware for app version: ${version}"
+
+      # Toolchain is pinned in rust-toolchain.toml (root and
+      # lp-fw/fw-esp32c6/); keep this in sync with the other workflows.
+      # rust-src: the firmware builds core/alloc from source (build-std).
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: nightly-2026-04-27
+          components: rust-src
+
+      - name: Install RISC-V target
+        run: rustup target add ${{ env.RISC_V_TARGET }}
+
+      # Two of the three served targets are Xtensa. Same pin, targets and
+      # `default: false` as deploy-cloud.yml; keep the version in sync with
+      # the other workflows. Referenced as owner/repo/path@main, NOT `./`:
+      # this workflow's file comes from the default branch but its checkout
+      # is an arbitrary older ref (workflow_run.head_sha / inputs.tag), so a
+      # `./` local action would resolve against a tree that may predate it —
+      # read the comment in deploy-cloud.yml (run 34204176179).
+      - name: Install Xtensa Rust toolchain
+        uses: PhotomancerArt/lightplayer/.github/actions/xtensa-toolchain@main
+        with:
+          version: 1.95.0.0
+          buildtargets: esp32s3,esp32
+          default: false
+
+      # The repo's one cargo-registry entry, restored read-only (`@main` for
+      # the reason above; docs/debt/actions-cache-budget.md).
+      - name: Restore cargo registry
+        uses: PhotomancerArt/lightplayer/.github/actions/cargo-registry@main
+
+      - name: Run sccache
+        uses: mozilla/sccache-action@v0.0.10
+        with:
+          version: v0.18.0
+
+      - name: Install just
+        uses: extractions/setup-just@v3
+
+      # Prebuilt, pinned to match the deploy workflows and pre-merge's
+      # firmware jobs: `lp-cli firmware package` merges the image with
+      # `espflash save-image`.
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@v1.21.1
+
+      - name: Install espflash (prebuilt)
+        run: cargo binstall --no-confirm --locked espflash@3.3.0
+
+      # Package every served target, stage, release-check (--version: every
+      # target carries this release's version), upload immutably, mark
+      # Latest. The staged list goes to the step summary.
+      - name: Build, check and attach
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/release/release-firmware.sh "${APP_VERSION}"
+
+      - name: sccache stats
+        if: always()
+        shell: bash
+        run: |
+          if command -v sccache >/dev/null; then
+            { echo '#### sccache'; echo '```'; sccache --show-stats; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi

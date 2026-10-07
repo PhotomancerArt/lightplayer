@@ -45,6 +45,14 @@ pub const ASSET_BODY: &str = "console.log('studio')";
 pub const BUNDLE_FIRMWARE_MANIFEST_PATH: &str = "/firmware/esp32c6-4mb/manifest.json";
 pub const BUNDLE_FIRMWARE_MANIFEST_BODY: &str = r#"{"schemaVersion":2}"#;
 
+/// The bundle's own update files (OTA M7, DS10), beside its package
+/// manifest — two segments after `/firmware/`, like it — with their bodies.
+pub const BUNDLE_UPDATE_FILES: [(&str, &str); 3] = [
+    ("/firmware/esp32c6-4mb/ota-manifest.json", r#"{"format":1}"#),
+    ("/firmware/esp32c6-4mb/core.z", "bundle core.z"),
+    ("/firmware/esp32c6-4mb/engine.z", "bundle engine.z"),
+];
+
 /// A service under test.
 pub struct TestServer {
     router: Router,
@@ -79,6 +87,9 @@ impl TestServer {
             .join(BUNDLE_FIRMWARE_MANIFEST_PATH.trim_start_matches('/'));
         std::fs::create_dir_all(bundle_manifest.parent().unwrap()).unwrap();
         std::fs::write(bundle_manifest, BUNDLE_FIRMWARE_MANIFEST_BODY).unwrap();
+        for (path, body) in BUNDLE_UPDATE_FILES {
+            std::fs::write(artifact.path().join(path.trim_start_matches('/')), body).unwrap();
+        }
         std::fs::write(artifact.path().join("index.html"), INDEX_HTML).unwrap();
         std::fs::create_dir_all(artifact.path().join("assets")).unwrap();
         std::fs::write(

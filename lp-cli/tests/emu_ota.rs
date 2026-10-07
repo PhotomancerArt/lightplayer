@@ -463,7 +463,13 @@ fn u08_a_core_install_needs_edit_and_a_core_side_login_grants_it() {
         "{}",
         tail(&host)
     );
-    assert_eq!(host.ota.as_ref().unwrap().refusals, [b'A']);
+    // USB pulls the read-back four ahead: every `G` already in flight is
+    // refused the same way before the host stops.
+    let refusals = &host.ota.as_ref().unwrap().refusals;
+    assert!(
+        !refusals.is_empty() && refusals.iter().all(|r| *r == b'A'),
+        "{refusals:?}"
+    );
     untouched(&flash_of(&host), &chip, "nothing written");
 
     // (b) Core-only (engine-less), no password: N/A, nothing written.

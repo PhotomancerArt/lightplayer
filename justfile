@@ -464,7 +464,7 @@ studio-web-copy-sidecars profile out_dir include_firmware="false":
                 echo "  run: just studio-firmware-package-served" >&2
                 exit 1
             fi
-            # The package, and a split package's update files into `ota/`
+            # The package, and a split package's update files beside it
             # (OTA M7, DS10) — see the script's header.
             scripts/studio-copy-firmware.sh "${build_id}" "{{ studio_assets_dir }}/firmware" \
                 "{{ out_dir }}/firmware" target/firmware-parts
@@ -715,7 +715,7 @@ studio-dev: install-wasm32-target (studio-firmware-package-served studio_fw_imag
         # fresh hash pair and the script sweeps the stale one it replaces.
         scripts/sync-engine-sidecar.sh "${sidecar_dir}" "${public_dir}/pkg"
         for build_id in "${served_builds[@]}"; do
-            # The package, and a split package's update files (`ota/`).
+            # The package, and a split package's update files beside it.
             scripts/studio-copy-firmware.sh "${build_id}" "{{ studio_assets_dir }}/firmware" \
                 "${public_dir}/firmware" target/firmware-parts
         done
@@ -799,17 +799,25 @@ studio-firmware-package-served image=studio_fw_image:
     #!/usr/bin/env bash
     set -euo pipefail
     while read -r build_id; do
-        case "${build_id}" in
-            esp32c6-*) just studio-firmware-package-esp32c6 "{{ image }}" ;;
-            esp32s3-*) just studio-firmware-package-esp32s3 ;;
-            esp32v3-*) just studio-firmware-package-esp32v3 ;;
-            *)
-                echo "served.json lists ${build_id}, which has no packaging recipe" >&2
-                echo "  add studio-firmware-package-<chip> next to its siblings" >&2
-                exit 1
-                ;;
-        esac
+        just studio-firmware-package-target "${build_id}" "{{ image }}"
     done < <(just studio-served-builds)
+
+# `image` is the C6's (`single` or `split`); the release
+# (`scripts/release/release-firmware.sh`) always asks for `split`.
+# Package one served target by its id (`esp32c6-4mb`) with its chip's recipe.
+studio-firmware-package-target target image=studio_fw_image:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "{{ target }}" in
+        esp32c6-*) just studio-firmware-package-esp32c6 "{{ image }}" ;;
+        esp32s3-*) just studio-firmware-package-esp32s3 ;;
+        esp32v3-*) just studio-firmware-package-esp32v3 ;;
+        *)
+            echo "{{ target }} has no packaging recipe" >&2
+            echo "  add studio-firmware-package-<chip> next to its siblings" >&2
+            exit 1
+            ;;
+    esac
 
 # Cheap wasm-compile gate for the cloud client path (full gate: studio-web-build).
 #
@@ -824,8 +832,11 @@ check-wasm-cloud: install-wasm32-target
 
 # The release bundle — every deploy builds through here — is always the
 # split image with its update files: a Studio that cannot update boards over
-# the air must never ship.
-studio-web-build: install-wasm32-target (studio-firmware-package-served "split")
+# the air must never ship. Its firmware comes from `studio-web-firmware`
+# (below), AFTER dx: a deploy's wasm build then overlaps the release's
+# firmware build instead of waiting on it, and nothing dx builds reads the
+# firmware directory.
+studio-web-build: install-wasm32-target
     #!/usr/bin/env bash
     set -euo pipefail
     just studio-fw-browser-sidecar release
@@ -833,8 +844,48 @@ studio-web-build: install-wasm32-target (studio-firmware-package-served "split")
     echo "Building lpa-studio-web with dx for wasm32 release (stories bundled for the in-app design library)..."
     rm -rf target/dx/lpa-studio-web/release/web/public
     dx build --web -p lpa-studio-web --features stories --release --debug-symbols false
+    just studio-web-firmware
     just studio-web-copy-sidecars release target/dx/lpa-studio-web/release/web/public true
     echo "Artifacts: target/dx/lpa-studio-web/release/web/public/ (index.html, assets/, pkg/, firmware/)"
+
+# Where the release bundle's firmware comes from, by LP_STUDIO_FIRMWARE:
+#
+#   unset or `build`     build it here: `studio-firmware-package-served split`
+#                        (local builds, `studio-web`, the walks)
+#   `release:<version>`  take release v<version>'s own firmware, verified
+#                        (scripts/release/fetch-release-firmware.sh) — the
+#                        deploys, so the bundle flashes exactly the bytes the
+#                        firmware store serves (one build). With
+#                        LP_STUDIO_FIRMWARE_WAIT_SHA set, wait for that
+#                        commit's "Release firmware" run first.
+#
+# Either way it fills target/studio-web-assets/firmware/<target>/ and a split
+# target's update files in target/firmware-parts/<target>/, which
+# `studio-web-copy-sidecars` copies into the bundle.
+# Fill the release bundle's firmware: built here, or a release's (LP_STUDIO_FIRMWARE).
+studio-web-firmware:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    source="${LP_STUDIO_FIRMWARE:-build}"
+    case "${source}" in
+        build)
+            echo "Studio firmware: built here"
+            just studio-firmware-package-served split
+            ;;
+        release:*)
+            version="${source#release:}"
+            echo "Studio firmware: release v${version}"
+            args=("${version}")
+            if [[ -n "${LP_STUDIO_FIRMWARE_WAIT_SHA:-}" ]]; then
+                args+=(--wait-for-sha "${LP_STUDIO_FIRMWARE_WAIT_SHA}")
+            fi
+            scripts/release/fetch-release-firmware.sh "${args[@]}"
+            ;;
+        *)
+            echo "LP_STUDIO_FIRMWARE must be build or release:<version>, not ${source}" >&2
+            exit 1
+            ;;
+    esac
 
 # Build a clean GitHub Pages artifact for Studio.
 studio-web-deploy-dir channel="local" out_dir="target/pages/studio" domain="":
@@ -893,6 +944,16 @@ cloud-serve:
     LP_CLOUD_STATIC_DIR="${LP_CLOUD_STATIC_DIR:-}" \
     LP_CLOUD_DEV_AUTH=1 \
         cargo run -p lp-cloud-server
+
+# The firmware store's whole lookup, locally and hermetically (OTA M5, D20):
+# a C6 release staged at the synthetic version 2099.01.01-1 (or the given
+# release-version staging directory) served GitHub-shaped by python3, behind
+# a local lp-cloud-server's `/firmware/` route, checked with curl — bytes,
+# headers, `latest`, the cache, 404s that never reach upstream, a tampered
+# upstream file. Not CI: it builds the C6 firmware. Ports from
+# scripts/dev-port.sh. The live check is the merged release's (yona-ship).
+firmware-store-smoke staging="":
+    scripts/release/firmware-store-smoke.sh {{ staging }}
 
 # ============================================================================
 # Schema artifacts (schemas/) - generated from the model shape catalog
@@ -3135,7 +3196,7 @@ test-glsl-filetests:
 # Warm ~1s, cold ~47s locally; it runs beside clippy, the Lint job's long
 # pole. See docs/debt/wasm-cloud-check-not-in-just-check.md.
 [parallel]
-check-lint: fmt-check clippy check-wasm-cloud check-lp-link-targets check-lpc-engine-gates check-studio-core-minimal lint-serde-content lint-browser-test-harness lint-classic-capture lint-pcb-export lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-nested-patches lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities lint-red-main-needs lint-tag-next-version lint-web-actions lint-core-action-fields lint-core-test-ops
+check-lint: fmt-check clippy check-wasm-cloud check-lp-link-targets check-lpc-engine-gates check-studio-core-minimal lint-serde-content lint-browser-test-harness lint-classic-capture lint-pcb-export lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-nested-patches lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities lint-red-main-needs lint-tag-next-version lint-release-version-cmp lint-web-actions lint-core-action-fields lint-core-test-ops
 
 [parallel]
 check: check-lint schema-check fw-manifest-check-emu
@@ -3251,6 +3312,12 @@ lint-red-main-needs:
 # own commit, a tagged commit is a no-op, and a lost tag race retries.
 lint-tag-next-version:
     ./scripts/tag-next-version-test.sh
+
+# The order release-firmware.sh marks GitHub's Latest by (`YYYY.MM.DD-N`,
+# numerically, dev versions refused): `-9` before `-10`, dates before
+# counters. Offline, ~0.1 s.
+lint-release-version-cmp:
+    ./scripts/release/test-version-cmp.sh
 
 # The ESP32-C6 machine's boot tests, which need firmware ELFs, plus the M3
 # replays of the committed transcripts.

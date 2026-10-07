@@ -22,11 +22,16 @@ recovery served (the resume evidence).
 The board is resolved by MAC (scripts/emu/board-port.py), never by guessing a
 port. A VIA-style hub is a USB 2 and a USB 3 hub on one chip: VBUS drops only
 when BOTH twins' ports are off, so --hub takes both. Needs uhubctl.
+
+On the desk, cut through the lease tool instead of uhubctl:
+`--power-cycle-cmd 'board power-cycle fixture-c6 --as "<who>" --off-secs 2'`
+replaces --hub/--hub-port (the command is split shell-style and run as is).
 """
 
 import argparse
 import json
 import re
+import shlex
 import subprocess
 import sys
 import time
@@ -72,8 +77,10 @@ def last_core(text):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--mac", required=True)
-    ap.add_argument("--hub", required=True, help="the hub and its USB 3 twin, e.g. 1-1.2,1-2.2")
-    ap.add_argument("--hub-port", type=int, required=True)
+    ap.add_argument("--hub", help="the hub and its USB 3 twin, e.g. 1-1.2,1-2.2")
+    ap.add_argument("--hub-port", type=int)
+    ap.add_argument("--power-cycle-cmd",
+                    help="a command that cuts the board's power and restores it (instead of --hub)")
     ap.add_argument("--x", required=True)
     ap.add_argument("--y", required=True)
     ap.add_argument("--lp-cli", default=str(REPO / "target/release/lp-cli"))
@@ -83,6 +90,8 @@ def main():
     ap.add_argument("--recover-secs", type=int, default=180)
     ap.add_argument("--no-z", action="store_true", help="offer raw chunks only")
     a = ap.parse_args()
+    if not a.power_cycle_cmd and (not a.hub or a.hub_port is None):
+        ap.error("give --hub and --hub-port, or --power-cycle-cmd")
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     x, y = Path(a.x), Path(a.y)
@@ -113,11 +122,18 @@ def main():
         host = subprocess.Popen(cmd, stdout=subprocess.DEVNULL,
                                 stderr=open(out / f"{tag}.cut.err", "w"))
         time.sleep(t)
-        power(a.hub, a.hub_port, False)
-        host.kill()
-        host.wait()
-        time.sleep(a.off_secs)
-        power(a.hub, a.hub_port, True)
+        if a.power_cycle_cmd:
+            r = sh(shlex.split(a.power_cycle_cmd))
+            if r.returncode != 0:
+                print(f"{tag}: power cycle failed: {(r.stdout + r.stderr)[-300:]}", flush=True)
+            host.kill()
+            host.wait()
+        else:
+            power(a.hub, a.hub_port, False)
+            host.kill()
+            host.wait()
+            time.sleep(a.off_secs)
+            power(a.hub, a.hub_port, True)
         port = port_of(a.mac, wait=20)
         if not port:
             rows.append({"cut": t, "verdict": "FAIL", "why": "the board did not come back on USB"})

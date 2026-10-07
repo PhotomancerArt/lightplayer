@@ -9,6 +9,16 @@ name: Deploy Cloud Service
 # inherited from the retired deploy-studio-pages.yml (GH Pages hosting died
 # with the 2026-08-06 DNS cutover; the last-deployed Pages site remains as
 # the DNS-rollback target — see docs/runbooks/godaddy-dns-cutover.md §5).
+#
+# The bundle's FIRMWARE is not built here. It is the release's own:
+# release-firmware.yml builds every served package once for this commit and
+# attaches it to the release, and the build step below waits for that run
+# and downloads the packages, verified by SHA-256
+# (scripts/release/fetch-release-firmware.sh). One build: the engine a
+# bundle flashes is one lightplayer.app's firmware store serves, so a board
+# flashed from this Studio can always be healed by any Studio
+# (docs/adr/2026-10-06-firmware-distribution.md). The cost is deliberate: a
+# release whose firmware fails to build does not deploy.
 
 # Deploys ride the "Main push" workflow (tag + release, ~90 s) — NOT the
 # full "CI" validation workflow, so a red CI run on main does not block a
@@ -33,28 +43,25 @@ permissions:
 
 env:
   RUST_BACKTRACE: 1
-  RISC_V_TARGET: riscv32imac-unknown-none-elf
   RUSTUP_PERMIT_COPY_RENAME: 1
   # Same compile-reuse shape as pre-merge.yml: sccache (GHA backend) caches
   # individual rustc invocations content-addressed, workspace members
   # included. CARGO_INCREMENTAL=0 because sccache cannot cache incremental
-  # compiles. The wrapper also covers the Xtensa firmware cross-builds —
-  # sccache + Espressif toolchain + build-std is proven by pre-merge's
-  # firmware-size job.
+  # compiles.
   CARGO_INCREMENTAL: "0"
   # Match pre-merge.yml exactly: these two are part of the rustc arguments
-  # sccache hashes, and the deployed artifact (the wasm bundle + release
-  # firmware images) does not carry host debuginfo anyway. Without them the
-  # deploy's lp-cli build was `dev [unoptimized + debuginfo]`, sharing
-  # nothing with CI and half again as much output to link (2026-09-08).
+  # sccache hashes. (They were added when this job still built lp-cli for
+  # the firmware packages — `dev [unoptimized + debuginfo]`, sharing nothing
+  # with CI, 2026-09-08; they stay so the wasm builds keep their sccache
+  # keys.)
   CARGO_PROFILE_DEV_DEBUG: "false"
   CARGO_PROFILE_TEST_DEBUG: "false"
   SCCACHE_GHA_ENABLED: "true"
   RUSTC_WRAPPER: sccache
 
 jobs:
-  # A 20-minute wasm+firmware build that then discovers it has no deploy
-  # token is a bad way to learn that. This job costs seconds.
+  # A 20-minute wasm build that then discovers it has no deploy token is a
+  # bad way to learn that. This job costs seconds.
   gate:
     name: Deploy token present?
     # On the CI-ride path, only a GREEN "Main push" run on main proceeds;
@@ -88,7 +95,13 @@ jobs:
     needs: gate
     if: needs.gate.outputs.ready == 'true'
     runs-on: ubuntu-latest
+    # Includes the bounded wait for this commit's "Release firmware" run,
+    # which starts with this job and builds in parallel with the wasm.
     timeout-minutes: 90
+    permissions:
+      contents: read
+      # `gh run list` / `gh run watch` on release-firmware.yml.
+      actions: read
     # Every `run` step works inside lp2025/, the same path pre-merge.yml
     # checks out into. That is not cosmetic: sccache hashes the compile's
     # working directory ("the cwd of the compile" in its Rust hasher), so a
@@ -142,7 +155,6 @@ jobs:
       - name: Install Rust targets
         run: |
           rustup target add wasm32-unknown-unknown
-          rustup target add ${{ env.RISC_V_TARGET }}
           # wasm32-wasip1 is the ESP32-C6 emulator module Studio now ships
           # as a sidecar (`just studio-emu-sidecar`, called by
           # `studio-web-build`). The recipe installs it itself if it is
@@ -150,27 +162,9 @@ jobs:
           # this job needs is readable in one place.
           rustup target add wasm32-wasip1
 
-      # The bundle ships a firmware image per chip (lp-fw/builds/served.json)
-      # and two of the three are Xtensa, so both build targets are named
-      # here exactly as in deploy-studio-pages.yml. `default: false` for the
-      # same reason: the wasm bundle and host tooling build on the pinned
-      # nightly above. Keep the version in sync with the other workflows.
-      - name: Install Xtensa Rust toolchain
-        # Referenced as owner/repo/path@main, NOT `./`. This workflow's file
-        # comes from the default branch, but its checkout is an arbitrary
-        # older ref (workflow_run.head_sha / inputs.ref) — so a `./` local
-        # action resolves against a tree that may predate the action and
-        # dies with "Can't find 'action.yml'". That is not hypothetical:
-        # run 34204176179 failed exactly that way, deploying #601's commit
-        # under main's newer workflow. `@main` resolves from the repository
-        # instead of the workspace, so the two are decoupled. pre-merge.yml
-        # deliberately keeps `./` — there the PR's own copy is what CI must
-        # validate.
-        uses: PhotomancerArt/lightplayer/.github/actions/xtensa-toolchain@main
-        with:
-          version: 1.95.0.0
-          buildtargets: esp32s3,esp32
-          default: false
+      # No RISC-V target, no Xtensa toolchain and no espflash: the firmware
+      # comes from the release (see the top of this file). They lived here
+      # only for `lp-cli firmware package`.
 
       # target/ is deliberately NOT cached: multi-GB target payloads get
       # LRU-evicted from the repo's 10 GB Actions-cache budget before they
@@ -182,8 +176,18 @@ jobs:
       # cargo-registry entry, restored read-only — pre-merge's lint job on
       # main is its only writer (this workflow used to save its own
       # ~517 MB `deploy` copy of the same bytes;
-      # docs/debt/actions-cache-budget.md). `@main` for the reason the
-      # xtensa-toolchain step above gives.
+      # docs/debt/actions-cache-budget.md).
+      #
+      # Referenced as owner/repo/path@main, NOT `./`. This workflow's file
+      # comes from the default branch, but its checkout is an arbitrary
+      # older ref (workflow_run.head_sha / inputs.ref) — so a `./` local
+      # action resolves against a tree that may predate the action and dies
+      # with "Can't find 'action.yml'". That is not hypothetical: run
+      # 34204176179 failed exactly that way, deploying #601's commit under
+      # main's newer workflow. `@main` resolves from the repository instead
+      # of the workspace, so the two are decoupled. pre-merge.yml
+      # deliberately keeps `./` — there the PR's own copy is what CI must
+      # validate.
       - name: Restore cargo registry
         uses: PhotomancerArt/lightplayer/.github/actions/cargo-registry@main
 
@@ -195,21 +199,32 @@ jobs:
       - name: Install just
         uses: extractions/setup-just@v3
 
-      # Prebuilt binaries, not `cargo install`: these three compiled from
-      # source on EVERY deploy (dx alone ~8 min, ~11 min total — `--force`
-      # defeats even a warm ~/.cargo/bin). All three publish binaries for
-      # exactly these pins; binstall verifies the requested version and falls
-      # back to a `--locked` source build only if an asset ever disappears.
+      # Prebuilt binaries, not `cargo install`: these compiled from source on
+      # EVERY deploy (dx alone ~8 min, ~11 min total — `--force` defeats even
+      # a warm ~/.cargo/bin). Both publish binaries for exactly these pins;
+      # binstall verifies the requested version and falls back to a
+      # `--locked` source build only if an asset ever disappears.
       - name: Install cargo-binstall
         uses: cargo-bins/cargo-binstall@v1.21.1
 
       - name: Install web build tools (prebuilt)
-        run: cargo binstall --no-confirm --locked wasm-bindgen-cli@0.2.114 dioxus-cli@0.7.9 espflash@3.3.0
+        run: cargo binstall --no-confirm --locked wasm-bindgen-cli@0.2.114 dioxus-cli@0.7.9
 
       # `production` + the domain are what put the canonical origin into the
       # artifact. The output path is contractual: infra/Dockerfile COPYs
       # exactly target/pages/studio.
+      #
+      # LP_STUDIO_FIRMWARE: the bundle's firmware is release v<version>'s
+      # (`just studio-web-firmware`), fetched after dx so this job's wasm
+      # build overlaps the release's firmware build; it waits for this
+      # commit's "Release firmware" run (bounded by timeout-minutes) and
+      # fails if that run fails — the deploy never ships firmware it did not
+      # release. Rollback: revert this change to build it here again.
       - name: Build web artifact
+        env:
+          LP_STUDIO_FIRMWARE: release:${{ env.APP_VERSION }}
+          LP_STUDIO_FIRMWARE_WAIT_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+          GH_TOKEN: ${{ github.token }}
         run: just studio-web-deploy-dir production target/pages/studio lightplayer.app
 
       - name: Smoke-check web artifact

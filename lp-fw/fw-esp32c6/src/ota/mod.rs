@@ -88,6 +88,7 @@ mod update_edge;
 mod update_links;
 mod update_outbox;
 mod update_target_impl;
+mod update_timing;
 
 pub use board_identity::CoreIdentity;
 pub use boot_state::BootState;

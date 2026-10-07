@@ -2,6 +2,7 @@
 //! the session waits for.
 
 use alloc::vec::Vec;
+use core::ops::Range;
 
 use crate::piece_kind::PieceKind;
 use crate::transfer_record::{MarkSet, TransferRecord};
@@ -28,6 +29,12 @@ pub(crate) struct Transfer {
     pub retries: u8,
     /// The engine's header sector, held in RAM until the piece hashes.
     pub sector0: Option<Vec<u8>>,
+    /// Flash this boot erased ahead of the waiting chunk (one block, from
+    /// the next sector to program to its end), so its chunks are programmed
+    /// without a sector erase each. RAM only: after a cut, a resume, a fault
+    /// or a mismatch nothing is known erased, and the next chunk erases
+    /// again.
+    pub erased: Option<Range<u32>>,
 }
 
 impl Transfer {
@@ -40,6 +47,7 @@ impl Transfer {
             raw_next: false,
             retries: 0,
             sector0: None,
+            erased: None,
         }
     }
 

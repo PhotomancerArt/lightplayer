@@ -7,9 +7,11 @@
 //! `?firmware-store=` dev flag); tests, sims and hosts without OPFS keep the
 //! defaults — a [`MemoryEngineCache`] and no store.
 //!
-//! Nothing reads them yet. The update flow (M4's host crate, ordered by M7)
-//! asks the cache first, then the store, then the board; the USB install
-//! (M5 P8) puts the engine it just flashed.
+//! The update flow (M4's host crate, ordered by M7) asks the cache first,
+//! then the store, then the board. The USB install puts the engine it just
+//! flashed (M5 P8, D19): it reads the package back from the bundle the
+//! flasher read it from — the third source here, the shell's same-origin
+//! fetch at the bundle's `firmware/` base.
 
 use std::rc::Rc;
 
@@ -18,10 +20,28 @@ use lpa_firmware_store::{EngineCache, FirmwareFetch, FirmwareStore, MemoryEngine
 /// The store client Studio holds: a type-erased fetch at one origin.
 pub type StudioFirmwareStore = FirmwareStore<Rc<dyn FirmwareFetch>>;
 
-/// The engine cache and the store, as the device effects hold them.
+/// The engine cache, the store and the bundle, as the device effects hold
+/// them.
 pub struct DeviceFirmwareSources {
     engine_cache: Rc<dyn EngineCache>,
     store: Option<Rc<StudioFirmwareStore>>,
+    bundle: Option<BundleFirmware>,
+}
+
+/// Where this Studio's flasher reads its packages: a fetch and the
+/// `firmware/` base the package manifests sit under
+/// (`<base>/<build id>/manifest.json`, the flasher's own rule).
+#[derive(Clone)]
+pub struct BundleFirmware {
+    pub fetch: Rc<dyn FirmwareFetch>,
+    base: String,
+}
+
+impl BundleFirmware {
+    /// The package manifest URL the flasher used for `build_id`.
+    pub fn manifest_url(&self, build_id: &str) -> String {
+        format!("{}/{build_id}/manifest.json", self.base)
+    }
 }
 
 impl Default for DeviceFirmwareSources {
@@ -29,6 +49,7 @@ impl Default for DeviceFirmwareSources {
         Self {
             engine_cache: Rc::new(MemoryEngineCache::new()),
             store: None,
+            bundle: None,
         }
     }
 }
@@ -52,6 +73,20 @@ impl DeviceFirmwareSources {
     /// The firmware store, once the shell installed one.
     pub fn store(&self) -> Option<Rc<StudioFirmwareStore>> {
         self.store.clone()
+    }
+
+    /// Install where the flasher's packages are read from (the bundle's
+    /// `firmware/` base, same-origin in the browser).
+    pub fn set_bundle(&mut self, fetch: Rc<dyn FirmwareFetch>, base: &str) {
+        self.bundle = Some(BundleFirmware {
+            fetch,
+            base: base.trim_end_matches('/').to_string(),
+        });
+    }
+
+    /// The bundle's packages, once the shell installed a fetch for them.
+    pub fn bundle(&self) -> Option<BundleFirmware> {
+        self.bundle.clone()
     }
 }
 

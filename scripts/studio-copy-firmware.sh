@@ -9,15 +9,20 @@
 #
 # Always: `manifest.json` and the `*.bin` beside it (the flasher's merged
 # image). For a SPLIT package (its manifest has a `split` block) also the
-# package's update files, into `<dest>/<build_id>/ota/` (OTA M7 P8, DS10):
-# `ota-manifest.json`, `core.z`, `engine.z` — never `core.bin` /
+# package's update files, beside the manifest in `<dest>/<build_id>/` (OTA
+# M7 P8, DS10): `ota-manifest.json`, `core.z`, `engine.z` — never `core.bin` /
 # `engine.bin`, which Studio slices out of the merged image by the `split`
 # offsets. They must be THIS package's: `ota-manifest.json`'s `package`
 # entry must hash the copied `manifest.json`, or the build fails with the
 # recipe to run (a stale parts directory from another package is the case
-# this catches). A single-image package (the fast local build) gets no
-# `ota/`, and a stale one in the destination is removed, so the bundle
+# this catches). A single-image package (the fast local build) gets none
+# of the three, and stale ones in the destination are removed, so the bundle
 # never offers an update its firmware cannot take.
+#
+# Two segments under `firmware/`, never three: on lightplayer.app every
+# `/firmware/<target>/<release>/<file>` path belongs to lp-cloud-server's
+# firmware lookup, which answers it before the static bundle is consulted
+# (docs/defects/2026-10-06-the-bundles-ota-files-are-shadowed-by-the-firmware-lookup.md).
 #
 # Used by `studio-web-copy-sidecars` and `studio-dev`'s asset sync loop.
 set -euo pipefail
@@ -40,8 +45,11 @@ const m = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
 process.stdout.write(m.split ? "yes" : "no");
 ' "${src}/manifest.json")"
 
+# The update files' old home (`ota/`, three segments deep) never comes back.
+rm -rf "${out}/ota"
+
 if [[ "${split}" != "yes" ]]; then
-    rm -rf "${out}/ota"
+    rm -f "${out}/ota-manifest.json" "${out}/core.z" "${out}/engine.z"
     exit 0
 fi
 
@@ -68,5 +76,4 @@ if (!ota.package || ota.package.sha256 !== sha || ota.package.length !== bytes.l
 }
 ' "${parts}/ota-manifest.json" "${src}/manifest.json"
 
-mkdir -p "${out}/ota"
-cp "${parts}/ota-manifest.json" "${parts}/core.z" "${parts}/engine.z" "${out}/ota/"
+cp "${parts}/ota-manifest.json" "${parts}/core.z" "${parts}/engine.z" "${out}/"

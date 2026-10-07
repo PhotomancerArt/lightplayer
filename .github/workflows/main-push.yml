@@ -89,4 +89,9 @@ jobs:
           echo "## Changes" > release_notes.md
           echo "" >> release_notes.md
           echo "${NOTES}" >> release_notes.md
-          gh release create "${TAG}" --title "Release ${APP_VERSION}" --notes-file release_notes.md --latest
+          # NOT Latest. Latest is set by release-firmware.yml once this
+          # release carries its firmware, so `releases/latest` never points
+          # at a release without assets (lightplayer.app's
+          # `/firmware/<target>/latest` reads it). That workflow rides this
+          # one's success; nothing else here changes, so it stays ~90 s.
+          gh release create "${TAG}" --title "Release ${APP_VERSION}" --notes-file release_notes.md --latest=false

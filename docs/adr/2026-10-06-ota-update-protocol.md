@@ -332,3 +332,55 @@ Proven by host tests (`fw-esp32-common` radio-link, `lpa-server`'s
 Bluetooth from Mac Chrome (refusal, X→Y with `Z`, a power cut that
 resumed, a heal with no login, five in a row, one with no USB host): the
 record is in `docs/reports/2026-10-06-ota-iphone-walk.md`.
+## Amendment (2026-10-06): a USB update in half the time
+
+An lp-cli USB update, X → Y on the bench C6 (`A0:F2:62:87:B4:8C`), took
+**67.5 s** and now takes **32.1 s** (two runs each, same desk, same host).
+espflash writes the same image in about 14.5 s. The board's own profile, the
+`[OTA] timing` lines (`fw-esp32c6/src/ota/update_timing.rs`), showed where
+the time went. Four changes, none of them on the wire:
+
+Stage times are the host's (from the start, or the reset that began the
+stage, to the reset that ended it), runs 1 and 2:
+
+| stage | before | after | what moved it |
+|---|---:|---:|---|
+| backup (read-back of X's engine) | 21.1 / 21.2 s | 10.4 / 10.3 s | the read-back streams (below), and USB pulls four `G`s ahead |
+| core (1.22 MB), to its reset | 18.9 / 18.4 s | 8.7 / 8.7 s | block erase, the lookup-table inflate, the accelerator hash, four ahead |
+| engine (1.83 MB), to its reset | 27.1 / 28.4 s | 12.6 / 12.7 s | the same |
+| last reset → `UpToDate` | 0.5 / 0.5 s | 0.5 / 0.5 s | — |
+| **total** | **67.5 / 68.5 s** | **32.1 / 32.1 s** | |
+
+- **Whole 64 KiB blocks are erased ahead of their chunks.** A sector erase
+  cost 20–22 ms of every 4 KiB chunk, a third of the update. The C6's part
+  erases a 64 KiB block in ~93 ms, against ~330 ms for its sixteen sectors.
+  A chunk that starts a block the piece wholly holds, none of it written,
+  erases the block (`UpdateTarget::block_size`/`erase_block`), and the
+  block's chunks are then programmed without an erase. What is known erased
+  is RAM only (`Transfer::erased`). A cut, a resume, a fault or a read-back
+  mismatch forgets it, so an unmarked chunk is still written again from an
+  erase. The fence, header-last, the commit word and the order inside a
+  chunk (program → read back → mark) are unchanged. The cut-after-every-
+  flash-operation tests run on a model that erases blocks and on one that
+  does not.
+- **The piece's SHA-256 runs on the accelerator** (`UpdateTarget::
+  sha256_flash`, `BootSha256` fed from the ROM's reads): ~1.3 s → 0.5 s for
+  the core, ~1.9 s → 0.8 s for the engine. Same digest, still the check a
+  piece commits on.
+- **`lp-deflate` decodes Huffman codes through a 9-bit lookup table**, with
+  the bit-at-a-time loop for longer codes, unused code space and a stream's
+  last bits: ~7.8 → ~4.2 ms of inflate a chunk.
+- **A streaming update channel is pumped between frames.** The running
+  engine answered one read-back `G` per server-loop pass, so a backup went at
+  the frame rate (~45 ms a sector). While channel-3 messages keep arriving
+  (one within 15 ms), the USB transport keeps pumping the link for up to
+  40 ms before the loop renders. The engine still renders between those
+  bursts.
+- **`ServeConfig::USB` is `ahead` 4**, as BLE's already was: the next
+  chunks arrive while the board decodes and writes this one. Board-side, v1
+  already allowed it (a chunk that is not its turn is ignored; `G`s may
+  queue).
+
+Protocol v1, lp-link and every on-flash format are unchanged: no flag, no
+version, no new message. The core grew by 3,600 B (1,219,072 →
+1,222,672 B), and the split image's steady headroom is 300,714 B.

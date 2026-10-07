@@ -829,6 +829,20 @@ impl DeviceEffects {
             }
         );
         let layout = self.layout.clone();
+        // A flash keeps the engine it installs (OTA M5, D19): the package
+        // the flasher read, read back from the same place after the
+        // install's success is reported.
+        let keep = match &effect {
+            EffectRequest::Flash { build_id, .. } => {
+                self.firmware.bundle().map(|bundle| InstallKeep {
+                    manifest_url: bundle.manifest_url(build_id),
+                    fetch: bundle.fetch,
+                    cache: self.firmware.engine_cache(),
+                    clock: self.clock.clone(),
+                })
+            }
+            _ => None,
+        };
         let call = match resolve_effect_call(effect, payload, || layout.plan_for_flash(device)) {
             Ok(call) => call,
             Err(message) => {
@@ -923,6 +937,11 @@ impl DeviceEffects {
                             summary: facts.summary,
                         },
                     ));
+                    // After the outcome, never before it: keeping the
+                    // engine must not fail or delay the install.
+                    if let Some(keep) = keep {
+                        keep.run().await;
+                    }
                 }
                 Err(message) => {
                     sink(effect_ended(
@@ -1389,6 +1408,36 @@ fn effect_ended(
         effect: Some(effect_id),
         marker: ActivityMarker::Ended { kind, outcome },
     })
+}
+
+/// What a successful flash needs to keep the engine it installed.
+struct InstallKeep {
+    manifest_url: String,
+    fetch: Rc<dyn lpa_firmware_store::FirmwareFetch>,
+    cache: Rc<dyn lpa_firmware_store::EngineCache>,
+    clock: Option<Rc<dyn Fn() -> f64>>,
+}
+
+impl InstallKeep {
+    /// Keep the engine, or say in one line why not. Only ever logs.
+    async fn run(self) {
+        let now = self.clock.as_ref().map_or(0.0, |clock| clock());
+        match lpa_firmware_store::keep_installed_engine(
+            self.fetch.as_ref(),
+            self.cache.as_ref(),
+            &self.manifest_url,
+            now,
+        )
+        .await
+        {
+            Ok(lpa_firmware_store::KeptEngine::Kept { sha256, build_id }) => log::info!(
+                "firmware cache: kept engine {} (installed, {build_id})",
+                &sha256[..8]
+            ),
+            Ok(lpa_firmware_store::KeptEngine::NotSplit) => {}
+            Err(why) => log::warn!("firmware cache: could not keep the installed engine: {why}"),
+        }
+    }
 }
 
 /// Which activity a coarse effect belongs to.
