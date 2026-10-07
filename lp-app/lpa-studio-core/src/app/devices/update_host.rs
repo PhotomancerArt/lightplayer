@@ -94,10 +94,10 @@ use super::device_update_route::UpdateLink;
 use super::device_update_version::UpdateVersion;
 use super::own_build_source::{OwnBuildSource, verified_own_build};
 use super::update_auto_start::{board_build_facts, board_engine_sha};
-use super::update_build_facts::StoreLatest;
+use super::update_build_facts::{StoreLatest, StoreReleases};
 use super::update_driver_mirror::{decision_facts, driver_intent, outcome_facts, stage_facts};
 use super::update_narration::{NarrationNames, UpdateNarration};
-use super::update_store_builds::{store_build, store_engine, store_latest};
+use super::update_store_builds::{store_build, store_engine, store_latest, store_releases};
 
 /// How often a run's driver is ticked (a login backoff; the Waiting ask).
 const TICK_INTERVAL: Duration = Duration::from_millis(250);
@@ -202,6 +202,8 @@ impl UpdateHost {
                     pins: BTreeMap::new(),
                     latest: None,
                     latest_asked: None,
+                    releases: None,
+                    releases_asked: None,
                 })
             }),
         }
@@ -349,6 +351,18 @@ impl UpdateHost {
     pub(crate) fn store_latest(&self) -> Option<StoreLatest> {
         self.state.borrow().latest.clone()
     }
+
+    /// Ask the store for its release index of `target`, once per target
+    /// and store epoch (a miss, a 404 or a refused index is "no list" until
+    /// the epoch moves).
+    pub(crate) fn want_store_releases(&self, target: &str) {
+        HostState::want_store_releases(&self.state, target);
+    }
+
+    /// The store's release index, once it answered with one.
+    pub(crate) fn store_releases(&self) -> Option<StoreReleases> {
+        self.state.borrow().releases.clone()
+    }
 }
 
 /// A run's remembered failure (see [`UpdateHost::auto_blocked`]).
@@ -431,6 +445,8 @@ struct HostState {
     pins: BTreeMap<DeviceId, String>,
     latest: Option<StoreLatest>,
     latest_asked: Option<(String, u64)>,
+    releases: Option<StoreReleases>,
+    releases_asked: Option<(String, u64)>,
 }
 
 impl HostState {
@@ -1491,6 +1507,44 @@ impl HostState {
                         state.note_store_answer(true);
                         // Asked again when the store is back.
                         state.latest_asked = None;
+                    }
+                }
+            }
+        }));
+    }
+
+    fn want_store_releases(cell: &Rc<RefCell<Self>>, target: &str) {
+        let mut state = cell.borrow_mut();
+        let Some(seams) = state.seams.clone() else {
+            return;
+        };
+        let Some(store) = seams.store.clone() else {
+            return;
+        };
+        let asked = (target.to_string(), state.store_epoch);
+        if state.releases_asked.as_ref() == Some(&asked) {
+            return;
+        }
+        state.releases_asked = Some(asked);
+        let me = state.me.clone();
+        let target = target.to_string();
+        (seams.spawn)(Box::pin(async move {
+            let answer = store_releases(store, target).await;
+            let Some(cell) = me.upgrade() else {
+                return;
+            };
+            let mut state = cell.borrow_mut();
+            match answer {
+                Ok(index) => {
+                    state.note_store_answer(false);
+                    state.releases = index.map(|index| StoreReleases { index });
+                }
+                Err(miss) => {
+                    log::debug!("firmware store: no release index: {}", miss.why);
+                    if miss.offline {
+                        state.note_store_answer(true);
+                        // Asked again when the store is back.
+                        state.releases_asked = None;
                     }
                 }
             }

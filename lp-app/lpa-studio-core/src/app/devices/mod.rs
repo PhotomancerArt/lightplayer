@@ -99,6 +99,7 @@ pub mod device_update_version;
 pub mod device_update_words;
 pub mod devices_op;
 pub mod emu_transport;
+pub mod install_choice;
 pub mod lan_addresses;
 pub mod lan_link_view;
 pub mod lan_transport;
@@ -216,9 +217,12 @@ pub use device_transport::{
     DeviceTransportFuture, GrantedLink, LensLineTap, LensTapEvent,
 };
 pub use device_update_offers::{
-    INSTALL_VERSION_PARAM, UpdateOfferFacts, UpdateOffers, update_offers,
+    INSTALL_ALL_VERSIONS_PARAM, INSTALL_LIST_UNAVAILABLE, INSTALL_VERSION_PARAM, UpdateOfferFacts,
+    UpdateOffers, update_offers,
 };
-pub use device_update_route::{USB_UPDATES_OVER_THE_AIR, UpdateLink, UpdateRoute, update_route};
+pub use device_update_route::{
+    FIRST_BLUETOOTH_UPDATE_RELEASE, USB_UPDATES_OVER_THE_AIR, UpdateLink, UpdateRoute, update_route,
+};
 pub use device_update_standing::{
     UpdateStanding, UpdateStandingInputs, update_standing, wants_auto_start,
 };
@@ -230,6 +234,9 @@ pub use device_update_words::{
 pub use devices_op::{DeviceFace, DevicesOp};
 pub use emu_transport::{
     EmuBacking, EmuDeviceTransport, EmuLinkSource, EmuRuntimeControl, EmuSession,
+};
+pub use install_choice::{
+    InstallChoice, InstallChoiceInputs, RECENT_CHOICES, index_for, install_choices,
 };
 pub use lan_addresses::{LAN_LINK_PATH, LanFlag, normalize_lan_address, parse_lan_flag};
 pub use lan_link_view::{UiLanLink, lan_link_for_endpoint, lan_link_view};
@@ -258,7 +265,7 @@ pub use sim_transport::{
 };
 pub use target_offer::{TargetChoice, TargetGroup, TargetOffer, TargetScope, target_offer};
 pub use ui_link_kind::UiLinkKind;
-pub use update_build_facts::{StoreLatest, UpdateBuildFacts};
+pub use update_build_facts::{StoreLatest, StoreReleases, UpdateBuildFacts};
 pub use update_host::UpdateHost;
 pub use wifi_address_book::{WIFI_ADDRESSES_STORAGE_KEY, WifiAddress, WifiAddressBook};
 pub use wifi_connect_failure::{WIFI_BLOCKED_WORDS, WIFI_BUSY_WORDS, WifiConnectFailure};

@@ -95,11 +95,13 @@ pub use app::devices::{
 };
 pub use app::devices::{DeviceFirmwareSources, StudioFirmwareStore};
 pub use app::devices::{
-    INSTALL_VERSION_PARAM, StoreLatest, USB_UPDATES_OVER_THE_AIR, UiDeviceUpdate, UiSessionUpdate,
-    UpdateBuildFacts, UpdateLight, UpdateLink, UpdateOfferFacts, UpdateOffers, UpdateProgress,
-    UpdateRoute, UpdateRowKind, UpdateRunTone, UpdateRunWord, UpdateStanding, UpdateStandingInputs,
-    UpdateVersion, UpdateVersionDisplay, update_offers, update_route, update_session_words,
-    update_standing, update_words, wants_auto_start,
+    FIRST_BLUETOOTH_UPDATE_RELEASE, INSTALL_ALL_VERSIONS_PARAM, INSTALL_LIST_UNAVAILABLE,
+    INSTALL_VERSION_PARAM, InstallChoice, RECENT_CHOICES, StoreLatest, StoreReleases,
+    USB_UPDATES_OVER_THE_AIR, UiDeviceUpdate, UiSessionUpdate, UpdateBuildFacts, UpdateLight,
+    UpdateLink, UpdateOfferFacts, UpdateOffers, UpdateProgress, UpdateRoute, UpdateRowKind,
+    UpdateRunTone, UpdateRunWord, UpdateStanding, UpdateStandingInputs, UpdateVersion,
+    UpdateVersionDisplay, update_offers, update_route, update_session_words, update_standing,
+    update_words, wants_auto_start,
 };
 pub use app::devices::{LINK_COUNTERS_CAPTION, LinkTrouble, UiLinkCounterRow, link_counter_rows};
 pub use app::devices::{

@@ -10,7 +10,10 @@
 //! only builds inputs.
 //!
 //! The sample board is the update-states spike's: on X `2026.10.03-1`,
-//! with this Studio carrying Y `2026.10.05-2`.
+//! with this Studio carrying Y `2026.10.05-2`. The store's release index
+//! ([`release_index`]) lists fourteen releases over five days, X and Y
+//! among them, the oldest five in an older wire language than this
+//! Studio's.
 //!
 //! [`update_standing`]: super::device_update_standing::update_standing
 //! [`update_offers`]: super::device_update_offers::update_offers
@@ -22,6 +25,7 @@ use lpa_devices::{
 };
 use lpa_update::{HostBuildFacts, HostIdentity, HostPieceFacts};
 use lpc_access::Tier;
+use lpc_firmware_release::{ReleaseIndex, ReleaseIndexEntry, Requires, TargetName};
 use lpc_update::{BoardManifest, BoardState, PieceKind, TransferView, sha256_to_hex};
 
 use super::device_identity::device_chip;
@@ -31,6 +35,7 @@ use super::device_update_standing::UpdateStandingInputs;
 use super::device_update_words::{
     UiDeviceUpdate, UiSessionUpdate, update_session_words, update_words,
 };
+use super::update_build_facts::StoreReleases;
 
 /// One row of the update-states table, as a fixture builds it. The link a
 /// row is told over is the view's own (a Bluetooth view, a USB one).
@@ -104,6 +109,9 @@ pub struct UpdateFixture {
     pub tier: Option<Tier>,
     /// The link the board is reached over (the view's).
     pub link: UpdateLink,
+    /// The store's release index ([`release_index`]); `None` is a Studio
+    /// that could not read it ([`Self::offline`]).
+    pub releases: Option<StoreReleases>,
 }
 
 impl UpdateFixture {
@@ -173,7 +181,17 @@ impl UpdateFixture {
             own: studio_y(),
             tier,
             link,
+            releases: Some(StoreReleases {
+                index: release_index(),
+            }),
         }
+    }
+
+    /// The same board, with no release index: only this Studio's build to
+    /// choose from, and the list says why.
+    pub fn offline(mut self) -> Self {
+        self.releases = None;
+        self
     }
 
     /// The standing's inputs, as the controller assembles them.
@@ -185,6 +203,7 @@ impl UpdateFixture {
             tier: self.tier,
             link: self.link,
             store_latest: None,
+            store_releases: self.releases.as_ref(),
         }
     }
 
@@ -411,6 +430,48 @@ pub fn with_update_intent(
         view.escapes.insert(0, Escape::Cancel);
     }
     view
+}
+
+/// The store's release index for the sample target: fourteen releases,
+/// newest first, from `2026.10.07-4` (the newer board's) down to
+/// `2026.10.02-1`, X and Y among them. The five oldest speak the wire
+/// language before this Studio's.
+pub fn release_index() -> ReleaseIndex {
+    const RELEASES: [(&str, &str); 14] = [
+        ("2026.10.07-4", "2026-10-07T16:28:38Z"),
+        ("2026.10.07-3", "2026-10-07T13:54:40Z"),
+        ("2026.10.07-2", "2026-10-07T12:32:57Z"),
+        ("2026.10.07-1", "2026-10-07T09:12:05Z"),
+        ("2026.10.05-2", "2026-10-05T21:40:11Z"),
+        ("2026.10.05-1", "2026-10-05T17:03:52Z"),
+        ("2026.10.04-3", "2026-10-04T22:15:30Z"),
+        ("2026.10.04-2", "2026-10-04T18:47:09Z"),
+        ("2026.10.04-1", "2026-10-04T11:20:44Z"),
+        ("2026.10.03-4", "2026-10-03T23:05:18Z"),
+        ("2026.10.03-3", "2026-10-03T19:31:02Z"),
+        ("2026.10.03-2", "2026-10-03T15:58:27Z"),
+        ("2026.10.03-1", "2026-10-03T10:44:13Z"),
+        ("2026.10.02-1", "2026-10-02T20:09:36Z"),
+    ];
+    let target = TargetName::parse("esp32c6-4mb").expect("the sample target");
+    let entries = RELEASES
+        .iter()
+        .enumerate()
+        .map(|(at, (version, published))| ReleaseIndexEntry {
+            version: version.to_string(),
+            commit: format!("{}{}", commit_for(version), "0".repeat(28)),
+            wire_proto: match at {
+                0..9 => lpc_wire::WIRE_PROTO_VERSION,
+                _ => lpc_wire::WIRE_PROTO_VERSION - 1,
+            },
+            requires: Requires {
+                layout: 1,
+                loader: 1,
+            },
+            published_at: Some(published.to_string()),
+        })
+        .collect();
+    ReleaseIndex::newest_first(&target, entries)
 }
 
 /// A stable fake commit per version (a dev version is its own commit).

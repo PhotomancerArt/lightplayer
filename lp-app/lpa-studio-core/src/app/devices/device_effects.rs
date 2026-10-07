@@ -356,6 +356,13 @@ impl DeviceEffects {
         self.update.want_store_latest(target);
     }
 
+    /// Ask the store for its release index of `target` (once per target
+    /// and store epoch).
+    pub(crate) fn want_store_releases(&mut self, target: &str) {
+        self.refresh_update_seams();
+        self.update.want_store_releases(target);
+    }
+
     /// The layout step's state (the C6 repartition): backup store, staged
     /// plans, the cached backup index.
     pub fn layout(&self) -> &super::device_layout_effect::LayoutEffects {

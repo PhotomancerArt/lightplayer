@@ -17,7 +17,7 @@
 //! | `flash` | the needs-firmware faces ([`flash_device_offer`]) |
 //! | `update-firmware` | over the air: an update available ([`update_offers`], Routine); else the USB flash on a running LightPlayer ([`update_firmware_offer`], Lasting) |
 //! | `reinstall-firmware` | the board's firmware keeps crashing ([`update_offers`]) |
-//! | `install-firmware` | keeps crashing ("Other version…") or needs a version Studio can't get ("Install Y"): one `version` choice ([`update_offers`]) |
+//! | `install-firmware` | an idle board that can update over the air — up to date, update available, newer, rolled back, keeps crashing ("Other version…") or needs a version Studio can't get ("Install Y"): a `version` choice over the store's release index, and `all_versions` ([`update_offers`]) |
 //! | `erase` | linked, idle, not a needs-firmware face (erasing a blank flash does nothing), and not where the update standing withdraws it ([`update_offers`]) |
 //! | `identify` | linked and idle, where Retry (the same `Identify`) is not already offered |
 //! | `connect` | the port is there but closed |
@@ -533,6 +533,7 @@ mod tests {
                     to: y.clone(),
                 },
                 route: UpdateRoute::OverTheAir,
+                ..Default::default()
             },
             ..facts(DeviceFace::Wire)
         };
@@ -561,11 +562,20 @@ mod tests {
 
         let crashing = DeviceOfferFacts {
             update: UpdateOfferFacts {
-                standing: UpdateStanding::KeepsCrashing {
-                    board: y.clone(),
-                    choices: vec![y, UpdateVersion::new("2026.10.07-4")],
-                },
+                standing: UpdateStanding::KeepsCrashing { board: y },
                 route: UpdateRoute::OverTheAir,
+                choices: vec![crate::InstallChoice {
+                    version: UpdateVersion::new("2026.10.07-4"),
+                    age: lpa_devices::FirmwareAge::Older,
+                    on_board: false,
+                    refused: false,
+                    own: false,
+                    wire: None,
+                    needs_usb_after: false,
+                    published_at: None,
+                    recent: true,
+                }],
+                listed: true,
             },
             ..facts(DeviceFace::Wire)
         };

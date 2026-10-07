@@ -1,6 +1,6 @@
 //! What this Studio knows about the builds it could put on a board: its own
-//! build, and the firmware store's `latest`, by their facts alone (DS5: a
-//! card decides without loading a build's bytes).
+//! build, the firmware store's `latest`, and the store's release index, by
+//! their facts alone (DS5: a card decides without loading a build's bytes).
 //!
 //! The controller owns one [`UpdateBuildFacts`]. It starts empty, and with
 //! it empty nothing changes on any card: every board's update standing is
@@ -9,9 +9,16 @@
 //! [`UpdateBuildFacts::set_own`] from this Studio's bundled
 //! `ota-manifest.json` at start, [`UpdateBuildFacts::set_store_latest`]
 //! when the firmware store answers its `latest` lookup for a board's
-//! target — and from then on every card reads its standing against them.
+//! target, [`UpdateBuildFacts::set_store_releases`] when it answers the
+//! release index for that target — and from then on every card reads its
+//! standing and its version choices against them.
+//!
+//! The store's answers are held for **one target at a time** (the first
+//! target the controller sees, as for `latest`): every board in the field
+//! today is one target. Holding one per target is future work.
 
 use lpa_update::HostBuildFacts;
+use lpc_firmware_release::ReleaseIndex;
 
 /// The firmware store's latest release for a target, by its facts: the
 /// second version "Other version…" can offer (DS7), when it is not this
@@ -34,12 +41,28 @@ impl StoreLatest {
     }
 }
 
-/// This Studio's own build and the store's latest, when known. See the
-/// module docs: empty until the update host fills it.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+/// The firmware store's release index for a target (verified by
+/// `lpa-firmware-store`): every version "Other version…" can list for a
+/// board of that target.
+#[derive(Clone, Debug, PartialEq)]
+pub struct StoreReleases {
+    pub index: ReleaseIndex,
+}
+
+impl StoreReleases {
+    /// The target every listed release was built for.
+    pub fn target(&self) -> &str {
+        &self.index.target
+    }
+}
+
+/// This Studio's own build, the store's latest and its release index, when
+/// known. See the module docs: empty until the update host fills it.
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct UpdateBuildFacts {
     own: Option<HostBuildFacts>,
     store_latest: Option<StoreLatest>,
+    store_releases: Option<StoreReleases>,
 }
 
 impl UpdateBuildFacts {
@@ -53,6 +76,11 @@ impl UpdateBuildFacts {
         self.store_latest.as_ref()
     }
 
+    /// The store's release index, once the store has listed one.
+    pub fn store_releases(&self) -> Option<&StoreReleases> {
+        self.store_releases.as_ref()
+    }
+
     /// Install (or clear) this Studio's own build facts.
     pub fn set_own(&mut self, own: Option<HostBuildFacts>) {
         self.own = own;
@@ -61,6 +89,11 @@ impl UpdateBuildFacts {
     /// Install (or clear) the store's latest release.
     pub fn set_store_latest(&mut self, latest: Option<StoreLatest>) {
         self.store_latest = latest;
+    }
+
+    /// Install (or clear) the store's release index.
+    pub fn set_store_releases(&mut self, releases: Option<StoreReleases>) {
+        self.store_releases = releases;
     }
 }
 
@@ -84,6 +117,14 @@ mod tests {
         let latest = facts.store_latest().unwrap();
         assert_eq!(latest.version(), "2026.10.07-4");
         assert_eq!(latest.target(), "esp32c6-4mb");
+
+        assert!(facts.store_releases().is_none());
+        let index = ReleaseIndex::newest_first(
+            &lpc_firmware_release::TargetName::parse("esp32c6-4mb").unwrap(),
+            Vec::new(),
+        );
+        facts.set_store_releases(Some(StoreReleases { index }));
+        assert_eq!(facts.store_releases().unwrap().target(), "esp32c6-4mb");
 
         facts.set_own(None);
         assert!(facts.own().is_none());

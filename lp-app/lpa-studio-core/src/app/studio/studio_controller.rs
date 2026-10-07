@@ -1581,6 +1581,10 @@ impl StudioController {
         if latest.as_ref() != self.update_build_facts.store_latest() {
             self.update_build_facts_mut().set_store_latest(latest);
         }
+        let releases = host.store_releases();
+        if releases.as_ref() != self.update_build_facts.store_releases() {
+            self.update_build_facts_mut().set_store_releases(releases);
+        }
         // This Studio's own build may arrive after its source was installed
         // (the bundle's reads its manifests asynchronously).
         let own_now = host.own_facts();
@@ -1628,6 +1632,7 @@ impl StudioController {
                     false => crate::UpdateLink::Usb,
                 },
                 store_latest: store_latest.as_ref(),
+                store_releases: None,
             };
             let verdict = auto_start::auto_update_for_standing(&crate::update_standing(&inputs));
             actions.extend(auto_start::auto_action(&host, device.id, evidence, verdict));
@@ -1665,6 +1670,7 @@ impl StudioController {
         self.devices.effects_mut().set_update_watches(watches);
         if let Some(target) = target {
             self.devices.effects_mut().want_store_latest(&target);
+            self.devices.effects_mut().want_store_releases(&target);
         }
         for device in starts {
             self.fold_device_input(crate::DeviceInput::Action(lpa_devices::Action::Update {
@@ -1686,8 +1692,9 @@ impl StudioController {
         self.devices.effects().firmware().store()
     }
 
-    /// This Studio's own build and the store's latest, by their facts —
-    /// what every card's update standing is read against.
+    /// This Studio's own build, the store's latest and its release index,
+    /// by their facts — what every card's update standing and version
+    /// choices are read against.
     pub fn update_build_facts(&self) -> &crate::UpdateBuildFacts {
         &self.update_build_facts
     }
@@ -1726,6 +1733,7 @@ impl StudioController {
             },
             link,
             store_latest: self.update_build_facts.store_latest(),
+            store_releases: self.update_build_facts.store_releases(),
         };
         crate::UpdateOfferFacts::read(
             &inputs,

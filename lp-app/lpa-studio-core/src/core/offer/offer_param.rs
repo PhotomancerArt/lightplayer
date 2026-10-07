@@ -20,6 +20,10 @@ pub struct OfferParam {
     pub label: String,
     /// What kind of value it is, and what is allowed.
     pub kind: OfferParamKind,
+    /// One plain line about the whole parameter, when there is something
+    /// to say (a version list that is shorter than usual because the full
+    /// one cannot be read): renderers draw it under the control.
+    pub note: Option<String>,
 }
 
 /// The kinds of value an offer can take.
@@ -86,6 +90,7 @@ impl OfferParam {
         Self {
             name: name.into(),
             label: label.into(),
+            note: None,
             kind: OfferParamKind::Choice { options, preselect },
         }
     }
@@ -100,6 +105,7 @@ impl OfferParam {
         Self {
             name: name.into(),
             label: label.into(),
+            note: None,
             kind: OfferParamKind::Text {
                 placeholder: placeholder.into(),
                 max_len: None,
@@ -114,8 +120,15 @@ impl OfferParam {
         Self {
             name: name.into(),
             label: label.into(),
+            note: None,
             kind: OfferParamKind::Toggle { value },
         }
+    }
+
+    /// With `note` drawn under the control.
+    pub fn with_note(mut self, note: impl Into<String>) -> Self {
+        self.note = Some(note.into());
+        self
     }
 
     /// Text the press may leave out. No effect on other kinds.

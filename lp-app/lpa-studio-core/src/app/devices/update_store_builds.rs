@@ -1,5 +1,6 @@
 //! What the firmware store gives an update: a released build's facts (the
-//! store's `latest`, for "Other version…", DS7), a whole released build to
+//! store's `latest`, for "Other version…", DS7), the release index (every
+//! version "Other version…" lists), a whole released build to
 //! install, and an engine for a heal or a backup — every file verified
 //! against its `ota-manifest.json` by `lpa-firmware-store` before it is
 //! used.
@@ -15,7 +16,7 @@ use lpa_firmware_store::{FetchError, StoreError, fetch_engine_from_store};
 use lpa_update::decide::StoreAnswer;
 use lpa_update::{EncodedPiece, HostBuild, HostBuildFacts, HostIdentity, HostPieceFacts};
 use lpc_firmware_release::{
-    EncodedPieceFile, OtaManifest, ReleaseSelector, ReleaseVersion, TargetName,
+    EncodedPieceFile, OtaManifest, ReleaseIndex, ReleaseSelector, ReleaseVersion, TargetName,
 };
 
 use super::device_firmware_sources::StudioFirmwareStore;
@@ -58,6 +59,19 @@ pub(crate) async fn store_latest(
         .await
         .map_err(miss)?;
     Ok(manifest.as_ref().and_then(facts_from_ota_manifest))
+}
+
+/// The store's release index for `target` (verified by the store client);
+/// `None` when the store has none.
+pub(crate) async fn store_releases(
+    store: Rc<StudioFirmwareStore>,
+    target: String,
+) -> Result<Option<ReleaseIndex>, StoreMiss> {
+    let target = TargetName::parse(&target).ok_or_else(|| StoreMiss {
+        offline: false,
+        why: format!("{target} is not a target name"),
+    })?;
+    store.releases(&target).await.map_err(miss)
 }
 
 /// Release `version` for `target`, whole, from the store.
