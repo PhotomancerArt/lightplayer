@@ -4874,8 +4874,9 @@ walk-ota-emu *args: install-rv32-target
     node scripts/emu/walk-ota-emu.mjs {{ args }}
 
 # The over-the-air update walk over Bluetooth (OTA M7 P12): walk-ota-emu's
-# update, a drop mid-core (out of range, and Bluefy's phantom drop) finished
-# with no click, and an engine-less board restored on connect — with Studio
+# update, a drop mid-backup that the backup resumes from, a drop mid-core (out
+# of range, and Bluefy's phantom drop) finished with no click, and an
+# engine-less board restored on connect — with Studio
 # reaching the door's boards over `?ble=emu`, whose polyfill makes every
 # board reset a GATT drop. The card must say "Bluetooth" and Studio's
 # terminal must time every reconnect. Builds what walk-ota-emu builds. Proves

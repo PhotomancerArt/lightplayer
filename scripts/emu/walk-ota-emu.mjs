@@ -44,6 +44,11 @@
 // of the board as a GATT drop (the board's radio goes with its CPU). The card
 // must say "Bluetooth", and Studio's terminal must time every reconnect:
 //
+//   cut-backup    the board goes out of range mid-BACKUP (an empty engine
+//                 cache, so the update reads X's engine back first) and comes
+//                 back: the backup resumes where it was, and the update
+//                 finishes with no click (2026-10-07: on silicon a drop
+//                 there ended the update; also walkable over `?emu=`)
 //   cut-core      the board goes out of range mid-core (the banner's
 //                 `detach`: the GATT connection drops and connects fail until
 //                 `attach`), comes back: the update finishes with no click
@@ -86,10 +91,10 @@ const TAB = ARGS.includes("--tab");
 const BLE = ARGS.includes("--ble");
 const STEPS_ARG = ARGS.includes("--steps") ? ARGS[ARGS.indexOf("--steps") + 1].split(",") : null;
 /// Every step, in the order their boards' MACs are numbered.
-const ALL_STEPS = ["update", "cut-core", "cut-engine", "engine-less", "cant-get", "crashing", "needs-usb", "phantom-core"];
+const ALL_STEPS = ["update", "cut-core", "cut-engine", "engine-less", "cant-get", "crashing", "needs-usb", "phantom-core", "cut-backup"];
 const DOOR_STEPS = ["update", "cut-core", "cut-engine", "engine-less", "cant-get", "crashing", "needs-usb"];
 const TAB_STEPS = ["update", "cut-core", "engine-less"];
-const BLE_STEPS = ["update", "cut-core", "phantom-core", "engine-less"];
+const BLE_STEPS = ["update", "cut-backup", "cut-core", "phantom-core", "engine-less"];
 const STEPS = STEPS_ARG ?? (TAB ? TAB_STEPS : BLE ? BLE_STEPS : DOOR_STEPS);
 /// The link the card must name.
 const LINK_WORD = BLE ? "Bluetooth" : "USB";
@@ -550,6 +555,10 @@ async function main() {
     const label = await pressUpdate();
     let cutAt = null;
     let cutShot = null;
+    /// The cut stage's highest and lowest percent the card showed after the
+    /// cut (a stage that starts over shows its low numbers again).
+    let peakAfterCut = -1;
+    let lowAfterCut = Infinity;
     let lastAir = "";
     let lastAirAt = 0;
     const order = await watchCard(upToDate, "up to date on Y", UPDATE_MS, async (lines) => {
@@ -577,11 +586,18 @@ async function main() {
           );
         }
       }
+      if (cut && cutAt) {
+        const after = Number(lines[cut.stage]?.match(/(\d+)%/)?.[1] ?? -1);
+        peakAfterCut = Math.max(peakAfterCut, after);
+        if (after >= 0) lowAfterCut = Math.min(lowAfterCut, after);
+      }
       if (!cut || cutAt) return;
       const words = boardWords(board).slice(from);
       const line = lines[cut.stage];
       const percent = Number(line?.match(/(\d+)%/)?.[1] ?? -1);
-      if (cut.boardSays.test(words) && percent >= cut.atPercent) {
+      // A running engine says nothing per read-back: a backup's cut has no
+      // board words to wait for.
+      if ((!cut.boardSays || cut.boardSays.test(words)) && percent >= cut.atPercent) {
         cutAt = line;
         if (cut.phantom) {
           // Bluefy's phantom drop: the page is told nothing, the board's side
@@ -628,7 +644,7 @@ async function main() {
         cutAt = `${line} (out for ${Date.now() - back} ms)`;
       }
     });
-    return { label, order, cutAt, cutShot, from };
+    return { label, order, cutAt, cutShot, from, peakAfterCut, lowAfterCut };
   };
 
   // The door writes a board's console file every 2 s (`emu serve`'s
@@ -701,6 +717,52 @@ async function main() {
             };
           });
           break;
+        case "cut-backup": {
+          // An empty cache: the update must read X's engine back first.
+          await clearEngineCache();
+          if (!TAB) await openDoor(name, [xBoard]);
+          else {
+            await loadPage(null);
+            await seedTab("x");
+          }
+          const describe = BLE
+            ? "the board goes out of range mid-backup and comes back: the backup resumes, the update finishes with no click"
+            : "the cable comes out mid-backup and goes back in: the backup resumes, the update finishes with no click";
+          await step(name, describe, async () => {
+            await connect(board);
+            await driver.waitFor(`${MAIN_TEXT}.includes('Ready')`, { timeoutMs: STEP_MS, what: "Ready on X" });
+            const air0 = await bleStats(board);
+            const ran = await runUpdate(board, { cut: { stage: "backing up", boardSays: null, atPercent: 40 } });
+            const air1 = await bleStats(board);
+            if (!ran.cutAt) throw new Error("the walk never found the moment to cut");
+            await settle(board, ran.from);
+            const said = boardSaid(board, ran.from, OTA_WORDS);
+            for (const need of ["core offer", "core confirmed", "engine committed"]) {
+              if (!said[need]) throw new Error(`the board never said ${need}`);
+            }
+            checkLinkWord(ran.order);
+            // The backup went on after the cut: a "Backing up" line past the
+            // percent it was cut at, and the read-back kept in the cache.
+            const cutPercent = Number(ran.cutAt.match(/(\d+)%/)?.[1] ?? 0);
+            if (ran.peakAfterCut <= cutPercent) {
+              throw new Error(`the card never showed the backup past ${cutPercent}% after the cut (peak ${ran.peakAfterCut}%)`);
+            }
+            // Resumed, not started over: it never went back below the cut.
+            if (ran.lowAfterCut < cutPercent) {
+              throw new Error(`the backup started over after the cut: ${ran.lowAfterCut}% after ${cutPercent}%`);
+            }
+            const cache = await engineCache();
+            if (!cache.some((entry) => entry.includes(x.engine.sha256))) {
+              throw new Error(`the engine cache does not hold X's engine after the cut backup: ${JSON.stringify(cache)}`);
+            }
+            const reconnects = checkReconnects(await terminalLines(), air0, air1, 1);
+            return {
+              summary: `cut at ${ran.cutAt}; the backup resumed (never below ${ran.lowAfterCut}%) and went on to ${ran.peakAfterCut}%; X's engine cached; up to date${reconnects ? `; ${reconnects.resets} resets + 1 drop → ${reconnects.timed.length} reconnects timed` : ""}`,
+              card: ran.order, board: said, air: air1, reconnects, cache,
+            };
+          });
+          break;
+        }
         case "cut-core":
         case "cut-engine":
         case "phantom-core": {
