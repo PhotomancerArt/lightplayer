@@ -16,8 +16,11 @@
 //! ```
 //!
 //! Shared by the `seam_*` gate tests; each test file says what it proves.
+//! The network seam's guest, a page of its own, is [`net_guest`].
 
 #![allow(dead_code, reason = "each seam test uses part of the shared guest")]
+
+pub mod net_guest;
 
 use lp_emu_esp32c6::flash::FlashBacking;
 use lp_emu_esp32c6::machine::{Esp32C6Builder, Esp32C6Machine};

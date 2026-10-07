@@ -487,10 +487,75 @@ table, not a chip number — `EM_XTENSA` says LX6/LX7 no more than `EM_RISCV`
 says C6 — and nothing else about the parse is machine-dependent. A `PT_LOAD`
 is a `PT_LOAD`.
 
+### `seam::net` — the virtual LAN (Wi-Fi plan P11)
+
+The medium under the network seam (`net=lan`): a small home network that
+several emulated boards join. `VirtualLan` is a `SeamMedium` holding one
+Ethernet segment (unicast by learned MAC; broadcast, multicast and unknown
+unicast flooded to every port but the sender; one stated latency per frame),
+the networks a board can hear (`VirtualAccessPoint`: a name, a password or
+none, a configured signal, hidden or not), a gateway that answers ARP and
+hands out deterministic DHCP leases, a host TCP port forwarded to each
+board's port 80 (`LanPortForward`), and `LanProbe`, a host-side participant
+tests use to ask the boards their `.local` names and open TCP connections.
+
+It never pretends to be a radio (no airtime, fading, retransmission or
+coexistence), holds no clock rate (`LanConfig::new` takes the chip's cycles
+per microsecond), and runs in guest cycles; only a forward's host side is
+wall-clock, like the USB door. The gateway's and the probe's TCP/IP stacks
+are `smoltcp` (0BSD). Test networks live in `testdata/virtual_lan.toml` and
+are test values only.
+
+A forward's connection follows the address it was opened to: when the
+board's lease moves or goes, the forward closes it (host side too), and one
+whose board stops answering with data waiting is reset after
+`CONNECTION_TIMEOUT` (60 s of LAN time). Both matter more than they look:
+smoltcp rate-limits ARP to **one request a second for the whole stack**, so
+a gateway connection asking for a dead address would hold every other
+connection off its ARP — the moved board's new address and every other
+board's forward (the emulated Wi-Fi walk's W9).
+
+`SharedLan` (P12) is the handle boards, hosts and runners share one LAN
+through (`Arc<Mutex<…>>`, `Send + Sync`), with who drives it on whose clock:
+`LanDriver::Runner` (the lockstep runner's boundaries: deterministic, CI),
+`SelfDriven` (one board's machine, on its guest clock: `emu run`, the tab) or
+`WallClock` (every board's machine on its own thread, the host's clock:
+`emu serve`, not deterministic). `net=lan` is a capability default, so every
+emulated C6 whose image carries the seam engages it, on the LAN its host
+gave it or on an empty one of its own. A wasm build binds no port forward:
+the tab's page has no sockets.
+
+**A run's pace** (`Pace`, `HostPace`). A board can be held to the host's
+clock at its LAN pump: it pumps at least every millisecond of its guest time
+(`HOST_PACE_STEP_US`) and waits there when it has run ahead (at most 50 ms a
+wait, outside the LAN's lock). A board slower than the host is never hurried,
+and a sleep's overshoot is not made up, so a held idle board runs at about
+two thirds of wall speed. Which boards are held is each board's pace, set by
+its host (`SharedLan::set_pace`; `lp-cli emu run --pace`, `emu serve`'s
+`pace=`):
+
+- **unset** (the default, and every existing run): held while a host is
+  connected through any of the LAN's forwards, otherwise as fast as it goes.
+  Unpaced, an idle board's clock ran about 8× the host's, so a host's 1–2 ms
+  round trip was 10–17 ms on the board's clock and its lp-link resend timer
+  and tail probe fired on frames the host had not yet had time to acknowledge
+  (74–95 resent per upload, nothing lost;
+  `docs/defects/2026-10-06-an-emulated-boards-clock-outran-its-lan-host.md`);
+- **`realtime`**: held for the whole run, host or no host (1×, for watching a
+  pattern). It needs the network seam engaged on a self-driven or wall-clock
+  LAN, so a runner's LAN refuses it and the C6 refuses it with no `net=lan`;
+- **`max`**: never held, even with a host connected.
+
+A set pace is in the run's label after its seam atoms,
+`lp-emu:esp32c6:t1+net=lan@pace=realtime` (`Pace::label_suffix`), never as a
+`+` atom: a pace is not a seam. An unset one adds nothing. A runner's LAN,
+and so the lockstep runner and CI, never waits.
+
 ## Tests
 
 ```bash
 cargo test -p lp-emu-core -p lp-emu-esp-common
+cargo test -p lp-emu-esp-common seam::net   # the virtual LAN alone
 ```
 
 `tests/elf_image.rs` reads a real rv32 firmware ELF **if one is already on

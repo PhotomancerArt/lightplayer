@@ -667,9 +667,7 @@ pub fn replay(
     //
     // Stated in `validate.toml`, never inferred from the configuration's name.
     let cfg = crate::config::ValidateConfig::embedded();
-    let records_pins = |t: &Transcript| -> Result<bool> {
-        Ok(cfg.configuration(&t.header.configuration)?.records_pins)
-    };
+    let records_pins = |t: &Transcript| -> Result<bool> { Ok(live_entry(&cfg, t)?.records_pins) };
     let (left_pins, right_pins) = (records_pins(left)?, records_pins(right)?);
     // Said in the report rather than silently skipped: a replay that cannot
     // compare pins must not read as one that compared them and agreed.
@@ -678,10 +676,11 @@ pub fn replay(
         (true, true, true) => None,
         (true, false, false) => Some(format!(
             "neither {} nor {} records pins",
-            left.header.configuration, right.header.configuration
+            left.header.label(),
+            right.header.label()
         )),
-        (true, false, true) => Some(format!("{} records none", left.header.configuration)),
-        (true, true, false) => Some(format!("{} records none", right.header.configuration)),
+        (true, false, true) => Some(format!("{} records none", left.header.label())),
+        (true, true, false) => Some(format!("{} records none", right.header.label())),
     };
 
     if payload.pin_capture.is_on() && left_pins && right_pins {
@@ -752,7 +751,7 @@ pub fn replay(
                 if grade < Grade::Measured {
                     grade_problems.push(format!(
                         "strict: {side} configuration `{}` is graded `{grade}` for {class}{}",
-                        t.header.configuration,
+                        t.header.label(),
                         t.header
                             .trust
                             .because(class)
@@ -783,7 +782,7 @@ pub fn replay(
     // which matters: "never edit a transcript" and "a band is Yona's to
     // choose" would otherwise be in direct conflict.
     fn band_of(t: &Transcript, cfg: &crate::config::ValidateConfig) -> Option<Band> {
-        cfg.configuration(&t.header.configuration)
+        live_entry(cfg, t)
             .ok()
             .and_then(|c| c.trust.band(FieldClass::Timing).cloned())
             .or_else(|| t.header.trust.band(FieldClass::Timing).cloned())
@@ -802,17 +801,17 @@ pub fn replay(
         // configuration pair in the tree does this today.
         (Some(b), Some(_)) => Some(AppliedBand {
             band: b,
-            stated_by: left.header.configuration.clone(),
+            stated_by: left.header.label(),
             invert: false,
         }),
         (Some(b), None) => Some(AppliedBand {
             band: b,
-            stated_by: left.header.configuration.clone(),
+            stated_by: left.header.label(),
             invert: true,
         }),
         (None, Some(b)) => Some(AppliedBand {
             band: b,
-            stated_by: right.header.configuration.clone(),
+            stated_by: right.header.label(),
             invert: false,
         }),
     };
@@ -821,8 +820,8 @@ pub fn replay(
         payload: payload.name,
         left_name: describe(left),
         right_name: describe(right),
-        left_config: left.header.configuration.clone(),
-        right_config: right.header.configuration.clone(),
+        left_config: left.header.label(),
+        right_config: right.header.label(),
         mask_set: payload.mask_set,
         comparisons,
         series_summaries,
@@ -834,11 +833,24 @@ pub fn replay(
     })
 }
 
+/// The live `validate.toml` entry a transcript was recorded on: its label
+/// (`…+net=lan`, the base with each engaged seam's overlay), else the base
+/// configuration when the live table no longer knows an overlay the capture
+/// was recorded with. A seam-free capture's label is its configuration, so
+/// for every committed transcript this is exactly the lookup it always had.
+fn live_entry<'a>(
+    cfg: &'a crate::config::ValidateConfig,
+    t: &Transcript,
+) -> Result<std::borrow::Cow<'a, crate::config::ConfigurationEntry>> {
+    cfg.configuration(&t.header.label())
+        .or_else(|_| cfg.configuration(&t.header.configuration))
+}
+
 fn describe(t: &Transcript) -> String {
     t.path
         .as_ref()
         .map(|p| p.display().to_string())
-        .unwrap_or_else(|| format!("<{}>", t.header.configuration))
+        .unwrap_or_else(|| format!("<{}>", t.header.label()))
 }
 
 fn index_series(

@@ -21,6 +21,12 @@
 //! board nobody had open. `--monitor` (a reader from power-on) or `--usb-host
 //! attached` is how to ask for that console on the wire.
 //!
+//! `--lan <fixture.toml>` puts the board on a virtual LAN with the fixture's
+//! networks in range (Wi-Fi plan P12) and prints its forward,
+//! `lan:127.0.0.1:<port>`: once the board has joined (a network saved over
+//! USB with `lp-cli wifi add`), `lp-cli … lan:127.0.0.1:<port>` reaches it as
+//! a board on a desk's network. `--seam-trace <file>` keeps the seams' calls.
+//!
 //! `lp-cli emu serve` is the second door, and the one a browser can reach
 //! (plan two M1). It holds N named boards rather than one, outlives any one
 //! of them, and exposes each as the same two channels the TCP pair already
@@ -38,6 +44,7 @@
 
 pub mod args;
 mod handler;
+mod lan_fixture;
 pub mod link_host;
 mod run_hosted;
 mod run_s3;

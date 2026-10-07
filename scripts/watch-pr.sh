@@ -173,9 +173,9 @@ snapshot() {
     # id, so it ties on runid; its jobs have larger job ids (/job/<id>).
     def jobid: ((.detailsUrl // "") | [capture("/job/(?<n>[0-9]+)")] | (.[0].n // "0") | tonumber);
     def order: [runid, jobid];
-    # Latest run per check wins: a re-run (an edited event re-triggers CI on
-    # the same head and cancels the run before it) leaves the checks of the
-    # old run in the rollup, and a stale cancel must not count against a later
+    # Latest run per check wins: a re-run, a reopen, or a close-and-reopen can
+    # still put several runs on one head, and the checks of the older runs
+    # stay in the rollup; a stale cancel must not count against a later
     # green. StatusContexts have no run and pass through.
     def latest:
       [.[] | select(.__typename == "StatusContext")]
@@ -246,7 +246,9 @@ no_ci_diagnostic() {
   cat >&2 <<EOF
 no checks registered for $tag after ${REGISTER_TIMEOUT}s. Likely causes:
   - path-filtered CI: no workflow job matches this diff (.github/workflows)
-  - stacked PR: base '$base' — CI only runs against main; retarget the PR
+  - stacked PR: base '$base' — CI only runs against main; retarget the PR,
+    then push a commit or close and reopen it (retargeting alone starts no
+    CI): docs/debt/stacked-pr-retarget-gets-no-ci.md
   - the last push was made with GITHUB_TOKEN (e.g. story-baseline
     auto-commit), which never triggers workflows — push any commit to kick CI
 EOF

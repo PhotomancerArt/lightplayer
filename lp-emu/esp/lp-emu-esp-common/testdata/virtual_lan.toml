@@ -1,0 +1,29 @@
+# The virtual LAN's test networks (`src/seam/net/`).
+#
+# TEST VALUES ONLY. Never put a real network's name or password here: these
+# are committed, and the emulator prints the names it hears.
+#
+# One [[access_point]] per network in range. `password` absent: an open
+# network. `signal_dbm` is a configured number, not a model. `hidden`: left
+# out of scans, still joinable by name.
+
+# A mesh: one name heard at two strengths.
+[[access_point]]
+name = "home"
+password = "test-password-1"
+signal_dbm = -45
+
+[[access_point]]
+name = "home"
+password = "test-password-1"
+signal_dbm = -70
+
+[[access_point]]
+name = "cafe"
+signal_dbm = -80
+
+[[access_point]]
+name = "attic"
+password = "test-password-2"
+signal_dbm = -60
+hidden = true

@@ -4229,6 +4229,13 @@ test-emu-jit-image slug="harness" grade="t2" window="20ms":
 test-emu-serve:
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --test emu_serve_door -- --include-ignored --test-threads=1
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --test emu_serve_walk -- --include-ignored --test-threads=1
+    # The Wi-Fi network seam's two LAN cells (plan lp2025/2026-10-05-1903-wifi-link-c6,
+    # P12/P13): one board reached over its port forward (hello, status, an
+    # upload), and two boards in lockstep finding each other. Dev profile:
+    # the emulator crates build at opt-level 3 there, and the Heap budget job
+    # that ran them in release hit its 30-minute budget.
+    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --test emu_lan_link -- --include-ignored --nocapture
+    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --test emu_lan_lockstep -- --include-ignored --nocapture
 
 # The hardware walk, with the emulator where the board goes.
 #
@@ -4831,8 +4838,28 @@ walk-ble-emu *args:
 # store — not access (the emulated link is trusted). Serves the RELEASE
 # bundle itself; needs `just studio-web-story-build`,
 # `just studio-firmware-package-esp32c6` and `cargo build -p lp-cli`. Not CI.
-walk-wifi-emu lane:
-    node scripts/emu/walk-wifi-emu.mjs {{ lane }}
+#
+# `lan` (Wi‑Fi plan P13, scripts/emu/walk-wifi-emu-lan.mjs) is the joined
+# walk: two emulated C6s on one virtual LAN, each joined over its USB door,
+# Studio reaching both over `?lan=` through their port forwards — upload and
+# edit, the LAN probe, a wrong password, a name not in range, the Radio
+# node's rule, a reset onto a new lease, `link rtt lan:` in frames (W1–W10).
+# Every step waits for the board's words (its console, its status answers),
+# never Studio's. Needs `just studio-firmware-package-served` (the merged
+# image) instead; `just walk-wifi-emu lan --dry-run` checks the arguments and
+# prerequisites and starts nothing. Report:
+# docs/reports/2026-10-06-wifi-emulator-walk.md. Not CI. `--skip W10` leaves
+# out W10's `link rtt`, which alone outlives a 10-minute command cap.
+#
+# `studio-lan` (network-transport plan P04,
+# scripts/emu/walk-wifi-emu-studio-lan.mjs): the same two boards, Studio with
+# NO `?lan=` — remembered over USB, "Connect over Wi‑Fi" with no cable, a
+# board added by address, a second browser told the board is busy, a wrong
+# address said in words. Stand-in (DD193): the remembered lease is rewritten
+# to the board's loopback forward before it is dialled. Report:
+# docs/reports/2026-10-07-studio-lan-boards-emulator-walk.md. Not CI.
+walk-wifi-emu lane *args:
+    node scripts/emu/walk-wifi-emu.mjs {{ lane }} {{ args }}
 
 # The dropped-link walk: an emulated C6 over `?emu=` USB, the cable pulled
 # and re-seated under the editor and under Play — the page must stay put

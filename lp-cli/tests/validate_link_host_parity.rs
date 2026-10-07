@@ -28,6 +28,8 @@ const HOSTED: &[(&str, &str)] = &[
     ("lp-emu:esp32c6:t1", "rom-up-boot"),
     ("lp-emu:esp32c6:t1", "usb-detach-reattach"),
     ("lp-emu:esp32c6:t1", "usb-negative-control"),
+    // A capability seam's composite: the plan states `--seams net=lan`.
+    ("lp-emu:esp32c6:t1+net=lan", "boot-idle"),
     ("silicon:esp32c6", "boot-idle"),
     ("silicon:esp32c6", "boot-idle-flash"),
     ("silicon:esp32c6", "usb-negative-control"),
@@ -62,6 +64,16 @@ fn every_hosted_emulated_run_parses_as_lp_cli_emu_run() {
             "{payload} on {config}: the console is the capture"
         );
         assert!(parsed.strict_bus, "{payload} on {config}");
+        // The configuration is the whole seam request: its atoms, strictly,
+        // or `none` — never the machine's capability defaults behind the
+        // label (`RunRequest::seams`).
+        let want = config.split_once('+').map_or("none", |(_, atoms)| atoms);
+        assert_eq!(
+            parsed.seams.as_deref(),
+            Some(want),
+            "{payload} on {config}: the seams the label names"
+        );
+        assert_eq!(parsed.seams_prefer, None, "{payload} on {config}");
     }
 }
 
@@ -126,6 +138,11 @@ fn plan(config: &str, payload: &str, host: &LinkHost) -> RunPlan {
         identity: entry.identity(),
         chip: entry.chip.clone(),
         link_host: Some(host.clone()),
+        seams: entry
+            .seams
+            .iter()
+            .map(|s| format!("{}={}", s.seam, s.implementation))
+            .collect(),
     };
     assert!(
         req.hosted().unwrap().is_some(),

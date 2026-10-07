@@ -8,7 +8,7 @@
 //! Bluetooth board with (`key_holder.rs`, `login_key_cache.rs`), turned into
 //! what the link presents. Nothing here is new key material.
 //!
-//! Two sources, one list per board address, best first:
+//! Two sources, one list per board, best first:
 //!
 //! 1. **Typed for this board** ([`NetworkLinkKeys::offer`]): a locked board's
 //!    link comes up on the anonymous key, the keyed login reads its offers
@@ -17,6 +17,16 @@
 //! 2. **Held** ([`NetworkLinkKeys::set_held`]): this browser's key and the
 //!    account's, which use one salt on every device, so presenting them to a
 //!    board that does not hold them costs that board nothing.
+//!
+//! **By board, once the board is known** (ND4 of the network-transport
+//! plan): a link is dialled at an address (its socket URL), and until its
+//! hello says which board answered, what was typed for it is kept by that
+//! address. Once Studio knows the board — its hello, or a card's "Connect
+//! over Wi‑Fi", which knows the board before it dials — the address is an
+//! ALIAS of the board's MAC ([`NetworkLinkKeys::alias`]), and the keys live
+//! with the board: a password typed for it is not lost when its address
+//! changes, and a later link to the same board by another road (the relay)
+//! presents them too.
 //!
 //! A key a board refused as WRONG (it knows the salt; the PSK did not match)
 //! is charged to that board's login backoff, so the provider reports it
@@ -50,8 +60,26 @@ pub struct NetworkLinkKeys {
 struct KeyStore {
     held: Vec<LinkKey>,
     held_generation: u64,
-    /// By board address (its socket URL).
+    /// By board: its MAC once known, its socket URL until then.
     boards: BTreeMap<String, BoardKeys>,
+    /// Socket URL → the board (its MAC) found answering there.
+    aliases: BTreeMap<String, String>,
+}
+
+impl KeyStore {
+    /// The number that moves whenever the keys for `address` would change.
+    fn generation_of(&self, address: &str) -> u64 {
+        self.held_generation
+            + self
+                .boards
+                .get(self.board_of(address))
+                .map_or(0, |board| board.generation)
+    }
+
+    /// Where the keys for the link at `address` live.
+    fn board_of<'a>(&'a self, address: &'a str) -> &'a str {
+        self.aliases.get(address).map_or(address, String::as_str)
+    }
 }
 
 #[derive(Default)]
@@ -76,6 +104,39 @@ impl NetworkLinkKeys {
         }
     }
 
+    /// The link at `address` reaches the board `board` (its MAC, any one
+    /// spelling used consistently): from now on its keys are the board's.
+    /// Anything typed for the address before the board was known moves to
+    /// the board (most recent first), and the address's generation moves so
+    /// a live link re-reads its list (it is rekeyed only if its best key
+    /// changed).
+    pub fn alias(&self, address: &str, board: &str) {
+        let mut store = self.inner.borrow_mut();
+        if store.aliases.get(address).map(String::as_str) == Some(board) {
+            return;
+        }
+        let before = store.generation_of(address) - store.held_generation;
+        store.aliases.insert(address.to_string(), board.to_string());
+        let moved = store.boards.remove(address);
+        let entry = store.boards.entry(board.to_string()).or_default();
+        if let Some(moved) = moved {
+            let mut typed = moved.typed;
+            for key in entry.typed.drain(..) {
+                if !typed.iter().any(|newer| newer.key_id == key.key_id) {
+                    typed.push(key);
+                }
+            }
+            entry.typed = typed;
+            for wrong in moved.wrong {
+                if !entry.wrong.contains(&wrong) {
+                    entry.wrong.push(wrong);
+                }
+            }
+            entry.generation = entry.generation.max(moved.generation);
+        }
+        entry.generation = entry.generation.max(before) + 1;
+    }
+
     /// Keys a password typed for the board at `address` derived (one per
     /// salt it offered): presented first, ahead of anything held, from now
     /// on. A key once refused as wrong there is given another chance only if
@@ -85,7 +146,8 @@ impl NetworkLinkKeys {
             return;
         }
         let mut store = self.inner.borrow_mut();
-        let board = store.boards.entry(address.to_string()).or_default();
+        let id = store.board_of(address).to_string();
+        let board = store.boards.entry(id).or_default();
         let mut typed = keys;
         for key in board.typed.drain(..) {
             if !typed.iter().any(|offered| offered.key_id == key.key_id) {
@@ -99,10 +161,10 @@ impl NetworkLinkKeys {
 
     /// Whether anything was typed for the board at `address` this session.
     pub fn has_typed(&self, address: &str) -> bool {
-        self.inner
-            .borrow()
+        let store = self.inner.borrow();
+        store
             .boards
-            .get(address)
+            .get(store.board_of(address))
             .is_some_and(|board| !board.typed.is_empty())
     }
 
@@ -122,7 +184,7 @@ impl NetworkLinkKeys {
 impl LinkKeys for NetworkLinkKeys {
     fn keys_for(&self, address: &str) -> Vec<LinkKey> {
         let store = self.inner.borrow();
-        let board = store.boards.get(address);
+        let board = store.boards.get(store.board_of(address));
         let wrong = |key: &LinkKey| board.is_some_and(|board| board.wrong.contains(key));
         board
             .map(|board| board.typed.as_slice())
@@ -135,17 +197,13 @@ impl LinkKeys for NetworkLinkKeys {
     }
 
     fn generation(&self, address: &str) -> u64 {
-        let store = self.inner.borrow();
-        store.held_generation
-            + store
-                .boards
-                .get(address)
-                .map_or(0, |board| board.generation)
+        self.inner.borrow().generation_of(address)
     }
 
     fn refused_wrong(&self, address: &str, key: &LinkKey) {
         let mut store = self.inner.borrow_mut();
-        let board = store.boards.entry(address.to_string()).or_default();
+        let id = store.board_of(address).to_string();
+        let board = store.boards.entry(id).or_default();
         if !board.wrong.contains(key) {
             board.wrong.push(key.clone());
             board.typed.retain(|typed| typed != key);
@@ -179,6 +237,7 @@ mod tests {
     use super::*;
 
     const BOARD: &str = "ws://10.0.0.5/link";
+    const MAC: &str = "a0f26287b48c";
 
     #[test]
     fn typed_keys_go_first_then_the_held_ones() {
@@ -241,6 +300,46 @@ mod tests {
         keys.forget_typed();
         assert_eq!(keys.keys_for(BOARD), vec![key(1)]);
         assert!(!keys.has_typed(BOARD));
+    }
+
+    #[test]
+    fn keys_typed_for_an_address_follow_the_board_to_its_next_address() {
+        let keys = NetworkLinkKeys::new();
+        keys.set_held(vec![key(1)]);
+        // Typed while the board was only an address.
+        keys.offer(BOARD, vec![key(7)]);
+        let before = keys.generation(BOARD);
+        // Its hello says which board it is.
+        keys.alias(BOARD, MAC);
+        assert!(keys.generation(BOARD) > before, "a live link re-reads");
+        assert_eq!(keys.keys_for(BOARD), vec![key(7), key(1)]);
+        // The board comes back at a new address, known before it is dialled
+        // (a card's "Connect over Wi‑Fi"): the typed key is presented there.
+        let moved = "ws://10.0.0.9/link";
+        assert_eq!(keys.keys_for(moved), vec![key(1)]);
+        let before = keys.generation(moved);
+        keys.alias(moved, MAC);
+        assert!(keys.generation(moved) > before);
+        assert_eq!(keys.keys_for(moved), vec![key(7), key(1)]);
+        assert!(keys.has_typed(moved));
+        // A key refused as wrong at one address is the board's to drop.
+        keys.refused_wrong(moved, &key(7));
+        assert_eq!(keys.keys_for(BOARD), vec![key(1)]);
+        // A second alias call with the same board moves nothing.
+        let settled = keys.generation(moved);
+        keys.alias(moved, MAC);
+        assert_eq!(keys.generation(moved), settled);
+    }
+
+    #[test]
+    fn a_password_typed_after_the_alias_is_the_boards() {
+        let keys = NetworkLinkKeys::new();
+        keys.alias(BOARD, MAC);
+        keys.offer(BOARD, vec![key(7)]);
+        keys.alias("ws://10.0.0.9/link", MAC);
+        assert_eq!(keys.keys_for("ws://10.0.0.9/link"), vec![key(7)]);
+        // Another board at another address sees none of it.
+        assert!(keys.keys_for("ws://10.0.0.6/link").is_empty());
     }
 
     #[test]

@@ -288,6 +288,61 @@ fn strict_mode_refuses_our_modeled_classes() {
     }
 }
 
+/// A seam overlay's `absent` grade travels in a sidecar's frozen trust and
+/// `--strict` refuses it, naming the run by its LABEL (`…+net=lan`) rather
+/// than its base. The committed capture is only the vehicle: its header is
+/// altered in memory, never on disk. `net=lan`'s own overlay marks no class
+/// absent (the radio it cannot see has no class in this table), so the
+/// absent entry is the test's own.
+#[test]
+fn strict_mode_refuses_an_absent_class_and_names_the_seam() {
+    use lp_emu_validate::configuration::{TrustEntry, TrustTable};
+    let silicon = load("shader-compile-stress", SILICON);
+    let mut ours = load("shader-compile-stress", OURS);
+    ours.header.seams.insert("net".into(), "lan".into());
+    let mut entries = ours.header.trust.entries().to_vec();
+    entries.retain(|e| e.class != FieldClass::Memory);
+    entries.push(TrustEntry {
+        class: FieldClass::Memory,
+        grade: Grade::Absent,
+        band: None,
+        because: "a test overlay whose seam never produces this class".into(),
+    });
+    ours.header.trust = TrustTable::new(entries);
+    let report = replay(
+        &ours,
+        &silicon,
+        ReplayOptions {
+            strict: true,
+            strict_timing: false,
+        },
+    )
+    .unwrap();
+    assert!(!report.is_ok());
+    let problems = report.grade_problems.join("\n");
+    assert!(
+        problems.contains(
+            "left configuration `lp-emu:esp32c6:t1+net=lan` is graded `absent` for memory \
+             (a test overlay"
+        ),
+        "{problems}"
+    );
+    // Without --strict the same pair still compares, value for value: an
+    // absent grade is a reading of the claim, not a different comparison.
+    let lax = replay(&ours, &silicon, ReplayOptions::default()).unwrap();
+    assert!(lax.grade_problems.is_empty());
+    assert_eq!(
+        lax.compared(FieldClass::Memory),
+        replay(
+            &load("shader-compile-stress", OURS),
+            &silicon,
+            ReplayOptions::default()
+        )
+        .unwrap()
+        .compared(FieldClass::Memory)
+    );
+}
+
 /// Every transcript this milestone recorded is filed where its own header says
 /// it should be, carries a sidecar, and names a payload the registry knows.
 #[test]

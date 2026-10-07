@@ -1192,10 +1192,19 @@ pub struct Esp32C6Builder {
     /// The USB host link's fault injector (`--usb-faults`), off by default.
     usb_faults: Option<lp_emu_esp_common::link_faults::LinkFaults>,
     /// Emulator seams to engage (`--seams`, `--seams-prefer`). The capability
-    /// defaults (empty today) unless asked otherwise: today's machine.
+    /// defaults (`net=lan`, softly) unless asked otherwise.
     seams: lp_emu_esp_common::seam::SeamRequest,
     /// The wake's pacing (G0 rule (b)); the default unless a test says.
     seam_pacing: lp_emu_esp_common::seam::PacerConfig,
+    /// The virtual LAN the network seam answers from, and this board's name
+    /// on it ([`Esp32C6Builder::lan`]); `None` gives an engaged board an empty
+    /// LAN of its own.
+    lan: Option<(
+        lp_emu_esp_common::seam::net::SharedLan,
+        lp_emu_esp_common::ParticipantId,
+    )>,
+    /// The run's pace ([`Esp32C6Builder::pace`]); `None` is the unset pace.
+    pace: Option<lp_emu_esp_common::seam::net::Pace>,
 }
 
 impl Default for Esp32C6Builder {
@@ -1267,6 +1276,8 @@ impl Esp32C6Builder {
             usb_faults: None,
             seams: lp_emu_esp_common::seam::SeamRequest::default(),
             seam_pacing: lp_emu_esp_common::seam::PacerConfig::default(),
+            lan: None,
+            pace: None,
         }
     }
 
@@ -1753,10 +1764,49 @@ impl Esp32C6Builder {
     /// `lp_emu_esp_common::seam::SeamRequest`). A strict seam that no table
     /// in flash could satisfy fails the build; one that cannot engage once
     /// the app runs ends the run with [`Outcome::Seam`]. A soft one prints
-    /// `SEAM none engaged: …` and the run goes on. An empty request — the
-    /// default while no capability seam exists — scans nothing.
+    /// `SEAM none engaged: …` and the run goes on. The default request is the
+    /// capability defaults (`net=lan`, softly); only an empty one (`none`)
+    /// scans nothing.
     pub fn seams(mut self, request: lp_emu_esp_common::seam::SeamRequest) -> Self {
         self.seams = request;
+        self
+    }
+
+    /// Put this board on `lan` as `board` (`<board>/net`,
+    /// `lp_emu_esp_common::seam::net::net_endpoint`), its station MAC the
+    /// eFuse MAC ([`Self::efuse`]). When the request wants `net=lan`, the
+    /// board is **attached at build** — before the guest boots — so a host can
+    /// call [`SharedLan::forward`] and print the board's `lan:` address at
+    /// once; a MAC another board on the LAN already has fails the build. The
+    /// attachment survives every reboot and power cycle.
+    ///
+    /// Who drives the LAN is the LAN's ([`LanDriver`]): a runner's LAN goes in
+    /// `Lockstep::with_medium`, a self-driven or wall-clock one is pumped by
+    /// the machine itself. Without this an engaged board gets an empty LAN of
+    /// its own: nothing in range.
+    ///
+    /// [`SharedLan::forward`]: lp_emu_esp_common::seam::net::SharedLan::forward
+    /// [`LanDriver`]: lp_emu_esp_common::seam::net::LanDriver
+    pub fn lan(
+        mut self,
+        lan: lp_emu_esp_common::seam::net::SharedLan,
+        board: lp_emu_esp_common::ParticipantId,
+    ) -> Self {
+        self.lan = Some((lan, board));
+        self
+    }
+
+    /// The run's pace (`lp_emu_esp_common::seam::net::lan_pace`): `realtime`
+    /// holds the board's guest clock to wall time for the whole run, `max`
+    /// never does; unset (the default) holds it only while a host is
+    /// connected through one of its LAN's forwards. Applied at the board's
+    /// LAN pump, so `realtime` needs the network seam engaged on a LAN its
+    /// boards drive themselves: a run that does not ask for `net=lan`, or
+    /// whose LAN is a runner's, fails to build, and a chip start where the
+    /// seam does not engage ends the run ([`Outcome::Seam`]). A set pace is
+    /// in the configuration label (`…@pace=realtime`).
+    pub fn pace(mut self, pace: lp_emu_esp_common::seam::net::Pace) -> Self {
+        self.pace = Some(pace);
         self
     }
 
@@ -1905,6 +1955,8 @@ impl Esp32C6Builder {
             usb_faults,
             seams,
             seam_pacing,
+            lan,
+            pace,
         } = self;
 
         let rom_image = match rom {
@@ -2447,6 +2499,9 @@ impl Esp32C6Builder {
             idle_skips: 0,
             seams: crate::seams::SeamState {
                 pacer_config: seam_pacing,
+                board: lan.as_ref().map(|(_, b)| *b).unwrap_or_default(),
+                lan: lan.as_ref().map(|(l, _)| l.clone()),
+                pace,
                 ..crate::seams::SeamState::new(seams)
             },
             stop_at: None,
@@ -2490,6 +2545,34 @@ impl Esp32C6Builder {
         // built from a window that already holds the patches. A direct load
         // is already running the app, so it resolves and arms now; a ROM-up
         // boot waits for the app. With none asked for: nothing at all.
+        //
+        // A board a host put on a LAN is attached now, before the guest
+        // boots, when it wants the network seam: its lease is reserved and a
+        // host can forward to it at once.
+        let wants_net = machine
+            .seams
+            .request
+            .wanted()
+            .iter()
+            .any(|(i, _)| i.answer == lp_emu_esp_common::seam::SeamAnswer::Net);
+        if let Some((lan, board)) = &lan
+            && wants_net
+        {
+            let id = lp_emu_esp_common::seam::net::net_endpoint(*board);
+            lan.attach(id, machine.efuse().mac)
+                .map_err(|why| BuildError::Seam(format!("net=lan: {why}")))?;
+            lan.set_pace(id, pace).map_err(BuildError::Seam)?;
+        }
+        // A `realtime` pace is held at the LAN pump: with no network seam
+        // asked for there is no LAN to hold it, and the run would go unpaced
+        // under a label that says otherwise.
+        if pace == Some(lp_emu_esp_common::seam::net::Pace::Realtime) && !wants_net {
+            return Err(BuildError::Seam(
+                crate::seams::net_seam::realtime_needs_a_lan(
+                    "this run does not ask for the network seam (`net=lan`)",
+                ),
+            ));
+        }
         machine.seams_on_chip_start().map_err(BuildError::Seam)?;
         machine.seams_start_if_app_running();
         if let Some(why) = machine.seams.strict_error.take() {
@@ -5151,6 +5234,12 @@ impl Esp32C6Machine {
                     deadline = at;
                     bound = slice_census::Bound::Strict;
                 }
+            }
+            // The network seam's LAN, when this machine drives it itself:
+            // what the guest gave goes out, what arrived comes in, before the
+            // wake looks. One `bool` on every other run.
+            if self.seams.net_pumps {
+                self.net_pump(now);
             }
             // An engaged capability seam's wake, before the slice: a raise
             // reaches the hart now, not after a slice (or an idle skip) that

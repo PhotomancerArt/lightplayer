@@ -129,6 +129,9 @@ host-lan-harness = [
 server = ["dep:littlefs-rust", "dep:lp-json-pack", "dep:lp-recovery", "dep:lpa-server", "dep:lpc-model", "dep:lpc-wire", "dep:lpfs", "dep:ser-write-json"]
 
 [dev-dependencies]
+# The seam ABI on the host, for the unit tests of `seams` and the network
+# seam's adapters (every call shim runs its silicon body off riscv32).
+lp-seam = { path = "../../lp-base/lp-seam" }
 # Host tests of the link mux run embassy-sync channels, whose
 # `CriticalSectionRawMutex` needs an implementation on the host.
 critical-section = { workspace = true, features = ["std"] }

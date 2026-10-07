@@ -33,6 +33,9 @@ extern "C" {
     #[wasm_bindgen(js_name = connect)]
     fn js_connect(id: u32) -> Promise;
 
+    #[wasm_bindgen(js_name = settle)]
+    fn js_settle(id: u32, ms: u32) -> Promise;
+
     #[wasm_bindgen(js_name = disconnect)]
     fn js_disconnect(id: u32) -> Promise;
 
@@ -104,6 +107,20 @@ pub(crate) fn is_connected(session: u32) -> bool {
 
 pub(crate) async fn connect(session: u32) -> Result<(), String> {
     JsFuture::from(js_connect(session))
+        .await
+        .map(|_| ())
+        .map_err(|error| error_message(&error))
+}
+
+/// Connect a session now because someone asked, and wait up to `settle_ms`
+/// for the connection to prove itself (`settle` in the JS): the board sends
+/// its first frame, or turns the connection away (a busy board's close 1013
+/// right after the upgrade). `Err` carries the socket's own words — a
+/// connect that failed or timed out, or the drop. The session is left as it
+/// is either way; the caller decides whether to keep it.
+pub async fn connect_and_settle(session: u32, settle_ms: u32) -> Result<(), String> {
+    connect(session).await?;
+    JsFuture::from(js_settle(session, settle_ms))
         .await
         .map(|_| ())
         .map_err(|error| error_message(&error))
