@@ -155,19 +155,27 @@ async function main() {
     driver.evaluate(`JSON.stringify(window.__lpEmuBluetooth?.stats(${JSON.stringify(BOARD)}) ?? null)`).then(JSON.parse);
   /// Count both directions for `windowMs`, with a census of what Studio
   /// wrote by request kind (the first chunk of each line carries
-  /// `"msg":{"<kind>"` or `"msg":"<kind>"`).
+  /// `"msg":{"<kind>"` or `"msg":"<kind>"`). Both write kinds are counted:
+  /// Studio's data frames go without response by default (the Bluetooth
+  /// write policy, `?ble-writes=`), its SYN and ACK-only frames with one.
   const measure = async (windowMs) => {
     await driver.evaluate(`(() => {
       const rx = window.__lpEmuBluetooth.devices.get(${JSON.stringify(BOARD)}).gatt.service.rx;
       if (!rx.__lpCensus) {
-        const write = rx.writeValueWithResponse.bind(rx);
         rx.__lpCensus = true;
-        rx.writeValueWithResponse = async (value) => {
+        const count = (value) => {
           const text = new TextDecoder().decode(value);
           const kind = text.match(/"msg":\\{?"([A-Za-z]+)"/)?.[1];
           if (kind) window.__lpBleCensus[kind] = (window.__lpBleCensus[kind] ?? 0) + 1;
-          return write(value);
         };
+        for (const name of ['writeValueWithResponse', 'writeValueWithoutResponse']) {
+          if (typeof rx[name] !== 'function') continue;
+          const write = rx[name].bind(rx);
+          rx[name] = async (value) => {
+            count(value);
+            return write(value);
+          };
+        }
       }
       window.__lpBleCensus = {};
     })()`);
