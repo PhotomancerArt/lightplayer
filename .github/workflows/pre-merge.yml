@@ -2093,7 +2093,7 @@ jobs:
             # `boot_idle.path_high_water_gap`) are lp-cli's since wire proto 32.
             scripts/ci/figures-patch.py bless --name "Classic link gates (lp-cli)" \
               --log "$RUNNER_TEMP/figures-tests.log" \
-              --cargo-test "set -a; . target/lp-emu-esp32v3/images.env; set +a; cargo test -p lp-cli --release --test emu_v3_link_gates"
+              --cargo-test "set -a; . target/lp-emu-esp32v3/images.env; set +a; cargo test -p lp-cli --profile host-test --test emu_v3_link_gates"
           fi
           if [ "$HEAP" = failure ]; then
             scripts/ci/figures-patch.py bless --name "Heap budget ratchet (esp32v3)" \
@@ -2422,7 +2422,7 @@ jobs:
             # `stack_total_bytes` figure) is lp-cli's since wire proto 30.
             scripts/ci/figures-patch.py bless --name "S3 link gates (lp-cli)" \
               --log "$RUNNER_TEMP/figures-tests.log" \
-              --cargo-test "set -a; . target/lp-emu-esp32s3/images.env; set +a; cargo test -p lp-cli --release --test emu_s3_link_gates"
+              --cargo-test "set -a; . target/lp-emu-esp32s3/images.env; set +a; cargo test -p lp-cli --profile host-test --test emu_s3_link_gates"
           fi
           if [ "$HEAP" = failure ]; then
             scripts/ci/figures-patch.py bless --name "Heap budget ratchet (esp32s3)" \
@@ -2457,7 +2457,7 @@ jobs:
   # its step timings on main run 34308562027 said why: 478 s for the ratchet
   # and 367 s inside the suite for `cargo test -p lp-cli` — a second full
   # test-tree build, because `-p lp-cli` unifies features differently from
-  # `-p lp-emu-esp32c6`. The ratchet's `cargo run --release -p lp-cli` reuses
+  # `-p lp-emu-esp32c6`. The ratchet's `cargo run --profile host-test -p lp-cli` reuses
   # the lp-cli that test build makes, so the two ride together here and the
   # emulator job keeps only the emulator's own suite.
   #
@@ -2466,8 +2466,10 @@ jobs:
   # passing (runs 37469170395, 37473996154). The whole-board tests moved to
   # `emu-c6-cli` below; the dev `-p lp-cli` build the recipe also ran (~4 min,
   # for two parity tests) left CI altogether, because `Validate (x64)` runs
-  # them already; and each half is now ONE cargo invocation, so its fat-LTO
-  # test binaries link side by side (see the justfile's `test-emu-c6-cli-link`).
+  # them already; and each half is now ONE cargo invocation, so its test
+  # binaries link side by side (see the justfile's `test-emu-c6-cli-link`).
+  # Since 2026-10-06 the tree is the `host-test` profile (release without fat
+  # LTO; see its comment in the root Cargo.toml), not `--release`.
   #
   # Cheaper setup than emu-c6 on purpose: a depth-1 checkout (nothing here
   # builds a reference image, so no historical commits are needed) and no
@@ -2545,7 +2547,7 @@ jobs:
       # `lp-cli/tests/emu_usb_link_gates.rs` (a link host is a product
       # crate, so those gates left the emulator's own suite).
       # Then the app-agent evals' stage A and B (`test-emu-c6-cli-agent`):
-      # stage B reuses the release lp-cli build the link half just made, and
+      # stage B reuses the host-test lp-cli build the link half just made, and
       # this job had the room — moved here from `emu-c6-cli` to balance the
       # two. A failure there names no pinned figure, so the bless below
       # classifies it "not a figure move", as it should.
@@ -2591,7 +2593,7 @@ jobs:
           if [ "$CLI_TESTS" = failure ]; then
             scripts/ci/figures-patch.py bless --name "C6 link gates (lp-cli)" \
               --log "$RUNNER_TEMP/figures-cli.log" \
-              --cargo-test "LP_EMU_BUILD_FW=1 cargo test -p lp-cli --release $(just c6-cli-link-tests)"
+              --cargo-test "LP_EMU_BUILD_FW=1 cargo test -p lp-cli --profile host-test $(just c6-cli-link-tests)"
           fi
           if [ "$HEAP" = failure ]; then
             scripts/ci/figures-patch.py bless --name "Heap budget ratchet (esp32c6)" \
@@ -2704,7 +2706,7 @@ jobs:
   # preflighted by the real `lp-cli hardware lpfs` commands through espflash's
   # stub over a pty. Until this job nothing in CI ran it — it is ~16 minutes
   # of wall clock on an M2 Max (a migration is ~180 s emulated), too long for
-  # `heap-budget-chips`, whose `-p lp-cli --release` tree it otherwise shares
+  # `heap-budget-chips`, whose `-p lp-cli --profile host-test` tree it otherwise shares
   # (and so shares main's sccache objects with).
   #
   # Its own job rather than a step of `heap-budget-chips` so it runs beside

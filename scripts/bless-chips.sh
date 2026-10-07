@@ -115,7 +115,7 @@ for t in "${targets[@]}"; do
         # `heartbeat.total_bytes`): a link host is a product crate, so those
         # gates are lp-cli's (`tests/emu_usb_link_gates.rs`).
         run "esp32c6 link figures" env LP_EMU_BUILD_FW=1 \
-            scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release \
+            scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --profile host-test \
             --test emu_usb_link_gates -- --include-ignored
         ;;
     esp32v3)

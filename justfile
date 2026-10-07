@@ -3007,7 +3007,7 @@ check-lp-link-targets: install-rv32-target install-wasm32-target
 # the `test_comms_lab` image against `lp-cli link lab`'s host half, with the
 # emulator's USB fault injector, in emulated time. Builds the image.
 link-lab-emu:
-    LP_EMU_BUILD_FW=1 cargo test -p lp-cli --release --test emu_link_lab -- --include-ignored --nocapture --test-threads 1
+    LP_EMU_BUILD_FW=1 cargo test -p lp-cli --profile host-test --test emu_link_lab -- --include-ignored --nocapture --test-threads 1
 
 # The vendored serializer forks' own tests: upstream's, plus the LP token
 # hook's. `third_party/ser-write` and `third_party/ser-write-json` are their
@@ -3406,7 +3406,7 @@ test-emu-c6-boot:
 # `test-emu-c6-cli` and no CI job runs it yet — run it when the layout
 # migration or the host flasher changes.
 test-emu-layout-migration:
-    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_layout_migration -- --include-ignored --nocapture --test-threads=1
+    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --profile host-test --test emu_layout_migration -- --include-ignored --nocapture --test-threads=1
 
 # The split image's boot bookkeeping, scenario by scenario, on an emulated C6
 # (OTA M2, P08; `lp-cli/tests/emu_split_scenarios.rs`). Each scenario builds
@@ -3440,7 +3440,7 @@ test-emu-c6-split-boot scenarios="": install-rv32-target
         split y-test y-dies esp32c6,server,fixture-trial-dies
         split y-test y-hangs esp32c6,server,fixture-trial-hangs
     fi
-    LP_SPLIT_SCENARIOS="$(cd "$out" && pwd)" cargo test -p lp-cli --release --test emu_split_scenarios -- --include-ignored --nocapture --test-threads=1
+    LP_SPLIT_SCENARIOS="$(cd "$out" && pwd)" cargo test -p lp-cli --profile host-test --test emu_split_scenarios -- --include-ignored --nocapture --test-threads=1
 
 # Over-the-air updates on an emulated C6, scenario by scenario (OTA plan
 # lp2025/2026-10-04-0757-ota-update-protocol, Part B, P08;
@@ -3480,7 +3480,7 @@ test-emu-c6-ota scenarios="" filter="": install-rv32-target
         scripts/ota/build-image.sh "$out/y-dies" b1b1b1b1 esp32c6,server,fixture-trial-dies
         scripts/ota/build-image.sh "$out/x-untrusted" a0a0a0a0 esp32c6,server,fixture-usb-untrusted
     fi
-    LP_OTA_IMAGES="$(cd "$out" && pwd)" cargo test -p lp-cli --release --test emu_ota -- --include-ignored --nocapture --test-threads=1 {{ filter }}
+    LP_OTA_IMAGES="$(cd "$out" && pwd)" cargo test -p lp-cli --profile host-test --test emu_ota -- --include-ignored --nocapture --test-threads=1 {{ filter }}
 
 # lp-cli's emulator-backed tests, whole: what a desk runs. They resolve the
 # ELF through `lp_emu_esp32c6::test_support` under `LP_EMU_BUILD_FW=1` — a
@@ -3499,22 +3499,27 @@ test-emu-c6-cli: test-emu-c6-cli-link test-emu-c6-cli-boards test-emu-c6-cli-age
 # The link half: the shipped image's USB lp-link, its pinned figures
 # (`emu_usb_link_gates`), the Wi-Fi settings over it and `link capture`. CI's
 # `Heap budget (esp32c6 chip)` job runs it beside the chip ratchet, whose
-# `cargo run --release -p lp-cli` reuses the lp-cli this build makes — and
+# `cargo run --profile host-test -p lp-cli` reuses the lp-cli this build makes — and
 # whose figure-patch step re-runs these same binaries as a bless.
 #
-# One cargo invocation, not one per file: the release profile is fat LTO with
-# one codegen unit, so each test binary is a 20–45 s single-threaded link, and
-# one invocation links them side by side instead of one after another.
+# `--profile host-test`, not `--release`: release is fat LTO with one codegen
+# unit (for firmware size), which made each test binary a 20–45 s
+# single-threaded link. host-test is release without that (root Cargo.toml
+# says what it is and the measurement that chose it), and every emulator
+# test tree and the chip ratchet's lp-cli build with it.
+#
+# One cargo invocation, not one per file, so the test binaries link side by
+# side instead of one after another.
 # `--no-fail-fast` so a red run names every failure, not the first.
 test-emu-c6-cli-link: install-rv32-target
-    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --no-fail-fast {{ C6_CLI_LINK_TESTS }} -- --include-ignored --nocapture
+    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --profile host-test --no-fail-fast {{ C6_CLI_LINK_TESTS }} -- --include-ignored --nocapture
 
 # The boards half: whole boards over the link — the fragmented-heap reads,
 # the split image's boot and the LED seam on the split image. CI's `Emulator
 # C6 lp-cli (x64)` job runs it. No pinned figures here, so that job has no
 # figure-patch step.
 test-emu-c6-cli-boards: install-rv32-target
-    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --no-fail-fast --test emu_frag_reads --test emu_split_boot --test emu_seam_led -- --include-ignored --nocapture
+    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --profile host-test --no-fail-fast --test emu_frag_reads --test emu_split_boot --test emu_seam_led -- --include-ignored --nocapture
 
 # The app-agent evals' deterministic legs: stage A's `the_` tests, then stage
 # B (`app_agent_emu_decode`, the Sean goldens and stage A's replays decoded
@@ -3522,10 +3527,10 @@ test-emu-c6-cli-boards: install-rv32-target
 # its scripted replays WRITE the project trees stage B decodes
 # (`target/app-agent-evals/scripted/`), so stage B fails without them. CI
 # runs this in `Heap budget (esp32c6 chip)`, after the link half, whose
-# release lp-cli build stage B reuses.
+# host-test lp-cli build stage B reuses.
 test-emu-c6-cli-agent: install-rv32-target
     cargo test -p lpa-studio-core --lib app_agent_eval_tests::the_
-    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test app_agent_emu_decode -- --include-ignored --nocapture the_
+    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --profile host-test --test app_agent_emu_decode -- --include-ignored --nocapture the_
 
 # The link half's test binaries, named once: the recipe above runs them and
 # CI's figure-patch step re-runs them as a bless (`just c6-cli-link-tests`
@@ -3588,7 +3593,7 @@ test-emu-esp32v3-cli:
     mkdir -p "$out"
     cp {{ justfile_directory() }}/target/xtensa-esp32-none-elf/release-esp32v3/fw-esp32v3 "$out/fw-esp32v3-cli.elf"
     LP_EMU_ESP32V3_ELF="$out/fw-esp32v3-cli.elf" \
-        cargo test -p lp-cli --release --test emu_uart_link -- --include-ignored --nocapture
+        cargo test -p lp-cli --profile host-test --test emu_uart_link -- --include-ignored --nocapture
 
 # The classic ESP32 (v3) machine's own suite (plan three, M3).
 #
@@ -3728,7 +3733,7 @@ test-emu-esp32v3-boot:
       # The classic's gates that need a link host since wire proto 32
       # (lp-cli's: a link host is a product crate, which the lp-emu fence
       # keeps out), and its conversation tests (DD33).
-      cargo test -p lp-cli --release --test emu_v3_link_gates --test emu_uart_link -- --include-ignored --nocapture || status=$?
+      cargo test -p lp-cli --profile host-test --test emu_v3_link_gates --test emu_uart_link -- --include-ignored --nocapture || status=$?
       exit "$status"
     fi
     just build-fw-esp32v3
@@ -3813,7 +3818,7 @@ test-emu-esp32v3-boot:
     # them, the classic's conversation tests and fault soak
     # (`tests/emu_uart_link.rs`, DD33), so the product's transport on this
     # chip is covered wherever this recipe runs.
-    cargo test -p lp-cli --release --test emu_v3_link_gates --test emu_uart_link -- --include-ignored --nocapture || status=$?
+    cargo test -p lp-cli --profile host-test --test emu_v3_link_gates --test emu_uart_link -- --include-ignored --nocapture || status=$?
     exit "$status"
 
 # Run an image on the classic ESP32 (v3) machine.
@@ -3880,7 +3885,7 @@ test-emu-esp32s3-boot:
       cargo test -p lp-emu-esp32s3 --no-fail-fast -- --include-ignored || status=$?
       # The S3's gates that need a link host since wire proto 30 (lp-cli's:
       # a link host is a product crate, which the lp-emu fence keeps out).
-      cargo test -p lp-cli --release --test emu_s3_link_gates -- --include-ignored --nocapture || status=$?
+      cargo test -p lp-cli --profile host-test --test emu_s3_link_gates -- --include-ignored --nocapture || status=$?
       exit "$status"
     fi
     just build-fw-esp32s3
@@ -3907,7 +3912,7 @@ test-emu-esp32s3-boot:
     cargo test -p lp-emu-esp32s3 --no-fail-fast -- --include-ignored || status=$?
     # The S3's gates that need a link host since wire proto 30 (lp-cli's:
     # a link host is a product crate, which the lp-emu fence keeps out).
-    cargo test -p lp-cli --release --test emu_s3_link_gates -- --include-ignored --nocapture || status=$?
+    cargo test -p lp-cli --profile host-test --test emu_s3_link_gates -- --include-ignored --nocapture || status=$?
     exit "$status"
 
 # **M6's gate.** What the `Emulator ESP32-S3 (x64)` job runs (M6 P10 added

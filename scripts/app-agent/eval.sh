@@ -108,7 +108,7 @@ PY
     if LP_APP_AGENT_PROJECT="$dir/project" LP_APP_AGENT_LEDS="$leds" LP_APP_AGENT_PAD="$pad" \
         LP_EMU_BUILD_FW="${LP_EMU_BUILD_FW:-1}" \
         "$root/scripts/ci/ci-images.py" with esp32c6 -- \
-        cargo test -p lp-cli --release --test app_agent_emu_decode -- --ignored --nocapture an_agent_built_project \
+        cargo test -p lp-cli --profile host-test --test app_agent_emu_decode -- --ignored --nocapture an_agent_built_project \
         > "$dir/stage-b.log" 2>&1; then
         verdict=pass
         echo "  stage B: pass"

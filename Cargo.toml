@@ -532,6 +532,28 @@ opt-level = 3
 [profile.release.package.lp-xt-emu]
 opt-level = 3
 
+# The host test trees of the emulator suites, and the lp-cli the chip heap
+# ratchet boots: `cargo test -p lp-cli --profile host-test --test emu_…` in
+# the `test-emu-*` recipes, and `cargo run --profile host-test -p lp-cli --
+# emu run` in `scripts/heap-budget-check.sh`, which therefore reuses the
+# binary the test build just made (same profile, same `-p lp-cli` features).
+#
+# Why it exists: `[profile.release]` is fat LTO with one codegen unit, set for
+# FIRMWARE size, and every one of those test binaries paid a whole-program,
+# single-threaded LTO link (20–45 s each, ~5–6 min for a tree on a CI runner
+# even at a 95 % sccache hit rate — sccache does not cache the LTO link; see
+# docs/debt/ci-runner-time-over-the-concurrency-cap.md). `dev` was measured
+# and rejected: the build saving went back out in run time.
+#
+# HOST ONLY. No firmware is built with this profile — `release-esp32*` and
+# `release-emu` inherit `release`, not this — so no firmware byte moves.
+# The `[profile.release.package.*]` overrides above (opt-level 3 on the
+# emulator crates, `lps-builtins`) reach this profile through `inherits`.
+[profile.host-test]
+inherits = "release"
+lto = false
+codegen-units = 16
+
 [patch.crates-io]
 # esp-alloc 0.10.0 fork: the per-allocator region cap is 5, not 3. The classic
 # ESP32 registers four regions (arena, SRAM1 tail, and the two ROM boot-stack

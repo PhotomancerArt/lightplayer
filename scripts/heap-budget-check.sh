@@ -401,10 +401,13 @@ chip_measure() {
     chip_facts "$1" || return 1
     local elf="$2" dir
     dir="$(mktemp -d "${TMPDIR:-/tmp}/heap-budget-chip.XXXXXX")"
-    # `--release`, and it is not optional on either chip: the emulator's
-    # interpreter loop IS this binary, and a debug build takes tens of minutes
-    # to reach a heartbeat that release reaches in seconds. A gate nobody will
-    # wait for is a gate nobody runs.
+    # `--profile host-test` (release's optimisation without its fat LTO; see
+    # the root Cargo.toml), and an optimised build is not optional on either
+    # chip: the emulator's interpreter loop IS this binary, and a debug build
+    # takes tens of minutes to reach a heartbeat that release reaches in
+    # seconds. A gate nobody will wait for is a gate nobody runs. The same
+    # profile as the `test-emu-*` lp-cli test trees, so on CI this reuses the
+    # lp-cli the job's test build already made.
     #
     # No link socket on any arm: a gate that binds a port collides with
     # whatever is already using one.
@@ -432,7 +435,7 @@ chip_measure() {
         # boot of the same chip).
         local split_dir
         split_dir="$(dirname "$elf")"
-        cargo run -q --release -p lp-cli -- emu run --elf "$split_dir/loader.elf" \
+        cargo run -q --profile host-test -p lp-cli -- emu run --elf "$split_dir/loader.elf" \
             --over "$split_dir/merged.bin" --mmu-page 32k \
             --host-link --json-replies \
             --timeout "$CHIP_TIMEOUT" --console "$dir/console.txt" \
@@ -451,7 +454,7 @@ chip_measure() {
         # `--strict-bus` is free here and is a second assertion for nothing:
         # a run that started reaching addresses nothing claims would stop and
         # say where.
-        cargo run -q --release -p lp-cli -- emu run --chip esp32v3 --elf "$elf" \
+        cargo run -q --profile host-test -p lp-cli -- emu run --chip esp32v3 --elf "$elf" \
             --host-link --json-replies \
             --request '"stopAllProjects"' \
             --console "$dir/console.txt" \
@@ -481,7 +484,7 @@ chip_measure() {
         # (`--request`, sent once the board's hello arrives) rather than the
         # `M!` bytes of `$S3_STOP_ALL_SCRIPT`, which the lp-link image no
         # longer reads: the same request, sent a little later in the boot.
-        cargo run -q --release -p lp-cli -- emu run --chip esp32s3 --elf "$elf" \
+        cargo run -q --profile host-test -p lp-cli -- emu run --chip esp32s3 --elf "$elf" \
             --host-link --json-replies \
             --request '"stopAllProjects"' \
             --console "$dir/console.txt" \

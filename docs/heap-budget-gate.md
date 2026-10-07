@@ -614,7 +614,8 @@ The **chip** half runs elsewhere: the C6's arm in the path-gated `Heap budget
 (esp32c6 chip)` job, as `just heap-budget-check-chips-c6`, and the classic's
 in `Emulator ESP32v3 (x64)` as `just heap-budget-check-chips-v3` — because
 each needs a cross-target firmware build (the script builds it under
-`LP_EMU_BUILD_FW=1`), and the C6's needs a release `lp-cli` on top. The C6's
+`LP_EMU_BUILD_FW=1`), and the C6's needs an optimised `lp-cli` on top
+(the `host-test` profile, shared with the emulator test trees). The C6's
 arm was a step of the emulator job until 2026-09-08, when that job
 outgrew its budget and the ratchet moved to a job of its own — one that also
 runs lp-cli's emulator-backed link tests, which share its `-p lp-cli` build
