@@ -162,6 +162,28 @@ fn a_read_back_piece_lost_with_the_link_up_is_asked_again() {
 }
 
 #[test]
+fn a_drop_before_the_first_answer_still_waits_for_the_login_on_the_next_link() {
+    // Desk run c2b: the link went 21 s after the press, before the board
+    // had answered one `G`; the reconnected link's `N`/`A` then stopped the
+    // update at once. The first link held a login (the update started
+    // there): the next one's is on its way.
+    let engine: Vec<u8> = (0..2 * CHUNK).map(|i| (i * 11) as u8).collect();
+    let board = board_x_with(&engine);
+    let (mut driver, _) = driver_backing_up(&board);
+    driver.link_down(5_000);
+    driver.link_up(7_000);
+    driver.on_board(7_010, &manifest(&board), &[]);
+    driver.take_effects();
+    driver.on_board(7_020, &Refusal::Access.encode(), &[]);
+    assert!(ended(&driver.take_effects()).is_none());
+    driver.tick(7_020 + ENGINE_LOGIN_RETRY_MS);
+    assert_eq!(queries(&driver.take_effects()), 1);
+    driver.on_board(8_100, &manifest(&board), &[]);
+    let asked = gets(&driver.take_effects());
+    assert_eq!(asked[0], 0, "the backup starts over from its first piece");
+}
+
+#[test]
 fn a_wait_for_the_engine_login_gives_up_and_stops_needs_engine_login() {
     let engine: Vec<u8> = (0..6 * CHUNK).map(|i| (i * 3) as u8).collect();
     let board = board_x_with(&engine);

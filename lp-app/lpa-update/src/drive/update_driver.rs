@@ -34,12 +34,13 @@
 //! **A running engine's `N`/`A` after a drop is a race, not a verdict.** Its
 //! channel 3 takes the tier its server's login (channel 1) granted the link,
 //! and a reconnected link has none until the caller's login there lands —
-//! while the driver's first `Q` → `M` → `G`s go at once. So once the board
-//! has answered this driver (a read-back `D`), an `N`/`A` from a running
-//! engine waits for that login: `Q` again every [`ENGINE_LOGIN_RETRY_MS`],
-//! the backup kept, for at most [`ENGINE_LOGIN_WAIT_MS`] before it stops
-//! `NeedsEngineLogin`. On a link the board never answered, `N`/`A` stops at
-//! once, as before (no login was ever there to wait for).
+//! while the driver's first `Q` → `M` → `G`s go at once. So on any link but
+//! the driver's first (or once the board has answered a read-back), an
+//! `N`/`A` from a running engine waits for that login: `Q` again every
+//! [`ENGINE_LOGIN_RETRY_MS`], the backup kept, for at most
+//! [`ENGINE_LOGIN_WAIT_MS`] before it stops `NeedsEngineLogin`. On the first
+//! link, before any answer, `N`/`A` stops at once, as before: whoever
+//! started the driver there held no login to wait for (lp-cli's U8).
 //!
 //! Inputs: link up/down, board messages (with the credentials the caller
 //! holds, passed each time: nothing here stores them), engine-source
@@ -239,8 +240,12 @@ pub struct UpdateDriver {
     /// A running engine answered this driver's read-back: its server's
     /// login held the tier once, so a later `N`/`A` waits for it again.
     engine_answered: bool,
+    /// Links this driver has come up on: past the first, an `N`/`A` from a
+    /// running engine is the new link's login still on its way.
+    links_up: u32,
     /// When a wait for the engine's login gives up (set at its first
-    /// `N`/`A`, cleared by progress and by a new link).
+    /// `N`/`A`, cleared only by progress: a link that keeps dropping does
+    /// not keep the wait alive).
     engine_login_deadline: Option<u64>,
     /// The latest time an input carried.
     now_ms: u64,
@@ -271,6 +276,7 @@ impl UpdateDriver {
             moved_core: false,
             reinstalled: false,
             engine_answered: false,
+            links_up: 0,
             engine_login_deadline: None,
             now_ms: 0,
             effects: Vec::new(),
@@ -318,7 +324,7 @@ impl UpdateDriver {
             return;
         }
         self.now_ms = now_ms;
-        self.engine_login_deadline = None;
+        self.links_up = self.links_up.saturating_add(1);
         self.drop_serve();
         self.login = LoginClient::new();
         self.phase = Phase::Asked;
@@ -684,14 +690,16 @@ impl UpdateDriver {
     }
 
     /// A running engine refused for want of its server's login on this
-    /// link (see the module docs): wait for it when the board answered this
-    /// driver before and the wait has time left; stop otherwise.
+    /// link (see the module docs): wait for it on a link after the first
+    /// (or once the board answered) while the wait has time left; stop
+    /// otherwise.
     fn wait_for_engine_login(&mut self) {
         let now = self.now_ms;
         let deadline = *self
             .engine_login_deadline
             .get_or_insert(now.saturating_add(ENGINE_LOGIN_WAIT_MS));
-        if !self.engine_answered || now >= deadline {
+        let had_a_login = self.engine_answered || self.links_up > 1;
+        if !had_a_login || now >= deadline {
             self.backup = None;
             self.source = None;
             return self.finish(Finish::Stopped(StopReason::NeedsEngineLogin));
