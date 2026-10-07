@@ -117,11 +117,17 @@ def fetch_runs(repo: str, token: str | None, runs_n: int | None, since: str | No
     return runs
 
 
-def fetch_jobs_for_run(run: dict, repo: str, token: str | None, cache_dir: Path) -> list[dict]:
+def fetch_jobs_for_run(
+    run: dict, repo: str, token: str | None, cache_dir: Path
+) -> tuple[list[dict], bool]:
+    """Returns (jobs, made_a_request) — the caller only needs to sleep after
+    a real request, never after a cache hit, or a re-run pays the
+    sequential sleep for every run regardless of whether it fetched
+    anything."""
     run_id = run["id"]
     cache_file = cache_dir / f"{run_id}.json"
     if cache_file.is_file():
-        return json.loads(cache_file.read_text())["jobs"]
+        return json.loads(cache_file.read_text())["jobs"], False
     data = api_get(f"/repos/{repo}/actions/runs/{run_id}/jobs?per_page=100", token)
     jobs = data.get("jobs", [])
     # per_page=100 covers every run observed so far (~20 jobs); paginate
@@ -138,7 +144,7 @@ def fetch_jobs_for_run(run: dict, repo: str, token: str | None, cache_dir: Path)
     if run.get("status") == "completed":
         cache_dir.mkdir(parents=True, exist_ok=True)
         cache_file.write_text(json.dumps({"run_id": run_id, "jobs": jobs}))
-    return jobs
+    return jobs, True
 
 
 # ── timeout-minutes, parsed from the workflow's own text ───────────────────
@@ -560,13 +566,14 @@ def main() -> int:
         return 1
 
     all_jobs: list[dict] = []
-    for i, run in enumerate(runs):
+    for run in runs:
         try:
-            all_jobs.extend(fetch_jobs_for_run(run, repo, token, cache_dir))
+            jobs, made_request = fetch_jobs_for_run(run, repo, token, cache_dir)
         except RuntimeError as e:
             print(f"error: {e}", file=sys.stderr)
             return 1
-        if i < len(runs) - 1:
+        all_jobs.extend(jobs)
+        if made_request:
             time.sleep(SLEEP_S)
 
     result = summarize(all_jobs, budgets, names)

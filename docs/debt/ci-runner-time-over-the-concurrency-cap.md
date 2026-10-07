@@ -85,18 +85,17 @@ look for cargo's `Finished … in` lines (build) and libtest's `test result:
 - **2026-10-06** — `just ci-durations`'s first real report (M1 of
   lp2025/2026-10-06-1945-ci-director), last 200 runs: 6 of 20 jobs `over`
   (Emulator C6, Emulator ESP32-S3, Emulator ESP32v3, Heap budget
-  (esp32c6 chip), Validate (x64), Validate story baselines — see the PR
-  for the full table), 368.8 total runner-hours, 15.9% on cancelled jobs.
+  (esp32c6 chip), Validate (x64), Validate story baselines — see PR #1010
+  for the full table), 370.0 total runner-hours, 16.0% on cancelled jobs.
   Spot-check against this entry's own 399-run numbers landed OUTSIDE the
-  one-minute tolerance for Validate (x64) (p50 25.2 vs. 20.3, p95 30.5 vs.
-  27.7 — both ~3-5 min higher) and just outside it for Lint (x64)'s p50
-  (10.8 vs. 9.7; its p95, 12.2 vs. 11.4, was within a minute). The 200-run
-  window is more recent and smaller than the 399-run one this entry's
-  numbers came from, and recency is exactly where #997-era growth shows
-  up — a narrower, newer window reading slower than a wider, older one is
-  consistent with the jobs still growing, not a script defect (hand
-  spot-check against the cached raw job records: Validate (x64)'s 93
-  successful durations in this window range 11.75-31.5 min). Left for the
+  one-minute tolerance for Validate (x64) (p50 25.3 vs. 20.3, p95 30.5 vs.
+  27.7 — both ~3-5 min higher, n=94) and just outside it for Lint (x64)'s
+  p50 (10.8 vs. 9.7, n=129; its p95, 12.2 vs. 11.4, was within a minute).
+  The 200-run window is more recent and smaller than the 399-run one this
+  entry's numbers came from, and recency is exactly where #997-era growth
+  shows up — a narrower, newer window reading slower than a wider, older
+  one is consistent with the jobs still growing, not a script defect
+  (hand-checked against the cached raw job records). Left for the
   director to weigh, not re-scoped or tuned toward the older number.
 
 **Exit criteria** — every job's p95 is under half its `timeout-minutes`;
