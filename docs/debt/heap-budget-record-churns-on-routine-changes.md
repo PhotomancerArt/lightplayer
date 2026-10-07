@@ -307,6 +307,7 @@ long-lived branch conflict on this file whenever main re-baselined too.
   transcribed from the log, not a local or fetched-image bless. Paydown as
   above and now with a second reason: pin `APP_VERSION` for every build the
   figure checks use, so a build's stamp length stops being a figure.
+  Applied on PR #1005 as `chore(figures): record CI's clean C6 heap figures for 4cad23fdb` (the json's `commit` field left at `e922ceca5`).
 
 **Exit criteria** — a PR whose only memory effect is a few bytes of statics
 passes the gate without touching the record, and two PRs that each
