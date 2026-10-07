@@ -96,12 +96,12 @@ import {
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
 const LP_CLI = path.join(ROOT, "target/debug/lp-cli");
 
-const LAN = "home";
+export const LAN = "home";
 const BOARDS = ["c6-a", "c6-b"];
 const [A, B] = BOARDS;
 
 /// TEST VALUES ONLY: committed, printed, and named in the emulator's output.
-const NET = { ssid: "lp-walk-net", password: "correct-horse-42", dbm: -50 };
+export const NET = { ssid: "lp-walk-net", password: "correct-horse-42", dbm: -50 };
 /// In range, secured; W6 adds it with the wrong password.
 const GUEST = { ssid: "lp-walk-guest", password: "staple-battery-7", wrong: "wrong-horse-0", dbm: -65 };
 /// No access point has it (W7).
@@ -113,7 +113,7 @@ const NOWHERE = { ssid: "lp-walk-nowhere", password: "no-such-net-1" };
 /// `lp-cli/src/commands/emu/lan_fixture.rs`): one `[[access_point]]` per
 /// network, `name`, `password` (absent = open), `signal_dbm`, `hidden`; any
 /// other key is refused.
-const FIXTURE = `# walk-wifi-emu-lan.mjs: made-up test values only, never a real network.
+export const FIXTURE = `# walk-wifi-emu-lan.mjs: made-up test values only, never a real network.
 [[access_point]]
 name = "${NET.ssid}"
 password = "${NET.password}"
@@ -139,9 +139,9 @@ const RADIO_OFF_FOR_WIFI =
 
 /// Studio's words (`lpa-studio-core/src/app/network/wifi_words.rs`). They
 /// say WHEN to look; the board's status says what happened.
-const WORDS = {
+export const WORDS = {
   wifiRow: "Wi‑Fi", // U+2011, the card's Wi‑Fi row
-  wifiLine: "Wi-Fi · ", // U+002D, the card's LAN line (`UiLanLink::line`)
+  wifiLine: "Wi‑Fi · ", // U+2011, the card's LAN line (`UiLanLink::line`, `UiLinkKind::Wifi`'s word)
   connectToANetwork: "Connect to a network",
   otherNetwork: "Other network",
   connect: "Connect",
@@ -151,18 +151,18 @@ const WORDS = {
   cloudRelay: "Cloud relay",
 };
 
-const STUDIO_LOAD_MS = 420_000;
+export const STUDIO_LOAD_MS = 420_000;
 /// Wedged-run deadlines, never measurements: emulated boards boot, scan,
 /// join and render at emulated speed on a shared box.
-const STEP_MS = 300_000;
+export const STEP_MS = 300_000;
 const JOIN_MS = 420_000;
 const STATUS_POLL_MS = 2_000;
 /// W10: requests timed. Enough for a p90 to mean something.
 const RTT_COUNT = 40;
 
-const MAIN_TEXT = `(document.querySelector('#main')?.innerText || '')`;
-const PANEL = `document.querySelector('[id^="ux-popover-panel"]')`;
-const PANEL_TEXT = `(${PANEL}?.innerText || '')`;
+export const MAIN_TEXT = `(document.querySelector('#main')?.innerText || '')`;
+export const PANEL = `document.querySelector('[id^="ux-popover-panel"]')`;
+export const PANEL_TEXT = `(${PANEL}?.innerText || '')`;
 
 // --- arguments -------------------------------------------------------------
 
@@ -196,7 +196,7 @@ export function parseArgs(argv) {
 // --- the walk's own plumbing ---------------------------------------------
 
 /// What this run needs on disk, and whether it is there.
-function prerequisites() {
+export function prerequisites() {
   return [
     ["a debug lp-cli (cargo build -p lp-cli)", LP_CLI],
     ["the release Studio bundle (just studio-web-story-build)", path.join(ROOT, RELEASE_BUNDLE)],
@@ -212,7 +212,7 @@ function prerequisites() {
 /// <name>=<fixture.toml>`, and a board joins it with `,lan=<name>` in its
 /// `--board` spec. Boards naming the same LAN share it; each board's MAC is
 /// its own by default (`02:4c:50:00:00:<seat>`).
-function doorSpec(fixturePath) {
+export function doorSpec(fixturePath) {
   return {
     boards: BOARDS.map((id) => `${id}={merged},kind=rom-up,lan=${LAN}`),
     extraArgs: ["--lan", `${LAN}=${fixturePath}`],
@@ -263,7 +263,7 @@ export function studioUrlForUsb({ studioPort, doorAddr, sinkUrl, route = "/devic
 }
 
 /// Run `lp-cli <args>`; a password goes in on stdin, never in argv.
-function lpCli(args, { stdin = null, timeoutMs = STEP_MS, env = {} } = {}) {
+export function lpCli(args, { stdin = null, timeoutMs = STEP_MS, env = {} } = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(LP_CLI, args, { cwd: ROOT, env: { ...process.env, ...env }, stdio: ["pipe", "pipe", "pipe"] });
     let stdout = "";
@@ -299,7 +299,7 @@ function lastJson(stdout) {
 }
 
 /// The board's own status answer over `target`.
-async function wifiStatus(target) {
+export async function wifiStatus(target) {
   const { code, stdout, stderr } = await lpCli(["wifi", "status", target, "--json"], { timeoutMs: 120_000 });
   if (code !== 0) throw new Error(`wifi status ${target} → exit ${code}: ${stderr.trim().split("\n").slice(-3).join(" | ")}`);
   return lastJson(stdout);
@@ -330,7 +330,7 @@ function lastAttempt(status, ssid) {
 /// Ask the board until `test(status)` holds. Failures to reach it are
 /// expected while it is off its network (W6, W7, W9) and are retried; the
 /// last one is said if the deadline passes.
-async function awaitStatus(target, test, { timeoutMs = JOIN_MS, what }) {
+export async function awaitStatus(target, test, { timeoutMs = JOIN_MS, what }) {
   const deadline = Date.now() + timeoutMs;
   let last = null;
   for (;;) {
@@ -348,7 +348,7 @@ async function awaitStatus(target, test, { timeoutMs = JOIN_MS, what }) {
   }
 }
 
-const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+export const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /// One board's decoded console, as `lp-cli link capture` writes it a line
 /// at a time. Waits read the file; the board writing it is the event.
@@ -367,7 +367,7 @@ const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 /// link to ask it something over that door (`usbStatus`) and takes it back,
 /// the new capture writes a new file, and the text is all of them in order,
 /// so a mark taken before the hand-over still points at the same line.
-class BoardConsole {
+export class BoardConsole {
   constructor(board, file) {
     this.board = board;
     this.files = [file];
@@ -454,7 +454,7 @@ class BoardConsole {
 /// on it.
 ///
 /// `console` continues an earlier hold's console in a new file (`usbStatus`).
-async function holdConsole({ doorAddr, board, file, console: continued = null }) {
+export async function holdConsole({ doorAddr, board, file, console: continued = null }) {
   const boardConsole = continued ?? new BoardConsole(board, file);
   const target = continued ? continued.nextFile() : file;
   const bridge = await bridgeDoorBytes({ doorAddr, board });
@@ -472,7 +472,7 @@ async function holdConsole({ doorAddr, board, file, console: continued = null })
 
 /// Let go of a board's USB link: stop its capture and its bridge, and wait
 /// for the capture to exit so the door is free for the next client.
-async function releaseConsole(hold) {
+export async function releaseConsole(hold) {
   if (hold.released) return;
   hold.released = true;
   const exited = new Promise((resolve) => {
@@ -529,7 +529,7 @@ async function probeBrowse(doorAddr) {
 }
 
 /// The lp-emu commit numbers are quoted against (AGENTS.md: name it inline).
-function lpEmuCommit() {
+export function lpEmuCommit() {
   try {
     const sha = execFileSync("git", ["log", "-1", "--format=%h", "--", "lp-emu"], { cwd: ROOT, encoding: "utf8" }).trim();
     const dirty = execFileSync("git", ["status", "--porcelain", "--", "lp-emu"], { cwd: ROOT, encoding: "utf8" }).trim();
@@ -567,7 +567,7 @@ function escapeRegExp(text) {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-const cardText = (forward) => `(${cardOf(forward)}?.innerText || '')`;
+export const cardText = (forward) => `(${cardOf(forward)}?.innerText || '')`;
 
 /// The one Wi‑Fi row on the page, a button whose text starts "Wi‑Fi": the
 /// USB card's (a LAN card has none, as built).
@@ -575,7 +575,7 @@ const WIFI_ROW_ANYWHERE = `[...(document.querySelector('#main')?.querySelectorAl
 
 /// Type `text` into the panel's input `selector`, the way a keyboard does
 /// for Dioxus (`input` events carry the value).
-function typeInto(selector, text) {
+export function typeInto(selector, text) {
   return `(() => {
     const el = ${PANEL}?.querySelector(${JSON.stringify(selector)});
     if (!el) return false;
@@ -586,7 +586,7 @@ function typeInto(selector, text) {
   })()`;
 }
 
-class Page {
+export class Page {
   constructor(driver) {
     this.driver = driver;
   }
@@ -1452,4 +1452,7 @@ function quantiles(xs) {
   return { n: v.length, p50: q(0.5), p90: q(0.9) };
 }
 
-await main();
+// Run as the `lan` lane (the dispatcher imports this file) or on its own;
+// imported by another lane (`walk-wifi-emu-studio-lan.mjs`) for its
+// helpers, it runs nothing.
+if (process.argv[2] === "lan" || path.basename(process.argv[1] ?? "") === "walk-wifi-emu-lan.mjs") await main();
