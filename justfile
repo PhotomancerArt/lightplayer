@@ -2689,7 +2689,7 @@ clippy-host:
     cargo clippy --workspace --exclude lps-builtins-emu-app --exclude fw-esp32c6 --exclude fw-esp32s3 --exclude fw-esp32v3 --exclude fw-emu --exclude lp-riscv-emu-guest-test-app --exclude lp-riscv-emu-guest --exclude lp-xt-fp-harness --exclude lp-gfx-wgpu --exclude fw-browser --exclude naga-wasm-poc -- --no-deps -D warnings
     # fw-esp32-common's usb_link/uart_link modules are behind non-default
     # features (`clippy-host`'s `--workspace` only lints its defaults), the
-    # same gap `test-rust-core` closes above for the tests.
+    # same gap `test-rust-features` closes below for the tests.
     cargo clippy -p fw-esp32-common --features usb-link,server --all-targets -- --no-deps -D warnings
     cargo clippy -p fw-esp32-common --features uart-link,server --all-targets -- --no-deps -D warnings
     # lpa-update's `pack` feature (the one packer of OTA encoding 1, std +
@@ -2930,6 +2930,26 @@ _test-parallel: test-rust test-filetests test-emu-lab lpa-link-js-test
 
 test-rust-core:
     cargo test
+
+# The feature-variant test lines: crates whose tests (or part of them) sit
+# behind non-default features, so the workspace `cargo test` in
+# `test-rust-core` never compiles them. Each line resolves features over its
+# own package, which is exactly why they are slow: none of them shares the
+# workspace build's dependency artifacts, and together they cost 215-237 s on
+# a runner (lpc-wire ~60 s, lp-cli's desk-images ~45 s, fw-esp32-common up to
+# 66 s), measured on main run 37575019902 (2026-10-07).
+#
+# They used to be the tail of `test-rust-core`, on Validate (x64)'s critical
+# path. CI now runs them in the Lint (x64) job, which has the same `core`
+# gate, the same x64 runner and the same sccache setup, and finished ~15 min
+# before Validate did (see that job's step for the measured cost). Locally
+# `test-rust` (so `just test` and `just ci`) still runs both recipes, in this
+# order.
+#
+# lp-cli pulls in lpvm-cranelift, whose build script embeds the rv32 builtins
+# image: run `build-rv32-builtins` first (as `just test` and the CI step do),
+# or that crate compiles an empty embed.
+test-rust-features:
     # lp-json-pack's corpus tests need its host features (`required-features`),
     # which the plain workspace run never turns on. No dependencies: cheap.
     cargo test -p lp-json-pack --all-features
@@ -2965,14 +2985,14 @@ test-rust-core:
 
 # lp-link (the link-layer prototype, plan lp2025/2026-09-26-1720-reliable-device-link):
 # the delivery property at soak depth, 5,000 fault schedules per ARQ variant
-# (release, ~3 min). CI runs 500 per variant inside `test-rust-core`.
+# (release, ~3 min). CI runs 500 per variant inside `test-rust-features`.
 link-soak cases="5000":
     PROPTEST_CASES={{cases}} cargo test -p lp-link --features sim,secure --release --test delivery_properties
 
 # lp-link's decoder fuzzing at depth: arbitrary bytes, datagrams and crafted
 # frames against a live link, `cases` per framing (release, ~12 s at 20,000),
 # plain and secure (the secure cases add replays, forged SYNs and msg1 floods).
-# CI runs 256 per framing inside `test-rust-core`.
+# CI runs 256 per framing inside `test-rust-features`.
 link-fuzz cases="20000":
     PROPTEST_CASES={{cases}} cargo test -p lp-link --features sim,secure --release --test decoder_fuzz
 
@@ -3018,7 +3038,7 @@ link-lab-emu:
 # off upstream code), which is why this is `--manifest-path`, not `-p`. They
 # resolve their own dependencies, so this is a local check, not a CI job; the
 # hook's behaviour on the wire types is covered by `cargo test -p lpc-wire
-# --features ser-write-json`, which CI runs through `test-rust-core`.
+# --features ser-write-json`, which CI runs through `test-rust-features`.
 test-ser-write:
     CARGO_TARGET_DIR="$PWD/target" cargo test --manifest-path third_party/ser-write/Cargo.toml
     CARGO_TARGET_DIR="$PWD/target" cargo test --manifest-path third_party/ser-write-json/Cargo.toml
@@ -3119,7 +3139,7 @@ test-browser-shader-frontend:
     cargo test -p lpc-engine --features naga --lib -- shader_palette
 
 # Local parity: all host tests. CI composes the same pieces path-gated.
-test-rust: test-rust-core test-studio-host test-xt-host test-browser-shader-frontend
+test-rust: test-rust-core test-rust-features test-studio-host test-xt-host test-browser-shader-frontend
 
 # lp-gfx-wgpu is outside default-members (heavy wgpu dep tree) but its
 # CPU-side tests gate the canonical-GLSL → WGSL compile path; the
