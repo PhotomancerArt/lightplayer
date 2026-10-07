@@ -464,16 +464,16 @@ fn soak(test: &str, spec: &str) -> Option<Soak> {
     // wait for the next one, so they cover the whole conversation.
     host.set_queue_messages(false);
     // The last round's load leaves the board compiling its shader, and a
-    // compile holds the server loop: no heartbeat can come until it is
-    // done. Wait for the compile to end first (inside the answer budget),
-    // so the heartbeat window below is not spent on board work whose length
-    // depends on where the soak happened to stop.
-    let compile_deadline = host.board.micros() + (host.answer_budget_s * 1e6) as u64;
-    while host.board.micros() < compile_deadline && compiling(host.console()) {
-        host.step().expect("the run");
-    }
+    // compile holds the server loop: no heartbeat comes until it is done,
+    // so the wait is the answer budget, not one heartbeat period. It waits
+    // on the heartbeat itself — a proto message, resent until it lands —
+    // and never on the compile's log lines: those are best-effort log
+    // datagrams this very soak loses, and a lost `compilation succeeded`
+    // once held the wait to its whole budget with the board rendering flat
+    // out (12 minutes of CI; docs/defects/
+    // 2026-10-07-the-uart-soak-waited-on-a-log-line-its-own-faults-lose.md).
     let seen = host.console().len();
-    let deadline = host.board.micros() + 6_000_000;
+    let deadline = host.board.micros() + (host.answer_budget_s * 1e6) as u64;
     while host.board.micros() < deadline
         && !host.console()[seen..]
             .iter()
@@ -639,20 +639,6 @@ fn sniffed_board(test: &str) -> Option<SniffedV3> {
 }
 
 /// The last lines of a console, for a failure message.
-/// Whether the board's latest shader compile has started and not ended.
-fn compiling(console: &[String]) -> bool {
-    let Some(started) = console
-        .iter()
-        .rposition(|line| line.contains("[shader-node] compilation starting"))
-    else {
-        return false;
-    };
-    !console[started..].iter().any(|line| {
-        line.contains("[shader-node] compilation succeeded")
-            || line.contains("[shader-node] compilation failed")
-    })
-}
-
 fn tail(console: &[String]) -> String {
     let from = console.len().saturating_sub(40);
     console[from..].join("\n")
