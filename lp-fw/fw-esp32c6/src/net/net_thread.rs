@@ -30,7 +30,7 @@ use core::ffi::c_void;
 use embassy_net::{Config, Runner, Stack, StackResources};
 use esp_radio::wifi::{Interface, WifiController};
 use fw_esp32_common::net::NetFrameDevice;
-use fw_esp32_common::radio_link::{LAN_LINK_SLOTS, SharedPort};
+use fw_esp32_common::radio_link::{NETWORK_LINK_SLOTS, SharedPort};
 
 use super::esp_frame_device::{C6FrameDevice, CountedStation};
 use super::esp_station::EspStation;
@@ -48,7 +48,7 @@ pub const SOCKET_SLOTS: usize = 6;
 
 /// Every socket buffer the services on the stack keep, allocated at once.
 pub struct NetBuffers {
-    lan: [LanBuffers; LAN_LINK_SLOTS],
+    lan: [LanBuffers; NETWORK_LINK_SLOTS],
     refuse: RefuseBuffers,
     mdns: MdnsBuffers,
 }

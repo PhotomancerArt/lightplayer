@@ -162,14 +162,10 @@ impl RelayClient {
                 }
             }
             RelayEvent::RouteSend { route, bytes } => self.route_send(route, bytes, &mut actions),
-            RelayEvent::RouteClose { route } => {
+            RelayEvent::RouteClose { route, reason } => {
                 if self.routes.close(route) && matches!(self.phase, Phase::Registered { .. }) {
                     actions.push(RelayAction::Send(
-                        RelayFrame::Close {
-                            route,
-                            reason: RouteCloseReason::Normal,
-                        }
-                        .encode(),
+                        RelayFrame::Close { route, reason }.encode(),
                     ));
                 }
             }

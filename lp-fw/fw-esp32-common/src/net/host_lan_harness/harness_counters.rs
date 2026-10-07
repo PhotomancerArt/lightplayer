@@ -13,6 +13,7 @@ use lpc_wire::HelloAuth;
 #[derive(Default)]
 pub struct HarnessCounters {
     refused: AtomicUsize,
+    takeovers: AtomicUsize,
     links_opened: AtomicUsize,
     links_closed: AtomicUsize,
     requests: AtomicUsize,
@@ -23,8 +24,12 @@ pub struct HarnessCounters {
 /// A snapshot of [`HarnessCounters`].
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct HarnessStats {
-    /// Connections told WebSocket close 1013 (every LAN slot busy).
+    /// Connections told WebSocket close 1013 (the network link in use).
     pub refused: usize,
+    /// LAN connections that took the network slot over from the relay with
+    /// the holder's own key (a relay route that took it from the LAN is the
+    /// relay driver's count: `LanHarness::relay_status`).
+    pub takeovers: usize,
     /// WebSocket upgrades that got a LAN slot and a secure lp-link session.
     pub links_opened: usize,
     /// LAN links whose connection has ended and whose slot is free again.
@@ -43,6 +48,10 @@ pub struct HarnessStats {
 impl HarnessCounters {
     pub(super) fn refused(&self) {
         self.refused.fetch_add(1, Ordering::SeqCst);
+    }
+
+    pub(super) fn took_over(&self) {
+        self.takeovers.fetch_add(1, Ordering::SeqCst);
     }
 
     pub(super) fn link_opened(&self) {
@@ -68,6 +77,7 @@ impl HarnessCounters {
     pub fn snapshot(&self) -> HarnessStats {
         HarnessStats {
             refused: self.refused.load(Ordering::SeqCst),
+            takeovers: self.takeovers.load(Ordering::SeqCst),
             links_opened: self.links_opened.load(Ordering::SeqCst),
             links_closed: self.links_closed.load(Ordering::SeqCst),
             requests: self.requests.load(Ordering::SeqCst),

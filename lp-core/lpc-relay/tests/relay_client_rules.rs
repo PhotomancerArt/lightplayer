@@ -365,10 +365,31 @@ fn frames_pass_both_ways_byte_identical() {
     );
     client.handle(15, message(&RelayFrame::Open { route: 4 }));
     assert_eq!(
-        sent(&client.handle(16, RelayEvent::RouteClose { route: 4 })),
+        sent(&client.handle(
+            16,
+            RelayEvent::RouteClose {
+                route: 4,
+                reason: RouteCloseReason::Normal
+            }
+        )),
         RelayFrame::Close {
             route: 4,
             reason: RouteCloseReason::Normal
+        }
+    );
+    // A board that turns a newcomer away (its one session is held) says so.
+    client.handle(17, message(&RelayFrame::Open { route: 5 }));
+    assert_eq!(
+        sent(&client.handle(
+            18,
+            RelayEvent::RouteClose {
+                route: 5,
+                reason: RouteCloseReason::Busy
+            }
+        )),
+        RelayFrame::Close {
+            route: 5,
+            reason: RouteCloseReason::Busy
         }
     );
 }

@@ -14,8 +14,13 @@
 //! - [`radio_link_port`]: the slots the radio side and the mux share — each
 //!   open connection's `Link`, and the signals both halves wait on (feature
 //!   `radio-link`);
-//! - [`lan_link_config`]: one LAN link's lp-link configuration, the `ws()`
-//!   preset cut to the board (feature `wifi`);
+//! - [`slot_edge`]: which edge serves a slot's link — the network slot's
+//!   two, the LAN endpoint and the relay driver, take turns (feature
+//!   `radio-link`);
+//! - [`parked_handshake`]: a newcomer's first frame while the network slot
+//!   is held, and the same-key takeover rule (feature `wifi`);
+//! - [`lan_link_config`]: one network link's lp-link configuration, the
+//!   `ws()` preset cut to the board (feature `wifi`);
 //! - [`link_mux_transport`]: USB plus the radio links as one server
 //!   transport: whole wire messages on each link's proto channel, the hello
 //!   per session, the login deadline (feature `radio-link`);
@@ -31,21 +36,29 @@ pub mod hci_connection_ledger;
 pub mod lan_link_config;
 #[cfg(feature = "radio-link")]
 pub mod link_mux_transport;
+#[cfg(feature = "wifi")]
+pub mod parked_handshake;
 #[cfg(feature = "radio-link")]
 pub mod radio_link_config;
 #[cfg(feature = "radio-link")]
 pub mod radio_link_port;
+#[cfg(feature = "radio-link")]
+pub mod slot_edge;
 
 #[cfg(feature = "server")]
 pub use frame_buf_holder::FrameBufHolder;
 #[cfg(feature = "radio-link")]
 pub use link_mux_transport::{
-    LOGIN_DEADLINE_MS, LinkMuxTransport, RADIO_WRITE_DEADLINE_MS, now_us,
+    LAN_WRITE_DEADLINE_MS, LOGIN_DEADLINE_MS, LinkMuxTransport, RADIO_WRITE_DEADLINE_MS, now_us,
 };
+#[cfg(feature = "wifi")]
+pub use parked_handshake::{ChallengeVerdict, PARKED_FRAME_MAX, ParkRefused};
 #[cfg(feature = "radio-link")]
 pub use radio_link_config::{MtuTooSmall, radio_link_config, radio_max_payload};
 #[cfg(feature = "radio-link")]
 pub use radio_link_port::{
-    CloseReason, LAN_LINK_SLOTS, LINK_SLOTS, PortLock, RADIO_LINK_SLOTS, RadioLinkEvent,
-    RadioLinkPort, RadioLinkSlot, SharedPort,
+    CloseReason, LINK_SLOTS, NETWORK_LINK_SLOTS, NotHeld, PortLock, RADIO_LINK_SLOTS,
+    RadioLinkEvent, RadioLinkPort, RadioLinkSlot, SharedPort, SlotHeld,
 };
+#[cfg(feature = "radio-link")]
+pub use slot_edge::SlotEdge;

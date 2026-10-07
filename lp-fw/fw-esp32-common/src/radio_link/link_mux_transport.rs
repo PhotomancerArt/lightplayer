@@ -53,15 +53,21 @@
 //!    enforces: once the challenge expires or its answer is refused, the
 //!    ordinary deadline applies again, and a link already past it closes.
 //!
-//! **LAN links** (feature `wifi`) ride the same slots and the same rules,
-//! with three differences: they are secure lp-link responders, so they are
-//! [`LinkTrust::Keyed`] and their handshake asks the server for keys
-//! ([`ServerTransport::take_secure_events`] /
+//! **Network links** (feature `wifi`: the LAN's, and the cloud relay's
+//! routes) ride the same slots and the same rules, with four differences:
+//! they are secure lp-link responders, so they are [`LinkTrust::Keyed`] (or
+//! [`LinkTrust::Relayed`] through the relay) and their handshake asks the
+//! server for keys ([`ServerTransport::take_secure_events`] /
 //! [`ServerTransport::answer_key_lookup`]; the key that verifies decides the
-//! link's tier at `Up`); a keyed session that resets after coming up closes
-//! the link (a new session is a new server link, with a new grant, so the
-//! client reconnects); and they are served from another thread, under the
-//! port's lock (see `radio_link_port`).
+//! link's tier at `Up`); a secure session that resets after coming up
+//! closes the link (a new session is a new server link, with a new grant, so
+//! the client reconnects); they are served from another thread, under the
+//! port's lock (see `radio_link_port`); and the LAN and the relay share
+//! **one** network slot (Wi-Fi relay plan D2). A newcomer that finds it held
+//! is a *challenge* ([`RadioLinkEvent::Challenged`]): it takes the slot only
+//! with a handshake that verifies under the holder's own key, looked up
+//! through the server like any other, and anything else is told busy
+//! without a lookup (`parked_handshake` has the rule and why).
 //!
 //! A radio send that fails does **not** return an error to the server. The
 //! server's `tick_and_send` stops answering the whole batch on the first
@@ -85,6 +91,8 @@ use lpc_wire::server::ServerMsgBody;
 use lpc_wire::{LinkCounterTally, TransportError, WireServerMessage};
 
 use super::frame_buf_holder::FrameBufHolder;
+#[cfg(feature = "wifi")]
+use super::parked_handshake::Msg1;
 use super::radio_link_config::SMALL_REPLY_BYTES;
 #[cfg(feature = "wifi")]
 use super::radio_link_port::RADIO_LINK_SLOTS;
@@ -108,6 +116,12 @@ pub const RADIO_WRITE_DEADLINE_MS: u32 = 5_000;
 /// milliseconds, so one that has not let go of the buffer in a second has
 /// stopped reading (a backgrounded tab, a stalled Wi-Fi), and every second
 /// of waiting is a second the board does not render.
+///
+/// A **relayed** link is not a LAN peer: every window crosses the internet
+/// twice. PR A measured request round trips of 215–224 ms through the relay
+/// with 100 ms added each way, and a 16 KiB reply at the board's window of
+/// two 1 KB frames is eight round trips (~1.8 s), so a relayed link gets the
+/// slow path's bound, [`RADIO_WRITE_DEADLINE_MS`].
 pub const LAN_WRITE_DEADLINE_MS: u32 = 1_000;
 
 /// The most one server tick may spend waiting for radio links to let go of
@@ -172,6 +186,14 @@ struct RadioLink {
     tally: LinkCounterTally,
 }
 
+/// A newcomer whose first frame is parked on the held network slot.
+#[cfg(feature = "wifi")]
+struct Challenge {
+    id: LinkId,
+    slot: usize,
+    msg1: Msg1,
+}
+
 /// What queueing one reply on a radio link came to.
 enum Queued {
     Yes,
@@ -195,6 +217,9 @@ pub struct LinkMuxTransport<U, D> {
     /// Keyed links' handshake events the server has not taken yet.
     #[cfg(feature = "wifi")]
     secure: Vec<(LinkId, SecureLinkEvent)>,
+    /// The network slot's challenger, while the server looks its key up.
+    #[cfg(feature = "wifi")]
+    challenge: Option<Challenge>,
     upkeep_hook: Option<fn(&LpServer, u64)>,
     /// Until when the current server tick may wait on radio links: the last
     /// upkeep (the end of the previous tick) plus [`TICK_WAIT_LIMIT_MS`].
@@ -220,7 +245,9 @@ impl<U: ServerTransport + FrameBufHolder, D: DelayNs> LinkMuxTransport<U, D> {
             inbox: VecDeque::with_capacity(INBOX_RESERVE),
             closed: Vec::with_capacity(LINK_SLOTS),
             #[cfg(feature = "wifi")]
-            secure: Vec::with_capacity(LINK_SLOTS),
+            secure: Vec::with_capacity(LINK_SLOTS + 1),
+            #[cfg(feature = "wifi")]
+            challenge: None,
             upkeep_hook: None,
             tick_wait_until: tick_wait_until(),
         }
@@ -330,13 +357,129 @@ impl<U: ServerTransport + FrameBufHolder, D: DelayNs> LinkMuxTransport<U, D> {
                 }
                 RadioLinkEvent::Closed { link } => {
                     if let Some(at) = self.radio.iter().position(|l| l.id == link) {
-                        self.radio.remove(at);
+                        let gone = self.radio.remove(at);
                         self.inbox.retain(|i| i.link != link);
                         self.closed.push(link);
                         log::info!("radio link {link}: closed");
+                        // The holder left while a newcomer waited on its
+                        // key: the newcomer is told busy and simply tries
+                        // again, onto a free slot.
+                        #[cfg(feature = "wifi")]
+                        if self.challenge.as_ref().is_some_and(|c| c.slot == gone.slot) {
+                            self.refuse_challenge("its holder left");
+                        }
+                        #[cfg(not(feature = "wifi"))]
+                        let _ = gone;
+                    }
+                    #[cfg(feature = "wifi")]
+                    if self.challenge.as_ref().is_some_and(|c| c.id == link) {
+                        // Its edge gave up waiting.
+                        self.challenge = None;
+                        self.closed.push(link);
                     }
                 }
+                RadioLinkEvent::Challenged { link, slot } => {
+                    #[cfg(feature = "wifi")]
+                    self.challenged(link, slot);
+                    #[cfg(not(feature = "wifi"))]
+                    log::error!("radio link {link}: a challenge on slot {slot} with no network");
+                }
             }
+        }
+    }
+
+    /// A newcomer parked its first frame on the held network `slot`: ask
+    /// the server for its key only when it names the holder's own key id
+    /// (see `parked_handshake`); anything else is busy at once, with no
+    /// lookup and nothing charged.
+    #[cfg(feature = "wifi")]
+    fn challenged(&mut self, link: LinkId, slot: usize) {
+        let port = self.port;
+        if slot >= LINK_SLOTS || self.challenge.is_some() {
+            port.slot(slot.min(LINK_SLOTS - 1)).refuse_challenge(link);
+            return;
+        }
+        let Some(Some(msg1)) = port.slot(slot).parked_msg1(link) else {
+            log::info!("network link {link}: a newcomer's first frame is not a handshake — busy");
+            port.slot(slot).refuse_challenge(link);
+            return;
+        };
+        let holder_key = self
+            .radio
+            .iter()
+            .find(|l| l.slot == slot)
+            .and_then(|holder| port.slot(slot).with_link(holder.id, |l| l.session_auth()))
+            .flatten()
+            .map(|auth| auth.key_id);
+        match holder_key {
+            Some(key) if key == msg1.key_id && !key.is_anonymous() => {
+                log::info!("network link {link}: the holder's key asks for the slot — checking it");
+                self.secure
+                    .push((link, SecureLinkEvent::KeyLookup { salt: key.0 }));
+                self.challenge = Some(Challenge {
+                    id: link,
+                    slot,
+                    msg1,
+                });
+            }
+            _ => {
+                log::info!("network link {link}: the network link is in use — busy");
+                port.slot(slot).refuse_challenge(link);
+            }
+        }
+    }
+
+    /// The server answered the challenger's key lookup: a msg1 that
+    /// verifies under one of its candidates takes the slot (the holder is
+    /// closed first), anything else is busy — a wrong key charged to the
+    /// backoff like any failed guess.
+    #[cfg(feature = "wifi")]
+    fn decide_challenge(&mut self, answer: KeyAnswer) {
+        let Some(challenge) = self.challenge.take() else {
+            return;
+        };
+        let verified = match &answer {
+            KeyAnswer::Keys(psks) => psks.iter().any(|psk| challenge.msg1.verifies_with(psk)),
+            KeyAnswer::Unknown | KeyAnswer::Backoff { .. } => false,
+        };
+        let slot = self.port.slot(challenge.slot);
+        if verified {
+            if let Some(holder) = self.radio.iter().find(|l| l.slot == challenge.slot) {
+                let holder = holder.id;
+                log::info!(
+                    "network link {holder}: taken over by link {} (the same key)",
+                    challenge.id
+                );
+                self.close_radio(holder, "taken over by the same key");
+            }
+            slot.grant_challenge(challenge.id);
+            return;
+        }
+        if matches!(answer, KeyAnswer::Keys(_)) {
+            self.secure.push((
+                challenge.id,
+                SecureLinkEvent::WrongKey {
+                    salt: challenge.msg1.key_id.0,
+                },
+            ));
+        }
+        log::info!(
+            "network link {}: its key did not verify — busy",
+            challenge.id
+        );
+        slot.refuse_challenge(challenge.id);
+        self.closed.push(challenge.id);
+    }
+
+    /// Turn the waiting challenger away.
+    #[cfg(feature = "wifi")]
+    fn refuse_challenge(&mut self, why: &str) {
+        if let Some(challenge) = self.challenge.take() {
+            log::info!("network link {}: busy ({why})", challenge.id);
+            self.port
+                .slot(challenge.slot)
+                .refuse_challenge(challenge.id);
+            self.closed.push(challenge.id);
         }
     }
 
@@ -352,7 +495,7 @@ impl<U: ServerTransport + FrameBufHolder, D: DelayNs> LinkMuxTransport<U, D> {
         for radio in &mut self.radio {
             let slot = port.slot(radio.slot);
             #[cfg(feature = "wifi")]
-            if radio.wire.trust == LinkTrust::Keyed {
+            if radio.wire.trust.is_secure() {
                 take_secure_events(slot, radio, &mut self.secure);
             }
             while !radio.hello_owed {
@@ -411,7 +554,7 @@ impl<U: ServerTransport + FrameBufHolder, D: DelayNs> LinkMuxTransport<U, D> {
                         // A keyed link's grant before its hello: the key the
                         // handshake verified decides its tier.
                         #[cfg(feature = "wifi")]
-                        if radio.wire.trust == LinkTrust::Keyed
+                        if radio.wire.trust.is_secure()
                             && let Some(Some(auth)) = slot.with_link(radio.id, |l| l.session_auth())
                         {
                             self.secure.push((
@@ -430,7 +573,7 @@ impl<U: ServerTransport + FrameBufHolder, D: DelayNs> LinkMuxTransport<U, D> {
                     }
                     LinkEvent::Reset { reason, generation } => {
                         #[cfg(feature = "wifi")]
-                        if radio.wire.trust == LinkTrust::Keyed && radio.session.is_some() {
+                        if radio.wire.trust.is_secure() && radio.session.is_some() {
                             reset_keyed.push(radio.id);
                         }
                         radio.packed.back_to_json();
@@ -465,14 +608,12 @@ impl<U: ServerTransport + FrameBufHolder, D: DelayNs> LinkMuxTransport<U, D> {
     }
 
     /// Drop `id` from the mux, drop its link (it stops reading the frame
-    /// buffer now), ask the radio side to disconnect it, and owe the server a
-    /// closed notice.
+    /// buffer now), ask the edge that served it to disconnect it, and owe the
+    /// server a closed notice.
     fn close_radio(&mut self, id: LinkId, reason: &'static str) {
         if let Some(at) = self.radio.iter().position(|l| l.id == id) {
             let link = self.radio.remove(at);
-            let slot = self.port.slot(link.slot);
-            slot.drop_link(id);
-            slot.request_close(reason);
+            self.port.slot(link.slot).revoke(id, reason);
             self.inbox.retain(|i| i.link != id);
             self.closed.push(id);
         }
@@ -490,7 +631,12 @@ impl<U: ServerTransport + FrameBufHolder, D: DelayNs> LinkMuxTransport<U, D> {
                 continue;
             }
             let left_ms = (self.tick_wait_until.saturating_sub(now_us()) / 1_000) as u32;
-            let wait_ms = write_deadline_ms(index).min(left_ms);
+            let trust = self
+                .radio
+                .iter()
+                .find(|l| l.slot == index)
+                .map(|l| l.wire.trust);
+            let wait_ms = write_deadline_ms(index, trust).min(left_ms);
             let released = wait_ms > 0
                 && matches!(
                     select(wait_for_release(slot), self.delay.delay_ms(wait_ms)).await,
@@ -685,15 +831,16 @@ fn tick_wait_until() -> Micros {
     now_us() + u64::from(TICK_WAIT_LIMIT_MS) * 1_000
 }
 
-/// How long the link in slot `index` may hold the frame buffer: Bluetooth's
-/// air is slow ([`RADIO_WRITE_DEADLINE_MS`]), the LAN's is not
-/// ([`LAN_WRITE_DEADLINE_MS`]).
-fn write_deadline_ms(index: usize) -> u32 {
+/// How long the link in slot `index` (trusted as `trust`) may hold the
+/// frame buffer: Bluetooth's air is slow ([`RADIO_WRITE_DEADLINE_MS`]), the
+/// LAN's is not ([`LAN_WRITE_DEADLINE_MS`]), and the relay crosses the
+/// internet (the slow path's bound again).
+fn write_deadline_ms(index: usize, trust: Option<lpc_shared::transport::LinkTrust>) -> u32 {
     #[cfg(feature = "wifi")]
-    if index >= RADIO_LINK_SLOTS {
+    if index >= RADIO_LINK_SLOTS && trust != Some(LinkTrust::Relayed) {
         return LAN_WRITE_DEADLINE_MS;
     }
-    let _ = index;
+    let _ = (index, trust);
     RADIO_WRITE_DEADLINE_MS
 }
 
@@ -768,6 +915,10 @@ impl<U: ServerTransport + FrameBufHolder, D: DelayNs> ServerTransport for LinkMu
 
     #[cfg(feature = "wifi")]
     fn answer_key_lookup(&mut self, link: LinkId, answer: KeyAnswer) {
+        if self.challenge.as_ref().is_some_and(|c| c.id == link) {
+            self.decide_challenge(answer);
+            return;
+        }
         let Some(radio) = self.radio.iter_mut().find(|l| l.id == link) else {
             return;
         };
@@ -1015,9 +1166,20 @@ mod tests {
         block(mux.send(LinkId::PRIMARY, error_reply(44, 10))).unwrap();
         assert_eq!(waited.get(), u64::from(RADIO_WRITE_DEADLINE_MS) * 1_000_000);
         assert_eq!(mux.take_closed_links(), vec![link]);
-        assert_eq!(write_deadline_ms(0), RADIO_WRITE_DEADLINE_MS);
+        assert_eq!(write_deadline_ms(0, None), RADIO_WRITE_DEADLINE_MS);
         #[cfg(feature = "wifi")]
-        assert_eq!(write_deadline_ms(RADIO_LINK_SLOTS), LAN_WRITE_DEADLINE_MS);
+        {
+            use lpc_shared::transport::LinkTrust;
+            assert_eq!(
+                write_deadline_ms(RADIO_LINK_SLOTS, Some(LinkTrust::Keyed)),
+                LAN_WRITE_DEADLINE_MS
+            );
+            assert_eq!(
+                write_deadline_ms(RADIO_LINK_SLOTS, Some(LinkTrust::Relayed)),
+                RADIO_WRITE_DEADLINE_MS,
+                "the relay crosses the internet: the slow path's bound"
+            );
+        }
     }
 
     /// Packing exists only with `json-pack`; without it every reply is JSON.

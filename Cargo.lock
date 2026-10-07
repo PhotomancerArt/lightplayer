@@ -4164,6 +4164,7 @@ dependencies = [
  "lpc-access",
  "lpc-hardware",
  "lpc-model",
+ "lpc-relay",
  "lpc-shared",
  "lpc-wire",
  "lpfs",

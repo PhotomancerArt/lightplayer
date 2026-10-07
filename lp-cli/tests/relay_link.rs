@@ -294,7 +294,132 @@ fn a_session_through_a_slow_device_leg_stays_up() {
     });
 }
 
+/// The board's own relay driver (the C6's, on the host harness: its
+/// WebSocket client, driver, network slot and mux in front of a real
+/// lpa-server) against the real hub: it registers with its account key,
+/// the hub lists it with its LAN address, and an account session edits it.
+#[test]
+fn a_boards_own_relay_driver_registers_with_its_lan_address_and_carries_a_session() {
+    let cloud = Cloud::start(None);
+    let alice = cloud.account("alice");
+    let (harness, board) = HarnessBoard::start(&cloud, vec![alice.entry()]);
+    cloud.wait_for_boards(1);
+
+    let list = cloud.list_boards(&alice.session);
+    assert_eq!(list.boards.len(), 1);
+    assert_eq!(list.boards[0].id, board.to_string());
+    assert_eq!(
+        list.boards[0].lan.as_deref(),
+        Some(harness.addr().to_string().as_str()),
+        "the board's LAN address rides its hello"
+    );
+    run(async {
+        let connection = connect_relay(cloud.target(board), Some(alice.session.clone()), None)
+            .await
+            .expect("the account's key opens the board's relay session");
+        assert_eq!(connection.hello().unwrap().auth.granted, Some(Tier::Edit));
+        let mut client = LpClient::new(connection.client_io());
+        client
+            .network_status()
+            .await
+            .expect("an edit request through the board's own relay driver");
+        drop(client);
+        connection.close().await;
+    });
+    harness.stop();
+}
+
+/// D2 with the real hub and clients: Alice's relay session moves to the LAN
+/// when she opens it with the same key, and Bob, through the relay, is told
+/// busy while she holds it.
+#[test]
+fn the_same_key_moves_a_relay_session_to_the_lan_and_anyone_else_is_busy() {
+    let cloud = Cloud::start(None);
+    let alice = cloud.account("alice");
+    let bob = cloud.account("bob");
+    let (harness, board) = HarnessBoard::start(&cloud, vec![alice.entry()]);
+    cloud.wait_for_boards(1);
+    let alice_key = alice.entry();
+    run(async {
+        let relayed = connect_relay(cloud.target(board), Some(alice.session.clone()), None)
+            .await
+            .expect("Alice through the relay");
+        let lan_target =
+            lpa_client::transport_lan::LanTarget::new("127.0.0.1", harness.addr().port());
+        let (lan, hello) = lpa_client::transport_lan::connect_lan_transport(
+            lan_target.endpoint(),
+            lpa_client::transport_lan::LanOptions {
+                password: None,
+                want_packed: false,
+                held_keys: vec![(
+                    lpc_wire::lp_link::secure_channel::KeyId(alice_key.salt),
+                    lpc_wire::lp_link::secure_channel::Psk::new(lpc_access::link_psk(&alice_key.k)),
+                )],
+            },
+        )
+        .await
+        .expect("Alice on the LAN with the same key takes her session over");
+        assert_eq!(hello.auth.granted, Some(Tier::Edit));
+        let mut relay_client = LpClient::new(relayed.client_io());
+        assert!(
+            relay_client.network_status().await.is_err(),
+            "the relay session is gone once the LAN has it"
+        );
+        drop(relay_client);
+        relayed.close().await;
+
+        let refused =
+            match connect_relay(cloud.target(board), Some(bob.session.clone()), None).await {
+                Ok(_) => panic!("Bob got the board while Alice holds its one session"),
+                Err(error) => error,
+            };
+        assert!(
+            matches!(
+                refused.downcast_ref::<LanError>(),
+                Some(LanError::Busy { .. })
+            ),
+            "{refused}"
+        );
+        drop(lan);
+    });
+    assert_eq!(harness.stats().takeovers, 1);
+    harness.stop();
+}
+
 // ---- helpers ---------------------------------------------------------
+
+/// The C6's board-side relay on the host harness: its network slot, mux
+/// and server, locked (no "Anyone"), holding `accounts`, on `cloud`'s relay.
+struct HarnessBoard;
+
+impl HarnessBoard {
+    fn start(
+        cloud: &Cloud,
+        accounts: Vec<SecretEntry>,
+    ) -> (
+        fw_esp32_common::net::host_lan_harness::LanHarness,
+        RelayBoardId,
+    ) {
+        use fw_esp32_common::net::host_lan_harness::{
+            HarnessAccess, HarnessRelay, LanHarness, LanHarnessOptions,
+        };
+        let mut mac = [0u8; 6];
+        os_entropy(&mut mac);
+        mac[0] = (mac[0] | 0x02) & 0xfe;
+        let harness = LanHarness::start(LanHarnessOptions {
+            access: HarnessAccess::locked(accounts),
+            graphics: None,
+            relay: Some(HarnessRelay {
+                host: "127.0.0.1".to_string(),
+                port: cloud.port,
+                board_mac: mac,
+                label: "harness board".to_string(),
+            }),
+        })
+        .expect("the harness starts");
+        (harness, RelayBoardId(mac))
+    }
+}
 
 /// An lp-cloud-server on a loopback port, on its own runtime.
 struct Cloud {

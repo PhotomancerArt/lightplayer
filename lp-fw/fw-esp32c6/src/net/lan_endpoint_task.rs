@@ -1,16 +1,21 @@
 //! The LAN endpoint on `lp-net`: secure lp-link links at `ws://<board>/link`
 //! (plan P04, MD10–MD12).
 //!
-//! One task per LAN slot ([`LAN_LINK_SLOTS`]: one on the C6), each holding
-//! one listening TCP socket on port 80. A connection is upgraded to a
-//! WebSocket (`fw_esp32_common::net::ws`, over the [`ByteStream`] a TLS
+//! One task per network slot ([`NETWORK_LINK_SLOTS`]: one on the C6), each
+//! holding one listening TCP socket on port 80. A connection is upgraded to
+//! a WebSocket (`fw_esp32_common::net::ws`, over the [`ByteStream`] a TLS
 //! wrapper can later replace), then gets its own secure lp-link session on
-//! the slot (`RadioLinkSlot::open_lan`: the board as the Noise responder,
-//! keyed like Bluetooth by the server's access store). One binary message is
-//! one lp-link frame. The mux on the main thread carries it like a Bluetooth
-//! link (`radio_link::link_mux_transport`), under the port's lock.
+//! the slot (`RadioLinkSlot::open_network`: the board as the Noise
+//! responder, keyed like Bluetooth by the server's access store). One binary
+//! message is one lp-link frame. The mux on the main thread carries it like
+//! a Bluetooth link (`radio_link::link_mux_transport`), under the port's
+//! lock.
 //!
-//! - **One connection too many** while every slot is busy reaches the
+//! - **The slot is the relay's too** (Wi-Fi relay plan D2): when a relay
+//!   route holds it, a LAN connection is a challenge
+//!   (`fw_esp32_common::net::network_challenge`) — it takes the session
+//!   over only with the holder's own key, else it is told 1013.
+//! - **One connection too many** while the LAN endpoint is busy reaches the
 //!   [`refuse_task`]'s socket and gets WebSocket close 1013 ("try again
 //!   later") and a log line.
 //! - **Memory.** Each slot's TCP and WebSocket buffers are allocated once,
@@ -38,11 +43,13 @@ use embassy_net::tcp::TcpSocket;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
 use embassy_time::{Duration, Instant, Timer};
+use fw_esp32_common::net::network_challenge::{ChallengeOutcome, challenge_over_ws};
 use fw_esp32_common::net::ws::{ByteStream, CloseCode, RX_OVERHEAD, StreamClosed, WsConnection};
 use fw_esp32_common::radio_link::lan_link_config::LAN_MAX_FRAME;
 use fw_esp32_common::radio_link::{
-    LAN_LINK_SLOTS, RADIO_LINK_SLOTS, RadioLinkEvent, SharedPort, now_us,
+    NETWORK_LINK_SLOTS, RADIO_LINK_SLOTS, RadioLinkEvent, SharedPort, SlotEdge, now_us,
 };
+use lpc_shared::transport::{LinkId, LinkTrust};
 
 /// The endpoint's port (plan Q6: 80, room for the device-served panel).
 pub const LINK_PORT: u16 = 80;
@@ -65,6 +72,9 @@ const IDLE_TIMEOUT: Duration = Duration::from_secs(20);
 const STATS_EVERY: Duration = Duration::from_secs(10);
 /// WebSocket close 1013: try again later.
 const TRY_AGAIN_LATER: CloseCode = CloseCode(1013);
+/// How long a challenger waits for its verdict: past lp-link's own 2 s
+/// key-lookup limit, with room for the server loop's tick.
+const CHALLENGE_WAIT: Duration = Duration::from_secs(5);
 
 /// LAN slots holding a link.
 static BUSY: AtomicUsize = AtomicUsize::new(0);
@@ -93,8 +103,9 @@ impl LanBuffers {
     }
 }
 
-/// One LAN slot's task: `lan` is its index among the LAN slots.
-#[embassy_executor::task(pool_size = LAN_LINK_SLOTS)]
+/// One network slot's LAN task: `lan` is its index among the network
+/// slots.
+#[embassy_executor::task(pool_size = NETWORK_LINK_SLOTS)]
 pub async fn lan_link_task(
     stack: Stack<'static>,
     port: SharedPort,
@@ -124,7 +135,7 @@ pub async fn lan_link_task(
             continue;
         }
         let peer = socket.remote_endpoint();
-        let ws = match WsConnection::accept(TcpStream(socket), &mut *buffers.ws_rx).await {
+        let mut ws = match WsConnection::accept(TcpStream(socket), &mut *buffers.ws_rx).await {
             Ok(ws) => ws,
             Err(_) => {
                 log::info!("[lan] a request on port {LINK_PORT} was not a link upgrade");
@@ -134,8 +145,40 @@ pub async fn lan_link_task(
         set_busy(1);
         let slot = port.slot(index);
         let id = port.mint_link();
-        slot.reset();
-        let payload = slot.open_lan(id, random_u32(), fill_random);
+        let opened = slot.open_network(
+            id,
+            random_u32(),
+            fill_random,
+            LinkTrust::Keyed,
+            SlotEdge::Local,
+        );
+        let payload = match opened {
+            Ok(payload) => payload,
+            Err(_) => {
+                let deadline = Timer::after(CHALLENGE_WAIT);
+                let outcome = challenge_over_ws(&mut ws, &port, index, id, deadline).await;
+                let taken = match outcome {
+                    ChallengeOutcome::TakeOver => slot
+                        .take_over(id, now_us(), random_u32(), fill_random, LinkTrust::Keyed)
+                        .ok(),
+                    ChallengeOutcome::Busy | ChallengeOutcome::PeerGone => None,
+                };
+                match taken {
+                    Some(payload) => {
+                        log::info!("[lan] link {id}: took the network link over (the same key)");
+                        payload
+                    }
+                    None => {
+                        if outcome != ChallengeOutcome::PeerGone {
+                            log::info!("[lan] the network link is in use: told to try again later");
+                            ws.close(TRY_AGAIN_LATER).await;
+                        }
+                        set_busy(-1);
+                        continue;
+                    }
+                }
+            }
+        };
         match peer {
             Some(peer) => log::info!(
                 "[lan] link {id} from {peer}: secure session opening ({payload} B frames)"
@@ -147,49 +190,67 @@ pub async fn lan_link_task(
             slot: index,
         })
         .await;
-        let reason = serve(ws, port, index, &mut *buffers.frame_tx).await;
+        let reason = serve(ws, port, index, id, &mut *buffers.frame_tx).await;
         log_counters(port, index, id);
-        slot.close();
+        slot.close_link(id);
         port.announce(RadioLinkEvent::Closed { link: id }).await;
         log::info!("[lan] link {id}: closed ({reason})");
         set_busy(-1);
     }
 }
 
-/// Carry frames between the WebSocket and the slot's link until either
-/// side ends it; why it ended.
+/// Carry frames between the WebSocket and the slot's link `id` until either
+/// side ends it (or the mux revokes it: the login deadline, a reset, a
+/// relay route with the same key taking it over); why it ended.
 async fn serve(
     mut ws: WsConnection<'_, TcpStream<'_>>,
     port: SharedPort,
     index: usize,
+    id: LinkId,
     frame_tx: &mut [u8],
 ) -> &'static str {
     let slot = port.slot(index);
     let mut next_stats = Instant::now() + STATS_EVERY;
     loop {
         // Everything the link wants to send now, one message per frame.
-        while let Some(len) = slot.poll_frame(now_us(), |frame| {
-            let n = frame.len().min(frame_tx.len());
-            frame_tx[..n].copy_from_slice(&frame[..n]);
-            n
-        }) {
-            if ws.send(&frame_tx[..len]).await.is_err() {
-                return "the peer stopped taking frames";
+        loop {
+            let polled = slot.poll_frame_for(id, now_us(), |frame| {
+                let n = frame.len().min(frame_tx.len());
+                frame_tx[..n].copy_from_slice(&frame[..n]);
+                n
+            });
+            match polled {
+                Ok(Some(len)) => {
+                    if ws.send(&frame_tx[..len]).await.is_err() {
+                        return "the peer stopped taking frames";
+                    }
+                }
+                Ok(None) => break,
+                Err(_) => {
+                    let reason = slot
+                        .try_close_request_for(SlotEdge::Local)
+                        .unwrap_or("closed by the board");
+                    ws.close(CloseCode::NORMAL).await;
+                    return reason;
+                }
             }
         }
         let wake = slot
-            .poll_timeout()
+            .poll_timeout_for(id)
             .map(|at| Instant::from_micros(at).min(next_stats))
             .unwrap_or(next_stats);
         match select4(
             ws.recv(),
-            slot.doorbell(),
+            slot.doorbell_for(SlotEdge::Local),
             Timer::at(wake),
-            slot.close_requested(),
+            slot.close_requested_for(SlotEdge::Local),
         )
         .await
         {
-            Either4::First(Ok(frame)) => slot.on_datagram(now_us(), frame),
+            // A frame for a link no longer held: the next pass closes it.
+            Either4::First(Ok(frame)) => {
+                let _ = slot.on_datagram_for(id, now_us(), frame);
+            }
             Either4::First(Err(_)) => return "the WebSocket closed",
             Either4::Second(()) => {}
             Either4::Third(()) => {
@@ -244,7 +305,7 @@ pub async fn refuse_task(stack: Stack<'static>, buffers: Option<RefuseBuffers>) 
         }
     };
     loop {
-        while BUSY.load(Ordering::Acquire) < LAN_LINK_SLOTS {
+        while BUSY.load(Ordering::Acquire) < NETWORK_LINK_SLOTS {
             BUSY_CHANGED.wait().await;
         }
         let mut socket = TcpSocket::new(stack, &mut *tcp_rx, &mut *tcp_tx);

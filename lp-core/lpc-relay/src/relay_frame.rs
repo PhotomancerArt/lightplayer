@@ -275,6 +275,15 @@ impl RelayFrame {
     }
 }
 
+/// [`RelayFrame::Frame`]'s header: the tag and the route. The payload follows
+/// it in the same message. For an edge that writes frames into a buffer it
+/// owns (the C6's relay task), with no allocation per frame.
+#[must_use]
+pub fn route_frame_header(route: u16) -> [u8; ROUTE_FRAME_OVERHEAD] {
+    let [lo, hi] = route.to_le_bytes();
+    [TAG_FRAME, lo, hi]
+}
+
 /// [`RelayFrame::Frame`]'s bytes, straight from a borrowed payload: the hot
 /// path, which every lp-link frame takes, without building the enum.
 #[must_use]
@@ -381,6 +390,22 @@ mod tests {
                 "{frame}"
             );
         }
+    }
+
+    #[test]
+    fn the_route_frame_header_is_the_encoded_frames_prefix() {
+        let encoded = encode_route_frame(0x1234, &[9, 8, 7]);
+        assert_eq!(
+            &encoded[..ROUTE_FRAME_OVERHEAD],
+            &route_frame_header(0x1234)
+        );
+        assert_eq!(
+            RelayFrame::decode(&encoded),
+            Ok(RelayFrame::Frame {
+                route: 0x1234,
+                bytes: vec![9, 8, 7]
+            })
+        );
     }
 
     #[test]
