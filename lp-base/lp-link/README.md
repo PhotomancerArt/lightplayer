@@ -274,6 +274,18 @@ The `secure` feature (`docs/adr/2026-10-01-network-link-security.md`) runs
 then seals every frame. It is for untrusted network links (the LAN
 WebSocket, the relay); USB and UART never use it (the cable is the trust).
 
+**Forged frames are out of lp-link's threat model today.** Every product
+link — USB, UART, and BLE (`radio_link/` never calls `secured()`, and the
+BLE connection itself carries no pairing or link-layer encryption) — runs
+with `secure` off, so the session key guards against noise and stale
+sessions, not forgery: anyone who saw both SYN nonces — on the cable for
+USB/UART, or simply in radio range for BLE — can forge a frame that lands
+at a seq the sender reuses and silently replaces the real message. That
+forged frame runs with whatever access tier its link already holds, since
+the server's gate checks a link's tier on every request rather than
+re-authenticating each one, so it acts with the session's own access and
+is capped at what that session may do, not stopped by login.
+
 **The SYN.** Its 12 bytes do not change; flags bit 1 is `SECURE` and bits 2–3
 name what follows (`frame/secure_syn.rs`):
 
