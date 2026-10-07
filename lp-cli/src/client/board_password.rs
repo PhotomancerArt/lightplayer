@@ -28,7 +28,7 @@ impl BoardPasswordArgs {
     /// The password for `spec`: `None` for anything but a `lan:` board, or
     /// when none was given.
     pub fn resolve(self, spec: &HostSpecifier) -> Result<Option<BoardPassword>> {
-        if !spec.is_lan() {
+        if !(spec.is_lan() || spec.is_relay()) {
             return Ok(None);
         }
         if self.password_stdin {

@@ -353,6 +353,14 @@ fn the_snapshot_carries_the_state_that_is_not_a_register() {
 /// the entries above. Skips did not move.
 const PREFIX_KEY: &str = "init_chain.prefix";
 
+/// lp-link's text mark (`fw-esp32v3/src/recovery/panic_path.rs`'s
+/// `write_link_text_mark`), written just before the app's first `[INIT]`
+/// line so a host's deframer is never left mid-frame by the ROM/bootloader
+/// text ahead of it. `0xFF` is never valid UTF-8, so it is stripped (and its
+/// presence asserted separately) before the chain reaches [`PREFIX_KEY`]'s
+/// strict-UTF-8 figure rather than widening that figure to tolerate it.
+const LINK_TEXT_MARK: [u8; 3] = [0xFF, b'\r', b'\n'];
+
 /// **The single-core safety net.** A run in which core 1 never starts is
 /// the run M3 produced: same bytes, same sha, same cycles, same
 /// instructions, same skips. The quantum is the loop's window bound now and
@@ -381,8 +389,13 @@ fn the_single_core_prefix_is_unchanged() {
         "esp32v3",
         "determinism::the_single_core_prefix_is_unchanged",
     );
+    let boot_bytes = m.uart0().bytes();
+    assert!(
+        boot_bytes.starts_with(&LINK_TEXT_MARK),
+        "lp-link's text mark precedes the boot's first line: {boot_bytes:?}"
+    );
     figures
-        .utf8(PREFIX_KEY, &m.uart0().bytes())
+        .utf8(PREFIX_KEY, &boot_bytes[LINK_TEXT_MARK.len()..])
         .int("determinism.single_core_prefix.cycles", m.cycles())
         .int(
             "determinism.single_core_prefix.instructions",

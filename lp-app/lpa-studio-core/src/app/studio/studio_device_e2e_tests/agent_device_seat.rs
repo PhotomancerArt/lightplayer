@@ -220,7 +220,6 @@ impl AgentSeat {
                     }
                     actor_step(bench, tasks);
                     self.apply(bench);
-                    std::thread::sleep(Duration::from_millis(1));
                     continue;
                 }
                 return true;
@@ -240,8 +239,8 @@ impl AgentSeat {
                 }
                 if self.live {
                     // The model thinks in real time: keep the bench's clock
-                    // near it (as `run_until` does), so the board's own
-                    // timers are not raced past what its server answers.
+                    // near it, so the board's timers and the model's
+                    // deadlines do not race past a model still thinking.
                     std::thread::sleep(Duration::from_millis(1));
                     if std::time::Instant::now() > next_progress {
                         next_progress = std::time::Instant::now() + PROGRESS_EVERY;
@@ -376,28 +375,35 @@ impl AgentSeat {
 
 /// Step the bench until no card is busy, every board has said what it
 /// runs, and every pending link has settled — as a person waits for the
-/// card to stop moving. Bounded by the bench's ceiling, never a hang: a
-/// board that never settles is the checks' to report.
+/// card to stop moving. Bounded by [`QUIET_CEILING_SECS`] on the bench's
+/// clock, never a hang: a board that never settles is the checks' to
+/// report.
 fn wait_quiet(bench: &mut DeviceBench, tasks: &TaskPool) {
-    let deadline = std::time::Instant::now() + REAL_TIME_LIMIT;
-    while std::time::Instant::now() < deadline {
+    for _ in 0..(QUIET_CEILING_SECS / STEP_MS) as usize {
         actor_step(bench, tasks);
         let view = bench.view();
-        // An Offline card (a sim the last open powered off) will never say
-        // what it runs; waiting on it would spend the whole ceiling.
+        // A card nobody is listening to will never say what it runs:
+        // Offline (a sim the last open powered off), or Attached with its
+        // port closed (a flash the user cancelled). Waiting on one would
+        // spend the whole ceiling.
         let quiet = view.devices.iter().all(|card| {
-            card.status == lpa_devices::DeviceStatus::Offline
-                || (card.activity.is_none()
-                    && card.loaded_project != lpa_devices::view::LoadedProject::Unknown)
+            matches!(
+                card.status,
+                lpa_devices::DeviceStatus::Offline | lpa_devices::DeviceStatus::Attached
+            ) || (card.activity.is_none()
+                && card.loaded_project != lpa_devices::view::LoadedProject::Unknown)
         }) && view.pending.iter().all(|pending| pending.needs_firmware())
             // An open waiting for its device (a sim starting) lands first.
             && bench.controller.pending_device_lens_for_test().is_none();
         if quiet {
             return;
         }
-        std::thread::sleep(Duration::from_millis(1));
     }
 }
+
+/// How long [`wait_quiet`] waits, on the bench's clock: a minute, where
+/// every flash, push and open the corpus drives settles in seconds.
+const QUIET_CEILING_SECS: f64 = 60.0;
 
 /// Whether the agent started something that has not ended yet (an open
 /// whose sim is still starting, a flash or a push still running).
@@ -472,7 +478,7 @@ impl SimLinkSource for SeatSims {
         let info = crate::sim_link_info(&session.uid, &session.display_name);
         Ok(SimBacking {
             link: GrantedLink {
-                link: Box::new(fake_device_link(info.clone(), &device)),
+                link: Box::new(bench_link(info.clone(), &device)),
                 info,
             },
             control: Rc::new(ScriptedSimControl {

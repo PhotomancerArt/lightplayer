@@ -29,6 +29,13 @@
 //! - **Five wires over four slots**: routing, the per-wire checksums against
 //!   the guest's own summary lines, and determinism across two runs and two
 //!   quanta (was `five_wires.rs`).
+//! - **The text mark survives a baud-mismatched host**
+//!   ([`the_text_mark_survives_a_baud_mismatched_host_reading_the_boot`]):
+//!   the ROM and bootloader go out at 115,200 baud and a host reads UART0 at
+//!   921,600, so it misreads them — a seam no `lp-emu/` UART models
+//!   (`lp-emu-esp32v3/src/periph/uart.rs:398-399` delivers bytes clean
+//!   whatever the baud), hence this lives here rather than there
+//!   (`docs/defects/2026-10-03-the-classic-loses-its-boot-text-when-a-host-holds-the-link.md`).
 //!
 //! What changed with the move, for every test here: the conversation is the
 //! product's own (a deploy over the link, requests sent once the hello has
@@ -61,6 +68,7 @@ use lp_emu_esp32v3::machine::{
 };
 use lp_emu_esp32v3::periph::rmt;
 use lp_emu_esp32v3::test_support;
+use lp_link::{Link, LinkConfig, LinkEvent, SelectiveRepeat};
 use lp_ws281x::ColorOrder;
 use lpc_wire::{ClientMessage, ClientRequest};
 use sha2::{Digest, Sha256};
@@ -1671,4 +1679,188 @@ fn groups_through(through: usize, wires: &[u32]) -> String {
                 .map(move |crc| line(k * REPORT_EVERY_FRAMES, *crc))
         })
         .collect()
+}
+
+// ---------------------------------------------------------------------------
+// The text mark, against a baud-mismatched host (classic boot text lost
+// with a host across a reset)
+// ---------------------------------------------------------------------------
+
+/// lp-link's text mark (`fw-esp32v3/src/recovery/panic_path.rs`'s
+/// `write_link_text_mark`, now also called from `main.rs::boot_firmware`
+/// just before the app's first `[INIT]` line).
+const LINK_TEXT_MARK: [u8; 3] = [0xFF, b'\r', b'\n'];
+
+/// A short stand-in for the app's own `[INIT]` chain (the real one is pinned
+/// in `lp-emu/esp/figures/esp32v3.json`'s `init_chain.prefix`; this gate is
+/// about the deframer recovering, not that chain's exact wording, so it
+/// does not chase that figure's own re-pins).
+const APP_INIT_LINES: &[&str] = &[
+    "[INIT] fw-esp32v3 boot",
+    "[INIT] chip=esp32 arch=xtensa heap=15072+112640+98304+15536=241552",
+    "[INIT] main stack 37352 B",
+    "[INIT] runtime started",
+    "[INIT] I/O task spawned (uart0 921600 8N1, swi2 executor prio2, timg0t1 pacer 1ms)",
+];
+
+/// What the app writes to UART0 once it is at 921,600 — with or without the
+/// text mark ahead of it, to model the fixed and the pre-fix ("main") boot.
+fn app_bytes(with_mark: bool) -> Vec<u8> {
+    let mut out = Vec::new();
+    if with_mark {
+        out.extend_from_slice(&LINK_TEXT_MARK);
+    }
+    for line in APP_INIT_LINES {
+        out.extend_from_slice(line.as_bytes());
+        out.push(b'\n');
+    }
+    out
+}
+
+/// An "ideal" UART receiver clocked at `to_baud`, reading bytes a
+/// transmitter actually sent at `from_baud` (8-N-1, back to back, no idle
+/// gaps — the busy case this boot is). This is the seam no `lp-emu/` UART
+/// models (`lp-emu-esp32v3/src/periph/uart.rs:398-399` delivers bytes clean
+/// whatever the baud), and the only reason this gate lives here rather than
+/// in `lp-emu-esp32v3/tests/`.
+///
+/// Per byte: a low start bit, eight data bits LSB-first, a high stop bit,
+/// `to_baud / from_baud` receiver-bit-times each. Real UART hardware is
+/// edge-triggered only while idle: once it sees a start bit it free-runs its
+/// own clock for the rest of that frame, then goes back to watching for the
+/// next falling edge. With `to_baud` an exact multiple of `from_baud` (true
+/// of 921,600 / 115,200 = 8), every frame this receiver locks onto starts
+/// exactly on the real byte's own start bit, so seven of its eight
+/// "data-bit" samples land back on that same start bit (0) and only the
+/// eighth reaches the transmitted byte's first real data bit — the
+/// investigation's own empirical finding, almost every misread byte is
+/// `0x00` or `0x80`.
+fn misread_at_wrong_baud(sent_at_from_baud: &[u8], from_baud: u32, to_baud: u32) -> Vec<u8> {
+    assert_eq!(to_baud % from_baud, 0, "model needs an exact multiple");
+    let ratio = (to_baud / from_baud) as usize;
+    let mut wave = Vec::with_capacity(sent_at_from_baud.len() * 10 * ratio);
+    for &byte in sent_at_from_baud {
+        let mut bits = Vec::with_capacity(10);
+        bits.push(0u8); // start
+        for i in 0..8 {
+            bits.push((byte >> i) & 1);
+        }
+        bits.push(1); // stop
+        for bit in bits {
+            wave.extend(std::iter::repeat(bit).take(ratio));
+        }
+    }
+    let mut out = Vec::new();
+    let mut i = 0usize;
+    let mut idle = true;
+    while i < wave.len() {
+        if !(idle && wave[i] == 0) {
+            idle = wave[i] == 1;
+            i += 1;
+            continue;
+        }
+        // Locked on a start bit at `i`: sample the next eight receiver-bit
+        // slots as data (LSB first) and the tenth as the stop bit, never
+        // resyncing mid-frame.
+        let mut byte = 0u8;
+        let mut have_all = true;
+        for n in 1..=8 {
+            match wave.get(i + n) {
+                Some(&b) => byte |= b << (n - 1),
+                None => have_all = false,
+            }
+        }
+        if !have_all {
+            break;
+        }
+        out.push(byte);
+        let next = i + 10;
+        idle = wave.get(next - 1).copied().unwrap_or(1) == 1;
+        i = next;
+    }
+    out
+}
+
+/// Drive `bytes` through a fresh `cfg` link in one shot and hand back every
+/// byte it delivered as [`LinkEvent::Text`] (boot text, concatenated in
+/// order — not frames, there are none in this stream).
+fn link_text(cfg: LinkConfig, bytes: &[u8]) -> Vec<u8> {
+    let mut link = Link::<SelectiveRepeat>::new(cfg, 0xABCD_0001);
+    link.on_bytes(0, bytes);
+    let mut text = Vec::new();
+    while let Some(ev) = link.recv() {
+        if let LinkEvent::Text(t) = ev {
+            text.extend_from_slice(&t);
+        }
+    }
+    text
+}
+
+/// **The ticket's own gate.** A real ROM banner line
+/// (`lp-emu-esp32v3/tests/boot.rs`'s `ets Jul 29 2019 12:21:46\r\n`, pinned
+/// off the real mask ROM) sent at 115,200 and misread by a host at 921,600
+/// (`misread_at_wrong_baud`), followed by the app's own `[INIT]` chain at
+/// the matching 921,600 — with the text mark ahead of it (the fix) or
+/// without (what `main` sends today). Fed to a real `LinkConfig::uart()`
+/// host link.
+///
+/// Without the mark, the misread ROM bytes toggle the deframer's frame state
+/// on every `0x00` (`lp-base/lp-link/src/deframer.rs`'s `push`), and
+/// whichever state that leaves it in when the matching-baud app text
+/// starts is as likely to be "inside a frame" as not — the real board's was
+/// (the 2026-10-03 desk sitting, PR #943). Inside a frame, the app's text is
+/// collected as a frame body instead of being handed up as text, and (this
+/// stand-in chain being shorter than the real ~500-byte one) never reaches
+/// `max_frame`, so none of it is delivered at all — the same root cause as
+/// the real cut at byte 531, a plainer symptom. With the mark, `0xFF`
+/// resets the deframer's frame state unconditionally (`deframer.rs`'s
+/// `TEXT_MARK` handling) however that state was left, so every line after
+/// it is handed up as text whatever came before it.
+#[test]
+fn the_text_mark_survives_a_baud_mismatched_host_reading_the_boot() {
+    let mut rom_text = b"ets Jul 29 2019 12:21:46\r\n".to_vec();
+    // Whether the misread ROM prefix leaves the deframer "inside a frame"
+    // right at the hand-off to the app's text depends on how many `0x00`s
+    // it produces (each one flips the frame state) — which depends on this
+    // banner's own bytes. Force the parity that does, rather than leave the
+    // gate's outcome to which ROM banner happened to be copied in here: the
+    // point under test is the mark's recovery, not this coincidence.
+    let odd_zeros = |rom: &[u8]| {
+        misread_at_wrong_baud(rom, 115_200, 921_600)
+            .iter()
+            .filter(|&&b| b == 0)
+            .count()
+            % 2
+            == 1
+    };
+    if !odd_zeros(&rom_text) {
+        rom_text.push(b' '); // 0x20: LSB 0, one more 0x00 out
+    }
+    assert!(odd_zeros(&rom_text), "the forcing byte flips the parity");
+    let garbled_prefix = misread_at_wrong_baud(&rom_text, 115_200, 921_600);
+
+    let fixed = [garbled_prefix.clone(), app_bytes(true)].concat();
+    let unfixed = [garbled_prefix, app_bytes(false)].concat();
+
+    let fixed_text = String::from_utf8_lossy(&link_text(LinkConfig::uart(), &fixed)).into_owned();
+    for line in APP_INIT_LINES {
+        assert!(
+            fixed_text.contains(line),
+            "with the text mark, every [INIT] line arrives whole: missing {line:?} in \
+             {fixed_text:?}"
+        );
+    }
+
+    let unfixed_text =
+        String::from_utf8_lossy(&link_text(LinkConfig::uart(), &unfixed)).into_owned();
+    let missing: Vec<&&str> = APP_INIT_LINES
+        .iter()
+        .filter(|line| !unfixed_text.contains(**line))
+        .collect();
+    assert!(
+        !missing.is_empty(),
+        "without the mark, the baud-mismatched ROM prefix should leave the host deframer \
+         mid-frame, losing or tearing at least one [INIT] line; none were missing: \
+         {unfixed_text:?}"
+    );
 }

@@ -29,6 +29,14 @@ enum Cli {
         /// Use in-memory filesystem instead of disk
         #[arg(long)]
         memory: bool,
+        /// Also put this host board on the cloud relay at ORIGIN, as a C6 on
+        /// Wi-Fi does: e.g. --relay https://lightplayer.app, or
+        /// --relay http://127.0.0.1:2813 for a local lp-cloud-server. With
+        /// LP_CLOUD_SESSION set (a signed-in session, from the environment
+        /// only), the account's key is installed first. Clients reach it
+        /// with relay:<board-id>[@ORIGIN].
+        #[arg(long, value_name = "ORIGIN")]
+        relay: Option<String>,
     },
     /// Connect to server and sync local project
     Dev {
@@ -130,9 +138,17 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli {
-        Cli::Serve { dir, init, memory } => {
-            serve::handle_serve(serve::ServeArgs { dir, init, memory })
-        }
+        Cli::Serve {
+            dir,
+            init,
+            memory,
+            relay,
+        } => serve::handle_serve(serve::ServeArgs {
+            dir,
+            init,
+            memory,
+            relay,
+        }),
         Cli::Dev {
             dir,
             push,

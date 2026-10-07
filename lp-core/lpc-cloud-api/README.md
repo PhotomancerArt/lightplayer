@@ -74,7 +74,7 @@ alias, or a best-effort partial-compat decode. `version::check_version` is
 the one place that decision is made; both client and server call it before
 trusting a call or reply body.
 
-`CLOUD_API_VERSION` is `4` as of 2026-09-24: v2 added the account/session/
+`CLOUD_API_VERSION` is `5` as of 2026-10-06: v2 added the account/session/
 login-options calls (`GetMe`, `UpdateMe`, `ListSessions`, `RevokeSession`,
 `LoginOptions`); v3 replaced `Visibility { Private, Link }` with
 `Access { None, View, Edit }` (`SetVisibility` → `SetAccess`), added
@@ -82,4 +82,6 @@ login-options calls (`GetMe`, `UpdateMe`, `ListSessions`, `RevokeSession`,
 `ProjectInfo.members`, and renamed `MemberRole::Member` to `Editor`; v4
 (2026-09-24) added the account device key and optional account passwords
 (`GetAccountAccess`, `SetAccountPassword`, `ResetAccountKey`, answered by
-`AccountAccessInfo`).
+`AccountAccessInfo`); v5 (2026-10-06) added the cloud relay's `ListBoards`,
+answered by `BoardList` (the signed-in account's boards online at the
+relay).

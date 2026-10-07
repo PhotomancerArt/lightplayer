@@ -34,11 +34,14 @@ impl LinkSession {
     ///   edit); with neither, nothing.
     /// - Keyed → the same, where the grant is the tier of the key its
     ///   secure handshake matched (the anonymous key grants nothing).
+    /// - Relayed → its handshake's grant **only**: the device's `open`
+    ///   ("Anyone nearby") never reaches through the relay.
     #[must_use]
     pub fn effective_tier(&self, device_open: OpenTo) -> Option<Tier> {
         match self.trust {
             LinkTrust::Trusted => Some(Tier::Edit),
             LinkTrust::Untrusted | LinkTrust::Keyed => self.granted.max(device_open.tier()),
+            LinkTrust::Relayed => self.granted,
         }
     }
 }
@@ -63,6 +66,20 @@ mod tests {
         assert_eq!(session.effective_tier(OpenTo::Edit), Some(Tier::Edit));
         session.granted = Some(Tier::Play);
         assert_eq!(session.effective_tier(OpenTo::Nobody), Some(Tier::Play));
+    }
+
+    /// The relay's second lock: whatever the device is open to, a relayed
+    /// link holds only what its key granted.
+    #[test]
+    fn relayed_links_hold_their_grant_and_never_open() {
+        let mut session = LinkSession::new(LinkTrust::Relayed);
+        for open in [OpenTo::Nobody, OpenTo::Play, OpenTo::Edit] {
+            assert_eq!(session.effective_tier(open), None, "{open:?}");
+        }
+        session.granted = Some(Tier::Play);
+        assert_eq!(session.effective_tier(OpenTo::Edit), Some(Tier::Play));
+        session.granted = Some(Tier::Edit);
+        assert_eq!(session.effective_tier(OpenTo::Nobody), Some(Tier::Edit));
     }
 
     #[test]

@@ -161,7 +161,7 @@ the rv32 or wasm32 graph.
 |---|---|
 | M4 (this ADR) | **None in product.** lp-link's simulator on every preset, the host end-to-end test, the wasm build, a C6 diagnostic image |
 | M6 | The C6 LAN WebSocket server — the first product secure link, **with the `WIRE_PROTO_VERSION` bump** |
-| M7 | The relay (the same link inside the relay's routing frames) |
+| M7 | The relay (the same link inside the relay's routing frames) — **done in PR A, 2026-10-06** (`2026-10-06-cloud-relay.md`): a relay link is `LinkTrust::Relayed`, keyed like the LAN, but the board's open/"Anyone" setting never applies to it, so its anonymous key holds nothing |
 | M8 | Studio's browser WebSocket provider (and the client key policy) |
 | later | BLE, by its own decision (`ble().secured()` keeps a sealed frame in one notification) |
 | never | USB and UART: the cable is the trust |

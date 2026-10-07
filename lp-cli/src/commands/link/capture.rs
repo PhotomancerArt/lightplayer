@@ -182,8 +182,9 @@ fn open(args: &CaptureArgs) -> Result<Opened> {
         let options = LanOptions {
             password: args.board_password.resolve(&spec)?,
             want_packed: !args.json_replies,
+            held_keys: Vec::new(),
         };
-        let opened = LanLink::open(&target, &options)?;
+        let opened = LanLink::open(&target.endpoint(), &options)?;
         let (socket, link, clock) = opened.link.into_parts();
         return Ok(Opened {
             pipe: CapturePipe::Lan(socket),

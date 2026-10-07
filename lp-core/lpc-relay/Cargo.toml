@@ -1,0 +1,25 @@
+[package]
+name = "lpc-relay"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "The cloud relay's device-leg protocol: framing, the board's hello, the account-key proof, and the board's relay client state machine — no_std, sans-IO"
+
+[features]
+default = []
+std = []
+
+[dependencies]
+# The one HMAC and the constant-time compare the board already links.
+lpc-access = { path = "../lpc-access" }
+
+# RustCrypto's HMAC is an ORACLE, never a dependency: the proof is built on
+# `lpc-access`'s RFC 2104 HMAC, and this checks it in tests.
+[dev-dependencies]
+hmac = "0.12"
+sha2 = { workspace = true }
+
+[lints]
+workspace = true

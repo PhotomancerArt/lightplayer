@@ -11,9 +11,9 @@ use lpc_cloud_api::response::{
     Events, Heads, MissingBlobs, ProjectInfo, ProjectList, PushResult, UserInfo,
 };
 use lpc_cloud_api::{
-    Access, AccountAccessInfo, AccountPasswordTier, Ack, Actor, CloudError, CloudRequest,
-    CloudResponse, DevChoice, DevPickerOptions, HeadInfo, LoginOptionsInfo, MeInfo, MemberInfo,
-    MemberRole, OidcOption, SessionInfo, SessionList, SidecarMeta,
+    Access, AccountAccessInfo, AccountPasswordTier, Ack, Actor, BoardList, CloudError,
+    CloudRequest, CloudResponse, DevChoice, DevPickerOptions, HeadInfo, LoginOptionsInfo, MeInfo,
+    MemberInfo, MemberRole, OidcOption, SessionInfo, SessionList, SidecarMeta,
 };
 use lpc_history::{ContentHash, PrefixedUid, UidPrefix};
 
@@ -154,6 +154,12 @@ impl<S: MetaStore, C: Clock, I: IdMint> CloudService<S, C, I> {
                 self.set_account_password(caller, request).map(Into::into)
             }
             CloudRequest::ResetAccountKey => self.reset_account_key(caller).map(Into::into),
+            // Presence is the relay's, in the edge's memory: lp-cloud-server
+            // answers `ListBoards` itself, asking `board_list_viewer` who is
+            // asking. A service with no relay attached knows no board online.
+            CloudRequest::ListBoards => self
+                .board_list_viewer(actor)
+                .map(|_| BoardList::default().into()),
         }
     }
 
@@ -735,6 +741,17 @@ impl<S: MetaStore, C: Clock, I: IdMint> CloudService<S, C, I> {
         access.rotate_key(key_secret, key_salt, self.clock.now());
         self.store.put_account_access(access.clone());
         Ok(access.info())
+    }
+
+    // ---- the relay ----------------------------------------------------
+
+    /// Whose boards a `ListBoards` caller sees: a signed-in account's own
+    /// (`Some(uid)`); a guest's, which are none (no board holds a guest's
+    /// key: guests are refused an account key), as `None`; and an anonymous
+    /// caller is `NotAuthenticated`.
+    pub fn board_list_viewer(&self, actor: Actor) -> Result<Option<PrefixedUid>, CloudError> {
+        let user = self.require_user(actor)?;
+        Ok((!user.anonymous).then_some(user.uid))
     }
 
     /// The account's stored access record, or a freshly minted one (stored

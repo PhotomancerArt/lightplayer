@@ -38,6 +38,9 @@ log = { workspace = true, features = ["std"] }
 # `transport_lan` (feature `lan`): the OS's random bytes for each secure
 # handshake's ephemeral key. Already in the tree (lp-cloud-server).
 getrandom = { version = "0.3", optional = true }
+# A board's relay id (`relay:` specifiers) and the relay's close codes.
+# no_std and small; lpa-client already links lpc-access, its one dependency.
+lpc-relay = { path = "../../lp-core/lpc-relay" }
 
 [features]
 default = ["host"]
@@ -60,7 +63,17 @@ ws = ["host", "tokio-tungstenite"]
 # lp-link inside a WebSocket to `ws://<board>/link` (Wi-Fi plan P06). Rides
 # the serial transport's client half (`AsyncSerialClientTransport`) and the
 # sync WebSocket client.
-lan = ["serial", "lpc-wire/secure-link", "dep:getrandom"]
+#
+# The same feature carries `relay:<board>[@<origin>]` (`transport_relay`): the
+# same secure link inside a WebSocket to the cloud relay, `wss://` in
+# production — hence tungstenite's `native-tls`, which lp-cli already
+# enables, so nothing new is linked.
+lan = [
+    "serial",
+    "lpc-wire/secure-link",
+    "dep:getrandom",
+    "tungstenite/native-tls",
+]
 # `WsByteStream`: the raw-byte `serial:ws://…` sibling of `serial:tcp://…`.
 # Distinct from `ws`, which is the lpc-wire protocol against an `lpa-server`.
 ws-stream = ["dep:tungstenite"]

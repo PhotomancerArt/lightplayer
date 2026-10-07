@@ -74,6 +74,14 @@ pub trait MetaStore {
     /// An account's device key and passwords, if it has asked for them yet.
     fn account_access(&self, user: PrefixedUid) -> Option<AccountAccess>;
 
+    /// The account whose **current** key has this salt — how the relay hub
+    /// finds the account a board's proof names. A retired salt
+    /// ([`AccountAccess::previous_key_salts`]) matches nothing: a key the
+    /// account has reset no longer speaks for it. Salts are 16 random bytes,
+    /// so two accounts never share one; were it to happen, either may be
+    /// answered.
+    fn account_by_key_salt(&self, key_salt: &[u8; 16]) -> Option<AccountAccess>;
+
     // ---- sessions ----------------------------------------------------
 
     /// Insert or replace a session row, keyed by its token hash.

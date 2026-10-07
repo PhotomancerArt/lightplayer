@@ -15,8 +15,8 @@ pub enum LanError {
     /// No WebSocket to the board: the name did not resolve, nothing
     /// answered, or the upgrade was refused.
     Connect { target: String, detail: String },
-    /// Both of the board's LAN links are in use (it closed this one with
-    /// WebSocket close 1013, "try again later").
+    /// Every session the board can hold is in use (a board on the LAN
+    /// closed this one with WebSocket close 1013, the relay with 4429).
     Busy { target: String },
     /// The board closed the link (`code`: its WebSocket close code, if it
     /// sent one).
@@ -51,10 +51,14 @@ impl fmt::Display for LanError {
             Self::Connect { target, detail } => write!(f, "could not reach {target}: {detail}"),
             Self::Busy { target } => write!(
                 f,
-                "{target}: the board's LAN links are all in use; try again later"
+                "{target}: busy with another connection — try again later"
             ),
             Self::Closed { code: Some(code) } => {
-                write!(f, "the board closed the link (WebSocket close {code})")
+                match lpc_relay::RelayCloseCode::from_code(*code) {
+                    // The relay's own refusals, in its words.
+                    Some(relay) if *code >= 4000 => f.write_str(relay.words()),
+                    _ => write!(f, "the board closed the link (WebSocket close {code})"),
+                }
             }
             Self::Closed { code: None } => f.write_str("the board closed the link"),
             Self::Lost(detail) => write!(f, "the LAN link was lost: {detail}"),

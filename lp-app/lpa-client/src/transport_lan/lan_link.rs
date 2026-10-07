@@ -1,9 +1,16 @@
-//! One LAN link to a board: a secure lp-link initiator (lpc-wire's
+//! One network link to a board — on the LAN, or through the cloud relay
+//! (a [`LinkEndpoint`] says which): a secure lp-link initiator (lpc-wire's
 //! [`WireLinkPort`] on [`LinkConfig::ws`]) over a [`LanSocket`], one frame
 //! per WebSocket message ([`WireLinkPort::on_datagram`], never `on_bytes`).
 //!
 //! [`LanLink::open`] is the whole way in, and how it picks its key:
 //!
+//! 0. **A held key first, if the caller has one** ([`LanOptions::held_keys`]:
+//!    lp-cli's `relay:` client holds the signed-in account's key). The
+//!    board grants that key's tier at `Up`. A board that does not hold it
+//!    (`UnknownKey`) goes on to the password path below, if a password was
+//!    given, and is [`LanError::Locked`] otherwise — never a silent fall
+//!    back to anonymous.
 //! 1. **Anonymous first.** The anonymous key (`KeyId::ANONYMOUS`,
 //!    `Psk::ANONYMOUS`) encrypts and authenticates nobody; the board's hello
 //!    on that session says what anyone nearby holds. An open board is done
@@ -42,7 +49,7 @@ use super::lan_entropy::os_entropy;
 use super::lan_error::LanError;
 use super::lan_keys::password_keys;
 use super::lan_socket::LanSocket;
-use super::lan_target::LanTarget;
+use super::link_endpoint::LinkEndpoint;
 use crate::transport_serial::fresh_link_nonce;
 
 /// How long a secure session, its hello, or one setup request may take.
@@ -64,6 +71,10 @@ pub struct LanOptions {
     /// Ask the board to pack its replies (`LP_WIRE_ENCODING`'s rule, the
     /// serial transports' own).
     pub want_packed: bool,
+    /// Keys the caller holds (key id = the entry's salt, PSK = `link_psk(K)`),
+    /// tried before anything else, in order: the signed-in account's key,
+    /// for a `relay:` client.
+    pub held_keys: Vec<(KeyId, Psk)>,
 }
 
 /// An open link whose secure session is up and whose tier is known.
@@ -84,12 +95,19 @@ pub struct LanLink {
     socket: LanSocket,
     port: WireLinkPort,
     started: Instant,
-    target: LanTarget,
+    target: LinkEndpoint,
 }
 
 impl LanLink {
     /// Connect to `target` and come up with the right key (module docs).
-    pub fn open(target: &LanTarget, options: &LanOptions) -> Result<LanSession, LanError> {
+    pub fn open(target: &LinkEndpoint, options: &LanOptions) -> Result<LanSession, LanError> {
+        if !options.held_keys.is_empty() {
+            match Self::open_held(target, options)? {
+                Some(session) => return Ok(session),
+                None if options.password.is_none() => return Err(LanError::Locked),
+                None => {}
+            }
+        }
         let (mut link, (hello, mut early)) = retry_while_busy(|| {
             let mut link = Self::connect(
                 target,
@@ -161,8 +179,48 @@ impl LanLink {
         }
     }
 
+    /// Step 0: come up on one of the held keys. `None` when the board holds
+    /// none of them.
+    fn open_held(
+        target: &LinkEndpoint,
+        options: &LanOptions,
+    ) -> Result<Option<LanSession>, LanError> {
+        let attempt = retry_while_busy(|| {
+            let mut keys = options.held_keys.clone().into_iter();
+            let Some((key_id, psk)) = keys.next() else {
+                return Err(LanError::Refused(RefusalReason::UnknownKey));
+            };
+            let mut link = Self::connect(target, key_id, psk, options.want_packed)?;
+            let up = link.come_up(&mut keys)?;
+            Ok((link, up))
+        });
+        let (mut link, (_, mut early)) = match attempt {
+            Ok(opened) => opened,
+            Err(LanError::Refused(RefusalReason::UnknownKey | RefusalReason::WrongKey)) => {
+                return Ok(None);
+            }
+            Err(other) => return Err(other),
+        };
+        let hello = match link.request(HELLO_ID, ClientRequest::Hello, &mut early)? {
+            ServerMsgBody::Hello(hello) => hello,
+            other => return Err(LanError::Login(reply_words(&other))),
+        };
+        match hello.auth.granted {
+            Some(granted) => Ok(Some(LanSession {
+                link,
+                hello,
+                granted,
+                early,
+            })),
+            None => {
+                link.close();
+                Ok(None)
+            }
+        }
+    }
+
     fn connect(
-        target: &LanTarget,
+        target: &LinkEndpoint,
         key_id: KeyId,
         psk: Psk,
         want_packed: bool,
@@ -200,7 +258,7 @@ impl LanLink {
     }
 
     /// Where the link goes.
-    pub fn target(&self) -> &LanTarget {
+    pub fn target(&self) -> &LinkEndpoint {
         &self.target
     }
 
@@ -327,11 +385,12 @@ impl LanLink {
         )))
     }
 
-    /// A socket error during setup: close 1013 is the board saying every
-    /// LAN link it has is taken.
+    /// A socket error during setup: the endpoint's busy close (1013 from a
+    /// board on the LAN, 4429 from the relay) is the board saying every
+    /// session it can hold is taken.
     fn busy_or(&self, error: LanError) -> LanError {
         match error {
-            LanError::Closed { code: Some(1013) } => LanError::Busy {
+            LanError::Closed { code: Some(code) } if self.target.is_busy(code) => LanError::Busy {
                 target: self.target.to_string(),
             },
             other => other,

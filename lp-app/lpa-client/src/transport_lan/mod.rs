@@ -35,6 +35,7 @@ mod lan_link;
 mod lan_pump;
 mod lan_socket;
 mod lan_target;
+mod link_endpoint;
 
 pub use board_password::BoardPassword;
 pub use lan_entropy::os_entropy;
@@ -43,6 +44,7 @@ pub use lan_keys::password_keys;
 pub use lan_link::{BUSY_RETRIES, LAN_SETUP_BUDGET, LanLink, LanOptions, LanSession, tier_words};
 pub use lan_socket::LanSocket;
 pub use lan_target::{LAN_DEFAULT_PORT, LAN_LINK_PATH, LanTarget};
+pub use link_endpoint::{LAN_BUSY_CLOSE, LinkEndpoint};
 
 use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
@@ -53,10 +55,12 @@ use tokio::sync::{mpsc, oneshot};
 use crate::transport_serial::AsyncSerialClientTransport;
 use lan_pump::LanPump;
 
-/// Open `target` (its secure session up, its tier known) and serve it as a
-/// client transport. Returns the session's hello beside it.
+/// Open `target` — a board on the LAN ([`LanTarget::endpoint`]) or through
+/// the relay ([`crate::transport_relay::RelayTarget::endpoint`]) — its
+/// secure session up, its tier known, and serve it as a client transport.
+/// Returns the session's hello beside it.
 pub async fn connect_lan_transport(
-    target: LanTarget,
+    target: LinkEndpoint,
     options: LanOptions,
 ) -> Result<(AsyncSerialClientTransport, ServerHello), LanError> {
     let (client_tx, client_rx) = mpsc::unbounded_channel();

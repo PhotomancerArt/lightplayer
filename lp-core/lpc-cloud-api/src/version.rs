@@ -28,7 +28,11 @@ use crate::error::CloudError;
 /// v4 = the account device key and optional account passwords (2026-09-24):
 /// `GetAccountAccess`, `SetAccountPassword`, `ResetAccountKey`, answered by
 /// [`AccountAccessInfo`](crate::account_access_info::AccountAccessInfo).
-pub const CLOUD_API_VERSION: u32 = 4;
+///
+/// v5 = the cloud relay (2026-10-06): `ListBoards`, answered by
+/// [`BoardList`](crate::board_presence::BoardList) — the signed-in account's
+/// boards online at the relay.
+pub const CLOUD_API_VERSION: u32 = 5;
 
 /// Refuse a call whose declared version does not match [`CLOUD_API_VERSION`].
 ///

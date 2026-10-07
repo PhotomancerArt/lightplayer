@@ -68,6 +68,16 @@ impl AccountAccess {
         self.updated_at = now;
     }
 
+    /// The account key as every board holds it: the `K` of the
+    /// [`SecretKind::Account`](lpc_access::SecretKind::Account) entry Studio
+    /// installs, `PBKDF2(key_secret, key_salt, 1)` — a generated secret is
+    /// installed at one iteration (nothing to stretch). The relay checks a
+    /// board's proof against this, so it must match Studio byte for byte.
+    #[must_use]
+    pub fn device_key(&self) -> [u8; 32] {
+        lpc_access::derive_login_key(&self.key_secret, &self.key_salt, 1)
+    }
+
     /// The wire form of this record.
     pub fn info(&self) -> AccountAccessInfo {
         AccountAccessInfo {
@@ -117,6 +127,24 @@ mod tests {
             "oldest first, capped at four"
         );
         assert_eq!(access.updated_at, 6.0);
+    }
+
+    /// What Studio installs (`InstallableKey::entry` → `SecretEntry::from_password`
+    /// at one iteration, the account key's secret as the material) is
+    /// exactly what the relay verifies against.
+    #[test]
+    fn the_device_key_is_the_entry_studio_installs() {
+        let mut access = record();
+        access.key_secret = [0x3c; 32];
+        access.key_salt = [0x7e; 16];
+        let installed = lpc_access::SecretEntry::from_password(
+            "Yona's account",
+            lpc_access::Tier::Edit,
+            &access.key_secret,
+            access.key_salt,
+            1,
+        );
+        assert_eq!(access.device_key(), installed.k);
     }
 
     #[test]
