@@ -196,16 +196,35 @@ pub fn device_layout_view(
         }
         return Some(layout);
     }
-    // A board that came back without its files: "without its files" is the
-    // boot that formatted — or ANY later boot of that empty filesystem,
-    // which mounts fine but names no identity (the walk's W7b: a reboot
-    // between the interruption and the user's return must not hide the way
-    // back). A backup still pending in THIS browser offers Restore files
-    // straight away; one is never required — "Restore from a backup file…"
+    // A board that came back without its files — said only on EVIDENCE of
+    // the loss, never inferred from a missing identity alone:
+    //
+    // - the boot that formatted (`fs: formatted`: whatever the board held
+    //   is gone from it);
+    // - a backup still PENDING for this board in this browser (the resume
+    //   rule, Q14: an unfinished migration's backup), on a board that names
+    //   no identity — any later boot of the formatted filesystem mounts
+    //   fine but names none (the walk's W7b: a reboot between the
+    //   interruption and the user's return must not hide the way back).
+    //
+    // A mounted board that names no identity and has NO pending backup is
+    // simply a board that was never named (Studio no longer stamps
+    // `/.lp/device.json`: an ESP board's identity is its efuse MAC, ADR
+    // 2026-08-04) — the C6 carried across by `lp-cli hardware lpfs migrate`
+    // in defect 2026-10-06 was one. It gets the ordinary card. A pending backup here offers Restore files straight
+    // away; one is never required — "Restore from a backup file…"
     // (Decision 11) reads any backup ZIP Studio ever wrote, including one
-    // this browser lost or never held (a different machine, cleared
-    // storage, an interrupted migration whose only copy is the download).
-    if fs == BoardFs::Formatted || (fs == BoardFs::Mounted && !has_uid) {
+    // this browser lost or never held.
+    //
+    // None of this withholds the card's firmware verbs: an update (over
+    // the air, or a plain flash that keeps `lpfs`) never touches the
+    // board's files, so its `update-firmware` offer stands beside these.
+    let lost_files = match fs {
+        BoardFs::Formatted => true,
+        BoardFs::Mounted => !has_uid && pending.is_some(),
+        BoardFs::Unknown | BoardFs::Memory | BoardFs::LegacyHeld => false,
+    };
+    if lost_files {
         layout.line = Some(match pending {
             Some(entry) => format!(
                 "This board's files from {} are in a backup in this browser.",
@@ -503,6 +522,33 @@ mod tests {
             .is_none(),
             "the board has its own files and identity back — nothing to offer"
         );
+    }
+
+    /// Defect 2026-10-06: a board that mounted its files but was never
+    /// named (no `/.lp/device.json` — Studio no longer stamps one) is NOT
+    /// a board that lost them. With no evidence of a loss — no format, no
+    /// pending backup for it here — the card says nothing about its files
+    /// and publishes no restore verb: it is the ordinary card.
+    #[test]
+    fn a_mounted_board_that_was_never_named_is_not_told_its_files_are_missing() {
+        let mut offers = UiOfferTree::new();
+        let layout = device_layout_view(
+            &running_c6(),
+            prefix(),
+            BoardFs::Mounted,
+            false,
+            None,
+            None,
+            Some("10:bd:a3:b0:8e:30"),
+            &mut offers,
+        );
+        assert_eq!(layout, None, "no layout facts for an unnamed board");
+        for verb in [RESTORE_FROM_FILE, RESTORE_FILES, DOWNLOAD_BACKUP] {
+            assert!(
+                offers.get(&prefix().child(verb)).is_none(),
+                "`{verb}` is not offered on an unnamed board"
+            );
+        }
     }
 
     /// Decision 11 (plan P01): a board that needs its files back offers
