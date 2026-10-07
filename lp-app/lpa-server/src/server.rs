@@ -80,6 +80,15 @@ pub type LastAttemptProbe = fn(&str) -> Option<lpc_wire::LastAttempt>;
 /// and never logs it. Unset on hosts.
 pub type NetworkChanged = fn(&lpc_access::NetworkFile);
 
+/// Embedder-supplied "who has access changed" notice, called after an
+/// `AccessAdd`, `AccessRemove` or `AccessSetSwitches` is answered with the
+/// list (not an error), with the device store as it now stands. The C6's
+/// relay client takes its account entries from it (Wi-Fi relay plan P8),
+/// so a key Studio installs over USB reaches the relay at once. The store
+/// holds keys: the embedder keeps them in RAM and never logs them. Unset on
+/// hosts.
+pub type AccessChanged = fn(&lpc_access::DeviceAccessFile);
+
 /// Embedder-supplied "restart this device now" action, backing
 /// [`lpc_wire::ClientRequest::Reboot`].
 ///
@@ -183,6 +192,8 @@ pub struct LpServer {
     last_attempt_probe: Option<LastAttemptProbe>,
     /// Optional settings-changed notice for the station. Unset = nothing.
     network_changed: Option<NetworkChanged>,
+    /// Optional "who has access changed" notice. Unset = nothing is told.
+    access_changed: Option<AccessChanged>,
     /// The ProjectRead memory gate's floors, per chip (see [`ReadGate`]).
     /// Unset (hosts/browser) = reads are never refused.
     read_gate: Option<ReadGate>,
@@ -387,6 +398,7 @@ impl LpServer {
             scan_probe: None,
             last_attempt_probe: None,
             network_changed: None,
+            access_changed: None,
             read_gate: None,
             messages_first: false,
             reboot_hook: None,
@@ -972,6 +984,7 @@ impl LpServer {
                 | ClientRequest::AccessRemove { .. }
                 | ClientRequest::AccessSetSwitches { .. } => {
                     let fs = &*self.base_fs;
+                    let changes = !matches!(client_msg.msg, ClientRequest::AccessList);
                     let body = match client_msg.msg {
                         ClientRequest::AccessAdd { entry } => access_store::access_add(fs, entry),
                         ClientRequest::AccessRemove { salt } => {
@@ -984,6 +997,12 @@ impl LpServer {
                     };
                     // `open` may have changed; the cached flag is re-read.
                     self.access.invalidate_device_store();
+                    if changes
+                        && matches!(body, lpc_wire::server::ServerMsgBody::AccessList { .. })
+                        && let Some(notice) = self.access_changed
+                    {
+                        notice(&access_store::read_device_store(fs));
+                    }
                     transport
                         .send(link.id, WireServerMessage::new(msg_id, body))
                         .await
@@ -1364,6 +1383,12 @@ impl LpServer {
     /// status. Unset = nothing is told.
     pub fn set_network_changed(&mut self, notice: Option<NetworkChanged>) {
         self.network_changed = notice;
+    }
+
+    /// Install the notice called after an access change is answered with
+    /// the list. Unset = nothing is told.
+    pub fn set_access_changed(&mut self, notice: Option<AccessChanged>) {
+        self.access_changed = notice;
     }
 
     /// What the radio hears, from the probe (`unsupported` without one).

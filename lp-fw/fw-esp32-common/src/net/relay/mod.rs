@@ -10,11 +10,13 @@
 //! - [`relay_route_link`], [`relay_driver_action`]: what the driver keeps
 //!   and asks.
 
+pub mod relay_board;
 pub mod relay_driver;
 pub mod relay_driver_action;
 pub mod relay_leg;
 pub mod relay_route_link;
 
+pub use relay_board::{RelayBoard, wire_relay_state};
 pub use relay_driver::{CHALLENGE_WAIT_US, RelayCounters, RelayDriver};
 pub use relay_driver_action::RelayDriverAction;
 pub use relay_leg::{CONNECT_TIMEOUT_US, RelayLegBuffers, RelayLegIo, run_relay_leg};

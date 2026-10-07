@@ -3,7 +3,7 @@
 //!
 //! One task per network slot ([`NETWORK_LINK_SLOTS`]: one on the C6), each
 //! holding one listening TCP socket on port 80. A connection is upgraded to
-//! a WebSocket (`fw_esp32_common::net::ws`, over the [`ByteStream`] a TLS
+//! a WebSocket (`fw_esp32_common::net::ws`, over the `ByteStream` a TLS
 //! wrapper can later replace), then gets its own secure lp-link session on
 //! the slot (`RadioLinkSlot::open_network`: the board as the Noise
 //! responder, keyed like Bluetooth by the server's access store). One binary
@@ -37,6 +37,7 @@ use alloc::vec;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 use super::net_address;
+use super::tcp_byte_stream::TcpStream;
 use embassy_futures::select::{Either4, select4};
 use embassy_net::Stack;
 use embassy_net::tcp::TcpSocket;
@@ -44,7 +45,7 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
 use embassy_time::{Duration, Instant, Timer};
 use fw_esp32_common::net::network_challenge::{ChallengeOutcome, challenge_over_ws};
-use fw_esp32_common::net::ws::{ByteStream, CloseCode, RX_OVERHEAD, StreamClosed, WsConnection};
+use fw_esp32_common::net::ws::{CloseCode, RX_OVERHEAD, WsConnection};
 use fw_esp32_common::radio_link::lan_link_config::LAN_MAX_FRAME;
 use fw_esp32_common::radio_link::{
     NETWORK_LINK_SLOTS, RADIO_LINK_SLOTS, RadioLinkEvent, SharedPort, SlotEdge, now_us,
@@ -317,31 +318,6 @@ pub async fn refuse_task(stack: Stack<'static>, buffers: Option<RefuseBuffers>) 
             log::warn!("[lan] every LAN link is in use: a new one was told to try again later");
             ws.close(TRY_AGAIN_LATER).await;
         }
-    }
-}
-
-/// A TCP socket as the WebSocket's byte stream.
-pub struct TcpStream<'a>(TcpSocket<'a>);
-
-impl ByteStream for TcpStream<'_> {
-    async fn read(&mut self, buf: &mut [u8]) -> Result<usize, StreamClosed> {
-        self.0.read(buf).await.map_err(|_| StreamClosed)
-    }
-
-    async fn write_all(&mut self, mut buf: &[u8]) -> Result<(), StreamClosed> {
-        while !buf.is_empty() {
-            match self.0.write(buf).await {
-                Ok(0) | Err(_) => return Err(StreamClosed),
-                Ok(n) => buf = &buf[n..],
-            }
-        }
-        Ok(())
-    }
-
-    async fn close(&mut self) {
-        let _ = self.0.flush().await;
-        self.0.close();
-        let _ = self.0.flush().await;
     }
 }
 

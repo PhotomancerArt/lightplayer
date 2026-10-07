@@ -461,3 +461,121 @@ impl RelayDriver {
 fn ms(now_us: Micros) -> u64 {
     now_us / 1_000
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloc::string::String;
+    use alloc::vec;
+    use lpc_relay::{RelayAccount, RelayFrame, RouteCloseReason};
+
+    use crate::radio_link::RADIO_LINK_SLOTS;
+
+    /// It dials only when joined, Cloud relay on and an account held — the
+    /// C6's rule (RD8), whichever order they arrive in — and says why not.
+    #[test]
+    fn it_dials_only_when_joined_switched_on_and_holding_an_account() {
+        let mut driver = driver();
+        driver.handle(0, RelayEvent::Network { joined: true });
+        driver.handle(0, RelayEvent::Accounts(vec![account()]));
+        assert!(!driver.has_actions());
+        assert_eq!(driver.state(), RelayState::Off, "Cloud relay off");
+
+        let mut driver = self::driver();
+        driver.handle(0, RelayEvent::CloudRelay(true));
+        driver.handle(0, RelayEvent::Network { joined: true });
+        assert!(!driver.has_actions());
+        assert_eq!(driver.state(), RelayState::NoAccount);
+
+        let mut driver = self::driver();
+        driver.handle(0, RelayEvent::CloudRelay(true));
+        driver.handle(0, RelayEvent::Accounts(vec![account()]));
+        assert!(!driver.has_actions());
+        assert_eq!(driver.state(), RelayState::WaitingForInternet, "not joined");
+        driver.handle(0, RelayEvent::Network { joined: true });
+        assert_eq!(
+            driver.take_actions(),
+            [RelayDriverAction::Resolve {
+                host: String::from("relay.test")
+            }]
+        );
+        assert_eq!(driver.state(), RelayState::Connecting);
+    }
+
+    /// A route opened on a free slot is a relayed link on it, announced;
+    /// the hub closing it frees the slot and says so.
+    #[test]
+    fn a_route_on_a_free_slot_is_a_relayed_link_and_its_close_frees_it() {
+        let mut driver = driver();
+        register(&mut driver);
+        let opened = RelayFrame::Open { route: 9 }.encode();
+        driver.handle(1_000, RelayEvent::Message(&opened));
+        let actions = driver.take_actions();
+        let [RelayDriverAction::Announce(RadioLinkEvent::Opened { link, slot })] = actions[..]
+        else {
+            panic!("{actions:?}");
+        };
+        assert_eq!(slot, RADIO_LINK_SLOTS);
+        assert_eq!(
+            driver.port.link_on(slot, link).trust,
+            LinkTrust::Relayed,
+            "the board's Anyone never applies through the relay"
+        );
+        let closed = RelayFrame::Close {
+            route: 9,
+            reason: RouteCloseReason::Gone,
+        }
+        .encode();
+        driver.handle(2_000, RelayEvent::Message(&closed));
+        assert_eq!(
+            driver.take_actions(),
+            [RelayDriverAction::Announce(RadioLinkEvent::Closed { link })]
+        );
+        assert_eq!(driver.port.slot(slot).link_id(), None);
+    }
+
+    fn driver() -> RelayDriver {
+        fn entropy(buf: &mut [u8]) {
+            buf.fill(3);
+        }
+        RelayDriver::new(
+            RelayClientConfig {
+                host: String::from("relay.test"),
+                port: 80,
+                board_mac: [2, 0, 0, 0, 0, 1],
+                label: String::from("test"),
+                wire_proto: 1,
+                max_routes: 1,
+            },
+            entropy,
+            RadioLinkPort::leak(),
+            RADIO_LINK_SLOTS,
+        )
+    }
+
+    fn account() -> RelayAccount {
+        RelayAccount {
+            salt: [1; 16],
+            k: [2; 32],
+        }
+    }
+
+    /// Joined, on, an account, the leg up and the hub's welcome.
+    fn register(driver: &mut RelayDriver) {
+        driver.handle(0, RelayEvent::CloudRelay(true));
+        driver.handle(0, RelayEvent::Accounts(vec![account()]));
+        driver.handle(0, RelayEvent::Network { joined: true });
+        driver.handle(0, RelayEvent::Resolved(Some([127, 0, 0, 1])));
+        driver.handle(0, RelayEvent::Connected);
+        let challenge = RelayFrame::Challenge { nonce: [5; 32] }.encode();
+        driver.handle(0, RelayEvent::Message(&challenge));
+        let registered = RelayFrame::Registered {
+            accounts_ok: 1,
+            ping_s: 25,
+        }
+        .encode();
+        driver.handle(0, RelayEvent::Message(&registered));
+        assert_eq!(driver.state(), RelayState::Connected);
+        driver.take_actions();
+    }
+}

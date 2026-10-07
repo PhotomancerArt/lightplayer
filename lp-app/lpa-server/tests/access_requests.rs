@@ -115,6 +115,25 @@ fn remove_drops_by_salt_and_a_missing_salt_is_a_no_op() {
     assert_eq!(again.entries, list.entries);
 }
 
+/// The embedder hears every change (the C6's relay client takes its account
+/// entries from it), with the store as it now stands; a list is not one.
+#[test]
+fn every_change_tells_the_embedder_and_a_list_does_not() {
+    use std::sync::Mutex;
+    static HEARD: Mutex<Vec<usize>> = Mutex::new(Vec::new());
+    fn notice(store: &DeviceAccessFile) {
+        HEARD.lock().unwrap().push(store.secrets.len());
+    }
+    let mut rig = Rig::new(None);
+    rig.server.set_access_changed(Some(notice));
+    rig.list(USB);
+    rig.add(USB, browser_key("a", 1));
+    rig.add(USB, browser_key("b", 2));
+    rig.remove(USB, [1; 16]);
+    rig.switches(USB, Some(false), None);
+    assert_eq!(*HEARD.lock().unwrap(), [1, 2, 1, 1]);
+}
+
 #[test]
 fn the_seventeenth_key_is_refused_and_nothing_changes() {
     let mut rig = Rig::new(None);

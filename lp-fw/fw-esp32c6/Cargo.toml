@@ -81,6 +81,7 @@ wifi = [
     "dep:esp-radio-rtos-driver",
     "dep:embassy-net",
     "dep:smoltcp",
+    "dep:lpc-relay",
 ]
 # `lp-net`'s stack high-water, painted at thread start and logged as
 # `[netstack]` at the heartbeat — OFF by default, never shipped (the same
@@ -433,9 +434,10 @@ lps-q32 = { path = "../../lp-shader/lps-q32", default-features = false }
 # protocol and the `log` adapter for its log ring.
 lp-link = { path = "../../lp-base/lp-link", default-features = false, features = ["lab", "log"], optional = true }
 # The comms lab's WiFi pipe (`test_comms_lab_wifi`): IPv4, DHCP, UDP.
-# The network on `lp-net` (`wifi`): IPv4, DHCP, TCP (the LAN endpoint), UDP
-# and multicast (mDNS). DNS is off.
-embassy-net = { version = "0.9.1", default-features = false, features = ["proto-ipv4", "medium-ethernet", "dhcpv4", "udp", "tcp", "multicast"], optional = true }
+# The network on `lp-net` (`wifi`): IPv4, DHCP, TCP (the LAN endpoint and the
+# relay's device leg), UDP and multicast (mDNS), and DNS (the relay resolves
+# lightplayer.app; DHCP's servers feed it — Wi-Fi relay plan P8).
+embassy-net = { version = "0.9.1", default-features = false, features = ["proto-ipv4", "medium-ethernet", "dhcpv4", "udp", "tcp", "multicast", "dns"], optional = true }
 # embassy-net's own smoltcp (the same crate, no second copy), named only for
 # the DHCP client's retry timing (`net::station_task::dhcp_config`), which
 # embassy-net takes but does not re-export.
@@ -501,6 +503,9 @@ lp-bootctl = { path = "../../lp-base/lp-bootctl", default-features = false }
 # in core-only and as the running engine's channel-3 hook (`src/ota/`).
 lpc-update = { path = "../../lp-core/lpc-update" }
 lpc-access = { path = "../../lp-core/lpc-access" }
+# The cloud relay's protocol and client (`wifi`; Wi-Fi relay plan P8): the
+# relay task names its config, events and LAN address. no_std, sans-IO.
+lpc-relay = { path = "../../lp-core/lpc-relay", optional = true }
 sha2 = { workspace = true }
 serde = { workspace = true, default-features = false, features = ["alloc", "derive"] }
 hashbrown = { workspace = true }
