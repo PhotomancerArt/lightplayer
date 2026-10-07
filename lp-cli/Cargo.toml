@@ -67,12 +67,10 @@ lpc-view = { path = "../lp-core/lpc-view" }
 # `lan`: a board on the LAN (`lan:<host>[:port]`, a secure lp-link inside a
 # WebSocket; Wi-Fi plan P06).
 lpa-client = { path = "../lp-app/lpa-client", features = ["ws", "serial", "emu", "lan"] }
-# The cloud relay (`serve --relay`, `relay:`): its protocol, the cloud API
-# calls that fetch the account key, and reqwest to make them — the same
-# rustls-only reqwest the cloud server and lpa-agent link, one copy.
+# The cloud relay (`serve --relay`, `relay:`): its protocol and the cloud API
+# calls that fetch the account key (made with the one reqwest below).
 lpc-relay = { path = "../lp-core/lpc-relay" }
 lpc-cloud-api = { path = "../lp-core/lpc-cloud-api" }
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 lp-emu-core = { path = "../lp-emu/lp-emu-core", features = ["std"] }
 lp-riscv-emu = { path = "../lp-emu/lp-riscv-emu", features = ["std"] }
 lp-perf = { path = "../lp-base/lp-perf", default-features = false }
@@ -94,8 +92,9 @@ dialoguer = "0.11"
 chrono = "0.4"
 # `firmware install`: lightplayer.app's public firmware lookup and, when
 # `--release previous` needs the GitHub releases list and `gh` is not on
-# PATH, the public GitHub REST API. reqwest 0.12 is already in the workspace
-# dependency graph (lp-cloud-server, lpa-agent).
+# PATH, the public GitHub REST API; and the cloud relay's account-key fetch.
+# reqwest 0.12 is already in the workspace dependency graph (lp-cloud-server,
+# lpa-agent).
 reqwest = { version = "0.12", default-features = false, features = [
     "blocking",
     "json",
