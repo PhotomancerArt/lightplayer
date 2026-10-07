@@ -59,7 +59,10 @@ held across radio latency it does not control.
 Also seen on d2, not established: the board's watchdog line
 `[RECOVERY] io task silent > 2000 ms; withholding watchdog feed` once per
 5 s window alongside those waits. With the fix applied (run e1 below) it
-did not appear.
+did not appear. The same line, under LAN traffic on an emulated C6, is
+`docs/defects/2026-10-06-the-io-task-goes-silent-for-2-s-under-paced-lan-traffic.md`
+(open): a second sighting of it beside a long wait on the shared buffer,
+on silicon.
 
 **Fix** — host side, no protocol or firmware change: over Bluetooth a
 backup asks for `BLE_READ_BACK_PIECE` = 1016 B per `G`
