@@ -13,7 +13,7 @@ use lpc_model::AsLpPath;
 use lpc_shared::output::MemoryOutputProvider;
 use lpc_shared::transport::Link;
 use lpfs::LpFsMemory;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Notify};
 
 use crate::host_runtime_error::HostRuntimeError;
 use crate::server_loop::run_server_loop_async;
@@ -27,6 +27,8 @@ pub struct HostRuntime {
     server_handle: Option<JoinHandle<()>>,
     client_transport: Arc<Mutex<Box<dyn ClientTransport>>>,
     closed: Arc<AtomicBool>,
+    /// Ends the server loop's idle wait between frames ([`Self::wake_server`]).
+    wake: Arc<Notify>,
 }
 
 impl HostRuntime {
@@ -61,6 +63,8 @@ impl HostRuntime {
             Arc::new(Mutex::new(Box::new(client_transport)));
         let closed = Arc::new(AtomicBool::new(false));
         let closed_for_thread = Arc::clone(&closed);
+        let wake = Arc::new(Notify::new());
+        let wake_for_thread = Arc::clone(&wake);
 
         let server_handle = thread::Builder::new()
             .name("fw-host-runtime".to_string())
@@ -78,7 +82,11 @@ impl HostRuntime {
                 runtime.block_on(async {
                     let local_set = tokio::task::LocalSet::new();
                     let _ = local_set
-                        .run_until(run_server_loop_async(server, server_transport))
+                        .run_until(run_server_loop_async(
+                            server,
+                            server_transport,
+                            wake_for_thread,
+                        ))
                         .await;
                 });
                 closed_for_thread.store(true, Ordering::Relaxed);
@@ -89,11 +97,20 @@ impl HostRuntime {
             server_handle: Some(server_handle),
             client_transport,
             closed,
+            wake,
         })
     }
 
     pub fn client_transport(&self) -> Arc<Mutex<Box<dyn ClientTransport>>> {
         Arc::clone(&self.client_transport)
+    }
+
+    /// Start the server's next frame now instead of at the end of its
+    /// frame interval: call it after sending a request, so the answer comes
+    /// back in about one tick's work rather than up to a frame later. A
+    /// wake sent while a frame is running starts the next one at once.
+    pub fn wake_server(&self) {
+        self.wake.notify_one();
     }
 
     pub async fn close(&mut self) -> Result<(), HostRuntimeError> {

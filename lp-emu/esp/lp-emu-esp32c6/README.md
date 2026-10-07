@@ -220,14 +220,44 @@ snapshot), and **with none asked for nothing runs**: no scan, no patch, one
   `--trace` adds a `SEAM led=fast wait-step` line per call, and the run's
   label becomes `lp-emu:esp32c6:t2+led=fast`. `lp-cli emu run` takes the
   same three flags and `emu serve` the board options `seams=` and
-  `seams_prefer=` (none by default; `GET /boards` names each board's label
+  `seams_prefer=` (the default `net=lan` only; `GET /boards` names each board's label
   and lines). The tab module (`tab_abi`, `emu_abi=2`) takes the config keys
   `seams=` and `seams_prefer=`, and `emu_seams_info` answers one line of JSON
   — `{"label","engaged","lines","none_why"}` — after `emu_create` and after
   every restart.
-- **Implementations**: `led=fast` (the LED wait, below). `test=echo` and
-  `test=take` exist only under the dev feature `test-seams`, which the seam
-  tests turn on and no shipped command line does.
+- **Implementations**: `led=fast` (the LED wait, below) and `net=lan` (the
+  network seam, below). `test=echo` and `test=take` exist only under the dev
+  feature `test-seams`, which the seam tests turn on and no shipped command
+  line does.
+- **The default is `net=lan`, softly** (FD5): every run whose image carries
+  the network seam engages it (`SEAM net=lan engaged (capability, abi …, 9
+  sites, engaged-byte@…)`, label `…+net=lan`); an older image, or one with no
+  table, prints `SEAM none engaged: …` and runs with no network. Only
+  `--seams none` (or `net=real`) scans nothing.
+- **A run's pace** (`Esp32C6Builder::pace`; `lp-cli emu run --pace`, `emu
+  serve`'s `pace=`) is set on the board's LAN when `net=lan` engages:
+  `realtime` holds the guest clock to wall time for the whole run, `max`
+  never does, and unset (the default) holds it only while a host is
+  connected through a LAN forward. `realtime` needs the network seam on a
+  LAN the board drives itself: with no `net=lan` asked for, or on a
+  runner's LAN, the build fails, and a chip start where the seam does not
+  engage (an older image) ends the run with exit 64; a blank ROM-up chip,
+  which runs nothing until it is flashed, is let be until then. A set pace
+  follows the seam atoms in the label: `lp-emu:esp32c6:t1+net=lan@pace=realtime`.
+
+**The network seam (`net=lan`, `src/seams/net_seam.rs`).** One atom arms all
+nine `lp_seam::net` calls and `net_mac`'s engaged byte. The board is
+`<board>/net` on a `SharedLan` (`lp_emu_esp_common::seam::net`): the one
+`Esp32C6Builder::lan(lan, board)` gave it — attached at build, so a host can
+`forward` to it and print `lan:127.0.0.1:<port>` before the guest boots — or
+an empty one of its own (nothing in range: a scan hears nothing, a join ends
+`not found`). Its MAC is the eFuse MAC; the attachment, MAC and lease survive
+every restart, and a restart drops the link and untaken events. A runner's
+LAN is carried at the lockstep's boundaries; a self-driven or wall-clock one
+is pumped by the machine at the top of its slices, and its next due cycle
+bounds the idle skip. The wake is raised for a frame **or** a station event.
+No call charges a cycle. `tests/seam_net_*.rs` prove each call on a
+synthetic guest.
 
 **The wake, endpoints and many boards.** An engaged capability seam gets an
 **endpoint** on the machine, addressed `<board>/<seam>`
@@ -240,12 +270,15 @@ The pacer keeps G0's rule (b): never two raises outstanding, a minimum
 spacing, a bounded queue that refuses and counts, a cap per take (512 B by
 default — below a full Ethernet frame, so a frame-carrying seam sets its own
 `PacerConfig`; `take` joins whole events, `take_one` keeps one event's
-boundary). Rule (a) —
-what a wake wakes runs on the firmware's IO thread — is the firmware's, and
-ships with the Bluetooth seam, as does the firmware's handler; until then the
-wake is proven against a synthetic guest (`tests/seam_wake_*.rs`). Its
-latency figures are **emulated** and never quoted as silicon. The lockstep
-runner (`Lockstep::with_medium`) is the deterministic multi-board driver:
+boundary). Rule (a) — what a wake wakes runs on the firmware's IO thread —
+is the firmware's, and **ships with the network seam** (`net=lan`'s pending
+word, bit 0 frames / bit 1 events; `FROM_CPU_INTR3` at priority 1, bound only
+when the seam is engaged; its two consumers are the tasks `lp-net` runs:
+embassy-net's runner and the station task). No Bluetooth seam had shipped it
+first, so it was built here instead of waited on; the Bluetooth seam reuses
+the same handler and adds its own consumer. Its latency figures are
+**emulated** and never quoted as silicon. The lockstep runner
+(`Lockstep::with_medium`) is the deterministic multi-board driver:
 `tests/seam_two_boards.rs` replays byte-identically.
 
 **`led=fast`, the LED performance seam.** It answers the firmware's

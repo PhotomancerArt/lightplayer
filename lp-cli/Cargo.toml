@@ -145,6 +145,11 @@ lp-emu-esp32v3 = { path = "../lp-emu/esp/lp-emu-esp32v3" }
 # which `lp-emu-esp32c6` uses but does not re-export. Same direction as the
 # line above — a product crate reaching INTO the fence, which is fine.
 lp-emu-esp-common = { path = "../lp-emu/esp/lp-emu-esp-common" }
+# `lp-cli emu run --lan <fixture>` / `emu serve --lan <name>=<fixture>`: the
+# virtual LAN's fixture file (`[[access_point]]` tables), the format
+# `lp-emu-esp-common/testdata/virtual_lan.toml` is written in. The same major
+# the emulator crates already use.
+toml = "0.8"
 lpir = { path = "../lp-shader/lpir" }
 lps-frontend = { path = "../lp-shader/lps-frontend" }
 lps-shared = { path = "../lp-shader/lps-shared" }

@@ -2,6 +2,10 @@
 // THE WI‑FI SETTINGS WALK WITH NO BOARD (Wi‑Fi roadmap M5;
 // `just walk-wifi-emu <usb|ble>`).
 //
+// `lan` is a different walk in its own script, `walk-wifi-emu-lan.mjs`
+// (Wi‑Fi plan P13: two emulated boards on one virtual LAN, Studio over
+// `?lan=`); this file hands `lan` and its arguments straight to it.
+//
 // Real Studio, headless, against an emulated ESP32-C6 running the shipped
 // firmware image — over the `?emu=` USB shim (`usb`) or the `?ble=emu`
 // Bluetooth polyfill (`ble`):
@@ -59,7 +63,7 @@ const WIFI_ROW = `[...document.querySelectorAll('button')].find((b) => (b.innerT
 function args() {
   const lane = process.argv[2];
   if (lane !== "usb" && lane !== "ble") {
-    console.error("usage: node scripts/emu/walk-wifi-emu.mjs <usb|ble>");
+    console.error("usage: node scripts/emu/walk-wifi-emu.mjs <usb|ble|lan> (lan: [--out <dir>] [--keep-open] [--dry-run])");
     process.exit(2);
   }
   return { lane, out: path.join(ROOT, "target/walk-wifi-emu", lane) };
@@ -356,4 +360,6 @@ async function main() {
   console.log(`\n✓ the Wi‑Fi walk (${lane}) finished: two networks added → saved on the chip → read back after a reload → cloud relay off → one forgotten, with no board.`);
 }
 
-await main();
+// `lan` is its own walk; it reads `process.argv` itself (and skips the lane).
+if (process.argv[2] === "lan") await import("./walk-wifi-emu-lan.mjs");
+else await main();

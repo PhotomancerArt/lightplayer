@@ -24,7 +24,8 @@ pub mod logger;
 #[cfg(feature = "wifi")]
 pub mod net;
 pub mod output;
-#[cfg(target_arch = "riscv32")]
+// Host unit tests build it too, over the `lp-seam` dev-dependency.
+#[cfg(any(target_arch = "riscv32", test))]
 pub mod seams;
 pub mod serial;
 pub mod time;

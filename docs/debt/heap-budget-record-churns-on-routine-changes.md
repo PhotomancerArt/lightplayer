@@ -190,6 +190,33 @@ long-lived branch conflict on this file whenever main re-baselined too.
   a first boot that hashes the engine and the core (~1.9 s emulated) reached
   its first heartbeat past it, which the gate reported as "no first
   heartbeat", not as a timing change (window now 8.5 s, with the reason).
+- 2026-10-06 — **a stacked PR takes its bases' moves as well as its own**
+  (Wi-Fi in the emulator, PR #993, stacked on #987 and #989): merging #989's
+  main merge (wire 39, #986's OTA) moved `hello.proto` 38 → 39 and the
+  S3/classic stack figures (−40 B / −48 B), and the C6 record moved by #989's
+  network stack (90,208 → 101,608 B used) — none of it #993's own. #993's
+  own move is the record's `configuration` (`lp-emu:esp32c6:t1+net=lan`: the
+  network seam engages on every emulated run); with nothing joined the seam
+  costs +32 B of heap, measured against `--seams none`. Taken from CI's patch
+  (`just apply-ci-figures 993`); #989 will take the same base moves again.
+- 2026-10-06 — **the C6 ratchet's first heartbeat moved 32 B between two
+  boots of one image** (PR #993 after merging main's #997/#1000/#1001 and
+  #989's latest, run 37514407160): the check measured 102,980 B used, CI's
+  bless re-ran it and measured 103,012, so the bless could not hold
+  ("not a figure move"); a desk run measured 102,988 twice. `net=lan`
+  engaged in every boot, so the spread is the host link's timing reaching the
+  first heartbeat (what the packed link has allocated by then), not the
+  seam. The record was set by hand to CI's worst-seen boot (103,012 used /
+  198,524 free / 119,360 largest), with the move's causes: +128 B of
+  server-boot from the bases (the engine records moved by the same 128) and
+  +32 B of the network seam's two boxes on a board that never joins. A gate at
+  0 % margin over a figure that varies with the host is this entry's shape
+  again; a band, as `stackHighWater` already has, is the paydown.
+- 2026-10-06 — the same, once more after #989's main merge (`ec48b7afc`):
+  #989's record (102,956 B used) is its own tree's, without the network
+  seam's two boxes (+32 B on a board that never joins); #993's merged tree
+  measured 102,980 then 103,012 on two CI boots (run 37530685444), so the
+  record again takes the worst boot (103,012 / 198,524 / 119,384).
 
 - 2026-10-06 — **a merge's "take theirs" dropped a branch's own figures**
   (Wi-Fi PR B, #989): merging main after #986, the C6 record conflicted and
@@ -244,14 +271,25 @@ long-lived branch conflict on this file whenever main re-baselined too.
   ratchet's 0 % margin on a placement figure turns a host-side difference
   in the emulated run into a red check.
 
+- 2026-10-07 — **CI's dirty re-check fails again; the net seam moves the C6
+  record** (emulated Wi-Fi PR C, #993, run 37584523250). After the merge of
+  main took main's C6 record, PR C's net seam moved `usedBytes` +24 B and
+  `largestFreeBlock` -32 B (`freeBytes` -24 B) on the clean first step
+  (version `14b39e7`, `lp-emu:esp32c6:t1+net=lan`). CI's "Figure moves"
+  re-check ran on a dirty tree (`<sha>-dirty-…` version, +32 B) and failed
+  as "not a figure move" again. Workaround as on 2026-10-06: the record
+  carries CI's clean figures (103,024 / 198,512 / 119,400), transcribed
+  from the first clean step, not a local bless.
+
 - 2026-10-07 — the cloud relay on the C6 (Wi-Fi relay PR B, #1019, P8): a
   real move, not churn — the network slots' parked-handshake buffers and
   per-edge signals, two more embassy-net socket slots and its DNS socket
   took the C6's boot heap from 103,000 to 105,560 B used and its largest
   block from 119,432 to 116,840 B (nothing saved, so no relay buffers);
-  the main stack's high water 11,940 → 12,200 B. Re-baselined locally
-  (`just heap-budget-baseline-chips esp32c6`); if CI's figure differs by
-  the 8 B of the entry above, CI's wins.
+  the main stack's high water 11,940 → 12,200 B, measured on a local
+  bless before main's net-seam record landed. The merge of main took
+  main's record (the director owns the figures); CI's clean figures on
+  the merged tree replace it.
 
 **Exit criteria** — a PR whose only memory effect is a few bytes of statics
 passes the gate without touching the record, and two PRs that each

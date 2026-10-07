@@ -59,6 +59,19 @@ env:
   # own previous push. See the budget note above `jobs:` and
   # docs/debt/actions-cache-budget.md.
   SCCACHE_GHA_RW_MODE: ${{ github.ref == 'refs/heads/main' && 'READ_WRITE' || 'READ_ONLY' }}
+  # Make sccache's backend failures visible. Its `Cache write errors` stat
+  # counts every failed upload but says nothing about why, and the server is
+  # a daemon whose stderr goes nowhere unless SCCACHE_ERROR_LOG names a file.
+  # opendal (sccache's storage layer) logs each failed backend call at warn:
+  # `RateLimited` is GitHub's 200-uploads-a-minute-per-repo cache limit
+  # (HTTP 429; sccache 0.18 does not retry it, so the object is simply not
+  # stored), `AlreadyExists` another job storing the same object first (409,
+  # harmless). A miss is a `NotFound` read and is not an error. The "sccache
+  # stats" step of each job counts them into its summary. Neither variable is
+  # part of an object's key (sccache hashes only CARGO_* env), so this moves
+  # no hit rate.
+  SCCACHE_LOG: opendal::services=warn
+  SCCACHE_ERROR_LOG: /tmp/sccache-server.log
 
 # CI shape (2026-07-28 restructure — measured baseline: Validate was 39-52 min
 # and dominated every run; 2026-09-08 restructure — baseline in the
@@ -776,6 +789,16 @@ jobs:
           if command -v sccache >/dev/null; then
             { echo '#### sccache'; echo '```'; sccache --show-stats; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           fi
+          # Why the failed calls failed (SCCACHE_ERROR_LOG in `env:` says what each kind means).
+          log=/tmp/sccache-server.log
+          kinds='(RateLimited|AlreadyExists|PermissionDenied|ConditionNotMatch|Unexpected) \([a-z]+\) at [A-Za-z_:]+'
+          if [ -s "$log" ] && grep -q -E "$kinds" "$log"; then
+            { echo '#### sccache backend errors, by kind and operation'; echo '```'
+              grep -o -E "$kinds" "$log" | sed -E 's/ \([a-z]+\)//' | sort | uniq -c
+              echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+            grep -o -E "$kinds" "$log" | sed -E 's/ \([a-z]+\)//' | sort | uniq -c
+            grep -m 5 -E "$kinds" "$log" | cut -c1-400 || true
+          fi
 
   # fw-esp32s3 is the repo's only crate on a SECOND toolchain (Espressif's
   # Xtensa Rust fork — no upstream target exists), so no other job compiles it.
@@ -885,6 +908,16 @@ jobs:
           if command -v sccache >/dev/null; then
             { echo '#### sccache'; echo '```'; sccache --show-stats; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           fi
+          # Why the failed calls failed (SCCACHE_ERROR_LOG in `env:` says what each kind means).
+          log=/tmp/sccache-server.log
+          kinds='(RateLimited|AlreadyExists|PermissionDenied|ConditionNotMatch|Unexpected) \([a-z]+\) at [A-Za-z_:]+'
+          if [ -s "$log" ] && grep -q -E "$kinds" "$log"; then
+            { echo '#### sccache backend errors, by kind and operation'; echo '```'
+              grep -o -E "$kinds" "$log" | sed -E 's/ \([a-z]+\)//' | sort | uniq -c
+              echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+            grep -o -E "$kinds" "$log" | sed -E 's/ \([a-z]+\)//' | sort | uniq -c
+            grep -m 5 -E "$kinds" "$log" | cut -c1-400 || true
+          fi
 
   # fw-esp32v3 (classic ESP32, "v3"/WROOM-32E) — the second crate on the
   # Xtensa fork, cloned from firmware-xtensa above. Same anti-rot rationale:
@@ -984,6 +1017,16 @@ jobs:
         run: |
           if command -v sccache >/dev/null; then
             { echo '#### sccache'; echo '```'; sccache --show-stats; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          # Why the failed calls failed (SCCACHE_ERROR_LOG in `env:` says what each kind means).
+          log=/tmp/sccache-server.log
+          kinds='(RateLimited|AlreadyExists|PermissionDenied|ConditionNotMatch|Unexpected) \([a-z]+\) at [A-Za-z_:]+'
+          if [ -s "$log" ] && grep -q -E "$kinds" "$log"; then
+            { echo '#### sccache backend errors, by kind and operation'; echo '```'
+              grep -o -E "$kinds" "$log" | sed -E 's/ \([a-z]+\)//' | sort | uniq -c
+              echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+            grep -o -E "$kinds" "$log" | sed -E 's/ \([a-z]+\)//' | sort | uniq -c
+            grep -m 5 -E "$kinds" "$log" | cut -c1-400 || true
           fi
 
   # The Xtensa HOST path: `lpvm-native`'s `rt_emu` compiling shaders for Xtensa
@@ -1359,6 +1402,16 @@ jobs:
           if command -v sccache >/dev/null; then
             { echo '#### sccache'; echo '```'; sccache --show-stats; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           fi
+          # Why the failed calls failed (SCCACHE_ERROR_LOG in `env:` says what each kind means).
+          log=/tmp/sccache-server.log
+          kinds='(RateLimited|AlreadyExists|PermissionDenied|ConditionNotMatch|Unexpected) \([a-z]+\) at [A-Za-z_:]+'
+          if [ -s "$log" ] && grep -q -E "$kinds" "$log"; then
+            { echo '#### sccache backend errors, by kind and operation'; echo '```'
+              grep -o -E "$kinds" "$log" | sed -E 's/ \([a-z]+\)//' | sort | uniq -c
+              echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+            grep -o -E "$kinds" "$log" | sed -E 's/ \([a-z]+\)//' | sort | uniq -c
+            grep -m 5 -E "$kinds" "$log" | cut -c1-400 || true
+          fi
 
   # The release's C6 firmware, dry run: package the split build, stage it
   # under the release's asset names, and prove it with `release-check` —
@@ -1458,6 +1511,16 @@ jobs:
         run: |
           if command -v sccache >/dev/null; then
             { echo '#### sccache'; echo '```'; sccache --show-stats; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          # Why the failed calls failed (SCCACHE_ERROR_LOG in `env:` says what each kind means).
+          log=/tmp/sccache-server.log
+          kinds='(RateLimited|AlreadyExists|PermissionDenied|ConditionNotMatch|Unexpected) \([a-z]+\) at [A-Za-z_:]+'
+          if [ -s "$log" ] && grep -q -E "$kinds" "$log"; then
+            { echo '#### sccache backend errors, by kind and operation'; echo '```'
+              grep -o -E "$kinds" "$log" | sed -E 's/ \([a-z]+\)//' | sort | uniq -c
+              echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+            grep -o -E "$kinds" "$log" | sed -E 's/ \([a-z]+\)//' | sort | uniq -c
+            grep -m 5 -E "$kinds" "$log" | cut -c1-400 || true
           fi
 
   # The ESP32-C6 emulator's own boot-test + replay suite (`just
@@ -1923,6 +1986,16 @@ jobs:
           if command -v sccache >/dev/null; then
             { echo '#### sccache'; echo '```'; sccache --show-stats; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           fi
+          # Why the failed calls failed (SCCACHE_ERROR_LOG in `env:` says what each kind means).
+          log=/tmp/sccache-server.log
+          kinds='(RateLimited|AlreadyExists|PermissionDenied|ConditionNotMatch|Unexpected) \([a-z]+\) at [A-Za-z_:]+'
+          if [ -s "$log" ] && grep -q -E "$kinds" "$log"; then
+            { echo '#### sccache backend errors, by kind and operation'; echo '```'
+              grep -o -E "$kinds" "$log" | sed -E 's/ \([a-z]+\)//' | sort | uniq -c
+              echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+            grep -o -E "$kinds" "$log" | sed -E 's/ \([a-z]+\)//' | sort | uniq -c
+            grep -m 5 -E "$kinds" "$log" | cut -c1-400 || true
+          fi
 
   # ─────────────────────────────────────────────────────────────────────────
   # The CLASSIC ESP32's machine, and M3's own gate.
@@ -2147,6 +2220,16 @@ jobs:
           if command -v sccache >/dev/null; then
             { echo '#### sccache'; echo '```'; sccache --show-stats; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           fi
+          # Why the failed calls failed (SCCACHE_ERROR_LOG in `env:` says what each kind means).
+          log=/tmp/sccache-server.log
+          kinds='(RateLimited|AlreadyExists|PermissionDenied|ConditionNotMatch|Unexpected) \([a-z]+\) at [A-Za-z_:]+'
+          if [ -s "$log" ] && grep -q -E "$kinds" "$log"; then
+            { echo '#### sccache backend errors, by kind and operation'; echo '```'
+              grep -o -E "$kinds" "$log" | sed -E 's/ \([a-z]+\)//' | sort | uniq -c
+              echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+            grep -o -E "$kinds" "$log" | sed -E 's/ \([a-z]+\)//' | sort | uniq -c
+            grep -m 5 -E "$kinds" "$log" | cut -c1-400 || true
+          fi
 
   # The other half of the classic's gate — see `emu-esp32v3` above for the
   # split. Same path gate, same toolchains, same cache key (the rust-cache
@@ -2263,6 +2346,16 @@ jobs:
         run: |
           if command -v sccache >/dev/null; then
             { echo '#### sccache'; echo '```'; sccache --show-stats; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          # Why the failed calls failed (SCCACHE_ERROR_LOG in `env:` says what each kind means).
+          log=/tmp/sccache-server.log
+          kinds='(RateLimited|AlreadyExists|PermissionDenied|ConditionNotMatch|Unexpected) \([a-z]+\) at [A-Za-z_:]+'
+          if [ -s "$log" ] && grep -q -E "$kinds" "$log"; then
+            { echo '#### sccache backend errors, by kind and operation'; echo '```'
+              grep -o -E "$kinds" "$log" | sed -E 's/ \([a-z]+\)//' | sort | uniq -c
+              echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+            grep -o -E "$kinds" "$log" | sed -E 's/ \([a-z]+\)//' | sort | uniq -c
+            grep -m 5 -E "$kinds" "$log" | cut -c1-400 || true
           fi
 
   # The ESP32-S3's machine (`lp-emu-esp32s3`, plan three M6), and the third
@@ -2476,6 +2569,16 @@ jobs:
           if command -v sccache >/dev/null; then
             { echo '#### sccache'; echo '```'; sccache --show-stats; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           fi
+          # Why the failed calls failed (SCCACHE_ERROR_LOG in `env:` says what each kind means).
+          log=/tmp/sccache-server.log
+          kinds='(RateLimited|AlreadyExists|PermissionDenied|ConditionNotMatch|Unexpected) \([a-z]+\) at [A-Za-z_:]+'
+          if [ -s "$log" ] && grep -q -E "$kinds" "$log"; then
+            { echo '#### sccache backend errors, by kind and operation'; echo '```'
+              grep -o -E "$kinds" "$log" | sed -E 's/ \([a-z]+\)//' | sort | uniq -c
+              echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+            grep -o -E "$kinds" "$log" | sed -E 's/ \([a-z]+\)//' | sort | uniq -c
+            grep -m 5 -E "$kinds" "$log" | cut -c1-400 || true
+          fi
 
   # The heap-budget record's chip half (`just heap-budget-check-chips`,
   # docs/heap-budget-gate.md "The second source"), the LINK half of lp-cli's
@@ -2645,6 +2748,16 @@ jobs:
           if command -v sccache >/dev/null; then
             { echo '#### sccache'; echo '```'; sccache --show-stats; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           fi
+          # Why the failed calls failed (SCCACHE_ERROR_LOG in `env:` says what each kind means).
+          log=/tmp/sccache-server.log
+          kinds='(RateLimited|AlreadyExists|PermissionDenied|ConditionNotMatch|Unexpected) \([a-z]+\) at [A-Za-z_:]+'
+          if [ -s "$log" ] && grep -q -E "$kinds" "$log"; then
+            { echo '#### sccache backend errors, by kind and operation'; echo '```'
+              grep -o -E "$kinds" "$log" | sed -E 's/ \([a-z]+\)//' | sort | uniq -c
+              echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+            grep -o -E "$kinds" "$log" | sed -E 's/ \([a-z]+\)//' | sort | uniq -c
+            grep -m 5 -E "$kinds" "$log" | cut -c1-400 || true
+          fi
 
   # The BOARDS half of lp-cli's emulator-backed tests (`just
   # test-emu-c6-cli-boards`): the fragmented-heap reads, the split image's
@@ -2725,6 +2838,16 @@ jobs:
         run: |
           if command -v sccache >/dev/null; then
             { echo '#### sccache'; echo '```'; sccache --show-stats; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          # Why the failed calls failed (SCCACHE_ERROR_LOG in `env:` says what each kind means).
+          log=/tmp/sccache-server.log
+          kinds='(RateLimited|AlreadyExists|PermissionDenied|ConditionNotMatch|Unexpected) \([a-z]+\) at [A-Za-z_:]+'
+          if [ -s "$log" ] && grep -q -E "$kinds" "$log"; then
+            { echo '#### sccache backend errors, by kind and operation'; echo '```'
+              grep -o -E "$kinds" "$log" | sed -E 's/ \([a-z]+\)//' | sort | uniq -c
+              echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+            grep -o -E "$kinds" "$log" | sed -E 's/ \([a-z]+\)//' | sort | uniq -c
+            grep -m 5 -E "$kinds" "$log" | cut -c1-400 || true
           fi
 
   # The C6 repartition's migration, end to end on the emulated C6 (`just
@@ -2829,6 +2952,16 @@ jobs:
         run: |
           if command -v sccache >/dev/null; then
             { echo '#### sccache'; echo '```'; sccache --show-stats; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          # Why the failed calls failed (SCCACHE_ERROR_LOG in `env:` says what each kind means).
+          log=/tmp/sccache-server.log
+          kinds='(RateLimited|AlreadyExists|PermissionDenied|ConditionNotMatch|Unexpected) \([a-z]+\) at [A-Za-z_:]+'
+          if [ -s "$log" ] && grep -q -E "$kinds" "$log"; then
+            { echo '#### sccache backend errors, by kind and operation'; echo '```'
+              grep -o -E "$kinds" "$log" | sed -E 's/ \([a-z]+\)//' | sort | uniq -c
+              echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+            grep -o -E "$kinds" "$log" | sed -E 's/ \([a-z]+\)//' | sort | uniq -c
+            grep -m 5 -E "$kinds" "$log" | cut -c1-400 || true
           fi
 
   # The main validate job runs on x64. It was ARM from 2026-06 (x64 was
@@ -3000,6 +3133,16 @@ jobs:
           if command -v sccache >/dev/null; then
             { echo '#### sccache'; echo '```'; sccache --show-stats; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           fi
+          # Why the failed calls failed (SCCACHE_ERROR_LOG in `env:` says what each kind means).
+          log=/tmp/sccache-server.log
+          kinds='(RateLimited|AlreadyExists|PermissionDenied|ConditionNotMatch|Unexpected) \([a-z]+\) at [A-Za-z_:]+'
+          if [ -s "$log" ] && grep -q -E "$kinds" "$log"; then
+            { echo '#### sccache backend errors, by kind and operation'; echo '```'
+              grep -o -E "$kinds" "$log" | sed -E 's/ \([a-z]+\)//' | sort | uniq -c
+              echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+            grep -o -E "$kinds" "$log" | sed -E 's/ \([a-z]+\)//' | sort | uniq -c
+            grep -m 5 -E "$kinds" "$log" | cut -c1-400 || true
+          fi
 
   # The wgpu-tree workspace members (lp-gfx-wgpu, fw-browser, naga-wasm-poc)
   # are validated here, separate from validate-x64: building `-p lp-gfx-wgpu`
@@ -3067,6 +3210,16 @@ jobs:
         run: |
           if command -v sccache >/dev/null; then
             { echo '#### sccache'; echo '```'; sccache --show-stats; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          # Why the failed calls failed (SCCACHE_ERROR_LOG in `env:` says what each kind means).
+          log=/tmp/sccache-server.log
+          kinds='(RateLimited|AlreadyExists|PermissionDenied|ConditionNotMatch|Unexpected) \([a-z]+\) at [A-Za-z_:]+'
+          if [ -s "$log" ] && grep -q -E "$kinds" "$log"; then
+            { echo '#### sccache backend errors, by kind and operation'; echo '```'
+              grep -o -E "$kinds" "$log" | sed -E 's/ \([a-z]+\)//' | sort | uniq -c
+              echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+            grep -o -E "$kinds" "$log" | sed -E 's/ \([a-z]+\)//' | sort | uniq -c
+            grep -m 5 -E "$kinds" "$log" | cut -c1-400 || true
           fi
 
   # Real-browser wasm suites: lpa-fs-opfs (real OPFS ops, Web Locks, store
@@ -3168,6 +3321,16 @@ jobs:
         run: |
           if command -v sccache >/dev/null; then
             { echo '#### sccache'; echo '```'; sccache --show-stats; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          # Why the failed calls failed (SCCACHE_ERROR_LOG in `env:` says what each kind means).
+          log=/tmp/sccache-server.log
+          kinds='(RateLimited|AlreadyExists|PermissionDenied|ConditionNotMatch|Unexpected) \([a-z]+\) at [A-Za-z_:]+'
+          if [ -s "$log" ] && grep -q -E "$kinds" "$log"; then
+            { echo '#### sccache backend errors, by kind and operation'; echo '```'
+              grep -o -E "$kinds" "$log" | sed -E 's/ \([a-z]+\)//' | sort | uniq -c
+              echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+            grep -o -E "$kinds" "$log" | sed -E 's/ \([a-z]+\)//' | sort | uniq -c
+            grep -m 5 -E "$kinds" "$log" | cut -c1-400 || true
           fi
 
   # Story baselines are CI-canonical and live OUTSIDE this repo, in the

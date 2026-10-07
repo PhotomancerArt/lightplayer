@@ -93,6 +93,14 @@ other way is not comparable to anything in §2 or §3.
 - **A UART0 sha256 on every row.** A speed number from a run that computed
   something else is not a speed number. `render-basic` t2 at 5,500 ms is
   `2407828f80684331`; the trap log is `51ddaf56c96b77d3`.
+- **The row's configuration is the run's label, seams and all.** From
+  wifi-link-c6 PR C the C6 engages its capability seam `net=lan` on every
+  run whose image carries it, so a row on such an image is
+  `lp-emu:esp32c6:t2+net=lan`, not `…:t2`. "Seam-off" in an older row means
+  no *performance* seam (`led=fast`). Whether `net=lan` moves a speed number
+  on a board that joins nothing is **unmeasured**: compare a `+net=lan` row
+  with another `+net=lan` row, or pin both legs with `--seams none` /
+  `--seams net=lan`, never across the two.
 - **Both desk engines.** node/V8 at 16 blocks a function and bun/JavaScriptCore
   at 8 — JSC is the phone's family (JD19). In the agent harness `node` is an
   nvm shim: use `/opt/homebrew/bin/node` explicitly.

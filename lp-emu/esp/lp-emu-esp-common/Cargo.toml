@@ -31,9 +31,29 @@ lp-ws281x = { path = "../../../lp-fw/lp-ws281x", default-features = false }
 # the firmware's seam table is written in. MIT, outside the fence, and the
 # fence admits an MIT crate with no allowlist entry.
 lp-seam = { path = "../../../lp-base/lp-seam" }
+# The virtual LAN (`src/seam/net/`): the gateway's and the test probe's
+# TCP/IP stacks, and the wire types its DHCP server reads and writes. 0BSD,
+# already in the tree (embassy-net's stack). No default features: no OS
+# interface, no IPv6, no logging; only what a /24 home LAN carries.
+smoltcp = { version = "0.13.1", default-features = false, features = [
+    "std",
+    "medium-ethernet",
+    "proto-ipv4",
+    "proto-dhcpv4",
+    "socket-tcp",
+    "socket-udp",
+    "multicast",
+] }
 
 [dev-dependencies]
 test-log = { workspace = true }
+# The virtual LAN's tests: a smoltcp board stand-in that takes its address
+# over DHCP (`socket-dhcpv4`, test builds only), and the fixture file of test
+# networks.
+smoltcp = { version = "0.13.1", default-features = false, features = [
+    "socket-dhcpv4",
+] }
+toml = "0.8"
 
 # The speed probes' guest-side counters, OFF by default and never in a gate
 # binary: a per-fetch and per-MMIO-access hash lookup, which is several times
