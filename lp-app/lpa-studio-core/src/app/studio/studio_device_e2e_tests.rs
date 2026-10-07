@@ -685,14 +685,12 @@ impl lpa_client::ClientIo for FakeDeviceIo {
             }
             // What the board's server is working on comes back first: the
             // server is real, and this is the one place a conversation waits
-            // for it. Off a bench's wire the board's own timers run on the
-            // wall clock, so real time has to pass between looks there.
+            // for it (its board's other timers are on the bench's wire).
             self.device.settle_server(REAL_TIME_LIMIT);
             self.drain();
             if !self.pending.is_empty() {
                 continue;
             }
-            if BenchWire::current().is_none() {}
             // Yield to the bench's task pump so the rest of the app keeps
             // turning while this conversation waits — the same shape the
             // browser io's `setTimeout` poll has.
