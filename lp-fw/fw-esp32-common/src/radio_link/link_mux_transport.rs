@@ -528,12 +528,20 @@ impl<U: ServerTransport + FrameBufHolder, D: DelayNs> LinkMuxTransport<U, D> {
                         let id = radio.id;
                         self.inbox.retain(|i| i.link != id);
                         self.updates.retain(|(l, _)| *l != id);
+                        // In words: a `{:?}` prints nothing on the C6
+                        // (`-Z fmt-debug=none`).
+                        let why = match reason {
+                            ResetReason::PeerRestarted => "peer restarted",
+                            ResetReason::Requested => "requested",
+                            ResetReason::RetryLimit => "retry limit",
+                            ResetReason::ProtocolError => "protocol error",
+                        };
                         match reason {
                             ResetReason::PeerRestarted | ResetReason::Requested => log::info!(
-                                "radio link {id}: session reset ({reason:?}); now {generation}"
+                                "radio link {id}: session reset ({why}); now {generation}"
                             ),
                             ResetReason::RetryLimit | ResetReason::ProtocolError => log::warn!(
-                                "radio link {id}: session reset ({reason:?}); now {generation}"
+                                "radio link {id}: session reset ({why}); now {generation}"
                             ),
                         }
                     }

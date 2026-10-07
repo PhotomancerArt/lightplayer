@@ -169,7 +169,9 @@ impl UpdateEdge {
     pub fn pump(&mut self, links: &UpdateLinks) -> Vec<EdgeEffect> {
         for out in self.session.take_outgoing() {
             if let Ok(BoardMessage::Refusal(r)) = BoardMessage::decode(&out.bytes) {
-                log::warn!("[OTA] refused {r:?}");
+                // In words, never `{:?}`: this image prints a Debug as
+                // nothing (`-Z fmt-debug=none`), which left the line empty.
+                log::warn!("[OTA] refused on link {}: {r}", out.link.0);
             }
             self.outbox_for(out.link).push(links, out.bytes);
         }
