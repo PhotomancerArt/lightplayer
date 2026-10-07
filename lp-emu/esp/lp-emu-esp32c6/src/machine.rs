@@ -6634,7 +6634,11 @@ mod tests {
 
         // The supply.
         assert!(m.power_cycle(Strap::App));
-        assert_eq!(m.peek_word(lp_sram), Some(0), "a power cycle clears LP SRAM");
+        assert_eq!(
+            m.peek_word(lp_sram),
+            Some(0),
+            "a power cycle clears LP SRAM"
+        );
         assert_eq!(
             m.peek_word(lp),
             Some(0),
