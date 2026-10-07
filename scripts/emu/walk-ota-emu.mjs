@@ -28,6 +28,16 @@
 //                recipe): with an empty cache the update takes the board's
 //                engine from the release store — the walk's store serves XR —
 //                and never reads it back. Not in the default steps
+//   install-older "Other version…" over the release index (OTA M10): a board
+//                on release r2 (`2026.10.02-1`) and a REAL lp-cloud-server in
+//                front of a GitHub-shaped upstream holding r1 and r2 (their
+//                assets, a REST releases list, `latest`). The list shows r2
+//                as the board's own, r1 and this Studio's build; r1 arms
+//                (older: Lasting) and installs on the second click; then r2
+//                installs at one click (newer: Routine). Both images are
+//                built by the recipe (`build-image.sh` into images/r1,
+//                images/r2), and differ only in their version. Not in the
+//                default steps: `--steps install-older`
 //
 // Every assertion waits for the BOARD's words (its console, `[OTA]`,
 // `[LOADER]`, `[CORE]` lines) as well as the card's; a card line alone proves
@@ -84,7 +94,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSyn
 import { createServer } from "node:http";
 import path from "node:path";
 import process from "node:process";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 
 import { StudioDriver } from "./studio-driver.mjs";
 import { serveStudioBundle, startDoor, stopDoor, walkPort } from "./emulated-lane.mjs";
@@ -96,7 +106,7 @@ const TAB = ARGS.includes("--tab");
 const BLE = ARGS.includes("--ble");
 const STEPS_ARG = ARGS.includes("--steps") ? ARGS[ARGS.indexOf("--steps") + 1].split(",") : null;
 /// Every step, in the order their boards' MACs are numbered.
-const ALL_STEPS = ["update", "cut-core", "cut-engine", "engine-less", "cant-get", "crashing", "needs-usb", "phantom-core", "cut-backup", "store-backup"];
+const ALL_STEPS = ["update", "cut-core", "cut-engine", "engine-less", "cant-get", "crashing", "needs-usb", "phantom-core", "cut-backup", "store-backup", "install-older"];
 const DOOR_STEPS = ["update", "cut-core", "cut-engine", "engine-less", "cant-get", "crashing", "needs-usb"];
 const TAB_STEPS = ["update", "cut-core", "engine-less"];
 const BLE_STEPS = ["update", "cut-backup", "cut-core", "phantom-core", "engine-less"];
@@ -122,6 +132,10 @@ const xr = existsSync(path.join(XR, "ota/ota-manifest.json"))
   ? JSON.parse(readFileSync(path.join(XR, "ota/ota-manifest.json"), "utf8"))
   : null;
 const MONO = path.join(IMAGES, "mono");
+/// `install-older`'s two releases (the recipe builds them).
+const R1 = path.join(IMAGES, "r1");
+const R2 = path.join(IMAGES, "r2");
+const LP_CLOUD_SERVER = path.join(ROOT, "target/debug/lp-cloud-server");
 /// Y's update files and package. `WALK_Y_PARTS` / `WALK_Y_PACKAGES` point at
 /// a copy instead — for a worktree where something else rebuilds the shared
 /// `target/firmware-parts` while a walk runs.
@@ -168,6 +182,13 @@ async function main() {
     ["the pre-update single image (lp-cli firmware package esp32c6-4mb --single-image --out …/mono/package)", path.join(MONO, "package/manifest.json")],
     ["Y, this Studio's split package (lp-cli firmware package esp32c6-4mb)", path.join(PACKAGES, "esp32c6-4mb/manifest.json")],
     ["a debug lp-cli (cargo build -p lp-cli)", LP_CLI],
+    ...(STEPS.includes("install-older")
+      ? [
+          ["release r1 (scripts/ota/build-image.sh target/walk-ota-emu/images/r1 2026.10.01-1)", path.join(R1, "ota/ota-manifest.json")],
+          ["release r2 (scripts/ota/build-image.sh target/walk-ota-emu/images/r2 2026.10.02-1)", path.join(R2, "ota/ota-manifest.json")],
+          ["a debug lp-cloud-server (cargo build -p lp-cloud-server)", LP_CLOUD_SERVER],
+        ]
+      : []),
   ]) {
     if (!existsSync(at)) {
       console.error(`walk-ota-emu: missing ${what}: ${at}\n  run: just walk-ota-emu (it builds what is missing)`);
@@ -207,6 +228,8 @@ async function main() {
   const chipFiles = { x: xChip, "x-engine-less": xEngineLess };
   const xrChip = path.join(chips, "x-release.bin");
   if (xr && STEPS.includes("store-backup")) seedChip(path.join(XR, "merged.bin"), xrChip);
+  const r2Chip = path.join(chips, "r2.bin");
+  if (STEPS.includes("install-older")) seedChip(path.join(R2, "merged.bin"), r2Chip);
   const lpEmu = git(["log", "-1", "--format=%h", "--", "lp-emu"]);
   const head = git(["rev-parse", "--short=12", "HEAD"]);
 
@@ -305,9 +328,9 @@ async function main() {
   });
   let door = null;
 
-  const pageUrl = (doorAddr) =>
+  const pageUrl = (doorAddr, firmwareStore = storeOrigin) =>
     `http://localhost:${studioPort}/devices?emu=${doorAddr ? encodeURIComponent(`ws://${doorAddr}`) : "tab"}` +
-    `&firmware-store=${encodeURIComponent(storeOrigin)}` +
+    `&firmware-store=${encodeURIComponent(firmwareStore)}` +
     (EMU_TTY ? `&emu-tty=${EMU_TTY}` : "") +
     (BLE ? "&ble=emu" : "");
 
@@ -439,8 +462,9 @@ async function main() {
     return !error;
   };
 
-  /// A fresh door holding `boards`, and the page loaded against it.
-  const openDoor = async (id, boards) => {
+  /// A fresh door holding `boards`, and the page loaded against it (and
+  /// against `firmwareStore`, when not the walk's empty store).
+  const openDoor = async (id, boards, firmwareStore = storeOrigin) => {
     if (door) await stopDoor(door);
     door = await startDoor({
       root: ROOT,
@@ -451,10 +475,10 @@ async function main() {
       logFile: path.join(out, `serve-${id}.log`),
       fresh: true,
     });
-    await loadPage(door.addr);
+    await loadPage(door.addr, firmwareStore);
   };
-  const loadPage = async (doorAddr) => {
-    await driver.navigate(pageUrl(doorAddr));
+  const loadPage = async (doorAddr, firmwareStore = storeOrigin) => {
+    await driver.navigate(pageUrl(doorAddr, firmwareStore));
     await driver.awaitShim();
     if (BLE) await driver.waitFor("Boolean(window.__lpEmuBluetooth)", { timeoutMs: LOAD_MS, what: "the Bluetooth polyfill" });
     await driver.waitFor(`${MAIN_TEXT}.length > 0`, { timeoutMs: LOAD_MS, what: "Studio to finish loading" });
@@ -706,6 +730,139 @@ async function main() {
     ["light", /\[OTA\] light: GPIO\d+ × \d+ LEDs r=\d+ g=\d+ b=\d+ \([a-z-]+\)/g],
   ];
 
+  /// `install-older`'s release store: `releases` laid out as GitHub serves
+  /// them (`download/v<version>/<target>.<file>`, the newest under
+  /// `latest/download/`), a GitHub-shaped REST releases list
+  /// (`releases.json`: every asset its manifest names, `uploaded`), served
+  /// by a small static server, and a real lp-cloud-server in front of it
+  /// (`LP_CLOUD_FIRMWARE_UPSTREAM`, `LP_CLOUD_FIRMWARE_RELEASES_LIST`) on a
+  /// `scripts/dev-port.sh` port. Studio is pointed at the server, so the
+  /// index it reads is the route's own answer.
+  const startReleaseStore = async (releases) => {
+    const root = path.join(out, "release-upstream");
+    const list = [];
+    for (const [at, { dir, publishedAt }] of releases.entries()) {
+      const manifest = JSON.parse(readFileSync(path.join(dir, "ota/ota-manifest.json"), "utf8"));
+      const files = {
+        "ota-manifest.json": path.join(dir, "ota/ota-manifest.json"),
+        [manifest.core.file]: path.join(dir, "ota", manifest.core.file),
+        [manifest.engine.file]: path.join(dir, "ota", manifest.engine.file),
+        [manifest.package.file]: path.join(dir, "package/manifest.json"),
+        [manifest.package.image.file]: path.join(dir, "package", manifest.package.image.file),
+      };
+      for (const encoding of manifest.encodings ?? []) {
+        for (const piece of [encoding.core, encoding.engine]) {
+          if (piece?.file) files[piece.file] = path.join(dir, "ota", piece.file);
+        }
+      }
+      const homes = [path.join(root, `download/v${manifest.version}`)];
+      if (at === 0) homes.push(path.join(root, "latest/download"));
+      for (const home of homes) {
+        mkdirSync(home, { recursive: true });
+        for (const [file, from] of Object.entries(files)) {
+          writeFileSync(path.join(home, `${manifest.target}.${file}`), readFileSync(from));
+        }
+      }
+      list.push({
+        tag_name: `v${manifest.version}`,
+        draft: false,
+        prerelease: false,
+        published_at: publishedAt,
+        assets: Object.keys(files).map((file) => ({ name: `${manifest.target}.${file}`, state: "uploaded" })),
+      });
+    }
+    writeFileSync(path.join(root, "releases.json"), JSON.stringify(list));
+    const upstreamHits = [];
+    const upstream = await new Promise((resolve) => {
+      const server = createServer((request, response) => {
+        const at = path.join(root, decodeURIComponent(new URL(request.url, "http://upstream").pathname));
+        upstreamHits.push(request.url);
+        if (!at.startsWith(root) || !existsSync(at) || !statSync(at).isFile()) {
+          response.writeHead(404);
+          response.end();
+          return;
+        }
+        response.writeHead(200, { "content-type": at.endsWith(".json") ? "application/json" : "application/octet-stream" });
+        response.end(readFileSync(at));
+      });
+      server.listen(0, "127.0.0.1", () => resolve(server));
+    });
+    const upstreamOrigin = `http://127.0.0.1:${upstream.address().port}`;
+    const port = execFileSync("scripts/dev-port.sh", ["walk-ota-cloud"], { cwd: ROOT, encoding: "utf8" }).trim();
+    const origin = `http://127.0.0.1:${port}`;
+    const log = path.join(out, "lp-cloud-server.log");
+    const cloud = spawn(LP_CLOUD_SERVER, [], {
+      cwd: ROOT,
+      env: {
+        ...process.env,
+        LP_CLOUD_PORT: port,
+        LP_CLOUD_BASE_URL: origin,
+        LP_CLOUD_STORE: "mem",
+        LP_CLOUD_BLOBS: "fs",
+        LP_CLOUD_DATA_DIR: path.join(out, "cloud-data"),
+        LP_CLOUD_FIRMWARE_UPSTREAM: upstreamOrigin,
+        LP_CLOUD_FIRMWARE_RELEASES_LIST: `${upstreamOrigin}/releases.json`,
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    cloud.stdout.on("data", (chunk) => appendFileSync(log, chunk));
+    cloud.stderr.on("data", (chunk) => appendFileSync(log, chunk));
+    const stop = () => {
+      cloud.kill();
+      upstream.close();
+    };
+    const deadline = Date.now() + STEP_MS;
+    for (;;) {
+      try {
+        if ((await fetch(`${origin}/healthz`)).ok) break;
+      } catch {
+        /* not up yet */
+      }
+      if (Date.now() > deadline || cloud.exitCode !== null) {
+        stop();
+        throw new Error(`lp-cloud-server never answered at ${origin} (its log: ${path.relative(ROOT, log)})`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    return { origin, upstreamHits, stop };
+  };
+  /// A build id, as a regular expression's literal.
+  const literal = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const PANEL = `document.querySelector('[id^="ux-popover-panel"]')`;
+  /// Open the card's "Other version…" list and wait for it to hold `version`.
+  const openOtherVersion = async (version) => {
+    await driver.clickWhenReady("Other version…", { timeoutMs: STEP_MS });
+    return driver.waitFor(
+      `(() => { const t = ${PANEL}?.innerText ?? ''; return t.includes(${JSON.stringify(version)}) ? t : false; })()`,
+      { timeoutMs: STEP_MS, what: `the version list to hold ${version}` },
+    );
+  };
+  /// Whether the list's option for `version` is drawn disabled.
+  const optionDisabled = (version) =>
+    driver.evaluate(
+      `[...(${PANEL}?.querySelectorAll('button') ?? [])].some((el) => el.disabled && (el.textContent || '').includes(${JSON.stringify(version)}))`,
+    );
+  /// The board runs `release` and the card has finished: the board's core
+  /// booted that build and committed its engine, and the card's identity row
+  /// names the version with no update line left and the project running.
+  const awaitRelease = async (board, release, from) => {
+    const id = `${release.version}+${release.commit.slice(0, 12)}`;
+    await waitBoard(board, new RegExp(`\\[OTA\\] offer ${literal(id)} → core`), `${id}'s core offer`, UPDATE_MS, from);
+    const core = await waitBoard(board, new RegExp(`\\[CORE\\] [^\\n]*build ${literal(id)}`), `booting ${id}'s core`, UPDATE_MS, from);
+    const order = await watchCard(
+      `(() => { const t = ${MAIN_TEXT};
+                return t.includes(${JSON.stringify(`· ${release.version}`)}) && t.includes('Remove project')
+                  && !/(Backing up current firmware|Updating over|Finishing the update|Restoring firmware)/.test(t); })()`,
+      `the card on ${release.version}, its project running`,
+    );
+    await settle(board, from);
+    const said = boardSaid(board, from, OTA_WORDS);
+    for (const need of ["core offer", "core confirmed", "engine committed"]) {
+      if (!said[need]) throw new Error(`the board never said ${need} for ${id}`);
+    }
+    return { id, core, order, said };
+  };
+
   let fatal = null;
   try {
     for (const name of STEPS) {
@@ -926,6 +1083,72 @@ async function main() {
               if (!said["engine committed"]) throw new Error("the board never committed Y's engine");
               return { summary: `pending core-only; pressed ${kept}; ${order.map((e) => e.kind).join(" → ")}; pressed ${label}; ${rest.map((e) => e.kind).join(" → ")}`, card: [...order, ...rest], board: said };
             });
+          }
+          break;
+        }
+        case "install-older": {
+          if (TAB || BLE) throw new Error("install-older walks the door lane over ?emu= only");
+          const r1 = JSON.parse(readFileSync(path.join(R1, "ota/ota-manifest.json"), "utf8"));
+          const r2 = JSON.parse(readFileSync(path.join(R2, "ota/ota-manifest.json"), "utf8"));
+          const store = await startReleaseStore([
+            { dir: R2, publishedAt: "2026-10-02T12:00:00Z" },
+            { dir: R1, publishedAt: "2026-10-01T12:00:00Z" },
+          ]);
+          try {
+            await openDoor(name, [`${board}=${r2Chip},kind=rom-up,${mac}`], store.origin);
+            await step(name, `on ${r2.version}: Other version… lists the store's releases; ${r1.version} arms and installs, then ${r2.version} installs at one click`, async () => {
+              await connect(board);
+              await driver.waitFor(`${MAIN_TEXT}.includes('Remove project')`, { timeoutMs: STEP_MS, what: `the board running its project on ${r2.version}` });
+
+              // The list: the board's own drawn disabled, r1, this Studio's build.
+              const list = await openOtherVersion(r1.version);
+              if (!list.includes(r2.version) || !list.includes("On this board now")) throw new Error(`the list does not show ${r2.version} as the board's own: ${list}`);
+              if (!(await optionDisabled(r2.version))) throw new Error(`${r2.version} is pickable, though the board runs it`);
+              if (!list.includes("this Studio's build")) throw new Error(`the list does not offer this Studio's build: ${list}`);
+              const listShot = await shot("install-older-list");
+
+              // r1: older than the board's, so the press arms (Lasting).
+              const from1 = boardWords(board).length;
+              await driver.click(r1.version, { scope: PANEL });
+              await driver.click("Other version…", { scope: PANEL });
+              // Armed, and its label swap (a 0.16 s fade) done, so the shot
+              // shows the armed reading alone.
+              await driver.waitFor(
+                `(() => { const rest = ${PANEL}?.querySelector('.ux-armed .ux-armed-label-rest');
+                          return Boolean(rest) && getComputedStyle(rest).opacity === '0'; })()`,
+                { timeoutMs: STEP_MS, what: `the press on ${r1.version} to arm` },
+              );
+              const copy = await driver.evaluate(`${PANEL}?.innerText ?? ''`);
+              if (!copy.includes("Install an older version?")) throw new Error(`the armed press does not say what changes: ${copy}`);
+              const armedShot = await shot("install-older-armed");
+              await driver.click("Confirm install", { scope: PANEL });
+              const toR1 = await awaitRelease(board, r1, from1);
+              const r1Shot = await shot("install-older-on-r1");
+
+              // r2: newer than the board's now, so one click.
+              const from2 = boardWords(board).length;
+              const again = await openOtherVersion(r2.version);
+              if (!again.includes("On this board now")) throw new Error(`the list does not mark ${r1.version} as the board's own: ${again}`);
+              if (!(await optionDisabled(r1.version))) throw new Error(`${r1.version} is pickable, though the board runs it`);
+              await driver.click(r2.version, { scope: PANEL });
+              await driver.click("Other version…", { scope: PANEL });
+              const armed = await driver.evaluate(`Boolean(${PANEL}?.querySelector('.ux-armed'))`);
+              if (armed) throw new Error(`the press on ${r2.version} armed: a newer version is one click`);
+              const toR2 = await awaitRelease(board, r2, from2);
+              const r2Shot = await shot("install-older-on-r2");
+
+              const asked = store.upstreamHits.filter((url) => url.includes("releases.json")).length;
+              if (asked < 1) throw new Error("lp-cloud-server never read the releases list");
+              return {
+                summary: `${toR1.id} armed, confirmed and installed (${toR1.order.map((e) => e.kind).join(" → ")}); ${toR2.id} at one click (${toR2.order.map((e) => e.kind).join(" → ")}); the project ran throughout`,
+                shots: { list: listShot, armed: armedShot, onR1: r1Shot, onR2: r2Shot },
+                toR1: { core: toR1.core, card: toR1.order, board: toR1.said },
+                toR2: { core: toR2.core, card: toR2.order, board: toR2.said },
+                listsAsked: asked,
+              };
+            });
+          } finally {
+            store.stop();
           }
           break;
         }

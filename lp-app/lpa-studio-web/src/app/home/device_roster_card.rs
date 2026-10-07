@@ -326,6 +326,9 @@ pub(crate) fn DeviceRosterCard(
     // AND beside the restore verbs of a board needing its files back — an
     // update never touches the board's files, so the files state never
     // withholds it (defect 2026-10-06).
+    // "Other version…" beside another firmware install verb: three chips.
+    let firmware_row_crowded = verb("install-firmware").is_some()
+        && (verb("update-firmware").is_some() || verb("reinstall-firmware").is_some());
     let update_verb = {
         let update = update.clone();
         let chip = chip.clone();
@@ -702,7 +705,11 @@ pub(crate) fn DeviceRosterCard(
                         other: firmware_bar.2,
                     }
                 }
-                div { class: if restore_face { restore_verb_row_class() } else { verb_row_class() },
+                // The restore face's verbs, and an install verb beside an
+                // update one ("Install dev …", "Other version…", Factory
+                // reset), do not fit one line of a narrow card: that row may
+                // wrap rather than paint its chips over each other.
+                div { class: if restore_face || firmware_row_crowded { restore_verb_row_class() } else { verb_row_class() },
                     if busy_zone == Some(ZoneKind::Firmware) {
                         if let Some(cancel) = cancel.clone() {
                             AgentMark { key: "{\"cancel-firmware\"}", path: cancel.path.clone(),
