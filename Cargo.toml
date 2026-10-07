@@ -548,10 +548,28 @@ opt-level = 3
 # HOST ONLY. No firmware is built with this profile — `release-esp32*` and
 # `release-emu` inherit `release`, not this — so no firmware byte moves.
 # The `[profile.release.package.*]` overrides above (opt-level 3 on the
-# emulator crates, `lps-builtins`) reach this profile through `inherits`.
+# emulator crates, `lps-builtins`) reach this profile through `inherits`:
+# `cargo build -v --profile host-test -p lp-emu-esp32c6` passes
+# `-C opt-level=3` for lp_emu_core / lp_riscv_emu / lp_emu_esp32c6.
+#
+# Thin LTO, not none — measured 2026-10-06 on an M2 Max (plan
+# lp2025/2026-10-06-1945-ci-director, M2), `just bench-emu-c6`'s user
+# seconds, best of 2-3 same-window invocations, against `release`:
+#
+#   lto = false,  16 CGUs: render-basic t1/t2 +15 % / +17 %, harness t1/t2 +6 % / +15 %
+#   lto = "thin", 16 CGUs: render-basic t1/t2 −0.7 % / −0.2 %, harness t1/t2 −5 % / +0.4 %
+#
+# (Likely why: without LTO nothing is inlined across a crate boundary unless
+# it is `#[inline]` or generic, and the interpreter's hot path spans
+# lp-emu-esp32c6, lp-emu-core and lp-riscv-emu; thin LTO imports across.) The cost is
+# CPU: thin LTO's link is parallel but not small (a warm re-link of the
+# link-half test set: ~670 CPU-s thin vs ~400 release vs ~120 no-LTO), so
+# its wall-clock win depends on the cores. Locally (12 cores, a busy
+# machine) cold build + warm re-link + run came to ~6 min against
+# release's ~11.
 [profile.host-test]
 inherits = "release"
-lto = false
+lto = "thin"
 codegen-units = 16
 
 [patch.crates-io]
