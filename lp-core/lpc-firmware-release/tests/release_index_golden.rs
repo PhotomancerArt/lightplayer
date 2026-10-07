@@ -1,8 +1,9 @@
 //! The release index's format-1 compatibility pin.
 //!
-//! `fixtures/release-index.v1.json` is what `/firmware/<target>/releases`
-//! answers at format 1. **A later change that fails to read it, or writes it
-//! differently, is a format break**: Studios in the field read this shape.
+//! `fixtures/release-index.v1.json` is what
+//! `/api/v1/firmware/<target>/releases` answers at format 1. **A later
+//! change that fails to read it, or writes it differently, is a format
+//! break**: Studios in the field read this shape.
 //! Never edit the fixture to make a test pass. Its values are two real
 //! releases (`2026.10.06-19` at wire proto 39, `2026.10.06-11` at 38),
 //! copied from their published `ota-manifest.json` and GitHub's release
@@ -41,7 +42,7 @@ fn the_golden_parses_validates_and_round_trips_byte_identically() {
 #[test]
 fn unknown_fields_are_ignored_at_every_level() {
     let mut value: Value = serde_json::from_slice(GOLDEN).unwrap();
-    value["nextPage"] = json!("/firmware/esp32c6-4mb/releases?before=2026.10.06-11");
+    value["nextPage"] = json!("/api/v1/firmware/esp32c6-4mb/releases?before=2026.10.06-11");
     value["releases"][0]["capabilities"] = json!(["bluetooth-updates"]);
     value["releases"][1]["requires"]["radio"] = json!(2);
     let index = ReleaseIndex::parse_valid(&serde_json::to_vec(&value).unwrap()).unwrap();

@@ -14,9 +14,7 @@
 //!   and byte verification.
 //! - [`ReleaseIndex`] — the release index **format 1** (every release one
 //!   target can install, newest first), served at
-//!   [`release_index_path`] `/firmware/<target>/releases`, and the namespace
-//!   rule that path keeps (a dotless second segment is the server's; Studio
-//!   bundle files always carry an extension).
+//!   [`release_index_path`] `/api/v1/firmware/<target>/releases`.
 //! - [`ReleaseVersion`] — ordered by number (`-10` is newer than `-9`).
 //!
 //! Names (N1, doors #1): a **target** is a line of builds (`esp32c6-4mb`,
@@ -65,7 +63,9 @@ pub use ota_manifest_error::OtaManifestError;
 pub use release_asset_name::{asset_name, split_asset_name};
 pub use release_index::{RELEASE_INDEX_FORMAT, ReleaseIndex, ReleaseIndexEntry};
 pub use release_index_error::ReleaseIndexError;
-pub use release_index_path::{RELEASE_INDEX_SEGMENT, parse_release_index_path, release_index_path};
+pub use release_index_path::{
+    RELEASE_INDEX_PATH_PREFIX, RELEASE_INDEX_SEGMENT, parse_release_index_path, release_index_path,
+};
 pub use release_selector::{LATEST, ReleaseSelector};
 pub use release_version::{BuildId, ReleaseVersion, is_release_version};
 pub use target_name::{TARGET_NAME_MAX_LEN, TargetName, is_target_name};

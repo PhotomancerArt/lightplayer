@@ -219,6 +219,7 @@ fn release_index_golden_conforms_to_checked_in_schema() -> Result<()> {
     let mut unknown = golden.clone();
     unknown["futureField"] = serde_json::json!({ "anything": 1 });
     unknown["releases"][0]["capabilities"] = serde_json::json!(["bluetooth-updates"]);
+    unknown["releases"][1]["requires"]["radio"] = serde_json::json!(2);
     assert_eq!(errors(&unknown), Vec::<String>::new(), "unknown fields");
 
     let mut dev = golden.clone();

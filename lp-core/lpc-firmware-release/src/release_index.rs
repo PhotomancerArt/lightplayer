@@ -15,7 +15,7 @@ use crate::target_name::{TargetName, is_target_name};
 pub const RELEASE_INDEX_FORMAT: u32 = 1;
 
 /// The release index, **format 1**: the releases one target can install,
-/// newest first. Served at `/firmware/<target>/releases`
+/// newest first. Served at `/api/v1/firmware/<target>/releases`
 /// ([`release_index_path`](crate::release_index_path)); its schema is
 /// `schemas/firmware-release-index.schema.json`.
 ///
@@ -26,8 +26,9 @@ pub const RELEASE_INDEX_FORMAT: u32 = 1;
 /// # Compatibility (a public contract from its first deploy)
 ///
 /// - `format` is `1`. Readers **refuse** another `format` and **ignore
-///   unknown fields**, at the top and in every entry (no
-///   `deny_unknown_fields`).
+///   unknown fields**, at the top, in every entry and in its `requires` (no
+///   `deny_unknown_fields`; the schema says `additionalProperties: true`).
+///   That is what lets the index grow without a new format.
 /// - An additive optional field keeps `format: 1`.
 /// - `version`, `commit` and `target` are spelled exactly as the release's
 ///   `ota-manifest.json` spells them, and are never re-rendered.
@@ -42,7 +43,8 @@ pub const RELEASE_INDEX_FORMAT: u32 = 1;
     feature = "schema-gen",
     schemars(
         title = "firmware release index",
-        description = "The firmware release index, format 1 (lpc_firmware_release::ReleaseIndex), served at /firmware/<target>/releases: the releases one target can install, newest first by numeric version order. Readers refuse another format and ignore unknown fields; an additive optional field keeps format 1. See the firmware-distribution ADR."
+        description = "The firmware release index, format 1 (lpc_firmware_release::ReleaseIndex), served at /api/v1/firmware/<target>/releases: the releases one target can install, newest first by numeric version order. Readers refuse another format and ignore unknown fields; an additive optional field keeps format 1. See the firmware-distribution ADR.",
+        extend("additionalProperties" = true)
     )
 )]
 #[serde(rename_all = "camelCase")]
@@ -65,6 +67,7 @@ pub struct ReleaseIndex {
 /// it was published.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema-gen", schemars(extend("additionalProperties" = true)))]
 #[serde(rename_all = "camelCase")]
 pub struct ReleaseIndexEntry {
     /// The release version (`2026.10.06-19`); never a dev version.

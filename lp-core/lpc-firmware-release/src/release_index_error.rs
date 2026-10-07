@@ -3,7 +3,7 @@
 use alloc::string::String;
 use core::fmt;
 
-/// Why a release index (`/firmware/<target>/releases`) could not be read, or
+/// Why a release index (`/api/v1/firmware/<target>/releases`) could not be read, or
 /// failed [`validate`].
 ///
 /// [`validate`]: crate::ReleaseIndex::validate

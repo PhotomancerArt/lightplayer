@@ -359,9 +359,10 @@ fn ota_manifest_schema() -> Result<Value> {
     serde_json::to_value(&schema).context("serializing ota manifest schema")
 }
 
-/// Schema for the firmware release index, `/firmware/<target>/releases`.
-/// Plain serde; its own public format (`format: 1`), computed by
-/// lp-cloud-server and read by Studios in the field.
+/// Schema for the firmware release index,
+/// `/api/v1/firmware/<target>/releases`. Plain serde; its own public format
+/// (`format: 1`), computed by lp-cloud-server and read by Studios in the
+/// field; unknown fields are allowed (`additionalProperties: true`).
 fn firmware_release_index_schema() -> Result<Value> {
     let schema = schemars::schema_for!(lpc_firmware_release::ReleaseIndex);
     serde_json::to_value(&schema).context("serializing firmware release index schema")

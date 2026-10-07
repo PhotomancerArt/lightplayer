@@ -1,6 +1,7 @@
 {
   "$defs": {
     "ReleaseIndexEntry": {
+      "additionalProperties": true,
       "description": "One installable release of the index's target: what the release's\n`ota-manifest.json` says about its identity and what it needs, and when\nit was published.",
       "properties": {
         "commit": {
@@ -66,7 +67,8 @@
   },
   "$id": "https://lightplayer.dev/schemas/firmware-release-index.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "description": "The firmware release index, format 1 (lpc_firmware_release::ReleaseIndex), served at /firmware/<target>/releases: the releases one target can install, newest first by numeric version order. Readers refuse another format and ignore unknown fields; an additive optional field keeps format 1. See the firmware-distribution ADR.",
+  "additionalProperties": true,
+  "description": "The firmware release index, format 1 (lpc_firmware_release::ReleaseIndex), served at /api/v1/firmware/<target>/releases: the releases one target can install, newest first by numeric version order. Readers refuse another format and ignore unknown fields; an additive optional field keeps format 1. See the firmware-distribution ADR.",
   "properties": {
     "format": {
       "description": "Shape version; always `1` ([`RELEASE_INDEX_FORMAT`]).",

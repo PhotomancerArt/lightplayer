@@ -24,11 +24,7 @@ pub const FILE_NAME_MAX_LEN: usize = 128;
 /// [`OTA_MANIFEST_FILE`], which always is.
 ///
 /// The Studio bundle's own `/firmware/<target>/manifest.json` has **two**
-/// segments after `/firmware/` and is never a lookup path. Two-segment paths
-/// are shared by one rule: a second segment with no dot is the server's
-/// (the release index, `/firmware/<target>/releases`, see
-/// [`release_index_path`](crate::release_index_path)); the bundle's files
-/// always carry an extension.
+/// segments after `/firmware/` and is never a lookup path.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FirmwareLookupPath {
     /// The target (opaque).
