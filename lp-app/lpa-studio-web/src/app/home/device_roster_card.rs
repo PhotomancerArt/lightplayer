@@ -287,6 +287,43 @@ pub(crate) fn DeviceRosterCard(
     // answered it (the panel says which). Core's offer narrowed by the
     // same chip.
     let chip = joined_chip(&card);
+    // The Update verb as the firmware row draws it: one chip when it is one
+    // click, else the board pick in verb mode. Drawn on the ordinary row
+    // AND beside the restore verbs of a board needing its files back — an
+    // update never touches the board's files, so the files state never
+    // withholds it (defect 2026-10-06).
+    let update_verb = {
+        let update = update.clone();
+        let chip = chip.clone();
+        move || -> Element {
+            let Some(update) = update.clone() else {
+                return rsx! {};
+            };
+            if update_one_click {
+                rsx! {
+                    AgentMark { key: "{\"update-firmware\"}", path: update.path.clone(),
+                        ActionButton {
+                            action: update.action,
+                            running: false,
+                            variant: ActionButtonVariant::Quiet,
+                            on_action,
+                        }
+                    }
+                }
+            } else {
+                rsx! {
+                    AgentMark { path: update.path.clone(),
+                        BoardPickPopover {
+                            offer: update,
+                            chip: chip.clone(),
+                            mode: BoardPickMode::Verb,
+                            on_action,
+                        }
+                    }
+                }
+            }
+        }
+    };
     // The running face's ONE Primary: Open — the editor as a lens on this
     // board. Opening is NAVIGATION, so it is a real `<a>` to the device
     // route (the same road the project cards take): a plain click rides the
@@ -652,11 +689,11 @@ pub(crate) fn DeviceRosterCard(
                         // A board that came back without its files: when a
                         // backup of them waits in this browser, Restore
                         // files puts it straight back; "Restore from a
-                        // backup file…" is offered beside it, and ALONE
-                        // when this browser holds no backup of its own
-                        // (Decision 11, plan P01) — the gap an interrupted
-                        // migration can leave when its only copy is the
-                        // download.
+                        // backup file…" is offered beside it, and in its
+                        // place when this browser holds no backup of its
+                        // own (Decision 11, plan P01) — the gap an
+                        // interrupted migration can leave when its only
+                        // copy is the download. Update follows them.
                         if let Some(action) = restore_files {
                             ActionButton {
                                 key: "{\"restore-files\"}",
@@ -682,6 +719,9 @@ pub(crate) fn DeviceRosterCard(
                                 on_action,
                             }
                         }
+                        // And the board's Update, as on the ordinary row:
+                        // the files state never withholds it.
+                        {update_verb()}
                     } else {
                         // The blank board's face: the chip-filtered board
                         // pick plus its Flash CTA, on one row — or, over a
@@ -719,27 +759,7 @@ pub(crate) fn DeviceRosterCard(
                         // (no build served for the chip): the pick's own
                         // row says why on one truncated line — a dead chip
                         // with its reason under it overflows a narrow dock.
-                        if let Some(update) = update.clone() {
-                            if update_one_click {
-                                AgentMark { key: "{\"update-firmware\"}", path: update.path.clone(),
-                                    ActionButton {
-                                        action: update.action,
-                                        running: false,
-                                        variant: ActionButtonVariant::Quiet,
-                                        on_action,
-                                    }
-                                }
-                            } else {
-                                AgentMark { path: update.path.clone(),
-                                    BoardPickPopover {
-                                        offer: update,
-                                        chip: chip.clone(),
-                                        mode: BoardPickMode::Verb,
-                                        on_action,
-                                    }
-                                }
-                            }
-                        }
+                        {update_verb()}
                         // The over-the-air repairs of a board whose
                         // firmware will not start: the same build again,
                         // and an install of a version picked from what this
