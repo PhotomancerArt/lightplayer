@@ -104,33 +104,33 @@ static PANICKING: AtomicBool = AtomicBool::new(false);
 /// [`stage_oom_and_reset`], so probing through them from inside that function
 /// would recurse.
 pub fn largest_free_block() -> usize {
-    /// Ignore differences below this; a 4-byte-precise answer costs probes and
-    /// tells no one anything the rounded one does not.
-    const GRANULARITY: usize = 16;
+    // `free()` bounds the answer from above: no single block can exceed the
+    // sum of every block. Exact to the byte (`largest_fitting`): the gates
+    // compare it with round floors.
+    #[cfg(all(feature = "heap_map_diag", not(fw_harness)))]
+    return crate::heap_map::untracked(largest_free_block_now);
+    #[cfg(not(all(feature = "heap_map_diag", not(fw_harness))))]
+    largest_free_block_now()
+}
 
-    // `free()` bounds the answer from above: no single block can exceed the sum
-    // of every block.
-    let mut too_big = esp_alloc::HEAP.free() + 1;
-    let mut fits = 0usize;
-
-    while too_big - fits > GRANULARITY {
-        let mid = fits + (too_big - fits) / 2;
-        let Ok(layout) = core::alloc::Layout::from_size_align(mid, 4) else {
-            break;
+fn largest_free_block_now() -> usize {
+    fw_esp32_common::largest_block::largest_fitting(esp_alloc::HEAP.free(), |size| {
+        if size == 0 {
+            return true;
+        }
+        let Ok(layout) = core::alloc::Layout::from_size_align(size, 4) else {
+            return false;
         };
-        // SAFETY: `mid > 0` (the loop condition keeps `mid` above `fits >= 0`
-        // by at least GRANULARITY/2), and the pointer is freed with the same
-        // layout it was allocated with, immediately, before anything else runs.
+        // SAFETY: `size > 0`, and the pointer is freed with the same layout it
+        // was allocated with, immediately, before anything else runs.
         let ptr = unsafe { alloc::alloc::alloc(layout) };
         if ptr.is_null() {
-            too_big = mid;
+            false
         } else {
             unsafe { alloc::alloc::dealloc(ptr, layout) };
-            fits = mid;
+            true
         }
-    }
-
-    fits
+    })
 }
 
 /// Stage a breadcrumb into the RTC ledger, commit it, report on serial, reset.

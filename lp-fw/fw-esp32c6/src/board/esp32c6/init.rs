@@ -142,11 +142,7 @@ const HEAP_MAIN_SIZE: usize = 236_000 - HEAP_RADIO_SIZE;
 /// that does not fit still succeeds, in the main region.
 pub const HEAP_RADIO_SIZE: usize = 49_152;
 /// The reclaimed bootloader segment's size.
-#[cfg(not(feature = "heap_track_diag"))]
 const HEAP_DRAM2_SIZE: usize = 65_536;
-/// The heap-tracking diagnostic keeps its table in the rest of the segment.
-#[cfg(feature = "heap_track_diag")]
-const HEAP_DRAM2_SIZE: usize = 16_384;
 /// A heap region's backing array, 8-aligned so the allocator loses nothing
 /// to aligning its start (a bare byte array can land on an odd address).
 #[repr(C, align(8))]

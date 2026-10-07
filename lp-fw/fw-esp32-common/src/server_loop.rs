@@ -125,8 +125,16 @@ pub async fn run_server_loop<T: ServerTransport + LinkUpkeep>(
         );
     }
 
+    let mut frame_times = crate::frame_time_stats::FrameTimeStats::default();
+    let mut last_frame: Option<(u64, crate::frame_time_stats::SlowFrame)> = None;
     loop {
         let frame_start = time_provider.now_ms();
+        // The frame that just ended is counted whole, start to start: its
+        // heartbeats, upkeep and yield are frame time a viewer waits for.
+        if let Some((started, mut frame)) = last_frame.take() {
+            frame.total_ms = frame_start.saturating_sub(started).min(u64::from(u32::MAX)) as u32;
+            frame_times.record(frame);
+        }
         #[cfg(feature = "frame-pace-diag")]
         crate::frame_pace_diag::frame_start();
 
@@ -206,6 +214,16 @@ pub async fn run_server_loop<T: ServerTransport + LinkUpkeep>(
         );
         last_tick = frame_start;
         frame_count += 1;
+        last_frame = Some((
+            frame_start,
+            crate::frame_time_stats::SlowFrame {
+                total_ms: 0,
+                recv_ms: receive_done.saturating_sub(receive_start) as u32,
+                tick_ms: tick_ms as u32,
+                send_ms: send_ms as u32,
+                responses: response_count as u32,
+            },
+        ));
 
         let current_time = time_provider.now_ms();
         if current_time.saturating_sub(fps_tracker.last_log_time_ms()) >= PERF_LOG_INTERVAL_MS {
@@ -224,6 +242,10 @@ pub async fn run_server_loop<T: ServerTransport + LinkUpkeep>(
                     total_ms,
                     response_count,
                 );
+                // A line of its own: beside the [perf] line it ran past a log
+                // record's 200 B and lost its hiccup counts.
+                log::info!("[perf] frames {frame_times}");
+                frame_times.reset();
                 fps_tracker.record_log(frame_count, current_time);
             }
         }
@@ -444,8 +466,16 @@ pub async fn run_server_loop_bounded<T: ServerTransport + LinkUpkeep>(
         );
     }
 
+    let mut frame_times = crate::frame_time_stats::FrameTimeStats::default();
+    let mut last_frame: Option<(u64, crate::frame_time_stats::SlowFrame)> = None;
     loop {
         let frame_start = time_provider.now_ms();
+        // The frame that just ended is counted whole, start to start: its
+        // heartbeats, upkeep and yield are frame time a viewer waits for.
+        if let Some((started, mut frame)) = last_frame.take() {
+            frame.total_ms = frame_start.saturating_sub(started).min(u64::from(u32::MAX)) as u32;
+            frame_times.record(frame);
+        }
 
         // A link that joined since the last frame (a radio connection) gets
         // its own hello before anything else is sent to it.
@@ -534,6 +564,16 @@ pub async fn run_server_loop_bounded<T: ServerTransport + LinkUpkeep>(
 
         last_tick = frame_start;
         frame_count += 1;
+        last_frame = Some((
+            frame_start,
+            crate::frame_time_stats::SlowFrame {
+                total_ms: 0,
+                recv_ms: receive_done.saturating_sub(receive_start) as u32,
+                tick_ms: tick_ms as u32,
+                send_ms: send_ms as u32,
+                responses: response_count as u32,
+            },
+        ));
 
         let current_time = time_provider.now_ms();
         if current_time.saturating_sub(fps_tracker.last_log_time_ms()) >= PERF_LOG_INTERVAL_MS {
@@ -552,6 +592,10 @@ pub async fn run_server_loop_bounded<T: ServerTransport + LinkUpkeep>(
                     total_ms,
                     response_count,
                 );
+                // A line of its own: beside the [perf] line it ran past a log
+                // record's 200 B and lost its hiccup counts.
+                log::info!("[perf] frames {frame_times}");
+                frame_times.reset();
                 fps_tracker.record_log(frame_count, current_time);
             }
         }

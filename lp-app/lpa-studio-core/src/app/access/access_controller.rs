@@ -19,6 +19,13 @@
 //!
 //! - **Bluetooth unlock** (untrusted link): by salt with the held keys, else
 //!   remembered passwords, else the Unlock sheet (`access_session.rs`).
+//! - **Wi-Fi unlock** (a board on the LAN, a KEYED link — Wi-Fi M6 P07): the
+//!   link itself presents this browser's held keys
+//!   ([`NetworkLinkKeys`], kept here); a board none of them opens comes up
+//!   holding nothing, and the same session machine asks for its password —
+//!   whose keys go to the link, which moves onto them (`keyed_login.rs`).
+//!   Everything below that says "Bluetooth" about a link that must be
+//!   unlocked holds for these too ([`is_untrusted`]).
 //! - **USB sync** (trusted link, once per connection): read the list, remove
 //!   retired account keys, add the held keys it is missing (dropping the
 //!   oldest other browser key when the device is full), and raise
@@ -48,8 +55,10 @@ use super::device_access_ops::{AccessOp, run_access_ops, sync_access};
 use super::device_access_record::{DeviceAccessChange, DeviceAccessRecords, SetHere};
 use super::key_groups::key_groups;
 use super::key_holder::{HeldKey, held_keys};
+use super::keyed_login::try_keyed_login;
 use super::login_attempt::{LoginAttemptOutcome, try_login};
 use super::login_key_cache::LoginKeyCache;
+use super::network_link_keys::{NetworkLinkKeys, link_key};
 use super::remembered_passwords::RememberedPasswords;
 use super::two_passwords::{device_password_salts, password_lines, plan_password};
 use super::ui_access_view::{
@@ -101,6 +110,14 @@ pub struct AccessController {
     remembered: RememberedPasswords,
     records: DeviceAccessRecords,
     keys: Rc<RefCell<LoginKeyCache>>,
+    /// The keys a secure network link presents (Wi-Fi): the held ones, and
+    /// what passwords typed for a board derived. Shared with the LAN
+    /// provider, which reads them on every connection.
+    network_keys: NetworkLinkKeys,
+    /// A password a keyed login put on a link, to remember once the link's
+    /// next hello says it opened the board (the Bluetooth flow remembers on
+    /// the answer; a keyed link has none).
+    remember_on_grant: BTreeMap<DeviceId, String>,
     browser: Option<BrowserKey>,
     account: Option<AccountKeys>,
     writes: BTreeMap<DeviceId, WriteStatus>,
@@ -141,6 +158,8 @@ impl AccessController {
             remembered: RememberedPasswords::default(),
             records: DeviceAccessRecords::default(),
             keys: Rc::new(RefCell::new(LoginKeyCache::new())),
+            network_keys: NetworkLinkKeys::new(),
+            remember_on_grant: BTreeMap::new(),
             browser: None,
             account: None,
             writes: BTreeMap::new(),
@@ -178,6 +197,19 @@ impl AccessController {
         Rc::clone(&self.keys)
     }
 
+    /// The keys a secure network link presents (a handle on the one store).
+    pub fn network_link_keys(&self) -> NetworkLinkKeys {
+        self.network_keys.clone()
+    }
+
+    /// Fill the held keys in now, rather than at the first drive that sees
+    /// a LAN board — so the first link a page opens already presents this
+    /// browser's key instead of coming up anonymous and being rekeyed.
+    pub fn refresh_held_network_keys(&mut self) {
+        let held = self.held();
+        self.refresh_network_keys(&held);
+    }
+
     // --- reads ------------------------------------------------------------
 
     /// Passwords remembered on this browser, most recent first.
@@ -204,11 +236,11 @@ impl AccessController {
         self.sessions.get(&device)
     }
 
-    /// Whether a Bluetooth link to `device` holds a tier (so the lens may
-    /// attach: an untrusted link that has not unlocked is answered nothing
-    /// but hello and login).
+    /// Whether a Bluetooth (or Wi-Fi) link to `device` holds a tier (so the
+    /// lens may attach: an untrusted link that has not unlocked is answered
+    /// nothing but hello and login).
     pub fn link_is_granted(&self, device: &Device) -> bool {
-        if !is_bluetooth(device) {
+        if !is_untrusted(device) {
             return true;
         }
         self.sessions
@@ -244,16 +276,24 @@ impl AccessController {
     ) {
         self.ensure_browser_key(random, FALLBACK_BROWSER_NAME);
         let held = self.held();
+        if roster
+            .devices()
+            .iter()
+            .any(|device| lan_address(device).is_some())
+        {
+            self.refresh_network_keys(&held);
+        }
         for device in roster.devices() {
             self.watch_restart(device);
             let Some(window) = login_window(device) else {
-                if is_bluetooth(device) {
+                if is_untrusted(device) {
                     self.sessions.entry(device.id).or_default().observe(None);
                 }
                 continue;
             };
-            if is_bluetooth(device) {
-                self.drive_unlock(device.id, window, &held, effects, now);
+            if is_untrusted(device) {
+                let address = lan_address(device).map(str::to_string);
+                self.drive_unlock(device.id, window, &held, address, effects, now);
                 if self.granted_tier(device.id) == Some(Tier::Edit)
                     && self.synced.get(&device.id) != Some(&window)
                 {
@@ -277,11 +317,14 @@ impl AccessController {
         self.synced.retain(|device, _| live.contains(device));
     }
 
+    /// `address`: the board's socket URL when its link is a KEYED one (a
+    /// board on the LAN), whose login ends in keys for the link.
     fn drive_unlock(
         &mut self,
         device: DeviceId,
         window: LoginWindow,
         held: &[HeldKey],
+        address: Option<String>,
         effects: &DeviceEffects,
         now: Millis,
     ) {
@@ -292,11 +335,56 @@ impl AccessController {
         let Some(step) = session.next_step(now, held, &remembered) else {
             return;
         };
-        if self.dispatch(device, window.link, step.clone(), effects)
+        let run = match (address, step.clone()) {
+            (
+                Some(address),
+                AccessStep::Login {
+                    window,
+                    held,
+                    passwords,
+                    typed,
+                    challenge,
+                },
+            ) => AccessStep::KeyedLogin {
+                window,
+                address,
+                held,
+                passwords,
+                typed,
+                challenge,
+                link_keys: self.network_keys.clone(),
+            },
+            (_, step) => step,
+        };
+        if self.dispatch(device, window.link, run, effects)
             && let Some(session) = self.sessions.get_mut(&device)
         {
             session.started(&step);
         }
+    }
+
+    /// The held keys a network link presents on its own: those installed at
+    /// one PBKDF2 iteration (this browser's, the account's), which cost
+    /// nothing to derive. A human-password key (an account password, at its
+    /// full cost) reaches a board through the keyed login instead, which
+    /// derives it only for a board that offers its salt.
+    fn refresh_network_keys(&mut self, held: &[HeldKey]) {
+        let keys = held
+            .iter()
+            .filter(|key| key.key.iterations <= 1)
+            .map(|key| {
+                let offer = lpc_access::LoginOffer {
+                    salt: key.key.salt,
+                    iterations: key.key.iterations,
+                };
+                let (k, _) = self
+                    .keys
+                    .borrow_mut()
+                    .key_for_material(&offer, &key.key.material);
+                link_key(key.key.salt, &k)
+            })
+            .collect();
+        self.network_keys.set_held(keys);
     }
 
     /// The sync step for a device's current window: with every held key
@@ -470,6 +558,7 @@ impl AccessController {
             AccessCommand::ForgetRememberedPasswords => {
                 self.remembered.forget_all();
                 self.keys.borrow_mut().clear();
+                self.network_keys.forget_typed();
                 self.persist_passwords();
             }
             AccessCommand::Change { device, change } => {
@@ -495,6 +584,12 @@ impl AccessController {
                 result,
             } => {
                 let anything_known = !self.remembered.is_empty() || !self.held().is_empty();
+                if let Some(password) = self.remember_on_grant.remove(&device)
+                    && matches!(result, Ok((_, Some(_))))
+                {
+                    self.remembered.remember(&password, now_secs);
+                    self.persist_passwords();
+                }
                 if let Some(session) = self.sessions.get_mut(&device) {
                     match result {
                         Ok((required, granted)) => {
@@ -516,6 +611,21 @@ impl AccessController {
                 passwords,
                 typed,
             } => {
+                if outcome == LoginAttemptOutcome::Rekeyed {
+                    // A keyed link has no answer to remember on: hold the
+                    // password until the link's next hello says it opened
+                    // the board (`Checked`).
+                    let asked = typed.as_ref().is_some_and(|typed| typed.remember);
+                    let password = typed
+                        .as_ref()
+                        .map(|typed| typed.password.clone())
+                        .or_else(|| passwords.first().cloned());
+                    if let Some(password) = password
+                        && (asked || self.remembered.in_order().any(|known| known == password))
+                    {
+                        self.remember_on_grant.insert(device, password);
+                    }
+                }
                 if let LoginAttemptOutcome::Granted {
                     password_index: Some(index),
                     ..
@@ -609,7 +719,7 @@ impl AccessController {
                     }
                     // Bluetooth applies at boot: over USB, Studio restarts
                     // the device itself (AC1).
-                    if bluetooth.is_some() && found.is_some_and(|found| !is_bluetooth(found)) {
+                    if bluetooth.is_some() && found.is_some_and(|found| !is_untrusted(found)) {
                         return Some(self.restart(device, roster));
                     }
                 }
@@ -767,7 +877,7 @@ impl AccessController {
         else {
             return fail(self, "connect this device first");
         };
-        if is_bluetooth(found) && self.granted_tier(device) != Some(Tier::Edit) {
+        if is_untrusted(found) && self.granted_tier(device) != Some(Tier::Edit) {
             return fail(self, super::not_permitted_sentence(Tier::Edit));
         }
         if !effects.lens_holds_wire(link) && effects.wire_borrowed(link) {
@@ -843,11 +953,12 @@ impl AccessController {
     /// The access facts for one card.
     pub fn device_view(&self, device: &Device) -> Option<UiDeviceAccess> {
         let over_bluetooth = is_bluetooth(device);
+        let untrusted = is_untrusted(device);
         let session = self.sessions.get(&device.id);
         let open = record_key(&device.identity)
             .and_then(|key| self.records.get(&key))
             .map(|record| record.listing.open);
-        let line = over_bluetooth
+        let line = untrusted
             .then(|| session.map_or(AccessPhase::Unknown, |s| s.phase.clone()))
             .and_then(|phase| {
                 if !device.evidence.presence.is_open() {
@@ -869,13 +980,13 @@ impl AccessController {
             _ => None,
         });
         let panel = self.panel(device);
-        if !over_bluetooth && panel.is_none() {
+        if !untrusted && panel.is_none() {
             return None;
         }
         Some(UiDeviceAccess {
             over_bluetooth,
             line,
-            unlock: unlock.filter(|_| over_bluetooth),
+            unlock: unlock.filter(|_| untrusted),
             panel,
         })
     }
@@ -901,7 +1012,8 @@ impl AccessController {
             return None;
         }
         let over_bluetooth = endpoint.is_bluetooth();
-        if over_bluetooth && self.granted_tier(device.id) != Some(Tier::Edit) {
+        let untrusted = is_untrusted(device);
+        if untrusted && self.granted_tier(device.id) != Some(Tier::Edit) {
             return None;
         }
         let key = record_key(&device.identity)?;
@@ -941,7 +1053,7 @@ impl AccessController {
             capacity: MAX_SECRETS_PER_FILE,
             ble_enabled: record.map(|record| record.listing.ble_enabled),
             restart_pending: record.is_some_and(|record| record.restart_pending),
-            can_restart: !over_bluetooth,
+            can_restart: !untrusted,
             over_bluetooth,
             writing,
             error,
@@ -1002,6 +1114,19 @@ pub(crate) fn is_bluetooth(device: &Device) -> bool {
         .is_some_and(|endpoint| endpoint.is_bluetooth())
 }
 
+/// The socket URL of a board reached on the LAN right now, or `None`.
+pub(crate) fn lan_address(device: &Device) -> Option<&str> {
+    let endpoint = device.identity.endpoint.as_ref()?;
+    lpa_link::providers::network_link::url_from_lan_endpoint(&endpoint.0)
+}
+
+/// A link that must be unlocked before it may do anything: Bluetooth, and a
+/// board on the LAN (a keyed link). Physical connection is access; a radio
+/// is not.
+pub(crate) fn is_untrusted(device: &Device) -> bool {
+    is_bluetooth(device) || lan_address(device).is_some()
+}
+
 /// A trusted link to a LightPlayer board that is not a browser sim: physical
 /// connection is access, so its connect adds this browser's keys.
 fn syncs_over_usb(device: &Device) -> bool {
@@ -1009,6 +1134,7 @@ fn syncs_over_usb(device: &Device) -> bool {
         return false;
     };
     !endpoint.is_bluetooth()
+        && lan_address(device).is_none()
         && !endpoint
             .0
             .starts_with(crate::app::devices::sim_record::SIM_ENDPOINT_PREFIX)
@@ -1082,6 +1208,34 @@ pub(crate) async fn run_step<Io: lpa_client::ClientIo>(
             let outcome = try_login(client, &held, &passwords, challenge, keys, |delay| {
                 (timer.borrow_mut())(delay)
             })
+            .await;
+            AccessCommand::LoggedIn {
+                device,
+                window,
+                outcome,
+                passwords,
+                typed,
+            }
+        }
+        AccessStep::KeyedLogin {
+            window,
+            address,
+            held,
+            passwords,
+            typed,
+            challenge,
+            link_keys,
+        } => {
+            let outcome = try_keyed_login(
+                client,
+                &held,
+                &passwords,
+                challenge,
+                keys,
+                &link_keys,
+                &address,
+                |delay| (timer.borrow_mut())(delay),
+            )
             .await;
             AccessCommand::LoggedIn {
                 device,
@@ -1667,6 +1821,139 @@ mod tests {
         ))
         .expect_err("play cannot change the list");
         assert!(error.contains("author device password"), "{error}");
+    }
+
+    /// Wi-Fi M6 P07: a locked board on the LAN. Its keyed link came up on
+    /// the anonymous key holding nothing; the password typed in the sheet
+    /// becomes keys for the link — no answer is sent (one never grants on a
+    /// keyed link) — and the hello of the session the link rekeys onto is
+    /// the login's outcome: granted, and the sheet closes.
+    #[test]
+    fn a_password_typed_for_a_lan_board_becomes_link_keys_and_its_next_hello_grants() {
+        let access = controller();
+        let board = FakeBoard::locked(&[("mine", Tier::Edit, "pw")]);
+        let (mut session, outcome) = keyed_login_typed(&access, &board, "pw");
+
+        assert_eq!(outcome, LoginAttemptOutcome::Rekeyed);
+        assert_eq!(board.answers(), 0, "a keyed link is never answered");
+        assert!(access.network_link_keys().has_typed(LAN_BOARD));
+        assert_eq!(session.phase, AccessPhase::LoggingIn, "the sheet unlocks…");
+        assert_eq!(session.typed, None);
+
+        // The link rekeys: a new session, a new window, its hello grants.
+        session.observe(Some(window(2)));
+        let step = session.next_step(Millis(8), &access.held(), &[]).unwrap();
+        assert_eq!(step, AccessStep::Check(window(2)));
+        session.started(&step);
+        session.checked(window(2), true, Some(Tier::Edit), true);
+        assert!(
+            matches!(
+                session.phase,
+                AccessPhase::Granted {
+                    tier: Tier::Edit,
+                    ..
+                }
+            ),
+            "{:?}",
+            session.phase
+        );
+        assert_eq!(session.prompt, None);
+    }
+
+    /// The same, with the wrong password: the new session still holds
+    /// nothing, and the sheet says the password was refused rather than
+    /// asking as if nothing had been tried.
+    #[test]
+    fn a_wrong_password_for_a_lan_board_reopens_the_sheet_as_refused() {
+        let access = controller();
+        let board = FakeBoard::locked(&[("mine", Tier::Edit, "pw")]);
+        let (mut session, outcome) = keyed_login_typed(&access, &board, "nope");
+        assert_eq!(outcome, LoginAttemptOutcome::Rekeyed);
+
+        session.observe(Some(window(2)));
+        let step = session.next_step(Millis(8), &access.held(), &[]).unwrap();
+        session.started(&step);
+        session.checked(window(2), true, None, true);
+
+        assert_eq!(session.phase, AccessPhase::Locked);
+        assert_eq!(
+            session.prompt,
+            Some(PromptReason::Refused { retry_after_ms: 0 })
+        );
+    }
+
+    /// What a LAN link presents on its own is this browser's key, exactly as
+    /// the board derives it from the entry that key installs: the salt as
+    /// the key id, `link_psk(K)` as the PSK.
+    #[test]
+    fn a_lan_link_presents_this_browsers_key_as_the_board_derives_it() {
+        use lpa_link::providers::network_link::LinkKeys;
+        let mut access = controller();
+        let browser = access.browser_key().unwrap().installable();
+        let entry = browser.entry(1);
+
+        access.refresh_held_network_keys();
+        let presented = access.network_link_keys().keys_for(LAN_BOARD);
+
+        assert_eq!(presented.len(), 1, "{presented:?}");
+        assert_eq!(presented[0].key_id, entry.salt);
+        assert_eq!(presented[0].psk, lpc_access::link_psk(&entry.k));
+    }
+
+    /// The board on the LAN the keyed-login tests address.
+    const LAN_BOARD: &str = "ws://10.0.0.5/link";
+
+    /// A locked LAN board's first window checked locked, a password typed in
+    /// the sheet, and the keyed login the controller runs for it (the
+    /// session plans a `Login`; `drive_unlock` makes it a `KeyedLogin` for a
+    /// `lan:` device).
+    fn keyed_login_typed(
+        access: &AccessController,
+        board: &FakeBoard,
+        password: &str,
+    ) -> (AccessSession, LoginAttemptOutcome) {
+        let held = access.held();
+        let mut session = AccessSession::default();
+        session.observe(Some(window(1)));
+        session.started(&AccessStep::Check(window(1)));
+        session.checked(window(1), true, None, true);
+        session.type_password(TypedPassword {
+            password: password.to_string(),
+            remember: false,
+        });
+        let step = session.next_step(Millis(6), &held, &[]).expect("a login");
+        let AccessStep::Login {
+            window: at,
+            held: offered,
+            passwords,
+            typed,
+            challenge,
+        } = step.clone()
+        else {
+            panic!("{step:?}")
+        };
+        session.started(&step);
+        let keyed = AccessStep::KeyedLogin {
+            window: at,
+            address: LAN_BOARD.to_string(),
+            held: offered,
+            passwords,
+            typed,
+            challenge,
+            link_keys: access.network_link_keys(),
+        };
+        let mut client = board.client();
+        let AccessCommand::LoggedIn { outcome, .. } = block_on(run_step(
+            &mut client,
+            DeviceId(1),
+            keyed,
+            &access.keys(),
+            instant_timer(),
+        )) else {
+            panic!("a keyed login ends as a login")
+        };
+        session.logged_in(window(1), &outcome, true, Millis(7));
+        (session, outcome)
     }
 
     // --- helpers ----------------------------------------------------------

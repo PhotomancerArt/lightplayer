@@ -1,5 +1,7 @@
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
+use crate::client::board_password::BoardPasswordArgs;
+
 #[derive(Debug, Parser)]
 #[command(
     name = "wifi",
@@ -10,6 +12,8 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
         takes it on the command line (shell history and `ps` would keep it). Give it \
         in LP_WIFI_PASSWORD or on stdin with --password-stdin; --open saves an open \
         network. Adding a saved network again changes its password.\n\n\
+        A locked board at a lan: address needs its own password: LP_PASSWORD, \
+        or --password-stdin on status, scan, forget and set.\n\n\
         No firmware connects to Wi-Fi yet: a board stores the settings and says so, \
         and a scan answers that this firmware cannot scan."
 )]
@@ -36,9 +40,12 @@ pub enum WifiCommand {
 
 #[derive(Debug, Args)]
 pub struct HostArgs {
-    /// The device, e.g. serial:auto, serial:/dev/cu.usbmodem2101 or
-    /// serial:tcp://127.0.0.1:5591 (an emulated board).
+    /// The device, e.g. serial:auto, serial:/dev/cu.usbmodem2101,
+    /// serial:tcp://127.0.0.1:5591 (an emulated board) or lan:192.168.1.40
+    /// (a board on the network).
     pub host: String,
+    #[command(flatten)]
+    pub board_password: BoardPasswordArgs,
     /// Print the board's reply as JSON (it holds no password).
     #[arg(long)]
     pub json: bool,
@@ -46,7 +53,9 @@ pub struct HostArgs {
 
 #[derive(Debug, Args)]
 pub struct AddArgs {
-    /// The device, e.g. serial:auto or serial:tcp://127.0.0.1:5591.
+    /// The device, e.g. serial:auto or serial:tcp://127.0.0.1:5591. A
+    /// locked board at a lan: address takes its own password from
+    /// LP_PASSWORD (stdin here is the network's).
     pub host: String,
     /// The network name (1-32 bytes). Its password comes from
     /// LP_WIFI_PASSWORD or --password-stdin; --open for none.
@@ -68,8 +77,11 @@ pub struct AddArgs {
 
 #[derive(Debug, Args)]
 pub struct ForgetArgs {
-    /// The device, e.g. serial:auto or serial:tcp://127.0.0.1:5591.
+    /// The device, e.g. serial:auto, serial:tcp://127.0.0.1:5591 or
+    /// lan:192.168.1.40.
     pub host: String,
+    #[command(flatten)]
+    pub board_password: BoardPasswordArgs,
     /// The saved network to forget.
     pub ssid: String,
     /// Print the board's reply as JSON (it holds no password).
@@ -79,8 +91,11 @@ pub struct ForgetArgs {
 
 #[derive(Debug, Args)]
 pub struct SetArgs {
-    /// The device, e.g. serial:auto or serial:tcp://127.0.0.1:5591.
+    /// The device, e.g. serial:auto, serial:tcp://127.0.0.1:5591 or
+    /// lan:192.168.1.40.
     pub host: String,
+    #[command(flatten)]
+    pub board_password: BoardPasswordArgs,
     /// The board's Wi-Fi switch.
     #[arg(long, value_enum)]
     pub wifi: Option<OnOff>,

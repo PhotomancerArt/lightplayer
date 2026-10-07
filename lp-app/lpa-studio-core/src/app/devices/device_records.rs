@@ -65,6 +65,8 @@ pub fn transport_label_for_endpoint(endpoint: &str) -> &'static str {
         LinkProviderKind::EmulatorTab
     } else if endpoint.starts_with(super::sim_record::BLE_ENDPOINT_PREFIX) {
         LinkProviderKind::BrowserBle
+    } else if endpoint.starts_with(lpa_link::providers::network_link::LAN_ENDPOINT_PREFIX) {
+        LinkProviderKind::BrowserWebsocket
     } else {
         LinkProviderKind::BrowserSerialEsp32
     };
@@ -286,6 +288,19 @@ mod tests {
         let row = registry_row_from_record(&over_ble).unwrap();
         assert!(record_from_registry_row(&row, 1).last_over_bluetooth);
         let row = registry_row_from_record(&record()).unwrap();
+        assert!(!record_from_registry_row(&row, 1).last_over_bluetooth);
+    }
+
+    /// A board reached on the LAN (`?lan=`) is a Wi-Fi board in the column,
+    /// and is not remembered as a Bluetooth one.
+    #[test]
+    fn a_lan_board_is_remembered_as_wifi() {
+        let mut over_lan = record();
+        over_lan.identity.endpoint = Some(lpa_devices::identity::EndpointKey(
+            "lan:ws://10.0.0.5/link".to_string(),
+        ));
+        let row = registry_row_from_record(&over_lan).unwrap();
+        assert_eq!(row.transport, "Wi-Fi");
         assert!(!record_from_registry_row(&row, 1).last_over_bluetooth);
     }
 

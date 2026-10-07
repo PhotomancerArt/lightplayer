@@ -33,7 +33,7 @@ pub use fake_device_core::FakeEsp32Device;
 pub use fake_device_script::{
     C6_ROM_BANNER, CLASSIC_ESP32_ROM_BANNER, FAKE_DEVICE_PROJECT_DIR, FAKE_IMAGE_IDENTITY,
     FAKE_PROBED_MAC, FakeBootState, FakeDeviceIdentity, FakeDeviceScript, FakeFlashLayout,
-    FakeLightPlayerState, XIAO_FACTORY_DEMO_LINE, fake_provenance,
+    FakeLightPlayerState, FakeWifiStation, XIAO_FACTORY_DEMO_LINE, fake_provenance,
 };
 pub use fake_device_stream::FakeDeviceByteStream;
 pub use fake_flash_layout::{FAKE_FIRMWARE_LEN, fake_firmware_image, fake_target_table};

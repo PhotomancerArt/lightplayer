@@ -50,6 +50,8 @@ pub mod browser_ble_source;
 /// studio is built with the module that owns them.
 #[cfg(all(feature = "emulator-tab", target_arch = "wasm32"))]
 pub mod browser_emu_source;
+#[cfg(all(feature = "browser-websocket", target_arch = "wasm32"))]
+pub mod browser_lan_source;
 /// Sims backed by `fw-browser` workers. wasm-only, and only when the studio
 /// is built with the provider that owns them.
 #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
@@ -95,6 +97,9 @@ pub mod device_update_version;
 pub mod device_update_words;
 pub mod devices_op;
 pub mod emu_transport;
+pub mod lan_addresses;
+pub mod lan_link_view;
+pub mod lan_transport;
 pub mod link_health;
 pub mod new_sim_offer;
 pub mod own_build_source;
@@ -107,6 +112,7 @@ pub mod sim_create_op;
 pub mod sim_record;
 pub mod sim_transport;
 pub mod target_offer;
+pub mod ui_link_kind;
 pub(crate) mod update_auto_start;
 pub mod update_build_facts;
 pub(crate) mod update_driver_mirror;
@@ -123,6 +129,8 @@ pub use board_ref::{BoardRef, BoardRefError};
 pub use browser_ble_source::BrowserBleSource;
 #[cfg(all(feature = "emulator-tab", target_arch = "wasm32"))]
 pub use browser_emu_source::BrowserEmuLinkSource;
+#[cfg(all(feature = "browser-websocket", target_arch = "wasm32"))]
+pub use browser_lan_source::BrowserLanSource;
 #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
 pub use browser_sim_source::BrowserSimLinkSource;
 #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
@@ -209,6 +217,9 @@ pub use devices_op::{DeviceFace, DevicesOp};
 pub use emu_transport::{
     EmuBacking, EmuDeviceTransport, EmuLinkSource, EmuRuntimeControl, EmuSession,
 };
+pub use lan_addresses::{LAN_LINK_PATH, LanFlag, normalize_lan_address, parse_lan_flag};
+pub use lan_link_view::{UiLanLink, lan_link_for_endpoint, lan_link_view};
+pub use lan_transport::{LanDeviceTransport, LanLinkSource};
 pub use link_health::{LinkHealth, LinkHealthMap, LinkTrouble};
 pub use new_sim_offer::{NEW_SIM_BACKING_PARAM, NEW_SIM_BOARD_PARAM, new_sim_offer};
 pub use own_build_source::{MemoryOwnBuildSource, OwnBuildSource};
@@ -228,5 +239,6 @@ pub use sim_transport::{
     SimBacking, SimDeviceTransport, SimLinkSource, SimRuntimeControl, SimSession, SimTier,
 };
 pub use target_offer::{TargetChoice, TargetGroup, TargetOffer, TargetScope, target_offer};
+pub use ui_link_kind::UiLinkKind;
 pub use update_build_facts::{StoreLatest, UpdateBuildFacts};
 pub use update_host::UpdateHost;

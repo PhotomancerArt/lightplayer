@@ -15,8 +15,16 @@
 //! locked link; again when the popover opens ([`NetworkCommand::Refresh`]);
 //! and every change's answer replaces the status. It scans when the
 //! connect page asks ([`NetworkCommand::Scan`]), and never on a board whose
-//! station is `unsupported`. No polling: nothing changes on a board that
-//! cannot connect (M6 adds a poll while a test runs).
+//! station is `unsupported`. A board answers a scan from what its radio
+//! last heard; when that is stale it says `scanning` and listens, and the
+//! controller asks again after [`ASK_AGAIN`]. A scan asked while the
+//! status read (or a change) is still out, or before the first read, is
+//! owed and goes out once that answer lands: the connect page asks once,
+//! when it opens, which is usually just as its board's first read leaves.
+//! While a just-added network's
+//! test is under way it re-reads the status every [`ASK_AGAIN`] too, so the
+//! test advances live (Looking for → Checking the password → Getting an
+//! address); it stops once the test is done or dismissed.
 //!
 //! **The in-row test** (the spike's 2B): a network added through the offer
 //! becomes the device's `testing` network once the board has saved it, and
@@ -45,6 +53,10 @@ use crate::app::access::access_controller::{holds_its_files, is_bluetooth, login
 use crate::app::devices::device_effects::{DeviceEffects, DeviceTaskFuture};
 use crate::app::studio::studio_command::StudioCommand;
 use crate::app::studio::studio_view_channel::CommandSender;
+
+/// How long the controller waits before asking a board again: after a scan
+/// answered `scanning`, and between status reads while a test runs.
+pub const ASK_AGAIN: std::time::Duration = std::time::Duration::from_secs(1);
 
 /// How far a device's link reaches into its network settings.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -94,6 +106,14 @@ struct DeviceNetwork {
     /// What the radio heard at the last scan.
     heard: Option<Vec<HeardNetwork>>,
     scanning: bool,
+    /// The board said `scanning`: a scan is asked again after
+    /// [`ASK_AGAIN`] (the connect page keeps saying it is looking).
+    scan_again: bool,
+    /// A scan was asked while a read or a change was out (or before the
+    /// first status): it goes out when that answer lands.
+    scan_owed: bool,
+    /// A status read is asked again after [`ASK_AGAIN`] (a test runs).
+    read_again: bool,
     /// The network an add in flight is saving.
     adding: Option<String>,
     /// The network whose test shows in its row.
@@ -175,6 +195,24 @@ impl NetworkController {
         true
     }
 
+    /// Post `command` back onto the actor's queue after [`ASK_AGAIN`]. Does
+    /// nothing without a timer, a spawner or a queue (a test rig that wires
+    /// none).
+    fn later(&self, command: NetworkCommand, effects: &DeviceEffects) {
+        let (Some(timer), Some(spawner), Some(tx)) = (
+            effects.timer_factory(),
+            self.spawner.clone(),
+            self.tx.clone(),
+        ) else {
+            return;
+        };
+        let sleep = (timer.borrow_mut())(ASK_AGAIN);
+        spawner(Box::pin(async move {
+            sleep.await;
+            tx.send(StudioCommand::Network(command));
+        }));
+    }
+
     /// The next step parked for the lens's client, if any.
     pub(crate) fn take_lens_step(&mut self) -> Option<(DeviceId, NetworkStep)> {
         self.lens_steps.pop_front()
@@ -199,6 +237,7 @@ impl NetworkController {
                     return;
                 };
                 let state = self.devices.entry(device).or_default();
+                state.read_again = false;
                 if state.reading || state.writing {
                     return;
                 }
@@ -212,20 +251,8 @@ impl NetworkController {
                 let Some(found) = roster.device(device) else {
                     return;
                 };
-                let Some((window, WifiReach::Edit)) = reach(found, granted(device)) else {
-                    return;
-                };
-                let state = self.devices.entry(device).or_default();
-                let can_scan = state
-                    .status
-                    .as_ref()
-                    .is_some_and(|status| status.station != StationState::Unsupported);
-                if !can_scan || state.scanning || state.reading || state.writing {
-                    return;
-                }
-                if self.dispatch(device, window.link, NetworkStep::Scan, effects) {
-                    self.devices.entry(device).or_default().scanning = true;
-                }
+                let reach = reach(found, granted(device));
+                self.scan(device, reach, effects);
             }
             NetworkCommand::DismissTest { device } => {
                 if let Some(state) = self.devices.get_mut(&device) {
@@ -238,6 +265,12 @@ impl NetworkController {
                 match result {
                     Ok(NetworkScan::Heard(heard)) => state.heard = Some(heard),
                     Ok(NetworkScan::Unsupported) => state.heard = None,
+                    Ok(NetworkScan::Scanning) => {
+                        // The radio is listening now: keep what was heard
+                        // before, and ask again.
+                        state.scan_again = true;
+                        self.later(NetworkCommand::Scan { device }, effects);
+                    }
                     Err(NetworkRefusal::NotPermitted(_)) => state.needs_author = true,
                     Err(NetworkRefusal::Said(error)) => state.error = Some(error),
                 }
@@ -264,14 +297,25 @@ impl NetworkController {
                             // Saved: its test runs in its row (2B).
                             state.testing = Some(added);
                         }
+                        let running = state.testing.as_deref().is_some_and(|ssid| {
+                            matches!(
+                                super::UiWifiTest::of(ssid, &status).progress,
+                                super::WifiTestProgress::Running(_)
+                            )
+                        });
                         state.status = Some(status);
                         state.error = None;
                         state.needs_author = false;
+                        if running && !state.read_again {
+                            state.read_again = true;
+                            self.later(NetworkCommand::Refresh { device }, effects);
+                        }
                     }
                     Err(NetworkRefusal::NotPermitted(_)) => {
                         // The row says it needs author instead of an error.
                         state.needs_author = true;
                         state.error = None;
+                        state.scan_owed = false;
                     }
                     Err(NetworkRefusal::Said(error)) => {
                         // A refused change keeps the status the board last
@@ -279,7 +323,50 @@ impl NetworkController {
                         state.error = Some(error);
                     }
                 }
+                // The scan asked while this was out goes now.
+                let state = self.devices.entry(device).or_default();
+                if std::mem::take(&mut state.scan_owed)
+                    && let Some(found) = roster.device(device)
+                {
+                    let reach = reach(found, granted(device));
+                    self.scan(device, reach, effects);
+                }
             }
+        }
+    }
+
+    /// Ask `device` what its radio heard, on the link `reach` names, when it
+    /// can scan now; owe the scan when a read or a change is out (or the
+    /// first status has not come back), so its answer sends it.
+    fn scan(
+        &mut self,
+        device: DeviceId,
+        reach: Option<(LoginWindow, WifiReach)>,
+        effects: &DeviceEffects,
+    ) {
+        let Some((window, WifiReach::Edit)) = reach else {
+            return;
+        };
+        let state = self.devices.entry(device).or_default();
+        state.scan_again = false;
+        if state.scanning {
+            return;
+        }
+        if state.reading || state.writing || state.status.is_none() {
+            // Not now, and not never: the answer in flight (or the first
+            // read) decides whether this board can scan.
+            state.scan_owed = true;
+            return;
+        }
+        let can_scan = state
+            .status
+            .as_ref()
+            .is_some_and(|status| status.station != StationState::Unsupported);
+        if !can_scan {
+            return;
+        }
+        if self.dispatch(device, window.link, NetworkStep::Scan, effects) {
+            self.devices.entry(device).or_default().scanning = true;
         }
     }
 
@@ -370,7 +457,7 @@ impl NetworkController {
             writing: state.is_some_and(|state| state.writing),
             error: state.and_then(|state| state.error.clone()),
             heard: state.and_then(|state| state.heard.clone()),
-            scanning: state.is_some_and(|state| state.scanning),
+            scanning: state.is_some_and(|state| state.scanning || state.scan_again),
             testing: state.and_then(|state| state.testing.clone()),
         })
     }

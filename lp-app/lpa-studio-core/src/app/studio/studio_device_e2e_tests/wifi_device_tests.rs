@@ -123,6 +123,47 @@ fn wifi_is_read_on_connect_added_through_its_offer_and_forgotten() {
     assert_no_password_anywhere(&mut bench);
 }
 
+/// The connect page asks for a scan when it opens, which is often while the
+/// board's status read is still out. That scan is owed, not dropped: it goes
+/// out once the read lands, and the Nearby list fills (PR C's emulated walk
+/// found it staying empty, now and then). The board's station is scripted:
+/// not connected, and its radio has heard one network.
+#[test]
+fn a_scan_asked_while_the_status_read_is_out_goes_after_it() {
+    let device = wifi_light_player("dev000000wifiscan1");
+    let (mut bench, tasks) = identified(&device, "usb-wifi-scan");
+    let target = bench.view().devices[0].id;
+    let status = wifi_status(&mut bench, &tasks, target);
+    assert_eq!(status.station, crate::StationState::NotConnected);
+
+    // A read goes out (the popover's refresh), and the scan is asked before
+    // its answer has come back.
+    bench
+        .controller
+        .apply_network_command(crate::NetworkCommand::Refresh { device: target });
+    assert!(
+        bench.controller.device_roster_view().wifi[&target].reading,
+        "the read is out"
+    );
+    bench
+        .controller
+        .apply_network_command(crate::NetworkCommand::Scan { device: target });
+    bench.run_until(&tasks, "the board's heard networks", |bench| {
+        bench
+            .controller
+            .device_roster_view()
+            .wifi
+            .get(&target)
+            .is_some_and(|wifi| wifi.heard.is_some())
+    });
+    let heard = bench.controller.device_roster_view().wifi[&target]
+        .heard
+        .clone()
+        .unwrap();
+    let names: Vec<&str> = heard.iter().map(|network| network.ssid.as_str()).collect();
+    assert_eq!(names, [SSID]);
+}
+
 /// A password the board would refuse is refused by the offer first, in the
 /// board's own words, without quoting it; nothing reaches the board.
 #[test]
@@ -227,6 +268,29 @@ fn assert_no_password_anywhere(bench: &mut DeviceBench) {
         assert!(!logs.contains(password), "the console holds a password");
         assert!(!readout.contains(password), "the readout holds a password");
     }
+}
+
+/// A LightPlayer board with a Wi‑Fi station: not connected, and its radio
+/// has heard [`SSID`] (the firmware's station probes, scripted).
+fn wifi_light_player(uid: &str) -> FakeEsp32Device {
+    FakeEsp32Device::new(
+        FakeDeviceScript::new(FakeBootState::LightPlayer(
+            FakeLightPlayerState::new()
+                .with_identity(FakeDeviceIdentity::new(uid, "Bench board"))
+                .with_base_mac("60:55:f9:0a:0b:0d")
+                .with_heartbeat_interval(Duration::from_millis(20)),
+        ))
+        .with_wifi_station(lpa_link::providers::fake_device::FakeWifiStation {
+            state: || lpc_wire::StationState::NotConnected,
+            scan: || {
+                lpc_wire::NetworkScan::Heard(vec![lpc_wire::server::HeardNetwork {
+                    ssid: SSID.to_string(),
+                    rssi: -50,
+                    secure: true,
+                }])
+            },
+        }),
+    )
 }
 
 /// Read the board's status as the card has it, once it has answered and

@@ -2101,6 +2101,14 @@ impl SocBus {
     /// differently built machine and is refused loudly rather than half
     /// applied.
     pub fn restore_regions(&mut self, data: &[Vec<u8>]) {
+        self.restore_regions_keeping(data, &[]);
+    }
+
+    /// [`Self::restore_regions`], leaving the regions `keep` names as they
+    /// are: what a reset that does not reach them looks like (an HP-domain
+    /// reset leaves the LP island's SRAM, where firmware keeps what must
+    /// survive one).
+    pub fn restore_regions_keeping(&mut self, data: &[Vec<u8>], keep: &[&str]) {
         assert_eq!(
             data.len(),
             self.regions.len(),
@@ -2119,6 +2127,9 @@ impl SocBus {
                 "SocBus::restore_regions: region `{name}` is {len} bytes, snapshot has {}",
                 bytes.len()
             );
+            if keep.contains(&name) {
+                continue;
+            }
             let off = (base - self.arena_base) as usize;
             self.arena[off..off + len].copy_from_slice(bytes);
         }

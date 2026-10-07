@@ -142,6 +142,7 @@ mod tests {
         let port = free_port();
         let args = CaptureArgs {
             target: format!("blepipe:{port}"),
+            board_password: Default::default(),
             console: dir.path().join("console.txt"),
             exit_on: Some("[host-ota] done: UpToDate".into()),
             seconds: 60,

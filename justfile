@@ -295,16 +295,19 @@ lpa-link-browser-test: install-wasm32-target
         echo "wasm-bindgen-test-runner not found. Install: cargo install wasm-bindgen-cli --version 0.2.114"
         exit 1
     fi
-    # Two suites, one runner: Web Serial over `?emu=`'s polyfill, and (M5)
-    # Web Bluetooth over `?ble=emu`'s, both against the scripted door. The
-    # Bluetooth suite spends a real 10 s proving a hung GATT connect is
-    # bounded, against the runner's default 20 s for a whole suite, so the
-    # budget is raised rather than the bound faked.
+    # Three suites, one runner: Web Serial over `?emu=`'s polyfill, and (M5)
+    # Web Bluetooth over `?ble=emu`'s, both against the scripted door; and
+    # (Wi-Fi M6 P07) the LAN provider against a secure lp-link board double
+    # behind a `WebSocket` double. The Bluetooth suite spends a real 10 s
+    # proving a hung GATT connect is bounded, against the runner's default
+    # 20 s for a whole suite, so the budget is raised rather than the bound
+    # faked.
     WASM_BINDGEN_TEST_TIMEOUT="${WASM_BINDGEN_TEST_TIMEOUT:-60}" \
     CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER="$PWD/scripts/wasm-serial-test-runner.sh" \
         cargo test -p lpa-link --target wasm32-unknown-unknown \
-            --features browser-serial-esp32,browser-ble \
-            --test browser_serial_conformance --test browser_ble_conformance
+            --features browser-serial-esp32,browser-ble,browser-websocket \
+            --test browser_serial_conformance --test browser_ble_conformance \
+            --test browser_websocket_conformance
 
 # The SAME assertions against boards hosted IN THE TAB — one Worker per
 # board, each holding the emulator's own wasm, and no server anywhere
@@ -3196,7 +3199,7 @@ test-glsl-filetests:
 # Warm ~1s, cold ~47s locally; it runs beside clippy, the Lint job's long
 # pole. See docs/debt/wasm-cloud-check-not-in-just-check.md.
 [parallel]
-check-lint: fmt-check clippy check-wasm-cloud check-lp-link-targets check-lpc-engine-gates check-studio-core-minimal lint-serde-content lint-browser-test-harness lint-classic-capture lint-pcb-export lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-nested-patches lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities lint-red-main-needs lint-tag-next-version lint-release-version-cmp lint-web-actions lint-core-action-fields lint-core-test-ops
+check-lint: fmt-check clippy check-wasm-cloud check-lp-link-targets check-lpc-engine-gates check-studio-core-minimal lint-serde-content lint-browser-test-harness lint-classic-capture lint-pcb-export lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-nested-patches lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities lint-red-main-needs lint-ci-durations lint-tag-next-version lint-release-version-cmp lint-web-actions lint-core-action-fields lint-core-test-ops
 
 [parallel]
 check: check-lint schema-check fw-manifest-check-emu
@@ -3307,6 +3310,13 @@ lint-nested-patches:
 # stdlib python, ~0.1 s.
 lint-red-main-needs:
     python3 scripts/ci/check-red-main-needs.py
+
+# job-durations.py's own fixture-based self-test: percentiles, the
+# timeout-minutes parse and the verdicts, no network. Offline, stdlib
+# python, ~0.1 s — keeps the parser honest when pre-merge.yml's layout
+# changes. docs/debt/ci-runner-time-over-the-concurrency-cap.md.
+lint-ci-durations:
+    python3 scripts/ci/job-durations.py --self-test
 
 # Main push's version tagger, against throwaway git repos: each run tags its
 # own commit, a tagged commit is a no-op, and a lost tag race retries.
@@ -4538,6 +4548,14 @@ merge: check
 # Run it as a background task, not a foreground sleep loop.
 watch-pr *args:
     scripts/watch-pr.sh {{ args }}
+
+# Measure pre-merge.yml's job durations against their timeout-minutes
+# budgets (docs/debt/ci-runner-time-over-the-concurrency-cap.md). Default
+# window is the last 200 runs; pass `--since <ISO date>` for a wider one.
+# Exits 2 when a job is over or tight on its budget, so the weekly
+# scheduled run (.github/workflows/ci-durations.yml) goes red on its own.
+ci-durations *args:
+    scripts/ci/job-durations.py {{ args }}
 
 # ============================================================================
 # Hardware discovery

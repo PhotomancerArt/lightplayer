@@ -538,6 +538,7 @@ fn powered_off_sim_fixture() -> DeviceRosterView {
     DeviceRosterView {
         access: Default::default(),
         wifi: Default::default(),
+        lan_links: Default::default(),
         updates: Default::default(),
         transport_available: true,
         usb_available: true,
@@ -887,10 +888,18 @@ fn devices_card_layout_change() -> Element {
 
 /// A board needing its files back, with no pending backup of its own
 /// (Decision 11, plan P01): "Restore from a backup file…" is the only
-/// verb — picking a file opens the OS file dialog directly (never a
-/// generic `UiAction` dispatch; see `device_backup_import`'s module doc),
-/// so there is nothing more for this card to draw until a file is chosen.
+/// restore verb, with the board's Update beside it (defect 2026-10-06: the
+/// files state never withholds an update). Picking a file opens the OS file
+/// dialog directly (never a generic `UiAction` dispatch; see
+/// `device_backup_import`'s module doc), so there is nothing more for this
+/// card to draw until a file is chosen.
 fn restore_from_file_menu_cell() -> Element {
+    needs_files_back_cell(None)
+}
+
+/// A board that came back without its files (its filesystem just
+/// formatted), with `pending` the backup this browser still holds for it.
+fn needs_files_back_cell(pending: Option<&lpa_studio_core::BackupEntry>) -> Element {
     use lpa_studio_core::{
         DeviceBoardFs, DeviceFirmwareFace, DeviceWireVersion, device_layout_view,
     };
@@ -925,7 +934,7 @@ fn restore_from_file_menu_cell() -> Element {
         DeviceBoardFs::Formatted,
         false,
         None,
-        None,
+        pending,
         Some("60:55:f9:0a:0b:0c"),
         &mut offers,
     );
@@ -946,12 +955,32 @@ fn restore_from_file_menu_cell() -> Element {
 }
 
 #[story(
-    description = "The gap Decision 11 of the repartition ADR closes: a board needing its files back, with no pending backup in THIS browser — a different machine, cleared storage, or an interrupted migration whose only surviving copy is the file it offered as a download. \"Restore from a backup file…\" is the one verb (no Restore files, no Download backup: there is nothing stored here). Pressing it opens the OS file picker directly — a file dialog cannot be a `UiAction`, the same reasoning as the project library's own zip Import — so there is no sheet to capture here; the next two stories show the words it leads to."
+    description = "The gap Decision 11 of the repartition ADR closes: a board needing its files back, with no pending backup in THIS browser — a different machine, cleared storage, or an interrupted migration whose only surviving copy is the file it offered as a download. \"Restore from a backup file…\" is the one restore verb (no Restore files, no Download backup: there is nothing stored here), and the board's Update stands beside it: an update never touches the board's files, so a files problem never hides it (defect 2026-10-06). Pressing it opens the OS file picker directly — a file dialog cannot be a `UiAction`, the same reasoning as the project library's own zip Import — so there is no sheet to capture here; the next two stories show the words it leads to."
 )]
 fn devices_card_restore_from_file_menu() -> Element {
     rsx! {
         section { class: "tw:p-4",
             div { class: "tw:w-[400px]", {restore_from_file_menu_cell()} }
+        }
+    }
+}
+
+#[story(
+    description = "A board that came back without its files while THIS browser still holds their backup (the update that moved them was cut off mid-write; the repartition walk's W7): the line names the backup's date, and the row offers Restore files, Download backup and Restore from a backup file… — and the board's Update beside them, because an update never touches the board's files, so a files problem never hides it (defect 2026-10-06). Four verbs do not fit one card's width, so this row (and only this face's) takes a second line."
+)]
+fn devices_card_restore_files_beside_update() -> Element {
+    let pending = lpa_studio_core::BackupEntry {
+        base_mac: "60:55:f9:0a:0b:0c".to_string(),
+        archive: "60-55-f9-0a-0b-0c-1791000000.zip".to_string(),
+        captured_at_epoch_seconds: 1_791_000_000.0,
+        purpose: "layout-migration".to_string(),
+        status: lpa_studio_core::BackupStatus::Pending,
+        file_count: 23,
+        total_bytes: 96_000,
+    };
+    rsx! {
+        section { class: "tw:p-4",
+            div { class: "tw:w-[400px]", {needs_files_back_cell(Some(&pending))} }
         }
     }
 }
@@ -1225,6 +1254,7 @@ fn roster_fixture() -> DeviceRosterView {
     DeviceRosterView {
         access: Default::default(),
         wifi: Default::default(),
+        lan_links: Default::default(),
         updates: Default::default(),
         transport_available: true,
         usb_available: true,
@@ -1576,6 +1606,7 @@ fn roster_page_fixture() -> DeviceRosterView {
     DeviceRosterView {
         access: Default::default(),
         wifi: Default::default(),
+        lan_links: Default::default(),
         updates: Default::default(),
         transport_available: true,
         usb_available: true,

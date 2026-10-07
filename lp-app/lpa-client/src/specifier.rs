@@ -1,17 +1,26 @@
 //! Host specifier parsing
 //!
 //! Parses host specifiers to determine transport type and parameters.
-//! Supports websocket (`ws://`, `wss://`) and serial (`serial:`) formats.
+//! Supports websocket (`ws://`, `wss://`, lpc-wire to `lp-cli serve`), serial
+//! (`serial:`) and a board on the LAN (`lan:<host>[:port]`) formats.
 
 use anyhow::{Result, bail};
 use lpc_model::DEFAULT_SERIAL_BAUD_RATE;
 use std::fmt;
 
+/// A LAN board's link port when a `lan:` address names none (Wi-Fi plan Q6:
+/// 80, the port a device-served panel will share).
+pub const LAN_DEFAULT_PORT: u16 = 80;
+
 /// Host specifier indicating transport type and connection details
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HostSpecifier {
-    /// WebSocket connection
+    /// WebSocket connection (lpc-wire to `lp-cli serve`)
     WebSocket { url: String },
+    /// A board on the LAN: a secure lp-link inside a WebSocket to
+    /// `ws://<host>:<port>/link`. `host` is an IPv4 address or a `.local`
+    /// name, resolved by the OS resolver (mDNS on macOS).
+    Lan { host: String, port: u16 },
     /// Serial connection
     Serial {
         port: Option<String>,   // None = auto-detect
@@ -64,6 +73,12 @@ impl HostSpecifier {
             return Ok(HostSpecifier::WebSocket { url: s.to_string() });
         }
 
+        // A board on the LAN
+        if let Some(rest) = s.strip_prefix("lan:") {
+            let (host, port) = parse_lan_address(rest.trim())?;
+            return Ok(HostSpecifier::Lan { host, port });
+        }
+
         // Check for serial specifier
         if s.starts_with("serial:") {
             let rest = s.strip_prefix("serial:").unwrap().trim();
@@ -91,8 +106,13 @@ impl HostSpecifier {
         }
 
         bail!(
-            "Invalid host specifier: '{s}'. Supported formats: ws://host:port/, wss://host:port/, serial:auto, serial:/dev/ttyUSB1, serial:/dev/cu.usbmodem2101?baud={DEFAULT_SERIAL_BAUD_RATE}, local, emu"
+            "Invalid host specifier: '{s}'. Supported formats: ws://host:port/, wss://host:port/, serial:auto, serial:/dev/ttyUSB1, serial:/dev/cu.usbmodem2101?baud={DEFAULT_SERIAL_BAUD_RATE}, lan:192.168.1.40, lan:lp-3f2a.local[:port], local, emu"
         )
+    }
+
+    /// Check if this is a LAN board specifier
+    pub fn is_lan(&self) -> bool {
+        matches!(self, HostSpecifier::Lan { .. })
     }
 
     /// Check if this is a websocket specifier
@@ -132,6 +152,37 @@ impl HostSpecifier {
     }
 }
 
+/// The board a `lan:` address names: `<host>[:port]`, the port 80 when
+/// absent. IPv6 literals are not taken (a board's address is IPv4 or its
+/// `.local` name).
+fn parse_lan_address(rest: &str) -> Result<(String, u16)> {
+    const FORM: &str = "lan:<host>[:port], e.g. lan:192.168.1.40 or lan:lp-3f2a.local";
+    if rest.is_empty() {
+        bail!("lan: needs the board's address: {FORM}");
+    }
+    if rest.starts_with("//") || rest.contains('/') {
+        bail!("'lan:{rest}' is not an address: {FORM} (no scheme, no path)");
+    }
+    let (host, port) = match rest.split_once(':') {
+        None => (rest, LAN_DEFAULT_PORT),
+        Some((host, port)) => {
+            if port.contains(':') {
+                bail!("'lan:{rest}': IPv6 addresses are not supported; {FORM}");
+            }
+            let port = port
+                .parse::<u16>()
+                .ok()
+                .filter(|&p| p != 0)
+                .ok_or_else(|| anyhow::anyhow!("'lan:{rest}': '{port}' is not a port"))?;
+            (host, port)
+        }
+    };
+    if host.is_empty() {
+        bail!("lan: needs the board's address: {FORM}");
+    }
+    Ok((host.to_string(), port))
+}
+
 /// Parse baud rate from query string
 ///
 /// Supports format: `baud=115200`
@@ -155,6 +206,10 @@ impl fmt::Display for HostSpecifier {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             HostSpecifier::WebSocket { url } => write!(f, "{url}"),
+            HostSpecifier::Lan { host, port } if *port == LAN_DEFAULT_PORT => {
+                write!(f, "lan:{host}")
+            }
+            HostSpecifier::Lan { host, port } => write!(f, "lan:{host}:{port}"),
             HostSpecifier::Serial {
                 port: None,
                 baud_rate: None,
@@ -425,6 +480,52 @@ mod tests {
         assert!(!spec.is_websocket());
         assert!(!spec.is_serial());
         assert!(!spec.is_local());
+    }
+
+    #[test]
+    fn a_lan_address_is_a_host_and_a_port_80_by_default() {
+        assert_eq!(
+            HostSpecifier::parse("lan:192.168.1.40").unwrap(),
+            HostSpecifier::Lan {
+                host: "192.168.1.40".to_string(),
+                port: 80
+            }
+        );
+        let named = HostSpecifier::parse(" lan:lp-3f2a.local:8080 ").unwrap();
+        assert!(named.is_lan());
+        assert_eq!(
+            named,
+            HostSpecifier::Lan {
+                host: "lp-3f2a.local".to_string(),
+                port: 8080
+            }
+        );
+        assert_eq!(named.to_string(), "lan:lp-3f2a.local:8080");
+        assert_eq!(
+            HostSpecifier::parse("lan:10.0.0.7:80").unwrap().to_string(),
+            "lan:10.0.0.7"
+        );
+    }
+
+    #[test]
+    fn a_bad_lan_address_is_refused_in_words() {
+        for bad in [
+            "lan:",
+            "lan::80",
+            "lan:host:0",
+            "lan:host:http",
+            "lan://10.0.0.7",
+            "lan:fe80::1",
+        ] {
+            let error = HostSpecifier::parse(bad).unwrap_err().to_string();
+            assert!(error.contains("lan:"), "{bad}: {error}");
+        }
+    }
+
+    #[test]
+    fn the_invalid_specifier_error_lists_lan() {
+        let error = HostSpecifier::parse("bogus").unwrap_err().to_string();
+        assert!(error.contains("lan:"), "{error}");
     }
 
     #[test]

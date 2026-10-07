@@ -16,7 +16,8 @@
 //! - `browser-ble`: a LightPlayer board over browser Web Bluetooth (NUS),
 //!   control only
 //! - `host-websocket`: host-side websocket connection to an existing server
-//! - `browser-websocket`: browser-side websocket connection to an existing server
+//! - `browser-websocket`: browser-side websocket connection to a board on
+//!   the LAN (`ws://<board>/link`), a secure lp-link, control only
 //!
 //! The target segment is optional when the mechanism already carries the whole
 //! contract. Include it when management details are target-specific, such as
@@ -41,6 +42,10 @@ pub mod browser_serial_esp32;
 // eventually name different files.
 #[path = "browser_serial_esp32/browser_serial_esp32_options.rs"]
 pub mod browser_serial_esp32_options;
+/// A board on the LAN over a browser WebSocket: a secure lp-link, one frame
+/// per binary message, control only.
+#[cfg(all(feature = "browser-websocket", target_arch = "wasm32"))]
+pub mod browser_websocket;
 #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
 pub mod browser_worker;
 // Pure (browser-free) boot-wait policy for the browser-worker provider.
@@ -57,12 +62,16 @@ pub mod emulator_tab;
 #[path = "emulator_tab/emulator_tab_seams.rs"]
 pub mod emulator_tab_seams;
 pub mod fake;
+// The LAN provider's sans-IO half: its endpoint, its keys and the key walk.
+// Outside every gate so the policy is host-tested and the app implements
+// `LinkKeys` on every target.
 #[cfg(feature = "fake-device")]
 pub mod fake_device;
 #[cfg(feature = "host-process")]
 pub mod host_process;
 #[cfg(feature = "host-serial-esp32")]
 pub mod host_serial_esp32;
+pub mod network_link;
 
 pub use crate::registry::connector::LinkConnector;
 pub use crate::registry::descriptor::LinkProviderDescriptor;

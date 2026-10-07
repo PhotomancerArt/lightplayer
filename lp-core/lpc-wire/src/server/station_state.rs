@@ -3,6 +3,7 @@
 use alloc::string::String;
 use serde::{Deserialize, Serialize};
 
+use crate::server::connect_step::ConnectStep;
 use crate::server::station_failure::StationFailure;
 
 /// The station's state in [`crate::server::NetworkStatus`].
@@ -22,15 +23,19 @@ pub enum StationState {
     /// On, and not connected: nothing saved, or none of the saved networks
     /// in range.
     NotConnected,
-    /// Trying the saved network `ssid`.
-    Connecting { ssid: String },
-    /// Connected to `ssid`: the board's address and the signal strength.
+    /// Trying the saved network `ssid`, at `step`.
+    Connecting { ssid: String, step: ConnectStep },
+    /// Connected to `ssid`: the board's address, the signal strength and
+    /// the board's name on the LAN.
     Connected {
         ssid: String,
         /// Dotted IPv4 address.
         ip: String,
         /// Signal strength in dBm.
         rssi: i8,
+        /// The board's mDNS name, `lp-xxxx.local` (the same four hex as its
+        /// Bluetooth name `LP-xxxx`).
+        host: String,
     },
     /// The attempt at `ssid` failed, and why.
     Failed {
@@ -59,7 +64,7 @@ impl StationState {
     #[must_use]
     pub fn ssid(&self) -> Option<&str> {
         match self {
-            Self::Connecting { ssid }
+            Self::Connecting { ssid, .. }
             | Self::Connected { ssid, .. }
             | Self::Failed { ssid, .. } => Some(ssid),
             Self::Unsupported | Self::Off | Self::NotConnected => None,
@@ -81,16 +86,32 @@ mod tests {
             (
                 StationState::Connecting {
                     ssid: "lp-walk-net".to_string(),
+                    step: ConnectStep::Looking,
                 },
-                r#"{"connecting":{"ssid":"lp-walk-net"}}"#,
+                r#"{"connecting":{"ssid":"lp-walk-net","step":"looking"}}"#,
+            ),
+            (
+                StationState::Connecting {
+                    ssid: "lp-walk-net".to_string(),
+                    step: ConnectStep::CheckingPassword,
+                },
+                r#"{"connecting":{"ssid":"lp-walk-net","step":"checkingPassword"}}"#,
+            ),
+            (
+                StationState::Connecting {
+                    ssid: "lp-walk-net".to_string(),
+                    step: ConnectStep::GettingAddress,
+                },
+                r#"{"connecting":{"ssid":"lp-walk-net","step":"gettingAddress"}}"#,
             ),
             (
                 StationState::Connected {
                     ssid: "lp-walk-net".to_string(),
                     ip: "192.168.1.40".to_string(),
                     rssi: -61,
+                    host: "lp-8e30.local".to_string(),
                 },
-                r#"{"connected":{"ssid":"lp-walk-net","ip":"192.168.1.40","rssi":-61}}"#,
+                r#"{"connected":{"ssid":"lp-walk-net","ip":"192.168.1.40","rssi":-61,"host":"lp-8e30.local"}}"#,
             ),
             (
                 StationState::Failed {

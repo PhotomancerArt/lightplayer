@@ -1,5 +1,5 @@
 ---
-status: fixed
+status: fixed (the load gate is superseded: docs/adr/2026-10-07-project-loads-are-tried-and-recovered.md)
 found: 2026-08-29
 fixed: 2026-08-30
 area: lpa-server project load vs the D7 refusal contract (classic-first, all chips)
@@ -8,6 +8,19 @@ related:
   - 2026-08-26-project-read-assembly-oom-resets-classic.md
 ---
 # loadProject OOM-resets the device where reads refuse
+
+> **2026-10-07 — the gate half of this fix is gone.** The 64 KiB
+> `PROJECT_LOAD_MIN_HEADROOM_BYTES` gate refused every switch on a
+> Wi-Fi-joined C6 (a 73-LED choker's largest ask is 8 KB) and never caught
+> a project that loads and then runs out on its first frame. Loads are now
+> tried and recovered across the reset instead: a load is recorded in the
+> RTC recovery region until its project has run its first frames, a switch
+> that resets the board boots the previous project with a plain-words
+> notice, and a startup load that reset it is not tried again. The map2d
+> half (the exact-size reserve) stays, and the reserve is now fallible
+> (`Map2dError::TooBigForMemory`). See
+> `docs/adr/2026-10-07-project-loads-are-tried-and-recovered.md` and
+> `2026-10-06-a-wifi-joined-c6-refuses-every-project-switch.md`.
 
 **Shape** — classic bring-up bench (2026-08-29, dig2go, wire-evolution
 round-1 firmware + full small-dome tree on flash): `loadProject

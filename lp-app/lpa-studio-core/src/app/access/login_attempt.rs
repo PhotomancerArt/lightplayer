@@ -59,6 +59,10 @@ pub enum LoginAttemptOutcome {
     NothingMatched { challenge: Challenge },
     /// The link failed under the conversation.
     Failed(String),
+    /// A KEYED link (a board on the LAN, `keyed_login.rs`): no answer was
+    /// sent; keys for the board's offers went to the link, which moves onto
+    /// them. The next window's hello says what they granted.
+    Rekeyed,
 }
 
 /// Unlock `client`'s link with the keys this browser holds, else the
@@ -182,7 +186,9 @@ where
 }
 
 /// `LoginBegin`: the challenge, or how the conversation ends instead.
-async fn begin<Io: ClientIo>(client: &mut LpClient<Io>) -> Result<Challenge, LoginAttemptOutcome> {
+pub(crate) async fn begin<Io: ClientIo>(
+    client: &mut LpClient<Io>,
+) -> Result<Challenge, LoginAttemptOutcome> {
     match client.login_begin().await {
         Ok(outcome) => match outcome.value {
             LoginBegun::Challenge(challenge) => Ok(challenge),

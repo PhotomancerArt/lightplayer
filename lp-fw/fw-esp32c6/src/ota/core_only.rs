@@ -18,7 +18,8 @@
 //!
 //! **Radio links.** Core-only is the radio port's one reader while it runs
 //! (no engine, no link mux): it takes the port's `Opened`/`Closed` notices
-//! and each open link's events itself. Every radio link is untrusted; the
+//! and each open Bluetooth link's events itself; a LAN link (Wi-Fi) that
+//! opens is asked to close, as updates over the LAN are not served yet. Every radio link is untrusted; the
 //! session's own login (`L` over channel 3) is how one earns a tier, and
 //! the device's `open` setting counts as the access rule says (QY2). The
 //! links were opened in update mode (`RadioLinkMode::Update`, decided by
@@ -236,6 +237,17 @@ impl RadioLinks {
         while let Some(event) = self.port.try_event() {
             touched = true;
             match event {
+                // A LAN link (Wi-Fi) is not served here: updates over the
+                // LAN are their own change, and its secure handshake needs
+                // the server's keys, which core-only does not run.
+                RadioLinkEvent::Opened { link, slot }
+                    if slot >= fw_esp32_common::radio_link::RADIO_LINK_SLOTS =>
+                {
+                    log::info!("[OTA] core-only: LAN link {link} refused (slot {slot})");
+                    self.port
+                        .slot(slot)
+                        .request_close("core-only serves Bluetooth links only");
+                }
                 RadioLinkEvent::Opened { link, slot } => {
                     log::info!("[OTA] core-only: radio link {link} opened (slot {slot})");
                     self.open.push((link, slot));

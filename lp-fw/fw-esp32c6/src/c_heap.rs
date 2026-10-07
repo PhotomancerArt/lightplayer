@@ -92,6 +92,8 @@ unsafe fn c_alloc(size: usize) -> *mut u8 {
     if ptr.is_null() {
         return ptr;
     }
+    #[cfg(feature = "radio_dma_diag")]
+    crate::radio_dma_diag::record(ptr as usize, total);
     // SAFETY: the block is at least HEADER bytes and 4-aligned.
     unsafe {
         (ptr as *mut usize).write(total);
@@ -121,6 +123,8 @@ unsafe extern "C" fn free(ptr: *mut u8) {
     unsafe {
         let block = ptr.sub(HEADER);
         let total = (block as *const usize).read();
+        #[cfg(feature = "radio_dma_diag")]
+        crate::radio_dma_diag::forget(block as usize);
         if in_radio_region(block) {
             RADIO_LIVE.fetch_sub(total, Ordering::Relaxed);
         }

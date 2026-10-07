@@ -31,6 +31,9 @@ mod link_nonce;
 mod link_pump;
 
 pub use client::AsyncSerialClientTransport;
+// The LAN transport (`crate::transport_lan`) rides the same client half.
+#[cfg(feature = "lan")]
+pub(crate) use client::SerialInbound;
 #[cfg(feature = "serial")]
 pub use emulator::{BacktraceInfo, create_emulator_serial_transport_pair};
 #[cfg(feature = "serial")]

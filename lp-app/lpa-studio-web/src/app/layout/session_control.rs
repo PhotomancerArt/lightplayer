@@ -461,7 +461,7 @@ fn segments_rsx(
                 press(ControlSegment::Device);
             },
             span { class: kind_glyph_class(),
-                StudioIcon { name: kind_icon(), size: 12 }
+                StudioIcon { name: kind_icon(session.link), size: 12 }
             }
             span { class: dot_class(status) }
             // The md fold: below the 900px cut the glyph and the dot carry kind
@@ -616,7 +616,7 @@ pub fn SessionDevicePanel(
         section { class: "tw:grid tw:gap-0.5 tw:bg-card-muted tw:px-3 tw:py-2",
             div { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-2",
                 span { class: kind_glyph_class(),
-                    StudioIcon { name: kind_icon(), size: 13 }
+                    StudioIcon { name: kind_icon(session.link), size: 13 }
                 }
                 strong { class: "tw:min-w-0 tw:overflow-hidden tw:text-ellipsis tw:whitespace-nowrap tw:text-sm tw:text-strong-foreground",
                     "{session.name}"
@@ -787,11 +787,15 @@ fn save_receipt_line(next_version: Option<u64>) -> String {
     }
 }
 
-/// The session's kind glyph: the violet sim mark (the bound-family
-/// convention the sim card wears), or the USB mark for a board the editor
-/// is a lens on (round-2 M5).
-fn kind_icon() -> StudioIconName {
-    StudioIconName::Usb
+/// The session's kind glyph: how the board the editor is a lens on is
+/// reached — USB, Bluetooth or Wi‑Fi (round-2 M5; core's
+/// [`UiLinkKind`](lpa_studio_core::UiLinkKind)).
+fn kind_icon(link: lpa_studio_core::UiLinkKind) -> StudioIconName {
+    match link {
+        lpa_studio_core::UiLinkKind::Usb => StudioIconName::Usb,
+        lpa_studio_core::UiLinkKind::Bluetooth => StudioIconName::Bluetooth,
+        lpa_studio_core::UiLinkKind::Wifi => StudioIconName::Wifi,
+    }
 }
 
 /// The trigger's title for the device segment: this tab's ONE device,
@@ -1114,6 +1118,7 @@ mod tests {
             status: UiChromeSessionStatus::Run,
             stat_line: None,
             update: None,
+            link: lpa_studio_core::UiLinkKind::Usb,
         }
     }
 
@@ -1263,7 +1268,15 @@ mod tests {
             Some("XIAO ESP32-C6".to_string()),
             "a name that does NOT carry its board wears the suffix"
         );
-        assert_eq!(kind_icon(), StudioIconName::Usb);
+        assert_eq!(kind_icon(named.link), StudioIconName::Usb);
+        assert_eq!(
+            kind_icon(lpa_studio_core::UiLinkKind::Wifi),
+            StudioIconName::Wifi
+        );
+        assert_eq!(
+            kind_icon(lpa_studio_core::UiLinkKind::Bluetooth),
+            StudioIconName::Bluetooth
+        );
         assert!(device_title(&named).contains("XIAO ESP32-C6"));
     }
 

@@ -4,7 +4,7 @@ extern crate alloc;
 
 use crate::error::ServerError;
 use crate::project_manager::ProjectManager;
-use crate::server::{MemoryStatsFn, ReadHeadroomProbe, check_load_headroom};
+use crate::server::{MemoryStatsFn, ReadHeadroomProbe, project_name};
 use alloc::{format, rc::Rc, sync::Arc, vec::Vec};
 use core::cell::RefCell;
 use lpc_engine::{ButtonService, LpGraphics, RadioService};
@@ -115,14 +115,16 @@ pub fn handle_client_message(
             ServerMessagePayload::Hello(hello)
         }
         lpc_wire::ClientRequest::Filesystem(fs_request) => {
-            ServerMessagePayload::Filesystem(handle_fs_request(base_fs, fs_request)?)
+            match fs_read_refusal(&*base_fs, &fs_request, read_headroom_probe) {
+                Some(response) => ServerMessagePayload::Filesystem(response),
+                None => ServerMessagePayload::Filesystem(handle_fs_request(base_fs, fs_request)?),
+            }
         }
         lpc_wire::ClientRequest::LoadProject { path } => handle_load_project(
             project_manager,
             base_fs,
             output_provider,
             memory_stats,
-            read_headroom_probe,
             time_provider,
             button_service,
             radio_service,
@@ -293,6 +295,44 @@ fn handle_project_command(
 pub const WRITE_ONLY_FILE_REFUSED: &str =
     "write-only file: no link at any tier reads .lp/access.json or .lp/network.json";
 
+/// Bytes past a file's own size a read needs in one block: its `Vec`'s
+/// slack and the reply's other fields. The reply's base64 is written into the
+/// static frame buffer, not the heap.
+const FS_READ_SLACK_BYTES: u64 = 512;
+
+/// A file read the heap cannot hold, refused before the file is read: its
+/// `FsResponse::Read` with the reason ("board memory busy"), the read gate's
+/// posture — refusal, not reset. A whole-file read is one contiguous
+/// allocation of the file's size, and on a board with a project loaded and
+/// a radio link open that is often more than the largest free block (a
+/// 10,240 B read reset the silicon C6, PR B's desk walk). `None`: the read
+/// may go ahead (or it is not a read, or nothing probes the heap).
+fn fs_read_refusal(
+    fs: &dyn LpFs,
+    request: &FsRequest,
+    probe: Option<ReadHeadroomProbe>,
+) -> Option<FsResponse> {
+    let FsRequest::Read { path } = request else {
+        return None;
+    };
+    let largest = u64::from(probe.and_then(|probe| probe())?);
+    let size = fs.file_size(path.as_path()).ok()?;
+    let needs = size + FS_READ_SLACK_BYTES;
+    if largest >= needs {
+        return None;
+    }
+    let error = format!(
+        "read refused: board memory busy (largest block {largest} B; a {size} B file needs \
+         {needs} B); retry shortly"
+    );
+    log::warn!("fs gate: {} — {error}", path.as_str());
+    Some(FsResponse::Read {
+        path: path.clone(),
+        data: None,
+        error: Some(error),
+    })
+}
+
 /// Handle a filesystem request
 ///
 /// The fs path gate lives here, beneath the tier check and on EVERY link:
@@ -398,7 +438,6 @@ fn handle_load_project(
     base_fs: &mut dyn LpFs,
     output_provider: &Rc<RefCell<dyn OutputProvider>>,
     memory_stats: Option<&MemoryStatsFn>,
-    read_headroom_probe: Option<ReadHeadroomProbe>,
     time_provider: Option<Rc<dyn TimeProvider>>,
     button_service: Option<Rc<dyn ButtonService>>,
     radio_service: Option<Rc<dyn RadioService>>,
@@ -418,21 +457,83 @@ fn handle_load_project(
         project_manager.unload_all_projects()?;
         log_memory(memory_stats, "load_project unload existing after");
     }
-    // Gated AFTER the unload on purpose: the probe must read the heap the
-    // load would actually run in, and refusing before freeing the outgoing
-    // project would reject loads that fit.
-    check_load_headroom(read_headroom_probe)?;
+    // No headroom gate: the board tries the load, and a load that runs it
+    // out of memory resets it with the load recorded in the recovery region,
+    // so the next boot runs the previous project again (the startup choice
+    // only moves after a load is done) and says why (ADR
+    // `2026-10-07-project-loads-are-tried-and-recovered`). The previous
+    // project is what this unload, or a
+    // StopAllProjects just before it (an upload), stopped.
+    lp_recovery::begin_project_load(project_name(path), project_manager.stopped_name(), false);
     log_memory(memory_stats, "load_project before");
-    let handle = project_manager.load_project(
+    let loaded = project_manager.load_project(
         path,
         base_fs,
         output_provider.clone(),
         memory_stats.copied(),
-        time_provider,
-        button_service,
-        radio_service,
-        graphics,
-    )?;
+        time_provider.clone(),
+        button_service.clone(),
+        radio_service.clone(),
+        graphics.clone(),
+    );
+    let handle = match loaded {
+        Ok(handle) => {
+            project_manager.forget_stopped();
+            // Done once its first frames ran: until then the recovery record
+            // stands, and the startup choice is not moved (a project that
+            // loads but cannot run its first frame would otherwise come back
+            // on every boot).
+            project_manager.await_load_commit(handle, true);
+            handle
+        }
+        Err(error) => {
+            lp_recovery::end_project_load();
+            // Never leave the board dark: a failed load (one that said so
+            // without a reset: a missing or malformed project, a mapping too
+            // big for the heap) runs what was running before (this
+            // unload's, or a StopAllProjects just before it, as an upload
+            // sends) — it ran in this heap moments ago. The G1 desk walk
+            // found a refused switch left the LEDs dark until a reboot.
+            let mut restored = Vec::new();
+            if project_manager.list_loaded_projects().is_empty() {
+                if let Some(stopped) = project_manager.take_stopped() {
+                    match project_manager.load_project(
+                        stopped.as_path(),
+                        base_fs,
+                        output_provider.clone(),
+                        memory_stats.copied(),
+                        time_provider.clone(),
+                        button_service.clone(),
+                        radio_service.clone(),
+                        graphics.clone(),
+                    ) {
+                        Ok(_) => restored.push(stopped),
+                        Err(restore_error) => log::warn!(
+                            "load_project: could not restore {}: {restore_error}",
+                            stopped.as_str()
+                        ),
+                    }
+                }
+            }
+            if restored.is_empty() {
+                return Err(error);
+            }
+            let names: Vec<&str> = restored.iter().map(|path| path.as_str()).collect();
+            log::warn!(
+                "load_project: {} refused; {} running again",
+                path.as_str(),
+                names.join(", ")
+            );
+            let words = match error {
+                ServerError::Core(words) => words,
+                other => format!("{other}"),
+            };
+            return Err(ServerError::Core(format!(
+                "{words} — the previous project ({}) is running again",
+                names.join(", ")
+            )));
+        }
+    };
     // The clamp and the display-layout budget are device/link state: every
     // engine wears them, including one born from a wire-load. Skipping this
     // left wire-loaded projects on the fail-safe SERIAL budget, so an
@@ -448,7 +549,6 @@ fn handle_load_project(
     }
     backtrace::set_oom_context("server handler: load project memory log");
     log_memory(memory_stats, "load_project after");
-    persist_startup_project(base_fs, path);
     backtrace::set_oom_context("server handler: load project response");
     let response = ServerMessagePayload::LoadProject { handle };
     backtrace::clear_oom_context();
@@ -456,21 +556,18 @@ fn handle_load_project(
 }
 
 /// Remember the loaded project as the boot default: a device that
-/// power-cycles resumes the last project it was told to show. Best-effort —
-/// a config write failure must never fail the load itself.
-fn persist_startup_project(fs: &dyn LpFs, path: &LpPath) {
+/// power-cycles resumes the last project it was told to show. Called once
+/// the load is done (it survived its first frames,
+/// `ProjectManager::frame_survived`). Best-effort — a config write failure
+/// must never fail the load itself.
+pub(crate) fn persist_startup_project(fs: &dyn LpFs, path: &LpPath) {
     use alloc::string::ToString;
     use lpc_model::server::server_config::ServerConfig;
 
-    let Some(name) = path
-        .as_str()
-        .trim_end_matches('/')
-        .rsplit('/')
-        .next()
-        .filter(|name| !name.is_empty())
-    else {
+    let name = project_name(path);
+    if name.is_empty() {
         return;
-    };
+    }
 
     let mut config = fs
         .read_file(ServerConfig::PATH.as_path())
@@ -646,6 +743,37 @@ mod tests {
                 other => panic!("{path}: {other:?}"),
             }
         }
+    }
+
+    /// A file read the heap cannot hold in one block is refused with the
+    /// read gate's words before the file is read; one that fits is not.
+    #[test]
+    fn a_read_bigger_than_the_largest_block_is_refused_not_attempted() {
+        use lpc_model::{AsLpPath, AsLpPathBuf};
+        let fs = lpfs::LpFsMemory::new();
+        fs.write_file("/data.bin".as_path(), &[7u8; 10_240])
+            .unwrap();
+        let read = FsRequest::Read {
+            path: "/data.bin".as_path_buf(),
+        };
+        let tight: ReadHeadroomProbe = || Some(10_000);
+        match fs_read_refusal(&fs, &read, Some(tight)) {
+            Some(FsResponse::Read { data, error, .. }) => {
+                assert_eq!(data, None);
+                assert!(
+                    error
+                        .unwrap()
+                        .starts_with("read refused: board memory busy")
+                );
+            }
+            other => panic!("{other:?}"),
+        }
+        let roomy: ReadHeadroomProbe = || Some(40_000);
+        assert!(fs_read_refusal(&fs, &read, Some(roomy)).is_none());
+        assert!(
+            fs_read_refusal(&fs, &read, None).is_none(),
+            "no probe, no gate"
+        );
     }
 
     /// Writes and deletes pass the fs gate (the tier check decides them),

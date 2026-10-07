@@ -43,6 +43,7 @@ use lpa_link::providers::fake_device::{
 
 use lpfs::AsLpPath;
 
+use crate::app::devices::device_layout_view::{DOWNLOAD_BACKUP, RESTORE_FILES, RESTORE_FROM_FILE};
 use crate::app::library::{
     CatalogOp, CatalogOutcome, LibraryHost, LibraryHostError, LibraryStore, LocalBoxFuture,
     MemoryLibraryHost, OpenedProject,
@@ -75,6 +76,8 @@ mod agent_device_journey_tests;
 pub(crate) mod agent_device_seat;
 /// A Bluetooth link that drops under the editor and comes back.
 mod ble_drop_tests;
+/// A LAN link that closes and redials.
+mod lan_drop_tests;
 /// Wi‑Fi settings over the bench's USB link (Wi‑Fi roadmap M5).
 mod wifi_device_tests;
 
@@ -8965,6 +8968,170 @@ fn a_pull_mid_filesystem_write_offers_the_backup_and_restore_puts_it_back() {
             .all(|entry| entry.status == crate::BackupStatus::Completed),
         "{index:?}"
     );
+}
+
+/// Defect 2026-10-06 (loose-c6): a board carried to the new layout by
+/// `lp-cli hardware lpfs migrate`, its files mounted and its project loaded,
+/// but never named (no `/.lp/device.json`). The card told it "This board
+/// needs its files back" and drew no Update. With no evidence of a loss —
+/// nothing formatted, no backup pending for it in this browser — it is the
+/// ordinary card: no files line, no restore verb, and its Update.
+#[test]
+fn an_unnamed_board_with_its_files_gets_the_ordinary_card_and_its_update() {
+    let device = unnamed_light_player(lpc_wire::FsBootState::Mounted);
+    let (mut bench, tasks) = identified(&device, "usb-layout-unnamed");
+    let target = bench.view().devices[0].id;
+
+    bench.wait_for_verb(&tasks, target, "update-firmware");
+    assert_eq!(heard_fs(&bench), Some(lpa_devices::wire::BoardFs::Mounted));
+    assert!(
+        bench
+            .controller
+            .device_roster_view()
+            .layout
+            .get(&target)
+            .is_none(),
+        "nothing said about its files"
+    );
+    for verb in [RESTORE_FROM_FILE, RESTORE_FILES, DOWNLOAD_BACKUP] {
+        assert!(
+            !card_offers(&bench, target, verb),
+            "`{verb}` is not offered on a board that has its files"
+        );
+    }
+}
+
+/// A board whose filesystem was just formatted DOES need its files back —
+/// and still gets its Update beside the restore: an update (over the air,
+/// or a flash that keeps `lpfs`) never touches the board's files, so the
+/// files state never withholds it (defect 2026-10-06).
+#[test]
+fn a_board_that_formatted_offers_its_restore_and_its_update() {
+    let device = unnamed_light_player(lpc_wire::FsBootState::Formatted);
+    let (mut bench, tasks) = identified(&device, "usb-layout-formatted");
+    let target = bench.view().devices[0].id;
+
+    bench.wait_for_verb(&tasks, target, "update-firmware");
+    let layout = bench.controller.device_roster_view().layout[&target].clone();
+    assert_eq!(
+        layout.line.as_deref(),
+        Some("This board needs its files back — restore them from a backup file.")
+    );
+    assert!(layout.restore_from_file.is_some(), "the way back");
+    assert!(card_offers(&bench, target, RESTORE_FROM_FILE));
+    assert!(
+        card_offers(&bench, target, "update-firmware"),
+        "and its Update"
+    );
+}
+
+/// The migration walk's W7b, end to end: the cable is pulled mid
+/// filesystem write (the board boots formatted), and the board reboots
+/// before the user comes back — that boot mounts the empty filesystem and
+/// names no identity. The backup still pending in this browser is the
+/// evidence: the card keeps offering it back, and its Update beside it.
+#[test]
+fn a_reboot_after_a_pull_mid_filesystem_write_still_offers_the_backup_and_update() {
+    let device = legacy_light_player(Vec::new());
+    let before = device.fake_board_files().0;
+    let (mut bench, tasks) = identified(&device, "usb-layout-w7b");
+    let target = bench.view().devices[0].id;
+
+    update(&mut bench, target);
+    let panel = layout_panel(&mut bench, &tasks, target);
+    device.interrupt_next_plan_after(4);
+    press(&mut bench, &panel.continue_action.unwrap());
+    settle(&mut bench, &tasks);
+    assert_eq!(
+        device.fake_board_files().1,
+        Some(lpc_wire::FsBootState::Formatted)
+    );
+
+    // The later boot: the empty filesystem mounts, naming no one.
+    device.fake_power_cycle();
+    assert_eq!(
+        device.fake_board_files().1,
+        Some(lpc_wire::FsBootState::Mounted)
+    );
+    bench.run_until(&tasks, "the rebooted board's hello", |bench| {
+        heard_fs(bench) == Some(lpa_devices::wire::BoardFs::Mounted)
+            && bench
+                .view()
+                .devices
+                .first()
+                .is_some_and(|card| card.activity.is_none() && card.state_label == "Ready")
+    });
+    bench.run_until(&tasks, "the card to offer the backup", |bench| {
+        bench
+            .controller
+            .device_roster_view()
+            .layout
+            .get(&target)
+            .is_some_and(|layout| layout.restore.is_some())
+    });
+    let layout = bench.controller.device_roster_view().layout[&target].clone();
+    assert!(
+        layout
+            .line
+            .as_deref()
+            .is_some_and(|line| line.contains("in a backup in this browser")),
+        "{:?}",
+        layout.line
+    );
+    assert!(
+        card_offers(&bench, target, "update-firmware"),
+        "and its Update"
+    );
+
+    // The way back still works from here.
+    press(&mut bench, &layout.restore.unwrap());
+    let panel = layout_panel(&mut bench, &tasks, target);
+    assert_eq!(panel.title, "Put this board's files back");
+    press(&mut bench, &panel.continue_action.unwrap());
+    settle(&mut bench, &tasks);
+    assert!(bench.view().devices[0].last_outcome.clone().unwrap().ok);
+    let (after, fs) = device.fake_board_files();
+    assert_eq!(fs, Some(lpc_wire::FsBootState::Mounted));
+    assert_eq!(sorted(after), sorted(before), "every file, byte for byte");
+}
+
+/// A board on the current layout that was never named: its files (a
+/// project, the board manifest Studio stamped, an access file), its base
+/// MAC, and no `/.lp/device.json` — booting with `fs`.
+fn unnamed_light_player(fs: lpc_wire::FsBootState) -> FakeEsp32Device {
+    let manifest = lpa_boards::runtime_manifest_json(&c6_board_choice().board_id)
+        .expect("a served board has a manifest");
+    FakeEsp32Device::new(FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new()
+            .with_base_mac("10:bd:a3:b0:8e:30")
+            .with_project_files(vec![(
+                "project.json".to_string(),
+                b"{\"name\":\"kept\"}".to_vec(),
+            )])
+            .with_root_files(vec![
+                ("/hardware.json".to_string(), manifest.as_bytes().to_vec()),
+                ("/.lp/access.json".to_string(), b"{\"version\":1}".to_vec()),
+            ])
+            .with_fs_boot_state(fs),
+    )))
+}
+
+/// The filesystem state of the last hello Studio heard from the (only)
+/// board.
+fn heard_fs(bench: &DeviceBench) -> Option<lpa_devices::wire::BoardFs> {
+    bench.controller.devices_for_test().roster().devices()[0]
+        .evidence
+        .classification
+        .hello()
+        .map(|hello| hello.fs)
+}
+
+/// Whether `device`'s card offers `verb` at `devices/<board>/<verb>`.
+fn card_offers(bench: &DeviceBench, device: crate::DeviceId, verb: &str) -> bool {
+    let offers = bench.controller.view().offers;
+    offers
+        .device_prefix(device)
+        .is_some_and(|prefix| offers.get(&prefix.clone().child(verb)).is_some())
 }
 
 /// G1 walk, 2026-10-03: the spare C6's device store was FULL (16 entries,

@@ -10,6 +10,7 @@ pub use lpa_client::{
 
 // CLI-specific modules
 pub mod board_bench;
+pub mod board_password;
 pub mod cli_connect;
 pub mod client_connect;
 pub mod esp32_probe;

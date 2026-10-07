@@ -527,6 +527,7 @@ mod tests {
             };
             let args = CaptureArgs {
                 target: "blepipe:0".into(),
+                board_password: Default::default(),
                 console: dir.path().join("console.txt"),
                 exit_on: None,
                 seconds: 60,

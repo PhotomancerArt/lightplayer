@@ -279,7 +279,7 @@ impl UiDeviceWifi {
             StationState::Connected {
                 ssid: on, ip, rssi, ..
             } if on == ssid => (row::connected(ip), WifiTone::Good, Some(*rssi), true),
-            StationState::Connecting { ssid: on } if on == ssid => {
+            StationState::Connecting { ssid: on, .. } if on == ssid => {
                 (row::CONNECTING.to_string(), WifiTone::Plain, heard, false)
             }
             _ if self.refused(status, network) => (
@@ -378,6 +378,7 @@ mod tests {
                 ssid: "Starlink Truck".to_string(),
                 ip: "192.168.1.17".to_string(),
                 rssi: -41,
+                host: "lp-8e30.local".to_string(),
             },
             vec![
                 saved("Starlink Home", None),

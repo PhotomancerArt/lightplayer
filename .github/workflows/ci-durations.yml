@@ -1,0 +1,37 @@
+# Weekly check: are any of pre-merge.yml's jobs crowding their
+# timeout-minutes budget? scripts/ci/job-durations.py does the measuring;
+# this workflow just runs it on a schedule and goes red when something is
+# `over` or `tight` (exit code 2), the same way a wedge used to go
+# unnoticed until it hit its budget and got cancelled with every test
+# passing (emu-c6 2026-09-08, heap-budget-chips 2026-10-06). See
+# docs/debt/ci-runner-time-over-the-concurrency-cap.md.
+#
+# Deliberately its own workflow, not a pre-merge job: it runs on a
+# schedule, never on `pull_request`, and reads pre-merge.yml's history
+# rather than gating it — `check-red-main-needs.py` only looks at
+# pre-merge.yml, so this file needs no `needs:` entry there.
+name: CI durations
+
+on:
+  schedule:
+    # Monday 14:00 UTC.
+    - cron: "0 14 * * 1"
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  job-durations:
+    name: Pre-merge job durations
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Measure pre-merge.yml's job durations
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/ci/job-durations.py --runs 300

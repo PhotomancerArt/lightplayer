@@ -522,6 +522,7 @@ impl FakeDeviceCore {
         let base_mac = lp.base_mac.clone();
         let packs = lp.packs;
         let board_manifest = self.script.board_manifest.clone();
+        let wifi_station = self.script.wifi_station;
         let reboot_requests = Arc::clone(&self.reboot_requests);
         // The stamped uid the hello names: the scripted identity, or — for a
         // board rebuilt from a flash image — the one its own
@@ -577,6 +578,10 @@ impl FakeDeviceCore {
             let mut server =
                 create_memory_server_on_board(fs, hello_identity, board_manifest.as_deref());
             server.set_fs_boot_state(fs_boot_state);
+            if let Some(station) = wifi_station {
+                server.set_station_probe(Some(station.state));
+                server.set_scan_probe(Some(station.scan));
+            }
             if untrusted {
                 server.set_entropy_source(Some(fake_entropy));
             }

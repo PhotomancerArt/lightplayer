@@ -45,6 +45,40 @@ pub struct ProjectManager {
     /// in builds with the power-button runtime (see `LpServer::power`).
     #[cfg(feature = "node-power-button")]
     power_service: Option<Rc<dyn PowerService>>,
+    /// The path of what the last unload that stopped anything stopped
+    /// (the first project, if several), until a load succeeds: what a
+    /// refused or failed load restores, so a refusal never leaves the board
+    /// dark (`take_stopped`). Empty: nothing owed. Its buffer is reserved at
+    /// construction and only ever copied into: remembering must not allocate
+    /// while a project is live, or the record lands above the project and
+    /// splits the space the project frees (the 2026-09-24 class: it cost the
+    /// emulated C6 its 64 KiB load block).
+    stopped: String,
+    /// A load that has not yet survived its first frames: its recovery
+    /// record (`lp_recovery::begin_project_load`) stays set until it has, so
+    /// a project that loads and then runs the board out of memory on its
+    /// first frame (a dome's first compile) is recovered like one that ran
+    /// out mid-load. Plain data: nothing allocates while it waits.
+    load_commit: Option<LoadCommit>,
+}
+
+/// Bytes reserved for the stopped project's path (`ProjectManager::stopped`).
+const STOPPED_PATH_RESERVE: usize = 128;
+
+/// Frames a freshly loaded project must survive before its load counts as
+/// done. The first frame compiles the project's shaders and opens its
+/// outputs (the load's real peak); the rest are margin.
+pub const LOAD_COMMIT_FRAMES: u8 = 3;
+
+/// A load waiting out [`LOAD_COMMIT_FRAMES`] (see `ProjectManager::load_commit`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LoadCommit {
+    /// The project that loaded.
+    pub handle: ProjectHandle,
+    /// Whether it becomes the startup project once it is done (a client's
+    /// switch does; the boot's own startup load already is one).
+    pub persist_startup: bool,
+    frames_left: u8,
 }
 
 impl ProjectManager {
@@ -62,6 +96,38 @@ impl ProjectManager {
             latent_read_back: None,
             #[cfg(feature = "node-power-button")]
             power_service: None,
+            stopped: String::with_capacity(STOPPED_PATH_RESERVE),
+            load_commit: None,
+        }
+    }
+
+    /// The load of `handle` succeeded; it is done once the project has
+    /// survived [`LOAD_COMMIT_FRAMES`] frames ([`Self::frame_survived`]).
+    pub fn await_load_commit(&mut self, handle: ProjectHandle, persist_startup: bool) {
+        self.load_commit = Some(LoadCommit {
+            handle,
+            persist_startup,
+            frames_left: LOAD_COMMIT_FRAMES,
+        });
+    }
+
+    /// One frame of the loaded projects ran (and returned). Answers the
+    /// commit when this frame finished the wait: the caller ends the
+    /// recovery record and, for a switch, makes it the startup project.
+    pub fn frame_survived(&mut self) -> Option<LoadCommit> {
+        let commit = self.load_commit.as_mut()?;
+        commit.frames_left = commit.frames_left.saturating_sub(1);
+        if commit.frames_left > 0 {
+            return None;
+        }
+        self.load_commit.take()
+    }
+
+    /// A load still waiting out its frames is over without a reset (its
+    /// project was unloaded): the recovery record is ended.
+    fn end_pending_commit(&mut self) {
+        if self.load_commit.take().is_some() {
+            lp_recovery::end_project_load();
         }
     }
 
@@ -225,6 +291,12 @@ impl ProjectManager {
             .projects
             .remove(&handle)
             .ok_or_else(|| ServerError::ProjectNotFound(format!("handle {}", handle.id())))?;
+        if self
+            .load_commit
+            .is_some_and(|commit| commit.handle == handle)
+        {
+            self.end_pending_commit();
+        }
 
         // The clean-shutdown flush (panel.md P11): an orderly unload is
         // the one moment we can beat the ~10 s throttle, so the last few
@@ -243,6 +315,16 @@ impl ProjectManager {
     /// Output channels and other resources are freed before removal.
     /// Note: next_handle_id is not reset - handles continue incrementing.
     pub fn unload_all_projects(&mut self) -> Result<(), ServerError> {
+        self.end_pending_commit();
+        if let Some(project) = self.projects.values().next() {
+            let path = project.path().as_str();
+            self.stopped.clear();
+            // A path longer than the reserve is not remembered (it would
+            // grow the buffer here, above the live project).
+            if path.len() <= self.stopped.capacity() {
+                self.stopped.push_str(path);
+            }
+        }
         for project in self.projects.values_mut() {
             project.flush_panel_state();
         }
@@ -250,6 +332,29 @@ impl ProjectManager {
         self.name_to_handle.clear();
         self.release_tables_if_empty();
         Ok(())
+    }
+
+    /// The project the last unload stopped, taken: what to run again when
+    /// the load that followed it was refused or failed. Built when it is
+    /// taken (no project is live then), and the reserve is kept.
+    pub fn take_stopped(&mut self) -> Option<LpPathBuf> {
+        if self.stopped.is_empty() {
+            return None;
+        }
+        let path = LpPathBuf::from(self.stopped.as_str());
+        self.stopped.clear();
+        Some(path)
+    }
+
+    /// The name (directory) of what the last unload stopped, or "" when
+    /// nothing is owed a restore: the "previous project" a load records.
+    pub fn stopped_name(&self) -> &str {
+        crate::server::project_name(lpfs::lp_path::LpPath::new(self.stopped.as_str()))
+    }
+
+    /// A load succeeded: nothing stopped is owed a restore any more.
+    pub fn forget_stopped(&mut self) {
+        self.stopped.clear();
     }
 
     /// With no project loaded, give the tables' memory back instead of
@@ -345,12 +450,17 @@ impl ProjectManager {
     /// Returns project names that exist on disk but may not be loaded.
     /// Requires a filesystem to query.
     pub fn list_available_projects(&self, fs: &dyn LpFs) -> Result<Vec<String>, ServerError> {
-        // List entries in the base directory
-        let entries = fs
-            .list_dir(self.projects_base_dir.as_path(), false)
-            .map_err(|e| {
-                ServerError::Filesystem(format!("Failed to read projects directory: {e}"))
-            })?;
+        // List entries in the base directory. The base is relative
+        // (`projects`), and a device's flash filesystem takes absolute paths
+        // only: it answered `Invalid path: Path must be absolute: projects`
+        // (G1 desk walk). The memory filesystem the host tests use is lenient.
+        let dir = LpPathBuf::from(format!(
+            "/{}",
+            self.projects_base_dir.as_str().trim_start_matches('/')
+        ));
+        let entries = fs.list_dir(dir.as_path(), false).map_err(|e| {
+            ServerError::Filesystem(format!("Failed to read projects directory: {e}"))
+        })?;
 
         let mut projects = Vec::new();
         for entry in entries {

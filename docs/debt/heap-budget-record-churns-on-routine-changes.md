@@ -175,6 +175,12 @@ long-lived branch conflict on this file whenever main re-baselined too.
   record was re-baselined (the three `bless-chips esp32c6` steps run one at a
   time; ≈10 min). The same bless caught `hello.proto` 30 → 31, which the
   proto bump earlier on the branch had moved without re-recording.
+- 2026-10-06 — Wi-Fi link on the C6 (PR #989, P03–P06): a real move, not
+  churn — the `lp-net` thread's 8 KB stack, embassy-net's resources and the
+  station took the C6's boot heap from 90,024 to 104,064 B used and its
+  largest block from 132,233 to 118,152 B (nothing saved, never joins);
+  wire 38 moved `hello.proto` and the S3/classic stack figures. Taken from
+  CI's patch (`just apply-ci-figures 989`), no local bless.
 
 - 2026-10-06 — **a merge took the record twice in one PR** (OTA update
   protocol Part B): the C6 record conflicted with #880's re-bless of the same
@@ -184,6 +190,43 @@ long-lived branch conflict on this file whenever main re-baselined too.
   a first boot that hashes the engine and the core (~1.9 s emulated) reached
   its first heartbeat past it, which the gate reported as "no first
   heartbeat", not as a timing change (window now 8.5 s, with the reason).
+
+- 2026-10-06 — **a merge's "take theirs" dropped a branch's own figures**
+  (Wi-Fi PR B, #989): merging main after #986, the C6 record conflicted and
+  main's was taken, which was main's 90,208 B used without PR B's station.
+  The next full run (the memory-gate push) then reported "usedBytes grew
+  102,820 > 90,208", which reads as the new change costing 12.6 KB when it
+  had saved 1.2 KB against PR B's own 104,064. The memory-gate change also
+  moved the S3's and the classic's stack by 40-48 B (the exact probe) and the
+  C6 emulator's `hello.proto` (wire 39, missed at the bump). Taken from CI's
+  patch (`just apply-ci-figures 989`). Workaround: after taking main's record
+  in a merge, re-bless or apply CI's patch in the merge's own push, before
+  another change lands on top of it.
+
+- 2026-10-06 — **CI's own C6 figure patch measures a dirty build** (Wi-Fi
+  PR B, #989, run 37512040622): the ratchet failed at 102,948 B used, the
+  `Figure moves` step re-baselined and re-ran, and the re-run read 102,980 B
+  and failed again as `not-a-figure-move`. Writing the record dirties the
+  tree, so the re-run's firmware is rebuilt with the app version
+  `<sha>-dirty-<HHMMSS>PT` (`tools/lp-app-version`) instead of `<sha>`, and the
+  longer string costs 32 B of heap. The patch CI offers for the C6 is
+  therefore always 32 B above a clean build (that is why PR B's earlier
+  applied patch, 102,852, read "improved 102,820" on the next clean run), and
+  it can never pass its own re-check. The short sha's length also differs by
+  machine (a local clone printed 9 characters against CI's figure 8 B lower).
+  Workaround: re-baseline the C6 locally on a committed, clean tree
+  (`just heap-budget-baseline-chips esp32c6`) rather than taking CI's C6
+  patch. Paydown: pin `APP_VERSION` (as the deploy workflows already do) for
+  the ratchet's builds, or rebuild the re-check from the pre-write tree.
+
+- 2026-10-07 — **the C6's `largestFreeBlock` differs between machines on
+  one image** (Wi-Fi PR B, #989, run 37555989018). CI read 119,432 B. This
+  Mac read 119,456 B on CI's own fetched image (`just fetch-ci-images`, so
+  no build difference), and 119,440 B on a local build. `usedBytes` and
+  `freeBytes` matched. The local clean re-baseline therefore failed CI by
+  8 B. Workaround: record CI's (lower) figure, which passes on both. The
+  ratchet's 0 % margin on a placement figure turns a host-side difference
+  in the emulated run into a red check.
 
 **Exit criteria** — a PR whose only memory effect is a few bytes of statics
 passes the gate without touching the record, and two PRs that each

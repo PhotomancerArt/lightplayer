@@ -103,6 +103,8 @@ pub struct UiChromeSessionControl {
     /// update is on offer, running or needed, and the version stat line
     /// (`<chip> · X → Y · <mac>`). `None` = no update story to tell.
     pub update: Option<crate::UiSessionUpdate>,
+    /// How the board is reached right now: the header's glyph.
+    pub link: crate::UiLinkKind,
 }
 
 #[derive(Clone, Debug, PartialEq)]

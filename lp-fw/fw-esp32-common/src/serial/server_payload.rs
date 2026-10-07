@@ -92,6 +92,128 @@ pub fn decode_client_payload(
     }
 }
 
+/// The heap's free bytes and largest free block, as the chip measures them
+/// (`set_request_headroom_probe`); `None` until a chip installs one.
+pub type RequestHeadroomProbe = fn() -> Option<(usize, usize)>;
+
+static REQUEST_HEADROOM: core::sync::atomic::AtomicPtr<()> =
+    core::sync::atomic::AtomicPtr::new(core::ptr::null_mut());
+
+/// Install the chip's heap probe for [`request_refusal`]. Once at boot.
+pub fn set_request_headroom_probe(probe: RequestHeadroomProbe) {
+    REQUEST_HEADROOM.store(probe as *mut (), core::sync::atomic::Ordering::Release);
+}
+
+fn request_headroom() -> Option<(usize, usize)> {
+    let ptr = REQUEST_HEADROOM.load(core::sync::atomic::Ordering::Acquire);
+    if ptr.is_null() {
+        return None;
+    }
+    // SAFETY: the only non-null value ever stored is a `RequestHeadroomProbe`
+    // cast to a pointer (`set_request_headroom_probe`).
+    let probe: RequestHeadroomProbe = unsafe { core::mem::transmute(ptr) };
+    probe()
+}
+
+/// A request shorter than this is decoded without asking the heap.
+const REQUEST_CHECKED_FROM_BYTES: usize = 2 * 1024;
+
+/// Free bytes a large request must leave for the work that follows its
+/// decode (the server's handling, the reply).
+const REQUEST_FREE_MARGIN_BYTES: usize = 16 * 1024;
+
+/// A request the heap cannot decode, refused before decoding: the error
+/// reply to send for it (a small JSON message, ready for the link's send
+/// ring) and the reason for the log. Decoding a request allocates the
+/// decoded blob in one block (base64 is 3/4 of its text), and that, not the
+/// reassembly, is where a 10 KB write reset the silicon C6 with three links
+/// open (PR B's desk walk: `alloc 10242 bytes failed`). The read gate's
+/// posture: refusal ("board memory busy"), never a reset. `None`: decode it
+/// (short, or the heap has room, or nothing probes the heap).
+pub fn request_refusal(data: &[u8]) -> Option<(alloc::vec::Vec<u8>, alloc::string::String)> {
+    if data.len() < REQUEST_CHECKED_FROM_BYTES {
+        return None;
+    }
+    refusal_given(data, request_headroom()?)
+}
+
+/// [`request_refusal`] against measured `(free, largest)` figures.
+fn refusal_given(
+    data: &[u8],
+    (free, largest): (usize, usize),
+) -> Option<(alloc::vec::Vec<u8>, alloc::string::String)> {
+    if data.len() < REQUEST_CHECKED_FROM_BYTES {
+        return None;
+    }
+    let block = data.len() * 3 / 4 + 1024;
+    let total = data.len() + REQUEST_FREE_MARGIN_BYTES;
+    if largest >= block && free >= total {
+        return None;
+    }
+    let id = request_id(data)?;
+    let reason = alloc::format!(
+        "request refused: board memory busy (free {free} B, largest block {largest} B; a {} B \
+         request needs {total} B free and a {block} B block); retry shortly or send it in \
+         smaller pieces",
+        data.len()
+    );
+    let reply = alloc::format!(r#"{{"id":{id},"msg":{{"error":{{"error":"{reason}"}}}}}}"#);
+    Some((reply.into_bytes(), reason))
+}
+
+/// The id of a JSON client message, read off its start
+/// (`{"id":<n>,…`, the field order every host's serializer writes) without
+/// decoding the rest.
+fn request_id(data: &[u8]) -> Option<u64> {
+    let text = core::str::from_utf8(&data[..data.len().min(64)]).ok()?;
+    let rest = text.trim_start().strip_prefix('{')?.trim_start();
+    let rest = rest
+        .strip_prefix(r#""id""#)?
+        .trim_start()
+        .strip_prefix(':')?
+        .trim_start();
+    let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
+    rest[..digits].parse().ok()
+}
+
+#[cfg(test)]
+mod request_gate_tests {
+    use super::*;
+
+    /// A large request the heap cannot decode is refused with its own id
+    /// and the read gate's words; one the heap can is not, and a short one
+    /// is never measured.
+    #[test]
+    fn a_request_the_heap_cannot_decode_is_refused_in_words() {
+        let mut big =
+            alloc::string::String::from(r#"{"id":4242,"msg":{"filesystem":{"write":{"data":""#);
+        big.push_str(&"QUFB".repeat(3_000));
+        big.push_str(r#""}}}}"#);
+        let (reply, reason) = refusal_given(big.as_bytes(), (60_000, 9_000)).expect("refused");
+        assert!(
+            reason.starts_with("request refused: board memory busy"),
+            "{reason}"
+        );
+        let reply: lpc_wire::WireServerMessage =
+            lpc_wire::json::from_slice(&reply).expect("the reply is a server message");
+        assert_eq!(reply.id, 4242);
+        assert!(matches!(
+            reply.msg,
+            lpc_wire::server::ServerMsgBody::Error { .. }
+        ));
+        assert!(
+            refusal_given(br#"{"id":1,"msg":"hello"}"#, (0, 0)).is_none(),
+            "short: not measured"
+        );
+        assert!(refusal_given(big.as_bytes(), (90_000, 40_000)).is_none());
+        assert!(
+            request_refusal(big.as_bytes()).is_none(),
+            "no probe: no gate"
+        );
+        assert_eq!(request_id(br#" { "id" : 7 , "msg":"#), Some(7));
+    }
+}
+
 /// A packed link's message went as JSON: say so once per boot, then at
 /// debug, so a message class that never packs cannot flood the log.
 fn note_sent_as_json(msg: &lpc_wire::WireServerMessage) {

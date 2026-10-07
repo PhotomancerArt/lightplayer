@@ -1,5 +1,6 @@
 //! The link mux: one [`ServerTransport`] over the USB cable and up to
-//! [`RADIO_LINK_SLOTS`] radio links.
+//! [`LINK_SLOTS`] radio links — Bluetooth's, and with feature `wifi` the
+//! LAN's.
 //!
 //! - **USB** is the primary transport it wraps ([`LinkId::PRIMARY`],
 //!   trusted), unchanged: everything addressed to the primary link goes
@@ -28,10 +29,14 @@
 //!    instead, and holds nothing. The core's update hook (rule 5) writes the
 //!    buffer too, for a read-back chunk, and only while no link holds it.
 //! 2. **A slow radio link cannot stall the device for long.** The wait for a
-//!    radio link to let go of the frame buffer is bounded
-//!    ([`RADIO_WRITE_DEADLINE_MS`]); past it the link is closed with a
-//!    logged reason (its link dropped at once, so it reads the buffer no
-//!    more) and the server loop moves on.
+//!    radio link to let go of the frame buffer is bounded — by its own
+//!    deadline ([`RADIO_WRITE_DEADLINE_MS`] on Bluetooth,
+//!    [`LAN_WRITE_DEADLINE_MS`] on the LAN) and by what is left of the
+//!    tick's own budget ([`TICK_WAIT_LIMIT_MS`], measured from the last
+//!    upkeep, so a tick that already compiled a shader cannot then wait out
+//!    a whole deadline and trip the watchdog); past it the link is closed
+//!    with a logged reason (its link dropped at once, so it reads the
+//!    buffer no more) and the server loop moves on.
 //! 3. **A radio link's hello waits for its lp-link session.** The radio side
 //!    announces a link when the central enables notifications (it could
 //!    receive nothing before); its lp-link handshake runs after that, as
@@ -59,7 +64,20 @@
 //!    The mux holds no copy of that rule. A closed link is passed on so the
 //!    session forgets it, its queued messages dropped; a session `Reset`
 //!    drops the ended session's. With no hook (a monolithic image, DM25)
-//!    channel 3 is ignored.
+//!    channel 3 is ignored. Only a Bluetooth link's channel 3 goes to the
+//!    hook: a LAN link's is ignored until updates over Wi-Fi are their own
+//!    change.
+//!
+//! **LAN links** (feature `wifi`) ride the same slots and the same rules,
+//! with four differences: they are secure lp-link responders, so they are
+//! [`LinkTrust::Keyed`] and their handshake asks the server for keys
+//! ([`ServerTransport::take_secure_events`] /
+//! [`ServerTransport::answer_key_lookup`]; the key that verifies decides the
+//! link's tier at `Up`); a keyed session that resets after coming up closes
+//! the link (a new session is a new server link, with a new grant, so the
+//! client reconnects); they are served from another thread, under the
+//! port's lock (see `radio_link_port`); and their channel 3 is not served
+//! (rule 5).
 //!
 //! A radio send that fails does **not** return an error to the server. The
 //! server's `tick_and_send` stops answering the whole batch on the first
@@ -78,17 +96,23 @@ use lp_link::{CH_PROTO, CH_UPDATE, LinkEvent, LinkState, Micros, ResetReason, Se
 use lpa_server::LpServer;
 use lpc_access::{OpenTo, Tier};
 use lpc_shared::transport::{Incoming, Link, LinkId, ServerTransport};
+#[cfg(feature = "wifi")]
+use lpc_shared::transport::{KeyAnswer, LinkTrust, SecureLinkEvent};
 use lpc_wire::server::ServerMsgBody;
 use lpc_wire::{LinkCounterTally, TransportError, WireServerMessage};
 
 use super::frame_buf_holder::FrameBufHolder;
 use super::radio_link_config::SMALL_REPLY_BYTES;
-use super::radio_link_port::{RADIO_LINK_SLOTS, RadioLinkEvent, RadioLinkPort, RadioLinkSlot};
+use super::radio_link_port::{
+    LINK_SLOTS, RADIO_LINK_SLOTS, RadioLinkEvent, RadioLinkPort, RadioLinkSlot,
+};
 use super::radio_update_channel::{RadioUpdate, RadioUpdateHook};
 use crate::link_upkeep::LinkUpkeep;
 use crate::serial::packed_link::PackedLink;
 use crate::serial::server_msg::frame_bytes;
-use crate::serial::server_payload::{decode_client_payload, serialize_server_payload};
+use crate::serial::server_payload::{
+    decode_client_payload, request_refusal, serialize_server_payload,
+};
 
 /// How long a radio link has to finish taking a long reply out of the frame
 /// buffer once someone else needs the buffer, before it is closed.
@@ -98,18 +122,58 @@ use crate::serial::server_payload::{decode_client_payload, serialize_server_payl
 /// worst honest reply needs ~3.3 s; the bound is set above that, not at it.
 pub const RADIO_WRITE_DEADLINE_MS: u32 = 5_000;
 
+/// The same bound for a LAN link. A LAN peer drains a whole 16 KiB reply in
+/// milliseconds, so one that has not let go of the buffer in a second has
+/// stopped reading (a backgrounded tab, a stalled Wi-Fi), and every second
+/// of waiting is a second the board does not render.
+pub const LAN_WRITE_DEADLINE_MS: u32 = 1_000;
+
+/// The most one server tick may spend waiting for radio links to let go of
+/// the frame buffer, counted from the tick's start (the last upkeep) and
+/// including whatever the tick did first — a project load, a shader
+/// compile. Below the 8 s watchdog with room for the rest of the tick: a
+/// load followed by a stalled peer's 5 s wait reset the emulated C6 in a
+/// loop (PR C's walk, 12 watchdog resets).
+pub const TICK_WAIT_LIMIT_MS: u32 = 5_000;
+
 /// How long an untrusted radio link may stay open without logging in (PQ6).
 pub const LOGIN_DEADLINE_MS: u64 = 10_000;
+
+/// Client messages the inbox holds without growing: two per link, a
+/// request and the next one queued behind it. The server takes one per
+/// tick, so more is a burst, and the inbox grows for it as it always has.
+const INBOX_RESERVE: usize = 2 * LINK_SLOTS;
+
+/// A LAN link's opt-in answer is always `json`: its replies are never
+/// packed. A learned table is 6.9 KB per link, held for the link's life,
+/// and a LAN link has the bandwidth packing exists to save (a Wi-Fi link
+/// moves a JSON project read in a few frames). Hosts take a `json` answer
+/// as any board's decline and keep reading JSON.
+#[cfg(feature = "wifi")]
+fn stay_json(answer: &mut ServerMsgBody) {
+    if let ServerMsgBody::SetEncoding { encoding } = answer {
+        *encoding = lpc_wire::WireEncoding::Json;
+    }
+}
 
 /// One open radio link, as the mux tracks it.
 struct RadioLink {
     id: LinkId,
     slot: usize,
+    /// The link as the server sees it: untrusted (Bluetooth) or keyed (LAN).
+    wire: Link,
+    /// A keyed link's handshake asked for this key id; the server's answer
+    /// goes back to it.
+    #[cfg(feature = "wifi")]
+    pending_key: Option<lp_link::secure_channel::KeyId>,
     /// Server-loop time the link was first seen by the upkeep, which starts
     /// its login deadline.
     opened_at_ms: Option<u64>,
-    /// It held a tier once; the deadline no longer applies.
+    /// It held a tier once; the login deadline no longer applies.
     cleared: bool,
+    /// Its lp-link session has come `Up` at least once. A link that never
+    /// does is closed at the login deadline whatever tier it would hold.
+    ever_up: bool,
     /// The lp-link session the mux last saw come `Up`, whose hello has gone
     /// out (or is owed): replies are coded for it and for no other.
     session: Option<u32>,
@@ -146,10 +210,17 @@ pub struct LinkMuxTransport<U, D> {
     inbox: VecDeque<Incoming>,
     /// Closed links the server has not been told about yet.
     closed: Vec<LinkId>,
+    /// Keyed links' handshake events the server has not taken yet.
+    #[cfg(feature = "wifi")]
+    secure: Vec<(LinkId, SecureLinkEvent)>,
     upkeep_hook: Option<fn(&LpServer, u64)>,
+    /// Until when the current server tick may wait on radio links: the last
+    /// upkeep (the end of the previous tick) plus [`TICK_WAIT_LIMIT_MS`].
+    tick_wait_until: Micros,
     /// The core's channel-3 hook (rule 5); `None`: channel 3 is ignored.
     update_hook: Option<RadioUpdateHook>,
-    /// Channel-3 messages taken off the radio links, waiting for the upkeep.
+    /// Channel-3 messages taken off the Bluetooth links, waiting for the
+    /// upkeep.
     updates: VecDeque<(LinkId, Vec<u8>)>,
     /// Closed links the update hook has not been told about yet.
     updates_closed: Vec<LinkId>,
@@ -159,18 +230,27 @@ impl<U: ServerTransport + FrameBufHolder, D: DelayNs> LinkMuxTransport<U, D> {
     /// Wrap `primary` (the USB transport) and serve the radio links that
     /// `port` announces. `delay` bounds a radio link's hold on the frame
     /// buffer.
+    ///
+    /// Every list the mux keeps per link is reserved here, at its most
+    /// links ([`LINK_SLOTS`]), so none of them grows when a link opens: a
+    /// growth then would land above whatever the link allocated and outlive
+    /// it, splitting the hole the link leaves when it closes
+    /// (`docs/defects/2026-10-06-a-lan-link-strands-the-heap-below-the-load-floor.md`).
     pub fn new(primary: U, port: &'static RadioLinkPort, delay: D) -> Self {
         Self {
             primary,
             port,
             delay,
-            radio: Vec::new(),
-            inbox: VecDeque::new(),
-            closed: Vec::new(),
+            radio: Vec::with_capacity(LINK_SLOTS),
+            inbox: VecDeque::with_capacity(INBOX_RESERVE),
+            closed: Vec::with_capacity(LINK_SLOTS),
+            #[cfg(feature = "wifi")]
+            secure: Vec::with_capacity(LINK_SLOTS),
             upkeep_hook: None,
+            tick_wait_until: tick_wait_until(),
             update_hook: None,
-            updates: VecDeque::new(),
-            updates_closed: Vec::new(),
+            updates: VecDeque::with_capacity(LINK_SLOTS),
+            updates_closed: Vec::with_capacity(LINK_SLOTS),
         }
     }
 
@@ -242,12 +322,24 @@ impl<U: ServerTransport + FrameBufHolder, D: DelayNs> LinkMuxTransport<U, D> {
         login_pending: impl Fn(Link) -> bool,
     ) {
         let mut expired = Vec::new();
+        let mut never_up = Vec::new();
         for link in &mut self.radio {
+            let opened_at = *link.opened_at_ms.get_or_insert(now_ms);
+            let late = now_ms.saturating_sub(opened_at) >= LOGIN_DEADLINE_MS;
+            // A link whose session never came up holds a slot and speaks
+            // nothing: on an open board it "holds a tier" from its first
+            // frame, so the login deadline never applied, and with one LAN
+            // slot a peer that opened a socket and went quiet (a page torn
+            // down mid-reload) kept the next client out (PR C's walk:
+            // `frames in 0 out 534 · handshakes 0`).
+            if !link.ever_up && late {
+                never_up.push(link.id);
+                continue;
+            }
             if link.cleared {
                 continue;
             }
-            let opened_at = *link.opened_at_ms.get_or_insert(now_ms);
-            let wire_link = RadioLinkPort::link(link.id);
+            let wire_link = link.wire;
             if has_tier(wire_link) {
                 link.cleared = true;
             } else if now_ms.saturating_sub(opened_at) >= LOGIN_DEADLINE_MS
@@ -262,6 +354,13 @@ impl<U: ServerTransport + FrameBufHolder, D: DelayNs> LinkMuxTransport<U, D> {
                 LOGIN_DEADLINE_MS / 1000
             );
             self.close_radio(id, "no login within the deadline");
+        }
+        for id in never_up {
+            log::warn!(
+                "radio link {id}: its session never came up in {} s — closing",
+                LOGIN_DEADLINE_MS / 1000
+            );
+            self.close_radio(id, "no session within the deadline");
         }
     }
 
@@ -279,11 +378,11 @@ impl<U: ServerTransport + FrameBufHolder, D: DelayNs> LinkMuxTransport<U, D> {
         while let Some(event) = self.port.try_event() {
             match event {
                 RadioLinkEvent::Opened { link, slot } => {
-                    if slot >= RADIO_LINK_SLOTS || self.radio.iter().any(|l| l.slot == slot) {
+                    if slot >= LINK_SLOTS || self.radio.iter().any(|l| l.slot == slot) {
                         // Cannot happen with a well-behaved radio side; if it
                         // does, refuse the newcomer rather than cross wires.
                         log::error!("radio link {link}: slot {slot} unusable — closing");
-                        if slot < RADIO_LINK_SLOTS {
+                        if slot < LINK_SLOTS {
                             self.port.slot(slot).request_close("slot already in use");
                         }
                         continue;
@@ -292,8 +391,12 @@ impl<U: ServerTransport + FrameBufHolder, D: DelayNs> LinkMuxTransport<U, D> {
                     self.radio.push(RadioLink {
                         id: link,
                         slot,
+                        wire: self.port.link_on(slot, link),
+                        #[cfg(feature = "wifi")]
+                        pending_key: None,
                         opened_at_ms: None,
                         cleared: false,
+                        ever_up: false,
                         session: None,
                         hello_owed: false,
                         packed: PackedLink::new(),
@@ -320,14 +423,31 @@ impl<U: ServerTransport + FrameBufHolder, D: DelayNs> LinkMuxTransport<U, D> {
     fn pump_radio(&mut self) {
         let port = self.port;
         let now = now_us();
+        #[cfg(feature = "wifi")]
+        let mut reset_keyed: Vec<LinkId> = Vec::new();
         for radio in &mut self.radio {
             let slot = port.slot(radio.slot);
+            #[cfg(feature = "wifi")]
+            if radio.wire.trust == LinkTrust::Keyed {
+                take_secure_events(slot, radio, &mut self.secure);
+            }
             while !radio.hello_owed {
                 let Some(Some(event)) = slot.with_link(radio.id, |link| link.recv()) else {
                     break;
                 };
                 match event {
                     LinkEvent::Message { channel, data } if channel == CH_PROTO => {
+                        // A request the heap cannot decode is refused in
+                        // words, never decoded into a reset.
+                        if let Some((reply, reason)) = request_refusal(&data) {
+                            drop(data);
+                            log::warn!("radio link {}: {reason}", radio.id);
+                            slot.with_link(radio.id, |link| {
+                                let _ = link.send(CH_PROTO, &reply);
+                            });
+                            slot.ring();
+                            continue;
+                        }
                         let decoded = decode_client_payload(&data);
                         match decoded {
                             Ok(msg) => {
@@ -336,8 +456,7 @@ impl<U: ServerTransport + FrameBufHolder, D: DelayNs> LinkMuxTransport<U, D> {
                                 // them would pin their hole).
                                 drop(data);
                                 log::debug!("radio link {}: received id={}", radio.id, msg.id);
-                                self.inbox
-                                    .push_back(Incoming::on(RadioLinkPort::link(radio.id), msg));
+                                self.inbox.push_back(Incoming::on(radio.wire, msg));
                             }
                             Err(error) => {
                                 radio.tally.note_payload_error();
@@ -353,10 +472,14 @@ impl<U: ServerTransport + FrameBufHolder, D: DelayNs> LinkMuxTransport<U, D> {
                         }
                     }
                     LinkEvent::Message { channel, data }
-                        if channel == CH_UPDATE && self.update_hook.is_some() =>
+                        if channel == CH_UPDATE
+                            && self.update_hook.is_some()
+                            && radio.slot < RADIO_LINK_SLOTS =>
                     {
                         // For the core, with the link's tier, from the
-                        // upkeep (rule 5).
+                        // upkeep (rule 5). Bluetooth links only: a LAN
+                        // link's channel 3 is not served yet, and falls to
+                        // the arm below like any other channel.
                         self.updates.push_back((radio.id, data));
                     }
                     LinkEvent::Message { channel, data } => {
@@ -372,12 +495,31 @@ impl<U: ServerTransport + FrameBufHolder, D: DelayNs> LinkMuxTransport<U, D> {
                         log::debug!("radio link {}: {} B of text ignored", radio.id, text.len());
                     }
                     LinkEvent::Up { generation } => {
+                        // A keyed link's grant before its hello: the key the
+                        // handshake verified decides its tier.
+                        #[cfg(feature = "wifi")]
+                        if radio.wire.trust == LinkTrust::Keyed
+                            && let Some(Some(auth)) = slot.with_link(radio.id, |l| l.session_auth())
+                        {
+                            self.secure.push((
+                                radio.id,
+                                SecureLinkEvent::Authenticated {
+                                    salt: auth.key_id.0,
+                                    candidate: auth.candidate,
+                                },
+                            ));
+                        }
                         radio.packed.back_to_json();
                         radio.session = Some(generation);
+                        radio.ever_up = true;
                         radio.hello_owed = true;
                         log::info!("radio link {}: session {generation} up", radio.id);
                     }
                     LinkEvent::Reset { reason, generation } => {
+                        #[cfg(feature = "wifi")]
+                        if radio.wire.trust == LinkTrust::Keyed && radio.session.is_some() {
+                            reset_keyed.push(radio.id);
+                        }
                         radio.packed.back_to_json();
                         radio.session = None;
                         radio.tally.note_reset(reason);
@@ -401,6 +543,13 @@ impl<U: ServerTransport + FrameBufHolder, D: DelayNs> LinkMuxTransport<U, D> {
                 radio.tally.note_stalled(stalled);
             }
         }
+        #[cfg(feature = "wifi")]
+        for id in reset_keyed {
+            log::info!(
+                "radio link {id}: keyed session reset — closing (a new session is a new link)"
+            );
+            self.close_radio(id, "secure session reset");
+        }
     }
 
     /// Drop `id` from the mux, drop its link (it stops reading the frame
@@ -419,32 +568,36 @@ impl<U: ServerTransport + FrameBufHolder, D: DelayNs> LinkMuxTransport<U, D> {
     }
 
     /// Wait until no radio link reads the frame buffer (rule 1): each one
-    /// with a long reply in flight gets [`RADIO_WRITE_DEADLINE_MS`] to finish
-    /// cutting it into frames, and is closed past that.
+    /// with a long reply in flight gets its deadline ([`write_deadline_ms`])
+    /// to finish cutting it into frames, cut short by what is left of the
+    /// tick's [`TICK_WAIT_LIMIT_MS`], and is closed past that.
     async fn release_radio_holders(&mut self) {
         let port = self.port;
-        for index in 0..RADIO_LINK_SLOTS {
+        for index in 0..LINK_SLOTS {
             let slot = port.slot(index);
             if !slot.external_in_flight() {
                 continue;
             }
-            let outcome = select(
-                wait_for_release(slot),
-                self.delay.delay_ms(RADIO_WRITE_DEADLINE_MS),
-            )
-            .await;
-            if let Either::Second(()) = outcome {
-                let Some((id, held)) = slot.with_any_link(|id, link| (id, link.buffered_bytes()))
-                else {
-                    continue;
-                };
-                log::error!(
-                    "radio link {id}: a reply still not out of the frame buffer after \
-                     {RADIO_WRITE_DEADLINE_MS} ms ({held} B held) — closing"
+            let left_ms = (self.tick_wait_until.saturating_sub(now_us()) / 1_000) as u32;
+            let wait_ms = write_deadline_ms(index).min(left_ms);
+            let released = wait_ms > 0
+                && matches!(
+                    select(wait_for_release(slot), self.delay.delay_ms(wait_ms)).await,
+                    Either::First(())
                 );
-                slot.drop_link(id);
-                self.close_radio(id, "reply deadline");
+            if released || !slot.external_in_flight() {
+                continue;
             }
+            let Some((id, held)) = slot.with_any_link(|id, link| (id, link.buffered_bytes()))
+            else {
+                continue;
+            };
+            log::error!(
+                "radio link {id}: a reply still not out of the frame buffer after {wait_ms} ms \
+                 ({held} B held; {left_ms} ms of the tick's wait budget left) — closing"
+            );
+            slot.drop_link(id);
+            self.close_radio(id, "reply deadline");
         }
     }
 
@@ -480,6 +633,10 @@ impl<U: ServerTransport + FrameBufHolder, D: DelayNs> LinkMuxTransport<U, D> {
         // An opt-in answer `packed` needs a table first; the answer itself is
         // always JSON (`table_for`), and the switch it announces applies to
         // every reply after it, until the session ends — as on USB.
+        #[cfg(feature = "wifi")]
+        if radio.slot >= RADIO_LINK_SLOTS {
+            stay_json(&mut msg.msg);
+        }
         radio.packed.prepare_answer(&mut msg.msg);
         let switch_to = match msg.msg {
             ServerMsgBody::SetEncoding { encoding } => Some(encoding),
@@ -566,6 +723,69 @@ fn queue_reply(
     }
 }
 
+/// Take a keyed link's handshake events into `out`: a key lookup for the
+/// server (its key id kept for the answer), or a wrong key to charge to the
+/// backoff. An initiator's events (`Refused`, `PeerNotSecure`) never reach a
+/// responder.
+#[cfg(feature = "wifi")]
+fn take_secure_events(
+    slot: &RadioLinkSlot,
+    radio: &mut RadioLink,
+    out: &mut Vec<(LinkId, SecureLinkEvent)>,
+) {
+    use lp_link::secure_channel::SecureEvent;
+    while let Some(Some(event)) = slot.with_link(radio.id, |l| l.poll_secure_event()) {
+        match event {
+            SecureEvent::KeyLookup { key_id } => {
+                radio.pending_key = Some(key_id);
+                out.push((radio.id, SecureLinkEvent::KeyLookup { salt: key_id.0 }));
+            }
+            SecureEvent::WrongKey { key_id } => {
+                out.push((radio.id, SecureLinkEvent::WrongKey { salt: key_id.0 }));
+            }
+            SecureEvent::Refused { .. } | SecureEvent::PeerNotSecure => {}
+        }
+    }
+}
+
+/// Hand the server's answer to a key lookup to the link: its candidate PSKs,
+/// or a refusal in the handshake's own words.
+#[cfg(feature = "wifi")]
+fn answer_lookup(
+    link: &mut lp_link::Link<lp_link::SelectiveRepeat>,
+    key_id: lp_link::secure_channel::KeyId,
+    answer: KeyAnswer,
+) {
+    use lp_link::secure_channel::{Psk, RefusalReason};
+    match answer {
+        KeyAnswer::Keys(psks) => {
+            let psks: Vec<Psk> = psks.into_iter().map(Psk::new).collect();
+            link.provide_keys(key_id, &psks);
+        }
+        KeyAnswer::Unknown => link.refuse(key_id, RefusalReason::UnknownKey, 0),
+        KeyAnswer::Backoff { retry_after_ms } => {
+            link.refuse(key_id, RefusalReason::Backoff, retry_after_ms);
+        }
+    }
+}
+
+/// The end of a tick's wait budget, for a tick starting now.
+fn tick_wait_until() -> Micros {
+    now_us() + u64::from(TICK_WAIT_LIMIT_MS) * 1_000
+}
+
+/// How long the link in slot `index` may hold the frame buffer: Bluetooth's
+/// air is slow ([`RADIO_WRITE_DEADLINE_MS`]), the LAN's is not
+/// ([`LAN_WRITE_DEADLINE_MS`]).
+fn write_deadline_ms(index: usize) -> u32 {
+    #[cfg(feature = "wifi")]
+    if index >= RADIO_LINK_SLOTS {
+        return LAN_WRITE_DEADLINE_MS;
+    }
+    let _ = index;
+    RADIO_WRITE_DEADLINE_MS
+}
+
 /// Resolves once `slot`'s link no longer reads the frame buffer, waking the
 /// radio side to keep cutting frames meanwhile.
 async fn wait_for_release(slot: &RadioLinkSlot) {
@@ -613,7 +833,7 @@ impl<U: ServerTransport + FrameBufHolder, D: DelayNs> ServerTransport for LinkMu
 
     fn links(&self) -> Vec<Link> {
         let mut links = self.primary.links();
-        links.extend(self.radio.iter().map(|l| RadioLinkPort::link(l.id)));
+        links.extend(self.radio.iter().map(|l| l.wire));
         links
     }
 
@@ -621,6 +841,31 @@ impl<U: ServerTransport + FrameBufHolder, D: DelayNs> ServerTransport for LinkMu
         let mut closed = self.primary.take_closed_links();
         closed.append(&mut self.closed);
         closed
+    }
+
+    #[cfg(feature = "wifi")]
+    fn take_secure_events(&mut self) -> Vec<(LinkId, SecureLinkEvent)> {
+        self.drain_events();
+        self.pump_radio();
+        // Drained, not taken: the list keeps its reserve (`new`).
+        if self.secure.is_empty() {
+            Vec::new()
+        } else {
+            self.secure.drain(..).collect()
+        }
+    }
+
+    #[cfg(feature = "wifi")]
+    fn answer_key_lookup(&mut self, link: LinkId, answer: KeyAnswer) {
+        let Some(radio) = self.radio.iter_mut().find(|l| l.id == link) else {
+            return;
+        };
+        let Some(key_id) = radio.pending_key.take() else {
+            return;
+        };
+        let slot = self.port.slot(radio.slot);
+        slot.with_link(link, |l| answer_lookup(l, key_id, answer));
+        slot.ring();
     }
 
     async fn close(&mut self) -> Result<(), TransportError> {
@@ -642,14 +887,26 @@ impl<U: ServerTransport + FrameBufHolder + LinkUpkeep, D: DelayNs> LinkUpkeep
         self.drain_events();
         self.pump_radio();
         for radio in &mut self.radio {
+            // A keyed link's hello waits for its grant: the server takes the
+            // handshake's `Authenticated` in its next tick, and a hello built
+            // before that would say the link holds nothing (found by the
+            // host LAN harness, P06).
+            #[cfg(feature = "wifi")]
+            if self.secure.iter().any(|(id, event)| {
+                *id == radio.id && matches!(event, SecureLinkEvent::Authenticated { .. })
+            }) {
+                continue;
+            }
             if core::mem::take(&mut radio.hello_owed) {
-                opened.push(RadioLinkPort::link(radio.id));
+                opened.push(radio.wire);
             }
         }
         opened
     }
 
     fn upkeep(&mut self, server: &LpServer, now_ms: u64) {
+        // The end of a tick: the next one's wait budget starts here.
+        self.tick_wait_until = tick_wait_until();
         self.primary.upkeep(server, now_ms);
         self.expire_unauthenticated(
             now_ms,
@@ -670,11 +927,12 @@ impl<U: ServerTransport + FrameBufHolder + LinkUpkeep, D: DelayNs> LinkUpkeep
 mod tests {
     use super::*;
     use alloc::boxed::Box;
+    use alloc::rc::Rc;
     use alloc::string::ToString;
     use alloc::vec;
     use lp_link::{LinkConfig, SelectiveRepeat};
     use lpc_shared::transport::LinkTrust;
-    #[cfg(feature = "json-pack")]
+    #[cfg(any(feature = "json-pack", feature = "wifi"))]
     use lpc_wire::WireEncoding;
 
     extern crate std;
@@ -804,6 +1062,57 @@ mod tests {
         assert_eq!(port.slot(1).take_close_request(), Some("reply deadline"));
         // Frames still addressed to it are skipped, not errors.
         assert!(block(mux.send(link, error_reply(33, 10))).is_ok());
+    }
+
+    /// A tick that has already spent its wait budget (a project load, a
+    /// compile) does not wait on a stalled link at all: the link is closed
+    /// at once and the tick goes on, so a load and a stalled peer can never
+    /// add up past the watchdog (PR C's walk: 12 resets).
+    #[test]
+    fn a_tick_past_its_wait_budget_closes_a_stalled_link_without_waiting() {
+        let _turn = frame_buf_turn();
+        let port = leak_port();
+        let usb = Usb {
+            port: Some(port),
+            ..Usb::default()
+        };
+        let waited = Rc::new(core::cell::Cell::new(0u64));
+        let mut mux = LinkMuxTransport::new(usb, port, CountingDelay(Rc::clone(&waited)));
+        let mut central = Central::new(0x3333_5555, 247);
+        let link = open_session(port, &mut mux, &mut central, 1, 247);
+        block(mux.send(link, error_reply(41, 9_000))).unwrap();
+        assert!(port.slot(1).external_in_flight());
+        // The tick began long enough ago that its budget is spent.
+        mux.tick_wait_until = now_us();
+        block(mux.send(LinkId::PRIMARY, error_reply(42, 10))).unwrap();
+        assert_eq!(waited.get(), 0, "no wait at all");
+        assert_eq!(mux.take_closed_links(), vec![link]);
+        assert_eq!(port.slot(1).take_close_request(), Some("reply deadline"));
+    }
+
+    /// A stalled peer's wait is its link's deadline, never more: a whole
+    /// Bluetooth deadline, a LAN link's second.
+    #[test]
+    fn a_stalled_links_wait_is_its_own_deadline() {
+        let _turn = frame_buf_turn();
+        let port = leak_port();
+        let usb = Usb {
+            port: Some(port),
+            ..Usb::default()
+        };
+        let waited = Rc::new(core::cell::Cell::new(0u64));
+        let mut mux = LinkMuxTransport::new(usb, port, CountingDelay(Rc::clone(&waited)));
+        let mut central = Central::new(0x3333_6666, 247);
+        let link = open_session(port, &mut mux, &mut central, 1, 247);
+        block(mux.send(link, error_reply(43, 9_000))).unwrap();
+        // A fresh tick with budget to spare: the link's deadline decides.
+        mux.tick_wait_until = now_us() + 10_000_000;
+        block(mux.send(LinkId::PRIMARY, error_reply(44, 10))).unwrap();
+        assert_eq!(waited.get(), u64::from(RADIO_WRITE_DEADLINE_MS) * 1_000_000);
+        assert_eq!(mux.take_closed_links(), vec![link]);
+        assert_eq!(write_deadline_ms(0), RADIO_WRITE_DEADLINE_MS);
+        #[cfg(feature = "wifi")]
+        assert_eq!(write_deadline_ms(RADIO_LINK_SLOTS), LAN_WRITE_DEADLINE_MS);
     }
 
     /// Packing exists only with `json-pack`; without it every reply is JSON.
@@ -1003,11 +1312,31 @@ mod tests {
         );
     }
 
+    /// A LAN link never packs: its opt-in is answered `json`, so no learned
+    /// table is allocated for it.
+    #[cfg(feature = "wifi")]
+    #[test]
+    fn a_lan_links_packed_opt_in_is_answered_json() {
+        let mut answer = ServerMsgBody::SetEncoding {
+            encoding: WireEncoding::Packed,
+        };
+        stay_json(&mut answer);
+        assert!(matches!(
+            answer,
+            ServerMsgBody::SetEncoding {
+                encoding: WireEncoding::Json
+            }
+        ));
+    }
+
     #[test]
     fn an_unauthenticated_link_is_closed_after_the_deadline() {
+        let _turn = frame_buf_turn();
         let port = leak_port();
         let mut mux = LinkMuxTransport::new(Usb::default(), port, NeverDelay);
-        let link = open_link(port, &mut mux, 0, 247);
+        // A login runs over a session that is up.
+        let mut central = Central::new(0x1357_2468, 247);
+        let link = open_session(port, &mut mux, &mut central, 0, 247);
         mux.expire_unauthenticated(1_000, |_| false, |_| false);
         mux.expire_unauthenticated(1_000 + LOGIN_DEADLINE_MS - 1, |_| false, |_| false);
         assert!(mux.take_closed_links().is_empty());
@@ -1025,20 +1354,47 @@ mod tests {
 
     #[test]
     fn a_link_that_logs_in_is_never_expired() {
+        let _turn = frame_buf_turn();
         let port = leak_port();
         let mut mux = LinkMuxTransport::new(Usb::default(), port, NeverDelay);
-        let _link = open_link(port, &mut mux, 0, 247);
+        let mut central = Central::new(0x2468_1357, 247);
+        let _link = open_session(port, &mut mux, &mut central, 0, 247);
         mux.expire_unauthenticated(0, |_| false, |_| false);
         mux.expire_unauthenticated(5_000, |_| true, |_| false);
         mux.expire_unauthenticated(60_000, |_| false, |_| false);
         assert!(mux.take_closed_links().is_empty());
     }
 
+    /// A link whose session never comes up is closed at the deadline even
+    /// on an open board, where it would hold a tier from the start: it
+    /// speaks nothing and only holds the slot.
     #[test]
-    fn an_outstanding_login_holds_the_deadline_until_it_ends() {
+    fn a_link_whose_session_never_comes_up_is_closed_even_on_an_open_board() {
         let port = leak_port();
         let mut mux = LinkMuxTransport::new(Usb::default(), port, NeverDelay);
         let link = open_link(port, &mut mux, 0, 247);
+        mux.expire_unauthenticated(0, |_| true, |_| false);
+        mux.expire_unauthenticated(LOGIN_DEADLINE_MS - 1, |_| true, |_| false);
+        assert!(
+            mux.take_closed_links().is_empty(),
+            "not before the deadline"
+        );
+        mux.expire_unauthenticated(LOGIN_DEADLINE_MS, |_| true, |_| false);
+        assert_eq!(mux.take_closed_links(), vec![link]);
+        assert_eq!(
+            port.slot(0).take_close_request(),
+            Some("no session within the deadline")
+        );
+    }
+
+    #[test]
+    fn an_outstanding_login_holds_the_deadline_until_it_ends() {
+        let _turn = frame_buf_turn();
+        let port = leak_port();
+        let mut mux = LinkMuxTransport::new(Usb::default(), port, NeverDelay);
+        // A login runs over a session that is up.
+        let mut central = Central::new(0x1357_2468, 247);
+        let link = open_session(port, &mut mux, &mut central, 0, 247);
         mux.expire_unauthenticated(1_000, |_| false, |_| false);
         // LoginBegin at 9 s; the person is still typing at 10 s and at 38 s.
         mux.expire_unauthenticated(1_000 + LOGIN_DEADLINE_MS, |_| false, |_| true);
@@ -1547,6 +1903,14 @@ mod tests {
     impl DelayNs for NeverDelay {
         async fn delay_ns(&mut self, _ns: u32) {
             core::future::pending::<()>().await;
+        }
+    }
+
+    /// A deadline that elapses at once, counting the nanoseconds asked for.
+    struct CountingDelay(Rc<core::cell::Cell<u64>>);
+    impl DelayNs for CountingDelay {
+        async fn delay_ns(&mut self, ns: u32) {
+            self.0.set(self.0.get() + u64::from(ns));
         }
     }
 

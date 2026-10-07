@@ -77,6 +77,17 @@ impl AccessState {
         self.entropy = source;
     }
 
+    /// Room for `links` links' sessions and key lookups, so neither list
+    /// grows when a link is first seen ([`LpServer::reserve_links`]).
+    ///
+    /// [`LpServer::reserve_links`]: crate::LpServer::reserve_links
+    pub fn reserve_links(&mut self, links: usize) {
+        self.sessions
+            .reserve(links.saturating_sub(self.sessions.len()));
+        self.key_lookups
+            .reserve(links.saturating_sub(self.key_lookups.len()));
+    }
+
     /// Advance the access clock by one frame's delta and let an unanswered
     /// challenge expire.
     pub fn advance_clock(&mut self, delta_ms: u32) {

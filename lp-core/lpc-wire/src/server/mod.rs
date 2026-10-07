@@ -1,6 +1,7 @@
 pub mod access_entry_info;
 pub mod api;
 pub mod config;
+pub mod connect_step;
 pub mod file_chunk;
 pub mod fs_api;
 pub mod fs_boot_state;
@@ -23,6 +24,7 @@ pub use api::{
     LoadedProject, MemoryStats, ProjectFaultWire, SampleStats, ServerMsgBody,
 };
 pub use config::ServerConfig;
+pub use connect_step::ConnectStep;
 pub use file_chunk::{FileChangeKind, FileChunk, FileCursor};
 pub use fs_api::{FsRequest, FsResponse};
 pub use fs_boot_state::FsBootState;
