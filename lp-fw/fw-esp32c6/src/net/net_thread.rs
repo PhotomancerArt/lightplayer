@@ -24,7 +24,9 @@
 //!   comes out of the main stack on this chip). A board that boots with a
 //!   network saved allocates the socket buffers in [`start`], on the boot
 //!   path, low in the heap ([`NetBuffers`]); one that saves its first
-//!   network later allocates them at its first address.
+//!   network later allocates them at its first address. The relay's leg
+//!   is the exception: its buffers exist only while it may dial
+//!   (`relay_task`).
 
 use alloc::boxed::Box;
 use alloc::string::String;
@@ -37,7 +39,6 @@ use fw_esp32_common::radio_link::{NETWORK_LINK_SLOTS, SharedPort};
 use super::esp_frame_device::C6FrameDevice;
 use super::lan_endpoint_task::{LanBuffers, RefuseBuffers};
 use super::mdns_task::MdnsBuffers;
-use super::relay_task::RelayBuffers;
 use lpc_relay::RelayClientConfig;
 
 /// The thread's stack, bytes.
@@ -50,23 +51,21 @@ pub const PRIORITY: u32 = 1;
 /// the M6 plan's two LAN links; one is spare now).
 pub const SOCKET_SLOTS: usize = 8;
 
-/// Every socket buffer the services on the stack keep, allocated at once.
+/// Every socket buffer the services on the stack keep for the board's
+/// life, allocated at once (the relay's are not among them: `relay_task`).
 pub struct NetBuffers {
     lan: [LanBuffers; NETWORK_LINK_SLOTS],
     refuse: RefuseBuffers,
     mdns: MdnsBuffers,
-    /// The relay's, when Cloud relay is on at boot.
-    relay: Option<RelayBuffers>,
 }
 
 impl NetBuffers {
-    /// Allocate them all now (the relay's with `relay`).
-    pub fn leak(relay: bool) -> Self {
+    /// Allocate them all now.
+    pub fn leak() -> Self {
         Self {
             lan: core::array::from_fn(|_| LanBuffers::leak()),
             refuse: RefuseBuffers::leak(),
             mdns: MdnsBuffers::leak(),
-            relay: relay.then(RelayBuffers::leak),
         }
     }
 }
@@ -91,8 +90,8 @@ unsafe impl Send for Args {}
 /// Start `lp-net` with the radio's controller and station interface. `host`
 /// is the board's LAN name; `seed` seeds the IP stack's port and sequence
 /// randomness. `will_join`: the board boots with Wi-Fi on and a network
-/// saved, so its socket buffers are allocated now — the relay's too when
-/// `cloud_relay` is on. `relay` is the relay client's configuration.
+/// saved, so its socket buffers are allocated now. `relay` is the relay
+/// client's configuration.
 pub fn start(
     controller: WifiController<'static>,
     station: Interface<'static>,
@@ -100,10 +99,9 @@ pub fn start(
     seed: u64,
     port: SharedPort,
     will_join: bool,
-    cloud_relay: bool,
     relay: RelayClientConfig,
 ) {
-    let buffers = will_join.then(|| NetBuffers::leak(cloud_relay));
+    let buffers = will_join.then(NetBuffers::leak);
     let args = Box::into_raw(Box::new(Args {
         controller,
         station,
@@ -177,14 +175,9 @@ fn spawn_services(
     buffers: Option<NetBuffers>,
     relay: RelayClientConfig,
 ) {
-    let (lan, refuse, mdns, relay_buffers) = match buffers {
-        Some(NetBuffers {
-            lan,
-            refuse,
-            mdns,
-            relay,
-        }) => (lan.map(Some), Some(refuse), Some(mdns), relay),
-        None => (core::array::from_fn(|_| None), None, None, None),
+    let (lan, refuse, mdns) = match buffers {
+        Some(NetBuffers { lan, refuse, mdns }) => (lan.map(Some), Some(refuse), Some(mdns)),
+        None => (core::array::from_fn(|_| None), None, None),
     };
     for (index, buffers) in lan.into_iter().enumerate() {
         spawner
@@ -194,7 +187,7 @@ fn spawn_services(
     let mac = base_mac();
     let label = fw_esp32_common::net::mdns::mdns_label(mac);
     spawner.spawn(super::mdns_task::mdns_task(stack, label, mac, mdns).unwrap());
-    spawner.spawn(super::relay_task::relay_task(stack, port, relay_buffers, relay).unwrap());
+    spawner.spawn(super::relay_task::relay_task(stack, port, relay).unwrap());
 }
 
 /// The lock the radio-link port takes around every borrow once the LAN's

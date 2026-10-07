@@ -249,6 +249,14 @@ impl RelayDriver {
         }
     }
 
+    /// Whether the board may dial now (joined, Cloud relay on, an account
+    /// entry held: RD8). While it is false the edge holds no device-leg
+    /// buffers ([`super::relay_leg::run_relay_leg`] returns `Idle`).
+    #[must_use]
+    pub fn may_dial(&self) -> bool {
+        self.client.may_dial()
+    }
+
     /// The relay's state, for status.
     #[must_use]
     pub fn state(&self) -> RelayState {
@@ -492,7 +500,9 @@ mod tests {
         driver.handle(0, RelayEvent::Accounts(vec![account()]));
         assert!(!driver.has_actions());
         assert_eq!(driver.state(), RelayState::WaitingForInternet, "not joined");
+        assert!(!driver.may_dial());
         driver.handle(0, RelayEvent::Network { joined: true });
+        assert!(driver.may_dial());
         assert_eq!(
             driver.take_actions(),
             [RelayDriverAction::Resolve {

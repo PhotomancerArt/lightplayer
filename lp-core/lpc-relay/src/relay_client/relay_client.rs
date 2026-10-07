@@ -207,6 +207,14 @@ impl RelayClient {
         &self.routes
     }
 
+    /// Whether the board may dial now: joined, Cloud relay on, and holding
+    /// an account entry (RD8). While it is false the client never asks for
+    /// a socket, so an edge may give the device leg's buffers back.
+    #[must_use]
+    pub fn may_dial(&self) -> bool {
+        self.precondition().is_none()
+    }
+
     /// The hub's verdict on each account of the last registration: bit `i`
     /// set when the hello's account `i` verified.
     #[must_use]

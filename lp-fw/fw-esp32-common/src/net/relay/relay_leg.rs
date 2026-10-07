@@ -22,8 +22,12 @@
 //!    verdict on a challenge, an input, or a deadline. A close from the hub
 //!    with 1001 is "going away" (a deploy).
 //!
-//! The buffers are the caller's, made once ([`RelayLegBuffers`]); nothing
-//! here allocates per connection beyond what the driver's frames do.
+//! The buffers are the caller's ([`RelayLegBuffers`]); nothing here
+//! allocates per connection beyond what the driver's frames do. The loop
+//! returns [`RelayLegExit::Idle`] once the board may no longer dial (Wi-Fi
+//! lost, Cloud relay off, no account entry: RD8) and no leg is open, so the
+//! caller can give the buffers back and wait in [`wait_until_may_dial`]
+//! holding none (Wi-Fi relay plan, round 2: the memory fix).
 
 use core::future::Future;
 
@@ -104,6 +108,23 @@ pub struct RelayLegBuffers<'a> {
     pub frame_tx: &'a mut [u8],
 }
 
+/// Why [`run_relay_leg`] returned.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RelayLegExit {
+    /// The board may not dial (RD8) and no leg is open: the buffers are
+    /// free to go until [`wait_until_may_dial`] says otherwise.
+    Idle,
+    /// The edge is stopping (the host harness; never on a board).
+    Stopped,
+}
+
+/// What the loop does next with no leg open.
+enum NoLeg {
+    Dial([u8; 4], u16),
+    Idle,
+    Stop,
+}
+
 /// How a connected leg ended.
 enum LegEnd {
     /// The driver closed it.
@@ -115,17 +136,20 @@ enum LegEnd {
 }
 
 /// Run the device leg for `driver`, its routes on network slot `index` of
-/// `port`, until the edge stops (never, on a board).
+/// `port`, until the board may no longer dial with no leg open
+/// ([`RelayLegExit::Idle`]) or the edge stops.
 pub async fn run_relay_leg<I: RelayLegIo>(
     driver: &mut RelayDriver,
     io: &I,
     port: &RadioLinkPort,
     index: usize,
     bufs: &mut RelayLegBuffers<'_>,
-) {
+) -> RelayLegExit {
     loop {
-        let Some((addr, tcp_port)) = wait_for_dial(driver, io, port).await else {
-            return;
+        let (addr, tcp_port) = match wait_for_dial(driver, io, port).await {
+            NoLeg::Dial(addr, tcp_port) => (addr, tcp_port),
+            NoLeg::Idle => return RelayLegExit::Idle,
+            NoLeg::Stop => return RelayLegExit::Stopped,
         };
         let host = host_header(&driver.config().host, tcp_port);
         let connected = bounded(io, async {
@@ -161,22 +185,54 @@ pub async fn run_relay_leg<I: RelayLegIo>(
             }
             LegEnd::Stop => {
                 ws.close(CloseCode::NORMAL).await;
-                return;
+                return RelayLegExit::Stopped;
             }
         }
     }
 }
 
+/// With the board unable to dial (RD8) and no buffers held: feed the
+/// driver its inputs and run what it announces until it may dial (`true`),
+/// or the edge stops (`false`). The driver's first dial action is left for
+/// [`run_relay_leg`].
+pub async fn wait_until_may_dial<I: RelayLegIo>(
+    driver: &mut RelayDriver,
+    io: &I,
+    port: &RadioLinkPort,
+) -> bool {
+    loop {
+        if io.stopping() {
+            return false;
+        }
+        if driver.may_dial() {
+            return true;
+        }
+        for action in driver.take_actions() {
+            // No leg: nothing to send or close, and nothing to resolve or
+            // connect until it may dial (checked above).
+            if let RelayDriverAction::Announce(event) = action {
+                port.announce(event).await;
+            }
+        }
+        io.publish(driver);
+        match select(io.next_input(), io.sleep_until(driver.next_wake_us())).await {
+            Either::First(input) => driver.handle(io.now_us(), input),
+            Either::Second(()) => driver.tick(io.now_us()),
+        }
+    }
+}
+
 /// With no leg open: run the driver's actions and wait on its inputs and
-/// deadlines until it asks to connect (`None`: the edge is stopping).
+/// deadlines until it asks to connect, the board may no longer dial, or the
+/// edge stops.
 async fn wait_for_dial<I: RelayLegIo>(
     driver: &mut RelayDriver,
     io: &I,
     port: &RadioLinkPort,
-) -> Option<([u8; 4], u16)> {
+) -> NoLeg {
     loop {
         if io.stopping() {
-            return None;
+            return NoLeg::Stop;
         }
         let mut dial = None;
         for action in driver.take_actions() {
@@ -191,11 +247,15 @@ async fn wait_for_dial<I: RelayLegIo>(
                 RelayDriverAction::Send(_) | RelayDriverAction::Close => {}
             }
         }
-        if dial.is_some() {
-            return dial;
+        if let Some((addr, port)) = dial {
+            return NoLeg::Dial(addr, port);
         }
         if driver.has_actions() {
             continue;
+        }
+        if !driver.may_dial() {
+            io.publish(driver);
+            return NoLeg::Idle;
         }
         io.publish(driver);
         match select(io.next_input(), io.sleep_until(driver.next_wake_us())).await {

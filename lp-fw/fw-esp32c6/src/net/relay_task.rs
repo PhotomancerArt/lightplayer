@@ -17,20 +17,22 @@
 //! - **Where.** `lightplayer.app:80`, always, on the product image; a desk
 //!   image built with `LP_RELAY_HOST=<host>[:port]` dials that instead and
 //!   says so at boot (RD14).
-//! - **Memory.** The leg's TCP and WebSocket buffers (6,921 B) are
-//!   allocated once: at boot with the LAN's when the board will join with
-//!   Cloud relay on (`net_thread::NetBuffers`; whether it holds an account
-//!   key or not, so they sit low in the heap), else the first time the
-//!   driver dials. A board with Cloud relay off at boot does not pay for
-//!   them until it is switched on and dials. On the emulated C6 with
-//!   `projects/test/basic` loaded and a network session open they take the
-//!   largest free block from 19,556 B to 13,448 B — under the read gate's
-//!   16,384 B (Wi-Fi relay plan P9's measurement; A3, R1).
+//! - **Memory.** The leg's TCP and WebSocket buffers ([`RelayBuffers`],
+//!   6,921 B) exist only while the board may dial — joined, Cloud relay on,
+//!   an account entry held (RD8) — and are given back when that stops being
+//!   true (Wi-Fi relay plan, round 2: Yona's 2026-10-07 ruling reversed
+//!   P8's boot-time allocation). A board with Cloud relay on but no account
+//!   key holds none, exactly like one with it off: P9 measured those 6,921 B
+//!   taking the largest free block from 19,556 B to 13,448 B on the
+//!   emulated C6 with `projects/test/basic` loaded and a network session
+//!   open, under the read gate's 16,384 B. They are allocated fallibly: a
+//!   heap that cannot give them waits and tries again rather than
+//!   resetting the board.
 
 use alloc::boxed::Box;
 use alloc::collections::VecDeque;
 use alloc::string::String;
-use alloc::vec;
+use alloc::vec::Vec;
 use core::cell::RefCell;
 
 use embassy_futures::select::{Either, select};
@@ -38,7 +40,9 @@ use embassy_net::dns::DnsQueryType;
 use embassy_net::tcp::TcpSocket;
 use embassy_net::{IpAddress, Ipv4Address, Stack};
 use embassy_time::{Duration, Instant, Timer};
-use fw_esp32_common::net::relay::{RelayDriver, RelayLegBuffers, RelayLegIo, run_relay_leg};
+use fw_esp32_common::net::relay::{
+    RelayDriver, RelayLegBuffers, RelayLegExit, RelayLegIo, run_relay_leg, wait_until_may_dial,
+};
 use fw_esp32_common::net::ws::RX_OVERHEAD;
 use fw_esp32_common::radio_link::lan_link_config::LAN_MAX_FRAME;
 use fw_esp32_common::radio_link::{RADIO_LINK_SLOTS, SharedPort};
@@ -58,6 +62,9 @@ const TCP_TX: usize = 2560;
 const WS_RX: usize = ROUTE_FRAME_OVERHEAD + LAN_MAX_FRAME + RX_OVERHEAD;
 /// One outgoing route frame.
 const FRAME_TX: usize = ROUTE_FRAME_OVERHEAD + LAN_MAX_FRAME;
+/// How long to wait before asking the heap again when it could not give
+/// the leg's buffers.
+const ALLOC_RETRY: Duration = Duration::from_secs(10);
 /// A leg that hears nothing for this long is gone. The hub pings every
 /// 25 s, and the driver closes a leg silent for 60 s itself first.
 const SOCKET_TIMEOUT: Duration = Duration::from_secs(75);
@@ -75,36 +82,43 @@ pub fn relay_host_overridden() -> bool {
     env!("LP_RELAY_HOST_OVERRIDDEN") == "true"
 }
 
-/// The leg's buffers, allocated once (on the heap directly).
-pub struct RelayBuffers {
-    tcp_rx: &'static mut [u8],
-    tcp_tx: &'static mut [u8],
-    ws_rx: &'static mut [u8],
-    frame_tx: &'static mut [u8],
+/// The leg's buffers, held only while the board may dial (on the heap
+/// directly; dropped to give them back).
+struct RelayBuffers {
+    tcp_rx: Box<[u8]>,
+    tcp_tx: Box<[u8]>,
+    ws_rx: Box<[u8]>,
+    frame_tx: Box<[u8]>,
 }
 
 impl RelayBuffers {
-    pub fn leak() -> Self {
-        let leak =
-            |len: usize| -> &'static mut [u8] { Box::leak(vec![0u8; len].into_boxed_slice()) };
-        Self {
-            tcp_rx: leak(TCP_RX),
-            tcp_tx: leak(TCP_TX),
-            ws_rx: leak(WS_RX),
-            frame_tx: leak(FRAME_TX),
-        }
+    /// Every buffer, or `None` when the heap cannot give one (what was
+    /// taken goes back).
+    fn try_new() -> Option<Self> {
+        Some(Self {
+            tcp_rx: try_zeroed(TCP_RX)?,
+            tcp_tx: try_zeroed(TCP_TX)?,
+            ws_rx: try_zeroed(WS_RX)?,
+            frame_tx: try_zeroed(FRAME_TX)?,
+        })
     }
+
+    const BYTES: usize = TCP_RX + TCP_TX + WS_RX + FRAME_TX;
+}
+
+/// `len` zeroed bytes on the heap, or `None` rather than an allocation
+/// failure (which resets the board).
+fn try_zeroed(len: usize) -> Option<Box<[u8]>> {
+    let mut bytes = Vec::new();
+    bytes.try_reserve_exact(len).ok()?;
+    bytes.resize(len, 0);
+    Some(bytes.into_boxed_slice())
 }
 
 /// The relay task: `config` is the board's fixed facts (MAC, name, wire
 /// version) and where the relay is.
 #[embassy_executor::task]
-pub async fn relay_task(
-    stack: Stack<'static>,
-    port: SharedPort,
-    buffers: Option<RelayBuffers>,
-    config: RelayClientConfig,
-) {
+pub async fn relay_task(stack: Stack<'static>, port: SharedPort, config: RelayClientConfig) {
     let index = RADIO_LINK_SLOTS;
     let io = C6RelayIo {
         stack,
@@ -113,31 +127,29 @@ pub async fn relay_task(
     };
     let mut driver = RelayDriver::new(config, fill_random, port.port(), index);
     io.prime(&mut driver);
-    let buffers = match buffers {
-        Some(buffers) => buffers,
-        None => {
-            // Nothing is spent until the driver first wants to dial.
-            while !driver.has_actions() {
-                RELAY_BOARD.publish(&driver);
-                let input = io.next_input().await;
-                driver.handle(io.now_us(), input);
-            }
-            RelayBuffers::leak()
+    loop {
+        // Nothing is held until the board may dial (RD8).
+        wait_until_may_dial(&mut driver, &io, &port).await;
+        let Some(mut buffers) = RelayBuffers::try_new() else {
+            log::warn!(
+                "[relay] no room for the leg's {} B of buffers; trying again",
+                RelayBuffers::BYTES
+            );
+            Timer::after(ALLOC_RETRY).await;
+            continue;
+        };
+        let mut bufs = RelayLegBuffers {
+            tcp_rx: &mut buffers.tcp_rx,
+            tcp_tx: &mut buffers.tcp_tx,
+            ws_rx: &mut buffers.ws_rx,
+            frame_tx: &mut buffers.frame_tx,
+        };
+        let exit = run_relay_leg(&mut driver, &io, &port, index, &mut bufs).await;
+        drop(buffers);
+        if exit == RelayLegExit::Stopped {
+            return;
         }
-    };
-    let RelayBuffers {
-        tcp_rx,
-        tcp_tx,
-        ws_rx,
-        frame_tx,
-    } = buffers;
-    let mut bufs = RelayLegBuffers {
-        tcp_rx,
-        tcp_tx,
-        ws_rx,
-        frame_tx,
-    };
-    run_relay_leg(&mut driver, &io, &port, index, &mut bufs).await;
+    }
 }
 
 /// The relay's platform on the C6.

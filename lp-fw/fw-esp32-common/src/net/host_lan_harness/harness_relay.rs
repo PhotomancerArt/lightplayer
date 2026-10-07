@@ -23,7 +23,10 @@ use lpc_relay::{ROUTE_FRAME_OVERHEAD, RelayAccount, RelayClientConfig, RelayEven
 use super::harness_block_on::{block_on, until_micros};
 use super::harness_entropy::harness_entropy;
 use super::std_tcp_byte_stream::StdTcpByteStream;
-use crate::net::relay::{RelayCounters, RelayDriver, RelayLegBuffers, RelayLegIo, run_relay_leg};
+use crate::net::relay::{
+    RelayCounters, RelayDriver, RelayLegBuffers, RelayLegExit, RelayLegIo, run_relay_leg,
+    wait_until_may_dial,
+};
 use crate::net::ws::RX_OVERHEAD;
 use crate::radio_link::lan_link_config::LAN_MAX_FRAME;
 use crate::radio_link::{RADIO_LINK_SLOTS, SharedPort, now_us};
@@ -99,7 +102,12 @@ pub(super) fn run_relay(
         ws_rx: &mut ws_rx,
         frame_tx: &mut frame_tx,
     };
-    block_on(run_relay_leg(&mut driver, &io, &port, index, &mut bufs));
+    // The C6's loop, without giving the buffers back (they are the host's).
+    while block_on(run_relay_leg(&mut driver, &io, &port, index, &mut bufs)) == RelayLegExit::Idle {
+        if !block_on(wait_until_may_dial(&mut driver, &io, &port)) {
+            return;
+        }
+    }
 }
 
 /// The relay leg's platform on the host: std sockets, the device clock, and

@@ -815,16 +815,7 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
                 mac,
                 lpa_server::device_identity::read_device_name(base_fs.as_ref()),
             );
-            net::net_thread::start(
-                controller,
-                station,
-                host,
-                seed,
-                lan_port,
-                will_join,
-                file.cloud_relay,
-                relay,
-            );
+            net::net_thread::start(controller, station, host, seed, lan_port, will_join, relay);
         }
     }
     #[cfg(all(

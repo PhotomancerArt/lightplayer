@@ -19,5 +19,8 @@ pub mod relay_route_link;
 pub use relay_board::{RelayBoard, wire_relay_state};
 pub use relay_driver::{CHALLENGE_WAIT_US, RelayCounters, RelayDriver};
 pub use relay_driver_action::RelayDriverAction;
-pub use relay_leg::{CONNECT_TIMEOUT_US, RelayLegBuffers, RelayLegIo, run_relay_leg};
+pub use relay_leg::{
+    CONNECT_TIMEOUT_US, RelayLegBuffers, RelayLegExit, RelayLegIo, run_relay_leg,
+    wait_until_may_dial,
+};
 pub use relay_route_link::{RelayRouteLink, RouteSlotState};
