@@ -690,13 +690,18 @@ fn the_tier_a_radio_links_update_session_gets_is_the_grant_alone() {
     for state in LinkState::ALL {
         let rig = Rig::for_state(state);
         let want = match state {
-            LinkState::UntrustedPlay | LinkState::KeyedPlay => Some(Tier::Play),
-            LinkState::UntrustedEdit | LinkState::KeyedEdit => Some(Tier::Edit),
+            LinkState::UntrustedPlay | LinkState::KeyedPlay | LinkState::RelayedPlay => {
+                Some(Tier::Play)
+            }
+            LinkState::UntrustedEdit | LinkState::KeyedEdit | LinkState::RelayedEdit => {
+                Some(Tier::Edit)
+            }
             LinkState::Trusted
             | LinkState::UntrustedNone
             | LinkState::UntrustedOpen
             | LinkState::KeyedAnonymousLocked
-            | LinkState::KeyedAnonymousOpen => None,
+            | LinkState::KeyedAnonymousOpen
+            | LinkState::RelayedAnonymousOpen => None,
         };
         assert_eq!(
             rig.server.link_granted_tier(state.link()),
@@ -710,14 +715,16 @@ fn the_tier_a_radio_links_update_session_gets_is_the_grant_alone() {
     assert_eq!(rig.server.link_granted_tier(BLE_A), None);
 }
 
-/// Every link state, under both answers to QY2: `Q` is always answered,
-/// `G` needs play and another core needs edit — exactly the tier this
-/// server holds for the link, though the session was handed only the grant
-/// (it adds `open` from the same access file).
+/// Every link state channel 3 can arrive on — the USB cable and a
+/// Bluetooth link; the mux hands no keyed (LAN) or relayed link's channel 3
+/// to the update session — under both answers to QY2: `Q` is always
+/// answered, `G` needs play and another core needs edit — exactly the tier
+/// this server holds for the link, though the session was handed only the
+/// grant (it adds `open` from the same access file).
 #[test]
 fn a_radio_links_channel_three_answers_by_the_tier_the_server_holds() {
     for follows in [true, false] {
-        for state in LinkState::ALL {
+        for state in LinkState::ALL.into_iter().filter(|s| s.carries_channel_three()) {
             let rig = Rig::for_state(state);
             let link = state.link();
             let mut board = UpdateBoard::new(&rig, follows, state == LinkState::Trusted);
@@ -1127,6 +1134,20 @@ enum LinkState {
 }
 
 impl LinkState {
+    /// Whether the board serves this link's channel 3 (the update
+    /// protocol): the USB cable and a Bluetooth link do; a keyed LAN link
+    /// and a relayed link do not (`LinkMuxTransport`, rule 5).
+    fn carries_channel_three(self) -> bool {
+        matches!(
+            self,
+            LinkState::Trusted
+                | LinkState::UntrustedNone
+                | LinkState::UntrustedOpen
+                | LinkState::UntrustedPlay
+                | LinkState::UntrustedEdit
+        )
+    }
+
     const ALL: [LinkState; 12] = [
         LinkState::Trusted,
         LinkState::UntrustedNone,
