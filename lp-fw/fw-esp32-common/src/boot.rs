@@ -26,12 +26,14 @@ pub fn auto_load_project(server: &mut LpServer) {
     // (`RecoveryStatus::load_notice`). A switch that reset the board is not
     // this case: the startup choice still names the project that ran
     // before it, and loading that is exactly the recovery.
-    if let Some(interrupted) = lp_recovery::snapshot()
-        .and_then(|snapshot| snapshot.interrupted_load)
-        .filter(|load| load.skip_startup_load())
+    if let Some(interrupted) =
+        lp_recovery::snapshot().and_then(|snapshot| snapshot.interrupted_load)
     {
-        log::warn!("Boot: not loading a project: {interrupted}");
-        return;
+        if interrupted.skip_startup_load() {
+            log::warn!("Boot: not loading a project: {interrupted}");
+            return;
+        }
+        log::warn!("Boot: the last run's load did not finish: {interrupted}");
     }
     let raw_base = server.project_manager().projects_base_dir();
     let base_dir = if raw_base.starts_with('/') {
