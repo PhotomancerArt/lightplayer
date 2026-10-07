@@ -460,9 +460,9 @@ fn handle_load_project(
     // No headroom gate: the board tries the load, and a load that runs it
     // out of memory resets it with the load recorded in the recovery region,
     // so the next boot runs the previous project again (the startup choice
-    // only moves after a load succeeds) and says why (ADR
-    // `2026-08-28-project-reads-bounded-streamed-refusable`, D7 as amended
-    // 2026-10-07). The previous project is what this unload, or a
+    // only moves after a load is done) and says why (ADR
+    // `2026-10-07-project-loads-are-tried-and-recovered`). The previous
+    // project is what this unload, or a
     // StopAllProjects just before it (an upload), stopped.
     lp_recovery::begin_project_load(project_name(path), project_manager.stopped_name(), false);
     log_memory(memory_stats, "load_project before");

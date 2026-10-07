@@ -181,8 +181,8 @@ mod tests {
 
         // Loads are no longer gated on a headroom floor (they are tried, and
         // a load that runs the board out of memory is recovered across the
-        // reset: ADR `2026-08-28-project-reads-bounded-streamed-refusable`,
-        // D7 as amended 2026-10-07), so only the read gate is checked here.
+        // reset: ADR `2026-10-07-project-loads-are-tried-and-recovered`), so
+        // only the read gate is checked here.
         let f = LinkFigures::measure();
         let read_headroom = LOADED_LOWEST - PROJECT_READ_MIN_HEADROOM_BYTES as usize;
         std::println!(

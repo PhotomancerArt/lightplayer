@@ -3,8 +3,8 @@
 //! error (and the previous project runs again: never dark) or, when it runs
 //! the board out of memory, resets it with the load recorded so the next
 //! boot runs the previous project again and says why (`lp-recovery`'s
-//! `InterruptedLoad`; ADR `2026-08-28-project-reads-bounded-streamed-refusable`,
-//! D7 as amended 2026-10-07). The blunt 64 KiB headroom gate this file used
+//! `InterruptedLoad`; ADR `2026-10-07-project-loads-are-tried-and-recovered`).
+//! The blunt 64 KiB headroom gate this file used
 //! to pin is gone (`docs/defects/2026-08-29-load-project-resets-instead-of-refusing.md`).
 
 extern crate alloc;

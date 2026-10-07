@@ -1,6 +1,8 @@
 # Project reads are bounded, streamed, and refusable
 
-- Status: accepted
+- Status: accepted; its load half (the `PROJECT_LOAD_MIN_HEADROOM_BYTES`
+  gate added beside it on 2026-08-30) is superseded by
+  `2026-10-07-project-loads-are-tried-and-recovered.md`
 - Date: 2026-08-28
 - Plan: `lp2025/2026-08-28-1424-wire-protocol-evolution` (PRs #457, #458)
 - Fixes (with the G1 bench walk):
@@ -90,3 +92,7 @@ Four rules, all landed with no breaking wire change (no
 - The defect's on-device verdict (previously always-reset full read on
   the bench classic) is owed at the plan's G1 bench walk; the defect
   stays open until then.
+- 2026-10-07: the load gate added beside this ADR is gone (loads are tried
+  and recovered across a reset: `2026-10-07-project-loads-are-tried-and-recovered.md`).
+  Yona wants the read gate here revisited the same way; it is unchanged
+  until then.

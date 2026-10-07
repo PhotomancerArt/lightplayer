@@ -1464,8 +1464,7 @@ impl LpServer {
     /// hang) is then known on the next boot, which boots with no project
     /// instead of trying it again: never a reset loop. There is no headroom
     /// gate before it — a board tries, and recovers if the try fails
-    /// (ADR `2026-08-28-project-reads-bounded-streamed-refusable`, D7 as
-    /// amended 2026-10-07).
+    /// (ADR `2026-10-07-project-loads-are-tried-and-recovered`).
     pub fn load_startup_project(
         &mut self,
         path: &lpfs::lp_path::LpPath,
