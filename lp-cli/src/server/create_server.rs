@@ -30,14 +30,33 @@ use std::sync::Arc;
 /// batching path runs everywhere (see the comment at the call site).
 const HOST_LINK_FRAME_BUDGET_BYTES: usize = 1024 * 1024;
 
+#[allow(
+    dead_code,
+    reason = "the binary's serve makes its filesystem first (create_server_on); the library and its tests use this"
+)]
 pub fn create_server(
     dir: Option<&Path>,
     memory: bool,
     init: Option<bool>,
 ) -> anyhow::Result<(LpServer, Box<dyn LpFs>)> {
-    // Create filesystem
     let base_fs = create_filesystem(dir, memory)?;
+    let server = create_server_on(base_fs, dir, memory, init)?;
 
+    // Create a new filesystem instance to return (same type as what was created)
+    let returned_fs = create_filesystem(dir, memory)?;
+
+    Ok((server, returned_fs))
+}
+
+/// [`create_server`] on a filesystem the caller already made — so it can
+/// write to it first (`serve --relay` installs the account key in the
+/// board's access store before the server reads it).
+pub fn create_server_on(
+    base_fs: Box<dyn LpFs>,
+    dir: Option<&Path>,
+    memory: bool,
+    init: Option<bool>,
+) -> anyhow::Result<LpServer> {
     // Handle server configuration
     if memory {
         // For in-memory filesystem, use default config (no file needed)
@@ -88,11 +107,7 @@ pub fn create_server(
     if !memory {
         server.set_fs_boot_state(lpc_wire::FsBootState::Mounted);
     }
-
-    // Create a new filesystem instance to return (same type as what was created)
-    let returned_fs = create_filesystem(dir, memory)?;
-
-    Ok((server, returned_fs))
+    Ok(server)
 }
 
 #[cfg(test)]

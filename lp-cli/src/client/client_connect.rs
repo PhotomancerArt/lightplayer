@@ -83,13 +83,39 @@ pub fn client_connect(spec: HostSpecifier) -> Result<Box<dyn ClientTransport>> {
                 password: crate::client::board_password::board_password_from_env(),
                 want_packed: lpa_client::requested_wire_encoding()
                     == lpc_wire::WireEncoding::Packed,
+                held_keys: Vec::new(),
             };
             let target = lpa_client::transport_lan::LanTarget::new(host, port);
             let rt = tokio::runtime::Runtime::new()
                 .map_err(|e| anyhow::anyhow!("Failed to create tokio runtime: {e}"))?;
             let (transport, _hello) = rt.block_on(
-                lpa_client::transport_lan::connect_lan_transport(target, options),
+                lpa_client::transport_lan::connect_lan_transport(target.endpoint(), options),
             )?;
+            Ok(Box::new(transport))
+        }
+        HostSpecifier::Relay { board, origin } => {
+            // A board through the cloud relay (see `cli_connect`).
+            let rt = tokio::runtime::Runtime::new()
+                .map_err(|e| anyhow::anyhow!("Failed to create tokio runtime: {e}"))?;
+            let session = crate::client::relay_session::cloud_session_from_env();
+            let held_keys = match &session {
+                Some(session) => rt.block_on(crate::client::relay_session::account_link_keys(
+                    &origin, session,
+                ))?,
+                None => Vec::new(),
+            };
+            let target = lpa_client::transport_relay::RelayTarget::new(board, origin);
+            let options = lpa_client::transport_lan::LanOptions {
+                password: crate::client::board_password::board_password_from_env(),
+                want_packed: lpa_client::requested_wire_encoding()
+                    == lpc_wire::WireEncoding::Packed,
+                held_keys,
+            };
+            let (transport, _hello) =
+                rt.block_on(lpa_client::transport_lan::connect_lan_transport(
+                    target.endpoint(session.as_deref()),
+                    options,
+                ))?;
             Ok(Box::new(transport))
         }
         #[cfg(feature = "serial")]

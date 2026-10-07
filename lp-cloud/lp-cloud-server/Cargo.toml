@@ -16,6 +16,8 @@ lpc-history = { path = "../../lp-core/lpc-history" }
 # The `/firmware/` lookup's grammar, `ota-manifest.json` and verification.
 lpc-firmware-release = { path = "../../lp-core/lpc-firmware-release" }
 lpfs = { path = "../../lp-base/lpfs" }
+# The relay's device-leg protocol (framing, version, limits).
+lpc-relay = { path = "../../lp-core/lpc-relay" }
 
 serde = { workspace = true, features = ["std", "derive"] }
 serde_json = { workspace = true, features = ["std"] }
@@ -26,7 +28,8 @@ env_logger = { workspace = true }
 # THE edge crate: axum/tokio/reqwest live here and nowhere else in the
 # workspace. Versions match what the lockfile already carries, so nothing
 # gains a second copy.
-axum = "0.8"
+# `ws`: the relay's two socket legs (`relay::device_leg`, `relay::browser_leg`).
+axum = { version = "0.8", features = ["ws"] }
 tokio = { version = "1", features = [
     "rt-multi-thread",
     "macros",
@@ -53,6 +56,11 @@ getrandom = "0.3"
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
 tempfile = "3"
+# The relay tests' socket clients: a fake board and a fake browser.
+tokio-tungstenite = "0.21"
+futures-util = "0.3"
+# `K` as Studio installs it, for the fake board's account entries.
+lpc-access = { path = "../../lp-core/lpc-access" }
 
 [lints]
 workspace = true

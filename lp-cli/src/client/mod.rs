@@ -16,6 +16,7 @@ pub mod client_connect;
 pub mod esp32_probe;
 pub mod host_process;
 pub mod host_serial_esp32;
+pub mod relay_session;
 pub mod serial_port;
 
 // Re-export CLI-specific types

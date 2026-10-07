@@ -20,6 +20,7 @@ Commands that connect to a firmware host (`lp-cli upload <project> <host>`,
 | `ws://host:port/`, `wss://host:port/` | a WebSocket host |
 | `serial:tcp://host:port` | a device link over TCP instead of a real serial port |
 | `serial:ws://host:port/path` | a device link over a WebSocket — `lp-cli emu serve`'s byte endpoint |
+| `relay:<board-id>[@<origin>]` | a board through the cloud relay (origin `https://lightplayer.app` by default) — see below |
 
 **`ws://…` and `serial:ws://…` are not the same thing.** A bare
 `ws://host:port/` is the **lpc-wire protocol** against an `lpa-server`; the
@@ -52,6 +53,39 @@ establishes the session instead. See
 (`lp-app/lpa-link/src/providers/host_serial_esp32/provider.rs`) for the
 implementation, and
 `docs/reports/2026-09-07-esp-emu-c6-spike.md` for where this came from.
+
+## Boards through the cloud relay: `relay:` and `serve --relay`
+
+A board on Wi-Fi with Cloud relay on dials lightplayer.app and stays there;
+`relay:<board-id>` reaches it from anywhere — the same secure lp-link as a
+`lan:` board, inside a WebSocket to `<origin>/relay/board/<id>`. The board id
+is its MAC (`10bda3b08e30`; `10:BD:A3:…` reads too). The relay wants a
+signed-in session, read from **`LP_CLOUD_SESSION`** (the value of the
+`lp_session` cookie of a signed-in browser — environment only, never argv,
+never printed). With an account session the account's key is tried first, so
+a board the account plugged in by USB opens at its tier; anyone else gives the
+board's password (`--password-stdin` or `LP_PASSWORD`), and with neither the
+board refuses — through the relay a board never grants its "Anyone" tier.
+
+```sh
+LP_CLOUD_SESSION=… lp-cli upload projects/test/basic relay:10bda3b08e30
+```
+
+`lp-cli serve --relay <origin>` puts lp-cli's host board on the relay the way
+a C6 does — the same `lpc-relay` client, one session at a time — for building
+against before a board is on Wi-Fi. With `LP_CLOUD_SESSION` set it installs
+the account's key in its own access store first (it prints only
+`installed <name>'s account key`), then prints the `relay:` address to use:
+
+```sh
+just cloud-serve                                   # a local relay; note its URL
+LP_CLOUD_SESSION=… lp-cli serve --memory --relay http://127.0.0.1:<port>
+```
+
+The pieces: `lp-cli/src/server/relay_host/` and
+`lp-app/lpa-client/src/transport_relay/`; the end-to-end test is
+`lp-cli/tests/relay_link.rs`; the decision is
+`docs/adr/2026-10-06-cloud-relay.md`.
 
 ## Measuring a board's link: `lp-cli link rtt`
 

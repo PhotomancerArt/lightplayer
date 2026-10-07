@@ -217,7 +217,7 @@ fn a_link_past_the_boards_slots_is_told_to_try_again_later() {
 fn a_plain_link_never_comes_up_and_the_server_sees_none_of_it() {
     let harness = start(HarnessAccess::open(OpenTo::Edit), None);
     let target = target(&harness);
-    let mut socket = LanSocket::connect(&target).expect("the upgrade");
+    let mut socket = LanSocket::connect(&target.endpoint()).expect("the upgrade");
     let mut port = WireLinkPort::new(LinkConfig::ws(), 0x0b1a_1201, false);
     port.send_client(&ClientMessage {
         id: 1,

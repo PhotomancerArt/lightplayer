@@ -278,3 +278,31 @@ jobs:
           done
           echo "healthz never answered — check: flyctl logs --app lightplayer"
           exit 1
+
+      - name: Verify plain HTTP still redirects (and only the relay's device leg does not)
+        run: |
+          set -euo pipefail
+          # fly's `force_https` is off so boards can reach the relay over
+          # plain HTTP; the app redirects everything else itself
+          # (lp-cloud-server/src/https_redirect.rs). This is the live check
+          # that it does.
+          headers="$(curl -sS --max-time 10 -o /dev/null -D - 'http://lightplayer.app/?relay-smoke=1')"
+          echo "$headers"
+          echo "$headers" | head -1 | grep -q ' 301' \
+            || { echo "http://lightplayer.app/ is not a 301"; exit 1; }
+          echo "$headers" | grep -qi '^location: https://lightplayer.app/?relay-smoke=1' \
+            || { echo "the 301 does not point at https"; exit 1; }
+          # The one exception: a WebSocket upgrade on /relay/device over
+          # plain HTTP is answered 101, not redirected.
+          python3 - <<'PY'
+          import socket
+          s = socket.create_connection(("lightplayer.app", 80), timeout=10)
+          s.sendall(b"GET /relay/device HTTP/1.1\r\nHost: lightplayer.app\r\n"
+                    b"Upgrade: websocket\r\nConnection: Upgrade\r\n"
+                    b"Sec-WebSocket-Version: 13\r\n"
+                    b"Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n")
+          status = s.recv(4096).split(b"\r\n", 1)[0].decode()
+          print(status)
+          s.close()
+          assert " 101 " in status, f"the device leg did not upgrade: {status}"
+          PY

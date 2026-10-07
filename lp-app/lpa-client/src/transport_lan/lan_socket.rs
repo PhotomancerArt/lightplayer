@@ -1,5 +1,8 @@
-//! The WebSocket under a LAN link: one binary message is one lp-link frame
-//! (the `ws()` preset is datagram framing), both ways.
+//! The WebSocket under a network link — a board on the LAN, or a board
+//! through the cloud relay ([`LinkEndpoint`]): one binary message is one
+//! lp-link frame (the `ws()` preset is datagram framing), both ways.
+//! `wss://` (the relay in production) wraps the socket in TLS; the secure
+//! lp-link inside is the same either way.
 //!
 //! A blocking socket with a per-read timeout: a read waits no longer than
 //! the link's next timer, a write is a plain blocking write (bounded by
@@ -10,29 +13,44 @@ use std::io::ErrorKind;
 use std::net::{TcpStream, ToSocketAddrs};
 use std::time::Duration;
 
+use tungstenite::client::IntoClientRequest as _;
+use tungstenite::http::{HeaderValue, Uri, header};
+use tungstenite::stream::MaybeTlsStream;
 use tungstenite::{Message, WebSocket};
 
 use super::lan_error::LanError;
-use super::lan_target::LanTarget;
+use super::link_endpoint::LinkEndpoint;
 
 /// How long the TCP connect may take.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 /// How long one write may block before the link counts as lost.
 const WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// One open WebSocket to a board's `/link`.
+/// One open WebSocket to a board's link endpoint.
 pub struct LanSocket {
-    ws: WebSocket<TcpStream>,
+    ws: WebSocket<MaybeTlsStream<TcpStream>>,
+    tcp: TcpStream,
 }
 
 impl LanSocket {
-    /// Resolve `target`, connect, and upgrade to a WebSocket on `/link`.
-    pub fn connect(target: &LanTarget) -> Result<Self, LanError> {
+    /// Resolve the endpoint's host, connect, and upgrade to a WebSocket on
+    /// its URL (with TLS for `wss://`, and its cookie if it has one).
+    pub fn connect(endpoint: &LinkEndpoint) -> Result<Self, LanError> {
         let fail = |detail: String| LanError::Connect {
-            target: target.to_string(),
+            target: endpoint.to_string(),
             detail,
         };
-        let addrs = (target.host.as_str(), target.port)
+        let uri: Uri = endpoint
+            .url()
+            .parse()
+            .map_err(|e| fail(format!("not a URL ({e})")))?;
+        let tls = uri.scheme_str() == Some("wss");
+        let host = uri
+            .host()
+            .ok_or_else(|| fail("the URL names no host".to_string()))?
+            .to_string();
+        let port = uri.port_u16().unwrap_or(if tls { 443 } else { 80 });
+        let addrs = (host.as_str(), port)
             .to_socket_addrs()
             .map_err(|e| fail(format!("the name did not resolve ({e})")))?;
         let mut last = None;
@@ -53,15 +71,31 @@ impl LanSocket {
             .set_nodelay(true)
             .and_then(|()| stream.set_write_timeout(Some(WRITE_TIMEOUT)))
             .map_err(|e| fail(e.to_string()))?;
-        let (ws, _response) = tungstenite::client::client(target.url(), stream)
+        let mut request = endpoint
+            .url()
+            .into_client_request()
+            .map_err(|e| fail(format!("not a WebSocket URL ({e})")))?;
+        if let Some(cookie) = endpoint.cookie() {
+            let value = HeaderValue::from_str(cookie)
+                .map_err(|_| fail("the session cookie is not a header value".to_string()))?;
+            request.headers_mut().insert(header::COOKIE, value);
+        }
+        let tcp = stream.try_clone().map_err(|e| fail(e.to_string()))?;
+        let (ws, _response) = tungstenite::client_tls_with_config(request, stream, None, None)
             .map_err(|e| fail(format!("the WebSocket upgrade failed ({e})")))?;
-        Ok(Self { ws })
+        Ok(Self { ws, tcp })
+    }
+
+    /// The TCP socket under the WebSocket (and under TLS, for `wss://`):
+    /// a second handle on the same socket, so its blocking mode and
+    /// timeouts are set whatever wraps it.
+    fn tcp(&self) -> &TcpStream {
+        &self.tcp
     }
 
     /// Send one frame as one binary message.
     pub fn send(&mut self, frame: &[u8]) -> Result<(), LanError> {
-        self.ws
-            .get_ref()
+        self.tcp()
             .set_nonblocking(false)
             .map_err(|e| LanError::Lost(e.to_string()))?;
         self.ws
@@ -72,7 +106,7 @@ impl LanSocket {
     /// The next frame, waiting at most `wait` (`Duration::ZERO`: only what
     /// has already arrived). `Ok(None)`: nothing in time.
     pub fn recv(&mut self, wait: Duration) -> Result<Option<Vec<u8>>, LanError> {
-        let socket = self.ws.get_ref();
+        let socket = self.tcp();
         let set = if wait.is_zero() {
             socket.set_nonblocking(true)
         } else {
@@ -112,10 +146,9 @@ impl LanSocket {
     /// [`Self::close`], for a caller that cannot give the socket up; nothing
     /// is read or written on it afterwards.
     pub fn shutdown(&mut self) {
-        let _ = self.ws.get_ref().set_nonblocking(false);
+        let _ = self.tcp().set_nonblocking(false);
         let _ = self
-            .ws
-            .get_ref()
+            .tcp()
             .set_read_timeout(Some(Duration::from_millis(200)));
         if self.ws.close(None).is_ok() {
             // Read until the board's close echo (or a timeout) so the close
@@ -129,7 +162,7 @@ impl LanSocket {
                 }
             }
         }
-        let _ = self.ws.get_ref().shutdown(std::net::Shutdown::Both);
+        let _ = self.tcp().shutdown(std::net::Shutdown::Both);
     }
 }
 

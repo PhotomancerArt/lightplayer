@@ -10,6 +10,10 @@ description = "Cloud sync service domain logic: every CloudRequest answered behi
 [dependencies]
 lpc-cloud-api = { path = "../../lp-core/lpc-cloud-api" }
 lpc-history = { path = "../../lp-core/lpc-history" }
+# The account key as a board holds it (`AccountAccess::device_key`), and the
+# relay's proof check (`relay_accounts`).
+lpc-access = { path = "../../lp-core/lpc-access" }
+lpc-relay = { path = "../../lp-core/lpc-relay" }
 
 # The in-memory adapters are this crate's test backend (D13). The resulting
 # dev-dependency cycle (store-mem -> domain -> [dev] store-mem) is supported by

@@ -20,6 +20,12 @@
 //! against its `ota-manifest.json`, cached in the blob store by SHA-256, and
 //! answered to any origin.
 //!
+//! And the **relay** — `GET /relay/device` (a board's one plain-HTTP
+//! socket) and `GET /relay/board/{id}` (one browser session to one board)
+//! ([`relay`]): boards on Wi-Fi reachable through lightplayer.app, every
+//! session sealed end to end. Its long-lived sockets never touch the store
+//! lock past their first moment; see the module doc.
+//!
 //! Across all three sits [`auth`]: the Google sign-in round trip
 //! ([`auth::google_auth`]), the session cookie every plane reads
 //! ([`auth::session_cookie`]), and the localhost-only dev login
@@ -53,8 +59,10 @@ pub mod auth;
 pub mod config;
 pub mod content;
 pub mod firmware;
+pub mod https_redirect;
 pub mod page;
 pub mod ports;
+pub mod relay;
 pub mod request_log;
 pub mod router;
 

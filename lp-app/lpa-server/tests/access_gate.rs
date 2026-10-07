@@ -57,6 +57,12 @@ const KEYED: Link = Link {
     id: LinkId::new(9),
     trust: LinkTrust::Keyed,
 };
+/// The same secure link through the cloud relay: the device's `open` never
+/// applies to it.
+const RELAYED: Link = Link {
+    id: LinkId::new(10),
+    trust: LinkTrust::Relayed,
+};
 
 /// THE TABLE. Every `ClientRequest` variant — `Filesystem` expanded to every
 /// `FsRequest` variant inside and outside the projects directory,
@@ -347,6 +353,100 @@ fn backoff_survives_a_link_closing_and_reopening() {
     match rig.request(reconnected, ClientRequest::LoginBegin) {
         WireServerMsgBody::LoginResult(LoginOutcome::Refused { retry_after_ms }) => {
             assert!(retry_after_ms > 0, "the backoff was reset by a reconnect");
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+/// The relay's second lock, alone: a board open at edit to anyone nearby
+/// holds nothing for an anonymous relayed link, and its hello says a login
+/// is required — so a visitor through the relay must give a password.
+#[test]
+fn a_relayed_link_never_gets_what_the_board_is_open_to() {
+    let mut rig = Rig::for_state(LinkState::RelayedAnonymousOpen);
+    assert_eq!(rig.store.open, OpenTo::Edit);
+    assert_eq!(rig.server.link_tier(RELAYED), None);
+    assert_eq!(
+        rig.server.link_tier(BLE_A),
+        Some(Tier::Edit),
+        "the same board is open to a link nearby"
+    );
+    match rig.request(RELAYED, ClientRequest::Hello) {
+        WireServerMsgBody::Hello(hello) => assert_eq!(
+            hello.auth,
+            HelloAuth {
+                required: true,
+                granted: None
+            }
+        ),
+        other => panic!("{other:?}"),
+    }
+    // The visitor's way in: the offers, to derive a password's key.
+    match rig.request(RELAYED, ClientRequest::LoginBegin) {
+        WireServerMsgBody::LoginChallenge { offers, .. } => assert_eq!(offers.len(), 2),
+        other => panic!("{other:?}"),
+    }
+}
+
+/// A transport that reports a relayed link's handshake before the link's
+/// first message (the order a secure transport has) still has it read as
+/// relayed: the tier follows the link's own trust, not the session's.
+#[test]
+fn a_relayed_handshake_before_any_message_is_still_relayed() {
+    let mut rig = Rig::for_state(LinkState::RelayedAnonymousOpen);
+    let fresh = Link {
+        id: LinkId::new(11),
+        trust: LinkTrust::Relayed,
+    };
+    rig.keyed_handshake(fresh, [0; 16]);
+    assert_eq!(rig.server.link_tier(fresh), None);
+    assert!(matches!(
+        rig.request(fresh, ClientRequest::StopAllProjects),
+        WireServerMsgBody::NotPermitted { .. }
+    ));
+}
+
+/// Password guessing through the relay hits the board's own backoff, which
+/// is device-wide: wrong keys on relayed links lock out the next relayed
+/// lookup and a Bluetooth login alike.
+#[test]
+fn wrong_keys_through_the_relay_are_charged_to_the_device_backoff() {
+    let mut rig = Rig::for_state(LinkState::UntrustedNone);
+    for attempt in 0..4u32 {
+        let link = Link {
+            id: LinkId::new(20 + attempt),
+            trust: LinkTrust::Relayed,
+        };
+        rig.transport
+            .secure_events
+            .push((link.id, SecureLinkEvent::KeyLookup { salt: [2; 16] }));
+        rig.idle(16);
+        let (_, answer) = rig.transport.answers.pop().expect("a lookup answer");
+        assert!(
+            matches!(answer, KeyAnswer::Keys(_)),
+            "attempt {attempt}: {answer:?}"
+        );
+        rig.transport
+            .secure_events
+            .push((link.id, SecureLinkEvent::WrongKey { salt: [2; 16] }));
+        rig.idle(16);
+    }
+    let next = Link {
+        id: LinkId::new(30),
+        trust: LinkTrust::Relayed,
+    };
+    rig.transport
+        .secure_events
+        .push((next.id, SecureLinkEvent::KeyLookup { salt: [2; 16] }));
+    rig.idle(16);
+    let (_, answer) = rig.transport.answers.pop().expect("a lookup answer");
+    assert!(
+        matches!(answer, KeyAnswer::Backoff { retry_after_ms } if retry_after_ms > 0),
+        "{answer:?}"
+    );
+    match rig.request(BLE_A, ClientRequest::LoginBegin) {
+        WireServerMsgBody::LoginResult(LoginOutcome::Refused { retry_after_ms }) => {
+            assert!(retry_after_ms > 0, "the backoff is the device's");
         }
         other => panic!("{other:?}"),
     }
@@ -859,10 +959,18 @@ enum LinkState {
     KeyedPlay,
     /// A keyed link up on the edit secret's key.
     KeyedEdit,
+    /// A relayed link up on the anonymous key, the device open at EDIT (a
+    /// fresh board): it still holds nothing.
+    RelayedAnonymousOpen,
+    /// A relayed link up on the play secret's key, the device open at edit:
+    /// it holds play, not edit.
+    RelayedPlay,
+    /// A relayed link up on the edit secret's key.
+    RelayedEdit,
 }
 
 impl LinkState {
-    const ALL: [LinkState; 9] = [
+    const ALL: [LinkState; 12] = [
         LinkState::Trusted,
         LinkState::UntrustedNone,
         LinkState::UntrustedOpen,
@@ -872,6 +980,9 @@ impl LinkState {
         LinkState::KeyedAnonymousOpen,
         LinkState::KeyedPlay,
         LinkState::KeyedEdit,
+        LinkState::RelayedAnonymousOpen,
+        LinkState::RelayedPlay,
+        LinkState::RelayedEdit,
     ];
 
     fn link(self) -> Link {
@@ -881,26 +992,35 @@ impl LinkState {
             | LinkState::KeyedAnonymousOpen
             | LinkState::KeyedPlay
             | LinkState::KeyedEdit => KEYED,
+            LinkState::RelayedAnonymousOpen | LinkState::RelayedPlay | LinkState::RelayedEdit => {
+                RELAYED
+            }
             _ => BLE_A,
         }
     }
 
     fn tier(self) -> Option<Tier> {
         match self {
-            LinkState::Trusted | LinkState::UntrustedEdit | LinkState::KeyedEdit => {
-                Some(Tier::Edit)
-            }
+            LinkState::Trusted
+            | LinkState::UntrustedEdit
+            | LinkState::KeyedEdit
+            | LinkState::RelayedEdit => Some(Tier::Edit),
             LinkState::UntrustedOpen
             | LinkState::UntrustedPlay
             | LinkState::KeyedAnonymousOpen
-            | LinkState::KeyedPlay => Some(Tier::Play),
-            LinkState::UntrustedNone | LinkState::KeyedAnonymousLocked => None,
+            | LinkState::KeyedPlay
+            | LinkState::RelayedPlay => Some(Tier::Play),
+            LinkState::UntrustedNone
+            | LinkState::KeyedAnonymousLocked
+            | LinkState::RelayedAnonymousOpen => None,
         }
     }
 
     fn device_open(self) -> OpenTo {
         match self {
             LinkState::UntrustedOpen | LinkState::KeyedAnonymousOpen => OpenTo::Play,
+            // The worst case: a fresh board, open to anyone nearby at edit.
+            LinkState::RelayedAnonymousOpen | LinkState::RelayedPlay => OpenTo::Edit,
             _ => OpenTo::Nobody,
         }
     }
@@ -970,6 +1090,9 @@ impl Rig {
             }
             LinkState::KeyedPlay => rig.keyed_handshake(KEYED, [1; 16]),
             LinkState::KeyedEdit => rig.keyed_handshake(KEYED, [2; 16]),
+            LinkState::RelayedAnonymousOpen => rig.keyed_handshake(RELAYED, [0; 16]),
+            LinkState::RelayedPlay => rig.keyed_handshake(RELAYED, [1; 16]),
+            LinkState::RelayedEdit => rig.keyed_handshake(RELAYED, [2; 16]),
             _ => {}
         }
         rig

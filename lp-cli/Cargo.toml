@@ -67,6 +67,10 @@ lpc-view = { path = "../lp-core/lpc-view" }
 # `lan`: a board on the LAN (`lan:<host>[:port]`, a secure lp-link inside a
 # WebSocket; Wi-Fi plan P06).
 lpa-client = { path = "../lp-app/lpa-client", features = ["ws", "serial", "emu", "lan"] }
+# The cloud relay (`serve --relay`, `relay:`): its protocol and the cloud API
+# calls that fetch the account key (made with the one reqwest below).
+lpc-relay = { path = "../lp-core/lpc-relay" }
+lpc-cloud-api = { path = "../lp-core/lpc-cloud-api" }
 lp-emu-core = { path = "../lp-emu/lp-emu-core", features = ["std"] }
 lp-riscv-emu = { path = "../lp-emu/lp-riscv-emu", features = ["std"] }
 lp-perf = { path = "../lp-base/lp-perf", default-features = false }
@@ -88,8 +92,9 @@ dialoguer = "0.11"
 chrono = "0.4"
 # `firmware install`: lightplayer.app's public firmware lookup and, when
 # `--release previous` needs the GitHub releases list and `gh` is not on
-# PATH, the public GitHub REST API. reqwest 0.12 is already in the workspace
-# dependency graph (lp-cloud-server, lpa-agent).
+# PATH, the public GitHub REST API; and the cloud relay's account-key fetch.
+# reqwest 0.12 is already in the workspace dependency graph (lp-cloud-server,
+# lpa-agent).
 reqwest = { version = "0.12", default-features = false, features = [
     "blocking",
     "json",
@@ -183,6 +188,13 @@ esp-idf-part = "0.5"
 fw-esp32-common = { path = "../lp-fw/fw-esp32-common", features = ["host-lan-harness", "json-pack"] }
 # Well-formedness of the SVG files `hardware desk-images` writes.
 quick-xml = "0.39"
+# The cloud relay end to end (tests/relay_link.rs): a whole mem-backed
+# lp-cloud-server in-process, with its relay hub, as the relay.
+lp-cloud-server = { path = "../lp-cloud/lp-cloud-server" }
+lp-cloud-store-mem = { path = "../lp-cloud/lp-cloud-store-mem" }
+lp-cloud-domain = { path = "../lp-cloud/lp-cloud-domain" }
+lpc-history = { path = "../lp-core/lpc-history" }
+axum = "0.8"
 
 [features]
 default = ["serial"]
