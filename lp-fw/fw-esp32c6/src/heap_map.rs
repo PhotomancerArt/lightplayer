@@ -188,6 +188,17 @@ pub fn arm_tracking(why: &str) {
     let _ = why;
 }
 
+/// Run `probe` with allocation tracking and `[bigalloc]` logging paused: a
+/// probe's own trial allocations are not the program's.
+pub fn untracked<R>(probe: impl FnOnce() -> R) -> R {
+    #[cfg(feature = "heap_track_diag")]
+    track::pause(true);
+    let result = probe();
+    #[cfg(feature = "heap_track_diag")]
+    track::pause(false);
+    result
+}
+
 /// Allocation tracking (`heap_track_diag`): once [`arm_tracking`] has run,
 /// every allocation in the main region or `dram2_seg` is remembered with its
 /// backtrace while it lives. The table sits in LP SRAM (`rtc_fast`), which the

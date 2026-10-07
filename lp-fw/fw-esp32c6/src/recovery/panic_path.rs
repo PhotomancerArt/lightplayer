@@ -107,6 +107,13 @@ pub fn largest_free_block() -> usize {
     // `free()` bounds the answer from above: no single block can exceed the
     // sum of every block. Exact to the byte (`largest_fitting`): the gates
     // compare it with round floors.
+    #[cfg(all(feature = "heap_map_diag", not(fw_harness)))]
+    return crate::heap_map::untracked(largest_free_block_now);
+    #[cfg(not(all(feature = "heap_map_diag", not(fw_harness))))]
+    largest_free_block_now()
+}
+
+fn largest_free_block_now() -> usize {
     fw_esp32_common::largest_block::largest_fitting(esp_alloc::HEAP.free(), |size| {
         if size == 0 {
             return true;
