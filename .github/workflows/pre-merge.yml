@@ -882,6 +882,8 @@ jobs:
         uses: cargo-bins/cargo-binstall@v1.21.1
 
       - name: Install espflash (prebuilt)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: cargo binstall --no-confirm --locked espflash@3.3.0
 
       # Builds the crate and checks the image against its app partition (the
@@ -993,6 +995,8 @@ jobs:
         uses: cargo-bins/cargo-binstall@v1.21.1
 
       - name: Install espflash (prebuilt)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: cargo binstall --no-confirm --locked espflash@3.3.0
 
       # Builds the crate and checks the image against its 3 MB app partition
@@ -1382,6 +1386,8 @@ jobs:
         uses: cargo-bins/cargo-binstall@v1.21.1
 
       - name: Install espflash (prebuilt)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: cargo binstall --no-confirm --locked espflash@3.3.0
 
       # The SPLIT image (the product's): two link passes, the verifier (any
@@ -1489,6 +1495,8 @@ jobs:
         uses: cargo-bins/cargo-binstall@v1.21.1
 
       - name: Install espflash (prebuilt)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: cargo binstall --no-confirm --locked espflash@3.3.0
 
       - name: Release dry run (package, stage, release-check)
@@ -1658,6 +1666,8 @@ jobs:
         uses: cargo-bins/cargo-binstall@v1.21.1
 
       - name: Install espflash (prebuilt — the merged image's bootloader)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: cargo binstall --no-confirm --locked espflash@3.3.0
 
       # **The pinned reference builds, cached as OUTPUTS** (2026-09-23). The
@@ -2114,6 +2124,8 @@ jobs:
       # second-stage bootloader whose log this job diffs against a silicon
       # capture: a different espflash is a different program in the image.
       - name: Install espflash (prebuilt — the merged image's bootloader)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: cargo binstall --no-confirm --locked espflash@3.3.0
 
       # Part 1 of `test-emu-esp32v3-gate`: the shipped, `rmt-chase` and
@@ -2482,6 +2494,8 @@ jobs:
       # bundles the second-stage bootloader the ROM-up tests boot through, so
       # a different espflash is a different program in the image.
       - name: Install espflash (prebuilt — the merged image's bootloader)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: cargo binstall --no-confirm --locked espflash@3.3.0
 
       - name: Emulator ESP32-S3 gate (both boot paths, the pads, the replays)
@@ -2937,6 +2951,8 @@ jobs:
         uses: cargo-bins/cargo-binstall@v1.21.1
 
       - name: Install espflash (prebuilt — the merged image's bootloader)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: cargo binstall --no-confirm --locked espflash@3.3.0
 
       # The test RETURNS (passes) with "emu_layout_migration: skipped — …" when
@@ -3293,6 +3309,8 @@ jobs:
         uses: cargo-bins/cargo-binstall@v1.21.1
 
       - name: Install wasm-bindgen-cli (prebuilt)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: command -v wasm-bindgen-test-runner >/dev/null || cargo binstall --no-confirm --locked wasm-bindgen-cli@0.2.114
 
       # The smoke check drives Chrome over a raw CDP WebSocket; pin node so
@@ -3505,6 +3523,8 @@ jobs:
 
       - name: Install pinned tools (wasm-bindgen, dioxus-cli, oxipng)
         shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           wasm-bindgen --version 2>/dev/null | grep -qF "$WASM_BINDGEN_VERSION" \
             || cargo binstall --no-confirm --locked --force "wasm-bindgen-cli@$WASM_BINDGEN_VERSION"
