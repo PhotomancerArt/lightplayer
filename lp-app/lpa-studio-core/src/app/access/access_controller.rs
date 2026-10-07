@@ -1474,6 +1474,149 @@ mod tests {
         assert_eq!(board.answers(), 1);
     }
 
+    /// An open board (anyone nearby may play) is Play with no sheet: the
+    /// check says so and nothing is sent to log in. The board's own refusal
+    /// of an edit is what would ask for a password (Bluefy, 2026-10-02;
+    /// `?ble=emu` cannot show this, it is a trusted link).
+    #[test]
+    fn an_open_board_is_play_with_no_sheet_and_no_answer() {
+        let access = controller();
+        let board = FakeBoard::open(&[("camp", Tier::Play, "smores")], OpenTo::Play);
+        let session = check_only(&access, &board, 1);
+        assert_eq!(
+            session.phase,
+            AccessPhase::Granted {
+                tier: Tier::Play,
+                label: None
+            }
+        );
+        assert_eq!(session.prompt, None, "no sheet on an open board");
+        assert_eq!(board.answers(), 0, "no login was attempted");
+        assert_eq!(
+            session.next_step(Millis(6), &access.held(), &["smores"]),
+            None
+        );
+    }
+
+    /// Bluefy, 2026-10-02: a board locked at connect raised the sheet; the
+    /// owner then opened it (Play: anyone nearby) over USB, and the next
+    /// Bluetooth link's hello grants Play. The sheet must close, with no
+    /// login sent.
+    #[test]
+    fn a_sheet_raised_on_a_locked_board_closes_when_the_board_is_opened() {
+        let mut access = controller();
+        let board = FakeBoard::locked(&[("camp", Tier::Play, "smores")]);
+        let mut session = unlock(&access, &board, &[]);
+        assert_eq!(session.prompt, Some(PromptReason::NoPasswordKnown));
+        assert_eq!(board.granted(), None, "the board refuses an unknown link");
+
+        // The owner opens the board to anyone nearby, over USB.
+        let (step, _) = access
+            .change_step(
+                DeviceAccessChange::SetPassword {
+                    tier: Tier::Play,
+                    password: None,
+                },
+                Some(&list(&board)),
+                false,
+                5.0,
+                &counter(),
+            )
+            .unwrap();
+        run_change(&mut access, &board, DeviceId(1), step);
+        assert_eq!(board.store().open, OpenTo::Play);
+
+        // The Bluetooth link drops and comes back: the new hello grants Play.
+        board.drop_link();
+        session.observe(None);
+        session.observe(Some(window(2)));
+        let step = session.next_step(Millis(5), &access.held(), &[]).unwrap();
+        assert_eq!(step, AccessStep::Check(window(2)));
+        session.started(&step);
+        let mut client = board.client();
+        let AccessCommand::Checked {
+            result: Ok((required, granted)),
+            ..
+        } = block_on(run_step(
+            &mut client,
+            DeviceId(1),
+            step,
+            &access.keys(),
+            instant_timer(),
+        ))
+        else {
+            panic!("the check failed")
+        };
+        session.checked(window(2), required, granted, true);
+        assert_eq!(session.prompt, None, "the board opened; the sheet closes");
+        assert!(matches!(
+            session.phase,
+            AccessPhase::Granted {
+                tier: Tier::Play,
+                ..
+            }
+        ));
+        assert_eq!(board.answers(), 0, "no login was sent");
+    }
+
+    /// An edit refused at Play: the board's own `NotPermitted` is what
+    /// raises the edit sheet (no sheet before it), and the author password
+    /// typed there lifts the link to edit, so the same write lands.
+    #[test]
+    fn an_edit_refused_at_play_raises_the_edit_sheet_until_the_author_password_is_typed() {
+        let mut access = controller();
+        let board = FakeBoard::open(
+            &[
+                ("friends", Tier::Play, "play-pw"),
+                ("Author password", Tier::Edit, "edit-pw"),
+            ],
+            OpenTo::Play,
+        );
+        let device = DeviceId(1);
+        let session = check_only(&access, &board, 1);
+        assert_eq!(session.prompt, None, "play needs no sheet");
+        access.sessions.insert(device, session);
+        let title = |_: DeviceId| "Choker".to_string();
+        assert!(access.prompt(title).is_none());
+
+        // The board refuses the edit, by its tier.
+        let mut client = board.client();
+        let path = lpc_model::LpPath::new("/projects/x.json");
+        let refused = block_on(client.fs_write(path, b"{}".to_vec()));
+        assert!(
+            matches!(
+                refused,
+                Err(lpa_client::ClientError::NotPermitted { needs: Tier::Edit })
+            ),
+            "{refused:?}"
+        );
+        access.note_needs_edit(device);
+        let sheet = access.prompt(title).expect("the refusal raises the sheet");
+        assert_eq!(sheet.device, device);
+        assert_eq!(
+            sheet.reason,
+            prompt_sentence(&PromptReason::NeedsEdit, "Choker")
+        );
+
+        // The author password lifts the link to edit; the sheet closes.
+        let mut session = access.sessions.remove(&device).unwrap();
+        session.type_password(TypedPassword {
+            password: "edit-pw".to_string(),
+            remember: false,
+        });
+        let step = session.next_step(Millis(20), &access.held(), &[]).unwrap();
+        run_login_on(&access, &mut client, &mut session, step, Millis(21));
+        assert_eq!(session.prompt, None);
+        assert!(matches!(
+            session.phase,
+            AccessPhase::Granted {
+                tier: Tier::Edit,
+                ..
+            }
+        ));
+        assert!(block_on(client.fs_write(path, b"{}".to_vec())).is_ok());
+    }
+
     /// Automatic tries are capped per device: one wrong remembered password
     /// at most, and none again on a reconnect.
     #[test]
@@ -2052,6 +2195,31 @@ mod tests {
         session.checked(window(1), required, granted, true);
         let step = session.next_step(Millis(6), &held, remembered).unwrap();
         run_login_on(access, &mut client, &mut session, step, Millis(7));
+        session
+    }
+
+    /// Only the check on a fresh untrusted link `link`: what the board's
+    /// hello says, with nothing sent after it.
+    fn check_only(access: &AccessController, board: &FakeBoard, link: u64) -> AccessSession {
+        let mut session = AccessSession::default();
+        session.observe(Some(window(link)));
+        let step = session.next_step(Millis(5), &access.held(), &[]).unwrap();
+        session.started(&step);
+        let mut client = board.client();
+        let AccessCommand::Checked {
+            result: Ok((required, granted)),
+            ..
+        } = block_on(run_step(
+            &mut client,
+            DeviceId(1),
+            step,
+            &access.keys(),
+            instant_timer(),
+        ))
+        else {
+            panic!("the check failed")
+        };
+        session.checked(window(link), required, granted, true);
         session
     }
 
