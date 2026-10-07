@@ -59,12 +59,25 @@ env:
   # own previous push. See the budget note above `jobs:` and
   # docs/debt/actions-cache-budget.md.
   SCCACHE_GHA_RW_MODE: ${{ github.ref == 'refs/heads/main' && 'READ_WRITE' || 'READ_ONLY' }}
+  # Make sccache's backend failures visible. Its `Cache write errors` stat
+  # counts every failed upload but says nothing about why, and the server is
+  # a daemon whose stderr goes nowhere unless SCCACHE_ERROR_LOG names a file.
+  # opendal (sccache's storage layer) logs each failed backend call at warn:
+  # `RateLimited` is GitHub's 200-uploads-a-minute-per-repo cache limit
+  # (HTTP 429; sccache 0.18 does not retry it, so the object is simply not
+  # stored), `AlreadyExists` another job storing the same object first (409,
+  # harmless). A miss is a `NotFound` read and is not an error. The "sccache
+  # stats" step of each job counts them into its summary. Neither variable is
+  # part of an object's key (sccache hashes only CARGO_* env), so this moves
+  # no hit rate.
+  SCCACHE_LOG: opendal::services=warn
+  SCCACHE_ERROR_LOG: /tmp/sccache-server.log
 
 # CI shape (2026-07-28 restructure — measured baseline: Validate was 39-52 min
 # and dominated every run; 2026-09-08 restructure — baseline in the
 # paragraphs below):
 #
-#   detect-changes ─┬─ lint              (fmt + clippy + repo lints)
+#   detect-changes ─┬─ lint              (fmt + clippy + repo lints + feature-variant tests)
 #                   ├─ validate-x64      (build prereqs + gated test recipes + schema-check + heap ratchet)
 #                   ├─ validate-gfx      (ARM; wgpu tree)
 #                   ├─ validate-browser  (real-browser wasm suites)
@@ -650,11 +663,19 @@ jobs:
   # full dev build concurrently and both crawled). schema-check itself moved
   # into validate-x64, where its dev build shares artifacts with the test
   # builds; clippy's check-mode artifacts are shareable with nothing.
+  #
+  # It also hosts `just test-rust-features` (the feature-variant test lines,
+  # see the step) — off validate-x64's critical path, in a job with the same
+  # gate, runner and cache, instead of a new job's setup against the org's
+  # 20-job cap (docs/debt/ci-runner-time-over-the-concurrency-cap.md).
   lint:
     name: Lint (x64)
     runs-on: ubuntu-24.04
-    # p95 6.5 min, max 7.1.
-    timeout-minutes: 25
+    # Before the feature-variant tests moved here (2026-10-07): p50 10.8 min,
+    # p95 12.2 (`just ci-durations`, last 200 runs), main runs 11.2 and 12.6.
+    # The tests add ~4-7 min (see the step), so p95 ~19: 40 keeps it under
+    # half the budget, the `ci-durations` verdict line.
+    timeout-minutes: 40
     needs: detect-changes
     if: needs.detect-changes.outputs.core == 'true'
     env:
@@ -740,12 +761,43 @@ jobs:
       - name: Lint
         run: cd lp2025 && just check-lint
 
+      # The feature-variant test lines (lp-json-pack, lp-link, lpc-wire,
+      # fw-esp32-common, lpa-update, lp-cli desk-images — the justfile recipe
+      # says why each exists). They were the tail of validate-x64's
+      # `test-rust-core`, 215-237 s on its critical path (main run
+      # 37575019902: 215 s), each line resolving features over its own
+      # package and so sharing few dependency artifacts with the workspace
+      # build there; here the rest come back from sccache, since this job's
+      # target/ holds only clippy's check-mode artifacts.
+      #
+      # Same `core` gate as validate-x64, same x86_64 runner, same env, so
+      # every line runs on exactly the runs it ran on before. `!cancelled()`:
+      # a red lint does not hide a red test (and these no longer wait on
+      # validate's workspace `cargo test` passing either).
+      #
+      # `build-rv32-builtins` first, as validate-x64's `ci-prereqs` did:
+      # lp-cli pulls in lpvm-cranelift, whose build script embeds that image.
+      - name: Feature-variant tests
+        if: ${{ !cancelled() }}
+        timeout-minutes: 20
+        run: cd lp2025 && just build-rv32-builtins test-rust-features
+
       - name: sccache stats
         if: always()
         shell: bash
         run: |
           if command -v sccache >/dev/null; then
             { echo '#### sccache'; echo '```'; sccache --show-stats; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          # Why the failed calls failed (SCCACHE_ERROR_LOG in `env:` says what each kind means).
+          log=/tmp/sccache-server.log
+          kinds='(RateLimited|AlreadyExists|PermissionDenied|ConditionNotMatch|Unexpected) \([a-z]+\) at [A-Za-z_:]+'
+          if [ -s "$log" ] && grep -q -E "$kinds" "$log"; then
+            { echo '#### sccache backend errors, by kind and operation'; echo '```'
+              grep -o -E "$kinds" "$log" | sed -E 's/ \([a-z]+\)//' | sort | uniq -c
+              echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+            grep -o -E "$kinds" "$log" | sed -E 's/ \([a-z]+\)//' | sort | uniq -c
+            grep -m 5 -E "$kinds" "$log" | cut -c1-400 || true
           fi
 
   # fw-esp32s3 is the repo's only crate on a SECOND toolchain (Espressif's
@@ -856,6 +908,16 @@ jobs:
           if command -v sccache >/dev/null; then
             { echo '#### sccache'; echo '```'; sccache --show-stats; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           fi
+          # Why the failed calls failed (SCCACHE_ERROR_LOG in `env:` says what each kind means).
+          log=/tmp/sccache-server.log
+          kinds='(RateLimited|AlreadyExists|PermissionDenied|ConditionNotMatch|Unexpected) \([a-z]+\) at [A-Za-z_:]+'
+          if [ -s "$log" ] && grep -q -E "$kinds" "$log"; then
+            { echo '#### sccache backend errors, by kind and operation'; echo '```'
+              grep -o -E "$kinds" "$log" | sed -E 's/ \([a-z]+\)//' | sort | uniq -c
+              echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+            grep -o -E "$kinds" "$log" | sed -E 's/ \([a-z]+\)//' | sort | uniq -c
+            grep -m 5 -E "$kinds" "$log" | cut -c1-400 || true
+          fi
 
   # fw-esp32v3 (classic ESP32, "v3"/WROOM-32E) — the second crate on the
   # Xtensa fork, cloned from firmware-xtensa above. Same anti-rot rationale:
@@ -955,6 +1017,16 @@ jobs:
         run: |
           if command -v sccache >/dev/null; then
             { echo '#### sccache'; echo '```'; sccache --show-stats; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          # Why the failed calls failed (SCCACHE_ERROR_LOG in `env:` says what each kind means).
+          log=/tmp/sccache-server.log
+          kinds='(RateLimited|AlreadyExists|PermissionDenied|ConditionNotMatch|Unexpected) \([a-z]+\) at [A-Za-z_:]+'
+          if [ -s "$log" ] && grep -q -E "$kinds" "$log"; then
+            { echo '#### sccache backend errors, by kind and operation'; echo '```'
+              grep -o -E "$kinds" "$log" | sed -E 's/ \([a-z]+\)//' | sort | uniq -c
+              echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+            grep -o -E "$kinds" "$log" | sed -E 's/ \([a-z]+\)//' | sort | uniq -c
+            grep -m 5 -E "$kinds" "$log" | cut -c1-400 || true
           fi
 
   # The Xtensa HOST path: `lpvm-native`'s `rt_emu` compiling shaders for Xtensa
@@ -1330,6 +1402,16 @@ jobs:
           if command -v sccache >/dev/null; then
             { echo '#### sccache'; echo '```'; sccache --show-stats; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           fi
+          # Why the failed calls failed (SCCACHE_ERROR_LOG in `env:` says what each kind means).
+          log=/tmp/sccache-server.log
+          kinds='(RateLimited|AlreadyExists|PermissionDenied|ConditionNotMatch|Unexpected) \([a-z]+\) at [A-Za-z_:]+'
+          if [ -s "$log" ] && grep -q -E "$kinds" "$log"; then
+            { echo '#### sccache backend errors, by kind and operation'; echo '```'
+              grep -o -E "$kinds" "$log" | sed -E 's/ \([a-z]+\)//' | sort | uniq -c
+              echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+            grep -o -E "$kinds" "$log" | sed -E 's/ \([a-z]+\)//' | sort | uniq -c
+            grep -m 5 -E "$kinds" "$log" | cut -c1-400 || true
+          fi
 
   # The release's C6 firmware, dry run: package the split build, stage it
   # under the release's asset names, and prove it with `release-check` —
@@ -1429,6 +1511,16 @@ jobs:
         run: |
           if command -v sccache >/dev/null; then
             { echo '#### sccache'; echo '```'; sccache --show-stats; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          # Why the failed calls failed (SCCACHE_ERROR_LOG in `env:` says what each kind means).
+          log=/tmp/sccache-server.log
+          kinds='(RateLimited|AlreadyExists|PermissionDenied|ConditionNotMatch|Unexpected) \([a-z]+\) at [A-Za-z_:]+'
+          if [ -s "$log" ] && grep -q -E "$kinds" "$log"; then
+            { echo '#### sccache backend errors, by kind and operation'; echo '```'
+              grep -o -E "$kinds" "$log" | sed -E 's/ \([a-z]+\)//' | sort | uniq -c
+              echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+            grep -o -E "$kinds" "$log" | sed -E 's/ \([a-z]+\)//' | sort | uniq -c
+            grep -m 5 -E "$kinds" "$log" | cut -c1-400 || true
           fi
 
   # The ESP32-C6 emulator's own boot-test + replay suite (`just
@@ -1894,6 +1986,16 @@ jobs:
           if command -v sccache >/dev/null; then
             { echo '#### sccache'; echo '```'; sccache --show-stats; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           fi
+          # Why the failed calls failed (SCCACHE_ERROR_LOG in `env:` says what each kind means).
+          log=/tmp/sccache-server.log
+          kinds='(RateLimited|AlreadyExists|PermissionDenied|ConditionNotMatch|Unexpected) \([a-z]+\) at [A-Za-z_:]+'
+          if [ -s "$log" ] && grep -q -E "$kinds" "$log"; then
+            { echo '#### sccache backend errors, by kind and operation'; echo '```'
+              grep -o -E "$kinds" "$log" | sed -E 's/ \([a-z]+\)//' | sort | uniq -c
+              echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+            grep -o -E "$kinds" "$log" | sed -E 's/ \([a-z]+\)//' | sort | uniq -c
+            grep -m 5 -E "$kinds" "$log" | cut -c1-400 || true
+          fi
 
   # ─────────────────────────────────────────────────────────────────────────
   # The CLASSIC ESP32's machine, and M3's own gate.
@@ -2118,6 +2220,16 @@ jobs:
           if command -v sccache >/dev/null; then
             { echo '#### sccache'; echo '```'; sccache --show-stats; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           fi
+          # Why the failed calls failed (SCCACHE_ERROR_LOG in `env:` says what each kind means).
+          log=/tmp/sccache-server.log
+          kinds='(RateLimited|AlreadyExists|PermissionDenied|ConditionNotMatch|Unexpected) \([a-z]+\) at [A-Za-z_:]+'
+          if [ -s "$log" ] && grep -q -E "$kinds" "$log"; then
+            { echo '#### sccache backend errors, by kind and operation'; echo '```'
+              grep -o -E "$kinds" "$log" | sed -E 's/ \([a-z]+\)//' | sort | uniq -c
+              echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+            grep -o -E "$kinds" "$log" | sed -E 's/ \([a-z]+\)//' | sort | uniq -c
+            grep -m 5 -E "$kinds" "$log" | cut -c1-400 || true
+          fi
 
   # The other half of the classic's gate — see `emu-esp32v3` above for the
   # split. Same path gate, same toolchains, same cache key (the rust-cache
@@ -2234,6 +2346,16 @@ jobs:
         run: |
           if command -v sccache >/dev/null; then
             { echo '#### sccache'; echo '```'; sccache --show-stats; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          # Why the failed calls failed (SCCACHE_ERROR_LOG in `env:` says what each kind means).
+          log=/tmp/sccache-server.log
+          kinds='(RateLimited|AlreadyExists|PermissionDenied|ConditionNotMatch|Unexpected) \([a-z]+\) at [A-Za-z_:]+'
+          if [ -s "$log" ] && grep -q -E "$kinds" "$log"; then
+            { echo '#### sccache backend errors, by kind and operation'; echo '```'
+              grep -o -E "$kinds" "$log" | sed -E 's/ \([a-z]+\)//' | sort | uniq -c
+              echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+            grep -o -E "$kinds" "$log" | sed -E 's/ \([a-z]+\)//' | sort | uniq -c
+            grep -m 5 -E "$kinds" "$log" | cut -c1-400 || true
           fi
 
   # The ESP32-S3's machine (`lp-emu-esp32s3`, plan three M6), and the third
@@ -2447,6 +2569,16 @@ jobs:
           if command -v sccache >/dev/null; then
             { echo '#### sccache'; echo '```'; sccache --show-stats; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           fi
+          # Why the failed calls failed (SCCACHE_ERROR_LOG in `env:` says what each kind means).
+          log=/tmp/sccache-server.log
+          kinds='(RateLimited|AlreadyExists|PermissionDenied|ConditionNotMatch|Unexpected) \([a-z]+\) at [A-Za-z_:]+'
+          if [ -s "$log" ] && grep -q -E "$kinds" "$log"; then
+            { echo '#### sccache backend errors, by kind and operation'; echo '```'
+              grep -o -E "$kinds" "$log" | sed -E 's/ \([a-z]+\)//' | sort | uniq -c
+              echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+            grep -o -E "$kinds" "$log" | sed -E 's/ \([a-z]+\)//' | sort | uniq -c
+            grep -m 5 -E "$kinds" "$log" | cut -c1-400 || true
+          fi
 
   # The heap-budget record's chip half (`just heap-budget-check-chips`,
   # docs/heap-budget-gate.md "The second source"), the LINK half of lp-cli's
@@ -2616,6 +2748,16 @@ jobs:
           if command -v sccache >/dev/null; then
             { echo '#### sccache'; echo '```'; sccache --show-stats; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           fi
+          # Why the failed calls failed (SCCACHE_ERROR_LOG in `env:` says what each kind means).
+          log=/tmp/sccache-server.log
+          kinds='(RateLimited|AlreadyExists|PermissionDenied|ConditionNotMatch|Unexpected) \([a-z]+\) at [A-Za-z_:]+'
+          if [ -s "$log" ] && grep -q -E "$kinds" "$log"; then
+            { echo '#### sccache backend errors, by kind and operation'; echo '```'
+              grep -o -E "$kinds" "$log" | sed -E 's/ \([a-z]+\)//' | sort | uniq -c
+              echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+            grep -o -E "$kinds" "$log" | sed -E 's/ \([a-z]+\)//' | sort | uniq -c
+            grep -m 5 -E "$kinds" "$log" | cut -c1-400 || true
+          fi
 
   # The BOARDS half of lp-cli's emulator-backed tests (`just
   # test-emu-c6-cli-boards`): the fragmented-heap reads, the split image's
@@ -2696,6 +2838,16 @@ jobs:
         run: |
           if command -v sccache >/dev/null; then
             { echo '#### sccache'; echo '```'; sccache --show-stats; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          # Why the failed calls failed (SCCACHE_ERROR_LOG in `env:` says what each kind means).
+          log=/tmp/sccache-server.log
+          kinds='(RateLimited|AlreadyExists|PermissionDenied|ConditionNotMatch|Unexpected) \([a-z]+\) at [A-Za-z_:]+'
+          if [ -s "$log" ] && grep -q -E "$kinds" "$log"; then
+            { echo '#### sccache backend errors, by kind and operation'; echo '```'
+              grep -o -E "$kinds" "$log" | sed -E 's/ \([a-z]+\)//' | sort | uniq -c
+              echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+            grep -o -E "$kinds" "$log" | sed -E 's/ \([a-z]+\)//' | sort | uniq -c
+            grep -m 5 -E "$kinds" "$log" | cut -c1-400 || true
           fi
 
   # The C6 repartition's migration, end to end on the emulated C6 (`just
@@ -2801,6 +2953,16 @@ jobs:
           if command -v sccache >/dev/null; then
             { echo '#### sccache'; echo '```'; sccache --show-stats; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           fi
+          # Why the failed calls failed (SCCACHE_ERROR_LOG in `env:` says what each kind means).
+          log=/tmp/sccache-server.log
+          kinds='(RateLimited|AlreadyExists|PermissionDenied|ConditionNotMatch|Unexpected) \([a-z]+\) at [A-Za-z_:]+'
+          if [ -s "$log" ] && grep -q -E "$kinds" "$log"; then
+            { echo '#### sccache backend errors, by kind and operation'; echo '```'
+              grep -o -E "$kinds" "$log" | sed -E 's/ \([a-z]+\)//' | sort | uniq -c
+              echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+            grep -o -E "$kinds" "$log" | sed -E 's/ \([a-z]+\)//' | sort | uniq -c
+            grep -m 5 -E "$kinds" "$log" | cut -c1-400 || true
+          fi
 
   # The main validate job runs on x64. It was ARM from 2026-06 (x64 was
   # disabled over x86_64 host-JIT failures in `lpvm-cranelift`; that JIT was
@@ -2871,10 +3033,11 @@ jobs:
       - name: Install just
         uses: extractions/setup-just@v3
 
-      # test-rust-core always runs; the studio-web host test only when studio
-      # paths changed (it forces a differently-feature-unified rebuild of the
-      # Dioxus tree); filetests only when shader paths changed. Pushes to
-      # main force every gate true.
+      # test-rust-core always runs (its feature-variant half,
+      # `test-rust-features`, runs in the lint job — see its step); the
+      # studio-web host test only when studio paths changed (it forces a
+      # differently-feature-unified rebuild of the Dioxus tree); filetests
+      # only when shader paths changed. Pushes to main force every gate true.
       #
       # schema-check and the heap ratchet (next step) run against the
       # `target/debug/lp-cli` the workspace `cargo test` just built, via the
@@ -2970,6 +3133,16 @@ jobs:
           if command -v sccache >/dev/null; then
             { echo '#### sccache'; echo '```'; sccache --show-stats; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           fi
+          # Why the failed calls failed (SCCACHE_ERROR_LOG in `env:` says what each kind means).
+          log=/tmp/sccache-server.log
+          kinds='(RateLimited|AlreadyExists|PermissionDenied|ConditionNotMatch|Unexpected) \([a-z]+\) at [A-Za-z_:]+'
+          if [ -s "$log" ] && grep -q -E "$kinds" "$log"; then
+            { echo '#### sccache backend errors, by kind and operation'; echo '```'
+              grep -o -E "$kinds" "$log" | sed -E 's/ \([a-z]+\)//' | sort | uniq -c
+              echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+            grep -o -E "$kinds" "$log" | sed -E 's/ \([a-z]+\)//' | sort | uniq -c
+            grep -m 5 -E "$kinds" "$log" | cut -c1-400 || true
+          fi
 
   # The wgpu-tree workspace members (lp-gfx-wgpu, fw-browser, naga-wasm-poc)
   # are validated here, separate from validate-x64: building `-p lp-gfx-wgpu`
@@ -3037,6 +3210,16 @@ jobs:
         run: |
           if command -v sccache >/dev/null; then
             { echo '#### sccache'; echo '```'; sccache --show-stats; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          # Why the failed calls failed (SCCACHE_ERROR_LOG in `env:` says what each kind means).
+          log=/tmp/sccache-server.log
+          kinds='(RateLimited|AlreadyExists|PermissionDenied|ConditionNotMatch|Unexpected) \([a-z]+\) at [A-Za-z_:]+'
+          if [ -s "$log" ] && grep -q -E "$kinds" "$log"; then
+            { echo '#### sccache backend errors, by kind and operation'; echo '```'
+              grep -o -E "$kinds" "$log" | sed -E 's/ \([a-z]+\)//' | sort | uniq -c
+              echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+            grep -o -E "$kinds" "$log" | sed -E 's/ \([a-z]+\)//' | sort | uniq -c
+            grep -m 5 -E "$kinds" "$log" | cut -c1-400 || true
           fi
 
   # Real-browser wasm suites: lpa-fs-opfs (real OPFS ops, Web Locks, store
@@ -3138,6 +3321,16 @@ jobs:
         run: |
           if command -v sccache >/dev/null; then
             { echo '#### sccache'; echo '```'; sccache --show-stats; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          # Why the failed calls failed (SCCACHE_ERROR_LOG in `env:` says what each kind means).
+          log=/tmp/sccache-server.log
+          kinds='(RateLimited|AlreadyExists|PermissionDenied|ConditionNotMatch|Unexpected) \([a-z]+\) at [A-Za-z_:]+'
+          if [ -s "$log" ] && grep -q -E "$kinds" "$log"; then
+            { echo '#### sccache backend errors, by kind and operation'; echo '```'
+              grep -o -E "$kinds" "$log" | sed -E 's/ \([a-z]+\)//' | sort | uniq -c
+              echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+            grep -o -E "$kinds" "$log" | sed -E 's/ \([a-z]+\)//' | sort | uniq -c
+            grep -m 5 -E "$kinds" "$log" | cut -c1-400 || true
           fi
 
   # Story baselines are CI-canonical and live OUTSIDE this repo, in the

@@ -28,7 +28,7 @@ impl crate::LanLinkSource for DroppableLanBoard {
         let info = lpa_link::providers::network_link::lan_link_info(URL);
         vec![GrantedLink {
             link: Box::new(LossyLink {
-                inner: Box::new(fake_device_link(info.clone(), &self.device)),
+                inner: Box::new(bench_link(info.clone(), &self.device)),
                 lose: Rc::clone(&self.lose),
                 open: false,
                 lost: VecDeque::new(),
