@@ -133,7 +133,7 @@ pub fn DevicesPage(
                                 // Its Wi‑Fi row (Wi‑Fi roadmap M5).
                                 wifi: devices.wifi.get(&card.id).cloned(),
                                 // How a board on the LAN is reached
-                                // (`?lan=`, Wi-Fi M6 P07).
+                                // (Wi-Fi M6 P07).
                                 lan: devices.lan_links.get(&card.id).cloned(),
                                 // Its files across a layout change (the
                                 // C6 repartition): question, refusal, a

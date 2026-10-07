@@ -83,7 +83,7 @@ pub struct DeviceRosterView {
     /// board's network status, read on a link that holds edit. Absent = no
     /// row (a sim, a held board, a Bluetooth link nothing unlocked).
     pub wifi: std::collections::BTreeMap<lpa_devices::DeviceId, crate::app::network::UiDeviceWifi>,
-    /// Each board reached on the LAN right now (`?lan=`, Wi-Fi M6 P07): the
+    /// Each board reached on the LAN right now (Wi-Fi M6 P07): the
     /// card's "Wi-Fi · <address>" line. Absent = not a LAN link.
     pub lan_links: std::collections::BTreeMap<lpa_devices::DeviceId, super::UiLanLink>,
     /// Each remembered board's "Connect over Wi‑Fi" under way, or why it
