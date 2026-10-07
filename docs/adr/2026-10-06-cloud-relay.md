@@ -1,6 +1,6 @@
 # ADR: The cloud relay — boards on Wi-Fi reachable through lightplayer.app
 
-- **Status:** Proposed (accepted at PR A's ship call)
+- **Status:** Accepted at PR A's ship call (#999, merged 2026-10-07; sections 1–7). The device half ("Device side", PR B, #1019) is proposed until that PR ships, and nothing in it has run on silicon.
 - **Date:** 2026-10-06
 - **Deciders:** Photomancer (Yona; the Wi-Fi roadmap director)
 - **Supersedes:** None
@@ -204,10 +204,171 @@ argv), so M8 builds against a board-shaped peer before the firmware lands.
 `lp-cli/tests/relay_link.rs` runs both against an in-process
 `lp-cloud-server`.
 
-### Device side (PR B)
+### Device side (PR B, #1019)
 
-To be written by P11: the shared network slot and same-key takeover (D2), DNS
-on the C6, the relay client in the core, buffers and the measured cost.
+The C6 dials lightplayer.app by itself and holds its device leg. Every figure
+below is emulated unless it says otherwise: **no desk sitting has happened**
+(plan P10), so nothing here is validated on silicon.
+
+**One network slot, shared (D2, RD9).** The C6 holds one secure network
+session (about 14 KB with its link), and a relay route is a session too. So
+the LAN's slot became **the network slot** (`NETWORK_LINK_SLOTS = 1`,
+`fw-esp32-common/src/radio_link/radio_link_port.rs`): the LAN endpoint and the
+relay driver take turns at it, and each link records the edge serving it.
+A connection that finds the slot held does not open a second session. It
+parks its first frame (the initiator's SYN, which carries Noise's msg1 and
+names its key id in the clear, at most 96 B, in a buffer made with the slot)
+and the link mux decides (`radio_link/parked_handshake.rs`):
+
+- **another key id**, an anonymous one, or a holder whose session is not up:
+  *busy*, at once, with no key lookup and nothing charged to the login
+  backoff (a LAN newcomer is closed 1013; a relay route is closed `Busy`);
+- **the holder's key id**: the server looks the key up through the same
+  `lpc-access` path every handshake takes and checks msg1 against it. Only a
+  msg1 that verifies takes the slot, so a stranger who knows a key id (they
+  travel in the clear) can never knock a session down. The holder is closed
+  and the newcomer opens with the parked frame first. A wrong key is a failed
+  guess, charged to the login backoff like any other.
+
+This runs in both directions: a `lan:` client with the key a relay session
+holds takes the slot (what M8's automatic LAN upgrade rides), and a relay
+route with the LAN session's key takes it back. The relay route a LAN client
+displaces is closed `Normal`, with no reason of its own: a `TakenOver` close
+reason would be a `RELAY_PROTO_VERSION` bump for a word the browser does not
+need, and the director decided against it (DD199). A parked frame waits at
+most 5 s for its verdict.
+
+**What dials, and when (RD8).** Only when the station has an address, Cloud
+relay is on, and the board holds at least one `SecretKind::Account` entry.
+`RelayClient::may_dial` states it once, for the driver and the C6 task. The
+backoff is `lpc-relay`'s: 1 s doubling to 60 s with ±50 % jitter; 2–12 s
+after a hub that closed `1001 going away` (a deploy); an hour after a version
+refusal; 10 s each to resolve, connect and register. A leg silent for 60 s is
+closed by the driver, and the socket's own timeout is 75 s. Account entries
+come from the access store once at boot and again on every `AccessAdd`,
+`AccessRemove` and `AccessSetSwitches` (a new `AccessChanged` hook on
+`LpServer`; a raw write of `/.lp/access.json` fires nothing, so the relay
+picks those keys up at the next boot). The hello carries the board's MAC, its
+name (`/.lp/device.json`, else `lp-xxxx`), the wire version and its LAN
+address (`<ip>:80`); a new address sends `LanChanged`.
+
+**DNS on the device.** embassy-net's `dns` feature is on (DHCP's DNS servers
+feed it), `SOCKET_SLOTS` went 6 → 8 (the relay's TCP socket and the DNS
+socket) and `net_address`'s watcher table grew by one. Name resolution costs
+**+4,304 B** of core flash, measured with the feature switched on alone.
+
+**The task is in the core.** `fw-esp32c6/src/net/relay_task.rs` runs on
+`lp-net` beside the station, the LAN endpoint and mDNS, started from
+`core_boot`, so an engine-less core reaches the relay too (OTA M8's rule). The
+loop itself (`fw-esp32-common/src/net/relay/`: the driver and the leg, with
+the WebSocket's client half in `net/ws/`) is shared with the host harness and
+takes no `esp-*` crate; the C6 supplies embassy-net's DNS and TCP, the
+hardware RNG and the station's address. The split verifier places the relay
+client in the core (0 core nodes in the engine region). **Core-only
+registration has not been exercised**: `test-emu-c6-split-boot`'s S8 boots
+core-only with the link up and the task running, but no uplink is wired to
+that cell.
+
+**Memory: allocated only while the board may dial (RD12 reversed, round 2).**
+P8 first allocated the relay's buffers at boot with the LAN's. With
+`projects/test/basic` loaded and a network session open that left the largest
+free block at 13,448 B (relay session) / 13,384 B (LAN session); a probe with
+Cloud relay on but no account key gave the same 13,448 B, and with Cloud relay
+off 19,556 B. Yona ruled (2026-10-07), in order and stopping when the gate
+case passed:
+
+- **(a)** `run_relay_leg` allocates the leg's TCP and WebSocket buffers
+  (5,830 B) the first time the driver asks to connect, keeps them across
+  reconnects, and gives them back whenever the board may not dial. The
+  allocation is fallible (`try_zeroed_bytes`): no room is a failed dial that
+  the backoff retries, never a reset. A board with Cloud relay on and no
+  account key holds nothing.
+- **(b)** Each path's outgoing frame exists only while that path serves the
+  session: the LAN's 1,088 B after its upgrade, the relay's 1,091 B while a
+  route holds the slot. Neither path's whole set can go: the LAN listener
+  must stay to take a same-key takeover and to answer anyone else busy, and
+  the relay leg must stay registered so a second key through the relay is
+  told busy. An image with no LAN endpoint at all (the most "a relay session
+  frees the LAN" could give, and it breaks the takeover) put the relay-session
+  row at only 16,600 B.
+- **(c)** was not applied. The C6's read gate is **40 KiB free / 8 KiB
+  block** (`READ_GATE`, from the 2026-10-07 read-frame budget: a read on a
+  fragmented heap shrinks its frames to half the largest block), not the
+  16,384 B the plan quoted from the LAN's earlier gate. Against the gate the
+  firmware runs, every row below passes in every run (DD208).
+
+**Measured, emulated** (`lp-emu:esp32c6:t1+net=lan@81816d2f4`, the board's
+heartbeat, 2 runs; free bytes never move run to run):
+
+| State | Free | Largest block |
+|---|---:|---:|
+| joined, no account key | 174,568 B | 95,340 B |
+| registered, no session | 168,668 B | 89,500–89,508 B |
+| `projects/test/basic` loaded, relay session open | 57,848 B | 20,368 B (2/2) |
+| `projects/test/basic` loaded, LAN session open | 57,784 B | 20,368 B (2/2) |
+
+Registering costs about **5.9 KB** of free heap (P9 measured 7.0 KB before
+(a); the plan's line was 8 KB). **The gate case's largest block is bimodal
+run to run**, because host timing moves the order of the emulated board's
+allocations: at the previous head (`af4c35ded`, 6 runs) the relay-session row
+read 20,432 B in 4 of 5 runs and 13,440 B in 1, and the LAN-session row
+20,424–20,440 B in 5 of 6 and 13,384 B in 1. Which step did the work: (b), in
+most runs and not all; (a) alone moved nothing there, because the relay dials
+in that case. A scratch probe of (a) itself (a network saved, a LAN session
+open, not committed) read the same free bytes with Cloud relay on and no key
+as with it off, on every image, but the largest block differed on the last
+one (15,880 / 15,880 / 19,604 B on, against 26,508 B ×3 off): same bytes, a
+different layout, reported as measured and not tuned. At boot, with nothing
+saved, the C6 heap record moved from 103,000 to **105,580 B used / 195,956 B
+free / 116,840 B largest** (the network slots' parked-handshake buffers and
+per-edge signals, two more socket slots and the DNS socket; CI's clean
+figures). **`lp-net`'s stack high water with DNS and the handshake was not
+measured** (it needs a `net_thread_stack_diag` build).
+
+**Flash.** The relay client alone is **+29,840 B** of core (P8's relay task
+over its own DNS), above the plan's 24 KB line (A3). The slot, challenge, mux
+and wire field cost +5,200 B of core and +4,484 B of engine. At this PR's last
+firmware change the core sat 64 B under its 32 KiB page; main's #1005
+(core-only Bluetooth updates) then crossed it, which is not this PR's growth.
+CI's build of `a303512e4` reads **88,308 B gated headroom**: above CI's 64 KB
+line, below the plan's 128 KB bar, accepted by Yona on 2026-10-07 as "OK but
+tight" (a local build at `81816d2f4` read 89,146 B). The spend is in
+`2026-07-28-esp32c6-flash-budget.md`'s ledger. A line the board prints on
+every relay state change was written and **taken out**: 688 B of core pushed
+the core 224 B over a page and cost the update headroom 32 KiB at once. So
+the board's console says its relay state only in the heartbeat's
+`[relay] state=… routes=… rx=… tx=…` line (and a walk reads the board's status
+answers instead); there is no line when the state changes.
+
+**Where the desk image dials (RD14).** The product image dials
+`lightplayer.app:80`, always. `LP_RELAY_HOST=<host>[:port]` at build time
+(`fw-esp32c6/build.rs`) makes a **desk image** that dials that instead and
+says so on the console at boot (`[INIT] desk image: the relay is …`). It
+exists so the desk sitting can use a local `lp-cloud-server` and a dev account
+without anyone's real session. Nothing in the release workflows sets it.
+
+**Status.** `NetworkStatus.relay` carries `off`, `noAccount`,
+`waitingForInternet`, `connecting`, `connected` or `refused { reason }`
+(`unknownAccount`, `updateFirmware`, `busy`): one wire bump, to 40. The words
+are core's (`wifi_words::relay`) and `lp-cli wifi status` reads the same
+ones. See the device-wifi-settings ADR's amendment.
+
+**The emulator reaches it** through an uplink on the virtual LAN (the
+emulator-seams ADR, section 11's amendment), so an emulated C6 resolves and
+dials `lightplayer.app` like a real one, with no change to the firmware.
+
+**Not proven here, and by whom.** The desk sitting (P10) owns what the
+emulator cannot answer: the real radio, a home router's NAT, real DNS, the
+internet path to the service, whether the leg survives 30 minutes idle
+through fly's proxy and a NAT (R3), the 15 s reconnect after a deploy (a
+desk-only measurement, DD200: the emulated cell prints the time and does not
+assert it, and its spread was 7.2–47.4 s of wall time on a loaded host,
+undiagnosed), lp-link's timeouts against a real relay's round trip (R2; none
+was changed), and the frame-rate budget with the relay joined (the radio
+budget ADR's ceilings). One compatibility promise carries over to the board:
+a fielded core's `RELAY_PROTO_VERSION` has to stay listed in the hub for as
+long as boards run it, which matters most for cores that will update over the
+relay (OTA M8).
 
 ## Consequences
 
@@ -220,6 +381,14 @@ on the C6, the relay client in the core, buffers and the measured cost.
   `RELAY_PROTO_VERSION`, and the hub keeps old versions listed while boards
   speak them.
 - Every deploy drops every board for 2–12 s, and every session on it.
+- On a C6 the LAN and the relay share one session: while one person is on
+  Wi-Fi, a second (by either path) is told "busy" unless it proves the same
+  key, in which case it takes over.
+- The C6 pays for it in the core: +29,840 B of flash for the client and
+  +4,304 B for DNS, about 2.6 KB more heap at boot and about 5.9 KB more only
+  while it may dial. The gated headroom is 88,308 B (CI's build),
+  under the plan's 128 KB bar and over CI's 64 KB line; the next core
+  growth has to be weighed against it.
 - A board reachable through the relay is reachable by anyone who learns its
   id and its password. That is the point (helping Sean set up his board), and
   why "Anyone" never applies there.
@@ -244,8 +413,9 @@ on the C6, the relay client in the core, buffers and the measured cost.
 
 ## Follow-ups
 
-- PR B (P6–P11): the board side, the wire field (`NetworkStatus.relay`), the
-  emulator's uplink, measurement, and this ADR's device half.
+- PR B (#1019): the board side, the wire field (`NetworkStatus.relay`), the
+  emulator's uplink and this ADR's device half are written; the desk sitting
+  (P10) is what moves them from emulated to measured.
 - M8: Studio's relay provider, the board list, the share link
   (`lightplayer.app/b/<id>`), the automatic LAN upgrade.
 - Cloud-side access settings for each board (registry, owner sharing,
