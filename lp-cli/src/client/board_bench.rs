@@ -126,6 +126,39 @@ pub fn take(port: &str, holder: &str, why: &str, minutes: Option<u32>) -> Result
     }
 }
 
+/// Whether a working `board` is on `PATH` (or named by `$BOARD_BIN`) at all
+/// — the courtesy check before leasing, which (unlike [`check`]) has no
+/// silent no-op: asking for a lease and not getting one must never look
+/// like holding one. `firmware install` leases only when this is true.
+pub fn available() -> bool {
+    board_binary().is_some()
+}
+
+/// Drop the lease [`take`] holds on `port`, best-effort: the bench's own
+/// leases expire on their own, so a caller may log and continue rather than
+/// fail its whole operation over this.
+pub fn drop_lease(port: &str, holder: Option<&str>) -> Result<()> {
+    let Some(board) = board_binary() else {
+        return Ok(());
+    };
+    let mut args: Vec<OsString> = vec!["drop".into(), port.into()];
+    if let Some(holder) = holder {
+        args.extend(["--as".into(), holder.into()]);
+    }
+    let output = Command::new(&board).args(&args).output()?;
+    let said = String::from_utf8_lossy(&output.stderr)
+        .trim_end()
+        .to_owned();
+    if output.status.success() {
+        if !said.is_empty() {
+            eprintln!("board: {said}");
+        }
+        Ok(())
+    } else {
+        bail!("could not drop the lease on {port}: {said}")
+    }
+}
+
 /// The bench's view of every board, or `None` without a working `board`.
 pub fn list() -> Option<Vec<BenchBoard>> {
     let board = board_binary()?;
@@ -250,6 +283,32 @@ mod tests {
         assert!(check("/dev/cu.usbmodem1", None, None).is_ok());
         assert!(list().is_none());
         assert!(take("/dev/cu.usbmodem1", "me", "test", None).is_err());
+        assert!(!available());
+        // Unlike a lease, dropping one is a no-op without a bench: nothing
+        // was held, so there is nothing to fail over.
+        assert!(drop_lease("/dev/cu.usbmodem1", None).is_ok());
+    }
+
+    #[test]
+    fn available_reflects_whether_board_runs() {
+        let _guard = ENV.lock().unwrap();
+        let _stub = Stub::new(0, "ok");
+        assert!(available());
+    }
+
+    #[test]
+    fn drop_lease_passes_the_holder_and_reports_the_benchs_failure() {
+        let _guard = ENV.lock().unwrap();
+        let stub = Stub::new(0, "FC6 fixture-c6 dropped");
+        drop_lease("/dev/cu.usbmodem1", Some("ota")).unwrap();
+        assert_eq!(stub.args(), "drop /dev/cu.usbmodem1 --as ota");
+        drop(stub);
+
+        let _failing = Stub::new(1, "fixture-c6 is not yours");
+        let error = drop_lease("/dev/cu.usbmodem1", None)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("fixture-c6 is not yours"), "{error}");
     }
 
     #[test]

@@ -1110,6 +1110,10 @@ board drop fixture-c6 --as "direct: ota"
   `uhubctl` against a board you do not hold.
 - Leases are a courtesy lock between cooperating agents, not security; a
   lease expires (30 min, `board renew`), and dies with its `--pid`.
+- To put a published release on a board rather than a local build, see
+  `lp-cli firmware install --release <version|previous|latest>` in
+  `lp-fw/builds/README.md` — it leases through this same `board` when
+  present.
 
 ## Hardware validation — one system, no board most days
 
