@@ -244,6 +244,15 @@ long-lived branch conflict on this file whenever main re-baselined too.
   ratchet's 0 % margin on a placement figure turns a host-side difference
   in the emulated run into a red check.
 
+- 2026-10-07 — the cloud relay on the C6 (Wi-Fi relay PR B, #1019, P8): a
+  real move, not churn — the network slots' parked-handshake buffers and
+  per-edge signals, two more embassy-net socket slots and its DNS socket
+  took the C6's boot heap from 103,000 to 105,560 B used and its largest
+  block from 119,432 to 116,840 B (nothing saved, so no relay buffers);
+  the main stack's high water 11,940 → 12,200 B. Re-baselined locally
+  (`just heap-budget-baseline-chips esp32c6`); if CI's figure differs by
+  the 8 B of the entry above, CI's wins.
+
 **Exit criteria** — a PR whose only memory effect is a few bytes of statics
 passes the gate without touching the record, and two PRs that each
 legitimately re-baseline different chips/projects do not conflict. Likely
