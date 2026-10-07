@@ -196,6 +196,27 @@ mod tests {
         );
     }
 
+    /// What a rolled-back core meets: a file a newer firmware grew keys in.
+    /// The boot (`fw-esp32c6`'s `main`) reads it with `read_network_file` and
+    /// joins on `file.wifi && !file.networks.is_empty()`, so the grown file
+    /// must read as its networks, not as "damaged: no network", and a read
+    /// writes nothing back.
+    #[test]
+    fn a_file_with_keys_this_core_does_not_know_still_joins() {
+        let grown = b"{\"version\":1,\"wifi\":true,\"cloudRelay\":false,\"band\":\"2.4\",\
+            \"networks\":[{\"ssid\":\"lp-walk-net\",\"password\":\"correct-horse-42\",\"priority\":2},\
+            {\"ssid\":\"lp-back-office\",\"password\":\"\",\"hidden\":true}]}";
+        let fs = LpFsMemory::new();
+        fs.write_file(NetworkFile::PATH.as_path(), grown).unwrap();
+        let file = read_network_file(&fs);
+        assert!(file.wifi && !file.networks.is_empty(), "the board joins");
+        assert!(!file.cloud_relay, "the keys it knows still read");
+        let names: alloc::vec::Vec<&str> = file.networks.iter().map(|n| n.ssid.as_str()).collect();
+        assert_eq!(names, ["lp-walk-net", "lp-back-office"]);
+        assert!(file.networks[1].hidden);
+        assert_eq!(fs.read_file(NetworkFile::PATH.as_path()).unwrap(), grown);
+    }
+
     #[test]
     fn a_short_password_writes_nothing() {
         let fs = LpFsMemory::new();

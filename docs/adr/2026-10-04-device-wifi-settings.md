@@ -254,3 +254,35 @@ the form until the press and in the op until the request leaves.
   network…" saves as not hidden); `lp-cli wifi add --hidden` and the offer's
   `hidden` parameter set it.
 - Revisit storing the PMK (WQ2b) once M6 knows what esp-radio accepts.
+
+## Amendment (2026-10-07): the reader ignores keys it does not know
+
+**Decision.** `NetworkFile::from_json` ignores unknown keys, at the top level
+and inside each network entry. Version 1 reads as before, the keys it knows
+are still checked for their type and their rules, and **a `version` other
+than 1 is still refused by its number.** Until now both an unknown top-level
+key and an unknown entry key were refused, so a file that grew a key read as
+"damaged" (no network). The derived serde types and the schema
+(`schemas/device-network.schema.json`) drop `additionalProperties: false`
+to match.
+
+**Why.** Over-the-air updates over Wi‑Fi (`lp2025/2026-10-06-2249-ota-wifi-updates`)
+make this a file the *core* reads to get onto the network, and a core that
+is the only way to reach a board in a house may be rolled back or held back
+by a failed update. If a newer firmware has added a key, the older core must
+still join; a reader that refuses it leaves the board with no Wi‑Fi and no
+way to be reached. Yona, 2026-10-07: parsers should be tolerant of unknown
+fields so we stay easily backwards compatible.
+
+**What does not change.** Writers write version 1 and exactly the keys
+above, so no byte on any board changes: **this widens what the reader
+accepts and is not a format bump** (the bump rule above is about what a
+reader must still read, and every old file still reads). An old core that
+rewrites the file (only a client's request does) writes it without a key it
+did not know; that is the cost of tolerance, and an additive key must be
+safe to lose that way. A change an older reader would *misread* is not an
+additive key: it needs `version: 2`, which a firmware may write only when its
+rollback target reads both, and no firmware rewrites the file on an
+unconfirmed trial boot (the access file's rule, `may_migrate_device_store`;
+today only a client's request writes the network file, and a core-only
+image serves no channel 1).
