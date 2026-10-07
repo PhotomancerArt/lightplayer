@@ -13,9 +13,10 @@ use dioxus::prelude::*;
 use lpa_studio_core::{
     DeviceId, HeardNetwork, LastAttempt, NetworkStatus, OfferArgs, OfferPath, SavedNetworkInfo,
     StationFailure, StationState, UiDeviceWifi, UiOffer, UiWifiTest, WIFI_NETWORK_PARAM,
-    WIFI_PASSWORD_PARAM, WifiTestOutcome, WifiTestProgress, WifiTestStep,
+    WIFI_PASSWORD_PARAM, WifiTestProgress, WifiTestStep,
 };
 use lpa_studio_web_story_macros::story;
+use lpc_wire::{RelayRefusal, RelayState};
 
 use crate::app::home::ble_access_stories::{usb_access, usb_card};
 use crate::app::home::device_offer_story_fixtures::StoryDeviceCard;
@@ -117,6 +118,7 @@ fn wifi_test_running_in_its_row() -> Element {
         UiWifiTest {
             ssid: "Starlink Apt".to_string(),
             relay_step: true,
+            relay_note: None,
             progress: WifiTestProgress::Running(WifiTestStep::CheckingPassword),
         },
     );
@@ -191,28 +193,65 @@ fn wifi_test_not_in_range() -> Element {
 }
 
 #[story(
-    description = "The in-row test, connected but lightplayer.app didn't answer (the relay step, M7): \"Connected, no internet · lightplayer.app didn't answer (10.20.4.118). The network may need a sign-in page.\""
+    description = "The in-row test, connected but lightplayer.app didn't answer (the board's relay says waitingForInternet, wire 40): \"Reaching lightplayer.app\" crossed, \"Connected, no internet · lightplayer.app didn't answer (10.20.4.118). The network may need a sign-in page.\", and \"Connected, no internet\" under the Cloud relay switch."
 )]
 fn wifi_test_no_internet() -> Element {
-    let wifi = with_test(
-        board(
-            StationState::Connected {
-                ssid: "Ritual Coffee Guest".to_string(),
-                ip: "10.20.4.118".to_string(),
-                rssi: -58,
-                host: "lp-8e30.local".to_string(),
-            },
-            vec![saved("Ritual Coffee Guest", Some(LastAttempt::Connected))],
-        ),
-        UiWifiTest {
-            ssid: "Ritual Coffee Guest".to_string(),
-            relay_step: true,
-            progress: WifiTestProgress::Done(WifiTestOutcome::NoInternet {
-                ip: "10.20.4.118".to_string(),
-            }),
-        },
-    );
-    panel_with_test(wifi)
+    let wifi = joined_cafe(RelayState::WaitingForInternet);
+    panel(testing(wifi, "Ritual Coffee Guest"), None, None)
+}
+
+#[story(
+    description = "The in-row test, joined and reaching lightplayer.app (relay connecting): the first three steps ticked, \"Reaching lightplayer.app\" now; \"Reaching lightplayer.app…\" under the Cloud relay switch."
+)]
+fn wifi_test_reaching_lightplayer_app() -> Element {
+    let wifi = joined_cafe(RelayState::Connecting);
+    panel(testing(wifi, "Ritual Coffee Guest"), None, None)
+}
+
+#[story(
+    description = "The in-row test, done (relay connected): all four steps ticked including \"Reaching lightplayer.app\", \"Connected · good signal · 10.20.4.118\" with Done, and \"Connected to lightplayer.app\" in green under the Cloud relay switch."
+)]
+fn wifi_test_reached_lightplayer_app() -> Element {
+    let wifi = joined_cafe(RelayState::Connected);
+    panel(testing(wifi, "Ritual Coffee Guest"), None, None)
+}
+
+#[story(
+    description = "Joined, with no account key on the board (relay noAccount): three steps ticked, no relay step, the note \"Sign in to Studio and plug this board in once to use lightplayer.app\" under them, the same line under the Cloud relay switch, and Connected."
+)]
+fn wifi_test_no_account_key() -> Element {
+    let wifi = joined_cafe(RelayState::NoAccount);
+    panel(testing(wifi, "Ritual Coffee Guest"), None, None)
+}
+
+#[story(
+    description = "Joined, its account key reset on lightplayer.app (relay refused unknownAccount): no relay step, the note \"Plug this board into Studio once to refresh its account\", the same under the switch, and Connected."
+)]
+fn wifi_test_account_key_refused() -> Element {
+    let wifi = joined_cafe(RelayState::Refused {
+        reason: RelayRefusal::UnknownAccount,
+    });
+    panel(testing(wifi, "Ritual Coffee Guest"), None, None)
+}
+
+#[story(
+    description = "Joined, its relay protocol too old for lightplayer.app (relay refused updateFirmware): no relay step, the note \"Update this board's firmware to use lightplayer.app\", the same under the switch, and Connected."
+)]
+fn wifi_test_firmware_too_old_for_the_relay() -> Element {
+    let wifi = joined_cafe(RelayState::Refused {
+        reason: RelayRefusal::UpdateFirmware,
+    });
+    panel(testing(wifi, "Ritual Coffee Guest"), None, None)
+}
+
+#[story(
+    description = "Joined, lightplayer.app busy (relay refused busy; the board tries again by itself): no relay step, no note, nothing under the switch, and Connected."
+)]
+fn wifi_test_relay_busy() -> Element {
+    let wifi = joined_cafe(RelayState::Refused {
+        reason: RelayRefusal::Busy,
+    });
+    panel(testing(wifi, "Ritual Coffee Guest"), None, None)
 }
 
 #[story(
@@ -446,9 +485,27 @@ fn board(station: StationState, networks: Vec<SavedNetworkInfo>) -> UiDeviceWifi
             cloud_relay: true,
             networks,
             station,
+            relay: RelayState::Off,
         }),
         ..UiDeviceWifi::new(DeviceId(7), true)
     }
+}
+
+/// Joined to the café's network, the relay saying `relay`.
+fn joined_cafe(relay: RelayState) -> UiDeviceWifi {
+    let mut wifi = board(
+        StationState::Connected {
+            ssid: "Ritual Coffee Guest".to_string(),
+            ip: "10.20.4.118".to_string(),
+            rssi: -58,
+            host: "lp-8e30.local".to_string(),
+        },
+        vec![saved("Ritual Coffee Guest", Some(LastAttempt::Connected))],
+    );
+    if let Some(status) = wifi.status.as_mut() {
+        status.relay = relay;
+    }
+    wifi
 }
 
 /// The truck: three saved, on the truck's network, the apartment's
@@ -481,9 +538,9 @@ fn testing(mut wifi: UiDeviceWifi, ssid: &str) -> UiDeviceWifi {
     wifi
 }
 
-/// `wifi` with `test` under way. A board reports its step (wire 38) but not
-/// the relay step (M7), so a story that shows the relay step hands the
-/// panel the test it draws.
+/// `wifi` with `test` under way: for a step the board only passes through
+/// (checking the password), which a story cannot catch from the board's
+/// own status, the story hands the panel the test it draws.
 fn with_test(wifi: UiDeviceWifi, test: UiWifiTest) -> (UiDeviceWifi, UiWifiTest) {
     (testing(wifi, &test.ssid), test)
 }

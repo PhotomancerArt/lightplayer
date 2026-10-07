@@ -3,8 +3,9 @@
 //!
 //! Its steps: Looking for <ssid> → Checking the password → Getting an
 //! address (· ip) → Reaching lightplayer.app (only while the cloud relay is
-//! on AND the board reports whether it reached it — the relay is M7, so no
-//! board does yet). What the station says decides how far it got:
+//! on AND the board reports reaching it: `relay` is `connecting`,
+//! `connected` or `waitingForInternet`; Wi-Fi roadmap M7). What the station
+//! says decides how far it got:
 //!
 //! | station / the network's `last` | the test |
 //! |---|---|
@@ -16,21 +17,34 @@
 //! | `failed { ssid, notFound }` / `last: notFound` | Not in range |
 //! | `failed { ssid, noAddress }` / `last: noAddress` | No address |
 //!
-//! "Connected, no internet" is the relay step failing, which needs M7's
-//! relay field; it is built here for the stories and for M7.
+//! Once joined, the relay decides the last step:
+//!
+//! | relay | the test |
+//! |---|---|
+//! | `connecting` | running, at Reaching lightplayer.app |
+//! | `connected` | Connected |
+//! | `waitingForInternet` | Connected, no internet |
+//! | `noAccount`, `refused { unknownAccount \| updateFirmware }` | Connected; the step skipped, a note under the row says what to do |
+//! | `off`, `refused { busy }` | Connected; no step |
 
-use lpc_wire::server::{ConnectStep, LastAttempt, NetworkStatus, StationFailure, StationState};
+use lpc_wire::server::{
+    ConnectStep, LastAttempt, NetworkStatus, RelayState, StationFailure, StationState,
+};
 
+use super::wifi_words::relay as relay_words;
 use super::wifi_words::test as words;
 
 /// The in-row test of one just-added network.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct UiWifiTest {
     pub ssid: String,
-    /// Whether the last step (Reaching lightplayer.app) is shown: the relay
-    /// is on and the board reports reaching it. `false` from every board
-    /// today (M7 adds the field).
+    /// Whether the last step (Reaching lightplayer.app) is shown: Cloud
+    /// relay is on and the board reports trying to reach it.
     pub relay_step: bool,
+    /// A line under the row when the relay step is skipped for a reason
+    /// the person can act on (no account key on the board, a reset key, an
+    /// old firmware).
+    pub relay_note: Option<&'static str>,
     pub progress: WifiTestProgress,
 }
 
@@ -111,15 +125,33 @@ impl UiWifiTest {
     /// The test of `ssid` from what the board says now.
     pub fn of(ssid: &str, status: &NetworkStatus) -> Self {
         let last = status.network(ssid).and_then(|network| network.last);
+        let relay_step = status.cloud_relay
+            && matches!(
+                status.relay,
+                RelayState::Connecting | RelayState::Connected | RelayState::WaitingForInternet
+            );
+        let relay_note = if status.cloud_relay {
+            relay_words::note(status.relay)
+        } else {
+            None
+        };
         let progress = match &status.station {
             StationState::Unsupported => WifiTestProgress::Saved,
             StationState::Off => WifiTestProgress::WifiOff,
             StationState::Connected {
                 ssid: on, ip, rssi, ..
-            } if on == ssid => WifiTestProgress::Done(WifiTestOutcome::Connected {
-                rssi: *rssi,
-                ip: ip.clone(),
-            }),
+            } if on == ssid => match status.relay {
+                RelayState::Connecting if relay_step => {
+                    WifiTestProgress::Running(WifiTestStep::ReachingCloud)
+                }
+                RelayState::WaitingForInternet if relay_step => {
+                    WifiTestProgress::Done(WifiTestOutcome::NoInternet { ip: ip.clone() })
+                }
+                _ => WifiTestProgress::Done(WifiTestOutcome::Connected {
+                    rssi: *rssi,
+                    ip: ip.clone(),
+                }),
+            },
             StationState::Failed { ssid: on, reason } if on == ssid => {
                 WifiTestProgress::Done(failure_outcome(*reason))
             }
@@ -143,7 +175,8 @@ impl UiWifiTest {
         };
         Self {
             ssid: ssid.to_string(),
-            relay_step: false,
+            relay_step,
+            relay_note,
             progress,
         }
     }
@@ -271,6 +304,7 @@ mod tests {
                 last,
             }],
             station,
+            relay: RelayState::Off,
         }
     }
 
@@ -376,11 +410,102 @@ mod tests {
         assert!(away.result().unwrap().body.contains("2.4 GHz"));
     }
 
+    /// A joined board's relay decides the last step, in the board's words.
+    #[test]
+    fn the_relay_decides_the_last_step_once_joined() {
+        use WifiStepState::{Bad, Done, Now};
+        use lpc_wire::server::RelayRefusal;
+
+        let joined = |relay| NetworkStatus {
+            relay,
+            ..status(
+                StationState::Connected {
+                    ssid: SSID.to_string(),
+                    ip: "192.168.1.42".to_string(),
+                    rssi: -48,
+                    host: "lp-8e30.local".to_string(),
+                },
+                Some(LastAttempt::Connected),
+            )
+        };
+
+        let reaching = UiWifiTest::of(SSID, &joined(RelayState::Connecting));
+        assert_eq!(states(&reaching), [Done, Done, Done, Now]);
+        assert_eq!(reaching.steps()[3].label, "Reaching lightplayer.app");
+        assert_eq!(reaching.result(), None);
+
+        let reached = UiWifiTest::of(SSID, &joined(RelayState::Connected));
+        assert_eq!(states(&reached), [Done, Done, Done, Done]);
+        assert_eq!(reached.result().unwrap().headline, "Connected");
+        assert_eq!(reached.relay_note, None);
+
+        let no_internet = UiWifiTest::of(SSID, &joined(RelayState::WaitingForInternet));
+        assert_eq!(states(&no_internet), [Done, Done, Done, Bad]);
+        assert_eq!(
+            no_internet.result().unwrap().headline,
+            "Connected, no internet"
+        );
+
+        for (relay, note) in [
+            (
+                RelayState::NoAccount,
+                "Sign in to Studio and plug this board in once to use lightplayer.app",
+            ),
+            (
+                RelayState::Refused {
+                    reason: RelayRefusal::UnknownAccount,
+                },
+                "Plug this board into Studio once to refresh its account",
+            ),
+            (
+                RelayState::Refused {
+                    reason: RelayRefusal::UpdateFirmware,
+                },
+                "Update this board's firmware to use lightplayer.app",
+            ),
+        ] {
+            let skipped = UiWifiTest::of(SSID, &joined(relay));
+            assert_eq!(states(&skipped), [Done, Done, Done], "{relay:?}");
+            assert_eq!(skipped.relay_note, Some(note));
+            assert_eq!(skipped.result().unwrap().headline, "Connected");
+        }
+
+        for relay in [
+            RelayState::Off,
+            RelayState::Refused {
+                reason: RelayRefusal::Busy,
+            },
+        ] {
+            let plain = UiWifiTest::of(SSID, &joined(relay));
+            assert_eq!(states(&plain), [Done, Done, Done], "{relay:?}");
+            assert_eq!(plain.relay_note, None);
+        }
+
+        // Cloud relay off: whatever the board says, no step and no note.
+        let mut off = joined(RelayState::NoAccount);
+        off.cloud_relay = false;
+        let off = UiWifiTest::of(SSID, &off);
+        assert!(!off.relay_step);
+        assert_eq!(off.relay_note, None);
+
+        // Still joining: the relay step waits its turn.
+        let mut joining = joined(RelayState::WaitingForInternet);
+        joining.station = StationState::Connecting {
+            ssid: SSID.to_string(),
+            step: ConnectStep::GettingAddress,
+        };
+        assert_eq!(
+            states(&UiWifiTest::of(SSID, &joining)),
+            [Done, Done, Now, WifiStepState::Todo]
+        );
+    }
+
     #[test]
     fn the_relay_step_shows_only_when_it_is_known() {
         let no_internet = UiWifiTest {
             ssid: SSID.to_string(),
             relay_step: true,
+            relay_note: None,
             progress: WifiTestProgress::Done(WifiTestOutcome::NoInternet {
                 ip: "10.20.4.118".to_string(),
             }),

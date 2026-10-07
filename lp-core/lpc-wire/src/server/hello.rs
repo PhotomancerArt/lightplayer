@@ -37,6 +37,15 @@ use crate::server::hello_auth::HelloAuth;
 ///
 /// # History
 ///
+/// - 40: the cloud relay's state (plan `lp2025/2026-10-06-0815-wifi-relay`,
+///   Wi-Fi roadmap M7, PR B) — `NetworkStatus` gains the required `relay`
+///   (`RelayState`: `off | noAccount | waitingForInternet | connecting |
+///   connected | refused { reason: unknownAccount | updateFirmware | busy }`),
+///   so Studio's "Reaching lightplayer.app" step and lp-cli's `wifi status`
+///   say whether the board reached lightplayer.app. A required field: an
+///   old peer cannot decode a new status, nor a new one an old status.
+///   `PACK_FORMAT_VERSION` is unchanged. The relay's own device-leg
+///   protocol (`lpc-relay`) is not the wire and does not move.
 /// - 39: the Wi-Fi link on the C6 (plan `lp2025/2026-10-05-1903-wifi-link-c6`,
 ///   Wi-Fi roadmap M6) — three changes to M5's station shapes, so Studio's
 ///   in-row test can advance live: `StationState::Connecting` gains the
@@ -405,7 +414,7 @@ use crate::server::hello_auth::HelloAuth;
 /// as `None` on new Studio and a new firmware's extra fields are ignored
 /// by old Studio. Bumping for those would mark every board running
 /// current firmware Incompatible in exchange for nothing.
-pub const WIRE_PROTO_VERSION: u32 = 39;
+pub const WIRE_PROTO_VERSION: u32 = 40;
 
 /// Unsolicited/boot-time server identity, version, and capability report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -836,7 +845,7 @@ mod tests {
     #[test]
     fn the_proto_version_is_pinned_to_its_history() {
         assert_eq!(
-            WIRE_PROTO_VERSION, 39,
+            WIRE_PROTO_VERSION, 40,
             "if you meant to bump, add the History entry in this file's \
              doc comment and update this pin"
         );

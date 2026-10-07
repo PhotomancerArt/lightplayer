@@ -3,7 +3,7 @@
 //! codes (`wrongPassword`, `notFound`, …); Studio words them, plainly:
 //! "Connected", "Not connected", "Wrong password".
 
-use lpc_wire::server::{NetworkStatus, StationFailure, StationState};
+use lpc_wire::server::{NetworkStatus, RelayRefusal, RelayState, StationFailure, StationState};
 
 /// How a status word reads: plain, good (connected) or a warning.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -88,6 +88,61 @@ pub const FORGET_HELP: &str = "The board forgets it and its password.";
 
 /// The cloud relay switch's line.
 pub const CLOUD_RELAY_HELP: &str = "Lets lightplayer.app reach this board through the cloud.";
+
+/// What the board says about the cloud relay (Wi-Fi roadmap M7): the line
+/// under the Cloud relay switch, and the note under an in-row test.
+pub mod relay {
+    use super::{NetworkStatus, RelayRefusal, RelayState, StationState, WifiTone};
+
+    pub const REACHING: &str = "Reaching lightplayer.app…";
+    pub const CONNECTED: &str = "Connected to lightplayer.app";
+    /// Joined, and lightplayer.app did not answer.
+    pub const NO_INTERNET: &str = super::test::NO_INTERNET;
+    /// The board holds no account key.
+    pub const NO_ACCOUNT: &str =
+        "Sign in to Studio and plug this board in once to use lightplayer.app";
+    /// lightplayer.app no longer knows the board's account key (it was reset).
+    pub const REFRESH_ACCOUNT: &str = "Plug this board into Studio once to refresh its account";
+    /// lightplayer.app no longer takes the board's relay protocol.
+    pub const UPDATE_FIRMWARE: &str = "Update this board's firmware to use lightplayer.app";
+
+    /// The line under the Cloud relay switch, when there is one: nothing
+    /// with the switch off, on a board with no relay, or while the hub is
+    /// only busy (the board tries again by itself); "Connected, no
+    /// internet" only while the station is joined.
+    pub fn line(status: &NetworkStatus) -> Option<(&'static str, WifiTone)> {
+        if !status.cloud_relay {
+            return None;
+        }
+        let joined = matches!(status.station, StationState::Connected { .. });
+        Some(match status.relay {
+            RelayState::Off
+            | RelayState::Refused {
+                reason: RelayRefusal::Busy,
+            } => return None,
+            RelayState::WaitingForInternet if !joined => return None,
+            RelayState::WaitingForInternet => (NO_INTERNET, WifiTone::Warn),
+            RelayState::Connecting => (REACHING, WifiTone::Plain),
+            RelayState::Connected => (CONNECTED, WifiTone::Good),
+            relay => (note(relay)?, WifiTone::Warn),
+        })
+    }
+
+    /// What a test row says under itself when the relay step is skipped
+    /// for a reason the person can act on.
+    pub fn note(relay: RelayState) -> Option<&'static str> {
+        match relay {
+            RelayState::NoAccount => Some(NO_ACCOUNT),
+            RelayState::Refused {
+                reason: RelayRefusal::UnknownAccount,
+            } => Some(REFRESH_ACCOUNT),
+            RelayState::Refused {
+                reason: RelayRefusal::UpdateFirmware,
+            } => Some(UPDATE_FIRMWARE),
+            _ => None,
+        }
+    }
+}
 
 /// What the board said about one saved network, as its row reads it.
 pub mod row {
@@ -195,7 +250,74 @@ mod tests {
                 Vec::new()
             },
             station,
+            relay: RelayState::Off,
         }
+    }
+
+    #[test]
+    fn the_relay_line_says_whether_the_board_reached_lightplayer_app() {
+        let joined = StationState::Connected {
+            ssid: "lp-walk-net".to_string(),
+            ip: "192.168.1.40".to_string(),
+            rssi: -48,
+            host: "lp-8e30.local".to_string(),
+        };
+        let cases = [
+            (RelayState::Off, None),
+            (
+                RelayState::Connecting,
+                Some(("Reaching lightplayer.app…", WifiTone::Plain)),
+            ),
+            (
+                RelayState::Connected,
+                Some(("Connected to lightplayer.app", WifiTone::Good)),
+            ),
+            (
+                RelayState::WaitingForInternet,
+                Some(("Connected, no internet", WifiTone::Warn)),
+            ),
+            (
+                RelayState::NoAccount,
+                Some((
+                    "Sign in to Studio and plug this board in once to use lightplayer.app",
+                    WifiTone::Warn,
+                )),
+            ),
+            (
+                RelayState::Refused {
+                    reason: RelayRefusal::UnknownAccount,
+                },
+                Some((
+                    "Plug this board into Studio once to refresh its account",
+                    WifiTone::Warn,
+                )),
+            ),
+            (
+                RelayState::Refused {
+                    reason: RelayRefusal::UpdateFirmware,
+                },
+                Some((
+                    "Update this board's firmware to use lightplayer.app",
+                    WifiTone::Warn,
+                )),
+            ),
+            (
+                RelayState::Refused {
+                    reason: RelayRefusal::Busy,
+                },
+                None,
+            ),
+        ];
+        for (relay, line) in cases {
+            let mut on = status(joined.clone(), true);
+            on.relay = relay;
+            assert_eq!(relay::line(&on), line, "{relay:?}");
+            on.cloud_relay = false;
+            assert_eq!(relay::line(&on), None, "the switch off says nothing");
+        }
+        let mut away = status(StationState::NotConnected, true);
+        away.relay = RelayState::WaitingForInternet;
+        assert_eq!(relay::line(&away), None, "no internet only when joined");
     }
 
     #[test]

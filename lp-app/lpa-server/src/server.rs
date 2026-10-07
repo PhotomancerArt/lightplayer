@@ -48,6 +48,16 @@ pub type ReadHeadroomProbe = fn() -> Option<u32>;
 /// server never touches a radio (sans-IO).
 pub type StationProbe = fn() -> lpc_wire::StationState;
 
+/// Embedder-supplied probe for whether the board reached lightplayer.app
+/// through the cloud relay, reported in every
+/// [`lpc_wire::server::NetworkStatus`] (Wi-Fi roadmap M7). Unset (a board
+/// with no relay client: the S3, the classic, a host) =
+/// [`lpc_wire::RelayState::Off`]. A plain `fn`, read when a network request
+/// is answered; the server never opens a socket (sans-IO). Its Cloud relay
+/// switch reaches the relay client through [`NetworkChanged`], as the
+/// station's settings do.
+pub type RelayProbe = fn() -> lpc_wire::RelayState;
+
 /// Embedder-supplied probe for what the Wi-Fi radio hears, the answer to
 /// [`lpc_wire::ClientRequest::NetworkScan`]. Unset (every M5 image) =
 /// [`lpc_wire::NetworkScan::Unsupported`] — never an empty list, which
@@ -165,6 +175,8 @@ pub struct LpServer {
     /// Optional Wi-Fi station probe behind the network status. Unset =
     /// `unsupported`.
     station_probe: Option<StationProbe>,
+    /// Optional cloud relay probe behind the network status. Unset = `off`.
+    relay_probe: Option<RelayProbe>,
     /// Optional Wi-Fi scan probe. Unset = `unsupported`.
     scan_probe: Option<ScanProbe>,
     /// Optional per-network last-attempt probe. Unset = `last` absent.
@@ -371,6 +383,7 @@ impl LpServer {
             memory_stats,
             read_headroom_probe: None,
             station_probe: None,
+            relay_probe: None,
             scan_probe: None,
             last_attempt_probe: None,
             network_changed: None,
@@ -1262,6 +1275,12 @@ impl LpServer {
         self.station_probe = probe;
     }
 
+    /// Install the cloud relay probe the network status reports. Unset =
+    /// [`lpc_wire::RelayState::Off`] (no relay client on this board).
+    pub fn set_relay_probe(&mut self, probe: Option<RelayProbe>) {
+        self.relay_probe = probe;
+    }
+
     /// The answer to one network request (the caller has matched it and the
     /// gate has passed it at edit). Out of line, so the transport-generic
     /// `tick_and_send` carries one call for all five.
@@ -1275,6 +1294,9 @@ impl LpServer {
         );
         let mut body = self.network_body(request);
         if let lpc_wire::server::ServerMsgBody::NetworkStatus(status) = &mut body {
+            status.relay = self
+                .relay_probe
+                .map_or(lpc_wire::RelayState::Off, |probe| probe());
             if let Some(probe) = self.last_attempt_probe {
                 for network in &mut status.networks {
                     network.last = probe(&network.ssid);

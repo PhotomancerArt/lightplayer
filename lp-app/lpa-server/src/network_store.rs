@@ -166,8 +166,10 @@ fn save_and_answer(
     status_body(file, station)
 }
 
+/// The status of `file`. Its `relay` is the server's to fill from its
+/// [`crate::RelayProbe`], as each network's `last` is from its probe.
 fn status_body(file: &NetworkFile, station: StationState) -> ServerMsgBody {
-    ServerMsgBody::NetworkStatus(NetworkStatus::of(file, station))
+    ServerMsgBody::NetworkStatus(NetworkStatus::of(file, station, lpc_wire::RelayState::Off))
 }
 
 #[cfg(test)]

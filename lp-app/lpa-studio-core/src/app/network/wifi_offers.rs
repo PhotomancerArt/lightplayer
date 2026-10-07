@@ -507,6 +507,7 @@ mod tests {
                     })
                     .collect(),
                 station: StationState::Unsupported,
+                relay: lpc_wire::RelayState::Off,
             }),
             ..UiDeviceWifi::new(DeviceId(7), true)
         }

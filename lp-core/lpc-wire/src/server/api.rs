@@ -505,12 +505,12 @@ mod tests {
         let json = crate::json::to_string(&saved).unwrap();
         assert_eq!(
             json,
-            r#"{"networkStatus":{"wifi":true,"cloudRelay":true,"networks":[{"ssid":"lp-walk-net","hasPassword":true},{"ssid":"lp-back-office","hasPassword":false,"hidden":true,"last":"wrongPassword"}],"station":"unsupported"}}"#
+            r#"{"networkStatus":{"wifi":true,"cloudRelay":true,"networks":[{"ssid":"lp-walk-net","hasPassword":true},{"ssid":"lp-back-office","hasPassword":false,"hidden":true,"last":"wrongPassword"}],"station":"unsupported","relay":"off"}}"#
         );
         assert!(!json.contains("password\":"), "{json}");
         assert_eq!(
             crate::json::to_string(&none).unwrap(),
-            r#"{"networkStatus":{"wifi":false,"cloudRelay":false,"networks":[],"station":"off"}}"#
+            r#"{"networkStatus":{"wifi":false,"cloudRelay":false,"networks":[],"station":"off","relay":"off"}}"#
         );
         let json = crate::json::to_string(&connected).unwrap();
         match crate::json::from_str::<ServerMsgBody>(&json).unwrap() {
@@ -522,6 +522,12 @@ mod tests {
                         ip: String::from("10.0.0.7"),
                         rssi: -48,
                         host: String::from("lp-8e30.local")
+                    }
+                );
+                assert_eq!(
+                    status.relay,
+                    crate::server::RelayState::Refused {
+                        reason: crate::server::RelayRefusal::UnknownAccount
                     }
                 );
             }
@@ -600,7 +606,9 @@ mod tests {
     }
 
     fn network_status_samples() -> [ServerMsgBody; 3] {
-        use crate::server::{LastAttempt, NetworkStatus, SavedNetworkInfo, StationState};
+        use crate::server::{
+            LastAttempt, NetworkStatus, RelayRefusal, RelayState, SavedNetworkInfo, StationState,
+        };
         let walk = SavedNetworkInfo {
             ssid: String::from("lp-walk-net"),
             has_password: true,
@@ -619,12 +627,14 @@ mod tests {
                 cloud_relay: true,
                 networks: alloc::vec![walk.clone(), back_office],
                 station: StationState::Unsupported,
+                relay: RelayState::Off,
             }),
             ServerMsgBody::NetworkStatus(NetworkStatus {
                 wifi: false,
                 cloud_relay: false,
                 networks: alloc::vec![],
                 station: StationState::Off,
+                relay: RelayState::Off,
             }),
             ServerMsgBody::NetworkStatus(NetworkStatus {
                 wifi: true,
@@ -635,6 +645,9 @@ mod tests {
                     ip: String::from("10.0.0.7"),
                     rssi: -48,
                     host: String::from("lp-8e30.local"),
+                },
+                relay: RelayState::Refused {
+                    reason: RelayRefusal::UnknownAccount,
                 },
             }),
         ]

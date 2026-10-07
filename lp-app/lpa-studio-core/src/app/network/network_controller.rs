@@ -562,6 +562,7 @@ mod tests {
             cloud_relay: true,
             networks: Vec::new(),
             station: lpc_wire::server::StationState::Unsupported,
+            relay: lpc_wire::RelayState::Off,
         };
         network.apply(
             NetworkCommand::Answered {
@@ -645,6 +646,7 @@ mod tests {
                 last: None,
             }],
             station: StationState::Unsupported,
+            relay: lpc_wire::RelayState::Off,
         };
         let answered = |network: &mut NetworkController, result| {
             network.apply(

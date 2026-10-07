@@ -220,7 +220,7 @@ fn networks_page(
             StudioIcon { name: StudioIconName::Add, size: 13 }
             "{label::CONNECT_TO_A_NETWORK}"
         }
-        RelaySwitch { offer: verbs.cloud_relay.clone(), on_action }
+        RelaySwitch { offer: verbs.cloud_relay.clone(), line: wifi.relay_line(), on_action }
     }
 }
 
@@ -264,7 +264,7 @@ fn connect_page(
                 on_pressed: move |_| go(WifiPage::Networks),
             }
             if root {
-                RelaySwitch { offer: verbs.cloud_relay.clone(), on_action }
+                RelaySwitch { offer: verbs.cloud_relay.clone(), line: wifi.relay_line(), on_action }
             }
         };
     }
@@ -323,7 +323,7 @@ fn connect_page(
             }
         }
         if root {
-            RelaySwitch { offer: verbs.cloud_relay.clone(), on_action }
+            RelaySwitch { offer: verbs.cloud_relay.clone(), line: wifi.relay_line(), on_action }
         }
     }
 }
@@ -522,10 +522,16 @@ fn OfferSwitch(offer: UiOffer, on_action: EventHandler<UiAction>) -> Element {
     }
 }
 
-/// The Cloud relay switch at the foot of a root page.
+/// The Cloud relay switch at the foot of a root page, and under it whether
+/// the board reached lightplayer.app (`line`, the board's relay state in
+/// words).
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn RelaySwitch(offer: Option<UiOffer>, on_action: EventHandler<UiAction>) -> Element {
+fn RelaySwitch(
+    offer: Option<UiOffer>,
+    line: Option<(&'static str, WifiTone)>,
+    on_action: EventHandler<UiAction>,
+) -> Element {
     let Some(offer) = offer else {
         return rsx! {};
     };
@@ -534,6 +540,9 @@ fn RelaySwitch(offer: Option<UiOffer>, on_action: EventHandler<UiAction>) -> Ele
             div { class: "tw:grid tw:min-w-0 tw:flex-1 tw:gap-0.5",
                 span { class: "tw:text-[13px] tw:font-semibold tw:text-strong-foreground", "Cloud relay" }
                 span { class: HELP_CLASS, "{CLOUD_RELAY_HELP}" }
+                if let Some((words, tone)) = line {
+                    span { class: "{HELP_CLASS} {tone_class(tone)}", "{words}" }
+                }
             }
             OfferSwitch { offer, on_action }
         }
@@ -648,6 +657,9 @@ fn TestCard(
                     }
                     span { class: "tw:min-w-0 tw:truncate", "{step.label}" }
                 }
+            }
+            if let Some(note) = test.relay_note {
+                p { class: "tw:text-xs tw:leading-relaxed tw:text-status-warning-foreground", "{note}" }
             }
             if let Some(result) = result {
                 div { class: "tw:grid tw:gap-2 tw:text-xs tw:leading-relaxed tw:text-muted-foreground",
@@ -829,6 +841,7 @@ mod tests {
                     })
                     .collect(),
                 station: StationState::Unsupported,
+                relay: lpc_wire::RelayState::Off,
             }),
             writing,
             ..UiDeviceWifi::new(DeviceId(1), true)
