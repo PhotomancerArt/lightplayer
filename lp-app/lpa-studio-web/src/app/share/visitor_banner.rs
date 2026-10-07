@@ -157,7 +157,7 @@ pub fn VisitorBanner(
     // Names dismissed this session; storage is the memory across loads. A
     // throwing store still hides the strip for the session via this.
     let mut dismissed_now = use_signal(Vec::<String>::new);
-    let live_line =|icon: Element, verb: &'static str, name: String, tail: &'static str| {
+    let live_line = |icon: Element, verb: &'static str, name: String, tail: &'static str| {
         if dismissed_now.read().contains(&name) || visitor_banner_dismissal::is_dismissed(&name) {
             return rsx! {};
         }
