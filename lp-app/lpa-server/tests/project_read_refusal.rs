@@ -89,6 +89,81 @@ fn a_fragmented_heap_with_room_in_total_is_served() {
     assert_served(&sent);
 }
 
+/// A fragmented heap's read goes out in smaller frames instead of being
+/// refused: at a 12 KiB and at an 8 KiB largest block (the C6's floor), the
+/// read is served and no frame is bigger than half the block.
+#[test]
+fn a_read_on_a_fragmented_heap_is_served_in_smaller_frames() {
+    for block in [12 * 1024u32, 8 * 1024] {
+        let (mut server, project_path) =
+            server_with_clock_project("read-small-frames", Some(plenty_free));
+        let handle = server.load_project(project_path.as_path()).expect("load");
+        server.set_read_gate(Some(GATE));
+        static BLOCK: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+        BLOCK.store(block, core::sync::atomic::Ordering::Relaxed);
+        server.set_read_headroom_probe(Some(|| {
+            Some(BLOCK.load(core::sync::atomic::Ordering::Relaxed))
+        }));
+        let sent = read(&mut server, handle, 46);
+        assert_served(&sent);
+        let budget =
+            lpa_server::read_frame_budget(lpc_wire::PROJECT_READ_FRAME_MAX_BYTES, Some(block));
+        assert_eq!(budget, block as usize / 2);
+        for frame in &sent {
+            let bytes = lpc_wire::json::to_string(frame).expect("serialize").len();
+            assert!(bytes <= budget, "a {bytes} B frame at a {block} B block");
+        }
+    }
+}
+
+/// An event too big for the frame a fragmented heap allows is refused in
+/// words, not attempted: the read ends with a terminal error and the server
+/// stays alive.
+#[test]
+fn an_event_too_big_for_the_frame_is_refused_in_words() {
+    let (mut server, project_path) =
+        server_with_clock_project("read-atom-too-big", Some(plenty_free));
+    // One node whose name alone is bigger than the smallest frame: every
+    // event naming it is an atom that cannot be cut.
+    let long = "c".repeat(2 * lpa_server::MIN_READ_FRAME_BYTES);
+    server
+        .base_fs_mut()
+        .write_file(
+            project_path.join("module.json").as_path(),
+            alloc::format!(
+                "{{\"kind\": \"Module\", \"nodes\": {{\"{long}\": {{\"ref\": \"./clock.json\"}}}}}}"
+            )
+            .as_bytes(),
+        )
+        .expect("write project");
+    let handle = server.load_project(project_path.as_path()).expect("load");
+    // No floor, so the frame budget alone decides: the smallest frame.
+    server.set_read_gate(Some(ReadGate {
+        min_free_bytes: 0,
+        min_largest_block_bytes: 0,
+    }));
+    server.set_read_headroom_probe(Some(|| Some(1)));
+    assert_eq!(
+        lpa_server::read_frame_budget(lpc_wire::PROJECT_READ_FRAME_MAX_BYTES, Some(1)),
+        lpa_server::MIN_READ_FRAME_BYTES
+    );
+    let sent = read(&mut server, handle, 47);
+    let errors: Vec<&String> = project_read_events(&sent)
+        .into_iter()
+        .filter_map(|event| match event {
+            ProjectReadEvent::Error { message } => Some(message),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        !errors.is_empty(),
+        "an event bigger than a 1 KiB frame is refused: {sent:?}"
+    );
+    // Alive: a healthy heap serves it.
+    server.set_read_headroom_probe(Some(|| Some(u32::MAX)));
+    assert_served(&read(&mut server, handle, 48));
+}
+
 #[test]
 fn a_probe_without_a_gate_never_refuses() {
     let (mut server, project_path) = server_with_clock_project("read-no-gate", Some(short_free));
@@ -115,7 +190,7 @@ fn unset_probe_never_refuses() {
 /// The C6's numbers (`fw-esp32c6/src/main.rs` `READ_GATE`).
 const GATE: ReadGate = ReadGate {
     min_free_bytes: 40 * 1024,
-    min_largest_block_bytes: 16 * 1024,
+    min_largest_block_bytes: 8 * 1024,
 };
 
 fn plenty_free() -> Option<(u32, u32)> {

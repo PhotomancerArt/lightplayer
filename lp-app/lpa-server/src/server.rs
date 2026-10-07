@@ -997,12 +997,20 @@ impl LpServer {
                     response_count += 1;
                 }
                 ClientRequest::ProjectRead { handle, request } => {
-                    let sink_frame_budget = self.sink_frame_budget();
-                    // One read of the heap's figures serves both the gate
-                    // and the reply's runtime status: the S3's and the
-                    // classic's stats function prints the memory ledger
-                    // when it is called, so it is called once per read.
+                    // One read of the heap's figures serves the gate, the
+                    // frame budget and the reply's runtime status: the S3's
+                    // and the classic's stats function prints the memory
+                    // ledger when it is called, so it is called once per read.
                     let mut server_status = self.runtime_status();
+                    let largest_block = server_status
+                        .memory
+                        .as_ref()
+                        .and_then(|memory| memory.largest_free_block)
+                        .or_else(|| self.read_headroom_probe.and_then(|probe| probe()));
+                    // On a fragmented heap the read goes out in smaller
+                    // frames instead of being refused.
+                    let sink_frame_budget =
+                        read_frame_budget(self.sink_frame_budget(), largest_block);
                     // Refusal-not-reset: if the heap cannot afford
                     // even a well-behaved streamed read, fail the
                     // request with a structured terminal error instead
@@ -1010,13 +1018,8 @@ impl LpServer {
                     // board mid-assembly.
                     if let Some(refusal) = self.read_gate.and_then(|gate| {
                         let memory = server_status.memory.as_ref();
-                        gate.check(
-                            memory.map(|memory| memory.free_bytes),
-                            memory
-                                .and_then(|memory| memory.largest_free_block)
-                                .or_else(|| self.read_headroom_probe.and_then(|probe| probe())),
-                        )
-                        .err()
+                        gate.check(memory.map(|memory| memory.free_bytes), largest_block)
+                            .err()
                     }) {
                         let mut sink = ProjectReadStreamSink::with_max_bytes(
                             transport,
@@ -1625,6 +1628,23 @@ enum ProjectReadStreamOutcome {
 /// server best-effort emits a terminal [`lpc_wire::ProjectReadEvent::Error`].
 /// Sink transport-write failures (connection lost, other) are fatal and
 /// propagate as before.
+/// The smallest frame a read is cut into, whatever the heap: below it a
+/// read's frame envelope is most of every frame.
+pub const MIN_READ_FRAME_BYTES: usize = 1024;
+
+/// A read's frame budget on a heap whose largest free block is
+/// `largest_block`: at most half that block, so assembling a frame never
+/// needs the heap's biggest piece, and never above the link's own budget
+/// (`link_budget`; 16 KiB on a device) or under [`MIN_READ_FRAME_BYTES`].
+/// A single event too big for the frame is refused in words, as on any
+/// link. Unknown block (hosts): the link's budget.
+pub fn read_frame_budget(link_budget: usize, largest_block: Option<u32>) -> usize {
+    match largest_block {
+        Some(largest) => link_budget.min((largest as usize / 2).max(MIN_READ_FRAME_BYTES)),
+        None => link_budget,
+    }
+}
+
 fn classify_project_read_stream_error(
     error: lpc_engine::ProjectReadEventStreamError<lpc_wire::TransportError>,
 ) -> ProjectReadStreamOutcome {
