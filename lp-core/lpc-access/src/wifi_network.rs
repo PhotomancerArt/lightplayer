@@ -24,7 +24,7 @@ pub const HEX_KEY_LEN: usize = 64;
 /// the server and the firmware format with `{:?}`.
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct WifiNetwork {
     /// The network name: 1–32 bytes of UTF-8.
     pub ssid: String,
