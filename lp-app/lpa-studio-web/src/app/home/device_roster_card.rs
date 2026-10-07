@@ -425,6 +425,16 @@ pub(crate) fn DeviceRosterCard(
     let current_base_mac = layout
         .as_ref()
         .and_then(|layout| layout.current_base_mac.clone());
+    // The firmware row's restore face: a board that came back without its
+    // files, idle, over a link that carries firmware (not one holding its
+    // files — that face's verb is Finish update). Its restore verbs AND its
+    // Update share the row, which may then take two lines: four quiet
+    // verbs do not fit one card's width, and this face's firmware line
+    // wraps already, so the card's height is not fixed here.
+    let restore_face = card.activity.is_none()
+        && finish_update.is_none()
+        && !firmware_blocked
+        && (restore_files.is_some() || restore_from_file);
     let sheet_verbs =
         layout_sheet
             .as_ref()
@@ -659,7 +669,7 @@ pub(crate) fn DeviceRosterCard(
                         other: firmware_bar.2,
                     }
                 }
-                div { class: verb_row_class(),
+                div { class: if restore_face { restore_verb_row_class() } else { verb_row_class() },
                     if busy_zone == Some(ZoneKind::Firmware) {
                         if let Some(cancel) = cancel.clone() {
                             AgentMark { key: "{\"cancel-firmware\"}", path: cancel.path.clone(),
@@ -685,7 +695,7 @@ pub(crate) fn DeviceRosterCard(
                             variant: ActionButtonVariant::Quiet,
                             on_action,
                         }
-                    } else if (restore_files.is_some() || restore_from_file) && !firmware_blocked {
+                    } else if restore_face {
                         // A board that came back without its files: when a
                         // backup of them waits in this browser, Restore
                         // files puts it straight back; "Restore from a
@@ -1938,6 +1948,12 @@ fn preview_slot_sentence(card: &DeviceView, feed: Option<&DeviceCardFeedView>) -
 /// narrow card runs out of room.
 fn verb_row_class() -> &'static str {
     "tw:flex tw:h-[30px] tw:min-w-0 tw:items-center tw:gap-1.5 tw:whitespace-nowrap"
+}
+
+/// The firmware row on the restore face: the verb row's look, but it may
+/// wrap onto a second line (its restore verbs and Update do not fit one).
+fn restore_verb_row_class() -> &'static str {
+    "tw:flex tw:min-h-[30px] tw:min-w-0 tw:flex-wrap tw:items-center tw:gap-1.5 tw:whitespace-nowrap"
 }
 
 /// The verb row's Primary voice — the standing spectrum ring every surface's
