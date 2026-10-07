@@ -506,6 +506,23 @@ wall-clock, like the USB door. The gateway's and the probe's TCP/IP stacks
 are `smoltcp` (0BSD). Test networks live in `testdata/virtual_lan.toml` and
 are test values only.
 
+**An uplink** (Wi-Fi relay plan P9) is the one way out of the LAN, to a host
+address a run names, so an emulated board reaches a service on the host the
+way a real one reaches the internet. `lan_uplink.rs` is the mirror of
+`lan_port_forward.rs`: the gateway holds a second address beyond the /24,
+`192.0.2.1` (TEST-NET-1), listens on `<it>:<port>`, and pairs each connection
+the board opens with a host `TcpStream::connect` (paired once the board's side
+is Established; the forward's `ForwardConn`, buffer sizes and moved-board care
+are shared). `lan_dns_server.rs` answers DNS (UDP 53, from RFC 1035) for the
+configured names only and `NXDOMAIN` for the rest, and `lan_dhcp_server.rs`
+offers the gateway as DNS (option 6) **only on a LAN that has an uplink**, so
+a LAN with none behaves exactly as before. `VirtualLan`/`SharedLan` carry them
+beside `forward()` (`uplink()`, `uplinks()`). Generic TCP, MIT, no product
+crate; a host configures it in the fixture's `[[uplink]]` table
+(`lp-cli/src/commands/emu/lan_fixture.rs`). No NAT, no real resolver, no
+internet latency: the ADR's amendment
+(`docs/adr/2026-10-05-emulator-seams.md` §11) says what it does not model.
+
 A forward's connection follows the address it was opened to: when the
 board's lease moves or goes, the forward closes it (host side too), and one
 whose board stops answering with data waiting is reset after

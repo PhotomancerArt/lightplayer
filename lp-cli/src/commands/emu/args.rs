@@ -417,6 +417,13 @@ pub struct RunArgs {
     /// network. The board joins whatever network its own saved settings
     /// name (`lp-cli wifi add` over the USB link).
     ///
+    /// An `[[uplink]]` table (`name`, `to`, `port` = 80) gives the LAN a name
+    /// and a way out: the board resolves `name` through the gateway and its
+    /// TCP connections to it are carried to `to` on this machine, so a board
+    /// dials `lightplayer.app` as a real one does (`to` = a local
+    /// `lp-cloud-server`) and the relay's Wi-Fi status can be walked with no
+    /// internet.
+    ///
     /// Without it the seam still engages and the board's LAN is empty:
     /// nothing in range, nothing forwarded. The C6 only.
     #[arg(long, value_name = "FIXTURE")]
@@ -525,7 +532,8 @@ pub struct ServeArgs {
     pub board: Vec<String>,
 
     /// A virtual LAN: `<name>=<fixture.toml>`, the fixture in `emu run
-    /// --lan`'s format (the networks in range; test values only).
+    /// --lan`'s format (the networks in range and any `[[uplink]]`; test
+    /// values only; `GET /boards` lists a LAN's uplinks).
     /// Repeatable. Every board whose spec says `lan=<name>` shares it, each
     /// with its own lease and its own forward, a loopback port carried to the
     /// board's LAN endpoint that `GET /boards` lists as `forward`

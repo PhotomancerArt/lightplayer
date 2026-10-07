@@ -328,8 +328,10 @@ measured** (it needs a `net_thread_stack_diag` build).
 **Flash.** The relay client alone is **+29,840 B** of core (P8's relay task
 over its own DNS), above the plan's 24 KB line (A3). The slot, challenge, mux
 and wire field cost +5,200 B of core and +4,484 B of engine. At this PR's last
-firmware change the core sat 64 B under its 32 KiB page; main's #1005
-(core-only Bluetooth updates) then crossed it, which is not this PR's growth.
+firmware change before the last merge of main the core sat 64 B under its
+32 KiB page; the merge of main's #1005 (core-only Bluetooth updates, +6,768 B
+with the core-only arms this branch needed to match) crossed it (DD209), so
+the page is main's growth rather than this PR's.
 CI's build of `a303512e4` reads **88,308 B gated headroom**: above CI's 64 KB
 line, below the plan's 128 KB bar, accepted by Yona on 2026-10-07 as "OK but
 tight" (a local build at `81816d2f4` read 89,146 B). The spend is in

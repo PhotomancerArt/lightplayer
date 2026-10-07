@@ -105,17 +105,39 @@ shims keep their arguments and result through this profile's LTO. The ABI
 and its rules are `lp-base/lp-seam/README.md`; why seams exist is
 `docs/adr/2026-10-05-emulator-seams.md`.
 
-## Wi-Fi (the LAN link)
+## Wi-Fi (the LAN link and the cloud relay)
 
 A board with a saved network (`/.lp/network.json`, written by `lp-cli wifi
 add` or Studio) joins it by itself. Once joined it serves the secure lp-link
 at `ws://<board>/link` (port 80), and answers mDNS for `lp-xxxx.local` and
-DNS-SD for `_lightplayer._tcp`. The IP stack (embassy-net/smoltcp), the
-station, the LAN endpoint (one slot) and mDNS run on their own thread,
-`lp-net` (`src/net/`, 8 KB stack). The radio's C heap stays in `HEAP_RADIO`.
+DNS-SD for `_lightplayer._tcp`. The IP stack (embassy-net/smoltcp, DNS on),
+the station, the LAN endpoint, the relay task and mDNS run on their own
+thread, `lp-net` (`src/net/`, 8 KB stack), all started from `core_boot`, so a
+core-only board has them too. The radio's C heap stays in `HEAP_RADIO`.
 ESP-NOW (the Radio node) is off while the board uses Wi-Fi. Decisions and
-measured costs: `docs/adr/2026-10-07-c6-wifi-link.md`. The diagnostics are
-off by default and never shipped:
+measured costs: `docs/adr/2026-10-07-c6-wifi-link.md`.
+
+**The relay task** (`src/net/relay_task.rs`; the loop is
+`fw-esp32-common/src/net/relay/`) dials `lightplayer.app:80` when the station
+has an address, Cloud relay is on and the board holds an account key
+(`lpc_relay::RelayClient::may_dial`), registers, and carries a browser's
+sealed session on a route. **One network slot** is shared by the LAN and the
+relay: while one holds the session, the other's newcomer is told busy unless
+its handshake proves the holder's own key, which takes the slot. The leg's
+TCP and WebSocket buffers (5,830 B) exist only while the board may dial and
+the route's outgoing frame only while a route holds the slot, so a board with
+no account key holds no relay memory. Status: `NetworkStatus.relay`; the
+heartbeat says `[relay] state=… routes=… rx=… tx=…` (there is no line on a
+state change: a 688 B line crossed a flash page, see the budget ADR's
+ledger). Costs and what is not yet measured on silicon:
+`docs/adr/2026-10-06-cloud-relay.md` ("Device side").
+
+`LP_RELAY_HOST=<host>[:port]` at build time (`build.rs`) makes a **desk
+image** that dials that host instead and prints `[INIT] desk image: the relay
+is …` at boot. The product image always dials `lightplayer.app:80`; do not
+release a desk image.
+
+The diagnostics are off by default and never shipped:
 
 - `net_thread_stack_diag`: `lp-net`'s stack high water;
 - `radio_dma_diag`: where the radio's C blocks live, plus the heap map;

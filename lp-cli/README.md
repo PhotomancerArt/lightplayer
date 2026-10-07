@@ -82,6 +82,15 @@ just cloud-serve                                   # a local relay; note its URL
 LP_CLOUD_SESSION=… lp-cli serve --memory --relay http://127.0.0.1:<port>
 ```
 
+`lp-cli wifi status <device>` prints a board's relay state in the words
+Studio uses (`relay: connected to lightplayer.app`, `relay: no account key — …`,
+`relay: connected, no internet — …`), and `wifi set --cloud-relay on|off`
+flips the board's switch. With no board on Wi-Fi, an emulated C6 reaches a
+local relay through a virtual LAN's uplink — an `[[uplink]]` table in the
+`emu run --lan` fixture (`name = "lightplayer.app"`, `to = "127.0.0.1:<port>"`) —
+which is what `just walk-wifi-emu relay` does
+(`lp-cli/tests/emu_relay_link.rs`).
+
 The pieces: `lp-cli/src/server/relay_host/` and
 `lp-app/lpa-client/src/transport_relay/`; the end-to-end test is
 `lp-cli/tests/relay_link.rs`; the decision is
