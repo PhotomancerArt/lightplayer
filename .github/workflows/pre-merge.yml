@@ -64,7 +64,7 @@ env:
 # and dominated every run; 2026-09-08 restructure — baseline in the
 # paragraphs below):
 #
-#   detect-changes ─┬─ lint              (fmt + clippy + repo lints)
+#   detect-changes ─┬─ lint              (fmt + clippy + repo lints + feature-variant tests)
 #                   ├─ validate-x64      (build prereqs + gated test recipes + schema-check + heap ratchet)
 #                   ├─ validate-gfx      (ARM; wgpu tree)
 #                   ├─ validate-browser  (real-browser wasm suites)
@@ -650,11 +650,19 @@ jobs:
   # full dev build concurrently and both crawled). schema-check itself moved
   # into validate-x64, where its dev build shares artifacts with the test
   # builds; clippy's check-mode artifacts are shareable with nothing.
+  #
+  # It also hosts `just test-rust-features` (the feature-variant test lines,
+  # see the step) — off validate-x64's critical path, in a job with the same
+  # gate, runner and cache, instead of a new job's setup against the org's
+  # 20-job cap (docs/debt/ci-runner-time-over-the-concurrency-cap.md).
   lint:
     name: Lint (x64)
     runs-on: ubuntu-24.04
-    # p95 6.5 min, max 7.1.
-    timeout-minutes: 25
+    # Before the feature-variant tests moved here (2026-10-07): p50 10.8 min,
+    # p95 12.2 (`just ci-durations`, last 200 runs), main runs 11.2 and 12.6.
+    # The tests add ~4-7 min (see the step), so p95 ~19: 40 keeps it under
+    # half the budget, the `ci-durations` verdict line.
+    timeout-minutes: 40
     needs: detect-changes
     if: needs.detect-changes.outputs.core == 'true'
     env:
@@ -739,6 +747,27 @@ jobs:
 
       - name: Lint
         run: cd lp2025 && just check-lint
+
+      # The feature-variant test lines (lp-json-pack, lp-link, lpc-wire,
+      # fw-esp32-common, lpa-update, lp-cli desk-images — the justfile recipe
+      # says why each exists). They were the tail of validate-x64's
+      # `test-rust-core`, 215-237 s on its critical path (main run
+      # 37575019902: 215 s), each line resolving features over its own
+      # package and so sharing few dependency artifacts with the workspace
+      # build there; here the rest come back from sccache, since this job's
+      # target/ holds only clippy's check-mode artifacts.
+      #
+      # Same `core` gate as validate-x64, same x86_64 runner, same env, so
+      # every line runs on exactly the runs it ran on before. `!cancelled()`:
+      # a red lint does not hide a red test (and these no longer wait on
+      # validate's workspace `cargo test` passing either).
+      #
+      # `build-rv32-builtins` first, as validate-x64's `ci-prereqs` did:
+      # lp-cli pulls in lpvm-cranelift, whose build script embeds that image.
+      - name: Feature-variant tests
+        if: ${{ !cancelled() }}
+        timeout-minutes: 20
+        run: cd lp2025 && just build-rv32-builtins test-rust-features
 
       - name: sccache stats
         if: always()
@@ -2871,10 +2900,11 @@ jobs:
       - name: Install just
         uses: extractions/setup-just@v3
 
-      # test-rust-core always runs; the studio-web host test only when studio
-      # paths changed (it forces a differently-feature-unified rebuild of the
-      # Dioxus tree); filetests only when shader paths changed. Pushes to
-      # main force every gate true.
+      # test-rust-core always runs (its feature-variant half,
+      # `test-rust-features`, runs in the lint job — see its step); the
+      # studio-web host test only when studio paths changed (it forces a
+      # differently-feature-unified rebuild of the Dioxus tree); filetests
+      # only when shader paths changed. Pushes to main force every gate true.
       #
       # schema-check and the heap ratchet (next step) run against the
       # `target/debug/lp-cli` the workspace `cargo test` just built, via the
