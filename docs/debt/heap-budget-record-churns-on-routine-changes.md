@@ -281,6 +281,34 @@ long-lived branch conflict on this file whenever main re-baselined too.
   carries CI's clean figures (103,024 / 198,512 / 119,400), transcribed
   from the first clean step, not a local bless.
 
+- 2026-10-07 — **the dirty re-check again, and CI's own images are not the
+  ratchet's image** (OTA M7 Bluetooth updates, PR #1005, run 37631551382,
+  merge commit `f3035c68c858`). The heap job's clean first check
+  (`target/fw-split/shipped/p2.elf`, version `f3035c6`) read `usedBytes`
+  103,088 / `freeBytes` 198,448 / `largestFreeBlock` 119,344 against a record
+  of 103,096 / 198,440 / 119,360, and failed on `largestFreeBlock` alone
+  ("shrank"; the other two read "improved"). The `Figure moves` step then
+  re-baselined and re-checked on a tree its own write had dirtied: the log's
+  pass 1 reads `version f3035c6-dirty-071620PT` (against `f3035c6` for the
+  two clean builds), the re-check read 103,120 / 198,416 / 119,288, and the
+  step answered "not-a-figure-move" — the 2026-10-06 entry's mechanism,
+  confirmed in the log, the second time on this branch. Found on the way:
+  `just fetch-ci-images 1005 esp32c6` + `heap-budget-baseline-chips` /
+  `heap-budget-check-chips-c6` reads the record's own 103,096 / 198,440 /
+  119,360 and passes with no diff, because the `Emulator C6 (x64)` job's
+  image is stamped with a 9-character version (`f3035c68c`, `commit=f3035c68c858`
+  in its hello) while the heap job's build stamps 7 (`f3035c6`). 2 characters
+  x the stamp's copies is the 8 B the heap job reads lower, so the fetched
+  image reproduces the record, not the failing job. Two builds of one commit
+  inside one CI run therefore carry different C6 figures, and `docs/chip-figures.md`'s
+  "the heap ratchet's image is the same bytes the boot suite reads" does not
+  hold for the version string. Workaround as on 2026-10-06/07: the record
+  takes the heap job's clean first-step figures (103,088 / 198,448 / 119,344),
+  transcribed from the log, not a local or fetched-image bless. Paydown as
+  above and now with a second reason: pin `APP_VERSION` for every build the
+  figure checks use, so a build's stamp length stops being a figure.
+  Applied on PR #1005 as `chore(figures): record CI's clean C6 heap figures for 4cad23fdb` (the json's `commit` field left at `e922ceca5`).
+
 **Exit criteria** — a PR whose only memory effect is a few bytes of statics
 passes the gate without touching the record, and two PRs that each
 legitimately re-baseline different chips/projects do not conflict. Likely

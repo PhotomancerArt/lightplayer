@@ -137,7 +137,7 @@ fn world(case: &Case, builds: &Builds) -> World {
         _ => LinkTrust::Untrusted,
     };
     let config = DriverConfig {
-        serve: ServeConfig { ahead: case.ahead },
+        serve: ServeConfig::ahead(case.ahead),
         ..DriverConfig::default()
     };
     let host = match (case.start, case.mode) {
@@ -481,7 +481,7 @@ fn a_second_host_takes_over_after_fifteen_seconds_of_quiet() {
     rig.link_up(0, h1, LinkTrust::Untrusted);
     rig.link_up(0, h2, LinkTrust::Untrusted);
     // One chunk per request, so four rounds leave host 1 mid-transfer.
-    let mut serve = lpa_update::ServeSession::new(ServeConfig { ahead: 1 });
+    let mut serve = lpa_update::ServeSession::new(ServeConfig::ahead(1));
     let mut to_board = vec![host.offer().encode()];
     for _ in 0..4 {
         let mut next = Vec::new();

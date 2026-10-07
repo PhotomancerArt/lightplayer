@@ -4,19 +4,33 @@
 //! like `plain_bytes_golden.rs` — this is a **never break** pin, not a
 //! "bump the proto" one (OTA plan, QY1 decided yes as N5; ADR 2).
 //!
-//! The transcript is a fixed exchange between two `usb()` links with fixed
-//! nonces: the handshake, a reliable channel-3 message each way (a query and
-//! a manifest-shaped answer), a fragmented chunk, their ACKs, and
-//! keepalives, every frame in the order it went, as hex. It was captured
-//! once, when channel 3 joined `usb()`'s reliable mask. A mismatch is a
-//! break of the link a fielded core keeps: never re-capture it to make this
+//! Each transcript is a fixed exchange between two links of one preset with
+//! fixed nonces: the handshake, a reliable channel-3 message each way (a
+//! query and a manifest-shaped answer), a fragmented chunk, their ACKs, and
+//! keepalives, every frame in the order it went, as hex. A mismatch is a
+//! break of the link a fielded core keeps: never re-capture one to make this
 //! pass.
+//!
+//! - `usb()` (Stream framing, COBS): captured once, when channel 3 joined
+//!   `usb()`'s reliable mask;
+//! - `ble()` (Datagram framing: each line is one frame, one GATT write or
+//!   notification, no COBS): captured once, when core-only began serving
+//!   channel 3 over Bluetooth (OTA Part C, QY1/N5's link freeze reaching
+//!   BLE). The board cuts its own buffers and fits `max_payload` to the
+//!   connection's MTU (`fw-esp32-common`'s `radio_link_config`), and opens
+//!   core-only's links with a wider receive window: values a SYN carries,
+//!   not the frame format pinned here.
 
 use lp_link::{CH_UPDATE, Framing, Link, LinkConfig, LinkState, Micros, SelectiveRepeat};
 
 #[test]
 fn usb_update_channel_bytes_are_unchanged() {
     check(&transcript(LinkConfig::usb()), USB);
+}
+
+#[test]
+fn ble_update_channel_bytes_are_unchanged() {
+    check(&transcript(LinkConfig::ble()), BLE);
 }
 
 #[test]
@@ -49,6 +63,21 @@ const USB: &[&str] = &[
     "B 000202070408683be24300",
     "A 000202070108c3c2ca1e00",
     "B 000202070408683be24300",
+];
+
+const BLE: &[&str] = &[
+    "A 03000000111111110000000000b40008b459217a",
+    "B 03000000222222221111111100b40008fe5d8cb4",
+    "A 03000000111111112222222201b40008b76ab3e0",
+    "A 78000008510182e8ccef",
+    "B 780001084d7b2270726f746f223a312c227374617465223a2272756e6e696e67227d54171af3",
+    "A 700101084445001000000b30557a9fc4e90e33587da2c7ec11365b80a5caef14395e83a8cdf2173c6186abd0f51a3f6489aed3f81d42678cb1d6fb20456a8fb4d9fe23486d92b7dc01264b7095badf04294e7398bde2072c51769bc0e50a2f54799ec3e80d32577ca1c6eb10355a7fa4c9ee13385d82a7ccf1163b6085aacff4193e6388add2f71c41668bb0d5fa1f44698eb3d8fd22476c91b6db00254a6f94b9de03284d7297bce1062b50759abfe4092e53789dc2e70c68b2c471",
+    "A 6002010831567ba0c5ea0f34597ea3c8ed12375c81a6cbf0153a5f84a9cef3183d6287acd1f61b40658aafd4f91e43688db2d7fc21466b90b5daff24496e93b8dd02274c7196bbe0052a4f7499bee3082d52779cc1e60b30557a9fc4e90e33587da2c7ec11365b80a5caef14395e83a8cdf2173c6186abd0f51a3f6489aed3f81d42678cb1d6fb20456a8fb4d9fe23486d92b7dc01264b7095badf04294e7398bde2072c51769bc0e50a2f54799ec3e80d32577ca1c6eb10bbd8489a",
+    "A 60030108355a7fa4c9ee13385d82a7ccf1163b6085aacff4193e6388add2f71c41668bb0d5fa1f44698eb3d8fd22476c91b6db00254a6f94b9de03284d7297bce1062b50759abfe4092e53789dc2e70c31567ba0c5ea0f34597ea3c8ed12375c81a6cbf0153a5f84a9cef3183d6287acd1f61b40658aafd4f91e43688db2d7fc21466b90b5daff24496e93b8dd02274c7196bbe0052a4f7499bee3082d52779cc1e60b30557a9fc4e90e33587da2c7ec11365b80a5caef14e4ad91c4",
+    "A 68040108395e83a8cdf2173c6186abd0f51a3f6489aed3f81d42678cb1d6fb20456a8fb4d9fe23486d92b7dc01264b7095badf04294e7398bde2072c51769bc0e50a2f54799e56848de6",
+    "B 020005081fa34050",
+    "A 02000108c3c2ca1e",
+    "B 020005081fa34050",
 ];
 
 fn check(got: &[String], want: &[&str]) {

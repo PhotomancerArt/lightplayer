@@ -15,8 +15,8 @@
 //! random search for a space this shape.
 
 use lpa_devices::replay::{Replay, Step};
-use lpa_devices::view::FIRMWARE_NEEDS_USB;
 use lpa_devices::view::{DeviceView, PendingLinkView, RosterView};
+use lpa_devices::view::{FIRMWARE_NEEDS_USB, UPDATE_NOT_OVER_WIFI_YET};
 use lpa_devices::{
     ActivityKind, DeviceStatus, Escape, Millis, RosterConfig, UpdateBoardState, UpdateIntentFacts,
     UpdateOutcomeFacts, UpdateStageFacts,
@@ -326,9 +326,9 @@ fn assert_device(device: &DeviceView, case: &str) {
         );
     }
     if let Some(reason) = &device.update_blocked {
-        assert_eq!(
-            reason, FIRMWARE_NEEDS_USB,
-            "[{case}] an update blocked for a reason the card has no words for"
+        assert!(
+            reason == FIRMWARE_NEEDS_USB || reason == UPDATE_NOT_OVER_WIFI_YET,
+            "[{case}] an update blocked for a reason the card has no words for: {reason}"
         );
     }
     if let Some(freshness) = &device.freshness_label {

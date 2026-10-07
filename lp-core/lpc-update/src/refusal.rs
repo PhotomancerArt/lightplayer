@@ -19,6 +19,11 @@
 //! **Forever:** reason letters are never reused; a reason only gains detail
 //! fields at its end. A host that does not know a reason reads it as
 //! "refused" ([`Refusal::Other`]).
+//!
+//! [`Refusal`]'s `Display` is the reason in words, letter first
+//! (`A: log in first`), for logs: the C6 firmware builds with
+//! `-Z fmt-debug=none`, which prints a `{:?}` as nothing at all, so a board
+//! log line must never carry a refusal by `Debug`.
 
 use alloc::vec::Vec;
 
@@ -156,5 +161,90 @@ impl Refusal {
             b'U' => Self::UnknownMessage { ty: r.u8()? },
             other => Self::Other { reason: other },
         })
+    }
+}
+
+impl core::fmt::Display for Refusal {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let letter = char::from(self.reason());
+        match *self {
+            Self::FailedBuild { build_hash } => {
+                write!(
+                    f,
+                    "{letter}: that build failed its trial here ({build_hash:08x})"
+                )
+            }
+            Self::Access => write!(f, "{letter}: log in first"),
+            Self::DoesNotFit { need, room } => {
+                write!(
+                    f,
+                    "{letter}: does not fit (needs {need} B, room for {room} B)"
+                )
+            }
+            Self::Incompatible { what, have, need } => {
+                let what = match what {
+                    Mismatch::Chip => "chip",
+                    Mismatch::Layout => "layout",
+                    Mismatch::Loader => "loader",
+                    Mismatch::Flags => "must-understand flags",
+                    Mismatch::Other(_) => "something",
+                };
+                write!(f, "{letter}: another {what} (have {have}, needs {need})")
+            }
+            Self::Busy { done, total } => write!(
+                f,
+                "{letter}: busy, another link holds the transfer ({done} of {total} B)"
+            ),
+            Self::HashMismatch => write!(f, "{letter}: hash mismatch"),
+            Self::Untrusted => write!(f, "{letter}: the boot state cannot be trusted"),
+            Self::UnknownMessage { ty } => write!(f, "{letter}: unknown host message {ty:#04x}"),
+            Self::Other { .. } => write!(f, "{letter}: refused"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloc::format;
+
+    #[test]
+    fn every_refusal_says_its_reason_in_words_letter_first() {
+        let all = [
+            (
+                Refusal::FailedBuild { build_hash: 0xab },
+                "F: that build failed its trial here (000000ab)",
+            ),
+            (Refusal::Access, "A: log in first"),
+            (
+                Refusal::DoesNotFit { need: 10, room: 4 },
+                "S: does not fit (needs 10 B, room for 4 B)",
+            ),
+            (
+                Refusal::Incompatible {
+                    what: Mismatch::Loader,
+                    have: 1,
+                    need: 2,
+                },
+                "V: another loader (have 1, needs 2)",
+            ),
+            (
+                Refusal::Busy {
+                    done: 4096,
+                    total: 8192,
+                },
+                "B: busy, another link holds the transfer (4096 of 8192 B)",
+            ),
+            (Refusal::HashMismatch, "H: hash mismatch"),
+            (Refusal::Untrusted, "T: the boot state cannot be trusted"),
+            (
+                Refusal::UnknownMessage { ty: b'X' },
+                "U: unknown host message 0x58",
+            ),
+            (Refusal::Other { reason: b'q' }, "q: refused"),
+        ];
+        for (refusal, words) in all {
+            assert_eq!(format!("{refusal}"), words);
+        }
     }
 }

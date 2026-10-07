@@ -485,6 +485,7 @@ mod tests {
                 to: y(),
                 percent: Some(70),
                 running: true,
+                resumed: false,
             },
             UpdateStanding::Restoring {
                 board: x(),
@@ -510,6 +511,7 @@ mod tests {
                 to: y(),
                 percent: Some(70),
                 running: false,
+                resumed: true,
             },
             UpdateStanding::AnotherDevice {
                 board: x(),

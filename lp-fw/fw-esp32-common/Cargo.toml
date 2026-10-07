@@ -40,7 +40,9 @@ hashbrown = { workspace = true }
 # runs over. Chip-free; esp-radio's `WifiDevice` implements it.
 embassy-net-driver = { version = "0.2.0", optional = true }
 # `net::StationSettings` / `net::StationBoard` (feature `wifi`): the network
-# file the station joins from. Already in every server image (lpa-server).
+# file the station joins from; and the tier a radio link's channel-3 message
+# carries to the core's update hook (`radio_link::radio_update_channel`,
+# feature `radio-link`). Already in every server image (lpa-server).
 lpc-access = { path = "../../lp-core/lpc-access", optional = true }
 littlefs-rust = { version = "0.1.0", default-features = false, features = ["alloc"], optional = true }
 
@@ -92,7 +94,7 @@ usb-link = ["dep:lp-link", "dep:critical-section"]
 # The radio links on lp-link (`radio_link`'s mux and port, plan
 # `ble-on-lp-link`): one `Link` per open connection, Datagram framing. The
 # C6's `ble` feature turns it on; the S3 and the classic have no radio link.
-radio-link = ["server", "dep:lp-link"]
+radio-link = ["server", "dep:lp-link", "dep:lpc-access"]
 # The classic's UART0 host link on lp-link (`uart_link`, `log_ring_logger`;
 # plan `classic-uart-on-lp-link`): the classic (v3) turns it on. The server
 # transport over it (`uart_link::uart_link_transport`) also needs `server`.

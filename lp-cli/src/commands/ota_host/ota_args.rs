@@ -28,12 +28,14 @@ pub struct OtaArgs {
     pub ota_cache: Option<PathBuf>,
 
     /// Chunks kept in flight per request (send-ahead). Default 1 on USB,
-    /// serial and tcp.
+    /// serial and tcp; 4 on `blepipe:` (`ServeConfig::BLE`).
     #[arg(long = "ota-ahead", requires = "ota_offer")]
     pub ota_ahead: Option<u8>,
 
-    /// A password for the core-side login (tests and desk only; never
-    /// logged).
+    /// A password for the core-side login (channel 3), whenever the board
+    /// asks for one; on `blepipe:` also the running engine's login
+    /// (channel 1), before the update starts. Tests and desk only; never
+    /// logged.
     #[arg(long = "ota-password", requires = "ota_offer")]
     pub ota_password: Option<String>,
 

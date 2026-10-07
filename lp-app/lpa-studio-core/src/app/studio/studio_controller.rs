@@ -1557,16 +1557,26 @@ impl StudioController {
             return;
         }
         let host = self.devices.effects().update_host().clone();
-        host.set_credentials(
-            self.access
-                .held()
-                .into_iter()
-                .map(|held| lpa_update::Credential::Key {
-                    salt: held.key.salt,
-                    material: held.key.material,
-                })
-                .collect(),
-        );
+        // The keys this browser and account hold, then the passwords it
+        // remembers: a board unlocked over Bluetooth with a typed password
+        // knows no key of this browser's, and its core-only half asks for a
+        // login of its own after the update's first reset — answered with
+        // the same password, or the update stopped `LoginRefused` with the
+        // board core-only (the M7 pre-walk on the fixture C6).
+        let keys = self
+            .access
+            .held()
+            .into_iter()
+            .map(|held| lpa_update::Credential::Key {
+                salt: held.key.salt,
+                material: held.key.material,
+            });
+        let passwords = self
+            .access
+            .remembered()
+            .in_order()
+            .map(|password| lpa_update::Credential::Password(password.as_bytes().to_vec()));
+        host.set_credentials(keys.chain(passwords).collect());
         let latest = host.store_latest();
         if latest.as_ref() != self.update_build_facts.store_latest() {
             self.update_build_facts_mut().set_store_latest(latest);

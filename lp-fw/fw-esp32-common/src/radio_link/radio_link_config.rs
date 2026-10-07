@@ -17,6 +17,8 @@
 use lp_link::frame::{HEADER_LEN, SYN_LEN};
 use lp_link::{LinkConfig, MAX_MESSAGE as LINK_MAX_MESSAGE};
 
+use super::radio_link_mode::{RadioLinkMode, UPDATE_RX_WINDOW};
+
 /// The ATT header an ATT value leaves room for: opcode and handle.
 const ATT_VALUE_OVERHEAD: usize = 3;
 
@@ -71,7 +73,7 @@ pub fn radio_max_payload(att_mtu: u16) -> Result<u16, MtuTooSmall> {
 }
 
 /// The board's configuration for one radio link on a connection whose ATT MTU
-/// is `att_mtu`.
+/// is `att_mtu`, opened in `mode`.
 ///
 /// Every buffer is allocated in `Link::new` for the link's life, up to two of
 /// them at once ([`super::RADIO_LINK_SLOTS`]), on a heap BLE already makes
@@ -83,7 +85,13 @@ pub fn radio_max_payload(att_mtu: u16) -> Result<u16, MtuTooSmall> {
 /// side is lazy (grows with traffic, capped at one largest request, and gives
 /// a large reassembly buffer back once its request is delivered); and there
 /// is one datagram slot, since no log records travel on a radio link.
-pub fn radio_link_config(att_mtu: u16) -> Result<LinkConfig, MtuTooSmall> {
+///
+/// In [`RadioLinkMode::Update`] (core-only) the receive window is
+/// [`UPDATE_RX_WINDOW`] rather than the preset's 8, advertised in the SYN.
+/// Its out-of-order slots are allocated with the link — 24 more frames of
+/// `max_payload`, ~4.4 KB at a 247-byte MTU — on a heap the engine is not
+/// using; every other buffer stays the board's cut.
+pub fn radio_link_config(att_mtu: u16, mode: RadioLinkMode) -> Result<LinkConfig, MtuTooSmall> {
     let max_payload = radio_max_payload(att_mtu)?;
     let mut cfg = LinkConfig::ble();
     cfg.max_payload = max_payload;
@@ -94,6 +102,9 @@ pub fn radio_link_config(att_mtu: u16) -> Result<LinkConfig, MtuTooSmall> {
     cfg.send_queue = SEND_QUEUE;
     cfg.keep_reassembly = KEEP_REASSEMBLY;
     cfg.datagram_queue = DATAGRAM_QUEUE;
+    if mode == RadioLinkMode::Update {
+        cfg.rx_window = UPDATE_RX_WINDOW;
+    }
     Ok(cfg)
 }
 
@@ -133,7 +144,7 @@ mod tests {
     fn a_connection_below_the_bluetooth_minimum_is_refused() {
         assert_eq!(radio_max_payload(22), Err(MtuTooSmall { att_mtu: 22 }));
         assert_eq!(radio_max_payload(0), Err(MtuTooSmall { att_mtu: 0 }));
-        assert!(radio_link_config(22).is_err());
+        assert!(radio_link_config(22, RadioLinkMode::Serve).is_err());
     }
 
     /// The board's cut holds together, carries the largest reply, and costs
@@ -141,7 +152,7 @@ mod tests {
     /// a 32-bit target's descriptors and event queue are about half).
     #[test]
     fn the_board_config_holds_one_largest_reply_and_costs_less_than_the_preset() {
-        let cfg = radio_link_config(247).unwrap();
+        let cfg = radio_link_config(247, RadioLinkMode::Serve).unwrap();
         assert_eq!(cfg.validate(), Ok(()));
         assert!(cfg.max_message >= lpc_wire::PROJECT_READ_FRAME_SERIAL_BUFFER_BYTES);
         assert!(
@@ -156,5 +167,34 @@ mod tests {
             "radio link RAM at rest: board {board} B, ble() preset {preset} B; board bound {bound} B"
         );
         assert!(board * 2 < preset, "board {board} B vs preset {preset} B");
+    }
+
+    /// Update mode widens the receive window, and nothing else: the window
+    /// is what the SYN advertises, and its slots are the whole RAM cost.
+    /// `--nocapture` prints it.
+    #[test]
+    fn update_mode_widens_the_receive_window_only() {
+        let serve = radio_link_config(247, RadioLinkMode::Serve).unwrap();
+        let update = radio_link_config(247, RadioLinkMode::Update).unwrap();
+        assert_eq!(serve.rx_window, LinkConfig::ble().rx_window);
+        assert_eq!(update.rx_window, UPDATE_RX_WINDOW);
+        assert_eq!(update.validate(), Ok(()));
+        let narrowed = LinkConfig {
+            rx_window: serve.rx_window,
+            ..update.clone()
+        };
+        assert_eq!(
+            std::format!("{narrowed:?}"),
+            std::format!("{serve:?}"),
+            "only the window differs"
+        );
+        let at_rest = |cfg: &LinkConfig| Link::<SelectiveRepeat>::new(cfg.clone(), 1).ram_bytes();
+        let cost = at_rest(&update) - at_rest(&serve);
+        std::println!(
+            "update-mode radio link: +{cost} B at rest ({} B vs {} B)",
+            at_rest(&update),
+            at_rest(&serve)
+        );
+        assert!(cost <= 24 * (180 + 16), "{cost} B: the window's slots only");
     }
 }

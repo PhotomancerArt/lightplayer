@@ -32,16 +32,18 @@
 //! | `fake` | the scripted `FakeEsp32Device` → `Link` (host tests) |
 //! | `link_port_edge` | the page's clock, nonce and wake loop for a browser link port (wasm) |
 //! | `browser_serial` | the Web Serial provider → `Link` (wasm) |
-//! | `browser_ble` | a Web Bluetooth (NUS) session → `Link` (wasm) |
+//! | `browser_ble` | a Web Bluetooth (NUS) session → `Link`, channel 3 included (wasm) |
 //! | `browser_websocket` | a LAN board's WebSocket session (a secure lp-link) → `Link` (wasm) |
 //! | `browser_worker` | a `fw-browser` worker → `Link`, i.e. the sim as a device (wasm) |
 //! | `browser_worker_io` | that worker's protocol channel → `lpa_client::ClientIo` (wasm) |
 //!
 //! # The update channel (lp-link channel 3)
 //!
-//! Every lp-link transport Studio drives over USB — Web Serial (a board, or
-//! the `?emu=` door), the tab-hosted board and the host byte stream —
-//! carries the over-the-air update channel beside channel 1 (M7 P7, DS1):
+//! Every lp-link transport Studio drives — Web Serial (a board, or the
+//! `?emu=` door), the tab-hosted board and the host byte stream (M7 P7), and
+//! Web Bluetooth (`browser_ble`, M7 P12, on the same `link_port_service`
+//! per connection) — carries the over-the-air update channel beside
+//! channel 1 (DS1):
 //! `LinkCommand::SendUpdate` is one channel-3 message out, and each message
 //! the board sends comes back as `LinkEvent::Update` (with
 //! `LinkEvent::UpdateFacts` first when it is a manifest). Their
@@ -51,8 +53,8 @@
 //! message, and it **never sends on channel 3 before the board announced
 //! it** (a hello with `firmware`, or an update message received this
 //! session; DS9): a board without the channel would never acknowledge a
-//! reliable frame there and the link would stall. Bluetooth (still the
-//! next PR) and `M!` transports say `false` and drop `SendUpdate`.
+//! reliable frame there and the link would stall. The `M!` transports (the
+//! `fw-browser` sim worker, `fw-emu`) say `false` and drop `SendUpdate`.
 //!
 //! What is NOT here: the effects layer. Pumping `poll_event` into
 //! `Event::Link`, running timers, persisting records and revoking grants are

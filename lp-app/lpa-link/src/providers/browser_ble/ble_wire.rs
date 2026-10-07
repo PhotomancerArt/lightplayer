@@ -54,6 +54,20 @@ impl BleWire {
         ble_link_port::send_client_json(self.session, json)
     }
 
+    /// Queue one channel-3 (update) message as one lp-link message.
+    /// `Ok(false)`: the board has not announced the update channel on this
+    /// connection, so nothing was queued (DS9). `Err` like
+    /// [`Self::send_client_json`].
+    pub fn send_update(&self, message: &[u8]) -> Result<bool, String> {
+        ble_link_port::send_update(self.session, message)
+    }
+
+    /// The board's channel-3 (update) messages since the last drain, this
+    /// connection's only. Only the model's link drains them.
+    pub fn take_updates(&self) -> Vec<Vec<u8>> {
+        ble_link_port::take_updates(self.session)
+    }
+
     /// Everything the board said since the last drain, in order: wire
     /// messages (decoded once, JSON or packed) and link resets.
     pub fn take_reads(&self) -> Vec<WireRead> {

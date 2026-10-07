@@ -31,7 +31,9 @@
 
 use embassy_futures::select::{Either4, select4};
 use embassy_time::{Duration, Instant, Timer};
-use fw_esp32_common::radio_link::{LOGIN_DEADLINE_MS, RadioLinkEvent, RadioLinkPort, now_us};
+use fw_esp32_common::radio_link::{
+    LOGIN_DEADLINE_MS, OpenRefused, RadioLinkEvent, RadioLinkMode, RadioLinkPort, now_us,
+};
 use lpc_shared::transport::LinkId;
 use trouble_host::att::{AttClient, AttReq};
 use trouble_host::prelude::*;
@@ -255,30 +257,44 @@ pub async fn serve(
 }
 
 /// The central enabled notifications: start the connection's lp-link session
-/// at its negotiated ATT MTU and announce the link. `false`: the MTU cannot
-/// carry a frame and the caller disconnects.
+/// at its negotiated ATT MTU, in the boot's radio link mode, and announce the
+/// link. `false`: the MTU cannot carry a frame and the caller disconnects.
 async fn open_link(
     port: &'static RadioLinkPort,
     slot: usize,
     link: LinkId,
     conn: &GattConnection<'_, '_, DefaultPacketPool>,
 ) -> bool {
+    // The boot decides what its radio links are for (serving the wire, or
+    // core-only taking an update with a wider receive window) before this
+    // task has ever run; should a central ever subscribe first, its link
+    // waits here rather than open with a window nobody chose.
+    let mode = port.wait_for_mode(slot).await;
     let att_mtu = conn.raw().att_mtu();
     // Random per connection: it is how the central learns this is a new
     // session (the RNG is the one the login challenges draw from).
     let nonce = esp_hal::rng::Rng::new().random();
-    match port.slot(slot).open(link, att_mtu, nonce) {
+    match port.open(slot, link, att_mtu, nonce) {
         Ok(max_payload) => {
             log::info!(
                 "[ble] {link}: notifications on — link open (ATT MTU {att_mtu}, frames \
-                 {max_payload} B + 8, link RAM {} B, heap used {} B)",
+                 {max_payload} B + 8, {}, link RAM {} B, heap used {} B)",
+                match mode {
+                    RadioLinkMode::Serve => "serving",
+                    RadioLinkMode::Update => "update mode",
+                },
                 port.slot(slot).ram_bytes().unwrap_or(0),
                 esp_alloc::HEAP.used()
             );
             port.announce(RadioLinkEvent::Opened { link, slot }).await;
             true
         }
-        Err(_) => {
+        Err(OpenRefused::ModeUndecided) => {
+            // `wait_for_mode` returned, so the mode is decided: unreachable.
+            log::error!("[ble] {link}: radio link mode undecided — disconnecting");
+            false
+        }
+        Err(OpenRefused::MtuTooSmall(_)) => {
             // D5 (plan `ble-on-lp-link`): below the Bluetooth minimum not
             // even the handshake frame fits one ATT value. Refused rather
             // than opened on a link that can never carry a frame.

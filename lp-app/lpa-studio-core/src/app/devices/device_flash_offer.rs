@@ -112,7 +112,11 @@ pub fn update_firmware_offer(view: &DeviceView, prefix: OfferPath) -> Option<UiO
         return None;
     }
     let path = prefix.child("update-firmware");
-    if let Some(reason) = &view.firmware_blocked {
+    if let Some(blocked) = &view.firmware_blocked {
+        // The update's own reason, when it has one: over Wi‑Fi the flash
+        // needs USB but the update only is not ready yet, and Bluetooth and
+        // USB both carry it (`DeviceView::update_blocked`).
+        let reason = view.update_blocked.as_ref().unwrap_or(blocked);
         return Some(UiOffer::new(
             path,
             "download",
@@ -601,6 +605,24 @@ mod tests {
             })
         );
         assert_eq!(blocked.label(), "Update firmware");
+    }
+
+    /// Over Wi‑Fi the flash needs USB but the update is only not ready yet:
+    /// the Update verb says that, not "need USB" (Bluetooth and USB both
+    /// carry it).
+    #[test]
+    fn over_wifi_the_update_says_it_is_not_ready_and_the_flash_still_needs_usb() {
+        let mut view = running(Some("esp32c6"));
+        view.board_id = Some(flash_offer(Some("esp32c6")).candidates[0].board_id.clone());
+        view.firmware_blocked = Some(lpa_devices::view::FIRMWARE_NEEDS_USB.to_string());
+        view.update_blocked = Some(lpa_devices::view::UPDATE_NOT_OVER_WIFI_YET.to_string());
+        let update = update_firmware_offer(&view, prefix()).unwrap();
+        assert_eq!(
+            update.press(&OfferArgs::new()),
+            Err(OfferArgError::Unavailable {
+                reason: lpa_devices::view::UPDATE_NOT_OVER_WIFI_YET.to_string()
+            })
+        );
     }
 
     #[test]

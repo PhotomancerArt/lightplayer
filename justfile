@@ -4827,7 +4827,9 @@ walk-migration-emu *args:
 # The Bluetooth twin (M5 of the BLE remote-control plan): add over Bluetooth
 # → identify → push → Play → idle → knob, over `?ble=emu` against an emulated
 # C6, and the idle bytes/s a connected Play-mode Studio puts on a `ble:` link.
-# Needs a Studio on this worktree's port, like walk-no-board. Not CI.
+# Needs a Studio on this worktree's port, like walk-no-board — or
+# `--serve-release` (after `just studio-web-story-build`), which serves the
+# release bundle itself. Not CI.
 # Proves the transport, the UI and Play — not access enforcement.
 walk-ble-emu *args:
     node scripts/emu/walk-ble-emu.mjs {{ args }}
@@ -4897,6 +4899,19 @@ walk-ota-emu *args: install-rv32-target
     just studio-firmware-package-esp32c6 split
     just studio-web-story-build
     node scripts/emu/walk-ota-emu.mjs {{ args }}
+
+# The over-the-air update walk over Bluetooth (OTA M7 P12): walk-ota-emu's
+# update, a drop mid-backup that the backup resumes from, a drop mid-core (out
+# of range, and Bluefy's phantom drop) finished with no click, and an
+# engine-less board restored on connect — with Studio
+# reaching the door's boards over `?ble=emu`, whose polyfill makes every
+# board reset a GATT drop. The card must say "Bluetooth" and Studio's
+# terminal must time every reconnect. Builds what walk-ota-emu builds. Proves
+# the transport, the card and the reconnects — not access (the emulated board
+# answers at the edit tier), and no number it prints is a Bluetooth number.
+# Not CI.
+walk-ota-ble-emu *args:
+    just walk-ota-emu --ble {{ args }}
 
 # The hardware-validation system: payloads, configurations, transcripts,
 # replay. `just validate list` with no other args; `replay <transcript>

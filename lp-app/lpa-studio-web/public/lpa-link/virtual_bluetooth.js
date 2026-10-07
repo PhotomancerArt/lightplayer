@@ -33,8 +33,14 @@
 //   device.{id, name, gatt, forget, addEventListener("gattserverdisconnected")}
 //   gatt.{connected, connect, disconnect}
 //   server.getPrimaryService(NUS) → service.getCharacteristic(RX | TX)
-//   rx.writeValueWithResponse(bytes)
+//   rx.writeValueWithResponse(bytes), rx.writeValueWithoutResponse(bytes)
 //   tx.{startNotifications, addEventListener("characteristicvaluechanged"), value}
+//
+// A write WITHOUT response is delivered exactly as one with a response —
+// nothing is lost on this "air" unless a test asks (`dropUnackedEvery`,
+// the Mac's write queue overflowing, OTA spike S5c), so `?ble=emu` proves
+// which kind each frame is and that lp-link recovers a lost one, never a
+// rate.
 //
 // ONE PLUMBING, NOT TWO. The NUS characteristics reach the SAME
 // `EmulatorPort` the `navigator.serial` bus holds for each board (`emu serve`
@@ -56,6 +62,33 @@
 // hello rides inside lp-link frames, which this file does not read, so the
 // rule fires only for text a test injects (`deliverBytes`); the emulated
 // board's own link is trusted USB and never asks anyway.
+//
+// A BOARD'S RESET IS A GATT DROP (M7 P12). A real board's radio goes down
+// with its CPU, so a reset — an over-the-air update has three — ends the
+// GATT connection, and the page reconnects once the board advertises again.
+// The emulated board's USB-Serial-JTAG link SURVIVES a reset (the ruling in
+// `virtual_serial.js`), so on its own the reset would reach the page as an
+// lp-link restart inside a live connection, which a Bluetooth board never
+// does. So: a SYN from the board after its link has carried anything else is
+// either the board's link restarting by itself (the radio stays up) or the
+// board rebooted (the radio goes). Until the polyfill knows which, it holds
+// the board's frames and reads the board's reboot count from the backing's
+// registry (`GET /boards`'s `reboots`, or the tab's live row) against the
+// count when this connection opened — a count, never the guest's cycle
+// clock, which a core-only boot that verifies its image can carry past any
+// earlier reading. Then it either drops the connection
+// (`gattserverdisconnected`, the board's frames discarded until the page
+// subscribes again) or delivers what it held. A reset drop leaves the
+// board's byte channel OPEN: the rebooted board already starts a new lp-link
+// session of its own, as a real board's radio stack does, and closing its
+// USB host in the middle of its boot would be a disturbance no Bluetooth
+// board ever sees. Every other drop still closes it. The door publishes the count at the end of
+// each emulation slice, so a count that has not moved is read once more
+// before the frames are let through. The page's reconnect loop then finds
+// the board in range at once:
+// the emulator has no advertising gap, so the time a reconnect takes here is
+// the page's own (its first retry, 250 ms) and the board's boot, never a
+// radio's.
 //
 // THE CABLE IS THE RADIO. The dev banner's `detach` takes a board out of
 // range: an open GATT connection drops (`gattserverdisconnected`), and
@@ -81,6 +114,17 @@ const UNAUTHENTICATED_TIMEOUT_MS = 10_000;
 /// long write, which the firmware refuses (P3 of the BLE-on-lp-link plan),
 /// so this refuses it too — one frame is always one plain write.
 const ATT_VALUE_BYTES = 244;
+/// How long the polyfill waits for the board registry when it asks whether
+/// the board rebooted (one HTTP round trip on this machine, or the tab's own
+/// row).
+const REGISTRY_MS = 1_000;
+/// The second look at a reboot count that has not moved (the door publishes
+/// it at the end of each emulation slice).
+const REBOOT_RECHECK_MS = 150;
+/// lp-link's SYN frame kind (`lp-base/lp-link/src/frame.rs`, `FrameKind::Syn`:
+/// the low three bits of the header's first byte): a link starting, or
+/// restarting.
+const LP_LINK_SYN = 3;
 /// A frame body longer than this between two `0x00`s is not a frame (the
 /// board's USB link frames are ≤ 256 B of payload, COBS-FF at most doubles).
 const MAX_STREAM_FRAME_BYTES = 1_024;
@@ -152,6 +196,11 @@ class VirtualBluetooth extends EventTarget {
     // write. Off by default (a standard browser sends the view); the
     // conformance suite turns it on.
     this.wholeBufferWrites = false;
+    // Mac Chrome resolves a write WITHOUT response at once and macOS drops
+    // what overflows its queue (BLE M2 Run B; OTA spike S5c). `n > 0` drops
+    // every n-th write without response, silently, as that queue does; the
+    // conformance suite turns it on to prove lp-link resends what is lost.
+    this.dropUnackedEvery = 0;
     this.onCableOut = (event) => {
       const boardId = event?.detail?.port?.boardId;
       if (!boardId) return;
@@ -308,6 +357,16 @@ class VirtualGattServer {
     this.lineTail = "";
     // The board's stream, cut back into frames (see the header).
     this.deframer = null;
+    // A board reset is a GATT drop (see the header): whether the board's
+    // link has carried anything but a SYN since this link opened, the
+    // frames held while a SYN after that is checked, and the port's
+    // `reboot` subscription.
+    this.linkCarried = false;
+    this.held = null;
+    this.rebootsAtOpen = null;
+    // A reset drop: the radio went with the board's CPU, but the board's
+    // byte channel stays open (see the header) for the next subscribe.
+    this.keptAcrossReset = false;
     // `linkOpens`/`linkCloses`: the BOARD's side of the link (the port under
     // it opened or closed), which a phantom drop leaves open.
     // `textDropped`: console bytes between frames, which a real board never
@@ -315,6 +374,10 @@ class VirtualGattServer {
     this.stats = {
       written: 0,
       writes: 0,
+      // Of `writes`, how many asked for no response, and how many of those
+      // `dropUnackedEvery` lost.
+      unackedWrites: 0,
+      unackedDropped: 0,
       largestWrite: 0,
       notified: 0,
       notifications: 0,
@@ -323,6 +386,8 @@ class VirtualGattServer {
       linkOpens: 0,
       linkCloses: 0,
       textDropped: 0,
+      // Board resets the polyfill turned into GATT drops.
+      resetDrops: 0,
     };
   }
 
@@ -347,6 +412,16 @@ class VirtualGattServer {
   /// the board's port opening (the door's coupling rule); if the serial side
   /// of this page holds it, this says so.
   async openLink() {
+    if (this.emulator && this.keptAcrossReset) {
+      // The connection after a reset drop: the board's side is the channel
+      // it booted with, and what the page subscribes to now is the new
+      // session the rebooted board started.
+      this.keptAcrossReset = false;
+      this.linkCarried = false;
+      this.held = null;
+      this.rebootsAtOpen = await this.rebootCount();
+      return;
+    }
     if (this.emulator) {
       return;
     }
@@ -358,14 +433,105 @@ class VirtualGattServer {
     this.lineTail = "";
     // A new byte channel is a new stream: nothing half-read carries over.
     this.deframer = new StreamDeframer(
-      (frame) => this.service.tx.deliver(frame),
+      (frame) => this.boardFrame(frame),
       (text) => {
         this.stats.textDropped += text.length;
         this.watchAuth(text);
       },
     );
+    this.linkCarried = false;
+    this.held = null;
     this.offBytes = emulator.onBytes((bytes) => this.deframer?.push(toBytes(bytes)));
     this.offError = emulator.on("byteserror", () => this.drop("the board's link failed"));
+    // The board's reboots so far: one more, later in this connection, is
+    // its radio going down (see the header).
+    this.rebootsAtOpen = await this.rebootCount();
+  }
+
+  /// One frame from the board's stream: notified, unless it is a SYN after
+  /// the link carried something else, which may be the board's reboot (see
+  /// the header) — then held until that is known.
+  boardFrame(frame) {
+    // Nobody subscribed (a reset drop's radio gap): the frame is on no air.
+    if (!this.service.tx.notifying) {
+      return;
+    }
+    if (this.held) {
+      this.held.push(frame);
+      return;
+    }
+    const syn = frame.length > 0 && (frame[0] & 0x07) === LP_LINK_SYN;
+    if (!syn) {
+      this.linkCarried = true;
+      this.service.tx.deliver(frame);
+      return;
+    }
+    if (!this.linkCarried) {
+      this.service.tx.deliver(frame);
+      return;
+    }
+    this.held = [frame];
+    this.checkReboot(this.emulator).catch(() => {});
+  }
+
+  /// Did the chip under `emulator` go back to power-on since this link
+  /// opened? Drops the connection if so; otherwise notifies what was held.
+  async checkReboot(emulator) {
+    let rebooted = false;
+    for (let look = 0; look < 2 && !rebooted; look += 1) {
+      if (look > 0) {
+        // The door publishes its count once a slice: give it one.
+        await new Promise((resolve) => setTimeout(resolve, REBOOT_RECHECK_MS));
+      }
+      const now = await this.rebootCount();
+      rebooted = now !== null && this.rebootsAtOpen !== null && now > this.rebootsAtOpen;
+      if (this.emulator !== emulator) {
+        return; // dropped meanwhile
+      }
+    }
+    if (rebooted) {
+      this.boardReset(emulator);
+      return;
+    }
+    // The board's link restarted on its own, the radio still up: that IS a
+    // reset inside one connection, and the page's link reads it as one.
+    const held = this.held ?? [];
+    this.held = null;
+    this.linkCarried = false;
+    for (const frame of held) {
+      this.boardFrame(frame);
+    }
+  }
+
+  /// How many times the board has restarted, from the backing's registry
+  /// (`GET /boards`, or the tab's live row); null when the registry cannot
+  /// say (no answer within [`REGISTRY_MS`], or no such board).
+  async rebootCount() {
+    const bus = this.device.bluetooth.bus;
+    const boards = await bounded(bus.backing?.listBoards?.(), REGISTRY_MS);
+    const row = Array.isArray(boards)
+      ? boards.find((board) => board?.id === this.device.boardId)
+      : null;
+    return typeof row?.reboots === "number" ? row.reboots : null;
+  }
+
+  /// The board under this connection rebooted: its radio went down with
+  /// it. What it said after the reboot belongs to no connection.
+  boardReset(emulator) {
+    if (this.emulator !== emulator || !this.connected) {
+      return;
+    }
+    this.held = null;
+    this.stats.resetDrops += 1;
+    console.info(`[ble] ${this.device.boardId}: the board reset — its GATT connection drops, as a real board's radio does`);
+    // The radio goes; the byte channel stays (see the header).
+    this.connected = false;
+    this.keptAcrossReset = true;
+    this.linkCarried = false;
+    clearTimeout(this.unauthTimer);
+    this.unauthTimer = null;
+    this.service.tx.notifying = false;
+    this.device.dispatchEvent(new Event("gattserverdisconnected"));
   }
 
   /// One lp-link frame from the page (one RX write), onto the board's
@@ -409,6 +575,12 @@ class VirtualGattServer {
   }
 
   disconnect() {
+    // After a reset drop there is no radio link left to end (the page's own
+    // teardown, rule 5 of `browser_ble.js`): the board's channel stays for
+    // the reconnect.
+    if (this.keptAcrossReset && !this.connected) {
+      return;
+    }
     // A page-initiated disconnect fires the event too, as Chrome's does.
     this.drop("disconnected by the page");
   }
@@ -429,6 +601,9 @@ class VirtualGattServer {
     this.offBytes = null;
     this.offError = null;
     this.deframer = null;
+    this.held = null;
+    this.linkCarried = false;
+    this.keptAcrossReset = false;
     const emulator = this.emulator;
     this.emulator = null;
     if (emulator) {
@@ -476,6 +651,16 @@ class VirtualRxCharacteristic {
   }
 
   async writeValueWithResponse(value) {
+    this.takeWrite(value, true);
+  }
+
+  /// Resolves at once, as Chrome's does: the page learns nothing about
+  /// whether the board got it.
+  async writeValueWithoutResponse(value) {
+    this.takeWrite(value, false);
+  }
+
+  takeWrite(value, withResponse) {
     const gatt = this.gatt;
     if (!gatt.connected || !gatt.emulator) {
       throw domError("NetworkError", "GATT Server is disconnected.");
@@ -494,8 +679,15 @@ class VirtualRxCharacteristic {
         `a ${frame.length}-byte write is an ATT long write, which the board refuses`,
       );
     }
+    let lost = false;
+    if (!withResponse) {
+      gatt.stats.unackedWrites += 1;
+      const every = gatt.device.bluetooth.dropUnackedEvery;
+      lost = every > 0 && gatt.stats.unackedWrites % every === 0;
+      if (lost) gatt.stats.unackedDropped += 1;
+    }
     // Out of range, the write still goes on the air; nothing hears it.
-    if (!gatt.quiet) {
+    if (!gatt.quiet && !lost) {
       gatt.writeFrame(frame);
     }
     gatt.stats.writes += 1;
@@ -723,6 +915,16 @@ function advertisedName(boardId, mac) {
     .slice(-4)
     .toLowerCase();
   return tail ? `LP-${tail}` : `LP-${boardId}`;
+}
+
+/// `promise`'s value, or undefined after `ms` or on a rejection — whichever
+/// is first; never rejects. An answer that does not come within this says
+/// nothing either way.
+function bounded(promise, ms) {
+  return Promise.race([
+    Promise.resolve(promise).catch(() => {}),
+    new Promise((resolve) => setTimeout(resolve, ms)),
+  ]);
 }
 
 function toBytes(value) {
