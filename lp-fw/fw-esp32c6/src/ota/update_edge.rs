@@ -22,6 +22,7 @@ use lpc_update::{BoardMessage, BoardState, HostMessage, PieceKind};
 
 use super::update_outbox::UpdateOutbox;
 use super::update_target_impl::SplitUpdateTarget;
+use super::update_timing::{MessageTiming, now_us};
 
 /// The one USB link, as the session names it.
 pub const USB_LINK: LinkId = LinkId(0);
@@ -48,6 +49,10 @@ pub struct UpdateEdge {
     /// `Z` chunks received (the board's own count; a re-requested chunk
     /// counts each time).
     encoded: u32,
+    /// The chunks (`D`/`Z`) and read-backs (`G`) this session handled, for
+    /// the `[OTA] timing` lines.
+    chunks: MessageTiming,
+    read_backs: MessageTiming,
 }
 
 /// Milliseconds since boot: the session's clock.
@@ -90,6 +95,8 @@ impl UpdateEdge {
             last,
             refused_last: false,
             encoded: 0,
+            chunks: MessageTiming::default(),
+            read_backs: MessageTiming::default(),
         }
     }
 
@@ -113,11 +120,18 @@ impl UpdateEdge {
 
     /// One channel-3 message from the USB host.
     pub fn on_message(&mut self, bytes: &[u8]) {
-        if bytes.first() == Some(&b'Z') {
+        let first = bytes.first().copied();
+        if first == Some(b'Z') {
             self.encoded += 1;
         }
+        let start = now_us();
         self.session
             .on_message(&mut self.target, now_ms(), USB_LINK, bytes);
+        match first {
+            Some(b'D' | b'Z') => self.chunks.note(start, now_us()),
+            Some(b'G') => self.read_backs.note(start, now_us()),
+            _ => {}
+        }
         self.refused_last = self.session_refused();
         self.note_offer(bytes);
     }
@@ -184,6 +198,13 @@ impl UpdateEdge {
     }
 
     fn note_reset(&mut self) {
+        let flash = self.target.timing;
+        self.read_backs.log("read-back", &flash);
+        let what = match self.last {
+            Some(t) => kind_word(t.kind),
+            None => "chunks",
+        };
+        self.chunks.log(what, &flash);
         if self.session.facts().mode == SessionMode::EngineRunning {
             log::info!("[OTA] resetting: a core install is pending");
             return;

@@ -1052,6 +1052,18 @@ fn map_client_events(events: Vec<ClientEvent>) -> Vec<UiLogDraft> {
                 ),
             )),
             ClientEvent::Heartbeat { recovery, .. } => match recovery {
+                // A load the board's last run never finished, in its own
+                // words: why it runs what it runs.
+                Some(lpc_wire::server::RecoveryStatus {
+                    load_notice: Some(notice),
+                    level: lpc_wire::server::RecoveryLevelWire::Green,
+                    safe_mode: false,
+                    ..
+                }) => Some(UiLogDraft::new(
+                    UiLogLevel::Warn,
+                    UiLogOrigin::Server,
+                    notice.clone(),
+                )),
                 Some(recovery)
                     if recovery.safe_mode
                         || recovery.level != lpc_wire::server::RecoveryLevelWire::Green =>
@@ -1309,6 +1321,7 @@ mod tests {
             output_clamp: None,
             last_crash,
             paths: Vec::new(),
+            load_notice: None,
         }
     }
 }

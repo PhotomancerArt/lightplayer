@@ -28,6 +28,34 @@ pub struct FlashFault;
 pub trait UpdateTarget {
     /// Erase the 4 KiB sector at `addr` to `0xFF`.
     fn erase_sector(&mut self, addr: u32) -> Result<(), FlashFault>;
+    /// The size of the target's block erase, if it has one: a power of two,
+    /// a multiple of [`CHUNK`](crate::code_table::CHUNK). A NOR part erases
+    /// a 64 KiB block in a fraction of what sixteen sector erases take, so
+    /// the session erases a piece's whole blocks ahead of their chunks.
+    /// `None` (the default): sector by sector.
+    fn block_size(&self) -> Option<u32> {
+        None
+    }
+    /// Erase the [`block_size`](Self::block_size) block at `addr` (aligned to
+    /// it) to `0xFF`. Asked only when `block_size` is `Some`.
+    fn erase_block(&mut self, addr: u32) -> Result<(), FlashFault> {
+        let _ = addr;
+        Err(FlashFault)
+    }
+    /// SHA-256 of `head` (held in RAM, if any) followed by the flash bytes
+    /// `[from, to)`, when the target has a faster way to it than the
+    /// session's software hash over [`read`](Self::read) — an accelerator.
+    /// `None` (the default): the session hashes. The digest is the same
+    /// either way, and it is still the check a piece commits on.
+    fn sha256_flash(
+        &mut self,
+        head: Option<&[u8]>,
+        from: u32,
+        to: u32,
+    ) -> Option<Result<[u8; 32], FlashFault>> {
+        let _ = (head, from, to);
+        None
+    }
     /// Program `bytes` at `addr` (NOR: bits only go 1 → 0).
     fn program(&mut self, addr: u32, bytes: &[u8]) -> Result<(), FlashFault>;
     /// Read `buf.len()` bytes at `addr`.

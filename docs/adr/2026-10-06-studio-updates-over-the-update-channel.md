@@ -134,9 +134,13 @@ deploy bundles are always split.
 
 ### 6. This Studio's own build ships beside its merged image (DS5, DS10)
 
-The bundle adds the split package's `ota/ota-manifest.json`, `core.z` and
-`engine.z` beside `manifest.json` and the merged image (C6: ~1.84 MB more,
-fetched only when an update runs). `core.bin` and `engine.bin` are not
+The bundle adds the split package's `ota-manifest.json`, `core.z` and
+`engine.z` beside `manifest.json` and the merged image, in the same
+`firmware/<target>/` directory (C6: ~1.84 MB more, fetched only when an
+update runs). *(Amended 2026-10-06: they first shipped one level down, in
+`firmware/<target>/ota/`, where lightplayer.app's firmware lookup —
+`/firmware/<target>/<release>/<file>` — answered before the bundle; see
+`docs/defects/2026-10-06-the-bundles-ota-files-are-shadowed-by-the-firmware-lookup.md`.)* `core.bin` and `engine.bin` are not
 shipped: Studio slices them out of the merged image by the package
 manifest's `split` offsets, and checks every piece against
 `ota-manifest.json` (the package hash, the core's layout, the image)
@@ -170,9 +174,11 @@ frame on it, and lp-link would stall the whole link.
   (255 B a read, a read every 16 ms: ~12 KB/s); `?emu-tty=none` lifts it to
   ~54 KB/s on the emulator. A real Chromium's rate is a desk number, not
   this.
-- `USB_UPDATES_OVER_THE_AIR` and `ServeConfig::USB` (`ahead` 1) are the two
-  dials USB has; the second was measured at 63.1 s (ahead 1) against 58.5 s
-  (ahead 4) for a whole lp-cli update on the bench C6 and left as it was.
+- `USB_UPDATES_OVER_THE_AIR` and `ServeConfig::USB` are the two dials USB
+  has. The second was measured at 63.1 s (ahead 1) against 58.5 s (ahead 4)
+  for a whole lp-cli update on the bench C6 and left at 1. Once the board
+  erased blocks ahead, ahead 4 was worth 44.8 → 37.4 s, and it is now 4
+  (2026-10-06; ADR 2's "a USB update in half the time" amendment).
 
 ## References
 

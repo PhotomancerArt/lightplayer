@@ -48,6 +48,29 @@ impl<'a> Bits<'a> {
         Ok(v)
     }
 
+    /// The next `k` bits (0..=16), least-significant first, zero-filled past
+    /// the end of the input, and how many of them are real (`k`, or fewer at
+    /// the end). Consumes nothing: [`Bits::consume`] does.
+    #[inline]
+    pub(crate) fn peek(&mut self, k: u32) -> (u32, u32) {
+        while self.n < k {
+            let Some(&b) = self.src.get(self.pos) else {
+                break;
+            };
+            self.pos += 1;
+            self.acc |= u32::from(b) << self.n;
+            self.n += 8;
+        }
+        (self.acc & ((1 << k) - 1), self.n.min(k))
+    }
+
+    /// Drops `k` bits a [`Bits::peek`] showed were there.
+    #[inline]
+    pub(crate) fn consume(&mut self, k: u32) {
+        self.acc >>= k;
+        self.n -= k;
+    }
+
     /// Discards the bits remaining in the current byte, so the next `take`
     /// starts at a byte boundary (RFC 1951 §3.2.3, before a stored block).
     pub(crate) fn align(&mut self) {

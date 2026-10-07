@@ -192,8 +192,11 @@ sequence space is future work if a measurement ever calls for it).
    `Reset` on each side, and per-link state above (the learned dictionary,
    pending requests) resets in step.
 4. **One design, tuned per transport.** Presets in `link_config.rs`: `usb()`, `uart()`,
-   `ble()`, `udp()`, `ws()`. WS/TCP use `NoArq` (channels and lifecycle
-   only). A preset is what a **host** runs; a board takes its own cut of one
+   `ble()`, `udp()`, `ws()`. `ws()` is the C6's Wi-Fi (LAN) link in product
+   use: one frame per WebSocket message, the `secure` channel on, and
+   selective-repeat ARQ with a window of 2, acks every 2 frames and a 200 ms
+   resend floor (TCP already delivers, and the hosts' `WireLinkPort` speaks
+   selective-repeat; `docs/adr/2026-10-07-c6-wifi-link.md`). A preset is what a **host** runs; a board takes its own cut of one
    (the C6's `UsbLinkShared::config`, the classic's
    `uart_board_link_config`), smaller buffers and a slower resend floor,
    because a host queues upload-sized requests through `send()` and a board
@@ -273,6 +276,18 @@ The `secure` feature (`docs/adr/2026-10-01-network-link-security.md`) runs
 **`Noise_NNpsk0_25519_ChaChaPoly_SHA256`** merged into the session handshake,
 then seals every frame. It is for untrusted network links (the LAN
 WebSocket, the relay); USB and UART never use it (the cable is the trust).
+
+**Forged frames are out of lp-link's threat model today.** Every product
+link — USB, UART, and BLE (`radio_link/` never calls `secured()`, and the
+BLE connection itself carries no pairing or link-layer encryption) — runs
+with `secure` off, so the session key guards against noise and stale
+sessions, not forgery: anyone who saw both SYN nonces — on the cable for
+USB/UART, or simply in radio range for BLE — can forge a frame that lands
+at a seq the sender reuses and silently replaces the real message. That
+forged frame runs with whatever access tier its link already holds, since
+the server's gate checks a link's tier on every request rather than
+re-authenticating each one, so it acts with the session's own access and
+is capped at what that session may do, not stopped by login.
 
 **The SYN.** Its 12 bytes do not change; flags bit 1 is `SECURE` and bits 2–3
 name what follows (`frame/secure_syn.rs`):

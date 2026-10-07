@@ -196,6 +196,8 @@ async fn run(
             stack.set_config_v4(ConfigV4::None);
             super::net_address::publish(None);
             log::info!("[wifi] trying {ssid}");
+            #[cfg(feature = "heap_map_diag")]
+            crate::heap_map::arm_tracking("station join");
             let started = Instant::now();
             match control.connect(&ssid, &network.password).await {
                 ConnectOutcome::Associated => {

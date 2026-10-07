@@ -7,6 +7,7 @@
 use crate::crash_record::{CompactFrameName, CrashCause, CrashMsg, CrashRecord, OomStats};
 use crate::frame_path::{FramePath, MAX_FRAME_DEPTH};
 use crate::frame_record::FrameRecord;
+use crate::load_intent::InterruptedLoad;
 use crate::path_entry::PathEntry;
 use crate::recovery_level::RecoveryLevel;
 use crate::recovery_region::RecoveryRegion;
@@ -40,10 +41,17 @@ pub struct RecoverySnapshot {
     pub consecutive_incomplete_boots: u32,
     /// Blame-ledger entries (empty slots included; filter on `is_empty`).
     pub path_entries: [PathEntry; PATH_SLOTS],
+    /// The project load the previous run started and never finished, for
+    /// this whole boot (`load_intent`).
+    pub interrupted_load: Option<InterruptedLoad>,
 }
 
 impl RecoverySnapshot {
-    pub(crate) fn capture(region: &RecoveryRegion, reset_cause: ResetCause) -> Self {
+    pub(crate) fn capture(
+        region: &RecoveryRegion,
+        reset_cause: ResetCause,
+        interrupted_load: Option<InterruptedLoad>,
+    ) -> Self {
         let depth = (region.depth() as usize).min(MAX_FRAME_DEPTH);
         let crash = region.crash();
         let ledger = region.ledger();
@@ -62,6 +70,7 @@ impl RecoverySnapshot {
             safe_mode: ledger.safe_mode(),
             consecutive_incomplete_boots: ledger.consecutive_incomplete_boots(),
             path_entries: *ledger.entries(),
+            interrupted_load,
         }
     }
 }

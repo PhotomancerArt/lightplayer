@@ -25,8 +25,8 @@
 #
 # — the inputs `studio-web-copy-sidecars` hands to
 # scripts/studio-copy-firmware.sh, which copies the package into the bundle's
-# `firmware/<target>/` and a split target's three update files into its
-# `firmware/<target>/ota/` (OTA M7, DS10). `core.bin` / `engine.bin` are not
+# `firmware/<target>/` and a split target's three update files beside it
+# (OTA M7, DS10). `core.bin` / `engine.bin` are not
 # fetched: Studio slices them out of the merged image.
 #
 # Every image is checked against the package manifest it came with, and the

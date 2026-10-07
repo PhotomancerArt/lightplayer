@@ -56,13 +56,15 @@ fn sent(out: &[Vec<u8>]) -> Vec<(u8, PieceKind, u32)> {
         .collect()
 }
 
+/// One chunk per request (what `ServeConfig::USB` was before it streamed).
+const ONE_AHEAD: ServeConfig = ServeConfig { ahead: 1 };
 const C: PieceKind = PieceKind::Core;
 const E: PieceKind = PieceKind::Engine;
 
 #[test]
 fn ahead_1_sends_exactly_what_is_asked() {
     let b = build();
-    let mut s = ServeSession::new(ServeConfig::USB);
+    let mut s = ServeSession::new(ONE_AHEAD);
     for i in 0..8 {
         let out = s.on_board(&b, &r(C, i, 4096, 0));
         assert_eq!(sent(&out.send), [(b'D', C, i)]);
@@ -124,7 +126,7 @@ fn the_engine_header_goes_alone() {
 #[test]
 fn z_only_when_flagged_and_indexed() {
     let b = build();
-    let mut s = ServeSession::new(ServeConfig::USB);
+    let mut s = ServeSession::new(ONE_AHEAD);
     assert_eq!(
         sent(&s.on_board(&b, &r(C, 0, 4096, 1)).send),
         [(b'Z', C, 0)]
@@ -161,7 +163,7 @@ fn z_only_when_flagged_and_indexed() {
 #[test]
 fn a_request_with_an_unknown_must_understand_flag_is_not_served() {
     let b = build();
-    let mut s = ServeSession::new(ServeConfig::USB);
+    let mut s = ServeSession::new(ONE_AHEAD);
     let out = s.on_board(&b, &r(C, 0, 4096, 0x21));
     assert!(out.send.is_empty());
     assert_eq!(out.events, [ServeEvent::UnservableRequest { flags: 0x21 }]);
@@ -176,7 +178,7 @@ fn a_request_with_an_unknown_must_understand_flag_is_not_served() {
 #[test]
 fn refusals_become_typed_events_and_unknown_board_messages_are_ignored() {
     let b = build();
-    let mut s = ServeSession::new(ServeConfig::USB);
+    let mut s = ServeSession::new(ONE_AHEAD);
     for (n, want) in [
         (
             Refusal::UnknownMessage { ty: b'G' },

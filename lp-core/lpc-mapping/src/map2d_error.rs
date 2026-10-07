@@ -20,6 +20,10 @@ pub enum Map2dError {
     },
     /// Fit was asked for but the geometry (or target) has no usable extent.
     EmptyBounds,
+    /// The lamps' positions are one contiguous buffer, and the heap could
+    /// not hand over one that size: the mapping is refused instead of
+    /// aborting the load (a board resets on a failed infallible allocation).
+    TooBigForMemory { lamps: u32, bytes: u32 },
 }
 
 impl core::fmt::Display for Map2dError {
@@ -45,6 +49,10 @@ impl core::fmt::Display for Map2dError {
                 }
             }
             Self::EmptyBounds => write!(f, "map2d geometry has no usable extent to fit"),
+            Self::TooBigForMemory { lamps, bytes } => write!(
+                f,
+                "{lamps} lamps need {bytes} B in one piece, more than this board's memory has free"
+            ),
         }
     }
 }

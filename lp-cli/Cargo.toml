@@ -86,6 +86,19 @@ espflash = { version = "3.3", default-features = false, features = [
 ] }
 dialoguer = "0.11"
 chrono = "0.4"
+# `firmware install`: lightplayer.app's public firmware lookup and, when
+# `--release previous` needs the GitHub releases list and `gh` is not on
+# PATH, the public GitHub REST API. reqwest 0.12 is already in the workspace
+# dependency graph (lp-cloud-server, lpa-agent).
+reqwest = { version = "0.12", default-features = false, features = [
+    "blocking",
+    "json",
+    "rustls-tls",
+] }
+# `firmware install`: a scratch directory for the downloaded package,
+# cleaned up on drop. Already a dev-dependency here; promoted to a normal
+# one for this.
+tempfile = "3"
 # `firmware package` hashes the merged image for the distribution manifest.
 sha2 = { workspace = true }
 # `firmware build|package` of a split def (the ESP32-C6): the split pipeline

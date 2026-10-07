@@ -246,6 +246,15 @@ long-lived branch conflict on this file whenever main re-baselined too.
   patch. Paydown: pin `APP_VERSION` (as the deploy workflows already do) for
   the ratchet's builds, or rebuild the re-check from the pre-write tree.
 
+- 2026-10-07 — **the C6's `largestFreeBlock` differs between machines on
+  one image** (Wi-Fi PR B, #989, run 37555989018). CI read 119,432 B. This
+  Mac read 119,456 B on CI's own fetched image (`just fetch-ci-images`, so
+  no build difference), and 119,440 B on a local build. `usedBytes` and
+  `freeBytes` matched. The local clean re-baseline therefore failed CI by
+  8 B. Workaround: record CI's (lower) figure, which passes on both. The
+  ratchet's 0 % margin on a placement figure turns a host-side difference
+  in the emulated run into a red check.
+
 **Exit criteria** — a PR whose only memory effect is a few bytes of statics
 passes the gate without touching the record, and two PRs that each
 legitimately re-baseline different chips/projects do not conflict. Likely

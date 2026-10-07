@@ -1,5 +1,9 @@
 //! Diagnostic: the heap's free holes and live spans, by address.
 //!
+//! Printed through `log`, so it rides the link's log channel to whatever
+//! host is connected (`lp-cli upload` prints it as `[serial]` lines); raw
+//! `esp_println` text does not reach a host on an lp-link USB port.
+//!
 //! Feature `heap_map_diag`; **never shipped**. Written for the defect
 //! `2026-09-24-ble-enabled-c6-refuses-a-project-switch-after-the-heap-cut`:
 //! the load gate refuses on the largest free block, and which live
@@ -13,17 +17,26 @@
 //! recorded holes, inside each region's bounds, is live (or a hole smaller
 //! than [`MIN_HOLE`]).
 //!
-//! With `heap_track_diag` as well, every main-region allocation at or above
-//! offset `LP_HEAP_TRACK_FROM` (build time) is remembered with its
-//! frame-pointer backtrace while it is live, and the map prints the live ones
-//! once they are few (after a project stops) — `addr2line` on the ELF names
-//! the allocator.
+//! With `heap_track_diag` as well, every allocation in the main region or
+//! `dram2_seg` made after [`arm_tracking`] (the station arms it when it
+//! joins) is remembered with its frame-pointer backtrace while it is live,
+//! and the map prints the live ones once they are few (after a project
+//! stops) — `addr2line` on the ELF names the allocator. The table lives in
+//! LP SRAM, so the heap's layout is the shipped image's.
 
 use core::alloc::Layout;
 use core::sync::atomic::{AtomicU32, Ordering};
 
 /// Holes smaller than this are not reported (they are counted as live).
 const MIN_HOLE: usize = 32;
+/// Holes smaller than this are not printed (they still bound what is live).
+const PRINT_HOLE: usize = 256;
+/// Live spans this large or larger are not printed: a project's or boot's
+/// own memory. The small spans between holes are the splitters.
+const PRINT_LIVE_BELOW: usize = 8 * 1024;
+/// The log target: short, because every line rides a 4 KB log ring and a
+/// map is a burst (long module paths made the ring drop half of one).
+const TARGET: &str = "hm";
 /// At most this many holes per map.
 const MAX_HOLES: usize = 48;
 /// Minimum spacing between two periodic maps.
@@ -42,7 +55,21 @@ pub fn log_periodic(tag: &str) {
     log(tag);
 }
 
-/// Log the map now, tagged `tag`.
+/// Log a map now if the heap looks like no project is loaded (`free` above
+/// `min_free`), else at most every [`PERIOD_MS`]: the load gate's probe runs
+/// right after a project stops, often within a period of the last read's.
+pub fn log_if_stopped_or_periodic(tag: &str, min_free: usize) {
+    if esp_alloc::HEAP.free() > min_free {
+        let now = embassy_time::Instant::now().as_millis() as u32;
+        LAST_MAP_MS.store(now.max(1), Ordering::Relaxed);
+        log(tag);
+    } else {
+        log_periodic(tag);
+    }
+}
+
+/// Log the map now, tagged `tag`. Holes under [`PRINT_HOLE`] and live spans
+/// of [`PRINT_LIVE_BELOW`] or more are left out of the print.
 pub fn log(tag: &str) {
     let mut holes = [(0usize, 0usize); MAX_HOLES];
     let n = critical_section::with(|_| take_holes(&mut holes));
@@ -50,32 +77,38 @@ pub fn log(tag: &str) {
     holes.sort_unstable_by_key(|(addr, _)| *addr);
 
     let regions = crate::board::esp32c6::init::heap_regions();
-    esp_println::println!(
+    log::info!(
+        target: TARGET,
         "[heapmap] {tag}: used {} free {} holes {n} (>= {MIN_HOLE} B)",
         esp_alloc::HEAP.used(),
         esp_alloc::HEAP.free()
     );
     for (ri, (start, size)) in regions.iter().enumerate() {
         let end = start + size;
-        esp_println::println!("[heapmap] {tag}: region {ri} 0x{start:08x}..0x{end:08x} ({size} B)");
+        log::info!(target: TARGET, "[heapmap] {tag}: region {ri} 0x{start:08x}..0x{end:08x} ({size} B)");
         let mut cursor = *start;
         for (addr, len) in holes.iter().filter(|(a, _)| *a >= *start && *a < end) {
-            if *addr > cursor {
-                esp_println::println!(
+            if *addr > cursor && addr - cursor < PRINT_LIVE_BELOW {
+                log::info!(
+                    target: TARGET,
                     "[heapmap] {tag}:   live 0x{cursor:08x}..0x{addr:08x} {} B (+{})",
                     addr - cursor,
                     cursor - start
                 );
             }
-            esp_println::println!(
-                "[heapmap] {tag}:   HOLE 0x{addr:08x}..0x{:08x} {len} B (+{})",
-                addr + len,
-                addr - start
-            );
+            if *len >= PRINT_HOLE {
+                log::info!(
+                    target: TARGET,
+                    "[heapmap] {tag}:   HOLE 0x{addr:08x}..0x{:08x} {len} B (+{})",
+                    addr + len,
+                    addr - start
+                );
+            }
             cursor = addr + len;
         }
-        if cursor < end {
-            esp_println::println!(
+        if cursor < end && end - cursor < PRINT_LIVE_BELOW {
+            log::info!(
+                target: TARGET,
                 "[heapmap] {tag}:   live 0x{cursor:08x}..0x{end:08x} {} B (+{})",
                 end - cursor,
                 cursor - start
@@ -143,17 +176,39 @@ fn largest_fit() -> usize {
     fits
 }
 
-/// Allocation tracking over the upper part of the main region
-/// (`heap_track_diag`): every allocation at or above main-region offset
-/// `LP_HEAP_TRACK_FROM` (decimal; default 90,000) is remembered with its
-/// backtrace while it lives. The table sits in the reclaimed bootloader
-/// segment (this build gives the heap only 16 KiB of it), so it costs the
-/// main stack nothing.
+/// Arm allocation tracking (`heap_track_diag`) from now on: forget what was
+/// recorded and record every heap allocation made after this call, in the
+/// main region and `dram2_seg`, while it lives. A no-op without the feature.
+/// The station calls it when it joins, so what the network allocates while a
+/// project runs (and what outlives the project) is what the table holds.
+pub fn arm_tracking(why: &str) {
+    #[cfg(feature = "heap_track_diag")]
+    track::arm(why);
+    #[cfg(not(feature = "heap_track_diag"))]
+    let _ = why;
+}
+
+/// Run `probe` with allocation tracking and `[bigalloc]` logging paused: a
+/// probe's own trial allocations are not the program's.
+pub fn untracked<R>(probe: impl FnOnce() -> R) -> R {
+    #[cfg(feature = "heap_track_diag")]
+    track::pause(true);
+    let result = probe();
+    #[cfg(feature = "heap_track_diag")]
+    track::pause(false);
+    result
+}
+
+/// Allocation tracking (`heap_track_diag`): once [`arm_tracking`] has run,
+/// every allocation in the main region or `dram2_seg` is remembered with its
+/// backtrace while it lives. The table sits in LP SRAM (`rtc_fast`), which the
+/// firmware barely uses, so the build's heap layout is the shipped one: the
+/// regions keep their sizes and their addresses.
 #[cfg(feature = "heap_track_diag")]
 mod track {
-    use core::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
+    use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
-    const SLOTS: usize = 1_200;
+    const SLOTS: usize = 300;
     const FRAMES: usize = 8;
     /// Frames to skip: the hook itself and `EspHeap::alloc_caps`.
     const SKIP: usize = 2;
@@ -165,36 +220,69 @@ mod track {
         frames: [u32; FRAMES],
     }
 
-    #[esp_hal::ram(reclaimed)]
-    static mut TABLE: core::mem::MaybeUninit<[Entry; SLOTS]> = core::mem::MaybeUninit::uninit();
-    static READY: AtomicBool = AtomicBool::new(false);
+    const EMPTY: Entry = Entry {
+        addr: 0,
+        size: 0,
+        frames: [0; FRAMES],
+    };
+
+    #[esp_hal::ram(unstable(rtc_fast))]
+    static mut TABLE: [Entry; SLOTS] = [EMPTY; SLOTS];
+    static ARMED: AtomicBool = AtomicBool::new(false);
     static PAUSED: AtomicBool = AtomicBool::new(false);
     static OVERFLOW: AtomicU32 = AtomicU32::new(0);
-    static FROM: AtomicUsize = AtomicUsize::new(0);
 
     fn table(_cs: critical_section::CriticalSection<'_>) -> &'static mut [Entry; SLOTS] {
         // SAFETY: only ever reached inside a critical section (the token), so
-        // there is one borrow at a time; zeroed on first use (reclaimed RAM
-        // is not initialised).
-        unsafe {
-            let t = &mut *core::ptr::addr_of_mut!(TABLE);
-            if !READY.load(Ordering::Relaxed) {
-                core::ptr::write_bytes(t.as_mut_ptr(), 0, 1);
-                READY.store(true, Ordering::Relaxed);
-                let off = option_env!("LP_HEAP_TRACK_FROM")
-                    .and_then(|s| s.parse::<usize>().ok())
-                    .unwrap_or(90_000);
-                FROM.store(
-                    crate::board::esp32c6::init::heap_regions()[0].0 + off,
-                    Ordering::Relaxed,
-                );
+        // there is one borrow at a time.
+        unsafe { &mut *core::ptr::addr_of_mut!(TABLE) }
+    }
+
+    pub fn arm(why: &str) {
+        critical_section::with(|cs| {
+            // Slot by slot: a whole-array assignment would build its 12 KB
+            // on the caller's stack (the net thread has 8 KB).
+            for slot in table(cs).iter_mut() {
+                *slot = EMPTY;
             }
-            t.assume_init_mut()
-        }
+            OVERFLOW.store(0, Ordering::Relaxed);
+            ARMED.store(true, Ordering::Relaxed);
+        });
+        log::info!(target: super::TARGET, "[heaptrack] armed: {why}");
+    }
+
+    /// Every allocation this large or larger is logged as it happens, armed
+    /// or not, with its backtrace (`[bigalloc]`): a project load's few
+    /// contiguous asks are what decide whether it fits a fragmented heap.
+    const BIG_ALLOC_LOG: usize = 2048;
+
+    fn log_big(ptr: usize, size: usize) {
+        let mut raw = [0u32; FRAMES + SKIP];
+        lpc_shared::backtrace::capture_frames(&mut raw);
+        let f = &raw[SKIP..];
+        log::info!(
+            target: super::TARGET,
+            "[bigalloc] {size} B at 0x{ptr:08x} frames {:08x} {:08x} {:08x} {:08x} {:08x} {:08x} {:08x} {:08x}",
+            f[0],
+            f[1],
+            f[2],
+            f[3],
+            f[4],
+            f[5],
+            f[6],
+            f[7]
+        );
     }
 
     pub fn pause(on: bool) {
         PAUSED.store(on, Ordering::Relaxed);
+    }
+
+    fn tracked(ptr: usize) -> bool {
+        let regions = crate::board::esp32c6::init::heap_regions();
+        regions[..2]
+            .iter()
+            .any(|(start, size)| ptr >= *start && ptr < start + size)
     }
 
     #[unsafe(no_mangle)]
@@ -204,60 +292,61 @@ mod track {
         ptr: usize,
         size: usize,
     ) {
-        if PAUSED.load(Ordering::Relaxed) || ptr == 0 {
+        if PAUSED.load(Ordering::Relaxed) {
             return;
         }
-        let main = crate::board::esp32c6::init::heap_regions()[0];
-        if ptr >= main.0 + main.1 {
+        if size >= BIG_ALLOC_LOG {
+            log_big(ptr, size);
+        }
+        if !ARMED.load(Ordering::Relaxed) || ptr == 0 {
+            return;
+        }
+        if !tracked(ptr) {
             return;
         }
         let mut raw = [0u32; FRAMES + SKIP];
         lpc_shared::backtrace::capture_frames(&mut raw);
         let mut frames = [0u32; FRAMES];
         frames.copy_from_slice(&raw[SKIP..]);
-        critical_section::with(|cs| {
-            let t = table(cs);
-            if ptr < FROM.load(Ordering::Relaxed) {
-                return;
+        critical_section::with(|cs| match table(cs).iter_mut().find(|e| e.addr == 0) {
+            Some(slot) => {
+                *slot = Entry {
+                    addr: ptr as u32,
+                    size: size as u32,
+                    frames,
+                }
             }
-            match t.iter_mut().find(|e| e.addr == 0) {
-                Some(slot) => {
-                    *slot = Entry {
-                        addr: ptr as u32,
-                        size: size as u32,
-                        frames,
-                    }
-                }
-                None => {
-                    OVERFLOW.fetch_add(1, Ordering::Relaxed);
-                }
+            None => {
+                OVERFLOW.fetch_add(1, Ordering::Relaxed);
             }
         });
     }
 
     #[unsafe(no_mangle)]
     fn _esp_alloc_dealloc(_heap: &esp_alloc::EspHeap, ptr: usize, _size: usize) {
-        if ptr == 0 || !READY.load(Ordering::Relaxed) || ptr < FROM.load(Ordering::Relaxed) {
+        if ptr == 0 || !ARMED.load(Ordering::Relaxed) {
             return;
         }
         critical_section::with(|cs| {
-            let t = table(cs);
-            if let Some(slot) = t.iter_mut().find(|e| e.addr == ptr as u32) {
+            if let Some(slot) = table(cs).iter_mut().find(|e| e.addr == ptr as u32) {
                 slot.addr = 0;
             }
         });
     }
 
     /// Print the live tracked allocations — only when there are few (after a
-    /// project stops), never the thousands a running project holds.
+    /// project stops), never the hundreds a running project holds.
     pub fn log_live(tag: &str) {
+        if !ARMED.load(Ordering::Relaxed) {
+            return;
+        }
         let live = critical_section::with(|cs| table(cs).iter().filter(|e| e.addr != 0).count());
-        esp_println::println!(
-            "[heaptrack] {tag}: {live} live from 0x{:08x}, overflow {}",
-            FROM.load(Ordering::Relaxed),
+        log::info!(
+            target: super::TARGET,
+            "[heaptrack] {tag}: {live} live since armed, overflow {}",
             OVERFLOW.load(Ordering::Relaxed)
         );
-        if live > 64 {
+        if live > 96 {
             return;
         }
         for i in 0..SLOTS {
@@ -266,7 +355,8 @@ mod track {
                 continue;
             }
             let f = e.frames;
-            esp_println::println!(
+            log::info!(
+                target: super::TARGET,
                 "[heaptrack] {tag}: 0x{:08x} {} B frames {:08x} {:08x} {:08x} {:08x} {:08x} {:08x} {:08x} {:08x}",
                 e.addr,
                 e.size,

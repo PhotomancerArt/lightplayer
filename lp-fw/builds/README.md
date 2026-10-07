@@ -151,8 +151,9 @@ bundle (`just studio-web-build`, which every deploy runs) is **always** split,
 and the Pages artifact refuses to stage without the update files.
 
 **What the Studio bundle carries** (OTA M7, DS10): for a split package,
-`firmware/<id>/ota/` holds its `ota-manifest.json`, `core.z` and `engine.z`
-— never `core.bin`/`engine.bin`, which Studio slices out of the merged image
+`firmware/<id>/` also holds its `ota-manifest.json`, `core.z` and `engine.z`,
+beside `manifest.json` (two segments under `firmware/`: lightplayer.app's
+firmware lookup owns every three-segment `/firmware/` path) — never `core.bin`/`engine.bin`, which Studio slices out of the merged image
 by the package manifest's `split` offsets. For the C6 that is about 1.8 MB
 (`core.z` 741,552 + `engine.z` 1,084,808 + the manifest 13,255 bytes at
 `e6775ad53`), fetched only when an update runs.
@@ -186,6 +187,22 @@ keeps the staging directory as an artifact). lightplayer.app serves these
 assets at `/firmware/<target>/<release>/<file>`
 (`lp-cloud/lp-cloud-server/README.md`); `just firmware-store-smoke` proves
 the whole lookup locally.
+
+**Putting a published release on a board.**
+`lp-cli firmware install --release <version|previous|latest> (--mac <MAC> |
+--port <PORT>) [--target <id>] [--yes]` resolves the release (`latest` and a
+version against lightplayer.app's lookup directly; `previous` — the newest
+published release older than latest that carries the target — against the
+GitHub releases list, `gh` when it is on `PATH` else the public REST API),
+downloads `<target>.package.json` and its merged image from that same lookup,
+verifies every file's length and SHA-256 against the manifest before writing
+anything, leases the board on the desk's board bench when `board` is
+installed, and writes it with the same layout-aware flasher
+`lp-cli hardware lpfs migrate` uses: a board whose filesystem layout already
+matches gets the plain write (the ordinary case), one that does not gets a
+backed-up migration. `--dry-run` resolves, downloads and verifies without
+touching the board at all — the way to check a release exists and hashes
+clean before committing a desk sitting to it.
 
 **The deploys ship the release's firmware, not their own build.**
 `just studio-web-build` fills the bundle's firmware after dx through `just

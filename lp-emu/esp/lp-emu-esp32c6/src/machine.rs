@@ -6258,7 +6258,16 @@ impl Esp32C6Machine {
         let trap_log = self.harts[0].take_trap_log();
         self.harts.clone_from(&s.harts);
         self.harts[0].restore_trap_log(trap_log);
-        self.bus.restore_regions(&s.regions);
+        match domain {
+            // An HP-domain reset does not reach the LP island: its SRAM keeps
+            // what the firmware left there, which is what RTC fast memory is
+            // for (the recovery region, the crash ledger). Restoring it too
+            // made every emulated reset look like a power cycle to the
+            // firmware's recovery: a crash was never reported on the next
+            // boot, and a load that reset the board was never known.
+            Some(Domain::Hp) => self.bus.restore_regions_keeping(&s.regions, &["lp-sram"]),
+            _ => self.bus.restore_regions(&s.regions),
+        }
         let _ = self.bus.take_code_writes();
         match domain {
             None => self.bus.restore_peripherals(&s.periph),
@@ -6687,8 +6696,17 @@ mod tests {
         assert_eq!(m.peek_word(lp), Some(0xabad_1dea));
         assert_eq!(m.peek_word(hp), Some(0x0000_0011));
 
+        // LP SRAM, where firmware keeps what must survive a reset.
+        let lp_sram = memmap::LP_SRAM_BASE + 0x40;
+        assert!(m.poke_word(lp_sram, 0x4c50_5243));
+
         // A reset.
         assert!(m.reboot(Strap::App, ResetCause::Tg0WdtHpSys));
+        assert_eq!(
+            m.peek_word(lp_sram),
+            Some(0x4c50_5243),
+            "an HP-only reset keeps the LP island's SRAM (RTC fast memory)"
+        );
         assert_eq!(
             m.peek_word(lp),
             Some(0xabad_1dea),
@@ -6705,6 +6723,11 @@ mod tests {
 
         // The supply.
         assert!(m.power_cycle(Strap::App));
+        assert_eq!(
+            m.peek_word(lp_sram),
+            Some(0),
+            "a power cycle clears LP SRAM"
+        );
         assert_eq!(
             m.peek_word(lp),
             Some(0),
