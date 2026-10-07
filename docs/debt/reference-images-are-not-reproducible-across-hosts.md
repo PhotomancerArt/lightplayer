@@ -90,6 +90,11 @@ it wrong is a red CI run on a correct change.
   CI's images rather than desk-built reference images. Not investigated
   further — where a host-built image spends 64 B more heap is the open
   question.
+- 2026-10-07 (#1019, Wi-Fi relay P9) — the same 64 B on the desk: the first
+  `emu_serve_walk` run (`LP_EMU_BUILD_FW=1`, which built the pinned
+  reference image) read `220468 B free / 105068 B used`; an immediate re-run
+  of the one test passed (5.7 s, the reference build cached). Not
+  investigated; this branch's own firmware is not in that test.
 
 **Exit criteria** — one build environment for the reference images: a pinned
 container (`Dockerfile.ci`, or a pinned image in the gated `emu-c6` job) that
