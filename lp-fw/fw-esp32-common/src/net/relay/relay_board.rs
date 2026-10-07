@@ -118,19 +118,26 @@ impl RelayBoard {
         critical_section::with(|cs| self.inner.borrow_ref_mut(cs).accounts.take())
     }
 
-    /// Publish the driver's state and counters.
+    /// Publish the driver's state and counters, saying so in one line when
+    /// the state moved (the board's own words a walk waits on; the
+    /// heartbeat's `[relay]` line comes only every few seconds).
     pub fn publish(&self, driver: &RelayDriver) {
         let (state, counters, routes) = (
             driver.state(),
             driver.counters(),
             usize::from(driver.route().is_some()),
         );
-        critical_section::with(|cs| {
+        let moved = critical_section::with(|cs| {
             let mut inner = self.inner.borrow_ref_mut(cs);
+            let moved = inner.state != state;
             inner.state = state;
             inner.counters = counters;
             inner.routes = routes;
+            moved
         });
+        if moved {
+            log::info!("[relay] now {state}");
+        }
     }
 
     /// Wait for news from the server's side.

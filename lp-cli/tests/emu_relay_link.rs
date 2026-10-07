@@ -100,7 +100,7 @@ fn an_emulated_c6_reaches_lightplayer_app_through_the_lans_uplink() {
         &usb_addr,
         &fixture,
         &flash,
-        Some("[relay] state=connected"),
+        Some("[relay] now connected"),
     );
     wait_listening(&usb_addr);
     let usb = format!("serial:tcp://{usb_addr}");
@@ -238,6 +238,9 @@ fn an_emulated_c6_reaches_lightplayer_app_through_the_lans_uplink() {
         .await;
         drop(client);
         connection.close().await;
+        let mut through = LpClient::new(relayed.client_io());
+        request_rtt(&mut through).await;
+        drop(through);
         relayed.close().await;
     });
 
@@ -393,6 +396,77 @@ async fn heap(client: &mut LpClient<impl lpa_client::ClientIo>, what: &str) {
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
     eprintln!("emu_relay_link: heap — {what}: no heartbeat within 30 s");
+}
+
+/// How promptly the board answers through the relay with a project
+/// rendering: `RTT_COUNT` status requests one after another, their wall
+/// round trips at p50 and p90 — in milliseconds, in frames at the board's
+/// own frame rate (its heartbeat's), and in frames it drew per wall second
+/// (two heartbeats' frame counts), as `lp-cli link rtt` reports a LAN link.
+/// Printed, never a gate: the round trip is wall time on this host.
+async fn request_rtt(client: &mut LpClient<impl lpa_client::ClientIo>) {
+    const RTT_COUNT: usize = 20;
+    let mut ms = Vec::with_capacity(RTT_COUNT);
+    let mut fps = None;
+    let mut counts: Vec<(Instant, u64)> = Vec::new();
+    for _ in 0..RTT_COUNT {
+        let asked = Instant::now();
+        let outcome = client
+            .network_status()
+            .await
+            .expect("a request through the relay");
+        ms.push(asked.elapsed().as_secs_f64() * 1000.0);
+        for event in outcome.events {
+            if let ClientEvent::Heartbeat {
+                fps: rate,
+                frame_count,
+                ..
+            } = event
+            {
+                fps = Some(f64::from(rate.avg));
+                counts.push((Instant::now(), frame_count));
+            }
+        }
+    }
+    // The frame rate per wall second needs two heartbeats: keep asking
+    // (untimed) until a second one comes, for at most 30 s.
+    let until = Instant::now() + Duration::from_secs(30);
+    while counts.len() < 2 && Instant::now() < until {
+        let outcome = client
+            .network_status()
+            .await
+            .expect("a request through the relay");
+        for event in outcome.events {
+            if let ClientEvent::Heartbeat { frame_count, .. } = event {
+                counts.push((Instant::now(), frame_count));
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    ms.sort_by(f64::total_cmp);
+    let at =|p: usize| ms[(ms.len() * p / 100).min(ms.len() - 1)];
+    let (p50, p90) = (at(50), at(90));
+    let frames = |rate: Option<f64>| match rate {
+        Some(rate) if rate > 0.0 => format!(
+            "{:.1} / {:.1} frames at {rate:.1} fps",
+            p50 * rate / 1000.0,
+            p90 * rate / 1000.0
+        ),
+        _ => String::from("no frame rate"),
+    };
+    let wall_fps = match (counts.first(), counts.last()) {
+        (Some((t0, f0)), Some((t1, f1))) if t1 > t0 && f1 > f0 => {
+            Some((f1 - f0) as f64 / t1.duration_since(*t0).as_secs_f64())
+        }
+        _ => None,
+    };
+    eprintln!(
+        "emu_relay_link: {RTT_COUNT} status requests through the relay, projects/test/basic \
+         rendering: p50 {p50:.0} ms / p90 {p90:.0} ms wall; {} (the board's own); {} drawn \
+         per wall second (lp-emu:esp32c6:t1+net=lan; not a gate)",
+        frames(fps),
+        frames(wall_fps)
+    );
 }
 
 /// Ask the board's status until `done` says yes, or fail after `net`.

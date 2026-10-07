@@ -4236,6 +4236,11 @@ test-emu-serve:
     # that ran them in release hit its 30-minute budget.
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --test emu_lan_link -- --include-ignored --nocapture
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --test emu_lan_lockstep -- --include-ignored --nocapture
+    # The cloud relay's cell (plan lp2025/2026-10-06-0815-wifi-relay, P9): the
+    # same board dialing `lightplayer.app` through the LAN's uplink to an
+    # in-process relay — register, edit through it, takeover, deploy, Cloud
+    # relay off and on, a reset account key.
+    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --test emu_relay_link -- --include-ignored --nocapture
 
 # The hardware walk, with the emulator where the board goes.
 #
@@ -4849,6 +4854,13 @@ walk-ble-emu *args:
 # image) instead; `just walk-wifi-emu lan --dry-run` checks the arguments and
 # prerequisites and starts nothing. Report:
 # docs/reports/2026-10-06-wifi-emulator-walk.md. Not CI.
+#
+# `relay` (Wi‑Fi relay plan P9, scripts/emu/walk-wifi-emu-relay.mjs) is
+# lp-cli-driven: it runs the `emu_relay_link` cell (one board dialing
+# `lightplayer.app` through the LAN's uplink to an in-process relay), keeps
+# its log, and checks each step against the board's own `[relay]` words
+# (target/walk-wifi-emu/relay/). Studio's relay walk is M8's. Not CI (the
+# cell is, in `test-emu-serve`).
 walk-wifi-emu lane *args:
     node scripts/emu/walk-wifi-emu.mjs {{ lane }} {{ args }}
 
