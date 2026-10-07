@@ -676,6 +676,8 @@ mod tests {
             access: Default::default(),
             wifi: Default::default(),
             lan_links: Default::default(),
+            wifi_connects: Default::default(),
+            wifi_address_connect: None,
             updates: Default::default(),
             roster,
             transport_available,
@@ -694,13 +696,16 @@ mod tests {
     /// the path), the target menu for the board Studio is about to start.
     #[test]
     fn the_add_slot_offers_both_ways_a_card_can_appear() {
-        let [usb, ble] = lpa_studio_core::add_device_offers(true, BluetoothReach::Ready)
-            .try_into()
-            .expect("two transports");
+        let [usb, ble, wifi] =
+            lpa_studio_core::add_device_offers(true, BluetoothReach::Ready, wifi_reach())
+                .try_into()
+                .expect("three transports");
         assert_eq!(usb.path.to_string(), "devices/connect-usb");
         assert_eq!(usb.action.meta().icon.as_deref(), Some("usb"));
         assert_eq!(ble.path.to_string(), "devices/connect-ble");
         assert_eq!(ble.action.meta().icon.as_deref(), Some("bluetooth"));
+        assert_eq!(wifi.path.to_string(), "devices/connect-wifi-address");
+        assert_eq!(wifi.action.meta().icon.as_deref(), Some("wifi"));
         assert_eq!(
             crate::app::home::target_pick_popover::SLOT_VERB_LABEL,
             "start a board here"
@@ -714,8 +719,11 @@ mod tests {
     #[test]
     fn a_transport_this_browser_cannot_drive_is_disabled_with_a_way_forward() {
         let reasons = |usb: bool, reach: BluetoothReach| {
-            lpa_studio_core::add_device_offers(usb, reach)
+            lpa_studio_core::add_device_offers(usb, reach, wifi_reach())
                 .into_iter()
+                // The two choosers; the Wi‑Fi address entry has its own
+                // test in core (it waits for its field, not a browser).
+                .take(2)
                 .map(|offer| match &offer.action.meta().enablement {
                     lpa_studio_core::ActionEnablement::Enabled => None,
                     lpa_studio_core::ActionEnablement::Disabled { reason } => Some(reason.clone()),
@@ -1019,6 +1027,14 @@ mod tests {
         );
     }
 
+    /// A page that reaches the LAN, reaching nothing yet.
+    fn wifi_reach() -> lpa_studio_core::WifiAddressReach {
+        lpa_studio_core::WifiAddressReach {
+            available: true,
+            connecting: false,
+        }
+    }
+
     fn remembered_fixture() -> RememberedView {
         RememberedView {
             id: lpa_studio_core::DeviceId(7),
@@ -1028,6 +1044,7 @@ mod tests {
             escapes: vec![DeviceEscape::Reconnect, DeviceEscape::Forget],
             face: lpa_studio_core::DeviceFace::Wire,
             feed: None,
+            wifi_connect: None,
         }
     }
 

@@ -53,6 +53,10 @@ impl crate::LanLinkSource for DroppableLanBoard {
             None => io,
         }))
     }
+
+    fn connect(&self, _url: &str) -> DeviceTransportFuture<Result<(), String>> {
+        Box::pin(core::future::ready(Ok(())))
+    }
 }
 
 /// The fake board's link, which drops the way `BrowserWebsocketLink` does:
