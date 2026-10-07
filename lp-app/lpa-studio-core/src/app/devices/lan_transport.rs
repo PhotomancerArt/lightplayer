@@ -17,22 +17,26 @@
 //! (`access/network_link_keys.rs`), and a locked board's password is asked
 //! for the way the Bluetooth flow asks (`access/keyed_login.rs`).
 //!
-//! Boards come from the `?lan=` dev flag (`lan_addresses.rs`) until the
-//! add-by-address UI exists (roadmap M8): there is no chooser here.
-//! Everything platform-shaped arrives through [`LanLinkSource`] — the page's
-//! WebSockets in production (`browser_lan_source.rs`), a double in the tests
-//! below — so routing and refusals are `just test`-covered on the host.
+//! There is no chooser here. A board is reached at an address: one Studio
+//! remembered for it (`wifi_address_book.rs`, "Connect over Wi‑Fi" on its
+//! card), one typed into "Connect a board on Wi‑Fi", or one the `?lan=` dev
+//! shortcut names at page load. Everything platform-shaped arrives through
+//! [`LanLinkSource`] — the page's WebSockets in production
+//! (`browser_lan_source.rs`), a double in the tests below — so routing,
+//! refusals and the connect's plain words are `just test`-covered on the
+//! host.
 
 use std::rc::Rc;
 
 use lpa_devices::link::LinkInfo;
 use lpa_devices::view::FIRMWARE_NEEDS_USB;
-use lpa_link::providers::network_link::url_from_lan_endpoint;
+use lpa_link::providers::network_link::{lan_host, url_from_lan_endpoint};
 
 use super::device_transport::{
     DeviceEffectCall, DeviceEffectFacts, DeviceEffectProgress, DeviceTransport,
     DeviceTransportFuture, GrantedLink, LensLineTap, LensTapEvent,
 };
+use super::wifi_connect_failure::WifiConnectFailure;
 use super::wire_conversation::{is_wire_conversation, run_wire_conversation};
 
 /// Where LAN boards come from on this platform.
@@ -54,6 +58,20 @@ pub trait LanLinkSource {
         url: &str,
         tap: Option<LensLineTap>,
     ) -> Result<Box<dyn lpa_client::ClientIo>, String>;
+
+    /// Reach the board at `url` now, because someone asked: open (or keep)
+    /// its session and wait until its first connection says how it went —
+    /// the board answered, or the socket failed, timed out, or was turned
+    /// away. `Err` carries the socket's own words, and a failed session is
+    /// not kept (nothing keeps redialling an address that did not answer).
+    /// Once it is `Ok` the board is present, and the next sweep links it.
+    fn connect(&self, url: &str) -> DeviceTransportFuture<Result<(), String>>;
+
+    /// Whether this page is served over https, where Chrome's Local Network
+    /// check turns away a socket to a private address before it opens.
+    fn secure_page(&self) -> bool {
+        false
+    }
 }
 
 /// The LAN half of the composite.
@@ -64,6 +82,19 @@ pub struct LanDeviceTransport {
 impl LanDeviceTransport {
     pub fn new(source: Rc<dyn LanLinkSource>) -> Self {
         Self { source }
+    }
+
+    /// Reach the board at `url` now (a user's "Connect over Wi‑Fi", or an
+    /// address typed into the add slot), answering why not in plain words.
+    pub fn connect(&self, url: &str) -> DeviceTransportFuture<Result<(), WifiConnectFailure>> {
+        let host = lan_host(url).to_string();
+        let secure = self.source.secure_page();
+        let attempt = self.source.connect(url);
+        Box::pin(async move {
+            attempt
+                .await
+                .map_err(|raw| WifiConnectFailure::from_socket(&raw, &host, secure))
+        })
     }
 }
 
@@ -84,7 +115,7 @@ impl DeviceTransport for LanDeviceTransport {
     fn request_grant(&self) -> DeviceTransportFuture<Result<Option<GrantedLink>, String>> {
         // Never reached through the composite (the chooser is serial's).
         Box::pin(core::future::ready(Err(
-            "a Wi-Fi board is named with the ?lan= flag, not the port chooser".to_string(),
+            "a Wi\u{2011}Fi board is reached by its address, not the port chooser".to_string(),
         )))
     }
 
@@ -222,12 +253,42 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_connect_answers_in_plain_words_for_the_address_it_dialled() {
+        let source = Rc::new(DoubleSource::default());
+        let transport = LanDeviceTransport::new(Rc::clone(&source) as Rc<dyn LanLinkSource>);
+        block_on(transport.connect(URL)).expect("the board answered");
+
+        let source = Rc::new(DoubleSource {
+            refuse: Some("wi-fi connect to ws://10.0.0.5/link was closed (code 1006)".to_string()),
+            secure: true,
+            ..Default::default()
+        });
+        let transport = LanDeviceTransport::new(Rc::clone(&source) as Rc<dyn LanLinkSource>);
+        let blocked = block_on(transport.connect(URL)).expect_err("the page was turned away");
+        assert_eq!(blocked, WifiConnectFailure::Blocked);
+        assert_eq!(source.asked.borrow().as_slice(), [format!("connect {URL}")]);
+
+        let source = Rc::new(DoubleSource {
+            refuse: Some("wi-fi connect timed out after 10 s".to_string()),
+            ..Default::default()
+        });
+        let transport = LanDeviceTransport::new(Rc::clone(&source) as Rc<dyn LanLinkSource>);
+        assert_eq!(
+            block_on(transport.connect(URL)).unwrap_err().words(),
+            "Couldn't reach the board at 10.0.0.5. Is it on this network?"
+        );
+    }
+
     // --- the doubles -----------------------------------------------------
 
     #[derive(Default)]
     struct DoubleSource {
         present: Vec<String>,
         asked: Rc<RefCell<Vec<String>>>,
+        /// The socket's words a connect fails with, or `None` to answer.
+        refuse: Option<String>,
+        secure: bool,
     }
 
     impl LanLinkSource for DoubleSource {
@@ -263,6 +324,18 @@ mod tests {
                 asked: Rc::clone(&self.asked),
                 answer: None,
             }))
+        }
+
+        fn connect(&self, url: &str) -> DeviceTransportFuture<Result<(), String>> {
+            self.asked.borrow_mut().push(format!("connect {url}"));
+            Box::pin(core::future::ready(match &self.refuse {
+                Some(words) => Err(words.clone()),
+                None => Ok(()),
+            }))
+        }
+
+        fn secure_page(&self) -> bool {
+            self.secure
         }
     }
 

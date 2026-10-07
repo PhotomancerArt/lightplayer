@@ -102,6 +102,11 @@ class LanSession {
     this.present = false;
     this.reconnectTimer = null;
     this.attempt = 0;
+    // Messages received over the session's life, and the words of its last
+    // drop: what `settle` reads to tell an answering board from one that
+    // turned the connection away.
+    this.received = 0;
+    this.lastDrop = null;
   }
 
   describe() {
@@ -261,6 +266,51 @@ export function onActivity(id, callback) {
   return () => session.listeners.delete(callback);
 }
 
+/// Wait until the connection that is up now proves itself — because a
+/// person asked for it and is waiting for the answer ("Connect over Wi‑Fi",
+/// an address typed into the add slot). A board that answers sends a frame
+/// (its half of the handshake); a board that turns the connection away
+/// closes it right after the upgrade (a busy board's 1013, "try again
+/// later"). Resolves `true` on a frame, or when `ms` pass with the link
+/// still up; rejects with the drop's words when it drops. Never touches the
+/// frames themselves (the link reads those).
+export function settle(id, ms) {
+  const session = requireSession(id);
+  const generation = session.generation;
+  const heard = session.received;
+  return new Promise((resolve, reject) => {
+    let done = false;
+    let timer = null;
+    const check = () => {
+      if (done) {
+        return;
+      }
+      const dropped = session.generation !== generation || session.state !== "connected";
+      if (!dropped && session.received === heard) {
+        return;
+      }
+      done = true;
+      clearTimeout(timer);
+      session.listeners.delete(check);
+      if (dropped) {
+        const why = session.lastDrop ?? "the connection closed";
+        reject(new Error(`wi-fi link lost: ${why}`));
+      } else {
+        resolve(true);
+      }
+    };
+    timer = setTimeout(() => {
+      if (!done) {
+        done = true;
+        session.listeners.delete(check);
+        resolve(true);
+      }
+    }, ms);
+    session.listeners.add(check);
+    check();
+  });
+}
+
 export function takeErrors(id) {
   const session = requireSession(id);
   const errors = session.errors;
@@ -382,6 +432,7 @@ function onFrame(session, data) {
     return;
   }
   const frame = data instanceof ArrayBuffer ? new Uint8Array(data) : new Uint8Array(data.buffer ?? data);
+  session.received += 1;
   if (session.bufferedBytes + frame.length > MAX_BUFFERED_BYTES) {
     if (!session.overflowNoted) {
       session.overflowNoted = true;
@@ -397,6 +448,7 @@ function onFrame(session, data) {
 /// The link died underneath us: say so ONCE (the Rust side reads this exact
 /// phrase as a departure), stop being present, and reconnect if wanted.
 function handleDrop(session, why) {
+  session.lastDrop = why;
   session.generation += 1;
   session.connecting = null;
   session.state = "lost";

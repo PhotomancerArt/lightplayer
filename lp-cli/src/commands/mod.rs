@@ -4,6 +4,7 @@ pub mod emu;
 pub mod firmware;
 pub mod fwcheck;
 pub mod hardware;
+pub mod lan;
 pub mod link;
 pub mod ota_host;
 pub mod pattern;
