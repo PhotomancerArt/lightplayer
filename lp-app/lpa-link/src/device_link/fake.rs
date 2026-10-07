@@ -27,8 +27,14 @@ pub type FakeDeviceLink = ByteStreamLink<FakeDeviceByteStream>;
 /// The device remembers this link (weakly) as its host's, so a test's
 /// conversation that borrows the wire can drain the same link
 /// ([`fake_host_port`]), as a browser borrower drains its port's.
+///
+/// The link's timers read the board's clock (the wall clock unless the test
+/// gave the board its own, [`FakeEsp32Device::set_clock`]), so the two ends
+/// of the link always agree on how much time has passed.
 pub fn fake_device_link(info: LinkInfo, device: &FakeEsp32Device) -> FakeDeviceLink {
-    let link = ByteStreamLink::new(info, FakeDeviceByteStream::new(device.clone()));
+    let clock = device.clone();
+    let link = ByteStreamLink::new(info, FakeDeviceByteStream::new(device.clone()))
+        .with_clock_us(move || clock.now_us());
     device.set_host_port(link.port_handle().downgrade());
     link
 }
