@@ -155,6 +155,33 @@ impl Cloud {
         URL_SAFE_NO_PAD.encode(token)
     }
 
+    /// Boards registered with the hub now.
+    pub fn board_count(&self) -> usize {
+        self.state.relay().board_count()
+    }
+
+    /// Wait up to `wait` for exactly `count` boards; whether it came.
+    pub fn boards_within(&self, count: usize, wait: Duration) -> bool {
+        let deadline = Instant::now() + wait;
+        while self.board_count() != count {
+            if Instant::now() >= deadline {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        true
+    }
+
+    /// The account resets its key (`ResetAccountKey`): every board holding
+    /// the old one is refused at its next registration.
+    pub fn reset_account_key(&self, uid: PrefixedUid) {
+        self.runtime.block_on(self.state.with_service(move |core| {
+            core.service
+                .handle(Actor::User(uid), CloudRequest::ResetAccountKey)
+                .expect("the key resets");
+        }));
+    }
+
     pub fn wait_for_boards(&self, count: usize) {
         let deadline = Instant::now() + Duration::from_secs(15);
         while self.state.relay().board_count() < count {
