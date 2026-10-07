@@ -1,5 +1,5 @@
 //! The firmware plane: `/firmware/{target}/{release}/{file}` and the release
-//! index, `/firmware/{target}/releases`.
+//! index, `/api/v1/firmware/{target}/releases`.
 //!
 //! The router is driven with `oneshot` against an in-process
 //! [`FirmwareUpstream`] stub that records every asset it is asked for, so
@@ -28,8 +28,8 @@ use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Redirect};
 use axum::routing::get;
 use edge_harness::{
-    BUNDLE_FIRMWARE_MANIFEST_BODY, BUNDLE_FIRMWARE_MANIFEST_PATH, BUNDLE_UPDATE_FILES, TestServer,
-    body_bytes, body_text, header_value,
+    BUNDLE_FIRMWARE_MANIFEST_BODY, BUNDLE_FIRMWARE_MANIFEST_PATH, BUNDLE_UPDATE_FILES, INDEX_HTML,
+    TestServer, body_bytes, body_text, header_value,
 };
 use lp_cloud_server::config::GithubToken;
 use lp_cloud_server::firmware::firmware_plane::{FirmwarePlane, LookupFailure};
@@ -42,6 +42,8 @@ use lp_cloud_server::firmware::release_index_cache::RELEASE_LIST_STALE_SECONDS;
 use lp_cloud_server::firmware::release_list_upstream::{
     ReleaseListFetch, ReleaseListFuture, ReleaseListUpstream,
 };
+use lpc_cloud_api::response::UserInfo;
+use lpc_cloud_api::{Actor, CloudRequest, CloudResponse};
 use lpc_firmware_release::{
     EncodedPieceFile, Encoding1, EncodingEntry, OtaManifest, PackageRef, PieceFile, ReleaseIndex,
     ReleaseVersion, Requires, TargetName, sha256_hex,
@@ -542,7 +544,9 @@ async fn the_index_lists_complete_releases_newest_first() {
     ]));
     let server = TestServer::with_firmware_upstreams(upstream.clone(), list.clone());
 
-    let response = server.get(&format!("/firmware/{TARGET}/releases")).await;
+    let response = server
+        .get(&format!("/api/v1/firmware/{TARGET}/releases"))
+        .await;
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
         header_value(&response, header::CONTENT_TYPE),
@@ -642,7 +646,9 @@ async fn a_manifest_that_fails_verification_drops_only_its_entry() {
     let list = StubReleaseList::new(github_list(&[listed(&nine, None), listed(&ten, None)]));
     let server = TestServer::with_firmware_upstreams(upstream, list);
 
-    let response = server.get(&format!("/firmware/{TARGET}/releases")).await;
+    let response = server
+        .get(&format!("/api/v1/firmware/{TARGET}/releases"))
+        .await;
     assert_eq!(response.status(), StatusCode::OK);
     let index = ReleaseIndex::parse_valid(&body_bytes(response).await).unwrap();
     assert_eq!(versions(&index), ["2026.10.06-9"]);
@@ -728,7 +734,9 @@ async fn upstream_down_serves_the_last_good_index_then_fails() {
         let list = StubReleaseList::new(github_list(&[listed(&nine, None)]));
         list.fail_with(Some(error.clone()));
         let server = TestServer::with_firmware_upstreams(upstream.clone(), list.clone());
-        let response = server.get(&format!("/firmware/{TARGET}/releases")).await;
+        let response = server
+            .get(&format!("/api/v1/firmware/{TARGET}/releases"))
+            .await;
         assert_eq!(response.status(), status, "{error}");
         assert_eq!(
             header_value(&response, header::CACHE_CONTROL),
@@ -739,14 +747,18 @@ async fn upstream_down_serves_the_last_good_index_then_fails() {
             Some("*")
         );
         list.fail_with(None);
-        let response = server.get(&format!("/firmware/{TARGET}/releases")).await;
+        let response = server
+            .get(&format!("/api/v1/firmware/{TARGET}/releases"))
+            .await;
         assert_eq!(response.status(), StatusCode::OK, "not remembered");
     }
 
     // A body that is not the list is refused the same way, never cached.
     let list = StubReleaseList::new(br#"{"message":"API rate limit exceeded"}"#.to_vec());
     let server = TestServer::with_firmware_upstreams(upstream, list);
-    let response = server.get(&format!("/firmware/{TARGET}/releases")).await;
+    let response = server
+        .get(&format!("/api/v1/firmware/{TARGET}/releases"))
+        .await;
     assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
 }
 
@@ -760,7 +772,7 @@ async fn an_unknown_target_is_a_404_with_no_manifest_fetch() {
     let list = StubReleaseList::new(github_list(&[listed(&nine, None)]));
     let server = TestServer::with_firmware_upstreams(upstream.clone(), list.clone());
 
-    let response = server.get("/firmware/esp32s3-8mb/releases").await;
+    let response = server.get("/api/v1/firmware/esp32s3-8mb/releases").await;
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
     assert_eq!(
         header_value(&response, header::CACHE_CONTROL),
@@ -777,7 +789,7 @@ async fn an_unknown_target_is_a_404_with_no_manifest_fetch() {
     assert!(upstream.calls().is_empty());
     assert_eq!(list.calls().len(), 1);
 
-    let response = server.get("/firmware/ESP32C6/releases").await;
+    let response = server.get("/api/v1/firmware/ESP32C6/releases").await;
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
     assert_eq!(body_text(response).await, "no such target\n");
     assert_eq!(list.calls().len(), 1, "no list call for a bad target");
@@ -791,7 +803,7 @@ async fn head_conditional_and_options_on_the_index() {
     nine.put_into(&upstream);
     let list = StubReleaseList::new(github_list(&[listed(&nine, None)]));
     let server = TestServer::with_firmware_upstreams(upstream, list);
-    let path = format!("/firmware/{TARGET}/releases");
+    let path = format!("/api/v1/firmware/{TARGET}/releases");
 
     let get = server.get(&path).await;
     let etag = header_value(&get, header::ETAG).unwrap().to_string();
@@ -844,47 +856,49 @@ async fn head_conditional_and_options_on_the_index() {
     );
 }
 
-/// 19. The namespace rule: under `/firmware/<target>/`, the dotless
-///     `releases` is the server's, and every bundle file name (they all
-///     carry an extension) still falls through to the static bundle — no
-///     list or manifest is fetched for them.
+/// 19. The index is only at `/api/v1/…`: `/firmware/<target>/releases` is
+///     what it was before the index existed — two segments after
+///     `/firmware/`, the page fallback's (here the SPA document) — and asks
+///     upstream for nothing.
 #[tokio::test]
-async fn the_index_route_leaves_the_bundles_names_to_the_fallback() {
+async fn firmware_target_releases_is_not_the_index() {
     let nine = Release::at("2026.10.06-9");
     let upstream = StubUpstream::empty();
     nine.put_into(&upstream);
     let list = StubReleaseList::new(github_list(&[listed(&nine, None)]));
     let server = TestServer::with_firmware_upstreams(upstream.clone(), list.clone());
 
-    for name in [
-        "manifest.json",
-        "ota-manifest.json",
-        "core.z",
-        "engine.z",
-        "fw-esp32c6-merged.bin",
-    ] {
-        let response = server.get(&format!("/firmware/{TARGET}/{name}")).await;
-        assert!(
-            response
-                .headers()
-                .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
-                .is_none(),
-            "{name}: the fallback's, not a firmware answer"
-        );
-        assert!(
-            name.contains('.'),
-            "{name}: a bundle file carries an extension"
-        );
-    }
-    assert!(list.calls().is_empty());
-    assert!(upstream.calls().is_empty());
-
     let response = server.get(&format!("/firmware/{TARGET}/releases")).await;
     assert_eq!(response.status(), StatusCode::OK);
+    assert!(
+        response
+            .headers()
+            .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+            .is_none(),
+        "the fallback's answer, not a firmware one"
+    );
+    assert_eq!(body_text(response).await, INDEX_HTML, "the SPA document");
+    assert!(list.calls().is_empty(), "no releases list fetched");
+    assert!(upstream.calls().is_empty(), "no manifest fetched");
+
+    let response = server
+        .get(&format!("/api/v1/firmware/{TARGET}/releases"))
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    ReleaseIndex::parse_valid(&body_bytes(response).await).unwrap();
+}
+
+/// 20. The account API at `POST /api` is untouched by the index under
+///     `/api/v1/`: an anonymous `WhoAmI` is still answered there.
+#[tokio::test]
+async fn the_account_api_beside_the_index_is_unchanged() {
+    let server = TestServer::new();
+    let reply = server.call(CloudRequest::WhoAmI, None).await;
     assert_eq!(
-        header_value(&response, header::ACCESS_CONTROL_ALLOW_ORIGIN),
-        Some("*"),
-        "the index's answer"
+        reply.result,
+        Ok(CloudResponse::UserInfo(UserInfo {
+            actor: Actor::Anonymous
+        }))
     );
 }
 

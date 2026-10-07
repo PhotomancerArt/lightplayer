@@ -9,7 +9,7 @@
 //! The blob store (where checked files are kept by SHA-256) is reached by
 //! the route through [`AppState::with_service`](crate::AppState::with_service);
 //! this type holds the upstreams and the in-memory caches. The release index
-//! (`/firmware/<target>/releases`) is built on the same plane, in
+//! (`/api/v1/firmware/<target>/releases`) is built on the same plane, in
 //! [`release_index_plane`](super::release_index_plane).
 
 use std::sync::{Arc, Mutex};

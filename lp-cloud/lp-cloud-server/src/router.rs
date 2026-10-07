@@ -3,6 +3,7 @@
 //! | Route | Plane | Auth |
 //! |---|---|---|
 //! | `POST /api` | control | cookie → `Actor` (anonymous is a caller too) |
+//! | `GET\|HEAD\|OPTIONS /api/v1/firmware/{target}/releases` | firmware | none — the release index, format 1, any origin |
 //! | `GET /b/{hash}` | content | none — the hash is the capability |
 //! | `PUT /b/{hash}` | content | session required |
 //! | `GET /t/{hash}` | content | none |
@@ -13,7 +14,6 @@
 //! | `POST /auth/guest` | auth | none — mints a guest session unless one is live |
 //! | `POST /auth/logout` | auth | the session cookie, if there is one |
 //! | `GET /auth/dev` | auth | localhost + `LP_CLOUD_DEV_AUTH` (else 404) |
-//! | `GET\|HEAD\|OPTIONS /firmware/{target}/releases` | firmware | none — the release index, format 1, any origin |
 //! | `GET\|HEAD\|OPTIONS /firmware/{target}/{release}/{file}` | firmware | none — public, verified by hash, any origin |
 //! | `GET /relay/device` | relay | WebSocket; the board proves its accounts in-band. Plain HTTP allowed |
 //! | `GET /relay/board/{id}` | relay | WebSocket; a session (account or guest) — see `relay::route_admission` |
@@ -64,16 +64,15 @@ pub fn build_router(state: AppState) -> Router {
         .route("/auth/guest", post(guest_auth::post_guest_auth))
         .route("/auth/logout", post(google_auth::post_logout))
         .route("/auth/dev", get(dev_auth::get_dev_auth))
-        // Two segments after `/firmware/` are shared by one rule: a second
-        // segment with no dot is the server's (`releases`, the index); the
-        // Studio bundle's files always carry an extension
-        // (`/firmware/<target>/manifest.json`, `core.z`, …) and stay the
-        // fallback's.
+        // The release index: an API answer, versioned in its path (a later
+        // incompatible shape is `/api/v2/…` beside it). `POST /api` above is
+        // a different, exact path; the two never overlap.
         .route(
-            "/firmware/{target}/releases",
+            "/api/v1/firmware/{target}/releases",
             get(firmware_index_route::get_release_index).options(firmware_route::options_firmware),
         )
-        // Three segments after `/firmware/`: the lookup.
+        // Three segments after `/firmware/`; the Studio bundle's own
+        // `/firmware/<target>/manifest.json` has two and stays the fallback's.
         .route(
             "/firmware/{target}/{release}/{file}",
             get(firmware_route::get_firmware).options(firmware_route::options_firmware),

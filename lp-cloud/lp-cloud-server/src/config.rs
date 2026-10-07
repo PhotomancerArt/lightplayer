@@ -20,7 +20,7 @@
 //! | `LP_CLOUD_GOOGLE_CLIENT_ID` / `_SECRET` | OAuth; both required for `GET /auth/google` | — |
 //! | `LP_CLOUD_GOOGLE_ENDPOINT_BASE` | Point the OAuth dance at a stub (tests) | Google |
 //! | `LP_CLOUD_FIRMWARE_UPSTREAM` | Releases base the `/firmware/` lookup proxies (an `http(s)` URL) | [`DEFAULT_FIRMWARE_UPSTREAM`] |
-//! | `LP_CLOUD_FIRMWARE_RELEASES_LIST` | The releases list `/firmware/<target>/releases` is built from (an `http(s)` URL answering GitHub's REST releases JSON) | [`DEFAULT_FIRMWARE_RELEASES_LIST`] |
+//! | `LP_CLOUD_FIRMWARE_RELEASES_LIST` | The releases list `/api/v1/firmware/<target>/releases` is built from (an `http(s)` URL answering GitHub's REST releases JSON) | [`DEFAULT_FIRMWARE_RELEASES_LIST`] |
 //! | `LP_CLOUD_GITHUB_TOKEN` | Optional bearer token sent to the releases list URL **only** (raises GitHub's rate limit; no scopes needed for a public repo). Never logged | unset |
 
 use std::fmt;

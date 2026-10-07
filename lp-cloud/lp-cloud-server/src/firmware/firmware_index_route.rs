@@ -1,5 +1,5 @@
-//! `GET|HEAD|OPTIONS /firmware/{target}/releases` — the release index and
-//! its headers.
+//! `GET|HEAD|OPTIONS /api/v1/firmware/{target}/releases` — the release
+//! index and its headers.
 //!
 //! | Answer | When | `Cache-Control` |
 //! |---|---|---|

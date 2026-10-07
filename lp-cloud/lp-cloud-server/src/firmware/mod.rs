@@ -1,5 +1,6 @@
 //! The firmware plane: `GET|HEAD|OPTIONS /firmware/{target}/{release}/{file}`
-//! and the release index, `GET|HEAD|OPTIONS /firmware/{target}/releases`.
+//! and the release index, `GET|HEAD|OPTIONS
+//! /api/v1/firmware/{target}/releases`.
 //!
 //! A browser cannot read GitHub release assets cross-origin — neither hop of
 //! `releases/download` sends `Access-Control-Allow-Origin`, the blob host
