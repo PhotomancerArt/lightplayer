@@ -2,8 +2,9 @@
 
 **Status: protocol, not yet walked.** The gate of
 `lp2025/2026-10-05-0820-ota-studio-ble-updates` (M7, PR-3, P13): a person,
-an iPhone running Bluefy, and the desk's fixture C6, with Studio served from
-the PR's branch. The agent's Mac Chrome pre-walk (the same flow on the same
+an iPhone running Bluefy, and a desk C6, with Studio served from the PR's
+branch. **2026-10-07: the director hosts the walk on `loose-c6`** (below);
+`fixture-c6` is the agent's Mac Chrome pre-walk board. The agent's Mac Chrome pre-walk (the same flow on the same
 board, Mac Chrome as the central over CDP) is in the PR; it is the agent's
 evidence that the flow works on a real radio, **not** a phone's number. This
 file is filled in at and after the walk: the blank rows below are for it.
@@ -12,10 +13,10 @@ file is filled in at and after the walk: the blank rows below are for it.
 
 | | |
 |---|---|
-| **The board** | `fixture-c6` (FC6, XIAO C6 on its LED panel, MAC `A0:F2:62:87:B4:8C`), on the desk, USB plugged into the hub (power and console only). It advertises `LP-studio` while its engine runs and `LP-b48c` core-only; an iPhone may show either (iOS caches names). Before the walk the agent backs it up (the desk's known-good image is `77a0701d…79aa`), flashes **X** (`a0a0a0a0`, this branch's split image), adds the walk's password over USB and leaves X running its project. **Never** the loose XIAO that advertises `LP-8e30`. |
+| **The board** | `loose-c6` (LC6, "Loose C6", MAC `10:BD:A3:B0:8E:30`), hosted by the director (2026-10-07). It advertises its project's name while its engine runs and `LP-8e30` core-only; an iPhone may show either (iOS caches names). **Its USB must not be held by a host during the update** (power only — a USB charger, or the hub with no program holding the port): a host on the board's USB link closes the Bluetooth update link mid-backup (`docs/defects/2026-10-07-a-usb-host-on-the-board-closes-its-bluetooth-update-link.md`). The agent's pre-walk board was `fixture-c6` (FC6, `A0:F2:62:87:B4:8C`, `LP-b48c`), restored after. |
 | **Studio** | This branch's Studio, built and served on the desk by the agent (its own firmware is **Y**, the version the card offers), on the tailnet over HTTPS so Bluefy can open it: `https://<desk>.<tailnet>.ts.net:8443/` — the agent posts the exact URL at the gate. Web Bluetooth needs a secure context; the phone cannot reach `127.0.0.1`. |
 | **The phone** | Bluefy, its Bluetooth on, within a few metres of the board. Close other Bluefy tabs that hold the board. |
-| **The agent** | At the desk's terminal, to make the board engine-less over USB for step 3 (`scripts/ota/make-engine-less.sh A0:F2:62:87:B4:8C`) and to read the board's console. It restores the backup after the walk. |
+| **The agent** | At the desk's terminal, to make the board engine-less over USB for step 3 (`scripts/ota/make-engine-less.sh 10:BD:A3:B0:8E:30` on loose-c6) and to read the board's console **between** steps, never while the phone is updating it. It restores the backup after the walk. |
 
 The board holds a password (Play and Author set to Password) unless the
 agent says otherwise at the gate; Bluefy asks for it once, on the card.
@@ -28,7 +29,8 @@ should read; anything else is worth a note.
 ### 1. Update the board to this Studio's version from the card
 
 1. Open the URL in Bluefy. Devices → add a board → **via Bluetooth** → pick
-   `LP-b48c`. Unlock with the password if the card asks.
+   the board (`LP-8e30`, or its project's name). Unlock with the password
+   if the card asks.
 2. The card offers the install as a plain button (one click, no confirm):
    **Update** for a release newer than the board's, or **Install dev
    <Y>** when either side is a dev build, which is the case at this walk
@@ -84,16 +86,56 @@ reads wrong, any state the card did not show, any button that should not
 have been there (no **Factory reset** while updating, no **Update** while one
 runs), and whether the LEDs' colour matched the card's picture slot.
 
-## Expect it to be slow, and why
+## How long it takes, and what to watch
 
-Studio writes every Bluetooth frame **with response**, one at a time
-(#880's rule), so it moves far less than the desk pipe does. In the Mac
-Chrome pre-walk (below) the core went at ~1.3 KiB/s on the wire and the
-engine at ~3.8 KiB/s: about 10 minutes for the core and 5 for the engine,
-and a first update that must back the engine up first (no copy of the
-board's engine on the phone) reads ~1.8 MB back first — on the order of 10
-more minutes. Bluefy is a different stack and may be faster or slower; the
-walk measures it. Keep the phone awake and near the board during step 1.
+**Bluefy writes Studio's data frames without response, at most 8 in
+flight** (`without-response:8`, the iOS default of the Bluetooth write
+policy; desktop Chrome runs `without-response:16`). SYN and ACK-only frames
+always go with response, and every frame goes with response while the link
+is stalled. The page console (or `?record=`) prints the policy once per
+link — `[ble N] bluetooth: data frames without response, at most 8 in
+flight` — and a rate line every 15 s:
+`[ble N] bluetooth: out … KiB/s, in … KiB/s over 15 s · R of F frames resent (…%) · srtt … ms`.
+
+**Measured on Mac Chrome via CDP (fixture C6, ~1 m, 2026-10-07, the merged
+build — not a phone's numbers):**
+
+| Phase | Mac Chrome (16 in flight) |
+|---|---|
+| Backup (the engine read back, 1.84 MB) — only when Studio has no copy of the board's engine | 7–11 KiB/s steady at a quiet host, ~4 min; under a heavy host (load 100–180) it decayed to 2–3 KiB/s |
+| Core (1.37 MB raw, 0.85 MB on the wire) | 22–23 s at best (38 KiB/s on the wire), 85–135 s at worst |
+| Engine (1.84 MB raw, 1.09 MB on the wire) | 74–112 s (16–24 KB/s raw) |
+| Each board reset → reconnected | 1.0–3.0 s |
+| Press → up to date, no backup | **122 s**; **164 s** with a power cut at 40 % of the core |
+
+**Expect on the iPhone:** no Bluefy number exists yet — this walk is the
+first. With half Mac Chrome's window, plan on **3–6 minutes** without a
+backup and **another 4–8 minutes** if the card starts with "Backing up
+current firmware…". Keep the phone awake and near the board for step 1.
+
+**What to watch:**
+
+- The card's % **stalling** for more than ~30 s, or rising by a percent
+  every several seconds where it had moved every second.
+- The console's `resent` share rising past ~10 %, or `srtt` past ~1 s.
+- A **drop/reconnect loop** — "reconnecting…" over and over, or a
+  reconnect that never comes ("1 remembered board not connected"). On Mac
+  Chrome four of eight runs lost the board (after a reset, or a link that
+  ended mid-transfer) and never reconnected by themselves; in the one we
+  tried, re-opening the board from Devices (a reconnect, DS12) finished the
+  update with no click. Whether Bluefy reconnects by itself is what step 2
+  asks.
+- A backup that ends early: on Mac Chrome two backups under a heavy host
+  ended at 58–59 % with no board reset and no reconnect.
+
+**Fallback URLs** (append to Studio's URL, then reload and re-pick the
+board): `?ble-writes=without-response:4` (a smaller window, if frames are
+being lost), `?ble-writes=with-response` (every frame with response, #880's
+rule: slowest, most conservative).
+
+**Keep the board's USB unplugged from any host** (power only) while it
+updates: with a host on its USB link the board closed the Bluetooth link
+mid-backup and the backup never resumed (the defect above).
 
 ## The gate's questions (for Yona)
 
@@ -148,6 +190,32 @@ card holds "Finishing…" after a refused login
 reconnect after some board resets (7 Chrome restarts and 1 crash in the
 sitting, the known macOS lore) — whether Bluefy reconnects is step 2's
 question.
+
+## The agent's speed pass on silicon (2026-10-07, Mac Chrome 154 via CDP, board ~1 m)
+
+Fixture C6, merged build: X = `a0a0a0a0+a3bf56bebe57`, Y = Studio's own
+`a3bf56beb+a3bf56bebe57`, Studio the release story bundle of `a3bf56beb`.
+Backed up first (`305d3f97…` by the file and the chip's own MD5), restored
+after (on-chip MD5 `305d3f97…` again), power-cycled, lease dropped. **Wi-Fi
+on, 0 networks saved, station `notConnected` in every run** (not joined).
+No USB host unless the row says so. Host load in brackets. Evidence:
+`lp2025/2026-10-05-0820-ota-studio-ble-updates/data/ble-speed-2026-10-07/`.
+
+| Run | Policy | USB host | Backup | Core | Engine | Press → up to date | Resent (frames) | Reconnects |
+|---|---|---|---|---|---|---|---|---|
+| b1 before (backup, stopped at 400 s) | with-response:16 | no | 0→98 % in 401 s, 7.9 decaying to 2.4 KiB/s [33–105] | — | — | stopped by design | 50 of 3,833 | 0 |
+| a0 after, resumed (same board, new policy) | without-response:16 | no | (done by b1's page) | 84 s, 5–21 KiB/s | ~90 s, 38 → 1.6 → 26 KiB/s | ~183 s from the join that worked (2 joins timed out first; 1 Chrome restart) | 151 + 96 | 1 reset |
+| a1 full, engine cached from b1 (no backup) | without-response:16 | no | skipped | 22 s (38.6 KiB/s wire) | 74 s, one drop mid-engine | **122.1 s** [134–146] | 311 | 1.1, 1.0, 2.0 (drop), 2.0 s |
+| a1d full with backup | without-response:16 | no | 11.8 → 2.6 KiB/s; link ended at **58 %** (200 s), no reconnect [100–140] | — | — | **failed** | 4 of 2,270 | none |
+| a1e full with backup | without-response:16 | no | 6.5 → 1.9 KiB/s; link ended at **59 %** (258 s), no board reset, no reconnect [37–100] | — | — | **failed** | 1 of 2,343 | none |
+| a1f full with backup | without-response:16 | no | **7–11 KiB/s steady, 99 % in 233 s** [33–65]; board reset into core-only, Chrome connected then dropped (0x13), no retry | — | — | **failed at the core's start** | 11 of 3,872 | 0 of 1 |
+| a2 seeded (no backup) | without-response:16 | no | skipped | 135 s, 2–13 KiB/s, srtt to 2.2 s | to 74 %, link ended, no reconnect; a re-join finished 75→100 % in 27 s | not in one go | 177 + 174 + 29 | 3.0, 2.0 s |
+| a3 power cut at 40 % of the core | without-response:16 | no | skipped | 23 s (58 KB/s raw) | 112 s (16 KB/s raw) | **163.9 s** [18–61] | 444 | 2.0 (cut), 2.0, 1.3 s |
+| s1 backup with a USB host | without-response:16 | **`lp-cli link capture`** | 1.7 KiB/s, **board closed the link at 17 s** (`reply deadline`, 1584 ms of the tick's budget left); reconnected 2.0 s; `[OTA] refused` ×4; stuck at 0 % | — | — | **failed** | 7 of 101 | 2.0 s |
+
+Surprise 1 (a USB host stalls the Bluetooth backup) **still holds** on the
+merged build, now as a closed link instead of a stall: s1 against a1f. Filed
+as `docs/defects/2026-10-07-a-usb-host-on-the-board-closes-its-bluetooth-update-link.md`.
 
 ## Measured at the walk (fill in)
 
