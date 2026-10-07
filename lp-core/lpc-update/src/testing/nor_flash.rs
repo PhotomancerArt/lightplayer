@@ -1,7 +1,8 @@
 //! An in-memory NOR flash with power cuts.
 //!
 //! - **Program only clears bits** (`old & new`), as NOR does.
-//! - **Erase** sets a 4 KiB sector to `0xFF`.
+//! - **Erase** sets a 4 KiB sector to `0xFF`; a **block erase** sets a
+//!   larger aligned span to `0xFF` in one operation.
 //! - Every erase and program counts as one **operation**. With
 //!   [`NorFlash::cut_after`]`(k)`, operations `1..=k` happen and the flash is
 //!   then **frozen**: every later operation (reads included) fails with
@@ -82,14 +83,27 @@ impl NorFlash {
 
     /// Erase the sector holding `addr`.
     pub fn erase(&mut self, addr: u32) -> Result<(), FlashFault> {
-        let start = (addr / CHUNK * CHUNK) as usize;
-        let end = start + CHUNK as usize;
+        self.erase_span(addr / CHUNK * CHUNK, CHUNK)
+    }
+
+    /// Erase the `len`-byte block at `addr` in one operation (a torn cut
+    /// leaves its first half erased).
+    pub fn erase_block(&mut self, addr: u32, len: u32) -> Result<(), FlashFault> {
+        if len == 0 || addr % len != 0 {
+            return Err(FlashFault);
+        }
+        self.erase_span(addr, len)
+    }
+
+    fn erase_span(&mut self, addr: u32, len: u32) -> Result<(), FlashFault> {
+        let start = addr as usize;
+        let end = start + len as usize;
         if end > self.bytes.len() {
             return Err(FlashFault);
         }
         let cut_here = self.operation()?;
         let end = if cut_here {
-            start + CHUNK as usize / 2
+            start + len as usize / 2
         } else {
             end
         };

@@ -213,6 +213,8 @@ holds the full context.
 | A link thread (and messages-first) for the S31; the C6, the S3 and the classic each have one now (S3/classic pending their desk-walk gates, PR #942/#943) | `2026-10-02-c6-link-io-thread` (2026-10-03 S3 and classic amendments); `2026-08-25-classic-uart-io-task-executor-isolation` (2026-10-03 amendment) | The S31 gets esp-hal support and a desk board |
 | The ProjectRead gate (32 KiB free / a 16 KiB block) refuses reads that would fit; Yona wants it revisited the way loads were — try, and recover — and with a LAN link open after a switch the emulated C6 sat at a 16,164–16,172 B block | `2026-10-07-project-loads-are-tried-and-recovered` | A read is next made tried-and-recovered, or a refused read is found on a board that could have served it |
 | 80–230 ms slow frames were observed even with Wi‑Fi off while taking the budget's first data point; the source is unidentified and predates Wi‑Fi | `2026-10-06-radio-frame-rate-budget` | Someone investigates frame-time outliers unrelated to radio |
+| Firmware release channels (`stable`, `beta`, …): every non-digit `<release>` but `latest` is reserved in `/firmware/<target>/<release>/<file>`, nothing more | `2026-10-06-firmware-distribution` | A second release channel is asked for |
+| An lp-cli engine cache and `lp-cli firmware fetch`; lookup by engine hash; single-flight in the `/firmware/` proxy; a retention policy for release assets | `2026-10-06-firmware-distribution` | A host tool needs released engines offline; the proxy's double cold fetch shows up; GitHub objects to the asset volume |
 
 ## Relationship To Shared Planning
 

@@ -124,10 +124,10 @@ async function main() {
   const trail = path.join(out, "card-trail.log");
 
   // This Studio's firmware, staged the way the release bundle is (Y's update
-  // files under ota/).
+  // files beside its manifest.json).
   const stagedY = path.join(out, "firmware-y");
   stageFirmware(stagedY, PACKAGES, PARTS);
-  const y = JSON.parse(readFileSync(path.join(stagedY, "esp32c6-4mb/ota/ota-manifest.json"), "utf8"));
+  const y = JSON.parse(readFileSync(path.join(stagedY, "esp32c6-4mb/ota-manifest.json"), "utf8"));
   const x = JSON.parse(readFileSync(path.join(X, "ota/ota-manifest.json"), "utf8"));
   const xSplit = JSON.parse(readFileSync(path.join(X, "split.json"), "utf8"));
   // X as a fielded board: its first boot done (`lpfs` formatted and
@@ -492,6 +492,17 @@ async function main() {
     return { label, order, cutAt, cutShot, from };
   };
 
+  // The door writes a board's console file every 2 s (`emu serve`'s
+  // FLUSH_EVERY), so the card can say "up to date" before the file holds the
+  // engine's commit line: give the file one flush to catch up before reading
+  // the board's words.
+  const settle = async (board, from) => {
+    try {
+      await waitBoard(board, /\[OTA\] engine verified, committing/, "the engine's commit", 5_000, from);
+    } catch {
+      // Not said: the assertions below name what is missing.
+    }
+  };
   const boardSaid = (board, from, patterns) =>
     Object.fromEntries(
       patterns.map(([name, pattern]) => [name, boardWords(board).slice(from).match(pattern)?.[0] ?? null]),
@@ -530,6 +541,7 @@ async function main() {
             await connect(board);
             const pushed = await pushProject();
             const ran = await runUpdate(board);
+            await settle(board, ran.from);
             const said = boardSaid(board, ran.from, OTA_WORDS);
             for (const need of ["core offer", "core on trial", "core confirmed", "engine offer", "engine committed"]) {
               if (!said[need]) throw new Error(`the board never said ${need}`);
@@ -561,6 +573,7 @@ async function main() {
                 : { stage: "updating", boardSays: /\[OTA\] offer \S+ → core/, atPercent: 40 },
             });
             if (!ran.cutAt) throw new Error("the walk never found the moment to cut");
+            await settle(board, ran.from);
             const said = boardSaid(board, ran.from, OTA_WORDS);
             if (!said.resumed) throw new Error("the board never said it resumed the transfer");
             if (!ran.order.some((entry) => entry.kind === "finishing")) throw new Error("the card never said Finishing the update");
@@ -592,6 +605,7 @@ async function main() {
               writeFileSync(path.join(out, "restoring-page.txt"), await driver.evaluate("document.body.innerText"));
               const order = await watchCard(`${MAIN_TEXT}.includes('Remove project') || /a0a0a0a0[^\\n]*available/.test(${MAIN_TEXT})`, "X running again");
               if (!order.some((entry) => entry.kind === "restoring")) throw new Error("the card never said Restoring firmware");
+              await settle(board, from);
               const said = boardSaid(board, from, OTA_WORDS);
               const lights = boardWords(board).slice(from).match(OTA_WORDS[7][1]) ?? [];
               if (!said["engine committed"]) throw new Error("the board never committed the engine");
@@ -614,6 +628,7 @@ async function main() {
               await shot("cant-get-row");
               const label = await pressUpdate();
               const rest = await watchCard(upToDate, "up to date on Y");
+              await settle(board, from);
               const said = boardSaid(board, from, OTA_WORDS);
               if (!said["engine committed"]) throw new Error("the board never committed Y's engine");
               return { summary: `pending core-only; pressed ${kept}; ${order.map((e) => e.kind).join(" → ")}; pressed ${label}; ${rest.map((e) => e.kind).join(" → ")}`, card: [...order, ...rest], board: said };

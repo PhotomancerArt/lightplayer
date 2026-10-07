@@ -90,14 +90,18 @@ are in three languages:
   eligibility filter and the candidate set for chip→build selection.
 - the justfile packages and copies exactly these ids
   (`just studio-served-builds` prints them;
-  `just studio-firmware-package-served` builds them).
+  `just studio-firmware-package-served` builds them), and so does every
+  release (`scripts/release/release-firmware.sh` attaches each one's
+  package; `fetch-release-firmware.sh` takes them back for the deploys).
 - `scripts/pages/static-site-smoke.mjs` fails a Pages artifact that is
   missing any of their `firmware/<id>/manifest.json`.
 
 A copy of this list in a second place is how the site came to offer a board
 it could not flash. Adding an id means adding a build def, a
-`studio-firmware-package-<chip>` recipe, and — for a new ISA — the toolchain
-step in both deploy workflows.
+`studio-firmware-package-<chip>` recipe (and its arm in
+`studio-firmware-package-target`), and — for a new ISA — the toolchain step in
+`release-firmware.yml` (which builds every release's firmware) and in
+`deploy-pages-channel.yml` (whose untagged betas build their own).
 
 ## Distribution
 
@@ -147,8 +151,9 @@ bundle (`just studio-web-build`, which every deploy runs) is **always** split,
 and the Pages artifact refuses to stage without the update files.
 
 **What the Studio bundle carries** (OTA M7, DS10): for a split package,
-`firmware/<id>/ota/` holds its `ota-manifest.json`, `core.z` and `engine.z`
-— never `core.bin`/`engine.bin`, which Studio slices out of the merged image
+`firmware/<id>/` also holds its `ota-manifest.json`, `core.z` and `engine.z`,
+beside `manifest.json` (two segments under `firmware/`: lightplayer.app's
+firmware lookup owns every three-segment `/firmware/` path) — never `core.bin`/`engine.bin`, which Studio slices out of the merged image
 by the package manifest's `split` offsets. For the C6 that is about 1.8 MB
 (`core.z` 741,552 + `engine.z` 1,084,808 + the manifest 13,255 bytes at
 `e6775ad53`), fetched only when an update runs.
@@ -161,9 +166,40 @@ update, and over USB keeps today's flash.
 
 `lp-cli firmware release-assets --out <dir> [--targets <id,…>] [--allow-dev]`
 stages those packages under release asset names (`<target>.<file>`), verifying
-every file and compressing nothing; `lp-cli firmware release-check <dir>`
-re-verifies a staged (or downloaded) release from its files alone, including
-every compressed chunk. Neither uploads anything.
+every file and compressing nothing; `lp-cli firmware release-check <dir>
+[--version <v>]` re-verifies a staged (or downloaded) release from its files
+alone, including every compressed chunk. Both refuse targets packaged at
+different versions (a release is one build), and `--version` requires the
+release's own. Neither uploads anything.
+
+**Releases.** Every main merge's GitHub release carries every served
+target's package (`<target>.package.json` = its `manifest.json`, and
+`<target>.<image>`) and, for a split target, its update files
+(`<target>.ota-manifest.json`, `.core.bin`, `.engine.bin`, `.core.z`,
+`.engine.z`). `.github/workflows/release-firmware.yml` attaches them, running
+`scripts/release/release-firmware.sh <version>`: package each target once
+(`just studio-firmware-package-target <id> split`), stage, `release-check`,
+upload — immutably: an asset already there with the same SHA-256 is skipped,
+a different one fails the run, nothing is ever replaced — then mark GitHub's
+Latest as the newest release that carries firmware. `--dry-run` prints the
+upload instead (the pre-merge `release-dry-run` job runs it for the C6 and
+keeps the staging directory as an artifact). lightplayer.app serves these
+assets at `/firmware/<target>/<release>/<file>`
+(`lp-cloud/lp-cloud-server/README.md`); `just firmware-store-smoke` proves
+the whole lookup locally.
+
+**The deploys ship the release's firmware, not their own build.**
+`just studio-web-build` fills the bundle's firmware after dx through `just
+studio-web-firmware`: `LP_STUDIO_FIRMWARE` unset (every local recipe)
+packages it here; `release:<version>` takes release v`<version>`'s
+(`scripts/release/fetch-release-firmware.sh`, verified, into the same
+directories `package` writes), which `deploy-cloud.yml` sets — waiting for
+its commit's "Release firmware" run — so the engine a bundle flashes is one
+the store serves. A release whose firmware fails does not deploy.
+
+**The published `package.json` is additive-only** from its first release:
+readers ignore unknown keys; a flasher may refuse another `schemaVersion`,
+never an unknown key. See `docs/adr/2026-10-06-firmware-distribution.md`.
 
 ## Consumers
 

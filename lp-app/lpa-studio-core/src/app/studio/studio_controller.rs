@@ -1271,6 +1271,22 @@ impl StudioController {
             .set_engine_cache(cache);
     }
 
+    /// Install where the flasher reads its packages (the bundle's
+    /// `firmware/` base and a fetch for it): after a successful USB install
+    /// of a split package, Studio reads that package back from here and
+    /// keeps its engine in the engine cache as `installed` (OTA M5, D19).
+    /// Without one, installed engines are not kept.
+    pub fn set_firmware_bundle(
+        &mut self,
+        fetch: Rc<dyn lpa_firmware_store::FirmwareFetch>,
+        base: &str,
+    ) {
+        self.devices
+            .effects_mut()
+            .firmware_mut()
+            .set_bundle(fetch, base);
+    }
+
     /// Install the firmware store client (lightplayer.app's `/firmware/`
     /// lookup, or the `?firmware-store=` dev origin). A store installed is a
     /// store online: a restore that missed for want of it may run again.
