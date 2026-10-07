@@ -1,0 +1,100 @@
+{
+  "$defs": {
+    "ReleaseIndexEntry": {
+      "additionalProperties": true,
+      "description": "One installable release of the index's target: what the release's\n`ota-manifest.json` says about its identity and what it needs, and when\nit was published.",
+      "properties": {
+        "commit": {
+          "description": "The full commit, 40 lowercase hex.",
+          "pattern": "^[0-9a-f]{40}$",
+          "type": "string"
+        },
+        "publishedAt": {
+          "description": "When the release was published (RFC 3339, UTC), as GitHub reports\nit. For display only: the version, not this, is the release's order.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "requires": {
+          "$ref": "#/$defs/Requires",
+          "description": "What a board must have to take the release without USB."
+        },
+        "version": {
+          "description": "The release version (`2026.10.06-19`); never a dev version.",
+          "pattern": "^[0-9]{4}\\.[0-9]{2}\\.[0-9]{2}-[1-9][0-9]{0,8}$",
+          "type": "string"
+        },
+        "wireProto": {
+          "description": "The device wire protocol version the release speaks.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "version",
+        "commit",
+        "wireProto",
+        "requires"
+      ],
+      "type": "object"
+    },
+    "Requires": {
+      "description": "What a board must have to take a build over the air. Only a prediction:\nthe board decides.",
+      "properties": {
+        "layout": {
+          "description": "The flash layout; the board's must be **equal** (M4's code table:\n`1` = layout 1).",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "loader": {
+          "description": "The loader version; the board's must be **≥** this (M4's code table:\n`1` = M2's loader, `0` = no version word).",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "layout",
+        "loader"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://lightplayer.dev/schemas/firmware-release-index.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "The firmware release index, format 1 (lpc_firmware_release::ReleaseIndex), served at /api/v1/firmware/<target>/releases: the releases one target can install, newest first by numeric version order. Readers refuse another format and ignore unknown fields; an additive optional field keeps format 1. See the firmware-distribution ADR.",
+  "properties": {
+    "format": {
+      "description": "Shape version; always `1` ([`RELEASE_INDEX_FORMAT`]).",
+      "format": "uint32",
+      "maximum": 1,
+      "minimum": 1,
+      "type": "integer"
+    },
+    "releases": {
+      "description": "The installable releases, newest first (numeric version order).",
+      "items": {
+        "$ref": "#/$defs/ReleaseIndexEntry"
+      },
+      "type": "array"
+    },
+    "target": {
+      "description": "The target every entry is a build of (`esp32c6-4mb`); opaque.",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
+      "type": "string"
+    }
+  },
+  "required": [
+    "format",
+    "target",
+    "releases"
+  ],
+  "title": "firmware release index",
+  "type": "object"
+}

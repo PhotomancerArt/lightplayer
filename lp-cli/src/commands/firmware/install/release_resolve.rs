@@ -3,12 +3,15 @@
 //! `latest` and an explicit version resolve for free when the package is
 //! fetched (its own manifest core names the version it is — see
 //! `package_fetch`). `previous` is the one case that needs a second source:
-//! lightplayer.app's lookup answers one release at a time and has no "list
-//! every release" route, so finding "the newest one before latest" means
-//! asking GitHub's releases list instead ([`ReleaseCatalog`],
-//! `release_catalog_source`).
+//! the lookup answers one release at a time, so finding "the newest one
+//! before latest" means asking a list of releases. This reads GitHub's
+//! ([`ReleaseCatalog`], `release_catalog_source`). lightplayer.app's release
+//! index (`/api/v1/firmware/<target>/releases`) lists a split target's
+//! installable releases and could stand in for it there; a target with no
+//! update files (the S3, the classic) has no index.
 
 use anyhow::{Context, Result, bail};
+use lpc_firmware_release::ReleaseVersion;
 
 /// What `--release` asked for.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -23,9 +26,7 @@ impl ReleaseRequest {
         match s {
             "latest" => Ok(Self::Latest),
             "previous" => Ok(Self::Previous),
-            _ if lpc_firmware_release::ReleaseVersion::parse(s).is_some() => {
-                Ok(Self::Version(s.to_string()))
-            }
+            _ if ReleaseVersion::parse(s).is_some() => Ok(Self::Version(s.to_string())),
             _ => bail!("`{s}` is not `latest`, `previous`, or a release version (YYYY.MM.DD-N)"),
         }
     }
@@ -54,58 +55,39 @@ pub trait ReleaseCatalog {
 ///
 /// Compares numerically (year, month, day, N), never lexicographically:
 /// `2026.10.05-10` is newer than `2026.10.05-9`, which a string compare gets
-/// backwards. Mirrors `scripts/release/version-cmp.sh`'s
-/// `release_version_fields`.
+/// backwards. The order is `lpc_firmware_release::ReleaseVersion`'s, the one
+/// the release index sorts by; a dev build or a malformed tag does not parse
+/// as one and is simply skipped, never chosen by a string sort.
 pub fn previous_version(
     catalog: &dyn ReleaseCatalog,
     target: &str,
     latest_version: &str,
 ) -> Result<String> {
     let wanted = format!("{target}.package.json");
-    let latest_order =
-        version_order(latest_version).context("the latest release's version is malformed")?;
+    let latest = ReleaseVersion::parse(latest_version)
+        .context("the latest release's version is malformed")?;
     let releases = catalog.list_releases()?;
-    let mut best: Option<(String, (u32, u32, u32, u32))> = None;
+    let mut best: Option<ReleaseVersion> = None;
     for release in releases {
         if !release.asset_names.iter().any(|name| name == &wanted) {
             continue;
         }
-        let Some(order) = version_order(&release.version) else {
+        let Some(version) = ReleaseVersion::parse(&release.version) else {
             continue;
         };
-        if order >= latest_order {
+        if version >= latest {
             continue;
         }
-        if best
-            .as_ref()
-            .is_none_or(|(_, best_order)| order > *best_order)
-        {
-            best = Some((release.version, order));
+        if best.as_ref().is_none_or(|best| version > *best) {
+            best = Some(version);
         }
     }
-    best.map(|(version, _)| version).ok_or_else(|| {
+    best.map(|version| version.to_string()).ok_or_else(|| {
         anyhow::anyhow!(
             "no published release older than {latest_version} carries {wanted} (via {})",
             catalog.source_name()
         )
     })
-}
-
-/// `(year, month, day, n)` from a release version (`YYYY.MM.DD-N`), for a
-/// numeric comparison. `None` for anything else (a dev build, a malformed
-/// tag) — such a release is simply skipped by [`previous_version`], never
-/// chosen by a string sort.
-fn version_order(version: &str) -> Option<(u32, u32, u32, u32)> {
-    lpc_firmware_release::ReleaseVersion::parse(version)?;
-    let (date, n) = version.split_once('-')?;
-    let mut parts = date.split('.');
-    let year = parts.next()?.parse().ok()?;
-    let month = parts.next()?.parse().ok()?;
-    let day = parts.next()?.parse().ok()?;
-    if parts.next().is_some() {
-        return None;
-    }
-    Some((year, month, day, n.parse().ok()?))
 }
 
 #[cfg(test)]
