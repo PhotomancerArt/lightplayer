@@ -1450,7 +1450,9 @@ cargo test -p lpa-server --no-run
 
 CI (see `.github/workflows/pre-merge.yml`) is path-gated per job: one
 `detect-changes` job computes the gates, then `Lint (x64)` runs
-`just check-lint` in parallel with `Validate (x64)`, which runs
+`just check-lint` and then `just test-rust-features` (the feature-variant
+`cargo test -p … --features …` lines, kept off Validate's critical path) in
+parallel with `Validate (x64)`, which runs
 `just ci-prereqs`, the gated test recipes (`test-rust-core`, plus
 `test-studio-host` when studio paths changed, plus `test-filetests` when
 shader paths changed), then `schema-check` and the heap-budget ratchet —
