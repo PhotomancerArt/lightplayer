@@ -476,13 +476,18 @@ fn handle_load_project(
         radio_service.clone(),
         graphics.clone(),
     );
-    lp_recovery::end_project_load();
     let handle = match loaded {
         Ok(handle) => {
             project_manager.forget_stopped();
+            // Done once its first frames ran: until then the recovery record
+            // stands, and the startup choice is not moved (a project that
+            // loads but cannot run its first frame would otherwise come back
+            // on every boot).
+            project_manager.await_load_commit(handle, true);
             handle
         }
         Err(error) => {
+            lp_recovery::end_project_load();
             // Never leave the board dark: a failed load (one that said so
             // without a reset: a missing or malformed project, a mapping too
             // big for the heap) runs what was running before (this
@@ -544,7 +549,6 @@ fn handle_load_project(
     }
     backtrace::set_oom_context("server handler: load project memory log");
     log_memory(memory_stats, "load_project after");
-    persist_startup_project(base_fs, path);
     backtrace::set_oom_context("server handler: load project response");
     let response = ServerMessagePayload::LoadProject { handle };
     backtrace::clear_oom_context();
@@ -552,9 +556,11 @@ fn handle_load_project(
 }
 
 /// Remember the loaded project as the boot default: a device that
-/// power-cycles resumes the last project it was told to show. Best-effort —
-/// a config write failure must never fail the load itself.
-fn persist_startup_project(fs: &dyn LpFs, path: &LpPath) {
+/// power-cycles resumes the last project it was told to show. Called once
+/// the load is done (it survived its first frames,
+/// `ProjectManager::frame_survived`). Best-effort — a config write failure
+/// must never fail the load itself.
+pub(crate) fn persist_startup_project(fs: &dyn LpFs, path: &LpPath) {
     use alloc::string::ToString;
     use lpc_model::server::server_config::ServerConfig;
 

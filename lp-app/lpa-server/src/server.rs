@@ -790,6 +790,19 @@ impl LpServer {
                 );
             }
         }
+        // A freshly loaded project that has now survived its first frames:
+        // its load is done. End the recovery record, and make a switch the
+        // startup project.
+        if !project_info.is_empty()
+            && let Some(commit) = self.project_manager.frame_survived()
+        {
+            if commit.persist_startup
+                && let Some(project) = self.project_manager.get_project(commit.handle)
+            {
+                crate::handlers::persist_startup_project(&*self.base_fs, project.path());
+            }
+            lp_recovery::end_project_load();
+        }
         // Handles are minted monotonically and never reused, so a project
         // that was unloaded mid-failure would otherwise keep its ledger
         // entry for the process's lifetime.
@@ -1459,7 +1472,11 @@ impl LpServer {
     ) -> Result<lpc_wire::WireProjectHandle, ServerError> {
         lp_recovery::begin_project_load(project_name(path), "", true);
         let loaded = self.load_project(path);
-        lp_recovery::end_project_load();
+        match &loaded {
+            // Done once its first frames ran (`ProjectManager::frame_survived`).
+            Ok(handle) => self.project_manager.await_load_commit(*handle, false),
+            Err(_) => lp_recovery::end_project_load(),
+        }
         loaded
     }
 

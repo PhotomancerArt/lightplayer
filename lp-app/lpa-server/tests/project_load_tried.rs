@@ -112,6 +112,51 @@ fn a_failed_switch_leaves_the_previous_project_running() {
     }
 }
 
+/// A switch becomes the startup project only once it has run its first
+/// frames: a project that loads but cannot run its first frame (it resets
+/// the board) must not come back on the next boot — the previous one does.
+#[test]
+fn a_switch_becomes_the_startup_project_after_its_first_frames() {
+    let (mut server, project_path) = server_with_clock_project("commit-after-frames");
+    let config = lpc_model::server::server_config::ServerConfig::PATH;
+    let startup = |server: &LpServer| {
+        server
+            .base_fs()
+            .read_file(config.as_path())
+            .ok()
+            .and_then(|data| {
+                lpc_wire::json::from_slice::<lpc_model::server::server_config::ServerConfig>(&data)
+                    .ok()
+            })
+            .and_then(|config| config.startup_project)
+    };
+
+    let mut transport = VecTransport::default();
+    let load = Incoming::primary(ClientMessage {
+        id: 70,
+        msg: ClientRequest::LoadProject {
+            path: String::from(project_path.as_str()),
+        },
+    });
+    block_on(server.tick_and_send(16, vec![load], &mut transport)).expect("tick");
+    assert!(
+        transport
+            .sent
+            .iter()
+            .any(|frame| matches!(frame.msg, WireServerMsgBody::LoadProject { .. })),
+        "{:?}",
+        transport.sent
+    );
+    let mut frames = 0;
+    while startup(&server).is_none() {
+        assert!(frames < 10, "the switch never became the startup project");
+        block_on(server.tick_and_send(16, Vec::new(), &mut VecTransport::default())).expect("tick");
+        frames += 1;
+    }
+    assert!(frames >= 2, "not before its first frames ran: {frames}");
+    assert_eq!(startup(&server).as_deref(), Some("commit-after-frames"));
+}
+
 #[test]
 fn unset_probe_never_refuses_a_load() {
     let (mut server, project_path) = server_with_clock_project("load-no-probe");
