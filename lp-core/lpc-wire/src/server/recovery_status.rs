@@ -69,4 +69,10 @@ pub struct RecoveryStatus {
     /// Active blame-ledger entries (yellow and red).
     #[serde(default)]
     pub paths: Vec<RecoveryPathWire>,
+    /// A project load the previous run started and never finished, in plain
+    /// words for the user ("Small Dome didn't fit in memory — back on
+    /// PLAYFUL Choker"), for the whole boot that follows it. A board tries a
+    /// load rather than gating it, and this is how it says the try failed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub load_notice: Option<String>,
 }

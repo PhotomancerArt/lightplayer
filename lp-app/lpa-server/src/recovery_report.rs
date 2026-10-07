@@ -50,6 +50,10 @@ pub fn recovery_status_from_snapshot(snapshot: &RecoverySnapshot) -> RecoverySta
         output_clamp: None,
         last_crash,
         paths,
+        load_notice: snapshot
+            .interrupted_load
+            .as_ref()
+            .map(|load| load.to_string()),
     }
 }
 

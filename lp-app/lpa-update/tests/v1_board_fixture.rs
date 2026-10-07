@@ -83,7 +83,12 @@ fn sends(effects: &[DriverEffect]) -> Vec<Vec<u8>> {
 
 #[test]
 fn the_driver_asks_and_backs_up_in_the_goldens_own_bytes() {
-    let mut d = UpdateDriver::new(host_build(), DriverConfig::default());
+    // One request at a time: the golden holds one `G`.
+    let config = DriverConfig {
+        serve: ServeConfig { ahead: 1 },
+        ..DriverConfig::default()
+    };
+    let mut d = UpdateDriver::new(host_build(), config);
     d.go();
     d.link_up(0);
     assert_eq!(
@@ -116,7 +121,8 @@ fn the_driver_asks_and_backs_up_in_the_goldens_own_bytes() {
 #[test]
 fn requests_are_served_in_the_goldens_shapes() {
     let b = host_build();
-    let mut s = ServeSession::new(ServeConfig::USB);
+    // One chunk per request: each golden `R` answered by its own chunk.
+    let mut s = ServeSession::new(ServeConfig { ahead: 1 });
     for r in board_lines(b'R') {
         let out = s.on_board(&b, &r);
         let Ok(BoardMessage::Request(req)) = BoardMessage::decode(&r) else {

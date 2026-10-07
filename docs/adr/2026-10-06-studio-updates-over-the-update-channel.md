@@ -174,9 +174,11 @@ frame on it, and lp-link would stall the whole link.
   (255 B a read, a read every 16 ms: ~12 KB/s); `?emu-tty=none` lifts it to
   ~54 KB/s on the emulator. A real Chromium's rate is a desk number, not
   this.
-- `USB_UPDATES_OVER_THE_AIR` and `ServeConfig::USB` (`ahead` 1) are the two
-  dials USB has; the second was measured at 63.1 s (ahead 1) against 58.5 s
-  (ahead 4) for a whole lp-cli update on the bench C6 and left as it was.
+- `USB_UPDATES_OVER_THE_AIR` and `ServeConfig::USB` are the two dials USB
+  has. The second was measured at 63.1 s (ahead 1) against 58.5 s (ahead 4)
+  for a whole lp-cli update on the bench C6 and left at 1. Once the board
+  erased blocks ahead, ahead 4 was worth 44.8 → 37.4 s, and it is now 4
+  (2026-10-06; ADR 2's "a USB update in half the time" amendment).
 
 ## References
 

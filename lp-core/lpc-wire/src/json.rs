@@ -428,6 +428,7 @@ mod ser_write_json_tests {
                         state: "yellow".to_string(),
                         crash_count: 1,
                     }],
+                    load_notice: None,
                 }),
                 outputs: Some(vec![crate::server::OutputWireStatus {
                     wire: 4,

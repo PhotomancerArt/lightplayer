@@ -4,7 +4,7 @@ extern crate alloc;
 
 use crate::error::ServerError;
 use crate::project_manager::ProjectManager;
-use crate::server::{MemoryStatsFn, ReadHeadroomProbe, check_load_headroom};
+use crate::server::{MemoryStatsFn, ReadHeadroomProbe, project_name};
 use alloc::{format, rc::Rc, sync::Arc, vec::Vec};
 use core::cell::RefCell;
 use lpc_engine::{ButtonService, LpGraphics, RadioService};
@@ -125,7 +125,6 @@ pub fn handle_client_message(
             base_fs,
             output_provider,
             memory_stats,
-            read_headroom_probe,
             time_provider,
             button_service,
             radio_service,
@@ -439,7 +438,6 @@ fn handle_load_project(
     base_fs: &mut dyn LpFs,
     output_provider: &Rc<RefCell<dyn OutputProvider>>,
     memory_stats: Option<&MemoryStatsFn>,
-    read_headroom_probe: Option<ReadHeadroomProbe>,
     time_provider: Option<Rc<dyn TimeProvider>>,
     button_service: Option<Rc<dyn ButtonService>>,
     radio_service: Option<Rc<dyn RadioService>>,
@@ -459,34 +457,43 @@ fn handle_load_project(
         project_manager.unload_all_projects()?;
         log_memory(memory_stats, "load_project unload existing after");
     }
-    // Gated AFTER the unload on purpose: the probe must read the heap the
-    // load would actually run in, and refusing before freeing the outgoing
-    // project would reject loads that fit.
-    let loaded = check_load_headroom(read_headroom_probe).and_then(|()| {
-        log_memory(memory_stats, "load_project before");
-        project_manager.load_project(
-            path,
-            base_fs,
-            output_provider.clone(),
-            memory_stats.copied(),
-            time_provider.clone(),
-            button_service.clone(),
-            radio_service.clone(),
-            graphics.clone(),
-        )
-    });
+    // No headroom gate: the board tries the load, and a load that runs it
+    // out of memory resets it with the load recorded in the recovery region,
+    // so the next boot runs the previous project again (the startup choice
+    // only moves after a load is done) and says why (ADR
+    // `2026-10-07-project-loads-are-tried-and-recovered`). The previous
+    // project is what this unload, or a
+    // StopAllProjects just before it (an upload), stopped.
+    lp_recovery::begin_project_load(project_name(path), project_manager.stopped_name(), false);
+    log_memory(memory_stats, "load_project before");
+    let loaded = project_manager.load_project(
+        path,
+        base_fs,
+        output_provider.clone(),
+        memory_stats.copied(),
+        time_provider.clone(),
+        button_service.clone(),
+        radio_service.clone(),
+        graphics.clone(),
+    );
     let handle = match loaded {
         Ok(handle) => {
             project_manager.forget_stopped();
+            // Done once its first frames ran: until then the recovery record
+            // stands, and the startup choice is not moved (a project that
+            // loads but cannot run its first frame would otherwise come back
+            // on every boot).
+            project_manager.await_load_commit(handle, true);
             handle
         }
         Err(error) => {
-            // Never leave the board dark: a refused or failed load runs
-            // what was running before (this unload's, or a StopAllProjects
-            // just before it, as an upload sends), without the headroom
-            // gate — it ran in this heap moments ago. On main too: the
-            // G1 desk walk found a refused switch left the LEDs dark until
-            // a reboot.
+            lp_recovery::end_project_load();
+            // Never leave the board dark: a failed load (one that said so
+            // without a reset: a missing or malformed project, a mapping too
+            // big for the heap) runs what was running before (this
+            // unload's, or a StopAllProjects just before it, as an upload
+            // sends) — it ran in this heap moments ago. The G1 desk walk
+            // found a refused switch left the LEDs dark until a reboot.
             let mut restored = Vec::new();
             if project_manager.list_loaded_projects().is_empty() {
                 if let Some(stopped) = project_manager.take_stopped() {
@@ -542,7 +549,6 @@ fn handle_load_project(
     }
     backtrace::set_oom_context("server handler: load project memory log");
     log_memory(memory_stats, "load_project after");
-    persist_startup_project(base_fs, path);
     backtrace::set_oom_context("server handler: load project response");
     let response = ServerMessagePayload::LoadProject { handle };
     backtrace::clear_oom_context();
@@ -550,21 +556,18 @@ fn handle_load_project(
 }
 
 /// Remember the loaded project as the boot default: a device that
-/// power-cycles resumes the last project it was told to show. Best-effort —
-/// a config write failure must never fail the load itself.
-fn persist_startup_project(fs: &dyn LpFs, path: &LpPath) {
+/// power-cycles resumes the last project it was told to show. Called once
+/// the load is done (it survived its first frames,
+/// `ProjectManager::frame_survived`). Best-effort — a config write failure
+/// must never fail the load itself.
+pub(crate) fn persist_startup_project(fs: &dyn LpFs, path: &LpPath) {
     use alloc::string::ToString;
     use lpc_model::server::server_config::ServerConfig;
 
-    let Some(name) = path
-        .as_str()
-        .trim_end_matches('/')
-        .rsplit('/')
-        .next()
-        .filter(|name| !name.is_empty())
-    else {
+    let name = project_name(path);
+    if name.is_empty() {
         return;
-    };
+    }
 
     let mut config = fs
         .read_file(ServerConfig::PATH.as_path())

@@ -673,7 +673,7 @@ mod tests {
         assert_eq!(rig.state(), failed("lp-made-up", StationFailure::NotFound));
         assert_eq!(
             rig.policy.next_wake(),
-            Some(rig.now + StationBackoff::EARLY_EVERY_MS)
+            Some(rig.now + StationBackoff::QUICK_RETRIES_MS[0])
         );
     }
 
@@ -704,15 +704,18 @@ mod tests {
         assert_eq!(rig.event(StationEvent::LinkLost), vec![StationAction::Scan]);
         assert_eq!(rig.state(), StationState::NotConnected);
         assert_eq!(rig.heard(&[]), vec![]);
-        assert_eq!(rig.policy.next_wake(), Some(rig.now + 10_000));
+        assert_eq!(rig.policy.next_wake(), Some(rig.now + 1_000));
     }
 
+    /// A first scan that misses the access point is retried after a second
+    /// and two more, then every ten seconds for the search's first minute,
+    /// then every minute (FC6 re-check: 4 boots of 19 waited 10 s or more).
     #[test]
-    fn searching_backs_off_from_ten_seconds_to_a_minute() {
+    fn searching_retries_quickly_then_backs_off_from_ten_seconds_to_a_minute() {
         let mut rig = Rig::new();
         rig.settings(true, &[(HOME, "pw-one-long")]);
         let mut gaps = Vec::new();
-        for _ in 0..8 {
+        for _ in 0..10 {
             rig.heard(&[]);
             let wake = rig.policy.next_wake().unwrap();
             gaps.push(wake - rig.now);
@@ -721,7 +724,7 @@ mod tests {
         assert_eq!(
             gaps,
             [
-                10_000, 10_000, 10_000, 10_000, 10_000, 10_000, 60_000, 60_000
+                1_000, 2_000, 10_000, 10_000, 10_000, 10_000, 10_000, 10_000, 60_000, 60_000
             ]
         );
     }

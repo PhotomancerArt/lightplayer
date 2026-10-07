@@ -147,7 +147,8 @@ mod tests {
     }
 
     /// The link fits the classic's heap with a real project loaded, with a
-    /// margin of twice its own cost on top of it at both gates.
+    /// margin of twice its own cost on top of it at the read gate (loads are
+    /// no longer gated).
     ///
     /// The headroom is MEASURED, not assumed: the shipped image
     /// (`esp32,server,float-f32`) on `lp-emu:esp32v3:t1`, ROM-up from a
@@ -172,30 +173,21 @@ mod tests {
     #[cfg(feature = "server")]
     #[test]
     fn the_link_fits_the_classic_heap_with_a_project_loaded() {
-        use lpa_server::{PROJECT_LOAD_MIN_HEADROOM_BYTES, PROJECT_READ_MIN_HEADROOM_BYTES};
+        use lpa_server::PROJECT_READ_MIN_HEADROOM_BYTES;
 
-        /// Largest free block the load gate read before zook's load (the
-        /// first load; the reload read 103,679 B).
-        const LOAD_GATE_READS: usize = 103_660;
         /// Lowest largest-free-block with zook loaded and running, over both
         /// load cycles (steady, first compiled frame, after a read).
         const LOADED_LOWEST: usize = 98_284;
 
+        // Loads are no longer gated on a headroom floor (they are tried, and
+        // a load that runs the board out of memory is recovered across the
+        // reset: ADR `2026-10-07-project-loads-are-tried-and-recovered`), so
+        // only the read gate is checked here.
         let f = LinkFigures::measure();
-        let load_headroom = LOAD_GATE_READS - PROJECT_LOAD_MIN_HEADROOM_BYTES as usize;
         let read_headroom = LOADED_LOWEST - PROJECT_READ_MIN_HEADROOM_BYTES as usize;
         std::println!(
-            "load gate: headroom {load_headroom} B, link at rest {} B; \
-             read gate: headroom {read_headroom} B, link at peak {} B",
-            f.rest,
+            "read gate: headroom {read_headroom} B, link at peak {} B",
             f.upload_peak
-        );
-        // A load happens with the link at rest: an upload's reassembly buffer
-        // is given back before the `loadProject` that follows it.
-        assert!(
-            3 * f.rest <= load_headroom,
-            "load gate: {load_headroom} B of headroom for a {} B link",
-            f.rest
         );
         // Reads and uploads happen with the project loaded, and an upload's
         // chunk may be mid-reassembly.

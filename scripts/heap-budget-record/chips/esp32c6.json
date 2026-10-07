@@ -1,18 +1,18 @@
 {
   "measured": {
-    "freeBytes": 198588,
-    "usedBytes": 102948,
+    "freeBytes": 198536,
+    "usedBytes": 103000,
     "totalBytes": 301536,
-    "largestFreeBlock": 119424,
-    "stackHighWater": 11620,
+    "largestFreeBlock": 119432,
+    "stackHighWater": 11940,
     "stackTop": 1082582544,
     "stackHighWaterBand": [
-      11100,
-      12200
+      11400,
+      12500
     ]
   },
   "recorded": "2026-10-06",
-  "commit": "f37e906b9",
+  "commit": "7fa64fd84",
   "comment": "What the FIRMWARE costs, not what a project costs: the shipped image \u2014 since M2 the SPLIT image (lp-fw-split: loader, boot records, core, engine; esp32c6,server,radio, built as the target esp32c6-4mb \u2014 the bytes a board is flashed with) \u2014 booted whole on lp-emu:esp32c6:t1, its loader direct-loaded over the flashed chip (tests/split_boot.rs holds that path to a ROM-up boot) and read from the allocator figures its own first heartbeat reports. `measured` is this tree, and is the ratchet; `silicon_reference` is a committed silicon capture and is NEVER gated \u2014 it is printed every run so the gap between the two cannot widen unseen. Regenerate `measured` with `just heap-budget-baseline-chips`; see docs/heap-budget-gate.md, \"The second source\".",
   "image": "esp32c6,server,radio (split)",
   "configuration": "lp-emu:esp32c6:t1",

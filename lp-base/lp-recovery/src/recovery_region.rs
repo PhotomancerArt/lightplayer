@@ -4,13 +4,15 @@ use crate::crash_record::CrashRecord;
 use crate::frame_path::MAX_FRAME_DEPTH;
 use crate::frame_record::FrameRecord;
 use crate::ledger::Ledger;
+use crate::load_intent::LoadIntent;
 use crate::reset_cause::ResetCause;
 
 /// "LPRC" — identifies an initialized region.
 pub const REGION_MAGIC: u32 = 0x4C50_5243;
 
 /// Bump on any layout change; old regions are discarded, never migrated.
-pub const REGION_VERSION: u16 = 1;
+/// 2: the project load in progress (`load_intent`).
+pub const REGION_VERSION: u16 = 2;
 
 /// Hard budget: the region must stay within 1 KB of RTC fast RAM.
 pub const REGION_MAX_SIZE: usize = 1024;
@@ -51,6 +53,8 @@ pub struct RecoveryRegion {
     crash: CrashRecord,
     // --- blame ledger (crash-time updates; torn-tolerant, no CRC) ---
     ledger: Ledger,
+    // --- the project load in progress (torn-write discipline, no CRC) ---
+    load: LoadIntent,
 }
 
 impl RecoveryRegion {
@@ -69,6 +73,7 @@ impl RecoveryRegion {
         frames: [FrameRecord::EMPTY; MAX_FRAME_DEPTH],
         crash: CrashRecord::EMPTY,
         ledger: Ledger::EMPTY,
+        load: LoadIntent::EMPTY,
     };
 
     /// Whether the region carries valid state from a previous run.
@@ -149,6 +154,14 @@ impl RecoveryRegion {
         &mut self.ledger
     }
 
+    pub(crate) fn load(&self) -> &LoadIntent {
+        &self.load
+    }
+
+    pub(crate) fn load_mut(&mut self) -> &mut LoadIntent {
+        &mut self.load
+    }
+
     /// Size of the region in bytes (for harness-side raw access).
     pub const SIZE: usize = core::mem::size_of::<Self>();
 
@@ -193,7 +206,7 @@ impl RecoveryRegion {
     /// memory). The reset cause is not stored in the region, so it reads
     /// as `Unknown` here.
     pub fn inspect(&self) -> crate::snapshot::RecoverySnapshot {
-        crate::snapshot::RecoverySnapshot::capture(self, ResetCause::Unknown)
+        crate::snapshot::RecoverySnapshot::capture(self, ResetCause::Unknown, None)
     }
 
     fn update_crcs(&mut self) {

@@ -316,7 +316,15 @@ fn log_heartbeat_stack_lines() {
 }
 
 /// This chip's ProjectRead memory gate (`lpa_server::ReadGate`): refuse a
-/// read when under 40 KiB is free in total or no 16 KiB block is left.
+/// read when under 40 KiB is free in total or no 8 KiB block is left.
+///
+/// Since 2026-10-07 a read on a fragmented heap goes out in smaller frames
+/// (`lpa_server::read_frame_budget`: half the largest block, at most the
+/// link's 16 KiB), so the block floor only has to hold a read's largest
+/// single ask, the 8 KB mapping slot JSON below, not twice it. A Wi-Fi-joined
+/// C6 with a LAN link open sat at a 16,164-16,172 B block after a switch, and
+/// the old 16 KiB floor refused every read there (emulated; the defect is
+/// `docs/defects/2026-10-06-a-wifi-joined-c6-refuses-every-project-switch.md`).
 ///
 /// Measured on the emulated C6 with Bluetooth on (`lp-emu:esp32c6:t1@4caa5b658`,
 /// plan `lp2025/2026-09-27-1218-fragmentation-tolerant-reads`, REPORT.md):
@@ -326,7 +334,7 @@ fn log_heartbeat_stack_lines() {
 ///   0–176 B; 40 KiB is that plus room for the link and radio tasks;
 /// - the largest single ask any read makes is 8 KB (a mapping file's slot
 ///   JSON, once `lpc-wire` sizes it exactly), 2.5 KB for the editor's reads;
-///   16 KiB is twice it.
+///   8 KiB holds it, now that a frame is cut to half the block.
 ///
 /// The old single floor (a 32 KiB block) refused 52 of 96 editor reads after
 /// ten shader edits, because Bluetooth holds this chip's second heap region
@@ -340,13 +348,15 @@ fn log_heartbeat_stack_lines() {
 #[cfg(not(fw_harness))]
 const READ_GATE: lpa_server::ReadGate = lpa_server::ReadGate {
     min_free_bytes: 40 * 1024,
-    min_largest_block_bytes: 16 * 1024,
+    min_largest_block_bytes: 8 * 1024,
 };
 
 #[cfg(not(fw_harness))]
 fn read_headroom_probe() -> Option<u32> {
+    // At once when no project is loaded (the load gate's probe, after a
+    // stop), else every few seconds.
     #[cfg(feature = "heap_map_diag")]
-    heap_map::log_periodic("probe");
+    heap_map::log_if_stopped_or_periodic("probe", 140_000);
     Some(recovery::panic_path::largest_free_block().min(u32::MAX as usize) as u32)
 }
 
@@ -1021,6 +1031,25 @@ fn lp_engine_entry(core: CoreBoot) {
     )));
     esp_println::println!("[INIT] LpServer created");
 
+    // USB plus the radio links. The advertised-name hook only when BLE runs.
+    // Built BEFORE the boot project loads: its per-link lists hold memory
+    // for the board's whole life, and allocated after the project they sat
+    // above it and split the space it frees (first fit; silicon N7,
+    // 2026-10-06).
+    #[cfg(feature = "ble")]
+    let transport = {
+        let mux = fw_esp32_common::radio_link::LinkMuxTransport::new(
+            transport,
+            radio_port,
+            embassy_time::Delay,
+        );
+        if ble_started {
+            mux.with_upkeep_hook(ble::refresh_advertised_name)
+        } else {
+            mux
+        }
+    };
+
     // Auto-load project at boot (from config or lexical-first) — unless
     // something asks us not to. Two independent reasons can skip it, and the
     // log always says which one applied:
@@ -1073,21 +1102,6 @@ fn lp_engine_entry(core: CoreBoot) {
     // Boot frame ends here; the boot-complete milestone is marked by the
     // server loop after the first successful frame.
     drop(boot_guard);
-
-    // USB plus the radio links. The advertised-name hook only when BLE runs.
-    #[cfg(feature = "ble")]
-    let transport = {
-        let mux = fw_esp32_common::radio_link::LinkMuxTransport::new(
-            transport,
-            radio_port,
-            embassy_time::Delay,
-        );
-        if ble_started {
-            mux.with_upkeep_hook(ble::refresh_advertised_name)
-        } else {
-            mux
-        }
-    };
 
     let app = FirmwareApp {
         server,

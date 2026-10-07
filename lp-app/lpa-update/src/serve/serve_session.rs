@@ -38,8 +38,11 @@ pub struct ServeConfig {
 }
 
 impl ServeConfig {
-    /// USB: one chunk per request.
-    pub const USB: Self = Self { ahead: 1 };
+    /// USB: four in flight. On the bench C6 (2026-10-06) the next chunks
+    /// then arrive while the board decodes and writes this one: a whole
+    /// update 44.8 → 37.4 s against one per request, with the board erasing
+    /// blocks ahead. The backup pulls four ahead too (BLE already did).
+    pub const USB: Self = Self { ahead: 4 };
     /// BLE: four in flight (the spike's S5c measurement).
     pub const BLE: Self = Self { ahead: 4 };
 }

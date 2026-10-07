@@ -22,6 +22,8 @@
 use lp_bootctl::{BOOT_RECORD_SECTORS, Extent, PROGRESS_RECORD_SECTOR, REGION_START};
 
 pub const SECTOR: u32 = 4096;
+/// The part's block erase (`0xD8`, the ROM's `esp_rom_spiflash_erase_block`).
+pub const BLOCK: u32 = 64 * 1024;
 
 /// The bytes the ROM moves per call: a word-aligned local buffer, small
 /// enough for the stack and never across a 256-byte program page.
@@ -85,6 +87,18 @@ impl SplitFlash {
         }
         // SAFETY: one sector the fence allows.
         self.unlock() && unsafe { esp_storage::ll::spiflash_erase_sector(at / SECTOR) }.is_ok()
+    }
+
+    /// Erase the 64 KiB block at `at` (block-aligned), if the fence allows
+    /// all of it. One erase in place of sixteen sector erases, and on the
+    /// XIAO C6's part a fraction of their time.
+    pub fn erase_block(&mut self, at: u32) -> bool {
+        if at % BLOCK != 0 || !self.allowed(at, BLOCK) {
+            log::error!("[OTA] refused: erase block {at:#x}");
+            return false;
+        }
+        // SAFETY: one block the fence allows.
+        self.unlock() && unsafe { esp_storage::ll::spiflash_erase_block(at / BLOCK) }.is_ok()
     }
 
     /// Program `bytes` at `at`, any alignment: NOR only clears bits, so the

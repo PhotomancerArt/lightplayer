@@ -45,6 +45,9 @@ pub const MODEL_RECORDS: [u32; 2] = [0x6000, 0x7000];
 pub const MODEL_REGION_START: u32 = 0x8000;
 /// The model's page.
 pub const MODEL_PAGE: u32 = CHUNK;
+/// The model's block erase: four sectors, so a model piece of a few chunks
+/// crosses whole blocks (the C6's part erases 64 KiB).
+pub const MODEL_BLOCK: u32 = 4 * CHUNK;
 
 const RECORD_MAGIC: [u8; 4] = *b"FBR1";
 const RECORD_CRC_AT: usize = 24;
@@ -103,6 +106,9 @@ pub struct FakeBoard {
     pub running: Option<RunningCore>,
     /// `false` makes every boot report an untrusted boot state (`N`/`T`).
     pub trusted_boot: bool,
+    /// The block erase the board offers ([`MODEL_BLOCK`] by default);
+    /// `None` erases sector by sector.
+    pub block: Option<u32>,
 }
 
 impl FakeBoard {
@@ -117,6 +123,7 @@ impl FakeBoard {
             catalog,
             running: None,
             trusted_boot: true,
+            block: Some(MODEL_BLOCK),
         };
         let b = board.catalog[build].clone();
         let core_off = MODEL_REGION_START;
@@ -369,6 +376,19 @@ impl UpdateTarget for FakeBoard {
     fn erase_sector(&mut self, addr: u32) -> Result<(), FlashFault> {
         self.fenced(addr / CHUNK * CHUNK, CHUNK)?;
         self.flash.erase(addr)
+    }
+
+    fn block_size(&self) -> Option<u32> {
+        self.block
+    }
+
+    fn erase_block(&mut self, addr: u32) -> Result<(), FlashFault> {
+        let block = self.block.ok_or(FlashFault)?;
+        if addr % block != 0 {
+            return Err(FlashFault);
+        }
+        self.fenced(addr, block)?;
+        self.flash.erase_block(addr, block)
     }
 
     fn program(&mut self, addr: u32, bytes: &[u8]) -> Result<(), FlashFault> {

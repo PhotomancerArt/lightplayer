@@ -625,6 +625,14 @@ fn fault_line(fault: &ProjectFaultFacts) -> Option<String> {
 
 /// The device-wide recovery state in one sentence.
 fn recovery_line(recovery: &RecoveryFacts) -> String {
+    // A load that did not finish is the whole story when the board is
+    // otherwise fine: what it runs, and why.
+    if let Some(notice) = &recovery.load_notice
+        && recovery.level == RecoveryLevelFacts::Green
+        && !recovery.safe_mode
+    {
+        return notice.clone();
+    }
     let gated: Vec<&RecoveryPathFacts> = recovery.gated().collect();
     let mut line = match recovery.level {
         RecoveryLevelFacts::Red => match gated.as_slice() {

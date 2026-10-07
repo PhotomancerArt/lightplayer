@@ -3199,7 +3199,7 @@ test-glsl-filetests:
 # Warm ~1s, cold ~47s locally; it runs beside clippy, the Lint job's long
 # pole. See docs/debt/wasm-cloud-check-not-in-just-check.md.
 [parallel]
-check-lint: fmt-check clippy check-wasm-cloud check-lp-link-targets check-lpc-engine-gates check-studio-core-minimal lint-serde-content lint-browser-test-harness lint-classic-capture lint-pcb-export lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-nested-patches lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities lint-red-main-needs lint-tag-next-version lint-release-version-cmp lint-web-actions lint-core-action-fields lint-core-test-ops
+check-lint: fmt-check clippy check-wasm-cloud check-lp-link-targets check-lpc-engine-gates check-studio-core-minimal lint-serde-content lint-browser-test-harness lint-classic-capture lint-pcb-export lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-nested-patches lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities lint-red-main-needs lint-ci-durations lint-tag-next-version lint-release-version-cmp lint-web-actions lint-core-action-fields lint-core-test-ops
 
 [parallel]
 check: check-lint schema-check fw-manifest-check-emu
@@ -3310,6 +3310,13 @@ lint-nested-patches:
 # stdlib python, ~0.1 s.
 lint-red-main-needs:
     python3 scripts/ci/check-red-main-needs.py
+
+# job-durations.py's own fixture-based self-test: percentiles, the
+# timeout-minutes parse and the verdicts, no network. Offline, stdlib
+# python, ~0.1 s — keeps the parser honest when pre-merge.yml's layout
+# changes. docs/debt/ci-runner-time-over-the-concurrency-cap.md.
+lint-ci-durations:
+    python3 scripts/ci/job-durations.py --self-test
 
 # Main push's version tagger, against throwaway git repos: each run tags its
 # own commit, a tagged commit is a no-op, and a lost tag race retries.
@@ -4541,6 +4548,14 @@ merge: check
 # Run it as a background task, not a foreground sleep loop.
 watch-pr *args:
     scripts/watch-pr.sh {{ args }}
+
+# Measure pre-merge.yml's job durations against their timeout-minutes
+# budgets (docs/debt/ci-runner-time-over-the-concurrency-cap.md). Default
+# window is the last 200 runs; pass `--since <ISO date>` for a wider one.
+# Exits 2 when a job is over or tight on its budget, so the weekly
+# scheduled run (.github/workflows/ci-durations.yml) goes red on its own.
+ci-durations *args:
+    scripts/ci/job-durations.py {{ args }}
 
 # ============================================================================
 # Hardware discovery
