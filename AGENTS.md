@@ -290,7 +290,9 @@ the app through the same view model and presses the same actions. See
   saved network joins it by itself and serves the link at
   `ws://<board>/link` (port 80), answering `lp-xxxx.local` and DNS-SD
   `_lightplayer._tcp`. Hosts reach it as `lan:<ip>` or `lan:lp-xxxx.local`
-  (`lp-cli`, and Studio behind `?lan=`). The link is `LinkConfig::ws()` (one
+  (`lp-cli`, whose `lan list` browses `_lightplayer._tcp`; and Studio, with
+  no flag: a board it has met is offered "Connect over Wi‑Fi" at the address
+  it last gave, and the add slot takes an address). The link is `LinkConfig::ws()` (one
   frame per WebSocket message) with the secure channel (NNpsk0 keyed by the
   access entries; the tier comes from the key, as on Bluetooth). Its replies
   are JSON, and the C6 has one LAN slot, so a second client is told to try
@@ -861,9 +863,15 @@ than `https://lightplayer.app` (a local `just cloud-serve`, say); it accepts
 loopback and private-LAN origins only, so a crafted link cannot aim Studio at
 someone else's `latest`.
 
-**`?lan=<host>`** adds a Wi-Fi board to the Devices page by its LAN address
-(`lp-xxxx.local` or an IP), over the secure `ws()` link
-(`docs/adr/2026-10-07-c6-wifi-link.md`).
+**Wi‑Fi boards need no flag.** Studio installs its LAN link in every
+browser with a WebSocket: a board it has met over any link remembers its
+Wi‑Fi address in this browser (`lp.devices.wifi-addresses.v1`, never the
+registry), and its remembered tile offers "Connect over Wi‑Fi"
+(`devices/<board>/connect-wifi`); "Connect a board on Wi‑Fi" in the add slot
+takes an address (`devices/connect-wifi-address`). **`?lan=<host>`** stays as
+a dev shortcut that dials a board at page load by its LAN address
+(`lp-xxxx.local`, an IP, or an emulator's `127.0.0.1:<forward>`), over the
+secure `ws()` link (`docs/adr/2026-10-07-c6-wifi-link.md`).
 
 Two more dev-only flags tune the device wire for a measurement (read once at
 page load by `lpa-studio-web/src/dev_url_flags.rs`; no UI, no persistence):

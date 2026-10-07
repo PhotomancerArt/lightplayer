@@ -27,6 +27,7 @@
 //! | a wrong key is reported back and never presented there again | [`a_wrong_key_is_reported_and_the_walk_moves_on`] |
 //! | a plain-link board is named, never downgraded to | [`a_board_that_runs_a_plain_link_is_named`] |
 //! | a drop is a departure, then a reconnect with no gesture | [`a_drop_is_a_departure_and_the_session_reconnects_by_itself`] |
+//! | a connect someone asked for waits for the board's answer (a frame, a busy 1013, a socket that never opens) | [`a_connect_someone_asked_for_settles_on_the_boards_answer`] |
 //! | no reset over Wi-Fi | [`a_reset_over_wifi_fails_by_name`] |
 //!
 //! Each test uses its own URL: the provider's sessions are page-wide, one per
@@ -350,6 +351,61 @@ async fn a_drop_is_a_departure_and_the_session_reconnects_by_itself() {
             .any(|present| present.url == url)
     );
     assert_eq!(js_sockets_opened(url), 2);
+}
+
+/// A connect a person asked for ("Connect over Wi‑Fi", an address typed into
+/// the add slot) waits for the board's answer, not just the upgrade: a busy
+/// board takes the upgrade and closes with 1013 at once, and that is the
+/// answer the caller hears, in the socket's words; a board that sends its
+/// first frame has answered; a socket that never opens says so.
+#[wasm_bindgen_test]
+async fn a_connect_someone_asked_for_settles_on_the_boards_answer() {
+    let url = "ws://10.0.0.9/link";
+    TestKeys::install(Vec::new());
+    let _bench = Bench::new(url, BoardDouble::secure(Opens::Edit, Vec::new()));
+
+    // Busy: the board takes the upgrade, then turns the connection away.
+    let session = lan::open_session(url).expect("a session");
+    let busy = spawn_settle(session.session);
+    for _ in 0..200 {
+        if js_sockets_opened(url) >= 1 {
+            break;
+        }
+        tick(5).await;
+    }
+    assert!(js_drop_socket(url, 1013, "try again later"));
+    let refused = settled(&busy)
+        .await
+        .expect_err("a busy board turned it away");
+    assert!(refused.contains("code 1013"), "{refused}");
+
+    // Free again: the board answers with a frame, and the connect is done.
+    let answered = spawn_settle(session.session);
+    let opened = js_sockets_opened(url);
+    for _ in 0..400 {
+        if js_sockets_opened(url) > opened || lan::present_sessions().iter().any(|s| s.url == url) {
+            break;
+        }
+        tick(5).await;
+    }
+    for _ in 0..400 {
+        if js_deliver(url, &[0x5a; 12]) {
+            break;
+        }
+        tick(5).await;
+    }
+    settled(&answered).await.expect("the board answered");
+    assert!(lan::forget(session.session).await);
+
+    // Nothing there: the socket never opens, in the connect's own words.
+    let nowhere = "ws://10.0.0.10/link";
+    js_accept_connects(nowhere, false);
+    let session = lan::open_session(nowhere).expect("a session");
+    let failed = settled(&spawn_settle(session.session))
+        .await
+        .expect_err("nothing answered");
+    assert!(failed.starts_with("wi-fi connect to"), "{failed}");
+    assert!(lan::forget(session.session).await);
 }
 
 #[wasm_bindgen_test]
@@ -782,4 +838,27 @@ fn edges() -> (Rc<Cell<u32>>, Rc<Cell<u32>>) {
 
 async fn tick(ms: u32) {
     let _ = JsFuture::from(js_tick(ms)).await;
+}
+
+/// Start `connect_and_settle` on `session` (a generous settle window: the
+/// tests end it with the board's own answer, never by waiting it out).
+fn spawn_settle(session: u32) -> Rc<RefCell<Option<Result<(), String>>>> {
+    let out = Rc::new(RefCell::new(None));
+    let slot = Rc::clone(&out);
+    wasm_bindgen_futures::spawn_local(async move {
+        let result = lan::connect_and_settle(session, 30_000).await;
+        *slot.borrow_mut() = Some(result);
+    });
+    out
+}
+
+/// What a spawned connect came to (bounded by rounds, never by a clock).
+async fn settled(out: &Rc<RefCell<Option<Result<(), String>>>>) -> Result<(), String> {
+    for _ in 0..1_000 {
+        if let Some(result) = out.borrow_mut().take() {
+            return result;
+        }
+        tick(10).await;
+    }
+    panic!("the connect never settled");
 }

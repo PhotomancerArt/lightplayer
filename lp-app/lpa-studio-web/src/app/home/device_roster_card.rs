@@ -193,7 +193,7 @@ pub(crate) fn DeviceRosterCard(
     /// at the app view; `None` for a board the link shows no row for.
     #[props(default)]
     wifi: Option<lpa_studio_core::UiDeviceWifi>,
-    /// The board is reached on the LAN (`?lan=`, Wi-Fi M6 P07): the info
+    /// The board is reached on the LAN (Wi-Fi M6 P07): the info
     /// line leads with "Wi-Fi · <address>". Functional, not designed (M8).
     /// `None` for every other link.
     #[props(default)]
@@ -2494,9 +2494,9 @@ mod tests {
         let lan = lpa_studio_core::lan_link_for_endpoint("lan:ws://10.0.0.5/link");
         assert_eq!(
             info_line(lan.as_ref(), Some("Unlocked by Yona's MacBook"), "ready"),
-            "Wi-Fi · 10.0.0.5 · Unlocked by Yona's MacBook · ready"
+            "Wi\u{2011}Fi · 10.0.0.5 · Unlocked by Yona's MacBook · ready"
         );
-        assert_eq!(info_line(lan.as_ref(), None, ""), "Wi-Fi · 10.0.0.5");
+        assert_eq!(info_line(lan.as_ref(), None, ""), "Wi\u{2011}Fi · 10.0.0.5");
         assert_eq!(info_line(None, Some("Locked"), "ready"), "Locked · ready");
         assert_eq!(info_line(None, None, "ready"), "ready");
     }

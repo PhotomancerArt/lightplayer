@@ -208,6 +208,8 @@ jobs:
         uses: cargo-bins/cargo-binstall@v1.21.1
 
       - name: Install web build tools (prebuilt)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: cargo binstall --no-confirm --locked wasm-bindgen-cli@0.2.114 dioxus-cli@0.7.9
 
       # `production` + the domain are what put the canonical origin into the
