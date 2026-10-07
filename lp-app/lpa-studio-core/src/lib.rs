@@ -104,6 +104,7 @@ pub use app::devices::{
     UiWifiConnect, WIFI_ADDRESS_PARAM, WIFI_ADDRESSES_STORAGE_KEY, WIFI_BLOCKED_WORDS,
     WIFI_BUSY_WORDS, WIFI_CONNECTING, WIFI_NEEDS_WEBSOCKET, WifiAddress, WifiAddressBook,
     WifiAddressReach, WifiConnectFailure, WifiConnectOp, WifiConnectTarget, WifiConnects,
+    connect_wifi_offer,
 };
 pub use app::docs_host::DocsSimHost;
 pub use app::studio::PlayViewOp;

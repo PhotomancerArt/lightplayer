@@ -33,7 +33,7 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{
     DeviceEscape, DeviceRosterView, OfferPath, RememberedView, UiAction, UiHomeView, UiOffer,
-    escape_verb, split_roster,
+    UiWifiConnect, escape_verb, split_roster,
 };
 
 use crate::app::home::ble_reach::{BluetoothReach, ble_reach_note, use_ble_reach};
@@ -41,6 +41,9 @@ use crate::app::home::device_roster_card::{DeviceRosterCard, PendingLinkCard};
 use crate::app::home::play_feed_text::frame_age_label;
 use crate::app::home::reach_note::{ReachCopy, ReachNote, USB_UNAVAILABLE, this_page_url};
 use crate::app::home::target_pick_popover::TargetPickPopover;
+use crate::app::home::wifi_address_entry::{
+    CONNECTING_LINE_CLASS, FAILED_LINE_CLASS, WifiAddressEntry, connect_line,
+};
 use crate::app::home::{device_grid_class, section_title_class};
 use crate::app::node::lamp_view::LampView;
 use crate::core::{ActionButton, ActionButtonVariant, use_device_verbs, use_offer_at, verb_named};
@@ -156,6 +159,7 @@ pub fn DevicesPage(
                         AddDeviceCard {
                             pick_open: target_pick_open,
                             usb_available: devices.usb_available,
+                            wifi_connect: devices.wifi_address_connect.clone(),
                             on_action,
                         }
                     }
@@ -240,6 +244,12 @@ pub(crate) fn AddDeviceCard(
     /// page's.
     #[props(default = None)]
     page_url: Option<String>,
+    /// The Wi‑Fi entry's connect under way, or why it failed (core's).
+    #[props(default)]
+    wifi_connect: Option<UiWifiConnect>,
+    /// Stories only: the Wi‑Fi field as typed.
+    #[props(default)]
+    wifi_typed: Option<String>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let asked = use_ble_reach();
@@ -248,6 +258,7 @@ pub(crate) fn AddDeviceCard(
     let page_url = page_url.unwrap_or_else(this_page_url);
     let usb = use_offer_at(OfferPath::devices().child("connect-usb"))();
     let ble_offer = use_offer_at(OfferPath::devices().child("connect-ble"))();
+    let wifi_offer = use_offer_at(OfferPath::devices().child("connect-wifi-address"))();
     rsx! {
         div { class: "tw:flex tw:min-h-40 tw:flex-col tw:items-center tw:justify-center tw:gap-3 tw:rounded-md tw:border tw:border-dashed tw:border-border-strong tw:bg-transparent tw:px-5 tw:py-6",
             // The invitation is transport-OPEN: connecting is the goal, and
@@ -274,6 +285,15 @@ pub(crate) fn AddDeviceCard(
                         path_word: "via Bluetooth",
                         note: notes.ble,
                         page_url,
+                        on_action,
+                    }
+                }
+                // A board on your network: no chooser, so its address.
+                if let Some(wifi) = wifi_offer {
+                    WifiAddressEntry {
+                        offer: wifi,
+                        connect: wifi_connect,
+                        typed: wifi_typed,
                         on_action,
                     }
                 }
@@ -468,6 +488,14 @@ fn RememberedTile(entry: RememberedView, on_action: EventHandler<UiAction>) -> E
         .iter()
         .filter_map(|escape| verb_named(&verbs, escape_verb(*escape)).map(|offer| (*escape, offer)))
         .collect();
+    // "Connect over Wi‑Fi": a board this browser remembers an address for
+    // (core offers it only then), reached with no cable.
+    let wifi = verb_named(&verbs, "connect-wifi");
+    let wifi_line = entry.wifi_connect.as_ref().map(connect_line);
+    let wifi_failed = entry
+        .wifi_connect
+        .as_ref()
+        .is_some_and(|connect| connect.error.is_some());
     let meta = remembered_meta_text(&entry);
     let slot = remembered_slot(&entry);
 
@@ -502,12 +530,28 @@ fn RememberedTile(entry: RememberedView, on_action: EventHandler<UiAction>) -> E
                     title: "{meta}",
                     "{meta}"
                 }
+                if let Some(line) = wifi_line {
+                    p {
+                        class: if wifi_failed { FAILED_LINE_CLASS } else { CONNECTING_LINE_CLASS },
+                        role: "status",
+                        "{line}"
+                    }
+                }
             }
             // Every escape the projection granted, rendered — the renderer
             // half of invariant I3, exactly as on a card. Reconnect is the
             // tile's one call to action (a grant can die on a replug), so
             // it wears the Outline voice; Forget keeps its inline confirm.
             div { class: "tw:mt-auto tw:flex tw:flex-wrap tw:items-center tw:gap-2 tw:whitespace-nowrap",
+                if let Some(wifi) = wifi {
+                    ActionButton {
+                        key: "{\"connect-wifi\"}",
+                        action: wifi.action,
+                        running: false,
+                        variant: ActionButtonVariant::Outline,
+                        on_action,
+                    }
+                }
                 for (escape , offer) in escapes {
                     ActionButton {
                         key: "{escape:?}",

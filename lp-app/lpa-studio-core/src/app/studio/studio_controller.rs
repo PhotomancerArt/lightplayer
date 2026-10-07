@@ -3224,23 +3224,12 @@ impl StudioController {
         }
         let key = self.board_key(view.id)?;
         let address = self.wifi_addresses.get(&key)?;
-        let action =
-            crate::WifiConnectOp::action_for(crate::WifiConnectOp::Board { device: view.id })
-                .with_summary(format!(
-                    "Reach this board on your network, at {} (the address it last gave).",
-                    address.ip
-                ));
-        let action = match self
-            .wifi_connects
-            .connecting(crate::WifiConnectTarget::Board(key))
-        {
-            true => action.disabled(crate::WIFI_CONNECTING),
-            false => action,
-        };
-        Some(crate::UiOffer::new(
-            facts.prefix.clone().child("connect-wifi"),
-            "wifi",
-            action,
+        Some(crate::connect_wifi_offer(
+            &facts.prefix,
+            view.id,
+            &address.ip,
+            self.wifi_connects
+                .connecting(crate::WifiConnectTarget::Board(key)),
         ))
     }
 

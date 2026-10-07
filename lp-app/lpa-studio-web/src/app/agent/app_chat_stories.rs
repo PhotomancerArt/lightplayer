@@ -542,7 +542,11 @@ fn placed_act_row(id: &str, path: OfferPath, place: UiAgentPlace) -> UiAgentTurn
 /// with Web Serial.
 fn connect_offers() -> UiOfferTree {
     let mut offers = UiOfferTree::new();
-    for offer in add_device_offers(true, BluetoothReach::Ready) {
+    let wifi = lpa_studio_core::WifiAddressReach {
+        available: true,
+        connecting: false,
+    };
+    for offer in add_device_offers(true, BluetoothReach::Ready, wifi) {
         offers.publish(offer);
     }
     offers
