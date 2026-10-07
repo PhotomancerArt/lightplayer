@@ -218,19 +218,25 @@ pub fn status_lines(status: &NetworkStatus) -> Vec<String> {
     }
     lines.extend(status.networks.iter().map(network_line));
     lines.push(format!("station: {}", station_words(&status.station)));
-    lines.push(format!("relay: {}", relay_words(status.relay)));
+    let joined = matches!(status.station, StationState::Connected { .. });
+    lines.push(format!("relay: {}", relay_words(status.relay, joined)));
     lines
 }
 
 /// The cloud relay's state in the words Studio's Wi-Fi popover uses
-/// (`lpa-studio-core`'s `wifi_words::relay`), lower-cased for a line.
-fn relay_words(relay: RelayState) -> &'static str {
+/// (`lpa-studio-core`'s `wifi_words::relay`), lower-cased for a line. Not
+/// reaching lightplayer.app is "no internet" only once the station is
+/// `joined`; before that the board is waiting for its network.
+fn relay_words(relay: RelayState, joined: bool) -> &'static str {
     match relay {
         RelayState::Off => "off",
         RelayState::NoAccount => {
             "no account key — sign in to Studio and plug this board in once to use lightplayer.app"
         }
-        RelayState::WaitingForInternet => "connected, no internet — lightplayer.app didn't answer",
+        RelayState::WaitingForInternet if joined => {
+            "connected, no internet — lightplayer.app didn't answer"
+        }
+        RelayState::WaitingForInternet => "waiting for a network",
         RelayState::Connecting => "reaching lightplayer.app…",
         RelayState::Connected => "connected to lightplayer.app",
         RelayState::Refused {
@@ -379,7 +385,18 @@ mod tests {
             cloud_relay: true,
             networks: Vec::new(),
             station: StationState::NotConnected,
-            relay: RelayState::Off,
+            relay: RelayState::WaitingForInternet,
+        };
+        assert_eq!(
+            status_lines(&status).last().map(String::as_str),
+            Some("relay: waiting for a network"),
+            "not reaching lightplayer.app is no internet only once joined"
+        );
+        status.station = StationState::Connected {
+            ssid: String::from("lp-walk-net"),
+            ip: String::from("10.0.0.7"),
+            rssi: -48,
+            host: String::from("lp-8e30.local"),
         };
         let cases = [
             (RelayState::Connecting, "relay: reaching lightplayer.app…"),
