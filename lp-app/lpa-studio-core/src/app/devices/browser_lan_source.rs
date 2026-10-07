@@ -84,8 +84,11 @@ impl BrowserLanSource {
 
 impl LanLinkSource for BrowserLanSource {
     fn present(&self) -> Vec<GrantedLink> {
+        // The provider holds relay sessions too (`browser_relay_source.rs`);
+        // those are the relay half's.
         lan::present_sessions()
             .iter()
+            .filter(|session| !session.is_relay())
             .map(|session| Self::granted(&self.wires, session))
             .collect()
     }

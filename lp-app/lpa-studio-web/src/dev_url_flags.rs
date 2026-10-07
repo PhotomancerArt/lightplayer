@@ -9,6 +9,7 @@
 //! | `?wire-capture=1` | tee every raw byte the Web Serial read pump hands to Rust into a 16 MiB in-memory buffer; `lpWireCapture()` in the console downloads it as `wire-capture-<unix-ms>.bin` (`lpa_link::device_link::wire_capture`) |
 //! | `?device-log=<level>` | once per link, after the board's hello and the packed-reply opt-in, ask it for `trace`/`debug`/`info`/`warn`/`error` logging (`SetLogLevel`) |
 //! | `?lan=<url>[,<url>…]` | a dev shortcut: dial each named board on the LAN (`ws://<board>/link`, or just its host) at page load, over a secure lp-link, as a Wi-Fi device on the Devices page. Wi-Fi boards need no flag — a board Studio has met is offered "Connect over Wi‑Fi", and the add slot takes an address — this only saves the typing (Wi-Fi M6 P07, network transport P01; parsed by `lpa_studio_core::parse_lan_flag`) |
+//! | `?relay=1` / `?relay=<mac>[,<mac>…]` | Studio reaches boards through lightplayer.app's relay (network transport P05; on for everyone after its walk): the relay half is installed — without the flag nothing of it exists. With board ids (a board's MAC, any spelling), each is also dialled at page load through the relay on this page's own origin (`/relay/board/<mac>`; in dev, `Dioxus.toml` forwards `/relay` to a local `lp-cloud-server`), a dev shortcut like `?lan=` until the board list arrives. `?relay=0` is off |
 //! | `?firmware-store=<origin>` | the firmware store Studio fetches engines from, instead of `https://lightplayer.app` — **loopback and private-LAN origins only** (the `?record=` sink rule, `record_sink::check_sink`), so a link someone else wrote cannot point Studio at another store's "latest"; a refused origin keeps the default and says so once in the console |
 //! | `?seams=<atoms\|none>` | what a **Devices-page** emulated board asks the emulator for, instead of the end-user default `led=fast` (`lpa_link::providers::emulator_tab_seams`); `none` is today's seam-free machine, for an A/B on one build. Never reaches `?emu=tab` / `?emu=ws://…` boards, which ask for nothing |
 //!
@@ -41,6 +42,11 @@ pub struct DevUrlFlags {
     pub firmware_store: Option<FirmwareStoreFlag>,
     /// `?lan=<url>[,<url>…]`: the boards' sockets, normalised.
     pub lan: Vec<String>,
+    /// `?relay=1` (or board ids): reach boards through lightplayer.app.
+    pub relay: bool,
+    /// `?relay=<mac>[,<mac>…]`: boards to dial through the relay at load,
+    /// as twelve lowercase hex digits.
+    pub relay_boards: Vec<String>,
     /// `?seams=<atoms|none>`, normalized (`led=fast`, `led=fast+x=y`,
     /// `none`).
     pub seams: Option<String>,
@@ -88,6 +94,20 @@ impl DevUrlFlags {
                 "firmware-store" if !value.trim().is_empty() => {
                     flags.firmware_store = Some(judge_firmware_store(value.trim()));
                 }
+                "relay" => match parse_relay_flag(value) {
+                    Some((on, boards, refused)) => {
+                        flags.relay = on;
+                        for board in boards {
+                            if !flags.relay_boards.contains(&board) {
+                                flags.relay_boards.push(board);
+                            }
+                        }
+                        for bad in refused {
+                            flags.ignored.push(format!("relay={bad} (not a board id)"));
+                        }
+                    }
+                    None => flags.ignored.push(pair.to_string()),
+                },
                 "lan" => {
                     let lan = lpa_studio_core::parse_lan_flag(value);
                     for (refused, why) in lan.refused {
@@ -104,6 +124,32 @@ impl DevUrlFlags {
         }
         flags
     }
+}
+
+/// Read a (still percent-encoded) `?relay=` value: `1`/`true`/empty is on,
+/// `0`/`false` off, and a list of board ids (a MAC in any spelling,
+/// comma-separated) on with those boards. `None` when nothing in it reads;
+/// otherwise `(on, boards, refused parts)`.
+fn parse_relay_flag(raw: &str) -> Option<(bool, Vec<String>, Vec<String>)> {
+    let value = percent_decode(raw);
+    match value.trim() {
+        "" | "1" | "true" => return Some((true, Vec::new(), Vec::new())),
+        "0" | "false" => return Some((false, Vec::new(), Vec::new())),
+        _ => {}
+    }
+    let mut boards = Vec::new();
+    let mut refused = Vec::new();
+    for part in value
+        .split(',')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+    {
+        match lpa_studio_core::BoardKey::parse(part) {
+            Ok(board) => boards.push(board.to_string()),
+            Err(_) => refused.push(part.to_string()),
+        }
+    }
+    (!boards.is_empty()).then_some((true, boards, refused))
 }
 
 /// A `?wire=` value: the reply encoding the page asks boards for.
@@ -224,6 +270,22 @@ thread_local! {
         const { std::cell::RefCell::new(None) };
     static LAN_ADDRESSES: std::cell::RefCell<Vec<String>> =
         const { std::cell::RefCell::new(Vec::new()) };
+    static RELAY_BOARDS: std::cell::RefCell<Option<Vec<String>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// What `?relay=` asked for: `None` without it (the relay half is not
+/// installed); otherwise the boards to dial at load (often none). Read once
+/// by [`install`].
+#[cfg_attr(
+    not(target_arch = "wasm32"),
+    allow(
+        dead_code,
+        reason = "read by the wasm install; host builds only run the unit tests"
+    )
+)]
+pub fn relay_boards() -> Option<Vec<String>> {
+    RELAY_BOARDS.with(|boards| boards.borrow().clone())
 }
 
 /// The boards `?lan=` named, as the sockets Studio dials at page load. Read
@@ -294,6 +356,17 @@ pub fn install() {
             flags.lan.join(", ")
         );
         LAN_ADDRESSES.with(|slot| *slot.borrow_mut() = flags.lan.clone());
+    }
+    if flags.relay {
+        if flags.relay_boards.is_empty() {
+            log::info!("dev flag: Studio reaches boards through lightplayer.app (?relay=1)");
+        } else {
+            log::info!(
+                "dev flag: reaching {} through lightplayer.app (?relay=)",
+                flags.relay_boards.join(", ")
+            );
+        }
+        RELAY_BOARDS.with(|slot| *slot.borrow_mut() = Some(flags.relay_boards.clone()));
     }
     if let Some(seams) = flags.seams {
         log::info!("dev flag: Devices-page emulated boards ask for seams `{seams}` (?seams=)");
@@ -427,6 +500,26 @@ mod tests {
             "{:?}",
             flags.ignored
         );
+    }
+
+    #[test]
+    fn the_relay_flag_turns_the_relay_half_on_and_may_name_boards() {
+        let on = DevUrlFlags::parse("?relay=1");
+        assert!(on.relay && on.relay_boards.is_empty() && on.ignored.is_empty());
+        assert!(DevUrlFlags::parse("relay").relay);
+        assert!(!DevUrlFlags::parse("relay=0").relay);
+
+        let boards =
+            DevUrlFlags::parse("?relay=A0:F2:62:87:B4:8C,a0f26287b48d,nope&relay=a0f26287b48c");
+        assert!(boards.relay);
+        assert_eq!(boards.relay_boards, ["a0f26287b48c", "a0f26287b48d"]);
+        assert_eq!(boards.ignored, ["relay=nope (not a board id)"]);
+
+        let unreadable = DevUrlFlags::parse("relay=maybe");
+        assert!(!unreadable.relay);
+        assert_eq!(unreadable.ignored, ["relay=maybe"]);
+        let encoded = DevUrlFlags::parse("relay=a0%3Af2%3A62%3A87%3Ab4%3A8c");
+        assert_eq!(encoded.relay_boards, ["a0f26287b48c"]);
     }
 
     #[test]

@@ -148,6 +148,9 @@ pub struct StudioController {
     /// The transport that reaches boards on the LAN, in every browser with
     /// a WebSocket (Wi-Fi M6 P07; no flag since M8).
     lan_transport: Option<Rc<crate::LanDeviceTransport>>,
+    /// The transport that reaches boards through lightplayer.app's relay
+    /// (the network transport's P05): installed behind `?relay=1` only.
+    relay_transport: Option<Rc<crate::RelayDeviceTransport>>,
     /// Where each board Studio has met is on Wi‑Fi, by MAC: learned from
     /// its status on any link, kept in this browser by the web edge
     /// ([`Self::set_on_wifi_addresses`]), never in the registry.
@@ -465,6 +468,7 @@ impl StudioController {
             emu_transport: None,
             ble_transport: None,
             lan_transport: None,
+            relay_transport: None,
             wifi_addresses: crate::WifiAddressBook::new(),
             on_wifi_addresses: None,
             wifi_connects: crate::WifiConnects::default(),
@@ -662,6 +666,21 @@ impl StudioController {
     pub fn set_lan_transport(&mut self, transport: Rc<crate::LanDeviceTransport>) {
         self.lan_transport = Some(transport);
         self.install_device_transport();
+    }
+
+    /// Install the transport that reaches boards through lightplayer.app's
+    /// relay (the network transport's P05), beside the others. The web edge
+    /// installs it behind `?relay=1` only, so a page without the flag holds
+    /// no relay half and a `relay:` endpoint is refused by name. Its links
+    /// present [`Self::network_link_keys`]: held keys only.
+    pub fn set_relay_transport(&mut self, transport: Rc<crate::RelayDeviceTransport>) {
+        self.relay_transport = Some(transport);
+        self.install_device_transport();
+    }
+
+    /// Whether this page reaches boards through lightplayer.app (`?relay=1`).
+    pub fn reaches_relay(&self) -> bool {
+        self.relay_transport.is_some()
     }
 
     /// The Wi‑Fi addresses this browser remembered for boards (the web
@@ -936,6 +955,12 @@ impl StudioController {
                 let composite = match &self.lan_transport {
                     Some(lan) => {
                         composite.with_lan(Rc::clone(lan) as Rc<dyn crate::DeviceTransport>)
+                    }
+                    None => composite,
+                };
+                let composite = match &self.relay_transport {
+                    Some(relay) => {
+                        composite.with_relay(Rc::clone(relay) as Rc<dyn crate::DeviceTransport>)
                     }
                     None => composite,
                 };

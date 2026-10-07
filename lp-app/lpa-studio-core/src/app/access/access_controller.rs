@@ -26,6 +26,11 @@
 //!   whose keys go to the link, which moves onto them (`keyed_login.rs`).
 //!   Everything below that says "Bluetooth" about a link that must be
 //!   unlocked holds for these too ([`is_untrusted`]).
+//! - **Through lightplayer.app's relay** (a keyed link like the LAN's, the
+//!   network transport's P05): the link presents the held keys only — no
+//!   anonymous key, no typed password (`network_link_keys.rs`) — so it is
+//!   either up on a tier one of them grants, or not up at all. Studio reads
+//!   the tier and the list, and never logs in over it.
 //! - **USB sync** (trusted link, once per connection): read the list, remove
 //!   retired account keys, add the held keys it is missing (dropping the
 //!   oldest other browser key when the device is full), and raise
@@ -279,7 +284,7 @@ impl AccessController {
         if roster
             .devices()
             .iter()
-            .any(|device| lan_address(device).is_some())
+            .any(|device| lan_address(device).is_some() || is_relayed(device))
         {
             self.refresh_network_keys(&held);
         }
@@ -293,7 +298,8 @@ impl AccessController {
             };
             if is_untrusted(device) {
                 let address = lan_address(device).map(str::to_string);
-                self.drive_unlock(device.id, window, &held, address, effects, now);
+                let held_only = is_relayed(device);
+                self.drive_unlock(device.id, window, &held, address, held_only, effects, now);
                 if self.granted_tier(device.id) == Some(Tier::Edit)
                     && self.synced.get(&device.id) != Some(&window)
                 {
@@ -319,12 +325,19 @@ impl AccessController {
 
     /// `address`: the board's socket URL when its link is a KEYED one (a
     /// board on the LAN), whose login ends in keys for the link.
+    /// `held_only`: a link through the relay, which holds what its held key
+    /// granted and is never logged in over — only its tier is read.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "one more fact about the link than the LAN needed; each is read once"
+    )]
     fn drive_unlock(
         &mut self,
         device: DeviceId,
         window: LoginWindow,
         held: &[HeldKey],
         address: Option<String>,
+        held_only: bool,
         effects: &DeviceEffects,
         now: Millis,
     ) {
@@ -335,6 +348,10 @@ impl AccessController {
         let Some(step) = session.next_step(now, held, &remembered) else {
             return;
         };
+        if held_only && !matches!(step, AccessStep::Check(_)) {
+            // No password, remembered or typed, goes through the relay (ND7).
+            return;
+        }
         let run = match (address, step.clone()) {
             (
                 Some(address),
@@ -381,7 +398,7 @@ impl AccessController {
                     .keys
                     .borrow_mut()
                     .key_for_material(&offer, &key.key.material);
-                link_key(key.key.salt, &k)
+                (key.holder, link_key(key.key.salt, &k))
             })
             .collect();
         self.network_keys.set_held(keys);
@@ -1120,11 +1137,20 @@ pub(crate) fn lan_address(device: &Device) -> Option<&str> {
     lpa_link::providers::network_link::url_from_lan_endpoint(&endpoint.0)
 }
 
-/// A link that must be unlocked before it may do anything: Bluetooth, and a
-/// board on the LAN (a keyed link). Physical connection is access; a radio
-/// is not.
+/// Whether `device` is reached through lightplayer.app's relay right now.
+pub(crate) fn is_relayed(device: &Device) -> bool {
+    device
+        .identity
+        .endpoint
+        .as_ref()
+        .is_some_and(|endpoint| endpoint.is_relay())
+}
+
+/// A link that must be unlocked before it may do anything: Bluetooth, a
+/// board on the LAN, and one through the relay (keyed links). Physical
+/// connection is access; a radio or the internet is not.
 pub(crate) fn is_untrusted(device: &Device) -> bool {
-    is_bluetooth(device) || lan_address(device).is_some()
+    is_bluetooth(device) || lan_address(device).is_some() || is_relayed(device)
 }
 
 /// A trusted link to a LightPlayer board that is not a browser sim: physical
@@ -1135,6 +1161,7 @@ fn syncs_over_usb(device: &Device) -> bool {
     };
     !endpoint.is_bluetooth()
         && lan_address(device).is_none()
+        && !endpoint.is_relay()
         && !endpoint
             .0
             .starts_with(crate::app::devices::sim_record::SIM_ENDPOINT_PREFIX)

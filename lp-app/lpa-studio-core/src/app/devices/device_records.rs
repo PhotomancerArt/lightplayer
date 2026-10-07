@@ -65,7 +65,11 @@ pub fn transport_label_for_endpoint(endpoint: &str) -> &'static str {
         LinkProviderKind::EmulatorTab
     } else if endpoint.starts_with(super::sim_record::BLE_ENDPOINT_PREFIX) {
         LinkProviderKind::BrowserBle
-    } else if endpoint.starts_with(lpa_link::providers::network_link::LAN_ENDPOINT_PREFIX) {
+    } else if endpoint.starts_with(lpa_link::providers::network_link::LAN_ENDPOINT_PREFIX)
+        || endpoint.starts_with(lpa_link::providers::network_link::RELAY_ENDPOINT_PREFIX)
+    {
+        // One provider, two endpoint kinds (the network transport's ND1):
+        // the registry column says "Wi-Fi" for both — no new stored value.
         LinkProviderKind::BrowserWebsocket
     } else {
         LinkProviderKind::BrowserSerialEsp32

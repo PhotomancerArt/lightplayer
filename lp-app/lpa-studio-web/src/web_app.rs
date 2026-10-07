@@ -484,10 +484,27 @@ pub fn App() -> Element {
                 controller.set_lan_transport(Rc::new(lpa_studio_core::LanDeviceTransport::new(
                     Rc::new(lpa_studio_core::BrowserLanSource::new(
                         &lan,
-                        keys,
+                        Rc::clone(&keys),
                         secure_page,
                     )),
                 )));
+                // Boards through lightplayer.app's relay (the network
+                // transport's P05), behind `?relay=1` until the walk on
+                // lightplayer.app: without the flag there is no relay half
+                // at all. The same provider and keys as the LAN; the relay
+                // is this page's own origin (in dev, `Dioxus.toml` forwards
+                // `/relay` to a local lp-cloud-server), so the signed-in
+                // session's cookie rides along.
+                if let Some(boards) = crate::dev_url_flags::relay_boards() {
+                    let origin = web_sys::window()
+                        .and_then(|window| window.location().origin().ok())
+                        .unwrap_or_default();
+                    controller.set_relay_transport(Rc::new(
+                        lpa_studio_core::RelayDeviceTransport::new(Rc::new(
+                            lpa_studio_core::BrowserRelaySource::new(&boards, &origin, keys),
+                        )),
+                    ));
+                }
             } else {
                 log::info!("this browser has no WebSocket; Wi\u{2011}Fi boards are not reachable");
             }
