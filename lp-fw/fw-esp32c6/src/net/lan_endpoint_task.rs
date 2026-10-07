@@ -149,9 +149,7 @@ pub async fn lan_link_task(
         };
         // The outgoing frame, for this connection only.
         let Some(mut frame_tx) = try_zeroed_bytes(LAN_MAX_FRAME) else {
-            log::warn!(
-                "[lan] no room for a link's {LAN_MAX_FRAME} B frame buffer: try again later"
-            );
+            log::warn!("[lan] no room for a link's frame buffer: try again later");
             ws.close(TRY_AGAIN_LATER).await;
             continue;
         };

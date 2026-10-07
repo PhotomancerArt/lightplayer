@@ -22,14 +22,15 @@
 //!    verdict on a challenge, an input, or a deadline. A close from the hub
 //!    with 1001 is "going away" (a deploy).
 //!
-//! The buffers are the caller's ([`RelayLegBuffers`]), but for the route's
-//! outgoing frame, which exists only while a route holds the network slot:
-//! while the LAN serves the one session it is not needed (Wi-Fi relay plan,
-//! round 2: the memory fix, (b)). The loop
-//! returns [`RelayLegExit::Idle`] once the board may no longer dial (Wi-Fi
-//! lost, Cloud relay off, no account entry: RD8) and no leg is open, so the
-//! caller can give the buffers back and wait in [`wait_until_may_dial`]
-//! holding none (Wi-Fi relay plan, round 2: the memory fix).
+//! **Memory** (Wi-Fi relay plan, round 2: Yona's 2026-10-07 ruling). The
+//! loop allocates the leg's buffers ([`RelayLegSizes`]) when the driver
+//! first asks to connect, keeps them across reconnects, and gives them back
+//! whenever the board may no longer dial (Wi-Fi lost, Cloud relay off, no
+//! account entry: RD8), so a board that will not dial holds none. The
+//! route's outgoing frame exists only while a route holds the network slot:
+//! while the LAN serves the one session it is not needed. Both are asked
+//! for fallibly; a heap with no room is a failed dial (the driver backs
+//! off) or a closed route, never a reset.
 
 use core::future::Future;
 
@@ -101,35 +102,35 @@ pub trait RelayLegIo {
     }
 }
 
-/// The leg's buffers, made once by the caller.
-pub struct RelayLegBuffers<'a> {
-    /// The TCP socket's receive and send buffers (unused on the host).
-    pub tcp_rx: &'a mut [u8],
-    pub tcp_tx: &'a mut [u8],
+/// The sizes of the leg's buffers; the loop allocates them.
+#[derive(Debug, Clone, Copy)]
+pub struct RelayLegSizes {
+    /// The TCP socket's receive and send buffers (0 on the host).
+    pub tcp_rx: usize,
+    pub tcp_tx: usize,
     /// The WebSocket's receive buffer: the largest relay frame the board
     /// takes (a route frame: 3 bytes and one network link frame) plus
     /// `ws::RX_OVERHEAD`; the upgrade request is also written from it.
-    pub ws_rx: &'a mut [u8],
-    /// The size of one outgoing route frame: allocated while a route holds
-    /// the network slot, given back when none does.
-    pub frame_tx_len: usize,
+    pub ws_rx: usize,
+    /// One outgoing route frame (held only while a route holds the slot).
+    pub frame_tx: usize,
 }
 
-/// Why [`run_relay_leg`] returned.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RelayLegExit {
-    /// The board may not dial (RD8) and no leg is open: the buffers are
-    /// free to go until [`wait_until_may_dial`] says otherwise.
-    Idle,
-    /// The edge is stopping (the host harness; never on a board).
-    Stopped,
+/// The leg's buffers, while the board may dial.
+struct LegBuffers {
+    tcp_rx: Box<[u8]>,
+    tcp_tx: Box<[u8]>,
+    ws_rx: Box<[u8]>,
 }
 
-/// What the loop does next with no leg open.
-enum NoLeg {
-    Dial([u8; 4], u16),
-    Idle,
-    Stop,
+impl LegBuffers {
+    fn try_new(sizes: RelayLegSizes) -> Option<Self> {
+        Some(Self {
+            tcp_rx: try_zeroed_bytes(sizes.tcp_rx)?,
+            tcp_tx: try_zeroed_bytes(sizes.tcp_tx)?,
+            ws_rx: try_zeroed_bytes(sizes.ws_rx)?,
+        })
+    }
 }
 
 /// How a connected leg ended.
@@ -143,29 +144,35 @@ enum LegEnd {
 }
 
 /// Run the device leg for `driver`, its routes on network slot `index` of
-/// `port`, until the board may no longer dial with no leg open
-/// ([`RelayLegExit::Idle`]) or the edge stops.
+/// `port`, until the edge stops (never, on a board).
 pub async fn run_relay_leg<I: RelayLegIo>(
     driver: &mut RelayDriver,
     io: &I,
     port: &RadioLinkPort,
     index: usize,
-    bufs: &mut RelayLegBuffers<'_>,
-) -> RelayLegExit {
+    sizes: RelayLegSizes,
+) {
+    let mut held: Option<LegBuffers> = None;
     loop {
-        let (addr, tcp_port) = match wait_for_dial(driver, io, port).await {
-            NoLeg::Dial(addr, tcp_port) => (addr, tcp_port),
-            NoLeg::Idle => return RelayLegExit::Idle,
-            NoLeg::Stop => return RelayLegExit::Stopped,
+        let Some((addr, tcp_port)) = wait_for_dial(driver, io, port, &mut held).await else {
+            return;
+        };
+        if held.is_none() {
+            held = LegBuffers::try_new(sizes);
+        }
+        let Some(bufs) = held.as_mut() else {
+            log::warn!("[relay] no room for the leg's buffers");
+            driver.handle(io.now_us(), RelayEvent::Closed { going_away: false });
+            continue;
         };
         let host = host_header(&driver.config().host, tcp_port);
         let connected = bounded(io, async {
             let stream = io
-                .connect(addr, tcp_port, &mut *bufs.tcp_rx, &mut *bufs.tcp_tx)
+                .connect(addr, tcp_port, &mut bufs.tcp_rx, &mut bufs.tcp_tx)
                 .await?;
             WsConnection::connect(
                 stream,
-                &mut *bufs.ws_rx,
+                &mut bufs.ws_rx,
                 &host,
                 RELAY_DEVICE_PATH,
                 io.entropy(),
@@ -181,7 +188,7 @@ pub async fn run_relay_leg<I: RelayLegIo>(
         };
         log::info!("[relay] leg open to {host}");
         driver.handle(io.now_us(), RelayEvent::Connected);
-        match serve_leg(driver, io, port, index, &mut ws, bufs.frame_tx_len).await {
+        match serve_leg(driver, io, port, index, &mut ws, sizes.frame_tx).await {
             LegEnd::Ours => ws.close(CloseCode::NORMAL).await,
             LegEnd::Theirs(going_away) => {
                 log::info!(
@@ -192,54 +199,27 @@ pub async fn run_relay_leg<I: RelayLegIo>(
             }
             LegEnd::Stop => {
                 ws.close(CloseCode::NORMAL).await;
-                return RelayLegExit::Stopped;
+                return;
             }
-        }
-    }
-}
-
-/// With the board unable to dial (RD8) and no buffers held: feed the
-/// driver its inputs and run what it announces until it may dial (`true`),
-/// or the edge stops (`false`). The driver's first dial action is left for
-/// [`run_relay_leg`].
-pub async fn wait_until_may_dial<I: RelayLegIo>(
-    driver: &mut RelayDriver,
-    io: &I,
-    port: &RadioLinkPort,
-) -> bool {
-    loop {
-        if io.stopping() {
-            return false;
-        }
-        if driver.may_dial() {
-            return true;
-        }
-        for action in driver.take_actions() {
-            // No leg: nothing to send or close, and nothing to resolve or
-            // connect until it may dial (checked above).
-            if let RelayDriverAction::Announce(event) = action {
-                port.announce(event).await;
-            }
-        }
-        io.publish(driver);
-        match select(io.next_input(), io.sleep_until(driver.next_wake_us())).await {
-            Either::First(input) => driver.handle(io.now_us(), input),
-            Either::Second(()) => driver.tick(io.now_us()),
         }
     }
 }
 
 /// With no leg open: run the driver's actions and wait on its inputs and
-/// deadlines until it asks to connect, the board may no longer dial, or the
-/// edge stops.
+/// deadlines until it asks to connect (`None`: the edge is stopping).
+/// `held` is given back whenever the board may not dial (RD8).
 async fn wait_for_dial<I: RelayLegIo>(
     driver: &mut RelayDriver,
     io: &I,
     port: &RadioLinkPort,
-) -> NoLeg {
+    held: &mut Option<LegBuffers>,
+) -> Option<([u8; 4], u16)> {
     loop {
         if io.stopping() {
-            return NoLeg::Stop;
+            return None;
+        }
+        if !driver.may_dial() {
+            *held = None;
         }
         let mut dial = None;
         for action in driver.take_actions() {
@@ -254,15 +234,11 @@ async fn wait_for_dial<I: RelayLegIo>(
                 RelayDriverAction::Send(_) | RelayDriverAction::Close => {}
             }
         }
-        if let Some((addr, port)) = dial {
-            return NoLeg::Dial(addr, port);
+        if dial.is_some() {
+            return dial;
         }
         if driver.has_actions() {
             continue;
-        }
-        if !driver.may_dial() {
-            io.publish(driver);
-            return NoLeg::Idle;
         }
         io.publish(driver);
         match select(io.next_input(), io.sleep_until(driver.next_wake_us())).await {
@@ -319,8 +295,8 @@ async fn serve_leg<I: RelayLegIo, S: ByteStream>(
         } else if frame_tx.is_none() {
             frame_tx = try_zeroed_bytes(frame_tx_len);
             if frame_tx.is_none() {
-                log::warn!("[relay] no room for a route's {frame_tx_len} B frame buffer");
-                driver.on_close_request(io.now_us(), "no room for its frames");
+                // Logged by the driver: "route N: closed (no room …)".
+                driver.on_close_request(io.now_us(), "no room for its frame buffer");
                 continue;
             }
         }
