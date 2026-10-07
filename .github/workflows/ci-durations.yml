@@ -26,12 +26,38 @@ jobs:
   job-durations:
     name: Pre-merge job durations
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    # The first run (37572977722) took 13.2 of 15 minutes: ~300 runs' job
+    # lists fetched one request at a time, on purpose (a parallel `gh api`
+    # loop trips GitHub's secondary rate limit). The per-run cache below is
+    # the real fix; 30 minutes is the headroom for a cold cache.
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      # Finished runs' job lists never change, and the script caches each by
+      # run id under target/ci-durations/. Restore the newest entry (the
+      # prefix match) so only runs newer than the last check are fetched.
+      # Saved from the default branch only, one small entry per run, per the
+      # Actions-cache rules in pre-merge.yml's header.
+      - name: Restore fetched-runs cache
+        uses: actions/cache/restore@v4
+        with:
+          path: target/ci-durations
+          key: ci-durations-${{ github.run_id }}
+          restore-keys: |
+            ci-durations-
 
       - name: Measure pre-merge.yml's job durations
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 scripts/ci/job-durations.py --runs 300
+
+      # `always()`: exit 2 (a job over budget) is the signal, and it must
+      # still save what it fetched, or the red week re-fetches everything.
+      - name: Save fetched-runs cache
+        if: always() && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@v4
+        with:
+          path: target/ci-durations
+          key: ci-durations-${{ github.run_id }}

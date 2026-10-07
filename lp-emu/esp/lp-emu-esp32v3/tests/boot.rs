@@ -1036,6 +1036,23 @@ fn uart0_fifo_bytes(trace: &str) -> Vec<u8> {
         .collect()
 }
 
+/// lp-link's text mark (`fw-esp32v3/src/recovery/panic_path.rs`'s
+/// `write_link_text_mark`), written just before the app's first `[INIT]`
+/// line so a host's deframer is never left mid-frame by the ROM/bootloader
+/// text ahead of it.
+const LINK_TEXT_MARK: [u8; 3] = [0xFF, b'\r', b'\n'];
+
+/// Assert `bytes` starts with [`LINK_TEXT_MARK`] and return what follows it.
+/// `0xFF` is never valid UTF-8, so a figure that stays UTF-8 strict needs the
+/// mark stripped rather than widening the figure format to tolerate it.
+fn strip_link_text_mark(bytes: &[u8]) -> &[u8] {
+    assert!(
+        bytes.starts_with(&LINK_TEXT_MARK),
+        "lp-link's text mark precedes the boot's first line: {bytes:?}"
+    );
+    &bytes[LINK_TEXT_MARK.len()..]
+}
+
 /// Run the shipped image to `micros` with UART0 traced into a sink, and hand
 /// back the machine, the outcome and the trace text.
 ///
@@ -1242,10 +1259,10 @@ fn the_flash_status_spin_ends_and_a_blank_chip_has_no_partition_table() {
     );
 
     let written = uart0_fifo_bytes(&trace);
-    let text = String::from_utf8_lossy(&written).into_owned();
+    let text = String::from_utf8_lossy(strip_link_text_mark(&written)).into_owned();
     assert!(
         text.starts_with("[INIT] fw-esp32v3 boot\n"),
-        "the first line the boot prints: {text:?}"
+        "the first line the boot prints, past lp-link's text mark: {text:?}"
     );
     assert!(
         text.contains(BLANK_LAST_LINE),
@@ -1358,7 +1375,10 @@ fn the_init_chain_is_the_golden_bytes() {
     };
     assert!(stopped_on_the_line(&outcome), "{outcome:?}");
     let mut figures = Figures::new("esp32v3", "boot::the_init_chain_is_the_golden_bytes");
-    figures.utf8("boot.init_chain.blank", &uart0_fifo_bytes(&trace));
+    figures.utf8(
+        "boot.init_chain.blank",
+        strip_link_text_mark(&uart0_fifo_bytes(&trace)),
+    );
 
     let Some(chip) = merged_chip() else {
         figures.verify();
@@ -1369,7 +1389,10 @@ fn the_init_chain_is_the_golden_bytes() {
         return;
     };
     assert!(stopped_on_the_line(&outcome), "{outcome:?}");
-    figures.utf8("boot.init_chain.merged", &uart0_fifo_bytes(&trace));
+    figures.utf8(
+        "boot.init_chain.merged",
+        strip_link_text_mark(&uart0_fifo_bytes(&trace)),
+    );
     figures.verify();
 }
 

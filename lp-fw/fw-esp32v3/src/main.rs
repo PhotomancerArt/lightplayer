@@ -850,6 +850,14 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     // arena is carved, because the paint runs on the main stack and the arena
     // is `.bss`, not stack.
     stack_probe::paint();
+    // The ROM and bootloader text ahead of this point went out at 115,200
+    // baud; a host reading UART0 at 921,600 (lp-link speed) misreads most of
+    // it and is left mid-frame when this app's own text starts, so the first
+    // `[INIT]` line is collected as a frame body and torn at `max_frame`
+    // instead of arriving as text. Writing lp-link's text mark first resets
+    // every host deframer (`0xFF` never occurs inside a COBS-FF frame). See
+    // `docs/defects/2026-10-03-the-classic-loses-its-boot-text-when-a-host-holds-the-link.md`.
+    recovery::panic_path::write_link_text_mark();
     esp_println::println!("[INIT] fw-esp32v3 boot");
     esp_println::println!(
         "[INIT] chip=esp32 arch=xtensa heap={rom_pro_heap}+{HEAP_SIZE}+{sram1_heap}+{ROM_APP_HEAP_BYTES}={} \
