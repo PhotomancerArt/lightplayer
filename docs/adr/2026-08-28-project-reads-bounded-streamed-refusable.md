@@ -94,5 +94,6 @@ Four rules, all landed with no breaking wire change (no
   stays open until then.
 - 2026-10-07: the load gate added beside this ADR is gone (loads are tried
   and recovered across a reset: `2026-10-07-project-loads-are-tried-and-recovered.md`).
-  Yona wants the read gate here revisited the same way; it is unchanged
-  until then.
+  Reads on a fragmented heap now go out in frames of half the largest
+  block (the C6's block floor is 8 KiB, down from 16 KiB). Yona wants the
+  read gate itself revisited the same way.

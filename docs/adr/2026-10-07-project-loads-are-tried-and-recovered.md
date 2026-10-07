@@ -81,11 +81,16 @@ frame's 20 KB ask does not) passed it and reset the board on every boot.
 - A project that does not fit costs at most one reboot and comes back on
   the previous project with a message. Over Wi-Fi the reboot is a rejoin,
   and a host's link redials.
-- The read gate (32 KiB free / a 16 KiB block for a ProjectRead) is
-  unchanged for now. Yona wants it revisited the same way: try, and
-  recover. With a LAN link open after a switch to `basic`, the emulated
-  C6's largest block sat at 16,164–16,172 B and reads were refused. The
-  project itself ran.
+- Reads on a fragmented heap go out in smaller frames instead of being
+  refused. A ProjectRead's frame budget is half the largest free block (at
+  most the link's 16 KiB, at least 1 KiB, `lpa_server::read_frame_budget`).
+  The C6's read-gate block floor dropped from 16 KiB to 8 KiB, which holds
+  the largest single read ask (an 8 KB mapping slot JSON). An event too big
+  for its frame is refused in words. This followed directly: with a LAN link
+  open after a switch to `basic`, the emulated C6's largest block sat at
+  16,164–16,172 B and every read was refused. The total-free floor (40 KiB)
+  stays. Yona still wants the read gate itself revisited the
+  try-and-recover way.
 - The recovery region is version 2 and holds the record in its last
   48 B of the 1 KB budget; project names are cut to 20 bytes there (they
   are only ever words).

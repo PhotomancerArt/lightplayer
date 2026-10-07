@@ -273,6 +273,25 @@ the app through the same view model and presses the same actions. See
   `fw-emu`. See `lp-base/lp-link/README.md`,
   `docs/adr/2026-09-27-lp-link-one-comms-layer.md` and
   `docs/adr/2026-09-24-ble-transport.md`'s dated Amendment.
+- **Wi-Fi (the LAN link) is `lp-link` too, and always secure.** A C6 with a
+  saved network joins it by itself and serves the link at
+  `ws://<board>/link` (port 80), answering `lp-xxxx.local` and DNS-SD
+  `_lightplayer._tcp`. Hosts reach it as `lan:<ip>` or `lan:lp-xxxx.local`
+  (`lp-cli`, and Studio behind `?lan=`). The link is `LinkConfig::ws()` (one
+  frame per WebSocket message) with the secure channel (NNpsk0 keyed by the
+  access entries; the tier comes from the key, as on Bluetooth). Its replies
+  are JSON, and the C6 has one LAN slot, so a second client is told to try
+  again later. See `docs/adr/2026-10-07-c6-wifi-link.md`; the emulated LAN
+  (`net=lan`) is PR C's (`docs/adr/2026-10-05-emulator-seams.md`).
+- **Project loads are tried, not gated.** There is no headroom gate before a
+  `LoadProject`. A load is recorded in the RTC recovery region until its
+  project has run 3 frames. A switch that resets the board boots the
+  previous project with a plain-words `load_notice` in the heartbeat, and a
+  startup load that reset it is not tried again
+  (`docs/adr/2026-10-07-project-loads-are-tried-and-recovered.md`). Reads on a
+  fragmented heap go out in frames of half the largest block
+  (`lpa_server::read_frame_budget`). Size embedded tests at the 128–512 LED
+  design target, not at dome scale.
 - **On the C6 the USB link task has its own thread** (`io-thread`, priority
   1, 3 KB stack) and the server answers a tick's requests before it renders.
   Every `UsbLinkShared::with_link` closure there masks priority-1 interrupts
@@ -373,7 +392,7 @@ runtime.
 | `lp-server`      | Project management, client connections | yes              |
 | `lp-json-pack`   | JSON Pack: a compact binary form of JSON that decodes back to byte-identical JSON text (`lp-base/`, generic; names coded against an injected seed and a per-connection learned table) | yes |
 | `lp-seam`        | The emulator-seam ABI: the one declaration of every seam, its identity (`SEAM_ABI_ID`), the descriptor table layout, and the macros that generate a seam function and its call (`lp-base/`, MIT). See "Emulator seams" below | yes |
-| `lp-link`        | Sans-IO link layer under the device wire: framing, CRC-32C, channels, selective-repeat ARQ, session handshake (`lp-base/`, generic; one crate on both ends). Runs the product's USB, classic-UART0 and BLE links (board, host, Studio, tools); only fw-emu is still the pre-lp-link `M!` framing. Optional `secure` feature: Noise NNpsk0 inside the SYN + sealed frames, the key match as the login (`LinkTrust::Keyed`), off on every product link until the Wi-Fi milestones | yes |
+| `lp-link`        | Sans-IO link layer under the device wire: framing, CRC-32C, channels, selective-repeat ARQ, session handshake (`lp-base/`, generic; one crate on both ends). Runs the product's USB, classic-UART0 and BLE links (board, host, Studio, tools); only fw-emu is still the pre-lp-link `M!` framing. Optional `secure` feature: Noise NNpsk0 inside the SYN + sealed frames, the key match as the login (`LinkTrust::Keyed`); on for the C6's LAN link (`ws()` preset), the only secure product link | yes |
 | `lpa-devices`    | Device model: event fold, no IO, no UI | no (host + wasm) |
 | `lpc-firmware-release` | Released firmware's formats: `ota-manifest.json` format 1, `<target>.<file>` asset names, the `/firmware/<target>/<release>/<file>` grammar (reserved words), verification. Producer lp-cli, consumers lp-cloud-server and Studio. Depends on no update-protocol crate; `lpa-update` depends on it | yes |
 | `lpa-firmware-store` | Studio's engine cache seam (index, LRU 64 MiB + `held`), the firmware store client over an injected fetch, the USB-install keep (`keep_installed_engine`) — sans-IO. Never depends on `lpa-update`/`lpc-update`, nor they on it: the update host emits cache/store effects the edge answers with this crate | no (host + wasm) |
@@ -822,6 +841,10 @@ does.
 than `https://lightplayer.app` (a local `just cloud-serve`, say); it accepts
 loopback and private-LAN origins only, so a crafted link cannot aim Studio at
 someone else's `latest`.
+
+**`?lan=<host>`** adds a Wi-Fi board to the Devices page by its LAN address
+(`lp-xxxx.local` or an IP), over the secure `ws()` link
+(`docs/adr/2026-10-07-c6-wifi-link.md`).
 
 Two more dev-only flags tune the device wire for a measurement (read once at
 page load by `lpa-studio-web/src/dev_url_flags.rs`; no UI, no persistence):

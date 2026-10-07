@@ -83,10 +83,11 @@ for loads.
   `basic` all switched with no reset. Small Dome's lamp list was refused
   in words ("5950 lamps need 47600 B in one piece, more than this
   board's memory has free").
-- Not fixed here: after the switch to `basic` with the LAN link open,
-  the read gate refused reads (largest block 16,164–16,172 B < 16,384).
-  The read gate is left as it is for now, and Yona wants it revisited the
-  same way.
+- The reads after that switch: with the LAN link open the read gate
+  refused every read (largest block 16,164–16,172 B < 16,384). Fixed too:
+  a read on a fragmented heap goes out in frames of half the largest
+  block, and the C6's block floor is 8 KiB (`lpa_server::read_frame_budget`).
+  Yona wants the read gate itself revisited the try-and-recover way.
 
 **Regression coverage**
 
@@ -100,6 +101,10 @@ for loads.
   - `a_switch_becomes_the_startup_project_after_its_first_frames`
   - `a_failed_switch_leaves_the_previous_project_running`
 - `lpa-devices`: `a_load_that_did_not_fit_is_said_in_the_boards_words`
+- `lpa-server` (`tests/project_read_refusal.rs`):
+  - `a_read_on_a_fragmented_heap_is_served_in_smaller_frames` (12 KiB and
+    8 KiB blocks)
+  - `an_event_too_big_for_the_frame_is_refused_in_words`
 
 **Lesson** — a gate guesses a project's cost before reading it. It
 refused loads that fit and let through the ones that did not. On a small

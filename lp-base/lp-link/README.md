@@ -192,8 +192,11 @@ sequence space is future work if a measurement ever calls for it).
    `Reset` on each side, and per-link state above (the learned dictionary,
    pending requests) resets in step.
 4. **One design, tuned per transport.** Presets in `link_config.rs`: `usb()`, `uart()`,
-   `ble()`, `udp()`, `ws()`. WS/TCP use `NoArq` (channels and lifecycle
-   only). A preset is what a **host** runs; a board takes its own cut of one
+   `ble()`, `udp()`, `ws()`. `ws()` is the C6's Wi-Fi (LAN) link in product
+   use: one frame per WebSocket message, the `secure` channel on, and
+   selective-repeat ARQ with a window of 2, acks every 2 frames and a 200 ms
+   resend floor (TCP already delivers, and the hosts' `WireLinkPort` speaks
+   selective-repeat; `docs/adr/2026-10-07-c6-wifi-link.md`). A preset is what a **host** runs; a board takes its own cut of one
    (the C6's `UsbLinkShared::config`, the classic's
    `uart_board_link_config`), smaller buffers and a slower resend floor,
    because a host queues upload-sized requests through `send()` and a board
