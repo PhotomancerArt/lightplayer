@@ -70,6 +70,15 @@ impl BoardOnLan {
         forward_spec(self.forward)
     }
 
+    /// Its LAN's uplinks in words (`lightplayer.app:80 → 127.0.0.1:2812`).
+    pub fn uplinks(&self) -> Vec<String> {
+        self.lan
+            .uplinks()
+            .into_iter()
+            .map(|(name, port, to)| format!("{name}:{port} → {to}"))
+            .collect()
+    }
+
     /// The board's address on the LAN, once its DHCP exchange finished.
     pub fn address(&self) -> Option<Ipv4Addr> {
         self.lan.address(self.endpoint)

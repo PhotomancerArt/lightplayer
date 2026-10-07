@@ -15,6 +15,20 @@
 //! other key is refused, so a misspelt `pasword` is an error rather than an
 //! open network.
 //!
+//! An `[[uplink]]` table (Wi-Fi relay plan P9) names a host beyond the
+//! LAN's router and where it really is, so a board on the LAN reaches it by
+//! name, as a board at home reaches lightplayer.app:
+//!
+//! - `name`: the host name a board resolves (`lightplayer.app`);
+//! - `to`: where its connections go on this machine (`127.0.0.1:2812`, a
+//!   local `lp-cloud-server`);
+//! - `port` (default 80): the port a board dials.
+//!
+//! In the fixture, not a flag, so `emu run --lan` and `emu serve --lan`
+//! take it the same way and a LAN's whole world — what is in range, and
+//! what is beyond the router — is one file. No uplink: no name resolves and
+//! nothing leaves the LAN, as before.
+//!
 //! **Test values only.** A fixture is committed or passed around, and the
 //! emulator prints the names it hears: never a real network's name or
 //! password.
@@ -42,6 +56,15 @@ pub const BOARD_LAN_PORT: u16 = 80;
 pub struct LanFixture {
     pub path: PathBuf,
     pub access_points: Vec<VirtualAccessPoint>,
+    pub uplinks: Vec<FixtureUplink>,
+}
+
+/// One `[[uplink]]`: a host beyond the LAN.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FixtureUplink {
+    pub name: String,
+    pub port: u16,
+    pub to: SocketAddr,
 }
 
 impl LanFixture {
@@ -51,17 +74,27 @@ impl LanFixture {
             .with_context(|| format!("reading the LAN fixture {}", path.display()))?;
         let access_points = parse_fixture(&text)
             .map_err(|why| anyhow!("the LAN fixture {}: {why}", path.display()))?;
+        let uplinks = parse_uplinks(&text)
+            .map_err(|why| anyhow!("the LAN fixture {}: {why}", path.display()))?;
         Ok(Self {
             path: path.to_path_buf(),
             access_points,
+            uplinks,
         })
     }
 
-    /// A LAN with this fixture's networks in range, at the C6's clock.
+    /// A LAN with this fixture's networks in range, and its uplinks, at the
+    /// C6's clock.
     pub fn lan(&self, driver: LanDriver) -> SharedLan {
         let mut lan = VirtualLan::new(LanConfig::new(lp_emu_esp32c6::memmap::CYCLES_PER_US));
         for ap in &self.access_points {
             lan.add_access_point(ap.clone());
+        }
+        for uplink in &self.uplinks {
+            // `parse_uplinks` refused a port named twice, the one way this
+            // can fail on a fresh LAN.
+            lan.uplink(&uplink.name, uplink.port, uplink.to)
+                .unwrap_or_else(|e| panic!("uplink {}: {e}", uplink.name));
         }
         SharedLan::new(lan, driver)
     }
@@ -85,6 +118,9 @@ impl LanFixture {
         }
         if !hidden.is_empty() {
             out.push_str(&format!("; hidden: {hidden}"));
+        }
+        for uplink in &self.uplinks {
+            out.push_str(&format!("; uplink {}", uplink_spec(uplink)));
         }
         out
     }
@@ -113,11 +149,61 @@ pub fn forward_spec(at: SocketAddr) -> String {
     format!("lan:{at}")
 }
 
+/// An uplink in words: `lightplayer.app:80 → 127.0.0.1:2812`.
+pub fn uplink_spec(uplink: &FixtureUplink) -> String {
+    format!("{}:{} → {}", uplink.name, uplink.port, uplink.to)
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct FixtureFile {
     #[serde(default)]
     access_point: Vec<FixtureAccessPoint>,
+    #[serde(default)]
+    uplink: Vec<FixtureUplinkToml>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FixtureUplinkToml {
+    name: String,
+    to: String,
+    #[serde(default = "default_uplink_port")]
+    port: u16,
+}
+
+fn default_uplink_port() -> u16 {
+    80
+}
+
+/// A fixture's text → its uplinks, in file order: a name, a port no other
+/// uplink takes, and an `ip:port` to go to.
+pub fn parse_uplinks(text: &str) -> Result<Vec<FixtureUplink>, String> {
+    let file: FixtureFile = toml::from_str(text).map_err(|e| e.to_string())?;
+    let mut out: Vec<FixtureUplink> = Vec::new();
+    for uplink in file.uplink {
+        if uplink.name.trim().is_empty() {
+            return Err("an [[uplink]] with an empty name".to_string());
+        }
+        let to: SocketAddr = uplink.to.parse().map_err(|_| {
+            format!(
+                "[[uplink]] {}: `to = \"{}\"` is not an ip:port",
+                uplink.name, uplink.to
+            )
+        })?;
+        if out.iter().any(|u| u.port == uplink.port) {
+            return Err(format!(
+                "[[uplink]] {}: port {} is another uplink's (each needs its own)",
+                uplink.name, uplink.port
+            ));
+        }
+        out.push(FixtureUplink {
+            name: uplink.name,
+            port: uplink.port,
+            to,
+        });
+    }
+    Ok(out)
 }
 
 #[derive(Deserialize)]
@@ -171,6 +257,7 @@ mod tests {
         let fixture = LanFixture {
             path: PathBuf::from("virtual_lan.toml"),
             access_points: aps,
+            uplinks: Vec::new(),
         };
         assert_eq!(
             fixture.describe(),
@@ -193,6 +280,34 @@ mod tests {
         assert!(
             parse_fixture("[[access_point]]\nname = \"\"\nsignal_dbm = -50\n").is_err(),
             "an empty SSID"
+        );
+    }
+
+    #[test]
+    fn an_uplink_names_a_host_and_where_it_is() {
+        let text = "[[uplink]]\nname = \"lightplayer.app\"\nto = \"127.0.0.1:2812\"\n";
+        let uplinks = parse_uplinks(text).expect("an uplink");
+        assert_eq!(
+            uplinks,
+            [FixtureUplink {
+                name: "lightplayer.app".to_string(),
+                port: 80,
+                to: "127.0.0.1:2812".parse().unwrap(),
+            }]
+        );
+        assert_eq!(parse_fixture(text), Ok(Vec::new()), "and no access point");
+        assert_eq!(
+            uplink_spec(&uplinks[0]),
+            "lightplayer.app:80 → 127.0.0.1:2812"
+        );
+        assert!(parse_uplinks("[[uplink]]\nname = \"x\"\nto = \"nowhere\"\n").is_err());
+        assert!(
+            parse_uplinks(
+                "[[uplink]]\nname = \"a\"\nto = \"127.0.0.1:1\"\n\
+                 [[uplink]]\nname = \"b\"\nto = \"127.0.0.1:2\"\n"
+            )
+            .is_err(),
+            "two on port 80"
         );
     }
 

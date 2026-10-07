@@ -216,6 +216,17 @@ impl SharedLan {
         Ok(at)
     }
 
+    /// The LAN's uplinks: each name, the port a board dials, where it goes.
+    pub fn uplinks(&self) -> Vec<(String, u16, SocketAddr)> {
+        self.inner()
+            .lan
+            .gateway()
+            .uplinks()
+            .iter()
+            .map(|u| (u.name.clone(), u.port, u.to))
+            .collect()
+    }
+
     /// Carry `name` beyond the LAN to `to` on the host (`VirtualLan::uplink`).
     pub fn uplink(&self, name: &str, port: u16, to: SocketAddr) -> io::Result<Ipv4Addr> {
         let mut g = self.inner();
