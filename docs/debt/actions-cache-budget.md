@@ -109,7 +109,12 @@ restore main's entries; one entry per purpose.
     small:** PR #1022's first run, with no entry under the new key, built
     all three (fw-browser, the emulator sidecar, dx) cold in 8m28s, against
     7m42s on the 06:27 main run warm off the old 1.75 GB entry; the tools
-    came by binstall in 6 s. If the pruned entry still costs more budget
+    came by binstall in 6 s. What the new entry holds, from that cold
+    build (PR #1022's report step, uncompressed): `target/` 3,106 MiB, of
+    which the prune removes 827 MiB of path packages, 239 MiB of final
+    artifacts and 69 MiB of dx bundle and sidecars, keeping 1,971 MiB of
+    third-party units, plus 147 MiB of `~/.cargo/bin`. Its compressed size
+    is main's to report. If the pruned entry still costs more budget
     than ~45 s a stories run is worth, the next lever is caching only
     `~/.cargo/bin` (or nothing) here.
   - **`emu-esp32v3-ref` still had its own rust-cache entry.** Registry only
