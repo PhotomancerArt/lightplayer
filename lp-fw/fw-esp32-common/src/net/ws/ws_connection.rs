@@ -1,14 +1,22 @@
-//! One WebSocket connection to the board's `/link` route: the handshake and
-//! the frame codec, driven over a [`ByteStream`].
+//! One WebSocket connection, driven over a [`ByteStream`]: the server end
+//! of the board's `/link` route ([`WsConnection::accept`]), or the client
+//! end of the relay's device leg ([`WsConnection::connect`]).
 //!
 //! The receive buffer is borrowed, fixed-size and caller-owned (the
 //! firmware pools buffers at bring-up and allocates nothing per
 //! connection). Messages are reassembled **in place** in it, so a received
 //! message is a borrow of that buffer — no second copy.
+//!
+//! The two ends differ only where RFC 6455 makes them: a client masks every
+//! frame it sends with a fresh key from its entropy and refuses a masked
+//! frame from the server; a server does the opposite. Everything else —
+//! pings answered, the close handshake, fragments — is the same code.
 
 use super::byte_stream::{ByteStream, StreamClosed};
+use super::ws_client_handshake::{ClientHandshake, ClientKey, client_request, parse_response};
 use super::ws_frame::{
-    CloseCode, Decoded, FrameDecoder, MAX_CLIENT_HEADER, MAX_CONTROL_PAYLOAD, Opcode, server_header,
+    CloseCode, Decoded, FrameDecoder, MAX_CLIENT_HEADER, MAX_CONTROL_PAYLOAD, Opcode, apply_mask,
+    client_header, server_header,
 };
 use super::ws_handshake::{Handshake, MAX_REQUEST, Refusal, parse_request, upgrade_response};
 
@@ -46,6 +54,28 @@ pub enum AcceptError {
     Stream,
 }
 
+/// Why [`WsConnection::connect`] did not upgrade. The stream has been
+/// closed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConnectError {
+    /// The server answered this status (0: not HTTP), or a `101` without
+    /// the upgrade headers and accept value the key implies.
+    Refused { status: u16 },
+    /// The request did not fit the receive buffer.
+    RequestTooLong,
+    /// The stream ended or failed before the handshake completed.
+    Stream,
+}
+
+/// What [`WsConnection::recv_event`] heard.
+#[derive(Debug, PartialEq, Eq)]
+pub enum WsEvent<'m> {
+    /// A whole binary message, borrowing the receive buffer.
+    Message(&'m [u8]),
+    /// A ping (answered) or a pong: the peer is alive, nothing to deliver.
+    Control,
+}
+
 /// A server-side WebSocket connection carrying binary messages.
 ///
 /// The largest message it takes is `rx.len() - RX_OVERHEAD`; give it a
@@ -71,6 +101,15 @@ pub struct WsConnection<'a, S: ByteStream> {
     /// Set across every write; still set on entry = a write was abandoned.
     writing: bool,
     closed: Option<WsClosed>,
+    /// A client's entropy, for each frame's masking key; `None` on a server.
+    mask: Option<fn(&mut [u8])>,
+}
+
+/// What the receive loop stopped on: a message (its length, at the start
+/// of the buffer), or a control frame the caller asked to hear about.
+enum Next {
+    Message(usize),
+    Control,
 }
 
 impl<'a, S: ByteStream> WsConnection<'a, S> {
@@ -110,6 +149,7 @@ impl<'a, S: ByteStream> WsConnection<'a, S> {
                         decoder: FrameDecoder::new(max_message),
                         writing: false,
                         closed: None,
+                        mask: None,
                     });
                 }
             }
@@ -117,6 +157,68 @@ impl<'a, S: ByteStream> WsConnection<'a, S> {
         let _ = stream.write_all(refusal.response()).await;
         stream.close().await;
         Err(AcceptError::Refused(refusal))
+    }
+
+    /// Open a client connection: write the upgrade request for `path` with
+    /// `host` as its `Host` (`host:port` off port 80), read the `101`, and
+    /// check its accept value. `entropy` makes the key, and every frame's
+    /// masking key after it. The request is written from `rx` (so it must
+    /// fit there); bytes the server sent after its answer are kept as the
+    /// first frames.
+    pub async fn connect(
+        mut stream: S,
+        rx: &'a mut [u8],
+        host: &str,
+        path: &str,
+        entropy: fn(&mut [u8]),
+    ) -> Result<Self, ConnectError> {
+        let key = ClientKey::fresh(entropy);
+        let Ok(len) = client_request(rx, host, path, &key) else {
+            stream.close().await;
+            return Err(ConnectError::RequestTooLong);
+        };
+        if stream.write_all(&rx[..len]).await.is_err() {
+            stream.close().await;
+            return Err(ConnectError::Stream);
+        }
+        let response_cap = rx.len().min(MAX_REQUEST);
+        let mut filled = 0;
+        loop {
+            match parse_response(&rx[..filled], &key) {
+                ClientHandshake::Incomplete if filled < response_cap => {
+                    match stream.read(&mut rx[filled..response_cap]).await {
+                        Ok(n) if n > 0 => filled += n,
+                        _ => {
+                            stream.close().await;
+                            return Err(ConnectError::Stream);
+                        }
+                    }
+                }
+                ClientHandshake::Incomplete => {
+                    stream.close().await;
+                    return Err(ConnectError::Refused { status: 0 });
+                }
+                ClientHandshake::Refused { status } => {
+                    stream.close().await;
+                    return Err(ConnectError::Refused { status });
+                }
+                ClientHandshake::Upgraded { consumed } => {
+                    rx.copy_within(consumed..filled, 0);
+                    let max_message = rx.len().saturating_sub(RX_OVERHEAD);
+                    return Ok(Self {
+                        stream,
+                        rx,
+                        filled: filled - consumed,
+                        message_len: 0,
+                        returned: 0,
+                        decoder: FrameDecoder::for_client(max_message),
+                        writing: false,
+                        closed: None,
+                        mask: Some(entropy),
+                    });
+                }
+            }
+        }
     }
 
     /// The largest message this connection receives.
@@ -129,6 +231,24 @@ impl<'a, S: ByteStream> WsConnection<'a, S> {
     /// ends the connection. The message borrows the receive buffer until
     /// the next call.
     pub async fn recv(&mut self) -> Result<&[u8], WsClosed> {
+        match self.next(false).await? {
+            Next::Message(len) => Ok(&self.rx[..len]),
+            Next::Control => unreachable!("controls are not surfaced"),
+        }
+    }
+
+    /// As [`Self::recv`], but a ping (answered) or a pong is reported as
+    /// [`WsEvent::Control`] too: the relay's device leg counts them as the
+    /// hub being alive.
+    pub async fn recv_event(&mut self) -> Result<WsEvent<'_>, WsClosed> {
+        match self.next(true).await? {
+            Next::Message(len) => Ok(WsEvent::Message(&self.rx[..len])),
+            Next::Control => Ok(WsEvent::Control),
+        }
+    }
+
+    /// The receive loop behind [`Self::recv`] and [`Self::recv_event`].
+    async fn next(&mut self, surface_control: bool) -> Result<Next, WsClosed> {
         self.ensure_open().await?;
         if self.returned > 0 {
             self.drop_range(0, self.returned);
@@ -164,20 +284,34 @@ impl<'a, S: ByteStream> WsConnection<'a, S> {
                         let len = self.message_len;
                         self.message_len = 0;
                         self.returned = len;
-                        return Ok(&self.rx[..len]);
+                        return Ok(Next::Message(len));
                     }
                 }
                 Opcode::Ping => {
                     let pong = &self.rx[payload];
-                    if write_frame(&mut self.stream, &mut self.writing, Opcode::Pong, pong)
-                        .await
-                        .is_err()
+                    if write_frame(
+                        &mut self.stream,
+                        &mut self.writing,
+                        self.mask,
+                        Opcode::Pong,
+                        pong,
+                    )
+                    .await
+                    .is_err()
                     {
                         return Err(self.end(WsClosed::Stream).await);
                     }
                     self.drop_range(base, frame_end);
+                    if surface_control {
+                        return Ok(Next::Control);
+                    }
                 }
-                Opcode::Pong => self.drop_range(base, frame_end),
+                Opcode::Pong => {
+                    self.drop_range(base, frame_end);
+                    if surface_control {
+                        return Ok(Next::Control);
+                    }
+                }
                 Opcode::Close => {
                     let code = match payload.len() {
                         0 => CloseCode::NO_STATUS,
@@ -197,9 +331,15 @@ impl<'a, S: ByteStream> WsConnection<'a, S> {
     /// Send `payload` as one binary frame.
     pub async fn send(&mut self, payload: &[u8]) -> Result<(), WsClosed> {
         self.ensure_open().await?;
-        if write_frame(&mut self.stream, &mut self.writing, Opcode::Binary, payload)
-            .await
-            .is_err()
+        if write_frame(
+            &mut self.stream,
+            &mut self.writing,
+            self.mask,
+            Opcode::Binary,
+            payload,
+        )
+        .await
+        .is_err()
         {
             return Err(self.end(WsClosed::Stream).await);
         }
@@ -245,7 +385,14 @@ impl<'a, S: ByteStream> WsConnection<'a, S> {
         } else {
             &bytes
         };
-        write_frame(&mut self.stream, &mut self.writing, Opcode::Close, payload).await
+        write_frame(
+            &mut self.stream,
+            &mut self.writing,
+            self.mask,
+            Opcode::Close,
+            payload,
+        )
+        .await
     }
 
     /// Remove `rx[from..to]`, shifting the input after it down.
@@ -255,18 +402,43 @@ impl<'a, S: ByteStream> WsConnection<'a, S> {
     }
 }
 
-/// One final server frame; `writing` stays set if it does not complete.
+/// Bytes a client masks at a time on its way out (a stack copy: the
+/// caller's payload is borrowed, and masking is in place).
+const MASK_CHUNK: usize = 64;
+
+/// One final frame — a server's, unmasked, or with `mask` (a client's
+/// entropy) masked under a fresh key; `writing` stays set if it does not
+/// complete.
 async fn write_frame<S: ByteStream>(
     stream: &mut S,
     writing: &mut bool,
+    mask: Option<fn(&mut [u8])>,
     opcode: Opcode,
     payload: &[u8],
 ) -> Result<(), StreamClosed> {
     *writing = true;
-    stream
-        .write_all(server_header(opcode, payload.len()).as_bytes())
-        .await?;
-    stream.write_all(payload).await?;
+    match mask {
+        None => {
+            stream
+                .write_all(server_header(opcode, payload.len()).as_bytes())
+                .await?;
+            stream.write_all(payload).await?;
+        }
+        Some(entropy) => {
+            let mut key = [0u8; 4];
+            entropy(&mut key);
+            stream
+                .write_all(client_header(opcode, payload.len(), key).as_bytes())
+                .await?;
+            let mut chunk = [0u8; MASK_CHUNK];
+            for (index, part) in payload.chunks(MASK_CHUNK).enumerate() {
+                let out = &mut chunk[..part.len()];
+                out.copy_from_slice(part);
+                apply_mask(out, key, index * MASK_CHUNK);
+                stream.write_all(out).await?;
+            }
+        }
+    }
     *writing = false;
     Ok(())
 }
@@ -326,6 +498,126 @@ mod tests {
             server.join().unwrap(),
             Ok(WsClosed::Peer(CloseCode::NO_STATUS))
         );
+    }
+
+    /// The client half against a real server (tungstenite): every length
+    /// form both ways, masked out and unmasked in; a server's ping is
+    /// answered and heard; the close handshake ends it.
+    #[test]
+    fn the_client_round_trips_every_length_form_with_a_real_server() {
+        let (port, server) = spawn_tungstenite_echo("/relay/device");
+        let socket = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        socket
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        let mut rx = vec![0u8; 65536 + RX_OVERHEAD];
+        let host = format!("127.0.0.1:{port}");
+        block_on(async {
+            let mut ws = WsConnection::connect(
+                TcpByteStream(socket),
+                &mut rx,
+                &host,
+                "/relay/device",
+                test_entropy,
+            )
+            .await
+            .expect("the upgrade");
+            for len in [0usize, 1, 125, 126, 1000, 65535, 65536] {
+                let payload = pattern(len);
+                ws.send(&payload).await.unwrap();
+                assert_eq!(ws.recv().await.unwrap(), payload.as_slice(), "length {len}");
+            }
+            // The echo server pings after the word "ping".
+            ws.send(b"ping").await.unwrap();
+            assert_eq!(ws.recv_event().await.unwrap(), WsEvent::Control);
+            assert_eq!(
+                ws.recv_event().await.unwrap(),
+                WsEvent::Message(b"ping".as_slice())
+            );
+            ws.close(CloseCode::NORMAL).await;
+        });
+        let (host_seen, pongs, close) = server.join().unwrap();
+        assert_eq!(host_seen, host, "the Host header names host:port");
+        assert_eq!(pongs, 1, "the ping was answered");
+        assert_eq!(close, Some(1000));
+    }
+
+    #[test]
+    fn the_client_and_the_server_halves_talk_to_each_other() {
+        let (port, server) = spawn_echo_server(2048 + RX_OVERHEAD);
+        let socket = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        socket
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        let mut rx = vec![0u8; 2048 + RX_OVERHEAD];
+        block_on(async {
+            let mut ws = WsConnection::connect(
+                TcpByteStream(socket),
+                &mut rx,
+                "board",
+                "/link",
+                test_entropy,
+            )
+            .await
+            .expect("the board's server upgrades the board's client");
+            for len in [0usize, 125, 126, 2048] {
+                ws.send(&pattern(len)).await.unwrap();
+                assert_eq!(ws.recv().await.unwrap(), pattern(len).as_slice());
+            }
+            ws.close(CloseCode::NORMAL).await;
+        });
+        assert_eq!(
+            server.join().unwrap(),
+            Ok(WsClosed::Peer(CloseCode::NORMAL))
+        );
+    }
+
+    #[test]
+    fn a_refused_upgrade_is_its_status() {
+        let (port, server) = spawn_echo_server(1024 + RX_OVERHEAD);
+        let socket = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        let mut rx = vec![0u8; 1024 + RX_OVERHEAD];
+        let result = block_on(WsConnection::connect(
+            TcpByteStream(socket),
+            &mut rx,
+            "board",
+            "/relay/device",
+            test_entropy,
+        ));
+        assert_eq!(
+            result.map(|_| ()),
+            Err(ConnectError::Refused { status: 404 }),
+            "the board's server serves /link only"
+        );
+        let _ = server.join();
+    }
+
+    #[test]
+    fn a_masked_server_frame_is_refused_by_the_client() {
+        let key = ClientKey::fresh(test_entropy);
+        let mut response = std::format!(
+            "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\
+             Sec-WebSocket-Accept: {}\r\n\r\n",
+            core::str::from_utf8(&key.expected_accept()).unwrap()
+        )
+        .into_bytes();
+        response.extend(client_frame(0x82, b"masked"));
+        let mut stream = MemStream {
+            input: vec![response].into(),
+            output: Vec::new(),
+        };
+        let mut rx = vec![0u8; 1024];
+        let result = block_on(async {
+            let mut conn =
+                WsConnection::connect(&mut stream, &mut rx, "hub", "/relay/device", test_entropy)
+                    .await
+                    .expect("the upgrade");
+            conn.recv().await.map(|_| ()).unwrap_err()
+        });
+        assert_eq!(result, WsClosed::Protocol(CloseCode::PROTOCOL_ERROR));
+        // The client's own close frame is masked: mask bit set, 4-byte key.
+        let close = &stream.output[stream.output.len() - 8..];
+        assert_eq!(&close[..2], &[0x88, 0x82]);
     }
 
     #[test]
@@ -636,6 +928,60 @@ mod tests {
                     }
                 }
             })
+        });
+        (port, server)
+    }
+
+    /// Fixed bytes: a client key and masks the tests can predict.
+    fn test_entropy(buf: &mut [u8]) {
+        buf.fill(0x5a);
+    }
+
+    /// A real (tungstenite) server on a loopback port, one connection at
+    /// `path`: echoes binary messages, pings before echoing `ping`. Its
+    /// result: the request's `Host`, the pongs it got, the close code.
+    fn spawn_tungstenite_echo(
+        path: &'static str,
+    ) -> (u16, JoinHandle<(String, usize, Option<u16>)>) {
+        use tungstenite::handshake::server::{Request, Response};
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = thread::spawn(move || {
+            let (socket, _) = listener.accept().unwrap();
+            socket
+                .set_read_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            let mut host = String::new();
+            let mut ws =
+                tungstenite::accept_hdr(socket, |request: &Request, response: Response| {
+                    assert_eq!(request.uri().path(), path);
+                    host = request
+                        .headers()
+                        .get("host")
+                        .and_then(|h| h.to_str().ok())
+                        .unwrap_or_default()
+                        .into();
+                    Ok(response)
+                })
+                .unwrap();
+            let mut pongs = 0;
+            loop {
+                match ws.read() {
+                    Ok(Message::Binary(data)) => {
+                        if data.as_ref() == b"ping" {
+                            ws.send(Message::Ping(b"hub".to_vec().into())).unwrap();
+                        }
+                        ws.send(Message::Binary(data)).unwrap();
+                    }
+                    Ok(Message::Pong(_)) => pongs += 1,
+                    Ok(Message::Close(frame)) => {
+                        let _ = ws.flush();
+                        return (host, pongs, frame.map(|f| u16::from(f.code)));
+                    }
+                    Ok(_) => {}
+                    Err(_) => return (host, pongs, None),
+                }
+            }
         });
         (port, server)
     }
