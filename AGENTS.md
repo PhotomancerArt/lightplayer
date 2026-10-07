@@ -853,6 +853,18 @@ replies stay JSON — <why>`), and a packed link whose learned table lost step
 says so once (`wire: packed reply dropped …`, then `wire: back in step …`). See
 `docs/adr/2026-09-09-studio-device-stack-over-a-virtual-serial-port.md`.
 
+`?ble-writes=<with-response|without-response>[:N]` sets how every Bluetooth
+link the page makes writes its lp-link frames: data frames with or without
+response, at most `N` (1–32) in flight. The defaults
+(`lpa_link::providers::browser_ble_write_policy`) are `without-response:16`
+on a desktop browser (the OTA spike's S5c best on Mac Chrome) and
+`without-response:8` on iOS (Bluefy, unmeasured); SYN and ACK-only frames,
+and every frame while the link hears nothing, always go with response.
+`?ble-writes=with-response` is #880's every-frame-acknowledged behaviour, the
+fallback for a central that loses too much. Each link logs its policy and,
+during bulk traffic, a 15 s rate/resend/srtt line as `[ble <session>] …` on
+the page's console.
+
 An emulated board added on the **Devices page** asks the emulator for the
 LED performance seam (`led=fast`, softly: an image too old for it boots
 seam-free and says why), and says what came of it in one journal line per
