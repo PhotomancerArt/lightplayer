@@ -118,45 +118,14 @@ pub type FirmwareManifestFn = fn() -> Option<lpc_update::BoardManifest>;
 /// OOMs) cannot serve any read shape and SHOULD be refused.
 pub const PROJECT_READ_MIN_HEADROOM_BYTES: u32 = 32 * 1024;
 
-/// Minimum heap headroom (largest free block) to attempt a `LoadProject`.
-///
-/// Same refusal-not-reset posture as the read gate ([`ReadGate`])
-/// (ADR `2026-08-28-project-reads-bounded-streamed-refusable`, D7): loading
-/// materializes the whole engine — mapping lamp lists, node graph, shader
-/// JIT — through infallible allocs, so an unaffordable load abort-resets the
-/// board instead of failing the request
-/// (`docs/defects/2026-08-29-load-project-resets-instead-of-refusing.md`).
-///
-/// The floor is a can-anything-load bound, not a fit check — the server
-/// cannot know a project's real cost without parsing it, and parsing is
-/// itself part of the allocation being guarded. 64 KiB comes from the
-/// observed reset: the classic died mid-load on a single 64 KiB mapping ask
-/// with a 24 KiB largest free block, and even with the resolver's exact
-/// reserve a dome-scale lamp list is one contiguous ask of that order
-/// (5,950 lamps × 16 B ≈ 93 KiB). A heap that cannot hand over one 64 KiB
-/// block right after unloading every project is too pressed to finish any
-/// real load. A big-enough project can still OOM past the gate — the floor
-/// only catches boards that could never succeed, and refusing those with a
-/// structured error always beats resetting.
-pub const PROJECT_LOAD_MIN_HEADROOM_BYTES: u32 = 64 * 1024;
-
-/// The `LoadProject` headroom gate, shared by the wire handler and the
-/// host-call path (`LpServer::load_project`, which boot-time startup loads
-/// use — a refused startup project boots to an idle server instead of a
-/// reset loop). No probe (hosts, browser) = never refused.
-pub(crate) fn check_load_headroom(probe: Option<ReadHeadroomProbe>) -> Result<(), ServerError> {
-    if let Some(headroom) = probe.and_then(|probe| probe())
-        && headroom < PROJECT_LOAD_MIN_HEADROOM_BYTES
-    {
-        let message = format!(
-            "load refused: heap headroom too low (largest free block {headroom} B < \
-             {PROJECT_LOAD_MIN_HEADROOM_BYTES} B); power-cycle the device or load a smaller \
-             project"
-        );
-        log::warn!("load_project: {message}");
-        return Err(ServerError::Core(message));
-    }
-    Ok(())
+/// A project load's name for the user and the recovery record: the
+/// project's directory name, the last segment of `path`.
+pub(crate) fn project_name(path: &lpfs::lp_path::LpPath) -> &str {
+    path.as_str()
+        .trim_end_matches('/')
+        .rsplit('/')
+        .next()
+        .unwrap_or("")
 }
 
 /// Main server struct for processing client-server messages.
@@ -1264,9 +1233,9 @@ impl LpServer {
 
     /// Get the memory stats callback
     /// Install the largest-free-block probe the ProjectRead gate
-    /// ([`Self::set_read_gate`]) and the LoadProject headroom gate
-    /// ([`PROJECT_LOAD_MIN_HEADROOM_BYTES`]) consult. Unset = neither checks
-    /// a largest block.
+    /// ([`Self::set_read_gate`]) and the filesystem-read refusal consult, and
+    /// the heartbeat reports. Unset = no read checks a largest block. A
+    /// LoadProject never consults it: loads are tried, not gated.
     pub fn set_read_headroom_probe(&mut self, probe: Option<ReadHeadroomProbe>) {
         self.read_headroom_probe = probe;
     }
@@ -1452,7 +1421,6 @@ impl LpServer {
         &mut self,
         path: &lpfs::lp_path::LpPath,
     ) -> Result<lpc_wire::WireProjectHandle, ServerError> {
-        check_load_headroom(self.read_headroom_probe)?;
         let handle = self.project_manager.load_project(
             path,
             &mut *self.base_fs,
@@ -1475,6 +1443,24 @@ impl LpServer {
                 .set_display_layout_budget(engine_budget);
         }
         Ok(handle)
+    }
+
+    /// The boot's startup load: [`Self::load_project`], with the load
+    /// recorded in the recovery region first (`lp_recovery::begin_project_load`).
+    /// A startup project that resets the board (out of memory, a crash, a
+    /// hang) is then known on the next boot, which boots with no project
+    /// instead of trying it again: never a reset loop. There is no headroom
+    /// gate before it — a board tries, and recovers if the try fails
+    /// (ADR `2026-08-28-project-reads-bounded-streamed-refusable`, D7 as
+    /// amended 2026-10-07).
+    pub fn load_startup_project(
+        &mut self,
+        path: &lpfs::lp_path::LpPath,
+    ) -> Result<lpc_wire::WireProjectHandle, ServerError> {
+        lp_recovery::begin_project_load(project_name(path), "", true);
+        let loaded = self.load_project(path);
+        lp_recovery::end_project_load();
+        loaded
     }
 
     /// Inject (or clear) the latent readback for a graphics backend whose

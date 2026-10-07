@@ -286,6 +286,12 @@ impl ProjectManager {
         Some(path)
     }
 
+    /// The name (directory) of what the last unload stopped, or "" when
+    /// nothing is owed a restore: the "previous project" a load records.
+    pub fn stopped_name(&self) -> &str {
+        crate::server::project_name(lpfs::lp_path::LpPath::new(self.stopped.as_str()))
+    }
+
     /// A load succeeded: nothing stopped is owed a restore any more.
     pub fn forget_stopped(&mut self) {
         self.stopped.clear();

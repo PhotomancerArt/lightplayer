@@ -1024,10 +1024,10 @@ fn lp_engine_entry(core: CoreBoot) {
     esp_println::println!("[INIT] LpServer created");
 
     // USB plus the radio links. The advertised-name hook only when BLE runs.
-    // Built BEFORE the boot project loads, and so is the learned table a
-    // packing host borrows: both hold memory for the board's whole life, and
-    // allocated after the project they would sit above it and split the
-    // space a project switch needs (first fit; silicon N7, 2026-10-06).
+    // Built BEFORE the boot project loads: its per-link lists hold memory
+    // for the board's whole life, and allocated after the project they sat
+    // above it and split the space it frees (first fit; silicon N7,
+    // 2026-10-06).
     #[cfg(feature = "ble")]
     let transport = {
         let mux = fw_esp32_common::radio_link::LinkMuxTransport::new(
@@ -1041,9 +1041,6 @@ fn lp_engine_entry(core: CoreBoot) {
             mux
         }
     };
-    if !fw_esp32_common::serial::packed_link::reserve_spare_table() {
-        log::warn!("[INIT] no heap for the spare learned table: a packing host makes its own");
-    }
 
     // Auto-load project at boot (from config or lexical-first) — unless
     // something asks us not to. Two independent reasons can skip it, and the

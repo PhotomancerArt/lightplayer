@@ -1,11 +1,11 @@
-//! Refusal-not-reset for loads: a LoadProject the device cannot afford fails
-//! with a structured error on the request id and leaves the server fully
-//! alive — it must never reach the infallible-alloc abort path that resets
-//! the board mid-load
-//! (`docs/defects/2026-08-29-load-project-resets-instead-of-refusing.md`).
-//!
-//! Companion to `project_read_refusal.rs`, which pins the same posture for
-//! ProjectRead (ADR `2026-08-28-project-reads-bounded-streamed-refusable`).
+//! Loads are tried, not gated: a LoadProject is attempted whatever the heap
+//! looks like, and a load that cannot finish either fails with a structured
+//! error (and the previous project runs again: never dark) or, when it runs
+//! the board out of memory, resets it with the load recorded so the next
+//! boot runs the previous project again and says why (`lp-recovery`'s
+//! `InterruptedLoad`; ADR `2026-08-28-project-reads-bounded-streamed-refusable`,
+//! D7 as amended 2026-10-07). The blunt 64 KiB headroom gate this file used
+//! to pin is gone (`docs/defects/2026-08-29-load-project-resets-instead-of-refusing.md`).
 
 extern crate alloc;
 
@@ -22,7 +22,7 @@ use core::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 use lpc_shared::transport::{Incoming, Link, LinkId};
 
 use lp_gfx_lpvm::TargetLpvmGraphics;
-use lpa_server::{LpGraphics, LpServer, PROJECT_LOAD_MIN_HEADROOM_BYTES};
+use lpa_server::{LpGraphics, LpServer};
 use lpc_model::{AsLpPath, LpPathBuf};
 use lpc_shared::output::MemoryOutputProvider;
 use lpc_wire::{
@@ -31,50 +31,15 @@ use lpc_wire::{
 use lpfs::LpFsMemory;
 
 #[test]
-fn starved_heap_refuses_the_load_and_stays_alive() {
-    let (mut server, project_path) = server_with_clock_project("load-refusal");
-
-    // A probe reporting headroom below the gate: the load is refused with a
-    // structured Error frame naming the free bytes and the remedy.
-    server.set_read_headroom_probe(Some(|| Some(PROJECT_LOAD_MIN_HEADROOM_BYTES - 1)));
+fn a_load_is_tried_whatever_the_headroom_probe_says() {
+    let (mut server, project_path) = server_with_clock_project("load-tried");
+    // The probe reports almost nothing free: the load is tried anyway (the
+    // read gate, which still consults it, is not the load's business).
+    server.set_read_headroom_probe(Some(|| Some(1024)));
 
     let mut transport = VecTransport::default();
     let load = Incoming::primary(ClientMessage {
         id: 51,
-        msg: ClientRequest::LoadProject {
-            path: String::from(project_path.as_str()),
-        },
-    });
-    block_on(server.tick_and_send(16, vec![load], &mut transport)).expect("tick");
-
-    assert_eq!(
-        transport.sent.len(),
-        1,
-        "one response frame: {:?}",
-        transport.sent
-    );
-    let frame = &transport.sent[0];
-    assert_eq!(frame.id, 51);
-    let WireServerMsgBody::Error { error } = &frame.msg else {
-        panic!("expected an Error body, got {:?}", frame.msg);
-    };
-    assert!(
-        error.contains("load refused")
-            && error.contains("largest free block")
-            && error.contains("smaller project"),
-        "refusal names the free bytes and the remedy: {error}"
-    );
-    assert!(
-        server.project_manager().list_loaded_projects().is_empty(),
-        "a refused load leaves nothing loaded"
-    );
-
-    // The server survives: with the probe healthy again, the same request
-    // loads normally.
-    server.set_read_headroom_probe(Some(|| Some(u32::MAX)));
-    let mut transport = VecTransport::default();
-    let load = Incoming::primary(ClientMessage {
-        id: 52,
         msg: ClientRequest::LoadProject {
             path: String::from(project_path.as_str()),
         },
@@ -88,17 +53,25 @@ fn starved_heap_refuses_the_load_and_stays_alive() {
                 ..
             }]
         ),
-        "healthy probe serves the load normally: {:?}",
+        "the load is served: {:?}",
         transport.sent
     );
+
+    // The host-call path (the boot's startup load) is not gated either.
+    let (mut server, project_path) = server_with_clock_project("load-tried-host");
+    server.set_read_headroom_probe(Some(|| Some(1024)));
+    server
+        .load_startup_project(project_path.as_path())
+        .expect("the startup load is tried");
 }
 
-/// Never dark (G1 desk walk): a refused switch runs the project that was
-/// running before, whether the load itself unloaded it or a StopAllProjects
-/// just before it did (what an upload sends), and the error says so.
+/// Never dark (G1 desk walk): a switch that fails without a reset runs the
+/// project that was running before, whether the load itself unloaded it or
+/// a StopAllProjects just before it did (what an upload sends), and the
+/// error says so.
 #[test]
-fn a_refused_switch_leaves_the_previous_project_running() {
-    let (mut server, project_path) = server_with_clock_project("load-refusal-restore");
+fn a_failed_switch_leaves_the_previous_project_running() {
+    let (mut server, project_path) = server_with_clock_project("load-failed-restore");
     server
         .load_project(project_path.as_path())
         .expect("the first project loads");
@@ -114,22 +87,21 @@ fn a_refused_switch_leaves_the_previous_project_running() {
         requests.push(Incoming::primary(ClientMessage {
             id: 61,
             msg: ClientRequest::LoadProject {
-                path: String::from(project_path.as_str()),
+                path: String::from("/projects/not-a-project"),
             },
         }));
-        server.set_read_headroom_probe(Some(|| Some(PROJECT_LOAD_MIN_HEADROOM_BYTES - 1)));
         let mut transport = VecTransport::default();
         block_on(server.tick_and_send(16, requests, &mut transport)).expect("tick");
-        let refusal = transport
+        let failure = transport
             .sent
             .iter()
             .find(|frame| frame.id == 61)
             .expect("the load is answered");
-        let WireServerMsgBody::Error { error } = &refusal.msg else {
-            panic!("expected an Error body, got {:?}", refusal.msg);
+        let WireServerMsgBody::Error { error } = &failure.msg else {
+            panic!("expected an Error body, got {:?}", failure.msg);
         };
         assert!(
-            error.contains("load refused") && error.contains("is running again"),
+            error.contains("is running again"),
             "stop first: {stop_first}: {error}"
         );
         assert_eq!(
@@ -137,30 +109,7 @@ fn a_refused_switch_leaves_the_previous_project_running() {
             1,
             "stop first: {stop_first}: the previous project runs again"
         );
-        server.set_read_headroom_probe(None);
     }
-}
-
-#[test]
-fn starved_heap_refuses_the_host_call_path_too() {
-    // Boot-time startup loads use `LpServer::load_project` directly; the
-    // same gate must refuse there so an unaffordable startup project boots
-    // to an idle server instead of a reset loop.
-    let (mut server, project_path) = server_with_clock_project("load-refusal-host");
-    server.set_read_headroom_probe(Some(|| Some(PROJECT_LOAD_MIN_HEADROOM_BYTES - 1)));
-    let error = server
-        .load_project(project_path.as_path())
-        .expect_err("starved heap refuses the host-call load");
-    let message = alloc::format!("{error}");
-    assert!(
-        message.contains("load refused"),
-        "host-call refusal carries the same shape: {message}"
-    );
-
-    server.set_read_headroom_probe(Some(|| Some(u32::MAX)));
-    server
-        .load_project(project_path.as_path())
-        .expect("healthy probe loads normally");
 }
 
 #[test]

@@ -25,100 +25,16 @@
 //! never among the frames a fresh reader has to drop. Found by the emulated
 //! G1 sitting: after a push, Studio reopened the port and its identify timed
 //! out on a dropped Hello reply ("pre-hello firmware").
-//!
-//! **One table is made at boot** ([`reserve_spare_table`]) and lent to the
-//! first link that opts in, then returned when that link goes back to JSON
-//! or closes. A host opts in while a project runs, so a table allocated then
-//! landed above the project's memory (first fit) and was still there when
-//! the project stopped: with Wi-Fi joined the main region had no 6.9 KB hole
-//! and it went into `dram2_seg`, the 64 KiB region the load gate needs empty,
-//! so every project switch over USB was refused (silicon N7, 2026-10-06;
-//! docs/defects/2026-10-06-a-wifi-joined-c6-refuses-every-project-switch.md).
-//! A second packed link at once (two hosts) still allocates its own. This
-//! revises the plan's D4 above: the board pays for one table from boot,
-//! where a host would otherwise make it pay at the worst possible address.
 
 use alloc::boxed::Box;
-use core::sync::atomic::{AtomicPtr, Ordering};
 use lp_json_pack::{LearnMark, LearnStore, LearnedTable};
 use lpc_wire::WireEncoding;
 use lpc_wire::server::ServerMsgBody;
-
-/// The firmware's spare table (module docs).
-static SPARE: SpareTable = SpareTable::new();
-
-/// Make the one learned table a link borrows when it opts in (module docs).
-/// Call at boot, before anything long-lived is allocated after it; a second
-/// call keeps the first table. Answers whether a spare is now held.
-pub fn reserve_spare_table() -> bool {
-    SPARE.reserve()
-}
-
-/// A learned table held while no link uses it: a pointer from
-/// `Box::into_raw` (null: lent out, or none made), swapped whole, so taking
-/// and returning it needs no lock.
-pub struct SpareTable(AtomicPtr<LearnedTable>);
-
-impl SpareTable {
-    /// No table yet.
-    pub const fn new() -> Self {
-        Self(AtomicPtr::new(core::ptr::null_mut()))
-    }
-
-    /// Make the table if none is held. Answers whether one is now held.
-    fn reserve(&self) -> bool {
-        if !self.0.load(Ordering::Acquire).is_null() {
-            return true;
-        }
-        match LearnedTable::try_boxed() {
-            Some(table) => {
-                self.give_back(table);
-                true
-            }
-            None => false,
-        }
-    }
-
-    /// The table, if no link holds it.
-    fn take(&self) -> Option<Box<LearnedTable>> {
-        let ptr = self.0.swap(core::ptr::null_mut(), Ordering::AcqRel);
-        // SAFETY: a non-null pointer here came from `Box::into_raw` in
-        // `give_back`, and the swap made this the only owner.
-        (!ptr.is_null()).then(|| unsafe { Box::from_raw(ptr) })
-    }
-
-    /// A table a link no longer needs: it becomes the spare if there is
-    /// none, and is freed otherwise.
-    fn give_back(&self, table: Box<LearnedTable>) {
-        let ptr = Box::into_raw(table);
-        if self
-            .0
-            .compare_exchange(
-                core::ptr::null_mut(),
-                ptr,
-                Ordering::AcqRel,
-                Ordering::Acquire,
-            )
-            .is_err()
-        {
-            // SAFETY: `ptr` is the box just leaked and nothing else saw it.
-            drop(unsafe { Box::from_raw(ptr) });
-        }
-    }
-}
-
-impl Default for SpareTable {
-    fn default() -> Self {
-        Self::new()
-    }
-}
 
 /// One link's packed-reply state. See the module docs.
 pub struct PackedLink {
     encoding: WireEncoding,
     table: Option<Box<LearnedTable>>,
-    /// Where an opt-in takes its table from first, and where it goes back.
-    spare: &'static SpareTable,
     /// The epoch the next accepted opt-in starts. Wraps; a host only needs a
     /// *different* epoch to see a reset.
     next_epoch: u8,
@@ -137,16 +53,9 @@ impl Default for PackedLink {
 impl PackedLink {
     /// A JSON link with no table.
     pub const fn new() -> Self {
-        Self::with_spare(&SPARE)
-    }
-
-    /// A JSON link that borrows its table from `spare` (tests give each link
-    /// a pool of its own).
-    pub const fn with_spare(spare: &'static SpareTable) -> Self {
         Self {
             encoding: WireEncoding::Json,
             table: None,
-            spare,
             next_epoch: 1,
         }
     }
@@ -210,7 +119,7 @@ impl PackedLink {
         if *encoding != WireEncoding::Packed || self.table.is_some() {
             return;
         }
-        match self.spare.take().or_else(LearnedTable::try_boxed) {
+        match LearnedTable::try_boxed() {
             Some(table) => self.table = Some(table),
             None => {
                 log::warn!(
@@ -244,7 +153,7 @@ impl PackedLink {
     /// in use is freed.
     pub fn answer_dropped(&mut self) {
         if self.encoding == WireEncoding::Json {
-            self.release_table();
+            self.table = None;
         }
     }
 
@@ -254,20 +163,7 @@ impl PackedLink {
             log::info!("packed link: replies are JSON again");
         }
         self.encoding = WireEncoding::Json;
-        self.release_table();
-    }
-
-    /// Hand the table back (it becomes the spare if there is none).
-    fn release_table(&mut self) {
-        if let Some(table) = self.table.take() {
-            self.spare.give_back(table);
-        }
-    }
-}
-
-impl Drop for PackedLink {
-    fn drop(&mut self) {
-        self.release_table();
+        self.table = None;
     }
 }
 
@@ -304,48 +200,6 @@ mod tests {
         link.back_to_json();
         assert_eq!(link.encoding(), WireEncoding::Json);
         assert!(link.table.is_none(), "freed with the link");
-    }
-
-    /// The table made at boot is the one the first opt-in uses, and it comes
-    /// back when the link closes, for the next link: no table is allocated
-    /// while a project runs.
-    #[test]
-    fn the_boot_table_is_lent_to_an_opt_in_and_comes_back() {
-        let pool: &'static SpareTable = Box::leak(Box::new(SpareTable::new()));
-        assert!(pool.reserve());
-        let spare = pool.0.load(Ordering::Acquire);
-        assert!(!spare.is_null());
-
-        let mut link = PackedLink::with_spare(pool);
-        link.prepare_answer(&mut set_encoding(WireEncoding::Packed));
-        link.answered(WireEncoding::Packed);
-        let lent: *const LearnedTable = link.table.as_deref().unwrap();
-        assert_eq!(lent, spare.cast_const(), "the opt-in took the spare");
-        assert!(pool.0.load(Ordering::Acquire).is_null());
-
-        // A second packed link at once makes its own, and when both close
-        // the pool keeps one and frees the other.
-        let mut second = PackedLink::with_spare(pool);
-        second.prepare_answer(&mut set_encoding(WireEncoding::Packed));
-        second.answered(WireEncoding::Packed);
-        assert!(second.table.is_some());
-
-        drop(link);
-        assert_eq!(
-            pool.0.load(Ordering::Acquire),
-            spare,
-            "a closed link gives the table back"
-        );
-        drop(second);
-        assert_eq!(pool.0.load(Ordering::Acquire), spare);
-
-        // A link that goes back to JSON gives it back too.
-        let mut link = PackedLink::with_spare(pool);
-        link.prepare_answer(&mut set_encoding(WireEncoding::Packed));
-        link.answered(WireEncoding::Packed);
-        assert!(pool.0.load(Ordering::Acquire).is_null());
-        link.back_to_json();
-        assert_eq!(pool.0.load(Ordering::Acquire), spare);
     }
 
     /// The io task abandoned the write: the table forgets what it learned

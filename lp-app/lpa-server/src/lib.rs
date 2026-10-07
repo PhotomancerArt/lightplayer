@@ -54,8 +54,8 @@ pub use project::Project;
 pub use project_manager::{ProjectManager, is_project_dir};
 pub use read_gate::{ReadGate, ReadRefusal};
 pub use server::{
-    LastAttemptProbe, LpServer, MemoryStatsFn, NetworkChanged, PROJECT_LOAD_MIN_HEADROOM_BYTES,
-    PROJECT_READ_MIN_HEADROOM_BYTES, ReadHeadroomProbe, RebootHook, ScanProbe, StationProbe,
+    LastAttemptProbe, LpServer, MemoryStatsFn, NetworkChanged, PROJECT_READ_MIN_HEADROOM_BYTES,
+    ReadHeadroomProbe, RebootHook, ScanProbe, StationProbe,
 };
 
 /// GLSL frontend that ships on LightPlayer devices — the product constant.

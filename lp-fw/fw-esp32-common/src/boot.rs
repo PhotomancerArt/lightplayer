@@ -20,6 +20,19 @@ pub fn read_config(fs: &dyn LpFs) -> Option<ServerConfig> {
 /// Auto-load a project at boot: use startup_project from config if set,
 /// otherwise load the first project by lexical order in projects/.
 pub fn auto_load_project(server: &mut LpServer) {
+    // The startup load the previous run started reset the board (out of
+    // memory, a crash, a hang): boot with no project rather than try it
+    // again, which would reset again. The heartbeat says so in plain words
+    // (`RecoveryStatus::load_notice`). A switch that reset the board is not
+    // this case: the startup choice still names the project that ran
+    // before it, and loading that is exactly the recovery.
+    if let Some(interrupted) = lp_recovery::snapshot()
+        .and_then(|snapshot| snapshot.interrupted_load)
+        .filter(|load| load.skip_startup_load())
+    {
+        log::warn!("Boot: not loading a project: {interrupted}");
+        return;
+    }
     let raw_base = server.project_manager().projects_base_dir();
     let base_dir = if raw_base.starts_with('/') {
         LpPathBuf::from(raw_base)
@@ -84,7 +97,7 @@ pub fn auto_load_project(server: &mut LpServer) {
 
     log::info!("Boot: auto-loading {}", project_path.as_str());
     log_memory(server, "boot auto_load before");
-    if let Err(e) = server.load_project(project_path.as_path()) {
+    if let Err(e) = server.load_startup_project(project_path.as_path()) {
         log::warn!("Boot: auto-load failed for {}: {e}", project_path.as_str());
     } else {
         log_memory(server, "boot auto_load after");

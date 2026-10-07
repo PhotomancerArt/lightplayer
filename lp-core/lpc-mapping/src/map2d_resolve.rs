@@ -138,7 +138,15 @@ pub fn resolve_into(
         .map(|object| shape_lamp_count(&object.shape) as usize)
         .sum();
     positions.clear();
-    positions.reserve_exact(total_lamps);
+    // The one big ask a mapping makes, tried first: a lamp count the heap
+    // cannot hold refuses the mapping instead of aborting the load.
+    if positions.try_reserve_exact(total_lamps).is_err() {
+        let bytes = total_lamps.saturating_mul(core::mem::size_of::<[f32; 2]>());
+        return Err(Map2dError::TooBigForMemory {
+            lamps: u32::try_from(total_lamps).unwrap_or(u32::MAX),
+            bytes: u32::try_from(bytes).unwrap_or(u32::MAX),
+        });
+    }
     spans.clear();
     let mut strands = Vec::new();
     for (object_index, object) in doc.objects.iter().enumerate() {
