@@ -271,6 +271,16 @@ long-lived branch conflict on this file whenever main re-baselined too.
   ratchet's 0 % margin on a placement figure turns a host-side difference
   in the emulated run into a red check.
 
+- 2026-10-07 — **CI's dirty re-check fails again; the net seam moves the C6
+  record** (emulated Wi-Fi PR C, #993, run 37584523250). After the merge of
+  main took main's C6 record, PR C's net seam moved `usedBytes` +24 B and
+  `largestFreeBlock` -32 B (`freeBytes` -24 B) on the clean first step
+  (version `14b39e7`, `lp-emu:esp32c6:t1+net=lan`). CI's "Figure moves"
+  re-check ran on a dirty tree (`<sha>-dirty-…` version, +32 B) and failed
+  as "not a figure move" again. Workaround as on 2026-10-06: the record
+  carries CI's clean figures (103,024 / 198,512 / 119,400), transcribed
+  from the first clean step, not a local bless.
+
 **Exit criteria** — a PR whose only memory effect is a few bytes of statics
 passes the gate without touching the record, and two PRs that each
 legitimately re-baseline different chips/projects do not conflict. Likely
