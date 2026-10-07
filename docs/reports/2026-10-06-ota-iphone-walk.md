@@ -13,7 +13,7 @@ file is filled in at and after the walk: the blank rows below are for it.
 
 | | |
 |---|---|
-| **The board** | `loose-c6` (LC6, "Loose C6", MAC `10:BD:A3:B0:8E:30`), hosted by the director (2026-10-07). It advertises its project's name while its engine runs and `LP-8e30` core-only; an iPhone may show either (iOS caches names). **Its USB must not be held by a host during the update** (power only — a USB charger, or the hub with no program holding the port): a host on the board's USB link closes the Bluetooth update link mid-backup (`docs/defects/2026-10-07-a-usb-host-on-the-board-closes-its-bluetooth-update-link.md`). The agent's pre-walk board was `fixture-c6` (FC6, `A0:F2:62:87:B4:8C`, `LP-b48c`), restored after. |
+| **The board** | `loose-c6` (LC6, "Loose C6", MAC `10:BD:A3:B0:8E:30`), hosted by the director (2026-10-07). It advertises its project's name while its engine runs and `LP-8e30` core-only; an iPhone may show either (iOS caches names). **Keep its USB free of a host during the update** (power only — a USB charger, or the hub with no program holding the port). A host on the board's USB link used to close the Bluetooth update link mid-backup (`docs/defects/2026-10-07-a-usb-host-on-the-board-closes-its-bluetooth-update-link.md`, fixed: run e1 held one for 40 s mid-backup and the link stayed up), but the walk is about the phone, so leave the cable out of it. The agent's pre-walk board was `fixture-c6` (FC6, `A0:F2:62:87:B4:8C`, `LP-b48c`), restored after. |
 | **Studio** | This branch's Studio, built and served on the desk by the agent (its own firmware is **Y**, the version the card offers), on the tailnet over HTTPS so Bluefy can open it: `https://<desk>.<tailnet>.ts.net:8443/` — the agent posts the exact URL at the gate. Web Bluetooth needs a secure context; the phone cannot reach `127.0.0.1`. |
 | **The phone** | Bluefy, its Bluetooth on, within a few metres of the board. Close other Bluefy tabs that hold the board. |
 | **The agent** | At the desk's terminal, to make the board engine-less over USB for step 3 (`scripts/ota/make-engine-less.sh 10:BD:A3:B0:8E:30` on loose-c6) and to read the board's console **between** steps, never while the phone is updating it. It restores the backup after the walk. |
@@ -102,16 +102,18 @@ build — not a phone's numbers):**
 
 | Phase | Mac Chrome (16 in flight) |
 |---|---|
-| Backup (the engine read back, 1.84 MB) — only when Studio has no copy of the board's engine | 7–11 KiB/s steady at a quiet host, ~4 min; under a heavy host (load 100–180) it decayed to 2–3 KiB/s |
+| Backup (the engine read back, 1.84 MB) — only when Studio has no copy of the board's engine **and** the store has none (a dev build: a board on a published release gets its engine from the release store, never a read-back) | 1016 B pieces since the backup fix: 233–342 s (5.4–7.9 KiB/s on average; 15 s windows up to 9.6–13.5 KiB/s) at host load 33–212, six runs, none ended mid-backup by itself |
 | Core (1.37 MB raw, 0.85 MB on the wire) | 22–23 s at best (38 KiB/s on the wire), 85–135 s at worst |
 | Engine (1.84 MB raw, 1.09 MB on the wire) | 74–112 s (16–24 KB/s raw) |
 | Each board reset → reconnected | 1.0–3.0 s |
 | Press → up to date, no backup | **122 s**; **164 s** with a power cut at 40 % of the core |
+| Press → up to date, with a backup | **297–507 s** where Chrome reconnected by itself (d1, r1, e1); the other four needed the board re-picked after a board reset (below) |
 
 **Expect on the iPhone:** no Bluefy number exists yet — this walk is the
 first. With half Mac Chrome's window, plan on **3–6 minutes** without a
 backup and **another 4–8 minutes** if the card starts with "Backing up
-current firmware…". Keep the phone awake and near the board for step 1.
+current firmware…" (dev builds only; a released board's engine comes from
+the store). Keep the phone awake and near the board for step 1.
 
 **What to watch:**
 
@@ -121,12 +123,15 @@ current firmware…". Keep the phone awake and near the board for step 1.
 - A **drop/reconnect loop** — "reconnecting…" over and over, or a
   reconnect that never comes ("1 remembered board not connected"). On Mac
   Chrome four of eight runs lost the board (after a reset, or a link that
-  ended mid-transfer) and never reconnected by themselves; in the one we
-  tried, re-opening the board from Devices (a reconnect, DS12) finished the
-  update with no click. Whether Bluefy reconnects by itself is what step 2
-  asks.
-- A backup that ends early: on Mac Chrome two backups under a heavy host
-  ended at 58–59 % with no board reset and no reconnect.
+  ended mid-transfer) and never reconnected by themselves, and after the
+  backup fix four of seven again, every one at a board reset (into
+  core-only after the backup, or onto the trial core); each time,
+  re-picking the board from Devices finished the update with no other
+  click. Whether Bluefy reconnects by itself is what step 2 asks.
+- A backup that ends early, or a backup that does not pick up again after a
+  reconnect: fixed on the desk (the backup resumes from its last piece,
+  and waits up to 30 s for the reconnected link's login). The board now
+  says why it refuses (`[OTA] refused on link N: A: log in first`).
 
 **Fallback URLs** (append to Studio's URL, then reload and re-pick the
 board): `?ble-writes=without-response:4` (a smaller window, if frames are
@@ -134,8 +139,9 @@ being lost), `?ble-writes=with-response` (every frame with response, #880's
 rule: slowest, most conservative).
 
 **Keep the board's USB unplugged from any host** (power only) while it
-updates: with a host on its USB link the board closed the Bluetooth link
-mid-backup and the backup never resumed (the defect above).
+updates. The defect that made this a must (a host on its USB link closed
+the Bluetooth link mid-backup) is fixed; it stays the walk's rule so the
+phone is the only thing under test.
 
 ## The gate's questions (for Yona)
 
@@ -216,6 +222,34 @@ No USB host unless the row says so. Host load in brackets. Evidence:
 Surprise 1 (a USB host stalls the Bluetooth backup) **still holds** on the
 merged build, now as a closed link instead of a stall: s1 against a1f. Filed
 as `docs/defects/2026-10-07-a-usb-host-on-the-board-closes-its-bluetooth-update-link.md`.
+
+## The backup fix on silicon (2026-10-07, Mac Chrome 154 via CDP, board ~1 m)
+
+Fixture C6, X = `a0a0a0a0+81077deeeef7` (refusals and resets in words),
+Studio the release story bundle of `ed15e1091` (1016 B read-back pieces,
+the engine-login wait) for r1–c3 and of `6f3fc621b` (the wait on any later
+link) for e1; Y = Studio's own build. `--fresh-cache` every run (the engine
+cache really empty). Wi-Fi on, 0 networks, not joined. No USB host unless
+the row says so. Backed up first (chip MD5 `305d3f97…` = the earlier
+backup file), restored after. Host load in brackets. Evidence:
+`lp2025/2026-10-05-0820-ota-studio-ble-updates/data/ble-backup-2026-10-07/`.
+
+| Run | Backup (to 99 %) | Press → up to date | Mid-backup link ends | Resent (frames, links ended) | Reconnects | Result |
+|---|---|---|---|---|---|---|
+| d1 (before the piece fix, `81077deee`) | 211 s, 8 KB/s [64–169] | 297.7 s | 0 | 242 of 15,352 | 2.0, 1.0 s | complete, no click |
+| d2 (before the piece fix) | link closed by the board at 35 % (232 s): `reply still not out of the frame buffer after 4633 ms` | — | 1 | 5 of 1,406 | 2.0 s, refused ×4, resumed; then stuck at 36 % (a lost answer) | the diagnosis run |
+| r1 | 318 s, 5 KB/s [213–168] | **507.2 s** | 0 | 268 of 15,889 | 1.3, 2.0, 3.0 s | complete, no click |
+| r2 | 270 s [150–108] | core done at ~318 s; Chrome did not reconnect after the reset onto the trial core; re-picked → up to date in 72 s | 0 | 75 of 9,342 | 1.0 s | complete, **re-pick** |
+| r3 | 342 s [91–14] | Chrome did not reconnect after the reset into core-only; re-picked → up to date in 76 s (two joins before the press hung until a Chrome restart) | 0 | 36 of 4,355 | — | complete, **re-pick** |
+| c1b | 233 s [33–56] (the cut did not fire: Mac Chrome has no `getDevices`) | Chrome did not reconnect into core-only; re-pick: core, then a drop mid-heal; a second re-pick found it up to date | 0 | 22 of 4,347 | — | complete, **two re-picks** |
+| c3 cut at 40 % at the central | 323 s [59–24]; cut at 144 s, reconnected 2.0 s, backup went on; the new link ended again 13 s later (cause not seen), reconnected 2.0 s, went on | Chrome did not reconnect into core-only; re-picked → up to date in 82 s | 1 cut + 1 | 28 of 4,436 | 2.0, 2.0 s | **resumed**; complete, **re-pick** |
+| e1 USB host 40 s from 30 % (the old s1) | 326 s [32–113]; the link stayed up; board frames `max ≤ 105 ms` while the host was on | **426.5 s** | 0 | 248 of 15,832 | 3.0, 2.0 s | complete, no click |
+
+Three consecutive full updates with a backup (r1, r2, r3) completed; r2 and
+r3 needed the board re-picked after a board reset, which the brief counts
+apart. The cut run (c3) resumed the backup twice with no click. A cut by
+the central is `gatt.disconnect()` on the page's own GATT server: the board
+sees a clean disconnect, not an out-of-range timeout.
 
 ## Measured at the walk (fill in)
 
