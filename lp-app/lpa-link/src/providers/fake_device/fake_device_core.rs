@@ -138,20 +138,23 @@ impl FakeEsp32Device {
         }
     }
 
-    /// Put the board on `clock` instead of the wall clock: its own timers
+    /// Run the board on `clock` instead of the wall clock: its own timers
     /// and the host end of every link attached to it
     /// ([`fake_device_link`](crate::device_link::fake::fake_device_link))
-    /// read it.
+    /// read it from now on.
     ///
-    /// Meant for before the board's first byte: a boot already under way
-    /// restarts its wait on the new clock, and a link already up keeps
-    /// whatever its timers last read.
+    /// The board's time carries on from where it is, at `clock`'s rate:
+    /// whatever origin `clock` has, nothing the board or a link already
+    /// timed sees time jump, in either direction.
     pub fn set_clock(&self, clock: FakeDeviceClock) {
-        *self
+        let mut current = self
             .clock
             .write()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = clock;
-        self.lock().restamp();
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let offset = i128::from(current()) - i128::from(clock());
+        *current = Arc::new(move || {
+            u64::try_from((i128::from(clock()) + offset).max(0)).unwrap_or(u64::MAX)
+        });
     }
 
     /// Whether `other` is a handle on this same board.
@@ -528,19 +531,6 @@ impl FakeDeviceCore {
         // Dropping a RunningLp phase drops the HostRuntime, which joins the
         // server thread (bounded).
         self.phase = FakePhase::fresh(&self.script.boot, self.now());
-    }
-
-    /// Re-read every timestamp on the board's (new) clock: a boot under way
-    /// waits its delay again, and every cadence starts over.
-    fn restamp(&mut self) {
-        let now = self.now();
-        match &mut self.phase {
-            FakePhase::BootingLp { since } => *since = now,
-            FakePhase::Passive { last_emit, .. } => *last_emit = None,
-            FakePhase::RunningLp { .. } => {}
-        }
-        self.last_heartbeat = None;
-        self.out_since = self.out_since.map(|_| now);
     }
 
     /// Whether the server has work this board is still owed: a boot's hello,
