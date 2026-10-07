@@ -73,8 +73,8 @@ impl WsWire {
 }
 
 /// Whether a session error is the link itself dying (the phrase
-/// `browser_websocket.js` reserves for a drop), as opposed to one failed
-/// send.
+/// `browser_websocket.js` reserves for a drop: `wi-fi link lost`, or
+/// `relay link lost` through the relay), as opposed to one failed send.
 pub fn is_link_lost(error: &str) -> bool {
-    error.starts_with("wi-fi link lost")
+    error.starts_with("wi-fi link lost") || error.starts_with("relay link lost")
 }

@@ -28,6 +28,15 @@
 //! changes, and a later link to the same board by another road (the relay)
 //! presents them too.
 //!
+//! **Through lightplayer.app's relay, held keys only** (the network
+//! transport's ND7): a link whose address is the relay's browser leg
+//! (`wss://<host>/relay/board/<mac>`) is presented the account's key, then
+//! this browser's — never a key a typed password derived, and never the
+//! anonymous key (the provider's walk is held-only there). Its address names
+//! the board, so it is the board's from the first connection: a key the
+//! board refused as wrong on the LAN is not presented through the relay
+//! either, and the other way round.
+//!
 //! A key a board refused as WRONG (it knows the salt; the PSK did not match)
 //! is charged to that board's login backoff, so the provider reports it
 //! ([`LinkKeys::refused_wrong`]) and it is never presented there again this
@@ -38,7 +47,9 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
-use lpa_link::providers::network_link::{LinkKey, LinkKeys};
+use lpa_link::providers::network_link::{LinkKey, LinkKeys, board_from_relay_socket_url};
+
+use super::key_holder::KeyHolder;
 
 /// The key a link presents for the access entry whose salt is `salt` and
 /// whose derived key is `k`: the salt as its id, `link_psk(K)` as its PSK.
@@ -58,7 +69,9 @@ pub struct NetworkLinkKeys {
 
 #[derive(Default)]
 struct KeyStore {
-    held: Vec<LinkKey>,
+    /// The held keys in the order a LAN link presents them, each with whose
+    /// it is (the relay presents the account's first).
+    held: Vec<(KeyHolder, LinkKey)>,
     held_generation: u64,
     /// By board: its MAC once known, its socket URL until then.
     boards: BTreeMap<String, BoardKeys>,
@@ -76,9 +89,26 @@ impl KeyStore {
                 .map_or(0, |board| board.generation)
     }
 
-    /// Where the keys for the link at `address` live.
+    /// Where the keys for the link at `address` live: a relay leg's board
+    /// (its address names it), an alias's board, or the address itself.
     fn board_of<'a>(&'a self, address: &'a str) -> &'a str {
+        if let Some(board) = board_from_relay_socket_url(address) {
+            return board;
+        }
         self.aliases.get(address).map_or(address, String::as_str)
+    }
+
+    /// The held keys a relay link presents, best first: the account's key,
+    /// then this browser's. Nothing else a browser holds is presented
+    /// through the relay.
+    fn held_for_relay(&self) -> impl Iterator<Item = &LinkKey> {
+        let of = |holder: KeyHolder| {
+            self.held
+                .iter()
+                .filter(move |(held_by, _)| *held_by == holder)
+                .map(|(_, key)| key)
+        };
+        of(KeyHolder::Account).chain(of(KeyHolder::Browser))
     }
 }
 
@@ -94,9 +124,10 @@ impl NetworkLinkKeys {
         Self::default()
     }
 
-    /// This browser's held keys, as links present them. A change moves every
-    /// board's generation; the same keys again move nothing.
-    pub fn set_held(&self, keys: Vec<LinkKey>) {
+    /// This browser's held keys, each with whose it is, in the order a LAN
+    /// link presents them. A change moves every board's generation; the same
+    /// keys again move nothing.
+    pub fn set_held(&self, keys: Vec<(KeyHolder, LinkKey)>) {
         let mut store = self.inner.borrow_mut();
         if store.held != keys {
             store.held = keys;
@@ -186,11 +217,19 @@ impl LinkKeys for NetworkLinkKeys {
         let store = self.inner.borrow();
         let board = store.boards.get(store.board_of(address));
         let wrong = |key: &LinkKey| board.is_some_and(|board| board.wrong.contains(key));
+        if board_from_relay_socket_url(address).is_some() {
+            // Held keys only, the account's first (ND7).
+            return store
+                .held_for_relay()
+                .filter(|key| !wrong(key))
+                .cloned()
+                .collect();
+        }
         board
             .map(|board| board.typed.as_slice())
             .unwrap_or_default()
             .iter()
-            .chain(store.held.iter())
+            .chain(store.held.iter().map(|(_, key)| key))
             .filter(|key| !wrong(key))
             .cloned()
             .collect()
@@ -242,7 +281,7 @@ mod tests {
     #[test]
     fn typed_keys_go_first_then_the_held_ones() {
         let keys = NetworkLinkKeys::new();
-        keys.set_held(vec![key(1), key(2)]);
+        keys.set_held(vec![browser(1), account(2)]);
         assert_eq!(keys.keys_for(BOARD), vec![key(1), key(2)]);
 
         let before = keys.generation(BOARD);
@@ -257,18 +296,18 @@ mod tests {
     #[test]
     fn the_same_held_keys_again_move_no_generation() {
         let keys = NetworkLinkKeys::new();
-        keys.set_held(vec![key(1)]);
+        keys.set_held(vec![browser(1)]);
         let generation = keys.generation(BOARD);
-        keys.set_held(vec![key(1)]);
+        keys.set_held(vec![browser(1)]);
         assert_eq!(keys.generation(BOARD), generation);
-        keys.set_held(vec![key(1), key(2)]);
+        keys.set_held(vec![browser(1), account(2)]);
         assert_ne!(keys.generation(BOARD), generation);
     }
 
     #[test]
     fn a_wrong_key_is_never_presented_there_again_until_offered_anew() {
         let keys = NetworkLinkKeys::new();
-        keys.set_held(vec![key(1)]);
+        keys.set_held(vec![browser(1)]);
         keys.offer(BOARD, vec![key(7)]);
         let generation = keys.generation(BOARD);
 
@@ -295,7 +334,7 @@ mod tests {
     #[test]
     fn forgetting_typed_keys_keeps_the_held_ones() {
         let keys = NetworkLinkKeys::new();
-        keys.set_held(vec![key(1)]);
+        keys.set_held(vec![browser(1)]);
         keys.offer(BOARD, vec![key(7)]);
         keys.forget_typed();
         assert_eq!(keys.keys_for(BOARD), vec![key(1)]);
@@ -305,7 +344,7 @@ mod tests {
     #[test]
     fn keys_typed_for_an_address_follow_the_board_to_its_next_address() {
         let keys = NetworkLinkKeys::new();
-        keys.set_held(vec![key(1)]);
+        keys.set_held(vec![browser(1)]);
         // Typed while the board was only an address.
         keys.offer(BOARD, vec![key(7)]);
         let before = keys.generation(BOARD);
@@ -345,10 +384,66 @@ mod tests {
     #[test]
     fn debug_counts_and_never_prints_a_key() {
         let keys = NetworkLinkKeys::new();
-        keys.set_held(vec![key(0x5c)]);
+        keys.set_held(vec![browser(0x5c)]);
         let shown = format!("{keys:?}");
         assert!(shown.contains("held: 1"), "{shown}");
         assert!(!shown.contains("5c"), "{shown}");
+    }
+
+    const RELAY: &str = "wss://lightplayer.app/relay/board/a0f26287b48c";
+
+    #[test]
+    fn through_the_relay_only_held_keys_are_presented_the_accounts_first() {
+        let keys = NetworkLinkKeys::new();
+        keys.set_held(vec![browser(1), account(2)]);
+        // The LAN keeps the order it was given.
+        assert_eq!(keys.keys_for(BOARD), vec![key(1), key(2)]);
+        // The relay: the account's key, then this browser's.
+        assert_eq!(keys.keys_for(RELAY), vec![key(2), key(1)]);
+
+        // A password typed for the board (on the LAN) is never presented
+        // through the relay, even once the LAN address is known to be it.
+        keys.alias(BOARD, MAC);
+        keys.offer(BOARD, vec![key(7)]);
+        assert_eq!(keys.keys_for(BOARD), vec![key(7), key(1), key(2)]);
+        assert_eq!(keys.keys_for(RELAY), vec![key(2), key(1)]);
+        assert!(keys.has_typed(RELAY), "the relay leg is the board's");
+    }
+
+    #[test]
+    fn a_relay_leg_is_its_boards_from_the_first_connection() {
+        let keys = NetworkLinkKeys::new();
+        keys.set_held(vec![browser(1), account(2)]);
+        // Refused as wrong through the relay: the board's to drop, so the LAN
+        // address that is the same board does not present it either.
+        keys.refused_wrong(RELAY, &key(2));
+        assert_eq!(keys.keys_for(RELAY), vec![key(1)]);
+        keys.alias(BOARD, MAC);
+        assert_eq!(keys.keys_for(BOARD), vec![key(1)]);
+        // Another board through the relay is untouched.
+        assert_eq!(
+            keys.keys_for("wss://lightplayer.app/relay/board/a0f26287b48d"),
+            vec![key(2), key(1)]
+        );
+    }
+
+    #[test]
+    fn signed_out_with_no_keys_the_relay_is_presented_nothing() {
+        let keys = NetworkLinkKeys::new();
+        assert!(keys.keys_for(RELAY).is_empty());
+        let generation = keys.generation(RELAY);
+        // Signing in hands the account's key over: the relay link re-reads.
+        keys.set_held(vec![account(2)]);
+        assert!(keys.generation(RELAY) > generation);
+        assert_eq!(keys.keys_for(RELAY), vec![key(2)]);
+    }
+
+    fn browser(id: u8) -> (KeyHolder, LinkKey) {
+        (KeyHolder::Browser, key(id))
+    }
+
+    fn account(id: u8) -> (KeyHolder, LinkKey) {
+        (KeyHolder::Account, key(id))
     }
 
     fn key(id: u8) -> LinkKey {

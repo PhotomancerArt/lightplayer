@@ -408,6 +408,191 @@ async fn a_connect_someone_asked_for_settles_on_the_boards_answer() {
     assert!(lan::forget(session.session).await);
 }
 
+/// Through the relay (its browser leg, `…/relay/board/<mac>`) the page
+/// presents the keys it holds and NEVER the anonymous key — even to a board
+/// open to anyone — and a connect someone asked for waits for the link to
+/// come up, not for the relay's first frame.
+#[wasm_bindgen_test]
+async fn a_relay_session_presents_held_keys_only_and_settles_when_up() {
+    let url = "ws://127.0.0.1:2812/relay/board/a0f26287b401";
+    TestKeys::install(vec![key(0x51), key(0xED)]);
+    let bench = Bench::new(
+        url,
+        BoardDouble::secure(Opens::Edit, vec![(key(0xED), Tier::Play)]),
+    );
+    let session = lan::open_relay_session(url, &[4404, 4429]).expect("a session");
+    assert!(session.is_relay());
+    // The model's link services the session from its first connection.
+    let wire = WsWire::new(session.session);
+    let pump = bench.spawn_board_loop();
+    let up = spawn_until_up(session.session);
+    settled(&up).await.expect("the board accepted a held key");
+    assert!(wire.is_link_up());
+    // The page's end is up first; the board's says hello on its next turn.
+    for _ in 0..200 {
+        if bench.board.borrow().last_hello_granted.is_some() {
+            break;
+        }
+        tick(10).await;
+    }
+    pump.set(false);
+
+    assert_eq!(
+        bench.board.borrow().keys_seen,
+        vec![[0x51; KEY_ID_BYTES], [0xED; KEY_ID_BYTES]],
+        "the held keys, in order, and no anonymous key"
+    );
+    assert_eq!(
+        bench.board.borrow().last_hello_granted,
+        Some(Some(Tier::Play)),
+        "the key's tier, not the board's open one"
+    );
+    assert!(lan::forget(session.session).await);
+}
+
+/// When no held key opens the board, the relay session is given up in its
+/// own words (`relay link lost: …`) and not redialled — and the anonymous
+/// key the board would take is never offered.
+#[wasm_bindgen_test]
+async fn a_relay_session_no_held_key_opens_is_given_up_in_words() {
+    let url = "ws://127.0.0.1:2812/relay/board/a0f26287b402";
+    TestKeys::install(vec![key(0x51)]);
+    let bench = Bench::new(url, BoardDouble::secure(Opens::Edit, Vec::new()));
+    let session = lan::open_relay_session(url, &[4404, 4429]).expect("a session");
+    let _wire = WsWire::new(session.session);
+    let pump = bench.spawn_board_loop();
+    let refused = settled(&spawn_until_up(session.session))
+        .await
+        .expect_err("nothing this page holds opens the board");
+    pump.set(false);
+    assert_eq!(
+        refused,
+        format!(
+            "relay link lost: {}",
+            lpa_link::providers::browser_websocket::RELAY_NO_HELD_KEY
+        )
+    );
+    assert_eq!(bench.board.borrow().keys_seen, vec![[0x51; KEY_ID_BYTES]]);
+    for _ in 0..20 {
+        tick(20).await;
+    }
+    assert_eq!(
+        js_sockets_opened(url),
+        1,
+        "a given-up session is not redialled"
+    );
+    assert!(
+        !lan::present_sessions()
+            .iter()
+            .any(|present| present.url == url)
+    );
+    assert!(lan::forget(session.session).await);
+}
+
+/// A relay link that ran out of held keys waits a few seconds for the page's
+/// keys to change (the account's key still loading, a sign-in) and, when one
+/// arrives, presents it and comes up — on the same socket.
+#[wasm_bindgen_test]
+async fn a_relay_session_out_of_keys_comes_up_when_a_key_arrives() {
+    let url = "ws://127.0.0.1:2812/relay/board/a0f26287b404";
+    let keys = TestKeys::install(vec![key(0x51)]);
+    let bench = Bench::new(
+        url,
+        BoardDouble::secure(Opens::Edit, vec![(key(0xED), Tier::Edit)]),
+    );
+    let session = lan::open_relay_session(url, &[4404, 4429]).expect("a session");
+    let wire = WsWire::new(session.session);
+    let pump = bench.spawn_board_loop();
+    let up = spawn_until_up(session.session);
+    for _ in 0..200 {
+        if bench.board.borrow().keys_seen.len() >= 1 {
+            break;
+        }
+        tick(10).await;
+    }
+    // The account's key arrives after the browser's was refused.
+    keys.set(vec![key(0x51), key(0xED)]);
+    settled(&up)
+        .await
+        .expect("the key that arrived opened the board");
+    pump.set(false);
+    assert!(wire.is_link_up());
+    let seen = bench.board.borrow().keys_seen.clone();
+    assert_eq!(seen.first(), Some(&[0x51; KEY_ID_BYTES]), "{seen:?}");
+    assert_eq!(seen.last(), Some(&[0xED; KEY_ID_BYTES]), "{seen:?}");
+    assert!(
+        seen.iter()
+            .all(|id| *id == [0x51; KEY_ID_BYTES] || *id == [0xED; KEY_ID_BYTES]),
+        "only held keys, never the anonymous one: {seen:?}"
+    );
+    assert_eq!(js_sockets_opened(url), 1, "on the same socket");
+    assert!(lan::forget(session.session).await);
+}
+
+/// A relay refusal (its close code) ends the session in the relay's words
+/// and is not redialled — each redial would spend the page's tries at the
+/// relay; any other drop redials, as on the LAN.
+#[wasm_bindgen_test]
+async fn a_relay_refusal_ends_the_session_and_another_drop_redials() {
+    let url = "ws://127.0.0.1:2812/relay/board/a0f26287b403";
+    TestKeys::install(vec![key(0xED)]);
+    let mut bench = Bench::new(
+        url,
+        BoardDouble::secure(Opens::Nobody, vec![(key(0xED), Tier::Edit)]),
+    );
+    let session = lan::open_relay_session(url, &[4404, 4429]).expect("a session");
+    for _ in 0..200 {
+        if lan::present_sessions()
+            .iter()
+            .any(|present| present.url == url && present.connected)
+        {
+            break;
+        }
+        tick(10).await;
+    }
+    let wire = WsWire::new(session.session);
+    bench
+        .exchange_until(&wire, |reads| hello_count(reads) >= 1)
+        .await;
+
+    // The board left the relay mid-session (4410): the page redials.
+    js_accept_connects(url, true);
+    assert!(js_drop_socket(url, 4410, "board-gone"));
+    let mut errors = Vec::new();
+    for _ in 0..400 {
+        errors.extend(wire.take_errors().unwrap_or_default());
+        if js_sockets_opened(url) >= 2 {
+            break;
+        }
+        tick(10).await;
+    }
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.starts_with("relay link lost") && error.contains("code 4410")),
+        "{errors:?}"
+    );
+    assert_eq!(js_sockets_opened(url), 2, "a 4410 is redialled");
+
+    // Now it is offline (4404): the session ends there.
+    for _ in 0..200 {
+        if js_drop_socket(url, 4404, "board-offline") {
+            break;
+        }
+        tick(10).await;
+    }
+    for _ in 0..40 {
+        tick(20).await;
+    }
+    assert_eq!(js_sockets_opened(url), 2, "a 4404 is not redialled");
+    assert!(
+        !lan::present_sessions()
+            .iter()
+            .any(|present| present.url == url)
+    );
+    assert!(lan::forget(session.session).await);
+}
+
 #[wasm_bindgen_test]
 async fn a_reset_over_wifi_fails_by_name() {
     let url = "ws://10.0.0.8/link";
@@ -847,6 +1032,18 @@ fn spawn_settle(session: u32) -> Rc<RefCell<Option<Result<(), String>>>> {
     let slot = Rc::clone(&out);
     wasm_bindgen_futures::spawn_local(async move {
         let result = lan::connect_and_settle(session, 30_000).await;
+        *slot.borrow_mut() = Some(result);
+    });
+    out
+}
+
+/// Start `connect_until_up` on `session` (the relay's connect; the same
+/// generous window).
+fn spawn_until_up(session: u32) -> Rc<RefCell<Option<Result<(), String>>>> {
+    let out = Rc::new(RefCell::new(None));
+    let slot = Rc::clone(&out);
+    wasm_bindgen_futures::spawn_local(async move {
+        let result = lan::connect_until_up(session, 30_000).await;
         *slot.borrow_mut() = Some(result);
     });
     out

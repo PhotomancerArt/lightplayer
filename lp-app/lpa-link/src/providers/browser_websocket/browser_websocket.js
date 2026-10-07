@@ -37,6 +37,16 @@
 // Presence is announced the way Web Serial's hotplug is — a `connect` /
 // `disconnect` edge with no payload — and Studio's device layer re-derives
 // from `presentSessions()`.
+//
+// TWO KINDS OF SESSION, ONE SOCKET CODE (the network transport's ND1). A
+// `wi-fi` session dials a board's own `ws://<board>/link`; a `relay` session
+// dials lightplayer.app's browser leg (`wss://<host>/relay/board/<mac>`),
+// which carries the same frames. What differs is said here and nowhere else:
+// a relay session's words start `relay …` instead of `wi-fi …` (so its drop
+// is `relay link lost: …`), and a close with one of its `finalCodes` (the
+// relay's refusals: not signed in, board offline, too many tries, busy) ends
+// the session instead of redialling — a redial would only be refused again,
+// and each one spends the page's tries at the relay.
 
 /// Rule 1.
 export const CONNECT_TIMEOUT_MS = 10_000;
@@ -70,6 +80,13 @@ export function installWebsocketEvents(onConnect, onDisconnect) {
   }
   presence.onConnect = onConnect;
   presence.onDisconnect = onDisconnect;
+  // A session opened at page load (`?lan=`, `?relay=`) can come up before
+  // the page installs these — a socket to a local server opens in
+  // milliseconds — and its edge was said to nobody. Say it again now, so
+  // the sweep that links it is not left waiting for the next edge.
+  if ([...sessions.values()].some((session) => session.present)) {
+    setTimeout(() => announce("connect"), 0);
+  }
   return true;
 }
 
@@ -85,9 +102,13 @@ function announce(edge) {
 // --- sessions ----------------------------------------------------------------
 
 class LanSession {
-  constructor(id, url) {
+  constructor(id, url, kind, finalCodes) {
     this.id = id;
     this.url = url;
+    // "wi-fi" | "relay": the first word of everything the session says.
+    this.kind = kind === "relay" ? "relay" : "wi-fi";
+    // Close codes after which the session is not redialled.
+    this.finalCodes = new Set(finalCodes ?? []);
     // idle | connecting | connected | lost | closed
     this.state = "idle";
     this.generation = 0;
@@ -107,10 +128,12 @@ class LanSession {
     // turned the connection away.
     this.received = 0;
     this.lastDrop = null;
+    // The link above the socket said it is up on this connection (`markUp`).
+    this.up = false;
   }
 
   describe() {
-    return { id: this.id, url: this.url, connected: this.state === "connected" };
+    return { id: this.id, url: this.url, kind: this.kind, connected: this.state === "connected" };
   }
 
   clearFrames() {
@@ -132,8 +155,9 @@ class LanSession {
 /// Start (or keep) a session for the board at `url`: one per URL per page.
 /// The session wants its link from now on, so it connects at once and keeps
 /// reconnecting; it is present (listed) once it is connected. Answers its
-/// descriptor `{ id, url, connected }`.
-export function openSession(url) {
+/// descriptor `{ id, url, kind, connected }`. `options` (optional, read when
+/// the session is made): `{ kind: "wi-fi" | "relay", finalCodes: [code…] }`.
+export function openSession(url, options) {
   for (const session of sessions.values()) {
     if (session.url === url) {
       if (!session.wanted) {
@@ -143,7 +167,7 @@ export function openSession(url) {
       return session.describe();
     }
   }
-  const session = new LanSession(nextSessionId++, url);
+  const session = new LanSession(nextSessionId++, url, options?.kind, options?.finalCodes);
   sessions.set(session.id, session);
   session.wanted = true;
   startReconnect(session, 0);
@@ -199,6 +223,7 @@ export async function disconnect(id) {
   session.generation += 1;
   session.connecting = null;
   session.state = "closed";
+  session.up = false;
   closeSocket(session);
   session.clearFrames();
   session.activity();
@@ -228,7 +253,7 @@ export function write(id, frame) {
   const session = requireSession(id);
   const socket = session.socket;
   if (session.state !== "connected" || !socket || socket.readyState !== OPEN) {
-    session.errors.push("write on a wi-fi link that is not connected");
+    session.errors.push(`write on a ${session.kind} link that is not connected`);
     return false;
   }
   const data = frame instanceof Uint8Array ? frame.slice() : new Uint8Array(frame);
@@ -274,7 +299,13 @@ export function onActivity(id, callback) {
 /// later"). Resolves `true` on a frame, or when `ms` pass with the link
 /// still up; rejects with the drop's words when it drops. Never touches the
 /// frames themselves (the link reads those).
-export function settle(id, ms) {
+///
+/// `untilUp`: wait for more than a frame — for the link above the socket to
+/// say it is up (`markUp`). Through the relay the first frame proves only
+/// that the relay passed the socket on; the board's answer to the key is
+/// what counts, and a session that runs out of keys gives up (`giveUp`),
+/// which rejects here with its words.
+export function settle(id, ms, untilUp) {
   const session = requireSession(id);
   const generation = session.generation;
   const heard = session.received;
@@ -286,7 +317,8 @@ export function settle(id, ms) {
         return;
       }
       const dropped = session.generation !== generation || session.state !== "connected";
-      if (!dropped && session.received === heard) {
+      const proved = untilUp ? session.up : session.received !== heard;
+      if (!dropped && !proved) {
         return;
       }
       done = true;
@@ -294,7 +326,7 @@ export function settle(id, ms) {
       session.listeners.delete(check);
       if (dropped) {
         const why = session.lastDrop ?? "the connection closed";
-        reject(new Error(`wi-fi link lost: ${why}`));
+        reject(new Error(`${session.kind} link lost: ${why}`));
       } else {
         resolve(true);
       }
@@ -309,6 +341,32 @@ export function settle(id, ms) {
     session.listeners.add(check);
     check();
   });
+}
+
+/// The link above the socket is up on the connection open now (its secure
+/// handshake is done): what `settle(…, untilUp)` waits for.
+export function markUp(id) {
+  const session = sessions.get(id);
+  if (!session || session.up || session.state !== "connected") {
+    return;
+  }
+  session.up = true;
+  session.activity();
+}
+
+/// End the session for good, saying why: the link above the socket has
+/// nothing left to try (a relay session out of keys). Heard as a drop —
+/// `<kind> link lost: <why>` — but never redialled, and no longer listed.
+export function giveUp(id, why) {
+  const session = sessions.get(id);
+  if (!session) {
+    return;
+  }
+  session.wanted = false;
+  cancelReconnect(session);
+  if (session.state === "connected" || session.state === "connecting") {
+    handleDrop(session, why);
+  }
 }
 
 export function takeErrors(id) {
@@ -362,13 +420,13 @@ function openSocket(session, generation) {
       reject(new Error(why));
     };
     const timer = setTimeout(
-      () => fail(`wi-fi connect timed out after ${CONNECT_TIMEOUT_MS / 1000} s`),
+      () => fail(`${session.kind} connect timed out after ${CONNECT_TIMEOUT_MS / 1000} s`),
       CONNECT_TIMEOUT_MS,
     );
     try {
       socket = new globalThis.WebSocket(session.url);
     } catch (error) {
-      fail(`wi-fi connect failed: ${messageOf(error)}`);
+      fail(`${session.kind} connect failed: ${messageOf(error)}`);
       return;
     }
     socket.binaryType = "arraybuffer";
@@ -392,6 +450,7 @@ function openSocket(session, generation) {
       session.clearFrames();
       session.overflowNoted = false;
       session.state = "connected";
+      session.up = false;
       session.attempt = 0;
       const wasPresent = session.present;
       session.present = true;
@@ -410,15 +469,19 @@ function openSocket(session, generation) {
     socket.onerror = () => {
       // A connect that fails fires error, then close; the close says why.
       if (!settled) {
-        fail(`wi-fi connect to ${session.url} failed`);
+        fail(`${session.kind} connect to ${session.url} failed`);
       }
     };
     socket.onclose = (event) => {
       if (!settled) {
-        fail(`wi-fi connect to ${session.url} was closed (${closeWords(event)})`);
+        fail(`${session.kind} connect to ${session.url} was closed (${closeWords(event)})`);
         return;
       }
       if (session.socket === socket && session.generation === generation) {
+        // A refusal that would only be repeated ends the session here.
+        if (session.finalCodes.has(event?.code)) {
+          session.wanted = false;
+        }
         handleDrop(session, `the board closed the link (${closeWords(event)})`);
       }
     };
@@ -427,7 +490,7 @@ function openSocket(session, generation) {
 
 function onFrame(session, data) {
   if (typeof data === "string") {
-    session.errors.push("a text message on the wi-fi link (the link is binary frames only)");
+    session.errors.push(`a text message on the ${session.kind} link (the link is binary frames only)`);
     session.activity();
     return;
   }
@@ -436,7 +499,7 @@ function onFrame(session, data) {
   if (session.bufferedBytes + frame.length > MAX_BUFFERED_BYTES) {
     if (!session.overflowNoted) {
       session.overflowNoted = true;
-      session.errors.push("wi-fi frames nobody drained were dropped");
+      session.errors.push(`${session.kind} frames nobody drained were dropped`);
     }
   } else {
     session.frames.push(frame);
@@ -452,8 +515,9 @@ function handleDrop(session, why) {
   session.generation += 1;
   session.connecting = null;
   session.state = "lost";
+  session.up = false;
   closeSocket(session);
-  session.errors.push(`wi-fi link lost: ${why}`);
+  session.errors.push(`${session.kind} link lost: ${why}`);
   session.clearFrames();
   session.activity();
   if (session.present) {

@@ -23,6 +23,16 @@
 //!   the link holds a key that is no longer the best, the link is rekeyed in
 //!   place: the session ends — read as a link reset, as over Web Serial — and
 //!   a new one starts presenting the new key, on the same socket.
+//! - **Through the relay, held keys only.** A session whose socket is the
+//!   relay's browser leg walks [`KeyWalk::held_only`]: the page's keys and no
+//!   anonymous key. When none opens the board — or the page holds none — the
+//!   walk waits [`RELAY_KEY_GRACE_MS`] for the page's keys to change (a page
+//!   still loading its account's key, a sign-in), and then the session is
+//!   given up with [`RELAY_NO_HELD_KEY`] (heard as `relay link lost: …`),
+//!   and nothing is redialled.
+//! - **Up is said.** Once a connection's secure link is up the page is told
+//!   (`markUp`), so a connect someone is waiting on through the relay
+//!   answers on the board's acceptance, not on the relay's first frame.
 //! - **Serviced from the start of a connection**, at most every
 //!   [`SERVICE_TICK_CAP`] plus a pass on every JS activity (a message, the
 //!   link up or down), so the handshake does not wait for the model's open.
@@ -39,14 +49,16 @@ use js_sys::{Function, Reflect, Uint8Array};
 use lpc_wire::lp_link::{LinkConfig, Micros};
 use wasm_bindgen::{JsCast, JsValue, prelude::*};
 
-use super::browser_websocket;
+use super::browser_websocket::{self, tap_tag};
 use super::ws_link_keys::link_keys;
 use crate::device_link::link_port_edge::{
     SERVICE_TICK_CAP, now_micros, random_nonce, spawn_service_loop,
 };
 use crate::device_link::link_port_service::{LinkPortService, SecureLinkEvent};
 use crate::device_link::wire_reader::{WireRead, device_log_level, packed_replies_wanted};
-use crate::providers::network_link::{KeyRefusal, KeyWalk, KeyWalkStep, LinkKey, LinkKeys};
+use crate::providers::network_link::{
+    KeyRefusal, KeyWalk, KeyWalkStep, LinkKey, LinkKeys, board_from_relay_socket_url,
+};
 
 /// Reads a session keeps for a drainer that is not draining. Past this the
 /// oldest go, and the journal is told once.
@@ -55,6 +67,18 @@ const READ_QUEUE_CAP: usize = 1_024;
 /// The note a board that runs a plain link gets, once per connection.
 pub const PLAIN_LINK_NOTE: &str =
     "wi-fi: this board runs a plain link; Studio reaches boards on Wi-Fi only over a secure one";
+
+/// Why a relay session was given up: no key this page holds opens the board
+/// (the walk ran out, or there was nothing to walk). The page hears it as
+/// `relay link lost: <this>`, and Studio says what to do about it.
+pub const RELAY_NO_HELD_KEY: &str = "no key this browser holds opens this board";
+
+/// How long a relay link whose held keys ran out (or were never there)
+/// waits for the page's keys to change before it is given up. A page dialled
+/// at load is still fetching its account's key; one signing in hands it
+/// over. Well inside a board's 10 s limit for a link that never
+/// authenticates.
+pub const RELAY_KEY_GRACE_MS: u32 = 5_000;
 
 thread_local! {
     /// One link per LAN session, shared by every drainer of it — the model's
@@ -77,11 +101,18 @@ struct ServedSession {
     dropped_reads: usize,
     running: Rc<Cell<bool>>,
     wake: Option<WakeOnActivity>,
+    /// The page was told this connection's link is up.
+    said_up: bool,
+    /// This connection's link has sent a frame (a held-only walk with no
+    /// keys sends nothing).
+    transmitted: bool,
+    /// When a held-only walk was first seen with nothing left to present.
+    exhausted_at: Option<Micros>,
 }
 
 impl ServedSession {
     fn new(generation: u32, address: String, keys: &dyn LinkKeys) -> Self {
-        let walk = KeyWalk::new(keys.keys_for(&address), keys.generation(&address));
+        let walk = walk_for(&address, keys);
         Self {
             generation,
             service: fresh_service(walk.current()),
@@ -93,6 +124,9 @@ impl ServedSession {
             dropped_reads: 0,
             running: Rc::default(),
             wake: None,
+            said_up: false,
+            transmitted: false,
+            exhausted_at: None,
         }
     }
 
@@ -100,10 +134,13 @@ impl ServedSession {
     /// with it.
     fn restart(&mut self, generation: u32, keys: &dyn LinkKeys) {
         self.generation = generation;
-        self.walk = KeyWalk::new(keys.keys_for(&self.address), keys.generation(&self.address));
+        self.walk = walk_for(&self.address, keys);
         self.service = fresh_service(self.walk.current());
         self.retry_at = None;
         self.reads.clear();
+        self.said_up = false;
+        self.transmitted = false;
+        self.exhausted_at = None;
     }
 
     /// Answer what the handshake said: the next key, or a wait.
@@ -119,6 +156,9 @@ impl ServedSession {
                         KeyWalkStep::PresentAfter { key, after_ms } => {
                             self.retry_at = Some((now + Micros::from(after_ms) * 1_000, key));
                         }
+                        // Nothing left to present: the session is given up
+                        // once this pass lets go of it (`service`).
+                        KeyWalkStep::Exhausted => self.retry_at = None,
                     }
                 }
                 SecureLinkEvent::PeerNotSecure => self.notes.push(PLAIN_LINK_NOTE.to_string()),
@@ -139,7 +179,28 @@ impl ServedSession {
         if generation == self.walk.generation() {
             return;
         }
-        let walk = KeyWalk::new(keys.keys_for(&self.address), generation);
+        let walk = walk_for(&self.address, keys);
+        if walk.is_exhausted() {
+            // A held-only walk the new keys leave empty: given up by
+            // `service` once its grace has passed, like one that ran out.
+            self.walk = walk;
+            self.retry_at = None;
+            return;
+        }
+        if self.walk.is_exhausted() {
+            // Keys arrived for a held-only walk that had none left: walk
+            // them, on a fresh link if nothing was ever sent.
+            let best = walk.current().clone();
+            self.walk = walk;
+            self.retry_at = None;
+            self.exhausted_at = None;
+            if self.transmitted {
+                self.service.retry_with(&best);
+            } else {
+                self.service = fresh_service(&best);
+            }
+            return;
+        }
         let best = walk.current().clone();
         let holds_best = walk.first_is(&self.walk.current().key_id);
         self.walk = walk;
@@ -174,11 +235,31 @@ impl ServedSession {
 
     fn wake_in(&self, now: Micros) -> Micros {
         let link = self.service.wake_in(now, SERVICE_TICK_CAP);
+        let link = match &self.exhausted_at {
+            Some(at) => link.min(grace_end(*at).saturating_sub(now)),
+            None => link,
+        };
         match &self.retry_at {
             Some((at, _)) => link.min(at.saturating_sub(now)),
             None => link,
         }
     }
+
+    /// Whether a held-only walk has had nothing to present for longer than
+    /// [`RELAY_KEY_GRACE_MS`] (marking when it first ran out).
+    fn out_of_keys(&mut self, now: Micros) -> bool {
+        if !self.walk.is_exhausted() {
+            self.exhausted_at = None;
+            return false;
+        }
+        let since = *self.exhausted_at.get_or_insert(now);
+        now >= grace_end(since)
+    }
+}
+
+/// When the grace for a walk that ran out of keys at `at` ends.
+fn grace_end(at: Micros) -> Micros {
+    at + Micros::from(RELAY_KEY_GRACE_MS) * 1_000
 }
 
 /// A subscription to the session's JS activity that services it.
@@ -196,6 +277,19 @@ impl Drop for WakeOnActivity {
         if let Some(callback) = self.callback.take() {
             callback.forget();
         }
+    }
+}
+
+/// The walk a link to `address` presents: held keys only through the relay
+/// (no anonymous key — a board's "Anyone" never applies over the internet),
+/// the held keys then the anonymous one on the LAN.
+fn walk_for(address: &str, keys: &dyn LinkKeys) -> KeyWalk {
+    let held = keys.keys_for(address);
+    let generation = keys.generation(address);
+    if board_from_relay_socket_url(address).is_some() {
+        KeyWalk::held_only(held, generation)
+    } else {
+        KeyWalk::new(held, generation)
     }
 }
 
@@ -316,7 +410,8 @@ fn service(session: u32) -> Serviced {
     };
     let now = now_micros();
     let keys = link_keys();
-    let (frames, wake, running) = SESSIONS.with(|sessions| {
+    let tag = tap_tag(&taken.url);
+    let (frames, wake, running, gave_up, came_up) = SESSIONS.with(|sessions| {
         let mut sessions = sessions.borrow_mut();
         let served = sessions
             .entry(session)
@@ -329,19 +424,38 @@ fn service(session: u32) -> Serviced {
         }
         served.answer_handshake(now, &*keys);
         served.follow_keys(now, &*keys);
+        let gave_up = taken.connected && served.out_of_keys(now);
         let mut out = Vec::new();
-        if taken.connected {
+        if taken.connected && !served.walk.is_exhausted() {
             served
                 .service
                 .transmit(now, |frame| out.push(frame.to_vec()));
         }
+        served.transmitted |= !out.is_empty();
         served.collect();
-        (out, served.wake_in(now), Rc::clone(&served.running))
+        let came_up = taken.connected && !served.said_up && served.service.is_up();
+        served.said_up |= came_up;
+        (
+            out,
+            served.wake_in(now),
+            Rc::clone(&served.running),
+            gave_up,
+            came_up,
+        )
     });
     // No borrow is held past here: the writes and the loop call back into
     // JS, and the loop into `service`.
+    if gave_up {
+        // Held keys only, and none opens the board: end the session for good
+        // (`relay link lost: …`), and redial nothing.
+        browser_websocket::give_up(session, RELAY_NO_HELD_KEY);
+        return Serviced::Down;
+    }
     for frame in frames {
-        let _ = browser_websocket::write_frame(session, &frame);
+        let _ = browser_websocket::write_frame(session, &frame, tag);
+    }
+    if came_up {
+        browser_websocket::mark_up(session);
     }
     wake_on_activity(session);
     if !taken.connected {

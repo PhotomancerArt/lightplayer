@@ -873,6 +873,20 @@ a dev shortcut that dials a board at page load by its LAN address
 (`lp-xxxx.local`, an IP, or an emulator's `127.0.0.1:<forward>`), over the
 secure `ws()` link (`docs/adr/2026-10-07-c6-wifi-link.md`).
 
+**`?relay=1`** (until the network transport's walk on lightplayer.app; off
+by default) installs Studio's relay half: boards reached THROUGH
+lightplayer.app (`relay:<mac>`, the relay's browser leg
+`/relay/board/<mac>` on the page's own origin; `docs/adr/2026-10-06-cloud-relay.md`).
+Without it nothing of the relay exists in the page. A relay link presents
+held keys only — the account's, then the browser's; never the anonymous key
+or a typed password. `?relay=<mac>[,<mac>…]` also dials those boards at page
+load (a dev shortcut, like `?lan=`). Locally, serve the Studio bundle from a
+`lp-cloud-server` (`LP_CLOUD_STATIC_DIR`, dev login) so the relay is
+same-origin, and put a host board on it with `lp-cli serve --relay <origin>`
+(`LP_CLOUD_SESSION` = the dev login's session); `Dioxus.toml` also forwards
+`/relay` (WebSocket upgrades included) to the `lp-cloud-server` on 2812 — but
+`lp-cli serve` binds 2812 for its own socket, so the two do not share a desk.
+
 Two more dev-only flags tune the device wire for a measurement (read once at
 page load by `lpa-studio-web/src/dev_url_flags.rs`; no UI, no persistence):
 `?lens-pause-ms=N` sets the editor lens's pause between device reads

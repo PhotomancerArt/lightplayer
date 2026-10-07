@@ -1,5 +1,8 @@
 //! [`Link`] over a LAN session — a browser WebSocket to a board on Wi-Fi
-//! (wasm only).
+//! (wasm only) — or over a relay session, the same socket code reaching a
+//! board through lightplayer.app (the network transport's P05). One adapter:
+//! the endpoint (`lan:` or `relay:`) and the first word of what it says
+//! (`wi-fi …` or `relay …`) are all that differ.
 //!
 //! The Wi-Fi twin of `browser_ble`: the JS module owns the socket, this
 //! adapter turns that promise-shaped surface into the model's event-queue
@@ -42,6 +45,13 @@ use crate::providers::browser_websocket::{LanSession, WsWire, is_link_lost};
 /// [`network_link::lan_link_info`](crate::providers::network_link::lan_link_info)).
 pub fn lan_link_info(session: &LanSession) -> LinkInfo {
     crate::providers::network_link::lan_link_info(&session.url)
+}
+
+/// The [`LinkInfo`] a session's link wears, whichever kind it is: `relay:`
+/// for the relay's browser leg, `lan:` for anything else.
+pub fn network_link_info(session: &LanSession) -> LinkInfo {
+    crate::providers::network_link::relay_link_info(&session.url)
+        .unwrap_or_else(|| lan_link_info(session))
 }
 
 /// One [`Link`] over a LAN session.
@@ -123,9 +133,14 @@ impl WsLinkInner {
             LinkCommand::Open { .. } => self.open_link().await,
             LinkCommand::Close => self.close_link("closed by request").await,
             LinkCommand::RunReset(kind) => {
-                self.push(LinkEvent::Error(
-                    "a Wi-Fi link has no reset lines; reset needs USB".to_string(),
-                ));
+                self.push(LinkEvent::Error(format!(
+                    "a {} link has no reset lines; reset needs USB",
+                    if self.info.endpoint.is_relay() {
+                        "relay"
+                    } else {
+                        "Wi-Fi"
+                    }
+                )));
                 self.push(LinkEvent::ResetOutcome { kind, ok: false });
             }
             LinkCommand::SendFrame(frame) => match client_message(&frame) {
@@ -157,7 +172,10 @@ impl WsLinkInner {
         if !self.wire.is_connected()
             && let Err(error) = self.wire.connect().await
         {
-            self.push(LinkEvent::Error(format!("wi-fi connect failed: {error}")));
+            self.push(LinkEvent::Error(format!(
+                "{} connect failed: {error}",
+                self.kind()
+            )));
             return;
         }
         // A `wi-fi link lost` still queued here was an earlier link's; read
@@ -190,7 +208,10 @@ impl WsLinkInner {
             ));
         }
         if let Err(error) = self.wire.send_client_json(json) {
-            self.push(LinkEvent::Error(format!("wi-fi write failed: {error}")));
+            self.push(LinkEvent::Error(format!(
+                "{} write failed: {error}",
+                self.kind()
+            )));
         }
     }
 
@@ -215,6 +236,15 @@ impl WsLinkInner {
         }
         for note in self.wire.take_notes() {
             self.push(LinkEvent::WireNote(note));
+        }
+    }
+
+    /// The first word of what this link says: `relay` or `wi-fi`.
+    fn kind(&self) -> &'static str {
+        if self.info.endpoint.is_relay() {
+            "relay"
+        } else {
+            "wi-fi"
         }
     }
 

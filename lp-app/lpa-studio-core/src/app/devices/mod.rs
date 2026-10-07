@@ -52,6 +52,8 @@ pub mod browser_ble_source;
 pub mod browser_emu_source;
 #[cfg(all(feature = "browser-websocket", target_arch = "wasm32"))]
 pub mod browser_lan_source;
+#[cfg(all(feature = "browser-websocket", target_arch = "wasm32"))]
+pub mod browser_relay_source;
 /// Sims backed by `fw-browser` workers. wasm-only, and only when the studio
 /// is built with the provider that owns them.
 #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
@@ -105,6 +107,8 @@ pub mod new_sim_offer;
 pub mod own_build_source;
 pub mod pending_link_offers;
 pub mod provisional_board_numbers;
+pub mod relay_connect_failure;
+pub mod relay_transport;
 pub mod runtime_backing;
 pub mod runtime_band;
 pub mod shared_link_client_io;
@@ -139,6 +143,8 @@ pub use browser_ble_source::BrowserBleSource;
 pub use browser_emu_source::BrowserEmuLinkSource;
 #[cfg(all(feature = "browser-websocket", target_arch = "wasm32"))]
 pub use browser_lan_source::BrowserLanSource;
+#[cfg(all(feature = "browser-websocket", target_arch = "wasm32"))]
+pub use browser_relay_source::BrowserRelaySource;
 #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
 pub use browser_sim_source::BrowserSimLinkSource;
 #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
@@ -233,6 +239,10 @@ pub use new_sim_offer::{NEW_SIM_BACKING_PARAM, NEW_SIM_BOARD_PARAM, new_sim_offe
 pub use own_build_source::{MemoryOwnBuildSource, OwnBuildSource};
 pub use pending_link_offers::pending_link_offers;
 pub use provisional_board_numbers::ProvisionalBoardNumbers;
+pub use relay_connect_failure::{
+    RELAY_NO_HELD_KEY_WORDS, RELAY_OFFLINE_WORDS, RELAY_UNREACHABLE_WORDS, RelayConnectFailure,
+};
+pub use relay_transport::{RelayDeviceTransport, RelayLinkSource};
 pub use runtime_backing::{Backing, EMULATED_TARGETS, backing_for, emu_offered_for};
 pub use runtime_band::{UiRuntimeBand, speed_word};
 pub use shared_link_client_io::{ConversationInbox, SharedLinkClientIo};
