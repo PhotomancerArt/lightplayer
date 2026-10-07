@@ -53,6 +53,7 @@ pub mod relationship;
 pub mod share_person;
 pub mod share_url;
 pub mod visitor_banner;
+mod visitor_banner_dismissal;
 #[cfg(feature = "stories")]
 pub(crate) mod visitor_banner_stories;
 pub mod visitor_mode;
