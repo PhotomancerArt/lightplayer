@@ -7,6 +7,8 @@ set -euo pipefail
 #                                         exit 0 = all green, 1 = a check failed
 #                                         exit 2 = no checks registered in time
 #                                         exit 3 = PR is conflicting (no CI runs)
+#                                                  (mergeable CONFLICTING or
+#                                                  mergeStateStatus DIRTY)
 #                                         exit 4 = the head moved while watching
 #   scripts/watch-pr.sh --merged <pr>     wait until the PR merges
 #                                         exit 0 = merged, 1 = closed unmerged
@@ -48,12 +50,33 @@ set -euo pipefail
 # green is believed only when **every workflow run for the pinned head on the
 # pinned branch has completed** (`head_runs_all_completed`).
 #
+# Conflicts come first. A conflicting PR (mergeable CONFLICTING, or
+# mergeStateStatus DIRTY) gets no pull_request CI, so the only check on it may
+# be the CLA, which passes. That used to read as green. A settled conflict now
+# exits 3 on every poll, whatever checks are present. UNKNOWN (GitHub is still
+# recomputing) is not a verdict: keep polling.
+#
+# And green needs the real CI. A green is believed only when a completed run of
+# the workflow named in .github/workflows/pre-merge.yml (`CI`) exists for the
+# pinned head, so CLA alone is never green. Every PR to main gets a CI run (the
+# workflow has no paths-ignore; docs-only PRs still run `detect-changes`), so
+# there is no docs-only exception. A PR with no CI run (a stacked PR, a
+# GITHUB_TOKEN push) waits out REGISTER_TIMEOUT and exits 2.
+#
 # And a CANCELLED run is not a failure. `cancel-in-progress` evicts a run the
 # moment a newer push arrives, and GitHub reports the eviction as a red check;
 # a caller sent to read that log finds nothing in it. A red whose runs carry
 # no real failure conclusion is reported as SUPERSEDED and waited out.
 REGISTER_TIMEOUT="${WATCH_PR_REGISTER_TIMEOUT:-600}"   # consecutive-empty seconds before giving up
 POLL_INTERVAL="${WATCH_PR_POLL_INTERVAL:-15}"          # seconds between polls
+
+# The workflow whose completed run makes a green: the `name:` of pre-merge.yml.
+CI_WORKFLOW="$(sed -nE 's/^name:[[:space:]]*"?([^"]*)"?[[:space:]]*$/\1/p' \
+  "$(dirname "$0")/../.github/workflows/pre-merge.yml" | head -n 1)"
+if [[ -z "$CI_WORKFLOW" ]]; then
+  echo "could not read the workflow name from .github/workflows/pre-merge.yml" >&2
+  exit 1
+fi
 
 mode="checks"
 case "${1:-}" in
@@ -93,12 +116,12 @@ view() {
 }
 
 # The workflow runs for the PINNED head on the PINNED branch, as
-# "<status> <conclusion>" lines. Empty output means no run exists for this
+# "<status> <conclusion> <workflow name>" lines. Empty output means no run exists for this
 # commit yet — which is the registration phase, not a pass.
 runs_for_head() {
   gh run list -R "$repo" --branch "$branch" --commit "$head" --limit 50 \
-    --json headSha,status,conclusion \
-    --jq "[.[] | select(.headSha == \"$head\")] | .[] | \"\(.status) \(.conclusion)\"" \
+    --json headSha,status,conclusion,workflowName \
+    --jq "[.[] | select(.headSha == \"$head\")] | .[] | \"\(.status) \(.conclusion) \(.workflowName)\"" \
     2>/dev/null || true
 }
 
@@ -108,6 +131,12 @@ head_runs_all_completed() {
   local out
   out="$(runs_for_head)"
   [[ -n "$out" ]] && ! grep -qv '^completed' <<<"$out"
+}
+
+# Has the CI workflow itself (see CI_WORKFLOW) run to completion on the head?
+# Non-CI runs, the CLA above all, finish in seconds and prove nothing.
+head_ci_completed() {
+  runs_for_head | grep -qE "^completed [a-z_]* ${CI_WORKFLOW}\$"
 }
 
 # Did any run for the head fail for a reason worth reading a log about?
@@ -120,9 +149,10 @@ head_has_a_real_failure() {
 # read against cannot come from different moments:
 #   head<TAB><sha>
 #   mergeable<TAB><MERGEABLE|CONFLICTING|UNKNOWN>
+#   merge_state<TAB><CLEAN|DIRTY|BEHIND|BLOCKED|UNSTABLE|...>
 #   check<TAB><pass|fail|cancel|pending><TAB><name><TAB><link>   (0..n)
 snapshot() {
-  gh pr view "$num" -R "$repo" --json headRefOid,mergeable,statusCheckRollup --jq '
+  gh pr view "$num" -R "$repo" --json headRefOid,mergeable,mergeStateStatus,statusCheckRollup --jq '
     def bucket:
       if .__typename == "StatusContext" then
         if .state == "SUCCESS" then "pass"
@@ -136,6 +166,7 @@ snapshot() {
       end;
     "head\t\(.headRefOid)",
     "mergeable\t\(.mergeable)",
+    "merge_state\t\(.mergeStateStatus)",
     ((.statusCheckRollup // [])[]
       | "check\t\(bucket)\t\(if .__typename == "StatusContext" then .context else ((.workflowName // "") + (if .workflowName then " / " else "" end) + .name) end)\t\(.detailsUrl // .targetUrl // "")")'
 }
@@ -216,18 +247,20 @@ while true; do
   snap="$(snapshot)"
   assert_head "$(awk -F'\t' '$1=="head"{print $2}' <<<"$snap")"
   mergeable="$(awk -F'\t' '$1=="mergeable"{print $2}' <<<"$snap")"
+  merge_state="$(awk -F'\t' '$1=="merge_state"{print $2}' <<<"$snap")"
   checks="$(grep '^check' <<<"$snap" | cut -f2- || true)"
 
+  # A conflicted PR gets NO pull_request CI, so whatever checks are present
+  # (the CLA, say) prove nothing. Checked on every poll, before anything else.
+  # DIRTY is conflicts too, and can be reported while mergeable is still
+  # UNKNOWN; mergeable UNKNOWN alone is not a verdict.
+  if [[ "$mergeable" == "CONFLICTING" || "$merge_state" == "DIRTY" ]]; then
+    echo "PR #$num conflicts with $base: no CI runs until resolved." >&2
+    echo "Merge the base branch into it (resolve, push), then re-watch." >&2
+    exit 3
+  fi
+
   if [[ -z "$checks" ]]; then
-    # A conflicted PR gets NO pull_request CI at all: no run will ever
-    # register, so waiting out the timeout only delays the news. (mergeable
-    # is UNKNOWN while GitHub recomputes it after a push; only the settled
-    # CONFLICTING verdict short-circuits.)
-    if [[ "$mergeable" == "CONFLICTING" ]]; then
-      echo "PR #$num is CONFLICTING — GitHub runs no pull_request CI on a conflicted PR." >&2
-      echo "Merge the base branch into it (resolve, push), then re-watch." >&2
-      exit 3
-    fi
     [[ -n "$empty_deadline" ]] || empty_deadline=$((SECONDS + REGISTER_TIMEOUT))
     if ((SECONDS >= empty_deadline)); then
       no_ci_diagnostic
@@ -271,12 +304,13 @@ while true; do
     continue
   fi
 
-  # A green is only a green once every run on this head has finished. The
-  # rollup can be all-pass while the real CI run is still queued.
-  if ! head_runs_all_completed; then
+  # A green is only a green once every run on this head has finished AND the
+  # CI workflow is among them. The rollup can be all-pass (CLA alone) while
+  # the real CI run is still queued or will never exist.
+  if ! { head_runs_all_completed && head_ci_completed; }; then
     if [[ -z "$partial_deadline" ]]; then
       partial_deadline=$((SECONDS + REGISTER_TIMEOUT))
-      echo "checks report green, but no completed workflow run on ${head:0:9} yet — waiting." >&2
+      echo "checks report green, but no completed '$CI_WORKFLOW' run on ${head:0:9} yet — waiting." >&2
     fi
     if ((SECONDS >= partial_deadline)); then
       no_ci_diagnostic

@@ -1,0 +1,1 @@
+{"number":1,"url":"https://github.com/o/r/pull/1","state":"OPEN","baseRefName":"main","headRefName":"b","headRefOid":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","mergeable":"CONFLICTING","mergeStateStatus":"DIRTY","statusCheckRollup":[{"__typename":"CheckRun","name":"cla","workflowName":"CLA Assistant","status":"COMPLETED","conclusion":"SUCCESS","detailsUrl":"u"}]}
