@@ -92,12 +92,15 @@ pub struct FwcheckPortArgs {
     pub mac: Option<String>,
     /// Lease the board on the desk's board bench before printing its port
     /// (`board take`; needs `board` installed). Refused if someone else
-    /// holds it.
+    /// holds it. Needs `--as` (or BOARD_HOLDER) and `--for`.
     #[arg(long, requires = "lease_for")]
     pub lease: bool,
-    /// Who is leasing and why, `"<who>: <why>"`. Also who the bench check
-    /// runs as.
-    #[arg(long = "for", id = "lease_for", value_name = "WHO: WHY")]
+    /// Who you are on the bench: your whole session name ("direct: wifi").
+    /// Defaults to BOARD_HOLDER. Also who the bench check runs as.
+    #[arg(long = "as", value_name = "WHO")]
+    pub lease_as: Option<String>,
+    /// Why you are leasing the board (free text).
+    #[arg(long = "for", id = "lease_for", value_name = "WHY", requires = "lease")]
     pub lease_for: Option<String>,
     /// Lease length in minutes (the bench's default is 30).
     #[arg(long, requires = "lease")]

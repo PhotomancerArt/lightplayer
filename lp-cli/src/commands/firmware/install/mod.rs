@@ -30,13 +30,16 @@ use release_resolve::{ReleaseRequest, previous_version};
 pub fn handle_install(args: InstallArgs) -> Result<()> {
     let request = ReleaseRequest::parse(&args.release)?;
 
-    // `--as`, else `$BOARD_HOLDER` (the board bench's own fallback, read
-    // from this process's environment by the `board` subprocess itself —
-    // see `board_bench::check`/`take`).
-    let holder = args.holder.as_deref();
+    // Who you are comes from --as or BOARD_HOLDER only — never parsed out
+    // of anything else (session names carry colons; see board_bench).
+    let holder = args
+        .holder
+        .clone()
+        .or_else(|| std::env::var("BOARD_HOLDER").ok())
+        .filter(|holder| !holder.trim().is_empty());
     let resolved_port = match (args.mac.as_deref(), args.port.as_deref()) {
-        (Some(mac), None) => port::resolve_by_mac(mac, holder)?,
-        (None, Some(p)) => port::resolve_checked(Some(p), None, holder)?,
+        (Some(mac), None) => port::resolve_by_mac(mac, holder.as_deref())?,
+        (None, Some(p)) => port::resolve_checked(Some(p), None, holder.as_deref())?,
         _ => bail!("pass exactly one of --mac or --port"),
     };
 
@@ -89,7 +92,7 @@ pub fn handle_install(args: InstallArgs) -> Result<()> {
     }
 
     let manifest_path = fetched.dir.join("manifest.json");
-    let leased = lease_board(&resolved_port, holder, &version)?;
+    let leased = lease_board(&resolved_port, holder.as_deref(), &version)?;
     let result = flash::install_package(
         &resolved_port,
         &manifest_path,
@@ -97,7 +100,7 @@ pub fn handle_install(args: InstallArgs) -> Result<()> {
         args.yes,
     );
     if leased {
-        if let Err(e) = board_bench::drop_lease(&resolved_port, holder) {
+        if let Err(e) = board_bench::drop_lease(&resolved_port, holder.as_deref()) {
             eprintln!("warning: could not drop the lease on {resolved_port}: {e}");
         }
     }
@@ -161,6 +164,10 @@ fn lease_board(port: &str, holder: Option<&str>, version: &str) -> Result<bool> 
     if !board_bench::available() {
         return Ok(false);
     }
+    let holder = holder.context(
+        "leasing the board needs to know who you are: --as \"<your session name>\" (or \
+         BOARD_HOLDER)",
+    )?;
     board_bench::take(
         port,
         holder,

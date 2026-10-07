@@ -1087,17 +1087,19 @@ and a **mark** written on the chip in sharpie: `FC6 fixture-c6`.
 
 ```bash
 board list                                         # every board, its port and hub, who holds it, who waits
-board take fixture-c6 --as ota-director --for "power-cut soak"   # 30 min; prints the port
-BOARD_HOLDER=ota-director just flash-fw-esp32c6    # recipes check the lease as you
-board power-cycle fixture-c6 --as ota-director     # both VIA hub twins, lease-checked
-board drop fixture-c6 --as ota-director
+board take fixture-c6 --as "direct: ota" --for "power-cut soak"   # 30 min; prints the port
+BOARD_HOLDER="direct: ota" just flash-fw-esp32c6  # recipes check the lease as you
+board power-cycle fixture-c6 --as "direct: ota"   # both VIA hub twins, lease-checked
+board drop fixture-c6 --as "direct: ota"
 ```
 
 - **Consult or lease before flashing, probing or power-cycling.** `fwcheck
   port` — so every `just` firmware recipe — asks `board check` whichever way
   the port was named (`--port`, `ESPFLASH_PORT`, discovery) and refuses a
   board someone else holds, or an `art` board nobody took on purpose.
-  `fwcheck port --lease --for "<who>: <why>"` takes the lease as it resolves.
+  `fwcheck port --lease --as "<who>" --for "<why>"` takes the lease as it
+  resolves. Who you are is `--as` or `BOARD_HOLDER` (your whole session name,
+  colons and all) — never parsed out of `--for`. A long run: `board run`.
   Probing skips held boards. Without `board` installed nothing changes.
 - **Say the mark and slug, identify by MAC + chip, never by a port label.**
   Hub ports and `/dev` names move on replug; on 2026-10-05 a board lent as
@@ -1108,8 +1110,6 @@ board drop fixture-c6 --as ota-director
   `uhubctl` against a board you do not hold.
 - Leases are a courtesy lock between cooperating agents, not security; a
   lease expires (30 min, `board renew`), and dies with its `--pid`.
-- `board take`/`board run` now refuse with no identity at all: pass `--as
-  <who>`, or set `$BOARD_HOLDER`. `--for` is only the reason.
 - To put a published release on a board rather than a local build, see
   `lp-cli firmware install --release <version|previous|latest>` in
   `lp-fw/builds/README.md` — it leases through this same `board` when

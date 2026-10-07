@@ -53,15 +53,29 @@ pub fn handle_fwcheck(cli: FwcheckCli) -> Result<()> {
             Ok(())
         }
         FwcheckCommand::Port(args) => {
-            let holder = args.lease_for.as_deref().map(board_bench::holder_of);
+            // Who you are comes from --as or BOARD_HOLDER only — never parsed
+            // out of --for (session names carry colons; see board_bench).
+            let holder = args
+                .lease_as
+                .clone()
+                .or_else(|| std::env::var("BOARD_HOLDER").ok())
+                .filter(|holder| !holder.trim().is_empty());
+            if args.lease && holder.is_none() {
+                anyhow::bail!(
+                    "--lease needs to know who you are: --as \"<your session name>\" (or BOARD_HOLDER)"
+                );
+            }
             let resolved = match args.mac.as_deref() {
-                Some(mac) => port::resolve_by_mac(mac, holder)?,
-                None => port::resolve_checked(args.port.as_deref(), args.chip.as_deref(), holder)?,
+                Some(mac) => port::resolve_by_mac(mac, holder.as_deref())?,
+                None => port::resolve_checked(
+                    args.port.as_deref(),
+                    args.chip.as_deref(),
+                    holder.as_deref(),
+                )?,
             };
-            if args.lease {
-                let lease_for = args.lease_for.as_deref().unwrap_or_default();
-                let reason = board_bench::reason_of(lease_for);
-                board_bench::take(&resolved, holder, reason, args.minutes)?;
+            if let (true, Some(holder)) = (args.lease, holder.as_deref()) {
+                let why = args.lease_for.as_deref().unwrap_or_default();
+                board_bench::take(&resolved, holder, why, args.minutes)?;
             }
             println!("{resolved}");
             Ok(())
