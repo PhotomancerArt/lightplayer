@@ -46,6 +46,11 @@ reqwest = { version = "0.12", default-features = false, features = [
     "json",
 ] }
 
+# The release index fetches its manifests a few at a time
+# (`StreamExt::buffered`). Already in the tree through axum; this was a
+# dev-dependency for the relay tests' clients before.
+futures-util = "0.3"
+
 # Session tokens are bearer credentials, so the mint behind `IdMint` has to
 # be the OS CSPRNG — `MemIdMint` is a counter and says so in its own docs.
 getrandom = "0.3"
@@ -58,7 +63,6 @@ http-body-util = "0.1"
 tempfile = "3"
 # The relay tests' socket clients: a fake board and a fake browser.
 tokio-tungstenite = "0.21"
-futures-util = "0.3"
 # `K` as Studio installs it, for the fake board's account entries.
 lpc-access = { path = "../../lp-core/lpc-access" }
 
