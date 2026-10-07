@@ -117,12 +117,12 @@ pub use ser_write::{
     ser_write_json_len, ser_write_json_to,
 };
 pub use server::{
-    AccessEntryInfo, AvailableProject, BuildFacts, FAULT_MESSAGE_CAP_BYTES, FAULT_NODES_CAP,
-    FaultedNodeWire, FsBootState, FsRequest, FsResponse, HardwareFacts, HardwareIdentity,
-    HeardNetwork, HeartbeatIdentity, HelloAuth, HelloIdentity, LastAttempt, LinkCounters,
-    LinkResets, LoadedProject, MemoryStats, NetworkScan, NetworkStatus, ProjectFaultWire,
-    SampleStats, SavedNetworkInfo, ServerConfig, ServerHello, ServerMsgBody, StationFailure,
-    StationState, WIRE_PROTO_VERSION, hello_board_id, hello_proto,
+    AccessEntryInfo, AvailableProject, BuildFacts, ConnectStep, FAULT_MESSAGE_CAP_BYTES,
+    FAULT_NODES_CAP, FaultedNodeWire, FsBootState, FsRequest, FsResponse, HardwareFacts,
+    HardwareIdentity, HeardNetwork, HeartbeatIdentity, HelloAuth, HelloIdentity, LastAttempt,
+    LinkCounters, LinkResets, LoadedProject, MemoryStats, NetworkScan, NetworkStatus,
+    ProjectFaultWire, SampleStats, SavedNetworkInfo, ServerConfig, ServerHello, ServerMsgBody,
+    StationFailure, StationState, WIRE_PROTO_VERSION, hello_board_id, hello_proto,
 };
 pub use slot::{
     WireSlotChange, WireSlotData, WireSlotFullSync, WireSlotPatch, WireSlotRootSnapshot,

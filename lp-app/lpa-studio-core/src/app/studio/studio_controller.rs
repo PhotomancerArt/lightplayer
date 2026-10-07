@@ -145,6 +145,9 @@ pub struct StudioController {
     /// The transport that reaches BLUETOOTH devices (M5), when this build
     /// has one. `dyn`-free for symmetry with the other two halves.
     ble_transport: Option<Rc<crate::BleDeviceTransport>>,
+    /// The transport that reaches boards on the LAN (`?lan=`, Wi-Fi M6 P07),
+    /// when this page was asked to reach one.
+    lan_transport: Option<Rc<crate::LanDeviceTransport>>,
     /// What the browser answered about Bluetooth, reported by the web layer
     /// (`StudioCommand::BluetoothReach`); `Checking` until it does.
     bluetooth_reach: crate::BluetoothReach,
@@ -448,6 +451,7 @@ impl StudioController {
             sim_transport: None,
             emu_transport: None,
             ble_transport: None,
+            lan_transport: None,
             bluetooth_reach: crate::BluetoothReach::Checking,
             update_build_facts: crate::UpdateBuildFacts::default(),
             driving_updates: false,
@@ -632,6 +636,23 @@ impl StudioController {
         self.install_device_transport();
     }
 
+    /// Install the transport that serves boards on the LAN (`?lan=`, Wi-Fi
+    /// M6 P07), beside the others. Its links present
+    /// [`Self::network_link_keys`].
+    pub fn set_lan_transport(&mut self, transport: Rc<crate::LanDeviceTransport>) {
+        self.lan_transport = Some(transport);
+        self.install_device_transport();
+    }
+
+    /// The keys a secure network link presents: this browser's and the
+    /// account's, and the ones a password typed for a locked board derived
+    /// (the access layer keeps them). The web shell hands them to the LAN
+    /// provider when it builds the transport.
+    pub fn network_link_keys(&mut self) -> crate::NetworkLinkKeys {
+        self.access.refresh_held_network_keys();
+        self.access.network_link_keys()
+    }
+
     /// What the browser answered about Bluetooth. A platform fact the web
     /// layer reports (it alone can ask `navigator.bluetooth`), as installing
     /// a serial transport reports Web Serial: it decides whether
@@ -719,6 +740,12 @@ impl StudioController {
                 let composite = match &self.ble_transport {
                     Some(ble) => {
                         composite.with_ble(Rc::clone(ble) as Rc<dyn crate::DeviceTransport>)
+                    }
+                    None => composite,
+                };
+                let composite = match &self.lan_transport {
+                    Some(lan) => {
+                        composite.with_lan(Rc::clone(lan) as Rc<dyn crate::DeviceTransport>)
                     }
                     None => composite,
                 };
@@ -3097,6 +3124,9 @@ impl StudioController {
                 | crate::LinkTransport::Ble => crate::DeviceFace::Wire,
             },
             key: format!("device:{}", attachment.uid),
+            link: crate::UiLinkKind::of_endpoint(
+                device.and_then(|device| device.identity.endpoint.as_ref()),
+            ),
             device: Some(attachment.device),
             // The roster's LIVE title, so a rename made from this very
             // panel shows up in the segment at once; the attach-time
@@ -6165,9 +6195,11 @@ impl StudioController {
         if let Some(device) = self.devices.roster().device(facts.device)
             && !self.access.link_is_granted(device)
         {
-            return Err(UiError::MissingSession(
-                "this device is still unlocking over Bluetooth".to_string(),
-            ));
+            let over = crate::UiLinkKind::of_endpoint(device.identity.endpoint.as_ref());
+            return Err(UiError::MissingSession(format!(
+                "this device is still unlocking over {}",
+                over.label()
+            )));
         }
         Ok(crate::DeviceLensAttachment {
             device: facts.device,

@@ -32,6 +32,7 @@ fn upload_waits_and_reports_the_project_running() {
     let result = handle_upload(UploadArgs {
         dir: project_dir,
         host: "local".to_string(),
+        password: Default::default(),
         no_wait: false,
         wait_timeout_secs: 10,
     });
@@ -49,6 +50,7 @@ fn upload_wait_ends_nonzero_on_a_shader_compile_failure() {
     let result = handle_upload(UploadArgs {
         dir: project_dir,
         host: "local".to_string(),
+        password: Default::default(),
         no_wait: false,
         wait_timeout_secs: 10,
     });
@@ -74,6 +76,7 @@ fn no_wait_skips_the_wait_even_when_the_shader_would_fail() {
     let result = handle_upload(UploadArgs {
         dir: project_dir,
         host: "local".to_string(),
+        password: Default::default(),
         no_wait: true,
         wait_timeout_secs: 10,
     });
@@ -92,6 +95,7 @@ fn upload_wait_times_out_nonzero_when_no_evidence_arrives() {
     let result = handle_upload(UploadArgs {
         dir: project_dir,
         host: "local".to_string(),
+        password: Default::default(),
         no_wait: false,
         // A budget too small for a real render loop tick (~16ms/frame) to
         // ever land a poll response: proves the timeout path is reachable

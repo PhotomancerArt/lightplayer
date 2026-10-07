@@ -130,6 +130,7 @@ fn a_clean_heartbeat_clears_the_degraded_face() {
                 gated: true,
             }],
             last_crash: None,
+            load_notice: None,
         }),
     );
     assert_eq!(
@@ -171,6 +172,7 @@ fn a_heartbeat_that_says_nothing_about_recovery_does_not_clear_it() {
                 gated: false,
             }],
             last_crash: Some("oom at node:nodes/fire".to_string()),
+            load_notice: None,
         }),
     );
 
@@ -190,6 +192,31 @@ fn a_heartbeat_that_says_nothing_about_recovery_does_not_clear_it() {
     );
 }
 
+/// A switch that did not fit reset the board, which came back on the
+/// project it ran before: the card says so, in the board's own words.
+#[test]
+fn a_load_that_did_not_fit_is_said_in_the_boards_words() {
+    let mut roster = identified_board();
+    heartbeat(
+        &mut roster,
+        Millis(200),
+        Some(vec![LoadedProjectFacts::new("/projects/PLAYFUL Choker")]),
+        Some(RecoveryFacts {
+            load_notice: Some(
+                "Small Dome didn't fit in memory — back on PLAYFUL Choker".to_string(),
+            ),
+            ..RecoveryFacts::default()
+        }),
+    );
+
+    let card = roster_view(&roster, Millis(300)).devices[0].clone();
+    assert_eq!(card.status, DeviceStatus::Degraded);
+    assert_eq!(
+        card.degraded.as_deref(),
+        Some("Small Dome didn't fit in memory — back on PLAYFUL Choker"),
+    );
+}
+
 #[test]
 fn safe_mode_alone_is_worth_saying() {
     let mut roster = identified_board();
@@ -202,6 +229,7 @@ fn safe_mode_alone_is_worth_saying() {
             safe_mode: true,
             paths: Vec::new(),
             last_crash: None,
+            load_notice: None,
         }),
     );
 

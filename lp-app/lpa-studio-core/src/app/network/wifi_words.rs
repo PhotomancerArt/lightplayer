@@ -43,7 +43,7 @@ pub fn networks_page_line(status: &NetworkStatus) -> Option<String> {
         }
         StationState::Unsupported => Some(NOT_CONNECTED_UNSUPPORTED.to_string()),
         StationState::Off => Some(WIFI_OFF.to_string()),
-        StationState::Connecting { ssid } => Some(format!("Connecting to {ssid}…")),
+        StationState::Connecting { ssid, .. } => Some(format!("Connecting to {ssid}…")),
         StationState::Failed {
             ssid,
             reason: StationFailure::WrongPassword,
@@ -110,6 +110,9 @@ pub mod label {
     pub const ADD_BY_NAME: &str = "Add a network by name";
     pub const NEARBY: &str = "Nearby";
     pub const REFRESH: &str = "refresh";
+    /// The connect page while the board's radio listens and nothing has
+    /// been heard yet (the board answered a scan `scanning`).
+    pub const LOOKING_FOR_NETWORKS: &str = "Looking for networks…";
     pub const OTHER_NETWORK: &str = "Other network…";
     pub const OTHER_NETWORK_SUB: &str = "hidden, or not in range";
     pub const OTHER_NETWORK_TITLE: &str = "Other network";
@@ -215,6 +218,7 @@ mod tests {
                     ssid: "lp-walk-net".to_string(),
                     ip: "192.168.1.40".to_string(),
                     rssi: -48,
+                    host: "lp-8e30.local".to_string(),
                 },
                 true,
                 None,
@@ -241,7 +245,8 @@ mod tests {
         assert_eq!(
             networks_page_line(&status(
                 StationState::Connecting {
-                    ssid: "lp-walk-net".to_string()
+                    ssid: "lp-walk-net".to_string(),
+                    step: lpc_wire::ConnectStep::Looking,
                 },
                 true
             ))

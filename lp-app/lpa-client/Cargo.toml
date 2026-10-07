@@ -35,6 +35,9 @@ serialport = { version = "4.8", optional = true }
 libc = { version = "0.2", optional = true }
 hashbrown = { workspace = true, optional = true }
 log = { workspace = true, features = ["std"] }
+# `transport_lan` (feature `lan`): the OS's random bytes for each secure
+# handshake's ephemeral key. Already in the tree (lp-cloud-server).
+getrandom = { version = "0.3", optional = true }
 
 [features]
 default = ["host"]
@@ -53,6 +56,11 @@ serial = [
 ]
 emu = ["host", "lp-riscv-elf", "lp-riscv-emu", "lp-riscv-emu/std", "lp-emu-core", "lp-emu-core/std", "hashbrown"]
 ws = ["host", "tokio-tungstenite"]
+# `lan:<host>[:port]` (`transport_lan`): a board on the LAN, one secure
+# lp-link inside a WebSocket to `ws://<board>/link` (Wi-Fi plan P06). Rides
+# the serial transport's client half (`AsyncSerialClientTransport`) and the
+# sync WebSocket client.
+lan = ["serial", "lpc-wire/secure-link", "dep:getrandom"]
 # `WsByteStream`: the raw-byte `serial:ws://…` sibling of `serial:tcp://…`.
 # Distinct from `ws`, which is the lpc-wire protocol against an `lpa-server`.
 ws-stream = ["dep:tungstenite"]

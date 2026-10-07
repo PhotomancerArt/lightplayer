@@ -33,6 +33,7 @@
 //! | `link_port_edge` | the page's clock, nonce and wake loop for a browser link port (wasm) |
 //! | `browser_serial` | the Web Serial provider → `Link` (wasm) |
 //! | `browser_ble` | a Web Bluetooth (NUS) session → `Link` (wasm) |
+//! | `browser_websocket` | a LAN board's WebSocket session (a secure lp-link) → `Link` (wasm) |
 //! | `browser_worker` | a `fw-browser` worker → `Link`, i.e. the sim as a device (wasm) |
 //! | `browser_worker_io` | that worker's protocol channel → `lpa_client::ClientIo` (wasm) |
 //!
@@ -91,7 +92,8 @@ pub mod fake;
     any(
         feature = "browser-serial-esp32",
         feature = "emulator-tab",
-        feature = "browser-ble"
+        feature = "browser-ble",
+        feature = "browser-websocket"
     ),
     target_arch = "wasm32"
 ))]
@@ -102,6 +104,9 @@ pub mod browser_serial;
 
 #[cfg(all(feature = "browser-ble", target_arch = "wasm32"))]
 pub mod browser_ble;
+
+#[cfg(all(feature = "browser-websocket", target_arch = "wasm32"))]
+pub mod browser_websocket;
 
 /// The sim as a `Link`. wasm-only like the provider it wraps
 /// (`providers/mod.rs`), and it needs the model's contract to implement.

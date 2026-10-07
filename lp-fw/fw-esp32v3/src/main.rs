@@ -1200,6 +1200,14 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     // and the pusher's mailboxes.
     server.set_total_led_budget(total_led_budget);
     server.set_read_headroom_probe(Some(read_headroom_probe));
+    // A request the heap cannot decode is refused in words before it is
+    // decoded (`server_payload::request_refusal`), on every link.
+    fw_esp32_common::serial::server_payload::set_request_headroom_probe(|| {
+        Some((
+            esp_alloc::HEAP.free(),
+            recovery::panic_path::largest_free_block(),
+        ))
+    });
     // The classic keeps the 2026-08-29 single floor (a 32 KiB block, no
     // total-free floor): with a project loaded its heap is ≈34 KB free with a
     // 25.5 KB largest block, against a 23.7 KB read, so there is no room for

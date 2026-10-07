@@ -40,5 +40,21 @@ pub mod espnow_controller_config;
     )
 ))]
 pub mod espnow_radio_driver;
+// The radio's one bring-up (`esp_radio::wifi::new`), shared by the ESP-NOW
+// driver and the station: the same gate as the driver.
+#[cfg(all(
+    feature = "radio",
+    not(any(
+        feature = "stress_s2",
+        feature = "stress_s3",
+        feature = "desk_espnow_meter"
+    )),
+    any(
+        not(fw_harness),
+        feature = "test_espnow",
+        feature = "test_espnow_broadcast"
+    )
+))]
+pub mod radio_hub;
 #[cfg(not(fw_harness))]
 pub use fw_esp32_common::hardware::manifest_loader;

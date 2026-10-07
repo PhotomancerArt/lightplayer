@@ -12,6 +12,7 @@ use crate::frame_guard::FrameGuard;
 use crate::frame_kind::FrameKind;
 use crate::frame_record::fnv1a_32;
 use crate::ledger::GatedInfo;
+use crate::load_intent::InterruptedLoad;
 use crate::recovery_level::RecoveryLevel;
 use crate::recovery_stack::{clear_stack, current_path, current_path_names, pop_frame, push_frame};
 use crate::reset_cause::ResetCause;
@@ -34,6 +35,11 @@ pub struct BootAssessment {
     /// Whether this boot should skip crash-prone work (project auto-load):
     /// the previous boots kept dying before the boot-complete milestone.
     pub safe_mode: bool,
+    /// The project load the previous run started and never finished (it
+    /// reset in the middle: out of memory, a crash, a hang). A startup load
+    /// that did not finish is not tried again
+    /// ([`InterruptedLoad::skip_startup_load`]).
+    pub interrupted_load: Option<InterruptedLoad>,
 }
 
 /// Why `enter` refused a frame.
@@ -99,6 +105,10 @@ pub trait RecoveryHandle {
     /// [`clear_ledger`] for what is kept and why.
     fn clear_ledger(&mut self);
     fn snapshot(&mut self) -> RecoverySnapshot;
+    /// A project load starts (see [`begin_project_load`]).
+    fn begin_load(&mut self, target: &str, previous: &str, at_startup: bool);
+    /// The project load finished (see [`end_project_load`]).
+    fn end_load(&mut self);
 }
 
 /// The recovery system over a platform backend.
@@ -109,6 +119,8 @@ pub struct Recovery<B: RecoveryBackend> {
     /// Bumped on every staged crash; frames entered before a crash and
     /// dropped after it are not clean completions.
     crash_epoch: u32,
+    /// What [`BootAssessment::interrupted_load`] said, kept for the boot.
+    interrupted_load: Option<InterruptedLoad>,
 }
 
 impl<B: RecoveryBackend> Recovery<B> {
@@ -125,6 +137,7 @@ impl<B: RecoveryBackend> Recovery<B> {
                     backend,
                     boot_cause: cause,
                     crash_epoch: 0,
+                    interrupted_load: None,
                 },
                 BootAssessment {
                     cause,
@@ -132,6 +145,7 @@ impl<B: RecoveryBackend> Recovery<B> {
                     prior_crash: None,
                     level: RecoveryLevel::Green,
                     safe_mode: false,
+                    interrupted_load: None,
                 },
             );
         }
@@ -180,11 +194,30 @@ impl<B: RecoveryBackend> Recovery<B> {
         let prior_crash = has_prior_crash
             .then(|| CrashSnapshot::from_record(region.crash(), region.generation()));
 
+        // A load the previous run started and never finished, if the run
+        // ended the way a failure does (a crash's software reset, a
+        // watchdog); a user's reset in the middle of one is not a failure.
+        let interrupted_load = region.load().pending().filter(|_| cause.blames_code()).map(
+            |(target, previous, at_startup)| InterruptedLoad {
+                target,
+                previous,
+                at_startup,
+                cause: prior_crash.as_ref().map(|crash| crash.cause),
+            },
+        );
+        region.load_mut().end();
+
         // Ledger transitions: demote reds for their one-retry-per-boot,
         // account boot-loop counting, THEN record the prior crash (so a
-        // repeat offender goes straight back to red for this run).
+        // repeat offender goes straight back to red for this run). A load
+        // that ran out of memory is not ledger material: it did not fit,
+        // which is no fault of the frame that asked last (a shader, a node),
+        // and the interrupted load already keeps it from trying again.
         region.ledger_mut().on_boot(prior_boot_complete, cause);
-        if let Some(crash) = &prior_crash {
+        let out_of_memory_loading = interrupted_load
+            .as_ref()
+            .is_some_and(|load| load.cause == Some(CrashCause::Oom));
+        if let Some(crash) = prior_crash.as_ref().filter(|_| !out_of_memory_loading) {
             let record = *region.crash();
             region
                 .ledger_mut()
@@ -198,6 +231,7 @@ impl<B: RecoveryBackend> Recovery<B> {
                 backend,
                 boot_cause: cause,
                 crash_epoch: 0,
+                interrupted_load,
             },
             BootAssessment {
                 cause,
@@ -205,6 +239,7 @@ impl<B: RecoveryBackend> Recovery<B> {
                 prior_crash,
                 level,
                 safe_mode,
+                interrupted_load,
             },
         )
     }
@@ -339,7 +374,22 @@ impl<B: RecoveryBackend> RecoveryHandle for Recovery<B> {
     }
 
     fn snapshot(&mut self) -> RecoverySnapshot {
-        RecoverySnapshot::capture(self.backend.region(), self.boot_cause)
+        RecoverySnapshot::capture(
+            self.backend.region(),
+            self.boot_cause,
+            self.interrupted_load,
+        )
+    }
+
+    fn begin_load(&mut self, target: &str, previous: &str, at_startup: bool) {
+        self.backend
+            .region()
+            .load_mut()
+            .begin(target, previous, at_startup);
+    }
+
+    fn end_load(&mut self) {
+        self.backend.region().load_mut().end();
     }
 }
 
@@ -503,6 +553,22 @@ pub fn snapshot() -> Option<RecoverySnapshot> {
     with_global(|r| r.snapshot())
 }
 
+/// A project load of `target` starts; `previous` is what ran before it
+/// (empty: nothing), `at_startup` the boot's own startup load. Written to the
+/// persistent region before the load allocates anything, so a load that
+/// resets the board (out of memory, a crash, a hang) is known on the next
+/// boot ([`BootAssessment::interrupted_load`]). Zero-alloc. No global
+/// installed: nothing to write.
+pub fn begin_project_load(target: &str, previous: &str, at_startup: bool) {
+    with_global(|r| r.begin_load(target, previous, at_startup));
+}
+
+/// The project load [`begin_project_load`] started finished: it runs, or it
+/// failed and said so without a reset.
+pub fn end_project_load() {
+    with_global(|r| r.end_load());
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -584,6 +650,91 @@ mod tests {
         assert_eq!(crash.cause, CrashCause::Panic);
         assert_eq!(crash.msg.as_str(), "died opening rmt (at rmt.rs:553)");
         assert_eq!(crash.boots_ago, 1);
+    }
+
+    /// A switch that ran out of memory: the next boot knows what was loading
+    /// and what ran before, and the ledger blames nobody for it.
+    #[test]
+    fn a_switch_that_ran_out_of_memory_is_an_interrupted_load_not_a_blame() {
+        let (mut recovery, _) = boot_fresh();
+        recovery.mark_boot_complete();
+        recovery.begin_load("Small Dome", "PLAYFUL Choker", false);
+        let _load = recovery
+            .enter_frame(FrameKind::ProjectLoad, "Small Dome")
+            .unwrap();
+        let _compile = recovery
+            .enter_frame(FrameKind::ShaderCompile, "dome.glsl")
+            .unwrap();
+        recovery.stage_crash(CrashCause::Oom, &"alloc 47600 B failed", None, &[], None);
+        recovery.finalize_crash_and_reset();
+        let (mut recovery, assessment) =
+            InMemoryBackend::reboot(recovery, ResetCause::SoftwareReset);
+
+        let load = assessment.interrupted_load.expect("an interrupted load");
+        assert_eq!(load.target.as_str(), "Small Dome");
+        assert_eq!(load.previous.as_str(), "PLAYFUL Choker");
+        assert!(!load.at_startup && !load.skip_startup_load());
+        assert_eq!(load.cause, Some(CrashCause::Oom));
+        assert_eq!(assessment.level, RecoveryLevel::Green, "nothing blamed");
+        let snapshot = recovery.snapshot();
+        assert!(snapshot.path_entries.iter().all(|entry| entry.is_empty()));
+        assert_eq!(snapshot.interrupted_load, Some(load), "kept for the boot");
+
+        // Consumed: the boot after that one has no interrupted load.
+        let (_, next) = InMemoryBackend::reboot(recovery, ResetCause::SoftwareReset);
+        assert!(next.interrupted_load.is_none());
+    }
+
+    /// A startup load that did not finish is not tried again.
+    #[test]
+    fn a_startup_load_that_reset_the_board_is_skipped_next_boot() {
+        let (mut recovery, _) = boot_fresh();
+        recovery.begin_load("Small Dome", "", true);
+        recovery.stage_crash(CrashCause::Oom, &"alloc failed", None, &[], None);
+        recovery.finalize_crash_and_reset();
+        let (_, assessment) = InMemoryBackend::reboot(recovery, ResetCause::SoftwareReset);
+        let load = assessment.interrupted_load.expect("an interrupted load");
+        assert!(load.at_startup && load.skip_startup_load());
+    }
+
+    /// A load that finished leaves nothing behind, and a user's reset in the
+    /// middle of one is not a failure.
+    #[test]
+    fn a_finished_load_or_a_users_reset_is_no_interrupted_load() {
+        let (mut recovery, _) = boot_fresh();
+        recovery.mark_boot_complete();
+        recovery.begin_load("Basic", "PLAYFUL Choker", false);
+        recovery.end_load();
+        let (mut recovery, assessment) =
+            InMemoryBackend::reboot(recovery, ResetCause::SoftwareReset);
+        assert!(assessment.interrupted_load.is_none());
+
+        recovery.mark_boot_complete();
+        recovery.begin_load("Basic", "PLAYFUL Choker", false);
+        let (_, assessment) = InMemoryBackend::reboot(recovery, ResetCause::UserReset);
+        assert!(assessment.interrupted_load.is_none());
+    }
+
+    /// A load that crashed (not out of memory) is still an interrupted load,
+    /// and the ledger still watches the frame that crashed.
+    #[test]
+    fn a_load_that_panicked_is_interrupted_and_still_blamed() {
+        let (mut recovery, _) = boot_fresh();
+        recovery.mark_boot_complete();
+        recovery.begin_load("Basic", "PLAYFUL Choker", false);
+        let _load = recovery
+            .enter_frame(FrameKind::ProjectLoad, "Basic")
+            .unwrap();
+        recovery.stage_crash(CrashCause::Panic, &"boom", None, &[], None);
+        recovery.finalize_crash_and_reset();
+        let (_, assessment) = InMemoryBackend::reboot(recovery, ResetCause::SoftwareReset);
+        let load = assessment.interrupted_load.expect("an interrupted load");
+        assert_eq!(load.cause, Some(CrashCause::Panic));
+        assert_ne!(
+            assessment.level,
+            RecoveryLevel::Green,
+            "the frame is watched"
+        );
     }
 
     #[test]

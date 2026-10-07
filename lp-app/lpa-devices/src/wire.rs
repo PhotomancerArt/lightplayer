@@ -325,13 +325,19 @@ pub struct RecoveryFacts {
     /// The device's own last-crash summary, already phrased ("oom at
     /// node:nodes/meteor"). `None` = no crash on record.
     pub last_crash: Option<String>,
+    /// A project load the board's previous run never finished, in the
+    /// device's own plain words ("Small Dome didn't fit in memory — back on
+    /// PLAYFUL Choker"). The card says it: it is why the board runs what it
+    /// runs.
+    #[serde(default)]
+    pub load_notice: Option<String>,
 }
 
 impl RecoveryFacts {
     /// Whether this state is something the card must SAY. Green with no
     /// safe mode and no gated path is the only silent answer.
     pub fn is_degraded(&self) -> bool {
-        self.level != RecoveryLevelFacts::Green || self.safe_mode
+        self.level != RecoveryLevelFacts::Green || self.safe_mode || self.load_notice.is_some()
     }
 
     /// Entries the ledger has disabled outright.

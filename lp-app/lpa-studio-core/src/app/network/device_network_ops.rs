@@ -285,6 +285,7 @@ mod tests {
 
         let wifi = read(StationState::Connecting {
             ssid: "Starlink Apt".to_string(),
+            step: lpc_wire::ConnectStep::Looking,
         });
         assert_eq!(words(&wifi), ["Saved", "Connecting…"]);
         let test = wifi.test().unwrap();
@@ -295,6 +296,7 @@ mod tests {
             ssid: "Starlink Apt".to_string(),
             ip: "10.0.0.23".to_string(),
             rssi: -57,
+            host: "lp-8e30.local".to_string(),
         });
         assert_eq!(words(&wifi), ["Connected · 10.0.0.23", "Saved"]);
         assert_eq!(wifi.rows()[0].tone, WifiTone::Good);

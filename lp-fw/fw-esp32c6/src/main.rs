@@ -124,6 +124,11 @@ pub use fw_esp32_common::logger;
 mod io_thread;
 #[cfg(all(feature = "io_thread_stack_diag", not(fw_harness)))]
 mod io_thread_stack_diag;
+// The Wi-Fi station and the network on `lp-net` (Wi-Fi roadmap M6). Its
+// radio comes from the radio hub, which stress and desk-meter builds give to
+// their load generators instead.
+#[cfg(lp_net)]
+mod net;
 #[cfg(all(lp_split, not(fw_harness)))]
 mod ota;
 #[cfg(any(
@@ -136,6 +141,8 @@ mod ota;
     feature = "test_fluid_demo",
 ))]
 mod output;
+#[cfg(all(feature = "radio_dma_diag", lp_net))]
+mod radio_dma_diag;
 mod recovery;
 mod seams;
 #[cfg(all(feature = "diag_secure_link", not(fw_harness)))]
@@ -145,6 +152,11 @@ mod serial;
 mod stack_probe;
 #[cfg(all(any(feature = "stress_s2", feature = "stress_s3"), not(fw_harness)))]
 mod stress;
+#[cfg(all(
+    any(feature = "io_thread_stack_diag", feature = "net_thread_stack_diag"),
+    not(fw_harness)
+))]
+mod thread_stack_diag;
 #[cfg(not(fw_harness))]
 use fw_esp32_common::server_loop;
 #[cfg(not(fw_harness))]
@@ -296,11 +308,23 @@ fn log_heartbeat_stack_lines() {
         c_heap::log_if_grown("heartbeat");
         #[cfg(feature = "io_thread_stack_diag")]
         io_thread_stack_diag::log_if_grown();
+        #[cfg(feature = "net_thread_stack_diag")]
+        net::net_thread_stack_diag::log_if_grown();
+        #[cfg(lp_net)]
+        net::net_heartbeat::log_line();
     }
 }
 
 /// This chip's ProjectRead memory gate (`lpa_server::ReadGate`): refuse a
-/// read when under 40 KiB is free in total or no 16 KiB block is left.
+/// read when under 40 KiB is free in total or no 8 KiB block is left.
+///
+/// Since 2026-10-07 a read on a fragmented heap goes out in smaller frames
+/// (`lpa_server::read_frame_budget`: half the largest block, at most the
+/// link's 16 KiB), so the block floor only has to hold a read's largest
+/// single ask, the 8 KB mapping slot JSON below, not twice it. A Wi-Fi-joined
+/// C6 with a LAN link open sat at a 16,164-16,172 B block after a switch, and
+/// the old 16 KiB floor refused every read there (emulated; the defect is
+/// `docs/defects/2026-10-06-a-wifi-joined-c6-refuses-every-project-switch.md`).
 ///
 /// Measured on the emulated C6 with Bluetooth on (`lp-emu:esp32c6:t1@4caa5b658`,
 /// plan `lp2025/2026-09-27-1218-fragmentation-tolerant-reads`, REPORT.md):
@@ -310,7 +334,7 @@ fn log_heartbeat_stack_lines() {
 ///   0–176 B; 40 KiB is that plus room for the link and radio tasks;
 /// - the largest single ask any read makes is 8 KB (a mapping file's slot
 ///   JSON, once `lpc-wire` sizes it exactly), 2.5 KB for the editor's reads;
-///   16 KiB is twice it.
+///   8 KiB holds it, now that a frame is cut to half the block.
 ///
 /// The old single floor (a 32 KiB block) refused 52 of 96 editor reads after
 /// ten shader edits, because Bluetooth holds this chip's second heap region
@@ -324,13 +348,15 @@ fn log_heartbeat_stack_lines() {
 #[cfg(not(fw_harness))]
 const READ_GATE: lpa_server::ReadGate = lpa_server::ReadGate {
     min_free_bytes: 40 * 1024,
-    min_largest_block_bytes: 16 * 1024,
+    min_largest_block_bytes: 8 * 1024,
 };
 
 #[cfg(not(fw_harness))]
 fn read_headroom_probe() -> Option<u32> {
+    // At once when no project is loaded (the load gate's probe, after a
+    // stop), else every few seconds.
     #[cfg(feature = "heap_map_diag")]
-    heap_map::log_periodic("probe");
+    heap_map::log_if_stopped_or_periodic("probe", 140_000);
     Some(recovery::panic_path::largest_free_block().min(u32::MAX as usize) as u32)
 }
 
@@ -650,15 +676,29 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
             feature = "desk_espnow_meter"
         ))
     ))]
-    let radio_driver = {
-        let radio_driver = Esp32EspNowRadioDriver::new(Rc::clone(&hardware_registry), wifi)
-            .expect("Failed to initialize ESP-NOW radio");
+    let (radio_driver, net_radio) = {
+        // The radio's one bring-up (`hardware::radio_hub`): ESP-NOW's
+        // interface to its driver; the controller and the station interface
+        // to the station (`wifi`), or back to the driver to keep alive.
+        let parts =
+            hardware::radio_hub::bring_up(wifi).expect("Failed to initialize ESP-NOW radio");
+        #[cfg(lp_net)]
+        let (kept, net_radio) = (None, Some((parts.controller, parts.station)));
+        #[cfg(not(lp_net))]
+        let (kept, net_radio) = (Some(parts.controller), None::<()>);
+        let radio_driver = Esp32EspNowRadioDriver::from_parts(
+            Rc::clone(&hardware_registry),
+            parts.esp_now,
+            kept,
+            hardware::espnow_radio_driver::DEFAULT_ESPNOW_CHANNEL,
+        )
+        .expect("Failed to initialize ESP-NOW radio");
         log::info!(
             "[fw-esp32c6] ESP-NOW radio ready: device_id={:?} channel={}",
             radio_driver.device_id(),
             radio_driver.default_channel()
         );
-        radio_driver
+        (radio_driver, net_radio)
     };
     // P4 stress builds: the radio stack becomes a load generator instead of a
     // driver — `esp_radio::wifi::new` can only run once, and the stress tasks
@@ -690,8 +730,12 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
     // store says off never touches the BLE controller.
     // The radio links' shared slots: the BLE task opens a connection's link
     // there and the link mux (below) serves it. On the heap, not `.bss`: its
-    // slots hold `RefCell`s (one thread executor), which a `static` cannot.
-    #[cfg(feature = "ble")]
+    // slots hold `RefCell`s, which a `static` cannot. With the LAN's links
+    // (served from `lp-net`) every borrow is taken under the port's lock.
+    #[cfg(lp_net)]
+    let (radio_port, lan_port) =
+        fw_esp32_common::radio_link::RadioLinkPort::leak_locked(net::net_thread::port_lock);
+    #[cfg(all(feature = "ble", not(lp_net)))]
     let radio_port = fw_esp32_common::radio_link::RadioLinkPort::leak();
     #[cfg(feature = "ble")]
     let ble_started = {
@@ -731,6 +775,40 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
     heap_map::log("after-ble");
     #[cfg(not(feature = "ble"))]
     let _ = quirks_applied;
+
+    // The network on its own thread, in the core (plan MD6): after the radio
+    // and BLE bring-up (M2 Run G's order). The network file is read here,
+    // on the main thread, before any Radio node exists, so "set to use
+    // Wi-Fi" holds from the first frame; the station never reads the file
+    // itself (`net::station_probes`).
+    #[cfg(lp_net)]
+    {
+        let file = lpa_server::network_store::read_network_file(base_fs.as_ref());
+        net::station_probes::boot_settings(&file);
+        log::info!(
+            "[wifi] {} network(s) saved, Wi-Fi {}",
+            file.networks.len(),
+            if file.wifi { "on" } else { "off" }
+        );
+        if let Some((controller, station)) = net_radio {
+            let host = fw_esp32_common::net::mdns::mdns_host(net::net_thread::base_mac());
+            let seed = (u64::from(esp_hal::rng::Rng::new().random()) << 32)
+                | u64::from(esp_hal::rng::Rng::new().random());
+            // A board that will join allocates its socket buffers now.
+            let will_join = file.wifi && !file.networks.is_empty();
+            net::net_thread::start(controller, station, host, seed, lan_port, will_join);
+        }
+    }
+    #[cfg(all(
+        feature = "radio",
+        not(lp_net),
+        not(any(
+            feature = "stress_s2",
+            feature = "stress_s3",
+            feature = "desk_espnow_meter"
+        ))
+    ))]
+    let _ = net_radio;
 
     CoreBoot {
         spawner,
@@ -878,7 +956,25 @@ fn lp_engine_entry(core: CoreBoot) {
         graphics,
     );
     server.set_read_headroom_probe(Some(read_headroom_probe));
+    // A request the heap cannot decode is refused in words before it is
+    // decoded (`server_payload::request_refusal`), on every link.
+    fw_esp32_common::serial::server_payload::set_request_headroom_probe(|| {
+        Some((
+            esp_alloc::HEAP.free(),
+            recovery::panic_path::largest_free_block(),
+        ))
+    });
     server.set_read_gate(Some(READ_GATE));
+    // The station's probes and its settings hook (`wifi`): the server reads
+    // what the station publishes, and hands it the network file after every
+    // change (`net::station_probes`).
+    #[cfg(lp_net)]
+    {
+        server.set_station_probe(Some(net::station_probes::station_probe));
+        server.set_scan_probe(Some(net::station_probes::scan_probe));
+        server.set_last_attempt_probe(Some(net::station_probes::last_attempt_probe));
+        server.set_network_changed(Some(net::station_probes::network_changed));
+    }
     // With the link on its own thread, answer a tick's requests before its
     // render: the replies then go out while the frame renders (`io_thread`).
     #[cfg(feature = "io-thread")]
@@ -925,11 +1021,34 @@ fn lp_engine_entry(core: CoreBoot) {
     // Login challenges draw from the chip's hardware RNG; the server itself
     // never draws randomness (sans-IO).
     server.set_entropy_source(Some(fill_random));
+    // Every link's access state reserved now, the USB link's and each radio
+    // slot's, so a link's first sight grows nothing above its own memory.
+    #[cfg(feature = "ble")]
+    server.reserve_links(1 + fw_esp32_common::radio_link::LINK_SLOTS);
     // A PowerButton node deep-sleeps the chip through this (EXT1 wake).
     server.set_power_platform(Some(Rc::new(
         crate::hardware::power::Esp32C6PowerPlatform::new(Rc::clone(&hardware_system)),
     )));
     esp_println::println!("[INIT] LpServer created");
+
+    // USB plus the radio links. The advertised-name hook only when BLE runs.
+    // Built BEFORE the boot project loads: its per-link lists hold memory
+    // for the board's whole life, and allocated after the project they sat
+    // above it and split the space it frees (first fit; silicon N7,
+    // 2026-10-06).
+    #[cfg(feature = "ble")]
+    let transport = {
+        let mux = fw_esp32_common::radio_link::LinkMuxTransport::new(
+            transport,
+            radio_port,
+            embassy_time::Delay,
+        );
+        if ble_started {
+            mux.with_upkeep_hook(ble::refresh_advertised_name)
+        } else {
+            mux
+        }
+    };
 
     // Auto-load project at boot (from config or lexical-first) — unless
     // something asks us not to. Two independent reasons can skip it, and the
@@ -983,21 +1102,6 @@ fn lp_engine_entry(core: CoreBoot) {
     // Boot frame ends here; the boot-complete milestone is marked by the
     // server loop after the first successful frame.
     drop(boot_guard);
-
-    // USB plus the radio links. The advertised-name hook only when BLE runs.
-    #[cfg(feature = "ble")]
-    let transport = {
-        let mux = fw_esp32_common::radio_link::LinkMuxTransport::new(
-            transport,
-            radio_port,
-            embassy_time::Delay,
-        );
-        if ble_started {
-            mux.with_upkeep_hook(ble::refresh_advertised_name)
-        } else {
-            mux
-        }
-    };
 
     let app = FirmwareApp {
         server,

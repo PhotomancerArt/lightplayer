@@ -31,6 +31,8 @@ pub mod tokio_client;
 pub mod transport;
 #[cfg(feature = "emu")]
 pub mod transport_emu_serial;
+#[cfg(feature = "lan")]
+pub mod transport_lan;
 #[cfg(feature = "serial")]
 pub mod transport_serial;
 #[cfg(feature = "ws")]

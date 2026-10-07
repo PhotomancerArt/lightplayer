@@ -14,10 +14,12 @@
 //! bytes, and is left as it is until the next change replaces it.
 //!
 //! Nothing here joins a network or listens for one: what the station is
-//! doing and what it hears come from the embedder's probes
-//! ([`crate::StationProbe`], [`crate::ScanProbe`]), and no M5 image
-//! installs either, so every board answers [`StationState::Unsupported`]
-//! and a scan [`NetworkScan::Unsupported`].
+//! doing, what it hears and how its last attempt at each network went come
+//! from the embedder's probes ([`crate::StationProbe`], [`crate::ScanProbe`],
+//! [`crate::LastAttemptProbe`]), and a change is announced to the station
+//! through [`crate::NetworkChanged`]. An image with no station installs
+//! none, and answers [`StationState::Unsupported`] and a scan
+//! [`NetworkScan::Unsupported`].
 
 extern crate alloc;
 

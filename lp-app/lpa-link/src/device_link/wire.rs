@@ -208,6 +208,7 @@ fn recovery_facts(recovery: &lpc_wire::server::RecoveryStatus) -> RecoveryFacts 
             .last_crash
             .as_ref()
             .map(|crash| format!("{} at {}", crash.cause, crash.path)),
+        load_notice: recovery.load_notice.clone(),
     }
 }
 

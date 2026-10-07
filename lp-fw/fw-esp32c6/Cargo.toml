@@ -8,7 +8,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [features]
-default = ["esp32c6", "server", "radio", "ble", "json-pack", "io-thread"]
+default = ["esp32c6", "server", "radio", "ble", "json-pack", "io-thread", "wifi"]
 esp32c6 = [
     "esp-backtrace/esp32c6",
     "esp-bootloader-esp-idf/esp32c6",
@@ -67,6 +67,30 @@ io-thread = ["radio", "dep:esp-radio-rtos-driver"]
 # `[iostack]` at the heartbeat — OFF by default, never shipped: it finds the
 # stack by scanning esp-rtos's private task record (`src/io_thread_stack_diag.rs`).
 io_thread_stack_diag = ["io-thread"]
+# The Wi-Fi station and the network on `lp-net` (plan
+# `lp2025/2026-10-05-1903-wifi-link-c6`, Wi-Fi roadmap M6; `src/net/`): the
+# join policy over esp-radio's station, embassy-net with DHCP on link-up, the
+# Radio node rule, the server's station probes. On by default. A build
+# without it answers `unsupported`, as every image before M6 did. The thread
+# is created like `io-thread`'s (the esp-rtos driver), and its LAN links ride
+# the same radio-link mux as Bluetooth's, so it needs `ble`.
+wifi = [
+    "ble",
+    "server",
+    "fw-esp32-common/wifi",
+    "dep:esp-radio-rtos-driver",
+    "dep:embassy-net",
+    "dep:smoltcp",
+]
+# `lp-net`'s stack high-water, painted at thread start and logged as
+# `[netstack]` at the heartbeat — OFF by default, never shipped (the same
+# private-record scan as `io_thread_stack_diag`).
+net_thread_stack_diag = ["wifi"]
+# Where the radio's DMA buffers are, with the station joined (plan P08, the
+# desk walk's W10): every live radio C block by address, and the Rust heap's
+# map, flagging anything in `dram2_seg` — the bootloader's load region.
+# OFF by default, never shipped, never built by CI (`src/radio_dma_diag.rs`).
+radio_dma_diag = ["wifi", "heap_map_diag"]
 # NOTE: the former `ws281x_2blocks` feature is gone: the RMT block plan is now
 # computed at driver init from the board manifest's declared WS281x channel
 # count (1 declared channel = the whole 192-word RMT RAM, 2 = one 48-word
@@ -160,10 +184,9 @@ stress_s3 = ["radio"]  # ESP-NOW broadcast chatter, max payload, back to back
 desk_espnow_meter = ["radio"]
 # Heap diagnostics — OFF by default, never shipped. `heap_map_diag` logs the
 # heap's holes and live spans by address (`[heapmap]`, `src/heap_map.rs`);
-# `heap_track_diag` adds the backtrace of every live allocation at or above
-# main-region offset `LP_HEAP_TRACK_FROM` (build-time, decimal; this build
-# gives the heap only 16 KiB of the reclaimed segment and keeps its table in
-# the rest);
+# `heap_track_diag` adds the backtrace of every live allocation made after
+# the station joins (its table is in LP SRAM, so the heap keeps the shipped
+# layout);
 # `heap_diag_ble_standin` leaks BLE's boot-time heap (Run I: 19,436 + 3,500 +
 # 1,372 B) where BLE would start, for an emulated board, which never starts
 # BLE. Written for docs/defects/2026-09-24-ble-enabled-c6-refuses-a-project-switch-after-the-heap-cut.md.
@@ -410,7 +433,13 @@ lps-q32 = { path = "../../lp-shader/lps-q32", default-features = false }
 # protocol and the `log` adapter for its log ring.
 lp-link = { path = "../../lp-base/lp-link", default-features = false, features = ["lab", "log"], optional = true }
 # The comms lab's WiFi pipe (`test_comms_lab_wifi`): IPv4, DHCP, UDP.
-embassy-net = { version = "0.9.1", default-features = false, features = ["proto-ipv4", "medium-ethernet", "dhcpv4", "udp"], optional = true }
+# The network on `lp-net` (`wifi`): IPv4, DHCP, TCP (the LAN endpoint), UDP
+# and multicast (mDNS). DNS is off.
+embassy-net = { version = "0.9.1", default-features = false, features = ["proto-ipv4", "medium-ethernet", "dhcpv4", "udp", "tcp", "multicast"], optional = true }
+# embassy-net's own smoltcp (the same crate, no second copy), named only for
+# the DHCP client's retry timing (`net::station_task::dhcp_config`), which
+# embassy-net takes but does not re-export.
+smoltcp = { version = "0.13.1", default-features = false, optional = true }
 # The portable WS281x driver core. `default-features = false` drops its host
 # `mock` backend (and the `alloc` it needs) — firmware brings its own `RmtHw`.
 # `isr-in-ram`: the refill path lives in `.rwtext` (IRAM). Single-core, so not

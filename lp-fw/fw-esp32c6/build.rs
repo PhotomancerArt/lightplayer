@@ -214,6 +214,20 @@ fn main() {
     if harness {
         println!("cargo::rustc-cfg=fw_harness");
     }
+    // The network on `lp-net` (`src/net/`): the `wifi` feature in an app
+    // image whose radio is the product's. Stress and desk-meter builds give
+    // the radio to their load generators instead, and harnesses replace the
+    // app, so none of them run it. One cfg, so each site carries one gate.
+    println!("cargo::rustc-check-cfg=cfg(lp_net)");
+    let feature = |name: &str| std::env::var_os(format!("CARGO_FEATURE_{name}")).is_some();
+    if feature("WIFI")
+        && !harness
+        && !feature("STRESS_S2")
+        && !feature("STRESS_S3")
+        && !feature("DESK_ESPNOW_METER")
+    {
+        println!("cargo::rustc-cfg=lp_net");
+    }
 
     let manifest_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
 

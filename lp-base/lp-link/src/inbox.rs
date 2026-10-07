@@ -60,7 +60,8 @@ pub struct Inbox {
     open: u8,
     /// Bit `c`: channel `c` is mid-way through a message too long to keep.
     dropping: u8,
-    /// Messages dropped for being longer than `max_message`.
+    /// Messages dropped for being longer than `max_message`, or for a
+    /// reassembly buffer the heap could not grow.
     oversize: u32,
     ready_bytes: usize,
     budget: usize,
@@ -68,6 +69,9 @@ pub struct Inbox {
     /// A reassembly buffer above this capacity is released once its message
     /// is delivered (`LinkConfig::keep_reassembly`).
     keep: usize,
+    /// Tests: a heap that cannot grow a reassembly buffer past this.
+    #[cfg(test)]
+    refuse_growth_past: Option<usize>,
 }
 
 impl Inbox {
@@ -82,6 +86,8 @@ impl Inbox {
             budget,
             max_message,
             keep,
+            #[cfg(test)]
+            refuse_growth_past: None,
         }
     }
 
@@ -120,7 +126,8 @@ impl Inbox {
         self.ready_bytes + partial + n + EVENT_COST <= self.budget
     }
 
-    /// Messages dropped so far for being longer than `max_message`.
+    /// Messages dropped so far for being longer than `max_message`, or for
+    /// a reassembly buffer the heap could not grow.
     pub fn oversize_messages(&self) -> u32 {
         self.oversize
     }
@@ -169,7 +176,19 @@ impl Inbox {
             self.deliver(f.chan, f.data.to_vec());
             return Ok(());
         }
-        self.grow_partial(c, f.data.len());
+        if !self.grow_partial(c, f.data.len()) {
+            // The heap cannot hold the message: drop it to its end, as an
+            // oversize one is, rather than abort the program. A board's
+            // largest free block is often smaller than its `max_message`
+            // (PR B's emulated LAN walk: an 8 KB write reset the C6 here,
+            // with 13,448 B in one piece).
+            self.abort(f.chan);
+            self.oversize += 1;
+            if !f.fin {
+                self.dropping |= bit;
+            }
+            return Ok(());
+        }
         self.partials[c].extend_from_slice(f.data);
         self.open |= bit;
         if f.fin {
@@ -263,13 +282,27 @@ impl Inbox {
     /// Make room for `n` more bytes in channel `c`'s reassembly buffer:
     /// double, but never past `max_message` (the caller checked the message
     /// fits it).
-    fn grow_partial(&mut self, c: usize, n: usize) {
+    /// Room for `n` more bytes in channel `c`'s reassembly buffer: doubled
+    /// (to `max_message`) when the heap has it, else exactly what is needed.
+    /// `false`: the heap has neither.
+    fn grow_partial(&mut self, c: usize, n: usize) -> bool {
         let partial = &mut self.partials[c];
         let need = partial.len() + n;
-        if need > partial.capacity() {
-            let to = need.max((2 * partial.capacity()).min(self.max_message));
-            partial.reserve_exact(to - partial.len());
+        if need <= partial.capacity() {
+            return true;
         }
+        let to = need.max((2 * partial.capacity()).min(self.max_message));
+        #[cfg(test)]
+        if self.refuse_growth_past.is_some_and(|limit| need > limit) {
+            return false;
+        }
+        #[cfg(test)]
+        let to = match self.refuse_growth_past {
+            Some(limit) if to > limit => need,
+            _ => to,
+        };
+        let len = partial.len();
+        partial.try_reserve_exact(to - len).is_ok() || partial.try_reserve_exact(need - len).is_ok()
     }
 }
 
@@ -359,6 +392,36 @@ mod tests {
         inbox.push_fragment(frag(true, false)).unwrap();
         assert_eq!(inbox.push_fragment(frag(true, false)), Err(ProtocolError));
         assert_eq!(inbox.bytes(), 0, "the partial is dropped");
+    }
+
+    /// A message the heap cannot reassemble is dropped to its end and
+    /// counted, never an allocation failure; a shorter one after it fits.
+    /// (The C6 reset here on an 8 KB write with 13,448 B in one piece.)
+    #[test]
+    fn a_message_the_heap_cannot_hold_is_dropped_not_fatal() {
+        let mut inbox = Inbox::new(64 * 1024, 16 * 1024, 100);
+        inbox.refuse_growth_past = Some(150);
+        let frag = |first, fin, n| Fragment {
+            chan: 1,
+            first,
+            fin,
+            data: &[7; 60][..n],
+        };
+        inbox.push_fragment(frag(true, false, 60)).unwrap();
+        inbox.push_fragment(frag(false, false, 60)).unwrap();
+        // 180 B does not fit the heap: dropped here, and the rest with it.
+        inbox.push_fragment(frag(false, false, 60)).unwrap();
+        inbox.push_fragment(frag(false, true, 10)).unwrap();
+        assert_eq!(inbox.oversize_messages(), 1);
+        assert!(inbox.pop().is_none(), "nothing delivered");
+        // Doubling past the limit falls back to exactly what is needed.
+        inbox.push_fragment(frag(true, false, 60)).unwrap();
+        inbox.push_fragment(frag(false, false, 60)).unwrap();
+        inbox.push_fragment(frag(false, true, 20)).unwrap();
+        assert!(
+            matches!(inbox.pop(), Some(LinkEvent::Message { data, .. }) if data.len() == 140),
+            "a message the heap can hold is whole"
+        );
     }
 
     #[test]

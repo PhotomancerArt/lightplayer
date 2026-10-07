@@ -21,6 +21,7 @@ fn upload_refuses_when_a_dormant_entry_fails_to_load() {
     let result = handle_upload(UploadArgs {
         dir: project_dir,
         host: "local".to_string(),
+        password: Default::default(),
         no_wait: false,
         wait_timeout_secs: 10,
     });
@@ -44,6 +45,7 @@ fn upload_still_succeeds_when_every_entry_is_fine() {
     let result = handle_upload(UploadArgs {
         dir: project_dir,
         host: "local".to_string(),
+        password: Default::default(),
         no_wait: false,
         wait_timeout_secs: 10,
     });

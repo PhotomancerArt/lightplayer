@@ -54,6 +54,22 @@ pub type StationProbe = fn() -> lpc_wire::StationState;
 /// would claim the radio listened.
 pub type ScanProbe = fn() -> lpc_wire::NetworkScan;
 
+/// Embedder-supplied probe for how the station's last attempt at one saved
+/// network went (by name), reported as each network's `last` in every
+/// [`lpc_wire::server::NetworkStatus`]. The station keeps these in RAM,
+/// never in the network file. Unset = no attempt recorded (`last` absent).
+pub type LastAttemptProbe = fn(&str) -> Option<lpc_wire::LastAttempt>;
+
+/// Embedder-supplied "the network settings changed" notice, called after a
+/// `NetworkAdd`, `NetworkForget` or `NetworkSet` is answered with a status
+/// (not an error), with the network file as it now stands. The server reads
+/// it off its own filesystem, on its own thread, so a station on another
+/// thread never touches the filesystem; it works out what changed itself
+/// (a just-added network, or a changed password, is tried at once). The
+/// file holds the passwords: the embedder keeps it in RAM for the station
+/// and never logs it. Unset on hosts.
+pub type NetworkChanged = fn(&lpc_access::NetworkFile);
+
 /// Embedder-supplied "restart this device now" action, backing
 /// [`lpc_wire::ClientRequest::Reboot`].
 ///
@@ -102,45 +118,14 @@ pub type FirmwareManifestFn = fn() -> Option<lpc_update::BoardManifest>;
 /// OOMs) cannot serve any read shape and SHOULD be refused.
 pub const PROJECT_READ_MIN_HEADROOM_BYTES: u32 = 32 * 1024;
 
-/// Minimum heap headroom (largest free block) to attempt a `LoadProject`.
-///
-/// Same refusal-not-reset posture as the read gate ([`ReadGate`])
-/// (ADR `2026-08-28-project-reads-bounded-streamed-refusable`, D7): loading
-/// materializes the whole engine — mapping lamp lists, node graph, shader
-/// JIT — through infallible allocs, so an unaffordable load abort-resets the
-/// board instead of failing the request
-/// (`docs/defects/2026-08-29-load-project-resets-instead-of-refusing.md`).
-///
-/// The floor is a can-anything-load bound, not a fit check — the server
-/// cannot know a project's real cost without parsing it, and parsing is
-/// itself part of the allocation being guarded. 64 KiB comes from the
-/// observed reset: the classic died mid-load on a single 64 KiB mapping ask
-/// with a 24 KiB largest free block, and even with the resolver's exact
-/// reserve a dome-scale lamp list is one contiguous ask of that order
-/// (5,950 lamps × 16 B ≈ 93 KiB). A heap that cannot hand over one 64 KiB
-/// block right after unloading every project is too pressed to finish any
-/// real load. A big-enough project can still OOM past the gate — the floor
-/// only catches boards that could never succeed, and refusing those with a
-/// structured error always beats resetting.
-pub const PROJECT_LOAD_MIN_HEADROOM_BYTES: u32 = 64 * 1024;
-
-/// The `LoadProject` headroom gate, shared by the wire handler and the
-/// host-call path (`LpServer::load_project`, which boot-time startup loads
-/// use — a refused startup project boots to an idle server instead of a
-/// reset loop). No probe (hosts, browser) = never refused.
-pub(crate) fn check_load_headroom(probe: Option<ReadHeadroomProbe>) -> Result<(), ServerError> {
-    if let Some(headroom) = probe.and_then(|probe| probe())
-        && headroom < PROJECT_LOAD_MIN_HEADROOM_BYTES
-    {
-        let message = format!(
-            "load refused: heap headroom too low (largest free block {headroom} B < \
-             {PROJECT_LOAD_MIN_HEADROOM_BYTES} B); power-cycle the device or load a smaller \
-             project"
-        );
-        log::warn!("load_project: {message}");
-        return Err(ServerError::Core(message));
-    }
-    Ok(())
+/// A project load's name for the user and the recovery record: the
+/// project's directory name, the last segment of `path`.
+pub(crate) fn project_name(path: &lpfs::lp_path::LpPath) -> &str {
+    path.as_str()
+        .trim_end_matches('/')
+        .rsplit('/')
+        .next()
+        .unwrap_or("")
 }
 
 /// Main server struct for processing client-server messages.
@@ -182,6 +167,10 @@ pub struct LpServer {
     station_probe: Option<StationProbe>,
     /// Optional Wi-Fi scan probe. Unset = `unsupported`.
     scan_probe: Option<ScanProbe>,
+    /// Optional per-network last-attempt probe. Unset = `last` absent.
+    last_attempt_probe: Option<LastAttemptProbe>,
+    /// Optional settings-changed notice for the station. Unset = nothing.
+    network_changed: Option<NetworkChanged>,
     /// The ProjectRead memory gate's floors, per chip (see [`ReadGate`]).
     /// Unset (hosts/browser) = reads are never refused.
     read_gate: Option<ReadGate>,
@@ -383,6 +372,8 @@ impl LpServer {
             read_headroom_probe: None,
             station_probe: None,
             scan_probe: None,
+            last_attempt_probe: None,
+            network_changed: None,
             read_gate: None,
             messages_first: false,
             reboot_hook: None,
@@ -568,6 +559,17 @@ impl LpServer {
     /// only trusted links need none.
     pub fn set_entropy_source(&mut self, source: Option<EntropySource>) {
         self.access.set_entropy_source(source);
+    }
+
+    /// Reserve the per-link access state for `links` links at once (the
+    /// embedder's most: every transport's links, the primary included).
+    /// An embedder whose heap is placed by first fit calls it at boot: a
+    /// list that grows when a link opens lands above the link's own memory
+    /// and outlives it, splitting the hole the link leaves
+    /// (`docs/defects/2026-10-06-a-lan-link-strands-the-heap-below-the-load-floor.md`).
+    /// Hosts need not call it.
+    pub fn reserve_links(&mut self, links: usize) {
+        self.access.reserve_links(links);
     }
 
     /// One heartbeat per link in `links`, each built for the link it goes to.
@@ -788,6 +790,19 @@ impl LpServer {
                 );
             }
         }
+        // A freshly loaded project that has now survived its first frames:
+        // its load is done. End the recovery record, and make a switch the
+        // startup project.
+        if !project_info.is_empty()
+            && let Some(commit) = self.project_manager.frame_survived()
+        {
+            if commit.persist_startup
+                && let Some(project) = self.project_manager.get_project(commit.handle)
+            {
+                crate::handlers::persist_startup_project(&*self.base_fs, project.path());
+            }
+            lp_recovery::end_project_load();
+        }
         // Handles are minted monotonically and never reused, so a project
         // that was unloaded mid-failure would otherwise keep its ledger
         // entry for the process's lifetime.
@@ -982,12 +997,20 @@ impl LpServer {
                     response_count += 1;
                 }
                 ClientRequest::ProjectRead { handle, request } => {
-                    let sink_frame_budget = self.sink_frame_budget();
-                    // One read of the heap's figures serves both the gate
-                    // and the reply's runtime status: the S3's and the
-                    // classic's stats function prints the memory ledger
-                    // when it is called, so it is called once per read.
+                    // One read of the heap's figures serves the gate, the
+                    // frame budget and the reply's runtime status: the S3's
+                    // and the classic's stats function prints the memory
+                    // ledger when it is called, so it is called once per read.
                     let mut server_status = self.runtime_status();
+                    let largest_block = server_status
+                        .memory
+                        .as_ref()
+                        .and_then(|memory| memory.largest_free_block)
+                        .or_else(|| self.read_headroom_probe.and_then(|probe| probe()));
+                    // On a fragmented heap the read goes out in smaller
+                    // frames instead of being refused.
+                    let sink_frame_budget =
+                        read_frame_budget(self.sink_frame_budget(), largest_block);
                     // Refusal-not-reset: if the heap cannot afford
                     // even a well-behaved streamed read, fail the
                     // request with a structured terminal error instead
@@ -995,13 +1018,8 @@ impl LpServer {
                     // board mid-assembly.
                     if let Some(refusal) = self.read_gate.and_then(|gate| {
                         let memory = server_status.memory.as_ref();
-                        gate.check(
-                            memory.map(|memory| memory.free_bytes),
-                            memory
-                                .and_then(|memory| memory.largest_free_block)
-                                .or_else(|| self.read_headroom_probe.and_then(|probe| probe())),
-                        )
-                        .err()
+                        gate.check(memory.map(|memory| memory.free_bytes), largest_block)
+                            .err()
                     }) {
                         let mut sink = ProjectReadStreamSink::with_max_bytes(
                             transport,
@@ -1231,9 +1249,9 @@ impl LpServer {
 
     /// Get the memory stats callback
     /// Install the largest-free-block probe the ProjectRead gate
-    /// ([`Self::set_read_gate`]) and the LoadProject headroom gate
-    /// ([`PROJECT_LOAD_MIN_HEADROOM_BYTES`]) consult. Unset = neither checks
-    /// a largest block.
+    /// ([`Self::set_read_gate`]) and the filesystem-read refusal consult, and
+    /// the heartbeat reports. Unset = no read checks a largest block. A
+    /// LoadProject never consults it: loads are tried, not gated.
     pub fn set_read_headroom_probe(&mut self, probe: Option<ReadHeadroomProbe>) {
         self.read_headroom_probe = probe;
     }
@@ -1249,6 +1267,31 @@ impl LpServer {
     /// `tick_and_send` carries one call for all five.
     #[inline(never)]
     fn network_answer(&self, request: ClientRequest) -> lpc_wire::server::ServerMsgBody {
+        let changes = matches!(
+            request,
+            ClientRequest::NetworkAdd { .. }
+                | ClientRequest::NetworkForget { .. }
+                | ClientRequest::NetworkSet { .. }
+        );
+        let mut body = self.network_body(request);
+        if let lpc_wire::server::ServerMsgBody::NetworkStatus(status) = &mut body {
+            if let Some(probe) = self.last_attempt_probe {
+                for network in &mut status.networks {
+                    network.last = probe(&network.ssid);
+                }
+            }
+            if changes {
+                if let Some(notice) = self.network_changed {
+                    notice(&network_store::read_network_file(&*self.base_fs));
+                }
+            }
+        }
+        body
+    }
+
+    /// The network request's answer before the station's own facts (each
+    /// network's `last`) are filled in.
+    fn network_body(&self, request: ClientRequest) -> lpc_wire::server::ServerMsgBody {
         let fs = &*self.base_fs;
         let held = self.hello.hardware.fs == lpc_wire::FsBootState::LegacyHeld;
         match request {
@@ -1287,6 +1330,18 @@ impl LpServer {
     /// [`lpc_wire::NetworkScan::Unsupported`] (no M5 image installs one).
     pub fn set_scan_probe(&mut self, probe: Option<ScanProbe>) {
         self.scan_probe = probe;
+    }
+
+    /// Install the per-network last-attempt probe each saved network's
+    /// `last` is read from. Unset = `last` absent on every network.
+    pub fn set_last_attempt_probe(&mut self, probe: Option<LastAttemptProbe>) {
+        self.last_attempt_probe = probe;
+    }
+
+    /// Install the notice called after a network change is answered with a
+    /// status. Unset = nothing is told.
+    pub fn set_network_changed(&mut self, notice: Option<NetworkChanged>) {
+        self.network_changed = notice;
     }
 
     /// What the radio hears, from the probe (`unsupported` without one).
@@ -1382,7 +1437,6 @@ impl LpServer {
         &mut self,
         path: &lpfs::lp_path::LpPath,
     ) -> Result<lpc_wire::WireProjectHandle, ServerError> {
-        check_load_headroom(self.read_headroom_probe)?;
         let handle = self.project_manager.load_project(
             path,
             &mut *self.base_fs,
@@ -1405,6 +1459,27 @@ impl LpServer {
                 .set_display_layout_budget(engine_budget);
         }
         Ok(handle)
+    }
+
+    /// The boot's startup load: [`Self::load_project`], with the load
+    /// recorded in the recovery region first (`lp_recovery::begin_project_load`).
+    /// A startup project that resets the board (out of memory, a crash, a
+    /// hang) is then known on the next boot, which boots with no project
+    /// instead of trying it again: never a reset loop. There is no headroom
+    /// gate before it — a board tries, and recovers if the try fails
+    /// (ADR `2026-10-07-project-loads-are-tried-and-recovered`).
+    pub fn load_startup_project(
+        &mut self,
+        path: &lpfs::lp_path::LpPath,
+    ) -> Result<lpc_wire::WireProjectHandle, ServerError> {
+        lp_recovery::begin_project_load(project_name(path), "", true);
+        let loaded = self.load_project(path);
+        match &loaded {
+            // Done once its first frames ran (`ProjectManager::frame_survived`).
+            Ok(handle) => self.project_manager.await_load_commit(*handle, false),
+            Err(_) => lp_recovery::end_project_load(),
+        }
+        loaded
     }
 
     /// Inject (or clear) the latent readback for a graphics backend whose
@@ -1553,6 +1628,23 @@ enum ProjectReadStreamOutcome {
 /// server best-effort emits a terminal [`lpc_wire::ProjectReadEvent::Error`].
 /// Sink transport-write failures (connection lost, other) are fatal and
 /// propagate as before.
+/// The smallest frame a read is cut into, whatever the heap: below it a
+/// read's frame envelope is most of every frame.
+pub const MIN_READ_FRAME_BYTES: usize = 1024;
+
+/// A read's frame budget on a heap whose largest free block is
+/// `largest_block`: at most half that block, so assembling a frame never
+/// needs the heap's biggest piece, and never above the link's own budget
+/// (`link_budget`; 16 KiB on a device) or under [`MIN_READ_FRAME_BYTES`].
+/// A single event too big for the frame is refused in words, as on any
+/// link. Unknown block (hosts): the link's budget.
+pub fn read_frame_budget(link_budget: usize, largest_block: Option<u32>) -> usize {
+    match largest_block {
+        Some(largest) => link_budget.min((largest as usize / 2).max(MIN_READ_FRAME_BYTES)),
+        None => link_budget,
+    }
+}
+
 fn classify_project_read_stream_error(
     error: lpc_engine::ProjectReadEventStreamError<lpc_wire::TransportError>,
 ) -> ProjectReadStreamOutcome {

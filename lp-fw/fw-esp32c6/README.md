@@ -105,6 +105,25 @@ shims keep their arguments and result through this profile's LTO. The ABI
 and its rules are `lp-base/lp-seam/README.md`; why seams exist is
 `docs/adr/2026-10-05-emulator-seams.md`.
 
+## Wi-Fi (the LAN link)
+
+A board with a saved network (`/.lp/network.json`, written by `lp-cli wifi
+add` or Studio) joins it by itself. Once joined it serves the secure lp-link
+at `ws://<board>/link` (port 80), and answers mDNS for `lp-xxxx.local` and
+DNS-SD for `_lightplayer._tcp`. The IP stack (embassy-net/smoltcp), the
+station, the LAN endpoint (one slot) and mDNS run on their own thread,
+`lp-net` (`src/net/`, 8 KB stack). The radio's C heap stays in `HEAP_RADIO`.
+ESP-NOW (the Radio node) is off while the board uses Wi-Fi. Decisions and
+measured costs: `docs/adr/2026-10-07-c6-wifi-link.md`. The diagnostics are
+off by default and never shipped:
+
+- `net_thread_stack_diag`: `lp-net`'s stack high water;
+- `radio_dma_diag`: where the radio's C blocks live, plus the heap map;
+- `heap_map_diag` / `heap_track_diag`: holes and live spans by address, the
+  backtrace of each live block since the station joined (its table is in
+  LP SRAM, so the heap keeps the shipped layout), and `[bigalloc]`, every
+  ask of 2 KB or more.
+
 ## Common Commands
 
 Run on a connected ESP32-C6:

@@ -40,6 +40,7 @@ mod frame_path;
 mod frame_record;
 mod in_memory_backend;
 mod ledger;
+mod load_intent;
 mod path_entry;
 mod recovery;
 mod recovery_level;
@@ -60,11 +61,13 @@ pub use frame_path::{FramePath, MAX_FRAME_DEPTH};
 pub use frame_record::{FRAME_NAME_CAP, FrameRecord};
 pub use in_memory_backend::InMemoryBackend;
 pub use ledger::{GatedInfo, Ledger};
+pub use load_intent::{InterruptedLoad, LOAD_NAME_CAP, LoadName};
 pub use path_entry::{ENTRY_NAME_CAP, PathEntry};
 pub use recovery::{
-    BootAssessment, EnterDenied, EnteredFrame, Recovery, RecoveryHandle, clear_ledger,
-    clear_tentative_crash, commit_staged_crash, enter, finalize_crash_and_reset, is_initialized,
-    mark_boot_complete, record_recovered_crash, set_global, snapshot, stage_crash,
+    BootAssessment, EnterDenied, EnteredFrame, Recovery, RecoveryHandle, begin_project_load,
+    clear_ledger, clear_tentative_crash, commit_staged_crash, end_project_load, enter,
+    finalize_crash_and_reset, is_initialized, mark_boot_complete, record_recovered_crash,
+    set_global, snapshot, stage_crash,
 };
 pub use recovery_level::RecoveryLevel;
 pub use recovery_region::{REGION_MAGIC, REGION_MAX_SIZE, REGION_VERSION, RecoveryRegion};

@@ -538,6 +538,7 @@ fn powered_off_sim_fixture() -> DeviceRosterView {
     DeviceRosterView {
         access: Default::default(),
         wifi: Default::default(),
+        lan_links: Default::default(),
         updates: Default::default(),
         transport_available: true,
         usb_available: true,
@@ -1253,6 +1254,7 @@ fn roster_fixture() -> DeviceRosterView {
     DeviceRosterView {
         access: Default::default(),
         wifi: Default::default(),
+        lan_links: Default::default(),
         updates: Default::default(),
         transport_available: true,
         usb_available: true,
@@ -1604,6 +1606,7 @@ fn roster_page_fixture() -> DeviceRosterView {
     DeviceRosterView {
         access: Default::default(),
         wifi: Default::default(),
+        lan_links: Default::default(),
         updates: Default::default(),
         transport_available: true,
         usb_available: true,

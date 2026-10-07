@@ -76,6 +76,8 @@ mod agent_device_journey_tests;
 pub(crate) mod agent_device_seat;
 /// A Bluetooth link that drops under the editor and comes back.
 mod ble_drop_tests;
+/// A LAN link that closes and redials.
+mod lan_drop_tests;
 /// Wi‑Fi settings over the bench's USB link (Wi‑Fi roadmap M5).
 mod wifi_device_tests;
 
