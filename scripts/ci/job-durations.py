@@ -69,7 +69,26 @@ def gh_token() -> str | None:
 
 
 def api_get(path: str, token: str | None) -> dict:
-    """One GET against the GitHub REST API: direct with a token, `gh api` without one."""
+    """A GET against the GitHub REST API, retried a few times on a 5xx or a
+    network error (one 502 at minute four otherwise throws away the whole
+    sequential fetch). Sequential, backing off 2 s, 4 s, 8 s."""
+    for attempt in range(4):
+        try:
+            return api_get_once(path, token)
+        except TransientError as e:
+            if attempt == 3:
+                raise RuntimeError(str(e)) from e
+            print(f"warn: {e}; retrying", file=sys.stderr)
+            time.sleep(2 ** (attempt + 1))
+    raise AssertionError("unreachable")
+
+
+class TransientError(RuntimeError):
+    pass
+
+
+def api_get_once(path: str, token: str | None) -> dict:
+    """One GET: direct with a token, `gh api` without one."""
     if token:
         req = urllib.request.Request(
             f"https://api.github.com{path}",
@@ -85,9 +104,10 @@ def api_get(path: str, token: str | None) -> dict:
                 return json.loads(resp.read())
         except urllib.error.HTTPError as e:
             body = e.read().decode("utf-8", errors="replace")
-            raise RuntimeError(f"GET {path} -> HTTP {e.code}: {body[:500]}") from e
-        except urllib.error.URLError as e:
-            raise RuntimeError(f"GET {path} -> {e}") from e
+            kind = TransientError if e.code >= 500 else RuntimeError
+            raise kind(f"GET {path} -> HTTP {e.code}: {body[:500]}") from e
+        except (urllib.error.URLError, TimeoutError) as e:
+            raise TransientError(f"GET {path} -> {e}") from e
     out = subprocess.run(["gh", "api", path], capture_output=True, text=True)
     if out.returncode != 0:
         raise RuntimeError(f"gh api {path} failed: {out.stderr.strip()}")
