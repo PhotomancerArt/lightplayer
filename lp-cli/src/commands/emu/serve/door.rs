@@ -1,11 +1,18 @@
 //! The WebSocket door: `GET /boards`, `/board/<id>/bytes`,
-//! `/board/<id>/control`.
+//! `/board/<id>/control`, and `GET /lans/<name>/browse`.
 //!
 //! Everything here is a **pump**. A binary frame's payload on `/bytes` is
 //! exactly the bytes, both ways — no length prefix, no JSON envelope, no
 //! control verb in band. `/control` carries the line protocol of
 //! `lp-emu/esp/lp-emu-esp32c6/src/control.rs` verbatim: one command per line,
-//! one reply per line, and this door neither filters a verb nor adds one.
+//! one reply per line, and this door filters no verb. It adds exactly one,
+//! `renumber`, because the LAN is the door's and not the machine's: "this
+//! board's next DHCP lease is a different address" (walk step W9), answered
+//! `ok renumber lan=<name>` in its place in the reply order, or `err
+//! renumber: …` for a board on no served LAN.
+//!
+//! `GET /lans/<name>/browse` asks a served LAN's probe for a DNS-SD service
+//! ([`super::lan_browse`]).
 //!
 //! The coupling rule falls out for free (plan two PD2): the loopback TCP
 //! client this door opens when a WebSocket arrives **is** the byte client the
@@ -36,6 +43,8 @@ use tokio_tungstenite::tungstenite::handshake::derive_accept_key;
 use tokio_tungstenite::tungstenite::protocol::Role;
 
 use super::board::{Board, format_mac};
+use super::lan_browse;
+use super::served_lan::ServedLan;
 use super::wire_tap::{TapDirection, WireTap};
 use super::wire_tear::WireTear;
 
@@ -47,14 +56,29 @@ const MAX_HEAD: usize = 8 * 1024;
 /// worth of traffic, so this is generous.
 const PUMP_BUF: usize = 16 * 1024;
 
-/// The boards this door serves, in the order they were spelled.
+/// The boards this door serves, in the order they were spelled, and the
+/// LANs they share.
 pub struct Registry {
     pub boards: Vec<Board>,
+    pub lans: Vec<ServedLan>,
 }
 
 impl Registry {
     fn find(&self, id: &str) -> Option<&Board> {
         self.boards.iter().find(|b| b.id == id)
+    }
+
+    fn find_lan(&self, name: &str) -> Option<&ServedLan> {
+        self.lans.iter().find(|l| l.name == name)
+    }
+
+    /// The running boards on LAN `name`: how many answers a browse waits for.
+    fn running_on(&self, name: &str) -> usize {
+        self.boards
+            .iter()
+            .filter(|b| b.lan.as_ref().is_some_and(|l| l.name == name))
+            .filter(|b| !b.stopped.load(Ordering::SeqCst))
+            .count()
     }
 
     /// The `GET /boards` body. Boring on purpose, and the ids are stable:
@@ -94,6 +118,13 @@ impl Registry {
                     // Its seam endpoints, `<board>/<seam>` — what a medium
                     // would join. Empty until a capability seam engages.
                     "endpoints": b.endpoints(),
+                    // On a served LAN (`lan=<name>`): its name, the board's
+                    // forward (`lan:127.0.0.1:<port>`, what `lp-cli … lan:`
+                    // takes), and its address once DHCP has bound one. All
+                    // three null for a board on no served LAN.
+                    "lan": b.lan.as_ref().map(|l| l.name.clone()),
+                    "forward": b.lan.as_ref().map(|l| l.forward_spec()),
+                    "address": b.lan.as_ref().and_then(|l| l.address()).map(|ip| ip.to_string()),
                 })
             })
             .collect();
@@ -107,6 +138,8 @@ enum Route<'a> {
     Boards,
     Bytes(&'a str),
     Control(&'a str),
+    /// `/lans/<name>/browse`.
+    Browse(&'a str),
     Unknown,
 }
 
@@ -114,6 +147,14 @@ fn route(path: &str) -> Route<'_> {
     let path = path.split('?').next().unwrap_or(path);
     if path == "/boards" || path == "/boards/" {
         return Route::Boards;
+    }
+    if let Some(name) = path
+        .strip_prefix("/lans/")
+        .and_then(|rest| rest.strip_suffix("/browse"))
+        && !name.is_empty()
+        && !name.contains('/')
+    {
+        return Route::Browse(name);
     }
     if let Some(rest) = path.strip_prefix("/board/") {
         if let Some(id) = rest.strip_suffix("/bytes") {
@@ -297,12 +338,55 @@ async fn handle(mut stream: TcpStream, registry: Arc<Registry>) -> Result<()> {
             let ws = accept(stream, &key).await?;
             pump_control(ws, board).await
         }
+        (Route::Browse(name), false) => {
+            let Some(lan) = registry.find_lan(name) else {
+                return respond(
+                    &mut stream,
+                    "404 Not Found",
+                    "text/plain",
+                    &format!("no LAN `{name}` — `emu serve --lan <name>=<fixture>` declares one\n"),
+                )
+                .await;
+            };
+            let query = path.split_once('?').map(|(_, q)| q).unwrap_or_default();
+            match lan_browse::parse_query(query) {
+                Ok(query) => {
+                    let answer = lan_browse::browse(lan, &query, registry.running_on(name)).await;
+                    respond(
+                        &mut stream,
+                        "200 OK",
+                        "application/json",
+                        &answer.to_string(),
+                    )
+                    .await
+                }
+                Err(why) => {
+                    respond(
+                        &mut stream,
+                        "400 Bad Request",
+                        "text/plain",
+                        &format!("{why}\n"),
+                    )
+                    .await
+                }
+            }
+        }
+        (Route::Browse(_), true) => {
+            respond(
+                &mut stream,
+                "400 Bad Request",
+                "text/plain",
+                "/lans/<name>/browse is a plain GET, not a WebSocket\n",
+            )
+            .await
+        }
         (Route::Unknown, _) => {
             respond(
                 &mut stream,
                 "404 Not Found",
                 "text/plain",
-                "GET /boards, ws /board/<id>/bytes, ws /board/<id>/control\n",
+                "GET /boards, ws /board/<id>/bytes, ws /board/<id>/control, \
+                 GET /lans/<name>/browse\n",
             )
             .await
         }
@@ -416,11 +500,15 @@ async fn pump_bytes(ws: WebSocketStream<TcpStream>, board: &Board) -> Result<()>
     result
 }
 
-/// `/board/<id>/control` — the line protocol, unchanged.
+/// `/board/<id>/control` — the line protocol, unchanged, plus the door's
+/// own `renumber`.
 ///
-/// One command per line in, one reply per line out. A command from a client
-/// that has hung up is dropped rather than queued, which is what
-/// `TcpHost::write_to_client` already does by answering `false`.
+/// One command per line in, one reply per line out, in order. A command from
+/// a client that has hung up is dropped rather than queued, which is what
+/// `TcpHost::write_to_client` already does by answering `false`. The machine
+/// answers every command it is sent with exactly one line and says nothing
+/// unasked, so a door verb's reply waits its turn behind the machine's
+/// replies still owed ([`ReplyOrder`]).
 async fn pump_control(ws: WebSocketStream<TcpStream>, board: &Board) -> Result<()> {
     let link = TcpStream::connect(board.control_addr).await?;
     link.set_nodelay(true)?;
@@ -428,15 +516,18 @@ async fn pump_control(ws: WebSocketStream<TcpStream>, board: &Board) -> Result<(
     let (mut ws_write, mut ws_read) = ws.split();
     let mut buf = vec![0u8; PUMP_BUF];
     let mut pending = Vec::<u8>::new();
+    let mut order = ReplyOrder::default();
 
     let result = loop {
         tokio::select! {
             incoming = ws_read.next() => match incoming {
                 Some(Ok(Message::Text(text))) => {
-                    link_write.write_all(&as_lines(text.as_bytes())).await?;
+                    let forward = order.commands(text.as_bytes(), |l| door_verb(l, board));
+                    link_write.write_all(&forward).await?;
                 }
                 Some(Ok(Message::Binary(bytes))) => {
-                    link_write.write_all(&as_lines(&bytes)).await?;
+                    let forward = order.commands(&bytes, |l| door_verb(l, board));
+                    link_write.write_all(&forward).await?;
                 }
                 Some(Ok(Message::Ping(payload))) => ws_write.send(Message::Pong(payload)).await?,
                 Some(Ok(Message::Pong(_) | Message::Frame(_))) => {}
@@ -453,15 +544,110 @@ async fn pump_control(ws: WebSocketStream<TcpStream>, board: &Board) -> Result<(
                     while let Some(at) = pending.iter().position(|b| *b == b'\n') {
                         let line: Vec<u8> = pending.drain(..=at).collect();
                         let line = String::from_utf8_lossy(&line).trim_end().to_string();
-                        ws_write.send(Message::Text(line)).await?;
+                        order.machine_replied(line);
                     }
                 }
                 Err(e) => break Err(e.into()),
             },
         }
+        for line in order.ready() {
+            ws_write.send(Message::Text(line)).await?;
+        }
     };
     let _ = ws_write.send(Message::Close(None)).await;
     result
+}
+
+/// The control channel's replies, in the order their commands came.
+#[derive(Default)]
+struct ReplyOrder {
+    /// One per command not yet answered to the client: `None` is owed by
+    /// the machine, `Some` is the door's own reply waiting its turn.
+    owed: std::collections::VecDeque<Option<String>>,
+    /// Replies in order, not yet sent.
+    out: Vec<String>,
+}
+
+impl ReplyOrder {
+    /// A client frame: answer the door's verbs in place, and return what
+    /// goes on to the machine.
+    fn commands(&mut self, bytes: &[u8], door: impl Fn(&[u8]) -> Option<String>) -> Vec<u8> {
+        let mut forward = Vec::new();
+        for line in as_lines(bytes)
+            .split(|b| *b == b'\n')
+            .filter(|l| !l.is_empty())
+        {
+            match door(line) {
+                Some(reply) => self.owed.push_back(Some(reply)),
+                None => {
+                    self.owed.push_back(None);
+                    forward.extend_from_slice(line);
+                    forward.push(b'\n');
+                }
+            }
+        }
+        self.settle();
+        forward
+    }
+
+    /// One line from the machine: the reply to the oldest command it owes.
+    fn machine_replied(&mut self, line: String) {
+        match self.owed.iter().position(Option::is_none) {
+            Some(at) => {
+                // Everything before it is the door's, already in order.
+                for _ in 0..at {
+                    if let Some(Some(reply)) = self.owed.pop_front() {
+                        self.out.push(reply);
+                    }
+                }
+                self.owed.pop_front();
+                self.out.push(line);
+            }
+            // The machine never speaks unasked; if it did, pass it on.
+            None => self.out.push(line),
+        }
+        self.settle();
+    }
+
+    /// The door's replies at the front go out as soon as nothing is owed
+    /// before them.
+    fn settle(&mut self) {
+        while let Some(Some(_)) = self.owed.front() {
+            if let Some(Some(reply)) = self.owed.pop_front() {
+                self.out.push(reply);
+            }
+        }
+    }
+
+    fn ready(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.out)
+    }
+}
+
+/// A verb the door answers itself, or `None` for the machine's. Only
+/// `renumber`: the LAN is the door's.
+fn door_verb(line: &[u8], board: &Board) -> Option<String> {
+    let line = std::str::from_utf8(line).ok()?.trim();
+    let mut words = line.split_whitespace();
+    if words.next()? != "renumber" {
+        return None;
+    }
+    if words.next().is_some() {
+        return Some("err renumber: takes no arguments".to_string());
+    }
+    Some(match &board.lan {
+        Some(lan) => {
+            lan.renumber_next_lease();
+            format!(
+                "ok renumber lan={} board={} (its next DHCP lease is a different address)",
+                lan.name, board.id
+            )
+        }
+        None => format!(
+            "err renumber: board `{}` is on no served LAN (`lan=<name>` on its --board)",
+            board.id
+        ),
+    })
 }
 
 /// Whatever the client wrote, as `\n`-terminated lines.
@@ -487,11 +673,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_three_routes_and_nothing_else() {
+    fn the_four_routes_and_nothing_else() {
         assert_eq!(route("/boards"), Route::Boards);
         assert_eq!(route("/board/c6-a/bytes"), Route::Bytes("c6-a"));
         assert_eq!(route("/board/c6-b/control"), Route::Control("c6-b"));
         assert_eq!(route("/board/c6-a/bytes?x=1"), Route::Bytes("c6-a"));
+        assert_eq!(route("/lans/home/browse"), Route::Browse("home"));
+        assert_eq!(
+            route("/lans/home/browse?service=_lightplayer._tcp.local"),
+            Route::Browse("home")
+        );
+        assert_eq!(route("/lans//browse"), Route::Unknown);
+        assert_eq!(route("/lans/a/b/browse"), Route::Unknown);
         assert_eq!(route("/board//bytes"), Route::Unknown);
         assert_eq!(route("/board/c6-a"), Route::Unknown);
         assert_eq!(route("/"), Route::Unknown);
@@ -530,5 +723,36 @@ mod tests {
             head.contains("Access-Control-Allow-Origin: *\r\n"),
             "404 reply is missing Access-Control-Allow-Origin: {head}"
         );
+    }
+
+    /// The door's `renumber` answers in its place in the reply order: after
+    /// the machine's replies still owed for the commands before it, before
+    /// the ones after it.
+    #[test]
+    fn a_door_verb_waits_its_turn_behind_the_machines_replies() {
+        let door = |line: &[u8]| (line == b"renumber").then(|| "ok renumber".to_string());
+        let mut order = ReplyOrder::default();
+        let forwarded = order.commands(
+            b"state
+renumber
+reset
+",
+            door,
+        );
+        assert_eq!(
+            forwarded,
+            b"state
+reset
+",
+            "the door's verb never reaches the machine"
+        );
+        assert!(order.ready().is_empty(), "`state` is still owed");
+        order.machine_replied("ok state".to_string());
+        assert_eq!(order.ready(), ["ok state", "ok renumber"]);
+        order.machine_replied("ok reset".to_string());
+        assert_eq!(order.ready(), ["ok reset"]);
+        // Nothing owed: the door's reply goes at once.
+        assert!(order.commands(b"renumber", door).is_empty());
+        assert_eq!(order.ready(), ["ok renumber"]);
     }
 }

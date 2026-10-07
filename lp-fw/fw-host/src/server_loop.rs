@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use fw_core::{drain_client_messages, send_unsolicited_hello, tick_server_frame};
@@ -5,14 +6,19 @@ use lpa_server::LpServer;
 use lpc_shared::time::TimeProvider;
 use lpc_shared::transport::ServerTransport;
 use lpc_wire::TransportError;
+use tokio::sync::Notify;
 
 use crate::HostRuntimeError;
 
 const TARGET_FRAME_TIME_MS: u32 = 16;
 
+/// Serve `transport` at one frame per [`TARGET_FRAME_TIME_MS`], ending a
+/// frame's idle wait early when `wake` is notified — a request arrived, and
+/// the board answers it on its next tick rather than a frame later.
 pub async fn run_server_loop_async<T: ServerTransport>(
     mut server: LpServer,
     mut transport: T,
+    wake: Arc<Notify>,
 ) -> Result<(), HostRuntimeError> {
     let time_provider = HostLoopTimeProvider::new();
     let mut last_tick_ms = time_provider.now_ms();
@@ -53,8 +59,9 @@ pub async fn run_server_loop_async<T: ServerTransport>(
         last_tick_ms = frame_start_ms;
         let frame_duration = frame_start.elapsed();
         if frame_duration < Duration::from_millis(TARGET_FRAME_TIME_MS as u64) {
-            tokio::time::sleep(Duration::from_millis(TARGET_FRAME_TIME_MS as u64) - frame_duration)
-                .await;
+            let idle = Duration::from_millis(TARGET_FRAME_TIME_MS as u64) - frame_duration;
+            // Elapsed or woken: either way the next frame starts now.
+            let _ = tokio::time::timeout(idle, wake.notified()).await;
         } else {
             tokio::task::yield_now().await;
         }

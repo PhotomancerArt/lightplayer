@@ -46,7 +46,7 @@ impl crate::BleLinkSource for DroppableBleBoard {
         }
         let info = crate::ble_link_info(BLE_DEVICE_ID, "LP-b48c");
         vec![GrantedLink {
-            link: Box::new(fake_device_link(info.clone(), &self.device)),
+            link: Box::new(bench_link(info.clone(), &self.device)),
             info,
         }]
     }
@@ -555,7 +555,6 @@ fn wait_for_the_resume(bench: &mut DeviceBench, tasks: &TaskPool) {
             bench.view().devices.first(),
             bench.controller.device_roster_view().access,
         );
-        std::thread::sleep(Duration::from_millis(1));
     }
     assert!(bench.controller.view().lens_reconnecting.is_none());
 }
