@@ -201,6 +201,40 @@ fn ota_manifest_golden_conforms_to_checked_in_schema() -> Result<()> {
     Ok(())
 }
 
+/// The release index is computed by lp-cloud-server, never authored, so its
+/// format-1 compatibility pin stands in for a corpus: the golden must
+/// validate, unknown fields must validate (readers ignore them), and a dev
+/// version, a short commit or another `format` must not.
+#[test]
+fn release_index_golden_conforms_to_checked_in_schema() -> Result<()> {
+    let workspace = workspace_dir();
+    let validator = load_validator(&workspace, "schemas/firmware-release-index.schema.json")?;
+    let rel = "lp-core/lpc-firmware-release/tests/fixtures/release-index.v1.json";
+    let text = std::fs::read_to_string(workspace.join(rel)).with_context(|| rel.to_string())?;
+    let golden: Value = serde_json::from_str(&text)?;
+    let errors =
+        |v: &Value| -> Vec<String> { validator.iter_errors(v).map(|e| e.to_string()).collect() };
+    assert_eq!(errors(&golden), Vec::<String>::new(), "{rel}");
+
+    let mut unknown = golden.clone();
+    unknown["futureField"] = serde_json::json!({ "anything": 1 });
+    unknown["releases"][0]["capabilities"] = serde_json::json!(["bluetooth-updates"]);
+    assert_eq!(errors(&unknown), Vec::<String>::new(), "unknown fields");
+
+    let mut dev = golden.clone();
+    dev["releases"][0]["version"] = serde_json::json!("abc1234");
+    assert!(!errors(&dev).is_empty(), "a dev version");
+
+    let mut short = golden.clone();
+    short["releases"][0]["commit"] = serde_json::json!("736d72856d24");
+    assert!(!errors(&short).is_empty(), "a short commit");
+
+    let mut format2 = golden;
+    format2["format"] = serde_json::json!(2);
+    assert!(!errors(&format2).is_empty(), "format 2");
+    Ok(())
+}
+
 fn workspace_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
