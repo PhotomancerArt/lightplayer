@@ -45,6 +45,9 @@ pub struct DhcpServer {
     next_host: u16,
     leases: Vec<Lease>,
     renumber: BTreeSet<[u8; 6]>,
+    /// The DNS server it names (option 6): the gateway, once its LAN has an
+    /// uplink; none before, so a LAN without one answers as it always has.
+    dns_server: Option<Ipv4Addr>,
     offers: u64,
     acks: u64,
     naks: u64,
@@ -63,6 +66,7 @@ impl DhcpServer {
             next_host: u16::from(first_host),
             leases: Vec::new(),
             renumber: BTreeSet::new(),
+            dns_server: None,
             offers: 0,
             acks: 0,
             naks: 0,
@@ -72,6 +76,11 @@ impl DhcpServer {
 
     pub fn server_ip(&self) -> Ipv4Addr {
         self.server_ip
+    }
+
+    /// Name `server` as the DNS server in every offer and ack from now on.
+    pub fn set_dns_server(&mut self, server: Option<Ipv4Addr>) {
+        self.dns_server = server;
     }
 
     /// `mac`'s lease, made now if it has none. `None` when the /24 is full.
@@ -184,7 +193,10 @@ impl DhcpServer {
             client_identifier: None,
             server_identifier: Some(self.server_ip),
             parameter_request_list: None,
-            dns_servers: None,
+            dns_servers: self
+                .dns_server
+                .filter(|_| !nak)
+                .map(|server| [server].into_iter().collect()),
             max_size: None,
             lease_duration: (!nak).then_some(self.lease_secs),
             renew_duration: None,

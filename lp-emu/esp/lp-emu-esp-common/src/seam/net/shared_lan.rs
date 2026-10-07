@@ -216,6 +216,14 @@ impl SharedLan {
         Ok(at)
     }
 
+    /// Carry `name` beyond the LAN to `to` on the host (`VirtualLan::uplink`).
+    pub fn uplink(&self, name: &str, port: u16, to: SocketAddr) -> io::Result<Ipv4Addr> {
+        let mut g = self.inner();
+        let at = g.lan.uplink(name, port, to)?;
+        g.changed();
+        Ok(at)
+    }
+
     /// The board attached as `from` is now `to`, with its MAC, its lease and
     /// its forwards (a runner renumbered the machine after a host attached
     /// it). Nothing happens when `to` is already attached.
@@ -435,9 +443,13 @@ impl SharedLan {
 }
 
 impl Shared {
-    /// Whether a host is connected through any forward.
+    /// Whether a host is connected through any forward, or any uplink (a
+    /// board's connection out to a host is a wall-clock peer too: the
+    /// relay's timers and the board's must agree).
     fn hosted(&self) -> bool {
-        self.lan.gateway().forwards().iter().any(|f| f.open() > 0)
+        let gateway = self.lan.gateway();
+        gateway.forwards().iter().any(|f| f.open() > 0)
+            || gateway.uplinks().iter().any(|u| u.open() > 0)
     }
 
     /// Board `board`'s pace as its host set it.

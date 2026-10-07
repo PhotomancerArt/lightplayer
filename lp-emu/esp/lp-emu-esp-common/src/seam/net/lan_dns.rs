@@ -149,7 +149,7 @@ pub fn encode_name(out: &mut Vec<u8>, name: &str) {
 }
 
 /// The name at `at`, and where the bytes after it (in place) start.
-fn read_name(bytes: &[u8], mut at: usize) -> Option<(String, usize)> {
+pub(super) fn read_name(bytes: &[u8], mut at: usize) -> Option<(String, usize)> {
     let mut labels: Vec<String> = Vec::new();
     let mut end = None;
     let mut pointers = 0;

@@ -37,7 +37,7 @@ use smoltcp::wire::IpAddress;
 use super::lan_stack::LanStack;
 
 /// Each forwarded connection's buffer, each way, in the gateway's stack.
-const SOCKET_BUFFER: usize = 16 * 1024;
+pub(super) const SOCKET_BUFFER: usize = 16 * 1024;
 
 /// The first of the gateway's own ports for forwarded connections.
 const FIRST_LOCAL_PORT: u16 = 49_152;
@@ -76,7 +76,10 @@ pub struct LanPortForward {
     counters: ForwardCounters,
 }
 
-struct ForwardConn {
+/// One host connection paired with one socket in the gateway's stack, bytes
+/// copied both ways: a forward's (the host dialled the board) and an
+/// uplink's (`super::lan_uplink`: the board dialled the host).
+pub(super) struct ForwardConn {
     host: TcpStream,
     socket: SocketHandle,
     /// The board's address when this connection was opened.
@@ -193,33 +196,54 @@ impl LanPortForward {
             }
             let handle = stack.sockets.add(socket);
             self.counters.accepted += 1;
-            self.conns.push(ForwardConn {
-                host,
-                socket: handle,
-                board_ip: ip,
-                to_board: Vec::new(),
-                to_host: Vec::new(),
-                host_eof: false,
-                fin_sent: false,
-                host_shut: false,
-                dead: false,
-            });
+            self.conns.push(ForwardConn::new(host, handle, ip));
         }
     }
 }
 
 impl ForwardConn {
+    /// `host` (non-blocking) paired with `socket` in the gateway's stack, to
+    /// or from the board at `board_ip`.
+    pub(super) fn new(host: TcpStream, socket: SocketHandle, board_ip: Ipv4Addr) -> Self {
+        Self {
+            host,
+            socket,
+            board_ip,
+            to_board: Vec::new(),
+            to_host: Vec::new(),
+            host_eof: false,
+            fin_sent: false,
+            host_shut: false,
+            dead: false,
+        }
+    }
+
+    /// The board's address this connection belongs to.
+    pub(super) fn board_ip(&self) -> Ipv4Addr {
+        self.board_ip
+    }
+
+    /// Finished: drop it (its socket from the stack too).
+    pub(super) fn is_dead(&self) -> bool {
+        self.dead
+    }
+
+    /// The gateway stack's socket.
+    pub(super) fn socket(&self) -> SocketHandle {
+        self.socket
+    }
+
     /// The board no longer holds the address this connection was opened to:
     /// close the host's side and drop the socket. It is removed from the
     /// stack before it can dispatch anything, so no RST goes out — sending
     /// one would ask ARP for the dead address one last time.
-    fn close_moved(&mut self, stack: &mut LanStack) {
+    pub(super) fn close_moved(&mut self, stack: &mut LanStack) {
         stack.sockets.get_mut::<tcp::Socket>(self.socket).abort();
         shut(&self.host, Shutdown::Both);
         self.dead = true;
     }
 
-    fn pump(&mut self, stack: &mut LanStack, counters: &mut ForwardCounters) {
+    pub(super) fn pump(&mut self, stack: &mut LanStack, counters: &mut ForwardCounters) {
         let socket = stack.sockets.get_mut::<tcp::Socket>(self.socket);
 
         // Host → board: read only once what was read last time is handed on.
@@ -290,7 +314,7 @@ impl ForwardConn {
 /// ever bound ([`LanPortForward::bind`]), so this is never reached there, and
 /// it calls nothing: the tab's WASI shim answers no `sock_shutdown`, and a
 /// module that imported it would not instantiate.
-fn shut(stream: &TcpStream, how: Shutdown) {
+pub(super) fn shut(stream: &TcpStream, how: Shutdown) {
     #[cfg(not(target_family = "wasm"))]
     {
         let _ = stream.shutdown(how);
