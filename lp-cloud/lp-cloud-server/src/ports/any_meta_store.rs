@@ -58,6 +58,10 @@ impl MetaStore for AnyMetaStore {
         self.0.account_access(user)
     }
 
+    fn account_by_key_salt(&self, key_salt: &[u8; 16]) -> Option<AccountAccess> {
+        self.0.account_by_key_salt(key_salt)
+    }
+
     fn put_session(&mut self, session: SessionRecord) {
         self.0.put_session(session);
     }

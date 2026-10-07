@@ -716,8 +716,9 @@ fn open_lan(args: &RttArgs) -> Result<Session> {
     let options = LanOptions {
         password: args.board_password.resolve(&spec)?,
         want_packed: lpa_client::requested_wire_encoding() == WireEncoding::Packed,
+        held_keys: Vec::new(),
     };
-    let opened = LanLink::open(&target, &options)?;
+    let opened = LanLink::open(&target.endpoint(), &options)?;
     eprintln!(
         "link rtt: {target} up at the {} tier",
         tier_words(opened.granted)

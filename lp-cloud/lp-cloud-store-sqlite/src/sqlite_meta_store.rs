@@ -330,6 +330,18 @@ impl MetaStore for SqliteMetaStore {
         )
     }
 
+    fn account_by_key_salt(&self, key_salt: &[u8; 16]) -> Option<AccountAccess> {
+        // `account_access_key_salt` (migration 0006) makes this an index
+        // seek: the relay asks once per board registration.
+        self.query_one(
+            "MetaStore::account_by_key_salt",
+            "SELECT user_uid, key_secret, key_salt, play_password_salt, edit_password_salt, play_password, edit_password, previous_key_salts, updated_at\n\
+             FROM account_access WHERE key_salt = ?1 ORDER BY user_uid LIMIT 1",
+            params![key_salt.as_slice()],
+            decode_account_access,
+        )
+    }
+
     // ---- sessions ----------------------------------------------------
 
     fn put_session(&mut self, session: SessionRecord) {

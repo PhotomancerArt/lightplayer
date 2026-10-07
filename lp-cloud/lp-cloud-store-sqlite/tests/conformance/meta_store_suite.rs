@@ -36,6 +36,8 @@ macro_rules! meta_store_conformance_tests {
             account_access_is_absent_until_put,
             account_access_round_trips,
             replacing_account_access_overwrites_every_field,
+            account_by_key_salt_finds_only_the_current_key,
+            account_by_key_salt_follows_a_key_reset,
             projects_round_trip_by_uid,
             projects_round_trip_every_access_level_and_the_archive_stamp,
             replacing_a_project_keeps_its_members_refs_events_and_sidecar,
@@ -252,6 +254,51 @@ pub fn replacing_account_access_overwrites_every_field(store: &mut dyn MetaStore
     store.put_account_access(replaced.clone());
 
     assert_eq!(store.account_access(user), Some(replaced));
+}
+
+/// The relay's lookup: the current salt finds its account, a retired salt
+/// or a password salt finds nothing, and accounts do not leak into each
+/// other.
+pub fn account_by_key_salt_finds_only_the_current_key(store: &mut dyn MetaStore) {
+    let alice = seed_user(store, 1);
+    let bob = seed_user(store, 2);
+    let alices = sample_account_access(alice);
+    let bobs = AccountAccess {
+        key_secret: [0x99; 32],
+        key_salt: [0x98; 16],
+        previous_key_salts: vec![],
+        ..sample_account_access(bob)
+    };
+    store.put_account_access(alices.clone());
+    store.put_account_access(bobs.clone());
+
+    assert_eq!(
+        store.account_by_key_salt(&alices.key_salt),
+        Some(alices.clone())
+    );
+    assert_eq!(store.account_by_key_salt(&bobs.key_salt), Some(bobs));
+    for retired in &alices.previous_key_salts {
+        assert_eq!(store.account_by_key_salt(retired), None, "a retired salt");
+    }
+    assert_eq!(
+        store.account_by_key_salt(&alices.edit_password_salt),
+        None,
+        "a password salt names no account key"
+    );
+    assert_eq!(store.account_by_key_salt(&[0xfe; 16]), None);
+}
+
+/// A reset moves the lookup to the new salt in the same put.
+pub fn account_by_key_salt_follows_a_key_reset(store: &mut dyn MetaStore) {
+    let user = seed_user(store, 1);
+    let mut access = sample_account_access(user);
+    store.put_account_access(access.clone());
+    let old_salt = access.key_salt;
+    access.rotate_key([0x12; 32], [0x13; 16], 50.0);
+    store.put_account_access(access.clone());
+
+    assert_eq!(store.account_by_key_salt(&old_salt), None);
+    assert_eq!(store.account_by_key_salt(&[0x13; 16]), Some(access));
 }
 
 // ---- projects ---------------------------------------------------------

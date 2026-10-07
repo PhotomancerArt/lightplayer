@@ -15,6 +15,7 @@ use crate::firmware::firmware_upstream::FirmwareUpstream;
 use crate::firmware::github_release_upstream::GithubReleaseUpstream;
 use crate::page::static_site::StaticSite;
 use crate::ports::{AnyBlobStore, AnyMetaStore, SecureMint, SystemClock};
+use crate::relay::RelayRegistry;
 
 /// The domain service plus the blob bytes it deliberately does not hold.
 ///
@@ -60,6 +61,8 @@ pub struct AppState {
     core: Arc<Mutex<ServiceCore>>,
     site: Arc<StaticSite>,
     firmware: Arc<FirmwarePlane>,
+    /// The relay's hub and legs: behind its own lock, never the store's.
+    relay: Arc<RelayRegistry>,
     config: Arc<ServerConfig>,
 }
 
@@ -114,6 +117,7 @@ impl AppState {
             })),
             site: Arc::new(site),
             firmware: Arc::new(FirmwarePlane::new(Arc::new(upstream))),
+            relay: RelayRegistry::new(),
             config: Arc::new(config),
         }
     }
@@ -181,6 +185,11 @@ impl AppState {
     /// The `/firmware/` lookup: its upstream and its manifest cache.
     pub fn firmware(&self) -> &FirmwarePlane {
         &self.firmware
+    }
+
+    /// The relay: online boards, their sessions, and the legs' queues.
+    pub fn relay(&self) -> &Arc<RelayRegistry> {
+        &self.relay
     }
 
     /// The process configuration.

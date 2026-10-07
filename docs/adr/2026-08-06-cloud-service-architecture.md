@@ -76,6 +76,15 @@ addressed blobs already in the bucket; availability leans on
 offline-first clients treating brief downtime as a sync retry. The
 scale-out path, if ever needed, is a Postgres adapter behind the same
 port — not LiteFS, not a second machine.
+**Amended 2026-10-06** (`2026-10-06-cloud-relay.md`): the service now
+holds **long-lived sockets** — the cloud relay's device and browser legs.
+They live outside the store lock entirely: the relay's hub sits behind its
+own lock, the only store calls on its path are the account lookup when a
+board registers and the session lookup when a browser leg opens (both
+through `with_service`, once), and no frame ever touches the store. And the
+origin now has **one plain-HTTP path**, `/relay/device`: fly's
+`force_https` is off and the app's `https_redirect` middleware sends every
+other plain-HTTP request to https, as fly did.
 
 **No Terraform.** `infra/` is fly.toml + an idempotent bootstrap
 script; the estate is ~5 resources. Revisit when it stops fitting on

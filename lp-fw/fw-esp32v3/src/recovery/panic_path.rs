@@ -297,8 +297,15 @@ pub fn free_list_shape() -> FreeListShape {
 ///
 /// Written once the interrupts are masked, so io_task (swi2) cannot put a
 /// frame's bytes between the mark and the text.
+///
+/// `pub(crate)`: the app's own boot path (`main.rs::boot_firmware`) writes
+/// this same mark before its first `[INIT]` line, for the same reason — the
+/// ROM/bootloader text ahead of it was sent at a different baud than a host
+/// reads UART0 at, so the host's lp-link deframer is left mid-frame when the
+/// app's text starts. See
+/// `docs/defects/2026-10-03-the-classic-loses-its-boot-text-when-a-host-holds-the-link.md`.
 #[inline(always)]
-fn write_link_text_mark() {
+pub(crate) fn write_link_text_mark() {
     esp_println::Printer::write_bytes(&[0xFF, b'\r', b'\n']);
 }
 

@@ -21,6 +21,7 @@ use serde::{Deserialize, Serialize};
 use crate::account_access_info::AccountAccessInfo;
 use crate::ack::Ack;
 use crate::actor::Actor;
+use crate::board_presence::BoardList;
 use crate::head_info::{HeadInfo, PushOutcome};
 use crate::login_options::LoginOptionsInfo;
 use crate::me_info::MeInfo;
@@ -58,6 +59,8 @@ pub enum CloudResponse {
     LoginOptionsInfo(LoginOptionsInfo),
     /// See [`crate::account_access_info::AccountAccessInfo`].
     AccountAccessInfo(AccountAccessInfo),
+    /// See [`crate::board_presence::BoardList`].
+    BoardList(BoardList),
 }
 
 /// Answers [`crate::request::WhoAmI`].
@@ -196,6 +199,12 @@ impl From<Ack> for CloudResponse {
 impl From<LoginOptionsInfo> for CloudResponse {
     fn from(response: LoginOptionsInfo) -> Self {
         CloudResponse::LoginOptionsInfo(response)
+    }
+}
+
+impl From<BoardList> for CloudResponse {
+    fn from(response: BoardList) -> Self {
+        CloudResponse::BoardList(response)
     }
 }
 

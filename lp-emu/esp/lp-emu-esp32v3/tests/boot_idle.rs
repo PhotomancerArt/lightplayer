@@ -69,6 +69,14 @@ const LAST_LINE: &str = "[INIT] I/O task spawned";
 /// same key. `just bless-chips esp32v3` re-records it.
 const PREFIX_KEY: &str = "init_chain.prefix";
 
+/// lp-link's text mark, written just before the app's first `[INIT]` line
+/// (see `determinism.rs`'s copy of this constant, and
+/// `fw-esp32v3/src/recovery/panic_path.rs`'s `write_link_text_mark`).
+/// `0xFF` is never valid UTF-8, so it is stripped — and its presence
+/// asserted separately — before the chain reaches [`PREFIX_KEY`]'s
+/// strict-UTF-8 figure.
+const LINK_TEXT_MARK: [u8; 3] = [0xFF, b'\r', b'\n'];
+
 /// The main stack's size, as `[INIT] main stack <n> B` and every `[stack]`
 /// line's `of <n> B` print it: `_stack_start − _stack_end`, the residual of
 /// RWDATA after the statics. A figure (`main_stack_bytes`), for the reason
@@ -129,11 +137,15 @@ fn the_init_chain_comes_out_of_the_wire_byte_for_byte() {
 
     let bytes = machine.uart0().bytes();
     let text = String::from_utf8_lossy(&bytes).into_owned();
+    assert!(
+        bytes.starts_with(&LINK_TEXT_MARK),
+        "lp-link's text mark precedes the boot's first line: {bytes:?}"
+    );
     let mut figures = Figures::new(
         "esp32v3",
         "boot_idle::the_init_chain_comes_out_of_the_wire_byte_for_byte",
     );
-    figures.utf8(PREFIX_KEY, &bytes);
+    figures.utf8(PREFIX_KEY, &bytes[LINK_TEXT_MARK.len()..]);
     figures.int(MAIN_STACK_KEY, number(&text, "[INIT] main stack "));
     figures.verify();
 

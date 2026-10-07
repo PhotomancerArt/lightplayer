@@ -26,7 +26,7 @@ use tokio::sync::{mpsc, oneshot};
 
 use super::lan_error::LanError;
 use super::lan_link::{LanLink, LanOptions, LanSession};
-use super::lan_target::LanTarget;
+use super::link_endpoint::LinkEndpoint;
 use crate::link_reset::reset_reason_words;
 use crate::transport_serial::SerialInbound;
 
@@ -35,7 +35,7 @@ const MAX_WAIT: Duration = Duration::from_millis(10);
 
 /// Everything the thread owns.
 pub(super) struct LanPump {
-    pub target: LanTarget,
+    pub target: LinkEndpoint,
     pub options: LanOptions,
     pub client_rx: mpsc::UnboundedReceiver<ClientMessage>,
     pub server_tx: mpsc::UnboundedSender<SerialInbound>,

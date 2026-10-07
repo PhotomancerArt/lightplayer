@@ -13,6 +13,7 @@ members = [
     "lp-base/lp-seam",
     # lp-app workspace members
     "lp-core/lpc-access",
+    "lp-core/lpc-relay",
     "lp-core/lpc-update",
     "lp-core/lpc-history",
     "lp-core/lpc-engine",
@@ -151,6 +152,7 @@ default-members = [
     "lp-base/lp-seam",
     # lp-app workspace members
     "lp-core/lpc-access",
+    "lp-core/lpc-relay",
     "lp-core/lpc-update",
     "lp-core/lpc-history",
     "lp-core/lpc-engine",
