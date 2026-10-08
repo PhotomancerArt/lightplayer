@@ -316,10 +316,6 @@ pub fn firmware_verb(view: &DeviceView) -> Option<FirmwareVerb> {
     }
 }
 
-/// Why the card's hardware Reset is disabled over a link with no reset
-/// lines (Bluetooth): it pulses DTR/RTS, and GATT has neither.
-pub const RESET_NEEDS_USB: &str = "Reset needs USB";
-
 /// Factory reset as a DISABLED action carrying `reason`, for the same card
 /// state as [`FirmwareVerb::blocked_action`]: erasing is a firmware verb too
 /// (it needs the ROM downloader), so it is refused the same way.

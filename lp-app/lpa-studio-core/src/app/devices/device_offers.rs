@@ -22,7 +22,7 @@
 //! | `erase` | linked, idle, not a needs-firmware face (erasing a blank flash does nothing), and not where the update standing withdraws it ([`update_offers`]) |
 //! | `identify` | linked and idle, where Retry (the same `Identify`) is not already offered |
 //! | `connect` | the port is there but closed |
-//! | `reset-board` | linked; disabled over Bluetooth (no reset lines) and while an activity runs (the model refuses a reset under one; Cancel is the escape) |
+//! | `reset-board` | linked: a USB link's reset lines, a network link's restart request ([`ResetReach`]); disabled over a network link without the author tier (the board would refuse) and while an activity runs (the model refuses a reset under one; Cancel is the escape) |
 //! | `rename` | always: one Text param, `name` |
 //! | `autoconnect` | a board at the end of a wire: one Toggle param, `enabled` |
 //!
@@ -36,7 +36,8 @@ use lpa_devices::device::DeviceStatus;
 use lpa_devices::view::{DeviceView, Escape};
 
 use super::device_affordance::device_escape_action_for;
-use super::device_flash::{FirmwareVerb, RESET_NEEDS_USB, firmware_verb};
+use super::device_flash::{FirmwareVerb, firmware_verb};
+use super::device_reset_reach::{RESET_NEEDS_AUTHOR, ResetReach};
 
 /// Why Reset is disabled while an activity runs: the device model refuses a
 /// reset under one, and Cancel is the way out.
@@ -67,6 +68,8 @@ pub struct DeviceOfferFacts<'a> {
     /// A Bluetooth link nothing has unlocked: it answers only its hello and
     /// the unlock, so it is offered no push.
     pub locked: bool,
+    /// How Reset restarts this board, and whether this link may ask.
+    pub reset: ResetReach,
     /// Whether the library holds what the board runs (Q4).
     pub banked: bool,
     /// The library's projects, for the push.
@@ -168,10 +171,13 @@ pub fn device_offers(view: &DeviceView, facts: &DeviceOfferFacts<'_>) -> Vec<UiO
         ));
     }
     // Reset is offered on any linked board, busy or not, so the way out of
-    // a stuck board is always visible. But the device model refuses a reset
-    // while an activity runs (`lpa-devices` device.rs: a reset under a
-    // flash would wreck it), so while busy it is published DISABLED with
-    // that reason: an offer the user or the agent can press must do
+    // a stuck board is always visible. Over a cable it pulses the reset
+    // lines; over Bluetooth, Wi‑Fi or the relay it asks the board to restart
+    // itself, which the board does only for the author tier — so a network
+    // link without it is published DISABLED, saying so. The device model
+    // also refuses a reset while an activity runs (`lpa-devices` device.rs:
+    // a reset under a flash would wreck it), so while busy it is disabled
+    // with that reason: an offer the user or the agent can press must do
     // something (director, M3 P3). The escape from a busy board is Cancel,
     // which leads the list; Reset enables once the activity ends.
     if linked {
@@ -179,8 +185,8 @@ pub fn device_offers(view: &DeviceView, facts: &DeviceOfferFacts<'_>) -> Vec<UiO
         offers.push(UiOffer::new(
             at("reset-board"),
             "reset",
-            if view.is_over_bluetooth() {
-                reset.disabled(RESET_NEEDS_USB)
+            if facts.reset == (ResetReach::Request { author: false }) {
+                reset.disabled(RESET_NEEDS_AUTHOR)
             } else if view.activity.is_some() {
                 reset.disabled(RESET_WAITS_FOR_ACTIVITY)
             } else {
@@ -473,19 +479,41 @@ mod tests {
         );
     }
 
+    /// Over Bluetooth the firmware verbs need the cable (no ROM downloader
+    /// behind a GATT service), but Reset does not: the board restarts itself
+    /// when asked (`ClientRequest::Reboot`), so Reset is enabled for the
+    /// author tier — the tier the board's access gate asks of the request —
+    /// and drawn disabled, saying so, for anyone less.
     #[test]
-    fn over_bluetooth_the_firmware_verbs_and_reset_are_drawn_disabled() {
+    fn over_bluetooth_the_firmware_verbs_need_usb_but_reset_asks_the_board() {
         let mut view = ready();
         view.firmware_blocked = Some(lpa_devices::view::FIRMWARE_NEEDS_USB.to_string());
-        let offers = device_offers(&view, &facts(DeviceFace::Wire));
-        for verb in ["update-firmware", "erase", "reset-board"] {
+        let author = DeviceOfferFacts {
+            reset: ResetReach::Request { author: true },
+            ..facts(DeviceFace::Wire)
+        };
+        let offers = device_offers(&view, &author);
+        for verb in ["update-firmware", "erase"] {
             assert!(!find(&offers, verb).is_enabled(), "{verb}");
         }
+        assert!(
+            find(&offers, "reset-board").is_enabled(),
+            "the author tier may restart the board over the air"
+        );
+
+        let player = DeviceOfferFacts {
+            reset: ResetReach::Request { author: false },
+            ..facts(DeviceFace::Wire)
+        };
         assert_eq!(
-            find(&offers, "reset-board").action.meta().enablement,
+            find(&device_offers(&view, &player), "reset-board")
+                .action
+                .meta()
+                .enablement,
             crate::ActionEnablement::Disabled {
-                reason: RESET_NEEDS_USB.to_string()
-            }
+                reason: RESET_NEEDS_AUTHOR.to_string()
+            },
+            "below the author tier the board would refuse, and the card says why"
         );
 
         let locked = DeviceOfferFacts {
@@ -499,7 +527,8 @@ mod tests {
     }
 
     /// Over Wi‑Fi the update is not ready yet, which is not "need USB":
-    /// Bluetooth and USB both carry it. Erase and reset keep the USB reason.
+    /// Bluetooth and USB both carry it. Erase keeps the USB reason; Reset is
+    /// a request there, enabled for the author tier.
     #[test]
     fn over_wifi_the_update_says_it_is_not_ready_and_erase_still_needs_usb() {
         let mut view = ready();
@@ -515,6 +544,12 @@ mod tests {
             lpa_devices::view::UPDATE_NOT_OVER_WIFI_YET
         );
         assert_eq!(reason("erase"), lpa_devices::view::FIRMWARE_NEEDS_USB);
+
+        let author = DeviceOfferFacts {
+            reset: ResetReach::Request { author: true },
+            ..facts(DeviceFace::Wire)
+        };
+        assert!(find(&device_offers(&view, &author), "reset-board").is_enabled());
     }
 
     /// An over-the-air update replaces the USB flash at `update-firmware`,
@@ -640,6 +675,7 @@ mod tests {
             face,
             autoconnect: false,
             locked: false,
+            reset: ResetReach::Lines,
             banked: false,
             projects: &[],
             examples: &EXAMPLES,

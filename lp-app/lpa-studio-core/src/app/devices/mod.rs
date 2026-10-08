@@ -87,6 +87,7 @@ pub mod device_offers;
 pub mod device_push;
 pub mod device_push_offer;
 pub mod device_records;
+pub mod device_reset_reach;
 pub mod device_roster;
 pub mod device_transport;
 /// The update story's inputs, built for tests and for the web's stories.
@@ -181,9 +182,8 @@ pub use device_firmware_face::{
 };
 pub use device_firmware_sources::{DeviceFirmwareSources, StudioFirmwareStore};
 pub use device_flash::{
-    FirmwareVerb, FlashBoardChoice, FlashOffer, RESET_NEEDS_USB, blocked_erase_action,
-    derive_flash_name, firmware_verb, flash_offer, flash_offer_for, reflash_choice,
-    taken_device_titles,
+    FirmwareVerb, FlashBoardChoice, FlashOffer, blocked_erase_action, derive_flash_name,
+    firmware_verb, flash_offer, flash_offer_for, reflash_choice, taken_device_titles,
 };
 pub use device_flash_offer::{
     FLASH_ALL_BOARDS_PARAM, FLASH_BOARD_PARAM, FLASH_NAME_PARAM, flash_consequence,
@@ -212,6 +212,7 @@ pub use device_records::{
     EMU_TRANSPORT, SIM_TRANSPORT, auto_record_name, record_from_registry_row,
     registry_row_from_record, transport_label_for_endpoint,
 };
+pub use device_reset_reach::{RESET_NEEDS_AUTHOR, RESET_WAITS_FOR_ANSWER, ResetReach};
 pub use device_roster::{
     DeviceRoster, DeviceRosterView, JournalLine, RememberedView, RosterSplit, split_roster,
 };
