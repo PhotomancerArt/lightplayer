@@ -18,6 +18,7 @@
 //! | `update-firmware` | over the air: an update available ([`update_offers`], Routine); else the USB flash on a running LightPlayer ([`update_firmware_offer`], Lasting) |
 //! | `reinstall-firmware` | the board's firmware keeps crashing ([`update_offers`]) |
 //! | `install-firmware` | an idle board that can update over the air — up to date, update available, newer, rolled back, keeps crashing ("Other version…") or needs a version Studio can't get ("Install Y"): a `find` box over a `version` choice from the store's release index, or a look-up of a version the box names ([`update_offers`]) |
+//! | `install-firmware-file` | wherever `install-firmware` opens its list: "From a file…", a custom build's update files picked in the web's file dialog (needs the user's click; the build joins the list, and its install arms) ([`update_offers`]) |
 //! | `erase` | linked, idle, not a needs-firmware face (erasing a blank flash does nothing), and not where the update standing withdraws it ([`update_offers`]) |
 //! | `identify` | linked and idle, where Retry (the same `Identify`) is not already offered |
 //! | `connect` | the port is there but closed |
