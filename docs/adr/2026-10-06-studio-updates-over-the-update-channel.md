@@ -180,6 +180,63 @@ frame on it, and lp-link would stall the whole link.
   erased blocks ahead, ahead 4 was worth 44.8 → 37.4 s, and it is now 4
   (2026-10-06; ADR 2's "a USB update in half the time" amendment).
 
+## Amendment (2026-10-08): over Wi‑Fi
+
+Plan `lp2025/2026-10-06-2249-ota-wifi-updates`, PR B (P7, P8), on PR A's
+board (the LAN link serves channel 3, core-only answers its own key lookup).
+
+- **A LAN link carries channel 3.** `lan_link_info` says
+  `carries_update_channel`; the WebSocket session sends and drains channel 3
+  through the same `LinkPortService` as USB and Bluetooth (DS9's
+  announced-first rule; a core-only board's unasked `M` is the
+  announcement). A link through the relay still carries none, and its card
+  keeps `UPDATE_NOT_OVER_WIFI_YET`.
+- **Three links, one word each.** `UpdateLink` is USB, Bluetooth or Wi‑Fi,
+  read off the endpoint (`UpdateLink::of_endpoint`) by the update host
+  (`ServeConfig::LAN`, the narration's word), the card's facts and the
+  no-click start. Wi‑Fi routes as Bluetooth does (§5): over the air, or
+  "can't update over Wi‑Fi from this Studio" when this Studio's build has no
+  update files.
+- **The tier is the key's.** Over Bluetooth and Wi‑Fi the decision reads
+  the access layer's granted tier (`UpdateLink::update_tier`), so a
+  play-only user on the LAN is told the update exists and offered nothing
+  the board refuses; a cable is trusted.
+- **The LAN reconnects itself.** A board's reset closes its socket; the
+  page's session redials by itself, so between legs the activity waits for
+  that redial and opens the new link (`reconnects_itself` for `lan:`, as for
+  Bluetooth), never knocking on the dropped one. Once a hello has said the
+  board's MAC, a session dialled at an IP also tries the board's
+  `lp-xxxx.local` socket when the IP has gone unanswered for 10 s
+  (`lan_name_fallback`); the session keeps its URL, so the board keeps its
+  card.
+- **Busy is said once.** A board's close 1013 (its one LAN slot taken) is a
+  drop in words and a slow redial (2, 5, 15, then 30 s), and a redial to a
+  busy board is not announced until the board answers, so a second tab or
+  lp-cli beside Studio does not flap the roster. A person's "Connect over
+  Wi‑Fi" hears "Busy with another connection — try again".
+- **A release from before Wi‑Fi updates** (W6) announces channel 3 in its
+  hello, but its LAN link ignores it. Over Wi‑Fi, a leg whose first `Q` hears
+  nothing for 5 s ends `NotOverWifi`; the card then says the board updates
+  over USB or Bluetooth until it has been updated once, and offers nothing
+  there. No hello field, no wire bump.
+- **Update messages wait for room.** `LinkPortService` holds channel-3
+  messages the link's 24 KiB send ring refuses (`Full`) in an outbox and
+  moves them in as acknowledgements free it — lp-cli's host already did.
+  The LAN's 8 ahead of raw 4 KiB restore chunks overran the ring and a
+  restore stalled at 1 % (defect
+  `docs/defects/2026-10-08-a-studio-update-burst-past-the-send-ring-was-dropped.md`).
+- **Measured.** Emulated (`lp-emu:esp32c6:t1+net=lan`, `just walk-ota-emu
+  --lan`): X → Y with a backup, 3 resets, backup 15 s, core 9.7 s, engine
+  12 s. Silicon (FC6 fixture-c6 on the test access point, headless Chrome on
+  a Mac, no USB host): X → Y with a backup 78.7 s from the press (backup
+  31 s at 58 KB/s, core 12 s, engine 15 s); with the backup cached and the
+  board's power cut mid-core, 50.4 s. lp-cli on the same desk (PR A):
+  58.8 s with a backup. The terminal's "reconnected in" read 1.0 s for
+  every Wi‑Fi reconnect, emulated and on silicon, a power cut's included,
+  so over Wi‑Fi it does not measure the board's time away (not yet
+  explained; the likeliest reading is a reset's socket that stays silent
+  until the board answers again, and the activity's 1 s reopen knock).
+
 ## References
 
 - `docs/adr/2026-10-06-ota-update-protocol.md` (ADR 2: the protocol and
