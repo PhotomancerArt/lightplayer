@@ -43,14 +43,6 @@ pub struct WritePolicy {
     /// What to call the link in error text (`"USB"`, `"UART"`). Surfaces to the
     /// host inside `TransportError::Other`.
     pub link_name: &'static str,
-    /// How many times [`ChunkedWriter::write_server_msg`] rewrites a server
-    /// frame whose write failed, beyond the first attempt. A chip fact like
-    /// the rest of the policy: on a UART a failed write means a transient
-    /// stall (a wedged peripheral, or the io task masked through a flash
-    /// window) and a rewrite is cheap and honest; on USB-Serial-JTAG a failed
-    /// write means the host stopped draining, and rewriting at a dead FIFO
-    /// only stalls the io loop the connection monitor is about to latch.
-    pub server_msg_retries: usize,
 }
 
 impl WritePolicy {
@@ -68,7 +60,6 @@ impl WritePolicy {
         timeout: Duration::from_millis(250),
         chunk_size: 256,
         link_name: "USB",
-        server_msg_retries: 0,
     };
 
     /// The UART0 policy used by `fw-esp32v3` (921600 baud through the CH340K).
@@ -92,7 +83,6 @@ impl WritePolicy {
         timeout: Duration::from_millis(250),
         chunk_size: 64,
         link_name: "UART",
-        server_msg_retries: 2,
     };
 }
 
@@ -240,8 +230,7 @@ impl<'a, W: Write, F: FnMut(), D: DelayNs> ChunkedWriter<'a, W, F, D> {
     /// A `FnMut` rather than a `fn()` precisely so the second kind — which
     /// needs the RX half and the line buffer — fits without a second writer.
     ///
-    /// `delay` is the second seam: the source of the per-chunk timeout and the
-    /// retry backoff. On the C6/S3 it is `embassy_time::Delay`. On the v3 it
+    /// `delay` is the second seam: the source of the per-chunk timeout. On the C6/S3 it is `embassy_time::Delay`. On the v3 it
     /// must NOT be — that io task runs on an esp-rtos interrupt executor, and
     /// esp-rtos 0.3.0 never delivers embassy-time wakes to tasks on interrupt
     /// executors (a task that awaits `Timer::after` there parks forever, and
